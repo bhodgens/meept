@@ -37,6 +37,13 @@ type IntentAnalyzer struct {
 	// tokenCap is the per-call output token budget, derived from the
 	// model's declared max_output (see effectiveClassificationCap).
 	tokenCap int
+
+	// resolver enables alias-based failover (leaf 03 of
+	// classifier-reliability). When non-nil (with aliasName set), a failed
+	// Chat attempt records an alias failure, rotates to the next candidate,
+	// reconfigures the client, and retries once.
+	resolver  *llm.Resolver // nil = no failover (legacy behavior)
+	aliasName string        // e.g. "classifier"; required when resolver != nil
 }
 
 // NewIntentAnalyzer creates a new IntentAnalyzer with the given LLM client and logger.
@@ -51,11 +58,25 @@ type IntentAnalyzerConfig struct {
 	// endpoint. When non-nil, the per-call token cap is derived from its
 	// declared max_output (see effectiveClassificationCap).
 	ModelConfig *llm.ModelConfig
+	// Resolver enables alias failover (leaf 03 of classifier-reliability).
+	// When non-nil, a failed Chat attempt records an alias failure, rotates
+	// to the next candidate via ResolveForAlias(aliasName), swaps the client
+	// config, and retries once. Nil = no failover (unchanged behavior).
+	Resolver *llm.Resolver
+	// AliasName is the resolver alias used for failover (e.g. "classifier").
+	// Required when Resolver != nil; ignored otherwise.
+	AliasName string
 }
 
 // newIntentAnalyzer is the shared constructor; tokenCapOverride of 0 means
 // derive from modelCfg.
 func newIntentAnalyzer(client *llm.Client, _ int, modelCfg *llm.ModelConfig, logger *slog.Logger) *IntentAnalyzer {
+	return newIntentAnalyzerWithConfig(IntentAnalyzerConfig{ModelConfig: modelCfg}, client, logger)
+}
+
+// newIntentAnalyzerWithConfig is the fully-parameterized constructor used by
+// the dispatcher to wire resolver-based alias failover.
+func newIntentAnalyzerWithConfig(cfg IntentAnalyzerConfig, client *llm.Client, logger *slog.Logger) *IntentAnalyzer {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -63,7 +84,9 @@ func newIntentAnalyzer(client *llm.Client, _ int, modelCfg *llm.ModelConfig, log
 		client:             client,
 		ambiguityThreshold: defaultAmbiguityThreshold,
 		logger:             logger,
-		tokenCap:           effectiveClassificationCap(modelCfg),
+		tokenCap:           effectiveClassificationCap(cfg.ModelConfig),
+		resolver:           cfg.Resolver,
+		aliasName:          cfg.AliasName,
 	}
 }
 
@@ -103,7 +126,7 @@ Rules:
 		{Role: llm.RoleUser, Content: input},
 	}
 
-	resp, err := ia.client.Chat(ctx, messages,
+	resp, err := ia.chatWithFailover(ctx, messages,
 		llm.WithMaxTokens(ia.tokenCap),
 		llm.WithTemperature(0.2),
 		noThinkingOpt(),
@@ -113,11 +136,56 @@ Rules:
 		return nil, fmt.Errorf("intent analysis failed: %w", err)
 	}
 
-	if resp == nil || resp.Content == "" {
-		return nil, fmt.Errorf("intent analysis: empty response from LLM")
+	return ia.parseAnalysis(resp.Content)
+}
+
+// chatWithFailover performs at most two Chat attempts against the underlying
+// client: the initial attempt plus, when resolver-based alias failover is
+// configured and the first attempt fails (including empty responses), one
+// rotation to the next alias candidate. On success it records AliasSuccess so
+// resolver health resets. Max 2 total attempts — no loops.
+func (ia *IntentAnalyzer) chatWithFailover(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
+	attempt := func() (*llm.Response, error) {
+		resp, err := ia.client.Chat(ctx, messages, opts...)
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil || resp.Content == "" {
+			return nil, fmt.Errorf("intent analysis: %w", llm.ErrEmptyResponse)
+		}
+		return resp, nil
 	}
 
-	return ia.parseAnalysis(resp.Content)
+	resp, err := attempt()
+	if err == nil {
+		if ia.resolver != nil && ia.aliasName != "" {
+			ia.resolver.RecordAliasSuccess(ia.aliasName)
+		}
+		return resp, nil
+	}
+	if ia.resolver == nil || ia.aliasName == "" {
+		return nil, err
+	}
+
+	// Fail over: record the failure, advance to the next candidate, swap the
+	// client config, and retry once.
+	ia.resolver.RecordAliasFailure(ia.aliasName, err)
+	nextCfg, rerr := ia.resolver.ResolveForAlias(ia.aliasName)
+	if rerr != nil || nextCfg == nil {
+		return nil, fmt.Errorf("intent analysis: %w (no alternate candidate: %v)", err, rerr)
+	}
+	ia.logger.Warn("Intent analyzer rotating to next alias candidate",
+		"alias", ia.aliasName,
+		"model", nextCfg.ProviderID+"/"+nextCfg.ModelID,
+		"error", err,
+	)
+	ia.client.Reconfigure(nextCfg)
+
+	resp, err = attempt()
+	if err == nil {
+		ia.resolver.RecordAliasSuccess(ia.aliasName)
+	}
+	return resp, err
 }
 
 func (ia *IntentAnalyzer) parseAnalysis(content string) (*TrueIntentAnalysis, error) {

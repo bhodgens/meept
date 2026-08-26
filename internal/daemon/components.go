@@ -25,6 +25,7 @@ import (
 	authpkg "github.com/caimlas/meept/internal/auth"
 	bkpkg "github.com/caimlas/meept/internal/backup"
 	"github.com/caimlas/meept/internal/bot"
+	"github.com/caimlas/meept/internal/browser"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/cluster"
@@ -1828,7 +1829,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, c.TokenStore)
 
 	// Register /remember tool for agents to propose improvements (Thread E)
 	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
@@ -1986,7 +1987,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			LLMClient:             c.LLMClient,
 			ClassifierClient:      c.ClassifierClient,
 			ClassifierModelConfig: c.ClassifierModelConfig,
-			ClassifierModel:       c.ModelsConfig.ClassifierModel,
+			// Alias failover (leaf 03 of classifier-reliability): rotate the
+			// classifier alias chain on classification failures.
+			Resolver:        c.LLMResolver,
+			ClassifierAlias: c.ModelsConfig.ClassifierModel,
+			ClassifierModel: c.ModelsConfig.ClassifierModel,
 			ClassifierTimeout:     15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
 			SessionMaxAge:         30 * time.Minute,
 			AmbiguityThreshold:    cfg.Orchestrator.AmbiguityThreshold,
@@ -4589,6 +4594,8 @@ func registerBuiltinTools(
 	mediaCfg config.MediaConfig,
 	resolver *llm.Resolver,
 	ssrfCfg config.SSRFConfig,
+	browserCfg config.BrowserConfig,
+	tokenStore llm.TokenResolver,
 ) {
 	readCache := builtin.NewReadCache(30)
 
@@ -4758,11 +4765,37 @@ func registerBuiltinTools(
 	}
 	registry.Register(webSearchTool)
 
+	// Browser automation tools ([browser], disabled by default). When
+	// enabled, a per-session headless Chrome family is registered behind
+	// the centralized SSRF guard. Disabled => tools absent from registry.
+	if browserCfg.Enabled {
+		browserMgr, err := browser.NewManager(browser.Config{
+			Enabled:    true,
+			ChromePath: browserCfg.ChromePath,
+			Headless:   browserCfg.HeadlessEnabled(),
+			MaxPages:   browserCfg.MaxPages,
+		}, webSSRFGuard, logger)
+		if err != nil {
+			logger.Error("browser tools disabled: manager init failed", "error", err)
+		} else {
+			for _, bt := range builtin.NewBrowserTools(browserMgr) {
+				registry.Register(bt)
+			}
+			logger.Info("browser automation tools registered", "headless", browserCfg.HeadlessEnabled(), "max_pages", browserCfg.MaxPages)
+		}
+	}
+
 	// Image/video generation (models.json5 refs)
 	media := config.EffectiveMediaConfig(mediaCfg)
 	timeout := time.Duration(media.TimeoutSeconds) * time.Second
-	registry.Register(builtin.NewGenerateImageTool(resolver, media.OutputDir, timeout))
-	registry.Register(builtin.NewGenerateVideoTool(resolver, media.OutputDir, timeout))
+	imageTool := builtin.NewGenerateImageTool(resolver, media.OutputDir, timeout)
+	videoTool := builtin.NewGenerateVideoTool(resolver, media.OutputDir, timeout)
+	if tokenStore != nil {
+		imageTool.SetTokenResolver(tokenStore)
+		videoTool.SetTokenResolver(tokenStore)
+	}
+	registry.Register(imageTool)
+	registry.Register(videoTool)
 
 	// Memory tools (only if memory manager is available AND successfully initialized)
 	if memoryMgr != nil && memoryMgr.IsInitialized() {

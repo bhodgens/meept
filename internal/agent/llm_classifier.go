@@ -93,6 +93,13 @@ type LLMClassifier struct {
 	// modelConfig is the resolved model configuration, used to derive caps
 	// for calls that don't use the precomputed tokenCap.
 	modelConfig *llm.ModelConfig
+
+	// resolver enables alias-based failover (leaf 03 of
+	// classifier-reliability). When non-nil (with aliasName set), a failed
+	// Chat attempt records an alias failure, rotates to the next candidate,
+	// reconfigures the client, and retries once.
+	resolver  *llm.Resolver // nil = no failover (legacy behavior)
+	aliasName string        // e.g. "classifier"; required when resolver != nil
 }
 
 // atomicBool is a sync-compatible boolean backed by atomic.Int32.
@@ -124,6 +131,14 @@ type LLMClassifierConfig struct {
 	// declared max_output (see effectiveClassificationCap). When nil, the
 	// floor applies.
 	ModelConfig *llm.ModelConfig
+	// Resolver enables alias failover (leaf 03 of classifier-reliability).
+	// When non-nil, a failed Chat attempt records an alias failure, rotates
+	// to the next candidate via ResolveForAlias(aliasName), swaps the client
+	// config, and retries once. Nil = no failover (unchanged behavior).
+	Resolver *llm.Resolver
+	// AliasName is the resolver alias used for failover (e.g. "classifier").
+	// Required when Resolver != nil; ignored otherwise.
+	AliasName string
 }
 
 func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifier {
@@ -147,6 +162,9 @@ func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifi
 		tokenCap: effectiveClassificationCap(cfg.ModelConfig),
 
 		modelConfig: cfg.ModelConfig,
+
+		resolver:  cfg.Resolver,
+		aliasName: cfg.AliasName,
 	}
 }
 
@@ -188,18 +206,35 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	}
 
 	// Check if we've cached an "unavailable" status and haven't yet exceeded
-	// the cooldown window.
+	// the cooldown window. With resolver failover configured, the cooldown
+	// applies only to the CURRENT candidate: before giving up we rotate to
+	// the next alias candidate rather than blocking all fallbacks behind one
+	// dead primary (leaf 03).
 	if c.unavailable.Load() {
 		c.unavailMu.RLock()
 		unavailUntil := c.unavailUntil
 		c.unavailMu.RUnlock()
 		if time.Now().Before(unavailUntil) {
-			// Still within cooldown; skip the connection attempt.
-			return nil, fmt.Errorf("LLM classifier unavailable (cooldown, retry after %s)",
-				unavailUntil.Truncate(time.Second).Format(time.TimeOnly))
+			if c.resolver == nil || c.aliasName == "" {
+				// Still within cooldown; skip the connection attempt.
+				return nil, fmt.Errorf("LLM classifier unavailable (cooldown, retry after %s)",
+					unavailUntil.Truncate(time.Second).Format(time.TimeOnly))
+			}
+			nextCfg, rerr := c.resolver.ResolveForAlias(c.aliasName)
+			if rerr != nil || nextCfg == nil {
+				return nil, fmt.Errorf("LLM classifier unavailable (cooldown until %s) and no alternate candidate: %w",
+					unavailUntil.Truncate(time.Second).Format(time.TimeOnly), rerr)
+			}
+			c.client.Reconfigure(nextCfg)
+			c.unavailable.Store(false)
+			c.logger.Info("LLM classifier rotated to next alias candidate during cooldown",
+				"alias", c.aliasName,
+				"model", nextCfg.ProviderID+"/"+nextCfg.ModelID,
+			)
+		} else {
+			// Cooldown expired; allow a retry.
+			c.unavailable.Store(false)
 		}
-		// Cooldown expired; allow a retry.
-		c.unavailable.Store(false)
 	}
 
 	classificationPrompt := c.buildClassificationPrompt(input)
@@ -211,7 +246,7 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	timeoutCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	resp, err := c.client.Chat(timeoutCtx, messages,
+	resp, err := c.chatWithFailover(timeoutCtx, messages,
 		llm.WithMaxTokens(c.tokenCap),
 		llm.WithTemperature(0.1),
 		noThinkingOpt(),
@@ -229,18 +264,59 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 		return nil, err
 	}
 
-	if resp == nil || resp.Content == "" {
-		c.unavailable.Store(true)
-		c.unavailMu.Lock()
-		c.unavailUntil = time.Now().Add(c.cooldown)
-		c.unavailMu.Unlock()
-		return nil, fmt.Errorf("llm classification: %w", llm.ErrEmptyResponse)
-	}
-
 	// Success: clear the unavailable flag.
 	c.unavailable.Store(false)
 
 	return c.parseResponse(resp.Content, input)
+}
+
+// chatWithFailover performs at most two Chat attempts against the underlying
+// client: the initial attempt plus, when resolver-based alias failover is
+// configured and the first attempt fails (including empty responses), one
+// rotation to the next alias candidate. On success it records AliasSuccess so
+// resolver health resets. Max 2 total attempts — no loops.
+func (c *LLMClassifier) chatWithFailover(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
+	attempt := func() (*llm.Response, error) {
+		resp, err := c.client.Chat(ctx, messages, opts...)
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil || resp.Content == "" {
+			return nil, fmt.Errorf("llm classification: %w", llm.ErrEmptyResponse)
+		}
+		return resp, nil
+	}
+
+	resp, err := attempt()
+	if err == nil {
+		if c.resolver != nil && c.aliasName != "" {
+			c.resolver.RecordAliasSuccess(c.aliasName)
+		}
+		return resp, nil
+	}
+	if c.resolver == nil || c.aliasName == "" {
+		return nil, err
+	}
+
+	// Fail over: record the failure, advance to the next candidate, swap the
+	// client config, and retry once.
+	c.resolver.RecordAliasFailure(c.aliasName, err)
+	nextCfg, rerr := c.resolver.ResolveForAlias(c.aliasName)
+	if rerr != nil || nextCfg == nil {
+		return nil, fmt.Errorf("llm classification: %w (no alternate candidate: %v)", err, rerr)
+	}
+	c.logger.Warn("LLM classifier rotating to next alias candidate",
+		"alias", c.aliasName,
+		"model", nextCfg.ProviderID+"/"+nextCfg.ModelID,
+		"error", err,
+	)
+	c.client.Reconfigure(nextCfg)
+
+	resp, err = attempt()
+	if err == nil {
+		c.resolver.RecordAliasSuccess(c.aliasName)
+	}
+	return resp, err
 }
 
 // ClassifyMulti detects multiple intents in a single input.

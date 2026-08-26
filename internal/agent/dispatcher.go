@@ -291,6 +291,15 @@ type DispatcherConfig struct {
 	// classifier endpoint (from the resolver). When non-nil, classification
 	// token caps are derived from its declared max_output.
 	ClassifierModelConfig *llm.ModelConfig
+	// Resolver enables alias failover for classification and intent analysis
+	// (leaf 03 of classifier-reliability). When non-nil (and ClassifierClient
+	// is set), failed Chat attempts rotate to the next candidate in the
+	// ClassifierAlias chain and retry once. Nil = no failover. Ignored when
+	// ClassifierClient is nil (main-LLMClient fallback path).
+	Resolver *llm.Resolver
+	// ClassifierAlias is the resolver alias name used with Resolver.
+	// Empty defaults to "classifier" when Resolver is set.
+	ClassifierAlias string
 	ClassifierTimeout     time.Duration // Per-classification timeout; 0 = defaultClassifierTimeout (10s).
 	CapabilityMatcher     *CapabilityMatcher
 	EmbeddingClient       EmbeddingClient
@@ -342,19 +351,36 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		classifierClient = cfg.LLMClient
 	}
 	if classifierClient != nil {
+		// Alias failover is wired only for the dedicated ClassifierClient
+		// path: when falling back to the main LLMClient, failure handling is
+		// a different concern and failover stays disabled.
+		failoverResolver := cfg.Resolver
+		failoverAlias := cfg.ClassifierAlias
+		if failoverAlias == "" {
+			failoverAlias = "classifier"
+		}
+		if cfg.ClassifierClient == nil {
+			failoverResolver = nil // main-client fallback: no alias failover
+		}
 		d.llmClassifier = NewLLMClassifier(
 			LLMClassifierConfig{
 				Client:      classifierClient,
 				Model:       cfg.ClassifierModel,
 				Timeout:     cfg.ClassifierTimeout,
 				ModelConfig: cfg.ClassifierModelConfig,
+				Resolver:    failoverResolver,
+				AliasName:   failoverAlias,
 			},
 			cfg.Logger,
 		)
 		// Initialize intent analyzer using same classifier client.
 		// Apply the configured ambiguity threshold when non-zero;
 		// otherwise NewIntentAnalyzer uses its built-in default.
-		ia := newIntentAnalyzer(classifierClient, 0, cfg.ClassifierModelConfig, cfg.Logger)
+		ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{
+			ModelConfig: cfg.ClassifierModelConfig,
+			Resolver:    failoverResolver,
+			AliasName:   failoverAlias,
+		}, classifierClient, cfg.Logger)
 		if cfg.AmbiguityThreshold > 0 {
 			ia = ia.WithAmbiguityThreshold(cfg.AmbiguityThreshold)
 		}
