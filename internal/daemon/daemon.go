@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/auth"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/cluster"
@@ -908,6 +909,26 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
 			httpCfg.RateLimitPerMinute = fullCfg.Transport.HTTP.RateLimitRPM
 			httpCfg.RateLimitBurst = fullCfg.Transport.HTTP.RateLimitBurst
+			// Multi-user authentication (opt-in). Construct the users store
+			// only when enabled; when disabled AuthStore stays nil and the
+			// legacy single-key path runs exactly as before. Nil-guard per
+			// typed-nil rules: only a constructed, non-typed-nil *auth.Store
+			// is assigned to the interface field.
+			if fullCfg.MultiUser.Enabled {
+				usersFile := fullCfg.MultiUser.UsersFile
+				if usersFile == "" {
+					homeDir2, _ := os.UserHomeDir()
+					usersFile = filepath.Join(homeDir2, ".meept", "users.json5")
+				}
+				if usersStore, uErr := auth.NewStore(usersFile); uErr != nil {
+					logger.Error("failed to open multi-user store; HTTP auth falls back to legacy keys",
+						"users_file", usersFile,
+						"error", uErr)
+				} else if usersStore != nil {
+					httpCfg.AuthStore = usersStore
+					logger.Info(fmt.Sprintf("multi-user authentication enabled (%d users)", usersStore.UserCount()))
+				}
+			}
 			// Map TLS version string to Go constant
 			switch fullCfg.Transport.HTTP.TLSMinVersion {
 			case "tls1.3":
