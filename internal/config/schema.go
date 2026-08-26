@@ -106,6 +106,7 @@ type Config struct {
 	Media               MediaConfig               `json:"media"               toml:"media"`
 	Secrets             SecretsConfig             `json:"secrets"             toml:"secrets"`
 	Browser             BrowserConfig             `json:"browser"             toml:"browser"`
+	MultiUser           MultiUserConfig           `json:"multiuser"           toml:"multiuser"`
 }
 
 // BrowserConfig configures the headless browser automation tool family
@@ -643,6 +644,20 @@ type HTTPTransportConfig struct {
 	MCPPath        string   `json:"mcp_path"      toml:"mcp_path"`            // MCP endpoint path
 	RateLimitRPM   int      `json:"rate_limit_rpm"  toml:"rate_limit_rpm"`    // Per-IP request rate limit (0 = default 120 req/min)
 	RateLimitBurst int      `json:"rate_limit_burst" toml:"rate_limit_burst"` // Per-IP burst size (0 = default 30)
+}
+
+// MultiUserConfig configures opt-in multi-user authentication for the HTTP
+// transport ([multiuser]).
+//
+// Disabled by default: when Enabled is false, the daemon never constructs
+// an auth.Store and the legacy flat transport.http.api_keys path behaves
+// identically to before multi-user support existed.
+type MultiUserConfig struct {
+	// Enabled toggles multi-user key validation. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// UsersFile is the path to the JSON5 users store. Tilde (~) paths are
+	// expanded at load time. Default: ~/.meept/users.json5.
+	UsersFile string `json:"users_file" toml:"users_file"`
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.
@@ -2017,6 +2032,10 @@ func DefaultConfig() *Config {
 				TLSCertFile: "~/.meept/certs/tls.crt",
 				TLSKeyFile:  "~/.meept/certs/tls.key",
 			},
+		},
+		MultiUser: MultiUserConfig{
+			Enabled:   false,
+			UsersFile: "~/.meept/users.json5",
 		},
 		LLM: LLMConfig{
 			ModelsDir: "~/.meept/models",

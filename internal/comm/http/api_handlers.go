@@ -738,6 +738,12 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Multi-user: stamp the authenticated identity's user id as owner.
+	// Legacy mode has no identity in context and leaves OwnerID empty.
+	if identity, ok := IdentityFromContext(r.Context()); ok && identity != nil {
+		req.OwnerID = identity.UserID
+	}
+
 	session, err := s.services.Session.CreateSession(r.Context(), req)
 	if err != nil {
 		s.handleServiceError(w, err)
@@ -756,9 +762,12 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 
 	opts := parseSessionListQuery(r)
 
+	// Multi-user: scope the listing to the caller's identity. Legacy mode
+	// passes a nil viewer = unfiltered (byte-identical behavior).
 	sessions, err := s.services.Session.List(r.Context(), services.ListSessionsRequest{
 		Limit:       opts.Limit,
 		Designation: opts.Designation,
+		Viewer:      viewerFromContext(r.Context()),
 	})
 	if err != nil {
 		s.handleServiceError(w, err)
@@ -784,7 +793,7 @@ func (s *Server) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := s.services.Session.GetSession(r.Context(), services.GetSessionRequest{ID: id})
+	session, err := s.services.Session.GetSessionViewable(r.Context(), services.GetSessionRequest{ID: id}, viewerFromContext(r.Context()))
 	if err != nil {
 		s.handleServiceError(w, err)
 		return

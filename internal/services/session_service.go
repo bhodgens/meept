@@ -36,6 +36,13 @@ func NewSessionService(s session.Store) *SessionService {
 	return &SessionService{store: s, logger: slog.Default()}
 }
 
+// ownerStore returns the store's ownership-aware surface, or nil when the
+// configured store does not implement OwnerStore (safe two-value assertion).
+func (s *SessionService) ownerStore() session.OwnerStore {
+	os, _ := s.store.(session.OwnerStore)
+	return os
+}
+
 // SetProjectManager wires the project manager for default project resolution
 // on session creation.
 func (s *SessionService) SetProjectManager(pm ProjectResolver) {
@@ -49,6 +56,7 @@ type CreateSessionRequest struct {
 	Name             string                    `json:"name,omitempty"`
 	ProjectID        string                    `json:"project_id,omitempty"`
 	DetectionContext *session.DetectionContext `json:"detection_context,omitempty"`
+	OwnerID          string                    `json:"owner_id,omitempty"` // multi-user: auth user id; "" = legacy unowned
 }
 
 // CreateSession creates a new session.
@@ -60,7 +68,22 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 	if name == "" {
 		name = "default"
 	}
-	sess, err := s.store.Create(name)
+	var sess *session.Session
+	var err error
+	switch ownerStore := s.ownerStore(); {
+	case req.OwnerID != "" && ownerStore != nil:
+		sess, err = ownerStore.CreateForOwner(ctx, session.CreateForOwnerRequest{Name: name, OwnerID: req.OwnerID})
+	case req.OwnerID != "":
+		// Ownership requested but the store predates OwnerStore: fall back
+		// to a plain create and stamp in memory so visibility rules still
+		// apply for this process lifetime.
+		sess, err = s.store.Create(name)
+		if err == nil && sess != nil {
+			sess.OwnerID = req.OwnerID
+		}
+	default:
+		sess, err = s.store.Create(name)
+	}
 	if err != nil {
 		return nil, wrapError("session", "CreateSession", err)
 	}
@@ -207,6 +230,9 @@ func (s *SessionService) DeleteSession(ctx context.Context, req DeleteSessionReq
 type ListSessionsRequest struct {
 	Limit       int     `json:"limit,omitempty"`
 	Designation *string `json:"designation,omitempty"`
+	// Viewer restricts results to sessions owned by this multi-user viewer.
+	// nil = unfiltered (legacy single-user behavior).
+	Viewer *session.Viewer `json:"-"`
 }
 
 // migrateSessionDetectionContext backfills DetectionContext from ProjectPath
@@ -244,11 +270,22 @@ func (s *SessionService) GetMostRecent(ctx context.Context) (*session.Session, e
 }
 
 // List returns all sessions, optionally filtered by designation status.
+// When req.Viewer is non-nil, results are restricted to that owner (plus
+// unowned legacy sessions); a nil viewer lists everything, exactly as before
+// multi-user support existed.
 func (s *SessionService) List(ctx context.Context, req ListSessionsRequest) ([]*session.Session, error) {
 	if s.store == nil {
 		return nil, wrapError("session", "List", ErrUnavailable)
 	}
-	sessions, err := s.store.List()
+	var (
+		sessions []*session.Session
+		err      error
+	)
+	if req.Viewer != nil {
+		sessions, err = s.listForViewer(ctx, req.Viewer)
+	} else {
+		sessions, err = s.store.List()
+	}
 	if err != nil {
 		return nil, wrapError("session", "List", err)
 	}
@@ -282,6 +319,35 @@ func (s *SessionService) List(ctx context.Context, req ListSessionsRequest) ([]*
 		sessions = sessions[:req.Limit]
 	}
 	return sessions, nil
+}
+
+// listForViewer lists sessions through the store's ownership-aware surface,
+// falling back to in-process filtering for stores predating OwnerStore.
+func (s *SessionService) listForViewer(ctx context.Context, viewer *session.Viewer) ([]*session.Session, error) {
+	if os := s.ownerStore(); os != nil {
+		return os.ListForViewer(ctx, viewer)
+	}
+	return session.OwnedListFallback(ctx, s.store, viewer)
+}
+
+// GetSessionViewable retrieves a session by ID with an optional ownership
+// check. A non-nil viewer cannot see other users' owned sessions: such a
+// session is indistinguishable from a missing one (ErrNotFound).
+func (s *SessionService) GetSessionViewable(ctx context.Context, req GetSessionRequest, viewer *session.Viewer) (*session.Session, error) {
+	sess, err := s.GetSession(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if !viewerMatches(sess, viewer) {
+		return nil, wrapError("session", "GetSession", ErrNotFound)
+	}
+	return sess, nil
+}
+
+// viewerMatches reports whether sess is visible to viewer. A nil viewer sees
+// everything; a set viewer sees unowned sessions plus its own.
+func viewerMatches(sess *session.Session, viewer *session.Viewer) bool {
+	return session.VisibleTo(sess, viewer)
 }
 
 // AttachSessionRequest contains attach parameters.

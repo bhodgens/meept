@@ -84,6 +84,12 @@ type Session struct {
 	// listings; their data is preserved.
 	Archived bool `json:"archived,omitempty"`
 
+	// OwnerID is the multi-user principal owning this session (auth user id).
+	// Empty string = unowned (legacy single-user mode): visible to everyone.
+	// In multi-user mode, new sessions stamp the creating identity's UserID;
+	// list/read APIs filter by owner unless the viewer is nil (unfiltered).
+	OwnerID string `json:"owner_id,omitempty"`
+
 	// Thread-based context partitioning (NEW)
 	Threads        map[string]*Thread `json:"threads,omitempty"` // threadID -> Thread
 	ActiveThreadID string             `json:"active_thread_id,omitempty"`
@@ -315,6 +321,62 @@ func (s *MemoryStore) List() ([]*Session, error) {
 	})
 
 	return sessions, nil
+}
+
+// CreateForOwner creates a new session stamped with an owner (multi-user
+// mode). An empty OwnerID produces the same result as Create.
+func (s *MemoryStore) CreateForOwner(_ context.Context, req CreateForOwnerRequest) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	id, err := randomHex(8)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate session ID: %w", err)
+	}
+	id = "session-" + id
+
+	convID, err := randomHex(8)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate conversation ID: %w", err)
+	}
+
+	session := &Session{
+		ID:              id,
+		Name:            req.Name,
+		ConversationID:  "conv-" + convID,
+		CreatedAt:       time.Now(),
+		LastActivity:    time.Now(),
+		AttachedClients: []string{},
+		WorkerIDs:       []string{},
+		OwnerID:         req.OwnerID,
+	}
+
+	s.sessions[id] = session
+	s.logger.Info("Session created", "id", id, "name", req.Name, "owner_id", req.OwnerID)
+	return session, nil
+}
+
+// ListForViewer returns sessions visible to viewer. A nil viewer is
+// unfiltered (legacy behavior); a viewer with a UserID also sees unowned
+// sessions so pre-multiuser data remains reachable. The has-assistant-message
+// visibility rule of MemoryStore.List applies unchanged.
+func (s *MemoryStore) ListForViewer(ctx context.Context, viewer *Viewer) ([]*Session, error) {
+	if viewer == nil || viewer.UserID == "" {
+		return s.List()
+	}
+	return OwnedListFallback(ctx, Store(s), viewer)
+}
+
+// GetForViewer returns the session with id if it exists and is visible to
+// viewer; otherwise nil.
+func (s *MemoryStore) GetForViewer(_ context.Context, viewer *Viewer, id string) *Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if !VisibleTo(s.sessions[id], viewer) {
+		return nil
+	}
+	return s.sessions[id]
 }
 
 // Delete removes a session.

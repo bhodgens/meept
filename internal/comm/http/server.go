@@ -74,6 +74,7 @@ type ServerConfig struct {
 	FingerprintFile         string                // Path to write cert fingerprint for client discovery
 	RateLimitPerMinute      int                   // Per-IP request rate limit (0 = default 120 req/min)
 	RateLimitBurst          int                   // Per-IP burst size (0 = default 30)
+	AuthStore               AuthStore             // Multi-user auth store; nil = legacy single-key mode
 }
 
 // DefaultServerConfig returns sensible defaults for the unified HTTP server.
@@ -1461,9 +1462,13 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 	}
 	rateLimitMiddleware := RateLimitMiddleware(limitPerMinute, burst)
 
-	// Create auth middleware if API keys are configured
+	// Create auth middleware: multi-user store-backed validation REPLACES
+	// the legacy flat-key path when an AuthStore is configured; otherwise
+	// the legacy API-key list applies exactly as before.
 	var authMiddleware func(http.Handler) http.Handler
-	if s.config.RequireAuth && len(s.config.APIKeys) > 0 {
+	if s.config.AuthStore != nil {
+		authMiddleware = NewStoreAuth(s.config.AuthStore).Middleware
+	} else if s.config.RequireAuth && len(s.config.APIKeys) > 0 {
 		authMiddleware = NewAPIKeyAuth(s.config.APIKeys).Middleware
 	}
 

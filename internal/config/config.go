@@ -272,6 +272,7 @@ func expandConfigPaths(cfg *Config) {
 	// Expand TLS cert/key paths
 	cfg.Transport.HTTP.TLSCertFile = expandPath(cfg.Transport.HTTP.TLSCertFile)
 	cfg.Transport.HTTP.TLSKeyFile = expandPath(cfg.Transport.HTTP.TLSKeyFile)
+	cfg.MultiUser.UsersFile = expandPath(cfg.MultiUser.UsersFile)
 
 	// Expand allowed/blocked paths
 	for i, p := range cfg.Security.AllowedPaths {
