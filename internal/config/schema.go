@@ -620,10 +620,10 @@ type RPCTransportConfig struct {
 
 // HTTPTransportConfig configures the HTTP REST transport.
 type HTTPTransportConfig struct {
-	Enabled        bool     `json:"enabled"       toml:"enabled"`             // Enable HTTP server (default: false)
-	Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: ":8081")
-	UseTLS         bool     `json:"use_tls"       toml:"use_tls"`             // Enable HTTPS
-	AutoTLSCert    bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`       // Auto-generate self-signed cert
+	Enabled        bool     `json:"enabled"       toml:"enabled"`             // Enable HTTP server (default: false; shipped config template enables it)
+	Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: ":8081"; SECURITY: keep 127.0.0.1 unless exposing intentionally)
+	UseTLS         bool     `json:"use_tls"       toml:"use_tls"`             // Enable HTTPS (server ALWAYS uses TLS; field is accepted for compat — see comment)
+	AutoTLSCert    bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`       // Auto-generate self-signed cert (server auto-generates whenever cert files are missing)
 	TLSCertFile    string   `json:"tls_cert_file" toml:"tls_cert_file"`       // TLS certificate file path
 	TLSKeyFile     string   `json:"tls_key_file"  toml:"tls_key_file"`        // TLS key file path
 	TLSMinVersion  string   `json:"tls_min_version" toml:"tls_min_version"`   // Minimum TLS version

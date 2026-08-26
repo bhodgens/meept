@@ -134,12 +134,13 @@ Peer-sync wire addition (RPC `backup_sync`): new field
 | 1 | 01-auth-store.md | leaf | ~55K | none |
 | 2 | 02-http-identity-sessions.md | leaf | ~75K | 01 |
 | 3 | 03-cluster-pooling.md | leaf | ~60K | 01 |
-| 4 | 04-quota-permission-stubs.md | leaf | ~35K | 01 |
-| 5 | 05-client-tooling/01-cli-tui.md | leaf | ~70K | 01 |
-| 6 | 05-client-tooling/02-flutter-gui.md | leaf | ~70K | 01 |
+| 4 | 04-user-management-cli.md | leaf | ~50K | 01 |
+| 5 | 05-client-tooling-tui-gui.md | leaf | ~70K | 01 |
+| 6 | 06-rpc-peercred.md | leaf | ~40K | none (independent) |
 
-Concurrency: after 01 completes REVIEWED, dispatch 02, 03, 04, 05a, 05b in
-one batch (cap permitting).
+Concurrency: after 01 completes REVIEWED, dispatch 02, 03, 04, 05 in one
+batch (cap permitting). Leaf 06 has NO dependency on 01 and may dispatch
+immediately, even before 01.
 
 ## Dispatch Protocol
 
@@ -209,9 +210,9 @@ After all leaves COMPLETE:
 | 01-auth-store.md | PENDING | |
 | 02-http-identity-sessions.md | PENDING | blocked by 01 |
 | 03-cluster-pooling.md | PENDING | blocked by 01 |
-| 04-quota-permission-stubs.md | PENDING | blocked by 01 |
-| 05-client-tooling/01-cli-tui.md | PENDING | blocked by 01 |
-| 05-client-tooling/02-flutter-gui.md | PENDING | blocked by 01 |
+| 04-user-management-cli.md | PENDING | blocked by 01 |
+| 05-client-tooling-tui-gui.md | PENDING | blocked by 01 |
+| 06-rpc-peercred.md | PENDING | independent — dispatch first |
 
 ## Open Questions (design-only, do NOT block implementation)
 
@@ -219,5 +220,6 @@ After all leaves COMPLETE:
   any; revisit when first consumer needs it.
 - Q2 Quota basis: per-machine % vs absolute vs cluster-pooled. Documented
   in `internal/auth/quota.go`; decide before implementing evaluator.
-- Q3 Whether RPC unix socket should also carry identity (currently trusted
-  local channel). Deferred; multi-user scope is HTTP/WS only.
+- Q3 RPC identity: RESOLVED as defense-in-depth in leaf 06 (peer UID
+  logging + optional allowlist). RPC remains owner-trusted single-user by
+  design; see docs/reference/http-api-security.md §Unix Socket RPC.

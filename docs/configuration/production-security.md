@@ -90,6 +90,34 @@ All HTTP communication uses TLS by default. The daemon auto-generates a self-sig
 
 Certificate files are created with `0600` permissions. Key material uses ECDSA P-256 (no RSA).
 
+Note: the server ALWAYS terminates TLS — there is no plaintext HTTP mode.
+`use_tls` / `auto_tls_cert` are accepted for config compatibility: whenever
+the configured cert/key files are missing, a self-signed certificate is
+generated automatically (see `internal/comm/http/server.go` `ensureTLSCert`).
+Plain-HTTP connections receive `426 Upgrade Required`.
+
+### Real Certificates
+
+For production endpoints behind a domain name, replace the self-signed cert
+with a CA-signed one. Full recipes (Caddy reverse proxy with WebSocket
+upgrade mapping, nginx + certbot, air-gapped internal-CA openssl) are in
+[docs/reference/http-api-security.md](../reference/http-api-security.md).
+Short version:
+
+```bash
+# Option A (preferred): terminate TLS at Caddy/nginx in front of the daemon.
+# Caddyfile, entire file:
+#   meept.example.com { reverse_proxy 127.0.0.1:8081 }
+
+# Option B: native TLS inside the daemon — obtain via certbot standalone,
+# then point tls_cert_file/tls_key_file at the live.pem/fullchain.pem pair:
+sudo certbot certonly --standalone -d meept.example.com
+```
+
+WebSocket clients (Flutter GUI) verify the daemon certificate by SHA-256
+fingerprint pinning; after replacing the certificate, update the pinned
+fingerprint or let clients re-read it on next connect.
+
 ### mTLS (Mutual TLS)
 
 For deployments requiring client certificate verification, the `internal/security/tls.go` module supports mTLS:
@@ -384,6 +412,67 @@ curl -k -H "Authorization: Bearer meept_..." \
   -X POST https://localhost:8081/api/v1/security/check \
   -d '{"action": "query_audit", "filters": {"limit": 50}}'
 ```
+
+---
+
+## Secret Broker
+
+Declared secrets let you keep tool-side credentials (MCP server API keys,
+shell-tool tokens) out of child environments entirely. You declare each secret
+once in `meept.toml`; meept loads the real value into memory at daemon
+startup, and every child process (shell commands, MCP server subprocesses)
+receives only a placeholder token of the form `MEEPT_SECRET:<name>`. Real
+values never appear in child environments, logs, or bus payloads.
+
+### Declaring Secrets
+
+Add a `[secrets]` section to `~/.meept/meept.toml`:
+
+```toml
+[secrets.sources.api_token]
+kind = "env"                     # load from an environment variable
+name = "GITHUB_TOKEN"            # env var read at daemon startup
+hosts = ["api.github.com"]       # host suffixes the egress proxy may inject toward
+header = "Authorization"         # header the proxy fills when enabled
+format = "Bearer {}"             # {} is replaced by the real value
+
+[secrets.sources.signing_key]
+kind = "file"                    # load from a file (trailing newline trimmed)
+name = "/etc/meept/signing.key"
+```
+
+- `kind = "env"` — value comes from the named environment variable in the
+  daemon's own environment.
+- `kind = "file"` — value comes from the named file; trailing newlines are
+  trimmed.
+
+If any declared secret cannot be loaded at startup (missing env var or file),
+the daemon reports one aggregated error naming every failure instead of
+starting with partial secrets. By default no secrets are declared and the
+egress proxy is disabled (`[secrets] proxy.enabled = false`).
+
+### Using Secrets in MCP Server Environments
+
+In `~/.meept/mcp_servers.json5`, set an env entry to `${secret:<name>}`:
+
+```json5
+{
+  "servers": [
+    {
+      "name": "github",
+      "command": ["npx", "@modelcontextprotocol/server-github"],
+      "enabled": true,
+      "env": { "GITHUB_TOKEN": "${secret:api_token}" }
+    }
+  ]
+}
+```
+
+At launch meept substitutes the placeholder token `MEEPT_SECRET:api_token` —
+never the real value. The subprocess sees only the placeholder; an enabled
+egress proxy resolves placeholders for allowlisted hosts (see leaf: egress
+proxy). Any other `${...}` form passes through unchanged, preserving existing
+`export VAR=...; ./bin/meept-daemon -f` behavior.
 
 ---
 
@@ -688,6 +777,58 @@ Or disable agent-level security:
 | `internal/security/audit.go` | Security decision audit log |
 | `internal/security/seed_rules.go` | Default tool/command/path/financial rule seeding |
 
+## Shell Permission Table
+
+The declarative shell permission table (`internal/security/shell_permissions.go`)
+provides prefix-keyed **allow / ask / deny** policy for shell commands. It is
+evaluated BEFORE tirith pattern scanning:
+
+- **deny** — the command is blocked immediately; no scanning, no execution.
+- **ask** — the command routes to the existing user-confirmation flow.
+- **allow** — the command proceeds, but tirith scanning STILL runs
+  (defense-in-depth: policy never bypasses pattern scanning).
+- **no match** — existing evaluation path is unchanged.
+
+Matching is token-based (no regex): whitespace-delimited, case-insensitive,
+longest prefix wins, word boundaries enforced (`rm -rf` does not match
+`rm -rfx`). A trailing `=` makes a value-carrying prefix (`dd if=` matches
+`dd if=/dev/zero`). `|` in a prefix separates segments that must appear in
+order (`curl | sh` matches `curl http://x | sh`). The catch-all `*` matches
+everything and always evaluates last.
+
+### Configuration
+
+```toml
+[security.shell_permissions]
+# preset: "workspace" (default) | "readonly" | "danger" | "" (custom only)
+preset = "workspace"
+
+# Optional rules override or extend the preset.
+[security.shell_permissions.rules]
+"git push" = "ask"       # redundant under workspace, shown for illustration
+"my-cli deploy" = "allow"
+"terraform destroy" = "deny"
+```
+
+Presets:
+
+| Preset | Contents |
+|--------|----------|
+| `workspace` (default) | deny `rm -rf`, `rm -fr`, `mkfs`, `dd if=`; ask `sudo`, `git push`, `docker system prune`, `chmod 777`, `curl \| sh`, `bash -c`, `sh -c`; everything else falls through |
+| `readonly` | ask-by-default (catch-all `*`) except deny `rm -rf`, `rm -fr`, `mkfs`, `dd if=`, `git commit`, `npm publish` |
+| `danger` | empty — every command falls through to existing evaluation |
+
+Invalid presets or rule actions fail at config-load time.
+
+### Related Files
+
+| File | Purpose |
+|------|---------|
+| `internal/security/shell_permissions.go` | PermissionTable, presets, BuildPermissionTable |
+| `internal/security/engine.go` | Engine integration (Stage 1.5, SetPermissionTable) |
+| `internal/tools/builtin/shell.go` | Tool consultation point (SetPermissionTable) |
+| `internal/config/schema.go` | `[security.shell_permissions]` schema |
+
 ### Flutter GUI
 
 | File | Purpose |
@@ -696,3 +837,57 @@ Or disable agent-level security:
 | `ui/flutter_ui/lib/services/api_client.dart` | HTTPS API client |
 | `ui/flutter_ui/lib/services/websocket_service.dart` | WSS WebSocket client |
 | `ui/flutter_ui/macos/Runner/*.entitlements` | macOS sandbox entitlements |
+
+---
+
+## Egress Policy
+
+When the secrets proxy is enabled, `[security.egress]` adds an ordered
+allow/ask/deny rule table consulted BEFORE any secret injection. Every
+proxied request is evaluated against the rules; the first match wins and a
+non-match falls back to the configured mode's default.
+
+```toml
+[security.egress]
+mode = "proxy"            # "allow" (default) | "deny" | "proxy"
+scrub_no_proxy = true     # clear NO_PROXY for children when proxying (default true)
+
+[[security.egress.rules]]
+match = ".github.com"     # host suffix (bare hosts = exact match)
+action = "allow"
+
+[[security.egress.rules]]
+match = "10.0.0.0/8"      # CIDR, matched against resolved IPs
+action = "deny"
+```
+
+- **mode = "allow"** — passthrough unchanged; rules are not consulted
+  (zero behavior change unless explicitly configured).
+- **mode = "deny"** — all proxied egress blocked.
+- **mode = "proxy"** — current injection behavior plus the rule table;
+  unmatched hosts are permitted.
+
+Rule semantics:
+
+- Host matches strip ports and trailing dots, case-insensitively; a suffix
+  entry matches itself and subdomains (`".example.com"` matches
+  `api.example.com`, never `notexample.com`).
+- CIDR entries are checked against every resolved destination IP. Even when a
+  host rule allows a destination, its resolved addresses are re-checked
+  against deny-CIDRs — a public-looking hostname that resolves into private
+  space is rejected (DNS rebinding defense).
+- **ask** holds the decision for an interactive approver with a 30-second
+  default timeout; no approver or timeout resolves to deny. The ask path
+  never blocks the daemon goroutine indefinitely.
+- Denied requests get HTTP 403 "blocked by egress policy" at the proxy and
+  increment the `egress.decision{action=deny}` counter.
+
+With `scrub_no_proxy = true` (default) and the proxy active, child processes
+have `NO_PROXY`/`no_proxy` cleared and `HTTP_PROXY`/`HTTPS_PROXY` pointed at
+the proxy address so placeholder traffic cannot bypass inspection.
+
+| File | Purpose |
+|------|---------|
+| `internal/secrets/egress_policy.go` | EgressPolicy rule engine, ApplyEgressEnv scrubbing |
+| `internal/secrets/proxy.go` | Pre-injection consultation point (403 on deny) |
+| `internal/config/schema.go` | `[security.egress]` schema + validation |
