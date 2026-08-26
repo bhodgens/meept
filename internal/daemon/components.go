@@ -332,6 +332,11 @@ type Components struct {
 	// gossip DB on a schedule. Constructed only when PeerSync is enabled.
 	SyncPuller *bkpkg.SyncPuller
 
+	// UsersSync pools multiuser accounts across cluster peers over the
+	// gossip event channel. Constructed only when the auth users store is
+	// wired; its Enabled flag tracks multi-user mode.
+	UsersSync *bkpkg.UsersSync
+
 	// PTY sessions for interactive tool streaming
 	PTYManager *pty.Manager
 
@@ -1459,6 +1464,48 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 			logger.Info("Dual store initialized", "data_dir", gossipDataDir)
 		}
+	}
+
+	// Cluster user pooling (multiuser leaf 03): pool multiuser accounts
+	// across cluster peers over the gossip event channel. UsersSync is
+	// structurally wired whenever clustering is available; Enabled stays
+	// false until the multiuser switch lands in config (see MultiUserConfig
+	// in docs/plans/2026-08-26-multiuser-access/master.md). Its merge
+	// target (auth.Store) arrives with the leaf-02 integration — until a
+	// store is passed to NewUsersSync, inbound payloads are no-ops.
+	if cfg.Cluster.Enabled && c.DualStore != nil {
+		nodeID := cfg.Cluster.NodeID
+		if nodeID == "" {
+			nodeID = "local"
+		}
+		usersSync := bkpkg.NewUsersSync(
+			bkpkg.UsersSyncConfig{
+				UsersFile: filepath.Join(cfg.Daemon.DataDir, "users.json5"),
+			},
+			nil, // auth store: wired by leaf 02 integration (SetAuthStore)
+			nodeID,
+			func(eventType models.ClusterEventType, payload any) error {
+				if c.ClusterEngine == nil {
+					return fmt.Errorf("users sync: cluster engine not running")
+				}
+				return c.ClusterEngine.PublishClusterEvent(eventType, payload)
+			},
+			func() map[string]struct{} {
+				if c.ClusterEngine == nil {
+					return nil
+				}
+				active := make(map[string]struct{})
+				for _, peer := range c.ClusterEngine.Peers() {
+					active[peer.NodeID] = struct{}{}
+				}
+				return active
+			},
+			logger,
+		)
+		c.UsersSync = usersSync
+		logger.Info("Cluster users sync configured",
+			"enabled", false, // flips with the future multiuser.enabled config switch
+			"node_id", nodeID)
 	}
 
 	// Create session store (SQLite-backed for persistence).
@@ -3767,6 +3814,16 @@ func (c *Components) Start(ctx context.Context) error {
 		c.Logger.Info("Peer sync puller started",
 			"pull_schedule", c.Config.PeerSync.PullSchedule.String())
 		startedHandlers = append(startedHandlers, "sync_puller")
+	}
+
+	// Start the cluster users exchange loop (multiuser leaf 03). The loop
+	// publishes local users and reconciles foreign users against the live
+	// gossip peer set on its cadence; with multi-user disabled it exits
+	// each cycle as a no-op.
+	if c.UsersSync != nil {
+		go c.UsersSync.Run(c.ctx)
+		c.Logger.Info("Cluster users sync started")
+		startedHandlers = append(startedHandlers, "users_sync")
 	}
 
 	started = true // signal success so the deferred rollback does not fire

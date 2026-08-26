@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/caimlas/meept/internal/backup"
 	"github.com/caimlas/meept/internal/config"
@@ -17,6 +18,7 @@ type BackupSyncHandler struct {
 	backupScheduler *backup.GitBackupScheduler
 	configSyncer    *config.ConfigSyncer
 	syncPuller      *backup.SyncPuller
+	usersSync       *backup.UsersSync
 }
 
 // NewBackupSyncHandler creates a new handler. Any argument may be nil; the
@@ -27,6 +29,14 @@ func NewBackupSyncHandler(scheduler *backup.GitBackupScheduler, syncer *config.C
 		backupScheduler: scheduler,
 		configSyncer:    syncer,
 		syncPuller:      puller,
+	}
+}
+
+// SetUsersSync wires the cluster users pool. Nil-guarded per CLAUDE.md
+// setter convention; without it, sync.pull does not refresh user pooling.
+func (h *BackupSyncHandler) SetUsersSync(pool *backup.UsersSync) {
+	if pool != nil {
+		h.usersSync = pool
 	}
 }
 
@@ -195,9 +205,20 @@ func (h *BackupSyncHandler) handleSyncStatus(ctx context.Context, params json.Ra
 }
 
 // handleSyncPull triggers an immediate peer sync cycle via SyncPuller.PullNow.
+// When the cluster users pool is wired, a users exchange (publish local
+// users + reconcile foreign cache against the live peer set) runs first;
+// merge errors from the pool are logged there and never fail the pull.
 func (h *BackupSyncHandler) handleSyncPull(ctx context.Context, params json.RawMessage) (any, error) {
 	if err := h.availSyncPuller(); err != nil {
 		return nil, err
+	}
+	if h.usersSync != nil {
+		// ExchangeNow logs its own internal failures; a failed users
+		// exchange must never fail the backup pull itself. The error is
+		// deliberately logged-and-dropped via slog here, not ignored.
+		if err := h.usersSync.ExchangeNow(); err != nil {
+			slog.Warn("users sync: exchange before pull failed", "error", err)
+		}
 	}
 	if err := h.syncPuller.PullNow(); err != nil {
 		return map[string]any{
