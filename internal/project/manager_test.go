@@ -78,6 +78,37 @@ func TestRegisterLocal(t *testing.T) {
 	}
 }
 
+func TestRegisterLocalDedupesByPath(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	first, err := pm.RegisterLocal(ctx, "", "alpha", "/tmp/dedup-target")
+	if err != nil {
+		t.Fatalf("first RegisterLocal: %v", err)
+	}
+
+	// Second registration with a different explicit ID and name but the
+	// same path must return the existing record, not create a duplicate.
+	second, err := pm.RegisterLocal(ctx, "other-id", "beta", "/tmp/dedup-target")
+	if err != nil {
+		t.Fatalf("second RegisterLocal: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Errorf("duplicate registration returned ID %q, want existing %q", second.ID, first.ID)
+	}
+	if second.Name != "beta" {
+		t.Errorf("Name not updated on re-register: got %q, want %q", second.Name, "beta")
+	}
+
+	projects, err := pm.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Errorf("expected 1 project after duplicate register, got %d", len(projects))
+	}
+}
+
 func TestRegisterGit(t *testing.T) {
 	pm, _ := newTestManager(t)
 	ctx := context.Background()

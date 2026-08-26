@@ -116,13 +116,20 @@ func (pm *ProjectManager) RegisterGit(ctx context.Context, id, name, gitURL stri
 		Status:    "active",
 	}
 
+	// Dedupe: same path already registered -> return the existing record.
+	if existing, err := pm.store.GetProjectByPath(ctx, localPath); err == nil && existing != nil {
+		return existing, nil
+	}
+
 	if err := pm.store.CreateProject(ctx, p); err != nil {
 		return nil, fmt.Errorf("store project: %w", err)
 	}
 	return p, nil
 }
 
-// RegisterLocal registers a local directory as a project.
+// RegisterLocal registers a local-directory project. Idempotent: if a
+// project already exists at the same absolute local_path, it is returned
+// instead of creating a duplicate row (name is updated to match).
 func (pm *ProjectManager) RegisterLocal(ctx context.Context, id, name, path string) (*Project, error) {
 	if id == "" {
 		id = uuid.New().String()
@@ -132,6 +139,18 @@ func (pm *ProjectManager) RegisterLocal(ctx context.Context, id, name, path stri
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolve path: %w", err)
+	}
+
+	// Dedupe: same path already registered -> return the existing record.
+	existing, err := pm.store.GetProjectByPath(ctx, absPath)
+	if err == nil && existing != nil {
+		if name != "" && existing.Name != name {
+			existing.Name = name
+			if err := pm.store.UpdateProject(ctx, existing); err != nil {
+				return nil, fmt.Errorf("update project: %w", err)
+			}
+		}
+		return existing, nil
 	}
 
 	p := &Project{
