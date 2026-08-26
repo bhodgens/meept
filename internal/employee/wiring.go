@@ -173,8 +173,12 @@ func NewManagerFromConfig(
 		result.AuditStore = as
 	}
 
-	// Construct the Manager with all stores wired.
-	mgr := NewManagerWithStores(botMgr, botStore, cs, gs, as, empLog)
+	// Construct the Manager with all stores wired. Pass the undecorated
+	// logger: NewManagerWithStores applies its own "employee-manager"
+	// component attribute. Passing empLog here would stack
+	// "component=employee-wiring component=employee-manager ..." into a
+	// single record with duplicated/competing keys.
+	mgr := NewManagerWithStores(botMgr, botStore, cs, gs, as, logger)
 	result.Manager = mgr
 
 	// Apply optional wiring (e.g. migrator LLM injection). Each option is
