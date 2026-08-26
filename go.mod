@@ -1,6 +1,6 @@
 module github.com/caimlas/meept
 
-go 1.25.5
+go 1.26
 
 toolchain go1.26.5
 
@@ -15,6 +15,7 @@ require (
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.7
+	github.com/chromedp/chromedp v0.16.0
 	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
 	github.com/ebitengine/oto/v3 v3.4.0
@@ -64,6 +65,8 @@ require (
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
+	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f // indirect
+	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
@@ -77,6 +80,10 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
+	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
+	github.com/gobwas/httphead v0.1.0 // indirect
+	github.com/gobwas/pool v0.2.1 // indirect
+	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -114,7 +121,7 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark-emoji v1.0.3 // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
