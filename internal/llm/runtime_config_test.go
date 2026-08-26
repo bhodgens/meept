@@ -182,8 +182,12 @@ func TestIsLoopbackBaseURL(t *testing.T) {
 		{"http://localhost:8080/v1", true},
 		{"http://127.0.0.1:8080/v1", true},
 		{"http://[::1]:8080/v1", true},
-		{"http://::1:8080/v1", true},
-		{"http://0:0:0:0:0:0:0:1:8080/v1", true},
+		{"http://[0:0:0:0:0:0:0:1]:8080/v1", true},
+		// Unbracketed IPv6 with a port is not a valid URL (RFC 3986 section
+		// 3.2.2 requires brackets around IPv6 hosts). net/url cannot extract
+		// a host from these inputs, so the expected result is false.
+		{"http://::1:8080/v1", false},
+		{"http://0:0:0:0:0:0:0:1:8080/v1", false},
 		{"https://LOCALHOST:443", true},
 		{"http://0.0.0.0:8080", false},
 		{"http://192.168.1.5:8080", false},
