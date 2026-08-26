@@ -213,13 +213,13 @@ Go 1.24+, stdlib-first (new deps ONLY: chromedp leaf 13, rest stdlib/existing). 
 | 06-doctor-lifecycle | COMPLETE | 1 | babc8f57 |
 | 07-loop-guards | COMPLETE | 1 | e30c861a |
 | 08-quality-gated-autonomy | COMPLETE | 1 | b87f2674 |
-| 09-egress-policy | IN_PROGRESS | - | dispatched (this session) |
+| 09-egress-policy | COMPLETE | 1 | this session (egress_policy.go + proxy integration; schema.go plumbing swept into 0dbeb378 by other session) |
 | 10-inter-agent-messaging | COMPLETE | 1 | 4cfe9386 |
-| 11-local-model-cli | COMPLETE | 1 | this session (modelstore/model CLI) |
-| 12-gbnf-constrained-calling | IN_PROGRESS | - | dispatched (this session) |
-| 13-browser-automation | IN_PROGRESS | - | dispatched (this session) |
+| 11-local-model-cli | COMPLETE | 2 | this session (modelstore/model CLI; uncommitted — commit pending) |
+| 12-gbnf-constrained-calling | COMPLETE | 1 | d746ff54 |
+| 13-browser-automation | COMPLETE | 1 | 92f7876a ([browser] config struct landed in 0dbeb378) |
 | 14-memory-usefulness | COMPLETE | 2 | 2e69e57d (repaired abandoned WIP + wired consolidation) |
-| 15-memory-lessons-procedures | IN_PROGRESS | - | dispatched (this session) |
+| 15-memory-lessons-procedures | COMPLETE | 2 | ac41a129 (subagent died on API 429 mid-run; dedup + FTS injection fixed in-session) |
 
 ## Integration Test Plan
 
