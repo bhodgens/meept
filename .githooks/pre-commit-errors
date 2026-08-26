@@ -68,19 +68,26 @@ for file in $STAGED_GO_FILES; do
   fi
 
   FILE_ISSUES=""
+  BLOCKING_ISSUES=""
 
   # Check 1: Ignored errors with _ =
   # Match exact added lines containing "_ = " outside comments.
+  # Comma-ok type assertions (`v, _ := x.(T)` / `v, _ = x.(T)`) are NOT
+  # ignored errors — they are the mandated form for map[string]any payload
+  # access (see AGENTS.md "Error handling") — so lines whose assignment
+  # extracts from a type assertion `\.(...)` are exempt.
   while IFS= read -r pattern; do
     [ -z "$pattern" ] && continue
     # Skip known safe patterns
     echo "$pattern" | grep -qE "WithoutCancel|WithoutTimeout|WithoutDeadline" && continue
     # Skip comment lines
     echo "$pattern" | grep -qE "^\s*//" && continue
+    # Skip comma-ok type assertions: ", _ :=" / ", _ =" paired with ".("
+    echo "$pattern" | grep -qE ',\s*_\s*(:=|=)[^=]*\.\(' && continue
     # Locate in file for line number
     LINE_NUMS=$(grep -nF "$pattern" "$file" 2>/dev/null | cut -d: -f1)
     for ln in $LINE_NUMS; do
-      FILE_ISSUES="${FILE_ISSUES}  ⚠️  Ignored error (_ =):\n    $file:$ln: $pattern\n"
+      BLOCKING_ISSUES="${BLOCKING_ISSUES}  ❌ Ignored error (_ =):\n    $file:$ln: $pattern\n"
       BLOCK_COUNT=$((BLOCK_COUNT + 1))
     done
   done <<< "$(echo "$ADDED_LINES" | grep -F "_ = " || true)"
@@ -91,6 +98,7 @@ for file in $STAGED_GO_FILES; do
     LINE_NUMS=$(grep -nF "$pattern" "$file" 2>/dev/null | cut -d: -f1)
     for ln in $LINE_NUMS; do
       FILE_ISSUES="${FILE_ISSUES}  ⚠️  panic(err) found:\n    $file:$ln: $pattern\n"
+      BLOCKING_ISSUES="${BLOCKING_ISSUES}  ❌ panic(err):\n    $file:$ln: $pattern\n"
       BLOCK_COUNT=$((BLOCK_COUNT + 1))
     done
   done <<< "$(echo "$ADDED_LINES" | grep -F "panic(err)" | grep -vE '^\s*//' || true)"
@@ -117,6 +125,12 @@ for file in $STAGED_GO_FILES; do
     ISSUE_COUNT=$((ISSUE_COUNT + 1))
   fi
 done
+
+if [ -n "$BLOCKING_ISSUES" ]; then
+  echo ""
+  echo -e "${RED}━━━ BLOCKING issues (commit will fail) ━━━${NC}"
+  echo -e "$BLOCKING_ISSUES"
+fi
 
 if [ "$ISSUE_COUNT" -gt 0 ]; then
   echo ""
