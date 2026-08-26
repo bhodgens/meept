@@ -13,12 +13,12 @@ import (
 // WorkerPool manages a pool of worker goroutines that can execute agent work.
 // Workers are lazy: they only run when assigned sessions have pending work.
 type WorkerPool struct {
-	mu              sync.RWMutex
-	workers         []*Worker
-	maxWorkers      int
+	mu                sync.RWMutex
+	workers           []*Worker
+	maxWorkers        int
 	maxLoopsPerWorker int
-	ctx             context.Context
-	cancel          context.CancelFunc
+	ctx               context.Context
+	cancel            context.CancelFunc
 }
 
 // Worker represents a goroutine that can process agent loop work.
@@ -73,11 +73,11 @@ func DefaultWorkerPoolConfig() WorkerPoolConfig {
 func NewWorkerPool(cfg WorkerPoolConfig) *WorkerPool {
 	ctx, cancel := context.WithCancel(context.Background())
 	pool := &WorkerPool{
-		workers:         make([]*Worker, 0, cfg.MaxWorkers),
-		maxWorkers:      cfg.MaxWorkers,
+		workers:           make([]*Worker, 0, cfg.MaxWorkers),
+		maxWorkers:        cfg.MaxWorkers,
 		maxLoopsPerWorker: cfg.MaxLoopsPerWorker,
-		ctx:             ctx,
-		cancel:          cancel,
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 	return pool
 }

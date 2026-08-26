@@ -24,7 +24,7 @@ func TestReflectionProposerAdapter_FieldMapping(t *testing.T) {
 		config.ReflectionCollectorConfig{Enabled: true},
 		nil, // classifier — not needed; we Append directly
 		"",
-		nil,             // templateReg — not needed for drain
+		nil, // templateReg — not needed for drain
 		queuePath,
 		slog.Default(),
 	)

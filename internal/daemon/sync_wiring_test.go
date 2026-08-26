@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caimlas/meept/internal/bus"
 	bkpkg "github.com/caimlas/meept/internal/backup"
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/memory"
 )

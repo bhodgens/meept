@@ -29,7 +29,7 @@ type NotificationEvent = http.NotificationEvent
 // pruned on every Allow() call. If the remaining count is below maxPerMinute,
 // the request is allowed and its timestamp is recorded.
 type RateLimiter struct {
-	mu           sync.Mutex
+	mu            sync.Mutex
 	notifications map[string][]time.Time
 	maxPerMinute  int
 }
@@ -65,13 +65,13 @@ func (r *RateLimiter) Allow(notifType string) bool {
 
 // EventEmitter manages notification subscriptions and event distribution.
 type EventEmitter struct {
-	mu            sync.RWMutex
-	subscribers   []*subscriberSlot
-	buffer        []*http.NotificationEvent
-	maxBuffer     int
-	logger        *slog.Logger
-	rateLimiter   *RateLimiter
-	doNotDisturb  bool
+	mu           sync.RWMutex
+	subscribers  []*subscriberSlot
+	buffer       []*http.NotificationEvent
+	maxBuffer    int
+	logger       *slog.Logger
+	rateLimiter  *RateLimiter
+	doNotDisturb bool
 }
 
 // subscriberSlot bundles a subscriber channel with a closed flag so that

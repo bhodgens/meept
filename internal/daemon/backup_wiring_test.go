@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	bkpkg "github.com/caimlas/meept/internal/backup"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
-	bkpkg "github.com/caimlas/meept/internal/backup"
 )
 
 func testLogger(t *testing.T) *slog.Logger {

@@ -76,13 +76,13 @@ func (h *sessionEndBusHook) OnSessionEnd(ctx context.Context, state agent.Sessio
 	if h.bus != nil {
 		var err error
 		msg, err = models.NewBusMessage(models.MessageTypeEvent, "session", agent.SessionLifecyclePayload{
-			Event:        "end",
-			SessionID:    state.SessionID,
-			AgentID:      state.AgentID,
-			EndTimeSec:   float64(result.EndTime.Unix()),
-			DurationSec:  duration.Seconds(),
-			Success:      result.Success,
-			Metadata:     metadataToJSON(nil),
+			Event:       "end",
+			SessionID:   state.SessionID,
+			AgentID:     state.AgentID,
+			EndTimeSec:  float64(result.EndTime.Unix()),
+			DurationSec: duration.Seconds(),
+			Success:     result.Success,
+			Metadata:    metadataToJSON(nil),
 		})
 		if err == nil {
 			h.bus.Publish(bus.EventSessionEnd, msg)
@@ -113,7 +113,7 @@ func metadataToJSON(m map[string]any) string {
 // teardown latency is not affected by network I/O or message bus congestion.
 // The hook returns immediately and only logs errors asynchronously.
 //
-//nolint:U1000 // methods used via SessionEndHook interface indirection
+// nolint:U1000 // methods used via SessionEndHook interface indirection
 type asyncSessionEndHook struct {
 	bus    *bus.MessageBus
 	logger *slog.Logger
@@ -139,13 +139,13 @@ func (h *asyncSessionEndHook) OnSessionEnd(_ context.Context, state agent.Sessio
 		if h.bus != nil {
 			var err error
 			msg, err = models.NewBusMessage(models.MessageTypeEvent, "session", agent.SessionLifecyclePayload{
-				Event:        "end_async",
-				SessionID:    state.SessionID,
-				AgentID:      state.AgentID,
-				EndTimeSec:   float64(result.EndTime.Unix()),
-				DurationSec:  duration.Seconds(),
-				Success:      result.Success,
-				Metadata:     metadataToJSON(nil),
+				Event:       "end_async",
+				SessionID:   state.SessionID,
+				AgentID:     state.AgentID,
+				EndTimeSec:  float64(result.EndTime.Unix()),
+				DurationSec: duration.Seconds(),
+				Success:     result.Success,
+				Metadata:    metadataToJSON(nil),
 			})
 			if err == nil {
 				h.bus.Publish(bus.EventSessionEnd, msg)

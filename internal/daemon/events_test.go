@@ -311,7 +311,7 @@ func TestEventEmitter_DoNotDisturbDefault(t *testing.T) {
 
 type testHandler struct{}
 
-func (h *testHandler) Enabled(context.Context, slog.Level) bool        { return true }
-func (h *testHandler) Handle(context.Context, slog.Record) error       { return nil }
-func (h *testHandler) WithAttrs(attrs []slog.Attr) slog.Handler        { return h }
-func (h *testHandler) WithGroup(name string) slog.Handler              { return h }
+func (h *testHandler) Enabled(context.Context, slog.Level) bool  { return true }
+func (h *testHandler) Handle(context.Context, slog.Record) error { return nil }
+func (h *testHandler) WithAttrs(attrs []slog.Attr) slog.Handler  { return h }
+func (h *testHandler) WithGroup(name string) slog.Handler        { return h }

@@ -37,9 +37,9 @@ func registerSearchRPCHandlers(server *rpc.Server, searchSvc *services.SearchSer
 			return nil, err
 		}
 		return map[string]any{
-			"results":   results,
-			"count":     len(results),
-			"mode":      "keyword",
+			"results": results,
+			"count":   len(results),
+			"mode":    "keyword",
 		}, nil
 	})
 }

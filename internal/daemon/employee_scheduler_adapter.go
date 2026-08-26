@@ -53,10 +53,10 @@ type simpleIntervalJob struct {
 	fn       func()
 }
 
-func (j *simpleIntervalJob) ID() string                 { return j.id }
-func (j *simpleIntervalJob) Name() string               { return j.name }
-func (j *simpleIntervalJob) Schedule() string           { return fmt.Sprintf("@every %s", j.interval) }
-func (j *simpleIntervalJob) Type() scheduler.JobType    { return scheduler.JobTypeInterval }
+func (j *simpleIntervalJob) ID() string              { return j.id }
+func (j *simpleIntervalJob) Name() string            { return j.name }
+func (j *simpleIntervalJob) Schedule() string        { return fmt.Sprintf("@every %s", j.interval) }
+func (j *simpleIntervalJob) Type() scheduler.JobType { return scheduler.JobTypeInterval }
 func (j *simpleIntervalJob) Execute(_ context.Context) error {
 	j.fn()
 	return nil

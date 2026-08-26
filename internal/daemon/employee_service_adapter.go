@@ -266,6 +266,7 @@ func (p employeeBusPublisher) PublishConstitutionValidationError(employeeID, val
 	msg.Topic = "employee.constitution_validation_error"
 	p.bus.Publish("employee.constitution_validation_error", msg)
 }
+
 // bot.BotExecutor. The GoalLoop calls ExecuteBot(ctx, systemPrompt,
 // userMessage) to run a single LLM turn. We delegate to AgentLoop.RunOnce
 // which processes a single user message through the full reasoning loop.

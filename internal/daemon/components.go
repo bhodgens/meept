@@ -56,6 +56,7 @@ import (
 	"github.com/caimlas/meept/internal/scheduler"
 	"github.com/caimlas/meept/internal/secrets"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/security/ssrf"
 	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/services"
@@ -267,10 +268,13 @@ type Components struct {
 	// underlying bot.Manager is reused as the execution/storage layer.
 	// May be nil when the employee subsystem is not configured; the RPC
 	// handler layer handles nil gracefully (returns errNotConfigured).
-	EmployeeManager    *employee.Manager
-	ConstitutionStore  *employee.ConstitutionStore
-	EmployeeGoalStore  *employee.GoalStore
-	EmployeeAuditStore *employee.AuditStore
+	EmployeeManager *employee.Manager
+	// EmployeeMessageStore persists inter-agent messages (leaf 10).
+	// Nil when the employee stack is disabled.
+	EmployeeMessageStore *employee.MessageStore
+	ConstitutionStore    *employee.ConstitutionStore
+	EmployeeGoalStore    *employee.GoalStore
+	EmployeeAuditStore   *employee.AuditStore
 
 	// empBusPub is the bus publisher adapter for the employee framework
 	// (E4). Set in NewComponents so it's available in Start for wiring
@@ -1814,7 +1818,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF)
 
 	// Register /remember tool for agents to propose improvements (Thread E)
 	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
@@ -2001,6 +2005,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Register platform tools now that agent registry is available
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, msgBus, logger)
+
+		// Inter-agent messaging (loop-economics leaf 10): send_agent_message,
+		// inbox, and roster reachability on platform_agents.
+		WireEmployeeMessagingForComponents(c)
 
 		// Register template tools if template registry is available
 		registerTemplateTools(c.ToolRegistry, c.TemplateRegistry, logger)
@@ -2595,6 +2603,34 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.ConstitutionStore = wiring.ConstitutionStore
 			c.EmployeeGoalStore = wiring.GoalStore
 			c.EmployeeAuditStore = wiring.AuditStore
+
+			// Inter-agent message store (loop-economics leaf 10).
+			// Shares the shared DB when available, else employees dir.
+			// Non-fatal on failure: messaging tools simply stay absent.
+			var ms *employee.MessageStore
+			if wiring.SharedDBPath != "" {
+				db, dbErr := sql.Open("sqlite", wiring.SharedDBPath)
+				if dbErr != nil {
+					logger.Warn("employee messaging: shared db open failed", "error", dbErr)
+				} else if m2, msErr := employee.NewMessageStoreFromDB(db, logger.With("component", "employee-messages")); msErr != nil {
+					logger.Warn("employee messaging: migrate failed", "error", msErr)
+					db.Close()
+				} else {
+					ms = m2
+				}
+			}
+			if ms == nil {
+				ms, err = employee.NewMessageStore(
+					filepath.Join(wiring.EmployeesDataDir, "messages.db"),
+					logger.With("component", "employee-messages"))
+				if err != nil {
+					logger.Warn("employee messaging: store init failed; messaging unavailable", "error", err)
+					ms = nil
+				}
+			}
+			if ms != nil {
+				c.EmployeeMessageStore = ms
+			}
 
 			// Wire the bus publisher so Pause publishes employee.paused
 			// events (spec line 383). The bus is available here but not
@@ -4541,6 +4577,7 @@ func registerBuiltinTools(
 	logger *slog.Logger,
 	mediaCfg config.MediaConfig,
 	resolver *llm.Resolver,
+	ssrfCfg config.SSRFConfig,
 ) {
 	readCache := builtin.NewReadCache(30)
 
@@ -4673,15 +4710,42 @@ func registerBuiltinTools(
 	registry.Register(gitCommitTool)
 	registry.Register(builtin.NewGitValidateTool())
 
+	// Centralized SSRF guard for web tools ([security.ssrf], enabled by
+	// default). When disabled the tools fall back to the legacy built-in
+	// checks and a startup warning is logged.
+	var webSSRFGuard *ssrf.Guard
+	if ssrfCfg.Enabled {
+		g, err := ssrf.NewGuard(ssrf.GuardConfig{
+			AllowedHosts: ssrfCfg.AllowedHosts,
+			AllowedCIDRs: ssrfCfg.AllowedCIDRs,
+			BlockedCIDRs: ssrfCfg.BlockedCIDRs,
+			MaxRedirects: ssrfCfg.MaxRedirects,
+		})
+		if err != nil {
+			logger.Error("SSRF guard configuration invalid; web tools fall back to legacy checks", "error", err)
+		} else {
+			webSSRFGuard = g
+		}
+	} else {
+		logger.Warn("SSRF guard disabled ([security.ssrf] enabled=false): web_fetch/web_search use legacy checks and are less protected against SSRF")
+	}
+
 	// Web fetch tool
 	webFetchTool := builtin.NewWebFetchTool(30*time.Second, 100000)
 	if secOrch != nil {
 		webFetchTool.SetSecurityOrchestrator(secOrch)
 	}
+	if webSSRFGuard != nil {
+		webFetchTool.SetSSRFGuard(webSSRFGuard)
+	}
 	registry.Register(webFetchTool)
 
 	// Web search tool (DuckDuckGo)
-	registry.Register(builtin.NewWebSearchTool(15 * time.Second))
+	webSearchTool := builtin.NewWebSearchTool(15 * time.Second)
+	if webSSRFGuard != nil {
+		webSearchTool.SetSSRFGuard(webSSRFGuard)
+	}
+	registry.Register(webSearchTool)
 
 	// Image/video generation (models.json5 refs)
 	media := config.EffectiveMediaConfig(mediaCfg)
@@ -4695,6 +4759,7 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewMemorySearchTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetContextTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetVersionTool(memoryMgr))
+		registry.Register(builtin.NewMemoryVoteTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetVersionHistoryTool(memoryMgr))
 
 		// Memory curation tools (retain/recall/reflect)
@@ -4840,7 +4905,8 @@ func registerPlatformTools(
 	registry.Register(builtin.NewProjectInfoTool(projectInfoFunc))
 
 	// Platform agents tool
-	registry.Register(builtin.NewPlatformAgentsTool(agentRegistry))
+	platformAgentsTool := builtin.NewPlatformAgentsTool(agentRegistry)
+	registry.Register(platformAgentsTool)
 
 	// Platform tools tool
 	registry.Register(builtin.NewPlatformToolsTool(registry))
