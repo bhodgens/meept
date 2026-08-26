@@ -205,7 +205,21 @@ Go 1.24+, stdlib-first (new deps ONLY: chromedp leaf 13, rest stdlib/existing). 
 
 | Child | Status | Iterations | Notes |
 |-------|--------|-----------|-------|
-| 01..15 | PENDING | 0 | update per leaf |
+| 01-stable-prefix-prompt | IN_PROGRESS | - | other session (uncommitted WIP, tests green) |
+| 02-lazy-tool-schemas | PENDING | 0 | |
+| 03-scheduler-crash-safety | IN_PROGRESS | - | other session (claims.go WIP, tests green) |
+| 04-shell-permission-table | COMPLETE | 1 | 94031f53 + Execute wiring in 4cfe9386 |
+| 05-ssrf-guards | IN_PROGRESS | - | other session (ssrf pkg WIP, tests green) |
+| 06-doctor-lifecycle | COMPLETE | 1 | babc8f57 |
+| 07-loop-guards | COMPLETE | 1 | e30c861a |
+| 08-quality-gated-autonomy | COMPLETE | 1 | b87f2674 |
+| 09-egress-policy | IN_PROGRESS | - | dispatched (this session) |
+| 10-inter-agent-messaging | COMPLETE | 1 | 4cfe9386 |
+| 11-local-model-cli | COMPLETE | 1 | this session (modelstore/model CLI) |
+| 12-gbnf-constrained-calling | IN_PROGRESS | - | dispatched (this session) |
+| 13-browser-automation | IN_PROGRESS | - | dispatched (this session) |
+| 14-memory-usefulness | COMPLETE | 2 | 2e69e57d (repaired abandoned WIP + wired consolidation) |
+| 15-memory-lessons-procedures | IN_PROGRESS | - | dispatched (this session) |
 
 ## Integration Test Plan
 
