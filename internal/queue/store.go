@@ -130,22 +130,66 @@ func (s *Store) migrate() error {
 		// Don't fail the store -- non-cluster usage must still work.
 	}
 
-	// Legacy migrations: add columns if they don't exist (for older database files)
-	migrations := []string{
-		"ALTER TABLE jobs ADD COLUMN agent_id TEXT",
-		"ALTER TABLE dead_letter ADD COLUMN agent_id TEXT",
-		"ALTER TABLE jobs ADD COLUMN next_retry_at TEXT",
-		"ALTER TABLE dead_letter ADD COLUMN due_at TEXT",
+	// Legacy migrations: add columns if they don't exist (for older database
+	// files). Each ALTER is checked against the live column list first, so
+	// repeated boots are silent instead of warning on duplicate columns.
+	legacyMigrations := []struct {
+		table   string
+		column  string
+		declSQL string
+	}{
+		{"jobs", "agent_id", "ALTER TABLE jobs ADD COLUMN agent_id TEXT"},
+		{"dead_letter", "agent_id", "ALTER TABLE dead_letter ADD COLUMN agent_id TEXT"},
+		{"jobs", "next_retry_at", "ALTER TABLE jobs ADD COLUMN next_retry_at TEXT"},
+		{"dead_letter", "due_at", "ALTER TABLE dead_letter ADD COLUMN due_at TEXT"},
 	}
 
-	for _, m := range migrations {
-		if _, err := s.db.Exec(m); err != nil {
-			s.logger.Warn("Legacy migration step failed (column may already exist)",
-				"migration", m, "error", err)
+	for _, mig := range legacyMigrations {
+		exists, err := s.columnExists(mig.table, mig.column)
+		if err != nil {
+			s.logger.Warn("Legacy migration check failed; attempting ALTER anyway",
+				"table", mig.table, "column", mig.column, "error", err)
+		}
+		if exists {
+			continue
+		}
+		if _, err := s.db.Exec(mig.declSQL); err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue // raced with a concurrent migration; harmless
+			}
+			s.logger.Warn("Legacy migration failed",
+				"migration", mig.declSQL, "error", err)
 		}
 	}
 
 	return nil
+}
+
+// columnExists reports whether the named column is present in the given
+// table using PRAGMA table_info.
+func (s *Store) columnExists(table, column string) (bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return false, fmt.Errorf("pragma table_info(%s): %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			ctype     string
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return false, fmt.Errorf("scan table_info row: %w", err)
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // applyClusterSchema applies the cluster portion of clusterSchema one
