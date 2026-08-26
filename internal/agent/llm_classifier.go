@@ -15,6 +15,15 @@ import (
 	"github.com/caimlas/meept/internal/memory"
 )
 
+// noThinkingOpt returns a Chat option that explicitly disables thinking for
+// small classification calls (leaf 01 of classifier-reliability): thinking
+// models would otherwise burn the token cap on reasoning and return empty
+// content.
+func noThinkingOpt() llm.ChatOption {
+	noThinking := false
+	return llm.WithReasoning(&llm.ReasoningConfig{Enabled: &noThinking})
+}
+
 const (
 	// defaultClassifierTimeout is used when LLMClassifierConfig.Timeout is zero.
 	defaultClassifierTimeout = 10 * time.Second
@@ -76,6 +85,14 @@ type LLMClassifier struct {
 	unavailMu    sync.RWMutex
 
 	cooldown time.Duration // how long to cache "unavailable" (default 60s)
+
+	// tokenCap is the per-classification-call output token budget, derived
+	// from the model's declared max_output (see effectiveClassificationCap).
+	tokenCap int
+
+	// modelConfig is the resolved model configuration, used to derive caps
+	// for calls that don't use the precomputed tokenCap.
+	modelConfig *llm.ModelConfig
 }
 
 // atomicBool is a sync-compatible boolean backed by atomic.Int32.
@@ -102,6 +119,11 @@ type LLMClassifierConfig struct {
 	Model   string
 	Timeout time.Duration // When zero, defaultClassifierTimeout is used.
 	Logger  Logger
+	// ModelConfig is the resolved model configuration for the classifier
+	// endpoint. When non-nil, the per-call token cap is derived from its
+	// declared max_output (see effectiveClassificationCap). When nil, the
+	// floor applies.
+	ModelConfig *llm.ModelConfig
 }
 
 func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifier {
@@ -121,6 +143,10 @@ func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifi
 		timeout:  timeout,
 		logger:   l,
 		cooldown: defaultUnavailableCooldown,
+
+		tokenCap: effectiveClassificationCap(cfg.ModelConfig),
+
+		modelConfig: cfg.ModelConfig,
 	}
 }
 
@@ -186,8 +212,9 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	defer cancel()
 
 	resp, err := c.client.Chat(timeoutCtx, messages,
-		llm.WithMaxTokens(200),
+		llm.WithMaxTokens(c.tokenCap),
 		llm.WithTemperature(0.1),
+		noThinkingOpt(),
 	)
 	if err != nil {
 		// Cache the failure so future requests skip this endpoint.
@@ -259,7 +286,7 @@ If no intents detected, return empty array [].`, input)
 	defer cancel()
 
 	resp, err := c.client.Chat(timeoutCtx, messages,
-		llm.WithMaxTokens(500),
+		llm.WithMaxTokens(effectiveClassificationCap(c.modelConfig)),
 		llm.WithTemperature(0.1),
 	)
 	if err != nil {

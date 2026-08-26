@@ -62,10 +62,13 @@ func applyOpenAICompatReasoning(body map[string]any, cfg *ModelConfig, rc *Reaso
 		// GLM and Kimi use the Anthropic-style thinking block.
 		applyZAIStyleThinking(body, rc, cfg, globalBudgets)
 
-	case ProviderIDOllama, "qwen":
-		// Qwen3 / Qwq: boolean enable_thinking + thinking_budget.
+	case ProviderIDOllama, "qwen", "local", "gala-mlx", "gala-llama":
+		// Qwen3 / Qwq / llama.cpp / vLLM: boolean enable_thinking +
+		// thinking_budget. Qwen3 uses the same field name; llama.cpp-style
+		// servers take the template-level chat_template_kwargs toggle.
 		enable := rc.ResolveEnabled()
-		body["enable_thinking"] = enable
+		body["enable_thinking"] = enable // qwen native
+		body["chat_template_kwargs"] = map[string]any{"enable_thinking": enable}
 		if budget := ResolveBudget(rc, nil, nil, globalBudgets); budget != nil {
 			body["thinking_budget"] = *budget
 		}
