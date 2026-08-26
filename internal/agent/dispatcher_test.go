@@ -572,6 +572,24 @@ func TestKeywordClassifier_NewRosterIntents(t *testing.T) {
 			wantType:  string(IntentLibrarian),
 			wantAgent: config.AgentIDLibrarian,
 		},
+		{
+			name:      "generate an image → image-gen",
+			input:     "generate an image of a red fox in snow",
+			wantType:  string(IntentImageGen),
+			wantAgent: config.AgentIDImageGen,
+		},
+		{
+			name:      "generate a video → video-gen",
+			input:     "generate a video of a train leaving the station",
+			wantType:  string(IntentVideoGen),
+			wantAgent: config.AgentIDVideoGen,
+		},
+		{
+			name:      "identify this image → image-id",
+			input:     "identify this image and tell me what it is",
+			wantType:  string(IntentImageID),
+			wantAgent: config.AgentIDImageID,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

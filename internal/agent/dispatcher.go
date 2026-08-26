@@ -274,24 +274,28 @@ type IntentClassifier interface {
 
 // DispatcherConfig holds configuration for creating a Dispatcher.
 type DispatcherConfig struct {
-	Registry          *AgentRegistry
-	MemvidClient      *memvid.Client
-	MemoryMgr         *memory.Manager
-	TaskStore         *task.Store
-	TaskRegistry      *task.Registry
-	AmendmentManager  *task.AmendmentManager
-	SkillRegistry     *skills.Registry
-	SkillExecutor     *skills.Executor
-	TemplateRegistry  *templates.Registry
-	Logger            *slog.Logger
-	LLMClient         *llm.Client
-	ClassifierClient  *llm.Client // Separate client for classification (nil = use LLMClient)
-	ClassifierModel   string
-	ClassifierTimeout time.Duration // Per-classification timeout; 0 = defaultClassifierTimeout (10s).
-	CapabilityMatcher *CapabilityMatcher
-	EmbeddingClient   EmbeddingClient
-	SessionMaxAge     time.Duration
-	PlanManager       *plan.PlanManager
+	Registry         *AgentRegistry
+	MemvidClient     *memvid.Client
+	MemoryMgr        *memory.Manager
+	TaskStore        *task.Store
+	TaskRegistry     *task.Registry
+	AmendmentManager *task.AmendmentManager
+	SkillRegistry    *skills.Registry
+	SkillExecutor    *skills.Executor
+	TemplateRegistry *templates.Registry
+	Logger           *slog.Logger
+	LLMClient        *llm.Client
+	ClassifierClient *llm.Client // Separate client for classification (nil = use LLMClient)
+	ClassifierModel  string
+	// ClassifierModelConfig is the resolved model configuration for the
+	// classifier endpoint (from the resolver). When non-nil, classification
+	// token caps are derived from its declared max_output.
+	ClassifierModelConfig *llm.ModelConfig
+	ClassifierTimeout     time.Duration // Per-classification timeout; 0 = defaultClassifierTimeout (10s).
+	CapabilityMatcher     *CapabilityMatcher
+	EmbeddingClient       EmbeddingClient
+	SessionMaxAge         time.Duration
+	PlanManager           *plan.PlanManager
 	// AmbiguityThreshold configures the IntentAnalyzer's gate for blocking
 	// routing on high-ambiguity inputs. 0 means use the legacy const
 	// (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
@@ -340,16 +344,17 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	if classifierClient != nil {
 		d.llmClassifier = NewLLMClassifier(
 			LLMClassifierConfig{
-				Client:  classifierClient,
-				Model:   cfg.ClassifierModel,
-				Timeout: cfg.ClassifierTimeout,
+				Client:      classifierClient,
+				Model:       cfg.ClassifierModel,
+				Timeout:     cfg.ClassifierTimeout,
+				ModelConfig: cfg.ClassifierModelConfig,
 			},
 			cfg.Logger,
 		)
 		// Initialize intent analyzer using same classifier client.
 		// Apply the configured ambiguity threshold when non-zero;
 		// otherwise NewIntentAnalyzer uses its built-in default.
-		ia := NewIntentAnalyzer(classifierClient, cfg.Logger)
+		ia := newIntentAnalyzer(classifierClient, 0, cfg.ClassifierModelConfig, cfg.Logger)
 		if cfg.AmbiguityThreshold > 0 {
 			ia = ia.WithAmbiguityThreshold(cfg.AmbiguityThreshold)
 		}

@@ -89,23 +89,24 @@ type Components struct {
 	cancel   context.CancelFunc // cancels the lifecycle context
 	stopOnce sync.Once          // ensures Stop() is idempotent
 
-	Config               *config.Config
-	ModelsConfig         *config.ModelsConfig
-	LLMClient            *llm.Client
-	ClassifierClient     *llm.Client // Separate client for intent classification (nil = use LLMClient)
-	SummarizerClient     *llm.Client // Separate client for session summarization (nil = use LLMClient)
-	LLMResolver          *llm.Resolver
-	ToolRegistry         *tools.Registry
-	SecurityChecker      *security.PermissionChecker
-	BudgetCleanupStop    chan struct{} // Stop channel for budget periodic cleanup
-	SecurityOrchestrator *intsecurity.Orchestrator
-	FenceChecker         *intsecurity.FenceChecker
-	AgentLoop            *agent.AgentLoop
-	ChatHandler          *agent.ChatHandler
-	StatusHandler        *StatusHandler
-	SessionStore         session.Store
-	SessionHandler       *session.Handler
-	EmbeddingWorker      *session.EmbeddingWorker
+	Config                *config.Config
+	ModelsConfig          *config.ModelsConfig
+	LLMClient             *llm.Client
+	ClassifierClient      *llm.Client      // Separate client for intent classification (nil = use LLMClient)
+	ClassifierModelConfig *llm.ModelConfig // Resolved model config for the classifier endpoint (for token caps)
+	SummarizerClient      *llm.Client      // Separate client for session summarization (nil = use LLMClient)
+	LLMResolver           *llm.Resolver
+	ToolRegistry          *tools.Registry
+	SecurityChecker       *security.PermissionChecker
+	BudgetCleanupStop     chan struct{} // Stop channel for budget periodic cleanup
+	SecurityOrchestrator  *intsecurity.Orchestrator
+	FenceChecker          *intsecurity.FenceChecker
+	AgentLoop             *agent.AgentLoop
+	ChatHandler           *agent.ChatHandler
+	StatusHandler         *StatusHandler
+	SessionStore          session.Store
+	SessionHandler        *session.Handler
+	EmbeddingWorker       *session.EmbeddingWorker
 
 	// Multi-agent orchestration components
 	Queue         queue.Queue
@@ -626,6 +627,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.With("component", "classifier-llm"),
 			budgetTracker,
 		)
+		// Re-resolve the classifier model's ModelConfig so downstream token
+		// caps can be derived from its declared max_output. Best-effort: when
+		// resolution fails, caps fall back to the classification floor.
+		if c.LLMResolver != nil {
+			if aliasCfg, err := c.LLMResolver.ResolveForAlias(classifierRef); err == nil {
+				c.ClassifierModelConfig = aliasCfg
+				logger.Info("Resolved model alias", "alias", classifierRef, "model", aliasCfg.ModelID)
+			}
+		}
 		if c.ClassifierClient != nil {
 			logger.Info("Classifier LLM client initialized", "model", classifierRef)
 		} else {
@@ -1962,23 +1972,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Create dispatcher with capability matcher
 		c.Dispatcher = agent.NewDispatcher(agent.DispatcherConfig{
-			Registry:           c.AgentRegistry,
-			MemvidClient:       c.MemvidClient,
-			MemoryMgr:          c.MemoryManager,
-			TaskStore:          taskStore,
-			TaskRegistry:       c.TaskRegistry,
-			AmendmentManager:   c.AmendmentMgr,
-			SkillRegistry:      c.SkillRegistry,
-			SkillExecutor:      c.SkillExecutor,
-			TemplateRegistry:   c.TemplateRegistry,
-			Logger:             logger.With("component", "dispatcher"),
-			CapabilityMatcher:  capMatcher,
-			LLMClient:          c.LLMClient,
-			ClassifierClient:   c.ClassifierClient,
-			ClassifierModel:    c.ModelsConfig.ClassifierModel,
-			ClassifierTimeout:  15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
-			SessionMaxAge:      30 * time.Minute,
-			AmbiguityThreshold: cfg.Orchestrator.AmbiguityThreshold,
+			Registry:              c.AgentRegistry,
+			MemvidClient:          c.MemvidClient,
+			MemoryMgr:             c.MemoryManager,
+			TaskStore:             taskStore,
+			TaskRegistry:          c.TaskRegistry,
+			AmendmentManager:      c.AmendmentMgr,
+			SkillRegistry:         c.SkillRegistry,
+			SkillExecutor:         c.SkillExecutor,
+			TemplateRegistry:      c.TemplateRegistry,
+			Logger:                logger.With("component", "dispatcher"),
+			CapabilityMatcher:     capMatcher,
+			LLMClient:             c.LLMClient,
+			ClassifierClient:      c.ClassifierClient,
+			ClassifierModelConfig: c.ClassifierModelConfig,
+			ClassifierModel:       c.ModelsConfig.ClassifierModel,
+			ClassifierTimeout:     15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
+			SessionMaxAge:         30 * time.Minute,
+			AmbiguityThreshold:    cfg.Orchestrator.AmbiguityThreshold,
 		})
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 

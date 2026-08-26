@@ -33,10 +33,29 @@ type IntentAnalyzer struct {
 	client             *llm.Client
 	ambiguityThreshold float64
 	logger             *slog.Logger
+
+	// tokenCap is the per-call output token budget, derived from the
+	// model's declared max_output (see effectiveClassificationCap).
+	tokenCap int
 }
 
 // NewIntentAnalyzer creates a new IntentAnalyzer with the given LLM client and logger.
 func NewIntentAnalyzer(client *llm.Client, logger *slog.Logger) *IntentAnalyzer {
+	return newIntentAnalyzer(client, 0, nil, logger)
+}
+
+// IntentAnalyzerConfig carries optional construction parameters for
+// newIntentAnalyzer. All fields are additive; zero values keep prior defaults.
+type IntentAnalyzerConfig struct {
+	// ModelConfig is the resolved model configuration for the analyzer's
+	// endpoint. When non-nil, the per-call token cap is derived from its
+	// declared max_output (see effectiveClassificationCap).
+	ModelConfig *llm.ModelConfig
+}
+
+// newIntentAnalyzer is the shared constructor; tokenCapOverride of 0 means
+// derive from modelCfg.
+func newIntentAnalyzer(client *llm.Client, _ int, modelCfg *llm.ModelConfig, logger *slog.Logger) *IntentAnalyzer {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -44,6 +63,7 @@ func NewIntentAnalyzer(client *llm.Client, logger *slog.Logger) *IntentAnalyzer 
 		client:             client,
 		ambiguityThreshold: defaultAmbiguityThreshold,
 		logger:             logger,
+		tokenCap:           effectiveClassificationCap(modelCfg),
 	}
 }
 
@@ -84,8 +104,9 @@ Rules:
 	}
 
 	resp, err := ia.client.Chat(ctx, messages,
-		llm.WithMaxTokens(300),
+		llm.WithMaxTokens(ia.tokenCap),
 		llm.WithTemperature(0.2),
+		noThinkingOpt(),
 	)
 	if err != nil {
 		ia.logger.Warn("intent analysis failed", "error", err)
