@@ -181,6 +181,34 @@ generation. Keep renewal simple by running certbot with a deploy hook that
 restarts the daemon, or run everything behind Option A's proxy and avoid the
 problem entirely.
 
+## Unix Socket RPC Security Model
+
+The daemon exposes a second transport: JSON-RPC 2.0 over a Unix domain
+socket (`~/.meept/meept.sock`). It has NO application-layer auth — by
+design:
+
+- The socket is created with 0600 permissions. Only processes running as
+  the SAME operating-system user may connect; the kernel enforces this.
+- There is no bearer key to leak, rotate, or accidentally commit.
+- The socket must NEVER be exposed over TCP or a network filesystem —
+  doing so removes the only access control it has.
+
+This makes RPC strictly MORE trusted than the HTTP API: every RPC caller
+is, by construction, the daemon owner. Consequences:
+
+- The CLI and TUI default to RPC for loopback operation; they need no
+  key material on disk beyond what the OS already protects.
+- In a future multi-user deployment, RPC calls bypass per-user identity
+  (they act as the owner). Keep `transport.rpc.enabled: false` on any
+  node where untrusted local users exist, or run each user's daemon under
+  their own OS account. See the peer-credential note below.
+
+Planned defense-in-depth: verify peer credentials on each accepted
+connection (`LOCAL_PEERCRED` on macOS / `SO_PEERCRED` on Linux), log the
+connecting UID, and optionally restrict to an explicit UID allowlist.
+Tracked as an open question in
+`docs/plans/2026-08-26-multiuser-access/master.md` (Q3).
+
 ## Production Deployment Checklist
 
 - [ ] Replace dev-key fallback with explicit `api_keys` in config
