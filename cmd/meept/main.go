@@ -186,6 +186,8 @@ Analytics:
 	rootCmd.AddCommand(newMigrateCmd())
 	rootCmd.AddCommand(newLearningCmd())
 	rootCmd.AddCommand(newHaloCmd())
+	rootCmd.AddCommand(newUsersCmd())
+	rootCmd.AddCommand(newKeysCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "\nError: %v\n\n", err)

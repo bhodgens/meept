@@ -211,6 +211,55 @@ func (s *Store) RevokeKey(userID, keyID string) error {
 	return nil
 }
 
+// RemoveUser deletes a local user and all of their keys by id, persisting
+// the change before returning. Removing an unknown id is an error. Foreign
+// (cluster-pooled) users are managed by peer sync — removing them locally is
+// also an error.
+func (s *Store) RemoveUser(userID string) error {
+	s.mu.Lock()
+	idx := -1
+	for i, u := range s.users {
+		if u.ID == userID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("remove user %s: not found", userID)
+	}
+	if s.users[idx].OriginNode != "" {
+		s.mu.Unlock()
+		return fmt.Errorf("remove user %s: foreign users are removed by cluster sync", userID)
+	}
+	prev := s.users
+	next := make([]User, 0, len(prev)-1)
+	next = append(next, prev[:idx]...)
+	next = append(next, prev[idx+1:]...)
+	s.users = next
+	snapshot := copyUsers(s.users)
+	path := s.path
+	s.mu.Unlock()
+
+	if err := saveStore(path, snapshot); err != nil {
+		s.mu.Lock()
+		s.users = prev
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// ListUsers returns a deep copy of every user currently held (local plus
+// merged foreign), safe for callers to inspect or mutate without affecting
+// store-owned state.
+func (s *Store) ListUsers() []User {
+	s.mu.RLock()
+	out := copyUsers(s.users)
+	s.mu.RUnlock()
+	return out
+}
+
 // MergeForeign reconciles cluster-pooled ("foreign") users into the store.
 //
 // Callers pass fully-attributed User values (OriginNode set by the sync

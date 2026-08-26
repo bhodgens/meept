@@ -604,6 +604,130 @@ func TestMergeForeignIgnoresUnattributedIncoming(t *testing.T) {
 	}
 }
 
+func TestRemoveUserRemovesAndRejectsKey(t *testing.T) {
+	s := newTestStore(t)
+	alice := mustAddUser(t, s, "alice")
+	if _, err := s.AddKey(alice.ID, "laptop", nil); err != nil {
+		t.Fatalf("AddKey: %v", err)
+	}
+	raw, err := s.AddKey(alice.ID, "phone", nil)
+	if err != nil {
+		t.Fatalf("AddKey: %v", err)
+	}
+
+	if err := s.RemoveUser(alice.ID); err != nil {
+		t.Fatalf("RemoveUser: %v", err)
+	}
+	for _, u := range s.users {
+		if u.ID == alice.ID {
+			t.Fatal("user still present after RemoveUser")
+		}
+	}
+	// All of the user's keys must stop authenticating too.
+	if _, err := s.Validate(raw, time.Now()); err == nil {
+		t.Fatal("Validate of removed user's key succeeded, want error")
+	}
+}
+
+func TestRemoveUserUnknownID(t *testing.T) {
+	s := newTestStore(t)
+	mustAddUser(t, s, "alice")
+
+	if err := s.RemoveUser("user-missing"); err == nil {
+		t.Fatal("RemoveUser of unknown id succeeded, want error")
+	} else if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("error = %v, want it to mention \"not found\"", err)
+	}
+}
+
+func TestRemoveUserIsLocalOnly(t *testing.T) {
+	s := newTestStore(t)
+
+	foreign := User{ID: "user-f", Name: "pooled", OriginNode: "node-x"}
+	if err := s.MergeForeign([]User{foreign}, map[string]struct{}{"node-x": {}}); err != nil {
+		t.Fatalf("MergeForeign: %v", err)
+	}
+
+	if err := s.RemoveUser("user-f"); err == nil {
+		t.Fatal("RemoveUser of foreign user succeeded, want error (local users only)")
+	}
+}
+
+func TestRemoveUserRollbackOnSaveFailure(t *testing.T) {
+	s := newTestStorePath(t, t.TempDir()+"/users.json5")
+	alice := mustAddUser(t, s, "alice")
+
+	// Point the store at a path whose parent directory is missing so the
+	// post-lock persistence fails and the in-memory removal must roll back.
+	s.path = t.TempDir() + "/missing-dir/users.json5"
+	if err := s.RemoveUser(alice.ID); err == nil {
+		t.Fatal("RemoveUser expected persistence failure on bad path")
+	}
+	s.path = t.TempDir() + "/users.json5"
+
+	found := false
+	for _, u := range s.users {
+		if u.ID == alice.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("in-memory removal persisted after failed save; rollback missing")
+	}
+
+	// With a writable path restored, a real removal round-trips cleanly.
+	if err := s.RemoveUser(alice.ID); err != nil {
+		t.Fatalf("RemoveUser after recovered path: %v", err)
+	}
+}
+
+func TestListUsersReturnsDeepCopies(t *testing.T) {
+	s := newTestStore(t)
+	alice := mustAddUser(t, s, "alice")
+	expiry := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	if _, err := s.AddKey(alice.ID, "laptop", &expiry); err != nil {
+		t.Fatalf("AddKey: %v", err)
+	}
+
+	users := s.ListUsers()
+	if len(users) != 1 || users[0].Name != "alice" || len(users[0].Keys) != 1 {
+		t.Fatalf("ListUsers = %+v, want single alice with 1 key", users)
+	}
+
+	// Mutating the returned slice and key expiry pointers must not touch
+	// store-owned state.
+	users[0].Name = "hacked"
+	users[0].Keys[0].ExpiresAt = nil
+
+	if got := s.ListUsers(); len(got) != 1 || got[0].Name != "alice" || got[0].Keys[0].ExpiresAt == nil {
+		t.Fatalf("mutation leaked into store state: %+v", got)
+	}
+}
+
+func TestListUsersIncludesForeign(t *testing.T) {
+	s := newTestStore(t)
+	mustAddUser(t, s, "admin")
+
+	foreign := User{ID: "user-f", Name: "pooled", OriginNode: "node-x"}
+	if err := s.MergeForeign([]User{foreign}, map[string]struct{}{"node-x": {}}); err != nil {
+		t.Fatalf("MergeForeign: %v", err)
+	}
+
+	users := s.ListUsers()
+	if len(users) != 2 {
+		t.Fatalf("user count = %d, want 2", len(users))
+	}
+	var hasOrigin bool
+	for _, u := range users {
+		if u.OriginNode == "node-x" {
+			hasOrigin = true
+		}
+	}
+	if !hasOrigin {
+		t.Fatalf("foreign user missing from listing: %+v", users)
+	}
+}
+
 // farFuture returns a time long after any test expiry.
 func farFuture() time.Time {
 	return time.Now().UTC().AddDate(100, 0, 0)
