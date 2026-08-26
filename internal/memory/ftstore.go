@@ -534,6 +534,10 @@ func memoryTypeFromCategory(category string, defaultType MemoryType) MemoryType 
 	switch MemoryType(category) {
 	case MemoryTypeClaim, MemoryTypeDecision, MemoryTypePrediction, MemoryTypeQuestion:
 		return MemoryType(category)
+	case TypeLesson, TypeProcedure:
+		// Distilled memories (leaf 15) live in the task table with their
+		// distill kind as the domain/category.
+		return MemoryType(category)
 	default:
 		return defaultType
 	}

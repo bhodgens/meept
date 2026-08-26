@@ -108,6 +108,12 @@ type Manager struct {
 	// / storeViaMemvid paths are unchanged — the DualStore is purely
 	// additive for cluster sync. SetDualStore is nil-guarded.
 	dualStore *DualStore
+
+	// Distillation state (loop-economics leaf 15). distillQ holds pending
+	// reflection "pattern" items drained on evolver-cycle timing;
+	// distillSummarizer is an optional test override for the LLM path.
+	distillQ          *distillQueue
+	distillSummarizer DistillSummarizer
 }
 
 // prefetchRequest represents a request to prefetch context for a query.
@@ -157,6 +163,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		llm:            cfg.LLM,
 		embedder:       cfg.Embedder,
 		vectorStore:    cfg.VectorStore,
+		distillQ:       &distillQueue{},
 	}
 }
 
@@ -1511,11 +1518,16 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 	err := row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &createdAtStr, &lastAccessedStr)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
-			// Try task memory
+			// Try task memory.
 			if m.task != nil {
 				taskMem, taskErr := m.task.GetByID(ctx, id)
 				if taskErr == nil {
 					return &taskMem.Memory, nil
+				}
+				// Surface read-validation failures (e.g., malformed
+				// distilled JSON) instead of masking them as not-found.
+				if errors.Is(taskErr, ErrMalformedDistilled) {
+					return nil, fmt.Errorf("get memory %s: %w", id, taskErr)
 				}
 			}
 			return nil, ErrNotFound
@@ -1533,6 +1545,11 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 	}
 
 	mem.Metadata = ParseMetadata(metaJSON)
+	// Distilled memories (leaf 15) must carry well-formed structured JSON;
+	// malformed stored entries are rejected at read.
+	if verr := ValidateDistilledContent(mem.Category, mem.Content); verr != nil {
+		return nil, fmt.Errorf("get memory %s: %w", id, verr)
+	}
 	if t := memoryTypeFromCategory(mem.Category, MemoryTypeEpisodic); t != "" {
 		// Prefer an explicit type tag in metadata, then the category.
 		if raw, ok := mem.Metadata["type"].(string); ok && IsEpistemicType(MemoryType(raw)) {

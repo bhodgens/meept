@@ -303,10 +303,19 @@ func (t *TaskMemory) GetByID(ctx context.Context, id string) (*MemoryResult, err
 	}
 
 	createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
+	// Distilled memories (leaf 15) must carry well-formed structured JSON;
+	// malformed stored entries are rejected at read.
+	if err := ValidateDistilledContent(domain, content); err != nil {
+		return nil, fmt.Errorf("get memory %s: %w", id, err)
+	}
+	memType := MemoryTypeTask
+	if dt := memoryTypeFromCategory(domain, ""); dt != "" {
+		memType = dt
+	}
 	mem := Memory{
 		ID:        memID,
 		Content:   content,
-		Type:      MemoryTypeTask,
+		Type:      memType,
 		Category:  domain,
 		Metadata:  ParseMetadata(metaJSON),
 		CreatedAt: createdAt,

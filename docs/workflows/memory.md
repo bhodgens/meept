@@ -10,6 +10,25 @@ Effective agent operation requires persistent memory across sessions. The memory
 - Efficient retrieval of relevant information
 - Memory consolidation and summarization
 
+### Usefulness Voting (opt-in)
+Memories can receive explicit usefulness votes via the `memory_vote` tool (`memory_id`, `delta` of +1/-1, optional reason up to 512 bytes). Each memory's usefulness score is:
+
+```
+clamp01(base + Wv*net_votes + Wa*log1p(accesses) - Ws*age_days)
+```
+
+Defaults: `base=0.5`, `Wv=0.08`, `Wa=0.05`, `Ws=0.005`. When `[memory.usefulness] enabled = true` (default **false**), consolidation eviction reorders by this score: memories with net votes <= -2 are evicted first regardless of age, then the bottom `floor_pct` (default 0.05) by score is evicted before any age-based rule; the rest consolidate as before.
+
+```toml
+[memory.usefulness]
+enabled = true
+floor_pct = 0.05
+base = 0.5
+wv = 0.08
+wa = 0.05
+ws = 0.005
+```
+
 ## Behavior
 
 ### Episodic Memory (FTS5)
