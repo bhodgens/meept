@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -44,6 +45,14 @@ import (
 const maxRequestBodySize = 1 << 20 // 1 MB
 
 var defaultWSOrigins = []string{"localhost", "127.0.0.1", "::1"}
+
+// bannedPublicAPIKeys are legacy hardcoded keys from early releases. They
+// appear in public documentation and old client binaries, so they must never
+// authenticate. NewServer refuses to start when one is configured.
+var bannedPublicAPIKeys = []string{
+	"meept_dev_default_key_CHANGE_ME",
+	"d@ng3r_NOT_A_Secure_key_REGENERATE_M3",
+}
 
 // ServerConfig holds configuration for the HTTP server.
 // TLS is always enabled; there is no option to disable HTTPS.
@@ -232,6 +241,20 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 		logger.Warn("using development API key",
 			"hint", "replace with a generated key via `meept token generate --save` for production",
 			"default_key_visible", false) // key is never logged
+	}
+
+	// SECURITY: refuse to accept any known-public legacy default key.
+	// These values shipped in old releases and are printed in public docs;
+	// accepting them would let anyone on the network authenticate.
+	for i, k := range cfg.APIKeys {
+		for _, banned := range bannedPublicAPIKeys {
+			if subtle.ConstantTimeCompare([]byte(k), []byte(banned)) == 1 {
+				logger.Error("refusing to start with a publicly-known default API key",
+					"index", i,
+					"hint", "generate a real key via `meept token generate --save`")
+				return nil
+			}
+		}
 	}
 
 	s := &Server{

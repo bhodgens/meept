@@ -46,8 +46,11 @@ abstract class AppConstants {
   static const String windowMaximizedPref = 'window_maximized';
 
   /// Development API key (injected at build time via --dart-define).
-  /// In debug builds: pass `--dart-define=MEEPT_DEV_API_KEY=meept_dev_default_key_CHANGE_ME`.
-  /// In release builds: empty string — no fallback prevents silent auth with known keys.
+  /// In debug builds: pass `--dart-define=MEEPT_DEV_API_KEY=<generated-key>`
+  /// (generate with `meept token generate`). NEVER hardcode a public default
+  /// here — the daemon rejects known-public legacy keys at startup.
+  /// In release builds: empty string — no fallback prevents silent auth with
+  /// known keys.
   static const String defaultApiKey = String.fromEnvironment(
     'MEEPT_DEV_API_KEY',
     defaultValue: '',

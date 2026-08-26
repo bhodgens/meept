@@ -6,13 +6,15 @@
 import Foundation
 import os.log
 
-/// Default development API key shared with the daemon and other clients.
-/// Only available in DEBUG builds. In release builds, the API token must
-/// be configured via `menubar.json5` or the settings UI.
+/// Legacy hardcoded dev key from early releases. NEVER returned as a
+/// credential: it is public knowledge (old binaries, docs) and would let
+/// anyone authenticate. Kept only so Debug builds can DETECT a stale
+/// menubar.json5 still carrying it and warn loudly instead of silently
+/// failing auth.
 #if DEBUG
-let DefaultDevAPIKey = "meept_dev_default_key_CHANGE_ME"
+let LegacyPublicDevAPIKey = "meept_dev_default_key_CHANGE_ME"
 #else
-let DefaultDevAPIKey: String? = nil
+let LegacyPublicDevAPIKey: String? = nil
 #endif
 
 struct MenubarConfig: Codable {
@@ -77,10 +79,22 @@ class MenubarConfigService {
     var apiToken: String? {
         let configToken = config.daemon.apiToken
         if let token = configToken, !token.isEmpty {
+            // Refuse the legacy public key even if a stale config carries
+            // it — the daemon rejects it server-side; fail fast client-side.
+            if token == LegacyPublicDevAPIKey {
+                logger.error("menubar.json5 contains the legacy public dev key; set a real api_token")
+                return nil
+            }
             return token
         }
         #if DEBUG
-        return DefaultDevAPIKey
+        // Debug builds fall back to reading ~/.meept/dev_key — the same
+        // per-installation key the daemon uses by default.
+        if let devKey = try? String(contentsOfFile: NSString(string: "~/.meept/dev_key").expandingTildeInPath, encoding: .utf8),
+           !devKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return devKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
         #else
         // In release builds, return nil to trigger a clear auth error
         // rather than silently using a known key.

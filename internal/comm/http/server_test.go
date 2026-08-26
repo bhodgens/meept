@@ -70,6 +70,28 @@ func TestNewServer(t *testing.T) {
 	}
 }
 
+// TestNewServerRejectsBannedPublicKeys verifies the server refuses to start
+// when a publicly-known legacy default key is configured. These keys appear
+// in old releases and public docs; accepting them would let anyone
+// authenticate.
+func TestNewServerRejectsBannedPublicKeys(t *testing.T) {
+	for _, banned := range bannedPublicAPIKeys {
+		cfg := ServerConfig{
+			RequireAuth: true,
+			APIKeys:     []string{"legit-key", banned},
+		}
+		if srv := NewServer(cfg, nil, nil, nil, nil, nil); srv != nil {
+			t.Errorf("NewServer accepted banned public key %q; got server, want nil", banned)
+		}
+	}
+
+	// A configuration with only legitimate keys must still succeed.
+	cfg := ServerConfig{RequireAuth: true, APIKeys: []string{"legit-key"}}
+	if srv := NewServer(cfg, nil, nil, nil, nil, nil); srv == nil {
+		t.Fatal("NewServer rejected a legitimate key configuration")
+	}
+}
+
 func TestHandleHealth(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 

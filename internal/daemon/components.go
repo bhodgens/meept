@@ -2490,7 +2490,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// This is a fail-closed default: web enabled without explicit
 			// key configuration still requires auth with a random key
 			// that can be retrieved from logs or via daemon status.
-			randomKey, _ := generateRandomSecretKey(32)
+			// C-04 FIX (hardened): crypto/rand failure here must not
+			// silently produce an empty bearer secret, which would leave
+			// the web API effectively unauthenticated ("Bearer " matches
+			// an empty key). Fail startup instead.
+			randomKey, err := generateRandomSecretKey(32)
+			if err != nil || randomKey == "" {
+				logger.Error("web server cannot start: random secret key generation failed",
+					"error", err)
+				return nil, fmt.Errorf("web: generate random secret key: %w", err)
+			}
 			auth = web.NewBearerAuth(randomKey)
 			logger.Warn("Web server using auto-generated secret key",
 				"hint", "set web.secret_key in config to persist across restarts")
