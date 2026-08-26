@@ -215,7 +215,7 @@ Go 1.24+, stdlib-first (new deps ONLY: chromedp leaf 13, rest stdlib/existing). 
 | 08-quality-gated-autonomy | COMPLETE | 1 | b87f2674 |
 | 09-egress-policy | COMPLETE | 1 | this session (egress_policy.go + proxy integration; schema.go plumbing swept into 0dbeb378 by other session) |
 | 10-inter-agent-messaging | COMPLETE | 1 | 4cfe9386 |
-| 11-local-model-cli | COMPLETE | 2 | this session (modelstore/model CLI; uncommitted — commit pending) |
+| 11-local-model-cli | COMPLETE | 2 | b562c30a (modelstore/model CLI; IPv6 test-premise fix same commit) |
 | 12-gbnf-constrained-calling | COMPLETE | 1 | d746ff54 |
 | 13-browser-automation | COMPLETE | 1 | 92f7876a ([browser] config struct landed in 0dbeb378) |
 | 14-memory-usefulness | COMPLETE | 2 | 2e69e57d (repaired abandoned WIP + wired consolidation) |
