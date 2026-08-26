@@ -107,6 +107,11 @@ type ShellExecuteTool struct {
 	ptyMgr            *pty.Manager
 	fenceChecker      FenceChecker
 	secretScanner     *intsecurity.SecretScanner
+
+	// permissionTable is the declarative shell permission table. When set,
+	// it SUPERSEDES knownSafeCommands: deny/ask short-circuit execution;
+	// allow proceeds (tirith still runs). Both mechanisms remain available.
+	permissionTable *intsecurity.PermissionTable
 }
 
 // NewShellExecuteTool creates a new shell execution tool.
@@ -131,6 +136,35 @@ func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration, ptyMgr
 func (t *ShellExecuteTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
 	if orch != nil {
 		t.securityOrch = orch
+	}
+}
+
+// SetPermissionTable installs the declarative shell permission table
+// ([security.shell_permissions]). When configured it supersedes
+// knownSafeCommands: a deny blocks execution, ask returns an error requiring
+// user confirmation, and allow proceeds to tirith scanning as usual.
+func (t *ShellExecuteTool) SetPermissionTable(pt *intsecurity.PermissionTable) {
+	t.permissionTable = pt
+}
+
+// checkPermissionTable consults the permission table for command. Returns an
+// error when the table denies or requires confirmation; nil when unset,
+// allowed, or unmatched (fall through to existing evaluation).
+func (t *ShellExecuteTool) checkPermissionTable(command string) error {
+	if t.permissionTable == nil {
+		return nil
+	}
+	decision, prefix, ok := t.permissionTable.Evaluate(command)
+	if !ok {
+		return nil
+	}
+	switch decision {
+	case intsecurity.ShellActionDeny:
+		return fmt.Errorf("command denied by shell permission table rule: %s", prefix)
+	case intsecurity.ShellActionAsk:
+		return fmt.Errorf("command requires user confirmation by shell permission table rule: %s", prefix)
+	default:
+		return nil // allow: tirith still runs below (defense-in-depth)
 	}
 }
 
@@ -169,6 +203,43 @@ func (t *ShellExecuteTool) SetRuntimeManager(mgr *runtime.ContainerManager) {
 		base = slog.Default()
 	}
 	t.logger = base.With("component", "shell-tool")
+}
+
+// SetBackend overrides backend-based execution with an arbitrary
+// ExecutionBackend (used by daemon startup to install the sandbox-resolved
+// or refusing backend). Passing nil is a no-op so accidental misuse cannot
+// clear a previously-wired backend.
+func (t *ShellExecuteTool) SetBackend(be runtime.ExecutionBackend) {
+	if be == nil {
+		return
+	}
+	t.backend = be
+}
+
+// SetRefusingBackend overrides backend-based execution with a refusing
+// backend whose every Execute returns err. Used by daemon startup to enforce
+// fail-closed semantics when sandbox resolution fails under
+// require_sandbox=true: commands are REFUSED (error wrapping
+// runtime.ErrSandboxRequired) rather than silently run unsandboxed via direct
+// exec. Passing a nil error is a no-op so accidental misuse cannot disable
+// execution.
+func (t *ShellExecuteTool) SetRefusingBackend(err error) {
+	if err == nil {
+		return
+	}
+	t.backend = &refusingBackend{reason: err}
+}
+
+// Backend returns the currently-wired execution backend (nil when commands
+// run via direct exec). Exported for diagnostics and startup wiring tests.
+func (t *ShellExecuteTool) Backend() runtime.ExecutionBackend {
+	return t.backend
+}
+
+// BackendWired reports whether a backend-based executor is currently wired
+// (exported so daemon wiring can avoid double-wiring).
+func (t *ShellExecuteTool) BackendWired() bool {
+	return t.backend != nil
 }
 
 // SetKnownSafeCommands configures a set of base command names that are
@@ -312,6 +383,13 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	command, _ := args["command"].(string)
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
+	}
+
+	// Declarative permission table ([security.shell_permissions]) consult:
+	// deny blocks outright; ask requires user confirmation; allow falls
+	// through to tirith below. Unset table or unmatched prefix -> legacy path.
+	if err := t.checkPermissionTable(command); err != nil {
+		return nil, err
 	}
 
 	// Parse timeout
