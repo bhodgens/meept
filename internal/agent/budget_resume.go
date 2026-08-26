@@ -158,14 +158,19 @@ func (w *BudgetResumeWatcher) Pending() int {
 // parked turns oldest-first. Each resume runs in its own goroutine so a slow
 // turn does not block the polling loop.
 func (w *BudgetResumeWatcher) drainIfClear(ctx context.Context) {
-	if w.budget.CheckBudget().Exceeded {
+	// Read the budget pointer under mu: tests (and hot-swaps) may replace
+	// w.budget concurrently with this read on the polling goroutine.
+	w.mu.Lock()
+	budget := w.budget
+	resume := w.resumeFunc
+	w.mu.Unlock()
+	if budget == nil || budget.CheckBudget().Exceeded {
 		return // still over budget; wait for next tick
 	}
 
 	w.mu.Lock()
 	pending := w.parked
 	w.parked = nil
-	resume := w.resumeFunc
 	w.mu.Unlock()
 
 	if len(pending) == 0 {

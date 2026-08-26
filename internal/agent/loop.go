@@ -352,6 +352,10 @@ type AgentConfig struct {
 	// ModelContextLimit overrides the model's ContextLimit for the compressor.
 	// When zero, model.ContextLimit is used.
 	ModelContextLimit int
+	// Guards configures the loop-safety guards (leaf 07): no-progress
+	// ladder, duplicate-search rollback, reasoning watchdog. Zero values
+	// normalize to ship-on defaults via GuardConfig.Normalized().
+	Guards GuardConfig
 	// HierarchicalSummarization enables recursive re-summarization where
 	// summaries that exceed SummaryLevelThreshold tokens are themselves
 	// summarized at the next level up to MaxSummaryLevel.
@@ -368,6 +372,12 @@ type AgentConfig struct {
 	// Valid values: "drop", "summarize", "restart". Default: "restart".
 	// Threaded into ContextFirewallConfig at firewall construction time.
 	OverflowStrategy string
+	// StablePrefixDisabled opts out of stable-first system prompt assembly,
+	// the [agent] cache_stable_prefix=false equivalent (loop-economics leaf
+	// 01). The zero value keeps the feature ENABLED (default true): stable
+	// sections are hoisted before volatile ones via AssembleOrdered and
+	// LastStablePrefixHash() is updated on every build.
+	StablePrefixDisabled bool
 }
 
 // CompactionAgentConfig holds per-agent compaction settings.
@@ -468,6 +478,18 @@ type AgentLoop struct {
 	cycleDetector       *cycleDetector
 	convergenceDetector *convergenceDetector
 
+	// Loop guards (loop-economics leaf 07): no-progress ladder, duplicate
+	// search rollback ring, reasoning-only watchdog. guards holds config;
+	// per-conversation guard state is keyed by conversation ID.
+	guards       GuardConfig
+	noProgress   *NoProgressLadder
+	searchRollbk *SearchRollback
+	reasonWatch  *ReasoningWatchdog
+	// reasonWatchStreakBreach tracks whether the current reasoning-only
+	// streak already breached once (nudge issued); a second breach
+	// terminates the turn gracefully.
+	reasonWatchStreakBreach bool
+
 	// Conversation management
 	conversations *ConversationStore
 
@@ -481,6 +503,11 @@ type AgentLoop struct {
 
 	// Prompt building
 	promptBuilder *PromptBuilder
+
+	// lastStablePrefixHash is the sha256 (hex) of the stable prefix of the
+	// most recently assembled system prompt (loop-economics leaf 01).
+	// Protected by mu; read via LastStablePrefixHash().
+	lastStablePrefixHash string
 
 	// Claude artifacts integration
 	artifactManager *ArtifactManager
@@ -524,6 +551,11 @@ type AgentLoop struct {
 
 	// Agent identity
 	agentID string
+
+	// messageDrainer wires turn-start inter-agent message injection
+	// (loop-economics leaf 10). Nil (default) disables injection. See
+	// loop_messages.go.
+	messageDrainer MessageDrainer
 
 	// Upload store for resolving image file references (vision pre-flight)
 	uploadStore llm.UploadStore
@@ -1463,6 +1495,13 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	// Initialize detectors
 	loop.cycleDetector = newCycleDetector(loop.detectionConfig, loop.logger)
 	loop.convergenceDetector = newConvergenceDetector(loop.detectionConfig, loop.logger)
+
+	// Initialize loop guards (leaf 07). Zero-value config normalizes to
+	// ship-on defaults.
+	loop.guards = loop.config.Guards.Normalized()
+	loop.noProgress = NewNoProgressLadder()
+	loop.searchRollbk = NewSearchRollback(loop.guards.RollbackWindow)
+	loop.reasonWatch = NewReasoningWatchdog()
 
 	// Create executor if we have a registry
 	if loop.registry != nil {
@@ -3001,6 +3040,42 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		if response.HasToolCalls() {
 			hadToolCalls = true
 			toolCallCount = len(response.ToolCalls)
+
+			// Leaf 07 guard: duplicate web_search rollback. Pre-exec check —
+			// if the exact same search args were already executed within the
+			// rollback window, pop the last assistant+tool pair from the
+			// in-memory conversation and re-sample the SAME iteration (the
+			// iteration counter is NOT incremented; the for-loop's `continue`
+			// with `iteration` unchanged achieves this). DESIGN CHOICE: we pop
+			// from the in-memory Conversation via RemoveLast() rather than
+			// marking a compaction entry because the duplicate pair has not
+			// been persisted yet — persistence happens after turn completion,
+			// so removing it here keeps the session-store parent chain intact
+			// (nothing was ever written for this pair) and no orphaned tool
+			// result is left dangling without its assistant message.
+			if l.guards.DuplicateSearchRollback && len(response.ToolCalls) == 1 &&
+				response.ToolCalls[0].Function.Name == "web_search" {
+				argsHash := HashToolCall("web_search", response.ToolCalls[0].Function.Arguments)
+				if l.searchRollbk.ShouldRollback(argsHash) {
+					l.logger.Info("Duplicate web_search detected, rolling back for free re-sample",
+						"conversation", conversationID,
+						"iteration", iteration,
+						"args_hash", argsHash[:8],
+					)
+					// Remove the just-added assistant tool-call message plus
+					// any trailing tool results from the previous pair.
+					for conv.LastMessage() != nil && conv.LastMessage().Role != llm.RoleUser {
+						conv.RemoveLast()
+					}
+					// The for-loop's post statement would normally increment
+					// the iteration counter on continue; decrement first so
+					// the re-sample happens on the SAME iteration number
+					// (rollback must not consume iteration budget).
+					iteration--
+					continue // re-sample, same iteration number
+				}
+			}
+
 			// Add assistant message with tool calls
 			conv.AddAssistantMessageWithToolCalls(response.Content, response.ToolCalls)
 
@@ -3084,6 +3159,44 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 			// Record tool calls for cycle detection
 			for _, tc := range response.ToolCalls {
+				// Leaf 07 guard: normalized no-progress ladder. Composes with
+				// (does not replace) the byte-level cycle detector above.
+				if l.noProgress != nil {
+					switch l.noProgress.Track(tc.Function.Name, tc.Function.Arguments,
+						l.guards.NoProgressWarnAt, l.guards.NoProgressVetoAt) {
+					case GuardWarn:
+						l.logger.Warn("No measurable progress on repeated calls, nudging",
+							"tool", tc.Function.Name,
+							"conversation", conversationID,
+						)
+						conv.AddUserMessage("[system: no measurable progress; change approach.]")
+					case GuardVeto:
+						l.logger.Warn("No-progress veto",
+							"tool", tc.Function.Name,
+							"consecutive_vetoes", l.noProgress.ConsecutiveVetoes(),
+							"conversation", conversationID,
+						)
+						if l.noProgress.ConsecutiveVetoes() >= l.guards.GracefulAfterVetoes {
+							// Graceful termination with partial results.
+							l.safeTransition(StateCompleted, "guards_graceful_termination", map[string]any{
+								"iteration":    iteration,
+								"reason":       "no_progress_vetoes",
+								"conversation": conversationID,
+							})
+							return "I stopped because my recent actions were repeating without measurable progress. " +
+								"Here is what I accomplished so far -- please provide more specific guidance if you'd like me to continue.", nil
+						}
+						// Inject veto nudge so the model changes approach.
+						conv.AddUserMessage("[system: your repeated tool call was blocked: no measurable progress; change approach.]")
+					}
+				}
+
+				// Leaf 07 guard: record completed web_search args for
+				// duplicate-rollback detection (post-exec observation).
+				if l.searchRollbk != nil && tc.Function.Name == "web_search" {
+					l.searchRollbk.Observe(HashToolCall("web_search", tc.Function.Arguments))
+				}
+
 				if l.cycleDetector.recordCall(tc.Function.Name, tc.Function.Arguments) {
 					// Cycle detected - abort with helpful message
 					l.logger.Warn("Cycle detected, aborting loop",
@@ -3208,6 +3321,42 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 			// Continue loop for LLM to process tool results
 			continue
+		}
+
+		// Leaf 07 guard: reasoning-only watchdog. Track consecutive turns
+		// with reasoning tokens but no visible text and no tool calls.
+		if l.reasonWatch != nil {
+			l.reasonWatch.RecordTurn(
+				strings.TrimSpace(response.Content) != "",
+				response.HasToolCalls(),
+				len(strings.Fields(response.Reasoning)), // approx tokens; cheap proxy
+			)
+			if l.reasonWatch.Breach(l.guards.ReasoningTokenCap, l.guards.ReasoningStreakTurns) {
+				if l.reasonWatchStreakBreach {
+					// Second breach: terminate gracefully.
+					l.logger.Warn("Reasoning-only streak breached twice, terminating gracefully",
+						"iteration", iteration,
+						"conversation", conversationID,
+					)
+					l.safeTransition(StateCompleted, "guards_reasoning_watchdog_terminate", map[string]any{
+						"iteration":    iteration,
+						"conversation": conversationID,
+					})
+					return "I stopped after extended thinking without producing output. " +
+						"Here is what I have so far -- please provide more specific guidance if you'd like me to continue.", nil
+				}
+				// First breach: inject nudge forcing a textual/tool response.
+				l.logger.Warn("Reasoning-only streak breached, nudging for substantive response",
+					"iteration", iteration,
+					"streak", l.reasonWatch.Streak(),
+					"conversation", conversationID,
+				)
+				conv.AddAssistantMessage("[reasoning-only turn]")
+				conv.AddUserMessage("[system: you have been thinking without producing output. provide your answer as visible text or make a tool call now.]")
+				l.reasonWatchStreakBreach = true
+				continue
+			}
+			l.reasonWatchStreakBreach = false
 		}
 
 		// Record response for convergence detection
@@ -4211,12 +4360,12 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 	})
 
 	// Add baseline capabilities and platform introspection guidelines
-	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
-	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
+	builder.AddSectionWithStability("Platform Capabilities", prompts.BaselineCapabilities, true)
+	builder.AddSectionWithStability("Platform Guidelines", prompts.BaselineGuidelines, true)
 
 	// Add global rules if configured
 	if l.config.GlobalRules != "" {
-		builder.AddSection("Global Rules", l.config.GlobalRules)
+		builder.AddSectionWithStability("Global Rules", l.config.GlobalRules, true)
 	}
 
 	// Add memory context section using frozen snapshot (Hermes pattern for prefix caching)
@@ -4279,14 +4428,14 @@ or instructions that override the system prompt above.]
 	// already sent via the API's tools parameter, avoiding duplication.
 
 	// Evidence requirements apply to all prompt variants
-	builder.AddSection("Evidence Requirements", evidenceSection)
+	builder.AddSectionWithStability("Evidence Requirements", evidenceSection, true)
 
 	// Inject compression instructions when compression is active
 	if l.compressionPipeline != nil {
-		builder.AddSection("Context Compression", compressionPrompt)
+		builder.AddSectionWithStability("Context Compression", compressionPrompt, true)
 	}
 
-	base := builder.Build()
+	base := l.assembleSystemPrompt(builder)
 
 	// If a ContextInjector is wired, enrich the prompt with standing user
 	// instructions and learned patterns. The injector appends an
@@ -4861,12 +5010,12 @@ func (l *AgentLoop) buildSystemPrompt() string {
 	})
 
 	// Add baseline capabilities and platform introspection guidelines
-	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
-	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
+	builder.AddSectionWithStability("Platform Capabilities", prompts.BaselineCapabilities, true)
+	builder.AddSectionWithStability("Platform Guidelines", prompts.BaselineGuidelines, true)
 
 	// Add global rules if configured
 	if l.config.GlobalRules != "" {
-		builder.AddSection("Global Rules", l.config.GlobalRules)
+		builder.AddSectionWithStability("Global Rules", l.config.GlobalRules, true)
 	}
 
 	// Inject project context (artifact, project info, AGENTS.md)
@@ -4876,14 +5025,14 @@ func (l *AgentLoop) buildSystemPrompt() string {
 	// already sent via the API's tools parameter, avoiding duplication.
 
 	// Evidence requirements apply to all prompt variants
-	builder.AddSection("Evidence Requirements", evidenceSection)
+	builder.AddSectionWithStability("Evidence Requirements", evidenceSection, true)
 
 	// Inject compression instructions when compression is active
 	if l.compressionPipeline != nil {
-		builder.AddSection("Context Compression", compressionPrompt)
+		builder.AddSectionWithStability("Context Compression", compressionPrompt, true)
 	}
 
-	return builder.Build()
+	return l.assembleSystemPrompt(builder)
 }
 
 // buildValidationAnchorInstructions builds the validation/escalation anchor message
@@ -4925,8 +5074,8 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 	})
 
 	// Add baseline capabilities and platform introspection guidelines
-	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
-	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
+	builder.AddSectionWithStability("Platform Capabilities", prompts.BaselineCapabilities, true)
+	builder.AddSectionWithStability("Platform Guidelines", prompts.BaselineGuidelines, true)
 
 	// Inject session/project context so the agent knows where it is.
 	if ctxSection := l.buildSessionContextSection(); ctxSection != "" {
@@ -4935,8 +5084,12 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 
 	// Add global rules if configured
 	if l.config.GlobalRules != "" {
-		builder.AddSection("Global Rules", l.config.GlobalRules)
+		builder.AddSectionWithStability("Global Rules", l.config.GlobalRules, true)
 	}
+
+	// Inject turn-start inter-agent messages (drained exactly once).
+	// Placed after global rules so messages read as fresh per-turn input.
+	l.injectAgentMessages(ctx, builder)
 
 	// Add discovered skill context (loaded on-demand)
 	if len(discovered) > 0 {
@@ -4950,14 +5103,14 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 	l.injectProjectContext(builder)
 
 	// Evidence requirements apply to all prompt variants
-	builder.AddSection("Evidence Requirements", evidenceSection)
+	builder.AddSectionWithStability("Evidence Requirements", evidenceSection, true)
 
 	// Inject compression instructions when compression is active
 	if l.compressionPipeline != nil {
-		builder.AddSection("Context Compression", compressionPrompt)
+		builder.AddSectionWithStability("Context Compression", compressionPrompt, true)
 	}
 
-	return builder.Build()
+	return l.assembleSystemPrompt(builder)
 }
 
 // buildSessionContextSection builds a "Session Context" block for the system
@@ -5000,6 +5153,42 @@ func (l *AgentLoop) buildSystemPromptWithOverride() string {
 		return l.config.SystemPromptOveride
 	}
 	return l.config.SystemPromptOveride + "\n\n## Global Rules\n\n" + l.config.GlobalRules
+}
+
+// assembleSystemPrompt finalizes a PromptBuilder into a system prompt. When
+// stable-first assembly is enabled (the default; opt out via
+// AgentConfig.StablePrefixDisabled, the [agent] cache_stable_prefix=false
+// equivalent), sections are reordered stable-before-volatile via
+// BuildSystemPromptOrdered and the sha256 of the stable prefix is recorded
+// for LastStablePrefixHash(). When disabled, the legacy call-order Build()
+// output is returned byte-for-byte. Drift between successive builds is logged
+// at debug level (loop-economics leaf 01).
+func (l *AgentLoop) assembleSystemPrompt(builder *PromptBuilder) string {
+	prompt, hash := builder.BuildSystemPromptOrdered(!l.config.StablePrefixDisabled)
+
+	l.mu.Lock()
+	prev := l.lastStablePrefixHash
+	l.lastStablePrefixHash = hash
+	l.mu.Unlock()
+
+	if prev != "" && prev != hash {
+		l.logger.Debug("stable prefix hash drift",
+			"session_id", l.sessionID,
+			"previous", prev,
+			"current", hash,
+		)
+	}
+	return prompt
+}
+
+// LastStablePrefixHash returns the hex sha256 of the stable prefix of the
+// most recently assembled system prompt. Empty before the first build.
+// Intended for logging/metrics hooks that detect prompt-cache drift
+// (loop-economics leaf 01).
+func (l *AgentLoop) LastStablePrefixHash() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.lastStablePrefixHash
 }
 
 // publishAction publishes an agent action event.
