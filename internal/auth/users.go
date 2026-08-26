@@ -11,8 +11,21 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
+)
+
+// Sentinel validation outcomes. The HTTP middleware maps these to distinct
+// 418 messages; the store wraps them with %w.
+var (
+	// ErrUnknownKey is returned when the presented key matches no stored key.
+	ErrUnknownKey = errors.New("unknown key")
+	// ErrExpiredKey is returned when the presented key matches but has passed
+	// its ExpiresAt instant.
+	ErrExpiredKey = errors.New("key expired")
+	// ErrEmptyKey is returned when the presented key is empty.
+	ErrEmptyKey = errors.New("empty key")
 )
 
 // rawKeyLen is the number of random bytes in a generated API key

@@ -44,7 +44,7 @@ func NewStore(path string) (*Store, error) {
 // with a non-nil ExpiresAt are rejected once now is after that instant.
 func (s *Store) Validate(rawKey string, now time.Time) (*Identity, error) {
 	if rawKey == "" {
-		return nil, fmt.Errorf("validate key: empty key")
+		return nil, fmt.Errorf("validate key: %w", ErrEmptyKey)
 	}
 
 	hash := hashKey(rawKey)
@@ -79,12 +79,21 @@ func (s *Store) Validate(rawKey string, now time.Time) (*Identity, error) {
 
 	switch {
 	case found == nil:
-		return nil, fmt.Errorf("validate key: unknown key")
+		return nil, fmt.Errorf("validate key: %w", ErrUnknownKey)
 	case expired:
-		return nil, fmt.Errorf("validate key %s: expired", keyID)
+		return nil, fmt.Errorf("validate key %s: %w", keyID, ErrExpiredKey)
 	}
 
 	return &Identity{UserID: userID, UserName: foundUser.Name, KeyID: keyID}, nil
+}
+
+// UserCount returns the number of users currently held by the store
+// (local plus merged foreign). Used for a startup log line when multi-user
+// mode is enabled.
+func (s *Store) UserCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.users)
 }
 
 // AddUser creates a new local user with the given name. It errors if a user
