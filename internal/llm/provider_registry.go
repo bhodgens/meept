@@ -39,6 +39,10 @@ const (
 	CapTools      = "tools"
 	CapImageGen   = "image"
 	CapVideoGen   = "video"
+	// CapToolConstraint marks a model endpoint as supporting grammar-
+	// constrained tool calling. The specific wire mode lives in
+	// ModelConfig.ToolConstraint ("llamacpp"|"vllm"|"json_schema").
+	CapToolConstraint = "tool_constraint"
 
 	// Metrics dimension keys.
 	KeyLevel = "level"

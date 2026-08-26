@@ -105,6 +105,32 @@ type Config struct {
 	Learning            LearningConfig            `json:"learning"            toml:"learning"`
 	Media               MediaConfig               `json:"media"               toml:"media"`
 	Secrets             SecretsConfig             `json:"secrets"             toml:"secrets"`
+	Browser             BrowserConfig             `json:"browser"             toml:"browser"`
+}
+
+// BrowserConfig configures the headless browser automation tool family
+// ([browser]). Disabled by default: when enabled=false the browser_* tools
+// are absent from the registry entirely.
+//
+//gendoc:section browser
+//gendoc:desc Headless Chrome automation tools (browser_navigate/click/type/read_text/screenshot/close), SSRF-guarded.
+//gendoc:example [browser] enabled = true
+type BrowserConfig struct {
+	// Enabled toggles the browser tool family. Default false. When true,
+	// a chrome/chromium binary must be discoverable at startup.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// ChromePath overrides binary discovery (absolute path to a
+	// chrome/chromium executable). Empty means auto-discover.
+	ChromePath string `json:"chrome_path" toml:"chrome_path"`
+	// Headless launches Chrome without a visible window. Default true.
+	Headless *bool `json:"headless" toml:"headless"`
+	// MaxPages caps concurrent per-session browser instances. Default 3.
+	MaxPages int `json:"max_pages" toml:"max_pages"`
+}
+
+// HeadlessEnabled returns the effective headless setting (default true).
+func (c BrowserConfig) HeadlessEnabled() bool {
+	return c.Headless == nil || *c.Headless
 }
 
 // SecretsConfig holds declared secrets loaded into the daemon's secret broker
@@ -799,6 +825,8 @@ type MemoryConfig struct {
 	Expiration MemoryExpirationConfig `json:"expiration" toml:"expiration"`
 	// Versioning holds versioned memory settings
 	Versioning MemoryVersioningConfig `json:"versioning" toml:"versioning"`
+	// Distill holds memory distillation settings (lessons/procedures).
+	Distill MemoryDistillConfig `json:"distill" toml:"distill"`
 	// ProjectOverrides allows per-project character limit overrides
 	ProjectOverrides map[string]MemoryLimitsConfig `json:"project_overrides" toml:"project_overrides"`
 	// Epistemic holds epistemic memory settings (ambient extraction,
@@ -826,6 +854,19 @@ type MemoryUsefulnessConfig struct {
 	Wa float64 `json:"wa" toml:"wa"`
 	// Ws is the per-day age penalty. Default 0.005.
 	Ws float64 `json:"ws" toml:"ws"`
+}
+
+// MemoryDistillConfig gates lessons/procedures distillation.
+type MemoryDistillConfig struct {
+	// Enabled turns on lesson/procedure distillation. Default false
+	// (opt-in until validated).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// SimilarityThreshold is the dedup threshold: distilled candidates
+	// matching an existing memory above this are suppressed. Default 0.85.
+	SimilarityThreshold float64 `json:"similarity_threshold" toml:"similarity_threshold"`
+	// MinRelevance is the minimum query/intent similarity for a procedure
+	// to be injected into context. Default 0.6.
+	MinRelevance float64 `json:"min_relevance" toml:"min_relevance"`
 }
 
 // EpistemicConfig holds epistemic memory platform settings.
@@ -1020,6 +1061,17 @@ type AgentConfig struct {
 	// duplicate-search rollback, reasoning-only watchdog. Zero values
 	// normalize to ship-on defaults via NormalizeAgentGuardsDefaults.
 	Guards AgentGuardsConfig `json:"guards" toml:"guards"`
+	// Tools configures tool-call handling for the agent loop, including
+	// grammar-constrained (GBNF) tool calling.
+	Tools AgentToolsConfig `json:"tools" toml:"tools"`
+}
+
+// AgentToolsConfig holds [agent.tools] settings. GBNFConstrained is the
+// global kill-switch for grammar-constrained tool calling: when true, the
+// LLM client attaches a grammar to chat requests on endpoints that declare
+// a matching tool_constraint capability. Default false.
+type AgentToolsConfig struct {
+	GBNFConstrained bool `json:"gbnf_constrained" toml:"gbnf_constrained"`
 }
 
 // AgentGuardsConfig mirrors agent.GuardConfig for the [agent.guards] TOML
@@ -1386,6 +1438,35 @@ type SecurityConfig struct {
 	// Declarative shell command permission table ([security.shell_permissions]).
 	// Prefix-keyed allow/ask/deny policy evaluated before tirith scanning.
 	ShellPermissions ShellPermissionsConfig `json:"shell_permissions" toml:"shell_permissions"`
+
+	// Egress policy for the secrets proxy ([security.egress]): ordered
+	// host-suffix/CIDR allow/ask/deny rules consulted before secret injection.
+	Egress EgressConfig `json:"egress" toml:"egress"`
+}
+
+// EgressConfig configures outbound egress policy for proxied child traffic.
+//
+//gendoc:section security.egress
+//gendoc:desc Host/CIDR allow-ask-deny policy for the egress proxy, with NO_PROXY scrubbing and DNS-rebinding defense.
+//gendoc:example [security.egress] mode = "proxy"
+type EgressConfig struct {
+	// Mode selects behavior: "allow" (default, passthrough unchanged),
+	// "deny" (all proxied egress blocked), or "proxy" (rules consulted
+	// pre-injection; no match permits).
+	Mode string `json:"mode" toml:"mode"`
+	// Rules is the ordered first-match-wins rule table. Match is a host
+	// suffix (e.g. ".example.com") or CIDR (e.g. "10.0.0.0/8"); Action is
+	// "allow", "ask", or "deny".
+	Rules []EgressRuleConfig `json:"rules" toml:"rules"`
+	// ScrubNoProxy clears NO_PROXY/no_proxy for children when the proxy is
+	// active so traffic actually flows through it. Default true.
+	ScrubNoProxy bool `json:"scrub_no_proxy" toml:"scrub_no_proxy"`
+}
+
+// EgressRuleConfig is one [security.egress.rules] entry.
+type EgressRuleConfig struct {
+	Match  string `json:"match"  toml:"match"`  // host suffix or CIDR
+	Action string `json:"action" toml:"action"` // allow | ask | deny
 }
 
 // ShellPermissionsConfig configures the declarative shell permission table.
@@ -1482,6 +1563,32 @@ func (c *SecurityConfig) Validate() error {
 		}
 		if strings.TrimSpace(prefix) == "" {
 			return fmt.Errorf("security.shell_permissions.rules: empty command prefix")
+		}
+	}
+	// Egress policy: fail fast on invalid mode/actions/malformed CIDRs at
+	// config load time (the secrets package re-validates at policy build).
+	if c.Egress.Mode != "" {
+		switch c.Egress.Mode {
+		case "allow", "deny", "proxy":
+			// valid
+		default:
+			return fmt.Errorf("security.egress.mode %q: must be allow, deny, or proxy", c.Egress.Mode)
+		}
+	}
+	for i, rule := range c.Egress.Rules {
+		switch rule.Action {
+		case "allow", "ask", "deny":
+			// valid
+		default:
+			return fmt.Errorf("security.egress.rules[%d]: invalid action %q (want allow, ask, or deny)", i, rule.Action)
+		}
+		if strings.TrimSpace(rule.Match) == "" {
+			return fmt.Errorf("security.egress.rules[%d]: empty match", i)
+		}
+		if strings.Contains(rule.Match, "/") {
+			if _, _, err := net.ParseCIDR(rule.Match); err != nil {
+				return fmt.Errorf("security.egress.rules[%d]: invalid CIDR %q: %w", i, rule.Match, err)
+			}
 		}
 	}
 	return nil
@@ -1962,6 +2069,11 @@ func DefaultConfig() *Config {
 				Enabled:         true,
 				MaxContextItems: 20,
 			},
+			Distill: MemoryDistillConfig{
+				Enabled:             false,
+				SimilarityThreshold: 0.85,
+				MinRelevance:        0.6,
+			},
 			Task: TaskMemoryConfig{
 				Enabled: true,
 				Domains: []string{"general", "code", "commands"},
@@ -2171,9 +2283,13 @@ func DefaultConfig() *Config {
 			ShellPermissions: ShellPermissionsConfig{
 				Preset: "workspace",
 			},
+			Egress: EgressConfig{
+				ScrubNoProxy: true,
+			},
 		},
 		Scheduler: SchedulerConfig{
 			Enabled:  true,
+
 			Timezone: "UTC",
 		},
 		Queue: QueueConfig{

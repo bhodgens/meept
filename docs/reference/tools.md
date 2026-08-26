@@ -895,3 +895,25 @@ Tools are assigned risk levels for security purposes:
 - Shell commands are scanned for dangerous patterns
 - Web requests respect rate limits and size constraints
 - Memory operations are subject to privacy controls
+
+## Media Tools
+
+### `generate_image`
+
+Generate a still image through a configured provider.
+
+**Parameters:** `prompt` (required), `model` (`provider/id` or alias), `aspect_ratio`, `output_path`
+
+**Models:** defined in `models.json5` with capability `image`. Slot `image_model`. Alias `image`.
+
+**Default:** `image_model`. Files land in `media.output_dir` (`~/.meept/media`) unless `output_path` is set.
+
+### `generate_video`
+
+Generate a video clip through a configured provider.
+
+**Parameters:** `prompt` (required), `model` (`provider/id` or alias), `aspect_ratio`, `duration_s`, `output_path`
+
+**Default:** `video_model`. Same catalog as chat models. Capability `video`.
+
+See `docs/configuration/media.md`.

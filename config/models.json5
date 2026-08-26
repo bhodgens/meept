@@ -16,6 +16,10 @@
   // NOTE: Vision models require MLX runtime - currently disabled
   "vision_model": "ollama/llama3.2",
 
+  // Image / video generation (same provider/id form as chat models)
+  "image_model": "xai-oauth/grok-imagine-image-2.0",
+  "video_model": "xai-oauth/grok-imagine-video",
+
   // Model aliases with cooldown-based failover
   "model_aliases": {
     "classifier": {
@@ -38,6 +42,16 @@
       "timeout": 15,
       "max_fails": 2
     },
+    "small": {
+      "models": [
+        "local/lfm-1.2b-q8",
+        "local/lfm-8b-f16",
+        "zai/glm-4.5-air",
+        "ollama/llama3.2"
+      ],
+      "timeout": 15,
+      "max_fails": 2
+    },
     "coder": {
       "models": ["zai/glm-5.2", "ollama/llama3.2"],
       "timeout": 30,
@@ -52,6 +66,16 @@
       "models": ["zai/glm-4.5-air", "ollama/qwen2.5-coder"],
       "timeout": 20,
       "max_fails": 3
+    },
+    "image": {
+      "models": ["xai-oauth/grok-imagine-image-2.0", "comfyui/flux-dev"],
+      "timeout": 60,
+      "max_fails": 2
+    },
+    "video": {
+      "models": ["xai-oauth/grok-imagine-video"],
+      "timeout": 120,
+      "max_fails": 2
     }
   },
 
@@ -217,6 +241,113 @@
           "context_limit": 32768,
           "max_output": 8192,
           "temperature": 0.7
+        }
+      }
+    },
+
+    "xai": {
+      "api": "openai",
+      "options": {
+        "baseURL": "https://api.x.ai/v1",
+        "apiKey": "${XAI_API_KEY}"
+      },
+      "models": {
+        "grok-imagine-image-2.0": {
+          "name": "grok-imagine-image-2.0",
+          "capabilities": ["image"],
+          "input_cost": 0.0,
+          "output_cost": 0.0
+        },
+        "grok-imagine-video": {
+          "name": "grok-imagine-video",
+          "capabilities": ["video"],
+          "input_cost": 0.0,
+          "output_cost": 0.0
+        }
+      }
+    },
+
+    // SuperGrok subscription (OAuth). Bearer token from
+    // `meept config oauth connect xai-oauth`. No API key or credits needed.
+    "xai-oauth": {
+      "api": "openai",
+      "options": {
+        "baseURL": "https://api.x.ai/v1"
+      },
+      "models": {
+        "grok-imagine-image-2.0": {
+          "name": "grok-imagine-image-2.0",
+          "capabilities": ["image"],
+          "oauth_provider": "xai-oauth"
+        },
+        "grok-imagine-video": {
+          "name": "grok-imagine-video",
+          "capabilities": ["video"],
+          "oauth_provider": "xai-oauth"
+        }
+      }
+    },
+
+    "openai": {
+      "api": "openai",
+      "options": {
+        "baseURL": "https://api.openai.com/v1",
+        "apiKey": "${OPENAI_API_KEY}"
+      },
+      "models": {
+        "gpt-image-1": {
+          "name": "gpt-image-1",
+          "capabilities": ["image"],
+          "input_cost": 0.0,
+          "output_cost": 0.0
+        }
+      }
+    },
+
+    "google": {
+      "api": "gemini",
+      "options": {
+        "baseURL": "https://generativelanguage.googleapis.com/v1beta",
+        "apiKey": "${GOOGLE_API_KEY}"
+      },
+      "models": {
+        "gemini-2.5-flash-image": {
+          "name": "gemini-2.5-flash-image",
+          "capabilities": ["image"]
+        },
+        "nano-banana": {
+          "name": "gemini-2.5-flash-image",
+          "capabilities": ["image"]
+        }
+      }
+    },
+
+    "comfyui": {
+      "api": "comfyui",
+      "options": {
+        "baseURL": "http://127.0.0.1:8188"
+      },
+      "models": {
+        "flux-dev": {
+          "name": "flux-dev",
+          "capabilities": ["image"],
+          "workflow": "~/.meept/workflows/flux_dev.json"
+        }
+      }
+    },
+
+    "infsh": {
+      "api": "infsh",
+      "models": {
+        "flux": {
+          "name": "falai/flux-dev-lora",
+          "capabilities": ["image"],
+          "image_app": "falai/flux-dev-lora"
+        },
+        "wan": {
+          "name": "falai/wan-2-5",
+          "capabilities": ["video"],
+          "video_app": "falai/wan-2-5"
         }
       }
     }

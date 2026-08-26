@@ -220,6 +220,11 @@ type ModelConfig struct {
 	ContextLimit         int
 	Capabilities         map[string]bool
 	ProviderID           string
+	// ToolConstraint declares the grammar-constraint wire mode this
+	// endpoint supports for tool calls: "llamacpp", "vllm", or
+	// "json_schema". Empty means no constraint support (no grammar is
+	// ever attached). See internal/llm/gbnf.go.
+	ToolConstraint string
 	// OAuthProvider identifies the OAuth provider (e.g. "github-models",
 	// "google-oauth") whose token should be used in place of a static API
 	// key. When non-empty, the LLM client resolves a fresh access token
@@ -242,11 +247,54 @@ type ModelConfig struct {
 	// PromptCache controls prompt caching behavior. When nil, caching is
 	// enabled by default.
 	PromptCache *PromptCacheConfig
+	// ProviderAPI is the provider-level api field (openai, comfyui, gemini, …).
+	ProviderAPI string
+	// CatalogRef is "provider/map-key" as written in models.json5.
+	CatalogRef string
+	// GenerationAPI is an optional per-model transport override.
+	GenerationAPI string
+	// Workflow is a ComfyUI API-format workflow path.
+	Workflow string
+	// GenerationURL is a full URL for kind=http models.
+	GenerationURL string
+	// BodyTemplate is the JSON body template for kind=http models.
+	BodyTemplate map[string]any
+	// ResponseURLPath / ResponseB64Path extract the asset from an http response.
+	ResponseURLPath string
+	ResponseB64Path string
+	ImageApp        string
+	VideoApp        string
 }
 
 // HasCapability checks if the model has a specific capability.
 func (m *ModelConfig) HasCapability(capability string) bool {
 	return m.Capabilities[capability]
+}
+
+// GenerationTransport returns the image/video backend for this model.
+// Model-level api wins. Else provider api if it is a generation transport.
+// Else infer openai_images / openai_videos from capabilities.
+func (m *ModelConfig) GenerationTransport() string {
+	if m == nil {
+		return ""
+	}
+	if m.GenerationAPI != "" {
+		return m.GenerationAPI
+	}
+	switch m.ProviderAPI {
+	case "openai_images", "openai_videos", "gemini", "comfyui", "infsh", "http":
+		return m.ProviderAPI
+	}
+	if m.HasCapability(CapVideoGen) && !m.HasCapability(CapImageGen) {
+		return "openai_videos"
+	}
+	if m.HasCapability(CapImageGen) {
+		return "openai_images"
+	}
+	if m.HasCapability(CapVideoGen) {
+		return "openai_videos"
+	}
+	return ""
 }
 
 // HasCapabilities checks if the model has all specified capabilities.
@@ -305,6 +353,10 @@ type ParameterProperty struct {
 	Description string             `json:"description,omitempty"`
 	Enum        []string           `json:"enum,omitempty"`
 	Items       *ParameterProperty `json:"items,omitempty"`
+	// Properties and Required support nested object schemas (used by the
+	// GBNF/json-schema tool-call converters). Absent for non-object props.
+	Properties map[string]ParameterProperty `json:"properties,omitempty"`
+	Required   []string                     `json:"required,omitempty"`
 }
 
 // NewToolDefinition creates a new tool definition.

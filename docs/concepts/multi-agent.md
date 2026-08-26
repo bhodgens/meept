@@ -28,6 +28,9 @@ Meept uses a multi-agent architecture where specialist agents handle different t
 | `architect` | System design, tech evaluation, trade-off analysis | `file_read`, `list_directory`, `request_handoff` |
 | `skeptic` | Stress-tests claims, surfaces contradictions | `memory_search`, `file_read`, `request_handoff` |
 | `librarian` | Memory steward — reflection, tag hygiene, epistemic integrity | `memory_store`, `memory_search`, `request_handoff` |
+| `image-gen` | Expand a brief (`enhancer_model`, default `small`) then generate an image | `generate_image`, `file_read`, `file_write`, `shell_execute`, `web_fetch` |
+| `video-gen` | Expand a brief (`enhancer_model`, default `small`) then generate a video clip | `generate_video`, `file_read`, `file_write`, `shell_execute`, `web_fetch` |
+| `image-id` | Identify subject, text, style, and source clues in an image | `file_read`, `web_fetch`, `web_search` |
 
 ### Reviewer Agents
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -107,6 +108,68 @@ func (r *Resolver) DefaultModel() *ModelConfig {
 // SmallModel returns the small/fast model configuration.
 func (r *Resolver) SmallModel() *ModelConfig {
 	return r.smallModel
+}
+
+// ImageModel returns the configured image-generation model, if any.
+func (r *Resolver) ImageModel() *ModelConfig {
+	if r == nil || r.config == nil || r.config.ImageModel == "" {
+		return nil
+	}
+	return r.resolveGenerationRef(r.config.ImageModel, CapImageGen)
+}
+
+// VideoModel returns the configured video-generation model, if any.
+func (r *Resolver) VideoModel() *ModelConfig {
+	if r == nil || r.config == nil || r.config.VideoModel == "" {
+		return nil
+	}
+	return r.resolveGenerationRef(r.config.VideoModel, CapVideoGen)
+}
+
+// ResolveGeneration resolves a model ref or alias for image/video generation.
+// Empty ref uses the image_model / video_model slot, then the cheapest model
+// with the matching capability.
+func (r *Resolver) ResolveGeneration(ref, kind string) (*ModelConfig, error) {
+	if r == nil {
+		return nil, fmt.Errorf("model resolver is not configured")
+	}
+	capName := CapImageGen
+	if kind == "video" {
+		capName = CapVideoGen
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		if kind == "video" {
+			if mc := r.VideoModel(); mc != nil {
+				return mc, nil
+			}
+		} else if mc := r.ImageModel(); mc != nil {
+			return mc, nil
+		}
+		if cheapest := r.FindCheapest([]string{capName}); cheapest != nil {
+			return cheapest, nil
+		}
+		return nil, fmt.Errorf("no model with capability %q; set %s_model in models.json5", capName, kind)
+	}
+	mc := r.resolveGenerationRef(ref, capName)
+	if mc == nil {
+		return nil, fmt.Errorf("unknown generation model %q (want provider/id or alias with capability %s)", ref, capName)
+	}
+	return mc, nil
+}
+
+func (r *Resolver) resolveGenerationRef(ref, capName string) *ModelConfig {
+	if models, ok := r.GetAllModelsForAlias(ref); ok {
+		for _, mc := range models {
+			if mc != nil && mc.HasCapability(capName) {
+				return mc
+			}
+		}
+	}
+	if mc := ResolveModelRef(ref, r.config); mc != nil && mc.HasCapability(capName) {
+		return mc
+	}
+	return nil
 }
 
 // AllModels returns all available model configurations.

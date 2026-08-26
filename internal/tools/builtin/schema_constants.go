@@ -45,6 +45,15 @@ const (
 	schemaPropModel          = "model"
 	schemaPropSuccess        = "success"
 	schemaPropStatus         = "status"
+	schemaPropPrompt         = "prompt"
+	schemaPropAspectRatio    = "aspect_ratio"
+	schemaPropOutputPath     = "output_path"
+	schemaPropDurationS      = "duration_s"
+
+	// Browser tool family schema keys.
+	schemaPropURL      = "url"
+	schemaPropSelector = "selector"
+	schemaPropText     = "text"
 
 	// Scheduler error messages.
 	errSchedulerNotAvailable = "scheduler not available"

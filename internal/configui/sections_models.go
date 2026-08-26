@@ -19,6 +19,8 @@ func buildModelsFields() []Field {
 		NewTextField("small_model", "small model", cfg.SmallModel),
 		NewTextField("classifier_model", "classifier model", cfg.ClassifierModel),
 		NewTextField("summarizer_model", "summarizer model", cfg.SummarizerModel),
+		NewTextField("image_model", "image model", cfg.ImageModel),
+		NewTextField("video_model", "video model", cfg.VideoModel),
 		NewTextField("disabled_providers", "disabled providers", strings.Join(cfg.DisabledProviders, ", ")),
 		NewDrilldownField("providers", "providers", buildProviderItems(cfg.Providers)),
 	}

@@ -20,6 +20,9 @@ func TestConfigLoads(t *testing.T) {
 	if cfg.ClassifierModel != "classifier" {
 		t.Errorf("classifier_model = %q, want classifier", cfg.ClassifierModel)
 	}
+	if cfg.ImageModel != "xai-oauth/grok-imagine-image-2.0" {
+		t.Errorf("image_model = %q, want xai-oauth/grok-imagine-image-2.0", cfg.ImageModel)
+	}
 
 	// Verify classifier alias uses lfm-1.2b-q8 as primary
 	classifierAlias, ok := cfg.ModelAliases["classifier"]

@@ -59,6 +59,10 @@ var BuiltinRules = map[string]ActionRule{
 	// Agent operations
 	"agent_delegate": {Action: "agent_delegate", RiskLevel: RiskLow, RequiresConfirmation: false},
 	"skill_execute":  {Action: "skill_execute", RiskLevel: RiskMedium, RequiresConfirmation: false},
+
+	// Media generation (network + file write)
+	"generate_image": {Action: "generate_image", RiskLevel: RiskMedium, RequiresConfirmation: false},
+	"generate_video": {Action: "generate_video", RiskLevel: RiskMedium, RequiresConfirmation: false},
 }
 
 // Dangerous command patterns that elevate shell_execute to HIGH risk.

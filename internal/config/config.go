@@ -292,6 +292,7 @@ func expandConfigPaths(cfg *Config) {
 	// Expand LoRA learning pipeline paths
 	cfg.Learning.DataDir = expandPath(cfg.Learning.DataDir)
 	cfg.Learning.AdaptersDir = expandPath(cfg.Learning.AdaptersDir)
+	cfg.Media.OutputDir = expandPath(cfg.Media.OutputDir)
 }
 
 // ModelsConfig represents the models.json5 configuration structure.
@@ -300,6 +301,9 @@ type ModelsConfig struct {
 	SmallModel        string              `json:"small_model"`
 	ClassifierModel   string              `json:"classifier_model"` // Model for intent classification (empty = use model)
 	SummarizerModel   string              `json:"summarizer_model"` // Model for session summarization (empty = use model)
+	VisionModel       string              `json:"vision_model"`
+	ImageModel        string              `json:"image_model"`
+	VideoModel        string              `json:"video_model"`
 	DisabledProviders []string            `json:"disabled_providers"`
 	DefaultTimeout    int                 `json:"default_timeout"` // Default timeout in seconds
 	Providers         map[string]Provider `json:"providers"`
@@ -322,16 +326,24 @@ type ProviderOptions struct {
 
 // Model represents a model configuration.
 type Model struct {
-	Name             string   `json:"name"`
-	Capabilities     []string `json:"capabilities"`
-	InputCost        float64  `json:"input_cost"`
-	OutputCost       float64  `json:"output_cost"`
-	ContextLimit     int      `json:"context_limit"`
-	MaxOutput        int      `json:"max_output"`
-	Temperature      float64  `json:"temperature"`
-	TopP             float64  `json:"top_p,omitempty"`
-	FrequencyPenalty float64  `json:"frequency_penalty,omitempty"`
-	PresencePenalty  float64  `json:"presence_penalty,omitempty"`
+	Name             string         `json:"name"`
+	Capabilities     []string       `json:"capabilities"`
+	InputCost        float64        `json:"input_cost"`
+	OutputCost       float64        `json:"output_cost"`
+	ContextLimit     int            `json:"context_limit"`
+	MaxOutput        int            `json:"max_output"`
+	Temperature      float64        `json:"temperature"`
+	TopP             float64        `json:"top_p,omitempty"`
+	FrequencyPenalty float64        `json:"frequency_penalty,omitempty"`
+	PresencePenalty  float64        `json:"presence_penalty,omitempty"`
+	API              string         `json:"api,omitempty"`
+	Workflow         string         `json:"workflow,omitempty"`
+	GenerationURL    string         `json:"generation_url,omitempty"`
+	BodyTemplate     map[string]any `json:"body_template,omitempty"`
+	ResponseURLPath  string         `json:"response_url_json_path,omitempty"`
+	ResponseB64Path  string         `json:"response_b64_json_path,omitempty"`
+	ImageApp         string         `json:"image_app,omitempty"`
+	VideoApp         string         `json:"video_app,omitempty"`
 }
 
 // LoadModelsConfig loads models configuration from a JSON5 file.

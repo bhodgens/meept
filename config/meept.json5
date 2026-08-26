@@ -931,4 +931,11 @@
     "session_confidence_min": 0.7,
     "max_session_proposals": 3,
   },
+
+  // Image/video output dir. Models themselves live in models.json5
+  // (image_model / video_model, same provider/id as chat).
+  // "media": {
+  //   "output_dir": "~/.meept/media",
+  //   "timeout_seconds": 180,
+  // },
 }
