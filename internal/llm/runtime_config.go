@@ -55,7 +55,7 @@ const (
 // RuntimeConfig holds validated runtime configuration.
 type RuntimeConfig struct {
 	Type               RuntimeType
-	ModelPath          string // Backward-compat: first declared path (or legacy path)
+	ModelPath          string            // Backward-compat: first declared path (or legacy path)
 	ModelPaths         map[string]string // modelKey -> path, used for spawn-command variable expansion. For legacy single-model configs the key is "default".
 	ModelKeys          []string          // authoritative provider model IDs; used for the in-use gate and per-model logger naming. Populated by RegisterConfig from the provider's models map; falls back to ModelPaths keys when the caller does not supply real model IDs.
 	EndpointKey        string
@@ -72,6 +72,9 @@ type RuntimeConfig struct {
 	RestartMaxAttempts int
 	RestartCooldown    time.Duration
 	RestartResetAfter  time.Duration
+	// ToolConstraint is the grammar-constraint wire mode this managed
+	// runtime auto-declares ("llamacpp" for llama.cpp, "" for MLX).
+	ToolConstraint string
 }
 
 // ValidateAndNormalize validates the config and expands paths.
@@ -453,4 +456,15 @@ func ContainsSupportedRuntime(runtimes []string) bool {
 		}
 	}
 	return false
+}
+
+// ToolConstraintForRuntime returns the grammar-constraint mode a managed
+// runtime endpoint auto-declares. llama.cpp's server accepts the native
+// `grammar` field; MLX-server exposes an OpenAI-compatible API without any
+// grammar field, so it declares none (empty).
+func ToolConstraintForRuntime(rt RuntimeType) string {
+	if rt == RuntimeLlamaCpp {
+		return ToolConstraintLlamaCPP
+	}
+	return ""
 }

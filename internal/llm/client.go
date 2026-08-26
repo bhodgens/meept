@@ -258,6 +258,21 @@ func NewClient(config *ModelConfig, opts ...ClientOption) *Client {
 	return c
 }
 
+// Reconfigure swaps the client's underlying ModelConfig under configMu so
+// subsequent Chat calls target the new endpoint/model. Used by alias
+// failover (leaf 03 of classifier-reliability): the classifier and intent
+// analyzer keep a single *llm.Client and rotate its config when the active
+// candidate fails. Safe for concurrent readers: Chat snapshots cfg under
+// c.configMu.RLock, and all other reads go through the same lock.
+func (c *Client) Reconfigure(cfg *ModelConfig) {
+	if cfg == nil {
+		return
+	}
+	c.configMu.Lock()
+	c.config = cfg
+	c.configMu.Unlock()
+}
+
 // buildChatRequest constructs the chat options and JSON payload shared by
 // Chat(), ChatWithProgress(), and ChatWithDeltaCallback().
 // If addStream is true, the payload includes "stream": true.
@@ -334,6 +349,8 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 	if chatOpts.adapterPath != "" {
 		payload["adapter_path"] = chatOpts.adapterPath
 	}
+
+	c.attachToolGrammar(payload, cfg, chatOpts)
 
 	return chatOpts, payload, nil
 }
@@ -645,6 +662,9 @@ type chatOptions struct {
 	sessionID        string
 	reasoning        *ReasoningConfig
 	adapterPath      string // LoRA adapter path for providers that support it
+	// grammarMode is the tool-call grammar constraint mode for this request
+	// ("" = none; see gbnf.go constraint constants). Set via WithGrammar.
+	grammarMode string
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -724,6 +744,98 @@ func WithAdapter(path string) ChatOption {
 func WithReasoning(rc *ReasoningConfig) ChatOption {
 	return func(o *chatOptions) {
 		o.reasoning = rc
+	}
+}
+
+// gbnfWarnOnce deduplicates the incomplete-grammar warning across calls
+// (warn once per process/session, not per request).
+var gbnfWarnOnce sync.Map // map[string]struct{}
+
+// GBNFConstrained is the global kill-switch for grammar-constrained tool
+// calling ([agent.tools] gbnf_constrained). Default FALSE: no grammar is
+// attached anywhere until explicitly enabled. Set via SetGBNFConstrained
+// at daemon wiring time.
+var GBNFConstrained = false
+
+// gbnfSwitchMu guards GBNFConstrained.
+var gbncSwitchMu sync.RWMutex
+
+// SetGBNFConstrained sets the global gbnf_constrained switch.
+func SetGBNFConstrained(on bool) {
+	gbncSwitchMu.Lock()
+	GBNFConstrained = on
+	gbncSwitchMu.Unlock()
+}
+
+// GBNFConstrainedEnabled reads the global switch atomically.
+func GBNFConstrainedEnabled() bool {
+	gbncSwitchMu.RLock()
+	defer gbncSwitchMu.RUnlock()
+	return GBNFConstrained
+}
+
+// attachToolGrammar attaches a grammar constraint to the request payload when:
+//   - the caller opted in via WithGrammar (chatOpts.grammarMode != ""),
+//   - the resolved model config declares a matching tool_constraint capability,
+//   - tools are present on the request, and
+//   - the global GBNFConstrained switch is enabled.
+//
+// Any other combination leaves the payload untouched (zero wire change for
+// providers without declared capability or when the switch is off).
+func (c *Client) attachToolGrammar(payload map[string]any, cfg *ModelConfig, chatOpts *chatOptions) {
+	if chatOpts.grammarMode == "" || len(chatOpts.tools) == 0 {
+		return
+	}
+	if !GBNFConstrainedEnabled() {
+		return
+	}
+	mode := cfg.ToolConstraint
+	if mode == "" && chatOpts.grammarMode != "" && cfg.HasCapability(CapToolConstraint) {
+		// Model-level capability without an explicit mode: fall back to the
+		// mode requested by the caller if it is recognized.
+		mode = chatOpts.grammarMode
+	}
+	if mode == "" || mode != chatOpts.grammarMode {
+		return
+	}
+
+	var grammar string
+	complete := false
+	switch mode {
+	case ToolConstraintJSONSchea:
+		grammar = JSONSchemaForTools(chatOpts.tools)
+		complete = len(chatOpts.tools) > 0
+	default:
+		grammar, complete = GrammarForTools(chatOpts.tools)
+	}
+
+	if !complete {
+		key := "incomplete:" + strings.Join(toolNames(chatOpts.tools), ",")
+		if _, dup := gbnfWarnOnce.LoadOrStore(key, struct{}{}); !dup {
+			c.logger.Warn("gbnf: tool schemas contain unsupported constructs; excluding affected tools from grammar",
+				"mode", mode)
+		}
+	}
+	AttachGrammar(payload, mode, grammar)
+}
+
+func toolNames(defs []ToolDefinition) []string {
+	names := make([]string, 0, len(defs))
+	for _, d := range defs {
+		names = append(names, d.Function.Name)
+	}
+	return names
+}
+
+// WithGrammar enables GBNF/grammar-constrained tool calling for this request
+// using the given constraint mode ("llamacpp", "vllm", or "json_schema").
+// The grammar is only attached when tools are present AND the resolved model
+// config declares a matching tool_constraint capability AND the global
+// [agent.tools] gbnf_constrained switch is on. An incomplete grammar warns
+// once per session and is skipped.
+func WithGrammar(mode string) ChatOption {
+	return func(o *chatOptions) {
+		o.grammarMode = mode
 	}
 }
 
