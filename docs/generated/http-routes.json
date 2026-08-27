@@ -2146,21 +2146,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 5958
+    "line": 5964
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 5969
+    "line": 5975
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 5950
+    "line": 5956
   },
   {
     "method": "GET",
@@ -2293,14 +2293,14 @@
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 902
+    "line": 905
   },
   {
     "method": "GET",
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1039
+    "line": 1042
   },
   {
     "method": "GET",

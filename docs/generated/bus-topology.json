@@ -21,6 +21,56 @@
         "via_helper": true
       }
     ],
+    "agent.iteration.completed": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5428,
+        "payload_keys": [
+          "agent_id",
+          "conversation_id",
+          "iteration"
+        ],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5428,
+        "payload_keys": [
+          "agent_id",
+          "conversation_id",
+          "iteration"
+        ],
+        "via_helper": true
+      }
+    ],
+    "agent.lifecycle.ended": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 1892,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/loop.go",
+        "line": 1892,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "agent.lifecycle.started": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 1837,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/loop.go",
+        "line": 1837,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
     "agent.message.delivered": [
       {
         "file": "internal/tools/builtin/agent_message.go",
@@ -92,6 +142,98 @@
         "via_helper": true
       }
     ],
+    "agent.queue.followup.added": [
+      {
+        "file": "internal/agent/queue.go",
+        "line": 323,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "agent.queue.followup.injected": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5410,
+        "payload_keys": [
+          "conversation_id",
+          "count",
+          "message_ids",
+          "queue_type"
+        ],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5410,
+        "payload_keys": [
+          "conversation_id",
+          "count",
+          "message_ids",
+          "queue_type"
+        ],
+        "via_helper": true
+      }
+    ],
+    "agent.queue.followup.restored": [
+      {
+        "file": "internal/agent/queue_recovery.go",
+        "line": 76,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/queue_recovery.go",
+        "line": 76,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "agent.queue.persisted": [
+      {
+        "file": "internal/agent/queue_persister.go",
+        "line": 324,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/queue_persister.go",
+        "line": 324,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "agent.queue.steer.added": [
+      {
+        "file": "internal/agent/queue.go",
+        "line": 258,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "agent.queue.steer.injected": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5386,
+        "payload_keys": [
+          "conversation_id",
+          "count",
+          "message_ids",
+          "queue_type"
+        ],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5386,
+        "payload_keys": [
+          "conversation_id",
+          "count",
+          "message_ids",
+          "queue_type"
+        ],
+        "via_helper": true
+      }
+    ],
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
@@ -113,12 +255,33 @@
         "via_helper": true
       }
     ],
+    "agent.state.changed": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 1491,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/loop.go",
+        "line": 1491,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
     "agent.workers.list": [
       {
         "file": "internal/rpc/proxy.go",
         "line": 86,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 86,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "agent.workers.list"
       }
     ],
     "agent.workers.result": [
@@ -131,26 +294,6 @@
         "file": "internal/agent/handler.go",
         "line": 498,
         "payload_keys": [],
-        "via_helper": true
-      }
-    ],
-    "analyzing": [
-      {
-        "file": "internal/selfimprove/controller.go",
-        "line": 228,
-        "payload_keys": [
-          "issues_count"
-        ],
-        "via_helper": true
-      }
-    ],
-    "applying": [
-      {
-        "file": "internal/selfimprove/controller.go",
-        "line": 374,
-        "payload_keys": [
-          "validated_count"
-        ],
         "via_helper": true
       }
     ],
@@ -171,25 +314,46 @@
     "cache.clear": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 135,
+        "line": 147,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 147,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "cache.clear"
       }
     ],
     "cache.invalidate": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 136,
+        "line": 148,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 148,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "cache.invalidate"
       }
     ],
     "cache.stats": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 134,
+        "line": 146,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 146,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "cache.stats"
       }
     ],
     "chat.processing": [
@@ -264,6 +428,13 @@
         "line": 194,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 54,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "chat"
       }
     ],
     "chat.response": [
@@ -357,34 +528,144 @@
         "via_helper": true
       }
     ],
-    "completed": [
+    "collaboration.consensus_reached": [
       {
-        "file": "internal/selfimprove/controller.go",
-        "line": 221,
+        "file": "internal/agent/collaboration_pair_driver.go",
+        "line": 227,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "collaboration.divergence": [
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 119,
         "payload_keys": [],
         "via_helper": true
       },
       {
-        "file": "internal/selfimprove/controller.go",
-        "line": 265,
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 132,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "collaboration.error": [
+      {
+        "file": "internal/agent/collaboration_team_driver.go",
+        "line": 222,
         "payload_keys": [],
         "via_helper": true
       },
       {
-        "file": "internal/selfimprove/controller.go",
-        "line": 324,
+        "file": "internal/agent/collaboration_team_driver.go",
+        "line": 245,
         "payload_keys": [],
         "via_helper": true
       },
       {
-        "file": "internal/selfimprove/controller.go",
-        "line": 368,
+        "file": "internal/agent/collaboration_pair_driver.go",
+        "line": 117,
         "payload_keys": [],
         "via_helper": true
       },
       {
-        "file": "internal/selfimprove/controller.go",
-        "line": 443,
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 101,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 148,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "collaboration.phase_completed": [
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 93,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 106,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 139,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "collaboration.requested": [
+      {
+        "file": "internal/agent/collaboration_engine.go",
+        "line": 131,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "collaboration.result": [
+      {
+        "file": "internal/agent/collaboration_team_driver.go",
+        "line": 257,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_pair_driver.go",
+        "line": 126,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 158,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "collaboration.session_created": [
+      {
+        "file": "internal/agent/collaboration_team_driver.go",
+        "line": 199,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_pair_driver.go",
+        "line": 96,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_engine.go",
+        "line": 101,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 71,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "collaboration.turn_completed": [
+      {
+        "file": "internal/agent/collaboration_pair_driver.go",
+        "line": 190,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_pair_driver.go",
+        "line": 217,
         "payload_keys": [],
         "via_helper": true
       }
@@ -397,25 +678,17 @@
         "via_helper": true
       }
     ],
-    "daemon": [
-      {
-        "file": "internal/daemon/components.go",
-        "line": 1176,
-        "payload_keys": [],
-        "via_helper": true
-      }
-    ],
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1849,
+        "line": 1852,
         "payload_keys": [
           "event"
         ]
       },
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1849,
+        "line": 1852,
         "payload_keys": [
           "event"
         ],
@@ -425,25 +698,17 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1506,
+        "line": 1509,
         "payload_keys": [
           "event"
         ]
       },
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1506,
+        "line": 1509,
         "payload_keys": [
           "event"
         ],
-        "via_helper": true
-      }
-    ],
-    "detecting": [
-      {
-        "file": "internal/selfimprove/controller.go",
-        "line": 197,
-        "payload_keys": [],
         "via_helper": true
       }
     ],
@@ -489,7 +754,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3705,
+        "line": 3711,
         "payload_keys": [
           "name",
           "tags",
@@ -498,7 +763,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 3705,
+        "line": 3711,
         "payload_keys": [
           "name",
           "tags",
@@ -516,6 +781,20 @@
       {
         "file": "internal/daemon/employee_service_adapter.go",
         "line": 210,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "event": [
+      {
+        "file": "internal/plan/manager.go",
+        "line": 812,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/plan/manager.go",
+        "line": 812,
         "payload_keys": [],
         "via_helper": true
       }
@@ -541,12 +820,46 @@
         "via_helper": true
       }
     ],
-    "generating": [
+    "hook.async_rewake": [
       {
-        "file": "internal/selfimprove/controller.go",
-        "line": 272,
+        "file": "internal/agent/http_hooks.go",
+        "line": 188,
         "payload_keys": [
-          "analyses_count"
+          "hook_name",
+          "hook_type",
+          "session_id"
+        ],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/file_watcher.go",
+        "line": 216,
+        "payload_keys": [
+          "hook_name",
+          "hook_type",
+          "path",
+          "session_id"
+        ],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/http_hooks.go",
+        "line": 188,
+        "payload_keys": [
+          "hook_name",
+          "hook_type",
+          "session_id"
+        ],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/file_watcher.go",
+        "line": 216,
+        "payload_keys": [
+          "hook_name",
+          "hook_type",
+          "path",
+          "session_id"
         ],
         "via_helper": true
       }
@@ -591,6 +904,22 @@
         "via_helper": true
       }
     ],
+    "invalid parameters: %w": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 117,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 157,
+        "payload_keys": [
+          "max_iterations"
+        ],
+        "via_helper": true
+      }
+    ],
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
@@ -616,6 +945,13 @@
         "line": 62,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 62,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "memory.export"
       }
     ],
     "memory.query": [
@@ -624,6 +960,13 @@
         "line": 60,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 60,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "memory.query"
       }
     ],
     "memory.recent": [
@@ -632,6 +975,13 @@
         "line": 61,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 61,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "memory.recent"
       }
     ],
     "memory.result": [
@@ -680,12 +1030,40 @@
         "line": 63,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 63,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "memory.vector.search"
       }
     ],
     "memory.vector.stats": [
       {
         "file": "internal/rpc/proxy.go",
         "line": 64,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 64,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "memory.vector.stats"
+      }
+    ],
+    "orchestrator.handoff": [
+      {
+        "file": "internal/tools/builtin/handoff.go",
+        "line": 197,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/tools/builtin/handoff.go",
+        "line": 197,
         "payload_keys": [],
         "via_helper": true
       }
@@ -745,7 +1123,7 @@
       },
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2135,
+        "line": 2138,
         "payload_keys": [
           "task_id"
         ],
@@ -768,10 +1146,44 @@
         "via_helper": true
       }
     ],
+    "pair.error": [
+      {
+        "file": "internal/agent/pair_orchestrator.go",
+        "line": 503,
+        "payload_keys": [
+          "error",
+          "session_id"
+        ],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/pair_orchestrator.go",
+        "line": 503,
+        "payload_keys": [
+          "error",
+          "session_id"
+        ],
+        "via_helper": true
+      }
+    ],
     "pair.exhausted": [
       {
         "file": "internal/agent/pair_manager.go",
         "line": 255,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "pair.result": [
+      {
+        "file": "internal/agent/pair_orchestrator.go",
+        "line": 479,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/pair_orchestrator.go",
+        "line": 479,
         "payload_keys": [],
         "via_helper": true
       }
@@ -812,12 +1224,33 @@
         "via_helper": true
       }
     ],
+    "pair.start": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 1568,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/handler.go",
+        "line": 1568,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
     "pipeline.status": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 131,
+        "line": 143,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 143,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "pipeline.status"
       }
     ],
     "plan.approved": [
@@ -932,20 +1365,72 @@
         "via_helper": true
       }
     ],
+    "push.*": [
+      {
+        "file": "internal/services/push_service.go",
+        "line": 199,
+        "payload_keys": [],
+        "dynamic_prefix": true
+      }
+    ],
     "queue.claim": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 115,
+        "line": 124,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 124,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.claim"
       }
     ],
     "queue.complete": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 116,
+        "line": 125,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 125,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.complete"
+      }
+    ],
+    "queue.dead_letter": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 132,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 132,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.dead_letter"
+      }
+    ],
+    "queue.dead_stats": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 133,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 133,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.dead_stats"
       }
     ],
     "queue.enqueue": [
@@ -957,25 +1442,46 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 114,
+        "line": 123,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 123,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.enqueue"
       }
     ],
     "queue.fail": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 117,
+        "line": 126,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 126,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.fail"
       }
     ],
     "queue.get": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 119,
+        "line": 128,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 128,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.get"
       }
     ],
     "queue.job.claimed": [
@@ -1033,7 +1539,37 @@
     "queue.list": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 120,
+        "line": 129,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 129,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.list"
+      }
+    ],
+    "queue.recover": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 131,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 131,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.recover"
+      }
+    ],
+    "queue.result": [
+      {
+        "file": "internal/queue/queue.go",
+        "line": 572,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1041,17 +1577,31 @@
     "queue.retry": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 118,
+        "line": 127,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 127,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.retry"
       }
     ],
     "queue.stats": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 121,
+        "line": 130,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 130,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "queue.stats"
       }
     ],
     "reflection.complete": [
@@ -1072,22 +1622,6 @@
           "fix_length",
           "prompt"
         ],
-        "via_helper": true
-      }
-    ],
-    "regression_check": [
-      {
-        "file": "internal/selfimprove/controller.go",
-        "line": 418,
-        "payload_keys": [],
-        "via_helper": true
-      }
-    ],
-    "regression_detected": [
-      {
-        "file": "internal/selfimprove/controller.go",
-        "line": 426,
-        "payload_keys": [],
         "via_helper": true
       }
     ],
@@ -1117,6 +1651,20 @@
         "line": 69,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 68,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "scheduler.add_job"
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 69,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "scheduler.schedule_agent_task"
       }
     ],
     "scheduler.list_jobs": [
@@ -1125,6 +1673,13 @@
         "line": 67,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 67,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "scheduler.list_jobs"
       }
     ],
     "security.get_stats": [
@@ -1133,6 +1688,13 @@
         "line": 76,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 76,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "security.get_stats"
       }
     ],
     "security.query_log": [
@@ -1141,6 +1703,13 @@
         "line": 75,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 75,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "security.query_log"
       }
     ],
     "security.record_override": [
@@ -1148,6 +1717,33 @@
         "file": "internal/rpc/proxy.go",
         "line": 77,
         "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 77,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "security.record_override"
+      }
+    ],
+    "selfimprove.status": [
+      {
+        "file": "internal/selfimprove/controller.go",
+        "line": 786,
+        "payload_keys": [
+          "data",
+          "phase"
+        ],
+        "via_const": true
+      },
+      {
+        "file": "internal/selfimprove/controller.go",
+        "line": 786,
+        "payload_keys": [
+          "data",
+          "phase"
+        ],
         "via_helper": true
       }
     ],
@@ -1157,6 +1753,43 @@
         "line": 92,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 92,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.attach"
+      }
+    ],
+    "session.branch.navigate": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 105,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 105,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.branch.navigate"
+      }
+    ],
+    "session.branches.list": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 106,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 106,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.branches.list"
       }
     ],
     "session.create": [
@@ -1165,6 +1798,13 @@
         "line": 89,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 89,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.create"
       }
     ],
     "session.delete": [
@@ -1173,6 +1813,13 @@
         "line": 94,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 94,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.delete"
       }
     ],
     "session.detach": [
@@ -1181,6 +1828,28 @@
         "line": 93,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 93,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.detach"
+      }
+    ],
+    "session.fork": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 107,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 107,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.fork"
       }
     ],
     "session.generate_description": [
@@ -1189,12 +1858,96 @@
         "line": 98,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 98,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.generate_description"
       }
     ],
     "session.get": [
       {
         "file": "internal/rpc/proxy.go",
         "line": 91,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 91,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.get"
+      }
+    ],
+    "session.get_child_tasks": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 104,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 104,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.get_child_tasks"
+      }
+    ],
+    "session.get_most_recent": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 100,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 100,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.get_most_recent"
+      }
+    ],
+    "session.lifecycle.end": [
+      {
+        "file": "internal/daemon/session_hooks.go",
+        "line": 88,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/daemon/session_hooks.go",
+        "line": 151,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/daemon/session_hooks.go",
+        "line": 88,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/daemon/session_hooks.go",
+        "line": 151,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "session.lifecycle.start": [
+      {
+        "file": "internal/daemon/session_hooks.go",
+        "line": 60,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/daemon/session_hooks.go",
+        "line": 60,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1205,6 +1958,13 @@
         "line": 90,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 90,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.list"
       }
     ],
     "session.messages.get": [
@@ -1213,6 +1973,13 @@
         "line": 96,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 96,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.messages.get"
       }
     ],
     "session.messages.save": [
@@ -1221,6 +1988,66 @@
         "line": 95,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 95,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.messages.save"
+      }
+    ],
+    "session.refresh_title": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 102,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 102,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.refresh_title"
+      }
+    ],
+    "session.result": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1554,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "session.set_nofence": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 103,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 103,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.set_nofence"
+      }
+    ],
+    "session.stop": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 101,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 101,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.stop"
       }
     ],
     "session.title_updated": [
@@ -1255,18 +2082,91 @@
         "via_helper": true
       }
     ],
+    "session.tree.get": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 108,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 108,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.tree.get"
+      }
+    ],
     "session.update_description": [
       {
         "file": "internal/rpc/proxy.go",
         "line": 97,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 97,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "session.update_description"
       }
     ],
     "sessions.designated": [
       {
         "file": "internal/rpc/proxy.go",
         "line": 99,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 99,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "sessions.designated"
+      }
+    ],
+    "skill execution failed: %w": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 180,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "skill executor not configured": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 167,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "skill not found: %s": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 128,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 173,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "skill registry not configured": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 122,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 162,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1284,31 +2184,30 @@
         "via_helper": true
       }
     ],
-    "started": [
-      {
-        "file": "internal/selfimprove/controller.go",
-        "line": 183,
-        "payload_keys": [],
-        "via_helper": true
-      }
-    ],
     "status.request": [
       {
         "file": "internal/rpc/proxy.go",
         "line": 57,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 57,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "status"
       }
     ],
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6550,
+        "line": 6556,
         "payload_keys": []
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 6550,
+        "line": 6556,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1429,9 +2328,16 @@
     "task.cancel": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 107,
+        "line": 116,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 116,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.cancel"
       }
     ],
     "task.cancelled": [
@@ -1459,9 +2365,16 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 102,
+        "line": 111,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 111,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.create"
       }
     ],
     "task.delete": [
@@ -1473,9 +2386,16 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 108,
+        "line": 117,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 117,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.delete"
       }
     ],
     "task.error": [
@@ -1497,9 +2417,16 @@
     "task.get": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 103,
+        "line": 112,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 112,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.get"
       }
     ],
     "task.handoff_created": [
@@ -1527,25 +2454,46 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 109,
+        "line": 118,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 118,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.link"
       }
     ],
     "task.list": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 104,
+        "line": 113,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 113,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.list"
       }
     ],
     "task.list_extended": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 105,
+        "line": 114,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 114,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.list_extended"
       }
     ],
     "task.pending_approval": [
@@ -1604,6 +2552,14 @@
         "via_helper": true
       }
     ],
+    "task.result": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 577,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
     "task.review_completed": [
       {
         "file": "internal/agent/review_manager.go",
@@ -1648,9 +2604,16 @@
     "task.steps": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 111,
+        "line": 120,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 120,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.steps"
       }
     ],
     "task.unlink": [
@@ -1662,9 +2625,16 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 110,
+        "line": 119,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 119,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.unlink"
       }
     ],
     "task.update": [
@@ -1700,15 +2670,82 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 106,
+        "line": 115,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 115,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "task.update"
       }
     ],
     "task.validation_retry": [
       {
         "file": "internal/agent/tactical.go",
         "line": 557,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "team.error": [
+      {
+        "file": "internal/agent/team_orchestrator.go",
+        "line": 542,
+        "payload_keys": [
+          "error",
+          "session_id"
+        ],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/team_orchestrator.go",
+        "line": 542,
+        "payload_keys": [
+          "error",
+          "session_id"
+        ],
+        "via_helper": true
+      }
+    ],
+    "team.result": [
+      {
+        "file": "internal/agent/team_orchestrator.go",
+        "line": 321,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/agent/team_orchestrator.go",
+        "line": 321,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "team.start": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 5194,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/daemon/components.go",
+        "line": 5231,
+        "payload_keys": [],
+        "via_const": true
+      },
+      {
+        "file": "internal/daemon/components.go",
+        "line": 5194,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/daemon/components.go",
+        "line": 5231,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1766,30 +2803,34 @@
         "via_helper": true
       }
     ],
-    "validating": [
-      {
-        "file": "internal/selfimprove/controller.go",
-        "line": 338,
-        "payload_keys": [
-          "fixes_count"
-        ],
-        "via_helper": true
-      }
-    ],
     "worker.add": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 124,
+        "line": 136,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 136,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "worker.add"
       }
     ],
     "worker.list": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 126,
+        "line": 138,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 138,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "worker.list"
       }
     ],
     "worker.pool.started": [
@@ -1811,7 +2852,22 @@
     "worker.remove": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 125,
+        "line": 137,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 137,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "worker.remove"
+      }
+    ],
+    "worker.result": [
+      {
+        "file": "internal/worker/pool.go",
+        "line": 494,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1819,9 +2875,16 @@
     "worker.scale": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 128,
+        "line": 140,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 140,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "worker.scale"
       }
     ],
     "worker.started": [
@@ -1835,9 +2898,16 @@
     "worker.stats": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 127,
+        "line": 139,
         "payload_keys": [],
         "via_helper": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 139,
+        "payload_keys": [],
+        "via_rpc_proxy": true,
+        "method": "worker.stats"
       }
     ],
     "worker.status": [
@@ -1877,171 +2947,588 @@
     ]
   },
   "subscribers": {
-    "agent.event.*": [
+    "collaboration.consensus_reached": [
       {
-        "file": "internal/daemon/components.go",
-        "line": 1247,
-        "subscriber_id": "agent.event.*"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:collaboration.consensus_reached",
+        "via_handler_table": true
       }
     ],
-    "agent.progress.synthesized": [
+    "collaboration.divergence": [
       {
-        "file": "internal/comm/http/server.go",
-        "line": 518,
-        "subscriber_id": "agent.progress.synthesized"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:collaboration.divergence",
+        "via_handler_table": true
       }
     ],
-    "agent.workers.list": [
+    "collaboration.error": [
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:collaboration.error",
+        "via_handler_table": true
+      }
+    ],
+    "collaboration.requested": [
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:collaboration.requested",
+        "via_handler_table": true
+      }
+    ],
+    "collaboration.result": [
       {
         "file": "internal/agent/handler.go",
-        "line": 175,
-        "subscriber_id": "agent.workers.list"
+        "line": 192,
+        "subscriber_id": "chat-handler"
+      },
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:collaboration.result",
+        "via_handler_table": true
       }
     ],
-    "dispatcher.stats": [
+    "collaboration.session_created": [
       {
-        "file": "internal/daemon/components.go",
-        "line": 2117,
-        "subscriber_id": "dispatcher.stats"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:collaboration.session_created",
+        "via_handler_table": true
       }
     ],
-    "employee.critical_finding": [
+    "combinedTopic": [
       {
-        "file": "internal/daemon/components.go",
-        "line": 2746,
-        "subscriber_id": "employee.critical_finding"
+        "file": "internal/rpc/proxy.go",
+        "line": 377,
+        "subscriber_id": "subID"
       }
     ],
-    "instruction.add": [
+    "llm.context_compressed": [
       {
-        "file": "internal/rpc/instructions.go",
-        "line": 48,
-        "subscriber_id": "instruction.add"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:llm.context_compressed",
+        "via_handler_table": true
       }
     ],
-    "instruction.delete": [
+    "orchestrator.handoff": [
       {
-        "file": "internal/rpc/instructions.go",
-        "line": 50,
-        "subscriber_id": "instruction.delete"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:orchestrator.handoff",
+        "via_handler_table": true
       }
     ],
-    "instruction.execute": [
+    "orchestrator.plan": [
       {
-        "file": "internal/rpc/instructions.go",
-        "line": 51,
-        "subscriber_id": "instruction.execute"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:orchestrator.plan",
+        "via_handler_table": true
       }
     ],
-    "instruction.list": [
+    "orchestrator.schedule": [
       {
-        "file": "internal/rpc/instructions.go",
-        "line": 49,
-        "subscriber_id": "instruction.list"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:orchestrator.schedule",
+        "via_handler_table": true
       }
     ],
-    "instruction.preview": [
+    "pair.converged": [
       {
-        "file": "internal/rpc/instructions.go",
-        "line": 52,
-        "subscriber_id": "instruction.preview"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:pair.converged",
+        "via_handler_table": true
       }
     ],
-    "memory.query": [
+    "pair.exhausted": [
       {
-        "file": "internal/memory/handler.go",
-        "line": 115,
-        "subscriber_id": "memory.query"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:pair.exhausted",
+        "via_handler_table": true
       }
     ],
-    "memory.recent": [
+    "pair.result": [
       {
-        "file": "internal/memory/handler.go",
-        "line": 116,
-        "subscriber_id": "memory.recent"
+        "file": "internal/agent/handler.go",
+        "line": 189,
+        "subscriber_id": "chat-handler"
       }
     ],
-    "metrics": [
+    "pair.round_failed": [
       {
-        "file": "internal/metrics/collector.go",
-        "line": 205,
-        "subscriber_id": "metrics"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:pair.round_failed",
+        "via_handler_table": true
       }
     ],
-    "queue.job.claimed": [
+    "pair.session_created": [
       {
-        "file": "internal/memory/sync/handler.go",
-        "line": 40,
-        "subscriber_id": "queue.job.claimed"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:pair.session_created",
+        "via_handler_table": true
+      }
+    ],
+    "pair.start": [
+      {
+        "file": "internal/agent/pair_orchestrator.go",
+        "line": 61,
+        "subscriber_id": "pair-orchestrator"
+      }
+    ],
+    "queue.claim": [
+      {
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.claim",
+        "via_handler_table": true
+      }
+    ],
+    "queue.complete": [
+      {
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.complete",
+        "via_handler_table": true
+      }
+    ],
+    "queue.dead_letter": [
+      {
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.dead_letter",
+        "via_handler_table": true
+      }
+    ],
+    "queue.dead_stats": [
+      {
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.dead_stats",
+        "via_handler_table": true
+      }
+    ],
+    "queue.enqueue": [
+      {
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.enqueue",
+        "via_handler_table": true
+      }
+    ],
+    "queue.fail": [
+      {
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.fail",
+        "via_handler_table": true
+      }
+    ],
+    "queue.get": [
+      {
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.get",
+        "via_handler_table": true
       }
     ],
     "queue.job.completed": [
       {
-        "file": "internal/memory/sync/handler.go",
-        "line": 41,
-        "subscriber_id": "queue.job.completed"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:queue.job.completed",
+        "via_handler_table": true
       }
     ],
-    "skills.execute": [
+    "queue.job.failed": [
       {
-        "file": "internal/rpc/skills.go",
-        "line": 40,
-        "subscriber_id": "skills.execute"
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:queue.job.failed",
+        "via_handler_table": true
       }
     ],
-    "skills.get": [
+    "queue.list": [
       {
-        "file": "internal/rpc/skills.go",
-        "line": 39,
-        "subscriber_id": "skills.get"
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.list",
+        "via_handler_table": true
       }
     ],
-    "skills.list": [
+    "queue.recover": [
       {
-        "file": "internal/rpc/skills.go",
-        "line": 38,
-        "subscriber_id": "skills.list"
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.recover",
+        "via_handler_table": true
       }
     ],
-    "status.request": [
+    "queue.retry": [
       {
-        "file": "internal/daemon/components.go",
-        "line": 6480,
-        "subscriber_id": "status.request"
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.retry",
+        "via_handler_table": true
       }
     ],
-    "step.*": [
+    "queue.stats": [
       {
-        "file": "internal/metrics/collector.go",
-        "line": 216,
-        "subscriber_id": "step.*"
+        "file": "internal/queue/queue.go",
+        "line": 463,
+        "subscriber_id": "topics:queue.stats",
+        "via_handler_table": true
       }
     ],
-    "task.amend.request": [
+    "replyTopic": [
       {
-        "file": "internal/task/amendment_manager.go",
-        "line": 191,
-        "subscriber_id": "task.amend.request"
+        "file": "internal/bus/bus.go",
+        "line": 342,
+        "subscriber_id": "msg.ID"
+      },
+      {
+        "file": "internal/services/chat_service.go",
+        "line": 158,
+        "subscriber_id": "msgID"
       }
     ],
-    "worker.*": [
+    "responseTopic": [
       {
-        "file": "internal/metrics/collector.go",
-        "line": 231,
-        "subscriber_id": "worker.*"
+        "file": "internal/rpc/proxy.go",
+        "line": 180,
+        "subscriber_id": "msgID"
+      }
+    ],
+    "session.attach": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.attach",
+        "via_handler_table": true
+      }
+    ],
+    "session.branch.navigate": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.branch.navigate",
+        "via_handler_table": true
+      }
+    ],
+    "session.branches.list": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.branches.list",
+        "via_handler_table": true
+      }
+    ],
+    "session.create": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.create",
+        "via_handler_table": true
+      }
+    ],
+    "session.delete": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.delete",
+        "via_handler_table": true
+      }
+    ],
+    "session.detach": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.detach",
+        "via_handler_table": true
+      }
+    ],
+    "session.fork": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.fork",
+        "via_handler_table": true
+      }
+    ],
+    "session.generate_description": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.generate_description",
+        "via_handler_table": true
+      }
+    ],
+    "session.get": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.get",
+        "via_handler_table": true
+      }
+    ],
+    "session.get_child_tasks": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.get_child_tasks",
+        "via_handler_table": true
+      }
+    ],
+    "session.get_most_recent": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.get_most_recent",
+        "via_handler_table": true
+      }
+    ],
+    "session.list": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.list",
+        "via_handler_table": true
+      }
+    ],
+    "session.messages.get": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.messages.get",
+        "via_handler_table": true
+      }
+    ],
+    "session.messages.save": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.messages.save",
+        "via_handler_table": true
+      }
+    ],
+    "session.refresh_title": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.refresh_title",
+        "via_handler_table": true
+      }
+    ],
+    "session.set_nofence": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.set_nofence",
+        "via_handler_table": true
+      }
+    ],
+    "session.stop": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.stop",
+        "via_handler_table": true
+      }
+    ],
+    "session.tree.get": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.tree.get",
+        "via_handler_table": true
+      }
+    ],
+    "session.update_description": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1386,
+        "subscriber_id": "topics:session.update_description",
+        "via_handler_table": true
+      }
+    ],
+    "task.amend.applied": [
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:task.amend.applied",
+        "via_handler_table": true
+      }
+    ],
+    "task.amend.rejected": [
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:task.amend.rejected",
+        "via_handler_table": true
+      }
+    ],
+    "task.cancel": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.cancel",
+        "via_handler_table": true
+      }
+    ],
+    "task.completed": [
+      {
+        "file": "internal/plan/handler.go",
+        "line": 37,
+        "subscriber_id": "topics:task.completed",
+        "via_handler_table": true
+      }
+    ],
+    "task.create": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.create",
+        "via_handler_table": true
+      }
+    ],
+    "task.delete": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.delete",
+        "via_handler_table": true
+      }
+    ],
+    "task.get": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.get",
+        "via_handler_table": true
+      }
+    ],
+    "task.link": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.link",
+        "via_handler_table": true
+      }
+    ],
+    "task.list": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.list",
+        "via_handler_table": true
+      }
+    ],
+    "task.list_extended": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.list_extended",
+        "via_handler_table": true
+      }
+    ],
+    "task.step_completed": [
+      {
+        "file": "internal/plan/handler.go",
+        "line": 37,
+        "subscriber_id": "topics:task.step_completed",
+        "via_handler_table": true
+      }
+    ],
+    "task.steps": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.steps",
+        "via_handler_table": true
+      }
+    ],
+    "task.unlink": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.unlink",
+        "via_handler_table": true
+      }
+    ],
+    "task.update": [
+      {
+        "file": "internal/task/registry.go",
+        "line": 475,
+        "subscriber_id": "topics:task.update",
+        "via_handler_table": true
+      }
+    ],
+    "team.error": [
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:team.error",
+        "via_handler_table": true
+      }
+    ],
+    "team.result": [
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:team.result",
+        "via_handler_table": true
+      }
+    ],
+    "team.start": [
+      {
+        "file": "internal/agent/team_orchestrator.go",
+        "line": 113,
+        "subscriber_id": "team-orchestrator"
+      }
+    ],
+    "tool.execution.complete": [
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:tool.execution.complete",
+        "via_handler_table": true
+      }
+    ],
+    "topic": [
+      {
+        "file": "internal/services/bus_service.go",
+        "line": 106,
+        "subscriber_id": "session-"
       }
     ]
   },
   "orphans": {
     "published_not_subscribed": [
       "agent.action",
+      "agent.iteration.completed",
+      "agent.lifecycle.ended",
+      "agent.lifecycle.started",
       "agent.message.delivered",
       "agent.progress",
+      "agent.queue.followup.added",
+      "agent.queue.followup.injected",
+      "agent.queue.followup.restored",
+      "agent.queue.persisted",
+      "agent.queue.steer.added",
+      "agent.queue.steer.injected",
       "agent.result",
+      "agent.state.changed",
+      "agent.workers.list",
       "agent.workers.result",
-      "analyzing",
-      "applying",
-      "budget-resume-",
       "cache.clear",
       "cache.invalidate",
       "cache.stats",
@@ -2052,36 +3539,32 @@
       "cluster.event.broadcast",
       "cluster.event.heartbeat",
       "cluster.event.received",
-      "collab-result-",
-      "completed",
+      "collaboration.phase_completed",
+      "collaboration.turn_completed",
       "config.reload",
-      "daemon",
       "daemon.reloaded",
       "daemon.stopping",
-      "detecting",
       "dispatcher.stats.result",
       "employee.constitution_validation_error",
+      "employee.critical_finding",
       "employee.metric",
       "employee.paused",
+      "event",
       "event.cluster.task_reclaim",
-      "generating",
+      "hook.async_rewake",
       "instruction.executing",
       "llm.tokens.used",
       "memory.export",
+      "memory.query",
+      "memory.recent",
       "memory.result",
       "memory.sync.distilled",
       "memory.sync.hydrated",
       "memory.vector.search",
       "memory.vector.stats",
-      "orchestrator.plan",
       "orchestrator.replan",
-      "orchestrator.schedule",
-      "pair-result-",
-      "pair.converged",
-      "pair.exhausted",
+      "pair.error",
       "pair.round_completed",
-      "pair.round_failed",
-      "pair.session_created",
       "pipeline.status",
       "plan.approved",
       "plan.cancelled",
@@ -2095,88 +3578,59 @@
       "plan.submitting",
       "project.set",
       "push.",
-      "queue.claim",
-      "queue.complete",
-      "queue.enqueue",
-      "queue.fail",
-      "queue.get",
-      "queue.job.failed",
+      "queue.job.claimed",
       "queue.job.recovered",
       "queue.job.retry",
-      "queue.list",
-      "queue.retry",
-      "queue.stats",
+      "queue.result",
       "reflection.complete",
-      "regression_check",
-      "regression_detected",
-      "review-completed-",
       "scheduler.add_job",
       "scheduler.list_jobs",
       "security.get_stats",
       "security.query_log",
       "security.record_override",
-      "session.attach",
-      "session.create",
-      "session.delete",
-      "session.detach",
-      "session.generate_description",
-      "session.get",
-      "session.list",
-      "session.messages.get",
-      "session.messages.save",
+      "selfimprove.status",
+      "session.lifecycle.end",
+      "session.lifecycle.start",
+      "session.result",
       "session.title_updated",
-      "session.update_description",
       "sessions.designated",
       "skills.result",
-      "started",
+      "status.request",
       "status.response",
-      "task-completed-",
-      "task-failed-",
-      "task.amend.applied",
-      "task.amend.rejected",
+      "step.review_completed",
+      "step.review_requested",
+      "task.amend.request",
       "task.approved",
-      "task.cancel",
       "task.cancelled",
-      "task.completed",
-      "task.create",
-      "task.delete",
       "task.error",
       "task.failed",
-      "task.get",
       "task.handoff_created",
       "task.interview",
-      "task.link",
-      "task.list",
-      "task.list_extended",
       "task.pending_approval",
       "task.planned",
       "task.progress",
       "task.rejected",
+      "task.result",
       "task.review_completed",
       "task.review_requested",
-      "task.step_completed",
-      "task.steps",
-      "task.unlink",
-      "task.update",
       "task.validation_retry",
       "terminal.command",
-      "tool.execution.complete",
       "tool.execution.progress",
-      "validating"
+      "worker.add",
+      "worker.list",
+      "worker.pool.started",
+      "worker.pool.stopped",
+      "worker.remove",
+      "worker.result",
+      "worker.scale",
+      "worker.started",
+      "worker.stats",
+      "worker.status",
+      "worker.stop",
+      "worker.stopped"
     ],
     "subscribed_not_published": [
-      "agent.event.*",
-      "agent.progress.synthesized",
-      "dispatcher.stats",
-      "instruction.add",
-      "instruction.delete",
-      "instruction.execute",
-      "instruction.list",
-      "instruction.preview",
-      "metrics",
-      "skills.execute",
-      "skills.get",
-      "skills.list"
+      "llm.context_compressed"
     ]
   }
 }

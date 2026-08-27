@@ -21,7 +21,7 @@
     "topic": "bus.poll",
     "handler": "p.handleBusPoll",
     "file": "internal/rpc/proxy.go",
-    "line": 144
+    "line": 156
   },
   {
     "topic": "bus.publish",
@@ -39,13 +39,13 @@
     "topic": "bus.subscribe",
     "handler": "p.handleBusSubscribe",
     "file": "internal/rpc/proxy.go",
-    "line": 143
+    "line": 155
   },
   {
     "topic": "bus.unsubscribe",
     "handler": "p.handleBusUnsubscribe",
     "file": "internal/rpc/proxy.go",
-    "line": 145
+    "line": 157
   },
   {
     "topic": "cache.clear",
@@ -57,7 +57,7 @@
     "topic": "cache.clear",
     "handler": "p.makeProxy(\"cache.clear\", \"cache.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 135
+    "line": 147
   },
   {
     "topic": "cache.inspect",
@@ -75,7 +75,7 @@
     "topic": "cache.invalidate",
     "handler": "p.makeProxy(\"cache.invalidate\", \"cache.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 136
+    "line": 148
   },
   {
     "topic": "cache.stats",
@@ -87,7 +87,7 @@
     "topic": "cache.stats",
     "handler": "p.makeProxy(\"cache.stats\", \"cache.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 134
+    "line": 146
   },
   {
     "topic": "changes.accept",
@@ -549,7 +549,7 @@
     "topic": "pipeline.status",
     "handler": "p.makeProxy(\"pipeline.status\", \"pipeline.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 131
+    "line": 143
   },
   {
     "topic": "plan.approve",
@@ -687,49 +687,67 @@
     "topic": "queue.claim",
     "handler": "p.makeProxy(\"queue.claim\", \"queue.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 115
+    "line": 124
   },
   {
     "topic": "queue.complete",
     "handler": "p.makeProxy(\"queue.complete\", \"queue.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 116
+    "line": 125
+  },
+  {
+    "topic": "queue.dead_letter",
+    "handler": "p.makeProxy(\"queue.dead_letter\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 132
+  },
+  {
+    "topic": "queue.dead_stats",
+    "handler": "p.makeProxy(\"queue.dead_stats\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 133
   },
   {
     "topic": "queue.enqueue",
     "handler": "p.makeProxy(\"queue.enqueue\", \"queue.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 114
+    "line": 123
   },
   {
     "topic": "queue.fail",
     "handler": "p.makeProxy(\"queue.fail\", \"queue.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 117
+    "line": 126
   },
   {
     "topic": "queue.get",
     "handler": "p.makeProxy(\"queue.get\", \"queue.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 119
+    "line": 128
   },
   {
     "topic": "queue.list",
     "handler": "p.makeProxy(\"queue.list\", \"queue.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 120
+    "line": 129
+  },
+  {
+    "topic": "queue.recover",
+    "handler": "p.makeProxy(\"queue.recover\", \"queue.result\", 30*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 131
   },
   {
     "topic": "queue.retry",
     "handler": "p.makeProxy(\"queue.retry\", \"queue.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 118
+    "line": 127
   },
   {
     "topic": "queue.stats",
     "handler": "p.makeProxy(\"queue.stats\", \"queue.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 121
+    "line": 130
   },
   {
     "topic": "reasoning.get",
@@ -1020,6 +1038,18 @@
     "line": 92
   },
   {
+    "topic": "session.branch.navigate",
+    "handler": "p.makeProxy(\"session.branch.navigate\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 105
+  },
+  {
+    "topic": "session.branches.list",
+    "handler": "p.makeProxy(\"session.branches.list\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 106
+  },
+  {
     "topic": "session.create",
     "handler": "p.makeProxy(\"session.create\", \"session.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
@@ -1044,6 +1074,12 @@
     "line": 20
   },
   {
+    "topic": "session.fork",
+    "handler": "p.makeProxy(\"session.fork\", \"session.result\", 20*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 107
+  },
+  {
     "topic": "session.generate_description",
     "handler": "p.makeProxy(\"session.generate_description\", \"session.result\", 20*time.Second",
     "file": "internal/rpc/proxy.go",
@@ -1054,6 +1090,18 @@
     "handler": "p.makeProxy(\"session.get\", \"session.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
     "line": 91
+  },
+  {
+    "topic": "session.get_child_tasks",
+    "handler": "p.makeProxy(\"session.get_child_tasks\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 104
+  },
+  {
+    "topic": "session.get_most_recent",
+    "handler": "p.makeProxy(\"session.get_most_recent\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 100
   },
   {
     "topic": "session.list",
@@ -1074,10 +1122,28 @@
     "line": 95
   },
   {
+    "topic": "session.refresh_title",
+    "handler": "p.makeProxy(\"session.refresh_title\", \"session.result\", 60*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 102
+  },
+  {
     "topic": "session.reset",
     "handler": "handleSessionReset(sessionSvc, chatHandler",
     "file": "internal/daemon/session_rpc.go",
     "line": 32
+  },
+  {
+    "topic": "session.set_nofence",
+    "handler": "p.makeProxy(\"session.set_nofence\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 103
+  },
+  {
+    "topic": "session.stop",
+    "handler": "p.makeProxy(\"session.stop\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 101
   },
   {
     "topic": "session.thread.create",
@@ -1126,6 +1192,12 @@
     "handler": "handleThreadSetActive(threadSvc",
     "file": "internal/daemon/thread_rpc.go",
     "line": 29
+  },
+  {
+    "topic": "session.tree.get",
+    "handler": "p.makeProxy(\"session.tree.get\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 108
   },
   {
     "topic": "session.update_description",
@@ -1245,61 +1317,61 @@
     "topic": "task.cancel",
     "handler": "p.makeProxy(\"task.cancel\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 107
+    "line": 116
   },
   {
     "topic": "task.create",
     "handler": "p.makeProxy(\"task.create\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 102
+    "line": 111
   },
   {
     "topic": "task.delete",
     "handler": "p.makeProxy(\"task.delete\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 108
+    "line": 117
   },
   {
     "topic": "task.get",
     "handler": "p.makeProxy(\"task.get\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 103
+    "line": 112
   },
   {
     "topic": "task.link",
     "handler": "p.makeProxy(\"task.link\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 109
+    "line": 118
   },
   {
     "topic": "task.list",
     "handler": "p.makeProxy(\"task.list\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 104
+    "line": 113
   },
   {
     "topic": "task.list_extended",
     "handler": "p.makeProxy(\"task.list_extended\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 105
+    "line": 114
   },
   {
     "topic": "task.steps",
     "handler": "p.makeProxy(\"task.steps\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 111
+    "line": 120
   },
   {
     "topic": "task.unlink",
     "handler": "p.makeProxy(\"task.unlink\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 110
+    "line": 119
   },
   {
     "topic": "task.update",
     "handler": "p.makeProxy(\"task.update\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 106
+    "line": 115
   },
   {
     "topic": "templates.clear",
@@ -1341,30 +1413,30 @@
     "topic": "worker.add",
     "handler": "p.makeProxy(\"worker.add\", \"worker.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 124
+    "line": 136
   },
   {
     "topic": "worker.list",
     "handler": "p.makeProxy(\"worker.list\", \"worker.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 126
+    "line": 138
   },
   {
     "topic": "worker.remove",
     "handler": "p.makeProxy(\"worker.remove\", \"worker.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 125
+    "line": 137
   },
   {
     "topic": "worker.scale",
     "handler": "p.makeProxy(\"worker.scale\", \"worker.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 128
+    "line": 140
   },
   {
     "topic": "worker.stats",
     "handler": "p.makeProxy(\"worker.stats\", \"worker.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
-    "line": 127
+    "line": 139
   }
 ]

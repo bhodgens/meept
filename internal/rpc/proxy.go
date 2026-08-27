@@ -97,6 +97,15 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("session.update_description", p.makeProxy("session.update_description", "session.result", 10*time.Second))
 	server.RegisterHandler("session.generate_description", p.makeProxy("session.generate_description", "session.result", 20*time.Second))
 	server.RegisterHandler("sessions.designated", p.makeProxy("sessions.designated", "session.result", 10*time.Second))
+	server.RegisterHandler("session.get_most_recent", p.makeProxy("session.get_most_recent", "session.result", 10*time.Second))
+	server.RegisterHandler("session.stop", p.makeProxy("session.stop", "session.result", 10*time.Second))
+	server.RegisterHandler("session.refresh_title", p.makeProxy("session.refresh_title", "session.result", 60*time.Second))
+	server.RegisterHandler("session.set_nofence", p.makeProxy("session.set_nofence", "session.result", 10*time.Second))
+	server.RegisterHandler("session.get_child_tasks", p.makeProxy("session.get_child_tasks", "session.result", 10*time.Second))
+	server.RegisterHandler("session.branch.navigate", p.makeProxy("session.branch.navigate", "session.result", 10*time.Second))
+	server.RegisterHandler("session.branches.list", p.makeProxy("session.branches.list", "session.result", 10*time.Second))
+	server.RegisterHandler("session.fork", p.makeProxy("session.fork", "session.result", 20*time.Second))
+	server.RegisterHandler("session.tree.get", p.makeProxy("session.tree.get", "session.result", 10*time.Second))
 
 	// Task methods
 	server.RegisterHandler("task.create", p.makeProxy("task.create", "task.result", 10*time.Second))
@@ -119,6 +128,9 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("queue.get", p.makeProxy("queue.get", "queue.result", 10*time.Second))
 	server.RegisterHandler("queue.list", p.makeProxy("queue.list", "queue.result", 10*time.Second))
 	server.RegisterHandler("queue.stats", p.makeProxy("queue.stats", "queue.result", 10*time.Second))
+	server.RegisterHandler("queue.recover", p.makeProxy("queue.recover", "queue.result", 30*time.Second))
+	server.RegisterHandler("queue.dead_letter", p.makeProxy("queue.dead_letter", "queue.result", 10*time.Second))
+	server.RegisterHandler("queue.dead_stats", p.makeProxy("queue.dead_stats", "queue.result", 10*time.Second))
 
 	// Worker methods
 	server.RegisterHandler("worker.add", p.makeProxy("worker.add", "worker.result", 10*time.Second))
