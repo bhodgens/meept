@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -67,6 +70,10 @@ type PromptBuilder struct {
 type promptSection struct {
 	title   string
 	content string
+	// stable marks sections that are byte-invariant across turns within a
+	// session (constants, config values, project files). AddSection leaves
+	// this false (conservative); AddSectionWithStability sets it explicitly.
+	stable bool
 }
 
 // NewPromptBuilder creates a new PromptBuilder with default values.
@@ -173,9 +180,21 @@ func (b *PromptBuilder) AddUserPreference(key, value string) *PromptBuilder {
 	return b
 }
 
-// AddSection adds a custom section to the prompt.
+// AddSection adds a custom section to the prompt. Custom sections are
+// classified as unstable (volatile) by BuildSystemPromptOrdered; use
+// AddSectionWithStability for content that is byte-invariant across turns.
 func (b *PromptBuilder) AddSection(title, content string) *PromptBuilder {
 	b.customSections = append(b.customSections, promptSection{title: title, content: content})
+	return b
+}
+
+// AddSectionWithStability adds a custom section with an explicit cache
+// stability classification. stable=true marks content that does not vary per
+// turn within a session (e.g. baseline constants, global rules, project
+// convention files); such sections land in the cacheable stable prefix of
+// BuildSystemPromptOrdered. stable=false matches AddSection behavior.
+func (b *PromptBuilder) AddSectionWithStability(title, content string, stable bool) *PromptBuilder {
+	b.customSections = append(b.customSections, promptSection{title: title, content: content, stable: stable})
 	return b
 }
 
@@ -425,4 +444,193 @@ type ToolParameterInfo struct {
 	Name     string
 	Type     string
 	Required bool
+}
+
+// --- Stable-prefix prompt assembly (loop-economics leaf 01) ---
+
+// PromptSection is a named chunk of system prompt text tagged with its cache
+// stability. Stable sections are byte-invariant across turns within a session
+// (identity, rules, capabilities); unstable sections vary per turn or per
+// request (memory context, tool lists, session context).
+type PromptSection struct {
+	Name   string
+	Stable bool
+	Body   string
+}
+
+// AssembleOrdered assembles a system prompt with all stable sections first
+// (preserving their given relative order), followed by all unstable sections
+// (also preserving their given relative order). Sections with an empty Body
+// are skipped. The returned stablePrefixHash is the hex-encoded sha256 over
+// the exact bytes of the concatenated stable prefix; an empty stable set
+// yields sha256(""). This gives provider prompt caches a byte-identical
+// prefix to hit on every turn, and callers a cheap drift signal.
+func AssembleOrdered(sections []PromptSection) (prompt string, stablePrefixHash string) {
+	var stable, unstable []string
+	for _, s := range sections {
+		if s.Body == "" {
+			continue
+		}
+		if s.Stable {
+			stable = append(stable, s.Body)
+		} else {
+			unstable = append(unstable, s.Body)
+		}
+	}
+
+	parts := append(stable, unstable...)
+	prompt = strings.Join(parts, "\n")
+	stablePrefixHash = stablePrefixSHA256(stable)
+	return prompt, stablePrefixHash
+}
+
+// stablePrefixSHA256 hashes the concatenated stable-section bodies. The
+// concatenation reproduces the exact prefix bytes of the assembled prompt:
+// each stable body contributes its bytes plus one "\n" separator, except the
+// last body which has no trailing separator when unstable sections follow.
+// Empty stable set hashes "".
+func stablePrefixSHA256(stable []string) string {
+	if len(stable) == 0 {
+		return emptyPrefixSHA256
+	}
+	h := sha256.New()
+	for i, body := range stable {
+		h.Write([]byte(body))
+		if i < len(stable)-1 {
+			h.Write([]byte("\n"))
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// emptyPrefixSHA256 is sha256(""), precomputed: the hash of an empty stable
+// prefix.
+var emptyPrefixSHA256 = func() string {
+	sum := sha256.Sum256(nil)
+	return hex.EncodeToString(sum[:])
+}()
+
+// BuildSystemPromptOrdered assembles the system prompt via AssembleOrdered.
+// When cacheStablePrefix is true (the default path), sections are reordered
+// stable-first and the sha256 of the stable prefix is returned. When false,
+// the legacy call-order Build() output is returned byte-for-byte with the
+// hash of that legacy prefix, so callers can detect ordering-mode changes.
+func (b *PromptBuilder) BuildSystemPromptOrdered(cacheStablePrefix bool) (prompt string, stablePrefixHash string) {
+	if !cacheStablePrefix {
+		prompt = b.Build()
+		sum := sha256.Sum256([]byte(prompt))
+		return prompt, hex.EncodeToString(sum[:])
+	}
+	return AssembleOrdered(b.classifySections())
+}
+
+// BuildSystemPrompt is the stable-prefix convenience wrapper: equivalent to
+// BuildSystemPromptOrdered(true).
+func (b *PromptBuilder) BuildSystemPrompt() (prompt string, stablePrefixHash string) {
+	return b.BuildSystemPromptOrdered(true)
+}
+
+// classifySections renders every populated builder component into a named
+// PromptSection with an honest stability classification:
+//
+// STABLE (byte-invariant across turns within a session):
+//   - constitution/restrictions/purpose/personality: agent identity, set once
+//     from config at loop construction.
+//   - user preferences: loaded once at session start, not mutated per turn.
+//   - cache boundary: constant sentinel (llm.PromptCacheBoundary).
+//
+// UNSTABLE (varies per turn or per request):
+//   - project info: git branch/dirty status re-probed per build (TTL cache,
+//     still turn-variable).
+//   - memory context: per-request recall (frozen snapshot keeps it session-
+//     stable in practice, but the builder cannot assume that).
+//   - agents context / session templates / coworker awareness / tools:
+//     tool lists change with schema-mode switches and skill-gated filtering,
+//     so these are conservatively unstable.
+//   - custom sections: stability is whatever AddSectionWithStability declared
+//     (AddSection defaults to unstable, since loop call sites inject per-turn
+//     content such as memory, skills, and repo maps through it).
+//
+// Within-class order matches the legacy Build() order, so stable-first
+// assembly only moves unstable sections after stable ones.
+func (b *PromptBuilder) classifySections() []PromptSection {
+	sections := make([]PromptSection, 0, 16)
+
+	if b.constitution != "" {
+		sections = append(sections, PromptSection{Name: "constitution", Stable: true,
+			Body: "# Constitution\n" + b.constitution})
+	}
+	if b.restrictions != "" {
+		sections = append(sections, PromptSection{Name: "restrictions", Stable: true,
+			Body: "\n# Safety Restrictions\n" + b.restrictions})
+	}
+	if b.purpose != "" {
+		sections = append(sections, PromptSection{Name: "purpose", Stable: true,
+			Body: "\n# Purpose & Task Principles\n" + b.purpose})
+	}
+	if b.personality != "" {
+		sections = append(sections, PromptSection{Name: "personality", Stable: true,
+			Body: "\n# Personality\n" + b.personality})
+	}
+	if len(b.userPrefs) > 0 {
+		// Sort keys so the stable prefix is byte-deterministic across builds
+		// (legacy Build() iterates the map unordered).
+		keys := make([]string, 0, len(b.userPrefs))
+		for key := range b.userPrefs {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		var sb strings.Builder
+		sb.WriteString("\n# User Preferences")
+		for _, key := range keys {
+			sb.WriteString("\n- ")
+			sb.WriteString(key)
+			sb.WriteString(": ")
+			sb.WriteString(b.userPrefs[key])
+		}
+		sections = append(sections, PromptSection{Name: "user-preferences", Stable: true, Body: sb.String()})
+	}
+
+	sections = append(sections, PromptSection{Name: "cache-boundary", Stable: true, Body: llm.PromptCacheBoundary})
+
+	if b.projectInfo != "" {
+		sections = append(sections, PromptSection{Name: "project-info", Stable: false,
+			Body: "\n# Current Project\n" + b.projectInfo})
+	}
+	if b.memoryContext != "" {
+		sections = append(sections, PromptSection{Name: "memory-context", Stable: false,
+			Body: "\n# Relevant Context from Memory\n" + b.memoryContext})
+	}
+	if b.agentsContext != "" {
+		sections = append(sections, PromptSection{Name: "agents-context", Stable: false,
+			Body: "\n# Project Context\n" + b.agentsContext})
+	}
+	if b.sessionTemplates != "" {
+		sections = append(sections, PromptSection{Name: "session-templates", Stable: false,
+			Body: "\n# Active Session Templates\n" + b.sessionTemplates})
+	}
+	if b.coworkerAwareness != "" {
+		sections = append(sections, PromptSection{Name: "coworker-awareness", Stable: false,
+			Body: "\n# Coworker Awareness\n" + b.coworkerAwareness})
+	}
+	if len(b.tools) > 0 {
+		var sb strings.Builder
+		sb.WriteString("\n# Available Tools")
+		for _, tool := range b.tools {
+			sb.WriteString("\n")
+			sb.WriteString(formatToolDescription(tool))
+		}
+		sections = append(sections, PromptSection{Name: "tools", Stable: false, Body: sb.String()})
+	}
+	for i, section := range b.customSections {
+		// Stability comes from the add-time classification: AddSection is
+		// conservatively unstable; AddSectionWithStability opts in.
+		sections = append(sections, PromptSection{
+			Name:   "custom-" + section.title + "-" + fmt.Sprint(i),
+			Stable: section.stable,
+			Body:   "\n# " + section.title + "\n" + section.content,
+		})
+	}
+
+	return sections
 }
