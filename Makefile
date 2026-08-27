@@ -134,15 +134,12 @@ setup:
 	@echo "Setup complete."
 
 hooks:
-	@echo "Installing git hooks..."
-	@cp scripts/pre-commit .git/hooks/pre-commit
-	@chmod +x .git/hooks/pre-commit
-	@if [ -f scripts/check-deferred-items.sh ]; then \
-		cp scripts/check-deferred-items.sh .git/hooks/pre-commit-deferred 2>/dev/null || true; \
-		chmod +x .git/hooks/pre-commit-deferred 2>/dev/null || true; \
-	fi
-	@echo "Installed pre-commit hook (golangci-lint + mutexio + predid + audit scripts)"
-	@echo "See scripts/pre-commit for details; bypass with --no-verify."
+	@echo "Installing git hooks (core.hooksPath -> .githooks)..."
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/pre-commit .githooks/pre-commit-*
+	@echo "Installed 15 pre-commit checks via .githooks (see .githooks/pre-commit)."
+	@echo "Requires bash >= 4 on macOS (sub-hooks use /opt/homebrew/bin/bash)."
+	@echo "Bypass with --no-verify."
 
 deps:
 	@echo "Downloading Go dependencies..."

@@ -2,19 +2,24 @@
 # Main pre-commit hook - runs all quality and security checks
 #
 # Runs the following checks in order:
-# 1. Deferred item validation (findings docs)
-# 2. Mutex I/O analyzer (Go concurrency)
-# 3. Staticcheck U1000 (unused code)
-# 4. go vet (common Go bugs)
-# 5. Setter nil-safety (typed-nil panics)
-# 6. gosec (security vulnerabilities) - if installed
-# 7. Error handling patterns (anti-patterns)
-# 8. Predictable ID detection (use pkg/id.Generate)
-# 9. SQLite pragma check (WAL + busy_timeout)
-# 10. Channel close-then-nil detection (sync.Once pattern)
-# 11. Concurrency annotations (informational)
-# 12. Mutation testing (report only)
-# 13. Feature documentation (code changes)
+# 1. go build on staged packages (+ clean downstream importers)
+# 2. Deferred item validation (findings docs)
+# 3. Mutex I/O analyzer (Go concurrency)
+# 4. Staticcheck U1000 (unused code)
+# 5. go vet (common Go bugs)
+# 6. Setter nil-safety (typed-nil panics)
+# 7. Selflock analyzer (self-deadlocking locks)
+# 8. gosec (security vulnerabilities) - if installed
+# 9. Error handling patterns (anti-patterns)
+# 10. Predictable ID detection (use pkg/id.Generate)
+# 11. SQLite pragma check (WAL + busy_timeout)
+# 12. Channel close-then-nil detection (sync.Once pattern)
+# 13. Concurrency annotations (informational)
+# 14. Mutation testing (report only)
+# 15. Feature documentation (code changes)
+#
+# Requires bash >= 4 (macOS /bin/bash is 3.2): sub-hooks carry
+# /opt/homebrew/bin/bash shebangs.
 #
 # Skip with --no-verify for emergencies only.
 
@@ -28,56 +33,64 @@ echo "  Pre-commit Quality Checks"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# 1. Deferred item check (findings docs have resolution plans)
-echo -e "\e[34m[1/13]\e[0m Running deferred item validation..."
+# 1. go build (catches compile errors before anything else runs)
+echo -e "\e[34m[1/15]\e[0m Building staged packages..."
+"$SCRIPT_DIR/pre-commit-build"
+
+# 2. Deferred item check (findings docs have resolution plans)
+echo -e "\e[34m[2/15]\e[0m Running deferred item validation..."
 "$SCRIPT_DIR/pre-commit-deferred" || exit 1
 
-# 2. Mutex I/O analyzer (CLAUDE.md rule: no I/O under lock)
-echo -e "\e[34m[2/13]\e[0m Running mutex I/O analyzer..."
+# 3. Mutex I/O analyzer (CLAUDE.md rule: no I/O under lock)
+echo -e "\e[34m[3/15]\e[0m Running mutex I/O analyzer..."
 "$SCRIPT_DIR/pre-commit-mutexio" || exit 1
 
-# 3. Staticcheck U1000 (unused code detection)
-echo -e "\e[34m[3/13]\e[0m Running unused code check..."
+# 4. Staticcheck U1000 (unused code detection)
+echo -e "\e[34m[4/15]\e[0m Running unused code check..."
 "$SCRIPT_DIR/pre-commit-u1000" || exit 1
 
-# 4. go vet (common Go bugs)
-echo -e "\e[34m[4/13]\e[0m Running go vet..."
+# 5. go vet (common Go bugs)
+echo -e "\e[34m[5/15]\e[0m Running go vet..."
 "$SCRIPT_DIR/pre-commit-vet" || exit 1
 
-# 5. Setter nil-safety (typed-nil interface guard)
-echo -e "\e[34m[5/13]\e[0m Verifying setter nil-safety..."
-"$SCRIPT_DIR/pre-commit-setters" || exit 1
+# 6. Setter nil-safety (typed-nil interface guard)
+echo -e "\e[34m[6/15]\e[0m Verifying setter nil-safety..."
+"$SCRIPT_DIR/pre-commit-setters"
 
-# 6. gosec security scan (if installed)
-echo -e "\e[34m[6/13]\e[0m Running security scan..."
+# 7. Selflock analyzer (self-deadlocking locks)
+echo -e "\e[34m[7/15]\e[0m Checking for self-deadlocking locks..."
+"$SCRIPT_DIR/pre-commit-selflock" || exit 1
+
+# 8. gosec security scan (if installed)
+echo -e "\e[34m[8/15]\e[0m Running security scan..."
 "$SCRIPT_DIR/pre-commit-gosec" || exit 1
 
-# 7. Error handling patterns
-echo -e "\e[34m[7/13]\e[0m Checking error handling patterns..."
+# 9. Error handling patterns
+echo -e "\e[34m[9/15]\e[0m Checking error handling patterns..."
 "$SCRIPT_DIR/pre-commit-errors" || exit 1
 
-# 8. Predictable ID detection (use pkg/id.Generate, not time.Now().UnixNano())
-echo -e "\e[34m[8/13]\e[0m Checking for predictable ID generation..."
+# 10. Predictable ID detection (use pkg/id.Generate, not time.Now().UnixNano())
+echo -e "\e[34m[10/15]\e[0m Checking for predictable ID generation..."
 "$SCRIPT_DIR/pre-commit-predictable-ids" || exit 1
 
-# 9. SQLite pragma check (WAL + busy_timeout required)
-echo -e "\e[34m[9/13]\e[0m Checking SQLite pragma compliance..."
+# 11. SQLite pragma check (WAL + busy_timeout required)
+echo -e "\e[34m[11/15]\e[0m Checking SQLite pragma compliance..."
 "$SCRIPT_DIR/pre-commit-sqlite-pragmas" || exit 1
 
-# 10. Channel close-then-nil detection (use sync.Once instead)
-echo -e "\e[34m[10/13]\e[0m Checking for close-then-nil channel pattern..."
+# 12. Channel close-then-nil detection (use sync.Once instead)
+echo -e "\e[34m[12/15]\e[0m Checking for close-then-nil channel pattern..."
 "$SCRIPT_DIR/pre-commit-channel-nilafterclose" || exit 1
 
-# 11. Concurrency annotations (informational, does not block)
-echo -e "\e[34m[11/13]\e[0m Checking concurrency annotations..."
+# 13. Concurrency annotations (informational, does not block)
+echo -e "\e[34m[13/15]\e[0m Checking concurrency annotations..."
 "$SCRIPT_DIR/pre-commit-concurrency" || true
 
-# 12. Mutation testing (report only, does not block)
-echo -e "\e[34m[12/13]\e[0m Checking mutation test coverage..."
+# 14. Mutation testing (report only, does not block)
+echo -e "\e[34m[14/15]\e[0m Checking mutation test coverage..."
 "$SCRIPT_DIR/pre-commit-mutation" || true
 
-# 13. Feature documentation check
-echo -e "\e[34m[13/13]\e[0m Verifying feature documentation..."
+# 15. Feature documentation check
+echo -e "\e[34m[15/15]\e[0m Verifying feature documentation..."
 "$SCRIPT_DIR/pre-commit-feature-docs" || exit 1
 
 echo ""

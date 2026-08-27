@@ -52,6 +52,9 @@ agent-tui ./bin/meept chat      # TUI testing
 make graphs               # Regenerate bus/RPC/HTTP/WS topology
 make graphs-check         # Verify generated files are fresh (CI)
 
+# Git hooks (bash >= 4 required on macOS; sub-hooks use /opt/homebrew/bin/bash)
+make hooks                # core.hooksPath -> .githooks (15 pre-commit checks)
+
 # Static analyzers
 make analyzers            # mutexio + predid
 make lint-ci              # golangci-lint + analyzers + audit scripts
