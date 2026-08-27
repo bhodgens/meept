@@ -12,8 +12,9 @@ import (
 	"sync"
 	"time"
 
-	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/llm"
+	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/security/ssrf"
 	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
@@ -45,8 +46,11 @@ type WebFetchTool struct {
 	// Production code never sets this; it exists for unit tests that run
 	// against httptest.NewServer (which binds to 127.0.0.1).
 	allowPrivateRanges bool
+	// guard is the centralized SSRF guard ([security.ssrf] enabled, default).
+	// When non-nil it supersedes the legacy checkURL/ssrfDialContext path.
+	guard *ssrf.Guard
 
-	// clientMu guards client and its Transport during SetAllowPrivateRanges
+	// clientMu guards client, its Transport, guard, and allowPrivateRanges
 	// to prevent a race with concurrent Execute reads.
 	clientMu sync.Mutex
 }
@@ -80,11 +84,30 @@ func (t *WebFetchTool) checkRedirect(req *http.Request, via []*http.Request) err
 		return fmt.Errorf("too many redirects")
 	}
 	if !t.allowPrivateRanges {
-		if err := checkURL(req.URL.String()); err != nil {
+		if err := t.checkURLGuarded(req.URL.String()); err != nil {
 			return fmt.Errorf("redirect blocked: %w", err)
 		}
 	}
 	return nil
+}
+
+// checkURLGuarded validates raw against the centralized SSRF guard when one
+// is installed, falling back to the legacy package-level checkURL otherwise.
+func (t *WebFetchTool) checkURLGuarded(raw string) error {
+	t.clientMu.Lock()
+	g := t.guard
+	t.clientMu.Unlock()
+	if g != nil {
+		return g.CheckURL(raw)
+	}
+	return checkURL(raw)
+}
+
+// guardEnabled reports whether a centralized SSRF guard is installed.
+func (t *WebFetchTool) guardEnabled() bool {
+	t.clientMu.Lock()
+	defer t.clientMu.Unlock()
+	return t.guard != nil
 }
 
 func (t *WebFetchTool) Name() string { return "web_fetch" }
@@ -99,16 +122,42 @@ func (t *WebFetchTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
 
 // SetAllowPrivateRanges disables SSRF protection for private/loopback IPs.
 // Intended only for unit tests that exercise the fetch path against
-// httptest.NewServer. Production callers must never invoke this.
+// httptest.NewServer. Production callers must never invoke this. It also
+// removes any installed centralized SSRF guard (legacy disabled behavior).
 func (t *WebFetchTool) SetAllowPrivateRanges(allow bool) {
 	t.clientMu.Lock()
 	defer t.clientMu.Unlock()
 	t.allowPrivateRanges = allow
+	if allow {
+		t.guard = nil
+	}
 	// Rebuild the transport so the dial-time SSRF check is also disabled.
 	t.client.Transport = &http.Transport{
 		MaxConnsPerHost: 8,
 		DialContext:     ssrfDialContext(allow),
 	}
+}
+
+// SetSSRFGuard installs the centralized SSRF guard from
+// internal/security/ssrf ([security.ssrf] config, enabled by default).
+// The client is rebuilt via Guard.WrapClient with a fresh transport, which
+// installs per-hop redirect re-validation and dial-time IP re-checks,
+// superseding the legacy checkURL/ssrfDialContext path. Follows the
+// typed-nil guard pattern: a nil g leaves legacy behavior in place. Must be
+// called before the tool serves requests.
+func (t *WebFetchTool) SetSSRFGuard(g *ssrf.Guard) {
+	if g == nil {
+		return
+	}
+	t.clientMu.Lock()
+	defer t.clientMu.Unlock()
+	t.guard = g
+	// Fresh transport (no legacy ssrfDialContext) so AllowedCIDRs are
+	// honored; WrapClient installs CheckRedirect and the guarded dialer.
+	t.client = g.WrapClient(&http.Client{
+		Timeout:   t.timeout,
+		Transport: &http.Transport{MaxConnsPerHost: 8},
+	})
 }
 
 func (t *WebFetchTool) Category() string { return "web" }
@@ -158,9 +207,10 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 	// SSRF guard: refuse private/loopback/link-local targets before
 	// constructing the request. This catches both raw-IP and hostname
-	// targets that resolve to blocked ranges.
+	// targets that resolve to blocked ranges. Uses the centralized guard
+	// when installed, legacy checkURL otherwise.
 	if !t.allowPrivateRanges {
-		if err := checkURL(url); err != nil {
+		if err := t.checkURLGuarded(url); err != nil {
 			return nil, fmt.Errorf("web_fetch blocked: %w", err)
 		}
 	}
@@ -340,9 +390,10 @@ func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any
 	}
 
 	// SSRF guard: refuse private/loopback/link-local targets before
-	// constructing the request.
+	// constructing the request. Uses the centralized guard when installed,
+	// legacy checkURL otherwise.
 	if !t.allowPrivateRanges {
-		if err := checkURL(url); err != nil {
+		if err := t.checkURLGuarded(url); err != nil {
 			return nil, fmt.Errorf("web_fetch blocked: %w", err)
 		}
 	}

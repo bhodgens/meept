@@ -1,3 +1,8 @@
+// These are the LEGACY per-tool SSRF checks, retained for backward
+// compatibility as the fallback path when the centralized guard is not
+// installed ([security.ssrf] enabled=false). The canonical implementation
+// lives in internal/security/ssrf and is wired into web_fetch/web_search
+// via SetSSRFGuard; keep this file's behavior unchanged.
 package builtin
 
 import (

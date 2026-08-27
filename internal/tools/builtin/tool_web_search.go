@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/security/ssrf"
 	"github.com/caimlas/meept/internal/tools"
 )
 
@@ -53,6 +54,11 @@ type WebSearchTool struct {
 	client          *http.Client
 	mu              sync.Mutex
 	lastRequestTime time.Time
+
+	// guard is the centralized SSRF guard ([security.ssrf] enabled, default).
+	// When non-nil it supersedes the legacy checkURL/ssrfDialContext path.
+	guard   *ssrf.Guard
+	guardMu sync.Mutex
 }
 
 // NewWebSearchTool creates a new web search tool.
@@ -61,7 +67,7 @@ func NewWebSearchTool(timeout time.Duration) *WebSearchTool {
 		timeout = DefaultSearchTimeout
 	}
 
-	return &WebSearchTool{
+	t := &WebSearchTool{
 		timeout: timeout,
 		client: &http.Client{
 			Timeout: timeout,
@@ -69,19 +75,62 @@ func NewWebSearchTool(timeout time.Duration) *WebSearchTool {
 				MaxConnsPerHost: 8,
 				DialContext:     ssrfDialContext(false),
 			},
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return fmt.Errorf("too many redirects")
-				}
-				// SSRF guard on redirect targets to prevent redirects to
-				// private/loopback/link-local addresses.
-				if err := checkURL(req.URL.String()); err != nil {
-					return fmt.Errorf("redirect blocked: %w", err)
-				}
-				return nil
-			},
 		},
 	}
+	t.client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("too many redirects")
+		}
+		// SSRF guard on redirect targets to prevent redirects to
+		// private/loopback/link-local addresses. Uses the centralized
+		// guard when installed, legacy checkURL otherwise.
+		if err := t.checkURLGuarded(req.URL.String()); err != nil {
+			return fmt.Errorf("redirect blocked: %w", err)
+		}
+		return nil
+	}
+	return t
+}
+
+// checkURLGuarded validates raw against the centralized SSRF guard when one
+// is installed, falling back to the legacy package-level checkURL otherwise.
+func (t *WebSearchTool) checkURLGuarded(raw string) error {
+	t.guardMu.Lock()
+	g := t.guard
+	t.guardMu.Unlock()
+	if g != nil {
+		return g.CheckURL(raw)
+	}
+	return checkURL(raw)
+}
+
+// guardEnabled reports whether a centralized SSRF guard is installed.
+func (t *WebSearchTool) guardEnabled() bool {
+	t.guardMu.Lock()
+	defer t.guardMu.Unlock()
+	return t.guard != nil
+}
+
+// SetSSRFGuard installs the centralized SSRF guard from
+// internal/security/ssrf ([security.ssrf] config, enabled by default). The
+// client is rebuilt via Guard.WrapClient with a fresh transport, which
+// installs per-hop redirect re-validation and dial-time IP re-checks,
+// superseding the legacy checkURL/ssrfDialContext path. Follows the
+// typed-nil guard pattern: a nil g leaves legacy behavior in place. Must be
+// called before the tool serves requests.
+func (t *WebSearchTool) SetSSRFGuard(g *ssrf.Guard) {
+	if g == nil {
+		return
+	}
+	t.guardMu.Lock()
+	defer t.guardMu.Unlock()
+	t.guard = g
+	// Fresh transport (no legacy ssrfDialContext) so AllowedCIDRs are
+	// honored; WrapClient installs CheckRedirect and the guarded dialer.
+	t.client = g.WrapClient(&http.Client{
+		Timeout:   t.timeout,
+		Transport: &http.Transport{MaxConnsPerHost: 8},
+	})
 }
 
 func (t *WebSearchTool) Name() string { return "web_search" }
