@@ -129,6 +129,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 
 	topics := map[string]func(context.Context, *models.BusMessage){
 		"orchestrator.plan":               o.handlePlanRequest,
+		"orchestrator.replan":             o.handlePlanRequest,
 		"orchestrator.schedule":           o.handleScheduleRequest,
 		"orchestrator.handoff":            o.handleHandoff,
 		"queue.job.completed":             o.handleJobCompleted,
