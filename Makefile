@@ -29,6 +29,7 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  test             Run tests (short mode)"
+	@echo "  test-multiuser   Run multiuser cluster-pooling integration tests (race, 10x)"
 	@echo "  test-verbose     Run tests with verbose output"
 	@echo "  test-cover       Run tests with coverage report"
 	@echo "  test-race        Run tests with race detector"
@@ -254,6 +255,10 @@ test-cover:
 test-race:
 	@echo "Running tests with race detector..."
 	go test ./... -race
+
+test-multiuser:
+	@echo "Running multiuser cluster-pooling integration tests (10x for repeatability)..."
+	go test ./tests/integration/ -run "TestMultiuserUsersSync" -race -count=10 -v
 
 bench:
 	@echo "Running benchmarks..."

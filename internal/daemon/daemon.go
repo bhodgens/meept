@@ -407,6 +407,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		clusterEngine.SetConflictResolver(conflictResolver)
 		clusterEngine.SetMetrics(clusterMetrics)
 		clusterEngine.RegisterHandler(gossipHandler)
+		// Register the cluster users pool (multiuser leaf 03) so inbound
+		// USERS_SYNC events reach its merge path. No-op effect when
+		// multi-user is disabled: OnEvent exits early on !Enabled.
+		if components.UsersSync != nil {
+			clusterEngine.RegisterHandler(components.UsersSync)
+			logger.Info("users sync handler registered with cluster engine")
+		}
 		logger.Info("gossip handler registered with cluster engine")
 	}
 
@@ -934,24 +941,30 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
 			httpCfg.RateLimitPerMinute = fullCfg.Transport.HTTP.RateLimitRPM
 			httpCfg.RateLimitBurst = fullCfg.Transport.HTTP.RateLimitBurst
-			// Multi-user authentication (opt-in). Construct the users store
-			// only when enabled; when disabled AuthStore stays nil and the
-			// legacy single-key path runs exactly as before. Nil-guard per
-			// typed-nil rules: only a constructed, non-typed-nil *auth.Store
-			// is assigned to the interface field.
+			// Multi-user authentication (opt-in). Prefer the shared store
+			// constructed in NewComponents (single instance shared with
+			// cluster user pooling); fall back to opening one here only
+			// when clustering is off. Disabled => AuthStore stays nil and
+			// the legacy single-key path runs exactly as before.
 			if fullCfg.MultiUser.Enabled {
-				usersFile := fullCfg.MultiUser.UsersFile
-				if usersFile == "" {
-					homeDir2, _ := os.UserHomeDir()
-					usersFile = filepath.Join(homeDir2, ".meept", "users.json5")
-				}
-				if usersStore, uErr := auth.NewStore(usersFile); uErr != nil {
-					logger.Error("failed to open multi-user store; HTTP auth falls back to legacy keys",
-						"users_file", usersFile,
-						"error", uErr)
-				} else if usersStore != nil {
-					httpCfg.AuthStore = usersStore
-					logger.Info(fmt.Sprintf("multi-user authentication enabled (%d users)", usersStore.UserCount()))
+				if components != nil && components.AuthUsersStore != nil {
+					httpCfg.AuthStore = components.AuthUsersStore
+					logger.Info(fmt.Sprintf("multi-user authentication enabled (%d users)", components.AuthUsersStore.UserCount()))
+				} else if components == nil || components.UsersSync == nil {
+					// Clustering disabled: no components-side store exists.
+					usersFile := fullCfg.MultiUser.UsersFile
+					if usersFile == "" {
+						homeDir2, _ := os.UserHomeDir()
+						usersFile = filepath.Join(homeDir2, ".meept", "users.json5")
+					}
+					if usersStore, uErr := auth.NewStore(usersFile); uErr != nil {
+						logger.Error("failed to open multi-user store; HTTP auth falls back to legacy keys",
+							"users_file", usersFile,
+							"error", uErr)
+					} else if usersStore != nil {
+						httpCfg.AuthStore = usersStore
+						logger.Info(fmt.Sprintf("multi-user authentication enabled (%d users)", usersStore.UserCount()))
+					}
 				}
 			}
 			// Map TLS version string to Go constant

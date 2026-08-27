@@ -106,6 +106,15 @@ func NewUsersSync(cfg UsersSyncConfig, store *auth.Store, localNode string, publ
 	}
 }
 
+// SetAuthStore wires (or re-wires) the merge target used by OnEvent and
+// reconcile. Nil-guarded per the setter convention: a nil store is ignored
+// so an accidental call cannot disable an already-active pool.
+func (u *UsersSync) SetAuthStore(store *auth.Store) {
+	if store != nil {
+		u.store = store
+	}
+}
+
 // OnEvent processes an inbound USERS_SYNC gossip event, making UsersSync a
 // structural match for cluster.GossipHandler (register with
 // GossipEngine.RegisterHandler). Events of other types, self-originated
