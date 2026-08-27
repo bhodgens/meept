@@ -1,41 +1,6 @@
 [
   {
     "method": "ANY",
-    "path": "/",
-    "handler": "func(w http.ResponseWriter, _ *http.Request",
-    "file": "internal/tools/builtin/browser_test.go",
-    "line": 20
-  },
-  {
-    "method": "ANY",
-    "path": "/",
-    "handler": "func(w http.ResponseWriter, r *http.Request",
-    "file": "internal/llm/modelstore_test.go",
-    "line": 49
-  },
-  {
-    "method": "ANY",
-    "path": "/",
-    "handler": "func(w http.ResponseWriter, _ *http.Request",
-    "file": "internal/browser/manager_test.go",
-    "line": 56
-  },
-  {
-    "method": "ANY",
-    "path": "/a",
-    "handler": "func(w http.ResponseWriter, r *http.Request",
-    "file": "internal/security/ssrf/guard_test.go",
-    "line": 328
-  },
-  {
-    "method": "ANY",
-    "path": "/api/models/",
-    "handler": "func(w http.ResponseWriter, r *http.Request",
-    "file": "internal/llm/modelstore_test.go",
-    "line": 35
-  },
-  {
-    "method": "ANY",
     "path": "/api/v1/notifications",
     "handler": "s.notifHandler.ServeHTTP",
     "file": "internal/comm/http/server.go",
@@ -57,346 +22,10 @@
   },
   {
     "method": "ANY",
-    "path": "/b",
-    "handler": "func(w http.ResponseWriter, r *http.Request",
-    "file": "internal/security/ssrf/guard_test.go",
-    "line": 331
-  },
-  {
-    "method": "ANY",
-    "path": "/bad",
-    "handler": "func(w http.ResponseWriter, r *http.Request",
-    "file": "internal/security/ssrf/guard_test.go",
-    "line": 295
-  },
-  {
-    "method": "ANY",
-    "path": "/dest",
-    "handler": "func(w http.ResponseWriter, r *http.Request",
-    "file": "internal/security/ssrf/guard_test.go",
-    "line": 292
-  },
-  {
-    "method": "GET",
-    "path": "/file1.txt",
-    "handler": "",
-    "file": "internal/tools/builtin/hashline_test.go",
-    "line": 268
-  },
-  {
-    "method": "GET",
-    "path": "/file1.txt",
-    "handler": "",
-    "file": "internal/tools/builtin/hashline_test.go",
-    "line": 289
-  },
-  {
-    "method": "GET",
-    "path": "/file2.txt",
-    "handler": "",
-    "file": "internal/tools/builtin/hashline_test.go",
-    "line": 286
-  },
-  {
-    "method": "GET",
-    "path": "/file4.txt",
-    "handler": "",
-    "file": "internal/tools/builtin/hashline_test.go",
-    "line": 271
-  },
-  {
-    "method": "ANY",
-    "path": "/gen",
-    "handler": "func(w http.ResponseWriter, r *http.Request",
-    "file": "internal/tools/builtin/generate_media_test.go",
-    "line": 134
-  },
-  {
-    "method": "GET",
-    "path": "/nonexistent",
-    "handler": "",
-    "file": "internal/tools/builtin/hashline_test.go",
-    "line": 254
-  },
-  {
-    "method": "GET",
-    "path": "/nonexistent/file.go",
-    "handler": "time.Now(",
-    "file": "internal/repomap/cache_test.go",
-    "line": 166
-  },
-  {
-    "method": "GET",
-    "path": "/nonexistent/file.go",
-    "handler": "10",
-    "file": "internal/repomap/cache_test.go",
-    "line": 359
-  },
-  {
-    "method": "ANY",
-    "path": "/ok",
-    "handler": "func(w http.ResponseWriter, r *http.Request",
-    "file": "internal/security/ssrf/guard_test.go",
-    "line": 289
-  },
-  {
-    "method": "GET",
-    "path": "/other/dir",
-    "handler": "",
-    "file": "internal/context/types_test.go",
-    "line": 169
-  },
-  {
-    "method": "ANY",
-    "path": "/redirect-to-private",
-    "handler": "func(w http.ResponseWriter, r *http.Request",
-    "file": "internal/browser/manager_test.go",
-    "line": 61
-  },
-  {
-    "method": "GET",
-    "path": "/test.txt",
-    "handler": "",
-    "file": "internal/tools/builtin/hashline_test.go",
-    "line": 304
-  },
-  {
-    "method": "GET",
-    "path": "/test.txt",
-    "handler": "",
-    "file": "internal/tools/builtin/hashline_test.go",
-    "line": 314
-  },
-  {
-    "method": "GET",
-    "path": "/test.txt",
-    "handler": "",
-    "file": "internal/tools/builtin/hashline_test.go",
-    "line": 316
-  },
-  {
-    "method": "GET",
-    "path": "/test/dir",
-    "handler": "",
-    "file": "internal/context/types_test.go",
-    "line": 160
-  },
-  {
-    "method": "GET",
-    "path": "/test/dir",
-    "handler": "",
-    "file": "internal/context/types_test.go",
-    "line": 176
-  },
-  {
-    "method": "GET",
-    "path": "/test/dir",
-    "handler": "",
-    "file": "internal/context/types_test.go",
-    "line": 184
-  },
-  {
-    "method": "GET",
-    "path": "/test/dir",
-    "handler": "",
-    "file": "internal/context/types_test.go",
-    "line": 192
-  },
-  {
-    "method": "PUT",
-    "path": "/test/dir",
-    "handler": "artifacts",
-    "file": "internal/context/types_test.go",
-    "line": 158
-  },
-  {
-    "method": "PUT",
-    "path": "/test/dir",
-    "handler": "artifacts",
-    "file": "internal/context/types_test.go",
-    "line": 182
-  },
-  {
-    "method": "PUT",
-    "path": "/test/dir",
-    "handler": "artifacts",
-    "file": "internal/context/types_test.go",
-    "line": 190
-  },
-  {
-    "method": "GET",
-    "path": "/test/file.go",
-    "handler": "mtime",
-    "file": "internal/repomap/cache_test.go",
-    "line": 114
-  },
-  {
-    "method": "GET",
-    "path": "/test/file.go",
-    "handler": "newMtime",
-    "file": "internal/repomap/cache_test.go",
-    "line": 145
-  },
-  {
-    "method": "GET",
-    "path": "/test/file.go",
-    "handler": "mtime",
-    "file": "internal/repomap/cache_test.go",
-    "line": 195
-  },
-  {
-    "method": "GET",
-    "path": "/test/file.go",
-    "handler": "mtime",
-    "file": "internal/repomap/cache_test.go",
-    "line": 203
-  },
-  {
-    "method": "GET",
-    "path": "/test/file.go",
-    "handler": "10",
-    "file": "internal/repomap/cache_test.go",
-    "line": 347
-  },
-  {
-    "method": "GET",
-    "path": "/test/file.txt",
-    "handler": "",
-    "file": "internal/tools/builtin/hashline_test.go",
-    "line": 238
-  },
-  {
-    "method": "ANY",
     "path": "/ws/notifications",
     "handler": "s.notifHandler.ServeWebSocket",
     "file": "internal/comm/http/server.go",
     "line": 1104
-  },
-  {
-    "method": "GET",
-    "path": "Accept",
-    "handler": "",
-    "file": "internal/llm/codex_test.go",
-    "line": 175
-  },
-  {
-    "method": "GET",
-    "path": "Accept",
-    "handler": "",
-    "file": "internal/auth/discovery_test.go",
-    "line": 16
-  },
-  {
-    "method": "GET",
-    "path": "Accept",
-    "handler": "",
-    "file": "internal/auth/anthropic_test.go",
-    "line": 42
-  },
-  {
-    "method": "GET",
-    "path": "Access-Control-Allow-Origin",
-    "handler": "",
-    "file": "internal/comm/http/server_test.go",
-    "line": 487
-  },
-  {
-    "method": "GET",
-    "path": "Access-Control-Allow-Origin",
-    "handler": "",
-    "file": "internal/comm/http/server_test.go",
-    "line": 524
-  },
-  {
-    "method": "GET",
-    "path": "Anthropic-Beta",
-    "handler": "",
-    "file": "internal/llm/anthropic_bearer_test.go",
-    "line": 86
-  },
-  {
-    "method": "GET",
-    "path": "Anthropic-Beta",
-    "handler": "",
-    "file": "internal/llm/anthropic_bearer_test.go",
-    "line": 158
-  },
-  {
-    "method": "GET",
-    "path": "Anthropic-Version",
-    "handler": "",
-    "file": "internal/llm/anthropic_bearer_test.go",
-    "line": 89
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/tools/mcp/transport/http_test.go",
-    "line": 120
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/llm/anthropic_bearer_test.go",
-    "line": 83
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/llm/anthropic_bearer_test.go",
-    "line": 155
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/llm/anthropic_bearer_test.go",
-    "line": 182
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/llm/codex_test.go",
-    "line": 166
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/llm/codex_test.go",
-    "line": 232
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/calendar/reminder_test.go",
-    "line": 66
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/calendar/reminder_test.go",
-    "line": 67
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/integration/containment_test.go",
-    "line": 165
-  },
-  {
-    "method": "GET",
-    "path": "Authorization",
-    "handler": "",
-    "file": "internal/secrets/proxy_test.go",
-    "line": 174
   },
   {
     "method": "GET",
@@ -421,38 +50,10 @@
   },
   {
     "method": "GET",
-    "path": "Cache-Control",
-    "handler": "",
-    "file": "internal/comm/http/unified_http_test.go",
-    "line": 684
-  },
-  {
-    "method": "GET",
-    "path": "ChatGPT-Account-ID",
-    "handler": "",
-    "file": "internal/llm/codex_test.go",
-    "line": 169
-  },
-  {
-    "method": "GET",
-    "path": "ChatGPT-Account-ID",
-    "handler": "",
-    "file": "internal/llm/codex_test.go",
-    "line": 215
-  },
-  {
-    "method": "GET",
     "path": "Content-Length",
     "handler": "",
     "file": "internal/secrets/proxy.go",
     "line": 323
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/tools/mcp/transport/http_test.go",
-    "line": 40
   },
   {
     "method": "GET",
@@ -493,64 +94,8 @@
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
-    "file": "internal/llm/codex_test.go",
-    "line": 70
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/calendar/reminder_test.go",
-    "line": 111
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/calendar/reminder_test.go",
-    "line": 112
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/auth/device_flow_form_test.go",
-    "line": 23
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/auth/device_flow_form_test.go",
-    "line": 73
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/auth/anthropic_test.go",
-    "line": 43
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
     "file": "internal/secrets/proxy.go",
     "line": 287
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/comm/web/server_test.go",
-    "line": 739
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/comm/http/unified_http_test.go",
-    "line": 680
   },
   {
     "method": "GET",
@@ -572,41 +117,6 @@
     "handler": "",
     "file": "internal/comm/http/upload_handlers.go",
     "line": 49
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/comm/http/server_test.go",
-    "line": 540
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/comm/http/server_test.go",
-    "line": 541
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/comm/http/server_test.go",
-    "line": 1086
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/comm/http/server_test.go",
-    "line": 1451
-  },
-  {
-    "method": "GET",
-    "path": "Content-Type",
-    "handler": "",
-    "file": "internal/comm/http/server_test.go",
-    "line": 1521
   },
   {
     "method": "ANY",
@@ -1531,13 +1041,6 @@
     "handler": "s.handleHealth",
     "file": "internal/comm/http/server.go",
     "line": 1091
-  },
-  {
-    "method": "GET",
-    "path": "Mcp-Session-Id",
-    "handler": "",
-    "file": "internal/tools/mcp/transport/http_test.go",
-    "line": 137
   },
   {
     "method": "GET",
@@ -2486,13 +1989,6 @@
   },
   {
     "method": "GET",
-    "path": "Range",
-    "handler": "",
-    "file": "internal/llm/modelstore_test.go",
-    "line": 72
-  },
-  {
-    "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
@@ -2577,48 +2073,6 @@
   },
   {
     "method": "GET",
-    "path": "User-Agent",
-    "handler": "",
-    "file": "internal/llm/codex_test.go",
-    "line": 160
-  },
-  {
-    "method": "GET",
-    "path": "User-Agent",
-    "handler": "",
-    "file": "internal/auth/anthropic_test.go",
-    "line": 41
-  },
-  {
-    "method": "GET",
-    "path": "X-Api-Key",
-    "handler": "",
-    "file": "internal/llm/anthropic_bearer_test.go",
-    "line": 92
-  },
-  {
-    "method": "GET",
-    "path": "X-Api-Key",
-    "handler": "",
-    "file": "internal/llm/anthropic_bearer_test.go",
-    "line": 152
-  },
-  {
-    "method": "GET",
-    "path": "X-Api-Key",
-    "handler": "",
-    "file": "internal/llm/anthropic_bearer_test.go",
-    "line": 179
-  },
-  {
-    "method": "GET",
-    "path": "X-Custom",
-    "handler": "",
-    "file": "internal/tools/mcp/transport/http_test.go",
-    "line": 123
-  },
-  {
-    "method": "GET",
     "path": "X-Forwarded-For",
     "handler": "",
     "file": "internal/comm/web/auth.go",
@@ -2661,209 +2115,6 @@
   },
   {
     "method": "GET",
-    "path": "X-Saw-Authorization",
-    "handler": "",
-    "file": "internal/integration/containment_test.go",
-    "line": 206
-  },
-  {
-    "method": "GET",
-    "path": "X-Saw-Authorization",
-    "handler": "",
-    "file": "internal/integration/containment_test.go",
-    "line": 209
-  },
-  {
-    "method": "GET",
-    "path": "X-Saw-Authorization",
-    "handler": "",
-    "file": "internal/integration/containment_test.go",
-    "line": 244
-  },
-  {
-    "method": "GET",
-    "path": "X-Saw-Authorization",
-    "handler": "",
-    "file": "internal/secrets/proxy_test.go",
-    "line": 243
-  },
-  {
-    "method": "GET",
-    "path": "add-test",
-    "handler": "",
-    "file": "internal/scheduler/persistence_test.go",
-    "line": 153
-  },
-  {
-    "method": "GET",
-    "path": "client_id",
-    "handler": "",
-    "file": "internal/auth/device_flow_form_test.go",
-    "line": 56
-  },
-  {
-    "method": "GET",
-    "path": "coder",
-    "handler": "",
-    "file": "internal/agent/capabilities_test.go",
-    "line": 108
-  },
-  {
-    "method": "GET",
-    "path": "coder",
-    "handler": "",
-    "file": "internal/agent/capability_matcher_test.go",
-    "line": 171
-  },
-  {
-    "method": "GET",
-    "path": "coder",
-    "handler": "",
-    "file": "internal/agent/registry_test.go",
-    "line": 758
-  },
-  {
-    "method": "GET",
-    "path": "conv-1",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 547
-  },
-  {
-    "method": "GET",
-    "path": "conv-1",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 582
-  },
-  {
-    "method": "GET",
-    "path": "conv-guards-ladder",
-    "handler": "",
-    "file": "internal/agent/guards_test.go",
-    "line": 237
-  },
-  {
-    "method": "GET",
-    "path": "conv-guards-rollback",
-    "handler": "",
-    "file": "internal/agent/guards_test.go",
-    "line": 297
-  },
-  {
-    "method": "GET",
-    "path": "conv-guards-rollback-off",
-    "handler": "",
-    "file": "internal/agent/guards_test.go",
-    "line": 347
-  },
-  {
-    "method": "GET",
-    "path": "conv-guards-watchdog",
-    "handler": "",
-    "file": "internal/agent/guards_test.go",
-    "line": 397
-  },
-  {
-    "method": "DELETE",
-    "path": "conv1",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 349
-  },
-  {
-    "method": "GET",
-    "path": "conv1",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 309
-  },
-  {
-    "method": "GET",
-    "path": "conv1",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 317
-  },
-  {
-    "method": "GET",
-    "path": "conv1",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 346
-  },
-  {
-    "method": "GET",
-    "path": "conv1",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 363
-  },
-  {
-    "method": "GET",
-    "path": "conv1",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 368
-  },
-  {
-    "method": "GET",
-    "path": "conv2",
-    "handler": "",
-    "file": "internal/agent/loop_test.go",
-    "line": 191
-  },
-  {
-    "method": "GET",
-    "path": "conv2",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 323
-  },
-  {
-    "method": "GET",
-    "path": "conv2",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 347
-  },
-  {
-    "method": "GET",
-    "path": "conv2",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 364
-  },
-  {
-    "method": "GET",
-    "path": "conv3",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 324
-  },
-  {
-    "method": "GET",
-    "path": "conv3",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 365
-  },
-  {
-    "method": "GET",
-    "path": "conv4",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 331
-  },
-  {
-    "method": "GET",
-    "path": "conv4",
-    "handler": "",
-    "file": "internal/agent/conversation_test.go",
-    "line": 371
-  },
-  {
-    "method": "GET",
     "path": "conversation_id",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
@@ -2878,31 +2129,10 @@
   },
   {
     "method": "GET",
-    "path": "decompose",
-    "handler": "",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 72
-  },
-  {
-    "method": "GET",
-    "path": "design",
-    "handler": "",
-    "file": "internal/agent/artifacts_test.go",
-    "line": 25
-  },
-  {
-    "method": "GET",
     "path": "designation",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
     "line": 4022
-  },
-  {
-    "method": "GET",
-    "path": "does-not-exist",
-    "handler": "",
-    "file": "internal/agent/manager_test.go",
-    "line": 48
   },
   {
     "method": "GET",
@@ -2912,74 +2142,25 @@
     "line": 2595
   },
   {
-    "method": "DELETE",
-    "path": "e2e_test",
-    "handler": "",
-    "file": "internal/agent/phase1_e2e_test.go",
-    "line": 72
-  },
-  {
     "method": "GET",
-    "path": "enabled-test",
+    "path": "file_edit",
     "handler": "",
-    "file": "internal/scheduler/persistence_test.go",
-    "line": 330
-  },
-  {
-    "method": "GET",
-    "path": "enabled-test",
-    "handler": "",
-    "file": "internal/scheduler/persistence_test.go",
-    "line": 340
-  },
-  {
-    "method": "GET",
-    "path": "existing",
-    "handler": "",
-    "file": "internal/scheduler/persistence_test.go",
-    "line": 525
-  },
-  {
-    "method": "GET",
-    "path": "export-1",
-    "handler": "",
-    "file": "internal/scheduler/persistence_test.go",
-    "line": 466
+    "file": "internal/daemon/components.go",
+    "line": 5958
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 5937
-  },
-  {
-    "method": "GET",
-    "path": "file_edit",
-    "handler": "",
-    "file": "internal/daemon/components.go",
-    "line": 5948
-  },
-  {
-    "method": "GET",
-    "path": "file_read",
-    "handler": "",
-    "file": "internal/agent/verification_spawn_test.go",
-    "line": 181
-  },
-  {
-    "method": "GET",
-    "path": "file_write",
-    "handler": "",
-    "file": "internal/agent/verification_spawn_test.go",
-    "line": 183
+    "line": 5969
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 5929
+    "line": 5950
   },
   {
     "method": "GET",
@@ -2990,80 +2171,10 @@
   },
   {
     "method": "GET",
-    "path": "get-test",
-    "handler": "",
-    "file": "internal/skills/lazy_loader_test.go",
-    "line": 308
-  },
-  {
-    "method": "GET",
-    "path": "get-test",
-    "handler": "",
-    "file": "internal/skills/lazy_loader_test.go",
-    "line": 316
-  },
-  {
-    "method": "DELETE",
-    "path": "github-models",
-    "handler": "",
-    "file": "internal/auth/token_store_test.go",
-    "line": 59
-  },
-  {
-    "method": "GET",
-    "path": "grant_type",
-    "handler": "",
-    "file": "internal/auth/refresh_test.go",
-    "line": 19
-  },
-  {
-    "method": "GET",
-    "path": "grant_type",
-    "handler": "",
-    "file": "internal/auth/device_flow_test.go",
-    "line": 295
-  },
-  {
-    "method": "GET",
-    "path": "grant_type",
-    "handler": "",
-    "file": "internal/auth/device_flow_test.go",
-    "line": 296
-  },
-  {
-    "method": "GET",
     "path": "hash",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
     "line": 1140
-  },
-  {
-    "method": "GET",
-    "path": "http://",
-    "handler": "",
-    "file": "internal/secrets/proxy_test.go",
-    "line": 461
-  },
-  {
-    "method": "GET",
-    "path": "http://",
-    "handler": "",
-    "file": "internal/secrets/proxy_test.go",
-    "line": 471
-  },
-  {
-    "method": "GET",
-    "path": "http://127.0.0.1:9/",
-    "handler": "",
-    "file": "internal/security/ssrf/guard_test.go",
-    "line": 364
-  },
-  {
-    "method": "GET",
-    "path": "http://fake.internal.host:9/",
-    "handler": "",
-    "file": "internal/security/ssrf/guard_test.go",
-    "line": 353
   },
   {
     "method": "GET",
@@ -3102,20 +2213,6 @@
   },
   {
     "method": "GET",
-    "path": "lastrun-test",
-    "handler": "",
-    "file": "internal/scheduler/persistence_test.go",
-    "line": 279
-  },
-  {
-    "method": "GET",
-    "path": "lastrun-test",
-    "handler": "",
-    "file": "internal/scheduler/persistence_test.go",
-    "line": 296
-  },
-  {
-    "method": "GET",
     "path": "limit",
     "handler": "",
     "file": "internal/comm/web/server.go",
@@ -3134,20 +2231,6 @@
     "handler": "",
     "file": "internal/comm/http/changes_handlers.go",
     "line": 142
-  },
-  {
-    "method": "GET",
-    "path": "memory_store",
-    "handler": "",
-    "file": "internal/agent/verification_spawn_test.go",
-    "line": 184
-  },
-  {
-    "method": "GET",
-    "path": "missing_tool",
-    "handler": "",
-    "file": "internal/agent/executor_test.go",
-    "line": 127
   },
   {
     "method": "GET",
@@ -3171,41 +2254,6 @@
     "line": 4105
   },
   {
-    "method": "DELETE",
-    "path": "nonexistent",
-    "handler": "",
-    "file": "internal/auth/token_store_test.go",
-    "line": 83
-  },
-  {
-    "method": "GET",
-    "path": "nonexistent",
-    "handler": "",
-    "file": "internal/tools/registry_test.go",
-    "line": 106
-  },
-  {
-    "method": "GET",
-    "path": "nonexistent",
-    "handler": "",
-    "file": "internal/registry/registry_test.go",
-    "line": 133
-  },
-  {
-    "method": "GET",
-    "path": "nonexistent",
-    "handler": "",
-    "file": "internal/templates/registry_test.go",
-    "line": 51
-  },
-  {
-    "method": "GET",
-    "path": "nonexistent",
-    "handler": "",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 83
-  },
-  {
     "method": "GET",
     "path": "offset",
     "handler": "",
@@ -3214,94 +2262,10 @@
   },
   {
     "method": "GET",
-    "path": "old-session",
-    "handler": "",
-    "file": "internal/session/store_sqlite_test.go",
-    "line": 168
-  },
-  {
-    "method": "GET",
-    "path": "originator",
-    "handler": "",
-    "file": "internal/llm/codex_test.go",
-    "line": 163
-  },
-  {
-    "method": "GET",
     "path": "path",
     "handler": "",
     "file": "internal/comm/http/filesystem_handlers.go",
     "line": 37
-  },
-  {
-    "method": "GET",
-    "path": "phase4-e2e-1",
-    "handler": "",
-    "file": "internal/agent/phase4_e2e_test.go",
-    "line": 76
-  },
-  {
-    "method": "PUT",
-    "path": "planner/broken.md",
-    "handler": "\"{{ .Broken\"",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 120
-  },
-  {
-    "method": "DELETE",
-    "path": "planner/decompose.md",
-    "handler": "",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 146
-  },
-  {
-    "method": "GET",
-    "path": "planner/decompose.md",
-    "handler": "",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 110
-  },
-  {
-    "method": "GET",
-    "path": "planner/decompose.md",
-    "handler": "",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 150
-  },
-  {
-    "method": "PUT",
-    "path": "planner/decompose.md",
-    "handler": "content",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 97
-  },
-  {
-    "method": "PUT",
-    "path": "planner/decompose.md",
-    "handler": "\"USER OVERRIDE {{.X}}\"",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 142
-  },
-  {
-    "method": "PUT",
-    "path": "planner/empty.md",
-    "handler": "\"\"",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 128
-  },
-  {
-    "method": "GET",
-    "path": "planner/interview.md",
-    "handler": "",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 53
-  },
-  {
-    "method": "DELETE",
-    "path": "planner/none.md",
-    "handler": "",
-    "file": "internal/services/prompt_service_test.go",
-    "line": 158
   },
   {
     "method": "GET",
@@ -3319,20 +2283,6 @@
   },
   {
     "method": "GET",
-    "path": "refresh_token",
-    "handler": "",
-    "file": "internal/auth/device_flow_test.go",
-    "line": 298
-  },
-  {
-    "method": "GET",
-    "path": "refresh_token",
-    "handler": "",
-    "file": "internal/auth/device_flow_test.go",
-    "line": 299
-  },
-  {
-    "method": "GET",
     "path": "resolution",
     "handler": "",
     "file": "internal/comm/http/server.go",
@@ -3343,49 +2293,14 @@
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 895
+    "line": 902
   },
   {
     "method": "GET",
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1026
-  },
-  {
-    "method": "GET",
-    "path": "scope",
-    "handler": "",
-    "file": "internal/auth/device_flow_form_test.go",
-    "line": 59
-  },
-  {
-    "method": "GET",
-    "path": "sess-creates-no",
-    "handler": "",
-    "file": "internal/agent/manager_test.go",
-    "line": 69
-  },
-  {
-    "method": "GET",
-    "path": "sess-getme",
-    "handler": "",
-    "file": "internal/agent/manager_test.go",
-    "line": 60
-  },
-  {
-    "method": "GET",
-    "path": "sess-remove",
-    "handler": "",
-    "file": "internal/agent/manager_test.go",
-    "line": 91
-  },
-  {
-    "method": "GET",
-    "path": "sess-remove",
-    "handler": "",
-    "file": "internal/agent/manager_test.go",
-    "line": 98
+    "line": 1039
   },
   {
     "method": "GET",
@@ -3393,13 +2308,6 @@
     "handler": "",
     "file": "internal/comm/http/changes_handlers.go",
     "line": 140
-  },
-  {
-    "method": "GET",
-    "path": "session-legacy1",
-    "handler": "",
-    "file": "internal/session/owner_store_test.go",
-    "line": 96
   },
   {
     "method": "GET",
@@ -3424,13 +2332,6 @@
   },
   {
     "method": "GET",
-    "path": "shell_execute",
-    "handler": "",
-    "file": "internal/agent/verification_spawn_test.go",
-    "line": 182
-  },
-  {
-    "method": "GET",
     "path": "since",
     "handler": "",
     "file": "internal/comm/http/notification_handlers.go",
@@ -3442,13 +2343,6 @@
     "handler": "",
     "file": "internal/employee/api_handlers.go",
     "line": 386
-  },
-  {
-    "method": "GET",
-    "path": "skill-1",
-    "handler": "",
-    "file": "internal/skills/registry_test.go",
-    "line": 310
   },
   {
     "method": "GET",
@@ -3466,66 +2360,10 @@
   },
   {
     "method": "GET",
-    "path": "stub.ping",
-    "handler": "",
-    "file": "internal/daemon/mcp_refresher_test.go",
-    "line": 99
-  },
-  {
-    "method": "GET",
-    "path": "stub.ping",
-    "handler": "",
-    "file": "internal/daemon/mcp_refresher_test.go",
-    "line": 111
-  },
-  {
-    "method": "GET",
-    "path": "summarize",
-    "handler": "",
-    "file": "internal/templates/registry_test.go",
-    "line": 20
-  },
-  {
-    "method": "GET",
     "path": "tags",
     "handler": "",
     "file": "internal/comm/web/server.go",
     "line": 522
-  },
-  {
-    "method": "GET",
-    "path": "task-1",
-    "handler": "",
-    "file": "internal/task/interrupt_manager_test.go",
-    "line": 37
-  },
-  {
-    "method": "GET",
-    "path": "task-1",
-    "handler": "",
-    "file": "internal/task/interrupt_manager_test.go",
-    "line": 44
-  },
-  {
-    "method": "GET",
-    "path": "task-1",
-    "handler": "",
-    "file": "internal/task/interrupt_manager_test.go",
-    "line": 63
-  },
-  {
-    "method": "GET",
-    "path": "task-1",
-    "handler": "",
-    "file": "internal/task/interrupt_manager_test.go",
-    "line": 82
-  },
-  {
-    "method": "GET",
-    "path": "task-1",
-    "handler": "",
-    "file": "internal/task/interrupt_manager_test.go",
-    "line": 124
   },
   {
     "method": "GET",
@@ -3540,132 +2378,6 @@
     "handler": "",
     "file": "internal/tui/render/syntax.go",
     "line": 36
-  },
-  {
-    "method": "GET",
-    "path": "test",
-    "handler": "",
-    "file": "internal/registry/registry_test.go",
-    "line": 145
-  },
-  {
-    "method": "GET",
-    "path": "test",
-    "handler": "",
-    "file": "internal/templates/registry_test.go",
-    "line": 118
-  },
-  {
-    "method": "GET",
-    "path": "test",
-    "handler": "",
-    "file": "internal/templates/registry_test.go",
-    "line": 308
-  },
-  {
-    "method": "GET",
-    "path": "test-conv",
-    "handler": "",
-    "file": "internal/agent/loop_test.go",
-    "line": 121
-  },
-  {
-    "method": "GET",
-    "path": "test-job-pause",
-    "handler": "",
-    "file": "internal/scheduler/scheduler_test.go",
-    "line": 283
-  },
-  {
-    "method": "GET",
-    "path": "test-job-pause",
-    "handler": "",
-    "file": "internal/scheduler/scheduler_test.go",
-    "line": 296
-  },
-  {
-    "method": "GET",
-    "path": "test-skill",
-    "handler": "",
-    "file": "internal/skills/index_test.go",
-    "line": 76
-  },
-  {
-    "method": "GET",
-    "path": "test-skill",
-    "handler": "",
-    "file": "internal/skills/registry_test.go",
-    "line": 19
-  },
-  {
-    "method": "GET",
-    "path": "test-skill",
-    "handler": "",
-    "file": "internal/skills/lifecycle/writer_test.go",
-    "line": 182
-  },
-  {
-    "method": "GET",
-    "path": "test-skill",
-    "handler": "",
-    "file": "internal/skills/lifecycle/writer_test.go",
-    "line": 191
-  },
-  {
-    "method": "GET",
-    "path": "test-skill",
-    "handler": "",
-    "file": "internal/skills/lifecycle/writer_test.go",
-    "line": 200
-  },
-  {
-    "method": "GET",
-    "path": "test1",
-    "handler": "",
-    "file": "internal/preferences/store_test.go",
-    "line": 77
-  },
-  {
-    "method": "GET",
-    "path": "test_tool",
-    "handler": "",
-    "file": "internal/tools/registry_test.go",
-    "line": 52
-  },
-  {
-    "method": "GET",
-    "path": "test_tool",
-    "handler": "",
-    "file": "internal/tools/registry_test.go",
-    "line": 74
-  },
-  {
-    "method": "GET",
-    "path": "test_tool",
-    "handler": "",
-    "file": "internal/tools/registry_test.go",
-    "line": 115
-  },
-  {
-    "method": "GET",
-    "path": "test_tool",
-    "handler": "",
-    "file": "internal/agent/executor_test.go",
-    "line": 117
-  },
-  {
-    "method": "GET",
-    "path": "text",
-    "handler": "",
-    "file": "internal/calendar/reminder_test.go",
-    "line": 151
-  },
-  {
-    "method": "GET",
-    "path": "text",
-    "handler": "",
-    "file": "internal/calendar/reminder_test.go",
-    "line": 152
   },
   {
     "method": "GET",
@@ -3690,51 +2402,9 @@
   },
   {
     "method": "GET",
-    "path": "to-remove",
-    "handler": "",
-    "file": "internal/skills/registry_test.go",
-    "line": 78
-  },
-  {
-    "method": "GET",
-    "path": "to-remove",
-    "handler": "",
-    "file": "internal/skills/registry_test.go",
-    "line": 87
-  },
-  {
-    "method": "DELETE",
-    "path": "to_delete",
-    "handler": "",
-    "file": "internal/preferences/store_test.go",
-    "line": 97
-  },
-  {
-    "method": "GET",
-    "path": "to_delete",
-    "handler": "",
-    "file": "internal/preferences/store_test.go",
-    "line": 102
-  },
-  {
-    "method": "GET",
-    "path": "tool_",
-    "handler": "",
-    "file": "internal/tools/registry_test.go",
-    "line": 269
-  },
-  {
-    "method": "GET",
     "path": "topic",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
     "line": 3793
-  },
-  {
-    "method": "GET",
-    "path": "update-test",
-    "handler": "",
-    "file": "internal/scheduler/persistence_test.go",
-    "line": 238
   }
 ]

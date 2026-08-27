@@ -43,7 +43,7 @@ def find_go_files():
         for dirpath, dirnames, filenames in os.walk(base):
             dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
             for f in filenames:
-                if f.endswith(".go"):
+                if f.endswith(".go") and not f.endswith("_test.go"):
                     yield Path(dirpath) / f
 
 
@@ -64,6 +64,13 @@ RE_PUBLISH = re.compile(
     r'\.Publish\(\s*"([^"]+)"'
 )
 
+# Matches wrapper-helper bodies: .Publish(topicVar, msg) where the topic is an
+# identifier, not a string literal. Marks the enclosing function as a
+# publish-through helper; its call sites are attributed in pass 2.
+RE_PUBLISH_VAR = re.compile(
+    r'\.Publish\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*,'
+)
+
 # Matches: bus.Subscribe(id, "topic") / s.bus.Subscribe("id", "topic")
 # Also: bus.Subscribe("id", "topic.*") for wildcards
 RE_SUBSCRIBE = re.compile(
@@ -81,26 +88,37 @@ RE_PAYLOAD_KEY = re.compile(r'"([a-z_]+)"\s*:')
 
 
 def extract_bus_topology():
-    """Extract all bus.Publish and bus.Subscribe calls with file:line."""
+    """Extract all bus.Publish and bus.Subscribe calls with file:line.
+
+    Publisher detection covers two shapes:
+      1. Direct: bus.Publish("topic", msg)
+      2. Indirect via a wrapper helper: e.g. func (q *Q) publishEvent(topic
+         string, ...) { ... bus.Publish(topic, msg) }. The helper's body
+         contains .Publish(<identifier>); we find call sites of that helper
+         (by name, string literal first arg) and attribute the topic there.
+    """
     publishers = defaultdict(list)   # topic -> [{file, line, payload_keys}]
     subscribers = defaultdict(list)  # topic -> [{file, line, subscriber_id}]
 
-    for fpath in find_go_files():
+    go_files = list(find_go_files())
+
+    # Pass 1: collect direct publishes and wrapper-publish helpers.
+    # publish_helpers maps helperName -> [(file, line)] of its Publish var site.
+    publish_helpers = defaultdict(list)
+
+    for fpath in go_files:
         try:
             lines = fpath.read_text(errors="replace").splitlines()
         except OSError:
             continue
 
         for i, line in enumerate(lines, 1):
-            # Skip comments and test files for cleaner output
             stripped = line.strip()
             if stripped.startswith("//"):
                 continue
 
-            # Publishers
             for m in RE_PUBLISH.finditer(line):
                 topic = m.group(1)
-                # Try to extract payload keys from nearby lines (the map literal)
                 payload_keys = _extract_payload_keys(lines, i - 1)
                 publishers[topic].append({
                     "file": rel(fpath),
@@ -108,11 +126,62 @@ def extract_bus_topology():
                     "payload_keys": sorted(payload_keys),
                 })
 
-            # Subscribers
+            # Wrapper-helper bodies end in .Publish(topicVar, msg). Record the
+            # enclosing function's name so pass 2 can match its call sites.
+            for m in RE_PUBLISH_VAR.finditer(line):
+                fn = _enclosing_func(lines, i - 1)
+                if fn:
+                    publish_helpers[fn].append(rel(fpath))
+
+    # Pass 2: attribute topics published through helpers. A call like
+    # q.publishEvent("topic", map...) whose helper publishes a variable topic
+    # is treated as a real publisher of that topic.
+    re_call = None  # built lazily per helper name
+    helper_callsites = []
+    seen_names = set(publish_helpers)
+    if seen_names:
+        names = "|".join(re.escape(n) for n in sorted(seen_names))
+        re_call = re.compile(
+            r'\.(?:' + names + r')\(\s*"([^"]+)"'
+        )
+
+    for fpath in go_files:
+        if not re_call:
+            break
+        try:
+            lines = fpath.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("//") or not re_call:
+                continue
+            for m in re_call.finditer(line):
+                topic = m.group(1)
+                payload_keys = _extract_payload_keys(lines, i - 1)
+                publishers[topic].append({
+                    "file": rel(fpath),
+                    "line": i,
+                    "payload_keys": sorted(payload_keys),
+                    "via_helper": True,
+                })
+                helper_callsites.append((rel(fpath), i))
+
+    # Subscribers (same file walk as before)
+    for fpath in go_files:
+        try:
+            lines = fpath.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("//"):
+                continue
+
             for m in RE_SUBSCRIBE.finditer(line):
                 topic = m.group(1)
-                # Extract subscriber ID (first string arg)
-                sub_id_m = re.search(r'\.Subscribe\(\s*"([^"]*)"', line)
+                sub_id_m = re.search(r'\.Subscribe\(\s*"[^"]*"\s*,\s*"([^"]+)"', line)
                 sub_id = sub_id_m.group(1) if sub_id_m else "?"
                 subscribers[topic].append({
                     "file": rel(fpath),
@@ -122,7 +191,7 @@ def extract_bus_topology():
 
             for m in RE_SUBSCRIBE_WILDCARD.finditer(line):
                 topic = m.group(1)
-                sub_id_m = re.search(r'\.SubscribeWildcard\(\s*"([^"]*)"', line)
+                sub_id_m = re.search(r'\.SubscribeWildcard\(\s*"[^"]*"\s*,\s*"([^"]+)"', line)
                 sub_id = sub_id_m.group(1) if sub_id_m else "?"
                 subscribers[topic].append({
                     "file": rel(fpath),
@@ -132,6 +201,19 @@ def extract_bus_topology():
                 })
 
     return publishers, subscribers
+
+
+def _enclosing_func(lines, idx):
+    """Walk backwards from a 0-based line index to find the enclosing Go
+    function's declared name, tolerating receiver methods."""
+    fn_re = re.compile(r'^func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)')
+    depth = 0
+    for j in range(idx, max(idx - 400, -1), -1):
+        line = lines[j]
+        m = fn_re.match(line.strip())
+        if m and "func" in line:
+            return m.group(1)
+    return None
 
 
 def _extract_payload_keys(lines, pub_line_idx):
@@ -290,6 +372,7 @@ def cross_reference(publishers, subscribers):
 
     # Expand wildcard subscriptions
     expanded_subs = set()
+    matched_wildcards = set()
     for t in sub_topics:
         if t.endswith(".*") or t.endswith(".#"):
             prefix = t.rsplit(".", 1)[0]
@@ -297,17 +380,21 @@ def cross_reference(publishers, subscribers):
             for pt in pub_topics:
                 if pt.startswith(prefix):
                     expanded_subs.add(pt)
+                    matched_wildcards.add(t)
         else:
             expanded_subs.add(t)
 
     orphan_publishers = pub_topics - expanded_subs
-    orphan_subscribers = sub_topics - pub_topics
+    # A wildcard subscription is satisfied when at least one concrete topic
+    # matches its prefix; only unmatched wildcards are dead listeners.
+    orphan_subscribers = {
+        t for t in sub_topics if not (t in matched_wildcards or t in pub_topics)
+    }
 
     return {
         "published_not_subscribed": sorted(orphan_publishers),
         "subscribed_not_published": sorted(orphan_subscribers),
     }
-
 
 def generate_markdown(publishers, subscribers, rpc_handlers, http_routes, ws_map, xref):
     """Generate a human-readable markdown report."""
