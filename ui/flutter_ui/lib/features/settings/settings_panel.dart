@@ -13,6 +13,7 @@ import '../../providers/providers.dart';
 import 'settings_inputs.dart';
 import 'orchestrator_config_editor.dart';
 import 'client_prefs_editor.dart';
+import 'users_panel.dart';
 import '../../widgets/error_banner.dart';
 
 /// Form field names used throughout the settings panel.
@@ -305,6 +306,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                 _buildConnectionSection(storage),
                 const ClientPrefsEditor(),
                 const OrchestratorConfigEditor(),
+                const UsersPanel(),
                 if (_error != null)
                   ErrorBanner(message: _error!, onDismiss: _loadConfig),
                 _buildEditor(),

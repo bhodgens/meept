@@ -137,6 +137,7 @@ type App struct {
 	fuzzyFinder         *FuzzyFinderModal
 	branchPicker        *BranchPickerModal
 	projectPicker       *ProjectPickerModal
+	usersModal          *UsersModal
 	pendingChangesModal *modals.PendingChangesModal
 	pendingChangesCount int // status bar indicator (0 hides it)
 
@@ -319,6 +320,7 @@ func NewApp(socketPath string, cwd string) *App {
 		app.branchPicker = NewBranchPickerModal(styles, rpc)
 	}
 	app.projectPicker = NewProjectPickerModal(styles, rpc)
+	app.usersModal = NewUsersModal(styles)
 	app.pendingChangesModal = modals.NewPendingChangesModal(&changesRPCAPI{rpc: rpc})
 
 	// Initialize slash autocomplete
@@ -2111,6 +2113,12 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalProjectPicker
 			a.projectPicker.Show()
 			return a, a.projectPicker.RefreshProjects()
+		case "u":
+			// users awareness modal (v1 read-only; actions shell out to the
+			// meept users cli on the daemon host).
+			a.activeModal = ModalUsers
+			a.usersModal.Show()
+			return a, nil
 		}
 		return a, nil
 
@@ -2127,6 +2135,20 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalNone
 		}
 		return a, cmd
+
+	case ModalUsers:
+		// Awareness-only modal: all rows are disabled so no row key acts;
+		// navigation and esc still work through the shared handler. The
+		// returned action string is intentionally unused — disabled rows
+		// produce no actions and the shared handler owns visibility.
+		action := a.usersModal.HandleKey(keyStr)
+		if action != "" {
+			return a, nil
+		}
+		if !a.usersModal.IsVisible() {
+			a.activeModal = ModalNone
+		}
+		return a, nil
 
 	case ModalConfirm:
 		if a.confirmModal != nil {
@@ -2411,6 +2433,11 @@ func (a *App) renderModalOverlay() string {
 			return ""
 		}
 		return a.pendingChangesModal.View(a.width, a.height)
+	case ModalUsers:
+		if a.usersModal == nil {
+			return ""
+		}
+		return a.usersModal.View(a.width, a.height)
 	}
 	return ""
 }
