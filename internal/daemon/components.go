@@ -337,6 +337,12 @@ type Components struct {
 	// wired; its Enabled flag tracks multi-user mode.
 	UsersSync *bkpkg.UsersSync
 
+	// AuthUsersStore is the multi-user identity store shared between HTTP
+	// authentication (daemon.go hands it to the HTTP server instead of
+	// opening its own) and cluster user pooling. Nil when multi-user is
+	// disabled or clustering is off.
+	AuthUsersStore *authpkg.Store
+
 	// PTY sessions for interactive tool streaming
 	PTYManager *pty.Manager
 
@@ -839,12 +845,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if len(inUse) > 0 {
 			c.ContainerManager.SetModelsInUse(inUse)
 		}
-		// Start local LLM runtimes
-		if err := c.ContainerManager.StartAll(ctx); err != nil {
-			logger.Error("Failed to start LLM runtimes", "error", err)
-		} else {
-			logger.Info("LLM runtimes started")
-		}
+		// LLM runtime start is intentionally NOT synchronous here.
+		// Run() (daemon.go) starts runtimes in a background goroutine so a
+		// slow-loading model (~90s llama.cpp warm start observed) cannot
+		// delay pidfile/RPC socket readiness. Keep construction cheap:
+		// registration + in-use set only.
 	}
 
 	// Create learning pipeline
@@ -1467,22 +1472,38 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	// Cluster user pooling (multiuser leaf 03): pool multiuser accounts
-	// across cluster peers over the gossip event channel. UsersSync is
-	// structurally wired whenever clustering is available; Enabled stays
-	// false until the multiuser switch lands in config (see MultiUserConfig
-	// in docs/plans/2026-08-26-multiuser-access/master.md). Its merge
-	// target (auth.Store) arrives with the leaf-02 integration — until a
-	// store is passed to NewUsersSync, inbound payloads are no-ops.
+	// across cluster peers over the gossip event channel. Active only when
+	// BOTH clustering and multiuser are enabled; multiuser also constructs
+	// the shared auth users store here so HTTP auth (daemon.go) and the
+	// sync pool merge into ONE store instance.
 	if cfg.Cluster.Enabled && c.DualStore != nil {
 		nodeID := cfg.Cluster.NodeID
 		if nodeID == "" {
 			nodeID = "local"
 		}
+		multiuserEnabled := cfg.MultiUser.Enabled
+		usersFile := cfg.MultiUser.UsersFile
+		if usersFile == "" {
+			usersFile = filepath.Join(cfg.Daemon.DataDir, "users.json5")
+		}
+		var usersStore *authpkg.Store
+		if multiuserEnabled {
+			store, sErr := authpkg.NewStore(usersFile)
+			if sErr != nil || store == nil {
+				logger.Error("multi-user enabled but users store failed to open; pooling disabled",
+					"users_file", usersFile, "error", sErr)
+			} else {
+				usersStore = store
+				c.AuthUsersStore = store
+				logger.Info(fmt.Sprintf("multi-user authentication enabled (%d users)", store.UserCount()))
+			}
+		}
 		usersSync := bkpkg.NewUsersSync(
 			bkpkg.UsersSyncConfig{
-				UsersFile: filepath.Join(cfg.Daemon.DataDir, "users.json5"),
+				Enabled:   multiuserEnabled && usersStore != nil,
+				UsersFile: usersFile,
 			},
-			nil, // auth store: wired by leaf 02 integration (SetAuthStore)
+			usersStore,
 			nodeID,
 			func(eventType models.ClusterEventType, payload any) error {
 				if c.ClusterEngine == nil {
@@ -1504,7 +1525,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		)
 		c.UsersSync = usersSync
 		logger.Info("Cluster users sync configured",
-			"enabled", false, // flips with the future multiuser.enabled config switch
+			"enabled", multiuserEnabled && usersStore != nil,
 			"node_id", nodeID)
 	}
 
@@ -2036,12 +2057,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			ClassifierModelConfig: c.ClassifierModelConfig,
 			// Alias failover (leaf 03 of classifier-reliability): rotate the
 			// classifier alias chain on classification failures.
-			Resolver:        c.LLMResolver,
-			ClassifierAlias: c.ModelsConfig.ClassifierModel,
-			ClassifierModel: c.ModelsConfig.ClassifierModel,
-			ClassifierTimeout:     15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
-			SessionMaxAge:         30 * time.Minute,
-			AmbiguityThreshold:    cfg.Orchestrator.AmbiguityThreshold,
+			Resolver:           c.LLMResolver,
+			ClassifierAlias:    c.ModelsConfig.ClassifierModel,
+			ClassifierModel:    c.ModelsConfig.ClassifierModel,
+			ClassifierTimeout:  15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
+			SessionMaxAge:      30 * time.Minute,
+			AmbiguityThreshold: cfg.Orchestrator.AmbiguityThreshold,
 		})
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
