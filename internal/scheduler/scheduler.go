@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,6 +62,11 @@ type Scheduler struct {
 	runNowCtx    context.Context
 	runNowCancel context.CancelFunc
 	runNowWg     sync.WaitGroup
+
+	// Crash safety (claim-before-deliver + missed-tick coalescing).
+	claims             *claimStore
+	coalesceMissed     bool // default true: coalesce missed ticks to MAX per job
+	claimRetentionDays int  // prune claims older than this many days on startup
 }
 
 // Option is a functional option for configuring the Scheduler.
@@ -100,6 +106,31 @@ func WithNotificationEmitter(emitter NotificationEmitter) Option {
 	}
 }
 
+// WithCoalesceMissed controls missed-tick coalescing ([scheduler]
+// coalesce_missed). Default true: after downtime, only the latest due tick
+// per job is delivered once, with missed_count metadata. Set false to restore
+// the accumulate-each behavior (one delivery per missed tick).
+func WithCoalesceMissed(enabled bool) Option {
+	return func(s *Scheduler) error {
+		s.coalesceMissed = enabled
+		return nil
+	}
+}
+
+// WithClaimRetentionDays sets the claimed-tick retention window
+// ([scheduler] claim_retention_days). Claims older than this are pruned on
+// startup. Non-positive values fall back to DefaultClaimRetentionDays (7).
+func WithClaimRetentionDays(days int) Option {
+	return func(s *Scheduler) error {
+		if days <= 0 {
+			s.claimRetentionDays = DefaultClaimRetentionDays
+			return nil
+		}
+		s.claimRetentionDays = days
+		return nil
+	}
+}
+
 // NewScheduler creates a new Scheduler instance.
 func NewScheduler(cfg config.SchedulerConfig, msgBus *bus.MessageBus, opts ...Option) (*Scheduler, error) {
 	// Parse timezone
@@ -120,6 +151,10 @@ func NewScheduler(cfg config.SchedulerConfig, msgBus *bus.MessageBus, opts ...Op
 		entryIDs:    make(map[string]cron.EntryID),
 		runningJobs: make(map[string]bool),
 		location:    loc,
+
+		// Crash-safety defaults; options applied below may override.
+		coalesceMissed:     true,
+		claimRetentionDays: DefaultClaimRetentionDays,
 	}
 
 	// Apply options
@@ -135,6 +170,14 @@ func NewScheduler(cfg config.SchedulerConfig, msgBus *bus.MessageBus, opts ...Op
 		return nil, fmt.Errorf("failed to create store: %w", err)
 	}
 	s.store = store
+
+	// Open the claimed-ticks store next to jobs.json.
+	claimDBPath := filepath.Join(filepath.Dir(store.FilePath()), claimDBFileName)
+	claims, err := newClaimStore(claimDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create claim store: %w", err)
+	}
+	s.claims = claims
 
 	// Create cron scheduler with options
 	cronOpts := []cron.Option{
@@ -188,6 +231,15 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.cron.Start()
 	s.running.Store(true)
 
+	// Crash safety: prune expired claims, then catch up missed ticks since
+	// the last wake. Coalescing (default) delivers only the latest due tick
+	// per job with missed_count metadata; claim-before-deliver guarantees no
+	// duplicate delivery against ticks already claimed pre-crash.
+	s.pruneExpiredClaims()
+	if _, err := s.ProcessMissedTicks(time.Now().UTC()); err != nil {
+		s.logger.Warn("scheduler: missed-tick catch-up failed", "error", err)
+	}
+
 	// Publish startup event
 	if s.bus != nil {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler", map[string]any{
@@ -234,6 +286,13 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 		s.logger.Debug("scheduler: all jobs completed")
 	case <-ctx.Done():
 		s.logger.Warn("scheduler: shutdown timeout, some jobs may not have completed")
+	}
+
+	// Close the claim store after all jobs have drained.
+	if s.claims != nil {
+		if err := s.claims.close(); err != nil {
+			s.logger.Warn("scheduler: failed to close claim store", "error", err)
+		}
 	}
 
 	// Publish shutdown event
@@ -375,7 +434,7 @@ func (s *Scheduler) RunNow(jobID string) error {
 		ctx, cancel := context.WithTimeout(runNowCtx, 30*time.Minute)
 		defer cancel()
 
-		s.executeJob(ctx, job)
+		s.executeJob(ctx, job, ExecutionOptions{})
 	}()
 
 	s.logger.Info("scheduler: job triggered manually", "job_id", jobID)
@@ -523,6 +582,12 @@ func (s *Scheduler) JobCount() int {
 // wrapJob creates a function wrapper for the job that handles execution tracking.
 func (s *Scheduler) wrapJob(job Job) func() {
 	return func() {
+		// Snapshot the fire time as the tick for claim-before-deliver.
+		// robfig/cron does not pass the scheduled tick to jobs, and
+		// reading entry.Prev from here would race the cron loop; the
+		// wall-clock fire time serves as the tick identity.
+		fireTick := time.Now().UTC()
+
 		// Snapshot runNowCtx under lock to avoid racing with Start/Stop.
 		s.mu.RLock()
 		baseCtx := s.runNowCtx
@@ -533,13 +598,58 @@ func (s *Scheduler) wrapJob(job Job) func() {
 		ctx, cancel := context.WithTimeout(baseCtx, 30*time.Minute)
 		defer cancel()
 
-		s.executeJob(ctx, job)
+		s.executeJob(ctx, job, ExecutionOptions{Tick: fireTick})
 	}
 }
 
 // executeJob runs the job and tracks execution state.
-func (s *Scheduler) executeJob(ctx context.Context, job Job) {
+//
+// Claim-before-deliver: the tick is claimed atomically in the claim store
+// BEFORE dispatch. If the tick is already claimed (e.g. a previous daemon
+// instance claimed it and crashed before/after completion), delivery is
+// skipped so work is never duplicated. On claim-store errors the job is
+// skipped (fail closed: no duplicate delivery).
+func (s *Scheduler) executeJob(ctx context.Context, job Job, opts ExecutionOptions) {
 	jobID := job.ID()
+
+	// Determine the tick to claim. Callers on the scheduled path supply the
+	// fire tick; manual RunNow leaves it zero and falls back to the start
+	// time (nanosecond-unique, so claims never collide).
+	tick := opts.Tick
+	explicitTick := !tick.IsZero()
+	if tick.IsZero() {
+		tick = time.Now().UTC()
+	}
+
+	claimed := opts.PreClaimed
+	if !claimed {
+		var claimErr error
+		claimed, claimErr = s.ClaimTick(jobID, tick)
+		if claimErr != nil {
+			s.logger.Warn("scheduler: failed to claim tick, skipping delivery",
+				"job_id", jobID,
+				"tick", tick,
+				"error", claimErr,
+			)
+			return
+		}
+	}
+	if !claimed {
+		s.logger.Info("scheduler: tick already claimed, skipping duplicate delivery",
+			"job_id", jobID,
+			"tick", tick,
+		)
+		return
+	}
+
+	// Advance lastWake so a post-crash catch-up window starts after this
+	// delivered tick (only for scheduled fires, not manual RunNow).
+	if explicitTick {
+		if wakeErr := s.advanceLastWake(tick); wakeErr != nil {
+			s.logger.Warn("scheduler: failed to advance last wake",
+				"job_id", jobID, "error", wakeErr)
+		}
+	}
 
 	// Mark as running
 	s.mu.Lock()
@@ -556,12 +666,16 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 
 	// Publish job start event
 	if s.bus != nil {
-		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+jobID, map[string]any{
+		startPayload := map[string]any{
 			SchedulerKeyEvent: "job_started",
 			SchedulerKeyJobID: jobID,
 			"name":            job.Name(),
 			"type":            job.Type(),
-		})
+		}
+		if opts.MissedCount > 0 {
+			startPayload[SchedulerKeyMissedCount] = opts.MissedCount
+		}
+		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+jobID, startPayload)
 		s.bus.PublishExternalOnly("scheduler.job.started", msg)
 	}
 
@@ -586,6 +700,9 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 			"type":              job.Type(),
 			"duration":          duration.String(),
 			SchedulerKeySuccess: err == nil,
+		}
+		if opts.MissedCount > 0 {
+			result[SchedulerKeyMissedCount] = opts.MissedCount
 		}
 		if err != nil {
 			result["error"] = err.Error()

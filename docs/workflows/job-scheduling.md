@@ -60,6 +60,33 @@ Jobs that exhaust all retries are moved to the dead-letter queue:
 - **Queryable**: `ListDeadLetter(limit)` to inspect dead jobs
 - **Statistics**: `DeadLetterStats()` for monitoring
 
+### Crash Safety (Claim + Coalesce)
+
+> **Behavior change:** catch-up after downtime now delivers at most ONE run
+> per job (the latest due tick) instead of one run per missed tick. An
+> every-5-minute job down for 6 hours wakes to 1 run, not 72.
+
+Every scheduled delivery claims its tick atomically in a SQLite store
+(`scheduler_claims.db`, table `scheduler_claimed_ticks` with
+`UNIQUE(job_id, tick_time)`) **before** dispatch:
+
+- **Claim-before-deliver**: `ClaimTick(jobID, tick)` inserts the claim row; a
+  constraint violation means the tick was already delivered (possibly by a
+  daemon instance that crashed after claiming), so dispatch is skipped. Work
+  is never duplicated across crashes.
+- **Missed-tick coalescing**: on wake (daemon startup), due ticks since the
+  last wake are grouped per job and only `MAX(tick)` is enqueued, once, with
+  `missed_count` metadata on the job events (`missed_count` = number of ticks
+  skipped). Disabled mode enqueues every due tick individually.
+- **Retention**: claims older than the retention window (default 7 days) are
+  pruned on startup.
+
+Tuning is via scheduler options: `WithCoalesceMissed(bool)` (default `true`,
+equivalent to `[scheduler] coalesce_missed = true`) and
+`WithClaimRetentionDays(int)` (default 7, equivalent to
+`[scheduler] claim_retention_days = 7`). Claim-store failures fail closed:
+the tick is skipped rather than risk duplicate delivery.
+
 ## Configuration
 
 ```toml
