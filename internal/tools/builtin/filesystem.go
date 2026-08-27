@@ -979,6 +979,16 @@ func resolvePath(path string) (string, error) {
 		path = filepath.Join(home, path[1:])
 	}
 
+	// Relative paths resolve against the session's working directory when
+	// one is injected via context (agent loop per-session cwd). Falling back
+	// to filepath.Abs(process cwd) made benchmark step-jobs write outside
+	// their worktree: "answer.txt" landed in the daemon repo.
+	if !filepath.IsAbs(path) {
+		if wd := tools.WorkingDirFromContext(context.Background()); wd != "" {
+			path = filepath.Join(wd, path)
+		}
+	}
+
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve absolute path: %w", err)
