@@ -63,6 +63,11 @@ const (
 	IntentArchitect IntentType = "architect"
 	IntentSkeptic   IntentType = "skeptic"
 	IntentLibrarian IntentType = "librarian"
+
+	// Media work. Each routes to a specialist executor.
+	IntentImageGen IntentType = "image_gen"
+	IntentVideoGen IntentType = "video_gen"
+	IntentImageID  IntentType = "image_id"
 )
 
 // IntentCategory groups intents by routing behavior.
@@ -83,7 +88,8 @@ func (t IntentType) Category() IntentCategory {
 		return CategoryDefer
 	case IntentCompound:
 		return CategoryDefer
-	case IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian:
+	case IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian,
+		IntentImageGen, IntentVideoGen, IntentImageID:
 		return CategoryDefer
 	case IntentSkill:
 		return CategoryInline
@@ -154,6 +160,12 @@ func (t IntentType) DefaultAgent() string {
 		return config.AgentIDSkeptic
 	case IntentLibrarian:
 		return config.AgentIDLibrarian
+	case IntentImageGen:
+		return config.AgentIDImageGen
+	case IntentVideoGen:
+		return config.AgentIDVideoGen
+	case IntentImageID:
+		return config.AgentIDImageID
 	default:
 		return config.AgentIDChat
 	}
@@ -184,7 +196,7 @@ func (t IntentType) ShouldCreateTask() bool {
 // ShouldDispatchAsync returns true if the intent should be dispatched asynchronously.
 func (t IntentType) ShouldDispatchAsync(requiresPlanning bool) bool {
 	switch t {
-	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound, IntentPair, IntentCollaborate, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian:
+	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound, IntentPair, IntentCollaborate, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian, IntentImageGen, IntentVideoGen, IntentImageID:
 		return true
 	case IntentSchedule:
 		// Only dispatch async for schedule if it requires planning
@@ -201,7 +213,8 @@ func IsValidIntentType(s string) bool {
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
 		IntentSchedule, IntentAnalyze, IntentSearch, IntentResearch,
 		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCollaborate, IntentCompound, IntentClarify,
-		IntentInstruction, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian, IntentExplore:
+		IntentInstruction, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian, IntentExplore,
+		IntentImageGen, IntentVideoGen, IntentImageID:
 		return true
 	}
 	return false
@@ -267,6 +280,12 @@ func (t IntentType) Keywords() []string {
 		return []string{"stress-test", "stress test", "steelman", "what's wrong with", "what is wrong with", "challenge this", "adversarial"}
 	case IntentLibrarian:
 		return []string{"review memory", "memory review", "clean up tags", "mine backlog", "what contradictions", "what have i been thinking"}
+	case IntentImageGen:
+		return []string{"generate an image", "generate image", "text to image", "txt2img", "image generation", "create an image", "draw me", "render an image"}
+	case IntentVideoGen:
+		return []string{"generate a video", "generate video", "text to video", "txt2video", "video generation", "create a video", "animate this"}
+	case IntentImageID:
+		return []string{"identify this image", "identify the image", "what is this image", "describe this image", "what's in this photo", "analyze this image"}
 	case IntentExplore:
 		return []string{"explore", "find in codebase", "search codebase", "where is", "locate", "find file", "find function"}
 	default:

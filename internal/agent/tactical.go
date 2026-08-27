@@ -1119,6 +1119,12 @@ func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 		return config.AgentIDSkeptic
 	case string(IntentLibrarian):
 		return config.AgentIDLibrarian
+	case string(IntentImageGen):
+		return config.AgentIDImageGen
+	case string(IntentVideoGen):
+		return config.AgentIDVideoGen
+	case string(IntentImageID):
+		return config.AgentIDImageID
 	default:
 		return config.AgentIDChat
 	}

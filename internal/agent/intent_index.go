@@ -58,6 +58,7 @@ func (idx *SemanticIndex) BuildIndex(ctx context.Context) error {
 		IntentSkill, IntentCompound, IntentClarify,
 		// Plan 2: knowledge-work intents.
 		IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian,
+		IntentImageGen, IntentVideoGen, IntentImageID,
 	}
 
 	entries := make([]IntentEntry, 0, len(allIntents))
