@@ -79,7 +79,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall) |
 | **Memory** | `internal/memory` (manager, episodic, task, ftstore) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp) |
-| **Security** | `internal/security` (engine, sanitizer, tirith, tls, fence) |
+| **Security** | `internal/security` (engine, sanitizer, tirith, tls, fence), `internal/auth` (multi-user store: users/keys/expiry, quota+permission stubs) |
 | **Employee** | `internal/employee` (constitution, goal, goal_loop, enforcement, authority, manager) |
 | **Session** | `internal/session` (store, store_sqlite, threads, messages) |
 | **Services** | `internal/services` (chat, session, terminal, push, reflection) |
@@ -122,6 +122,28 @@ sends `session_id` as `conversation_id` in chat requests. WS subscriptions use
 `session_id`. Bus events carry `conversation_id`. New event/filter/routing code
 MUST handle both. The WS filter in `internal/comm/http/server.go` falls back
 from `session_id` to `conversation_id` — preserve this.
+
+### Multi-user is opt-in; RPC stays owner-trusted
+
+`multiuser.enabled` (default **false**) gates per-user key auth. When off:
+the daemon never constructs `internal/auth.Store`, HTTP auth uses the legacy
+flat-key path byte-identically, and sessions have no owner — every visible
+session belongs to everyone. Code touching auth, session ownership, or
+identity MUST preserve the disabled-path behavior exactly.
+
+Two trust boundaries, never mix them:
+
+- **HTTP/WS** (`transport.http`): bearer-key identity. In multi-user mode,
+  keys map to `*auth.Identity` via `IdentityFromContext`; expired/unknown
+  keys get 418. Sessions created through it are owner-scoped.
+- **Unix RPC** (`transport.rpc`): kernel-enforced same-OS-user only (0600
+  socket, optional SO_PEERCRED/LOCAL_PEERCRED UID allowlist). It has NO
+  user identity by design — RPC callers act as the daemon owner. Do not add
+  token auth to the socket path and do not expose the socket over a network.
+
+Cluster user pooling syncs users over gossip events
+(`USERS_SYNC` in `internal/backup/usersync.go`); foreign users' lifecycle
+belongs to peer sync — local code must not delete them.
 
 ### Daemon CWD is NOT the user's project
 

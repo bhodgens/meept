@@ -207,12 +207,12 @@ After all leaves COMPLETE:
 
 | Child | Status | Notes |
 |-------|--------|-------|
-| 01-auth-store.md | PENDING | |
-| 02-http-identity-sessions.md | PENDING | blocked by 01 |
-| 03-cluster-pooling.md | PENDING | blocked by 01 |
-| 04-user-management-cli.md | PENDING | blocked by 01 |
-| 05-client-tooling-tui-gui.md | PENDING | blocked by 01 |
-| 06-rpc-peercred.md | PENDING | independent — dispatch first |
+| 01-auth-store.md | COMPLETE | commit 756491ec |
+| 02-http-identity-sessions.md | COMPLETE | commits 15e8d344 + b926a483 (daemon wiring) |
+| 03-cluster-pooling.md | COMPLETE | commit 74d50167 — gossip channel, merge target nil-wired until leaf 02 integration |
+| 04-user-management-cli.md | COMPLETE | commit bc269da2 (+ bbbb3ccb sentinel follow-through) |
+| 05-client-tooling-tui-gui.md | COMPLETE | commit 99fc881e — awareness+CLI-guidance parity (no manage path exists on either surface) |
+| 06-rpc-peercred.md | COMPLETE | commit cbda76c9 |
 
 ## Open Questions (design-only, do NOT block implementation)
 
