@@ -6610,7 +6610,16 @@ func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
 	if p.taskStore != nil {
 		if t, err := p.taskStore.GetByID(job.TaskID); err == nil && t != nil {
 			for _, sessID := range t.LinkedSessions {
+				// LinkedSessions store conversation IDs (conv-…), not primary
+				// session IDs (session-…) — tasks are linked from the chat
+				// path, which keys on conversation. Try both lookups
+				// (meept-bench: project.set bound the worktree to the
+				// session, but Get() missed it and step jobs ran in the
+				// daemon's cwd).
 				sess := p.sessionStore.Get(sessID)
+				if sess == nil {
+					sess = p.sessionStore.GetByConversationID(sessID)
+				}
 				if sess == nil {
 					continue
 				}
