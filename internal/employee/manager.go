@@ -511,6 +511,15 @@ type Manager struct {
 	botManager *bot.Manager
 	botStore   *bot.Store
 
+	// seen tracks per-employee heartbeats for roster reachability
+	// (leaf 10). In-memory only.
+	seen seenTracker
+
+	// employeeMessager is the daemon-wired messaging adapter (leaf 10),
+	// held as any because the adapter's message types live in the
+	// tool layer (import-cycle constraint).
+	employeeMessager any
+
 	constitutionStore *ConstitutionStore
 	goalStore         *GoalStore
 	auditStore        *AuditStore
@@ -1369,6 +1378,10 @@ func (m *Manager) Trigger(ctx context.Context, id string, payload map[string]any
 	if c, ok := m.cachedConstitution(id); ok {
 		tierTag = c.AutonomyTier.String()
 	}
+
+	// Turn start: record the reachability heartbeat so Reachability() reflects
+	// employees whose loops actually fire (in-memory, no I/O).
+	m.MarkSeen(id)
 
 	// GoalLoop path: when a loop is registered, delegate to Decide under
 	// per-employee serialization.
