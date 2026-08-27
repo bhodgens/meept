@@ -2433,6 +2433,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.AgentRegistry != nil {
 		jobProc.WithRegistry(c.AgentRegistry)
 	}
+	if c.SessionStore != nil {
+		jobProc.WithSessionStore(c.SessionStore)
+	}
+	if taskStore != nil {
+		jobProc.WithTaskStore(taskStore)
+	}
 	c.JobProcessor = jobProc
 
 	// Create worker pool
@@ -6550,13 +6556,14 @@ func (h *StatusHandler) handleStatusRequest(msg *models.BusMessage) {
 	h.bus.Publish("status.response", respMsg)
 }
 
-// AgentJobProcessor processes jobs using the agent loop.
 // AgentJobProcessor processes jobs using the agent loop, with optional
 // multi-agent dispatch via the agent registry.
 type AgentJobProcessor struct {
-	agentLoop *agent.AgentLoop
-	registry  *agent.AgentRegistry
-	logger    *slog.Logger
+	agentLoop    *agent.AgentLoop
+	registry     *agent.AgentRegistry
+	taskStore    *task.Store
+	sessionStore session.Store
+	logger       *slog.Logger
 }
 
 // NewAgentJobProcessor creates a new agent job processor.
@@ -6571,6 +6578,71 @@ func NewAgentJobProcessor(agentLoop *agent.AgentLoop, logger *slog.Logger) *Agen
 func (p *AgentJobProcessor) WithRegistry(registry *agent.AgentRegistry) *AgentJobProcessor {
 	p.registry = registry
 	return p
+}
+
+// WithSessionStore sets the session store used to resolve step-job working
+// directories from session project bindings.
+func (p *AgentJobProcessor) WithSessionStore(ss session.Store) *AgentJobProcessor {
+	p.sessionStore = ss
+	return p
+}
+
+// WithTaskStore sets the task store used to look up a step job's linked
+// sessions when resolving the working directory.
+func (p *AgentJobProcessor) WithTaskStore(ts *task.Store) *AgentJobProcessor {
+	p.taskStore = ts
+	return p
+}
+
+// resolveStepWorkingDir finds the working directory for a step job:
+//
+//	1. task -> LinkedSessions -> session.WorktreePath (or ProjectPath)
+//	2. fallback: session whose ConversationID or ID equals the task's
+//	   linked session id
+//
+// Returns "" when nothing resolvable; callers fall back to the loop default.
+func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
+	if p.sessionStore == nil || job.TaskID == "" {
+		return ""
+	}
+
+	var projectPath string
+	if p.taskStore != nil {
+		if t, err := p.taskStore.GetByID(job.TaskID); err == nil && t != nil {
+			for _, sessID := range t.LinkedSessions {
+				sess := p.sessionStore.Get(sessID)
+				if sess == nil {
+					continue
+				}
+				if sess.WorktreePath != "" {
+					return sess.WorktreePath
+				}
+				if sess.ProjectPath != "" && projectPath == "" {
+					projectPath = sess.ProjectPath
+				}
+			}
+		}
+	}
+	if projectPath != "" {
+		return projectPath
+	}
+
+	// Fallback: job.TaskID doubling as a session/conversation key.
+	for _, key := range []string{job.TaskID} {
+		if sess := p.sessionStore.GetByConversationID(key); sess != nil {
+			if sess.WorktreePath != "" {
+				return sess.WorktreePath
+			}
+			return sess.ProjectPath
+		}
+		if sess := p.sessionStore.Get(key); sess != nil {
+			if sess.WorktreePath != "" {
+				return sess.WorktreePath
+			}
+			return sess.ProjectPath
+		}
+	}
+	return ""
 }
 
 // Process executes a job using the appropriate agent loop.
@@ -6620,6 +6692,19 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			)
 			agentLoop = p.agentLoop
 		} else {
+			// Resolve the working directory from the task's linked session's
+			// project binding (set via project.set). Without this, step-job
+			// loops run in the daemon's default cwd instead of the caller's
+			// project — found by meept-bench: file writes landed outside the
+			// benchmark worktree.
+			if wd := p.resolveStepWorkingDir(job); wd != "" {
+				loop.SetWorkingDir(wd)
+				p.logger.Info("Step job working dir resolved",
+					"job_id", job.ID,
+					"task_id", job.TaskID,
+					"working_dir", wd,
+				)
+			}
 			agentLoop = loop
 		}
 	} else {
