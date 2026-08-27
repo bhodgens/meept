@@ -191,13 +191,22 @@ func (e *EpisodicMemory) Store(ctx context.Context, content, category string, me
 // Search finds episodic memories matching the query.
 // Uses FTS5 when available, falls back to LIKE-based queries otherwise.
 func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
+	return e.SearchOptions(ctx, SearchParams{Query: query, Limit: limit})
+}
+
+// SearchOptions finds episodic memories with full option control.
+func (e *EpisodicMemory) SearchOptions(ctx context.Context, p SearchParams) ([]MemoryResult, error) {
 	if !e.store.Initialized() {
 		return nil, errors.New("episodic memory not initialized")
 	}
 
-	safeQuery := sqlite.SanitizeQuery(query)
+	op := "AND"
+	if p.MatchAny {
+		op = "OR"
+	}
+	safeQuery := sqlite.SanitizeQueryOp(p.Query, op)
 	if safeQuery == "" {
-		return e.GetRecent(ctx, limit)
+		return e.GetRecent(ctx, p.Limit)
 	}
 
 	hasFTS5 := e.store.HasFTS5Public()
@@ -217,13 +226,13 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 			WHERE episodic_fts MATCH ?
 			ORDER BY f.rank
 			LIMIT ?
-		`, safeQuery, limit)
+		`, safeQuery, p.Limit)
 	} else {
 		// Fallback to LIKE-based search (slower but works without FTS5)
 		// Note: ESCAPE '\' uses a Go raw string literal, so backslash has no special meaning
 		// in the string itself - the raw backslash is correctly passed to SQLite as the
 		// escape character for LIKE pattern matching.
-		escapedQuery := escapeLikeWildcards(query)
+		escapedQuery := escapeLikeWildcards(p.Query)
 		likePattern := "%" + escapedQuery + "%"
 		rows, err = db.QueryContext(ctx, `
 			SELECT id, content, category, metadata_json, created_at
@@ -231,7 +240,7 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 			WHERE content LIKE ? ESCAPE '\' OR category LIKE ? ESCAPE '\'
 			ORDER BY created_at DESC
 			LIMIT ?
-		`, likePattern, likePattern, limit)
+		`, likePattern, likePattern, p.Limit)
 	}
 
 	if err != nil {

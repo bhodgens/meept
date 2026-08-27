@@ -20,33 +20,34 @@ CREATE TABLE IF NOT EXISTS task_memories (
     content       TEXT NOT NULL,
     domain        TEXT NOT NULL DEFAULT 'general',
     metadata_json TEXT NOT NULL DEFAULT '{}',
+    search_text   TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL
 )`
 
 	// SQL for creating the FTS5 virtual table
 	createTaskFTSSQL = `
 CREATE VIRTUAL TABLE IF NOT EXISTS task_fts
-USING fts5(content, domain, content='task_memories', content_rowid='rowid')`
+USING fts5(search_text, domain, content='task_memories', content_rowid='rowid')`
 
 	// Triggers to keep FTS index in sync
 	triggerTaskInsert = `
 CREATE TRIGGER IF NOT EXISTS task_fts_ai AFTER INSERT ON task_memories BEGIN
-    INSERT INTO task_fts(rowid, content, domain)
-    VALUES (new.rowid, new.content, new.domain);
+    INSERT INTO task_fts(rowid, search_text, domain)
+    VALUES (new.rowid, new.search_text, new.domain);
 END`
 
 	triggerTaskDelete = `
 CREATE TRIGGER IF NOT EXISTS task_fts_ad AFTER DELETE ON task_memories BEGIN
-    INSERT INTO task_fts(task_fts, rowid, content, domain)
-    VALUES ('delete', old.rowid, old.content, old.domain);
+    INSERT INTO task_fts(task_fts, rowid, search_text, domain)
+    VALUES ('delete', old.rowid, old.search_text, old.domain);
 END`
 
 	triggerTaskUpdate = `
 CREATE TRIGGER IF NOT EXISTS task_fts_au AFTER UPDATE ON task_memories BEGIN
-    INSERT INTO task_fts(task_fts, rowid, content, domain)
-    VALUES ('delete', old.rowid, old.content, old.domain);
-    INSERT INTO task_fts(rowid, content, domain)
-    VALUES (new.rowid, new.content, new.domain);
+    INSERT INTO task_fts(task_fts, rowid, search_text, domain)
+    VALUES ('delete', old.rowid, old.search_text, old.domain);
+    INSERT INTO task_fts(rowid, search_text, domain)
+    VALUES (new.rowid, new.search_text, new.domain);
 END`
 )
 
@@ -98,12 +99,13 @@ func NewTaskMemory(cfg TaskMemoryConfig) (*TaskMemory, error) {
 
 	// Create the shared FTS store with task-specific config
 	storeCfg := FTSConfig{
-		TableName:     "task_memories",
-		FTS5Table:     "task_fts",
-		CategoryField: "domain",
-		DataDir:       cfg.DataDir,
-		Schema:        []string{createTaskTableSQL, createTaskFTSSQL},
-		Triggers:      []string{triggerTaskInsert, triggerTaskDelete, triggerTaskUpdate},
+		TableName:        "task_memories",
+		FTS5Table:        "task_fts",
+		CategoryField:    "domain",
+		DataDir:          cfg.DataDir,
+		SearchTextColumn: true,
+		Schema:           []string{createTaskTableSQL, createTaskFTSSQL},
+		Triggers:         []string{triggerTaskInsert, triggerTaskDelete, triggerTaskUpdate},
 	}
 
 	store, err := NewSQLiteFTSStore(storeCfg, cfg.Logger)
@@ -140,10 +142,13 @@ func (t *TaskMemory) Store(ctx context.Context, content, domain string, metadata
 	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
 	metaJSON := (&Memory{Metadata: metadata}).MetadataJSON()
 
+	// search_text is the flattened text FTS indexes. For distilled JSON
+	// payloads (lessons/procedures) it holds the canonical comparable text;
+	// for plain content it mirrors content.
 	err := t.store.Store(ctx,
-		`INSERT INTO task_memories (id, content, domain, metadata_json, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-		id, content, domain, metaJSON, nowISO,
+		`INSERT INTO task_memories (id, content, domain, metadata_json, search_text, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+		id, content, domain, metaJSON, canonicalDedupeText(domain, content), nowISO,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to store memory: %w", err)
@@ -157,13 +162,34 @@ func (t *TaskMemory) Store(ctx context.Context, content, domain string, metadata
 // Uses FTS5 when available, falls back to LIKE-based queries otherwise.
 // If domain is specified, results are limited to that domain.
 func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int) ([]MemoryResult, error) {
+	return t.SearchOptions(ctx, SearchParams{Query: query, Domain: domain, Limit: limit})
+}
+
+// SearchParams carries search options shared by task and episodic stores.
+type SearchParams struct {
+	// Query is the free-text search string.
+	Query string
+	// Domain (task store only) restricts results to one domain.
+	Domain string
+	// Limit caps the number of results.
+	Limit int
+	// MatchAny relaxes FTS matching to ANY-token (OR joined).
+	MatchAny bool
+}
+
+// SearchOptions finds task memories with full option control.
+func (t *TaskMemory) SearchOptions(ctx context.Context, p SearchParams) ([]MemoryResult, error) {
 	if !t.store.Initialized() {
 		return nil, errors.New("task memory not initialized")
 	}
 
-	safeQuery := sqlite.SanitizeQuery(query)
+	op := "AND"
+	if p.MatchAny {
+		op = "OR"
+	}
+	safeQuery := sqlite.SanitizeQueryOp(p.Query, op)
 	if safeQuery == "" {
-		return t.GetRecent(ctx, domain, limit)
+		return t.GetRecent(ctx, p.Domain, p.Limit)
 	}
 
 	hasFTS5 := t.store.HasFTS5Public()
@@ -174,7 +200,7 @@ func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int
 
 	if hasFTS5 {
 		// Use FTS5 for efficient full-text search
-		if domain != "" {
+		if p.Domain != "" {
 			rows, err = db.QueryContext(ctx, `
 				SELECT
 					m.id, m.content, m.domain, m.metadata_json, m.created_at,
@@ -184,7 +210,7 @@ func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int
 				WHERE task_fts MATCH ? AND m.domain = ?
 				ORDER BY f.rank
 				LIMIT ?
-			`, safeQuery, domain, limit)
+			`, safeQuery, p.Domain, p.Limit)
 		} else {
 			rows, err = db.QueryContext(ctx, `
 				SELECT
@@ -195,31 +221,31 @@ func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int
 				WHERE task_fts MATCH ?
 				ORDER BY f.rank
 				LIMIT ?
-			`, safeQuery, limit)
+			`, safeQuery, p.Limit)
 		}
 	} else {
 		// Fallback to LIKE-based search
-		escapedQuery := escapeLikeWildcards(query)
+		escapedQuery := escapeLikeWildcards(p.Query)
 		likePattern := "%" + escapedQuery + "%"
-		if domain != "" {
+		if p.Domain != "" {
 			// Note: ESCAPE '\' uses a Go raw string literal, so backslash has no special meaning
 			// in the string itself - the raw backslash is correctly passed to SQLite as the
 			// escape character for LIKE pattern matching.
 			rows, err = db.QueryContext(ctx, `
 				SELECT id, content, domain, metadata_json, created_at
 				FROM task_memories
-				WHERE (content LIKE ? ESCAPE '\' OR domain LIKE ? ESCAPE '\') AND domain = ?
+				WHERE ((content LIKE ? ESCAPE '\' OR search_text LIKE ? ESCAPE '\') OR domain LIKE ? ESCAPE '\') AND domain = ?
 				ORDER BY created_at DESC
 				LIMIT ?
-			`, likePattern, likePattern, domain, limit)
+			`, likePattern, likePattern, likePattern, p.Domain, p.Limit)
 		} else {
 			rows, err = db.QueryContext(ctx, `
 				SELECT id, content, domain, metadata_json, created_at
 				FROM task_memories
-				WHERE content LIKE ? ESCAPE '\' OR domain LIKE ? ESCAPE '\'
+				WHERE content LIKE ? ESCAPE '\' OR search_text LIKE ? ESCAPE '\' OR domain LIKE ? ESCAPE '\'
 				ORDER BY created_at DESC
 				LIMIT ?
-			`, likePattern, likePattern, limit)
+			`, likePattern, likePattern, likePattern, p.Limit)
 		}
 	}
 

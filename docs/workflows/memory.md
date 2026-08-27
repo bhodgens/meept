@@ -39,11 +39,20 @@ ws = 0.005
 ### Task Memory
 - **Domain-Specific Storage**: Separate namespaces for different task types
 - **Technical Knowledge**: Code snippets, commands, patterns
+- **Flattened Search Index**: FTS5 indexes `search_text` — the canonical
+  flattened text (lesson principle / procedure title+steps) rather than raw
+  JSON content, so BM25 ranks words instead of JSON syntax. The column
+  backfills automatically from legacy rows at startup.
+- **Any-Token Matching**: `MemoryQuery.MatchAny` switches FTS matching from
+  ALL-token (AND) to ANY-token (OR) for relevance ranking where partial term
+  overlap should still surface documents. Distilled-memory injection uses it.
 - **Consolidation**: Promoted to episodic memory over time
 
 ### Knowledge Graph
 - **PageRank Scoring**: Importance-based ranking
 - **5 Relation Types**: `reference`, `similar`, `temporal`, `co_accessed`, `causal`
+- **Similarity Edges Over Canonical Text**: similarity edges compare token
+  overlap over the same canonical flattened text, never raw JSON payloads
 - **Community Detection**: Clustering related memories
 - **Entity-Centric Querying**: Focus on entities and relationships
 

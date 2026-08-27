@@ -137,7 +137,18 @@ func sanitizeTerm(term string) string {
 // SanitizeQuery converts a raw user query into a safe FTS5 MATCH expression.
 // Each whitespace-separated token is quoted for safety.
 func SanitizeQuery(raw string) string {
-	return NewFTS5Query().TermsFromString(raw).Build()
+	return SanitizeQueryOp(raw, "AND")
+}
+
+// SanitizeQueryOp converts a raw user query into a safe FTS5 MATCH
+// expression joining tokens with the given boolean operator ("AND" or
+// "OR"). Each whitespace-separated token is quoted for safety.
+func SanitizeQueryOp(raw, operator string) string {
+	q := NewFTS5Query()
+	if operator == "OR" {
+		q.Or()
+	}
+	return q.TermsFromString(raw).Build()
 }
 
 // Highlight returns SQL for FTS5 highlight function.

@@ -799,7 +799,11 @@ func (m *Manager) searchViaSQLite(ctx context.Context, query MemoryQuery) ([]Mem
 	searchTask := query.Type == "" || query.Type == MemoryTypeTask
 
 	if searchEpisodic && m.episodic != nil {
-		episodicResults, err := m.episodic.Search(ctx, query.Query, query.Limit)
+		episodicResults, err := m.episodic.SearchOptions(ctx, SearchParams{
+			Query:    query.Query,
+			Limit:    query.Limit,
+			MatchAny: query.MatchAny,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("episodic search failed: %w", err)
 		}
@@ -807,7 +811,12 @@ func (m *Manager) searchViaSQLite(ctx context.Context, query MemoryQuery) ([]Mem
 	}
 
 	if searchTask && m.task != nil {
-		taskResults, err := m.task.Search(ctx, query.Query, query.Domain, query.Limit)
+		taskResults, err := m.task.SearchOptions(ctx, SearchParams{
+			Query:    query.Query,
+			Domain:   query.Domain,
+			Limit:    query.Limit,
+			MatchAny: query.MatchAny,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("task search failed: %w", err)
 		}

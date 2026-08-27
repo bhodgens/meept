@@ -89,6 +89,10 @@ type MemoryQuery struct {
 	Limit int `json:"limit"`
 	// MinRelevance discards results below this threshold.
 	MinRelevance float64 `json:"min_relevance,omitempty"`
+	// MatchAny relaxes free-text matching to ANY-token (FTS5 OR joined)
+	// instead of the default ALL-token (AND). Useful for relevance ranking,
+	// where partial term overlap should still surface documents.
+	MatchAny bool `json:"match_any,omitempty"`
 }
 
 // MemoryStats holds aggregate statistics about stored memories.

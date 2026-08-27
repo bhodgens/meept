@@ -518,30 +518,17 @@ func (m *Manager) RelevantDistilled(ctx context.Context, query string, limit int
 	if m.config.Distill.MinRelevance < 0 {
 		minRel = 0
 	}
-	runSearch := func(q string) ([]MemoryResult, error) {
-		return m.searchViaSQLite(ctx, MemoryQuery{
-			Query:        q,
-			Type:         MemoryTypeTask,
-			Limit:        limit * 4,
-			MinRelevance: minRel,
-		})
-	}
-	// Implicit-AND full-text matching is too strict for relevance ranking
-	// over JSON-blob content: a query of three terms where the stored text
-	// has only two would miss entirely. Search the whole query first, then
-	// fall back to per-token probes and merge when it under-delivers.
-	results, err := runSearch(query)
+	// MatchAny (FTS5 OR join) ranks partial term overlap instead of
+	// demanding every token — the right semantics for relevance ranking.
+	results, err := m.searchViaSQLite(ctx, MemoryQuery{
+		Query:        query,
+		Type:         MemoryTypeTask,
+		Limit:        limit * 4,
+		MinRelevance: minRel,
+		MatchAny:     true,
+	})
 	if err != nil {
 		return nil, err
-	}
-	if len(results) < limit && strings.TrimSpace(query) != "" {
-		for _, tok := range strings.Fields(query) {
-			more, serr := runSearch(tok)
-			if serr != nil {
-				continue
-			}
-			results = append(results, more...)
-		}
 	}
 	var out []MemoryResult
 	seen := make(map[string]bool)

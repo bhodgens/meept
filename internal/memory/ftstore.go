@@ -37,18 +37,24 @@ type FTSConfig struct {
 	Schema []string
 	// Triggers are the FTS sync trigger statements
 	Triggers []string
+	// SearchTextColumn enables the search_text column: a flattened,
+	// canonical text projection of content that FTS indexes instead of raw
+	// content. Set true for stores whose content may be structured (e.g.
+	// distilled JSON payloads) so BM25 ranks words, not JSON syntax.
+	SearchTextColumn bool
 }
 
 // SQLiteFTSStore provides shared SQLite + FTS5 functionality.
 // Both EpisodicMemory and TaskMemory embed this to eliminate duplication.
 type SQLiteFTSStore struct {
-	db          *sqlx.DB
-	config      FTSConfig
-	dataDir     string
-	initialized bool
-	hasFTS5     bool
-	mu          sync.RWMutex
-	logger      *slog.Logger
+	db               *sqlx.DB
+	config           FTSConfig
+	dataDir          string
+	initialized      bool
+	hasFTS5          bool
+	searchTextColumn bool
+	mu               sync.RWMutex
+	logger           *slog.Logger
 }
 
 // NewSQLiteFTSStore creates a new FTS store.
@@ -57,9 +63,10 @@ func NewSQLiteFTSStore(config FTSConfig, logger *slog.Logger) (*SQLiteFTSStore, 
 		logger = slog.Default()
 	}
 	return &SQLiteFTSStore{
-		config:  config,
-		dataDir: config.DataDir,
-		logger:  logger,
+		config:           config,
+		dataDir:          config.DataDir,
+		searchTextColumn: config.SearchTextColumn,
+		logger:           logger,
 	}, nil
 }
 
@@ -148,6 +155,9 @@ func (s *SQLiteFTSStore) initSchema(ctx context.Context) error {
 		// Continue anyway - the table exists, just may lack some columns
 	}
 
+	// Backfill search_text for rows written before the column existed.
+	s.backfillSearchText(ctx)
+
 	// Try to create FTS5 virtual table
 	if len(s.config.Schema) > 1 {
 		_, err := s.db.ExecContext(ctx, s.config.Schema[1])
@@ -181,12 +191,57 @@ func (s *SQLiteFTSStore) initSchema(ctx context.Context) error {
 func (s *SQLiteFTSStore) migrateSchema(ctx context.Context) error {
 	// Check and add last_accessed_at column if missing (episodic/task memory)
 	columns := []string{"last_accessed_at", "parent_id", "is_current", "version"}
+	if s.searchTextColumn {
+		columns = append(columns, "search_text")
+	}
 	for _, col := range columns {
 		if err := s.addColumnIfMissing(ctx, s.config.TableName, col, "TEXT", "DEFAULT ''"); err != nil {
 			s.logger.Debug("Column migration skipped", "column", col, "error", err)
 		}
 	}
 	return nil
+}
+
+// backfillSearchText populates search_text for legacy rows that predate the
+// column. For distilled JSON payloads it stores the canonical comparable
+// text (lesson principle / procedure title+steps); other content passes
+// through unchanged. Rows with empty content need no backfill. Failures are
+// logged and non-fatal: search falls back to whatever text exists.
+func (s *SQLiteFTSStore) backfillSearchText(ctx context.Context) {
+	if !s.searchTextColumn {
+		return
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT rowid, domain, content FROM `+s.config.TableName+` WHERE search_text = ''`)
+	if err != nil {
+		s.logger.Debug("search_text backfill query failed", "error", err)
+		return
+	}
+	type pending struct {
+		rowid int64
+		text  string
+	}
+	var todo []pending
+	for rows.Next() {
+		var rowid int64
+		var domain, content string
+		if err := rows.Scan(&rowid, &domain, &content); err != nil {
+			continue
+		}
+		todo = append(todo, pending{rowid: rowid, text: canonicalDedupeText(domain, content)})
+	}
+	if cerr := rows.Close(); cerr != nil {
+		s.logger.Debug("search_text backfill scan close", "error", cerr)
+	}
+	for _, p := range todo {
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE `+s.config.TableName+` SET search_text = ? WHERE rowid = ?`, p.text, p.rowid); err != nil {
+			s.logger.Debug("search_text backfill update failed", "rowid", p.rowid, "error", err)
+		}
+	}
+	if len(todo) > 0 {
+		s.logger.Info("search_text backfilled", "table", s.config.TableName, "rows", len(todo))
+	}
 }
 
 // addColumnIfMissing adds a column to a table if it doesn't exist.

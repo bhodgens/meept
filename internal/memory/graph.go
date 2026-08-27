@@ -1016,11 +1016,16 @@ func (g *KnowledgeGraph) CreateTemporalEdges(ctx context.Context, sessionID stri
 // CreateSimilarityEdges creates edges based on content similarity.
 // This is a placeholder - real implementation would use embeddings.
 func (g *KnowledgeGraph) CreateSimilarityEdges(ctx context.Context, memories []Memory, threshold float64) error {
-	// Simple Jaccard similarity based on word overlap
+	// Simple Jaccard similarity based on word overlap over CANONICAL text:
+	// distilled lessons/procedures carry JSON content, and comparing raw JSON
+	// wraps every pair in shared structural tokens ("principle", "steps",
+	// braces) that inflate the score. canonicalDedupeText flattens them to
+	// their real words first.
 	wordSets := make([]map[string]bool, len(memories))
 	for i, m := range memories {
 		wordSets[i] = make(map[string]bool)
-		for word := range strings.FieldsSeq(strings.ToLower(m.Content)) {
+		text := canonicalDedupeText(m.Category, m.Content)
+		for word := range strings.FieldsSeq(strings.ToLower(text)) {
 			if len(word) > 3 {
 				wordSets[i][word] = true
 			}
