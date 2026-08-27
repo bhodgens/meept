@@ -69,11 +69,22 @@ func (t *PlatformStatusTool) Execute(ctx context.Context, args map[string]any) (
 type PlatformAgentsTool struct {
 	tools.ToolDefaults
 	registry *agent.AgentRegistry
+	// reachability optionally reports per-agent liveness for employees
+	// (loop-economics leaf 10). Returns (reachable, lastSeen, ok); ok is
+	// false for non-employee agents, which then report reachable=true
+	// (in-process specialists are always addressable).
+	reachability func(agentID string) (reachable bool, lastSeen time.Time, known bool)
 }
 
 // NewPlatformAgentsTool creates a new platform agents tool.
 func NewPlatformAgentsTool(registry *agent.AgentRegistry) *PlatformAgentsTool {
 	return &PlatformAgentsTool{registry: registry}
+}
+
+// SetReachability wires employee heartbeat reporting into platform_agents
+// output. See loop-economics leaf 10.
+func (t *PlatformAgentsTool) SetReachability(fn func(agentID string) (bool, time.Time, bool)) {
+	t.reachability = fn
 }
 
 func (t *PlatformAgentsTool) Name() string { return "platform_agents" }
@@ -124,6 +135,21 @@ func (t *PlatformAgentsTool) Execute(ctx context.Context, args map[string]any) (
 	for _, spec := range specs {
 		sb.WriteString(fmt.Sprintf("### %s (`%s`)\n", spec.Name, spec.ID))
 		sb.WriteString(fmt.Sprintf("**Role**: %s\n\n", spec.Role))
+		// Roster reachability (leaf 10): employees report heartbeat
+		// state; in-process specialists are always addressable.
+		if t.reachability != nil {
+			if reachable, lastSeen, known := t.reachability(spec.ID); known {
+				reachableStr := "true"
+				if !reachable {
+					reachableStr = "false"
+				}
+				seen := "never"
+				if !lastSeen.IsZero() {
+					seen = lastSeen.Format(time.RFC3339)
+				}
+				sb.WriteString(fmt.Sprintf("**reachable**: %s | **last_seen**: %s\n\n", reachableStr, seen))
+			}
+		}
 		// Extract first meaningful line from the purpose body to avoid
 		// nested markdown headings breaking the list structure.
 		purpose := extractFirstLine(spec.Purpose)
@@ -216,7 +242,7 @@ func (t *PlatformToolsTool) Execute(ctx context.Context, args map[string]any) (a
 
 	for _, cat := range categories {
 		tools := toolsByCategory[cat]
-		sb.WriteString(fmt.Sprintf("### %s Tools\n\n", strings.ToUpper(cat[:1]) + cat[1:]))
+		sb.WriteString(fmt.Sprintf("### %s Tools\n\n", strings.ToUpper(cat[:1])+cat[1:]))
 		for _, tool := range tools {
 			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Name, tool.Description))
 		}
@@ -393,7 +419,6 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 		Response: response,
 	}, nil
 }
-
 
 // SessionHistoryTool provides access to recent session activity and completed work.
 // This enables agents to provide reports about what was accomplished.
