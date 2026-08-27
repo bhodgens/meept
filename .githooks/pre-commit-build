@@ -5,6 +5,9 @@
 # catching in-progress feature work that breaks the rest of the tree (e.g.
 # new struct fields that other packages depend on). Sub-2s typically.
 #
+# Compatibility: written for /bin/bash 3.2 (macOS default). No mapfile,
+# no associative arrays — same constraint as pre-commit-mutexio.
+#
 # Added 2026-06-19 per docs/20260618-checkreview.md recommendations.
 
 set -e
@@ -28,42 +31,22 @@ if [ -z "$STAGED_GO_FILES" ]; then
   exit 0
 fi
 
-# Build strategy: staged packages FIRST (their own compile errors block the
-# commit; built from the working tree, which matches the index for fully-
-# staged paths), then the CLEAN packages that IMPORT them — catches
-# downstream breakage like removed struct fields while excluding other
-# concurrent sessions' uncommitted WIP. Packages with unstaged WIP beyond
-# their staged content still build (worktree != index caveat is warned).
-# Falls back to whole-tree `go build ./...` when module listing fails.
-
-STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=d 2>/dev/null | grep '\.go$' | grep -v '_test\.go$' || true)
-
-if [ -z "$STAGED_GO_FILES" ]; then
-  echo -e "${GREEN}✅ No Go source files staged${NC}"
-  exit 0
-fi
-
-# Package dirs with staged changes, as ./import paths.
-mapfile -t STAGED_PKGS < <(printf '%s\n' "$STAGED_GO_FILES" | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
+# Package dirs with staged changes, as ./import paths (newline list).
+STAGED_PKGS=$(printf '%s\n' "$STAGED_GO_FILES" | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
 
 echo "Staged packages:"
-printf '  %s\n' "${STAGED_PKGS[@]}"
+printf '  %s\n' $STAGED_PKGS
 echo ""
 
 # Packages whose working-tree files differ from HEAD outside what is staged:
-# these contain other sessions' WIP and are skipped in the targeted build.
-declare -A DIRTY_PKG=()
-while IFS= read -r f; do
-  d=$(dirname "$f")
-  DIRTY_PKG["./$d"]=1
-done < <(git diff --name-only HEAD | sort -u)
+# these contain other sessions' WIP and are flagged when building from the
+# working tree.
+DIRTY_PKGS=$(git diff --name-only HEAD | sort -u | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
 
-TARGET_PKGS=()
-for pkg in "${STAGED_PKGS[@]}"; do
-  if [[ -n "${DIRTY_PKG[$pkg]:-}" ]]; then
+for pkg in $STAGED_PKGS; do
+  if printf '%s\n' "$DIRTY_PKGS" | grep -Fxq "$pkg"; then
     echo -e "${YELLOW}⚠ $pkg has unstaged WIP — vetting via staged-only build may be imprecise; building anyway${NC}"
   fi
-  TARGET_PKGS+=("$pkg")
 done
 
 # 1) Direct build of each staged package from its WORKING TREE state. The
@@ -71,8 +54,7 @@ done
 #    exact content being committed. Errors here always fail the hook: they
 #    belong to code being committed right now (or conflict with foreign WIP,
 #    which needs human attention either way).
-if ! OUTPUT=$(go build "${TARGET_PKGS[@]}" 2>&1); then
-  BUILD_FAILED=true
+if ! OUTPUT=$(go build $STAGED_PKGS 2>&1); then
   echo -e "${RED}❌ go build failed (staged packages):${NC}"
   echo ""
   echo "$OUTPUT"
@@ -85,32 +67,37 @@ fi
 #    packages are EXCLUDED — a foreign session's half-written file must not
 #    block this commit when the commit itself is self-consistent.
 if command -v go >/dev/null && go list -deps=none ./... >/dev/null 2>&1; then
-  mapfile -t ALL_PKGS < <(go list -deps=none ./... 2>/dev/null)
-  DOWNSTREAM=()
-  for pkg in "${ALL_PKGS[@]}"; do
-    skip=false
-    for s in "${STAGED_PKGS[@]}"; do
-      if [[ "$pkg" == "$s" ]]; then skip=true; break; fi
-    done
-    $skip && continue
+  DOWNSTREAM=""
+  while IFS= read -r pkg; do
+    [ -z "$pkg" ] && continue
+    case "
+$STAGED_PKGS
+" in
+      *"
+$pkg
+"*) continue ;;
+    esac
     imports=$(go list -f '{{join .Imports "\n"}}' "$pkg" 2>/dev/null || true)
-    for s in "${STAGED_PKGS[@]}"; do
+    for s in $STAGED_PKGS; do
       if echo "$imports" | grep -qx "${s#./}"; then
         # Only build if this downstream package is clean vs HEAD.
         rel="${pkg#github.com/caimlas/meept/}"
         if git diff --quiet HEAD -- "$rel" 2>/dev/null; then
-          DOWNSTREAM+=("$pkg")
+          DOWNSTREAM="$DOWNSTREAM$pkg
+"
         fi
         break
       fi
     done
-  done
+  done <<EOF
+$(go list -deps=none ./... 2>/dev/null)
+EOF
 
-  if [ ${#DOWNSTREAM[@]} -gt 0 ]; then
+  if [ -n "$DOWNSTREAM" ]; then
     echo "Downstream importers (clean):"
-    printf '  %s\n' "${DOWNSTREAM[@]}"
+    printf '%s' "$DOWNSTREAM" | sed 's/^/  /'
     echo ""
-    if ! OUTPUT=$(go build "${DOWNSTREAM[@]}" 2>&1); then
+    if ! OUTPUT=$(go build $(printf '%s' "$DOWNSTREAM") 2>&1); then
       echo -e "${RED}❌ go build failed (downstream importers):${NC}"
       echo ""
       echo "$OUTPUT"

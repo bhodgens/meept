@@ -42,7 +42,7 @@ echo ""
 
 # For each test file, suggest running mutation tests
 echo "$staged_test_files" | while IFS= read -r f; do
-    [ -z "$f" ] && done
+    [ -z "$f" ] && continue
     echo "  $f"
 
     # Check if the test file has mutation test patterns
