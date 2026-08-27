@@ -269,6 +269,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// even when individual components are not configured; callers get
 		// a "service not available" error instead of "method not found".
 		backupSyncHandler := rpc.NewBackupSyncHandler(components.BackupScheduler, components.ConfigSyncer, components.SyncPuller)
+		if components.UsersSync != nil {
+			backupSyncHandler.SetUsersSync(components.UsersSync)
+		}
 		backupSyncHandler.RegisterBackupSyncMethods(rpcServer)
 		logger.Info("Backup/sync RPC handlers registered",
 			"backup", components.BackupScheduler != nil,
