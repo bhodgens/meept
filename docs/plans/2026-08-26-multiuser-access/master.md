@@ -213,6 +213,7 @@ After all leaves COMPLETE:
 | 04-user-management-cli.md | COMPLETE | commit bc269da2 (+ bbbb3ccb sentinel follow-through) |
 | 05-client-tooling-tui-gui.md | COMPLETE | commit 99fc881e — awareness+CLI-guidance parity (no manage path exists on either surface) |
 | 06-rpc-peercred.md | COMPLETE | commit cbda76c9 |
+| live | COMPLETE | totem1/2/3 3-node verification 2026-08-28: pooling + cross-node key validation confirmed; found+fixed 3 more production wiring bugs (0837af0e members provider, 9af6d011 git-sync start, 55868872 TCP-heartbeat liveness, a6fde549 heartbeat merge+guard) |
 
 ## Open Questions (design-only, do NOT block implementation)
 
