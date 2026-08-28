@@ -66,6 +66,12 @@ type Proxy struct {
 	// rewriteTransport overrides the downstream transport (tests inject a
 	// recording/local-only transport here; nil means http.DefaultTransport).
 	rewriteTransport http.RoundTripper
+
+	// policy is consulted before secret injection when non-nil: deny -> 403,
+	// ask -> approver/timeout, allow -> continue. Resolved IPs are
+	// double-checked against CIDR rules (DNS rebinding defense). Nil means no
+	// egress policy (default mode=allow behavior).
+	policy *EgressPolicy
 }
 
 // NewProxy builds a proxy. Start must be called to begin serving.
@@ -210,6 +216,24 @@ func (p *Proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dest := requestDest(r)
+	if p.policy != nil {
+		action, _, _, err := p.policy.CheckAndResolve(dest)
+		if err != nil {
+			p.logger.Warn("egress policy check failed", "dest_host", dest, "error", err)
+			http.Error(w, "blocked by egress policy", http.StatusForbidden)
+			return
+		}
+		switch action {
+		case EgressDeny:
+			p.logger.Warn("blocked by egress policy", "dest_host", dest,
+				"metric", EgressDecisionMetricName, "action", EgressDeny)
+			http.Error(w, "blocked by egress policy", http.StatusForbidden)
+			return
+		case EgressAsk:
+			// resolveAsk already ran inside Decide; a surviving ask (no
+			// approver) resolves to deny there, so this branch is allow.
+		}
+	}
 	tr := p.rewriteTransport
 	if tr == nil {
 		tr = http.DefaultTransport
