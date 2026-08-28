@@ -375,7 +375,19 @@ func (g *GitSync) pushHeartbeat() error {
 	}
 
 	if err := g.git("commit", "-m", fmt.Sprintf("cluster: heartbeat %s", g.localCfg.NodeID)); err != nil {
-		return fmt.Errorf("pushHeartbeat: git commit: %w", err)
+		return fmt.Errorf("pushHeartbeat: commit: %w", err)
+	}
+
+	// Integrate peers' heartbeat commits before pushing. With a shared
+	// remote, every node commits to nodes/<id>.json5 on the same branch at
+	// its own cadence; a bare push is rejected non-fast-forward whenever
+	// any peer beat us to it (found live on the totem cluster: only the
+	// fastest node's heartbeats ever landed). pull --rebase replays our
+	// single heartbeat commit on top of theirs; conflicts are practically
+	// impossible since each node touches only its own file, but fall back
+	// to handleRebaseConflict like pullRemote does.
+	if err := g.pullRemote(); err != nil {
+		return fmt.Errorf("pushHeartbeat: pre-push pull: %w", err)
 	}
 
 	if err := g.push(); err != nil {
