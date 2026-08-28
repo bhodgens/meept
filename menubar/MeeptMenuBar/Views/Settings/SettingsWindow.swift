@@ -12,11 +12,13 @@ struct SettingsWindow: View {
     @ObservedObject var configViewModel: ConfigViewModel
     @StateObject private var mcpViewModel: MCPViewModel
     @StateObject private var memoryReviewViewModel: MemoryReviewViewModel
+    let apiClient: APIClient
 
     init(
         configViewModel: ConfigViewModel,
         mcpViewModel: MCPViewModel? = nil,
-        memoryReviewViewModel: MemoryReviewViewModel? = nil
+        memoryReviewViewModel: MemoryReviewViewModel? = nil,
+        apiClient: APIClient? = nil
     ) {
         self.configViewModel = configViewModel
         // Allow callers to inject an APIClient-backed MCPViewModel (the main
@@ -42,6 +44,16 @@ struct SettingsWindow: View {
                 apiToken: config.apiToken
             )
             self._memoryReviewViewModel = StateObject(wrappedValue: MemoryReviewViewModel(api: api))
+        }
+        // Reasoning tab talks to the /api/v1/reasoning/* routes directly.
+        if let apiClient {
+            self.apiClient = apiClient
+        } else {
+            let config = MenubarConfigService()
+            self.apiClient = APIClient(
+                baseURL: config.daemonBaseURL,
+                apiToken: config.apiToken
+            )
         }
     }
 
@@ -91,6 +103,12 @@ struct SettingsWindow: View {
                 Label("memory", systemImage: "brain.head.profile")
             }
             .tag(4)
+
+            ReasoningConfigView(api: apiClient)
+            .tabItem {
+                Label("reasoning", systemImage: "brain.fmt")
+            }
+            .tag(5)
         }
         .frame(width: 600, height: 450)
         .padding()
