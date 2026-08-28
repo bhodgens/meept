@@ -334,6 +334,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// Create git sync for cluster membership registry
 		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
 		clusterGitSync = cluster.NewGitSync(clusterCfg, clusterCfg, gitRepoPath, logger)
+		// Expose to components so the git-sync heartbeat loop actually runs
+		// (NewComponents starts it). Without this assignment the heartbeat
+		// loop never starts, member records go stale, GetMembers filters
+		// every peer out, and the gossip transport has nobody to send to
+		// (found in the totem live verification).
+		if components != nil {
+			components.ClusterGitSync = clusterGitSync
+		}
 
 		// Wire the git-sync membership registry as the gossip transport's
 		// members provider so Publish reaches peers over TCP. Without this
