@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -172,14 +173,17 @@ func (e *WhisperEngine) transcribe(filePath string) (string, error) {
 		return "", fmt.Errorf("stt: whisper: start whisper-cli: %w", err)
 	}
 
-	// Read stderr in background to avoid blocking.
-	var stderrBuf strings.Builder
+	// Drain stderr in the background so a noisy child cannot fill the pipe
+	// and block. Ownership of the bytes is transferred on stderrCh; the
+	// receive after Wait always runs so the goroutine cannot leak.
+	stderrCh := make(chan string, 1)
 	go func() {
-		sc := bufio.NewScanner(stderr)
-		for sc.Scan() {
-			stderrBuf.WriteString(sc.Text())
-			stderrBuf.WriteString("\n")
+		b, err := io.ReadAll(stderr) // best-effort; used only in error text
+		if err != nil {
+			stderrCh <- ""
+			return
 		}
+		stderrCh <- string(b)
 	}()
 
 	// Parse stdout: collect lines that are transcription text.
@@ -198,12 +202,13 @@ func (e *WhisperEngine) transcribe(filePath string) (string, error) {
 		lines = append(lines, line)
 	}
 
-	if err := cmd.Wait(); err != nil {
-		stderrText := strings.TrimSpace(stderrBuf.String())
+	waitErr := cmd.Wait()
+	stderrText := strings.TrimSpace(<-stderrCh)
+	if waitErr != nil {
 		if stderrText != "" {
-			return "", fmt.Errorf("stt: whisper: whisper-cli failed: %w: %s", err, stderrText)
+			return "", fmt.Errorf("stt: whisper: whisper-cli failed: %w: %s", waitErr, stderrText)
 		}
-		return "", fmt.Errorf("stt: whisper: whisper-cli failed: %w", err)
+		return "", fmt.Errorf("stt: whisper: whisper-cli failed: %w", waitErr)
 	}
 
 	text := strings.TrimSpace(strings.Join(lines, " "))
