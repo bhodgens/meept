@@ -6817,6 +6817,10 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		"job_id":   job.ID,
 		"response": response,
 		KeyStatus:  "completed",
+		// ralph-loop evidence contract: a completed job with a non-empty
+		// response counts as evidence (ralph_loop.go checks Evidence).
+		"success":  true,
+		"evidence": []string{fmt.Sprintf("job %s completed by agent %s: %s", job.ID, job.AgentID, truncateEvidence(response))},
 	}
 	if isStepJob {
 		result["step_id"] = stepPayload.StepID
@@ -7199,4 +7203,16 @@ func generateRandomSecretKey(byteLen int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// truncateEvidence bounds an agent response for the ralph-loop evidence
+// field: ralph_loop only checks non-emptiness, but full responses can be
+// kilobytes and they end up in task metadata.
+func truncateEvidence(s string) string {
+	const max = 300
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }

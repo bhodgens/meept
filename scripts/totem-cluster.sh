@@ -114,7 +114,7 @@ PYEOF"
 cmd_start() {
   local h
   for h in "${NODES[@]}"; do
-    node "$h" "pkill -f meept-daemon 2>/dev/null || true"
+    node "$h" 'for pid in $(pgrep -f meept-daemon); do [ "$pid" = "$$" ] || kill "$pid" 2>/dev/null; done; true'
   done
   sleep 2
   for h in "${NODES[@]}"; do
@@ -126,7 +126,12 @@ cmd_start() {
 }
 
 cmd_stop() {
-  for h in "${NODES[@]}"; do node "$h" "pkill -f meept-daemon 2>/dev/null || true"; done
+  # pkill -f with the full binary path kills the remote shell carrying the
+  # pattern too (self-match), making ssh exit 255 mid-loop. Kill only
+  # matching PIDs that are not our own shell.
+  for h in "${NODES[@]}"; do
+    node "$h" 'for pid in $(pgrep -f meept-daemon); do [ "$pid" = "$$" ] || kill "$pid" 2>/dev/null; done; true'
+  done
   echo "daemons stopped"
 }
 
@@ -147,7 +152,7 @@ cmd_status() {
 cmd_sync() {
   local name="${1:-alice}"
   echo "== create user+key on totem1 (daemon stopped to avoid cache clobber)"
-  node totem1 "pkill -f meept-daemon 2>/dev/null || true"
+  node totem1 'for pid in $(pgrep -f meept-daemon); do [ "$pid" = "$$" ] || kill "$pid" 2>/dev/null; done; true'
   sleep 2
   node totem1 "cd $REPO_DIR && uid=\$(./bin/meept users add $name 2>/dev/null | grep -o 'user-[0-9a-f]*' | head -1) \
     && ./bin/meept keys add \$uid --label cluster-test 2>&1 | grep -E '^[0-9a-f]{64}'"
