@@ -2650,3 +2650,85 @@ func TestHandleClientConfigPatch_PreservesUnrelatedKeys(t *testing.T) {
 		t.Errorf("verbosity = %v, want verbose", chat["verbosity"])
 	}
 }
+
+// TestWSBridgeForwardsTerminalDaemonCollaborationPairTopics verifies the WS
+// bridge subscribes to the terminal.*, daemon.*, collaboration.*.* and pair.*
+// topic patterns so those bus events reach frontend WebSocket clients.
+// End-to-end: publish each event on a live bus wired via WithWebSocket and
+// assert transformBusEventToWS classifies it as the safe generic "event" type
+// (never chat_message — only chat_message/chat.response may produce that).
+func TestWSBridgeForwardsTerminalDaemonCollaborationPairTopics(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	defer msgBus.Close()
+
+	cfg := DefaultServerConfig()
+	cfg.Addr = ":0"
+	srv := NewServer(cfg, nil, nil, nil, nil, nil, WithWebSocket(msgBus, "/ws"))
+	if srv == nil {
+		t.Fatal("failed to create server with WebSocket option")
+	}
+
+	cases := []struct {
+		topic string
+		want  string
+	}{
+		{"terminal.command", "event"},
+		{"daemon.stopping", "event"},
+		{"daemon.reloaded", "event"},
+		{"collaboration.turn_completed", "event"},
+		{"collaboration.phase_completed", "event"},
+		{"collaboration.consensus_reached", "event"},
+		{"pair.round_completed", "event"},
+		{"pair.session_created", "event"},
+		{"pair.error", "event"},
+	}
+
+	for _, tc := range cases {
+		msg, err := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{"note": tc.topic})
+		if err != nil {
+			t.Fatalf("NewBusMessage: %v", err)
+		}
+		if got := msgBus.Publish(tc.topic, msg); got < 1 {
+			t.Errorf("topic %q: Publish delivered to %d subscribers, want >= 1 (WS bridge not subscribed)", tc.topic, got)
+			continue
+		}
+
+		frontendData := transformBusEventToWS(msg)
+		if frontendData == nil {
+			t.Errorf("topic %q: transformBusEventToWS returned nil, want payload", tc.topic)
+			continue
+		}
+		if frontendData["type"] != tc.want {
+			t.Errorf("topic %q: frontend type = %v, want %q", tc.topic, frontendData["type"], tc.want)
+		}
+		if frontendData["type"] == "chat_message" {
+			t.Errorf("topic %q: classified as chat_message; only chat topics may produce that type", tc.topic)
+		}
+		if frontendData["source_topic"] != tc.topic {
+			t.Errorf("topic %q: source_topic = %v, want %q", tc.topic, frontendData["source_topic"], tc.topic)
+		}
+	}
+}
+
+// TestWSBridgeDoesNotSubscribeDynamicPairTurnTopic verifies the bridge does
+// NOT subscribe to pair.*.* : pair.{sessionID}.turn is the dynamic point-to-
+// point RPC channel between pair agents, not a frontend event.
+func TestWSBridgeDoesNotSubscribeDynamicPairTurnTopic(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	defer msgBus.Close()
+
+	cfg := DefaultServerConfig()
+	cfg.Addr = ":0"
+	srv := NewServer(cfg, nil, nil, nil, nil, nil, WithWebSocket(msgBus, "/ws"))
+	if srv == nil {
+		t.Fatal("failed to create server with WebSocket option")
+	}
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "pair-orchestrator", map[string]any{"turn": 1})
+	if err != nil {
+		t.Fatalf("NewBusMessage: %v", err)
+	}
+	if got := msgBus.Publish("pair.some-session.turn", msg); got != 0 {
+		t.Errorf("Publish(pair.some-session.turn) delivered to %d WS-bridge subscribers, want 0 (dynamic pair turn topics are point-to-point)", got)
+	}
+}

@@ -499,9 +499,18 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 		// Subscribe to all bus topic patterns that produce frontend events.
 		// The bus wildcard "*" only matches single-segment topics, so we
 		// subscribe to multiple prefixes used by the agent system.
+		// terminal.*/daemon.* are single-segment events; collaboration.* covers
+		// the two-segment collaboration lifecycle events (collaboration.turn_completed,
+		// collaboration.phase_completed, ...). Dynamic per-session collaboration
+		// traffic uses the separate team.{sessionID}.* namespace, which stays
+		// point-to-point. pair.* covers static pair lifecycle events
+		// (pair.round_completed, pair.session_created, ...); pair.*.* is
+		// intentionally NOT subscribed: the only 3-segment pair topic is the
+		// dynamic pair.{sessionID}.turn RPC channel between pair agents.
 		topics := []string{"*", "agent.*", "agent.*.*", "task.*", "task.*.*", "step.*", "step.*.*", "orchestrator.*",
 			"chat.*", "chat.*.*", "tool.*", "llm.*", "review.*",
-			"queue.*", "queue.*.*", "plan.*", "plan.*.*"}
+			"queue.*", "queue.*.*", "plan.*", "plan.*.*",
+			"terminal.*", "daemon.*", "collaboration.*", "pair.*"}
 		for _, topic := range topics {
 			sub := msgBus.Subscribe("http-ws-"+topic, topic)
 			s.wsSubMu.Lock()
