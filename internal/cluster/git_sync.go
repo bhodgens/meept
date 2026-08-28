@@ -378,16 +378,15 @@ func (g *GitSync) pushHeartbeat() error {
 		return fmt.Errorf("pushHeartbeat: commit: %w", err)
 	}
 
-	// Integrate peers' heartbeat commits before pushing. With a shared
-	// remote, every node commits to nodes/<id>.json5 on the same branch at
-	// its own cadence; a bare push is rejected non-fast-forward whenever
-	// any peer beat us to it (found live on the totem cluster: only the
-	// fastest node's heartbeats ever landed). pull --rebase replays our
-	// single heartbeat commit on top of theirs; conflicts are practically
-	// impossible since each node touches only its own file, but fall back
-	// to handleRebaseConflict like pullRemote does.
-	if err := g.pullRemote(); err != nil {
-		return fmt.Errorf("pushHeartbeat: pre-push pull: %w", err)
+	// Integrate peers' heartbeat commits before pushing, WITHOUT rebase.
+	// Rebase here was found live (totem 3-node cluster) to conflict on the
+	// node's own historical heartbeat commits; handleRebaseConflict's
+	// "keep local state" then silently dropped peer member files from the
+	// working tree, and the transport lost all peers. A fetch+merge of
+	// per-node files auto-merges cleanly, and the member-preservation
+	// guard below makes dropping members impossible.
+	if err := g.mergeOriginWithMemberGuard(); err != nil {
+		return fmt.Errorf("pushHeartbeat: integrate: %w", err)
 	}
 
 	if err := g.push(); err != nil {
@@ -395,6 +394,65 @@ func (g *GitSync) pushHeartbeat() error {
 	}
 
 	g.logger.Debug("git_sync: heartbeat committed", "node_id", g.localCfg.NodeID)
+	return nil
+}
+
+// mergeOriginWithMemberGuard integrates origin/main into the local branch
+// via fetch + merge (never rebase), preserving every member file that
+// existed before the merge. This is the heartbeat-path integration: with a
+// shared remote, nodes push concurrently and a plain push is rejected
+// non-fast-forward; rebase conflicts on self-history and the conflict
+// handler's "keep local state" dropped peer member files live (totem
+// cluster). Merge auto-resolves per-node files; if a conflict still occurs
+// the merge is aborted (never left mid-merge) and the error returned.
+func (g *GitSync) mergeOriginWithMemberGuard() error {
+	if err := g.git("fetch", "origin"); err != nil {
+		return fmt.Errorf("mergeOrigin: fetch: %w", err)
+	}
+
+	// Snapshot membership knowledge so nothing can be lost by the merge.
+	before, err := ListLocalMembers(g.gitRepoPath)
+	if err != nil {
+		return fmt.Errorf("mergeOrigin: snapshot members: %w", err)
+	}
+
+	if err := g.git("merge", "--no-edit", "origin/main"); err != nil {
+		// Never leave the repo mid-merge.
+		if abortErr := g.git("merge", "--abort"); abortErr != nil {
+			g.logger.Warn("git_sync: merge abort returned error", "error", abortErr)
+		}
+		return fmt.Errorf("mergeOrigin: merge: %w", err)
+	}
+
+	// Member-preservation guard: any member file that vanished during the
+	// merge is restored from the snapshot and committed. Heartbeat flow
+	// may not reduce cluster membership knowledge.
+	after, err := ListLocalMembers(g.gitRepoPath)
+	if err != nil {
+		return fmt.Errorf("mergeOrigin: list after merge: %w", err)
+	}
+	var missing []string
+	for id := range before {
+		if _, ok := after[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	g.logger.Error("git_sync: merge dropped member files; restoring",
+		"missing", missing)
+	for _, id := range missing {
+		if err := SaveMember(g.gitRepoPath, before[id]); err != nil {
+			return fmt.Errorf("mergeOrigin: restore member %s: %w", id, err)
+		}
+	}
+	if err := g.git("add", "."); err != nil {
+		return fmt.Errorf("mergeOrigin: stage restored members: %w", err)
+	}
+	if err := g.git("commit", "-m", "cluster: restore members lost in merge"); err != nil {
+		return fmt.Errorf("mergeOrigin: commit restored members: %w", err)
+	}
 	return nil
 }
 
