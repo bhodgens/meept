@@ -30,6 +30,9 @@ help:
 	@echo "Testing:"
 	@echo "  test             Run tests (short mode)"
 	@echo "  test-multiuser   Run multiuser cluster-pooling integration tests (race, 10x)"
+	@echo "  totem-status     Show totem test-cluster state (users, heartbeats, peers)"
+	@echo "  totem-start      Start daemons on totem1/2/3"
+	@echo "  totem-stop       Stop daemons on totem1/2/3"
 	@echo "  test-verbose     Run tests with verbose output"
 	@echo "  test-cover       Run tests with coverage report"
 	@echo "  test-race        Run tests with race detector"
@@ -254,8 +257,14 @@ test-race:
 	go test ./... -race
 
 test-multiuser:
-	@echo "Running multiuser cluster-pooling integration tests (10x for repeatability)..."
+	@echo "Running multiuser cluster-pooling integration tests (race, 10x)..."
 	go test ./tests/integration/ -run "TestMultiuserUsersSync" -race -count=10 -v
+
+# Repopulate the 3-node totem multiuser test cluster (totem1/2/3, root SSH).
+# provision = deps + repo + build + config; start/stop/status/sync/teardown
+# control it. See scripts/totem-cluster.sh header for topology.
+totem-%:
+	./scripts/totem-cluster.sh $*
 
 bench:
 	@echo "Running benchmarks..."
