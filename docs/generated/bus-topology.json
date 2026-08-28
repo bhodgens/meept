@@ -1122,7 +1122,7 @@
     "reflection.complete": [
       {
         "file": "internal/agent/orchestrator.go",
-        "line": 1114,
+        "line": 1134,
         "payload_keys": [
           "files",
           "fix_length",
