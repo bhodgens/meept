@@ -926,6 +926,11 @@ meta-tool is always full-schema — it is the expansion mechanism: calling
 `tool_view{"name": "some_tool"}` returns that tool's complete definition, and
 expansions are LRU-cached.
 
+Skill-filtered registries inherit those stubs automatically:
+`FilteredToolRegistry.GetDefinitions()` delegates to `parent.GetDefinitions()`
+then name-filters. Schema mode and `always_full` live only on the parent
+`*tools.Registry`; the wrapper has no mode field of its own.
+
 Setting `schema_mode = "full"` under `[agent.tools]` restores the legacy
 behavior where every tool ships its full schema byte-identically.
 

@@ -55,7 +55,7 @@ func (r *Registry) SetSchemaMode(mode SchemaMode, alwaysFull []string)
 // Evidence: models.NewEvidence("tool_view", name, hash, t.Name()) if pattern exists nearby.
 ```
 
-Config [agent.tools]: schema_mode ("indexed" DEFAULT per user directive), always_full list (default: shell,file_read,file_edit,file_write,memory_search,memory_store,web_fetch,websearch,platform_status,tool_view). Loop passes mode through existing wiring path used by FilterToolsForSkill so filtered registries inherit mode+alwaysFull.
+Config [agent.tools]: schema_mode ("indexed" DEFAULT per user directive), always_full list (default: shell,file_read,file_edit,file_write,memory_search,memory_store,web_fetch,websearch,platform_status,tool_view). FilteredToolRegistry.GetDefinitions() delegates to parent.GetDefinitions() then name-filters; schema mode/always_full live only on the parent *tools.Registry, so skill-filtered registries inherit stubs automatically with zero extra wiring.
 
 PER-MODEL / PER-PROVIDER OVERRIDES (user directive, 2026-08-24):
 
@@ -81,7 +81,7 @@ Implementation surface:
 
 ## Tasks
 
-1. Failing tests registry-side: indexed mode stubs non-core (params empty, description contains tool_view); core untouched; switching modes mid-flight safe under -race; FilteredToolRegistry inherits.
+1. Failing tests registry-side: indexed mode stubs non-core (params empty, description contains tool_view); core untouched; switching modes mid-flight safe under -race; FilteredToolRegistry inherits stubs via parent.GetDefinitions() delegation (no mode field on the wrapper).
 1b. Failing tests EffectiveSchemaMode resolution: model override beats provider, provider beats global, all-unset -> global default, unknown string -> config-load error (test via config parse path).
 2. Implement SetSchemaMode + GetDefinitions branch.
 3. Failing tests tool_view: known tool returns parseable JSON w/ params; unknown errors; LRU eviction bounded (size cap respected); nil-registry guard.

@@ -141,6 +141,47 @@ func TestSchemaModeWiring_SetConfigBeforeRegistry(t *testing.T) {
 	}
 }
 
+// TestFilteredToolRegistry_InheritsStubsViaParentDelegation proves that
+// FilteredToolRegistry does not store schema mode of its own: wrapping an
+// indexed-mode *tools.Registry yields stubbed defs for non-alwaysFull tools
+// because GetDefinitions() delegates to parent.GetDefinitions() then
+// name-filters. There is no SetSchemaMode on the wrapper.
+func TestFilteredToolRegistry_InheritsStubsViaParentDelegation(t *testing.T) {
+	registry := tools.NewRegistry(nil)
+	registry.Register(&schemaWiringTool{name: "shell"})
+	registry.Register(&schemaWiringTool{name: "rare_tool"})
+	registry.Register(&schemaWiringTool{name: "hidden_tool"})
+
+	registry.SetSchemaMode(tools.SchemaModeIndexed, []string{"shell"})
+
+	filtered := NewFilteredToolRegistry(registry, []string{"shell", "rare_tool"})
+	defs := filtered.GetDefinitions()
+
+	shell := findWiringDef(t, defs, "shell")
+	if len(shell.Function.Parameters.Properties) == 0 {
+		t.Fatal("alwaysFull tool \"shell\" must keep its parameter properties through the filtered wrapper")
+	}
+
+	rare := findWiringDef(t, defs, "rare_tool")
+	if len(rare.Function.Parameters.Properties) != 0 {
+		t.Fatalf("non-alwaysFull tool must be stubbed via parent GetDefinitions; got %d properties",
+			len(rare.Function.Parameters.Properties))
+	}
+	if !contains(rare.Function.Description, " use tool_view{rare_tool}.") {
+		t.Fatalf("stubbed description %q must contain tool_view expansion instruction",
+			rare.Function.Description)
+	}
+	if rare.Function.Name != "rare_tool" {
+		t.Fatalf("stubbed definition name = %q, want rare_tool", rare.Function.Name)
+	}
+
+	for _, d := range defs {
+		if d.Function.Name == "hidden_tool" {
+			t.Fatal("tool not in the allowed list must not appear in filtered definitions")
+		}
+	}
+}
+
 // containsWiring is a tiny substring helper avoiding strings import churn.
 func containsWiring(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && indexOfWiring(s, sub) >= 0)
