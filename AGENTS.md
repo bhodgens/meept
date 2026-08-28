@@ -177,6 +177,20 @@ processing, worker events) produce `type: "agent_progress"`. The Flutter client
 creates a visible message bubble for every `chat_message` event — misclassified
 lifecycle events appear as blank messages.
 
+### Bus proxy registrations must have a live responder
+
+`internal/rpc/proxy.go makeProxy` publishes a request topic and waits on a
+response topic. Before adding a proxy registration, verify BOTH sides exist
+in source: a subscriber for the request topic AND a publisher that echoes
+`ReplyTo` on the response topic (see `internal/memory/handler.go` for the
+correct pattern). A proxy with no responder blocks the caller for the full
+timeout (10-30s) and then fails — worse than method-not-found. Prefer a
+direct `RegisterHandler` closure (the epistemic/memory_rpc/scheduler
+pattern). The generator's `ANNOTATED_ORPHANS` table
+(`scripts/gen-connectivity-graph.py`) suppresses topics with documented
+external-only paths (e.g. `dispatcher.stats` via the `bus.publish` RPC);
+add entries there instead of deleting intentional external surfaces.
+
 ## Coding Practices
 
 ### Predictable ID Prevention
