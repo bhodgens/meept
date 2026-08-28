@@ -335,6 +335,20 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
 		clusterGitSync = cluster.NewGitSync(clusterCfg, clusterCfg, gitRepoPath, logger)
 
+		// Wire the git-sync membership registry as the gossip transport's
+		// members provider so Publish reaches peers over TCP. Without this
+		// the engine runs local-only ("no members provider") and every
+		// cluster.* event never leaves the node (found in multiuser live
+		// verification: USERS_SYNC never crossed nodes).
+		if clusterEngine != nil && clusterGitSync != nil {
+			localNodeID := clusterCfg.NodeID
+			if localNodeID == "" {
+				localNodeID = "local"
+			}
+			clusterEngine = cluster.NewGossipEngine(clusterCfg, localNodeID, msgBus, logger,
+				cluster.WithMembersProvider(clusterGitSync))
+		}
+
 		// Create WireGuard manager for mesh networking (best-effort; non-fatal on macOS)
 		wgConfigPath := filepath.Join(gitRepoPath, "wireguard")
 		wgIface := clusterCfg.Network.Interface
