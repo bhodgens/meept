@@ -213,7 +213,7 @@ Go 1.24+, stdlib-first (new deps ONLY: chromedp leaf 13, rest stdlib/existing). 
 | 06-doctor-lifecycle | COMPLETE | 1 | babc8f57 |
 | 07-loop-guards | COMPLETE | 1 | e30c861a |
 | 08-quality-gated-autonomy | COMPLETE | 1 | b87f2674 |
-| 09-egress-policy | COMPLETE | 1 | this session (egress_policy.go + proxy integration; schema.go plumbing swept into 0dbeb378 by other session) |
+| 09-egress-policy | COMPLETE | 2 | af109d77 (EgressPolicy engine + proxy enforcement, landed as leaf-09 complement; docs at HEAD since 0dbeb378-era) |
 | 10-inter-agent-messaging | COMPLETE | 1 | 4cfe9386 |
 | 11-local-model-cli | COMPLETE | 2 | b562c30a (modelstore/model CLI; IPv6 test-premise fix same commit) |
 | 12-gbnf-constrained-calling | COMPLETE | 1 | d746ff54 |
