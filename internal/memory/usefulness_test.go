@@ -257,7 +257,7 @@ func TestPlanUsefulEviction_NeverFloorsEverything(t *testing.T) {
 // Flag-off path: legacy consolidation behavior unchanged.
 func TestConsolidateEpisodic_FlagOff_LegacyBehaviorUnchanged(t *testing.T) {
 	backend := &recordingBackend{
-		memories: makeMemories(4, time.Now().Add(-72*time.Hour)),
+		memories: makeMemories(4, time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)),
 	}
 	c := NewConsolidator(ConsolidatorConfig{
 		Manager: &Manager{config: config.MemoryConfig{Usefulness: config.MemoryUsefulnessConfig{Enabled: false}}},
