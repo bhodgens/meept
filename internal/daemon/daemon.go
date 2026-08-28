@@ -197,7 +197,8 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		rpcServer.SetDefaultModel(components.ModelsConfig.Model)
 	}
 
-	// Register skills handlers (both direct and bus-based)
+	// Register skills handlers (direct RPC closures — there is no bus path
+	// for skills; the former dead bus-subscriber handler was removed)
 	if rpcServer != nil && fullCfg.Skills.Enabled && components.SkillRegistry != nil {
 		rpc.RegisterSkillsHandlers(rpcServer, components.SkillRegistry, components.SkillExecutor, components.SkillUsageTracker, components.SkillWriter, components.SkillVersioner, components.SkillEvolver)
 		logger.Info("Skills RPC handlers registered",
@@ -898,6 +899,44 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Memory RPC handlers registered")
 		}
 
+		// User instruction RPC handlers (instruction.list/add/delete/preview).
+		// The CLI instructions commands (cmd/meept/instructions.go) call these
+		// methods directly; previously nothing registered them and every call
+		// failed with -32601 method-not-found. The handlers call the store/
+		// parser/verifier directly. NOTE: the rpc.InstructionHandler's bus
+		// Start() is deliberately NOT invoked — agent.InstructionHandler
+		// (instruction_wiring.go, started in Components.Start) already owns
+		// the instruction.* bus subscriptions, and a second subscriber would
+		// double-consume bus requests.
+		if components.InstructionStore != nil {
+			instrRPCHandler := rpc.NewInstructionHandler(
+				components.InstructionStore,
+				components.InstructionParser,
+				components.InstructionVerifier,
+				nil, // bus not needed for direct RPC handlers
+				logger.With("component", "instruction-rpc"),
+			)
+			instrRPCHandler.RegisterInstructionMethods(rpcServer)
+			logger.Info("Instruction RPC handlers registered")
+		}
+
+		// Reasoning RPC handlers (reasoning.list_tiers/get/set, budgets,
+		// model defaults, session overrides, list_agents). The HTTP routes
+		// /api/v1/reasoning/* (api_handlers.go) proxy to these methods over
+		// RPC, and the macOS menubar ReasoningConfigView consumes those
+		// routes — previously the methods were never registered, so the
+		// menubar's reasoning settings panel always failed. The handler is
+		// nil-safe per method: missing backing stores degrade to errors.
+		reasoningHandler := rpc.NewReasoningHandler(
+			components.AgentRegistry,
+			fullCfg,
+			defaultConfigFilePath(),
+			components.ModelsConfig,
+			components.ModelsConfigPath,
+		)
+		reasoningHandler.RegisterReasoningMethods(rpcServer)
+		logger.Info("Reasoning RPC handlers registered")
+
 		// Notification (DND) RPC handlers — runtime control of daemon-side
 		// notification suppression.
 		if components.NotificationEmitter != nil {
@@ -1069,6 +1108,20 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				}
 				httpOpts = append(httpOpts, http.WithChangesAPI(components.PendingChanges, changesResolveTool, components.ChangeJournal))
 				logger.Info("Change review HTTP endpoints enabled", "path", "/api/v1/pending-changes, /api/v1/changes/journal")
+			}
+
+			// User instructions HTTP endpoints (/api/v1/instructions*).
+			// Previously never wired — NewInstructionsHandler had zero call
+			// sites, so the routes never registered. Requires the instruction
+			// store/parser/verifier from wireInstructions.
+			if components.InstructionStore != nil {
+				httpOpts = append(httpOpts, http.WithInstructions(http.NewInstructionsHandler(
+					components.InstructionStore,
+					components.InstructionParser,
+					components.InstructionVerifier,
+					nil, // instructionRPC bridge unused by current handlers
+				)))
+				logger.Info("User instructions HTTP endpoints enabled", "path", "/api/v1/instructions/*")
 			}
 
 			var metricsService interface {

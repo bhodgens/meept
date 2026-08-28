@@ -414,6 +414,10 @@ func (t *WriteFileTool) Parameters() llm.FunctionParameters {
 				Type:        schemaTypeBoolean,
 				Description: "If true, append instead of overwrite (default false).",
 			},
+			"direct": {
+				Type:        schemaTypeBoolean,
+				Description: "If true, write to disk immediately instead of staging for review. Use for headless/benchmark runs where no accept step will follow.",
+			},
 		},
 		Required: []string{schemaPropPath, schemaPropContent},
 	}
@@ -446,6 +450,13 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 	rawPath, _ := args[schemaPropPath].(string)
 	content, _ := args["content"].(string)
 	appendMode, _ := args["append"].(bool)
+
+	// Headless benchmark clients need durable writes: staged writes live in
+	// the in-memory registry pending a resolve-tool accept that never comes
+	// in non-interactive runs, so the file never lands and evaluators see
+	// "no evidence". Opt out via {"direct": true} (meept-bench leaf 02
+	// finding) — the caller explicitly accepts immediate disk I/O.
+	direct, _ := args["direct"].(bool)
 
 	if rawPath == "" {
 		return nil, fmt.Errorf("no path specified")
@@ -484,7 +495,7 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 
 	// Preview/accept workflow: when a pending changes registry is wired, stage
 	// the write instead of touching disk (mirrors FileEditTool staging).
-	if t.pendingChangesRegistry != nil {
+	if t.pendingChangesRegistry != nil && !direct {
 		var original []byte
 		if data, readErr := os.ReadFile(resolved); readErr == nil {
 			original = data

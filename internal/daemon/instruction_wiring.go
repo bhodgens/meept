@@ -19,6 +19,8 @@ type instructionWiringResult struct {
 	Listener        *agent.InstructionListener
 	Scheduler       *scheduler.InstructionScheduler
 	ContextInjector *agent.ContextInjector
+	Parser          *agent.InstructionParser
+	Verifier        *preferences.InstructionVerifier
 }
 
 // wireInstructions constructs the user-instruction subsystem:
@@ -62,6 +64,8 @@ func wireInstructions(
 	//    time — the verifier will warn on unknown tools but will not reject
 	//    them outright.
 	verifier := preferences.NewInstructionVerifier(toolRegistry)
+	result.Parser = parser
+	result.Verifier = verifier
 
 	// 4. Construct the instruction handler (bus subscriptions for
 	//    instruction.add, instruction.list, instruction.delete,

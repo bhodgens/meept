@@ -92,6 +92,7 @@ type Components struct {
 
 	Config                *config.Config
 	ModelsConfig          *config.ModelsConfig
+	ModelsConfigPath      string // resolved models.json5 path ("<injected>" when injected)
 	LLMClient             *llm.Client
 	ClassifierClient      *llm.Client      // Separate client for intent classification (nil = use LLMClient)
 	ClassifierModelConfig *llm.ModelConfig // Resolved model config for the classifier endpoint (for token caps)
@@ -364,6 +365,8 @@ type Components struct {
 	InstructionListener        *agent.InstructionListener
 	InstructionScheduler       *scheduler.InstructionScheduler
 	InstructionContextInjector *agent.ContextInjector
+	InstructionParser          *agent.InstructionParser
+	InstructionVerifier        *preferences.InstructionVerifier
 
 	Logger *slog.Logger
 }
@@ -473,6 +476,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			return nil, fmt.Errorf("models configuration required: %w", err)
 		}
 	}
+	c.ModelsConfigPath = configPath
 	logger.Info("Loaded models configuration",
 		"path", configPath,
 		"default_model", c.ModelsConfig.Model,
@@ -1414,6 +1418,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.InstructionListener = instrResult.Listener
 	c.InstructionScheduler = instrResult.Scheduler
 	c.InstructionContextInjector = instrResult.ContextInjector
+	c.InstructionParser = instrResult.Parser
+	c.InstructionVerifier = instrResult.Verifier
 
 	// Attach the ContextInjector to the agent loop so the system prompt is
 	// enriched with standing instructions and learned patterns.
@@ -2118,7 +2124,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		logger.Info("ChatHandler initialized with dispatcher")
 
-		// Subscribe to dispatcher.stats requests
+		// Subscribe to dispatcher.stats requests. This is the bus surface for
+		// external clients: an MCP/CLI client publishes {"topic":
+		// "dispatcher.stats"} via the "bus.publish" RPC (server.go) and gets
+		// the response on "dispatcher.stats.result". The in-process chat path
+		// ("show me dispatcher stats") uses handleStatsQuery directly
+		// (dispatcher.go handlePlatformIntrospection) and does not go
+		// through the bus. Not a dead listener — do not remove.
 		statsSub := msgBus.Subscribe("dispatcher-stats-handler", "dispatcher.stats")
 		go func() {
 			for {
