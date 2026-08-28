@@ -221,6 +221,14 @@ def extract_bus_topology():
 
             for m in RE_PUBLISH_CONST.finditer(line):
                 const_name = m.group(1).split(".")[-1]
+                # Skip identifiers that are parameters (or locals) of the
+                # enclosing function — e.g. publishEvent's own `eventType`
+                # parameter. RE_CONST_DECL can wrongly pick up assignments
+                # to same-named variables elsewhere (e.g. a switch-case
+                # `eventType = "event"`), which would fabricate a topic.
+                fn_idx = _enclosing_func_idx(lines, i - 1)
+                if fn_idx is not None and const_name in _func_params(lines[fn_idx]):
+                    continue
                 if const_name in const_table:
                     topic = const_table[const_name]
                     payload_keys = _extract_payload_keys(lines, i - 1)
@@ -253,6 +261,13 @@ def extract_bus_topology():
     re_call = None  # built lazily per helper name
     helper_callsites = []
     seen_names = set(publish_helpers)
+    # Exclude the bare name Publish: BusService.Publish and friends call
+    # s.bus.Publish(req.Topic, ...) with `req` a parameter, which registers
+    # "Publish" itself as a wrapper — then re_call matches EVERY .Publish(
+    # call in the repo and fabricates publishers via const-table accidents
+    # (e.g. topic "event" from the eventType switch-assignment). A method
+    # named Publish is the bus API, not a pass-through helper.
+    seen_names -= {"Publish", "publish"}
     if seen_names:
         names = "|".join(re.escape(n) for n in sorted(seen_names))
         # Helper call sites pass the topic as either a string literal or a Go
@@ -679,13 +694,30 @@ def cross_reference(publishers, subscribers):
         or "*" in t and not t.endswith(".*") and not t.endswith(".#")
     }
 
-    orphan_publishers = pub_topics - expanded_subs - runtime_dynamic
+    # Topics with a documented external/dynamic publish or consume path that
+    # static source scanning cannot see. Each entry: topic -> reason. These
+    # are suppressed from BOTH orphan lists so they don't resurface as false
+    # positives on every regeneration.
+    annotated_orphans = {
+        # External clients publish {"topic": "dispatcher.stats"} via the
+        # "bus.publish" RPC; the responder lives at components.go
+        # (dispatcher-stats-handler). The mirror "dispatcher.stats.result"
+        # response topic is consumed by those same external clients.
+        "dispatcher.stats": "external request endpoint via bus.publish RPC; responder in internal/daemon/components.go",
+        "dispatcher.stats.result": "response for external dispatcher.stats requesters",
+        # Forward-looking hook: Orchestrator subscribes; ContextFirewall does
+        # not emit bus events yet (orchestrator.go handleContextCompressed).
+        "llm.context_compressed": "forward-looking subscription; publisher (ContextFirewall) not yet implemented",
+    }
+
+    orphan_publishers = pub_topics - expanded_subs - runtime_dynamic - set(annotated_orphans)
     # A wildcard subscription is satisfied when at least one concrete topic
     # matches its prefix; only unmatched wildcards are dead listeners.
     orphan_subscribers = {
         t for t in sub_topics
         if not (t in matched_wildcards or t in pub_topics)
         and t not in runtime_dynamic
+        and t not in annotated_orphans
     }
 
     return {
