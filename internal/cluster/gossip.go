@@ -462,6 +462,17 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 		return
 	}
 
+	// Wire liveness (multiuser live-verification): any inbound traffic from
+	// a node proves it is alive. Upsert the sender into the peers map BEFORE
+	// dedup/verification so even duplicated or rejected events count — the
+	// kernel of truth here is the TCP handshake itself. CLUSTER_HEARTBEAT
+	// events short-circuit below: they carry no domain payload.
+	g.observePeer(event.NodeID, "")
+	if event.EventType == clusterHeartbeatEventType {
+		g.logger.Debug("gossip: heartbeat received", "node_id", event.NodeID)
+		return
+	}
+
 	// Verify signature BEFORE dedup so that a poisoned/unsigned event with
 	// a known event ID cannot suppress a legitimate signed event.
 	if g.cfg.Security.RequireNodeSignatures {
@@ -522,12 +533,8 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 		g.vcMu.Unlock()
 	}
 
-	// Update peer LastSeen timestamp
-	g.mu.Lock()
-	if peer, exists := g.peers[event.NodeID]; exists {
-		peer.LastSeen = time.Now().UTC()
-	}
-	g.mu.Unlock()
+	// Peer liveness was recorded via observePeer at the top of this
+	// function (covers both existing and newly-discovered peers).
 
 	// Re-broadcast to peers via bus
 	if g.msgBus != nil {
@@ -756,6 +763,58 @@ func (g *GossipEngine) sendHeartbeat() {
 	if g.msgBus != nil {
 		g.msgBus.Publish("cluster.event.heartbeat", body)
 	}
+
+	// Send a wire heartbeat through the transport so peers observe our
+	// liveness over TCP (their observePeer upserts us). Without this,
+	// heartbeats never leave the node when no domain events are flowing,
+	// and peer liveness never propagates (found live on the totem cluster:
+	// UsersSync peer sets stayed empty and foreign users never merged).
+	if g.transport != nil {
+		ev := &models.ClusterEvent{
+			EventID:   models.GenerateEventID(),
+			NodeID:    g.localNode,
+			EventType: clusterHeartbeatEventType,
+			Timestamp: time.Now().UTC(),
+		}
+		g.transport.SendEvent(ev)
+	}
+}
+
+// clusterHeartbeatEventType is the wire event type used by
+// sendHeartbeat's transport heartbeat. Receivers short-circuit on it:
+// liveness is recorded, nothing is persisted or dispatched to domain
+// handlers. Declared here rather than pkg/models to keep the footprint
+// local (same reasoning as backup.EventTypeUsersSync).
+const clusterHeartbeatEventType = models.ClusterEventType("CLUSTER_HEARTBEAT")
+
+// observePeer records liveness for a node observed on the wire. Called on
+// every inbound event/heartbeat. Endpoint is best-effort: the event
+// envelope does not carry a dial address, so the endpoint is only set when
+// provided (e.g. by future transport-level discovery) and never
+// overwritten once known.
+func (g *GossipEngine) observePeer(nodeID, endpoint string) {
+	if nodeID == "" || nodeID == g.localNode {
+		return
+	}
+	now := time.Now().UTC()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if p, ok := g.peers[nodeID]; ok {
+		p.LastSeen = now
+		p.Status = "active"
+		if endpoint != "" && p.Endpoint == "" {
+			p.Endpoint = endpoint
+		}
+		return
+	}
+	g.peers[nodeID] = &PeerInfo{
+		NodeID:   nodeID,
+		Endpoint: endpoint,
+		JoinedAt: now,
+		LastSeen: now,
+		Status:   "active",
+	}
+	g.logger.Info("gossip: peer discovered", "node_id", nodeID, "endpoint", endpoint)
 }
 
 // pruneStalePeers removes peers that haven't been seen within the timeout.
