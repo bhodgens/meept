@@ -228,3 +228,37 @@ func TestRecordWorkerMetricsEventLog(t *testing.T) {
 		t.Errorf("expected worker_id w-99 in event context, got %v", ctx["worker_id"])
 	}
 }
+
+// TestCollectorTokenUsageSubscription verifies llm.tokens.used events
+// from AgentLoop.publishTokenUsage are recorded as llm.tokens_used.
+func TestCollectorTokenUsageSubscription(t *testing.T) {
+	t.Parallel()
+
+	c, store, messageBus := newTestCollectorAndBus(t)
+	defer c.Shutdown()
+	defer func() { _ = store.Close() }()
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", map[string]any{
+		"conversation_id": "conv-1",
+		"total_tokens":    42,
+	})
+	if err != nil {
+		t.Fatalf("NewBusMessage: %v", err)
+	}
+	if n := messageBus.Publish("llm.tokens.used", msg); n == 0 {
+		t.Fatal("llm.tokens.used had no subscribers")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	var sum float64
+	err = store.DB().Get(&sum,
+		`SELECT COALESCE(SUM(value), 0) FROM metrics_live WHERE metric_name = ?`,
+		"llm.tokens_used")
+	if err != nil {
+		t.Fatalf("query metrics_live: %v", err)
+	}
+	if sum != 42 {
+		t.Errorf("llm.tokens_used sum = %v, want 42", sum)
+	}
+}

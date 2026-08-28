@@ -233,6 +233,19 @@ func (c *Collector) subscribeToBus() {
 			c.handleBusMessage(msg)
 		}
 	}()
+
+	// Token usage from AgentLoop.publishTokenUsage. Without this
+	// subscription the event has no in-process consumer when the TUI is
+	// not connected, and the collector never records LLM token volume.
+	tokenSub := c.bus.Subscribe("metrics-collector-tokens", "llm.tokens.used")
+	c.subs = append(c.subs, tokenSub)
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for msg := range tokenSub.Channel {
+			c.handleBusMessage(msg)
+		}
+	}()
 }
 
 // handleBusMessage processes bus messages for metrics collection.
@@ -266,6 +279,8 @@ func (c *Collector) handleBusMessage(msg *models.BusMessage) {
 		"worker.state_changed", "worker.status",
 		"worker.pool.started", "worker.pool.stopped":
 		c.recordWorkerMetrics(msg)
+	case "llm.tokens.used":
+		c.recordTokenUsage(msg)
 	}
 }
 
@@ -311,7 +326,7 @@ func (c *Collector) RecordLLMCall(model string, inputTokens, outputTokens int, l
 // RecordCompression records a compression event.
 func (c *Collector) RecordCompression(tokensSaved int, strategy string) {
 	tags := map[string]string{
-		DimModel:   strategy,
+		DimModel:    strategy,
 		"tool_name": "compress",
 	}
 	c.store.Record("compression.tokens_saved", float64(tokensSaved), tags)
@@ -321,7 +336,7 @@ func (c *Collector) RecordCompression(tokensSaved int, strategy string) {
 // recordCompression extracts compression metrics from a bus message.
 func (c *Collector) recordCompression(msg *models.BusMessage) {
 	var payload struct {
-		Event       struct {
+		Event struct {
 			TokensBefore int    `json:"tokens_before"`
 			TokensAfter  int    `json:"tokens_after"`
 			Strategy     string `json:"strategy"`
@@ -348,10 +363,10 @@ func (c *Collector) recordCompression(msg *models.BusMessage) {
 		map[string]any{
 			DimModel:        strategy,
 			"tool_name":     payload.Event.ToolName,
-			"tokens_before":  payload.Event.TokensBefore,
-			"tokens_after":   payload.Event.TokensAfter,
-			"tokens_saved":   tokensSaved,
-			"hash":           payload.Event.Hash,
+			"tokens_before": payload.Event.TokensBefore,
+			"tokens_after":  payload.Event.TokensAfter,
+			"tokens_saved":  tokensSaved,
+			"hash":          payload.Event.Hash,
 		},
 	)
 
@@ -481,6 +496,25 @@ func (c *Collector) recordWorkerMetrics(msg *models.BusMessage) {
 		fmt.Sprintf("worker %s (%s)", eventType, source),
 		eventContext,
 	)
+}
+
+// recordTokenUsage records AgentLoop token-usage events onto the metrics store.
+func (c *Collector) recordTokenUsage(msg *models.BusMessage) {
+	tokens := 0.0
+	if len(msg.Payload) > 0 {
+		var payload map[string]any
+		if err := json.Unmarshal(msg.Payload, &payload); err == nil {
+			switch v := payload["total_tokens"].(type) {
+			case float64:
+				tokens = v
+			case int:
+				tokens = float64(v)
+			}
+		}
+	}
+	c.store.Record("llm.tokens_used", tokens, map[string]string{
+		"source": msg.Source,
+	})
 }
 
 // extractWorkerID attempts to read a worker ID from a JSON payload using

@@ -505,7 +505,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3728,
+        "line": 3734,
         "payload_keys": [
           "name",
           "tags",
@@ -1122,7 +1122,7 @@
     "reflection.complete": [
       {
         "file": "internal/agent/orchestrator.go",
-        "line": 1135,
+        "line": 1114,
         "payload_keys": [
           "files",
           "fix_length",
@@ -1580,7 +1580,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6579,
+        "line": 6585,
         "payload_keys": []
       }
     ],
@@ -2046,13 +2046,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5217,
+        "line": 5223,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 5254,
+        "line": 5260,
         "payload_keys": [],
         "via_const": true
       }
@@ -2404,7 +2404,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2769,
+        "line": 2775,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -2464,6 +2464,13 @@
         "line": 130,
         "subscriber_id": "topics:llm.context_compressed",
         "via_handler_table": true
+      }
+    ],
+    "llm.tokens.used": [
+      {
+        "file": "internal/metrics/collector.go",
+        "line": 240,
+        "subscriber_id": "metrics-collector-tokens"
       }
     ],
     "memory.query": [
@@ -3100,7 +3107,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6509,
+        "line": 6515,
         "subscriber_id": "status-handler"
       }
     ],
