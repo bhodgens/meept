@@ -56,26 +56,39 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	// Status methods
 	server.RegisterHandler("status", p.makeProxy("status.request", "status.response", 10*time.Second))
 
-	// Memory methods
+	// Memory methods — memory.query, memory.recent, memory.export and
+	// memory.vector.search are covered by direct handlers registered in
+	// internal/daemon/memory_rpc.go (daemon.go) or live bus subscribers
+	// (internal/memory/handler.go subscribes memory.query/memory.recent).
+	// Dead proxies for memory.vector.stats and memory.export were removed:
+	// nothing subscribed to "memory.result" for them, so calls timed out
+	// instead of returning method-not-found. memory.vector.stats now has a
+	// direct handler wrapping MemoryService.VectorStats.
 	server.RegisterHandler("memory.query", p.makeProxy("memory.query", "memory.result", 30*time.Second))
 	server.RegisterHandler("memory.recent", p.makeProxy("memory.recent", "memory.result", 10*time.Second))
-	server.RegisterHandler("memory.export", p.makeProxy("memory.export", "memory.result", 10*time.Second))
-	server.RegisterHandler("memory.vector.search", p.makeProxy("memory.vector.search", "memory.result", 30*time.Second))
-	server.RegisterHandler("memory.vector.stats", p.makeProxy("memory.vector.stats", "memory.result", 10*time.Second))
 
-	// Scheduler methods
-	server.RegisterHandler("scheduler.list_jobs", p.makeProxy("scheduler.list_jobs", "scheduler.result", 10*time.Second))
-	server.RegisterHandler("scheduler.add_job", p.makeProxy("scheduler.add_job", "scheduler.result", 10*time.Second))
-	server.RegisterHandler("scheduler.schedule_agent_task", p.makeProxy("scheduler.add_job", "scheduler.result", 10*time.Second))
+	// Scheduler methods — the full scheduler surface (list_jobs, add_job,
+	// status, etc.) is registered as direct Go handlers by
+	// scheduler.RegisterRPCHandlers (internal/scheduler/rpc.go, daemon.go).
+	// The dead scheduler.* proxies (list_jobs/add_job/schedule_agent_task)
+	// were removed: they were fully shadowed by the direct handlers, and
+	// schedule_agent_task additionally proxied to the WRONG request topic
+	// (published "scheduler.add_job" on the bus, which has zero bus
+	// subscribers) — any caller would have blocked 10s then timed out.
+	// "scheduler.result" has no bus subscriber. If the schedule_agent_task
+	// API name is wanted, register it as a direct alias for handler.AddJob
+	// in internal/scheduler/rpc.go.
 
 	// Config methods
 	server.RegisterHandler("config.reload", p.makeFireAndForget("config.reload"))
 
-	// Security methods
-	server.RegisterHandler("security.query_log", p.makeProxy("security.query_log", "security.result", 10*time.Second))
-	server.RegisterHandler("security.get_stats", p.makeProxy("security.get_stats", "security.result", 10*time.Second))
-	server.RegisterHandler("security.record_override", p.makeProxy("security.record_override", "security.result", 10*time.Second))
-	server.RegisterHandler("security.approve_action", p.makeFireAndForgetBlocking("security.approve_action"))
+	// Security methods — query_log/get_stats/record_override/approve_action
+	// proxies were removed: no component subscribes to "security.result" (or
+	// handles approve_action), so every call timed out for 10s and then
+	// failed. security.Engine (the would-be backend) has no callers, so
+	// there is nothing real to wire these to; delete them rather than leave
+	// 10s-timeout traps. Direct check methods are registered by
+	// SecurityHandler.RegisterSecurityMethods (internal/rpc/security.go).
 
 	// Note: skills methods are NOT proxied here.
 	// Direct RPC handlers are registered by RegisterSkillsHandlers (internal/rpc/skills.go)
@@ -139,13 +152,20 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("worker.stats", p.makeProxy("worker.stats", "worker.result", 10*time.Second))
 	server.RegisterHandler("worker.scale", p.makeProxy("worker.scale", "worker.result", 10*time.Second))
 
-	// Pipeline methods
-	server.RegisterHandler("pipeline.status", p.makeProxy("pipeline.status", "pipeline.result", 10*time.Second))
+	// Pipeline methods — the pipeline.status proxy was removed: nothing
+	// subscribes to "pipeline.result" and no component handles the request,
+	// so callers blocked 10s and then got a timeout error. The CLI learning
+	// status command (cmd/meept/learning.go) reads local files directly and
+	// never called this method. services.PipelineService.Status exists but is
+	// not constructed anywhere, so there is nothing real to wire to.
+	// Re-add only together with a real pipeline status backend.
 
-	// Cache methods
-	server.RegisterHandler("cache.stats", p.makeProxy("cache.stats", "cache.result", 10*time.Second))
-	server.RegisterHandler("cache.clear", p.makeProxy("cache.clear", "cache.result", 10*time.Second))
-	server.RegisterHandler("cache.invalidate", p.makeProxy("cache.invalidate", "cache.result", 10*time.Second))
+	// Cache methods — direct handlers in internal/rpc/cache.go are
+	// registered unconditionally in daemon.go (RegisterCacheMethods), so
+	// these proxies were fully shadowed and unreachable. The dead proxy
+	// registrations were removed; "cache.result" has no bus subscriber.
+	// With the proxies gone a nil TokenCache yields "method not found"
+	// from handleStats rather than a 10s timeout.
 
 	// Self-improvement methods are registered as native Go handlers by
 	// SelfImproveHandler (see selfimprove.go) because the Controller lives
@@ -278,31 +298,6 @@ func (p *ProxyHandler) makeFireAndForget(topic string) Handler {
 		} else {
 			delivered = p.bus.Publish(topic, msg)
 		}
-		status := "published"
-		if delivered == 0 {
-			status = "dropped"
-		}
-		return map[string]any{
-			RPCKeyStatus: status,
-			"topic":      topic,
-			"delivered":  delivered,
-		}, nil
-	}
-}
-
-// makeFireAndForgetBlocking creates a handler that uses PublishBlocking for
-// security-critical events that must not be dropped. Same as makeFireAndForget
-// but uses blocking publish with a 5-second timeout.
-func (p *ProxyHandler) makeFireAndForgetBlocking(topic string) Handler {
-	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		msg := &models.BusMessage{
-			ID:      id.Generate("fire-"),
-			Type:    models.MessageTypeEvent,
-			Topic:   topic,
-			Source:  "rpc.proxy",
-			Payload: params,
-		}
-		delivered := p.bus.PublishBlocking(topic, msg)
 		status := "published"
 		if delivered == 0 {
 			status = "dropped"

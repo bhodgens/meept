@@ -65,4 +65,18 @@ func registerMemoryRPCHandlers(server *rpc.Server, memSvc *services.MemoryServic
 		}
 		return map[string]any{"data": parsed, "format": req.Format}, nil
 	})
+
+	// memory.vector.stats — vector shard statistics. Previously a dead bus
+	// proxy: the request was published to the bus but nothing subscribed to
+	// "memory.result", so `meept memory vector stats` (cmd/meept/memory.go)
+	// blocked 10s and then failed with a timeout error. This handler calls
+	// MemoryService.VectorStats directly — the same code path as the HTTP
+	// route GET /api/v1/memory/vector/stats.
+	server.RegisterHandler("memory.vector.stats", func(_ context.Context, _ json.RawMessage) (any, error) {
+		stats, err := memSvc.VectorStats()
+		if err != nil {
+			return nil, err
+		}
+		return stats, nil
+	})
 }
