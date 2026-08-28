@@ -197,6 +197,17 @@ func parseInstructionFile(path string, tierPriority int) (*UserInstruction, erro
 	content := extractFrontmatter(data, &frontmatter)
 	if len(frontmatter) > 0 {
 		body = strings.TrimSpace(content)
+	} else {
+		// No frontmatter delimiters: the file is bare YAML (the format
+		// Save() writes and docs/concepts/instructions.md documents).
+		// Parse the whole file as the instruction's fields instead of
+		// treating it as a markdown body — otherwise every field is lost
+		// and a fresh ID is minted on each scan.
+		frontmatter = map[string]any{}
+		if err := yaml.Unmarshal(data, &frontmatter); err != nil || len(frontmatter) == 0 {
+			frontmatter = map[string]any{}
+		}
+		body = ""
 	}
 
 	name := frontmatter["name"]
