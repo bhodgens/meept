@@ -1180,6 +1180,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// per-model > provider > global, indexed default-on; also applies on
 	// later registry attach via applySchemaModeWithLock.
 	c.AgentLoop.SetSchemaModeConfig(cfg.Agent.Tools)
+	applyGBNFConstrainedFromConfig(cfg.Agent.Tools)
 	c.AgentLoop.SetCompactionConfig(cfg.Compaction)
 
 	// Wire shadow hot-swap callback so that successful adapter activations
