@@ -2664,8 +2664,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
-	// Initialize bot framework if enabled
-	if cfg.Bots.Enabled {
+	// Initialize bot persistence whenever bots OR employees are enabled.
+	// The employee layer reuses bot.Manager/bot.Store (Hire/ListEmployees
+	// fail-closed when botManager is nil). Previously this block was gated
+	// on Bots.Enabled only, so employees.enabled=true with bots.enabled=
+	// false registered 16 agents.* RPC methods that all returned empty or
+	// "bot backend not configured".
+	if cfg.Bots.Enabled || cfg.Employees.Enabled {
 		botDataDir := cfg.Bots.DataDir
 		if botDataDir == "" {
 			botDataDir = filepath.Join(cfg.Daemon.DataDir, "bots")
@@ -2685,6 +2690,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				logger.Info("Bot framework initialized",
 					"data_dir", botDataDir,
 					"max_concurrent", cfg.Bots.MaxConcurrentBots,
+					"for_employees", cfg.Employees.Enabled && !cfg.Bots.Enabled,
 				)
 			}
 		}
@@ -6619,9 +6625,9 @@ func (p *AgentJobProcessor) WithTaskStore(ts *task.Store) *AgentJobProcessor {
 
 // resolveStepWorkingDir finds the working directory for a step job:
 //
-//	1. task -> LinkedSessions -> session.WorktreePath (or ProjectPath)
-//	2. fallback: session whose ConversationID or ID equals the task's
-//	   linked session id
+//  1. task -> LinkedSessions -> session.WorktreePath (or ProjectPath)
+//  2. fallback: session whose ConversationID or ID equals the task's
+//     linked session id
 //
 // Returns "" when nothing resolvable; callers fall back to the loop default.
 func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
