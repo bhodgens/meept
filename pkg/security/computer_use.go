@@ -10,10 +10,10 @@ const CuaDriverToolPrefix = "cua-driver."
 // computerUseObservationActions are read-only desktop observation actions.
 // They reveal screen contents but never inject input, so they classify LOW.
 var computerUseObservationActions = map[string]bool{
-	"capture":        true,
-	"screenshot":     true,
-	"list_apps":      true,
-	"list_windows":   true,
+	"capture":          true,
+	"screenshot":       true,
+	"list_apps":        true,
+	"list_windows":     true,
 	"get_window_state": true,
 }
 
@@ -46,5 +46,48 @@ func ComputerUseRule(action string) (RiskLevel, bool) {
 		return RiskLow, true
 	}
 
+	return RiskHigh, true
+}
+
+// BrowserToolPrefix is the registered-name prefix for the built-in browser
+// automation tool family (internal/browser + internal/tools/builtin/browser).
+const BrowserToolPrefix = "browser_"
+
+// browserObservationActions are read-only browser actions: they reveal page
+// content but never inject input or navigate.
+var browserObservationActions = map[string]bool{
+	"read_text":  true,
+	"screenshot": true,
+	// Closing the session releases resources without injecting anything.
+	"close": true,
+}
+
+// browserInputActions mutate browser state: navigation changes the loaded
+// origin; click/type can submit forms and trigger side effects.
+var browserInputActions = map[string]bool{
+	"navigate": true,
+	"type":     true,
+}
+
+// BrowserToolRule classifies a registered name from the built-in browser
+// tool family, mirroring ComputerUseRule's fail-closed shape:
+//   - observation actions (read_text/screenshot/close) -> LOW
+//   - input actions (click/navigate/type)              -> HIGH
+//   - unknown browser_* names                          -> HIGH (fail closed)
+func BrowserToolRule(action string) (RiskLevel, bool) {
+	rest, ok := strings.CutPrefix(action, BrowserToolPrefix)
+	if !ok {
+		return RiskSafe, false
+	}
+	if rest == "" {
+		// Degenerate name under our namespace: fail closed.
+		return RiskHigh, true
+	}
+	if strings.HasPrefix(rest, "click") || browserInputActions[rest] {
+		return RiskHigh, true
+	}
+	if browserObservationActions[rest] {
+		return RiskLow, true
+	}
 	return RiskHigh, true
 }

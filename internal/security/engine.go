@@ -41,6 +41,13 @@ type Engine struct {
 	logger            *slog.Logger
 	fenceChecker      *FenceChecker
 
+	// permissionTable is the optional declarative shell permission table
+	// ([security.shell_permissions]). When set, shell_execute commands are
+	// matched against it BEFORE tirith pattern scanning: deny short-circuits
+	// blocked; ask routes to the existing confirmation flow; allow proceeds
+	// but scanning still runs (defense-in-depth). No match -> unchanged path.
+	permissionTable *PermissionTable
+
 	// preExecCheckers maps employee/agent IDs to their PreExecChecker.
 	// Guarded by mu. The checker's Check method is invoked while mu is
 	// held as RLock, so implementations MUST NOT call back into Engine
@@ -117,6 +124,47 @@ func (e *Engine) initialize() error {
 
 	e.logger.Info("SecurityEngine initialized", "db", e.db)
 	return nil
+}
+
+// SetPermissionTable installs the declarative shell permission table.
+// Pass nil to disable. The typed-nil guard prevents accidental
+// interface-nil assignment (table is a pointer type).
+func (e *Engine) SetPermissionTable(pt *PermissionTable) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.permissionTable = pt
+}
+
+// checkShellPermissionTable evaluates the declarative permission table for a
+// shell command. Returns nil when the table is unset or no prefix matched —
+// in that case the existing evaluation path proceeds unchanged.
+func (e *Engine) checkShellPermissionTable(command string) *Decision {
+	if e.permissionTable == nil || command == "" {
+		return nil
+	}
+	decision, prefix, ok := e.permissionTable.Evaluate(command)
+	if !ok {
+		return nil
+	}
+	switch decision {
+	case ShellActionDeny:
+		return &Decision{
+			Allowed:    false,
+			Reason:     "command denied by shell permission table rule: " + prefix,
+			RiskLevel:  RiskCritical,
+			RuleSource: "shell_permission_table",
+		}
+	case ShellActionAsk:
+		return &Decision{
+			Allowed:              false,
+			Reason:               "command requires confirmation by shell permission table rule: " + prefix,
+			RiskLevel:            RiskHigh,
+			RuleSource:           "shell_permission_table",
+			RequiresConfirmation: true,
+		}
+	default: // ShellActionAllow — proceed, tirith still runs (defense-in-depth)
+		return nil
+	}
 }
 
 // SetFenceChecker sets the fence checker for path boundary enforcement.
@@ -324,6 +372,16 @@ func (e *Engine) CheckForAgent(action, toolName string, details map[string]strin
 	if decision := e.checkFinancial(details); decision != nil {
 		e.logDecision(*decision, action, toolName, details, conversationID)
 		return *decision
+	}
+
+	// Stage 1.5: Declarative shell permission table. Deny short-circuits
+	// blocked; ask routes to the existing confirmation flow; allow falls
+	// through (tirith scanning still runs downstream as defense-in-depth).
+	if action == ActionShellExecute {
+		if decision := e.checkShellPermissionTable(details["command"]); decision != nil {
+			e.logDecision(*decision, action, toolName, details, conversationID)
+			return *decision
+		}
 	}
 
 	// Stage 2: Base rule lookup
@@ -551,6 +609,14 @@ func (e *Engine) lookupBaseRule(action, toolName string) (RiskLevel, bool) {
 	}
 	if cuRisk, ok := pkgsecurity.ComputerUseRule(cuName); ok {
 		return RiskLevel(cuRisk), false
+	}
+
+	// Built-in browser automation tools (browser_navigate, browser_click,
+	// ...): observation actions LOW, input injection (navigate/click/type)
+	// and unknown names HIGH (fail-closed). Checked after the DB so
+	// operator overrides keep precedence.
+	if brRisk, ok := pkgsecurity.BrowserToolRule(cuName); ok {
+		return RiskLevel(brRisk), false
 	}
 
 	e.logger.Warn("No rule found for action; defaulting to MEDIUM", "action", action, "tool", toolName)
