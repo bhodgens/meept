@@ -55,9 +55,15 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 	var sb strings.Builder
 	sb.WriteString(base)
 
-	// Get active instructions
+	// Get active instructions. Re-scan disk so YAML files dropped since
+	// daemon start (or written by handleAddRPC in another process) reach
+	// the agent prompt — GetActive alone reads a map that starts empty.
 	var instructions []*preferences.UserInstruction
 	if c.instructions != nil {
+		if _, discErr := c.instructions.Discovery(); discErr != nil {
+			// scanTier treats missing dirs as empty. A real walk error
+			// leaves the previous in-memory map in place.
+		}
 		instructions = c.instructions.GetActive()
 	}
 

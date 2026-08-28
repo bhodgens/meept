@@ -55,6 +55,9 @@ func wireInstructions(
 
 	// 1. Construct the tiered instruction store.
 	store := preferences.NewUserInstructionStore(preferences.DefaultTiers)
+	if _, discErr := store.Discovery(); discErr != nil {
+		logger.Warn("instruction store discovery failed", "error", discErr)
+	}
 	result.Store = store
 
 	// 2. Construct the NL instruction parser.
