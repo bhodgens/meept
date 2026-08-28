@@ -19,8 +19,10 @@ import (
 )
 
 // HookAsyncRewakeTopic is the bus topic used when an async hook with
-// AsyncRewake=true finishes successfully. Subscribers (typically the
-// agent loop) can wake up and react to the completion.
+// AsyncRewake=true finishes successfully. The AgentLoop subscribes to
+// this topic (armed at turn entry) and injects a wake into the matching
+// conversation so it can react to the completion on its next reasoning
+// iteration.
 const HookAsyncRewakeTopic = "hook.async_rewake"
 
 // HTTPHookConfig serializes hook configuration.
@@ -39,7 +41,8 @@ type HTTPHookConfig struct {
 
 	// AsyncRewake, when true (and Async must also be true), publishes a
 	// hook.async_rewake bus signal after the async execution completes
-	// successfully so the agent loop can wake up and react. Requires
+	// successfully. The AgentLoop subscribes to this topic (armed at turn
+	// entry) and wakes the matching conversation. Requires
 	// SetBus to have been called with a non-nil MessageBus.
 	AsyncRewake bool `json:"async_rewake,omitempty"`
 }

@@ -45,7 +45,9 @@ type FileWatcherHook struct {
 
 	// AsyncRewake, when true (and Async must also be true), publishes a
 	// hook.async_rewake bus signal after the async callback finishes so
-	// the agent loop wakes up. Requires SetBus to have been called.
+	// the agent loop can wake up and react. The loop's consumer treats the
+	// typically-empty session_id as a broadcast to itself. Requires SetBus
+	// to have been called.
 	AsyncRewake bool `json:"async_rewake,omitempty"`
 
 	watcher *fsnotify.Watcher

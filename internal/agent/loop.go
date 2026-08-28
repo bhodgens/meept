@@ -592,6 +592,18 @@ type AgentLoop struct {
 
 	// File system hooks
 	fileWatcher *FileWatcherHook
+	// rewake consumer state for hook.async_rewake signals (see
+	// loop_rewake.go). rewakeOnce arms the bus subscription + pump
+	// goroutine at first turn entry; rewakeStopOnce guards the teardown
+	// close (idempotent, separate from arm so stopping never lets a later
+	// arm race); rewakeCh carries decoded payloads to the reasoning loop;
+	// rewakeSub is retained for teardown; rewakeWG tracks the pump so
+	// Close can drain it.
+	rewakeOnce     sync.Once
+	rewakeStopOnce sync.Once
+	rewakeCh       chan RewakePayload
+	rewakeSub      *bus.Subscriber
+	rewakeWG       sync.WaitGroup
 	// Session persistence (wired after construction)
 	sessionStore sessionStore
 
@@ -1872,6 +1884,10 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		"message_len", len(userMessage),
 	)
 
+	// Arm the hook.async_rewake consumer for this loop (first turn only;
+	// no-op without a bus). Torn down in Close.
+	l.armRewakeConsumer()
+
 	// begin marks the start of the turn for duration tracking. Used by
 	// the immediate self-reflection goroutine (Turbo Thread E) to attach
 	// wall-clock latency to the trajectory.
@@ -2348,6 +2364,8 @@ func (l *AgentLoop) Close() {
 		return
 	}
 	l.wg.Wait()
+	// Tear down the hook.async_rewake consumer (no-op when never armed).
+	l.stopRewake()
 	l.isActive.Store(false)
 	l.closed.Store(true)
 }
@@ -2742,6 +2760,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			return "", ErrContextCancelled
 		default:
 		}
+
+		// Inject async-rewake signals (hook.async_rewake completions) as
+		// system notes so the model wakes and reacts on this iteration.
+		l.injectRewakes(conv, conversationID, iteration)
 
 		// Check steering queue before LLM call
 		if l.queue != nil {

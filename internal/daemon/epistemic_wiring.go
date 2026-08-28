@@ -151,6 +151,9 @@ func wireEpistemicHook(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, ch
 // wireFileWatcherHook creates a FileWatcherHook from the daemon config and
 // attaches it to the agent loop via SetFileWatcher. No-op when agentLoop is
 // nil, the hook is disabled in hooks config, or FileWatcher pattern is empty.
+// When Async+AsyncRewake are enabled, the hook publishes hook.async_rewake
+// signals that the loop's own consumer (armed in RunOnceWithParts) injects
+// into the conversation at the next reasoning iteration.
 func wireFileWatcherHook(agentLoop *agent.AgentLoop, cfg config.Config, bus *bus.MessageBus, logger *slog.Logger) {
 	if agentLoop == nil {
 		return
@@ -183,7 +186,10 @@ func wireFileWatcherHook(agentLoop *agent.AgentLoop, cfg config.Config, bus *bus
 // wireHTTPHooks converts each HTTP hook entry from the daemon config into an
 // agent.HTTPHook and registers it as a session-start/session-end hook on the
 // agent loop's hook registry. Each hook also gets the message bus reference
-// (for async-rewake signals) when Async+AsyncRewake are enabled.
+// (for async-rewake signals) when Async+AsyncRewake are enabled; those
+// signals are consumed by the loop's own rewake consumer (see
+// internal/agent/loop_rewake.go), which wakes the matching conversation at
+// its next reasoning iteration.
 //
 // No-op when agentLoop is nil, the hook registry is nil, or no HTTP hooks are
 // configured.
