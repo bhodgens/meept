@@ -174,6 +174,7 @@ func (s *Server) CallMethod(ctx context.Context, method string, params json.RawM
 	s.mu.RUnlock()
 
 	if !ok {
+		s.logger.Warn("rpc: method not found", "method", method)
 		return nil, fmt.Errorf("method not found: %s", method)
 	}
 
@@ -391,6 +392,7 @@ func (s *Server) dispatch(connCtx context.Context, connCancel context.CancelFunc
 	s.mu.RUnlock()
 
 	if !ok {
+		s.logger.Warn("rpc: method not found", "method", req.Method)
 		return MakeErrorResponse(
 			req.ID,
 			models.ErrCodeMethodNotFound,
@@ -435,6 +437,10 @@ func (s *Server) dispatch(connCtx context.Context, connCancel context.CancelFunc
 		if isParameterError(err) {
 			code = models.ErrCodeInvalidParams
 		}
+		s.logger.Warn("rpc: handler error",
+			"method", req.Method,
+			"error_code", int(code),
+			"error", err)
 		return MakeErrorResponse(
 			req.ID,
 			code,

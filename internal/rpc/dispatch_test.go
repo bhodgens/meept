@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"testing"
+
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // stubSubmitter is a test double for DispatchSubmitter.
@@ -374,5 +377,92 @@ func TestSetSubmitter(t *testing.T) {
 	_, err = h.submitterOrErr()
 	if err != nil {
 		t.Fatalf("SetSubmitter(nil) should not clear existing submitter")
+	}
+}
+
+// --- Server.dispatch logging (silent-failure regression tests) ---
+
+// TestServerDispatch_MethodNotFound_Logs verifies that a missing-method
+// dispatch emits a warning carrying the method name instead of failing
+// silently.
+func TestServerDispatch_MethodNotFound_Logs(t *testing.T) {
+	t.Parallel()
+	logs := &logCapture{}
+	srv := New(&Config{SocketPath: ""}, nil, slog.New(logs))
+
+	req := &models.JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "does.not.exist",
+	}
+	resp := srv.dispatch(context.Background(), nil, req)
+	if resp == nil || resp.Error == nil {
+		t.Fatal("expected error response for unknown method")
+	}
+	if resp.Error.Code != models.ErrCodeMethodNotFound {
+		t.Errorf("error code = %d, want %d", resp.Error.Code, models.ErrCodeMethodNotFound)
+	}
+
+	rec := logs.findMessage("rpc: method not found")
+	if rec == nil {
+		t.Fatal("expected 'rpc: method not found' warning to be logged")
+	}
+	found := false
+	rec.Attrs(func(a slog.Attr) bool {
+		if a.Key == "method" && a.Value.String() == "does.not.exist" {
+			found = true
+			return false
+		}
+		return true
+	})
+	if !found {
+		t.Error("expected log record to carry method=does.not.exist")
+	}
+}
+
+// TestServerDispatch_HandlerError_Logs verifies that a handler returning an
+// error emits a warning carrying the method and error instead of failing
+// silently.
+func TestServerDispatch_HandlerError_Logs(t *testing.T) {
+	t.Parallel()
+	logs := &logCapture{}
+	srv := New(&Config{SocketPath: ""}, nil, slog.New(logs))
+	handlerErr := errors.New("boom")
+	srv.RegisterHandler("test.fail", func(_ context.Context, _ json.RawMessage) (any, error) {
+		return nil, handlerErr
+	})
+
+	req := &models.JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      2,
+		Method:  "test.fail",
+	}
+	resp := srv.dispatch(context.Background(), nil, req)
+	if resp == nil || resp.Error == nil {
+		t.Fatal("expected error response from failing handler")
+	}
+	if resp.Error.Code != models.ErrCodeInternal {
+		t.Errorf("error code = %d, want %d", resp.Error.Code, models.ErrCodeInternal)
+	}
+
+	rec := logs.findMessage("rpc: handler error")
+	if rec == nil {
+		t.Fatal("expected 'rpc: handler error' warning to be logged")
+	}
+	var gotMethod, gotErr string
+	rec.Attrs(func(a slog.Attr) bool {
+		switch a.Key {
+		case "method":
+			gotMethod = a.Value.String()
+		case "error":
+			gotErr = a.Value.String()
+		}
+		return true
+	})
+	if gotMethod != "test.fail" {
+		t.Errorf("log method = %q, want %q", gotMethod, "test.fail")
+	}
+	if gotErr != "boom" {
+		t.Errorf("log error = %q, want %q", gotErr, "boom")
 	}
 }
