@@ -25,10 +25,9 @@ type AgentStatePersister interface {
 // via an UPSERT on agent_id. It uses a sync.Once to ensure the DDL runs at
 // most once per instance.
 type SQLiteStatePersister struct {
-	db        *sql.DB
-	once      sync.Once
-	initErr   error
-	tableName string
+	db      *sql.DB
+	once    sync.Once
+	initErr error
 }
 
 // NewSQLiteStatePersister creates a new SQLiteStatePersister and runs the
@@ -38,10 +37,7 @@ func NewSQLiteStatePersister(db *sql.DB) (*SQLiteStatePersister, error) {
 	if db == nil {
 		return nil, errors.New("SQLiteStatePersister: db is nil")
 	}
-	p := &SQLiteStatePersister{
-		db:        db,
-		tableName: "agent_states",
-	}
+	p := &SQLiteStatePersister{db: db}
 	p.once.Do(func() {
 		p.initErr = p.ensureSchema(context.Background())
 	})
@@ -55,11 +51,11 @@ func NewSQLiteStatePersister(db *sql.DB) (*SQLiteStatePersister, error) {
 func (p *SQLiteStatePersister) ensureSchema(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	ddl := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+	const ddl = `CREATE TABLE IF NOT EXISTS agent_states (
 		agent_id   TEXT PRIMARY KEY,
 		state_data TEXT NOT NULL,
 		updated_at DATETIME NOT NULL
-	)`, p.tableName)
+	)`
 	_, err := p.db.ExecContext(ctx, ddl)
 	return err
 }
@@ -72,11 +68,11 @@ func (p *SQLiteStatePersister) Save(ctx context.Context, agentID string, snapsho
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	q := fmt.Sprintf(`INSERT INTO %s (agent_id, state_data, updated_at)
+	const q = `INSERT INTO agent_states (agent_id, state_data, updated_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(agent_id) DO UPDATE SET
 			state_data = excluded.state_data,
-			updated_at = excluded.updated_at`, p.tableName)
+			updated_at = excluded.updated_at`
 	_, err = p.db.ExecContext(ctx, q, agentID, string(data), time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("SQLiteStatePersister.Save: upsert failed: %w", err)
@@ -89,7 +85,7 @@ func (p *SQLiteStatePersister) Save(ctx context.Context, agentID string, snapsho
 func (p *SQLiteStatePersister) Load(ctx context.Context, agentID string) (*AgentStateSnapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	q := fmt.Sprintf(`SELECT state_data FROM %s WHERE agent_id = ?`, p.tableName)
+	const q = `SELECT state_data FROM agent_states WHERE agent_id = ?`
 	var rawData string
 	err := p.db.QueryRowContext(ctx, q, agentID).Scan(&rawData)
 	if err != nil {
@@ -106,7 +102,7 @@ func (p *SQLiteStatePersister) Load(ctx context.Context, agentID string) (*Agent
 func (p *SQLiteStatePersister) Delete(ctx context.Context, agentID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	q := fmt.Sprintf(`DELETE FROM %s WHERE agent_id = ?`, p.tableName)
+	const q = `DELETE FROM agent_states WHERE agent_id = ?`
 	_, err := p.db.ExecContext(ctx, q, agentID)
 	if err != nil {
 		return fmt.Errorf("SQLiteStatePersister.Delete: %w", err)

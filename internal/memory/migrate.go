@@ -2,12 +2,12 @@ package memory
 
 import (
 	"database/sql"
-	"strings"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 // MigrateToDualDB migrates from legacy single-DB storage (sessions.db,
@@ -15,10 +15,10 @@ import (
 //
 // Steps:
 //
-//	1. Snapshot existing .db files into migration-backup/.
-//	2. Rename sessions.db → local.db (it already has the session schema).
-//	3. Merge memory.db tables into local.db where tables differ.
-//	4. Create an empty sync-gossip.db with gossip schema.
+//  1. Snapshot existing .db files into migration-backup/.
+//  2. Rename sessions.db → local.db (it already has the session schema).
+//  3. Merge memory.db tables into local.db where tables differ.
+//  4. Create an empty sync-gossip.db with gossip schema.
 //
 // All operations are destructive after step 2 (files are moved); a backup
 // directory is created first so nothing is lost.
@@ -155,10 +155,21 @@ func mergeMemoryDbIntoLocal(memoryPath, localPath string, logger *slog.Logger) e
 	}
 	rows.Close()
 
-	safeMemPath := memoryPath // safe because it came from our own dataDir
+	if _, err := localDB.Exec(`ATTACH DATABASE ? AS src`, memoryPath); err != nil {
+		return fmt.Errorf("attach memory.db for merge: %w", err)
+	}
+	defer func() {
+		if _, err := localDB.Exec(`DETACH src`); err != nil {
+			logger.Warn("migration: detach memory.db failed", "error", err)
+		}
+	}()
 
 	for _, tbl := range tables {
 		if tbl == "sqlite_sequence" || tbl == "sqlite_stat1" {
+			continue
+		}
+		name := tblName(tbl)
+		if name == "" || !sqliteIdentRe.MatchString(name) {
 			continue
 		}
 		// Check if table already exists in local.db.
@@ -170,12 +181,10 @@ func mergeMemoryDbIntoLocal(memoryPath, localPath string, logger *slog.Logger) e
 			logger.Debug("migration: skip merge, table already exists", "table", tbl)
 			continue
 		}
-		// ATTACH memory.db, CREATE TABLE AS SELECT, DETACH.
-		// SECURITY FIX (2026-07-14): Escape single quotes in the path to prevent
-		// SQL injection via crafted directory names (e.g., "dir's-name").
-		escapedMemPath := strings.ReplaceAll(safeMemPath, "'", "''")
-		stmt := fmt.Sprintf(`ATTACH '%s' AS src; CREATE TABLE "%s" AS SELECT * FROM src."%s"; DETACH src;`,
-			escapedMemPath, tblName(tbl), tblName(tbl))
+		// Table identifiers cannot be bound parameters; tblName + sqliteIdentRe
+		// restrict interpolation to [A-Za-z_][A-Za-z0-9_]*.
+		// #nosec G201 -- identifiers sanitized by tblName; path bound via ATTACH ?
+		stmt := fmt.Sprintf(`CREATE TABLE "%s" AS SELECT * FROM src."%s"`, name, name)
 		if _, err := localDB.Exec(stmt); err != nil {
 			logger.Warn("migration: failed to copy table", "table", tbl, "error", err)
 		} else {
@@ -185,7 +194,11 @@ func mergeMemoryDbIntoLocal(memoryPath, localPath string, logger *slog.Logger) e
 	return nil
 }
 
+// sqliteIdentRe is the identifier shape allowed in interpolated SQL.
+var sqliteIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // tblName sanitizes a table name to alphanumeric + underscore only.
+// Returns empty if nothing remains after stripping, so callers can skip.
 func tblName(s string) string {
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
@@ -193,9 +206,6 @@ func tblName(s string) string {
 		if ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z') || b == '_' || ('0' <= b && b <= '9') {
 			out = append(out, b)
 		}
-	}
-	if len(out) == 0 {
-		return "table_" + s
 	}
 	return string(out)
 }

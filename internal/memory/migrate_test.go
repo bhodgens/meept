@@ -2,6 +2,7 @@ package memory
 
 import (
 	"database/sql"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -158,5 +159,77 @@ func TestMigrateBothDatabases(t *testing.T) {
 	// The merge will fail gracefully but the file is left.
 	if _, err := os.Stat(memoryPath); os.IsNotExist(err) {
 		// Acceptable - if merge worked
+	}
+}
+
+func TestTblNameStripsQuotesAndSpaces(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{`foo"bar`, "foobar"},
+		{`"quoted"`, "quoted"},
+		{"foo bar", "foobar"},
+		{"a-b", "ab"},
+		{"ok_1", "ok_1"},
+		{"_leading", "_leading"},
+		{"!!!", ""},
+		{"123abc", "123abc"},
+	}
+	for _, tt := range tests {
+		if got := tblName(tt.in); got != tt.want {
+			t.Errorf("tblName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+	if sqliteIdentRe.MatchString(tblName("123abc")) {
+		t.Error("identifiers starting with a digit must not pass sqliteIdentRe")
+	}
+	if sqliteIdentRe.MatchString("") {
+		t.Error("empty identifier must not pass sqliteIdentRe")
+	}
+}
+
+func TestMergeMemoryDbCopiesMissingTable(t *testing.T) {
+	dir := t.TempDir()
+	localPath := filepath.Join(dir, "local.db")
+	memoryPath := filepath.Join(dir, "memory.db")
+
+	localDB, err := sql.Open("sqlite", localPath)
+	if err != nil {
+		t.Fatalf("open local.db: %v", err)
+	}
+	if _, err := localDB.Exec(`CREATE TABLE keep_me (id INTEGER); INSERT INTO keep_me VALUES (1)`); err != nil {
+		t.Fatalf("seed local.db: %v", err)
+	}
+	localDB.Close()
+
+	memDB, err := sql.Open("sqlite", memoryPath)
+	if err != nil {
+		t.Fatalf("open memory.db: %v", err)
+	}
+	if _, err := memDB.Exec(`CREATE TABLE extra_mem (v TEXT); INSERT INTO extra_mem VALUES ('copied')`); err != nil {
+		t.Fatalf("seed memory.db: %v", err)
+	}
+	memDB.Close()
+
+	if err := mergeMemoryDbIntoLocal(memoryPath, localPath, slog.Default()); err != nil {
+		t.Fatalf("mergeMemoryDbIntoLocal: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", localPath)
+	if err != nil {
+		t.Fatalf("reopen local.db: %v", err)
+	}
+	defer db.Close()
+
+	var v string
+	if err := db.QueryRow(`SELECT v FROM extra_mem`).Scan(&v); err != nil {
+		t.Fatalf("copied table missing: %v", err)
+	}
+	if v != "copied" {
+		t.Errorf("copied value = %q, want copied", v)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM keep_me`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("original table lost: n=%d err=%v", n, err)
 	}
 }
