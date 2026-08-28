@@ -77,6 +77,8 @@ func seedToolRules() []SeedToolRule {
 		{ToolName: "list_directory", Action: ActionFileRead, RiskLevel: RiskSafe, Description: "List directory contents", RequiresConfirmation: false, Immutable: false},
 		{ToolName: "web_fetch", Action: "network_request", RiskLevel: RiskLow, Description: "Fetch content from a URL", RequiresConfirmation: false, Immutable: false},
 		{ToolName: "web_search", Action: "network_request", RiskLevel: RiskLow, Description: "Search the web", RequiresConfirmation: false, Immutable: false},
+		{ToolName: "generate_image", Action: "network_request", RiskLevel: RiskMedium, Description: "Generate an image via a configured media provider", RequiresConfirmation: false, Immutable: false},
+		{ToolName: "generate_video", Action: "network_request", RiskLevel: RiskMedium, Description: "Generate a video via a configured media provider", RequiresConfirmation: false, Immutable: false},
 	}
 }
 
