@@ -40,9 +40,9 @@ type Orchestrator struct {
 	// Proactive chunking dependencies (Task 4 of Plan C+F).
 	// These are nil until wired by the daemon (Task 6).
 	// chunkToExecutorCapacity nil-guards all of these and skips chunking when unwired.
-	registry   *AgentRegistry          // agent registry for model config + LLM access
-	templateReg *plannerTemplateLoader  // template loader for split.md rendering
-	stepStore  *task.StepStore          // step store for listing + replacing steps
+	registry    *AgentRegistry         // agent registry for model config + LLM access
+	templateReg *plannerTemplateLoader // template loader for split.md rendering
+	stepStore   *task.StepStore        // step store for listing + replacing steps
 
 	// Per-task artifact store for phase transition artifact tracking.
 	// One store per active task; cleared on task completion.
@@ -114,9 +114,9 @@ func NewOrchestrator(deps OrchestratorDeps) *Orchestrator {
 		fenceChecker:        deps.FenceChecker,
 
 		// Proactive chunking deps (Task 6).
-		registry:   deps.Registry,
+		registry:    deps.Registry,
 		templateReg: deps.TemplateReg,
-		stepStore:  deps.StepStore,
+		stepStore:   deps.StepStore,
 
 		// Per-task artifact store; reset on task completion.
 		artifacts: newArtifactStore(),
@@ -314,31 +314,10 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 
 	o.logger.Info("Job completed event received", "job_id", event.JobID)
 
-	// Ralph loop completion check: verify task completion and trigger replan if needed
-	if o.ralphLoop != nil {
-		// Extract task_id from job (jobs are linked to steps which are linked to tasks)
-		stepID, taskID := o.extractTaskIDFromJob(ctx, event.JobID)
-		if taskID != "" {
-			isComplete, evidence, needsReplan := o.ralphLoop.CheckCompletion(ctx, taskID, event.Result)
-			if needsReplan && !isComplete {
-				o.logger.Info("Ralph loop: task incomplete, triggering replan",
-					"task_id", taskID,
-					"step_id", stepID,
-					"iteration", o.ralphLoop.GetIterationCount(taskID))
-				if err := o.ralphLoop.TriggerReplan(ctx, taskID, evidence); err != nil {
-					o.logger.Error("Failed to trigger replan", "error", err)
-				}
-				return // Skip normal completion processing
-			}
-			if isComplete {
-				// Reset iteration counter on successful completion
-				o.ralphLoop.Reset(taskID)
-				// Reset per-task artifact store for the next task (MVP: single-task).
-				o.artifacts = newArtifactStore()
-			}
-		}
-	}
-
+	// Always record the step completion first. Skipping OnJobCompleted (the
+	// previous ralph-replan early return) left the task non-terminal, so
+	// waitForTaskCompletion blocked until its 10-minute cap — meept-bench
+	// timed out even after answer.txt was written.
 	if err := o.tactical.OnJobCompleted(ctx, event.JobID, event.Result); err != nil {
 		o.logger.Error("Failed to handle job completion",
 			"job_id", event.JobID,
@@ -356,6 +335,27 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 	if taskID != "" {
 		o.releaseTaskLoopsIfComplete(taskID)
 		o.maybeTransitionPhase(ctx, stepID, taskID)
+
+		if o.ralphLoop != nil {
+			if o.ralphLoop.TaskIsTerminal(taskID) {
+				o.ralphLoop.Reset(taskID)
+				o.artifacts = newArtifactStore()
+			} else {
+				isComplete, evidence, needsReplan := o.ralphLoop.CheckCompletion(ctx, taskID, event.Result)
+				if needsReplan && !isComplete {
+					o.logger.Info("Ralph loop: task still running, triggering replan",
+						"task_id", taskID,
+						"step_id", stepID,
+						"iteration", o.ralphLoop.GetIterationCount(taskID))
+					if err := o.ralphLoop.TriggerReplan(ctx, taskID, evidence); err != nil {
+						o.logger.Error("Failed to trigger replan", "error", err)
+					}
+				} else if isComplete {
+					o.ralphLoop.Reset(taskID)
+					o.artifacts = newArtifactStore()
+				}
+			}
+		}
 	}
 }
 
@@ -1099,7 +1099,6 @@ func extractCodeBlocksFromMarkdown(markdown string) map[string]string {
 
 	return blocks
 }
-
 
 // publishReflectionEvent publishes a bus event about reflection results
 // so other components (like the agent loop) are aware of the outcome.

@@ -258,6 +258,17 @@ func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousE
 	return nil
 }
 
+// TaskIsTerminal reports whether the named task is in a terminal state.
+// Used by the orchestrator so ralph-loop replanning cannot run after
+// OnJobCompleted has already finished the task.
+func (rl *RalphLoop) TaskIsTerminal(taskID string) bool {
+	if rl == nil || rl.taskStore == nil || taskID == "" {
+		return false
+	}
+	t, err := rl.taskStore.GetByID(taskID)
+	return err == nil && t != nil && t.State.IsTerminal()
+}
+
 // GetIterationCount returns the current iteration count for a task.
 func (rl *RalphLoop) GetIterationCount(taskID string) int {
 	rl.mu.Lock()
