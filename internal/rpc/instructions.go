@@ -102,12 +102,12 @@ func (h *InstructionHandler) Stop() {
 }
 
 type InstructionResponse struct {
-	Success              bool                        `json:"success"`
-	Instruction          *preferences.UserInstruction `json:"instruction,omitempty"`
+	Success              bool                           `json:"success"`
+	Instruction          *preferences.UserInstruction   `json:"instruction,omitempty"`
 	Instructions         []*preferences.UserInstruction `json:"instructions,omitempty"`
 	ParsedInstruction    *preferences.ParsedInstruction `json:"parsed,omitempty"`
-	ConfirmationRequired bool                         `json:"confirmation_required"`
-	Error                string                       `json:"error,omitempty"`
+	ConfirmationRequired bool                           `json:"confirmation_required"`
+	Error                string                         `json:"error,omitempty"`
 }
 
 func (h *InstructionHandler) handleAdd(ctx context.Context, msg *models.BusMessage) {
@@ -262,6 +262,13 @@ func (h *InstructionHandler) RegisterInstructionMethods(server *Server) {
 
 // handleListRPC handles instruction.list RPC calls directly.
 func (h *InstructionHandler) handleListRPC(ctx context.Context, params json.RawMessage) (any, error) {
+	// Re-scan tier directories so instructions added on disk since daemon
+	// start (or by other processes) are visible. Discovery refreshes the
+	// in-memory map that GetActive reads; without it a fresh daemon shows
+	// an empty list until the first Save.
+	if _, err := h.store.Discovery(); err != nil {
+		return InstructionResponse{Success: false, Error: "discovery failed: " + err.Error()}, nil
+	}
 	instructions := h.store.GetActive()
 	return InstructionResponse{
 		Success:      true,

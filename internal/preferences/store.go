@@ -27,19 +27,19 @@ var DefaultTiers = []string{
 
 // UserInstruction represents a single automation rule.
 type UserInstruction struct {
-	ID        string            `yaml:"id"`
-	Name      string            `yaml:"name"`
-	Trigger   string            `yaml:"trigger"`
-	Action    string            `yaml:"action"`
-	ActionArgs map[string]any   `yaml:"action_args,omitempty"`
-	Enabled   bool              `yaml:"enabled"`
-	Scope     string            `yaml:"scope"`
-	Priority  string            `yaml:"priority"`
-	CreatedAt time.Time         `yaml:"created_at"`
-	UpdatedAt time.Time         `yaml:"updated_at,omitempty"`
-	SourceTier int          `yaml:"-"`
-	SourcePath string          `yaml:"-"`
-	Body      string            `yaml:"-"`
+	ID         string         `yaml:"id" json:"id"`
+	Name       string         `yaml:"name" json:"name"`
+	Trigger    string         `yaml:"trigger" json:"trigger"`
+	Action     string         `yaml:"action" json:"action"`
+	ActionArgs map[string]any `yaml:"action_args,omitempty" json:"action_args,omitempty"`
+	Enabled    bool           `yaml:"enabled" json:"enabled"`
+	Scope      string         `yaml:"scope" json:"scope"`
+	Priority   string         `yaml:"priority" json:"priority"`
+	CreatedAt  time.Time      `yaml:"created_at" json:"created_at"`
+	UpdatedAt  time.Time      `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
+	SourceTier int            `yaml:"-" json:"-"`
+	SourcePath string         `yaml:"-" json:"-"`
+	Body       string         `yaml:"-" json:"-"`
 }
 
 // Store handles persistence and discovery of user instructions across
@@ -206,18 +206,18 @@ func parseInstructionFile(path string, tierPriority int) (*UserInstruction, erro
 	}
 
 	instr := &UserInstruction{
-		ID:           id.Generate("instr_"),
-		Name:         sanitizeName(fmt.Sprintf("%v", name)),
-		Trigger:      getString(frontmatter, "trigger", ""),
-		Action:       getString(frontmatter, "action", ""),
-		ActionArgs:   getArgs(frontmatter, "action_args"),
-		Enabled:      getBool(frontmatter, "enabled", true),
-		Scope:        getString(frontmatter, "scope", "project"),
-		Priority:     getString(frontmatter, "priority", "normal"),
-		CreatedAt:    getCreateTime(frontmatter),
-		SourceTier:   tierPriority,
-		SourcePath:   path,
-		Body:         body,
+		ID:         id.Generate("instr_"),
+		Name:       sanitizeName(fmt.Sprintf("%v", name)),
+		Trigger:    getString(frontmatter, "trigger", ""),
+		Action:     getString(frontmatter, "action", ""),
+		ActionArgs: getArgs(frontmatter, "action_args"),
+		Enabled:    getBool(frontmatter, "enabled", true),
+		Scope:      getString(frontmatter, "scope", "project"),
+		Priority:   getString(frontmatter, "priority", "normal"),
+		CreatedAt:  getCreateTime(frontmatter),
+		SourceTier: tierPriority,
+		SourcePath: path,
+		Body:       body,
 	}
 
 	if frontmatter["id"] != nil {
