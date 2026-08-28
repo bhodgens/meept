@@ -201,16 +201,12 @@ func (c *Collector) subscribeToBus() {
 		return
 	}
 
-	// Subscribe to metrics topic and process messages in a goroutine
-	sub := c.bus.Subscribe("metrics-collector", "metrics")
-	c.subs = append(c.subs, sub)
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		for msg := range sub.Channel {
-			c.handleBusMessage(msg)
-		}
-	}()
+	// NOTE: The "metrics" topic subscription was removed: nothing in the repo
+	// publishes a bus message on the literal "metrics" topic (handleBusMessage
+	// has no case for it either), so this subscription was a dead listener and
+	// "metrics" appeared as a subscribed-never-published orphan in the
+	// connectivity graph. Event metrics arrive via the llm.*, agent.*, tool.*,
+	// worker.* and step.* subscriptions below.
 
 	// Subscribe to review events for review metrics
 	reviewSub := c.bus.Subscribe("metrics-collector-review", "step.*")
