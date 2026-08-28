@@ -59,9 +59,11 @@ def rel(path: Path) -> str:
 # 1. Bus topic topology
 # ---------------------------------------------------------------------------
 
-# Matches: bus.Publish("topic", msg) / s.bus.Publish("topic", msg) / e.bus.Publish(...)
+# Matches: bus.Publish("topic", msg) / s.bus.Publish("topic", msg) /
+# e.bus.Publish(...) — including PublishExternalOnly and PublishBlocking
+# variants, which deliver to the same topic namespace.
 RE_PUBLISH = re.compile(
-    r'\.Publish\(\s*"([^"]+)"'
+    r'\.Publish(?:ExternalOnly|Blocking)?\(\s*"([^"]+)"'
 )
 
 # Matches wrapper-helper bodies: .Publish(topicVar, msg) where the topic is an
@@ -90,15 +92,24 @@ RE_PUBLISH_CONCAT = re.compile(
 # a Go func literal ("func(ctx ..." -> "fun"/"func") are rejected AFTER the
 # match in extract code by requiring the char right after the ident to be ')'
 # or ',' + space (a real call continues with another arg) — not a '('.
-_TOPIC_ARG = r'(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_.]*))\b'
+# The \b word-boundary AFTER the alternation fails on the quoted branch: a
+# closing quote followed by a non-word char (e.g. `Subscribe("id", "topic")`
+# -> `"topic")`) has no word boundary, so every quoted-topic Subscribe was
+# silently unmatched. Use a conditional: require \b only for the ident branch
+# (group 2); the quoted branch (group 1) ends at the closing quote.
+_TOPIC_ARG = r'(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_.]*))(?(2)\b)'
+# The subscribe-id argument may be an EXPRESSION (subID+"-chatprogress")
+# or an identifier — match anything up to the first comma so the topic arg
+# stays the strict part of the pattern.
+_ANY_FIRST_ARG = r'(?:[^,()]|\([^)]*\))*'
 RE_SUBSCRIBE = re.compile(
-    r'\.Subscribe(?:Wildcard)?\(\s*(?:"[^"]*"|[A-Za-z_][A-Za-z0-9_.]*)\s*,\s*' + _TOPIC_ARG
+    r'\.Subscribe\(\s*' + _ANY_FIRST_ARG + r',\s*' + _TOPIC_ARG
 )
 
-# Back-compat wildcard pattern (RE_SUBSCRIBE above covers both shapes; this
-# one additionally tags the entry as a wildcard).
+# Back-compat wildcard pattern (this one additionally tags the entry as a
+# wildcard; RE_SUBSCRIBE keeps covering the same call sites otherwise).
 RE_SUBSCRIBE_WILDCARD = re.compile(
-    r'\.SubscribeWildcard\(\s*(?:"[^"]*"|[A-Za-z_][A-Za-z0-9_.]*)\s*,\s*' + _TOPIC_ARG
+    r'\.SubscribeWildcard\(\s*' + _ANY_FIRST_ARG + r',\s*' + _TOPIC_ARG
 )
 
 # Matches direct publishes whose topic arg is a Go constant identifier:
@@ -122,6 +133,13 @@ RE_HANDLER_TABLE = re.compile(
     r'^\s*(\w+)\s*:?=\s*map\[string\](?:[\w.*]+MessageCallback|func\([^)]*\)[^{]*)\s*\{'
 )
 RE_TABLE_KEY = re.compile(r'"([^"]+)"\s*:')
+
+# String-slice topic lists:  topics := []string{ "a", "b", ... }  consumed by
+#   for _, topic := range topics { bus.Subscribe(expr, topic) }. Each literal in
+# the slice is a live subscription. Detected like the MessageCallback tables.
+RE_TOPIC_SLICE = re.compile(
+    r'^\s*(\w+)\s*:?\s*=\s*\[\]string\{'
+)
 
 # Go constant declarations assigned a string literal:
 #   TopicPairResult    = "pair.result"
@@ -321,6 +339,41 @@ def extract_bus_topology():
                         break
                     j += 1
 
+            # String-slice topic list (e.g. internal/worker/pool.go): collect
+            # the slice literals, then attribute them to a following
+            # for-range loop whose Subscribe(topic, ...) uses the loop var.
+            slice_m = RE_TOPIC_SLICE.match(line)
+            if slice_m:
+                slice_name = slice_m.group(1)
+                j = i  # 1-based
+                depth = line.count("{") - line.count("}")
+                literals = []
+                while j < len(lines) and (depth > 0 or j == i):
+                    tline = lines[j]
+                    if not tline.strip().startswith("//"):
+                        for lit in re.findall(r'"([^"]+)"', tline):
+                            literals.append(lit)
+                    depth += tline.count("{") - tline.count("}")
+                    if depth <= 0:
+                        break
+                    j += 1
+                # Find the consuming range-loop Subscribe within 40 lines.
+                for k in range(j, min(j + 40, len(lines))):
+                    if f"range {slice_name}" not in lines[k]:
+                        continue
+                    for k2 in range(k, min(k + 6, len(lines))):
+                        sm = RE_SUBSCRIBE.search(lines[k2])
+                        if sm and sm.group(2) == "topic":
+                            for lit in literals:
+                                subscribers[lit].append({
+                                    "file": rel(fpath),
+                                    "line": k2 + 1,
+                                    "subscriber_id": f"slice:{slice_name}:{lit}",
+                                    "via_topic_slice": True,
+                                })
+                            break
+                    break
+
             for regex, wild in ((RE_SUBSCRIBE, False), (RE_SUBSCRIBE_WILDCARD, True)):
                 for m in regex.finditer(line):
                     literal, ident = m.group(1), m.group(2)
@@ -348,8 +401,17 @@ def extract_bus_topology():
                     if id_m:
                         sub_id = id_m.group(1)
                     else:
-                        alt_m = re.search(r'\.Subscribe(?:Wildcard)?\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*,', line)
-                        sub_id = resolve_identifier(alt_m.group(1), const_table) if alt_m else "?"
+                        # Expression ids (subID+"-chatprogress") have no plain
+                        # identifier; fall back to the raw id text before the
+                        # comma so the entry stays attributable.
+                        expr_m = re.search(
+                            r'\.Subscribe(?:Wildcard)?\(\s*([^,]{1,80}?),', line
+                        )
+                        sub_id = (
+                            resolve_identifier(alt_m.group(1), const_table)
+                            if (alt_m := re.search(r'\.Subscribe(?:Wildcard)?\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*,', line))
+                            else (expr_m.group(1).strip() if expr_m else "?")
+                        )
                     entry = {
                         "file": rel(fpath),
                         "line": i,
@@ -724,6 +786,15 @@ def main():
             "payload_keys": [],
             "via_rpc_proxy": True,
             "method": edge["method"],
+        })
+        # The proxy consumes the response topic via a runtime Subscribe
+        # (proxy.go makeProxy: Subscribe(msgID, responseTopic)) — record it
+        # as a subscriber so response topics are not misreported as orphans.
+        subscribers.setdefault(edge["response_topic"], []).append({
+            "file": edge["file"],
+            "line": edge["line"],
+            "subscriber_id": f"rpc-proxy:{edge['method']}",
+            "via_rpc_proxy": True,
         })
 
     xref = cross_reference(publishers, subscribers)

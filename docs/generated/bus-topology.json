@@ -142,6 +142,13 @@
         "via_helper": true
       }
     ],
+    "agent.progress.synthesized": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 1277,
+        "payload_keys": []
+      }
+    ],
     "agent.queue.followup.added": [
       {
         "file": "internal/agent/queue.go",
@@ -356,6 +363,18 @@
         "method": "cache.stats"
       }
     ],
+    "chat.message.received": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 578,
+        "payload_keys": [
+          "content",
+          "session_id",
+          "source_client",
+          "timestamp"
+        ]
+      }
+    ],
     "chat.processing": [
       {
         "file": "internal/agent/handler.go",
@@ -448,6 +467,13 @@
         "line": 995,
         "payload_keys": [],
         "via_helper": true
+      }
+    ],
+    "chat_message": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 1043,
+        "payload_keys": []
       }
     ],
     "cluster.event.broadcast": [
@@ -681,14 +707,14 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1852,
+        "line": 1874,
         "payload_keys": [
           "event"
         ]
       },
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1852,
+        "line": 1874,
         "payload_keys": [
           "event"
         ],
@@ -698,14 +724,14 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1509,
+        "line": 1531,
         "payload_keys": [
           "event"
         ]
       },
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1509,
+        "line": 1531,
         "payload_keys": [
           "event"
         ],
@@ -1123,7 +1149,7 @@
       },
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2138,
+        "line": 2160,
         "payload_keys": [
           "task_id"
         ],
@@ -1607,7 +1633,7 @@
     "reflection.complete": [
       {
         "file": "internal/agent/orchestrator.go",
-        "line": 1134,
+        "line": 1135,
         "payload_keys": [
           "files",
           "fix_length",
@@ -1616,7 +1642,7 @@
       },
       {
         "file": "internal/agent/orchestrator.go",
-        "line": 1134,
+        "line": 1135,
         "payload_keys": [
           "files",
           "fix_length",
@@ -1667,6 +1693,32 @@
         "method": "scheduler.schedule_agent_task"
       }
     ],
+    "scheduler.job.completed": [
+      {
+        "file": "internal/scheduler/jobs.go",
+        "line": 363,
+        "payload_keys": []
+      },
+      {
+        "file": "internal/scheduler/scheduler.go",
+        "line": 712,
+        "payload_keys": [
+          "duration",
+          "name",
+          "type"
+        ]
+      }
+    ],
+    "scheduler.job.started": [
+      {
+        "file": "internal/scheduler/scheduler.go",
+        "line": 679,
+        "payload_keys": [
+          "name",
+          "type"
+        ]
+      }
+    ],
     "scheduler.list_jobs": [
       {
         "file": "internal/rpc/proxy.go",
@@ -1680,6 +1732,41 @@
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "scheduler.list_jobs"
+      }
+    ],
+    "scheduler.reminder": [
+      {
+        "file": "internal/scheduler/jobs.go",
+        "line": 444,
+        "payload_keys": []
+      }
+    ],
+    "scheduler.security.completed": [
+      {
+        "file": "internal/scheduler/jobs.go",
+        "line": 622,
+        "payload_keys": [
+          "issue_count",
+          "issues",
+          "scan_types"
+        ]
+      }
+    ],
+    "scheduler.started": [
+      {
+        "file": "internal/scheduler/scheduler.go",
+        "line": 250,
+        "payload_keys": [
+          "jobs",
+          "timezone"
+        ]
+      }
+    ],
+    "scheduler.stopped": [
+      {
+        "file": "internal/scheduler/scheduler.go",
+        "line": 303,
+        "payload_keys": []
       }
     ],
     "security.get_stats": [
@@ -2297,7 +2384,7 @@
       },
       {
         "file": "internal/rpc/server.go",
-        "line": 599,
+        "line": 605,
         "payload_keys": [
           "type"
         ]
@@ -2310,7 +2397,7 @@
       },
       {
         "file": "internal/rpc/server.go",
-        "line": 599,
+        "line": 605,
         "payload_keys": [
           "type"
         ],
@@ -2947,6 +3034,124 @@
     ]
   },
   "subscribers": {
+    "*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 2684,
+        "subscriber_id": "session.sessionID"
+      }
+    ],
+    "agent.event.*": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 1247,
+        "subscriber_id": "progress-synthesizer"
+      }
+    ],
+    "agent.progress": [
+      {
+        "file": "internal/comm/http/api_handlers.go",
+        "line": 268,
+        "subscriber_id": "subID+\"-agent\""
+      },
+      {
+        "file": "internal/agent/handler.go",
+        "line": 183,
+        "subscriber_id": "chat-handler"
+      }
+    ],
+    "agent.progress.synthesized": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 518,
+        "subscriber_id": "http-ws-agent.progress.synthesized"
+      },
+      {
+        "file": "internal/comm/http/api_handlers.go",
+        "line": 274,
+        "subscriber_id": "subID+\"-synth\""
+      }
+    ],
+    "agent.workers.list": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 175,
+        "subscriber_id": "worker-handler"
+      }
+    ],
+    "agent.workers.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 86,
+        "subscriber_id": "rpc-proxy:agent.workers.list",
+        "via_rpc_proxy": true
+      }
+    ],
+    "cache.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 146,
+        "subscriber_id": "rpc-proxy:cache.stats",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 147,
+        "subscriber_id": "rpc-proxy:cache.clear",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 148,
+        "subscriber_id": "rpc-proxy:cache.invalidate",
+        "via_rpc_proxy": true
+      }
+    ],
+    "chat.*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 506,
+        "subscriber_id": "slice:topics:chat.*",
+        "via_topic_slice": true
+      }
+    ],
+    "chat.*.*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 506,
+        "subscriber_id": "slice:topics:chat.*.*",
+        "via_topic_slice": true
+      }
+    ],
+    "chat.processing": [
+      {
+        "file": "internal/comm/http/api_handlers.go",
+        "line": 292,
+        "subscriber_id": "subID+\"-chatprocessing\""
+      }
+    ],
+    "chat.progress": [
+      {
+        "file": "internal/comm/http/api_handlers.go",
+        "line": 286,
+        "subscriber_id": "subID+\"-chatprogress\""
+      }
+    ],
+    "chat.request": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 172,
+        "subscriber_id": "chat-handler"
+      }
+    ],
+    "chat.response": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 54,
+        "subscriber_id": "rpc-proxy:chat",
+        "via_rpc_proxy": true
+      }
+    ],
     "collaboration.consensus_reached": [
       {
         "file": "internal/agent/orchestrator.go",
@@ -3007,12 +3212,122 @@
         "subscriber_id": "subID"
       }
     ],
+    "dispatcher.stats": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 2117,
+        "subscriber_id": "dispatcher-stats-handler"
+      }
+    ],
+    "employee.critical_finding": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 2752,
+        "subscriber_id": "employee-critical-finding"
+      }
+    ],
+    "instruction.add": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 48,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "instruction.delete": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 50,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "instruction.execute": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 51,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "instruction.list": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 49,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "instruction.preview": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 52,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "llm.*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 506,
+        "subscriber_id": "slice:topics:llm.*",
+        "via_topic_slice": true
+      }
+    ],
     "llm.context_compressed": [
       {
         "file": "internal/agent/orchestrator.go",
         "line": 130,
         "subscriber_id": "topics:llm.context_compressed",
         "via_handler_table": true
+      }
+    ],
+    "memory.query": [
+      {
+        "file": "internal/memory/handler.go",
+        "line": 115,
+        "subscriber_id": "memory-handler"
+      }
+    ],
+    "memory.recent": [
+      {
+        "file": "internal/memory/handler.go",
+        "line": 116,
+        "subscriber_id": "memory-handler"
+      }
+    ],
+    "memory.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 60,
+        "subscriber_id": "rpc-proxy:memory.query",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 61,
+        "subscriber_id": "rpc-proxy:memory.recent",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 62,
+        "subscriber_id": "rpc-proxy:memory.export",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 63,
+        "subscriber_id": "rpc-proxy:memory.vector.search",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 64,
+        "subscriber_id": "rpc-proxy:memory.vector.stats",
+        "via_rpc_proxy": true
+      }
+    ],
+    "metrics": [
+      {
+        "file": "internal/metrics/collector.go",
+        "line": 205,
+        "subscriber_id": "metrics-collector"
       }
     ],
     "orchestrator.handoff": [
@@ -3028,6 +3343,14 @@
         "file": "internal/agent/orchestrator.go",
         "line": 130,
         "subscriber_id": "topics:orchestrator.plan",
+        "via_handler_table": true
+      }
+    ],
+    "orchestrator.replan": [
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 130,
+        "subscriber_id": "topics:orchestrator.replan",
         "via_handler_table": true
       }
     ],
@@ -3083,6 +3406,46 @@
         "file": "internal/agent/pair_orchestrator.go",
         "line": 61,
         "subscriber_id": "pair-orchestrator"
+      }
+    ],
+    "pipeline.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 143,
+        "subscriber_id": "rpc-proxy:pipeline.status",
+        "via_rpc_proxy": true
+      }
+    ],
+    "plan.*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 506,
+        "subscriber_id": "slice:topics:plan.*",
+        "via_topic_slice": true
+      }
+    ],
+    "plan.*.*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 506,
+        "subscriber_id": "slice:topics:plan.*.*",
+        "via_topic_slice": true
+      }
+    ],
+    "queue.*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 506,
+        "subscriber_id": "slice:topics:queue.*",
+        "via_topic_slice": true
+      }
+    ],
+    "queue.*.*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 506,
+        "subscriber_id": "slice:topics:queue.*.*",
+        "via_topic_slice": true
       }
     ],
     "queue.claim": [
@@ -3141,7 +3504,19 @@
         "via_handler_table": true
       }
     ],
+    "queue.job.claimed": [
+      {
+        "file": "internal/memory/sync/handler.go",
+        "line": 40,
+        "subscriber_id": "sync-handler"
+      }
+    ],
     "queue.job.completed": [
+      {
+        "file": "internal/memory/sync/handler.go",
+        "line": 41,
+        "subscriber_id": "sync-handler"
+      },
       {
         "file": "internal/agent/orchestrator.go",
         "line": 130,
@@ -3171,6 +3546,74 @@
         "line": 463,
         "subscriber_id": "topics:queue.recover",
         "via_handler_table": true
+      }
+    ],
+    "queue.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 123,
+        "subscriber_id": "rpc-proxy:queue.enqueue",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 124,
+        "subscriber_id": "rpc-proxy:queue.claim",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 125,
+        "subscriber_id": "rpc-proxy:queue.complete",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 126,
+        "subscriber_id": "rpc-proxy:queue.fail",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 127,
+        "subscriber_id": "rpc-proxy:queue.retry",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 128,
+        "subscriber_id": "rpc-proxy:queue.get",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 129,
+        "subscriber_id": "rpc-proxy:queue.list",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 130,
+        "subscriber_id": "rpc-proxy:queue.stats",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 131,
+        "subscriber_id": "rpc-proxy:queue.recover",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 132,
+        "subscriber_id": "rpc-proxy:queue.dead_letter",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 133,
+        "subscriber_id": "rpc-proxy:queue.dead_stats",
+        "via_rpc_proxy": true
       }
     ],
     "queue.retry": [
@@ -3206,6 +3649,54 @@
         "file": "internal/rpc/proxy.go",
         "line": 180,
         "subscriber_id": "msgID"
+      }
+    ],
+    "review.*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 506,
+        "subscriber_id": "slice:topics:review.*",
+        "via_topic_slice": true
+      }
+    ],
+    "scheduler.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 67,
+        "subscriber_id": "rpc-proxy:scheduler.list_jobs",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 68,
+        "subscriber_id": "rpc-proxy:scheduler.add_job",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 69,
+        "subscriber_id": "rpc-proxy:scheduler.schedule_agent_task",
+        "via_rpc_proxy": true
+      }
+    ],
+    "security.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 75,
+        "subscriber_id": "rpc-proxy:security.query_log",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 76,
+        "subscriber_id": "rpc-proxy:security.get_stats",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 77,
+        "subscriber_id": "rpc-proxy:security.record_override",
+        "via_rpc_proxy": true
       }
     ],
     "session.attach": [
@@ -3328,6 +3819,128 @@
         "via_handler_table": true
       }
     ],
+    "session.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 89,
+        "subscriber_id": "rpc-proxy:session.create",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 90,
+        "subscriber_id": "rpc-proxy:session.list",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 91,
+        "subscriber_id": "rpc-proxy:session.get",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 92,
+        "subscriber_id": "rpc-proxy:session.attach",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 93,
+        "subscriber_id": "rpc-proxy:session.detach",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 94,
+        "subscriber_id": "rpc-proxy:session.delete",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 95,
+        "subscriber_id": "rpc-proxy:session.messages.save",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 96,
+        "subscriber_id": "rpc-proxy:session.messages.get",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 97,
+        "subscriber_id": "rpc-proxy:session.update_description",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 98,
+        "subscriber_id": "rpc-proxy:session.generate_description",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 99,
+        "subscriber_id": "rpc-proxy:sessions.designated",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 100,
+        "subscriber_id": "rpc-proxy:session.get_most_recent",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 101,
+        "subscriber_id": "rpc-proxy:session.stop",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 102,
+        "subscriber_id": "rpc-proxy:session.refresh_title",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 103,
+        "subscriber_id": "rpc-proxy:session.set_nofence",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 104,
+        "subscriber_id": "rpc-proxy:session.get_child_tasks",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 105,
+        "subscriber_id": "rpc-proxy:session.branch.navigate",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 106,
+        "subscriber_id": "rpc-proxy:session.branches.list",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 107,
+        "subscriber_id": "rpc-proxy:session.fork",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 108,
+        "subscriber_id": "rpc-proxy:session.tree.get",
+        "via_rpc_proxy": true
+      }
+    ],
     "session.set_nofence": [
       {
         "file": "internal/session/session.go",
@@ -3360,6 +3973,49 @@
         "via_handler_table": true
       }
     ],
+    "skills.execute": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 40,
+        "subscriber_id": "skills-handler"
+      }
+    ],
+    "skills.get": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 39,
+        "subscriber_id": "skills-handler"
+      }
+    ],
+    "skills.list": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 38,
+        "subscriber_id": "skills-handler"
+      }
+    ],
+    "status.request": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 6486,
+        "subscriber_id": "status-handler"
+      }
+    ],
+    "status.response": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 57,
+        "subscriber_id": "rpc-proxy:status",
+        "via_rpc_proxy": true
+      }
+    ],
+    "step.*": [
+      {
+        "file": "internal/metrics/collector.go",
+        "line": 216,
+        "subscriber_id": "metrics-collector-review"
+      }
+    ],
     "task.amend.applied": [
       {
         "file": "internal/agent/orchestrator.go",
@@ -3376,6 +4032,13 @@
         "via_handler_table": true
       }
     ],
+    "task.amend.request": [
+      {
+        "file": "internal/task/amendment_manager.go",
+        "line": 191,
+        "subscriber_id": "amendment-manager"
+      }
+    ],
     "task.cancel": [
       {
         "file": "internal/task/registry.go",
@@ -3390,6 +4053,11 @@
         "line": 37,
         "subscriber_id": "topics:task.completed",
         "via_handler_table": true
+      },
+      {
+        "file": "internal/agent/handler.go",
+        "line": 178,
+        "subscriber_id": "chat-handler"
       }
     ],
     "task.create": [
@@ -3406,6 +4074,13 @@
         "line": 475,
         "subscriber_id": "topics:task.delete",
         "via_handler_table": true
+      }
+    ],
+    "task.failed": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 179,
+        "subscriber_id": "chat-handler"
       }
     ],
     "task.get": [
@@ -3438,6 +4113,75 @@
         "line": 475,
         "subscriber_id": "topics:task.list_extended",
         "via_handler_table": true
+      }
+    ],
+    "task.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 111,
+        "subscriber_id": "rpc-proxy:task.create",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 112,
+        "subscriber_id": "rpc-proxy:task.get",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 113,
+        "subscriber_id": "rpc-proxy:task.list",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 114,
+        "subscriber_id": "rpc-proxy:task.list_extended",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 115,
+        "subscriber_id": "rpc-proxy:task.update",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 116,
+        "subscriber_id": "rpc-proxy:task.cancel",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 117,
+        "subscriber_id": "rpc-proxy:task.delete",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 118,
+        "subscriber_id": "rpc-proxy:task.link",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 119,
+        "subscriber_id": "rpc-proxy:task.unlink",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 120,
+        "subscriber_id": "rpc-proxy:task.steps",
+        "via_rpc_proxy": true
+      }
+    ],
+    "task.review_completed": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 186,
+        "subscriber_id": "chat-handler"
       }
     ],
     "task.step_completed": [
@@ -3495,7 +4239,20 @@
         "subscriber_id": "team-orchestrator"
       }
     ],
+    "tool.*": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 506,
+        "subscriber_id": "slice:topics:tool.*",
+        "via_topic_slice": true
+      }
+    ],
     "tool.execution.complete": [
+      {
+        "file": "internal/comm/http/api_handlers.go",
+        "line": 280,
+        "subscriber_id": "subID+\"-complete\""
+      },
       {
         "file": "internal/agent/orchestrator.go",
         "line": 130,
@@ -3503,11 +4260,112 @@
         "via_handler_table": true
       }
     ],
+    "tool.execution.progress": [
+      {
+        "file": "internal/comm/http/api_handlers.go",
+        "line": 258,
+        "subscriber_id": "subID"
+      }
+    ],
     "topic": [
+      {
+        "file": "internal/bus/handler.go",
+        "line": 52,
+        "subscriber_id": "\"handler-\"+topic"
+      },
+      {
+        "file": "internal/bot/router.go",
+        "line": 66,
+        "subscriber_id": "\"bot-router-\"+topic"
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 421,
+        "subscriber_id": "subID+\"-\"+topic"
+      },
       {
         "file": "internal/services/bus_service.go",
         "line": 106,
         "subscriber_id": "session-"
+      }
+    ],
+    "worker.*": [
+      {
+        "file": "internal/metrics/collector.go",
+        "line": 231,
+        "subscriber_id": "metrics-collector-worker"
+      }
+    ],
+    "worker.add": [
+      {
+        "file": "internal/worker/pool.go",
+        "line": 444,
+        "subscriber_id": "slice:topics:worker.add",
+        "via_topic_slice": true
+      }
+    ],
+    "worker.list": [
+      {
+        "file": "internal/worker/pool.go",
+        "line": 444,
+        "subscriber_id": "slice:topics:worker.list",
+        "via_topic_slice": true
+      }
+    ],
+    "worker.remove": [
+      {
+        "file": "internal/worker/pool.go",
+        "line": 444,
+        "subscriber_id": "slice:topics:worker.remove",
+        "via_topic_slice": true
+      }
+    ],
+    "worker.result": [
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 136,
+        "subscriber_id": "rpc-proxy:worker.add",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 137,
+        "subscriber_id": "rpc-proxy:worker.remove",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 138,
+        "subscriber_id": "rpc-proxy:worker.list",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 139,
+        "subscriber_id": "rpc-proxy:worker.stats",
+        "via_rpc_proxy": true
+      },
+      {
+        "file": "internal/rpc/proxy.go",
+        "line": 140,
+        "subscriber_id": "rpc-proxy:worker.scale",
+        "via_rpc_proxy": true
+      }
+    ],
+    "worker.scale": [
+      {
+        "file": "internal/worker/pool.go",
+        "line": 444,
+        "subscriber_id": "slice:topics:worker.scale",
+        "via_topic_slice": true
+      }
+    ],
+    "worker.stats": [
+      {
+        "file": "internal/worker/pool.go",
+        "line": 444,
+        "subscriber_id": "slice:topics:worker.stats",
+        "via_topic_slice": true
       }
     ]
   },
@@ -3518,7 +4376,6 @@
       "agent.lifecycle.ended",
       "agent.lifecycle.started",
       "agent.message.delivered",
-      "agent.progress",
       "agent.queue.followup.added",
       "agent.queue.followup.injected",
       "agent.queue.followup.restored",
@@ -3527,15 +4384,9 @@
       "agent.queue.steer.injected",
       "agent.result",
       "agent.state.changed",
-      "agent.workers.list",
-      "agent.workers.result",
       "cache.clear",
       "cache.invalidate",
       "cache.stats",
-      "chat.processing",
-      "chat.progress",
-      "chat.request",
-      "chat.response",
       "cluster.event.broadcast",
       "cluster.event.heartbeat",
       "cluster.event.received",
@@ -3546,91 +4397,69 @@
       "daemon.stopping",
       "dispatcher.stats.result",
       "employee.constitution_validation_error",
-      "employee.critical_finding",
       "employee.metric",
       "employee.paused",
       "event",
       "event.cluster.task_reclaim",
       "hook.async_rewake",
       "instruction.executing",
-      "llm.tokens.used",
       "memory.export",
-      "memory.query",
-      "memory.recent",
-      "memory.result",
       "memory.sync.distilled",
       "memory.sync.hydrated",
       "memory.vector.search",
       "memory.vector.stats",
-      "orchestrator.replan",
       "pair.error",
       "pair.round_completed",
       "pipeline.status",
-      "plan.approved",
-      "plan.cancelled",
-      "plan.completed",
-      "plan.confirmed",
-      "plan.created",
-      "plan.executing",
-      "plan.phase_completed",
-      "plan.rejected",
-      "plan.revised",
-      "plan.submitting",
       "project.set",
       "push.",
-      "queue.job.claimed",
-      "queue.job.recovered",
-      "queue.job.retry",
-      "queue.result",
       "reflection.complete",
       "scheduler.add_job",
+      "scheduler.job.completed",
+      "scheduler.job.started",
       "scheduler.list_jobs",
+      "scheduler.reminder",
+      "scheduler.security.completed",
+      "scheduler.started",
+      "scheduler.stopped",
       "security.get_stats",
       "security.query_log",
       "security.record_override",
       "selfimprove.status",
       "session.lifecycle.end",
       "session.lifecycle.start",
-      "session.result",
       "session.title_updated",
       "sessions.designated",
       "skills.result",
-      "status.request",
-      "status.response",
-      "step.review_completed",
-      "step.review_requested",
-      "task.amend.request",
       "task.approved",
       "task.cancelled",
       "task.error",
-      "task.failed",
       "task.handoff_created",
       "task.interview",
       "task.pending_approval",
       "task.planned",
       "task.progress",
       "task.rejected",
-      "task.result",
-      "task.review_completed",
       "task.review_requested",
       "task.validation_retry",
-      "terminal.command",
-      "tool.execution.progress",
-      "worker.add",
-      "worker.list",
-      "worker.pool.started",
-      "worker.pool.stopped",
-      "worker.remove",
-      "worker.result",
-      "worker.scale",
-      "worker.started",
-      "worker.stats",
-      "worker.status",
-      "worker.stop",
-      "worker.stopped"
+      "terminal.command"
     ],
     "subscribed_not_published": [
-      "llm.context_compressed"
+      "cache.result",
+      "dispatcher.stats",
+      "instruction.add",
+      "instruction.delete",
+      "instruction.execute",
+      "instruction.list",
+      "instruction.preview",
+      "llm.context_compressed",
+      "metrics",
+      "pipeline.result",
+      "scheduler.result",
+      "security.result",
+      "skills.execute",
+      "skills.get",
+      "skills.list"
     ]
   }
 }

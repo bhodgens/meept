@@ -2293,14 +2293,14 @@
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 905
+    "line": 927
   },
   {
     "method": "GET",
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1042
+    "line": 1064
   },
   {
     "method": "GET",
