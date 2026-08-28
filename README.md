@@ -51,34 +51,26 @@ Instead of massive context due to plan files and SKILLS.md, everything gets load
   
 ### What Makes Meept Different
 
-| Platform | Model | Meept's Advantage |
-|----------|-------|-------------------|
-| **Claude Code / OpenClaw** | Single-session CLI | **Daemon architecture** with persistent memory, job scheduling, and multi-transport (RPC + HTTP + WebSocket) |
-| **Hermes / OpenCode** | Terminal-only, ephemeral | **Constitution-bound AI Employees** with autonomy tiers, enforcement engines, and goal loops |
-| **Cursor** | IDE-integrated copilot | **Evidence-based execution** - every tool produces verifiable evidence (file hashes, exit codes, API responses) |
-| **OpenAgent (Rust)** | Single agent (ReAct) | **28 specialist agents + reviewers** with intent classification and capability-based routing |
-| **OpenAgent (Python)** | Team coordination | **Seven-layer safety stack** - watchdog, cycle/convergence detection, budget tracking, hallucination recovery, model failover, context firewall |
-| **oh-my-pi** | Single-agent harness | **Five-tier memory system** - episodic (FTS5), task, knowledge graph, semantic (vector), distributed (memvid) |
-| **Most agents** | Written in Python | **Go implementation** - native threading (goroutines), compiled performance, single binary deployment |
-| **Most agents** | Manual model selection | **Model reassignment via natural language** - "use GLM for coding" triggers capability-based resolution |
-| **Most agents** | Skill learning only | **Full self-improvement cycle** - detect → analyze → generate → validate → apply (code fixing, not just patterns) + **skill evolution** (usage tracking, evidence-based refinement, pattern promotion, versioning) |
+One chart. Rows are capabilities. Columns are named products. No empty cells.
 
-See [docs/analysis/agent-framework-comparison.md](docs/analysis/agent-framework-comparison.md) for the complete 12-category comparison.
+Figures are from public docs and repos as of August 2026.
 
-## Where Meept is Clearly Better
-
-| Capability | Meept | Other Harnesses |
-|---|---|---|
-| **Architecture** | Go daemon with HTTP/RPC/WebSocket/MCP transports | TypeScript in-process (OpenCode), Python (Hermes, oh-my-pi) |
-| **Security** | SecurityEngine (SQLite permissions) + InputSanitizer + Tirith + TLS + path fencing | Heuristic-only (Hermes), Guard whitelist (OpenAgent-Rust) |
-| **Observability** | SQLite metrics store, Prometheus-compatible, structured logging (slog) | OTEL JSONL (OpenAgent-Rust), Usage DB (Hermes), None (others) |
-| **Context management** | ContextFirewall + compaction + thread partitioning | Truncation (OpenCode), LLM summarization (Hermes) |
-| **Scheduling** | Cron + job queue with agent targeting | Cron only (Hermes, OpenAgent), None (others) |
-| **Self-improvement** | Full cycle (detect→analyze→generate→validate→apply) + skill evolution (usage tracking, evidence-based refinement, pattern promotion) | Skill learning only (Hermes), None (others) |
-| **Cross-platform** | Go binary + Flutter GUI + SwiftUI MenuBar + MCP | Terminal-only (most), Electron (OpenAgent-Python) |
-| **Model resolution** | Capability-based resolver + natural language reassignment | Manual selection, Team-as-router (OpenAgent-Python) |
-| **Memory** | 5-tier (episodic/task/KG/semantic/distributed) | 1-2 tiers (Hermes, OpenAgent), None (OpenCode) |
-| **Agent architecture** | 28 specialists + 6 reviewers + Employees | Single agent (Hermes, oh-my-pi), Dynamic teams (OpenAgent-Python) |
+| Capability | Meept | Hermes | OpenCode | Claude Code | OpenClaw | Cursor | OpenAgent | oh-my-pi |
+|---|---|---|---|---|---|---|---|---|
+| **Runtime** | Go daemon: Unix RPC + HTTP + WebSocket + MCP | Python CLI + gateway daemon + Desktop | TypeScript server (HTTP/WS); TUI + desktop clients | CLI + IDE plugins + web; no local owner daemon | TypeScript always-on multi-channel daemon | IDE process + optional cloud agents | **Rust:** binary on :8080 + TCP services. **Python:** network server + P2P workspace | TypeScript + Rust natives; in-process TUI |
+| **Deploy** | Single compiled Go binary | Python (uv) + Node extras | TypeScript (Bun/Node) | Anthropic TypeScript distribution | Node.js (~430k lines) | Proprietary VS Code fork | **Rust:** one control-plane binary. **Python:** pip package, 3.10+ | Bun + ~80k-line Rust core; native Windows, no WSL |
+| **Clients** | TUI, Flutter desktop/web, macOS MenuBar, Telegram, MCP server | CLI/TUI, Desktop, 20+ gateways (Telegram, Discord, Slack, WhatsApp, Signal, Home Assistant, …) | TUI, SolidJS desktop, web, Slack; client/server | Terminal, VS Code, JetBrains, claude.ai/code | WhatsApp, Telegram, Slack, Discord, Signal, Gmail, companion apps | VS Code-fork IDE | **Rust:** Telegram, Discord, Slack, WhatsApp, CLI, IRC, MQTT. **Python:** CLI, Electron, shared workspace URL | TUI + `/collab` browser relay; no desktop IDE |
+| **Agents** | 28 specialists (22 executor + 6 reviewers); LLM intent classifier routes work | One agent + isolated subagents; Desktop Bot Mode (`@mention` roster, per-bot memory) | Primary agent + Task subagents; plugin specialist packs | Sub-agents and agent teams (Opus) | Single personal assistant | Single Agent/Composer plus BugBot reviewer | **Rust:** one in-process ReAct loop (max 40 steps). **Python:** WorkerAgent teams / event network | Main agent + schema-validated `task` subagents + advisor model |
+| **Memory** | Five tiers: episodic FTS5, task, knowledge graph, semantic vector, memvid | USER.md + MEMORY.md + SOUL.md; FTS5 session search; Honcho; optional mem0 | Session store; extra memory only via plugins | CLAUDE.md project memory; ~1M context window | Workspace files / JSONL transcripts | `.cursorrules` plus checkpoints | **Rust:** 40-message STM + LanceDB LTM. **Python:** SQLite + skills + Obsidian | Four backends (off / local / hindsight / mnemopi SQLite); off by default |
+| **Context** | ContextFirewall: hierarchical compression, structured summary, thread partition | LLM summarization, `/compress`, session branching | Harness compaction; optional working-memory plugins | Auto-compact inside a large window | Session files; truncation | Rules file plus chat truncation | **Rust:** sliding window (compaction still open). **Python:** in-session recap | snapcompact plus rewind/checkpoint tools |
+| **Models** | Capability resolver + natural-language reassignment ("use GLM for coding") + failover | Per-session `/model`; 200+ providers; fallback | 75+ providers; Zen gateway; fallback | Claude family (third-party keys optional) | Model-agnostic: Claude, GPT, Gemini, Ollama, vLLM | Multi-vendor + Composer; Auto mode | **Rust:** OpenAI-compatible + fallback chain. **Python:** 15+ providers; team-as-router | 60+ providers; role pins (smol / slow / plan / advisor) |
+| **Security** | SecurityEngine (SQLite perms) + InputSanitizer + Tirith + TLS + project path fence | Toolset allowlist, message sanitizer, Tirith, Docker/SSH/Modal isolation | Permission allow/deny/ask; local HTTP has been unauthenticated by default | Permission prompts + sandbox (bypassable); SOC 2 | Sandbox off by default; 90+ advisories; plaintext keys | Opt-in sandbox; yolo toggle; SOC 2 on Enterprise | **Rust:** contact Guard whitelist + sandbox VM. **Python:** approvals + P2P auth | Stream-rule abort, hash-anchored edits, isolated worktrees; no OS sandbox default |
+| **Evidence** | Every tool emits file hashes, exit codes, API bodies; validators check claims; missing evidence → `needs_info` | Heuristic abort; no evidence structs | Tool results as text; no claim checker | Trusts the model plus the permission UI | Trusts the model; no claim checker | Trusts the model; BugBot is a separate review pass | No evidence pipeline in either variant | Schema-validated subagent yield; hashline rejects stale patches — not claim-vs-evidence |
+| **Loop safety** | Seven layers: firewall, cycle, convergence, watchdog, budget, failover, hallucination recovery | Iteration limits, heuristic abort, container isolation | Compaction + permission rules; no cycle/convergence detectors | Rate limits, permission loop, sandbox | Operator-managed; no loop watchdog | Credit caps; no loop watchdog | **Rust:** max 40 iterations + concurrency semaphore. **Python:** request queue | Stream rules + advisor model; no watchdog/budget/hallucination stack |
+| **Scheduling** | Cron + claim-based job queue with priority and `agent_id` targeting | Full cron; deliver to any gateway; per-bot routines | Session-scoped server; no local job queue | GitHub Actions / Slack→PR / scheduled jobs; not a local queue | Heartbeats on an always-on daemon; no job queue | Cloud background agents; no local cron | **Rust:** SQLite cron/at/every (shell or agent). **Python:** cron + DAG workflows | No cron; live session + collab only |
+| **Self-improve** | Detect → analyze → generate → validate → apply (code) plus skill evolution (usage, promote, version) | Skill create/refine from experience; no code-fix cycle | None built in | None | Unreviewed skill marketplace | None | Skills are static files | Autolearn lessons → `learned.md`; plugin skills; no code-fix cycle |
+| **Observability** | SQLite metrics store, slog, health endpoints | Cost/usage DB, rotating logs | Server logs; optional share | Vendor usage dashboard | Local JSONL transcripts | IDE UI; audit logs on Enterprise | **Rust:** OTEL JSONL + `/health`. **Python:** SQLite usage + `/api/usage` | Local `omp-stats` dashboard; per-subagent cost in Agent Hub |
+| **Employees** | Constitution (4 sections), 3 autonomy tiers, 3-checkpoint enforcement, goal loop, SQLite audit findings | SOUL.md persona; no tiers or enforcement engine | AGENTS.md / custom agents; no constitution runtime | CLAUDE.md + permission tiers; no employee runtime | SOUL.md-style persona; no enforcement engine | Rules and modes; no employee runtime | None | Advisor role + config persona; no autonomy tiers |
 
 ## Other Key Differentiators
 #### Autonomous Agent Workcycle 

@@ -167,7 +167,7 @@
 
 <tr>
 <td><strong>MCP Support</strong></td>
-<td>21 preconfigured</td>
+<td>20 preconfigured, 6 enabled</td>
 <td>Limited</td>
 <td>❌ No</td>
 <td>✅ Yes</td>

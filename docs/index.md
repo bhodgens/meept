@@ -9,7 +9,7 @@ Meept is a Go-based daemon that runs AI agents as background processes. It suppo
 | Feature | Description |
 |---------|-------------|
 | **Multi-Agent Orchestration** | 28 specialist agents + reviewers with automatic task routing |
-| **Hybrid Memory** | Episodic, task, personality, knowledge graph, and vector memory |
+| **Hybrid Memory** | Episodic FTS5, task, knowledge graph, semantic vector, memvid |
 | **Skill System** | Three-tier skill discovery with capability-based model resolution |
 | **Security Layers** | Input sanitization, taint tracking, shell scanning, audit logging |
 | **Code Intelligence** | Tree-sitter AST parsing and LSP client tools |
@@ -32,42 +32,46 @@ See the [Getting Started](getting-started/index.md) guide for detailed installat
 
 ## What Makes Meept Different
 
-Unlike single-agent CLI tools (Claude Code, OpenCode) or chat-only interfaces, Meept is a **persistent daemon** that runs specialist agents as background processes. It combines:
+Meept is a persistent Go daemon, not a single-session CLI and not an IDE copilot.
 
-- **Daemon architecture** for always-on availability and job scheduling
-- **Multi-agent routing** so specialists handle what they're best at
-- **Persistent memory** that survives restarts and accumulates knowledge
-- **Extensible tool system** with MCP protocol support
-- **Self-improvement** through shadow training and automated bug fixing
+It combines:
+
+- Daemon runtime with RPC, HTTP, WebSocket, and MCP
+- 28 specialist agents plus reviewers, routed by an intent classifier
+- Five-tier memory (episodic FTS5, task, knowledge graph, semantic, memvid)
+- Evidence on every tool result (hashes, exit codes, API bodies)
+- Constitution-bound AI employees with autonomy tiers
+
+The full named-product chart is in the [root README](../README.md#what-makes-meept-different).
 
 ## Project Status
+
+Status below matches the root README feature table.
 
 ### What Works
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Daemon Core** | Stable | Full lifecycle, config, RPC server |
-| **Agent Loop** | Stable | Tool use, reasoning, iteration limits |
-| **Multi-Agent** | Stable | 28 agents (22 executor-role incl. dispatcher + chat, 6 reviewers), routing |
+| **Daemon Core** | Stable | Lifecycle, config, RPC, HTTP REST |
+| **Agent Loop** | Stable | Full safety stack (watchdog, cycle/convergence, budget, failover) |
+| **Multi-Agent** | Stable | 28 agents (22 executor-role incl. dispatcher + chat, 6 reviewers) |
 | **CLI/TUI** | Stable | Interactive chat, vim mode, markdown rendering |
-| **LLM Client** | Stable | Multi-provider, retry, budget tracking |
-| **Tools** | Stable | File ops, shell, web, memory, tasks, scheduling |
-| **Memory** | Stable | Episodic, task, personality, knowledge graph |
+| **LLM Client** | Stable | Multi-provider, retry, budget tracking, capability resolver |
+| **Tools** | Stable | File ops, shell, web, memory, tasks, scheduling, MCP catalog |
+| **Memory** | Stable | Five-tier: episodic, task, knowledge graph, semantic, memvid |
 | **Job Queue** | Stable | SQLite-backed, agent routing, priorities |
-| **Security** | Stable | Sanitization, taint tracking, shell scanning |
+| **Security** | Stable | Sanitization, Tirith, SecurityEngine, TLS, path fencing |
 | **Code Intel** | Stable | AST parsing, LSP client tools |
-| **Shadow Training** | Stable | Parallel teacher execution, export |
+| **Skills** | Stable | Three-tier discovery plus closed-loop evolution |
+| **Self-Improve** | Stable | Detect → analyze → generate → validate → apply |
+| **AI Employees** | Stable | Constitution, 3 autonomy tiers, enforcement, goal loop |
+| **Clients** | Stable | TUI, Flutter GUI, macOS MenuBar, Telegram, MCP server |
 
 ### In Progress
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Skills Execution** | Partial | Discovery works; execution not fully wired |
-| **MCP Tools** | Partial | Protocol implemented; runtime integration ongoing |
-| **Self-Improve** | Partial | Detection works; full cycle not implemented |
-| **Telegram** | Stub | Bot scaffolding only |
-| **Web Server** | Stub | Basic structure; many endpoints TODO |
-| **Calendar** | Stub | File exists; no integration |
+| **Shadow Training** | Partial | Parallel teacher execution and export work; continuous learning is still open |
 
 ## Navigation
 

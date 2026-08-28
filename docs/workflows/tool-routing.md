@@ -30,7 +30,7 @@ Agent Request → Tool Registry → Security Check → Tool Execution → Result
 
 ## MCP Default Catalog
 
-Meept ships a default catalog of 21 preconfigured MCP (Model Context Protocol) servers in `config/mcp_servers.json5`. The template is copied to `~/.meept/mcp_servers.json5` on `make install` if no file exists there yet. Each entry is fully configured with the correct command (`npx` or `uvx` as appropriate), environment variables, category, and description.
+Meept ships a default catalog of 20 preconfigured MCP (Model Context Protocol) servers in `config/mcp_servers.json5`. The template is copied to `~/.meept/mcp_servers.json5` on `make install` if no file exists there yet. Each entry is fully configured with the correct command (`npx` or `uvx` as appropriate), environment variables, category, and description.
 
 ### MCP Security Considerations
 
@@ -52,12 +52,14 @@ Only the zero-config servers are enabled by default (no API keys or external ser
 
 | server | runtime | category | purpose |
 |--------|---------|----------|---------|
+| `sequential-thinking` | npx | reasoning | step-wise reasoning scratchpad |
+| `everything` | npx | reasoning | MCP reference test server |
+| `memory` | npx | data | local knowledge graph store |
 | `fetch` | uvx | network | general-purpose http fetcher |
 | `git` | uvx | vcs | local git repo operations (log, diff, blame) |
-| `memory` | npx | data | local knowledge graph store |
-| `sequential-thinking` | npx | reasoning | step-wise reasoning scratchpad |
+| `time` | uvx | data | timezone-aware time and conversion |
 
-The remaining 17 servers ship `enabled: false` because they need API keys, OAuth credentials, or external daemons. Enable only the ones you want.
+The remaining 14 servers ship `enabled: false` because they need API keys, OAuth credentials, or external daemons. Enable only the ones you want.
 
 The `cua-driver` entry (category `automation`) adds background desktop computer-use via a native binary — install commands, enable steps, and its LOW/HIGH risk-rule table are documented under [Cua-Driver Computer-Use Integration](external-integrations.md#cua-driver-computer-use-integration).
 
