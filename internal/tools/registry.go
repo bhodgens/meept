@@ -13,6 +13,29 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 )
 
+// SchemaMode controls how tool definitions are exposed to the LLM.
+//
+// SchemaModeFull ships every tool's complete parameter schema (legacy
+// behavior). SchemaModeIndexed collapses non-core tools to a one-line
+// description that instructs the model to call tool_view{name} for the full
+// schema, conserving tokens on every request.
+type SchemaMode string
+
+const (
+	// SchemaModeFull ships complete parameter schemas for every tool.
+	// This is the registry's default; callers must opt in to indexed mode.
+	SchemaModeFull SchemaMode = "full"
+	// SchemaModeIndexed stubs non-core tools to one-line descriptions and
+	// empty object schemas; the alwaysFull set keeps core tools intact.
+	SchemaModeIndexed SchemaMode = "indexed"
+)
+
+// metaToolName is the tool_view builtin's registration name. It is the
+// expansion mechanism for indexed mode, so it is never stubbed: it is
+// implicitly added to the always-full set on every SetSchemaMode call,
+// even when the caller omits it.
+const metaToolName = "tool_view"
+
 // Registry maintains a collection of registered tools.
 //
 // The registry is thread-safe and can be used concurrently by multiple
@@ -21,6 +44,13 @@ type Registry struct {
 	mu     sync.RWMutex
 	tools  map[string]Tool
 	logger *slog.Logger
+
+	// schemaMode and alwaysFull are guarded by mu. alwaysFull is treated
+	// as immutable after being stored (copy-on-write): SetSchemaMode builds
+	// a fresh map and swaps the reference, so readers may hold the reference
+	// past the lock and read it without further synchronization.
+	schemaMode SchemaMode
+	alwaysFull map[string]struct{}
 }
 
 // NewRegistry creates a new empty tool registry.
@@ -164,19 +194,75 @@ func (r *Registry) Count() int {
 	return len(r.tools)
 }
 
+// SetSchemaMode configures how tool definitions are exposed to the LLM.
+//
+// In SchemaModeIndexed, tools named in alwaysFull keep their complete
+// schemas; all other tools are stubbed to a one-line description ending in
+// ` use tool_view{name}.` and an empty object parameter schema. The
+// tool_view meta tool is always implicitly added to the always-full set so
+// the expansion mechanism is itself never stubbed, even if the caller
+// omits it. In SchemaModeFull (and for any unrecognized mode value, which
+// is treated as full) every tool ships its complete schema — byte-identical
+// legacy behavior.
+//
+// It is safe to call at runtime while other goroutines read definitions;
+// mode switches take effect on the next GetDefinitions/ToLLMDefinitions
+// call. Note that switching modes changes the definitions payload and will
+// invalidate provider-side prompt caches by design.
+func (r *Registry) SetSchemaMode(mode SchemaMode, alwaysFull []string) {
+	set := make(map[string]struct{}, len(alwaysFull)+1)
+	for _, name := range alwaysFull {
+		if name == "" {
+			continue
+		}
+		set[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	// The meta tool is the expansion mechanism for indexed mode; stubbing
+	// it would make the index unusable, so it is always full.
+	set[metaToolName] = struct{}{}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.schemaMode = mode
+	r.alwaysFull = set
+}
+
+// indexedStubDescription appends the tool_view expansion instruction to a
+// tool's original description.
+func indexedStubDescription(name, description string) string {
+	return fmt.Sprintf("%s use tool_view{%s}.", description, name)
+}
+
 // ToLLMDefinitions converts all registered tools to LLM tool definitions.
 // This format is suitable for passing to the LLM client's tools parameter.
+//
+// In indexed schema mode, non-core tools are stubbed (see SetSchemaMode).
+// The mode/alwaysFull state is snapshotted under the lock and the
+// definition building happens outside it, so schema transformation work
+// never runs while holding the mutex.
 func (r *Registry) ToLLMDefinitions() []llm.ToolDefinition {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	definitions := make([]llm.ToolDefinition, 0, len(r.tools))
+	mode := r.schemaMode
+	alwaysFull := r.alwaysFull
+	tools := make([]Tool, 0, len(r.tools))
 	for _, tool := range r.tools {
-		def := llm.NewToolDefinition(
-			tool.Name(),
-			tool.Description(),
-			tool.Parameters(),
-		)
+		tools = append(tools, tool)
+	}
+	r.mu.RUnlock()
+
+	indexed := mode == SchemaModeIndexed
+	definitions := make([]llm.ToolDefinition, 0, len(tools))
+	for _, tool := range tools {
+		name := tool.Name()
+		description := tool.Description()
+		params := tool.Parameters()
+
+		if indexed && !isAlwaysFullTool(alwaysFull, name) {
+			description = indexedStubDescription(name, description)
+			params = emptyObjectParameters()
+		}
+
+		def := llm.NewToolDefinition(name, description, params)
 		definitions = append(definitions, def)
 	}
 
@@ -186,6 +272,24 @@ func (r *Registry) ToLLMDefinitions() []llm.ToolDefinition {
 	})
 
 	return definitions
+}
+
+// isAlwaysFullTool reports whether the named tool must always ship its full
+// schema in indexed mode. The alwaysFull set is a copy-on-write reference:
+// it is only ever replaced wholesale under the lock, so reading it here
+// without synchronization is safe.
+func isAlwaysFullTool(alwaysFull map[string]struct{}, name string) bool {
+	_, ok := alwaysFull[normalizeToolName(name)]
+	return ok
+}
+
+// emptyObjectParameters returns the canonical stub parameter schema used
+// for indexed (non-core) tools: an object with no properties.
+func emptyObjectParameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type:       "object",
+		Properties: make(map[string]llm.ParameterProperty),
+	}
 }
 
 // Execute runs a tool by name with the given arguments.

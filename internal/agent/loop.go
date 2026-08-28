@@ -440,6 +440,12 @@ type AgentLoop struct {
 	bus             *bus.MessageBus
 	logger          *slog.Logger
 
+	// Tool-schema mode plumbing (loop-economics leaf 02). schemaModeCfg is
+	// the [agent.tools] values supplied via SetSchemaModeConfig;
+	// schemaModeSet distinguishes "explicitly set" from zero-value config.
+	schemaModeCfg config.AgentToolsConfig
+	schemaModeSet bool
+
 	// Memory for context injection
 	memvid    *memvid.Client
 	taskStore *task.Store
@@ -878,7 +884,73 @@ func WithToolRegistry(registry ToolRegistry) LoopOption {
 	return func(l *AgentLoop) {
 		if registry != nil {
 			l.registry = registry
+			l.applySchemaModeLocked()
 		}
+	}
+}
+
+// SetSchemaModeConfig supplies the [agent.tools] tool-schema settings
+// (loop-economics leaf 02) used to resolve the registry's schema mode.
+// Call it any time before or after the registry is attached; when a registry
+// is present the mode is applied immediately, otherwise it is applied on
+// attach (or at loop-construction time if the option ran first).
+func (l *AgentLoop) SetSchemaModeConfig(cfg config.AgentToolsConfig) {
+	l.mu.Lock()
+	l.schemaModeCfg = cfg
+	l.schemaModeSet = true
+	l.applySchemaModeLocked()
+	l.mu.Unlock()
+}
+
+// applySchemaModeWithLock applies the schema-mode config to the attached
+// registry under l.mu.
+func (l *AgentLoop) applySchemaModeWithLock() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.applySchemaModeLocked()
+}
+
+// applySchemaModeLocked pushes the effective tool-schema mode into the
+// attached registry. Resolution order (leaf 02): resolved per-model
+// schema_mode > provider schema_mode > global [agent.tools].schema_mode
+// > "indexed" (indexed is default-on; "full" restores legacy full-schema
+// payloads). always_full falls back to config.DefaultAlwaysFullTools().
+// l.mu must be held by the caller. No-op when the registry does not expose
+// SetSchemaMode (e.g. placeholder registries).
+func (l *AgentLoop) applySchemaModeLocked() {
+	if l.registry == nil {
+		return
+	}
+	sm, ok := l.registry.(interface {
+		SetSchemaMode(tools.SchemaMode, []string)
+	})
+	if !ok {
+		return
+	}
+
+	// Global mode from [agent.tools]; "" means the indexed default.
+	modeStr := ""
+	alwaysFull := config.DefaultAlwaysFullTools()
+	if l.schemaModeSet {
+		modeStr = l.schemaModeCfg.SchemaMode
+		if len(l.schemaModeCfg.AlwaysFull) > 0 {
+			alwaysFull = l.schemaModeCfg.AlwaysFull
+		}
+	}
+
+	// Per-model / per-provider overrides via the resolver and the loop's
+	// active model config.
+	if l.resolver != nil && l.llmClient != nil {
+		if mc := l.llmClient.Config(); mc != nil {
+			modeStr = l.resolver.EffectiveSchemaMode(mc.ProviderID, mc.ModelID, modeStr)
+		}
+	}
+
+	switch modeStr {
+	case "full":
+		sm.SetSchemaMode(tools.SchemaModeFull, alwaysFull)
+	default:
+		sm.SetSchemaMode(tools.SchemaModeIndexed, alwaysFull)
 	}
 }
 
@@ -1468,6 +1540,11 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	for _, opt := range opts {
 		opt(loop)
 	}
+
+	// Apply the effective tool-schema mode to the attached registry
+	// (loop-economics leaf 02). Covers registries supplied through option
+	// functions that ran before WithResolver / SetSchemaModeConfig.
+	loop.applySchemaModeWithLock()
 
 	// Initialize state machine
 	if loop.logger == nil {

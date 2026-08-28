@@ -1092,8 +1092,45 @@ type AgentConfig struct {
 // global kill-switch for grammar-constrained tool calling: when true, the
 // LLM client attaches a grammar to chat requests on endpoints that declare
 // a matching tool_constraint capability. Default false.
+//
+// SchemaMode controls how tool definitions are exposed to the LLM
+// (loop-economics leaf 02): "indexed" (the default when empty) stubs
+// non-core tools to one-line descriptions ending in " use tool_view{name}.";
+// "full" ships every tool's complete parameter schema (legacy behavior).
+// AlwaysFull lists tool names that always ship full schemas under indexed
+// mode; an empty/nil list falls back to DefaultAlwaysFullTools() at loop
+// wiring time.
 type AgentToolsConfig struct {
 	GBNFConstrained bool `json:"gbnf_constrained" toml:"gbnf_constrained"`
+	// SchemaMode is the global tool-schema mode: "", "full", or "indexed".
+	// Empty means "indexed" (indexed is default-on; "full" restores legacy).
+	SchemaMode string `json:"schema_mode" toml:"schema_mode"`
+	// AlwaysFull names tools that always ship their complete parameter
+	// schema even under indexed mode. Nil/empty -> DefaultAlwaysFullTools().
+	AlwaysFull []string `json:"always_full" toml:"always_full"`
+}
+
+// Validate checks the [agent.tools] section. Unknown schema_mode values are
+// rejected with an error naming agent.tools.schema_mode so a typo fails fast
+// at config load instead of silently shipping full schemas.
+func (c *AgentToolsConfig) Validate() error {
+	switch c.SchemaMode {
+	case "", "full", "indexed":
+		return nil
+	default:
+		return fmt.Errorf("agent.tools.schema_mode: invalid value %q (must be \"\", \"full\", or \"indexed\")", c.SchemaMode)
+	}
+}
+
+// DefaultAlwaysFullTools returns the curated core-tool list that keeps its
+// full parameter schema under indexed schema mode. Returns a fresh copy on
+// every call so callers may mutate the result freely.
+func DefaultAlwaysFullTools() []string {
+	return []string{
+		"shell", "file_read", "file_edit", "file_write",
+		"memory_search", "memory_store", "web_fetch", "websearch",
+		"platform_status", "tool_view",
+	}
 }
 
 // AgentGuardsConfig mirrors agent.GuardConfig for the [agent.guards] TOML
@@ -2984,7 +3021,9 @@ type FileWatcherHookConfig struct {
 
 	// AsyncRewake, when true (Async must also be true), publishes a
 	// hook.async_rewake bus signal after the async callback finishes so
-	// the agent loop wakes up and can react to the file change.
+	// the agent loop can wake up and react to the file change. Since the
+	// loop keeps its own watcher, its consumer treats the signal (whose
+	// session_id is typically empty) as a broadcast to itself.
 	AsyncRewake bool `json:"async_rewake,omitempty"`
 }
 
@@ -3002,7 +3041,9 @@ type HTTPHookConfig struct {
 	// Async runs the HTTP request in a background goroutine.
 	Async bool `json:"async,omitempty"`
 	// AsyncRewake publishes a hook.async_rewake bus signal after successful
-	// async completion.
+	// async completion. The agent loop subscribes to this topic and injects
+	// a wake into the conversation whose ID matches the payload's
+	// session_id (session hooks stamp it from the lifecycle state).
 	AsyncRewake bool `json:"async_rewake,omitempty"`
 }
 
@@ -3039,6 +3080,11 @@ func (c *Config) ValidateAll() error {
 	// Validate plans config
 	if err := c.Plans.Validate(); err != nil {
 		return fmt.Errorf("plans config: %w", err)
+	}
+
+	// Validate [agent.tools] schema mode (loop-economics leaf 02).
+	if err := c.Agent.Tools.Validate(); err != nil {
+		return fmt.Errorf("agent config: %w", err)
 	}
 
 	return nil

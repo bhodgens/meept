@@ -1176,6 +1176,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.AgentLoop = agent.NewAgentLoop("daemon", "", agentOpts...)
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
+	// Wire tool-schema mode (leaf 02): [agent.tools].schema_mode resolves
+	// per-model > provider > global, indexed default-on; also applies on
+	// later registry attach via applySchemaModeWithLock.
+	c.AgentLoop.SetSchemaModeConfig(cfg.Agent.Tools)
 	c.AgentLoop.SetCompactionConfig(cfg.Compaction)
 
 	// Wire shadow hot-swap callback so that successful adapter activations
@@ -4959,6 +4963,12 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewCronCreateTool(sched))
 		logger.Debug("Registered scheduler tools")
 	}
+
+	// tool_view (leaf 02): exposes full parameter schemas on demand so
+	// indexed schema mode can stub non-core tools in GetDefinitions(). The
+	// registry itself always returns full-fidelity tools via Get(name), so
+	// expansions never lose schema data. LRU size 0 -> builtin default 32.
+	registry.Register(builtin.NewToolViewTool(registry, 0))
 
 	logger.Info("Registered builtin tools", "count", registry.Count())
 }

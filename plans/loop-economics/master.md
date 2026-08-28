@@ -206,7 +206,7 @@ Go 1.24+, stdlib-first (new deps ONLY: chromedp leaf 13, rest stdlib/existing). 
 | Child | Status | Iterations | Notes |
 |-------|--------|-----------|-------|
 | 01-stable-prefix-prompt | COMPLETE | 1 | a3a93ef2 (AssembleOrdered + AddSectionWithStability; complements committed loop.go refs) |
-| 02-lazy-tool-schemas | PENDING | 0 | tool_view.go never implemented |
+| 02-lazy-tool-schemas | COMPLETE | 1 | 86be1fb4 (indexed mode default-on + tool_view LRU; config/llm resolution + loop wiring via subagents) |
 | 03-scheduler-crash-safety | COMPLETE | 1 | 33d51b2f (claimStore + coalescing; core guard pkg in 936a7d4e) |
 | 04-shell-permission-table | COMPLETE | 1 | 94031f53 + Execute wiring in 4cfe9386 |
 | 05-ssrf-guards | COMPLETE | 2 | 936a7d4e (guard pkg) + 85171998 (web_fetch/web_search wiring + config tests) |

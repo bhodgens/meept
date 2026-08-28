@@ -916,4 +916,76 @@ Generate a video clip through a configured provider.
 
 **Default:** `video_model`. Same catalog as chat models. Capability `video`.
 
+## Indexed Schema Mode
+
+Tool definitions are shipped to the LLM in **indexed schema mode** by default
+(loop-economics leaf 02): core tools keep their complete parameter schemas,
+while every other tool is stubbed to a one-line description ending in
+` use tool_view{name}.` with an empty parameter schema. The `tool_view`
+meta-tool is always full-schema — it is the expansion mechanism: calling
+`tool_view{"name": "some_tool"}` returns that tool's complete definition, and
+expansions are LRU-cached.
+
+Setting `schema_mode = "full"` under `[agent.tools]` restores the legacy
+behavior where every tool ships its full schema byte-identically.
+
+**Trade-offs:**
+
+| Indexed (default) | Full (legacy) |
+|---|---|
+| Token conservation on every call, every provider | Full schemas cost tokens on every call |
+| Smaller stable prefix → cheaper provider cache writes | Toolset changes disturb larger prefix regions |
+| Small local models become viable (schema flood is a top failure mode) | Full fidelity for tool selection |
+| Two-step first use of a rare tool (+1 round trip for `tool_view`) | Single-step first use |
+| Selection quality depends on one-line descriptions; weak models may skip `tool_view` | Model sees parameter shapes up front |
+
+Mitigations: the stub description explicitly instructs the expansion call, and
+the `always_full` list keeps the common core set at full schema. If
+selection-quality regressions are suspected, benchmark with full mode before
+and after (GAIA runs in meept-bench).
+
+**Configuration** (`~/.meept/meept.json5`):
+
+```json5
+{
+  "agent": {
+    "tools": {
+      // "indexed" is the default (empty means indexed); "full" restores legacy.
+      "schema_mode": "full",
+      // Tools that always ship complete schemas under indexed mode.
+      // Default when omitted: shell, file_read, file_edit, file_write,
+      // memory_search, memory_store, web_fetch, websearch, platform_status,
+      // tool_view.
+      "always_full": ["shell", "file_read", "file_edit", "file_write"]
+    }
+  }
+}
+```
+
+**Per-model / per-provider overrides** (`config/models.json5` or
+`~/.meept/models.json5`). Resolution order: model entry → provider block →
+global `[agent.tools].schema_mode` → `"indexed"`:
+
+```json5
+{
+  "providers": {
+    "anthropic": {
+      // ...
+      "schema_mode": "indexed",                            // provider default
+      "models": {
+        "claude-opus-4-5": { "schema_mode": "full" }       // per-model override
+      }
+    }
+  }
+}
+```
+
+Unknown `schema_mode` strings are rejected at config load
+(`agent.tools.schema_mode`) and warn-ignored in models.json5 (falling through
+to the next level).
+
+Switching the mode mid-session changes the definitions payload, which
+invalidates provider-side prompt caches by design — treat `SetSchemaMode`
+changes as intentional cache invalidation, not a bug.
+
 See `docs/configuration/media.md`.

@@ -35,6 +35,11 @@ type ProviderOptionsConfig struct {
 	// "json_schema". Empty (default) = no constraint support. Per-model
 	// tool_constraint overrides this value.
 	ToolConstraint string `json:"tool_constraint,omitempty"`
+	// SchemaMode is the provider-level default tool-schema mode
+	// ("full"|"indexed", loop-economics leaf 02). Empty inherits the global
+	// [agent.tools].schema_mode. Per-model schema_mode overrides this value.
+	// Unknown values are ignored at resolve time (warn + fall through).
+	SchemaMode string `json:"schema_mode,omitempty"`
 }
 
 // ModelDef represents a model definition in the config.
@@ -64,6 +69,10 @@ type ModelDef struct {
 	// mode for this model ("llamacpp"|"vllm"|"json_schema"). Empty inherits
 	// the provider setting.
 	ToolConstraint string `json:"tool_constraint,omitempty"`
+	// SchemaMode overrides the provider-level tool-schema mode for this
+	// model ("full"|"indexed", loop-economics leaf 02). Empty inherits the
+	// provider setting. Unknown values are ignored at resolve time.
+	SchemaMode string `json:"schema_mode,omitempty"`
 }
 
 // ProvidersConfig represents the full models.json5 configuration.
@@ -370,6 +379,18 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 			"provider", providerID, "model", mapKey, "mode", mode)
 		mode = ""
 	}
+	// Resolve tool-schema mode the same way: per-model override > provider
+	// default. Unknown values are warned about and cleared so resolution
+	// falls through to the global [agent.tools] mode (leaf 02).
+	schemaMode := modelDef.SchemaMode
+	if schemaMode == "" {
+		schemaMode = provider.Options.SchemaMode
+	}
+	if !SchemaModeValid(schemaMode) {
+		slog.Warn("providers: ignoring unknown schema_mode",
+			"provider", providerID, "model", mapKey, "mode", schemaMode)
+		schemaMode = ""
+	}
 	name := modelDef.Name
 	if name == "" {
 		name = mapKey
@@ -392,6 +413,7 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		ProviderID:           providerID,
 		CatalogRef:           providerID + "/" + mapKey,
 		ToolConstraint:       mode,
+		SchemaMode:           schemaMode,
 		Timeout:              time.Duration(opts.Timeout) * time.Second,
 		MaxConcurrency:       modelDef.MaxConcurrency,
 		ProviderAPI:          provider.API,

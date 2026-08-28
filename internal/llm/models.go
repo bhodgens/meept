@@ -225,6 +225,12 @@ type ModelConfig struct {
 	// "json_schema". Empty means no constraint support (no grammar is
 	// ever attached). See internal/llm/gbnf.go.
 	ToolConstraint string
+	// SchemaMode is the resolved tool-schema mode for this endpoint
+	// ("full"|"indexed", loop-economics leaf 02). Empty means no
+	// model/provider-level override; the effective mode falls back to the
+	// global [agent.tools].schema_mode (default "indexed") via
+	// Resolver.EffectiveSchemaMode.
+	SchemaMode string
 	// OAuthProvider identifies the OAuth provider (e.g. "github-models",
 	// "google-oauth") whose token should be used in place of a static API
 	// key. When non-empty, the LLM client resolves a fresh access token

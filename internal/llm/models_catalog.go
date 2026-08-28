@@ -10,6 +10,10 @@ type ModelCatalogEntry struct {
 	InputCost     float64  // Cost per million input tokens (USD)
 	OutputCost    float64  // Cost per million output tokens (USD)
 	Capabilities  []string // Model capabilities
+	// SchemaMode is an optional display/wiring hint for the model's
+	// tool-schema mode ("full"|"indexed", loop-economics leaf 02). Empty
+	// means no per-model override in the static catalog.
+	SchemaMode string `json:"schema_mode,omitempty"`
 }
 
 // ProviderModels maps provider IDs to their model catalogs.
