@@ -766,6 +766,7 @@ Endpoints under `/api/v1/agents/*` manage AI employees — persistent, constitut
 | PATCH | `/api/v1/agents/{id}/constitution` | Propose amendment (routes to Plan signoff) |
 | GET | `/api/v1/agents/{id}/goals` | List goals with health |
 | GET | `/api/v1/agents/{id}/goals/{gid}` | Goal detail |
+| PUT | `/api/v1/agents/{id}/goals/{gid}/gate` | Set or clear the completion gate |
 | GET | `/api/v1/agents/{id}/audit` | Audit findings (filter: `?since=&severity=`) |
 | POST | `/api/v1/agents/{id}/audit/{fid}/resolve` | Resolve finding |
 | POST | `/api/v1/agents/migrate` | Run migration scan, returns proposed constitutions |

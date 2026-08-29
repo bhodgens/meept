@@ -1,5 +1,75 @@
 {
   "publishers": {
+    "[no servers configured]": [
+      {
+        "file": "internal/agent/instruction_handler.go",
+        "line": 133,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/instruction_handler.go",
+        "line": 142,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/instruction_handler.go",
+        "line": 161,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/instruction_handler.go",
+        "line": 190,
+        "payload_keys": [
+          "action",
+          "args",
+          "instruction_id"
+        ],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/instruction_handler.go",
+        "line": 211,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 154,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 163,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 182,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 211,
+        "payload_keys": [
+          "action",
+          "args",
+          "instruction_id"
+        ],
+        "via_helper": true
+      },
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 232,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
@@ -484,7 +554,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2156,
+        "line": 2157,
         "payload_keys": []
       }
     ],
@@ -505,7 +575,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3734,
+        "line": 3754,
         "payload_keys": [
           "name",
           "tags",
@@ -1580,7 +1650,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6585,
+        "line": 6605,
         "payload_keys": []
       }
     ],
@@ -2046,13 +2116,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5223,
+        "line": 5243,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 5260,
+        "line": 5280,
         "payload_keys": [],
         "via_const": true
       }
@@ -2397,14 +2467,14 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2134,
+        "line": 2135,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2775,
+        "line": 2776,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -2469,7 +2539,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/metrics/collector.go",
-        "line": 240,
+        "line": 237,
         "subscriber_id": "metrics-collector-tokens"
       }
     ],
@@ -3107,7 +3177,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6515,
+        "line": 6535,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3122,7 +3192,7 @@
     "step.*": [
       {
         "file": "internal/metrics/collector.go",
-        "line": 212,
+        "line": 209,
         "subscriber_id": "metrics-collector-review"
       }
     ],
@@ -3410,7 +3480,7 @@
     "worker.*": [
       {
         "file": "internal/metrics/collector.go",
-        "line": 227,
+        "line": 224,
         "subscriber_id": "metrics-collector-worker"
       }
     ],

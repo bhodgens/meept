@@ -73,6 +73,7 @@ func (h *AgentAPIHandler) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/agents/{id}/goals", h.handleGoalsList)
 	mux.HandleFunc("GET /api/v1/agents/{id}/goals/{gid}", h.handleGoalsGet)
+	mux.HandleFunc("PUT /api/v1/agents/{id}/goals/{gid}/gate", h.handleGoalsSetGate)
 
 	mux.HandleFunc("GET /api/v1/agents/{id}/audit", h.handleAuditList)
 	mux.HandleFunc("POST /api/v1/agents/{id}/audit/{fid}/resolve", h.handleAuditResolve)
@@ -370,6 +371,26 @@ func (h *AgentAPIHandler) handleGoalsGet(w http.ResponseWriter, r *http.Request)
 	h.dispatch(w, r, "agents.goals.get", map[string]string{"id": gid})
 }
 
+// handleGoalsSetGate handles PUT /api/v1/agents/{id}/goals/{gid}/gate.
+// Body: {"command":"go test ./...","timeout_seconds":300,"skip_when_unchanged":true}
+// An empty command clears the per-goal gate.
+func (h *AgentAPIHandler) handleGoalsSetGate(w http.ResponseWriter, r *http.Request) {
+	gid := r.PathValue("gid")
+	if gid == "" {
+		h.writeError(w, http.StatusBadRequest, "goal id is required")
+		return
+	}
+	var body GateConfig
+	if !h.readJSON(w, r, &body) {
+		return
+	}
+	var gate any
+	if body.Command != "" {
+		gate = body
+	}
+	h.dispatch(w, r, "agents.goals.set_gate", map[string]any{"id": gid, "gate": gate})
+}
+
 // ---------------------------------------------------------------------------
 // Audit (spec lines 521-522)
 // ---------------------------------------------------------------------------
@@ -412,9 +433,9 @@ func (h *AgentAPIHandler) handleAuditResolve(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.dispatch(w, r, "agents.audit.resolve", map[string]string{
-		"finding_id":  fid,
-		"resolution":  body.Resolution,
-		"note":        body.Note,
+		"finding_id": fid,
+		"resolution": body.Resolution,
+		"note":       body.Note,
 	})
 }
 

@@ -138,12 +138,26 @@ struct GoalWire: Codable {
     let state: String?
     let health: String?
     let activePlanID: String?
+    let gate: GateWire?
 
     enum CodingKeys: String, CodingKey {
         case id
         case employeeID = "employee_id"
-        case title, state, health
+        case title, state, health, gate
         case activePlanID = "active_plan_id"
+    }
+}
+
+/// Completion-gate payload on a goal (`gate.command` etc).
+struct GateWire: Codable {
+    let command: String?
+    let timeoutSeconds: Int?
+    let skipWhenUnchanged: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case command
+        case timeoutSeconds = "timeout_seconds"
+        case skipWhenUnchanged = "skip_when_unchanged"
     }
 }
 
@@ -155,6 +169,7 @@ struct Goal: Identifiable {
     var state: String
     var health: String
     var activePlanID: String
+    var gateCommand: String
 
     init(from wire: GoalWire) {
         self.id = wire.id
@@ -163,5 +178,6 @@ struct Goal: Identifiable {
         self.state = wire.state ?? "unknown"
         self.health = wire.health ?? "unknown"
         self.activePlanID = wire.activePlanID ?? ""
+        self.gateCommand = wire.gate?.command ?? ""
     }
 }

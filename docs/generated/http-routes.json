@@ -270,7 +270,7 @@
     "path": "GET /api/v1/agents/{id}/audit",
     "handler": "h.handleAuditList",
     "file": "internal/employee/api_handlers.go",
-    "line": 77
+    "line": 78
   },
   {
     "method": "ANY",
@@ -1138,7 +1138,7 @@
     "path": "POST /api/v1/agents/{id}/audit/{fid}/resolve",
     "handler": "h.handleAuditResolve",
     "file": "internal/employee/api_handlers.go",
-    "line": 78
+    "line": 79
   },
   {
     "method": "ANY",
@@ -1933,6 +1933,13 @@
   },
   {
     "method": "ANY",
+    "path": "PUT /api/v1/agents/{id}/goals/{gid}/gate",
+    "handler": "h.handleGoalsSetGate",
+    "file": "internal/employee/api_handlers.go",
+    "line": 76
+  },
+  {
+    "method": "ANY",
     "path": "PUT /api/v1/calendar/events/{id}",
     "handler": "s.handleCalendarUpdate",
     "file": "internal/comm/http/server.go",
@@ -2146,21 +2153,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 5993
+    "line": 6013
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6004
+    "line": 6024
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 5985
+    "line": 6005
   },
   {
     "method": "GET",
@@ -2328,7 +2335,7 @@
     "path": "severity",
     "handler": "",
     "file": "internal/employee/api_handlers.go",
-    "line": 389
+    "line": 410
   },
   {
     "method": "GET",
@@ -2342,7 +2349,7 @@
     "path": "since",
     "handler": "",
     "file": "internal/employee/api_handlers.go",
-    "line": 386
+    "line": 407
   },
   {
     "method": "GET",
@@ -2356,7 +2363,7 @@
     "path": "status",
     "handler": "",
     "file": "internal/employee/api_handlers.go",
-    "line": 207
+    "line": 208
   },
   {
     "method": "GET",

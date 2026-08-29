@@ -105,13 +105,21 @@ type AgentDetail struct {
 
 // AgentGoal mirrors employee.Goal for wire transport.
 type AgentGoal struct {
-	ID           string    `json:"id"`
-	Title        string    `json:"title"`
-	Mandate      string    `json:"mandate"`
-	State        string    `json:"state"`  // active | paused | retired
-	Health       string    `json:"health"` // healthy | at_risk | broken | unknown
-	ActivePlanID string    `json:"active_plan_id,omitempty"`
-	LastAssessed time.Time `json:"last_assessed"`
+	ID           string     `json:"id"`
+	Title        string     `json:"title"`
+	Mandate      string     `json:"mandate"`
+	State        string     `json:"state"`  // active | paused | retired
+	Health       string     `json:"health"` // healthy | at_risk | broken | unknown
+	ActivePlanID string     `json:"active_plan_id,omitempty"`
+	LastAssessed time.Time  `json:"last_assessed"`
+	Gate         *AgentGate `json:"gate,omitempty"`
+}
+
+// AgentGate is the completion check shown on a goal row.
+type AgentGate struct {
+	Command           string `json:"command"`
+	TimeoutSeconds    int    `json:"timeout_seconds"`
+	SkipWhenUnchanged bool   `json:"skip_when_unchanged"`
 }
 
 // AgentFinding mirrors employee.AuditFinding for wire transport.
@@ -989,7 +997,12 @@ func (p *AgentsPanel) renderGoalLine(g AgentGoal) string {
 		plan = lipgloss.NewStyle().Foreground(Current().TextMuted).
 			Render(" plan: " + truncate(g.ActivePlanID, 12))
 	}
-	return fmt.Sprintf("%s %s (%s)%s", dot, title, healthLabel, plan)
+	gate := ""
+	if g.Gate != nil && g.Gate.Command != "" {
+		gate = lipgloss.NewStyle().Foreground(Current().TextMuted).
+			Render(" gate: " + truncate(g.Gate.Command, 24))
+	}
+	return fmt.Sprintf("%s %s (%s)%s%s", dot, title, healthLabel, plan, gate)
 }
 
 func (p *AgentsPanel) renderFindingLine(f AgentFinding) string {

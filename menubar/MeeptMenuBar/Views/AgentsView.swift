@@ -453,6 +453,13 @@ struct GoalRow: View {
                 .font(.system(size: 11))
                 .lineLimit(1)
 
+            if !goal.gateCommand.isEmpty {
+                Text(goal.gateCommand)
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
             Spacer()
 
             if !goal.activePlanID.isEmpty {

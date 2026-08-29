@@ -353,6 +353,7 @@ New endpoints under `/api/v1/agents/*`. The existing `/api/v1/bot/{id}/trigger` 
 | `/api/v1/agents/{id}/constitution` | GET, PATCH | view / propose amendment |
 | `/api/v1/agents/{id}/goals` | GET | list goals with health |
 | `/api/v1/agents/{id}/goals/{gid}` | GET | goal detail |
+| `/api/v1/agents/{id}/goals/{gid}/gate` | PUT | set or clear the completion gate |
 | `/api/v1/agents/{id}/audit` | GET | findings, filterable by `?since=&severity=` |
 | `/api/v1/agents/{id}/audit/{fid}/resolve` | POST | resolve finding |
 | `/api/v1/agents/migrate` | POST | run migration scan, returns proposed constitutions |

@@ -309,25 +309,25 @@
     "topic": "instruction.add",
     "handler": "h.handleAddRPC",
     "file": "internal/rpc/instructions.go",
-    "line": 258
+    "line": 271
   },
   {
     "topic": "instruction.delete",
     "handler": "h.handleDeleteRPC",
     "file": "internal/rpc/instructions.go",
-    "line": 259
+    "line": 272
   },
   {
     "topic": "instruction.list",
     "handler": "h.handleListRPC",
     "file": "internal/rpc/instructions.go",
-    "line": 257
+    "line": 270
   },
   {
     "topic": "instruction.preview",
     "handler": "h.handlePreviewRPC",
     "file": "internal/rpc/instructions.go",
-    "line": 260
+    "line": 273
   },
   {
     "topic": "mcp.list",
