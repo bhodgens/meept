@@ -306,6 +306,25 @@ func newAgentsShowCmd() *cobra.Command {
 				fmt.Printf("  max_fix_loops: %v\n", verification["max_fix_loops"])
 			}
 
+			// Quality gate summary (leaf 08). Lowercase status per spec.
+			if gate, ok := resultMap["gate"].(map[string]any); ok {
+				gateCmd := getStringOr(gate, "command", "")
+				if gateCmd != "" {
+					timeout := getStringOr(gate, "timeout_seconds", "300")
+					skip := "true"
+					if v, ok := gate["skip_when_unchanged"].(bool); ok {
+						skip = fmt.Sprintf("%v", v)
+					}
+					fmt.Println("\ngate:")
+					fmt.Printf("  command:             %s\n", gateCmd)
+					fmt.Printf("  timeout_seconds:     %s\n", timeout)
+					fmt.Printf("  skip_when_unchanged: %s\n", skip)
+					fmt.Printf("  last result:         %s\n", getStringOr(gate, "last_result", "unknown"))
+				} else {
+					fmt.Printf("\ngate: none (model-judgment completion)\n")
+				}
+			}
+
 			// Constitution summary.
 			if constitution, ok := resultMap["constitution"].(map[string]any); ok {
 				fmt.Println("\nConstitution:")

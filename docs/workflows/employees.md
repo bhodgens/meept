@@ -105,6 +105,58 @@ The loop is tier-aware. Everything else in the system (storage, triggering, sign
 
 Spec reference: `docs/superpowers/specs/2026-06-23-ai-employee-design.md` lines 298–300.
 
+### Quality gate (completion gating)
+
+The quality gate is a **completion** check — orthogonal to the Constitution
+Engine's action policing. Where enforcement decides *what the employee may do*,
+the gate decides *when it may claim success*. An autonomous run may only mark
+a goal complete after a user-defined shell check passes in the employee's
+project directory.
+
+Configure it per goal in the employee definition:
+
+```json5
+{
+  goals: [{
+    title: "keep main shippable",
+    mandate: "…",
+    gate: {
+      command: "npm test",       // empty = no gate (legacy model-judgment completion)
+      timeout_seconds: 300,      // kills the command; default 300
+      skip_when_unchanged: true, // default: don't re-run a failed gate on an unchanged workspace
+    },
+  }],
+}
+```
+
+Or set an employee-wide default in `meept.json5` under
+`[employees.defaults.gate]` (per-goal `gate.command` wins when both are set):
+
+```json5
+{
+  employees: {
+    defaults: {
+      gate: { command: "make check", timeout_seconds: 120, skip_when_unchanged: true },
+    },
+  },
+}
+```
+
+Semantics (`internal/employee/gate.go`):
+
+- The workspace hash is `sha256(git status --porcelain || git rev-parse HEAD)`
+  computed via the configured execution backend (honors `require_sandbox`
+  from the runtime config when present; falls back to local execution).
+- A gate that exits non-zero **fails**: goal health drops to `at_risk`
+  regardless of the model's own assessment, and the failure output
+  (truncated to 4 KB) is injected into the next round's prompt as a
+  `# quality gate feedback` block.
+- With `skip_when_unchanged` enabled, a previously **failed** gate whose
+  workspace hash is unchanged is skipped without re-running. The goal still
+  cannot complete until the workspace changes and the gate re-runs green.
+- Gate output may contain code and is therefore never logged above debug level;
+  gate runs are recorded in the employee audit trail.
+
 ### Constitution Engine
 
 Three checkpoints, each with a distinct role. All live in `internal/employee/enforcement.go`.
@@ -527,6 +579,47 @@ The existing multi-agent system (dispatcher, coder, planner, etc.) handles inter
 - Employees show up in `platform_agents` so other agents can discover and delegate to them.
 
 See [Multi-Agent System](../concepts/multi-agent.md#employees) for details.
+
+---
+
+## Inter-agent messaging with receipts
+
+Employees (and the orchestrator) exchange direct messages with delivery
+receipts, persisted in SQLite so a message to a busy or offline employee
+waits until its next turn start.
+
+### Tools
+
+- `send_agent_message{to, message}` — queues a direct message. The
+  recipient must exist in the roster; unknown recipients return an error
+  listing valid targets. The sender receives a receipt
+  `{id, state: "queued"}`. Bodies are capped at 32KB.
+- `inbox{}` — drains your unread messages and marks them read.
+
+### Delivery model
+
+Messages live in the `agent_messages` table (state machine:
+`queued → delivered → read`). At each turn start, an employee's loop
+drains its queued messages and injects them into the system prompt as an
+anchored block:
+
+```
+[message from orchestrator] (id: msg-<hex>)
+<body>
+```
+
+Draining transitions messages to `delivered`, so each message is injected
+exactly once — a second turn never re-injects it. A bus event
+`agent.message.delivered` is published when messages are drained via the
+inbox tool.
+
+### Roster reachability
+
+The `platform_agents` output includes `reachable` (heartbeat seen within
+the last 10 minutes) and `last_seen` for employees. In-process
+specialists are always addressable and omit these fields.
+
+Cross-daemon messaging is out of scope (cluster-level transport later).
 
 ---
 
