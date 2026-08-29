@@ -610,6 +610,9 @@ func (e *Engine) lookupBaseRule(action, toolName string) (RiskLevel, bool) {
 	if cuRisk, ok := pkgsecurity.ComputerUseRule(cuName); ok {
 		return RiskLevel(cuRisk), false
 	}
+	if acpRisk, ok := pkgsecurity.ACPAgentRule(cuName, nil); ok {
+		return RiskLevel(acpRisk), false
+	}
 
 	// Built-in browser automation tools (browser_navigate, browser_click,
 	// ...): observation actions LOW, input injection (navigate/click/type)

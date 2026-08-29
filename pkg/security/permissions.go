@@ -409,6 +409,9 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 	if risk, ok := ComputerUseRule(action); ok {
 		return pc.checkRiskResult(details, risk)
 	}
+	if risk, ok := ACPAgentRule(action, details); ok {
+		return pc.checkRiskResult(details, risk)
+	}
 
 	rule, ok := BuiltinRules[action]
 	if !ok {
