@@ -3663,6 +3663,25 @@ func (c *Components) Start(ctx context.Context) error {
 						emp.ID, &emp.Constitution, goalStore,
 						c.Logger.With("component", "goal-loop", "employee_id", emp.ID),
 					)
+					if c.Config != nil {
+						loop.SetGateEnabled(c.Config.Employees.Defaults.Gate.Enabled)
+						if c.Config.Employees.Defaults.Gate.Command != "" {
+							loop.SetDefaultGate(&employee.GateConfig{
+								Command:           c.Config.Employees.Defaults.Gate.Command,
+								TimeoutSeconds:    c.Config.Employees.Defaults.Gate.TimeoutSeconds,
+								SkipWhenUnchanged: c.Config.Employees.Defaults.Gate.SkipWhenUnchanged,
+							})
+						}
+						workdir := c.Config.Daemon.DataDir
+						if c.ProjectManager != nil {
+							if proj, err := c.ProjectManager.GetActive(registerCtx); err == nil && proj != nil && proj.LocalPath != "" {
+								workdir = proj.LocalPath
+							}
+						}
+						if workdir != "" {
+							loop = loop.WithGateWorkdir(workdir)
+						}
+					}
 					if executor != nil {
 						loop = loop.WithExecutor(executor)
 					}

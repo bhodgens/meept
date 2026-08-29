@@ -119,3 +119,35 @@ func TestReflect_GateSkip_StillCannotComplete(t *testing.T) {
 		t.Error("skipped-but-unresolved gate must not allow completion")
 	}
 }
+
+func TestGateConfigForGoal_KillSwitch(t *testing.T) {
+	loop, _ := gateLoopHarness(t, "ok\n", 0, false)
+	if cfg := loop.gateConfigForGoal(context.Background()); cfg == nil || cfg.Command == "" {
+		t.Fatal("want loop-level gate while enabled")
+	}
+	loop.SetGateEnabled(false)
+	if cfg := loop.gateConfigForGoal(context.Background()); cfg != nil {
+		t.Errorf("kill switch off still returned %+v", cfg)
+	}
+}
+
+func TestGateConfigForGoal_PerGoalWins(t *testing.T) {
+	store := testGoalStore(t)
+	ctx := context.Background()
+	g := &Goal{
+		EmployeeID: "bot-test-1",
+		Title:      "ci",
+		Mandate:    "green",
+		Source:     SourceUser,
+		Gate:       &GateConfig{Command: "make test"},
+	}
+	if err := store.Create(ctx, g); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	loop := NewGoalLoop("bot-test-1", testTier2Constitution(), store, nil)
+	loop.SetDefaultGate(&GateConfig{Command: "make check"})
+	cfg := loop.gateConfigForGoal(ctx)
+	if cfg == nil || cfg.Command != "make test" {
+		t.Fatalf("per-goal command = %v, want make test", cfg)
+	}
+}

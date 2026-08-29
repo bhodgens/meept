@@ -194,6 +194,10 @@ type Goal struct {
 	// RetiredAt is when the goal was soft-deleted. Zero for active goals.
 	RetiredAt time.Time `json:"retired_at,omitempty"`
 
+	// Gate is the optional completion check for this goal. Nil or empty
+	// Command means no per-goal gate (the employee default or none).
+	Gate *GateConfig `json:"gate,omitempty"`
+
 	// mu guards the in-memory Goal during concurrent reads/writes of the
 	// slice and time fields. Store operations snapshot under this lock and
 	// perform SQL I/O outside the critical section (per CLAUDE.md mutex
@@ -483,9 +487,9 @@ func NewGoalID() string { return id.Generate(GoalIDPrefix) }
 // underlying *sql.DB is goroutine-safe; the store itself holds no mutable
 // state.
 type GoalStore struct {
-	db   *sql.DB
-	log  *slog.Logger
-	mu   sync.Mutex // serializes migrate-on-open and Close
+	db    *sql.DB
+	log   *slog.Logger
+	mu    sync.Mutex // serializes migrate-on-open and Close
 	ready bool
 }
 
@@ -546,6 +550,11 @@ func (s *GoalStore) migrate() error {
 	if _, err := s.db.Exec(`ALTER TABLE employee_goals ADD COLUMN max_plan_history INTEGER DEFAULT 0`); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("migrate max_plan_history: %w", err)
+		}
+	}
+	if _, err := s.db.Exec(`ALTER TABLE employee_goals ADD COLUMN gate TEXT`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate gate: %w", err)
 		}
 	}
 	return nil
@@ -626,13 +635,13 @@ func (s *GoalStore) Create(ctx context.Context, g *Goal) error {
 INSERT INTO employee_goals
     (id, employee_id, title, mandate, state, source, trigger_ref,
      health, last_assessed, active_plan_id, plan_history,
-     created_at, retired_at, recent_findings, active_plan_ids, max_plan_history)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		g.ID, g.EmployeeID, g.Title, g.Mandate,
 		g.State.String(), string(g.Source), triggerRef,
 		g.Health.String(), lastAssessed, activePlan, history,
 		g.CreatedAt.Format(time.RFC3339), retiredAt, recentFindings,
-		activePlanIDsJSON, maxPlanHistory,
+		activePlanIDsJSON, maxPlanHistory, marshalGate(g.Gate),
 	)
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)
@@ -712,13 +721,14 @@ UPDATE employee_goals SET
     retired_at = ?,
     recent_findings = ?,
     active_plan_ids = ?,
-    max_plan_history = ?
+    max_plan_history = ?,
+    gate = ?
 WHERE id = ?`,
 		g.Title, g.Mandate, g.State.String(), string(g.Source),
 		goalNullableString(g.TriggerRef), g.Health.String(),
 		goalNullableTime(lastAssessed), goalNullableString(activePlanID),
 		historyJSON, goalNullableTime(retiredAt), findingsJSON,
-		activePlanIDsJSON, g.MaxPlanHistory, g.ID,
+		activePlanIDsJSON, g.MaxPlanHistory, marshalGate(g.Gate), g.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
@@ -771,25 +781,25 @@ const (
 	selectByID = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate
 FROM employee_goals WHERE id = ?`
 
 	selectByEmployee = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate
 FROM employee_goals WHERE employee_id = ? ORDER BY created_at`
 
 	selectActiveAll = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate
 FROM employee_goals WHERE state != 'retired' ORDER BY created_at`
 
 	selectActiveByEmployee = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate
 FROM employee_goals WHERE employee_id = ? AND state != 'retired'
 ORDER BY created_at`
 
@@ -799,23 +809,24 @@ UPDATE employee_goals SET state = ?, retired_at = ? WHERE id = ?`
 
 func scanGoal(sc rowScanner) (*Goal, error) {
 	var (
-		g                          Goal
-		stateStr, sourceStr        string
-		healthStr                  string
-		triggerRef, activePlanID   sql.NullString
-		lastAssessed, retiredAt    sql.NullString
-		planHistoryJSON            sql.NullString
-		recentFindingsJSON         sql.NullString
-		activePlanIDsJSON          sql.NullString
-		maxPlanHistory             sql.NullInt64
-		createdAt                  string
+		g                        Goal
+		stateStr, sourceStr      string
+		healthStr                string
+		triggerRef, activePlanID sql.NullString
+		lastAssessed, retiredAt  sql.NullString
+		planHistoryJSON          sql.NullString
+		recentFindingsJSON       sql.NullString
+		activePlanIDsJSON        sql.NullString
+		maxPlanHistory           sql.NullInt64
+		gateJSON                 sql.NullString
+		createdAt                string
 	)
 	if err := sc.Scan(
 		&g.ID, &g.EmployeeID, &g.Title, &g.Mandate,
 		&stateStr, &sourceStr, &triggerRef,
 		&healthStr, &lastAssessed, &activePlanID, &planHistoryJSON,
 		&createdAt, &retiredAt, &recentFindingsJSON,
-		&activePlanIDsJSON, &maxPlanHistory,
+		&activePlanIDsJSON, &maxPlanHistory, &gateJSON,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrGoalNotFound
@@ -878,6 +889,7 @@ func scanGoal(sc rowScanner) (*Goal, error) {
 	if maxPlanHistory.Valid {
 		g.MaxPlanHistory = int(maxPlanHistory.Int64)
 	}
+	g.Gate = unmarshalGate(gateJSON)
 
 	t, err := time.Parse(time.RFC3339, createdAt)
 	if err != nil {
@@ -912,6 +924,31 @@ func collectRows(ctx context.Context, rows *sql.Rows) ([]*Goal, error) {
 // marshalHistory serializes a plan-history slice to the storage form (a JSON
 // array). Empty slices are stored as the literal "[]" so the column is never
 // NULL — simplifies queries and keeps the schema NOT NULL-friendly.
+func marshalGate(g *GateConfig) any {
+	if g == nil || g.Command == "" {
+		return nil
+	}
+	b, err := json.Marshal(g)
+	if err != nil {
+		return nil
+	}
+	return string(b)
+}
+
+func unmarshalGate(s sql.NullString) *GateConfig {
+	if !s.Valid || s.String == "" {
+		return nil
+	}
+	var g GateConfig
+	if err := json.Unmarshal([]byte(s.String), &g); err != nil {
+		return nil
+	}
+	if g.Command == "" {
+		return nil
+	}
+	return &g
+}
+
 func marshalHistory(history []string) (string, error) {
 	if history == nil {
 		history = []string{}

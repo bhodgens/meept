@@ -830,4 +830,52 @@ func jsonUnmarshal(s string, v any) error {
 
 // sql.ErrNoRows guard: testStore relies on it being covered by the database/sql
 // import.
+
+func TestGoalStore_GateRoundTrip(t *testing.T) {
+	store := testGoalStore(t)
+	ctx := context.Background()
+	g := &Goal{
+		EmployeeID: "bot-test-1",
+		Title:      "keep ci green",
+		Mandate:    "tests pass",
+		Source:     SourceUser,
+		Gate: &GateConfig{
+			Command:           "go test ./...",
+			TimeoutSeconds:    120,
+			SkipWhenUnchanged: true,
+		},
+	}
+	if err := store.Create(ctx, g); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := store.Get(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Gate == nil {
+		t.Fatal("Gate is nil after round-trip")
+	}
+	if got.Gate.Command != "go test ./..." {
+		t.Errorf("Gate.Command = %q", got.Gate.Command)
+	}
+	if got.Gate.TimeoutSeconds != 120 {
+		t.Errorf("Gate.TimeoutSeconds = %d", got.Gate.TimeoutSeconds)
+	}
+	if !got.Gate.SkipWhenUnchanged {
+		t.Error("SkipWhenUnchanged = false, want true")
+	}
+
+	g.Gate = nil
+	if err := store.Update(ctx, g); err != nil {
+		t.Fatalf("Update clear: %v", err)
+	}
+	got, err = store.Get(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("Get after clear: %v", err)
+	}
+	if got.Gate != nil {
+		t.Errorf("Gate after clear = %+v, want nil", got.Gate)
+	}
+}
+
 var _ = sql.ErrNoRows

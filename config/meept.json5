@@ -917,6 +917,14 @@
     //   "on_never_violation": true,
     //   "require_operator_resume": true,
     // },
+    // "defaults": {
+    //   "gate": {
+    //     "enabled": false,              // kill switch; false = no completion gates
+    //     "command": "go test ./...",
+    //     "timeout_seconds": 300,
+    //     "skip_when_unchanged": true,
+    //   },
+    // },
   },
   // Turbo Thread E — immediate self-reflection (per-turn lesson extraction)
   "reflection_collector": {

@@ -270,10 +270,12 @@ type GoalLoop struct {
 	// the cross-round skip-on-unchanged memory.
 	gateBackend runtime.ExecutionBackend
 	gateWorkdir string
-	// gateCfg is the resolved quality-gate config (per-goal Gate merged
-	// over [employee.defaults.gate] by the Manager). Nil/empty Command =
-	// legacy, ungated behaviour.
-	gateCfg *GateConfig
+	// gateCfg is the loop-level quality-gate config (SetGateConfig).
+	// Nil/empty Command = no loop-level gate. Per-goal Goal.Gate wins
+	// when both are set. defaultGate is employees.defaults.gate.
+	gateCfg     *GateConfig
+	defaultGate *GateConfig
+	gateEnabled bool // global kill switch; default true so tests keep working
 
 	// Mutable state (guarded by mu).
 	mu                   sync.Mutex
@@ -380,6 +382,7 @@ func NewGoalLoop(employeeID string, c *Constitution, store *GoalStore, logger *s
 		logger:                          logger.With("component", "goal-loop", "employee_id", employeeID),
 		maxConsecutiveFailures:          DefaultMaxConsecutiveFailures,
 		consecutiveSuccessesForRecovery: DefaultConsecutiveSuccessesForRecovery,
+		gateEnabled:                     true,
 	}
 }
 
@@ -860,18 +863,28 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 	return health, nil
 }
 
-// gateConfigForGoal resolves the effective quality-gate config for the
-// active goal. Returns nil when no goal is active or no gate is configured.
-// The Goal struct carries a per-goal Gate; until goal definitions expose it
-// in storage, the loop-level config (set via SetGateConfig) is authoritative.
+// gateConfigForGoal resolves the effective quality-gate config.
+// Order: global kill switch off → nil; else per-goal Gate from storage;
+// else loop-level SetGateConfig; else employees.defaults.gate.
 func (l *GoalLoop) gateConfigForGoal(ctx context.Context) *GateConfig {
 	l.mu.Lock()
-	cfg := l.gateCfg
+	enabled := l.gateEnabled
+	loopCfg := l.gateCfg
+	def := l.defaultGate
 	l.mu.Unlock()
-	if cfg == nil || cfg.Command == "" {
+	if !enabled {
 		return nil
 	}
-	return cfg
+	if g, err := l.lookupActiveGoal(ctx); err == nil && g != nil && g.Gate != nil && g.Gate.Command != "" {
+		return g.Gate
+	}
+	if loopCfg != nil && loopCfg.Command != "" {
+		return loopCfg
+	}
+	if def != nil && def.Command != "" {
+		return def
+	}
+	return nil
 }
 
 // runCompletionGate executes the configured quality gate via RunGate,
@@ -917,6 +930,28 @@ func (l *GoalLoop) SetGateConfig(cfg *GateConfig) {
 	}
 	c := *cfg
 	l.gateCfg = &c
+}
+
+// SetGateEnabled is the global kill switch. When false, no completion gate
+// runs even if a command is set on the goal or as a default. NewGoalLoop
+// defaults to true so unit tests that call SetGateConfig keep working.
+func (l *GoalLoop) SetGateEnabled(on bool) {
+	l.mu.Lock()
+	l.gateEnabled = on
+	l.mu.Unlock()
+}
+
+// SetDefaultGate installs employees.defaults.gate. Per-goal Gate and
+// SetGateConfig take precedence when they have a command.
+func (l *GoalLoop) SetDefaultGate(cfg *GateConfig) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if cfg == nil || cfg.Command == "" {
+		l.defaultGate = nil
+		return
+	}
+	c := *cfg
+	l.defaultGate = &c
 }
 
 // reflectViaLLM asks the reflector LLM to assess the execution outcome.

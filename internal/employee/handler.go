@@ -113,9 +113,10 @@ func (h *RPCHandler) Handlers() map[string]func(context.Context, json.RawMessage
 		"agents.amend": h.handleAmend,
 
 		// Goals (spec lines 537-538)
-		"agents.goals.list":    h.handleGoalsList,
-		"agents.goals.get":     h.handleGoalsGet,
-		"agents.goals.approve": h.handleGoalsApprove,
+		"agents.goals.list":     h.handleGoalsList,
+		"agents.goals.get":      h.handleGoalsGet,
+		"agents.goals.set_gate": h.handleGoalsSetGate,
+		"agents.goals.approve":  h.handleGoalsApprove,
 		"agents.goals.reject":  h.handleGoalsReject,
 
 		// Audit (spec line 539)
@@ -457,6 +458,27 @@ func (h *RPCHandler) handleGoalsGet(ctx context.Context, raw json.RawMessage) (a
 		return nil, fmt.Errorf("id is required")
 	}
 	return h.manager.GetGoal(ctx, req.ID)
+}
+
+func (h *RPCHandler) handleGoalsSetGate(ctx context.Context, raw json.RawMessage) (any, error) {
+	if h.manager == nil {
+		return nil, errNotConfigured
+	}
+	var req struct {
+		ID   string      `json:"id"`
+		Gate *GateConfig `json:"gate"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, fmt.Errorf("invalid request: %w", err)
+	}
+	if req.ID == "" {
+		return nil, fmt.Errorf("id is required")
+	}
+	g, err := h.manager.SetGoalGate(ctx, req.ID, req.Gate)
+	if err != nil {
+		return nil, fmt.Errorf("set gate: %w", err)
+	}
+	return g, nil
 }
 
 func (h *RPCHandler) handleGoalsApprove(ctx context.Context, raw json.RawMessage) (any, error) {

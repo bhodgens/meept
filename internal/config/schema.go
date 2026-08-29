@@ -241,6 +241,12 @@ type EmployeesDefaultsConfig struct {
 // import from config → employee; the Manager translates between the two
 // shapes. See docs/workflows/employees.md ("Quality gate").
 type EmployeesGateConfig struct {
+	// Enabled is the global kill switch for quality gates. When false
+	// (the default), no completion gate runs even if a command is set
+	// on a goal or in this defaults block. When true, a non-empty
+	// Command on the goal (or this default) is executed before a goal
+	// may be marked complete.
+	Enabled bool `json:"enabled" toml:"enabled"`
 	// Command is the shell command run in the employee's project directory.
 	// Exit 0 passes; anything else fails. Empty = no gate (legacy).
 	Command string `json:"command" toml:"command"`

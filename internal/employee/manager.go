@@ -1772,6 +1772,26 @@ func (m *Manager) GetGoal(ctx context.Context, id string) (*Goal, error) {
 	return m.goalStore.Get(ctx, id)
 }
 
+// SetGoalGate persists the completion gate on a goal. A nil or empty-command
+// gate clears it (legacy model-judgment completion).
+func (m *Manager) SetGoalGate(ctx context.Context, goalID string, gate *GateConfig) (*Goal, error) {
+	if m.goalStore == nil {
+		return nil, ErrNotImplemented
+	}
+	g, err := m.goalStore.Get(ctx, goalID)
+	if err != nil {
+		return nil, err
+	}
+	if gate != nil && gate.Command == "" {
+		gate = nil
+	}
+	g.Gate = gate
+	if err := m.goalStore.Update(ctx, g); err != nil {
+		return nil, fmt.Errorf("set goal gate: %w", err)
+	}
+	return g, nil
+}
+
 // ApprovePlan signs off on a pending plan for a goal, allowing the GoalLoop
 // to proceed to the EXECUTE phase. The approval is routed through the
 // injected PlanDisposer (backed by internal/plan.PlanManager in

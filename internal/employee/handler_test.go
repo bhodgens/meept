@@ -77,7 +77,7 @@ func TestRPCHandler_Handlers_Registration(t *testing.T) {
 		// amend (spec line 536)
 		"agents.amend",
 		// goals (spec lines 537-538)
-		"agents.goals.list", "agents.goals.get",
+		"agents.goals.list", "agents.goals.get", "agents.goals.set_gate",
 		"agents.goals.approve", "agents.goals.reject",
 		// audit (spec line 539)
 		"agents.audit.list", "agents.audit.resolve",

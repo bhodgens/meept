@@ -66,6 +66,7 @@ func newAgentsCmd() *cobra.Command {
 	cmd.AddCommand(newAgentsMigrateCmd())
 	cmd.AddCommand(newAgentsGoalsCmd())
 	cmd.AddCommand(newAgentsGoalCmd())
+	cmd.AddCommand(newAgentsSetGateCmd())
 	cmd.AddCommand(newAgentsAuditCmd())
 
 	return cmd
@@ -304,25 +305,6 @@ func newAgentsShowCmd() *cobra.Command {
 				fmt.Printf("  model:         %s\n", model)
 				fmt.Printf("  auto_trigger:  %v\n", verification["auto_trigger"])
 				fmt.Printf("  max_fix_loops: %v\n", verification["max_fix_loops"])
-			}
-
-			// Quality gate summary (leaf 08). Lowercase status per spec.
-			if gate, ok := resultMap["gate"].(map[string]any); ok {
-				gateCmd := getStringOr(gate, "command", "")
-				if gateCmd != "" {
-					timeout := getStringOr(gate, "timeout_seconds", "300")
-					skip := "true"
-					if v, ok := gate["skip_when_unchanged"].(bool); ok {
-						skip = fmt.Sprintf("%v", v)
-					}
-					fmt.Println("\ngate:")
-					fmt.Printf("  command:             %s\n", gateCmd)
-					fmt.Printf("  timeout_seconds:     %s\n", timeout)
-					fmt.Printf("  skip_when_unchanged: %s\n", skip)
-					fmt.Printf("  last result:         %s\n", getStringOr(gate, "last_result", "unknown"))
-				} else {
-					fmt.Printf("\ngate: none (model-judgment completion)\n")
-				}
 			}
 
 			// Constitution summary.
@@ -997,7 +979,7 @@ func newAgentsGoalsCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tEMPLOYEE\tTITLE\tHEALTH\tACTIVE_PLAN\tLAST_ASSESSED")
+			fmt.Fprintln(w, "ID	EMPLOYEE	TITLE	HEALTH	GATE	ACTIVE_PLAN	LAST_ASSESSED")
 
 			for _, g := range goalsList {
 				goal, ok := g.(map[string]any)
@@ -1006,18 +988,33 @@ func newAgentsGoalsCmd() *cobra.Command {
 				}
 
 				gid := truncateID(getStringOr(goal, "id", ""))
-				emp := getStringOr(goal, "employee", "")
+				emp := getStringOr(goal, "employee_id", "")
+				if emp == "" {
+					emp = getStringOr(goal, "employee", "")
+				}
 				title := getStringOr(goal, "title", "")
 				health := getStringOr(goal, "health", "")
-				activePlan := getStringOr(goal, "active_plan", "")
+				activePlan := getStringOr(goal, "active_plan_id", "")
+				if activePlan == "" {
+					activePlan = getStringOr(goal, "active_plan", "")
+				}
 				lastAssessed := getStringOr(goal, "last_assessed", "")
+				gateLabel := "-"
+				if gm, ok := goal["gate"].(map[string]any); ok {
+					if cmd := getStringOr(gm, "command", ""); cmd != "" {
+						gateLabel = cmd
+						if len(gateLabel) > 28 {
+							gateLabel = gateLabel[:25] + "..."
+						}
+					}
+				}
 
 				if len(title) > 40 {
 					title = title[:37] + "..."
 				}
 
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-					gid, emp, title, healthColor(health), activePlan, lastAssessed)
+				fmt.Fprintf(w, "%s	%s	%s	%s	%s	%s	%s\n",
+					gid, emp, title, healthColor(health), gateLabel, activePlan, lastAssessed)
 			}
 
 			w.Flush()
@@ -1028,6 +1025,71 @@ func newAgentsGoalsCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&employeeID, "employee", "", "filter by employee ID")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "output as JSON")
+	return cmd
+}
+
+func newAgentsSetGateCmd() *cobra.Command {
+	var command string
+	var timeout int
+	var skipUnchanged bool
+	var clear bool
+
+	cmd := &cobra.Command{
+		Use:   "set-gate <goal-id>",
+		Short: "set or clear a goal quality gate",
+		Long: `Set the completion gate for a goal. The gate command must exit 0
+before the goal may be marked complete. Clear with --clear.
+
+The global switch employees.defaults.gate.enabled in meept.json5 must
+be true or no gate runs.
+
+Examples:
+  meept agents set-gate goal_abc --command="go test ./..."
+  meept agents set-gate goal_abc --clear`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			params := map[string]any{"id": args[0]}
+			if clear {
+				params["gate"] = nil
+			} else {
+				if command == "" {
+					return fmt.Errorf("command is required (or pass --clear)")
+				}
+				params["gate"] = map[string]any{
+					"command":             command,
+					"timeout_seconds":     timeout,
+					"skip_when_unchanged": skipUnchanged,
+				}
+			}
+			rawResult, err := client.Call("agents.goals.set_gate", params)
+			if err != nil {
+				return fmt.Errorf("failed to set gate: %w", err)
+			}
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+			if errMsg := rpcError(resultMap); errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+			if clear {
+				fmt.Println("gate cleared")
+				return nil
+			}
+			fmt.Printf("gate set: %s\n", command)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&command, "command", "", "shell command that must exit 0")
+	cmd.Flags().IntVar(&timeout, "timeout", 300, "timeout seconds")
+	cmd.Flags().BoolVar(&skipUnchanged, "skip-when-unchanged", true, "skip re-run if workspace unchanged after a failure")
+	cmd.Flags().BoolVar(&clear, "clear", false, "remove the per-goal gate")
 	return cmd
 }
 

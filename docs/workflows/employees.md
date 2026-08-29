@@ -136,7 +136,12 @@ Or set an employee-wide default in `meept.json5` under
 {
   employees: {
     defaults: {
-      gate: { command: "make check", timeout_seconds: 120, skip_when_unchanged: true },
+      gate: {
+        enabled: true,                 // kill switch; false = no gates run
+        command: "make check",
+        timeout_seconds: 120,
+        skip_when_unchanged: true,
+      },
     },
   },
 }

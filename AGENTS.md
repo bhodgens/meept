@@ -40,6 +40,7 @@ agent-tui ./bin/meept chat      # TUI testing
 ./bin/meept agents create <def.json5>   # Register new employee
 ./bin/meept agents pause <id> / resume <id>
 ./bin/meept agents goals [--employee=<id>]
+./bin/meept agents set-gate <goal-id> --command="go test ./..."
 ./bin/meept agents audit <id> [--since=6h]
 
 # Plans
