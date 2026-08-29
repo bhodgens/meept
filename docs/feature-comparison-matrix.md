@@ -33,6 +33,7 @@
 | Constitution-bound employees | X | - | - | - | - | - | - | - | - |
 | Autonomy tiers (reactive/propose/autonomous) | X | - | - | - | ~ (bounded auto) | - | - | - | - |
 | Goal loop with enforcement | X | - | X (persistent goals) | - | X (/goal + autonomous) | - | - | - | - |
+| Quality-gated goal completion | X | - | - | - | - | - | - | - | - |
 | Plan approve/reject lifecycle | X | ~ (approval gate) | - | - | - | - | - | - | ~ |
 | Collaboration engine (pair/diff) | X | - | - | - | - | - | - | - | - |
 
@@ -177,7 +178,7 @@
 |----------|----------------|
 | **Multi-agent orchestration** | Only framework with 18 specialists + 5 reviewers, intent classification, DAG planning, async handoff, and collaboration engine (pair programming, differential A/B) |
 | **Memory depth** | 6-tier system: episodic (FTS5), task, knowledge graph (PageRank), semantic (vector HNSW), distributed (memvid), epistemic (claims/trust) |
-| **AI Employees** | Only framework with constitution-bound autonomous agents, three autonomy tiers, and enforcement engine (pre-exec/post-turn/periodic audits) |
+| **AI Employees** | Only framework with constitution-bound autonomous agents, three autonomy tiers, enforcement engine, and optional quality-gated goal completion |
 | **Evidence pipeline** | Only framework with claim-evidence matching, validation gates, and needs_info routing for human review |
 | **Defense-in-depth security** | Only framework combining taint lattice, input sanitizer, Tirith shell scan, adversarial boundary markers, and fail-closed policy |
 | **Self-improvement loops** | Only framework with closed-loop skill evolution (usage tracking + LLM-judge verifier + versioning), shadow LoRA/DPO training with eval gate, reflection collector, and Q-Agent meta-optimization |
@@ -248,4 +249,4 @@ Category Dominance (X count across 28 features)
 
 ---
 
-*Matrix generated 2026-08-28 from `docs/features.md`, `docs/research/2026-08-24-agent-parity-audit.md`, and direct repo inspection at `/tmp/agent-compare/`. MCP catalog count updated 2026-08-28 from `config/mcp_servers.json5` (20 servers, 6 enabled).*
+*Matrix generated 2026-08-28 from `docs/features.md`, `docs/research/2026-08-24-agent-parity-audit.md`, and direct repo inspection. MCP catalog count from `config/mcp_servers.json5` (20 servers, 6 enabled). Updated 2026-08-28 for quality-gated goals, standing instructions, reasoning settings, instruction RPC, and employee bot-store wiring.*

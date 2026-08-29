@@ -1440,6 +1440,12 @@ Meept supports persistent autonomous bots that execute on schedules and respond 
 
 Bots are defined as JSON documents with prompt, triggers, tools, and constraints. The legacy `meept bots` CLI has been removed — the unified `meept agents` namespace manages AI employees (constitution-bound autonomous agents) instead; `meept agents migrate` converts legacy bot definitions. See [AI Employees](workflows/employees.md) for the full spec and [Persistent Bot Framework](workflows/bots.md) for the original framework documentation.
 
+**Quality-gated completion:** an employee goal may only mark success after a shell check you set (`go test ./...`, `make check`) exits 0. The global switch is `employees.defaults.gate.enabled` (default false). Per-goal commands win over the default. Surfaces: `meept agents set-gate`, `PUT /api/v1/agents/{id}/goals/{gid}/gate`, TUI, Flutter agents pane, menubar. See [Quality gate](workflows/employees.md#quality-gate-completion-gating).
+
+**Standing instructions:** `meept instructions add/list/show/delete/preview` persist YAML automation rules and inject them into the agent prompt. The store scans disk on list and before each prompt.
+
+**Reasoning effort:** per-agent and session overrides plus a menubar **reasoning** settings tab (`/api/v1/reasoning/*`).
+
 ---
 
 ### Epistemic Memory Platform
@@ -1486,6 +1492,7 @@ Three media specialists sit beside that roster: `image-gen` and `video-gen` each
 | **Token Usage Trickle-Up** | Real-time token tracking aggregated from steps to tasks, displayed in chat and sidebar |
 | **Progress Event Reliability** | All progress updates visible in chat with no rate limiting; immediate error escalation |
 | **Taint Tracking** | Lattice-based information flow tracking for security |
+| **Quality-gated goals** | Shell completion check before an employee may mark a goal done |
 | **Native Anthropic Driver** | Extended thinking mode with progress reporting |
 | **Web Search (No API Key)** | DuckDuckGo integration without API requirements |
 | **Code Intelligence (AST+LSP)** | Tree-sitter parsing, AST-based code compression, and LSP client tools |
@@ -1674,7 +1681,11 @@ retention = 30
 ./bin/meept agents create <def.json5> # Validate + register employee
 ./bin/meept agents pause <id>      # Operator pause
 ./bin/meept agents resume <id>     # Operator resume
+./bin/meept agents goals           # List goals (includes GATE column)
+./bin/meept agents set-gate <id> --command="go test ./..."
 ./bin/meept agents migrate         # Migrate legacy bots
+./bin/meept instructions list      # Standing automation rules
+./bin/meept doctor                 # Daemon health block
 
 # Cluster
 ./bin/meept cluster status         # Show cluster status
