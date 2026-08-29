@@ -2,7 +2,7 @@
 
 ## Overview
 
-Meept is a Go-based autonomous agent daemon with multi-agent orchestration, persistent hybrid memory, LLM integration with failover, production-grade execution controls, and extensibility through skills and tools. It operates as a background process with multiple frontends (CLI/TUI, Flutter GUI desktop+web, Telegram, HTTP/WebSocket API, macOS MenuBar, MCP server).
+Meept is a Go-based autonomous agent daemon with multi-agent orchestration, persistent hybrid memory, LLM integration with failover, production-grade execution controls, and extensibility through skills and tools. It operates as a background process with multiple frontends (CLI/TUI, Flutter GUI desktop+web, Telegram, HTTP/WebSocket API, macOS MenuBar, MCP server). It can also drive other coding agents as full peers over ACP (Agent Client Protocol), disabled by default.
 
 ### Architecture Summary
 
@@ -1020,12 +1020,13 @@ meept chat "Use GLM models for this"
 
 ### Tools
 
-Meept provides built-in tools and supports MCP (Model Context Protocol) for external tools.
+Meept provides built-in tools and supports MCP (Model Context Protocol) for external tools. It can also drive external coding agents (Codex, OpenCode, and other ACP agents) through the `acp_agent` tool. That path is opt-in (`[acp] enabled`, default false).
 
 #### Built-in Tools
 - File operations: `file_read`, `file_write`, `list_directory`
 - Memory: `memory_store`, `memory_search`, `memory_get_context`
 - Platform: `platform_agents`, `platform_status`, `platform_tools`, `delegate_task`, `request_handoff`
+- ACP: `acp_agent` (launch/send/read/stop against cataloged ACP agents; `[acp]` disabled by default)
 - Git: `git_commit`, `git_diff`, `git_status`
 
 #### Knowledge Graph Tools
@@ -1510,6 +1511,7 @@ Three media specialists sit beside that roster: `image-gen` and `video-gen` each
 | **Auto-Lint & Reflection** | LLM-driven feedback loop: lint/test → fix attempts → re-validate, with tree-sitter and per-language linters |
 | **Distributed Cluster** | P2P mesh networking with gossip protocol, distributed task queue, WireGuard sync, and cluster CLI commands |
 | **MCP Server** | Expose Meept as an MCP server for external agent platforms with tool discovery and execution |
+| **ACP Client** | Drive external ACP agents (Codex via codex-acp, OpenCode, others) as full agents over JSON-RPC stdio. Catalog `~/.meept/acp_agents.json5`. `[acp] enabled` defaults false. `permission_mode` is `permissive` (default) or `deny`. Status: `GET /api/v1/acp/agents`. See [Acp](workflows/acp.md). |
 | **Meept-Lite TUI** | Minimalistic alternative TUI using termbox-go with shared library (`sharedclient`) for code reuse |
 | **Desktop Notifications** | macOS native notifications via daemon event emitter, WebSocket, and UNUserNotificationCenter |
 | **Analytics System** | Agent performance analytics, response quality analysis, benchmark framework, and CLI analytics commands. The `model_performance` aggregation table tracks per-model metrics (requests, errors, latency, tokens) with period-based aggregation. The `error_records` table tracks individual errors with `limit_type`, `retry_attempts`, and `final_outcome` for retry analysis. |
@@ -1528,6 +1530,7 @@ Three media specialists sit beside that roster: `image-gen` and `video-gen` each
 | **Git Worktrees** | Isolated task execution environments |
 | **macOS MenuBar** | Native SwiftUI monitoring and control app with desktop notifications |
 | **MCP Server** | Expose Meept as MCP server for external agent platforms |
+| **ACP Client** | Drive Codex/OpenCode/other ACP agents as peers (`acp_agent`; `[acp]` off by default) |
 | **Distributed Cluster** | P2P mesh networking with gossip protocol for multi-node coordination |
 | **Flutter GUI** | Cross-platform GUI client (desktop + web) with chat, sessions, tasks, agents, metrics panels, live rendering prefs and theme picker |
 

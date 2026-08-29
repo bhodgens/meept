@@ -1,6 +1,6 @@
 # Meept Feature Parity Matrix
 
-**Date:** 2026-08-28
+**Date:** 2026-08-29
 **Source:** Meept `docs/features.md`, parity audit `docs/research/2026-08-24-agent-parity-audit.md`, direct repo inspection at commit time.
 **Competitors analyzed:** FrontierAgent, duckagent, atomic-agent, prime-agent, Hermes Agent, OpenCode, oh-my-pi, Claude Code/OpenClaw.
 
@@ -58,6 +58,7 @@
 | Tool count | 40+ | ~15 | 18 | ~30 | ~15 | 86 | ~20 | ~10 | ~20 |
 | MCP client | X (20 preconfigured, 6 enabled) | - | X | X | X | X | Limited | - | X |
 | MCP server mode | X | - | - | - | - | - | - | - | - |
+| ACP client (drive external agents) | X (opt-in, default off) | - | - | - | - | ~ (ACP server for editors) | ~ (`opencode acp`) | - | - |
 | Parallel tool execution | X (semaphore) | X | X | X (resource-class) | X | X | X | X | X |
 | Tool streaming progress | X | - | - | - | - | - | - | - | - |
 | Browser automation | - | - | - | X (Playwright) | - | ~ | - | - | ~ |
@@ -185,6 +186,7 @@
 | **Always-on daemon** | Only framework with resident daemon + five frontends (TUI/Flutter/MenuBar/Telegram/HTTP+WS) + voice (STT/TTS) |
 | **Cluster mesh** | Only framework with P2P gossip networking, WireGuard sync, and distributed task queue |
 | **MCP server mode** | Only framework that can be consumed BY other agents as an MCP server |
+| **ACP client** | Drive Codex/OpenCode/other Agent Client Protocol agents as full peers (`acp_agent`); `[acp] enabled` defaults false |
 
 ### Where Competitors Lead
 
@@ -249,4 +251,4 @@ Category Dominance (X count across 28 features)
 
 ---
 
-*Matrix generated 2026-08-28 from `docs/features.md`, `docs/research/2026-08-24-agent-parity-audit.md`, and direct repo inspection. MCP catalog count from `config/mcp_servers.json5` (20 servers, 6 enabled). Updated 2026-08-28 for quality-gated goals, standing instructions, reasoning settings, instruction RPC, and employee bot-store wiring.*
+*Matrix generated 2026-08-29 from `docs/features.md`, `docs/research/2026-08-24-agent-parity-audit.md`, and direct repo inspection. MCP catalog count from `config/mcp_servers.json5`. Updated 2026-08-29 for ACP client (`acp_agent`, `[acp]` disabled by default).*
