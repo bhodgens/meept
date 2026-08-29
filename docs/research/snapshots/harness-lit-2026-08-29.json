@@ -1,0 +1,140 @@
+{
+  "date": "2026-08-29",
+  "queries": {
+    "agent harness compaction context window": [
+      {
+        "id": "http://arxiv.org/abs/2603.03329v1",
+        "title": "AutoHarness: improving LLM agents by automatically synthesizing a code harness",
+        "url": "http://arxiv.org/abs/2603.03329v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2605.18747v1",
+        "title": "Code as Agent Harness",
+        "url": "http://arxiv.org/abs/2605.18747v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2606.09498v3",
+        "title": "Self-Harness: Harnesses That Improve Themselves",
+        "url": "http://arxiv.org/abs/2606.09498v3"
+      },
+      {
+        "id": "http://arxiv.org/abs/2607.13285v1",
+        "title": "Harness Handbook: Making Evolving Agent Harnesses Readable,Navigable, and Editable",
+        "url": "http://arxiv.org/abs/2607.13285v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2608.17597v1",
+        "title": "HarnessRisk: A Lifecycle-Oriented Benchmark for Agent Harness Safety",
+        "url": "http://arxiv.org/abs/2608.17597v1"
+      }
+    ],
+    "tool call repair LLM agent": [
+      {
+        "id": "http://arxiv.org/abs/2111.01762v1",
+        "title": "AIRCC-Clim: a user-friendly tool for generating regional probabilistic climate change scenarios and risk measures",
+        "url": "http://arxiv.org/abs/2111.01762v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2401.07324v3",
+        "title": "Small LLMs Are Weak Tool Learners: A Multi-LLM Agent",
+        "url": "http://arxiv.org/abs/2401.07324v3"
+      },
+      {
+        "id": "http://arxiv.org/abs/2409.01907v1",
+        "title": "Focus Agent: LLM-Powered Virtual Focus Group",
+        "url": "http://arxiv.org/abs/2409.01907v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2512.21309v2",
+        "title": "A Plan Reuse Mechanism for LLM-Driven Agent",
+        "url": "http://arxiv.org/abs/2512.21309v2"
+      },
+      {
+        "id": "http://arxiv.org/abs/2606.20023v2",
+        "title": "When Lower Privileges Suffice: Investigating Over-Privileged Tool Selection in LLM Agents",
+        "url": "http://arxiv.org/abs/2606.20023v2"
+      }
+    ],
+    "GBNF constrained tool calling": [
+      {
+        "id": "http://arxiv.org/abs/2006.14147v2",
+        "title": "FastSpec: Scalable Generation and Detection of Spectre Gadgets Using Neural Embeddings",
+        "url": "http://arxiv.org/abs/2006.14147v2"
+      },
+      {
+        "id": "http://arxiv.org/abs/2111.01762v1",
+        "title": "AIRCC-Clim: a user-friendly tool for generating regional probabilistic climate change scenarios and risk measures",
+        "url": "http://arxiv.org/abs/2111.01762v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2308.13062v1",
+        "title": "ZeroLeak: Using LLMs for Scalable and Cost Effective Side-Channel Patching",
+        "url": "http://arxiv.org/abs/2308.13062v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2507.10593v3",
+        "title": "ToolRegistry: A Protocol-Agnostic Tool Management Library for Function-Calling LLMs",
+        "url": "http://arxiv.org/abs/2507.10593v3"
+      },
+      {
+        "id": "http://arxiv.org/abs/2603.05515v1",
+        "title": "Enhancing Tool Calling in LLMs with the International Tool Calling Dataset",
+        "url": "http://arxiv.org/abs/2603.05515v1"
+      }
+    ],
+    "skill markdown agent self-improvement": [
+      {
+        "id": "http://arxiv.org/abs/2604.10674v1",
+        "title": "Skill-SD: Skill-Conditioned Self-Distillation for Multi-turn LLM Agents",
+        "url": "http://arxiv.org/abs/2604.10674v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2605.03353v4",
+        "title": "SkCC: Portable and Secure Skill Compilation for Cross-Framework LLM Agents",
+        "url": "http://arxiv.org/abs/2605.03353v4"
+      },
+      {
+        "id": "http://arxiv.org/abs/2605.19362v2",
+        "title": "Toward User Comprehension Supports for LLM Agent Skill Specifications",
+        "url": "http://arxiv.org/abs/2605.19362v2"
+      },
+      {
+        "id": "http://arxiv.org/abs/2605.27955v1",
+        "title": "Skill-as-Pseudocode: Refactoring Skill Libraries to Pseudocode for LLM Agents",
+        "url": "http://arxiv.org/abs/2605.27955v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2607.13104v1",
+        "title": "Self-Improvements in Modern Agentic Systems: A Survey",
+        "url": "http://arxiv.org/abs/2607.13104v1"
+      }
+    ],
+    "recursive language model agent": [
+      {
+        "id": "http://arxiv.org/abs/1912.09913v2",
+        "title": "Hierarchical Character Embeddings: Learning Phonological and Semantic Representations in Languages of Logographic Origin using Recursive Neural Networks",
+        "url": "http://arxiv.org/abs/1912.09913v2"
+      },
+      {
+        "id": "http://arxiv.org/abs/2402.11651v2",
+        "title": "Learning From Failure: Integrating Negative Examples when Fine-tuning Large Language Models as Agents",
+        "url": "http://arxiv.org/abs/2402.11651v2"
+      },
+      {
+        "id": "http://arxiv.org/abs/2409.02645v2",
+        "title": "Emergent Language: A Survey and Taxonomy",
+        "url": "http://arxiv.org/abs/2409.02645v2"
+      },
+      {
+        "id": "http://arxiv.org/abs/2512.13930v1",
+        "title": "Hierarchical Multi-agent Large Language Model Reasoning for Autonomous Functional Materials Discovery",
+        "url": "http://arxiv.org/abs/2512.13930v1"
+      },
+      {
+        "id": "http://arxiv.org/abs/2602.09080v1",
+        "title": "Looping Back to Move Forward: Recursive Transformers for Efficient and Flexible Large Multimodal Models",
+        "url": "http://arxiv.org/abs/2602.09080v1"
+      }
+    ]
+  }
+}
