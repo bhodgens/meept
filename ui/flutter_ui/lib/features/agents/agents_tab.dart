@@ -19,9 +19,8 @@ import '../../models/api_models.dart';
 /// - Swift menubar tab: quick status, pause/resume, approve plans
 /// - Flutter full window: detailed constitution editing, audit review
 ///
-/// Currently this widget shows the basic agent grid. Full employee detail
-/// (constitution, goals, audit findings) is handled via the agents API and
-/// can be extended with additional views.
+/// Currently this widget shows the employee grid plus a goals pane
+/// (health, gate command, approve/reject) when an agent is selected.
 class AgentsTab extends ConsumerStatefulWidget {
   const AgentsTab({super.key});
 
@@ -32,6 +31,10 @@ class AgentsTab extends ConsumerStatefulWidget {
 class _AgentsTabState extends ConsumerState<AgentsTab> {
   int _selectedIndex = 0;
   final _gridFocusNode = FocusNode();
+  List<EmployeeGoal> _goals = const [];
+  bool _goalsLoading = false;
+  String? _goalsError;
+  String? _goalsForId;
 
   @override
   void initState() {
@@ -86,6 +89,32 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     return KeyEventResult.ignored;
   }
 
+  Future<void> _loadGoals(String employeeId) async {
+    setState(() {
+      _goalsLoading = true;
+      _goalsError = null;
+      _goalsForId = employeeId;
+    });
+    try {
+      final raw = await ref
+          .read(sdkClientProvider)
+          .listEmployeeGoals(employeeId);
+      final goals = raw.map(EmployeeGoal.fromJson).toList(growable: false);
+      if (!mounted || _goalsForId != employeeId) return;
+      setState(() {
+        _goals = goals;
+        _goalsLoading = false;
+      });
+    } catch (e) {
+      if (!mounted || _goalsForId != employeeId) return;
+      setState(() {
+        _goals = const [];
+        _goalsLoading = false;
+        _goalsError = e.toString();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final agentState = ref.watch(agentProvider);
@@ -94,7 +123,25 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     return BackgroundImage(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _buildAgentColumn(agentState)),
+            if (activeAgent != null) ...[
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 300,
+                child: _buildGoalsPane(activeAgent),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAgentColumn(AgentState agentState) {
+    return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -165,7 +212,8 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                     itemCount: agentState.agents.length,
                     itemBuilder: (context, index) {
                       final agent = agentState.agents[index];
-                      final isSelected = activeAgent?.id == agent.id;
+                      final selected = ref.watch(activeAgentProvider);
+                      final isSelected = selected?.id == agent.id;
                       final isKeyboardSelected = _selectedIndex == index;
                       return _buildAgentCard(
                         agent,
@@ -177,8 +225,6 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                 ),
               ),
           ],
-        ),
-      ),
     );
   }
 
@@ -191,6 +237,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
       key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
         ref.read(activeAgentProvider.notifier).state = agent;
+        _loadGoals(agent.id);
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -238,6 +285,70 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
       ),
     );
   }
+
+  Widget _buildGoalsPane(Agent agent) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'goals',
+          style: CyberpunkTypography.headlineMedium.copyWith(
+            color: CyberpunkColors.orangePrimary,
+            fontSize: 16,
+          ),
+        ),
+        Text(
+          agent.name.toLowerCase(),
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: CyberpunkColors.midGray,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (_goalsLoading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else if (_goalsError != null)
+          Expanded(
+            child: Text(
+              _goalsError!,
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.redAlert,
+              ),
+            ),
+          )
+        else if (_goals.isEmpty)
+          const Expanded(child: Center(child: Text('no goals')))
+        else
+          Expanded(
+            child: ListView.separated(
+              itemCount: _goals.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, i) {
+                final g = _goals[i];
+                return _GoalCard(
+                  goal: g,
+                  onApprove: g.activePlanId.isEmpty
+                      ? null
+                      : () async {
+                          await ref
+                              .read(sdkClientProvider)
+                              .approvePlan(g.activePlanId);
+                          await _loadGoals(agent.id);
+                        },
+                  onReject: g.activePlanId.isEmpty
+                      ? null
+                      : () async {
+                          await ref
+                              .read(sdkClientProvider)
+                              .rejectPlan(g.activePlanId, reason: 'rejected via gui');
+                          await _loadGoals(agent.id);
+                        },
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 /// Inline error banner for agent list errors
@@ -265,6 +376,146 @@ class _AgentErrorBanner extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class EmployeeGoal {
+  final String id;
+  final String title;
+  final String health;
+  final String activePlanId;
+  final String gateCommand;
+
+  const EmployeeGoal({
+    required this.id,
+    required this.title,
+    required this.health,
+    required this.activePlanId,
+    required this.gateCommand,
+  });
+
+  factory EmployeeGoal.fromJson(Map<String, dynamic> json) {
+    final gate = json['gate'];
+    var gateCmd = '';
+    if (gate is Map) {
+      gateCmd = '${gate['command'] ?? ''}';
+    }
+    return EmployeeGoal(
+      id: '${json['id'] ?? ''}',
+      title: '${json['title'] ?? json['id'] ?? ''}',
+      health: _healthLabel(json['health']),
+      activePlanId: '${json['active_plan_id'] ?? ''}',
+      gateCommand: gateCmd,
+    );
+  }
+
+  static String _healthLabel(dynamic raw) {
+    if (raw is String && raw.isNotEmpty) return raw;
+    if (raw is num) {
+      switch (raw.toInt()) {
+        case 0:
+          return 'healthy';
+        case 1:
+          return 'at_risk';
+        case 2:
+          return 'broken';
+        default:
+          return 'unknown';
+      }
+    }
+    return 'unknown';
+  }
+}
+
+class _GoalCard extends StatelessWidget {
+  final EmployeeGoal goal;
+  final Future<void> Function()? onApprove;
+  final Future<void> Function()? onReject;
+
+  const _GoalCard({
+    required this.goal,
+    this.onApprove,
+    this.onReject,
+  });
+
+  Color get _healthColor {
+    switch (goal.health) {
+      case 'healthy':
+        return CyberpunkColors.greenSuccess;
+      case 'at_risk':
+        return CyberpunkColors.orangePrimary;
+      case 'broken':
+        return CyberpunkColors.redAlert;
+      default:
+        return CyberpunkColors.midGray;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: ValueKey('goal-card-${goal.id}'),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: CyberpunkColors.black,
+        border: Border.all(color: CyberpunkColors.midGray),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.circle, size: 8, color: _healthColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  goal.title.toLowerCase(),
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.greenSuccess,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            goal.health,
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: _healthColor,
+              fontSize: 10,
+            ),
+          ),
+          if (goal.gateCommand.isNotEmpty)
+            Text(
+              'gate: ${goal.gateCommand}',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.midGray,
+                fontSize: 10,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          if (onApprove != null || onReject != null)
+            Row(
+              children: [
+                if (onApprove != null)
+                  TextButton(
+                    onPressed: onApprove,
+                    child: const Text('approve'),
+                  ),
+                if (onReject != null)
+                  TextButton(
+                    onPressed: onReject,
+                    child: const Text('reject'),
+                  ),
+              ],
+            ),
         ],
       ),
     );

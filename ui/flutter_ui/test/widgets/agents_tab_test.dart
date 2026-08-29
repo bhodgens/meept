@@ -108,6 +108,39 @@ void main() {
       expect(wideCols, greaterThan(narrowCols),
           reason: 'wider window should show more tiles per row');
     });
+
+    testWidgets('selecting an agent shows its goals pane', (tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(900, 600);
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final agents = [
+        const Agent(id: 'agent-0', name: 'coder', description: 'd'),
+      ];
+      final fake = _FakeSdkClient(agents: agents);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sdkClientProvider.overrideWith((ref) => fake),
+            agentProvider.overrideWith(
+              (ref) => AgentNotifier(sdkClient: fake),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: AgentsTab())),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.byKey(const ValueKey('agent-tile-agent-0')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.text('goals'), findsOneWidget);
+      expect(find.text('keep ci green'), findsOneWidget);
+      expect(find.textContaining('gate:'), findsOneWidget);
+    });
   });
 }
 
@@ -129,6 +162,22 @@ class _FakeSdkClient implements SdkApiClient {
               'description': a.description,
             })
         .toList();
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployeeGoals(String employeeId) async {
+    if (employeeId == 'agent-0') {
+      return [
+        {
+          'id': 'goal_keep_ci',
+          'title': 'keep ci green',
+          'health': 'healthy',
+          'active_plan_id': '',
+          'gate': {'command': 'go test ./...'},
+        },
+      ];
+    }
+    return [];
   }
 
   @override

@@ -714,6 +714,40 @@ class SdkApiClient {
     return raw;
   }
 
+  /// Employee goals: `GET /api/v1/agents/{id}/goals` → `{goals: [...]}`.
+  Future<List<Map<String, dynamic>>> listEmployeeGoals(String employeeId) async {
+    try {
+      final raw = await _get('/api/v1/agents/$employeeId/goals');
+      final goalsRaw = raw['goals'] as List?;
+      if (goalsRaw == null) return [];
+      return goalsRaw
+          .whereType<Map>()
+          .map((g) => Map<String, dynamic>.from(g))
+          .toList();
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Set or clear a goal completion gate.
+  /// `PUT /api/v1/agents/{id}/goals/{gid}/gate`
+  Future<Map<String, dynamic>> setEmployeeGoalGate({
+    required String employeeId,
+    required String goalId,
+    String? command,
+    int timeoutSeconds = 300,
+    bool skipWhenUnchanged = true,
+  }) async {
+    return _put(
+      '/api/v1/agents/$employeeId/goals/$goalId/gate',
+      body: {
+        'command': command ?? '',
+        'timeout_seconds': timeoutSeconds,
+        'skip_when_unchanged': skipWhenUnchanged,
+      },
+    );
+  }
+
   // ===== Tasks =====
 
   /// Returns the raw `tasks` array.  Callers deserialize via `Task.fromJson`.
