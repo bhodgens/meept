@@ -52,6 +52,8 @@ agent-tui ./bin/meept chat      # TUI testing
 # Connectivity graphs
 make graphs               # Regenerate bus/RPC/HTTP/WS topology
 make graphs-check         # Verify generated files are fresh (CI)
+make research-harness      # verify harness catalog evidence + regenerate techniques md
+make research-harness-check # CI: fail if evidence missing or techniques md stale
 
 # Git hooks (bash >= 4 required on macOS; sub-hooks use /opt/homebrew/bin/bash)
 make hooks                # core.hooksPath -> .githooks (15 pre-commit checks)
@@ -447,6 +449,7 @@ Audit scripts in `scripts/`:
 | `audit-dart-enum-name-shadow.py` | Flags Dart extensions shadowing Enum.name/index |
 | `audit-utf8-byte-arithmetic.py` | Flags hand-rolled ASCII case-conversion corrupting UTF-8 |
 | `gen-connectivity-graph.py` | Generates bus/RPC/HTTP/WS topology (`make graphs`) |
+| `research-harness-lit.py` | Verifies harness-technique catalog evidence and markdown freshness (`make research-harness-check`) |
 
 All analyzers and audit scripts run via `make lint-ci`.
 
@@ -459,6 +462,7 @@ documentation updates.
 - `docs/workflows/` — Feature specifications
 - `docs/concepts/` — Architecture
 - `docs/reference/` — CLI, API, tools
+- `docs/research/` — living research maps (harness techniques)
 - `docs/generated/` — Auto-generated connectivity graphs (do not edit)
 
 **Feature mapping:** `internal/<pkg>/` → `docs/workflows/<pkg>.md`

@@ -442,7 +442,18 @@ audit-scripts:
 		echo "  utf8-byte-arithmetic..."; \
 		python3 scripts/audit-utf8-byte-arithmetic.py || exit 1; \
 	fi
+	@if [ -f scripts/research-harness-lit.py ]; then \
+		echo "  research-harness-lit..."; \
+		python3 scripts/research-harness-lit.py --check || exit 1; \
+	fi
 	@echo "Audit scripts complete."
+
+.PHONY: research-harness research-harness-check
+research-harness:
+	@python3 scripts/research-harness-lit.py
+
+research-harness-check:
+	@python3 scripts/research-harness-lit.py --check
 
 mod-tidy:
 	@echo "Tidying Go modules..."
