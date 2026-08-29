@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agents"
 	authpkg "github.com/caimlas/meept/internal/auth"
@@ -199,6 +200,9 @@ type Components struct {
 
 	// MCP integration
 	MCPManager *mcp.Manager
+
+	// ACP agent sessions
+	ACPManager *acp.Manager
 
 	// Scheduler with job dependencies
 	Scheduler *scheduler.Scheduler
@@ -1909,6 +1913,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		taskStore = c.TaskRegistry.Store()
 	}
 	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, c.TokenStore)
+
+	acpMgr, acpErr := applyACPFromConfig(cfg.ACP)
+	if acpErr != nil {
+		return nil, acpErr
+	}
+	c.ACPManager = acpMgr
+	RegisterACPTools(c.ToolRegistry, c.ACPManager)
 
 	// Register /remember tool for agents to propose improvements (Thread E)
 	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
@@ -4263,6 +4274,10 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// Stop all MCP server connections
 	if c.MCPManager != nil {
 		c.MCPManager.StopAll()
+	}
+
+	if c.ACPManager != nil {
+		c.ACPManager.StopAll()
 	}
 
 	// Stop all LSP server connections
