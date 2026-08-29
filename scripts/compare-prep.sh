@@ -24,9 +24,9 @@ DEFAULT_REPOS=(
   "AtomicBot-ai/atomic-agent atomic-agent"
   "PrimeIntellect-ai/prime-agent prime-agent"
   "nousresearch/hermes-agent hermes"
-  "antonosika/opencode opencode"
+  "anomalyco/opencode opencode"
   "can1357/oh-my-pi oh-my-pi"
-  "anthropics/claude-code claude-code"
+  # claude-code is reference-only (no public repo); skip clone
 )
 
 # Allow override via REPOS: newline-separated "owner/repo alias" lines.
