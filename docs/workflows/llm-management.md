@@ -82,6 +82,51 @@ api_key_env = ""
 }
 ```
 
+## Grammar-Constrained Tool Calling (GBNF)
+
+Small local models frequently emit malformed tool-call JSON. When the
+endpoint supports grammar constraints, meept can attach a grammar that makes
+invalid tool-call output impossible.
+
+### Endpoint support matrix
+
+| Endpoint type | Constraint key | `tool_constraint` value | Notes |
+|---|---|---|---|
+| llama.cpp server (managed or remote) | `grammar` (GBNF) | `"llamacpp"` | Full enum-tight grammar; managed runtimes auto-declare this |
+| vLLM | `guided_grammar` (GBNF) | `"vllm"` | Same GBNF grammar, different wire key |
+| OpenAI-compat structured outputs | `response_format: {type:"json_schema"}` | `"json_schema"` | JSON Schema instead of GBNF; enum tightness may be lower depending on server |
+| MLX-server, Ollama, most remote APIs | none | `""` (default) | No grammar attached — not an error |
+
+### Configuration
+
+```toml
+# config.toml — global kill-switch (default false)
+[agent.tools]
+gbnf_constrained = true
+```
+
+```json5
+// models.json5 — per-provider and per-model constraint declaration
+{
+  "providers": {
+    "local": {
+      "options": { "baseURL": "http://127.0.0.1:8080", "tool_constraint": "llamacpp" },
+      "models": {
+        "my-model": { "name": "...", "tool_constraint": "json_schema" } // optional override
+      }
+    }
+  }
+}
+```
+
+Behavior:
+- Attach requires ALL of: `gbnf_constrained = true`, a declared matching
+  `tool_constraint`, tools present on the request.
+- Unsupported schema constructs exclude that tool from the grammar (never
+  brick generation); the exclusion is logged once per session.
+- Managed llama.cpp runtimes (`llama-cpp`) auto-declare `llamacpp`; MLX
+  runtimes declare nothing.
+
 ## Observability
 
 ### Logging

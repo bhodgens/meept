@@ -54,6 +54,17 @@ Autonomous agents require robust security to prevent misuse and protect sensitiv
 - **Implementation**: `internal/agent/loop.go`, `internal/tools/builtin/*.go`
 - **Full Documentation**: [Adversarial Input Defense](adversarial-input-defense.md)
 
+### SSRF Guard (Web Tools)
+- **Scheme Allowlist**: Only `http`/`https` URLs are fetched; `ftp://`, `file://`, `gopher://`, etc. are rejected.
+- **IP Blocking**: URL hosts (literal IPs and resolved hostnames) are checked against a default blocklist covering loopback (`127/8`, `::1/128`), private ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`), link-local (`169.254/16` including the cloud-metadata endpoint `169.254.169.254`, `fe80::/10`), plus multicast and unspecified addresses. Every resolved IP must pass.
+- **Redirect Re-validation**: Every redirect hop is re-checked against the same rules, with a configurable hop limit (`max_redirects`, default 5).
+- **Dial-time Re-check**: The HTTP client's dialer re-validates resolved IPs at connect time, closing the common DNS-rebinding window between pre-flight check and dial.
+- **Enabled by default** (`security.ssrf.enabled = true`). Disabling it falls back to the legacy per-tool checks and logs a startup warning.
+- **Allowlists**: `allowed_hosts` bypasses IP checks by dot-delimited suffix match; `allowed_cidrs` exempts ranges (e.g., corporate networks); `blocked_cidrs` replaces the default blocklist when set.
+- **Implementation**: `internal/security/ssrf/`, wired into `web_fetch` and `web_search` (`internal/tools/builtin/`).
+
+**DNS rebinding limitation (TOCTOU):** the guard resolves and validates hostnames both pre-flight and at dial time, and re-validates every redirect hop, which mitigates the common rebinding and redirect-bypass cases. A determined attacker who can change DNS answers between the dial-time lookup and the TCP connect itself remains out of scope; no user-space fetch layer fully eliminates this without OS-level pinning.
+
 ## Configuration
 
 ```toml
@@ -87,6 +98,14 @@ strict_override_matching = false
 # Taint tracking
 enable_taint_tracking = true
 taint_db_path = "~/.meept/taint.db"
+
+# SSRF guard for web_fetch / web_search (enabled by default)
+[security.ssrf]
+enabled = true          # false = legacy checks + startup warning
+allowed_hosts = []      # suffix match bypass, e.g. "api.github.com"
+allowed_cidrs = []      # e.g. "10.0.0.0/8" for corporate networks
+blocked_cidrs = []      # non-empty replaces the default blocklist
+max_redirects = 5
 ```
 
 ## Observability

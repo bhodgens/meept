@@ -102,7 +102,7 @@ Tools register under the server-name prefix — `cua-driver.capture`, `cua-drive
 
 The classification is prefix-matched on the registered name (`pkg/security.ComputerUseRule`); DB-seeded rules keep precedence for operator overrides. The HIGH gate means an agent cannot type or click anywhere until you approve each action unless confirmation is disabled in `[tools.security]`.
 
-See the bundled computer-use skill for the recommended capture → act → verify loop (leaf 09 of the containment-and-computer-use plan).
+See the bundled `computer-use` skill (`config/skills/computer-use/SKILL.md`) for the recommended capture → act → verify loop.
 
 ### Web API Integration
 - **HTTP/JSON API**: RESTful interface for external clients
