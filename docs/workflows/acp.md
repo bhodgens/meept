@@ -78,3 +78,5 @@ consumes this endpoint in the same tree (leaf 09).
 - Inbound permission requests keep their JSON-RPC id so `Reply` can answer.
 - The daemon working directory is not the user project. Sessions pass the
   session working dir, never `os.Getwd()`.
+- The Flutter status bar shows `acp:N` when live sessions exist. Disabled
+  catalogs render nothing.

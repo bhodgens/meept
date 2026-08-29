@@ -4,6 +4,7 @@ import '../theme/colors.dart';
 import '../theme/typography.dart';
 import '../providers/providers.dart';
 import '../providers/status_message_provider.dart';
+import '../providers/acp_status_provider.dart';
 
 /// Single-line status bar pinned at the bottom of the HomeScreen.
 /// Mirrors TUI renderStatusBar (internal/tui/app.go:2236-2289).
@@ -58,6 +59,14 @@ class StatusBar extends ConsumerWidget {
         style: _lightStyle,
       ),
     );
+
+    final acp = ref.watch(acpStatusProvider).valueOrNull;
+    if (acp != null && acp.enabled && acp.liveCount > 0) {
+      spans.add(_separator());
+      spans.add(
+        TextSpan(text: 'acp:${acp.liveCount}', style: _lightStyle),
+      );
+    }
 
     return _bar(
       child: Row(

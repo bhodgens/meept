@@ -358,6 +358,15 @@ class SdkApiClient {
     return _get('/api/v1/daemon/status');
   }
 
+  /// Returns GET /api/v1/acp/agents envelope.
+  Future<Map<String, dynamic>> getAcpAgents() async {
+    try {
+      return await _get('/api/v1/acp/agents');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   // ===== Chat =====
 
   /// Sends a chat message and returns the raw JSON response map.
