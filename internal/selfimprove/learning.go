@@ -154,6 +154,11 @@ type LearningPipeline struct {
 	patterns          map[string]*LearnedPattern
 	lastConsolidation time.Time
 
+	// wiki persists learned patterns to the wiki layer (arXiv:2608.27454);
+	// nil means no persistence (byte-identical legacy behavior). Must only be
+	// set before Initialize per SetWikiStore's contract.
+	wiki *WikiStore
+
 	initialized bool
 }
 
@@ -169,6 +174,16 @@ func NewLearningPipeline(cfg LearningConfig, llmClient *llm.Client, dataDir stri
 		llmClient: llmClient,
 		logger:    logger,
 		patterns:  make(map[string]*LearnedPattern),
+	}
+}
+
+// SetWikiStore attaches the wiki persistence layer to the pipeline. A nil
+// wiki store is accepted and leaves existing behavior untouched. This must be
+// called before Initialize; the wiki is only read during Initialize and
+// written during StorePattern.
+func (lp *LearningPipeline) SetWikiStore(ws *WikiStore) {
+	if ws != nil {
+		lp.wiki = ws
 	}
 }
 
@@ -189,6 +204,25 @@ func (lp *LearningPipeline) Initialize(ctx context.Context) error {
 	if err := lp.loadPatterns(); err != nil {
 		lp.logger.Warn("Failed to load patterns", "error", err)
 		// Continue with empty patterns
+	}
+
+	// Restart survival (02-wiki-store.md): repopulate from wiki pages, never
+	// clobbering patterns already loaded by loadPatterns.
+	if lp.wiki != nil {
+		wikiPatterns, err := lp.wiki.LoadPatterns()
+		if err != nil {
+			lp.logger.Warn("Failed to load wiki patterns", "error", err)
+		} else {
+			for _, p := range wikiPatterns {
+				if p == nil || p.ID == "" {
+					continue
+				}
+				if _, exists := lp.patterns[p.ID]; exists {
+					continue
+				}
+				lp.patterns[p.ID] = p
+			}
+		}
 	}
 
 	lp.initialized = true
@@ -558,6 +592,10 @@ func (lp *LearningPipeline) distillHeuristic(trajectory Trajectory, judgment *Ju
 // patterns.json is deprecated (skills are the new learning format), but
 // in-memory storage is retained so Retrieve() and the skill evolver can
 // still access patterns during the session.
+//
+// When a wiki store is attached, the pattern is additionally written through
+// to the wiki layer (arXiv:2608.27454) so it survives restarts. Wiki I/O
+// errors are logged at Warn and NEVER fail StorePattern.
 func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPattern) error {
 	lp.mu.Lock()
 
@@ -565,6 +603,10 @@ func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPa
 		lp.mu.Unlock()
 		return errors.New("learning pipeline not initialized")
 	}
+
+	// wikiSnapshot collects the pattern to persist before releasing the lock
+	// (no I/O under mutex). nil means no wiki write is needed.
+	var wikiSnapshot *LearnedPattern
 
 	// Check for duplicates
 	for _, existing := range lp.patterns {
@@ -582,7 +624,12 @@ func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPa
 				existing.Confidence = 1.0
 			}
 		}
+		if lp.wiki != nil {
+			snap := *existing
+			wikiSnapshot = &snap
+		}
 		lp.mu.Unlock()
+		lp.writePatternToWiki(wikiSnapshot)
 		return nil
 	}
 
@@ -592,8 +639,29 @@ func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPa
 	}
 
 	lp.patterns[pattern.ID] = pattern
+	if lp.wiki != nil {
+		snap := *pattern
+		wikiSnapshot = &snap
+	}
 	lp.mu.Unlock()
+	lp.writePatternToWiki(wikiSnapshot)
 	return nil
+}
+
+// writePatternToWiki persists one pattern snapshot to the wiki layer,
+// rebuilding the index so the evolver's view stays fresh. All failures are
+// logged at Warn and never propagated (StorePattern must not fail on wiki
+// I/O). A nil snapshot is a no-op.
+func (lp *LearningPipeline) writePatternToWiki(snap *LearnedPattern) {
+	if snap == nil || lp.wiki == nil {
+		return
+	}
+	if _, err := lp.wiki.UpsertPattern(snap); err != nil {
+		lp.logger.Warn("Failed to write pattern to wiki", "pattern_id", snap.ID, "error", err)
+	}
+	if err := lp.wiki.RebuildIndex(); err != nil {
+		lp.logger.Warn("Failed to rebuild wiki index", "error", err)
+	}
 }
 
 // Consolidate performs deduplication, contradiction detection, and pruning.
