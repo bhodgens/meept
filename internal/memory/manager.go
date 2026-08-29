@@ -65,6 +65,10 @@ type Manager struct {
 	voteErr  error
 	votes    *voteStore
 
+	// Typed user-memory facts (harness-eval leaf 12). Nil until
+	// OpenFactStore is called; accessor is nil-safe.
+	factStore *FactStore
+
 	consolidator *Consolidator
 	initialized  bool
 	mu           sync.RWMutex
@@ -2103,6 +2107,32 @@ func (m *Manager) DualStore() *DualStore {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.dualStore
+}
+
+// GetFactStore returns the typed user-memory fact store, or nil when
+// OpenFactStore has not been called. Nil-safe by design (harness-eval
+// leaf 12).
+func (m *Manager) GetFactStore() *FactStore {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.factStore
+}
+
+// OpenFactStore opens (creating if needed) the memory_facts database at
+// dbPath and installs it on the Manager. Idempotent: a second call returns
+// the existing store.
+func (m *Manager) OpenFactStore(dbPath string) (*FactStore, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.factStore != nil {
+		return m.factStore, nil
+	}
+	fs, err := NewFactStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	m.factStore = fs
+	return fs, nil
 }
 
 // ScopedManager returns a ScopedMemoryManager that filters all operations
