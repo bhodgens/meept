@@ -412,6 +412,7 @@ Learn more: [Skill System](docs/workflows/skills.md)
 - **[Features](docs/features.md)** &mdash; Complete capability reference with configuration and examples
 - **[Workflows](docs/workflows/)** &mdash; Feature specifications with edge cases
 - **[Reference](docs/reference/)** &mdash; CLI, API, configuration reference
+- **[Feature Comparison](docs/feature-comparison-matrix.md)** &mdash; Meept vs. frontier agents (FrontierAgent, duckagent, atomic-agent, prime-agent, Hermes, OpenCode, oh-my-pi, Claude Code)
 
 ## Project Structure
 

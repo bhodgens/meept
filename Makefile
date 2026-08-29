@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -44,6 +44,7 @@ help:
 	@echo "  vet              Run go vet"
 	@echo "  graphs           Regenerate connectivity graphs (bus/RPC/HTTP/WS)"
 	@echo "  graphs-check     Verify connectivity graphs are up to date (CI)"
+	@echo "  compare-prep     Clone competitor repos into TMPDIR/meept-compare"
 	@echo "  mod-tidy         Tidy go modules"
 	@echo "  clean            Remove build artifacts"
 	@echo "  menubar-clean    Remove menubar build artifacts"
@@ -971,3 +972,10 @@ selflock:
 		exit 1)
 
 analyzers: selflock
+
+# =============================================================================
+# Comparison Prep
+# =============================================================================
+
+compare-prep:
+	@CLEAN="$(CLEAN)" bash scripts/compare-prep.sh
