@@ -534,3 +534,45 @@ func TestTacticalScheduler_IsRetryableError_StringFallback(t *testing.T) {
 		}
 	}
 }
+
+// TestTacticalScheduler_CompletesWhenValidatorAbsent: Validated stays false
+// when no validatorManager is wired. That must not block task completion.
+func TestTacticalScheduler_CompletesWhenValidatorAbsent(t *testing.T) {
+	ts, _, cleanup := newTacticalTestSetup(t)
+	defer cleanup()
+
+	parentTask := task.NewTask("no-validator", "write a file")
+	parentTask.TotalJobs = 1
+	parentTask.SetState(task.StateExecuting)
+	if err := ts.taskStore.Create(parentTask); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	step1 := task.NewTaskStep(parentTask.ID, "write answer.txt", 0)
+	step1.AgentID = "coder"
+	if err := ts.stepStore.Create(step1); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := ts.stepStore.SetJobID(step1.ID, "job-noval-1"); err != nil {
+		t.Fatalf("set job id: %v", err)
+	}
+	if err := ts.stepStore.SetState(step1.ID, task.StepScheduled); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+
+	resultJSON, err := json.Marshal(map[string]any{"success": true, "result": "wrote 42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.OnJobCompleted(t.Context(), "job-noval-1", resultJSON); err != nil {
+		t.Fatalf("OnJobCompleted: %v", err)
+	}
+
+	got, err := ts.taskStore.GetByID(parentTask.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.State != task.StateCompleted {
+		t.Fatalf("task state = %s, want %s", got.State, task.StateCompleted)
+	}
+}

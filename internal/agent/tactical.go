@@ -733,7 +733,11 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		} else {
 			var validationErrors []string
 			for _, s := range steps {
-				if s.State.IsSuccessfullyTerminal() && !s.Validated {
+				// Validated is only set when a validatorManager ran. With no
+				// validator, the flag stays false — do not block task
+				// completion (meept-bench: heuristic auto-approve left
+				// Validated=false and waitForTaskCompletion hung 600s).
+				if ts.validatorManager != nil && s.State.IsSuccessfullyTerminal() && !s.Validated {
 					validationErrors = append(validationErrors,
 						fmt.Sprintf("step %s completed but not validated", s.ID))
 				}
