@@ -201,12 +201,9 @@ func (c *Collector) subscribeToBus() {
 		return
 	}
 
-	// NOTE: The "metrics" topic subscription was removed: nothing in the repo
-	// publishes a bus message on the literal "metrics" topic (handleBusMessage
-	// has no case for it either), so this subscription was a dead listener and
-	// "metrics" appeared as a subscribed-never-published orphan in the
-	// connectivity graph. Event metrics arrive via the llm.*, agent.*, tool.*,
-	// worker.* and step.* subscriptions below.
+	// NOTE: The "metrics" topic subscription was removed: nothing publishes
+	// that literal topic. Live event metrics arrive via step.*, worker.*,
+	// and llm.tokens.used.
 
 	// Subscribe to review events for review metrics
 	reviewSub := c.bus.Subscribe("metrics-collector-review", "step.*")
@@ -251,26 +248,6 @@ func (c *Collector) subscribeToBus() {
 // handleBusMessage processes bus messages for metrics collection.
 func (c *Collector) handleBusMessage(msg *models.BusMessage) {
 	switch msg.Topic {
-	case "llm.request":
-		c.store.RecordEvent("llm.request", "info", "LLM request completed", map[string]any{
-			"source": msg.Source,
-		})
-	case "llm.error":
-		c.store.RecordEvent("llm.error", "error", "LLM request failed", map[string]any{
-			"source": msg.Source,
-		})
-	case "agent.iteration":
-		c.store.Record("agent.iterations", 1, map[string]string{
-			"agent": msg.Source,
-		})
-	case "tool.call":
-		c.store.Record("tool.calls", 1, map[string]string{
-			"tool": msg.Source,
-		})
-	case "model.failover":
-		c.store.RecordEvent("model.failover", "warn", "Model failover occurred", map[string]any{
-			"source": msg.Source,
-		})
 	case "step.review_completed":
 		c.recordReviewMetrics(msg)
 	case "compress.saved":
