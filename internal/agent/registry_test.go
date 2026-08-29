@@ -249,6 +249,9 @@ func TestLoadAgentDefinitions_AllBundled(t *testing.T) {
 		config.AgentIDArchitect,
 		config.AgentIDSkeptic,
 		config.AgentIDLibrarian,
+		config.AgentIDImageGen,
+		config.AgentIDVideoGen,
+		config.AgentIDImageID,
 	}
 	for _, id := range expected {
 		spec, ok := r.GetSpec(id)
@@ -302,6 +305,9 @@ func TestLoadAgentDefinitions_AllBundled(t *testing.T) {
 		config.AgentIDAnalyst:    {"competitive-teardown"},
 		config.AgentIDSkeptic:    {"grill-me"},
 		config.AgentIDLibrarian:  {"librarian-backlog-mining", "librarian-reflection-surfacing", "librarian-tag-hygiene"},
+		config.AgentIDImageGen:   {"image-prompt-enhance"},
+		config.AgentIDVideoGen:   {"video-prompt-enhance"},
+		config.AgentIDImageID:    {"image-identify"},
 	}
 	for agentID, skills := range skillChecks {
 		spec, ok := r.GetSpec(agentID)
@@ -313,6 +319,23 @@ func TestLoadAgentDefinitions_AllBundled(t *testing.T) {
 			if !spec.HasSkill(want) {
 				t.Errorf("agent %q missing available_skill %q (has %v)", agentID, want, spec.AvailableSkills)
 			}
+		}
+	}
+
+	if spec, ok := r.GetSpec(config.AgentIDImageGen); ok {
+		if spec.EnhancerModel != "small" {
+			t.Errorf("image-gen EnhancerModel = %q, want small", spec.EnhancerModel)
+		}
+		if !spec.HasTool("generate_image") {
+			t.Errorf("image-gen missing generate_image (has %v)", spec.AdditionalTools)
+		}
+	}
+	if spec, ok := r.GetSpec(config.AgentIDVideoGen); ok {
+		if spec.EnhancerModel != "small" {
+			t.Errorf("video-gen EnhancerModel = %q, want small", spec.EnhancerModel)
+		}
+		if !spec.HasTool("generate_video") {
+			t.Errorf("video-gen missing generate_video (has %v)", spec.AdditionalTools)
 		}
 	}
 }
@@ -478,16 +501,16 @@ func TestDispatcherRoutingTableMatchesRoster(t *testing.T) {
 	// non-agent backtick tokens that appear in the dispatcher body so we
 	// don't false-flag tool or field names.
 	allowlist := map[string]bool{
-		"platform_agents":        true,
-		"platform_tools":         true,
-		"platform_status":        true,
-		"delegate_task":          true,
-		"memory_search":          true,
-		"memory_refs":            true,
-		"context_query":          true,
-		"inherited_from":         true,
-		"agent_id":               true,
-		"message":                true,
+		"platform_agents": true,
+		"platform_tools":  true,
+		"platform_status": true,
+		"delegate_task":   true,
+		"memory_search":   true,
+		"memory_refs":     true,
+		"context_query":   true,
+		"inherited_from":  true,
+		"agent_id":        true,
+		"message":         true,
 	}
 
 	// Extract `token` occurrences.
@@ -540,6 +563,9 @@ func TestDispatcherRoutingTableMatchesRoster(t *testing.T) {
 		config.AgentIDArchitect,
 		config.AgentIDSkeptic,
 		config.AgentIDLibrarian,
+		config.AgentIDImageGen,
+		config.AgentIDVideoGen,
+		config.AgentIDImageID,
 	} {
 		// Search for the agent ID wrapped in backticks (the routing table format).
 		needle := "`" + want + "`"

@@ -202,6 +202,7 @@ max_tokens_per_turn: 2048
 max_memory_refs: 10
 temperature: 0.5
 top_p: 0.9
+enhancer_model: small
 ---
 
 # Test Agent Instructions
@@ -255,6 +256,9 @@ Do testing.`
 	}
 	if def.TopP == nil || *def.TopP != 0.9 {
 		t.Errorf("TopP = %v, want 0.9", def.TopP)
+	}
+	if def.EnhancerModel != "small" {
+		t.Errorf("EnhancerModel = %q, want %q", def.EnhancerModel, "small")
 	}
 	if def.Body != "# Test Agent Instructions\n\nDo testing." {
 		t.Errorf("Body = %q", def.Body)

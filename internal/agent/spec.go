@@ -96,6 +96,9 @@ type AgentSpec struct {
 	// or empty to use the default. If it matches a known alias, alias resolution with
 	// automatic failover and cooldown rotation is used.
 	Model string `json:"model,omitempty"`
+	// EnhancerModel is the small/cheap model used to expand a brief into
+	// generator-ready prose. Empty = alias "small".
+	EnhancerModel string `json:"enhancer_model,omitempty"`
 	// AdditionalTools are tools beyond the baseline that this agent has access to.
 	AdditionalTools []string `json:"additional_tools,omitempty"`
 	// Constraints are operational limits for this agent.
@@ -171,4 +174,16 @@ func (s *AgentSpec) GetSkillForTrigger(keyword string) string {
 		return ""
 	}
 	return s.SkillTriggers[keyword]
+}
+
+// DefaultEnhancerModelAlias is the model alias used when EnhancerModel is empty.
+const DefaultEnhancerModelAlias = "small"
+
+// EffectiveEnhancerModel returns the enhancer model: the explicit override
+// if set, otherwise the "small" alias (resolves to small_model).
+func (s *AgentSpec) EffectiveEnhancerModel() string {
+	if s == nil || s.EnhancerModel == "" {
+		return DefaultEnhancerModelAlias
+	}
+	return s.EnhancerModel
 }

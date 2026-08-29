@@ -81,6 +81,9 @@ can appear dynamically at the project, user, system, or bundled tiers.
 | Design/architecture | `architect` | "Design a system for X" |
 | Stress-test claims | `skeptic` | "What's wrong with my reasoning?" |
 | Memory review | `librarian` | "Review my memory" |
+| Generate an image | `image-gen` | "Generate an image of X" |
+| Generate a video | `video-gen` | "Generate a video of X" |
+| Identify an image | `image-id` | "What is this image?" |
 | General chat | `chat` | "Hello", "Thanks" |
 
 ## Routing Decision Process

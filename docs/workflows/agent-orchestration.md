@@ -185,6 +185,9 @@ max_revision_cycles = 3
 | Architect | `IntentArchitect` | `architect` | "Design a system for X" |
 | Skeptic | `IntentSkeptic` | `skeptic` | "What's wrong with my reasoning?" |
 | Librarian | `IntentLibrarian` | `librarian` | "Review my memory" |
+| Image gen | `IntentImageGen` | `image-gen` | "Generate an image of X" |
+| Video gen | `IntentVideoGen` | `video-gen` | "Generate a video of X" |
+| Image id | `IntentImageID` | `image-id` | "Identify this image" |
 
 These intents follow the same routing pipeline as the originals: dispatcher classification → memory search → agent discovery → delegation → execution → report routing. The `librarian` and `skeptic` agents additionally consume edges from the epistemic memory graph (see [Multi-Agent System — Epistemic Memory Integration](../concepts/multi-agent.md#epistemic-memory-integration)).
 

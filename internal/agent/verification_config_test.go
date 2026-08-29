@@ -99,7 +99,7 @@ func TestVerificationConfigBackwardCompat(t *testing.T) {
 		}
 		vc := verificationFromMetadata(meta)
 		assert.False(t, vc.Enabled)
-		assert.True(t, vc.AutoTrigger)    // default preserved
+		assert.True(t, vc.AutoTrigger)     // default preserved
 		assert.Equal(t, 3, vc.MaxFixLoops) // default preserved
 		assert.Empty(t, vc.Model)
 	})
@@ -179,5 +179,20 @@ func TestAgentOverridesDaemon(t *testing.T) {
 		assert.Empty(t, vc.Model, "unset model should remain empty (inherit)")
 		assert.True(t, vc.AutoTrigger, "unset auto_trigger should keep default true")
 		assert.Equal(t, 3, vc.MaxFixLoops, "unset max_fix_loops should keep default 3")
+	})
+}
+
+func TestEffectiveEnhancerModel(t *testing.T) {
+	t.Run("empty defaults to small", func(t *testing.T) {
+		var spec AgentSpec
+		assert.Equal(t, DefaultEnhancerModelAlias, spec.EffectiveEnhancerModel())
+	})
+	t.Run("nil spec defaults to small", func(t *testing.T) {
+		var spec *AgentSpec
+		assert.Equal(t, DefaultEnhancerModelAlias, spec.EffectiveEnhancerModel())
+	})
+	t.Run("explicit override wins", func(t *testing.T) {
+		spec := &AgentSpec{EnhancerModel: "local/lfm-8b-f16"}
+		assert.Equal(t, "local/lfm-8b-f16", spec.EffectiveEnhancerModel())
 	})
 }

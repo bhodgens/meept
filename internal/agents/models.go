@@ -45,6 +45,11 @@ type AgentMetadata struct {
 	// Model can be an alias name or direct model reference.
 	Model string `yaml:"model,omitempty"`
 
+	// EnhancerModel is the small/cheap model used to expand a brief into
+	// generator-ready prose before an image or video backend is called.
+	// Empty = alias "small" (resolves to small_model).
+	EnhancerModel string `yaml:"enhancer_model,omitempty"`
+
 	// PromptComponents lists component IDs (e.g., "base.constitution") that wrap
 	// the AGENT.md body when assembling the system prompt.
 	PromptComponents []string `yaml:"prompt_components,omitempty"`

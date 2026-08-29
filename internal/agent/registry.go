@@ -737,6 +737,13 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.Model = base.Model
 	}
 
+	// EnhancerModel: prefer AGENT.md if set
+	if def.EnhancerModel != "" {
+		merged.EnhancerModel = def.EnhancerModel
+	} else {
+		merged.EnhancerModel = base.EnhancerModel
+	}
+
 	// Tools: MERGE (union)
 	merged.AdditionalTools = mergeStringSlices(base.AdditionalTools, def.AdditionalTools)
 
@@ -794,6 +801,7 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		ReviewsDomain:   def.ReviewsDomain,
 		Purpose:         r.assemblePurpose(def.PromptComponents, def.Body),
 		Model:           def.Model,
+		EnhancerModel:   def.EnhancerModel,
 		AdditionalTools: append([]string(nil), def.AdditionalTools...),
 		AvailableSkills: append([]string(nil), def.AvailableSkills...),
 		SkillTriggers:   copyStringMap(def.SkillTriggers),
