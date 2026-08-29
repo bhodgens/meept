@@ -25,12 +25,12 @@ type InstructionHandler struct {
 
 // InstructionResponse is the standard response format for instruction operations.
 type InstructionResponse struct {
-	Success              bool                        `json:"success"`
-	Instruction          *preferences.UserInstruction `json:"instruction,omitempty"`
+	Success              bool                           `json:"success"`
+	Instruction          *preferences.UserInstruction   `json:"instruction,omitempty"`
 	Instructions         []*preferences.UserInstruction `json:"instructions,omitempty"`
 	ParsedInstruction    *preferences.ParsedInstruction `json:"parsed,omitempty"`
-	ConfirmationRequired bool                         `json:"confirmation_required"`
-	Error                string                       `json:"error,omitempty"`
+	ConfirmationRequired bool                           `json:"confirmation_required"`
+	Error                string                         `json:"error,omitempty"`
 }
 
 // NewInstructionHandler creates a new handler with the given dependencies.
@@ -92,7 +92,7 @@ func (h *InstructionHandler) Stop() {
 func (h *InstructionHandler) handleAdd(ctx context.Context, msg *models.BusMessage) {
 	var req map[string]any
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		h.sendError(msg.ReplyTo, "invalid payload: "+err.Error())
+		h.sendError(msg, "invalid payload: "+err.Error())
 		return
 	}
 
@@ -101,13 +101,13 @@ func (h *InstructionHandler) handleAdd(ctx context.Context, msg *models.BusMessa
 
 	parsed, err := h.parser.Parse(ctx, input)
 	if err != nil {
-		h.sendError(msg.ReplyTo, "parse error: "+err.Error())
+		h.sendError(msg, "parse error: "+err.Error())
 		return
 	}
 
 	result := h.verifier.Verify(parsed)
 	if !result.Valid {
-		h.sendError(msg.ReplyTo, "validation failed: "+fmt.Sprint(result.Errors))
+		h.sendError(msg, "validation failed: "+fmt.Sprint(result.Errors))
 		return
 	}
 
@@ -126,11 +126,11 @@ func (h *InstructionHandler) handleAdd(ctx context.Context, msg *models.BusMessa
 	}
 
 	if err := h.store.Save(instr, tier); err != nil {
-		h.sendError(msg.ReplyTo, "save error: "+err.Error())
+		h.sendError(msg, "save error: "+err.Error())
 		return
 	}
 
-	h.sendResponse(msg.ReplyTo, InstructionResponse{
+	h.sendResponse(msg, InstructionResponse{
 		Success:              true,
 		Instruction:          instr,
 		ConfirmationRequired: result.ConfirmationNeeded,
@@ -139,7 +139,7 @@ func (h *InstructionHandler) handleAdd(ctx context.Context, msg *models.BusMessa
 
 func (h *InstructionHandler) handleList(ctx context.Context, msg *models.BusMessage) {
 	instructions := h.store.GetActive()
-	h.sendResponse(msg.ReplyTo, InstructionResponse{
+	h.sendResponse(msg, InstructionResponse{
 		Success:      true,
 		Instructions: instructions,
 	})
@@ -148,30 +148,30 @@ func (h *InstructionHandler) handleList(ctx context.Context, msg *models.BusMess
 func (h *InstructionHandler) handleDelete(ctx context.Context, msg *models.BusMessage) {
 	var req map[string]any
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		h.sendError(msg.ReplyTo, "invalid payload: "+err.Error())
+		h.sendError(msg, "invalid payload: "+err.Error())
 		return
 	}
 
 	id, _ := req["id"].(string)
 	if err := h.store.Delete(id); err != nil {
-		h.sendError(msg.ReplyTo, "delete error: "+err.Error())
+		h.sendError(msg, "delete error: "+err.Error())
 		return
 	}
 
-	h.sendResponse(msg.ReplyTo, InstructionResponse{Success: true})
+	h.sendResponse(msg, InstructionResponse{Success: true})
 }
 
 func (h *InstructionHandler) handleExecute(ctx context.Context, msg *models.BusMessage) {
 	var req map[string]any
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		h.sendError(msg.ReplyTo, "invalid payload: "+err.Error())
+		h.sendError(msg, "invalid payload: "+err.Error())
 		return
 	}
 
 	instrID, _ := req["id"].(string)
 	instr := h.store.Get(instrID)
 	if instr == nil {
-		h.sendError(msg.ReplyTo, "instruction not found: "+instrID)
+		h.sendError(msg, "instruction not found: "+instrID)
 		return
 	}
 
@@ -187,7 +187,7 @@ func (h *InstructionHandler) handleExecute(ctx context.Context, msg *models.BusM
 		Payload:   payload,
 	})
 
-	h.sendResponse(msg.ReplyTo, InstructionResponse{
+	h.sendResponse(msg, InstructionResponse{
 		Success:     true,
 		Instruction: instr,
 	})
@@ -196,36 +196,49 @@ func (h *InstructionHandler) handleExecute(ctx context.Context, msg *models.BusM
 func (h *InstructionHandler) handlePreview(ctx context.Context, msg *models.BusMessage) {
 	var req map[string]any
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		h.sendError(msg.ReplyTo, "invalid payload: "+err.Error())
+		h.sendError(msg, "invalid payload: "+err.Error())
 		return
 	}
 
 	input, _ := req["input"].(string)
 	parsed, err := h.parser.Parse(ctx, input)
 	if err != nil {
-		h.sendError(msg.ReplyTo, "parse error: "+err.Error())
+		h.sendError(msg, "parse error: "+err.Error())
 		return
 	}
 
 	result := h.verifier.Verify(parsed)
-	h.sendResponse(msg.ReplyTo, InstructionResponse{
+	h.sendResponse(msg, InstructionResponse{
 		Success:              true,
 		ParsedInstruction:    parsed,
 		ConfirmationRequired: result.ConfirmationNeeded,
 	})
 }
 
-func (h *InstructionHandler) sendResponse(replyTo string, resp InstructionResponse) {
-	payload, _ := json.Marshal(resp)
-	h.bus.Publish(replyTo, &models.BusMessage{
+func (h *InstructionHandler) sendResponse(req *models.BusMessage, resp InstructionResponse) {
+	if h.bus == nil || req == nil || req.ReplyTo == "" {
+		return
+	}
+	payload, err := json.Marshal(resp)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Error("instruction response marshal failed", "error", err)
+		}
+		return
+	}
+	h.bus.Publish(req.ReplyTo, &models.BusMessage{
 		ID:        id.Generate("resp_"),
+		Type:      models.MessageTypeResponse,
+		Topic:     req.ReplyTo,
+		Source:    "instruction-handler",
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
+		ReplyTo:   req.ID,
 	})
 }
 
-func (h *InstructionHandler) sendError(replyTo string, errMsg string) {
-	h.sendResponse(replyTo, InstructionResponse{
+func (h *InstructionHandler) sendError(req *models.BusMessage, errMsg string) {
+	h.sendResponse(req, InstructionResponse{
 		Success: false,
 		Error:   errMsg,
 	})
