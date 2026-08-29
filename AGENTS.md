@@ -82,7 +82,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace, executor, dispatcher) |
 | **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall) |
 | **Memory** | `internal/memory` (manager, episodic, task, ftstore) |
-| **Tools** | `internal/tools` (registry, builtin/*, mcp) |
+| **Tools** | `internal/tools` (registry, builtin/*, mcp), `internal/acp` (ACP client wire) |
 | **Security** | `internal/security` (engine, sanitizer, tirith, tls, fence), `internal/auth` (multi-user store: users/keys/expiry, quota+permission stubs) |
 | **Employee** | `internal/employee` (constitution, goal, goal_loop, enforcement, authority, manager) |
 | **Session** | `internal/session` (store, store_sqlite, threads, messages) |
