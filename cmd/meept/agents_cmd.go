@@ -24,6 +24,10 @@ defines its role, goals, constraints, and escalation policy. Employees
 operate in one of three tiers (1=autonomous, 2=plan-signoff, 3=approval
 required) and are continuously audited for constitution drift.
 
+This command is NOT the dispatcher agent roster. Specs in config/agents/
+and ~/.meept/agents/*/AGENT.md are loaded by the AgentRegistry for chat
+routing. Employees live in the bot/employee sqlite store (~/.meept/bots/).
+
 The constitution is the source of truth: every lifecycle operation
 (create, update, amend, delete) validates against it. Amendments route
 through the Plan signoff workflow before taking effect.

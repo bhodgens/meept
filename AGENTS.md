@@ -34,7 +34,7 @@ agent-tui ./bin/meept chat      # TUI testing
 ./bin/meept config get <key>    # Get value
 ./bin/meept config set <key> <v> # Set value
 
-# Agents (AI Employees)
+# Agents (AI Employees) — not the dispatcher roster in config/agents/
 ./bin/meept agents list                 # List employees
 ./bin/meept agents show <id>            # Full definition
 ./bin/meept agents create <def.json5>   # Register new employee
