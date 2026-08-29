@@ -1,0 +1,37 @@
+// default acp agent catalog.
+//
+// this is the default acp (agent client protocol) agent catalog shipped with
+// meept. each entry names an external agent subprocess that meept can spawn
+// and drive over json-rpc stdio when [acp] enabled = true.
+//
+// the catalog is unused while [acp] enabled is false (the default). per-agent
+// `enabled` is independent of that kill switch: even after you turn acp on,
+// only agents with enabled: true are launched.
+//
+// fields:
+//   id            unique catalog id (used as the agent name in acp_agent calls)
+//   description   optional human-readable label
+//   command       argv to spawn (first element is the executable)
+//   env           extra environment variables for the subprocess
+//   cwd           working directory; empty = inherit the session workdir
+//   default_mode  session mode hint (e.g. "read-only"); empty = agent default
+//   enabled       per-agent enable; ships false
+//
+// how to enable an agent:
+//   1. set [acp] enabled = true in meept.json5 / meept.toml
+//   2. set enabled: true on the entry below
+//   3. restart the daemon
+//
+{
+  "agents": [
+    {
+      "id": "codex",
+      "description": "OpenAI Codex via codex-acp adapter",
+      "command": ["npx", "-y", "@agentclientprotocol/codex-acp"],
+      "env": {},
+      "cwd": "",
+      "default_mode": "read-only",
+      "enabled": false,
+    },
+  ],
+}

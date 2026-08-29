@@ -97,6 +97,9 @@ enabled = false
 [mcp]
 enabled = false
 
+[acp]
+enabled = false
+
 [skills]
 enabled = false
 

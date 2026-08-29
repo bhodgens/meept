@@ -70,6 +70,7 @@ type Config struct {
 	Telegram            TelegramConfig            `json:"telegram"           toml:"telegram"`
 	Web                 WebConfig                 `json:"web"                toml:"web"`
 	MCP                 MCPConfig                 `json:"mcp"                toml:"mcp"`
+	ACP                 ACPConfig                 `json:"acp"                toml:"acp"`
 	Plugins             PluginsConfig             `json:"plugins"            toml:"plugins"`
 	Workspace           WorkspaceConfig           `json:"workspace"          toml:"workspace"`
 	Skills              SkillsConfig              `json:"skills"             toml:"skills"`
@@ -1764,6 +1765,36 @@ type MCPConfig struct {
 	ConfigFile string `json:"config_file" toml:"config_file"`
 }
 
+// ACPConfig holds Agent Client Protocol client settings.
+type ACPConfig struct {
+	Enabled        bool   `json:"enabled"         toml:"enabled"`
+	AgentsFile     string `json:"agents_file"     toml:"agents_file"`
+	DialTimeout    int    `json:"dial_timeout"    toml:"dial_timeout"`
+	CallTimeout    int    `json:"call_timeout"    toml:"call_timeout"`
+	MaxAgents      int    `json:"max_agents"      toml:"max_agents"`
+	PermissionMode string `json:"permission_mode" toml:"permission_mode"`
+}
+
+// Validate checks the [acp] section. Invalid timeouts, agent caps, or
+// permission modes fail fast at config load.
+func (c *ACPConfig) Validate() error {
+	if c.DialTimeout <= 0 {
+		return fmt.Errorf("dial_timeout must be > 0")
+	}
+	if c.CallTimeout <= 0 {
+		return fmt.Errorf("call_timeout must be > 0")
+	}
+	if c.MaxAgents < 1 || c.MaxAgents > 32 {
+		return fmt.Errorf("max_agents must be between 1 and 32")
+	}
+	switch c.PermissionMode {
+	case "permissive", "deny":
+		return nil
+	default:
+		return fmt.Errorf("permission_mode must be \"permissive\" or \"deny\"")
+	}
+}
+
 // PluginsConfig holds plugin settings.
 type PluginsConfig struct {
 	Enabled   bool   `json:"enabled"   toml:"enabled"`
@@ -2391,6 +2422,14 @@ func DefaultConfig() *Config {
 		MCP: MCPConfig{
 			Enabled:    false,
 			ConfigFile: "~/.meept/mcp_servers.json",
+		},
+		ACP: ACPConfig{
+			Enabled:        false,
+			AgentsFile:     "~/.meept/acp_agents.json5",
+			DialTimeout:    10,
+			CallTimeout:    120,
+			MaxAgents:      3,
+			PermissionMode: "permissive",
 		},
 		Plugins: PluginsConfig{
 			Enabled:   true,
@@ -3091,6 +3130,10 @@ func (c *Config) ValidateAll() error {
 	// Validate [agent.tools] schema mode (loop-economics leaf 02).
 	if err := c.Agent.Tools.Validate(); err != nil {
 		return fmt.Errorf("agent config: %w", err)
+	}
+
+	if err := c.ACP.Validate(); err != nil {
+		return fmt.Errorf("acp config: %w", err)
 	}
 
 	return nil

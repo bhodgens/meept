@@ -234,6 +234,31 @@ MCP (Model Context Protocol) servers are configured separately from LLM runtimes
 
 The same `${VAR}` expansion used by `spawn_command` here in `llm-lifecycle.md` also applies to MCP server `env` maps, with one difference: MCP `${VAR}` placeholders are passed through to the subprocess environment at transport-creation time inside `Manager.StartServer`, not expanded by meept itself. Use `${VAR:-default}` to provide a fallback for unset vars.
 
+## ACP Agent Configuration
+
+ACP (Agent Client Protocol) clients are configured in the `[acp]` section of `meept.json5` / `meept.toml`. The section is **disabled by default**: nothing is spawned, and the catalog file is not read, until `enabled` is set to `true`.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `false` | Master kill switch. Off = zero ACP behavior. |
+| `agents_file` | `~/.meept/acp_agents.json5` | JSON5 catalog of external ACP agents. |
+| `dial_timeout` | `10` | Seconds to wait for the subprocess JSON-RPC handshake. |
+| `call_timeout` | `120` | Seconds to wait for an ACP method call. |
+| `max_agents` | `3` | Concurrent ACP subprocesses (1–32). |
+| `permission_mode` | `"permissive"` | `"permissive"` or `"deny"`. |
+
+The catalog template ships at `config/acp_agents.json5` (copied to `~/.meept/acp_agents.json5` on install). Each entry has its own `enabled` flag (also false by default), independent of `[acp] enabled`.
+
+```toml
+[acp]
+enabled = false
+agents_file = "~/.meept/acp_agents.json5"
+dial_timeout = 10
+call_timeout = 120
+max_agents = 3
+permission_mode = "permissive"
+```
+
 ## Supported Runtimes
 
 ### llama.cpp

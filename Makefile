@@ -129,6 +129,7 @@ CONFIG_FILES := \
 	$(MEEPT_HOME)/presets.json5 \
 	$(MEEPT_HOME)/client.json5 \
 	$(MEEPT_HOME)/mcp_servers.json5 \
+	$(MEEPT_HOME)/acp_agents.json5 \
 	$(MEEPT_HOME)/q_agent.json5 \
 	$(MEEPT_HOME)/menubar.json5
 

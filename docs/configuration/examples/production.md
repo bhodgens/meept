@@ -103,6 +103,14 @@ secret_key = "${MEEPT_WEB_SECRET}"
 enabled = true
 config_file = "~/.meept/mcp_servers.json"
 
+[acp]
+enabled = false
+agents_file = "~/.meept/acp_agents.json5"
+dial_timeout = 10
+call_timeout = 120
+max_agents = 3
+permission_mode = "permissive"
+
 [plugins]
 enabled = true
 directory = "~/.meept/plugins"
