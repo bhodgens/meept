@@ -89,6 +89,10 @@ type AgentRegistry struct {
 	// Queues config from config file (overrides code defaults)
 	queueConfig config.AgentQueuesConfig
 
+	// guardsCfg holds [agent.guards] settings from the config file
+	// (leaf 07); applied to every loop created by this registry.
+	guardsCfg config.AgentGuardsConfig
+
 	// db is the SQLite connection for queue persistence (may be nil).
 	db *sql.DB
 
@@ -136,6 +140,10 @@ type RegistryConfig struct {
 	// When non-zero, these values override the code defaults.
 	Queues config.AgentQueuesConfig
 
+	// Guards holds [agent.guards] loop-safety settings (leaf 07). Zero
+	// values normalize to ship-on defaults at loop construction.
+	Guards config.AgentGuardsConfig
+
 	// DB is an optional SQLite connection used for queue persistence.
 	// When set, follow-up messages are persisted to the queued_followups table.
 	DB *sql.DB
@@ -169,6 +177,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		artifactManager:       cfg.ArtifactManager,
 		ttsrManager:           cfg.TTSRManager,
 		queueConfig:           cfg.Queues,
+		guardsCfg:             cfg.Guards,
 		db:                    cfg.DB,
 		sharedConvStore:       NewConversationStore(cfg.ConversationStoreSize),
 	}
@@ -313,6 +322,20 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		Purpose:               spec.Purpose,
 		MaxConversationTokens: spec.Constraints.MaxConversationTokens,
 		GlobalRules:           r.globalRules,
+		Guards:                GuardConfig{}.Normalized(),
+	}
+	if r.guardsCfg != (config.AgentGuardsConfig{}) {
+		g := r.guardsCfg
+		config.NormalizeAgentGuardsDefaults(&g)
+		agentCfg.Guards = GuardConfig{
+			NoProgressWarnAt:        g.NoProgressWarnAt,
+			NoProgressVetoAt:        g.NoProgressVetoAt,
+			GracefulAfterVetoes:     g.GracefulAfterVetoes,
+			DuplicateSearchRollback: g.DuplicateSearchRollback,
+			RollbackWindow:          g.RollbackWindow,
+			ReasoningTokenCap:       g.ReasoningTokenCap,
+			ReasoningStreakTurns:    g.ReasoningStreakTurns,
+		}
 	}
 
 	opts := []LoopOption{

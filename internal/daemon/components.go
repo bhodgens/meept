@@ -1994,6 +1994,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			ArtifactManager:       c.ArtifactManager,
 			TTSRManager:           c.TTSRManager,
 			Queues:                cfg.Agent.Queues,
+			Guards:                cfg.Agent.Guards,
 			DB:                    getQueueDB(c),
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
