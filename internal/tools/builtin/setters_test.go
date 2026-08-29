@@ -54,6 +54,8 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		{"lspWriteNotifier.SetFenceChecker", func() { (&lspWriteNotifier{}).SetFenceChecker(nil) }},
 		// project_info session-scoped working directory setter
 		{"ProjectInfoTool.SetWorkingDirFunc", func() { (&ProjectInfoTool{}).SetWorkingDirFunc(nil) }},
+		{"ACPAgentTool.SetManager", func() { (*ACPAgentTool)(nil).SetManager(nil) }},
+		{"ACPAgentTool.SetEnabled", func() { (*ACPAgentTool)(nil).SetEnabled(false) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
