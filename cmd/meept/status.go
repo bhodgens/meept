@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
@@ -77,10 +78,44 @@ func runStatus(jsonOutput bool) error {
 	}
 
 	if jsonOutput {
-		return printStatusJSON(status, pid)
+		return printStatusJSON(status, pid, client)
 	}
 
 	printStatusText(status, pid)
+
+	// Text output: append daemon health block when reachable (report-only).
+	if err := appendHealthText(client); err != nil {
+		fmt.Printf("health unavailable: %v\n", err)
+	}
+
+	return nil
+}
+
+// fetchDaemonHealth calls daemon.health over the connected client.
+func fetchDaemonHealth(client transport.Client) (map[string]any, error) {
+	raw, err := client.Call("daemon.health", nil)
+	if err != nil {
+		return nil, err
+	}
+	var health map[string]any
+	if err := json.Unmarshal(raw, &health); err != nil {
+		return nil, fmt.Errorf("failed to parse daemon.health response: %w", err)
+	}
+	return health, nil
+}
+
+// appendHealthText prints a lowercase health block for text status output.
+func appendHealthText(client transport.Client) error {
+	health, err := fetchDaemonHealth(client)
+	if err != nil {
+		return nil // best-effort enrichment only
+	}
+	fmt.Println()
+	fmt.Println("health")
+	fmt.Println("------")
+	fmt.Printf("  overall:    %v\n", health["ok"])
+	fmt.Printf("  uptime:     %vs\n", health["uptime_s"])
+	fmt.Printf("  version:    %v\n", health["version"])
 	return nil
 }
 
@@ -157,7 +192,7 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) {
 	fmt.Printf("  Bus Subs:   %d\n", status.BusSubscribers)
 }
 
-func printStatusJSON(status *types.DaemonStatusResponse, pid int) error {
+func printStatusJSON(status *types.DaemonStatusResponse, pid int, client transport.Client) error {
 	out := map[string]any{
 		"status":                status.Status,
 		"pid":                   pid,
@@ -179,5 +214,16 @@ func printStatusJSON(status *types.DaemonStatusResponse, pid int) error {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
+	out["health"] = buildHealthBlock(client)
 	return enc.Encode(out)
+}
+
+// buildHealthBlock fetches daemon.health for JSON status; returns nil when the
+// daemon doesn't expose it so the block is simply omitted.
+func buildHealthBlock(client transport.Client) map[string]any {
+	health, err := fetchDaemonHealth(client)
+	if err != nil {
+		return nil
+	}
+	return health
 }

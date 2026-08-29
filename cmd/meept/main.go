@@ -18,7 +18,7 @@ import (
 var (
 	// Global flags
 	socketPath    string
-	rootCwd       string  // working directory for session
+	rootCwd       string // working directory for session
 	stateDir      string
 	debugFile     string // Empty = no debug, "-" = stderr, "filename" = file
 	transportFlag string // "rpc" or "http"
@@ -144,6 +144,7 @@ Analytics:
 	// Add subcommands
 	rootCmd.AddCommand(newChatCmd())
 	rootCmd.AddCommand(newStatusCmd())
+	rootCmd.AddCommand(newDoctorCmd())
 	rootCmd.AddCommand(newDaemonCmd())
 	rootCmd.AddCommand(newJobsCmd())
 	rootCmd.AddCommand(newMemoryCmd())
