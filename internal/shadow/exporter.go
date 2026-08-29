@@ -235,12 +235,12 @@ func (e *Exporter) exportDPO(ctx context.Context, writer *bufio.Writer, opts Exp
 		// Build DPO format
 		// Format: {"prompt": "...", "chosen": "...", "rejected": "...", "domain": "...", "task_type": "...", "margin": ...}
 		entry := map[string]any{
-			"prompt":   formatPrompt(pair.PromptMessages),
-			"chosen":   pair.ChosenResponse,
-			"rejected": pair.RejectedResponse,
-			"domain":   string(pair.Domain),
+			"prompt":    formatPrompt(pair.PromptMessages),
+			"chosen":    pair.ChosenResponse,
+			"rejected":  pair.RejectedResponse,
+			"domain":    string(pair.Domain),
 			"task_type": string(pair.TaskType),
-			"margin":   pair.Margin,
+			"margin":    pair.Margin,
 		}
 
 		data, err := json.Marshal(entry)
@@ -453,6 +453,8 @@ func formatPrompt(messages []Message) string {
 }
 
 // newDedupState creates a new deduplication state with the given similarity threshold.
+// A threshold <= 0 disables near-duplicate detection; exact-duplicate (hash)
+// short-circuiting still applies.
 func newDedupState(threshold float64) *dedupState {
 	return &dedupState{
 		seenHashes:    make(map[string]bool),
@@ -461,8 +463,11 @@ func newDedupState(threshold float64) *dedupState {
 	}
 }
 
-// isDuplicate checks if the given text is semantically similar to any previously seen text.
-// It uses both hash-based and token-based Jaccard similarity.
+// isDuplicate checks if the given text is a duplicate of any previously seen
+// text. Exact duplicates (identical first-100-char fingerprint) short-circuit
+// before any similarity work. When the configured threshold is > 0,
+// near-duplicates (token-multiset Jaccard similarity >= threshold) are also
+// reported.
 func (d *dedupState) isDuplicate(text string) bool {
 	// Quick hash check first
 	hash := textHash(text)
@@ -477,11 +482,15 @@ func (d *dedupState) isDuplicate(text string) bool {
 		tokenSet[t]++
 	}
 
-	// Check semantic similarity against all seen token sets
-	for _, seen := range d.seenTokenSets {
-		sim := jaccardSimilarity(tokenSet, seen)
-		if sim >= d.threshold {
-			return true
+	// Near-duplicate detection honors DedupSimilarityThreshold. A
+	// non-positive threshold disables it entirely.
+	if d.threshold > 0 {
+		// Check semantic similarity against all seen token sets
+		for _, seen := range d.seenTokenSets {
+			sim := jaccardSimilarity(tokenSet, seen)
+			if sim >= d.threshold {
+				return true
+			}
 		}
 	}
 

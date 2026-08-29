@@ -82,8 +82,13 @@ type ShadowRecord struct {
 	// (e.g. "skill:coding" or "alias:default"). Populated from agent-loop context
 	// at capture time. Not persisted in shadow_records — flows transiently into
 	// PreferencePair via NewPreferencePair.
-	RoutingPath      string     `json:"routing_path,omitempty"`
-	IsHighQuality    bool       `json:"is_high_quality"`
+	RoutingPath string `json:"routing_path,omitempty"`
+	// EvalPassed is an optional oracle verdict from an eval harness. When
+	// non-nil it dominates heuristic correctness scoring (see scorer.go).
+	// It is a transient in-memory field: the shadow_records schema does not
+	// persist it, and it flows into scoring/export at capture time.
+	EvalPassed    *bool `json:"eval_passed,omitempty"`
+	IsHighQuality bool  `json:"is_high_quality"`
 }
 
 // NewShadowRecord creates a new shadow record with generated ID.

@@ -355,11 +355,22 @@ func (t *TeacherClient) checkLimits(ctx context.Context) error {
 	return nil
 }
 
+// calculateCost computes the USD cost of a teacher response from its real
+// token counts: (inTokens*inPrice + outTokens*outPrice) per million tokens.
+func (t *TeacherClient) calculateCost(cfg *llm.ModelConfig, usage llm.TokenUsage) float64 {
+	if cfg == nil {
+		return 0
+	}
+	inputCost := float64(usage.PromptTokens) * cfg.CostPerMillionInput / 1_000_000.0
+	outputCost := float64(usage.CompletionTokens) * cfg.CostPerMillionOutput / 1_000_000.0
+	return inputCost + outputCost
+}
+
 func (t *TeacherClient) recordUsage(ctx context.Context, cfg *llm.ModelConfig, response *llm.Response) {
-	// Calculate cost outside the lock (no shared state needed)
-	inputCost := float64(response.Usage.PromptTokens) * cfg.CostPerMillionInput / 1_000_000.0
-	outputCost := float64(response.Usage.CompletionTokens) * cfg.CostPerMillionOutput / 1_000_000.0
-	actualCost := inputCost + outputCost
+	// Cost is derived from the response's REAL token counts, priced per
+	// million tokens (matches internal/llm provider accounting). Never a
+	// flat per-call estimate.
+	actualCost := t.calculateCost(cfg, response.Usage)
 
 	// Update counters under lock, then do I/O outside lock
 	t.mu.Lock()

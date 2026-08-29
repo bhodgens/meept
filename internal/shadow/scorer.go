@@ -58,6 +58,13 @@ type ScoreResult struct {
 	Method        string             `json:"method"`
 }
 
+// maxCompletenessContribution caps how many points the completeness
+// dimension may add to the weighted score. Completeness is largely
+// length-driven, so uncapped it rewards verbose padding (the "length trap"):
+// a long, well-formatted wrong answer must not outscore a short oracle-pass
+// answer just by being long.
+const maxCompletenessContribution = 0.3
+
 // Score evaluates a response based on the configured method.
 func (s *Scorer) Score(ctx context.Context, record *ShadowRecord) (*ScoreResult, error) {
 	switch s.config.Method {
@@ -124,11 +131,29 @@ func (s *Scorer) scoreHeuristic(record *ShadowRecord) *ScoreResult {
 	// Score style
 	dimensions["style"] = s.scoreStyle(response)
 
+	// Oracle hook: when an eval result is attached to the record, it
+	// dominates correctness regardless of length or formatting heuristics.
+	// A long, well-formatted wrong answer is still wrong.
+	if record.EvalPassed != nil {
+		if *record.EvalPassed {
+			dimensions["correctness"] = 1.0
+		} else {
+			dimensions["correctness"] = 0.0
+		}
+	}
+
 	// Calculate weighted score
 	score := dimensions["relevance"]*weights.Relevance +
 		dimensions["completeness"]*weights.Completeness +
 		dimensions["correctness"]*weights.Correctness +
 		dimensions["style"]*weights.Style
+
+	// Length-trap cap: completeness is largely length-driven, so its
+	// weighted contribution is capped (maxCompletenessContribution of the
+	// total). Long, well-formatted padding cannot buy a passing score.
+	if contribution := dimensions["completeness"] * weights.Completeness; contribution > maxCompletenessContribution {
+		score -= contribution - maxCompletenessContribution
+	}
 
 	return &ScoreResult{
 		Score:         score,

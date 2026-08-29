@@ -32,10 +32,6 @@ type Manager struct {
 	// Metrics
 	metrics *Metrics
 
-	// Auto-train
-	autoTrainStop chan struct{}
-	autoTrainDone chan struct{}
-
 	// Hot-swap coordinator wires shadow adapter activation into the
 	// serving LLM client via OllamaActivator + HotSwapCallback.
 	hotSwap hotSwapCoordinator
@@ -146,9 +142,13 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		"teacher_model", cfg.Config.Teacher.Model,
 	)
 
-	// Start auto-train background check if enabled
-	if cfg.Config.Adapters.AutoTrain && cfg.Config.Adapters.TrainThreshold > 0 {
-		m.startAutoTrainChecker()
+	// Shadow is a data collector (export-only): the daemon never trains.
+	// Auto-train lives in the sidecar. If the config asks for it, warn and
+	// continue — no ticker, no goroutine, no training invocation here.
+	if cfg.Config.Adapters.AutoTrain {
+		cfg.Logger.Warn("auto-train is sidecar-only; ignored",
+			"component", "shadow",
+		)
 	}
 
 	return m, nil
@@ -709,94 +709,10 @@ func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID str
 	}
 }
 
-// startAutoTrainChecker starts a background goroutine that periodically checks
-// if enough preference pairs are available to trigger training.
-func (m *Manager) startAutoTrainChecker() {
-	m.autoTrainStop = make(chan struct{})
-	m.autoTrainDone = make(chan struct{})
-
-	// Parse schedule or use default (check every hour)
-	checkInterval := time.Hour
-	if m.config.Adapters.TrainSchedule != "" {
-		// Simple parsing: "1h", "30m", "24h"
-		if d, err := time.ParseDuration(m.config.Adapters.TrainSchedule); err == nil {
-			checkInterval = d
-		}
-	}
-
-	m.logger.Info("Auto-train checker started",
-		"interval", checkInterval,
-		"threshold", m.config.Adapters.TrainThreshold,
-	)
-
-	go func() {
-		defer close(m.autoTrainDone)
-		ticker := time.NewTicker(checkInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-m.autoTrainStop:
-				return
-			case <-ticker.C:
-				m.checkAutoTrain()
-			}
-		}
-	}()
-}
-
-// checkAutoTrain checks if training threshold is met and triggers training if so.
-func (m *Manager) checkAutoTrain() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	count, err := m.GetPreferencePairCount(ctx)
-	if err != nil {
-		m.logger.Warn("Auto-train check failed", "error", err)
-		return
-	}
-
-	threshold := m.config.Adapters.TrainThreshold
-	if count >= threshold {
-		m.logger.Info("Auto-train threshold met",
-			"pairs", count,
-			"threshold", threshold,
-		)
-
-		// Export DPO data for training
-		timestamp := time.Now().Format("20060102-150405")
-		outputPath := filepath.Join(expandPath(m.config.Export.OutputDir), fmt.Sprintf("auto_dpo_%s.jsonl", timestamp))
-
-		result, err := m.Export(ctx, ExportOptions{
-			Format:         FormatDPO,
-			OutputPath:     outputPath,
-			MarkAsExported: true,
-		})
-		if err != nil {
-			m.logger.Error("Auto-train export failed", "error", err)
-			return
-		}
-
-		m.logger.Info("Auto-train data exported",
-			"records", result.RecordsExported,
-			"path", result.OutputPath,
-		)
-
-		// Note: Actual training execution would be triggered here if a trainer is configured.
-		// For now, we just export the data and log that training should be triggered.
-		// The actual training is handled by the CLI 'shadow adapters train' command.
-	}
-}
-
-// StopAutoTrain stops the auto-train checker goroutine.
-func (m *Manager) StopAutoTrain() {
-	if m.autoTrainStop != nil {
-		close(m.autoTrainStop)
-		<-m.autoTrainDone
-		m.autoTrainStop = nil
-		m.autoTrainDone = nil
-	}
-}
+// NOTE (sidecar-only contract): shadow is a data collector. Training
+// invocation lives in the sidecar, never in the daemon. Config AutoTrain=true
+// is rejected at startup with a warn; there is deliberately no checkAutoTrain
+// function to grep — the warn in NewManager is the anchor.
 
 // Close closes all resources. It marks the manager as shut down (so in-flight
 // ProcessRecord calls exit early), waits for background goroutines to finish,
@@ -806,9 +722,6 @@ func (m *Manager) Close() error {
 	m.mu.Lock()
 	m.shutdown = true
 	m.mu.Unlock()
-
-	// Stop auto-train checker first
-	m.StopAutoTrain()
 
 	// Wait for in-flight async CaptureInteraction/CaptureToolInteraction goroutines
 	m.wg.Wait()
