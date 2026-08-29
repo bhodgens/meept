@@ -839,6 +839,7 @@ When enabled, the WebSocket handler subscribes to the message bus and broadcasts
 | GET | `/mcp/sse` | MCP Server-Sent Events stream | `mcp: true` |
 | GET | `/api/v1/mcp/servers` | List configured MCP client servers + runtime stats | — |
 | PUT | `/api/v1/mcp/servers/{name}/enabled` | Toggle a client server's enabled flag | — |
+| GET | `/api/v1/acp/agents` | List ACP client agents + live session state | — |
 
 The MCP endpoints allow AI agents (Claude Code, Cline, etc.) to interact with meept via the Model Context Protocol.
 
@@ -923,6 +924,46 @@ curl -X PUT http://localhost:8081/api/v1/mcp/servers/github/enabled \
 Response: the updated `ServerStatusEntry` for that server.
 
 The handler reads the on-disk config fresh, mutates only the named entry's `Enabled` field, writes the file atomically (temp file + rename), then triggers `Manager.Reload`. Lost-update is avoided because the on-disk file — not a cached copy — is the source of truth for the write.
+
+### ACP Client Agents
+
+These endpoints report meept's ACP *client* catalog (the external agents meept launches as subprocesses). They share the same auth middleware as `/api/v1/mcp/servers`. Disabled or missing manager returns 200 with an empty list — never 500.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/acp/agents` | List catalog agents with enabled/running/state |
+
+```bash
+curl http://localhost:8081/api/v1/acp/agents
+```
+
+Response:
+
+```json
+{
+  "enabled": false,
+  "agents": []
+}
+```
+
+When `[acp] enabled = true`, `agents` lists catalog entries:
+
+```json
+{
+  "enabled": true,
+  "agents": [
+    {
+      "id": "codex",
+      "enabled": true,
+      "running": true,
+      "state": "ready",
+      "uptime_s": 0
+    }
+  ]
+}
+```
+
+`state` is `ready`, `busy`, `closed`, `starting`, or empty when no live session. `uptime_s` is 0 until sessions track uptime. The Flutter GUI consumes this endpoint (leaf 09).
 
 ## Error Responses
 

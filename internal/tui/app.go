@@ -140,6 +140,7 @@ type App struct {
 	usersModal          *UsersModal
 	pendingChangesModal *modals.PendingChangesModal
 	pendingChangesCount int // status bar indicator (0 hides it)
+	acpLive             int // live non-closed acp sessions; 0 hides the token
 
 	// Current session
 	currentSession *types.Session
@@ -2613,6 +2614,10 @@ func (a *App) renderStatusBar() string {
 		// and only when no transient status message is taking the bar.
 		if a.pendingChangesCount > 0 {
 			parts = append(parts, a.styles.Warning.Render(fmt.Sprintf("%d pending changes (ctrl+d)", a.pendingChangesCount)))
+		}
+
+		if a.acpLive > 0 {
+			parts = append(parts, a.styles.Muted.Render(fmt.Sprintf("acp:%d", a.acpLive)))
 		}
 
 		// Add context-sensitive quick actions

@@ -54,6 +54,22 @@ and can `Reply` to inbound requests.
 Catalog template: `config/acp_agents.json5` (copied on `make install`).
 Each entry has `id`, `command`, `enabled` (per-agent, also default false).
 
+## HTTP status
+
+`GET /api/v1/acp/agents` (same auth as `/api/v1/mcp/servers`) returns:
+
+```json
+{"enabled": false, "agents": []}
+```
+
+when ACP is off or the manager is nil (still 200). When enabled, each agent has
+`id`, `enabled`, `running`, `state`, and `uptime_s` (0 if untracked). RPC method
+`acp.list` returns the same envelope.
+
+Security: `acp_agent` verbs `launch`/`send` are HIGH; `read`/`stop` are LOW.
+See [http-api](../reference/http-api.md#acp-client-agents). The Flutter GUI
+consumes this endpoint in the same tree (leaf 09).
+
 ## Edge Cases
 
 - Missing catalog file loads as empty, not an error.

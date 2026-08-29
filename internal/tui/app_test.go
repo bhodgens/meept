@@ -202,6 +202,20 @@ func TestApp_RenderStatusBar(t *testing.T) {
 	}
 }
 
+func TestApp_RenderStatusBar_ACPToken(t *testing.T) {
+	app := createTestApp()
+	statusBar := app.renderStatusBar()
+	if strings.Contains(statusBar, "acp:") {
+		t.Error("expected no acp token when acpLive=0")
+	}
+
+	app.acpLive = 2
+	statusBar = app.renderStatusBar()
+	if !strings.Contains(statusBar, "acp:2") {
+		t.Errorf("expected acp:2 in status bar, got %q", ansi.Strip(statusBar))
+	}
+}
+
 func TestApp_RenderError(t *testing.T) {
 	app := createTestApp()
 	app.err = &testError{"connection failed"}

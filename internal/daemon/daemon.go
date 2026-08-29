@@ -259,6 +259,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("MCP RPC handlers registered")
 		}
 
+		// Always register acp.list even when the manager is nil so HTTP
+		// GET /api/v1/acp/agents returns the disabled envelope, never 500.
+		acpRPCHandler := rpc.NewACPHandler(components.ACPManager)
+		acpRPCHandler.RegisterACPMethods(rpcServer)
+
 		// Register scheduler RPC handlers (direct Go handlers override bus proxy)
 		if components.Scheduler != nil {
 			scheduler.RegisterRPCHandlers(rpcServer, components.Scheduler)

@@ -1416,6 +1416,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	if s.rpcCall != nil {
 		mux.HandleFunc("GET /api/v1/mcp/servers", s.handleMCPServersList)
 		mux.HandleFunc("PUT /api/v1/mcp/servers/{name}/enabled", s.handleMCPServerSetEnabled)
+		mux.HandleFunc("GET /api/v1/acp/agents", s.handleACPAgentsList)
 
 		// Epistemic memory endpoints (dispatched via rpcCall to memory.* handlers)
 		mux.HandleFunc("POST /api/v1/memory/claims", s.handleEpistemicRetainClaim)

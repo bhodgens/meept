@@ -53,6 +53,13 @@ meept mcp-chat-server
 
 See [Agent Lateral Interrogation Howto](agent-lateral-interrogation-howto.md) for detailed usage patterns.
 
+### ACP Client Agents
+
+Meept can *drive* external coding agents (codex-acp, opencode acp) over the
+Agent Client Protocol. This is the opposite of `meept mcp-chat-server`: MCP
+exposes meept to other agents; ACP lets meept launch them. Disabled by default
+(`[acp] enabled = false`). Status: `GET /api/v1/acp/agents`. See [ACP](acp.md).
+
 ### Telegram Bot Integration
 - **Two-Way Communication**: Send/receive messages via Telegram
 - **Bot Interface**: Standard Telegram bot API
