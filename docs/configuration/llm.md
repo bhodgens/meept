@@ -145,6 +145,21 @@ Model aliases provide cooldown-based failover for high-availability:
 - **models**: Ordered list of fallback models
 - **timeout**: Cooldown period after failure (seconds)
 - **max_fails**: Maximum consecutive failures before switching
+- **default_model**: Optional model ID to revert to after cooldown expires
+- **balanced_sticky_requests**: When true, pins each caller to a single model
+
+Example with advanced options:
+```json5
+"model_aliases": {
+  "coder": {
+    "models": ["zai/glm-5.2", "ollama/llama3.2"],
+    "timeout": 30,
+    "max_fails": 3,
+    "default_model": "zai/glm-5.2",
+    "balanced_sticky_requests": true
+  }
+}
+```
 
 ## Budget Configuration
 

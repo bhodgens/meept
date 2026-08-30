@@ -220,7 +220,7 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 				return nil, fmt.Errorf("LLM classifier unavailable (cooldown, retry after %s)",
 					unavailUntil.Truncate(time.Second).Format(time.TimeOnly))
 			}
-			nextCfg, rerr := c.resolver.ResolveForAlias(c.aliasName)
+			nextCfg, rerr := c.resolver.ResolveForAlias(c.aliasName, "")
 			if rerr != nil || nextCfg == nil {
 				return nil, fmt.Errorf("LLM classifier unavailable (cooldown until %s) and no alternate candidate: %w",
 					unavailUntil.Truncate(time.Second).Format(time.TimeOnly), rerr)
@@ -301,7 +301,7 @@ func (c *LLMClassifier) chatWithFailover(ctx context.Context, messages []llm.Cha
 	// Fail over: record the failure, advance to the next candidate, swap the
 	// client config, and retry once.
 	c.resolver.RecordAliasFailure(c.aliasName, err)
-	nextCfg, rerr := c.resolver.ResolveForAlias(c.aliasName)
+	nextCfg, rerr := c.resolver.ResolveForAlias(c.aliasName, "")
 	if rerr != nil || nextCfg == nil {
 		return nil, fmt.Errorf("llm classification: %w (no alternate candidate: %v)", err, rerr)
 	}

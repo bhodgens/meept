@@ -46,6 +46,43 @@ When a model fails, the cooldown period follows exponential backoff:
 
 After `max_fails` consecutive failures, the system automatically rotates to the next model in the list. If all models are exhausted, the global default model is used as a fallback.
 
+### Advanced Features
+
+#### Default Model Reversion
+
+When `default_model` is set, the alias reverts to the specified model after cooldown expires instead of continuing round-robin:
+
+```json5
+"model_aliases": {
+  "coder": {
+    "models": ["zai/glm-4.7", "ollama/llama3.2"],
+    "default_model": "zai/glm-4.7",
+    "timeout": 30,
+    "max_fails": 3
+  }
+}
+```
+
+#### Sticky Request Distribution
+
+When `balanced_sticky_requests` is enabled, each concurrent caller (session/task) is pinned to a single model within the alias:
+
+```json5
+"model_aliases": {
+  "coder": {
+    "models": ["zai/glm-5.2", "ollama/llama3.2", "zai/glm-4.7"],
+    "balanced_sticky_requests": true,
+    "timeout": 30,
+    "max_fails": 3
+  }
+}
+```
+
+Benefits:
+- Different sessions use different models (load distribution)
+- Each session sees consistent model behavior
+- Pins release automatically when the pinned model enters cooldown
+
 ### Usage in Agent Specs
 
 Agent specs can reference an alias by name in the `Model` field:

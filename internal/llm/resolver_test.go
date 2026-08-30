@@ -120,7 +120,7 @@ func TestResolver_ResolveForAlias(t *testing.T) {
 	resolver := NewResolver(cfg, logger)
 
 	// Should return the first model initially
-	modelConfig, err := resolver.ResolveForAlias("coder")
+	modelConfig, err := resolver.ResolveForAlias("coder", "")
 	if err != nil {
 		t.Fatalf("ResolveForAlias failed: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestResolver_RotateToNextModel(t *testing.T) {
 	resolver := NewResolver(cfg, logger)
 
 	// Initial model
-	m0, err := resolver.ResolveForAlias("coder")
+	m0, err := resolver.ResolveForAlias("coder", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestResolver_RotateToNextModel(t *testing.T) {
 	}
 
 	// Verify ResolveForAlias now returns the rotated model
-	m2, _ := resolver.ResolveForAlias("coder")
+	m2, _ := resolver.ResolveForAlias("coder", "")
 	if m2.ModelID != m1.ModelID {
 		t.Errorf("expected %s after rotation, got %s", m1.ModelID, m2.ModelID)
 	}
@@ -203,7 +203,7 @@ func TestResolver_ResolveForAlias_NotFound(t *testing.T) {
 
 	resolver := NewResolver(cfg, logger)
 
-	_, err := resolver.ResolveForAlias("nonexistent")
+	_, err := resolver.ResolveForAlias("nonexistent", "")
 	if err == nil {
 		t.Error("Expected error for nonexistent alias")
 	}
@@ -271,7 +271,7 @@ func TestResolver_Rotation(t *testing.T) {
 	resolver := NewResolver(cfg, logger)
 
 	// Get initial model
-	model1, _ := resolver.ResolveForAlias("coder")
+	model1, _ := resolver.ResolveForAlias("coder", "")
 	if model1.ModelID != "glm-4.7" {
 		t.Errorf("Expected first model 'glm-4.7', got '%s'", model1.ModelID)
 	}
@@ -282,7 +282,7 @@ func TestResolver_Rotation(t *testing.T) {
 	}
 
 	// Next resolution should trigger rotation
-	model2, _ := resolver.ResolveForAlias("coder")
+	model2, _ := resolver.ResolveForAlias("coder", "")
 	if model2.ModelID != "llama3.2" {
 		t.Errorf("Expected rotation to 'llama3.2', got '%s'", model2.ModelID)
 	}
@@ -495,7 +495,7 @@ func TestResolver_RecordsDecisionsToRoutingLogger(t *testing.T) {
 	r.SetRoutingLogger(rl)
 
 	// Trigger ResolveForAlias (the production hot path).
-	mc, err := r.ResolveForAlias("default")
+	mc, err := r.ResolveForAlias("default", "")
 	if err != nil {
 		t.Fatalf("ResolveForAlias: %v", err)
 	}

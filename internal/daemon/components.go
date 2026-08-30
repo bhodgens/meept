@@ -661,7 +661,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// caps can be derived from its declared max_output. Best-effort: when
 		// resolution fails, caps fall back to the classification floor.
 		if c.LLMResolver != nil {
-			if aliasCfg, err := c.LLMResolver.ResolveForAlias(classifierRef); err == nil {
+			if aliasCfg, err := c.LLMResolver.ResolveForAlias(classifierRef, ""); err == nil {
 				c.ClassifierModelConfig = aliasCfg
 				logger.Info("Resolved model alias", "alias", classifierRef, "model", aliasCfg.ModelID)
 			}
@@ -3506,7 +3506,7 @@ func (c *Components) Start(ctx context.Context) error {
 			// fallback.
 			var modelCfg *llm.ModelConfig
 			if modelAlias != "" {
-				if resolved, err := c.LLMResolver.ResolveForAlias(modelAlias); err == nil && resolved != nil {
+				if resolved, err := c.LLMResolver.ResolveForAlias(modelAlias, ""); err == nil && resolved != nil {
 					modelCfg = resolved
 				}
 			}
@@ -3701,7 +3701,7 @@ func (c *Components) Start(ctx context.Context) error {
 			var reflector llm.Chatter
 			if c.LLMResolver != nil {
 				var modelCfg *llm.ModelConfig
-				if resolved, err := c.LLMResolver.ResolveForAlias("small"); err == nil && resolved != nil {
+				if resolved, err := c.LLMResolver.ResolveForAlias("small", ""); err == nil && resolved != nil {
 					modelCfg = resolved
 				} else if small := c.LLMResolver.SmallModel(); small != nil {
 					modelCfg = small
@@ -4566,7 +4566,7 @@ func createAuxiliaryLLMClientWithResolver(
 	// Check if modelRef is an alias - try to resolve it first
 	var llmCfg *llm.ModelConfig
 	if resolver != nil {
-		aliasCfg, err := resolver.ResolveForAlias(modelRef)
+		aliasCfg, err := resolver.ResolveForAlias(modelRef, "")
 		if err == nil {
 			// modelRef is an alias, use the resolved model
 			logger.Info("Resolved model alias", "alias", modelRef, "model", aliasCfg.ModelID)

@@ -3123,7 +3123,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		l.modelMu.Unlock()
 
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef)
+			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef, l.sessionID)
 			if err != nil {
 				l.logger.Warn("Alias resolution failed, using default",
 					"alias", l.modelRef,
@@ -4110,7 +4110,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 
 		// Resolve model for this attempt
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef)
+			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef, l.sessionID)
 			if err != nil {
 				l.logger.Warn("Alias resolution failed",
 					"alias", l.modelRef,

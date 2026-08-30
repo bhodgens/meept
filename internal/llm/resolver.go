@@ -82,9 +82,11 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 				maxFails = 3 // Default max fails
 			}
 			r.aliases[aliasName] = &AliasEntry{
-				Models:   models,
-				Timeout:  timeout,
-				MaxFails: maxFails,
+				Models:                 models,
+				Timeout:                timeout,
+				MaxFails:               maxFails,
+				DefaultModel:           aliasEntry.DefaultModel,
+				BalancedStickyRequests: aliasEntry.BalancedStickyRequests,
 			}
 		}
 	}
@@ -311,7 +313,9 @@ func (r *Resolver) FindByProvider(providerID string) []*ModelConfig {
 
 // ResolveForAlias resolves an alias to a specific model, handling rotation.
 // It returns the currently active model for the given alias.
-func (r *Resolver) ResolveForAlias(aliasName string) (*ModelConfig, error) {
+// When callerKey is non-empty and BalancedStickyRequests is true, the caller
+// is pinned to a single model within the alias.
+func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelConfig, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -337,6 +341,80 @@ func (r *Resolver) ResolveForAlias(aliasName string) (*ModelConfig, error) {
 			health.CurrentIndex = nextIdx
 			health.ConsecutiveFails = 0
 			health.CooldownUntil = time.Time{} // Reset cooldown for this candidate
+		}
+	}
+
+	// Handle default model reversion: after cooldown expires, revert to default
+	if alias.DefaultModel != "" && !health.CooldownUntil.IsZero() && now.After(health.CooldownUntil) {
+		defaultIdx := -1
+		// Resolve the default model ref against config to get its provider/model ID
+		defaultMC := ResolveModelRef(alias.DefaultModel, r.config)
+		if defaultMC != nil {
+			for i, m := range alias.Models {
+				if m.ProviderID == defaultMC.ProviderID && m.ModelID == defaultMC.ModelID {
+					defaultIdx = i
+					break
+				}
+			}
+		}
+
+		if defaultIdx >= 0 && health.CurrentIndex != defaultIdx {
+			// Revert to default model
+			health.CurrentIndex = defaultIdx
+			health.ConsecutiveFails = 0
+			health.CooldownUntil = time.Time{}
+		}
+	}
+
+	// Handle sticky requests
+	if alias.BalancedStickyRequests && callerKey != "" {
+		if health.StickyPins == nil {
+			health.StickyPins = make(map[string]int)
+		}
+
+		// Check if caller has a pin
+		if pinnedIdx, ok := health.StickyPins[callerKey]; ok {
+			// Verify pinned model is still available
+			if pinnedIdx < len(alias.Models) {
+				// Check if pinned model is in cooldown
+				if !health.CooldownUntil.IsZero() && now.Before(health.CooldownUntil) {
+					// Pinned model in cooldown, release pin
+					delete(health.StickyPins, callerKey)
+				} else {
+					// Return pinned model
+					chosen := alias.Models[pinnedIdx]
+					// Log decision
+					if r.routingLogger != nil {
+						decision := RoutingDecision{
+							ChosenModelID:    chosen.ModelID,
+							ChosenProviderID: chosen.ProviderID,
+							Alias:            aliasName,
+							Reason:           "sticky_request",
+						}
+						_ = r.routingLogger.Record(context.Background(), decision)
+					}
+					return chosen, nil
+				}
+			}
+		}
+
+		// No pin or pin released, assign new pin
+		nextIdx := health.CurrentIndex
+		if nextIdx < len(alias.Models) {
+			health.StickyPins[callerKey] = nextIdx
+			health.CurrentIndex = (nextIdx + 1) % len(alias.Models)
+
+			chosen := alias.Models[nextIdx]
+			if r.routingLogger != nil {
+				decision := RoutingDecision{
+					ChosenModelID:    chosen.ModelID,
+					ChosenProviderID: chosen.ProviderID,
+					Alias:            aliasName,
+					Reason:           "sticky_request_new",
+				}
+				_ = r.routingLogger.Record(context.Background(), decision)
+			}
+			return chosen, nil
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -320,17 +321,26 @@ func (m *ModelConfig) TotalCost() float64 {
 
 // AliasEntry holds the resolved models and configuration for an alias.
 type AliasEntry struct {
-	Models   []*ModelConfig // Ordered by priority (first = primary)
-	Timeout  time.Duration  // Base cooldown timeout after failure
-	MaxFails int            // Max consecutive failures before rotation
+	Models                 []*ModelConfig // Ordered by priority (first = primary)
+	Timeout                time.Duration  // Base cooldown timeout after failure
+	MaxFails               int            // Max consecutive failures before rotation
+	DefaultModel           string         // Optional: revert to this model after cooldown
+	BalancedStickyRequests bool           // Optional: pin callers to single model
 }
 
 // AliasHealth tracks the health and rotation state of an alias.
 type AliasHealth struct {
-	CurrentIndex     int       // Which model in the rotation is currently active
-	ConsecutiveFails int       // Number of consecutive failures on the current model
-	LastFailure      time.Time // When the last failure occurred
-	CooldownUntil    time.Time // Don't use the current model until this time
+	mu             sync.RWMutex // protects quota block maps below
+	CurrentIndex   int
+	ConsecutiveFails int
+	LastFailure    time.Time
+	CooldownUntil  time.Time
+	StickyPins     map[string]int
+	// entryBlocks tracks per-entry quota blocks: "provider/model" -> until.
+	entryBlocks map[string]time.Time
+	// credentialBlocks tracks per-credential quota blocks (shared pool):
+	// credentialKey -> until.
+	credentialBlocks map[string]time.Time
 }
 
 // ToolDefinition defines a tool/function for the LLM.

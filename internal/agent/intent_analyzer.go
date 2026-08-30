@@ -170,7 +170,7 @@ func (ia *IntentAnalyzer) chatWithFailover(ctx context.Context, messages []llm.C
 	// Fail over: record the failure, advance to the next candidate, swap the
 	// client config, and retry once.
 	ia.resolver.RecordAliasFailure(ia.aliasName, err)
-	nextCfg, rerr := ia.resolver.ResolveForAlias(ia.aliasName)
+	nextCfg, rerr := ia.resolver.ResolveForAlias(ia.aliasName, "")
 	if rerr != nil || nextCfg == nil {
 		return nil, fmt.Errorf("intent analysis: %w (no alternate candidate: %v)", err, rerr)
 	}

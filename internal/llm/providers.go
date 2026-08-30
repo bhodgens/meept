@@ -91,9 +91,11 @@ type ProvidersConfig struct {
 
 // ModelAliasEntry represents a model alias configuration.
 type ModelAliasEntry struct {
-	Models   []string `json:"models"`    // List of "provider/model-id" in priority order
-	Timeout  int      `json:"timeout"`   // Cooldown timeout in seconds after failure
-	MaxFails int      `json:"max_fails"` // Max consecutive failures before rotation
+	Models                 []string `json:"models"`    // List of "provider/model-id" in priority order
+	Timeout                int      `json:"timeout"`   // Cooldown timeout in seconds after failure
+	MaxFails               int      `json:"max_fails"` // Max consecutive failures before rotation
+	DefaultModel           string   `json:"default_model,omitempty"`
+	BalancedStickyRequests bool     `json:"balanced_sticky_requests,omitempty"`
 }
 
 // envVarPattern matches ${VAR_NAME} or $VAR_NAME patterns.
