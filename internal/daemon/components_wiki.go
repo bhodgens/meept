@@ -81,3 +81,69 @@ func evolverKnowledgeOptions(ts *selfimprove.TraceStore, ws *selfimprove.WikiSto
 	}
 	return opts
 }
+
+// initializeSkillEvolver constructs the skill evolver + scheduler (closed-loop
+// skill evolution). Extracted from the old inline block in initializeSkills:
+// that block executed BEFORE NewComponents assigned c.SkillUsageTracker /
+// c.SkillWriter, so its nil-gate was always false and the evolver never
+// constructed (found by the wiki smoke test, 2026-08-29). Callers must invoke
+// this AFTER the tracker, writer, learning pipeline, and PlanManager exist —
+// daemon.go calls it in the plan-system wiring section.
+// Gated on cfg.Skills.Evolver.Enabled.
+func (c *Components) initializeSkillEvolver(cfg *config.Config, logger *slog.Logger) {
+	if !cfg.Skills.Evolver.Enabled || c.SkillUsageTracker == nil || c.SkillWriter == nil {
+		return
+	}
+	verifier := lifecycle.NewVerifier(
+		c.LLMClient,
+		logger.With("component", "skill-verifier"),
+	)
+	// Build evolver options. When the reflection collector is wired,
+	// bridge it to the evolver's ReflectionProposer interface via the
+	// reflectionProposerAdapter. This closes the self-improvement loop:
+	// per-turn reflection proposals queued by ReflectionCollector are
+	// drained at the start of each evolver cycle and routed through the
+	// verifier as skill creates/updates.
+	var evolverOpts []lifecycle.EvolverOption
+	if c.ReflectionCollector != nil {
+		evolverOpts = append(evolverOpts, lifecycle.WithReflectionProposer(
+			&reflectionProposerAdapter{rc: c.ReflectionCollector},
+		))
+		logger.Info("Skill evolver wired to reflection collector",
+			"component", "skill-evolver",
+		)
+	}
+	// Wire the wiki-era knowledge sources (execution-trace sampling +
+	// wiki store for Pass A context and the skill-impact ledger). Only
+	// inside this block: wiki.enabled=true with the evolver disabled
+	// must not change evolver behavior (master §Contract 5).
+	if knowledgeOpts := evolverKnowledgeOptions(c.TraceStore, c.WikiStore); len(knowledgeOpts) > 0 {
+		evolverOpts = append(evolverOpts, knowledgeOpts...)
+		logger.Info("Skill evolver wired to knowledge stores",
+			"trace_provider", c.TraceStore != nil,
+			"wiki_store", c.WikiStore != nil,
+		)
+	}
+	c.SkillEvolver = lifecycle.NewEvolver(
+		c.SkillUsageTracker,
+		c.LearningPipeline,
+		c.SkillWriter,
+		c.SkillRegistry,
+		c.CapabilityIndex,
+		verifier,
+		c.LLMClient,
+		c.PlanManager,
+		cfg.Skills.Evolver,
+		logger,
+		evolverOpts...,
+	)
+	c.SkillEvolverSched = lifecycle.NewEvolverScheduler(
+		c.SkillEvolver,
+		cfg.Skills.Evolver.Interval,
+		logger.With("component", "skill-evolver-scheduler"),
+	)
+	logger.Info("Skill evolver + scheduler initialized",
+		"interval", cfg.Skills.Evolver.Interval,
+		"auto_apply", cfg.Skills.Evolver.AutoApply,
+	)
+}

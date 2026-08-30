@@ -755,6 +755,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	}
 
+	// Construct the skill evolver + scheduler here (NOT inside NewComponents'
+	// initializeSkills): it requires the usage tracker, writer, and
+	// PlanManager, which only exist after the blocks above. See
+	// components_wiki.go initializeSkillEvolver for the ordering-bug history.
+	if components != nil {
+		components.initializeSkillEvolver(fullCfg, logger)
+	}
+
 	// Register plan RPC handlers (direct Go handlers override bus proxy)
 	if rpcServer != nil && planManagerInst != nil {
 		planRPCHandler := rpc.NewPlanHandler(planManagerInst, planStoreIF)
