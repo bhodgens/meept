@@ -689,6 +689,19 @@ type AgentLoop struct {
 	// tool. Nil when the agent spec carries no gate.
 	rosterGate *RosterGate
 
+	// speakRouter routes the turn's final text to the harness delivery
+	// surface (leaf 11: bubble vs notify vs parent report). Nil = the
+	// legacy behavior: the bubble path only, no routed delivery.
+	speakRouter *SpeakRouter
+	// sessionAttached marks this loop as bound to a watching chat session
+	// (bubble path). Defaults TRUE so un-optioned loops keep the legacy
+	// chat behavior; detached runners (e.g. employee GoalLoop) set it
+	// false. Guarded by mu.
+	sessionAttached bool
+	// isolatedChild marks this loop as an isolated child (C4): it can
+	// never speak to the user. Guarded by mu. Default false.
+	isolatedChild bool
+
 	// State machine for explicit state tracking
 	stateMachine *AgentStateMachine
 	// statePersister optionally persists state snapshots for crash recovery
@@ -1071,6 +1084,64 @@ func WithShadowManager(mgr *shadow.Manager) LoopOption {
 	return func(l *AgentLoop) {
 		l.shadowMgr = mgr
 	}
+}
+
+// WithSpeakRouter sets the harness speak router (leaf 11). When nil (typed
+// nil guard) the loop keeps the legacy bubble-only behavior: no routed
+// delivery after the turn.
+func WithSpeakRouter(router *SpeakRouter) LoopOption {
+	return func(l *AgentLoop) {
+		if router != nil {
+			l.speakRouter = router
+		}
+	}
+}
+
+// WithSessionAttached marks the loop as bound to a watching chat session.
+// Default is TRUE (legacy chat behavior); pass false for detached runners
+// (employee goal rounds) whose final text must be delivered as a notify.
+func WithSessionAttached(attached bool) LoopOption {
+	return func(l *AgentLoop) {
+		l.mu.Lock()
+		l.sessionAttached = attached
+		l.mu.Unlock()
+	}
+}
+
+// WithIsolatedChild marks the loop as an isolated child (C4): ClassifyRun
+// forces SpeakParent so the child can never reach the user.
+func WithIsolatedChild(isolated bool) LoopOption {
+	return func(l *AgentLoop) {
+		l.mu.Lock()
+		l.isolatedChild = isolated
+		l.mu.Unlock()
+	}
+}
+
+// SetIsolatedChild flips the isolated-child bit after construction (the
+// dispatcher decides isolation at spawn time, which can be after the loop
+// was built from a template).
+func (l *AgentLoop) SetIsolatedChild(isolated bool) {
+	l.mu.Lock()
+	l.isolatedChild = isolated
+	l.mu.Unlock()
+}
+
+// SetSessionAttached flips the session-attached bit after construction.
+func (l *AgentLoop) SetSessionAttached(attached bool) {
+	l.mu.Lock()
+	l.sessionAttached = attached
+	l.mu.Unlock()
+}
+
+// speakContextSnapshot reads the speak wiring under the loop lock.
+func (l *AgentLoop) speakContextSnapshot() (router *SpeakRouter, attached, isolated bool) {
+	l.mu.RLock()
+	router = l.speakRouter
+	attached = l.sessionAttached
+	isolated = l.isolatedChild
+	l.mu.RUnlock()
+	return router, attached, isolated
 }
 
 // WithResultCache sets the result cache for the agent loop.
@@ -1560,6 +1631,9 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 		detectionConfig: DefaultDetectionConfig(),
 		conversations:   NewConversationStore(100),
 		logger:          slog.Default(),
+		// Leaf 11: loops are session-attached (bubble path) unless a
+		// detached runner opts out via WithSessionAttached(false).
+		sessionAttached: true,
 	}
 
 	for _, opt := range opts {
@@ -2033,6 +2107,13 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	conv.MarkActive()
 	defer conv.MarkInactive()
 
+	// Leaf 11: inject the speak reply carrier into every registry tool that
+	// accepts one (builtin reply_to_user). The carrier classifies THIS run
+	// (bubble ack / notify / isolated-child error) so the tool speaks
+	// through the same router the post-turn Deliver uses. Best-effort:
+	// injection failure never blocks the turn.
+	l.wireReplyCarriers(conversationID)
+
 	// Add validation anchor instructions as an anchor message (persists through truncation)
 	// Only add once per conversation
 	if conv.Len() == 0 {
@@ -2264,6 +2345,40 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 					finalResponse = notice + "\n" + finalResponse
 				}
 			}
+		}
+	}
+
+	// Harness-routed speak (leaf 11): after the turn produces its final
+	// text, deliver it through the speak router. The chat bubble path is
+	// unchanged — this is the seam for DETACHED runs (ClassifyRun(false,
+	// false) = SpeakNotify) and ISOLATED children (C4: SpeakParent).
+	// Delivery is best-effort: failures are logged, never fail the turn.
+	if router, attached, isolated := l.speakContextSnapshot(); router != nil {
+		kind := ClassifyRun(attached, isolated)
+		switch kind {
+		case SpeakNotify:
+			// De-dup (leaf 11 Task 4): if the model already notified via
+			// reply_to_user this turn, drop the duplicate final-text notify
+			// so the user receives exactly one notification.
+			if l.replyToolNotifiedThisTurn(conv) {
+				l.logger.Debug("speak: skipping final-text notify (reply_to_user already notified this turn)")
+			} else if err := router.Deliver(ctx, kind, finalResponse, l.sessionID, conversationID); err != nil {
+				l.logger.Warn("speak: notify delivery failed (non-fatal)",
+					"error", err,
+					"session_id", l.sessionID,
+					"conversation_id", conversationID)
+			}
+		case SpeakParent:
+			// C4: an isolated child never notifies or bubbles. Write the
+			// parent report only (publisher routes it; no user surface).
+			if err := router.Deliver(ctx, kind, finalResponse, l.sessionID, conversationID); err != nil {
+				l.logger.Warn("speak: parent report delivery failed (non-fatal)", "error", err)
+			}
+		case SpeakSession:
+			// Attached, not isolated: bubble path unchanged. Deliver is a
+			// no-op on the production bus publisher; kept so the routing
+			// decision is explicit and testable in one place.
+			_ = router.Deliver(ctx, kind, finalResponse, l.sessionID, conversationID)
 		}
 	}
 
@@ -6499,4 +6614,24 @@ func toolNamesSinceLastUser(messages []llm.ChatMessage) []string {
 		}
 	}
 	return names
+}
+
+// replyToolNotifiedThisTurn reports whether the model already invoked the
+// reply_to_user tool since the last user message (leaf 11 Task 4 dedup).
+// The agent package cannot import internal/tools/builtin (import cycle:
+// builtin imports agent for the agent-message bridge), so detection is by
+// tool-call name over the current turn's messages — the same scan the
+// roster gate uses. If the model called the tool with an empty text the
+// delivery no-ops and this returns true; the final-text notify is still
+// skipped, which matches the "at most one notify per turn" rule.
+func (l *AgentLoop) replyToolNotifiedThisTurn(conv *Conversation) bool {
+	if conv == nil {
+		return false
+	}
+	for _, name := range toolNamesSinceLastUser(conv.GetMessages()) {
+		if name == "reply_to_user" {
+			return true
+		}
+	}
+	return false
 }

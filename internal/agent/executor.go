@@ -72,10 +72,10 @@ const maxAdaptiveLimit = 20
 
 // ExecutionMetrics captures runtime statistics for adaptive parallelism tuning.
 type ExecutionMetrics struct {
-	AvgLatency      time.Duration `json:"avg_latency"`
-	ErrorRate       float64       `json:"error_rate"`
-	ActiveGoroutines int          `json:"active_goroutines"`
-	Throughput      float64       `json:"throughput"`
+	AvgLatency       time.Duration `json:"avg_latency"`
+	ErrorRate        float64       `json:"error_rate"`
+	ActiveGoroutines int           `json:"active_goroutines"`
+	Throughput       float64       `json:"throughput"`
 }
 
 // AdaptiveParallelismLimiter limits concurrency per ToolConcurrencyProfile.
@@ -101,10 +101,10 @@ func NewAdaptiveParallelismLimiter(baseParallelism int) *AdaptiveParallelismLimi
 	}
 
 	limits := map[ToolConcurrencyProfile]int{
-		ProfileIOBound:    baseParallelism,
-		ProfileCPUBound:   cpuBoundLimit,
-		ProfileStateful:   1,
-		ProfileExclusive:  1,
+		ProfileIOBound:   baseParallelism,
+		ProfileCPUBound:  cpuBoundLimit,
+		ProfileStateful:  1,
+		ProfileExclusive: 1,
 	}
 	slots := make(map[ToolConcurrencyProfile]chan struct{}, len(limits))
 	for profile, lim := range limits {
@@ -278,6 +278,10 @@ var ToolActionMap = map[string]string{
 	// Agent delegation
 	"delegate_task":   "agent_delegate",
 	ToolRequestReview: "agent_delegate",
+
+	// Speak router (leaf 11): mid-turn user replies ride the messaging
+	// surface — bus publish on employee.notify, no side effects beyond it.
+	"reply_to_user": "send_message",
 
 	// Code intelligence - AST (read-only, safe)
 	"ast_parse":   ToolCodeRead,

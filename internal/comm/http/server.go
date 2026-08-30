@@ -512,7 +512,12 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 		topics := []string{"*", "agent.*", "agent.*.*", "task.*", "task.*.*", "step.*", "step.*.*", "orchestrator.*",
 			"chat.*", "chat.*.*", "tool.*", "llm.*", "review.*",
 			"queue.*", "queue.*.*", "plan.*", "plan.*.*",
-			"terminal.*", "daemon.*", "collaboration.*", "pair.*"}
+			"terminal.*", "daemon.*", "collaboration.*", "pair.*",
+			// Leaf 11 (harness-routed speak): employee.notify carries
+			// detached goal-round notifications. Forwarded as the generic
+			// "event" type — NEVER classified as chat_message (AGENTS.md
+			// invariant: only chat_message/chat.response produce it).
+			"employee.*"}
 		for _, topic := range topics {
 			sub := msgBus.Subscribe("http-ws-"+topic, topic)
 			s.wsSubMu.Lock()

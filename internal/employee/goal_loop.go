@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/runtime"
@@ -288,6 +289,19 @@ type GoalLoop struct {
 	// any) is not in a failed state. Guarded by mu.
 	lastGateState        GateState
 	lastGateFailedOutput string
+
+	// Speak routing (leaf 11: harness-routed speak). speakRouter delivers
+	// the round's final output as a SpeakNotify on employee.notify when
+	// the round produced non-empty text; speakSessionID/speakConversationID
+	// identify the (usually synthetic) goal-round conversation in the
+	// payload. speakNotifiedRound carries the "already notified this round"
+	// dedup memory so a tool notify and the final text yield ONE notify.
+	// speakRouter defaults to a nil-safe no-op router, so a loop without
+	// injected wiring is nil-safe (log + skip, never panic).
+	speakRouter         *agent.SpeakRouter
+	speakSessionID      string
+	speakConversationID string
+	speakNotifiedRound  bool
 }
 
 // EmitMetricFunc is the callback signature for emitting telemetry from the
@@ -420,6 +434,69 @@ func (l *GoalLoop) WithReflector(r Reflector) *GoalLoop {
 		l.reflector = r
 	}
 	return l
+}
+
+// WithSpeakRouter wires the harness speak router (leaf 11). Typed-nil guard:
+// a nil router is ignored, leaving the loop's default nil-safe no-op router
+// in place (notify sites log + skip, never panic).
+func (l *GoalLoop) WithSpeakRouter(router *agent.SpeakRouter) *GoalLoop {
+	if router != nil {
+		l.mu.Lock()
+		l.speakRouter = router
+		l.mu.Unlock()
+	}
+	return l
+}
+
+// SetSpeakContext binds the goal-round conversation identity carried in the
+// employee.notify payload. Called by the Manager when a goal round starts;
+// also clears the per-round notify dedup flag.
+func (l *GoalLoop) SetSpeakContext(sessionID, conversationID string) {
+	l.mu.Lock()
+	l.speakSessionID = sessionID
+	l.speakConversationID = conversationID
+	l.speakNotifiedRound = false
+	l.mu.Unlock()
+}
+
+// notifySpeakRound delivers the round's final output as a SpeakNotify
+// (leaf 11). Best-effort and nil-safe:
+//
+//   - no router / no speaker → debug log + skip (never panic)
+//   - empty text → no-op (a round with nothing to say must not notify)
+//   - already notified this round → skip (tool notify + final text = ONE
+//     notify per round; the flag is reset by SetSpeakContext / BeginRound)
+func (l *GoalLoop) notifySpeakRound(ctx context.Context, text string) {
+	l.mu.Lock()
+	router := l.speakRouter
+	sessionID := l.speakSessionID
+	convID := l.speakConversationID
+	already := l.speakNotifiedRound
+	l.mu.Unlock()
+
+	logger := l.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if router == nil {
+		logger.Debug("goal loop notify skipped: no speak router")
+		return
+	}
+	if strings.TrimSpace(text) == "" {
+		logger.Debug("goal loop notify skipped: empty final text")
+		return
+	}
+	if already {
+		logger.Debug("goal loop notify skipped: already notified this round")
+		return
+	}
+	if err := router.Deliver(ctx, agent.SpeakNotify, text, sessionID, convID); err != nil {
+		logger.Warn("goal loop notify delivery failed (non-fatal)", "error", err)
+		return
+	}
+	l.mu.Lock()
+	l.speakNotifiedRound = true
+	l.mu.Unlock()
 }
 
 // WithGoalLookup injects a goal-lookup strategy. Optional; if unset, the loop
@@ -858,6 +935,14 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 	l.lastAssessmentTime = time.Now().UTC()
 	l.lastResult = result
 	l.mu.Unlock()
+
+	// Leaf 11 (harness-routed speak): the goal round has no watching chat,
+	// so its final output is delivered as a SpeakNotify on employee.notify.
+	// Best-effort and nil-safe (no router / empty text / already-notified
+	// this round all skip). Failures are logged, never fail the reflection.
+	if result != nil {
+		l.notifySpeakRound(ctx, result.Output)
+	}
 
 	logger.Info("reflect complete", "health", health.String(), "plan_id", plan.ID)
 	return health, nil

@@ -2681,6 +2681,9 @@ func TestWSBridgeForwardsTerminalDaemonCollaborationPairTopics(t *testing.T) {
 		{"pair.round_completed", "event"},
 		{"pair.session_created", "event"},
 		{"pair.error", "event"},
+		// Leaf 11 (harness-routed speak): employee.notify must reach WS
+		// clients as the generic "event" type — never chat_message.
+		{"employee.notify", "event"},
 	}
 
 	for _, tc := range cases {
