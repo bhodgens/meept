@@ -46,11 +46,14 @@ File: `docs/research/harness-techniques.json`
       "status": "shipped" | "partial" | "candidate" | "skip",
       "sources": [{"title": string, "url": string}],
       "evidence": [{"path": string, "must_contain": string?}],
+      "commits": ["short-sha", ...]?,
       "notes": string
     }
   ]
 }
 ```
+
+`commits[]` is optional provenance: git SHAs that landed the technique, mined from `git log -i --grep` (first pass 2026-08-29: HALO/RLM d3b430d2). Not verified by the script; documentation only.
 
 Owner: 01-catalog.md. Consumers: 02-script.md, 03-wiring.md.
 
