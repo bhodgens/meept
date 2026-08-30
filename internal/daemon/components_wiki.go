@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/skills/lifecycle"
@@ -63,6 +64,33 @@ type traceStoreProvider struct {
 // Sample delegates pass-through to TraceStore.Sample.
 func (p *traceStoreProvider) Sample(maxFails, maxPasses, maxChars int) ([]selfimprove.TraceRecord, error) {
 	return p.ts.Sample(maxFails, maxPasses, maxChars)
+}
+
+// traceStorePersist converts an agent.TraceRecordPayload into a store record
+// and writes it to ts. Shared by both trace wirings (loop turn traces via
+// agent.WithTraceWriter and state-run traces via the state runtime) so the
+// payload→record mapping exists exactly once.
+func traceStorePersist(ts *selfimprove.TraceStore, p agent.TraceRecordPayload) (string, error) {
+	steps := make([]selfimprove.TraceStep, len(p.Steps))
+	for i, s := range p.Steps {
+		steps[i] = selfimprove.TraceStep{
+			Action:  s.Action,
+			Input:   s.Input,
+			Output:  s.Output,
+			Success: s.Success,
+		}
+	}
+	return ts.Write(&selfimprove.TraceRecord{
+		ID:             p.ID,
+		SessionID:      p.SessionID,
+		Domain:         p.Domain,
+		Outcome:        p.Outcome,
+		Error:          p.Error,
+		InjectedSkills: p.InjectedSkills,
+		Steps:          steps,
+		Summary:        p.Summary,
+		CreatedAt:      p.CreatedAt,
+	})
 }
 
 // evolverKnowledgeOptions appends the wiki-era EvolverOptions when the

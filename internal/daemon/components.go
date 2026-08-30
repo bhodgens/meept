@@ -1111,6 +1111,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		agentOpts = append(agentOpts, agent.WithUsageTracker(utAdapter))
 		logger.Info("Agent loop configured with skill usage tracker")
 	}
+	// Wire turn-level trace persistence (WikiSkill raw layer): every
+	// learning-eligible turn — success AND failure — records an immutable
+	// trace through the shared store. Opt-in with [skills.wiki]; nil store
+	// (wiki disabled) keeps the loop unwired.
+	if c.TraceStore != nil {
+		ts := c.TraceStore
+		agentOpts = append(agentOpts, agent.WithTraceWriter(
+			agent.NewTraceStoreWriter(func(p agent.TraceRecordPayload) (string, error) {
+				return traceStorePersist(ts, p)
+			}),
+		))
+		logger.Info("Agent loop configured with trace writer")
+	}
 	// Wire result cache
 	if c.ResultCache != nil {
 		agentOpts = append(agentOpts, agent.WithResultCache(c.ResultCache))
@@ -1222,26 +1235,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				ts := c.TraceStore
 				stateRuntime = stateRuntime.WithStateTraceWriter(
 					agent.NewTraceStoreWriter(func(p agent.TraceRecordPayload) (string, error) {
-						steps := make([]selfimprove.TraceStep, len(p.Steps))
-						for i, s := range p.Steps {
-							steps[i] = selfimprove.TraceStep{
-								Action:  s.Action,
-								Input:   s.Input,
-								Output:  s.Output,
-								Success: s.Success,
-							}
-						}
-						return ts.Write(&selfimprove.TraceRecord{
-							ID:             p.ID,
-							SessionID:      p.SessionID,
-							Domain:         p.Domain,
-							Outcome:        p.Outcome,
-							Error:          p.Error,
-							InjectedSkills: p.InjectedSkills,
-							Steps:          steps,
-							Summary:        p.Summary,
-							CreatedAt:      p.CreatedAt,
-						})
+						return traceStorePersist(ts, p)
 					}),
 				)
 			}
