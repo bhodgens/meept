@@ -62,6 +62,15 @@ func writeEvalError(w http.ResponseWriter, status int, msg string) {
 	json.NewEncoder(w).Encode(evalErrorResponse{Error: msg})
 }
 
+// EvalTrajectoryStep is one optional per-tool step in a run request. When
+// the client supplies a trajectory, the run attaches a TrajectoryJudgment
+// beside the run record; otherwise the run is unjudged.
+type EvalTrajectoryStep struct {
+	Name   string `json:"name"`
+	Err    string `json:"err,omitempty"`
+	Failed bool   `json:"failed"`
+}
+
 // EvalRunParams is the shared payload for POST /api/v1/eval/runs and the
 // eval.run RPC method (identical JSON per the frozen contract).
 type EvalRunParams struct {
@@ -72,6 +81,10 @@ type EvalRunParams struct {
 	Workdir  string `json:"workdir"`
 	ToolList string `json:"tool_list,omitempty"`
 	Prompt   string `json:"prompt,omitempty"`
+
+	// Trajectory is optional per-tool step data; non-empty triggers a
+	// judgment saved as <run-id>.judgment.json beside the run record.
+	Trajectory []EvalTrajectoryStep `json:"trajectory,omitempty"`
 }
 
 // validateRunParams checks a run request. Returned errors are lowercase and
@@ -89,14 +102,20 @@ func (h *EvalHandler) validateRunParams(req *EvalRunParams) error {
 	return nil
 }
 
+// oracleTimeout returns the per-attempt timeout: DefaultEvalRunTimeout
+// unless the test seam set runTimeout.
+func (h *EvalHandler) oracleTimeout() time.Duration {
+	if h.runTimeout > 0 {
+		return h.runTimeout
+	}
+	return DefaultEvalRunTimeout
+}
+
 // runRecord executes the oracle K times synchronously against req and
 // returns the completed, unsaved RunRecord. pass^k short-circuits on the
 // first failed attempt. Shared by the HTTP and RPC run paths.
 func (h *EvalHandler) runRecord(ctx context.Context, req *EvalRunParams) (*eval.RunRecord, error) {
-	timeout := DefaultEvalRunTimeout
-	if h.runTimeout > 0 {
-		timeout = h.runTimeout
-	}
+	timeout := h.oracleTimeout()
 
 	oracleName := "shell:" + req.Command
 	newRun := h.newRun
@@ -129,6 +148,64 @@ func (h *EvalHandler) runRecord(ctx context.Context, req *EvalRunParams) (*eval.
 	return rec, nil
 }
 
+// stepsFromEvalParams converts the optional request trajectory into judge
+// steps. The request already carries the minimal per-step shape, so this is
+// a straight element-wise copy.
+func stepsFromEvalParams(req *EvalRunParams) []eval.Step {
+	steps := make([]eval.Step, 0, len(req.Trajectory))
+	for _, s := range req.Trajectory {
+		steps = append(steps, eval.Step{Name: s.Name, Err: s.Err, Failed: s.Failed})
+	}
+	return steps
+}
+
+// attachJudgment computes and persists the C7 TrajectoryJudgment for a run
+// carrying a trajectory. Attachment is best-effort: the judgment reuses the
+// run's final attempt verdict rather than re-running the command, and a save
+// failure is logged, not fatal — the run record itself is already persisted.
+// Runs without a trajectory are skipped (unjudged).
+func (h *EvalHandler) attachJudgment(ctx context.Context, rec *eval.RunRecord, steps []eval.Step, workdir string) {
+	if len(steps) == 0 {
+		return
+	}
+	oracle := finalAttemptOracle(rec)
+	j, err := eval.Judge(ctx, steps, oracle, workdir)
+	if err != nil {
+		h.logger.Error("eval: judge trajectory", "error", err, "run_id", rec.ID)
+		return
+	}
+	j.TrajectoryID = rec.ID
+	if err := h.store.SaveJudgment(ctx, j); err != nil {
+		h.logger.Error("eval: save judgment", "error", err, "run_id", rec.ID)
+		return
+	}
+	h.logger.Info("eval: judgment attached", "run_id", rec.ID, "passed", j.Passed, "first_error_step", j.FirstErrorStep)
+}
+
+// finalAttemptOracle returns an oracle whose Check replays the FINAL
+// attempt's persisted verdict instead of re-executing the command: the
+// K-attempt run already exercised it, and the judgment must describe the
+// outcome that was actually recorded.
+func finalAttemptOracle(rec *eval.RunRecord) eval.Oracle {
+	res := eval.OracleResult{}
+	if n := len(rec.Attempts); n > 0 {
+		res = rec.Attempts[n-1].Oracle
+	}
+	return replayOracle{name: rec.OracleName, res: res}
+}
+
+// replayOracle is a fixed-verdict oracle; Check never executes anything.
+type replayOracle struct {
+	name string
+	res  eval.OracleResult
+}
+
+func (o replayOracle) Name() string { return o.name }
+
+func (o replayOracle) Check(_ context.Context, _ string) (eval.OracleResult, error) {
+	return o.res, nil
+}
+
 // handleRun implements POST /api/v1/eval/runs: validate, run the oracle K
 // times synchronously, persist, and return the RunRecord. Validation
 // failures are 400 with a lowercase message.
@@ -155,6 +232,9 @@ func (h *EvalHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 		writeEvalError(w, http.StatusInternalServerError, "internal error: failed to save run record")
 		return
 	}
+
+	// Best-effort judgment attachment for runs carrying a trajectory.
+	h.attachJudgment(r.Context(), rec, stepsFromEvalParams(&req), req.Workdir)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -229,6 +309,10 @@ func (h *EvalHandler) rpcHandleRun() func(ctx context.Context, params json.RawMe
 		if err := h.store.Save(ctx, *rec); err != nil {
 			return nil, fmt.Errorf("save run record: %w", err)
 		}
+
+		// Best-effort judgment attachment for runs carrying a trajectory.
+		h.attachJudgment(ctx, rec, stepsFromEvalParams(&req), req.Workdir)
+
 		return rec, nil
 	}
 }
