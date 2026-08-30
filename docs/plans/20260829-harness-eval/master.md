@@ -355,7 +355,7 @@ Output: APPROVED or list of specific gaps.
 ||| 15-docs-flags-metrics | REVIEWED | 659f72ae |
 || 16-tui-parity | REVIEWED | 79a54e48 |
 || 17-flutter-parity | REVIEWED | 79a54e48 |
-|| 18-menubar-parity | REVIEWED | 79a54e48 |
+|| 18-menubar-parity | REVIEWED | 2e8b1c36 |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
