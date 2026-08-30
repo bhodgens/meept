@@ -16,12 +16,23 @@
       "category": "context",
       "status": "partial",
       "sources": [
-        {"title": "Pi Agent compaction", "url": "https://github.com/earendil-works/pi/tree/main/packages/agent"},
-        {"title": "meept pi-agent analysis", "url": "analysis/pi-agent.md"}
+        {
+          "title": "Pi Agent compaction",
+          "url": "https://github.com/earendil-works/pi/tree/main/packages/agent"
+        },
+        {
+          "title": "meept pi-agent analysis",
+          "url": "analysis/pi-agent.md"
+        }
       ],
       "evidence": [
-        {"path": "internal/llm/context_firewall.go", "must_contain": "processMessages"},
-        {"path": "docs/workflows/context-firewall.md"}
+        {
+          "path": "internal/llm/context_firewall.go",
+          "must_contain": "processMessages"
+        },
+        {
+          "path": "docs/workflows/context-firewall.md"
+        }
       ],
       "notes": "Shipped multi-stage compression. Stage-2 summarize still truncates in places (docs/bugs-and-gaps.md). Not Pi iterative update-summary + file-op tracking."
     },
@@ -31,12 +42,24 @@
       "category": "context",
       "status": "candidate",
       "sources": [
-        {"title": "Pi Agent compaction/", "url": "https://github.com/earendil-works/pi/tree/main/packages/agent"}
+        {
+          "title": "Pi Agent compaction/",
+          "url": "https://github.com/earendil-works/pi/tree/main/packages/agent"
+        }
       ],
       "evidence": [
-        {"path": "internal/session/store_sqlite.go", "must_contain": "InsertCompaction"}
+        {
+          "path": "internal/session/store_sqlite.go",
+          "must_contain": "InsertCompaction"
+        }
       ],
-      "notes": "SQLite compaction APIs exist. Missing iterative update prompt, cumulative file-op tags, split-turn merge. Related GitHub #21."
+      "notes": "SQLite compaction APIs (edacab6a MemoryStore parity), HALO atomic tool-turn compaction (3bbb7979, b16411ff ~40% reduction), user-message preservation in compaction prompts (d9559497). Still not Pi's update-in-place iterative summary; #21 may now be stale.",
+      "commits": [
+        "edacab6a",
+        "3bbb7979",
+        "b16411ff",
+        "d9559497"
+      ]
     },
     {
       "id": "stable-prefix-prompt",
@@ -44,13 +67,26 @@
       "category": "context",
       "status": "shipped",
       "sources": [
-        {"title": "atomic-agent stable prefix", "url": "docs/research/2026-08-24-agent-parity-audit.md"},
-        {"title": "loop-economics plan", "url": "plans/loop-economics/01-stable-prefix-prompt.md"}
+        {
+          "title": "atomic-agent stable prefix",
+          "url": "docs/research/2026-08-24-agent-parity-audit.md"
+        },
+        {
+          "title": "loop-economics plan",
+          "url": "plans/loop-economics/01-stable-prefix-prompt.md"
+        }
       ],
       "evidence": [
-        {"path": "internal/agent/prompt.go", "must_contain": "BuildSystemPromptOrdered"}
+        {
+          "path": "internal/agent/prompt.go",
+          "must_contain": "BuildSystemPromptOrdered"
+        }
       ],
-      "notes": "cacheStablePrefix default true; sha256 over stable prefix bytes."
+      "notes": "cacheStablePrefix default true; sha256 over stable prefix bytes.",
+      "commits": [
+        "a3a93ef2",
+        "012b88e4"
+      ]
     },
     {
       "id": "token-budgets",
@@ -58,10 +94,15 @@
       "category": "loop",
       "status": "partial",
       "sources": [
-        {"title": "Enable and Fully Test Token Budgets", "url": "https://github.com/bhodgens/meept/issues/16"}
+        {
+          "title": "Enable and Fully Test Token Budgets",
+          "url": "https://github.com/bhodgens/meept/issues/16"
+        }
       ],
       "evidence": [
-        {"path": "internal/agent/budget_hierarchy.go"}
+        {
+          "path": "internal/agent/budget_hierarchy.go"
+        }
       ],
       "notes": "Hierarchy exists. Issue #16 tracks enabling and testing fully."
     },
@@ -71,10 +112,15 @@
       "category": "loop",
       "status": "shipped",
       "sources": [
-        {"title": "meept pi-agent analysis", "url": "analysis/pi-agent.md"}
+        {
+          "title": "meept pi-agent analysis",
+          "url": "analysis/pi-agent.md"
+        }
       ],
       "evidence": [
-        {"path": "internal/agent/hallucination.go"}
+        {
+          "path": "internal/agent/hallucination.go"
+        }
       ],
       "notes": "3 identical tool calls / 3 identical text replies abort. Hallucination detector in same package."
     },
@@ -84,11 +130,19 @@
       "category": "loop",
       "status": "shipped",
       "sources": [
-        {"title": "Pi Agent steering/follow-up", "url": "analysis/pi-agent.md"}
+        {
+          "title": "Pi Agent steering/follow-up",
+          "url": "analysis/pi-agent.md"
+        }
       ],
       "evidence": [
-        {"path": "internal/agent/queue.go"},
-        {"path": "internal/agent/dispatcher.go", "must_contain": "shouldSteer"}
+        {
+          "path": "internal/agent/queue.go"
+        },
+        {
+          "path": "internal/agent/dispatcher.go",
+          "must_contain": "shouldSteer"
+        }
       ],
       "notes": "Steer queue size 1 (latest wins); follow-up FIFO 20."
     },
@@ -99,8 +153,13 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "internal/task/amendment_handlers.go"},
-        {"path": "internal/tui/command_handler.go", "must_contain": "executeAmend"}
+        {
+          "path": "internal/task/amendment_handlers.go"
+        },
+        {
+          "path": "internal/tui/command_handler.go",
+          "must_contain": "executeAmend"
+        }
       ],
       "notes": "/amend inject_context, skip_step, add_step, reprioritize, change_agent."
     },
@@ -111,7 +170,9 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "internal/agent/orchestrator.go"}
+        {
+          "path": "internal/agent/orchestrator.go"
+        }
       ],
       "notes": "Fixed 8600dfd0: complete the step before replan."
     },
@@ -121,12 +182,23 @@
       "category": "tools",
       "status": "shipped",
       "sources": [
-        {"title": "atomic-agent GBNF array tool calls", "url": "docs/research/2026-08-24-agent-parity-audit.md"}
+        {
+          "title": "atomic-agent GBNF array tool calls",
+          "url": "docs/research/2026-08-24-agent-parity-audit.md"
+        }
       ],
       "evidence": [
-        {"path": "plans/loop-economics/12-gbnf-constrained-calling.md"}
+        {
+          "path": "plans/loop-economics/12-gbnf-constrained-calling.md"
+        }
       ],
-      "notes": "Per-endpoint constraint modes. Tool-call repair on malformed JSON is still missing."
+      "notes": "Per-endpoint constraint modes. Tool-call repair on malformed JSON is still missing.",
+      "commits": [
+        "d746ff54",
+        "9feb8e7b",
+        "930084fc",
+        "4b8024d0"
+      ]
     },
     {
       "id": "tool-call-repair",
@@ -134,7 +206,10 @@
       "category": "tools",
       "status": "candidate",
       "sources": [
-        {"title": "Hermes tool-call repair", "url": "https://github.com/NousResearch/hermes-agent"}
+        {
+          "title": "Hermes tool-call repair",
+          "url": "https://github.com/NousResearch/hermes-agent"
+        }
       ],
       "evidence": [],
       "notes": "No repairer in internal/. GBNF is prevention only."
@@ -145,13 +220,24 @@
       "category": "tools",
       "status": "shipped",
       "sources": [
-        {"title": "oh-my-pi Hashline", "url": "https://github.com/can1357/oh-my-pi"}
+        {
+          "title": "oh-my-pi Hashline",
+          "url": "https://github.com/can1357/oh-my-pi"
+        }
       ],
       "evidence": [
-        {"path": "internal/tools/builtin/hashline.go"},
-        {"path": "internal/tools/builtin/file_edit.go", "must_contain": "hashline"}
+        {
+          "path": "internal/tools/builtin/hashline.go"
+        },
+        {
+          "path": "internal/tools/builtin/file_edit.go",
+          "must_contain": "hashline"
+        }
       ],
-      "notes": "Stale-line edits rejected. Do not reimplement from OmO (SUL-1.0)."
+      "notes": "Stale-line edits rejected. Do not reimplement from OmO (SUL-1.0).",
+      "commits": [
+        "326b2fb1"
+      ]
     },
     {
       "id": "lsp-codeintel",
@@ -160,7 +246,10 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "internal/daemon/components.go", "must_contain": "initializeCodeIntel"}
+        {
+          "path": "internal/daemon/components.go",
+          "must_contain": "initializeCodeIntel"
+        }
       ],
       "notes": "definition, references, hover, symbols, diagnostics, rename."
     },
@@ -170,10 +259,15 @@
       "category": "tools",
       "status": "partial",
       "sources": [
-        {"title": "oh-my-openagent ast-grep", "url": "https://github.com/code-yeongyu/oh-my-openagent"}
+        {
+          "title": "oh-my-openagent ast-grep",
+          "url": "https://github.com/code-yeongyu/oh-my-openagent"
+        }
       ],
       "evidence": [
-        {"path": "internal/code/ast/rule.go"}
+        {
+          "path": "internal/code/ast/rule.go"
+        }
       ],
       "notes": "YAML rules inspired by ast-grep. Not the ast-grep binary. pgrep/scope-grep still candidate."
     },
@@ -183,10 +277,16 @@
       "category": "tools",
       "status": "shipped",
       "sources": [
-        {"title": "atomic-agent tool.view LRU", "url": "docs/research/2026-08-24-agent-parity-audit.md"}
+        {
+          "title": "atomic-agent tool.view LRU",
+          "url": "docs/research/2026-08-24-agent-parity-audit.md"
+        }
       ],
       "evidence": [
-        {"path": "internal/agent/executor.go", "must_contain": "FilteredToolRegistry"}
+        {
+          "path": "internal/agent/executor.go",
+          "must_contain": "FilteredToolRegistry"
+        }
       ],
       "notes": "Schema modes full/filtered; meta-tool self-exclusion."
     },
@@ -197,7 +297,10 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "internal/agent/dispatcher.go", "must_contain": "KeywordClassifier"}
+        {
+          "path": "internal/agent/dispatcher.go",
+          "must_contain": "KeywordClassifier"
+        }
       ],
       "notes": "LLM first; substring fallback. Empty LLM reply skips keyword → chat. Candidate to disable (Meept ideas note)."
     },
@@ -207,10 +310,16 @@
       "category": "routing",
       "status": "partial",
       "sources": [
-        {"title": "GLM-5.3 thinking levels", "url": "https://docs.z.ai/guides/llm/glm-5.3.md"}
+        {
+          "title": "GLM-5.3 thinking levels",
+          "url": "https://docs.z.ai/guides/llm/glm-5.3.md"
+        }
       ],
       "evidence": [
-        {"path": "internal/agent/dispatcher.go", "must_contain": "SuggestedReasoningTier"}
+        {
+          "path": "internal/agent/dispatcher.go",
+          "must_contain": "SuggestedReasoningTier"
+        }
       ],
       "notes": "Field exists; production never assigns it. Loop honors ReasoningOverride only. glm-5.3 not in catalog."
     },
@@ -221,7 +330,9 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "internal/llm/resolver.go"}
+        {
+          "path": "internal/llm/resolver.go"
+        }
       ],
       "notes": "Quota-pause-with-timer is still candidate."
     },
@@ -232,7 +343,10 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "internal/llm/metrics/adaptive.go", "must_contain": "stddev"}
+        {
+          "path": "internal/llm/metrics/adaptive.go",
+          "must_contain": "stddev"
+        }
       ],
       "notes": "Wired via broker."
     },
@@ -243,7 +357,10 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "internal/metrics/store.go", "must_contain": "ModelPerformanceRecord"}
+        {
+          "path": "internal/metrics/store.go",
+          "must_contain": "ModelPerformanceRecord"
+        }
       ],
       "notes": "Client Mission Control panel is still candidate."
     },
@@ -253,11 +370,19 @@
       "category": "skills",
       "status": "shipped",
       "sources": [
-        {"title": "Pi skills.ts", "url": "analysis/pi-agent.md"},
-        {"title": "Memento-Skills", "url": "https://arxiv.org/abs/2603.18743"}
+        {
+          "title": "Pi skills.ts",
+          "url": "analysis/pi-agent.md"
+        },
+        {
+          "title": "Memento-Skills",
+          "url": "https://arxiv.org/abs/2603.18743"
+        }
       ],
       "evidence": [
-        {"path": "internal/skills/models.go"}
+        {
+          "path": "internal/skills/models.go"
+        }
       ],
       "notes": "Discovery + YAML frontmatter. No Memento retrieve→act→rewrite skill loop."
     },
@@ -267,7 +392,10 @@
       "category": "skills",
       "status": "candidate",
       "sources": [
-        {"title": "Memento-Skills", "url": "https://arxiv.org/abs/2603.18743"}
+        {
+          "title": "Memento-Skills",
+          "url": "https://arxiv.org/abs/2603.18743"
+        }
       ],
       "evidence": [],
       "notes": "Apache-2.0 Python runtime. Steal the loop; do not vendor. Self-improve exists but is patch-based (#2 safety)."
@@ -279,9 +407,15 @@
       "status": "partial",
       "sources": [],
       "evidence": [
-        {"path": "internal/selfimprove"}
+        {
+          "path": "internal/selfimprove"
+        }
       ],
-      "notes": "Pipeline exists. GitHub #2: LLM patches have insufficient safety boundaries."
+      "notes": "Pipeline exists. GitHub #2: LLM patches have insufficient safety boundaries.",
+      "commits": [
+        "f79ab1c7",
+        "dab2a027"
+      ]
     },
     {
       "id": "mcp-client-server",
@@ -290,8 +424,12 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "config/mcp_servers.json5"},
-        {"path": "cmd/meept/mcp_chat_server.go"}
+        {
+          "path": "config/mcp_servers.json5"
+        },
+        {
+          "path": "cmd/meept/mcp_chat_server.go"
+        }
       ],
       "notes": "20 catalog servers, 6 enabled. Reverse MCP chat server ships. A2A does not."
     },
@@ -301,10 +439,15 @@
       "category": "interop",
       "status": "partial",
       "sources": [
-        {"title": "ACP agent runtime plan", "url": "plans/acp-agent-runtime/master.md"}
+        {
+          "title": "ACP agent runtime plan",
+          "url": "plans/acp-agent-runtime/master.md"
+        }
       ],
       "evidence": [
-        {"path": "plans/acp-agent-runtime/master.md"}
+        {
+          "path": "plans/acp-agent-runtime/master.md"
+        }
       ],
       "notes": "Config/leaves landing 2026-08-29. Runtime not complete. Distinct from zcode subprocess worker."
     },
@@ -315,10 +458,21 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "internal/security/orchestrator.go"},
-        {"path": "internal/security/sanitizer.go", "must_contain": "redact"}
+        {
+          "path": "internal/security/orchestrator.go"
+        },
+        {
+          "path": "internal/security/sanitizer.go",
+          "must_contain": "redact"
+        }
       ],
-      "notes": "Credential redaction on output; MCP result scrub."
+      "notes": "Credential redaction on output; MCP result scrub.",
+      "commits": [
+        "a669bb48",
+        "513dd906",
+        "f78b4c61",
+        "94031f53"
+      ]
     },
     {
       "id": "sandbox-backends",
@@ -326,10 +480,15 @@
       "category": "security",
       "status": "partial",
       "sources": [
-        {"title": "duckagent bwrap", "url": "docs/research/2026-08-24-agent-parity-audit.md"}
+        {
+          "title": "duckagent bwrap",
+          "url": "docs/research/2026-08-24-agent-parity-audit.md"
+        }
       ],
       "evidence": [
-        {"path": "internal/runtime/resolver.go"}
+        {
+          "path": "internal/runtime/resolver.go"
+        }
       ],
       "notes": "docker/bwrap/local only. nsjail #11 and libkrun #12 not in SandboxOrder. dcg is candidate subprocess (custom license rider)."
     },
@@ -339,7 +498,10 @@
       "category": "security",
       "status": "candidate",
       "sources": [
-        {"title": "shell backend inherits full daemon environment", "url": "https://github.com/bhodgens/meept/issues/25"}
+        {
+          "title": "shell backend inherits full daemon environment",
+          "url": "https://github.com/bhodgens/meept/issues/25"
+        }
       ],
       "evidence": [],
       "notes": "GitHub #25. duckagent secret-backed requests are the analog."
@@ -350,25 +512,52 @@
       "category": "memory",
       "status": "shipped",
       "sources": [
-        {"title": "atomic-agent memory", "url": "docs/research/2026-08-24-agent-parity-audit.md"}
+        {
+          "title": "atomic-agent memory",
+          "url": "docs/research/2026-08-24-agent-parity-audit.md"
+        }
       ],
       "evidence": [
-        {"path": "internal/memory"}
+        {
+          "path": "internal/memory"
+        }
       ],
-      "notes": "Usefulness scoring not default (#27). MentisDB taxonomy is candidate steal, not a replacement."
+      "notes": "Includes distributed memvid hydrate/distill (3bbea836, ConsolidationBackend a56b03f3), usefulness voting + eviction (#27, 2e69e57d), lessons/procedures distillation (ac41a129). MentisDB taxonomy remains candidate steal.",
+      "commits": [
+        "3bbea836",
+        "a56b03f3",
+        "2e69e57d",
+        "ac41a129",
+        "740ea8bf"
+      ]
     },
     {
       "id": "minilm-vectors",
       "name": "Local MiniLM embeddings",
       "category": "memory",
-      "status": "partial",
+      "status": "shipped",
       "sources": [
-        {"title": "sentence-transformers MiniLM", "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"}
+        {
+          "title": "sentence-transformers MiniLM",
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
+        }
       ],
       "evidence": [
-        {"path": "internal/memory/vector/model_registry.go", "must_contain": "all-MiniLM-L6-v2"}
+        {
+          "path": "internal/memory/vector/model_registry.go",
+          "must_contain": "all-MiniLM-L6-v2"
+        },
+        {
+          "path": "internal/session/store_sqlite.go",
+          "must_contain": "sqlite-vec"
+        }
       ],
-      "notes": "Session KNN is sqlite-vec, not faiss."
+      "notes": "Sharded vector store on sqlite-vec (1e2706c5), scroll-to-message nav (7a0ce51a). Not faiss — deliberate choice.",
+      "commits": [
+        "1e2706c5",
+        "7a0ce51a",
+        "cd17fdc4"
+      ]
     },
     {
       "id": "ambient-extractor",
@@ -377,7 +566,10 @@
       "status": "partial",
       "sources": [],
       "evidence": [
-        {"path": "internal/memory/epistemic_ambient.go", "must_contain": "AmbientExtractor"}
+        {
+          "path": "internal/memory/epistemic_ambient.go",
+          "must_contain": "AmbientExtractor"
+        }
       ],
       "notes": "In-process, not a standalone async service."
     },
@@ -388,8 +580,12 @@
       "status": "shipped",
       "sources": [],
       "evidence": [
-        {"path": "internal/employee/gate.go"},
-        {"path": "docs/workflows/employees.md"}
+        {
+          "path": "internal/employee/gate.go"
+        },
+        {
+          "path": "docs/workflows/employees.md"
+        }
       ],
       "notes": "Completion gates (shell exit 0). Reviewer blocker/warning/concern tiers are candidate."
     },
@@ -400,7 +596,9 @@
       "status": "partial",
       "sources": [],
       "evidence": [
-        {"path": "internal/browser"}
+        {
+          "path": "internal/browser"
+        }
       ],
       "notes": "Disabled by default (BrowserConfig.Enabled)."
     },
@@ -410,10 +608,16 @@
       "category": "tools",
       "status": "partial",
       "sources": [
-        {"title": "wire cua-driver", "url": "https://github.com/bhodgens/meept/issues/26"}
+        {
+          "title": "wire cua-driver",
+          "url": "https://github.com/bhodgens/meept/issues/26"
+        }
       ],
       "evidence": [
-        {"path": "config/mcp_servers.json5", "must_contain": "cua"}
+        {
+          "path": "config/mcp_servers.json5",
+          "must_contain": "cua"
+        }
       ],
       "notes": "Catalog entry enabled:false. GitHub #26."
     },
@@ -423,7 +627,10 @@
       "category": "context",
       "status": "candidate",
       "sources": [
-        {"title": "rtk-ai/rtk", "url": "https://github.com/rtk-ai/rtk"}
+        {
+          "title": "rtk-ai/rtk",
+          "url": "https://github.com/rtk-ai/rtk"
+        }
       ],
       "evidence": [],
       "notes": "Apache-2.0 Rust CLI. Subprocess only. Hermes already in their agent matrix."
@@ -434,7 +641,10 @@
       "category": "loop",
       "status": "candidate",
       "sources": [
-        {"title": "fristovic/snitch", "url": "https://github.com/fristovic/snitch"}
+        {
+          "title": "fristovic/snitch",
+          "url": "https://github.com/fristovic/snitch"
+        }
       ],
       "evidence": [],
       "notes": "Apache-2.0 Go. Prefer meept-native post-turn hook using their claim-type table."
@@ -445,7 +655,10 @@
       "category": "tools",
       "status": "candidate",
       "sources": [
-        {"title": "safishamsi/graphify", "url": "https://github.com/safishamsi/graphify"}
+        {
+          "title": "safishamsi/graphify",
+          "url": "https://github.com/safishamsi/graphify"
+        }
       ],
       "evidence": [],
       "notes": "Apache-2.0. Subprocess `uv tool install graphifyy`. Do not vendor Python."
@@ -456,11 +669,19 @@
       "category": "loop",
       "status": "candidate",
       "sources": [
-        {"title": "OpenSpec", "url": "https://openspec.dev/"},
-        {"title": "github/spec-kit", "url": "https://github.com/github/spec-kit"}
+        {
+          "title": "OpenSpec",
+          "url": "https://openspec.dev/"
+        },
+        {
+          "title": "github/spec-kit",
+          "url": "https://github.com/github/spec-kit"
+        }
       ],
       "evidence": [
-        {"path": "docs/superpowers/plans/2026-06-18-openspec-and-researcher-agent.md"}
+        {
+          "path": "docs/superpowers/plans/2026-06-18-openspec-and-researcher-agent.md"
+        }
       ],
       "notes": "Plan exists. internal/openspec package missing."
     },
@@ -470,10 +691,104 @@
       "category": "interop",
       "status": "candidate",
       "sources": [
-        {"title": "A2A announcement", "url": "https://developers.googleblog.com/en/a2a-a-new-era-of-agent-interoperability/"}
+        {
+          "title": "A2A announcement",
+          "url": "https://developers.googleblog.com/en/a2a-a-new-era-of-agent-interoperability/"
+        }
       ],
       "evidence": [],
       "notes": "HTTP only if implemented. Unix RPC stays owner-trusted. Complements MCP."
+    },
+    {
+      "id": "halo-augmentation",
+      "name": "HALO trace analysis (RLM analyzer, trace index, depth gating, turn compaction, failure recovery)",
+      "category": "observability",
+      "status": "shipped",
+      "sources": [
+        {
+          "title": "HALO augmentation implementation status",
+          "url": "docs/plans/2026-07-17-halo-implementation-status.md"
+        },
+        {
+          "title": "context-labs/halo",
+          "url": "https://github.com/context-labs/halo"
+        }
+      ],
+      "evidence": [
+        {
+          "path": "internal/agent/rlm_analyzer.go",
+          "must_contain": "RLM"
+        },
+        {
+          "path": "internal/memory/trace_store.go",
+          "must_contain": "TraceIndexBuilder"
+        },
+        {
+          "path": "internal/agent/per_depth_semaphore.go"
+        },
+        {
+          "path": "internal/agent/turn_compaction.go"
+        },
+        {
+          "path": "internal/agent/rlm_telemetry.go"
+        },
+        {
+          "path": "internal/memory/report_artifact.go"
+        }
+      ],
+      "commits": [
+        "1e74b9b3",
+        "3bbb7979",
+        "b16411ff",
+        "820bde41",
+        "9151bb57",
+        "63718217",
+        "4f5e509b",
+        "112f7b32",
+        "61af4a88",
+        "f79ab1c7"
+      ],
+      "notes": "Tier1-3 HALO phases landed 2026-07-17..23 (status doc marks Tier1 done; Phases 6/8/9/10/11 files exist). Mid-stream RetryRecovery (112f7b32) shipped despite 'deferred' note."
+    },
+    {
+      "id": "wikiskill-state",
+      "name": "WikiSkill + SKILL.state (arXiv:2608.27454 wiki layer, arXiv:2608.26263 skill state runtime)",
+      "category": "skills",
+      "status": "partial",
+      "sources": [
+        {
+          "title": "arXiv:2608.27454 (WikiSkill)",
+          "url": "https://arxiv.org/abs/2608.27454"
+        },
+        {
+          "title": "arXiv:2608.26263 (SKILL.state)",
+          "url": "https://arxiv.org/abs/2608.26263"
+        },
+        {
+          "title": "plan tree",
+          "url": "docs/plans/2026-08-29-wikiskill-skill-state"
+        }
+      ],
+      "evidence": [
+        {
+          "path": "internal/skills",
+          "must_contain": "wiki"
+        },
+        {
+          "path": "internal/llm",
+          "must_contain": "WithRawGrammar"
+        }
+      ],
+      "commits": [
+        "1e1f9e09",
+        "5899ac60",
+        "aaafe0c7",
+        "d08a5bd2",
+        "6566ea71",
+        "bf016488",
+        "58f53f2a"
+      ],
+      "notes": "Wiki store, immutable trace store, trace-fed refine + skill-impact ledger, skill.state runtime core, WithRawGrammar seam. Landing 2026-08-29; verify completion before marking shipped."
     }
   ]
 }

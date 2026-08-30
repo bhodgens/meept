@@ -4,14 +4,14 @@
 
 Generated from `docs/research/harness-techniques.json` (version 1, updated 2026-08-29). Do not edit by hand; run `python3 scripts/research-harness-lit.py` to regenerate.
 
-Status counts: shipped 18, partial 11, candidate 9, skip 0
+Status counts: shipped 20, partial 11, candidate 9, skip 0
 
 ## context
 
 | Technique | Status | Sources | Evidence | Notes |
 | --- | --- | --- | --- | --- |
 | Hierarchical context firewall | partial | [Pi Agent compaction](https://github.com/earendil-works/pi/tree/main/packages/agent), [meept pi-agent analysis](../../analysis/pi-agent.md) | `internal/llm/context_firewall.go`, `docs/workflows/context-firewall.md` | Shipped multi-stage compression. Stage-2 summarize still truncates in places (docs/bugs-and-gaps.md). Not Pi iterative update-summary + file-op tracking. |
-| Pi-style iterative compaction (update summary, file tracking, split-turn) | candidate | [Pi Agent compaction/](https://github.com/earendil-works/pi/tree/main/packages/agent) | `internal/session/store_sqlite.go` | SQLite compaction APIs exist. Missing iterative update prompt, cumulative file-op tags, split-turn merge. Related GitHub #21. |
+| Pi-style iterative compaction (update summary, file tracking, split-turn) | candidate | [Pi Agent compaction/](https://github.com/earendil-works/pi/tree/main/packages/agent) | `internal/session/store_sqlite.go` | SQLite compaction APIs (edacab6a MemoryStore parity), HALO atomic tool-turn compaction (3bbb7979, b16411ff ~40% reduction), user-message preservation in compaction prompts (d9559497). Still not Pi's update-in-place iterative summary; #21 may now be stale. |
 | Command-output compression (rtk) | candidate | [rtk-ai/rtk](https://github.com/rtk-ai/rtk) | — | Apache-2.0 Rust CLI. Subprocess only. Hermes already in their agent matrix. |
 | Byte-stable prompt prefix (KV-cache / prefix hash) | shipped | [atomic-agent stable prefix](2026-08-24-agent-parity-audit.md), [loop-economics plan](../../plans/loop-economics/01-stable-prefix-prompt.md) | `internal/agent/prompt.go` | cacheStablePrefix default true; sha256 over stable prefix bytes. |
 
@@ -41,14 +41,15 @@ Status counts: shipped 18, partial 11, candidate 9, skip 0
 | Technique | Status | Sources | Evidence | Notes |
 | --- | --- | --- | --- | --- |
 | Ambient / async memory extractor | partial | — | `internal/memory/epistemic_ambient.go` | In-process, not a standalone async service. |
-| 6-tier memory + epistemic claims | shipped | [atomic-agent memory](2026-08-24-agent-parity-audit.md) | `internal/memory` | Usefulness scoring not default (#27). MentisDB taxonomy is candidate steal, not a replacement. |
-| Local MiniLM embeddings | partial | [sentence-transformers MiniLM](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) | `internal/memory/vector/model_registry.go` | Session KNN is sqlite-vec, not faiss. |
+| 6-tier memory + epistemic claims | shipped | [atomic-agent memory](2026-08-24-agent-parity-audit.md) | `internal/memory` | Includes distributed memvid hydrate/distill (3bbea836, ConsolidationBackend a56b03f3), usefulness voting + eviction (#27, 2e69e57d), lessons/procedures distillation (ac41a129). MentisDB taxonomy remains candidate steal. |
+| Local MiniLM embeddings | shipped | [sentence-transformers MiniLM](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) | `internal/memory/vector/model_registry.go`, `internal/session/store_sqlite.go` | Sharded vector store on sqlite-vec (1e2706c5), scroll-to-message nav (7a0ce51a). Not faiss — deliberate choice. |
 
 ## observability
 
 | Technique | Status | Sources | Evidence | Notes |
 | --- | --- | --- | --- | --- |
 | Adaptive timeout (mean + N*stddev) | shipped | — | `internal/llm/metrics/adaptive.go` | Wired via broker. |
+| HALO trace analysis (RLM analyzer, trace index, depth gating, turn compaction, failure recovery) | shipped | [HALO augmentation implementation status](../plans/2026-07-17-halo-implementation-status.md), [context-labs/halo](https://github.com/context-labs/halo) | `internal/agent/rlm_analyzer.go`, `internal/memory/trace_store.go`, `internal/agent/per_depth_semaphore.go`, `internal/agent/turn_compaction.go`, `internal/agent/rlm_telemetry.go`, `internal/memory/report_artifact.go` | Tier1-3 HALO phases landed 2026-07-17..23 (status doc marks Tier1 done; Phases 6/8/9/10/11 files exist). Mid-stream RetryRecovery (112f7b32) shipped despite 'deferred' note. |
 | Per-model latency / error stats | shipped | — | `internal/metrics/store.go` | Client Mission Control panel is still candidate. |
 
 ## routing
@@ -74,6 +75,7 @@ Status counts: shipped 18, partial 11, candidate 9, skip 0
 | Memento-Skills reflective rewrite (frozen-θ) | candidate | [Memento-Skills](https://arxiv.org/abs/2603.18743) | — | Apache-2.0 Python runtime. Steal the loop; do not vendor. Self-improve exists but is patch-based (#2 safety). |
 | Shadow-training / skill-evolution self-improve | partial | — | `internal/selfimprove` | Pipeline exists. GitHub #2: LLM patches have insufficient safety boundaries. |
 | Filesystem SKILL.md skills | shipped | [Pi skills.ts](../../analysis/pi-agent.md), [Memento-Skills](https://arxiv.org/abs/2603.18743) | `internal/skills/models.go` | Discovery + YAML frontmatter. No Memento retrieve→act→rewrite skill loop. |
+| WikiSkill + SKILL.state (arXiv:2608.27454 wiki layer, arXiv:2608.26263 skill state runtime) | partial | [arXiv:2608.27454 (WikiSkill)](https://arxiv.org/abs/2608.27454), [arXiv:2608.26263 (SKILL.state)](https://arxiv.org/abs/2608.26263), [plan tree](../plans/2026-08-29-wikiskill-skill-state) | `internal/skills`, `internal/llm` | Wiki store, immutable trace store, trace-fed refine + skill-impact ledger, skill.state runtime core, WithRawGrammar seam. Landing 2026-08-29; verify completion before marking shipped. |
 
 ## tools
 
