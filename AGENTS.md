@@ -83,7 +83,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Server** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus`, `internal/comm` |
 | **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace, executor, dispatcher) |
 | **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall) |
-| **Memory** | `internal/memory` (manager, episodic, task, ftstore) |
+| **Memory** | `internal/memory` (manager, episodic, task, ftstore, facts) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp), `internal/acp` (ACP client wire) |
 | **Security** | `internal/security` (engine, sanitizer, tirith, tls, fence), `internal/auth` (multi-user store: users/keys/expiry, quota+permission stubs) |
 | **Employee** | `internal/employee` (constitution, goal, goal_loop, enforcement, authority, manager) |
@@ -94,7 +94,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **GUI** | `ui/flutter_ui` (Flutter web + desktop) |
 | **Scheduling** | `internal/scheduler`, `internal/queue`, `internal/worker` |
 | **Skills** | `internal/skills`, `internal/selfimprove` |
-| **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty` |
+| **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/eval`, `internal/gate` |
 
 See `docs/concepts/architecture.md` for full documentation.
 
@@ -202,6 +202,14 @@ never be reachable from `ContextInjector`, `BuildSystemPrompt`, or any
 inference-path prompt builder (WikiSkill §5.1: giving the worker wiki access
 during evolution degrades final skill quality). Sampling constants
 (5 fail / 3 pass traces, 15k chars) live in code, not config.
+
+Every loop that serves user turns must be wired for trace persistence: the
+primary loop (components.go, `agent.WithTraceWriter`) AND every
+registry-created specialist loop (`AgentRegistry.SetTraceWriter`) — chat,
+coder, etc. turns all reach the store via `agent.NewTraceStoreWriter` +
+`traceStorePersist`. When adding a new loop construction path, wire these
+three (trace writer, usage tracker, learning pipeline) or the evolver
+blind spot grows.
 
 ### State mode is per-skill opt-in
 

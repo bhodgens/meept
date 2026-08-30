@@ -310,6 +310,6 @@ config) execute through `SkillStateRuntime` instead of the conversation loop
 auditing, debugging provenance, explaining past actions. State mode is
 per-skill opt-in and must never be forced on such tasks (SKILL.state §7).
 
-Known gap: the state runtime's per-run trace record is not wired (the agent
-`TraceWriter` interface takes an unexported mirror type); turn-level traces
-still record normally.
+State-run trajectories persist to the same trace store as turn traces
+(via `agent.NewTraceStoreWriter`), so the evolver's Pass A samples evidence
+from both ordinary turns and state-mode runs.
