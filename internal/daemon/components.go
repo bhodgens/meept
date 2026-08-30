@@ -2102,6 +2102,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if c.SkillLoader != nil {
 			c.AgentRegistry.SetSkillLoader(c.SkillLoader)
 		}
+		// Wire learning + evolution components so dispatcher-routed
+		// specialist loops record traces, skill outcomes, and patterns
+		// exactly like the primary loop (WikiSkill raw layer).
+		if c.TraceStore != nil {
+			ts := c.TraceStore
+			c.AgentRegistry.SetTraceWriter(
+				agent.NewTraceStoreWriter(func(p agent.TraceRecordPayload) (string, error) {
+					return traceStorePersist(ts, p)
+				}),
+			)
+		}
+		if c.SkillUsageTracker != nil {
+			c.AgentRegistry.SetUsageTracker(&skillUsageTrackerAdapter{tracker: c.SkillUsageTracker})
+		}
+		if c.LearningPipeline != nil {
+			c.AgentRegistry.SetLearningPipeline(&learningPipelineAdapter{pipeline: c.LearningPipeline})
+		}
 
 		// Build capabilities map from agent specs and skill metadata
 		capBuilder := agent.NewCapabilitiesBuilder(c.SkillIndex, logger.With("component", "capabilities-builder"))

@@ -93,6 +93,14 @@ type AgentRegistry struct {
 	// (leaf 07); applied to every loop created by this registry.
 	guardsCfg config.AgentGuardsConfig
 
+	// Learning + evolution wiring (WikiSkill raw layer, arXiv:2608.27454):
+	// shared across all registry-created loops so specialist agents record
+	// traces, skill outcomes, and learned patterns identically to the
+	// primary daemon loop. All three are optional (nil = not wired).
+	traceWriter      TraceWriter
+	usageTracker     lifecycleUsageTracker
+	learningPipeline LearningPipeline
+
 	// db is the SQLite connection for queue persistence (may be nil).
 	db *sql.DB
 
@@ -391,6 +399,21 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		opts = append(opts, WithSkillLoader(r.skillLoader))
 	}
 
+	// Learning + evolution wiring (WikiSkill raw layer): registry-created
+	// loops inherit the trace writer, usage tracker, and learning pipeline
+	// so specialist agents (chat/coder/...) record traces, skill outcomes,
+	// and patterns identically to the primary daemon loop. Without this,
+	// dispatcher-routed turns never reach the knowledge stores.
+	if r.traceWriter != nil {
+		opts = append(opts, WithTraceWriter(r.traceWriter))
+	}
+	if r.usageTracker != nil {
+		opts = append(opts, WithUsageTracker(r.usageTracker))
+	}
+	if r.learningPipeline != nil {
+		opts = append(opts, WithLearningPipeline(r.learningPipeline))
+	}
+
 	// Wire shared validation components into each agent loop
 	if r.watchdog != nil {
 		opts = append(opts, WithWatchdog(r.watchdog))
@@ -595,6 +618,39 @@ func (r *AgentRegistry) CapabilitiesMap() *CapabilitiesMap {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.capabilitiesMap
+}
+
+// SetTraceWriter wires the turn-trace persistence hook into every loop this
+// registry creates (WikiSkill raw layer). Nil is a no-op.
+func (r *AgentRegistry) SetTraceWriter(tw TraceWriter) {
+	if tw == nil {
+		return
+	}
+	r.mu.Lock()
+	r.traceWriter = tw
+	r.mu.Unlock()
+}
+
+// SetUsageTracker wires the skill usage tracker into every loop this
+// registry creates (closed-loop skill evolution). Nil is a no-op.
+func (r *AgentRegistry) SetUsageTracker(ut lifecycleUsageTracker) {
+	if ut == nil {
+		return
+	}
+	r.mu.Lock()
+	r.usageTracker = ut
+	r.mu.Unlock()
+}
+
+// SetLearningPipeline wires the learning pipeline (Judge/Distill) into every
+// loop this registry creates. Nil is a no-op.
+func (r *AgentRegistry) SetLearningPipeline(lp LearningPipeline) {
+	if lp == nil {
+		return
+	}
+	r.mu.Lock()
+	r.learningPipeline = lp
+	r.mu.Unlock()
 }
 
 // SetCapabilitiesMap sets the capabilities map for fast routing.
