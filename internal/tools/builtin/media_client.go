@@ -374,7 +374,7 @@ func enhanceMediaPrompt(ctx context.Context, resolver *llm.Resolver, kind, promp
 	}
 	small := resolver.SmallModel()
 	if small == nil {
-		if mc, err := resolver.ResolveForAlias("small"); err == nil {
+		if mc, err := resolver.ResolveForAlias("small", ""); err == nil {
 			small = mc
 		}
 	}
