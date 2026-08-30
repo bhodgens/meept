@@ -165,8 +165,8 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-core-types.md | PENDING | 0 | |
-| 02-call-sites.md | PENDING | 0 | |
+| 01-core-types.md | COMPLETE | 2 | Implemented: ModelAliasEntry fields, AliasHealth.StickyPins, ResolveForAlias with callerKey, sticky logic, default reversion. Tests pass. Committed 4d644e36. |
+| 02-call-sites.md | COMPLETE | 1 | Implemented: wired sessionID through agent loops, updated docs. Committed bc4ffb2b. |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
