@@ -311,7 +311,7 @@ func TestWriteFileTool_StagedMode(t *testing.T) {
 
 		// Change registered with correct pre-image hash for a new file.
 		// The tool resolves symlinks, so compare against its own resolution.
-		wantResolved, resErr := resolvePathSecure(path)
+		wantResolved, resErr := resolvePathSecure(context.Background(), path)
 		if resErr != nil {
 			t.Fatalf("resolvePathSecure failed: %v", resErr)
 		}
@@ -587,7 +587,7 @@ func TestResolvePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := resolvePath(tt.input)
+			_, err := resolvePath(context.Background(), tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("resolvePath(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 			}

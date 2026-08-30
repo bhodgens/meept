@@ -121,7 +121,7 @@ func (n *lspWriteNotifier) NotifyWrite(ctx context.Context, filePath string, con
 		return nil
 	}
 
-	absPath, err := resolvePath(filePath)
+	absPath, err := resolvePath(ctx, filePath)
 	if err != nil {
 		return nil
 	}

@@ -117,7 +117,7 @@ type ShellExecuteTool struct {
 // NewShellExecuteTool creates a new shell execution tool.
 func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration, ptyMgr *pty.Manager) *ShellExecuteTool {
 	if workingDir == "" {
-		workingDir, _ = resolvePath("~")
+		workingDir, _ = resolvePath(context.Background(), "~")
 	}
 	if defaultTimeout == 0 {
 		defaultTimeout = DefaultShellTimeout
@@ -401,7 +401,7 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	// Parse working directory
 	workDir := t.workingDir
 	if wd, ok := args["working_dir"].(string); ok && wd != "" {
-		resolved, err := resolvePath(wd)
+		resolved, err := resolvePath(ctx, wd)
 		if err != nil {
 			return nil, fmt.Errorf("invalid working directory: %w", err)
 		}
@@ -591,7 +591,7 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	// Parse working directory
 	workDir := t.workingDir
 	if wd, ok := args["working_dir"].(string); ok && wd != "" {
-		resolved, err := resolvePath(wd)
+		resolved, err := resolvePath(ctx, wd)
 		if err != nil {
 			return nil, fmt.Errorf("invalid working directory: %w", err)
 		}

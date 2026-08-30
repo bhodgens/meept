@@ -1,0 +1,22 @@
+{
+  "rpc": { "socket": "~/git/meept/scratch/wikismoke/meept.sock" },
+  "transport": { "http": { "addr": "127.0.0.1:18099" } },
+  "data_dir": "~/git/meept/scratch/wikismoke/data",
+  "selfimprove": { "enabled": true, "data_dir": "~/git/meept/scratch/wikismoke/data/learning" },
+  "skills": {
+    "evolver": {
+      "enabled": true,
+      "interval": 3600000000000,
+      "auto_apply": false,
+      "run_on_start": true,
+    },
+    "wiki": {
+      "enabled": true,
+      "dir": "~/git/meept/scratch/wikismoke/wiki",
+    },
+    "state": {
+      "enabled": true,
+      "max_state_chars": 2000,
+    },
+  },
+}

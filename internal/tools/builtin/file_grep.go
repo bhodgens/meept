@@ -119,7 +119,7 @@ func (t *FileGrepTool) Execute(ctx context.Context, args map[string]any) (any, e
 		rawPath = "."
 	}
 
-	resolved, err := resolvePath(rawPath)
+	resolved, err := resolvePath(ctx, rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}

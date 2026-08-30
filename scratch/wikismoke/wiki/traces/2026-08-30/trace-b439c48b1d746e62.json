@@ -1,0 +1,20 @@
+{
+  "id": "trace-b439c48b1d746e62",
+  "session_id": "plan-task-20260830204234.876853000-0001-a3597536b1267cda",
+  "domain": "code",
+  "outcome": "success",
+  "injected_skills": [
+    "subagent-orchestrator-race-on-nested-completion",
+    "parallel-subagent-code-review",
+    "git-blame-contributor-analysis"
+  ],
+  "steps": [
+    {
+      "action": "user_input",
+      "input": "\nYou are a task planner. Decompose the following request into discrete, executable steps.\nEach step should be a single unit of work that can be assigned to a specialist agent.\n\nAvailable tool hints (use these to indicate what kind of agent should handle each step):\n- \"code\" or \"refactor\" → coding specialist\n- \"debug\" or \"fix\" → debugging specialist\n- \"analyze\" or \"research\" → analysis specialist\n- \"git\" or \"commit\" → git operations specialist\n- \"plan\" → further planning/decomposition\n- \"chat\" → general conversation\n\nOutput ONLY valid JSON in this exact format (no markdown, no explanation):\n{\n  \"steps\": [\n    {\"description\": \"step description\", \"tool_hint\": \"code\", \"depends_on\": []},\n    {\"description\": \"step description\", \"tool_hint\": \"code\", \"depends_on\": [0]},\n    {\"description\": \"step description\", \"tool_hint\": \"git\", \"depends_on\": [0, 1]}\n  ]\n}\n\nThe \"depends_on\" field uses 0-based step indices. Steps with empty depends_on can run in parallel.\nKeep the plan to 10 steps maximum. Be specific and actionable.\n\n\n\nRequest to decompose:\nCreate a file named answer.txt in the repository root containing exactly the number 42 on a single line. When writing, use file_write with the direct:true argument so the file is written to disk immediately.\n\n\n## Dynamic Agent Availability\n- \"coder\" → Implements, modifies, and maintains code with precision\n- \"doc-keeper\" → Detects code changes that invalidate documentation and proposes doc updates\n- \"image-id\" → Identifies subjects, text, style, and likely source of an image\n- \"release-manager\" → Assembles changelogs, bumps versions, creates tags, and prepares releases\n- \"architect\" → Designs systems, chooses technologies, documents trade-offs and decisions\n- \"cost-auditor\" → Reads employee budget metrics and reports per-agent spend with amendment recomme\n- \"debugger\" → Investigates, diagnoses, and fixes bugs with systematic precision\n- \"onboarding-tour\" → Produces a repo orientation — build commands, layout, conventions, gotchas\n- \"skeptic\" → Stress-tests claims, hunts for flaws in reasoning, surfaces contradictions\n- \"committer\" → Handles git operations including commits, branches, merges, and repository manag\n- \"flaky-test-hunter\" → Reruns failed tests to classify flaky vs. broken and feeds evidence to ci-monito\n- \"image-gen\" → Expands a brief with a small enhancer model, then generates images\n- \"researcher\" → Gathers information from web, documentation, and codebase\n- \"video-gen\" → Expands a brief with a small enhancer model, then generates video clips\n- \"writer\" → Produces long-form writing — essays, docs, briefs, explanations\n- \"analyst\" → Synthesizes information, draws insights, and summarizes complex topics\n- \"explore\" → fast read-only codebase search specialist\n- \"librarian\" → Tends the memory platform — dedup, tag hygiene, reflection, epistemic integrit\n- \"scheduler\" → Creates, manages, and cancels scheduled tasks and reminders\n",
+      "success": true
+    }
+  ],
+  "summary": "{\n  \"steps\": [\n    {\"description\": \"Create answer.txt in the repository root with content '42' (exactly the number 42 followed by a newline on a single line), using file_write with the argument direct:true so the file is written to disk immediately\", \"tool_hint\": \"code\", \"depends_on\": []},\n    {\"description\": \"Verify answer.txt exists in the repository root and contains exactly '42' on a single line (confirm file path, size, and content)\", \"tool_hint\": \"analyze\", \"depends_on\": [0]}\n  ]\n}",
+  "created_at": "2026-08-30T20:42:46.418545Z"
+}

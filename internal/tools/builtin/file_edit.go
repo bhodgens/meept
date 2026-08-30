@@ -147,7 +147,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		return nil, fmt.Errorf("no edits specified")
 	}
 
-	resolved, err := resolvePath(rawPath)
+	resolved, err := resolvePath(ctx, rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}

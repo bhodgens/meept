@@ -1,0 +1,21 @@
+{
+  "rpc": { "socket": "~/git/meept/scratch/gapsmoke2/meept.sock" },
+  "transport": { "http": { "addr": "127.0.0.1:18097" } },
+  "data_dir": "~/git/meept/scratch/gapsmoke2/data",
+  "skills": {
+    "wiki": {
+      "enabled": true,
+      "dir": "~/git/meept/scratch/gapsmoke2/wiki",
+    },
+    "evolver": {
+      "enabled": true,
+      "interval": "1h",
+      "auto_apply": false,
+      "run_on_start": true,
+    },
+    "state": {
+      "enabled": true,
+      "max_state_chars": 2000,
+    },
+  },
+}
