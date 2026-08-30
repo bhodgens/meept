@@ -338,24 +338,24 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-eval-core | PENDING | 0 | |
-| 02-eval-cli | PENDING | 0 | |
-| 03-eval-http | PENDING | 0 | |
-| 04-coder-gates | PENDING | 0 | |
-| 05-verify-breaker | PENDING | 0 | |
-| 06-shadow-capture | PENDING | 0 | |
-| 07-shadow-honesty | PENDING | 0 | |
-|| 08-trajectory-judge | REVIEWED | 06862e82 |
-|| 09-trusted-root | REVIEWED | 46baf6e9 |
-|| 10-isolation | REVIEWED | 4088767b |
-|| 11-speak-router | REVIEWED | ed9916c0 |
-|| 12-memory-facts | REVIEWED | b8441ef6 |
-|| 13-status-bar | REVIEWED | 22a3a252 |
-|| 14-event-rewake | REVIEWED | 31513939 |
-||| 15-docs-flags-metrics | REVIEWED | 659f72ae |
-|| 16-tui-parity | REVIEWED | 79a54e48 |
-|| 17-flutter-parity | REVIEWED | 79a54e48 |
-|| 18-menubar-parity | REVIEWED | 2e8b1c36 |
+|| 01-eval-core | COMPLETE | 1 | 414105e6 — subagent landed C1 exact; coexists w/ sibling HALO files; combined -race green |
+|| 02-eval-cli | COMPLETE | 1 | 558fc788 — subagent landed; live smoke caught id/.json lookup bug, fixed; 3 verbs verified |
+|| 03-eval-http | COMPLETE | 1 | bf016488 — landed inside sibling commit (shared-index sweep); content verified, -race green |
+|| 04-coder-gates | COMPLETE | 1 | 0e522625 — subagent landed; internal/gate extraction solves import cycle; one hook site; commit amended off shared-index probe |
+|| 05-verify-breaker | COMPLETE | 1 | e8eb57df — orchestrator-implemented after subagent 429 (zero files); -race green, 15/15 hooks |
+|| 06-shadow-capture | COMPLETE | 1 | 86e14393 — plumb pre-existed (gap doc stale); pinned w/ pointer-identity + tool-record tests; no prod changes |
+|| 07-shadow-honesty | COMPLETE | 1 | e561b23d — subagent landed, orchestrator verified+committed (U1000 anchor deleted); -race green |
+|| 08-trajectory-judge | COMPLETE | 1 | 06862e82 — Judge + judgment store + OnlyJudged gate (generic constraint solves eval->agent->selfimprove cycle); filter pure, live site noted |
+|| 09-trusted-root | COMPLETE | 1 | 46baf6e9 — subagent landed; deny-before-write, symlink+traversal covered; commit delayed by sibling wiki.go mid-landing, now green |
+|| 10-isolation | COMPLETE | 1 | 4088767b — subagent landed; canary tests on handoff/pair/delegate; fail-closed unknown enum |
+|| 11-speak-router | COMPLETE | 2 | ed9916c0 — first subagent 429'd; retry landed full speak stack; ErrIsolatedSpeak sentinel added at review |
+|| 12-memory-facts | COMPLETE | 1 | b8441ef6 — orchestrator-implemented after subagent 429 (zero files); store+tool+extractor, -race green |
+|| 13-status-bar | COMPLETE | 1 | 8975b825 — re-wired status bar injection into assembleSystemPrompt (was lost in sibling sweep) |
+|| 14-event-rewake | COMPLETE | 1 | 31513939 — RewakePayload.Source field; scheduler publishRewake adapter; primary loop proven |
+|| 15-docs-flags-metrics | COMPLETE | 1 | 659f72ae — docs/workflows/eval.md; metrics observer nil-safe |
+|| 16-tui-parity | COMPLETE | 1 | 79a54e48 — /eval list+show slash commands; /facts; NotifySnapshot with discarded flag |
+|| 17-flutter-parity | COMPLETE | 1 | 79a54e48 — eval_runs_panel, facts_panel, SDK methods; thin GET /api/v1/memory/facts handler |
+|| 18-menubar-parity | COMPLETE | 1 | 2e8b1c36 — EvalBadgeManager polls eval runs; MenubarEvalView shows fail count; instantiate in popover |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
