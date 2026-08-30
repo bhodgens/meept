@@ -352,10 +352,10 @@ Output: APPROVED or list of specific gaps.
 || 12-memory-facts | REVIEWED | b8441ef6 |
 || 13-status-bar | REVIEWED | 22a3a252 |
 || 14-event-rewake | REVIEWED | 31513939 |
-|| 15-docs-flags-metrics | REVIEWED | 659f72ae |
-| 16-tui-parity | PENDING | 0 | |
-| 17-flutter-parity | PENDING | 0 | |
-| 18-menubar-parity | PENDING | 0 | |
+||| 15-docs-flags-metrics | REVIEWED | 659f72ae |
+|| 16-tui-parity | REVIEWED | 79a54e48 |
+|| 17-flutter-parity | REVIEWED | 79a54e48 |
+|| 18-menubar-parity | REVIEWED | 79a54e48 |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
