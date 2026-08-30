@@ -162,6 +162,11 @@ type Components struct {
 	// Learning pipeline
 	LearningPipeline *selfimprove.LearningPipeline
 
+	// Skill knowledge stores (WikiSkill raw + wiki layers). Both nil unless
+	// [skills.wiki] is enabled; built by wireSkillKnowledgeStores.
+	TraceStore *selfimprove.TraceStore
+	WikiStore  *selfimprove.WikiStore
+
 	// LoRA learning capture recorder
 	LearningCapture *learning.CaptureRecorder
 
@@ -177,6 +182,11 @@ type Components struct {
 	SkillVersioner    *lifecycle.Versioner
 	SkillEvolver      *lifecycle.Evolver
 	SkillEvolverSched *lifecycle.EvolverScheduler
+
+	// SkillStateRuntime routes SKILL.state-mode skills through the
+	// state-layer execution path (arXiv:2608.26263). Nil unless
+	// [skills.state] is enabled; bound to the daemon's template loop.
+	SkillStateRuntime *agent.SkillStateRuntime
 
 	// Self-improvement controller (full 5-phase cycle)
 	SelfImproveCtrl  *selfimprove.Controller
@@ -933,6 +943,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Construct skill knowledge stores (WikiSkill raw trace layer + wiki
+	// layer, arXiv:2608.27454). Runs regardless of SelfImprove.Enabled: the
+	// wiki store is attached to the learning pipeline when one exists and
+	// handed to the evolver below when the evolver is enabled. With
+	// [skills.wiki] disabled this is a no-op (nil stores, no directories).
+	c.TraceStore, c.WikiStore = wireSkillKnowledgeStores(cfg, c.LearningPipeline, logger.With("component", "skill-knowledge"))
+
 	// Create learning capture recorder (LoRA learning pipeline).
 	// Gated on both master switch and capture.enabled so operators can keep
 	// adapters/training enabled while pausing passive capture.
@@ -1181,6 +1198,31 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Note: memvid and taskStore are wired AFTER their initialization below
 	// workingDir is empty at init; set per-session when a project is bound.
+	// Wire SKILL.state mode (WikiSkill state layer, arXiv:2608.26263).
+	// Opt-in: no-op unless [skills.state] is enabled. The runtime is built
+	// inside a LoopOption closure because it needs the loop's chatter and
+	// tool-execution seam, which exist only once NewAgentLoop applies the
+	// options gathered here (the loop does not exist before that call —
+	// this is the ~:1076 options block, deliberately placed at its tail).
+	// The WithSkillStateRuntime option then stores it mutex-guarded on the
+	// loop, and ConfigSnapshot propagates it to per-session clones.
+	if cfg.Skills.State.Enabled {
+		agentOpts = append(agentOpts, func(l *agent.AgentLoop) {
+			stateRuntime := agent.NewSkillStateRuntime(
+				l,
+				agent.SkillStateConfig{
+					MaxStateChars: cfg.Skills.State.MaxStateChars,
+					MaxIterations: 0, // 0 = runtime default (25)
+				},
+				logger.With("component", "skill-state"),
+			).WithToolRunner(l.ExecuteSkillToolCalls)
+			c.SkillStateRuntime = stateRuntime
+			agent.WithSkillStateRuntime(stateRuntime)(l)
+			logger.Info("Agent loop configured with skill state runtime",
+				"max_state_chars", cfg.Skills.State.MaxStateChars,
+			)
+		})
+	}
 	c.AgentLoop = agent.NewAgentLoop("daemon", "", agentOpts...)
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
@@ -6425,6 +6467,17 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			))
 			logger.Info("Skill evolver wired to reflection collector",
 				"component", "skill-evolver",
+			)
+		}
+		// Wire the wiki-era knowledge sources (execution-trace sampling +
+		// wiki store for Pass A context and the skill-impact ledger). Only
+		// inside this block: wiki.enabled=true with the evolver disabled
+		// must not change evolver behavior (master §Contract 5).
+		if knowledgeOpts := evolverKnowledgeOptions(c.TraceStore, c.WikiStore); len(knowledgeOpts) > 0 {
+			evolverOpts = append(evolverOpts, knowledgeOpts...)
+			logger.Info("Skill evolver wired to knowledge stores",
+				"trace_provider", c.TraceStore != nil,
+				"wiki_store", c.WikiStore != nil,
 			)
 		}
 		c.SkillEvolver = lifecycle.NewEvolver(

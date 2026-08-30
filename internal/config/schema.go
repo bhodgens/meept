@@ -1821,6 +1821,24 @@ type SkillsConfig struct {
 	HermesSkillsDir       string              `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
 	ValidatePrerequisites bool                `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
 	Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings
+	Wiki                  SkillsWikiConfig    `json:"wiki"                    toml:"wiki"`                   // Wiki knowledge store (raw/consolidated evidence base)
+	State                 SkillsStateConfig   `json:"state"                   toml:"state"`                  // SKILL.state execution mode settings
+}
+
+// SkillsWikiConfig configures the wiki knowledge store (arXiv:2608.27454).
+// The store is inert until wired into the daemon's learning pipeline and
+// evolver; enabled=true alone changes no runtime behavior.
+type SkillsWikiConfig struct {
+	Enabled bool   `json:"enabled" toml:"enabled"` // default true
+	Dir     string `json:"dir"     toml:"dir"`     // default "~/.meept/wiki"
+}
+
+// SkillsStateConfig configures SKILL.state execution mode — a per-skill
+// persistent state layer (arXiv:2608.26263) routed through the skill-state
+// runtime instead of the conversation loop. Opt-in by config.
+type SkillsStateConfig struct {
+	Enabled       bool `json:"enabled"         toml:"enabled"`         // default false
+	MaxStateChars int  `json:"max_state_chars" toml:"max_state_chars"` // prompt budget for the state JSON block; default 2000
 }
 
 // SkillsEvolverConfig configures the skill evolver — the scheduled process
@@ -2461,6 +2479,14 @@ func DefaultConfig() *Config {
 				MinProposalConfidence:      0.7,
 				AutoApply:                  false,
 				RunOnStart:                 false,
+			},
+			Wiki: SkillsWikiConfig{
+				Enabled: true,
+				Dir:     "~/.meept/wiki",
+			},
+			State: SkillsStateConfig{
+				Enabled:       false,
+				MaxStateChars: 2000,
 			},
 		},
 		SelfImprove: SelfImproveConfig{

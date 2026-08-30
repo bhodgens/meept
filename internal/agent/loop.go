@@ -469,6 +469,10 @@ type AgentLoop struct {
 	// turn (success AND failure) via the TraceWriter hook (WikiSkill raw
 	// layer). Nil when unset; guarded by mu (set via WithTraceWriter).
 	traceWriter TraceWriter
+	// skillStateRuntime routes SKILL.state-mode skills through the state
+	// layer (arXiv:2608.26263) from RunWithSkill. Nil when unset; guarded
+	// by mu (set via WithSkillStateRuntime).
+	skillStateRuntime *SkillStateRuntime
 	// lastInjectedSkills holds skill names surfaced into the system prompt
 	// for the current turn. Set synchronously in recordSkillInjections;
 	// consumed by triggerLearning.
@@ -2364,6 +2368,19 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 
 	// Get or create conversation
 	conv := l.conversations.Get(conversationID)
+
+	// SKILL.state dispatch (WikiSkill state layer, arXiv:2608.26263): skills
+	// declaring state:true route through the state runtime before any
+	// conversation mutation. Nil runtime (skills.state disabled) ⇒ unchanged
+	// conversation-path behavior even when skill.State is true.
+	if skill.State {
+		if rt := l.SkillStateRuntime(); rt != nil {
+			return rt.Run(ctx, skill, input, conversationID)
+		}
+		l.logger.Debug("SKILL.state skill but no state runtime wired; using conversation path",
+			"skill", skill.Name,
+		)
+	}
 
 	// Set skill body as system prompt
 	conv.SetSystemPrompt(skill.Body)
@@ -5690,6 +5707,7 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		// --- Skills ---
 		WithCapabilityIndex(l.capabilityIndex),
 		WithSkillLoader(l.skillLoader),
+		WithSkillStateRuntime(l.skillStateRuntime),
 
 		// --- Prefetch + queue ---
 		WithPrefetchCallback(l.prefetchCallback),
