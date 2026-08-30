@@ -5457,6 +5457,9 @@ func (l *AgentLoop) buildSystemPromptWithOverride() string {
 // output is returned byte-for-byte. Drift between successive builds is logged
 // at debug level (loop-economics leaf 01).
 func (l *AgentLoop) assembleSystemPrompt(builder *PromptBuilder) string {
+	// Inject status bar (leaf 13, unstable section for turn-level info)
+	builder.AddSectionWithStability("[status]", StatusBar(l.turnStatus()), false)
+
 	prompt, hash := builder.BuildSystemPromptOrdered(!l.config.StablePrefixDisabled)
 
 	l.mu.Lock()
