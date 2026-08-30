@@ -500,6 +500,52 @@ func (s *Server) handleMemoryRecent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleMemoryFacts handles GET /api/v1/memory/facts.
+// Returns active user-memory facts with optional kind filter and query substring.
+func (s *Server) handleMemoryFacts(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Memory == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "memory service not available")
+		return
+	}
+
+	kind := r.URL.Query().Get("kind")
+	query := r.URL.Query().Get("query")
+
+	store := s.services.Memory.GetFactStore()
+	if store == nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"facts": []any{}, "count": 0})
+		return
+	}
+
+	facts, err := store.Search(r.Context(), "", query, kind)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	type factRow struct {
+		Key        string `json:"key"`
+		Value      string `json:"value"`
+		Kind       string `json:"kind"`
+		UpdatedAt  string `json:"updated_at"`
+	}
+
+	rows := make([]factRow, 0, len(facts))
+	for _, f := range facts {
+		rows = append(rows, factRow{
+			Key:       f.Key,
+			Value:     f.Value,
+			Kind:      string(f.Kind),
+			UpdatedAt: f.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"facts": rows,
+		"count": len(rows),
+	})
+}
+
 // handleMemoryExport handles POST /api/v1/memory/export.
 func (s *Server) handleMemoryExport(w http.ResponseWriter, r *http.Request) {
 	if s.services == nil || s.services.Memory == nil {

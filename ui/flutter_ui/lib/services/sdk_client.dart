@@ -1728,20 +1728,59 @@ class SdkApiClient {
     };
     await _post('/api/v1/calendar/events', body: body);
   }
-}
 
-/// Exception thrown by [SdkApiClient].
-class SdkApiException implements Exception {
-  final String message;
-  final int statusCode;
-  final dynamic response;
+  // ===== Eval Endpoint Methods =====
 
-  SdkApiException({
-    required this.message,
-    required this.statusCode,
-    this.response,
-  });
+  /// Fetches eval runs from GET /api/v1/eval/runs.
+  /// Returns a list of raw eval run maps matching the C1 contract.
+  Future<List<Map<String, dynamic>>> listEvalRuns() async {
+    try {
+      final raw = await _get('/api/v1/eval/runs');
+      final runsRaw = raw['runs'] as List?;
+      if (runsRaw == null) return [];
+      return runsRaw
+          .whereType<Map>()
+          .map((r) => Map<String, dynamic>.from(r))
+          .toList();
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
 
-  @override
-  String toString() => 'SdkApiException: $message (HTTP $statusCode)';
+  /// Fetches a single eval run by id from GET /api/v1/eval/runs/{id}.
+  Future<Map<String, dynamic>> getEvalRun(String runId) async {
+    try {
+      return await _get('/api/v1/eval/runs/$runId');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  // ===== Memory Facts Endpoint Methods =====
+
+  /// Fetches active memory facts from GET /api/v1/memory/facts.
+  /// Supports optional kind filter and query substring.
+  Future<List<Map<String, dynamic>>> listMemoryFacts({
+    String? kind,
+    String? query,
+  }) async {
+    try {
+      final params = <String, dynamic>{};
+      if (kind != null && kind.isNotEmpty) {
+        params['kind'] = kind;
+      }
+      if (query != null && query.isNotEmpty) {
+        params['query'] = query;
+      }
+      final raw = await _get('/api/v1/memory/facts', queryParameters: params.isNotEmpty ? params : null);
+      final factsRaw = raw['facts'] as List?;
+      if (factsRaw == null) return [];
+      return factsRaw
+          .whereType<Map>()
+          .map((f) => Map<String, dynamic>.from(f))
+          .toList();
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
 }

@@ -925,3 +925,63 @@ class SkillExecuteResult with _$SkillExecuteResult {
   factory SkillExecuteResult.fromJson(Map<String, dynamic> json) =>
       _$$SkillExecuteResultImplFromJson(json);
 }
+
+// ===== Eval Models =====
+
+/// Eval run record matching C1 contract from internal/eval/store.go.
+/// Raw shape so callers can inspect without a full typed model.
+class EvalRun {
+  final String id;
+  final String kind;
+  final bool passed;
+  final int k;
+  final String modelId;
+  final String taskId;
+  final String createdAt;
+
+  EvalRun({
+    required this.id,
+    required this.kind,
+    required this.passed,
+    required this.k,
+    required this.modelId,
+    required this.taskId,
+    required this.createdAt,
+  });
+
+  factory EvalRun.fromJson(Map<String, dynamic> json) {
+    return EvalRun(
+      id: '${json['id'] ?? ''}',
+      kind: '${json['kind'] ?? 'pass_k'}',
+      passed: json['passed'] as bool? ?? false,
+      k: (json['k'] as num?)?.toInt() ?? 0,
+      modelId: '${json['model_id'] ?? ''}',
+      taskId: '${json['task_id'] ?? ''}',
+      createdAt: '${json['created_at'] ?? ''}',
+    );
+  }
+}
+
+/// Memory fact row from the memory_facts store.
+class MemoryFact {
+  final String key;
+  final String value;
+  final String kind;
+  final String updatedAt;
+
+  MemoryFact({
+    required this.key,
+    required this.value,
+    required this.kind,
+    required this.updatedAt,
+  });
+
+  factory MemoryFact.fromJson(Map<String, dynamic> json) {
+    return MemoryFact(
+      key: '${json['key'] ?? ''}',
+      value: '${json['value'] ?? ''}',
+      kind: '${json['kind'] ?? ''}',
+      updatedAt: '${json['updated_at'] ?? ''}',
+    );
+  }
+}

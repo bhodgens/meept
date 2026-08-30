@@ -32,6 +32,14 @@ func NewMemoryService(mgr *memory.Manager) *MemoryService {
 	return &MemoryService{manager: mgr}
 }
 
+// GetFactStore returns the typed user-memory fact store, or nil when not wired.
+func (s *MemoryService) GetFactStore() *memory.FactStore {
+	if s.manager == nil {
+		return nil
+	}
+	return s.manager.GetFactStore()
+}
+
 // Query searches memories.
 func (s *MemoryService) Query(ctx context.Context, req MemoryQueryRequest) ([]MemoryResult, error) {
 	if req.Query == "" {

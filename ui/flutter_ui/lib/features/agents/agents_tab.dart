@@ -9,6 +9,8 @@ import '../../providers/providers.dart';
 import '../../providers/tab_activation_provider.dart'
     show keyboardFocusProvider;
 import '../../models/api_models.dart';
+import 'eval_runs_panel.dart';
+import 'facts_panel.dart';
 
 /// Agents tab - displays all available agents.
 ///
@@ -131,7 +133,15 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
               const SizedBox(width: 12),
               SizedBox(
                 width: 300,
-                child: _buildGoalsPane(activeAgent),
+                child: Column(
+                  children: [
+                    _buildGoalsPane(activeAgent),
+                    const SizedBox(height: 12),
+                    const EvalRunsPanel(),
+                    const SizedBox(height: 12),
+                    const FactsPanel(),
+                  ],
+                ),
               ),
             ],
           ],

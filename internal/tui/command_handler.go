@@ -224,6 +224,10 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeDebugSession()
 	case "worktree":
 		return h.executeWorktree(cmd.Args)
+	case "eval":
+		return h.executeEval(cmd.Args)
+	case "facts":
+		return h.executeFacts(cmd.Args)
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),

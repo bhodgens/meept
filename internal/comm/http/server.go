@@ -700,6 +700,13 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 		// messages. Label them as progress so the client can update
 		// indicators without creating blank message bubbles.
 		eventType = "agent_progress"
+	case strings.HasPrefix(topic, "agent.quota"):
+		// Quota-state events (agent.quota_wait from the episode tracker,
+		// leaf 07 quota-reset-resilience) carry agent state transitions.
+		// They MUST render as progress indicators — never chat_message
+		// (a chat bubble would appear blank; AGENTS.md WS classification
+		// invariant).
+		eventType = "agent_progress"
 	case strings.HasPrefix(topic, "metrics."):
 		eventType = "metrics_update"
 	case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job.") ||
@@ -1208,6 +1215,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/memory/query", s.handleMemoryQuery)
 	mux.HandleFunc("GET /api/v1/memory/recent", s.handleMemoryRecent)
 	mux.HandleFunc("POST /api/v1/memory/export", s.handleMemoryExport)
+	mux.HandleFunc("GET /api/v1/memory/facts", s.handleMemoryFacts)
 
 	// Memory Vector endpoints
 	mux.HandleFunc("POST /api/v1/memory/vector/search", s.handleMemoryVectorSearch)
