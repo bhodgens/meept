@@ -7,6 +7,7 @@ import SwiftUI
 
 struct MenuBarContentView: View {
     @ObservedObject var daemonStatusVM: DaemonStatusViewModel
+    @ObservedObject var evalBadgeVM: EvalBadgeManager
     @StateObject private var notificationManager = NotificationManager.shared
 
     let onShowSettings: () -> Void
@@ -96,6 +97,10 @@ struct MenuBarContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
+
+            Divider()
+
+            MenubarEvalView(evalVM: evalBadgeVM)
         }
         .frame(width: 220)
     }
@@ -107,6 +112,7 @@ struct MenuBarContentView: View {
             apiClient: APIClient(baseURL: "https://localhost:8081"),
             daemonController: DaemonController()
         ),
+        evalBadgeVM: EvalBadgeManager(apiClient: APIClient(baseURL: "https://localhost:8081")),
         onShowSettings: {},
         onShowDashboard: {},
         onQuit: {}

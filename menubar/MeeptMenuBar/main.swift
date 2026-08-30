@@ -13,6 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let configVM: ConfigViewModel
     private let metricsVM: MetricsViewModel
     private let sessionBadgeVM: SessionBadgeManager
+    private let evalBadgeVM: EvalBadgeManager
     private let logger = Logger(subsystem: "com.caimlas.meept.menubar", category: "Main")
 
     override init() {
@@ -26,6 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.configVM = ConfigViewModel(configService: ConfigService())
         self.metricsVM = MetricsViewModel(dashboardService: DashboardService())
         self.sessionBadgeVM = SessionBadgeManager(apiClient: apiClient)
+        self.evalBadgeVM = EvalBadgeManager(apiClient: apiClient)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -55,6 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover?.contentViewController = NSHostingController(
             rootView: MenuBarContentView(
                 daemonStatusVM: daemonStatusVM,
+                evalBadgeVM: evalBadgeVM,
                 onShowSettings: { [weak self] in self?.showSettings() },
                 onShowDashboard: { [weak self] in self?.showDashboard() },
                 onQuit: { NSApp.terminate(nil) }
@@ -70,11 +73,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         daemonStatusVM.startPolling()
         sessionBadgeVM.startPolling()
+        evalBadgeVM.startPolling()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         daemonStatusVM.stopPolling()
         sessionBadgeVM.stopPolling()
+        evalBadgeVM.stopPolling()
     }
 
     private func showSettings() {

@@ -288,6 +288,26 @@ class APIClient {
         }
     }
 
+    // MARK: - Eval Runs (async/await)
+
+    /// Fetches recent eval runs. Backed by `GET /api/v1/eval/runs`.
+    func listEvalRuns() async throws -> EvalRunsResponse {
+        let request = try makeRequest(path: "/api/v1/eval/runs", method: "GET")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        return try decoder.decode(EvalRunsResponse.self, from: data)
+    }
+
+    // MARK: - Memory Facts (async/await)
+
+    /// Fetches active memory facts. Backed by `GET /api/v1/memory/facts`.
+    func listMemoryFacts() async throws -> MemoryFactsResponse {
+        let request = try makeRequest(path: "/api/v1/memory/facts", method: "GET")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        return try decoder.decode(MemoryFactsResponse.self, from: data)
+    }
+
     // MARK: - Private helpers
 
     private func makeRequest(path: String, method: String, requiresAuth: Bool = true) throws -> URLRequest {
@@ -384,6 +404,34 @@ struct DaemonStatusResponse: Codable {
     let pid: Int
     let uptime: String
     let state: String
+}
+
+struct MemoryFactsResponse: Codable {
+    let facts: [MemoryFact]
+    let count: Int
+}
+
+struct MemoryFact: Codable {
+    let key: String
+    let value: String
+    let kind: String
+    let updated_at: String
+}
+
+struct EvalRunsResponse: Codable {
+    let runs: [EvalRun]
+}
+
+struct EvalRun: Codable {
+    let id: String
+    let kind: String
+    let task_id: String
+    let harness_hash: String
+    let outcomes: [EvalOutcome]
+}
+
+struct EvalOutcome: Codable {
+    let passed: Bool
 }
 
 enum APIError: LocalizedError {
