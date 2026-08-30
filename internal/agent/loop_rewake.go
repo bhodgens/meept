@@ -50,6 +50,11 @@ type RewakePayload struct {
 	HookType  string `json:"hook_type"`
 	HookName  string `json:"hook_name"`
 	Path      string `json:"path,omitempty"`
+	// Source classifies the publisher: "timer" (scheduler job
+	// completion), "hook" (async hook callback), "user", or
+	// "notify_reply". It is provenance metadata only — unknown or empty
+	// values are injected identically and must never act as a filter.
+	Source string `json:"source,omitempty"`
 }
 
 // parseRewakePayload decodes the raw payload of a hook.async_rewake
@@ -64,14 +69,21 @@ func parseRewakePayload(raw json.RawMessage) (RewakePayload, error) {
 }
 
 // rewakeNote renders the system-note content injected for one signal.
+// Source is included when known ("via timer", "via hook", …) so the model
+// can distinguish what woke it; unknown/empty sources render nothing
+// extra — provenance never gates delivery.
 func rewakeNote(p RewakePayload) string {
+	via := ""
+	if p.Source != "" {
+		via = fmt.Sprintf(" via %s", p.Source)
+	}
 	switch {
 	case p.Path != "":
-		return fmt.Sprintf("%s (hook: %s, path: %s)", rewakeNotePrefix, p.HookName, p.Path)
+		return fmt.Sprintf("%s (hook: %s, path: %s)%s", rewakeNotePrefix, p.HookName, p.Path, via)
 	case p.HookName != "":
-		return fmt.Sprintf("%s (hook: %s)", rewakeNotePrefix, p.HookName)
+		return fmt.Sprintf("%s (hook: %s)%s", rewakeNotePrefix, p.HookName, via)
 	default:
-		return rewakeNotePrefix
+		return rewakeNotePrefix + via
 	}
 }
 
@@ -184,6 +196,7 @@ func (l *AgentLoop) injectRewakes(conv *Conversation, conversationID string, ite
 		l.logger.Info("async rewake injected",
 			"conversation", conversationID,
 			"iteration", iteration,
+			"source", p.Source,
 			"hook_type", p.HookType,
 			"hook_name", p.HookName,
 		)
