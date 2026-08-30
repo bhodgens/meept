@@ -1216,10 +1216,40 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				},
 				logger.With("component", "skill-state"),
 			).WithToolRunner(l.ExecuteSkillToolCalls)
+			// State-run traces: adapt the shared TraceStore through the
+			// exported payload seam (traceRecordMirror is unexported).
+			if c.TraceStore != nil {
+				ts := c.TraceStore
+				stateRuntime = stateRuntime.WithStateTraceWriter(
+					agent.NewTraceStoreWriter(func(p agent.TraceRecordPayload) (string, error) {
+						steps := make([]selfimprove.TraceStep, len(p.Steps))
+						for i, s := range p.Steps {
+							steps[i] = selfimprove.TraceStep{
+								Action:  s.Action,
+								Input:   s.Input,
+								Output:  s.Output,
+								Success: s.Success,
+							}
+						}
+						return ts.Write(&selfimprove.TraceRecord{
+							ID:             p.ID,
+							SessionID:      p.SessionID,
+							Domain:         p.Domain,
+							Outcome:        p.Outcome,
+							Error:          p.Error,
+							InjectedSkills: p.InjectedSkills,
+							Steps:          steps,
+							Summary:        p.Summary,
+							CreatedAt:      p.CreatedAt,
+						})
+					}),
+				)
+			}
 			c.SkillStateRuntime = stateRuntime
 			agent.WithSkillStateRuntime(stateRuntime)(l)
 			logger.Info("Agent loop configured with skill state runtime",
 				"max_state_chars", cfg.Skills.State.MaxStateChars,
+				"trace_writer", c.TraceStore != nil,
 			)
 		})
 	}
@@ -1966,6 +1996,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Register /remember tool for agents to propose improvements (Thread E)
 	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
 	logger.Info("Registered /remember tool")
+
+	// Register reply_to_user (leaf 11: harness-routed speak). The reply
+	// carrier is injected per turn by the agent loop (agent.ReplyFuncSetter
+	// seam), so the tool registers without wiring: the loop classifies each
+	// run (bubble ack / notify / isolated-child error) via its SpeakRouter.
+	c.ToolRegistry.Register(builtin.NewReplyToUserTool(nil))
+	logger.Info("Registered reply_to_user tool")
 
 	// Initialize code intelligence if enabled
 	if cfg.CodeIntel.Enabled {

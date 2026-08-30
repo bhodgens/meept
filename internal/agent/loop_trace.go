@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"log/slog"
 	"reflect"
 	"time"
@@ -37,6 +38,81 @@ type traceStepMirror struct {
 // selfimprove.
 type TraceWriter interface {
 	WriteTrace(rec *traceRecordMirror) (string, error)
+}
+
+// TraceWriterFunc adapts a plain write function into a TraceWriter. The
+// function receives the record with ID and CreatedAt already populated by the
+// adapter; it performs the actual persistence (the daemon wires this to
+// *selfimprove.TraceStore.Write without either package importing the other).
+type TraceWriterFunc func(rec *traceRecordMirror) (string, error)
+
+// WriteTrace implements TraceWriter: it fills in the record ID (pkg/id, the
+// store rejects empty IDs) and CreatedAt when unset, then delegates.
+func (f TraceWriterFunc) WriteTrace(rec *traceRecordMirror) (string, error) {
+	if rec == nil {
+		return "", errors.New("trace writer: nil record")
+	}
+	if rec.ID == "" {
+		rec.ID = pkgid.Generate("trace-")
+	}
+	if rec.CreatedAt.IsZero() {
+		rec.CreatedAt = time.Now().UTC()
+	}
+	return f(rec)
+}
+
+// NewTraceWriterFunc is the exported constructor for daemon wiring: pass a
+// function that persists a trace-record-shaped map or struct. Because
+// traceRecordMirror is unexported, external packages adapt through
+// TraceRecordPayload: build one from your store-side record fields and the
+// adapter converts it.
+type TraceRecordPayload struct {
+	ID             string
+	SessionID      string
+	Domain         string
+	Outcome        string
+	Error          string
+	InjectedSkills []string
+	Steps          []TraceStepPayload
+	Summary        string
+	CreatedAt      time.Time
+}
+
+// TraceStepPayload is the exported step shape for TraceRecordPayload.
+type TraceStepPayload struct {
+	Action  string
+	Input   string
+	Output  string
+	Success bool
+}
+
+// NewTraceStoreWriter builds a TraceWriter from a caller-supplied persist
+// function that accepts the exported payload shape. The daemon passes a
+// closure over *selfimprove.TraceStore, converting payload → store record —
+// no cross-package import of the unexported mirror types.
+func NewTraceStoreWriter(persist func(payload TraceRecordPayload) (string, error)) TraceWriter {
+	return TraceWriterFunc(func(rec *traceRecordMirror) (string, error) {
+		payload := TraceRecordPayload{
+			ID:             rec.ID,
+			SessionID:      rec.SessionID,
+			Domain:         rec.Domain,
+			Outcome:        rec.Outcome,
+			Error:          rec.Error,
+			InjectedSkills: rec.InjectedSkills,
+			Steps:          make([]TraceStepPayload, len(rec.Steps)),
+			Summary:        rec.Summary,
+			CreatedAt:      rec.CreatedAt,
+		}
+		for i, s := range rec.Steps {
+			payload.Steps[i] = TraceStepPayload{
+				Action:  s.Action,
+				Input:   s.Input,
+				Output:  s.Output,
+				Success: s.Success,
+			}
+		}
+		return persist(payload)
+	})
 }
 
 // WithTraceWriter sets the loop's trace persistence hook. Every
