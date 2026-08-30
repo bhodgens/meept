@@ -191,6 +191,8 @@ type Server struct {
 	ptyHandler *PTYHandler
 	// Instructions handler (optional, set via WithInstructions)
 	instructionsHandler *InstructionsHandler
+	// Eval handler (optional, set via WithEval)
+	evalHandler *EvalHandler
 	// dispatchSubmitter handles cross-daemon task dispatch (optional).
 	// When nil, dispatch endpoints return 503.
 	dispatchSubmitter DispatchSubmitter
@@ -839,6 +841,16 @@ func WithPTY(h *PTYHandler) ServerOption {
 	}
 }
 
+// WithEval enables eval-run endpoints under /api/v1/eval/*.
+// Routes inherit the server's authentication middleware when RequireAuth is enabled.
+func WithEval(h *EvalHandler) ServerOption {
+	return func(s *Server) {
+		if h != nil {
+			s.evalHandler = h
+		}
+	}
+}
+
 // WithInstructions enables user instructions endpoints under /api/v1/instructions/*.
 // Routes inherit the server's authentication middleware when RequireAuth is enabled.
 func WithInstructions(h *InstructionsHandler) ServerOption {
@@ -1409,6 +1421,11 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	// User instructions endpoints (optional, depends on WithInstructions option)
 	if s.instructionsHandler != nil {
 		s.instructionsHandler.RegisterRoutes(mux)
+	}
+
+	// Eval run endpoints (optional, depends on WithEval option)
+	if s.evalHandler != nil {
+		s.evalHandler.RegisterRoutes(mux)
 	}
 
 	// MCP server management endpoints (mcp.list + mcp.set_enabled).

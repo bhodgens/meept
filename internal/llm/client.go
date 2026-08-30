@@ -351,6 +351,7 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 	}
 
 	c.attachToolGrammar(payload, cfg, chatOpts)
+	attachRawGrammar(payload, chatOpts)
 
 	return chatOpts, payload, nil
 }
@@ -663,8 +664,14 @@ type chatOptions struct {
 	reasoning        *ReasoningConfig
 	adapterPath      string // LoRA adapter path for providers that support it
 	// grammarMode is the tool-call grammar constraint mode for this request
-	// ("" = none; see gbnf.go constraint constants). Set via WithGrammar.
+	// ("", see gbnf.go constraint constants). Set via WithGrammar.
 	grammarMode string
+	// rawGrammar is a caller-supplied grammar body attached verbatim when
+	// GBNFConstrainedEnabled() is on (see WithRawGrammar). Unlike
+	// grammarMode, it does NOT require tools on the request — for
+	// structured-output constraints on tool-free calls (e.g. SKILL.state
+	// response envelopes).
+	rawGrammar string
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -817,6 +824,21 @@ func (c *Client) attachToolGrammar(payload map[string]any, cfg *ModelConfig, cha
 		}
 	}
 	AttachGrammar(payload, mode, grammar)
+	return
+}
+
+// attachRawGrammar attaches a caller-supplied grammar to the payload when the
+// global GBNFConstrained switch is on. This path is independent of tools and
+// model capability: the caller opted in explicitly via WithRawGrammar and owns
+// the grammar body.
+func attachRawGrammar(payload map[string]any, chatOpts *chatOptions) {
+	if chatOpts.rawGrammar == "" {
+		return
+	}
+	if !GBNFConstrainedEnabled() {
+		return
+	}
+	payload["grammar"] = chatOpts.rawGrammar
 }
 
 func toolNames(defs []ToolDefinition) []string {
@@ -836,6 +858,18 @@ func toolNames(defs []ToolDefinition) []string {
 func WithGrammar(mode string) ChatOption {
 	return func(o *chatOptions) {
 		o.grammarMode = mode
+	}
+}
+
+// WithRawGrammar attaches the caller's GBNF grammar body directly to the
+// request payload (llamacpp wire format: payload["grammar"]) when the global
+// GBNFConstrained switch is on. Unlike WithGrammar, this does NOT require
+// tools on the request or a model tool_constraint capability — it is for
+// constraining free-form structured output (e.g. the SKILL.state response
+// envelope) on tool-free calls. An empty grammar is a no-op.
+func WithRawGrammar(grammar string) ChatOption {
+	return func(o *chatOptions) {
+		o.rawGrammar = grammar
 	}
 }
 

@@ -823,6 +823,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Upload service wired to agent loop for vision pre-flight")
 	}
 
+	// Eval handler: one instance whose DiskStore backs both the eval.* RPC
+	// handlers (below) and the HTTP /api/v1/eval/* routes (HTTP wiring).
+	// Home dir is resolved here and injected; eval never calls
+	// os.Getwd/os.UserHomeDir itself.
+	evalHandler := http.NewEvalHandler(evalStoreDir(evalHomeDir()), logger)
+
 	// Register daemon and model RPC handlers (after service registry is created)
 	if rpcServer != nil {
 		if svcRegistry.Daemon != nil {
@@ -903,6 +909,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			registerMemoryRPCHandlers(rpcServer, svcRegistry.Memory)
 			logger.Info("Memory RPC handlers registered")
 		}
+
+		// Eval RPC handlers (eval.run/show/list). Direct registration on
+		// the shared evalHandler's DiskStore, so CLI-over-daemon and HTTP
+		// clients see the same run records.
+		registerEvalRPCHandlers(rpcServer, evalHandler)
+		logger.Info("Eval RPC handlers registered")
 
 		// User instruction RPC handlers (instruction.list/add/delete/preview).
 		// The CLI instructions commands (cmd/meept/instructions.go) call these
@@ -1127,6 +1139,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 					nil, // instructionRPC bridge unused by current handlers
 				)))
 				logger.Info("User instructions HTTP endpoints enabled", "path", "/api/v1/instructions/*")
+			}
+
+			// Eval HTTP endpoints (/api/v1/eval/runs*). Shares the same
+			// evalHandler (and its DiskStore) as the eval.* RPC handlers
+			// registered above.
+			if evalHandler != nil {
+				httpOpts = append(httpOpts, http.WithEval(evalHandler))
+				logger.Info("Eval HTTP endpoints enabled", "path", "/api/v1/eval/runs*")
 			}
 
 			var metricsService interface {
