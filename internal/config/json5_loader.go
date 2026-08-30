@@ -12,8 +12,13 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-// durationToken matches Go-style duration literals like 30s, 2m, 5m, 100ms, 1h30m.
-var durationToken = regexp.MustCompile(`(?m)(?:^|[:\s,])\s*(\d+(?:\.\d+)?(?:ns|us|ms|s|m|h|d))\s*`)
+// durationTokenExact matches a WHOLE value that is one duration literal
+// ("1h", "250ms", "1h30m"). Used by preprocessDurations' line-based pass so
+// only true duration VALUES are rewritten — never duration-like text inside
+// quoted strings. The old content-wide regex (durationToken) rewrote
+// duration-like text inside string values ("runs about 1h"), corrupting the
+// JSON; the line-anchored exact match replaces it.
+var durationTokenExact = regexp.MustCompile(`^\d+(?:\.\d+)?(?:ns|us|ms|s|m|h|d)$`)
 
 // LoadJSON5 reads a JSON5 file, expands environment variables, standardizes to JSON, and unmarshals into v.
 func LoadJSON5(path string, v any) error {
@@ -31,6 +36,13 @@ func LoadJSON5(path string, v any) error {
 		return fmt.Errorf("failed to expand env vars in config %s: %w", path, err)
 	}
 
+	// Convert Go-style duration values ("30s", "1h", quoted or bare) to
+	// nanosecond integers so time.Duration fields unmarshal. Same
+	// preprocessing as UnmarshalJSON5 — without it, any config loaded
+	// through this path rejects duration strings that the TOML path accepts
+	// (found via [skills.evolver] interval in a -c config, 2026-08-29).
+	content = preprocessDurations(content)
+
 	// Standardize JSON5 to JSON
 	stdJSON, err := hujson.Standardize([]byte(content))
 	if err != nil {
@@ -42,6 +54,38 @@ func LoadJSON5(path string, v any) error {
 		return wrapJSONUnmarshalError(err, path)
 	}
 	return nil
+}
+
+// preprocessDurations applies the shared duration preprocessing used by both
+// config load paths: bare duration tokens get quoted, then quoted duration
+// values become nanosecond integers.
+//
+// The bare-token pass runs LINE-BY-LINE with a colon-anchored check: a bare
+// token qualifies only when it follows "key: " on the same line (a JSON
+// value position). This avoids the string-mangling bug where duration-like
+// text INSIDE a quoted string value ("runs about 1h total") got rewritten.
+func preprocessDurations(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		colon := strings.Index(line, ":")
+		if colon < 0 {
+			continue
+		}
+		value := strings.TrimSpace(line[colon+1:])
+		if value == "" || strings.HasPrefix(value, `"`) {
+			// Quoted values are handled by quotedDurationToNanos below
+			// (which only rewrites true duration-shaped quoted values);
+			// free text inside strings must pass through untouched.
+			continue
+		}
+		// Strip a trailing comma (JSON5 trailing-comma style) before the
+		// exact-match test, preserving it in the rewritten line.
+		token := strings.TrimSuffix(value, ",")
+		if durationTokenExact.MatchString(token) {
+			lines[i] = line[:colon+1] + ` "` + token + `"` + strings.TrimPrefix(value, token)
+		}
+	}
+	return quotedDurationToNanos(strings.Join(lines, "\n"))
 }
 
 // wrapJSONUnmarshalError provides detailed, user-friendly error messages for JSON unmarshaling failures.
@@ -152,15 +196,7 @@ func LoadJSON5WithDefault(path string, v any) error {
 // It also handles Go-style duration literals (e.g. 30s, 2m) and
 // Go duration string values (e.g. "30s") in JSON.
 func UnmarshalJSON5(data []byte, v any) error {
-	// Pre-process: convert bare duration tokens (unquoted) to quoted strings
-	content := durationToken.ReplaceAllStringFunc(string(data), func(match string) string {
-		// match starts with a delimiter (colon/space/comma), then a duration
-		trimmed := strings.TrimLeft(match, " :,\t")
-		return match[:len(match)-len(trimmed)] + `"` + trimmed + `"`
-	})
-	// Also convert quoted duration strings like "30s" to nanoseconds (int64)
-	// so the standard json.Unmarshal can handle them as time.Duration values.
-	content = quotedDurationToNanos(content)
+	content := preprocessDurations(string(data))
 	stdJSON, err := hujson.Standardize([]byte(content))
 	if err != nil {
 		return fmt.Errorf("failed to parse JSON5: %w", err)
