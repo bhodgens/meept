@@ -333,6 +333,15 @@ For complete feature details, see [Features](./docs/features.md).
 ./bin/meept skills gaps                    # Show skill coverage gaps
 ./bin/meept skills run <name> <input>      # Execute a skill directly
 
+### Research references
+
+The skill knowledge system implements mechanisms from two papers:
+
+- **WikiSkill** (arXiv:2608.27454) — persistent wiki + immutable traces feeding
+  skill evolution; meept adopts the raw/wiki/skill layering in the evolver.
+- **SKILL.state** (arXiv:2608.26263) — bounded-prompt state-mode skill
+  execution; meept adopts opt-in state mode via skill frontmatter `state: true`.
+
 # AI Employees (replaces `meept bots`)
 ./bin/meept agents list                    # List employees, status, tier, drift
 ./bin/meept agents show <id>               # Constitution, goals, audit findings

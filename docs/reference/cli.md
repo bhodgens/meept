@@ -459,7 +459,7 @@ Verified against the binary. Run `meept <command> --help` for flags.
 | `meept selfimprove` | analyze, apply, detect, full-cycle, generate-fixes, reject, status, validate | Self-improvement cycle |
 | `meept session` | attach, create, delete, detach, get, list, messages, needs-attention, trace | Chat sessions (alias: `sessions`) |
 | `meept shadow` | adapters, examples, export, export-db, status | Shadow training |
-| `meept skills` | archive, evolve, gaps, history, list, restore, run, show, stats | Skill system + closed-loop evolution |
+| `meept skills` | archive, evolve, gaps, history, list, restore, run, show, stats | Skill system + closed-loop evolution (wiki layer + trace store; no new verbs — see docs/workflows/skills.md) |
 | `meept status` | — | Daemon health |
 | `meept sync` | pull, status | Peer backup sync |
 | `meept task` | create, delete, get, link, list, unlink | Background tasks |

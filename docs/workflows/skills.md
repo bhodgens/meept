@@ -229,6 +229,87 @@ When `auto_apply = false` (default), proposals go through the plan system:
       auto_apply: false,
       run_on_start: false,
     },
+    wiki: {
+      enabled: true,
+      dir: "~/.meept/wiki",
+    },
+    state: {
+      enabled: false,
+      max_state_chars: 2000,
+    },
   },
 }
 ```
+
+## Wiki Layer
+
+The wiki is the persistent knowledge store behind skill evolution
+(arXiv:2608.27454 "WikiSkill"). Learned patterns survive daemon restarts, and
+every evolver verdict — accepted AND rejected — is recorded so later cycles do
+not repeat rejected edits.
+
+### Layout
+
+```
+~/.meept/wiki/
+  index.md              # one line per pattern: description one-liner
+  logs.md               # append-only evolution log ("<RFC3339> <entry>")
+  skill-impact.md       # append-only JSONL ledger of every proposal verdict
+  patterns/<domain>-<hash12>.md   # one page per learned pattern
+  traces/<yyyy-mm-dd>/<trace-id>.json   # immutable raw trajectories
+```
+
+### Behavior
+
+- **Write-through**: `LearningPipeline.StorePattern` writes the pattern page
+  and rebuilds the index. Wiki I/O failures log a warning and never fail the
+  store call.
+- **Restart survival**: `LearningPipeline.Initialize` reloads pattern pages
+  from disk and inserts only patterns whose IDs are absent from the in-memory
+  map.
+- **Skill-impact ledger**: one JSONL row per verifier verdict — action, skill
+  name, candidate diff (capped at 4k chars), verifier score, accepted flag,
+  reasons. Pass A reads the ledger (newest rows first, capped at 20k chars)
+  with the instruction "do not repeat rejected proposals".
+- **Trace sampling**: Pass A prepends up to 5 failure + 3 success traces
+  (15k chars per record) alongside the ledger and index.
+- **Prompt isolation**: the wiki and trace stores are read ONLY by the
+  evolver. Nothing in them is reachable from `ContextInjector` or any
+  inference-path prompt builder (WikiSkill §5.1: wiki access for the worker
+  degrades final skill quality).
+
+## Trace Store
+
+Every learning-eligible agent turn — success AND failure — writes an immutable
+trace to `~/.meept/wiki/traces/<yyyy-mm-dd>/<id>.json` via `agent.WithTraceWriter`.
+Failure records carry the error text; step flags reflect the turn outcome so
+sampled evidence is not misleadingly green. `TraceStore.Sample` returns
+stratified fail/pass records newest-first with per-record char caps marked
+`...[truncated]`.
+
+## State-Mode Execution
+
+Skills with frontmatter `state: true` (and `skills.state.enabled = true` in
+config) execute through `SkillStateRuntime` instead of the conversation loop
+(arXiv:2608.26263 "SKILL.state"):
+
+- Per step the model sees ONLY: the skill body, the current state Σ as JSON
+  (default schema: `files_touched`, `tests_run`, `errors`, `next_step`), and
+  the latest observation. Prompt size stays bounded regardless of run length.
+- State patches: replace values; explicit `null` deletes a key; a key missing
+  from the patch is left unchanged (small models drop keys — missing must not
+  delete); unknown keys are dropped and reported.
+- Intermediate reasoning is discarded after each step; it never persists into
+  the next prompt.
+- Steps cap at `MaxIterations` (default 25). Malformed responses get one
+  corrective retry, then fail without corrupting Σ.
+- When the global `[agent.tools] gbnf_constrained` switch is on, the response
+  shape is grammar-constrained via `llm.WithRawGrammar`.
+
+**When NOT to use state mode**: tasks where the history IS the deliverable —
+auditing, debugging provenance, explaining past actions. State mode is
+per-skill opt-in and must never be forced on such tasks (SKILL.state §7).
+
+Known gap: the state runtime's per-run trace record is not wired (the agent
+`TraceWriter` interface takes an unexported mirror type); turn-level traces
+still record normally.
