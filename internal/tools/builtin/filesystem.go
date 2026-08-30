@@ -115,23 +115,23 @@ func (t *ReadFileTool) Parameters() llm.FunctionParameters {
 }
 
 func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	return t.executeRead(args, nil)
+	return t.executeRead(ctx, args, nil)
 }
 
 // ExecuteStreaming implements tools.StreamingTool with progress updates during file reads.
 func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
-	return t.executeRead(args, onUpdate)
+	return t.executeRead(ctx, args, onUpdate)
 }
 
 // executeRead is the shared core logic for Execute and ExecuteStreaming.
 // progress may be nil; all progress calls are guarded.
-func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.ProgressUpdate)) (any, error) {
+func (t *ReadFileTool) executeRead(ctx context.Context, args map[string]any, progress func(tools.ProgressUpdate)) (any, error) {
 	rawPath, _ := args[schemaPropPath].(string)
 	if rawPath == "" {
 		return nil, fmt.Errorf("no path specified")
 	}
 
-	resolved, err := resolvePathSecure(rawPath)
+	resolved, err := resolvePathSecure(ctx, rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -469,7 +469,7 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 		return nil, fmt.Errorf("content too large (max %d bytes)", MaxWriteSize)
 	}
 
-	resolved, err := resolvePathSecure(rawPath)
+	resolved, err := resolvePathSecure(ctx, rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -671,7 +671,7 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 		return nil, fmt.Errorf("no path specified")
 	}
 
-	resolved, err := resolvePathSecure(rawPath)
+	resolved, err := resolvePathSecure(ctx, rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -819,7 +819,7 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 		return nil, fmt.Errorf("no path specified")
 	}
 
-	resolved, err := resolvePathSecure(rawPath)
+	resolved, err := resolvePathSecure(ctx, rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -988,7 +988,7 @@ func stripHashlinePrefixes(content string) string {
 // allowing fence bypass via symlink attacks (e.g., a symlink inside the workspace
 // pointing to /etc or ~/.ssh). Callers that need full path resolution including
 // symlinks should use resolvePathSecure instead.
-func resolvePath(path string) (string, error) {
+func resolvePath(ctx context.Context, path string) (string, error) {
 	if strings.HasPrefix(path, "~") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -1002,7 +1002,7 @@ func resolvePath(path string) (string, error) {
 	// to filepath.Abs(process cwd) made benchmark step-jobs write outside
 	// their worktree: "answer.txt" landed in the daemon repo.
 	if !filepath.IsAbs(path) {
-		if wd := tools.WorkingDirFromContext(context.Background()); wd != "" {
+		if wd := tools.WorkingDirFromContext(ctx); wd != "" {
 			path = filepath.Join(wd, path)
 		}
 	}
@@ -1018,8 +1018,8 @@ func resolvePath(path string) (string, error) {
 // resolvePathSecure expands ~ and resolves to absolute path including symlinks.
 // This is the secure variant that should be used for all file operations to
 // prevent symlink-based fence bypass attacks.
-func resolvePathSecure(path string) (string, error) {
-	resolved, err := resolvePath(path)
+func resolvePathSecure(ctx context.Context, path string) (string, error) {
+	resolved, err := resolvePath(ctx, path)
 	if err != nil {
 		return "", err
 	}
