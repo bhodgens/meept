@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-08-29",
+  "updated": "2026-08-30",
   "description": "Living map of agent-harness techniques vs meept. Source of truth for docs/research/harness-techniques.md. Verified by scripts/research-harness-lit.py.",
   "search_queries": [
     "agent harness compaction context window",
@@ -754,7 +754,7 @@
       "id": "wikiskill-state",
       "name": "WikiSkill + SKILL.state (arXiv:2608.27454 wiki layer, arXiv:2608.26263 skill state runtime)",
       "category": "skills",
-      "status": "partial",
+      "status": "shipped",
       "sources": [
         {
           "title": "arXiv:2608.27454 (WikiSkill)",
@@ -771,8 +771,21 @@
       ],
       "evidence": [
         {
-          "path": "internal/skills",
-          "must_contain": "wiki"
+          "path": "internal/selfimprove/wiki.go"
+        },
+        {
+          "path": "internal/selfimprove/trace_store.go"
+        },
+        {
+          "path": "internal/skills/lifecycle/evolver.go",
+          "must_contain": "Pass A"
+        },
+        {
+          "path": "internal/agent/skill_state.go"
+        },
+        {
+          "path": "internal/agent/loop.go",
+          "must_contain": "RunWithSkill"
         },
         {
           "path": "internal/llm",
@@ -788,7 +801,7 @@
         "bf016488",
         "58f53f2a"
       ],
-      "notes": "Wiki store, immutable trace store, trace-fed refine + skill-impact ledger, skill.state runtime core, WithRawGrammar seam. Landing 2026-08-29; verify completion before marking shipped."
+      "notes": "Shipped 2026-08-29: persistent wiki store + pattern pages (selfimprove.WikiStore), immutable trace store, trace-fed refine + skill-impact ledger (evolver.go Pass A), skill.state runtime core wired into AgentLoop.RunWithSkill (WithSkillStateRuntime), WithRawGrammar seam for tool-free constraints. Verified in-tree 2026-08-29."
     }
   ]
 }

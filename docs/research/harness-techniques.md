@@ -2,9 +2,9 @@
 
 # Agent harness techniques vs meept
 
-Generated from `docs/research/harness-techniques.json` (version 1, updated 2026-08-29). Do not edit by hand; run `python3 scripts/research-harness-lit.py` to regenerate.
+Generated from `docs/research/harness-techniques.json` (version 1, updated 2026-08-30). Do not edit by hand; run `python3 scripts/research-harness-lit.py` to regenerate.
 
-Status counts: shipped 20, partial 11, candidate 9, skip 0
+Status counts: shipped 21, partial 10, candidate 9, skip 0
 
 ## context
 
@@ -75,7 +75,7 @@ Status counts: shipped 20, partial 11, candidate 9, skip 0
 | Memento-Skills reflective rewrite (frozen-θ) | candidate | [Memento-Skills](https://arxiv.org/abs/2603.18743) | — | Apache-2.0 Python runtime. Steal the loop; do not vendor. Self-improve exists but is patch-based (#2 safety). |
 | Shadow-training / skill-evolution self-improve | partial | — | `internal/selfimprove` | Pipeline exists. GitHub #2: LLM patches have insufficient safety boundaries. |
 | Filesystem SKILL.md skills | shipped | [Pi skills.ts](../../analysis/pi-agent.md), [Memento-Skills](https://arxiv.org/abs/2603.18743) | `internal/skills/models.go` | Discovery + YAML frontmatter. No Memento retrieve→act→rewrite skill loop. |
-| WikiSkill + SKILL.state (arXiv:2608.27454 wiki layer, arXiv:2608.26263 skill state runtime) | partial | [arXiv:2608.27454 (WikiSkill)](https://arxiv.org/abs/2608.27454), [arXiv:2608.26263 (SKILL.state)](https://arxiv.org/abs/2608.26263), [plan tree](../plans/2026-08-29-wikiskill-skill-state) | `internal/skills`, `internal/llm` | Wiki store, immutable trace store, trace-fed refine + skill-impact ledger, skill.state runtime core, WithRawGrammar seam. Landing 2026-08-29; verify completion before marking shipped. |
+| WikiSkill + SKILL.state (arXiv:2608.27454 wiki layer, arXiv:2608.26263 skill state runtime) | shipped | [arXiv:2608.27454 (WikiSkill)](https://arxiv.org/abs/2608.27454), [arXiv:2608.26263 (SKILL.state)](https://arxiv.org/abs/2608.26263), [plan tree](../plans/2026-08-29-wikiskill-skill-state) | `internal/selfimprove/wiki.go`, `internal/selfimprove/trace_store.go`, `internal/skills/lifecycle/evolver.go`, `internal/agent/skill_state.go`, `internal/agent/loop.go`, `internal/llm` | Shipped 2026-08-29: persistent wiki store + pattern pages (selfimprove.WikiStore), immutable trace store, trace-fed refine + skill-impact ledger (evolver.go Pass A), skill.state runtime core wired into AgentLoop.RunWithSkill (WithSkillStateRuntime), WithRawGrammar seam for tool-free constraints. Verified in-tree 2026-08-29. |
 
 ## tools
 
