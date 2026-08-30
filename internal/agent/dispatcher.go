@@ -158,6 +158,17 @@ type DispatchResult struct {
 	ClarificationReply string `json:"clarification_reply,omitempty"`
 	// ClarificationNeeded indicates the directive needs user clarification
 	ClarificationNeeded bool `json:"clarification_needed,omitempty"`
+
+	// Isolation records the context-isolation level this dispatch result was
+	// spawned under. Always ArtifactOnly today; SharedTranscript would be an
+	// explicit opt-in. Zero value means ArtifactOnly by fail-closed contract.
+	Isolation ContextIsolation `json:"isolation,omitempty"`
+	// Brief is the structured handoff brief produced via BuildSpawnContext
+	// (report summary + artifact refs), replacing raw parent-transcript
+	// propagation. Empty for fresh user-initiated dispatches.
+	Brief string `json:"brief,omitempty"`
+	// MemoryIDs are memory references attached to the handoff brief.
+	MemoryIDs []string `json:"memory_ids,omitempty"`
 	// Plan is the created plan if plan routing was triggered.
 	Plan *plan.Plan `json:"plan,omitempty"`
 	// ClassificationNotice is a user-facing notice about classification degradation
@@ -1728,17 +1739,23 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 			"to", nextAgentID,
 			"depth", routeResult.Depth,
 		)
-		// Build accumulated context from previous agent's work
-		accumulatedContext := d.buildAccumulatedContext(report, displayResponse)
+		// Build the child's spawn context under the ArtifactOnly default:
+		// the report-derived brief + memory references ride along as
+		// structured artifacts; the parent's message transcript does not.
+		// (Leaf 10-isolation: handoffs must not inherit parent tool dumps.)
+		spawnCtx := d.buildHandoffSpawnContext(report, conversationID)
 		nextResult := &DispatchResult{
 			AgentID:       nextAgentID,
 			Intent:        result.Intent,
 			OriginalInput: result.OriginalInput,
+			// Structured handoff brief; never a parent transcript copy.
+			Brief:     RenderSpawnContext(spawnCtx),
+			MemoryIDs: spawnCtx.MemoryIDs,
+			Isolation: spawnCtx.Isolation,
 			// Preserve multimodal parts for the next hop so attachments are
 			// not silently dropped during report-router handoffs.
 			Parts: result.Parts,
 		}
-		_ = accumulatedContext // used for context enrichment in recursive call
 		// Recursively route to the next agent
 		return d.RouteToAgent(ctx, nextResult, conversationID)
 	}
@@ -2009,6 +2026,14 @@ func (d *Dispatcher) buildContextMessage(result *DispatchResult, conversationID 
 		parts = append(parts, fmt.Sprintf("Task ID: %s\n", result.Task.ID))
 	}
 
+	// Add the structured handoff brief when this dispatch is a handoff hop
+	// (leaf 10-isolation). This is report-derived context produced via
+	// BuildSpawnContext under artifact_only isolation — never a copy of the
+	// parent agent's conversation transcript.
+	if result.Brief != "" {
+		parts = append(parts, "## Handoff Context\n\n"+result.Brief+"\n\n")
+	}
+
 	// Use the full original user input, falling back to the intent summary
 	// when OriginalInput is not populated (e.g. programmatic dispatch results).
 	content := result.OriginalInput
@@ -2021,6 +2046,11 @@ func (d *Dispatcher) buildContextMessage(result *DispatchResult, conversationID 
 }
 
 // buildAccumulatedContext creates context from a previous agent's report for the next agent.
+//
+// Deprecated: superseded by buildHandoffSpawnContext, which routes the same
+// report content through BuildSpawnContext so handoffs carry a structured
+// brief + artifact refs under artifact_only isolation. Retained for callers
+// that still need the bare report-derived string.
 func (d *Dispatcher) buildAccumulatedContext(report *AgentReport, displayResponse string) string {
 	var parts []string
 	if len(report.Accomplished) > 0 {
@@ -2036,6 +2066,28 @@ func (d *Dispatcher) buildAccumulatedContext(report *AgentReport, displayRespons
 		parts = append(parts, "decision context: "+report.DecisionContext)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// buildHandoffSpawnContext constructs the child agent's SpawnContext for a
+// report-router handoff under the ArtifactOnly default. The parent's report
+// becomes the structured brief; the conversation-level memory record (if any)
+// is referenced as an artifact rather than copied as transcript.
+//
+// The parent message list is deliberately NOT passed to BuildSpawnContext:
+// handoff children must not inherit parent tool dumps or chain-of-thought
+// (leaf 10-isolation contract C4).
+func (d *Dispatcher) buildHandoffSpawnContext(report *AgentReport, conversationID string) SpawnContext {
+	brief := d.buildAccumulatedContext(report, "")
+	var artifacts []ArtifactRef
+	if brief != "" {
+		// Reference the accumulated context as a durable artifact so the
+		// child can consult the full handoff digest on demand.
+		artifacts = append(artifacts, ArtifactRef{
+			Path: "handoff://" + conversationID + "/accumulated-context",
+		})
+	}
+	// nil parent: ArtifactOnly keeps Transcript empty by construction.
+	return BuildSpawnContext(IsolationArtifactOnly, brief, artifacts, nil, nil)
 }
 
 // recordInteraction records the interaction to memory.

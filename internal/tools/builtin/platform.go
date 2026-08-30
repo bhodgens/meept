@@ -356,10 +356,14 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 		}, nil
 	}
 
-	// Build the full message with context
-	fullMessage := message
+	// Build the child's input as a structured spawn brief (leaf 10-isolation):
+	// the caller's message + optional caller context become Brief fields; the
+	// child's conversation is fresh (new "delegate-" ID), so no parent
+	// transcript is inherited. SharedTranscript is not offered here.
+	spawn := agent.BuildSpawnContext(agent.IsolationArtifactOnly, message, nil, nil, nil)
+	fullMessage := agent.RenderSpawnContext(spawn)
 	if contextStr != "" {
-		fullMessage = "Context: " + contextStr + "\n\nTask: " + message
+		fullMessage = "Context: " + contextStr + "\n\n" + fullMessage
 	}
 
 	// Check for output_schema parameter

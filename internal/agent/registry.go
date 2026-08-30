@@ -516,7 +516,14 @@ func (r *AgentRegistry) findReviewerByDomain(domain string) string {
 	return ""
 }
 
-// RunAgent runs a specific agent with a message and context.
+// RunAgent sends a single message to an agent and returns its response.
+//
+// Context isolation (leaf 10): the message is treated as a structured brief
+// — built by the caller through BuildSpawnContext — and starts a FRESH
+// conversation keyed by conversationID. The child never inherits a parent
+// conversation's transcript; cross-agent context flows via explicit
+// SpawnContext briefs (report-router handoffs, step AccumulatedContext), not
+// shared message lists.
 func (r *AgentRegistry) RunAgent(ctx context.Context, agentID, message, conversationID string) (string, error) {
 	loop, err := r.Get(agentID)
 	if err != nil {

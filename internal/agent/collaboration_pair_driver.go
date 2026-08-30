@@ -268,11 +268,21 @@ func (d *PairProgrammingDriver) buildDriverPrompt(sess *CollaborationSession, co
 	prompt += fmt.Sprintf("**Observer:** %s\n\n", observerID)
 	prompt += fmt.Sprintf("## Task\n\n%s\n\n", sess.TaskID)
 
+	// Context isolation: by default the driver receives a structured brief
+	// (task + workspace artifact), NOT the turn log. SharedTranscript is the
+	// explicit opt-in that includes prior turns verbatim.
 	turnLog := sess.CopyTurnLog()
-	if len(turnLog) > 0 {
-		prompt += "## Conversation History\n\n"
-		for _, turn := range turnLog {
-			prompt += fmt.Sprintf("**%s (%s):** %s\n\n", turn.AgentID, turn.Role, truncateString(turn.Content, 1000))
+	if sess.Isolation == IsolationSharedTranscript {
+		if len(turnLog) > 0 {
+			prompt += "## Conversation History\n\n"
+			for _, turn := range turnLog {
+				prompt += fmt.Sprintf("**%s (%s):** %s\n\n", turn.AgentID, turn.Role, truncateString(turn.Content, 1000))
+			}
+		}
+	} else {
+		spawn := BuildSpawnContext(IsolationArtifactOnly, "", []ArtifactRef{{Path: sess.Workspace}}, nil, nil)
+		if rendered := RenderSpawnContext(spawn); rendered != "" {
+			prompt += rendered + "\n\n"
 		}
 	}
 
@@ -296,11 +306,19 @@ func (d *PairProgrammingDriver) buildObserverPrompt(sess *CollaborationSession, 
 	prompt += "**Your role:** Observer (review and provide feedback)\n\n"
 	prompt += fmt.Sprintf("## Task\n\n%s\n\n", sess.TaskID)
 
+	// Context isolation: the observer sees the driver's LATEST output (needed
+	// to review) plus an artifact-digest brief by default. The full turn log
+	// rides along ONLY under the SharedTranscript opt-in.
 	turnLog := sess.CopyTurnLog()
-	if len(turnLog) > 0 {
+	if sess.Isolation == IsolationSharedTranscript && len(turnLog) > 0 {
 		prompt += "## Conversation History\n\n"
 		for _, turn := range turnLog {
 			prompt += fmt.Sprintf("**%s (%s):** %s\n\n", turn.AgentID, turn.Role, truncateString(turn.Content, 1000))
+		}
+	} else if sess.Isolation != IsolationSharedTranscript {
+		spawn := BuildSpawnContext(IsolationArtifactOnly, "", []ArtifactRef{{Path: sess.Workspace}}, nil, nil)
+		if rendered := RenderSpawnContext(spawn); rendered != "" {
+			prompt += rendered + "\n\n"
 		}
 	}
 

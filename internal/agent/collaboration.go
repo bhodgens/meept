@@ -50,8 +50,12 @@ type CollaborationSession struct {
 	TimeBudget   time.Duration
 	TurnTimeout  time.Duration // max time per turn
 	MaxTurns     int
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// ContextIsolation governs what the pair participants' per-turn prompts
+	// carry from prior turns. Default ArtifactOnly (brief + artifact digest);
+	// SharedTranscript is the explicit opt-in that includes the turn log.
+	Isolation ContextIsolation `json:"isolation,omitempty" yaml:"isolation,omitempty"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 
 	mu sync.RWMutex
 }
@@ -88,6 +92,13 @@ const (
 // NewCollaborationSession creates a new collaboration session.
 func NewCollaborationSession(mode, taskID string, participants []string, config SessionConfig) *CollaborationSession {
 	now := time.Now().UTC()
+	// Pair sessions default to artifact_only isolation. The only opt-in to
+	// shared_transcript is config.SharedTranscript; unknown values (if a
+	// config carries a raw isolation string) fail closed in BuildSpawnContext.
+	iso := IsolationArtifactOnly
+	if config.SharedTranscript {
+		iso = IsolationSharedTranscript
+	}
 	return &CollaborationSession{
 		ID:           id.Generate("collab-") + "-" + taskID,
 		Mode:         mode,
@@ -99,6 +110,7 @@ func NewCollaborationSession(mode, taskID string, participants []string, config 
 		TurnTimeout:  config.TurnTimeout,
 		TokenBudget:  config.TokenBudget,
 		TimeBudget:   config.TimeBudget,
+		Isolation:    iso,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -110,6 +122,12 @@ type SessionConfig struct {
 	TurnTimeout time.Duration
 	TokenBudget int64
 	TimeBudget  time.Duration
+	// SharedTranscript opts the pair participants into receiving the full
+	// parent-conversation transcript in their per-turn prompts. It is an
+	// explicit opt-in: the default (false) spawns participants under
+	// artifact_only isolation, where prompts carry a structured brief plus
+	// prior-turn artifact digests — never raw transcript dumps.
+	SharedTranscript bool `json:"shared_transcript,omitempty" yaml:"shared_transcript,omitempty"`
 }
 
 // DefaultSessionConfig returns sensible defaults.

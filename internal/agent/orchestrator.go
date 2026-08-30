@@ -1268,10 +1268,14 @@ func (o *Orchestrator) propagateHandoffToDependents(ctx context.Context, complet
 		return o.legacyPropagate(ctx, completedStep)
 	}
 
-	// Render as markdown and inject into each ready step
+	// Render as markdown and inject into each ready step. Context isolation
+	// (leaf 10): dependents receive the structured handoff brief produced
+	// through BuildSpawnContext under the artifact_only default — never the
+	// completed step's raw conversation transcript.
 	handoffMD := h.RenderMarkdown()
+	spawn := BuildSpawnContext(IsolationArtifactOnly, handoffMD, nil, nil, nil)
 	for _, dep := range readySteps {
-		dep.AppendToContext(handoffMD)
+		dep.AppendToContext(RenderSpawnContext(spawn))
 		for _, ref := range completedStep.MemoryRefs {
 			dep.AddMemoryRef(ref)
 		}
