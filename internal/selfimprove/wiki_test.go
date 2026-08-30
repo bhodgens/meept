@@ -491,3 +491,34 @@ func TestStorePattern_NilWikiByteIdentical(t *testing.T) {
 		t.Fatalf("patterns dir must not be created without a wiki store; err=%v", err)
 	}
 }
+
+// TestReadIndex_MissingIsEmptyAndRoundTrip covers the evolver-facing index read:
+// a missing index.md is not an error; content written by RebuildIndex comes
+// back verbatim.
+func TestReadIndex_MissingIsEmptyAndRoundTrip(t *testing.T) {
+	ws, _ := newTestWikiStore(t)
+	got, err := ws.ReadIndex()
+	if err != nil {
+		t.Fatalf("missing index should not error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("missing index should be empty, got %q", got)
+	}
+
+	mustUpsert(t, ws, &LearnedPattern{
+		ID: "pat-idx-1", Type: PatternTypeStrategy, Status: PatternStatusActive,
+		Domain: "code", Description: "index round trip", Pattern: "p",
+		CreatedAt: wikiFixtureTime, UpdatedAt: wikiFixtureTime,
+		ContentHash: "hashidxround",
+	})
+	if err := ws.RebuildIndex(); err != nil {
+		t.Fatalf("RebuildIndex: %v", err)
+	}
+	round, err := ws.ReadIndex()
+	if err != nil {
+		t.Fatalf("ReadIndex after rebuild: %v", err)
+	}
+	if !strings.Contains(round, "- [code-hashidxround](patterns/code-hashidxround.md): index round trip") {
+		t.Fatalf("index round trip lost content: %q", round)
+	}
+}

@@ -232,6 +232,19 @@ func (w *WikiStore) ReadSkillImpact() (string, error) {
 	return string(data), nil
 }
 
+// ReadIndex returns the current index.md content. A missing index is not an
+// error and returns an empty string.
+func (w *WikiStore) ReadIndex() (string, error) {
+	data, err := os.ReadFile(filepath.Join(w.dir, wikiIndexFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("wiki: read index: %w", err)
+	}
+	return string(data), nil
+}
+
 // LoadPatterns parses every patterns/*.md page back into a LearnedPattern.
 // A page missing its ID is repaired with a freshly generated ID (with a
 // warning); a page that cannot be parsed is skipped with a warning. Load

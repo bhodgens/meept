@@ -63,17 +63,19 @@ type ReflectionProposer interface {
 // AutoApply is false (the default), proposals become plans via the plan manager
 // instead of being applied directly.
 type Evolver struct {
-	usage      UsageTracker
-	learning   *selfimprove.LearningPipeline
-	writer     *Writer
-	registry   *skills.Registry
-	capIndex   *skills.CapabilityIndex
-	verifier   *Verifier
-	llmClient  llmChatter
-	planMgr    *plan.PlanManager // nullable — when nil + AutoApply=false, proposals are just recorded
-	proposer   ReflectionProposer // nullable — when set, Pass A drains it at cycle start
-	cfg        config.SkillsEvolverConfig
-	logger     *slog.Logger
+	usage         UsageTracker
+	learning      *selfimprove.LearningPipeline
+	writer        *Writer
+	registry      *skills.Registry
+	capIndex      *skills.CapabilityIndex
+	verifier      *Verifier
+	llmClient     llmChatter
+	planMgr       *plan.PlanManager      // nullable — when nil + AutoApply=false, proposals are just recorded
+	proposer      ReflectionProposer     // nullable — when set, Pass A drains it at cycle start
+	traceProvider TraceProvider          // nullable — when nil, Pass A prompts carry no execution traces
+	wiki          *selfimprove.WikiStore // nullable — when nil, Pass A prompts carry no wiki context and the impact ledger is not written
+	cfg           config.SkillsEvolverConfig
+	logger        *slog.Logger
 }
 
 // EvolverOption configures an Evolver at construction time.
@@ -225,6 +227,12 @@ func (e *Evolver) passARefine(ctx context.Context, report *EvolutionReport) {
 		return
 	}
 
+	// Build the shared wiki/trace context ONCE per cycle (not per skill) so
+	// every refine prompt in this pass sees the same evidence snapshot. When
+	// no wiki and no trace provider are wired the rendered context is empty
+	// and prompts stay byte-identical to the pre-wiki behavior.
+	wikiCtx := e.loadCycleWikiContext().render()
+
 	for _, skill := range e.registry.List() {
 		stats, ok := allStats[skill.Name]
 		if !ok || stats == nil {
@@ -241,7 +249,7 @@ func (e *Evolver) passARefine(ctx context.Context, report *EvolutionReport) {
 			}
 		}
 
-		prompt := e.buildRefinePrompt(skill.Name, currentContent, stats)
+		prompt := e.buildRefinePrompt(skill.Name, currentContent, stats, wikiCtx)
 		decision, err := e.callLLMJSON(ctx, refineSystemPrompt, prompt)
 		if err != nil {
 			e.logger.Warn("pass A: LLM call failed for skill",
@@ -274,8 +282,18 @@ func (e *Evolver) passARefine(ctx context.Context, report *EvolutionReport) {
 	}
 }
 
-func (e *Evolver) buildRefinePrompt(name, currentContent string, stats *UsageStats) string {
+// buildRefinePrompt constructs the user prompt for one Pass A refine call:
+// the optional shared wiki/trace context (ledger → index → traces, empty when
+// nothing is wired), then the skill's usage stats and current content.
+func (e *Evolver) buildRefinePrompt(name, currentContent string, stats *UsageStats, wikiCtx string) string {
 	var sb strings.Builder
+	if wikiCtx != "" {
+		sb.WriteString(wikiCtx)
+		if !strings.HasSuffix(wikiCtx, "\n") {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
 	fmt.Fprintf(&sb, "Skill name: %s\n", name)
 	fmt.Fprintf(&sb, "Usage stats: inject_count=%d, positive=%d, negative=%d, neutral=%d, effectiveness=%.2f\n",
 		stats.InjectCount, stats.PositiveCount, stats.NegativeCount, stats.NeutralCount, stats.Effectiveness)
@@ -548,6 +566,11 @@ func (e *Evolver) processProposal(ctx context.Context, report *EvolutionReport, 
 	}
 
 	proposal.VerifierResult = vr
+
+	// Record the verdict (accept or reject) in the skill-impact ledger. The
+	// verifier-error branch above returns before this point, so failed
+	// verifications record nothing. Wiki nil ⇒ no-op.
+	e.appendSkillImpact(verifyAction, proposal, vr)
 
 	if vr.Action != ActionAccept {
 		report.Rejected++
