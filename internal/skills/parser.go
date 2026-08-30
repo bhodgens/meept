@@ -195,6 +195,7 @@ func ParseSkillText(text string) (*Skill, error) {
 		MaxTokens:     meta.MaxTokens,
 		MCPServers:    meta.MCPServers,
 		UIType:        meta.UIType,
+		State:         meta.State,
 		Prerequisites: meta.HermesPrereqs,
 		SourceOrigin:  meta.SourceOrigin,
 	}

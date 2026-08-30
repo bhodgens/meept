@@ -290,6 +290,27 @@ description: A minimal skill
 	}
 }
 
+// TestParseSkillText_StateFlag covers the `state: true` frontmatter flag
+// used by SKILL.state mode (arXiv:2608.26263): present ⇒ Skill.State is true,
+// absent ⇒ defaults to false.
+func TestParseSkillText_StateFlag(t *testing.T) {
+	s, err := ParseSkillText("---\nname: t\ndescription: d\nstate: true\n---\nbody")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.State {
+		t.Fatal("state flag not parsed")
+	}
+
+	s2, err := ParseSkillText("---\nname: t\ndescription: d\n---\nbody")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s2.State {
+		t.Fatal("state must default false")
+	}
+}
+
 func TestParseSkillText_LeadingWhitespace(t *testing.T) {
 	text := `
 

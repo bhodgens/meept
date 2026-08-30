@@ -76,6 +76,12 @@ type Skill struct {
 	// Empty means default behavior (description + execute button).
 	UIType string `json:"ui_type,omitempty"`
 
+	// State enables SKILL.state mode for this skill (arXiv:2608.26263):
+	// the skill executes via SkillStateRuntime with an explicit Σ state
+	// object instead of the append-only conversation. Set by the
+	// `state: true` frontmatter flag; leaf 05 owns activation.
+	State bool `json:"state,omitempty"`
+
 	// Prerequisites holds Hermes-Agent runtime requirements (env vars, commands, packages).
 	// Nil for Meept-native skills.
 	Prerequisites *HermesPrerequisites `json:"prerequisites,omitempty" yaml:"prerequisites,omitempty"`
@@ -144,6 +150,9 @@ type SkillMetadata struct {
 	MaxTokens     *int              `yaml:"max-tokens"`
 	MCPServers    []MCPServerConfig `yaml:"mcp-servers"`
 	UIType        string            `yaml:"ui-type"`
+
+	// State is the SKILL.state opt-in flag (frontmatter `state: true`).
+	State bool `yaml:"state"`
 
 	// Claude-specific fields (parsed separately, merged into Tags).
 	Trigger  string   `yaml:"trigger"`
