@@ -34,8 +34,8 @@ func TestReadOnlyTools(t *testing.T) {
 
 func TestWriteTools(t *testing.T) {
 	tests := []struct {
-		name            string
-		tool            interface {
+		name string
+		tool interface {
 			IsReadOnly(map[string]any) bool
 			IsConcurrencySafe(map[string]any) bool
 		}

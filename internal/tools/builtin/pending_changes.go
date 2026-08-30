@@ -27,12 +27,12 @@ func shortHash(h string) string {
 
 // PendingChange represents a file modification awaiting acceptance.
 type PendingChange struct {
-	ID        string         `json:"id"`
-	SessionID string         `json:"session_id"`
-	FilePath  string         `json:"file_path"`
-	Original  string         `json:"original"` // Original file content
-	Modified  string         `json:"modified"` // Modified content (preview)
-	Diff      string         `json:"diff"`     // Unified diff preview
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	FilePath  string `json:"file_path"`
+	Original  string `json:"original"` // Original file content
+	Modified  string `json:"modified"` // Modified content (preview)
+	Diff      string `json:"diff"`     // Unified diff preview
 	// PreImageSHA256 is the lowercase hex SHA256 of Original at staging time.
 	// Empty means legacy change created before integrity tracking; accept
 	// treats it as "proceed with warning" for mid-upgrade compatibility.

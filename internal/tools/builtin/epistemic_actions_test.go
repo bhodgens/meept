@@ -9,9 +9,9 @@ import (
 
 func TestTruncatePreview(t *testing.T) {
 	cases := []struct {
-		in    string
-		max   int
-		want  string
+		in   string
+		max  int
+		want string
 	}{
 		{"short", 10, "short"},
 		{"exact10ch", 10, "exact10ch"},

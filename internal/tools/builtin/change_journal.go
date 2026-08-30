@@ -47,7 +47,7 @@ type JournalEntry struct {
 
 // JournalConfig configures a Journal.
 type JournalConfig struct {
-	DBPath        string `json:"db_path"         toml:"db_path"`        // default ~/.meept/changes.db
+	DBPath        string `json:"db_path"         toml:"db_path"`         // default ~/.meept/changes.db
 	MaxEntryBytes int64  `json:"max_entry_bytes" toml:"max_entry_bytes"` // default 1MiB
 }
 
@@ -322,12 +322,12 @@ func writeFileAtomic(path string, data []byte) error {
 	tmpName := tmp.Name()
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close() // cleanup path: original write error takes precedence
+		tmp.Close()        // cleanup path: original write error takes precedence
 		os.Remove(tmpName) // temp-file cleanup is best-effort
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close() // cleanup path: original write error takes precedence
+		tmp.Close()        // cleanup path: original write error takes precedence
 		os.Remove(tmpName) // temp-file cleanup is best-effort
 		return fmt.Errorf("sync temp file: %w", err)
 	}

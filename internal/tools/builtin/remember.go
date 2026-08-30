@@ -65,8 +65,8 @@ func (t *RememberTool) Parameters() llm.FunctionParameters {
 // RememberResult is the structured payload returned by a successful Execute.
 type RememberResult struct {
 	Target string `json:"target"`
-	ID     string `json:"id"`       // assigned by the queue; useful for /improvements skip/apply
-	Queued bool   `json:"queued"`   // always true on success
+	ID     string `json:"id"`     // assigned by the queue; useful for /improvements skip/apply
+	Queued bool   `json:"queued"` // always true on success
 }
 
 // TerminateHint implements tools.TerminatingTool. The remember tool returns a
@@ -130,7 +130,7 @@ func inferProposalType(target string) string {
 
 // Compile-time interface checks.
 var (
-	_ tools.Tool             = (*RememberTool)(nil)
-	_ tools.Categorizer      = (*RememberTool)(nil)
-	_ tools.TerminatingTool  = (*RememberTool)(nil)
+	_ tools.Tool            = (*RememberTool)(nil)
+	_ tools.Categorizer     = (*RememberTool)(nil)
+	_ tools.TerminatingTool = (*RememberTool)(nil)
 )

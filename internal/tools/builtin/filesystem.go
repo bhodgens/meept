@@ -802,6 +802,13 @@ type ListResult struct {
 
 func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	rawPath, _ := args[schemaPropPath].(string)
+	if rawPath == "" {
+		// No explicit path: default to the session working directory
+		// injected by the agent loop. Empty context dir falls through to
+		// the "no path specified" error below (process cwd is almost never
+		// the user's project).
+		rawPath = tools.WorkingDirFromContext(ctx)
+	}
 	recursive, _ := args["recursive"].(bool)
 	maxEntries := 200
 	if maxVal, ok := args["max_entries"].(float64); ok && maxVal > 0 {

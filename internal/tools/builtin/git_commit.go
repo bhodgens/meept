@@ -336,12 +336,12 @@ func (t *GitCommitTool) createCommit(ctx context.Context, dir, message string) (
 	//   - Execute malicious payloads
 	// Mitigation: Use --no-verify for untrusted repositories
 	args := []string{"commit", "-m", message}
-	
+
 	// Check if no-verify is requested via context value
 	if noVerify, ok := ctx.Value(noVerifyKey{}).(bool); ok && noVerify {
 		args = append(args, "--no-verify")
 	}
-	
+
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()

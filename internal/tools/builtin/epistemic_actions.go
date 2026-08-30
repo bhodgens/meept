@@ -292,8 +292,8 @@ func (t *RecordReviewTool) Execute(ctx context.Context, args map[string]any) (an
 		return ConfirmationResponse("record_review", false,
 			fmt.Sprintf("review decision %s", decID),
 			map[string]any{
-				"decision_preview":   preview,
-				"actual_outcome":     truncatePreview(actual, 80),
+				"decision_preview": preview,
+				"actual_outcome":   truncatePreview(actual, 80),
 			}), nil
 	}
 
@@ -302,9 +302,9 @@ func (t *RecordReviewTool) Execute(ctx context.Context, args map[string]any) (an
 		return nil, fmt.Errorf("record review: %w", err)
 	}
 	return map[string]any{
-		"success":    true,
-		"audit_id":   auditID,
-		"score":      score,
+		"success":  true,
+		"audit_id": auditID,
+		"score":    score,
 	}, nil
 }
 
@@ -455,7 +455,7 @@ func (t *PurgeAutoClaimsTool) Execute(ctx context.Context, args map[string]any) 
 		return ConfirmationResponse("purge_auto_claims", false,
 			fmt.Sprintf("delete %d auto claims older than %d day(s)", len(autoClaims), olderThanDays),
 			map[string]any{
-				"claim_count":    len(autoClaims),
+				"claim_count":     len(autoClaims),
 				"older_than_days": olderThanDays,
 			}), nil
 	}
@@ -477,8 +477,8 @@ func (t *PurgeAutoClaimsTool) Execute(ctx context.Context, args map[string]any) 
 		deleted++
 	}
 	resp := map[string]any{
-		"success":  deleted > 0 || firstErr == nil,
-		"deleted":  deleted,
+		"success":   deleted > 0 || firstErr == nil,
+		"deleted":   deleted,
 		"attempted": len(autoClaims),
 	}
 	if firstErr != nil {

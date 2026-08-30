@@ -458,10 +458,10 @@ func (t *TaskSummarizeTool) Execute(ctx context.Context, args map[string]any) (a
 		summary = resp.Content
 	}
 	return map[string]any{
-		"success":  true,
-		"task_id":  taskObj.ID,
-		"summary":  summary,
-		"state":    string(taskObj.State),
+		"success": true,
+		"task_id": taskObj.ID,
+		"summary": summary,
+		"state":   string(taskObj.State),
 	}, nil
 }
 
