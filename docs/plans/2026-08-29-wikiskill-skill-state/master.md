@@ -357,12 +357,13 @@ The orchestrator verifies each child in-session:
 
 | Child | Status | Notes |
 |-------|--------|-------|
-| 01-trace-store.md | PENDING | |
-| 02-wiki-store.md | PENDING | |
-| 03-evolver-trace-fed.md | PENDING | |
-| 04-state-runtime-core.md | PENDING | |
-| 05-config-wiring.md | PENDING | |
-| 06-docs-research.md | PENDING | |
+| 01-trace-store.md | COMPLETE | 2026-08-29 commit aaafe0c7, review APPROVED, 19 tests -race green, failure-turn traces land, 100% |
+| 02-wiki-store.md | COMPLETE | 2026-08-29 commit 5899ac60, review APPROVED, 17 tests -race green, 100% |
+| 03-evolver-trace-fed.md | COMPLETE | 2026-08-29 commit d08a5bd2, review APPROVED (ReadIndex deviation accepted per Contract 2 note), 7 tests + suites -race green, golden degraded-path byte-identical, 100% |
+| 04-state-runtime-core.md | COMPLETE | 2026-08-29 commit 6566ea71 (GBNF seam bf016488), review APPROVED with 2 orchestrator fixes: dead truncateStateValue removed, WithGrammar no-op replaced by new WithRawGrammar path; 16 tests -race green, 100% |
+| 05-config-wiring.md | COMPLETE | 2026-08-29 commit 58f53f2a — subagent hit 429 before reporting; orchestrator reviewed + committed from its on-disk work (both -race runs green pre-death). State trace-writer intentionally unwired (unexported mirror type; documented gap). 100% of contract scope |
+| live-fix | COMPLETE | 2026-08-29 commit ecad07a7 — smoke test exposed PRE-EXISTING ordering bug: evolver gate in initializeSkills always false (tracker/writer assigned after that block ran); evolver never constructed in ANY deployment. Extracted initializeSkillEvolver, called from daemon.go post-PlanManager. Live-verified: evolver constructs + runs cycle |
+| 06-docs-research.md | COMPLETE | 2026-08-29 commit 092a1132 — subagent 429'd with zero files; orchestrator wrote docs directly. README note + skills.md 3 sections + AGENTS.md 4 invariants + cli.md table note; http-api.md intentionally untouched (no new endpoints). Cross-refs verified. 100% |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
