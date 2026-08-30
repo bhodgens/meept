@@ -465,6 +465,10 @@ type AgentLoop struct {
 
 	// Skill usage tracker for closed-loop skill evolution.
 	usageTracker lifecycleUsageTracker
+	// traceWriter persists an immutable trace for every learning-eligible
+	// turn (success AND failure) via the TraceWriter hook (WikiSkill raw
+	// layer). Nil when unset; guarded by mu (set via WithTraceWriter).
+	traceWriter TraceWriter
 	// lastInjectedSkills holds skill names surfaced into the system prompt
 	// for the current turn. Set synchronously in recordSkillInjections;
 	// consumed by triggerLearning.
@@ -2150,19 +2154,31 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// accounting. The triggerLearning path is deprecated for *pattern*
 	// extraction (ReflectionCollector supersedes it) but still handles
 	// skill outcome recording.
-	if l.learningPipeline != nil && err == nil {
+	//
+	// WikiSkill raw-layer traces are written for EVERY learning-eligible
+	// turn — success AND failure — before the judge path runs. The judge
+	// call itself remains gated on err == nil as before.
+	if l.learningPipeline != nil || l.traceWriter != nil {
 		// Snapshot the injected skill names before launching the goroutine.
 		// lastInjectedSkills is set synchronously above (in
-		// buildSkillContextSection -> recordSkillInjections) but the goroutine
-		// may execute after the next turn's prompt has overwritten it.
+		// buildSkillContextSection -> recordSkillInjections) but the
+		// goroutine may execute after the next turn's prompt has
+		// overwritten it.
 		injectedSkillsSnapshot := make([]string, len(l.lastInjectedSkills))
 		copy(injectedSkillsSnapshot, l.lastInjectedSkills)
 
-		l.wg.Add(1)
-		go func() {
-			defer l.wg.Done()
-			l.triggerLearning(context.Background(), conv, conversationID, finalResponse, injectedSkillsSnapshot)
-		}()
+		if l.traceWriter != nil {
+			l.tryWriteTrace(l.buildTrajectory(conv, conversationID, finalResponse),
+				conversationID, injectedSkillsSnapshot, err, finalResponse)
+		}
+
+		if l.learningPipeline != nil && err == nil {
+			l.wg.Add(1)
+			go func() {
+				defer l.wg.Done()
+				l.triggerLearning(context.Background(), conv, conversationID, finalResponse, injectedSkillsSnapshot)
+			}()
+		}
 	}
 
 	// LoRA trajectory capture: record the full (intent, synthesis, tool path,
