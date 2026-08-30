@@ -678,6 +678,7 @@ type LLMConfig struct {
 	Broker          LLMBrokerConfig          `json:"broker"           toml:"broker"`
 	AdaptiveTimeout LLMAdaptiveTimeoutConfig `json:"adaptive_timeout" toml:"adaptive_timeout"`
 	ContextFirewall LLMContextFirewallConfig `json:"context_firewall" toml:"context_firewall"`
+	QuotaRetry      QuotaRetryConfig         `json:"quota_retry"      toml:"quota_retry"`
 	Metrics         LLMMetricsConfig         `json:"metrics"          toml:"metrics"`
 	Cache           LLMSimpleFeatureConfig   `json:"cache"            toml:"cache"`
 }
@@ -745,6 +746,55 @@ type LLMContextFirewallConfig struct {
 	// Valid values: "drop" (keep system + last N), "summarize" (legacy partial),
 	// "restart" (summarize full conversation, fresh context). Default: "restart".
 	OverflowStrategy string `json:"overflow_strategy" toml:"overflow_strategy"`
+}
+
+// QuotaRetryConfig configures quota-reset resilience: detection of provider
+// quota/usage-limit errors, bounded waits for the reset window, and deferral
+// polling. See the quota-reset-resilience plan (docs/plans/).
+//
+// Zero-value semantics: because Load/LoadJSON5Config unmarshal user config
+// ONTO DefaultConfig(), an unset section inherits these defaults from
+// DefaultConfig(). For a zero-value struct used directly (e.g. a Resolver
+// built without the daemon config object), call Normalize to apply
+// enabled-with-defaults. Defaults: enabled, 24h max wait, 1h default
+// estimate, 10m defer re-check interval.
+type QuotaRetryConfig struct {
+	// Enabled turns quota error detection/retry on. Default true.
+	Enabled bool `json:"enabled"             toml:"enabled"`
+	// MaxWait is the upper bound on any quota wait/block/defer. When the
+	// computed reset horizon exceeds MaxWait, callers soft-stop instead of
+	// waiting. Default 24h.
+	MaxWait time.Duration `json:"max_wait"            toml:"max_wait"`
+	// DefaultEstimate is assumed to remain until reset when the provider
+	// does not disclose a reset time. Default 1h.
+	DefaultEstimate time.Duration `json:"default_estimate"    toml:"default_estimate"`
+	// DeferCheckInterval is the re-check cadence for deferred tasks.
+	// Default 10m.
+	DeferCheckInterval time.Duration `json:"defer_check_interval" toml:"defer_check_interval"`
+}
+
+// Defaults for llm.quota_retry (quota-reset-resilience plan leaf 02).
+const (
+	DefaultQuotaRetryMaxWait            = 24 * time.Hour
+	DefaultQuotaRetryDefaultEstimate    = time.Hour
+	DefaultQuotaRetryDeferCheckInterval = 10 * time.Minute
+)
+
+// NormalizeQuotaRetryDefaults clamps invalid quota_retry values to defaults:
+// negative durations (JSON5 numeric values) become the field default; zero
+// durations mean unset and take the default. Enabled is left as-is — the
+// default-true behavior is provided by DefaultConfig(), and Normalize is
+// safe to call repeatedly (idempotent on valid values).
+func NormalizeQuotaRetryDefaults(q *QuotaRetryConfig) {
+	if q.MaxWait <= 0 {
+		q.MaxWait = DefaultQuotaRetryMaxWait
+	}
+	if q.DefaultEstimate <= 0 {
+		q.DefaultEstimate = DefaultQuotaRetryDefaultEstimate
+	}
+	if q.DeferCheckInterval <= 0 {
+		q.DeferCheckInterval = DefaultQuotaRetryDeferCheckInterval
+	}
 }
 
 // LLMMetricsConfig configures HTTP-level metrics collection.
@@ -2172,6 +2222,12 @@ func DefaultConfig() *Config {
 				MaxSummaryLevel:            3,
 				SummaryLevelThreshold:      500,
 				OverflowStrategy:           "restart",
+			},
+			QuotaRetry: QuotaRetryConfig{
+				Enabled:            true,
+				MaxWait:            DefaultQuotaRetryMaxWait,
+				DefaultEstimate:    DefaultQuotaRetryDefaultEstimate,
+				DeferCheckInterval: DefaultQuotaRetryDeferCheckInterval,
 			},
 			Metrics: LLMMetricsConfig{
 				Enabled:             true,
