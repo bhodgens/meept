@@ -3,6 +3,7 @@ package selfimprove
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -18,6 +19,27 @@ import (
 
 // ErrApprovalRequired is returned when a fix requires human approval.
 var ErrApprovalRequired = fmt.Errorf("fix requires human approval")
+
+// ErrTrustedRoot is returned when a proposed fix targets a trusted-root path:
+// the security/eval packages, the self-improvement machinery itself, or
+// gate-bearing configuration. The component that approves updates must never
+// be writable by those updates. Callers should test with errors.Is.
+var ErrTrustedRoot = errors.New("trusted root path denied")
+
+// trustedRootPrefixes are path prefixes (slash-separated, relative to the
+// project root) the applier refuses to modify. Gate configuration lives in
+// meept.json5 (employees.defaults.gate.enabled) and config/employees/*.json5;
+// the `meept agents set-gate` CLI remains the only gate mutator. Skills
+// (config/skills/, .meept/skills/) intentionally stay writable.
+var trustedRootPrefixes = []string{
+	"internal/security/",
+	"pkg/security/",
+	"internal/eval/",
+	"internal/selfimprove/applier.go",
+	"internal/selfimprove/validator.go",
+	"config/meept.json5",
+	"config/employees/",
+}
 
 // ChangeApplier applies validated fixes to the codebase.
 type ChangeApplier struct {
@@ -87,6 +109,14 @@ func (a *ChangeApplier) Apply(ctx context.Context, fix *ProposedFix, validation 
 
 // applyFix performs the actual fix application.
 func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix, approvedBy string) (*AppliedFix, error) {
+	// Deny trusted-root targets BEFORE any backup or write: the approver
+	// must not be updatable by the updates it approves, and rejecting here
+	// also prevents traversal targets from being copied into backups.
+	if err := a.denyTrustedRoot(fix.FilePath); err != nil {
+		a.logger.Warn("fix denied: trusted root", "fix_id", fix.ID, "path", fix.FilePath)
+		return nil, err
+	}
+
 	// Create backup
 	backupPath, err := a.createBackup(fix)
 	if err != nil {
@@ -263,8 +293,13 @@ func (a *ChangeApplier) createBackup(fix *ProposedFix) (string, error) {
 		return "", err
 	}
 
+	// Never join raw fix data into the destination: both parts are reduced
+	// to their base name and stripped of separators so the backup always
+	// lands directly inside backupDir, regardless of what ID or path the
+	// proposed fix carries.
+	safeID := sanitizeBackupComponent(fix.ID)
 	backupPath := filepath.Join(a.backupDir, fmt.Sprintf("%s_%s.backup",
-		fix.ID, filepath.Base(fix.FilePath)))
+		safeID, filepath.Base(fix.FilePath)))
 
 	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(backupPath, content, 0o644); err != nil {
@@ -319,31 +354,123 @@ func (a *ChangeApplier) createCommit(fix *ProposedFix) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// validateFixPath ensures that a relative file path resolves inside the
-// project root and does not escape via "..", symlinks, or absolute paths.
-// Paths beginning with "-" are rejected to defend against arg-injection
-// (callers should also pass "--" to the git invocation).
-func (a *ChangeApplier) validateFixPath(relPath string) error {
+// sanitizeBackupComponent reduces s to a safe single path component: only
+// [A-Za-z0-9._-] survive and every other rune becomes "_", so no separator
+// and therefore no traversal can survive. (".." is harmless once separators
+// are gone.) Used for attacker-influenced strings (fix IDs) that are
+// formatted into file names.
+func sanitizeBackupComponent(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	if out == "" || out == "." || out == ".." {
+		return "unnamed"
+	}
+	return out
+}
+
+// denyTrustedRoot reports whether relPath targets a trusted-root location
+// and must never be modified by the applier. Denied when the path is
+// absolute, contains any ".." segment, escapes projectRoot via symlink
+// resolution (only the deepest existing ancestor is resolved, so not-yet-
+// created files are fine), or matches a trusted prefix. Malformed paths
+// (empty, dash-prefixed) return a plain validation error WITHOUT the
+// ErrTrustedRoot sentinel; trusted-root and traversal denials wrap
+// ErrTrustedRoot with %w so callers can test with errors.Is.
+func (a *ChangeApplier) denyTrustedRoot(relPath string) error {
+	// Malformed input: plain validation errors, not trusted-root denials.
 	if relPath == "" {
 		return fmt.Errorf("fix file path is empty")
 	}
 	if strings.HasPrefix(relPath, "-") {
 		return fmt.Errorf("fix file path starts with '-': %q", relPath)
 	}
-	if filepath.IsAbs(relPath) {
-		return fmt.Errorf("fix file path must be relative: %q", relPath)
+
+	cleaned := filepath.Clean(strings.ReplaceAll(relPath, "\\", "/"))
+	if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "/") {
+		return fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
+	}
+	for _, seg := range strings.Split(cleaned, "/") {
+		if seg == ".." {
+			return fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
+		}
 	}
 
+	for _, prefix := range trustedRootPrefixes {
+		if cleaned == prefix || strings.HasPrefix(cleaned, prefix) {
+			return fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
+		}
+	}
+
+	// Symlink containment: resolve the deepest EXISTING ancestor so paths
+	// whose final components do not exist yet are still checked against
+	// the root they would be created under. The root itself is resolved
+	// too: it may sit behind symlinks (e.g. /var -> /private/var on macOS),
+	// and both sides must be canonical for the prefix check to hold.
 	absRoot, err := filepath.Abs(a.projectRoot)
 	if err != nil {
 		return fmt.Errorf("resolve project root: %w", err)
 	}
-	absTarget, err := filepath.Abs(filepath.Join(absRoot, relPath))
-	if err != nil {
-		return fmt.Errorf("resolve fix path: %w", err)
+	if r, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = r
+	} else {
+		current := absRoot
+		for {
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			if r, err := filepath.EvalSymlinks(parent); err == nil {
+				absRoot = filepath.Join(r, filepath.Base(current))
+				break
+			}
+			current = parent
+		}
 	}
-	if absTarget != absRoot && !strings.HasPrefix(absTarget, absRoot+string(filepath.Separator)) {
-		return fmt.Errorf("fix file path escapes project root: %q", relPath)
+	joined := filepath.Join(absRoot, filepath.FromSlash(cleaned))
+	resolved := joined
+	if current := joined; current != "" {
+		for {
+			r, err := filepath.EvalSymlinks(current)
+			if err == nil {
+				if rest, relErr := filepath.Rel(current, joined); relErr == nil && rest != "." {
+					resolved = filepath.Join(r, rest)
+				} else {
+					resolved = r
+				}
+				break
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
+	}
+	if resolved != absRoot && !strings.HasPrefix(resolved, absRoot+string(filepath.Separator)) {
+		return fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
+	}
+	return nil
+}
+
+// validateFixPath ensures that a relative file path resolves inside the
+// project root and does not escape via "..", symlinks, or absolute paths.
+// Paths beginning with "-" are rejected to defend against arg-injection
+// (callers should also pass "--" to the git invocation). It also enforces
+// the trusted-root deny list.
+func (a *ChangeApplier) validateFixPath(relPath string) error {
+	if err := a.denyTrustedRoot(relPath); err != nil {
+		return err
 	}
 	return nil
 }
