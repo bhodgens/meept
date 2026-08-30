@@ -9,7 +9,11 @@ import "slices"
 
 import "time"
 
-import "github.com/caimlas/meept/internal/config"
+import (
+	"gopkg.in/yaml.v3"
+
+	"github.com/caimlas/meept/internal/config"
+)
 
 // Priority levels for agent discovery (lower is higher priority).
 const (
@@ -99,7 +103,78 @@ type AgentMetadata struct {
 	// Verification configures post-completion verification for this agent.
 	// Nil = use DefaultVerificationConfig() at spec conversion time.
 	Verification *VerificationMetadata `yaml:"verification,omitempty" json:"verification,omitempty"`
+
+	// Gate configures the roster quality gate (e.g. "go test ./...") that
+	// runs after turns which mutated the workspace. Nil = no gate. The
+	// registry converts it to a RosterGateConfig; see
+	// internal/agent/roster_gate.go. This is the per-agent AGENT.md path and
+	// is orthogonal to employees.defaults.gate.enabled (the employee kill
+	// switch).
+	Gate *GateMetadata `yaml:"gate,omitempty" json:"gate,omitempty"`
 }
+
+// GateMetadata is the AGENT.md frontmatter form of the roster quality gate.
+// The registry converts it to a per-agent gate. Contract C2 (frozen).
+type GateMetadata struct {
+	// Command is the shell command run in the session workdir after a
+	// mutating turn. Empty means no gate.
+	Command string `yaml:"command,omitempty" json:"command,omitempty"`
+	// TimeoutSeconds kills the gate command after this many seconds.
+	// Zero/unset = DefaultGateTimeoutSeconds (300) at conversion time.
+	TimeoutSeconds int `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
+	// SkipWhenUnchanged skips re-running a previously FAILED gate when the
+	// workspace is unchanged since the failure. Absent YAML key parses as
+	// true (see UnmarshalYAML).
+	SkipWhenUnchanged bool `yaml:"skip_when_unchanged" json:"skip_when_unchanged"`
+
+	// skipExplicit records that skip_when_unchanged was explicitly present
+	// in the parsed frontmatter. It exists only so NormalizeGateDefaults can
+	// distinguish "unset" from "false" for a plain-bool field; programmatic
+	// construction without parsing leaves it false, which normalizes to the
+	// true default (same documented caveat as employee.GateConfig).
+	skipExplicit bool
+}
+
+// NormalizeGateDefaults applies roster-gate defaults at conversion time:
+// TimeoutSeconds unset/<=0 becomes DefaultGateTimeoutSeconds (300) and
+// SkipWhenUnchanged defaults to true unless explicitly configured false in
+// parsed frontmatter. Callers converting GateMetadata to a runtime gate
+// MUST call this first.
+func (m *GateMetadata) NormalizeGateDefaults() {
+	if m == nil {
+		return
+	}
+	if m.TimeoutSeconds <= 0 {
+		m.TimeoutSeconds = DefaultGateTimeoutSeconds
+	}
+	if !m.skipExplicit {
+		m.SkipWhenUnchanged = true
+	}
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler. It decodes the C2 field set and
+// records whether skip_when_unchanged was explicitly present so
+// NormalizeGateDefaults can distinguish unset (default true) from an
+// explicit false.
+func (m *GateMetadata) UnmarshalYAML(value *yaml.Node) error {
+	var aux struct {
+		Command           string `yaml:"command"`
+		TimeoutSeconds    int    `yaml:"timeout_seconds"`
+		SkipWhenUnchanged *bool  `yaml:"skip_when_unchanged"`
+	}
+	if err := value.Decode(&aux); err != nil {
+		return err
+	}
+	m.Command = aux.Command
+	m.TimeoutSeconds = aux.TimeoutSeconds
+	m.SkipWhenUnchanged = aux.SkipWhenUnchanged == nil || *aux.SkipWhenUnchanged
+	m.skipExplicit = aux.SkipWhenUnchanged != nil
+	return nil
+}
+
+// DefaultGateTimeoutSeconds is the roster gate timeout applied when
+// GateMetadata.TimeoutSeconds is unset.
+const DefaultGateTimeoutSeconds = 300
 
 // VerificationMetadata is the AGENT.md frontmatter form of per-agent
 // verification config. The registry converts it to agent.VerificationConfig.

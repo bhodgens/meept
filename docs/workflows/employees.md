@@ -162,6 +162,34 @@ Semantics (`internal/employee/gate.go`):
 - Gate output may contain code and is therefore never logged above debug level;
   gate runs are recorded in the employee audit trail.
 
+### Roster gate vs employee gate
+
+The **employee gate** above is the autonomous-goal completion check controlled
+by the `employees.defaults.gate.enabled` kill switch. The **roster gate** is a
+separate, per-agent mechanism defined directly in an AGENT.md file
+(`config/agents/coder/AGENT.md`, `config/agents/debugger/AGENT.md`):
+
+```yaml
+gate:
+  command: "go test ./..."
+  timeout_seconds: 300
+  skip_when_unchanged: true
+```
+
+- **Trigger:** runs once at the end of any agent turn that invoked a mutating
+  tool (`file_write`, `file_edit`, `file_delete`, `shell_execute`); turns that
+  only read files skip the gate entirely.
+- **Scope:** runs in the session's bound project directory (never the daemon
+  CWD).
+- **On failure:** the gate output (capped at 4 KB) is injected into the
+  conversation, and the turn's response carries a failure notice — the agent
+  may not report success until the command exits 0.
+- **Independence:** the roster gate runs regardless of
+  `employees.defaults.gate.enabled` (that flag gates only employee goals).
+  Both paths share the same engine (`internal/gate.RunGate`; re-exported as
+  `internal/employee.RunGate`) and the same skip-when-unchanged workspace
+  hashing. Reviewer agents do not carry a gate.
+
 ### Constitution Engine
 
 Three checkpoints, each with a distinct role. All live in `internal/employee/enforcement.go`.

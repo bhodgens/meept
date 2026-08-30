@@ -111,6 +111,11 @@ type AgentSpec struct {
 	SkillTriggers map[string]string `json:"skill_triggers,omitempty"`
 	// Verification configures post-completion verification for this agent.
 	Verification VerificationConfig `json:"verification" yaml:"verification"`
+	// Gate configures the roster quality gate (from AGENT.md `gate:`) run
+	// after turns that mutated the workspace. Nil = no gate. This is the
+	// per-agent AGENT.md path, orthogonal to employees.defaults.gate.enabled
+	// (the employee kill switch).
+	Gate *RosterGateConfig `json:"gate,omitempty" yaml:"gate,omitempty"`
 }
 
 // BaselineTools are the tools available to all agents.

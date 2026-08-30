@@ -680,6 +680,11 @@ type AgentLoop struct {
 	// is disabled for this agent.
 	verificationTracker *VerificationTracker
 
+	// rosterGate is the per-agent quality gate from AGENT.md `gate:`
+	// (leaf 04-coder-gates). Evaluated after each turn that ran a mutating
+	// tool. Nil when the agent spec carries no gate.
+	rosterGate *RosterGate
+
 	// State machine for explicit state tracking
 	stateMachine *AgentStateMachine
 	// statePersister optionally persists state snapshots for crash recovery
@@ -1638,6 +1643,13 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 		}
 	}
 
+	// Roster quality gate (leaf 04-coder-gates): built from the AGENT.md
+	// `gate:` block converted onto the spec. Nil spec / nil Gate = no gate.
+	// Independent of verification and of employees.defaults.gate.enabled.
+	if loop.spec != nil && loop.spec.Gate != nil {
+		loop.rosterGate = NewRosterGate(*loop.spec.Gate)
+	}
+
 	// Wrap LLM with ContextFirewall for context budget enforcement
 	if loop.llm != nil {
 		var modelConfig *llm.ModelConfig
@@ -2216,6 +2228,40 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 
 	// Add final response to conversation
 	conv.AddAssistantMessage(finalResponse)
+
+	// Roster quality gate (leaf 04-coder-gates): the ONE post-turn hook
+	// site. Runs only when the agent spec declares a `gate:` block AND this
+	// turn actually invoked a mutating tool; read-only turns skip. Workdir is
+	// the SESSION workdir (l.GetWorkingDir(), bound at session→project bind
+	// time), never the daemon CWD. On failure the (4KB-capped) gate output is
+	// injected into the conversation so the agent must fix it; the response
+	// returned to the caller carries the failure notice too.
+	if l.rosterGate != nil {
+		// CWD rule: the gate runs in the SESSION workdir only. An unbound
+		// session (empty workdir) would make the backend inherit the daemon
+		// process CWD, so the gate is skipped instead.
+		workdir := l.GetWorkingDir()
+		if workdir == "" {
+			l.logger.Debug("roster gate skipped: no session workdir bound")
+		} else {
+			turnHadMutatingTool := false
+			for _, name := range toolNamesSinceLastUser(conv.GetMessages()) {
+				if rosterMutatingTools[name] {
+					turnHadMutatingTool = true
+					break
+				}
+			}
+			if turnHadMutatingTool {
+				if passed, output, skipped, gerr := l.rosterGate.Evaluate(ctx, workdir, true); gerr != nil {
+					l.logger.Warn("roster gate error", "error", gerr)
+				} else if !passed && !skipped {
+					notice := rosterGateFailureMessage(l.rosterGate.cfg.Command, output)
+					conv.AddUserMessage(notice)
+					finalResponse = notice + "\n" + finalResponse
+				}
+			}
+		}
+	}
 
 	// Invoke epistemic hook (Path B: ambient extraction) after the turn
 	// completes. Best-effort: runs asynchronously with panic recovery so

@@ -28,6 +28,10 @@ verification:
   enabled: true
   auto_trigger: true
   max_fix_loops: 3
+gate:
+  command: "go test ./..."
+  timeout_seconds: 300
+  skip_when_unchanged: true
 ---
 
 # Code Specialist

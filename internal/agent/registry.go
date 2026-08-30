@@ -880,6 +880,17 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 	// Verification
 	spec.Verification = verificationFromMetadata(def.Verification)
 
+	// Roster quality gate (leaf 04-coder-gates). Nil metadata = no gate.
+	if def.Gate != nil && def.Gate.Command != "" {
+		gm := *def.Gate
+		gm.NormalizeGateDefaults()
+		spec.Gate = &RosterGateConfig{
+			Command:           gm.Command,
+			TimeoutSeconds:    gm.TimeoutSeconds,
+			SkipWhenUnchanged: gm.SkipWhenUnchanged,
+		}
+	}
+
 	return spec
 }
 
