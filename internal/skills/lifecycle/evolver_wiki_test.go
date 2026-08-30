@@ -235,7 +235,7 @@ func TestPassARefine_PromptCarriesLedgerTracesIndex(t *testing.T) {
 	if !(ledgerIdx < indexIdx && indexIdx < tracesIdx) {
 		t.Fatalf("section order wrong: ledger=%d index=%d traces=%d", ledgerIdx, indexIdx, tracesIdx)
 	}
-	if strings.Index(prompt, "rejected diff") < 0 {
+	if !strings.Contains(prompt, "rejected diff") {
 		t.Fatalf("prompt must carry the ledger row diff:\n%s", prompt)
 	}
 	if !(failIdx < passIdx) {
@@ -244,7 +244,7 @@ func TestPassARefine_PromptCarriesLedgerTracesIndex(t *testing.T) {
 	if stepIdx := strings.Index(prompt, "edit_file"); stepIdx < tracesIdx {
 		t.Fatalf("trace steps must render after the traces header:\n%s", prompt)
 	}
-	if strings.Index(prompt, "patterns/") < 0 {
+	if !strings.Contains(prompt, "patterns/") {
 		t.Fatalf("prompt must carry wiki index bullets:\n%s", prompt)
 	}
 	// The prepended context comes before the usage-stats line.
@@ -285,9 +285,9 @@ func TestPassARefine_NilWikiNilTraces_GoldenPrompt(t *testing.T) {
 	}
 }
 
-// e_loadCycleWikiContextForTest builds a throwaway evolver wired with the
+// eLoadCycleWikiContextForTest builds a throwaway evolver wired with the
 // given wiki/trace sources and runs loadCycleWikiContext against them.
-func e_loadCycleWikiContextForTest(t *testing.T, ws *selfimprove.WikiStore, tp TraceProvider) *cycleWikiContext {
+func eLoadCycleWikiContextForTest(t *testing.T, ws *selfimprove.WikiStore, tp TraceProvider) *cycleWikiContext {
 	t.Helper()
 	evolver := &Evolver{wiki: ws, traceProvider: tp, logger: slog.New(slog.DiscardHandler)}
 	return evolver.loadCycleWikiContext()
@@ -309,7 +309,7 @@ func TestBuildWikiContext_KeepsNewestRows(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
-	wctx := e_loadCycleWikiContextForTest(t, ws, nil)
+	wctx := eLoadCycleWikiContextForTest(t, ws, nil)
 	if len(wctx.ledger) == 0 || len(wctx.ledger) > impactLedgerMaxChars {
 		t.Fatalf("ledger cap violated: %d chars", len(wctx.ledger))
 	}

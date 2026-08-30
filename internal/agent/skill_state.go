@@ -548,7 +548,6 @@ func (r *SkillStateRuntime) Run(ctx context.Context, skill *skills.Skill, input,
 
 		if parsed.Action.Answer != "" {
 			answer = parsed.Action.Answer
-			observation = answer
 			break
 		}
 
