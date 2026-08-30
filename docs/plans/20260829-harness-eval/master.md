@@ -345,14 +345,14 @@ Output: APPROVED or list of specific gaps.
 | 05-verify-breaker | PENDING | 0 | |
 | 06-shadow-capture | PENDING | 0 | |
 | 07-shadow-honesty | PENDING | 0 | |
-| 08-trajectory-judge | PENDING | 0 | |
-| 09-trusted-root | PENDING | 0 | |
-| 10-isolation | PENDING | 0 | |
-| 11-speak-router | PENDING | 0 | |
-| 12-memory-facts | PENDING | 0 | |
-| 13-status-bar | PENDING | 0 | |
-| 14-event-rewake | PENDING | 0 | |
-| 15-docs-flags-metrics | PENDING | 0 | |
+|| 08-trajectory-judge | REVIEWED | 06862e82 |
+|| 09-trusted-root | REVIEWED | 46baf6e9 |
+|| 10-isolation | REVIEWED | 4088767b |
+|| 11-speak-router | REVIEWED | ed9916c0 |
+|| 12-memory-facts | REVIEWED | b8441ef6 |
+|| 13-status-bar | REVIEWED | 22a3a252 |
+|| 14-event-rewake | REVIEWED | 31513939 |
+|| 15-docs-flags-metrics | REVIEWED | 659f72ae |
 | 16-tui-parity | PENDING | 0 | |
 | 17-flutter-parity | PENDING | 0 | |
 | 18-menubar-parity | PENDING | 0 | |
