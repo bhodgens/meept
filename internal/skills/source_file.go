@@ -174,8 +174,8 @@ func (s *FileSource) loadSkillFile(path string, priority int, skills map[string]
 				"path", path,
 				"error", err,
 			)
-			return
 		}
+		return
 	}
 
 	if skill.Name == "" {
