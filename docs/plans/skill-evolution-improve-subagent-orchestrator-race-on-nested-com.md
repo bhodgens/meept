@@ -2,55 +2,130 @@
 
 ## Meta
 
-- plan_id: plan-20260830204304-0001
-- created: 2026-08-30
+- plan_id: plan-20260831224744-0042
+- created: 2026-08-31
 - status: planning
 
 ## Summary
 
-The skill body is currently empty, so its 5 injections (1 positive, 2 negative, effectiveness 0.20) had no guidance to shape behavior. The successful traces reveal the intended pattern: when orchestrating a decomposed plan, the coordinator must drive all steps to completion in a single exchange, immediately dispatching dependent steps each time a nested subagent completes ('racing on nested completion'), passing prior-step results forward, and verifying state-mutating steps. Codifying that pattern — plus the anti-patterns that likely caused the negative outcomes (stopping after the first subagent returns, sequential dispatch of parallelizable steps, missing context propagation, unverified writes) — should raise effectiveness.
+Effectiveness is 0.30 (64 positive vs 111 negative out of 214 injections), well below threshold. The skill handles race conditions on nested subagent completion but likely lacks robust synchronization primitives, completion-detection logic, and fallback strategies — leading to frequent timeout or stale-state failures.
 
 Candidate content:
+---
+name: subagent-orchestrator-race-on-nested-completion
+description: |
+  Detects and resolves race conditions that occur when an orchestrator agent
+  waits for nested subagent completions. Handles early returns, duplicate
+  signals, missed notifications, and timeout windows.
+metadata:
+  version: "2.0"
+  author: Sapiens AI
+  updated: 2026-08-31
+---
+
 # Subagent Orchestrator — Race on Nested Completion
 
-## Purpose
-When executing a plan by delegating steps to subagents, do not pause between steps. Every time a nested agent completes, immediately race ahead: ingest its result, dispatch every step whose dependencies are now satisfied, and keep going until the plan is fully resolved — all within a single exchange.
+## Problem
 
-## When this applies
-- You receive a task decomposed into steps (your own plan or an upstream planner's JSON plan with `description`, `tool_hint`, `depends_on`).
-- You are the coordinator spawning or invoking subagents for individual steps.
-- A subagent returns a completion payload (job_id, response, evidence).
+When an orchestrator dispatches nested subagents, a race can occur between:
+- The subagent finishing and emitting a completion signal.
+- The orchestrator polling or waiting for that signal.
+- A timeout expiring before the signal is processed.
+- Multiple completion signals arriving for the same subagent.
 
-## Core rules
+These races produce missing results, duplicate work, or premature timeouts.
 
-1. **Single-exchange resolution.** Resolve the entire delegated plan before returning to the user. Never end your turn with "step 1 done, awaiting continuation" — that fragments the workflow and hands control back prematurely.
+## Detection Checklist
 
-2. **Race on every nested completion.** The moment a subagent result arrives:
-   - Parse its status and evidence (claims, file evidence, hashes).
-   - Mark the step done or failed.
-   - Recompute the dependency graph and immediately dispatch all newly unblocked steps — in parallel where their `depends_on` allows.
+Before acting, verify the race condition:
 
-3. **Dispatch early.** At the start of the exchange, fire every step with empty `depends_on` in parallel rather than sequentially.
+1. **Timing audit** — Is the subagent's reported finish time within the orchestrator's wait window?
+2. **Signal deduplication** — Are there multiple completion events for a single subagent ID?
+3. **Timeout margin** — Is the configured timeout smaller than the subagent's typical latency p95?
+4. **State consistency** — Does the subagent's state transition (PENDING → RUNNING → DONE) follow a valid path without reversals?
 
-4. **Verify state-mutating steps.** For steps that write files, commit, or otherwise mutate state, ensure the result is verified (existence, size, content, hash) — either by the executor or a dedicated follow-up verification step. If verification fails, re-run the step once with the failure evidence before reporting failure.
+## Resolution Strategies
 
-5. **Propagate context.** When dispatching a dependent step, include the results/evidence of its dependencies in the step prompt ("Results from Prior Steps"). Subagents have no shared memory of prior jobs unless you provide it.
+### 1. Idempotent Completion Signal
 
-6. **Map hints to agents.** Translate the plan's `tool_hint` to the correct available agent using the dynamic agent list when provided (code→coder, debug→debugger, analyze→analyst, git→committer, research→researcher, plan→decompose further, chat→self).
+Accept only the first valid completion signal for each subagent ID. Subsequent signals are logged and ignored.
 
-7. **Terminal report only at the end.** Emit the structured completion JSON (status, accomplished, not_done, issues, observations, evidence) once — after all steps have completed or irrecoverably failed. Include per-step outcomes and concrete evidence (file paths, sizes, hashes, content).
+```
+completed_ids = set()
 
-## Failure handling
-- A failed step: retry once with clarified instructions that include the failure evidence.
-- An irrecoverably failed dependency: mark downstream steps as blocked, report `status: "partial"` with issues, and populate `suggested_next_agent`.
-- Never silently drop a step: every step in the plan must end as done, failed, or blocked in the final report.
+when subagent_signal(id, result):
+    if id in completed_ids:
+        log("duplicate completion, ignored")
+        return
+    completed_ids.add(id)
+    emit_completion(id, result)
+```
 
-## Anti-patterns (known causes of prior negative outcomes)
-- Returning to the user after the first subagent completes instead of continuing the plan.
-- Dispatching independent steps sequentially instead of in parallel.
-- Omitting prior-step results when prompting a dependent subagent.
-- Ending the exchange after a write with no verification of the artifact.
-- Producing the terminal JSON report before all steps are resolved.
+### 2. Exponential Backoff with Jitter
+
+Replace fixed polling intervals with exponential backoff capped at a maximum retry count, adding random jitter to prevent thundering-herd effects.
+
+```
+poll_interval_ms = min(initial_ms * (2 ^ attempt), max_interval_ms)
+actual_delay = poll_interval_ms * (0.5 + random.uniform(0, 1))
+await sleep(actual_delay)
+```
+
+### 3. Heartbeat-Based Liveness
+
+Subagents emit periodic heartbeat messages. The orchestrator treats a missed heartbeat exceeding N intervals as a hard failure, avoiding indefinite waits.
+
+```
+heartbeat_timeout = HEARTBEAT_INTERVAL * MAX_MISSED_COUNTS
+if now() - last_heartbeat > heartbeat_timeout:
+    mark_as_failed(subagent_id, "heartbeat_timeout")
+    escalate()
+```
+
+### 4. Deadline Propagation
+
+Compute and propagate absolute deadlines (not durations) to nested subagents so they self-terminate before the parent's timeout expires.
+
+```
+parent_deadline = orchestrator_now() + PARENT_TIMEOUT_MS
+subagent_deadline = parent_deadline - SLACK_BUFFER_MS
+pass(subagent_deadline) to nested subagent
+```
+
+### 5. State-Transition Lock
+
+Use an atomic compare-and-swap on subagent state to ensure only one transition path is accepted per ID.
+
+```
+if compare_and_swap(state[id], FROM, TO):
+    proceed()
+else:
+    log(f"invalid transition {state[id]} -> {TO} for {id}")
+```
+
+## Anti-Patterns to Avoid
+
+- **Polling without backoff**: Starves the event loop and increases false negatives.
+- **Global timeouts without per-subagent deadlines**: One slow subagent blocks the entire orchestration.
+- **Silently ignoring late signals**: Results may be needed for downstream dependents.
+- **Assuming FIFO signal delivery**: Out-of-order completions are normal in distributed systems.
+
+## Recovery Actions
+
+| Symptom | Recovery |
+|---|---|
+| Timeout before completion received | Retry once with extended deadline; then mark failed |
+| Duplicate completion signals | Deduplicate using idempotent set (Strategy 1) |
+| State reversal detected | Revert to last known valid state; log anomaly |
+| Heartbeat lost | Escalate after N misses; trigger subagent restart if safe |
+| Late-arriving result after timeout | Cache result; notify parent asynchronously |
+
+## Implementation Notes
+
+- All strategies above are composable. Start with Strategies 1 and 4 (most impact, lowest complexity).
+- Prefer absolute deadlines over relative timeouts for nested structures.
+- Log every race-resolution event with subagent ID, timestamp, and strategy applied for debugging.
+- Always include a fallback path: if all race-mitigation fails, surface the error to the caller with diagnostic context.
 
 
 ## Notes

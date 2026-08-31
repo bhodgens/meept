@@ -28,9 +28,9 @@ const (
 	EventTypeSessionTurn    ClusterEventType = "SESSION_TURN"
 
 	// Memory events (Phase 4).
-	EventTypeMemoryStored ClusterEventType = "MEMORY_STORED"
+	EventTypeMemoryStored  ClusterEventType = "MEMORY_STORED"
 	EventTypeMemoryExpired ClusterEventType = "MEMORY_EXPIRED"
-	EventTypeMemoryEdge   ClusterEventType = "MEMORY_EDGE"
+	EventTypeMemoryEdge    ClusterEventType = "MEMORY_EDGE"
 )
 
 // ClusterEvent represents a signed, replicated cluster event.

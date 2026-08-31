@@ -29,11 +29,11 @@ func writeComponent(t *testing.T, root, rel, body string) {
 
 func TestComponentIDFromRel(t *testing.T) {
 	cases := map[string]string{
-		"base/constitution.md":     "base.constitution",
-		"capabilities/memory.md":   "capabilities.memory",
+		"base/constitution.md":       "base.constitution",
+		"capabilities/memory.md":     "capabilities.memory",
 		"conditional/source_eval.md": "conditional.source_eval",
-		"tools/web.md":             "tools.web",
-		"top.md":                   "top",
+		"tools/web.md":               "tools.web",
+		"top.md":                     "top",
 	}
 	for rel, want := range cases {
 		got := componentIDFromRel(rel)
@@ -45,10 +45,10 @@ func TestComponentIDFromRel(t *testing.T) {
 
 func TestComponentTitleFromID(t *testing.T) {
 	cases := map[string]string{
-		"base.constitution":          "Constitution",
-		"capabilities.memory":        "Memory",
+		"base.constitution":             "Constitution",
+		"capabilities.memory":           "Memory",
 		"conditional.source_evaluation": "Source Evaluation",
-		"base.task_principles":       "Task Principles",
+		"base.task_principles":          "Task Principles",
 	}
 	for id, want := range cases {
 		got := componentTitleFromID(id)

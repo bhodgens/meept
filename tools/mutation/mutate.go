@@ -46,13 +46,13 @@ const (
 
 // MutationResult describes the outcome of a mutation test.
 type MutationResult struct {
-	MutatorType   MutatorType
-	FilePath      string
-	LineNumber    int
-	Description   string
-	TestPassed    bool // if true, test passed with mutation = BAD (insufficient test)
-	ExpectedFail  bool // if true, test was expected to fail
-	Error         error
+	MutatorType  MutatorType
+	FilePath     string
+	LineNumber   int
+	Description  string
+	TestPassed   bool // if true, test passed with mutation = BAD (insufficient test)
+	ExpectedFail bool // if true, test was expected to fail
+	Error        error
 }
 
 // RunMutationTest runs a mutation test.
@@ -173,9 +173,9 @@ func NewASTMutator() *ASTMutator {
 
 // MutationVisitor implements ast.Visitor for tracking mutations.
 type MutationVisitor struct {
-	Mutations []string
+	Mutations  []string
 	TargetNode ast.Node
-	Mutated bool
+	Mutated    bool
 }
 
 func (v *MutationVisitor) Visit(node ast.Node) ast.Visitor {
@@ -193,11 +193,11 @@ func (v *MutationVisitor) Visit(node ast.Node) ast.Visitor {
 
 // GenerateMutationReport creates a mutation test report.
 type MutationReport struct {
-	TotalMutations  int
-	KilledMutations int
+	TotalMutations    int
+	KilledMutations   int
 	SurvivedMutations int
-	MutationScore   float64
-	Results         []MutationResult
+	MutationScore     float64
+	Results           []MutationResult
 }
 
 // AddResult adds a mutation result to the report.

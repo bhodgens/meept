@@ -37,6 +37,7 @@ var roleHeuristic = map[string]string{
 // blocks based on the agent role heuristic. The user confirms each write
 // unless --dry-run is set (print only). The --force flag allows overwriting
 // agents that already have a reasoning block.
+//
 //lint:ignore U1000 called via rootCmd.AddCommand()
 func newConfigMigrateReasoningCmd() *cobra.Command {
 	var (
@@ -73,6 +74,7 @@ Examples:
 // files, applies the role heuristic, and either prints suggestions (dry-run)
 // or prompts the user to apply each one. Returns nil if zero agents were
 // found — callers should print a contextual message.
+//
 //lint:ignore U1000 called from newConfigMigrateReasoning
 func runConfigMigrateReasoning(dryRun, force bool, agentIDs []string) error {
 	files, err := discoverAgentFiles()
@@ -224,10 +226,10 @@ func discoverAgentFiles() ([]string, error) {
 		path string
 		prio int
 	}{
-		{filepath.Join(home, ".meept", "agents"), 1},  // user-global
+		{filepath.Join(home, ".meept", "agents"), 1},           // user-global
 		{filepath.Join(home, ".config", "meept", "agents"), 2}, // system-wide
-		{filepath.Join(".meept", "agents"), 0},         // project-local
-		{filepath.Join("config", "agents"), 3},         // bundled
+		{filepath.Join(".meept", "agents"), 0},                 // project-local
+		{filepath.Join("config", "agents"), 3},                 // bundled
 	}
 
 	// Map id -> (path, prio) so lower-priority wins.

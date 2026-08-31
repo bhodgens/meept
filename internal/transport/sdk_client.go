@@ -543,6 +543,5 @@ func (c *SDKClient) callAPI(method string, params any) (json.RawMessage, error) 
 	return c.Call(method, params)
 }
 
-
 // Ensure SDKClient implements Client at compile time.
 var _ Client = (*SDKClient)(nil)

@@ -15,6 +15,11 @@
     "event_type": "agent_progress"
   },
   {
+    "topic_pattern": "agent.quota*",
+    "match": "prefix",
+    "event_type": "agent_progress"
+  },
+  {
     "topic_pattern": "metrics.*",
     "match": "prefix",
     "event_type": "metrics_update"

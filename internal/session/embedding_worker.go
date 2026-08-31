@@ -47,11 +47,11 @@ type EmbeddingWorkerConfig struct {
 //     when the previous tick saturated the catch-up batch size (i.e. the
 //     queue likely still has many entries).
 type EmbeddingWorker struct {
-	store     Store
-	embedder  EmbeddingProvider
-	logger    *slog.Logger
-	batch     int
-	interval  time.Duration
+	store    Store
+	embedder EmbeddingProvider
+	logger   *slog.Logger
+	batch    int
+	interval time.Duration
 
 	catchUpBatch         int
 	catchUpInterval      time.Duration

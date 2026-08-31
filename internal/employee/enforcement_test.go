@@ -16,15 +16,15 @@ import (
 
 func testConstitution() *Constitution {
 	return &Constitution{
-		Purpose:  "keep CI green",
-		Role:     "CI Reliability Engineer",
-		Charter:  "investigate failures, open issues, never merge code",
+		Purpose:      "keep CI green",
+		Role:         "CI Reliability Engineer",
+		Charter:      "investigate failures, open issues, never merge code",
 		AutonomyTier: Tier2Propose,
-		EscalatesTo: []string{"user"},
+		EscalatesTo:  []string{"user"},
 		Constraints: ConstitutionalConstraints{
-			ToolsAllowed:   []string{"web_fetch", "shell_execute", "file_read"},
-			ToolsForbidden: []string{"git_push", "file_delete"},
-			RiskCeiling:    "medium",
+			ToolsAllowed:         []string{"web_fetch", "shell_execute", "file_read"},
+			ToolsForbidden:       []string{"git_push", "file_delete"},
+			RiskCeiling:          "medium",
 			DailyBudgetCents:     50,
 			MaxInvocationsPerDay: 100,
 			MaxTokensPerTurn:     8000,
@@ -50,9 +50,9 @@ func (b budgetStub) SpentToday(string) (int, int, int) {
 
 // pauseTracker records auto-pause calls for assertion.
 type pauseTracker struct {
-	called  bool
-	empID   string
-	reason  string
+	called bool
+	empID  string
+	reason string
 }
 
 func (p *pauseTracker) fn() AutoPauseFunc {
@@ -73,213 +73,213 @@ func TestPreExecChecker_Check(t *testing.T) {
 	pause := &pauseTracker{}
 
 	type tc struct {
-		name      string
-		action    string
-		tool      string
-		details   map[string]string
+		name         string
+		action       string
+		tool         string
+		details      map[string]string
 		constitution *Constitution
-		budget    BudgetChecker
-		wantAllow bool
-		wantSev   string
-		wantPlan  bool
-		wantPause bool
-		wantReason string // substring check
+		budget       BudgetChecker
+		wantAllow    bool
+		wantSev      string
+		wantPlan     bool
+		wantPause    bool
+		wantReason   string // substring check
 	}
 
 	tests := []tc{
 		// --- 1. tools_forbidden ---
 		{
-			name:        "forbidden tool denied",
-			action:      "execute",
-			tool:        "git_push",
+			name:         "forbidden tool denied",
+			action:       "execute",
+			tool:         "git_push",
 			constitution: base,
-			wantAllow:   false,
-			wantSev:     "warning",
-			wantReason:  "forbidden",
+			wantAllow:    false,
+			wantSev:      "warning",
+			wantReason:   "forbidden",
 		},
 		{
-			name:        "forbidden tool file_delete denied",
-			action:      "delete",
-			tool:        "file_delete",
+			name:         "forbidden tool file_delete denied",
+			action:       "delete",
+			tool:         "file_delete",
 			constitution: base,
-			wantAllow:   false,
-			wantSev:     "warning",
+			wantAllow:    false,
+			wantSev:      "warning",
 		},
 
 		// --- 2. tools_allowed ---
 		{
-			name:        "allowed tool web_fetch",
-			action:      "fetch",
-			tool:        "web_fetch",
+			name:         "allowed tool web_fetch",
+			action:       "fetch",
+			tool:         "web_fetch",
 			constitution: base,
-			wantAllow:   true,
-			wantSev:     "info",
+			wantAllow:    true,
+			wantSev:      "info",
 		},
 		{
-			name:        "allowed tool shell_execute (but triggers escalation)",
-			action:      "run",
-			tool:        "shell_execute",
+			name:         "allowed tool shell_execute (but triggers escalation)",
+			action:       "run",
+			tool:         "shell_execute",
 			constitution: base,
-			wantAllow:   false,
-			wantSev:     "",
-			wantPlan:    true,
-			wantReason:  "escalation",
+			wantAllow:    false,
+			wantSev:      "",
+			wantPlan:     true,
+			wantReason:   "escalation",
 		},
 		{
-			name:        "tool not in allowed list denied",
-			action:      "search",
-			tool:        "web_search",
+			name:         "tool not in allowed list denied",
+			action:       "search",
+			tool:         "web_search",
 			constitution: base,
-			wantAllow:   false,
-			wantSev:     "warning",
-			wantReason:  "not in tools_allowed",
+			wantAllow:    false,
+			wantSev:      "warning",
+			wantReason:   "not in tools_allowed",
 		},
 
 		// --- 3. risk_ceiling ---
 		{
-			name:        "risk within ceiling allowed",
-			action:      "read",
-			tool:        "file_read",
-			details:     map[string]string{"risk_level": "low"},
+			name:         "risk within ceiling allowed",
+			action:       "read",
+			tool:         "file_read",
+			details:      map[string]string{"risk_level": "low"},
 			constitution: base,
-			wantAllow:   true,
-			wantSev:     "info",
+			wantAllow:    true,
+			wantSev:      "info",
 		},
 		{
-			name:        "risk at ceiling allowed",
-			action:      "read",
-			tool:        "file_read",
-			details:     map[string]string{"risk_level": "medium"},
+			name:         "risk at ceiling allowed",
+			action:       "read",
+			tool:         "file_read",
+			details:      map[string]string{"risk_level": "medium"},
 			constitution: base,
-			wantAllow:   true,
-			wantSev:     "info",
+			wantAllow:    true,
+			wantSev:      "info",
 		},
 		{
-			name:        "risk above ceiling denied + requires plan",
-			action:      "read",
-			tool:        "file_read",
-			details:     map[string]string{"risk_level": "high"},
+			name:         "risk above ceiling denied + requires plan",
+			action:       "read",
+			tool:         "file_read",
+			details:      map[string]string{"risk_level": "high"},
 			constitution: base,
-			wantAllow:   false,
-			wantSev:     "warning",
-			wantPlan:    true,
-			wantReason:  "exceeds ceiling",
+			wantAllow:    false,
+			wantSev:      "warning",
+			wantPlan:     true,
+			wantReason:   "exceeds ceiling",
 		},
 
 		// --- 4. escalation_triggers ---
 		{
-			name:        "escalation trigger on tool shell_execute",
-			action:      "run",
-			tool:        "shell_execute",
+			name:         "escalation trigger on tool shell_execute",
+			action:       "run",
+			tool:         "shell_execute",
 			constitution: base,
-			wantAllow:   false,
-			wantPlan:    true,
-			wantReason:  "escalation trigger",
+			wantAllow:    false,
+			wantPlan:     true,
+			wantReason:   "escalation trigger",
 		},
 		{
-			name:        "escalation trigger on risk critical",
-			action:      "read",
-			tool:        "file_read",
-			details:     map[string]string{"risk_level": "critical"},
+			name:         "escalation trigger on risk critical",
+			action:       "read",
+			tool:         "file_read",
+			details:      map[string]string{"risk_level": "critical"},
 			constitution: base,
-			wantAllow:   false,
-			wantPlan:    true,
-			wantReason:  "escalation trigger",
+			wantAllow:    false,
+			wantPlan:     true,
+			wantReason:   "escalation trigger",
 		},
 
 		// --- 5. never[] ---
 		{
-			name:        "never rule match in action",
-			action:      "merge to main",
-			tool:        "shell_execute",
+			name:         "never rule match in action",
+			action:       "merge to main",
+			tool:         "shell_execute",
 			constitution: base,
-			wantAllow:   false,
-			wantSev:     "critical",
-			wantPause:   true,
-			wantReason:  "never-rule",
+			wantAllow:    false,
+			wantSev:      "critical",
+			wantPause:    true,
+			wantReason:   "never-rule",
 		},
 		{
-			name:        "never rule match in details",
-			action:      "run",
-			tool:        "shell_execute",
-			details:     map[string]string{"command": "git push --force"},
+			name:         "never rule match in details",
+			action:       "run",
+			tool:         "shell_execute",
+			details:      map[string]string{"command": "git push --force"},
 			constitution: base,
-			wantAllow:   false,
-			wantSev:     "critical",
-			wantPause:   true,
-			wantReason:  "never-rule",
+			wantAllow:    false,
+			wantSev:      "critical",
+			wantPause:    true,
+			wantReason:   "never-rule",
 		},
 		{
-			name:        "never rule no false positive",
-			action:      "read",
-			tool:        "file_read",
-			details:     map[string]string{"path": "/tmp/output.txt"},
+			name:         "never rule no false positive",
+			action:       "read",
+			tool:         "file_read",
+			details:      map[string]string{"path": "/tmp/output.txt"},
 			constitution: base,
 			// "merge to main" / "force push" / "delete branches" should NOT match
 			// But shell_execute triggers escalation. Use file_read which is clean.
 			// Actually file_read is allowed and has no escalation trigger.
-			wantAllow:   true,
-			wantSev:     "info",
+			wantAllow: true,
+			wantSev:   "info",
 		},
 
 		// --- 6. budget ---
 		{
-			name:        "budget cents exhausted denied + pause",
-			action:      "fetch",
-			tool:        "web_fetch",
+			name:         "budget cents exhausted denied + pause",
+			action:       "fetch",
+			tool:         "web_fetch",
 			constitution: base,
-			budget:      budgetStub{cents: 50},
-			wantAllow:   false,
-			wantSev:     "critical",
-			wantPause:   true,
-			wantReason:  "budget",
+			budget:       budgetStub{cents: 50},
+			wantAllow:    false,
+			wantSev:      "critical",
+			wantPause:    true,
+			wantReason:   "budget",
 		},
 		{
-			name:        "budget invocations exhausted denied + pause",
-			action:      "fetch",
-			tool:        "web_fetch",
+			name:         "budget invocations exhausted denied + pause",
+			action:       "fetch",
+			tool:         "web_fetch",
 			constitution: base,
-			budget:      budgetStub{invocations: 100},
-			wantAllow:   false,
-			wantSev:     "critical",
-			wantPause:   true,
-			wantReason:  "invocations",
+			budget:       budgetStub{invocations: 100},
+			wantAllow:    false,
+			wantSev:      "critical",
+			wantPause:    true,
+			wantReason:   "invocations",
 		},
 		{
-			name:        "budget under limit allowed",
-			action:      "fetch",
-			tool:        "web_fetch",
+			name:         "budget under limit allowed",
+			action:       "fetch",
+			tool:         "web_fetch",
 			constitution: base,
-			budget:      budgetStub{cents: 10, invocations: 5},
-			wantAllow:   true,
-			wantSev:     "info",
+			budget:       budgetStub{cents: 10, invocations: 5},
+			wantAllow:    true,
+			wantSev:      "info",
 		},
 		{
-			name:        "turn tokens exceeded denied",
-			action:      "fetch",
-			tool:        "web_fetch",
-			details:     map[string]string{"turn_tokens": "9000"},
+			name:         "turn tokens exceeded denied",
+			action:       "fetch",
+			tool:         "web_fetch",
+			details:      map[string]string{"turn_tokens": "9000"},
 			constitution: base,
-			wantAllow:   false,
-			wantSev:     "warning",
-			wantReason:  "turn tokens",
+			wantAllow:    false,
+			wantSev:      "warning",
+			wantReason:   "turn tokens",
 		},
 
 		// --- 7. nil constitution (allow-all) ---
 		{
-			name:        "nil constitution allows all",
-			action:      "anything",
-			tool:        "anything",
+			name:         "nil constitution allows all",
+			action:       "anything",
+			tool:         "anything",
 			constitution: nil,
-			wantAllow:   true,
-			wantSev:     "info",
+			wantAllow:    true,
+			wantSev:      "info",
 		},
 
 		// --- 8. empty tools_allowed means inherit all ---
 		{
-			name:    "empty tools_allowed inherits all",
-			action:  "custom",
-			tool:    "custom_tool",
+			name:   "empty tools_allowed inherits all",
+			action: "custom",
+			tool:   "custom_tool",
 			constitution: func() *Constitution {
 				c := testConstitution()
 				c.Constraints.ToolsAllowed = nil
@@ -616,11 +616,11 @@ func TestParseAuditResponse(t *testing.T) {
 	turn := TurnRecord{EmployeeID: "e1", TurnID: "t1"}
 
 	tests := []struct {
-		name      string
-		input     string
-		wantNil   bool
-		wantSev   AuditSeverity
-		wantErr   bool
+		name    string
+		input   string
+		wantNil bool
+		wantSev AuditSeverity
+		wantErr bool
 	}{
 		{
 			name:    "clean info",
@@ -767,9 +767,9 @@ func TestParseRiskCeiling(t *testing.T) {
 		{"medium", riskMedium},
 		{"high", riskHigh},
 		{"critical", riskCritical},
-		{"", riskMedium},     // default
+		{"", riskMedium},        // default
 		{"unknown", riskMedium}, // fallback
-		{"HIGH", riskHigh},   // case insensitive
+		{"HIGH", riskHigh},      // case insensitive
 	}
 
 	for _, tt := range tests {
@@ -788,11 +788,11 @@ func TestParseRiskCeiling(t *testing.T) {
 
 func TestShouldEscalate(t *testing.T) {
 	tests := []struct {
-		name          string
-		triggers      []EscalationTrigger
-		candidate     CandidatePlan
-		wantEscalate  bool
-		wantReason    string
+		name         string
+		triggers     []EscalationTrigger
+		candidate    CandidatePlan
+		wantEscalate bool
+		wantReason   string
 	}{
 		{
 			name:         "empty triggers never escalates",

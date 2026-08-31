@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-			"testing"
+	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/preferences"

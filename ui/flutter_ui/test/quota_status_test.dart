@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/features/agents/agents_tab.dart';
+import 'package:meept_ui/features/agents/quota_status.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/agent_provider.dart';
 import 'package:meept_ui/providers/providers.dart';
@@ -12,7 +13,7 @@ void main() {
   group('formatDuration', () {
     test('returns resuming… for negative durations', () {
       // Dart normalises Duration(hours: -1) to positive, so construct
-      // a truly negative duration via microseconds.
+      // a truly negative duration via milliseconds.
       expect(formatDuration(const Duration(milliseconds: -1)), equals('resuming…'));
       expect(formatDuration(const Duration(hours: -1, minutes: -30)), equals('resuming…'));
       expect(formatDuration(const Duration(days: -1)), equals('resuming…'));
@@ -21,41 +22,43 @@ void main() {
     test('formats hours+minutes >= 1h', () {
       expect(
         formatDuration(const Duration(hours: 3, minutes: 12)),
-        equals('3 h 12 m'),
+        equals('3h 12m'),
       );
-      expect(formatDuration(const Duration(hours: 1)), equals('1 h'));
-      expect(formatDuration(const Duration(hours: 2)), equals('2 h'));
-      expect(formatDuration(const Duration(hours: 5, minutes: 0)), equals('5 h'));
+      expect(formatDuration(const Duration(hours: 1)), equals('1h'));
+      expect(formatDuration(const Duration(hours: 2)), equals('2h'));
+      expect(formatDuration(const Duration(hours: 5, minutes: 0)), equals('5h'));
       expect(
         formatDuration(const Duration(hours: 12, minutes: 30)),
-        equals('12 h 30 m'),
+        equals('12h 30m'),
       );
     });
 
     test('formats minutes >= 1m', () {
-      expect(formatDuration(const Duration(minutes: 45)), equals('45 m'));
-      expect(formatDuration(const Duration(minutes: 1)), equals('1 m'));
-      expect(formatDuration(const Duration(minutes: 59)), equals('59 m'));
+      expect(formatDuration(const Duration(minutes: 45)), equals('45m'));
+      expect(formatDuration(const Duration(minutes: 1)), equals('1m'));
+      expect(formatDuration(const Duration(minutes: 59)), equals('59m'));
     });
 
-    test('formats seconds < 1m', () {
-      expect(formatDuration(const Duration(seconds: 59)), equals('59 s'));
-      expect(formatDuration(const Duration(seconds: 5)), equals('5 s'));
-      expect(formatDuration(const Duration(seconds: 1)), equals('1 s'));
-      expect(formatDuration(const Duration(seconds: 0)), equals('0 s'));
+    test('truncates sub-minute remains, never rounds up (parity)', () {
+      expect(formatDuration(const Duration(seconds: 90)), equals('1m'));
+      expect(formatDuration(const Duration(seconds: 30)), equals('0m'));
+      expect(formatDuration(const Duration(seconds: 59)), equals('0m'));
     });
 
     test('boundary cases', () {
       // Exactly 1 minute
-      expect(formatDuration(const Duration(minutes: 1)), equals('1 m'));
-      // Just under 1 minute
-      expect(formatDuration(const Duration(seconds: 59)), equals('59 s'));
-      // Exactly 1 hour
-      expect(formatDuration(const Duration(hours: 1)), equals('1 h'));
+      expect(formatDuration(const Duration(minutes: 1)), equals('1m'));
       // Just under 1 hour
       expect(
         formatDuration(const Duration(minutes: 59, seconds: 59)),
-        equals('59 m'),
+        equals('59m'),
+      );
+      // Exactly 1 hour
+      expect(formatDuration(const Duration(hours: 1)), equals('1h'));
+      // Just under 1 hour via seconds
+      expect(
+        formatDuration(const Duration(seconds: 3599)),
+        equals('59m'),
       );
     });
   });
@@ -65,16 +68,22 @@ void main() {
       const state = AgentQuotaState(quotaBlocked: false);
       expect(state.quotaBlocked, isFalse);
       expect(state.quotaWaitUntilEpoch, isNull);
+      expect(state.fallbackModel, isNull);
+      expect(state.escalation, isNull);
     });
 
     test('copyWith preserves unprovided fields', () {
       const original = AgentQuotaState(
         quotaBlocked: true,
         quotaWaitUntilEpoch: 123456789,
+        fallbackModel: 'glm-4.7',
+        escalation: 'warn',
       );
       final copy = original.copyWith(quotaBlocked: false);
       expect(copy.quotaBlocked, isFalse);
       expect(copy.quotaWaitUntilEpoch, 123456789);
+      expect(copy.fallbackModel, 'glm-4.7');
+      expect(copy.escalation, 'warn');
     });
   });
 
@@ -95,6 +104,21 @@ void main() {
       final ep = state.quotaEpisodes['agent-1']!;
       expect(ep.quotaBlocked, isFalse);
       expect(ep.quotaWaitUntilEpoch, isNotNull);
+    });
+
+    test('quota_wait stores fallback model when present', () async {
+      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+      await notifier.loadAgents();
+
+      notifier.handleQuotaEvent(
+        agentId: 'agent-fb',
+        to: 'quota_wait',
+        unblockAt: '2026-08-31T12:00:00Z',
+        fallbackModel: 'glm-4.7',
+      );
+
+      final ep = notifier.state.quotaEpisodes['agent-fb']!;
+      expect(ep.fallbackModel, 'glm-4.7');
     });
 
     test('blocked sets episode with blocked=true', () async {
@@ -145,6 +169,78 @@ void main() {
       expect(notifier.state.quotaEpisodes, isEmpty);
     });
 
+    test('to="" tier escalation updates existing episode unblock time', () async {
+      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+      await notifier.loadAgents();
+
+      // Enter quota wait (escalation is "" on initial entry).
+      notifier.handleQuotaEvent(
+        agentId: 'agent-esc',
+        to: 'quota_wait',
+        unblockAt: '2026-08-31T12:00:00Z',
+      );
+      final before = DateTime.parse('2026-08-31T12:00:00Z')
+          .millisecondsSinceEpoch;
+      var ep = notifier.state.quotaEpisodes['agent-esc']!;
+      expect(ep.quotaWaitUntilEpoch, before);
+      expect(ep.quotaBlocked, isFalse);
+
+      // 12h warn tier fires with to == "" and an extended unblock time.
+      notifier.handleQuotaEvent(
+        agentId: 'agent-esc',
+        to: '',
+        unblockAt: '2026-08-31T13:30:00Z',
+        escalation: 'warn',
+      );
+      ep = notifier.state.quotaEpisodes['agent-esc']!;
+      expect(ep.quotaWaitUntilEpoch,
+          DateTime.parse('2026-08-31T13:30:00Z').millisecondsSinceEpoch);
+      // Episode persists — only the wait time/tier refreshed.
+      expect(ep.quotaBlocked, isFalse);
+      expect(ep.escalation, 'warn');
+    });
+
+    test('to="" with no existing episode is a no-op', () async {
+      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+      await notifier.loadAgents();
+
+      notifier.handleQuotaEvent(
+        agentId: 'agent-ghost',
+        to: '',
+        unblockAt: '2026-08-31T15:00:00Z',
+        escalation: 'action_recommended',
+      );
+
+      expect(notifier.state.quotaEpisodes, isEmpty);
+    });
+
+    test('quota_wait stores escalation "" and later to="" warn stores "warn"', () async {
+      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+      await notifier.loadAgents();
+
+      // Initial entry: escalation is "" (absent) — stored as null.
+      notifier.handleQuotaEvent(
+        agentId: 'agent-tier',
+        to: 'quota_wait',
+        unblockAt: '2026-08-31T12:00:00Z',
+        escalation: '',
+      );
+      var ep = notifier.state.quotaEpisodes['agent-tier']!;
+      expect(ep.escalation, isNull);
+
+      // Later tier firing carries "warn".
+      notifier.handleQuotaEvent(
+        agentId: 'agent-tier',
+        to: '',
+        escalation: 'warn',
+      );
+      ep = notifier.state.quotaEpisodes['agent-tier']!;
+      expect(ep.escalation, 'warn');
+      // Unblock time kept from the original event (unblockAt was null here).
+      expect(ep.quotaWaitUntilEpoch,
+          DateTime.parse('2026-08-31T12:00:00Z').millisecondsSinceEpoch);
+    });
+
     test('clears existing episode for same agent on new event', () async {
       final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
       await notifier.loadAgents();
@@ -182,6 +278,7 @@ void main() {
         'to': 'quota_wait',
         'unblock_at': '2026-08-31T12:00:00Z',
         'escalation': 'warn',
+        'fallback_model': 'glm-4.7',
         'timestamp': '2026-08-31T10:00:00Z',
       };
       final progress = AgentProgress.fromJson(json);
@@ -190,6 +287,7 @@ void main() {
       expect(progress.quota!.to, 'quota_wait');
       expect(progress.quota!.unblockAt, '2026-08-31T12:00:00Z');
       expect(progress.quota!.escalation, 'warn');
+      expect(progress.quota!.fallbackModel, 'glm-4.7');
     });
 
     test('parses blocked event', () {
@@ -206,6 +304,7 @@ void main() {
       final progress = AgentProgress.fromJson(json);
       expect(progress.quota, isNotNull);
       expect(progress.quota!.to, 'blocked');
+      expect(progress.quota!.fallbackModel, isNull);
     });
 
     test('parses running/clear event', () {
@@ -244,6 +343,74 @@ void main() {
       };
       // Should not throw
       expect(() => AgentProgress.fromJson(json), returnsNormally);
+    });
+  });
+
+  group('quotaCountdownText', () {
+    test('formats remaining wait time in parity format', () {
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: nowMs + (3 * 60 + 12) * 60 * 1000,
+      );
+      expect(quotaCountdownText(state), equals('quota resets in 3h 12m'));
+    });
+
+    test('single hour and 45m', () {
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      expect(
+        quotaCountdownText(AgentQuotaState(
+          quotaBlocked: false,
+          quotaWaitUntilEpoch: nowMs + 60 * 60 * 1000,
+        )),
+        equals('quota resets in 1h'),
+      );
+      expect(
+        quotaCountdownText(AgentQuotaState(
+          quotaBlocked: false,
+          quotaWaitUntilEpoch: nowMs + 45 * 60 * 1000,
+        )),
+        equals('quota resets in 45m'),
+      );
+    });
+
+    test('past-due renders resets soon', () {
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: nowMs - 60 * 60 * 1000,
+      );
+      expect(quotaCountdownText(state), equals('resets soon'));
+    });
+
+    test('null wait time and blocked yield null', () {
+      expect(
+        quotaCountdownText(const AgentQuotaState(quotaBlocked: false)),
+        isNull,
+      );
+      expect(
+        quotaCountdownText(const AgentQuotaState(quotaBlocked: true)),
+        isNull,
+      );
+    });
+  });
+
+  group('quotaDetailLines', () {
+    test('two lines when fallback model is present', () {
+      final lines = quotaDetailLines('claude-opus-4', 'glm-4.7', 1756627200000);
+      expect(lines.length, 2);
+      expect(lines[0], contains('primary: claude-opus-4 (blocked until '));
+      expect(lines[1], equals('active: glm-4.7'));
+    });
+
+    test('empty when no fallback model', () {
+      expect(quotaDetailLines('claude-opus-4', null, null), isEmpty);
+      expect(quotaDetailLines('claude-opus-4', '', 1756627200000), isEmpty);
+    });
+
+    test('missing unblock time degrades to unknown', () {
+      final lines = quotaDetailLines('claude-opus-4', 'glm-4.7', null);
+      expect(lines[0], contains('(blocked until unknown)'));
     });
   });
 
@@ -334,7 +501,7 @@ void main() {
       expect(find.textContaining('blocked'), findsNothing);
     });
 
-    testWidgets('past-due shows resuming…', (tester) async {
+    testWidgets('past-due shows resets soon', (tester) async {
       // Past due: unblock time in the past
       final quotaState = AgentQuotaState(
         quotaBlocked: false,
@@ -363,8 +530,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
-      // Should find "resuming…" text
-      expect(find.textContaining('resuming'), findsOneWidget);
+      // Should find "resets soon" text
+      expect(find.textContaining('resets soon'), findsOneWidget);
     });
   });
 }

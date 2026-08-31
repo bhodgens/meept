@@ -439,33 +439,33 @@ func (c *Constitution) Validate(selfID string) error {
 // constitutionFieldNames is the set of valid top-level JSON field names
 // on Constitution. Used by ValidateFrozenFields.
 var constitutionFieldNames = map[string]struct{}{
-	"purpose":           {},
-	"role":              {},
-	"charter":           {},
-	"autonomy_tier":     {},
-	"escalates_to":      {},
-	"constraints":       {},
-	"amendment_policy":  {},
-	"version":           {},
-	"authored_by":       {},
-	"approved_at":       {},
+	"purpose":          {},
+	"role":             {},
+	"charter":          {},
+	"autonomy_tier":    {},
+	"escalates_to":     {},
+	"constraints":      {},
+	"amendment_policy": {},
+	"version":          {},
+	"authored_by":      {},
+	"approved_at":      {},
 }
 
 // constraintsFieldNames is the set of valid JSON field names on
 // ConstitutionalConstraints, used when a FrozenFields entry is dotted
 // into the constraints sub-struct.
 var constraintsFieldNames = map[string]struct{}{
-	"tools_allowed":          {},
-	"tools_forbidden":        {},
-	"risk_ceiling":           {},
-	"max_tokens_per_turn":    {},
+	"tools_allowed":           {},
+	"tools_forbidden":         {},
+	"risk_ceiling":            {},
+	"max_tokens_per_turn":     {},
 	"max_conversation_tokens": {},
-	"daily_budget_cents":     {},
+	"daily_budget_cents":      {},
 	"max_invocations_per_day": {},
-	"escalation_triggers":    {},
-	"never":                  {},
-	"never_rules":            {},
-	"assessment_interval":    {},
+	"escalation_triggers":     {},
+	"never":                   {},
+	"never_rules":             {},
+	"assessment_interval":     {},
 }
 
 // ValidateFrozenFields returns a list of human-readable problems with
@@ -691,8 +691,8 @@ func DefaultConservativeConstitution(purpose string) Constitution {
 			DailyBudgetCents:      0,
 			MaxInvocationsPerDay:  0,
 			// No escalation triggers by default.
-			EscalationTriggers:   nil,
-			AssessmentInterval:   "", // tier 1: trigger-driven
+			EscalationTriggers: nil,
+			AssessmentInterval: "", // tier 1: trigger-driven
 		},
 		AmendmentPolicy: AmendmentPolicy{
 			SelfProposeAllowed: false,

@@ -17,11 +17,11 @@ func newTestReportArtifact(t *testing.T, format ReportFormat) (*ReportArtifact, 
 	t.Helper()
 	dir := t.TempDir()
 	cfg := ReportConfig{
-		OutputDir:            dir,
-		Format:               format,
-		IncludeTraces:        true,
+		OutputDir:              dir,
+		Format:                 format,
+		IncludeTraces:          true,
 		IncludeRecommendations: true,
-		CleanupAfterDays:     30,
+		CleanupAfterDays:       30,
 	}
 	ra, err := NewReportArtifact(cfg)
 	if err != nil {
@@ -41,11 +41,11 @@ func sampleFailures() []FailureMode {
 			Recommendation: "Review tool prompt template",
 		},
 		{
-			Category:  "tool_error",
+			Category:    "tool_error",
 			Description: "File read failed with permission error",
-			Severity:  "medium",
-			TraceID:   "def456",
-			Model:     "claude-opus-4-6",
+			Severity:    "medium",
+			TraceID:     "def456",
+			Model:       "claude-opus-4-6",
 		},
 	}
 }
@@ -57,7 +57,7 @@ const sampleAnalysis = "The root cause of the refusal loop is an overly strict s
 // -----------------------------------------------------------------------
 
 func TestReportArtifact_MarkdownFormat(t *testing.T) {
-ra, _ := newTestReportArtifact(t, ReportFormatMarkdown)
+	ra, _ := newTestReportArtifact(t, ReportFormatMarkdown)
 
 	err := ra.Generate(sampleFailures(), sampleAnalysis)
 	if err != nil {
@@ -209,9 +209,9 @@ func TestReportArtifact_OutputDirCreation(t *testing.T) {
 	nested := filepath.Join(root, "deeply", "nested", "reports")
 
 	cfg := ReportConfig{
-		OutputDir:            nested,
-		Format:               ReportFormatMarkdown,
-		IncludeTraces:        true,
+		OutputDir:              nested,
+		Format:                 ReportFormatMarkdown,
+		IncludeTraces:          true,
 		IncludeRecommendations: true,
 	}
 	ra, _ := NewReportArtifact(cfg)
@@ -446,11 +446,11 @@ func TestReportArtifact_Cleanup(t *testing.T) {
 	// to simulate an "old" report. Instead, we test that GenerateWithMeta does not
 	// delete the current report even when old ones exist.
 	cfg := ReportConfig{
-		OutputDir:            root,
-		Format:               ReportFormatMarkdown,
-		IncludeTraces:        true,
+		OutputDir:              root,
+		Format:                 ReportFormatMarkdown,
+		IncludeTraces:          true,
 		IncludeRecommendations: true,
-		CleanupAfterDays:     1,
+		CleanupAfterDays:       1,
 	}
 	ra, err := NewReportArtifact(cfg)
 	if err != nil {
@@ -486,9 +486,9 @@ func TestReportArtifact_Cleanup(t *testing.T) {
 func TestReportArtifact_IncludeTraces_False(t *testing.T) {
 	root := t.TempDir()
 	cfg := ReportConfig{
-		OutputDir:            root,
-		Format:               ReportFormatMarkdown,
-		IncludeTraces:        false,
+		OutputDir:              root,
+		Format:                 ReportFormatMarkdown,
+		IncludeTraces:          false,
 		IncludeRecommendations: true,
 	}
 	ra, err := NewReportArtifact(cfg)
@@ -517,9 +517,9 @@ func TestReportArtifact_IncludeTraces_False(t *testing.T) {
 func TestReportArtifact_IncludeRecommendations_False(t *testing.T) {
 	root := t.TempDir()
 	cfg := ReportConfig{
-		OutputDir:            root,
-		Format:               ReportFormatMarkdown,
-		IncludeTraces:        true,
+		OutputDir:              root,
+		Format:                 ReportFormatMarkdown,
+		IncludeTraces:          true,
 		IncludeRecommendations: false,
 	}
 	ra, err := NewReportArtifact(cfg)
@@ -549,9 +549,9 @@ func TestReportArtifact_IncludeRecommendations_False(t *testing.T) {
 func TestReportArtifact_HTML_NoRecommendations(t *testing.T) {
 	root := t.TempDir()
 	cfg := ReportConfig{
-		OutputDir:            root,
-		Format:               ReportFormatHTML,
-		IncludeTraces:        true,
+		OutputDir:              root,
+		Format:                 ReportFormatHTML,
+		IncludeTraces:          true,
 		IncludeRecommendations: false,
 	}
 	ra, err := NewReportArtifact(cfg)
@@ -581,9 +581,9 @@ func TestReportArtifact_HTML_NoRecommendations(t *testing.T) {
 func TestReportArtifact_JSON_NoTraces(t *testing.T) {
 	root := t.TempDir()
 	cfg := ReportConfig{
-		OutputDir:            root,
-		Format:               ReportFormatJSON,
-		IncludeTraces:        false,
+		OutputDir:              root,
+		Format:                 ReportFormatJSON,
+		IncludeTraces:          false,
 		IncludeRecommendations: false,
 	}
 	ra, err := NewReportArtifact(cfg)

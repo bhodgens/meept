@@ -127,7 +127,7 @@ func (h *CompressionHandler) mccStatsDef() llm.ToolDefinition {
 			Name:        "mcc_stats",
 			Description: "Return compression statistics: entry count, total tokens saved, and retrieval count.",
 			Parameters: llm.FunctionParameters{
-				Type: "object",
+				Type:       "object",
 				Properties: map[string]llm.ParameterProperty{},
 			},
 		},

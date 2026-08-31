@@ -18,10 +18,10 @@ type ReloadFunc func(commitHash string) error
 // ConfigSyncer manages periodic config pulling from a git repo, merging,
 // and triggering reload hooks when configs change.
 type ConfigSyncer struct {
-	cfg   ConfigSyncConfig
+	cfg ConfigSyncConfig
 
-	nodeID   string
-	logger   *slog.Logger
+	nodeID string
+	logger *slog.Logger
 
 	// Git checkout operations
 	checkout *GitCheckout
@@ -41,10 +41,10 @@ type ConfigSyncer struct {
 	mu                sync.Mutex
 
 	// Background ticker control
-	ticker      *time.Ticker
-	tickerStop  chan struct{}
-	stopping    chan struct{}
-	stopped     sync.WaitGroup
+	ticker     *time.Ticker
+	tickerStop chan struct{}
+	stopping   chan struct{}
+	stopped    sync.WaitGroup
 }
 
 // NewConfigSyncer creates a ConfigSyncer.
@@ -69,13 +69,13 @@ func NewConfigSyncer(cfg ConfigSyncConfig, nodeID, baseDir string, logger *slog.
 	hooks := NewReloadRegistry()
 
 	return &ConfigSyncer{
-		cfg:       cfg,
-		nodeID:    nodeID,
-		logger:    logger,
-		checkout:  checkout,
-		merger:    merger,
-		hooks:     hooks,
-		baseDir:   baseDir,
+		cfg:        cfg,
+		nodeID:     nodeID,
+		logger:     logger,
+		checkout:   checkout,
+		merger:     merger,
+		hooks:      hooks,
+		baseDir:    baseDir,
 		tickerStop: make(chan struct{}),
 		stopping:   make(chan struct{}),
 	}, nil
@@ -196,13 +196,13 @@ func (s *ConfigSyncer) Status() SyncStatus {
 	defer s.mu.Unlock()
 
 	status := SyncStatus{
-		Enabled:         s.cfg.Enabled,
-		RepoURL:         s.cfg.RepoURL,
-		PullRate:        s.cfg.PullSchedule.String(),
-		NodeID:          s.nodeID,
-		LastCommit:      s.lastCommitHash,
+		Enabled:           s.cfg.Enabled,
+		RepoURL:           s.cfg.RepoURL,
+		PullRate:          s.cfg.PullSchedule.String(),
+		NodeID:            s.nodeID,
+		LastCommit:        s.lastCommitHash,
 		LastAppliedCommit: s.lastAppliedCommit,
-		Checkout:        s.checkout.Path(),
+		Checkout:          s.checkout.Path(),
 	}
 
 	if dirty, err := s.checkout.IsDirty(); err == nil {

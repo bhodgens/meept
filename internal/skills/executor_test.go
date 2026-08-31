@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/llm"
+	intsecurity "github.com/caimlas/meept/internal/security"
 )
 
 // Test helper to create a resolver with test providers config

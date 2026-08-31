@@ -46,11 +46,11 @@ func WithLogger(l *slog.Logger) TopicDetectorOption {
 //
 // The default categories are:
 //
-//	   "work"      – task, feature, bug, code, build, deploy, api
-//	   "code"      – debug, error, panic, compile, test
-//	   "food"      – lunch, dinner, food, eat, recipe, restaurant
-//	   "personal"  – weekend, vacation, hobby, shopping
-//	   "health"    – workout, gym, exercise, running, diet, sleep
+//	"work"      – task, feature, bug, code, build, deploy, api
+//	"code"      – debug, error, panic, compile, test
+//	"food"      – lunch, dinner, food, eat, recipe, restaurant
+//	"personal"  – weekend, vacation, hobby, shopping
+//	"health"    – workout, gym, exercise, running, diet, sleep
 //
 // The default fallback topic is "general".
 func NewTopicDetector(opts ...TopicDetectorOption) *TopicDetector {

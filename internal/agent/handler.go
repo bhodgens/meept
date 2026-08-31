@@ -85,6 +85,11 @@ type ChatHandler struct {
 	// retries them when the budget window clears.
 	budgetResumeWatcher *BudgetResumeWatcher
 
+	// quotaResumeWatcher parks turns interrupted by provider quota errors
+	// and retries them when the quota window lifts (quota-reset-resilience
+	// leaf 06 deferral). Nil disables quota deferral.
+	quotaResumeWatcher *QuotaResumeWatcher
+
 	// Synchronous dispatch mode: when true, async-dispatched tasks wait
 	// for completion instead of returning immediately (Issue 0022).
 	syncMode bool
@@ -166,6 +171,11 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	// Start the budget resume watcher if configured.
 	if h.budgetResumeWatcher != nil {
 		h.budgetResumeWatcher.Start(ctx)
+	}
+
+	// Start the quota resume watcher if configured.
+	if h.quotaResumeWatcher != nil {
+		h.quotaResumeWatcher.Start(ctx)
 	}
 
 	// Subscribe to chat requests
@@ -503,6 +513,13 @@ func (h *ChatHandler) Stop(ctx context.Context) error {
 	// Stop the budget resume watcher first.
 	if h.budgetResumeWatcher != nil {
 		h.budgetResumeWatcher.Stop()
+	}
+
+	// Stop the quota resume watcher (quota-reset-resilience leaf 06):
+	// prevents a goroutine leak on shutdown and stops parked-turn resumes
+	// from firing mid-shutdown. Nil-safe and idempotent.
+	if h.quotaResumeWatcher != nil {
+		h.quotaResumeWatcher.Stop()
 	}
 
 	if h.cancel != nil {
@@ -853,6 +870,31 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 					response.Error = ""
 				}
 			}
+			// Quota deferral (quota-reset-resilience leaf 06): park
+			// quota-interrupted turns for automatic retry at the reset time.
+		} else if quotaErr, ok := llm.AsQuotaResetError(err); ok {
+			unblockAt := quotaErr.ResetAt
+			if unblockAt.IsZero() && quotaErr.RetryAfter > 0 {
+				unblockAt = time.Now().Add(quotaErr.RetryAfter)
+			}
+			response.Error = quotaErr.UserMessage()
+			response.Reply = quotaErr.UserMessage()
+			if h.quotaResumeWatcher != nil && !unblockAt.IsZero() {
+				if h.quotaResumeWatcher.Park(QuotaParkedTurn{
+					SessionID:      persistID,
+					ConversationID: conversationID,
+					Message:        req.Message,
+					Parts:          req.Parts,
+					AgentID:        req.AgentID,
+					SourceClient:   req.SourceClient,
+					ProviderID:     quotaErr.ProviderID,
+					UnblockAt:      unblockAt,
+				}) {
+					response.Reply = quotaErr.UserMessage() +
+						"\n\nyour message is queued and will run automatically when the quota resets."
+					response.Error = ""
+				}
+			}
 		} else {
 			response.Error = err.Error()
 			response.Reply = reply // AgentLoop returns a user-friendly message even on error
@@ -1018,12 +1060,12 @@ func (h *ChatHandler) sendResponse(replyTo string, response ChatResponse) {
 // relayed to WS clients (it is RPC-only).
 func (h *ChatHandler) publishChatMessage(response ChatResponse, replyTo string) {
 	payload, err := json.Marshal(map[string]any{
-		"role":             "assistant",
-		"content":          response.Reply,
-		"session_id":       response.SessionID,
-		"conversation_id":  response.ConversationID,
-		"error":            response.Error,
-		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+		"role":            "assistant",
+		"content":         response.Reply,
+		"session_id":      response.SessionID,
+		"conversation_id": response.ConversationID,
+		"error":           response.Error,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
 		h.logger.Error("Failed to marshal chat_message payload", "error", err)
@@ -1473,6 +1515,92 @@ func (h *ChatHandler) SetBudget(budget *llm.Budget) {
 	}
 	h.budget = budget
 	h.budgetResumeWatcher = NewBudgetResumeWatcher(budget, h.logger, h.resumeParkedTurn)
+}
+
+// SetQuotaResumeConfig wires the quota deferral watcher
+// (quota-reset-resilience leaf 06) from llm.quota_retry settings. The
+// watcher's resume callback is bound internally (mirrors SetBudget).
+// maxWait <= 0 falls back to the llm package default. Nil-safe.
+func (h *ChatHandler) SetQuotaResumeConfig(maxWait time.Duration) {
+	if h == nil || h.quotaResumeWatcher != nil {
+		return // already wired; idempotent
+	}
+	h.quotaResumeWatcher = NewQuotaResumeWatcher(h.logger, h.resumeQuotaParkedTurn, maxWait)
+}
+
+// QuotaResumeWatcher exposes the configured watcher so the daemon can Start
+// it on its lifecycle. Returns nil when quota deferral is not wired.
+func (h *ChatHandler) QuotaResumeWatcher() *QuotaResumeWatcher {
+	if h == nil {
+		return nil
+	}
+	return h.quotaResumeWatcher
+}
+
+// resumeQuotaParkedTurn re-runs a turn that was parked due to a provider
+// quota wall. Called by the QuotaResumeWatcher once the quota window lifts.
+func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParkedTurn) {
+	h.logger.Info("resuming parked turn after quota reset",
+		"session_id", turn.SessionID,
+		"conversation_id", turn.ConversationID,
+		"provider", turn.ProviderID,
+		"parked_at", turn.ParkedAt,
+	)
+
+	loop := h.sessionLoop(turn.ConversationID)
+	reply, err := loop.RunOnceWithParts(ctx, turn.Message, turn.Parts, turn.ConversationID)
+	if err != nil {
+		// Still quota-blocked (reset drifted) or a new failure: park again
+		// if the error is quota and the window is knowable; otherwise push
+		// the error to the session.
+		var quotaErr *llm.QuotaResetError
+		if errors.As(err, &quotaErr) {
+			unblockAt := quotaErr.ResetAt
+			if unblockAt.IsZero() && quotaErr.RetryAfter > 0 {
+				unblockAt = time.Now().Add(quotaErr.RetryAfter)
+			}
+			if !unblockAt.IsZero() && h.quotaResumeWatcher.Park(QuotaParkedTurn{
+				SessionID:      turn.SessionID,
+				ConversationID: turn.ConversationID,
+				Message:        turn.Message,
+				Parts:          turn.Parts,
+				AgentID:        turn.AgentID,
+				SourceClient:   turn.SourceClient,
+				ProviderID:     quotaErr.ProviderID,
+				UnblockAt:      unblockAt,
+			}) {
+				h.logger.Info("re-parked turn after fresh quota error",
+					"session_id", turn.SessionID,
+					"provider", quotaErr.ProviderID,
+				)
+				return
+			}
+		}
+		h.logger.Error("resumed turn failed",
+			"session_id", turn.SessionID,
+			"error", err,
+		)
+		h.sendResponse("quota-resume-"+turn.SessionID, ChatResponse{
+			ConversationID: turn.SessionID,
+			Error:          "Auto-resume failed: " + err.Error(),
+		})
+		return
+	}
+
+	// Persist the exchange
+	h.persistExchange(turn.SessionID, turn.Message, turn.Parts, reply, turn.AgentID)
+
+	// Push the result back to the session via the bus.
+	h.sendResponse("quota-resume-"+turn.SessionID, ChatResponse{
+		ConversationID: turn.SessionID,
+		SessionID:      turn.SessionID, // for WS push routing
+		Reply:          reply,
+	})
+
+	h.logger.Info("resumed turn completed after quota reset",
+		"session_id", turn.SessionID,
+		"reply_length", len(reply),
+	)
 }
 
 // SetSyncMode enables or disables synchronous dispatch mode.

@@ -992,3 +992,64 @@ func TestHTTPStateEndpoint(t *testing.T) {
 		t.Error("marshaled snapshot should be non-empty")
 	}
 }
+
+func TestAgentStateMachine_QuotaWaitTransitions(t *testing.T) {
+	activeSources := []AgentState{
+		StateIdle,
+		StateThinking,
+		StateToolExecuting,
+		StateToolWaiting,
+		StateProcessingResult,
+		StateGeneratingResponse,
+	}
+	for _, from := range activeSources {
+		m2 := NewAgentStateMachine(slog.Default())
+		if from != StateIdle {
+			if err := m2.Transition(StateThinking, "setup", nil); err != nil {
+				t.Fatalf("setup to thinking failed: %v", err)
+			}
+			if from != StateThinking {
+				if err := m2.Transition(from, "setup", nil); err != nil {
+					t.Fatalf("setup transition to %v failed: %v", from, err)
+				}
+			}
+		}
+		if err := m2.Transition(StateQuotaWait, "quota_blocked", nil); err != nil {
+			t.Errorf("expected %v -> quota_wait allowed, got %v", from, err)
+		}
+	}
+
+	// StateQuotaWait exits to the documented set.
+	exits := []AgentState{StateThinking, StateIdle, StateBlocked, StateError, StateCancelled}
+	for _, to := range exits {
+		m2 := NewAgentStateMachine(slog.Default())
+		if err := m2.Transition(StateQuotaWait, "quota_blocked", nil); err != nil {
+			t.Fatalf("entering quota_wait failed: %v", err)
+		}
+		if err := m2.Transition(to, "quota_exit", nil); err != nil {
+			t.Errorf("expected quota_wait -> %v allowed, got %v", to, err)
+		}
+	}
+
+	// quota_wait -> Completed is NOT in the table (must route via Idle).
+	m2 := NewAgentStateMachine(slog.Default())
+	_ = m2.Transition(StateQuotaWait, "quota_blocked", nil)
+	if err := m2.Transition(StateCompleted, "should_reject", nil); err == nil {
+		t.Error("expected quota_wait -> completed to be rejected")
+	}
+}
+
+func TestAgentStateMachine_QuotaWaitFromBlocked(t *testing.T) {
+	m := NewAgentStateMachine(slog.Default())
+	// Setup: reach blocked from an active state (idle -> blocked is illegal).
+	if err := m.Transition(StateThinking, "start", nil); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	// Blocked -> quota_wait is legal (re-block during recovery window).
+	if err := m.Transition(StateBlocked, "approval_wait", nil); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	if err := m.Transition(StateQuotaWait, "quota_blocked", nil); err != nil {
+		t.Errorf("expected blocked -> quota_wait allowed, got %v", err)
+	}
+}

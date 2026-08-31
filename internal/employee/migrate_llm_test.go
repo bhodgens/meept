@@ -95,7 +95,7 @@ func TestSynthesizeConstitutionWithLLM_TableDriven(t *testing.T) {
 			name:           "unparseable JSON falls back to conservative",
 			llm:            &mockMigrator{response: "I cannot parse this"},
 			wantCalled:     1,
-			wantPurpose:    "", // conservative path
+			wantPurpose:    "",        // conservative path
 			wantAuthoredBy: "migrate", // pure conservative fallback
 			wantFallback:   true,
 		},
@@ -105,7 +105,7 @@ func TestSynthesizeConstitutionWithLLM_TableDriven(t *testing.T) {
 				err: errors.New("network timeout"),
 			},
 			wantCalled:     1,
-			wantPurpose:    "", // conservative path
+			wantPurpose:    "",        // conservative path
 			wantAuthoredBy: "migrate", // pure conservative fallback
 			wantFallback:   true,
 		},

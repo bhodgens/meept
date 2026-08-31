@@ -16,7 +16,7 @@ type fakePTYSession struct {
 	out chan []byte
 }
 
-func (f *fakePTYSession) Write([]byte) (int, error)         { return 0, nil }
+func (f *fakePTYSession) Write([]byte) (int, error) { return 0, nil }
 func (f *fakePTYSession) Read(context.Context, []byte) (int, error) {
 	return 0, nil
 }

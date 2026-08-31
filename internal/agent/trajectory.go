@@ -13,13 +13,13 @@ import (
 // the learning adapter; this richer type is consumed by ReflectionCollector
 // to render reflection/turn.md.
 type ReflectionTrajectory struct {
-	UserInput     string                   `json:"user_input"`
+	UserInput     string                     `json:"user_input"`
 	Steps         []ReflectionTrajectoryStep `json:"steps"`
-	FinalResponse string                   `json:"final_response"`
-	SessionID     string                   `json:"session_id"`
-	AgentID       string                   `json:"agent_id"`
-	Outcome       string                   `json:"outcome"` // success|partial|failure
-	Duration      time.Duration            `json:"duration"`
+	FinalResponse string                     `json:"final_response"`
+	SessionID     string                     `json:"session_id"`
+	AgentID       string                     `json:"agent_id"`
+	Outcome       string                     `json:"outcome"` // success|partial|failure
+	Duration      time.Duration              `json:"duration"`
 }
 
 // ReflectionTrajectoryStep describes one step in the reflection execution trace.

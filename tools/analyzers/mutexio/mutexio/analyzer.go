@@ -92,30 +92,30 @@ var Analyzer = &analysis.Analyzer{
 // conservative: it flags the call by method name regardless of receiver
 // type (except the mutex itself).
 var ioMethods = map[string]bool{
-	"WriteFile":      true,
-	"ReadFile":       true,
-	"MarshalIndent":  true,
-	"Unmarshal":      true,
-	"Do":             true,
-	"Post":           true,
-	"Get":            true,
-	"Chat":           true,
-	"ChatStream":     true,
+	"WriteFile":        true,
+	"ReadFile":         true,
+	"MarshalIndent":    true,
+	"Unmarshal":        true,
+	"Do":               true,
+	"Post":             true,
+	"Get":              true,
+	"Chat":             true,
+	"ChatStream":       true,
 	"ChatWithProgress": true,
-	"Call":           true,
-	"Publish":        true,
-	"Close":          true,
-	"Exec":           true,
-	"Query":          true,
-	"QueryRow":       true,
-	"Connect":        true,
-	"Dial":           true,
-	"Send":           true,
-	"Receive":        true,
-	"Persist":        true,
-	"PersistSync":    true,
-	"Save":           true,
-	"Load":           true,
+	"Call":             true,
+	"Publish":          true,
+	"Close":            true,
+	"Exec":             true,
+	"Query":            true,
+	"QueryRow":         true,
+	"Connect":          true,
+	"Dial":             true,
+	"Send":             true,
+	"Receive":          true,
+	"Persist":          true,
+	"PersistSync":      true,
+	"Save":             true,
+	"Load":             true,
 	// database/sql *Context-suffixed methods and transaction lifecycle.
 	// These perform real I/O against the database connection and must
 	// not be held under a mutex (CLAUDE.md "Mutex scope" rule) unless
@@ -184,12 +184,12 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 // callInfo is a single selector-method call recorded during linear scan.
 type callInfo struct {
-	call    *ast.CallExpr
-	method  string
-	recvKey string // canonical dotted path of the receiver (e.g. "s.mu", "p.mu")
-	isLock  bool
+	call     *ast.CallExpr
+	method   string
+	recvKey  string // canonical dotted path of the receiver (e.g. "s.mu", "p.mu")
+	isLock   bool
 	isUnlock bool
-	isDefer bool // true if call is inside a DeferStmt
+	isDefer  bool // true if call is inside a DeferStmt
 }
 
 // receiverKey extracts a canonical string key identifying the receiver

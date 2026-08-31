@@ -66,6 +66,7 @@ type DualStore struct {
 	localWriteMu  sync.Mutex
 	gossipWriteMu sync.Mutex
 }
+
 // runs their schemas, and returns a DualStore. The caller should call Close()
 // when done.
 func NewDualStore(dataDir string, nodeID string, logger *slog.Logger) (*DualStore, error) {
@@ -118,7 +119,6 @@ func NewDualStore(dataDir string, nodeID string, logger *slog.Logger) (*DualStor
 	logger.Debug("dual store initialized", "local", localPath, "gossip", gossipPath)
 	return ds, nil
 }
-
 
 // openWithRetries opens a SQLite database with a couple of retry attempts.
 // WAL and busy_timeout are set via DSN params so every pooled connection
@@ -458,8 +458,8 @@ func (s *DualStore) queryMemoriesGossip(ctx context.Context, query *MemoryQuery)
 }
 
 const (
-	memColsLocal   = "id, type, category, content, metadata_json, created_at, updated_at, agent_id, session_id, bot_id"
-	memColsGossip  = "id, type, category, content, metadata_json, created_at, updated_at, agent_id, session_id, bot_id, source_node"
+	memColsLocal  = "id, type, category, content, metadata_json, created_at, updated_at, agent_id, session_id, bot_id"
+	memColsGossip = "id, type, category, content, metadata_json, created_at, updated_at, agent_id, session_id, bot_id, source_node"
 )
 
 // scanMemoriesFromDB builds and runs a query against the given DB for the
@@ -661,28 +661,28 @@ func memorySourceNode(mem *Memory) string {
 // are meaningful for cross-node replication; presentation-layer concerns
 // (workers, designation, etc.) stay in the session package.
 type Session struct {
-	ID             string                 `json:"id"`
-	Name           string                 `json:"name"`
-	ConversationID string                 `json:"conversation_id"`
-	CreatedAt      time.Time              `json:"created_at"`
-	LastActivity   time.Time              `json:"last_activity"`
-	Description    string                 `json:"description,omitempty"`
-	ProjectID      string                 `json:"project_id,omitempty"`
-	ProjectPath    string                 `json:"project_path,omitempty"`
-	NoFence        bool                   `json:"no_fence,omitempty"`
-	Metadata       map[string]any         `json:"metadata,omitempty"`
-	SourceNode     string                 `json:"source_node,omitempty"` // only set for gossip-sourced sessions
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	ConversationID string         `json:"conversation_id"`
+	CreatedAt      time.Time      `json:"created_at"`
+	LastActivity   time.Time      `json:"last_activity"`
+	Description    string         `json:"description,omitempty"`
+	ProjectID      string         `json:"project_id,omitempty"`
+	ProjectPath    string         `json:"project_path,omitempty"`
+	NoFence        bool           `json:"no_fence,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	SourceNode     string         `json:"source_node,omitempty"` // only set for gossip-sourced sessions
 }
 
 // Turn is the dual-store's turn representation, mirroring the turns table.
 type Turn struct {
-	TurnID      string         `json:"turn_id"`
-	SessionID   string         `json:"session_id"`
-	Role        string         `json:"role"`
-	Content     string         `json:"content"`
-	Timestamp   time.Time      `json:"timestamp"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	SourceNode  string         `json:"source_node,omitempty"` // only set for gossip-sourced turns
+	TurnID     string         `json:"turn_id"`
+	SessionID  string         `json:"session_id"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
+	Timestamp  time.Time      `json:"timestamp"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	SourceNode string         `json:"source_node,omitempty"` // only set for gossip-sourced turns
 }
 
 // sessionMetadataJSON serializes a session's metadata for SQL storage.
@@ -1020,13 +1020,13 @@ const (
 // row is expected to include a trailing source_node column.
 func scanSessionRow(row *sql.Row, fromGossip bool) (*Session, error) {
 	var (
-		sess                Session
-		createdAt, lastAct  string
-		desc                sql.NullString
-		projID, projPath    sql.NullString
-		noFence             int
-		metaJSON            string
-		sourceNode          sql.NullString
+		sess               Session
+		createdAt, lastAct string
+		desc               sql.NullString
+		projID, projPath   sql.NullString
+		noFence            int
+		metaJSON           string
+		sourceNode         sql.NullString
 	)
 	var err error
 	if fromGossip {
@@ -1066,13 +1066,13 @@ func scanSessionRows(rows *sql.Rows, fromGossip bool) ([]*Session, error) {
 	var out []*Session
 	for rows.Next() {
 		var (
-			sess                Session
-			createdAt, lastAct  string
-			desc                sql.NullString
-			projID, projPath    sql.NullString
-			noFence             int
-			metaJSON            string
-			sourceNode          sql.NullString
+			sess               Session
+			createdAt, lastAct string
+			desc               sql.NullString
+			projID, projPath   sql.NullString
+			noFence            int
+			metaJSON           string
+			sourceNode         sql.NullString
 		)
 		var err error
 		if fromGossip {

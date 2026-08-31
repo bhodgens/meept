@@ -222,6 +222,33 @@ max_p95_latency_ms = 30000   # Maximum P95 latency
 fallback_enabled = true      # Enable automatic fallback
 ```
 
+## Quota Retry Configuration
+
+Behavior when a provider returns a quota/usage-limit error (429 with a
+quota shape, or 402). Meept blocks the affected credential, rotates to
+other alias candidates, and waits out the reset window instead of failing
+tasks. Retry-on-billing is the default posture: a mid-window top-up
+resumes queued work.
+
+```json5
+llm: {
+  quota_retry: {
+    enabled: true,              // master switch (default true)
+    max_wait: "24h",            // upper bound on any wait/block/defer
+    default_estimate: "1h",     // assumed reset horizon when unknown
+    defer_check_interval: "10m" // re-check cadence for deferred work
+  }
+}
+```
+
+Notes:
+- Defaults are 24h / 1h / 10m; non-positive values revert to defaults.
+- Reset times come only from structured body fields or rate-limit headers
+  (never guessed from message text). Unknown reset times use
+  `default_estimate`.
+- Quota blocks are in-memory; a daemon restart re-probes providers.
+- See `docs/workflows/quota-resilience.md` for the full behavior.
+
 ## Adaptive Timeout Configuration
 
 Dynamic timeout calculation based on request characteristics:

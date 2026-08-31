@@ -122,7 +122,7 @@ type AgentLifecyclePayload struct {
 
 // SessionLifecyclePayload is attached to bus events for session boundary tracking.
 type SessionLifecyclePayload struct {
-	Event        string  `json:"event"`          // "start" or "end"
+	Event        string  `json:"event"` // "start" or "end"
 	SessionID    string  `json:"session_id"`
 	AgentID      string  `json:"agent_id"`
 	StartTimeSec float64 `json:"start_time_sec,omitempty"`

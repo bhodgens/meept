@@ -33,8 +33,8 @@ func TestBackupConfig_Validate_Disabled(t *testing.T) {
 
 func TestBackupConfig_Validate_NoRepo(t *testing.T) {
 	cfg := BackupConfig{
-		Enabled:   true,
-		Schedule:  time.Hour,
+		Enabled:       true,
+		Schedule:      time.Hour,
 		RetentionDays: 7,
 	}
 	if err := cfg.Validate(); err != ErrBackupInvalid {
@@ -44,9 +44,9 @@ func TestBackupConfig_Validate_NoRepo(t *testing.T) {
 
 func TestBackupConfig_Validate_ZeroSchedule(t *testing.T) {
 	cfg := BackupConfig{
-		Enabled:    true,
-		RepoURL:    "https://example.com/backup.git",
-		Schedule:   0,
+		Enabled:       true,
+		RepoURL:       "https://example.com/backup.git",
+		Schedule:      0,
 		RetentionDays: 7,
 	}
 	if err := cfg.Validate(); err != ErrBackupInvalid {

@@ -1,5 +1,11 @@
 [
   {
+    "topic": "acp.list",
+    "handler": "h.handleList",
+    "file": "internal/rpc/acp.go",
+    "line": 38
+  },
+  {
     "topic": "agent.workers.list",
     "handler": "p.makeProxy(\"agent.workers.list\", \"agent.workers.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",

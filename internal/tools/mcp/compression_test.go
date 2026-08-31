@@ -10,8 +10,8 @@ import (
 
 // testCCRStore is a minimal in-memory CCR store for compression handler tests.
 type testCCRStore struct {
-	data   map[string]*compress.CCREntry
-	stats  compress.CCRStats
+	data  map[string]*compress.CCREntry
+	stats compress.CCRStats
 }
 
 func newTestCCRStore() *testCCRStore {
@@ -54,10 +54,10 @@ func (s *testCCRStore) Stats() compress.CCRStats {
 		comp += int64(e.CompressedTokens)
 	}
 	return compress.CCRStats{
-		EntryCount:          int64(len(s.data)),
-		TotalOriginalTokens: orig,
+		EntryCount:            int64(len(s.data)),
+		TotalOriginalTokens:   orig,
 		TotalCompressedTokens: comp,
-		TotalRetrievals:     s.stats.TotalRetrievals,
+		TotalRetrievals:       s.stats.TotalRetrievals,
 	}
 }
 
@@ -78,10 +78,10 @@ func (s *nilStore) Retrieve(ctx context.Context, hash string) (*compress.CCREntr
 func (s *nilStore) Search(ctx context.Context, h, q string) ([]compress.CCRSearchResult, error) {
 	return nil, nil
 }
-func (s *nilStore) Exists(ctx context.Context, h string) bool              { return false }
-func (s *nilStore) Delete(ctx context.Context, h string) (bool, error)    { return false, nil }
-func (s *nilStore) Stats() compress.CCRStats                              { return compress.CCRStats{} }
-func (s *nilStore) Close() error                                          { return nil }
+func (s *nilStore) Exists(ctx context.Context, h string) bool          { return false }
+func (s *nilStore) Delete(ctx context.Context, h string) (bool, error) { return false, nil }
+func (s *nilStore) Stats() compress.CCRStats                           { return compress.CCRStats{} }
+func (s *nilStore) Close() error                                       { return nil }
 
 func TestNewCompressionHandler_Disabled(t *testing.T) {
 	cfg := DefaultCompressionConfig()
@@ -116,9 +116,9 @@ func TestCompressionHandler_Tools(t *testing.T) {
 	}
 
 	wantNames := map[string]bool{
-		"mcc_compress":  false,
-		"mcc_retrieve":  false,
-		"mcc_stats":     false,
+		"mcc_compress": false,
+		"mcc_retrieve": false,
+		"mcc_stats":    false,
 	}
 	for _, tool := range tools {
 		wantNames[tool.Function.Name] = true
@@ -295,9 +295,9 @@ See <<ccr:abcdef123456abcdef123456>>
 
 func TestEstimateTokens(t *testing.T) {
 	tests := []struct {
-		input  string
-		min    int
-		max    int
+		input string
+		min   int
+		max   int
 	}{
 		{"", 0, 0},
 		{"hello", 0, 5},

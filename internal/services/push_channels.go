@@ -16,6 +16,7 @@ import (
 // Daemon's EventEmitter has:
 //   - Publish(*http.NotificationEvent)
 //   - PublishNotification(sessionID, agentID string, notifType NotificationType, title, message string)
+//
 // This local interface mirrors those signatures without importing daemon/http.
 type notifier interface {
 	Publish(event interface{})
@@ -24,14 +25,14 @@ type notifier interface {
 
 // PushMessage carries the data routed to channel subscribers.
 type PushMessage struct {
-	SessionID  string                 `json:"session_id"`
-	Source     string                 `json:"source"`
-	ChannelID  string                 `json:"channel_id,omitempty"`
-	Type       PushType               `json:"type"`
-	Priority   PushPriority           `json:"priority"`
-	Content    string                 `json:"content"`
-	Timestamp  time.Time              `json:"timestamp"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	SessionID string                 `json:"session_id"`
+	Source    string                 `json:"source"`
+	ChannelID string                 `json:"channel_id,omitempty"`
+	Type      PushType               `json:"type"`
+	Priority  PushPriority           `json:"priority"`
+	Content   string                 `json:"content"`
+	Timestamp time.Time              `json:"timestamp"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // PushChannel defines the interface that all push delivery channels must
@@ -113,7 +114,6 @@ func (r *ChannelRegistry) Remove(id string) {
 	}
 	r.channels = kept
 }
-
 
 // --- Channel Implementations ---
 
@@ -280,12 +280,12 @@ func (h *HTTPPushChannel) CanReceive(ctx context.Context, sessionID string, msg 
 func (h *HTTPPushChannel) Push(ctx context.Context, msg *PushMessage) error {
 	// Build a notification payload matching http.NotificationEvent shape.
 	evt := map[string]interface{}{
-		"id":        generatePushNotificationID(),
-		"timestamp": msg.Timestamp.UTC().Format(time.RFC3339),
-		"title":     "Meept",
-		"message":   msg.Content,
+		"id":         generatePushNotificationID(),
+		"timestamp":  msg.Timestamp.UTC().Format(time.RFC3339),
+		"title":      "Meept",
+		"message":    msg.Content,
 		"session_id": msg.SessionID,
-		"type":      "info",
+		"type":       "info",
 	}
 	h.notifier.Publish(evt)
 	return nil

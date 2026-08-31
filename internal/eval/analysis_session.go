@@ -17,9 +17,9 @@ type SessionState int
 
 const (
 	SessionActive    SessionState = iota // Session is accepting new turns
-	SessionPaused                         // Session is temporarily paused
-	SessionCompleted                      // Session is closed and read-only
-	SessionExported                       // Session has been exported
+	SessionPaused                        // Session is temporarily paused
+	SessionCompleted                     // Session is closed and read-only
+	SessionExported                      // Session has been exported
 )
 
 func (s SessionState) String() string {
@@ -50,28 +50,28 @@ type ConversationTurn struct {
 
 // AnalysisSession manages a multi-turn conversation about trace analysis results.
 type AnalysisSession struct {
-	SessionID    string                  `json:"session_id"`
-	CreatedAt    time.Time               `json:"created_at"`
-	UpdatedAt    time.Time               `json:"updated_at"`
-	TraceIDs     []string                `json:"trace_ids"`
-	FailureModes []agent.FailureMode     `json:"failure_modes,omitempty"`
-	Turns        []ConversationTurn      `json:"turns"`
-	State        SessionState            `json:"state"`
-	Metadata     map[string]string       `json:"metadata,omitempty"`
+	SessionID    string              `json:"session_id"`
+	CreatedAt    time.Time           `json:"created_at"`
+	UpdatedAt    time.Time           `json:"updated_at"`
+	TraceIDs     []string            `json:"trace_ids"`
+	FailureModes []agent.FailureMode `json:"failure_modes,omitempty"`
+	Turns        []ConversationTurn  `json:"turns"`
+	State        SessionState        `json:"state"`
+	Metadata     map[string]string   `json:"metadata,omitempty"`
 }
 
 // NewSession creates a new analysis session for the given traces and failure modes.
 func NewSession(traceIDs []string, failureModes []agent.FailureMode) *AnalysisSession {
 	now := time.Now()
 	return &AnalysisSession{
-		SessionID:      id.Generate("sess-"),
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		TraceIDs:       traceIDs,
-		FailureModes:   failureModes,
-		Turns:          make([]ConversationTurn, 0),
-		State:          SessionActive,
-		Metadata:       make(map[string]string),
+		SessionID:    id.Generate("sess-"),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		TraceIDs:     traceIDs,
+		FailureModes: failureModes,
+		Turns:        make([]ConversationTurn, 0),
+		State:        SessionActive,
+		Metadata:     make(map[string]string),
 	}
 }
 
@@ -137,14 +137,14 @@ func (s *AnalysisSession) Resume() {
 // ExportJSON serializes the full session as JSON for audit trail purposes.
 func (s *AnalysisSession) ExportJSON() ([]byte, error) {
 	exp := struct {
-		SessionID    string                  `json:"session_id"`
-		CreatedAt    time.Time               `json:"created_at"`
-		UpdatedAt    time.Time               `json:"updated_at"`
-		TraceIDs     []string                `json:"trace_ids"`
-		FailureModes []agent.FailureMode     `json:"failure_modes,omitempty"`
-		Turns        []ConversationTurn      `json:"turns"`
-		State        string                  `json:"state"`
-		Metadata     map[string]string       `json:"metadata,omitempty"`
+		SessionID    string              `json:"session_id"`
+		CreatedAt    time.Time           `json:"created_at"`
+		UpdatedAt    time.Time           `json:"updated_at"`
+		TraceIDs     []string            `json:"trace_ids"`
+		FailureModes []agent.FailureMode `json:"failure_modes,omitempty"`
+		Turns        []ConversationTurn  `json:"turns"`
+		State        string              `json:"state"`
+		Metadata     map[string]string   `json:"metadata,omitempty"`
 	}{
 		SessionID:    s.SessionID,
 		CreatedAt:    s.CreatedAt,

@@ -13,7 +13,7 @@ type DesignationHistoryEntry struct {
 	FromStatus DesignationStatus `json:"from_status"` // empty if first designation
 	ToStatus   DesignationStatus `json:"to_status"`
 	Reason     string            `json:"reason,omitempty"`
-	Timestamp time.Time          `json:"timestamp"`
+	Timestamp  time.Time         `json:"timestamp"`
 }
 
 // DesignationHistoryStore persists designation transitions and supports listing

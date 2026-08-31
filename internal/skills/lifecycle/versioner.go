@@ -304,4 +304,3 @@ func computeTreeSHA(path, shaHex string, size int) string {
 	fmt.Fprintf(h, "%s\x00%s\x00%d\n", filepath.Base(path), shaHex, size)
 	return hex.EncodeToString(h.Sum(nil))
 }
-

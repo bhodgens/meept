@@ -9,13 +9,13 @@ import (
 
 func sampleInstructionData() InstructionConfirmationData {
 	return InstructionConfirmationData{
-		RiskLevel:     RiskHigh,
-		Action:        "shell",
-		ActionDetail:  "rm -rf /tmp/build",
-		Trigger:       "cron: 0 * * * *",
-		Scope:         "project",
-		Priority:      "high",
-		RawInput:      "every hour delete temp files",
+		RiskLevel:    RiskHigh,
+		Action:       "shell",
+		ActionDetail: "rm -rf /tmp/build",
+		Trigger:      "cron: 0 * * * *",
+		Scope:        "project",
+		Priority:     "high",
+		RawInput:     "every hour delete temp files",
 	}
 }
 

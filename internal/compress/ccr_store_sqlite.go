@@ -18,10 +18,10 @@ var _ CCRStore = (*sqliteStore)(nil)
 
 // sqliteStore is a SQLite-backed CCR store.
 type sqliteStore struct {
-	db       *sql.DB
-	mu       sync.RWMutex
-	config   CCRStoreConfig
-	closed   bool
+	db     *sql.DB
+	mu     sync.RWMutex
+	config CCRStoreConfig
+	closed bool
 }
 
 // ccrSchema is the SQLite schema for the CCR store.

@@ -2,10 +2,10 @@
 // field access follows ownership annotations.
 //
 // It checks:
-// 1. Fields annotated with "// guarded by <mutex>" are only accessed while
-//    holding that mutex (basic intraprocedural check).
-// 2. Fields annotated with "// immutable" are only written in constructors.
-// 3. Structs with shared mutable state should have annotations.
+//  1. Fields annotated with "// guarded by <mutex>" are only accessed while
+//     holding that mutex (basic intraprocedural check).
+//  2. Fields annotated with "// immutable" are only written in constructors.
+//  3. Structs with shared mutable state should have annotations.
 //
 // This enforces the concurrency patterns from docs/concepts/concurrency.md.
 package fieldguard
@@ -48,7 +48,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 	// Build a map of guarded fields per struct
 	guardedFields := make(map[string]map[string]string) // typeName -> fieldName -> mutexName
-	immutableFields := make(map[string]map[string]bool)  // typeName -> fieldName -> true
+	immutableFields := make(map[string]map[string]bool) // typeName -> fieldName -> true
 
 	// First pass: collect struct type annotations
 	typeFilter := []ast.Node{
@@ -208,7 +208,7 @@ func checkGuardedFieldAccess(pass *analysis.Pass, fn *ast.FuncDecl, statements [
 	for _, stmt := range statements {
 		// First, process lock/unlock operations to update heldLocks
 		// This must happen BEFORE checking field access in the same statement
-		
+
 		// Check for lock operations (e.g., g.mu.Lock())
 		if exprStmt, ok := stmt.(*ast.ExprStmt); ok {
 			if call, ok := exprStmt.X.(*ast.CallExpr); ok {
@@ -231,7 +231,7 @@ func checkGuardedFieldAccess(pass *analysis.Pass, fn *ast.FuncDecl, statements [
 				continue // Skip field access check for defer unlock statements
 			}
 		}
-		
+
 		// Check for defer lock (rare but possible)
 		if deferStmt, ok := stmt.(*ast.DeferStmt); ok {
 			if mutex := isLockCall(deferStmt.Call); mutex != "" {

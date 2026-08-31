@@ -62,35 +62,35 @@ type ServiceRegistry struct {
 // Config holds dependencies for service instantiation.
 // All fields are optional; services whose dependencies are nil will not be created.
 type Config struct {
-	Bus              *bus.MessageBus
-	AgentRegistry    *agent.AgentRegistry
-	Queue            queue.Queue
-	MemoryManager    *memory.Manager
-	TaskRegistry     *task.Registry
-	SessionStore     session.Store
-	WorkerPool       *worker.Pool
-	SkillRegistry    *skills.Registry
-	SkillExecutor    *skills.Executor
-	TemplateRegistry *templates.Registry
-	SelfImprove      *selfimprove.Controller
-	TokenCache       *llm.TokenCacheCoordinator
-	SecurityChecker  *security.PermissionChecker
-	Scheduler        *scheduler.Scheduler
-	CalendarClient   *calendar.Client
-	DaemonController DaemonController
-	WorkingDir       string
-	PidFile          string
-	StateDir         string
-	BinPath          string
-	ProjectManager   *project.ProjectManager
-	PlanManager      *plan.PlanManager
-	PlanStore        plan.PlanStore
-	RuntimeManager   *llm.RuntimeManager
-	ChatTimeout      time.Duration
-	UploadsDir       string
-	UploadsMaxMB     int
-	UploadsTypes     []string
-	EmployeeManager  EmployeeManager
+	Bus                 *bus.MessageBus
+	AgentRegistry       *agent.AgentRegistry
+	Queue               queue.Queue
+	MemoryManager       *memory.Manager
+	TaskRegistry        *task.Registry
+	SessionStore        session.Store
+	WorkerPool          *worker.Pool
+	SkillRegistry       *skills.Registry
+	SkillExecutor       *skills.Executor
+	TemplateRegistry    *templates.Registry
+	SelfImprove         *selfimprove.Controller
+	TokenCache          *llm.TokenCacheCoordinator
+	SecurityChecker     *security.PermissionChecker
+	Scheduler           *scheduler.Scheduler
+	CalendarClient      *calendar.Client
+	DaemonController    DaemonController
+	WorkingDir          string
+	PidFile             string
+	StateDir            string
+	BinPath             string
+	ProjectManager      *project.ProjectManager
+	PlanManager         *plan.PlanManager
+	PlanStore           plan.PlanStore
+	RuntimeManager      *llm.RuntimeManager
+	ChatTimeout         time.Duration
+	UploadsDir          string
+	UploadsMaxMB        int
+	UploadsTypes        []string
+	EmployeeManager     EmployeeManager
 	ReflectionQueuePath string
 }
 

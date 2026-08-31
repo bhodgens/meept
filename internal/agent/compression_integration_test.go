@@ -63,8 +63,8 @@ func (s *memCCRStore) Stats() compress.CCRStats {
 		totalComp += int64(e.CompressedTokens)
 	}
 	return compress.CCRStats{
-		EntryCount:          int64(len(s.data)),
-		TotalOriginalTokens: totalOrig,
+		EntryCount:            int64(len(s.data)),
+		TotalOriginalTokens:   totalOrig,
 		TotalCompressedTokens: totalComp,
 	}
 }
@@ -103,7 +103,7 @@ func largeTextOutput() string {
 	var sb strings.Builder
 	for i := 0; i < 100; i++ {
 		sb.WriteString("This is line ")
-		sb.WriteString(string(rune('a'+i%26)))
+		sb.WriteString(string(rune('a' + i%26)))
 		sb.WriteString(" of the output, padding for compression testing.\n")
 	}
 	return sb.String()
@@ -438,7 +438,7 @@ func TestAgentLoop_WithCompressionPipeline(t *testing.T) {
 func TestAgentLoop_CompressionSystemPrompt(t *testing.T) {
 	loop := NewAgentLoop("test-session-3", "/tmp",
 		WithAgentConfig(AgentConfig{
-			Constitution: "Test constitution for compression prompt test",
+			Constitution:         "Test constitution for compression prompt test",
 			ProactiveCompression: true,
 		}),
 	)
@@ -488,8 +488,8 @@ func TestAgentLoop_CompressionSystemPrompt(t *testing.T) {
 
 func TestAgentLoop_ClosedPipelineReturnsOriginal(t *testing.T) {
 	pipeline := compress.NewPipelineWithConfig(newMemCCRStore(), compress.PipelineConfig{
-		MinTokensToCompress:  50,
-		EnableCCR:            true,
+		MinTokensToCompress: 50,
+		EnableCCR:           true,
 	})
 
 	// Close the pipeline

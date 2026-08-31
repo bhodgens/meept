@@ -133,6 +133,5 @@ func (t *LSPFormatTool) Execute(ctx context.Context, args map[string]any) (any, 
 	}, nil
 }
 
-
 // Ensure tool implements the Tool interface
 var _ tools.Tool = (*LSPFormatTool)(nil)

@@ -571,6 +571,11 @@ type AgentLoop struct {
 	// loop_messages.go.
 	messageDrainer MessageDrainer
 
+	// quotaTracker owns per-provider-key quota episode tracking for this
+	// loop. When set, quota-wait errors enter the episode tracker and emit
+	// agent.quota_wait bus events. Nil (default) disables quota tracking.
+	quotaTracker *QuotaEpisodeTracker
+
 	// Upload store for resolving image file references (vision pre-flight)
 	uploadStore llm.UploadStore
 
@@ -683,6 +688,11 @@ type AgentLoop struct {
 	// verification auto-trigger (Tree 01 Leaf 03). Nil when verification
 	// is disabled for this agent.
 	verificationTracker *VerificationTracker
+
+	// toolBreaker vetoes retry storms: repeated identical tool failures
+	// (harness-eval leaf 05). Initialized unconditionally; Observe is a
+	// no-op cost when everything succeeds.
+	toolBreaker *ToolRetryBreaker
 
 	// rosterGate is the per-agent quality gate from AGENT.md `gate:`
 	// (leaf 04-coder-gates). Evaluated after each turn that ran a mutating
@@ -1291,6 +1301,17 @@ func WithNotificationPublisher(publisher NotificationPublisher) LoopOption {
 	}
 }
 
+// WithQuotaTracker sets the quota episode tracker for this agent loop.
+// When set, quota-wait errors will be tracked and escalation events will
+// be published to the bus.
+func WithQuotaTracker(tracker *QuotaEpisodeTracker) LoopOption {
+	return func(l *AgentLoop) {
+		if tracker != nil {
+			l.quotaTracker = tracker
+		}
+	}
+}
+
 // WithMCPServerLister sets the MCP server lister for system prompt context.
 func WithMCPServerLister(lister func() []MCPServerInfo) LoopOption {
 	return func(l *AgentLoop) {
@@ -1668,6 +1689,37 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 		})
 	}
 
+	// Wire quota tracker to publish events to the bus.
+	if loop.quotaTracker != nil && loop.bus != nil {
+		busRef := loop.bus
+		loop.quotaTracker.SetPublisher(func(topic string, msg any) {
+			if qe, ok := msg.(*QuotaEvent); ok {
+				if m, err := models.NewBusMessage(models.MessageTypeEvent, loop.agentID, qe); err == nil {
+					m.Topic = "agent.quota_wait"
+					busRef.Publish("agent.quota_wait", m)
+				}
+			}
+		})
+	}
+
+	// Wire quota tracker to drive the agent state machine. Tracker
+	// transitions (quota_wait on episode entry, blocked on 24h escalation,
+	// idle on quota_cleared) flow through SafeTransition so an invalid
+	// transition (e.g. a racing terminal state) is logged, never panics.
+	// Guarded against a nil stateMachine — although NewAgentLoop always
+	// initializes one, per-session clone paths may not have run this yet.
+	if loop.quotaTracker != nil {
+		loop.quotaTracker.SetStateSetter(func(agentID string, state AgentState, reason string) {
+			if loop.stateMachine == nil {
+				return
+			}
+			loop.stateMachine.SafeTransition(state, reason, map[string]any{
+				"agent_id": agentID,
+				"source":   "quota_tracker",
+			})
+		})
+	}
+
 	// Initialize detectors
 	loop.cycleDetector = newCycleDetector(loop.detectionConfig, loop.logger)
 	loop.convergenceDetector = newConvergenceDetector(loop.detectionConfig, loop.logger)
@@ -1712,7 +1764,6 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	// The threshold defaults to 3 (matching daemon AutoTriggerThreshold).
 	if loop.spec != nil && loop.spec.Verification.Enabled && loop.spec.Verification.AutoTrigger {
 		loop.verificationTracker = NewVerificationTracker(3)
-
 		// Register the auto-trigger hook if a hook registry is available.
 		if loop.hookRegistry != nil {
 			trigger := NewVerificationAutoTrigger(loop.verificationTracker, loop.spec.Verification)
@@ -1727,6 +1778,11 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	if loop.spec != nil && loop.spec.Gate != nil {
 		loop.rosterGate = NewRosterGate(*loop.spec.Gate)
 	}
+
+	// Tool-retry circuit breaker (harness-eval leaf 05): vetoes re-invoking
+	// a tool call that has failed identically five consecutive times.
+	// Unconditional: the breaker is inert until Observe sees a failure.
+	loop.toolBreaker = NewToolRetryBreaker()
 
 	// Wrap LLM with ContextFirewall for context budget enforcement
 	if loop.llm != nil {
@@ -4228,6 +4284,13 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 			if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
 				l.resolver.RecordAliasSuccess(l.modelRef)
 			}
+			// A successful call means the provider's quota window recovered:
+			// end any active quota episode (idempotent no-op when none).
+			// Without this, an episode that outlived the outage would keep
+			// escalating and never emit quota_cleared.
+			if l.quotaTracker != nil && servedModel != nil {
+				l.quotaTracker.Clear(l.agentID, servedModel.ProviderID)
+			}
 			return response, nil
 		}
 
@@ -4301,6 +4364,40 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
+		}
+
+		// Handle quota errors: track the episode, mark the Resolver block,
+		// and return WITHOUT RecordAliasFailure — quota is not an alias
+		// health failure (quota-reset-resilience master contract 4). The
+		// quota waiter (resolver_direct.go) already applied wait+retry, so
+		// by here the quota window has passed without recovery. The caller
+		// (ChatHandler) parks the turn for auto-resume at the reset time.
+		var quotaErr *llm.QuotaResetError
+		if errors.As(err, &quotaErr) {
+			unblockAt := quotaErr.ResetAt
+			if unblockAt.IsZero() && quotaErr.RetryAfter > 0 {
+				unblockAt = time.Now().Add(quotaErr.RetryAfter)
+			}
+			if l.quotaTracker != nil {
+				l.quotaTracker.Enter(l.agentID, quotaErr.ProviderID, quotaErr.ModelID, unblockAt, l.currentTaskID)
+			}
+			// Mark the alias's block so rotation skips the quota'd candidate.
+			if l.resolver != nil && l.modelRef != "" && l.resolver.HasAlias(l.modelRef) {
+				wait := quotaErr.RetryAfter
+				if wait <= 0 && !unblockAt.IsZero() {
+					wait = time.Until(unblockAt)
+				}
+				if wait > 0 {
+					l.resolver.BlockQuotaEntry(l.modelRef, quotaErr.ProviderID, quotaErr.ModelID, unblockAt)
+					l.resolver.BlockQuotaCredential(l.modelRef, llm.QuotaCredentialKey(quotaErr.ProviderID, servedModel), unblockAt)
+				}
+			}
+			l.logger.Warn("Quota exceeded, episode tracked",
+				"provider", quotaErr.ProviderID,
+				"model", quotaErr.ModelID,
+				"retry_after", quotaErr.RetryAfter,
+			)
+			return nil, err
 		}
 
 		// Non-rate-limit error - return immediately
@@ -5293,6 +5390,30 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 		}
 	}
 
+	// Tool-retry breaker (harness-eval leaf 05): observe every outcome and
+	// inject a system note when a call is vetoed after repeated identical
+	// failures. The model sees the note; execution already happened, so the
+	// veto steers the next iteration instead of erasing results.
+	if l.toolBreaker != nil {
+		for i, tc := range toolCalls {
+			r := results[i]
+			if r == nil {
+				continue
+			}
+			var args map[string]any
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+				// Best-effort parse: veto observation proceeds with nil
+				// args when the tool arguments are not valid JSON.
+				args = nil
+			}
+			if veto := l.toolBreaker.Observe(tc.Function.Name, args, !r.Success); veto {
+				r.Error = strings.TrimSpace(r.Error + " [tool-retry breaker: this call has failed identically " +
+					"5+ consecutive times and is vetoed; change the arguments or abandon this approach]")
+				l.logger.Warn("tool retry breaker vetoed call", "tool", tc.Function.Name)
+			}
+		}
+	}
+
 	return results
 }
 
@@ -5830,6 +5951,9 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		// --- Cache + progress ---
 		WithResultCache(l.cache),
 		WithProgressEnabled(l.progressEnabled),
+
+		// --- Quota episode tracking (shared singleton) ---
+		WithQuotaTracker(l.quotaTracker),
 
 		// --- Skills ---
 		WithCapabilityIndex(l.capabilityIndex),

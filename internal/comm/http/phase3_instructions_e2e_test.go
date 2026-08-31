@@ -221,12 +221,12 @@ func TestPhase3_E2E_UpdateDelete(t *testing.T) {
 
 	// Step 1: Create an instruction via the store directly (simpler than HTTP create)
 	instr := &preferences.UserInstruction{
-		ID:      "e2e-update-delete",
-		Name:    "e2e-update-delete",
-		Trigger: "intent:code",
-		Action:  "shell_execute",
+		ID:         "e2e-update-delete",
+		Name:       "e2e-update-delete",
+		Trigger:    "intent:code",
+		Action:     "shell_execute",
 		ActionArgs: map[string]any{"command": "go test ./..."},
-		Enabled: true,
+		Enabled:    true,
 	}
 	if err := store.Save(instr, store.DefaultTier()); err != nil {
 		t.Fatalf("Save() error: %v", err)

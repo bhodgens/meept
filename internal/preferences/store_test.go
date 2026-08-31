@@ -54,13 +54,13 @@ func TestStore_SaveGetActive(t *testing.T) {
 	store := NewUserInstructionStore([]string{tmpDir})
 
 	instr := &UserInstruction{
-		ID:      "test1",
-		Name:    "Test Instruction",
-		Trigger: "cron:0 9 * * *",
-		Action:  "shell_execute",
-		Enabled: true,
-		Scope:   "project",
-		Priority: "normal",
+		ID:        "test1",
+		Name:      "Test Instruction",
+		Trigger:   "cron:0 9 * * *",
+		Action:    "shell_execute",
+		Enabled:   true,
+		Scope:     "project",
+		Priority:  "normal",
 		CreatedAt: time.Now(),
 	}
 
@@ -88,8 +88,8 @@ func TestStore_Delete(t *testing.T) {
 	store := NewUserInstructionStore([]string{tmpDir})
 
 	instr := &UserInstruction{
-		ID: "to_delete",
-		Name: "Delete Me",
+		ID:      "to_delete",
+		Name:    "Delete Me",
 		Enabled: true,
 	}
 	store.Save(instr, tmpDir)

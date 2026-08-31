@@ -10,8 +10,8 @@ type ResearchTrajectory struct {
 	ID          string           `json:"id"`
 	SessionID   string           `json:"session_id"`
 	Domain      string           `json:"domain"` // code, debugging, api_research
-	Intent      string           `json:"intent"`  // Original user intent
-	Query       string           `json:"query"`   // Research query
+	Intent      string           `json:"intent"` // Original user intent
+	Query       string           `json:"query"`  // Research query
 	ToolCalls   []ToolCallRecord `json:"tool_calls"`
 	Synthesis   string           `json:"synthesis"` // Agent's final answer
 	TaskOutcome TaskOutcome      `json:"task_outcome"`

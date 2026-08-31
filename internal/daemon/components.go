@@ -298,6 +298,11 @@ type Components struct {
 	// to PostTurnAuditor.SetBusPublisher.
 	empBusPub employee.BusPublisher
 
+	// msgBus is the daemon message bus, stored for wiring paths that run
+	// in Start (where the NewComponents parameter is out of scope) —
+	// currently the leaf-11 speak router for GoalLoops.
+	msgBus *bus.MessageBus
+
 	// OAuth token management (shared across calendar, LLM providers, etc.)
 	TokenStore     *authpkg.TokenStore
 	RefreshManager *authpkg.RefreshManager
@@ -366,6 +371,11 @@ type Components struct {
 
 	// Push notification service (bot-to-user push over bus + channels)
 	PushService *services.PushService
+
+	// QuotaNotifier subscribes to agent.quota_wait bus events and pushes
+	// deduplicated quota notifications (quota-reset-resilience). Nil when
+	// the bus is unavailable.
+	QuotaNotifier *services.QuotaNotifier
 
 	// Bot context for push notifications (bot-to-user delivery)
 	BotContext *services.BotContextImpl
@@ -467,6 +477,15 @@ func newRefusingBackend(reason error) runtime.ExecutionBackend {
 // The provided ctx controls the lifecycle of background goroutines spawned by
 // Components; when ctx is cancelled they will exit.
 func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logger, modelsCfg ...*config.ModelsConfig) (*Components, error) {
+	// Fail fast on an empty DataDir BEFORE any component derives sqlite
+	// paths from it: filepath.Join("", "x.db") yields a CWD-relative path,
+	// which litters whatever directory the process runs from with *.db
+	// artifacts (AGENTS.md: daemon CWD is never the user's data location).
+	// Callers must pass a resolved data dir (config defaults to ~/.meept).
+	if cfg.Daemon.DataDir == "" {
+		return nil, fmt.Errorf("daemon.data_dir must be set: components derive all database paths from it")
+	}
+
 	c := &Components{
 		Config: cfg,
 		Logger: logger,
@@ -610,6 +629,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Warn("Failed to load providers config for resolver", "error", err)
 		} else {
 			c.LLMResolver = llm.NewResolver(providersCfg, logger.With("component", "resolver"))
+			// Quota-aware rotation (quota-reset-resilience): gate candidate
+			// skipping on llm.quota_retry.
+			quotaCfg := llm.ConfigFromSchema(&cfg.LLM.QuotaRetry)
+			c.LLMResolver.SetQuotaConfig(&quotaCfg)
 			logger.Debug("LLM resolver initialized")
 		}
 
@@ -759,6 +782,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				pmCfg.TokenResolver = c.TokenStore
 			}
 			pm := llm.NewProviderManager(pmCfg)
+			// Quota persistence (quota-reset-resilience): block quota'd
+			// credentials across requests, capped by llm.quota_retry.max_wait.
+			pm.SetQuotaMaxWait(cfg.LLM.QuotaRetry.MaxWait)
 
 			// Dynamically register OAuth-backed LLM providers that have
 			// stored tokens but are not already in the static config.
@@ -878,6 +904,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			dataDir = filepath.Join(cfg.Daemon.DataDir, "learning")
 		}
 		c.LearningPipeline = selfimprove.NewLearningPipeline(lpCfg, c.LLMClient, dataDir, logger.With("component", "learning"))
+		// C7 gate (harness-eval leaf 08): patterns promote only from
+		// judged-pass trajectories. Judgments live beside the eval run
+		// records (~/.meept/eval/<id>.judgment.json); unknown or failed
+		// judgments drop the pattern (unjudged rows are not lessons).
+		c.LearningPipeline.SetJudgmentLoader(newEvalJudgmentLoader())
 		if err := c.LearningPipeline.Initialize(context.Background()); err != nil {
 			logger.Error("Failed to initialize learning pipeline", "error", err)
 			c.LearningPipeline = nil
@@ -1069,6 +1100,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		agent.WithMessageBus(msgBus),
 		agent.WithLoopLogger(logger),
 	}
+
+	// Quota episode tracker (quota-reset-resilience): shared singleton that
+	// tracks provider quota episodes, fires 12h/20h/24h escalation events on
+	// its background reaper, and drives the agent state machine
+	// running -> quota_wait -> blocked -> idle. Shared with per-session
+	// clones via AgentLoop.ConfigSnapshot and the agent registry below.
+	quotaTracker := agent.NewQuotaEpisodeTracker(logger.With("component", "quota-tracker"))
+	agentOpts = append(agentOpts, agent.WithQuotaTracker(quotaTracker))
 	// Use provider manager if available, otherwise use client directly
 	if c.LLMProvider != nil {
 		agentOpts = append(agentOpts, agent.WithLLMChatter(c.LLMProvider))
@@ -1314,6 +1353,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.PushService = services.NewPushServiceWithChannels(msgBus, pushRegistry,
 		logger.With("component", "push-service"))
 
+	// Quota notifier (quota-reset-resilience): subscribes to agent.quota_wait
+	// and auto-starts its event pump — no explicit Start call needed. Nil
+	// push service is guarded internally (events still consumed, delivery
+	// skipped), so this is safe even before channels register.
+	c.QuotaNotifier = services.NewQuotaNotifier(msgBus, c.PushService,
+		logger.With("component", "quota-notifier"))
+
 	// Wire BotContext for bot-to-user push notifications (Task 8, dormant wiring closure)
 	// BotContextImpl implements bot.BotContext interface, exposing PushNotification
 	c.BotContext = services.NewBotContext(c.PushService,
@@ -1444,6 +1490,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Wire security orchestrator for retrieval-time re-sanitization and boundary
 		// marker wrapping (Phase 5 memory retrieval protection).
 		c.MemoryHandler = memory.NewHandlerWithSecurity(c.MemoryManager, msgBus, c.SecurityOrchestrator, logger.With("component", "memory-handler"))
+
+		// Open the typed user-memory FactStore (harness-eval leaf 12, C6).
+		// Lives beside the other daemon sqlite databases. Failure is
+		// non-fatal: the store stays nil and every consumer is nil-safe
+		// (tool returns an honest empty result, extraction skips).
+		if factStore, factErr := c.MemoryManager.OpenFactStore(filepath.Join(cfg.Daemon.DataDir, "memory_facts.db")); factErr != nil {
+			logger.Error("Failed to open memory fact store", "error", factErr)
+		} else {
+			logger.Info("Memory fact store opened", "path", filepath.Join(cfg.Daemon.DataDir, "memory_facts.db"))
+			// Session-end fact extraction (C6): extract typed facts from
+			// the turn's dialogue after the session closes. Errors are
+			// logged, never fatal — extraction is advisory.
+			wireMemoryFactExtraction(c.AgentLoop, factStore, logger)
+		}
 
 		// Wire prefetch callback to agent loop (Hermes pattern)
 		// This enables background prefetching of memory context at turn completion
@@ -2077,6 +2137,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			HallucinationDetector: c.HallucinationDetector,
 			ArtifactManager:       c.ArtifactManager,
 			TTSRManager:           c.TTSRManager,
+			QuotaTracker:          quotaTracker,
 			Queues:                cfg.Agent.Queues,
 			Guards:                cfg.Agent.Guards,
 			DB:                    getQueueDB(c),
@@ -2223,6 +2284,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if budgetTracker != nil {
 			c.ChatHandler.SetBudget(budgetTracker)
 		}
+
+		// Quota deferral (quota-reset-resilience leaf 06): park quota-blocked
+		// turns and auto-resume at the reset time. The watcher starts with
+		// the handler (ChatHandler.Start).
+		c.ChatHandler.SetQuotaResumeConfig(cfg.LLM.QuotaRetry.MaxWait)
 
 		logger.Info("ChatHandler initialized with dispatcher")
 
@@ -2478,6 +2544,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if budgetTracker != nil {
 			c.ChatHandler.SetBudget(budgetTracker)
 		}
+
+		// Quota deferral (quota-reset-resilience leaf 06): park quota-blocked
+		// turns and auto-resume at the reset time.
+		c.ChatHandler.SetQuotaResumeConfig(cfg.LLM.QuotaRetry.MaxWait)
 	}
 
 	// Initialize RepoMap generator for context enrichment
@@ -2867,6 +2937,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 			c.EmployeeManager.SetBusPublisher(empBusPub)
 			c.empBusPub = empBusPub
+			// Store the bus for Start-time wiring (leaf-11 speak router).
+			c.msgBus = msgBus
 
 			// E4: subscribe to employee.critical_finding bus events.
 			// PostTurnAuditor publishes these when it detects a critical
@@ -3629,10 +3701,8 @@ func (c *Components) Start(ctx context.Context) error {
 
 			auditInterval := 6 * time.Hour
 			if c.Config != nil {
-				if s := c.Config.Employees.Audit.PeriodicInterval; s != "" {
-					if d, err := time.ParseDuration(s); err == nil && d > 0 {
-						auditInterval = d
-					}
+				if d := c.Config.Employees.Audit.PeriodicInterval; d > 0 {
+					auditInterval = d
 				}
 			}
 			if err := c.EmployeeManager.SchedulePeriodicAudit(ctx, schedAdapter, auditInterval); err != nil {
@@ -3641,10 +3711,8 @@ func (c *Components) Start(ctx context.Context) error {
 
 			approvalTimeout := 7 * 24 * time.Hour
 			if c.Config != nil {
-				if s := c.Config.Employees.Audit.ApprovalTimeout; s != "" {
-					if d, err := time.ParseDuration(s); err == nil && d > 0 {
-						approvalTimeout = d
-					}
+				if d := c.Config.Employees.Audit.ApprovalTimeout; d > 0 {
+					approvalTimeout = d
 				}
 			}
 			if err := c.EmployeeManager.ScheduleApprovalTimeoutSweeper(ctx, schedAdapter, approvalTimeout); err != nil {
@@ -3729,6 +3797,18 @@ func (c *Components) Start(ctx context.Context) error {
 				}
 			}
 
+			// Speak router (harness-eval leaf 11): routes detached goal-
+			// round final text to employee.notify over the bus. Built once
+			// and shared by every GoalLoop; nil when no bus is available.
+			var speakRouter *agent.SpeakRouter
+			if c.msgBus != nil {
+				speakRouter = agent.NewSpeakRouter(agent.BusSpeakPublisher(c.msgBus, "employee-goal-loop"))
+				// Bridge employee.notify into the push service so
+				// Telegram/TUI/menubar channels receive detached-run
+				// notifications (the WS bridge covers browsers).
+				wireSpeakPushBridge(c.msgBus, c.PushService, c.Logger.With("component", "speak-push-bridge"))
+			}
+
 			// Build the PlanCreator adapter from the existing plan
 			// manager wiring. When no plan manager is available, tier-2+
 			// employees will error at Decide time (documented behaviour).
@@ -3804,6 +3884,13 @@ func (c *Components) Start(ctx context.Context) error {
 					}
 					if reflector != nil {
 						loop = loop.WithReflector(reflector)
+					}
+					// Harness-eval leaf 11: goal rounds are session-
+					// detached, so their final text delivers as a
+					// SpeakNotify on employee.notify (never a chat
+					// bubble). One shared router; nil-safe when no bus.
+					if speakRouter != nil {
+						loop = loop.WithSpeakRouter(speakRouter)
 					}
 					if postTurn != nil {
 						loop = loop.WithAuditor(postTurn)
@@ -4079,6 +4166,14 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.ConfigSyncer != nil {
 		c.ConfigSyncer.Stop()
 		c.Logger.Info("Config syncer stopped")
+	}
+
+	// Stop quota notifier pump + tracker reaper (quota-reset-resilience).
+	// Both are optional for daemon lifetime (goroutines exit with the
+	// process) but stop cleanly here for test/shutdown determinism.
+	if c.QuotaNotifier != nil {
+		c.QuotaNotifier.Stop()
+		c.Logger.Info("Quota notifier stopped")
 	}
 
 	// Stop sync handler and manager first (depends on queue events)
@@ -5042,6 +5137,9 @@ func registerBuiltinTools(
 	if memoryMgr != nil && memoryMgr.IsInitialized() {
 		registry.Register(builtin.NewMemoryStoreTool(memoryMgr))
 		registry.Register(builtin.NewMemorySearchTool(memoryMgr))
+		// memory_fact_search (harness-eval leaf 12, contract C6): typed
+		// user-memory fact retrieval over the FactStore.
+		registry.Register(builtin.NewMemoryFactSearchTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetContextTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetVersionTool(memoryMgr))
 		registry.Register(builtin.NewMemoryVoteTool(memoryMgr))
@@ -6318,7 +6416,7 @@ func (c *Components) initializeCalendar(cfg *config.Config, msgBus *bus.MessageB
 
 	// Start reminder watcher if enabled
 	if cfg.Calendar.ReminderEnabled {
-		checkInterval, _ := time.ParseDuration(cfg.Calendar.ReminderCheckInterval)
+		checkInterval := cfg.Calendar.ReminderCheckInterval
 		if checkInterval <= 0 {
 			checkInterval = 5 * time.Minute
 		}

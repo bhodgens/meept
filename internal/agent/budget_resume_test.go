@@ -54,8 +54,8 @@ func TestBudgetResumeWatcher_ParkAndDrain(t *testing.T) {
 	}
 
 	var (
-		mu       sync.Mutex
-		resumed  []ParkedTurn
+		mu      sync.Mutex
+		resumed []ParkedTurn
 	)
 	resumeCh := make(chan ParkedTurn, 1)
 

@@ -72,9 +72,9 @@ func TestRetryRecovery_NewDefaults(t *testing.T) {
 
 func TestRetryRecovery_CustomConfig(t *testing.T) {
 	r := NewRetryRecovery(RecoveryConfig{
-		MaxRetries:        1,
-		RetryDelay:        50 * time.Millisecond,
-		RecoverableErrors: []string{"transient"},
+		MaxRetries:           1,
+		RetryDelay:           50 * time.Millisecond,
+		RecoverableErrors:    []string{"transient"},
 		NonRecoverableErrors: []string{"always_fail"},
 	})
 
@@ -145,8 +145,8 @@ func TestShouldRetry_502ReturnsTrue(t *testing.T) {
 func TestShouldRetry_NonRecoverablePatternPriority(t *testing.T) {
 	r := NewRetryRecovery(RecoveryConfig{
 		// "timeout" is in both lists but non-recovarable should win.
-		RecoverableErrors:      []string{"timeout"},
-		NonRecoverableErrors:   []string{"timeout"},
+		RecoverableErrors:    []string{"timeout"},
+		NonRecoverableErrors: []string{"timeout"},
 	})
 	// "timeout" appears in error message
 	if r.ShouldRetry(fmt.Errorf("operation timed out with timeout")) {
@@ -156,7 +156,7 @@ func TestShouldRetry_NonRecoverablePatternPriority(t *testing.T) {
 
 func TestShouldRetry_CaseInsensitive(t *testing.T) {
 	r := NewRetryRecovery(RecoveryConfig{
-		RecoverableErrors:   []string{"RATELIMIT"},
+		RecoverableErrors:    []string{"RATELIMIT"},
 		NonRecoverableErrors: nil,
 	})
 	if !r.ShouldRetry(fmt.Errorf("rate limit exceeded")) {
@@ -292,7 +292,7 @@ func TestRetryRecovery_NonRecoverableSkip(t *testing.T) {
 
 func TestRetryRecovery_ExponentialBackoff(t *testing.T) {
 	r := NewRetryRecovery(RecoveryConfig{
-		MaxRetries: 10, // high; we check delay progression
+		MaxRetries: 10,                    // high; we check delay progression
 		RetryDelay: 10 * time.Millisecond, // fast for tests
 	})
 

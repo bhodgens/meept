@@ -12,10 +12,10 @@ import (
 // mockBusPublisher captures PublishEmployeePaused and PublishCriticalFinding
 // and PublishConstitutionValidationError calls for testing.
 type mockBusPublisher struct {
-	mu            sync.Mutex
-	events        []EmployeePausedEvent
-	criticalEvts  []CriticalFindingEvent
-	constErrors   []ConstitutionValidationErrorEvent
+	mu           sync.Mutex
+	events       []EmployeePausedEvent
+	criticalEvts []CriticalFindingEvent
+	constErrors  []ConstitutionValidationErrorEvent
 }
 
 func (m *mockBusPublisher) PublishEmployeePaused(employeeID, reason, source string) {

@@ -95,10 +95,66 @@ type ProviderManager struct {
 	// device-code authentication.
 	tokenResolver TokenResolver
 
+	// quotaBlocks maps QuotaCredentialKey(providerID, modelConfig) to the
+	// time the credential's quota window lifts. Blocked credentials are
+	// skipped by getOrderedProviders and re-probed by runHealthCheck only
+	// after expiry. Guarded by mu (collect-under-lock, act-after-unlock).
+	quotaBlocks map[string]time.Time
+	// quotaMaxWait caps how far into the future a quota block is persisted.
+	// Zero means DefaultQuotaMaxWait.
+	quotaMaxWait time.Duration
+
 	// Circuit breaker state
 	lastHealthCheck time.Time
 	stopChan        chan struct{}
 	initialized     bool
+}
+
+// SetQuotaMaxWait caps how far into the future a provider credential stays
+// quota-blocked after a QuotaResetError (block horizon =
+// min(ResetAt, now+d)). Zero or negative restores DefaultQuotaMaxWait.
+// No-op on a nil receiver to honor the typed-nil setter rule (AGENTS.md).
+func (pm *ProviderManager) SetQuotaMaxWait(d time.Duration) {
+	if pm == nil {
+		return
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.quotaMaxWait = d
+}
+
+// effectiveQuotaMaxWait returns the configured block-horizon cap, falling
+// back to DefaultQuotaMaxWait. Callers must hold at least pm.mu.RLock.
+func (pm *ProviderManager) effectiveQuotaMaxWait() time.Duration {
+	if pm.quotaMaxWait > 0 {
+		return pm.quotaMaxWait
+	}
+	return DefaultQuotaMaxWait
+}
+
+// blockQuotaCredential persists a quota block for the credential serving
+// entry until min(ResetAt, now+maxWait). A zero ResetAt blocks for maxWait.
+// Callers must hold pm.mu (write lock).
+func (pm *ProviderManager) blockQuotaCredential(entry *ProviderEntry, resetAt time.Time) {
+	if pm.quotaBlocks == nil {
+		pm.quotaBlocks = make(map[string]time.Time)
+	}
+	key := QuotaCredentialKey(entry.Config.ProviderID, entry.Config)
+	maxWait := pm.effectiveQuotaMaxWait()
+	until := time.Now().Add(maxWait)
+	if !resetAt.IsZero() && resetAt.Before(until) {
+		until = resetAt
+	}
+	pm.quotaBlocks[key] = until
+}
+
+// clearQuotaCredential drops the quota block for the credential serving
+// entry, if any. Callers must hold pm.mu (write lock).
+func (pm *ProviderManager) clearQuotaCredential(entry *ProviderEntry) {
+	if pm.quotaBlocks == nil {
+		return
+	}
+	delete(pm.quotaBlocks, QuotaCredentialKey(entry.Config.ProviderID, entry.Config))
 }
 
 // isAnthropic checks whether the given ModelConfig points to an Anthropic endpoint.
@@ -261,8 +317,30 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 			}
 
 			// Error-type-aware failover: differentiate error types for
-			// smarter routing decisions.
+			// smarter routing decisions. Quota is checked BEFORE rate
+			// limit: QuotaResetError may wrap a 429 APIError, and
+			// IsRateLimitError matches any 429 APIError, so the quota
+			// (more specific, per-credential) classification must win.
 			switch {
+			case IsQuotaResetError(err):
+				// Quota errors are per-credential; do NOT call recordFailure
+				// (the alias health stays Healthy — quota is orthogonal).
+				// Persist the block so subsequent Chat calls skip this
+				// credential until min(ResetAt, now+quotaMaxWait).
+				resetAt := time.Time{}
+				if qe, ok := AsQuotaResetError(err); ok {
+					resetAt = qe.ResetAt
+				}
+				pm.mu.Lock()
+				pm.blockQuotaCredential(entry, resetAt)
+				pm.mu.Unlock()
+				pm.logger.Warn("Quota limit hit, blocking credential and rotating to next provider",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+					"latency", latency,
+				)
+				continue
+
 			case IsRateLimitError(err):
 				// Rate limit is provider-specific — rotate immediately.
 				// Don't record as a health failure since rate limits are transient.
@@ -299,7 +377,6 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 				return nil, err
 
 			default:
-				// Server errors (5xx), network errors, etc. — rotate normally.
 				pm.recordFailure(entry, err, latency)
 				pm.logger.Warn("Provider call failed, trying next",
 					"provider", entry.Config.ProviderID,
@@ -312,6 +389,12 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 
 		// Success
 		pm.recordSuccess(entry, resp, latency)
+
+		// A served request proves the credential's quota window has lifted:
+		// clear any persisted quota block for it.
+		pm.mu.Lock()
+		pm.clearQuotaCredential(entry)
+		pm.mu.Unlock()
 
 		// S3-8 FIX: guard resp dereference in debug log.
 		if resp != nil {
@@ -406,21 +489,33 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 				return nil, ctx.Err()
 			}
 
+			// Quota is checked BEFORE rate limit: QuotaResetError may wrap
+			// a 429 APIError which IsRateLimitError also matches; the more
+			// specific per-credential classification must win.
 			switch {
-			case IsRateLimitError(err):
+			case IsQuotaResetError(err):
+				// Quota errors are per-credential; do NOT call recordFailure.
+				// Persist the block so subsequent calls skip this credential
+				// until min(ResetAt, now+quotaMaxWait).
+				resetAt := time.Time{}
+				if qe, ok := AsQuotaResetError(err); ok {
+					resetAt = qe.ResetAt
+				}
+				pm.mu.Lock()
+				pm.blockQuotaCredential(entry, resetAt)
+				pm.mu.Unlock()
+				pm.logger.Warn("Quota limit hit on provider, blocking credential and trying next",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+				)
 				if progress != nil {
-					progress(ProgressStageDone, fmt.Sprintf("Provider %s rate limited, rotating (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
+					progress(ProgressStageDone, fmt.Sprintf("Provider %s quota limited, trying next", entry.Config.ProviderID))
 				}
 				continue
 
-			case isAuthError(err):
-				pm.recordFailure(entry, err, latency)
-				pm.mu.Lock()
-				entry.Health.Status = ProviderStatusUnhealthy
-				entry.Health.LastError = err.Error()
-				pm.mu.Unlock()
+			case IsRateLimitError(err):
 				if progress != nil {
-					progress(ProgressStageDone, fmt.Sprintf("Provider %s auth error, marked unhealthy (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
+					progress(ProgressStageDone, fmt.Sprintf("Provider %s rate limited, rotating (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
 				}
 				continue
 
@@ -443,6 +538,13 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 			progress(ProgressStageStreaming, fmt.Sprintf("Provider %s responded (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
 		}
 		pm.recordSuccess(entry, resp, latency)
+
+		// A served request proves the credential's quota window has lifted:
+		// clear any persisted quota block for it.
+		pm.mu.Lock()
+		pm.clearQuotaCredential(entry)
+		pm.mu.Unlock()
+
 		return resp, nil
 	}
 
@@ -452,11 +554,26 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 	return nil, fmt.Errorf("no providers available")
 }
 
-// getOrderedProviders returns providers sorted by preference.
+// getOrderedProviders returns providers sorted by preference, with
+// quota-blocked credentials (whose block has not expired) filtered out.
+// Callers must hold at least pm.mu.RLock.
 func (pm *ProviderManager) getOrderedProviders() []*ProviderEntry {
+	now := time.Now()
+
+	// Filter blocked credentials first so sorting below operates on the
+	// eligible set only.
+	var eligible []*ProviderEntry
+	for _, e := range pm.providers {
+		key := QuotaCredentialKey(e.Config.ProviderID, e.Config)
+		if blockedUntil, ok := pm.quotaBlocks[key]; ok && now.Before(blockedUntil) {
+			continue
+		}
+		eligible = append(eligible, e)
+	}
+
 	// Copy the slice for sorting
-	ordered := make([]*ProviderEntry, len(pm.providers))
-	copy(ordered, pm.providers)
+	ordered := make([]*ProviderEntry, len(eligible))
+	copy(ordered, eligible)
 
 	if pm.config.CostOptimized {
 		// Sort by cost (cheapest first), then by priority
@@ -868,6 +985,12 @@ func (pm *ProviderManager) StartHealthChecks(ctx context.Context) {
 // runHealthCheck performs a health check on unhealthy providers by sending
 // a minimal chat request ("test", 1 token) to elicit a response.
 //
+// Quota-aware probing: a still-blocked credential is skipped (its block has
+// not expired); an EXPIRED block is probed — a probe that returns a
+// QuotaResetError re-blocks the credential instead of marking the provider
+// Unhealthy, and a successful probe clears the block along with the usual
+// recovery transition.
+//
 // LLM-13: Health checks make live API calls and consume real budget
 // (each check counts against the provider's token quota and cost tracking).
 // Operators should set HealthCheckInterval high enough (default 5m) to
@@ -885,12 +1008,23 @@ func (pm *ProviderManager) runHealthCheck(ctx context.Context) {
 
 	// Health check: try a minimal request on unhealthy providers only
 	for _, entry := range snapshots {
+		now := time.Now()
+
+		// Collect probe state under lock, then release before I/O
+		// (collect-under-lock / act-after-unlock, AGENTS.md mutex scope).
 		pm.mu.RLock()
 		status := entry.Health.Status
+		blockedUntil, blocked := pm.quotaBlocks[QuotaCredentialKey(entry.Config.ProviderID, entry.Config)]
 		pm.mu.RUnlock()
+
 		if status != ProviderStatusUnhealthy {
 			continue
 		}
+		// Still blocked and the block has not expired: do not probe.
+		if blocked && now.Before(blockedUntil) {
+			continue
+		}
+
 		// Try a minimal request
 		checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 
@@ -910,7 +1044,24 @@ func (pm *ProviderManager) runHealthCheck(ctx context.Context) {
 			pm.mu.Lock()
 			entry.Health.Status = ProviderStatusDegraded
 			entry.Health.ConsecutiveFails = 0
+			// A successful probe proves the quota window lifted.
+			pm.clearQuotaCredential(entry)
 			pm.mu.Unlock()
+			continue
+		}
+
+		if qe, ok := AsQuotaResetError(err); ok {
+			// Still in the quota window: re-block rather than penalize
+			// health. The entry stays Unhealthy and gets re-probed after
+			// the (recomputed) block expires.
+			pm.mu.Lock()
+			pm.blockQuotaCredential(entry, qe.ResetAt)
+			pm.mu.Unlock()
+			pm.logger.Info("Health probe hit quota window; re-blocking credential",
+				"provider", entry.Config.ProviderID,
+				"code", qe.Code,
+			)
+			continue
 		}
 
 		_ = latency // Could use for latency tracking

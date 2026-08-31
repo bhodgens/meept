@@ -32,11 +32,11 @@ var orderedTiers = []string{"none", "low", "medium", "high", "xhigh", "max"}
 // the agent registry for per-agent reasoning settings. Persistence uses the
 // atomic-write pattern (write .tmp then rename).
 type ReasoningHandler struct {
-	registry    *agent.AgentRegistry
-	cfg         *config.Config
-	cfgPath     string // path to meept.json5 (for budgets persistence)
-	modelsCfg   *config.ModelsConfig
-	modelsPath  string // path to models.json5 (for model default persistence)
+	registry   *agent.AgentRegistry
+	cfg        *config.Config
+	cfgPath    string // path to meept.json5 (for budgets persistence)
+	modelsCfg  *config.ModelsConfig
+	modelsPath string // path to models.json5 (for model default persistence)
 }
 
 // NewReasoningHandler creates a new handler.
@@ -97,10 +97,10 @@ func (h *ReasoningHandler) handleListTiers(_ context.Context, _ json.RawMessage)
 
 // reasoningGetResult is the response shape for reasoning.get.
 type reasoningGetResult struct {
-	AgentID            string                  `json:"agent_id"`
-	HasReasoning       bool                    `json:"has_reasoning"`
-	Config             *llm.AgentReasoningConfig `json:"config,omitempty"`
-	EffectiveEffort    string                  `json:"effective_effort"`
+	AgentID         string                    `json:"agent_id"`
+	HasReasoning    bool                      `json:"has_reasoning"`
+	Config          *llm.AgentReasoningConfig `json:"config,omitempty"`
+	EffectiveEffort string                    `json:"effective_effort"`
 }
 
 // handleGet returns the per-agent reasoning config for a single agent.
@@ -153,15 +153,15 @@ func (h *ReasoningHandler) handleGet(_ context.Context, params json.RawMessage) 
 // handleSet updates an agent's reasoning config in-memory and (when the
 // agent is instantiated) propagates it to the running loop.
 //
-// Params: {
-//   "agent_id": string,
-//   "effort": string (optional),
-//   "allow_self_modulation": bool (optional),
-//   "min_effort": string (optional),
-//   "max_effort": string (optional),
-//   "budget_tokens": int (optional),
-//   "force": bool (optional)
-// }
+//	Params: {
+//	  "agent_id": string,
+//	  "effort": string (optional),
+//	  "allow_self_modulation": bool (optional),
+//	  "min_effort": string (optional),
+//	  "max_effort": string (optional),
+//	  "budget_tokens": int (optional),
+//	  "force": bool (optional)
+//	}
 //
 // Persistence to AGENT.md is handled by the existing config_service SaveAgent
 // path. This RPC only updates the in-memory spec; callers wanting disk
@@ -174,13 +174,13 @@ func (h *ReasoningHandler) handleSet(_ context.Context, params json.RawMessage) 
 		return nil, fmt.Errorf("agent registry not available")
 	}
 	var req struct {
-		AgentID            string `json:"agent_id"`
-		Effort             string `json:"effort"`
-		AllowSelfModulation *bool `json:"allow_self_modulation,omitempty"`
-		MinEffort          string `json:"min_effort"`
-		MaxEffort          string `json:"max_effort"`
-		BudgetTokens       *int   `json:"budget_tokens,omitempty"`
-		Force              *bool  `json:"force,omitempty"`
+		AgentID             string `json:"agent_id"`
+		Effort              string `json:"effort"`
+		AllowSelfModulation *bool  `json:"allow_self_modulation,omitempty"`
+		MinEffort           string `json:"min_effort"`
+		MaxEffort           string `json:"max_effort"`
+		BudgetTokens        *int   `json:"budget_tokens,omitempty"`
+		Force               *bool  `json:"force,omitempty"`
 	}
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
@@ -350,7 +350,7 @@ func (h *ReasoningHandler) handleGetModelDefault(_ context.Context, params json.
 	// llm.ModelConfig does). Return null until the schema migration is
 	// complete.
 	return map[string]any{
-		"model_id":           req.ModelID,
+		"model_id":          req.ModelID,
 		"default_reasoning": nil,
 	}, nil
 }
@@ -422,13 +422,13 @@ func splitModelRef(ref string) (providerID, modelID string) {
 // currently handling that session. Translates the HTTP session-scoped request
 // into a SetReasoningOverride call on the target AgentLoop.
 //
-// Params: {
-//   "session_id": string,         // conversation ID (required)
-//   "agent_id":   string,         // target agent (optional; see note)
-//   "effort":         string,     // optional tier
-//   "budget_tokens":  int,        // optional token budget override
-//   "force":          bool,       // optional capability bypass
-// }
+//	Params: {
+//	  "session_id": string,         // conversation ID (required)
+//	  "agent_id":   string,         // target agent (optional; see note)
+//	  "effort":         string,     // optional tier
+//	  "budget_tokens":  int,        // optional token budget override
+//	  "force":          bool,       // optional capability bypass
+//	}
 //
 // Resolution of agent_id → loop:
 //  1. When `agent_id` is supplied, use registry.Get(agent_id) directly.

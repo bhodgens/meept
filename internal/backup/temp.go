@@ -102,8 +102,8 @@ func (m *TempManager) checkTempSize() error {
 	total, err := dirSize(m.tempDir)
 	if err != nil {
 		return &SyncError{
-			Op:    "temp_size",
-			Err:   err,
+			Op:      "temp_size",
+			Err:     err,
 			Message: "failed to calculate temp directory size",
 		}
 	}

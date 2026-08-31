@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/caimlas/meept/internal/llm"
-	"github.com/caimlas/meept/internal/tui"
 	"github.com/caimlas/meept/internal/transport"
+	"github.com/caimlas/meept/internal/tui"
 	"github.com/caimlas/meept/pkg/id"
 )
 

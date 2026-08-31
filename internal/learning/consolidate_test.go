@@ -43,8 +43,8 @@ func TestConsolidateRoutesCorrectly(t *testing.T) {
 			TaskOutcome: TaskOutcome{
 				Success: true,
 			},
-			ToolCalls:  []ToolCallRecord{{Tool: "file_read", Used: true}},
-			Timestamp:  time.Now().UTC(),
+			ToolCalls: []ToolCallRecord{{Tool: "file_read", Used: true}},
+			Timestamp: time.Now().UTC(),
 		},
 		{
 			ID:        "t2",

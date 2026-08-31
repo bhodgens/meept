@@ -258,14 +258,14 @@ func (ut *UsageTrackerImpl) RecordOutcome(skillName string, outcome Outcome, ses
 // recorded usage — this is NOT an error.
 func (ut *UsageTrackerImpl) GetStats(skillName string) (*UsageStats, error) {
 	var row struct {
-		SkillName      string    `db:"skill_name"`
-		InjectCount    int       `db:"inject_count"`
-		PositiveCount  int       `db:"positive_count"`
-		NegativeCount  int       `db:"negative_count"`
-		NeutralCount   int       `db:"neutral_count"`
+		SkillName      string     `db:"skill_name"`
+		InjectCount    int        `db:"inject_count"`
+		PositiveCount  int        `db:"positive_count"`
+		NegativeCount  int        `db:"negative_count"`
+		NeutralCount   int        `db:"neutral_count"`
 		LastInjectedAt *time.Time `db:"last_injected_at"`
 		LastUsedAt     *time.Time `db:"last_used_at"`
-		Effectiveness  float64   `db:"effectiveness"`
+		Effectiveness  float64    `db:"effectiveness"`
 	}
 
 	err := ut.db.Get(&row, `SELECT * FROM skill_usage WHERE skill_name = ?`, skillName)
@@ -296,14 +296,14 @@ func (ut *UsageTrackerImpl) GetStats(skillName string) (*UsageStats, error) {
 // GetAllStats returns usage statistics for all skills, keyed by skill name.
 func (ut *UsageTrackerImpl) GetAllStats() (map[string]*UsageStats, error) {
 	var rows []struct {
-		SkillName      string    `db:"skill_name"`
-		InjectCount    int       `db:"inject_count"`
-		PositiveCount  int       `db:"positive_count"`
-		NegativeCount  int       `db:"negative_count"`
-		NeutralCount   int       `db:"neutral_count"`
+		SkillName      string     `db:"skill_name"`
+		InjectCount    int        `db:"inject_count"`
+		PositiveCount  int        `db:"positive_count"`
+		NegativeCount  int        `db:"negative_count"`
+		NeutralCount   int        `db:"neutral_count"`
 		LastInjectedAt *time.Time `db:"last_injected_at"`
 		LastUsedAt     *time.Time `db:"last_used_at"`
-		Effectiveness  float64   `db:"effectiveness"`
+		Effectiveness  float64    `db:"effectiveness"`
 	}
 
 	if err := ut.db.Select(&rows, `SELECT * FROM skill_usage`); err != nil {
@@ -337,14 +337,14 @@ func (ut *UsageTrackerImpl) GetAllStats() (map[string]*UsageStats, error) {
 // first.
 func (ut *UsageTrackerImpl) GetLowPerformers(threshold float64, minInjections int) ([]*UsageStats, error) {
 	var rows []struct {
-		SkillName      string    `db:"skill_name"`
-		InjectCount    int       `db:"inject_count"`
-		PositiveCount  int       `db:"positive_count"`
-		NegativeCount  int       `db:"negative_count"`
-		NeutralCount   int       `db:"neutral_count"`
+		SkillName      string     `db:"skill_name"`
+		InjectCount    int        `db:"inject_count"`
+		PositiveCount  int        `db:"positive_count"`
+		NegativeCount  int        `db:"negative_count"`
+		NeutralCount   int        `db:"neutral_count"`
 		LastInjectedAt *time.Time `db:"last_injected_at"`
 		LastUsedAt     *time.Time `db:"last_used_at"`
-		Effectiveness  float64   `db:"effectiveness"`
+		Effectiveness  float64    `db:"effectiveness"`
 	}
 
 	if err := ut.db.Select(&rows, `

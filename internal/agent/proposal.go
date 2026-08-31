@@ -1,8 +1,8 @@
 package agent
 
 import (
-	"github.com/caimlas/meept/pkg/id"
 	"fmt"
+	"github.com/caimlas/meept/pkg/id"
 	"os"
 	"path/filepath"
 	"strings"

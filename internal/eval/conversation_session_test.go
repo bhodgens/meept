@@ -50,7 +50,7 @@ func TestConversationSession_BasicFlow(t *testing.T) {
 	}
 
 	store := freshStore()
-session.Start(store)
+	session.Start(store)
 
 	if session.GetState() != StateIdle {
 		t.Errorf("expected idle after start, got %s", session.GetState())

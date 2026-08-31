@@ -463,13 +463,13 @@ func RegularFunc() {}
 // as specified in Phase 3 of code-quality-detection-gaps.md
 func TestRuleExecutor_Transform_Mutation(t *testing.T) {
 	executor := &RuleExecutor{}
-	
+
 	t.Run("uppercase transform basic test", func(t *testing.T) {
 		captures := map[string]string{"name": "testValue"}
 		transforms := []Transform{
 			{Type: "uppercase", Node: "name"},
 		}
-		
+
 		result := executor.applyTransforms(captures, transforms)
 		if result["name"] != "TESTVALUE" {
 			t.Errorf("Expected 'TESTVALUE', got '%s'", result["name"])
@@ -481,7 +481,7 @@ func TestRuleExecutor_Transform_Mutation(t *testing.T) {
 		transforms := []Transform{
 			{Type: "prepend", Node: "name", Prefix: "new"},
 		}
-		
+
 		result := executor.applyTransforms(captures, transforms)
 		if result["name"] != "newvalue" {
 			t.Errorf("Expected 'newvalue', got '%s'", result["name"])
@@ -494,7 +494,7 @@ func TestRuleExecutor_Transform_Mutation(t *testing.T) {
 		transforms := []Transform{
 			{Type: "prepend", Node: "name", Prefix: "new"},
 		}
-		
+
 		mutation.RunMutationTest(t,
 			func() {
 				// Mutate: change prefix to wrong value

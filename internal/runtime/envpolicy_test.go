@@ -68,7 +68,7 @@ func TestBuildChildEnv(t *testing.T) {
 				"API_KEY":   "should-not-pass",
 				"OTHER_VAR": "ok",
 			},
-			wantContains:    []string{"PATH="},
+			wantContains: []string{"PATH="},
 			// OTHER_VAR is not in BaseEnvKeys/Allowlist -> stripped too.
 			wantNotContains: []string{"API_KEY", "OTHER_VAR"},
 			wantStripped:    []string{"MEEPT_SENTINEL_SECRET", "MY_EXTRA", "API_KEY", "OTHER_VAR"},
@@ -94,14 +94,14 @@ func TestBuildChildEnv(t *testing.T) {
 			wantNotContains: []string{"topsecret"},
 		},
 		{
-			name:        "empty cmdEnv in inherit appends nothing",
-			cfg:         EnvPolicyConfig{Mode: EnvModeInherit},
-			cmdEnv:      map[string]string{},
+			name:         "empty cmdEnv in inherit appends nothing",
+			cfg:          EnvPolicyConfig{Mode: EnvModeInherit},
+			cmdEnv:       map[string]string{},
 			wantStripped: nil,
 		},
 		{
-			name: "unknown allowlist key absent from parent is not invented",
-			cfg:  EnvPolicyConfig{Mode: EnvModeAllowlist, Allowlist: []string{"NOT_IN_PARENT"}},
+			name:            "unknown allowlist key absent from parent is not invented",
+			cfg:             EnvPolicyConfig{Mode: EnvModeAllowlist, Allowlist: []string{"NOT_IN_PARENT"}},
 			wantContains:    []string{"PATH="},
 			wantNotContains: []string{"NOT_IN_PARENT"},
 		},

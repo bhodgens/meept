@@ -1647,10 +1647,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						escalation, _ := payloadMap["escalation"].(string)
 						blocked := escalation == "blocked"
+						modelID, _ := payloadMap["model_id"].(string)
+						fallbackModel, _ := payloadMap["fallback_model"].(string)
+						to, _ := payloadMap["to"].(string)
 						if cmd := a.agents.Update(quotaStateMsg{
-							agentID:   agentID,
-							waitUntil: waitUntil,
-							blocked:   blocked,
+							agentID:       agentID,
+							to:            to,
+							waitUntil:     waitUntil,
+							blocked:       blocked,
+							model:         modelID,
+							fallbackModel: fallbackModel,
+							escalation:    escalation,
 						}); cmd != nil {
 							cmds = append(cmds, cmd)
 						}

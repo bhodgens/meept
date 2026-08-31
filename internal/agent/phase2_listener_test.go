@@ -59,12 +59,12 @@ func TestInstructionListener_PostHookMatch(t *testing.T) {
 
 	// Seed a matching instruction
 	instr := &preferences.UserInstruction{
-		ID:        "post-hook-test",
-		Name:      "post-hook-test",
-		Trigger:   "post_hook:tool_complete:*",
-		Action:    "shell_execute",
+		ID:         "post-hook-test",
+		Name:       "post-hook-test",
+		Trigger:    "post_hook:tool_complete:*",
+		Action:     "shell_execute",
 		ActionArgs: map[string]any{"command": "echo triggered"},
-		Enabled:   true,
+		Enabled:    true,
 	}
 	if err := store.Save(instr, store.DefaultTier()); err != nil {
 		t.Fatalf("Save() error: %v", err)
@@ -99,12 +99,12 @@ func TestInstructionListener_FileWrittenMatch(t *testing.T) {
 	defer cleanup()
 
 	instr := &preferences.UserInstruction{
-		ID:        "file-write-hook",
-		Name:      "file-write-hook",
-		Trigger:   "post_hook:write_file:*.go",
-		Action:    "shell_execute",
+		ID:         "file-write-hook",
+		Name:       "file-write-hook",
+		Trigger:    "post_hook:write_file:*.go",
+		Action:     "shell_execute",
 		ActionArgs: map[string]any{"command": "gofmt -w ."},
-		Enabled:   true,
+		Enabled:    true,
 	}
 	if err := store.Save(instr, store.DefaultTier()); err != nil {
 		t.Fatalf("Save() error: %v", err)
@@ -136,12 +136,12 @@ func TestInstructionListener_EventMatch(t *testing.T) {
 	defer cleanup()
 
 	instr := &preferences.UserInstruction{
-		ID:        "session-start-event",
-		Name:      "session-start-event",
-		Trigger:   "event:session_start",
-		Action:    "notification",
+		ID:         "session-start-event",
+		Name:       "session-start-event",
+		Trigger:    "event:session_start",
+		Action:     "notification",
 		ActionArgs: map[string]any{"message": "session started"},
-		Enabled:   true,
+		Enabled:    true,
 	}
 	if err := store.Save(instr, store.DefaultTier()); err != nil {
 		t.Fatalf("Save() error: %v", err)
@@ -171,11 +171,11 @@ func TestInstructionListener_NoMatch(t *testing.T) {
 
 	// Seed a non-matching instruction
 	instr := &preferences.UserInstruction{
-		ID:        "non-matching",
-		Name:      "non-matching",
-		Trigger:   "post_hook:write_file:*.py",
-		Action:    "notification",
-		Enabled:   true,
+		ID:      "non-matching",
+		Name:    "non-matching",
+		Trigger: "post_hook:write_file:*.py",
+		Action:  "notification",
+		Enabled: true,
 	}
 	if err := store.Save(instr, store.DefaultTier()); err != nil {
 		t.Fatalf("Save() error: %v", err)
@@ -241,11 +241,11 @@ func TestInstructionListener_ConcurrentPublish(t *testing.T) {
 	defer cleanup()
 
 	instr := &preferences.UserInstruction{
-		ID:        "concurrent-test",
-		Name:      "concurrent-test",
-		Trigger:   "post_hook:tool_complete:*",
-		Action:    "notification",
-		Enabled:   true,
+		ID:      "concurrent-test",
+		Name:    "concurrent-test",
+		Trigger: "post_hook:tool_complete:*",
+		Action:  "notification",
+		Enabled: true,
 	}
 	if err := store.Save(instr, store.DefaultTier()); err != nil {
 		t.Fatalf("Save() error: %v", err)

@@ -80,4 +80,3 @@ func TestSessionRefresher_Refresh_NoLLMIntegration(t *testing.T) {
 		t.Error("Description should not be empty")
 	}
 }
-

@@ -99,12 +99,12 @@ func (c *Compactor) Config() CompactionConfig {
 //
 // Pipeline:
 //
-//	1. If len(turns) <= MaxTurnsBeforeCompact, return unchanged (ratio 1.0).
-//	2. Reserve the last KeepLastNTurns turns unconditionally.
-//	3. Merge consecutive tool + observation pairs into single calls.
-//	4. Deduplicate adjacent observation turns (longer content wins).
-//	5. Trim each turn's ToolCalls slice to MaxToolCallsPerTurn.
-//	6. When the compactable region is large, replace its middle with a summary turn.
+//  1. If len(turns) <= MaxTurnsBeforeCompact, return unchanged (ratio 1.0).
+//  2. Reserve the last KeepLastNTurns turns unconditionally.
+//  3. Merge consecutive tool + observation pairs into single calls.
+//  4. Deduplicate adjacent observation turns (longer content wins).
+//  5. Trim each turn's ToolCalls slice to MaxToolCallsPerTurn.
+//  6. When the compactable region is large, replace its middle with a summary turn.
 func (c *Compactor) Compact(ctx context.Context, turns []TurnRecord) (*CompactionResult, []TurnRecord) {
 	c.mu.RLock()
 	cfg := c.cfg

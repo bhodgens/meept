@@ -273,4 +273,3 @@ func isIDSetter(name string) bool {
 	}
 	return false
 }
-

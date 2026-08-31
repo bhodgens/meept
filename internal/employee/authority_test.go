@@ -104,11 +104,11 @@ func TestDetectEscalationCycles(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name:        "nil graph is no-op",
-			graph:       nil,
-			seeds:       []string{"a"},
-			wantCycles:  0,
-			wantErr:     false,
+			name:       "nil graph is no-op",
+			graph:      nil,
+			seeds:      []string{"a"},
+			wantCycles: 0,
+			wantErr:    false,
 		},
 		{
 			name: "diamond not a cycle",

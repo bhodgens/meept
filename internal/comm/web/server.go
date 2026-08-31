@@ -222,11 +222,11 @@ func NewServer(cfg ServerConfig, handler Handler, auth Authenticator, logger *sl
 	}
 
 	s := &Server{
-		config:  cfg,
-		handler: handler,
-		auth:    auth,
-		logger:  logger,
-		wsHub:   NewWebSocketHub(logger),
+		config:        cfg,
+		handler:       handler,
+		auth:          auth,
+		logger:        logger,
+		wsHub:         NewWebSocketHub(logger),
 		wsConnLimiter: newWSConnLimiter(),
 	}
 
@@ -251,9 +251,9 @@ func (s *Server) Start(ctx context.Context) error {
 	s.setupRoutes(mux)
 
 	s.server = &http.Server{
-		Addr:           s.config.Addr,
-		Handler:        s.middleware(mux),
-		ReadTimeout:    s.config.ReadTimeout,
+		Addr:        s.config.Addr,
+		Handler:     s.middleware(mux),
+		ReadTimeout: s.config.ReadTimeout,
 		// WriteTimeout is intentionally 0: a non-zero value breaks SSE
 		// streaming (/api/v1/chat/stream) because Go's http.Server applies
 		// the deadline to the entire response write. Per-handler timeouts
@@ -596,7 +596,7 @@ func sanitizeErrMsg(msg string) string {
 }
 
 var (
-	webAbsPathRe     = regexp.MustCompile(`(?:/[A-Za-z0-9._-]+)+(?:\.[A-Za-z0-9]+)?|[A-Za-z]:\\[A-Za-z0-9._\\-]+`)
+	webAbsPathRe      = regexp.MustCompile(`(?:/[A-Za-z0-9._-]+)+(?:\.[A-Za-z0-9]+)?|[A-Za-z]:\\[A-Za-z0-9._\\-]+`)
 	webGoImportPathRe = regexp.MustCompile(`[a-z0-9.-]+\.[a-z]{2,}/[A-Za-z0-9._/-]+`)
 	webFileLineRe     = regexp.MustCompile(`[A-Za-z0-9_-]+\.go:\d+(?::\d+)?:\s*`)
 )

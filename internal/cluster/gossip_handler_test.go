@@ -137,8 +137,8 @@ func TestGossipHandler_OnEvent_MemoryStored(t *testing.T) {
 
 	// Verify memory is in gossip store.
 	results, err := ds.GetMemories(t.Context(), &memory.MemoryQuery{
-		Type:     memory.MemoryType("episodic"),
-		Limit:    10,
+		Type:         memory.MemoryType("episodic"),
+		Limit:        10,
 		MinRelevance: 0,
 	})
 	if err != nil {
@@ -420,4 +420,3 @@ func toJSON(v any) json.RawMessage {
 func evtID(t *testing.T) string {
 	return "test-evt-" + t.Name()
 }
-

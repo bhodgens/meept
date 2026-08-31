@@ -24,11 +24,11 @@ import (
 // RLMAnalyzerConfig configures the trace analysis RLM.
 // Modeled after HALO's RLM config (main.py, subagent_tool_factory.py).
 type RLMAnalyzerConfig struct {
-	MaximumDepth             int    `json:"maximum_depth"`               // default 2
-	MaximumParallelSubagents int    `json:"maximum_parallel_subagents"`  // default 4
-	MaximumTurns             int    `json:"maximum_turns"`               // per agent
-	Model                    string `json:"model"`                       // cheap model for analysis
-	SynthesisModel           string `json:"synthesis_model"`             // model for multi-trace summarization
+	MaximumDepth             int    `json:"maximum_depth"`              // default 2
+	MaximumParallelSubagents int    `json:"maximum_parallel_subagents"` // default 4
+	MaximumTurns             int    `json:"maximum_turns"`              // per agent
+	Model                    string `json:"model"`                      // cheap model for analysis
+	SynthesisModel           string `json:"synthesis_model"`            // model for multi-trace summarization
 }
 
 // DefaultRLMConfig returns sensible defaults matching HALO's configuration.
@@ -76,9 +76,9 @@ func NewRLMAnalyzer(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient *ll
 		llmClient: llmClient,
 		semaphore: NewPerDepthSemaphore(limits),
 		logger:    logger,
-		compactor: NewTurnCompactor(),    // Phase 1: atomic tool-turn compaction
+		compactor: NewTurnCompactor(),                       // Phase 1: atomic tool-turn compaction
 		emitter:   NewTelemetryEmitter(uuid.New().String()), // Phase 3: checks HALO_TELEMETRY_PATH
-		runID:     uuid.New().String(),   // Phase 3: telemetry run ID
+		runID:     uuid.New().String(),                      // Phase 3: telemetry run ID
 	}
 }
 
@@ -145,11 +145,11 @@ func (a *RLMAnalyzer) Analyze(ctx context.Context, prompt string) (*AnalyzeResul
 	}
 
 	var (
-		mu          sync.Mutex
-		outputBus   []outputEntry
-		sequence    int64
+		mu           sync.Mutex
+		outputBus    []outputEntry
+		sequence     int64
 		failureModes []FailureMode
-		allReports  []string
+		allReports   []string
 	)
 
 	nextSeq := func() int64 {

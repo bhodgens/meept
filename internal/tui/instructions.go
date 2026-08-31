@@ -54,12 +54,12 @@ type InstructionConfirmationData struct {
 //
 // All UI text is lowercase per CLAUDE.md UI conventions.
 type InstructionConfirmationModel struct {
-	data       InstructionConfirmationData
-	confirmed  bool
-	cancelled  bool
-	width      int
-	logger     *slog.Logger
-	riskStyle  lipgloss.Style
+	data      InstructionConfirmationData
+	confirmed bool
+	cancelled bool
+	width     int
+	logger    *slog.Logger
+	riskStyle lipgloss.Style
 }
 
 // NewInstructionConfirmationModel constructs a new confirmation dialog model

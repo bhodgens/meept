@@ -390,8 +390,8 @@ func NewBudgetHierarchyWithConfig(taskBudget int, phases []string, phaseBudgets 
 // NewBudgetHierarchy and NewBudgetHierarchyWithConfig.
 func newBudgetHierarchyWithOpts(taskBudget int, phases []string, phaseBudgets []int, opts BudgetHierarchyOptions) *BudgetHierarchy {
 	h := &BudgetHierarchy{
-		phaseBudgets:        make(map[string]*BudgetAllocation),
-		logger:              slog.Default(),
+		phaseBudgets:         make(map[string]*BudgetAllocation),
+		logger:               slog.Default(),
 		turnWarningThreshold: opts.effectiveTurnWarningRatio(),
 	}
 

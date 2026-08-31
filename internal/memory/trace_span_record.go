@@ -26,11 +26,11 @@ type SpanRecord struct {
 	ErrorType string `json:"error_type,omitempty"`
 
 	// Raw payload fields (kept for surgical queries)
-	Input          string            `json:"input,omitempty"`
-	Output         string            `json:"output,omitempty"`
-	Attributes     map[string]string `json:"attributes,omitempty"`
-	ToolName       string            `json:"tool_name,omitempty"`
-	ToolError      bool              `json:"tool_error,omitempty"`
+	Input      string            `json:"input,omitempty"`
+	Output     string            `json:"output,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+	ToolName   string            `json:"tool_name,omitempty"`
+	ToolError  bool              `json:"tool_error,omitempty"`
 
 	// RawLine preserves the original JSON string for regex search.
 	RawLine string `json:"-"`

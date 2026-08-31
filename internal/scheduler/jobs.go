@@ -37,10 +37,10 @@ const (
 	JobTypeAgent        JobType = "agent"
 	JobTypeShell        JobType = "shell"
 	JobTypeReminder     JobType = "reminder"
-	JobTypeOptimization JobType = "optimization"   // Memory graph optimization
-	JobTypeSecurity     JobType = "security"       // Security scans
-	JobTypeLearning     JobType = "learning"       // Learning consolidation
-	JobTypeInterval     JobType = "interval"       // Generic interval callback
+	JobTypeOptimization JobType = "optimization" // Memory graph optimization
+	JobTypeSecurity     JobType = "security"     // Security scans
+	JobTypeLearning     JobType = "learning"     // Learning consolidation
+	JobTypeInterval     JobType = "interval"     // Generic interval callback
 )
 
 // JobConfig is the serializable configuration for a job.
@@ -297,8 +297,8 @@ func NewShellJob(cfg JobConfig, msgBus *bus.MessageBus) (*ShellJob, error) {
 // arguments happens at job CREATION time (in tool_schedule_create.go).
 // There is a TOCTOU (time-of-check-time-of-use) window between creation
 // and execution where:
-//   1. The working directory could be modified
-//   2. Files referenced could be replaced with symlinks to sensitive locations
+//  1. The working directory could be modified
+//  2. Files referenced could be replaced with symlinks to sensitive locations
 //
 // For high-security deployments, consider:
 //   - Storing resolved realpath of workDir at creation and verifying at execution

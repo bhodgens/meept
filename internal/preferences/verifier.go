@@ -16,7 +16,7 @@ type InstructionVerifier struct {
 // VerificationResult holds the outcome of a verification check.
 type VerificationResult struct {
 	Valid              bool
-	RiskLevel          string   // "low", "medium", "high"
+	RiskLevel          string // "low", "medium", "high"
 	ConfirmationNeeded bool
 	Errors             []string
 	Warnings           []string
@@ -44,10 +44,10 @@ func NewInstructionVerifier(registry *tools.Registry) *InstructionVerifier {
 // Verify validates a parsed instruction and returns a result.
 func (v *InstructionVerifier) Verify(instr *ParsedInstruction) VerificationResult {
 	result := VerificationResult{
-		Valid:    true,
+		Valid:     true,
 		RiskLevel: "low",
-		Errors:   []string{},
-		Warnings: []string{},
+		Errors:    []string{},
+		Warnings:  []string{},
 	}
 
 	if instr == nil {

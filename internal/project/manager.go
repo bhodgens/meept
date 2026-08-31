@@ -500,11 +500,11 @@ func (pm *ProjectManager) generateShortID() string {
 
 // CreateOrResolve resolves a user-provided project argument.
 //
-// - Absolute path with .git -> DetectFromPath (auto-register or return existing)
-// - Absolute path without .git -> check for sidecar (adopt if found),
-//   otherwise RegisterLocal
-// - Shorthand name (not absolute) -> resolve to base_dir/<name>, mkdir -p,
-//   git init if no .git, write sidecar, register as git project
+//   - Absolute path with .git -> DetectFromPath (auto-register or return existing)
+//   - Absolute path without .git -> check for sidecar (adopt if found),
+//     otherwise RegisterLocal
+//   - Shorthand name (not absolute) -> resolve to base_dir/<name>, mkdir -p,
+//     git init if no .git, write sidecar, register as git project
 //
 // For all paths, if a sidecar file exists inside the directory, the project
 // is adopted (DB local_path and name updated) rather than re-registered.

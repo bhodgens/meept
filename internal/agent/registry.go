@@ -104,6 +104,10 @@ type AgentRegistry struct {
 	// db is the SQLite connection for queue persistence (may be nil).
 	db *sql.DB
 
+	// quotaTracker is the shared quota episode tracker. Nil = quota
+	// tracking disabled for loops built by this registry.
+	quotaTracker *QuotaEpisodeTracker
+
 	// sharedConvStore is a single ConversationStore shared across all agent
 	// loops so that cross-agent handoffs preserve conversation history.
 	sharedConvStore *ConversationStore
@@ -128,6 +132,12 @@ type RegistryConfig struct {
 
 	// TT-SR stream rule enforcement (shared across all agent loops)
 	TTSRManager *TTSRManager
+
+	// QuotaEpisodeTracker is the shared quota episode tracker (singleton).
+	// When set, registry-built agent loops inherit it so quota episodes and
+	// escalation events fire identically for specialist agents. Nil = quota
+	// tracking disabled for registry loops.
+	QuotaTracker *QuotaEpisodeTracker
 
 	// BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	BundledAgentsPath string
@@ -184,6 +194,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		hallucinationDetector: cfg.HallucinationDetector,
 		artifactManager:       cfg.ArtifactManager,
 		ttsrManager:           cfg.TTSRManager,
+		quotaTracker:          cfg.QuotaTracker,
 		queueConfig:           cfg.Queues,
 		guardsCfg:             cfg.Guards,
 		db:                    cfg.DB,
@@ -426,6 +437,12 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	}
 	if r.ttsrManager != nil {
 		opts = append(opts, WithTTSRManager(r.ttsrManager))
+	}
+
+	// Share the quota episode tracker so specialist agents fire quota
+	// escalation events and transitions identically to the daemon loop.
+	if r.quotaTracker != nil {
+		opts = append(opts, WithQuotaTracker(r.quotaTracker))
 	}
 
 	// Create a message queue for steering/follow-up support (unless disabled).

@@ -26,7 +26,7 @@ type EventActionRouter struct {
 
 	mu        sync.RWMutex
 	topicSubs map[string]map[string]BotTrigger // topic -> set of bot IDs
-	ctx       context.Context                   // set by Start, nil before
+	ctx       context.Context                  // set by Start, nil before
 }
 
 // NewEventActionRouter creates a new event-to-action router.

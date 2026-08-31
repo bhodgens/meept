@@ -69,7 +69,7 @@ type BusPublisher interface {
 type activeJob struct {
 	job          DispatchJob
 	cancel       context.CancelFunc
-	worktreePath string         // empty when no workspace was materialized
+	worktreePath string                  // empty when no workspace was materialized
 	resourceRefs []resources.ResourceRef // for Release on cleanup
 	startedAt    time.Time
 	// done is closed when executeJob returns (whether via completeJob,
@@ -90,7 +90,7 @@ type ExecutorBridge struct {
 	logger      *slog.Logger
 	metrics     *Metrics // nil-safe (every Inc helper nil-guards)
 
-	resources  resources.ResourceManager // nil-safe (Ensure is skipped)
+	resources  resources.ResourceManager  // nil-safe (Ensure is skipped)
 	workspaces workspace.WorkspaceManager // nil-safe (Ensure is skipped)
 	invoker    AgentInvoker               // nil-safe (returns error)
 	publisher  BusPublisher               // nil-safe (logs only)

@@ -192,7 +192,7 @@ func TestCallTool_RateLimitEnforced(t *testing.T) {
 
 	// Get the limiter directly
 	limiter := m.getRateLimiter("rate-limited-server")
-	
+
 	// First Allow() should succeed (uses the burst)
 	if !limiter.Allow() {
 		t.Error("expected first Allow() to succeed")

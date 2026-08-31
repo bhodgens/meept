@@ -86,9 +86,16 @@ type AgentSummary struct {
 	DailyCostCents int       `json:"daily_cost_cents"`
 	FindingsCount  int       `json:"findings_count"`
 	LastInvocation time.Time `json:"last_invocation"`
-	// Quota state (optional — when absent, rendering is unchanged).
-	QuotaWaitUntil *time.Time `json:"quota_wait_until,omitempty"`
-	QuotaBlocked   bool       `json:"quota_blocked,omitempty"`
+	// Quota episode state (optional — when absent, rendering is unchanged).
+	// QuotaWaitUntil comes from the agent.quota_wait event's unblock_at;
+	// QuotaModel is the primary model that hit the quota (event model_id);
+	// QuotaBlocked means the 24h max-wait escalation fired (hard stop);
+	// QuotaFallbackModel is the fallback model carrying work while the
+	// primary provider waits out its quota reset.
+	QuotaWaitUntil     *time.Time `json:"quota_wait_until,omitempty"`
+	QuotaModel         string     `json:"quota_model,omitempty"`
+	QuotaBlocked       bool       `json:"quota_blocked,omitempty"`
+	QuotaFallbackModel string     `json:"quota_fallback_model,omitempty"`
 }
 
 // AgentDetail is the drill-in payload. Combines the employee definition
@@ -224,11 +231,17 @@ func (p *AgentsPanel) Init() tea.Cmd {
 }
 
 // quotaStateMsg carries a quota state update for a single agent, sourced from
-// an agent.quota_wait bus event.
+// an agent.quota_wait bus event (WS type agent_progress). An empty to value
+// means "clear any quota episode for this agent" (quota_cleared / back to
+// running).
 type quotaStateMsg struct {
-	agentID    string
-	waitUntil  *time.Time
-	blocked    bool
+	agentID       string
+	to            string
+	waitUntil     *time.Time
+	blocked       bool
+	model         string
+	fallbackModel string
+	escalation    string // "" | warn | action_recommended | blocked (leaf 05 tier vocabulary)
 }
 
 // agentsListMsg carries the agents.list response.
@@ -416,15 +429,61 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 
 	case quotaStateMsg:
 		// Apply the quota state update to the matching agent in the cache.
+		// A quota_cleared transition (to == "" or "running") resets the
+		// agent to its base status so stale episode data clears on running.
 		for i := range p.agents {
 			if p.agents[i].ID == msg.agentID {
-				p.agents[i].QuotaWaitUntil = msg.waitUntil
-				p.agents[i].QuotaBlocked = msg.blocked
-				// Adjust the base status so the detail view also reflects it.
-				if msg.blocked {
-					p.agents[i].Status = "blocked"
-				} else if msg.waitUntil != nil {
-					p.agents[i].Status = "quota_wait"
+				switch msg.to {
+				case AgentStateQuotaWait:
+					p.agents[i].QuotaWaitUntil = msg.waitUntil
+					p.agents[i].QuotaModel = msg.model
+					p.agents[i].QuotaBlocked = false
+					p.agents[i].QuotaFallbackModel = msg.fallbackModel
+					p.agents[i].Status = AgentStateQuotaWait
+				case AgentStateBlocked:
+					// Blocked wins over wait time; keep the model info so
+					// the detail view can still show what was carrying work.
+					p.agents[i].QuotaBlocked = true
+					p.agents[i].Status = AgentStateBlocked
+					if msg.model != "" {
+						p.agents[i].QuotaModel = msg.model
+					}
+					if msg.fallbackModel != "" {
+						p.agents[i].QuotaFallbackModel = msg.fallbackModel
+					}
+					if msg.waitUntil != nil {
+						p.agents[i].QuotaWaitUntil = msg.waitUntil
+					}
+				case "":
+					// Tier escalation refresh (12h warn / 20h
+					// action_recommended fire with to == "" while the
+					// episode is live): update the unblock time when the
+					// event carries one; never wipe the episode. Only a
+					// genuine clear (escalation "" AND no unblock time)
+					// falls through to the reset below.
+					if msg.escalation != "" || msg.waitUntil != nil {
+						if msg.waitUntil != nil {
+							p.agents[i].QuotaWaitUntil = msg.waitUntil
+						}
+						if msg.model != "" {
+							p.agents[i].QuotaModel = msg.model
+						}
+						p.updateAgentsTable()
+						break
+					}
+					// quota_cleared: drop episode state entirely.
+					p.agents[i].QuotaWaitUntil = nil
+					p.agents[i].QuotaModel = ""
+					p.agents[i].QuotaBlocked = false
+					p.agents[i].QuotaFallbackModel = ""
+					p.agents[i].Status = "running"
+				default:
+					// quota_cleared / running: drop episode state entirely.
+					p.agents[i].QuotaWaitUntil = nil
+					p.agents[i].QuotaModel = ""
+					p.agents[i].QuotaBlocked = false
+					p.agents[i].QuotaFallbackModel = ""
+					p.agents[i].Status = "running"
 				}
 				p.updateAgentsTable()
 				break
@@ -615,31 +674,41 @@ func (p *AgentsPanel) statusBadge(status string) string {
 		style = style.Foreground(Current().Warning)
 	case "error":
 		style = style.Foreground(Current().ErrorC)
+	case AgentStateQuotaWait:
+		return style.Foreground(Current().Warning).Render(RenderAgentStatus(AgentStateQuotaWait))
+	case AgentStateBlocked:
+		return style.Foreground(Current().ErrorC).Render(RenderAgentStatus(AgentStateBlocked))
 	default:
 		style = style.Foreground(Current().TextMuted)
 	}
 	return style.Render(status)
 }
 
-// quotaStatusBadge returns a colored label for quota-related states.
-// When waitUntil is nil the agent is not in quota_wait; when blocked is true
-// the agent is hard-blocked; when the wait time is past-due we show "resuming…".
+// orTime dereferences p, returning the zero time when nil. Used so
+// RenderQuotaDetailLines can accept optional wait times directly.
+func orTime(p *time.Time) time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	return *p
+}
+
+// quotaStatusBadge returns the label for quota-related agent states (pure
+// text, no styling — updateAgentsTable colors it). When waitUntil is nil and
+// blocked is false the agent has no quota episode and the empty string is
+// returned so rendering is unchanged (regression safety). When both wait
+// time and blocked are present, the blocked label wins.
 func (p *AgentsPanel) quotaStatusBadge(waitUntil *time.Time, blocked bool) string {
-	style := lipgloss.NewStyle()
 	if blocked {
-		return style.Foreground(Current().ErrorC).Render("blocked")
+		return RenderAgentStatus(AgentStateBlocked)
 	}
 	if waitUntil == nil {
 		return ""
 	}
-	d := time.Until(*waitUntil)
-	if d <= 0 {
-		return style.Foreground(Current().Warning).Render("resuming…")
+	if label := RenderAgentStatus(AgentStateQuotaWait); waitUntil != nil {
+		return label + " · " + QuotaCountdownText(*waitUntil)
 	}
-	label := "quota wait"
-	hint := "quota resets in " + FormatDuration(d)
-	// Render as a single compact badge: "quota wait · resets in Xh Ym"
-	return style.Foreground(Current().Warning).Render(label + "  ⋅  " + hint)
+	return ""
 }
 
 func (p *AgentsPanel) tierShort(tier string) string {
@@ -817,8 +886,24 @@ func (p *AgentsPanel) renderDetail() string {
 	b.WriteString(valueStyle.Render(d.Agent.Tier))
 	b.WriteString("\n")
 	b.WriteString(labelStyle.Render("status:"))
-	b.WriteString(p.statusBadge(d.Agent.Status))
-	b.WriteString("\n")
+	if d.Agent.QuotaBlocked || d.Agent.QuotaWaitUntil != nil {
+		// Quota episode: show the colored quota status instead of the base
+		// status, plus the primary/active model lines when a fallback is
+		// carrying the work.
+		b.WriteString(p.quotaStatusBadge(d.Agent.QuotaWaitUntil, d.Agent.QuotaBlocked))
+		b.WriteString("\n")
+		for _, line := range RenderQuotaDetailLines(
+			d.Agent.QuotaModel, d.Agent.QuotaFallbackModel,
+			orTime(d.Agent.QuotaWaitUntil),
+		) {
+			b.WriteString(labelStyle.Render("quota:"))
+			b.WriteString(valueStyle.Render(line))
+			b.WriteString("\n")
+		}
+	} else {
+		b.WriteString(p.statusBadge(d.Agent.Status))
+		b.WriteString("\n")
+	}
 	b.WriteString(labelStyle.Render("risk cap:"))
 	b.WriteString(valueStyle.Render(orNA(d.RiskCeiling)))
 	b.WriteString("\n")

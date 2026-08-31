@@ -220,12 +220,12 @@ func TestAnalysisSession_ExportJSON(t *testing.T) {
 	}
 
 	var decoded struct {
-		SessionID    string            `json:"session_id"`
-		TraceIDs     []string          `json:"trace_ids"`
+		SessionID    string              `json:"session_id"`
+		TraceIDs     []string            `json:"trace_ids"`
 		FailureModes []agent.FailureMode `json:"failure_modes"`
-		Turns        []ConversationTurn `json:"turns"`
-		State        string            `json:"state"`
-		Metadata     map[string]string `json:"metadata"`
+		Turns        []ConversationTurn  `json:"turns"`
+		State        string              `json:"state"`
+		Metadata     map[string]string   `json:"metadata"`
 	}
 
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -379,8 +379,8 @@ func TestSessionManager_ExportSession(t *testing.T) {
 
 	// Verify the exported JSON contains expected data.
 	var decoded struct {
-		SessionID string `json:"session_id"`
-		TraceIDs  []string `json:"trace_ids"`
+		SessionID string             `json:"session_id"`
+		TraceIDs  []string           `json:"trace_ids"`
 		Turns     []ConversationTurn `json:"turns"`
 	}
 	if err := json.Unmarshal(data, &decoded); err != nil {

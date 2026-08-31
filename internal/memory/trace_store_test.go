@@ -169,7 +169,7 @@ func TestTraceStore_SurgicalCap(t *testing.T) {
 	// but would have been capped at 16 KB.
 	payload := strings.Repeat("x", 20*1024) // 20 KB
 	attr := map[string]string{
-		"tool_input":  strings.Repeat("a", 20 * 1024),
+		"tool_input":  strings.Repeat("a", 20*1024),
 		"tool_output": strings.Repeat("b", 20*1024),
 	}
 	spans := []SpanRecord{

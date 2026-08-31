@@ -13,10 +13,10 @@ import (
 
 // Merger handles config file merging from shared and per-node overrides.
 type Merger struct {
-	baseDir       string // ~/.meept/
-	checkoutDir   string // Git checkout path
-	nodeID        string
-	logger        logger
+	baseDir     string // ~/.meept/
+	checkoutDir string // Git checkout path
+	nodeID      string
+	logger      logger
 
 	// fileHashes tracks last-applied file hashes to detect changes.
 	fileHashes map[string]string
@@ -41,10 +41,10 @@ func NewMerger(baseDir, checkoutDir, nodeID string, l logger) *Merger {
 
 // MergeResult holds the outcome of a Merge operation.
 type MergeResult struct {
-	FilesApplied []string        `json:"files_applied"`
-	FilesSkipped []string        `json:"files_skipped"`
-	Errors       []error         `json:"errors,omitempty"`
-	CommitHash   string          `json:"commit_hash"`
+	FilesApplied []string `json:"files_applied"`
+	FilesSkipped []string `json:"files_skipped"`
+	Errors       []error  `json:"errors,omitempty"`
+	CommitHash   string   `json:"commit_hash"`
 }
 
 // Merge applies shared + per-node configs, returning applied/skipped/errored files.

@@ -263,17 +263,17 @@ func TestThreadRouter_SetActiveThread(t *testing.T) {
 	router := NewThreadRouter(WithThreadRouterSessionStore(store))
 
 	sess := &session.Session{
-		ID:      "sessionx1",
+		ID: "sessionx1",
 		Threads: map[string]*session.Thread{
 			"thread-general-001": {
-				ID:       "thread-general-001",
-				TopicLabel:     "general",
-				IsActive:       true,
+				ID:         "thread-general-001",
+				TopicLabel: "general",
+				IsActive:   true,
 			},
 			"thread-food-001": {
-				ID:       "thread-food-001",
-				TopicLabel:     "food",
-				IsActive:       false,
+				ID:         "thread-food-001",
+				TopicLabel: "food",
+				IsActive:   false,
 			},
 		},
 		ActiveThreadID: "thread-general-001",
@@ -312,9 +312,9 @@ func TestThreadRouter_GetActiveThread(t *testing.T) {
 		ID: "sessionx1",
 		Threads: map[string]*session.Thread{
 			"thread-general-001": {
-				ID:       "thread-general-001",
-				TopicLabel:     "general",
-				IsActive:       true,
+				ID:         "thread-general-001",
+				TopicLabel: "general",
+				IsActive:   true,
 			},
 		},
 		ActiveThreadID: "thread-general-001",

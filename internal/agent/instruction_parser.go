@@ -13,7 +13,6 @@ import (
 type InstructionParser struct {
 }
 
-
 // NewInstructionParser creates a new parser with optional logging.
 func NewInstructionParser() *InstructionParser {
 	return &InstructionParser{}

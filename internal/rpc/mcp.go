@@ -25,8 +25,8 @@ type MCPToolRefresher interface {
 // and reload.
 type MCPHandler struct {
 	manager       *mcp.Manager
-	configPath    string             // path to mcp_servers.json5 for save/load
-	toolRefresher MCPToolRefresher   // optional; if set, invoked after Reload
+	configPath    string           // path to mcp_servers.json5 for save/load
+	toolRefresher MCPToolRefresher // optional; if set, invoked after Reload
 }
 
 // NewMCPHandler creates a new handler. If manager is nil the registered

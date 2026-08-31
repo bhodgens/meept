@@ -253,10 +253,10 @@ func TestManager_ReleaseIdempotent(t *testing.T) {
 
 func TestManager_ParseRef(t *testing.T) {
 	cases := []struct {
-		raw     string
-		algo    string
-		body    string
-		isCAS   bool
+		raw   string
+		algo  string
+		body  string
+		isCAS bool
 	}{
 		{"blake3:abcd", "blake3", "abcd", true},
 		{"sha256:1234", "sha256", "1234", true},

@@ -102,13 +102,13 @@ func (p *ReviewPolicy) NeedsReview(step *task.TaskStep) bool {
 // reviewer-role agent. Domains match the reviews_domain declared on the
 // bundled reviewer AGENT.md files.
 var agentDomainMap = map[string]string{
-	config.AgentIDCoder:     "code",
-	config.AgentIDDebugger:  "debug",
-	config.AgentIDPlanner:   "plan",
-	config.AgentIDAnalyst:   "analysis",
-	config.AgentIDCommitter: "code",
+	config.AgentIDCoder:      "code",
+	config.AgentIDDebugger:   "debug",
+	config.AgentIDPlanner:    "plan",
+	config.AgentIDAnalyst:    "analysis",
+	config.AgentIDCommitter:  "code",
 	config.AgentIDResearcher: "analysis",
-	config.AgentIDChat:      "test",
+	config.AgentIDChat:       "test",
 }
 
 // toolHintDomainMap maps tool hints / intent keywords to review domains.
@@ -128,9 +128,10 @@ var toolHintDomainMap = map[string]string{
 //
 // Resolution order:
 // Dynamic lookup via Registry for a reviewer-role agent
-//     reviews_domain matches the originating agent's domain
-//  3. Tool-hint → domain → registry lookup
-//  4. "test-reviewer" fallback
+//
+//	   reviews_domain matches the originating agent's domain
+//	3. Tool-hint → domain → registry lookup
+//	4. "test-reviewer" fallback
 func (p *ReviewPolicy) SelectReviewer(step *task.TaskStep) string {
 	// Determine target domain from agent ID, then tool hint.
 	domain := ""

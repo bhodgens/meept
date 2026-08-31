@@ -76,6 +76,7 @@ const (
 // explicit mapping required by C2.
 //
 // internal/security defines:
+//
 //	RiskSafe=0, RiskLow=1, RiskMedium=2, RiskHigh=3, RiskCritical=4
 //
 // Since the ordering matches exactly, this is a direct cast, but the
@@ -208,12 +209,12 @@ func (noopConversationTokenStore) GetConversationTokens(string) (int, error) { r
 // tool; if the remaining budget is exhausted, the checker denies the call
 // and sets turnComplete = true so the loop stops queuing more tools.
 type TurnBudgetTracker struct {
-	mu              sync.Mutex
-	tokensUsed      int
-	costCents       int
-	toolCalls       int
+	mu               sync.Mutex
+	tokensUsed       int
+	costCents        int
+	toolCalls        int
 	maxTokensPerTurn int
-	maxCostPerTurn  int
+	maxCostPerTurn   int
 }
 
 // NewTurnBudgetTracker creates a tracker with the given per-turn limits.
@@ -370,19 +371,19 @@ const (
 // observation. Matches the employee_audit_findings table schema (spec
 // lines 402-419).
 type AuditFinding struct {
-	ID            string          `json:"id"`
-	EmployeeID    string          `json:"employee_id"`
-	GoalID        string          `json:"goal_id,omitempty"`
-	PlanID        string          `json:"plan_id,omitempty"`
-	TurnID        string          `json:"turn_id,omitempty"`
-	Severity      AuditSeverity   `json:"severity"`
-	Checkpoint    AuditCheckpoint `json:"checkpoint"`
-	ViolatedRule  string          `json:"violated_rule,omitempty"`
-	Evidence      string          `json:"evidence,omitempty"`
-	DetectedAt    time.Time       `json:"detected_at"`
-	ResolvedAt    *time.Time      `json:"resolved_at,omitempty"`
-	Resolution    string          `json:"resolution,omitempty"`
-	DriftScore    float64         `json:"drift_score,omitempty"`
+	ID           string          `json:"id"`
+	EmployeeID   string          `json:"employee_id"`
+	GoalID       string          `json:"goal_id,omitempty"`
+	PlanID       string          `json:"plan_id,omitempty"`
+	TurnID       string          `json:"turn_id,omitempty"`
+	Severity     AuditSeverity   `json:"severity"`
+	Checkpoint   AuditCheckpoint `json:"checkpoint"`
+	ViolatedRule string          `json:"violated_rule,omitempty"`
+	Evidence     string          `json:"evidence,omitempty"`
+	DetectedAt   time.Time       `json:"detected_at"`
+	ResolvedAt   *time.Time      `json:"resolved_at,omitempty"`
+	Resolution   string          `json:"resolution,omitempty"`
+	DriftScore   float64         `json:"drift_score,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -437,14 +438,14 @@ type TurnRecord struct {
 // any work, ensuring no I/O happens under the lock (per CLAUDE.md mutex-scope
 // rule).
 type PreExecChecker struct {
-	mu               sync.RWMutex
-	constitution     *Constitution
-	employeeID       string
-	budgetChecker    BudgetChecker
-	convTokenStore   ConversationTokenStore
-	autoPause        AutoPauseFunc
-	auditStore      *AuditStore
-	turnBudget       *TurnBudgetTracker
+	mu             sync.RWMutex
+	constitution   *Constitution
+	employeeID     string
+	budgetChecker  BudgetChecker
+	convTokenStore ConversationTokenStore
+	autoPause      AutoPauseFunc
+	auditStore     *AuditStore
+	turnBudget     *TurnBudgetTracker
 }
 
 // NewPreExecChecker constructs a PreExecChecker for the given employee. The
@@ -788,12 +789,13 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 // this method is the audit store's own internal mutex (SQL transaction
 // serialization). This is NOT a violation of the CLAUDE.md mutex-scope
 // rule because:
-//   1. The PreExecChecker.mu is NOT held during this call (it was released
-//      after snapshotting the auditStore pointer).
-//   2. The AuditStore is goroutine-safe via the underlying *sql.DB; no
-//      application-level mutex is held across I/O.
-//   3. The recover() wrapper ensures any panic from the store layer does
-//      not propagate into the checker.
+//  1. The PreExecChecker.mu is NOT held during this call (it was released
+//     after snapshotting the auditStore pointer).
+//  2. The AuditStore is goroutine-safe via the underlying *sql.DB; no
+//     application-level mutex is held across I/O.
+//  3. The recover() wrapper ensures any panic from the store layer does
+//     not propagate into the checker.
+//
 // The mutexio analyzer is expected to flag this because the method
 // signature includes "recordDenial" which doesn't match any I/O pattern.
 // If flagged: this is an intentional exception per the design. The audit
@@ -1386,21 +1388,21 @@ func parseAuditResponse(content string, turn TurnRecord) (*AuditFinding, error) 
 // PerPostTurnAuditor but runs on a cadence (e.g. every 6 hours) rather than
 // after each turn.
 type PeriodicAuditor struct {
-	mu              sync.Mutex
-	model           llm.Chatter
-	store           *AuditStore
-	autoPause       AutoPauseFunc
-	driftThreshold  float64 // auto-pause above this score (default 0.3)
+	mu             sync.Mutex
+	model          llm.Chatter
+	store          *AuditStore
+	autoPause      AutoPauseFunc
+	driftThreshold float64 // auto-pause above this score (default 0.3)
 
 	// E8: PeriodicAuditSampleSize controls how many turns are sent to
 	// the LLM for audit. When total turns exceed this number, reservoir
 	// sampling selects a representative subset. Default 50.
-	sampleSize      int
+	sampleSize int
 
 	// 3-strike failure tracking (spec lines 603-604). Guarded by failMu.
-	failMu               sync.Mutex
-	consecutiveFailures  int
-	lastFailureAt        time.Time
+	failMu              sync.Mutex
+	consecutiveFailures int
+	lastFailureAt       time.Time
 }
 
 // DefaultPeriodicAuditSampleSize is the default number of turns sampled
@@ -1769,8 +1771,8 @@ func (s *AuditStore) Create(ctx context.Context, f AuditFinding) error {
 
 // AuditListFilter controls which findings are returned by List.
 type AuditListFilter struct {
-	EmployeeID string // empty = all employees
-	Severity   string // empty = all severities
+	EmployeeID string    // empty = all employees
+	Severity   string    // empty = all severities
 	Since      time.Time // zero = no time filter
 	Limit      int       // 0 = default 100
 }
@@ -1814,15 +1816,15 @@ func (s *AuditStore) List(ctx context.Context, f AuditListFilter) ([]AuditFindin
 	var findings []AuditFinding
 	for rows.Next() {
 		var (
-			f             AuditFinding
-			severity      string
-			checkpoint    string
-			goalID        sql.NullString
-			planID        sql.NullString
-			turnID        sql.NullString
-			detectedAt    string
-			resolvedAt    sql.NullString
-			resolution    sql.NullString
+			f          AuditFinding
+			severity   string
+			checkpoint string
+			goalID     sql.NullString
+			planID     sql.NullString
+			turnID     sql.NullString
+			detectedAt string
+			resolvedAt sql.NullString
+			resolution sql.NullString
 		)
 		if err := rows.Scan(
 			&f.ID, &f.EmployeeID, &goalID, &planID, &turnID,
@@ -1952,6 +1954,7 @@ func nullableTime(t *time.Time) any {
 // Truncation Strategy:
 //
 //	If the combined prompt would exceed MaxLen bytes (default: 8192), the
+//
 // charter is truncated first (preserving the first N bytes), then the
 // existing prompt is truncated, then constraints are compacted (reasons
 // are dropped, tool lists are summarized as "[N tools]"). This ensures

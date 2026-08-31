@@ -183,8 +183,8 @@ func TestCreateFallbackSteps(t *testing.T) {
 			PlanningCtx: &plan.PlanningContext{
 				InterviewCompleted: true,
 				TrueGoal:           "ship login page",
-				Requirements:        []string{"OAuth2 flow", "session persistence"},
-				Constraints:         map[string]string{"timeline": "this week"},
+				Requirements:       []string{"OAuth2 flow", "session persistence"},
+				Constraints:        map[string]string{"timeline": "this week"},
 			},
 		}
 
@@ -1394,7 +1394,7 @@ func TestConductInterview_ErrorTypes(t *testing.T) {
 			TaskID: "t-1",
 			TrueAnalysis: &TrueIntentAnalysis{
 				Ambiguity: 0.1,
-				Scope:      "narrow",
+				Scope:     "narrow",
 			},
 		}
 		_, err := sp.ConductInterview(context.Background(), req)
@@ -1409,7 +1409,7 @@ func TestConductInterview_ErrorTypes(t *testing.T) {
 			TaskID: "t-1",
 			TrueAnalysis: &TrueIntentAnalysis{
 				Ambiguity: 0.9,
-				Scope:      "broad",
+				Scope:     "broad",
 			},
 		}
 		_, err := sp.ConductInterview(context.Background(), req)
@@ -1435,7 +1435,7 @@ func TestConductInterview_ErrorTypes(t *testing.T) {
 			TaskID: "t-1",
 			TrueAnalysis: &TrueIntentAnalysis{
 				Ambiguity: 0.9,
-				Scope:      "broad",
+				Scope:     "broad",
 			},
 		}
 		_, err := sp.ConductInterview(context.Background(), req)
@@ -1579,7 +1579,7 @@ func TestStrategicPlanner_shouldInterview(t *testing.T) {
 func TestStrategicPlanner_PairSessionNilManagerNoPanic(t *testing.T) {
 	sp := &StrategicPlanner{
 		// pairManager intentionally nil
-		logger:             slogDiscardLogger(),
+		logger:              slogDiscardLogger(),
 		simpleInputMaxChars: 100,
 	}
 	req := PlanRequest{

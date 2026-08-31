@@ -107,7 +107,7 @@ func (c *Client) initialize(ctx context.Context) (*InitializeResult, error) {
 		ProtocolVersion: ProtocolVersion,
 		Capabilities:    ClientCapabilities{},
 		ClientInfo: ImplementationInfo{
-			Name:    "meept",
+			Name: "meept",
 			// NOTE: keep in sync with internal/mcp.Version.
 			// Cannot import internal/mcp directly due to import cycle.
 			Version: ClientVersion,

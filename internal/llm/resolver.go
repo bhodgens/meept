@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -20,6 +21,12 @@ type CapabilityError struct {
 func (e *CapabilityError) Error() string {
 	return fmt.Sprintf("no model satisfies capability requirements %v for skill %q", e.Requires, e.SkillName)
 }
+
+// ErrAllModelsQuotaBlocked is returned by ResolveForAlias and
+// RotateToNextModel when every candidate model in the alias is currently
+// quota-blocked. Callers should treat it as a retry-later condition (the
+// alias unblocks when the earliest quota reset elapses), not a config error.
+var ErrAllModelsQuotaBlocked = errors.New("all models in alias are quota-blocked")
 
 // SkillRequirements defines the capability requirements for a skill.
 type SkillRequirements struct {
@@ -39,6 +46,8 @@ type Resolver struct {
 	routingLogger *RoutingLogger
 	mu            sync.Mutex
 	logger        *slog.Logger
+	// quotaCfg holds quota-aware retry settings. Nil disables quota blocking.
+	quotaCfg *QuotaWaitConfig
 }
 
 // NewResolver creates a new model resolver.
@@ -100,6 +109,31 @@ func (r *Resolver) SetRoutingLogger(rl *RoutingLogger) {
 	if rl != nil {
 		r.routingLogger = rl
 	}
+}
+
+// SetQuotaConfig attaches quota-aware retry settings. Pass nil to disable
+// quota blocking; a zero-value QuotaWaitConfig also means DISABLED (callers
+// that want enabled-with-defaults must populate the fields — see
+// ConfigFromSchema). No-op on a nil receiver to honor the typed-nil setter
+// rule (AGENTS.md).
+func (r *Resolver) SetQuotaConfig(cfg *QuotaWaitConfig) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cfg == nil {
+		r.quotaCfg = nil
+		return
+	}
+	c := *cfg // copy value: caller's struct is not aliased
+	r.quotaCfg = &c
+}
+
+// quotaEnabled reports whether quota blocking is active. Callers must hold
+// Resolver.mu.
+func (r *Resolver) quotaEnabled() bool {
+	return r.quotaCfg != nil && r.quotaCfg.Enabled
 }
 
 // DefaultModel returns the default model configuration.
@@ -369,6 +403,35 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 		}
 	}
 
+	// Check quota blocks on the current model. A blocked current model
+	// rotates to the next unblocked candidate; when every candidate is
+	// blocked, fail with ErrAllModelsQuotaBlocked instead of returning a
+	// blocked model (Bug A read health.entryBlocks directly and missed
+	// credential-level blocks; Bug B parked on a blocked model).
+	if r.quotaEnabled() {
+		if r.isQuotaBlocked(health, alias.Models[health.CurrentIndex]) {
+			nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
+			rotated := false
+			for i := 0; i < len(alias.Models); i++ {
+				candidate := alias.Models[nextIdx]
+				if !r.isQuotaBlocked(health, candidate) {
+					health.CurrentIndex = nextIdx
+					rotated = true
+					break
+				}
+				nextIdx = (nextIdx + 1) % len(alias.Models)
+			}
+			if !rotated {
+				return nil, fmt.Errorf("%w: alias %q (all %d model(s) quota-blocked)",
+					ErrAllModelsQuotaBlocked, aliasName, len(alias.Models))
+			}
+			r.logger.Info("Rotated away from quota-blocked current model",
+				"alias", aliasName,
+				"new_index", health.CurrentIndex,
+			)
+		}
+	}
+
 	// Return the active model
 	if health.CurrentIndex < len(alias.Models) {
 		chosen := alias.Models[health.CurrentIndex]
@@ -562,7 +625,11 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 	)
 }
 
-// RecordAliasSuccess records a success, resetting failure counter.
+// RecordAliasSuccess records a success, resetting failure counter and
+// lazily deleting EXPIRED quota block entries for this alias (both the
+// per-entry and per-credential maps) to bound map growth. Unexpired blocks
+// are left in place — a success on one model says nothing about another
+// model's (or the credential pool's) quota window.
 func (r *Resolver) RecordAliasSuccess(aliasName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -570,6 +637,18 @@ func (r *Resolver) RecordAliasSuccess(aliasName string) {
 	health := r.getOrCreateHealth(aliasName)
 	health.ConsecutiveFails = 0
 	health.CooldownUntil = time.Time{} // Reset cooldown
+
+	now := time.Now()
+	for key, blockedUntil := range health.entryBlocks {
+		if now.After(blockedUntil) {
+			delete(health.entryBlocks, key)
+		}
+	}
+	for key, blockedUntil := range health.credentialBlock {
+		if now.After(blockedUntil) {
+			delete(health.credentialBlock, key)
+		}
+	}
 }
 
 // getOrCreateHealth returns the health tracking for an alias, creating it if needed.
@@ -579,6 +658,8 @@ func (r *Resolver) getOrCreateHealth(aliasName string) *AliasHealth {
 		health = &AliasHealth{
 			CurrentIndex:     0,
 			ConsecutiveFails: 0,
+			entryBlocks:      make(map[string]time.Time),
+			credentialBlock:  make(map[string]time.Time),
 		}
 		r.health[aliasName] = health
 	}
@@ -620,8 +701,8 @@ func (r *Resolver) ResolveModelTier(tier string, fallback string) string {
 //     ResolveForAlias rotation semantics)
 //
 // Because non-current models are always considered available, this function
-// only returns false when the alias has exactly one model AND that single
-// model is currently in cooldown.
+// HasHealthyModels checks if the alias has at least one model that is not
+// in cooldown and not quota-blocked.
 func (r *Resolver) HasHealthyModels(aliasName string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -639,12 +720,27 @@ func (r *Resolver) HasHealthyModels(aliasName string) bool {
 	// If there is more than one model, a non-current model is always available
 	// for rotation — short-circuit.
 	if len(alias.Models) > 1 {
+		// But check if ALL models are quota-blocked
+		if r.quotaEnabled() {
+			for _, m := range alias.Models {
+				if !r.isQuotaBlocked(health, m) {
+					return true
+				}
+			}
+			return false
+		}
 		return true
 	}
 
-	// Single-model alias: healthy only if that model is not in cooldown.
+	// Single-model alias: healthy only if not in cooldown and not quota-blocked.
 	now := time.Now()
-	return health.CooldownUntil.IsZero() || now.After(health.CooldownUntil)
+	if !health.CooldownUntil.IsZero() && now.Before(health.CooldownUntil) {
+		return false
+	}
+	if r.quotaEnabled() && len(alias.Models) > 0 {
+		return !r.isQuotaBlocked(health, alias.Models[health.CurrentIndex])
+	}
+	return true
 }
 
 // RotateToNextModel forces rotation to the next model in an alias and resets failure counters.
@@ -672,8 +768,26 @@ func (r *Resolver) RotateToNextModel(aliasName string) (*ModelConfig, error) {
 		health.releasePinsForModel(alias, out.ProviderID, out.ModelID)
 	}
 
-	// Rotate to next model
-	health.CurrentIndex = (health.CurrentIndex + 1) % len(alias.Models)
+	// Rotate to the next model, skipping quota-blocked candidates. When
+	// every candidate is blocked, restore the original index and fail with
+	// ErrAllModelsQuotaBlocked (leaf 03 Task 2 semantics).
+	prevIdx := health.CurrentIndex
+	nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
+	rotated := false
+	for i := 0; i < len(alias.Models); i++ {
+		if !r.isQuotaBlocked(health, alias.Models[nextIdx]) {
+			rotated = true
+			break
+		}
+		nextIdx = (nextIdx + 1) % len(alias.Models)
+	}
+	if !rotated {
+		health.CurrentIndex = prevIdx
+		return nil, fmt.Errorf("%w: alias %q (all %d model(s) quota-blocked)",
+			ErrAllModelsQuotaBlocked, aliasName, len(alias.Models))
+	}
+
+	health.CurrentIndex = nextIdx
 	health.ConsecutiveFails = 0
 	health.CooldownUntil = time.Time{}
 	health.LastFailure = time.Time{}
@@ -747,4 +861,104 @@ func (r *Resolver) SetPricingSyncer(ps *PricingSyncer) {
 	}
 	enrich(r.defaultModel)
 	enrich(r.smallModel)
+}
+
+// quotaEntryKey returns a unique key for a provider/model pair.
+func quotaEntryKey(providerID, modelID string) string {
+	return providerID + "|" + modelID
+}
+
+// isQuotaBlocked checks if a model is currently quota-blocked.
+// Callers must hold Resolver.mu.
+func (r *Resolver) isQuotaBlocked(health *AliasHealth, m *ModelConfig) bool {
+	if health == nil || m == nil {
+		return false
+	}
+	entryKey := quotaEntryKey(m.ProviderID, m.ModelID)
+	blockedUntil, hasEntry := health.entryBlocks[entryKey]
+	if hasEntry && time.Now().Before(blockedUntil) {
+		return true
+	}
+	// Check credential-level block
+	credKey := QuotaCredentialKey(m.ProviderID, m)
+	if blockedUntil, ok := health.credentialBlock[credKey]; ok && time.Now().Before(blockedUntil) {
+		return true
+	}
+	return false
+}
+
+// BlockQuotaEntry records a quota block for a provider/model pair.
+func (r *Resolver) BlockQuotaEntry(aliasName, providerID, modelID string, unblockAt time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	health := r.getOrCreateHealth(aliasName)
+	health.entryBlocks[quotaEntryKey(providerID, modelID)] = unblockAt
+}
+
+// BlockQuotaCredential records a quota block for a credential key.
+func (r *Resolver) BlockQuotaCredential(aliasName, credentialKey string, unblockAt time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	health := r.getOrCreateHealth(aliasName)
+	health.credentialBlock[credentialKey] = unblockAt
+}
+
+// ClearQuotaBlocks clears all quota blocks for an alias.
+func (r *Resolver) ClearQuotaBlocks(aliasName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	health := r.getOrCreateHealth(aliasName)
+	health.entryBlocks = make(map[string]time.Time)
+	health.credentialBlock = make(map[string]time.Time)
+}
+
+// QuotaBlockedUntil returns the earliest unblock time for a credential key across all aliases.
+func (r *Resolver) QuotaBlockedUntil(credentialKey string) time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	earliest := time.Time{}
+	for _, health := range r.health {
+		if blockedUntil, ok := health.credentialBlock[credentialKey]; ok {
+			if earliest.IsZero() || blockedUntil.Before(earliest) {
+				earliest = blockedUntil
+			}
+		}
+	}
+	return earliest
+}
+
+// ActiveQuotaBlocks returns all active quota block statuses.
+func (r *Resolver) ActiveQuotaBlocks() []QuotaBlockStatus {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var blocks []QuotaBlockStatus
+	for aliasName, health := range r.health {
+		for entryKey, blockedUntil := range health.entryBlocks {
+			if time.Now().Before(blockedUntil) {
+				parts := strings.SplitN(entryKey, "|", 2)
+				if len(parts) == 2 {
+					blocks = append(blocks, QuotaBlockStatus{
+						AliasName:  aliasName,
+						ProviderID: parts[0],
+						ModelID:    parts[1],
+						ResetAt:    blockedUntil,
+						Remaining:  time.Until(blockedUntil),
+					})
+				}
+			}
+		}
+		for credKey, blockedUntil := range health.credentialBlock {
+			if time.Now().Before(blockedUntil) {
+				blocks = append(blocks, QuotaBlockStatus{
+					AliasName:     aliasName,
+					CredentialKey: credKey,
+					ResetAt:       blockedUntil,
+					Remaining:     time.Until(blockedUntil),
+				})
+			}
+		}
+	}
+	return blocks
 }

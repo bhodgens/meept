@@ -15,12 +15,12 @@ import (
 
 // StdioTransport implements Transport over stdio to a subprocess.
 type StdioTransport struct {
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stdout   io.ReadCloser
-	reader   *bufio.Reader
-	writeMu  sync.Mutex    // serializes header+content writes to avoid interleaved frames
-	readWG   sync.WaitGroup // tracks outstanding Read goroutines
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  io.ReadCloser
+	reader  *bufio.Reader
+	writeMu sync.Mutex     // serializes header+content writes to avoid interleaved frames
+	readWG  sync.WaitGroup // tracks outstanding Read goroutines
 }
 
 // NewStdioTransport creates a transport by starting a subprocess.

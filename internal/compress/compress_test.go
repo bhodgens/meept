@@ -314,11 +314,11 @@ func (s *memStore) Stats() CCRStats {
 	}
 
 	return CCRStats{
-		EntryCount:              int64(len(s.data)),
-		TotalOriginalTokens:     totalOriginal,
-		TotalCompressedTokens:   totalCompressed,
-		TotalRetrievals:         0,
-		ExpiredCount:            0,
+		EntryCount:            int64(len(s.data)),
+		TotalOriginalTokens:   totalOriginal,
+		TotalCompressedTokens: totalCompressed,
+		TotalRetrievals:       0,
+		ExpiredCount:          0,
 	}
 }
 

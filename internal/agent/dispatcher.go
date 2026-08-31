@@ -310,12 +310,12 @@ type DispatcherConfig struct {
 	Resolver *llm.Resolver
 	// ClassifierAlias is the resolver alias name used with Resolver.
 	// Empty defaults to "classifier" when Resolver is set.
-	ClassifierAlias string
-	ClassifierTimeout     time.Duration // Per-classification timeout; 0 = defaultClassifierTimeout (10s).
-	CapabilityMatcher     *CapabilityMatcher
-	EmbeddingClient       EmbeddingClient
-	SessionMaxAge         time.Duration
-	PlanManager           *plan.PlanManager
+	ClassifierAlias   string
+	ClassifierTimeout time.Duration // Per-classification timeout; 0 = defaultClassifierTimeout (10s).
+	CapabilityMatcher *CapabilityMatcher
+	EmbeddingClient   EmbeddingClient
+	SessionMaxAge     time.Duration
+	PlanManager       *plan.PlanManager
 	// AmbiguityThreshold configures the IntentAnalyzer's gate for blocking
 	// routing on high-ambiguity inputs. 0 means use the legacy const
 	// (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
@@ -2146,7 +2146,7 @@ var keywordPatterns = []keywordPattern{
 
 	// Code-related
 	{[]string{KeywordFix + " bug", string(IntentDebug), "error", "exception", "crash", "not working"}, string(IntentDebug), config.AgentIDDebugger, 0.8, false},
-	{[]string{"write code", "implement", "create function", "add feature", KeywordRefactor}, string(IntentCode), config.AgentIDCoder, 0.8, false},
+	{[]string{"write code", "implement", "create function", "add feature", KeywordRefactor, "create a file", "create the file"}, string(IntentCode), config.AgentIDCoder, 0.8, false},
 	{[]string{"code review", "review pr", "check code"}, string(IntentReview), config.AgentIDCoder, 0.75, false},
 
 	// Git operations

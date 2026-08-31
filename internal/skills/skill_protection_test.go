@@ -5,9 +5,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/caimlas/meept/internal/llm"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/security/taint"
-	"github.com/caimlas/meept/internal/llm"
 
 	"log/slog"
 )

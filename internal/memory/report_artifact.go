@@ -1,8 +1,8 @@
 package memory
 
 import (
-	"github.com/caimlas/meept/pkg/id"
 	"database/sql"
+	"github.com/caimlas/meept/pkg/id"
 	"os"
 	"path/filepath"
 	"time"

@@ -143,10 +143,10 @@ type syncMeta struct {
 // TestManifestJSONFormat verifies the manifest JSON structure matches expectations.
 func TestManifestJSONFormat(t *testing.T) {
 	type testManifest struct {
-		NodeID       string       `json:"node_id"`
-		Timestamp    string       `json:"timestamp"`
-		Databases    []dbInfo     `json:"databases"`
-		SyncMetadata syncMeta     `json:"sync_metadata"`
+		NodeID       string   `json:"node_id"`
+		Timestamp    string   `json:"timestamp"`
+		Databases    []dbInfo `json:"databases"`
+		SyncMetadata syncMeta `json:"sync_metadata"`
 	}
 
 	// Verify the struct can be marshaled/unmarshaled

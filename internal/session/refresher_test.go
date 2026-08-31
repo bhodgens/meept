@@ -6,17 +6,16 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
-
 )
 
 // TestRefreshRequest_JSON verifies the RefreshRequest serializes correctly.
 func TestRefreshRequest_JSON(t *testing.T) {
 	req := RefreshRequest{
-		SessionID:   "test-session-123",
-		Topic:       "debugging",
-		TurnCount:   5,
-		Keywords:    []string{"null", "pointer"},
-		FirstMsg:    "fix the null pointer",
+		SessionID: "test-session-123",
+		Topic:     "debugging",
+		TurnCount: 5,
+		Keywords:  []string{"null", "pointer"},
+		FirstMsg:  "fix the null pointer",
 	}
 
 	data, err := json.Marshal(req)
@@ -135,8 +134,6 @@ func TestSessionRefresher_Refresh_LargeTurnCount(t *testing.T) {
 		t.Error("Name should not be empty")
 	}
 }
-
-
 
 // TestRefreshResult_Validation verifies result cleanup logic.
 func TestRefreshResult_Cleanup(t *testing.T) {
@@ -278,11 +275,11 @@ func TestSessionRefresher_Refresh_FirstMessageTruncation(t *testing.T) {
 // BenchmarkRefreshRequest_Marshal benchmarks JSON marshaling performance.
 func BenchmarkRefreshRequest_Marshal(b *testing.B) {
 	req := RefreshRequest{
-		SessionID:   "test-session",
-		Topic:       "debugging",
-		TurnCount:   10,
-		Keywords:    []string{"auth", "token"},
-		FirstMsg:    "How does authentication work?",
+		SessionID: "test-session",
+		Topic:     "debugging",
+		TurnCount: 10,
+		Keywords:  []string{"auth", "token"},
+		FirstMsg:  "How does authentication work?",
 	}
 
 	b.ResetTimer()

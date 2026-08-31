@@ -115,10 +115,10 @@ type Prediction struct {
 
 // Question is an open question the user is tracking.
 type Question struct {
-	Text           string   // the question
-	RelatedClaims  []string // claim IDs that bear on this question
-	Status         string   // "open", "answered"
-	AnswerClaim    string   // claim ID that answers it (if answered)
+	Text          string   // the question
+	RelatedClaims []string // claim IDs that bear on this question
+	Status        string   // "open", "answered"
+	AnswerClaim   string   // claim ID that answers it (if answered)
 }
 
 // asString coerces a metadata value to a string, returning "" for non-strings.
@@ -195,7 +195,7 @@ func (m *Manager) StoreDecision(ctx context.Context, d Decision) (string, error)
 		d.Status = "open"
 	}
 	meta := map[string]any{
-		"status":          d.Status,
+		"status":           d.Status,
 		"expected_outcome": d.ExpectedOutcome,
 	}
 	if len(d.Alternatives) > 0 {
@@ -490,10 +490,10 @@ func (m *Manager) MarkSuperseded(ctx context.Context, oldID, newID string) (redi
 	auditID = generateAuditID()
 	if graph != nil {
 		if err := graph.AddEdge(ctx, MemoryEdge{
-			SourceID:  oldID,
-			TargetID:  newID,
-			EdgeType:  EdgeTypeSuperseded,
-			Weight:    1.0,
+			SourceID:   oldID,
+			TargetID:   newID,
+			EdgeType:   EdgeTypeSuperseded,
+			Weight:     1.0,
 			Confidence: 1.0,
 			Metadata: map[string]any{
 				"audit_id": auditID,
@@ -519,9 +519,9 @@ func (m *Manager) MarkSuperseded(ctx context.Context, oldID, newID string) (redi
 				Weight:     e.Weight,
 				Confidence: e.Confidence,
 				Metadata: map[string]any{
-					"audit_id":     auditID,
+					"audit_id":        auditID,
 					"redirected_from": oldID,
-					"at":           time.Now().Format(time.RFC3339),
+					"at":              time.Now().Format(time.RFC3339),
 				},
 			}); err != nil {
 				return redirectedEdges, auditID, fmt.Errorf("redirect edge: %w", err)

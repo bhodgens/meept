@@ -29,9 +29,9 @@ type CodeCompressor struct {
 
 // CodeCompressorConfig configures the CodeCompressor.
 type CodeCompressorConfig struct {
-	MaxLinesToShow    int      `json:"max_lines_to_show" toml:"max_lines_to_show"`
-	PreserveStrings   bool     `json:"preserve_strings" toml:"preserve_strings"`
-	Languages         []string `json:"languages" toml:"languages"`
+	MaxLinesToShow  int      `json:"max_lines_to_show" toml:"max_lines_to_show"`
+	PreserveStrings bool     `json:"preserve_strings" toml:"preserve_strings"`
+	Languages       []string `json:"languages" toml:"languages"`
 }
 
 // DefaultCodeCompressorConfig returns default configuration.

@@ -17,7 +17,6 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
-
 // TUI represents the meept-lite terminal interface.
 type TUI struct {
 	client       transport.Client

@@ -315,6 +315,7 @@ func mustMarshal(v any) json.RawMessage {
 	}
 	return data
 }
+
 // ConnectRPC connects to the daemon's Unix socket. The socket is trusted to
 // provide authenticated RPC. If the socket file is world-accessible, a warning
 // is logged so the operator can investigate unintended permission drift.

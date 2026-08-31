@@ -14,11 +14,11 @@ type AdapterRegistry struct {
 
 // AdapterEntry describes a single trained adapter.
 type AdapterEntry struct {
-	ID          string `json:"id"`            // "code-lfm2.5-8b-v1"
+	ID          string `json:"id"` // "code-lfm2.5-8b-v1"
 	Domain      string `json:"domain"`
-	Model       string `json:"model"`         // "lfm2.5-8b"
-	Path        string `json:"path"`          // "~/.meept/adapters/code/lfm2.5-8b-v1"
+	Model       string `json:"model"` // "lfm2.5-8b"
+	Path        string `json:"path"`  // "~/.meept/adapters/code/lfm2.5-8b-v1"
 	CreatedAt   string `json:"created_at"`
-	TrainingMD5 string `json:"training_md5"`  // Dataset fingerprint
+	TrainingMD5 string `json:"training_md5"` // Dataset fingerprint
 	Enabled     bool   `json:"enabled"`
 }

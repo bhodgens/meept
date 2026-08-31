@@ -72,7 +72,7 @@ func TestSidebar_PlanPanel_RendersPhases(t *testing.T) {
 // when no phases have been provided.
 func TestSidebar_PlanPanel_EmptyState(t *testing.T) {
 	s := &SidebarModel{
-		styles:       DefaultStyles(),
+		styles: DefaultStyles(),
 		expandedPanels: map[SidebarPanel]bool{
 			PanelPlan: true,
 		},
@@ -95,7 +95,7 @@ func TestSidebar_PlanPanel_EmptyState(t *testing.T) {
 // updated plan without manually toggling the panel.
 func TestSidebar_PlanPanel_SetPlanPhasesExpands(t *testing.T) {
 	s := &SidebarModel{
-		styles:       DefaultStyles(),
+		styles: DefaultStyles(),
 		expandedPanels: map[SidebarPanel]bool{
 			PanelPlan: false,
 		},
@@ -113,7 +113,7 @@ func TestSidebar_PlanPanel_SetPlanPhasesExpands(t *testing.T) {
 // when planView is nil (e.g., if sidebar was constructed without one).
 func TestSidebar_PlanPanel_NilPlanViewSafe(t *testing.T) {
 	s := &SidebarModel{
-		styles:       DefaultStyles(),
+		styles: DefaultStyles(),
 		expandedPanels: map[SidebarPanel]bool{
 			PanelPlan: true,
 		},

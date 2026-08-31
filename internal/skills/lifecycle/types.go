@@ -73,12 +73,12 @@ type UsageStats struct {
 
 // SkillEvent represents a single usage event in the event log.
 type SkillEvent struct {
-	ID         string    `json:"id"`
-	SkillName  string    `json:"skill_name"`
-	EventType  string    `json:"event_type"` // "inject" or "outcome"
-	Outcome    string    `json:"outcome,omitempty"` // populated for outcome events
-	SessionID  string    `json:"session_id,omitempty"`
-	Timestamp  time.Time `json:"timestamp"`
+	ID        string    `json:"id"`
+	SkillName string    `json:"skill_name"`
+	EventType string    `json:"event_type"`        // "inject" or "outcome"
+	Outcome   string    `json:"outcome,omitempty"` // populated for outcome events
+	SessionID string    `json:"session_id,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // VersionEntry represents a single versioned snapshot of a skill, recorded in
@@ -162,24 +162,24 @@ const (
 // of the three evolver passes (refine, promote, prune). Every proposal passes
 // through the Verifier before it is applied or turned into a plan.
 type EvolutionProposal struct {
-	Action            EvolutionProposalAction `json:"action"`
-	SkillName         string                  `json:"skill_name"`
-	Rationale         string                  `json:"rationale"`
-	CandidateContent  string                  `json:"candidate_content,omitempty"`
-	VerifierResult    *VerificationResult     `json:"verifier_result,omitempty"`
+	Action           EvolutionProposalAction `json:"action"`
+	SkillName        string                  `json:"skill_name"`
+	Rationale        string                  `json:"rationale"`
+	CandidateContent string                  `json:"candidate_content,omitempty"`
+	VerifierResult   *VerificationResult     `json:"verifier_result,omitempty"`
 }
 
 // EvolutionReport is the aggregate result of a single Evolver.RunCycle pass.
 // It contains counts for each disposition plus the full list of proposals
 // (including rejected ones, so callers can audit the decision trail).
 type EvolutionReport struct {
-	Refined  int                 `json:"refined"`   // Pass A: skills improved
-	Promoted int                 `json:"promoted"`  // Pass B: patterns promoted
-	Pruned   int                 `json:"pruned"`    // Pass C: skills archived
-	Gaps     int                 `json:"gaps"`      // Pass D: gaps filled
-	Skipped  int                 `json:"skipped"`   // proposals not applied (LLM said skip)
-	Rejected int                 `json:"rejected"`  // verifier rejected
-	Planned  int                 `json:"planned"`   // AutoApply=false → plan created
+	Refined  int                 `json:"refined"`  // Pass A: skills improved
+	Promoted int                 `json:"promoted"` // Pass B: patterns promoted
+	Pruned   int                 `json:"pruned"`   // Pass C: skills archived
+	Gaps     int                 `json:"gaps"`     // Pass D: gaps filled
+	Skipped  int                 `json:"skipped"`  // proposals not applied (LLM said skip)
+	Rejected int                 `json:"rejected"` // verifier rejected
+	Planned  int                 `json:"planned"`  // AutoApply=false → plan created
 	Details  []EvolutionProposal `json:"details"`
 }
 

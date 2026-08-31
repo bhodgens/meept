@@ -121,11 +121,11 @@ func TestDualStore_StoreRemoteSession(t *testing.T) {
 	ds.SetGossipPublisher(pub)
 
 	sess := &Session{
-		ID:           "sess-remote-1",
-		Name:         "remote",
+		ID:             "sess-remote-1",
+		Name:           "remote",
 		ConversationID: "conv-r",
-		CreatedAt:    time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC),
-		LastActivity: time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC),
+		CreatedAt:      time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC),
+		LastActivity:   time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC),
 	}
 	if err := ds.StoreRemoteSession(context.Background(), sess, "node-peer-a"); err != nil {
 		t.Fatalf("StoreRemoteSession: %v", err)

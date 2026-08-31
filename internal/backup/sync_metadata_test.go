@@ -160,11 +160,11 @@ func TestSyncMetadataStore_SetLastMergeStats_Persistence(t *testing.T) {
 
 	peerID := "peer-stats"
 	want := &MergeStats{
-		SessionsMerged: 7,
-		TurnsMerged:    42,
-		MemoriesMerged: 3,
+		SessionsMerged:  7,
+		TurnsMerged:     42,
+		MemoriesMerged:  3,
 		SkippedOrFailed: 9,
-		Errors:         1,
+		Errors:          1,
 	}
 	if err := store.SetLastMergeStats(peerID, want); err != nil {
 		t.Fatalf("SetLastMergeStats: %v", err)

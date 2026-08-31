@@ -2,60 +2,77 @@
 
 ## Meta
 
-- plan_id: plan-20260830220145-0001
-- created: 2026-08-30
+- plan_id: plan-20260831224641-0038
+- created: 2026-08-31
 - status: planning
 
 ## Summary
 
-Effectiveness is 0.00 (13 injections, 7 negative, 0 positive) and the skill body is completely empty, so every injection delivers zero guidance and actively wastes context. Prior archive proposals were rejected due to fallback scoring, so the skill will remain active — the only viable path is to replace the empty body with concise, accurate contributor-analysis guidance. The most common failure mode for this task is naive blame usage (last-touch attribution, reformat commits, moved code), so the improved content emphasizes attribution-accuracy flags and complementary commands.
+Effectiveness of 0.19 (33 negative vs 10 positive) indicates the skill is frequently invoked but failing to deliver useful results. The skill likely lacks clear scope, concrete output format, and proper tool guidance for git blame analysis.
 
 Candidate content:
----
-name: git-blame-contributor-analysis
-description: Use when attributing code to contributors — answering who wrote or last modified a file, line range, or module; measuring per-author contribution; assessing code ownership or bus factor; or preparing code-history summaries. Covers git blame, git shortlog, and per-author statistics, including attribution-accuracy caveats.
----
+# git-blame-contributor-analysis
 
-# Git Blame Contributor Analysis
-
-Attribute code to contributors accurately and summarize per-author contribution.
+## Purpose
+Analyze git blame output to identify key contributors, their commit patterns, code ownership, and file evolution over time.
 
 ## When to Use
-- "Who wrote this file/line/function?"
-- "Who are the main contributors to module X?"
-- Ownership, onboarding, bus-factor, or reviewer-selection questions.
+- User asks about who authored/modified specific files, lines, or sections of code.
+- User wants to understand code ownership or responsibility for a file/directory.
+- User asks about contributor activity, commit frequency, or change history.
+- User needs to find the original author of a specific line or block of code.
 
-## Core Commands
+## NOT for
+- General code review or quality assessment.
+- Merging or migrating repositories.
+- Analyzing non-git version-controlled content.
 
-| Goal | Command |
-|---|---|
-| Blame a file with author emails | `git blame -e <file>` |
-| Blame a line range | `git blame -L <start>,<end> <file>` |
-| Ignore whitespace-only changes | `git blame -w <file>` |
-| Detect moved/copied code | `git blame -M -C -C <file>` |
-| Skip known reformat commits | `git blame --ignore-rev <rev>` (or list revs in `.git-blame-ignore-revs`) |
-| Machine-readable output | `git blame --porcelain <file>` |
-| Commit counts per author | `git shortlog -sne` (add `--all` for all branches) |
-| Per-author churn on a path | `git log --follow --numstat --format='%an' -- <file>` |
+## Tools Available
+- `git blame` — line-level attribution
+- `git log` — commit history and contributor stats
+- `git shortlog` — summarized contributor output
+- File reading for context around blamed lines
 
-## Attribution Accuracy (critical)
-Blame shows the **last** commit that touched each line, not the original author. Before reporting results:
-1. Add `-w` so reformatting/reindentation does not steal attribution.
-2. Identify bulk-move, rename, or reformat commits; re-run with `--ignore-rev`, or recommend committing a `.git-blame-ignore-revs` file.
-3. Use `-M -C` when code was copied or moved from elsewhere in the repo.
-4. For renamed files, use `git log --follow -- <path>` to reach original authors.
+## Steps
+1. **Understand the scope**: Determine whether the user is asking about a specific file, directory, or repository-wide contributor analysis.
+2. **Gather blame data**:
+   - Run `git blame <file>` for line-level attribution.
+   - Run `git blame -e <file>` to include author emails.
+   - Run `git log --follow -- <file>` for full history including renames.
+3. **Summarize contributors**:
+   - Run `git shortlog -sn -- <file>` to rank contributors by commit count.
+   - Cross-reference with `git blame` output to identify dominant authors.
+4. **Annotate findings**:
+   - Note lines added/most recently modified by different contributors.
+   - Identify stale sections (unchanged for long periods) vs. actively maintained ones.
+5. **Present results**:
+   - Show top contributors with commit counts and affected line ranges.
+   - Highlight any surprising or unexpected attribution (e.g., large sections authored by a low-commit-count contributor).
+   - Include file path and any relevant context about the code section.
 
-## Summarizing Results
-- Group blamed lines by author:
-  `git blame --porcelain <file> | grep '^author ' | sort | uniq -c | sort -rn`
-- Report both **line attribution** (blame) and **commit activity** (shortlog) — they answer different questions and often disagree.
-- Always state caveats: last-touch attribution semantics, refactor commits excluded or included, branches and date range used.
+## Output Format
+```
+### Contributor Analysis: <file path>
 
-## Pitfalls
-- Do not equate blame line counts with authorship credit; refactors shift attribution over time.
-- Check provenance before blaming generated or vendored files.
-- Scope blame with `-L` ranges or pathspecs in large repos to keep output small and fast.
+**Top Contributors:**
+1. <Author> — <N> commits, ~<X>% of file
+2. <Author> — <N> commits, ~<X>% of file
+...
 
+**Key Findings:**
+- <Specific observation about code ownership or notable lines>
+- <Any patterns in contribution over time>
+
+**Original Authors of Notable Sections:**
+- Lines <X>-<Y>: <Author> (<commit hash>) — <brief description if available>
+```
+
+## Best Practices
+- Always specify the file path when running git commands.
+- Use `--relative` flag if running from a subdirectory.
+- Combine blame data with commit messages for richer context.
+- If the file has no git history (e.g., newly added), state so explicitly.
+- Do not fabricate contributor data; report accurately even if sparse.
 
 ## Notes
 

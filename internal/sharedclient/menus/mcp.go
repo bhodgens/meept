@@ -25,10 +25,10 @@ type mcpServerConfig struct {
 
 // mcpServerStats mirrors the JSON tags of mcp.ServerStats.
 type mcpServerStats struct {
-	State         string `json:"state"`
-	Requests      int64  `json:"requests"`
-	Errors        int64  `json:"errors"`
-	LastError     string `json:"last_error"`
+	State     string `json:"state"`
+	Requests  int64  `json:"requests"`
+	Errors    int64  `json:"errors"`
+	LastError string `json:"last_error"`
 }
 
 // mcpServerStatusEntry mirrors mcp.ServerStatusEntry.

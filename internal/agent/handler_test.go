@@ -340,7 +340,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck(t *testing.T) {
 			ID:   "task-123",
 			Name: "build new feature",
 		},
-		AgentID:      "orchestrator",
+		AgentID:       "orchestrator",
 		SuggestedMode: "plan",
 	}
 
@@ -487,15 +487,15 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_IncludesMode(t *testing.T) {
 	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 
 	cases := []struct {
-		mode     string
+		mode      string
 		wantLabel string
 	}{
 		{"direct", "executing directly"},
 		{"plan", "planned"},
 		{"spec_plan", "spec-planned (multi-phase)"},
 		{"spec_pair", "pair session"},
-		{"", "planned"},       // empty falls back to default
-		{"bogus", "planned"},  // unknown falls back to default
+		{"", "planned"},      // empty falls back to default
+		{"bogus", "planned"}, // unknown falls back to default
 	}
 
 	for _, c := range cases {
@@ -504,7 +504,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_IncludesMode(t *testing.T) {
 				ID:   "task-mode-" + c.mode,
 				Name: "mode test",
 			},
-			AgentID:      "orchestrator",
+			AgentID:       "orchestrator",
 			SuggestedMode: c.mode,
 		}
 

@@ -24,7 +24,7 @@ func TestQuotaRetryConfigDefaults(t *testing.T) {
 
 func TestNormalizeQuotaRetryDefaults(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input QuotaRetryConfig
 		want  QuotaRetryConfig
 	}{

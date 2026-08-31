@@ -30,11 +30,11 @@ func NewSessionRefresher(llmClient *llm.Client, logger *slog.Logger) *SessionRef
 
 // RefreshRequest contains parameters for refreshing a session title.
 type RefreshRequest struct {
-	SessionID   string   `json:"session_id"`
-	Topic       string   `json:"topic,omitempty"`      // Current dominant topic
-	TurnCount   int      `json:"turn_count"`           // Number of exchanges
-	Keywords    []string `json:"keywords,omitempty"`   // Extracted keywords
-	FirstMsg    string   `json:"first_message,omitempty"` // Original first message for context
+	SessionID string   `json:"session_id"`
+	Topic     string   `json:"topic,omitempty"`         // Current dominant topic
+	TurnCount int      `json:"turn_count"`              // Number of exchanges
+	Keywords  []string `json:"keywords,omitempty"`      // Extracted keywords
+	FirstMsg  string   `json:"first_message,omitempty"` // Original first message for context
 }
 
 // RefreshResult contains the updated title.

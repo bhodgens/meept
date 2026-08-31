@@ -9,20 +9,20 @@ import (
 
 // BackupManifest describes a single backup set.
 type BackupManifest struct {
-	NodeID        string         `json:"node_id"`
-	Timestamp     time.Time      `json:"timestamp"`
-	Databases     []DatabaseInfo `json:"databases"`
-	SyncMetadata  SyncMetadata   `json:"sync_metadata"`
+	NodeID       string         `json:"node_id"`
+	Timestamp    time.Time      `json:"timestamp"`
+	Databases    []DatabaseInfo `json:"databases"`
+	SyncMetadata SyncMetadata   `json:"sync_metadata"`
 }
 
 // DatabaseInfo holds metadata for a single backed-up database file.
 type DatabaseInfo struct {
-	Name                 string `json:"name"`
-	CompressedSize       int64  `json:"compressed_size"`
-	UncompressedSize     int64  `json:"uncompressed_size"`
-	SHA256               string `json:"sha256"`
-	OriginalPath         string `json:"-"` // not serialized, used internally
-	CompressedPath       string `json:"compressed_path"`
+	Name             string `json:"name"`
+	CompressedSize   int64  `json:"compressed_size"`
+	UncompressedSize int64  `json:"uncompressed_size"`
+	SHA256           string `json:"sha256"`
+	OriginalPath     string `json:"-"` // not serialized, used internally
+	CompressedPath   string `json:"compressed_path"`
 }
 
 // SyncMetadata tracks sync state for future phases (config sync, gossip).
@@ -73,12 +73,12 @@ func GenerateManifest(nodeID string, dbPaths []string) (*BackupManifest, error) 
 		}
 
 		m.Databases = append(m.Databases, DatabaseInfo{
-			Name:                 name,
-			UncompressedSize:     info.Size(),
-			CompressedSize:       compressedSize,
-			SHA256:               sha,
-			OriginalPath:         dbPath,
-			CompressedPath:       compressedPath,
+			Name:             name,
+			UncompressedSize: info.Size(),
+			CompressedSize:   compressedSize,
+			SHA256:           sha,
+			OriginalPath:     dbPath,
+			CompressedPath:   compressedPath,
 		})
 	}
 

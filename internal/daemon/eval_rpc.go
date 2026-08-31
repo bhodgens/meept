@@ -1,11 +1,14 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
 	"github.com/caimlas/meept/internal/comm/http"
+	"github.com/caimlas/meept/internal/eval"
 	"github.com/caimlas/meept/internal/rpc"
+	"github.com/caimlas/meept/internal/selfimprove"
 )
 
 // evalStoreDir returns the absolute eval store directory for the given home.
@@ -31,5 +34,21 @@ func registerEvalRPCHandlers(server *rpc.Server, h *http.EvalHandler) {
 	}
 	for method, handler := range h.EvalRPCHandlers() {
 		server.RegisterHandler(method, handler)
+	}
+}
+
+// newEvalJudgmentLoader builds the C7 judgment loader (harness-eval leaf 08)
+// for the learning pipeline: it reads the persisted eval.TrajectoryJudgment
+// for a trajectory ID from the same DiskStore directory the HTTP and RPC
+// eval handlers use. Lives here because the daemon package can import both
+// eval and selfimprove, which cannot import each other.
+func newEvalJudgmentLoader() func(ctx context.Context, trajectoryID string) (selfimprove.JudgmentOutcome, error) {
+	store := eval.NewDiskStore(evalStoreDir(evalHomeDir()))
+	return func(ctx context.Context, trajectoryID string) (selfimprove.JudgmentOutcome, error) {
+		j, err := store.LoadJudgment(ctx, trajectoryID)
+		if err != nil {
+			return selfimprove.JudgmentOutcome{}, err
+		}
+		return selfimprove.JudgmentOutcome{Passed: j.Passed}, nil
 	}
 }

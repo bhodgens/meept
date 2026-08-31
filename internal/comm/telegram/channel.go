@@ -13,13 +13,13 @@ import (
 
 // TelegramChannelConfig holds configuration for the TelegramChannel adapter.
 type TelegramChannelConfig struct {
-	Token        string   // Telegram bot API token
-	AllowedUsers []int64  // User IDs allowed to interact (empty = all)
-	AllowedChats []int64  // Chat IDs allowed (empty = all)
-	PollTimeout  int      // Long polling timeout in seconds
-	DataDir      string   // Directory for session persistence
-	BotID        string   // Unique bot ID for framework registration
-	BotName      string   // Human-readable bot name
+	Token        string  // Telegram bot API token
+	AllowedUsers []int64 // User IDs allowed to interact (empty = all)
+	AllowedChats []int64 // Chat IDs allowed (empty = all)
+	PollTimeout  int     // Long polling timeout in seconds
+	DataDir      string  // Directory for session persistence
+	BotID        string  // Unique bot ID for framework registration
+	BotName      string  // Human-readable bot name
 }
 
 // Validate checks that the config has all required fields.
@@ -86,12 +86,12 @@ func NewTelegramChannel(cfg TelegramChannelConfig, sessionMgr session.Store, age
 	}
 
 	return &TelegramChannel{
-		baseBot: base,
-		botClient:      botClient,
-		handler:        tgHandler,
-		config:         cfg,
-		logger:         logger,
-		sessionMgr:     sessionMgr,
+		baseBot:    base,
+		botClient:  botClient,
+		handler:    tgHandler,
+		config:     cfg,
+		logger:     logger,
+		sessionMgr: sessionMgr,
 	}, nil
 }
 

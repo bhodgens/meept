@@ -132,7 +132,7 @@ func (ti *ThreadIndicator) viewCompact() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(ti.styles.indicator.Render(" \u25cf "))  // bullet
+	b.WriteString(ti.styles.indicator.Render(" \u25cf ")) // bullet
 	b.WriteString(ti.styles.topicLabel.Render("thread: " + label))
 
 	if len(ti.threads) > 1 {
@@ -221,4 +221,3 @@ func sortThreadsByActivity(threads []types.Thread) {
 		return 0
 	})
 }
-

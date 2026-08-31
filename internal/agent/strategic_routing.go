@@ -11,10 +11,10 @@ import (
 // It replaces the hardcoded selectActorAgent/selectReviewerAgent switch
 // statements in strategic.go.
 type RoutingTable struct {
-	actor              map[string]string // intent → actor agent ID
-	reviewer           map[string]string // intent → reviewer agent ID
-	fallbackActor      string
-	fallbackReviewer   string
+	actor            map[string]string // intent → actor agent ID
+	reviewer         map[string]string // intent → reviewer agent ID
+	fallbackActor    string
+	fallbackReviewer string
 }
 
 // NewDefaultRoutingTable returns the routing table matching current hardcoded

@@ -7,9 +7,9 @@ import (
 
 // ActivityState tracks the most recent activity for a single session.
 type ActivityState struct {
-	SessionID string
+	SessionID    string
 	LastActivity time.Time
-	ClientID string
+	ClientID     string
 }
 
 // ActivityTracker tracks last-activity timestamps per session so callers

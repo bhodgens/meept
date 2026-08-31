@@ -1093,7 +1093,7 @@ func TestCreateTask_AssignedAgent_Empty(t *testing.T) {
 // creating or writing files are routed to the coder agent via heuristic fallback.
 func TestHeuristicFallback_FileWriteKeywords(t *testing.T) {
 	cases := []struct {
-		name string
+		name  string
 		input string
 	}{
 		{"create a file", "Create a file named answer.txt containing the text"},
@@ -1116,5 +1116,89 @@ func TestHeuristicFallback_FileWriteKeywords(t *testing.T) {
 					tc.input, intent.Type, string(IntentCode))
 			}
 		})
+	}
+}
+
+// TestKeywordClassifier_CodeWriteFileKeywords verifies that the keyword
+// classifier routes file-write prompts to the coder agent (not chat or writer).
+func TestKeywordClassifier_CodeWriteFileKeywords(t *testing.T) {
+	c := &KeywordClassifier{}
+	ctx := context.Background()
+
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"create a file prompt", "Create a file named answer.txt in the repository root"},
+		{"write code", "Write code to parse this JSON file"},
+		{"create the file", "Create the file at /tmp/output.txt with this content"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			intents := c.ClassifyAll(ctx, tc.input, nil)
+			if len(intents) == 0 {
+				t.Fatalf("ClassifyAll(%q) returned no intents", tc.input)
+			}
+			top := intents[0]
+			if top.AgentType != config.AgentIDCoder {
+				t.Errorf("ClassifyAll(%q) top agent = %q, want %q",
+					tc.input, top.AgentType, config.AgentIDCoder)
+			}
+			if top.Type != string(IntentCode) {
+				t.Errorf("ClassifyAll(%q) top type = %q, want %q",
+					tc.input, top.Type, string(IntentCode))
+			}
+		})
+	}
+}
+
+// TestHeuristicFallback_Disambiguation verifies that similar keywords
+// route to different agents based on context (write a file vs write an essay).
+func TestHeuristicFallback_Disambiguation(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		wantAgent string
+		wantType  string
+	}{
+		// File-write → coder (heuristicFallback catches these)
+		{"create a file", "Create a file named output.txt", config.AgentIDCoder, string(IntentCode)},
+		{"write a file", "Write a file named results.csv", config.AgentIDCoder, string(IntentCode)},
+		{"write the file", "Write the file to disk with this content", config.AgentIDCoder, string(IntentCode)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			intent := heuristicFallback(tc.input)
+			if intent == nil {
+				t.Fatalf("heuristicFallback(%q) returned nil", tc.input)
+			}
+			if intent.AgentType != tc.wantAgent {
+				t.Errorf("heuristicFallback(%q) agent = %q, want %q",
+					tc.input, intent.AgentType, tc.wantAgent)
+			}
+			if intent.Type != tc.wantType {
+				t.Errorf("heuristicFallback(%q) type = %q, want %q",
+					tc.input, intent.Type, tc.wantType)
+			}
+		})
+	}
+}
+
+// TestMultiTurnRoutingConsistency verifies that code-intent conversations
+// stay routed to coder across multiple turns.
+func TestMultiTurnRoutingConsistency(t *testing.T) {
+	c := &KeywordClassifier{}
+	ctx := context.Background()
+
+	// First turn: create a file
+	intents := c.ClassifyAll(ctx, "Create a file named answer.txt containing 42", nil)
+	if len(intents) == 0 || intents[0].AgentType != config.AgentIDCoder {
+		t.Errorf("first turn: expected coder agent, got %v", intents)
+	}
+
+	// Second turn: related follow-up (verify still routes to code agent)
+	intents = c.ClassifyAll(ctx, "Read the file and check it contains the number 42", nil)
+	if len(intents) > 0 && intents[0].AgentType != config.AgentIDCoder {
+		t.Errorf("second turn: expected coder agent for follow-up, got %v", intents[0])
 	}
 }

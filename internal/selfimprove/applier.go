@@ -39,6 +39,40 @@ var trustedRootPrefixes = []string{
 	"internal/selfimprove/validator.go",
 	"config/meept.json5",
 	"config/employees/",
+	// Eval oracle fixtures (harness-eval C5): the runs that judge skill
+	// quality must not be editable by the thing being judged.
+	"testdata/eval/",
+}
+
+// gateFrontmatterDeny marks the YAML frontmatter block of roster AGENT.md
+// files. C5 (harness-eval): `meept agents set-gate` is the only gate
+// mutator, and roster agents carry `gate:` in their AGENT.md frontmatter —
+// so the applier may edit an AGENT.md prompt body but never its frontmatter
+// (role/capabilities/gate live there). A whole-file deny would block the
+// prompt-body writes C5 explicitly allows, hence the section-level guard.
+const gateFrontmatterDeny = "config/agents/"
+
+// isGateFrontmatterPath reports whether relPath is a roster AGENT.md whose
+// frontmatter block must stay applier-untouchable.
+func isGateFrontmatterPath(relPath string) bool {
+	cleaned := filepath.Clean(strings.ReplaceAll(relPath, "\\", "/"))
+	if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "..") {
+		return false // odd shapes fall through to denyTrustedRoot's own checks
+	}
+	return strings.HasPrefix(cleaned, gateFrontmatterDeny) && strings.HasSuffix(cleaned, "/AGENT.md")
+}
+
+// denyGateFrontmatter rejects diffs that touch the YAML frontmatter block
+// (the `---`-delimited head) of a roster AGENT.md. Instruction bodies stay
+// writable per C5.
+func denyGateFrontmatter(relPath, diff string) error {
+	if !isGateFrontmatterPath(relPath) {
+		return nil
+	}
+	if idx := strings.Index(diff, "\n---\n"); idx >= 0 {
+		return fmt.Errorf("%w: %s frontmatter", ErrTrustedRoot, relPath)
+	}
+	return nil
 }
 
 // ChangeApplier applies validated fixes to the codebase.
@@ -114,6 +148,14 @@ func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix, approvedBy
 	// also prevents traversal targets from being copied into backups.
 	if err := a.denyTrustedRoot(fix.FilePath); err != nil {
 		a.logger.Warn("fix denied: trusted root", "fix_id", fix.ID, "path", fix.FilePath)
+		return nil, err
+	}
+
+	// Deny AGENT.md frontmatter edits (harness-eval C5): gate commands are
+	// CLI-only, and roster AGENT.md frontmatter carries the gate block.
+	// Checked before backup for the same reason as above.
+	if err := denyGateFrontmatter(fix.FilePath, fix.Diff); err != nil {
+		a.logger.Warn("fix denied: gate frontmatter", "fix_id", fix.ID, "path", fix.FilePath)
 		return nil, err
 	}
 

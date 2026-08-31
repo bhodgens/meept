@@ -1772,7 +1772,7 @@ class SdkApiClient {
       if (query != null && query.isNotEmpty) {
         params['query'] = query;
       }
-      final raw = await _get('/api/v1/memory/facts', queryParameters: params.isNotEmpty ? params : null);
+      final raw = await _get('/api/v1/memory/facts', query: params.isNotEmpty ? params : null);
       final factsRaw = raw['facts'] as List?;
       if (factsRaw == null) return [];
       return factsRaw
@@ -1783,4 +1783,20 @@ class SdkApiClient {
       throw _handleError(e);
     }
   }
+}
+
+/// Exception thrown by [SdkApiClient].
+class SdkApiException implements Exception {
+  final String message;
+  final int statusCode;
+  final dynamic response;
+
+  SdkApiException({
+    required this.message,
+    required this.statusCode,
+    this.response,
+  });
+
+  @override
+  String toString() => 'SdkApiException: $message (HTTP $statusCode)';
 }

@@ -328,4 +328,3 @@ func stripFrontmatter(body string) string {
 	}
 	return body
 }
-

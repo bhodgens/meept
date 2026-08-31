@@ -11,9 +11,9 @@ import '../../providers/tab_activation_provider.dart'
     show keyboardFocusProvider;
 import '../../models/api_models.dart';
 import '../../providers/agent_provider.dart';
-import '../../utils/format_duration.dart';
 import 'eval_runs_panel.dart';
 import 'facts_panel.dart';
+import 'quota_status.dart';
 
 /// Agents tab - displays all available agents.
 ///
@@ -77,12 +77,22 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
       final type = m['type'] as String?;
       return type == 'agent_progress' && m['to'] != null;
     }).listen((msg) {
-      final quota = AgentQuotaPayload.fromJson(msg);
-      ref.read(agentProvider.notifier).handleQuotaEvent(
-        agentId: quota.agentId,
-        to: quota.to,
-        unblockAt: quota.unblockAt,
-      );
+      // AgentProgress.fromJson is null-safe by design; a malformed payload
+      // must never crash the listener. Guard with try/catch anyway.
+      try {
+        final progress = AgentProgress.fromJson(msg);
+        final quota = progress.quota;
+        if (quota == null) return;
+        ref.read(agentProvider.notifier).handleQuotaEvent(
+          agentId: quota.agentId,
+          to: quota.to,
+          unblockAt: quota.unblockAt,
+          fallbackModel: quota.fallbackModel,
+          escalation: quota.escalation,
+        );
+      } catch (_) {
+        // malformed quota payload — ignore without crash
+      }
     });
   }
 
@@ -169,7 +179,10 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                 width: 300,
                 child: Column(
                   children: [
-                    _buildGoalsPane(activeAgent),
+                    // Expanded: the goals pane's own Column uses Expanded
+                    // children (goal list); without a flex parent it would
+                    // receive unbounded height and crash layout.
+                    Expanded(child: _buildGoalsPane(activeAgent)),
                     const SizedBox(height: 12),
                     const EvalRunsPanel(),
                     const SizedBox(height: 12),
@@ -334,7 +347,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ),
             if (quotaState != null) ...[
               const SizedBox(height: 4),
-              _QuotaBadge(quotaState: quotaState),
+              QuotaStatusBadge(quotaState: quotaState),
             ],
           ],
         ),
@@ -403,66 +416,6 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ),
           ),
       ],
-    );
-  }
-}
-
-/// A small badge showing quota wait or blocked status under an agent tile.
-class _QuotaBadge extends StatelessWidget {
-  final AgentQuotaState quotaState;
-
-  const _QuotaBadge({required this.quotaState});
-
-  @override
-  Widget build(BuildContext context) {
-    if (quotaState.quotaBlocked) {
-      return const _BlockedBadge();
-    }
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final waitUntil = quotaState.quotaWaitUntilEpoch;
-    if (waitUntil == null) return const SizedBox.shrink();
-    final remaining = Duration(milliseconds: waitUntil - nowMs);
-    final label = formatDuration(remaining);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      decoration: BoxDecoration(
-        color: CyberpunkColors.yellowWarning.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        'quota resets in $label',
-        style: CyberpunkTypography.bodySmall.copyWith(
-          color: CyberpunkColors.yellowWarning,
-          fontFamily: 'SourceCodePro',
-        ),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-    );
-  }
-}
-
-/// Badge for agents stuck in blocked state.
-class _BlockedBadge extends StatelessWidget {
-  const _BlockedBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      decoration: BoxDecoration(
-        color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        'blocked — action required',
-        style: CyberpunkTypography.bodySmall.copyWith(
-          color: CyberpunkColors.redAlert,
-          fontFamily: 'SourceCodePro',
-        ),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
     );
   }
 }

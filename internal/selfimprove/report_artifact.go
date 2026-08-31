@@ -21,11 +21,11 @@ const (
 
 // ReportConfig holds configuration for the ReportArtifact generator.
 type ReportConfig struct {
-	OutputDir            string       `json:"output_dir"`
-	Format               ReportFormat `json:"format"`
-	IncludeTraces        bool         `json:"include_traces"`
-	IncludeRecommendations bool       `json:"include_recommendations"`
-	CleanupAfterDays     int          `json:"cleanup_after_days"`
+	OutputDir              string       `json:"output_dir"`
+	Format                 ReportFormat `json:"format"`
+	IncludeTraces          bool         `json:"include_traces"`
+	IncludeRecommendations bool         `json:"include_recommendations"`
+	CleanupAfterDays       int          `json:"cleanup_after_days"`
 	// ModelsUsed records which LLM models were invoked during the analysis run.
 	ModelsUsed []string `json:"models_used,omitempty"`
 	// EmployeeID identifies the employee that triggered the report.
@@ -36,11 +36,11 @@ type ReportConfig struct {
 func DefaultReportConfig() ReportConfig {
 	homeDir, _ := os.UserHomeDir()
 	return ReportConfig{
-		OutputDir:            filepath.Join(homeDir, ".meept", "reports"),
-		Format:               ReportFormatMarkdown,
-		IncludeTraces:        true,
+		OutputDir:              filepath.Join(homeDir, ".meept", "reports"),
+		Format:                 ReportFormatMarkdown,
+		IncludeTraces:          true,
 		IncludeRecommendations: true,
-		CleanupAfterDays:     30,
+		CleanupAfterDays:       30,
 	}
 }
 
@@ -90,9 +90,9 @@ func NewReportArtifact(cfg ReportConfig) (*ReportArtifact, error) {
 // Generate creates a report from the given data and saves it to disk.
 // Creates a timestamped subdirectory under config.OutputDir containing:
 //
-//	- report.md/json/html (main report)
-//	- traces.jsonl (optional, when IncludeTraces)
-//	- metadata.json (timestamps, models, etc.)
+//   - report.md/json/html (main report)
+//   - traces.jsonl (optional, when IncludeTraces)
+//   - metadata.json (timestamps, models, etc.)
 func (ra *ReportArtifact) Generate(failures []FailureMode, analysis string) error {
 	return ra.GenerateWithMeta(failures, analysis, nil, "")
 }
@@ -144,7 +144,7 @@ func (ra *ReportArtifact) GenerateWithMeta(failures []FailureMode, analysis stri
 		Format:         string(ra.config.Format),
 		ModelsUsed:     modelsUsed,
 		EmployeeID:     employeeID,
-		FailureCount: len(failures),
+		FailureCount:   len(failures),
 		AnalysisLength: len(analysis),
 		OutputDir:      subDir,
 	}
@@ -278,13 +278,13 @@ func (ra *ReportArtifact) writeMarkdown(dir string, failures []FailureMode, anal
 // -----------------------------------------------------------------------
 
 type reportJSON struct {
-	Timestamp              string           `json:"timestamp"`
-	Format                 string           `json:"format"`
-	Failures               []FailureMode    `json:"failures"`
-	Analysis               string           `json:"analysis"`
-	IncludeTraces          bool             `json:"include_traces"`
-	IncludeRecommendations bool             `json:"include_recommendations"`
-	FailureCount           int                `json:"failure_count"`
+	Timestamp              string        `json:"timestamp"`
+	Format                 string        `json:"format"`
+	Failures               []FailureMode `json:"failures"`
+	Analysis               string        `json:"analysis"`
+	IncludeTraces          bool          `json:"include_traces"`
+	IncludeRecommendations bool          `json:"include_recommendations"`
+	FailureCount           int           `json:"failure_count"`
 }
 
 func (ra *ReportArtifact) writeJSON(dir string, failures []FailureMode, analysis string) (string, error) {
@@ -295,7 +295,7 @@ func (ra *ReportArtifact) writeJSON(dir string, failures []FailureMode, analysis
 		Analysis:               analysis,
 		IncludeTraces:          ra.config.IncludeTraces,
 		IncludeRecommendations: ra.config.IncludeRecommendations,
-		FailureCount:         len(failures),
+		FailureCount:           len(failures),
 	}
 	out, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -441,13 +441,13 @@ func (ra *ReportArtifact) writeHTML(dir string, failures []FailureMode, analysis
 
 // ReportMetadata captures static information about a generated report.
 type ReportMetadata struct {
-	Timestamp        time.Time  `json:"timestamp"`
-	Format           string     `json:"format"`
-	ModelsUsed       []string   `json:"models_used,omitempty"`
-	EmployeeID       string     `json:"employee_id,omitempty"`
-	FailureCount     int        `json:"failure_count"`
-	AnalysisLength   int        `json:"analysis_length"`
-	OutputDir        string     `json:"output_dir"`
+	Timestamp      time.Time `json:"timestamp"`
+	Format         string    `json:"format"`
+	ModelsUsed     []string  `json:"models_used,omitempty"`
+	EmployeeID     string    `json:"employee_id,omitempty"`
+	FailureCount   int       `json:"failure_count"`
+	AnalysisLength int       `json:"analysis_length"`
+	OutputDir      string    `json:"output_dir"`
 }
 
 func (ra *ReportArtifact) writeMetadata(dir string, meta *ReportMetadata) error {

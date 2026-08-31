@@ -136,8 +136,8 @@ func (m *CapabilityMatcher) matchByCapabilityIndex(inputLower string) *MatchResu
 	// Accept if: exact skill-name mention, OR total IDF weight and at least
 	// one distinctive (rare) keyword clear their floors.
 	const (
-		minTotalWeight    = 6.0 // sum of matched keyword weights
-		minDistinctiveWt  = 2.5 // single best keyword must be reasonably rare
+		minTotalWeight   = 6.0 // sum of matched keyword weights
+		minDistinctiveWt = 2.5 // single best keyword must be reasonably rare
 	)
 	hasExactNameHit := false
 	totalWeight := 0.0

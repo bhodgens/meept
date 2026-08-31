@@ -1,9 +1,9 @@
 package http
 
 import (
-	"github.com/caimlas/meept/pkg/id"
 	"encoding/json"
 	"fmt"
+	"github.com/caimlas/meept/pkg/id"
 	"log/slog"
 	"net/http"
 	"strings"

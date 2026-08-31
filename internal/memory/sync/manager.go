@@ -334,7 +334,7 @@ func (s *SyncManager) Distill(ctx context.Context, taskID, agentID string) (*Dis
 		// Queue for retry if configured
 		if s.config.Sync.RetryOnFailure {
 			s.queueRetry(RetryItem{
-				ID:          id.Generate("distill-"+taskID+"-"),
+				ID:          id.Generate("distill-" + taskID + "-"),
 				Operation:   OperationDistill,
 				TaskID:      taskID,
 				AgentID:     agentID,

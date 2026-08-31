@@ -74,6 +74,7 @@ var _ NonRetryableError = (*QuotaResetError)(nil)
 
 // QuotaBlockStatus is a snapshot of an active quota block for broker/query APIs.
 type QuotaBlockStatus struct {
+	AliasName     string
 	ProviderID    string
 	ModelID       string
 	CredentialKey string
@@ -95,8 +96,7 @@ func AsQuotaResetError(err error) (*QuotaResetError, bool) {
 	if err == nil {
 		return nil, false
 	}
-	var qe *QuotaResetError
-	if errors.As(err, &qe) {
+	if qe, ok := errors.AsType[*QuotaResetError](err); ok {
 		return qe, true
 	}
 	return nil, false
@@ -107,6 +107,44 @@ type QuotaContext struct {
 	ProviderID string
 	ModelID    string
 	MaxWait    time.Duration
+}
+
+// effectiveQuotaMaxWait resolves the wait upper bound: explicit context
+// value, else the client-configured value, else the 24h default.
+func (q QuotaContext) effectiveQuotaMaxWait(clientWait time.Duration) time.Duration {
+	if q.MaxWait > 0 {
+		return q.MaxWait
+	}
+	if clientWait > 0 {
+		return clientWait
+	}
+	return DefaultQuotaMaxWait
+}
+
+// classifyQuotaDecision decides whether a 429/402 response is a quota-window
+// error (QuotaResetError) or a short-cycle rate limit (keep RateLimitError).
+// Leaf-01 rule: short-cycle limits that carry retriable=true and a small
+// retry-after (< 5m) stay RateLimitError; everything else on 429/402 with a
+// quota-shaped body or a reset horizon classifies as quota.
+const shortCycleRetryAfter = 5 * time.Minute
+
+func classifyQuotaDecision(statusCode int, body []byte, providerDetail *ProviderError) bool {
+	if statusCode != http.StatusTooManyRequests && statusCode != http.StatusPaymentRequired {
+		return false
+	}
+	if statusCode == http.StatusPaymentRequired {
+		return true
+	}
+	// Short-cycle rate limits stay RateLimitError (do not swallow them).
+	if providerDetail != nil && providerDetail.Retriable &&
+		providerDetail.RetryAfter > 0 && providerDetail.RetryAfter < shortCycleRetryAfter {
+		return false
+	}
+	// Structured quota shapes.
+	if qb := parseQuotaBody(body); qb != nil && (qb.Code != "" || !qb.ResetAt.IsZero()) {
+		return true
+	}
+	return false
 }
 
 // formatDuration formats a duration for user-facing display. Values are
@@ -138,7 +176,7 @@ func ParseQuotaResponse(statusCode int, header http.Header, body []byte, known Q
 		ProviderID: known.ProviderID,
 		ModelID:    known.ModelID,
 		StatusCode: statusCode,
-		MaxWait:    known.MaxWait,
+		MaxWait:    known.effectiveQuotaMaxWait(0),
 	}
 
 	// Try structured body parsing first
@@ -233,21 +271,6 @@ func parseQuotaBody(body []byte) *quotaBody {
 		return b
 	}
 
-	// Gemini/Anthropic nested error shape
-	if errObj, ok := raw["error"].(map[string]any); ok {
-		if errMsg, ok := errObj["message"].(string); ok && b.Message == "" {
-			b.Message = errMsg
-		}
-		if errType, ok := errObj["type"].(string); ok && b.Code == "" {
-			b.Code = errType
-		}
-		// Check for quota_exceeded type
-		if b.Code == "rate_limit_error" && strings.Contains(b.Message, "quota") {
-			b.Code = "quota_exceeded"
-		}
-		return b
-	}
-
 	// Flat shape with code field (Tencent)
 	if code, ok := raw["code"].(float64); ok {
 		b.Code = fmt.Sprintf("%.0f", code)
@@ -315,6 +338,8 @@ func parseQuotaResetHeader(header http.Header) time.Time {
 //	nothing identifiable -> providerID + ":default"
 func QuotaCredentialKey(providerID string, cfg *ModelConfig) string {
 	switch {
+	case cfg == nil:
+		return fmt.Sprintf("%s:default", providerID)
 	case cfg.OAuthProvider != "":
 		return fmt.Sprintf("%s:oauth:%s", providerID, cfg.OAuthProvider)
 	case cfg.APIKey != "":

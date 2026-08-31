@@ -10,9 +10,9 @@ func TestTopicDetector_Detect(t *testing.T) {
 	detector := NewTopicDetector()
 
 	tests := []struct {
-		name     string
-		input    string
-		accept   []string // accepted topics (some ties depend on map iteration order)
+		name   string
+		input  string
+		accept []string // accepted topics (some ties depend on map iteration order)
 	}{
 		{"work task", "build a Go feature for the API", []string{"work"}},
 		{"code work tie", "debug this bug in the database code", []string{"code", "work"}},
@@ -131,10 +131,10 @@ func TestTopicDetector_GenerateThreadID(t *testing.T) {
 		topic     string
 		want      string
 	}{
-		{"session-abc123", "work", "thread-work-c123"},       // last 4 chars
-		{"session-xyz", "food", "thread-food--xyz"},           // last 4 chars of "session-xyz" = "-xyz"
-		{"s", "health", "thread-health-s"},                     // 1 char
-		{"", "general", "thread-general-"},                     // empty string
+		{"session-abc123", "work", "thread-work-c123"}, // last 4 chars
+		{"session-xyz", "food", "thread-food--xyz"},    // last 4 chars of "session-xyz" = "-xyz"
+		{"s", "health", "thread-health-s"},             // 1 char
+		{"", "general", "thread-general-"},             // empty string
 	}
 
 	for _, tt := range tests {

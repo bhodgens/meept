@@ -524,10 +524,10 @@ func (s *Server) handleMemoryFacts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type factRow struct {
-		Key        string `json:"key"`
-		Value      string `json:"value"`
-		Kind       string `json:"kind"`
-		UpdatedAt  string `json:"updated_at"`
+		Key       string `json:"key"`
+		Value     string `json:"value"`
+		Kind      string `json:"kind"`
+		UpdatedAt string `json:"updated_at"`
 	}
 
 	rows := make([]factRow, 0, len(facts))

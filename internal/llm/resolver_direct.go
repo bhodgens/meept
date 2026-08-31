@@ -37,7 +37,12 @@ func newQuotaWaitChatter(inner Chatter, cfg QuotaWaitConfig, logger *slog.Logger
 // ConfigFromSchema copies the canonical config.QuotaRetryConfig into a
 // QuotaWaitConfig. Callers must hold any needed locks; this function is
 // cheap (only copies fields).
-func ConfigFromSchema(qrc interface{ GetEnabled() bool; GetMaxWait() time.Duration; GetDefaultEstimate() time.Duration; GetDeferCheckInterval() time.Duration }) QuotaWaitConfig {
+func ConfigFromSchema(qrc interface {
+	GetEnabled() bool
+	GetMaxWait() time.Duration
+	GetDefaultEstimate() time.Duration
+	GetDeferCheckInterval() time.Duration
+}) QuotaWaitConfig {
 	return QuotaWaitConfig{
 		Enabled:            qrc.GetEnabled(),
 		MaxWait:            qrc.GetMaxWait(),

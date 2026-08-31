@@ -3,8 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
-
-	)
+)
 
 func TestInstructionParser_ExtractTrigger(t *testing.T) {
 	p := NewInstructionParser()
@@ -41,9 +40,9 @@ func TestInstructionParser_ExtractAction(t *testing.T) {
 	p := NewInstructionParser()
 
 	tests := []struct {
-		name      string
-		input     string
-		wantTool  string
+		name        string
+		input       string
+		wantTool    string
 		wantCommand string
 	}{
 		{"tests", "run tests", "shell_execute", "go test ./..."},

@@ -141,13 +141,13 @@ func GetRetryAfter(err error) time.Duration {
 // isRetryableHTTPStatus returns true for HTTP status codes that are worth retrying.
 func isRetryableHTTPStatus(code int) bool {
 	switch code {
-	case http.StatusTooManyRequests,     // 429
-		http.StatusBadGateway,            // 502
-		http.StatusServiceUnavailable,    // 503
-		http.StatusGatewayTimeout,        // 504
-		http.StatusRequestTimeout,        // 408
-		http.StatusInternalServerError,   // 500 (sometimes transient)
-		http.StatusConflict:              // 409 (sometimes transient, e.g., concurrent modification)
+	case http.StatusTooManyRequests, // 429
+		http.StatusBadGateway,          // 502
+		http.StatusServiceUnavailable,  // 503
+		http.StatusGatewayTimeout,      // 504
+		http.StatusRequestTimeout,      // 408
+		http.StatusInternalServerError, // 500 (sometimes transient)
+		http.StatusConflict:            // 409 (sometimes transient, e.g., concurrent modification)
 		return true
 	default:
 		return false

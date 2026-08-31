@@ -142,10 +142,10 @@ func TestLoadInstances_Valid(t *testing.T) {
 
 func TestReport_Scoring(t *testing.T) {
 	report := &Report{
-		Total:    4,
-		Resolved: 2,
+		Total:     4,
+		Resolved:  2,
 		Plausible: 1,
-		Failed:   1,
+		Failed:    1,
 	}
 	// Score is computed by the runner, but verify the formula.
 	score := float64(report.Resolved) / float64(report.Total) * 100

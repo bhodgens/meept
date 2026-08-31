@@ -24,6 +24,10 @@ prompt_components:
   - capabilities.memory
 verification:
   enabled: false
+gate:
+  command: "go test ./..."
+  timeout_seconds: 300
+  skip_when_unchanged: true
 ---
 
 # Explore Agent

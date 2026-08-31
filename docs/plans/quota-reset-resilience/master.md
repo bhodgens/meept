@@ -382,16 +382,43 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-|| 01-quota-error-type | PENDING | 0 | |
-|| 02-quota-config | PENDING | 0 | |
-|| 03-resolver-quota-blocks | PENDING | 0 | |
-| 04-direct-call-wait | PENDING | 0 | |
-| 05-agent-quota-state | PENDING | 0 | |
-| 06-dispatcher-deferral | PENDING | 0 | |
-| 07-notifications | PENDING | 0 | |
-| 08-tui-quota-status | PENDING | 0 | |
-| 09-gui-quota-status | PENDING | 0 | |
-| 10-docs-and-invariants | PENDING | 0 | |
+| 01-quota-error-type | COMPLETE | 2 | Type/parser OK from first pass; Task 4 client integration was missing and is now implemented (both clients classify 429 quota shapes + 402; all retry loops early-exit; regression tests in quota_client_test.go) |
+| 02-quota-config | COMPLETE | 0 | Defaults in DefaultConfig + Normalize; getter surface added for ConfigFromSchema |
+| 03-resolver-quota-blocks | COMPLETE | 2 | Maps/readers/skip from first pass; fixed credential-block rotation, ErrAllModelsQuotaBlocked, quota-aware RotateToNextModel, lazy-clear, PM persistence + probe integration |
+| 04-direct-call-wait | COMPLETE | 0 | quotaWaitChatter correct; wired at broker + config plumbing via ConfigFromSchema |
+| 05-agent-quota-state | COMPLETE | 2 | Tracker from first pass; daemon construction, ConfigSnapshot/registry mirroring, state-machine hook (SetStateSetter), transition-table entries, success-path Clear, reaper, initial event added |
+| 06-dispatcher-deferral | COMPLETE | 1 | Turn-level deferral via QuotaResumeWatcher + ChatHandler parking (mirrors BudgetResumeWatcher). DEVIATIONS: task-checkpoint resume and model-switch metadata in task records not implemented (no task plumbing exists); escalation vocabulary is ""/warn/action_recommended/blocked, not 12h/20h/24h strings |
+| 07-notifications | COMPLETE | 1 | Notifier from first pass; pump goroutine + Start/Stop, dedup resets on quota_cleared, cleared-event routing, task_count-absent handling, WS pin test added |
+| 08-tui-quota-status | COMPLETE | 1 | Badges/countdown/detail lines; formatter aligned to llm.FormatDuration semantics; episode state clears on running |
+| 09-gui-quota-status | COMPLETE | 1 | Flutter parity: QuotaStatusBadge, shared countdown, AgentProgress quota fields, malformed-payload safety |
+| 10-docs-and-invariants | COMPLETE | 1 | docs/workflows/quota-resilience.md corrected; docs/configuration/llm.md quota section added; AGENTS.md quota invariants section added; graphs green |
+
+### Post-completion deviations (accepted, documented)
+
+- **Task-level deferral**: Contract 7's task-checkpoint deferral (resume at
+  the failed step) is approximated at the turn level. Meept's task pipeline
+  has no checkpoint/resume plumbing to hook; the wired mechanism is
+  turn-level park/resume, matching how budget exhaustion already behaves.
+- **Model-switch metadata**: switches are logged (from_model/to_model) but
+  not recorded into task run metadata (same missing plumbing).
+- **Escalation vocabulary**: `""/warn/action_recommended/blocked` instead of
+  Contract 8's `12h/20h/24h` strings; internal consistency between tracker
+  and notifier is maintained.
+- **Episode dedup key**: tracker keys episodes per agent+provider with a
+  model-scoped proxy credential key; true credential fingerprinting at the
+  tracker requires config plumbing that does not exist.
+- **Restart-mid-episode visibility**: agent-status RPCs carry no quota
+  fields; surfaces rebuild quota state from the next bus event.
+
+## Post-Review Fix Log (2026-08-31)
+
+The original implementation was scaffolded but production-dormant. The
+orchestrator's post-hoc audit + fix pass closed: client classification
+(leaf 01 Task 4), resolver quotaCfg never set + all-blocked semantics +
+PM persistence (leaf 03), dead broker-only decorator config (leaf 04),
+tracker/notifier construction + pumps + state machine reachability +
+Clear-on-recovery (leaves 05/07), turn-level deferral (leaf 06), and
+TUI/Flutter surfaces (leaves 08/09). See `docs/workflows/quota-resilience.md`.
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 

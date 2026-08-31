@@ -79,11 +79,11 @@ func (h *EpistemicHandler) handleRetainClaim(ctx context.Context, params json.Ra
 }
 
 type retainDecisionParams struct {
-	Call            string   `json:"call"`
-	Alternatives    []string `json:"alternatives,omitempty"`
-	ExpectedOutcome string   `json:"expected_outcome,omitempty"`
+	Call            string     `json:"call"`
+	Alternatives    []string   `json:"alternatives,omitempty"`
+	ExpectedOutcome string     `json:"expected_outcome,omitempty"`
 	ReviewAt        *time.Time `json:"review_at,omitempty"`
-	Premises        []string `json:"premises,omitempty"`
+	Premises        []string   `json:"premises,omitempty"`
 }
 
 func (h *EpistemicHandler) handleRetainDecision(ctx context.Context, params json.RawMessage) (any, error) {
@@ -180,8 +180,8 @@ func (h *EpistemicHandler) handleMarkResolved(ctx context.Context, params json.R
 }
 
 type recordReviewParams struct {
-	DecisionID     string `json:"decision_id"`
-	ActualOutcome  string `json:"actual_outcome"`
+	DecisionID    string `json:"decision_id"`
+	ActualOutcome string `json:"actual_outcome"`
 }
 
 func (h *EpistemicHandler) handleRecordReview(ctx context.Context, params json.RawMessage) (any, error) {
@@ -395,8 +395,8 @@ func (h *EpistemicHandler) handleReviewQueue(ctx context.Context, params json.Ra
 		return nil, err
 	}
 	return map[string]any{
-		"auto_claims":        autoClaims,
-		"pending_decisions":  decisions,
+		"auto_claims":         autoClaims,
+		"pending_decisions":   decisions,
 		"pending_predictions": predictions,
 	}, nil
 }

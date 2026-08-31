@@ -14,8 +14,9 @@ import (
 // Tool base patterns
 // -----------------------------------------------------------------------
 
-//lint:ignore U1000 // base struct for trace tool implementations
 // traceTool is a helper for building trace query tools.
+//
+//lint:ignore U1000 // base struct for trace tool implementations
 //lint:ignore U1000 // base struct for trace tool implementations
 type traceTool struct {
 	name        string
@@ -23,15 +24,22 @@ type traceTool struct {
 	description string
 	parameters  llm.FunctionParameters
 	store       TraceStoreReader
-	logger      interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
+	logger      interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
 }
 
 //lint:ignore U1000 // traceTool method (reserved for future use)
-func (t *traceTool) ToolName() string        { return t.name }
+func (t *traceTool) ToolName() string { return t.name }
+
 //lint:ignore U1000 // traceTool method (reserved for future use)
-func (t *traceTool) ToolCategory() string     { return t.category }
+func (t *traceTool) ToolCategory() string { return t.category }
+
 //lint:ignore U1000 // traceTool method (reserved for future use)
-func (t *traceTool) ToolDescription() string  { return t.description }
+func (t *traceTool) ToolDescription() string { return t.description }
+
 //lint:ignore U1000 // traceTool method (reserved for future use)
 func (t *traceTool) ToolParameters() llm.FunctionParameters { return t.parameters }
 
@@ -45,8 +53,12 @@ type GetDatasetOverviewTool struct {
 	description string
 	parameters  llm.FunctionParameters
 	store       TraceStoreReader
-	logger      interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
-	category    string
+	logger      interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
+	category string
 }
 
 // NewGetDatasetOverviewTool creates a dataset overview tool.
@@ -162,8 +174,12 @@ func (t *GetDatasetOverviewTool) Invoke(ctx context.Context, args map[string]any
 
 // QueryTracesTool returns paginated summaries of trace data.
 type QueryTracesTool struct {
-	store       TraceStoreReader
-	logger      interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
+	store  TraceStoreReader
+	logger interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
 }
 
 // NewQueryTracesTool creates the query traces tool.
@@ -251,7 +267,11 @@ func (t *QueryTracesTool) Invoke(ctx context.Context, args map[string]any) (map[
 // CountTracesTool returns a quick count of traces.
 type CountTracesTool struct {
 	store  TraceStoreReader
-	logger interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
+	logger interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
 }
 
 // NewCountTracesTool creates the count traces tool.
@@ -283,7 +303,11 @@ func (t *CountTracesTool) Invoke(ctx context.Context, args map[string]any) (map[
 // ViewTraceTool returns all spans of one trace with attribute truncation.
 type ViewTraceTool struct {
 	store  TraceStoreReader
-	logger interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
+	logger interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
 }
 
 // NewViewTraceTool creates the view trace tool.
@@ -322,9 +346,9 @@ func (t *ViewTraceTool) viewTrace(traceID string) (map[string]any, error) {
 	}
 
 	return map[string]any{
-		"trace_id": traceID,
+		"trace_id":   traceID,
 		"span_count": len(spans),
-		"spans":   result,
+		"spans":      result,
 	}, nil
 }
 
@@ -335,7 +359,11 @@ func (t *ViewTraceTool) viewTrace(traceID string) (map[string]any, error) {
 // ViewSpansTool reads specific spans by ID with surgical (16KB) truncation.
 type ViewSpansTool struct {
 	store  TraceStoreReader
-	logger interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
+	logger interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
 }
 
 // NewViewSpansTool creates the view spans tool.
@@ -402,7 +430,11 @@ func (t *ViewSpansTool) Invoke(ctx context.Context, args map[string]any) (map[st
 // SearchTraceTool runs a regex search across all spans of one trace.
 type SearchTraceTool struct {
 	store  TraceStoreReader
-	logger interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
+	logger interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
 }
 
 // NewSearchTraceTool creates the search traces tool.
@@ -479,7 +511,11 @@ func (t *SearchTraceTool) Invoke(ctx context.Context, args map[string]any) (map[
 // SearchSpanTool runs a regex search inside a single span.
 type SearchSpanTool struct {
 	store  TraceStoreReader
-	logger interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
+	logger interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
 }
 
 // NewSearchSpanTool creates the search span tool.
@@ -547,10 +583,10 @@ func (t *SearchSpanTool) Invoke(ctx context.Context, args map[string]any) (map[s
 			context = context[:1000] + "..."
 		}
 		matches = append(matches, map[string]any{
-			"match":     match,
-			"context":   context,
-			"offset":    loc[0],
-			"length":    loc[1] - loc[0],
+			"match":   match,
+			"context": context,
+			"offset":  loc[0],
+			"length":  loc[1] - loc[0],
 		})
 	}
 
@@ -569,7 +605,11 @@ func (t *SearchSpanTool) Invoke(ctx context.Context, args map[string]any) (map[s
 // SynthesizeTracesTool uses the LLM to summarize patterns across multiple traces.
 type SynthesizeTracesTool struct {
 	store  TraceStoreReader
-	logger interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
+	logger interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
 	llmClient *llm.Client
 }
 
@@ -635,9 +675,9 @@ func (t *SynthesizeTracesTool) Invoke(ctx context.Context, args map[string]any) 
 			return nil, fmt.Errorf("synthesis LLM call failed: %w", err)
 		}
 		return map[string]any{
-			"trace_ids":  ids,
-			"synthesis":  result.Content,
-			"method":     "llm",
+			"trace_ids": ids,
+			"synthesis": result.Content,
+			"method":    "llm",
 		}, nil
 	}
 
@@ -659,8 +699,8 @@ func (t *SynthesizeTracesTool) Invoke(ctx context.Context, args map[string]any) 
 	}
 
 	return map[string]any{
-		"trace_ids":   ids,
-		"synthesis":   fmt.Sprintf("Aggregate: %d traces, %d spans (%d errors). Input: %d tokens. Output: %d tokens.",
+		"trace_ids": ids,
+		"synthesis": fmt.Sprintf("Aggregate: %d traces, %d spans (%d errors). Input: %d tokens. Output: %d tokens.",
 			len(ids), totalSpans, errorSpans, totalInput, totalOutput),
 		"method": "deterministic",
 	}, nil
@@ -695,12 +735,12 @@ func appendTraceSummary(t *QueryTracesTool, traceID string, allIDs []string) map
 	}
 
 	return map[string]any{
-		"trace_id": traceID,
-		"span_count": len(spans),
-		"services":     services,
-		"models":       models,
-		"sample_spans": sids[:min(len(sids), 5)],
-		"trace_index":  indexOf(traceID, allIDs),
+		"trace_id":           traceID,
+		"span_count":         len(spans),
+		"services":           services,
+		"models":             models,
+		"sample_spans":       sids[:min(len(sids), 5)],
+		"trace_index":        indexOf(traceID, allIDs),
 		"trace_length_bytes": len(spanToMap(spans[0], 4096)["spans"].(string)),
 	}
 }
@@ -716,15 +756,15 @@ func indexOf(id string, list []string) int {
 
 func spanToMap(s traceSpan, maxChars int) map[string]any {
 	m := map[string]any{
-		"span_id":        s.spanID,
-		"span_name":      s.spanName,
-		"service":        s.service,
-		"model":          s.model,
-		"start_time":     "",
-		"end_time":       "",
-		"input_tokens":   s.inputTokens,
-		"output_tokens":  s.outputTokens,
-		"has_error":      s.hasError,
+		"span_id":       s.spanID,
+		"span_name":     s.spanName,
+		"service":       s.service,
+		"model":         s.model,
+		"start_time":    "",
+		"end_time":      "",
+		"input_tokens":  s.inputTokens,
+		"output_tokens": s.outputTokens,
+		"has_error":     s.hasError,
 	}
 	if len(s.rawJSON) > maxChars {
 		m["raw_json"] = string(s.rawJSON[:maxChars]) + "...[truncated]"

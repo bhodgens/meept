@@ -104,7 +104,7 @@ func SyncWrap(op string, err error) error {
 		}
 	}
 	return &SyncError{
-		Op:    op,
-		Err:   err,
+		Op:  op,
+		Err: err,
 	}
 }

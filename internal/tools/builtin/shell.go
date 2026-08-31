@@ -422,6 +422,12 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		return nil, fmt.Errorf("command blocked for safety: %s", baseCmd)
 	}
 
+	// Declarative permission table: deny/ask short-circuit before tirith.
+	// Allow (or no match) falls through; tirith still runs below.
+	if err := t.checkPermissionTable(command); err != nil {
+		return nil, err
+	}
+
 	// Scan command with Tirith via security orchestrator
 	// Security orchestrator should be configured for production use
 	if t.securityOrch == nil {
@@ -610,6 +616,11 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	if risk == RiskCritical {
 		baseCmd := extractBaseCommand(command)
 		return nil, fmt.Errorf("command blocked for safety: %s", baseCmd)
+	}
+
+	// Declarative permission table: deny/ask short-circuit before tirith.
+	if err := t.checkPermissionTable(command); err != nil {
+		return nil, err
 	}
 
 	// Scan command with Tirith via security orchestrator

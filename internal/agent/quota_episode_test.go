@@ -41,6 +41,9 @@ func TestQuotaEpisodeTracker_EscalationTiers(t *testing.T) {
 
 	tracker.SetPublisher(func(topic string, msg any) {
 		qe := msg.(*QuotaEvent)
+		if qe.Escalation == "" {
+			return // initial episode event, not a tier
+		}
 		tiers = append(tiers, qe.Escalation)
 	})
 
@@ -55,7 +58,7 @@ func TestQuotaEpisodeTracker_EscalationTiers(t *testing.T) {
 
 	// Advance to 12h
 	now = now.Add(12 * time.Hour)
-	tracker.fireTiersLocked(tracker.episodes["agent-1|openrouter"], "task-1")
+	tracker.fireTiers(tracker.episodes["agent-1|openrouter"], "task-1")
 
 	if len(tiers) != 1 || tiers[0] != "warn" {
 		t.Fatalf("expected warn tier, got %v", tiers)
@@ -63,7 +66,7 @@ func TestQuotaEpisodeTracker_EscalationTiers(t *testing.T) {
 
 	// Advance to 20h
 	now = now.Add(8 * time.Hour)
-	tracker.fireTiersLocked(tracker.episodes["agent-1|openrouter"], "task-1")
+	tracker.fireTiers(tracker.episodes["agent-1|openrouter"], "task-1")
 
 	if len(tiers) != 2 || tiers[1] != "action_recommended" {
 		t.Fatalf("expected action_recommended tier, got %v", tiers)
@@ -71,7 +74,7 @@ func TestQuotaEpisodeTracker_EscalationTiers(t *testing.T) {
 
 	// Advance to 24h
 	now = now.Add(4 * time.Hour)
-	tracker.fireTiersLocked(tracker.episodes["agent-1|openrouter"], "task-1")
+	tracker.fireTiers(tracker.episodes["agent-1|openrouter"], "task-1")
 
 	if len(tiers) != 3 || tiers[2] != "blocked" {
 		t.Fatalf("expected blocked tier, got %v", tiers)
@@ -86,6 +89,9 @@ func TestQuotaEpisodeTracker_ReEnterExtendsWithoutReFire(t *testing.T) {
 	tracker.SetClock(func() time.Time { return now })
 	tracker.SetPublisher(func(topic string, msg any) {
 		qe := msg.(*QuotaEvent)
+		if qe.Escalation == "" {
+			return // initial episode event, not a tier
+		}
 		tiers = append(tiers, qe.Escalation)
 	})
 
@@ -96,7 +102,7 @@ func TestQuotaEpisodeTracker_ReEnterExtendsWithoutReFire(t *testing.T) {
 	// Advance to 12h, fire warn tier
 	now = now.Add(12 * time.Hour)
 	ep := tracker.episodes["agent-1|openrouter"]
-	tracker.fireTiersLocked(ep, "task-1")
+	tracker.fireTiers(ep, "task-1")
 
 	if len(tiers) != 1 {
 		t.Fatalf("expected 1 tier, got %d", len(tiers))
@@ -173,7 +179,10 @@ func TestFormatDuration(t *testing.T) {
 }
 
 func TestQuotaCredentialKey(t *testing.T) {
-	key := QuotaCredentialKey("claude-3-opus")
+	// The agent package uses the model-scoped proxy key (quota_episode.go):
+	// credential config is not plumbed to the tracker, so the key is
+	// "<modelID>:default". Mirrors llm.QuotaCredentialKey's default branch.
+	key := quotaCredentialProxy("claude-3-opus")
 	if key != "claude-3-opus:default" {
 		t.Errorf("expected 'claude-3-opus:default', got %q", key)
 	}

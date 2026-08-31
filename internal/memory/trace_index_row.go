@@ -10,8 +10,8 @@ import (
 // It aggregates span-level data into a per-trace rollup for efficient seeking.
 type TraceIndexRow struct {
 	TraceID                   string    `json:"trace_id"`
-	ByteOffsets               []int64   `json:"byte_offsets"`  // file offset per span
-	ByteLengths               []int64   `json:"byte_lengths"`  // line byte length per span
+	ByteOffsets               []int64   `json:"byte_offsets"` // file offset per span
+	ByteLengths               []int64   `json:"byte_lengths"` // line byte length per span
 	SpanCount                 int       `json:"span_count"`
 	StartTime                 time.Time `json:"start_time"`
 	EndTime                   time.Time `json:"end_time"`
@@ -53,7 +53,7 @@ func truncateStringSlice(s *[]string, max int) {
 type TraceIndexMeta struct {
 	SchemaVersion int       `json:"schema_version"` // currently 1
 	TraceCount    int       `json:"trace_count"`
-	SourceSize    int64     `json:"source_size"`    // byte size of source JSONL
+	SourceSize    int64     `json:"source_size"`     // byte size of source JSONL
 	SourceMtimeNs int64     `json:"source_mtime_ns"` // modification time nanoseconds
 	BuiltAt       time.Time `json:"built_at"`
 }

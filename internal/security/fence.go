@@ -26,7 +26,7 @@ type FenceConfig struct {
 type FenceChecker struct {
 	mu     sync.RWMutex
 	cfg    FenceConfig
-	valid  bool   // Whether RootPath is valid
+	valid  bool // Whether RootPath is valid
 	logger *slog.Logger
 }
 
@@ -242,7 +242,7 @@ func (fc *FenceChecker) CheckCommand(cmd string, workDir string) error {
 		return err
 	}
 
-// SECURITY FIX: Detect shell command substitution patterns that could
+	// SECURITY FIX: Detect shell command substitution patterns that could
 	// bypass path validation. These patterns execute nested commands that
 	// we cannot validate because they're hidden inside the substitution.
 	// Patterns: $(), ``, $(()), >(), <()

@@ -10,13 +10,13 @@ import (
 type ContentType string
 
 const (
-	ContentJSON     ContentType = "json"
-	ContentCode     ContentType = "code"
-	ContentLogs     ContentType = "logs"
-	ContentSearch   ContentType = "search"
-	ContentDiff     ContentType = "diff"
-	ContentText     ContentType = "text"
-	ContentUnknown  ContentType = "unknown"
+	ContentJSON    ContentType = "json"
+	ContentCode    ContentType = "code"
+	ContentLogs    ContentType = "logs"
+	ContentSearch  ContentType = "search"
+	ContentDiff    ContentType = "diff"
+	ContentText    ContentType = "text"
+	ContentUnknown ContentType = "unknown"
 )
 
 // ContentRouter routes content to the appropriate compressor.
@@ -109,13 +109,13 @@ func (r *ContentRouter) Compress(content string, contentType ContentType, query 
 	case ContentDiff:
 		// Diff: use special diff compressor (for now, passthrough)
 		return content, CompressionResult{
-			OriginalContent:  content,
+			OriginalContent:   content,
 			CompressedContent: content,
-			OriginalTokens:   countTokens(content),
-			CompressedTokens: countTokens(content),
-			TokensSaved:      0,
-			CompressionRatio: 1.0,
-			Strategy:         StrategyPassthrough,
+			OriginalTokens:    countTokens(content),
+			CompressedTokens:  countTokens(content),
+			TokensSaved:       0,
+			CompressionRatio:  1.0,
+			Strategy:          StrategyPassthrough,
 			TransformsApplied: []string{"diff_passthrough"},
 		}
 	default:
@@ -125,13 +125,13 @@ func (r *ContentRouter) Compress(content string, contentType ContentType, query 
 		}
 		// Plain text: passthrough
 		return content, CompressionResult{
-			OriginalContent:  content,
+			OriginalContent:   content,
 			CompressedContent: content,
-			OriginalTokens:   countTokens(content),
-			CompressedTokens: countTokens(content),
-			TokensSaved:      0,
-			CompressionRatio: 1.0,
-			Strategy:         StrategyPassthrough,
+			OriginalTokens:    countTokens(content),
+			CompressedTokens:  countTokens(content),
+			TokensSaved:       0,
+			CompressionRatio:  1.0,
+			Strategy:          StrategyPassthrough,
 			TransformsApplied: []string{"text_passthrough"},
 		}
 	}

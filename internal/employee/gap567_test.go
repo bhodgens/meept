@@ -29,8 +29,8 @@ func testAuditStoreHelper(t *testing.T) *AuditStore {
 
 // metricCapture is a minimal EmitMetricFunc that records calls for assertion.
 type metricCapture struct {
-	mu     sync.Mutex
-	calls  []metricCall
+	mu    sync.Mutex
+	calls []metricCall
 }
 
 type metricCall struct {

@@ -20,8 +20,8 @@ func TestTraceIndexBuilder_BuildOrReuse(t *testing.T) {
 	// Write a small JSONL file with 3 spans from 2 traces.
 	traces := []SpanRecord{
 		{TraceID: "t1", SpanID: "s1a", Service: "agent", Model: "claude-3.5",
-			StartTime: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
-			EndTime:   time.Date(2026, 1, 1, 10, 0, 1, 0, time.UTC),
+			StartTime:   time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
+			EndTime:     time.Date(2026, 1, 1, 10, 0, 1, 0, time.UTC),
 			InputTokens: 100, OutputTokens: 50, AgentName: "writer", AgentID: "a1"},
 		{TraceID: "t1", SpanID: "s1b", Service: "llm", InputTokens: 200, OutputTokens: 100},
 		{TraceID: "t2", SpanID: "s2a", Service: "agent", HasError: true,
@@ -309,7 +309,7 @@ func TestTraceIndexBuilder_ParallelChunkProcessing(t *testing.T) {
 				AgentName:    "agent-" + int64str(int64(j%2)),
 				StartTime:    time.Now().Add(time.Duration(i*spanPerTrace+j) * time.Second),
 			})
-			if (j%5) == 0 {
+			if (j % 5) == 0 {
 				traces[len(traces)-1].HasError = true
 			}
 		}

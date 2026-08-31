@@ -346,7 +346,7 @@ Output: APPROVED or list of specific gaps.
 || 06-shadow-capture | COMPLETE | 1 | 86e14393 — plumb pre-existed (gap doc stale); pinned w/ pointer-identity + tool-record tests; no prod changes |
 || 07-shadow-honesty | COMPLETE | 1 | e561b23d — subagent landed, orchestrator verified+committed (U1000 anchor deleted); -race green |
 || 08-trajectory-judge | COMPLETE | 1 | 06862e82 — Judge + judgment store + OnlyJudged gate (generic constraint solves eval->agent->selfimprove cycle); filter pure, live site noted |
-|| 09-trusted-root | COMPLETE | 1 | 46baf6e9 — subagent landed; deny-before-write, symlink+traversal covered; commit delayed by sibling wiki.go mid-landing, now green |
+|| 09-trusted-root | COMPLETE | 2 | 46baf6e9 — subagent landed; deny-before-write, symlink+traversal covered; commit delayed by sibling wiki.go mid-landing, now green. 2026-08-31 re-audit: added AGENT.md frontmatter deny guard (C5 gate-CLI-only invariant; config/agents/*/AGENT.md carries gate: block) + testdata/eval/ test rows — see denyGateFrontmatter, applier.go |
 || 10-isolation | COMPLETE | 1 | 4088767b — subagent landed; canary tests on handoff/pair/delegate; fail-closed unknown enum |
 || 11-speak-router | COMPLETE | 2 | ed9916c0 — first subagent 429'd; retry landed full speak stack; ErrIsolatedSpeak sentinel added at review |
 || 12-memory-facts | COMPLETE | 1 | b8441ef6 — orchestrator-implemented after subagent 429 (zero files); store+tool+extractor, -race green |

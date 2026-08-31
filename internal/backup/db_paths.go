@@ -2,9 +2,9 @@ package backup
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"log/slog"
 )
 
 // GetLocalDBPaths returns paths to SQLite databases that should be backed up

@@ -129,11 +129,11 @@ const UserEscalationID = "role:user"
 // (using e.g. "user", "system", "operator") load without modification
 // while new constitutions use the extensible "role:" prefix.
 var legacyRoleSentinels = map[string]string{
-	"user":      "role:user",
-	"system":    "role:system",
-	"operator":  "role:operator",
-	"oncall":    "role:oncall",
-	"admin":     "role:admin",
+	"user":     "role:user",
+	"system":   "role:system",
+	"operator": "role:operator",
+	"oncall":   "role:oncall",
+	"admin":    "role:admin",
 }
 
 // IsRoleSentinel reports whether id is a terminal role rather than an

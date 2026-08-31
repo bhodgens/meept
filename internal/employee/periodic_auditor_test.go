@@ -469,12 +469,12 @@ func TestParsePeriodicResponse(t *testing.T) {
 	turns := periodicTestTurns()
 
 	tests := []struct {
-		name          string
-		input         string
-		wantErr       bool
-		wantFindings  int
+		name           string
+		input          string
+		wantErr        bool
+		wantFindings   int
 		wantDriftScore float64
-		wantSeverity  AuditSeverity
+		wantSeverity   AuditSeverity
 	}{
 		{
 			name:           "clean — no findings",

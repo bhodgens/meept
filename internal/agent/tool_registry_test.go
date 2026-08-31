@@ -47,8 +47,10 @@ func (t *fakeSpawnTool) Parameters() llm.FunctionParameters {
 func (t *fakeSpawnTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return t.base.Execute(ctx, args)
 }
-func (t *fakeSpawnTool) IsReadOnly(input map[string]any) bool        { return t.base.IsReadOnly(input) }
-func (t *fakeSpawnTool) IsConcurrencySafe(input map[string]any) bool { return t.base.IsConcurrencySafe(input) }
+func (t *fakeSpawnTool) IsReadOnly(input map[string]any) bool { return t.base.IsReadOnly(input) }
+func (t *fakeSpawnTool) IsConcurrencySafe(input map[string]any) bool {
+	return t.base.IsConcurrencySafe(input)
+}
 
 var _ depthGate = (*fakeSpawnTool)(nil)
 
@@ -325,21 +327,21 @@ func TestToolRegistry_ExecuteGatedToolBelowGatedDepth(t *testing.T) {
 func TestGatedToolRegistry_DepthGating(t *testing.T) {
 	descs := []ToolDescriptor{
 		{
-			Name:                "call_subagent",
-			Description:         "spawn a subagent",
-			AvailableAtDepths:   []int{0, 1},
-			MaxUses:             0,
-			RequiresState:       "",
+			Name:              "call_subagent",
+			Description:       "spawn a subagent",
+			AvailableAtDepths: []int{0, 1},
+			MaxUses:           0,
+			RequiresState:     "",
 		},
 		{
-			Name:                "view_trace",
-			Description:         "view trace details",
-			AvailableAtDepths:   nil, // all depths
+			Name:              "view_trace",
+			Description:       "view trace details",
+			AvailableAtDepths: nil, // all depths
 		},
 		{
-			Name:                "generate_report",
-			Description:         "generate synthesis report",
-			AvailableAtDepths:   []int{0}, // top-level only
+			Name:              "generate_report",
+			Description:       "generate synthesis report",
+			AvailableAtDepths: []int{0}, // top-level only
 		},
 	}
 	leafNames := []string{"read_file", "write_file", "shell"}
@@ -392,10 +394,10 @@ func TestGatedToolRegistry_DepthGating(t *testing.T) {
 func TestGatedToolRegistry_MaxUses(t *testing.T) {
 	descs := []ToolDescriptor{
 		{
-			Name:            "limited_tool",
-			Description:     "tool with max uses",
+			Name:              "limited_tool",
+			Description:       "tool with max uses",
 			AvailableAtDepths: []int{0, 1, 2},
-			MaxUses:         3,
+			MaxUses:           3,
 		},
 	}
 	reg := NewGatedToolRegistryWithDescriptors(2, descs, nil)
@@ -420,10 +422,10 @@ func TestGatedToolRegistry_MaxUses(t *testing.T) {
 func TestGatedToolRegistry_StateGating(t *testing.T) {
 	descs := []ToolDescriptor{
 		{
-			Name:          "synthesis_tool",
-			Description:   "only available during synthesis",
+			Name:              "synthesis_tool",
+			Description:       "only available during synthesis",
 			AvailableAtDepths: []int{0},
-			RequiresState:  "planning",
+			RequiresState:     "planning",
 		},
 	}
 	reg := NewGatedToolRegistryWithDescriptors(2, descs, nil)
@@ -445,10 +447,10 @@ func TestGatedToolRegistry_StateGating(t *testing.T) {
 func TestGatedToolRegistry_GetAvailableToolsFiltersByMaxUses(t *testing.T) {
 	descs := []ToolDescriptor{
 		{
-			Name:            "bounded_reporter",
-			Description:     "report with bounded uses",
+			Name:              "bounded_reporter",
+			Description:       "report with bounded uses",
 			AvailableAtDepths: []int{0, 1, 2},
-			MaxUses:         1,
+			MaxUses:           1,
 		},
 	}
 	reg := NewGatedToolRegistryWithDescriptors(2, descs, nil)
@@ -472,11 +474,11 @@ func TestGatedToolRegistry_GetAvailableToolsFiltersByMaxUses(t *testing.T) {
 func TestGatedToolRegistry_StateAndDepthGating(t *testing.T) {
 	descs := []ToolDescriptor{
 		{
-			Name:                "depth_and_state_tool",
-			Description:         "gated by both depth and state",
-			AvailableAtDepths:   []int{0, 1},
-			MaxUses:             0,
-			RequiresState:       "analysis",
+			Name:              "depth_and_state_tool",
+			Description:       "gated by both depth and state",
+			AvailableAtDepths: []int{0, 1},
+			MaxUses:           0,
+			RequiresState:     "analysis",
 		},
 	}
 	reg := NewGatedToolRegistryWithDescriptors(2, descs, nil)

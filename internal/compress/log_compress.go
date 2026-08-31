@@ -27,10 +27,10 @@ type LogCompressor struct {
 
 // LogCompressorConfig configures the LogCompressor.
 type LogCompressorConfig struct {
-	KeepErrorLevels  bool `json:"keep_error_levels" toml:"keep_error_levels"`
-	MaxRepetitions   int  `json:"max_repetitions" toml:"max_repetitions"`
-	KeepFirstN       int  `json:"keep_first_n" toml:"keep_first_n"`
-	KeepLastN        int  `json:"keep_last_n" toml:"keep_last_n"`
+	KeepErrorLevels bool `json:"keep_error_levels" toml:"keep_error_levels"`
+	MaxRepetitions  int  `json:"max_repetitions" toml:"max_repetitions"`
+	KeepFirstN      int  `json:"keep_first_n" toml:"keep_first_n"`
+	KeepLastN       int  `json:"keep_last_n" toml:"keep_last_n"`
 }
 
 // DefaultLogCompressorConfig returns default configuration.

@@ -19,10 +19,10 @@ import (
 // can inspect many spans at once; surgical (view_spans) allows 4x because
 // the agent has already identified which span it cares about.
 const (
-	DiscoveryAttrTruncationChars   = 4096   // 4 KB for view_trace / search_trace
-	SurgicalAttrTruncationChars    = 16384  // 16 KB for view_spans (4x — "zoom in")
-	ViewTraceResponseBytesBudget   = 150000 // ~150 KB total response budget
-	ViewSpansMaxIDs                = 200    // max span_ids per view_spans call
+	DiscoveryAttrTruncationChars = 4096   // 4 KB for view_trace / search_trace
+	SurgicalAttrTruncationChars  = 16384  // 16 KB for view_spans (4x — "zoom in")
+	ViewTraceResponseBytesBudget = 150000 // ~150 KB total response budget
+	ViewSpansMaxIDs              = 200    // max span_ids per view_spans call
 )
 
 // OversizedTraceSummary is returned when a trace would exceed the response
@@ -49,15 +49,15 @@ type SearchMatch struct {
 
 // SearchTraceResult is the response from SearchTrace.
 type SearchTraceResult struct {
-	TraceID   string       `json:"trace_id,omitempty"`
-	Pattern   string       `json:"pattern"`
-	TotalHits int          `json:"total_hits"`
+	TraceID   string        `json:"trace_id,omitempty"`
+	Pattern   string        `json:"pattern"`
+	TotalHits int           `json:"total_hits"`
 	Matches   []SearchMatch `json:"matches"`
 }
 
 // ViewTraceResult is a union type -- either spans or an oversized summary.
 type ViewTraceResult struct {
-	Spans     []SpanRecord         `json:"spans,omitempty"`
+	Spans     []SpanRecord           `json:"spans,omitempty"`
 	Oversized *OversizedTraceSummary `json:"oversized,omitempty"`
 }
 
@@ -624,6 +624,7 @@ func (s *TraceStore) scanSpans(traceID string, idSet map[string]struct{}) ([]Spa
 
 // searchLines scans a JSONL file for lines matching a regex, returning up
 // to maxMatches SearchMatch records. totalHits is the total (unbounded) count.
+//
 //lint:ignore U1000 reserved for future search implementation
 func searchLines(filePath, pattern string, maxMatches int) ([]SearchMatch, int, error) {
 	f, err := os.Open(filePath)
@@ -907,14 +908,14 @@ func (b *TraceIndexBuilder) indexRowsFromSource(sourcePath string) ([]TraceIndex
 
 // rowAccumulator collects span data for one trace_id during index building.
 type rowAccumulator struct {
-	traceID           string
-	offsets           []int64
-	lengths           []int64
-	startTime         *timeTime
-	endTime           *timeTime
-	hasErrors         bool
-	serviceNames      map[string]struct{}
-	modelNames        map[string]struct{}
+	traceID      string
+	offsets      []int64
+	lengths      []int64
+	startTime    *timeTime
+	endTime      *timeTime
+	hasErrors    bool
+	serviceNames map[string]struct{}
+	modelNames   map[string]struct{}
 	//lint:ignore U1000 reserved for future token analysis
 	tokenNames        map[string]struct{}
 	totalInputTokens  int
@@ -995,17 +996,17 @@ func (acc *rowAccumulator) addSpan(sr SpanRecord, off, length int64) {
 
 func (acc *rowAccumulator) row() TraceIndexRow {
 	r := TraceIndexRow{
-		TraceID:                 acc.traceID,
-		ByteOffsets:             acc.offsets,
-		ByteLengths:             acc.lengths,
-		SpanCount:               len(acc.offsets),
-		HasErrors:               acc.hasErrors,
-		TotalInputTokens:        acc.totalInputTokens,
-		TotalOutputTokens:       acc.totalOutputTokens,
-		MissingParentCount:      acc.missingParent,
+		TraceID:                   acc.traceID,
+		ByteOffsets:               acc.offsets,
+		ByteLengths:               acc.lengths,
+		SpanCount:                 len(acc.offsets),
+		HasErrors:                 acc.hasErrors,
+		TotalInputTokens:          acc.totalInputTokens,
+		TotalOutputTokens:         acc.totalOutputTokens,
+		MissingParentCount:        acc.missingParent,
 		MissingAgentIdentityCount: acc.missingAgentID,
-		OtelErrorSpanCount:      acc.otelErrors,
-		ToolErrorSpanCount:      acc.toolErrors,
+		OtelErrorSpanCount:        acc.otelErrors,
+		ToolErrorSpanCount:        acc.toolErrors,
 	}
 	if acc.startTime != nil {
 		r.StartTime = acc.startTime.Time

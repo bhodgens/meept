@@ -55,7 +55,7 @@ func NewInstructionValidator(engine *Engine) *InstructionValidator {
 // ValidationResult holds the result of instruction validation.
 type ValidationResult struct {
 	Valid              bool
-	RiskLevel          string   // "low", "medium", "high"
+	RiskLevel          string // "low", "medium", "high"
 	ConfirmationNeeded bool
 	Errors             []string
 	Warnings           []string

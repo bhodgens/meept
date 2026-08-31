@@ -5,28 +5,27 @@ import (
 	"time"
 )
 
-// FormatDuration returns a human-readable duration string matching the Flutter
-// parity contract (leaf 09). This is exported so quota_status_test can exercise
-// it directly; agents_panel uses it via FormatQuotaCountdown.
+// FormatDuration returns a human-readable duration string. This is the TUI
+// side of the countdown parity contract shared with leaf 09 (Flutter) and
+// mirrors internal/llm errors_quota.go formatDuration semantics: values are
+// truncated to the minute (never rounded up), so a 90s wait shows as "1m"
+// and the user is never told more time remains than actually does.
 //
-//  - negative (past-due)    -> "resuming…"
-//  - >= 1h                 -> "Nh Mm" (omit minutes when 0)
-//  - >= 1m < 1h            -> "Mm"
-//  - < 1m                  -> "Ss"
+//   - >= 1h with minutes -> "3h 12m"
+//   - >= 1h, minutes == 0 -> "2h"
+//   - < 1h               -> "45m" (0m for sub-minute remains)
+//
+// Past-due durations are handled by FormatQuotaCountdown ("resets soon"),
+// not here; a negative input formats via truncation like the llm helper.
 func FormatDuration(d time.Duration) string {
-	if d < 0 {
-		return "resuming…"
-	}
+	d = d.Truncate(time.Minute)
 	if d >= time.Hour {
 		h := int(d.Hours())
 		m := int(d.Minutes()) % 60
-		if m == 0 {
-			return fmt.Sprintf("%dh", h)
+		if m > 0 {
+			return fmt.Sprintf("%dh %dm", h, m)
 		}
-		return fmt.Sprintf("%dh %dm", h, m)
+		return fmt.Sprintf("%dh", h)
 	}
-	if d >= time.Minute {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	return fmt.Sprintf("%ds", int(d.Seconds()))
+	return fmt.Sprintf("%dm", int(d.Minutes()))
 }

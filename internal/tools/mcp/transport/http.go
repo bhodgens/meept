@@ -98,11 +98,11 @@ type HTTPTransport struct {
 	headers map[string]string
 	config  Config
 
-	client      *http.Client
-	sessionID   string
+	client       *http.Client
+	sessionID    string
 	allowPrivate bool
-	running   atomic.Bool
-	mu        sync.RWMutex
+	running      atomic.Bool
+	mu           sync.RWMutex
 }
 
 // NewHTTPTransport creates a new HTTP transport.
@@ -113,9 +113,9 @@ func NewHTTPTransport(url string, headers map[string]string, config Config) *HTT
 	}
 
 	return &HTTPTransport{
-		url:     url,
-		headers: headers,
-		config:  config,
+		url:          url,
+		headers:      headers,
+		config:       config,
 		allowPrivate: false,
 		client: &http.Client{
 			Timeout: timeout,

@@ -261,8 +261,8 @@ func TestGoal_PersistRoundTrip_ActivePlanIDs(t *testing.T) {
 
 func TestConstitution_MaxActivePlans(t *testing.T) {
 	c := Constitution{
-		Purpose:       "test",
-		AutonomyTier: Tier2Propose,
+		Purpose:        "test",
+		AutonomyTier:   Tier2Propose,
 		MaxActivePlans: 3,
 	}
 	if c.MaxActivePlans != 3 {
@@ -478,9 +478,9 @@ func TestAssessmentSemaphore_LazyCreate(t *testing.T) {
 
 func TestValidateGoalSource(t *testing.T) {
 	tests := []struct {
-		name   string
-		source GoalSource
-		tier   AutonomyTier
+		name    string
+		source  GoalSource
+		tier    AutonomyTier
 		wantErr bool
 	}{
 		{"tier1 + user", SourceUser, Tier1Reactive, false},

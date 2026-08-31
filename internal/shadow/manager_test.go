@@ -459,4 +459,3 @@ func TestManager_ActivateAdapter_NoTrainingRun(t *testing.T) {
 		t.Errorf("expected error for missing training run, got nil")
 	}
 }
-

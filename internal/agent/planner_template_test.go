@@ -267,11 +267,11 @@ func TestPlannerTemplateLoader_RenderAllBundledTemplates(t *testing.T) {
 		key:      "reflection/session.md",
 		fallback: defaultReflectionSessionFallback(),
 		data: map[string]any{
-			"SessionID":   "s1",
-			"AgentID":     "coder",
-			"TurnCount":   5,
+			"SessionID":    "s1",
+			"AgentID":      "coder",
+			"TurnCount":    5,
 			"LastActivity": "2026-06-27",
-			"TurnsJSON":   "[]",
+			"TurnsJSON":    "[]",
 		},
 	}}
 
@@ -319,13 +319,13 @@ func TestPlannerTemplateLoader_LegacyFallbacksExecutable(t *testing.T) {
 		l := newPlannerTemplateLoader(t.TempDir())
 		l.fallbacks["planner/interview.md"] = defaultInterviewFallback()
 		got, err := l.render("planner/interview.md", map[string]any{
-			"Request":      "build x",
-			"Goal":         "ship",
-			"Ambiguity":    "0.4",
-			"Scope":        "v1",
-			"Category":     "feat",
-			"Confidence":   "0.8",
-			"Ambiguities":  "none",
+			"Request":     "build x",
+			"Goal":        "ship",
+			"Ambiguity":   "0.4",
+			"Scope":       "v1",
+			"Category":    "feat",
+			"Confidence":  "0.8",
+			"Ambiguities": "none",
 		})
 		if err != nil {
 			t.Fatalf("render interview fallback: %v", err)

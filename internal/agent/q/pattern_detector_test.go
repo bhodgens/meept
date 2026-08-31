@@ -688,23 +688,23 @@ func TestPatternDetectorDetectSkillOpportunity(t *testing.T) {
 
 func TestRecommendInstruction_Basic(t *testing.T) {
 	tests := []struct {
-		name            string
-		analyses        []*SessionAnalysis
+		name             string
+		analyses         []*SessionAnalysis
 		expectMinReports int
 	}{
 		{
-			name:            "no reports for fewer than 5 occurrences",
-			analyses:        makeTestAnalyses(4, "shell_execute", "code", true),
+			name:             "no reports for fewer than 5 occurrences",
+			analyses:         makeTestAnalyses(4, "shell_execute", "code", true),
 			expectMinReports: 0,
 		},
 		{
-			name:            "no reports for low success rate",
-			analyses:        makeTestAnalyses(10, "shell_execute", "code", false),
+			name:             "no reports for low success rate",
+			analyses:         makeTestAnalyses(10, "shell_execute", "code", false),
 			expectMinReports: 0,
 		},
 		{
-			name:            "generates report for recurring successful pattern",
-			analyses:        makeTestAnalyses(10, "shell_execute", "code", true),
+			name:             "generates report for recurring successful pattern",
+			analyses:         makeTestAnalyses(10, "shell_execute", "code", true),
 			expectMinReports: 1,
 		},
 	}
@@ -904,14 +904,14 @@ func makeTestAnalyses(n int, toolName, intent string, success bool) []*SessionAn
 	analyses := make([]*SessionAnalysis, n)
 	for i := 0; i < n; i++ {
 		analyses[i] = &SessionAnalysis{
-			SessionID:   string(rune('a' + i)),
-			AgentID:     "test-agent",
-			Intents:     []string{intent},
-			ToolCalls:   []ToolCallRecord{{ToolName: toolName, Success: success}},
-			Duration:    time.Minute,
-			Outcome:     "completed",
-			StartTime:   time.Now().Add(-time.Minute),
-			EndTime:     time.Now(),
+			SessionID: string(rune('a' + i)),
+			AgentID:   "test-agent",
+			Intents:   []string{intent},
+			ToolCalls: []ToolCallRecord{{ToolName: toolName, Success: success}},
+			Duration:  time.Minute,
+			Outcome:   "completed",
+			StartTime: time.Now().Add(-time.Minute),
+			EndTime:   time.Now(),
 		}
 	}
 	return analyses
@@ -924,14 +924,14 @@ func makeTestAnalysesWithSuccessRate(n int, toolName, intent string, successRate
 	for i := 0; i < n; i++ {
 		success := i < successCount
 		analyses[i] = &SessionAnalysis{
-			SessionID:   string(rune('a' + i)),
-			AgentID:     "test-agent",
-			Intents:     []string{intent},
-			ToolCalls:   []ToolCallRecord{{ToolName: toolName, Success: success}},
-			Duration:    time.Minute,
-			Outcome:     "completed",
-			StartTime:   time.Now().Add(-time.Minute),
-			EndTime:     time.Now(),
+			SessionID: string(rune('a' + i)),
+			AgentID:   "test-agent",
+			Intents:   []string{intent},
+			ToolCalls: []ToolCallRecord{{ToolName: toolName, Success: success}},
+			Duration:  time.Minute,
+			Outcome:   "completed",
+			StartTime: time.Now().Add(-time.Minute),
+			EndTime:   time.Now(),
 		}
 	}
 	return analyses

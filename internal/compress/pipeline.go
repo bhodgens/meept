@@ -16,11 +16,11 @@ import (
 // 3. CCR store saves originals for retrieval
 // 4. Compressed content returned with markers
 type Pipeline struct {
-	router     *ContentRouter
-	ccrStore   CCRStore
-	config     PipelineConfig
-	mu         sync.RWMutex
-	closed     bool
+	router   *ContentRouter
+	ccrStore CCRStore
+	config   PipelineConfig
+	mu       sync.RWMutex
+	closed   bool
 }
 
 // PipelineConfig configures the Pipeline.
@@ -41,10 +41,10 @@ type PipelineConfig struct {
 func DefaultPipelineConfig() PipelineConfig {
 	return PipelineConfig{
 		MinTokensToCompress:  500,
-		TTL:                 time.Hour,
-		EnableCCR:           true,
+		TTL:                  time.Hour,
+		EnableCCR:            true,
 		CompressUserMessages: false,
-		TargetRatio:         0.0,
+		TargetRatio:          0.0,
 	}
 }
 
@@ -184,10 +184,10 @@ func (p *Pipeline) Stats() PipelineStats {
 
 // PipelineStats provides pipeline statistics.
 type PipelineStats struct {
-	CCREntries              int64
-	CCRTotalOriginalTokens  int64
+	CCREntries               int64
+	CCRTotalOriginalTokens   int64
 	CCRTotalCompressedTokens int64
-	CCRTotalRetrievals      int64
+	CCRTotalRetrievals       int64
 }
 
 // Close releases pipeline resources.

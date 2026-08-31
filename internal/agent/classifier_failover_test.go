@@ -102,7 +102,7 @@ func TestLLMClassifier_RotatesOnEmptyResponse(t *testing.T) {
 	if !resolver.HasHealthyModels(testClassifierAlias) {
 		t.Error("expected alias to be healthy after successful rotation")
 	}
-	_ = primarySrv  // used via configs; keep references alive
+	_ = primarySrv // used via configs; keep references alive
 	_ = secondarySrv
 }
 

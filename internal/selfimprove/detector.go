@@ -119,10 +119,10 @@ func (d *IssueDetector) ScanTraces(ctx context.Context, traceStorePath string) (
 					Context:     fmt.Sprintf("span_count=%d recommendation=%s", result.Oversized.SpanCount, result.Oversized.Recommendation),
 					DetectedAt:  time.Now(),
 					Metadata: map[string]any{
-						"category":             "semantic",
-						"trace_id":             traceID,
-						"span_count":           result.Oversized.SpanCount,
-						"error_span_count":     result.Oversized.ErrorSpanCount,
+						"category":         "semantic",
+						"trace_id":         traceID,
+						"span_count":       result.Oversized.SpanCount,
+						"error_span_count": result.Oversized.ErrorSpanCount,
 					},
 				})
 			}
@@ -173,10 +173,10 @@ func (d *IssueDetector) ScanTraces(ctx context.Context, traceStorePath string) (
 						Context:     span.ToolName,
 						DetectedAt:  time.Now(),
 						Metadata: map[string]any{
-							"category":  "tool_error",
-							"trace_id":  traceID,
-							"model":     span.Model,
-							"error":     span.ErrorType,
+							"category": "tool_error",
+							"trace_id": traceID,
+							"model":    span.Model,
+							"error":    span.ErrorType,
 						},
 					})
 				}

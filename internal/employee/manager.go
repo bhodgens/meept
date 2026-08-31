@@ -28,8 +28,8 @@ import (
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
-	"github.com/caimlas/meept/pkg/security"
 	idpkg "github.com/caimlas/meept/pkg/id"
+	"github.com/caimlas/meept/pkg/security"
 
 	_ "modernc.org/sqlite" // sqlite driver registration
 )
@@ -407,7 +407,7 @@ func (g singleAgentGraph) Lookup(agentID string) (Constitution, bool) {
 // The employeeID is stored so ApprovePlan can apply the patch to the
 // correct employee's constitution.
 type pendingConstitution struct {
-	employeeID    string
+	employeeID   string
 	constitution *Constitution
 }
 
@@ -635,14 +635,14 @@ type Manager struct {
 // need to nil-check the Manager itself.
 func NewManager(bm *bot.Manager) *Manager {
 	return &Manager{
-		botManager:     bm,
-		constitutions:  make(map[string]Constitution),
+		botManager:           bm,
+		constitutions:        make(map[string]Constitution),
 		pendingConstitutions: make(map[string]*pendingConstitution),
-		driftScores:    make(map[string]float64),
-		goalLoops:      make(map[string]*GoalLoop),
-		invokeMuMap:    make(map[string]*sync.Mutex),
-		assessmentSems: make(map[string]chan struct{}),
-		logger:         slog.Default(),
+		driftScores:          make(map[string]float64),
+		goalLoops:            make(map[string]*GoalLoop),
+		invokeMuMap:          make(map[string]*sync.Mutex),
+		assessmentSems:       make(map[string]chan struct{}),
+		logger:               slog.Default(),
 	}
 }
 
@@ -663,18 +663,18 @@ func NewManagerWithStores(
 		logger = slog.Default()
 	}
 	m := &Manager{
-		botManager:        bm,
-		botStore:          bs,
-		constitutionStore: cs,
-		goalStore:         gs,
-		auditStore:        as,
-		constitutions:     make(map[string]Constitution),
+		botManager:           bm,
+		botStore:             bs,
+		constitutionStore:    cs,
+		goalStore:            gs,
+		auditStore:           as,
+		constitutions:        make(map[string]Constitution),
 		pendingConstitutions: make(map[string]*pendingConstitution),
-		driftScores:       make(map[string]float64),
-		goalLoops:         make(map[string]*GoalLoop),
-		invokeMuMap:       make(map[string]*sync.Mutex),
-		assessmentSems:    make(map[string]chan struct{}),
-		logger:            logger.With("component", "employee-manager"),
+		driftScores:          make(map[string]float64),
+		goalLoops:            make(map[string]*GoalLoop),
+		invokeMuMap:          make(map[string]*sync.Mutex),
+		assessmentSems:       make(map[string]chan struct{}),
+		logger:               logger.With("component", "employee-manager"),
 	}
 	// Best-effort: prime the in-memory constitution cache from the store
 	// so GetEmployee can return a Constitution without a SQL round-trip
@@ -1306,13 +1306,13 @@ func (m *Manager) recordConstitutionValidationError(ctx context.Context, req Hir
 	// Write audit finding.
 	if auditStore != nil {
 		finding := AuditFinding{
-			ID:            idpkg.Generate("audit_"),
-			EmployeeID:    req.ID,
-			Severity:      SeverityCritical,
-			Checkpoint:    CheckpointPreExec,
-			ViolatedRule:  "constitution_validation_error",
-			Evidence:      validationError,
-			DetectedAt:    time.Now().UTC(),
+			ID:           idpkg.Generate("audit_"),
+			EmployeeID:   req.ID,
+			Severity:     SeverityCritical,
+			Checkpoint:   CheckpointPreExec,
+			ViolatedRule: "constitution_validation_error",
+			Evidence:     validationError,
+			DetectedAt:   time.Now().UTC(),
 		}
 		if err := auditStore.Create(ctx, finding); err != nil {
 			m.logger.Warn("hire: failed to write constitution validation audit finding",
@@ -1435,6 +1435,11 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 	// other I/O happens under this lock.
 	invokeMu := m.acquireInvokeMutex(id)
 	invokeMu.Lock()
+	// Speak context (harness-eval leaf 11): a goal round is session-
+	// detached, so the notify payload carries the employee id as the
+	// session identity and resets the per-round dedup flag. Called here —
+	// the single round-entry site — so every round can notify exactly once.
+	loop.SetSpeakContext(id, "goal-"+id)
 	decideErr := loop.Decide(ctx, trigger)
 	invokeMu.Unlock()
 

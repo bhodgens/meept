@@ -2655,6 +2655,64 @@ func TestHandleClientConfigPatch_PreservesUnrelatedKeys(t *testing.T) {
 // bridge subscribes to the terminal.*, daemon.*, collaboration.*.* and pair.*
 // topic patterns so those bus events reach frontend WebSocket clients.
 // End-to-end: publish each event on a live bus wired via WithWebSocket and
+// TestWSBridgeClassifiesQuotaTopicsAsProgress pins the quota-reset-resilience
+// WS classification invariant (leaf 07 Task 3, AGENTS.md): every agent.quota*
+// topic transforms to "agent_progress" — never "chat_message" — so quota
+// events render as status indicators, not blank chat bubbles.
+func TestWSBridgeClassifiesQuotaTopicsAsProgress(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	defer msgBus.Close()
+
+	cfg := DefaultServerConfig()
+	cfg.Addr = ":0"
+	srv := NewServer(cfg, nil, nil, nil, nil, nil, WithWebSocket(msgBus, "/ws"))
+	if srv == nil {
+		t.Fatal("failed to create server with WebSocket option")
+	}
+
+	topics := []string{
+		"agent.quota_wait",
+		"agent.quota_blocked",
+		"agent.quota_cleared",
+	}
+
+	for _, topic := range topics {
+		payload := map[string]any{
+			"agent_id":    "agent-1",
+			"provider_id": "openai",
+			"model_id":    "gpt-test",
+			"reason":      "quota_blocked",
+		}
+		msg, err := models.NewBusMessage(models.MessageTypeEvent, "test", payload)
+		if err != nil {
+			t.Fatalf("NewBusMessage: %v", err)
+		}
+		if got := msgBus.Publish(topic, msg); got < 1 {
+			t.Errorf("topic %q: Publish delivered to %d subscribers, want >= 1 (WS bridge not subscribed)", topic, got)
+			continue
+		}
+
+		frontendData := transformBusEventToWS(msg)
+		if frontendData == nil {
+			t.Errorf("topic %q: transformBusEventToWS returned nil, want payload", topic)
+			continue
+		}
+		if frontendData["type"] != "agent_progress" {
+			t.Errorf("topic %q: frontend type = %v, want \"agent_progress\"", topic, frontendData["type"])
+		}
+		if frontendData["type"] == "chat_message" {
+			t.Errorf("topic %q: classified as chat_message; quota topics must never render as chat bubbles", topic)
+		}
+		if frontendData["source_topic"] != topic {
+			t.Errorf("topic %q: source_topic = %v, want %q", topic, frontendData["source_topic"], topic)
+		}
+	}
+}
+
+// TestWSBridgeForwardsTerminalDaemonCollaborationPairTopics pins that the WS
+// bridge subscribes to the terminal.*, daemon.*, collaboration.*.* and pair.*
+// topic patterns so those bus events reach frontend WebSocket clients.
+// End-to-end: publish each event on a live bus wired via WithWebSocket and
 // assert transformBusEventToWS classifies it as the safe generic "event" type
 // (never chat_message — only chat_message/chat.response may produce that).
 func TestWSBridgeForwardsTerminalDaemonCollaborationPairTopics(t *testing.T) {

@@ -107,7 +107,6 @@ func (a *APIKeyAuth) extractKey(r *http.Request) string {
 	return ""
 }
 
-
 // ExtractKeyFromRequest extracts the API key from HTTP request headers or
 // Sec-WebSocket-Protocol header using the same logic as the APIKeyAuth middleware.
 // Returns the key if found, empty string if missing.

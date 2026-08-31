@@ -2,94 +2,53 @@
 
 ## Meta
 
-- plan_id: plan-20260830213339-0002
-- created: 2026-08-30
+- plan_id: plan-20260831224718-0040
+- created: 2026-08-31
 - status: planning
 
 ## Summary
 
-The skill body contains only a placeholder analysis prompt with zero actionable instructions for actually fixing HuJSON unquoted keys. With 10 injections, 0 positive and 4 negative outcomes (effectiveness 0.00), every injection has wasted context and likely contributed to failures or confusion. The fix is to replace the placeholder with concrete, executable guidance: trigger conditions, a step-by-step quoting procedure, keyword/numeric key edge cases, comment/trailing-comma handling for strict JSON conversion, worked examples, and a validation checklist.
+Effectiveness is 0.29 (31 positive vs 64 negative out of 95 total). The skill likely lacks precision in determining when unquoted keys are valid HUJSON versus truly invalid, leading to excessive false-positive fixes that corrupt valid content. Need to add explicit validation gates, safety checks, and distinguish HUJSON permissive syntax from actual errors.
 
 Candidate content:
-# HuJSON Unquoted Keys Fix
+# HUJSON Unquoted Keys Fix
 
 ## Purpose
-Convert HuJSON (Human JSON, used by tools like Caddy and Tailscale) with unquoted object keys into valid JSON by wrapping every bare key in double quotes. Apply this when a strict JSON parser rejects a config file, or when a task asks to fix unquoted keys / convert HuJSON to JSON.
+Fix genuinely invalid JSON-like content by adding quotes around object keys where required, while preserving valid HUJSON syntax.
 
 ## When to Apply
-- A JSON parser (jq, `python -m json.tool`, `JSON.parse`, etc.) fails with errors such as "Expecting property name enclosed in double quotes" or "invalid character" before a `:`.
-- The file is known or suspected to be HuJSON: unquoted keys, `//` or `/* */` comments, or trailing commas may be present.
-- The task explicitly says "fix unquoted keys", "convert HuJSON to JSON", or "make this valid JSON".
+Apply ONLY when:
+1. The content is in standard JSON format (not HUJSON), OR
+2. The content is HUJSON but contains clearly broken syntax that would fail parsing
+3. The unquoted key appears in a position where JSON mandates quoting (object keys)
 
-## Procedure
-1. **Locate all bare (unquoted) keys.** A bare key is a token appearing directly before `:` inside `{ ... }` that is not already wrapped in double quotes. Example: in `{name: "value"}`, `name` is bare.
-2. **Wrap each bare key in double quotes.** `{name: "value"}` → `{"name": "value"}`.
-3. **Handle keyword and numeric keys.** HuJSON permits `true`, `false`, `null`, and numeric literals as keys; these must become strings: `{null: 1, 42: "a"}` → `{"null": 1, "42": "a"}`.
-4. **Never alter quoted keys.** Keys already in double quotes are left untouched, including their escape sequences.
-5. **Preserve all values exactly.** Only keys are modified. Do not reformat, reorder, or change strings, numbers, booleans, or whitespace unless the task also requests it.
-6. **If strict JSON output is required** (not just key quoting), also:
-   - Remove `//` line comments and `/* */` block comments.
-   - Remove trailing commas after the final element in objects and arrays.
-7. **Validate the result** with a strict JSON parser, e.g. `jq . file > /dev/null` or `python -m json.tool file`, and report whether it passes.
+## Pre-Flight Checks (skip if any fail)
+- Verify the file/section is NOT already valid HUJSON. HUJSON permits unquoted keys by design — do NOT fix these.
+- Check if the content uses HUJSON-specific features (`#` comments, trailing commas, unquoted string values, unquoted keys). If yes, the file is intentionally HUJSON — do not modify.
+- Confirm the target is an object key position (preceded by `{` or `,` and followed by `:`).
 
-## Edge Cases
-- Apply the fix recursively at every nesting depth inside objects and arrays.
-- Keys containing spaces or special characters must already be quoted in valid HuJSON; if you encounter an invalid bare key, quote it and escape interior `"` and `\` characters.
-- Single-quoted keys (JSON5 style) are not valid HuJSON; if found, convert to double-quoted with proper escaping.
-- Empty objects `{}` require no change.
-- Do not confuse keys with values: only tokens immediately preceding `:` inside object braces are keys.
+## Decision Flow
+1. Is the file/header declaring HUJSON format? → SKIP (unquoted keys are valid)
+2. Are there HUJSON-style comments (`//` or `#`)? → SKIP (this is HUJSON)
+3. Are there trailing commas? → SKIP (this is HUJSON)
+4. Is the unquoted value a bare string that would be invalid in strict JSON? → FIX
+5. Is the surrounding context clearly JSON (no HUJSON features)? → FIX only the broken keys
 
-## Examples
-Input:
-```
-{
-  // server config
-  apps: {
-    http: {
-      servers: {
-        srv0: {
-          listen: [":443",],
-        },
-      },
-    },
-  },
-}
-```
-Output (keys quoted only):
-```
-{
-  // server config
-  "apps": {
-    "http": {
-      "servers": {
-        "srv0": {
-          "listen": [":443",],
-        },
-      },
-    },
-  },
-}
-```
-Output (full strict JSON conversion):
-```json
-{
-  "apps": {
-    "http": {
-      "servers": {
-        "srv0": {
-          "listen": [":443"]
-        }
-      }
-    }
-  }
-}
-```
+## Fix Rules
+- Wrap ONLY object keys that are unquoted in valid JSON context with double quotes
+- Do NOT modify string values, array elements, or comment content
+- Preserve all whitespace and formatting outside the fix
+- After fixing, validate the output parses as valid JSON
 
-## Verification Checklist
-- [ ] Every key is enclosed in double quotes.
-- [ ] No values, strings, or numbers were changed.
-- [ ] Comments and trailing commas were removed only if strict JSON was requested.
-- [ ] The output passes validation with `jq` or `python -m json.tool`.
+## Anti-Patterns (DO NOT Fix)
+- `key: value` in HUJSON files
+- Unquoted keys in files with `.hujson` extension
+- Any content containing `#` or `//` comments
+- Template/embedded contexts where quoting would break functionality
+- Already-quoted keys (no double-quoting)
+
+## Output Format
+Return only the corrected content. Do not include explanations or diffs unless explicitly requested.
 
 ## Notes
 

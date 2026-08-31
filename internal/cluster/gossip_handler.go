@@ -141,8 +141,8 @@ func (h *eventGossipHandler) handleSessionTurn(event *models.ClusterEvent) error
 		Content:   payload.Content,
 		Timestamp: time.Unix(0, payload.Timestamp).UTC(),
 		Metadata: map[string]any{
-			"source_node":      event.NodeID,
-			"gossip_event_id":  event.EventID,
+			"source_node":     event.NodeID,
+			"gossip_event_id": event.EventID,
 		},
 	}
 

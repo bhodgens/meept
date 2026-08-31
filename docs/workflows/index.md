@@ -14,6 +14,7 @@ Feature specifications describing how each Meept subsystem works, with configura
 | [Change Review](change-review.md) | Human review surfaces (HTTP, TUI, Flutter) for staged writes and the revert journal |
 | [Memory System](memory.md) | Storage, retrieval, consolidation, and search |
 | [LLM Provider Management](llm-management.md) | Multi-provider support, failover, budget |
+| [Quota Reset Resilience](quota-resilience.md) | Provider quota detection, credential blocking, auto-resume, notifications |
 | [OAuth Providers](auth.md) | Device-code + PKCE subscription logins (ChatGPT, Claude Pro/Max, SuperGrok) |
 | [Models CLI](models-cli.md) | Interactive provider/model management |
 | [Context Firewall](context-firewall.md) | Context pressure management and summarization |

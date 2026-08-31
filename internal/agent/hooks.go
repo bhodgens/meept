@@ -352,6 +352,11 @@ type SessionLifecycleResult struct {
 	Success bool
 	Error   error
 	EndTime time.Time
+	// UserMessage is the user input that started the turn (harness-eval
+	// leaf 12: fact extraction runs on session close over the dialogue).
+	UserMessage string
+	// AssistantMessage is the final response text produced by the turn.
+	AssistantMessage string
 }
 
 // SessionStartHook is called at the beginning of each RunOnce invocation.

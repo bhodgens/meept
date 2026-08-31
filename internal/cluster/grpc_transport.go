@@ -25,13 +25,13 @@ import (
 
 	"github.com/caimlas/meept/pkg/models"
 
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
-	"golang.org/x/sync/singleflight"
 )
 
 // =====================================================================
@@ -85,7 +85,7 @@ type GRPCTransport struct {
 	logger      *slog.Logger
 
 	// Injected dependencies (nil-safe — handlers check before use).
-	resourceProvider ResourceProvider
+	resourceProvider  ResourceProvider
 	workspaceProvider WorkspaceProvider
 	dispatchExecutor  DispatchExecutor
 	eventPublisher    EventPublisher

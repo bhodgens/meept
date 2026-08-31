@@ -28,7 +28,19 @@ type EvalHandler struct {
 	// newRun is a test seam for the run constructor.
 	newRun func(kind eval.Kind, taskID, modelID string, k int) *eval.RunRecord
 
+	// observer records pass^k and oracle-run metrics (harness-eval leaf 15).
+	// Nil-safe: nil means metrics are skipped.
+	observer *eval.MetricsObserver
+
 	logger *slog.Logger
+}
+
+// SetMetricsObserver attaches the leaf 15 metrics observer. Nil-safe setter
+// per the repo convention.
+func (h *EvalHandler) SetMetricsObserver(o *eval.MetricsObserver) {
+	if o != nil {
+		h.observer = o
+	}
 }
 
 // NewEvalHandler creates an eval handler reading/writing dir (conventionally
@@ -141,10 +153,18 @@ func (h *EvalHandler) runRecord(ctx context.Context, req *EvalRunParams) (*eval.
 		attempt.Oracle = res
 		attempt.Passed = res.Passed
 		rec.AddAttempt(attempt)
+		// Leaf 15 metrics: every oracle attempt is recorded (nil-safe).
+		if h.observer != nil {
+			h.observer.RecordOracle(oracleName, res.Passed)
+		}
 		// No short-circuit: the contract runs the oracle exactly K times.
 		// pass^k then requires all K attempts to pass (last k == all k).
 	}
 	rec.Passed = eval.PassK(rec.Attempts, rec.K)
+	// Leaf 15 metrics: the run's pass^k verdict (nil-safe).
+	if h.observer != nil {
+		h.observer.RecordPassK(req.TaskID, rec.Passed)
+	}
 	return rec, nil
 }
 

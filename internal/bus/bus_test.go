@@ -152,7 +152,7 @@ func TestGossip_SubscriptionDrained(t *testing.T) {
 
 	// Create subscriber
 	sub := bus.Subscribe("test-sub", "test.topic")
-	
+
 	// Publish with subscriber
 	msg2, _ := models.NewBusMessage(models.MessageTypeEvent, "test2", map[string]any{"test": "data2"})
 	delivered2 := bus.Publish("test.topic", msg2)
@@ -197,7 +197,7 @@ func TestGossip_SubscriptionDrained(t *testing.T) {
 func TestBus_BufferNearFull(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
-	
+
 	// Use small buffer to trigger the warning quickly
 	cfg := &Config{BufferSize: 5}
 	bus := New(cfg, logger)
@@ -235,7 +235,7 @@ func TestMessageBus_Mutation(t *testing.T) {
 
 		// Add a subscriber
 		sub := bus.Subscribe("test-sub", "test.topic")
-		
+
 		mutation.RunMutationTest(t,
 			func() {
 				// Mutate: unsubscribe to simulate bug
@@ -251,7 +251,7 @@ func TestMessageBus_Mutation(t *testing.T) {
 				return nil
 			},
 		)
-		
+
 		// Re-subscribe to clean up
 		_ = bus.Subscribe("test-sub", "test.topic")
 	})

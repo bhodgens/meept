@@ -21,11 +21,11 @@ type classifierClient interface {
 // ReflectionCollector runs immediate self-reflection after each agent turn,
 // extracting 0-1 operational lessons per turn and queuing them as proposals.
 type ReflectionCollector struct {
-	cfg              config.ReflectionCollectorConfig
-	classifier       classifierClient
-	templateReg      *plannerTemplateLoader
-	queue            *proposalQueue
-	logger           *slog.Logger
+	cfg         config.ReflectionCollectorConfig
+	classifier  classifierClient
+	templateReg *plannerTemplateLoader
+	queue       *proposalQueue
+	logger      *slog.Logger
 
 	// classifierRunOnce, if non-nil, overrides the classifier call for tests.
 	// The test substitutes a function returning a canned LLM output string.

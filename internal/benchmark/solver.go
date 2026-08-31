@@ -95,9 +95,9 @@ func (s *ExecSolver) buildArgs(repoDir string, inst Instance) []string {
 // PromptSolver wraps a prompt template around the problem statement.
 // Useful for injecting SWE-bench-style instructions before the issue text.
 type PromptSolver struct {
-	Inner   Solver
-	Prompt  string // Template with {problem} placeholder.
-	Prefix  string // Static prefix prepended to the problem statement.
+	Inner  Solver
+	Prompt string // Template with {problem} placeholder.
+	Prefix string // Static prefix prepended to the problem statement.
 }
 
 // Solve delegates to the inner solver after transforming the problem statement.

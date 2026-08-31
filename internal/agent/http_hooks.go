@@ -27,11 +27,11 @@ const HookAsyncRewakeTopic = "hook.async_rewake"
 
 // HTTPHookConfig serializes hook configuration.
 type HTTPHookConfig struct {
-	URL string `json:"url"`
-	Method string `json:"method"`
-	Headers map[string]string `json:"headers"`
-	Timeout time.Duration `json:"timeout"`
-	RetryCount int `json:"retry_count"`
+	URL        string            `json:"url"`
+	Method     string            `json:"method"`
+	Headers    map[string]string `json:"headers"`
+	Timeout    time.Duration     `json:"timeout"`
+	RetryCount int               `json:"retry_count"`
 
 	// Async, when true, causes Execute to run in a background goroutine
 	// and return immediately. The caller never sees the result error —

@@ -23,10 +23,19 @@ func TestBackupSchedulerNilNoConfig(t *testing.T) {
 	logger := testLogger(t)
 	msgBus := bus.New(nil, logger)
 
+	tmpDir := t.TempDir()
+
 	cfg := &config.Config{
 		Backup: config.DefaultBackupConfig(), // disabled
 		Security: config.SecurityConfig{
-			AllowedPaths: []string{t.TempDir()},
+			AllowedPaths: []string{tmpDir},
+		},
+		// NewComponents derives every sqlite path from Daemon.DataDir;
+		// an empty value turns them into CWD-relative paths and litters
+		// the package dir with *.db artifacts (AGENTS.md: daemon CWD is
+		// never the user's data location).
+		Daemon: config.DaemonConfig{
+			DataDir: tmpDir,
 		},
 	}
 
@@ -59,6 +68,11 @@ func TestBackupSchedulerConstructedWhenEnabled(t *testing.T) {
 		Security: config.SecurityConfig{
 			AllowedPaths: []string{tmpDir},
 		},
+		// See TestBackupSchedulerNilNoConfig: keeps sqlite paths inside the
+		// temp dir instead of the package dir.
+		Daemon: config.DaemonConfig{
+			DataDir: tmpDir,
+		},
 	}
 
 	comps, err := NewComponents(context.Background(), cfg, msgBus, logger)
@@ -77,10 +91,17 @@ func TestBackupSchedulerStartDisabled(t *testing.T) {
 	logger := testLogger(t)
 	msgBus := bus.New(nil, logger)
 
+	tmpDir := t.TempDir()
+
 	cfg := &config.Config{
 		Backup: config.DefaultBackupConfig(),
 		Security: config.SecurityConfig{
-			AllowedPaths: []string{t.TempDir()},
+			AllowedPaths: []string{tmpDir},
+		},
+		// See TestBackupSchedulerNilNoConfig: keeps sqlite paths inside the
+		// temp dir instead of the package dir.
+		Daemon: config.DaemonConfig{
+			DataDir: tmpDir,
 		},
 	}
 
@@ -112,6 +133,11 @@ func TestBackupSchedulerStopAfterStart(t *testing.T) {
 		},
 		Security: config.SecurityConfig{
 			AllowedPaths: []string{tmpDir},
+		},
+		// See TestBackupSchedulerNilNoConfig: keeps sqlite paths inside the
+		// temp dir instead of the package dir.
+		Daemon: config.DaemonConfig{
+			DataDir: tmpDir,
 		},
 	}
 

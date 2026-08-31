@@ -71,27 +71,27 @@ type SessionConfig struct {
 
 // ptySession implements Session using github.com/creack/pty.
 type ptySession struct {
-	mu            sync.RWMutex
-	wg            sync.WaitGroup // waits for readLoop before waitLoop closes channels
-	ptyCmd        *exec.Cmd      // PTY mode: the actual command started by pty.StartWithSize
-	plainCmd      *exec.Cmd      // Non-PTY mode: process to Wait on.
-	ptmx          *os.File       // PTY master device (PTY mode)
-	stdoutPipe    io.Reader      // Non-PTY mode: cmd.Stdout
-	stdinPipe     io.Writer      // Non-PTY mode: cmd.Stdin
-	outputChan    chan []byte
-	errorChan     chan error
+	mu         sync.RWMutex
+	wg         sync.WaitGroup // waits for readLoop before waitLoop closes channels
+	ptyCmd     *exec.Cmd      // PTY mode: the actual command started by pty.StartWithSize
+	plainCmd   *exec.Cmd      // Non-PTY mode: process to Wait on.
+	ptmx       *os.File       // PTY master device (PTY mode)
+	stdoutPipe io.Reader      // Non-PTY mode: cmd.Stdout
+	stdinPipe  io.Writer      // Non-PTY mode: cmd.Stdin
+	outputChan chan []byte
+	errorChan  chan error
 	// pending holds the unread remainder of a large output chunk so
 	// that the next Read() call can serve it without data loss.
-	pending      []byte
-	done         chan struct{}
-	closed       bool
-	finished     bool
-	exitCode     int
-	rows         int
-	cols         int
-	fallback     bool
-	timeoutFired bool
-	timeoutCtx   context.Context
+	pending       []byte
+	done          chan struct{}
+	closed        bool
+	finished      bool
+	exitCode      int
+	rows          int
+	cols          int
+	fallback      bool
+	timeoutFired  bool
+	timeoutCtx    context.Context
 	timeoutCancel context.CancelFunc
 }
 

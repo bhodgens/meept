@@ -13,11 +13,11 @@ import (
 
 func TestTurnCounter_NudgeThresholds(t *testing.T) {
 	tests := []struct {
-		name       string
-		limit      int
-		increment  int   // how many times to call Increment() before calling Nudge()
-		wantThr    float64
-		wantExh    bool
+		name        string
+		limit       int
+		increment   int // how many times to call Increment() before calling Nudge()
+		wantThr     float64
+		wantExh     bool
 		description string
 	}{
 		// Below 25% — no threshold, returns basic banner.
@@ -206,7 +206,7 @@ func TestTurnCounter_GetNudgeThreshold(t *testing.T) {
 		t.Errorf("after 18 turns: threshold = %v, want 0.90", got)
 	}
 
-	tc.Increment() // 19
+	tc.Increment()             // 19
 	_ = tc.GetNudgeThreshold() // 19/20 = 0.95, still 0.90
 
 	tc.Increment() // 20 — exhausted, threshold = 1.0
@@ -481,9 +481,9 @@ func TestTurnCounter_GetCount(t *testing.T) {
 
 func TestRoundTo(t *testing.T) {
 	tests := []struct {
-		input  float64
-		dec    int
-		want   float64
+		input float64
+		dec   int
+		want  float64
 	}{
 		{0.333333, 2, 0.33},
 		{0.999, 0, 1.0},

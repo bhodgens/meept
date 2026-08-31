@@ -30,28 +30,28 @@ var errNotConfigured = errors.New("employees not configured")
 // handler rejects them with a message directing the caller to use the amend
 // flow instead (spec S5: update vs amend distinction).
 var constitutionFields = map[string]struct{}{
-	"purpose":             {},
-	"role":                {},
-	"charter":             {},
-	"autonomy_tier":       {},
-	"escalates_to":        {},
-	"constraints":         {},
-	"amendment_policy":    {},
-	"version":             {},
-	"authored_by":         {},
-	"tools_allowed":       {},
-	"tools_forbidden":     {},
-	"risk_ceiling":        {},
-	"max_tokens_per_turn": {},
+	"purpose":                 {},
+	"role":                    {},
+	"charter":                 {},
+	"autonomy_tier":           {},
+	"escalates_to":            {},
+	"constraints":             {},
+	"amendment_policy":        {},
+	"version":                 {},
+	"authored_by":             {},
+	"tools_allowed":           {},
+	"tools_forbidden":         {},
+	"risk_ceiling":            {},
+	"max_tokens_per_turn":     {},
 	"max_conversation_tokens": {},
-	"daily_budget_cents":  {},
+	"daily_budget_cents":      {},
 	"max_invocations_per_day": {},
-	"escalation_triggers": {},
-	"never":               {},
-	"assessment_interval": {},
-	"frozen_fields":       {},
-	"self_propose_allowed": {},
-	"requires_approval":   {},
+	"escalation_triggers":     {},
+	"never":                   {},
+	"assessment_interval":     {},
+	"frozen_fields":           {},
+	"self_propose_allowed":    {},
+	"requires_approval":       {},
 }
 
 // RPCHandler provides JSON-RPC handlers for employee management under the
@@ -117,7 +117,7 @@ func (h *RPCHandler) Handlers() map[string]func(context.Context, json.RawMessage
 		"agents.goals.get":      h.handleGoalsGet,
 		"agents.goals.set_gate": h.handleGoalsSetGate,
 		"agents.goals.approve":  h.handleGoalsApprove,
-		"agents.goals.reject":  h.handleGoalsReject,
+		"agents.goals.reject":   h.handleGoalsReject,
 
 		// Audit (spec line 539)
 		"agents.audit.list":    h.handleAuditList,
@@ -148,16 +148,16 @@ type createRequest struct {
 	// Employee is the full employee definition (BotDefinition + Constitution).
 	// We accept the raw bot definition shape plus a constitution field; the
 	// manager.Hire validates the constitution.
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description,omitempty"`
-	Prompt       string                 `json:"prompt"`
-	Model        string                 `json:"model,omitempty"`
-	Triggers     []bot.BotTrigger       `json:"triggers,omitempty"`
-	MemoryScope  bot.MemoryScope        `json:"memory_scope,omitempty"`
-	Tools        []string               `json:"tools,omitempty"`
-	Enabled      bool                   `json:"enabled"`
-	Constitution map[string]any         `json:"constitution"`
+	ID           string           `json:"id"`
+	Name         string           `json:"name"`
+	Description  string           `json:"description,omitempty"`
+	Prompt       string           `json:"prompt"`
+	Model        string           `json:"model,omitempty"`
+	Triggers     []bot.BotTrigger `json:"triggers,omitempty"`
+	MemoryScope  bot.MemoryScope  `json:"memory_scope,omitempty"`
+	Tools        []string         `json:"tools,omitempty"`
+	Enabled      bool             `json:"enabled"`
+	Constitution map[string]any   `json:"constitution"`
 	// RawDefinition preserves unknown fields for forward compatibility.
 	RawDefinition map[string]json.RawMessage `json:"-"`
 }
@@ -179,9 +179,9 @@ type triggerRequest struct {
 }
 
 type amendRequest struct {
-	ID     string            `json:"id"`
-	Fields map[string]any    `json:"fields"`
-	Reason string            `json:"reason,omitempty"`
+	ID     string         `json:"id"`
+	Fields map[string]any `json:"fields"`
+	Reason string         `json:"reason,omitempty"`
 }
 
 type goalsListRequest struct {
@@ -202,7 +202,7 @@ type goalRejectRequest struct {
 
 type auditListRequest struct {
 	EmployeeID string `json:"employee_id"`
-	Since      string `json:"since,omitempty"`  // duration string e.g. "24h", "7d"
+	Since      string `json:"since,omitempty"`    // duration string e.g. "24h", "7d"
 	Severity   string `json:"severity,omitempty"` // info|warning|critical
 }
 
@@ -380,9 +380,9 @@ func (h *RPCHandler) handleTrigger(ctx context.Context, raw json.RawMessage) (an
 		return nil, fmt.Errorf("trigger: %w", err)
 	}
 	return map[string]any{
-		"id":          req.ID,
-		"status":      "triggered",
-		"invocation":  result,
+		"id":         req.ID,
+		"status":     "triggered",
+		"invocation": result,
 	}, nil
 }
 
@@ -521,9 +521,9 @@ func (h *RPCHandler) handleGoalsApprove(ctx context.Context, raw json.RawMessage
 		return nil, fmt.Errorf("approve plan: %w", err)
 	}
 	return map[string]any{
-		"goal_id": req.GoalID,
-		"plan_id": req.PlanID,
-		"status":  "approved",
+		"goal_id":  req.GoalID,
+		"plan_id":  req.PlanID,
+		"status":   "approved",
 		"approver": caller.UserID,
 	}, nil
 }
@@ -571,9 +571,9 @@ func (h *RPCHandler) handleGoalsReject(ctx context.Context, raw json.RawMessage)
 		return nil, fmt.Errorf("reject plan: %w", err)
 	}
 	return map[string]any{
-		"goal_id": req.GoalID,
-		"plan_id": req.PlanID,
-		"status":  "rejected",
+		"goal_id":  req.GoalID,
+		"plan_id":  req.PlanID,
+		"status":   "rejected",
 		"rejector": caller.UserID,
 	}, nil
 }

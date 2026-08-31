@@ -152,7 +152,7 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 
 // wsConnLimiter tracks per-IP WebSocket connection counts.
 type wsConnLimiter struct {
-	mu   sync.Mutex
+	mu    sync.Mutex
 	conns map[string]int // ip -> connection count
 }
 

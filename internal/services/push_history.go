@@ -7,14 +7,14 @@ import (
 
 // PushEntry represents a single push notification event.
 type PushEntry struct {
-	ID        string    `json:"id"`
-	SessionID string    `json:"session_id"`
-	Source    string    `json:"source"`
-	Type      PushType  `json:"type"`
-	Content   string    `json:"content"`
+	ID        string       `json:"id"`
+	SessionID string       `json:"session_id"`
+	Source    string       `json:"source"`
+	Type      PushType     `json:"type"`
+	Content   string       `json:"content"`
 	Priority  PushPriority `json:"priority"`
-	Timestamp time.Time `json:"timestamp"`
-	Delivered bool      `json:"delivered"`
+	Timestamp time.Time    `json:"timestamp"`
+	Delivered bool         `json:"delivered"`
 }
 
 // PushHistory tracks push notification history with query capabilities.

@@ -254,8 +254,8 @@ func TestSyncer_FileWouldChange(t *testing.T) {
 // testLogger is a minimal logger implementation for tests.
 type testLogger struct{}
 
-func (l *testLogger) Info(msg string, keysAndValues ...interface{}) {}
-func (l *testLogger) Warn(msg string, keysAndValues ...interface{}) {}
+func (l *testLogger) Info(msg string, keysAndValues ...interface{})  {}
+func (l *testLogger) Warn(msg string, keysAndValues ...interface{})  {}
 func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) {}
 
 // ---- deepMerge unit tests ----
@@ -335,9 +335,9 @@ func TestDeepMerge_NullDeletesKey(t *testing.T) {
 
 func TestDeepMerge_ScalarOverride(t *testing.T) {
 	dst := map[string]any{
-		"port":   float64(8080),
-		"debug":  false,
-		"title":  "old",
+		"port":  float64(8080),
+		"debug": false,
+		"title": "old",
 	}
 	src := map[string]any{
 		"port":  float64(9090),

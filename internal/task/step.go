@@ -10,8 +10,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/caimlas/meept/pkg/models"
 	sid "github.com/caimlas/meept/pkg/id"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // ErrStepNotFound is returned when a step cannot be found by ID.

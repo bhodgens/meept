@@ -104,8 +104,8 @@ func TestAdaptiveParallelismLimiter_ProfileForTool(t *testing.T) {
 		{"bash", ProfileStateful},
 		{"git_diff", ProfileExclusive},
 		{"git_commit", ProfileExclusive},
-		{"unknown_tool_xyz", ProfileIOBound},   // default
-		{"", ProfileIOBound},                    // empty string default
+		{"unknown_tool_xyz", ProfileIOBound}, // default
+		{"", ProfileIOBound},                 // empty string default
 	}
 
 	for _, tt := range tests {
@@ -182,10 +182,10 @@ func TestAdaptiveParallelismLimiter_CPUBoundConcurrency(t *testing.T) {
 
 func TestToolProfiles_ContainsCommonTools(t *testing.T) {
 	expected := map[string]ToolConcurrencyProfile{
-		"web_search":  ProfileIOBound,
-		"file_read":   ProfileIOBound,
-		"shell":       ProfileStateful,
-		"git_commit":  ProfileExclusive,
+		"web_search": ProfileIOBound,
+		"file_read":  ProfileIOBound,
+		"shell":      ProfileStateful,
+		"git_commit": ProfileExclusive,
 	}
 
 	for tool, wantProfile := range expected {

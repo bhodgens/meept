@@ -55,8 +55,8 @@ type Checkpoint struct {
 
 // checkpointFile is the on-disk JSON wrapper for a Checkpoint plus version header.
 type checkpointFile struct {
-	Version     int        `json:"version"`
-	Checkpoint  Checkpoint `json:"checkpoint"`
+	Version    int        `json:"version"`
+	Checkpoint Checkpoint `json:"checkpoint"`
 	// Final is set to true when the run completed successfully (sentinel).
 	Final bool `json:"final,omitempty"`
 }
@@ -99,9 +99,9 @@ type ResumeResult struct {
 // creating one checkpoint file per incomplete run plus a sentinel for
 // completed runs.
 type RunRecoverer struct {
-	basePath         string
+	basePath           string
 	checkpointInterval int // checkpoint every N turns (0 = disabled)
-	mu               sync.Mutex
+	mu                 sync.Mutex
 }
 
 // NewRunRecoverer creates a recoverer that stores checkpoints under basePath.
@@ -451,11 +451,11 @@ func SnapshotForTurn(runID, agentID string, depth int, currentTurn, limit int,
 			Current int `json:"current"`
 			Limit   int `json:"limit"`
 		}{Current: currentTurn, Limit: limit},
-		ToolCalls:     tc,
-		LLMMessages:   msgs,
-		Outputs:       output,
-		Timestamp:     time.Now(),
-		Metadata:      nil,
+		ToolCalls:   tc,
+		LLMMessages: msgs,
+		Outputs:     output,
+		Timestamp:   time.Now(),
+		Metadata:    nil,
 	}
 }
 
@@ -562,10 +562,10 @@ type RecoveryState struct {
 // RetryRecovery provides HALO-style retry logic with observable state for
 // tool execution failures mid-turn.
 type RetryRecovery struct {
-	config   RecoveryConfig
-	mu       sync.RWMutex
-	state    RecoveryState
-	logger   *slog.Logger
+	config RecoveryConfig
+	mu     sync.RWMutex
+	state  RecoveryState
+	logger *slog.Logger
 }
 
 // NewRetryRecovery creates a RetryRecovery with the given config. If config

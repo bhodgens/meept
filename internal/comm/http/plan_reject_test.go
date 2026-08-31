@@ -71,7 +71,7 @@ func createPendingPlan(t *testing.T, tps *testPlanSvc) *plan.Plan {
 	t.Helper()
 	ctx := t.Context()
 	p, err := tps.Create(ctx, services.CreatePlanRequest{
-		Title:    "test plan",
+		Title:     "test plan",
 		SessionID: "sess-1",
 	})
 	if err != nil {

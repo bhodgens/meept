@@ -16,10 +16,10 @@ func TestCheckPermission_ComputerUse(t *testing.T) {
 	})
 
 	tests := []struct {
-		name          string
-		action        string
-		wantAllowed   bool
-		wantRisk      RiskLevel
+		name            string
+		action          string
+		wantAllowed     bool
+		wantRisk        RiskLevel
 		wantNeedConfirm bool
 	}{
 		// Observation class: LOW risk, runs without confirmation.

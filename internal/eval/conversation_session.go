@@ -157,7 +157,7 @@ type ConversationSession struct {
 	currentMode AnalysisMode
 	mu          sync.RWMutex
 
-	store    agent.TraceStoreReader
+	store     agent.TraceStoreReader
 	llmClient LLMClient
 	turnCount int
 	err       error

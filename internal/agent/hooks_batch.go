@@ -67,4 +67,3 @@ func (e *HookBatchExecutor) ExecuteAll(ctx context.Context, payload HookPayload)
 	}
 	wg.Wait()
 }
-

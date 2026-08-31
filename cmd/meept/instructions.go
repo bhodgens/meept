@@ -166,18 +166,18 @@ func instructionsPreview(client transport.Client, input string) error {
 }
 
 type InstructionResponse struct {
-	Success              bool                   `json:"success"`
-	Instruction          *InstructionInfo       `json:"instruction,omitempty"`
-	Instructions         []*InstructionInfo     `json:"instructions,omitempty"`
-	ParsedInstruction    *ParsedInstructionCLI  `json:"parsed,omitempty"`
-	ConfirmationRequired bool                   `json:"confirmation_required"`
-	Error                string                 `json:"error,omitempty"`
+	Success              bool                  `json:"success"`
+	Instruction          *InstructionInfo      `json:"instruction,omitempty"`
+	Instructions         []*InstructionInfo    `json:"instructions,omitempty"`
+	ParsedInstruction    *ParsedInstructionCLI `json:"parsed,omitempty"`
+	ConfirmationRequired bool                  `json:"confirmation_required"`
+	Error                string                `json:"error,omitempty"`
 }
 
 type InstructionListResponse struct {
-	Success      bool             `json:"success"`
+	Success      bool               `json:"success"`
 	Instructions []*InstructionInfo `json:"instructions"`
-	Error        string           `json:"error"`
+	Error        string             `json:"error"`
 }
 
 type InstructionInfo struct {
@@ -192,8 +192,8 @@ type InstructionInfo struct {
 
 type ParsedInstructionCLI struct {
 	Trigger struct {
-		Type    string         `json:"type"`
-		Pattern string         `json:"pattern"`
+		Type    string `json:"type"`
+		Pattern string `json:"pattern"`
 	} `json:"trigger"`
 	Action struct {
 		Tool    string         `json:"tool"`
@@ -251,7 +251,7 @@ Examples:
   meept instructions add "always run tests"        # Add instruction
   meept instructions delete <id>                   # Remove instruction
   meept instructions preview "every day at 9am"    # Preview parsed instruction`,
-		Args:  cobra.ArbitraryArgs,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return instructionsCmd(args)
 		},

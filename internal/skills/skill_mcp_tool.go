@@ -31,10 +31,10 @@ func NewSkillMCPTool(def llm.ToolDefinition, client *mcp.Client) *SkillMCPTool {
 	}
 }
 
-func (t *SkillMCPTool) Name() string                       { return t.def.Function.Name }
-func (t *SkillMCPTool) Description() string                { return t.def.Function.Description }
-func (t *SkillMCPTool) Parameters() llm.FunctionParameters { return t.def.Function.Parameters }
-func (t *SkillMCPTool) IsReadOnly(map[string]any) bool      { return false }
+func (t *SkillMCPTool) Name() string                          { return t.def.Function.Name }
+func (t *SkillMCPTool) Description() string                   { return t.def.Function.Description }
+func (t *SkillMCPTool) Parameters() llm.FunctionParameters    { return t.def.Function.Parameters }
+func (t *SkillMCPTool) IsReadOnly(map[string]any) bool        { return false }
 func (t *SkillMCPTool) IsConcurrencySafe(map[string]any) bool { return false }
 
 // Execute invokes the MCP tool via the client directly.

@@ -20,16 +20,16 @@ import (
 
 // ServerConfig defines the configuration for an MCP server.
 type ServerConfig struct {
-	Name        string            `json:"name"`
-	Enabled     *bool             `json:"enabled,omitempty"`     // nil/absent = true (backward compat)
-	Command     []string          `json:"command,omitempty"`     // For stdio transport
-	URL         string            `json:"url,omitempty"`         // For HTTP transport
-	Type        string            `json:"type,omitempty"`        // "stdio" or "http"
-	Env         map[string]string `json:"env,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`     // For HTTP transport
-	Description string            `json:"description,omitempty"` // Optional, for UI display
-	Category       string            `json:"category,omitempty"`    // Optional, for UI grouping
-	RateLimitRPS   float64           `json:"rate_limit_rps,omitempty"`  // Requests per second (default: 10)
+	Name           string            `json:"name"`
+	Enabled        *bool             `json:"enabled,omitempty"` // nil/absent = true (backward compat)
+	Command        []string          `json:"command,omitempty"` // For stdio transport
+	URL            string            `json:"url,omitempty"`     // For HTTP transport
+	Type           string            `json:"type,omitempty"`    // "stdio" or "http"
+	Env            map[string]string `json:"env,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`          // For HTTP transport
+	Description    string            `json:"description,omitempty"`      // Optional, for UI display
+	Category       string            `json:"category,omitempty"`         // Optional, for UI grouping
+	RateLimitRPS   float64           `json:"rate_limit_rps,omitempty"`   // Requests per second (default: 10)
 	RateLimitBurst int               `json:"rate_limit_burst,omitempty"` // Burst size (default: 20)
 }
 
@@ -54,10 +54,10 @@ const (
 // daemon restart.
 type ServerStats struct {
 	State         ServerState `json:"state"`
-	Requests      int64       `json:"requests"`                 // CallTool invocations (success + failure)
-	Errors        int64       `json:"errors"`                   // failed CallTool invocations
-	LastError     string      `json:"last_error"`               // trimmed; "" if none
-	LastErrorAt   *time.Time  `json:"last_error_at,omitempty"`  // time of last error
+	Requests      int64       `json:"requests"`                  // CallTool invocations (success + failure)
+	Errors        int64       `json:"errors"`                    // failed CallTool invocations
+	LastError     string      `json:"last_error"`                // trimmed; "" if none
+	LastErrorAt   *time.Time  `json:"last_error_at,omitempty"`   // time of last error
 	LastRequestAt *time.Time  `json:"last_request_at,omitempty"` // time of last request
 }
 
@@ -87,8 +87,8 @@ type Manager struct {
 	mu           sync.RWMutex
 	clients      map[string]*Client
 	logger       *slog.Logger
-	stats        map[string]*ServerStats // in-memory runtime stats, guarded by mu
-	configs      map[string]ServerConfig // snapshot of all configured servers (incl. disabled)
+	stats        map[string]*ServerStats  // in-memory runtime stats, guarded by mu
+	configs      map[string]ServerConfig  // snapshot of all configured servers (incl. disabled)
 	localTools   map[string]LocalToolkit  // keyed by toolkit name prefix
 	rateLimiters map[string]*rate.Limiter // per-server rate limiters
 	rateLimitMu  sync.RWMutex
@@ -100,9 +100,9 @@ func NewManager(logger *slog.Logger) *Manager {
 		logger = slog.Default()
 	}
 	return &Manager{
-		clients:    make(map[string]*Client),
-		stats:      make(map[string]*ServerStats),
-		configs:    make(map[string]ServerConfig),
+		clients:      make(map[string]*Client),
+		stats:        make(map[string]*ServerStats),
+		configs:      make(map[string]ServerConfig),
 		localTools:   make(map[string]LocalToolkit),
 		rateLimiters: make(map[string]*rate.Limiter),
 		logger:       logger.With("component", "mcp-manager"),

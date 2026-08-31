@@ -25,7 +25,7 @@ type retryableTestError struct {
 	msg string
 }
 
-func (e *retryableTestError) Error() string            { return e.msg }
+func (e *retryableTestError) Error() string             { return e.msg }
 func (e *retryableTestError) RetryAfter() time.Duration { return 0 }
 func (e *retryableTestError) IsRetryable() bool         { return true }
 

@@ -346,9 +346,9 @@ func TestEmbeddingWorker_CatchUpMode(t *testing.T) {
 
 	fe := &fakeEmbedder{dim: 768}
 	w := NewEmbeddingWorker(context.Background(), store, fe, slog.Default(), EmbeddingWorkerConfig{
-		Batch:           20,                   // maintenance batch
-		Interval:        time.Hour,            // not relevant; we call tick directly
-		CatchUpBatch:    200,                  // catch-up batch
+		Batch:           20,                    // maintenance batch
+		Interval:        time.Hour,             // not relevant; we call tick directly
+		CatchUpBatch:    200,                   // catch-up batch
 		CatchUpInterval: 10 * time.Millisecond, // not relevant for direct tick calls
 	})
 	if w == nil {

@@ -93,3 +93,5 @@ internal/comm/http/project/
 # Compiled test binaries
 daemon.test
 *.test
+*.db-shm
+*.db-wal

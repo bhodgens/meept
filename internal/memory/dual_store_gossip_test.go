@@ -13,8 +13,8 @@ import (
 
 // mockGossipPublisher satisfies GossipPublisher for testing.
 type mockGossipPublisher struct {
-	mu      sync.Mutex
-	events  []publishedEvent
+	mu         sync.Mutex
+	events     []publishedEvent
 	eventCount int64 // atomic counter for non-locking reads
 }
 

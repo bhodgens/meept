@@ -80,14 +80,14 @@ also provide --input), or "general" is used as the default.`,
 			if topicLabel == "" {
 				input := strings.Join(args, " ")
 				if input != "" {
-				detector := agent.NewTopicDetector()
+					detector := agent.NewTopicDetector()
 					topicLabel = detector.Detect(input)
 				}
 			}
 
 			params := map[string]any{
-				"session_id":     sessionID,
-				"topic_label":    topicLabel,
+				"session_id":      sessionID,
+				"topic_label":     topicLabel,
 				"conversation_id": sessionID,
 			}
 

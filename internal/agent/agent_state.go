@@ -88,7 +88,7 @@ func (s AgentState) String() string {
 	case StateBudgetExhausted:
 		return "budget_exhausted"
 	default:
-		return fmt.Sprintf("state(%d)", s)
+		return "unknown"
 	}
 }
 
@@ -260,20 +260,26 @@ func (m *AgentStateMachine) isValidTransition(from, to AgentState) bool {
 			StateGeneratingResponse,
 			StateToolExecuting,
 			StateProcessingResult,
+			StateQuotaWait, // quota episode entered while agent idle
 			StateError,
 			StateCancelled,
 			StateMaxIterations,
 			StateBudgetExhausted,
 			StateCompleted,
 		},
-		StateReceivingInput:   {StateClassifying, StateThinking, StateError, StateCancelled},
-		StateClassifying:      {StateThinking, StateGeneratingResponse, StateError, StateCancelled},
-		StateThinking:         {StateToolExecuting, StateToolWaiting, StateGeneratingResponse, StateProcessingResult, StateError, StateBlocked, StateCancelled, StateMaxIterations, StateBudgetExhausted, StateCompleted},
-		StateToolExecuting:    {StateToolWaiting, StateProcessingResult, StateGeneratingResponse, StateError, StateBlocked, StateCancelled},
-		StateToolWaiting:      {StateProcessingResult, StateToolExecuting, StateError, StateBlocked, StateCancelled},
-		StateProcessingResult: {StateThinking, StateGeneratingResponse, StateToolExecuting, StateCompleted, StateError, StateBlocked, StateMaxIterations, StateCancelled},
-		StateGeneratingResponse: {StateCompleted, StateError, StateCancelled, StateThinking},
-		StateBlocked:            {StateThinking, StateToolExecuting, StateProcessingResult, StateCancelled, StateError},
+		StateReceivingInput:     {StateClassifying, StateThinking, StateError, StateCancelled},
+		StateClassifying:        {StateThinking, StateGeneratingResponse, StateError, StateCancelled},
+		StateThinking:           {StateToolExecuting, StateToolWaiting, StateGeneratingResponse, StateProcessingResult, StateQuotaWait, StateError, StateBlocked, StateCancelled, StateMaxIterations, StateBudgetExhausted, StateCompleted},
+		StateToolExecuting:      {StateToolWaiting, StateProcessingResult, StateGeneratingResponse, StateQuotaWait, StateError, StateBlocked, StateCancelled},
+		StateToolWaiting:        {StateProcessingResult, StateToolExecuting, StateQuotaWait, StateError, StateBlocked, StateCancelled},
+		StateProcessingResult:   {StateThinking, StateGeneratingResponse, StateToolExecuting, StateCompleted, StateQuotaWait, StateError, StateBlocked, StateMaxIterations, StateCancelled},
+		StateGeneratingResponse: {StateCompleted, StateError, StateCancelled, StateQuotaWait, StateThinking},
+		StateBlocked:            {StateThinking, StateToolExecuting, StateProcessingResult, StateQuotaWait, StateCancelled, StateError},
+		// StateQuotaWait: the agent is parked waiting for a provider quota
+		// window to reset (entered from any active state or Idle by the
+		// QuotaEpisodeTracker). Exits to Thinking on automatic resume, Idle on
+		// quota_cleared, Blocked on the 24h escalation, or Error/Cancelled.
+		StateQuotaWait: {StateThinking, StateIdle, StateBlocked, StateError, StateCancelled},
 		// Terminal states may only reset to Idle. Error additionally allows
 		// transitioning back to Thinking for self-recovery (attemptStateRecovery
 		// performs an Error→Idle reset; callers that prefer direct retry can

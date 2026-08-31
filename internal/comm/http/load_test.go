@@ -40,9 +40,9 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 	}
 
 	const (
-		numClients   = 100
-		numEvents    = 50
-		testTimeout  = 30 * time.Second
+		numClients  = 100
+		numEvents   = 50
+		testTimeout = 30 * time.Second
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -403,7 +403,7 @@ func TestWebSocket_Load_BroadcastCorrectness(t *testing.T) {
 
 	// Read events from each client.
 	type readResult struct {
-		count   int
+		count    int
 		payloads []string
 	}
 	results := make([]readResult, numClients)

@@ -75,6 +75,7 @@ type Config struct {
 	Workspace           WorkspaceConfig           `json:"workspace"          toml:"workspace"`
 	Skills              SkillsConfig              `json:"skills"             toml:"skills"`
 	SelfImprove         SelfImproveConfig         `json:"selfimprove"        toml:"selfimprove"`
+	Eval                EvalConfig                `json:"eval"               toml:"eval"`
 	Orchestrator        OrchestratorConfig        `json:"orchestrator"       toml:"orchestrator"`
 	Shadow              ShadowConfig              `json:"shadow"             toml:"shadow"`
 	DistributedMemory   DistributedMemoryConfig   `json:"distributed_memory" toml:"distributed_memory"`
@@ -270,12 +271,6 @@ func (c *EmployeesConfig) Validate() error {
 
 // Validate validates the EmployeesAuditConfig.
 func (c *EmployeesAuditConfig) Validate() error {
-	// Validate approval timeout if set
-	if c.ApprovalTimeout != "" {
-		if _, err := time.ParseDuration(c.ApprovalTimeout); err != nil {
-			return fmt.Errorf("invalid approval_timeout %q: %w", c.ApprovalTimeout, err)
-		}
-	}
 	// Validate drift threshold is 0-1
 	if c.DriftPauseThreshold < 0 || c.DriftPauseThreshold > 1 {
 		return fmt.Errorf("drift_pause_threshold must be between 0 and 1, got %f", c.DriftPauseThreshold)
@@ -298,7 +293,7 @@ type EmployeesAuditConfig struct {
 	// bulk audit (Checkpoint 3). Per-employee AssessmentInterval overrides
 	// this for the GoalLoop; this value is used when the employee doesn't
 	// declare its own interval.
-	PeriodicInterval string `json:"periodic_interval" toml:"periodic_interval"`
+	PeriodicInterval time.Duration `json:"periodic_interval" toml:"periodic_interval"`
 
 	// DriftPauseThreshold is the drift score (0.0-1.0) above which the
 	// periodic auditor auto-pauses the employee. Drift measures slow
@@ -312,9 +307,8 @@ type EmployeesAuditConfig struct {
 	FindingsRetentionDays int `json:"findings_retention_days" toml:"findings_retention_days"`
 
 	// ApprovalTimeout is the duration after which a plan stuck in
-	// PendingApproval is auto-rejected (spec line 591). Default: "7d".
-	// Format: Go duration string ("168h", "7d" is not valid Go; use "168h").
-	ApprovalTimeout string `json:"approval_timeout" toml:"approval_timeout"`
+	// PendingApproval is auto-rejected (spec line 591). Default: 168h.
+	ApprovalTimeout time.Duration `json:"approval_timeout" toml:"approval_timeout"`
 }
 
 // EmployeesAutoPauseConfig controls the auto-pause policy. When any of
@@ -429,8 +423,11 @@ type CalendarConfig struct {
 	CalendarID string `json:"calendar_id" toml:"calendar_id"`
 	// ReminderEnabled turns on the reminder watcher for upcoming events
 	ReminderEnabled bool `json:"reminder_enabled" toml:"reminder_enabled"`
-	// ReminderCheckInterval is how often to check for upcoming events (default: 5m)
-	ReminderCheckInterval string `json:"reminder_check_interval" toml:"reminder_check_interval"`
+	// ReminderCheckInterval is how often to check for upcoming events (default: 5m).
+	// time.Duration: the JSON5 loader's duration preprocessing turns quoted
+	// "5m" values into nanosecond integers, so a string field breaks the
+	// JSON5 write→reload round-trip.
+	ReminderCheckInterval time.Duration `json:"reminder_check_interval" toml:"reminder_check_interval"`
 	// ReminderAdvanceMinutes triggers reminders this many minutes before an event
 	ReminderAdvanceMinutes int `json:"reminder_advance_minutes" toml:"reminder_advance_minutes"`
 }
@@ -580,7 +577,7 @@ type DaemonConfig struct {
 	PIDFile            string               `json:"pid_file"             toml:"pid_file"`
 	LogLevel           string               `json:"log_level"             toml:"log_level"`
 	DataDir            string               `json:"data_dir"             toml:"data_dir"`
-	ShutdownTimeout    string               `json:"shutdown_timeout"     toml:"shutdown_timeout"`
+	ShutdownTimeout    time.Duration        `json:"shutdown_timeout"     toml:"shutdown_timeout"`
 	ChatTimeoutSeconds int                  `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
 	Uploads            UploadsConfig        `json:"uploads"              toml:"uploads"`
 	UserInstructions   InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
@@ -779,6 +776,20 @@ const (
 	DefaultQuotaRetryDefaultEstimate    = time.Hour
 	DefaultQuotaRetryDeferCheckInterval = 10 * time.Minute
 )
+
+// GetEnabled returns Enabled. Part of the getter surface llm.ConfigFromSchema
+// reads via its parameter interface (kept interface-based to avoid an
+// internal/llm -> internal/config import cycle).
+func (q *QuotaRetryConfig) GetEnabled() bool { return q.Enabled }
+
+// GetMaxWait returns MaxWait. See GetEnabled.
+func (q *QuotaRetryConfig) GetMaxWait() time.Duration { return q.MaxWait }
+
+// GetDefaultEstimate returns DefaultEstimate. See GetEnabled.
+func (q *QuotaRetryConfig) GetDefaultEstimate() time.Duration { return q.DefaultEstimate }
+
+// GetDeferCheckInterval returns DeferCheckInterval. See GetEnabled.
+func (q *QuotaRetryConfig) GetDeferCheckInterval() time.Duration { return q.DeferCheckInterval }
 
 // NormalizeQuotaRetryDefaults clamps invalid quota_retry values to defaults:
 // negative durations (JSON5 numeric values) become the field default; zero
@@ -1244,12 +1255,17 @@ type AgentRetryConfig struct {
 }
 
 // AgentBackoffConfig holds per-operation backoff parameters.
+// BaseDelay/MaxDelay are time.Duration: the JSON5 loader's duration
+// preprocessing converts quoted "1s"-style values to nanosecond integers
+// for unmarshaling, and the TOML path accepts Go duration strings — a
+// plain string field here broke the JSON5 write→reload round-trip
+// (configui savepaths tests).
 type AgentBackoffConfig struct {
-	BaseDelay  string  `json:"base_delay"  toml:"base_delay"` // duration string, e.g. "1s"
-	MaxDelay   string  `json:"max_delay"   toml:"max_delay"`  // duration string, e.g. "30s"
-	Multiplier float64 `json:"multiplier"  toml:"multiplier"`
-	Jitter     float64 `json:"jitter"      toml:"jitter"`
-	Budget     int     `json:"budget"      toml:"budget"` // per-operation retry budget (0 = use DefaultBudget)
+	BaseDelay  time.Duration `json:"base_delay"  toml:"base_delay"` // e.g. "1s"
+	MaxDelay   time.Duration `json:"max_delay"   toml:"max_delay"`  // e.g. "30s"
+	Multiplier float64       `json:"multiplier"  toml:"multiplier"`
+	Jitter     float64       `json:"jitter"      toml:"jitter"`
+	Budget     int           `json:"budget"      toml:"budget"` // per-operation retry budget (0 = use DefaultBudget)
 }
 
 // AgentStateTrackingConfig configures the agent state machine observability hooks.
@@ -2012,6 +2028,32 @@ type OrchestratorConfig struct {
 	MaxPhases                   int     `json:"max_phases"                    toml:"max_phases"`                    // Thread C+F: phase count soft cap
 }
 
+// EvalConfig holds eval-harness settings (harness-eval leaf 15, contract:
+// two-layer flags). When Enabled is false, production behavior is unchanged
+// — gates still follow each AGENT.md's gate.command. The ablation knobs are
+// for eval runs and model-swap experiments; they are not a user-facing off
+// switch for security (the isolation flag only affects spawn context, never
+// fence/tirith).
+type EvalConfig struct {
+	// Enabled gates eval-run recording and the metrics observer.
+	Enabled bool `json:"enabled"    toml:"enabled"`
+	// Gates enables the roster coder-gate during eval runs (default on when
+	// eval.enabled; AGENT.md gate.command still decides whether a gate runs
+	// at all).
+	Gates bool `json:"gates"      toml:"gates"`
+	// StatusBar enables the [status] prompt block during eval runs.
+	StatusBar bool `json:"status_bar" toml:"status_bar"`
+	// Isolation enables ArtifactOnly spawn context during eval runs. This
+	// flag can NEVER disable isolation — false falls back to the default
+	// ArtifactOnly behavior; it cannot enable SharedTranscript.
+	Isolation bool `json:"isolation"  toml:"isolation"`
+}
+
+// Validate checks the [eval] config for impossible values.
+func (c *EvalConfig) Validate() error {
+	return nil
+}
+
 // ShadowConfig holds shadow training settings.
 type ShadowConfig struct {
 	Enabled   bool                  `json:"enabled"   toml:"enabled"`
@@ -2182,14 +2224,14 @@ func DefaultConfig() *Config {
 		LLM: LLMConfig{
 			ModelsDir: "~/.meept/models",
 			Budget: BudgetConfig{
-				HourlyTokenLimit:     0,  // 0 = disabled; suggested: 200000 (input-only) or 350000 (total)
-				DailyTokenLimit:      0,  // 0 = disabled; suggested: 1000000
+				HourlyTokenLimit:     0,   // 0 = disabled; suggested: 200000 (input-only) or 350000 (total)
+				DailyTokenLimit:      0,   // 0 = disabled; suggested: 1000000
 				DailyCostLimit:       0.0, // 0 = disabled; suggested: 10.0 for paid providers only
 				HourlyCostLimit:      0.0, // 0 = disabled; suggested: 2.0 for paid providers only
 				RateLimitRPM:         30,
 				Aggressiveness:       0.5,
-				PerTaskTokenLimit:    0,  // 0 = disabled; suggested: 50000
-				PerSessionTokenLimit: 0,  // 0 = disabled; suggested: 100000
+				PerTaskTokenLimit:    0,   // 0 = disabled; suggested: 50000
+				PerSessionTokenLimit: 0,   // 0 = disabled; suggested: 100000
 				PerTaskCostLimit:     0.0, // 0 = disabled
 				PerSessionCostLimit:  0.0, // 0 = disabled
 			},
@@ -2396,8 +2438,8 @@ func DefaultConfig() *Config {
 				Enabled:       true,
 				DefaultBudget: 5, // Max retries per operation chain
 				Backoff: AgentBackoffConfig{
-					BaseDelay:  "1s",
-					MaxDelay:   "30s",
+					BaseDelay:  time.Second,
+					MaxDelay:   30 * time.Second,
 					Multiplier: 2.0,
 					Jitter:     0.3, // 30% jitter
 				},
@@ -2590,6 +2632,12 @@ func DefaultConfig() *Config {
 				RuffArgs:         []string{},
 			},
 		},
+		Eval: EvalConfig{
+			Enabled:   false,
+			Gates:     true,
+			StatusBar: true,
+			Isolation: true,
+		},
 		Orchestrator: OrchestratorConfig{
 			MaxPlanSteps:                10,
 			MaxResearchSteps:            3,
@@ -2776,7 +2824,7 @@ func DefaultConfig() *Config {
 			Enabled:                false,
 			CalendarID:             "primary",
 			ReminderEnabled:        false,
-			ReminderCheckInterval:  "5m",
+			ReminderCheckInterval:  5 * time.Minute,
 			ReminderAdvanceMinutes: 10,
 		},
 		Compaction: CompactionConfig{
@@ -2813,7 +2861,7 @@ func DefaultConfig() *Config {
 			Enabled: true,
 			Audit: EmployeesAuditConfig{
 				Model:                 "",
-				PeriodicInterval:      "6h",
+				PeriodicInterval:      6 * time.Hour,
 				DriftPauseThreshold:   0.3,
 				FindingsRetentionDays: 90,
 			},
@@ -2875,10 +2923,8 @@ func ParseLogLevel(level string) slog.Level {
 
 // ShutdownTimeout returns the configured shutdown timeout, falling back to 10s.
 func (c *Config) ShutdownTimeout() time.Duration {
-	if c.Daemon.ShutdownTimeout != "" {
-		if d, err := time.ParseDuration(c.Daemon.ShutdownTimeout); err == nil {
-			return d
-		}
+	if c.Daemon.ShutdownTimeout > 0 {
+		return c.Daemon.ShutdownTimeout
 	}
 	return 10 * time.Second
 }
@@ -3212,6 +3258,11 @@ func (c *Config) ValidateAll() error {
 	// Validate [agent.tools] schema mode (loop-economics leaf 02).
 	if err := c.Agent.Tools.Validate(); err != nil {
 		return fmt.Errorf("agent config: %w", err)
+	}
+
+	// Validate [eval] config (harness-eval leaf 15).
+	if err := c.Eval.Validate(); err != nil {
+		return fmt.Errorf("eval config: %w", err)
 	}
 
 	if err := c.ACP.Validate(); err != nil {

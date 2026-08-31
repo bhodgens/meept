@@ -578,17 +578,17 @@ func (s *Store) RecordResponseQuality(_ context.Context, quality ResponseQuality
 
 // DispatchEntry captures a single dispatch routing decision for the audit log.
 type DispatchEntry struct {
-	SessionID         string  `json:"session_id" db:"session_id"`
-	InputSummary      string  `json:"input_summary" db:"input_summary"`
-	IntentType        string  `json:"intent_type" db:"intent_type"`
-	AgentID           string  `json:"agent_id" db:"agent_id"`
-	Confidence        float64 `json:"confidence" db:"confidence"`
-	ClassifierMethod  string  `json:"classifier_method" db:"classifier_method"`
-	HandlerCase       string  `json:"handler_case" db:"handler_case"`
-	TaskID            string  `json:"task_id" db:"task_id"`
-	HasParts          bool    `json:"has_parts" db:"-"`
-	HasPartsInt       int     `json:"-" db:"has_parts"`
-	Error             string  `json:"error" db:"error"`
+	SessionID        string  `json:"session_id" db:"session_id"`
+	InputSummary     string  `json:"input_summary" db:"input_summary"`
+	IntentType       string  `json:"intent_type" db:"intent_type"`
+	AgentID          string  `json:"agent_id" db:"agent_id"`
+	Confidence       float64 `json:"confidence" db:"confidence"`
+	ClassifierMethod string  `json:"classifier_method" db:"classifier_method"`
+	HandlerCase      string  `json:"handler_case" db:"handler_case"`
+	TaskID           string  `json:"task_id" db:"task_id"`
+	HasParts         bool    `json:"has_parts" db:"-"`
+	HasPartsInt      int     `json:"-" db:"has_parts"`
+	Error            string  `json:"error" db:"error"`
 }
 
 // RecordDispatch inserts a dispatch routing decision into the audit log.

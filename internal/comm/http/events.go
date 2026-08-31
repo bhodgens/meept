@@ -14,7 +14,7 @@ import (
 // Subscribe returned on a closed emitter (and was therefore already
 // closed at issue time) will not panic on the second close attempt.
 type subscriber struct {
-	ch       chan *NotificationEvent
+	ch        chan *NotificationEvent
 	closeOnce sync.Once
 }
 

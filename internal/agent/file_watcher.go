@@ -34,7 +34,7 @@ import (
 // it into agent context (see SECURITY note above).
 type FileWatcherHook struct {
 	os.FileInfo
-	Pattern  string        `json:"pattern"`
+	Pattern  string `json:"pattern"`
 	Callback func(path string)
 	Debounce time.Duration `json:"debounce"`
 	Ignore   []string      `json:"ignore"`

@@ -28,10 +28,10 @@ func TestEngineCheckComputerUse(t *testing.T) {
 	defer engine.Close()
 
 	tests := []struct {
-		name          string
-		action        string
-		wantAllowed   bool
-		wantRisk      RiskLevel
+		name            string
+		action          string
+		wantAllowed     bool
+		wantRisk        RiskLevel
 		wantNeedConfirm bool
 	}{
 		// Observation class: LOW risk, runs without confirmation.

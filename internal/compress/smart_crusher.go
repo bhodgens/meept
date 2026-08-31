@@ -20,12 +20,12 @@ import (
 // Typical savings: 70-90% on tool outputs (file listings, search results, API responses)
 type SmartCrusher struct {
 	// Config options
-	KeepFirstN       int     // Always keep first N items (default: 10)
-	KeepLastN        int     // Always keep last N items (default: 5)
-	PreserveErrors   bool    // Keep error responses (default: true)
-	MaxArrayItems    int     // Maximum items to keep per array (default: 50)
-	TargetRatio      float64 // Target compression ratio (0.0 = auto)
-	EnableCCRMarker  bool    // Inject CCR retrieval markers (default: true)
+	KeepFirstN      int     // Always keep first N items (default: 10)
+	KeepLastN       int     // Always keep last N items (default: 5)
+	PreserveErrors  bool    // Keep error responses (default: true)
+	MaxArrayItems   int     // Maximum items to keep per array (default: 50)
+	TargetRatio     float64 // Target compression ratio (0.0 = auto)
+	EnableCCRMarker bool    // Inject CCR retrieval markers (default: true)
 }
 
 // SmartCrusherConfig configures the SmartCrusher.
@@ -53,12 +53,12 @@ func DefaultSmartCrusherConfig() SmartCrusherConfig {
 // NewSmartCrusher creates a SmartCrusher with the given config.
 func NewSmartCrusher(cfg SmartCrusherConfig) *SmartCrusher {
 	return &SmartCrusher{
-		KeepFirstN:       cfg.KeepFirstN,
-		KeepLastN:        cfg.KeepLastN,
-		PreserveErrors:   cfg.PreserveErrors,
-		MaxArrayItems:    cfg.MaxArrayItems,
-		TargetRatio:      cfg.TargetRatio,
-		EnableCCRMarker:  cfg.EnableCCRMarker,
+		KeepFirstN:      cfg.KeepFirstN,
+		KeepLastN:       cfg.KeepLastN,
+		PreserveErrors:  cfg.PreserveErrors,
+		MaxArrayItems:   cfg.MaxArrayItems,
+		TargetRatio:     cfg.TargetRatio,
+		EnableCCRMarker: cfg.EnableCCRMarker,
 	}
 }
 
@@ -212,11 +212,11 @@ func (sc *SmartCrusher) crushArray(arr []interface{}, depth int) (interface{}, c
 		if keepAlways || preserve {
 			crushed, childStats := sc.crushValue(v, depth+1)
 			selected = append(selected, selectedItem{
-				index:   i,
-				value:   crushed,
-				hash:    hash,
-				kept:    true,
-				reason:  keepReason(i, len(arr), preserve),
+				index:  i,
+				value:  crushed,
+				hash:   hash,
+				kept:   true,
+				reason: keepReason(i, len(arr), preserve),
 			})
 			stats = stats.merge(childStats)
 		} else {
@@ -277,15 +277,15 @@ func (sc *SmartCrusher) buildArrayWithMarkers(selected []selectedItem, total int
 
 // compressionStats tracks metrics during crushing.
 type compressionStats struct {
-	originalTokens   int
-	compressedTokens int
+	originalTokens    int
+	compressedTokens  int
 	transformsApplied []string
 }
 
 func (s compressionStats) merge(other compressionStats) compressionStats {
 	return compressionStats{
-		originalTokens:   s.originalTokens + other.originalTokens,
-		compressedTokens: s.compressedTokens + other.compressedTokens,
+		originalTokens:    s.originalTokens + other.originalTokens,
+		compressedTokens:  s.compressedTokens + other.compressedTokens,
 		transformsApplied: appendUnique(s.transformsApplied, other.transformsApplied...),
 	}
 }

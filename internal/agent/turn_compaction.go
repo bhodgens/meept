@@ -38,19 +38,19 @@ type LLMMessage struct {
 //
 // Modeled after HALO's turn compaction pattern (engine/main.py).
 type TurnSnapshot struct {
-	Sequence    int            `json:"sequence"`
-	TurnID      string         `json:"turn_id"`
-	ToolCalls   []TurnRecord   `json:"tool_calls"`
-	LLMMessages []LLMMessage   `json:"llm_messages"`
-	Output      string         `json:"output"`
-	Timestamp   time.Time      `json:"timestamp"`
+	Sequence    int               `json:"sequence"`
+	TurnID      string            `json:"turn_id"`
+	ToolCalls   []TurnRecord      `json:"tool_calls"`
+	LLMMessages []LLMMessage      `json:"llm_messages"`
+	Output      string            `json:"output"`
+	Timestamp   time.Time         `json:"timestamp"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // TurnSnapshotFile is the on-disk JSON wrapper for a TurnSnapshot plus version header.
 type TurnSnapshotFile struct {
-	Version  int           `json:"version"`
-	Snapshot TurnSnapshot   `json:"snapshot"`
+	Version  int          `json:"version"`
+	Snapshot TurnSnapshot `json:"snapshot"`
 }
 
 const TurnSnapshotVersion = 1

@@ -132,8 +132,8 @@ func (p *SyncPuller) pullOnce(ctx context.Context) error {
 	repo, err := GitCloneOrOpen(p.repoPath, p.cfg.RepoURL)
 	if err != nil {
 		return &SyncError{
-			Op:    "pull",
-			Err:   fmt.Errorf("git pull: %w", err),
+			Op:      "pull",
+			Err:     fmt.Errorf("git pull: %w", err),
 			Message: "failed to open or clone backup repo",
 		}
 	}

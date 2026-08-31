@@ -14,11 +14,11 @@ import (
 //
 // Keys: y confirms, n/esc cancels, v toggles detail view.
 type ConfirmationModel struct {
-	response    map[string]any
-	confirmed   bool
-	cancelled   bool
-	showDetail  bool
-	width       int
+	response   map[string]any
+	confirmed  bool
+	cancelled  bool
+	showDetail bool
+	width      int
 }
 
 // NewConfirmationModel constructs a ConfirmationModel from a phase-1 response map.
@@ -105,8 +105,8 @@ func (m ConfirmationModel) View() tea.View {
 			b.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
 		}
 		for k, v := range details {
-				b.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
-			}
+			b.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
+		}
 		b.WriteString("\n")
 	}
 

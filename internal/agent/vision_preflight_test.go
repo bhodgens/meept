@@ -239,4 +239,3 @@ func TestCollectUndescribedImageRefsIncludesFailedRefs(t *testing.T) {
 		t.Errorf("expected 2 refs (fresh + failed), got %d", len(refs))
 	}
 }
-

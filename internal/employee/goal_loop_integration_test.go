@@ -372,9 +372,9 @@ func TestGoalLoop_CanExecutePlan_AuthorityCheck(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		approver  string
-	executable bool
+		name       string
+		approver   string
+		executable bool
 	}{
 		{"system approver", "system", true},
 		{"empty approver", "", true},

@@ -36,7 +36,7 @@ func (a *GapAnalyzer) Propose(_ context.Context, gaps []LowMatchQuery) []Evoluti
 		skillName := slugifyQuery(q.Query)
 		body := generateSkillBody(skillName, q.Query, q.Count, q.BestScore)
 		proposals = append(proposals, EvolutionProposal{
-			Action: ProposalFillGap,
+			Action:    ProposalFillGap,
 			SkillName: skillName,
 			Rationale: fmt.Sprintf(
 				"low-match query recurred %d times (best score %.2f); no existing skill covers it",

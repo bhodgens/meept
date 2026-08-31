@@ -92,7 +92,7 @@ func GitPullRebase(repo *git.Repository) error {
 	err = iter.ForEach(func(ref *plumbing.Reference) error {
 		if ref.Name().String() == refName {
 			if resetErr := w.Reset(&git.ResetOptions{
-				Mode: git.HardReset,
+				Mode:   git.HardReset,
 				Commit: ref.Hash(),
 			}); resetErr == nil {
 				found = true
@@ -111,7 +111,7 @@ func GitPullRebase(repo *git.Repository) error {
 		headObj, err := repo.Head()
 		if err == nil {
 			if err := w.Reset(&git.ResetOptions{
-				Mode: git.HardReset,
+				Mode:   git.HardReset,
 				Commit: headObj.Hash(),
 			}); err != nil {
 				return Wrap("git_pull_reset_head", err)

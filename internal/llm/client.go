@@ -103,9 +103,27 @@ type Client struct {
 	oauthProvider string
 	extraHeaders  map[string]string
 	uploadStore   UploadStore
+	// quotaMaxWait is the upper bound applied to derived quota waits
+	// (llm.quota_retry.max_wait). Zero falls back to DefaultQuotaMaxWait.
+	// Classification itself is always on: a quota-window error must be
+	// distinguishable regardless of retry config (retry-on-quota is the
+	// caller's decision).
+	quotaMaxWait time.Duration
 	// concurrencySemaphore limits concurrent requests for this model/provider.
 	// When nil, no limit is enforced. Buffered channel used as a semaphore.
 	concurrencySemaphore chan struct{}
+}
+
+// DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without
+// importing internal/config (which would create a cycle via tools/mcp).
+const DefaultQuotaMaxWait = 24 * time.Hour
+
+// SetQuotaMaxWait sets the quota wait upper bound. Nil-receiver safe.
+func (c *Client) SetQuotaMaxWait(d time.Duration) {
+	if c == nil || d <= 0 {
+		return
+	}
+	c.quotaMaxWait = d
 }
 
 // ClientOption is a functional option for configuring a Client.
@@ -408,6 +426,13 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		resp, err := c.doRequest(ctx, payload, cfg)
 		if err != nil {
+			// Quota errors never re-enter the short-retry loop: the window
+			// is hours, not seconds. Return immediately; the caller decides
+			// whether to wait/rotate (quota-reset-resilience contract 1).
+			var quotaErr *QuotaResetError
+			if errors.As(err, &quotaErr) {
+				return nil, err
+			}
 			var apiErr *APIError
 			var rlErr *RateLimitError
 			if errors.As(err, &rlErr) {
@@ -567,6 +592,13 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 
 		resp, err := c.doRequest(ctx, payload, cfg)
 		if err != nil {
+			// Quota errors never re-enter the short-retry loop (streaming
+			// path): hours-scale window, return immediately.
+			var quotaErr *QuotaResetError
+			if errors.As(err, &quotaErr) {
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
+			}
 			var apiErr *APIError
 			var rlErr *RateLimitError
 			if errors.As(err, &rlErr) {
@@ -1000,6 +1032,21 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 			providerDetail = ParseRateLimitBody(respBody)
 		}
 
+		// Quota-window classification (quota-reset-resilience): short-cycle
+		// retriable limits stay RateLimitError; usage-window/billing shapes
+		// become QuotaResetError so callers rotate/block instead of retrying.
+		if classifyQuotaDecision(resp.StatusCode, respBody, providerDetail) {
+			qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
+				ProviderID: providerID,
+				ModelID:    modelID,
+				MaxWait:    c.quotaMaxWait,
+			})
+			if qe != nil {
+				qe.Cause = &APIError{StatusCode: resp.StatusCode, Detail: detail}
+				return nil, qe
+			}
+		}
+
 		rlErr := &RateLimitError{
 			ProviderID: providerID,
 			ModelID:    modelID,
@@ -1031,6 +1078,24 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 			detail = detail[:500]
 		}
 		return nil, &APIError{StatusCode: resp.StatusCode, Detail: detail}
+	}
+
+	// Check for quota payment-required (402): billing exhaustion is treated
+	// as retry-with-estimate (default posture: top-up resumes the queue).
+	if resp.StatusCode == http.StatusPaymentRequired {
+		detail := string(respBody)
+		if len(detail) > 500 {
+			detail = detail[:500]
+		}
+		qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
+			ProviderID: providerID,
+			ModelID:    modelID,
+			MaxWait:    c.quotaMaxWait,
+		})
+		if qe != nil {
+			qe.Cause = &APIError{StatusCode: resp.StatusCode, Detail: detail}
+			return nil, qe
+		}
 	}
 
 	// Check for other error status codes

@@ -142,10 +142,10 @@ func TestCheckPermission_PreExecChecker_ToolName(t *testing.T) {
 	pc.SetPreExecChecker("emp-1", stubPreExecChecker{forbiddenTool: "git_push"})
 
 	tests := []struct {
-		name     string
-		action   string
-		details  map[string]string
-		allowed  bool
+		name    string
+		action  string
+		details map[string]string
+		allowed bool
 	}{
 		{
 			name:    "forbidden by tool name — denied",

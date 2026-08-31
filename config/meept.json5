@@ -100,6 +100,15 @@
       "summary_level_threshold": 500,   // Token threshold to trigger re-summarization
       "overflow_strategy": "restart",   // "drop" | "summarize" | "restart" (default: "restart")
     },
+    // Quota reset resilience - detect provider usage windows, block affected
+    // credentials, keep agent tasks moving via rotation or deferral.
+    // Default posture: retry even on billing-shaped errors.
+    // "quota_retry": {
+    //   "enabled": true,
+    //   "max_wait": "24h",
+    //   "default_estimate": "1h",
+    //   "defer_check_interval": "10m"
+    // },
     // HTTP-level metrics collection
     "metrics": {
       "enabled": true,

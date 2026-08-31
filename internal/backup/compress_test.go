@@ -101,7 +101,7 @@ func TestComputeSHA256(t *testing.T) {
 	}
 	// Known SHA256 of "sha256 test data"
 	expected := "9a2fe0cf8ee81c5bb43c8d7ba4cdb3faffecf10e18c46784e8e3d8c1d724b6a3" // placeholder
-	_ = expected // just verify length and non-empty
+	_ = expected                                                                   // just verify length and non-empty
 	if sha == "" {
 		t.Error("expected non-empty SHA256")
 	}

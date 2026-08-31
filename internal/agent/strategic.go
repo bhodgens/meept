@@ -1522,10 +1522,10 @@ func (sp *StrategicPlanner) recordMetric(name string, value float64, tags map[st
 // consumes (references to nothing any phase produces) to optional.
 //
 // This is the core of the 4-layer malformed-output defense:
-//   1. ExtractJSON — strips markdown fences / surrounding prose.
-//   2. json.Unmarshal — structural validation.
-//   3. Repair pass — normalizes or drops invalid entries.
-//   4. Cap — enforces maxPhases ceiling.
+//  1. ExtractJSON — strips markdown fences / surrounding prose.
+//  2. json.Unmarshal — structural validation.
+//  3. Repair pass — normalizes or drops invalid entries.
+//  4. Cap — enforces maxPhases ceiling.
 //
 // Returns an error if no phases survive the repair pass.
 func parsePhaseOutput(raw string, maxPhases int) (*plannerPhaseOutput, error) {
@@ -1623,4 +1623,3 @@ func checkPhaseReady(phase *PlanPhaseSpec, store *artifactStore) error {
 	}
 	return nil
 }
-

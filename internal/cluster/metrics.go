@@ -100,17 +100,17 @@ type MetricsSnapshot struct {
 	ConflictResolutionsRemote int64 `json:"conflict_resolutions_remote_total"`
 
 	// Dispatch + CAS + peer counters (spec §8).
-	DispatchJobsReceived     int64 `json:"dispatch_jobs_received_total"`
-	DispatchJobsCompleted    int64 `json:"dispatch_jobs_completed_total"`
-	DispatchJobsFailed       int64 `json:"dispatch_jobs_failed_total"`
-	CASHits                  int64 `json:"cas_hits_total"`
-	CASMisses                int64 `json:"cas_misses_total"`
-	CASBytesFetched          int64 `json:"cas_bytes_fetched_total"`
-	CASBytesEvicted          int64 `json:"cas_bytes_evicted_total"`
-	CASRefcountZeroEligible  int64 `json:"cas_refcount_zero_eligible_total"`
-	PeerUnreachable          int64 `json:"peer_unreachable_total"`
-	PeerCorruptionIncidents  int64 `json:"peer_corruption_incidents_total"`
-	PeerQuarantined          int64 `json:"peer_quarantined_total"`
+	DispatchJobsReceived    int64 `json:"dispatch_jobs_received_total"`
+	DispatchJobsCompleted   int64 `json:"dispatch_jobs_completed_total"`
+	DispatchJobsFailed      int64 `json:"dispatch_jobs_failed_total"`
+	CASHits                 int64 `json:"cas_hits_total"`
+	CASMisses               int64 `json:"cas_misses_total"`
+	CASBytesFetched         int64 `json:"cas_bytes_fetched_total"`
+	CASBytesEvicted         int64 `json:"cas_bytes_evicted_total"`
+	CASRefcountZeroEligible int64 `json:"cas_refcount_zero_eligible_total"`
+	PeerUnreachable         int64 `json:"peer_unreachable_total"`
+	PeerCorruptionIncidents int64 `json:"peer_corruption_incidents_total"`
+	PeerQuarantined         int64 `json:"peer_quarantined_total"`
 }
 
 // Snapshot returns an immutable copy of the current counter values.

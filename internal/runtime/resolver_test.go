@@ -103,8 +103,8 @@ func bwNo() bool                         { return false }
 
 func TestQualifies(t *testing.T) {
 	cases := []struct {
-		name  string
-		want  bool
+		name string
+		want bool
 	}{
 		{"docker", true},
 		{"bwrap", true},
@@ -194,9 +194,9 @@ func TestResolveBackend_Table(t *testing.T) {
 			wantWarnSub: "UNSANDBOXED",
 		},
 		{
-			name:     "explicit_local_no_fallback_warning",
-			order:    SandboxOrderLocal,
-			backends: []string{"local"},
+			name:        "explicit_local_no_fallback_warning",
+			order:       SandboxOrderLocal,
+			backends:    []string{"local"},
 			dockerAvail: alwaysAvail,
 			bwrapAvail:  bwYes,
 			wantName:    "local",

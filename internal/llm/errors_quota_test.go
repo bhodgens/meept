@@ -216,9 +216,9 @@ func TestFormatDuration(t *testing.T) {
 		want  string
 	}{
 		{3*time.Hour + 12*time.Minute, "3h 12m"},
-		{2*time.Hour, "2h"},
-		{45*time.Minute, "45m"},
-		{90*time.Second, "1m"}, // truncated, not rounded
+		{2 * time.Hour, "2h"},
+		{45 * time.Minute, "45m"},
+		{90 * time.Second, "1m"}, // truncated, not rounded
 	}
 	for _, tt := range tests {
 		got := formatDuration(tt.input)

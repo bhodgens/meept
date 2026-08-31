@@ -25,10 +25,10 @@ const (
 type PushPriority string
 
 const (
-	PushPriorityLow     PushPriority = "low"
-	PushPriorityNormal  PushPriority = "normal"
-	PushPriorityHigh    PushPriority = "high"
-	PushPriorityUrgent  PushPriority = "urgent"
+	PushPriorityLow    PushPriority = "low"
+	PushPriorityNormal PushPriority = "normal"
+	PushPriorityHigh   PushPriority = "high"
+	PushPriorityUrgent PushPriority = "urgent"
 )
 
 // PushService handles bot-to-user push notifications over the message bus

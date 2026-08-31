@@ -169,6 +169,8 @@ func TestDenyTrustedRoot(t *testing.T) {
 		{"gate config root", "config/meept.json5", true, true},
 		{"employee gate config", "config/employees/ci-monitor.json5", true, true},
 		{"config path normalized via clean", "config/skills/../meept.json5", true, true},
+		{"eval oracle fixture", "testdata/eval/oracle_k2.json", true, true},
+		{"eval oracle fixture nested", "testdata/eval/sub/run.json", true, true},
 		// Skills stay writable (control cases).
 		{"skill under config", "config/skills/my-skill.md", false, false},
 		{"skill under .meept", ".meept/skills/x/SKILL.md", false, false},
@@ -301,6 +303,34 @@ func TestApply_DeniesTrustedRoots(t *testing.T) {
 				t.Errorf("backup dir not empty after denial: %d entries", len(entries))
 			}
 		})
+	}
+}
+
+// TestDenyGateFrontmatter pins the C5 section-level guard: roster AGENT.md
+// prompt bodies stay writable, but any diff containing a YAML frontmatter
+// delimiter is rejected, and non-AGENT.md paths are untouched by it.
+func TestDenyGateFrontmatter(t *testing.T) {
+	a, _, _ := newTestApplier(t)
+
+	if err := denyGateFrontmatter("config/agents/coder/AGENT.md", "no frontmatter in body edit"); err != nil {
+		t.Errorf("body-only edit denied: %v", err)
+	}
+	if err := denyGateFrontmatter("config/agents/coder/AGENT.md", "line\n---\nline"); !errors.Is(err, ErrTrustedRoot) {
+		t.Errorf("frontmatter edit not denied (err=%v)", err)
+	}
+	if err := denyGateFrontmatter("config/agents/coder/AGENT.md", "---\nname: coder\n---\nbody"); !errors.Is(err, ErrTrustedRoot) {
+		t.Errorf("leading frontmatter edit not denied (err=%v)", err)
+	}
+	// Non-AGENT.md paths are the denyTrustedRoot pass's business, not this one.
+	if err := denyGateFrontmatter("config/agents/coder/NOTES.md", "---\nx\n---\n"); err != nil {
+		t.Errorf("non-AGENT.md path denied by frontmatter guard: %v", err)
+	}
+	// denyTrustedRoot must NOT blanket-deny AGENT.md paths (bodies stay writable).
+	if err := a.denyTrustedRoot(filepath.Join("config", "agents", "coder", "AGENT.md")); err != nil {
+		t.Errorf("AGENT.md body path blanket-denied: %v", err)
+	}
+	if err := a.denyTrustedRoot(filepath.Join("config", "agents", "coder", "other.go")); err != nil {
+		t.Errorf("non-AGENT.md file under config/agents denied: %v", err)
 	}
 }
 

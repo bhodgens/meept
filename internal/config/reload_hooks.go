@@ -7,7 +7,7 @@ import (
 
 // ReloadRegistry manages reload callbacks for config file changes.
 type ReloadRegistry struct {
-	hooks map[string][]ReloadFunc
+	hooks  map[string][]ReloadFunc
 	logger *slog.Logger
 	mu     sync.RWMutex
 }

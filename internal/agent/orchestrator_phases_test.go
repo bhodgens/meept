@@ -29,7 +29,7 @@ func (s *stubPlanStore) GetPlan(_ context.Context, id string) (*plan.Plan, error
 	return &plan.Plan{ID: id}, nil
 }
 func (s *stubPlanStore) UpdatePlan(_ context.Context, _ *plan.Plan) error { return nil }
-func (s *stubPlanStore) DeletePlan(_ context.Context, _ string) error      { return nil }
+func (s *stubPlanStore) DeletePlan(_ context.Context, _ string) error     { return nil }
 func (s *stubPlanStore) ListPlans(_ context.Context, _ string, _ int) ([]*plan.Plan, error) {
 	return nil, nil
 }
@@ -56,15 +56,23 @@ func (s *stubPlanStore) GetPhases(_ context.Context, planID string) ([]*plan.Pla
 	defer s.mu.Unlock()
 	return s.phases[planID], nil
 }
-func (s *stubPlanStore) UpdatePhase(_ context.Context, _ *plan.PlanPhase) error   { return nil }
-func (s *stubPlanStore) SetPhaseState(_ context.Context, _ string, _ plan.PhaseState) error { return nil }
-func (s *stubPlanStore) IncrementPhaseProgress(_ context.Context, _, _ string, _ int) error { return nil }
-func (s *stubPlanStore) LinkSession(_ context.Context, _, _ string) error                    { return nil }
-func (s *stubPlanStore) UnlinkSession(_ context.Context, _, _ string) error                  { return nil }
-func (s *stubPlanStore) GetPlansForSession(_ context.Context, _ string) ([]*plan.Plan, error) { return nil, nil }
-func (s *stubPlanStore) CreateSignoff(_ context.Context, _ *plan.PlanSignoff) error           { return nil }
-func (s *stubPlanStore) GetSignoffs(_ context.Context, _ string) ([]*plan.PlanSignoff, error) { return nil, nil }
-func (s *stubPlanStore) GetRevisionCount(_ context.Context, _ string) (int, error)           { return 0, nil }
+func (s *stubPlanStore) UpdatePhase(_ context.Context, _ *plan.PlanPhase) error { return nil }
+func (s *stubPlanStore) SetPhaseState(_ context.Context, _ string, _ plan.PhaseState) error {
+	return nil
+}
+func (s *stubPlanStore) IncrementPhaseProgress(_ context.Context, _, _ string, _ int) error {
+	return nil
+}
+func (s *stubPlanStore) LinkSession(_ context.Context, _, _ string) error   { return nil }
+func (s *stubPlanStore) UnlinkSession(_ context.Context, _, _ string) error { return nil }
+func (s *stubPlanStore) GetPlansForSession(_ context.Context, _ string) ([]*plan.Plan, error) {
+	return nil, nil
+}
+func (s *stubPlanStore) CreateSignoff(_ context.Context, _ *plan.PlanSignoff) error { return nil }
+func (s *stubPlanStore) GetSignoffs(_ context.Context, _ string) ([]*plan.PlanSignoff, error) {
+	return nil, nil
+}
+func (s *stubPlanStore) GetRevisionCount(_ context.Context, _ string) (int, error) { return 0, nil }
 func (s *stubPlanStore) CountPlansBySessionAndState(_ context.Context, _ string) (map[plan.PlanState]int, error) {
 	return nil, nil
 }

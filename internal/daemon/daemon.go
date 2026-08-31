@@ -24,6 +24,7 @@ import (
 	comprpkg "github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/config"
 	employeepkg "github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/eval"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
@@ -620,15 +621,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if fullCfg.Agent.Retry.Enabled {
 		rb := fullCfg.Agent.Retry.Backoff
 		override := agent.BackoffConfig{}
-		if rb.BaseDelay != "" {
-			if d, err := time.ParseDuration(rb.BaseDelay); err == nil {
-				override.BaseDelay = d
-			}
+		if rb.BaseDelay > 0 {
+			override.BaseDelay = rb.BaseDelay
 		}
-		if rb.MaxDelay != "" {
-			if d, err := time.ParseDuration(rb.MaxDelay); err == nil {
-				override.MaxDelay = d
-			}
+		if rb.MaxDelay > 0 {
+			override.MaxDelay = rb.MaxDelay
 		}
 		if rb.Multiplier > 0 {
 			override.Multiplier = rb.Multiplier
@@ -652,15 +649,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// Apply per-operation backoff overrides.
 		for key, poc := range fullCfg.Agent.Retry.PerOperation {
 			pocOverride := agent.BackoffConfig{}
-			if poc.BaseDelay != "" {
-				if d, err := time.ParseDuration(poc.BaseDelay); err == nil {
-					pocOverride.BaseDelay = d
-				}
+			if poc.BaseDelay > 0 {
+				pocOverride.BaseDelay = poc.BaseDelay
 			}
-			if poc.MaxDelay != "" {
-				if d, err := time.ParseDuration(poc.MaxDelay); err == nil {
-					pocOverride.MaxDelay = d
-				}
+			if poc.MaxDelay > 0 {
+				pocOverride.MaxDelay = poc.MaxDelay
 			}
 			if poc.Multiplier > 0 {
 				pocOverride.Multiplier = poc.Multiplier
@@ -836,6 +829,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// Home dir is resolved here and injected; eval never calls
 	// os.Getwd/os.UserHomeDir itself.
 	evalHandler := http.NewEvalHandler(evalStoreDir(evalHomeDir()), logger)
+
+	// Leaf 15 metrics: subscribe the eval handler to the in-process metrics
+	// store so daemon-only runs (not just TUI sessions) record pass^k and
+	// oracle counters. Gated on [eval] enabled to keep default behavior
+	// byte-identical.
+	if metricsStore != nil && evalHandler != nil && fullCfg.Eval.Enabled {
+		evalHandler.SetMetricsObserver(eval.NewMetricsObserver(metricsStore.Record))
+		logger.Info("eval metrics observer wired")
+	}
 
 	// Register daemon and model RPC handlers (after service registry is created)
 	if rpcServer != nil {

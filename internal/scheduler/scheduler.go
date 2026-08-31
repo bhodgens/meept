@@ -712,6 +712,13 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job, opts ExecutionOptio
 		s.bus.PublishExternalOnly("scheduler.job.completed", msg)
 	}
 
+	// Rewake: on successful completion, publish hook.async_rewake so armed
+	// agent loops drain at their next iteration boundary. Failures do not
+	// rewake — let the error path schedule a retry.
+	if err == nil {
+		s.publishRewake(jobID, job.Name())
+	}
+
 	// Notify HTTP clients on successful job completion
 	if s.notifEmitter != nil && err == nil {
 		s.notifEmitter.Publish(&NotificationEvent{

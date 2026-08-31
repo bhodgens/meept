@@ -59,11 +59,11 @@ type SubMetadata struct {
 
 // MessageBus implements a channel-based publish/subscribe message bus.
 type MessageBus struct {
-	mu          sync.RWMutex
-	subscribers map[string][]*Subscriber
-	bufferSize  int
-	closed      bool
-	logger      *slog.Logger
+	mu           sync.RWMutex
+	subscribers  map[string][]*Subscriber
+	bufferSize   int
+	closed       bool
+	logger       *slog.Logger
 	messagesSent atomic.Int64
 
 	// Subscription tracking for debugging dead subscriptions (Phase 1)

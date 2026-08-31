@@ -159,7 +159,19 @@ type LearningPipeline struct {
 	// set before Initialize per SetWikiStore's contract.
 	wiki *WikiStore
 
+	// judgmentLoader resolves trajectory_id → judgment outcome for the C7
+	// OnlyJudged gate (harness-eval leaf 08). Nil means no gate: every
+	// stored pattern is retrievable (legacy behavior).
+	judgmentLoader func(ctx context.Context, trajectoryID string) (JudgmentOutcome, error)
+
 	initialized bool
+}
+
+// JudgmentOutcome is the minimal judgment verdict the OnlyJudged gate needs.
+// Decoupled from eval.TrajectoryJudgment to preserve layering (selfimprove
+// cannot import eval); the daemon adapter converts.
+type JudgmentOutcome struct {
+	Passed bool
 }
 
 // NewLearningPipeline creates a new learning pipeline.
@@ -184,6 +196,16 @@ func NewLearningPipeline(cfg LearningConfig, llmClient *llm.Client, dataDir stri
 func (lp *LearningPipeline) SetWikiStore(ws *WikiStore) {
 	if ws != nil {
 		lp.wiki = ws
+	}
+}
+
+// SetJudgmentLoader attaches the C7 judgment loader (harness-eval leaf 08).
+// When set, Retrieve promotes ONLY patterns whose trajectory_id resolves to
+// a judged-pass outcome (OnlyJudged semantics). Nil loader = legacy behavior
+// (ungated). A loader error is treated as "unjudged" and drops the pattern.
+func (lp *LearningPipeline) SetJudgmentLoader(loader func(ctx context.Context, trajectoryID string) (JudgmentOutcome, error)) {
+	if loader != nil {
+		lp.judgmentLoader = loader
 	}
 }
 
@@ -231,15 +253,20 @@ func (lp *LearningPipeline) Initialize(ctx context.Context) error {
 }
 
 // Retrieve returns the top-k most relevant patterns for a query.
+//
+// C7 gate (harness-eval leaf 08): when a judgment loader is configured,
+// ONLY judged-pass patterns are promoted — unjudged rows are not lessons.
+// The loader is invoked OUTSIDE lp.mu (collect-under-lock, I/O-after-lock;
+// see the mutexio convention).
 func (lp *LearningPipeline) Retrieve(ctx context.Context, query, domain string, k int) ([]*LearnedPattern, error) {
 	lp.mu.RLock()
-	defer lp.mu.RUnlock()
 
 	if !lp.initialized {
+		lp.mu.RUnlock()
 		return nil, errors.New("learning pipeline not initialized")
 	}
 
-	// Filter by domain and status
+	// Collect under lock, gate after release.
 	var candidates []*LearnedPattern
 	for _, p := range lp.patterns {
 		if p.Status != PatternStatusActive {
@@ -249,6 +276,34 @@ func (lp *LearningPipeline) Retrieve(ctx context.Context, query, domain string, 
 			continue
 		}
 		candidates = append(candidates, p)
+	}
+	loader := lp.judgmentLoader
+	lp.mu.RUnlock()
+
+	if loader != nil {
+		judged := make([]*LearnedPattern, 0, len(candidates))
+		for _, p := range candidates {
+			raw, ok := p.Metadata["trajectory_id"]
+			if !ok {
+				continue
+			}
+			id, ok := raw.(string)
+			if !ok || id == "" {
+				continue
+			}
+			outcome, err := loader(ctx, id)
+			if err != nil || !outcome.Passed {
+				continue
+			}
+			judged = append(judged, p)
+		}
+		candidates = judged
+	}
+
+	lp.mu.RLock()
+	defer lp.mu.RUnlock()
+	if !lp.initialized {
+		return nil, errors.New("learning pipeline not initialized")
 	}
 
 	// Score by relevance (simple keyword matching + confidence)
@@ -440,14 +495,31 @@ func (lp *LearningPipeline) judgeHeuristic(trajectory Trajectory) *JudgmentResul
 	}
 }
 
-// Distill extracts patterns from a judged trajectory.
+// Distill extracts patterns from a judged trajectory. Every returned pattern
+// is stamped with Metadata["trajectory_id"] = trajectory.ID (harness-eval
+// leaf 08, contract C7): the provenance key OnlyJudged filters on, so the
+// evolver can gate learned patterns on trajectory judgment outcome.
 func (lp *LearningPipeline) Distill(ctx context.Context, trajectory Trajectory, judgment *JudgmentResult) ([]*LearnedPattern, error) {
 	if !judgment.ShouldStore {
 		return nil, nil
 	}
 
+	stampTrajectoryProvenance := func(patterns []*LearnedPattern) {
+		for _, p := range patterns {
+			if p == nil {
+				continue
+			}
+			if p.Metadata == nil {
+				p.Metadata = make(map[string]any, 1)
+			}
+			p.Metadata["trajectory_id"] = trajectory.ID
+		}
+	}
+
 	if lp.llmClient == nil {
-		return lp.distillHeuristic(trajectory, judgment), nil
+		patterns := lp.distillHeuristic(trajectory, judgment)
+		stampTrajectoryProvenance(patterns)
+		return patterns, nil
 	}
 
 	// Use LLM to extract patterns
@@ -461,15 +533,20 @@ func (lp *LearningPipeline) Distill(ctx context.Context, trajectory Trajectory, 
 	resp, err := lp.llmClient.Chat(ctx, messages)
 	if err != nil {
 		lp.logger.Warn("LLM distillation failed, using heuristic", "error", err)
-		return lp.distillHeuristic(trajectory, judgment), nil
+		patterns := lp.distillHeuristic(trajectory, judgment)
+		stampTrajectoryProvenance(patterns)
+		return patterns, nil
 	}
 
 	patterns, err := lp.parseDistillResponse(resp.Content, trajectory.Domain, judgment)
 	if err != nil {
 		lp.logger.Warn("Failed to parse distill response", "error", err)
-		return lp.distillHeuristic(trajectory, judgment), nil
+		heuristicPatterns := lp.distillHeuristic(trajectory, judgment)
+		stampTrajectoryProvenance(heuristicPatterns)
+		return heuristicPatterns, nil
 	}
 
+	stampTrajectoryProvenance(patterns)
 	return patterns, nil
 }
 

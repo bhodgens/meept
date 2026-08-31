@@ -89,8 +89,8 @@ func TestReset(t *testing.T) {
 
 func TestNewVerificationTrackerDefaultThreshold(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     int
+		name       string
+		input      int
 		wantThresh int
 	}{
 		{"zero defaults to 3", 0, 3},

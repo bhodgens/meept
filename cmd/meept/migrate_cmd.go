@@ -104,6 +104,7 @@ func runMigrateDryRun(dataDir string) error {
 }
 
 // humanSize formats bytes to a human-readable string.
+//
 //nolint:unused // called from runMigrateDryRun
 func humanSize(n int64) string {
 	switch {

@@ -24,8 +24,8 @@ const maxConsecutiveFailures = 10
 // (network blips, rate-limit 429s) are retried without propagating
 // errors to the GoalLoop's failure counter.
 type RetryPolicy struct {
-	MaxRetries    int
-	RetryBackoff  time.Duration
+	MaxRetries   int
+	RetryBackoff time.Duration
 }
 
 // DefaultRetryPolicy is a conservative retry policy used when no explicit
@@ -53,11 +53,11 @@ type BotExecutionResult struct {
 }
 
 type BotRunner struct {
-	definition   BotDefinition
-	namespace    *MemoryNamespace
-	executor     BotExecutor
-	logger       *slog.Logger
-	retryPolicy  RetryPolicy
+	definition  BotDefinition
+	namespace   *MemoryNamespace
+	executor    BotExecutor
+	logger      *slog.Logger
+	retryPolicy RetryPolicy
 }
 
 func NewBotRunner(def BotDefinition) *BotRunner {

@@ -127,8 +127,8 @@ func TestDispatchExplicitDirectiveSuppressesSuggestion(t *testing.T) {
 // path, ensuring the safety net works even if the dispatcher suggests a tier.
 func TestSuggestionNoOpOnSelfModulationFalse(t *testing.T) {
 	arc := &llm.AgentReasoningConfig{
-		Effort:               llm.ReasoningMedium,
-		AllowSelfModulation:  false,
+		Effort:              llm.ReasoningMedium,
+		AllowSelfModulation: false,
 	}
 
 	loop := NewAgentLoop("test-session", "/tmp",
@@ -151,8 +151,8 @@ func TestSuggestionNoOpOnSelfModulationFalse(t *testing.T) {
 // AllowSelfModulation is true.
 func TestSuggestionAppliedOnSelfModulationTrue(t *testing.T) {
 	arc := &llm.AgentReasoningConfig{
-		Effort:               llm.ReasoningMedium,
-		AllowSelfModulation:  true,
+		Effort:              llm.ReasoningMedium,
+		AllowSelfModulation: true,
 	}
 
 	loop := NewAgentLoop("test-session", "/tmp",
@@ -173,10 +173,10 @@ func TestSuggestionAppliedOnSelfModulationTrue(t *testing.T) {
 // allowed but the suggestion falls outside the configured range.
 func TestSuggestionClampedByBounds(t *testing.T) {
 	arc := &llm.AgentReasoningConfig{
-		Effort:               llm.ReasoningMedium,
-		AllowSelfModulation:  true,
-		MinEffort:            llm.ReasoningMedium,
-		MaxEffort:            llm.ReasoningHigh,
+		Effort:              llm.ReasoningMedium,
+		AllowSelfModulation: true,
+		MinEffort:           llm.ReasoningMedium,
+		MaxEffort:           llm.ReasoningHigh,
 	}
 
 	loop := NewAgentLoop("test-session", "/tmp",

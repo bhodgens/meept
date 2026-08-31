@@ -190,6 +190,43 @@ case strings.HasPrefix(topic, "agent.quota"):
 
 Future agents adding new bus topics must verify they land in the correct bucket.
 
+### Quota errors are not failures (quota-reset-resilience)
+
+The quota subsystem (`docs/workflows/quota-resilience.md`, plan in
+`docs/plans/quota-reset-resilience/`) has invariants that cross package
+boundaries:
+
+- **Quota is not a health failure.** A `*llm.QuotaResetError` must NEVER
+  reach `Resolver.RecordAliasFailure` — the agent loop's quota branch
+  (`internal/agent/loop.go`) tracks the episode, marks `BlockQuotaEntry` +
+  `BlockQuotaCredential`, and returns BEFORE the failure path. Quota blocks
+  live in separate Resolver state (`entryBlocks`/`credentialBlock` on
+  `AliasHealth`) and lazily clear only after expiry + a successful call.
+- **Never short-retry a quota error.** `QuotaResetError` implements
+  `NonRetryable`; every client retry loop (openai non-streaming/streaming,
+  anthropic non-streaming/streaming) has an explicit `errors.As` quota
+  early-exit BEFORE the `RateLimitError`/retryable-status checks. A new
+  retry loop must preserve this — a 429 quota window is hours, and the
+  default 3-attempt loop would burn it.
+- **All-blocked is a distinct error.** When every alias candidate is
+  quota-blocked, the Resolver returns `ErrAllModelsQuotaBlocked` — never a
+  blocked model.
+- **Deferral parks at the handler, mirroring budget.** `ChatHandler`
+  parks quota-interrupted turns in `QuotaResumeWatcher`
+  (`internal/agent/quota_resume.go`, the quota twin of
+  `BudgetResumeWatcher`/`ParkedTurn`) and auto-resumes them at
+  `min(unblockAt, now+MaxWait)`. Turn-level deferral is the wired
+  mechanism; task-checkpoint-level deferral is a documented deviation.
+- **State machine must stay reachable.** `agent.StateQuotaWait`
+  ("quota_wait") is a legal transition target from all active states and
+  Idle; the tracker drives it via `SetStateSetter` → `SafeTransition`.
+  Adding an AgentState without a transition-table entry makes it
+  unreachable (safe-by-default table rejects unknown states).
+- **Surfaces consume the event, not the RPC.** `agents.list`/`agents.get`
+  do not carry quota fields; TUI/GUI quota state arrives solely via
+  `agent.quota_wait` bus events (WS type `agent_progress`). Restarting a
+  client mid-episode shows base status until the next event.
+
 ### Bus proxy registrations must have a live responder
 
 `internal/rpc/proxy.go makeProxy` publishes a request topic and waits on a

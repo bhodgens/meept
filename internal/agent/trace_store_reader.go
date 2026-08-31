@@ -33,9 +33,9 @@ type spanViewData struct {
 	hasError     bool
 	rawJSON      []byte
 	//lint:ignore U1000 reserved for future time-based trace filtering
-	startTime    time.Time
+	startTime time.Time
 	//lint:ignore U1000 reserved for future time-based trace filtering
-	endTime      time.Time
+	endTime time.Time
 }
 
 // traceSpan is a type alias for backward compatibility with existing code.
@@ -43,6 +43,7 @@ type traceSpan = spanViewData
 
 // spanSliceToSpanViewData converts a slice of memory.SpanView to []spanViewData.
 // This is used by the TraceStoreAdapter when proxying ListSpans calls.
+//
 //lint:ignore U1000 reserved for future TraceStoreAdapter
 func spanSliceToSpanViewData(src []memorySpanView) []spanViewData {
 	out := make([]spanViewData, len(src))
@@ -62,6 +63,7 @@ func spanSliceToSpanViewData(src []memorySpanView) []spanViewData {
 
 // memorySpanView mirrors memory.SpanView to avoid a circular import.
 // The fields must match memory.SpanView exactly.
+//
 //lint:ignore U1000 reserved for future TraceStoreAdapter
 type memorySpanView struct {
 	SpanID       string

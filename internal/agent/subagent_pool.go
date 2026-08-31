@@ -56,15 +56,15 @@ func (a *RLMAnalyzer) guardedInvoke(ctx context.Context, depth int, prompt strin
 	tc := newTurnCounter(a.config.MaximumTurns)
 
 	run := &analyzerRun{
-		ctx:       childCtx,
-		cancel:    cancel,
-		depth:     depth,
-		parentID:  parentID,
-		semaphore:   a.semaphore,
-		turnCounter: tc,
-		toolRegistry:  newToolRegistry(),
-		logger:      a.logger,
-		done:        make(chan struct{}),
+		ctx:          childCtx,
+		cancel:       cancel,
+		depth:        depth,
+		parentID:     parentID,
+		semaphore:    a.semaphore,
+		turnCounter:  tc,
+		toolRegistry: newToolRegistry(),
+		logger:       a.logger,
+		done:         make(chan struct{}),
 	}
 
 	return run, nil
@@ -80,25 +80,29 @@ type analyzerRun struct {
 	depth    int
 	parentID string
 
-	semaphore   *PerDepthSemaphore // for Release on completion
-	turnCounter *turnCounter
-	toolRegistry  *toolRegistry
-	logger        interface{ Info(string, ...any); Warn(string, ...any); Error(string, ...any) }
-	agentID       string
+	semaphore    *PerDepthSemaphore // for Release on completion
+	turnCounter  *turnCounter
+	toolRegistry *toolRegistry
+	logger       interface {
+		Info(string, ...any)
+		Warn(string, ...any)
+		Error(string, ...any)
+	}
+	agentID string
 
 	done chan struct{}
 
 	// Accumulated output from this agent run.
 	//lint:ignore U1000 // reserved for future subagent output tracking
-	mu        sync.Mutex
+	mu sync.Mutex
 	//lint:ignore U1000 // reserved for future subagent output tracking
-	output    string
+	output string
 	//lint:ignore U1000 // reserved for future subagent output tracking
 	turnCount int
 	//lint:ignore U1000 // reserved for future subagent output tracking
 	toolCalls int
 	//lint:ignore U1000 // reserved for future subagent output tracking
-	finished  bool
+	finished bool
 }
 
 // releaseSemaphore returns the depth-N slot to the per-depth semaphore pool.
@@ -149,9 +153,9 @@ func (r *analyzerRun) finishedResult() SubagentExecution {
 // -----------------------------------------------------------------------
 
 type turnCounter struct {
-	current   int
-	limit     int
-	mu        sync.Mutex
+	current int
+	limit   int
+	mu      sync.Mutex
 }
 
 func newTurnCounter(limit int) *turnCounter {
@@ -197,8 +201,8 @@ func (tc *turnCounter) Reset() {
 // -----------------------------------------------------------------------
 
 type toolRegistry struct {
-	mu     sync.Mutex
-	tools  []string
+	mu    sync.Mutex
+	tools []string
 }
 
 func newToolRegistry() *toolRegistry {

@@ -376,17 +376,17 @@ func (s *SQLiteStore) GetPhases(ctx context.Context, planID string) ([]*PlanPhas
 	var phases []*PlanPhase
 	for rows.Next() {
 		var (
-			id           string
-			planID       string
-			name         string
-			sequence     int
-			totalSteps   int
-			completed    int
-			failed       int
-			stateStr     string
-			producesRaw  sql.NullString
-			consumesRaw  sql.NullString
-			taskID       sql.NullString
+			id          string
+			planID      string
+			name        string
+			sequence    int
+			totalSteps  int
+			completed   int
+			failed      int
+			stateStr    string
+			producesRaw sql.NullString
+			consumesRaw sql.NullString
+			taskID      sql.NullString
 		)
 		if err := rows.Scan(
 			&id, &planID, &name, &sequence,

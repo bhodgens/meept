@@ -37,6 +37,9 @@ func TestQuotaIntegration_EscalationTiers(t *testing.T) {
 
 	tracker.SetPublisher(func(topic string, msg any) {
 		if qe, ok := msg.(*QuotaEvent); ok {
+			if qe.Escalation == "" {
+				return // initial episode event, not a tier
+			}
 			tiers = append(tiers, qe.Escalation)
 		}
 	})
@@ -52,7 +55,7 @@ func TestQuotaIntegration_EscalationTiers(t *testing.T) {
 	// Advance to 12h, fire warn tier
 	now = now.Add(12 * time.Hour)
 	ep := tracker.episodes[Key("agent-1", "openrouter")]
-	tracker.fireTiersLocked(ep, "task-1")
+	tracker.fireTiers(ep, "task-1")
 
 	if len(tiers) != 1 || tiers[0] != "warn" {
 		t.Fatalf("expected warn tier, got %v", tiers)
@@ -61,7 +64,7 @@ func TestQuotaIntegration_EscalationTiers(t *testing.T) {
 	// Advance to 20h, fire action_recommended tier
 	now = now.Add(8 * time.Hour)
 	ep = tracker.episodes[Key("agent-1", "openrouter")]
-	tracker.fireTiersLocked(ep, "task-1")
+	tracker.fireTiers(ep, "task-1")
 
 	if len(tiers) != 2 || tiers[1] != "action_recommended" {
 		t.Fatalf("expected action_recommended tier, got %v", tiers)
@@ -70,7 +73,7 @@ func TestQuotaIntegration_EscalationTiers(t *testing.T) {
 	// Advance to 24h, fire blocked tier
 	now = now.Add(4 * time.Hour)
 	ep = tracker.episodes[Key("agent-1", "openrouter")]
-	tracker.fireTiersLocked(ep, "task-1")
+	tracker.fireTiers(ep, "task-1")
 
 	if len(tiers) != 3 || tiers[2] != "blocked" {
 		t.Fatalf("expected blocked tier, got %v", tiers)
@@ -85,6 +88,9 @@ func TestQuotaIntegration_ReEnterExtendsWithoutReFire(t *testing.T) {
 	tracker.SetClock(func() time.Time { return now })
 	tracker.SetPublisher(func(topic string, msg any) {
 		if qe, ok := msg.(*QuotaEvent); ok {
+			if qe.Escalation == "" {
+				return // initial episode event, not a tier
+			}
 			tiers = append(tiers, qe.Escalation)
 		}
 	})
@@ -93,7 +99,7 @@ func TestQuotaIntegration_ReEnterExtendsWithoutReFire(t *testing.T) {
 
 	now = now.Add(12 * time.Hour)
 	ep := tracker.episodes[Key("agent-1", "openrouter")]
-	tracker.fireTiersLocked(ep, "task-1")
+	tracker.fireTiers(ep, "task-1")
 
 	if len(tiers) != 1 {
 		t.Fatalf("expected 1 tier after 12h, got %d", len(tiers))
@@ -104,7 +110,7 @@ func TestQuotaIntegration_ReEnterExtendsWithoutReFire(t *testing.T) {
 	tracker.Enter("agent-1", "openrouter", "claude-3", now.Add(23*time.Hour), "task-2")
 
 	ep = tracker.episodes[Key("agent-1", "openrouter")]
-	tracker.fireTiersLocked(ep, "task-2")
+	tracker.fireTiers(ep, "task-2")
 
 	if len(tiers) != 1 {
 		t.Fatalf("expected still 1 tier after re-enter, got %d", len(tiers))

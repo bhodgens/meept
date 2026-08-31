@@ -1,9 +1,9 @@
 package agent
 
 import (
-	"github.com/caimlas/meept/pkg/id"
 	"encoding/json"
 	"fmt"
+	"github.com/caimlas/meept/pkg/id"
 	"os"
 	"sync"
 	"time"
@@ -102,9 +102,9 @@ func (te *TelemetryEmitter) EmitToolSpan(name, toolName, input, output string, d
 		StartTime: now.Add(-time.Duration(durationMs) * time.Millisecond),
 		EndTime:   now,
 		Attributes: map[string]string{
-			"tool_name": toolName,
-			"input":     input,
-			"output":    output,
+			"tool_name":   toolName,
+			"input":       input,
+			"output":      output,
 			"duration_ms": fmt.Sprintf("%d", durationMs),
 		},
 	}
@@ -121,9 +121,9 @@ func (te *TelemetryEmitter) EmitAgentSpan(name, agentID, content string, depth i
 		StartTime: time.Now(),
 		EndTime:   time.Now(),
 		Attributes: map[string]string{
-			"agent_id":  agentID,
-			"content":   content,
-			"depth":     fmt.Sprintf("%d", depth),
+			"agent_id": agentID,
+			"content":  content,
+			"depth":    fmt.Sprintf("%d", depth),
 		},
 	}
 	return te.EmitSpan(span)

@@ -51,6 +51,31 @@ type AnthropicClient struct {
 	uploadStore   UploadStore
 	tokenResolver TokenResolver
 	oauthProvider string
+	// quotaMaxWait is the upper bound applied to derived quota waits. Zero
+	// falls back to DefaultQuotaMaxWait. See Client.quotaMaxWait.
+	quotaMaxWait time.Duration
+}
+
+// SetQuotaMaxWait sets the quota wait upper bound. Nil-receiver safe.
+func (c *AnthropicClient) SetQuotaMaxWait(d time.Duration) {
+	if c == nil || d <= 0 {
+		return
+	}
+	c.quotaMaxWait = d
+}
+
+// quotaDetailFromBody returns a truncated body detail for quota error causes,
+// preferring the parsed Anthropic error message when present.
+func (c *AnthropicClient) quotaDetailFromBody(respBody []byte) string {
+	var anthErr anthropicErrorResponse
+	if err := json.Unmarshal(respBody, &anthErr); err == nil && anthErr.Error.Message != "" {
+		return anthErr.Error.Message
+	}
+	bodyStr := string(respBody)
+	if len(bodyStr) > 500 {
+		bodyStr = bodyStr[:500]
+	}
+	return bodyStr
 }
 
 // AnthropicClientOption is a functional option for configuring an AnthropicClient.
@@ -256,6 +281,13 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	for attempt := 1; attempt <= anthropicMaxRetries; attempt++ {
 		resp, err := c.doRequest(ctx, reqBody)
 		if err != nil {
+			// Quota errors never re-enter the short-retry loop: the window
+			// is hours, not seconds. Return immediately (quota-reset-
+			// resilience contract 1).
+			var quotaErr *QuotaResetError
+			if errors.As(err, &quotaErr) {
+				return nil, err
+			}
 			var apiErr *APIError
 			if errors.As(err, &apiErr) && anthropicRetryableStatusCodes[apiErr.StatusCode] {
 				c.logger.Warn("Retryable error",
@@ -422,6 +454,13 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 
 		resp, err := c.doStreamingRequest(ctx, reqBody, reportProgress)
 		if err != nil {
+			// Quota errors never re-enter the short-retry loop (streaming
+			// path): hours-scale window, return immediately.
+			var quotaErr *QuotaResetError
+			if errors.As(err, &quotaErr) {
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
+			}
 			var apiErr *APIError
 			if errors.As(err, &apiErr) && anthropicRetryableStatusCodes[apiErr.StatusCode] {
 				c.logger.Warn("Retryable error",
@@ -991,9 +1030,35 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	c.logger.Debug("Anthropic response received", "status", resp.StatusCode)
 
-	// Handle rate limit (429) specifically with Retry-After and structured error
+	// Handle rate limit (429) specifically with Retry-After and structured error.
+	// Quota-window classification first (quota-reset-resilience): spend-cap
+	// shapes become QuotaResetError; short-cycle retriable limits keep the
+	// existing RateLimitError path.
 	if resp.StatusCode == http.StatusTooManyRequests {
+		if classifyQuotaDecision(resp.StatusCode, respBody, ParseRateLimitBody(respBody)) {
+			if qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
+				ProviderID: c.config.ProviderID,
+				ModelID:    c.config.ModelID,
+				MaxWait:    c.quotaMaxWait,
+			}); qe != nil {
+				qe.Cause = &APIError{StatusCode: resp.StatusCode, Detail: c.quotaDetailFromBody(respBody)}
+				return nil, qe
+			}
+		}
 		return nil, c.buildRateLimitError(respBody, resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+
+	// Quota payment-required (402): treat as retry-with-estimate.
+	if resp.StatusCode == http.StatusPaymentRequired {
+		qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
+			ProviderID: c.config.ProviderID,
+			ModelID:    c.config.ModelID,
+			MaxWait:    c.quotaMaxWait,
+		})
+		if qe != nil {
+			qe.Cause = &APIError{StatusCode: resp.StatusCode, Detail: c.quotaDetailFromBody(respBody)}
+			return nil, qe
+		}
 	}
 
 	// Check for other retryable status codes (500, 502, 503, 504, 529)
@@ -1140,9 +1205,32 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 
-		// Handle rate limit (429) specifically with Retry-After and structured error
+		// Handle rate limit (429) specifically with Retry-After and structured
+		// error. Quota-window classification first (quota-reset-resilience).
 		if resp.StatusCode == http.StatusTooManyRequests {
+			if classifyQuotaDecision(resp.StatusCode, respBody, ParseRateLimitBody(respBody)) {
+				if qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
+					ProviderID: c.config.ProviderID,
+					ModelID:    c.config.ModelID,
+					MaxWait:    c.quotaMaxWait,
+				}); qe != nil {
+					qe.Cause = &APIError{StatusCode: resp.StatusCode, Detail: c.quotaDetailFromBody(respBody)}
+					return nil, qe
+				}
+			}
 			return nil, c.buildRateLimitError(respBody, resp.StatusCode, resp.Header.Get("Retry-After"))
+		}
+
+		// Quota payment-required (402): treat as retry-with-estimate.
+		if resp.StatusCode == http.StatusPaymentRequired {
+			if qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
+				ProviderID: c.config.ProviderID,
+				ModelID:    c.config.ModelID,
+				MaxWait:    c.quotaMaxWait,
+			}); qe != nil {
+				qe.Cause = &APIError{StatusCode: resp.StatusCode, Detail: c.quotaDetailFromBody(respBody)}
+				return nil, qe
+			}
 		}
 
 		if anthropicRetryableStatusCodes[resp.StatusCode] {

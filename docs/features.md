@@ -267,6 +267,29 @@ recall_mode = "auto"  # auto, on-query, hybrid, disabled
 snapshot_caching_enabled = true
 ```
 
+#### Loop Guards (`guards.go`, leaf 07)
+
+Three additional safety guards compose with the cycle/convergence detectors above. All ship **ON** by default:
+
+| Guard | Mechanism | Trigger | Action |
+|-------|-----------|---------|--------|
+| **No-Progress Ladder** | Normalized SHA256 hashes of tool name + key-sorted/whitespace-collapsed args JSON (reordered-key calls hash equal) | Same normalized call repeated: warn at 3rd consecutive call, veto at 5th | Warn injects `[system: no measurable progress; change approach.]`; veto blocks and nudges; after 3 consecutive vetoes the turn terminates gracefully with partial results |
+| **Duplicate Search Rollback** | Ring window (10 turns) of executed `web_search` arg hashes checked pre-execution | Exact-duplicate `web_search` within window | Last assistant+tool pair is popped from the in-memory conversation (never persisted, so session-store parent chain stays consistent) and the SAME iteration is re-sampled — no iteration budget consumed |
+| **Reasoning Watchdog** | Consecutive-turn streak counter over responses with reasoning tokens but empty text and no tool calls | Streak reaches 3 turns, or 16,384 cumulative reasoning tokens within a streak | First breach injects a nudge forcing a textual/tool answer; second breach terminates gracefully |
+
+All thresholds are configurable via `[agent.guards]`; zero values normalize to the ship-on defaults:
+
+```toml
+[agent.guards]
+no_progress_warn_at = 3
+no_progress_veto_at = 5
+graceful_after_vetoes = 3
+duplicate_search_rollback = true
+rollback_window = 10            # turns
+reasoning_token_cap = 16384     # per reasoning-only streak
+reasoning_streak_turns = 3
+```
+
 ---
 
 ### Context Firewall
@@ -1260,9 +1283,9 @@ search_paths = []
 auto_reload = false
 ```
 
-#### Skill Evolution (Closed-Loop)
+#### Skill Evolution (Evidence-Tracked)
 
-Meept continuously measures skill effectiveness and evolves skills based on real usage data. The closed loop: every skill injected into the agent prompt gets its effectiveness tracked; high-performing learned patterns get promoted to skills; existing skills get refined based on evidence; every change is versioned and reversible.
+Meept measures skill effectiveness and evolves skills based on real usage data. The loop is evidence-tracked, not autonomous: every skill injected into the agent prompt gets its effectiveness tracked; learned patterns that pass the judgment gate get promoted to skills; existing skills get refined based on evidence; every change is versioned and reversible. The skill evolver ships disabled (`skills.evolver.enabled` defaults to false) and runs only when enabled.
 
 **Four components** (package: `internal/skills/lifecycle/`):
 
@@ -1312,7 +1335,7 @@ Meept continuously improves its own model quality and skill coverage through fou
 
 #### Shadow Training (Model Improvement)
 
-Production LLM traffic is shadowed against a teacher model (typically a stronger cloud model). Preference pairs are mined and used to LoRA-train the local student model. Trained adapters pass an eval gate (minimum score and record count) before being hot-swapped into the serving alias — production traffic shifts to the improved model without a daemon restart.
+Production LLM traffic is shadowed against a teacher model (typically a stronger cloud model). Preference pairs are captured and exported as training data for an external fine-tuning sidecar — the daemon itself never trains. Trained adapters can be activated through an eval gate (minimum score and record count) and, when hot-swap is enabled, swapped into the serving loop by explicit operator action; there is no in-daemon training loop and no automatic retrain-serve cycle.
 
 **Location:** `internal/shadow/`
 **Config:** `[shadow]` block in `meept.json5`
@@ -1381,8 +1404,7 @@ Meept can learn from its operations and automatically fix issues.
 #### Shadow Training
 - Parallel execution with teacher model
 - Quality-based filtering of training examples
-- Export to JSONL/DPO formats
-- LoRA/DPO adapter training
+- Export to JSONL/DPO formats for the external fine-tuning sidecar
 
 #### Trajectory Learning
 - JUDGE: Evaluate trajectory quality

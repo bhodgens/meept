@@ -86,21 +86,21 @@ func (m *mockTraceStore) ListSpans(spanIDs []string) ([]traceSpan, error) {
 
 func TestRLMAnalyzer_StructuralDepthGating(t *testing.T) {
 	tests := []struct {
-		name         string
-		maxDepth     int
-		wantSubAgent bool // should subagent tool exist at root (depth 0)
+		name           string
+		maxDepth       int
+		wantSubAgent   bool         // should subagent tool exist at root (depth 0)
 		wantSubAgentAt map[int]bool // depth -> should have subagent tool
 	}{
 		{
-			name:         "depth 1 - root gets subagent, depth 1 does not",
-			maxDepth:     1,
-			wantSubAgent: true,
+			name:           "depth 1 - root gets subagent, depth 1 does not",
+			maxDepth:       1,
+			wantSubAgent:   true,
 			wantSubAgentAt: map[int]bool{0: true, 1: false},
 		},
 		{
-			name:         "depth 2 - root and depth 1 get subagent, depth 2 does not",
-			maxDepth:     2,
-			wantSubAgent: true,
+			name:           "depth 2 - root and depth 1 get subagent, depth 2 does not",
+			maxDepth:       2,
+			wantSubAgent:   true,
 			wantSubAgentAt: map[int]bool{0: true, 1: true, 2: false},
 		},
 		{
@@ -454,7 +454,8 @@ func buildFixtureTraces(t *testing.T, store *mockTraceStore) {
 	}
 }
 
-//nolint:U1000 // test helper reserved for future tests
+// nolint:U1000 // test helper reserved for future tests
+//
 //lint:ignore U1000 test helper reserved for future tests
 func slogLogger(t *testing.T) *slog.Logger {
 	return slog.New(&testHandler{t: t})

@@ -45,6 +45,10 @@ See [Token Budgets Configuration](../configuration/token-budgets.md) for detaile
 ## Configuration
 
 ```toml
+[llm]
+# Directory for locally pulled GGUF models (default shown)
+models_dir = "~/.meept/models"
+
 [llm.budget]
 hourly_token_limit = 100000
 daily_token_limit = 1000000
@@ -262,6 +266,38 @@ ERROR budget daily cost exceeded: $10.00 / $10.00
 ```
 
 Use `meept status` periodically or integrate with monitoring via the JSON output.
+
+## Local Model Lifecycle
+
+`meept model` manages local GGUF model *files* (runtimes themselves are managed by `meept runtime`):
+
+```sh
+# Pull a GGUF from Hugging Face (resumable; picks the single matching quant)
+meept model pull bartowski/Llama-3.2-1B-Instruct-GGUF --quant Q4_K_M
+meept model pull <repo> --force        # re-download
+
+# List pulled models
+meept model list
+meept model list --json
+
+# One-token completion probe through the local runtime (starts it if needed)
+meept model test <name>
+```
+
+Behavior:
+
+- Downloads use plain HTTPS against `https://huggingface.co/api/models/<id>` and
+  `.../resolve/main/<file>`. Interrupted downloads resume via a `.part` file and
+  Range requests; servers without Range support restart cleanly.
+- `sha256` is computed streaming during the pull; a stored file whose size or
+  hash disagrees with the manifest is re-downloaded.
+- If multiple `.gguf` files match, the command fails listing candidates — pass
+  `--quant` to disambiguate.
+- `HF_TOKEN`, when set in the environment, is sent as a bearer token (never logged).
+- Pulled models register under the `local-models` provider alias on a shared
+  llama.cpp-style endpoint (`127.0.0.1:8080`), making them selectable through
+  normal provider/alias resolution.
+- Storage location defaults to `models_dir = "~/.meept/models"` under `[llm]`.
 
 ## Edge Cases
 

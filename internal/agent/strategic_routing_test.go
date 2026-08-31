@@ -14,10 +14,10 @@ func TestRoutingTable_Defaults(t *testing.T) {
 	rt := NewDefaultRoutingTable()
 
 	tests := []struct {
-		name              string
-		intent            string
-		wantActor         string
-		wantReviewer      string
+		name         string
+		intent       string
+		wantActor    string
+		wantReviewer string
 	}{
 		{
 			name:         "code intent routes to coder/planner",
@@ -306,11 +306,11 @@ func TestBuildPlannerPromptHint_ExcludesNonExecutors(t *testing.T) {
 			Description: "writes code",
 		},
 		&AgentSpec{
-			ID:           "code-reviewer",
-			Name:         "Code Reviewer",
-			Role:         RoleReviewer,
-			Enabled:      true,
-			Description:  "reviews code",
+			ID:            "code-reviewer",
+			Name:          "Code Reviewer",
+			Role:          RoleReviewer,
+			Enabled:       true,
+			Description:   "reviews code",
 			ReviewsDomain: "code",
 		},
 	)

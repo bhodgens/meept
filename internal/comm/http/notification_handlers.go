@@ -33,12 +33,12 @@ func pickBearerSubprotocol(r *http.Request) []string {
 type NotificationType string
 
 const (
-	NotificationTypeInfo         NotificationType = "info"
-	NotificationTypeSuccess      NotificationType = "success"
-	NotificationTypeWarning      NotificationType = "warning"
-	NotificationTypeError        NotificationType = "error"
-	NotificationTypeTaskCompleted NotificationType = "task_completed"
-	NotificationTypeJobCompleted  NotificationType = "job_completed"
+	NotificationTypeInfo             NotificationType = "info"
+	NotificationTypeSuccess          NotificationType = "success"
+	NotificationTypeWarning          NotificationType = "warning"
+	NotificationTypeError            NotificationType = "error"
+	NotificationTypeTaskCompleted    NotificationType = "task_completed"
+	NotificationTypeJobCompleted     NotificationType = "job_completed"
 	NotificationTypeSessionWaiting   NotificationType = "session_waiting"
 	NotificationTypeSessionCompleted NotificationType = "session_completed"
 	NotificationTypeBotFinished      NotificationType = "bot_finished"
@@ -49,7 +49,7 @@ const (
 type NotificationEvent struct {
 	ID        string                 `json:"id"`
 	Timestamp string                 `json:"timestamp"` // RFC3339
-	Type      NotificationType      `json:"type"`
+	Type      NotificationType       `json:"type"`
 	Title     string                 `json:"title"`
 	Message   string                 `json:"message"`
 	Data      map[string]interface{} `json:"data,omitempty"`

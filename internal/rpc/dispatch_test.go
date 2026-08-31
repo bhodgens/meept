@@ -294,10 +294,10 @@ func TestDispatchTaskViaNode_EmptyArgs(t *testing.T) {
 func TestSplitNodePrefixedAgentID(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		input      string
-		wantNode   string
-		wantAgent  string
-		wantOK     bool
+		input     string
+		wantNode  string
+		wantAgent string
+		wantOK    bool
 	}{
 		{"node:abc-123:coder", "abc-123", "coder", true},
 		{"node:xyz:debugger", "xyz", "debugger", true},

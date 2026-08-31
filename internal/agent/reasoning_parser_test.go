@@ -263,14 +263,14 @@ func TestParseReasoningDirective_Negative(t *testing.T) {
 		"what's the weather like",
 		"please refactor this function",
 		"write me a poem about cats",
-		"low battery warning",          // "low" alone isn't a directive
-		"high performance computing",   // "high" alone isn't a directive
-		"max throughput please",        // "max" alone isn't a directive
-		"the thinking person's guide",  // "thinking" without tier
-		"reasoning is important",       // "reasoning" without tier
-		"how long does it take",        // sounds like a budget phrase but no
-		"quick brown fox",              // "quick" alone is ambiguous
-		"use the reasoning endpoint",   // "use reasoning-ish" but "endpoint"
+		"low battery warning",         // "low" alone isn't a directive
+		"high performance computing",  // "high" alone isn't a directive
+		"max throughput please",       // "max" alone isn't a directive
+		"the thinking person's guide", // "thinking" without tier
+		"reasoning is important",      // "reasoning" without tier
+		"how long does it take",       // sounds like a budget phrase but no
+		"quick brown fox",             // "quick" alone is ambiguous
+		"use the reasoning endpoint",  // "use reasoning-ish" but "endpoint"
 	}
 	for _, input := range cases {
 		t.Run(input, func(t *testing.T) {

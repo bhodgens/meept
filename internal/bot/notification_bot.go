@@ -27,10 +27,10 @@ const (
 type NotificationBotConfig struct {
 	Enabled             bool                `json:"enabled"`
 	TelegramChatIDs     []string            `json:"telegram_chat_ids"`
-	NotifyOn            []string            `json:"notify_on"`              // notification trigger types
-	RateLimitPerHour    int                 `json:"rate_limit_per_hour"`    // max notifications per hour
-	ChannelAllowlists   map[string][]string `json:"channel_allowlists"`     // channel_type -> allowed IDs
-	Templates           map[string]string   `json:"templates"`              // trigger_type -> template
+	NotifyOn            []string            `json:"notify_on"`           // notification trigger types
+	RateLimitPerHour    int                 `json:"rate_limit_per_hour"` // max notifications per hour
+	ChannelAllowlists   map[string][]string `json:"channel_allowlists"`  // channel_type -> allowed IDs
+	Templates           map[string]string   `json:"templates"`           // trigger_type -> template
 	TelegramToken       string              `json:"telegram_token,omitempty"`
 	TelegramPollTimeout int                 `json:"telegram_poll_timeout,omitempty"`
 }
@@ -99,8 +99,8 @@ func NewNotificationBot(cfg NotificationBotConfig, emitter EventEmitterAdapter, 
 			return "", nil
 		}
 		tgBot, err := telegram.NewBot(telegram.BotConfig{
-			Token:         cfg.TelegramToken,
-			PollTimeout:   cfg.TelegramPollTimeout,
+			Token:       cfg.TelegramToken,
+			PollTimeout: cfg.TelegramPollTimeout,
 		}, tgHandler, logger)
 		if err != nil {
 			return nil, fmt.Errorf("create telegram notification bot: %w", err)

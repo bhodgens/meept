@@ -231,8 +231,10 @@ func (t *spawnLeaf) Parameters() llm.FunctionParameters {
 func (t *spawnLeaf) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return t.base.Execute(ctx, args)
 }
-func (t *spawnLeaf) IsReadOnly(input map[string]any) bool        { return t.base.IsReadOnly(input) }
-func (t *spawnLeaf) IsConcurrencySafe(input map[string]any) bool { return t.base.IsConcurrencySafe(input) }
+func (t *spawnLeaf) IsReadOnly(input map[string]any) bool { return t.base.IsReadOnly(input) }
+func (t *spawnLeaf) IsConcurrencySafe(input map[string]any) bool {
+	return t.base.IsConcurrencySafe(input)
+}
 
 // -----------------------------------------------------------------------
 // GatedToolRegistry: multi-dimensional tool gating
@@ -241,9 +243,9 @@ func (t *spawnLeaf) IsConcurrencySafe(input map[string]any) bool { return t.base
 // ToolDescriptor describes a tool with gating constraints across
 // multiple dimensions: depth, invocation count, and runtime state.
 type ToolDescriptor struct {
-	Name          string
-	Description   string
-	InputSchema   llm.FunctionParameters
+	Name        string
+	Description string
+	InputSchema llm.FunctionParameters
 	// AvailableAtDepths lists the depths at which this tool is
 	// available. If nil or empty, the tool is available at all depths.
 	AvailableAtDepths []int
@@ -263,8 +265,8 @@ type ToolDescriptor struct {
 //   - State: RequiresState gates tools by agent runtime state
 type GatedToolRegistry struct {
 	*DepthToolRegistry
-	mu              sync.Mutex
-	usageCount      map[string]int
+	mu                sync.Mutex
+	usageCount        map[string]int
 	stateGateRegistry map[string]ToolDescriptor // name → descriptor
 }
 
@@ -448,8 +450,8 @@ type descriptorTool struct {
 	desc ToolDescriptor
 }
 
-func (t *descriptorTool) Name() string                  { return t.desc.Name }
-func (t *descriptorTool) Description() string           { return t.desc.Description }
+func (t *descriptorTool) Name() string                       { return t.desc.Name }
+func (t *descriptorTool) Description() string                { return t.desc.Description }
 func (t *descriptorTool) Parameters() llm.FunctionParameters { return t.desc.InputSchema }
 func (t *descriptorTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return map[string]any{"tool": t.desc.Name, "args": args}, nil

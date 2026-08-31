@@ -11,20 +11,34 @@ class AgentQuotaState {
   final bool quotaBlocked;
   /// Epoch milliseconds when the quota unblocks (null means no wait).
   final int? quotaWaitUntilEpoch;
+  /// Fallback model carrying work while the primary waits out its reset
+  /// (event fallback_model; null when the backend sent none).
+  final String? fallbackModel;
+  /// Notify escalation tier from the latest quota event
+  /// ("warn" | "action_recommended" | "blocked"). The backend sends ""
+  /// on initial entry (to == quota_wait/blocked); tier firings arrive
+  /// later as to == "" events. Null when never specified.
+  final String? escalation;
 
   const AgentQuotaState({
     required this.quotaBlocked,
     this.quotaWaitUntilEpoch,
+    this.fallbackModel,
+    this.escalation,
   });
 
   AgentQuotaState copyWith({
     bool? quotaBlocked,
     int? quotaWaitUntilEpoch,
+    String? fallbackModel,
+    String? escalation,
   }) {
     return AgentQuotaState(
       quotaBlocked: quotaBlocked ?? this.quotaBlocked,
       quotaWaitUntilEpoch:
           quotaWaitUntilEpoch ?? this.quotaWaitUntilEpoch,
+      fallbackModel: fallbackModel ?? this.fallbackModel,
+      escalation: escalation ?? this.escalation,
     );
   }
 }
@@ -88,11 +102,18 @@ class AgentNotifier extends StateNotifier<AgentState> {
   ///  - to == 'quota_wait'  -> set quotaWaitUntilEpoch, quotaBlocked=false
   ///  - to == 'blocked'     -> set quotaBlocked=true, keep unblock time
   ///  - to == 'running'     -> clear the episode for this agent
+  ///  - to == ''            -> tier escalation refresh (12h warn /
+  ///     20h action_recommended): update unblock time + escalation tier on
+  ///     the existing episode; ignored when no episode exists.
   void handleQuotaEvent({
     required String agentId,
     required String to,
     String? unblockAt,
+    String? fallbackModel,
+    String? escalation,
   }) {
+    // Normalize: backend sends "" for absent values; treat as null.
+    final esc = (escalation == null || escalation.isEmpty) ? null : escalation;
     final episodes = Map<String, AgentQuotaState>.from(
       state.quotaEpisodes,
     );
@@ -104,11 +125,26 @@ class AgentNotifier extends StateNotifier<AgentState> {
         episodes[agentId] = AgentQuotaState(
           quotaBlocked: blocked,
           quotaWaitUntilEpoch: epoch,
+          fallbackModel:
+              (fallbackModel == null || fallbackModel.isEmpty) ? null : fallbackModel,
+          escalation: esc,
         );
         break;
       case 'running':
         // Clear episode — quota was resolved.
         episodes.remove(agentId);
+        break;
+      case '':
+        // Tier escalation refresh (12h warn / 20h action_recommended fire
+        // with to == ""). The episode persists; only the unblock time and
+        // escalation tier refresh. Ignored when no episode exists — there
+        // is nothing to escalate.
+        final existing = episodes[agentId];
+        if (existing == null) return;
+        episodes[agentId] = existing.copyWith(
+          quotaWaitUntilEpoch: _parseQuotaEpoch(unblockAt),
+          escalation: esc,
+        );
         break;
       default:
         // Unknown transition — ignore silently.

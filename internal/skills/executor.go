@@ -345,13 +345,13 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 	}
 
 	result := &SkillExecutionResult{
-		Content:        wrappedContent,
-		Model:          resp.Model,
-		PromptTokens:   resp.Usage.PromptTokens,
+		Content:          wrappedContent,
+		Model:            resp.Model,
+		PromptTokens:     resp.Usage.PromptTokens,
 		CompletionTokens: resp.Usage.CompletionTokens,
-		TotalTokens:    resp.Usage.TotalTokens,
-		TaintLabel:     taintLabel,
-		WasSanitized:   wasSanitized,
+		TotalTokens:      resp.Usage.TotalTokens,
+		TaintLabel:       taintLabel,
+		WasSanitized:     wasSanitized,
 	}
 
 	if mcpRuntime != nil && mcpRuntime.Started() {

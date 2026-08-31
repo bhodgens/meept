@@ -37,12 +37,12 @@ func NewInstructionsHandler(
 
 // InstructionResponse is the HTTP response structure.
 type InstructionResponse struct {
-	Success              bool                         `json:"success"`
-	Instruction          *preferences.UserInstruction `json:"instruction,omitempty"`
+	Success              bool                           `json:"success"`
+	Instruction          *preferences.UserInstruction   `json:"instruction,omitempty"`
 	Instructions         []*preferences.UserInstruction `json:"instructions,omitempty"`
 	ParsedInstruction    *preferences.ParsedInstruction `json:"parsed,omitempty"`
-	ConfirmationRequired bool                          `json:"confirmation_required"`
-	Error                string                        `json:"error,omitempty"`
+	ConfirmationRequired bool                           `json:"confirmation_required"`
+	Error                string                         `json:"error,omitempty"`
 }
 
 // RegisterRoutes wires up instruction routes on the ServeMux.

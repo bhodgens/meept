@@ -9,8 +9,8 @@ func TestPassDFillGap_ProposesSkillForRepeatedQueries(t *testing.T) {
 	analyzer := NewGapAnalyzer()
 	gaps := []LowMatchQuery{
 		{Query: "deploy helm chart", Count: 12, BestScore: 0.3},
-		{Query: "deploy helm chart", Count: 12, BestScore: 0.3},          // dedup at the analyzer level
-		{Query: "single occurrence noise", Count: 1, BestScore: 0.1},     // below threshold, skipped
+		{Query: "deploy helm chart", Count: 12, BestScore: 0.3},      // dedup at the analyzer level
+		{Query: "single occurrence noise", Count: 1, BestScore: 0.1}, // below threshold, skipped
 	}
 	proposals := analyzer.Propose(context.Background(), gaps)
 	if len(proposals) != 1 {

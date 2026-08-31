@@ -479,7 +479,7 @@ func runTraining(domain, model string) error {
 	}
 	// Prefer stock YAML so train_lora uses official HF model ids / hyperparams.
 	configName := map[string]string{
-		"lfm2.5-8b":  "lora_lfm2.5_8b.yaml",
+		"lfm2.5-8b":   "lora_lfm2.5_8b.yaml",
 		"lfm2.5-1.2b": "lora_lfm2.5_1.2b.yaml",
 	}[model]
 	if configName != "" {

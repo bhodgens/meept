@@ -18,14 +18,14 @@ import (
 
 // fakeAgentInvoker is a controllable AgentInvoker for tests.
 type fakeAgentInvoker struct {
-	mu           sync.Mutex
-	invocations  []DispatchJob
-	output       string
-	outputRes    []string
-	err          error
-	delay        time.Duration
-	panicValue   any
-	callCount    int32
+	mu          sync.Mutex
+	invocations []DispatchJob
+	output      string
+	outputRes   []string
+	err         error
+	delay       time.Duration
+	panicValue  any
+	callCount   int32
 }
 
 func (f *fakeAgentInvoker) InvokeTask(ctx context.Context, job DispatchJob, worktreePath string) (string, []string, error) {
@@ -98,11 +98,11 @@ func (p *fakeBusPublisher) snapshot() ([]completeEvent, []failEvent) {
 
 // fakeResourceManager is a minimal ResourceManager for refcount testing.
 type fakeResourceManager struct {
-	mu          sync.Mutex
-	ensured     map[string]int // raw ref → refcount
-	released    map[string]int // raw ref → release count
-	ensureErr   error          // when set, Ensure returns this
-	addCount    int
+	mu        sync.Mutex
+	ensured   map[string]int // raw ref → refcount
+	released  map[string]int // raw ref → release count
+	ensureErr error          // when set, Ensure returns this
+	addCount  int
 }
 
 func newFakeResourceManager() *fakeResourceManager {
@@ -876,4 +876,3 @@ func TestDecodeDispatchJob_Garbage(t *testing.T) {
 }
 
 // --- helpers ---
-
