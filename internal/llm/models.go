@@ -350,6 +350,12 @@ type AliasHealth struct {
 	// other models cannot misattribute the failure (issue #30).
 	FailedProviderID string
 	FailedModelID    string
+	// entryBlocks maps provider/model ID pairs to their quota unblock time.
+	// Zero means not blocked.
+	entryBlocks map[string]time.Time
+	// credentialBlock maps credential keys to their quota unblock time.
+	// Blocking a credential blocks all models sharing that key.
+	credentialBlock map[string]time.Time
 }
 
 // ToolDefinition defines a tool/function for the LLM.

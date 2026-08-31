@@ -180,6 +180,16 @@ processing, worker events) produce `type: "agent_progress"`. The Flutter client
 creates a visible message bubble for every `chat_message` event — misclassified
 lifecycle events appear as blank messages.
 
+Quota events on `agent.quota_wait` MUST be classified as `agent_progress`, never
+`chat_message`. This is enforced by the topic prefix match:
+
+```go
+case strings.HasPrefix(topic, "agent.quota"):
+    eventType = "agent_progress"
+```
+
+Future agents adding new bus topics must verify they land in the correct bucket.
+
 ### Bus proxy registrations must have a live responder
 
 `internal/rpc/proxy.go makeProxy` publishes a request topic and waits on a

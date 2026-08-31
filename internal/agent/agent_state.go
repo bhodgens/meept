@@ -75,10 +75,12 @@ func (s AgentState) String() string {
 		return "generating_response"
 	case StateBlocked:
 		return "blocked"
-	case StateError:
-		return "error"
+	case StateQuotaWait:
+		return "quota_wait"
 	case StateCompleted:
 		return "completed"
+	case StateError:
+		return "error"
 	case StateCancelled:
 		return "cancelled"
 	case StateMaxIterations:
@@ -86,7 +88,7 @@ func (s AgentState) String() string {
 	case StateBudgetExhausted:
 		return "budget_exhausted"
 	default:
-		return "unknown"
+		return fmt.Sprintf("state(%d)", s)
 	}
 }
 

@@ -26,6 +26,10 @@ type BrokerConfig struct {
 	TokenCache      ResponseCache
 	TokenResolver   TokenResolver
 	Logger          *slog.Logger
+	// QuotaRetry gates quota-aware wait+retry wrapping of ChatterForModel
+	// returned chatters. When enabled, the returned Chatter is a
+	// quotaWaitChatter. Default: disabled.
+	QuotaRetry QuotaWaitConfig
 }
 
 // brokerEntry holds a Chatter and its health state.
@@ -453,6 +457,8 @@ func (b *ModelBroker) Config() *ModelConfig {
 // ChatterForModel returns a Chatter for a specific model reference.
 // Returns nil if the model is not found in the broker.
 // The returned Chatter can be used directly for chat operations.
+// If broker.config.QuotaRetry.Enabled, the returned Chatter is wrapped
+// in quotaWaitChatter for quota-aware wait+retry.
 func (b *ModelBroker) ChatterForModel(modelRef string) Chatter {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -461,7 +467,11 @@ func (b *ModelBroker) ChatterForModel(modelRef string) Chatter {
 	if !ok || entry == nil {
 		return nil
 	}
-	return entry.chatter
+	ch := entry.chatter
+	if b.config.QuotaRetry.Enabled {
+		ch = newQuotaWaitChatter(ch, b.config.QuotaRetry, b.logger)
+	}
+	return ch
 }
 
 // Ensure ModelBroker implements Chatter
@@ -474,6 +484,10 @@ func isRetryableError(err error) bool {
 	if IsRateLimitError(err) {
 		return true
 	}
+	// Quota errors are transient (wait for reset, then retry).
+	if IsQuotaResetError(err) {
+		return true
+	}
 	// Check for server errors (5xx) via structured APIError so HTTP 529
 	// (Anthropic "Overloaded") and other 5xx codes are detected. The previous
 	// substring match on "5" + "00"/"02"/"03"/"04" missed 529 and could false
@@ -483,6 +497,18 @@ func isRetryableError(err error) bool {
 		return apiErr.StatusCode >= 500 && apiErr.StatusCode < 600
 	}
 	return false
+}
+
+// QuotaBlockedUntil returns the earliest time at which the given credential
+// key will be unblocked, zero if never blocked. Broker stub: always zero.
+func (b *ModelBroker) QuotaBlockedUntil(credentialKey string) time.Time {
+	return time.Time{}
+}
+
+// ActiveQuotaBlocks returns any active quota block statuses. Broker stub:
+// always nil.
+func (b *ModelBroker) ActiveQuotaBlocks() []QuotaBlockStatus {
+	return nil
 }
 
 var _ Chatter = (*ModelBroker)(nil)
