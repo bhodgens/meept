@@ -82,6 +82,13 @@ for file in $STAGED_GO_FILES; do
     echo "$pattern" | grep -qE "WithoutCancel|WithoutTimeout|WithoutDeadline" && continue
     # Skip comment lines
     echo "$pattern" | grep -qE "^\s*//" && continue
+    # Skip lines where every "_ = " occurrence sits inside a quoted string
+    # literal (e.g. `const msg = "use _ = doThing() never"`). Strip all
+    # double-quoted spans first; if no "_ = " remains outside quotes, the
+    # match was string content, not code.
+    if ! echo "$pattern" | sed 's/"[^"]*"//g' | grep -qF "_ = "; then
+      continue
+    fi
     # Skip comma-ok type assertions: ", _ :=" / ", _ =" paired with ".("
     echo "$pattern" | grep -qE ',\s*_\s*(:=|=)[^=]*\.\(' && continue
     # Locate in file for line number
