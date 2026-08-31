@@ -177,7 +177,7 @@
 
 | Category | Meept Advantage |
 |----------|----------------|
-| **Multi-agent orchestration** | Only framework with 18 specialists + 5 reviewers, intent classification, DAG planning, async handoff, and collaboration engine (pair programming, differential A/B) |
+| **Multi-agent orchestration** | Only framework with 22 specialists + 6 reviewers, intent classification, DAG planning, async handoff, and a collaboration engine covering pair programming, differential A/B, and parallel-team mixture-of-agents (lead + N specialists, presets) |
 | **Memory depth** | 6-tier system: episodic (FTS5), task, knowledge graph (PageRank), semantic (vector HNSW), distributed (memvid), epistemic (claims/trust) |
 | **AI Employees** | Only framework with constitution-bound autonomous agents, three autonomy tiers, enforcement engine, and optional quality-gated goal completion |
 | **Evidence pipeline** | Only framework with claim-evidence matching, validation gates, and needs_info routing for human review |

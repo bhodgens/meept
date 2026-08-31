@@ -303,7 +303,7 @@ The `IntentPair` intent type triggers channel-based pairing. Keywords include: "
 
 ## Collaboration Engine
 
-The CollaborationEngine provides structured multi-agent collaboration with pluggable modes, session lifecycle management, budget enforcement, and agent-initiated sessions. It complements the channel-based PairOrchestrator with two additional modes:
+The CollaborationEngine provides structured multi-agent collaboration with pluggable modes, session lifecycle management, budget enforcement, and agent-initiated sessions. It complements the channel-based PairOrchestrator with three structured modes:
 
 ### Collaboration Modes
 
@@ -311,6 +311,7 @@ The CollaborationEngine provides structured multi-agent collaboration with plugg
 |------|--------|----------|
 | **Pair Programming** | `PairProgrammingDriver` | Two agents share a workspace with symmetric turn-taking. Observer signals actions via structured JSON. Converges on approval, exhausts on max turns. |
 | **Differential** | `DifferentialDriver` | Four-phase A/B pipeline: fork, implement+review (via PairManager or direct), validate with fallback, differentiate+synthesize. Produces combined output from best parts of each branch. |
+| **Parallel Teams** | `ParallelTeamDriver` | Mixture-of-agents ensemble: lead agent fans subtasks out to up to 8 specialists concurrently, publishes partial results on `team.{session}.result`, then synthesizes the final output. Started via `platform_team_create`/`team_preset_create` or a `team.start` bus event; the `TeamOrchestrator` manages the lifecycle. Presets: `hyperplan` (5-critic plan review), `security_research` (3 hunters + 2 PoC engineers). |
 
 ### Intent Classification
 
@@ -321,6 +322,8 @@ This is distinct from `IntentPair` (channel-based pairing via PairOrchestrator).
 ### Agent-Initiated Sessions
 
 Agents can request collaboration via the `initiate_collaboration` tool. The engine creates a nested session with a depth guard (max depth 1) to prevent runaway chains. Each mode has a `CanInitiate(agentID, reason)` gate.
+
+The `initiate_collaboration` tool exposes `pair_programming` and `differential` only. Parallel teams (`team_parallel`) start through the team tools (`platform_team_create`, `team_preset_create`) or a `team.start` bus event, which the `TeamOrchestrator` consumes.
 
 ### Collaboration Bus Topics
 
@@ -344,7 +347,9 @@ All collaboration topics are subscribed by the Orchestrator for event logging an
 | `pair_programming` | coder, planner |
 | `differential` | coder, planner, analyst |
 
-When `preferred_agents` provides 2+ agents, those are used instead of defaults.
+| `team_parallel` | lead = first participant, roster = remaining participants |
+
+When `preferred_agents` provides 2+ agents, those are used instead of defaults. For `team_parallel`, the first participant leads and the rest form the roster; presets supply their own lead and roster.
 
 ## Model Reassignment
 

@@ -1,7 +1,7 @@
 # Multi-Agent Parallelism
 
-This document describes Meept's current parallel execution model, existing
-collaboration modes, and the gaps that the planned Team Mode will fill.
+This document describes Meept's current parallel execution model, the
+collaboration modes, and how parallel teams fill the N-agent gap.
 
 ## Current Parallel Execution Flow
 
@@ -73,9 +73,10 @@ TacticalScheduler.OnJobCompleted()
 
 ## Existing Collaboration Modes
 
-Beyond independent parallel execution, Meept has two structured collaboration
-modes and a bus-channel pairing system. These enable **two** agents to work
-together on a single task, but they are distinct from N-agent parallel teams.
+Beyond independent parallel execution, Meept has three structured collaboration
+modes and a bus-channel pairing system. Pair programming and differential
+enable two to three agents to work together on a single task; parallel teams
+extend this to a lead agent plus N specialists.
 
 ### Mode 1: Pair Programming (`pair_programming`)
 
@@ -196,16 +197,21 @@ _, errB := d.pairMgr.RunAllRounds(ctx, sessionB.ID)  // then runs B
 This misses the opportunity for true A/B parallelism since branch A and branch
 B are independent by design.
 
-### Gap 3: No N-agent team mode
+### Gap 3: N-agent team mode (filled by parallel teams)
 
-Current collaboration modes support exactly 2 agents (pair programming, bus
-pairing) or 2-3 agents (differential with a differentiator). There is no mode
-for:
+The `team_parallel` collaboration mode now provides what earlier modes
+lacked:
 
-- A lead agent orchestrating N specialist agents in parallel.
-- Shared task boards for team progress tracking.
+- A lead agent orchestrating N specialist agents in parallel (up to 8).
+- A shared task board per session for progress tracking.
 - Broadcast or targeted inter-agent messaging during execution.
-- Result aggregation from multiple parallel workers.
+- Partial-result aggregation with lead-agent synthesis.
+
+Remaining gap: user chat requests do not route to `team_parallel`. The
+`IntentCollaborate` keywords and the `initiate_collaboration` tool expose
+only `pair_programming` and `differential`. Teams start through the team
+tools (`platform_team_create`, `team_preset_create`) or a `team.start` bus
+event.
 
 ### Gap 4: No shared state during parallel step execution
 
@@ -213,35 +219,11 @@ Steps accumulate context in `AccumulatedContext`, but this is only passed
 forward (step N+1 sees step N's output). There is no shared writeable state that
 parallel steps can contribute to during execution.
 
-## How Team Mode Will Extend the System
+## Parallel Teams (`team_parallel`)
 
-Team Mode will add a third collaboration mode (`team_parallel`) alongside the
-existing `pair_programming` and `differential` modes:
-
-### CollaborationMode Extension
-
-Team Mode will implement the same `CollaborationMode` interface:
-
-```go
-type ParallelTeamDriver struct {
-    // Lead agent + specialist roster
-    // Uses message bus for coordination:
-    //   team.{sessionID}.status   -- shared task board
-    //   team.{sessionID}.message  -- inter-agent communication
-    //   team.{sessionID}.result   -- partial results aggregation
-}
-```
-
-### Key Differences from Existing Modes
-
-| Aspect | Pair Programming | Differential | Team Mode (planned) |
-|--------|-----------------|--------------|-------------------|
-| Agents | 2 | 2-3 | 1 lead + N members (up to 8) |
-| Communication | Turn-based alternation | Sequential branches | Bus-based messaging |
-| Coordination | Editor token | Post-hoc synthesis | Real-time task board |
-| Scope | Single task | A/B comparison | Parallel specialist work |
-
-### Bus Topics for Team Mode
+Parallel teams is the third collaboration mode. `ParallelTeamDriver`
+implements the same `CollaborationMode` interface as the other modes and
+coordinates through per-session bus topics:
 
 - `team.{sessionID}.status` -- Shared task board (lead publishes assignments,
   members publish progress).
@@ -250,18 +232,46 @@ type ParallelTeamDriver struct {
 - `team.{sessionID}.result` -- Partial results aggregation (members submit
   outputs, lead synthesizes).
 
-### Integration Point
+### Execution pipeline
 
-In `internal/daemon/components.go`, team mode will be registered alongside
-existing modes:
+1. `platform_team_create` or `team_preset_create` publishes a
+   `TeamStartRequest` on the `team.start` bus topic.
+2. The `TeamOrchestrator` subscribes to `team.start`, creates a
+   `team_parallel` session in the `CollaborationEngine`, and runs
+   `ParallelTeamDriver`.
+3. The driver fans out subtasks to the roster concurrently (errgroup, gated
+   by `MaxConcurrent`), publishes partial results on `team.{sessionID}.result`
+   before synthesis, then the lead agent synthesizes the final output.
+4. Completion publishes `team.result`; failures publish `team.error`. The
+   Orchestrator logs both (`handleTeamResult`, `handleTeamError`).
+
+### Presets
+
+`internal/agent/team_presets.go` ships two built-in presets:
+
+| Preset | Lead | Roster | Purpose |
+|--------|------|--------|---------|
+| `hyperplan` | planner | analyst, coder, debugger, planner, analyst | 5 critics review a plan from different perspectives (mixture-of-agents ensemble) |
+| `security_research` | analyst | coder x3, debugger x2 | 3 vulnerability hunters plus 2 PoC engineers |
+
+### Mode comparison
+
+| Aspect | Pair Programming | Differential | Parallel Teams |
+|--------|-----------------|--------------|----------------|
+| Agents | 2 | 2-3 | 1 lead + N members (up to 8) |
+| Communication | Turn-based alternation | Sequential branches | Bus-based messaging |
+| Coordination | Editor token | Post-hoc synthesis | Real-time task board |
+| Scope | Single task | A/B comparison | Parallel specialist work |
+
+### Integration point
+
+Wired in `internal/daemon/components.go`:
 
 ```go
-collabEngine.RegisterMode("team_parallel", parallelTeamDriver)
+collabEngine.RegisterMode("team_parallel", agent.NewParallelTeamDriver(...))
+teamOrch := agent.NewTeamOrchestrator(...)
+builtin.RegisterTeamTools(registry, callbacks)
 ```
-
-The `CollaborationEngine.RegisterMode` method and `CollaborationMode` interface
-are the extension points. No changes to the existing pair programming or
-differential modes are required.
 
 ## Related Files
 
@@ -274,6 +284,10 @@ differential modes are required.
 | `internal/agent/collaboration.go` | Core types: CollaborationMode interface, session state |
 | `internal/agent/collaboration_pair_driver.go` | Pair programming driver |
 | `internal/agent/collaboration_diff_driver.go` | Differential A/B driver |
+| `internal/agent/collaboration_team_driver.go` | Parallel team (mixture-of-agents) driver |
+| `internal/agent/team_orchestrator.go` | `team.start` consumer, team lifecycle |
+| `internal/agent/team_presets.go` | Built-in team presets |
+| `internal/tools/builtin/team.go` | Agent-facing team tools |
 | `internal/agent/pair_orchestrator.go` | Bus-channel pairing (Option C) |
 | `internal/agent/pair_manager.go` | Multi-round actor/reviewer loop |
 | `internal/agent/intent.go` | Intent types including IntentPair, IntentCollaborate |

@@ -285,7 +285,7 @@ For complete feature details, see [Features](./docs/features.md).
 | **Model reassignment** | ✅ Complete | Natural language model override, capability-based resolution, vendor-specific reasoning effort translation |
 | **Context firewall** | ✅ Complete | Hierarchical compression, structured summarization, token-aware truncation, thread partitioning |
 | **Evidence pipeline** | ✅ Complete | Tool evidence (hashes, exit codes, API responses) → validator → claim checking |
-| Multi-agent system | ✅ Complete | 28 agents (22 executor-role incl. dispatcher + chat, 6 reviewers) with intent classification, delegation, handoff |
+| Multi-agent system | ✅ Complete | 28 agents (22 executor-role incl. dispatcher + chat, 6 reviewers) with intent classification, delegation, handoff, and 3 collaboration modes (pair programming, differential A/B, parallel teams) |
 | Memory system | ✅ Complete | 5-tier: episodic (FTS5), task, knowledge graph, semantic (vector), distributed (memvid) |
 | Code intelligence | ✅ Complete | Tree-sitter AST + LSP client tools |
 | LLM management | ✅ Complete | Multi-provider, alias resolution, failover, budgeting, reasoning effort control |

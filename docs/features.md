@@ -1901,6 +1901,7 @@ The CollaborationEngine provides first-class multi-agent collaboration with plug
 |------|--------|-------------|
 | **Pair Programming** | `PairProgrammingDriver` | Two agents share a workspace with symmetric turn-taking via editor token. Driver writes code, observer reviews via structured JSON responses. Converges on observer approval, exhausts on max turns, or fails on error. |
 | **Differential** | `DifferentialDriver` | Four-phase A/B pipeline: fork (create branch workspaces), implement (independent agent execution per branch with PairManager review loops), validate (checkpoint with fallback to best branch), differentiate (third agent synthesizes combined output). |
+| **Parallel Teams** | `ParallelTeamDriver` | Mixture-of-agents ensemble: lead agent fans subtasks out to up to 8 specialists concurrently, publishes partial results on `team.{session}.result`, then synthesizes the final output. Started via `platform_team_create`/`team_preset_create` or a `team.start` bus event; the `TeamOrchestrator` manages the lifecycle. Presets: `hyperplan` (5-critic plan review), `security_research` (3 hunters + 2 PoC engineers). |
 
 ### Session Lifecycle
 

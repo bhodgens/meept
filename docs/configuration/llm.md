@@ -342,6 +342,25 @@ export OPENROUTER_API_KEY="your-key"
 4. **Fallback handling**: Use model aliases for high availability
 5. **Budget enforcement**: Respect token limits and rate limits
 
+## Multi-Agent Collaboration and Model Selection
+
+The collaboration engine runs mixture-of-agents (MoA) patterns on top of the
+model configuration. Three modes exist:
+
+- `pair_programming`: two agents alternate turns in one workspace.
+- `differential`: two independent branches solve the task; a differentiator
+  agent synthesizes the best parts of both.
+- `team_parallel`: a lead agent fans subtasks out to up to 8 specialists and
+  synthesizes their partial results. Presets: `hyperplan` (5-critic plan
+  review), `security_research` (3 hunters + 2 PoC engineers).
+
+Each participant resolves its model through the standard chain: the agent's
+frontmatter model, then capability matching, then `agents.default_model`.
+Synthesis always runs on the lead (or differentiator) agent's resolved model.
+Natural-language reassignment can pin it, for example "synthesize using
+glm-4.7" (synthesis scope maps to the planner agent; see
+`docs/concepts/multi-agent.md`, Model Reassignment).
+
 ## Runtime Lifecycle Management
 
 Meept can automatically manage local LLM runtimes (spawn on startup, health monitoring, graceful shutdown). See [LLM Runtime Lifecycle Management](llm-lifecycle.md) for configuration details.
