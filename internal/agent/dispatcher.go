@@ -3064,6 +3064,8 @@ func heuristicFallback(input string) *Intent {
 		"make a", "make me a",
 		"generate a", "generate the",
 		"code a",
+		"write a file", "write the file",
+		"create a file", "create the file",
 	}
 	for _, kw := range simpleCodeKeywords {
 		if strings.Contains(lower, kw) {
