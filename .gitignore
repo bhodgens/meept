@@ -95,3 +95,4 @@ daemon.test
 *.test
 *.db-shm
 *.db-wal
+results/
