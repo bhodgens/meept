@@ -1322,6 +1322,16 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		}
 		lastErr = err
 
+		// Quota errors never re-enter the short-retry loop (streaming
+		// delta path): the window is hours, not seconds. Return immediately;
+		// the caller decides whether to wait/rotate (quota-reset-resilience
+		// contract 1). QuotaResetError wraps a 429 APIError, so without this
+		// branch isRetryableStreamingError would short-retry it.
+		var quotaErr *QuotaResetError
+		if errors.As(err, &quotaErr) {
+			return nil, err
+		}
+
 		// D4: Check if error is retryable
 		if !isRetryableStreamingError(err) {
 			c.logger.Debug("non-retryable stream error", "error", err)
@@ -1428,6 +1438,24 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		}
 
 		apiErr := &APIError{StatusCode: resp.StatusCode, Detail: string(detail)}
+
+		// Quota-window classification (quota-reset-resilience): 429/402
+		// usage-window/billing shapes become QuotaResetError so callers
+		// rotate/block instead of short-retrying; short-cycle retriable
+		// OpenRouter limits keep the RateLimitError path below.
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
+			if classifyQuotaDecision(resp.StatusCode, detail, ParseRateLimitBody(detail)) {
+				if qe := ParseQuotaResponse(resp.StatusCode, resp.Header, detail, QuotaContext{
+					ProviderID: providerID,
+					ModelID:    modelID,
+					MaxWait:    c.quotaMaxWait,
+				}); qe != nil {
+					qe.Cause = apiErr
+					return nil, 0, qe
+				}
+			}
+		}
+
 		// Wrap in RateLimitError for 429 to preserve Retry-After
 		if resp.StatusCode == 429 && retryAfter > 0 {
 			return nil, 0, &RateLimitError{

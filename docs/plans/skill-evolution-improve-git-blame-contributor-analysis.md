@@ -2,77 +2,76 @@
 
 ## Meta
 
-- plan_id: plan-20260831224641-0038
+- plan_id: plan-20260831231926-0004
 - created: 2026-08-31
 - status: planning
 
 ## Summary
 
-Effectiveness of 0.19 (33 negative vs 10 positive) indicates the skill is frequently invoked but failing to deliver useful results. The skill likely lacks clear scope, concrete output format, and proper tool guidance for git blame analysis.
+Effectiveness of 0.20 with 44% negative rate indicates the skill is frequently misapplied or produces poor outputs. Likely issues: unclear trigger conditions (when to use git blame vs simpler alternatives), ambiguous output format, or missing guidance on interpreting blame results practically.
 
 Candidate content:
 # git-blame-contributor-analysis
 
-## Purpose
-Analyze git blame output to identify key contributors, their commit patterns, code ownership, and file evolution over time.
+Use this skill when the user wants to understand **who contributed what** to a file or set of files, including line-level attribution, contribution breakdown, or identifying owners of specific sections.
 
 ## When to Use
-- User asks about who authored/modified specific files, lines, or sections of code.
-- User wants to understand code ownership or responsibility for a file/directory.
-- User asks about contributor activity, commit frequency, or change history.
-- User needs to find the original author of a specific line or block of code.
 
-## NOT for
-- General code review or quality assessment.
-- Merging or migrating repositories.
-- Analyzing non-git version-controlled content.
+- Analyzing ownership or responsibility for specific code sections
+- Finding the primary contributor(s) to a file or function
+- Understanding contribution history before making changes
+- Investigating why certain code exists (who wrote it and when)
 
-## Tools Available
-- `git blame` — line-level attribution
-- `git log` — commit history and contributor stats
-- `git shortlog` — summarized contributor output
-- File reading for context around blamed lines
+## When NOT to Use
 
-## Steps
-1. **Understand the scope**: Determine whether the user is asking about a specific file, directory, or repository-wide contributor analysis.
-2. **Gather blame data**:
-   - Run `git blame <file>` for line-level attribution.
-   - Run `git blame -e <file>` to include author emails.
-   - Run `git log --follow -- <file>` for full history including renames.
-3. **Summarize contributors**:
-   - Run `git shortlog -sn -- <file>` to rank contributors by commit count.
-   - Cross-reference with `git blame` output to identify dominant authors.
-4. **Annotate findings**:
-   - Note lines added/most recently modified by different contributors.
-   - Identify stale sections (unchanged for long periods) vs. actively maintained ones.
-5. **Present results**:
-   - Show top contributors with commit counts and affected line ranges.
-   - Highlight any surprising or unexpected attribution (e.g., large sections authored by a low-commit-count contributor).
-   - Include file path and any relevant context about the code section.
+- Simple log viewing → use `git log` directly
+- Counting commits by author → use `git shortlog`
+- Finding recent changes → use `git log -p`
+
+## Procedure
+
+1. **Run git blame** with appropriate options:
+   - For overall file analysis: `git blame <file>`
+   - For line-range focus: `git blame -L <start>,<end> <file>`
+   - For formatted output: `git blame --line-porcelain <file>`
+
+2. **Aggregate results** to identify:
+   - Top contributors by line count
+   - Time span of contributions
+   - Files with most diverse/least diverse authorship
+
+3. **Present findings** in structured format:
+
+```
+## File: <path>
+- Total lines: <N>
+- Contributors:
+  - <author> (<commit_count> commits, <line_count> lines)
+  - ...
+- Primary owner: <author>
+- Last modified: <date> by <author>
+```
 
 ## Output Format
-```
-### Contributor Analysis: <file path>
 
-**Top Contributors:**
-1. <Author> — <N> commits, ~<X>% of file
-2. <Author> — <N> commits, ~<X>% of file
-...
+Return a concise summary covering:
+1. **Top contributors** ranked by lines touched
+2. **Primary owner** — the single most responsible author
+3. **Contribution timeline** — earliest and latest commits
+4. **Notable patterns** — e.g., file rewritten by one person, stale sections, hot files
 
-**Key Findings:**
-- <Specific observation about code ownership or notable lines>
-- <Any patterns in contribution over time>
+## Tool Hints
 
-**Original Authors of Notable Sections:**
-- Lines <X>-<Y>: <Author> (<commit hash>) — <brief description if available>
-```
+- Use `explore` for read-only search of relevant files first
+- Use `code` for analyzing blame output and generating reports
+- Use `git` for running git blame commands directly
 
-## Best Practices
-- Always specify the file path when running git commands.
-- Use `--relative` flag if running from a subdirectory.
-- Combine blame data with commit messages for richer context.
-- If the file has no git history (e.g., newly added), state so explicitly.
-- Do not fabricate contributor data; report accurately even if sparse.
+## Example
+
+User: "Who wrote the auth module in main.go?"
+→ Run: `git blame internal/auth/main.go`
+→ Report top authors, highlight the primary author of key functions
+
 
 ## Notes
 

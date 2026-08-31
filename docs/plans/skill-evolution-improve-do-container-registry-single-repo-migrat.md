@@ -2,71 +2,54 @@
 
 ## Meta
 
-- plan_id: plan-20260831224614-0036
+- plan_id: plan-20260831231902-0002
 - created: 2026-08-31
 - status: planning
 
 ## Summary
 
-Effectiveness is 0.11 with 17/19 negative responses, indicating the current instructions are ineffective. Likely issues: no clear prerequisite checks, ambiguous migration steps, and missing error handling for common failures like credential issues or non-existent source repos.
+Effectiveness is extremely low (0.10) with 18 negative outcomes, indicating the skill is either mismatched to user requests or its instructions are unclear. The prior archiving attempts were rejected due to heuristic fallback, so the skill still exists and should be improved rather than discarded. I will broaden the scope to cover general single-repository container registry migrations, clarify decision points, and add concrete examples to reduce ambiguity.
 
 Candidate content:
-# Container Registry Single Repo Migration
+# do-container-registry-single-repo-migration
 
-## Purpose
-Migrate a single repository's container images from one container registry to another (e.g., Docker Hub → GHCR, ECR → GHCR, or between regions).
+You are a specialist in migrating a single repository between container image registries (e.g., Docker Hub → GitHub Container Registry, ECR → ACR, on-prem → cloud).
 
-## Prerequisites
-Before starting, verify:
-1. **Source credentials** — You have access to the source registry (login token, password, or OIDC).
-2. **Destination credentials** — You have write access to the destination registry.
-3. **Source image exists** — Confirm the image and tag exist in the source registry before attempting migration.
-4. **Docker CLI installed** — Ensure `docker` is available and logged into both registries.
+## When to use this skill
+- The user explicitly asks to move/migrate a single repo's images from one registry to another.
+- The request involves pushing images to a new registry while preserving tags, digests, or metadata.
+- The task is confined to one repository (not multi-repo or whole organization migrations).
 
-## Step-by-Step Instructions
+## What you need to know
+1. **Source registry** – URL, authentication method, existing tags.
+2. **Destination registry** – URL, authentication, target repository path.
+3. **Migration scope** – all tags, specific tags, or latest only.
+4. **Preservation requirements** – keep original digests, update CI/CD references, delete source images after success.
 
-### Step 1: Authenticate to Both Registries
-```bash
-# Source registry
-docker login <source-registry> -u <username> -p <password-or-token>
+## Common steps
+1. **Authenticate** to both source and destination registries.
+2. **List source tags** to determine what needs migration.
+3. **Pull** images from the source registry (or use `skopeo`/`crane` to copy directly).
+4. **Push** images to the destination registry with matching tags.
+5. **Verify** that images exist in the destination and are runnable.
+6. **Update** any Dockerfiles, CI pipelines, or deployment configs that reference the old registry.
+7. **Clean up** source images if required.
 
-# Destination registry
-docker login <dest-registry> -u <username> -p <password-or-token>
+## Tools & commands
+- `docker pull/push`
+- `skopeo copy`
+- `crane copy`
+- Registry-specific CLI tools (e.g., `aws ecr`, `az acr`)
+
+## Example
+```
+# Migrate `myapp:latest` from Docker Hub to GitHub Container Registry
+skopeo copy docker-daemon:myapp:latest docker://ghcr.io/myuser/myapp:latest
 ```
 
-### Step 2: Pull the Image
-```bash
-docker pull <source-registry>/<repo>:<tag>
-```
-If the tag is missing or pull fails, verify the image name and tag in the source registry first.
+## Output
+Provide a concise plan with exact commands, note any prerequisites, and flag risks (e.g., large images, rate limits).
 
-### Step 3: Tag for Destination
-```bash
-docker tag <source-registry>/<repo>:<tag> <dest-registry>/<repo>:<tag>
-```
-
-### Step 4: Push to Destination
-```bash
-docker push <dest-registry>/<repo>:<tag>
-```
-
-### Step 5: Verify
-```bash
-docker manifest inspect <dest-registry>/<repo>:<tag>
-```
-
-## Common Errors & Fixes
-| Error | Cause | Fix |
-|---|---|---|
-| `unauthorized` | Wrong credentials | Re-authenticate with correct token |
-| `manifest unknown` | Image or tag doesn't exist | List source tags with `docker run --rm mplatform/mquery <source>:<tag>` or check registry UI |
-| `connection refused` | Registry unreachable | Check network/firewall, verify registry URL |
-| `resource temporarily unavailable` | Rate limiting | Add `--quiet` and retry with backoff |
-
-## Important Notes
-- This skill handles **single repo only**. For multi-repo migrations, use batch migration scripts.
-- If the source and destination are the same registry but different paths, treat as a rename operation (pull + re-tag + push).
-- Always verify the destination image before deleting or updating the source.
 
 ## Notes
 

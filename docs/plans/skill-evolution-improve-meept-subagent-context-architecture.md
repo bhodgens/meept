@@ -2,89 +2,71 @@
 
 ## Meta
 
-- plan_id: plan-20260831224728-0041
+- plan_id: plan-20260831232028-0008
 - created: 2026-08-31
 - status: planning
 
 ## Summary
 
-Effectiveness is critically low (0.17) with 5 negative outcomes out of 6 injections, indicating the skill's current guidance is mismatched to agent needs. The skill likely lacks clear decision criteria for when to invoke it and what outputs to produce.
+Effectiveness is 0.17 (1 positive out of 6 uses). The skill appears to be used as a task decomposition/planning tool but its current wiki entry describes it as a 'two-turn turn-taking pattern for interactive code problems' — a mismatch. The execution traces show successful task decomposition, suggesting the skill content needs to be realigned with its actual use case: decomposing requests into discrete, executable steps with tool hints and dependency ordering.
 
 Candidate content:
-# meept-subagent-context-architecture
+# Task Decomposition Planner
 
-## Purpose
-Design and orchestrate the context-passing architecture between a Meept agent and its subagents to maximize task completion accuracy while minimizing unnecessary token usage.
+Decompose user requests into discrete, executable steps that can be assigned to specialist agents.
 
 ## When to Use
-Invoke this skill ONLY when:
-1. A task requires decomposing into multiple subagent calls
-2. Subagents need shared context (project state, prior results, tool outputs)
-3. The agent must coordinate subagent results into a coherent final output
 
-**Do NOT invoke** for single-turn, self-contained queries that don't require subagent delegation.
+Use this skill when a request needs to be broken down into a plan before execution. Common scenarios:
+- Multi-step tasks requiring coordination between specialists
+- Requests that involve both planning and execution phases
+- Ambiguous or complex requests that benefit from upfront decomposition
 
-## Context Architecture Patterns
+## Step Format
 
-### Pattern 1: Cascading Context
-Use when subagents depend on each other's outputs sequentially.
-- Subagent 1 receives full task brief + any relevant shared context
-- Subagent 2 receives task brief + Subagent 1's results + any other relevant context
-- Each subagent gets only the context it needs, not everything
+Each step must include:
+- **description**: A single unit of work, specific and actionable
+- **tool_hint**: The agent type best suited for the step:
+  - `code` or `refactor` → coding specialist
+  - `debug` or `fix` → debugging specialist
+  - `analyze` or `research` → analysis specialist
+  - `git` or `commit` → git operations specialist
+  - `plan` → further planning/decomposition
+  - `chat` → general conversation
+- **depends_on**: 0-based indices of prerequisite steps (empty array for parallel-start steps)
 
-### Pattern 2: Parallel Fan-out
-Use when subagents are independent and can run concurrently.
-- All subagents receive the same core task brief
-- Each subagent gets only the context relevant to its specific subtask
-- Results are aggregated by the parent agent
+## Constraints
 
-### Pattern 3: Router + Workers
-Use when the task scope is unclear and needs triage first.
-- A router subagent classifies the request and assigns subtasks
-- Worker subagents execute assigned subtasks with appropriate context
-- Results are synthesized by the parent agent
-
-## Subagent Prompt Template
-```
-You are a subagent specializing in: [subtask description]
-
-Your parent task: [brief description of overall goal]
-
-Context you need to know:
-[relevant shared context, prior results, tool outputs]
-
-What you must produce:
-[specific deliverable format]
-
-Guidelines:
-[Any constraints, style, or quality requirements]
-```
+- Keep plans to **10 steps maximum**
+- Steps with empty `depends_on` can run in parallel
+- Be specific and actionable — avoid vague descriptions
+- Output ONLY valid JSON, no markdown, no explanation
 
 ## Output Format
-When producing context architecture recommendations, return:
-1. **Pattern selected** and why
-2. **Context map**: which subagent gets which pieces of context
-3. **Prompt template** for each subagent invocation
-4. **Aggregation strategy** for combining subagent outputs
 
-## Common Pitfalls to Avoid
-- Don't dump all available context into every subagent prompt
-- Don't create unnecessary subagents for trivial subtasks
-- Don't have subagents re-derive context the parent already has
-- Always specify the output format a subagent must return
+```json
+{
+  "steps": [
+    {"description": "step description", "tool_hint": "code", "depends_on": []},
+    {"description": "step description", "tool_hint": "code", "depends_on": [0]},
+    {"description": "step description", "tool_hint": "git", "depends_on": [0, 1]}
+  ]
+}
+```
 
-## Examples
+## Example
 
-### Good Use Case
-Task: "Migrate our monolith to microservices"
-- Router subagent: decompose into service boundaries
-- Worker subagent 1: analyze database schema for splitting
-- Worker subagent 2: review existing API surface
-- Parent: synthesize migration plan from all results
+Request: "Write a file named summary.txt in the repository root containing the text: meept is an AI agent daemon."
 
-### Bad Use Case
-Task: "What's 2+2?"
-- No subagent needed; answer directly.
+Plan:
+```json
+{
+  "steps": [
+    {"description": "Get project info to confirm the repository root directory", "tool_hint": "plan", "depends_on": []},
+    {"description": "Write summary.txt to the repository root with content 'meept is an AI agent daemon.' using file_write with direct:true", "tool_hint": "code", "depends_on": [0]}
+  ]
+}
+```
 
 
 ## Notes

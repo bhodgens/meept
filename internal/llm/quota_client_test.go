@@ -139,3 +139,81 @@ func TestQuotaClient_SetQuotaMaxWait(t *testing.T) {
 		t.Errorf("quotaMaxWait changed on zero set: %v", c.quotaMaxWait)
 	}
 }
+
+// TestQuotaClient_DeltaCallbackQuotaErrorNoShortRetry pins the leaf-01
+// invariant on the ChatWithDeltaCallback retry loop: a quota-window 429
+// returns QuotaResetError and hits the server exactly ONCE, while a plain
+// 429 keeps its pre-existing retry behavior (regression guard for the
+// doStreamRequest quota-classification addition).
+func TestQuotaClient_DeltaCallbackQuotaErrorNoShortRetry(t *testing.T) {
+	tests := []struct {
+		name         string
+		statusCode   int
+		body         string
+		wantQuota    bool
+		wantAttempts int32
+	}{
+		{
+			name:         "quota 429 exits loop with one request",
+			statusCode:   http.StatusTooManyRequests,
+			body:         `{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":1893456000}}`,
+			wantQuota:    true,
+			wantAttempts: 1,
+		},
+		{
+			name:         "402 payment required is quota",
+			statusCode:   http.StatusPaymentRequired,
+			body:         `{"error":{"type":"insufficient_quota","message":"billing"}}`,
+			wantQuota:    true,
+			wantAttempts: 1,
+		},
+		{
+			name:         "plain 429 keeps retrying (rate-limit path)",
+			statusCode:   http.StatusTooManyRequests,
+			body:         `{"error":{"message":"slow down"}}`,
+			wantQuota:    false,
+			wantAttempts: streamMaxRetries,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var hits int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&hits, 1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.statusCode)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			cfg := &ModelConfig{
+				ProviderID: "openai",
+				ModelID:    "gpt-test",
+				BaseURL:    server.URL,
+				APIKey:     "sk-test",
+				MaxTokens:  16,
+			}
+			c := NewClient(cfg, WithLogger(discardLogger()))
+
+			_, err := c.ChatWithDeltaCallback(context.Background(),
+				[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+				func(string) error { return nil })
+			if err == nil {
+				t.Fatal("expected error")
+			}
+
+			if got := atomic.LoadInt32(&hits); got != tt.wantAttempts {
+				t.Errorf("server hits = %d, want %d", got, tt.wantAttempts)
+			}
+
+			if tt.wantQuota {
+				if !IsQuotaResetError(err) {
+					t.Fatalf("expected QuotaResetError, got %T: %v", err, err)
+				}
+			} else if IsQuotaResetError(err) {
+				t.Fatalf("did not expect QuotaResetError, got: %v", err)
+			}
+		})
+	}
+}

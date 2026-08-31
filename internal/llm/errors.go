@@ -135,7 +135,13 @@ func UserMessage(err error) string {
 	if err == nil {
 		return ""
 	}
-	// Try RateLimitError first (most specific)
+	// Try QuotaResetError first (most specific; wraps a 429 APIError so it
+	// must be checked before RateLimitError/APIError).
+	var quotaErr *QuotaResetError
+	if errors.As(err, &quotaErr) {
+		return quotaErr.UserMessage()
+	}
+	// Try RateLimitError (most specific)
 	var rlErr *RateLimitError
 	if errors.As(err, &rlErr) {
 		return rlErr.UserMessage()

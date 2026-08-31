@@ -62,6 +62,12 @@ type AgentsPanel struct {
 	width   int
 	height  int
 
+	// countdownTick gates the 30s countdown refresh (quotaCountdownTickMsg):
+	// while any agent is quota-hit the panel re-renders its cached episode
+	// data so the "quota resets in Nh Mm" badge stays live. Leaf 08 Task 2
+	// contract: countdown updates on the TUI's tick.
+	countdownTick bool
+
 	loading bool
 	err     error
 }
@@ -244,6 +250,34 @@ type quotaStateMsg struct {
 	escalation    string // "" | warn | action_recommended | blocked (leaf 05 tier vocabulary)
 }
 
+// quotaCountdownTickMsg re-renders quota badges so the live countdown stays
+// current. Emitted on a 30s cadence only while an episode is active; the
+// tick stops itself when the last episode clears.
+type quotaCountdownTickMsg struct{}
+
+// hasQuotaEpisodes reports whether any cached agent carries quota episode
+// state (drives the countdown tick lifecycle).
+func (p *AgentsPanel) hasQuotaEpisodes() bool {
+	for i := range p.agents {
+		if p.agents[i].QuotaWaitUntil != nil || p.agents[i].QuotaBlocked {
+			return true
+		}
+	}
+	return false
+}
+
+// scheduleQuotaCountdownTick starts the self-perpetuating 30s countdown
+// refresh. Idempotent: the tick is armed once per episode window.
+func (p *AgentsPanel) scheduleQuotaCountdownTick() tea.Cmd {
+	if p.countdownTick {
+		return nil
+	}
+	p.countdownTick = true
+	return tea.Tick(30*time.Second, func(_ time.Time) tea.Msg {
+		return quotaCountdownTickMsg{}
+	})
+}
+
 // agentsListMsg carries the agents.list response.
 type agentsListMsg struct {
 	agents []AgentSummary
@@ -400,6 +434,18 @@ func (p *AgentsPanel) resumeAgent() tea.Cmd {
 // Update handles messages for the agents panel.
 func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case quotaCountdownTickMsg:
+		// The previously armed tick has fired — its window is over.
+		p.countdownTick = false
+		// Recompute the cached status cells so countdown badges reflect
+		// the current time (cells are plain strings; without this pass
+		// they'd be frozen at event time).
+		if p.hasQuotaEpisodes() {
+			p.updateAgentsTable()
+			return p.scheduleQuotaCountdownTick()
+		}
+		return nil
+
 	case agentsListMsg:
 		p.loading = false
 		if msg.err != nil {
@@ -431,6 +477,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 		// Apply the quota state update to the matching agent in the cache.
 		// A quota_cleared transition (to == "" or "running") resets the
 		// agent to its base status so stale episode data clears on running.
+		var tickCmd tea.Cmd
 		for i := range p.agents {
 			if p.agents[i].ID == msg.agentID {
 				switch msg.to {
@@ -486,10 +533,18 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.agents[i].Status = "running"
 				}
 				p.updateAgentsTable()
+				// Episode state changed: arm the countdown tick when an
+				// episode became active, and let the tick stop itself when
+				// the last one clears.
+				if p.hasQuotaEpisodes() {
+					tickCmd = p.scheduleQuotaCountdownTick()
+				} else {
+					p.countdownTick = false
+				}
 				break
 			}
 		}
-		return nil
+		return tickCmd
 
 	case tea.KeyPressMsg:
 		if p.subView == agentsViewDetail {
@@ -659,8 +714,15 @@ func (p *AgentsPanel) updateAgentsTable() {
 		}
 	}
 	p.table.SetRows(rows)
-	if len(rows) > 0 {
-		p.table.GotoTop()
+	// Preserve the cursor across rebuilds. quota events and countdown ticks
+	// rebuild rows frequently; an unconditional GotoTop would yank the
+	// user's selection back to the first row each time.
+	if n := len(rows); n > 0 {
+		if cur := p.table.Cursor(); cur >= 0 && cur < n {
+			p.table.SetCursor(cur)
+		} else {
+			p.table.GotoTop()
+		}
 	}
 }
 

@@ -2,73 +2,64 @@
 
 ## Meta
 
-- plan_id: plan-20260831224606-0035
+- plan_id: plan-20260831231844-0001
 - created: 2026-08-31
 - status: planning
 
 ## Summary
 
-Effectiveness is low (0.41) with more negatives (24) than positives (19). The skill lacks clear trigger conditions, concrete steps, and output expectations, leading to inconsistent usage. Adding structured decision logic, explicit preconditions, and concrete deliverables should reduce ambiguity and improve outcomes.
+Low effectiveness (0.39) with 27 negative vs 19 positive outcomes. Traces show over-decomposition of simple tasks into unnecessary multi-step plans, and file_write operations writing to incorrect paths. Skill needs stronger guidance on task complexity assessment and direct execution patterns.
 
 Candidate content:
-# Agent Daemon Benchmarking
+---
+name: agent-daemon-benchmarking
+description: Decompose benchmark-style agent tasks into executable steps. Optimized for benchmark evaluation workloads including file writes, code generation, git operations, and simple reasoning tasks.
+---
 
-## Purpose
-Systematically benchmark agent daemon performance across multiple runs to establish reliability baselines and detect regressions.
+# Agent Daemon Benchmarking Skill
 
-## When to Use
-- After agent daemon configuration changes
-- Before deploying agent daemons to production
-- When investigating intermittent agent behavior
-- As part of CI/CD pipeline validation
+You are a task planner for benchmark-style agent evaluation. Decompose requests into discrete, executable steps that specialist agents can carry out.
 
-## Preconditions
-- [ ] Agent daemon is installed and configured
-- [ ] Benchmark test suite or workload script is available
-- [ ] Sufficient disk space for logs and metrics
-- [ ] Environment isolation (no competing workloads)
+## Core Principles
 
-## Steps
+1. **Prefer single-step plans for simple tasks.** If a request can be completed in one action (e.g., "write this file", "create this code"), emit exactly one step. Do NOT add preliminary planning or reconnaissance steps unless the target location or environment is genuinely unknown.
 
-1. **Define Benchmark Scope**
-   - Identify workloads to test (e.g., concurrent requests, message volume)
-   - Set expected success criteria (latency, throughput, error rate)
-   - Determine run count (minimum 10 runs recommended)
+2. **Recognize direct-write patterns.** When the user mentions `file_write with direct:true` or similar immediate-operation tools, the task is likely a single direct write — no setup steps needed.
 
-2. **Prepare Environment**
-   - Clear previous benchmark artifacts and logs
-   - Reset daemon state to baseline configuration
-   - Record environment metadata (OS, versions, resources)
+3. **Match tool hints to agent types:**
+   - `code` → coding / file writing / implementation tasks
+   - `git` → commit, branch, merge, push operations
+   - `analyze` / `research` → investigation, summarization, web lookup
+   - `debug` / `fix` → error diagnosis and remediation
+   - `plan` → only when genuine decomposition into sub-plans is needed
 
-3. **Execute Benchmark Runs**
-   - Run daemon under each workload scenario
-   - Capture metrics: response time, throughput, memory/CPU usage, error rates
-   - Log all runs to timestamped directories for traceability
+4. **Keep plans concise.** Maximum 5 steps unless the task genuinely requires more. Over-decomposition wastes tokens and introduces failure points.
 
-4. **Aggregate Results**
-   - Compute mean, median, min, max, p95, p99 for latency
-   - Calculate success rate across all runs
-   - Identify outliers and investigate root causes
+5. **Preserve repository root context.** When a task references "repository root", use the confirmed project directory from prior steps rather than inventing paths.
 
-5. **Generate Report**
-   - Summary table of metrics per workload
-   - Pass/fail against success criteria
-   - Recommendations for optimization or regression flags
+## When to Add Steps
 
-## Output Artifacts
-- `benchmark_results/<timestamp>/` — per-run logs and metrics
-- `benchmark_report.md` — consolidated findings and pass/fail verdict
+Add a preliminary step ONLY when:
+- The repository root or working directory is unknown
+- A prerequisite (e.g., installing dependencies) must succeed before the main task
+- The request involves multiple independent sub-tasks
 
-## Success Criteria
-- All latency percentiles within defined thresholds
-- Error rate below 1%
-- Consistent results across runs (no non-deterministic failures)
+## Output Format
+
+Output ONLY valid JSON:
+```json
+{
+  "steps": [
+    {"description": "clear, actionable step", "tool_hint": "code|git|analyze|debug|plan", "depends_on": []}
+  ]
+}
+```
 
 ## Anti-Patterns to Avoid
-- Running benchmarks on shared/noisy environments
-- Using insufficient run count (<5)
-- Ignoring outlier analysis
-- Benchmarking without clear success criteria
+
+- **Do NOT** add a "get project info" step before a simple file-write task — the repository root is already known from context.
+- **Do NOT** split a single atomic write into multiple steps.
+- **Do NOT** use `plan` as a catch-all tool hint; reserve it for genuine multi-stage planning.
 
 ## Notes
 

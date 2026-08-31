@@ -507,6 +507,14 @@ func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, heal
 		health.StickyPins = make(map[string]int)
 	}
 
+	// Quota-aware pin selection: a pinned model whose credential is
+	// quota-blocked must not be served (same semantics as the rotation
+	// path below). Release the pin so the caller lands on an unblocked
+	// candidate; when every candidate is blocked, the least-expired one
+	// is returned so the caller's request surfaces the quota error
+	// instead of deadlocking the resolve.
+	r.releaseQuotaBlockedPin(alias, health)
+
 	if pinnedIdx, ok := health.StickyPins[callerKey]; ok {
 		switch {
 		case pinnedIdx >= len(alias.Models):
@@ -530,9 +538,41 @@ func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, heal
 	if health.inCooldown(now) && health.failedModelMatches(alias, nextIdx) {
 		nextIdx = (nextIdx + 1) % len(alias.Models)
 	}
+	// Skip quota-blocked candidates, mirroring the rotation path. If every
+	// candidate is blocked, nextIdx cycles back to its start value and we
+	// pin there anyway (resolve cannot return an error here).
+	if r.quotaEnabled() {
+		startIdx := nextIdx
+		for i := 0; i < len(alias.Models); i++ {
+			if !r.isQuotaBlocked(health, alias.Models[nextIdx]) {
+				break
+			}
+			nextIdx = (nextIdx + 1) % len(alias.Models)
+		}
+		if nextIdx == startIdx && r.isQuotaBlocked(health, alias.Models[nextIdx]) {
+			r.logger.Warn("All alias models quota-blocked; serving rotation-head candidate anyway",
+				"alias", aliasName,
+				"model", alias.Models[nextIdx].ModelID,
+			)
+		}
+	}
 	health.StickyPins[callerKey] = nextIdx
 	health.CurrentIndex = (nextIdx + 1) % len(alias.Models)
 	return r.recordStickyDecision(alias, aliasName, nextIdx, "sticky_request_new")
+}
+
+// releaseQuotaBlockedPin drops every sticky pin whose pinned model is
+// currently quota-blocked so the pinned callers re-pin to an unblocked
+// candidate. Callers must hold Resolver.mu.
+func (r *Resolver) releaseQuotaBlockedPin(alias *AliasEntry, health *AliasHealth) {
+	if !r.quotaEnabled() || len(alias.Models) == 0 {
+		return
+	}
+	for caller, pinned := range health.StickyPins {
+		if pinned >= 0 && pinned < len(alias.Models) && r.isQuotaBlocked(health, alias.Models[pinned]) {
+			delete(health.StickyPins, caller)
+		}
+	}
 }
 
 // recordStickyDecision returns alias.Models[idx] and logs the routing

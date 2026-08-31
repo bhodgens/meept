@@ -44,6 +44,11 @@ func Load(path string) (*Config, error) {
 		return nil, wrapTOMLUnmarshalError(err, path)
 	}
 
+	// Clamp invalid quota_retry values to defaults (leaf 02 contract:
+	// negatives clamp, zeros take defaults). Applied at the load boundary
+	// so every consumer sees normalized values.
+	NormalizeQuotaRetryDefaults(&cfg.LLM.QuotaRetry)
+
 	// Expand tilde paths in the loaded config
 	expandConfigPaths(cfg)
 
@@ -133,6 +138,11 @@ func LoadJSON5Config(path string) (*Config, error) {
 		// Error already includes path from LoadJSON5
 		return nil, err
 	}
+
+	// Clamp invalid quota_retry values to defaults (leaf 02 contract:
+	// negatives clamp, zeros take defaults). Applied at the load boundary
+	// so every consumer sees normalized values.
+	NormalizeQuotaRetryDefaults(&cfg.LLM.QuotaRetry)
 
 	expandConfigPaths(cfg)
 	warnDeprecatedConfig(cfg)

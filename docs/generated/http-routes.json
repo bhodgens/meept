@@ -2048,7 +2048,7 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1706
+    "line": 1734
   },
   {
     "method": "GET",
@@ -2209,21 +2209,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6207
+    "line": 6216
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6218
+    "line": 6227
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6199
+    "line": 6208
   },
   {
     "method": "GET",

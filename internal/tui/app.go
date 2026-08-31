@@ -1637,6 +1637,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			case "agent.quota_wait":
+				if a.agents == nil {
+					break // panel not constructed yet; never dereference nil
+				}
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
 					if agentID, ok := payloadMap["agent_id"].(string); ok {
 						var waitUntil *time.Time

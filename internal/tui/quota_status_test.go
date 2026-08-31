@@ -247,7 +247,54 @@ func TestQuotaStateMsgTransitions(t *testing.T) {
 	}
 }
 
-// TestQuotaStateMsg_TierEscalationRefresh verifies that to == "" events
+// TestQuotaCountdownTick verifies the live countdown refresh: the tick is
+// armed when an episode becomes active, re-renders the badge text on each
+// tick (countdown recomputed from the current time), and stops itself when
+// the last episode clears (leaf 08 Task 2: countdown updates on the tick).
+func TestQuotaCountdownTick(t *testing.T) {
+	p := NewAgentsPanel(nil)
+	p.agents = []AgentSummary{{ID: "agent-1", Status: "running"}}
+
+	// No episode -> quotaStateMsg arms nothing.
+	if cmd := p.Update(quotaStateMsg{agentID: "agent-1", to: "running"}); cmd != nil {
+		t.Fatalf("expected nil cmd with no episode, got non-nil")
+	}
+
+	// Entering quota_wait arms the tick.
+	unblock := time.Now().Add(45 * time.Minute)
+	if cmd := p.Update(quotaStateMsg{agentID: "agent-1", to: AgentStateQuotaWait, waitUntil: &unblock}); cmd == nil {
+		t.Fatal("expected tick cmd when episode becomes active, got nil")
+	}
+	p.countdownTick = true // simulate the armed tick's in-flight window
+
+	// The tick message re-renders and re-arms while the episode is live.
+	if cmd := p.Update(quotaCountdownTickMsg{}); cmd == nil {
+		t.Fatal("expected tick to re-arm while an episode is active")
+	}
+
+	// Clearing the episode stops the tick: the next tick message returns
+	// nil and drops the armed flag.
+	p.Update(quotaStateMsg{agentID: "agent-1", to: "running"})
+	if p.countdownTick {
+		t.Fatal("expected countdownTick reset after last episode cleared")
+	}
+	if cmd := p.Update(quotaCountdownTickMsg{}); cmd != nil {
+		t.Fatal("expected tick to stop after last episode cleared")
+	}
+
+	// Re-render recomputes the countdown text from the current time: build
+	// the badge directly and confirm the formatter output is live (the
+	// cached cell is rebuilt, not frozen at event time).
+	future := time.Now().Add(3*time.Hour + 12*time.Minute)
+	p.agents[0].QuotaWaitUntil = &future
+	p.updateAgentsTable()
+	cell := p.table.Rows()[0][1]
+	if !strings.Contains(stripANSI(cell), "quota resets in 3h 12m") {
+		t.Errorf("rebuilt cell = %q, want live countdown", cell)
+	}
+}
+
+// TestQuotaStateMsgTransitions verifies that to == "" events
 // (12h warn / 20h action_recommended tier firings, leaf 05 contract) refresh
 // the live episode instead of clearing it — parity with the Flutter provider
 // (agent_provider.dart handleQuotaEvent case '').

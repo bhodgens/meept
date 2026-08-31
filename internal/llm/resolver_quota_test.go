@@ -369,3 +369,51 @@ func TestConfigFromSchema_Roundtrip(t *testing.T) {
 }
 
 func ptrTo(q QuotaWaitConfig) *QuotaWaitConfig { return &q }
+
+// TestResolverQuota_StickyPinSkipsBlockedModel verifies that a sticky-pinned
+// caller is not served a quota-blocked model: the pin is released and the
+// caller re-pins to the unblocked candidate (same skip semantics as the
+// non-sticky rotation path).
+func TestResolverQuota_StickyPinSkipsBlockedModel(t *testing.T) {
+	r := newTestResolver(&QuotaWaitConfig{
+		Enabled:         true,
+		MaxWait:         24 * time.Hour,
+		DefaultEstimate: 1 * time.Hour,
+	})
+
+	// Enable sticky balancing on the coder alias so ResolveForAlias takes
+	// the resolveStickyCaller path.
+	r.mu.Lock()
+	r.aliases["coder"].BalancedStickyRequests = true
+	r.mu.Unlock()
+
+	// First resolve pins the caller to the rotation head (zai/glm-4.7).
+	first, err := r.ResolveForAlias("coder", "caller-1")
+	if err != nil {
+		t.Fatalf("initial resolve: %v", err)
+	}
+
+	// Quota-block the pinned model, then resolve again: the sticky path
+	// must NOT return the blocked model.
+	r.BlockQuotaEntry("coder", first.ProviderID, first.ModelID, time.Now().Add(30*time.Minute))
+
+	second, err := r.ResolveForAlias("coder", "caller-1")
+	if err != nil {
+		t.Fatalf("resolve after block: %v", err)
+	}
+	if second.ProviderID == first.ProviderID && second.ModelID == first.ModelID {
+		t.Errorf("sticky caller re-served quota-blocked model %s/%s", first.ProviderID, first.ModelID)
+	}
+
+	// With every candidate blocked, the resolve still serves a model (the
+	// sticky path cannot error) so the caller's request surfaces the
+	// provider's quota error.
+	r.BlockQuotaEntry("coder", second.ProviderID, second.ModelID, time.Now().Add(30*time.Minute))
+	third, err := r.ResolveForAlias("coder", "caller-1")
+	if err != nil {
+		t.Fatalf("resolve with all blocked: %v", err)
+	}
+	if third == nil {
+		t.Fatal("expected a model even when all candidates are blocked")
+	}
+}

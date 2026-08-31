@@ -2,121 +2,106 @@
 
 ## Meta
 
-- plan_id: plan-20260831224700-0039
+- plan_id: plan-20260831231950-0005
 - created: 2026-08-31
 - status: planning
 
 ## Summary
 
-Effectiveness is 0.00 with 5 negative ratings, indicating the skill produces poor or irrelevant responses for Go SQLite NULL scan errors. The content needs restructuring with clearer diagnostics, concrete fix patterns, and better edge-case coverage.
+Effectiveness is 0.00 with 5 negative and 0 positive outcomes across 7 injections — the current skill is actively harming performance and needs significant revision.
 
 Candidate content:
-# Go SQLite NULL Scan Error Resolution
+# go-sqlite-null-scan-error
 
-## Description
-Diagnose and fix SQLite `sql: Scan error on column index N` NULL-related errors in Go applications using `database/sql` with `modernc.org/sqlite` or `github.com/mattn/go-sqlite3`.
+Specialist skill for diagnosing and fixing Go SQLite scan errors involving NULL values.
 
-## When to Use
-- Application panics or returns errors like `sql: Scan error on column index N` during SQLite reads
-- `driver.Value` type mismatches when scanning NULL values into Go variables
-- Unexpected behavior when SQLite NULL columns don't map cleanly to Go types
+## When to use
 
-## Root Causes
+Invoke when code exhibits any of the following:
+- `sql: Scan error on column index N` during `rows.Scan()`
+- Panic from dereferencing a nil pointer after querying nullable SQLite columns
+- Type mismatch errors scanning into `string`, `int`, `bool` for columns that may contain NULL
+- Need to safely read optional fields from SQLite results
 
-1. **Scanning NULL into non-pointer type** — Go's `int`, `string`, `bool` cannot hold NULL; they must use `*int`, `*string`, `*bool`
-2. **Type mismatch** — scanning `TEXT` into `int`, or `FLOAT` into `string`
-3. **Missing NULL handling in `.Scan()` calls** — using `sql.NullString`, `sql.NullInt64`, etc.
-4. **Column index errors** — `Scan` argument order doesn't match query column order
+## Core Principles
 
-## Diagnostic Steps
+1. **SQLite NULL maps to Go pointers/Null types** — you cannot scan a NULL SQLite value directly into a non-pointer Go variable.
+2. **Always use `sql.Null*` structs** for columns that may be NULL, or scan into `*T` pointers.
+3. **Check `.Valid`** before accessing the underlying value of a `sql.Null*` struct.
 
-```bash
-# 1. Identify the failing query and column index from the error message
-grep -rn "Scan error on column index" . --include="*.go"
+## Common Patterns
 
-# 2. Find the source of the error
-grep -rn "\.Scan(" . --include="*.go" | head -20
+### Pattern 1: Using sql.NullString / sql.NullInt64
 
-# 3. Check the SQLite schema for the relevant table
-sqlite3 your_db.db ".schema your_table"
+```go
+import "database/sql"
+
+var name sql.NullString
+var age sql.NullInt64
+err := row.Scan(&name, &age)
+if err != nil {
+    return err
+}
+if name.Valid {
+    // use name.String
+} else {
+    // column was NULL
+}
 ```
 
-## Fix Patterns
+### Pattern 2: Scanning into pointers
 
-### Pattern 1: Use Pointer Types for Nullable Columns
 ```go
-// BEFORE (will panic on NULL):
-var name string
-err := row.Scan(&id, &name)
-
-// AFTER:
 var name *string
-err := row.Scan(&id, &name)
+var age *int
+err := row.Scan(&name, &age)
+if err != nil {
+    return err
+}
 if name != nil {
     // use *name
 }
 ```
 
-### Pattern 2: Use sql.Null* Types
+### Pattern 3: Helper for default values
+
 ```go
-import "database/sql"
-
-// BEFORE:
-var active bool
-err := row.Scan(&id, &active)
-
-// AFTER:
-var active sql.NullBool
-err := row.Scan(&id, &active)
-if active.Valid {
-    // use active.Bool
-}
-```
-
-### Pattern 3: Handle Type Mismatches with Casting
-```go
-// SQLite stores numbers as TEXT; cast explicitly:
-var val float64
-err := row.Scan(`CAST(my_col AS FLOAT)`)
-```
-
-### Pattern 4: Safe Scan Helper
-```go
-func scanPtr[T any](dest *T) interface{} {
-    return dest
-}
-
-// Or use a generic wrapper:
-type NullSafe struct {
-    Valid bool
-    Value interface{}
-}
-```
-
-### Pattern 5: Using `ColumnTypeScanType()` to Inspect
-```go
-cols, _ := row.Columns()
-for i, col := range cols {
-    if ct, err := row.ColumnTypeScanType(i); err == nil {
-        fmt.Printf("Column %d (%s): Go type = %v\n", i, col, ct)
+func nullString(s sql.NullString, def string) string {
+    if s.Valid {
+        return s.String
     }
+    return def
+}
+
+func nullInt64(i sql.NullInt64, def int64) int64 {
+    if i.Valid {
+        return i.Int64
+    }
+    return def
 }
 ```
 
-## Prevention Checklist
-- [ ] All nullable SQLite columns use `*Type` or `sql.Null*` in Scan
-- [ ] Column order in `Scan()` matches query SELECT order exactly
-- [ ] Use `COALESCE(col, default_value)` in queries when appropriate
-- [ ] Add unit tests with NULL-present rows for all scan paths
+## Anti-patterns to Avoid
 
-## Common Pitfalls
-- `go-sqlite3` vs `modernc.org/sqlite` have different NULL handling behavior — verify which driver you're using
-- `SCAN` into `[]byte` from `TEXT` column works, but `SCAN` into `string` from `NULL TEXT` fails
-- `defer row.Close()` is not needed for single-row scans but is required for `rows.Next()` loops
+- **Never** scan a nullable column directly into `string`, `int`, `bool` — this panics or errors on NULL.
+- **Never** assume `.String` or `.Int64` is safe without checking `.Valid` first.
+- **Avoid** custom `Scan` implementations unless you have a specific reason — standard library `Null*` types handle edge cases.
 
-## References
-- [Go database/sql docs](https://pkg.go.dev/database/sql)
-- [sql.Null* types docs](https://pkg.go.dev/database/sql#NullString)
+## Debugging Checklist
+
+1. Identify which column index is failing in the error message.
+2. Check the SQLite schema for that column — is it defined as NOT NULL?
+3. If nullable, verify the Go destination type is a pointer or `sql.Null*`.
+4. Verify `row.Scan()` arguments match column count and types exactly.
+5. For TEXT columns that may be NULL, use `sql.NullString` (not `*string` unless preferred).
+6. For INTEGER columns that may be NULL, use `sql.NullInt64`.
+7. For REAL/BLOB columns that may be NULL, use `sql.NullFloat64` / `sql.NullString`.
+
+## Tool Hints
+
+- Use `analyst` to inspect schema and trace error paths.
+- Use `coder` to refactor scan calls with correct Null types.
+- Use `debugger` for runtime panic investigation.
 
 
 ## Notes

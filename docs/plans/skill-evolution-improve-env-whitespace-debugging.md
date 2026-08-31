@@ -2,117 +2,92 @@
 
 ## Meta
 
-- plan_id: plan-20260831224633-0037
+- plan_id: plan-20260831231916-0003
 - created: 2026-08-31
 - status: planning
 
 ## Summary
 
-Zero effectiveness with 3 negative outcomes indicates the skill is misfireing. The current version is too narrow, only addressing whitespace in file content. It needs broader detection (trailing spaces, mixed indentation, invisible Unicode whitespace), proper root-cause classification, and clearer remediation guidance.
+Effectiveness is 0.0 with 3 negative and 0 positive outcomes. The skill likely lacks specific diagnostic steps and concrete remediation patterns for env whitespace issues, causing agents to apply incorrect or incomplete fixes.
 
 Candidate content:
 # env-whitespace-debugging
 
 ## Purpose
-Detect and clean invisible whitespace characters that cause hidden failures in configs, scripts, diffs, CI output, and serialized data.
+Diagnose and fix whitespace-related issues in environment files (.env, .env.local, .env.production, etc.) that cause runtime failures, parsing errors, or silent misconfiguration.
 
 ## When to Use
-- Lint/format tools pass but behavior is inconsistent across environments
-- Config parsers reject values that look correct
-- Git diffs show changes in apparently identical files
-- CI/CD failures occur only on specific runners
-- Diff tools report unchanged files as different
-- String comparisons fail for visually identical text
-- Encoded payloads (base64, JSON, YAML) contain subtle differences
+- Application fails to start with unclear env-related errors
+- Variables appear unset despite being defined
+- Parsing errors from dotenv/envy/config-loader libraries
+- Quoting issues in shell scripts or Dockerfiles referencing env vars
+- CI/CD pipeline failures around secret injection
 
 ## Detection Patterns
 
-### Check for trailing whitespace
-```bash
-# Find trailing spaces/tabs in text files
-grep -nP '[ \t]+$' <file>
-grep -rnP '[ \t]+$' --include='*.yaml' --include='*.yml' --include='*.json' --include='*.env' --include='*.sh' --include='*.py' .
-```
-
-### Check for mixed indentation
-```bash
-# Detect tabs vs spaces inconsistency
-find . -type f \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' \) -exec sh -c 'if grep -qP "\t" "$1"; then echo "$1: contains tabs"; fi' _ {} \;
-```
-
-### Check for non-printable/invisible Unicode whitespace
-```bash
-# BOM, zero-width spaces, thin spaces, etc.
-grep -Pn '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\uFEFF\u200B\u200C\u200D\u202F\u205F\u3000]' <file>
-# Or use cat -A / vi to reveal invisible chars
-```
-
-### Check line ending consistency
-```bash
-# Detect mixed CRLF/LF
-git diff --check
-git diff --stat | grep -i crlf
-# Or per-file:
-cat -vet <file> | grep -E '\^M|\$'
-```
-
-### Check encoded payload whitespace
-```bash
-# In base64/JSON/YAML, check if surrounding whitespace differs
-xxd <file> | head
-python3 -c "import json; json.loads(open('<file>').read())"  # Python is strict about trailing commas
-```
+### Common Whitespace Issues
+1. **Leading/trailing spaces** around values: `KEY= value ` → parsed as literal ` value `
+2. **Embedded spaces in unquoted values**: `DB_URL=postgres://host mydb` → broken connection string
+3. **Tabs mixed with spaces**: invisible characters causing parser failures
+4. **Missing quotes around values with special chars**: `SECRET=abc def!@#` → shell interpretation
+5. **BOM or zero-width characters**: especially from Windows editors
+6. **Trailing comments without separator**: `KEY=value #comment` (no space before #)
+7. **Empty lines consumed as values**: blank lines between assignments
 
 ## Remediation Steps
 
-1. **Identify the scope**: Determine which files, environment variables, or config values are affected.
-2. **Normalize line endings**:
-   ```bash
-   sed -i 's/\r$//' <file>   # Remove CR, keep LF
-   dos2unix <file>             # If dos2unix is available
-   ```
-3. **Remove trailing whitespace**:
-   ```bash
-   sed -i -E 's/[[:space:]]+$//' <file>    # POSIX sed
-   # Or with perl:
-   perl -pi -e 's/\s+$//' <file>
-   ```
-4. **Normalize indentation** (pick one style):
-   ```bash
-   # Convert tabs to spaces (4-space indent)
-   expand -t 4 <file> > tmp && mv tmp <file>
-   # Or spaces to tabs
-   unexpand -t 4 --first-only <file> > tmp && mv tmp <file>
-   ```
-5. **Strip invisible Unicode whitespace**:
-   ```bash
-   python3 -c "
-import sys
-with open('<file>', 'r', encoding='utf-8-sig') as f:
-    content = f.read()
-clean = content.replace('\u200b','').replace('\u200c','').replace('\u200d','').replace('\ufeff','').replace('\u202f','').replace('\u3000',' ')
-with open('<file>', 'w', encoding='utf-8') as f:
-    f.write(clean)
-"
-   ```
-6. **Re-run the failing check** to confirm resolution.
-
-## Common Pitfalls
-- **Editor auto-formatting**: Some editors insert zero-width spaces or alter line endings. Disable auto-format on save for sensitive files.
-- **Cross-platform transfers**: Files moved between Windows/Linux/macOS often accumulate mixed line endings. Always normalize after transfer.
-- **Environment variable strings**: Values passed via CI secrets or Docker ENV may contain leading/trailing spaces. Use `printf '%s' "$VAR"` to inspect.
-- **Base64 whitespace**: Some base64 decoders reject embedded newlines. Strip whitespace before decoding if needed: `tr -d ' \n' < encoded.txt`.
-- **Config parser tolerance**: Python's `json.load()` and `yaml.safe_load()` may silently accept extra whitespace while strict parsers reject it. Check which parser your toolchain uses.
-
-## Verification
-After remediation, run:
-```bash
-# Confirm no remaining issues
-grep -nP '[ \t]+$' <file>           # No trailing whitespace
-grep -P '[\uFEFF\u200B-\u200D]' <file>  # No invisible Unicode
-file <file>                          # Confirm encoding/line ending
-diff <(cat -vet <old>) <(cat -vet <new>)  # Compare with visible markers
+### Step 1: Inspect Raw File Contents
 ```
+# Reveal hidden whitespace
+xxd .env | head -50
+# or
+cat -A .env
+# or
+python3 -c "import sys; print(repr(open('.env').read()))"
+```
+
+### Step 2: Validate Key-Value Parsing
+```bash
+# Test dotenv parsing if available
+node -e "require('dotenv').config(); console.log(process.env)"
+# or
+python3 -c "import dotenv; print(dotenv.dotenv_values('.env'))"
+```
+
+### Step 3: Apply Fixes
+- Remove leading/trailing whitespace from values
+- Wrap values containing spaces or special characters in double quotes
+- Replace tabs with spaces (or remove entirely)
+- Strip BOM: `iconv -f UTF-8 -t UTF-8//IGNORE .env > .env.clean && mv .env.clean .env`
+- Add space before `#` for inline comments
+- Ensure each KEY=VALUE pair is on its own line
+
+### Step 4: Post-Fix Verification
+```
+# Re-run parsing validation
+# Compare against known-good values
+diff <(grep -v '^#' .env | sort) <(grep -v '^#' .env.good | sort)
+```
+
+## Output Format
+```json
+{
+  "issues_found": [
+    {"line": 3, "type": "trailing_space", "raw": "DB_HOST=localhost ", "fixed": "DB_HOST=localhost"}
+  ],
+  "files_modified": [".env"],
+  "verification": "pass|fail",
+  "residual_warnings": []
+}
+```
+
+## Prevention
+- Configure editor to strip trailing whitespace on save
+- Use `.editorconfig` with `trim_trailing_whitespace = true`
+- Add env file linting to CI: `shellcheck` for bash, `dotenv-linter` for .env files
+- Use quoted values consistently: `KEY="value with spaces"`
+- Never commit .env files with sensitive data; use templates (.env.example)
+
 
 ## Notes
 

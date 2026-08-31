@@ -2,53 +2,51 @@
 
 ## Meta
 
-- plan_id: plan-20260831224718-0040
+- plan_id: plan-20260831232014-0007
 - created: 2026-08-31
 - status: planning
 
 ## Summary
 
-Effectiveness is 0.29 (31 positive vs 64 negative out of 95 total). The skill likely lacks precision in determining when unquoted keys are valid HUJSON versus truly invalid, leading to excessive false-positive fixes that corrupt valid content. Need to add explicit validation gates, safety checks, and distinguish HUJSON permissive syntax from actual errors.
+Effectiveness is 0.29 (32 positive, 66 negative). The skill likely needs clearer detection criteria and more specific transformation rules for HUJSON unquoted key fixes.
 
 Candidate content:
-# HUJSON Unquoted Keys Fix
+---
+name: hujson-unquoted-keys-fix
+description: Detect and fix unquoted keys in HUJSON (Heredoc JSON) files by quoting them properly while preserving comments and formatting.
+---
 
-## Purpose
-Fix genuinely invalid JSON-like content by adding quotes around object keys where required, while preserving valid HUJSON syntax.
+## When to Use
+Use this skill when a HUJSON file contains unquoted object keys that violate JSON/HUJSON syntax rules. Common triggers include lint errors, parser failures, or explicit requests to fix HUJSON formatting.
 
-## When to Apply
-Apply ONLY when:
-1. The content is in standard JSON format (not HUJSON), OR
-2. The content is HUJSON but contains clearly broken syntax that would fail parsing
-3. The unquoted key appears in a position where JSON mandates quoting (object keys)
+## Key Rules
+1. **Identify unquoted keys**: Look for bare identifiers at the start of key positions in objects (e.g., `{ foo: "bar" }` — `foo` is unquoted).
+2. **Quote with double quotes**: Convert unquoted keys to properly quoted strings (e.g., `{ "foo": "bar" }`).
+3. **Preserve comments**: HUJSON supports line comments (`//`) and block comments (`/* */`). Never remove or alter comments.
+4. **Preserve formatting**: Maintain indentation, line breaks, and trailing commas (if present).
+5. **Do not quote string values**: Only quote keys, never modify the content of already-quoted values.
+6. **Root-level keys**: If the file is a single JSON object at the root, all top-level unquoted keys must be fixed.
 
-## Pre-Flight Checks (skip if any fail)
-- Verify the file/section is NOT already valid HUJSON. HUJSON permits unquoted keys by design — do NOT fix these.
-- Check if the content uses HUJSON-specific features (`#` comments, trailing commas, unquoted string values, unquoted keys). If yes, the file is intentionally HUJSON — do not modify.
-- Confirm the target is an object key position (preceded by `{` or `,` and followed by `:`).
+## Detection Pattern
+- Regex hint for unquoted keys: match word characters immediately after `{` or `,` followed by `:`
+- Example invalid: `{ name: "test", age: 30 }`
+- Example valid: `{ "name": "test", "age": 30 }`
 
-## Decision Flow
-1. Is the file/header declaring HUJSON format? → SKIP (unquoted keys are valid)
-2. Are there HUJSON-style comments (`//` or `#`)? → SKIP (this is HUJSON)
-3. Are there trailing commas? → SKIP (this is HUJSON)
-4. Is the unquoted value a bare string that would be invalid in strict JSON? → FIX
-5. Is the surrounding context clearly JSON (no HUJSON features)? → FIX only the broken keys
+## Transformation Steps
+1. Read the HUJSON file completely.
+2. Parse the structure to identify all object key positions.
+3. For each unquoted key, wrap it in double quotes.
+4. Verify all comments and whitespace are untouched.
+5. Write the corrected content back using `file_write` with `direct:true`.
 
-## Fix Rules
-- Wrap ONLY object keys that are unquoted in valid JSON context with double quotes
-- Do NOT modify string values, array elements, or comment content
-- Preserve all whitespace and formatting outside the fix
-- After fixing, validate the output parses as valid JSON
+## Edge Cases
+- Keys containing special characters (e.g., hyphens, spaces) **must** be quoted regardless — this skill only fixes *previously* unquoted ones.
+- Nested objects: recurse into all levels.
+- Arrays inside objects: only fix keys, do not touch array elements.
+- Empty objects `{}` or empty arrays `[]` require no changes.
 
-## Anti-Patterns (DO NOT Fix)
-- `key: value` in HUJSON files
-- Unquoted keys in files with `.hujson` extension
-- Any content containing `#` or `//` comments
-- Template/embedded contexts where quoting would break functionality
-- Already-quoted keys (no double-quoting)
-
-## Output Format
-Return only the corrected content. Do not include explanations or diffs unless explicitly requested.
+## Output
+Return the corrected HUJSON content. Do not add explanatory text unless asked.
 
 ## Notes
 
