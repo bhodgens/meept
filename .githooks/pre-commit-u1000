@@ -39,6 +39,11 @@ fi
 # Each directory is a Go package; we pass them to staticcheck.
 PACKAGES=""
 while IFS= read -r file; do
+  # Skip analyzer testdata fixtures: they intentionally contain
+  # unused/dead-shaped code as analyzer test inputs, not shipped code.
+  case "$file" in
+    */testdata/*) continue ;;
+  esac
   dir=$(dirname "$file")
   case "$PACKAGES" in
     *"$dir"*) ;;  # already seen

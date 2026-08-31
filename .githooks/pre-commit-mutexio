@@ -48,6 +48,11 @@ while IFS= read -r f; do
         esac
     done
     [ "$skip" -eq 1 ] && continue
+    # Skip analyzer testdata fixtures: they intentionally contain
+    # violation-shaped code as analyzer test inputs, not shipped code.
+    case "$f" in
+        */testdata/*) continue ;;
+    esac
     if [ -z "$filtered_files" ]; then
         filtered_files="$f"
     else

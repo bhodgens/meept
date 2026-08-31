@@ -356,6 +356,14 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
   }
 
   Widget _buildGoalsPane(Agent agent) {
+    // Quota episode for the selected agent (parity with the TUI detail
+    // view): when a fallback model is carrying work, show the
+    // primary/active model lines under the agent name.
+    final quotaState = ref.watch(agentProvider).quotaEpisodes[agent.id];
+    final quotaLines = quotaState == null
+        ? const <String>[]
+        : quotaDetailLines(quotaState.fallbackModel != null ? agent.id : null,
+            quotaState.fallbackModel, quotaState.quotaWaitUntilEpoch);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -372,6 +380,21 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             color: CyberpunkColors.midGray,
           ),
         ),
+        if (quotaLines.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          for (final line in quotaLines)
+            Text(
+              line,
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: quotaState.quotaBlocked
+                    ? CyberpunkColors.redAlert
+                    : CyberpunkColors.yellowWarning,
+                fontFamily: 'SourceCodePro',
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
         const SizedBox(height: 12),
         if (_goalsLoading)
           const Expanded(child: Center(child: CircularProgressIndicator()))

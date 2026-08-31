@@ -284,8 +284,10 @@ func TestQuotaCountdownTick(t *testing.T) {
 
 	// Re-render recomputes the countdown text from the current time: build
 	// the badge directly and confirm the formatter output is live (the
-	// cached cell is rebuilt, not frozen at event time).
-	future := time.Now().Add(3*time.Hour + 12*time.Minute)
+	// cached cell is rebuilt, not frozen at event time). The +30s buffer
+	// absorbs sub-minute wall-clock drift between constructing the time
+	// and rendering.
+	future := time.Now().Add(3*time.Hour + 12*time.Minute + 30*time.Second)
 	p.agents[0].QuotaWaitUntil = &future
 	p.updateAgentsTable()
 	cell := p.table.Rows()[0][1]
@@ -297,7 +299,7 @@ func TestQuotaCountdownTick(t *testing.T) {
 // TestQuotaStateMsgTransitions verifies that to == "" events
 // (12h warn / 20h action_recommended tier firings, leaf 05 contract) refresh
 // the live episode instead of clearing it — parity with the Flutter provider
-// (agent_provider.dart handleQuotaEvent case '').
+// (agent_provider.dart handleQuotaEvent case ”).
 func TestQuotaStateMsg_TierEscalationRefresh(t *testing.T) {
 	p := NewAgentsPanel(nil)
 	unblock := time.Now().Add(3 * time.Hour)
