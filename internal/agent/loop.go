@@ -2052,11 +2052,16 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			}
 		}
 
-		// Session end hooks (metrics, audit, cleanup)
+		// Session end hooks (metrics, audit, cleanup). AssistantMessage
+		// reads the named return: defers run after return values are set,
+		// so `response` holds the turn's final text here (finalResponse is
+		// declared below this point and out of the defer's scope).
 		sessionEndResult := SessionLifecycleResult{
-			Success: err == nil,
-			Error:   err,
-			EndTime: time.Now(),
+			Success:          err == nil,
+			Error:            err,
+			EndTime:          time.Now(),
+			UserMessage:      userMessage,
+			AssistantMessage: response,
 		}
 		if l.hookRegistry != nil {
 			l.hookRegistry.RunSessionEnd(ctx, sessionStartState, sessionEndResult)
@@ -4104,6 +4109,9 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	}
 
 	attempt := 0
+	// servedModel tracks the model the current attempt is served by, for
+	// accurate failure attribution in RecordAliasFailure (issue #30).
+	var servedModel *llm.ModelConfig
 
 	for {
 		attempt++
@@ -4139,6 +4147,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				}
 				return nil, err
 			}
+			servedModel = modelConfig
 			if l.llmClient != nil {
 				l.modelMu.Lock()
 				if err := l.llmClient.SwitchModel(modelConfig); err != nil {
@@ -4234,7 +4243,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 
 			// Record failure for this alias
 			if l.modelRef != "" && l.resolver != nil {
-				l.resolver.RecordAliasFailure(l.modelRef, err)
+				l.resolver.RecordAliasFailure(l.modelRef, err, servedModel)
 			}
 
 			// Check if we can rotate to another model
@@ -4296,7 +4305,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 
 		// Non-rate-limit error - return immediately
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-			l.resolver.RecordAliasFailure(l.modelRef, err)
+			l.resolver.RecordAliasFailure(l.modelRef, err, servedModel)
 		}
 		return nil, err
 	}

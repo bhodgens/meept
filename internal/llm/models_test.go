@@ -55,28 +55,31 @@ func TestChatMessage_IsToolError(t *testing.T) {
 	})
 }
 
-// TestAliasHealth_StickyPins verifies the StickyPins map accepts pins and
-// that releasePinsForIndex drops exactly the pins on the given index.
-func TestAliasHealth_StickyPins(t *testing.T) {
-	health := &AliasHealth{
-		CurrentIndex: 0,
-		StickyPins:   make(map[string]int),
+// TestAliasHealth_ReleasePinsForModel verifies releasePinsForModel drops
+// exactly the pins whose model matches the given identity, and drops stale
+// out-of-range pins.
+func TestAliasHealth_ReleasePinsForModel(t *testing.T) {
+	cfg := createTestConfig()
+	alias := &AliasEntry{
+		Models: []*ModelConfig{
+			ResolveModelRef("zai/glm-4.7", cfg),
+			ResolveModelRef("ollama/llama3.2", cfg),
+		},
 	}
-	health.StickyPins["session-abc"] = 1
-	health.StickyPins["session-other"] = 2
-	assert.Equal(t, 1, health.StickyPins["session-abc"])
+	health := &AliasHealth{
+		StickyPins: map[string]int{
+			"session-on-glm":   0,
+			"session-on-llama": 1,
+			"session-stale":    7, // beyond the list
+		},
+	}
 
-	health.releasePinsForIndex(1)
-	assert.NotContains(t, health.StickyPins, "session-abc")
-	assert.Contains(t, health.StickyPins, "session-other")
-}
+	health.releasePinsForModel(alias, "zai", "glm-4.7")
+	assert.NotContains(t, health.StickyPins, "session-on-glm")
+	assert.Contains(t, health.StickyPins, "session-on-llama")
+	assert.NotContains(t, health.StickyPins, "session-stale", "stale pins are dropped")
 
-// TestAliasHealth_StickyPinsNilByDefault verifies StickyPins is nil until a
-// sticky resolve creates it.
-func TestAliasHealth_StickyPinsNilByDefault(t *testing.T) {
-	health := &AliasHealth{CurrentIndex: 0}
-	assert.Nil(t, health.StickyPins)
-	// Release on a nil map must be a no-op, not a panic.
-	health.releasePinsForIndex(0)
-	assert.Nil(t, health.StickyPins)
+	// Empty identity is a no-op.
+	health.releasePinsForModel(alias, "", "")
+	assert.Contains(t, health.StickyPins, "session-on-llama")
 }

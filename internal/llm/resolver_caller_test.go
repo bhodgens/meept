@@ -106,7 +106,8 @@ func TestResolveForAlias_StickyPinReleasedOnFailure(t *testing.T) {
 	assert.Equal(t, "glm-4.5-air", mc3.ModelID, "session-3 should hold the third model")
 
 	// The model session-3 was served fails: its pin is released, others stay.
-	resolver.RecordAliasFailure("sticky", nil)
+	// The caller passes the actually-served model for accurate attribution.
+	resolver.RecordAliasFailure("sticky", nil, mc3)
 	health := resolver.health["sticky"]
 	assert.NotContains(t, health.StickyPins, "session-3")
 	assert.Contains(t, health.StickyPins, "session-1")
@@ -121,6 +122,76 @@ func TestResolveForAlias_StickyPinReleasedOnFailure(t *testing.T) {
 	m3, err := resolver.ResolveForAlias("sticky", "session-3")
 	assert.NoError(t, err)
 	assert.NotEqual(t, "glm-4.5-air", m3.ModelID, "must not re-pin to the failed model")
+}
+
+// TestResolveForAlias_StickyFailureAttributionUnderInterleaving is the
+// regression test for issue #30: a resolve for a DIFFERENT model between the
+// failure and its RecordAliasFailure must not change which pins are
+// released. Identity-based attribution (provider/model) is immune to the
+// interleaving that broke index-based LastServedIndex tracking.
+func TestResolveForAlias_StickyFailureAttributionUnderInterleaving(t *testing.T) {
+	resolver := newStickyTestResolver(t, nil)
+
+	// Three callers pin all three models (0, 1, 2).
+	_, err := resolver.ResolveForAlias("sticky", "session-1")
+	assert.NoError(t, err)
+	mc2, err := resolver.ResolveForAlias("sticky", "session-2")
+	assert.NoError(t, err)
+	mc3, err := resolver.ResolveForAlias("sticky", "session-3")
+	assert.NoError(t, err)
+
+	// Interleave: resolve a DIFFERENT caller AFTER session-3's request has
+	// already failed out in the wild but BEFORE its RecordAliasFailure call.
+	// The old per-alias LastServedIndex would flip attribution to whichever
+	// model this resolve served; identity-based attribution must not.
+	mcLate, err := resolver.ResolveForAlias("sticky", "session-late")
+	assert.NoError(t, err)
+
+	// session-3's model failed; attribution says so regardless of the late
+	// resolve above.
+	resolver.RecordAliasFailure("sticky", nil, mc3)
+	health := resolver.health["sticky"]
+	assert.Equal(t, mc3.ProviderID, health.FailedProviderID)
+	assert.Equal(t, mc3.ModelID, health.FailedModelID)
+
+	// session-3's pin is gone...
+	assert.NotContains(t, health.StickyPins, "session-3")
+	// ...sessions on OTHER models keep theirs, including the late caller.
+	assert.Contains(t, health.StickyPins, "session-1")
+	assert.Contains(t, health.StickyPins, "session-2")
+	if mcLate.ModelID != mc2.ModelID {
+		assert.Contains(t, health.StickyPins, "session-late")
+	}
+
+	// A failure attributed to session-2's model (llama3.2) releases ITS pins.
+	// session-3 re-pinned onto llama3.2 in the resolve above (sharing a model
+	// is fine), so its pin is correctly released too; session-1 (glm-4.7)
+	// survives.
+	m3, err := resolver.ResolveForAlias("sticky", "session-3")
+	assert.NoError(t, err)
+	assert.Equal(t, "llama3.2", m3.ModelID, "session-3 re-pins to the rotation position")
+	resolver.RecordAliasFailure("sticky", nil, mc2)
+	health = resolver.health["sticky"]
+	assert.NotContains(t, health.StickyPins, "session-2")
+	assert.NotContains(t, health.StickyPins, "session-3", "its new model failed under it")
+	assert.Contains(t, health.StickyPins, "session-1")
+}
+
+// TestRecordAliasFailure_NilModelAttribution verifies nil failedModel is
+// accepted (attribution skipped, cooldown still armed) and unknown models
+// release no pins.
+func TestRecordAliasFailure_NilModelAttribution(t *testing.T) {
+	resolver := newStickyTestResolver(t, nil)
+
+	_, err := resolver.ResolveForAlias("sticky", "session-1")
+	assert.NoError(t, err)
+
+	resolver.RecordAliasFailure("sticky", nil, nil)
+	health := resolver.health["sticky"]
+	assert.Empty(t, health.FailedProviderID)
+	assert.Empty(t, health.FailedModelID)
+	assert.Contains(t, health.StickyPins, "session-1", "no attribution = no pins released")
+	assert.False(t, health.CooldownUntil.IsZero(), "cooldown still armed")
 }
 
 // TestResolveForAlias_StickyReasonsLogged verifies the routing logger
@@ -193,7 +264,7 @@ func TestResolveForAlias_DefaultModelReversion(t *testing.T) {
 	assert.Equal(t, "glm-4.5-air", mc.ModelID)
 
 	// Failure arms the cooldown and the reversion deadline.
-	resolver.RecordAliasFailure("with-default", nil)
+	resolver.RecordAliasFailure("with-default", nil, nil)
 	health := resolver.health["with-default"]
 	assert.False(t, health.RevertAt.IsZero(), "RecordAliasFailure must arm RevertAt when default_model is set")
 
@@ -227,7 +298,7 @@ func TestResolveForAlias_DefaultModelReversion_WaitsForCooldown(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "glm-4.5-air", mc.ModelID)
 
-	resolver.RecordAliasFailure("with-default", nil)
+	resolver.RecordAliasFailure("with-default", nil, nil)
 	assert.False(t, resolver.health["with-default"].RevertAt.IsZero())
 
 	// Deadline not yet reached: rotation advances but does not revert.

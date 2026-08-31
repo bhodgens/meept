@@ -44,6 +44,11 @@ type IntentAnalyzer struct {
 	// reconfigures the client, and retries once.
 	resolver  *llm.Resolver // nil = no failover (legacy behavior)
 	aliasName string        // e.g. "classifier"; required when resolver != nil
+
+	// modelConfig is the resolved model configuration for the analyzer's
+	// endpoint; passed to RecordAliasFailure for failure attribution
+	// (issue #30). Nil is allowed — attribution is skipped.
+	modelConfig *llm.ModelConfig
 }
 
 // NewIntentAnalyzer creates a new IntentAnalyzer with the given LLM client and logger.
@@ -87,6 +92,7 @@ func newIntentAnalyzerWithConfig(cfg IntentAnalyzerConfig, client *llm.Client, l
 		tokenCap:           effectiveClassificationCap(cfg.ModelConfig),
 		resolver:           cfg.Resolver,
 		aliasName:          cfg.AliasName,
+		modelConfig:        cfg.ModelConfig,
 	}
 }
 
@@ -168,8 +174,9 @@ func (ia *IntentAnalyzer) chatWithFailover(ctx context.Context, messages []llm.C
 	}
 
 	// Fail over: record the failure, advance to the next candidate, swap the
-	// client config, and retry once.
-	ia.resolver.RecordAliasFailure(ia.aliasName, err)
+	// client config, and retry once. ModelConfig identifies the model the
+	// failed attempt was served by (nil when unresolvable — see issue #30).
+	ia.resolver.RecordAliasFailure(ia.aliasName, err, ia.modelConfig)
 	nextCfg, rerr := ia.resolver.ResolveForAlias(ia.aliasName, "")
 	if rerr != nil || nextCfg == nil {
 		return nil, fmt.Errorf("intent analysis: %w (no alternate candidate: %v)", err, rerr)

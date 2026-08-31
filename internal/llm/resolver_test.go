@@ -191,7 +191,7 @@ func TestResolver_HasHealthyModels(t *testing.T) {
 	}
 
 	// After failure (current in cooldown), other models still available
-	resolver.RecordAliasFailure("coder", nil)
+	resolver.RecordAliasFailure("coder", nil, nil)
 	if !resolver.HasHealthyModels("coder") {
 		t.Error("expected other models available even if current is cooling down")
 	}
@@ -216,7 +216,7 @@ func TestResolver_RecordAliasFailure_Success(t *testing.T) {
 	resolver := NewResolver(cfg, logger)
 
 	// Record a failure
-	resolver.RecordAliasFailure("coder", nil)
+	resolver.RecordAliasFailure("coder", nil, nil)
 
 	// Check health state
 	health := resolver.health["coder"]
@@ -242,9 +242,9 @@ func TestResolver_RecordAliasSuccess_ResetsFailures(t *testing.T) {
 	resolver := NewResolver(cfg, logger)
 
 	// Record some failures
-	resolver.RecordAliasFailure("coder", nil)
-	resolver.RecordAliasFailure("coder", nil)
-	resolver.RecordAliasFailure("coder", nil)
+	resolver.RecordAliasFailure("coder", nil, nil)
+	resolver.RecordAliasFailure("coder", nil, nil)
+	resolver.RecordAliasFailure("coder", nil, nil)
 
 	// Verify failures were recorded
 	health := resolver.health["coder"]
@@ -278,7 +278,7 @@ func TestResolver_Rotation(t *testing.T) {
 
 	// Simulate failures to trigger cooldown
 	for range 3 {
-		resolver.RecordAliasFailure("coder", nil)
+		resolver.RecordAliasFailure("coder", nil, nil)
 	}
 
 	// Next resolution should trigger rotation
@@ -312,12 +312,12 @@ func TestResolver_ExponentialBackoff(t *testing.T) {
 	resolver := NewResolver(cfg, logger)
 
 	// Record first failure
-	resolver.RecordAliasFailure("coder", nil)
+	resolver.RecordAliasFailure("coder", nil, nil)
 	health1 := resolver.health["coder"]
 	cooldown1 := time.Until(health1.CooldownUntil)
 
 	// Record second failure
-	resolver.RecordAliasFailure("coder", nil)
+	resolver.RecordAliasFailure("coder", nil, nil)
 	health2 := resolver.health["coder"]
 	cooldown2 := time.Until(health2.CooldownUntil)
 

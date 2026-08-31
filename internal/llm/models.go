@@ -327,9 +327,13 @@ type AliasEntry struct {
 	BalancedStickyRequests bool           // Optional: pin callers to single model
 }
 
-// AliasHealth tracks the health and rotation state of an alias. All fields
-// are guarded by Resolver.mu; methods on this type must be called with that
-// lock held.
+// AliasHealth tracks the health and rotation state of an alias.
+//
+// Locking convention (issue #29): Resolver.mu is the SINGLE lock guarding
+// every field of this struct. Do NOT add a second mutex here — new fields
+// join the Resolver.mu regime, and helper methods on this type must be
+// documented "callers must hold Resolver.mu" and only be called with it
+// held.
 type AliasHealth struct {
 	CurrentIndex     int
 	ConsecutiveFails int
@@ -340,14 +344,12 @@ type AliasHealth struct {
 	// to AliasEntry.DefaultModel after this deadline (armed by
 	// RecordAliasFailure when default_model is configured).
 	RevertAt time.Time
-	// FailedIndex is the rotation index of the most recently served model at
-	// the time of the last failure (-1 = none). Sticky pins on it are
-	// released so callers re-pin off the failed model.
-	FailedIndex int
-	// LastServedIndex is the rotation index handed out by the most recent
-	// ResolveForAlias call; RecordAliasFailure uses it to attribute the
-	// failure to the model that was actually serving.
-	LastServedIndex int
+	// FailedProviderID/FailedModelID identify the model that most recently
+	// failed (empty = no known failure). Sticky pins are matched against
+	// this IDENTITY — not a rotation index — so interleaved resolves for
+	// other models cannot misattribute the failure (issue #30).
+	FailedProviderID string
+	FailedModelID    string
 }
 
 // ToolDefinition defines a tool/function for the LLM.

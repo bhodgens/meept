@@ -299,8 +299,9 @@ func (c *LLMClassifier) chatWithFailover(ctx context.Context, messages []llm.Cha
 	}
 
 	// Fail over: record the failure, advance to the next candidate, swap the
-	// client config, and retry once.
-	c.resolver.RecordAliasFailure(c.aliasName, err)
+	// client config, and retry once. ModelConfig identifies the model the
+	// failed attempt was served by (nil when unresolvable — see issue #30).
+	c.resolver.RecordAliasFailure(c.aliasName, err, c.modelConfig)
 	nextCfg, rerr := c.resolver.ResolveForAlias(c.aliasName, "")
 	if rerr != nil || nextCfg == nil {
 		return nil, fmt.Errorf("llm classification: %w (no alternate candidate: %v)", err, rerr)
