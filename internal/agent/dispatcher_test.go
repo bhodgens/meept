@@ -1088,3 +1088,33 @@ func TestCreateTask_AssignedAgent_Empty(t *testing.T) {
 		t.Errorf("AssignedAgent = %q, want empty", got.AssignedAgent)
 	}
 }
+
+// TestHeuristicFallback_FileWriteKeywords verifies that prompts mentioning
+// creating or writing files are routed to the coder agent via heuristic fallback.
+func TestHeuristicFallback_FileWriteKeywords(t *testing.T) {
+	cases := []struct {
+		name string
+		input string
+	}{
+		{"create a file", "Create a file named answer.txt containing the text"},
+		{"create the file", "Create the file at /tmp/output.txt with this content"},
+		{"write a file", "Write a file named results.csv with the data"},
+		{"write the file", "Write the file to disk with the provided content"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			intent := heuristicFallback(tc.input)
+			if intent == nil {
+				t.Fatalf("heuristicFallback(%q) returned nil", tc.input)
+			}
+			if intent.AgentType != config.AgentIDCoder {
+				t.Errorf("heuristicFallback(%q) agent = %q, want %q",
+					tc.input, intent.AgentType, config.AgentIDCoder)
+			}
+			if intent.Type != string(IntentCode) {
+				t.Errorf("heuristicFallback(%q) type = %q, want %q",
+					tc.input, intent.Type, string(IntentCode))
+			}
+		})
+	}
+}

@@ -38,6 +38,8 @@ func TestSelectAgent(t *testing.T) {
 		{"chat", "chat"},
 		{"", "chat"},
 		{"unknown", "chat"},
+		// Regression: tool_hint=coder should route to coder, not chat.
+		{"coder", "coder"},
 	}
 
 	for _, tt := range tests {
