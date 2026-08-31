@@ -2146,7 +2146,7 @@ var keywordPatterns = []keywordPattern{
 
 	// Code-related
 	{[]string{KeywordFix + " bug", string(IntentDebug), "error", "exception", "crash", "not working"}, string(IntentDebug), config.AgentIDDebugger, 0.8, false},
-	{[]string{"write code", "implement", "create function", "add feature", KeywordRefactor, "create a file", "create the file"}, string(IntentCode), config.AgentIDCoder, 0.8, false},
+	{[]string{"write code", "implement", "create function", "add feature", KeywordRefactor, "create a file", "create the file", "write a file", "write the file"}, string(IntentCode), config.AgentIDCoder, 0.8, false},
 	{[]string{"code review", "review pr", "check code"}, string(IntentReview), config.AgentIDCoder, 0.75, false},
 
 	// Git operations
