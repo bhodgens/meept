@@ -120,13 +120,13 @@ func (s *CompressionStats) Snapshot() CompressionStatsSnapshot {
 // ContextCompressor implements multi-stage context compression based on
 // utilization thresholds. It is safe for concurrent use.
 type ContextCompressor struct {
-	config     CompressionConfig
-	stats      CompressionStats
-	summarizer Chatter           // Optional: when set, enables LLM-based summarization at stage 2
+	config      CompressionConfig
+	stats       CompressionStats
+	summarizer  Chatter // Optional: when set, enables LLM-based summarization at stage 2
 	compactorMu sync.RWMutex
-	compactor  *ContextCompactor // Optional: preferred over summarizer when set; protected by compactorMu
-	logger     *slog.Logger
-	tokenizer  Tokenizer
+	compactor   *ContextCompactor // Optional: preferred over summarizer when set; protected by compactorMu
+	logger      *slog.Logger
+	tokenizer   Tokenizer
 }
 
 // NewContextCompressor creates a new compressor with the given configuration.

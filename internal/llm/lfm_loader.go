@@ -37,7 +37,7 @@ type LoadedAdapter struct {
 
 // LFMLoader manages LFM2.5 model + adapter loading.
 type LFMLoader struct {
-	BaseModel string                    // "lfm2.5-8b" or "lfm2.5-1.2b"
+	BaseModel string // "lfm2.5-8b" or "lfm2.5-1.2b"
 	ModelPath string
 	Adapters  map[string]*LoadedAdapter // domain -> best adapter
 	Fallback  *LoadedAdapter            // "general" domain or first ready adapter

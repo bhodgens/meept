@@ -26,8 +26,8 @@ type ContentPart struct {
 // treats the ref as still needing analysis. It is cleared on a successful
 // analysis or before a retry begins.
 type ImageRef struct {
-	URL            string `json:"url"`                     // "file://<sha256>.<ext>" or "data:..."
-	Description    string `json:"description,omitempty"`   // Cached vision description
+	URL            string `json:"url"`                       // "file://<sha256>.<ext>" or "data:..."
+	Description    string `json:"description,omitempty"`     // Cached vision description
 	AnalysisFailed bool   `json:"analysis_failed,omitempty"` // True if last vision pre-flight attempt failed (retryable)
 	MIMEType       string `json:"mime_type,omitempty"`
 	Width          int    `json:"width,omitempty"`

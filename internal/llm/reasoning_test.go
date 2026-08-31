@@ -75,10 +75,10 @@ func TestReasoningConfig_Validate(t *testing.T) {
 
 func TestAgentReasoningConfig_ClampEffort(t *testing.T) {
 	tests := []struct {
-		name     string
-		agent    *AgentReasoningConfig
-		effort   string
-		want     string
+		name   string
+		agent  *AgentReasoningConfig
+		effort string
+		want   string
 	}{
 		{"nil agent", nil, "high", "high"},
 		{"no bounds", &AgentReasoningConfig{}, "high", "high"},

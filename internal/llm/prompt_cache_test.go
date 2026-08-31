@@ -9,10 +9,10 @@ import (
 
 func TestClassifyPromptSections(t *testing.T) {
 	tests := []struct {
-		name           string
-		sections       []string
-		wantStatic     []string
-		wantDynamic    []string
+		name        string
+		sections    []string
+		wantStatic  []string
+		wantDynamic []string
 	}{
 		{
 			name:        "static before boundary, dynamic after",

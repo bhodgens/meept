@@ -291,9 +291,9 @@ func OpenProcessLogger(host, port string) (*ProcessLogger, error) {
 	path := filepath.Join(dir, fmt.Sprintf("%s-%s.process.log", host, port))
 	sharedMu := &sync.Mutex{}
 	var (
-		filePtr    **os.File
-		written    int64
-		atLineEnd  bool = true
+		filePtr   **os.File
+		written   int64
+		atLineEnd bool = true
 	)
 	writtenPtr := &written
 	atLineEndPtr := &atLineEnd
