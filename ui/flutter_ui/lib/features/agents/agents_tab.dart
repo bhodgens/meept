@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
 import '../../core/constants.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -9,6 +10,8 @@ import '../../providers/providers.dart';
 import '../../providers/tab_activation_provider.dart'
     show keyboardFocusProvider;
 import '../../models/api_models.dart';
+import '../../providers/agent_provider.dart';
+import '../../utils/format_duration.dart';
 import 'eval_runs_panel.dart';
 import 'facts_panel.dart';
 
@@ -37,19 +40,50 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
   bool _goalsLoading = false;
   String? _goalsError;
   String? _goalsForId;
+  Timer? _quotaTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(agentProvider.notifier).loadAgents();
+      _initQuotaListener();
     });
+    _startQuotaTimer();
   }
 
   @override
   void dispose() {
     _gridFocusNode.dispose();
+    _quotaTimer?.cancel();
+    _quotaTimer = null;
     super.dispose();
+  }
+
+  void _startQuotaTimer() {
+    _quotaTimer?.cancel();
+    _quotaTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      // Only rebuild if there are active quota episodes.
+      final episodes = ref.read(agentProvider).quotaEpisodes;
+      if (episodes.isNotEmpty && mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  void _initQuotaListener() {
+    final ws = ref.read(websocketProvider);
+    ws.messageStream.where((m) {
+      final type = m['type'] as String?;
+      return type == 'agent_progress' && m['to'] != null;
+    }).listen((msg) {
+      final quota = AgentQuotaPayload.fromJson(msg);
+      ref.read(agentProvider.notifier).handleQuotaEvent(
+        agentId: quota.agentId,
+        to: quota.to,
+        unblockAt: quota.unblockAt,
+      );
+    });
   }
 
   /// Handle keyboard navigation for the agents grid.
@@ -152,89 +186,91 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
 
   Widget _buildAgentColumn(AgentState agentState) {
     return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Row(
-              children: [
-                Text(
-                  'agents',
-                  style: CyberpunkTypography.headlineMedium.copyWith(
-                    color: CyberpunkColors.orangePrimary,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  tooltip: 'refresh employees',
-                  icon: const Icon(Icons.refresh, size: 18),
-                  color: CyberpunkColors.orangePrimary,
-                  onPressed: () {
-                    ref.read(agentProvider.notifier).loadAgents();
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (agentState.isLoading)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
-            else if (agentState.error != null)
-              Expanded(
-                child: Center(
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        width: 280,
-                        child: _AgentErrorBanner(message: agentState.error!),
-                      ),
-                      const SizedBox(height: 12),
-                      FilledButton.tonal(
-                        onPressed: () =>
-                            ref.read(agentProvider.notifier).loadAgents(),
-                        child: const Text(
-                          'retry',
-                          style: CyberpunkTypography.bodySmall,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else if (agentState.agents.isEmpty)
-              const Expanded(child: Center(child: Text('no agents available')))
-            else
-              Expanded(
-                child: Focus(
-                  onFocusChange: (hasFocus) {
-                    if (hasFocus) {
-                      ref
-                          .read(keyboardFocusProvider.notifier)
-                          .setFocusedPane(0);
-                    }
-                  },
-                  onKeyEvent: _handleKey,
-                  child: GridView.builder(
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 225,
-                          crossAxisSpacing: 8,
-                          mainAxisSpacing: 8,
-                          childAspectRatio: 0.87,
-                        ),
-                    itemCount: agentState.agents.length,
-                    itemBuilder: (context, index) {
-                      final agent = agentState.agents[index];
-                      final selected = ref.watch(activeAgentProvider);
-                      final isSelected = selected?.id == agent.id;
-                      final isKeyboardSelected = _selectedIndex == index;
-                      return _buildAgentCard(
-                        agent,
-                        isSelected,
-                        isKeyboardSelected,
-                      );
-                    },
-                  ),
-                ),
+            Text(
+              'agents',
+              style: CyberpunkTypography.headlineMedium.copyWith(
+                color: CyberpunkColors.orangePrimary,
               ),
+            ),
+            const Spacer(),
+            IconButton(
+              tooltip: 'refresh employees',
+              icon: const Icon(Icons.refresh, size: 18),
+              color: CyberpunkColors.orangePrimary,
+              onPressed: () {
+                ref.read(agentProvider.notifier).loadAgents();
+              },
+            ),
           ],
+        ),
+        const SizedBox(height: 16),
+        if (agentState.isLoading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else if (agentState.error != null)
+          Expanded(
+            child: Center(
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: 280,
+                    child: _AgentErrorBanner(message: agentState.error!),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: () =>
+                        ref.read(agentProvider.notifier).loadAgents(),
+                    child: const Text(
+                      'retry',
+                      style: CyberpunkTypography.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else if (agentState.agents.isEmpty)
+          const Expanded(child: Center(child: Text('no agents available')))
+        else
+          Expanded(
+            child: Focus(
+              onFocusChange: (hasFocus) {
+                if (hasFocus) {
+                  ref
+                      .read(keyboardFocusProvider.notifier)
+                      .setFocusedPane(0);
+                }
+              },
+              onKeyEvent: _handleKey,
+              child: GridView.builder(
+                gridDelegate:
+                    const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 225,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                      childAspectRatio: 0.87,
+                    ),
+                itemCount: agentState.agents.length,
+                itemBuilder: (context, index) {
+                  final agent = agentState.agents[index];
+                  final selected = ref.watch(activeAgentProvider);
+                  final isSelected = selected?.id == agent.id;
+                  final isKeyboardSelected = _selectedIndex == index;
+                  final quotaState = agentState.quotaEpisodes[agent.id];
+                  return _buildAgentCard(
+                    agent,
+                    isSelected,
+                    isKeyboardSelected,
+                    quotaState,
+                  );
+                },
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -242,6 +278,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     Agent agent,
     bool isSelected,
     bool isKeyboardSelected,
+    AgentQuotaState? quotaState,
   ) {
     return InkWell(
       key: ValueKey('agent-tile-${agent.id}'),
@@ -255,41 +292,50 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
           color: isKeyboardSelected
               ? CyberpunkColors.orangeDark.withValues(alpha: 0.3)
               : (isSelected
-                    ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
-                    : CyberpunkColors.black),
+                  ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
+                  : CyberpunkColors.black),
           border: Border.all(
             color: isKeyboardSelected
                 ? CyberpunkColors.orangeDark
                 : (isSelected
-                      ? CyberpunkColors.orangePrimary
-                      : CyberpunkColors.midGray),
+                    ? CyberpunkColors.orangePrimary
+                    : CyberpunkColors.midGray),
             width: isKeyboardSelected ? 3 : 1,
           ),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              getAgentIcon(agent.id),
-              color: isSelected
-                  ? CyberpunkColors.orangePrimary
-                  : CyberpunkColors.greenSuccess,
-              size: 20,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                agent.name.toLowerCase(),
-                style: CyberpunkTypography.bodySmall.copyWith(
+            Row(
+              children: [
+                Icon(
+                  getAgentIcon(agent.id),
                   color: isSelected
                       ? CyberpunkColors.orangePrimary
                       : CyberpunkColors.greenSuccess,
-                  fontFamily: 'SourceCodePro',
+                  size: 20,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    agent.name.toLowerCase(),
+                    style: CyberpunkTypography.bodySmall.copyWith(
+                      color: isSelected
+                          ? CyberpunkColors.orangePrimary
+                          : CyberpunkColors.greenSuccess,
+                      fontFamily: 'SourceCodePro',
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
+            if (quotaState != null) ...[
+              const SizedBox(height: 4),
+              _QuotaBadge(quotaState: quotaState),
+            ],
           ],
         ),
       ),
@@ -357,6 +403,66 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// A small badge showing quota wait or blocked status under an agent tile.
+class _QuotaBadge extends StatelessWidget {
+  final AgentQuotaState quotaState;
+
+  const _QuotaBadge({required this.quotaState});
+
+  @override
+  Widget build(BuildContext context) {
+    if (quotaState.quotaBlocked) {
+      return const _BlockedBadge();
+    }
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final waitUntil = quotaState.quotaWaitUntilEpoch;
+    if (waitUntil == null) return const SizedBox.shrink();
+    final remaining = Duration(milliseconds: waitUntil - nowMs);
+    final label = formatDuration(remaining);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: CyberpunkColors.yellowWarning.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        'quota resets in $label',
+        style: CyberpunkTypography.bodySmall.copyWith(
+          color: CyberpunkColors.yellowWarning,
+          fontFamily: 'SourceCodePro',
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+}
+
+/// Badge for agents stuck in blocked state.
+class _BlockedBadge extends StatelessWidget {
+  const _BlockedBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        'blocked — action required',
+        style: CyberpunkTypography.bodySmall.copyWith(
+          color: CyberpunkColors.redAlert,
+          fontFamily: 'SourceCodePro',
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
     );
   }
 }

@@ -135,6 +135,42 @@ class CalendarEvent {
   }
 }
 
+// ===== Quota payload =====
+
+/// Quota payload attached to an agent_progress event (agent.quota_wait bus).
+///
+/// Fields come from internal/agent/quota_episode.go:QuotaEvent.
+class AgentQuotaPayload {
+  /// Agent id (copied from the top-level agent_id).
+  final String agentId;
+  /// Transition target: "quota_wait", "blocked", or "running".
+  final String to;
+  /// Optional RFC3339 unblock time. Null when clearing.
+  final String? unblockAt;
+  /// Escalation tier label ("warn", "action_recommended", "blocked", "").
+  final String? escalation;
+  /// Fallback model name suggested by the backend.
+  final String? fallbackModel;
+
+  const AgentQuotaPayload({
+    required this.agentId,
+    required this.to,
+    this.unblockAt,
+    this.escalation,
+    this.fallbackModel,
+  });
+
+  factory AgentQuotaPayload.fromJson(Map<String, dynamic> json) {
+    return AgentQuotaPayload(
+      agentId: json['agent_id'] as String? ?? '',
+      to: json['to'] as String? ?? '',
+      unblockAt: json['unblock_at'] as String?,
+      escalation: json['escalation'] as String?,
+      fallbackModel: json['fallback_model'] as String?,
+    );
+  }
+}
+
 // ===== Agent Progress Model =====
 
 /// Represents a real-time agent progress event from the WebSocket stream.
@@ -156,6 +192,10 @@ class AgentProgress {
   /// GUI renders this as a live preview until the final chat_message lands.
   final String? textSoFar;
 
+  /// Quota state carried by this event (set when type=="agent_progress"
+  /// arrives on the agent.quota_wait bus topic). Null means no quota data.
+  final AgentQuotaPayload? quota;
+
   AgentProgress({
     required this.agentId,
     required this.message,
@@ -164,6 +204,7 @@ class AgentProgress {
     required this.timestamp,
     this.stage = '',
     this.textSoFar,
+    this.quota,
   });
 
   factory AgentProgress.fromJson(Map<String, dynamic> json) {
@@ -186,6 +227,7 @@ class AgentProgress {
       sourceEvent: (data?['source_event'] ?? json['source_event']) as String?,
       stage: (json['stage'] ?? '') as String,
       textSoFar: json['text_so_far'] as String?,
+      quota: json['to'] != null ? AgentQuotaPayload.fromJson(json) : null,
       timestamp:
           DateTime.tryParse(
             data?['timestamp'] as String? ??

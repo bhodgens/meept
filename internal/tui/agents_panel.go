@@ -80,12 +80,15 @@ type AgentSummary struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
 	Role           string    `json:"role"`
-	Status         string    `json:"status"` // running | paused | error | stopped
+	Status         string    `json:"status"` // running | paused | error | stopped | quota_wait
 	Tier           string    `json:"tier"`   // tier_1_reactive | tier_2_propose | tier_3_autonomous
 	DriftScore     float64   `json:"drift_score"`
 	DailyCostCents int       `json:"daily_cost_cents"`
 	FindingsCount  int       `json:"findings_count"`
 	LastInvocation time.Time `json:"last_invocation"`
+	// Quota state (optional — when absent, rendering is unchanged).
+	QuotaWaitUntil *time.Time `json:"quota_wait_until,omitempty"`
+	QuotaBlocked   bool       `json:"quota_blocked,omitempty"`
 }
 
 // AgentDetail is the drill-in payload. Combines the employee definition
@@ -218,6 +221,14 @@ func (p *AgentsPanel) resizeColumns() {
 // Init kicks off the initial agents.list fetch.
 func (p *AgentsPanel) Init() tea.Cmd {
 	return p.fetchAgents
+}
+
+// quotaStateMsg carries a quota state update for a single agent, sourced from
+// an agent.quota_wait bus event.
+type quotaStateMsg struct {
+	agentID    string
+	waitUntil  *time.Time
+	blocked    bool
 }
 
 // agentsListMsg carries the agents.list response.
@@ -403,6 +414,24 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 		// Refresh the detail view + the list.
 		return tea.Batch(p.fetchDetail, p.fetchAgents)
 
+	case quotaStateMsg:
+		// Apply the quota state update to the matching agent in the cache.
+		for i := range p.agents {
+			if p.agents[i].ID == msg.agentID {
+				p.agents[i].QuotaWaitUntil = msg.waitUntil
+				p.agents[i].QuotaBlocked = msg.blocked
+				// Adjust the base status so the detail view also reflects it.
+				if msg.blocked {
+					p.agents[i].Status = "blocked"
+				} else if msg.waitUntil != nil {
+					p.agents[i].Status = "quota_wait"
+				}
+				p.updateAgentsTable()
+				break
+			}
+		}
+		return nil
+
 	case tea.KeyPressMsg:
 		if p.subView == agentsViewDetail {
 			return p.handleDetailKey(msg)
@@ -555,9 +584,14 @@ func (p *AgentsPanel) handleDetailKey(msg tea.KeyPressMsg) tea.Cmd {
 func (p *AgentsPanel) updateAgentsTable() {
 	rows := make([]table.Row, len(p.agents))
 	for i, a := range p.agents {
+		statusCell := p.statusBadge(a.Status)
+		// If quota state is present, override the status cell.
+		if a.QuotaWaitUntil != nil || a.QuotaBlocked {
+			statusCell = p.quotaStatusBadge(a.QuotaWaitUntil, a.QuotaBlocked)
+		}
 		rows[i] = table.Row{
 			truncate(a.ID, 18),
-			p.statusBadge(a.Status),
+			statusCell,
 			p.tierShort(a.Tier),
 			fmt.Sprintf("%.2f", a.DriftScore),
 			fmt.Sprintf("$%d.%02d", a.DailyCostCents/100, a.DailyCostCents%100),
@@ -572,6 +606,7 @@ func (p *AgentsPanel) updateAgentsTable() {
 }
 
 func (p *AgentsPanel) statusBadge(status string) string {
+	// If the agent has quota state, delegate to quotaStatusBadge.
 	style := lipgloss.NewStyle()
 	switch status {
 	case "running":
@@ -584,6 +619,27 @@ func (p *AgentsPanel) statusBadge(status string) string {
 		style = style.Foreground(Current().TextMuted)
 	}
 	return style.Render(status)
+}
+
+// quotaStatusBadge returns a colored label for quota-related states.
+// When waitUntil is nil the agent is not in quota_wait; when blocked is true
+// the agent is hard-blocked; when the wait time is past-due we show "resuming…".
+func (p *AgentsPanel) quotaStatusBadge(waitUntil *time.Time, blocked bool) string {
+	style := lipgloss.NewStyle()
+	if blocked {
+		return style.Foreground(Current().ErrorC).Render("blocked")
+	}
+	if waitUntil == nil {
+		return ""
+	}
+	d := time.Until(*waitUntil)
+	if d <= 0 {
+		return style.Foreground(Current().Warning).Render("resuming…")
+	}
+	label := "quota wait"
+	hint := "quota resets in " + FormatDuration(d)
+	// Render as a single compact badge: "quota wait · resets in Xh Ym"
+	return style.Foreground(Current().Warning).Render(label + "  ⋅  " + hint)
 }
 
 func (p *AgentsPanel) tierShort(tier string) string {

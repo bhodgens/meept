@@ -1636,6 +1636,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.tabFlashTime = time.Now()
 					}
 				}
+			case "agent.quota_wait":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					if agentID, ok := payloadMap["agent_id"].(string); ok {
+						var waitUntil *time.Time
+						if unblockAtStr, ok := payloadMap["unblock_at"].(string); ok && unblockAtStr != "" {
+							if t, err := time.Parse(time.RFC3339, unblockAtStr); err == nil {
+								waitUntil = &t
+							}
+						}
+						escalation, _ := payloadMap["escalation"].(string)
+						blocked := escalation == "blocked"
+						if cmd := a.agents.Update(quotaStateMsg{
+							agentID:   agentID,
+							waitUntil: waitUntil,
+							blocked:   blocked,
+						}); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					}
+				}
 			}
 		}
 		// Also forward to sidebar for activity feed updates
