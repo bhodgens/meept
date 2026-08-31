@@ -21,11 +21,13 @@ class _FakeSdkClient implements SdkApiClient {
   @override
   Future<List<Map<String, dynamic>>> listAgents() async {
     return agents
-        .map((a) => <String, dynamic>{
-              'id': a.id,
-              'name': a.name,
-              'description': a.description,
-            })
+        .map(
+          (a) => <String, dynamic>{
+            'id': a.id,
+            'name': a.name,
+            'description': a.description,
+          },
+        )
         .toList();
   }
 
@@ -72,8 +74,9 @@ void main() {
       final agents = [const Agent(id: 'agent-1', name: 'coder')];
       final quotaState = AgentQuotaState(
         quotaBlocked: false,
-        quotaWaitUntilEpoch:
-            DateTime.now().add(const Duration(hours: 3)).millisecondsSinceEpoch,
+        quotaWaitUntilEpoch: DateTime.now()
+            .add(const Duration(hours: 3))
+            .millisecondsSinceEpoch,
         fallbackModel: 'glm-4.7',
       );
 
@@ -82,7 +85,10 @@ void main() {
       // The goals pane shows the two parity lines only when a fallback is
       // carrying work. The primary model is not stored in AgentQuotaState,
       // so the primary line degrades to "unknown" by design.
-      expect(find.textContaining('primary: unknown (blocked until '), findsOneWidget);
+      expect(
+        find.textContaining('primary: unknown (blocked until '),
+        findsOneWidget,
+      );
       expect(find.text('active: glm-4.7'), findsOneWidget);
     });
 
@@ -90,8 +96,9 @@ void main() {
       final agents = [const Agent(id: 'agent-1', name: 'coder')];
       final quotaState = AgentQuotaState(
         quotaBlocked: false,
-        quotaWaitUntilEpoch:
-            DateTime.now().add(const Duration(hours: 3)).millisecondsSinceEpoch,
+        quotaWaitUntilEpoch: DateTime.now()
+            .add(const Duration(hours: 3))
+            .millisecondsSinceEpoch,
       );
 
       await _pumpAgentsTab(tester, agents, {'agent-1': quotaState});
@@ -103,7 +110,9 @@ void main() {
       expect(find.textContaining('active: '), findsNothing);
     });
 
-    testWidgets('no quota episode renders no quota chrome at all', (tester) async {
+    testWidgets('no quota episode renders no quota chrome at all', (
+      tester,
+    ) async {
       final agents = [
         const Agent(id: 'agent-1', name: 'coder'),
         const Agent(id: 'agent-2', name: 'dispatcher'),
@@ -118,18 +127,22 @@ void main() {
 
     testWidgets('long model ids ellipsize without overflow', (tester) async {
       final agents = [const Agent(id: 'agent-1', name: 'coder')];
-      final longModel = 'anthropic/claude-opus-4-20260831-us-east-fallback';
+      const longModel = 'anthropic/claude-opus-4-20260831-us-east-fallback';
       final quotaState = AgentQuotaState(
         quotaBlocked: false,
-        quotaWaitUntilEpoch:
-            DateTime.now().add(const Duration(hours: 3)).millisecondsSinceEpoch,
+        quotaWaitUntilEpoch: DateTime.now()
+            .add(const Duration(hours: 3))
+            .millisecondsSinceEpoch,
         fallbackModel: longModel,
       );
 
       await _pumpAgentsTab(tester, agents, {'agent-1': quotaState});
 
-      expect(tester.takeException(), isNull,
-          reason: 'long fallback model id must not crash layout');
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'long fallback model id must not crash layout',
+      );
       expect(find.textContaining('active: '), findsOneWidget);
     });
   });
