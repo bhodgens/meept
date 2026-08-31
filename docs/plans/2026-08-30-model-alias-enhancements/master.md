@@ -165,8 +165,8 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-core-types.md | COMPLETE | 2 | Implemented: ModelAliasEntry fields, AliasHealth.StickyPins, ResolveForAlias with callerKey, sticky logic, default reversion. Tests pass. Committed 4d644e36. |
-| 02-call-sites.md | COMPLETE | 1 | Implemented: wired sessionID through agent loops, updated docs. Committed bc4ffb2b. |
+| 01-core-types.md | COMPLETE | 2 | Implemented: ModelAliasEntry fields, AliasHealth.StickyPins, ResolveForAlias with callerKey, sticky logic, default reversion. Tests pass. Committed 4d644e36. **Post-hoc review (2026-08-30):** plan-specified tests (providers_test.go, models_test.go additions, resolver_caller_test.go) were never written; two logic bugs fixed — (1) default_model reversion tested `now.After(CooldownUntil)` after the cooldown-reset block had already zeroed CooldownUntil, so reversion could only fire when the cooldown was still in the future, i.e. never in the common path; replaced with a durable `AliasHealth.RevertAt` deadline armed by RecordAliasFailure, and a `default_reversion` routing reason. (2) sticky pin-release branch was unreachable (cooldown rotation advanced CurrentIndex before the sticky check, zeroing CooldownUntil, so a pinned caller was never re-pinned); sticky resolution now runs before alias rotation and pins release via `FailedIndex` on RecordAliasFailure and on RotateToNextModel. gofmt violation in models.go fixed. Tests added in resolver_caller_test.go. |
+| 02-call-sites.md | COMPLETE | 1 | Implemented: wired sessionID through agent loops, updated docs. Committed bc4ffb2b. **Post-hoc review (2026-08-30):** all call sites verified correct (loop.go passes l.sessionID; classifier/analyzer/daemon/media sites pass ""). Docs match implementation. No changes needed. |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 

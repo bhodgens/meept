@@ -1,6 +1,10 @@
 package llm
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestTokenUsage_CacheFields(t *testing.T) {
 	u := TokenUsage{
@@ -49,4 +53,30 @@ func TestChatMessage_IsToolError(t *testing.T) {
 			t.Error("IsToolError must not be serialized in OpenAI dict")
 		}
 	})
+}
+
+// TestAliasHealth_StickyPins verifies the StickyPins map accepts pins and
+// that releasePinsForIndex drops exactly the pins on the given index.
+func TestAliasHealth_StickyPins(t *testing.T) {
+	health := &AliasHealth{
+		CurrentIndex: 0,
+		StickyPins:   make(map[string]int),
+	}
+	health.StickyPins["session-abc"] = 1
+	health.StickyPins["session-other"] = 2
+	assert.Equal(t, 1, health.StickyPins["session-abc"])
+
+	health.releasePinsForIndex(1)
+	assert.NotContains(t, health.StickyPins, "session-abc")
+	assert.Contains(t, health.StickyPins, "session-other")
+}
+
+// TestAliasHealth_StickyPinsNilByDefault verifies StickyPins is nil until a
+// sticky resolve creates it.
+func TestAliasHealth_StickyPinsNilByDefault(t *testing.T) {
+	health := &AliasHealth{CurrentIndex: 0}
+	assert.Nil(t, health.StickyPins)
+	// Release on a nil map must be a no-op, not a panic.
+	health.releasePinsForIndex(0)
+	assert.Nil(t, health.StickyPins)
 }

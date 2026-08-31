@@ -325,110 +325,64 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 	}
 
 	health := r.getOrCreateHealth(aliasName)
-
-	// Check if current model is in cooldown
 	now := time.Now()
-	if !health.CooldownUntil.IsZero() && now.Before(health.CooldownUntil) {
-		// Iterate through all models in the alias to find one that isn't in cooldown.
-		// The health pointer refers to a single AliasHealth that tracks one cooldown
-		// for the alias as a whole, so each candidate inherits the current cooldown.
-		// We reset the cooldown and failure counter for the candidate we're trying,
-		// then break because that candidate is now considered healthy.
-		// Advance once to the next model in the rotation. The unconditional
-		// break made this a single-step advance, not a scan.
-		nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
-		if nextIdx != health.CurrentIndex {
-			health.CurrentIndex = nextIdx
-			health.ConsecutiveFails = 0
-			health.CooldownUntil = time.Time{} // Reset cooldown for this candidate
-		}
+
+	// Sticky requests: resolve before alias-level rotation so a caller pinned
+	// to a failed model releases its pin and re-pins to a healthy model,
+	// while callers pinned to unaffected models keep their pins.
+	if alias.BalancedStickyRequests && callerKey != "" {
+		return r.resolveStickyCaller(alias, aliasName, health, callerKey, now), nil
 	}
 
-	// Handle default model reversion: after cooldown expires, revert to default
-	if alias.DefaultModel != "" && !health.CooldownUntil.IsZero() && now.After(health.CooldownUntil) {
-		defaultIdx := -1
-		// Resolve the default model ref against config to get its provider/model ID
-		defaultMC := ResolveModelRef(alias.DefaultModel, r.config)
-		if defaultMC != nil {
-			for i, m := range alias.Models {
-				if m.ProviderID == defaultMC.ProviderID && m.ModelID == defaultMC.ModelID {
-					defaultIdx = i
-					break
-				}
-			}
-		}
+	reverted := false
 
-		if defaultIdx >= 0 && health.CurrentIndex != defaultIdx {
-			// Revert to default model
+	// Default-model reversion: armed by RecordAliasFailure when default_model
+	// is configured, the rotation snaps back to the default model once the
+	// reversion deadline passes instead of continuing round-robin from the
+	// fallback position. RevertAt survives the cooldown reset below (which
+	// zeroes CooldownUntil when advancing), so it cannot be skipped.
+	if alias.DefaultModel != "" && !health.RevertAt.IsZero() && now.After(health.RevertAt) {
+		if defaultIdx := r.aliasIndexOfRef(alias.DefaultModel, alias); defaultIdx >= 0 && health.CurrentIndex != defaultIdx {
 			health.CurrentIndex = defaultIdx
+			reverted = true
+		}
+		health.RevertAt = time.Time{}
+		health.ConsecutiveFails = 0
+		health.CooldownUntil = time.Time{}
+	}
+
+	// Alias-level cooldown: the current model failed recently, so advance the
+	// rotation once to the next candidate and reset the failure state for it.
+	// A single AliasHealth tracks one cooldown for the alias as a whole, so
+	// the candidate inherits a cleared cooldown when it becomes current.
+	if health.inCooldown(now) {
+		nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
+		if nextIdx != health.CurrentIndex {
+			// The model being left is the failed one; release any sticky
+			// pins on it so those callers re-pin on their next resolve.
+			health.releasePinsForIndex(health.CurrentIndex)
+			health.CurrentIndex = nextIdx
 			health.ConsecutiveFails = 0
 			health.CooldownUntil = time.Time{}
 		}
 	}
 
-	// Handle sticky requests
-	if alias.BalancedStickyRequests && callerKey != "" {
-		if health.StickyPins == nil {
-			health.StickyPins = make(map[string]int)
-		}
-
-		// Check if caller has a pin
-		if pinnedIdx, ok := health.StickyPins[callerKey]; ok {
-			// Verify pinned model is still available
-			if pinnedIdx < len(alias.Models) {
-				// Check if pinned model is in cooldown
-				if !health.CooldownUntil.IsZero() && now.Before(health.CooldownUntil) {
-					// Pinned model in cooldown, release pin
-					delete(health.StickyPins, callerKey)
-				} else {
-					// Return pinned model
-					chosen := alias.Models[pinnedIdx]
-					// Log decision
-					if r.routingLogger != nil {
-						decision := RoutingDecision{
-							ChosenModelID:    chosen.ModelID,
-							ChosenProviderID: chosen.ProviderID,
-							Alias:            aliasName,
-							Reason:           "sticky_request",
-						}
-						_ = r.routingLogger.Record(context.Background(), decision)
-					}
-					return chosen, nil
-				}
-			}
-		}
-
-		// No pin or pin released, assign new pin
-		nextIdx := health.CurrentIndex
-		if nextIdx < len(alias.Models) {
-			health.StickyPins[callerKey] = nextIdx
-			health.CurrentIndex = (nextIdx + 1) % len(alias.Models)
-
-			chosen := alias.Models[nextIdx]
-			if r.routingLogger != nil {
-				decision := RoutingDecision{
-					ChosenModelID:    chosen.ModelID,
-					ChosenProviderID: chosen.ProviderID,
-					Alias:            aliasName,
-					Reason:           "sticky_request_new",
-				}
-				_ = r.routingLogger.Record(context.Background(), decision)
-			}
-			return chosen, nil
-		}
-	}
-
 	// Return the active model
 	if health.CurrentIndex < len(alias.Models) {
+		health.LastServedIndex = health.CurrentIndex
 		chosen := alias.Models[health.CurrentIndex]
 		// Persist the routing decision for later mining (Phase 4 student-learns-routing).
 		// Best-effort: swallow errors so routing observability never breaks serving.
 		if r.routingLogger != nil {
+			reason := "round_robin"
+			if reverted {
+				reason = "default_reversion"
+			}
 			decision := RoutingDecision{
 				ChosenModelID:    chosen.ModelID,
 				ChosenProviderID: chosen.ProviderID,
 				Alias:            aliasName,
-				Reason:           "round_robin",
+				Reason:           reason,
 			}
 			_ = r.routingLogger.Record(context.Background(), decision)
 		}
@@ -436,6 +390,93 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 	}
 
 	return nil, fmt.Errorf("all models in alias %q exhausted", aliasName)
+}
+
+// inCooldown reports whether the alias-level cooldown is active at now.
+// Callers must hold Resolver.mu.
+func (h *AliasHealth) inCooldown(now time.Time) bool {
+	return !h.CooldownUntil.IsZero() && now.Before(h.CooldownUntil)
+}
+
+// releasePinsForIndex drops every sticky pin that points at the given
+// rotation index. Called when the model at that index fails or rotates out
+// so pinned callers re-pin to a healthy model on their next resolve.
+// Callers must hold Resolver.mu.
+func (h *AliasHealth) releasePinsForIndex(idx int) {
+	for caller, pinned := range h.StickyPins {
+		if pinned == idx {
+			delete(h.StickyPins, caller)
+		}
+	}
+}
+
+// resolveStickyCaller serves one ResolveForAlias call for a sticky alias.
+// It must be called with r.mu held. The caller either keeps an existing pin
+// (when the pinned model is healthy), or is (re-)pinned to the next healthy
+// rotation position. Always returns a model.
+func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, health *AliasHealth, callerKey string, now time.Time) *ModelConfig {
+	if health.StickyPins == nil {
+		health.StickyPins = make(map[string]int)
+	}
+
+	if pinnedIdx, ok := health.StickyPins[callerKey]; ok {
+		switch {
+		case pinnedIdx >= len(alias.Models):
+			// Stale pin beyond the configured model list (config changed).
+			delete(health.StickyPins, callerKey)
+		case !health.inCooldown(now) || pinnedIdx != health.FailedIndex:
+			// The pinned model is still usable: either the alias is healthy
+			// or the active cooldown belongs to a different model.
+			health.LastServedIndex = pinnedIdx
+			return r.recordStickyDecision(alias, aliasName, pinnedIdx, "sticky_request")
+		default:
+			// Pinned model failed; release the pin so the caller re-pins to
+			// a healthy model below.
+			delete(health.StickyPins, callerKey)
+		}
+	}
+
+	// (Re-)assign a pin. Start at the rotation position; if that position is
+	// the model currently failing, advance once so the new pin lands on a
+	// healthy candidate.
+	nextIdx := health.CurrentIndex % len(alias.Models)
+	if health.inCooldown(now) && nextIdx == health.FailedIndex {
+		nextIdx = (nextIdx + 1) % len(alias.Models)
+	}
+	health.StickyPins[callerKey] = nextIdx
+	health.LastServedIndex = nextIdx
+	health.CurrentIndex = (nextIdx + 1) % len(alias.Models)
+	return r.recordStickyDecision(alias, aliasName, nextIdx, "sticky_request_new")
+}
+
+// recordStickyDecision returns alias.Models[idx] and logs the routing
+// decision. Callers must hold Resolver.mu.
+func (r *Resolver) recordStickyDecision(alias *AliasEntry, aliasName string, idx int, reason string) *ModelConfig {
+	chosen := alias.Models[idx]
+	if r.routingLogger != nil {
+		_ = r.routingLogger.Record(context.Background(), RoutingDecision{
+			ChosenModelID:    chosen.ModelID,
+			ChosenProviderID: chosen.ProviderID,
+			Alias:            aliasName,
+			Reason:           reason,
+		})
+	}
+	return chosen
+}
+
+// aliasIndexOfRef returns the index of the model identified by ref within
+// alias.Models, or -1 when the ref is unknown or not part of the alias.
+func (r *Resolver) aliasIndexOfRef(ref string, alias *AliasEntry) int {
+	mc := ResolveModelRef(ref, r.config)
+	if mc == nil {
+		return -1
+	}
+	for i, m := range alias.Models {
+		if m.ProviderID == mc.ProviderID && m.ModelID == mc.ModelID {
+			return i
+		}
+	}
+	return -1
 }
 
 // candidatesJSON serializes the candidate model list as a JSON array of
@@ -459,6 +500,12 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error) {
 	health.ConsecutiveFails++
 	health.LastFailure = time.Now()
 
+	// The failing model is the one most recently served by ResolveForAlias.
+	// Sticky pins on it are released so pinned callers re-pin to a healthy
+	// model instead of keep hitting the failure.
+	health.FailedIndex = health.LastServedIndex
+	health.releasePinsForIndex(health.FailedIndex)
+
 	// Calculate cooldown with exponential backoff: timeout * 2^(fails-1)
 	// Cap at 2^10 = 1024x to avoid integer overflow and astronomically large backoffs.
 	alias := r.aliases[aliasName]
@@ -469,6 +516,14 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error) {
 	backoffFactor := 1 << uint(shift)
 	cooldownDuration := alias.Timeout * time.Duration(backoffFactor)
 	health.CooldownUntil = time.Now().Add(cooldownDuration)
+
+	// Arm default-model reversion: after the cooldown window ends, the next
+	// ResolveForAlias call snaps the rotation back to default_model instead
+	// of leaving it parked on the fallback. Re-armed on every failure so the
+	// deadline always tracks the latest (possibly extended) cooldown.
+	if alias.DefaultModel != "" {
+		health.RevertAt = health.CooldownUntil
+	}
 
 	r.logger.Warn("Recorded alias failure",
 		"alias", aliasName,
@@ -579,6 +634,10 @@ func (r *Resolver) RotateToNextModel(aliasName string) (*ModelConfig, error) {
 	}
 
 	health := r.getOrCreateHealth(aliasName)
+
+	// Release sticky pins on the model being rotated out so pinned callers
+	// re-pin to a healthy model on their next resolve.
+	health.releasePinsForIndex(health.CurrentIndex)
 
 	// Rotate to next model
 	health.CurrentIndex = (health.CurrentIndex + 1) % len(alias.Models)

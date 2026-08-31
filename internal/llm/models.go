@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -328,19 +327,27 @@ type AliasEntry struct {
 	BalancedStickyRequests bool           // Optional: pin callers to single model
 }
 
-// AliasHealth tracks the health and rotation state of an alias.
+// AliasHealth tracks the health and rotation state of an alias. All fields
+// are guarded by Resolver.mu; methods on this type must be called with that
+// lock held.
 type AliasHealth struct {
-	mu             sync.RWMutex // protects quota block maps below
-	CurrentIndex   int
+	CurrentIndex     int
 	ConsecutiveFails int
-	LastFailure    time.Time
-	CooldownUntil  time.Time
-	StickyPins     map[string]int
-	// entryBlocks tracks per-entry quota blocks: "provider/model" -> until.
-	entryBlocks map[string]time.Time
-	// credentialBlocks tracks per-credential quota blocks (shared pool):
-	// credentialKey -> until.
-	credentialBlocks map[string]time.Time
+	LastFailure      time.Time
+	CooldownUntil    time.Time
+	StickyPins       map[string]int
+	// RevertAt arms default-model reversion: when non-zero, rotation reverts
+	// to AliasEntry.DefaultModel after this deadline (armed by
+	// RecordAliasFailure when default_model is configured).
+	RevertAt time.Time
+	// FailedIndex is the rotation index of the most recently served model at
+	// the time of the last failure (-1 = none). Sticky pins on it are
+	// released so callers re-pin off the failed model.
+	FailedIndex int
+	// LastServedIndex is the rotation index handed out by the most recent
+	// ResolveForAlias call; RecordAliasFailure uses it to attribute the
+	// failure to the model that was actually serving.
+	LastServedIndex int
 }
 
 // ToolDefinition defines a tool/function for the LLM.
