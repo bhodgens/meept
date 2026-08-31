@@ -103,8 +103,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Default log level = %q, want INFO", cfg.Daemon.LogLevel)
 	}
 
-	if cfg.LLM.Budget.HourlyTokenLimit != 100000 {
-		t.Errorf("Default hourly token limit = %d, want 100000", cfg.LLM.Budget.HourlyTokenLimit)
+	if cfg.LLM.Budget.HourlyTokenLimit != 0 {
+		t.Errorf("Default hourly token limit = %d, want 0 (disabled)", cfg.LLM.Budget.HourlyTokenLimit)
 	}
 
 	if cfg.Security.BlockFinancial != true {

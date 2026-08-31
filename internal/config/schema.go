@@ -671,7 +671,7 @@ type MultiUserConfig struct {
 //
 //gendoc:section llm
 //gendoc:desc LLM subsystem configuration including token budget, model broker, adaptive timeout, context firewall, and metrics.
-//gendoc:example [llm] budget.hourly_token_limit = 100000
+//gendoc:example [llm] budget.hourly_token_limit = 200000
 type LLMConfig struct {
 	Budget          BudgetConfig             `json:"budget"           toml:"budget"`
 	ModelsDir       string                   `json:"models_dir"       toml:"models_dir"` // default ~/.meept/models
@@ -2182,16 +2182,16 @@ func DefaultConfig() *Config {
 		LLM: LLMConfig{
 			ModelsDir: "~/.meept/models",
 			Budget: BudgetConfig{
-				HourlyTokenLimit:     100000,
-				DailyTokenLimit:      1000000,
-				DailyCostLimit:       10.0,
-				HourlyCostLimit:      2.0,
+				HourlyTokenLimit:     0,  // 0 = disabled; suggested: 200000 (input-only) or 350000 (total)
+				DailyTokenLimit:      0,  // 0 = disabled; suggested: 1000000
+				DailyCostLimit:       0.0, // 0 = disabled; suggested: 10.0 for paid providers only
+				HourlyCostLimit:      0.0, // 0 = disabled; suggested: 2.0 for paid providers only
 				RateLimitRPM:         30,
 				Aggressiveness:       0.5,
-				PerTaskTokenLimit:    50000,
-				PerSessionTokenLimit: 100000,
-				PerTaskCostLimit:     5.0,  // $5 per task max
-				PerSessionCostLimit:  10.0, // $10 per session max
+				PerTaskTokenLimit:    0,  // 0 = disabled; suggested: 50000
+				PerSessionTokenLimit: 0,  // 0 = disabled; suggested: 100000
+				PerTaskCostLimit:     0.0, // 0 = disabled
+				PerSessionCostLimit:  0.0, // 0 = disabled
 			},
 			Broker: LLMBrokerConfig{
 				MaxErrorRate:    0.10,
