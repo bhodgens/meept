@@ -333,23 +333,20 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 
 	subCtx, cancelFunc := context.WithCancel(context.Background())
 
-	// When the client disconnects, connDoneCh fires → cancel the subscription
-	// context → cleanup goroutine stops all subscriber goroutines and removes
-	// the subscription from the map.  We also listen on ctx.Done() (the
-	// request-timeout context) as a fallback: if the request handler returns
-	// for any reason, cancelFunc fires so we don't leave dangling goroutines.
+	// Subscriptions must outlive the subscribe RPC that created them. When
+	// the connection-done channel is available we watch ONLY that channel:
+	// ctx (opCtx) is request-scoped and is cancelled the moment this handler
+	// returns, so selecting on it here killed every subscription immediately
+	// after bus.subscribe returned — bus.poll then found no subscription
+	// ("subscription not found") and bench/TUI event traces stayed empty.
+	// Without connDoneCh (direct proxy calls, not via server.dispatch) we
+	// have no disconnect signal, so fall back to ctx.Done() as before.
 	if connDoneCh != nil {
 		go func() {
-			select {
-			case <-connDoneCh:
-				cancelFunc()
-			case <-ctx.Done():
-				cancelFunc()
-			}
+			<-connDoneCh
+			cancelFunc()
 		}()
 	} else {
-		// Fallback for direct proxy calls (not via server.dispatch): cancel on
-		// request context done.
 		go func() {
 			<-ctx.Done()
 			cancelFunc()
