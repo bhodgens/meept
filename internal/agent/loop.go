@@ -642,6 +642,13 @@ type AgentLoop struct {
 	// explicitly called (e.g. daemon shutdown, adapter rollback).
 	modelOverridePersistent bool
 
+	// pendingHookMessages holds ExtraMessages returned by PrepareNextTurn
+	// hooks (applyTurnModification). One-shot: prepended to the next LLM
+	// call's messages in reasoningCycle, then cleared. Guarded by l.mu —
+	// same mutex that guards modelOverride; written on the loop goroutine,
+	// read once per iteration in reasoningCycle.
+	pendingHookMessages []llm.ChatMessage
+
 	// Budget scope tracking for per-task/per-session token and cost limits
 	currentTaskID    string
 	currentSessionID string
@@ -1372,6 +1379,32 @@ func (l *AgentLoop) ClearModelOverride() {
 	defer l.mu.Unlock()
 	l.modelOverride = ""
 	l.modelOverridePersistent = false
+}
+
+// applyTurnModification applies a PrepareNextTurn hook's TurnModification to
+// the loop so it takes effect on the next LLM call in reasoningCycle:
+//   - ExtraMessages non-empty -> staged in pendingHookMessages; reasoningCycle
+//     prepends them to the next call's message slice (one-shot, then clears).
+//   - ModelOverride non-empty -> routed through the existing SetModelOverride
+//     seam (one-shot); no second override channel is introduced.
+//   - Modified false / zero-value modification -> true no-op: no allocations,
+//     no override churn, no message duplication.
+//
+// Hook errors: RunPrepareNextTurn returns no error, so hook failures surface
+// as panics; the call site recovers those (see reasoningCycle). This helper
+// itself never fails.
+func (l *AgentLoop) applyTurnModification(mod TurnModification) {
+	if !mod.Modified {
+		return
+	}
+	if len(mod.ExtraMessages) > 0 {
+		l.mu.Lock()
+		l.pendingHookMessages = append(l.pendingHookMessages, mod.ExtraMessages...)
+		l.mu.Unlock()
+	}
+	if mod.ModelOverride != "" {
+		l.SetModelOverride(mod.ModelOverride)
+	}
 }
 
 // deriveRoutingPath builds a routing context string for shadow training
@@ -3136,6 +3169,56 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// This preserves system prompt, original user message, and recent context
 		// Uses the same effective budget that accounts for tool definition overhead
 		messages := conv.GetWindowedMessages(effectiveBudget)
+
+		// PrepareNextTurn hook pipeline (llm-resilience-forest leaf 02;
+		// ARCH-AUDIT B1: pipeline was inert — zero production callers).
+		//
+		// SEAM DECISION: this is the single per-iteration point where (a) the
+		// turn's messages are finalized (windowed above), while (b) the model
+		// is still mutable — the alias-resolution and GetModelOverride blocks
+		// below run AFTER this, so a hook's ModelOverride (routed through the
+		// one-shot SetModelOverride seam) is consumed this same iteration.
+		// It fires once per iteration, before the LLM call, matching the
+		// RunSessionStart/RunSessionEnd nil-guard pattern (loop.go:2058/2123).
+		// RunPrepareNextTurn returns no error; hook failures surface as
+		// panics, which are recovered here so a broken hook cannot kill the
+		// turn (zero-value modification on recovery).
+		if l.hookRegistry != nil {
+			l.mu.RLock()
+			modelRefSnap := l.modelRef
+			l.mu.RUnlock()
+			turnState := TurnState{
+				ConversationID: conversationID,
+				Iteration:      iteration,
+				Messages:       messages,
+				ModelRef:       modelRefSnap,
+				TotalTokens:    totalTokens,
+			}
+			mod := func() (mod TurnModification) {
+				defer func() {
+					if r := recover(); r != nil {
+						l.logger.Error("prepare_next_turn hook panicked; continuing with zero-value modification",
+							"panic", r,
+							"conversation", conversationID,
+							"iteration", iteration,
+						)
+					}
+				}()
+				return l.hookRegistry.RunPrepareNextTurn(ctx, turnState)
+			}()
+			l.applyTurnModification(mod)
+		}
+
+		// Apply hook ExtraMessages (if any) to THIS call: prepend the staged
+		// pendingHookMessages ahead of the windowed conversation messages,
+		// then clear the one-shot staging. Zero pending -> no allocation.
+		l.mu.Lock()
+		pending := l.pendingHookMessages
+		l.pendingHookMessages = nil
+		l.mu.Unlock()
+		if len(pending) > 0 {
+			messages = append(pending, messages...)
+		}
 
 		// Inject few-shot examples from shadow training (only on first iteration)
 		if iteration == 1 && l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
