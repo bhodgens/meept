@@ -148,7 +148,7 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 1402,
+        "line": 1421,
         "payload_keys": []
       }
     ],
@@ -543,7 +543,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1962,
+        "line": 1969,
         "payload_keys": [
           "event"
         ]
@@ -552,7 +552,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 1619,
+        "line": 1626,
         "payload_keys": [
           "event"
         ]
@@ -561,7 +561,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2324,
+        "line": 2343,
         "payload_keys": []
       }
     ],
@@ -582,7 +582,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3942,
+        "line": 3961,
         "payload_keys": [
           "name",
           "tags",
@@ -774,7 +774,7 @@
       },
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2248,
+        "line": 2255,
         "payload_keys": [
           "task_id"
         ],
@@ -1679,7 +1679,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6773,
+        "line": 6805,
         "payload_keys": []
       }
     ],
@@ -2145,13 +2145,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5446,
+        "line": 5478,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 5483,
+        "line": 5515,
         "payload_keys": [],
         "via_const": true
       }
@@ -2336,7 +2336,7 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 1372,
+        "line": 1391,
         "subscriber_id": "progress-synthesizer"
       }
     ],
@@ -2495,7 +2495,7 @@
     "combinedTopic": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 372,
+        "line": 369,
         "subscriber_id": "subID"
       }
     ],
@@ -2510,7 +2510,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2302,
+        "line": 2321,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2525,7 +2525,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2949,
+        "line": 2968,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -2722,6 +2722,13 @@
         "line": 522,
         "subscriber_id": "slice:topics:plan.*.*",
         "via_topic_slice": true
+      }
+    ],
+    "plan.approved": [
+      {
+        "file": "internal/daemon/evolver_approval_bridge.go",
+        "line": 56,
+        "subscriber_id": "evolver-approval-bridge"
       }
     ],
     "queue.*": [
@@ -3228,7 +3235,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6703,
+        "line": 6735,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3519,7 +3526,7 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 416,
+        "line": 413,
         "subscriber_id": "subID+\"-\"+topic"
       },
       {
