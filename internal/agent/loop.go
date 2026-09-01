@@ -1341,6 +1341,12 @@ func WithModelOverride(modelRef string) LoopOption {
 func (l *AgentLoop) SetModelOverride(modelRef string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// Leaf 04 (audit R1 anti-demotion): a persistent override (escalation
+	// fix-loop window, shadow hot-swap) is not demoted to one-shot when the
+	// same turn's applyTurnModification replays the already-armed ref.
+	if l.modelOverridePersistent && l.modelOverride == modelRef {
+		return
+	}
 	l.modelOverride = modelRef
 	l.modelOverridePersistent = false
 }
@@ -1801,6 +1807,24 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 		if loop.hookRegistry != nil {
 			trigger := NewVerificationAutoTrigger(loop.verificationTracker, loop.spec.Verification)
 			trigger.SetSpawner(loop) // AgentLoop implements VerifierSpawner
+			// Leaf 04: escalation seams — resolver, persistent override applier
+			// (R1: full max_fix_loops budget), fresh-turn clear, and bus
+			// observability (agent.model_escalated → agent_progress).
+			trigger.SetAgentSpec(loop.spec)
+			if loop.resolver != nil {
+				trigger.SetResolver(loop.resolver)
+			}
+			trigger.SetOverrideApplier(loop.SetPersistentModelOverride)
+			trigger.SetClearOverride(loop.ClearModelOverride)
+			if loop.bus != nil {
+				bus := loop.bus
+				trigger.SetEventPublisher(func(topic string, payload map[string]any) {
+					if msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload); err == nil {
+						bus.Publish(topic, msg)
+					}
+				})
+			}
+			trigger.SetAgentIDSource(func() string { return loop.agentID })
 			loop.hookRegistry.RegisterPrepareNextTurn("verification_auto_trigger", HookPriorityNormal, trigger)
 		}
 	}
@@ -2075,6 +2099,15 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// the immediate self-reflection goroutine (Turbo Thread E) to attach
 	// wall-clock latency to the trajectory.
 	begin := time.Now()
+
+	// Leaf 04 (audit R1): fresh-turn override restore. Any persistent model
+	// override armed by a hook's escalation in a PREVIOUS conversation is
+	// cleared here — before SessionStart hooks and before PrepareNextTurn
+	// hooks — so the fresh turn runs on the base model unless this turn
+	// re-arms the escalation. No-op when no override was armed.
+	if l.hookRegistry != nil {
+		l.hookRegistry.ClearFreshTurnOverrides(ctx)
+	}
 
 	// Snapshot file watcher under lock to avoid racing with SetFileWatcher.
 	l.mu.RLock()

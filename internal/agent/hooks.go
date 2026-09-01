@@ -365,6 +365,17 @@ type SessionStartHook interface {
 	OnSessionStart(ctx context.Context, state SessionLifecycleState) ContextTransform
 }
 
+// ModelOverrideFreshTurnHook marks a hook that arms model overrides which
+// must NOT survive into an unrelated fresh turn (tree 01 leaf 04, audit R1
+// — no sticky escalation across turns). The hook registry sweeps every
+// hook implementing this interface at the START of each turn, BEFORE
+// RunSessionStart hooks and long before PrepareNextTurn hooks run, so a
+// hook that escalated in the previous conversation either re-arms its
+// override this turn or the base model is restored.
+type ModelOverrideFreshTurnHook interface {
+	ClearModelOverride(ctx context.Context)
+}
+
 // SessionEndHook is called at the end of each RunOnce invocation (via defer).
 // Useful for metrics, audit logging, and state cleanup.
 type SessionEndHook interface {
@@ -381,6 +392,27 @@ func (r *HookRegistry) RegisterSessionStartHook(name string, priority HookPriori
 	sort.Slice(r.sessionStarts, func(i, j int) bool {
 		return r.sessionStarts[i].Priority < r.sessionStarts[j].Priority
 	})
+}
+
+// ClearFreshTurnOverrides sweeps ClearModelOverride on every registered
+// PrepareNextTurn hook that implements ModelOverrideFreshTurnHook (tree 01
+// leaf 04, audit R1). The loop calls this ONCE at the START of each turn —
+// before RunSessionStart hooks and before RunPrepareNextTurn — so persistent
+// model overrides armed by an escalation in a previous conversation are
+// restored to the base model unless THIS turn re-arms them. Clearing is
+// the hook's own responsibility (each hook no-ops when it holds nothing).
+func (r *HookRegistry) ClearFreshTurnOverrides(ctx context.Context) {
+	r.mu.RLock()
+	hooks := make([]ModelOverrideFreshTurnHook, 0, len(r.prepareNextTurns))
+	for _, reg := range r.prepareNextTurns {
+		if h, ok := reg.Hook.(ModelOverrideFreshTurnHook); ok {
+			hooks = append(hooks, h)
+		}
+	}
+	r.mu.RUnlock()
+	for _, h := range hooks {
+		h.ClearModelOverride(ctx)
+	}
 }
 
 // RegisterSessionEndHook registers a SessionEndHook.

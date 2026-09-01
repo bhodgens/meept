@@ -707,6 +707,12 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 		// (a chat bubble would appear blank; AGENTS.md WS classification
 		// invariant).
 		eventType = "agent_progress"
+	case strings.HasPrefix(topic, "agent.model_escalated"):
+		// Model-escalation events (tree 01 leaf 04: verification fix-loop
+		// exhaustion switches the fix loop to the escalation model) are
+		// agent state transitions. They MUST render as progress — never
+		// chat_message (AGENTS.md WS classification invariant).
+		eventType = "agent_progress"
 	case strings.HasPrefix(topic, "metrics."):
 		eventType = "metrics_update"
 	case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job.") ||

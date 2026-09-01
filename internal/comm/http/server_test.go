@@ -2793,3 +2793,48 @@ func TestWSBridgeDoesNotSubscribeDynamicPairTurnTopic(t *testing.T) {
 		t.Errorf("Publish(pair.some-session.turn) delivered to %d WS-bridge subscribers, want 0 (dynamic pair turn topics are point-to-point)", got)
 	}
 }
+
+// TestWSBridgeClassifiesModelEscalatedAsProgress pins the tree-01-leaf-04
+// WS classification invariant (AGENTS.md): agent.model_escalated transforms
+// to "agent_progress" — never "chat_message" — so model-escalation events
+// render as status indicators, not blank chat bubbles.
+func TestWSBridgeClassifiesModelEscalatedAsProgress(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	defer msgBus.Close()
+
+	cfg := DefaultServerConfig()
+	cfg.Addr = ":0"
+	srv := NewServer(cfg, nil, nil, nil, nil, nil, WithWebSocket(msgBus, "/ws"))
+	if srv == nil {
+		t.Fatal("failed to create server with WebSocket option")
+	}
+
+	payload := map[string]any{
+		"agent_id":   "agent-1",
+		"from_model": "zai/glm-4.5-air",
+		"to_model":   "zai/glm-4.7",
+		"reason":     "fix_loops_exhausted",
+		"fix_loops":  3,
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "test", payload)
+	if err != nil {
+		t.Fatalf("NewBusMessage: %v", err)
+	}
+	if got := msgBus.Publish("agent.model_escalated", msg); got < 1 {
+		t.Fatalf("Publish(agent.model_escalated) delivered to %d subscribers, want >= 1 (WS bridge not subscribed)", got)
+	}
+
+	frontendData := transformBusEventToWS(msg)
+	if frontendData == nil {
+		t.Fatal("transformBusEventToWS returned nil, want payload")
+	}
+	if frontendData["type"] != "agent_progress" {
+		t.Errorf("frontend type = %v, want \"agent_progress\"", frontendData["type"])
+	}
+	if frontendData["type"] == "chat_message" {
+		t.Error("classified as chat_message; escalation topics must never render as chat bubbles")
+	}
+	if frontendData["source_topic"] != "agent.model_escalated" {
+		t.Errorf("source_topic = %v, want %q", frontendData["source_topic"], "agent.model_escalated")
+	}
+}

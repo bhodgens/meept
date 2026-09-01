@@ -188,6 +188,15 @@ case strings.HasPrefix(topic, "agent.quota"):
     eventType = "agent_progress"
 ```
 
+Model-escalation events on `agent.model_escalated` (verification fix-loop
+exhaustion, tree 01 leaf 04) are likewise classified `agent_progress`, never
+`chat_message`:
+
+```go
+case strings.HasPrefix(topic, "agent.model_escalated"):
+    eventType = "agent_progress"
+```
+
 Future agents adding new bus topics must verify they land in the correct bucket.
 
 ### Quota errors are not failures (quota-reset-resilience)

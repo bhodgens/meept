@@ -254,3 +254,57 @@ Ralph Loop uses layered opt-in:
 - `internal/agent/strategic.go` — Complexity-based overrides
 
 See [Ralph Loop: Self-Referential Task Verification](../concepts/ralph-loop.md) for full documentation.
+
+## Verification Fix-Loop Escalation (Adversarial Verification)
+
+When the verification auto-trigger (`internal/agent/verification_hook.go`)
+exhausts an agent's `max_fix_loops` budget, the next fix iteration is
+switched to the agent's configured `escalation_model` instead of escalating
+to the user.
+
+### Workflow
+
+```
+Verifier FAIL (fixCount > max_fix_loops)
+    ↓
+DecideEscalation (spec.EscalationModel, resolver)
+    ├── no escalation model / resolution failed → legacy escalate-to-user
+    └── resolved → ApplyEscalation
+            ├── arms PERSISTENT loop model override (full max_fix_loops budget)
+            ├── publishes agent.model_escalated on the bus
+            └── next fix iteration (agent turn + verifier spawn) runs escalated
+    ↓
+Fix loop continues on the escalation model with its own max_fix_loops budget
+    ↓
+Fresh turn without a pending escalation (verifier PASS/PARTIAL, user turn)
+    ↓
+Fresh-turn sweep clears the persistent override → base model restored
+```
+
+### Key Properties
+
+- **R1 — no sticky escalation:** the override is persistent within the
+  escalated window but cleared at the start of every turn without a
+  re-armed escalation (`HookRegistry.ClearFreshTurnOverrides`, called from
+  `RunOnceWithParts`). The escalated model never leaks into an unrelated
+  turn.
+- **Alias inheritance:** an alias escalation target inherits alias
+  rotation, cooldowns, and quota blocks. A fully quota-blocked escalation
+  alias fails with `ErrAllModelsQuotaBlocked` and the loop's existing
+  quota handling takes over — no second handling path.
+- **Observability:** bus topic `agent.model_escalated` (payload
+  `{agent_id, from_model, to_model, reason, fix_loops}`; classified
+  `agent_progress` on WS, never `chat_message`) and a routing-log row with
+  reason `escalation`.
+
+### Files
+
+- `internal/llm/resolver.go` — `ResolveEscalationRef` (alias or
+  `provider/model` → loop model ref)
+- `internal/agent/verification_escalation.go` — `DecideEscalation`,
+  `ApplyEscalation`, fresh-turn clear
+- `internal/agent/verification_hook.go` — hook wiring seams
+  (`SetResolver`, `SetOverrideApplier`, `SetEventPublisher`, ...)
+- `internal/agent/loop.go` — construction-site wiring
+  (`SetAgentSpec`/`SetResolver`) and the fresh-turn sweep call
+- `internal/comm/http/server.go` — WS topic classification

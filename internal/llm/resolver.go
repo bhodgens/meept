@@ -309,6 +309,77 @@ func (r *Resolver) ResolveRef(ref string) *ModelConfig {
 	return mc
 }
 
+// ResolveEscalationRef resolves an escalation target — an alias name or a
+// "provider/model" ref — to a model ref string usable as a loop model ref.
+// Implements agent.ModelResolver. Named ResolveEscalationRef, not ResolveRef,
+// because *Resolver already defines ResolveRef(ref string) *ModelConfig
+// above (audit B2: a same-name/different-signature method would not compile).
+// Alias resolution INHERITS alias rotation, cooldowns, and quota blocks: a
+// fully quota-blocked escalation alias surfaces ErrAllModelsQuotaBlocked and
+// the loop's existing quota handling takes over (SHARED-CONVENTIONS §2 — no
+// second handling path).
+func (r *Resolver) ResolveEscalationRef(ref string) (string, error) {
+	if ref == "" {
+		return "", fmt.Errorf("empty escalation ref")
+	}
+
+	// Alias branch: delegate to the existing alias lookup (rotation,
+	// cooldown, quota semantics all inherited). callerKey is "" — escalation
+	// is a fresh resolution, not a sticky-caller request. ResolveForAlias
+	// takes r.mu internally; no lock is held across the call.
+	if r.HasAlias(ref) {
+		mc, err := r.ResolveForAlias(ref, "")
+		if err != nil {
+			return "", err
+		}
+		if mc == nil {
+			return "", fmt.Errorf("alias %q resolved to no model", ref)
+		}
+		// Record the escalation decision for later mining (leaf 04 Task 3),
+		// same best-effort shape as the direct branch below. Alias is
+		// carried so escalations are queryable uniformly regardless of
+		// target form (D3: alias targets are the primary style).
+		if r.routingLogger != nil {
+			// Log-and-continue, never swallow silently (SHARED-CONVENTIONS
+			// §2 forbids `_ = f()`); observability must not fail serving.
+			if recErr := r.routingLogger.Record(context.Background(), RoutingDecision{
+				ChosenModelID:    mc.ModelID,
+				ChosenProviderID: mc.ProviderID,
+				Alias:            ref,
+				Reason:           "escalation",
+			}); recErr != nil {
+				slog.Warn("escalation routing-log record failed", "alias", ref, "error", recErr)
+			}
+		}
+		return mc.ProviderID + "/" + mc.ModelID, nil
+	}
+
+	// Direct-ref branch: mirror ResolveRef's lookup via ResolveModelRef, but
+	// surface unknown refs as errors instead of nil (escalation must fail
+	// loudly so DecideEscalation degrades to the legacy path).
+	mc := ResolveModelRef(ref, r.config)
+	if mc == nil {
+		return "", fmt.Errorf("escalation ref not found: %s", ref)
+	}
+
+	// Persist the routing decision for later mining. Best-effort: swallow
+	// errors so routing observability never breaks serving. Mirrors the
+	// capability_escalation recording shape above (resolver.go:269).
+	if r.routingLogger != nil {
+		// Log-and-continue, never swallow silently (SHARED-CONVENTIONS
+		// §2 forbids `_ = f()`); observability must not fail serving.
+		if recErr := r.routingLogger.Record(context.Background(), RoutingDecision{
+			ChosenModelID:    mc.ModelID,
+			ChosenProviderID: mc.ProviderID,
+			Reason:           "escalation",
+		}); recErr != nil {
+			slog.Warn("escalation routing-log record failed", "ref", ref, "error", recErr)
+		}
+	}
+
+	return mc.ProviderID + "/" + mc.ModelID, nil
+}
+
 // FindByCapabilities finds all models with the specified capabilities.
 func (r *Resolver) FindByCapabilities(caps []string) []*ModelConfig {
 	var results []*ModelConfig

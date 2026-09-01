@@ -43,6 +43,27 @@ type VerificationAutoTrigger struct {
 	// pendingEscalation holds the most recent Escalate=true decision from
 	// fix-loop exhaustion (leaf 04's consumption seam).
 	pendingEscalation *EscalationDecision
+
+	// baseModelRef mirrors the last non-escalated verifier model ref seen
+	// (h.config.EffectiveModel), used as the bus payload's from_model so
+	// the event reports the model the agent was running BEFORE escalation.
+	baseModelRef string
+	// --- Leaf 04 seams (set at the loop wiring site; all nil-safe) ---
+	// overrideApplier arms the loop's SetPersistentModelOverride (R1: the
+	// escalated model gets the FULL max_fix_loops budget; one-shot would
+	// grant exactly one turn).
+	overrideApplier func(modelRef string)
+	// escalatedModelRef mirrors the persistent override this hook armed, so
+	// ClearEscalation only clears/logs what it actually set.
+	escalatedModelRef string
+	// clearOverride clears the loop's model override (AgentLoop.
+	// ClearModelOverride) on fresh-turn detection; nil (unset) skips.
+	clearOverride func()
+	// publishEvent publishes one bus event (TopicAgentModelEscalated);
+	// nil (unset) skips the bus event — escalation still functions.
+	publishEvent EventPublisher
+	// agentIDSource supplies the agent id for bus payloads; nil → "".
+	agentIDSource AgentIDSource
 }
 
 // NewVerificationAutoTrigger wires a tracker and verification config into a
@@ -78,10 +99,59 @@ func (h *VerificationAutoTrigger) SetResolver(resolver ModelResolver) {
 	}
 }
 
+// SetOverrideApplier attaches the loop seam that arms the PERSISTENT model
+// override (AgentLoop.SetPersistentModelOverride) when an escalation
+// applies (R1). Nil/typed-nil is a no-op per repo setter rules.
+func (h *VerificationAutoTrigger) SetOverrideApplier(applier func(modelRef string)) {
+	if h != nil && applier != nil {
+		h.overrideApplier = applier
+	}
+}
+
+// SetClearOverride attaches the loop seam that clears the model override
+// (AgentLoop.ClearModelOverride) on fresh-turn detection. Nil/typed-nil is
+// a no-op per repo setter rules.
+func (h *VerificationAutoTrigger) SetClearOverride(clear func()) {
+	if h != nil && clear != nil {
+		h.clearOverride = clear
+	}
+}
+
+// SetEventPublisher attaches the bus publisher used for
+// TopicAgentModelEscalated events. Nil/typed-nil is a no-op per repo setter
+// rules; without a publisher the escalation still applies, just without the
+// bus event.
+func (h *VerificationAutoTrigger) SetEventPublisher(publish EventPublisher) {
+	if h != nil && publish != nil {
+		h.publishEvent = publish
+	}
+}
+
+// SetAgentIDSource attaches the agent-id source used in bus payloads.
+// Nil/typed-nil is a no-op per repo setter rules.
+func (h *VerificationAutoTrigger) SetAgentIDSource(source AgentIDSource) {
+	if h != nil && source != nil {
+		h.agentIDSource = source
+	}
+}
+
 // PrepareNextTurn implements PrepareNextTurnHook. It returns a nudge message
 // when verification is enabled, auto-trigger is on, and the threshold is met.
 // When a spawner is available, it also runs the verifier and handles FAIL.
 func (h *VerificationAutoTrigger) PrepareNextTurn(ctx context.Context, state TurnState) TurnModification {
+	// Leaf 04: a pending escalation is consumed HERE, before every other
+	// gate — the escalated iteration arrives with an already-snapshotted
+	// tracker (Snapshot() reset it at exhaustion), so the ShouldTrigger
+	// gate below would never fire again and the escalation would never
+	// apply. ApplyEscalation is idempotent; pending==nil falls through.
+	// D3: the switch lives in the hook; loop.go only gains wiring.
+	if h.pendingEscalation != nil {
+		mod := TurnModification{}
+		if ApplyEscalation(h, &mod) {
+			return mod
+		}
+	}
+
 	if !h.config.Enabled || !h.config.AutoTrigger {
 		return TurnModification{}
 	}
@@ -111,7 +181,18 @@ func (h *VerificationAutoTrigger) PrepareNextTurn(ctx context.Context, state Tur
 		"", // approach — not tracked yet
 	)
 
-	modelRef := h.config.EffectiveModel(state.ModelRef)
+	// Leaf 04 (D3): during an escalated window the WHOLE fix loop runs
+	// escalated — the verifier spawn included (leaf contract: the override
+	// applies to the next SpawnVerifier call AND the agent's own fix turn,
+	// consistently). Outside the window (fresh turn cleared it) the base
+	// ref applies.
+	modelRef := h.escalatedModelRef
+	if modelRef == "" {
+		modelRef = h.config.EffectiveModel(state.ModelRef)
+		// Track the base ref so the bus payload's from_model reports the
+		// model the agent actually ran before escalation (Contract 4).
+		h.baseModelRef = modelRef
+	}
 	result, err := h.spawner.SpawnVerifier(ctx, verifierPrompt, modelRef)
 	if err != nil {
 		slog.Warn("verification spawn failed", "error", err)
@@ -164,7 +245,13 @@ func (h *VerificationAutoTrigger) handleFail(verifierOutput string, checks []Che
 			// Q2 (DECISIONS.md): reset fixCount — the escalated model gets
 			// its own full max_fix_loops budget.
 			h.fixCount = 0
-			return TurnModification{
+			// Leaf 04: apply the escalation to THIS returned modification —
+			// arms the persistent override (R1: full budget), emits the bus
+			// event, and tags ModelOverride so applyTurnModification routes
+			// it through the loop's SetModelOverride seam this same
+			// iteration. The hook's early path above is the second consumer
+			// (harnesses that never apply the returned mod).
+			mod := TurnModification{
 				Modified: true,
 				ExtraMessages: []llm.ChatMessage{{
 					Role: llm.RoleUser,
@@ -175,6 +262,8 @@ func (h *VerificationAutoTrigger) handleFail(verifierOutput string, checks []Che
 				}},
 				Reason: "verification model escalation",
 			}
+			ApplyEscalation(h, &mod)
+			return mod
 		}
 		// No escalation model (or resolution failed) — legacy user
 		// escalation, byte-identical to the pre-escalation behavior.
