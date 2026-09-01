@@ -52,8 +52,14 @@ type Job struct {
 	RequiredCaps []string        `json:"required_caps,omitempty"` // Required capabilities
 	MaxRetries   int             `json:"max_retries"`
 	RetryCount   int             `json:"retry_count"`
-	ClaimedBy    string          `json:"claimed_by,omitempty"` // Worker ID
-	Result       json.RawMessage `json:"result,omitempty"`
+	// Interactive marks user-adjacent work (DECISIONS.md D11): the
+	// originating session had a recent user message or holds the foreground
+	// flag at enqueue time. Claim ordering puts interactive jobs first
+	// (SHARED-CONVENTIONS §4.4). Evaluated ONCE at enqueue; never expires
+	// mid-life (audit R4 accepted semantics).
+	Interactive bool            `json:"interactive,omitempty"`
+	ClaimedBy   string          `json:"claimed_by,omitempty"`
+	Result      json.RawMessage `json:"result,omitempty"`
 	Error        string          `json:"error,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
@@ -114,6 +120,12 @@ func (j *Job) WithMaxRetries(n int) *Job {
 // WithAgentID sets the target agent for this job.
 func (j *Job) WithAgentID(agentID string) *Job {
 	j.AgentID = agentID
+	return j
+}
+
+// WithInteractive sets the interactive priority flag (D11).
+func (j *Job) WithInteractive(v bool) *Job {
+	j.Interactive = v
 	return j
 }
 

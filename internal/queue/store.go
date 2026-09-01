@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 	required_caps TEXT DEFAULT '[]',
 	max_retries   INTEGER DEFAULT 3,
 	retry_count   INTEGER DEFAULT 0,
+	interactive   INTEGER DEFAULT 0,
 	claimed_by    TEXT,
 	result        TEXT,
 	error         TEXT,
@@ -75,6 +76,10 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_state_priority ON jobs(state, priority DESC, created_at);
+-- idx_jobs_claim (claim-covering, interactive-first) is created in migrate()
+-- AFTER the legacy column migration: on pre-interactive databases baseSchema's
+-- CREATE TABLE is a no-op, so the column does not exist yet at base-schema
+-- time and the index there would fail with "no such column".
 CREATE INDEX IF NOT EXISTS idx_jobs_task_id ON jobs(task_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_claimed_by ON jobs(claimed_by);
 CREATE INDEX IF NOT EXISTS idx_jobs_agent_id ON jobs(agent_id);
@@ -142,6 +147,10 @@ func (s *Store) migrate() error {
 		{"dead_letter", "agent_id", "ALTER TABLE dead_letter ADD COLUMN agent_id TEXT"},
 		{"jobs", "next_retry_at", "ALTER TABLE jobs ADD COLUMN next_retry_at TEXT"},
 		{"dead_letter", "due_at", "ALTER TABLE dead_letter ADD COLUMN due_at TEXT"},
+		// Interactive column for pre-interactive databases (tree 04 leaf 02).
+		// SQLite applies DEFAULT 0 to pre-existing rows on ADD COLUMN, which
+		// is exactly the required backfill: old jobs are background.
+		{"jobs", "interactive", "ALTER TABLE jobs ADD COLUMN interactive INTEGER DEFAULT 0"},
 	}
 
 	for _, mig := range legacyMigrations {
@@ -160,6 +169,16 @@ func (s *Store) migrate() error {
 			s.logger.Warn("Legacy migration failed",
 				"migration", mig.declSQL, "error", err)
 		}
+	}
+
+	// Claim-covering index for interactive-first ordering (tree 04 leaf 02,
+	// Contract 2). Runs after the interactive column migration above so
+	// pre-interactive databases have the column before the index references
+	// it. SQLite >= 3.3 supports DESC index columns; the modernc.org driver
+	// bundles a current SQLite, matching store.go's feature baseline.
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_claim
+		ON jobs(state, interactive DESC, priority DESC, created_at)`); err != nil {
+		return fmt.Errorf("failed to create idx_jobs_claim: %w", err)
 	}
 
 	return nil
@@ -299,8 +318,8 @@ func (s *Store) Insert(job *Job) error {
 
 	_, err := s.db.Exec(`
 		INSERT INTO jobs (id, task_id, agent_id, type, priority, state, payload, required_caps,
-		                  max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                  max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID,
 		nullableString(job.TaskID),
 		nullableString(job.AgentID),
@@ -311,6 +330,7 @@ func (s *Store) Insert(job *Job) error {
 		string(capsJSON),
 		job.MaxRetries,
 		job.RetryCount,
+		boolToInt(job.Interactive),
 		nullableString(job.ClaimedBy),
 		nullableRawJSON(job.Result),
 		nullableString(job.Error),
@@ -332,7 +352,7 @@ func (s *Store) Insert(job *Job) error {
 func (s *Store) GetByID(id string) (*Job, error) {
 	row := s.db.QueryRow(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 		FROM jobs WHERE id = ?`, id)
 
 	return s.scanJob(row)
@@ -368,13 +388,14 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	if agentID != "" {
 		query = `
 			SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-			       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+			       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 			FROM jobs
 			WHERE state = 'pending'
 			  AND (due_at IS NULL OR due_at <= ?)
 			  AND (next_retry_at IS NULL OR next_retry_at <= ?)
 			  AND (agent_id IS NULL OR agent_id = '' OR agent_id = ?)
 			ORDER BY
+			  interactive DESC,
 			  CASE WHEN agent_id = ? THEN 0 ELSE 1 END,
 			  priority DESC, created_at ASC
 			LIMIT 10`
@@ -382,12 +403,12 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	} else {
 		query = `
 			SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-			       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+			       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 			FROM jobs
 			WHERE state = 'pending'
 			  AND (due_at IS NULL OR due_at <= ?)
 			  AND (next_retry_at IS NULL OR next_retry_at <= ?)
-			ORDER BY priority DESC, created_at ASC
+			ORDER BY interactive DESC, priority DESC, created_at ASC
 			LIMIT 10`
 		args = []any{now, now}
 	}
@@ -618,10 +639,10 @@ func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 func (s *Store) ListByState(state JobState, limit int) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 		FROM jobs
 		WHERE state = ?
-		ORDER BY priority DESC, created_at ASC
+		ORDER BY interactive DESC, priority DESC, created_at ASC
 		LIMIT ?`,
 		string(state), limit)
 	if err != nil {
@@ -649,7 +670,7 @@ func (s *Store) ListByState(state JobState, limit int) ([]*Job, error) {
 func (s *Store) ListByTaskID(taskID string) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 		FROM jobs
 		WHERE task_id = ?
 		ORDER BY created_at ASC`,
@@ -678,10 +699,10 @@ func (s *Store) ListByTaskID(taskID string) ([]*Job, error) {
 func (s *Store) ListByAgentID(agentID string, limit int) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 		FROM jobs
 		WHERE agent_id = ? AND state = 'pending'
-		ORDER BY priority DESC, created_at ASC
+		ORDER BY interactive DESC, priority DESC, created_at ASC
 		LIMIT ?`,
 		agentID, limit)
 	if err != nil {
@@ -707,8 +728,9 @@ func (s *Store) ListByAgentID(agentID string, limit int) ([]*Job, error) {
 // GetStats returns queue statistics.
 func (s *Store) GetStats() (*QueueStats, error) {
 	stats := &QueueStats{
-		ByState:    make(map[JobState]int),
-		ByPriority: make(map[Priority]int),
+		ByState:       make(map[JobState]int),
+		ByPriority:    make(map[Priority]int),
+		ByInteractive: make(map[bool]int),
 	}
 
 	// Count by state
@@ -748,6 +770,25 @@ func (s *Store) GetStats() (*QueueStats, error) {
 		return nil, fmt.Errorf("failed iterating priority stats: %w", err)
 	}
 
+	// Interactive split for pending jobs (tree 04 leaf 02): lets operators
+	// see how much of the backlog is user-adjacent work.
+	interactiveRows, err := s.db.Query(`SELECT interactive, COUNT(*) FROM jobs WHERE state = 'pending' GROUP BY interactive`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get interactive stats: %w", err)
+	}
+	defer interactiveRows.Close()
+
+	for interactiveRows.Next() {
+		var interactive, count int
+		if err := interactiveRows.Scan(&interactive, &count); err != nil {
+			continue
+		}
+		stats.ByInteractive[interactive != 0] = count
+	}
+	if err := interactiveRows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating interactive stats: %w", err)
+	}
+
 	// Dead letter count
 	row := s.db.QueryRow(`SELECT COUNT(*) FROM dead_letter`)
 	_ = row.Scan(&stats.DeadCount)
@@ -761,7 +802,17 @@ func (s *Store) GetStats() (*QueueStats, error) {
 type QueueStats struct {
 	ByState    map[JobState]int
 	ByPriority map[Priority]int
-	DeadCount  int
+	// ByInteractive splits pending jobs by the interactive flag (D11).
+	ByInteractive map[bool]int
+	DeadCount     int
+}
+
+// boolToInt maps a boolean to its 0/1 storage encoding in the jobs table.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // moveToDead moves a job to the dead letter table.
@@ -1071,17 +1122,18 @@ func (s *Store) scanJob(row *sql.Row) (*Job, error) {
 		taskID, agentID, claimedBy       sql.NullString
 		result, errMsg                   sql.NullString
 		capsJSON                         string
+		interactive                      int
 		createdAt, updatedAt             string
 		dueAt, nextRetryAt               sql.NullString
 	)
 
 	err := row.Scan(&id, &taskID, &agentID, &jobType, &priority, &state, &payload, &capsJSON,
-		&maxRetries, &retryCount, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt)
+		&maxRetries, &retryCount, &interactive, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt)
+	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, interactive, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt)
 }
 
 func (s *Store) scanJobRows(rows *sql.Rows) (*Job, error) {
@@ -1091,31 +1143,33 @@ func (s *Store) scanJobRows(rows *sql.Rows) (*Job, error) {
 		taskID, agentID, claimedBy       sql.NullString
 		result, errMsg                   sql.NullString
 		capsJSON                         string
+		interactive                      int
 		createdAt, updatedAt             string
 		dueAt, nextRetryAt               sql.NullString
 	)
 
 	err := rows.Scan(&id, &taskID, &agentID, &jobType, &priority, &state, &payload, &capsJSON,
-		&maxRetries, &retryCount, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt)
+		&maxRetries, &retryCount, &interactive, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt)
+	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, interactive, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt)
 }
 
 func (s *Store) buildJob(id string, taskID, agentID sql.NullString, jobType, state, payload, capsJSON string,
-	priority, maxRetries, retryCount int, claimedBy, result, errMsg sql.NullString,
+	priority, maxRetries, retryCount, interactive int, claimedBy, result, errMsg sql.NullString,
 	createdAt, updatedAt string, dueAt, nextRetryAt sql.NullString) (*Job, error) {
 
 	job := &Job{
-		ID:         id,
-		Type:       JobType(jobType),
-		State:      JobState(state),
-		Payload:    json.RawMessage(payload),
-		Priority:   Priority(priority),
-		MaxRetries: maxRetries,
-		RetryCount: retryCount,
+		ID:          id,
+		Type:        JobType(jobType),
+		State:       JobState(state),
+		Payload:     json.RawMessage(payload),
+		Priority:    Priority(priority),
+		MaxRetries:  maxRetries,
+		RetryCount:  retryCount,
+		Interactive: interactive != 0,
 	}
 
 	if taskID.Valid {

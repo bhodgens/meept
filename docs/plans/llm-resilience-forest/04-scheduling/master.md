@@ -149,9 +149,9 @@ store's existing style); migrations follow store.go's pattern.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-session-signal.md | PENDING | 0 | |
+| 01-session-signal.md | COMPLETE | 0 | COMMITTED ed652a9e. Contract 1 exact. Activity source: NEW Session.LastUserMessageAt (LastActivity has no message writers; ActivityTracker unfed; thread ts thread-scoped). Deviation accepted: InteractiveWindow is a duration STRING (json5 loader rewrites duration tokens to ns ints — a time.Duration field is the only parseable shape); getter falls back to 5m. Setter = bus topic session.set_foreground / session.set_last_user_message + RPC proxy (no_fence pattern; no production daemon-side chat caller exists for messages.save either — client-invoked surface). |
 | 02-queue-priority.md | PENDING | 0 | |
-| 03-model-slot-fairness.md | PENDING | 0 | |
+| 03-model-slot-fairness.md | HELD | 0 | held: client.go conflict with tree 02; green-light after tree 02 leaf 03 lands |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
