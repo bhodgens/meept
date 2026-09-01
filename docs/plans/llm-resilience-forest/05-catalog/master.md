@@ -165,9 +165,9 @@ Pass `../SHARED-CONVENTIONS.md` §1-§3. HTTP fixtures via httptest
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-context-discovery.md | PENDING | 0 | |
-| 02-docs-and-config.md | PENDING | 0 | |
-| 03-lmstudio-provider.md | PENDING | 0 | |
+| 01-context-discovery.md | COMPLETE | 1 | dddb364e; APPROVED first review; SetContextLimits under r.mu (audit R3) |
+| 02-docs-and-config.md | COMPLETE | 1 | 40e41b0e; keys verified against schema.go; precedence verbatim; no drift found |
+| 03-lmstudio-provider.md | COMPLETE | 1 | 6f1a2e8a; commit gate paused run — orchestrator reviewed + committed; D12 discovery-only deviation recorded in DECISIONS.md |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
