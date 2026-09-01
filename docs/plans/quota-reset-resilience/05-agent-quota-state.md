@@ -80,11 +80,18 @@ func (t *QuotaEpisodeTracker) BlockedByEscalation(agentID, providerKey string)
 // (12h/20h/24h defaults; tests use seconds).
 
 // Bus events (topic "agent.quota_wait"), payload keys all string-typed:
-//   agent_id, task_id, from, to, reason ("quota_blocked"|"quota_cleared"),
+//   agent_id, task_id, from, to, reason ("quota_blocked"|"quota_cleared"|
+//   "warn"|"action_recommended"|"escalation_24h"),
 //   provider_id, credential_key, model_id,
-//   unblock_at (RFC3339), escalation ("" | "12h" | "20h" | "24h"),
-//   fallback_model (set by leaf 06 when a switch happened; tracker passes
-//   through if provided on Enter via an optional field)
+//   unblock_at (RFC3339), escalation ("" | "warn" | "action_recommended" |
+//   "blocked"), fallback_model (reserved; no producer sets it today —
+//   see master.md remaining gaps)
+//
+// DEVIATION from the sketch below: the wire escalation vocabulary is the
+// semantic ladder above, not "12h"/"20h"/"24h" strings. The 12h/20h/24h
+// timings gate WHICH tier fires (see QuotaEpisodeTracker.tiers); only the
+// wire strings differ. Tier events fire with to == "" (a refresh, not a
+// transition); only the initial entry and the 24h tier set to.
 ```
 
 ### What This Leaf Consumes

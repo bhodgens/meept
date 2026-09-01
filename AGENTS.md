@@ -204,10 +204,11 @@ boundaries:
   `AliasHealth`) and lazily clear only after expiry + a successful call.
 - **Never short-retry a quota error.** `QuotaResetError` implements
   `NonRetryable`; every client retry loop (openai non-streaming/streaming,
-  anthropic non-streaming/streaming) has an explicit `errors.As` quota
-  early-exit BEFORE the `RateLimitError`/retryable-status checks. A new
-  retry loop must preserve this — a 429 quota window is hours, and the
-  default 3-attempt loop would burn it.
+  openai streaming-delta, anthropic non-streaming/streaming) has an
+  explicit `errors.As` quota early-exit BEFORE the
+  `RateLimitError`/retryable-status checks. A new retry loop must
+  preserve this — a 429 quota window is hours, and the default
+  3-attempt loop would burn it.
 - **All-blocked is a distinct error.** When every alias candidate is
   quota-blocked, the Resolver returns `ErrAllModelsQuotaBlocked` — never a
   blocked model.

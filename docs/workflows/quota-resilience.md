@@ -111,18 +111,38 @@ go test -race ./internal/llm/ -run 'Quota' -count=1
 
 ## Invariants
 
-- Quota errors never re-enter the client 3-attempt short-retry loop.
+- Quota errors never re-enter ANY client short-retry loop. All five
+  (Chat, ChatWithProgress, streaming delta, anthropic non-streaming,
+  anthropic streaming) early-exit on `QuotaResetError` before the
+  `RateLimitError`/retryable-status checks.
 - QuotaWaitChatter retries exactly once per quota error.
 - Context cancellation takes precedence over quota wait.
 - A wait exceeding MaxWait returns the error immediately (no blocking).
 - Quota is not an alias health failure: RecordAliasFailure is never called
   for a QuotaResetError, and quota blocks live in separate Resolver state
-  (`entryBlocks` / `credentialBlock`).
+  (`entryBlocks` / `credentialBlock`). `RecordAliasSuccess` lazily deletes
+  EXPIRED blocks only (unexpired blocks persist; map growth is bounded).
+- Sticky aliases (BalancedStickyRequests) re-pin around quota blocks:
+  `resolveStickyCaller` releases pins on quota-blocked models and skips
+  blocked candidates when re-pinning.
 - Bus event classification: `agent.quota_wait` -> `agent_progress` (never
   `chat_message`).
 - Agent state transitions: running -> quota_wait -> blocked (at 24h), with
   Clear returning to running/idle.
 - Quota blocks are in-memory only; a daemon restart re-probes providers.
+
+## Known open gaps (audited 2026-08-31)
+
+- `QuotaEvent.FallbackModel` has no producer: declared and parsed by both
+  UIs, never set by any publisher.
+- No episode GC at the 24h boundary: a blocked episode stays in
+  QuotaEpisodeTracker until a successful call on that provider clears it.
+- `llm.quota_retry.defer_check_interval` is unconsumed: QuotaResumeWatcher
+  hardcodes the 10m `DefaultQuotaResumePollInterval`.
+- Unblock-time rendering drift: TUI detail lines use local time, Flutter
+  uses UTC.
+- Flutter drops the event `model_id`: the goals-pane primary line shows
+  "unknown" instead of the blocked model.
 
 ## Files
 

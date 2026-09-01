@@ -420,6 +420,70 @@ tracker/notifier construction + pumps + state machine reachability +
 Clear-on-recovery (leaves 05/07), turn-level deferral (leaf 06), and
 TUI/Flutter surfaces (leaves 08/09). See `docs/workflows/quota-resilience.md`.
 
+### Second pass (2026-08-31): adversarial verification fixes
+
+A second adversarial audit of the post-fix state found and fixed nine
+defects/gaps:
+
+1. **Streaming retry loop unprotected** — `ChatWithDeltaCallback`'s
+   streaming loop (`internal/llm/client.go` ~line 1328) had no quota
+   early-exit, so a wrapped-429 `QuotaResetError` re-entered the
+   `isRetryableStreamingError` short-retry loop. Fixed: `doStreamRequest`
+   classifies 429/402 via `classifyQuotaDecision`, and the loop
+   early-exits on `errors.As` `QuotaResetError`. All FIVE client retry
+   loops (Chat, ChatWithProgress, streaming delta, anthropic x2) are now
+   quota-protected.
+2. **`llm.UserMessage` mis-dispatched quota errors** — because
+   `QuotaResetError` wraps a 429 `APIError`, `errors.As` reached
+   `RateLimitError`/`APIError` first. Fixed: `internal/llm/errors.go`
+   tries `QuotaResetError` first.
+3. **Sticky pins held through quota blocks** — a sticky-alias caller
+   stayed pinned to a quota-blocked model. Fixed:
+   `resolveStickyCaller` calls `releaseQuotaBlockedPin`
+   (`internal/llm/resolver.go` ~line 567) before pin selection, and the
+   re-pin path skips blocked candidates (serving the rotation head only
+   when everything is blocked, so the quota error still surfaces).
+4. **`NormalizeQuotaRetryDefaults` was dead code** — defined but never
+   called. Fixed: wired at BOTH load paths
+   (`internal/config/config.go:50` TOML `Load`, `:145` `LoadJSON5Config`)
+   so every consumer sees normalized `llm.quota_retry` values.
+5. **`ChatHandler.Stop` leaked the watcher** — `quotaResumeWatcher` was
+   started in `Start` but never stopped. Fixed: `Stop` stops the watcher
+   (`internal/agent/handler.go:517-522`).
+6. **TUI `to==""` events were indistinguishable from clears** — a tier
+   escalation and a genuine clear carried the same shape. Fixed:
+   `internal/tui/agents_panel.go` `case ""` refreshes the episode
+   (unblock time + escalation tier) whenever any quota field is present,
+   clearing only when neither is; plus a new 30s
+   `quotaCountdownTickMsg` live countdown with cursor-preserving
+   table rebuild, and `internal/tui/app.go` plumbs the escalation field
+   into `quotaStateMsg`.
+7. **Flutter parity gaps** — `AgentQuotaState` gained an `escalation`
+   field + `to==""` refresh (same semantics as the TUI);
+   `quota_status.dart` badge prepends the state label; `agents_tab.dart`
+   renders `quotaDetailLines` in the goals pane.
+
+Also added: `RecordAliasSuccess` lazily deletes EXPIRED entry/credential
+blocks (bounds map growth; unexpired blocks stay), and
+`ErrAllModelsQuotaBlocked` is `errors.Is`-compatible for callers.
+
+### Remaining known gaps (open, not fixed)
+
+- **(a) `QuotaEvent.FallbackModel` has no producer** — declared +
+  parsed by both UIs, but nothing ever sets it, so the primary/active
+  detail lines always show the fallback as absent (Flutter's primary
+  line degrades to "unknown" since the event `model_id` is dropped too).
+- **(b) No episode GC at the 24h boundary** — after the blocked
+  escalation the episode stays in `QuotaEpisodeTracker` until a
+  successful call on that provider clears it.
+- **(c) `llm.quota_retry.defer_check_interval` is unconsumed** —
+  plumbed and normalized, but `QuotaResumeWatcher` hardcodes the 10m
+  `DefaultQuotaResumePollInterval`.
+- **(d) Unblock-time drift between surfaces** — TUI detail lines render
+  local time (`15:04 MST`); Flutter renders UTC `HH:mm`.
+- **(e) Flutter drops the event `model_id`** — the primary line shows
+  "unknown" in the goals pane.
+
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
 ## Integration Test Plan

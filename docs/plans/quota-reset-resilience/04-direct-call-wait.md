@@ -160,6 +160,11 @@ Output: APPROVED or list of specific gaps with file + line references.
 
 ## Notes
 
+- **Production wiring deviation (documented in master.md):** the decorator
+  is wired only via `ModelBroker.ChatterForModel`, and the broker is dead
+  in production. Production quota-wait instead happens through turn
+  parking (`QuotaResumeWatcher`, leaf 06) plus the agent-loop quota
+  branch. The decorator and its tests remain for the broker/test path.
 - The decorator intentionally does NOT consult the broker's block maps —
   direct calls are per-caller, wait happens in the caller's goroutine and
   context. The broker path (leaf 03) is the zero-wait rotation path; this

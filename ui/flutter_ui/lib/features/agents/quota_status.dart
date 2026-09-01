@@ -12,7 +12,9 @@ import 'package:flutter/material.dart';
 /// Returns the countdown hint for an [AgentQuotaState]: "quota resets in
 /// 3h 12m" while waiting, "resets soon" when the unblock time has passed.
 /// Null (no wait time) with a blocked state yields null — the blocked badge
-/// carries the "action required" hint itself.
+/// carries the "action required" hint itself. The "quota wait · " state
+/// label is prepended by [QuotaStatusBadge] (parity with the TUI badge
+/// format in internal/tui/agents_panel.go quotaStatusBadge).
 String? quotaCountdownText(AgentQuotaState? state) {
   if (state == null || state.quotaBlocked) return null;
   final waitUntil = state.quotaWaitUntilEpoch;
@@ -47,8 +49,19 @@ class QuotaStatusBadge extends StatelessWidget {
         color: CyberpunkColors.yellowWarning.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text(
-        text,
+      child: Text.rich(
+        // "quota wait · <countdown>" — byte-matched to the TUI badge format
+        // (internal/tui/agents_panel.go quotaStatusBadge).
+        TextSpan(
+          children: [
+            const TextSpan(
+              text: 'quota wait',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const TextSpan(text: ' · '),
+            TextSpan(text: text),
+          ],
+        ),
         style: CyberpunkTypography.bodySmall.copyWith(
           color: CyberpunkColors.yellowWarning,
           fontFamily: 'SourceCodePro',
