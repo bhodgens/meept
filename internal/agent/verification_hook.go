@@ -31,6 +31,18 @@ type VerificationAutoTrigger struct {
 	config   VerificationConfig
 	spawner  VerifierSpawner // nil = nudge-only mode
 	fixCount int             // tracks fix loop iterations within a session
+
+	// spec is the owning AgentSpec; its EscalationModel drives the
+	// fix-loop-exhaustion escalation decision (D1: per-agent config).
+	// Nil until SetAgentSpec is called; nil means escalation disabled.
+	spec *AgentSpec
+	// resolver resolves the escalation target to a usable model ref.
+	// Nil until SetResolver is called; nil with a configured target
+	// degrades to the legacy user-escalation path.
+	resolver ModelResolver
+	// pendingEscalation holds the most recent Escalate=true decision from
+	// fix-loop exhaustion (leaf 04's consumption seam).
+	pendingEscalation *EscalationDecision
 }
 
 // NewVerificationAutoTrigger wires a tracker and verification config into a
@@ -44,6 +56,25 @@ func NewVerificationAutoTrigger(tracker *VerificationTracker, config Verificatio
 func (h *VerificationAutoTrigger) SetSpawner(s VerifierSpawner) {
 	if s != nil {
 		h.spawner = s
+	}
+}
+
+// SetAgentSpec attaches the owning AgentSpec so the hook can consult
+// EscalationModel at fix-loop exhaustion. Nil (or typed-nil) input is a
+// no-op per repo setter rules.
+func (h *VerificationAutoTrigger) SetAgentSpec(spec *AgentSpec) {
+	if h != nil && spec != nil {
+		h.spec = spec
+	}
+}
+
+// SetResolver attaches the model resolver used to resolve the escalation
+// target. Nil (or a typed-nil carrier) is a no-op per repo setter rules;
+// without a resolver the escalation decision degrades to the legacy
+// user-escalation path.
+func (h *VerificationAutoTrigger) SetResolver(resolver ModelResolver) {
+	if h != nil && resolver != nil {
+		h.resolver = resolver
 	}
 }
 
@@ -125,7 +156,28 @@ func (h *VerificationAutoTrigger) handleFail(verifierOutput string, checks []Che
 	h.fixCount++
 
 	if h.fixCount > maxLoops {
-		// Max loops exhausted — escalate to user.
+		// Fix loops exhausted — decide escalation (D2: same max_fix_loops
+		// variable triggers escalation).
+		decision := DecideEscalation(h.spec, h.resolver)
+		if decision.Escalate {
+			h.pendingEscalation = &decision
+			// Q2 (DECISIONS.md): reset fixCount — the escalated model gets
+			// its own full max_fix_loops budget.
+			h.fixCount = 0
+			return TurnModification{
+				Modified: true,
+				ExtraMessages: []llm.ChatMessage{{
+					Role: llm.RoleUser,
+					Content: fmt.Sprintf(
+						"Adversarial verification failed after %d fix attempts. All fix attempts are exhausted; this next attempt runs on the escalation model (%s). Treat the verifier findings below as authoritative and resolve them with a fresh approach.\n\nLast verifier output:\n%s",
+						maxLoops, decision.ModelRef, verifierOutput,
+					),
+				}},
+				Reason: "verification model escalation",
+			}
+		}
+		// No escalation model (or resolution failed) — legacy user
+		// escalation, byte-identical to the pre-escalation behavior.
 		h.fixCount = 0
 		return TurnModification{
 			Modified: true,
