@@ -241,10 +241,10 @@ wrap errors with %w, comments cite DECISIONS.md IDs, no new deps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-spec-config.md | PENDING | 0 | |
-| 02-hook-pipeline.md | PENDING | 0 | |
-| 03-hook-wiring.md | PENDING | 0 | |
-| 04-resolution-lifecycle.md | PENDING | 0 | |
+| 01-spec-config.md | COMPLETE | 1 | 178cd2b3; D16 two-half frontmatter pattern |
+| 02-hook-pipeline.md | COMPLETE | 1 | 53e0dd48; wires inert RunPrepareNextTurn (audit B1) |
+| 03-hook-wiring.md | COMPLETE | 1 | c88cc545; DecideEscalation + pendingEscalation seam |
+| 04-resolution-lifecycle.md | COMPLETE | 2 | a00b76a5; ResolveEscalationRef (B2) + persistent override (R1) + agent.model_escalated; concurrent leaf-04 workers converged, orchestrator reviewed gates |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
