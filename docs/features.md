@@ -1325,7 +1325,16 @@ pattern_promotion_confidence = 0.7
 pattern_promotion_use_count = 5
 auto_apply = false              # false = proposals go to plan system
 run_on_start = false            # Skip immediate cycle on daemon startup
+plan_dir = "~/.meept/plans/evolver"  # Where evolver-created plans land
 ```
+
+**Plan sink:** When `auto_apply = false`, verified evolver proposals become
+plans in `skills.evolver.plan_dir` (default `~/.meept/plans/evolver`, a
+user-scoped directory independent of the daemon's working directory). Each
+machine-originated plan is stamped with `origin: skill-evolver`, a proposal
+id, and the proposed action in its Meta section. A repo's `docs/plans/`
+directory is reserved for human-authored plans only — evolver plans never
+land there.
 
 ---
 

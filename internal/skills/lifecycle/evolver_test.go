@@ -679,11 +679,15 @@ func TestEvolver_VerifierRejects_NoArchive(t *testing.T) {
 	registry.Register(parsed)
 
 	usage := newStubUsageTracker()
+	// Leaf 04 (corrected polarity): the archive usage gate re-verifies
+	// passCPrune's selection on current stats. Stats showing RECOVERY
+	// (effectiveness >= MinEffectiveness) make the gate reject — exercising
+	// a genuine usage-gate rejection that keeps the skill on disk.
 	usage.SetLowPerformers([]*UsageStats{
 		{
 			SkillName:     skillName,
 			InjectCount:   15,
-			Effectiveness: 0.1,
+			Effectiveness: 0.8,
 		},
 	})
 

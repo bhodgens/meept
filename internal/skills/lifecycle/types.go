@@ -131,7 +131,31 @@ type VerifyRequest struct {
 	// EvidenceSummary is a human-readable summary of usage stats and learned
 	// patterns that motivated this proposal.
 	EvidenceSummary string `json:"evidence_summary"`
+	// UsageGate carries the usage statistics for archive proposals (leaf 04:
+	// per-action verifier gating). Archive proposals are judged by the usage
+	// gate alone — the content rubric never scores them. Nil for refine/create.
+	UsageGate *UsageGateInput `json:"usage_gate,omitempty"`
 }
+
+// UsageGateInput is the usage-gate payload for archive proposals.
+type UsageGateInput struct {
+	// Stats are the skill's aggregate usage statistics (from passCPrune's
+	// GetLowPerformers selection).
+	Stats *UsageStats
+	// MinEffectiveness is the prune threshold from config (single-sourced
+	// with passCPrune's selection — the gate re-verifies that selection).
+	MinEffectiveness float64
+}
+
+// VerificationGate names which gate produced a verdict.
+type VerificationGate string
+
+const (
+	// GateContent is the 4-dimension content rubric (refine/create proposals).
+	GateContent VerificationGate = "content"
+	// GateUsage is the usage-statistics gate (archive proposals).
+	GateUsage VerificationGate = "usage"
+)
 
 // VerificationResult is the output of Verifier.Verify. It contains the
 // accept/reject decision, the four dimension scores, the overall average, and
@@ -141,6 +165,9 @@ type VerificationResult struct {
 	Score      float64      `json:"score"` // mean of the four dimensions
 	Reasons    []string     `json:"reasons"`
 	Dimensions Dimensions   `json:"dimensions"`
+	// Gate records which gate produced this verdict ("usage" | "content").
+	// Empty on legacy heuristic results that predate gate dispatch.
+	Gate VerificationGate `json:"gate,omitempty"`
 }
 
 // EvolutionProposalAction labels what the evolver wants to do with a skill.

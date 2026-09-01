@@ -192,6 +192,15 @@ When `auto_apply = false` (default), proposals go through the plan system:
 ./bin/meept plans reject <id>       # Reject with reason
 ```
 
+Evolver-created plans land in the user-scoped sink
+`skills.evolver.plan_dir` (default `~/.meept/plans/evolver`), never in a
+repo's `docs/plans/` — that directory is for human-authored plans only.
+Each evolver plan's Meta section records `origin: skill-evolver`, the
+proposal id, and the proposed action (`archive` | `improve` | `create`),
+so approval tooling can identify machine-originated plans. The default
+path is resolved against the user's home directory (not the daemon CWD);
+relative paths are rejected.
+
 ### CLI Reference
 
 ```bash
@@ -228,6 +237,7 @@ When `auto_apply = false` (default), proposals go through the plan system:
       pattern_promotion_use_count: 5,
       auto_apply: false,
       run_on_start: false,
+      plan_dir: "~/.meept/plans/evolver",  // sink for evolver-created plans
     },
     wiki: {
       enabled: true,

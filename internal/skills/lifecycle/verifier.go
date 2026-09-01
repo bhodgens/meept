@@ -85,14 +85,78 @@ Respond in JSON format:
   "reasons": ["brief explanation per dimension"]
 }`
 
+// ArchiveMinInjections is the minimum number of injections a skill must have
+// before it may be gated for archiving. It is the single source of truth for
+// both passCPrune's GetLowPerformers call (evolver.go) and the archive usage
+// gate (verifyUsage below) — never inline the literal at either site.
+const ArchiveMinInjections = 10
+
+// verifyUsage is the archive usage gate (leaf 04: per-action verifier
+// gating). It decides archive proposals purely on usage statistics, never on
+// content: an archive passes only when the skill is STILL a low performer —
+// injections >= ArchiveMinInjections AND effectiveness < minEffectiveness,
+// mirroring passCPrune's GetLowPerformers selection predicate. A skill whose
+// effectiveness has recovered to or above the prune threshold since selection
+// must not be archived: it improved, which is the point of letting skills
+// recover. A nil stats input fails the injection minimum (an unverifiable
+// archive is a rejected archive).
+func verifyUsage(input *UsageGateInput) *VerificationResult {
+	stats := input.Stats
+	if stats == nil {
+		stats = &UsageStats{}
+	}
+
+	var reasons []string
+	if stats.InjectCount < ArchiveMinInjections {
+		reasons = append(reasons, fmt.Sprintf(
+			"usage gate: injection count %d is below minimum %d",
+			stats.InjectCount, ArchiveMinInjections))
+	}
+	if stats.Effectiveness >= input.MinEffectiveness {
+		reasons = append(reasons, fmt.Sprintf(
+			"usage gate: effectiveness %.2f has recovered to or above the prune threshold %.2f — skill improved since selection; do not archive",
+			stats.Effectiveness, input.MinEffectiveness))
+	}
+
+	action := ActionAccept
+	if len(reasons) > 0 {
+		action = ActionReject
+	}
+
+	return &VerificationResult{
+		Action:     action,
+		Score:      stats.Effectiveness,
+		Reasons:    reasons,
+		Dimensions: Dimensions{},
+		Gate:       GateUsage,
+	}
+}
+
 // Verify evaluates a proposed skill change against the four-dimension rubric.
 // Returns a VerificationResult containing the accept/reject decision, the
 // dimension scores, the overall average, and human-readable reasons.
+//
+// Gate dispatch (leaf 04): archive proposals with a UsageGate payload are
+// judged by verifyUsage alone — the content rubric never scores them, because
+// archive proposals carry empty CandidateContent (nothing to judge). All
+// other actions take the content rubric.
 //
 // When the LLM client is nil or the call fails, Verify falls back to a neutral
 // heuristic (all dimensions = 0.5). Under the default minScore of 0.75, the
 // heuristic path always rejects — ensuring unverified changes never go live.
 func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (*VerificationResult, error) {
+	// Archive gate dispatch: usage stats only.
+	if req.Action == "archive_skill" && req.UsageGate != nil {
+		res := verifyUsage(req.UsageGate)
+		v.logger.Info("verifier: archive usage gate",
+			"gate", string(res.Gate),
+			"action", req.Action,
+			"skill", req.SkillName,
+			"score", res.Score,
+			"decision", string(res.Action))
+		return res, nil
+	}
+
 	if v.llmClient == nil {
 		v.logger.Debug("verifier: LLM client unavailable, using heuristic fallback",
 			"action", req.Action, "skill", req.SkillName)
@@ -255,6 +319,7 @@ func decide(dims Dimensions, reasons []string, minScore float64) *VerificationRe
 		Score:      score,
 		Reasons:    reasons,
 		Dimensions: dims,
+		Gate:       GateContent,
 	}
 }
 

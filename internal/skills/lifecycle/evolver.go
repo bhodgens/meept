@@ -278,7 +278,7 @@ func (e *Evolver) passARefine(ctx context.Context, report *EvolutionReport) {
 			CandidateContent: improvedContent,
 		}
 
-		e.processProposal(ctx, report, proposal, currentContent, action)
+		e.processProposal(ctx, report, proposal, currentContent, action, stats)
 	}
 }
 
@@ -335,7 +335,7 @@ func (e *Evolver) handleReflectionProposal(ctx context.Context, report *Evolutio
 		Rationale:        p.Justification,
 		CandidateContent: p.Change,
 	}
-	e.processProposal(ctx, report, proposal, currentContent, verifyAction)
+	e.processProposal(ctx, report, proposal, currentContent, verifyAction, nil)
 }
 
 // mapReflectionType converts a reflection proposal type string to the
@@ -424,7 +424,7 @@ func (e *Evolver) passBPromote(ctx context.Context, report *EvolutionReport) {
 			CandidateContent: candidateContent,
 		}
 
-		e.processProposal(ctx, report, proposal, "", "create_skill")
+		e.processProposal(ctx, report, proposal, "", "create_skill", nil)
 	}
 }
 
@@ -513,7 +513,7 @@ func (e *Evolver) passCPrune(ctx context.Context, report *EvolutionReport) {
 		return
 	}
 
-	lowPerformers, err := e.usage.GetLowPerformers(e.cfg.MinEffectiveness, 10)
+	lowPerformers, err := e.usage.GetLowPerformers(e.cfg.MinEffectiveness, ArchiveMinInjections)
 	if err != nil {
 		e.logger.Warn("pass C: failed to get low performers", "error", err)
 		return
@@ -534,7 +534,7 @@ func (e *Evolver) passCPrune(ctx context.Context, report *EvolutionReport) {
 			CandidateContent: "",
 		}
 
-		e.processProposal(ctx, report, proposal, currentContent, "archive_skill")
+		e.processProposal(ctx, report, proposal, currentContent, "archive_skill", stats)
 	}
 }
 
@@ -545,7 +545,13 @@ func (e *Evolver) passCPrune(ctx context.Context, report *EvolutionReport) {
 // processProposal is the central decision-and-apply pipeline shared by all
 // three passes. It routes every proposal through the verifier, then either
 // applies it (AutoApply=true) or creates a plan (AutoApply=false).
-func (e *Evolver) processProposal(ctx context.Context, report *EvolutionReport, proposal EvolutionProposal, currentContent, verifyAction string) {
+//
+// usage carries the skill's aggregate usage statistics. It is REQUIRED for
+// archive proposals (the usage gate judges these stats, with the threshold
+// single-sourced from e.cfg.MinEffectiveness) and nil for refine/create
+// proposals, which the content rubric judges — the content path needs no
+// usage input.
+func (e *Evolver) processProposal(ctx context.Context, report *EvolutionReport, proposal EvolutionProposal, currentContent, verifyAction string, usage *UsageStats) {
 	// Route through the verifier gate.
 	verifyReq := VerifyRequest{
 		Action:           verifyAction,
@@ -553,6 +559,17 @@ func (e *Evolver) processProposal(ctx context.Context, report *EvolutionReport, 
 		CandidateContent: proposal.CandidateContent,
 		CurrentContent:   currentContent,
 		EvidenceSummary:  proposal.Rationale,
+	}
+	if verifyAction == "archive_skill" {
+		if usage != nil {
+			verifyReq.UsageGate = &UsageGateInput{
+				Stats:            usage,
+				MinEffectiveness: e.cfg.MinEffectiveness,
+			}
+		}
+		// usage == nil here would leave the gate without stats; verifyUsage
+		// then degrades to zero stats, which fails the injection minimum —
+		// fail-closed, never a silent rubber-stamp.
 	}
 
 	vr, err := e.verifier.Verify(ctx, verifyReq)
@@ -601,11 +618,15 @@ func (e *Evolver) processProposal(ctx context.Context, report *EvolutionReport, 
 			if proposal.CandidateContent != "" {
 				planDesc += "\n\nCandidate content:\n" + proposal.CandidateContent
 			}
-			if _, perr := e.planMgr.CreatePlan(ctx, planTitle, planDesc, "", "", ""); perr != nil {
+			if created, perr := e.planMgr.CreatePlan(ctx, planTitle, planDesc, "", "", ""); perr != nil {
 				e.logger.Error("failed to create plan for proposal",
 					"skill", proposal.SkillName, "error", perr)
 				report.Skipped++
 			} else {
+				// Stamp evolver provenance (origin + proposal id + action)
+				// so the approval actuator can identify machine-originated
+				// plans and dispatch the right skill action.
+				StampEvolverPlan(created, evolverProposalID(proposal), string(proposal.Action))
 				report.Planned++
 			}
 		} else {

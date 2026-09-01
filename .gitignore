@@ -96,3 +96,6 @@ daemon.test
 *.db-shm
 *.db-wal
 results/
+
+# Skill-evolution cycle output (regenerable daemon artifacts, churn every cycle)
+docs/plans/skill-evolution-*.md

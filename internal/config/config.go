@@ -49,6 +49,13 @@ func Load(path string) (*Config, error) {
 	// so every consumer sees normalized values.
 	NormalizeQuotaRetryDefaults(&cfg.LLM.QuotaRetry)
 
+	// Normalize the evolver plan sink (empty -> user-scoped default,
+	// ~ expansion, relative rejection) at the load boundary so every
+	// consumer sees an absolute path (evolver plan-sink leaf 01).
+	if err := NormalizeEvolverDefaults(&cfg.Skills.Evolver); err != nil {
+		return nil, err
+	}
+
 	// Expand tilde paths in the loaded config
 	expandConfigPaths(cfg)
 
@@ -143,6 +150,13 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// negatives clamp, zeros take defaults). Applied at the load boundary
 	// so every consumer sees normalized values.
 	NormalizeQuotaRetryDefaults(&cfg.LLM.QuotaRetry)
+
+	// Normalize the evolver plan sink (empty -> user-scoped default,
+	// ~ expansion, relative rejection) at the load boundary so every
+	// consumer sees an absolute path (evolver plan-sink leaf 01).
+	if err := NormalizeEvolverDefaults(&cfg.Skills.Evolver); err != nil {
+		return nil, err
+	}
 
 	expandConfigPaths(cfg)
 	warnDeprecatedConfig(cfg)

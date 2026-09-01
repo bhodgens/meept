@@ -102,14 +102,22 @@ type Components struct {
 	ToolRegistry          *tools.Registry
 	SecurityChecker       *security.PermissionChecker
 	BudgetCleanupStop     chan struct{} // Stop channel for budget periodic cleanup
-	SecurityOrchestrator  *intsecurity.Orchestrator
-	FenceChecker          *intsecurity.FenceChecker
-	AgentLoop             *agent.AgentLoop
-	ChatHandler           *agent.ChatHandler
-	StatusHandler         *StatusHandler
-	SessionStore          session.Store
-	SessionHandler        *session.Handler
-	EmbeddingWorker       *session.EmbeddingWorker
+	// EvolverPlanStore backs the evolver-DEDICATED PlanManager (plan sink).
+	// Owned by the evolver wiring, NOT the shared plan system: closed in
+	// stopComponents, never by the daemon's plan-store shutdown.
+	EvolverPlanStore  *plan.SQLiteStore
+	EvolverPlanCancel context.CancelFunc // cancels the evolver sink lifecycle context
+	// EvolverPlanCtx is the sink lifecycle context created with the store
+	// above; the approval actuator (leaf 03) runs sink-scoped work on it.
+	EvolverPlanCtx       context.Context
+	SecurityOrchestrator *intsecurity.Orchestrator
+	FenceChecker         *intsecurity.FenceChecker
+	AgentLoop            *agent.AgentLoop
+	ChatHandler          *agent.ChatHandler
+	StatusHandler        *StatusHandler
+	SessionStore         session.Store
+	SessionHandler       *session.Handler
+	EmbeddingWorker      *session.EmbeddingWorker
 
 	// Multi-agent orchestration components
 	Queue         queue.Queue
@@ -4442,6 +4450,19 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.SkillEvolverSched != nil {
 		c.SkillEvolverSched.Stop()
 		c.Logger.Info("Skill evolver scheduler stopped")
+	}
+
+	// Close the evolver's dedicated plan-sink store (its lifecycle context
+	// first, so in-flight sink writes unblock). Owned solely by the evolver
+	// wiring — the shared plan store is closed by the daemon, not here.
+	if c.EvolverPlanCancel != nil {
+		c.EvolverPlanCancel()
+	}
+	if c.EvolverPlanStore != nil {
+		if err := c.EvolverPlanStore.Close(); err != nil {
+			c.Logger.Error("Failed to close evolver plan sink store", "error", err)
+			lastErr = err
+		}
 	}
 
 	// Stop self-improve scheduler and controller

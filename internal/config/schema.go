@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/pathutil"
 	"github.com/caimlas/meept/internal/secrets"
 )
 
@@ -1920,6 +1922,30 @@ type SkillsEvolverConfig struct {
 	MinProposalConfidence      float64       `json:"min_proposal_confidence"        toml:"min_proposal_confidence"`      // Default 0.7; reflection proposals below this confidence are dropped before reaching the verifier
 	AutoApply                  bool          `json:"auto_apply"                     toml:"auto_apply"`                   // Default false (requires plan approval)
 	RunOnStart                 bool          `json:"run_on_start"                   toml:"run_on_start"`                 // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
+	PlanDir                    string        `json:"plan_dir"                       toml:"plan_dir"`                     // Evolver plan sink; default "" -> ~/.meept/plans/evolver (user-scoped, machine-originated plans)
+}
+
+// DefaultEvolverPlanDir is the user-scoped sink where machine-originated
+// (evolver) plans land. Machine plans must never depend on the daemon's
+// arbitrary CWD, and must never pollute a repo's docs/plans (which is
+// reserved for human-authored plans).
+const DefaultEvolverPlanDir = "~/.meept/plans/evolver"
+
+// NormalizeEvolverDefaults normalizes the skills.evolver section: an empty
+// PlanDir resolves to the user-scoped sink (~-expanded), a ~-prefixed PlanDir
+// is expanded, and a relative PlanDir is rejected (machine plan landing must
+// not depend on the daemon's arbitrary CWD). Mirrors the load-boundary
+// normalization contract of NormalizeQuotaRetryDefaults.
+func NormalizeEvolverDefaults(e *SkillsEvolverConfig) error {
+	if e.PlanDir == "" {
+		e.PlanDir = DefaultEvolverPlanDir
+	}
+	expanded := pathutil.ExpandPath(e.PlanDir)
+	if !filepath.IsAbs(expanded) {
+		return fmt.Errorf("skills.evolver.plan_dir %q: relative paths are not supported; use an absolute or ~-prefixed path", e.PlanDir)
+	}
+	e.PlanDir = expanded
+	return nil
 }
 
 // SelfImproveConfig holds self-improvement settings.

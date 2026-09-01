@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/skills/lifecycle"
 )
@@ -152,6 +155,41 @@ func (c *Components) initializeSkillEvolver(cfg *config.Config, logger *slog.Log
 			"wiki_store", c.WikiStore != nil,
 		)
 	}
+	// Construct the evolver-DEDICATED PlanManager pinned to the
+	// skills.evolver.plan_dir sink, so machine-originated plans land under
+	// ~/.meept/plans/evolver (or the configured override) instead of the
+	// daemon CWD's docs/plans. The shared c.PlanManager is untouched —
+	// human-authored plans keep landing in the repo (evolver plan-sink
+	// leaf 01 invariant). Falls back to the shared manager only when the
+	// sink store cannot be created.
+	evolverPlanMgr := c.PlanManager
+	// Sink lifecycle context: derived from the components lifecycle so a
+	// Stop() cancels it (via EvolverPlanCancel in stopComponents). Stored
+	// on the component for the approval actuator (leaf 03); it is
+	// deliberately created here so the ownership chain is established at
+	// wiring time.
+	sinkCtx, sinkCancel := context.WithCancel(c.ctx)
+	c.EvolverPlanCtx = sinkCtx
+	evolverPlanStore, err := plan.NewSQLiteStore(
+		filepath.Join(c.Config.Daemon.DataDir, "plans-evolver.db"), logger)
+	if err != nil {
+		sinkCancel()
+		logger.Warn("Skill evolver plan sink store unavailable; falling back to shared plan manager",
+			"error", err)
+	} else {
+		c.EvolverPlanStore = evolverPlanStore
+		c.EvolverPlanCancel = sinkCancel
+		if sinkMgr, err := c.newEvolverPlanManager(evolverPlanStore, cfg, logger); err == nil {
+			evolverPlanMgr = sinkMgr
+			logger.Info("Skill evolver wired to dedicated plan sink",
+				"plan_dir", cfg.Skills.Evolver.PlanDir,
+			)
+		} else {
+			sinkCancel()
+			logger.Warn("Skill evolver plan sink unavailable; falling back to shared plan manager",
+				"error", err)
+		}
+	}
 	c.SkillEvolver = lifecycle.NewEvolver(
 		c.SkillUsageTracker,
 		c.LearningPipeline,
@@ -160,7 +198,7 @@ func (c *Components) initializeSkillEvolver(cfg *config.Config, logger *slog.Log
 		c.CapabilityIndex,
 		verifier,
 		c.LLMClient,
-		c.PlanManager,
+		evolverPlanMgr,
 		cfg.Skills.Evolver,
 		logger,
 		evolverOpts...,
@@ -174,4 +212,47 @@ func (c *Components) initializeSkillEvolver(cfg *config.Config, logger *slog.Log
 		"interval", cfg.Skills.Evolver.Interval,
 		"auto_apply", cfg.Skills.Evolver.AutoApply,
 	)
+}
+
+// newEvolverPlanManager constructs the evolver-DEDICATED PlanManager: same
+// bus/task-creator wiring as the shared human PlanManager, but with
+// Storage.ExternalPath pinned to the resolved skills.evolver.plan_dir sink so
+// machine-originated plans land under ~/.meept/plans/evolver (or the
+// configured override) instead of the daemon CWD's docs/plans. The shared
+// manager is NOT repointed — human-authored plans keep their repo-relative
+// default (evolver plan-sink leaf 01 invariant).
+//
+// store must be non-nil; the message bus and task creator may be nil (the
+// PlanManager degrades gracefully). The sink directory itself is created
+// lazily by the first plan write (plan.WritePlanMarkdown does MkdirAll),
+// not here.
+func (c *Components) newEvolverPlanManager(store plan.PlanStore, cfg *config.Config, logger *slog.Logger) (*plan.PlanManager, error) {
+	if store == nil {
+		return nil, fmt.Errorf("evolver plan sink: nil plan store")
+	}
+	sink := cfg.Skills.Evolver.PlanDir
+	if sink == "" {
+		// Load-path normalization normally guarantees a value; belt-and-
+		// suspenders for direct constructions (tests, embedded daemons).
+		if err := config.NormalizeEvolverDefaults(&cfg.Skills.Evolver); err != nil {
+			return nil, fmt.Errorf("evolver plan sink: %w", err)
+		}
+		sink = cfg.Skills.Evolver.PlanDir
+	}
+	if !filepath.IsAbs(sink) {
+		return nil, fmt.Errorf("evolver plan sink: plan_dir %q is not absolute", sink)
+	}
+	evolverPlans := cfg.Plans
+	evolverPlans.Storage.ExternalPath = sink
+	return plan.NewPlanManager(store, c.msgBus, evolverPlans, c.taskCreatorAdapterForEvolver(), logger), nil
+}
+
+// taskCreatorAdapterForEvolver returns the shared TaskCreator adapter (or nil
+// when the task registry is absent), so the evolver's PlanManager gets the
+// same task-synthesis capability as the human one.
+func (c *Components) taskCreatorAdapterForEvolver() plan.TaskCreator {
+	if c == nil || c.TaskRegistry == nil {
+		return nil
+	}
+	return newTaskCreatorAdapter(c.TaskRegistry)
 }
