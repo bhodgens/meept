@@ -62,3 +62,25 @@ go build ./... && go test ./internal/tui/... ./theme/... && gofmt -l internal/tu
 
 Restart-applied theme is acceptable (issue non-goal: no hot reload).
 Do not touch models/*.go stragglers (L4 owns).
+
+## Self-Verification Checklist
+
+Before reporting completion, verify:
+
+- [ ] All scope items implemented at the exact owned paths
+- [ ] Frozen interface contracts (master) satisfied
+- [ ] Tests written and passing (see Tests/Verify above)
+- [ ] No scope creep beyond this leaf's ownership
+- [ ] No debug artifacts; no line-number corruption
+
+**DO NOT COMMIT.** The orchestrator handles all git operations after
+review.
+
+## Review Checklist (For Review Agent)
+
+- [ ] Every scope item implemented; tests present and passing
+- [ ] Contracts match the master's frozen list exactly
+- [ ] File ownership respected (no overlap with sibling leaves)
+- [ ] Repo conventions honored (lowercase UI text, error handling, no new deps)
+
+Output: APPROVED or list of specific gaps with file + line references.

@@ -93,6 +93,60 @@ File ownership (no overlap):
 - Do not rename public identifiers beyond the contract above.
 - Non-goal (from issue): light themes; TUI hot-reload of theme (restart-applied OK).
 
+## Coding Conventions
+
+- Go: in-package tests, table-driven where natural, errors wrapped with
+  %w, no panics in libs; run `gofmt` before reporting.
+- Dart: follow `flutter analyze` clean as the gate; no `print`, use the
+  app logger; no top-level `dart:io` in shared code (kIsWeb guards).
+- Naming: match each surface's existing idiom (Go exported PascalCase;
+  Dart lowerCamel); no cross-surface renames beyond the contracts.
+- Comments explain WHY; no TODO/placeholder/debug artifacts in landed work.
+
+## Dispatch Protocol
+
+> This tree is COMPLETE (all items COMPLETE in Completion tracking, below).
+> The protocol is retained as the historical record; no further dispatches.
+
+1. Read this master + the assigned leaf + the frozen interface contracts.
+2. Dispatch the leaf via delegate_task with: full leaf text, contracts,
+   conventions, "Do NOT commit. Do NOT run git add. Write code, run tests,
+   report results only."
+3. Review in-session (main model); re-dispatch with feedback on gaps
+   (max 3 cycles); commit explicit paths on pass; update tracking.
+
+## Review Checklist
+
+- [ ] Leaf scope implemented exactly; files owned per the ownership table
+- [ ] Frozen interface contracts (above) satisfied — names, paths, keys
+- [ ] Tests present and passing (`go test ./theme/... ./internal/tui/...`,
+      `flutter analyze && flutter test`)
+- [ ] All UI text lowercase; no new deps; no public renames beyond contract
+- [ ] No debug artifacts, no line-number corruption
+
+## Integration Test Plan
+
+1. `go build ./...` and full `go test ./...` green (gates row: COMPLETE).
+2. `cd ui/flutter_ui && flutter analyze && flutter test` (322 pass at
+   completion).
+3. Cross-surface parity: switch rendering.ui_theme per client (TUI + GUI);
+   both surfaces render identical palettes; restart-applied on TUI.
+4. Stray-literal guard: no raw `Color(0x…)` outside lib/theme; no
+   `lipgloss.Color("#…")` literals outside styles.go (L4 guard test).
+
+## Completion Tracking Table
+
+| Child | Status | Iterations | Review Notes |
+|-------|--------|------------|-------------|
+| W0 tokens foundation | COMPLETE | 1 | see historical tracking below |
+| L1 flutter palette layer | COMPLETE | 1 | commit 2d6124d1 |
+| L2 tui runtime palette | COMPLETE | 1 | commit 660227b4 |
+| L3 flutter settings + tests | COMPLETE | 1 | commit 78db4f98 |
+| L4 tui stragglers | COMPLETE | 2 | commit 86af507c |
+| L5 consistency + docs | COMPLETE | 1 | commit c1fd91d5 |
+
+Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
+
 ## Completion tracking
 
 | Item | Status | Iterations | Timestamp | Complete | Notes |
