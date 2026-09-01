@@ -37,14 +37,37 @@ type Writer struct {
 	versioner *Versioner
 	logger    *slog.Logger
 
+	// resolver locates the discovery tier actually holding each skill
+	// (internal/skills.Discovery satisfies TierResolver). Nil until the
+	// default env-driven resolver is built lazily on first use — see
+	// resolver(). Tests and the daemon may inject one via SetTierResolver.
+	resolver     TierResolver
+	resolverOnce sync.Once
+
 	shaMu     sync.Mutex
 	shaIndex  map[string]string // content_sha → skill_name
 	shaLoaded bool              // tracks whether shaIndex has been loaded from disk
 }
 
+// TierResolver locates the discovery tier holding a named skill. It is
+// satisfied by *skills.Discovery (ResolveTierPath). Errors that wrap
+// skills.ErrSkillNotFound mean the skill exists in no tier — callers treat
+// that as "use the Writer's own root" (creation path) or surface it cleanly.
+type TierResolver interface {
+	ResolveTierPath(skillName string) (tierRoot, skillPath, source string, err error)
+}
+
 // NewWriter creates a new Writer rooted at skillsDir. The registry is used to
 // keep the in-memory registry in sync with disk state when archiving or
 // restoring skills. A nil registry is allowed (disk-only mode, for testing).
+//
+// Tier resolution is enabled by default: skill operations resolve the skill's
+// actual discovery tier (project > user > claude > hermes > system) and
+// operate inside it, so a skill living in the Claude tier is edited/archived
+// there rather than failing against the fixed skillsDir root. skillsDir
+// remains the fallback for skills that exist in no tier (new/created skills)
+// and for archive/restore storage. The resolver can be re-pointed via
+// SetTierResolver but not disabled.
 func NewWriter(skillsDir string, logger *slog.Logger) *Writer {
 	if logger == nil {
 		logger = slog.Default()
@@ -54,6 +77,35 @@ func NewWriter(skillsDir string, logger *slog.Logger) *Writer {
 		logger:    logger,
 		shaIndex:  make(map[string]string),
 	}
+}
+
+// SetTierResolver injects a custom tier resolver (e.g. a *skills.Discovery
+// built from config-driven tiers). Nil guard per CLAUDE.md setter rule: a nil
+// argument is ignored, leaving the current resolver (default or previous) in
+// place.
+func (w *Writer) SetTierResolver(r TierResolver) {
+	if r != nil {
+		w.resolver = r
+	}
+}
+
+// defaultResolver builds the env-driven discovery used when no resolver was
+// injected. Built lazily (sync.Once) so construction stays I/O-free and tests
+// that adjust HOME via t.Setenv before the first operation observe the
+// fixture environment.
+func (w *Writer) defaultResolver() TierResolver {
+	return skills.NewDiscovery()
+}
+
+// resolverOrNil returns the active resolver, building the default one on
+// first use.
+func (w *Writer) resolverOrNil() TierResolver {
+	w.resolverOnce.Do(func() {
+		if w.resolver == nil {
+			w.resolver = w.defaultResolver()
+		}
+	})
+	return w.resolver
 }
 
 // SetRegistry injects a skills.Registry so ArchiveSkill and RestoreSkill can
@@ -75,14 +127,50 @@ func (w *Writer) SetVersioner(v *Versioner) {
 	}
 }
 
-// skillPath returns the path to <skillsDir>/<name>/SKILL.md.
-func (w *Writer) skillPath(name string) string {
+// legacySkillPath returns <skillsDir>/<name>/SKILL.md — the Writer's own
+// root, used for new skills and legacy layouts.
+func (w *Writer) legacySkillPath(name string) string {
 	return filepath.Join(w.skillsDir, name, "SKILL.md")
 }
 
 // archivePath returns the path to <skillsDir>.archived/<name>/SKILL.md.
+// Archive/restore storage keeps its historical location under the Writer's
+// root regardless of which tier the source skill lives in.
 func (w *Writer) archivePath(name string) string {
 	return filepath.Join(w.skillsDir+".archived", name, "SKILL.md")
+}
+
+// resolveSkillPath locates the named skill for a source-side operation,
+// returning (path, inTier). Resolution happens ONCE per operation — call this
+// at the top of the op and derive all paths from the result, never per join.
+//
+// When the skill exists in a discovery tier, its tier path is returned
+// (inTier=true) and all reads/writes target that tier. When it exists in no
+// tier — or the resolver is unavailable — the Writer's own root path is
+// returned (inTier=false): that is where new skills are created and where
+// legacy layouts live.
+func (w *Writer) resolveSkillPath(name string) (string, bool) {
+	r := w.resolverOrNil()
+	if r == nil {
+		return w.legacySkillPath(name), false
+	}
+	_, skillPath, _, err := r.ResolveTierPath(name)
+	if err != nil || skillPath == "" {
+		// Not in any tier (or discovery unavailable): the Writer's own root
+		// is where new skills are created.
+		return w.legacySkillPath(name), false
+	}
+	return skillPath, true
+}
+
+// skillPath returns the tier-resolved path to the named skill's SKILL.md,
+// falling back to the Writer's own root when the skill exists in no tier.
+// Package-internal consumers (including the evolver's post-write re-parse)
+// share this resolution so every path in the lifecycle points at the tier
+// discovery actually serves.
+func (w *Writer) skillPath(name string) string {
+	path, _ := w.resolveSkillPath(name)
+	return path
 }
 
 // WriteSkill writes skill content to <skillsDir>/<name>/SKILL.md atomically.
@@ -306,8 +394,11 @@ func sha256HexBytes(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// ArchiveSkill moves a skill from <skillsDir>/<name>/ to
-// <skillsDir>.archived/<name>/. The archive directory is created if needed.
+// ArchiveSkill moves a skill from its resolved discovery tier
+// (<tier>/<name>/) to the archive at <skillsDir>.archived/<name>/. Skills are
+// located via tier resolution (project > user > claude > hermes > system, per
+// discovery); a skill living in the Claude tier is archived from there, not
+// from the fixed skillsDir root. The archive directory is created if needed.
 // The skill is unregistered from the registry (if set).
 //
 // If a Versioner is wired, a snapshot of the current content is captured BEFORE
@@ -315,17 +406,25 @@ func sha256HexBytes(data []byte) string {
 // After the successful move, the skill's entries are pruned from the SHA index
 // so that future writes with identical content are not falsely flagged as
 // duplicates of an archived skill.
+//
+// When the skill exists in no discovery tier (and not in the Writer's own
+// root layout), the error wraps skills.ErrSkillNotFound and names the skill.
 func (w *Writer) ArchiveSkill(name string) error {
 	if name == "" {
 		return fmt.Errorf("writer: skill name is required")
 	}
 
-	sourcePath := w.skillPath(name)
+	sourcePath, inTier := w.resolveSkillPath(name)
 	sourceDir := filepath.Dir(sourcePath)
 
-	// Check that the skill exists on disk.
+	// Check that the skill exists on disk. When the resolver found it in a
+	// tier this should always hold; when it fell back to the Writer's root
+	// the stat is the authoritative not-found check.
 	if _, err := os.Stat(sourcePath); err != nil {
-		return fmt.Errorf("writer: skill not found on disk: %w", err)
+		if !inTier {
+			return fmt.Errorf("writer: archive %q: %w", name, skills.ErrSkillNotFound)
+		}
+		return fmt.Errorf("writer: skill vanished from resolved tier: %w", err)
 	}
 
 	// Snapshot existing content before archiving, if a versioner is wired.
