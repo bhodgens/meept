@@ -114,6 +114,8 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("session.stop", p.makeProxy("session.stop", "session.result", 10*time.Second))
 	server.RegisterHandler("session.refresh_title", p.makeProxy("session.refresh_title", "session.result", 60*time.Second))
 	server.RegisterHandler("session.set_nofence", p.makeProxy("session.set_nofence", "session.result", 10*time.Second))
+	server.RegisterHandler("session.set_foreground", p.makeProxy("session.set_foreground", "session.result", 10*time.Second))
+	server.RegisterHandler("session.set_last_user_message", p.makeProxy("session.set_last_user_message", "session.result", 10*time.Second))
 	server.RegisterHandler("session.get_child_tasks", p.makeProxy("session.get_child_tasks", "session.result", 10*time.Second))
 	server.RegisterHandler("session.branch.navigate", p.makeProxy("session.branch.navigate", "session.result", 10*time.Second))
 	server.RegisterHandler("session.branches.list", p.makeProxy("session.branches.list", "session.result", 10*time.Second))

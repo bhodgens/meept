@@ -51,6 +51,7 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 ### Core Configuration
 
 - **[Daemon](daemon.md)** - Basic daemon settings and logging
+- **[Queue](queue.md)** - Job queue persistence and interactive-first scheduling window
 - **[LLM](llm.md)** - Model providers, capabilities, and budget management
 - **[Agents](agents.md)** - Multi-agent system configuration
 

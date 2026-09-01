@@ -1793,6 +1793,16 @@ type SchedulerConfig struct {
 type QueueConfig struct {
 	DBPath     string `json:"db_path"     toml:"db_path"`
 	MaxRetries int    `json:"max_retries" toml:"max_retries"`
+
+	// InteractiveWindow is the D11/Q1 recency window for the session
+	// interactivity signal: a session counts as interactive if it received
+	// a user message within this window (or holds the foreground flag).
+	// A duration string ("5m") rather than time.Duration on purpose: the
+	// JSON5 loader rewrites bare duration tokens to nanosecond integers,
+	// which cannot unmarshal into a string field — and rejecting the whole
+	// config over this knob would be worse than falling back to the Q1
+	// default in the getter.
+	InteractiveWindow string `json:"interactive_window" toml:"interactive_window"`
 }
 
 // WorkersConfig holds worker pool settings.
@@ -2536,8 +2546,9 @@ func DefaultConfig() *Config {
 			Timezone: "UTC",
 		},
 		Queue: QueueConfig{
-			DBPath:     "~/.meept/queue.db",
-			MaxRetries: 3,
+			DBPath:            "~/.meept/queue.db",
+			MaxRetries:        3,
+			InteractiveWindow: "5m", // Q1: default interactivity window (D11)
 		},
 		Workers: WorkersConfig{
 			PoolSize:           4,
@@ -2961,6 +2972,17 @@ func (c *Config) ChatTimeout() time.Duration {
 		return time.Duration(c.Daemon.ChatTimeoutSeconds) * time.Second
 	}
 	return 2 * time.Minute
+}
+
+// InteractiveWindow returns the D11 session-interactivity recency window
+// (queue.interactive_window), falling back to the Q1 default of 5 minutes
+// when unset or unparseable. Leaf 02 consumes this when stamping enqueued
+// jobs with the interactive flag.
+func (c *Config) InteractiveWindow() time.Duration {
+	if d, err := time.ParseDuration(c.Queue.InteractiveWindow); err == nil && d > 0 {
+		return d
+	}
+	return 5 * time.Minute
 }
 
 // OAuthConfig holds configuration for the OAuth token management system.

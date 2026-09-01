@@ -115,6 +115,13 @@ type Store interface {
 	// F-04 FIX: Allow per-session fence override for --nofence CLI flag.
 	SetNoFence(sessionID string, noFence bool) error
 
+	// SetForeground sets the client-declared foreground-session flag (D11).
+	SetForeground(sessionID string, foreground bool) error
+
+	// SetLastUserMessage records the timestamp of the most recent user
+	// message on the session — the recency source for IsInteractive (D11).
+	SetLastUserMessage(sessionID string, at time.Time) error
+
 	// ClearMessages removes all messages for a session, resetting the
 	// conversation history. The session itself is preserved.
 	ClearMessages(sessionID string) error

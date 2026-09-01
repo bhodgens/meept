@@ -180,6 +180,12 @@ func (s *SQLiteStore) migrate() error {
 	// Add archived column (soft-archive flag; default 0 = not archived).
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN archived BOOLEAN DEFAULT 0", "archived")
 
+	// Add foreground column (client-declared foreground-session flag, D11;
+	// default 0 = not foreground). Recency of user messages is tracked by
+	// last_user_message_at below — the IsInteractive recency source.
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN foreground BOOLEAN DEFAULT 0", "foreground")
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN last_user_message_at TEXT", "last_user_message_at")
+
 	// Add owner_id column (multi-user ownership; NULL = unowned legacy
 	// session visible to everyone). Nullable TEXT so pre-multiuser rows are
 	// untouched by the migration.
@@ -568,7 +574,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	defer s.mu.RUnlock()
 
 	row := s.db.QueryRow(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at
 		FROM sessions
 		ORDER BY last_activity DESC
 		LIMIT 1`) //nolint:mutexio // mutex serializes sqlite connection access
@@ -580,7 +586,7 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -589,6 +595,19 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 }
 
 func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
+	sess := s.scanSessionRow(func(dest ...any) error {
+		return row.Scan(dest...)
+	})
+	if sess == nil {
+		return nil
+	}
+	return sess
+}
+
+// scanSessionRow scans one sessions row via the provided scan function and
+// materializes a Session. Shared by scanSession (single row) and
+// scanSessionRows (List) so column order cannot drift between them.
+func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 	var (
 		id, name, convID          string
 		createdAt, lastActivity   string
@@ -600,9 +619,11 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 		noFence                   bool
 		archived                  bool
 		ownerID                   sql.NullString
+		foreground                bool
+		lastUserMessageAt         sql.NullString
 	)
 
-	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID)
+	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			s.logger.Error("Failed to scan session", "error", err)
@@ -616,6 +637,7 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 		ConversationID: convID,
 		NoFence:        noFence,
 		Archived:       archived,
+		Foreground:     foreground,
 	}
 
 	if description.Valid {
@@ -638,6 +660,11 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 	}
 	if ownerID.Valid {
 		session.OwnerID = ownerID.String
+	}
+	if lastUserMessageAt.Valid && lastUserMessageAt.String != "" {
+		if t, err := time.Parse(time.RFC3339, lastUserMessageAt.String); err == nil {
+			session.LastUserMessageAt = t
+		}
 	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -663,7 +690,7 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id
+		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id, s.foreground, s.last_user_message_at
 		FROM sessions s
 		ORDER BY s.archived ASC, s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
@@ -682,69 +709,12 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 	var sessions []*Session
 	for rows.Next() {
-		var (
-			id, name, convID          string
-			createdAt, lastActivity   string
-			attachedJSON, workersJSON string
-			description               sql.NullString
-			leafMessageID             sql.NullInt64
-			projectID, projectPath    sql.NullString
-			worktreeID, worktreePath  sql.NullString
-			noFence                   bool
-			archived                  bool
-			ownerID                   sql.NullString
-		)
-
-		if err := rows.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID); err != nil {
-			s.logger.Error("Failed to scan session row", "error", err)
+		sess := s.scanSessionRow(rows.Scan)
+		if sess == nil {
+			s.logger.Error("Failed to scan session row")
 			continue
 		}
-
-		session := &Session{
-			ID:             id,
-			Name:           name,
-			ConversationID: convID,
-			NoFence:        noFence,
-			Archived:       archived,
-		}
-
-		if description.Valid {
-			session.Description = description.String
-		}
-		if leafMessageID.Valid {
-			session.LeafMessageID = &leafMessageID.Int64
-		}
-		if projectID.Valid {
-			session.ProjectID = projectID.String
-		}
-		if projectPath.Valid {
-			session.ProjectPath = projectPath.String
-		}
-		if worktreeID.Valid {
-			session.WorktreeID = worktreeID.String
-		}
-		if worktreePath.Valid {
-			session.WorktreePath = worktreePath.String
-		}
-		if ownerID.Valid {
-			session.OwnerID = ownerID.String
-		}
-
-		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
-			session.CreatedAt = t
-		}
-		if t, err := time.Parse(time.RFC3339, lastActivity); err == nil {
-			session.LastActivity = t
-		}
-
-		if err := json.Unmarshal([]byte(attachedJSON), &session.AttachedClients); err != nil {
-			s.logger.Warn("Failed to unmarshal session attached_clients JSON", "id", id, "error", err)
-		}
-		if err := json.Unmarshal([]byte(workersJSON), &session.WorkerIDs); err != nil {
-			s.logger.Warn("Failed to unmarshal session worker_ids JSON", "id", id, "error", err)
-		}
-
-		sessions = append(sessions, session)
+		sessions = append(sessions, sess)
 	}
 
 	return sessions
@@ -1309,7 +1279,7 @@ func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -1459,6 +1429,52 @@ func (s *SQLiteStore) SetNoFence(sessionID string, noFence bool) error {
 	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to set no_fence for session: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// SetForeground updates the client-declared foreground-session flag (D11).
+// Mirrors SetNoFence: targeted single-column update, no last_activity bump
+// (flagging a foreground session is not session activity).
+func (s *SQLiteStore) SetForeground(sessionID string, foreground bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(
+		`UPDATE sessions SET foreground = ? WHERE id = ?`,
+		foreground, sessionID,
+	) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to set foreground for session: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// SetLastUserMessage records the timestamp of the most recent user message
+// on the session — the recency source for IsInteractive (D11). Unlike
+// UpdateActivity, this is written ONLY from the user-message path.
+func (s *SQLiteStore) SetLastUserMessage(sessionID string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ts := ""
+	if !at.IsZero() {
+		ts = at.UTC().Format(time.RFC3339)
+	}
+	result, err := s.db.Exec(
+		`UPDATE sessions SET last_user_message_at = ? WHERE id = ?`,
+		ts, sessionID,
+	) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to set last_user_message_at for session: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {

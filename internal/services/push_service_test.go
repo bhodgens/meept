@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/session"
@@ -209,7 +210,9 @@ func (f *fakeStore) ClearMessages(string) error                                 
 func (f *fakeStore) UpdateSessionsProjectPath(context.Context, string, string) error { return nil }
 
 // F-04 FIX: stub for new Store interface method.
-func (f *fakeStore) SetNoFence(string, bool) error { return nil }
+func (f *fakeStore) SetNoFence(string, bool) error              { return nil }
+func (f *fakeStore) SetForeground(string, bool) error           { return nil }
+func (f *fakeStore) SetLastUserMessage(string, time.Time) error { return nil }
 func (f *fakeStore) SearchMessages(context.Context, string, int) ([]session.MessageSearchResult, error) {
 	return nil, nil
 }

@@ -84,6 +84,19 @@ type Session struct {
 	// listings; their data is preserved.
 	Archived bool `json:"archived,omitempty"`
 
+	// Foreground is the client-declared foreground-session flag (D11): the
+	// TUI/GUI sets it when the user has this session open and focused. It
+	// makes IsInteractive return true regardless of message recency. WS
+	// presence was explicitly NOT ratified as a signal.
+	Foreground bool `json:"foreground,omitempty"`
+
+	// LastUserMessageAt is the timestamp of the most recent USER message on
+	// this session, written from the chat path (SetLastUserMessage). It is
+	// the recency source for IsInteractive (D11/Q1) — Session.LastActivity
+	// is NOT usable there because its writers are attach/store mutations,
+	// never user messages.
+	LastUserMessageAt time.Time `json:"last_user_message_at,omitempty"`
+
 	// OwnerID is the multi-user principal owning this session (auth user id).
 	// Empty string = unowned (legacy single-user mode): visible to everyone.
 	// In multi-user mode, new sessions stamp the creating identity's UserID;
@@ -705,6 +718,34 @@ func (s *MemoryStore) SetNoFence(sessionID string, noFence bool) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.NoFence = noFence
+	return nil
+}
+
+// SetForeground updates the client-declared foreground-session flag (D11).
+func (s *MemoryStore) SetForeground(sessionID string, foreground bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.Foreground = foreground
+	return nil
+}
+
+// SetLastUserMessage records the timestamp of the most recent user message
+// on the session — the recency source for IsInteractive (D11). Unlike
+// UpdateActivity, this is written ONLY from the user-message path.
+func (s *MemoryStore) SetLastUserMessage(sessionID string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.LastUserMessageAt = at
 	return nil
 }
 
@@ -1384,25 +1425,27 @@ func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger, opts .
 
 	// Subscribe to all session topics
 	topics := map[string]bus.MessageCallback{
-		"session.create":               h.handleSessionCreate,
-		"session.list":                 h.handleSessionList,
-		"session.get":                  h.handleSessionGet,
-		"session.get_most_recent":      h.handleSessionGetMostRecent,
-		"session.attach":               h.handleSessionAttach,
-		"session.detach":               h.handleSessionDetach,
-		"session.delete":               h.handleSessionDelete,
-		"session.messages.save":        h.handleSessionSaveMessages,
-		"session.messages.get":         h.handleSessionGetMessages,
-		"session.update_description":   h.handleSessionUpdateDescription,
-		"session.generate_description": h.handleSessionGenerateDescription,
-		"session.refresh_title":        h.handleSessionRefreshTitle,
-		"session.stop":                 h.handleSessionStop,
-		"session.get_child_tasks":      h.handleSessionGetChildTasks,
-		"session.branch.navigate":      h.handleBranchNavigate,
-		"session.branches.list":        h.handleBranchesList,
-		"session.fork":                 h.handleSessionFork,
-		"session.tree.get":             h.handleSessionTreeGet,
-		"session.set_nofence":          h.handleSessionSetNoFence, // F-04 FIX
+		"session.create":                h.handleSessionCreate,
+		"session.list":                  h.handleSessionList,
+		"session.get":                   h.handleSessionGet,
+		"session.get_most_recent":       h.handleSessionGetMostRecent,
+		"session.attach":                h.handleSessionAttach,
+		"session.detach":                h.handleSessionDetach,
+		"session.delete":                h.handleSessionDelete,
+		"session.messages.save":         h.handleSessionSaveMessages,
+		"session.messages.get":          h.handleSessionGetMessages,
+		"session.update_description":    h.handleSessionUpdateDescription,
+		"session.generate_description":  h.handleSessionGenerateDescription,
+		"session.refresh_title":         h.handleSessionRefreshTitle,
+		"session.stop":                  h.handleSessionStop,
+		"session.get_child_tasks":       h.handleSessionGetChildTasks,
+		"session.branch.navigate":       h.handleBranchNavigate,
+		"session.branches.list":         h.handleBranchesList,
+		"session.fork":                  h.handleSessionFork,
+		"session.tree.get":              h.handleSessionTreeGet,
+		"session.set_nofence":           h.handleSessionSetNoFence, // F-04 FIX
+		"session.set_foreground":        h.handleSessionSetForeground,
+		"session.set_last_user_message": h.handleSessionSetLastUserMessage,
 	}
 
 	for topic, callback := range topics {
@@ -1502,6 +1545,16 @@ func (h *Handler) handleSessionSetNoFence(ctx context.Context, topic string, msg
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
+// callback for session.set_foreground topic (D11 foreground-session flag).
+func (h *Handler) handleSessionSetForeground(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+// callback for session.set_last_user_message topic (D11 recency source).
+func (h *Handler) handleSessionSetLastUserMessage(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
 // handleMessage routes messages to the appropriate handler.
 func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 	var response any
@@ -1546,6 +1599,10 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 		response, err = h.handleTreeGetMsg(msg)
 	case "session.set_nofence": // F-04 FIX
 		response, err = h.handleSetNoFence(msg)
+	case "session.set_foreground":
+		response, err = h.handleSetForeground(msg)
+	case "session.set_last_user_message":
+		response, err = h.handleSetLastUserMessage(msg)
 	default:
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
@@ -1627,6 +1684,55 @@ func (h *Handler) handleSetNoFence(msg *models.BusMessage) (any, error) {
 		return nil, fmt.Errorf("failed to set no_fence: %w", err)
 	}
 	return map[string]any{"session_id": params.SessionID, "no_fence": params.NoFence}, nil
+}
+
+// handleSetForeground updates the client-declared foreground-session flag
+// (D11) on an existing session. Clients (TUI/GUI) call this when the user
+// opens/focuses or leaves a session.
+func (h *Handler) handleSetForeground(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID  string `json:"session_id"`
+		Foreground bool   `json:"foreground"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if err := h.store.SetForeground(params.SessionID, params.Foreground); err != nil {
+		return nil, fmt.Errorf("failed to set foreground: %w", err)
+	}
+	return map[string]any{"session_id": params.SessionID, "foreground": params.Foreground}, nil
+}
+
+// handleSetLastUserMessage records the timestamp of the most recent user
+// message on the session — the recency source for IsInteractive (D11).
+// The chat path calls this on user-message routing; `at` is optional and
+// defaults to the server's current time when omitted.
+func (h *Handler) handleSetLastUserMessage(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+		At        string `json:"at,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	at := time.Now()
+	if params.At != "" {
+		parsed, err := time.Parse(time.RFC3339, params.At)
+		if err != nil {
+			return nil, fmt.Errorf("invalid at timestamp: %w", err)
+		}
+		at = parsed
+	}
+	if err := h.store.SetLastUserMessage(params.SessionID, at); err != nil {
+		return nil, fmt.Errorf("failed to set last user message: %w", err)
+	}
+	return map[string]any{"session_id": params.SessionID, "at": at.Format(time.RFC3339)}, nil
 }
 
 // handleList lists all sessions.
