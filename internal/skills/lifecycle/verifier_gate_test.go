@@ -158,3 +158,19 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// TestVerifyUsage_NilInputFailClosed pins the fail-closed contract: an
+// archive proposal arriving with no usage payload (UsageGate nil) rejects —
+// never a silent content-rubric rubber-stamp.
+func TestVerifyUsage_NilInputFailClosed(t *testing.T) {
+	res := verifyUsage(nil)
+	if res.Action != ActionReject {
+		t.Fatalf("nil input must reject, got %s", res.Action)
+	}
+	if res.Gate != GateUsage {
+		t.Fatalf("gate = %q, want usage", res.Gate)
+	}
+	if len(res.Reasons) == 0 {
+		t.Fatal("nil input must carry a rejection reason")
+	}
+}

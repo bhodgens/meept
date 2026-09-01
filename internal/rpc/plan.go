@@ -15,12 +15,30 @@ import (
 type PlanHandler struct {
 	manager *plan.PlanManager
 	store   plan.PlanStore
+	// Evolver sink wiring (plan-sink leaf 01/03). Evolver plans live in
+	// the dedicated sink store, invisible to the shared store this handler
+	// was originally built around; when the shared side misses, these
+	// methods consult the sink so CLI/RPC plan list/show/approve/reject
+	// reach sink plans too. Either field may be nil (sink not wired).
+	fallbackManager *plan.PlanManager // state transitions (approve/reject/confirm)
+	fallbackStore   plan.PlanStore    // listing + reads (SQLiteStore has ListPlans)
 }
 
 // NewPlanHandler creates a new plan handler. If manager or store is nil the
 // registered methods return "plan service not available" errors.
 func NewPlanHandler(manager *plan.PlanManager, store plan.PlanStore) *PlanHandler {
 	return &PlanHandler{manager: manager, store: store}
+}
+
+// SetEvolverSink wires the evolver sink manager + store. Either argument
+// may be nil; nil values are ignored (setter nil-guard convention).
+func (h *PlanHandler) SetEvolverSink(m *plan.PlanManager, store plan.PlanStore) {
+	if m != nil {
+		h.fallbackManager = m
+	}
+	if store != nil {
+		h.fallbackStore = store
+	}
 }
 
 // RegisterPlanMethods registers plan RPC methods on the server.
@@ -84,6 +102,22 @@ func (h *PlanHandler) handleList(ctx context.Context, params json.RawMessage) (a
 	if err != nil {
 		return nil, err
 	}
+	// Merge evolver sink plans so the CLI/RPC surface sees the full set
+	// (plan-sink leaf 01: evolver plans live in the dedicated store).
+	if h.fallbackStore != nil {
+		sinkPlans, sinkErr := h.fallbackStore.ListPlans(ctx, req.ProjectID, req.Limit)
+		if sinkErr == nil {
+			seen := make(map[string]struct{}, len(plans)+len(sinkPlans))
+			for _, p := range plans {
+				seen[p.ID] = struct{}{}
+			}
+			for _, p := range sinkPlans {
+				if _, dup := seen[p.ID]; !dup {
+					plans = append(plans, p)
+				}
+			}
+		}
+	}
 	return map[string]any{
 		"plans":     plans,
 		RPCKeyCount: len(plans),
@@ -101,6 +135,9 @@ func (h *PlanHandler) handleGet(ctx context.Context, params json.RawMessage) (an
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 	p, err := h.store.GetPlan(ctx, req.ID)
+	if err != nil && h.fallbackStore != nil {
+		p, err = h.fallbackStore.GetPlan(ctx, req.ID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -122,8 +159,22 @@ func (h *PlanHandler) handleApprove(ctx context.Context, params json.RawMessage)
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	if err := h.manager.ApprovePlan(ctx, req.PlanID, req.SessionID, req.By); err != nil {
+	usedFallback := false
+	err := h.manager.ApprovePlan(ctx, req.PlanID, req.SessionID, req.By)
+	if err != nil && h.fallbackManager != nil {
+		// Not in the shared store: try the evolver sink manager.
+		if err2 := h.fallbackManager.ApprovePlan(ctx, req.PlanID, req.SessionID, req.By); err2 == nil {
+			usedFallback = true
+			err = nil
+		} else {
+			err = fmt.Errorf("shared: %v; sink: %v", err, err2)
+		}
+	}
+	if err != nil {
 		return nil, err
+	}
+	if usedFallback {
+		return h.fallbackManager.GetPlan(ctx, req.PlanID)
 	}
 	return h.store.GetPlan(ctx, req.PlanID)
 }
@@ -141,8 +192,17 @@ func (h *PlanHandler) handleReject(ctx context.Context, params json.RawMessage) 
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	if err := h.manager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason); err != nil {
-		return nil, err
+
+	sharedErr := h.manager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason)
+	if sharedErr != nil && h.fallbackManager != nil {
+		if sinkErr := h.fallbackManager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason); sinkErr != nil {
+			sharedErr = fmt.Errorf("shared: %v; sink: %v", sharedErr, sinkErr)
+		} else {
+			sharedErr = nil
+		}
+	}
+	if sharedErr != nil {
+		return nil, sharedErr
 	}
 	return h.store.GetPlan(ctx, req.PlanID)
 }
@@ -159,8 +219,16 @@ func (h *PlanHandler) handleConfirm(ctx context.Context, params json.RawMessage)
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	if err := h.manager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By); err != nil {
-		return nil, err
+	sharedErr := h.manager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By)
+	if sharedErr != nil && h.fallbackManager != nil {
+		if sinkErr := h.fallbackManager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By); sinkErr != nil {
+			sharedErr = fmt.Errorf("shared: %v; sink: %v", sharedErr, sinkErr)
+		} else {
+			sharedErr = nil
+		}
+	}
+	if sharedErr != nil {
+		return nil, sharedErr
 	}
 	return h.store.GetPlan(ctx, req.PlanID)
 }
@@ -177,8 +245,16 @@ func (h *PlanHandler) handleRevise(ctx context.Context, params json.RawMessage) 
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	if err := h.manager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback); err != nil {
-		return nil, err
+	sharedErr := h.manager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback)
+	if sharedErr != nil && h.fallbackManager != nil {
+		if sinkErr := h.fallbackManager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback); sinkErr != nil {
+			sharedErr = fmt.Errorf("shared: %v; sink: %v", sharedErr, sinkErr)
+		} else {
+			sharedErr = nil
+		}
+	}
+	if sharedErr != nil {
+		return nil, sharedErr
 	}
 	return h.store.GetPlan(ctx, req.PlanID)
 }

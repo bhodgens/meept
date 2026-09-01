@@ -766,6 +766,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// Register plan RPC handlers (direct Go handlers override bus proxy)
 	if rpcServer != nil && planManagerInst != nil {
 		planRPCHandler := rpc.NewPlanHandler(planManagerInst, planStoreIF)
+		// Evolver sink visibility (plan-sink leaf 01/03): evolver plans
+		// live in the dedicated sink store; without this the CLI/RPC plan
+		// surfaces cannot list or approve them.
+		if components != nil && components.EvolverPlanManager != nil {
+			planRPCHandler.SetEvolverSink(components.EvolverPlanManager, components.EvolverPlanStore)
+		}
 		planRPCHandler.RegisterPlanMethods(rpcServer)
 		logger.Info("Plan RPC handlers registered")
 	}

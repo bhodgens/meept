@@ -847,8 +847,16 @@ func markPlanApplied(path string) error {
 	if err != nil {
 		return fmt.Errorf("record applied marker: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(stamped), 0o644); err != nil { //nolint:gosec // plan file, user-readable by design
+	// Atomic write (tmp + rename) so a crash mid-write cannot corrupt the
+	// plan file — the marker is metadata, but the file also carries the
+	// proposal's provenance and description.
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(stamped), 0o644); err != nil { //nolint:gosec // plan file, user-readable by design
 		return fmt.Errorf("write applied marker: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup after rename failure
+		return fmt.Errorf("commit applied marker: %w", err)
 	}
 	return nil
 }

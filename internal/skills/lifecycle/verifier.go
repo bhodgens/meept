@@ -101,9 +101,17 @@ const ArchiveMinInjections = 10
 // recover. A nil stats input fails the injection minimum (an unverifiable
 // archive is a rejected archive).
 func verifyUsage(input *UsageGateInput) *VerificationResult {
-	stats := input.Stats
+	var stats *UsageStats
+	if input != nil {
+		stats = input.Stats
+	}
 	if stats == nil {
 		stats = &UsageStats{}
+	}
+
+	minEffectiveness := 0.0
+	if input != nil {
+		minEffectiveness = input.MinEffectiveness
 	}
 
 	var reasons []string
@@ -112,10 +120,10 @@ func verifyUsage(input *UsageGateInput) *VerificationResult {
 			"usage gate: injection count %d is below minimum %d",
 			stats.InjectCount, ArchiveMinInjections))
 	}
-	if stats.Effectiveness >= input.MinEffectiveness {
+	if stats.Effectiveness >= minEffectiveness {
 		reasons = append(reasons, fmt.Sprintf(
 			"usage gate: effectiveness %.2f has recovered to or above the prune threshold %.2f — skill improved since selection; do not archive",
-			stats.Effectiveness, input.MinEffectiveness))
+			stats.Effectiveness, minEffectiveness))
 	}
 
 	action := ActionAccept
@@ -145,8 +153,12 @@ func verifyUsage(input *UsageGateInput) *VerificationResult {
 // heuristic (all dimensions = 0.5). Under the default minScore of 0.75, the
 // heuristic path always rejects — ensuring unverified changes never go live.
 func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (*VerificationResult, error) {
-	// Archive gate dispatch: usage stats only.
-	if req.Action == "archive_skill" && req.UsageGate != nil {
+	// Archive gate dispatch: usage stats only, keyed on the action itself.
+	// An archive proposal without stats (UsageGate == nil) is fail-closed —
+	// verifyUsage degrades to zero stats, which fails the injection minimum.
+	// The content rubric never scores archive proposals: they carry empty
+	// CandidateContent, so rubric verdicts would be meaningless rubber-stamps.
+	if req.Action == "archive_skill" {
 		res := verifyUsage(req.UsageGate)
 		v.logger.Info("verifier: archive usage gate",
 			"gate", string(res.Gate),
