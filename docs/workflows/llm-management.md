@@ -86,6 +86,33 @@ api_key_env = ""
 }
 ```
 
+## Context-Length Discovery
+
+When `llm.context_discovery.enabled` is true, meept runs a background
+syncer that asks each provider for its true model context lengths and
+merges them into the in-memory model catalog (see
+[LLM Configuration](../configuration/llm.md#context-discovery-configuration)
+for the config block and precedence rule).
+
+- **What runs:** one fetcher per provider that exposes context length —
+  Ollama (`/api/show`), LM Studio (`/v1/models` for ids +
+  `/api/v0/models` for `max_context_length`), llama.cpp `local-models`
+  (`/props`), and OpenRouter (the same `/api/v1/models` fetch the pricing
+  sync uses). OpenAI and Anthropic expose no context length and are never
+  queried.
+- **When:** immediately at daemon startup, then every re-sync tick
+  (`interval`, default 6h).
+- **What it changes:** in-memory context windows only — resolver model
+  entries and the TUI model picker's display catalog. Deltas are logged
+  as `context window updated` lines.
+- **What it never changes:** your models.json5. Explicit
+  `context_limit` values are always authoritative; nothing discovered is
+  written back to any config file.
+- **Where LM Studio models come from:** LM Studio ships no static
+  catalog — discovered models are registered from its OpenAI-compatible
+  `/v1/models` list as `lmstudio/<id>` entries, with context lengths from
+  `/api/v0/models`. The model list is whatever that machine has loaded.
+
 ## Grammar-Constrained Tool Calling (GBNF)
 
 Small local models frequently emit malformed tool-call JSON. When the

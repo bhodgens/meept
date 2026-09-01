@@ -275,6 +275,63 @@ summarization_threshold = 0.75   # Threshold for auto-summarization
 summarization_model = "small"    # Model for summarization
 ```
 
+## Context Discovery Configuration
+
+Providers expose true model context lengths on their own endpoints (the
+built-in catalog only carries defaults). When enabled, meept runs a
+background discovery syncer — modeled on the pricing syncer — that
+fetches those values and fills context windows in memory. Discovery is
+**off by default**: when off, no syncer is constructed and no network
+traffic happens.
+
+```json5
+llm: {
+  context_discovery: {
+    enabled: false,                // master switch (default false)
+    interval: "6h",                // re-sync cadence (default 6h)
+    allow_context_override: false  // discovered values may replace non-zero catalog values
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `enabled` | bool | `false` | Turn discovery on. Off = zero behavior change. |
+| `interval` | duration | `6h` | Re-sync cadence. Zero or negative reverts to the default (deliberately slow — the OpenRouter fetch shares the pricing sync's politeness budget). |
+| `allow_context_override` | bool | `false` | Let a discovered value replace a non-zero catalog context value. Explicit `context_limit` in models.json5 always wins regardless of this flag. |
+
+**Precedence** (highest wins):
+
+```
+1. models.json5 explicit context_limit (authoritative when set)
+2. discovered value (when allow_context_override OR catalog value is 0)
+3. catalog default
+```
+
+**Provider exposure:**
+
+| Provider | Exposes context length | Endpoint |
+|----------|------------------------|----------|
+| Ollama | yes | `/api/show` (per model) |
+| LM Studio | yes | `/api/v0/models` (`max_context_length`) |
+| llama.cpp (`local-models`) | yes | `/props` (one `n_ctx` per server, applied to all its models) |
+| OpenRouter | yes | `/api/v1/models` (`context_length`) |
+| OpenAI | never | — (catalog stays the source) |
+| Anthropic | never | — (catalog stays the source) |
+
+Discovery updates the resolver's model set and the display catalog (the
+TUI model picker) in memory only — your models.json5 is never rewritten.
+
+**Verifying it works:** watch the daemon log for `Context discovery
+enabled` (startup, includes `interval` and `allow_context_override`),
+`context window updated` (per changed model, `from` → `to`), and
+`context discovery: ...` warnings when a provider endpoint is
+unreachable.
+
+See [LM Studio (Local)](#lm-studio-local) for its discovery behavior
+and [the LLM workflow page](../workflows/llm-management.md) for the
+runtime story.
+
 ## Provider Examples
 
 ### Ollama (Local)
