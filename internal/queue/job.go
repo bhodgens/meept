@@ -60,11 +60,11 @@ type Job struct {
 	Interactive bool            `json:"interactive,omitempty"`
 	ClaimedBy   string          `json:"claimed_by,omitempty"`
 	Result      json.RawMessage `json:"result,omitempty"`
-	Error        string          `json:"error,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	DueAt        *time.Time      `json:"due_at,omitempty"`
-	NextRetryAt  *time.Time      `json:"next_retry_at,omitempty"` // Retry backoff time
+	Error       string          `json:"error,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	DueAt       *time.Time      `json:"due_at,omitempty"`
+	NextRetryAt *time.Time      `json:"next_retry_at,omitempty"` // Retry backoff time
 
 	// Cluster fields
 	ManagingNode  string `json:"managing_node,omitempty"` // Node that manages this task

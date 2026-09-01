@@ -115,6 +115,11 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 
 	if cfg.Queue != nil {
 		reg.Queue = NewQueueService(cfg.Queue)
+		// Interactive stamp origin lookup (tree 04 leaf 02, D11): reuse the
+		// registry's session store so request-carried session_ids resolve.
+		if cfg.SessionStore != nil {
+			reg.Queue.sessions = cfg.SessionStore
+		}
 	}
 	if cfg.MemoryManager != nil {
 		reg.Memory = NewMemoryService(cfg.MemoryManager)

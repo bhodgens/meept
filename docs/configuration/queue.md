@@ -39,6 +39,8 @@ Queue settings are configured in `~/.meept/meept.json5` under the `queue` sectio
   foreground (`session.set_foreground`). Work enqueued from an interactive
   session is claimed ahead of background jobs by the queue's claim
   ordering. Unparseable or non-positive values fall back to the default.
+  See `docs/workflows/job-scheduling.md` ("Claim Ordering") for the full
+  ordering and stamping semantics.
 
 ## Notes
 

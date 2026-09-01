@@ -235,7 +235,7 @@ func TestClaimOrdering_InteractiveFirst(t *testing.T) {
 			name: "background-only order regression-identical",
 			seed: func() []*Job {
 				return []*Job{
-					interactiveSeedJob("bg-high", "", PriorityHigh, false, base.Add(2 * time.Second)),
+					interactiveSeedJob("bg-high", "", PriorityHigh, false, base.Add(2*time.Second)),
 					interactiveSeedJob("bg-norm-1", "", PriorityNormal, false, base),
 					interactiveSeedJob("bg-norm-2", "", PriorityNormal, false, base.Add(time.Second)),
 				}

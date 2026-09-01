@@ -41,6 +41,36 @@ Manual task execution lacks automation and reliability. Job scheduling enables:
 - **Resource Limits**: Global and per-agent concurrency semaphores
 - **Dead-Letter Recovery**: Recover unrecoverable jobs via `RecoverFromDeadLetter(jobID)` API
 
+### Claim Ordering (Interactive-First)
+
+Pending jobs are claimed in the order
+`interactive DESC, priority DESC, created_at ASC` (DECISIONS.md D11):
+
+1. **Interactive** — work enqueued while its originating session was
+   "interactive" (a user message within `queue.interactive_window`, default
+   5m, OR the client holds the session foreground via
+   `session.set_foreground`) claims ahead of all background work.
+2. **Priority** — among equally-interactive jobs, higher priority first.
+3. **FIFO** — equal priority claims oldest-first.
+
+For agent-targeted claims the agent-affinity CASE (jobs targeted at the
+claiming agent) still precedes priority, but interactive leads affinity:
+a job from another session's interactive work can beat a job targeted at
+this agent. This is intentional (user-first, D11).
+
+Semantics note: the flag is **stamped once at enqueue time** and never
+re-classified. A job enqueued while the session was interactive keeps its
+priority for its whole life even if the user walks away, and a job enqueued
+during quiet never upgrades if the user returns. This matches "the work was
+user-adjacent when created." Origin recovery: project-task step jobs carry
+their originating session in the step payload (populated from the task's
+linked sessions); scheduler/system and one-off jobs enqueued without a
+session stamp `interactive = false` by construction. Chat turns bypass the
+queue entirely (direct dispatch), so this ordering covers queued work only.
+Constant interactivity can starve background work — acceptable per D11's
+user-first intent; scheduler/system jobs remain fairness-bounded by their
+own retry/due mechanics.
+
 ### Retry Logic Integration
 
 Jobs benefit from the multi-layer retry system:

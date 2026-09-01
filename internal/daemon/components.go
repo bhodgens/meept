@@ -2460,6 +2460,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				HandoffUseAmendment: cfg.Orchestrator.HandoffUseAmendment,
 				AmendmentManager:    c.AmendmentMgr,
 			})
+			// Interactive stamp origin lookup (tree 04 leaf 02, D11).
+			tacticalScheduler.SetSessionStore(c.SessionStore)
 
 			// Create bus pair orchestrator for channel-based agent pairing (Option C)
 			busPairOrchestrator := agent.NewPairOrchestrator(agent.PairOrchestratorDeps{

@@ -4,18 +4,46 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/queue"
+	"github.com/caimlas/meept/internal/session"
 )
 
 // QueueService wraps the queue.Queue interface for cross-transport access.
 type QueueService struct {
 	q queue.Queue
+	// sessions resolves the enqueue request's session_id for the interactive
+	// stamp (D11). Nil = stamps false; wired from the registry's session
+	// store when available.
+	sessions sessionReader
 }
 
 // NewQueueService creates a queue service.
 func NewQueueService(q queue.Queue) *QueueService {
 	return &QueueService{q: q}
+}
+
+// sessionReader is the narrow session lookup the interactive stamp needs
+// (D11). A local interface keeps the dependency light for tests.
+type sessionReader interface {
+	Get(id string) *session.Session
+}
+
+// StampInteractive sets job.Interactive from the originating session's live
+// signal (tree 04 leaf 02, Contract 2; D11: recent user message within
+// window OR foreground flag). The flag is evaluated ONCE at enqueue and
+// never re-classified (audit R4 accepted semantics). A nil session, unknown
+// session ID, or nil window source stamps false — never an error.
+//
+// LAYERING NOTE: this helper lives in services, not internal/queue, because
+// the queue package is session-free by design; services already imports both.
+func StampInteractive(job *queue.Job, origin *session.Session, now time.Time, window time.Duration) {
+	if job == nil {
+		return
+	}
+	job.WithInteractive(session.IsInteractive(origin, now, window))
 }
 
 // EnqueueRequest contains queue enqueue parameters.
@@ -29,8 +57,17 @@ type EnqueueRequest struct {
 	Payload      map[string]any `json:"payload,omitempty"`
 }
 
-// Enqueue adds a job to the queue.
+// Enqueue adds a job to the queue. When the request carries a session_id
+// the interactive flag is stamped from that session's live signal (D11);
+// session-less requests stamp false by construction (audit R4).
 func (s *QueueService) Enqueue(ctx context.Context, req EnqueueRequest) (*queue.Job, error) {
+	return s.enqueueWithStamp(ctx, req, s.sessions, time.Now(), config.DefaultConfig().InteractiveWindow())
+}
+
+// enqueueWithStamp builds the job, stamps Interactive from the originating
+// session's live signal evaluated at `now` (injected so tests control the
+// clock, SHARED-CONVENTIONS §5), and enqueues.
+func (s *QueueService) enqueueWithStamp(ctx context.Context, req EnqueueRequest, sessions sessionReader, now time.Time, window time.Duration) (*queue.Job, error) {
 	if req.Prompt == "" {
 		return nil, wrapError("queue", "Enqueue", ErrInvalidInput)
 	}
@@ -66,11 +103,22 @@ func (s *QueueService) Enqueue(ctx context.Context, req EnqueueRequest) (*queue.
 		job.WithRequiredCaps(req.RequiredCaps)
 	}
 
+	StampInteractive(job, lookupSession(sessions, req.SessionID), now, window)
+
 	if err := s.q.Enqueue(ctx, job); err != nil {
 		return nil, wrapError("queue", "Enqueue", err)
 	}
 
 	return job, nil
+}
+
+// lookupSession resolves the origin session for the stamp, tolerating a nil
+// reader or empty ID (both stamp false per R4).
+func lookupSession(sessions sessionReader, sessionID string) *session.Session {
+	if sessions == nil || sessionID == "" {
+		return nil
+	}
+	return sessions.Get(sessionID)
 }
 
 // ClaimRequest contains claim parameters.

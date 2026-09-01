@@ -16,6 +16,7 @@ import (
 	"github.com/caimlas/meept/internal/errcls"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/queue"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/validator"
 	"github.com/caimlas/meept/pkg/models"
@@ -37,6 +38,10 @@ type StepJobPayload struct {
 	MemoryRefs           []string `json:"memory_refs,omitempty"`
 	AccumulatedContext   string   `json:"accumulated_context,omitempty"`
 	ValidationRetryCount int      `json:"validation_retry_count,omitempty"`
+	// SessionID is the originating session (audit R4): recoverable only via
+	// Task.LinkedSessions at schedule time, it rides the payload so the
+	// interactive stamp is evaluable and auditable on the job itself.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // TacticalScheduler schedules ready steps as queue jobs and handles completion callbacks.
@@ -66,6 +71,95 @@ type TacticalScheduler struct {
 	// (templateReg + registry + LLM). Nil falls back to the legacy 500-char
 	// truncation path.
 	handoffPropagator func(ctx context.Context, completedStep *task.TaskStep) error
+
+	// sessionStore resolves Task.LinkedSessions → *session.Session for the
+	// interactive stamp (tree 04 leaf 02, D11). Narrow interface so tests
+	// don't implement the full session.Store. Nil = no session context; all
+	// jobs then stamp Interactive=false by construction (R4 (c)).
+	sessions sessionStoreReader
+}
+
+// sessionStoreReader is the narrow session lookup the scheduler needs.
+// Mirrors handler.go's SessionStoreReader rationale: a local interface keeps
+// tests free of the 30+ method session.Store.
+type sessionStoreReader interface {
+	Get(id string) *session.Session
+}
+
+// SetSessionStore installs the session lookup used for the interactive stamp.
+// nil is ignored (leaves session-less stamping active).
+func (ts *TacticalScheduler) SetSessionStore(store sessionStoreReader) {
+	if store != nil {
+		ts.sessions = store
+	}
+}
+
+// resolveStepSession backfills step.SessionID from the task's linked sessions
+// (audit R4 (b)): the job payload carries no origin today, so TaskID →
+// LinkedSessions is the only recovery path. First linked session wins; tasks
+// linked to no session leave the field empty (stamps false by construction).
+func (ts *TacticalScheduler) resolveStepSession(step *task.TaskStep) {
+	if ts.taskStore == nil || step.TaskID == "" {
+		return
+	}
+	sessions, err := ts.taskStore.GetLinkedSessions(step.TaskID)
+	if err != nil {
+		ts.logger.Warn("Failed to resolve linked sessions for step session provenance",
+			"step_id", step.ID,
+			"task_id", step.TaskID,
+			"error", err,
+		)
+		return
+	}
+	if len(sessions) == 0 {
+		return
+	}
+	step.SessionID = sessions[0]
+	// Persist so validation-retry jobs (which rebuild the payload from the
+	// stored step) inherit the same origin.
+	if err := ts.stepStore.SetSessionID(step.ID, step.SessionID); err != nil {
+		ts.logger.Warn("Failed to persist step session provenance",
+			"step_id", step.ID,
+			"error", err,
+		)
+	}
+}
+
+// stepJobPayloadFromStep builds the queue payload for a step, carrying the
+// persisted session provenance through to the job.
+func stepJobPayloadFromStep(step *task.TaskStep) StepJobPayload {
+	return StepJobPayload{
+		StepID:               step.ID,
+		TaskID:               step.TaskID,
+		Description:          step.Description,
+		ToolHint:             step.ToolHint,
+		MemoryRefs:           step.MemoryRefs,
+		AccumulatedContext:   step.AccumulatedContext,
+		ValidationRetryCount: step.ValidationRetryCount,
+		SessionID:            step.SessionID,
+	}
+}
+
+// stampInteractive sets job.Interactive from the originating session's live
+// signal (D11: recent user message within the window OR foreground flag).
+// The window comes from the queue config; failures fall back to the Q1 5m
+// default via the config getter, and a missing store/session stamps false.
+func (ts *TacticalScheduler) stampInteractive(job *queue.Job, sessionID string) {
+	if sessionID == "" || ts.sessions == nil {
+		return // leaves Interactive=false (R4 (c): session-less by construction)
+	}
+	sess := ts.sessions.Get(sessionID)
+	if sess == nil {
+		return
+	}
+	window := config.DefaultConfig().InteractiveWindow()
+	job.WithInteractive(session.IsInteractive(sess, time.Now(), window))
+	if job.Interactive {
+		ts.logger.Debug("Step job stamped interactive",
+			"job_id", job.ID,
+			"session_id", sessionID,
+		)
+	}
 }
 
 // SetHandoffPropagator installs a callback that replaces the legacy
@@ -297,21 +391,26 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 		return fmt.Errorf("%w: for agent %s", ErrNoExecutionSlot, agentID)
 	}
 
-	// Create job payload with step context
-	payload := StepJobPayload{
-		StepID:             step.ID,
-		TaskID:             step.TaskID,
-		Description:        step.Description,
-		ToolHint:           step.ToolHint,
-		MemoryRefs:         step.MemoryRefs,
-		AccumulatedContext: step.AccumulatedContext,
+	// Recover session provenance from the persisted step (audit R4): the
+	// only reliable origin source is Task.LinkedSessions, resolved at
+	// schedule time and persisted on the step so validation-retry jobs can
+	// rebuild it. Session-less tasks leave it empty → stamp false (R4 (c)).
+	if step.SessionID == "" {
+		ts.resolveStepSession(step)
 	}
+
+	payload := stepJobPayloadFromStep(step)
 
 	job, err := queue.NewJob(queue.JobTypeProjectTask, payload)
 	if err != nil {
 		ts.releaseSlots(agentID)
 		return fmt.Errorf("failed to create job: %w", err)
 	}
+
+	// Interactive stamp (tree 04 leaf 02, D11): evaluated ONCE at enqueue
+	// from the originating session's live signal. Jobs enqueued while the
+	// session is quiet never upgrade — accepted R4 semantics.
+	ts.stampInteractive(job, step.SessionID)
 
 	job.WithTaskID(step.TaskID).
 		WithAgentID(agentID)
@@ -514,21 +613,15 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			}
 
 			if step.ValidationRetryCount < maxRetries {
-				// Re-queue step for validation retry
+				// Re-queue step for validation retry. The payload is rebuilt
+				// from the step (which carries the persisted SessionID) so
+				// the retry job re-stamps identically to the first schedule.
 				step.ValidationRetryCount++
 				if err := ts.stepStore.Update(step); err != nil {
 					ts.logger.Warn("failed to persist step retry count", "step_id", step.ID, "error", err)
 				}
 
-				retryPayload := StepJobPayload{
-					StepID:               step.ID,
-					TaskID:               step.TaskID,
-					Description:          step.Description,
-					ToolHint:             step.ToolHint,
-					MemoryRefs:           step.MemoryRefs,
-					AccumulatedContext:   step.AccumulatedContext,
-					ValidationRetryCount: step.ValidationRetryCount,
-				}
+				retryPayload := stepJobPayloadFromStep(step)
 				retryJob, jobErr := queue.NewJob(queue.JobTypeProjectTask, retryPayload)
 				if jobErr != nil {
 					ts.logger.Error("Failed to create validation-retry job", "step_id", step.ID, "error", jobErr)
