@@ -15,6 +15,7 @@ const (
 	ProviderIDAnthropic = "anthropic"
 	ProviderIDOpenAI    = "openai"
 	ProviderIDOllama    = "ollama"
+	ProviderIDLMStudio  = "lmstudio"
 	ProviderIDZAI       = "zai"
 	ProviderIDGoogle    = "google"
 	ProviderIDDeepSeek  = "deepseek"
@@ -114,6 +115,25 @@ var CanonicalProviders = []ProviderDef{
 		BaseURL:   "http://localhost:11434/v1",
 		DocURL:    "https://ollama.ai/docs",
 		Supports:  []string{CapStreaming, "local"},
+	},
+	// D12: LM Studio is a first-class local provider — same shape as
+	// Ollama. AuthEnvVar with no APIKeyEnvVar IS the local-provider
+	// pattern (no AuthNone const exists).
+	//
+	// DISCOVERY-ONLY, NO static catalog entries (deviation noted in the
+	// leaf): unlike Ollama, whose model set is stable enough to catalog,
+	// LM Studio's model list is entirely user-loaded and varies per
+	// machine, so static ProviderModels entries would rot. Models come
+	// from provider_lmstudio.go discovery instead (D13's
+	// catalog-fallback precedence still applies at merge time).
+	{
+		ID:        ProviderIDLMStudio,
+		Name:      "LM Studio",
+		Transport: TransportOpenAIChat,
+		AuthType:  AuthEnvVar,
+		BaseURL:   "http://localhost:1234/v1",
+		DocURL:    "https://lmstudio.ai/docs/api",
+		Supports:  []string{CapStreaming, CapTools, "local"},
 	},
 	//nolint:gosec // field name, not a secret
 	{

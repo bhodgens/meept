@@ -62,7 +62,13 @@ func applyOpenAICompatReasoning(body map[string]any, cfg *ModelConfig, rc *Reaso
 		// GLM and Kimi use the Anthropic-style thinking block.
 		applyZAIStyleThinking(body, rc, cfg, globalBudgets)
 
-	case ProviderIDOllama, "qwen", "local", "gala-mlx", "gala-llama":
+	// LM Studio is here with ollama/local: its OpenAI-compat server is
+	// llama.cpp-based and documents chat_template_kwargs passthrough for
+	// Qwen3-style templates (tree 05 leaf 03 Task 3 — decided BY TEST,
+	// TestApplyOpenAICompatReasoning_LMStudio). The default passthrough
+	// branch would silently drop the enable_thinking toggle for
+	// reasoning-capable local models.
+	case ProviderIDOllama, ProviderIDLMStudio, "qwen", "local", "gala-mlx", "gala-llama":
 		// Qwen3 / Qwq / llama.cpp / vLLM: boolean enable_thinking +
 		// thinking_budget. Qwen3 uses the same field name; llama.cpp-style
 		// servers take the template-level chat_template_kwargs toggle.

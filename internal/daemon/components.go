@@ -699,6 +699,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					return llm.FetchOpenRouterContexts(ctx, discovery.Client(), logger, baseURL, apiKey)
 				})
 			}
+			// LM Studio (tree 05 leaf 03): local, no auth (AuthEnvVar with
+			// unset APIKeyEnvVar). Base URL from the registry entry
+			// (http://localhost:1234/v1 default); the fetcher reads
+			// /v1/models for ids and /api/v0/models for context metadata.
+			if lmsDef, ok := llm.GetProviderByID(llm.ProviderIDLMStudio); ok {
+				discovery.SetEndpoint(llm.ProviderIDLMStudio, lmsDef.BaseURL, "")
+				discovery.RegisterFetcher(llm.ProviderIDLMStudio, llm.NewLMStudioFetcher(discovery.Client(), logger))
+			}
 			// llama.cpp local-models: the /props fetch uses the base URL
 			// the RuntimeManager resolved for the shared endpoint (spec:
 			// endpoint resolution, not provider config). The accessor is

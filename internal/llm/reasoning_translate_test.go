@@ -437,3 +437,52 @@ func TestParseResponseReasoningContent(t *testing.T) {
 		t.Errorf("Response.Content = %q, want %q", resp.Content, "answer")
 	}
 }
+
+// TestApplyOpenAICompatReasoning_LMStudio (tree 05 leaf 03 Task 3):
+// LM Studio's OpenAI-compat server is llama.cpp-based and documents
+// chat_template_kwargs passthrough for Qwen3-style templates, so a
+// reasoning-enabled lmstudio model must land in the SAME translation case
+// as ollama/local ("ProviderIDOllama, qwen, local, ..." in
+// reasoning_translate.go). The default branch would passthrough — silently
+// dropping the enable_thinking toggle — which IS a mis-translation for
+// reasoning-capable local models.
+func TestApplyOpenAICompatReasoning_LMStudio(t *testing.T) {
+	t.Run("reasoning enabled sends chat_template_kwargs toggle", func(t *testing.T) {
+		cfg := &ModelConfig{
+			ProviderID:   ProviderIDLMStudio,
+			ModelID:      "qwen3-8b",
+			Capabilities: map[string]bool{CapThinking: true},
+		}
+		rc := &ReasoningConfig{Effort: ReasoningMedium}
+		body := map[string]any{}
+		applyOpenAICompatReasoning(body, cfg, rc, nil)
+		ktw, ok := body["chat_template_kwargs"].(map[string]any)
+		if !ok {
+			t.Fatalf("chat_template_kwargs missing; body=%v", body)
+		}
+		if ktw["enable_thinking"] != true {
+			t.Errorf("enable_thinking = %v, want true", ktw["enable_thinking"])
+		}
+		if body["enable_thinking"] != true {
+			t.Errorf("enable_thinking = %v, want true (qwen native field)", body["enable_thinking"])
+		}
+	})
+
+	t.Run("none tier disables thinking", func(t *testing.T) {
+		cfg := &ModelConfig{
+			ProviderID:   ProviderIDLMStudio,
+			ModelID:      "qwen3-8b",
+			Capabilities: map[string]bool{CapThinking: true},
+		}
+		rc := &ReasoningConfig{Effort: ReasoningNone}
+		body := map[string]any{}
+		applyOpenAICompatReasoning(body, cfg, rc, nil)
+		ktw, ok := body["chat_template_kwargs"].(map[string]any)
+		if !ok {
+			t.Fatalf("chat_template_kwargs missing; body=%v", body)
+		}
+		if ktw["enable_thinking"] != false {
+			t.Errorf("enable_thinking = %v, want false", ktw["enable_thinking"])
+		}
+	})
+}

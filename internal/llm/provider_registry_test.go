@@ -96,3 +96,60 @@ func TestCanonicalProviders(t *testing.T) {
 		}
 	}
 }
+
+// TestGetProviderByIDLmStudio pins the LM Studio registry entry
+// field-for-field (llm-resilience-forest tree 05 leaf 03 Task 1; D12
+// "same treatment as Ollama").
+func TestGetProviderByIDLmStudio(t *testing.T) {
+	p, found := GetProviderByID(ProviderIDLMStudio)
+	if !found {
+		t.Fatalf("provider %q not registered", ProviderIDLMStudio)
+	}
+	if p.ID != "lmstudio" {
+		t.Errorf("ID = %q, want lmstudio", p.ID)
+	}
+	if p.Name != "LM Studio" {
+		t.Errorf("Name = %q, want %q", p.Name, "LM Studio")
+	}
+	if p.Transport != TransportOpenAIChat {
+		t.Errorf("Transport = %q, want %q", p.Transport, TransportOpenAIChat)
+	}
+	// Local provider pattern: AuthEnvVar with NO APIKeyEnvVar set
+	// (there is no AuthNone const; this IS the Ollama shape).
+	if p.AuthType != AuthEnvVar {
+		t.Errorf("AuthType = %q, want %q", p.AuthType, AuthEnvVar)
+	}
+	if p.APIKeyEnvVar != "" {
+		t.Errorf("APIKeyEnvVar = %q, want empty (local provider)", p.APIKeyEnvVar)
+	}
+	if p.BaseURL != "http://localhost:1234/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "http://localhost:1234/v1")
+	}
+	if p.DocURL != "https://lmstudio.ai/docs/api" {
+		t.Errorf("DocURL = %q, want %q", p.DocURL, "https://lmstudio.ai/docs/api")
+	}
+	wantCaps := []string{CapStreaming, CapTools, "local"}
+	if len(p.Supports) != len(wantCaps) {
+		t.Fatalf("Supports = %v, want %v", p.Supports, wantCaps)
+	}
+	for i, want := range wantCaps {
+		if p.Supports[i] != want {
+			t.Errorf("Supports[%d] = %q, want %q", i, p.Supports[i], want)
+		}
+	}
+}
+
+// TestListProvidersIncludesLMStudio verifies the entry resolves through
+// the OpenAI-compat transport listing (leaf Task 1 "transport resolves").
+func TestListProvidersIncludesLMStudio(t *testing.T) {
+	found := false
+	for _, p := range ListProviders(TransportOpenAIChat) {
+		if p.ID == ProviderIDLMStudio {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("lmstudio missing from ListProviders(TransportOpenAIChat)")
+	}
+}

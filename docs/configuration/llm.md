@@ -299,6 +299,61 @@ summarization_model = "small"    # Model for summarization
 }
 ```
 
+### LM Studio (Local)
+
+Serve a model from LM Studio's local API server (Developer tab → Start
+Server, or the CLI):
+
+```bash
+lms server start
+```
+
+LM Studio listens on `http://localhost:1234` by default; its
+OpenAI-compatible base URL is `http://localhost:1234/v1`. If you changed
+the port (or the machine), override it with the provider's `baseURL`
+option, exactly like Ollama:
+
+```json5
+"lmstudio": {
+  "api": "openai",
+  "options": {
+    "baseURL": "http://localhost:1234/v1"
+  },
+  "models": {
+    "qwen2.5-7b-instruct": {
+      "name": "Qwen2.5 7B Instruct",
+      "capabilities": ["code", "tool_use", "reasoning"],
+      "input_cost": 0.0,
+      "output_cost": 0.0,
+      "max_output": 4096,
+      "temperature": 0.7
+    }
+  }
+}
+```
+
+The `models` key is the model id as LM Studio's loader reports it (see
+`GET http://localhost:1234/v1/models`). It is usually the lowercased
+identifier already, e.g. `qwen2.5-7b-instruct`; loaded models vary per
+machine, so declare only the ones you pin for aliasing/costs.
+
+**Discovery:** when no explicit entry exists, models are discovered from
+the server itself — ids come from the OpenAI-compat list (`/v1/models`,
+which carries NO context metadata), and context lengths come from LM
+Studio's REST v0 layer (`/api/v0/models`). A loaded model's
+`context_length` wins over the entry's `max_context_length`; models that
+expose neither are registered with context `0`.
+
+**Context length:** an explicit `context_limit` in models.json5 always
+wins; a discovered value otherwise fills models with context `0` (and can
+replace catalog values when `allow_context_override` is enabled — see
+[tree 05 leaf 01's precedence](../../internal/llm/context_discovery.go)).
+
+**Tools:** the endpoint advertises `tools` support (it accepts the
+OpenAI wire format), but whether a specific loaded model can actually
+produce tool calls depends on that model's JIT tool use — per-model
+capability gating in models.json5 is your job.
+
 ### OpenRouter (External)
 
 ```json5
