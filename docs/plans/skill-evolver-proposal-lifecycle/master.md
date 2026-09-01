@@ -303,10 +303,10 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-evolver-plan-sink | PENDING | | |
-| 02-skill-root-resolution | PENDING | | |
-| 03-approval-actuator | PENDING | | |
-| 04-verifier-per-action-semantics | PENDING | | |
+| 01-evolver-plan-sink | COMPLETE | 287e1817 | sink + provenance + docs; tests: TestEvolverPlanDir(7)/Provenance(4)/Sink(3); plan regression green |
+| 02-skill-root-resolution | COMPLETE | acbbdaa1 | ResolveTierPath + Writer TierResolver seam; components.go unchanged; writer/discovery suites green |
+| 03-approval-actuator | COMPLETE | ddaeae96 | ApplyApprovedPlan + plan.approved bus bridge; ExtraMeta round-trip fix (approval was stripping provenance); SQLite WAL DSN fix; no import cycle |
+| 04-verifier-per-action-semantics | COMPLETE | 287e1817 | usage gate for archive (polarity corrected: gate re-verifies passCPrune selection), rubric frozen for refine/create, Gate field; 0 rubric deletions |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
