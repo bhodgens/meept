@@ -99,6 +99,10 @@ type AgentSpec struct {
 	// EnhancerModel is the small/cheap model used to expand a brief into
 	// generator-ready prose. Empty = alias "small".
 	EnhancerModel string `json:"enhancer_model,omitempty"`
+	// EscalationModel is the model (alias name or "provider/model" ref) used
+	// for the next fix attempt when verification exhausts max_fix_loops.
+	// Empty = escalation disabled; hook falls back to escalate-to-user.
+	EscalationModel string `json:"escalation_model,omitempty" yaml:"escalation_model,omitempty"`
 	// AdditionalTools are tools beyond the baseline that this agent has access to.
 	AdditionalTools []string `json:"additional_tools,omitempty"`
 	// Constraints are operational limits for this agent.

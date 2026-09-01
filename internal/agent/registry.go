@@ -847,6 +847,13 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.EnhancerModel = base.EnhancerModel
 	}
 
+	// EscalationModel: prefer AGENT.md if set (empty = escalation disabled)
+	if def.EscalationModel != "" {
+		merged.EscalationModel = def.EscalationModel
+	} else {
+		merged.EscalationModel = base.EscalationModel
+	}
+
 	// Tools: MERGE (union)
 	merged.AdditionalTools = mergeStringSlices(base.AdditionalTools, def.AdditionalTools)
 
@@ -905,6 +912,7 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		Purpose:         r.assemblePurpose(def.PromptComponents, def.Body),
 		Model:           def.Model,
 		EnhancerModel:   def.EnhancerModel,
+		EscalationModel: def.EscalationModel,
 		AdditionalTools: append([]string(nil), def.AdditionalTools...),
 		AvailableSkills: append([]string(nil), def.AvailableSkills...),
 		SkillTriggers:   copyStringMap(def.SkillTriggers),

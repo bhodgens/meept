@@ -774,3 +774,70 @@ func TestAgentRegistry_ReleaseTaskLoops_EmptyTaskID_Noop(t *testing.T) {
 		t.Error("empty taskID release should not delete existing loops")
 	}
 }
+
+// --- escalation_model config surface (llm-resilience-forest tree 01 leaf 01-spec-config) ---
+
+func TestEscalationModel_DefinitionToSpec(t *testing.T) {
+	r := &AgentRegistry{logger: silentLogger()}
+	def := &agents.AgentDefinition{
+		AgentMetadata: agents.AgentMetadata{
+			ID:              "esc-agent",
+			Name:            "Escalation Agent",
+			Role:            "executor",
+			EscalationModel: "smarter-alias",
+		},
+	}
+
+	spec := r.definitionToSpec(def)
+	if spec.EscalationModel != "smarter-alias" {
+		t.Errorf("definitionToSpec EscalationModel = %q, want %q", spec.EscalationModel, "smarter-alias")
+	}
+
+	// Empty definition field maps to empty spec field (disabled).
+	def.EscalationModel = ""
+	if got := r.definitionToSpec(def).EscalationModel; got != "" {
+		t.Errorf("definitionToSpec EscalationModel = %q, want empty (disabled)", got)
+	}
+}
+
+func TestEscalationModel_MergeSpec_Reload(t *testing.T) {
+	// Re-load scenario: a spec already carries escalation_model from a prior
+	// AGENT.md load; mergeSpec must preserve it.
+	r := &AgentRegistry{logger: silentLogger()}
+	base := &AgentSpec{
+		ID:              "esc-agent",
+		Name:            "Escalation Agent",
+		Role:            RoleExecutor,
+		Enabled:         true,
+		EscalationModel: "smarter-alias",
+	}
+	def := &agents.AgentDefinition{
+		AgentMetadata: agents.AgentMetadata{ID: "esc-agent", Name: "Escalation Agent", Role: "executor"},
+	}
+
+	merged := r.mergeSpec(base, def)
+	if merged.EscalationModel != "smarter-alias" {
+		t.Errorf("mergeSpec EscalationModel = %q, want %q (preserve base)", merged.EscalationModel, "smarter-alias")
+	}
+
+	// A re-load carrying its own value overrides the base (prefer AGENT.md).
+	def.EscalationModel = "provider/other-model"
+	merged = r.mergeSpec(base, def)
+	if merged.EscalationModel != "provider/other-model" {
+		t.Errorf("mergeSpec EscalationModel = %q, want %q (prefer AGENT.md)", merged.EscalationModel, "provider/other-model")
+	}
+}
+
+func TestEscalationModel_FrontmatterToSpec(t *testing.T) {
+	frontmatter := "---\nid: esc-agent\nname: Escalation Agent\nrole: executor\nescalation_model: my-alias\n---\n\n# Escalation Agent\n\nBody."
+	def, err := agents.ParseAgentText(frontmatter)
+	if err != nil {
+		t.Fatalf("ParseAgentText failed: %v", err)
+	}
+
+	r := &AgentRegistry{logger: silentLogger()}
+	spec := r.definitionToSpec(def)
+	if spec.EscalationModel != "my-alias" {
+		t.Errorf("spec.EscalationModel = %q, want %q (frontmatter → spec)", spec.EscalationModel, "my-alias")
+	}
+}

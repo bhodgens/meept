@@ -62,6 +62,7 @@ temperature: 0.3
 - **max_tokens_per_turn**: Maximum tokens per conversation turn
 - **max_memory_refs**: Maximum memory references per turn
 - **temperature**: LLM temperature setting
+- **escalation_model**: Model (alias name or `"provider/model"` ref) used for the next fix attempt when adversarial verification exhausts `max_fix_loops`; empty/absent = escalation disabled (escalates to the user instead)
 
 ## Discovery Hierarchy
 
@@ -156,6 +157,7 @@ timeout_seconds: 300
 max_tokens_per_turn: 8192
 max_memory_refs: 15
 temperature: 0.7
+# escalation_model: smarter-alias  # alias or provider/model; empty = disabled
 ---
 
 # Research Specialist

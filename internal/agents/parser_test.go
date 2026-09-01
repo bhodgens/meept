@@ -264,3 +264,62 @@ Do testing.`
 		t.Errorf("Body = %q", def.Body)
 	}
 }
+
+// TestParseAgentText_EscalationModel verifies that the `escalation_model`
+// frontmatter key parses into AgentMetadata.EscalationModel and that an
+// absent key leaves it empty (= escalation disabled).
+func TestParseAgentText_EscalationModel(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		wantEscalation string
+	}{
+		{
+			name: "alias name",
+			input: `---
+id: esc-agent
+name: Escalation Agent
+role: executor
+escalation_model: my-alias
+---
+
+Body.`,
+			wantEscalation: "my-alias",
+		},
+		{
+			name: "provider/model reference",
+			input: `---
+id: esc-agent
+name: Escalation Agent
+role: executor
+escalation_model: "provider/smarter-model"
+---
+
+Body.`,
+			wantEscalation: "provider/smarter-model",
+		},
+		{
+			name: "absent key stays empty",
+			input: `---
+id: esc-agent
+name: Escalation Agent
+role: executor
+---
+
+Body.`,
+			wantEscalation: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			def, err := ParseAgentText(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if def.EscalationModel != tt.wantEscalation {
+				t.Errorf("EscalationModel = %q, want %q", def.EscalationModel, tt.wantEscalation)
+			}
+		})
+	}
+}

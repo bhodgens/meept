@@ -54,6 +54,12 @@ type AgentMetadata struct {
 	// Empty = alias "small" (resolves to small_model).
 	EnhancerModel string `yaml:"enhancer_model,omitempty"`
 
+	// EscalationModel is the model (alias name or "provider/model" ref)
+	// used for the next fix attempt when verification exhausts
+	// max_fix_loops. Mirrors the AgentSpec pipeline field (D1, D14);
+	// empty = escalation disabled (escalate-to-user fallback).
+	EscalationModel string `yaml:"escalation_model,omitempty"`
+
 	// PromptComponents lists component IDs (e.g., "base.constitution") that wrap
 	// the AGENT.md body when assembling the system prompt.
 	PromptComponents []string `yaml:"prompt_components,omitempty"`
