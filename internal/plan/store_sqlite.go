@@ -30,7 +30,12 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error) {
 		logger = slog.Default()
 	}
 
-	rawDB, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	// modernc.org/sqlite honors `_pragma=...` DSN params only (the
+	// mattn-style `_journal_mode`/`_busy_timeout` keys are silently
+	// ignored): enable WAL + busy_timeout so concurrent readers (e.g. the
+	// evolver approval bridge) never collide with write transactions as
+	// instant SQLITE_BUSY.
+	rawDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

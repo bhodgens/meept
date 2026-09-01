@@ -109,8 +109,19 @@ type Components struct {
 	EvolverPlanCancel context.CancelFunc // cancels the evolver sink lifecycle context
 	// EvolverPlanCtx is the sink lifecycle context created with the store
 	// above; the approval actuator (leaf 03) runs sink-scoped work on it.
-	EvolverPlanCtx       context.Context
-	SecurityOrchestrator *intsecurity.Orchestrator
+	EvolverPlanCtx context.Context
+	// EvolverPlanManager is the PlanManager the evolver parks its plans in:
+	// the dedicated sink manager when available, else the shared manager
+	// (fallback). The approval bridge resolves evolver plan IDs through it
+	// FIRST — evolver plans are stored in this manager's store, not the
+	// shared one.
+	EvolverPlanManager        *plan.PlanManager
+	// EvolverPlanApprovalBridge dispatches approved evolver plans (leaf 03):
+	// subscribes to plan.approved and invokes the evolver's
+	// ApplyApprovedPlan. Nil when the evolver/plan system is absent; wired
+	// by wireEvolverApprovalBridge after initializeSkillEvolver.
+	EvolverPlanApprovalBridge *EvolverApprovalBridge
+	SecurityOrchestrator      *intsecurity.Orchestrator
 	FenceChecker         *intsecurity.FenceChecker
 	AgentLoop            *agent.AgentLoop
 	ChatHandler          *agent.ChatHandler

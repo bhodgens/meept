@@ -754,6 +754,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// components_wiki.go initializeSkillEvolver for the ordering-bug history.
 	if components != nil {
 		components.initializeSkillEvolver(fullCfg, logger)
+
+		// Approval actuator (leaf 03): approved evolver plans dispatch to
+		// the evolver's ApplyApprovedPlan. Fires only on the plan.approved
+		// event — auto_apply stays false; the human gate is untouched.
+		if _, err := components.wireEvolverApprovalBridge(); err != nil {
+			logger.Warn("Failed to wire evolver approval bridge", "error", err)
+		}
 	}
 
 	// Register plan RPC handlers (direct Go handlers override bus proxy)

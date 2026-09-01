@@ -18,6 +18,18 @@ type ParsedPlan struct {
 	Summary string
 	Phases  []ParsedPhase
 	Notes   []string
+	// ExtraMeta holds `## Meta` key/value lines beyond the structured
+	// fields above (plan_id/project/status). Preserved so the parse →
+	// write round-trip (UpdatePlanStatus) never strips third-party Meta
+	// keys such as the skill-evolver provenance stamp or the approval
+	// actuator's applied marker.
+	ExtraMeta []ParsedMetaKV
+}
+
+// ParsedMetaKV is one `- key: value` Meta line.
+type ParsedMetaKV struct {
+	Key   string
+	Value string
 }
 
 // ParsedPhase holds a phase and its steps.
@@ -220,6 +232,11 @@ func parseMetaLine(p *ParsedPlan, line string) {
 		p.Project = value
 	case "status":
 		p.Status = value
+	default:
+		// Unknown key: retain for round-trip fidelity (UpdatePlanStatus
+		// rewrites the Meta section, and dropping extras would silently
+		// strip provenance such as origin/proposal_id/action/applied).
+		p.ExtraMeta = append(p.ExtraMeta, ParsedMetaKV{Key: key, Value: value})
 	}
 }
 

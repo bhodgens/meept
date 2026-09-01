@@ -164,6 +164,14 @@ func WritePlanFromParsed(filePath string, parsed *ParsedPlan) error {
 	if parsed.Project != "" {
 		fmt.Fprintf(&b, "- project: %s\n", parsed.Project)
 	}
+	// Extra Meta keys (anything beyond plan_id/project/status — e.g. the
+	// skill-evolver provenance stamp origin/proposal_id/action and the
+	// approval actuator's applied marker) are preserved verbatim on
+	// round-trip, so status updates never silently strip machine-readable
+	// provenance from plan files.
+	for _, extra := range parsed.ExtraMeta {
+		fmt.Fprintf(&b, "- %s: %s\n", extra.Key, extra.Value)
+	}
 	if parsed.Status != "" {
 		fmt.Fprintf(&b, "- status: %s\n", parsed.Status)
 	}

@@ -1,11 +1,16 @@
 package lifecycle
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
@@ -752,6 +757,239 @@ func (e *Evolver) applyProposal(ctx context.Context, proposal EvolutionProposal)
 	default:
 		return fmt.Errorf("evolver: unknown proposal action %q", proposal.Action)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Approval actuator (leaf 03): applied evolver plan → skill action
+// ---------------------------------------------------------------------------
+
+const (
+	// metaKeyApplied is the Meta key recording durable application state on
+	// the plan file itself (`- applied: <RFC3339 timestamp>`). Reusing the
+	// existing `- key: value` Meta block (leaf 01's provenance encoding)
+	// keeps application state in the same durable, human-readable file — no
+	// sidecar marker, no parallel format.
+	metaKeyApplied = "applied"
+)
+
+// reAppliedLine matches the applied marker inside a plan file's Meta section
+// (`- applied: ...`), consumed with the Meta-section scoping of
+// parseEvolverPlanMeta.
+var reAppliedLine = regexp.MustCompile(`^-\s+(applied):\s+(.+)$`)
+
+// appliedEvolverProposals is the in-memory applied-proposal registry keyed by
+// proposal id (value: action). It closes the same-process idempotency window
+// between an application and its durable marker write. Guarded by appliedMu;
+// the mutex also keeps concurrent manual + scheduled approvals serialized.
+var (
+	appliedMu               sync.Mutex
+	appliedEvolverProposals = make(map[string]string)
+)
+
+// appliedEvolverPlanFromContent reports the applied marker's timestamp value
+// from plan.md content, or "" when the plan carries no applied marker.
+func appliedEvolverPlanFromContent(content string) string {
+	inMeta := false
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		switch {
+		case strings.HasPrefix(line, "## "):
+			inMeta = line == "## Meta"
+		case inMeta:
+			if m := reAppliedLine.FindStringSubmatch(line); m != nil {
+				return strings.TrimSpace(m[2])
+			}
+		}
+	}
+	return ""
+}
+
+// planEvolverProvenance loads the plan file at path and returns its evolver
+// provenance and application state. Errors surface read failures verbatim so
+// callers can report the offending path.
+func planEvolverProvenance(path string) (evolverPlanMeta, string, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // caller-supplied plan path
+	if err != nil {
+		return evolverPlanMeta{}, "", fmt.Errorf("read plan file %s: %w", path, err)
+	}
+	content := string(data)
+	meta := parseEvolverPlanMeta(content)
+	if meta.origin != EvolverPlanOrigin {
+		return evolverPlanMeta{}, "", fmt.Errorf(
+			"plan %s is not an evolver plan (origin %q != %q); refusing to apply",
+			filepath.Base(path), meta.origin, EvolverPlanOrigin)
+	}
+	if meta.proposalID == "" {
+		return evolverPlanMeta{}, "", fmt.Errorf(
+			"evolver plan %s carries no proposal_id; refusing to apply", filepath.Base(path))
+	}
+	if meta.action == "" {
+		return evolverPlanMeta{}, "", fmt.Errorf(
+			"evolver plan %s carries no action; refusing to apply", filepath.Base(path))
+	}
+	return meta, appliedEvolverPlanFromContent(content), nil
+}
+
+// markPlanApplied appends the durable applied marker (`- applied: <ts>`) to
+// the plan file's Meta section. Best-effort: the marker is the idempotency
+// guard's durable half, so a write failure is reported — but the in-memory
+// registry below still dedupes within the process.
+func markPlanApplied(path string) error {
+	data, err := os.ReadFile(path) //nolint:gosec // caller-supplied plan path
+	if err != nil {
+		return fmt.Errorf("read plan file for applied marker: %w", err)
+	}
+	stamped, err := injectMetaLines(string(data), []string{
+		"- " + metaKeyApplied + ": " + time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("record applied marker: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(stamped), 0o644); err != nil { //nolint:gosec // plan file, user-readable by design
+		return fmt.Errorf("write applied marker: %w", err)
+	}
+	return nil
+}
+
+// registerAppliedEvolverPlan records (proposalID, action) in the in-memory
+// applied-proposal registry. Returns false when the entry already existed.
+func registerAppliedEvolverPlan(proposalID, action string) bool {
+	appliedMu.Lock()
+	defer appliedMu.Unlock()
+	if applied, ok := appliedEvolverProposals[proposalID]; ok {
+		return applied == action
+	}
+	appliedEvolverProposals[proposalID] = action
+	return true
+}
+
+// ApplyApprovedPlan applies an approved evolver-origin plan: reads the plan
+// file's provenance (origin/proposal_id/action), dispatches by action to the
+// tier-resolved Writer (archive per leaf 02; refine/create via the existing
+// applyProposal path), and records the application durably on the plan file
+// plus in memory so a repeat approval is a nil-error no-op.
+//
+// Non-evolver plans (no `origin: skill-evolver` Meta line) are rejected —
+// human-authored plans can never trigger application. Idempotency is keyed
+// on proposal_id, so double-application of an archive (destructive to a live
+// skill dir) is impossible on retry.
+//
+// Every application attempt emits exactly one audit line:
+//
+//	applied evolver plan <file> action=<a> proposal=<id> result=<ok|err>
+func (e *Evolver) ApplyApprovedPlan(planPath string) error {
+	if e == nil || e.logger == nil {
+		return fmt.Errorf("evolver: not initialized")
+	}
+	audit := func(result string, err error) error {
+		meta, _, _ := planEvolverProvenanceForAudit(planPath)
+		e.logger.Info(fmt.Sprintf(
+			"applied evolver plan %s action=%s proposal=%s result=%s",
+			filepath.Base(planPath), meta.action, meta.proposalID, result))
+		if err != nil {
+			return fmt.Errorf("apply evolver plan %s: %w", filepath.Base(planPath), err)
+		}
+		return nil
+	}
+
+	// Provenance + idempotency gate. A missing/unreadable file errors here
+	// naming the path, without emitting an audit line (nothing was attempted).
+	meta, applied, err := planEvolverProvenance(planPath)
+	if err != nil {
+		return err
+	}
+	if applied != "" {
+		e.logger.Info("evolver plan already applied; skipping",
+			"plan", filepath.Base(planPath), "proposal_id", meta.proposalID)
+		return nil
+	}
+	if !registerAppliedEvolverPlan(meta.proposalID, meta.action) {
+		e.logger.Info("evolver plan already applied in this process; skipping",
+			"plan", filepath.Base(planPath), "proposal_id", meta.proposalID)
+		return nil
+	}
+
+	// Dispatch by action through the same proposal-application path the
+	// auto-apply flow uses. The candidate content for refine/create lives in
+	// the plan's Summary (CreatePlan concatenates rationale + "Candidate
+	// content:" + candidate). A content action whose plan carries no
+	// candidate is rejected — the actuator never invents creation inputs.
+	candidate := evolverPlanCandidateContent(planPath)
+	if meta.action != string(ProposalArchive) && candidate == "" {
+		return audit("err", fmt.Errorf(
+			"evolver plan carries action %q but no candidate content; refusing to write an empty skill",
+			meta.action))
+	}
+	if err := e.applyProposal(context.Background(), EvolutionProposal{
+		Action:           EvolutionProposalAction(meta.action),
+		SkillName:        evolverSkillNameFromAction(meta.proposalID),
+		CandidateContent: candidate,
+	}); err != nil {
+		return audit("err", err)
+	}
+
+	// Record the application durably on the plan file itself.
+	if err := markPlanApplied(planPath); err != nil {
+		return audit("err", err)
+	}
+	return audit("ok", nil)
+}
+
+// planEvolverProvenanceForAudit reads the plan's provenance for audit-line
+// rendering. Read failures degrade to empty fields rather than masking the
+// audit line: the line is emitted either way (result=err conveys the
+// failure). The action/proposal_id of the attempt under audit are recovered
+// from the file when it is readable.
+func planEvolverProvenanceForAudit(path string) (evolverPlanMeta, string, bool) {
+	meta, applied, err := planEvolverProvenance(path)
+	if err != nil {
+		return evolverPlanMeta{}, "", false
+	}
+	return meta, applied, true
+}
+
+// evolverPlanCandidateContent extracts the candidate skill content from the
+// plan's Summary section: everything after the first "Candidate content:"
+// divider, minus the plan-format's trailing "## Notes" section. The
+// candidate's own markdown headings are preserved — evolver candidates
+// routinely contain "## Phase …" sections. Returns "" when the plan carries
+// no candidate (e.g. archive plans), matching CreatePlan's description
+// encoding.
+func evolverPlanCandidateContent(path string) string {
+	data, err := os.ReadFile(path) //nolint:gosec // caller-supplied plan path
+	if err != nil {
+		return ""
+	}
+	content := string(data)
+	const divider = "Candidate content:"
+	idx := strings.Index(content, divider)
+	if idx < 0 {
+		return ""
+	}
+	candidate := content[idx+len(divider):]
+	// Drop the plan file's trailing Notes section (always the final section
+	// per WritePlanMarkdown). Cut at the LAST occurrence so a candidate that
+	// itself references "## Notes" in fenced examples keeps its body.
+	if notesIdx := strings.LastIndex(candidate, "\n## Notes"); notesIdx >= 0 {
+		candidate = candidate[:notesIdx]
+	}
+	return strings.TrimSpace(candidate)
+}
+
+// evolverSkillNameFromAction recovers the target skill name from the proposal
+// id the evolver stamped into the plan (`evo-<action>-<sanitized-skill>-<seq>`
+// per evolverProposalID + sanitizeIDPart). Sanitization is exactly reversible
+// here: skill names are recovered lowercase-hyphenated, which is the same
+// normalized form skill discovery resolves.
+func evolverSkillNameFromAction(proposalID string) string {
+	parts := strings.Split(proposalID, "-")
+	if len(parts) < 4 || parts[0] != "evo" {
+		return ""
+	}
+	// [evo, <action>, <skill...>, <seq>]
+	return strings.Join(parts[2:len(parts)-1], "-")
 }
 
 // ---------------------------------------------------------------------------

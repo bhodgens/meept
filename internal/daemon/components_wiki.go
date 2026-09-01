@@ -163,6 +163,7 @@ func (c *Components) initializeSkillEvolver(cfg *config.Config, logger *slog.Log
 	// leaf 01 invariant). Falls back to the shared manager only when the
 	// sink store cannot be created.
 	evolverPlanMgr := c.PlanManager
+	c.EvolverPlanManager = c.PlanManager
 	// Sink lifecycle context: derived from the components lifecycle so a
 	// Stop() cancels it (via EvolverPlanCancel in stopComponents). Stored
 	// on the component for the approval actuator (leaf 03); it is
@@ -181,6 +182,7 @@ func (c *Components) initializeSkillEvolver(cfg *config.Config, logger *slog.Log
 		c.EvolverPlanCancel = sinkCancel
 		if sinkMgr, err := c.newEvolverPlanManager(evolverPlanStore, cfg, logger); err == nil {
 			evolverPlanMgr = sinkMgr
+			c.EvolverPlanManager = sinkMgr
 			logger.Info("Skill evolver wired to dedicated plan sink",
 				"plan_dir", cfg.Skills.Evolver.PlanDir,
 			)
@@ -227,6 +229,14 @@ func (c *Components) initializeSkillEvolver(cfg *config.Config, logger *slog.Log
 // lazily by the first plan write (plan.WritePlanMarkdown does MkdirAll),
 // not here.
 func (c *Components) newEvolverPlanManager(store plan.PlanStore, cfg *config.Config, logger *slog.Logger) (*plan.PlanManager, error) {
+	return c.newEvolverPlanManagerWithCreator(store, cfg, logger, c.taskCreatorAdapterForEvolver())
+}
+
+// newEvolverPlanManagerWithCreator is newEvolverPlanManager with an explicit
+// TaskCreator, so tests can inject a stub (the approval actuator wiring
+// exercises the full approve → synthesize path). Production passes the
+// shared task-creator adapter.
+func (c *Components) newEvolverPlanManagerWithCreator(store plan.PlanStore, cfg *config.Config, logger *slog.Logger, creator plan.TaskCreator) (*plan.PlanManager, error) {
 	if store == nil {
 		return nil, fmt.Errorf("evolver plan sink: nil plan store")
 	}
@@ -244,7 +254,7 @@ func (c *Components) newEvolverPlanManager(store plan.PlanStore, cfg *config.Con
 	}
 	evolverPlans := cfg.Plans
 	evolverPlans.Storage.ExternalPath = sink
-	return plan.NewPlanManager(store, c.msgBus, evolverPlans, c.taskCreatorAdapterForEvolver(), logger), nil
+	return plan.NewPlanManager(store, c.msgBus, evolverPlans, creator, logger), nil
 }
 
 // taskCreatorAdapterForEvolver returns the shared TaskCreator adapter (or nil
