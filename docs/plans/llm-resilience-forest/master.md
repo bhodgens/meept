@@ -109,11 +109,11 @@ Forest-level verification after all trees COMPLETE:
 
 | Tree | Status | Notes |
 |------|--------|-------|
-| 01-escalation | PENDING | |
-| 02-failure-policy | PENDING | gates 03 |
-| 03-turn-lifecycle | PENDING | |
-| 04-scheduling | PENDING | |
-| 05-catalog | PENDING | |
+| 01-escalation | COMPLETE | 4/4 leaves (178cd2b3, 53e0dd48, c88cc545, a00b76a5); R1 persistent-override honored; tracking closed 2026-09-01 |
+| 02-failure-policy | IN_PROGRESS | leaves 01+02 COMPLETE (c9d7da28, adc44b16); leaf 03 in flight by parallel session; this forest waits for its completion signals |
+| 03-turn-lifecycle | PENDING | gated on tree 02 COMPLETE |
+| 04-scheduling | COMPLETE* | leaves 01+02 COMPLETE (ed652a9e, d7d2cddc+35c79887); leaf 03 HELD — client.go conflict with tree 02, green-light after tree 02 leaf 03 lands |
+| 05-catalog | COMPLETE | 3/3 leaves (dddb364e, 6f1a2e8a, 40e41b0e); tracking closed 2026-09-01 |
 
 ## Notes
 

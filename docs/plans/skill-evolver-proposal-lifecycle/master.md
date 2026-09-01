@@ -158,8 +158,15 @@ Owner: 03-approval-actuator.md. Depends on 01, 02.
 ```
 // internal/skills/lifecycle (verifier.go + evolver.go)
 // Gate dispatch by proposal action:
-//   archive  -> usage gate ONLY: injections >= 10 AND
-//               effectiveness >= MinEffectiveness
+//   archive  -> usage gate ONLY, keyed on the action (nil stats fail
+//               closed): PASS requires injections >= ArchiveMinInjections
+//               AND effectiveness < MinEffectiveness — the gate re-verifies
+//               passCPrune's selection on current stats; a recovered skill
+//               (effectiveness >= threshold) is rejected.
+//               POLARITY NOTE (2026-09-01): the original ">= MinEffectiveness"
+//               sketch was inverted — it would have made Pass C unable to
+//               ever prune. Corrected during implementation; corrected leaf:
+//               04-verifier-per-action-semantics.md.
 //               (both thresholds already computed in passCPrune,
 //               evolver.go:511 — single source of truth; extract shared
 //               constants if duplicated)

@@ -56,11 +56,20 @@ Key files to understand before implementing:
 ```
 // internal/skills/lifecycle (verifier.go + evolver.go) — gate dispatch by
 // proposal action:
-//   archive  -> usage gate ONLY: injections >= 10 AND
-//               effectiveness >= MinEffectiveness
-//               (thresholds already computed in passCPrune, evolver.go:511 —
-//               single source of truth; extract shared constants if
-//               duplicated)
+//   archive  -> usage gate ONLY, keyed on the action (nil stats fail
+//               closed): PASS requires injections >= ArchiveMinInjections
+//               AND effectiveness < MinEffectiveness — the gate RE-verifies
+//               passCPrune's GetLowPerformers selection on current stats.
+//               A skill whose effectiveness RECOVERED to or above the
+//               threshold is REJECTED (it improved; do not archive).
+//               NOTE (2026-09-01): the original sketch said
+//               "effectiveness >= MinEffectiveness" — that polarity was
+//                 inverted and would have made Pass C unable to ever prune
+//                 (selection picks effectiveness < threshold). Corrected
+//                 during implementation; see commit d3314890 and
+//                 TestArchiveUsageGate.
+//               (thresholds already computed in passCPrune —
+//               single source of truth; ArchiveMinInjections extracted)
 //   refine /
 //   create   -> existing 4-dim content rubric, min 0.75, unchanged
 //               (grounded_in_evidence / preserves_existing_value /

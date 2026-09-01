@@ -468,14 +468,23 @@ func (w *Writer) ArchiveSkill(name string) error {
 	return nil
 }
 
-// RestoreSkill moves a skill from <skillsDir>.archived/<name>/ back to
-// <skillsDir>/<name>/. After moving, the skill is re-parsed and registered
-// in the registry (if set).
+// RestoreSkill moves a skill from <skillsDir>.archived/<name>/ back to the
+// Writer's root (<skillsDir>/<name>/).
+//
+// Destination note (deliberate, documented): the skill does NOT return to
+// its original discovery tier. Archives do not record origin tier, and the
+// Writer root is the user tier (~/.meept/skills), which OUTRANKS the claude
+// and hermes tiers in discovery precedence — a restored skill is visible and
+// authoritative everywhere it was before, just promoted to user ownership.
+// Restoring into the user tier also guarantees the skill is discoverable even
+// when its original tier directory (e.g. ~/.claude/skills) is managed by
+// another tool that could overwrite it. After moving, the skill is re-parsed
+// and registered in the registry (if set).
 //
 // If a Versioner is wired AND a skill with the same name currently exists at
-// the primary path (which would be overwritten by the restore), a snapshot of
-// that existing content is captured BEFORE the move (best-effort: on snapshot
-// failure, logs a warning and continues).
+// the destination path (which would be overwritten by the restore), a
+// snapshot of that existing content is captured BEFORE the move (best-effort:
+// on snapshot failure, logs a warning and continues).
 func (w *Writer) RestoreSkill(name string) error {
 	if name == "" {
 		return fmt.Errorf("writer: skill name is required")
