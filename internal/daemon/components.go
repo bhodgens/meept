@@ -115,20 +115,20 @@ type Components struct {
 	// (fallback). The approval bridge resolves evolver plan IDs through it
 	// FIRST — evolver plans are stored in this manager's store, not the
 	// shared one.
-	EvolverPlanManager        *plan.PlanManager
+	EvolverPlanManager *plan.PlanManager
 	// EvolverPlanApprovalBridge dispatches approved evolver plans (leaf 03):
 	// subscribes to plan.approved and invokes the evolver's
 	// ApplyApprovedPlan. Nil when the evolver/plan system is absent; wired
 	// by wireEvolverApprovalBridge after initializeSkillEvolver.
 	EvolverPlanApprovalBridge *EvolverApprovalBridge
 	SecurityOrchestrator      *intsecurity.Orchestrator
-	FenceChecker         *intsecurity.FenceChecker
-	AgentLoop            *agent.AgentLoop
-	ChatHandler          *agent.ChatHandler
-	StatusHandler        *StatusHandler
-	SessionStore         session.Store
-	SessionHandler       *session.Handler
-	EmbeddingWorker      *session.EmbeddingWorker
+	FenceChecker              *intsecurity.FenceChecker
+	AgentLoop                 *agent.AgentLoop
+	ChatHandler               *agent.ChatHandler
+	StatusHandler             *StatusHandler
+	SessionStore              session.Store
+	SessionHandler            *session.Handler
+	EmbeddingWorker           *session.EmbeddingWorker
 
 	// Multi-agent orchestration components
 	Queue         queue.Queue
@@ -219,6 +219,11 @@ type Components struct {
 
 	// Pricing syncer for dynamic model pricing
 	PricingSyncer *llm.PricingSyncer
+
+	// ContextDiscovery syncs provider context lengths into resolver
+	// models (llm-resilience-forest tree 05 leaf 01). Nil when disabled
+	// (the default).
+	ContextDiscovery *llm.ContextDiscovery
 
 	// RoutingLogger persists LLM routing decisions for training-data mining
 	// (Phase 2 of self-improvement loop closure).
@@ -666,6 +671,59 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Wire pricing syncer into resolver for live cost enrichment
 		if c.LLMResolver != nil {
 			c.LLMResolver.SetPricingSyncer(pricingSyncer)
+		}
+
+		// Context-length discovery (llm-resilience-forest tree 05 leaf 01,
+		// DECISIONS.md D13). Constructed ONLY when enabled: disabled is the
+		// default and must mean zero behavior change (no syncer, no
+		// network traffic, no fetcher registrations). NO fetcher is ever
+		// registered for OpenAI or Anthropic (D13: their endpoints expose
+		// no context length).
+		if cfg.LLM.ContextDiscovery.Enabled {
+			discovery := llm.NewContextDiscovery(llm.ContextDiscoveryConfig{
+				Enabled:              true,
+				Interval:             cfg.LLM.ContextDiscovery.Interval,
+				AllowContextOverride: cfg.LLM.ContextDiscovery.AllowContextOverride,
+			}, nil)
+			discovery.SetLogger(logger.With("component", "context-discovery"))
+			// Ollama: local, no auth.
+			discovery.SetEndpoint(llm.ProviderIDOllama, "http://localhost:11434", "")
+			discovery.RegisterFetcher(llm.ProviderIDOllama, func(ctx context.Context, baseURL, apiKey string) (map[string]int, error) {
+				return llm.FetchOllamaContexts(ctx, discovery.Client(), logger, baseURL, apiKey)
+			})
+			// OpenRouter: same fetch the pricing sync uses; single fetch
+			// per tick keeps it inside the pricing-sync politeness budget.
+			if orDef, ok := llm.GetProviderByID("openrouter"); ok {
+				discovery.SetEndpoint("openrouter", orDef.BaseURL, os.Getenv(orDef.APIKeyEnvVar))
+				discovery.RegisterFetcher("openrouter", func(ctx context.Context, baseURL, apiKey string) (map[string]int, error) {
+					return llm.FetchOpenRouterContexts(ctx, discovery.Client(), logger, baseURL, apiKey)
+				})
+			}
+			// llama.cpp local-models: the /props fetch uses the base URL
+			// the RuntimeManager resolved for the shared endpoint (spec:
+			// endpoint resolution, not provider config). The accessor is
+			// consulted per sync tick; when the endpoint is not yet up the
+			// fetcher returns an empty map, which is the correct tolerant
+			// behavior (nothing discovered, nothing merged).
+			discovery.SetEndpoint(llm.LocalModelsProviderID, "pending", "")
+			discovery.RegisterFetcher(llm.LocalModelsProviderID, func(ctx context.Context, baseURL, apiKey string) (map[string]int, error) {
+				if baseURL == "pending" || c.ContainerManager == nil {
+					return map[string]int{}, nil
+				}
+				base, ok := c.ContainerManager.EndpointBaseURL(llm.LocalModelsProviderID)
+				if !ok {
+					return map[string]int{}, nil
+				}
+				modelKeys := c.ContainerManager.ModelKeys(llm.LocalModelsProviderID)
+				return llm.FetchLocalModelsContexts(ctx, discovery.Client(), logger, base, modelKeys), nil
+			})
+			if c.LLMResolver != nil {
+				discovery.SetResolver(c.LLMResolver)
+			}
+			c.ContextDiscovery = discovery
+			logger.Info("Context discovery enabled",
+				"interval", cfg.LLM.ContextDiscovery.Interval,
+				"allow_context_override", cfg.LLM.ContextDiscovery.AllowContextOverride)
 		}
 
 		// Construct routing decision logger and wire it into the resolver.
@@ -3508,6 +3566,14 @@ func (c *Components) Start(ctx context.Context) error {
 			<-ctx.Done()
 		}()
 		c.Logger.Info("Pricing syncer started")
+	}
+
+	// Start context-length discovery (if enabled). Like PricingSyncer, the
+	// syncer has no Stop() method: the ticker loop exits via ctx
+	// cancellation, so rollback relies on c.cancel() (deferred above).
+	if c.ContextDiscovery != nil {
+		c.ContextDiscovery.Start(ctx)
+		c.Logger.Info("Context discovery syncer started")
 	}
 
 	// Start sync manager and handler

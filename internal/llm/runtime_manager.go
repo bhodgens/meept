@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -729,6 +730,46 @@ func (m *RuntimeManager) attemptAutoRestart(endpointKey string) {
 	m.logger.Info("Auto-restart succeeded", "endpoint_key", endpointKey, "attempt", rs.attempts)
 	m.logToEndpoint(endpointKey, "restart_success", slog.Int("attempt", rs.attempts))
 	m.recordRestart(providerID, rs.attempts, true)
+}
+
+// EndpointBaseURL returns the resolved base URL for a provider's runtime
+// endpoint (context-discovery leaf 01: the llama.cpp /props fetch needs
+// the same base URL RuntimeManager resolved, not the provider config's).
+// ok is false when the provider has no registered running endpoint.
+func (m *RuntimeManager) EndpointBaseURL(providerID string) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	endpointKey := m.providerEndpoint[providerID]
+	if endpointKey == "" {
+		return "", false
+	}
+	ep, ok := m.endpoints[endpointKey]
+	if !ok || ep.hc == nil {
+		return "", false
+	}
+	return ep.hc.baseURL, true
+}
+
+// ModelKeys returns the model keys registered for a provider's runtime
+// endpoint (context-discovery leaf 01: the llama.cpp /props default is
+// applied per registered model key). Keys are returned in sorted order.
+func (m *RuntimeManager) ModelKeys(providerID string) []string {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg, ok := m.configs[providerID]
+	if !ok || len(cfg.ModelKeys) == 0 {
+		return nil
+	}
+	keys := make([]string, len(cfg.ModelKeys))
+	copy(keys, cfg.ModelKeys)
+	slices.Sort(keys)
+	return keys
 }
 
 // endpointProviderLocked returns one providerID registered against endpointKey

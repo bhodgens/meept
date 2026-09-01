@@ -125,7 +125,7 @@ func (m *ModelPicker) loadModelsForProvider(provider *ProviderDef) {
 	var models []ModelCatalogEntry
 
 	// Check static catalog first
-	if catalog, ok := ProviderModels[provider.ID]; ok {
+	if catalog, ok := GetModelsForProvider(provider.ID); ok {
 		models = append(models, catalog...)
 	}
 

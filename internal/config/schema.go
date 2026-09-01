@@ -678,8 +678,44 @@ type LLMConfig struct {
 	AdaptiveTimeout LLMAdaptiveTimeoutConfig `json:"adaptive_timeout" toml:"adaptive_timeout"`
 	ContextFirewall LLMContextFirewallConfig `json:"context_firewall" toml:"context_firewall"`
 	QuotaRetry      QuotaRetryConfig         `json:"quota_retry"      toml:"quota_retry"`
-	Metrics         LLMMetricsConfig         `json:"metrics"          toml:"metrics"`
-	Cache           LLMSimpleFeatureConfig   `json:"cache"            toml:"cache"`
+	// ContextDiscovery configures provider context-length discovery
+	// (llm-resilience-forest tree 05 leaf 01). Default OFF.
+	ContextDiscovery ContextDiscoveryConfig `json:"context_discovery" toml:"context_discovery"`
+	Metrics          LLMMetricsConfig       `json:"metrics"           toml:"metrics"`
+	Cache            LLMSimpleFeatureConfig `json:"cache"             toml:"cache"`
+}
+
+// ContextDiscoveryConfig configures provider context-length discovery
+// (DECISIONS.md D13): a background syncer fills model context lengths
+// from the provider endpoints that expose them (Ollama /api/show,
+// OpenRouter models, llama.cpp /props). OpenAI and Anthropic expose no
+// context length, so they are never queried.
+type ContextDiscoveryConfig struct {
+	// Enabled turns discovery on. Default false — zero behavior change
+	// when off (no syncer constructed, no network traffic).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// Interval is the re-sync cadence. Zero/negative means the 6h default
+	// (deliberately slow: the OpenRouter fetch shares the pricing sync's
+	// politeness budget).
+	Interval time.Duration `json:"interval" toml:"interval"`
+	// AllowContextOverride lets a discovered value replace a non-zero
+	// CATALOG context value. Explicit models.json5 context_limit values
+	// always win regardless of this flag (master Contract 3 precedence).
+	AllowContextOverride bool `json:"allow_context_override" toml:"allow_context_override"`
+}
+
+// Defaults for llm.context_discovery (tree 05 leaf 01).
+const (
+	DefaultContextDiscoveryInterval = 6 * time.Hour
+)
+
+// NormalizeContextDiscoveryDefaults clamps invalid context_discovery
+// values to defaults: negative durations become the field default; zero
+// means unset and takes the default. Idempotent on valid values.
+func NormalizeContextDiscoveryDefaults(c *ContextDiscoveryConfig) {
+	if c.Interval <= 0 {
+		c.Interval = DefaultContextDiscoveryInterval
+	}
 }
 
 // LLMSimpleFeatureConfig configures a simple feature with enabled flag and optional settings.
@@ -2306,6 +2342,12 @@ func DefaultConfig() *Config {
 				MaxWait:            DefaultQuotaRetryMaxWait,
 				DefaultEstimate:    DefaultQuotaRetryDefaultEstimate,
 				DeferCheckInterval: DefaultQuotaRetryDeferCheckInterval,
+			},
+			ContextDiscovery: ContextDiscoveryConfig{
+				// Default OFF (D13 leaf): discovery is opt-in; zero
+				// behavior change and zero network traffic when off.
+				Enabled:  false,
+				Interval: DefaultContextDiscoveryInterval,
 			},
 			Metrics: LLMMetricsConfig{
 				Enabled:             true,

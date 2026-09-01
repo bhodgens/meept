@@ -1,5 +1,7 @@
 package llm
 
+import "sync"
+
 // ModelCatalogEntry defines a model in the catalog.
 type ModelCatalogEntry struct {
 	ModelID       string   // Model identifier (e.g., "claude-sonnet-4-6")
@@ -17,6 +19,17 @@ type ModelCatalogEntry struct {
 }
 
 // ProviderModels maps provider IDs to their model catalogs.
+//
+// Concurrency: guarded by catalogMu. The context-discovery syncer
+// (context_discovery.go) rewrites provider slices at sync time while the
+// TUI model picker and the pricing syncer read them, so every runtime
+// access MUST go through the accessors below (GetModelsForProvider /
+// GetModel / GetAllCatalogModels / CatalogSnapshot /
+// SetCatalogContextWindow), never the map directly. Writers replace
+// slices wholesale and never mutate existing backing arrays, so a slice
+// header snapshot taken under RLock stays valid for readers.
+var catalogMu sync.RWMutex
+
 var ProviderModels = map[string][]ModelCatalogEntry{
 	ProviderIDAnthropic: {
 		{
@@ -244,12 +257,16 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 
 // GetModelsForProvider returns all models for a provider.
 func GetModelsForProvider(providerID string) ([]ModelCatalogEntry, bool) {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
 	models, ok := ProviderModels[providerID]
 	return models, ok
 }
 
 // GetModel returns a specific model by provider and model ID.
 func GetModel(providerID, modelID string) (*ModelCatalogEntry, bool) {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
 	models, ok := ProviderModels[providerID]
 	if !ok {
 		return nil, false
@@ -264,9 +281,48 @@ func GetModel(providerID, modelID string) (*ModelCatalogEntry, bool) {
 
 // GetAllCatalogModels returns all models across all providers.
 func GetAllCatalogModels() []ModelCatalogEntry {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
 	var all []ModelCatalogEntry
 	for _, models := range ProviderModels {
 		all = append(all, models...)
 	}
 	return all
+}
+
+// CatalogSnapshot returns a shallow copy of the provider -> models
+// catalog map for callers that need to range over the whole catalog
+// (e.g. the pricing syncer's merge step). Slice contents are shared but
+// immutable (writers replace slices wholesale).
+func CatalogSnapshot() map[string][]ModelCatalogEntry {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+	out := make(map[string][]ModelCatalogEntry, len(ProviderModels))
+	for k, v := range ProviderModels {
+		out[k] = v
+	}
+	return out
+}
+
+// SetCatalogContextWindow updates one entry's ContextWindow. The slice is
+// copied and replaced (never mutated in place) so existing snapshots
+// stay consistent. Returns false when the provider/model is unknown.
+func SetCatalogContextWindow(providerID, modelID string, contextWindow int) bool {
+	catalogMu.Lock()
+	defer catalogMu.Unlock()
+	models, ok := ProviderModels[providerID]
+	if !ok {
+		return false
+	}
+	for i, entry := range models {
+		if entry.ModelID != modelID {
+			continue
+		}
+		cp := make([]ModelCatalogEntry, len(models))
+		copy(cp, models)
+		cp[i].ContextWindow = contextWindow
+		ProviderModels[providerID] = cp
+		return true
+	}
+	return false
 }

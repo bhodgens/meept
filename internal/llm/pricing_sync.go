@@ -136,7 +136,7 @@ func (ps *PricingSyncer) MergeWithCatalog(fetched map[string]*LivePrice) []*Live
 	}
 
 	// Add catalog entries not already covered by fetched prices
-	for providerID, models := range ProviderModels {
+	for providerID, models := range CatalogSnapshot() {
 		for _, m := range models {
 			key := providerID + "/" + m.ModelID
 			if covered[key] || covered[m.ModelID] {

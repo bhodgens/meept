@@ -49,6 +49,10 @@ func Load(path string) (*Config, error) {
 	// so every consumer sees normalized values.
 	NormalizeQuotaRetryDefaults(&cfg.LLM.QuotaRetry)
 
+	// Clamp invalid context_discovery values to defaults (tree 05 leaf 01:
+	// zero/negative interval -> 6h). Same load-boundary rationale.
+	NormalizeContextDiscoveryDefaults(&cfg.LLM.ContextDiscovery)
+
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every
 	// consumer sees an absolute path (evolver plan-sink leaf 01).
@@ -150,6 +154,10 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// negatives clamp, zeros take defaults). Applied at the load boundary
 	// so every consumer sees normalized values.
 	NormalizeQuotaRetryDefaults(&cfg.LLM.QuotaRetry)
+
+	// Clamp invalid context_discovery values to defaults (tree 05 leaf 01:
+	// zero/negative interval -> 6h). Same load-boundary rationale.
+	NormalizeContextDiscoveryDefaults(&cfg.LLM.ContextDiscovery)
 
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every

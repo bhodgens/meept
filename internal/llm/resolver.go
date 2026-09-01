@@ -903,6 +903,90 @@ func (r *Resolver) SetPricingSyncer(ps *PricingSyncer) {
 	enrich(r.smallModel)
 }
 
+// SetContextLimits applies discovered context lengths to the resolver's
+// model pointer sets under r.mu (audit R3 — there is no separate mutable
+// registry: r.allModels, alias members, defaultModel and smallModel are
+// the pointers per-call modelConfigFrom copies and ResolveForAlias hand
+// out, so mutating them is what makes the runtime ContextLimit consumer —
+// context_firewall.go's budget math on ModelConfig.ContextLimit — observe
+// fresh values). Precedence per master Contract 3:
+//  1. an explicit models.json5 context_limit wins ALWAYS — on ModelConfig
+//     a non-zero ContextLimit can only come from json5 (modelConfigFrom
+//     never consults the static catalog), so `!= 0` marks explicit;
+//  2. a 0/absent value accepts the discovered value; when the model's own
+//     value is 0 but the display catalog carries one (catalog-only cell),
+//     the catalog value is treated as current;
+//  3. `override` (allow_context_override) additionally lets a discovered
+//     value replace that non-zero value.
+func (r *Resolver) SetContextLimits(discovered map[string]int, override bool, logger *slog.Logger) {
+	if len(discovered) == 0 {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// catalogContexts snapshots the display catalog's current values for
+	// this pass, so the "catalog-only" precedence cell can be evaluated
+	// even when the model's own ContextLimit is 0: modelConfigFrom never
+	// consults the catalog, so a zero on ModelConfig with a non-zero
+	// catalog entry means the effective current value is the catalog's.
+	catalogContexts := make(map[string]int, len(discovered))
+	for key := range discovered {
+		parts := strings.SplitN(key, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if entry, ok := GetModel(parts[0], parts[1]); ok {
+			catalogContexts[key] = entry.ContextWindow
+		}
+	}
+
+	apply := func(m *ModelConfig) {
+		if m == nil {
+			return
+		}
+		key := m.ProviderID + "/" + m.ModelID
+		discoveredVal, ok := discovered[key]
+		if !ok {
+			return
+		}
+		if m.ContextLimit != 0 {
+			// Rule 1: an explicit models.json5 context_limit is
+			// authoritative in EVERY override mode. modelConfigFrom never
+			// consults the static catalog, so a non-zero ContextLimit on
+			// ModelConfig can only be json5-explicit — override never
+			// lifts this.
+			return
+		}
+		// The model's own value is 0/absent: evaluate the rule against
+		// the catalog-only cell (catalog value as current, 0 when the
+		// catalog has none) so override governs exactly the non-zero
+		// CATALOG case per Contract 3.
+		newVal, changed := resolvedContext(catalogContexts[key], discoveredVal, override)
+		if !changed {
+			return
+		}
+		logger.Info("context window updated", "provider", m.ProviderID, "model", m.ModelID,
+			"from", m.ContextLimit, "to", newVal)
+		m.ContextLimit = newVal
+	}
+
+	for _, m := range r.allModels {
+		apply(m)
+	}
+	for _, alias := range r.aliases {
+		for _, m := range alias.Models {
+			apply(m)
+		}
+	}
+	apply(r.defaultModel)
+	apply(r.smallModel)
+}
+
 // quotaEntryKey returns a unique key for a provider/model pair.
 func quotaEntryKey(providerID, modelID string) string {
 	return providerID + "|" + modelID
