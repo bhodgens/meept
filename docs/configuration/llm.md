@@ -249,6 +249,49 @@ Notes:
 - Quota blocks are in-memory; a daemon restart re-probes providers.
 - See `docs/workflows/quota-resilience.md` for the full behavior.
 
+## Failure Policy Configuration
+
+Long-horizon retry scheduling when a provider request fails (throttling,
+quota exhaustion, server errors). Meept backs off exponentially from the
+class base, polls hourly once the steps reach the floor, and gives up at
+the horizon — the turn then fails with a clear user-facing error and the
+queue/goal-loop applies its own retry policy.
+
+```json5
+llm: {
+  failure_policy: {
+    horizon: "24h",              // give-up cap: retry only until now+horizon
+    base_throttle: "30s",        // first-retry delay for 429 throttle (also 5xx fallback base)
+    base_quota_402_extra: "5m",  // added to base_throttle for 402 quota errors
+    poll_floor: "1h",            // polling floor once exponential steps exceed it
+    short_retries: 3,            // bounded immediate-retry budget for 5xx in client loops
+    pacing: {
+      enabled: false,            // adaptive outbound pacing (opt-in)
+      min_interval: "1s",        // shortest gap between requests to one provider
+      max_interval: "30s"        // ceiling on the learned pacing gap
+    }
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `horizon` | duration | `24h` | Give-up cap. A failing model is retried only until `now + horizon`; past it the turn fails (the queue applies its own retry policy). Zero/negative reverts to the default. |
+| `base_throttle` | duration | `30s` | First-retry delay for provider-load throttling (429 without a quota signal) and the fallback base for all other failure classes. |
+| `base_quota_402_extra` | duration | `5m` | Added to `base_throttle` for payment-required (402) quota errors — 402 waits start minutes longer than the equivalent 429 path. |
+| `poll_floor` | duration | `1h` | Polling floor: once an exponential step would exceed it, every subsequent step is exactly this long (no jitter — polling stays on the hour mark). |
+| `short_retries` | int | `3` | Bounded immediate-retry budget for server errors (5xx) in the client retry loops. |
+| `pacing.enabled` | bool | `false` | Adaptive pacing below a provider's effective rate-limit ceiling (learned from rate-limit metrics). Off by default. |
+| `pacing.min_interval` | duration | `1s` | Shortest gap between outbound requests to a single provider while pacing. |
+| `pacing.max_interval` | duration | `30s` | Ceiling on the learned pacing gap. |
+
+Notes:
+- Retry schedules honor a provider-specified `Retry-After` (all RFC 7231
+  forms: delta-seconds, IMF-fixdate, RFC850, asctime) and the
+  Anthropic/Codex reset headers, but never wait past `horizon`.
+- The give-up boundary is a schedule question only: when the horizon is
+  reached the turn is surfaced as failed; it is not silently dropped.
+
 ## Adaptive Timeout Configuration
 
 Dynamic timeout calculation based on request characteristics:

@@ -678,6 +678,9 @@ type LLMConfig struct {
 	AdaptiveTimeout LLMAdaptiveTimeoutConfig `json:"adaptive_timeout" toml:"adaptive_timeout"`
 	ContextFirewall LLMContextFirewallConfig `json:"context_firewall" toml:"context_firewall"`
 	QuotaRetry      QuotaRetryConfig         `json:"quota_retry"      toml:"quota_retry"`
+	// FailurePolicy configures the long-horizon retry schedule for
+	// provider failures (llm-resilience-forest tree 02 leaf 02, D8).
+	FailurePolicy FailurePolicyConfig `json:"failure_policy"    toml:"failure_policy"`
 	// ContextDiscovery configures provider context-length discovery
 	// (llm-resilience-forest tree 05 leaf 01). Default OFF.
 	ContextDiscovery ContextDiscoveryConfig `json:"context_discovery" toml:"context_discovery"`
@@ -828,6 +831,118 @@ func (q *QuotaRetryConfig) GetDefaultEstimate() time.Duration { return q.Default
 
 // GetDeferCheckInterval returns DeferCheckInterval. See GetEnabled.
 func (q *QuotaRetryConfig) GetDeferCheckInterval() time.Duration { return q.DeferCheckInterval }
+
+// FailurePolicyConfig configures the long-horizon failure-policy schedule
+// (llm-resilience-forest tree 02 leaf 02, DECISIONS.md D8): exponential
+// backoff from a per-class base, a 1h polling floor, and a 24h give-up
+// horizon. Written to disk as llm.failure_policy. leaf 03 (retry loops)
+// and leaf 05 (adaptive pacing, D15) consume these knobs.
+//
+// Zero-value semantics: like QuotaRetryConfig, Load/LoadJSON5Config
+// unmarshal user config ONTO DefaultConfig(), so an unset section inherits
+// the defaults below; NormalizeFailurePolicyDefaults clamps zero/negative
+// durations and a non-positive ShortRetries for a directly-constructed
+// zero-value struct.
+type FailurePolicyConfig struct {
+	// Horizon is the give-up cap: a failing model is retried only until
+	// now+Horizon; past it the turn fails with a user-facing error and
+	// the queue/goal-loop applies its own retry policy (D8). Default 24h.
+	Horizon time.Duration `json:"horizon"             toml:"horizon"` // default 24h
+	// BaseThrottle is the first-retry delay for provider-load throttling
+	// (429 without quota signal) and the fallback base for all other
+	// classes. Default 30s.
+	BaseThrottle time.Duration `json:"base_throttle"       toml:"base_throttle"` // default 30s
+	// BaseQuota402Extra is added to base_throttle for payment-required
+	// quota errors: 402 waits start minutes longer than the 429 path
+	// (D5). Default 5m.
+	BaseQuota402Extra time.Duration `json:"base_quota_402_extra" toml:"base_quota_402_extra"` // default 5m
+	// PollFloor is the polling floor: once an exponential step would
+	// exceed it, all subsequent steps are exactly PollFloor (exact, no
+	// jitter). Default 1h.
+	PollFloor time.Duration `json:"poll_floor"          toml:"poll_floor"` // default 1h
+	// ShortRetries is the bounded immediate-retry budget for
+	// server-error (5xx) responses in the client retry loops (tree 02
+	// leaf 03 consumes). Default 3.
+	ShortRetries int `json:"short_retries"       toml:"short_retries"` // default 3
+	// Pacing gates adaptive outbound pacing (D15; tree 02 leaf 05
+	// consumes the full PacingConfig on this schema).
+	Pacing PacingConfig `json:"pacing"              toml:"pacing"`
+}
+
+// PacingConfig configures adaptive pacing below a provider's effective
+// rate-limit ceiling (DECISIONS.md D15). Default off; leaf 05 owns the
+// AdaptivePacer that consumes it.
+type PacingConfig struct {
+	// Enabled turns adaptive pacing on. Default false (D15 gate).
+	Enabled bool `json:"enabled"      toml:"enabled"`
+	// MinInterval is the shortest gap between outbound requests to one
+	// provider. Default 1s.
+	MinInterval time.Duration `json:"min_interval" toml:"min_interval"`
+	// MaxInterval is the ceiling on the learned pacing gap. Default 30s.
+	MaxInterval time.Duration `json:"max_interval" toml:"max_interval"`
+}
+
+// Defaults for llm.failure_policy (tree 02 leaf 02, DECISIONS.md D5/D8).
+const (
+	DefaultFailurePolicyHorizon           = 24 * time.Hour
+	DefaultFailurePolicyBaseThrottle      = 30 * time.Second
+	DefaultFailurePolicyBaseQuota402Extra = 5 * time.Minute
+	DefaultFailurePolicyPollFloor         = time.Hour
+	DefaultFailurePolicyShortRetries      = 3
+
+	DefaultPacingEnabled     = false
+	DefaultPacingMinInterval = time.Second
+	DefaultPacingMaxInterval = 30 * time.Second
+)
+
+// GetHorizon returns Horizon. Part of the getter surface internal/llm reads
+// through an anonymous parameter interface (kept interface-based to avoid
+// an internal/llm -> internal/config import cycle).
+func (f *FailurePolicyConfig) GetHorizon() time.Duration { return f.Horizon }
+
+// GetBaseThrottle returns BaseThrottle. See GetHorizon.
+func (f *FailurePolicyConfig) GetBaseThrottle() time.Duration { return f.BaseThrottle }
+
+// GetBaseQuota402Extra returns BaseQuota402Extra. See GetHorizon.
+func (f *FailurePolicyConfig) GetBaseQuota402Extra() time.Duration { return f.BaseQuota402Extra }
+
+// GetPollFloor returns PollFloor. See GetHorizon.
+func (f *FailurePolicyConfig) GetPollFloor() time.Duration { return f.PollFloor }
+
+// GetShortRetries returns ShortRetries. See GetHorizon.
+func (f *FailurePolicyConfig) GetShortRetries() int { return f.ShortRetries }
+
+// NormalizeFailurePolicyDefaults clamps invalid failure_policy values to
+// defaults: negative durations become the field default, zero means unset
+// and takes the default; non-positive ShortRetries takes the default;
+// pacing intervals normalize the same way and max < min lifts max to min.
+// Idempotent on valid values.
+func NormalizeFailurePolicyDefaults(f *FailurePolicyConfig) {
+	if f.Horizon <= 0 {
+		f.Horizon = DefaultFailurePolicyHorizon
+	}
+	if f.BaseThrottle <= 0 {
+		f.BaseThrottle = DefaultFailurePolicyBaseThrottle
+	}
+	if f.BaseQuota402Extra <= 0 {
+		f.BaseQuota402Extra = DefaultFailurePolicyBaseQuota402Extra
+	}
+	if f.PollFloor <= 0 {
+		f.PollFloor = DefaultFailurePolicyPollFloor
+	}
+	if f.ShortRetries <= 0 {
+		f.ShortRetries = DefaultFailurePolicyShortRetries
+	}
+	if f.Pacing.MinInterval <= 0 {
+		f.Pacing.MinInterval = DefaultPacingMinInterval
+	}
+	if f.Pacing.MaxInterval <= 0 {
+		f.Pacing.MaxInterval = DefaultPacingMaxInterval
+	}
+	if f.Pacing.MaxInterval < f.Pacing.MinInterval {
+		f.Pacing.MaxInterval = DefaultPacingMaxInterval
+	}
+}
 
 // NormalizeQuotaRetryDefaults clamps invalid quota_retry values to defaults:
 // negative durations (JSON5 numeric values) become the field default; zero
@@ -2342,6 +2457,18 @@ func DefaultConfig() *Config {
 				MaxWait:            DefaultQuotaRetryMaxWait,
 				DefaultEstimate:    DefaultQuotaRetryDefaultEstimate,
 				DeferCheckInterval: DefaultQuotaRetryDeferCheckInterval,
+			},
+			FailurePolicy: FailurePolicyConfig{
+				Horizon:           DefaultFailurePolicyHorizon,
+				BaseThrottle:      DefaultFailurePolicyBaseThrottle,
+				BaseQuota402Extra: DefaultFailurePolicyBaseQuota402Extra,
+				PollFloor:         DefaultFailurePolicyPollFloor,
+				ShortRetries:      DefaultFailurePolicyShortRetries,
+				Pacing: PacingConfig{
+					Enabled:     DefaultPacingEnabled,
+					MinInterval: DefaultPacingMinInterval,
+					MaxInterval: DefaultPacingMaxInterval,
+				},
 			},
 			ContextDiscovery: ContextDiscoveryConfig{
 				// Default OFF (D13 leaf): discovery is opt-in; zero

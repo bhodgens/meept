@@ -6,6 +6,115 @@ import (
 	"time"
 )
 
+// FailurePolicyConfig mirrors the canonical config.FailurePolicyConfig
+// (llm.failure_policy knobs, tree 02 leaf 02). Defined locally to avoid the
+// internal/llm -> internal/config import cycle (internal/config transitively
+// imports internal/llm); the canonical type satisfies this shape 1:1, and
+// internal/config maps onto it the same way llm.ConfigFromSchema maps
+// QuotaRetryConfig onto QuotaWaitConfig (resolver_direct.go precedent).
+type FailurePolicyConfig struct {
+	// Horizon is the give-up cap: DefaultBackoffPlan sets
+	// GiveUpAt = now + Horizon (D8: 24h default; on cap the turn fails).
+	Horizon time.Duration
+	// BaseThrottle is the first-retry delay for FailureThrottle (D8 30s
+	// default) and the fallback base for all other classes.
+	BaseThrottle time.Duration
+	// BaseQuota402Extra is added to BaseThrottle for FailureQuota (D5:
+	// 402 quota waits start "longer by minutes" than the 429 path; 5m).
+	BaseQuota402Extra time.Duration
+	// PollFloor is the polling floor: once an exponential step would
+	// exceed it, all subsequent steps are exactly PollFloor (D8: 1h).
+	PollFloor time.Duration
+	// ShortRetries is the bounded immediate-retry budget for 5xx in the
+	// short loops (D8 leaf-03 consumption; carried on the schema here so
+	// leaf 03 only reads it).
+	ShortRetries int
+	// Pacing gating knobs (D15; tree 02 leaf 05 consumption — carried on
+	// the schema here so leaf 05's PacingConfig maps onto it 1:1).
+	PacingEnabled     bool
+	PacingMinInterval time.Duration
+	PacingMaxInterval time.Duration
+}
+
+// BackoffPlan converts a failure class + attempt count into deterministic
+// attempt times (tree 02 Contract 2, DECISIONS.md D8). Pure value type;
+// injected now at every call; NO jitter — jitter stays at the call sites'
+// short sleeps so long-horizon polling is exact hourly.
+type BackoffPlan struct {
+	Base     time.Duration // first retry delay (throttle 30s; 402 = +5m, D5)
+	Max      time.Duration // polling floor once reached (default 1h)
+	GiveUpAt time.Time     // now + Horizon (default 24h, llm.failure_policy.horizon)
+}
+
+// DefaultBackoffPlan builds the schedule for a failure class at time now
+// from cfg. Base selection per DECISIONS.md: FailureQuota adds
+// BaseQuota402Extra to BaseThrottle (D5 — 402 quota waits start minutes
+// longer than the 429 path); every other class uses BaseThrottle directly.
+func DefaultBackoffPlan(class FailureClass, now time.Time, cfg FailurePolicyConfig) BackoffPlan {
+	base := cfg.BaseThrottle
+	if class == FailureQuota {
+		// D5: 402/quota starts with a retry timer longer by minutes.
+		base += cfg.BaseQuota402Extra
+	}
+	return BackoffPlan{
+		Base:     base,
+		Max:      cfg.PollFloor,
+		GiveUpAt: now.Add(cfg.Horizon),
+	}
+}
+
+// NextAttempt returns the earliest time the next attempt may run:
+//
+//   - The computed exponential step for attempt (attempt=0 is the FIRST
+//     retry): Base * 2^attempt, capped at Max — once a step would exceed
+//     Max, the step is exactly Max (D8 polling floor, hourly, exact).
+//   - prior (a server-provided retry time, zero = none) wins when it is
+//     LATER than the computed step — never retry before the server says —
+//     but is capped at GiveUpAt: never wait longer than the horizon (D8).
+//   - The result never lands after GiveUpAt.
+func (p BackoffPlan) NextAttempt(now time.Time, attempt int, prior time.Time) time.Time {
+	if attempt < 0 {
+		attempt = 0
+	}
+
+	// Exponential growth with an overflow-safe cap at Max: stop doubling
+	// as soon as the step reaches Max, then pin every later attempt to
+	// exactly Max (D8: hourly polling floor). Shifting only while step <
+	// Max keeps 2^attempt from overflowing int/Duration on huge counts.
+	step := p.Base
+	if step < p.Max {
+		for i := 0; i < attempt; i++ {
+			step *= 2
+			if step >= p.Max {
+				step = p.Max
+				break
+			}
+		}
+	}
+	if step > p.Max {
+		// Base itself already exceeds Max (misconfig): clamp.
+		step = p.Max
+	}
+	next := now.Add(step)
+
+	// Honor the server when it demands a longer wait, but never let the
+	// wait run past the horizon (D8 cap).
+	if prior.After(next) {
+		next = prior
+	}
+	if next.After(p.GiveUpAt) {
+		next = p.GiveUpAt
+	}
+	return next
+}
+
+// ShouldGiveUp answers the SCHEDULE question only: has now reached
+// GiveUpAt? (D8 cap.) The decision to surface a user-facing error belongs
+// to callers — leaf 03's short loops and tree 03's parking layer.
+func (p BackoffPlan) ShouldGiveUp(now time.Time) bool {
+	return !now.Before(p.GiveUpAt)
+}
+
 // FailureClass buckets an LLM-provider error response into the failure-policy
 // classes (SHARED-CONVENTIONS §4.1; DECISIONS.md D4: throttle and quota are
 // different classes with different horizons under one handler).

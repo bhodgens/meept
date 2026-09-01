@@ -309,3 +309,159 @@ func TestClassify_QuotaParityWithLegacyClassifier(t *testing.T) {
 		})
 	}
 }
+
+// --- Tree 02 leaf 02: BackoffPlan schedule (DECISIONS.md D8) ---
+
+// TestBackoffPlan_NextAttempt pins the deterministic schedule: exponential
+// 30s, 60s, 120s, ... until a step would exceed Max (1h), then all
+// subsequent attempts exactly 1h (the polling floor, exact — no jitter;
+// jitter stays at call sites). attempt=0 is the first retry.
+func TestBackoffPlan_NextAttempt(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	plan := BackoffPlan{
+		Base:     30 * time.Second,
+		Max:      time.Hour,
+		GiveUpAt: now.Add(24 * time.Hour),
+	}
+
+	tests := []struct {
+		name    string
+		attempt int
+		want    time.Duration // delay from now
+	}{
+		{name: "attempt 0 first retry", attempt: 0, want: 30 * time.Second},
+		{name: "attempt 1", attempt: 1, want: time.Minute},
+		{name: "attempt 2", attempt: 2, want: 2 * time.Minute},
+		{name: "attempt 3", attempt: 3, want: 4 * time.Minute},
+		{name: "attempt 4", attempt: 4, want: 8 * time.Minute},
+		{name: "attempt 5", attempt: 5, want: 16 * time.Minute},
+		{name: "attempt 6", attempt: 6, want: 32 * time.Minute},
+		{name: "attempt 7 capped to floor", attempt: 7, want: time.Hour},    // 64m > 1h -> floor
+		{name: "attempt 8 stays at floor", attempt: 8, want: time.Hour},     // exact 1h, no jitter
+		{name: "attempt 20 stays at floor", attempt: 20, want: time.Hour},   // long horizon stays exact
+		{name: "attempt 100 stays at floor", attempt: 100, want: time.Hour}, // overflow-safe
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := plan.NextAttempt(now, tt.attempt, time.Time{})
+			if want := now.Add(tt.want); !got.Equal(want) {
+				t.Errorf("NextAttempt(attempt=%d) = %v, want %v (delay %v)",
+					tt.attempt, got, want, tt.want)
+			}
+		})
+	}
+}
+
+// TestBackoffPlan_ShouldGiveUp pins the give-up boundary (D8 cap: the
+// schedule ends at GiveUpAt; surfacing the user error is the caller's job).
+func TestBackoffPlan_ShouldGiveUp(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	plan := BackoffPlan{
+		Base:     30 * time.Second,
+		Max:      time.Hour,
+		GiveUpAt: now.Add(24 * time.Hour),
+	}
+
+	if plan.ShouldGiveUp(now) {
+		t.Error("ShouldGiveUp(now) = true, want false before GiveUpAt")
+	}
+	if plan.ShouldGiveUp(now.Add(23 * time.Hour)) {
+		t.Error("ShouldGiveUp(23h) = true, want false before GiveUpAt")
+	}
+	if !plan.ShouldGiveUp(now.Add(24 * time.Hour)) {
+		t.Error("ShouldGiveUp(24h) = false, want true AT GiveUpAt")
+	}
+	if !plan.ShouldGiveUp(now.Add(25 * time.Hour)) {
+		t.Error("ShouldGiveUp(25h) = false, want true after GiveUpAt")
+	}
+}
+
+// TestBackoffPlan_DefaultBackoffPlan pins DefaultBackoffPlan per class:
+// throttle 30s base (D8), quota-402 = throttle base + 5m (D5), other
+// classes fall back to the throttle base; horizon/Max from config.
+func TestBackoffPlan_DefaultBackoffPlan(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	cfg := FailurePolicyConfig{
+		Horizon:           24 * time.Hour,
+		BaseThrottle:      30 * time.Second,
+		BaseQuota402Extra: 5 * time.Minute,
+		PollFloor:         time.Hour,
+	}
+
+	tests := []struct {
+		name     string
+		class    FailureClass
+		wantBase time.Duration
+	}{
+		{name: "throttle base", class: FailureThrottle, wantBase: 30 * time.Second},
+		{name: "quota 402 base = throttle + 5m (D5)", class: FailureQuota, wantBase: 30*time.Second + 5*time.Minute},
+		{name: "server error falls back to throttle base", class: FailureServerError, wantBase: 30 * time.Second},
+		{name: "none falls back to throttle base", class: FailureNone, wantBase: 30 * time.Second},
+		{name: "fatal falls back to throttle base", class: FailureFatal, wantBase: 30 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := DefaultBackoffPlan(tt.class, now, cfg)
+			if plan.Base != tt.wantBase {
+				t.Errorf("Base = %v, want %v", plan.Base, tt.wantBase)
+			}
+			if plan.Max != cfg.PollFloor {
+				t.Errorf("Max = %v, want PollFloor %v", plan.Max, cfg.PollFloor)
+			}
+			if want := now.Add(cfg.Horizon); !plan.GiveUpAt.Equal(want) {
+				t.Errorf("GiveUpAt = %v, want now+horizon = %v", plan.GiveUpAt, want)
+			}
+		})
+	}
+}
+
+// TestBackoffPlan_PriorDateRespected pins the prior-wins rule: an earlier
+// server-provided retry time AFTER the computed step is honored (never
+// retry before the server says), but CAPPED at GiveUpAt (never wait longer
+// than the horizon, D8).
+func TestBackoffPlan_PriorDateRespected(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	giveUpAt := now.Add(24 * time.Hour)
+	plan := BackoffPlan{Base: 30 * time.Second, Max: time.Hour, GiveUpAt: giveUpAt}
+
+	t.Run("zero prior ignored", func(t *testing.T) {
+		got := plan.NextAttempt(now, 0, time.Time{})
+		if want := now.Add(30 * time.Second); !got.Equal(want) {
+			t.Errorf("got %v, want computed step %v", got, want)
+		}
+	})
+
+	t.Run("later prior wins over computed step", func(t *testing.T) {
+		prior := now.Add(10 * time.Minute)
+		got := plan.NextAttempt(now, 0, prior)
+		if !got.Equal(prior) {
+			t.Errorf("got %v, want prior %v (server says wait longer)", got, prior)
+		}
+	})
+
+	t.Run("earlier prior loses to computed step", func(t *testing.T) {
+		// attempt 6 computes 32m; prior at +40m wins; prior at +10m loses.
+		prior := now.Add(10 * time.Minute)
+		got := plan.NextAttempt(now, 6, prior)
+		if want := now.Add(32 * time.Minute); !got.Equal(want) {
+			t.Errorf("got %v, want computed step %v", got, want)
+		}
+	})
+
+	t.Run("prior capped at GiveUpAt", func(t *testing.T) {
+		prior := now.Add(48 * time.Hour)
+		got := plan.NextAttempt(now, 0, prior)
+		if !got.Equal(giveUpAt) {
+			t.Errorf("got %v, want capped at GiveUpAt %v", got, giveUpAt)
+		}
+	})
+
+	t.Run("computed step capped at GiveUpAt", func(t *testing.T) {
+		got := plan.NextAttempt(now, 7, time.Time{})
+		if want := now.Add(time.Hour); !got.Equal(want) {
+			t.Errorf("got %v, want 1h floor step %v (inside horizon)", got, want)
+		}
+	})
+}

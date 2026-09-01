@@ -53,6 +53,11 @@ func Load(path string) (*Config, error) {
 	// zero/negative interval -> 6h). Same load-boundary rationale.
 	NormalizeContextDiscoveryDefaults(&cfg.LLM.ContextDiscovery)
 
+	// Clamp invalid failure_policy values to defaults (tree 02 leaf 02:
+	// zero/negative durations, non-positive ShortRetries). Load-boundary
+	// normalization so every consumer sees normalized values.
+	NormalizeFailurePolicyDefaults(&cfg.LLM.FailurePolicy)
+
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every
 	// consumer sees an absolute path (evolver plan-sink leaf 01).
@@ -158,6 +163,11 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// Clamp invalid context_discovery values to defaults (tree 05 leaf 01:
 	// zero/negative interval -> 6h). Same load-boundary rationale.
 	NormalizeContextDiscoveryDefaults(&cfg.LLM.ContextDiscovery)
+
+	// Clamp invalid failure_policy values to defaults (tree 02 leaf 02:
+	// zero/negative durations, non-positive ShortRetries). Load-boundary
+	// normalization so every consumer sees normalized values.
+	NormalizeFailurePolicyDefaults(&cfg.LLM.FailurePolicy)
 
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every
