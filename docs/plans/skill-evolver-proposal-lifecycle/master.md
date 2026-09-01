@@ -351,6 +351,26 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
   today beyond code/API, leaf 03 wires through whatever exists (manager
   caller) and reports the gap — do not build a new UI in this tree.
 
+## Post-implementation follow-ups (2026-09-01 re-review)
+
+- **Historical backlog backfilled:** `cmd/backfill-evolver-plans` inserted
+  sink-store rows for 20/21 migrated plan files, so the full historical
+  queue is listable and approvable via `meept plans` (the RPC handler's
+  sink fallback surfaces store rows only). Re-run is idempotent.
+- **decision-framework.md remains file-only:** it is a gap-fill plan
+  authored before the stamping scheme and carries no `plan_id` in its
+  Meta, so it cannot get a store row. Options: hand-edit a plan_id into
+  its Meta, or regenerate it via the evolver. Not automatable safely.
+- **Applied-marker backfill for already-applied plans:** historical plans
+  lack `- applied:` markers. The registry + marker system only gates new
+  applications; if a historical plan is approved after its skill was
+  already changed out-of-band, the actuator will re-apply. Check skill
+  state before approving old archive plans.
+- **Restore destination:** restores land in the user tier
+  (`~/.meept/skills`), deliberately — documented at
+  `Writer.RestoreSkill`. If "restore to original tier" is ever wanted,
+  ArchiveSkill must first record the origin tier in the archive.
+
 ## Notes
 
 - All file:line evidence was verified on 2026-08-31 against this working
