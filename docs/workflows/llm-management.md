@@ -25,6 +25,48 @@ Different tasks require different LLM capabilities and cost profiles. LLM manage
 - **Cost Optimization**: Cheapest capable model selected
 - **Automatic Fallback**: Retryable errors trigger failover
 
+### Model-Slot Fairness (Interactive Priority)
+
+When a model's `max_concurrency` is set, requests wait for a free slot
+before hitting the provider. Slots are handed out through a two-lane
+gate (`internal/llm/slot_gate.go`, tree 04 leaf 03):
+
+- **Interactive lane** — chat turns (the user is actively conversing)
+  call `llm.WithPriority(true)`; when a slot frees, an interactive
+  waiter is granted ahead of background waiters.
+- **Background lane** — queue jobs, specialist agents, goal loops, and
+  any caller that does not pass priority (the default) wait FIFO.
+- **Starvation guard** — after 3 consecutive interactive grants, one
+  background waiter is granted before further interactive ones, so
+  constant chatting cannot starve background work indefinitely.
+- **No wire change** — priority affects acquisition order only; nothing
+  is added to the request payload. Callers that never pass priority
+  behave exactly as before the gate existed.
+
+Two priority layers exist in meept, and they read DIFFERENT signals
+(cross-layer divergence, intentional scope — audit 2026-09-01):
+
+1. **Queue ordering** (see [Job Scheduling](job-scheduling.md),
+   "Claim Ordering"): jobs carry an `Interactive` flag stamped at
+   ENQUEUE time from the ORIGINATING SESSION (recent user message or
+   foreground flag, DECISIONS.md D11). It decides which job a worker
+   claims next.
+2. **Slot fairness** (this section): the gate reads the CALLING TURN —
+   chat turns are interactive, queue work is background. It decides who
+   gets a model-concurrency slot.
+
+Consequence: an `Interactive=true` planner job that wins its claim
+STILL acquires slots with priority=false (it is a queue turn, not a
+chat turn). Interactive queue work can therefore wait behind background
+chat turns at `max_concurrency`. This is intentional: queue jobs are
+not slot-prioritized in this tree (D11's two-tier rule; no third
+"priority" tier). Chat turns themselves never touch the queue (direct
+dispatch) — they are prioritized only at the slot layer.
+
+Note: `AnthropicClient` and `CodexClient` transports are not gated by
+`max_concurrency` today (pre-existing scope, unchanged by this leaf);
+slot fairness applies to the OpenAI-compatible client paths.
+
 ### Token Budgeting
 - **Hourly/Daily Limits**: Configurable token ceilings
 - **Rate Limiting**: Requests per minute control

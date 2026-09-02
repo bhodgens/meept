@@ -113,9 +113,11 @@ type Client struct {
 	// failurePolicy is the injected tree-02 policy config (leaf 03 Task 5):
 	// ShortRetries bounds every loop's retry budget; nil-safe default 3.
 	failurePolicy *FailurePolicyConfig
-	// concurrencySemaphore limits concurrent requests for this model/provider.
-	// When nil, no limit is enforced. Buffered channel used as a semaphore.
-	concurrencySemaphore chan struct{}
+	// concurrencyGate limits concurrent requests for this model/provider.
+	// When nil, no limit is enforced. Two-lane slot gate (tree 04 leaf
+	// 03): replaces the raw buffered channel so interactive acquires
+	// can jump the wait list under a starvation guard.
+	concurrencyGate *slotGate
 }
 
 // DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without
@@ -313,11 +315,13 @@ func WithUploadStore(store UploadStore) ClientOption {
 
 // WithConcurrencyLimit sets the maximum concurrent requests for this client.
 // When maxConcurrency is 0 or negative, no limit is enforced (unlimited).
-// The limit is enforced using a semaphore (buffered channel).
+// The limit is enforced using a two-lane slot gate (tree 04 leaf 03):
+// interactive acquires jump background waiters, bounded by a starvation
+// guard (slot_gate.go).
 func WithConcurrencyLimit(maxConcurrency int) ClientOption {
 	return func(c *Client) {
 		if maxConcurrency > 0 {
-			c.concurrencySemaphore = make(chan struct{}, maxConcurrency)
+			c.concurrencyGate = newSlotGate(maxConcurrency)
 		}
 	}
 }
@@ -335,9 +339,10 @@ func NewClient(config *ModelConfig, opts ...ClientOption) *Client {
 		logger: slog.Default(),
 	}
 
-	// Initialize concurrency semaphore from config if set
+	// Initialize concurrency gate from config if set (tree 04 leaf 03:
+	// slotGate replaces the raw channel semaphore)
 	if config.MaxConcurrency > 0 {
-		c.concurrencySemaphore = make(chan struct{}, config.MaxConcurrency)
+		c.concurrencyGate = newSlotGate(config.MaxConcurrency)
 	}
 
 	for _, opt := range opts {
@@ -504,7 +509,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
 
 	for attempt := 1; attempt <= shortRetries; attempt++ {
-		resp, err := c.doRequest(ctx, payload, cfg)
+		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority)
 		if err != nil {
 			// Quota errors never re-enter the short-retry loop: the window
 			// is hours, not seconds. Return immediately; the caller decides
@@ -707,7 +712,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
 
-		resp, err := c.doRequest(ctx, payload, cfg)
+		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority)
 		if err != nil {
 			// Quota errors never re-enter the short-retry loop (streaming
 			// path): hours-scale window, return immediately.
@@ -847,6 +852,13 @@ type chatOptions struct {
 	// structured-output constraints on tool-free calls (e.g. SKILL.state
 	// response envelopes).
 	rawGrammar string
+	// priority marks this turn INTERACTIVE for model-slot acquisition
+	// (tree 04 leaf 03, D11): chat turns pass true; queue/specialist/goal
+	// work stays false. It gates slot-GATE lane choice ONLY — it never
+	// touches the wire payload. The queue job's Interactive flag is a
+	// different layer (stamped at enqueue from the originating session)
+	// and does not flow here; see docs/workflows/llm-management.md.
+	priority bool
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -1048,11 +1060,28 @@ func WithRawGrammar(grammar string) ChatOption {
 	}
 }
 
+// WithPriority marks this chat turn INTERACTIVE for model-slot
+// acquisition (tree 04 leaf 03): when model concurrency is capped, an
+// interactive acquire is granted ahead of waiting background acquires,
+// bounded by a starvation guard (3 interactive grants → 1 background).
+// Default is false (background) for all callers that never pass this —
+// byte-identical ordering semantics to the prior channel semaphore.
+// This affects acquisition ordering only; nothing is added to the
+// request payload. Per D11, exactly two tiers exist: interactive chat
+// turns (true) and everything else (false, the default).
+func WithPriority(interactive bool) ChatOption {
+	return func(o *chatOptions) {
+		o.priority = interactive
+	}
+}
+
 // doRequest performs the HTTP request and parses the response.
 // cfg must be captured under lock by the caller.
-func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *ModelConfig) (*Response, error) {
-	// Acquire concurrency limit semaphore (if configured)
-	release, err := c.acquireConcurrencyLimit(ctx)
+// priority marks an interactive turn for slot-gate priority (tree 04
+// leaf 03); priority-less callers pass false, unchanged behavior.
+func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *ModelConfig, priority bool) (*Response, error) {
+	// Acquire concurrency slot (if configured)
+	release, err := c.acquireConcurrencyLimit(ctx, priority)
 	if err != nil {
 		return nil, &ClientError{Message: "concurrency limit wait interrupted", Cause: err}
 	}
@@ -1425,7 +1454,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			retryState.isResume = true
 			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", shortRetries)
 		}
-		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg)
+		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority)
 		if err == nil {
 			// Record usage with scope
 			if c.budget != nil && resp != nil {
@@ -1574,9 +1603,10 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 // resp.StatusCode and must not read resp.Body.
 // Returns HTTP status code as int so callers don't manage *http.Response lifecycle.
 // cfg must be captured under lock by the caller.
-func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState, cfg *ModelConfig) (*Response, int, error) {
-	// Acquire concurrency limit semaphore (if configured)
-	release, err := c.acquireConcurrencyLimit(ctx)
+// priority marks an interactive turn for slot-gate priority (tree 04 leaf 03).
+func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState, cfg *ModelConfig, priority bool) (*Response, int, error) {
+	// Acquire concurrency slot (if configured)
+	release, err := c.acquireConcurrencyLimit(ctx, priority)
 	if err != nil {
 		c.logger.Debug("stream concurrency limit wait interrupted", "error", err)
 		// Release the RPM slot reserved by WaitForRateLimit since the request
@@ -1977,20 +2007,20 @@ func (c *Client) Budget() *Budget {
 	return c.budget
 }
 
-// acquireConcurrencyLimit blocks until the semaphore is available or context is cancelled.
-// Returns a release function that must be called when the request completes.
-// If no limit is configured (semaphore is nil), returns a no-op release function.
-func (c *Client) acquireConcurrencyLimit(ctx context.Context) (release func(), err error) {
-	if c.concurrencySemaphore == nil {
+// acquireConcurrencyLimit blocks until the gate grants a slot or context is
+// cancelled. Returns a release function that must be called when the request
+// completes. If no limit is configured (gate is nil), returns a no-op release
+// function. priority=true (interactive chat turn) jumps background waiters,
+// bounded by the starvation guard (tree 04 leaf 03, D11 two-tier rule).
+func (c *Client) acquireConcurrencyLimit(ctx context.Context, priority bool) (release func(), err error) {
+	if c.concurrencyGate == nil {
 		return func() {}, nil
 	}
 
-	select {
-	case c.concurrencySemaphore <- struct{}{}:
-		return func() {
-			<-c.concurrencySemaphore
-		}, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	if err := c.concurrencyGate.acquire(ctx, priority); err != nil {
+		return nil, err
 	}
+	return func() {
+		c.concurrencyGate.release()
+	}, nil
 }
