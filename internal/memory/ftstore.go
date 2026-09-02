@@ -196,8 +196,78 @@ func (s *SQLiteFTSStore) migrateSchema(ctx context.Context) error {
 	}
 	for _, col := range columns {
 		if err := s.addColumnIfMissing(ctx, s.config.TableName, col, "TEXT", "DEFAULT ''"); err != nil {
-			s.logger.Debug("Column migration skipped", "column", col, "error", err)
+			s.logger.Warn("Column migration failed", "column", col, "error", err)
 		}
+	}
+	// SearchText stores: legacy databases may still carry the pre-search_text
+	// FTS pair — triggers that INSERT content into the virtual table and a
+	// virtual table whose columns are (content, domain). With the column now
+	// added, inserts specifying search_text succeed but the FTS index and
+	// sync triggers are wrong (indexed text = raw content or nothing). Detect
+	// the stale trigger body and rebuild the whole FTS pair to match the
+	// current schema SQL. Idempotent: a current-schema trigger body contains
+	// search_text and is left alone.
+	if s.searchTextColumn {
+		if err := s.rebuildLegacyFTSPair(ctx); err != nil {
+			s.logger.Warn("FTS pair rebuild had issues", "error", err)
+		}
+	}
+	return nil
+}
+
+// rebuildLegacyFTSPair drops and recreates the FTS5 virtual table and sync
+// triggers when the on-disk trigger bodies predate the search_text column.
+// Rows are reindexed via the caller's backfill (FTS5 external-content tables
+// rebuilt empty here; 'rebuild' command re-syncs from the content table).
+func (s *SQLiteFTSStore) rebuildLegacyFTSPair(ctx context.Context) error {
+	// Inspect the first INSERT trigger's body for the search_text marker.
+	var sqlText string
+	q := fmt.Sprintf("SELECT sql FROM sqlite_master WHERE type='trigger' AND name LIKE '%%_ai' AND tbl_name='%s' LIMIT 1", s.config.TableName)
+	if err := s.db.QueryRowContext(ctx, q).Scan(&sqlText); err != nil {
+		if err == sql.ErrNoRows {
+			return nil // no triggers yet; initSchema will create current ones
+		}
+		return fmt.Errorf("trigger introspection failed: %w", err)
+	}
+	if strings.Contains(sqlText, "search_text") {
+		return nil // current schema
+	}
+
+	s.logger.Info("Rebuilding legacy FTS pair for search_text schema",
+		"table", s.config.TableName, "fts", s.config.FTS5Table)
+
+	// Drop old triggers (all three), then the stale virtual table.
+	for _, suffix := range []string{"_ai", "_ad", "_au"} {
+		var name string
+		nq := fmt.Sprintf("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE '%%%s' AND tbl_name='%s' LIMIT 1", suffix, s.config.TableName)
+		if err := s.db.QueryRowContext(ctx, nq).Scan(&name); err == nil && name != "" {
+			if _, err := s.db.ExecContext(ctx, "DROP TRIGGER IF EXISTS "+name); err != nil {
+				return fmt.Errorf("drop trigger %s: %w", name, err)
+			}
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, "DROP TABLE IF EXISTS "+s.config.FTS5Table); err != nil {
+		return fmt.Errorf("drop stale fts table: %w", err)
+	}
+
+	// Recreate FTS virtual table + triggers from the current schema SQL.
+	if len(s.config.Schema) > 1 {
+		if _, err := s.db.ExecContext(ctx, s.config.Schema[1]); err != nil {
+			return fmt.Errorf("recreate fts table: %w", err)
+		}
+	}
+	for _, trigger := range s.config.Triggers {
+		if _, err := s.db.ExecContext(ctx, trigger); err != nil {
+			return fmt.Errorf("recreate trigger: %w", err)
+		}
+	}
+
+	// Reindex: FTS5 external-content rebuild syncs the virtual table from
+	// the content table. If unavailable (LIKE fallback), backfill still
+	// populated search_text so searches work.
+	if _, err := s.db.ExecContext(ctx,
+		"INSERT INTO "+s.config.FTS5Table+"("+s.config.FTS5Table+", search_text) SELECT 'rebuild', search_text FROM "+s.config.TableName); err != nil {
+		s.logger.Debug("fts rebuild command failed (non-fatal)", "error", err)
 	}
 	return nil
 }
