@@ -340,6 +340,35 @@ func (q *PersistentQueue) Retry(ctx context.Context, jobID string) error {
 	return nil
 }
 
+// Requeueable is the optional queue surface for provider-wait requeues
+// (tree 03 leaf 03, D9): reset the job to pending for a claim at
+// notBefore WITHOUT consuming a retry — a provider wait is not a job
+// failure. The worker checks for this interface alongside Heartbeater.
+type Requeueable interface {
+	Requeue(ctx context.Context, jobID string, notBefore time.Time) error
+}
+
+// Requeue implements Requeueable over the store's Requeue.
+func (q *PersistentQueue) Requeue(ctx context.Context, jobID string, notBefore time.Time) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		return fmt.Errorf("queue is closed")
+	}
+
+	if err := q.store.Requeue(jobID, notBefore); err != nil {
+		return err
+	}
+
+	q.publishEvent("queue.job.requeue", map[string]any{
+		KeyJobID:     jobID,
+		"not_before": notBefore.UTC().Format(time.RFC3339),
+	})
+
+	return nil
+}
+
 // Get retrieves a job by ID.
 func (q *PersistentQueue) Get(ctx context.Context, jobID string) (*Job, error) {
 	q.mu.RLock()

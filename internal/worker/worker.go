@@ -37,6 +37,10 @@ type Worker struct {
 	queue     queue.Queue
 	processor JobProcessor
 	logger    *slog.Logger
+	// providerPolicyCfg is the tree-03 failure-policy config (same
+	// values the LLM clients use; set once at wiring via
+	// SetProviderPolicy). Nil = package defaults.
+	providerPolicyCfg *llm.FailurePolicyConfig
 
 	mu     sync.RWMutex
 	cancel context.CancelFunc
@@ -311,6 +315,16 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 	w.LastActive = time.Now()
 
 	if processErr != nil {
+		// Tree 03 leaf 03 (D9): a PROVIDER WAIT is not a job failure.
+		// Requeue the job at the wait's scheduled time WITHOUT
+		// incrementing retry_count and release the worker slot (the
+		// normal return below does that). Give-up (schedule unknown or
+		// beyond the BackoffPlan horizon) and genuine failures keep the
+		// existing Fail/retry path byte-identically below.
+		if requeued := w.requeueOnProviderWait(ctx, job, processErr); requeued {
+			return true, nil
+		}
+
 		w.JobsFailed++
 		w.setStateWithError(StateError, job.ID, processErr)
 		w.mu.Unlock()
@@ -406,4 +420,121 @@ type WorkerStats struct {
 
 func generateWorkerID() string {
 	return id.Generate("worker-")
+}
+
+// SetProviderPolicy injects the failure-policy config (tree 03 leaf 03
+// wiring): the daemon passes the SAME cfg.LLM.FailurePolicy mapping the
+// LLM clients receive, so job requeue schedules and client backoff
+// schedules agree. Nil is ignored.
+func (w *Worker) SetProviderPolicy(cfg *llm.FailurePolicyConfig) {
+	if w == nil || cfg == nil {
+		return
+	}
+	w.mu.Lock()
+	w.providerPolicyCfg = cfg
+	w.mu.Unlock()
+}
+
+// requeueOnProviderWait classifies processErr as a provider wait
+// (llm.QuotaResetError / llm.ErrAllModelsQuotaBlocked /
+// llm.ThrottleBackoffError — tree 03 leaf 03, D9) and, when the queue
+// supports queue.Requeueable and the wait is schedulable within the
+// failure-policy horizon, requeues the job at that time WITHOUT
+// consuming a retry. Returns true when the job was requeued; the worker
+// slot is released by the caller's normal return and the next eligible
+// Claim wins the job (its next_retry_at gate keeps it parked until the
+// schedule). Returns false on give-up / non-provider errors / queues
+// without requeue support, so the existing Fail → retry/dead-letter
+// path runs unchanged.
+//
+// policy is the SAME failure-policy config the LLM clients use (daemon
+// wiring passes cfg.LLM.FailurePolicy; nil-safe defaults mirror
+// llm.Client.policyCfg).
+func (w *Worker) requeueOnProviderWait(ctx context.Context, job *queue.Job, processErr error) bool {
+	if w == nil || processErr == nil || job == nil {
+		return false
+	}
+	var class llm.FailureClass
+	_, throttleShaped := llm.AsThrottleBackoffError(processErr)
+	switch {
+	case llm.IsQuotaResetError(processErr) || errors.Is(processErr, llm.ErrAllModelsQuotaBlocked):
+		class = llm.FailureQuota
+	case throttleShaped:
+		class = llm.FailureThrottle
+	default:
+		return false // genuine failure — legacy path
+	}
+	// llm.IsNonRetryable covers QuotaResetError; a provider wait is
+	// still not a failure, so the requeue decision precedes that check
+	// at the call site. Failures the classifier does not recognize fall
+	// through to the legacy path above.
+
+	now := time.Now().UTC()
+	var resumeAt time.Time
+	var giveUp bool
+	if quotaErr, ok := llm.AsQuotaResetError(processErr); ok {
+		resumeAt = quotaErr.ResetAt
+		if resumeAt.IsZero() && quotaErr.RetryAfter > 0 {
+			resumeAt = now.Add(quotaErr.RetryAfter)
+		}
+		if resumeAt.IsZero() || !resumeAt.After(now) {
+			return false
+		}
+		plan := llm.DefaultBackoffPlan(llm.FailureQuota, now, w.providerPolicy())
+		if resumeAt.After(plan.GiveUpAt) {
+			return false
+		}
+	} else if throttleErr, ok := llm.AsThrottleBackoffError(processErr); ok {
+		if throttleErr.RetryAt.IsZero() {
+			return false
+		}
+		resumeAt = throttleErr.RetryAt
+		plan := llm.DefaultBackoffPlan(llm.FailureThrottle, now, w.providerPolicy())
+		if resumeAt.After(plan.GiveUpAt) {
+			return false
+		}
+	} else {
+		// ErrAllModelsQuotaBlocked: no attached schedule — the quota
+		// plan's first step.
+		plan := llm.DefaultBackoffPlan(llm.FailureQuota, now, w.providerPolicy())
+		if plan.ShouldGiveUp(now) {
+			return false
+		}
+		resumeAt = plan.NextAttempt(now, 0, time.Time{})
+		giveUp = resumeAt.IsZero()
+	}
+	if giveUp || resumeAt.IsZero() {
+		return false
+	}
+
+	rq, ok := w.queue.(queue.Requeueable)
+	if !ok {
+		w.logger.Debug("provider wait on job but queue lacks requeue support — legacy failure path",
+			"job", job.ID, "class", class)
+		return false
+	}
+	if err := rq.Requeue(ctx, job.ID, resumeAt); err != nil {
+		w.logger.Error("Failed to requeue job on provider wait", "job", job.ID, "error", err)
+		return false
+	}
+	w.logger.Info("job requeued on provider wait (retry count unchanged)",
+		"worker_id", w.ID,
+		"job_id", job.ID,
+		"class", class,
+		"resume_at", resumeAt.Format(time.RFC3339),
+	)
+	return true
+}
+
+// providerPolicy resolves the injected failure-policy config or the
+// nil-safe defaults (mirrors llm.Client.policyCfg).
+func (w *Worker) providerPolicy() llm.FailurePolicyConfig {
+	if w != nil && w.providerPolicyCfg != nil {
+		return *w.providerPolicyCfg
+	}
+	return llm.FailurePolicyConfig{
+		Horizon:      24 * time.Hour,
+		BaseThrottle: 30 * time.Second,
+		PollFloor:    time.Hour,
+	}
 }

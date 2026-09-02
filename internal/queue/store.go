@@ -505,7 +505,11 @@ func (s *Store) Fail(jobID, errMsg string) error {
 	if err != nil {
 		return fmt.Errorf("begin fail tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }() // safe: no-op after Commit
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+			s.logger.Debug("fail tx rollback (no-op after commit)", "error", rErr)
+		}
+	}()
 
 	var retryCount, maxRetries int
 	row := tx.QueryRow(`SELECT retry_count, max_retries FROM jobs WHERE id = ?`, jobID)
@@ -545,6 +549,64 @@ func (s *Store) Fail(jobID, errMsg string) error {
 // retryBackoffBase is the base delay for exponential retry backoff.
 const retryBackoffBase = 2 * time.Second
 
+// Requeue resets a job that hit a PROVIDER WAIT (llm.ThrottleBackoffError,
+// QuotaResetError / ErrAllModelsQuotaBlocked — tree 03 leaf 03, D9) to
+// pending for a future claim at notBefore, WITHOUT incrementing
+// retry_count: a provider wait is the machine being patient, not a job
+// failure, so the job's own retry budget must not be consumed. The claim
+// query's existing `next_retry_at <= now` gate (ClaimNextForAgent) is
+// the not-before mechanism — the leaf contract's "NotBefore" IS
+// next_retry_at.
+//
+// interactive is preserved in the UPDATE column list (SHARED-CONVENTIONS
+// §4.4): a requeued interactive job stays interactive so claim ordering
+// is undisturbed. The job is left in a claimable state (claimed_by
+// cleared, error cleared) so the next eligible Claim wins it.
+func (s *Store) Requeue(jobID string, notBefore time.Time) error {
+	now := time.Now().UTC()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin requeue tx: %w", err)
+	}
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+			s.logger.Debug("requeue tx rollback (no-op after commit)", "error", rErr)
+		}
+	}()
+
+	result, err := tx.Exec(`
+		UPDATE jobs
+		SET state = 'pending',
+		    claimed_by = NULL,
+		    result = NULL,
+		    error = NULL,
+		    interactive = interactive,
+		    next_retry_at = ?,
+		    updated_at = ?
+		WHERE id = ? AND state IN ('failed', 'claimed', 'processing')`,
+		notBefore.UTC().Format(time.RFC3339), now.Format(time.RFC3339), jobID)
+
+	if err != nil {
+		return fmt.Errorf("failed to requeue job: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("job not found or not in requeueable state: %s", jobID)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit requeue tx: %w", err)
+	}
+
+	s.logger.Info("Job requeued on provider wait (retry count unchanged)",
+		"id", jobID,
+		"not_before", notBefore.UTC(),
+	)
+	return nil
+}
+
 // Retry resets a failed job for retry with exponential backoff.
 // Backoff follows: 2s, 4s, 8s (capped at 8s).
 func (s *Store) Retry(jobID string) error {
@@ -558,7 +620,11 @@ func (s *Store) Retry(jobID string) error {
 	if err != nil {
 		return fmt.Errorf("begin retry tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }() // safe: no-op after Commit
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+			s.logger.Debug("requeue tx rollback (no-op after commit)", "error", rErr)
+		}
+	}()
 
 	// Get current retry count to calculate backoff
 	var retryCount int

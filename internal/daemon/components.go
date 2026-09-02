@@ -3495,6 +3495,29 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Tree 03 leaf 03 (D9): every worker requeues jobs on provider
+	// waits using the SAME failure-policy config the LLM clients
+	// received (cfg.LLM.FailurePolicy mapped identically), so job
+	// requeue schedules and client backoff schedules agree. Applied to
+	// the pool's startup workers below via workerPoolPolicy; AddWorker
+	// workers read the nil-safe package defaults, which mirror the
+	// normalized config values.
+	var workerPoolPolicy *llm.FailurePolicyConfig
+	if c.WorkerPool != nil && c.Config != nil {
+		fp := c.Config.LLM.FailurePolicy
+		workerPoolPolicy = &llm.FailurePolicyConfig{
+			Horizon:                fp.Horizon,
+			BaseThrottle:           fp.BaseThrottle,
+			BaseQuota402Extra:      fp.BaseQuota402Extra,
+			PollFloor:              fp.PollFloor,
+			ShortRetries:           fp.ShortRetries,
+			PacingEnabled:          fp.Pacing.Enabled,
+			PacingTarget429PerHour: fp.Pacing.Target429PerHour,
+			PacingMinInterval:      fp.Pacing.MinInterval,
+			PacingMaxInterval:      fp.Pacing.MaxInterval,
+		}
+	}
+
 	// Start worker pool
 	if c.WorkerPool != nil {
 		poolSize := c.Config.Workers.PoolSize
@@ -3509,12 +3532,14 @@ func (c *Components) Start(ctx context.Context) error {
 		workersPerAgent := 1
 		agentWorkerCount := 0
 		for _, agentID := range agentIDs {
-			if _, err := c.WorkerPool.AddWorker(c.Config.Workers.DefaultCaps, agentID); err != nil {
+			wk, err := c.WorkerPool.AddWorker(c.Config.Workers.DefaultCaps, agentID)
+			if err != nil {
 				c.Logger.Error("Failed to add agent-specific worker",
 					"agent_id", agentID, "error", err)
-			} else {
-				agentWorkerCount++
+				continue
 			}
+			wk.SetProviderPolicy(workerPoolPolicy)
+			agentWorkerCount++
 		}
 
 		// Reserve one general worker slot for unrouted jobs; the remainder of
@@ -3529,6 +3554,11 @@ func (c *Components) Start(ctx context.Context) error {
 			c.Logger.Error("Failed to start worker pool", "error", err)
 		} else {
 			startedHandlers = append(startedHandlers, "pool")
+			// The startup loop created `generalWorkers` workers; give them
+			// the policy too (Start assigns them before returning).
+			for _, wk := range c.WorkerPool.GetWorkers() {
+				wk.SetProviderPolicy(workerPoolPolicy)
+			}
 		}
 
 		c.Logger.Info("Started agent-specific workers",
@@ -3956,6 +3986,45 @@ func (c *Components) Start(ctx context.Context) error {
 				}
 			}
 
+			// Tree 03 leaf 03 (D9): ONE shared TurnParker + EpisodeParker
+			// serve every goal loop. The parker starts disabled (nil
+			// resume) and is armed below with a resume callback that
+			// routes each resumed record to the parked employee's
+			// registered GoalLoop via the Manager lookup — no second
+			// parker is ever created. maxWait mirrors the quota wiring
+			// (llm.quota_retry.max_wait) so goal episodes soft-stop on
+			// the same schedule as chat turns.
+			policyCfg := llm.FailurePolicyConfig{}
+			if c.Config != nil {
+				fp := c.Config.LLM.FailurePolicy
+				policyCfg = llm.FailurePolicyConfig{
+					Horizon:                fp.Horizon,
+					BaseThrottle:           fp.BaseThrottle,
+					BaseQuota402Extra:      fp.BaseQuota402Extra,
+					PollFloor:              fp.PollFloor,
+					ShortRetries:           fp.ShortRetries,
+					PacingEnabled:          fp.Pacing.Enabled,
+					PacingTarget429PerHour: fp.Pacing.Target429PerHour,
+					PacingMinInterval:      fp.Pacing.MinInterval,
+					PacingMaxInterval:      fp.Pacing.MaxInterval,
+				}
+			}
+			goalTurnParker := agent.NewTurnParker(
+				c.Logger.With("component", "goal-episode-parker"),
+				func(ctx context.Context, rec agent.ParkedTurnRecord) {
+					loop := c.EmployeeManager.GetGoalLoop(rec.AgentID)
+					if loop == nil {
+						c.Logger.Warn("parked goal episode resume: no loop registered",
+							"employee_id", rec.AgentID, "class", rec.Class)
+						return
+					}
+					loop.ResumeGoalEpisode(ctx, rec)
+				},
+				c.Config.LLM.QuotaRetry.MaxWait,
+			)
+			goalEpisodeParker := employee.NewEpisodeParker(goalTurnParker, policyCfg,
+				c.Logger.With("component", "goal-episode-parker"))
+
 			// Enumerate employees with constitutions and register a loop
 			// for each. Uses a fresh context (not the boot context) so
 			// lookups don't race with Start cancellation.
@@ -4080,6 +4149,14 @@ func (c *Components) Start(ctx context.Context) error {
 						})
 					}
 
+					if speakRouter != nil {
+						loop = loop.WithSpeakRouter(speakRouter)
+					}
+					// Tree 03 leaf 03 (D9): provider-wait parking for
+					// goal episodes. Every loop shares the ONE parker
+					// constructed above (no second TurnParker).
+					loop = loop.WithEpisodeParker(goalEpisodeParker)
+
 					c.EmployeeManager.RegisterGoalLoop(emp.ID, loop)
 					registered++
 				}
@@ -4091,6 +4168,12 @@ func (c *Components) Start(ctx context.Context) error {
 						"reflector", reflector != nil,
 						"auditor", postTurn != nil,
 					)
+					// Arm the shared episode parker now that at least
+					// one loop is registered (parking is inert until a
+					// loop is wired; the resume callback above resolves
+					// the loop by employee ID).
+					goalTurnParker.Start(ctx)
+					startedHandlers = append(startedHandlers, "goal-episode-parker")
 				}
 			} else if err != nil {
 				c.Logger.Warn("Employee GoalLoop wiring: failed to list employees", "error", err)

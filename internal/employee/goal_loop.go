@@ -260,6 +260,13 @@ type GoalLoop struct {
 	// autonomous GoalLoop plan). Nil default = pure autonomy.
 	escalationGate EscalationGate
 
+	// parker, when non-nil, parks the episode on provider waits
+	// (tree 03 leaf 03, D9) and re-dispatches it on resume. Nil means
+	// parking is disabled and reflector errors keep their legacy
+	// failure behaviour. Set once via WithEpisodeParker at wiring time;
+	// read-only afterwards (no mutex handoff on the hot path).
+	parker *EpisodeParker
+
 	// auditStore, when non-nil, receives an AuditFinding record whenever
 	// decideTier3 escalates a candidate to plan signoff (leaf 03).
 	auditStore *AuditStore
@@ -632,6 +639,25 @@ func (l *GoalLoop) Assess(ctx context.Context, trigger TriggerEvent) ([]Candidat
 
 	resp, err := reflector.Chat(ctx, messages, llm.WithTemperature(0.2), llm.WithMaxTokens(2048))
 	if err != nil {
+		// Tree 03 leaf 03 (D9): a provider wait parks the episode for
+		// scheduled resume instead of failing it. The phase encodes the
+		// tier so the resume re-enters the right decide path (tier-1/3
+		// re-run assess+execute+reflect; tier-2 re-dispatches Assess).
+		// Give-up (beyond the BackoffPlan horizon) propagates the
+		// ORIGINAL error unchanged.
+		phase := "assess"
+		switch constitution.AutonomyTier {
+		case Tier1Reactive:
+			phase = "tier1"
+		case Tier3Autonomous:
+			phase = "tier3"
+		}
+		if parked, _ := l.maybeParkProviderWait(err, goalTurnPayload{
+			Phase:   phase,
+			Trigger: &trigger,
+		}); parked {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("assess LLM call failed: %w", err)
 	}
 
@@ -869,7 +895,7 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 		l.mu.Unlock()
 
 		if reflector != nil {
-			assessed, err := l.reflectViaLLM(ctx, reflector, constitution, result)
+			assessed, err := l.reflectViaLLM(ctx, reflector, constitution, plan, result)
 			if err != nil {
 				logger.Warn("reflect LLM call failed, defaulting to healthy", "error", err)
 				health = GoalHealthy
@@ -1040,7 +1066,7 @@ func (l *GoalLoop) SetDefaultGate(cfg *GateConfig) {
 }
 
 // reflectViaLLM asks the reflector LLM to assess the execution outcome.
-func (l *GoalLoop) reflectViaLLM(ctx context.Context, reflector Reflector, c *Constitution, result *bot.BotExecutionResult) (GoalHealth, error) {
+func (l *GoalLoop) reflectViaLLM(ctx context.Context, reflector Reflector, c *Constitution, plan PlanRef, result *bot.BotExecutionResult) (GoalHealth, error) {
 	userMsg := buildReflectUserPrompt(c, result)
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: reflectSystemPrompt},
@@ -1048,6 +1074,26 @@ func (l *GoalLoop) reflectViaLLM(ctx context.Context, reflector Reflector, c *Co
 	}
 	resp, err := reflector.Chat(ctx, messages, llm.WithTemperature(0.1), llm.WithMaxTokens(1024))
 	if err != nil {
+		// Tree 03 leaf 03 (D9): a provider wait during the post-execution
+		// REFLECT step parks the episode for scheduled resume. Give-up
+		// (beyond the BackoffPlan horizon) keeps the legacy warn-and-
+		// default-to-healthy behaviour (the health default matches the
+		// unparseable-response branch below — an LLM hiccup is never a
+		// goal punishment).
+		if parked, _ := l.maybeParkProviderWait(err, goalTurnPayload{
+			Phase: "reflect",
+			Plan:  l.activePlanRefSnapshot(plan),
+			Result: &bot.BotExecutionResult{
+				BotID:      result.BotID,
+				Output:     result.Output,
+				TokensUsed: result.TokensUsed,
+				Success:    result.Success,
+				Error:      result.Error,
+				Duration:   result.Duration,
+			},
+		}); parked {
+			return GoalUnknown, nil
+		}
 		return GoalUnknown, fmt.Errorf("reflect LLM call: %w", err)
 	}
 	health, err := parseReflectResponse(resp.Content)
@@ -1056,6 +1102,15 @@ func (l *GoalLoop) reflectViaLLM(ctx context.Context, reflector Reflector, c *Co
 		return GoalHealthy, nil
 	}
 	return health, nil
+}
+
+// activePlanRefSnapshot returns the in-flight plan reference for
+// parked-episode snapshots: the approved plan ID + its execution prompt,
+// with ApproverID preserved so a resumed ApproveAndExecute (if the
+// resume path re-approves) still passes the G3 ownership check.
+func (l *GoalLoop) activePlanRefSnapshot(plan PlanRef) *PlanRef {
+	ref := plan
+	return &ref
 }
 
 // lookupActiveGoal retrieves the active goal for this employee, preferring
