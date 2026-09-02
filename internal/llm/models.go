@@ -4,6 +4,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -246,6 +247,12 @@ type ModelConfig struct {
 	// to this model/provider. When 0, no limit is enforced (unlimited).
 	// Use this to prevent overwhelming rate-limited APIs or local LLMs.
 	MaxConcurrency int
+	// ConfiguredTimeout records whether the ORIGINATING config declared a
+	// nonzero timeout: for this alias (tree 02 leaf 04, DECISIONS.md D10).
+	// It is set for every model built from that alias's entry and mirrors
+	// the alias-level flag; the alias's Timeout field alone cannot carry
+	// the distinction because NewResolver substitutes the 30s default.
+	ConfiguredTimeout bool
 	// DefaultReasoning is the model-level default reasoning effort/budget
 	// configuration. When non-nil, it is used if no per-request or agent-level
 	// reasoning override is present.
@@ -270,6 +277,51 @@ type ModelConfig struct {
 	ResponseB64Path string
 	ImageApp        string
 	VideoApp        string
+}
+
+// EndpointKey returns the cooldown identity for a model's base endpoint:
+// endpoint URL host + credential fingerprint (QuotaCredentialKey's provider
+// portion; audit R2). Host-only keys are wrong in this repo's config
+// practice — gala-mlx and gala-llama share one host while xai (API key) and
+// xai-oauth (subscription) share api.x.ai with unrelated credentials — so
+// models share timeout fate ONLY when both host and credential match
+// (DECISIONS.md D10). A nil or hostless config falls back to a stable,
+// non-empty key derived from the credential alone.
+func EndpointKey(cfg *ModelConfig) string {
+	host := ""
+	if cfg != nil {
+		host = endpointHost(cfg.BaseURL)
+	}
+	cred := QuotaCredentialKey(endpointKeyProviderID(cfg), cfg)
+	return host + "|" + cred
+}
+
+// endpointHost extracts the URL host from a base URL, tolerating configs
+// that omit a scheme. Empty input maps to "" so the fallback key stays
+// stable.
+func endpointHost(baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return ""
+	}
+	if !strings.Contains(baseURL, "://") {
+		baseURL = "http://" + baseURL
+	}
+	if u, err := url.Parse(baseURL); err == nil {
+		return strings.ToLower(u.Host)
+	}
+	return ""
+}
+
+// endpointKeyProviderID names the credential scope for the endpoint key.
+// The QuotaCredentialKey provider portion doubles as the scope so models
+// from DIFFERENT providers never share an endpoint key even when they
+// point at the same host.
+func endpointKeyProviderID(cfg *ModelConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ProviderID
 }
 
 // HasCapability checks if the model has a specific capability.
@@ -325,6 +377,11 @@ type AliasEntry struct {
 	MaxFails               int            // Max consecutive failures before rotation
 	DefaultModel           string         // Optional: revert to this model after cooldown
 	BalancedStickyRequests bool           // Optional: pin callers to single model
+	// timeoutArmed records that the originating CONFIG declared a nonzero
+	// timeout: (tree 02 leaf 04, DECISIONS.md D10). Alias-level blocks arm
+	// only when true — a Timeout value substituted as the 30s default must
+	// never look like an explicit opt-in.
+	timeoutArmed bool
 }
 
 // AliasHealth tracks the health and rotation state of an alias.
@@ -356,6 +413,18 @@ type AliasHealth struct {
 	// credentialBlock maps credential keys to their quota unblock time.
 	// Blocking a credential blocks all models sharing that key.
 	credentialBlock map[string]time.Time
+	// Alias-level explicit-timeout state (tree 02 leaf 04, DECISIONS.md
+	// D10). TimeoutArmed is true only when the alias CONFIG declared a
+	// nonzero timeout: — without it these fields stay zero forever and no
+	// alias-level block ever applies. TimeoutStreak counts CONSECUTIVE
+	// failures of the SAME member model (FailedProviderID/FailedModelID
+	// identity); TimeoutBlockUntil is the current alias-block deadline
+	// (zero = not blocked); TimeoutBlocks counts blocks ARMED so far and
+	// drives the incremental doubling ladder (1x, 2x, 4x base — capped).
+	TimeoutArmed      bool
+	TimeoutStreak     int
+	TimeoutBlockUntil time.Time
+	TimeoutBlocks     int
 }
 
 // ToolDefinition defines a tool/function for the LLM.

@@ -161,6 +161,49 @@ Example with advanced options:
 }
 ```
 
+### Timeouts and Cooldowns
+
+Meept distinguishes three cooldown layers when a provider request fails
+(throttling, transport timeouts, quota). They key differently and clear
+differently:
+
+**Endpoint shared fate.** When a model fails with a throttling error (a
+429 without quota signals) or a transport timeout (deadline exceeded,
+connection timeout), the whole base ENDPOINT cools down — not just the one
+model. The endpoint identity is the URL host plus the credential
+fingerprint, so `openai/gpt-4.1 (medium alias)` timing out also skips
+`openai/gpt-4.1-mini (thinkhard alias)` when both use the same host and
+API key. Models that share a host but use different credentials do NOT
+share fate: `xai` (API key) and `xai-oauth` (subscription) hit the same
+`api.x.ai` host but stay independently usable, and two runtimes that
+happen to live on one machine (`gala-mlx`, `gala-llama`) never block each
+other. The block lasts the alias's `timeout` base (or the 30s default)
+and clears lazily after expiry plus a successful call. When every model
+an alias could serve is endpoint-blocked, resolution fails with
+`all models in alias are endpoint-blocked` — a distinct error from the
+quota all-blocked error.
+
+**Alias-level timeout (opt-in only).** An alias that explicitly declares
+`timeout:` also arms an ALIAS-level block after `max_fails` CONSECUTIVE
+failures of the SAME member model — alternating failures of different
+members never count. Each additional armed block doubles the wait
+(60s → 120s → 240s …), capped at 4× the alias's `timeout` base. An alias
+without an explicit `timeout:` never gets this alias-level block; member
+and endpoint blocks carry the load instead. A successful call resets the
+streak and releases the block.
+
+**Precedence.** Quota blocks (structured quota errors with reset windows)
+outrank endpoint blocks, which outrank the alias-level timeout block. A
+candidate that is both quota- and endpoint-blocked surfaces as
+quota-blocked; endpoint checks run second; the alias block excludes every
+member last.
+
+**Relation to `max_concurrency`.** Provider/model `max_concurrency`
+(model table above) bounds how many requests may run in parallel against
+one model — it gates the request slot. It does not take part in failure
+cooldowns: cooldown duration always comes from the alias `timeout` base
+(or the 30s default), never from `max_concurrency`.
+
 ## Budget Configuration
 
 For comprehensive budget documentation, see [Token Budgets Configuration](token-budgets.md).

@@ -221,6 +221,21 @@ boundaries:
 - **All-blocked is a distinct error.** When every alias candidate is
   quota-blocked, the Resolver returns `ErrAllModelsQuotaBlocked` — never a
   blocked model.
+- **Endpoint-level cooldown identity (tree 02 leaf 04, D10).** Timeout
+  cooldowns key on the base endpoint — `EndpointKey` = host + credential
+  fingerprint — and their state lives ON THE RESOLVER
+  (`Resolver.endpointBlocks`), never on `AliasHealth`: a timeout on
+  `openai/model-1` (medium alias) must also skip `openai/model-2`
+  (thinkhard alias), and per-alias state cannot deliver that cross-alias
+  shared fate. A throttled/timed-out model's endpoint is blocked for the
+  alias `timeout` base (30s default), cleared lazily after expiry + a
+  success (same single lazy-clear pattern as quota blocks). Alias-level
+  timeout blocks arm ONLY when the alias config declares `timeout:`
+  explicitly, and only on consistent same-member consecutive failure
+  (doubling capped at 4× base). When every candidate is endpoint- or
+  alias-blocked, the Resolver returns the DISTINCT
+  `ErrAllEndpointsBlocked` — check with `errors.Is`, never string
+  matching. Precedence: quota blocks > endpoint blocks > alias blocks.
 - **Deferral parks at the handler, mirroring budget.** `ChatHandler`
   parks quota-interrupted turns in `QuotaResumeWatcher`
   (`internal/agent/quota_resume.go`, the quota twin of
@@ -236,6 +251,17 @@ boundaries:
   do not carry quota fields; TUI/GUI quota state arrives solely via
   `agent.quota_wait` bus events (WS type `agent_progress`). Restarting a
   client mid-episode shows base status until the next event.
+- **Slot priority is a ChatOption, two tiers only (tree 04 leaf 03,
+  D11).** Model-concurrency slots are gated by `slotGate`
+  (`internal/llm/slot_gate.go`), not a raw channel: interactive chat
+  turns pass `llm.WithPriority(true)` and jump background waiters
+  (starvation-guarded: 3 interactive grants → 1 background). Priority
+  is request-scoped ordering ONLY — never serialized into payloads, and
+  never inferred from the queue job's `Interactive` flag (that flag is
+  queue-layer, stamped at enqueue; the slot gate reads the calling
+  turn). New client transports that honor `max_concurrency` must go
+  through `acquireConcurrencyLimit` so they inherit the two-lane
+  behavior.
 
 ### Bus proxy registrations must have a live responder
 

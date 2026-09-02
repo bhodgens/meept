@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -28,6 +29,14 @@ func (e *CapabilityError) Error() string {
 // alias unblocks when the earliest quota reset elapses), not a config error.
 var ErrAllModelsQuotaBlocked = errors.New("all models in alias are quota-blocked")
 
+// ErrAllEndpointsBlocked is returned by ResolveForAlias when every
+// candidate model in the alias is blocked by an endpoint-level timeout
+// cooldown or by an armed alias-level explicit-timeout block (tree 02 leaf
+// 04, DECISIONS.md D10). It is DISTINCT from ErrAllModelsQuotaBlocked (the
+// two failure classes have different horizons and different clearing
+// rules) — check with errors.Is, never string matching.
+var ErrAllEndpointsBlocked = errors.New("all models in alias are endpoint-blocked")
+
 // SkillRequirements defines the capability requirements for a skill.
 type SkillRequirements struct {
 	Name     string
@@ -48,6 +57,19 @@ type Resolver struct {
 	logger        *slog.Logger
 	// quotaCfg holds quota-aware retry settings. Nil disables quota blocking.
 	quotaCfg *QuotaWaitConfig
+	// endpointBlocks maps EndpointKey(cfg) -> block deadline for
+	// endpoint-level timeout cooldowns (tree 02 leaf 04, DECISIONS.md
+	// D10). It deliberately lives on the RESOLVER, not on AliasHealth
+	// (audit B3): AliasHealth is per-alias, but D10 shared fate is
+	// cross-alias — openai/model-1 on the medium alias and openai/model-2
+	// on the thinkhard alias are different aliases over one endpoint, and
+	// a timeout on either must skip both. Guarded by the single Resolver
+	// .mu regime like every other field; zero deadline or one in the past
+	// means unblocked.
+	endpointBlocks map[string]time.Time
+	// now is the injected clock (SHARED-CONVENTIONS §5) used by the
+	// endpoint/alias-block paths for lazy expiry checks. Nil = time.Now.
+	now func() time.Time
 }
 
 // NewResolver creates a new model resolver.
@@ -57,11 +79,12 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	}
 
 	r := &Resolver{
-		config:    cfg,
-		allModels: GetAllModels(cfg),
-		aliases:   make(map[string]*AliasEntry),
-		health:    make(map[string]*AliasHealth),
-		logger:    logger,
+		config:         cfg,
+		allModels:      GetAllModels(cfg),
+		aliases:        make(map[string]*AliasEntry),
+		health:         make(map[string]*AliasHealth),
+		endpointBlocks: make(map[string]time.Time),
+		logger:         logger,
 	}
 
 	// Resolve default and small models
@@ -83,6 +106,10 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 		}
 		if len(models) > 0 {
 			timeout := time.Duration(aliasEntry.Timeout) * time.Second
+			// explicitTimeout distinguishes a config-declared timeout:
+			// from the substituted default. Alias-level blocks (D10) arm
+			// ONLY when the config declared one.
+			explicitTimeout := aliasEntry.Timeout > 0
 			if timeout == 0 {
 				timeout = 30 * time.Second // Default timeout
 			}
@@ -90,13 +117,25 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 			if maxFails == 0 {
 				maxFails = 3 // Default max fails
 			}
-			r.aliases[aliasName] = &AliasEntry{
+			entry := &AliasEntry{
 				Models:                 models,
 				Timeout:                timeout,
 				MaxFails:               maxFails,
 				DefaultModel:           aliasEntry.DefaultModel,
 				BalancedStickyRequests: aliasEntry.BalancedStickyRequests,
 			}
+			// Stamp explicit-config-ness onto every member model so the
+			// failure path can consult the identity-bearing config itself.
+			for _, m := range entry.Models {
+				m.ConfiguredTimeout = explicitTimeout
+			}
+			if explicitTimeout {
+				// Arming is done per-alias-health in getOrCreateHealth;
+				// record it here on the alias entry's members and rely on
+				// the health-level flag below.
+				entry.timeoutArmed = true
+			}
+			r.aliases[aliasName] = entry
 		}
 	}
 
@@ -503,6 +542,37 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 		}
 	}
 
+	// Endpoint-level timeout cooldowns (tree 02 leaf 04, DECISIONS.md
+	// D10): a throttled/timed-out model's whole base endpoint is blocked —
+	// including across aliases, because endpointBlocks lives on the
+	// Resolver (audit B3) — and an armed alias-level explicit-timeout
+	// block excludes every member. Endpoint-blocked candidates are skipped
+	// exactly like quota-blocked ones; when nothing unblocked remains the
+	// DISTINCT ErrAllEndpointsBlocked is returned. NOTE precedence: quota
+	// blocks outrank endpoint blocks, so a candidate that is BOTH is
+	// reported as quota-blocked above.
+	if r.isEndpointBlocked(health, alias.Models[health.CurrentIndex]) {
+		nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
+		rotated := false
+		for i := 0; i < len(alias.Models); i++ {
+			candidate := alias.Models[nextIdx]
+			if !r.isEndpointBlocked(health, candidate) {
+				health.CurrentIndex = nextIdx
+				rotated = true
+				break
+			}
+			nextIdx = (nextIdx + 1) % len(alias.Models)
+		}
+		if !rotated {
+			return nil, fmt.Errorf("%w: alias %q (all %d model(s) endpoint-blocked)",
+				ErrAllEndpointsBlocked, aliasName, len(alias.Models))
+		}
+		r.logger.Info("Rotated away from endpoint-blocked current model",
+			"alias", aliasName,
+			"new_index", health.CurrentIndex,
+		)
+	}
+
 	// Return the active model
 	if health.CurrentIndex < len(alias.Models) {
 		chosen := alias.Models[health.CurrentIndex]
@@ -688,11 +758,45 @@ func (r *Resolver) candidatesJSON(candidates []*ModelConfig) string {
 	return string(b)
 }
 
+// VerdictForFailure maps a failure into the leaf-01 policy vocabulary,
+// adding the transport seam audit M4 requires: status-bearing errors go
+// through Classify; transport timeouts (context deadline, net.Error
+// timeout) reach this path WITHOUT an HTTP status/body and would otherwise
+// never fire endpoint cooldowns — inverting D10's purpose. A wrapped
+// FailureQuota verdict (QuotaResetError) unwraps through so the quota
+// class is preserved; anything else is FailureNone (alias cooldown still
+// applies, but no endpoint block).
+func VerdictForFailure(err error) PolicyVerdict {
+	if err == nil {
+		return PolicyVerdict{Class: FailureNone}
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return PolicyVerdict{Class: FailureThrottle, Reason: "transport_timeout"}
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return PolicyVerdict{Class: FailureThrottle, Reason: "transport_timeout"}
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return Classify(apiErr.StatusCode, nil, []byte(apiErr.Detail), time.Now())
+	}
+	return PolicyVerdict{Class: FailureNone}
+}
+
 // RecordAliasFailure records a failure for cooldown tracking. failedModel
 // identifies the model that failed; pass nil when unknown (the failure is
 // then attributed to no specific model and no sticky pins are released by
 // identity). Callers should pass the ModelConfig the failed request was
 // served by.
+//
+// Failure-class routing (tree 02 leaf 04, DECISIONS.md D10): a
+// FailureThrottle verdict (bare 429, transport timeout) ALSO blocks the
+// failed model's whole base ENDPOINT — cross-alias, keyed by host +
+// credential (EndpointKey) — for the alias timeout base (or the 30s
+// default). FailureQuota never reaches this function (quota blocks are
+// recorded by the agent loop); other classes only advance the alias
+// cooldown as before.
 func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *ModelConfig) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -710,15 +814,68 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 	if alias == nil {
 		return
 	}
+	// Consistent-member tracking for the alias-level explicit timeout
+	// (leaf Task 3): the streak only grows while the SAME member fails;
+	// a different member resets it (identity check mirroring issue #30).
+	// The comparison uses the PREVIOUS failure's identity, so it must run
+	// before failedModel overwrites it below. An all-empty previous
+	// identity means no known failure yet — the first failure can never
+	// be "consistent" with itself.
+	sameMember := failedModel != nil &&
+		(health.FailedProviderID != "" || health.FailedModelID != "") &&
+		failedModel.ProviderID == health.FailedProviderID &&
+		failedModel.ModelID == health.FailedModelID
 	if failedModel != nil {
+		if sameMember {
+			health.TimeoutStreak++
+		} else {
+			health.TimeoutStreak = 1
+		}
 		health.FailedProviderID = failedModel.ProviderID
 		health.FailedModelID = failedModel.ModelID
 		health.releasePinsForModel(alias, failedModel.ProviderID, failedModel.ModelID)
+	} else {
+		health.TimeoutStreak = 0
 	}
 	shift := min(health.ConsecutiveFails-1, 10)
 	backoffFactor := 1 << uint(shift)
 	cooldownDuration := alias.Timeout * time.Duration(backoffFactor)
 	health.CooldownUntil = time.Now().Add(cooldownDuration)
+	if health.TimeoutArmed && failedModel != nil && health.TimeoutStreak >= alias.MaxFails {
+		// A consistent failure burst arms a block; each subsequent armed
+		// block DOUBLES the duration, capped at 4x the alias's own base
+		// (documented — there is no provider Options.Timeout to use as
+		// the ceiling; leaf Contract 3).
+		health.TimeoutBlocks++
+		multiplier := 1 << uint(health.TimeoutBlocks-1)
+		if multiplier > 4 {
+			multiplier = 4
+		}
+		blockDuration := alias.Timeout * time.Duration(multiplier)
+		if blockDuration > 4*alias.Timeout {
+			blockDuration = 4 * alias.Timeout
+		}
+		health.TimeoutBlockUntil = r.clock().Add(blockDuration)
+	}
+
+	// Endpoint-level cooldown on throttle/timeouts (D10 primary path).
+	// Transport timeouts and bare 429s both land here (audit M4 seam);
+	// quota-shaped verdicts are excluded — quota has its own block maps
+	// and must never short-circuit into timeout cooldowns (D4/D7).
+	if v := VerdictForFailure(err); v.Class == FailureThrottle && failedModel != nil {
+		if r.endpointBlocks == nil {
+			r.endpointBlocks = make(map[string]time.Time)
+		}
+		key := EndpointKey(failedModel)
+		r.endpointBlocks[key] = r.clock().Add(alias.Timeout)
+		r.logger.Warn("Endpoint cooldown armed",
+			"alias", aliasName,
+			"provider", failedModel.ProviderID,
+			"model", failedModel.ModelID,
+			"endpoint_key", key,
+			"until", r.endpointBlocks[key].Format(time.RFC3339),
+		)
+	}
 
 	// Arm default-model reversion: after the cooldown window ends, the next
 	// ResolveForAlias call snaps the rotation back to default_model instead
@@ -738,9 +895,11 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 
 // RecordAliasSuccess records a success, resetting failure counter and
 // lazily deleting EXPIRED quota block entries for this alias (both the
-// per-entry and per-credential maps) to bound map growth. Unexpired blocks
-// are left in place — a success on one model says nothing about another
-// model's (or the credential pool's) quota window.
+// per-entry and per-credential maps) plus EXPIRED endpoint-level timeout
+// blocks (tree 02 leaf 04 — same single lazy-clearing pattern; no second
+// mechanism) to bound map growth. Unexpired blocks are left in place — a
+// success on one model says nothing about another model's (or credential
+// pool's) quota window.
 func (r *Resolver) RecordAliasSuccess(aliasName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -748,8 +907,13 @@ func (r *Resolver) RecordAliasSuccess(aliasName string) {
 	health := r.getOrCreateHealth(aliasName)
 	health.ConsecutiveFails = 0
 	health.CooldownUntil = time.Time{} // Reset cooldown
+	// A success ends any consistent-failure streak and releases an armed
+	// alias-level explicit-timeout block (tree 02 leaf 04).
+	health.TimeoutStreak = 0
+	health.TimeoutBlocks = 0
+	health.TimeoutBlockUntil = time.Time{}
 
-	now := time.Now()
+	now := r.clock()
 	for key, blockedUntil := range health.entryBlocks {
 		if now.After(blockedUntil) {
 			delete(health.entryBlocks, key)
@@ -760,6 +924,7 @@ func (r *Resolver) RecordAliasSuccess(aliasName string) {
 			delete(health.credentialBlock, key)
 		}
 	}
+	r.sweepExpiredEndpointBlocks()
 }
 
 // getOrCreateHealth returns the health tracking for an alias, creating it if needed.
@@ -771,6 +936,11 @@ func (r *Resolver) getOrCreateHealth(aliasName string) *AliasHealth {
 			ConsecutiveFails: 0,
 			entryBlocks:      make(map[string]time.Time),
 			credentialBlock:  make(map[string]time.Time),
+		}
+		// Alias-level explicit-timeout blocks arm ONLY when the alias
+		// config declared timeout: (D10 opt-in rule, leaf Task 3).
+		if alias := r.aliases[aliasName]; alias != nil {
+			health.TimeoutArmed = alias.timeoutArmed
 		}
 		r.health[aliasName] = health
 	}
@@ -1080,6 +1250,47 @@ func (r *Resolver) isQuotaBlocked(health *AliasHealth, m *ModelConfig) bool {
 		return true
 	}
 	return false
+}
+
+// isEndpointBlocked reports whether a model is excluded by an endpoint-level
+// timeout cooldown (Resolver-wide endpointBlocks map, keyed by
+// EndpointKey) or by an armed alias-level explicit-timeout block (tree 02
+// leaf 04, DECISIONS.md D10). Blocks are consulted LAZILY: an expired entry
+// simply no longer matches (and is swept by the next RecordAliasSuccess,
+// mirroring the quota-block clearing pattern — there is no second clearing
+// mechanism). Callers must hold Resolver.mu.
+func (r *Resolver) isEndpointBlocked(health *AliasHealth, m *ModelConfig) bool {
+	if m == nil {
+		return false
+	}
+	now := r.clock()
+	if health != nil && health.TimeoutArmed && now.Before(health.TimeoutBlockUntil) {
+		// The alias-level explicit-timeout block covers every member.
+		return true
+	}
+	blockedUntil, ok := r.endpointBlocks[EndpointKey(m)]
+	return ok && now.Before(blockedUntil)
+}
+
+// sweepExpiredEndpointBlocks lazily deletes EXPIRED endpoint-block entries
+// to bound map growth, mirroring RecordAliasSuccess's quota-block sweep.
+// Callers must hold Resolver.mu.
+func (r *Resolver) sweepExpiredEndpointBlocks() {
+	now := r.clock()
+	for key, blockedUntil := range r.endpointBlocks {
+		if now.After(blockedUntil) {
+			delete(r.endpointBlocks, key)
+		}
+	}
+}
+
+// clock returns the injected time source (SHARED-CONVENTIONS §5); nil
+// field means the wall clock.
+func (r *Resolver) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }
 
 // BlockQuotaEntry records a quota block for a provider/model pair.
