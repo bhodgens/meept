@@ -1101,15 +1101,36 @@ func (d *Dispatcher) buildMemoryContext(ctx context.Context, input, sessionID st
 }
 
 // extractMemoryRefs extracts memory IDs from search results.
+//
+// Results are pre-sorted by relevance (descending). The absolute 0.3 gate
+// guards against noise injection, but normalized BM25 scores are
+// query-dependent: short queries against long memories routinely score the
+// TRUE best match at 0.15–0.25, and dropping it means the single most
+// relevant memory never reaches the conversation (observed: stored codeword
+// scored 0.203 as the top hit and was silently discarded). Policy: keep the
+// 0.3 bar for the tail, but always inject the top-ranked result when it
+// clears a low sanity floor (score > 0.1 means FTS actually matched).
 func (d *Dispatcher) extractMemoryRefs(results []memory.MemoryResult) []string {
 	refs := make([]string, 0, len(results))
-	for _, r := range results {
-		if r.RelevanceScore > 0.3 { // Only include reasonably relevant memories
+	for i, r := range results {
+		score := r.RelevanceScore
+		if score > memoryInjectionThreshold ||
+			(i == 0 && score > memoryTopResultFloor) {
 			refs = append(refs, r.Memory.ID)
 		}
 	}
 	return refs
 }
+
+const (
+	// memoryInjectionThreshold is the absolute relevance bar for injecting
+	// any memory into a new conversation.
+	memoryInjectionThreshold = 0.3
+	// memoryTopResultFloor is the reduced bar for the single top-ranked
+	// result — the best match for the query is injection-worthy even when
+	// normalized BM25 lands low (see extractMemoryRefs).
+	memoryTopResultFloor = 0.1
+)
 
 // routeToPlan creates a plan via the PlanManager and returns a DispatchResult
 // with the created plan. This is used for plan-eligible requests that should

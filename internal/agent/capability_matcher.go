@@ -308,15 +308,33 @@ func (m *CapabilityMatcher) findAgentForSkill(skillName string) string {
 
 // getDefaultIntentType returns the default intent type for an agent.
 func (m *CapabilityMatcher) getDefaultIntentType(agentID string) string {
-	if m.capMap == nil {
-		return agentID
+	if m.capMap != nil {
+		caps := m.capMap.Get(agentID)
+		if caps != nil && len(caps.IntentTypes) > 0 {
+			return caps.IntentTypes[0]
+		}
 	}
+	// No capability metadata: derive the intent type from the agent's
+	// natural mapping instead of returning the agent id verbatim. Agent ids
+	// are not intent types — leaking them into Intent.Type corrupted the
+	// dispatch log (intent_type=coder/committer/video-gen) and any
+	// downstream intent-type metrics.
+	for _, it := range intentTypesForDefaultAgent {
+		if it.DefaultAgent() == agentID {
+			return string(it)
+		}
+	}
+	return string(IntentChat)
+}
 
-	caps := m.capMap.Get(agentID)
-	if caps != nil && len(caps.IntentTypes) > 0 {
-		return caps.IntentTypes[0]
-	}
-	return agentID
+// intentTypesForDefaultAgent backs getDefaultIntentType's inverse mapping
+// from agent id to that agent's natural intent type.
+var intentTypesForDefaultAgent = []IntentType{
+	IntentCode, IntentReview, IntentDebug, IntentPlan,
+	IntentAnalyze, IntentSearch, IntentExplore, IntentResearch,
+	IntentGit, IntentSchedule, IntentWrite, IntentArchitect,
+	IntentSkeptic, IntentLibrarian, IntentImageGen, IntentVideoGen,
+	IntentImageID, IntentChat, IntentReport, IntentRecall,
 }
 
 // calculateKeywordConfidence converts a keyword score to confidence [0.0, 1.0].
