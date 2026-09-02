@@ -42,6 +42,17 @@ requires a new dated decision row here BEFORE the consuming leaf runs.
 
 ## Self-Verification Checklist (forest-level)
 
-- [ ] Every tree's master references the decision IDs it implements
-- [ ] No leaf contradicts a ratified decision (spot-check during review)
-- [ ] Q1-Q4 outcomes recorded here after each tree completes
+- [x] Every tree's master references the decision IDs it implements
+- [x] No leaf contradicts a ratified decision (spot-check during review)
+- [x] Q1-Q4 outcomes recorded here after each tree completes
+
+## Q1-Q4 Outcomes (forest close-out, 2026-09-02)
+
+| ID | Outcome |
+|----|---------|
+| Q1 | Default became law: `queue.interactive_window` = 5m (schema.go:1960), string-encoded duration per the JSON5 loader. |
+| Q2 | Default became law: fixCount resets on escalation; the escalated model receives a full max_fix_loops budget (verification_hook.go:245, comment cites Q2). |
+| Q3 | Split as planned: tree 01 = verification-hook only; tree 03 = goal-loop/queue coverage (leaf 03, commit 4739c151). No deviation. |
+| Q4 | Default became law with one extension: keyword list frozen in failure_policy.go:142-143 scanning header NAMES + body text, plus structured body codes (parseQuotaBody reuse). Retry-After alone is explicitly NOT a quota signal (D7 intent preserved). |
+
+Also recorded: D12-a (LM Studio ships discovery-only — no static catalog rows).
