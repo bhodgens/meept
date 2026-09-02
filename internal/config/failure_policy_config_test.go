@@ -41,6 +41,9 @@ func TestDefaultConfig_FailurePolicy(t *testing.T) {
 	if fp.Pacing.MaxInterval != DefaultPacingMaxInterval {
 		t.Errorf("pacing.max_interval = %v, want %v", fp.Pacing.MaxInterval, DefaultPacingMaxInterval)
 	}
+	if fp.Pacing.Target429PerHour != DefaultPacingTarget429Hour {
+		t.Errorf("pacing.target_429_per_hour = %d, want %d", fp.Pacing.Target429PerHour, DefaultPacingTarget429Hour)
+	}
 }
 
 // TestNormalizeFailurePolicyDefaults checks the load-boundary clamps:
@@ -111,6 +114,7 @@ func TestFailurePolicyConfigTags(t *testing.T) {
 		{name: "poll_floor", jsonTag: "poll_floor", tomlTag: "poll_floor"},
 		{name: "short_retries", jsonTag: "short_retries", tomlTag: "short_retries"},
 		{name: "pacing", jsonTag: "pacing", tomlTag: "pacing"},
+		{name: "pacing.target_429_per_hour", jsonTag: "target_429_per_hour", tomlTag: "target_429_per_hour"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -124,7 +128,17 @@ func TestFailurePolicyConfigTags(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Fatalf("field with json tag %q not found on FailurePolicyConfig", tt.jsonTag)
+				// Nested sub-block keys (pacing.*) live on PacingConfig.
+				st = reflect.TypeOf(PacingConfig{})
+				for i := 0; i < st.NumField(); i++ {
+					if strings.Split(st.Field(i).Tag.Get("json"), ",")[0] == tt.jsonTag {
+						field, found = st.Field(i), true
+						break
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("field with json tag %q not found on FailurePolicyConfig/PacingConfig", tt.jsonTag)
 			}
 			if got := field.Tag.Get("toml"); got != tt.tomlTag {
 				t.Errorf("toml tag = %q, want %q", got, tt.tomlTag)
@@ -150,6 +164,7 @@ func TestFailurePolicyConfigJSON5RoundTrip(t *testing.T) {
       "short_retries": 5,
       "pacing": {
         "enabled": true,
+        "target_429_per_hour": 3,
         "min_interval": "2s",
         "max_interval": "45s",
       },
@@ -181,6 +196,9 @@ func TestFailurePolicyConfigJSON5RoundTrip(t *testing.T) {
 	}
 	if !fp.Pacing.Enabled {
 		t.Error("pacing.enabled = false, want true")
+	}
+	if fp.Pacing.Target429PerHour != 3 {
+		t.Errorf("pacing.target_429_per_hour = %d, want 3", fp.Pacing.Target429PerHour)
 	}
 	if fp.Pacing.MinInterval != 2*time.Second {
 		t.Errorf("pacing.min_interval = %v, want 2s", fp.Pacing.MinInterval)
