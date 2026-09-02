@@ -150,6 +150,30 @@ Use type: "task" for:
 - [ ] Would I want Future Me to know this without re-deriving it?
 
 If yes to most: store it.
+
+## When to Search (Recall) Memories
+
+Search memory BEFORE asking the user to repeat themselves. Trigger a
+memory_search whenever:
+
+- The user references something said earlier ("the codeword I gave you",
+  "that approach we discussed", "my usual settings")
+- A name, acronym, or term appears that you don't recognize but sounds
+  established ("deploy it to the hub", "use the standard wrapper")
+- You're about to ask the user for a fact they may have already provided
+- You're starting work in a project/domain you've touched before
+- The user asks directly ("what did I say about X?", "do you remember?")
+
+How to search effectively:
+
+1. Extract the distinctive keywords, not the whole sentence ("codeword",
+   not "what is the codeword the user told me to remember")
+2. If the first search returns nothing useful, retry once with different
+   keywords (broader term, synonym) — then stop
+3. Found it: use it and cite that it came from memory
+4. Not found: write the fallback file/answer stating you searched memory
+   and couldn't find it, then ask the user for the fact. NEVER invent a
+   plausible-sounding value for something you can't recall.
 `
 
 // ToolUsageGuidelines provides instructions for effective tool usage.
