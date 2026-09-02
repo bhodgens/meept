@@ -105,12 +105,13 @@ GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 # -p (GOMAXPROCS), macOS ephemeral ports (net.inet.ip.portrange, 49152-65535)
 # run out mid-run and unrelated packages fail with
 #   dial tcp 127.0.0.1:NNNNN: connect: can't assign requested address
-# Bound -p so concurrent test binaries stay below the burst budget. Override
+# Dose-response: -p 4 cut 17 failures to 1 (one late-run burst in the
+# heaviest package); -p 2 ran the sweep clean twice. Keep -p 2. Override
 # with `make test TEST_PACKAGE_PARALLELISM=N` (e.g. on Linux/CI, or after
 # widening the port range via
 #   sudo sysctl -w net.inet.ip.portrange.first=10240
 # which is a dev-machine workaround, not a repo fix).
-TEST_PACKAGE_PARALLELISM ?= 4
+TEST_PACKAGE_PARALLELISM ?= 2
 GO_TEST_PACKAGE_FLAGS := -p $(TEST_PACKAGE_PARALLELISM)
 
 # Flutter GUI directory and platform (needed by multiple targets)

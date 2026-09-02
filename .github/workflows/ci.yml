@@ -124,11 +124,11 @@ jobs:
       # (~90s and ~40s per iteration respectively) but historically
       # most race bugs cluster here, so the cost is justified.
       - name: go test -race (high-risk packages)
-        # -p 4 matches the canonical bounded invocation (see Makefile
+        # -p 2 matches the canonical bounded invocation (see Makefile
         # TEST_PACKAGE_PARALLELISM): macOS full sweeps exhaust ephemeral
         # ports at go's default -p; bounding here keeps CI identical.
         run: |
-          go test -race -count=1 -p 4 \
+          go test -race -count=1 -p 2 \
             ./internal/agent/... \
             ./internal/llm/... \
             ./internal/memory/... \
@@ -162,9 +162,9 @@ jobs:
         run: go mod download
 
       - name: go test (short)
-        # -p 4 = canonical package-parallelism bound (Makefile
+        # -p 2 = canonical package-parallelism bound (Makefile
         # TEST_PACKAGE_PARALLELISM); see AGENTS.md Test section.
-        run: go test -short -count=1 -p 4 ./...
+        run: go test -short -count=1 -p 2 ./...
 
   # ─── Setter nil-guard regression check ────────────────────────────────
   # Locks in the CLAUDE.md rule that every Set* method accepting a pointer
