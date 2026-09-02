@@ -67,6 +67,10 @@ func TestQuotaClient_ClassifiesQuotaErrors(t *testing.T) {
 				MaxTokens:  16,
 			}
 			c := NewClient(cfg, WithLogger(discardLogger()))
+			// Fast policy: the rate-limit case still retries exactly
+			// defaultShortRetries times (the assertion), but the in-loop
+			// throttle waits are ~1ms instead of the 30s default.
+			c.SetFailurePolicyConfig(fastFailurePolicyCfg)
 
 			_, err := c.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}})
 			if err == nil {
@@ -195,6 +199,10 @@ func TestQuotaClient_DeltaCallbackQuotaErrorNoShortRetry(t *testing.T) {
 				MaxTokens:  16,
 			}
 			c := NewClient(cfg, WithLogger(discardLogger()))
+			// Fast policy: the rate-limit case still retries exactly
+			// defaultShortRetries times (the assertion), but the in-loop
+			// throttle waits are ~1ms instead of the 30s default.
+			c.SetFailurePolicyConfig(fastFailurePolicyCfg)
 
 			_, err := c.ChatWithDeltaCallback(context.Background(),
 				[]ChatMessage{{Role: RoleUser, Content: "hi"}},

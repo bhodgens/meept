@@ -88,7 +88,7 @@ func TestIntegration_CompactorTriggersAtTriggerRatio(t *testing.T) {
 		CompactorConfig{
 			KeepRecentTokens: 600,
 			TrackFileOps:     true,
-			TimeoutSeconds:   5,
+			TimeoutSeconds:   1,
 		},
 		compactorMock,
 		&HeuristicTokenizer{},
@@ -139,7 +139,7 @@ func TestIntegration_CompactorBelowTriggerRatio(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -186,7 +186,7 @@ func TestIntegration_CompactorFallbackOnFailure(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -242,7 +242,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -294,7 +294,7 @@ func TestIntegration_CompactorWithoutProactiveCompression(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -333,7 +333,7 @@ func TestIntegration_CompressorDelegatesToCompactor(t *testing.T) {
 	compactorCfg := CompactorConfig{
 		KeepRecentTokens: 600,
 		TrackFileOps:     true,
-		TimeoutSeconds:   5,
+		TimeoutSeconds:   1,
 	}
 	compactor := NewContextCompactor(compactorCfg, mock, &HeuristicTokenizer{}, nil)
 
@@ -394,7 +394,7 @@ func TestIntegration_FirewallSummarizeWithLevelDelegatesToCompactor(t *testing.T
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -445,7 +445,7 @@ func TestIntegration_CompactionTracksFileOps(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -494,7 +494,7 @@ func TestIntegration_CompactionStatsInSnapshot(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -559,7 +559,7 @@ none`},
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		mock1,
 		&HeuristicTokenizer{},
 		nil,
@@ -651,7 +651,7 @@ func TestIntegration_CompactionContextCancellation(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 1},
 		ctxAwareMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -749,7 +749,7 @@ Investigated three files, found root cause
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -832,7 +832,7 @@ none`
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -923,7 +923,7 @@ func TestIntegration_CompactionStatsConcurrentSafety(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -975,7 +975,7 @@ func TestIntegration_CompactionNotNeededForSmallContext(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -1021,7 +1021,7 @@ func TestIntegration_ZeroTriggerRatioCompactorOnlyViaCompressor(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		nil,
@@ -1074,7 +1074,7 @@ func TestIntegration_CompactionLoggingObservability(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, logger, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TrackFileOps: true, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		logger,
@@ -1135,7 +1135,7 @@ func TestIntegration_CompactionLoggingOnFailure(t *testing.T) {
 
 	f := NewContextFirewall(inner, model, cfg, nil, logger, &HeuristicTokenizer{})
 	compactor := NewContextCompactor(
-		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 5},
+		CompactorConfig{KeepRecentTokens: 600, TimeoutSeconds: 1},
 		compactorMock,
 		&HeuristicTokenizer{},
 		logger,

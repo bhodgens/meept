@@ -214,6 +214,10 @@ func TestClientChatRetry(t *testing.T) {
 		BaseURL: server.URL,
 		ModelID: "test-model",
 	})
+	// Fast policy: the test still exercises 2 failed 503 attempts before
+	// success (3 server hits), but the in-loop backoff is ~1ms instead of
+	// the production 30s/60s default steps (which cost 90 real seconds).
+	client.SetFailurePolicyConfig(fastFailurePolicyCfg)
 
 	resp, err := client.Chat(context.Background(), []ChatMessage{
 		{Role: RoleUser, Content: "Hello"},

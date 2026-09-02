@@ -278,6 +278,11 @@ func TestProviderManager_Failover(t *testing.T) {
 	}
 
 	pm := NewProviderManager(cfg)
+	// Fast policy: the primary still exhausts its short retry budget before
+	// failover (that is the assertion), but the in-loop 5xx steps are ~1ms
+	// instead of the production 30s default. FailoverTimeout no longer
+	// fires first, so the test runs in milliseconds.
+	pm.SetFailurePolicyConfig(fastFailurePolicyCfg)
 	ctx := context.Background()
 
 	// Make a request - should failover to backup
@@ -337,6 +342,10 @@ func TestProviderManager_AllProvidersFail(t *testing.T) {
 	}
 
 	pm := NewProviderManager(cfg)
+	// Fast policy: both providers still exhaust their short 5xx budgets
+	// (that is the assertion: an error surfaces), but the in-loop steps are
+	// ~1ms instead of the production 30s default.
+	pm.SetFailurePolicyConfig(fastFailurePolicyCfg)
 	ctx := context.Background()
 
 	_, err := pm.Chat(ctx, []ChatMessage{
@@ -443,10 +452,15 @@ func TestProviderManager_GetProviderStatus(t *testing.T) {
 }
 
 func TestProviderManager_ContextCancellation(t *testing.T) {
-	// Create a slow server
+	// The point is cancellation DURING an in-flight request, not 5 real
+	// seconds of wall clock: a small server delay plus a shorter context
+	// deadline guarantees the ctx wins the race without burning time.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(5 * time.Second)
-		w.WriteHeader(http.StatusOK)
+		select {
+		case <-time.After(500 * time.Millisecond):
+			w.WriteHeader(http.StatusOK)
+		case <-r.Context().Done():
+		}
 	}))
 	defer server.Close()
 
@@ -459,7 +473,7 @@ func TestProviderManager_ContextCancellation(t *testing.T) {
 
 	pm := NewProviderManager(cfg)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	_, err := pm.Chat(ctx, []ChatMessage{

@@ -81,6 +81,12 @@ type ProviderManagerConfig struct {
 	// device-code authentication. If nil, OAuth providers will fail at chat
 	// time with a clear error.
 	TokenResolver TokenResolver
+
+	// failurePolicy is the internal seam for SetFailurePolicyConfig
+	// (unexported so production constructors cannot set it inline; tests
+	// call pm.SetFailurePolicyConfig after NewProviderManager). Nil =
+	// client-level defaults.
+	failurePolicy *FailurePolicyConfig
 }
 
 // ProviderManager manages multiple LLM providers with failover and health tracking.
@@ -103,6 +109,11 @@ type ProviderManager struct {
 	// quotaMaxWait caps how far into the future a quota block is persisted.
 	// Zero means DefaultQuotaMaxWait.
 	quotaMaxWait time.Duration
+	// failurePolicy is the failure-policy config propagated onto
+	// OpenAI-compatible Client chatters (SetFailurePolicyConfig). Nil =
+	// clients keep their package defaults (30s throttle / 1h floor / 24h
+	// horizon). Guarded by mu.
+	failurePolicy *FailurePolicyConfig
 
 	// Circuit breaker state
 	lastHealthCheck time.Time
@@ -121,6 +132,27 @@ func (pm *ProviderManager) SetQuotaMaxWait(d time.Duration) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	pm.quotaMaxWait = d
+}
+
+// SetFailurePolicyConfig propagates a failure-policy config onto every
+// OpenAI-compatible Client chatter this manager owns (existing and future),
+// mirroring Client.SetFailurePolicyConfig. Tests inject tiny throttle
+// durations so in-loop retry waits are near-zero; production callers leave
+// it unset and keep the client-level defaults (30s/1h/24h). Anthropic and
+// Codex chatters are unaffected (their own policy seams are untouched).
+// Nil-receiver and nil-config safe; a nil cfg restores the default.
+func (pm *ProviderManager) SetFailurePolicyConfig(cfg *FailurePolicyConfig) {
+	if pm == nil {
+		return
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.failurePolicy = cfg
+	for _, entry := range pm.providers {
+		if c, ok := entry.Chatter.(*Client); ok {
+			c.SetFailurePolicyConfig(cfg)
+		}
+	}
 }
 
 // effectiveQuotaMaxWait returns the configured block-horizon cap, falling
@@ -249,6 +281,11 @@ func NewProviderManager(cfg ProviderManagerConfig) *ProviderManager {
 				ProviderID: providerCfg.ProviderID,
 				Status:     ProviderStatusHealthy,
 			},
+		}
+		if cfg.failurePolicy != nil {
+			if c, ok := entry.Chatter.(*Client); ok {
+				c.SetFailurePolicyConfig(cfg.failurePolicy)
+			}
 		}
 		pm.providers = append(pm.providers, entry)
 	}
@@ -884,6 +921,11 @@ func (pm *ProviderManager) AddProvider(cfg *ModelConfig, priority int) {
 			ProviderID: cfg.ProviderID,
 			Status:     ProviderStatusHealthy,
 		},
+	}
+	if pm.failurePolicy != nil {
+		if c, ok := entry.Chatter.(*Client); ok {
+			c.SetFailurePolicyConfig(pm.failurePolicy)
+		}
 	}
 
 	pm.providers = append(pm.providers, entry)

@@ -45,6 +45,10 @@ func TestProviderManager_RateLimitRotatesImmediately(t *testing.T) {
 	}
 
 	pm := NewProviderManager(cfg)
+	// Fast policy: the primary's 429 still rotates immediately (that is the
+	// assertion), but the client's in-loop throttle steps don't sleep for
+	// the production 30s default first.
+	pm.SetFailurePolicyConfig(fastFailurePolicyCfg)
 	ctx := context.Background()
 
 	resp, err := pm.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: "hi"}})
@@ -159,6 +163,10 @@ func TestProviderManager_ClientErrorDoesNotRotate(t *testing.T) {
 	}
 
 	pm := NewProviderManager(cfg)
+	// Fast policy: the primary's 503 still exhausts its short budget and
+	// rotates (that is the assertion), but the in-loop waits are ~1ms
+	// instead of the production 30s default steps.
+	pm.SetFailurePolicyConfig(fastFailurePolicyCfg)
 	ctx := context.Background()
 
 	_, err := pm.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: "hi"}})

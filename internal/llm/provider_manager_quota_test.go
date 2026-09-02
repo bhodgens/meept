@@ -53,6 +53,11 @@ func TestProviderManagerQuota_BlockPersistsAcrossChats(t *testing.T) {
 		Logger: nil,
 	})
 	pm.SetQuotaMaxWait(time.Hour)
+	// Tiny throttle steps so any transient 429/503 retry inside the
+	// client's short loop does not sleep for the production 30s default.
+	// Verdicts are unchanged (quota exits immediately; throttle budget
+	// still exhausts to the same error).
+	pm.SetFailurePolicyConfig(fastFailurePolicyCfg)
 	ctx := context.Background()
 
 	// First call: quota provider 429s (after its internal retries), manager
@@ -295,6 +300,7 @@ func TestProviderManagerQuota_AllProvidersQuotaBlocked(t *testing.T) {
 		},
 	})
 	pm.SetQuotaMaxWait(time.Hour)
+	pm.SetFailurePolicyConfig(fastFailurePolicyCfg)
 
 	ctx := context.Background()
 	if _, err := pm.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: "x"}}); err == nil {
