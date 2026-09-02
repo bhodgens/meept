@@ -170,7 +170,10 @@ func TestSpecialistShadow_ToolTurnCapturedViaRegistryLoop(t *testing.T) {
 		"terminating tool must end the turn after exactly one LLM call")
 
 	// The loop captures tool turns on a tracked goroutine; poll for the
-	// record rather than racing RunOnce's return.
+	// record rather than racing RunOnce's return. The window is generous
+	// (10s) because under full-sweep parallelism (other packages' test
+	// binaries competing for CPU) goroutine scheduling latency has been
+	// observed to exceed the original 3s window (forest F3 follow-up).
 	require.Eventually(t, func() bool {
 		stats, err := mgr.GetStats(context.Background())
 		if err != nil {
@@ -178,7 +181,7 @@ func TestSpecialistShadow_ToolTurnCapturedViaRegistryLoop(t *testing.T) {
 		}
 		return stats.TotalRecords == 1 &&
 			stats.RecordsByTaskType[string(shadow.TaskTypeToolUse)] == 1
-	}, 3*time.Second, 10*time.Millisecond,
+	}, 10*time.Second, 10*time.Millisecond,
 		"specialist loop tool turn must be captured as a tool_use shadow record")
 }
 

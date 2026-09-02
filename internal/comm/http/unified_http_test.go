@@ -9,6 +9,7 @@ import (
 	gohttp "net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,13 +22,40 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-// insecureHTTPClient returns an *http.Client that skips TLS verification.
+// insecureHTTPClientOnce + sharedTestHTTPClient: one client for the whole
+// package. Every test previously built its OWN client with a fresh Transport,
+// so 27+ tests each left a connection pool holding idle keep-alive conns (up
+// to 90s) — multiplied across the sweep this contributed to ephemeral-port
+// exhaustion (forest F3 close-out). The shared client bounds pooling:
+// MaxIdleConnsPerHost=1 and a 1s IdleConnTimeout drain conns immediately
+// after each test instead of parking them in TIME_WAIT.
+var (
+	insecureHTTPClientOnce sync.Once
+	insecureHTTPClientRef  *gohttp.Client
+)
+
 func insecureHTTPClient() *gohttp.Client {
-	return &gohttp.Client{
-		Transport: &gohttp.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test-only
-		},
-		Timeout: 30 * time.Second,
+	insecureHTTPClientOnce.Do(func() {
+		insecureHTTPClientRef = &gohttp.Client{
+			Transport: &gohttp.Transport{
+				TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test-only
+				MaxIdleConns:        2,
+				MaxIdleConnsPerHost: 1,
+				IdleConnTimeout:     1 * time.Second,
+			},
+			Timeout: 30 * time.Second,
+		}
+	})
+	return insecureHTTPClientRef
+}
+
+// drainTestHTTPClients closes pooled idle connections so finished tests do
+// not hold client-side ephemeral ports in TIME_WAIT while later tests (and
+// packages, under -p parallelism) need them. Call via t.Cleanup in tests
+// that dial the test server.
+func drainTestHTTPClients() {
+	if insecureHTTPClientRef != nil {
+		insecureHTTPClientRef.CloseIdleConnections()
 	}
 }
 
@@ -73,6 +101,10 @@ func startTestServer(t *testing.T, opts ...http.ServerOption) (baseURL string, c
 		host = "127.0.0.1"
 	}
 	baseURL = "https://" + host + ":" + port
+	// Drain this test's pooled client connections on completion: without
+	// this, each test's keep-alive conns park in TIME_WAIT for up to 90s
+	// while later tests (and packages, under -p parallelism) need ports.
+	t.Cleanup(drainTestHTTPClients)
 	return baseURL, cancel
 }
 
