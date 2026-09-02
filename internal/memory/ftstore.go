@@ -326,8 +326,13 @@ func (s *SQLiteFTSStore) addColumnIfMissing(ctx context.Context, tableName, colu
 
 	for rows.Next() {
 		var cid int
-		var name, dtype, dflt string
+		var name, dtype string
+		// dflt_value is NULL for columns without a DEFAULT clause — scan
+		// into *string or the whole migration errors out on the first such
+		// column and the missing column is never added (this is why
+		// search_text never appeared on legacy task/episodic tables).
 		var notnull, pk int
+		var dflt *string
 		if err := rows.Scan(&cid, &name, &dtype, &notnull, &dflt, &pk); err != nil {
 			return err
 		}
