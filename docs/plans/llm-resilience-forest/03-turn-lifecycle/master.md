@@ -165,10 +165,15 @@ resume tests never sleep). Bus payloads: two-value map assertions.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-generalize-parker.md | COMPLETE | 0 | 285f67fe (parallel session); legacy quota tests untouched+green; ParkedTurnRecord naming per §4.5; persistence memory-only (finding stated) |
-| 02-throttle-parking.md | COMPLETE | 0 | 1d94e2da; both pass-through sites park-or-give-up; D8 ThrottleGiveUpError; payload routing IMPLEMENTED (deviation from "deferred" sketch); attempt growth via context; full agent+llm suites green |
-| 03-goalloop-queue-coverage.md | COMPLETE | 0 | 4739c151; EpisodeParker over shared TurnParker; queue requeue via next_retry_at WITHOUT RetryCount consumption; give-up → legacy paths byte-identical; deviations documented in commit |
-| 04-states-visibility-docs.md | PENDING | 0 | |
+| 01-generalize-parker.md | COMPLETE | 1 | 285f67fe; dispatched by THIS orchestrator (group A); legacy quota tests untouched+green (8 before = 8 after); ParkedTurnRecord naming per §4.5; persistence memory-only (finding stated); deviations: payload superset (source_client/parked_at omitempty), wrapper preserves over-MaxWait-false, panic recovery in drainDue |
+| 02-throttle-parking.md | COMPLETE | 0 | 1d94e2da (parallel session; my group-B implementer stood down on collision, then co-verified); both pass-through sites park-or-give-up; D8 ThrottleGiveUpError; safeTransition→StateQuotaWait "throttle_wait" verified through Transition table; quota tests untouched+green; attempt growth via context |
+| 03-goalloop-queue-coverage.md | COMPLETE | 0 | 4739c151 (parallel session; my group-B implementer verified it); coverage matrix both sites × both classes tested; queue requeue via next_retry_at WITHOUT RetryCount consumption; interactive column explicitly preserved in requeue UPDATE; give-up → legacy paths byte-identical |
+| 04-states-visibility-docs.md | COMPLETE | 0 | 3eb6a3e3; dispatched by THIS orchestrator (parallel session's leaf-04 dispatch never materialized); WaitInfo + ParkTurnEvent on existing agent.quota_wait topic; WS classification test-pinned agent_progress; TUI≡GUI labels byte-identical; flutter test 378/378; make graphs regenerated; AGENTS.md no-turn-hangs invariant same-commit |
+
+Tree 03 COMPLETE — 4/4 leaves. Shared-checkout note: a parallel orchestrator
+session on this tree committed leaves 02/03 mid-run; verified independently
+against the leaf contracts by this orchestrator before acceptance. Tracking
+reconciled by 04919c01 (rows 01-03) and the leaf-04 row above.
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
