@@ -104,12 +104,9 @@ func NewTraceStoreWriter(persist func(payload TraceRecordPayload) (string, error
 			CreatedAt:      rec.CreatedAt,
 		}
 		for i, s := range rec.Steps {
-			payload.Steps[i] = TraceStepPayload{
-				Action:  s.Action,
-				Input:   s.Input,
-				Output:  s.Output,
-				Success: s.Success,
-			}
+			// traceStepMirror and TraceStepPayload share identical field
+			// sets, so a direct conversion is the mirror→payload mapping.
+			payload.Steps[i] = TraceStepPayload(s)
 		}
 		return persist(payload)
 	})
