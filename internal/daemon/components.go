@@ -2417,6 +2417,26 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// the handler (ChatHandler.Start).
 		c.ChatHandler.SetQuotaResumeConfig(cfg.LLM.QuotaRetry.MaxWait)
 
+		// Throttle parking (llm-resilience-forest tree 03 leaf 02, D4/D8):
+		// the loop parks ThrottleBackoffError turns on a TurnParker whose
+		// resume callback routes by class (throttle → loop resume; other
+		// classes → the handler's fallback). MaxWait mirrors the quota
+		// deferral cap; the failure-policy schedule comes from
+		// llm.failure_policy (installed below alongside the retry knobs).
+		throttleParker := agent.NewTurnParker(logger, nil, cfg.LLM.QuotaRetry.MaxWait)
+		throttleParker.SetPollInterval(cfg.LLM.QuotaRetry.DeferCheckInterval)
+		c.ChatHandler.SetThrottleParker(throttleParker)
+		agent.SetFailurePolicyDefaults(llm.FailurePolicyConfig{
+			Horizon:                cfg.LLM.FailurePolicy.Horizon,
+			BaseThrottle:           cfg.LLM.FailurePolicy.BaseThrottle,
+			BaseQuota402Extra:      cfg.LLM.FailurePolicy.BaseQuota402Extra,
+			PollFloor:              cfg.LLM.FailurePolicy.PollFloor,
+			ShortRetries:           cfg.LLM.FailurePolicy.ShortRetries,
+			PacingEnabled:          cfg.LLM.FailurePolicy.Pacing.Enabled,
+			PacingTarget429PerHour: cfg.LLM.FailurePolicy.Pacing.Target429PerHour,
+			PacingMinInterval:      cfg.LLM.FailurePolicy.Pacing.MinInterval,
+			PacingMaxInterval:      cfg.LLM.FailurePolicy.Pacing.MaxInterval,
+		})
 		logger.Info("ChatHandler initialized with dispatcher")
 
 		// Subscribe to dispatcher.stats requests. This is the bus surface for

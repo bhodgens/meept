@@ -134,6 +134,19 @@ func (p *TurnParker) SetPollInterval(d time.Duration) {
 	p.pollInterval = d
 }
 
+// SetResumeFunc swaps the resume callback. Only intended for wiring setups
+// that build a parker before the resume router exists (tree 03 leaf 02: the
+// loop-installed class dispatcher replaces the constructor callback). Safe
+// before Start; after Start it takes effect from the next drainDue pass.
+func (p *TurnParker) SetResumeFunc(resume func(context.Context, ParkedTurnRecord)) {
+	if p == nil || resume == nil {
+		return
+	}
+	p.mu.Lock()
+	p.resumeFunc = resume
+	p.mu.Unlock()
+}
+
 // Start begins the background polling loop. Safe to call once; subsequent
 // calls are no-ops.
 func (p *TurnParker) Start(ctx context.Context) {

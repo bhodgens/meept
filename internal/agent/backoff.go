@@ -282,6 +282,36 @@ func SetPerOperationBackoffOverride(key string, cfg BackoffConfig) {
 	perOperationOverrides.Store(key, cfg)
 }
 
+// failurePolicyOverride holds a process-wide llm.FailurePolicyConfig for
+// tree-03 parking (leaf 02): the daemon installs the llm.failure_policy
+// section via SetFailurePolicyDefaults and every loop composes
+// llm.DefaultBackoffPlan from it, mirroring the defaultBackoffOverride
+// regime above (atomic pointer, test reset helper, safe for concurrent use).
+// nil means "use llm defaults" (llm.FailurePolicyConfig{} — the zero-value
+// schedule with zero durations; the daemon wiring always sets real values).
+var failurePolicyOverride atomic.Pointer[llm.FailurePolicyConfig]
+
+// SetFailurePolicyDefaults installs the process-wide llm.failure_policy
+// values used to compose BackoffPlans for throttle parking (tree 03 leaf 02).
+// Safe for concurrent use; re-installing replaces the previous values.
+func SetFailurePolicyDefaults(cfg llm.FailurePolicyConfig) {
+	failurePolicyOverride.Store(&cfg)
+}
+
+// clearFailurePolicyDefaults is a test-only helper to reset the override.
+func clearFailurePolicyDefaults() {
+	failurePolicyOverride.Store(nil)
+}
+
+// currentFailurePolicyDefaults returns the installed failure policy, or the
+// zero-value llm.FailurePolicyConfig when none was installed.
+func currentFailurePolicyDefaults() llm.FailurePolicyConfig {
+	if p := failurePolicyOverride.Load(); p != nil {
+		return *p
+	}
+	return llm.FailurePolicyConfig{}
+}
+
 // getPerOperationOverride returns the override for a key, or nil if unset.
 func getPerOperationOverride(key string) *BackoffConfig {
 	if v, ok := perOperationOverrides.Load(key); ok {

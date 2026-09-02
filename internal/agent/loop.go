@@ -576,6 +576,23 @@ type AgentLoop struct {
 	// agent.quota_wait bus events. Nil (default) disables quota tracking.
 	quotaTracker *QuotaEpisodeTracker
 
+	// turnParker parks ThrottleBackoffError turns for later resume (tree 03
+	// leaf 02, D4/D8). The daemon wires the shared parker via SetTurnParker;
+	// nil (default) keeps the tree-02 pass-through (throttle error returned
+	// unchanged). Guarded by l.mu alongside the other wiring fields.
+	turnParker *TurnParker
+
+	// nowFunc injects the clock for parking schedule decisions (SetClock;
+	// test seam, nil = time.Now). Guarded by l.mu.
+	nowFunc func() time.Time
+
+	// throttleMu/throttleTurnCtx: the per-turn chat dispatch stash used to
+	// build the resume payload when a turn parks mid-throttle (loop_park.go,
+	// leaf 02 Task 3). Own mutex: written at turn entry/exit on the turn
+	// goroutine, read from the parker's resume goroutine.
+	throttleMu      sync.Mutex
+	throttleTurnCtx *throttleTurnContext
+
 	// Upload store for resolving image file references (vision pre-flight)
 	uploadStore llm.UploadStore
 
@@ -2105,6 +2122,13 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		return "", ErrNoLLMClient
 	}
 
+	// Throttle-park dispatch stash (tree 03 leaf 02): if the provider
+	// throttles mid-turn, parkThrottledTurn needs the ORIGINAL dispatch
+	// (message/parts/conversation) to build the resume payload. Set for the
+	// turn's duration; cleared on exit. Consumed only by the park branch.
+	l.setThrottleTurnContext(userMessage, parts, conversationID)
+	defer l.clearThrottleTurnContext()
+
 	// Trace: log loop identity at execution start so we can verify the
 	// correct session-scoped loop (with the right workingDir) is running.
 	l.logger.Debug("RunOnceWithParts: agent loop executing",
@@ -3418,6 +3442,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		response, err := l.chatWithFailoverRaw(ctx, messages, streamOnDelta, chatOpts...)
+		if err == nil && response == nil {
+			// Parked turn (tree 03 leaf 02): chatWithFailoverRaw parks a
+			// ThrottleBackoffError and returns (nil, nil) — the turn ends
+			// here with an empty reply and no error. The StateQuotaWait /
+			// "throttle_wait" transition already fired inside
+			// parkThrottledTurn; the TurnParker resumes the turn later.
+			return "", nil
+		}
 		if err != nil {
 			// Check for TTSR abort — retry with rule content injected.
 			// On mid-stream rule match, the LLM output violated a guardrail.
@@ -3441,6 +3473,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				)
 
 				response, err = l.chatWithFailover(ctx, messagesWithRule, chatOpts...)
+				if err == nil && response == nil {
+					// Parked during the TTSR retry (tree 03 leaf 02) —
+					// same parked semantics as the main call above.
+					return "", nil
+				}
 				if err != nil {
 					// Check if it's still a TTSR abort (rule triggered again)
 					// This can happen if the retry also violates. We allow one
@@ -3474,15 +3511,29 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					}
 				}
 			} else {
-				// D4/D8 (tree 02 leaf 03): a ThrottleBackoffError is
+				// D4/D8 (tree 03 leaf 02): a ThrottleBackoffError is
 				// provider load-shedding, not a dead model — the agent
 				// loop must NOT rotate, must NOT call RecordAliasFailure
-				// (alias health tracks model failure, not throttling),
-				// and returns it unchanged so the caller can park until
-				// RetryAt. Tree 03 (turn-lifecycle) replaces this branch
-				// body with parking; until then it is a clean pass-through.
+				// (alias health tracks model failure, not throttling).
+				// The turn PARKS on the BackoffPlan schedule via
+				// parkThrottledTurn: on success the turn ends with an
+				// empty reply and NO error (the caller sees a parked, not
+				// failed, turn; the StateQuotaWait/"throttle_wait"
+				// transition records the park). The D8 give-up error
+				// surfaces when the wait exceeds MaxWait. With no parker
+				// wired, the tree-02 pass-through is kept verbatim.
 				var throttleBackoffErr *llm.ThrottleBackoffError
 				if errors.As(err, &throttleBackoffErr) {
+					if parked, giveUp := l.parkThrottledTurn(ctx, throttleBackoffErr); parked || giveUp != nil {
+						if giveUp != nil {
+							return "", giveUp
+						}
+						// Parked: return an empty reply. The deferred
+						// state handling downstream treats nil err as a
+						// completed turn; the parked transition above
+						// already carries the throttle_wait reason.
+						return "", nil
+					}
 					l.logger.Warn("Provider throttled: returning park-capable error without rotation",
 						"provider", throttleBackoffErr.ProviderID,
 						"model", throttleBackoffErr.ModelID,
@@ -3490,6 +3541,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 						"attempt", throttleBackoffErr.Attempt,
 					)
 					return "", err
+				}
+
+				// D8 give-up from an inner failover call (tree 03 leaf 02):
+				// a ThrottleGiveUpError is terminal and non-retryable —
+				// surface it verbatim WITHOUT the StateError/recovery path
+				// (which would reset to Idle and absorb the error).
+				var giveUpErr *llm.ThrottleGiveUpError
+				if errors.As(err, &giveUpErr) {
+					return "", giveUpErr
 				}
 
 				l.logger.Error("LLM call failed",
@@ -4461,14 +4521,23 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 			return response, nil
 		}
 
-		// D4/D8 (tree 02 leaf 03): a ThrottleBackoffError is provider
-		// load-shedding, not alias ill-health. Return WITHOUT
-		// RecordAliasFailure and WITHOUT rotation (rotation is for dead
-		// models, not throttled live ones — D4/D8 rationale, mirrored in
-		// the reasoningCycle branch above); tree 03 replaces this
-		// pass-through with parking on RetryAt.
+		// D4/D8 (tree 03 leaf 02): a ThrottleBackoffError is provider
+		// load-shedding, not alias ill-health. NO RecordAliasFailure and NO
+		// rotation (rotation is for dead models, not throttled live ones —
+		// D4 rationale, mirrored in the reasoningCycle branch above): the
+		// turn PARKS on the BackoffPlan schedule via parkThrottledTurn, or
+		// the D8 give-up error surfaces when the wait exceeds MaxWait. With
+		// no parker wired (nil), the tree-02 pass-through is kept verbatim.
 		var throttleBackoffErr *llm.ThrottleBackoffError
 		if errors.As(err, &throttleBackoffErr) {
+			if parked, giveUp := l.parkThrottledTurn(ctx, throttleBackoffErr); parked || giveUp != nil {
+				if giveUp != nil {
+					return nil, giveUp
+				}
+				// Parked: the turn is scheduled for resume by the
+				// TurnParker; nothing flows to the loop's caller.
+				return nil, nil
+			}
 			l.logger.Warn("Provider throttled: returning park-capable error without rotation",
 				"provider", throttleBackoffErr.ProviderID,
 				"model", throttleBackoffErr.ModelID,

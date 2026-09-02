@@ -141,6 +141,12 @@ func UserMessage(err error) string {
 	if errors.As(err, &quotaErr) {
 		return quotaErr.UserMessage()
 	}
+	// ThrottleGiveUpError (tree 03 leaf 02, D8): abandoned-throttle surface,
+	// checked before RateLimitError (it describes the same 429 family).
+	var throttleGiveUpErr *ThrottleGiveUpError
+	if errors.As(err, &throttleGiveUpErr) {
+		return throttleGiveUpErr.UserMessage()
+	}
 	// Try RateLimitError (most specific)
 	var rlErr *RateLimitError
 	if errors.As(err, &rlErr) {
@@ -307,6 +313,50 @@ func AsThrottleBackoffError(err error) (*ThrottleBackoffError, bool) {
 		return nil, false
 	}
 	return errors.AsType[*ThrottleBackoffError](err)
+}
+
+// ThrottleGiveUpError is the D8 give-up surface for provider throttling
+// (tree 03 leaf 02): the turn hit a ThrottleBackoffError but waiting until
+// the backoff plan's next attempt would exceed the parking MaxWait cap, so
+// the turn is abandoned rather than parked. The queue/goal policy applies
+// its own retry policy on top (D8). Non-retryable: an abandoned turn never
+// re-enters any retry loop.
+type ThrottleGiveUpError struct {
+	ProviderID string
+	ModelID    string
+	Waited     time.Duration // the wait that would have been required
+}
+
+func (e *ThrottleGiveUpError) Error() string {
+	return fmt.Sprintf("provider %s throttled for %s (model %s) — turn abandoned: wait exceeds max wait",
+		e.ProviderID, formatDuration(e.Waited), e.ModelID)
+}
+
+// UserMessage renders the D8 wording: provider, waited duration, next step.
+// Mirrors QuotaResetError.UserMessage (errors_quota.go).
+func (e *ThrottleGiveUpError) UserMessage() string {
+	parts := []string{fmt.Sprintf("provider %s throttled for %s", e.ProviderID, formatDuration(e.Waited))}
+	if e.ModelID != "" {
+		parts = append(parts, fmt.Sprintf("on %s", e.ModelID))
+	}
+	parts = append(parts, "turn abandoned; queue/goal policy applies")
+	return strings.Join(parts, " — ")
+}
+
+// NonRetryable returns true so no retry loop re-enters an abandoned turn.
+func (e *ThrottleGiveUpError) NonRetryable() bool {
+	return true
+}
+
+var _ NonRetryableError = (*ThrottleGiveUpError)(nil)
+
+// AsThrottleGiveUpError returns the *ThrottleGiveUpError in err's chain,
+// mirroring AsThrottleBackoffError.
+func AsThrottleGiveUpError(err error) (*ThrottleGiveUpError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	return errors.AsType[*ThrottleGiveUpError](err)
 }
 
 // --- Provider-specific error parsers ---

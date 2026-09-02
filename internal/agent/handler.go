@@ -1517,6 +1517,30 @@ func (h *ChatHandler) SetBudget(budget *llm.Budget) {
 	h.budgetResumeWatcher = NewBudgetResumeWatcher(budget, h.logger, h.resumeParkedTurn)
 }
 
+// SetThrottleParker wires the loop's throttle-resume parker (tree 03 leaf 02
+// Task 3): the parker's resume callback routes by record class — throttle
+// records re-enter the loop via resumeThrottledTurn; quota records (when a
+// parker other than the handler's own quota watcher is shared) delegate to
+// the existing quota resume callback. Nil-guarded.
+func (h *ChatHandler) SetThrottleParker(parker *TurnParker) {
+	if h == nil || parker == nil {
+		return
+	}
+	if loop := h.loop; loop != nil {
+		loop.SetThrottleParker(h, parker)
+	}
+}
+
+// resumeRouterDefault is the non-throttle resume fallback: a quota (or
+// unknown-class) record that surfaces on a parker the handler does not own
+// is logged and dropped rather than mis-dispatched.
+func (h *ChatHandler) resumeRouterDefault(ctx context.Context, rec ParkedTurnRecord) {
+	h.logger.Warn("parked turn resumed with no router wired — dropping",
+		"class", rec.Class,
+		"session_id", rec.SessionID,
+	)
+}
+
 // SetQuotaResumeConfig wires the quota deferral watcher
 // (quota-reset-resilience leaf 06) from llm.quota_retry settings. The
 // watcher's resume callback is bound internally (mirrors SetBudget).
