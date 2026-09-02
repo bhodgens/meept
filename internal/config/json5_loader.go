@@ -64,6 +64,16 @@ func LoadJSON5(path string, v any) error {
 // token qualifies only when it follows "key: " on the same line (a JSON
 // value position). This avoids the string-mangling bug where duration-like
 // text INSIDE a quoted string value ("runs about 1h total") got rewritten.
+// stringDurationKeys are config keys declared as STRING fields whose
+// values happen to look like Go durations (e.g. queue.interactive_window
+// holds "5m" and must stay a string). quotedDurationToNanos must not
+// rewrite their values to nanosecond integers — the schema validator
+// rejects the number (configui save/load roundtrip regression, tree 04
+// leaf 01 follow-up).
+var stringDurationKeys = map[string]bool{
+	"interactive_window": true,
+}
+
 func preprocessDurations(content string) string {
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
@@ -213,28 +223,39 @@ var quotedDuration = regexp.MustCompile(`:\s*"(\d+(?:\.\d+)?(?:ns|us|ms|s|m|h|d)
 // Only matches quoted durations that appear as JSON values (after `: `) to
 // avoid corrupting non-duration string fields.
 func quotedDurationToNanos(data string) string {
-	return quotedDuration.ReplaceAllStringFunc(data, func(match string) string {
-		// Extract the duration value from the quoted string.
-		sub := quotedDuration.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
+	// Key-aware pass: exempt string-declared duration-like fields by
+	// checking the key that anchors each quoted value on its line.
+	lines := strings.Split(data, "\n")
+	for i, line := range lines {
+		colon := strings.Index(line, ":")
+		if colon <= 0 {
+			continue
 		}
-		val := sub[1]
-		d, err := parseDuration(val)
-		if err != nil {
-			return match // leave unchanged on parse error
+		key := strings.TrimRight(strings.TrimSpace(line[:colon]), `"`)
+		if idx := strings.LastIndexAny(key, " \t{,"); idx >= 0 {
+			key = strings.TrimSpace(key[idx+1:])
 		}
-		// Preserve the original prefix (`: ` or `:`).
-		// Find the colon position and rebuild the value.
-		colonIdx := strings.Index(match, ":")
-		prefix := match[:colonIdx+1]
-		return prefix + fmt.Sprintf(" %d", d)
-	})
+		key = strings.Trim(key, `"`)
+		if stringDurationKeys[strings.TrimSpace(key)] {
+			continue
+		}
+		lines[i] = quotedDuration.ReplaceAllStringFunc(line, func(match string) string {
+			sub := quotedDuration.FindStringSubmatch(match)
+			if len(sub) < 2 {
+				return match
+			}
+			d, err := parseDuration(sub[1])
+			if err != nil {
+				return match
+			}
+			colonIdx := strings.Index(match, ":")
+			prefix := match[:colonIdx+1]
+			return prefix + fmt.Sprintf(" %d", d)
+		})
+	}
+	return strings.Join(lines, "\n")
 }
 
-// parseDuration parses a Go duration string (e.g. "30s", "2m", "1h30m").
-// Uses time.ParseDuration for standard Go durations and falls back to a
-// custom parser only for the non-standard "d" (day) suffix.
 func parseDuration(s string) (int64, error) {
 	// Handle the non-standard "d" (day) suffix by converting to hours.
 	if strings.HasSuffix(s, "d") {

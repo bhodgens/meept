@@ -1032,7 +1032,6 @@ func (c *Client) attachToolGrammar(payload map[string]any, cfg *ModelConfig, cha
 		}
 	}
 	AttachGrammar(payload, mode, grammar)
-	return
 }
 
 // attachRawGrammar attaches a caller-supplied grammar to the payload when the
