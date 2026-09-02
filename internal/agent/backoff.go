@@ -552,7 +552,7 @@ func RunWithRetry[T any](ctx context.Context, config BackoffConfig, fn func() (T
 	backoff := NewBackoff(config)
 
 	var lastErr error
-	var first bool = true
+	first := true
 	var attempt int
 
 	for {

@@ -1015,7 +1015,7 @@ func (c *Client) attachToolGrammar(payload map[string]any, cfg *ModelConfig, cha
 	}
 
 	var grammar string
-	complete := false
+	var complete bool
 	switch mode {
 	case ToolConstraintJSONSchea:
 		grammar = JSONSchemaForTools(chatOpts.tools)
