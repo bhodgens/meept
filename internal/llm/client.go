@@ -1075,6 +1075,22 @@ func WithPriority(interactive bool) ChatOption {
 	}
 }
 
+// PriorityOf reports whether the given options mark the turn INTERACTIVE
+// for model-slot acquisition (tree 04 leaf 03, D11). It is the inspection
+// counterpart of WithPriority: a priority-less (nil / empty) option slice
+// or one never passing WithPriority reads as false (background), which is
+// exactly how the client's acquire path treats such callers. Test-facing
+// seam for callers that stub the Chatter and assert on option contents.
+func PriorityOf(opts []ChatOption) bool {
+	var o chatOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	return o.priority
+}
+
 // doRequest performs the HTTP request and parses the response.
 // cfg must be captured under lock by the caller.
 // priority marks an interactive turn for slot-gate priority (tree 04

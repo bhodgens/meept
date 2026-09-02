@@ -718,6 +718,15 @@ type AgentLoop struct {
 	// isolatedChild marks this loop as an isolated child (C4): it can
 	// never speak to the user. Guarded by mu. Default false.
 	isolatedChild bool
+	// interactiveTurns marks this loop's chat turns INTERACTIVE for
+	// model-slot acquisition (tree 04 leaf 03, D11): when model
+	// concurrency is capped, the loop's llm.Chat calls jump ahead of
+	// waiting background callers (bounded by the gate's starvation
+	// guard). Default false (background) — every loop shape that does
+	// not explicitly opt in (verifier children, registry specialists,
+	// goal loops) keeps today's byte-identical background ordering.
+	// Guarded by mu.
+	interactiveTurns bool
 
 	// State machine for explicit state tracking
 	stateMachine *AgentStateMachine
@@ -1131,6 +1140,20 @@ func WithIsolatedChild(isolated bool) LoopOption {
 	return func(l *AgentLoop) {
 		l.mu.Lock()
 		l.isolatedChild = isolated
+		l.mu.Unlock()
+	}
+}
+
+// WithInteractiveTurns marks this loop's chat turns INTERACTIVE for
+// model-slot acquisition (tree 04 leaf 03, D11): when the LLM client's
+// concurrency gate is capped, this loop's llm.Chat calls acquire slots on
+// the interactive lane, ahead of waiting background callers (verifier
+// children, registry specialists, goal loops). Default is FALSE
+// (background) — only the daemon's user-facing chat loop opts in.
+func WithInteractiveTurns(interactive bool) LoopOption {
+	return func(l *AgentLoop) {
+		l.mu.Lock()
+		l.interactiveTurns = interactive
 		l.mu.Unlock()
 	}
 }
@@ -4298,6 +4321,16 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		}
 	}
 
+	// D11 slot priority (tree 04 leaf 03): chat turns of an
+	// interactive-marked loop acquire model slots on the interactive
+	// lane. Default loops (verifier children, registry specialists,
+	// goal loops) never append the option — priority-less callers keep
+	// the gate's background ordering byte-identical to the prior
+	// channel semaphore.
+	if l.interactiveTurns {
+		opts = append(opts, llm.WithPriority(true))
+	}
+
 	attempt := 0
 	// servedModel tracks the model the current attempt is served by, for
 	// accurate failure attribution in RecordAliasFailure (issue #30).
@@ -6093,6 +6126,10 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 
 		// --- Config ---
 		WithAgentConfig(l.config),
+		// --- D11 slot priority (tree 04 leaf 03): per-session chat
+		// loops cloned from the daemon template keep the interactive
+		// lane; the flag default-false keeps specialists background. ---
+		WithInteractiveTurns(l.interactiveTurns),
 
 		// --- Tools + security ---
 		WithToolRegistry(l.registry),

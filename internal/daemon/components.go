@@ -1184,6 +1184,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	agentOpts := []agent.LoopOption{
 		agent.WithMessageBus(msgBus),
 		agent.WithLoopLogger(logger),
+		// D11 slot priority (tree 04 leaf 03): the daemon loop is the
+		// user-facing chat loop — its llm.Chat turns acquire model
+		// slots on the interactive lane when concurrency is capped.
+		// Per-session clones inherit the flag via ConfigSnapshot.
+		agent.WithInteractiveTurns(true),
 	}
 
 	// Quota episode tracker (quota-reset-resilience): shared singleton that
