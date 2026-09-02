@@ -79,11 +79,11 @@ Topic: `agent.quota_wait`
   `escalation` ("" | "warn" | "action_recommended" | "blocked"),
   `fallback_model` (optional), `timestamp`.
 - Tree 03 leaf 04 (universal parking, DECISIONS.md D9) shares this topic
-  with parked-turn lifecycle events: throttle park/resume/give-up publish
-  `agent.ParkTurnEvent` payloads (`reason`: "throttle_wait" |
-  "throttle_resumed" | "throttle_give_up", plus a `class` key carrying
-  the failure class) on the same topic, so this classification invariant
-  covers them unchanged. See
+  with parked-turn lifecycle events: park/resume/give-up publish
+  `agent.ParkTurnEvent` payloads (`reason`: "quota_wait" |
+  "throttle_wait" | "throttle_resumed" | "throttle_give_up", plus a
+  `class` key carrying the failure class) on the same topic, so this
+  classification invariant covers them unchanged. See
   [LLM Management — Universal Parking](llm-management.md#universal-parking-on-provider-waits-d9).
 
 ## Configuration

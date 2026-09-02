@@ -255,6 +255,15 @@ func (w *QuotaResumeWatcher) Park(turn QuotaParkedTurn) bool {
 		// refuses zero/past resume times); stay safe regardless.
 		return false
 	}
+	// Park event (tree 03 leaf 04): the chat-side quota park emits the same
+	// ParkTurnEvent as the throttle/employee park sites — reason
+	// "quota_wait", class "quota" — on the EXISTING agent.quota_wait topic.
+	// No model ID rides the event: quota blocks are per provider/credential,
+	// not per model. Resume visibility is owned by the episode tracker's
+	// existing quota_cleared (to=running) lifecycle, so no quota resume
+	// event is emitted here (throttle has no tracker episode, hence its own
+	// throttle_resumed event).
+	w.turns.emitParkEvent(rec, "", turn.ProviderID)
 	w.logger.Info("parked turn pending quota reset",
 		"session_id", turn.SessionID,
 		"provider", turn.ProviderID,
@@ -270,6 +279,19 @@ func (w *QuotaResumeWatcher) Pending() int {
 		return 0
 	}
 	return w.turns.Pending()
+}
+
+// SetParkEventBus forwards the park-event bus to the inner TurnParker so
+// handler-side quota parks (ChatHandler's leaf 06 deferral path) emit the
+// same ParkTurnEvent the loop's throttle parks emit — on the EXISTING
+// agent.quota_wait topic with reason "quota_wait" + class "quota" (tree 03
+// leaf 04 Task 1). Nil-guarded per repo setter convention: a nil bus or
+// watcher is refused and parking stays silent (the default).
+func (w *QuotaResumeWatcher) SetParkEventBus(b parkEventBus) {
+	if w == nil || b == nil {
+		return
+	}
+	w.turns.SetParkEventBus(b)
 }
 
 // drainDue resumes every parked turn whose unblock time has passed,

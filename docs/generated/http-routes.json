@@ -81,14 +81,14 @@
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1237
+    "line": 1236
   },
   {
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1348
+    "line": 1347
   },
   {
     "method": "GET",
@@ -2041,14 +2041,14 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1245
+    "line": 1244
   },
   {
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 2036
+    "line": 2035
   },
   {
     "method": "GET",
@@ -2230,21 +2230,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6469
+    "line": 6484
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6480
+    "line": 6495
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6461
+    "line": 6476
   },
   {
     "method": "GET",

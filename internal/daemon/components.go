@@ -2417,14 +2417,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// the handler (ChatHandler.Start).
 		c.ChatHandler.SetQuotaResumeConfig(cfg.LLM.QuotaRetry.MaxWait)
 
+		// Park-event bus (tree 03 leaf 04, D9): the chat-side quota watcher
+		// publishes its park/resume events on the EXISTING agent.quota_wait
+		// topic — the same ParkTurnEvent the throttle parker emits below —
+		// so the TUI/GUI agents-tab wait labels see every parked turn class.
+		if c.ChatHandler.QuotaResumeWatcher() != nil {
+			c.ChatHandler.QuotaResumeWatcher().SetParkEventBus(msgBus)
+		}
+
 		// Throttle parking (llm-resilience-forest tree 03 leaf 02, D4/D8):
 		// the loop parks ThrottleBackoffError turns on a TurnParker whose
 		// resume callback routes by class (throttle → loop resume; other
 		// classes → the handler's fallback). MaxWait mirrors the quota
 		// deferral cap; the failure-policy schedule comes from
 		// llm.failure_policy (installed below alongside the retry knobs).
+		// The parker's park/resume/give-up events publish on the same
+		// agent.quota_wait topic (leaf 04 SetParkEventBus wiring).
 		throttleParker := agent.NewTurnParker(logger, nil, cfg.LLM.QuotaRetry.MaxWait)
 		throttleParker.SetPollInterval(cfg.LLM.QuotaRetry.DeferCheckInterval)
+		throttleParker.SetParkEventBus(msgBus)
 		c.ChatHandler.SetThrottleParker(throttleParker)
 		agent.SetFailurePolicyDefaults(llm.FailurePolicyConfig{
 			Horizon:                cfg.LLM.FailurePolicy.Horizon,
@@ -4042,6 +4053,10 @@ func (c *Components) Start(ctx context.Context) error {
 				},
 				c.Config.LLM.QuotaRetry.MaxWait,
 			)
+			// Park-event bus (tree 03 leaf 04, D9): goal-episode parks and
+			// resumes emit the same ParkTurnEvent on agent.quota_wait as the
+			// chat parkers, so the agents-tab wait labels cover employees.
+			goalTurnParker.SetParkEventBus(c.msgBus)
 			goalEpisodeParker := employee.NewEpisodeParker(goalTurnParker, policyCfg,
 				c.Logger.With("component", "goal-episode-parker"))
 

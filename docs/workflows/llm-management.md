@@ -279,8 +279,8 @@ Park/resume/give-up events ride the EXISTING `agent.quota_wait` topic
 
 | Lifecycle | Payload keys |
 |-----------|--------------|
-| park | `agent_id`, `to: "quota_wait"`, `reason: "throttle_wait"`, `class` (`"quota"\|"throttle"`), `resume_at` (RFC3339), `model_id`, `provider_id`, `session_id` |
-| resume | `agent_id`, `to: "running"`, `reason: "throttle_resumed"`, `class`, `waited` (Go duration string), `session_id` |
+| park | `agent_id`, `to: "quota_wait"`, `reason` (follows the class: `"quota_wait"` \| `"throttle_wait"`), `class` (`"quota"\|"throttle"`), `resume_at` (RFC3339), `provider_id`, `session_id`, `model_id` (throttle parks; chat quota parks are provider-scoped and omit it) |
+| resume | `agent_id`, `to: "running"`, `reason: "throttle_resumed"`, `class: "throttle"`, `waited` (Go duration string), `session_id` (quota resume visibility is the episode tracker's existing `quota_cleared` event) |
 | give-up | `agent_id`, `reason: "throttle_give_up"`, `class: "throttle"`, `waited`, `model_id`, `provider_id` |
 
 No new topic was introduced, so the WS handler's `agent.quota` prefix
