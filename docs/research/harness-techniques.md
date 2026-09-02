@@ -2,9 +2,9 @@
 
 # Agent harness techniques vs meept
 
-Generated from `docs/research/harness-techniques.json` (version 1, updated 2026-08-30). Do not edit by hand; run `python3 scripts/research-harness-lit.py` to regenerate.
+Generated from `docs/research/harness-techniques.json` (version 1, updated 2026-09-01). Do not edit by hand; run `python3 scripts/research-harness-lit.py` to regenerate.
 
-Status counts: shipped 21, partial 10, candidate 9, skip 0
+Status counts: shipped 23, partial 10, candidate 9, skip 0
 
 ## context
 
@@ -56,8 +56,10 @@ Status counts: shipped 21, partial 10, candidate 9, skip 0
 
 | Technique | Status | Sources | Evidence | Notes |
 | --- | --- | --- | --- | --- |
-| Resolver alias failover + cooldown | shipped | — | `internal/llm/resolver.go` | Quota-pause-with-timer is still candidate. |
+| Resolver alias failover + cooldown | shipped | — | `internal/llm/resolver.go` | Quota pause shipped: turn parking + QuotaResumeWatcher (internal/agent/quota_resume.go). Alias timeout blocks on resolver. |
 | Keyword intent classifier fallback | shipped | — | `internal/agent/dispatcher.go` | LLM first; substring fallback. Empty LLM reply skips keyword → chat. Candidate to disable (Meept ideas note). |
+| 429 auto-reattempt (sleep server schedule, re-issue) | shipped | [pi retryProviderRequest (60s cap, abortable)](https://github.com/earendil-works/pi/tree/main/packages/ai/src/utils) | `internal/llm/client.go`, `internal/agent/quota_resume.go` | All five retry loops: server Retry-After wins over computed backoff, capped by plan max; bounded attempts. Quota-class 429s park the turn and auto-resume. claude-flow, by contrast, has no Retry-After read; its 429 path is zero-delay model failover, compliance lives in the delegated Anthropic SDK. |
+| RFC7231/RFC9110 Retry-After parsing | shipped | [RFC9110 §10.2.1 Retry-After](https://httpwg.org/specs/rfc9110.html#field.retry-after), [pi provider-retry (Date.parse, engine-dependent)](https://github.com/earendil-works/pi/tree/main/packages/ai/src/utils), [oh-my-pi retry-after util](https://github.com/can1357/oh-my-pi) | `internal/llm/retry_after.go`, `internal/llm/retry_after_test.go` | Explicit grammar for all RFC7231 forms (delta-seconds strict, IMF-fixdate, RFC850, asctime) + RFC3339 tolerance + Anthropic/Codex reset headers. Only harness of the four compared that parses HTTP-dates explicitly; pi/oh-my-pi use JS Date.parse, hermes-agent hot path reads delta-seconds only. |
 | Dispatcher-selected reasoning effort | partial | [GLM-5.3 thinking levels](https://docs.z.ai/guides/llm/glm-5.3.md) | `internal/agent/dispatcher.go` | Field exists; production never assigns it. Loop honors ReasoningOverride only. glm-5.3 not in catalog. |
 
 ## security

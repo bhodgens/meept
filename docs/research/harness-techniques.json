@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-08-30",
+  "updated": "2026-09-01",
   "description": "Living map of agent-harness techniques vs meept. Source of truth for docs/research/harness-techniques.md. Verified by scripts/research-harness-lit.py.",
   "search_queries": [
     "agent harness compaction context window",
@@ -334,7 +334,59 @@
           "path": "internal/llm/resolver.go"
         }
       ],
-      "notes": "Quota-pause-with-timer is still candidate."
+      "notes": "Quota pause shipped: turn parking + QuotaResumeWatcher (internal/agent/quota_resume.go). Alias timeout blocks on resolver."
+    },
+    {
+      "id": "retry-after-parsing",
+      "name": "RFC7231/RFC9110 Retry-After parsing",
+      "category": "routing",
+      "status": "shipped",
+      "sources": [
+        {
+          "title": "RFC9110 §10.2.1 Retry-After",
+          "url": "https://httpwg.org/specs/rfc9110.html#field.retry-after"
+        },
+        {
+          "title": "pi provider-retry (Date.parse, engine-dependent)",
+          "url": "https://github.com/earendil-works/pi/tree/main/packages/ai/src/utils"
+        },
+        {
+          "title": "oh-my-pi retry-after util",
+          "url": "https://github.com/can1357/oh-my-pi"
+        }
+      ],
+      "evidence": [
+        {
+          "path": "internal/llm/retry_after.go",
+          "must_contain": "RFC850"
+        },
+        {
+          "path": "internal/llm/retry_after_test.go"
+        }
+      ],
+      "notes": "Explicit grammar for all RFC7231 forms (delta-seconds strict, IMF-fixdate, RFC850, asctime) + RFC3339 tolerance + Anthropic/Codex reset headers. Only harness of the four compared that parses HTTP-dates explicitly; pi/oh-my-pi use JS Date.parse, hermes-agent hot path reads delta-seconds only."
+    },
+    {
+      "id": "rate-limit-auto-reattempt",
+      "name": "429 auto-reattempt (sleep server schedule, re-issue)",
+      "category": "routing",
+      "status": "shipped",
+      "sources": [
+        {
+          "title": "pi retryProviderRequest (60s cap, abortable)",
+          "url": "https://github.com/earendil-works/pi/tree/main/packages/ai/src/utils"
+        }
+      ],
+      "evidence": [
+        {
+          "path": "internal/llm/client.go",
+          "must_contain": "shortThrottleSleep"
+        },
+        {
+          "path": "internal/agent/quota_resume.go"
+        }
+      ],
+      "notes": "All five retry loops: server Retry-After wins over computed backoff, capped by plan max; bounded attempts. Quota-class 429s park the turn and auto-resume. claude-flow, by contrast, has no Retry-After read; its 429 path is zero-delay model failover, compliance lives in the delegated Anthropic SDK."
     },
     {
       "id": "adaptive-timeout",

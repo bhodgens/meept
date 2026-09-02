@@ -1,10 +1,23 @@
 # Pi Agent (`@earendil-works/pi-agent-core`) - Analysis & Meept Comparison
 
 > Source: https://github.com/earendil-works/pi/tree/main/packages/agent
-> Version analyzed: 0.74.0 (2026-05-07)
+> Version analyzed: 0.74.0 (2026-05-07); §3.7 re-verified against `main` 2026-09-01
 > Author: Mario Zechner (badlogic)
 > License: MIT
 > Language: TypeScript (Node.js >= 20)
+
+> **2026-09-01 revision note:** §3.7 re-verified against pi `main` (PRs
+> #4991/#6980 era). Corrections: pi has no `chatWithFailover`/model-rotation
+> retry (earlier claim removed); provider retries are retry-after-aware,
+> 60s-capped; SDK retries disabled in favor of pi's own loops. meept backoff
+> figures corrected against `internal/agent/backoff.go` (base 1s, not 2s).
+> For the four-harness 429 comparison (pi, oh-my-pi, hermes-agent,
+> claude-flow), see catalog rows `retry-after-parsing` and
+> `rate-limit-auto-reattempt` in `docs/research/harness-techniques.json`: pi
+> and oh-my-pi honor Retry-After via JS `Date.parse`; hermes-agent's hot path
+> reads delta-seconds only; claude-flow never reads the header (delegates to
+> Claude Code CLI / Anthropic SDK); meept is the only one with explicit
+> RFC7231 grammar + RFC3339 tolerance.
 
 ## 1. Executive Summary
 
@@ -178,12 +191,14 @@ Application Layer  (Pi IDE, etc.)
 - **Immediate error outcomes**: tool prep failures produce error results without aborting the batch
 - **afterToolCall hook error handling**: hook throws are converted to error tool results, not batch aborts
 - **Provider error handling**: `stopReason: "error"` or `"aborted"` causes graceful loop termination
-- **No retry at loop level**: retries are delegated to the provider layer (pi-ai)
+- **No retry in the agent core itself**: the agent loop surfaces errors; retries live in the provider layer (`packages/ai`). Since PRs #4991/#6980, SDK-internal retries are disabled (`maxRetries: 0`) and replaced by pi's own `retryProviderRequest` (reads `retry-after-ms` then `Retry-After`, exponential with jitter, capped at 60s via `validateServerRetryDelayMs` — a longer server delay fails fast instead of hanging) plus an agent-level `retryAssistantCall` (3 attempts, 2s/4s/8s, message-regex classification, refuses quota/billing exhaustion). Note: an earlier revision of this analysis claimed a `chatWithFailover` 5-attempt model-rotation path — that symbol does not exist in pi; model rotation is not part of pi's retry.
 - **Single-active-run guard**: concurrent `prompt()` calls throw
 
 **Meept:**
 - **chatWithFailover**: up to 5 LLM call attempts with model rotation on rate limits
-- **Exponential backoff**: base 2s, max 30s between retries
+- **Exponential backoff**: base 1s, max 30s between retries (LLMBackoffConfig preset; override via config.Agent.Retry.Backoff)
+- **Two retry layers**: the loop-level failover above sits on top of a second, client-level throttle retry (`internal/llm/client.go` shortThrottleSleep — five retry loops, each sleeping the server's Retry-After before re-issuing, capped by the backoff plan); the resolver (`internal/llm/resolver.go`) adds alias failover, endpoint/alias cooldowns, and quota blocks below both
+- **Quota/throttle split**: quota-class errors park the turn (`internal/agent/quota_resume.go`) and auto-resume when the window lifts; transient throttles retry in place (ThrottleBackoffError → turnParker)
 - **Cycle detection**: 3 identical consecutive tool calls → abort
 - **Convergence detection**: 3 identical consecutive text responses → abort
 - **Hallucination detection**: correction prompt injection for fabricated claims
