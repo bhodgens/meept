@@ -139,7 +139,7 @@ func (t *MemorySearchTool) Parameters() llm.FunctionParameters {
 			},
 			"min_relevance": {
 				Type:        schemaTypeNumber,
-				Description: "Minimum relevance score 0.0-1.0 (default 0.3).",
+				Description: "Minimum relevance score 0.0-1.0 (default 0.1; scores are query-dependent, so short queries legitimately score low).",
 			},
 		},
 		Required: []string{"query"},
@@ -161,7 +161,13 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 		limit = min(int(l), 50)
 	}
 
-	minRelevance := 0.3
+	// Default floor 0.1, not 0.3: normalized BM25 scores are query-dependent
+	// and short queries ("codeword") legitimately score the true match at
+	// 0.15–0.25. The old 0.3 default made memory_search return empty for
+	// exactly the queries where recall matters most, so agents concluded
+	// nothing was stored. With limit 10 the agent sees ranked results and
+	// judges relevance itself.
+	minRelevance := 0.1
 	if mr, ok := args["min_relevance"].(float64); ok {
 		minRelevance = mr
 	}
