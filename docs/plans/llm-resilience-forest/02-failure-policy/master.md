@@ -217,11 +217,11 @@ Time math uses injected `now` — no `time.Sleep` over 100ms in tests.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-classification.md | PENDING | 0 | |
-| 02-retryafter-schedule.md | PENDING | 0 | |
-| 03-client-unification.md | PENDING | 0 | |
-| 04-endpoint-timeouts.md | PENDING | 0 | |
-| 05-adaptive-pacing.md | PENDING | 0 | |
+| 01-classification.md | COMPLETE | 1 | c9d7da28 |
+| 02-retryafter-schedule.md | COMPLETE | 1 | adc44b16 |
+| 03-client-unification.md | COMPLETE | 2 | 962e9924; orchestrator repaired: restored 15 collateral-deleted tests, SSE scanner EOF+chunk bug fixed w/ regression tests |
+| 04-endpoint-timeouts.md | COMPLETE | 1 | a18802e8; Resolver-struct endpointBlocks (B3), host+credential key (R2) |
+| 05-adaptive-pacing.md | COMPLETE | 1 | 7d73b12f; client/daemon wiring deferred (atomic follow-up, plan in delegation report) |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
