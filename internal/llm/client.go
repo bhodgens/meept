@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -21,11 +20,13 @@ import (
 )
 
 const (
-	defaultTimeout       = 120 * time.Second
-	maxRetries           = 3
-	retryBackoffBase     = 2.0 // seconds - exponential: 2, 4, 8
-	retryBackoffMaxDelay = 30 * time.Second
-	streamMaxRetries     = 3 // D4: retry attempts for streaming
+	defaultTimeout = 120 * time.Second
+	// defaultShortRetries is the nil-safe ShortRetries budget for the
+	// policy-engine retry loops (leaf 03 Task 5; mirrors
+	// config.DefaultFailurePolicyShortRetries, D4/D8). The old
+	// maxRetries/streamMaxRetries/30s-cap constants left with the loops
+	// they hardcoded.
+	defaultShortRetries = 3
 )
 
 // HTTP status codes that warrant a retry
@@ -109,6 +110,9 @@ type Client struct {
 	// distinguishable regardless of retry config (retry-on-quota is the
 	// caller's decision).
 	quotaMaxWait time.Duration
+	// failurePolicy is the injected tree-02 policy config (leaf 03 Task 5):
+	// ShortRetries bounds every loop's retry budget; nil-safe default 3.
+	failurePolicy *FailurePolicyConfig
 	// concurrencySemaphore limits concurrent requests for this model/provider.
 	// When nil, no limit is enforced. Buffered channel used as a semaphore.
 	concurrencySemaphore chan struct{}
@@ -124,6 +128,73 @@ func (c *Client) SetQuotaMaxWait(d time.Duration) {
 		return
 	}
 	c.quotaMaxWait = d
+}
+
+// SetFailurePolicyConfig injects the tree-02 failure-policy config (leaf 03
+// Task 5): ShortRetries bounds all retry loops; a nil or invalid (<=0)
+// ShortRetries keeps the nil-safe default of 3 (config.DefaultFailurePolicy-
+// ShortRetries). Nil-receiver safe. The wiring point mirrors SetQuotaMaxWait;
+// the daemon maps config.FailurePolicyConfig onto *llm.FailurePolicyConfig
+// there (internal/llm cannot import internal/config — import cycle).
+func (c *Client) SetFailurePolicyConfig(cfg *FailurePolicyConfig) {
+	if c == nil {
+		return
+	}
+	if cfg != nil && cfg.ShortRetries <= 0 {
+		clone := *cfg
+		clone.ShortRetries = defaultShortRetries
+		c.failurePolicy = &clone
+		return
+	}
+	c.failurePolicy = cfg
+}
+
+// shortRetryBudget returns the loop retry count: the injected config value
+// or the nil-safe default (leaf 03 Task 5).
+func (c *Client) shortRetryBudget() int {
+	if c != nil && c.failurePolicy != nil && c.failurePolicy.ShortRetries > 0 {
+		return c.failurePolicy.ShortRetries
+	}
+	return defaultShortRetries
+}
+
+// policyCfg resolves the injected policy config or the package defaults.
+func (c *Client) policyCfg() FailurePolicyConfig {
+	if c != nil && c.failurePolicy != nil {
+		return *c.failurePolicy
+	}
+	return FailurePolicyConfig{
+		Horizon:      24 * time.Hour,
+		BaseThrottle: 30 * time.Second,
+		PollFloor:    time.Hour,
+	}
+}
+
+// shortThrottleSleep is the ONE throttle wait policy for all five retry
+// loops (leaf 03: no sixth divergent copy). given the failed response
+// headers, the plan, and the attempt index, it returns how long to wait:
+//   - the server Retry-After (ParseRetryAfter, D6) always wins when later
+//     than the plan's computed step — never hit a provider before it says;
+//   - but never longer than the plan's Max step, so a huge Retry-After
+//     cannot burn the short budget wall-clock (capped by the plan, D8).
+//
+// On a bare throttle with no server schedule the plan's exponential step
+// applies. The returned time.Time is the absolute wake instant.
+func shortThrottleSleep(header http.Header, plan BackoffPlan, now time.Time, attempt int) time.Duration {
+	step := plan.NextAttempt(now, attempt, time.Time{}).Sub(now)
+	if date, delta, present := ParseRetryAfter(header); present {
+		serverAt := date
+		if date.IsZero() {
+			serverAt = now.Add(delta)
+		}
+		if wait := serverAt.Sub(now); wait > step {
+			step = wait
+		}
+	}
+	if step < 0 {
+		step = 0
+	}
+	return step
 }
 
 // ClientOption is a functional option for configuring a Client.
@@ -423,7 +494,16 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 
 	var lastErr error
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	// D4 (leaf 03): every failure classifies through the policy engine
+	// FIRST; the legacy local backoff constants are gone. Quota exits
+	// immediately (quota-reset-resilience contract 1); throttle retries
+	// within the short budget and then escalate to ThrottleBackoffError;
+	// server errors keep the bounded retry + ClientError shape.
+	shortRetries := c.shortRetryBudget()
+	now := time.Now()
+	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
+
+	for attempt := 1; attempt <= shortRetries; attempt++ {
 		resp, err := c.doRequest(ctx, payload, cfg)
 		if err != nil {
 			// Quota errors never re-enter the short-retry loop: the window
@@ -433,44 +513,70 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			if errors.As(err, &quotaErr) {
 				return nil, err
 			}
-			var apiErr *APIError
-			var rlErr *RateLimitError
-			if errors.As(err, &rlErr) {
-				apiErr = &APIError{StatusCode: http.StatusTooManyRequests}
-				// rlErr already wraps the APIError cause
-			} else if !errors.As(err, &apiErr) || !retryableStatusCodes[apiErr.StatusCode] {
+
+			// D4/D7: Classify FIRST on the failure. The request layer
+			// already resolved quota-shaped responses to QuotaResetError,
+			// so a RateLimitError/APIError here is a bare throttle or
+			// server error (D7: a Retry-After alone is never a quota
+			// signal).
+			status, header := errorStatusAndHeader(err)
+			verdict := Classify(status, header, nil, time.Now())
+
+			switch verdict.Class {
+			case FailureThrottle:
+				// Short-horizon retries honoring the server schedule; when
+				// the short budget is exhausted, escalate to
+				// ThrottleBackoffError so the CALLER can park (D4/D8) —
+				// never a ClientError.
+				lastErr = err
+				c.logger.Warn("Retryable throttle",
+					"status", status,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					wait := shortThrottleSleep(header, plan, time.Now(), attempt-1)
+					c.logger.Debug("Retry backoff", "attempt", attempt, "sleep", wait)
+					select {
+					case <-time.After(wait):
+						continue
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				}
+				return nil, &ThrottleBackoffError{
+					ProviderID: cfg.ProviderID,
+					ModelID:    cfg.ModelID,
+					RetryAt:    plan.NextAttempt(time.Now(), attempt, errorRetryAt(err)),
+					Attempt:    attempt,
+					Cause:      err,
+				}
+			case FailureServerError:
+				// Bounded retries via the plan; give up → the historical
+				// ClientError shape (leaf Notes: only THROTTLE exhaustion
+				// changes type).
+				lastErr = err
+				c.logger.Warn("Retryable server error",
+					"status", status,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					wait := shortThrottleSleep(nil, plan, time.Now(), attempt-1)
+					c.logger.Debug("Retry backoff", "attempt", attempt, "sleep", wait)
+					select {
+					case <-time.After(wait):
+						continue
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				}
+				continue
+			default:
+				// FailureFatal and anything unclassifiable: return
+				// immediately (existing behavior).
 				return nil, err
 			}
-
-			c.logger.Warn("Retryable error",
-				"status", apiErr.StatusCode,
-				"attempt", attempt,
-				"max_retries", maxRetries,
-			)
-			lastErr = err
-			if attempt < maxRetries {
-				// Respect Retry-After from rate limit errors if available.
-				sleepDuration := time.Duration(0)
-				if rlErr != nil && rlErr.RetryAfter > 0 {
-					sleepDuration = rlErr.RetryAfter
-				}
-				// Fall back to exponential backoff with jitter.
-				if sleepDuration == 0 {
-					expDelay := time.Duration(math.Pow(retryBackoffBase, float64(attempt)) * float64(time.Second))
-					sleepDuration = BackoffWithJitter(expDelay, retryBackoffMaxDelay, true)
-				}
-				c.logger.Debug("Retry backoff",
-					"attempt", attempt,
-					"sleep", sleepDuration,
-				)
-				select {
-				case <-time.After(sleepDuration):
-					continue
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-			}
-			continue
 		}
 
 		// Record usage with scope
@@ -499,8 +605,12 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		return resp, nil
 	}
 
+	// D8 exhaustion cap: every attempt was classified (throttle escalations
+	// already returned ThrottleBackoffError above); reaching here means the
+	// remaining retries were server errors — the historical ClientError
+	// shape stands (leaf Notes).
 	return nil, &ClientError{
-		Message: fmt.Sprintf("All %d attempts failed", maxRetries),
+		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
 }
@@ -583,9 +693,16 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 
 	var lastErr error
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	// D4 (leaf 03): classify-first policy engine, identical shape to the
+	// non-streaming Chat loop — throttle escalates to ThrottleBackoffError,
+	// server errors keep the bounded ClientError exhaustion shape.
+	shortRetries := c.shortRetryBudget()
+	now := time.Now()
+	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
+
+	for attempt := 1; attempt <= shortRetries; attempt++ {
 		if attempt > 1 {
-			reportProgress(ProgressStageThinking, fmt.Sprintf("Retry attempt %d/%d...", attempt, maxRetries))
+			reportProgress(ProgressStageThinking, fmt.Sprintf("Retry attempt %d/%d...", attempt, shortRetries))
 		} else {
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
@@ -599,43 +716,69 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
-			var apiErr *APIError
-			var rlErr *RateLimitError
-			if errors.As(err, &rlErr) {
-				apiErr = &APIError{StatusCode: http.StatusTooManyRequests}
-			} else if !errors.As(err, &apiErr) || !retryableStatusCodes[apiErr.StatusCode] {
+
+			// D4/D7: classify FIRST; the request layer already resolved
+			// quota shapes to QuotaResetError (see Chat loop).
+			status, header := errorStatusAndHeader(err)
+			verdict := Classify(status, header, nil, time.Now())
+
+			switch verdict.Class {
+			case FailureThrottle:
+				// Short-horizon retries honoring the server schedule;
+				// exhaustion escalates to ThrottleBackoffError (D4/D8),
+				// never a ClientError.
+				lastErr = err
+				c.logger.Warn("Retryable throttle",
+					"status", status,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					wait := shortThrottleSleep(header, plan, time.Now(), attempt-1)
+					c.logger.Debug("Retry backoff", "attempt", attempt, "sleep", wait)
+					select {
+					case <-time.After(wait):
+						continue
+					case <-ctx.Done():
+						reportProgress(ProgressStageDone, "Request cancelled")
+						return nil, ctx.Err()
+					}
+				}
+				reportProgress(ProgressStageDone, "Throttled: parked for backoff")
+				return nil, &ThrottleBackoffError{
+					ProviderID: cfg.ProviderID,
+					ModelID:    cfg.ModelID,
+					RetryAt:    plan.NextAttempt(time.Now(), attempt, errorRetryAt(err)),
+					Attempt:    attempt,
+					Cause:      err,
+				}
+			case FailureServerError:
+				// Bounded retries via the plan; give up → the historical
+				// ClientError shape (leaf Notes).
+				lastErr = err
+				c.logger.Warn("Retryable server error",
+					"status", status,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					wait := shortThrottleSleep(nil, plan, time.Now(), attempt-1)
+					c.logger.Debug("Retry backoff", "attempt", attempt, "sleep", wait)
+					select {
+					case <-time.After(wait):
+						continue
+					case <-ctx.Done():
+						reportProgress(ProgressStageDone, "Request cancelled")
+						return nil, ctx.Err()
+					}
+				}
+				continue
+			default:
+				// FailureFatal and anything unclassifiable: return
+				// immediately (existing behavior).
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
-
-			c.logger.Warn("Retryable error",
-				"status", apiErr.StatusCode,
-				"attempt", attempt,
-				"max_retries", maxRetries,
-			)
-			lastErr = err
-			if attempt < maxRetries {
-				sleepDuration := time.Duration(0)
-				if rlErr != nil && rlErr.RetryAfter > 0 {
-					sleepDuration = rlErr.RetryAfter
-				}
-				if sleepDuration == 0 {
-					expDelay := time.Duration(math.Pow(retryBackoffBase, float64(attempt)) * float64(time.Second))
-					sleepDuration = BackoffWithJitter(expDelay, retryBackoffMaxDelay, true)
-				}
-				c.logger.Debug("Retry backoff",
-					"attempt", attempt,
-					"sleep", sleepDuration,
-				)
-				select {
-				case <-time.After(sleepDuration):
-					continue
-				case <-ctx.Done():
-					reportProgress(ProgressStageDone, "Request cancelled")
-					return nil, ctx.Err()
-				}
-			}
-			continue
 		}
 
 		// Streaming stage - response received
@@ -675,9 +818,9 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		return resp, nil
 	}
 
-	reportProgress(ProgressStageDone, fmt.Sprintf("Failed after %d attempts", maxRetries))
+	reportProgress(ProgressStageDone, fmt.Sprintf("Failed after %d attempts", shortRetries))
 	return nil, &ClientError{
-		Message: fmt.Sprintf("All %d attempts failed", maxRetries),
+		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
 }
@@ -1260,17 +1403,27 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		}
 	}
 
-	// D4: Retry loop for transient errors with resume capability
+	// D4: Retry loop for transient errors with resume capability.
+	// Leaf 03: the count comes from the policy config (shortRetries; the
+	// old streamMaxRetries constant is gone) and every failure goes through
+	// Classify FIRST. Streaming subtlety: the pre-first-token gating is
+	// preserved exactly — doStreamRequest only returns HTTP-status errors
+	// BEFORE the SSE scanner starts, so a throttle that survived the short
+	// retries surfaces as ThrottleBackoffError only when no tokens flowed;
+	// a mid-stream failure returns its own error (existing behavior).
 	var lastErr error
 	retryState := &streamRetryState{
 		toolCallAccums: make(map[int]*toolCallAccum),
 	}
+	shortRetries := c.shortRetryBudget()
+	now := time.Now()
+	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
 
-	for attempt := range streamMaxRetries {
+	for attempt := range shortRetries {
 		if attempt > 0 {
 			// D4: Set resume flag for retry attempts
 			retryState.isResume = true
-			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", streamMaxRetries)
+			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", shortRetries)
 		}
 		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg)
 		if err == nil {
@@ -1326,39 +1479,91 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		// delta path): the window is hours, not seconds. Return immediately;
 		// the caller decides whether to wait/rotate (quota-reset-resilience
 		// contract 1). QuotaResetError wraps a 429 APIError, so without this
-		// branch isRetryableStreamingError would short-retry it.
+		// branch the retryable check would short-retry it. Placement is
+		// BEFORE any retryable check — semantically unchanged (leaf 03).
 		var quotaErr *QuotaResetError
 		if errors.As(err, &quotaErr) {
 			return nil, err
 		}
 
-		// D4: Check if error is retryable
-		if !isRetryableStreamingError(err) {
+		// D4/D7 (leaf 03): classify FIRST, then obey. The quota early-exit
+		// above already peeled off quota-shaped responses, so a throttle
+		// verdict here is a bare 429/503 (Retry-After alone is never a
+		// quota signal). Preserves the loop's own mid-stream gating: a
+		// mid-stream failure is a ClientError whose message carries
+		// "stream"/EOF markers and Classify(0,...) returns FailureNone,
+		// which returns it unchanged (existing behavior).
+		status, header := errorStatusAndHeader(err)
+		verdict := Classify(status, header, nil, time.Now())
+
+		switch verdict.Class {
+		case FailureThrottle:
+			// D4: Don't retry if we're on the last attempt — exhaust the
+			// short budget into ThrottleBackoffError (NOT a wrapped
+			// ClientError), letting the caller park until RetryAt (D4/D8).
+			if attempt >= shortRetries-1 {
+				c.logger.Warn("stream throttle budget exhausted",
+					"attempt", attempt+1,
+					"max", shortRetries,
+				)
+				return nil, &ThrottleBackoffError{
+					ProviderID: cfg.ProviderID,
+					ModelID:    cfg.ModelID,
+					RetryAt:    plan.NextAttempt(time.Now(), attempt, errorRetryAt(err)),
+					Attempt:    attempt + 1,
+					Cause:      err,
+				}
+			}
+
+			// D4: backoff honoring the server Retry-After (ParseRetryAfter)
+			// over the plan's computed step, capped by the plan (D8).
+			backoff := shortThrottleSleep(header, plan, time.Now(), attempt)
+			if rl, ok := err.(*RateLimitError); ok && rl.RetryAfter > 0 && rl.RetryAfter < backoff {
+				// Parity with the legacy loop: a server-suggested shorter
+				// wait (body retry_after) is honored — never wait longer
+				// than the provider demands when it gave a smaller number.
+				backoff = rl.RetryAfter
+			}
+			c.logger.Debug("stream throttle backoff", "attempt", attempt+1, "sleep", backoff)
+
+			select {
+			case <-time.After(backoff):
+				// Continue to next attempt
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+
+		case FailureServerError:
+			// D4: Don't retry if we're on the last attempt
+			if attempt >= shortRetries-1 {
+				break
+			}
+
+			// D4: bounded backoff via the plan (server-error path carries
+			// no Retry-After schedule).
+			backoff := shortThrottleSleep(nil, plan, time.Now(), attempt)
+			c.logger.Debug("stream server-error backoff", "attempt", attempt+1, "sleep", backoff)
+
+			select {
+			case <-time.After(backoff):
+				// Continue to next attempt
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+
+		default:
+			// FailureFatal and everything the engine does not schedule
+			// (transport errors, mid-stream aborts): return immediately
+			// (existing behavior).
 			c.logger.Debug("non-retryable stream error", "error", err)
 			return nil, err
 		}
-
-		// D4: Don't retry if we're on the last attempt
-		if attempt >= streamMaxRetries-1 {
-			break
-		}
-
-		// D4: Calculate backoff with exponential delay and Retry-After
-		backoff := time.Duration(1<<uint(attempt)) * time.Second // 2s, 4s, 8s
-		if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 {
-			backoff = rlErr.RetryAfter
-			c.logger.Debug("using Retry-After from rate limit response", "retry_after", backoff)
-		}
-
-		select {
-		case <-time.After(backoff):
-			// Continue to next attempt
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
 	}
 
-	return nil, fmt.Errorf("streaming failed after %d attempts: %w", streamMaxRetries, lastErr)
+	return nil, &ClientError{
+		Message: fmt.Sprintf("streaming failed after %d attempts", shortRetries),
+		Cause:   lastErr,
+	}
 }
 
 // doStreamRequest performs a single streaming HTTP request and invokes onDelta for each chunk.
@@ -1707,22 +1912,40 @@ func (c *Client) Config() *ModelConfig {
 	return c.config
 }
 
-// isRetryableStreamingError returns true for transient errors that warrant stream retry.
-// D4: Used for ChatWithDeltaCallback retry logic.
-func isRetryableStreamingError(err error) bool {
-	if err == nil {
-		return false
+// errorStatusAndHeader extracts the failure's HTTP status and headers so the
+// loops can call Classify (D4). RateLimitError wraps the APIError cause, and
+// doStreamRequest returns bare APIErrors; the status alone is authoritative
+// here (quota-shaped responses were already resolved to QuotaResetError by
+// the request layer, and Classify only needs the status for the
+// throttle/server/fatal buckets once quota is off the table).
+func errorStatusAndHeader(err error) (int, http.Header) {
+	var rlErr *RateLimitError
+	if errors.As(err, &rlErr) {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			return apiErr.StatusCode, nil
+		}
+		return http.StatusTooManyRequests, nil
 	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode == 429 || apiErr.StatusCode == 502 || apiErr.StatusCode == 503 || apiErr.StatusCode == 504
+		return apiErr.StatusCode, nil
 	}
-	var clientErr *ClientError
-	if errors.As(err, &clientErr) {
-		errStr := clientErr.Error()
-		return strings.Contains(errStr, "stream") || strings.Contains(errStr, "broken pipe") || strings.Contains(errStr, "unexpected EOF")
+	return 0, nil
+}
+
+// errorRetryAt surfaces a server-provided retry instant from the error chain
+// for the plan's prior-instant input: a RateLimitError carries RetryAfter as
+// a duration from the exhaustion moment. Zero when absent (plan step only).
+func errorRetryAt(err error) time.Time {
+	if err == nil {
+		return time.Time{}
 	}
-	return false
+	var rlErr *RateLimitError
+	if errors.As(err, &rlErr) && rlErr.RetryAfter > 0 {
+		return time.Now().Add(rlErr.RetryAfter)
+	}
+	return time.Time{}
 }
 
 // extractRetryAfter extracts Retry-After duration from HTTP response headers.

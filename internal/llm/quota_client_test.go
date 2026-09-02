@@ -44,7 +44,7 @@ func TestQuotaClient_ClassifiesQuotaErrors(t *testing.T) {
 			statusCode:   http.StatusTooManyRequests,
 			body:         `{"error":{"message":"Provider returned 429): {\"error\":{\"type\":\"tpm_uncached_exceeded\",\"code\":\"tpm_uncached_exceeded\",\"retry_after\":2.0,\"retriable\":true}}","code":429}}`,
 			wantQuota:    false,
-			wantAttempts: maxRetries,
+			wantAttempts: defaultShortRetries,
 		},
 	}
 
@@ -172,7 +172,7 @@ func TestQuotaClient_DeltaCallbackQuotaErrorNoShortRetry(t *testing.T) {
 			statusCode:   http.StatusTooManyRequests,
 			body:         `{"error":{"message":"slow down"}}`,
 			wantQuota:    false,
-			wantAttempts: streamMaxRetries,
+			wantAttempts: defaultShortRetries,
 		},
 	}
 

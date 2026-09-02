@@ -270,6 +270,45 @@ func (d *ProviderError) Error() string {
 	return d.Type
 }
 
+// ThrottleBackoffError reports sustained provider throttling that exceeded
+// the short in-loop retry budget (tree 02 leaf 03, DECISIONS.md D4/D8): a
+// bare 429/503 load-shedding episode is NOT quota and NOT a dead model, so
+// after the short retries burn out the loop returns this instead of a
+// ClientError. RetryAt is the earliest future attempt time from the
+// BackoffPlan (server Retry-After honored when later, capped by the plan
+// horizon), letting the caller (agent loop, tree 03 parking) park the turn
+// until then. Implements error + Unwrap so errors.As traverses the cause.
+type ThrottleBackoffError struct {
+	ProviderID string
+	ModelID    string
+	RetryAt    time.Time
+	Attempt    int
+	Cause      error
+}
+
+func (e *ThrottleBackoffError) Error() string {
+	msg := fmt.Sprintf("throttled by provider %s model %s after %d attempts; retry at %s",
+		e.ProviderID, e.ModelID, e.Attempt, e.RetryAt.Format(time.RFC3339))
+	if e.Cause != nil {
+		msg += ": " + e.Cause.Error()
+	}
+	return msg
+}
+
+func (e *ThrottleBackoffError) Unwrap() error {
+	return e.Cause
+}
+
+// AsThrottleBackoffError returns the *ThrottleBackoffError in err's chain,
+// mirroring AsQuotaResetError (errors_quota.go). Tree 03 leaf 03 consumes it
+// to route park decisions off the verdict class.
+func AsThrottleBackoffError(err error) (*ThrottleBackoffError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	return errors.AsType[*ThrottleBackoffError](err)
+}
+
 // --- Provider-specific error parsers ---
 
 // openRouterOuter represents the outer JSON envelope from OpenRouter.

@@ -3451,6 +3451,24 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					}
 				}
 			} else {
+				// D4/D8 (tree 02 leaf 03): a ThrottleBackoffError is
+				// provider load-shedding, not a dead model — the agent
+				// loop must NOT rotate, must NOT call RecordAliasFailure
+				// (alias health tracks model failure, not throttling),
+				// and returns it unchanged so the caller can park until
+				// RetryAt. Tree 03 (turn-lifecycle) replaces this branch
+				// body with parking; until then it is a clean pass-through.
+				var throttleBackoffErr *llm.ThrottleBackoffError
+				if errors.As(err, &throttleBackoffErr) {
+					l.logger.Warn("Provider throttled: returning park-capable error without rotation",
+						"provider", throttleBackoffErr.ProviderID,
+						"model", throttleBackoffErr.ModelID,
+						"retry_at", throttleBackoffErr.RetryAt,
+						"attempt", throttleBackoffErr.Attempt,
+					)
+					return "", err
+				}
+
 				l.logger.Error("LLM call failed",
 					"iteration", iteration,
 					"error", err,
@@ -4408,6 +4426,23 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				l.quotaTracker.Clear(l.agentID, servedModel.ProviderID)
 			}
 			return response, nil
+		}
+
+		// D4/D8 (tree 02 leaf 03): a ThrottleBackoffError is provider
+		// load-shedding, not alias ill-health. Return WITHOUT
+		// RecordAliasFailure and WITHOUT rotation (rotation is for dead
+		// models, not throttled live ones — D4/D8 rationale, mirrored in
+		// the reasoningCycle branch above); tree 03 replaces this
+		// pass-through with parking on RetryAt.
+		var throttleBackoffErr *llm.ThrottleBackoffError
+		if errors.As(err, &throttleBackoffErr) {
+			l.logger.Warn("Provider throttled: returning park-capable error without rotation",
+				"provider", throttleBackoffErr.ProviderID,
+				"model", throttleBackoffErr.ModelID,
+				"retry_at", throttleBackoffErr.RetryAt,
+				"attempt", throttleBackoffErr.Attempt,
+			)
+			return nil, err
 		}
 
 		// Check if it's a rate limit error

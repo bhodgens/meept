@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -22,8 +21,11 @@ import (
 const (
 	anthropicDefaultTimeout = 5 * time.Minute
 	anthropicAPIVersion     = "2023-06-01"
-	anthropicMaxRetries     = 3
-	anthropicRetryBackoff   = 2.0 // seconds - exponential base: 2^1=2, 2^2=4, 2^3=8
+	// D4/D8 (leaf 03): anthropicMaxRetries / anthropicRetryBackoff and the
+	// 30s retryBackoffMaxDelay cap are gone — both loops take their count
+	// from FailurePolicyConfig.ShortRetries (nil-safe default 3,
+	// defaultShortRetries in client.go) and their schedule from
+	// DefaultBackoffPlan + ParseRetryAfter.
 )
 
 // Anthropic HTTP status codes that warrant a retry
@@ -54,6 +56,9 @@ type AnthropicClient struct {
 	// quotaMaxWait is the upper bound applied to derived quota waits. Zero
 	// falls back to DefaultQuotaMaxWait. See Client.quotaMaxWait.
 	quotaMaxWait time.Duration
+	// failurePolicy is the injected tree-02 policy config (leaf 03 Task 5):
+	// ShortRetries bounds both anthropic retry loops; nil-safe default 3.
+	failurePolicy *FailurePolicyConfig
 }
 
 // SetQuotaMaxWait sets the quota wait upper bound. Nil-receiver safe.
@@ -62,6 +67,43 @@ func (c *AnthropicClient) SetQuotaMaxWait(d time.Duration) {
 		return
 	}
 	c.quotaMaxWait = d
+}
+
+// SetFailurePolicyConfig injects the tree-02 failure-policy config (leaf 03
+// Task 5). Mirrors Client.SetFailurePolicyConfig: nil-safe, and a non-
+// positive ShortRetries falls back to the default 3.
+func (c *AnthropicClient) SetFailurePolicyConfig(cfg *FailurePolicyConfig) {
+	if c == nil {
+		return
+	}
+	if cfg != nil && cfg.ShortRetries <= 0 {
+		clone := *cfg
+		clone.ShortRetries = defaultShortRetries
+		c.failurePolicy = &clone
+		return
+	}
+	c.failurePolicy = cfg
+}
+
+// shortRetryBudget returns the loop retry count: the injected config value
+// or the nil-safe default (leaf 03 Task 5).
+func (c *AnthropicClient) shortRetryBudget() int {
+	if c != nil && c.failurePolicy != nil && c.failurePolicy.ShortRetries > 0 {
+		return c.failurePolicy.ShortRetries
+	}
+	return defaultShortRetries
+}
+
+// policyCfg resolves the injected policy config or the package defaults.
+func (c *AnthropicClient) policyCfg() FailurePolicyConfig {
+	if c != nil && c.failurePolicy != nil {
+		return *c.failurePolicy
+	}
+	return FailurePolicyConfig{
+		Horizon:      24 * time.Hour,
+		BaseThrottle: 30 * time.Second,
+		PollFloor:    time.Hour,
+	}
 }
 
 // quotaDetailFromBody returns a truncated body detail for quota error causes,
@@ -278,7 +320,17 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	}
 
 	var lastErr error
-	for attempt := 1; attempt <= anthropicMaxRetries; attempt++ {
+
+	// D4 (leaf 03): classify-first policy engine, identical shape to the
+	// openai loops. Quota exits immediately (quota-reset-resilience
+	// contract 1, placement unchanged); throttle retries within the short
+	// budget and escalates to ThrottleBackoffError; server errors keep the
+	// bounded retry + ClientError shape; fatal returns immediately.
+	shortRetries := c.shortRetryBudget()
+	now := time.Now()
+	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
+
+	for attempt := 1; attempt <= shortRetries; attempt++ {
 		resp, err := c.doRequest(ctx, reqBody)
 		if err != nil {
 			// Quota errors never re-enter the short-retry loop: the window
@@ -288,32 +340,72 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 			if errors.As(err, &quotaErr) {
 				return nil, err
 			}
-			var apiErr *APIError
-			if errors.As(err, &apiErr) && anthropicRetryableStatusCodes[apiErr.StatusCode] {
-				c.logger.Warn("Retryable error",
-					"status", apiErr.StatusCode,
-					"attempt", attempt,
-					"max_retries", anthropicMaxRetries,
-				)
+
+			// D4/D7: classify FIRST. The request layer already resolved
+			// quota shapes (rate_limit_error / quota_exceeded / 402) to
+			// QuotaResetError, so a surviving error is a bare throttle or
+			// server error.
+			status, header := errorStatusAndHeader(err)
+			verdict := Classify(status, header, nil, time.Now())
+
+			switch verdict.Class {
+			case FailureThrottle:
+				// Short-horizon retries honoring the server schedule
+				// (ParseRetryAfter over the plan step, capped by the plan);
+				// exhaustion escalates to ThrottleBackoffError (D4/D8).
 				lastErr = err
-				if attempt < anthropicMaxRetries {
-					// D11: Prefer Retry-After header from rate limit response
-					// LLM-H1: Use exponential backoff (2^attempt) with jitter, matching the OpenAI client.
-					expDelay := time.Duration(math.Pow(anthropicRetryBackoff, float64(attempt)) * float64(time.Second))
-					sleepDuration := BackoffWithJitter(expDelay, retryBackoffMaxDelay, true)
-					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 {
-						sleepDuration = rlErr.RetryAfter
+				c.logger.Warn("Retryable throttle",
+					"status", status,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					wait := shortThrottleSleep(header, plan, time.Now(), attempt-1)
+					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 && rlErr.RetryAfter < wait {
+						// Parity with the legacy loop: a smaller
+						// server-suggested wait is honored.
+						wait = rlErr.RetryAfter
 					}
+					c.logger.Debug("Retry backoff", "attempt", attempt, "sleep", wait)
 					select {
-					case <-time.After(sleepDuration):
+					case <-time.After(wait):
+						continue
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				}
+				return nil, &ThrottleBackoffError{
+					ProviderID: c.config.ProviderID,
+					ModelID:    c.config.ModelID,
+					RetryAt:    plan.NextAttempt(time.Now(), attempt, errorRetryAt(err)),
+					Attempt:    attempt,
+					Cause:      err,
+				}
+			case FailureServerError:
+				// Bounded retries via the plan; give up → the historical
+				// ClientError shape (leaf Notes).
+				lastErr = err
+				c.logger.Warn("Retryable server error",
+					"status", status,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					wait := shortThrottleSleep(nil, plan, time.Now(), attempt-1)
+					c.logger.Debug("Retry backoff", "attempt", attempt, "sleep", wait)
+					select {
+					case <-time.After(wait):
 						continue
 					case <-ctx.Done():
 						return nil, ctx.Err()
 					}
 				}
 				continue
+			default:
+				// FailureFatal and anything unclassifiable: return
+				// immediately (existing behavior).
+				return nil, err
 			}
-			return nil, err
 		}
 
 		if c.budget != nil {
@@ -341,8 +433,11 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		return resp, nil
 	}
 
+	// D8 exhaustion cap: throttle escalations already returned
+	// ThrottleBackoffError above; reaching here means the remaining retries
+	// were server errors — the historical ClientError shape stands.
 	return nil, &ClientError{
-		Message: fmt.Sprintf("All %d attempts failed", anthropicMaxRetries),
+		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
 }
@@ -445,9 +540,20 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 	}
 
 	var lastErr error
-	for attempt := 1; attempt <= anthropicMaxRetries; attempt++ {
+
+	// D4 (leaf 03): classify-first policy engine, identical shape to the
+	// anthropic non-streaming loop. Streaming subtlety: the pre-first-token
+	// gating is preserved exactly — doStreamingRequest only returns HTTP-
+	// status errors before parseStreamingResponse runs, so a throttle that
+	// survived the short retries surfaces as ThrottleBackoffError only
+	// when no tokens flowed; a mid-stream failure returns its own error.
+	shortRetries := c.shortRetryBudget()
+	now := time.Now()
+	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
+
+	for attempt := 1; attempt <= shortRetries; attempt++ {
 		if attempt > 1 {
-			reportProgress(ProgressStageThinking, fmt.Sprintf("Retry attempt %d/%d...", attempt, anthropicMaxRetries))
+			reportProgress(ProgressStageThinking, fmt.Sprintf("Retry attempt %d/%d...", attempt, shortRetries))
 		} else {
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
@@ -461,24 +567,59 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
-			var apiErr *APIError
-			if errors.As(err, &apiErr) && anthropicRetryableStatusCodes[apiErr.StatusCode] {
-				c.logger.Warn("Retryable error",
-					"status", apiErr.StatusCode,
-					"attempt", attempt,
-					"max_retries", anthropicMaxRetries,
-				)
+
+			// D4/D7: classify FIRST (quota already peeled off above).
+			status, header := errorStatusAndHeader(err)
+			verdict := Classify(status, header, nil, time.Now())
+
+			switch verdict.Class {
+			case FailureThrottle:
+				// Short-horizon retries honoring the server schedule;
+				// exhaustion escalates to ThrottleBackoffError (D4/D8).
 				lastErr = err
-				if attempt < anthropicMaxRetries {
-					// D11: Prefer Retry-After header from rate limit response
-					// LLM-H1: Use exponential backoff (2^attempt) with jitter, matching the OpenAI client.
-					expDelay := time.Duration(math.Pow(anthropicRetryBackoff, float64(attempt)) * float64(time.Second))
-					sleepDuration := BackoffWithJitter(expDelay, retryBackoffMaxDelay, true)
-					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 {
-						sleepDuration = rlErr.RetryAfter
+				c.logger.Warn("Retryable throttle",
+					"status", status,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					wait := shortThrottleSleep(header, plan, time.Now(), attempt-1)
+					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 && rlErr.RetryAfter < wait {
+						// Parity with the legacy loop: a smaller
+						// server-suggested wait is honored.
+						wait = rlErr.RetryAfter
 					}
+					c.logger.Debug("Retry backoff", "attempt", attempt, "sleep", wait)
 					select {
-					case <-time.After(sleepDuration):
+					case <-time.After(wait):
+						continue
+					case <-ctx.Done():
+						reportProgress(ProgressStageDone, "Request cancelled")
+						return nil, ctx.Err()
+					}
+				}
+				reportProgress(ProgressStageDone, "Throttled: parked for backoff")
+				return nil, &ThrottleBackoffError{
+					ProviderID: c.config.ProviderID,
+					ModelID:    c.config.ModelID,
+					RetryAt:    plan.NextAttempt(time.Now(), attempt, errorRetryAt(err)),
+					Attempt:    attempt,
+					Cause:      err,
+				}
+			case FailureServerError:
+				// Bounded retries via the plan; give up → the historical
+				// ClientError shape (leaf Notes).
+				lastErr = err
+				c.logger.Warn("Retryable server error",
+					"status", status,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					wait := shortThrottleSleep(nil, plan, time.Now(), attempt-1)
+					c.logger.Debug("Retry backoff", "attempt", attempt, "sleep", wait)
+					select {
+					case <-time.After(wait):
 						continue
 					case <-ctx.Done():
 						reportProgress(ProgressStageDone, "Request cancelled")
@@ -486,9 +627,12 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 					}
 				}
 				continue
+			default:
+				// FailureFatal and anything unclassifiable: return
+				// immediately (existing behavior).
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
 			}
-			reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
-			return nil, err
 		}
 
 		reportProgress(ProgressStageStreaming, "Receiving response...")
@@ -524,9 +668,9 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		return resp, nil
 	}
 
-	reportProgress(ProgressStageDone, fmt.Sprintf("Failed after %d attempts", anthropicMaxRetries))
+	reportProgress(ProgressStageDone, fmt.Sprintf("Failed after %d attempts", shortRetries))
 	return nil, &ClientError{
-		Message: fmt.Sprintf("All %d attempts failed", anthropicMaxRetries),
+		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
 }
@@ -1570,8 +1714,17 @@ func (s *sseScanner) Scan() bool {
 		// Read more data if buffer is empty
 		if len(s.buffer) == 0 {
 			n, err := s.reader.Read(chunk)
-			if err != nil {
-				if err == io.EOF {
+			// Tree-02 leaf-03 fix: process the bytes returned WITH io.EOF
+			// before honoring the EOF. Readers like http bodies and
+			// iotest.DataErrReader deliver the final bytes TOGETHER with
+			// EOF; the old code discarded them, silently dropping every
+			// event in the trailing read (streaming responses parsed as
+			// empty). n>0 must always be appended first.
+			if n > 0 {
+				s.buffer = append(s.buffer, chunk[:n]...)
+			}
+			if err == io.EOF {
+				if len(s.buffer) == 0 {
 					// B-06 FIX: Flush any pending line into the event, then
 					// return the event if it has data. Without this, the last
 					// SSE event is silently dropped when the connection ends
@@ -1581,15 +1734,26 @@ func (s *sseScanner) Scan() bool {
 					}
 					return s.event.Data != ""
 				}
+				// Bytes arrived with the EOF — fall through and parse them;
+				// the NEXT Scan's Read returns (0, io.EOF) and the flush
+				// above still runs for any trailing line.
+				err = nil
+			}
+			if err != nil {
 				s.err = err
 				return false
 			}
-			s.buffer = append(s.buffer, chunk[:n]...)
 		}
 
 		// Process buffer
-	bufferLoop:
-		for i := 0; i < len(s.buffer); i++ {
+		// Leaf-03 fix (tree 02): the old loop dropped the byte at
+		// i == len(s.buffer)-1 (s.buffer[:0] discarded it before it was
+		// ever written to currentLine), so ANY line split across two
+		// Read() chunks lost its tail — chunked SSE delivery (real HTTP
+		// bodies) silently yielded zero events. Iterate by index and
+		// keep the unconsumed remainder in the buffer instead.
+		i := 0
+		for i < len(s.buffer) {
 			c := s.buffer[i]
 
 			switch c {
@@ -1607,8 +1771,7 @@ func (s *sseScanner) Scan() bool {
 					s.buffer = s.buffer[i+1:]
 					return true
 				}
-				s.buffer = s.buffer[i+1:]
-				break bufferLoop
+				i++
 			case '\n':
 				// End of line
 				if currentLine.Len() > 0 {
@@ -1619,18 +1782,15 @@ func (s *sseScanner) Scan() bool {
 					s.buffer = s.buffer[i+1:]
 					return true
 				}
-				s.buffer = s.buffer[i+1:]
-				break bufferLoop
+				i++
 			default:
 				currentLine.WriteByte(c)
-			}
-
-			// If we've consumed all buffer bytes
-			if i == len(s.buffer)-1 {
-				s.buffer = s.buffer[:0]
-				break
+				i++
 			}
 		}
+		// Chunk fully consumed — every byte was either folded into
+		// currentLine / s.event or terminated a line above.
+		s.buffer = s.buffer[:0]
 	}
 }
 

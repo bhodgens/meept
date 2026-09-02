@@ -877,3 +877,37 @@ func TestUserMessage_Helper(t *testing.T) {
 		}
 	})
 }
+
+// ThrottleBackoffError tests (tree 02 leaf 03, D4/D8).
+func TestThrottleBackoffError_Error(t *testing.T) {
+	err := &ThrottleBackoffError{
+		ProviderID: "prov",
+		ModelID:    "model-1",
+		RetryAt:    time.Now().Add(time.Minute),
+		Attempt:    2,
+		Cause:      errors.New("throttled"),
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "prov") || !strings.Contains(msg, "model-1") {
+		t.Errorf("Error() = %q, want provider+model", msg)
+	}
+}
+
+func TestThrottleBackoffError_Unwrap(t *testing.T) {
+	cause := errors.New("throttled")
+	err := &ThrottleBackoffError{Cause: cause}
+	if !errors.Is(err, cause) {
+		t.Error("Unwrap should expose cause")
+	}
+}
+
+func TestAsThrottleBackoffError(t *testing.T) {
+	inner := &ThrottleBackoffError{ProviderID: "p", ModelID: "m", RetryAt: time.Now().Add(time.Second), Attempt: 1}
+	var got *ThrottleBackoffError
+	if !errors.As(error(inner), &got) || got.ModelID != "m" {
+		t.Error("errors.As should find ThrottleBackoffError")
+	}
+	if errors.As(error(&RateLimitError{}), &got) {
+		t.Error("RateLimitError must not match ThrottleBackoffError")
+	}
+}
