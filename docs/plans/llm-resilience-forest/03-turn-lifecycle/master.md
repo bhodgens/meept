@@ -165,9 +165,9 @@ resume tests never sleep). Bus payloads: two-value map assertions.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-generalize-parker.md | PENDING | 0 | |
-| 02-throttle-parking.md | PENDING | 0 | |
-| 03-goalloop-queue-coverage.md | PENDING | 0 | |
+| 01-generalize-parker.md | COMPLETE | 0 | 285f67fe (parallel session); legacy quota tests untouched+green; ParkedTurnRecord naming per §4.5; persistence memory-only (finding stated) |
+| 02-throttle-parking.md | COMPLETE | 0 | 1d94e2da; both pass-through sites park-or-give-up; D8 ThrottleGiveUpError; payload routing IMPLEMENTED (deviation from "deferred" sketch); attempt growth via context; full agent+llm suites green |
+| 03-goalloop-queue-coverage.md | COMPLETE | 0 | 4739c151; EpisodeParker over shared TurnParker; queue requeue via next_retry_at WITHOUT RetryCount consumption; give-up → legacy paths byte-identical; deviations documented in commit |
 | 04-states-visibility-docs.md | PENDING | 0 | |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
