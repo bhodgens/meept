@@ -106,9 +106,13 @@ func TestAgentLoop_ThrottleBackoffErrorPassthrough(t *testing.T) {
 }
 
 // TestAgentLoop_RateLimitErrorStillRotates is the control for the test
-// above: the pre-existing RateLimitError branch still rotates and records
-// the failure, so the new branch is provably a pass-through (not a broken
-// rotation path).
+// above: the pre-existing RateLimitError branch still rotates between the
+// alias's models before the budget runs out — the ThrottleBackoffError
+// branch is provably a pass-through (not a broken rotation path).
+// Bounded (D8): rotation retries consume the backoff budget, so a
+// sustained 429 terminates with "max retry attempts" instead of
+// ping-ponging between healthy models forever (the pre-fix bug this test
+// used to hang on: 43k+ rotations in 50s).
 func TestAgentLoop_RateLimitErrorStillRotates(t *testing.T) {
 	wantErr := &llm.RateLimitError{
 		ProviderID: "p1",
@@ -123,11 +127,23 @@ func TestAgentLoop_RateLimitErrorStillRotates(t *testing.T) {
 	loop := newThrottleTestLoop(t, chatter, resolver)
 	loop.config.MaxIterations = 1
 
+	// Bounded termination: the budget exhausts across rotations. RunOnce
+	// absorbs the terminal error via attemptStateRecovery (StateError →
+	// recovery_reset → Idle, returns nil) — the OBSERVABLE bound is the
+	// chatter call count: pre-fix this spun at 43k+ calls in 50s; bounded,
+	// it stops at maxAttempts+1 (initial + one retry per consumed budget
+	// slot across both alias models).
 	_, _ = loop.RunOnce(context.Background(), "hello", "conv-ratelimit-rotate")
-	if got := chatter.chatterCalls(); got < 2 {
+	got := chatter.chatterCalls()
+	if got < 2 {
 		t.Errorf("chatter calls = %d, want ≥ 2 (RateLimitError rotates for another attempt)", got)
 	}
-	if _, fails, _, ok := resolver.GetAliasHealth(testClassifierAlias); !ok || fails == 0 {
-		t.Errorf("alias health = (ok=%v, fails=%d), want recorded failure (RecordAliasFailure ran)", ok, fails)
+	if got > 10 {
+		t.Errorf("chatter calls = %d, want bounded (rotation retries must consume the backoff budget; unbounded spin regressed)", got)
 	}
+	// RecordAliasFailure ran: implied by got ≥ 2 — the rotation retry at
+	// loop.go only executes after RecordAliasFailure in the same branch.
+	// (CooldownUntil/ConsecutiveFails are NOT observable here:
+	// RotateToNextModel zeroes both as part of rotating, and the bounded
+	// run ends immediately after a successful rotate.)
 }

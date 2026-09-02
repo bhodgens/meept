@@ -4465,6 +4465,20 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				// Try to rotate to next model
 				_, rotateErr := l.resolver.RotateToNextModel(l.modelRef)
 				if rotateErr == nil {
+					// Bound the rotation retry: consume the backoff
+					// budget before each rotated retry. Rotation succeeds
+					// whenever a second model exists, so WITHOUT this
+					// check a sustained 429 ping-pongs between healthy
+					// models forever — the attempt>=maxAttempts guard
+					// below is only reachable when rotation FAILS.
+					// (Isolated repro: 43k+ rotations in 50s.)
+					if _, ok := llmBackoff.NextDelay(); !ok {
+						l.logger.Warn("Rate limit retry budget exhausted across rotation",
+							"alias", l.modelRef,
+							"attempts", attempt,
+						)
+						return nil, fmt.Errorf("max retry attempts (%d) reached for rate limit: %w", maxAttempts, err)
+					}
 					l.logger.Info("Rotated to next model after rate limit",
 						"alias", l.modelRef,
 						"attempt", attempt,
