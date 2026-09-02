@@ -841,3 +841,115 @@ func TestEscalationModel_FrontmatterToSpec(t *testing.T) {
 		t.Errorf("spec.EscalationModel = %q, want %q (frontmatter → spec)", spec.EscalationModel, "my-alias")
 	}
 }
+
+func TestVerification_MergeSpec_Reload(t *testing.T) {
+	// Re-load scenario: a spec already carries a verification config from a
+	// prior AGENT.md load; mergeSpec must preserve it when the re-loaded
+	// frontmatter omits the verification block (D16 gap fix).
+	r := &AgentRegistry{logger: silentLogger()}
+	base := &AgentSpec{
+		ID:      "ver-agent",
+		Name:    "Verification Agent",
+		Role:    RoleExecutor,
+		Enabled: true,
+		Verification: VerificationConfig{
+			Enabled:     true,
+			Model:       "verifier-model",
+			AutoTrigger: true,
+			MaxFixLoops: 5,
+		},
+	}
+	def := &agents.AgentDefinition{
+		AgentMetadata: agents.AgentMetadata{ID: "ver-agent", Name: "Verification Agent", Role: "executor"},
+	}
+
+	merged := r.mergeSpec(base, def)
+	if merged.Verification.MaxFixLoops != 5 {
+		t.Errorf("mergeSpec Verification.MaxFixLoops = %d, want 5 (preserve base on omission)",
+			merged.Verification.MaxFixLoops)
+	}
+	if merged.Verification.Model != "verifier-model" {
+		t.Errorf("mergeSpec Verification.Model = %q, want %q (preserve base on omission)",
+			merged.Verification.Model, "verifier-model")
+	}
+
+	// A re-load carrying its own verification block overrides the base.
+	enabled := true
+	def.Verification = &agents.VerificationMetadata{
+		Enabled:     &enabled,
+		Model:       "new-verifier",
+		MaxFixLoops: 7,
+	}
+	merged = r.mergeSpec(base, def)
+	if merged.Verification.MaxFixLoops != 7 {
+		t.Errorf("mergeSpec Verification.MaxFixLoops = %d, want 7 (prefer AGENT.md)",
+			merged.Verification.MaxFixLoops)
+	}
+	if merged.Verification.Model != "new-verifier" {
+		t.Errorf("mergeSpec Verification.Model = %q, want %q (prefer AGENT.md)",
+			merged.Verification.Model, "new-verifier")
+	}
+	if !merged.Verification.Enabled {
+		t.Errorf("mergeSpec Verification.Enabled = false, want true")
+	}
+}
+
+func TestGate_MergeSpec_Reload(t *testing.T) {
+	// Re-load scenario: a spec already carries a roster gate from a prior
+	// AGENT.md load; mergeSpec must preserve it when the re-loaded
+	// frontmatter omits the gate block (D16 gap fix).
+	r := &AgentRegistry{logger: silentLogger()}
+	base := &AgentSpec{
+		ID:      "gate-agent",
+		Name:    "Gate Agent",
+		Role:    RoleExecutor,
+		Enabled: true,
+		Gate: &RosterGateConfig{
+			Command:           "go test ./...",
+			TimeoutSeconds:    120,
+			SkipWhenUnchanged: true,
+		},
+	}
+	def := &agents.AgentDefinition{
+		AgentMetadata: agents.AgentMetadata{ID: "gate-agent", Name: "Gate Agent", Role: "executor"},
+	}
+
+	merged := r.mergeSpec(base, def)
+	if merged.Gate == nil {
+		t.Fatalf("mergeSpec Gate = nil, want preserved base gate (omission keeps current)")
+	}
+	if merged.Gate.Command != "go test ./..." {
+		t.Errorf("mergeSpec Gate.Command = %q, want %q (preserve base on omission)",
+			merged.Gate.Command, "go test ./...")
+	}
+	if merged.Gate.TimeoutSeconds != 120 {
+		t.Errorf("mergeSpec Gate.TimeoutSeconds = %d, want 120 (preserve base on omission)",
+			merged.Gate.TimeoutSeconds)
+	}
+
+	// A re-load carrying its own gate block overrides the base (prefer
+	// AGENT.md). Parsed from real frontmatter so skip_when_unchanged: false
+	// is explicitly-present (skipExplicit) and NormalizeGateDefaults
+	// preserves it — programmatic GateMetadata construction normalizes the
+	// plain bool back to true (documented caveat, agents.GateMetadata).
+	gateFM := "---\nid: gate-agent\nname: Gate Agent\nrole: executor\ngate:\n  command: make lint\n  timeout_seconds: 60\n  skip_when_unchanged: false\n---\n\n# Gate Agent\n\nBody."
+	parsed, err := agents.ParseAgentText(gateFM)
+	if err != nil {
+		t.Fatalf("ParseAgentText failed: %v", err)
+	}
+	merged = r.mergeSpec(base, parsed)
+	if merged.Gate == nil {
+		t.Fatalf("mergeSpec Gate = nil, want new gate (prefer AGENT.md)")
+	}
+	if merged.Gate.Command != "make lint" {
+		t.Errorf("mergeSpec Gate.Command = %q, want %q (prefer AGENT.md)",
+			merged.Gate.Command, "make lint")
+	}
+	if merged.Gate.TimeoutSeconds != 60 {
+		t.Errorf("mergeSpec Gate.TimeoutSeconds = %d, want 60 (prefer AGENT.md)",
+			merged.Gate.TimeoutSeconds)
+	}
+	if merged.Gate.SkipWhenUnchanged {
+		t.Errorf("mergeSpec Gate.SkipWhenUnchanged = true, want false (prefer AGENT.md)")
+	}
+}

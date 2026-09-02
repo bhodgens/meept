@@ -854,6 +854,34 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.EscalationModel = base.EscalationModel
 	}
 
+	// Verification: prefer AGENT.md when the re-loaded frontmatter carries a
+	// verification block; omission keeps the current config (D16 gap fix —
+	// previously only definitionToSpec wired this, so re-loads silently
+	// dropped verification changes).
+	if def.Verification != nil {
+		merged.Verification = verificationFromMetadata(def.Verification)
+	} else {
+		merged.Verification = base.Verification
+	}
+
+	// Roster quality gate: prefer AGENT.md when the re-loaded frontmatter
+	// carries a non-empty gate command; omission keeps the current gate
+	// (D16 gap fix). An empty gate block counts as omitted — mirroring
+	// definitionToSpec, a gate cannot be cleared via re-load. The preserve
+	// path shallow-copies to avoid aliasing the base spec's config.
+	if def.Gate != nil && def.Gate.Command != "" {
+		gm := *def.Gate
+		gm.NormalizeGateDefaults()
+		merged.Gate = &RosterGateConfig{
+			Command:           gm.Command,
+			TimeoutSeconds:    gm.TimeoutSeconds,
+			SkipWhenUnchanged: gm.SkipWhenUnchanged,
+		}
+	} else if base.Gate != nil {
+		g := *base.Gate
+		merged.Gate = &g
+	}
+
 	// Tools: MERGE (union)
 	merged.AdditionalTools = mergeStringSlices(base.AdditionalTools, def.AdditionalTools)
 
