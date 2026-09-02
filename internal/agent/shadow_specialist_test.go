@@ -17,7 +17,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
@@ -169,20 +168,21 @@ func TestSpecialistShadow_ToolTurnCapturedViaRegistryLoop(t *testing.T) {
 	assert.Equal(t, 1, chatter.callCount,
 		"terminating tool must end the turn after exactly one LLM call")
 
-	// The loop captures tool turns on a tracked goroutine; poll for the
-	// record rather than racing RunOnce's return. The window is generous
-	// (10s) because under full-sweep parallelism (other packages' test
-	// binaries competing for CPU) goroutine scheduling latency has been
-	// observed to exceed the original 3s window (forest F3 follow-up).
-	require.Eventually(t, func() bool {
-		stats, err := mgr.GetStats(context.Background())
-		if err != nil {
-			return false
-		}
-		return stats.TotalRecords == 1 &&
-			stats.RecordsByTaskType[string(shadow.TaskTypeToolUse)] == 1
-	}, 10*time.Second, 10*time.Millisecond,
-		"specialist loop tool turn must be captured as a tool_use shadow record")
+	// The loop captures tool turns on a fire-and-forget goroutine
+	// (loop.go: l.wg.Add(1) + go func). loop.Stop() waits on that same
+	// WaitGroup, so after it returns the capture is GUARANTEED complete —
+	// no polling, no scheduling race. (The previous Eventually-based
+	// version raced real async behavior and failed under full-sweep load
+	// when the 3s window expired before the goroutine ran; forest F3
+	// follow-up.)
+	loop.Stop()
+
+	stats, err := mgr.GetStats(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, stats.TotalRecords,
+		"specialist loop tool turn must be captured as a shadow record")
+	assert.Equal(t, 1, stats.RecordsByTaskType[string(shadow.TaskTypeToolUse)],
+		"the captured record must be task_type=tool_use")
 }
 
 // TestSpecialistShadow_NilManagerTurnStillCompletes is the negative control:
