@@ -99,6 +99,20 @@ GO_LDFLAGS_VERSION := -X github.com/caimlas/meept/internal/version.Version=$(VER
 # Build flags (after version info so it can reference GO_LDFLAGS_VERSION)
 GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 
+# Test package parallelism bound.
+#
+# WHY: the full ./internal/... sweep spawns ~98 test binaries; at go's default
+# -p (GOMAXPROCS), macOS ephemeral ports (net.inet.ip.portrange, 49152-65535)
+# run out mid-run and unrelated packages fail with
+#   dial tcp 127.0.0.1:NNNNN: connect: can't assign requested address
+# Bound -p so concurrent test binaries stay below the burst budget. Override
+# with `make test TEST_PACKAGE_PARALLELISM=N` (e.g. on Linux/CI, or after
+# widening the port range via
+#   sudo sysctl -w net.inet.ip.portrange.first=10240
+# which is a dev-machine workaround, not a repo fix).
+TEST_PACKAGE_PARALLELISM ?= 4
+GO_TEST_PACKAGE_FLAGS := -p $(TEST_PACKAGE_PARALLELISM)
+
 # Flutter GUI directory and platform (needed by multiple targets)
 FLUTTER_UI_DIR := ui/flutter_ui
 ifeq ($(shell uname -s),Darwin)
@@ -243,23 +257,23 @@ install: build menubar-app build-gui
 # =============================================================================
 
 test:
-	@echo "Running tests (short mode)..."
-	go test ./... -short
+	@echo "Running tests (short mode, package parallelism $(TEST_PACKAGE_PARALLELISM))..."
+	go test $(GO_TEST_PACKAGE_FLAGS) ./... -short
 
 test-verbose:
-	@echo "Running tests (verbose)..."
-	go test ./... -v
+	@echo "Running tests (verbose, package parallelism $(TEST_PACKAGE_PARALLELISM))..."
+	go test $(GO_TEST_PACKAGE_FLAGS) ./... -v
 
 test-cover:
-	@echo "Running tests with coverage..."
+	@echo "Running tests with coverage (package parallelism $(TEST_PACKAGE_PARALLELISM))..."
 	@mkdir -p coverage
-	go test ./... -coverprofile=coverage/coverage.out
+	go test $(GO_TEST_PACKAGE_FLAGS) ./... -coverprofile=coverage/coverage.out
 	go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 	@echo "Coverage report: coverage/coverage.html"
 
 test-race:
-	@echo "Running tests with race detector..."
-	go test ./... -race
+	@echo "Running tests with race detector (package parallelism $(TEST_PACKAGE_PARALLELISM))..."
+	go test $(GO_TEST_PACKAGE_FLAGS) ./... -race
 
 test-multiuser:
 	@echo "Running multiuser cluster-pooling integration tests (race, 10x)..."

@@ -19,9 +19,18 @@ make build-gui          # Flutter GUI only
 make menubar-install    # macOS MenuBar app
 
 # Test
-go test ./... -v
-go test -race ./...
-go test ./... -coverprofile=coverage.out && go tool cover -html=coverage.out
+#
+# macOS: full-sweep runs MUST bound package parallelism (-p 4). Unbounded
+# `go test ./...` / `./internal/...` opens enough concurrent localhost
+# sockets to exhaust the ephemeral port range (49152-65535) mid-run, and
+# unrelated packages then fail with
+#   dial tcp 127.0.0.1:NNNNN: connect: can't assign requested address
+# `make test` and friends already pass -p 4 (override: make test
+# TEST_PACKAGE_PARALLELISM=N).
+go test -p 4 ./... -v
+go test -p 4 -race ./...
+go test -p 4 ./... -coverprofile=coverage.out && go tool cover -html=coverage.out
+make test            # canonical full suite (short mode, -p 4)
 
 # Run
 ./bin/meept-daemon -f           # Daemon foreground
@@ -40,7 +49,7 @@ agent-tui ./bin/meept chat      # TUI testing
 ./bin/meept agents create <def.json5>   # Register new employee
 ./bin/meept agents pause <id> / resume <id>
 ./bin/meept agents goals [--employee=<id>]
-./bin/meept agents set-gate <goal-id> --command="go test ./..."
+./bin/meept agents set-gate <goal-id> --command="go test -p 4 ./..."
 ./bin/meept agents audit <id> [--since=6h]
 
 # Plans
