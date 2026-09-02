@@ -178,14 +178,22 @@ func (p *EpisodeParker) park(employeeID, sessionID string, class llm.FailureClas
 			"employee_id", employeeID, "phase", payload.Phase, "error", err)
 		return false
 	}
-	return p.turns.Park(agent.ParkedTurnRecord{
+	rec := agent.ParkedTurnRecord{
 		ConversationID: sessionID,
 		SessionID:      sessionID,
 		AgentID:        employeeID,
 		Class:          class,
 		ResumeAt:       resumeAt,
 		TurnPayload:    raw,
-	})
+	}
+	if !p.turns.Park(rec) {
+		return false
+	}
+	// Park observability (leaf 04, D9): the parked episode surfaces on the
+	// existing agent.quota_wait topic through the shared parker's event bus
+	// — the goal loop needs no bus wiring of its own.
+	p.turns.EmitParkEvent(rec, "", "")
+	return true
 }
 
 // maybeParkProviderWait classifies err as a provider wait and, on a
@@ -250,6 +258,9 @@ func (l *GoalLoop) ResumeGoalEpisode(ctx context.Context, rec agent.ParkedTurnRe
 		"class", rec.Class,
 		"phase", p.Phase,
 	)
+	// Resume observability (leaf 04, D9): symmetric to the park event, via
+	// the shared parker's event bus on agent.quota_wait.
+	l.parker.turns.EmitResumeEvent(rec)
 	switch p.Phase {
 	case "assess":
 		if _, err := l.Assess(ctx, normalizedTrigger(p.Trigger)); err != nil {

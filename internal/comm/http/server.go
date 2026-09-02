@@ -703,9 +703,12 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 	case strings.HasPrefix(topic, "agent.quota"):
 		// Quota-state events (agent.quota_wait from the episode tracker,
 		// leaf 07 quota-reset-resilience) carry agent state transitions.
-		// They MUST render as progress indicators — never chat_message
-		// (a chat bubble would appear blank; AGENTS.md WS classification
-		// invariant).
+		// Tree 03 leaf 04 (universal parking, D9) publishes throttle
+		// park/resume/give-up events on the SAME agent.quota_wait topic
+		// (ParkTurnEvent payloads with class="throttle"), precisely so this
+		// prefix match keeps classifying them: they MUST render as progress
+		// indicators — never chat_message (a chat bubble would appear
+		// blank; AGENTS.md WS classification invariant).
 		eventType = "agent_progress"
 	case strings.HasPrefix(topic, "agent.model_escalated"):
 		// Model-escalation events (tree 01 leaf 04: verification fix-loop

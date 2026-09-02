@@ -78,35 +78,61 @@ func TestFormatQuotaCountdown(t *testing.T) {
 
 // ---------- badges ----------
 
+// TestQuotaWaitLabel pins the leaf 04 status-label contract (TUI + Flutter
+// parity, lowercase): a quota-class wait renders "quota_wait · reset HH:MM",
+// a throttle-class wait renders "quota_wait · throttle retry HH:MM" — both
+// absolute HH:MM of the daemon-provided resume time (never relative math —
+// the GUI runs on web and cannot trust client wall clocks).
+func TestQuotaWaitLabel(t *testing.T) {
+	unblock := time.Date(2026, 9, 2, 14, 5, 0, 0, time.Local)
+	tests := []struct {
+		name      string
+		class     string
+		unblockAt time.Time
+		expect    string
+	}{
+		{"quota class", "quota", unblock, "quota_wait · reset 14:05"},
+		{"absent class defaults to quota semantics", "", unblock, "quota_wait · reset 14:05"},
+		{"throttle class", "throttle", unblock, "quota_wait · throttle retry 14:05"},
+		{"throttle past due still absolute", "throttle", time.Date(2026, 9, 1, 9, 1, 0, 0, time.Local), "quota_wait · throttle retry 09:01"},
+	}
+	for _, tt := range tests {
+		if got := QuotaWaitLabel(tt.class, tt.unblockAt); got != tt.expect {
+			t.Errorf("%s: QuotaWaitLabel(%q) = %q, want %q", tt.name, tt.class, got, tt.expect)
+		}
+	}
+}
+
 func TestQuotaStatus_Badges(t *testing.T) {
 	p := &AgentsPanel{}
 
-	// Blocked: error-tone label with the action-required hint.
-	if got := p.quotaStatusBadge(nil, true); got != "blocked · action required" {
+	// Blocked: error-tone label with the action-required hint (unchanged).
+	if got := p.quotaStatusBadge(nil, true, ""); got != "blocked · action required" {
 		t.Errorf("blocked badge = %q, want %q", got, "blocked · action required")
 	}
 
-	// Quota wait with a future unblock time (+30s buffer so sub-second
-	// wall-clock drift between constructing the time and rendering can't
-	// push the truncated minute below 3h12m).
-	future := time.Now().Add(3*time.Hour + 12*time.Minute + 30*time.Second)
-	got := p.quotaStatusBadge(&future, false)
-	if !strings.Contains(got, "quota wait") {
-		t.Errorf("quota wait badge %q missing %q", got, "quota wait")
-	}
-	if !strings.Contains(got, "quota resets in 3h 12m") {
-		t.Errorf("quota wait badge %q missing countdown", got)
+	// Quota wait (class quota): "quota_wait · reset HH:MM" of the unblock
+	// time.
+	future := time.Now().Add(3*time.Hour + 12*time.Minute)
+	got := p.quotaStatusBadge(&future, false, "quota")
+	if want := "quota_wait · reset " + future.Format("15:04"); got != want {
+		t.Errorf("quota wait badge = %q, want %q", got, want)
 	}
 
-	// Past-due wait: countdown resolves to "resets soon".
-	past := time.Now().Add(-1 * time.Hour)
-	got = p.quotaStatusBadge(&past, false)
-	if !strings.Contains(got, "quota wait") || !strings.Contains(got, "resets soon") {
-		t.Errorf("past-due badge = %q, want quota wait + resets soon", got)
+	// Throttle wait: "quota_wait · throttle retry HH:MM".
+	got = p.quotaStatusBadge(&future, false, "throttle")
+	if want := "quota_wait · throttle retry " + future.Format("15:04"); got != want {
+		t.Errorf("throttle wait badge = %q, want %q", got, want)
+	}
+
+	// Absent class (pre-leaf-04 event): defaults to quota semantics.
+	got = p.quotaStatusBadge(&future, false, "")
+	if want := "quota_wait · reset " + future.Format("15:04"); got != want {
+		t.Errorf("absent-class badge = %q, want %q", got, want)
 	}
 
 	// Blocked wins over wait time.
-	got = p.quotaStatusBadge(&future, true)
+	got = p.quotaStatusBadge(&future, true, "throttle")
 	if got != "blocked · action required" {
 		t.Errorf("blocked+wait badge = %q, want blocked label", got)
 	}
@@ -116,7 +142,7 @@ func TestQuotaStatus_Badges(t *testing.T) {
 // byte-identically to before (regression safety).
 func TestQuotaStatus_NoEpisode(t *testing.T) {
 	p := &AgentsPanel{}
-	if got := p.quotaStatusBadge(nil, false); got != "" {
+	if got := p.quotaStatusBadge(nil, false, ""); got != "" {
 		t.Errorf("expected empty badge when no quota state, got %q", got)
 	}
 }
@@ -282,17 +308,17 @@ func TestQuotaCountdownTick(t *testing.T) {
 		t.Fatal("expected tick to stop after last episode cleared")
 	}
 
-	// Re-render recomputes the countdown text from the current time: build
-	// the badge directly and confirm the formatter output is live (the
-	// cached cell is rebuilt, not frozen at event time). The +30s buffer
-	// absorbs sub-minute wall-clock drift between constructing the time
-	// and rendering.
-	future := time.Now().Add(3*time.Hour + 12*time.Minute + 30*time.Second)
+	// Re-render recomputes the wait label from the cached wait time: build
+	// the badge directly and confirm the cell is rebuilt from the cached
+	// episode (leaf 04: the label is the absolute HH:MM form, not a
+	// countdown, but the tick still refreshes it — e.g. it flips at
+	// midnight — and the cell is never frozen at event time).
+	future := time.Now().Add(3*time.Hour + 12*time.Minute)
 	p.agents[0].QuotaWaitUntil = &future
 	p.updateAgentsTable()
 	cell := p.table.Rows()[0][1]
-	if !strings.Contains(stripANSI(cell), "quota resets in 3h 12m") {
-		t.Errorf("rebuilt cell = %q, want live countdown", cell)
+	if !strings.Contains(stripANSI(cell), "quota_wait · reset "+future.Format("15:04")) {
+		t.Errorf("rebuilt cell = %q, want live wait label", cell)
 	}
 }
 

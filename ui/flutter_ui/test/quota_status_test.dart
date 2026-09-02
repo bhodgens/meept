@@ -414,6 +414,92 @@ void main() {
     });
   });
 
+  // Tree 03 leaf 04 Task 4: wait-label parity with the TUI's QuotaWaitLabel
+  // (internal/tui/quota_status.go). Strings must stay byte-identical.
+  group('quotaWaitLabel (leaf 04 parity)', () {
+    // 2026-09-02 14:05 local — matches the TUI test's fixture.
+    final unblock = DateTime(2026, 9, 2, 14, 5);
+
+    int epochOf(DateTime t) => t.millisecondsSinceEpoch;
+
+    test('quota class renders reset label', () {
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: epochOf(unblock),
+        waitClass: 'quota',
+      );
+      expect(quotaWaitLabel(state), equals('quota_wait · reset 14:05'));
+    });
+
+    test('absent class (legacy event) defaults to reset label', () {
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: epochOf(unblock),
+      );
+      expect(quotaWaitLabel(state), equals('quota_wait · reset 14:05'));
+    });
+
+    test('throttle class renders throttle retry label', () {
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: epochOf(unblock),
+        waitClass: 'throttle',
+      );
+      expect(
+        quotaWaitLabel(state),
+        equals('quota_wait · throttle retry 14:05'),
+      );
+    });
+
+    test('past-due throttle wait stays absolute (no relative math)', () {
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch:
+            epochOf(DateTime(2026, 9, 1, 9, 1)),
+        waitClass: 'throttle',
+      );
+      expect(
+        quotaWaitLabel(state),
+        equals('quota_wait · throttle retry 09:01'),
+      );
+    });
+
+    test('blocked and no-wait states yield null', () {
+      expect(
+        quotaWaitLabel(const AgentQuotaState(quotaBlocked: true)),
+        isNull,
+      );
+      expect(
+        quotaWaitLabel(const AgentQuotaState(quotaBlocked: false)),
+        isNull,
+      );
+      expect(quotaWaitLabel(null), isNull);
+    });
+
+    test('AgentQuotaPayload.fromJson maps class → waitClass', () {
+      final payload = AgentQuotaPayload.fromJson({
+        'agent_id': 'agent-1',
+        'to': 'quota_wait',
+        'reason': 'throttle_wait',
+        'class': 'throttle',
+        'resume_at': '2026-09-02T15:00:00Z',
+      });
+      expect(payload.waitClass, equals('throttle'));
+    });
+
+    test('handleQuotaEvent stores waitClass on the episode', () {
+      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+      notifier.handleQuotaEvent(
+        agentId: 'agent-wc',
+        to: 'quota_wait',
+        unblockAt: '2026-09-02T14:05:00Z',
+        waitClass: 'throttle',
+      );
+      final ep = notifier.state.quotaEpisodes['agent-wc']!;
+      expect(ep.waitClass, equals('throttle'));
+    });
+  });
+
   group('Agent card with quota', () {
     testWidgets('shows quota badge on agent tile', (tester) async {
       final quotaState = AgentQuotaState(
@@ -444,8 +530,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
-      // Should find "quota resets in" text
-      expect(find.textContaining('quota resets in'), findsOneWidget);
+      // Leaf 04 label: "quota_wait · reset HH:MM" on the tile.
+      expect(find.textContaining('quota_wait · reset '), findsOneWidget);
     });
 
     testWidgets('shows blocked badge on agent tile', (tester) async {
@@ -497,12 +583,13 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       // Should NOT find quota-related text
-      expect(find.textContaining('quota resets in'), findsNothing);
+      expect(find.textContaining('quota_wait · '), findsNothing);
       expect(find.textContaining('blocked'), findsNothing);
     });
 
-    testWidgets('past-due shows resets soon', (tester) async {
-      // Past due: unblock time in the past
+    testWidgets('past-due shows absolute wait label', (tester) async {
+      // Past due: unblock time in the past — leaf 04 renders the absolute
+      // HH:MM regardless (no relative "resets soon" anymore).
       final quotaState = AgentQuotaState(
         quotaBlocked: false,
         quotaWaitUntilEpoch: DateTime.now()
@@ -530,8 +617,9 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
-      // Should find "resets soon" text
-      expect(find.textContaining('resets soon'), findsOneWidget);
+      // Should find "quota_wait · reset HH:MM" text (past-due still
+      // renders the absolute wait label)
+      expect(find.textContaining('quota_wait · reset '), findsOneWidget);
     });
   });
 }

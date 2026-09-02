@@ -19,12 +19,18 @@ class AgentQuotaState {
   /// on initial entry (to == quota_wait/blocked); tier firings arrive
   /// later as to == "" events. Null when never specified.
   final String? escalation;
+  /// Parked-turn class from the tree 03 leaf 04 park event payload
+  /// ("quota" | "throttle"; null on legacy events and tier refreshes).
+  /// Selects the wait label: quota (or absent) → "quota_wait · reset
+  /// HH:MM", throttle → "quota_wait · throttle retry HH:MM".
+  final String? waitClass;
 
   const AgentQuotaState({
     required this.quotaBlocked,
     this.quotaWaitUntilEpoch,
     this.fallbackModel,
     this.escalation,
+    this.waitClass,
   });
 
   AgentQuotaState copyWith({
@@ -32,6 +38,7 @@ class AgentQuotaState {
     int? quotaWaitUntilEpoch,
     String? fallbackModel,
     String? escalation,
+    String? waitClass,
   }) {
     return AgentQuotaState(
       quotaBlocked: quotaBlocked ?? this.quotaBlocked,
@@ -39,6 +46,7 @@ class AgentQuotaState {
           quotaWaitUntilEpoch ?? this.quotaWaitUntilEpoch,
       fallbackModel: fallbackModel ?? this.fallbackModel,
       escalation: escalation ?? this.escalation,
+      waitClass: waitClass ?? this.waitClass,
     );
   }
 }
@@ -111,9 +119,11 @@ class AgentNotifier extends StateNotifier<AgentState> {
     String? unblockAt,
     String? fallbackModel,
     String? escalation,
+    String? waitClass,
   }) {
     // Normalize: backend sends "" for absent values; treat as null.
     final esc = (escalation == null || escalation.isEmpty) ? null : escalation;
+    final cls = (waitClass == null || waitClass.isEmpty) ? null : waitClass;
     final episodes = Map<String, AgentQuotaState>.from(
       state.quotaEpisodes,
     );
@@ -128,6 +138,7 @@ class AgentNotifier extends StateNotifier<AgentState> {
           fallbackModel:
               (fallbackModel == null || fallbackModel.isEmpty) ? null : fallbackModel,
           escalation: esc,
+          waitClass: cls,
         );
         break;
       case 'running':
@@ -138,7 +149,8 @@ class AgentNotifier extends StateNotifier<AgentState> {
         // Tier escalation refresh (12h warn / 20h action_recommended fire
         // with to == ""). The episode persists; only the unblock time and
         // escalation tier refresh. Ignored when no episode exists — there
-        // is nothing to escalate.
+        // is nothing to escalate. waitClass is not carried by tier events;
+        // the parked class stays as entered.
         final existing = episodes[agentId];
         if (existing == null) return;
         episodes[agentId] = existing.copyWith(

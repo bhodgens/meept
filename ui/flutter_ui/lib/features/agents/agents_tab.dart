@@ -89,6 +89,8 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
           unblockAt: quota.unblockAt,
           fallbackModel: quota.fallbackModel,
           escalation: quota.escalation,
+          // Parked-turn class (leaf 04); null-safe for legacy events.
+          waitClass: quota.waitClass,
         );
       } catch (_) {
         // malformed quota payload — ignore without crash

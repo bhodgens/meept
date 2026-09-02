@@ -98,10 +98,14 @@ type AgentSummary struct {
 	// QuotaBlocked means the 24h max-wait escalation fired (hard stop);
 	// QuotaFallbackModel is the fallback model carrying work while the
 	// primary provider waits out its quota reset.
+	// QuotaWaitClass is the parked-turn class from the leaf 04 event
+	// payload ("quota"|"throttle"; "" legacy) — it selects the wait label
+	// via QuotaWaitLabel.
 	QuotaWaitUntil     *time.Time `json:"quota_wait_until,omitempty"`
 	QuotaModel         string     `json:"quota_model,omitempty"`
 	QuotaBlocked       bool       `json:"quota_blocked,omitempty"`
 	QuotaFallbackModel string     `json:"quota_fallback_model,omitempty"`
+	QuotaWaitClass     string     `json:"quota_wait_class,omitempty"`
 }
 
 // AgentDetail is the drill-in payload. Combines the employee definition
@@ -239,7 +243,9 @@ func (p *AgentsPanel) Init() tea.Cmd {
 // quotaStateMsg carries a quota state update for a single agent, sourced from
 // an agent.quota_wait bus event (WS type agent_progress). An empty to value
 // means "clear any quota episode for this agent" (quota_cleared / back to
-// running).
+// running). waitClass is the leaf 04 park event's class payload
+// ("quota"|"throttle"; "" for legacy events and tier refreshes) — it rides
+// through to the row so the badge renders the right wait label.
 type quotaStateMsg struct {
 	agentID       string
 	to            string
@@ -248,6 +254,7 @@ type quotaStateMsg struct {
 	model         string
 	fallbackModel string
 	escalation    string // "" | warn | action_recommended | blocked (leaf 05 tier vocabulary)
+	waitClass     string // "quota" | "throttle" | "" (leaf 04 park-event class)
 }
 
 // quotaCountdownTickMsg re-renders quota badges so the live countdown stays
@@ -486,6 +493,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.agents[i].QuotaModel = msg.model
 					p.agents[i].QuotaBlocked = false
 					p.agents[i].QuotaFallbackModel = msg.fallbackModel
+					p.agents[i].QuotaWaitClass = msg.waitClass
 					p.agents[i].Status = AgentStateQuotaWait
 				case AgentStateBlocked:
 					// Blocked wins over wait time; keep the model info so
@@ -523,6 +531,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.agents[i].QuotaModel = ""
 					p.agents[i].QuotaBlocked = false
 					p.agents[i].QuotaFallbackModel = ""
+					p.agents[i].QuotaWaitClass = ""
 					p.agents[i].Status = "running"
 				default:
 					// quota_cleared / running: drop episode state entirely.
@@ -530,6 +539,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.agents[i].QuotaModel = ""
 					p.agents[i].QuotaBlocked = false
 					p.agents[i].QuotaFallbackModel = ""
+					p.agents[i].QuotaWaitClass = ""
 					p.agents[i].Status = "running"
 				}
 				p.updateAgentsTable()
@@ -701,7 +711,7 @@ func (p *AgentsPanel) updateAgentsTable() {
 		statusCell := p.statusBadge(a.Status)
 		// If quota state is present, override the status cell.
 		if a.QuotaWaitUntil != nil || a.QuotaBlocked {
-			statusCell = p.quotaStatusBadge(a.QuotaWaitUntil, a.QuotaBlocked)
+			statusCell = p.quotaStatusBadge(a.QuotaWaitUntil, a.QuotaBlocked, a.QuotaWaitClass)
 		}
 		rows[i] = table.Row{
 			truncate(a.ID, 18),
@@ -759,18 +769,18 @@ func orTime(p *time.Time) time.Time {
 // text, no styling — updateAgentsTable colors it). When waitUntil is nil and
 // blocked is false the agent has no quota episode and the empty string is
 // returned so rendering is unchanged (regression safety). When both wait
-// time and blocked are present, the blocked label wins.
-func (p *AgentsPanel) quotaStatusBadge(waitUntil *time.Time, blocked bool) string {
+// time and blocked are present, the blocked label wins. waitClass is the
+// park event's class wire value ("quota"|"throttle"|"" legacy): it selects
+// the leaf 04 wait label ("quota_wait · reset HH:MM" vs "quota_wait ·
+// throttle retry HH:MM", QuotaWaitLabel).
+func (p *AgentsPanel) quotaStatusBadge(waitUntil *time.Time, blocked bool, waitClass string) string {
 	if blocked {
 		return RenderAgentStatus(AgentStateBlocked)
 	}
 	if waitUntil == nil {
 		return ""
 	}
-	if label := RenderAgentStatus(AgentStateQuotaWait); waitUntil != nil {
-		return label + " · " + QuotaCountdownText(*waitUntil)
-	}
-	return ""
+	return QuotaWaitLabel(waitClass, *waitUntil)
 }
 
 func (p *AgentsPanel) tierShort(tier string) string {
@@ -952,7 +962,7 @@ func (p *AgentsPanel) renderDetail() string {
 		// Quota episode: show the colored quota status instead of the base
 		// status, plus the primary/active model lines when a fallback is
 		// carrying the work.
-		b.WriteString(p.quotaStatusBadge(d.Agent.QuotaWaitUntil, d.Agent.QuotaBlocked))
+		b.WriteString(p.quotaStatusBadge(d.Agent.QuotaWaitUntil, d.Agent.QuotaBlocked, d.Agent.QuotaWaitClass))
 		b.WriteString("\n")
 		for _, line := range RenderQuotaDetailLines(
 			d.Agent.QuotaModel, d.Agent.QuotaFallbackModel,

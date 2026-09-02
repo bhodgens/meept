@@ -251,6 +251,22 @@ boundaries:
   do not carry quota fields; TUI/GUI quota state arrives solely via
   `agent.quota_wait` bus events (WS type `agent_progress`). Restarting a
   client mid-episode shows base status until the next event.
+- **No turn hangs on a provider wait — universal parking (tree 03,
+  DECISIONS.md D9).** Every turn type (chat, goal-loop episode,
+  specialist agent, queue job) PARKS on a classified provider wait
+  instead of blocking or failing: the turn's re-entry data goes to the
+  ONE shared `agent.TurnParker`, the agent/model slot is released, and
+  the parker resumes the turn when the schedule allows. Throttle waits
+  REUSE the `quota_wait` state (`agent.StateQuotaWait`) — no
+  `StateThrottleWait` exists — with the reason payload
+  ("throttle_wait" / "throttle_resumed" / "throttle_give_up") and the
+  wait label ("quota_wait · throttle retry HH:MM") carrying the class.
+  A wait beyond MaxWait never parks: throttle surfaces
+  `ThrottleGiveUpError` (D8) and quota escalates to `blocked` at 24h.
+  Park/resume/give-up events ride the existing `agent.quota_wait` topic
+  (`agent.ParkTurnEvent` payloads with a `class` key) — never a new
+  topic prefix — so the WS `agent.quota` classification above keeps
+  every park event on `agent_progress`.
 - **Slot priority is a ChatOption, two tiers only (tree 04 leaf 03,
   D11).** Model-concurrency slots are gated by `slotGate`
   (`internal/llm/slot_gate.go`), not a raw channel: interactive chat

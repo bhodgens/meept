@@ -25,10 +25,12 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // DefaultTurnParkerPollInterval is the re-check cadence for parked turn
@@ -77,6 +79,12 @@ type TurnParker struct {
 	logger       *slog.Logger
 	pollInterval time.Duration
 	maxWait      time.Duration
+
+	// parkEventBus, when set, receives the park/resume/give-up lifecycle
+	// events (leaf 04 Task 1) on the EXISTING agent.quota_wait topic —
+	// D9 observability without a new topic or WS prefix. Bus is published
+	// to outside the mutex; installed once at wiring time.
+	parkEventBus parkEventBus
 
 	mu         sync.Mutex
 	parked     []ParkedTurnRecord
@@ -289,6 +297,54 @@ func (p *TurnParker) Next(class llm.FailureClass) (time.Time, bool) {
 	return earliest, !earliest.IsZero()
 }
 
+// ParkWaitInfo is one failure class's parked-turn summary for the status
+// surfaces (tree 03 leaf 04 Task 1): Next is the earliest scheduled resume
+// among that class's parked records and Pending is how many are parked.
+type ParkWaitInfo struct {
+	Class   llm.FailureClass
+	Next    time.Time
+	Pending int
+}
+
+// WaitInfo returns one ParkWaitInfo per failure class that currently has
+// parked records, sorted by Next (earliest resume first) so surfaces render
+// deterministically. An empty/nil parker returns nil. Collected under the
+// parker mutex; callers operate on the returned slice after release
+// (mutexio convention). Mirrors Next/Pending (leaf 01) — this is the ONE
+// query the TUI/GUI quota_wait labels consume.
+func (p *TurnParker) WaitInfo() []ParkWaitInfo {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	byClass := make(map[llm.FailureClass]ParkWaitInfo)
+	for _, turn := range p.parked {
+		info, ok := byClass[turn.Class]
+		if !ok {
+			byClass[turn.Class] = ParkWaitInfo{Class: turn.Class, Next: turn.ResumeAt, Pending: 1}
+			continue
+		}
+		if turn.ResumeAt.Before(info.Next) {
+			info.Next = turn.ResumeAt
+		}
+		info.Pending++
+		byClass[turn.Class] = info
+	}
+	p.mu.Unlock()
+
+	if len(byClass) == 0 {
+		return nil
+	}
+	infos := make([]ParkWaitInfo, 0, len(byClass))
+	for _, info := range byClass {
+		infos = append(infos, info)
+	}
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].Next.Before(infos[j].Next)
+	})
+	return infos
+}
+
 // drainDue resumes every parked record whose resume time has passed,
 // oldest-first, sequentially: a slow resume delays later resumes rather
 // than reordering them. Called from the polling loop; its cadence bounds
@@ -346,4 +402,162 @@ func (p *TurnParker) drainDue(ctx context.Context) {
 	// synchronously. resumeWG is disjoint from the polling goroutine's wg
 	// (waiting on wg here would deadlock with Stop).
 	p.resumeWG.Wait()
+}
+
+// --- Park/resume/give-up lifecycle events (tree 03 leaf 04 Task 1, D9) ------
+
+// ParkTurnEvent is the bus payload for parked-turn lifecycle events. It
+// rides the EXISTING "agent.quota_wait" topic — the episode tracker's topic
+// — with a class-carrying payload, per the leaf contract: zero new topics,
+// so the WS "agent.quota" prefix match keeps classifying every park event
+// as agent_progress (AGENTS.md WS classification invariant). Fields mirror
+// QuotaEvent (quota_episode.go) where they overlap so the TUI/Flutter quota
+// handlers consume both event shapes through one code path: agent_id, to,
+// reason, model_id, provider_id. The class key is the wire vocabulary of
+// parkClassString ("quota"|"throttle"); resume_at is RFC3339; waited is a
+// Go duration string (a display-input value, never formatted client-side
+// into wall-clock claims).
+type ParkTurnEvent struct {
+	AgentID    string    `json:"agent_id"`
+	To         string    `json:"to,omitempty"`
+	Reason     string    `json:"reason"`
+	Class      string    `json:"class,omitempty"`
+	ResumeAt   string    `json:"resume_at,omitempty"` // RFC3339
+	Waited     string    `json:"waited,omitempty"`    // Go duration string
+	SessionID  string    `json:"session_id,omitempty"`
+	ModelID    string    `json:"model_id,omitempty"`
+	ProviderID string    `json:"provider_id,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
+// parkEventBus is the published-to interface subset of *bus.MessageBus the
+// parker needs (bus.Publish(topic, msg)). A concrete field would import
+// internal/bus here; the tests install a real *bus.MessageBus.
+type parkEventBus interface {
+	Publish(topic string, msg *models.BusMessage) int
+}
+
+// Park lifecycle reason strings (leaf contract): parked on a provider wait
+// (reason follows the class — "quota_wait" | "throttle_wait"), resumed into
+// the loop, or abandoned past MaxWait.
+const (
+	ReasonQuotaWait       = "quota_wait"       // park (class=quota)
+	ReasonThrottleWait    = "throttle_wait"    // park (class=throttle)
+	ReasonThrottleResumed = "throttle_resumed" // resume (class=throttle)
+	ReasonThrottleGiveUp  = "throttle_give_up" // give-up past MaxWait
+)
+
+// parkClassString is the wire vocabulary for a FailureClass on park events
+// (the lowercase class names used across the resilience forest). FailureNone
+// and server_error/fatal records are never parked, so only the two parkable
+// classes are mapped; anything else is "" (key omitted on the wire).
+func parkClassString(class llm.FailureClass) string {
+	switch class {
+	case llm.FailureQuota:
+		return "quota"
+	case llm.FailureThrottle:
+		return "throttle"
+	default:
+		return ""
+	}
+}
+
+// SetParkEventBus installs the bus park/resume/give-up events publish to on
+// the EXISTING agent.quota_wait topic (leaf 04 Task 1). Nil disables
+// publishing (the default; parking stays silent). Daemon wiring calls this
+// once at construction, before Start, so no lock is needed afterwards
+// (same regime as pollInterval/maxWait).
+func (p *TurnParker) SetParkEventBus(b parkEventBus) {
+	if p == nil || b == nil {
+		return
+	}
+	p.parkEventBus = b
+}
+
+// publishParkEvent marshals ev and publishes it on the agent.quota_wait
+// topic when a park event bus is wired. Best-effort like every parker side
+// channel: a marshal failure is logged at warn and never affects parking.
+// Nil-receiver safe: the emit* callers run at park/resume/give-up sites that
+// may run with an unwired parker.
+func (p *TurnParker) publishParkEvent(ev ParkTurnEvent) {
+	if p == nil || p.parkEventBus == nil {
+		return
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, ev.AgentID, ev)
+	if err != nil {
+		p.logger.Warn("park event marshal failed — event dropped",
+			"reason", ev.Reason,
+			"error", err,
+		)
+		return
+	}
+	msg.Topic = "agent.quota_wait"
+	p.parkEventBus.Publish("agent.quota_wait", msg)
+}
+
+// emitParkEvent publishes the parked event for rec; the reason follows the
+// class ("quota_wait" | "throttle_wait" per the leaf contract). modelID/
+// providerID ride from the park call site (they live in the class payload,
+// not the frozen ParkedTurnRecord) so surfaces can show which model is
+// waiting (D9).
+func (p *TurnParker) emitParkEvent(rec ParkedTurnRecord, modelID, providerID string) {
+	reason := ReasonQuotaWait
+	if rec.Class == llm.FailureThrottle {
+		reason = ReasonThrottleWait
+	}
+	p.publishParkEvent(ParkTurnEvent{
+		AgentID:    rec.AgentID,
+		To:         "quota_wait",
+		Reason:     reason,
+		Class:      parkClassString(rec.Class),
+		ResumeAt:   rec.ResumeAt.Format(time.RFC3339),
+		SessionID:  rec.SessionID,
+		ModelID:    modelID,
+		ProviderID: providerID,
+		Timestamp:  p.now(),
+	})
+}
+
+// emitResumeEvent publishes the resumed event for rec with the time it
+// actually waited (now - ResumeAt).
+func (p *TurnParker) emitResumeEvent(rec ParkedTurnRecord) {
+	p.publishParkEvent(ParkTurnEvent{
+		AgentID:   rec.AgentID,
+		To:        "running",
+		Reason:    ReasonThrottleResumed,
+		Class:     parkClassString(rec.Class),
+		Waited:    p.now().Sub(rec.ResumeAt).String(),
+		SessionID: rec.SessionID,
+		Timestamp: p.now(),
+	})
+}
+
+// emitGiveUpEvent publishes the give-up event for an abandoned wait (the D8
+// ThrottleGiveUpError surface). To stays empty: a give-up is a failure
+// surface, not a parked-state change.
+func (p *TurnParker) emitGiveUpEvent(agentID, modelID, providerID string, waited time.Duration) {
+	p.publishParkEvent(ParkTurnEvent{
+		AgentID:    agentID,
+		Reason:     ReasonThrottleGiveUp,
+		Class:      parkClassString(llm.FailureThrottle),
+		Waited:     waited.String(),
+		ModelID:    modelID,
+		ProviderID: providerID,
+		Timestamp:  p.now(),
+	})
+}
+
+// EmitParkEvent is the exported park-event hook for park sites outside the
+// agent package (the employee goal-loop parker shares this TurnParker; leaf
+// 04 wires its emission through the same agent.quota_wait topic, D9).
+// modelID/providerID may be empty when the park site has no model context.
+func (p *TurnParker) EmitParkEvent(rec ParkedTurnRecord, modelID, providerID string) {
+	p.emitParkEvent(rec, modelID, providerID)
+}
+
+// EmitResumeEvent is the exported resume-event hook, symmetric to
+// EmitParkEvent: call it from external resume sites right before the turn
+// re-enters its loop.
+func (p *TurnParker) EmitResumeEvent(rec ParkedTurnRecord) {
+	p.emitResumeEvent(rec)
 }

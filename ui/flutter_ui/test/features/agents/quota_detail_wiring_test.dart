@@ -103,8 +103,8 @@ void main() {
 
       await _pumpAgentsTab(tester, agents, {'agent-1': quotaState});
 
-      // Countdown badge still present on the tile...
-      expect(find.textContaining('quota resets in'), findsOneWidget);
+      // Leaf 04 wait label still present on the tile...
+      expect(find.textContaining('quota_wait · '), findsOneWidget);
       // ...but no primary/active detail lines without a fallback.
       expect(find.textContaining('primary: '), findsNothing);
       expect(find.textContaining('active: '), findsNothing);
@@ -120,7 +120,7 @@ void main() {
 
       await _pumpAgentsTab(tester, agents, const {});
 
-      expect(find.textContaining('quota resets in'), findsNothing);
+      expect(find.textContaining('quota_wait · '), findsNothing);
       expect(find.textContaining('blocked'), findsNothing);
       expect(find.textContaining('primary: '), findsNothing);
     });

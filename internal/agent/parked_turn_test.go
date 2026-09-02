@@ -410,3 +410,93 @@ func TestTurnParker_NilSafe(t *testing.T) {
 	p.Start(context.Background())
 	p.Stop()
 }
+
+// --- leaf 04 Task 1: WaitInfo (per-class surface query) ---------------------
+
+// TestTurnParker_WaitInfoMixedClasses pins the surface contract: one query
+// returns one ParkWaitInfo per class that has parked records, each carrying
+// the earliest resume time and the pending count for that class. Classes
+// with nothing parked are absent, and entries are sorted by next-resume so
+// surfaces render deterministically.
+func TestTurnParker_WaitInfoMixedClasses(t *testing.T) {
+	now := time.Now()
+	p := NewTurnParker(parkedTurnTestLogger(), func(context.Context, ParkedTurnRecord) {}, time.Hour)
+	p.nowFunc = func() time.Time { return now }
+
+	if got := p.WaitInfo(); len(got) != 0 {
+		t.Fatalf("WaitInfo on empty parker = %+v, want empty", got)
+	}
+
+	quotaAt := now.Add(30 * time.Minute)
+	throttleAt := now.Add(15 * time.Minute)
+	if !p.Park(ParkedTurnRecord{SessionID: "q1", Class: llm.FailureQuota, ResumeAt: quotaAt}) {
+		t.Fatal("quota park refused")
+	}
+	if !p.Park(ParkedTurnRecord{SessionID: "q2", Class: llm.FailureQuota, ResumeAt: quotaAt.Add(time.Minute)}) {
+		t.Fatal("second quota park refused")
+	}
+	if !p.Park(ParkedTurnRecord{SessionID: "t1", Class: llm.FailureThrottle, ResumeAt: throttleAt}) {
+		t.Fatal("throttle park refused")
+	}
+
+	info := p.WaitInfo()
+	if len(info) != 2 {
+		t.Fatalf("WaitInfo len = %d, want 2 (one per parked class)", len(info))
+	}
+	// Sorted by next resume: throttle (15m) before quota (30m).
+	if info[0].Class != llm.FailureThrottle {
+		t.Errorf("info[0].Class = %v, want %v (earliest resume first)", info[0].Class, llm.FailureThrottle)
+	}
+	if !info[0].Next.Equal(throttleAt) {
+		t.Errorf("info[0].Next = %v, want %v", info[0].Next, throttleAt)
+	}
+	if info[0].Pending != 1 {
+		t.Errorf("info[0].Pending = %d, want 1", info[0].Pending)
+	}
+	if info[1].Class != llm.FailureQuota {
+		t.Errorf("info[1].Class = %v, want %v", info[1].Class, llm.FailureQuota)
+	}
+	if !info[1].Next.Equal(quotaAt) {
+		t.Errorf("info[1].Next = %v, want %v (earliest of the two quota records)", info[1].Next, quotaAt)
+	}
+	if info[1].Pending != 2 {
+		t.Errorf("info[1].Pending = %d, want 2", info[1].Pending)
+	}
+}
+
+// TestTurnParker_WaitInfoTracksResumeAndRefusals: WaitInfo reflects the live
+// queue — a resumed record leaves its class, an unparkable record never
+// enters it.
+func TestTurnParker_WaitInfoTracksResumeAndRefusals(t *testing.T) {
+	now := time.Now()
+	p := NewTurnParker(parkedTurnTestLogger(), func(context.Context, ParkedTurnRecord) {}, time.Hour)
+	p.nowFunc = func() time.Time { return now }
+
+	// Zero resume time is refused (cannot schedule) and must not appear.
+	if p.Park(ParkedTurnRecord{SessionID: "s0", Class: llm.FailureQuota}) {
+		t.Fatal("zero-resume park should be refused")
+	}
+	if got := p.WaitInfo(); len(got) != 0 {
+		t.Fatalf("WaitInfo after refused park = %+v, want empty", got)
+	}
+
+	if !p.Park(ParkedTurnRecord{SessionID: "s1", Class: llm.FailureThrottle, ResumeAt: now.Add(time.Minute)}) {
+		t.Fatal("throttle park refused")
+	}
+	// Drain manually the way drainDue would (drainDue calls the resume
+	// callback; here we only need the queue effect).
+	p.mu.Lock()
+	p.parked = nil
+	p.mu.Unlock()
+	if got := p.WaitInfo(); len(got) != 0 {
+		t.Fatalf("WaitInfo after drain = %+v, want empty", got)
+	}
+}
+
+// TestTurnParker_WaitInfoNilSafe mirrors the other nil-surface guards.
+func TestTurnParker_WaitInfoNilSafe(t *testing.T) {
+	var p *TurnParker
+	if got := p.WaitInfo(); got != nil {
+		t.Fatalf("nil parker WaitInfo = %+v, want nil", got)
+	}
+}

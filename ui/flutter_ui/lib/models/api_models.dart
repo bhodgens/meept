@@ -151,6 +151,9 @@ class AgentQuotaPayload {
   final String? escalation;
   /// Fallback model name suggested by the backend.
   final String? fallbackModel;
+  /// Parked-turn class (tree 03 leaf 04): "quota" | "throttle"; null when
+  /// the backend sent none (legacy events, tier refreshes, clears).
+  final String? waitClass;
 
   const AgentQuotaPayload({
     required this.agentId,
@@ -158,6 +161,7 @@ class AgentQuotaPayload {
     this.unblockAt,
     this.escalation,
     this.fallbackModel,
+    this.waitClass,
   });
 
   factory AgentQuotaPayload.fromJson(Map<String, dynamic> json) {
@@ -167,6 +171,7 @@ class AgentQuotaPayload {
       unblockAt: json['unblock_at'] as String?,
       escalation: json['escalation'] as String?,
       fallbackModel: json['fallback_model'] as String?,
+      waitClass: json['class'] as String?,
     );
   }
 }

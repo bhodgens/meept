@@ -1653,6 +1653,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						modelID, _ := payloadMap["model_id"].(string)
 						fallbackModel, _ := payloadMap["fallback_model"].(string)
 						to, _ := payloadMap["to"].(string)
+						// Parked-turn class (leaf 04: "quota"|"throttle"; ""
+						// on legacy events) — selects the wait label rendered
+						// by the agents-tab badge (QuotaWaitLabel).
+						waitClass, _ := payloadMap["class"].(string)
 						if cmd := a.agents.Update(quotaStateMsg{
 							agentID:       agentID,
 							to:            to,
@@ -1661,6 +1665,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							model:         modelID,
 							fallbackModel: fallbackModel,
 							escalation:    escalation,
+							waitClass:     waitClass,
 						}); cmd != nil {
 							cmds = append(cmds, cmd)
 						}

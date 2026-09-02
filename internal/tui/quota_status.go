@@ -71,6 +71,26 @@ func RenderAgentStatus(status string) string {
 	}
 }
 
+// QuotaWaitLabel renders the agents-tab wait label for a parked turn
+// (tree 03 leaf 04 Task 3, TUI + Flutter parity — the Flutter side mirrors
+// this byte-for-byte in ui/flutter_ui/lib/features/agents/quota_status.dart;
+// change both together):
+//
+//	quota class (or absent — legacy events): "quota_wait · reset HH:MM"
+//	throttle class:                          "quota_wait · throttle retry HH:MM"
+//
+// HH:MM is the ABSOLUTE time of unblockAt (the daemon-provided resume
+// instant), never relative countdown math: the GUI runs on web where client
+// wall clocks cannot be trusted (leaf Notes). Lowercase per repo UI rule.
+func QuotaWaitLabel(class string, unblockAt time.Time) string {
+	hhmm := unblockAt.Format("15:04")
+	if class == "throttle" {
+		return "quota_wait · throttle retry " + hhmm
+	}
+	// "quota" and legacy/absent class both name the reset wait.
+	return "quota_wait · reset " + hhmm
+}
+
 // RenderQuotaDetailLines returns the primary/active model lines for the
 // agent detail view. Returns nil unless fallbackModel is set; when set the
 // block is two lines:

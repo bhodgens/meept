@@ -2709,6 +2709,77 @@ func TestWSBridgeClassifiesQuotaTopicsAsProgress(t *testing.T) {
 	}
 }
 
+// TestWSBridgeClassifiesParkTurnEventsAsProgress pins the tree 03 leaf 04
+// WS-classification contract: throttle park/resume/give-up events ride the
+// EXISTING agent.quota_wait topic (ParkTurnEvent payloads carrying
+// reason=throttle_wait|throttle_resumed|throttle_give_up and class=throttle)
+// and must classify as agent_progress — never chat_message — with the
+// reason/class/resume_at keys intact for the TUI/Flutter surfaces.
+func TestWSBridgeClassifiesParkTurnEventsAsProgress(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	defer msgBus.Close()
+
+	cfg := DefaultServerConfig()
+	cfg.Addr = ":0"
+	srv := NewServer(cfg, nil, nil, nil, nil, nil, WithWebSocket(msgBus, "/ws"))
+	if srv == nil {
+		t.Fatal("failed to create server with WebSocket option")
+	}
+
+	payloads := []map[string]any{
+		{
+			// park
+			"agent_id": "agent-1", "to": "quota_wait", "reason": "throttle_wait",
+			"class": "throttle", "resume_at": "2026-09-02T15:00:00Z",
+			"model_id": "m1", "provider_id": "p1",
+		},
+		{
+			// resume
+			"agent_id": "agent-1", "to": "running", "reason": "throttle_resumed",
+			"class": "throttle", "waited": "45s", "session_id": "s1",
+		},
+		{
+			// give-up
+			"agent_id": "agent-1", "reason": "throttle_give_up",
+			"waited": "1h 0m 0s", "model_id": "m1", "provider_id": "p1",
+		},
+	}
+
+	for i, payload := range payloads {
+		msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent-1", payload)
+		if err != nil {
+			t.Fatalf("case %d: NewBusMessage: %v", i, err)
+		}
+		if got := msgBus.Publish("agent.quota_wait", msg); got < 1 {
+			t.Errorf("case %d: Publish delivered to %d subscribers, want >= 1 (WS bridge not subscribed)", i, got)
+			continue
+		}
+
+		frontendData := transformBusEventToWS(msg)
+		if frontendData == nil {
+			t.Errorf("case %d: transformBusEventToWS returned nil, want payload", i)
+			continue
+		}
+		if frontendData["type"] != "agent_progress" {
+			t.Errorf("case %d: frontend type = %v, want \"agent_progress\"", i, frontendData["type"])
+		}
+		if frontendData["type"] == "chat_message" {
+			t.Errorf("case %d: park/resume event classified as chat_message — a park event must never become a chat bubble", i)
+		}
+		if frontendData["source_topic"] != "agent.quota_wait" {
+			t.Errorf("case %d: source_topic = %v, want agent.quota_wait", i, frontendData["source_topic"])
+		}
+		// The class/reason keys must survive the transform so the TUI and
+		// Flutter can render "quota_wait · throttle retry HH:MM".
+		if frontendData["reason"] != payload["reason"] {
+			t.Errorf("case %d: reason = %v, want %v", i, frontendData["reason"], payload["reason"])
+		}
+		if frontendData["class"] != payload["class"] {
+			t.Errorf("case %d: class = %v, want %v", i, frontendData["class"], payload["class"])
+		}
+	}
+}
+
 // TestWSBridgeForwardsTerminalDaemonCollaborationPairTopics pins that the WS
 // bridge subscribes to the terminal.*, daemon.*, collaboration.*.* and pair.*
 // topic patterns so those bus events reach frontend WebSocket clients.

@@ -27,6 +27,37 @@ String? quotaCountdownText(AgentQuotaState? state) {
   return 'quota resets in ${formatDuration(remaining)}';
 }
 
+/// Absolute HH:MM of [waitUntilEpoch] in the LOCAL zone — the TUI formats
+/// the daemon-provided resume instant the same way (QuotaWaitLabel renders
+/// `unblockAt.Format("15:04")` on the daemon host's local zone). Rendering
+/// the absolute time keeps both surfaces off relative countdown math, which
+/// cannot be trusted on the web build.
+String? _quotaWaitHHmm(AgentQuotaState? state) {
+  if (state == null || state.quotaWaitUntilEpoch == null) return null;
+  final t = DateTime.fromMillisecondsSinceEpoch(state.quotaWaitUntilEpoch!);
+  final hh = t.hour.toString().padLeft(2, '0');
+  final mm = t.minute.toString().padLeft(2, '0');
+  return '$hh:$mm';
+}
+
+/// The leaf 04 wait label (tree 03 leaf 04 Task 4, byte-matched to the TUI's
+/// QuotaWaitLabel in internal/tui/quota_status.go — change both together):
+///
+///   quota class (or absent): "quota_wait · reset HH:MM"
+///   throttle class:          "quota_wait · throttle retry HH:MM"
+///
+/// Null when there is no wait time (agents without a parked turn never
+/// build the badge). Lowercase per AGENTS.md UI rule.
+String? quotaWaitLabel(AgentQuotaState? state) {
+  if (state == null || state.quotaBlocked) return null;
+  final hhmm = _quotaWaitHHmm(state);
+  if (hhmm == null) return null;
+  if (state.waitClass == 'throttle') {
+    return 'quota_wait · throttle retry $hhmm';
+  }
+  return 'quota_wait · reset $hhmm';
+}
+
 /// A small badge showing quota wait or blocked status under an agent tile.
 /// Lowercase text per AGENTS.md; amber (warning) tone for quota wait, red
 /// (error) tone for blocked. Agents without quota episodes never build this
@@ -41,7 +72,11 @@ class QuotaStatusBadge extends StatelessWidget {
     if (quotaState.quotaBlocked) {
       return const _BlockedBadge();
     }
-    final text = quotaCountdownText(quotaState);
+    // Leaf 04 label: "quota_wait · reset HH:MM" / "quota_wait · throttle
+    // retry HH:MM" — byte-matched to the TUI's QuotaWaitLabel. Null (no
+    // wait time) renders nothing, so agents without a parked turn are
+    // unchanged.
+    final text = quotaWaitLabel(quotaState);
     if (text == null) return const SizedBox.shrink();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -49,19 +84,8 @@ class QuotaStatusBadge extends StatelessWidget {
         color: CyberpunkColors.yellowWarning.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text.rich(
-        // "quota wait · <countdown>" — byte-matched to the TUI badge format
-        // (internal/tui/agents_panel.go quotaStatusBadge).
-        TextSpan(
-          children: [
-            const TextSpan(
-              text: 'quota wait',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const TextSpan(text: ' · '),
-            TextSpan(text: text),
-          ],
-        ),
+      child: Text(
+        text,
         style: CyberpunkTypography.bodySmall.copyWith(
           color: CyberpunkColors.yellowWarning,
           fontFamily: 'SourceCodePro',

@@ -221,6 +221,9 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 			"max_wait", maxWait,
 			"attempt", attempt,
 		)
+		// Give-up observability (leaf 04): the abandonment surfaces on the
+		// existing agent.quota_wait topic so TUI/GUI can show it (D9).
+		l.turnParker.emitGiveUpEvent(l.agentID, terr.ModelID, terr.ProviderID, wait)
 		return false, &llm.ThrottleGiveUpError{
 			ProviderID: terr.ProviderID,
 			ModelID:    terr.ModelID,
@@ -260,6 +263,9 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 		)
 		return false, nil
 	}
+	// Park observability (leaf 04): the parked record surfaces on the
+	// existing agent.quota_wait topic with its class + resume time (D9).
+	l.turnParker.emitParkEvent(rec, terr.ModelID, terr.ProviderID)
 
 	// Parked state: the quota branch's StateQuotaWait carries the parked
 	// semantics (leaf 04 finalizes the surface); the reason distinguishes
@@ -311,6 +317,13 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 		"conversation_id", turn.ConversationID,
 		"attempt", rec.Attempt,
 	)
+	// Resume observability (leaf 04): the resumed record surfaces on the
+	// existing agent.quota_wait topic with its class + waited duration (D9).
+	// Guarded: the resume callback normally runs on a wired parker, but the
+	// emit must never be able to panic the resume path.
+	if l.turnParker != nil {
+		l.turnParker.emitResumeEvent(rec)
+	}
 
 	// Attempt growth across park generations: the re-run's park math starts
 	// from this generation's attempt+1.

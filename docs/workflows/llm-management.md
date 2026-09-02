@@ -218,6 +218,99 @@ Behavior:
 - Managed llama.cpp runtimes (`llama-cpp`) auto-declare `llamacpp`; MLX
   runtimes declare nothing.
 
+## Universal Parking on Provider Waits (D9)
+
+Any meept turn can hit a provider wall — a quota window (hours until reset)
+or a throttle signal (seconds-to-minutes of load shedding). Per DECISIONS.md
+D9, meept is an electric machine: on (working) or off (broken). **No turn
+hangs on a dead or waiting connection** — every turn type parks instead,
+releasing its agent/model slot, and resumes automatically when the provider
+recovers.
+
+### What parks
+
+| Turn type | Park site | Mechanism |
+|-----------|-----------|-----------|
+| Chat turns (quota) | `ChatHandler` | `QuotaResumeWatcher` over the shared parker (`internal/agent/quota_resume.go`) |
+| Chat turns (throttle) | `AgentLoop` | `parkThrottledTurn` (`internal/agent/loop_park.go`) |
+| Goal-loop episodes | `EpisodeParker` | `maybeParkProviderWait` (`internal/employee/park.go`) |
+| Queue/specialist jobs | loop park branch | same `AgentLoop` throttle path |
+
+All of these feed ONE shared `agent.TurnParker`
+(`internal/agent/parked_turn.go`) per daemon: it holds
+`ParkedTurnRecord`s of any failure class, resumes them oldest-first at
+their scheduled time, and answers the surfaces' single query
+`TurnParker.WaitInfo() []ParkWaitInfo` — one `{Class, Next, Pending}` row
+per class with parked work. The parker is memory-only: a daemon restart
+drops parked records (logged), and quota blocks re-probe providers anyway.
+
+### Failure classes and schedules
+
+Two provider-wait classes exist (SHARED-CONVENTIONS §4.1, D4):
+
+- **`quota`** — a 429/402 with a quota-shaped signal. Parks until the
+  server-provided reset time (honored when later than the plan's first
+  step). The 24h `llm.quota_retry.max_wait` caps any single wait: waits
+  beyond it are refused and escalate (see quota escalation ladder in
+  [Quota Resilience](quota-resilience.md)).
+- **`throttle`** — 429/503 load shedding. Parks on the composed backoff
+  plan (`llm.DefaultBackoffPlan`): exponential steps from a 30s base, the
+  server `Retry-After` winning when later. Each re-park generation grows
+  the attempt count, so the schedule keeps stepping outward. A wait that
+  would exceed MaxWait **gives up**: the D8 `ThrottleGiveUpError` surfaces
+  to the user instead of an invisible multi-hour park.
+
+### State semantics: StateQuotaWait is reused, reason distinguishes
+
+Both classes drive the agent into the SAME `quota_wait` state
+(`agent.StateQuotaWait`). The leaf-04 decision: **keep one state + a
+`reason` payload, add no `StateThrottleWait`**. Rationale: the machine
+truth ("parked on a provider wait") is identical for both classes; every
+existing surface, transition-table entry, and WS classification keeps
+working unchanged; the reason string on the event and the wait label on
+the UI carry the distinction. The transition table needed zero new
+entries.
+
+### Bus events on the existing quota topic
+
+Park/resume/give-up events ride the EXISTING `agent.quota_wait` topic
+(published by the shared parker's `SetParkEventBus` wiring; payload type
+`agent.ParkTurnEvent`):
+
+| Lifecycle | Payload keys |
+|-----------|--------------|
+| park | `agent_id`, `to: "quota_wait"`, `reason: "throttle_wait"`, `class` (`"quota"\|"throttle"`), `resume_at` (RFC3339), `model_id`, `provider_id`, `session_id` |
+| resume | `agent_id`, `to: "running"`, `reason: "throttle_resumed"`, `class`, `waited` (Go duration string), `session_id` |
+| give-up | `agent_id`, `reason: "throttle_give_up"`, `class: "throttle"`, `waited`, `model_id`, `provider_id` |
+
+No new topic was introduced, so the WS handler's `agent.quota` prefix
+match classifies every park event as `agent_progress` — never
+`chat_message` (pinned by
+`TestWSBridgeClassifiesParkTurnEventsAsProgress`). Legacy
+`QuotaEvent`-shape messages on the same topic remain byte-identical.
+
+### Wait labels (TUI + GUI parity)
+
+The agents tab renders the parked state with an absolute-time label —
+identical strings on both surfaces (lowercase per UI rule):
+
+- quota wait: `quota_wait · reset HH:MM`
+- throttle wait: `quota_wait · throttle retry HH:MM`
+
+`HH:MM` is the daemon-provided resume instant rendered as absolute local
+time (`QuotaWaitLabel` in `internal/tui/quota_status.go`, mirrored by
+`quotaWaitLabel` in `ui/flutter_ui/lib/features/agents/quota_status.dart`).
+Both surfaces deliberately avoid relative countdowns here: the GUI runs on
+web where client wall clocks cannot be trusted.
+
+### Give-up semantics
+
+Give-up is not a crash — it is the machine reporting a wait too long to
+hide. A throttle wait beyond MaxWait surfaces `ThrottleGiveUpError` (D8)
+as the turn's failure; the quota equivalent is the 24h escalation to
+`blocked`. Both are visible on the same surfaces, and both leave the
+agent slot free.
+
 ## Observability
 
 ### Logging
