@@ -110,9 +110,9 @@ Forest-level verification after all trees COMPLETE:
 | Tree | Status | Notes |
 |------|--------|-------|
 | 01-escalation | COMPLETE | 4/4 leaves (178cd2b3, 53e0dd48, c88cc545, a00b76a5); R1 persistent-override honored; tracking closed 2026-09-01 |
-| 02-failure-policy | IN_PROGRESS | leaves 01+02 COMPLETE (c9d7da28, adc44b16); leaf 03 in flight by parallel session; this forest waits for its completion signals |
-| 03-turn-lifecycle | PENDING | gated on tree 02 COMPLETE |
-| 04-scheduling | COMPLETE* | leaves 01+02 COMPLETE (ed652a9e, d7d2cddc+35c79887); leaf 03 HELD — client.go conflict with tree 02, green-light after tree 02 leaf 03 lands |
+| 02-failure-policy | COMPLETE | 5/5 leaves (c9d7da28, adc44b16, 962e9924, a18802e8, 7d73b12f); tracking closed 5319ada4; pacer+policy daemon wiring b7f0a3d8 |
+| 03-turn-lifecycle | COMPLETE | 4/4 leaves (285f67fe, 1d94e2da, 4739c151, 3eb6a3e3); tracking closed 9a93555b |
+| 04-scheduling | COMPLETE | leaves 01-03 (ed652a9e, d7d2cddc+35c79887, b125e22b); WithPriority wiring af460b33; tracking 081898f8 |
 | 05-catalog | COMPLETE | 3/3 leaves (dddb364e, 6f1a2e8a, 40e41b0e); tracking closed 2026-09-01 |
 
 ## Notes
