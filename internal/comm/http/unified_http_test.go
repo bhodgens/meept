@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	gohttp "net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -42,11 +44,44 @@ func insecureHTTPClient() *gohttp.Client {
 				MaxIdleConns:        2,
 				MaxIdleConnsPerHost: 1,
 				IdleConnTimeout:     1 * time.Second,
+				// Under full-sweep parallelism the local ephemeral port
+				// range transiently exhausts (EADDRNOTAVAIL on outbound
+				// dial). One short, bounded retry rides out the burst —
+				// the ~50k-port range refills as prior TIME_WAIT sockets
+				// recycle (forest F3 close-out).
+				DialContext: dialWithEphemeralRetry,
 			},
 			Timeout: 30 * time.Second,
 		}
 	})
 	return insecureHTTPClientRef
+}
+
+// dialWithEphemeralRetry wraps net.Dialer.DialContext with one retry when
+// the dial fails because the local ephemeral port range is transiently
+// exhausted (EADDRNOTAVAIL). Test-only: production code must not paper
+// over port exhaustion; tests under -p parallelism legitimately hit it
+// through no fault of the code under test.
+func dialWithEphemeralRetry(ctx context.Context, network, addr string) (net.Conn, error) {
+	d := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := d.DialContext(ctx, network, addr)
+	if err == nil {
+		return conn, nil
+	}
+	var oe *net.OpError
+	if !errors.As(err, &oe) || oe.Op != "dial" {
+		return nil, err
+	}
+	var se *os.SyscallError
+	if !errors.As(err, &se) || !strings.Contains(se.Err.Error(), "assign requested address") {
+		return nil, err
+	}
+	select {
+	case <-time.After(250 * time.Millisecond):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return d.DialContext(ctx, network, addr)
 }
 
 // drainTestHTTPClients closes pooled idle connections so finished tests do
