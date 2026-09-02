@@ -793,6 +793,28 @@ LIMIT ?
 	return summary, nil
 }
 
+// CountRateLimitEventsSince returns the number of rate-limit
+// (error_type='rate_limit') rows recorded for one provider since the given
+// instant (tree 02 leaf 05, DECISIONS.md D15). GetRateLimitSummary has no
+// per-provider hourly resolution (its aggregate is a 24h window grouped by
+// provider+model), so the pacer uses this narrow COUNT instead of filtering
+// the summary in Go. Noted for the metrics doc.
+func (s *Store) CountRateLimitEventsSince(ctx context.Context, providerID string, since time.Time) (int64, error) {
+	var count int64
+	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
+		const q = `
+SELECT COUNT(*)
+FROM provider_requests
+WHERE error_type = 'rate_limit' AND provider_id = ? AND ts >= ?
+`
+		return db.QueryRowContext(ctx, q, providerID, since.UnixMilli()).Scan(&count)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // ClassifyError categorizes an error based on type and HTTP status.
 // Used by both Client and AnthropicClient to populate ErrorType in RequestRecord.
 func ClassifyError(err error, httpStatus int) ErrorType {

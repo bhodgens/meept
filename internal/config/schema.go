@@ -875,6 +875,10 @@ type FailurePolicyConfig struct {
 type PacingConfig struct {
 	// Enabled turns adaptive pacing on. Default false (D15 gate).
 	Enabled bool `json:"enabled"      toml:"enabled"`
+	// Target429PerHour is the tolerated throttle-429 rate per provider per
+	// hour; a higher observed rate holds the pacing gap at its floor
+	// (leaf 05: "tolerate at most N throttle 429/hour/provider"). Default 1.
+	Target429PerHour int `json:"target_429_per_hour" toml:"target_429_per_hour"` // default 1
 	// MinInterval is the shortest gap between outbound requests to one
 	// provider. Default 1s.
 	MinInterval time.Duration `json:"min_interval" toml:"min_interval"`
@@ -890,9 +894,10 @@ const (
 	DefaultFailurePolicyPollFloor         = time.Hour
 	DefaultFailurePolicyShortRetries      = 3
 
-	DefaultPacingEnabled     = false
-	DefaultPacingMinInterval = time.Second
-	DefaultPacingMaxInterval = 30 * time.Second
+	DefaultPacingEnabled       = false
+	DefaultPacingTarget429Hour = 1
+	DefaultPacingMinInterval   = time.Second
+	DefaultPacingMaxInterval   = 30 * time.Second
 )
 
 // GetHorizon returns Horizon. Part of the getter surface internal/llm reads
@@ -911,6 +916,10 @@ func (f *FailurePolicyConfig) GetPollFloor() time.Duration { return f.PollFloor 
 
 // GetShortRetries returns ShortRetries. See GetHorizon.
 func (f *FailurePolicyConfig) GetShortRetries() int { return f.ShortRetries }
+
+// GetPacing returns the pacing sub-block (tree 02 leaf 05, D15). See
+// GetHorizon for the interface rationale.
+func (f *FailurePolicyConfig) GetPacing() PacingConfig { return f.Pacing }
 
 // NormalizeFailurePolicyDefaults clamps invalid failure_policy values to
 // defaults: negative durations become the field default, zero means unset
@@ -932,6 +941,9 @@ func NormalizeFailurePolicyDefaults(f *FailurePolicyConfig) {
 	}
 	if f.ShortRetries <= 0 {
 		f.ShortRetries = DefaultFailurePolicyShortRetries
+	}
+	if f.Pacing.Target429PerHour <= 0 {
+		f.Pacing.Target429PerHour = DefaultPacingTarget429Hour
 	}
 	if f.Pacing.MinInterval <= 0 {
 		f.Pacing.MinInterval = DefaultPacingMinInterval
@@ -2465,9 +2477,10 @@ func DefaultConfig() *Config {
 				PollFloor:         DefaultFailurePolicyPollFloor,
 				ShortRetries:      DefaultFailurePolicyShortRetries,
 				Pacing: PacingConfig{
-					Enabled:     DefaultPacingEnabled,
-					MinInterval: DefaultPacingMinInterval,
-					MaxInterval: DefaultPacingMaxInterval,
+					Enabled:          DefaultPacingEnabled,
+					Target429PerHour: DefaultPacingTarget429Hour,
+					MinInterval:      DefaultPacingMinInterval,
+					MaxInterval:      DefaultPacingMaxInterval,
 				},
 			},
 			ContextDiscovery: ContextDiscoveryConfig{

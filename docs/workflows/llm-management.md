@@ -155,6 +155,24 @@ for the config block and precedence rule).
   `/v1/models` list as `lmstudio/<id>` entries, with context lengths from
   `/api/v0/models`. The model list is whatever that machine has loaded.
 
+## Adaptive 429 Pacing
+
+When `llm.failure_policy.pacing.enabled` is true, meept paces outbound
+requests per provider below that provider's effective rate-limit ceiling.
+The loop is observe → interval → decay: every provider response is
+classified (see the failure-policy docs), and a bare throttle 429 — no
+`Retry-After`, no quota signal — doubles the minimum gap between requests
+to that provider, clamped at `max_interval`. Clean traffic decays the gap
+by half per quiet window (one full gap's worth of successful traffic), so
+pacing fades back out as the provider recovers. Independently, the metrics
+store's hourly rate-limit count acts as a floor: while a provider exceeds
+`target_429_per_hour` events in the last hour, the enforced gap never
+drops below `min_interval`, even without fresh 429s. Pacing composes with
+the retry policy — it stretches the gap between requests, it never blocks
+or replaces a retry. See
+[LLM Configuration](../configuration/llm.md#failure-policy-configuration)
+for the knobs; the feature is off by default.
+
 ## Grammar-Constrained Tool Calling (GBNF)
 
 Small local models frequently emit malformed tool-call JSON. When the

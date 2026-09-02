@@ -31,9 +31,10 @@ type FailurePolicyConfig struct {
 	ShortRetries int
 	// Pacing gating knobs (D15; tree 02 leaf 05 consumption — carried on
 	// the schema here so leaf 05's PacingConfig maps onto it 1:1).
-	PacingEnabled     bool
-	PacingMinInterval time.Duration
-	PacingMaxInterval time.Duration
+	PacingEnabled          bool
+	PacingTarget429PerHour int
+	PacingMinInterval      time.Duration
+	PacingMaxInterval      time.Duration
 }
 
 // BackoffPlan converts a failure class + attempt count into deterministic
