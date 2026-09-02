@@ -632,6 +632,43 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			clientOpts = append(clientOpts, llm.WithTokenCache(tokenCache))
 		}
 		c.LLMClient = llm.NewClient(llmCfg, clientOpts...)
+
+		// Tree 02 wiring (leaves 03+05): failure-policy retry budget and
+		// the adaptive 429 pacer. Both default-safe: ShortRetries <= 0
+		// clamps to 3 inside the client; a disabled pacer is never
+		// constructed, so wiring is inert when llm.failure_policy.pacing
+		// is off (D15 default).
+		fp := cfg.LLM.FailurePolicy
+		c.LLMClient.SetFailurePolicyConfig(&llm.FailurePolicyConfig{
+			Horizon:                fp.Horizon,
+			BaseThrottle:           fp.BaseThrottle,
+			BaseQuota402Extra:      fp.BaseQuota402Extra,
+			PollFloor:              fp.PollFloor,
+			ShortRetries:           fp.ShortRetries,
+			PacingEnabled:          fp.Pacing.Enabled,
+			PacingTarget429PerHour: fp.Pacing.Target429PerHour,
+			PacingMinInterval:      fp.Pacing.MinInterval,
+			PacingMaxInterval:      fp.Pacing.MaxInterval,
+		})
+		if fp.Pacing.Enabled {
+			llmMetricsStore, mErr := llm.NewMetricsStoreForPacing(filepath.Join(cfg.Daemon.DataDir, "llm_metrics.db"))
+			if mErr != nil {
+				logger.Warn("Adaptive pacing disabled: metrics store unavailable", "error", mErr)
+			} else {
+				c.LLMClient.SetPacer(llm.NewAdaptivePacer(llmMetricsStore, llm.PacingConfig{
+					Enabled:          true,
+					Target429PerHour: fp.Pacing.Target429PerHour,
+					MinInterval:      fp.Pacing.MinInterval,
+					MaxInterval:      fp.Pacing.MaxInterval,
+				}))
+				logger.Info("Adaptive 429 pacing enabled",
+					"target_429_per_hour", fp.Pacing.Target429PerHour,
+					"min_interval", fp.Pacing.MinInterval.String(),
+					"max_interval", fp.Pacing.MaxInterval.String(),
+				)
+			}
+		}
+
 		c.TokenCache = tokenCache
 		logger.Info("LLM client initialized successfully",
 			"provider", llmCfg.ProviderID,

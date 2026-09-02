@@ -234,3 +234,13 @@ func (p *AdaptivePacer) interval(providerID string) time.Duration {
 	defer p.mu.Unlock()
 	return p.state[providerID].interval
 }
+
+// NewMetricsStoreForPacing opens a small metrics store dedicated to the
+// pacer's rate-hold query (tree 02 leaf 05 daemon wiring). Uses conservative
+// defaults: 30-day retention, 1h stats window.
+func NewMetricsStoreForPacing(dbPath string) (*metrics.Store, error) {
+	return metrics.NewStore(metrics.StoreConfig{
+		DBPath:        dbPath,
+		RetentionDays: 30,
+	})
+}

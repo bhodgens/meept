@@ -118,6 +118,10 @@ type Client struct {
 	// 03): replaces the raw buffered channel so interactive acquires
 	// can jump the wait list under a starvation guard.
 	concurrencyGate *slotGate
+
+	// pacer is the adaptive 429 pacer (tree 02 leaf 05, D15). Nil =
+	// feature off, zero overhead (typed-nil guard in SetPacer).
+	pacer *AdaptivePacer
 }
 
 // DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without
@@ -149,6 +153,17 @@ func (c *Client) SetFailurePolicyConfig(cfg *FailurePolicyConfig) {
 		return
 	}
 	c.failurePolicy = cfg
+}
+
+// SetPacer injects the adaptive 429 pacer (tree 02 leaf 05, D15). Nil
+// pacer (or nil receiver) = pacing off, zero overhead — the guard is the
+// typed-nil pattern (repo rule): a nil *AdaptivePacer must not produce a
+// non-nil interface that later panics.
+func (c *Client) SetPacer(p *AdaptivePacer) {
+	if c == nil || p == nil {
+		return
+	}
+	c.pacer = p
 }
 
 // shortRetryBudget returns the loop retry count: the injected config value
@@ -526,6 +541,9 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			// signal).
 			status, header := errorStatusAndHeader(err)
 			verdict := Classify(status, header, nil, time.Now())
+			if c.pacer != nil {
+				c.pacer.Observe(verdict, cfg.ProviderID)
+			}
 
 			switch verdict.Class {
 			case FailureThrottle:
@@ -726,6 +744,9 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			// quota shapes to QuotaResetError (see Chat loop).
 			status, header := errorStatusAndHeader(err)
 			verdict := Classify(status, header, nil, time.Now())
+			if c.pacer != nil {
+				c.pacer.Observe(verdict, cfg.ProviderID)
+			}
 
 			switch verdict.Class {
 			case FailureThrottle:
@@ -1102,6 +1123,15 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 		return nil, &ClientError{Message: "concurrency limit wait interrupted", Cause: err}
 	}
 	defer release()
+
+	// Adaptive 429 pacing (tree 02 leaf 05, D15): stay under the learned
+	// provider ceiling before egress. Nil pacer = feature off. Runs AFTER
+	// the slot gate so a granted slot isn't held while pacing sleeps.
+	if c.pacer != nil {
+		if err := c.pacer.Wait(ctx, cfg.ProviderID); err != nil {
+			return nil, &ClientError{Message: "pacing wait interrupted", Cause: err}
+		}
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -1540,6 +1570,9 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		// which returns it unchanged (existing behavior).
 		status, header := errorStatusAndHeader(err)
 		verdict := Classify(status, header, nil, time.Now())
+		if c.pacer != nil {
+			c.pacer.Observe(verdict, cfg.ProviderID)
+		}
 
 		switch verdict.Class {
 		case FailureThrottle:
