@@ -34,9 +34,6 @@ func TestWebFetchTool_Execute(t *testing.T) {
 </html>`))
 		case "/error":
 			http.Error(w, "Not Found", http.StatusNotFound)
-		case "/slow":
-			time.Sleep(5 * time.Second)
-			_, _ = w.Write([]byte("slow"))
 		default:
 			_, _ = w.Write([]byte("default"))
 		}

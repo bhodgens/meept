@@ -225,12 +225,11 @@ func TestProxyIntegration_AskFlowApproveDenyTimeout(t *testing.T) {
 		name     string
 		approve  bool
 		useAppr  bool
-		delay    time.Duration
 		wantCode int
 	}{
-		{"approved", true, true, 0, http.StatusOK},
-		{"denied", false, true, 0, http.StatusForbidden},
-		{"no approver denies", false, false, 0, http.StatusForbidden},
+		{"approved", true, true, http.StatusOK},
+		{"denied", false, true, http.StatusForbidden},
+		{"no approver denies", false, false, http.StatusForbidden},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -248,7 +247,6 @@ func TestProxyIntegration_AskFlowApproveDenyTimeout(t *testing.T) {
 			if tc.useAppr {
 				policy.SetApprover(func(ctx context.Context, host string) bool {
 					calls.Add(1)
-					time.Sleep(tc.delay)
 					return tc.approve
 				})
 			}
