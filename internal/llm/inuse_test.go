@@ -58,6 +58,101 @@ func TestBuildModelsInUse_AliasExpansion(t *testing.T) {
 	}
 }
 
+// TestBuildModelsInUse_BareAliasNameSlots reproduces the live config shape:
+// classifier_model / summarizer_model hold bare alias names (no "/"), and
+// the 8B endpoint's model appears ONLY as an alias fallback member. Before
+// the fix, slash-less values were dropped before alias expansion, so bare
+// alias names never resolved and fallback members never entered the set —
+// leaving their endpoints dead until a manual `meept runtime start`.
+func TestBuildModelsInUse_BareAliasNameSlots(t *testing.T) {
+	agents := []llm.AgentModelRef{}
+	slots := llm.ModelSlots{
+		Model:           "agnes/agnes-2.5-flash",
+		SmallModel:      "local-classifier/lfm-1.2b-q8",
+		ClassifierModel: "classifier", // bare alias name
+		SummarizerModel: "summarizer", // bare alias name
+	}
+	aliases := map[string]llm.ModelAliasEntry{
+		"classifier": {Models: []string{
+			"local-classifier/lfm-1.2b-q8",
+			"local/lfm-8b-q4",
+			"agnes/agnes-2.5-flash",
+			"zai/glm-4.5-air",
+			"ollama/llama3.2",
+		}},
+		"summarizer": {Models: []string{
+			"local-classifier/lfm-1.2b-q8",
+			"local/lfm-8b-q4",
+			"agnes/agnes-2.5-flash",
+			"zai/glm-4.5-air",
+			"ollama/llama3.2",
+		}},
+		"coder": {Models: []string{"agnes/agnes-2.5-flash", "local/lfm-8b-q4", "ollama/llama3.2"}},
+	}
+	got := llm.BuildModelsInUse(agents, slots, aliases, nil)
+	want := map[string]struct{}{
+		"agnes/agnes-2.5-flash":        {},
+		"local-classifier/lfm-1.2b-q8": {},
+		"local/lfm-8b-q4":              {},
+		"zai/glm-4.5-air":              {},
+		"ollama/llama3.2":              {},
+	}
+	if !mapsEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestBuildModelsInUse_AliasAllMembersContribute verifies that an alias with
+// three members contributes ALL three (head + fallbacks) to the in-use set —
+// each member's endpoint is a configured failover target that should
+// pre-warm at boot.
+func TestBuildModelsInUse_AliasAllMembersContribute(t *testing.T) {
+	agents := []llm.AgentModelRef{}
+	slots := llm.ModelSlots{ClassifierModel: "coder"}
+	aliases := map[string]llm.ModelAliasEntry{
+		"coder": {Models: []string{"agnes/agnes-2.5-flash", "local/lfm-8b-q4", "ollama/llama3.2"}},
+	}
+	got := llm.BuildModelsInUse(agents, slots, aliases, nil)
+	want := map[string]struct{}{
+		"agnes/agnes-2.5-flash": {},
+		"local/lfm-8b-q4":       {},
+		"ollama/llama3.2":       {},
+	}
+	if !mapsEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestBuildModelsInUse_AliasesOnlyConfig: a config that defines aliases but
+// no agents/slots still contributes alias members (aliased models are
+// usable at request time regardless of slot wiring).
+func TestBuildModelsInUse_AliasesOnlyConfig(t *testing.T) {
+	aliases := map[string]llm.ModelAliasEntry{
+		"planner": {Models: []string{"agnes/agnes-2.5-flash", "ollama/llama3.2"}},
+	}
+	got := llm.BuildModelsInUse(nil, llm.ModelSlots{}, aliases, nil)
+	want := map[string]struct{}{
+		"agnes/agnes-2.5-flash": {},
+		"ollama/llama3.2":       {},
+	}
+	if !mapsEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestBuildModelsInUse_UnreferencedEndpointStillGated: a model in no agent,
+// slot, or alias must NOT enter the set — the boot gate stays for genuinely
+// unreferenced endpoints.
+func TestBuildModelsInUse_UnreferencedEndpointStillGated(t *testing.T) {
+	aliases := map[string]llm.ModelAliasEntry{
+		"coder": {Models: []string{"agnes/agnes-2.5-flash", "local/lfm-8b-q4"}},
+	}
+	got := llm.BuildModelsInUse(nil, llm.ModelSlots{}, aliases, nil)
+	if _, ok := got["local/unrelated-model"]; ok {
+		t.Errorf("unreferenced model should be gated, got %v", got)
+	}
+}
+
 func TestBuildModelsInUse_DisabledProviders(t *testing.T) {
 	agents := []llm.AgentModelRef{
 		{Model: "local/alpha", Enabled: true},
