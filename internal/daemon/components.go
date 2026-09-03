@@ -7274,6 +7274,16 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		)
 		return nil, fmt.Errorf("agent execution failed: %w", err)
 	}
+	// Defense in depth: a no-op turn (LLM failure previously surfaced as
+	// ("", nil)) must not be reported as a completed job — the planner
+	// would advance past a step that never did any work.
+	if strings.TrimSpace(response) == "" {
+		p.logger.Error("Agent execution produced empty response",
+			"job_id", job.ID,
+			"agent_id", job.AgentID,
+		)
+		return nil, fmt.Errorf("agent execution produced empty response (job %s, agent %s)", job.ID, job.AgentID)
+	}
 
 	result := map[string]any{
 		"job_id":   job.ID,

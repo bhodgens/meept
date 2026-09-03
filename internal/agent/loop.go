@@ -3565,8 +3565,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				if handled != nil {
 					// Fallback: attempt one state-based recovery action
 					// (e.g., reset Error→Idle, surface Blocked to user,
-					// or revive ToolWaiting). If recovery absorbs the error,
-					// surface nil; otherwise propagate the wrapped error.
+					// or revive ToolWaiting). Recovery absorbs the error
+					// STATE-side (next turn starts clean), but the caller
+					// must still learn this turn FAILED: returning ("", nil)
+					// here made job workers mark no-op turns as success.
 					return "", l.attemptStateRecovery(handled)
 				}
 				return "", nil
@@ -4256,7 +4258,8 @@ func (l *AgentLoop) notifyUserBlocked(err error) {
 // agent state machine plan):
 //
 //   - StateError: reset to StateIdle so the next user turn starts fresh.
-//     Returns nil (recovery absorbed the error).
+//     Returns fallback (the original error) so the CALLER still learns the
+//     turn failed — recovery is state-machine hygiene, not success.
 //   - StateBlocked: notify the user and return ErrAgentBlocked wrapping the
 //     original error. The caller surfaces this to the user; no auto-retry.
 //   - StateToolWaiting: a tool result timed out — transition back to
@@ -4299,7 +4302,10 @@ func (l *AgentLoop) attemptStateRecovery(err error) error {
 				"error", tErr.Error())
 			return err
 		}
-		return nil
+		// State is clean for the next turn, but THIS turn failed: callers
+		// (job workers, step executors) must not see ("", nil) — that made
+		// no-op turns count as successes.
+		return err
 	case StateBlocked:
 		l.notifyUserBlocked(err)
 		return fmt.Errorf("%w: %s", ErrAgentBlocked, err.Error())

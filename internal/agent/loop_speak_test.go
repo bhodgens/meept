@@ -215,7 +215,9 @@ func TestRunOnce_AttachedRouterNil_BubbleOnly(t *testing.T) {
 
 // TestRunOnce_DetachedEmptyFinalText_NoNotify verifies the C3 empty-text
 // rule end-to-end: a detached run that ends with empty final text must not
-// notify.
+// notify. The whitespace response exhausts the mock, so the turn ends via
+// the LLM-failure path — which now propagates the error (callers must learn
+// the turn failed) — while the no-notify contract still holds.
 func TestRunOnce_DetachedEmptyFinalText_NoNotify(t *testing.T) {
 	chatter := newMockChatter(
 		&llm.Response{Content: "   ", FinishReason: "stop", Usage: llm.TokenUsage{TotalTokens: 5}},
@@ -224,8 +226,8 @@ func TestRunOnce_DetachedEmptyFinalText_NoNotify(t *testing.T) {
 	router := NewSpeakRouter(pub.publish)
 
 	loop := newSpeakTestLoop(t, chatter, router, false, false)
-	if _, err := loop.RunOnce(context.Background(), "produce nothing", "conv-speak-empty"); err != nil {
-		t.Fatalf("RunOnce: %v", err)
+	if _, err := loop.RunOnce(context.Background(), "produce nothing", "conv-speak-empty"); err == nil {
+		t.Fatalf("RunOnce: want error from exhausted LLM mock, got nil")
 	}
 	if calls := pub.recorded(); len(calls) != 0 {
 		t.Errorf("deliveries = %d, want 0 (empty final text)", len(calls))
