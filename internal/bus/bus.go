@@ -125,8 +125,8 @@ func (b *MessageBus) PublishBlocking(topic string, msg *models.BusMessage) int {
 	return b.publish(topic, msg, false, true)
 }
 
-// PublishExternalOnly is like Publish but downgrades the "no subscribers" log
-// from WARN to DEBUG. Use this for fire-and-forget event topics that are
+// PublishExternalOnly is like Publish but marks the "no subscribers" debug log
+// as an external-only topic. Use this for fire-and-forget event topics that are
 // informational and expected to have no subscriber when no TUI/MCP client is
 // connected (e.g., worker.*, chat.message.received).
 // The panicOnUndrainedSubscription behavior is unchanged — it now logs at
@@ -136,10 +136,11 @@ func (b *MessageBus) PublishExternalOnly(topic string, msg *models.BusMessage) i
 }
 
 // publish is the shared core for Publish, PublishBlocking, and PublishExternalOnly.
-// When suppressWarning is true, the "no subscribers" log is downgraded from
-// WARN to DEBUG. When blocking is true, sends to subscriber channels use a
-// 5-second timeout instead of non-blocking select-default.
-func (b *MessageBus) publish(topic string, msg *models.BusMessage, suppressWarning, blocking bool) int {
+// A publish with no subscribers is normal for fire-and-forget informational
+// events, so it always logs at DEBUG; externalOnly only marks the log line as
+// an external-only topic. When blocking is true, sends to subscriber channels
+// use a 5-second timeout instead of non-blocking select-default.
+func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly, blocking bool) int {
 	if msg == nil {
 		return 0
 	}
@@ -147,7 +148,8 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, suppressWarni
 	b.mu.RLock()
 	subs := b.subscribers[topic]
 
-	// Check for zero subscribers - warn (and optionally panic for tests)
+	// Check for zero subscribers - informational (Debug); Error only when
+	// panic mode is enabled so tests catch missing wiring.
 	if len(subs) == 0 {
 		// Check wildcard subscribers too
 		hasWildcardSubs := false
@@ -162,14 +164,14 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, suppressWarni
 
 		if !hasWildcardSubs {
 			b.mu.RUnlock()
-			if suppressWarning {
+			if externalOnly {
 				b.logger.Debug("bus: Publish with no subscribers (external-only topic)",
 					"topic", topic,
 					"source", msg.Source,
 					"msg_id", msg.ID,
 				)
 			} else {
-				b.logger.Warn("bus: Publish with no subscribers",
+				b.logger.Debug("bus: Publish with no subscribers",
 					"topic", topic,
 					"source", msg.Source,
 					"msg_id", msg.ID,

@@ -319,9 +319,11 @@ func TestPublishExternalOnly_DeliversToSubscribers(t *testing.T) {
 	}
 }
 
-// TestPublish_WarnsOnNoSubscribers verifies that the regular Publish still
-// emits a WARN-level "no subscribers" message (regression guard for refactor).
-func TestPublish_WarnsOnNoSubscribers(t *testing.T) {
+// TestPublish_DebugOnNoSubscribers verifies that the regular Publish logs the
+// no-subscriber condition at DEBUG — it is normal for fire-and-forget events:
+// invisible at INFO threshold, visible with topic/msg_id fields at DEBUG.
+func TestPublish_DebugOnNoSubscribers(t *testing.T) {
+	// INFO threshold: the DEBUG-level log must be suppressed.
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	bus := New(DefaultConfig(), logger)
@@ -331,8 +333,25 @@ func TestPublish_WarnsOnNoSubscribers(t *testing.T) {
 	bus.Publish("regular.topic", msg)
 
 	output := buf.String()
-	assert.True(t, strings.Contains(output, "no subscribers"),
-		"Publish should log 'no subscribers' at WARN level:\n%s", output)
+	assert.False(t, strings.Contains(output, "no subscribers"),
+		"Publish should not log 'no subscribers' above DEBUG (INFO threshold):\n%s", output)
+
+	// DEBUG threshold: the message must appear, with topic/msg_id fields intact.
+	var debugBuf bytes.Buffer
+	debugBus := New(DefaultConfig(), slog.New(slog.NewTextHandler(&debugBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer debugBus.Close()
+
+	debugBus.Publish("debug.topic", msg)
+
+	debugOutput := debugBuf.String()
+	assert.True(t, strings.Contains(debugOutput, "bus: Publish with no subscribers"),
+		"Publish should log 'no subscribers' at DEBUG level:\n%s", debugOutput)
+	assert.True(t, strings.Contains(debugOutput, "level=DEBUG"),
+		"no-subscriber log should be emitted at DEBUG level:\n%s", debugOutput)
+	assert.True(t, strings.Contains(debugOutput, "topic=debug.topic"),
+		"no-subscriber log should keep the topic field:\n%s", debugOutput)
+	assert.True(t, strings.Contains(debugOutput, "msg_id="+msg.ID),
+		"no-subscriber log should keep the msg_id field:\n%s", debugOutput)
 }
 
 // TestPublishExternalOnly_ErrorLogInTestMode verifies that PublishExternalOnly
