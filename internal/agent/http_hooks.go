@@ -86,6 +86,22 @@ func NewHTTPHook(config HTTPHookConfig, allowedURLs []string, logger *slog.Logge
 		config.Timeout = 30 * time.Second
 	}
 
+	// Default retry_count to 3 when unset: a zero value previously tripped
+	// executeSync's loop guard (attempt >= RetryCount) at attempt 0, so hooks
+	// with unset retry_count never retried transient failures ("HTTP request
+	// failed after 0 retries"). 3 matches the repo's other retry defaults
+	// (Job MaxRetries in internal/queue/job.go, retry_recovery.go).
+	//
+	// Contract: after construction RetryCount is always >= 1 — 0 is
+	// indistinguishable from "unset" over the JSON config surface and must
+	// mean the default, so negative RetryCount (-1) is the only explicit
+	// "no retries" opt-out. HTTPHookBackoffConfig callers must pass this
+	// normalized value; its MaxAttempts<=0-means-unlimited behavior must
+	// never see the raw pre-construction 0.
+	if config.RetryCount == 0 {
+		config.RetryCount = 3
+	}
+
 	// Compile allowed URL patterns
 	allowed := make([]*regexp.Regexp, 0, len(allowedURLs))
 	for _, pattern := range allowedURLs {
