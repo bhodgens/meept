@@ -2,7 +2,7 @@
 
 This document is a complete flattening of all Meept documentation into a single text file, designed to be fed to LLMs as context. It covers installation, architecture, configuration, workflows, and API reference.
 
-Generated: 2026-08-31T23:13:38Z
+Generated: 2026-09-03T21:54:15Z
 Source: https://github.com/caimlas/meept
 
 ---
@@ -57,6 +57,7 @@ Source: https://github.com/caimlas/meept
   - LLM Configuration
   - Media generation
   - Production Security Configuration
+  - Queue Configuration
   - Peer Sync Configuration
   - Theming
   - Token Budgets Configuration
@@ -66,6 +67,7 @@ Source: https://github.com/caimlas/meept
   - Agent Lateral Interrogation Howto
   - Multi-Agent Orchestration
   - OAuth Device-Code Providers
+  - backfill-evolver-plans
   - Backup
   - Persistent Bot Framework (deprecated)
   - Browser Automation Tools
@@ -1484,7 +1486,16 @@ pattern_promotion_confidence = 0.7
 pattern_promotion_use_count = 5
 auto_apply = false              # false = proposals go to plan system
 run_on_start = false            # Skip immediate cycle on daemon startup
+plan_dir = "~/.meept/plans/evolver"  # Where evolver-created plans land
 ```
+
+**Plan sink:** When `auto_apply = false`, verified evolver proposals become
+plans in `skills.evolver.plan_dir` (default `~/.meept/plans/evolver`, a
+user-scoped directory independent of the daemon's working directory). Each
+machine-originated plan is stamped with `origin: skill-evolver`, a proposal
+id, and the proposed action in its Meta section. A repo's `docs/plans/`
+directory is reserved for human-authored plans only — evolver plans never
+land there.
 
 ---
 
@@ -8451,6 +8462,7 @@ temperature: 0.3
 - **max_tokens_per_turn**: Maximum tokens per conversation turn
 - **max_memory_refs**: Maximum memory references per turn
 - **temperature**: LLM temperature setting
+- **escalation_model**: Model (alias name or `"provider/model"` ref) used for the next fix attempt when adversarial verification exhausts `max_fix_loops`; empty/absent = escalation disabled (escalates to the user instead)
 
 ## Discovery Hierarchy
 
@@ -8545,6 +8557,7 @@ timeout_seconds: 300
 max_tokens_per_turn: 8192
 max_memory_refs: 15
 temperature: 0.7
+# escalation_model: smarter-alias  # alias or provider/model; empty = disabled
 ---
 
 # Research Specialist
@@ -11977,6 +11990,7 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 ### Core Configuration
 
 - **[Daemon](daemon.md)** - Basic daemon settings and logging
+- **[Queue](queue.md)** - Job queue persistence and interactive-first scheduling window
 - **[LLM](llm.md)** - Model providers, capabilities, and budget management
 - **[Agents](agents.md)** - Multi-agent system configuration
 
@@ -12579,6 +12593,49 @@ Example with advanced options:
 }
 ```
 
+### Timeouts and Cooldowns
+
+Meept distinguishes three cooldown layers when a provider request fails
+(throttling, transport timeouts, quota). They key differently and clear
+differently:
+
+**Endpoint shared fate.** When a model fails with a throttling error (a
+429 without quota signals) or a transport timeout (deadline exceeded,
+connection timeout), the whole base ENDPOINT cools down — not just the one
+model. The endpoint identity is the URL host plus the credential
+fingerprint, so `openai/gpt-4.1 (medium alias)` timing out also skips
+`openai/gpt-4.1-mini (thinkhard alias)` when both use the same host and
+API key. Models that share a host but use different credentials do NOT
+share fate: `xai` (API key) and `xai-oauth` (subscription) hit the same
+`api.x.ai` host but stay independently usable, and two runtimes that
+happen to live on one machine (`gala-mlx`, `gala-llama`) never block each
+other. The block lasts the alias's `timeout` base (or the 30s default)
+and clears lazily after expiry plus a successful call. When every model
+an alias could serve is endpoint-blocked, resolution fails with
+`all models in alias are endpoint-blocked` — a distinct error from the
+quota all-blocked error.
+
+**Alias-level timeout (opt-in only).** An alias that explicitly declares
+`timeout:` also arms an ALIAS-level block after `max_fails` CONSECUTIVE
+failures of the SAME member model — alternating failures of different
+members never count. Each additional armed block doubles the wait
+(60s → 120s → 240s …), capped at 4× the alias's `timeout` base. An alias
+without an explicit `timeout:` never gets this alias-level block; member
+and endpoint blocks carry the load instead. A successful call resets the
+streak and releases the block.
+
+**Precedence.** Quota blocks (structured quota errors with reset windows)
+outrank endpoint blocks, which outrank the alias-level timeout block. A
+candidate that is both quota- and endpoint-blocked surfaces as
+quota-blocked; endpoint checks run second; the alias block excludes every
+member last.
+
+**Relation to `max_concurrency`.** Provider/model `max_concurrency`
+(model table above) bounds how many requests may run in parallel against
+one model — it gates the request slot. It does not take part in failure
+cooldowns: cooldown duration always comes from the alias `timeout` base
+(or the 30s default), never from `max_concurrency`.
+
 ## Budget Configuration
 
 For comprehensive budget documentation, see [Token Budgets Configuration](token-budgets.md).
@@ -12667,6 +12724,61 @@ Notes:
 - Quota blocks are in-memory; a daemon restart re-probes providers.
 - See `docs/workflows/quota-resilience.md` for the full behavior.
 
+## Failure Policy Configuration
+
+Long-horizon retry scheduling when a provider request fails (throttling,
+quota exhaustion, server errors). Meept backs off exponentially from the
+class base, polls hourly once the steps reach the floor, and gives up at
+the horizon — the turn then fails with a clear user-facing error and the
+queue/goal-loop applies its own retry policy.
+
+```json5
+llm: {
+  failure_policy: {
+    horizon: "24h",              // give-up cap: retry only until now+horizon
+    base_throttle: "30s",        // first-retry delay for 429 throttle (also 5xx fallback base)
+    base_quota_402_extra: "5m",  // added to base_throttle for 402 quota errors
+    poll_floor: "1h",            // polling floor once exponential steps exceed it
+    short_retries: 3,            // bounded immediate-retry budget for 5xx in client loops
+    pacing: {
+      enabled: false,            // adaptive outbound pacing (opt-in)
+      target_429_per_hour: 1,    // tolerated throttle-429 rate per provider/hour
+      min_interval: "1s",        // shortest gap between requests to one provider
+      max_interval: "30s"        // ceiling on the learned pacing gap
+    }
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `horizon` | duration | `24h` | Give-up cap. A failing model is retried only until `now + horizon`; past it the turn fails (the queue applies its own retry policy). Zero/negative reverts to the default. |
+| `base_throttle` | duration | `30s` | First-retry delay for provider-load throttling (429 without a quota signal) and the fallback base for all other failure classes. |
+| `base_quota_402_extra` | duration | `5m` | Added to `base_throttle` for payment-required (402) quota errors — 402 waits start minutes longer than the equivalent 429 path. |
+| `poll_floor` | duration | `1h` | Polling floor: once an exponential step would exceed it, every subsequent step is exactly this long (no jitter — polling stays on the hour mark). |
+| `short_retries` | int | `3` | Bounded immediate-retry budget for server errors (5xx) in the client retry loops. |
+| `pacing.enabled` | bool | `false` | Adaptive pacing below a provider's effective rate-limit ceiling (learned from rate-limit metrics). Off by default. |
+| `pacing.target_429_per_hour` | int | `1` | Tolerated throttle-429 rate per provider per hour: while the observed hourly rate-limit count from the metrics store exceeds this, the enforced gap is held at `min_interval`. Zero/negative reverts to the default. |
+| `pacing.min_interval` | duration | `1s` | Shortest gap between outbound requests to a single provider while pacing. |
+| `pacing.max_interval` | duration | `30s` | Ceiling on the learned pacing gap. |
+
+Notes:
+- Retry schedules honor a provider-specified `Retry-After` (all RFC 7231
+  forms: delta-seconds, IMF-fixdate, RFC850, asctime) and the
+  Anthropic/Codex reset headers, but never wait past `horizon`.
+- The give-up boundary is a schedule question only: when the horizon is
+  reached the turn is surfaced as failed; it is not silently dropped.
+
+When to enable pacing: most providers signal throttling with a
+`Retry-After` header or quota-shaped body, and the retry policy above
+handles them. A few shed load with bare 429s — no `Retry-After`, no quota
+signal — so every request costs a retry slot before backing off. If a
+provider's metrics (`docs/workflows/metrics.md`, rate-limit events) show a
+steady trickle of such bare 429s, enable pacing: meept then stretches the
+gap between outbound requests to that provider (never beyond
+`max_interval`, never blocking a request outright) to stay under the
+observed ceiling instead of reacting after each rejection.
+
 ## Adaptive Timeout Configuration
 
 Dynamic timeout calculation based on request characteristics:
@@ -12693,6 +12805,63 @@ summarization_threshold = 0.75   # Threshold for auto-summarization
 summarization_model = "small"    # Model for summarization
 ```
 
+## Context Discovery Configuration
+
+Providers expose true model context lengths on their own endpoints (the
+built-in catalog only carries defaults). When enabled, meept runs a
+background discovery syncer — modeled on the pricing syncer — that
+fetches those values and fills context windows in memory. Discovery is
+**off by default**: when off, no syncer is constructed and no network
+traffic happens.
+
+```json5
+llm: {
+  context_discovery: {
+    enabled: false,                // master switch (default false)
+    interval: "6h",                // re-sync cadence (default 6h)
+    allow_context_override: false  // discovered values may replace non-zero catalog values
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `enabled` | bool | `false` | Turn discovery on. Off = zero behavior change. |
+| `interval` | duration | `6h` | Re-sync cadence. Zero or negative reverts to the default (deliberately slow — the OpenRouter fetch shares the pricing sync's politeness budget). |
+| `allow_context_override` | bool | `false` | Let a discovered value replace a non-zero catalog context value. Explicit `context_limit` in models.json5 always wins regardless of this flag. |
+
+**Precedence** (highest wins):
+
+```
+1. models.json5 explicit context_limit (authoritative when set)
+2. discovered value (when allow_context_override OR catalog value is 0)
+3. catalog default
+```
+
+**Provider exposure:**
+
+| Provider | Exposes context length | Endpoint |
+|----------|------------------------|----------|
+| Ollama | yes | `/api/show` (per model) |
+| LM Studio | yes | `/api/v0/models` (`max_context_length`) |
+| llama.cpp (`local-models`) | yes | `/props` (one `n_ctx` per server, applied to all its models) |
+| OpenRouter | yes | `/api/v1/models` (`context_length`) |
+| OpenAI | never | — (catalog stays the source) |
+| Anthropic | never | — (catalog stays the source) |
+
+Discovery updates the resolver's model set and the display catalog (the
+TUI model picker) in memory only — your models.json5 is never rewritten.
+
+**Verifying it works:** watch the daemon log for `Context discovery
+enabled` (startup, includes `interval` and `allow_context_override`),
+`context window updated` (per changed model, `from` → `to`), and
+`context discovery: ...` warnings when a provider endpoint is
+unreachable.
+
+See [LM Studio (Local)](#lm-studio-local) for its discovery behavior
+and [the LLM workflow page](../workflows/llm-management.md) for the
+runtime story.
+
 ## Provider Examples
 
 ### Ollama (Local)
@@ -12716,6 +12885,61 @@ summarization_model = "small"    # Model for summarization
   }
 }
 ```
+
+### LM Studio (Local)
+
+Serve a model from LM Studio's local API server (Developer tab → Start
+Server, or the CLI):
+
+```bash
+lms server start
+```
+
+LM Studio listens on `http://localhost:1234` by default; its
+OpenAI-compatible base URL is `http://localhost:1234/v1`. If you changed
+the port (or the machine), override it with the provider's `baseURL`
+option, exactly like Ollama:
+
+```json5
+"lmstudio": {
+  "api": "openai",
+  "options": {
+    "baseURL": "http://localhost:1234/v1"
+  },
+  "models": {
+    "qwen2.5-7b-instruct": {
+      "name": "Qwen2.5 7B Instruct",
+      "capabilities": ["code", "tool_use", "reasoning"],
+      "input_cost": 0.0,
+      "output_cost": 0.0,
+      "max_output": 4096,
+      "temperature": 0.7
+    }
+  }
+}
+```
+
+The `models` key is the model id as LM Studio's loader reports it (see
+`GET http://localhost:1234/v1/models`). It is usually the lowercased
+identifier already, e.g. `qwen2.5-7b-instruct`; loaded models vary per
+machine, so declare only the ones you pin for aliasing/costs.
+
+**Discovery:** when no explicit entry exists, models are discovered from
+the server itself — ids come from the OpenAI-compat list (`/v1/models`,
+which carries NO context metadata), and context lengths come from LM
+Studio's REST v0 layer (`/api/v0/models`). A loaded model's
+`context_length` wins over the entry's `max_context_length`; models that
+expose neither are registered with context `0`.
+
+**Context length:** an explicit `context_limit` in models.json5 always
+wins; a discovered value otherwise fills models with context `0` (and can
+replace catalog values when `allow_context_override` is enabled — see
+[tree 05 leaf 01's precedence](../../internal/llm/context_discovery.go)).
+
+**Tools:** the endpoint advertises `tools` support (it accepts the
+OpenAI wire format), but whether a specific loaded model can actually
+produce tool calls depends on that model's JIT tool use — per-model
+capability gating in models.json5 is your job.
 
 ### OpenRouter (External)
 
@@ -13797,6 +14021,64 @@ the proxy address so placeholder traffic cannot bypass inspection.
 | `internal/secrets/egress_policy.go` | EgressPolicy rule engine, ApplyEgressEnv scrubbing |
 | `internal/secrets/proxy.go` | Pre-injection consultation point (403 on deny) |
 | `internal/config/schema.go` | `[security.egress]` schema + validation |
+
+---
+
+## Queue Configuration
+
+> Source: `configuration/queue.md`
+
+The `[queue]` section controls the job queue: where jobs persist, how
+failed jobs retry, and how interactive work is prioritized over
+background work.
+
+## Configuration File
+
+Queue settings are configured in `~/.meept/meept.json5` under the `queue` section:
+
+```json5
+{
+  queue: {
+    db_path: "~/.meept/queue.db",
+    max_retries: 3,
+    interactive_window: "5m",
+  },
+}
+```
+
+## Configuration Options
+
+### db_path
+- **Type**: string
+- **Default**: `~/.meept/queue.db`
+- **Description**: Path to the SQLite database where queued jobs persist
+
+### max_retries
+- **Type**: int
+- **Default**: `3`
+- **Description**: How many times a failed job is retried before it is marked failed
+
+### interactive_window
+- **Type**: duration string (e.g. `5m`, `30s`, `1h`)
+- **Default**: `5m`
+- **Description**: Recency window for the session interactivity signal
+  (DECISIONS.md D11). A session counts as *interactive* when it received a
+  user message within this window, or when the client holds it in the
+  foreground (`session.set_foreground`). Work enqueued from an interactive
+  session is claimed ahead of background jobs by the queue's claim
+  ordering. Unparseable or non-positive values fall back to the default.
+  See `docs/workflows/job-scheduling.md` ("Claim Ordering") for the full
+  ordering and stamping semantics.
+
+## Notes
+
+- Chat turns themselves bypass the queue (they dispatch directly), so this
+  window affects only queued work (planner/analyst/project tasks).
+- The interactive classification is stamped onto a job at enqueue time and
+  does not expire mid-life if the session goes quiet.
+- JSON5 note: quote the duration value (`"5m"`, or escape as `"\u0035m"`).
+  An unquoted `5m` is rewritten to a nanosecond integer by the config
+  loader and rejected for this string-typed field.
 
 ---
 
@@ -15635,6 +15917,60 @@ Ralph Loop uses layered opt-in:
 
 See [Ralph Loop: Self-Referential Task Verification](../concepts/ralph-loop.md) for full documentation.
 
+## Verification Fix-Loop Escalation (Adversarial Verification)
+
+When the verification auto-trigger (`internal/agent/verification_hook.go`)
+exhausts an agent's `max_fix_loops` budget, the next fix iteration is
+switched to the agent's configured `escalation_model` instead of escalating
+to the user.
+
+### Workflow
+
+```
+Verifier FAIL (fixCount > max_fix_loops)
+    ↓
+DecideEscalation (spec.EscalationModel, resolver)
+    ├── no escalation model / resolution failed → legacy escalate-to-user
+    └── resolved → ApplyEscalation
+            ├── arms PERSISTENT loop model override (full max_fix_loops budget)
+            ├── publishes agent.model_escalated on the bus
+            └── next fix iteration (agent turn + verifier spawn) runs escalated
+    ↓
+Fix loop continues on the escalation model with its own max_fix_loops budget
+    ↓
+Fresh turn without a pending escalation (verifier PASS/PARTIAL, user turn)
+    ↓
+Fresh-turn sweep clears the persistent override → base model restored
+```
+
+### Key Properties
+
+- **R1 — no sticky escalation:** the override is persistent within the
+  escalated window but cleared at the start of every turn without a
+  re-armed escalation (`HookRegistry.ClearFreshTurnOverrides`, called from
+  `RunOnceWithParts`). The escalated model never leaks into an unrelated
+  turn.
+- **Alias inheritance:** an alias escalation target inherits alias
+  rotation, cooldowns, and quota blocks. A fully quota-blocked escalation
+  alias fails with `ErrAllModelsQuotaBlocked` and the loop's existing
+  quota handling takes over — no second handling path.
+- **Observability:** bus topic `agent.model_escalated` (payload
+  `{agent_id, from_model, to_model, reason, fix_loops}`; classified
+  `agent_progress` on WS, never `chat_message`) and a routing-log row with
+  reason `escalation`.
+
+### Files
+
+- `internal/llm/resolver.go` — `ResolveEscalationRef` (alias or
+  `provider/model` → loop model ref)
+- `internal/agent/verification_escalation.go` — `DecideEscalation`,
+  `ApplyEscalation`, fresh-turn clear
+- `internal/agent/verification_hook.go` — hook wiring seams
+  (`SetResolver`, `SetOverrideApplier`, `SetEventPublisher`, ...)
+- `internal/agent/loop.go` — construction-site wiring
+  (`SetAgentSpec`/`SetResolver`) and the fresh-turn sweep call
+- `internal/comm/http/server.go` — WS topic classification
+
 ---
 
 ## OAuth Device-Code Providers
@@ -15754,6 +16090,43 @@ needed.
   `anthropic-beta: oauth-2025-04-20` header instead of `x-api-key`.
 - xAI access tokens are short-lived (~6h); the refresh manager keeps
   them warm within its configured margin.
+
+---
+
+## backfill-evolver-plans
+
+> Source: `workflows/backfill-evolver-plans.md`
+
+One-shot migration tool: inserts plan rows into the evolver plan sink store
+(`~/.meept/plans-evolver.db`) for the historical plan markdown files in
+`~/.meept/plans/evolver/`. Those files predate the sink store (plan-sink leaf
+01 of the skill-evolver-proposal-lifecycle tree), so without rows they are
+invisible to `meept plans list/show/approve` even though the RPC handler now
+falls back to the sink store.
+
+## Usage
+
+```bash
+go run ./cmd/backfill-evolver-plans            # dry run
+go run ./cmd/backfill-evolver-plans -apply     # insert rows
+```
+
+## Behavior
+
+- Each `*.md` file becomes a `pending_approval` row; `plan_id` comes from the
+  file's Meta block, FilePath points at the real file (the approval actuator
+  reads provenance from the file, so approval works once the row exists).
+- Idempotent: ids already present are skipped. Files without a `plan_id`
+  (e.g. the decision-framework gap-fill plan) are skipped — file-only by
+  design.
+- Config knobs: none (uses `-db`/`-dir` flags; defaults match the daemon's
+  `skills.evolver.plan_dir` default).
+
+## Edge cases
+
+- Unique-violation on insert is treated as already-present (skip), not an
+  error — safe to re-run.
+- Exited non-zero when any insert fails for a non-duplicate reason.
 
 ---
 
@@ -18664,6 +19037,36 @@ Manual task execution lacks automation and reliability. Job scheduling enables:
 - **Resource Limits**: Global and per-agent concurrency semaphores
 - **Dead-Letter Recovery**: Recover unrecoverable jobs via `RecoverFromDeadLetter(jobID)` API
 
+### Claim Ordering (Interactive-First)
+
+Pending jobs are claimed in the order
+`interactive DESC, priority DESC, created_at ASC` (DECISIONS.md D11):
+
+1. **Interactive** — work enqueued while its originating session was
+   "interactive" (a user message within `queue.interactive_window`, default
+   5m, OR the client holds the session foreground via
+   `session.set_foreground`) claims ahead of all background work.
+2. **Priority** — among equally-interactive jobs, higher priority first.
+3. **FIFO** — equal priority claims oldest-first.
+
+For agent-targeted claims the agent-affinity CASE (jobs targeted at the
+claiming agent) still precedes priority, but interactive leads affinity:
+a job from another session's interactive work can beat a job targeted at
+this agent. This is intentional (user-first, D11).
+
+Semantics note: the flag is **stamped once at enqueue time** and never
+re-classified. A job enqueued while the session was interactive keeps its
+priority for its whole life even if the user walks away, and a job enqueued
+during quiet never upgrades if the user returns. This matches "the work was
+user-adjacent when created." Origin recovery: project-task step jobs carry
+their originating session in the step payload (populated from the task's
+linked sessions); scheduler/system and one-off jobs enqueued without a
+session stamp `interactive = false` by construction. Chat turns bypass the
+queue entirely (direct dispatch), so this ordering covers queued work only.
+Constant interactivity can starve background work — acceptable per D11's
+user-first intent; scheduler/system jobs remain fairness-bounded by their
+own retry/due mechanics.
+
 ### Retry Logic Integration
 
 Jobs benefit from the multi-layer retry system:
@@ -19069,6 +19472,48 @@ Different tasks require different LLM capabilities and cost profiles. LLM manage
 - **Cost Optimization**: Cheapest capable model selected
 - **Automatic Fallback**: Retryable errors trigger failover
 
+### Model-Slot Fairness (Interactive Priority)
+
+When a model's `max_concurrency` is set, requests wait for a free slot
+before hitting the provider. Slots are handed out through a two-lane
+gate (`internal/llm/slot_gate.go`, tree 04 leaf 03):
+
+- **Interactive lane** — chat turns (the user is actively conversing)
+  call `llm.WithPriority(true)`; when a slot frees, an interactive
+  waiter is granted ahead of background waiters.
+- **Background lane** — queue jobs, specialist agents, goal loops, and
+  any caller that does not pass priority (the default) wait FIFO.
+- **Starvation guard** — after 3 consecutive interactive grants, one
+  background waiter is granted before further interactive ones, so
+  constant chatting cannot starve background work indefinitely.
+- **No wire change** — priority affects acquisition order only; nothing
+  is added to the request payload. Callers that never pass priority
+  behave exactly as before the gate existed.
+
+Two priority layers exist in meept, and they read DIFFERENT signals
+(cross-layer divergence, intentional scope — audit 2026-09-01):
+
+1. **Queue ordering** (see [Job Scheduling](job-scheduling.md),
+   "Claim Ordering"): jobs carry an `Interactive` flag stamped at
+   ENQUEUE time from the ORIGINATING SESSION (recent user message or
+   foreground flag, DECISIONS.md D11). It decides which job a worker
+   claims next.
+2. **Slot fairness** (this section): the gate reads the CALLING TURN —
+   chat turns are interactive, queue work is background. It decides who
+   gets a model-concurrency slot.
+
+Consequence: an `Interactive=true` planner job that wins its claim
+STILL acquires slots with priority=false (it is a queue turn, not a
+chat turn). Interactive queue work can therefore wait behind background
+chat turns at `max_concurrency`. This is intentional: queue jobs are
+not slot-prioritized in this tree (D11's two-tier rule; no third
+"priority" tier). Chat turns themselves never touch the queue (direct
+dispatch) — they are prioritized only at the slot layer.
+
+Note: `AnthropicClient` and `CodexClient` transports are not gated by
+`max_concurrency` today (pre-existing scope, unchanged by this leaf);
+slot fairness applies to the OpenAI-compatible client paths.
+
 ### Token Budgeting
 - **Hourly/Daily Limits**: Configurable token ceilings
 - **Rate Limiting**: Requests per minute control
@@ -19130,6 +19575,51 @@ api_key_env = ""
 }
 ```
 
+## Context-Length Discovery
+
+When `llm.context_discovery.enabled` is true, meept runs a background
+syncer that asks each provider for its true model context lengths and
+merges them into the in-memory model catalog (see
+[LLM Configuration](../configuration/llm.md#context-discovery-configuration)
+for the config block and precedence rule).
+
+- **What runs:** one fetcher per provider that exposes context length —
+  Ollama (`/api/show`), LM Studio (`/v1/models` for ids +
+  `/api/v0/models` for `max_context_length`), llama.cpp `local-models`
+  (`/props`), and OpenRouter (the same `/api/v1/models` fetch the pricing
+  sync uses). OpenAI and Anthropic expose no context length and are never
+  queried.
+- **When:** immediately at daemon startup, then every re-sync tick
+  (`interval`, default 6h).
+- **What it changes:** in-memory context windows only — resolver model
+  entries and the TUI model picker's display catalog. Deltas are logged
+  as `context window updated` lines.
+- **What it never changes:** your models.json5. Explicit
+  `context_limit` values are always authoritative; nothing discovered is
+  written back to any config file.
+- **Where LM Studio models come from:** LM Studio ships no static
+  catalog — discovered models are registered from its OpenAI-compatible
+  `/v1/models` list as `lmstudio/<id>` entries, with context lengths from
+  `/api/v0/models`. The model list is whatever that machine has loaded.
+
+## Adaptive 429 Pacing
+
+When `llm.failure_policy.pacing.enabled` is true, meept paces outbound
+requests per provider below that provider's effective rate-limit ceiling.
+The loop is observe → interval → decay: every provider response is
+classified (see the failure-policy docs), and a bare throttle 429 — no
+`Retry-After`, no quota signal — doubles the minimum gap between requests
+to that provider, clamped at `max_interval`. Clean traffic decays the gap
+by half per quiet window (one full gap's worth of successful traffic), so
+pacing fades back out as the provider recovers. Independently, the metrics
+store's hourly rate-limit count acts as a floor: while a provider exceeds
+`target_429_per_hour` events in the last hour, the enforced gap never
+drops below `min_interval`, even without fresh 429s. Pacing composes with
+the retry policy — it stretches the gap between requests, it never blocks
+or replaces a retry. See
+[LLM Configuration](../configuration/llm.md#failure-policy-configuration)
+for the knobs; the feature is off by default.
+
 ## Grammar-Constrained Tool Calling (GBNF)
 
 Small local models frequently emit malformed tool-call JSON. When the
@@ -19174,6 +19664,99 @@ Behavior:
   brick generation); the exclusion is logged once per session.
 - Managed llama.cpp runtimes (`llama-cpp`) auto-declare `llamacpp`; MLX
   runtimes declare nothing.
+
+## Universal Parking on Provider Waits (D9)
+
+Any meept turn can hit a provider wall — a quota window (hours until reset)
+or a throttle signal (seconds-to-minutes of load shedding). Per DECISIONS.md
+D9, meept is an electric machine: on (working) or off (broken). **No turn
+hangs on a dead or waiting connection** — every turn type parks instead,
+releasing its agent/model slot, and resumes automatically when the provider
+recovers.
+
+### What parks
+
+| Turn type | Park site | Mechanism |
+|-----------|-----------|-----------|
+| Chat turns (quota) | `ChatHandler` | `QuotaResumeWatcher` over the shared parker (`internal/agent/quota_resume.go`) |
+| Chat turns (throttle) | `AgentLoop` | `parkThrottledTurn` (`internal/agent/loop_park.go`) |
+| Goal-loop episodes | `EpisodeParker` | `maybeParkProviderWait` (`internal/employee/park.go`) |
+| Queue/specialist jobs | loop park branch | same `AgentLoop` throttle path |
+
+All of these feed ONE shared `agent.TurnParker`
+(`internal/agent/parked_turn.go`) per daemon: it holds
+`ParkedTurnRecord`s of any failure class, resumes them oldest-first at
+their scheduled time, and answers the surfaces' single query
+`TurnParker.WaitInfo() []ParkWaitInfo` — one `{Class, Next, Pending}` row
+per class with parked work. The parker is memory-only: a daemon restart
+drops parked records (logged), and quota blocks re-probe providers anyway.
+
+### Failure classes and schedules
+
+Two provider-wait classes exist (SHARED-CONVENTIONS §4.1, D4):
+
+- **`quota`** — a 429/402 with a quota-shaped signal. Parks until the
+  server-provided reset time (honored when later than the plan's first
+  step). The 24h `llm.quota_retry.max_wait` caps any single wait: waits
+  beyond it are refused and escalate (see quota escalation ladder in
+  [Quota Resilience](quota-resilience.md)).
+- **`throttle`** — 429/503 load shedding. Parks on the composed backoff
+  plan (`llm.DefaultBackoffPlan`): exponential steps from a 30s base, the
+  server `Retry-After` winning when later. Each re-park generation grows
+  the attempt count, so the schedule keeps stepping outward. A wait that
+  would exceed MaxWait **gives up**: the D8 `ThrottleGiveUpError` surfaces
+  to the user instead of an invisible multi-hour park.
+
+### State semantics: StateQuotaWait is reused, reason distinguishes
+
+Both classes drive the agent into the SAME `quota_wait` state
+(`agent.StateQuotaWait`). The leaf-04 decision: **keep one state + a
+`reason` payload, add no `StateThrottleWait`**. Rationale: the machine
+truth ("parked on a provider wait") is identical for both classes; every
+existing surface, transition-table entry, and WS classification keeps
+working unchanged; the reason string on the event and the wait label on
+the UI carry the distinction. The transition table needed zero new
+entries.
+
+### Bus events on the existing quota topic
+
+Park/resume/give-up events ride the EXISTING `agent.quota_wait` topic
+(published by the shared parker's `SetParkEventBus` wiring; payload type
+`agent.ParkTurnEvent`):
+
+| Lifecycle | Payload keys |
+|-----------|--------------|
+| park | `agent_id`, `to: "quota_wait"`, `reason` (follows the class: `"quota_wait"` \| `"throttle_wait"`), `class` (`"quota"\|"throttle"`), `resume_at` (RFC3339), `provider_id`, `session_id`, `model_id` (throttle parks; chat quota parks are provider-scoped and omit it) |
+| resume | `agent_id`, `to: "running"`, `reason: "throttle_resumed"`, `class: "throttle"`, `waited` (Go duration string), `session_id` (quota resume visibility is the episode tracker's existing `quota_cleared` event) |
+| give-up | `agent_id`, `reason: "throttle_give_up"`, `class: "throttle"`, `waited`, `model_id`, `provider_id` |
+
+No new topic was introduced, so the WS handler's `agent.quota` prefix
+match classifies every park event as `agent_progress` — never
+`chat_message` (pinned by
+`TestWSBridgeClassifiesParkTurnEventsAsProgress`). Legacy
+`QuotaEvent`-shape messages on the same topic remain byte-identical.
+
+### Wait labels (TUI + GUI parity)
+
+The agents tab renders the parked state with an absolute-time label —
+identical strings on both surfaces (lowercase per UI rule):
+
+- quota wait: `quota_wait · reset HH:MM`
+- throttle wait: `quota_wait · throttle retry HH:MM`
+
+`HH:MM` is the daemon-provided resume instant rendered as absolute local
+time (`QuotaWaitLabel` in `internal/tui/quota_status.go`, mirrored by
+`quotaWaitLabel` in `ui/flutter_ui/lib/features/agents/quota_status.dart`).
+Both surfaces deliberately avoid relative countdowns here: the GUI runs on
+web where client wall clocks cannot be trusted.
+
+### Give-up semantics
+
+Give-up is not a crash — it is the machine reporting a wait too long to
+hide. A throttle wait beyond MaxWait surfaces `ThrottleGiveUpError` (D8)
+as the turn's failure; the quota equivalent is the 24h escalation to
+`blocked`. Both are visible on the same surfaces, and both leave the
+agent slot free.
 
 ## Observability
 
@@ -22561,6 +23144,13 @@ Topic: `agent.quota_wait`
   `provider_id`, `credential_key`, `model_id`, `unblock_at` (RFC3339),
   `escalation` ("" | "warn" | "action_recommended" | "blocked"),
   `fallback_model` (optional), `timestamp`.
+- Tree 03 leaf 04 (universal parking, DECISIONS.md D9) shares this topic
+  with parked-turn lifecycle events: park/resume/give-up publish
+  `agent.ParkTurnEvent` payloads (`reason`: "quota_wait" |
+  "throttle_wait" | "throttle_resumed" | "throttle_give_up", plus a
+  `class` key carrying the failure class) on the same topic, so this
+  classification invariant covers them unchanged. See
+  [LLM Management — Universal Parking](llm-management.md#universal-parking-on-provider-waits-d9).
 
 ## Configuration
 
@@ -22594,18 +23184,38 @@ go test -race ./internal/llm/ -run 'Quota' -count=1
 
 ## Invariants
 
-- Quota errors never re-enter the client 3-attempt short-retry loop.
+- Quota errors never re-enter ANY client short-retry loop. All five
+  (Chat, ChatWithProgress, streaming delta, anthropic non-streaming,
+  anthropic streaming) early-exit on `QuotaResetError` before the
+  `RateLimitError`/retryable-status checks.
 - QuotaWaitChatter retries exactly once per quota error.
 - Context cancellation takes precedence over quota wait.
 - A wait exceeding MaxWait returns the error immediately (no blocking).
 - Quota is not an alias health failure: RecordAliasFailure is never called
   for a QuotaResetError, and quota blocks live in separate Resolver state
-  (`entryBlocks` / `credentialBlock`).
+  (`entryBlocks` / `credentialBlock`). `RecordAliasSuccess` lazily deletes
+  EXPIRED blocks only (unexpired blocks persist; map growth is bounded).
+- Sticky aliases (BalancedStickyRequests) re-pin around quota blocks:
+  `resolveStickyCaller` releases pins on quota-blocked models and skips
+  blocked candidates when re-pinning.
 - Bus event classification: `agent.quota_wait` -> `agent_progress` (never
   `chat_message`).
 - Agent state transitions: running -> quota_wait -> blocked (at 24h), with
   Clear returning to running/idle.
 - Quota blocks are in-memory only; a daemon restart re-probes providers.
+
+## Known open gaps (audited 2026-08-31)
+
+- `QuotaEvent.FallbackModel` has no producer: declared and parsed by both
+  UIs, never set by any publisher.
+- No episode GC at the 24h boundary: a blocked episode stays in
+  QuotaEpisodeTracker until a successful call on that provider clears it.
+- `llm.quota_retry.defer_check_interval` is unconsumed: QuotaResumeWatcher
+  hardcodes the 10m `DefaultQuotaResumePollInterval`.
+- Unblock-time rendering drift: TUI detail lines use local time, Flutter
+  uses UTC.
+- Flutter drops the event `model_id`: the goals-pane primary line shows
+  "unknown" instead of the blocked model.
 
 ## Files
 
@@ -24002,6 +24612,15 @@ When `auto_apply = false` (default), proposals go through the plan system:
 ./bin/meept plans reject <id>       # Reject with reason
 ```
 
+Evolver-created plans land in the user-scoped sink
+`skills.evolver.plan_dir` (default `~/.meept/plans/evolver`), never in a
+repo's `docs/plans/` — that directory is for human-authored plans only.
+Each evolver plan's Meta section records `origin: skill-evolver`, the
+proposal id, and the proposed action (`archive` | `improve` | `create`),
+so approval tooling can identify machine-originated plans. The default
+path is resolved against the user's home directory (not the daemon CWD);
+relative paths are rejected.
+
 ### CLI Reference
 
 ```bash
@@ -24038,6 +24657,7 @@ When `auto_apply = false` (default), proposals go through the plan system:
       pattern_promotion_use_count: 5,
       auto_apply: false,
       run_on_start: false,
+      plan_dir: "~/.meept/plans/evolver",  // sink for evolver-created plans
     },
     wiki: {
       enabled: true,
@@ -58554,7 +59174,7 @@ Each model entry supports these fields:
 | `tool_constraint` | string | "" | Grammar constraint mode: `"llamacpp"`, `"vllm"`, `"json_schema"` |
 | `schema_mode` | string | "" | Tool schema mode: `"full"` or `"indexed"` |
 | `oauth_provider` | string | "" | OAuth provider for token-based auth |
-| `extra_headers` | map | — | Additional HTTP headers |
+| `extra_headers` | map | — | Additional HTTP headers sent with every request. Value `"${session_id}"` is substituted with the current turn's session ID at request time; empty values are omitted. Model-level entries merge over provider-level `options.extra_headers` per key |
 | `default_reasoning` | object | — | Thinking/reasoning config (see below) |
 | `prompt_cache` | object | — | Prompt caching config (see below) |
 | `lifecycle` | object | — | Local runtime management (see Lifecycle section) |

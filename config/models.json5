@@ -350,6 +350,32 @@
           "video_app": "falai/wan-2-5"
         }
       }
+    },
+
+    // OpenCode Zen/Go gateway (opencode.ai). REQUIRED from 2026-09-06:
+    // requests must carry a stable per-session x-opencode-session header
+    // (session affinity for prompt-cache warmth; without it requests are
+    // treated as anonymous and some models fail). The "${session_id}"
+    // sentinel is substituted with the current turn's session ID per
+    // request; do NOT send the plain "session_id" header name — the
+    // gateway returns 500 for it on some models.
+    "opencode": {
+      "api": "openai",
+      "options": {
+        "baseURL": "https://opencode.ai/zen/v1",
+        "apiKey": "${OPENCODE_API_KEY}",
+        "extra_headers": {
+          "x-opencode-session": "${session_id}"
+        }
+      },
+      "models": {
+        "kimi-k2.6": {
+          "name": "kimi-k2.6",
+          "capabilities": ["completion", "code", "reasoning", "tool_use"],
+          "context_limit": 262144,
+          "max_output": 8192
+        }
+      }
     }
   }
 }

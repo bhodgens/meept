@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,6 +41,13 @@ type ProviderOptionsConfig struct {
 	// [agent.tools].schema_mode. Per-model schema_mode overrides this value.
 	// Unknown values are ignored at resolve time (warn + fall through).
 	SchemaMode string `json:"schema_mode,omitempty"`
+	// ExtraHeaders are additional HTTP headers sent with every request to
+	// this provider (e.g. x-opencode-session for session affinity on the
+	// OpenCode Zen/Go gateway). Per-model extra_headers merge over these
+	// per key. The sentinel value "${session_id}" is substituted with the
+	// current turn's session ID at request time; a header whose value is
+	// empty after substitution is omitted.
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
 
 // ModelDef represents a model definition in the config.
@@ -70,9 +78,13 @@ type ModelDef struct {
 	// the provider setting.
 	ToolConstraint string `json:"tool_constraint,omitempty"`
 	// SchemaMode overrides the provider-level tool-schema mode for this
-	// model ("full"|"indexed", loop-economics leaf 02). Empty inherits the
-	// provider setting. Unknown values are ignored at resolve time.
+	// model ("full"|"indexed", loop-economics leaf 02). Empty inherits
+	// the provider setting. Unknown values are ignored at resolve time.
 	SchemaMode string `json:"schema_mode,omitempty"`
+	// ExtraHeaders overrides/extends the provider-level extra HTTP headers
+	// for this model (merged per key over the provider map). See
+	// ProviderOptionsConfig.ExtraHeaders for the "${session_id}" sentinel.
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
 
 // ProvidersConfig represents the full models.json5 configuration.
@@ -269,6 +281,14 @@ func mergeProviderConfig(base, overlay ProviderConfig) ProviderConfig {
 	if overlay.Options.Timeout != 0 {
 		out.Options.Timeout = overlay.Options.Timeout
 	}
+	// ExtraHeaders merge per key: overlay entries win, base entries with
+	// no overlay counterpart survive (mirrors modelConfigFrom's merge).
+	if len(overlay.Options.ExtraHeaders) > 0 {
+		merged := make(map[string]string, len(out.Options.ExtraHeaders)+len(overlay.Options.ExtraHeaders))
+		maps.Copy(merged, out.Options.ExtraHeaders)
+		maps.Copy(merged, overlay.Options.ExtraHeaders)
+		out.Options.ExtraHeaders = merged
+	}
 	if overlay.Lifecycle != nil {
 		out.Lifecycle = overlay.Lifecycle
 	}
@@ -287,9 +307,13 @@ func mergeProviderConfig(base, overlay ProviderConfig) ProviderConfig {
 // known placeholder variables that are expanded later (e.g. MODEL_PATH).
 func expandEnvVars(s string) string {
 	// Placeholder variables that should NOT be expanded here
-	// They are expanded later by ValidateAndNormalize in runtime_config.go
+	// They are expanded later by ValidateAndNormalize in runtime_config.go.
+	// session_id is a request-time sentinel (see ModelConfig.ExtraHeaders):
+	// it must survive load-time expansion so the LLM client can substitute
+	// the current turn's session ID per request.
 	placeholderVars := map[string]bool{
 		"MODEL_PATH": true,
+		"session_id": true,
 	}
 
 	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
@@ -402,6 +426,15 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 	if workflow != "" {
 		workflow = pathutil.ExpandPath(workflow)
 	}
+	// Merge extra HTTP headers: per-model entries win per key over the
+	// provider-level map (same override direction as tool_constraint).
+	extraHeaders := make(map[string]string, len(opts.ExtraHeaders)+len(modelDef.ExtraHeaders))
+	for k, v := range opts.ExtraHeaders {
+		extraHeaders[k] = v
+	}
+	for k, v := range modelDef.ExtraHeaders {
+		extraHeaders[k] = v
+	}
 	return &ModelConfig{
 		BaseURL:              opts.BaseURL,
 		ModelID:              name,
@@ -416,6 +449,7 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		CatalogRef:           providerID + "/" + mapKey,
 		ToolConstraint:       mode,
 		SchemaMode:           schemaMode,
+		ExtraHeaders:         extraHeaders,
 		Timeout:              time.Duration(opts.Timeout) * time.Second,
 		MaxConcurrency:       modelDef.MaxConcurrency,
 		ProviderAPI:          provider.API,

@@ -108,7 +108,7 @@ Each model entry supports these fields:
 | `tool_constraint` | string | "" | Grammar constraint mode: `"llamacpp"`, `"vllm"`, `"json_schema"` |
 | `schema_mode` | string | "" | Tool schema mode: `"full"` or `"indexed"` |
 | `oauth_provider` | string | "" | OAuth provider for token-based auth |
-| `extra_headers` | map | — | Additional HTTP headers |
+| `extra_headers` | map | — | Additional HTTP headers sent with every request. Value `"${session_id}"` is substituted with the current turn's session ID at request time; empty values are omitted. Model-level entries merge over provider-level `options.extra_headers` per key |
 | `default_reasoning` | object | — | Thinking/reasoning config (see below) |
 | `prompt_cache` | object | — | Prompt caching config (see below) |
 | `lifecycle` | object | — | Local runtime management (see Lifecycle section) |

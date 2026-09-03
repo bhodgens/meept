@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -319,6 +320,37 @@ func WithExtraHeaders(headers map[string]string) ClientOption {
 	}
 }
 
+// sessionIDHeaderSentinel is the placeholder value recognized in extra
+// header values. At request time it is substituted with the current turn's
+// session ID (WithTaskScope). Exact full-value match only; a header whose
+// value is empty after substitution is omitted from the request.
+const sessionIDHeaderSentinel = "${session_id}"
+
+// applyExtraHeaders writes the configured extra HTTP headers onto req.
+// Sources, later winning per key: the active ModelConfig's ExtraHeaders
+// (config-driven via models.json5 `extra_headers`, read per request so
+// Reconfigure-based alias failover picks up the new model's headers
+// immediately), then the client-level extras (WithExtraHeaders option).
+// The sessionIDHeaderSentinel value is substituted with sessionID; a
+// header whose value is empty after substitution is never sent.
+func (c *Client) applyExtraHeaders(req *http.Request, cfg *ModelConfig, sessionID string) {
+	if len(cfg.ExtraHeaders) == 0 && len(c.extraHeaders) == 0 {
+		return
+	}
+	merged := make(map[string]string, len(cfg.ExtraHeaders)+len(c.extraHeaders))
+	maps.Copy(merged, cfg.ExtraHeaders)
+	maps.Copy(merged, c.extraHeaders)
+	for k, v := range merged {
+		if v == sessionIDHeaderSentinel {
+			v = sessionID
+		}
+		if v == "" {
+			continue
+		}
+		req.Header.Set(k, v)
+	}
+}
+
 // WithUploadStore sets the upload store for resolving image file references.
 func WithUploadStore(store UploadStore) ClientOption {
 	return func(c *Client) {
@@ -524,7 +556,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
 
 	for attempt := 1; attempt <= shortRetries; attempt++ {
-		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority)
+		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID)
 		if err != nil {
 			// Quota errors never re-enter the short-retry loop: the window
 			// is hours, not seconds. Return immediately; the caller decides
@@ -730,8 +762,10 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
 
-		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority)
+		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID)
 		if err != nil {
+			// ChatWithProgress retry loop: same classification contract
+			// as Chat() above.
 			// Quota errors never re-enter the short-retry loop (streaming
 			// path): hours-scale window, return immediately.
 			var quotaErr *QuotaResetError
@@ -1115,7 +1149,7 @@ func PriorityOf(opts []ChatOption) bool {
 // cfg must be captured under lock by the caller.
 // priority marks an interactive turn for slot-gate priority (tree 04
 // leaf 03); priority-less callers pass false, unchanged behavior.
-func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *ModelConfig, priority bool) (*Response, error) {
+func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *ModelConfig, priority bool, sessionID string) (*Response, error) {
 	// Acquire concurrency slot (if configured)
 	release, err := c.acquireConcurrencyLimit(ctx, priority)
 	if err != nil {
@@ -1141,7 +1175,6 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 	// We just append /chat/completions to whatever baseURL is configured
 	c.configMu.RLock()
 	baseURL := strings.TrimSuffix(cfg.BaseURL, "/")
-	extraHeaders := c.extraHeaders
 	c.configMu.RUnlock()
 	url := baseURL + "/chat/completions"
 	// Use cfg for modelID, apiKey, providerID to avoid race with SwitchModel
@@ -1172,9 +1205,10 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 	}
 
 	// Apply extra headers (e.g. X-GitHub-Api-Version for GitHub Models).
-	for k, v := range extraHeaders {
-		req.Header.Set(k, v)
-	}
+	// Also substitutes the "${session_id}" sentinel from ModelConfig
+	// extras so config-driven per-session headers (x-opencode-session)
+	// work on the non-streaming path.
+	c.applyExtraHeaders(req, cfg, sessionID)
 
 	// Time the HTTP request
 	start := time.Now()
@@ -1499,7 +1533,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			retryState.isResume = true
 			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", shortRetries)
 		}
-		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority)
+		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID)
 		if err == nil {
 			// Record usage with scope
 			if c.budget != nil && resp != nil {
@@ -1652,7 +1686,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 // Returns HTTP status code as int so callers don't manage *http.Response lifecycle.
 // cfg must be captured under lock by the caller.
 // priority marks an interactive turn for slot-gate priority (tree 04 leaf 03).
-func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState, cfg *ModelConfig, priority bool) (*Response, int, error) {
+func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState, cfg *ModelConfig, priority bool, sessionID string) (*Response, int, error) {
 	// Acquire concurrency slot (if configured)
 	release, err := c.acquireConcurrencyLimit(ctx, priority)
 	if err != nil {
@@ -1668,7 +1702,6 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 
 	c.configMu.RLock()
 	baseURL := strings.TrimSuffix(cfg.BaseURL, "/")
-	extraHeaders := c.extraHeaders
 	c.configMu.RUnlock()
 	url := baseURL + "/chat/completions"
 	// Use cfg for modelID, apiKey, providerID to avoid race with SwitchModel
@@ -1702,9 +1735,10 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	}
 
 	// Apply extra headers (e.g. X-GitHub-Api-Version for GitHub Models).
-	for k, v := range extraHeaders {
-		req.Header.Set(k, v)
-	}
+	// Also substitutes the "${session_id}" sentinel from ModelConfig
+	// extras so config-driven per-session headers (x-opencode-session)
+	// work on the streaming path.
+	c.applyExtraHeaders(req, cfg, sessionID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
