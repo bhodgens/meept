@@ -35,13 +35,17 @@ func TestActivityTracker_ActiveSessions(t *testing.T) {
 func TestActivityTracker_TimeWindow(t *testing.T) {
 	tr := NewActivityTracker()
 
-	// Record activity, then wait past the window
+	// Record activity, then verify expiry with a zero window. time.Since in
+	// HasRecentActivity is monotonic-clock based and could read 0 on coarse
+	// tick platforms if checked immediately after RecordActivity (a 10ms
+	// sleep previously masked this). Instead, rewind the recorded timestamp
+	// deterministically so LastActivity is unambiguously in the past.
 	tr.RecordActivity("session-1", "client-a")
-	// Use a zero-duration window to verify expiry (time.Now() was already called
-	// inside RecordActivity, so 0ns window means "expired").
-	time.Sleep(10 * time.Millisecond)
+	tr.mu.Lock()
+	tr.activity["session-1"].LastActivity = tr.activity["session-1"].LastActivity.Add(-time.Second)
+	tr.mu.Unlock()
 
-	// Zero-duration window should never match since some time passed
+	// Zero-duration window must not match a strictly-past timestamp.
 	if tr.HasRecentActivity("session-1", 0) {
 		t.Error("expected session-1 to have no recent activity with 0 duration")
 	}

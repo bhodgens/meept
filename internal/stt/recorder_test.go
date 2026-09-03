@@ -327,15 +327,30 @@ func TestRecorder_StartWithWriteWavMock(t *testing.T) {
 
 	err := r.Start()
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		r.Stop()
+		r.Cleanup()
+	})
 
-	// The mock writes a WAV file and exits immediately, so wait a moment.
-	time.Sleep(200 * time.Millisecond)
+	// The mock writes a WAV file and exits immediately, but process spawn
+	// and file creation are not instantaneous. Poll for the observable
+	// effect (the WAV file existing on disk) instead of sleeping an
+	// arbitrary 200ms (previous timing-luck version).
+	fp := r.FilePath()
+	require.NotEmpty(t, fp)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(fp); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("mock recorder never wrote WAV file %s within 2s", fp)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	// After the mock exits, recording state is still true because Stop()
 	// wasn't called.
-	fp := r.FilePath()
-	assert.NotEmpty(t, fp)
-
-	r.Stop()
-	r.Cleanup()
+	assert.True(t, r.recording)
 }

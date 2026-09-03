@@ -132,7 +132,14 @@ func TestStoreRequeue_InteractivePreserved(t *testing.T) {
 	if err := store.Insert(background); err != nil {
 		t.Fatalf("Insert background failed: %v", err)
 	}
-	time.Sleep(80 * time.Millisecond) // let the not-before elapse
+	// Force the interactive job's next_retry_at into the past (same
+	// deterministic clock-advance pattern as
+	// TestStoreRequeue_ClaimHonorsNotBefore) instead of sleeping out the
+	// 50ms not-before window.
+	if _, err := store.db.Exec(`UPDATE jobs SET next_retry_at = ? WHERE id = ?`,
+		time.Now().UTC().Add(-time.Second).Format(time.RFC3339), interactive.ID); err != nil {
+		t.Fatalf("failed to advance next_retry_at: %v", err)
+	}
 
 	first, err := store.ClaimNextForAgent("worker-2", nil, "")
 	if err != nil {

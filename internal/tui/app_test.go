@@ -494,15 +494,19 @@ func TestApp_Program_BasicRender(t *testing.T) {
 		tea.WithOutput(&buf),
 	)
 
-	// Run in background; send quit after brief delay
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		p.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
-	}()
+	// Quit the program deterministically: bubbletea v2's Send blocks on an
+	// unbuffered channel until the single-threaded event loop receives it,
+	// so a Send issued after Run() has started is delivered exactly once —
+	// no timed choreography (the goroutine previously slept 500ms and sent
+	// Ctrl+C, racing the event loop on slow CI).
+	go p.Quit()
 
-	_, err := p.Run()
+	finalModel, err := p.Run()
 	if err != nil && !strings.Contains(err.Error(), "context") {
 		t.Fatalf("program.Run() error: %v", err)
+	}
+	if finalModel == nil {
+		t.Fatal("program.Run() returned nil model")
 	}
 
 	// Verify output was produced
@@ -552,19 +556,33 @@ func TestApp_Program_CommandPalette(t *testing.T) {
 		tea.WithOutput(&buf),
 	)
 
-	// Send: Ctrl+X (open palette), Escape (close), Ctrl+C (quit)
+	// Drive the palette deterministically. bubbletea v2's Send blocks on an
+	// unbuffered channel until the single-threaded event loop receives the
+	// message, and the event loop processes one message to completion before
+	// reading the next — so sequential Sends from one goroutine are ordered
+	// and each Update finishes before the next key is handled. No sleeps
+	// (the goroutine previously slept 300+200+200ms and still raced slow CI).
 	go func() {
-		time.Sleep(300 * time.Millisecond)
-		p.Send(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
-		time.Sleep(200 * time.Millisecond)
-		p.Send(tea.KeyPressMsg{Code: tea.KeyEscape})
-		time.Sleep(200 * time.Millisecond)
-		p.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+		p.Send(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}) // open palette
+		p.Send(tea.KeyPressMsg{Code: tea.KeyEscape})         // close palette
+		p.Quit()                                             // exit cleanly
 	}()
 
-	_, err := p.Run()
+	finalModel, err := p.Run()
 	if err != nil && !strings.Contains(err.Error(), "context") {
 		t.Fatalf("program.Run() error: %v", err)
+	}
+	if finalModel == nil {
+		t.Fatal("program.Run() returned nil model")
+	}
+	// Escape must have closed the palette in the FINAL model state — a real
+	// behavioral assertion, not just "no panic + some output".
+	finalApp, ok := finalModel.(*App)
+	if !ok {
+		t.Fatalf("final model type = %T, want *App", finalModel)
+	}
+	if finalApp.activeModal != ModalNone {
+		t.Errorf("activeModal = %v after Escape, want ModalNone (palette must close)", finalApp.activeModal)
 	}
 
 	if buf.Len() == 0 {

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"testing"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -69,11 +68,11 @@ func TestDesignationHistory_ListMultiple(t *testing.T) {
 	store := NewSQLiteDesignationHistoryStore(db, slog.Default())
 	ctx := context.Background()
 
-	// Record several transitions.
+	// Record several transitions. Ordering is by AUTOINCREMENT id (see
+	// List), so no sleeps are needed — inserts are synchronous and the
+	// 1ms sleeps previously here were noise.
 	_ = store.Record(ctx, "sess-1", "", DesignationWaitingHuman, "initial")
-	time.Sleep(1 * time.Millisecond)
 	_ = store.Record(ctx, "sess-1", DesignationWaitingHuman, DesignationRequiresApproval, "escalation")
-	time.Sleep(1 * time.Millisecond)
 	_ = store.Record(ctx, "sess-1", DesignationRequiresApproval, DesignationBotThinking, "approved")
 
 	entries, err := store.List(ctx, "sess-1")
