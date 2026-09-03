@@ -24,6 +24,12 @@ type RuntimeProcess struct {
 	cmd     *exec.Cmd
 	pid     int
 	pidFile string
+	// spawnedByUs records whether THIS instance spawned or adopted the
+	// runtime process. Only an owner may Stop it: a secondary process (CLI
+	// invocation, eval harness, tool subprocess) that constructed the LLM
+	// stack and exits must never kill the daemon's healthy llama-server via
+	// the shared PID file.
+	spawnedByUs bool
 	// waitDone receives the result of cmd.Wait() exactly once.
 	// Created in Start(); consumed by Stop() to avoid a double-Wait race.
 	waitDone chan error
@@ -65,11 +71,17 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	// Check if already running via PID file
 	if pid, err := p.readPIDFile(); err == nil && pid > 0 {
 		if p.isProcessRunning(pid) {
+			// Adopt the existing process: record its PID so this instance
+			// is its authoritative owner (can Stop it), while NOT spawning
+			// a duplicate that would race for the port and die.
+			p.pid = pid
+			p.spawnedByUs = true
 			return nil // Already running
 		}
 		// Stale PID file
 		os.Remove(p.pidFile)
 	}
+	p.spawnedByUs = true
 
 	// Validate spawn command
 	if len(p.config.SpawnCommand) == 0 {
@@ -79,7 +91,15 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	name := p.config.SpawnCommand[0]
 	args := p.config.SpawnCommand[1:]
 
-	p.cmd = exec.CommandContext(ctx, name, args...)
+	// Detach the runtime process from the caller's context. Callers pass
+	// request-scoped contexts (e.g. the daemon's StartAll goroutine whose
+	// ctx is cancelled the moment StartAll returns after WaitForHealthy);
+	// binding exec.CommandContext to such a ctx SIGKILLs the freshly loaded
+	// llama-server ~1s after it becomes healthy. The runtime's lifetime is
+	// governed by explicit Stop()/StopAll and the health checker instead —
+	// both of which SIGTERM/SIGKILL the process group on real shutdown.
+	spawnCtx := context.WithoutCancel(ctx)
+	p.cmd = exec.CommandContext(spawnCtx, name, args...)
 	p.cmd.Stdout = stdout
 	p.cmd.Stderr = stderr
 	p.cmd.Stdin = nil // Explicitly set stdin to nil to avoid blocking
@@ -117,8 +137,16 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 }
 
 // Stop gracefully terminates the runtime process.
+// Non-owners are refused: a RuntimeProcess that neither spawned nor adopted
+// the runtime (e.g. the LLM stack constructed inside a short-lived CLI or
+// eval subprocess) must not kill the daemon's healthy llama-server through
+// the shared PID file.
 func (p *RuntimeProcess) Stop(ctx context.Context) error {
 	p.mu.Lock()
+	if !p.spawnedByUs {
+		p.mu.Unlock()
+		return nil // Not ours to stop — daemon owns this runtime.
+	}
 	if p.cmd == nil || p.cmd.Process == nil {
 		// Try to recover from PID file
 		if pid, err := p.readPIDFile(); err == nil && pid > 0 {
