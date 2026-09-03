@@ -114,6 +114,9 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 
 	// Barrier: all clients try to connect simultaneously.
 	startBarrier := make(chan struct{})
+	// acks counts clients that completed the subscribe handshake; the
+	// publisher waits for numClients of these instead of a blind sleep.
+	acks := make(chan struct{}, numClients)
 
 	for i := 0; i < numClients; i++ {
 		results[i] = &clientResult{}
@@ -156,10 +159,18 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 				return
 			}
 
-			// Consume subscribed ack.
+			// Consume subscribed ack — signal the parent so it publishes
+			// only after every client is actually subscribed (replaces a
+			// blind 2s sleep that both slowed the suite and raced slow
+			// machines: 100 sequential WS handshakes don't fit a fixed
+			// window deterministically).
 			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 			var subAck map[string]any
-			websocket.JSON.Receive(conn, &subAck) //nolint:errcheck // best-effort
+			if err := websocket.JSON.Receive(conn, &subAck); err != nil {
+				res.errors.Add(1)
+				return
+			}
+			acks <- struct{}{}
 
 			// Read events until context is done or we time out.
 			for {
@@ -188,8 +199,16 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 	// Signal all clients to connect.
 	close(startBarrier)
 
-	// Give clients time to connect and subscribe.
-	time.Sleep(2 * time.Second)
+	// Wait until every client completed the subscribe handshake (deterministic;
+	// replaces a blind 2s sleep that raced slow machines). Timeout guards
+	// against a wedged handshake — testTimeout bounds the whole test anyway.
+	for i := 0; i < numClients; i++ {
+		select {
+		case <-acks:
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for client subscribes: %d/%d", i, numClients)
+		}
+	}
 
 	// --- Publish events ---
 	// Use "task.status" topic which the WS event transformer maps to "job_update"
