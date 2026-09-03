@@ -494,8 +494,11 @@ ORDER BY latency_ms
 
 	// Get token rate (avg tokens per second)
 	//nolint:gosec // field name, not a secret
+	// COALESCE: a pair with zero successful requests yields NULL sums, and
+	// scanning NULL into int64 used to abort the whole pair's stats upsert
+	// (provider_stats rows silently missing for all-failed pairs).
 	const qTokens = `
-SELECT SUM(completion_tokens), SUM(latency_ms) FROM provider_requests
+SELECT COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(latency_ms), 0) FROM provider_requests
 WHERE provider_id = ? AND model_id = ? AND ts > ? AND success = 1
 `
 	rowTokens := db.QueryRowContext(ctx, qTokens, providerID, modelID, windowStart)

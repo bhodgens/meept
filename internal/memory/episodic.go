@@ -238,7 +238,7 @@ func (e *EpisodicMemory) SearchOptions(ctx context.Context, p SearchParams) ([]M
 			SELECT id, content, category, metadata_json, created_at
 			FROM episodic_memories
 			WHERE content LIKE ? ESCAPE '\' OR category LIKE ? ESCAPE '\'
-			ORDER BY created_at DESC
+			ORDER BY rowid DESC
 			LIMIT ?
 		`, likePattern, likePattern, p.Limit)
 	}
@@ -324,7 +324,7 @@ func (e *EpisodicMemory) GetRecent(ctx context.Context, limit int) ([]MemoryResu
 	rows, err := e.store.GetDB().QueryContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at
 		FROM episodic_memories
-		ORDER BY created_at DESC
+		ORDER BY rowid DESC
 		LIMIT ?
 	`, limit)
 	if err != nil {
@@ -341,7 +341,7 @@ func (e *EpisodicMemory) GetByCategory(ctx context.Context, category string, lim
 		SELECT id, content, category, metadata_json, created_at
 		FROM episodic_memories
 		WHERE category = ?
-		ORDER BY created_at DESC
+		ORDER BY rowid DESC
 		LIMIT ?
 	`, category, limit)
 	if err != nil {
@@ -358,7 +358,7 @@ func (e *EpisodicMemory) GetByTimeRange(ctx context.Context, start, end time.Tim
 		SELECT id, content, category, metadata_json, created_at
 		FROM episodic_memories
 		WHERE created_at >= ? AND created_at <= ?
-		ORDER BY created_at DESC
+		ORDER BY rowid DESC
 		LIMIT ?
 	`, start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano), limit)
 	if err != nil {

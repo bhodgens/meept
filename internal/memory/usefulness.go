@@ -187,7 +187,7 @@ func (v *voteStore) VotesFor(ctx context.Context, id string) ([]VoteRecord, erro
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	rows, err := v.db.QueryContext(ctx, //nolint:mutexio // db is mutex-guarded at this layer; driver serializes (MaxOpenConns=1)
-		`SELECT memory_id, delta, reason, created_at FROM memory_votes WHERE memory_id = ? ORDER BY created_at ASC`, id)
+		`SELECT memory_id, delta, reason, created_at FROM memory_votes WHERE memory_id = ? ORDER BY id ASC`, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query votes: %w", err)
 	}

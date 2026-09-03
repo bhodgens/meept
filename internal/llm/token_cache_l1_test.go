@@ -55,20 +55,17 @@ func TestL1Cache_LRU_Eviction_Zero_LastAccessedAt(t *testing.T) {
 	key0 := CacheKey{ModelID: "model", PromptHash: "hash0"}
 	cache.Put(key0, &CacheEntry{
 		Response:  &Response{Content: "response0"},
-		CreatedAt: now,
+		CreatedAt: now.Add(-2 * time.Millisecond), // explicitly older
 		// LastAccessedAt intentionally left as zero value
 		ExpiresAt: now.Add(time.Hour),
 	})
 
-	// Small delay so CreatedAt differs
-	time.Sleep(1 * time.Millisecond)
-
 	key1 := CacheKey{ModelID: "model", PromptHash: "hash1"}
 	cache.Put(key1, &CacheEntry{
 		Response:  &Response{Content: "response1"},
-		CreatedAt: time.Now(),
+		CreatedAt: now.Add(-1 * time.Millisecond), // older than key2, newer than key0
 		// LastAccessedAt intentionally left as zero value
-		ExpiresAt: time.Now().Add(time.Hour),
+		ExpiresAt: now.Add(time.Hour),
 	})
 
 	// Insert a 3rd entry -- should evict key0 (older CreatedAt, used as fallback)

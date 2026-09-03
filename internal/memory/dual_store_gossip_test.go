@@ -78,10 +78,18 @@ func TestDualStore_StoreMemory_PublishesGossip(t *testing.T) {
 		t.Fatalf("StoreMemory: %v", err)
 	}
 
-	// Give the goroutine time to publish.
-	time.Sleep(50 * time.Millisecond)
-
-	lastEvent, ok := pub.getLastEvent()
+	// Publication is asynchronous (goroutine per event): poll for the
+	// observable effect instead of a blind 50ms sleep.
+	deadline := time.Now().Add(2 * time.Second)
+	var lastEvent publishedEvent
+	var ok bool
+	for time.Now().Before(deadline) {
+		lastEvent, ok = pub.getLastEvent()
+		if ok {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if !ok {
 		t.Fatal("expected a published gossip event")
 	}

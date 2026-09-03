@@ -9,6 +9,40 @@ import (
 	"time"
 )
 
+// pollUntil runs cond every 10ms until it holds or the deadline elapses,
+// failing the test with msg. The metrics record worker is asynchronous;
+// tests wait for its observable effect (rows in the DB) instead of sleeping.
+// Store.Close() also joins the worker via recordWorkerDone, but tests that
+// read stats BEFORE Close must synchronize on the read itself.
+func pollUntil(t *testing.T, timeout time.Duration, msg string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal(msg)
+}
+
+// waitForStats polls RefreshStats+GetStats until at least one request row
+// for (provider, model) has been flushed to provider_stats.
+func waitForStats(t *testing.T, store *Store, providerID, modelID string) {
+	t.Helper()
+	ctx := context.Background()
+	pollUntil(t, 2*time.Second, "async record worker never flushed the request row", func() bool {
+		if err := store.RefreshStats(ctx); err != nil {
+			t.Fatalf("RefreshStats: %v", err)
+		}
+		stats, err := store.GetStats(ctx, providerID, modelID, 24)
+		if err != nil {
+			t.Fatalf("GetStats: %v", err)
+		}
+		return stats != nil && stats.RequestCount >= 1
+	})
+}
+
 func TestStoreInitialize(t *testing.T) {
 	tmpFile := t.TempDir() + "/test.db"
 	cfg := StoreConfig{
@@ -72,8 +106,18 @@ func TestStoreRecord(t *testing.T) {
 		t.Fatalf("Record failed: %v", err)
 	}
 
-	// Give the async worker a moment to process
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the async worker to flush the row (deterministic; the worker
+	// is joined by Close via recordWorkerDone, but we poll for the effect).
+	pollUntil(t, 2*time.Second, "async record worker never processed the record", func() bool {
+		if err := store.RefreshStats(context.Background()); err != nil {
+			t.Fatalf("RefreshStats: %v", err)
+		}
+		stats, err := store.GetStats(context.Background(), "openai", "gpt-4", 24)
+		if err != nil {
+			t.Fatalf("GetStats: %v", err)
+		}
+		return stats != nil && stats.RequestCount >= 1
+	})
 }
 
 func TestStoreRecordCachedTokens(t *testing.T) {
@@ -115,8 +159,8 @@ func TestStoreRecordCachedTokens(t *testing.T) {
 		t.Fatalf("Record failed: %v", err)
 	}
 
-	// Give the async worker a moment to process
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the async worker to flush the row before refreshing stats.
+	waitForStats(t, store, "anthropic", "claude-3-opus")
 
 	// Refresh stats so the aggregated data is computed
 	if err := store.RefreshStats(context.Background()); err != nil {
@@ -192,8 +236,14 @@ func TestStore_RecordWithCost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait for async worker
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the async worker to flush the row (deterministic).
+	pollUntil(t, 2*time.Second, "async record worker never flushed the cost entry", func() bool {
+		costs, err := store.GetDailyCosts(ctx, time.Now().Add(-24*time.Hour), time.Now())
+		if err != nil {
+			t.Fatalf("GetDailyCosts: %v", err)
+		}
+		return len(costs) >= 1
+	})
 
 	costs, err := store.GetDailyCosts(ctx, time.Now().Add(-24*time.Hour), time.Now())
 	if err != nil {
@@ -267,8 +317,14 @@ func TestStore_GetRateLimitSummary(t *testing.T) {
 		}
 	}
 
-	// Wait for async worker
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the async worker to flush all rate-limit rows (deterministic).
+	pollUntil(t, 2*time.Second, "async record worker never flushed the rate-limit rows", func() bool {
+		summary, err := store.GetRateLimitSummary(ctx, 0)
+		if err != nil {
+			t.Fatalf("GetRateLimitSummary: %v", err)
+		}
+		return summary.Total24h >= 6
+	})
 
 	// Test with default limit
 	summary, err := store.GetRateLimitSummary(ctx, 0)
@@ -385,7 +441,19 @@ func TestStore_GetRateLimitSummary_OnlyNonRateLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the async worker to flush both rows before asserting the
+	// aggregate (deterministic; a too-short sleep here would flake the
+	// Total24h==0 assertion below).
+	pollUntil(t, 2*time.Second, "async record worker never flushed the records", func() bool {
+		if err := store.RefreshStats(ctx); err != nil {
+			t.Fatalf("RefreshStats: %v", err)
+		}
+		stats, err := store.GetStats(ctx, "anthropic", "claude-3-opus", 24)
+		if err != nil {
+			t.Fatalf("GetStats: %v", err)
+		}
+		return stats != nil && stats.RequestCount >= 1
+	})
 
 	summary, err := store.GetRateLimitSummary(ctx, 5)
 	if err != nil {

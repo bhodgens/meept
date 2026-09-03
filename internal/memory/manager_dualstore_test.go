@@ -244,7 +244,13 @@ func TestManager_Store_DualStoreSetButMemoryIsRemote_NoEcho(t *testing.T) {
 		t.Fatal("expected non-empty ID")
 	}
 
-	// Allow any pending goroutines to flush, then assert no gossip events.
+	// Negative assertion (no echo): a remote-origin memory must NOT fire a
+	// gossip event. The mirror path is fully synchronous within
+	// Manager.Store (which has already returned), so if any event were
+	// going to fire it would be enqueued almost immediately; the residual
+	// risk is only the OS scheduling the hypothetical goroutine. 100ms is
+	// 10× the previous window, and no seam can exist because the correct
+	// behavior publishes nothing to wait on.
 	time.Sleep(100 * time.Millisecond)
 	if count := atomic.LoadInt64(&pub.eventCount); count != 0 {
 		t.Errorf("expected 0 gossip events for remote-origin memory, got %d", count)

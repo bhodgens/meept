@@ -626,7 +626,14 @@ func (s *SQLiteFTSStore) ScanResults(rows *sql.Rows, hasRank bool, cfg ScanRowCo
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
+		createdAt, err := time.Parse(time.RFC3339Nano, createdAtStr)
+		if err != nil {
+			// RFC3339Nano drops trailing zeros when formatting, so a
+			// timestamp like .8091 parses fine, but a malformed string
+			// must not silently become the zero time (it would sort to
+			// the very front of DESC-ordered listings).
+			return nil, fmt.Errorf("failed to parse created_at %q: %w", createdAtStr, err)
+		}
 
 		// Build the source label
 		source := cfg.SourceFmt

@@ -6,11 +6,32 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
+
+// syncedBuffer is a bytes.Buffer safe for concurrent Write+String, needed
+// because RuntimeProcess.Start spawns io.Copy goroutines into the writer
+// while the test polls it.
+type syncedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func TestOpenModelLogger_CreatesFile(t *testing.T) {
 	// We can't redirect HOME easily without env manipulation; rely on
@@ -37,16 +58,33 @@ func TestRuntimeProcess_Start_HonorsWriters(t *testing.T) {
 	}
 	proc := llm.NewRuntimeProcess(cfg)
 
-	var buf bytes.Buffer
+	var buf syncedBuffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := proc.Start(ctx, &buf, io.Discard); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	// Wait for the subprocess to exit naturally so its stdout flushes
-	// into our buffer. The sh -c echo completes in <1ms.
-	time.Sleep(200 * time.Millisecond)
-	_ = proc.Stop(ctx)
+	// Wait for the child's stdout to land in buf — the assertion condition
+	// itself, made eventual. (`sh -c echo` exits in <1ms; the previous
+	// 200ms blind sleep both raced the write on slow CI and wasted 200ms
+	// on fast machines. Do NOT Stop before the marker appears: Stop can
+	// SIGTERM the child before it writes.)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got := buf.String()
+		if strings.Contains(got, "marker-output") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected stdout writer to capture 'marker-output' within 2s, got %q", got)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// Hygiene only: the child has already exited, so this just reaps and
+	// removes the PID file.
+	if err := proc.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
 
 	got := buf.String()
 	if !strings.Contains(got, "marker-output") {

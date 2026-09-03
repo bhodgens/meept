@@ -149,9 +149,13 @@ func TestDualStore_StoreRemoteSession(t *testing.T) {
 		t.Errorf("source_node = %q, want node-peer-a", sourceNode)
 	}
 
-	// Remote writes must NOT fire a gossip event (they came from gossip).
-	// Give the goroutine a brief window in case the publisher was called.
-	time.Sleep(20 * time.Millisecond)
+	// Negative assertion (no echo): remote writes must NOT fire a gossip
+	// event — StoreRemoteSession is fully synchronous (direct gossipDB
+	// INSERT, already returned) and never touches the publisher, so there
+	// is nothing to await; a brief observation window documents the intent
+	// and would catch a regressed async publish. 20ms × 10 here. See also
+	// waitForEvents for the positive-assertion counterpart.
+	time.Sleep(200 * time.Millisecond)
 	if got := atomic.LoadInt64(&pub.eventCount); got != 0 {
 		t.Errorf("remote StoreRemoteSession published %d events, want 0 (no echo)", got)
 	}

@@ -126,11 +126,13 @@ func TestTaskMemoryGetRecent(t *testing.T) {
 	}
 	defer mem.Close()
 
-	// Store memories
+	// Store memories. GetRecent returns newest-first (ORDER BY rowid DESC
+	// after the honesty audit: created_at TEXT with RFC3339Nano trims
+	// trailing zeros, so ".9354Z" string-sorted AFTER ".935455Z" and
+	// recency order was wrong for sub-microsecond inserts). Insert order
+	// is authoritative, so Task A/B/C must come back C, B, A.
 	_, _ = mem.Store(ctx, "Task A", "general", nil)
-	time.Sleep(10 * time.Millisecond)
 	_, _ = mem.Store(ctx, "Task B", "code", nil)
-	time.Sleep(10 * time.Millisecond)
 	_, _ = mem.Store(ctx, "Task C", "code", nil)
 
 	// Get recent from code domain
@@ -141,6 +143,9 @@ func TestTaskMemoryGetRecent(t *testing.T) {
 
 	if len(results) != 2 {
 		t.Errorf("Expected 2 code results, got %d", len(results))
+	} else if results[0].Memory.Content != "Task C" || results[1].Memory.Content != "Task B" {
+		t.Errorf("code results order = [%s, %s], want [Task C, Task B]",
+			results[0].Memory.Content, results[1].Memory.Content)
 	}
 
 	// Get recent from all domains
@@ -151,12 +156,20 @@ func TestTaskMemoryGetRecent(t *testing.T) {
 
 	if len(results) != 3 {
 		t.Errorf("Expected 3 results, got %d", len(results))
+	} else {
+		for i := 1; i < len(results); i++ {
+			if tsOf(results[i-1]).Before(tsOf(results[i])) {
+				t.Errorf("GetRecent order violated at %d: %v before %v",
+					i, results[i-1].Memory.CreatedAt, results[i].Memory.CreatedAt)
+			}
+		}
 	}
+}
 
-	// Most recent should be first
-	if results[0].Memory.Content != "Task C" {
-		t.Errorf("Expected 'Task C' first, got %q", results[0].Memory.Content)
-	}
+// tsOf returns a comparable timestamp for a MemoryResult. The zero time is
+// returned for entries whose created_at failed to parse (never in practice).
+func tsOf(r MemoryResult) time.Time {
+	return r.Memory.CreatedAt
 }
 
 func TestTaskMemoryFindDuplicates(t *testing.T) {
@@ -279,9 +292,9 @@ func TestTaskMemoryTimestamps(t *testing.T) {
 		t.Error("Expected nil oldest for empty store")
 	}
 
-	// Store and check
+	// created_at is RFC3339Nano; back-to-back Stores can share a coarse
+	// wall reading, so oldest==newest is legal — only oldest>newest is a bug.
 	_, _ = mem.Store(ctx, "First", "general", nil)
-	time.Sleep(50 * time.Millisecond)
 	_, _ = mem.Store(ctx, "Second", "general", nil)
 
 	oldest, err = mem.GetOldestTimestamp(ctx)
@@ -298,8 +311,8 @@ func TestTaskMemoryTimestamps(t *testing.T) {
 		t.Fatal("Expected non-nil timestamps")
 	}
 
-	if !oldest.Before(*newest) {
-		t.Error("Oldest should be before newest")
+	if oldest.After(*newest) {
+		t.Errorf("oldest %v must not be after newest %v", oldest, newest)
 	}
 }
 

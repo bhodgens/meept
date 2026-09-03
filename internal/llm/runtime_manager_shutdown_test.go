@@ -89,10 +89,13 @@ func TestShutdownBlocksAutoRestart_AfterStopAll(t *testing.T) {
 	cb := mgr.makeHealthCallback(endpointKey)
 	cb(false) // launches a goroutine running attemptAutoRestart
 
-	// Give the goroutine time to either run (bug) or return early (fix).
-	// attemptAutoRestart holds m.mu briefly; 100ms is generous for a no-op
-	// return path even under heavy scheduling pressure.
-	time.Sleep(100 * time.Millisecond)
+	// Negative assertion: rs.attempts must stay 0. Any positive value
+	// observed here is a genuine bug regardless of when it lands, so we
+	// wait out a generous window (10× the previous 100ms) to give a
+	// misbehaving goroutine every chance to prove the invariant broken.
+	// (The blocked early-return path holds no resources the test waits on,
+	// so a deterministic seam cannot exist for the *absence* of an effect.)
+	time.Sleep(1 * time.Second)
 
 	// Assertion 1: rs.attempts must still be 0. If attemptAutoRestart had
 	// proceeded past the shutdown check, it would increment rs.attempts
@@ -202,9 +205,14 @@ func TestShutdownBlocksAutoRestart_RaceWithStopAll(t *testing.T) {
 
 	wg.Wait()
 
-	// Allow any in-flight attemptAutoRestart goroutines to either complete
-	// the (blocked) path or return from the cooldown check.
-	time.Sleep(150 * time.Millisecond)
+	// Negative assertion: no subprocess may appear. The callback storms
+	// fired up to 20 attemptAutoRestart goroutines racing StopAll; a
+	// PID file landing here at ANY later moment is a genuine bug, so we
+	// hold the observation window open (10× the previous 150ms) to give a
+	// misbehaving spawn every chance to materialize. No seam can replace
+	// this: the invariant being tested is the ABSENCE of an effect from
+	// fire-and-forget goroutines.
+	time.Sleep(1500 * time.Millisecond)
 
 	// After the storm: no subprocess should have been spawned, even though
 	// some attemptAutoRestart goroutines may have incremented rs.attempts

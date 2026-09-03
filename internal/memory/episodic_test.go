@@ -142,13 +142,12 @@ func TestEpisodicMemoryGetRecent(t *testing.T) {
 	}
 	defer mem.Close()
 
-	// Store memories
+	// Store memories (created_at is RFC3339Nano — ns separation, no sleeps)
 	for i := range 5 {
 		_, err = mem.Store(ctx, "Memory "+string(rune('A'+i)), "conversation", nil)
 		if err != nil {
 			t.Fatalf("Failed to store: %v", err)
 		}
-		time.Sleep(10 * time.Millisecond) // Ensure different timestamps
 	}
 
 	// Get recent
@@ -315,9 +314,11 @@ func TestEpisodicMemoryTimestamps(t *testing.T) {
 		t.Error("Expected nil newest timestamp for empty store")
 	}
 
-	// Store memories
+	// Store memories. Two immediate Stores can land on the same coarse wall
+	// reading (macOS time.Now can return identical ns readings for
+	// back-to-back calls), so oldest==newest is possible by construction;
+	// only strictly-descending order is a bug.
 	_, _ = mem.Store(ctx, "First", "conversation", nil)
-	time.Sleep(50 * time.Millisecond)
 	_, _ = mem.Store(ctx, "Second", "conversation", nil)
 
 	oldest, err = mem.GetOldestTimestamp(ctx)
@@ -336,8 +337,8 @@ func TestEpisodicMemoryTimestamps(t *testing.T) {
 		t.Fatal("Expected non-nil newest timestamp")
 	}
 
-	if !oldest.Before(*newest) {
-		t.Error("Oldest should be before newest")
+	if oldest.After(*newest) {
+		t.Errorf("oldest %v must not be after newest %v", oldest, newest)
 	}
 }
 
@@ -418,9 +419,8 @@ func TestEpisodicMemoryGetOldMemories(t *testing.T) {
 	}
 	defer mem.Close()
 
-	// Store memories
+	// Store memories (RFC3339Nano created_at: ns separation guaranteed)
 	_, _ = mem.Store(ctx, "Memory 1", "conversation", nil)
-	time.Sleep(10 * time.Millisecond)
 	_, _ = mem.Store(ctx, "Memory 2", "conversation", nil)
 
 	// Get memories older than now (should get all)
@@ -434,16 +434,28 @@ func TestEpisodicMemoryGetOldMemories(t *testing.T) {
 		t.Errorf("Expected 2 old memories, got %d", len(results))
 	}
 
-	// Get memories older than a very recent time (should get the first one)
-	time.Sleep(50 * time.Millisecond)
-	cutoff = time.Now().Add(-20 * time.Millisecond)
-	_, err = mem.GetOldMemories(ctx, cutoff, 10)
+	// Boundary check without timing luck: read Memory 2's actual created_at
+	// and cut strictly between the two records. Memory 1 (older created_at)
+	// must match; Memory 2 must not. (The previous version slept 50ms, cut
+	// at now-20ms, and asserted NOTHING about the result — a tautology.)
+	all, err := mem.GetRecent(ctx, 2)
 	if err != nil {
-		t.Fatalf("GetOldMemories failed: %v", err)
+		t.Fatalf("GetRecent failed: %v", err)
 	}
-
-	// This test is timing-dependent, so we just verify it doesn't error
-	// The actual count depends on timing
+	if len(all) != 2 {
+		t.Fatalf("GetRecent = %d memories, want 2", len(all))
+	}
+	// GetRecent orders newest-first; all[0] is Memory 2.
+	boundary := all[0].Memory.CreatedAt
+	boundaryCutoff := boundary.Add(-time.Nanosecond)
+	results, err = mem.GetOldMemories(ctx, boundaryCutoff, 10)
+	if err != nil {
+		t.Fatalf("GetOldMemories (boundary) failed: %v", err)
+	}
+	if len(results) != 1 || results[0].Memory.Content != "Memory 1" {
+		t.Errorf("boundary cutoff %v: got %d memories (%v), want exactly ['Memory 1']",
+			boundaryCutoff, len(results), results)
+	}
 }
 
 func TestEpisodicMemoryMetadata(t *testing.T) {

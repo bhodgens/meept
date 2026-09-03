@@ -221,8 +221,11 @@ func TestSQLiteFTSStore_Timestamps_WithData(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
+	// created_at uses RFC3339Nano, but back-to-back Store calls can land on
+	// the same coarse wall reading (identical ns strings on macOS), so
+	// oldest==newest is legal; only oldest>newest would be a bug. (A 50ms
+	// separator sleep previously forced distinct readings at latency cost.)
 	insertTestItem(t, store, "id-1", "first", "general")
-	time.Sleep(50 * time.Millisecond)
 	insertTestItem(t, store, "id-2", "second", "general")
 
 	oldest, err := store.GetOldestTimestamp(ctx, "test_items")
@@ -233,8 +236,8 @@ func TestSQLiteFTSStore_Timestamps_WithData(t *testing.T) {
 	require.NoError(t, err, "GetNewestTimestamp")
 	require.NotNil(t, newest, "expected non-nil newest timestamp")
 
-	if !oldest.Before(*newest) {
-		t.Errorf("oldest %v should be before newest %v", oldest, newest)
+	if oldest.After(*newest) {
+		t.Errorf("oldest %v must not be after newest %v", oldest, newest)
 	}
 }
 

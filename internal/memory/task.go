@@ -235,7 +235,7 @@ func (t *TaskMemory) SearchOptions(ctx context.Context, p SearchParams) ([]Memor
 				SELECT id, content, domain, metadata_json, created_at
 				FROM task_memories
 				WHERE ((content LIKE ? ESCAPE '\' OR search_text LIKE ? ESCAPE '\') OR domain LIKE ? ESCAPE '\') AND domain = ?
-				ORDER BY created_at DESC
+				ORDER BY rowid DESC
 				LIMIT ?
 			`, likePattern, likePattern, likePattern, p.Domain, p.Limit)
 		} else {
@@ -243,7 +243,7 @@ func (t *TaskMemory) SearchOptions(ctx context.Context, p SearchParams) ([]Memor
 				SELECT id, content, domain, metadata_json, created_at
 				FROM task_memories
 				WHERE content LIKE ? ESCAPE '\' OR search_text LIKE ? ESCAPE '\' OR domain LIKE ? ESCAPE '\'
-				ORDER BY created_at DESC
+				ORDER BY rowid DESC
 				LIMIT ?
 			`, likePattern, likePattern, likePattern, p.Limit)
 		}
@@ -273,14 +273,14 @@ func (t *TaskMemory) GetRecent(ctx context.Context, domain string, limit int) ([
 			SELECT id, content, domain, metadata_json, created_at
 			FROM task_memories
 			WHERE domain = ?
-			ORDER BY created_at DESC
+			ORDER BY rowid DESC
 			LIMIT ?
 		`, domain, limit)
 	} else {
 		rows, err = db.QueryContext(ctx, `
 			SELECT id, content, domain, metadata_json, created_at
 			FROM task_memories
-			ORDER BY created_at DESC
+			ORDER BY rowid DESC
 			LIMIT ?
 		`, limit)
 	}
