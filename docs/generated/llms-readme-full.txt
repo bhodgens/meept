@@ -2,7 +2,7 @@
 
 This document is a complete flattening of all Meept documentation into a single text file, designed to be fed to LLMs as context. It covers installation, architecture, configuration, workflows, and API reference.
 
-Generated: 2026-09-03T21:54:15Z
+Generated: 2026-09-03T22:27:11Z
 Source: https://github.com/caimlas/meept
 
 ---
@@ -12505,6 +12505,54 @@ Each provider is configured with API settings and model definitions:
 }
 ```
 
+#### Extra HTTP Headers (`extra_headers`)
+
+Providers that require custom HTTP headers use `extra_headers`. It works at
+BOTH levels: under `options` (applies to every model on the provider) and
+per-model (overrides/extends the provider map per key). Headers apply to
+streaming and non-streaming requests alike.
+
+```json5
+"opencode": {
+  "api": "openai",
+  "options": {
+    "baseURL": "https://opencode.ai/zen/v1",
+    "apiKey": "${OPENCODE_API_KEY}",
+    "extra_headers": {
+      // "${session_id}" is substituted with the current turn's session ID
+      // at request time. REQUIRED by OpenCode Zen/Go since 2026-09-06 for
+      // session affinity (prompt-cache warmth). A header whose value is
+      // empty after substitution is NOT sent.
+      "x-opencode-session": "${session_id}"
+    }
+  },
+  "models": {
+    "kimi-k2.6": {
+      "name": "kimi-k2.6",
+      "capabilities": ["completion", "code", "reasoning", "tool_use"],
+      "context_limit": 262144,
+      "max_output": 8192,
+      // Per-model extras merge over the provider-level map; this entry wins.
+      "extra_headers": {
+        "x-opencode-session": "${session_id}"
+      }
+    }
+  }
+}
+```
+
+Notes:
+
+- The sentinel must be written exactly `"${session_id}"` (full-value match).
+  The load-time env expansion leaves it intact even if a `SESSION_ID` env
+  var exists.
+- Empty values are omitted — a turn with no session never sends an empty
+  header.
+- OpenAI-compatible chat providers only. The Anthropic and Codex client
+  transports do not read `extra_headers` yet.
+- Do NOT use the bare `session_id` header name with OpenCode — the gateway
+  returns HTTP 500 for it on some models.
+
 ### Model Configuration
 
 Each model declares capabilities and limits:
@@ -12536,6 +12584,7 @@ Each model declares capabilities and limits:
 | `temperature` | Sampling temperature | 0.7 |
 | `top_p` | Nucleus sampling parameter | - |
 | `max_concurrency` | Max concurrent requests to this model | 0 (unlimited) |
+| `extra_headers` | Extra HTTP headers (see [Extra HTTP Headers](#extra-http-headers-extra_headers)) | - |
 
 **Use case for `max_concurrency`:** Set this limit to prevent overwhelming:
 - Local LLM servers (llama.cpp, MLX, Ollama) that have limited GPU memory
