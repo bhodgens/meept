@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/caimlas/meept/internal/pathutil"
 )
@@ -16,6 +17,13 @@ import (
 type ClaudeSource struct {
 	path   string
 	logger *slog.Logger
+
+	// warnedMu guards warned, which dedupes per-path parse-failure
+	// warnings: the first failure for a path logs WARN, repeats log
+	// Debug so repeated discovery scans stay quiet. Zero-value safe:
+	// shouldWarnParseFailure lazily initializes the map.
+	warnedMu sync.Mutex
+	warned   map[string]struct{}
 }
 
 // NewClaudeSource creates a ClaudeSource that scans ~/.claude/skills/.
@@ -32,6 +40,7 @@ func NewClaudeSource(logger *slog.Logger) *ClaudeSource {
 	return &ClaudeSource{
 		path:   filepath.Join(homeDir, ".claude", "skills"),
 		logger: logger,
+		warned: make(map[string]struct{}),
 	}
 }
 
@@ -43,6 +52,7 @@ func NewClaudeSourceWithPath(path string, logger *slog.Logger) *ClaudeSource {
 	return &ClaudeSource{
 		path:   path,
 		logger: logger,
+		warned: make(map[string]struct{}),
 	}
 }
 
@@ -81,6 +91,20 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]*Skill, error) {
 	return skills, nil
 }
 
+// shouldWarnParseFailure returns true the first time a path's parse failure
+// is seen, false for every repeat. It marks the path as warned either way
+// and is safe for concurrent scans.
+func (s *ClaudeSource) shouldWarnParseFailure(path string) bool {
+	s.warnedMu.Lock()
+	defer s.warnedMu.Unlock()
+	if s.warned == nil {
+		s.warned = make(map[string]struct{})
+	}
+	_, seen := s.warned[path]
+	s.warned[path] = struct{}{}
+	return !seen
+}
+
 // scanDir scans the Claude skills directory for skill files.
 func (s *ClaudeSource) scanDir(ctx context.Context, path string) ([]*Skill, error) {
 	var skills []*Skill
@@ -112,13 +136,19 @@ func (s *ClaudeSource) scanDir(ctx context.Context, path string) ([]*Skill, erro
 			skill, err = s.loadAndAdapt(entryPath, adapter)
 		}
 		if err != nil {
-			s.logger.Warn("Failed to parse Claude skill file",
-				"path", entryPath,
-				"error", err,
-			)
+			if s.shouldWarnParseFailure(entryPath) {
+				s.logger.Warn("Failed to parse Claude skill file",
+					"path", entryPath,
+					"error", err,
+				)
+			} else {
+				s.logger.Debug("Failed to parse Claude skill file (repeat, suppressed)",
+					"path", entryPath,
+					"error", err,
+				)
+			}
 			continue
 		}
-
 		if skill != nil {
 			skills = append(skills, skill)
 		}

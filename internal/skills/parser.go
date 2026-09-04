@@ -296,10 +296,10 @@ func parseMetadata(frontmatter string) (*SkillMetadata, error) {
 	// Handle alternative field names (with underscores instead of hyphens).
 	// The frontmatter was already validated above, so this parse cannot fail.
 	var altMeta struct {
-		AllowedTools  []string `yaml:"allowed_tools"`
-		RiskLevel     string   `yaml:"risk_level"`
-		MaxIterations int      `yaml:"max_iterations"`
-		MaxTokens     *int     `yaml:"max_tokens"`
+		AllowedTools  stringList `yaml:"allowed_tools"`
+		RiskLevel     string     `yaml:"risk_level"`
+		MaxIterations int        `yaml:"max_iterations"`
+		MaxTokens     *int       `yaml:"max_tokens"`
 	}
 	if err := yaml.Unmarshal([]byte(frontmatter), &altMeta); err != nil {
 		return nil, fmt.Errorf("parse alt skill metadata: %w", err)
@@ -324,10 +324,10 @@ func parseMetadata(frontmatter string) (*SkillMetadata, error) {
 	// handled above; this covers the camelCase variant used by some Claude
 	// skill authors.
 	var camelMeta struct {
-		AllowedTools  []string `yaml:"allowedTools"`
-		RiskLevel     string   `yaml:"riskLevel"`
-		MaxIterations int      `yaml:"maxIterations"`
-		MaxTokens     *int     `yaml:"maxTokens"`
+		AllowedTools  stringList `yaml:"allowedTools"`
+		RiskLevel     string     `yaml:"riskLevel"`
+		MaxIterations int        `yaml:"maxIterations"`
+		MaxTokens     *int       `yaml:"maxTokens"`
 	}
 	if err := yaml.Unmarshal([]byte(frontmatter), &camelMeta); err != nil {
 		return nil, fmt.Errorf("parse camel skill metadata: %w", err)

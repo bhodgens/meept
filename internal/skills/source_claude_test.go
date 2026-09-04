@@ -2,10 +2,123 @@ package skills
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
+
+// capturingHandler records (level, message, path) tuples emitted through a
+// slog.Logger so tests can assert exact warn/debug counts.
+type capturingHandler struct {
+	mu      sync.Mutex
+	records []capturedRecord
+}
+
+type capturedRecord struct {
+	level slog.Level
+	msg   string
+	path  string
+}
+
+func (h *capturingHandler) Enabled(_ context.Context, level slog.Level) bool { return true }
+
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	rec := capturedRecord{level: r.Level, msg: r.Message}
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "path" {
+			rec.path = a.Value.String()
+		}
+		return true
+	})
+	h.records = append(h.records, rec)
+	return nil
+}
+
+func (h *capturingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *capturingHandler) count(level slog.Level, path string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, r := range h.records {
+		if r.level == level && r.path == path {
+			n++
+
+		}
+	}
+	return n
+}
+
+func newTestLogger(h *capturingHandler) *slog.Logger {
+	return slog.New(h)
+}
+
+// TestClaudeSource_ParseFailureWarnDedupe verifies that repeated parse
+// failures for the same skill path log WARN once and DEBUG afterwards.
+func TestClaudeSource_ParseFailureWarnDedupe(t *testing.T) {
+	tmpDir := t.TempDir()
+	badPath := filepath.Join(tmpDir, "bad-skill.md")
+	// allowed-tools as a non-list, non-scalar value (a bare map) is a hard
+	// YAML type error that survives the stringList tolerance.
+	content := "---\nname: bad-skill\ndescription: broken\nallowed-tools:\n  foo: bar\n---\nBody.\n"
+	//nolint:gosec // test file
+	if err := os.WriteFile(badPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write bad skill: %v", err)
+	}
+
+	handler := &capturingHandler{}
+	src := NewClaudeSourceWithPath(tmpDir, newTestLogger(handler))
+
+	for i := 0; i < 3; i++ {
+		if _, err := src.Discover(context.Background()); err != nil {
+			t.Fatalf("Discover pass %d: %v", i, err)
+		}
+	}
+
+	if got := handler.count(slog.LevelWarn, badPath); got != 1 {
+		t.Errorf("WARN lines for %s = %d, want 1", badPath, got)
+	}
+	if got := handler.count(slog.LevelDebug, badPath); got < 1 {
+		t.Errorf("DEBUG lines for %s = %d, want >= 1", badPath, got)
+	}
+}
+
+// TestClaudeSource_ParseFailureWarnDedupe_DifferentPaths ensures dedupe is
+// per-path: distinct failing skills each get their own WARN.
+func TestClaudeSource_ParseFailureWarnDedupe_DifferentPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	paths := []string{
+		filepath.Join(tmpDir, "bad-one.md"),
+		filepath.Join(tmpDir, "bad-two.md"),
+	}
+	for _, p := range paths {
+		content := "---\nname: broken\ndescription: broken\nallowed-tools:\n  foo: bar\n---\nBody.\n"
+		//nolint:gosec // test file
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+
+	handler := &capturingHandler{}
+	src := NewClaudeSourceWithPath(tmpDir, newTestLogger(handler))
+
+	for i := 0; i < 2; i++ {
+		if _, err := src.Discover(context.Background()); err != nil {
+			t.Fatalf("Discover pass %d: %v", i, err)
+		}
+	}
+
+	for _, p := range paths {
+		if got := handler.count(slog.LevelWarn, p); got != 1 {
+			t.Errorf("WARN lines for %s = %d, want 1", p, got)
+		}
+	}
+}
 
 func TestClaudeSource_Name(t *testing.T) {
 	src := NewClaudeSource(nil)

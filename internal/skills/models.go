@@ -6,9 +6,12 @@
 package skills
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/caimlas/meept/internal/security/taint"
+	"gopkg.in/yaml.v3"
 )
 
 // Priority levels for skill discovery (lower is higher priority).
@@ -134,16 +137,60 @@ type MCPServerConfig struct {
 	Env map[string]string `yaml:"env,omitempty"`
 }
 
+// stringList is a []string that tolerates Claude-style comma-separated
+// scalars in skill frontmatter. A YAML sequence node decodes as a plain
+// string list; a scalar node is split on ',' with each segment trimmed
+// of surrounding whitespace and empty segments dropped. This lets
+// frontmatter like `allowed-tools: Read, Grep, Glob` (a scalar, as
+// written by Claude-format skills) decode into the same shape as
+// `allowed-tools: [Read, Grep, Glob]`. It remains assignment-compatible
+// with []string consumers via an explicit []string(sl) conversion.
+type stringList []string
+
+// UnmarshalYAML implements yaml.Unmarshaler for stringList.
+func (sl *stringList) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.SequenceNode:
+		var items []string
+		if err := value.Decode(&items); err != nil {
+			return err
+		}
+		*sl = items
+		return nil
+	case yaml.ScalarNode:
+		var raw string
+		if err := value.Decode(&raw); err != nil {
+			return err
+		}
+		*sl = parseStringListScalar(raw)
+		return nil
+	default:
+		return fmt.Errorf("skills: cannot decode %s node into string list field", value.Tag)
+	}
+}
+
+// parseStringListScalar splits a comma-separated scalar into list items,
+// trimming whitespace and dropping empty segments.
+func parseStringListScalar(raw string) stringList {
+	var out stringList
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
 // SkillMetadata holds the parsed YAML frontmatter from a SKILL.md file.
 //
 //nolint:revive // stutter with package name is intentional for API clarity
 type SkillMetadata struct {
 	Name          string            `yaml:"name"`
 	Description   string            `yaml:"description"`
-	Requires      []string          `yaml:"requires"`
-	Tags          []string          `yaml:"tags"`
-	Examples      []string          `yaml:"examples"`
-	AllowedTools  []string          `yaml:"allowed-tools"`
+	Requires      stringList        `yaml:"requires"`
+	Tags          stringList        `yaml:"tags"`
+	Examples      stringList        `yaml:"examples"`
+	AllowedTools  stringList        `yaml:"allowed-tools"`
 	RiskLevel     string            `yaml:"risk-level"`
 	MaxIterations int               `yaml:"max-iterations"`
 	Temperature   *float64          `yaml:"temperature"`
@@ -155,8 +202,8 @@ type SkillMetadata struct {
 	State bool `yaml:"state"`
 
 	// Claude-specific fields (parsed separately, merged into Tags).
-	Trigger  string   `yaml:"trigger"`
-	Triggers []string `yaml:"triggers"`
+	Trigger  string     `yaml:"trigger"`
+	Triggers stringList `yaml:"triggers"`
 
 	// Hermes-specific fields (populated during 4th parse pass).
 	HermesPrereqs *HermesPrerequisites `yaml:"-"`

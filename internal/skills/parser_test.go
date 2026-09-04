@@ -4,8 +4,128 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+// TestSkillMetadata_CommaSeparatedListFields verifies that list-typed
+// frontmatter fields (allowed-tools, triggers, etc.) decode from BOTH real
+// YAML lists and comma-separated string scalars (Claude-format skills).
+func TestSkillMetadata_CommaSeparatedListFields(t *testing.T) {
+	fm := "name: security-audit\n" +
+		"description: audit\n" +
+		"allowed-tools: Read, Grep, Glob, Bash, Agent\n" +
+		"triggers:\n  - \"/security-audit\"\n  - \"security scan\"\n"
+	var meta SkillMetadata
+	if err := yaml.Unmarshal([]byte(fm), &meta); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := []string{"Read", "Grep", "Glob", "Bash", "Agent"}
+	if !reflect.DeepEqual([]string(meta.AllowedTools), want) {
+		t.Errorf("AllowedTools = %v, want %v", meta.AllowedTools, want)
+	}
+	if !reflect.DeepEqual([]string(meta.Triggers), []string{"/security-audit", "security scan"}) {
+		t.Errorf("Triggers (list form) = %v", meta.Triggers)
+	}
+}
+
+// TestSkillMetadata_AllListFieldsAcceptScalarsAndLists covers every
+// tolerant list field in both forms, including empty-segment dropping,
+// whitespace trimming for the scalar form, and the alt-name parse passes.
+func TestSkillMetadata_AllListFieldsAcceptScalarsAndLists(t *testing.T) {
+	fm := "requires: alpha, beta\n" +
+		"tags: [x, y]\n" +
+		"examples: one, two , ,three\n" +
+		"trigger: /run-it\n"
+	var meta SkillMetadata
+	if err := yaml.Unmarshal([]byte(fm), &meta); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if !reflect.DeepEqual([]string(meta.Requires), []string{"alpha", "beta"}) {
+		t.Errorf("Requires (scalar) = %v", meta.Requires)
+	}
+	if !reflect.DeepEqual([]string(meta.Tags), []string{"x", "y"}) {
+		t.Errorf("Tags (list) = %v", meta.Tags)
+	}
+	if !reflect.DeepEqual([]string(meta.Examples), []string{"one", "two", "three"}) {
+		t.Errorf("Examples (scalar w/ empties) = %v", meta.Examples)
+	}
+
+	// parseMetadata-level behavior: trigger merges into Tags after decoding.
+	mergedMeta, err := parseMetadata("name: m\ndescription: m\ntags: [x]\ntrigger: /run-it\n")
+	if err != nil {
+		t.Fatalf("parseMetadata trigger merge: %v", err)
+	}
+	if !reflect.DeepEqual([]string(mergedMeta.Tags), []string{"x", "/run-it"}) {
+		t.Errorf("Tags (trigger merge via parseMetadata) = %v", mergedMeta.Tags)
+	}
+
+	// Alt-name passes: scalar allowed_tools / allowedTools must also decode
+	// and merge when the hyphenated key is absent.
+	altFM := "name: alt\n" +
+		"description: alt\n" +
+		"allowed_tools: A, B , C\n"
+	altMeta, err := parseMetadata(altFM)
+	if err != nil {
+		t.Fatalf("parseMetadata alt-name: %v", err)
+	}
+	if !reflect.DeepEqual([]string(altMeta.AllowedTools), []string{"A", "B", "C"}) {
+		t.Errorf("AllowedTools (allowed_tools scalar via parseMetadata) = %v", altMeta.AllowedTools)
+	}
+
+	// List-typed fields stay nil (not zero-length non-nil) when absent,
+	// preserving "not set" semantics for the alt-name merge passes.
+	var absent SkillMetadata
+	if err := yaml.Unmarshal([]byte("name: n\ndescription: d\n"), &absent); err != nil {
+		t.Fatalf("unmarshal absent: %v", err)
+	}
+	if absent.Requires != nil || absent.AllowedTools != nil || absent.Triggers != nil {
+		t.Errorf("absent list fields should be nil, got requires=%v allowed=%v triggers=%v",
+			absent.Requires, absent.AllowedTools, absent.Triggers)
+	}
+}
+
+// TestParseSkillText_ClaudeStyleSkill is the end-to-end check: a skill file
+// mirroring ~/.claude/skills/security-audit/SKILL.md (block-scalar
+// description, triggers list, comma-separated allowed-tools) parses without
+// error.
+func TestParseSkillText_ClaudeStyleSkill(t *testing.T) {
+	text := "---\n" +
+		"name: security-audit\n" +
+		"description: |\n" +
+		"  Run a security audit of the current project.\n" +
+		"  Checks dependencies and common vulnerability patterns.\n" +
+		"triggers:\n" +
+		"  - \"/security-audit\"\n" +
+		"  - \"security scan\"\n" +
+		"allowed-tools: Read, Grep, Glob, Bash, Agent\n" +
+		"---\n" +
+		"\n" +
+		"Audit the project for security issues.\n"
+
+	skill, err := ParseSkillText(text)
+	if err != nil {
+		t.Fatalf("ParseSkillText: %v", err)
+	}
+	if skill.Name != "security-audit" {
+		t.Errorf("Name = %q, want security-audit", skill.Name)
+	}
+	if got, want := len(skill.AllowedTools), 5; got != want {
+		t.Errorf("len(AllowedTools) = %d (%v), want %d", got, skill.AllowedTools, want)
+	}
+	wantTools := []string{"Read", "Grep", "Glob", "Bash", "Agent"}
+	if !reflect.DeepEqual(skill.AllowedTools, wantTools) {
+		t.Errorf("AllowedTools = %v, want %v", skill.AllowedTools, wantTools)
+	}
+	// triggers merge into Tags during parseMetadata.
+	if !slices.Contains(skill.Tags, "/security-audit") || !slices.Contains(skill.Tags, "security scan") {
+		t.Errorf("Tags missing triggers = %v", skill.Tags)
+	}
+}
 
 func TestParseSkillText_Valid(t *testing.T) {
 	text := `---
