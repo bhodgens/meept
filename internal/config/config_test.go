@@ -114,6 +114,10 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Memory.Episodic.Enabled != true {
 		t.Error("Default episodic memory should be enabled")
 	}
+
+	if cfg.Agents.CapabilityMatchEnabled != false {
+		t.Error("Default agents.capability_match_enabled should be false")
+	}
 }
 
 func TestStripJSON5Comments(t *testing.T) {

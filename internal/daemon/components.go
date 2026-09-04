@@ -2333,7 +2333,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Create capability matcher for fast routing
 		var capMatcher *agent.CapabilityMatcher
-		if c.CapabilitiesMap != nil {
+		if cfg.Agents.CapabilityMatchEnabled && c.CapabilitiesMap != nil {
 			capMatcher = agent.NewCapabilityMatcher(agent.CapabilityMatcherConfig{
 				CapabilitiesMap: c.CapabilitiesMap,
 				CapabilityIndex: c.CapabilityIndex,
@@ -2346,6 +2346,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			} else {
 				logger.Debug("Capability matcher initialized without capability index")
 			}
+		} else if !cfg.Agents.CapabilityMatchEnabled {
+			logger.Info("Capability matcher disabled by config (agents.capability_match_enabled=false) — using LLM classifier + keyword table fallback")
 		}
 
 		// Create dispatcher with capability matcher

@@ -1687,6 +1687,12 @@ type AgentsConfig struct {
 
 	// DispatcherID is the agent ID that handles intake/routing.
 	DispatcherID string `json:"dispatcher_id" toml:"dispatcher_id"`
+
+	// CapabilityMatchEnabled enables the keyword-based capability matcher
+	// used as a fast routing step in the dispatcher. Default false: when
+	// disabled the dispatcher skips keyword-based capability matching and
+	// relies on the LLM intent classifier (with keyword-table fallback).
+	CapabilityMatchEnabled bool `json:"capability_match_enabled" toml:"capability_match_enabled"`
 }
 
 // SecurityConfig holds security settings.
