@@ -254,7 +254,7 @@ relative paths are rejected.
 ## Wiki Layer
 
 The wiki is the persistent knowledge store behind skill evolution
-(arXiv:2608.27454 "WikiSkill"). Learned patterns survive daemon restarts, and
+(arXiv:2608.27454 "WikiSkill"). Learned patterns survive platform restarts, and
 every evolver verdict — accepted AND rejected — is recorded so later cycles do
 not repeat rejected edits.
 

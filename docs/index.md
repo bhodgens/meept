@@ -1,8 +1,8 @@
 # Meept
 
-**Self-executing autonomous agent daemon with multi-agent orchestration, hybrid memory, and skill-based task execution.**
+**Self-executing autonomous agent platform with multi-agent orchestration, hybrid memory, and skill-based task execution.**
 
-Meept is a Go-based daemon that runs AI agents as background processes. It supports multi-agent collaboration, persistent memory, tool execution, and multiple frontends (TUI, Telegram, web). Agents can decompose complex tasks, route work to specialists, and maintain context across sessions.
+Meept is a Go-based platform that runs AI agents as background processes. It supports multi-agent collaboration, persistent memory, tool execution, and multiple frontends (TUI, Telegram, web). Agents can decompose complex tasks, route work to specialists, and maintain context across sessions.
 
 ## Why Meept?
 
@@ -32,11 +32,11 @@ See the [Getting Started](getting-started/index.md) guide for detailed installat
 
 ## What Makes Meept Different
 
-Meept is a persistent Go daemon, not a single-session CLI and not an IDE copilot.
+Meept is a persistent Go platform, not a single-session CLI and not an IDE copilot.
 
 It combines:
 
-- Daemon runtime with RPC, HTTP, WebSocket, and MCP
+- Platform runtime with RPC, HTTP, WebSocket, and MCP
 - 28 specialist agents plus reviewers, routed by an intent classifier
 - Five-tier memory (episodic FTS5, task, knowledge graph, semantic, memvid)
 - Evidence on every tool result (hashes, exit codes, API bodies)
@@ -52,7 +52,7 @@ Status below matches the root README feature table.
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Daemon Core** | Stable | Lifecycle, config, RPC, HTTP REST |
+| **Platform Core** | Stable | Lifecycle, config, RPC, HTTP REST |
 | **Agent Loop** | Stable | Full safety stack (watchdog, cycle/convergence, budget, failover) |
 | **Multi-Agent** | Stable | 28 agents (22 executor-role incl. dispatcher + chat, 6 reviewers) |
 | **CLI/TUI** | Stable | Interactive chat, vim mode, markdown rendering |

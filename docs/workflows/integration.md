@@ -11,7 +11,7 @@ Proves the four containment workstreams compose end-to-end
 
 | Test | Guards |
 |------|--------|
-| `TestEnvStrippedThroughBackendExecution` | Env allowlist strips daemon secrets from real child processes ([runtime env policy](../concepts/runtime.md)) |
+| `TestEnvStrippedThroughBackendExecution` | Env allowlist strips platform secrets from real child processes ([runtime env policy](../concepts/runtime.md)) |
 | `TestSecretPlaceholderRoundTrip` | `MEEPT_SECRET:` placeholders resolve to real credentials only toward declared hosts via the egress proxy ([secrets](secrets.md)) |
 | `TestSandboxRefusalFailsClosed` | `require_sandbox=true` with no qualifying backend refuses execution instead of degrading ([runtime](../concepts/runtime.md)) |
 | `TestStageAcceptJournalRevertChain` | Stage → drift-refusal → accept → journal → revert chain ([change journal](change-journal.md)) |

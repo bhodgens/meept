@@ -10,7 +10,7 @@ Without a shared service layer, business logic would be duplicated between trans
 
 ## Behavior
 
-- `ServiceRegistry` holds all service instances, wired via `NewRegistry(services.Config{...})` in the daemon.
+- `ServiceRegistry` holds all service instances, wired via `NewRegistry(services.Config{...})` in the platform.
 - HTTP handlers in `internal/comm/http/api_handlers.go` call into services.
 - RPC handlers (some via bus proxy, some direct) also call into services.
 - **Search service** (`SearchService`): both keyword (`Search`) and semantic (`SearchSemantic`) search across sessions/tasks/memories/plans. Semantic uses embeddings when available, otherwise falls back to keyword.

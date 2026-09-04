@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Flutter desktop UI (`ui/flutter_ui/`) is the graphical counterpart to the terminal TUI. It targets macOS, linux, and windows from a single dart codebase, communicating with the daemon over HTTP + WebSocket. Where the TUI leads on a feature, the Flutter GUI follows, and vice versa — see [tui](tui.md) for the terminal surface and the "ui conventions" section of `CLAUDE.md` for the parity rule.
+The Flutter desktop UI (`ui/flutter_ui/`) is the graphical counterpart to the terminal TUI. It targets macOS, linux, and windows from a single dart codebase, communicating with the platform over HTTP + WebSocket. Where the TUI leads on a feature, the Flutter GUI follows, and vice versa — see [tui](tui.md) for the terminal surface and the "ui conventions" section of `CLAUDE.md` for the parity rule.
 
 ## Problem
 

@@ -34,7 +34,7 @@ change staged for re-staging against the current content.
 
 ## HTTP API
 
-All routes live on the daemon HTTP server under `/api/v1/*` and inherit the
+All routes live on the platform HTTP server under `/api/v1/*` and inherit the
 server's API-key auth middleware. Enabled with the REST API
 (`transport.http.rest`, default on); wired via `WithChangesAPI`.
 
@@ -96,8 +96,8 @@ Modal keys (all strings lowercase):
 | `esc` | leave diff view, or close the modal |
 
 After an accept/reject the list refreshes automatically and the status bar
-shows `change accepted` / `change rejected`, or the daemon error (e.g. the
-drift message) on failure. The TUI calls the daemon over its RPC socket
+shows `change accepted` / `change rejected`, or the platform error (e.g. the
+drift message) on failure. The TUI calls the platform over its RPC socket
 (`changes.list` / `changes.accept` / `changes.reject`), which dispatches to
 the same shared accept path as the HTTP routes.
 
@@ -128,7 +128,7 @@ Pending changes on the CLI are resolved through the agent's `resolve` tool
   untouched.
 - **Size-capped journal entries** (>1 MiB pre-image): listed with
   `pre_image_size = 0` but not revertible (HTTP `400`).
-- **Journal disabled** (database failed to open at daemon start): journal
+- **Journal disabled** (database failed to open at platform start): journal
   routes answer `503`; staging/accept/reject still work without revert
   history.
 - **Legacy staged changes** (no pre-image hash, mid-upgrade): accept proceeds

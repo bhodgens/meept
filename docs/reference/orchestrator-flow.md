@@ -166,7 +166,7 @@ go test ./internal/agent/... -run "TestChatHandler_PublishPlanRequest" -v
 
 Full flow verification:
 ```bash
-# Verify end-to-end flow (requires full daemon setup)
+# Verify end-to-end flow (requires full platform setup)
 make go-daemon
 ./bin/meept chat "Build a feature with API and tests"
 ```

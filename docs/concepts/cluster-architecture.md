@@ -15,7 +15,7 @@ Meept's distributed cluster feature enables multiple `meept-daemon` instances to
 ## Component Overview
 
 ```
-                            PER-NODE DAEMON
+                       PER-NODE PLATFORM INSTANCE
 
   +-----------+  +-----------+  +-----------+  +-----------+
   |   Agent   |  |  Cluster  |  |  Gossip   |  |   Git     |

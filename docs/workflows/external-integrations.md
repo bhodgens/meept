@@ -15,13 +15,13 @@ Single-channel interaction limits accessibility. External integrations provide:
 
 ### MCP Chat Server
 
-The MCP (Model Context Protocol) chat server exposes meept sessions to external AI agent platforms (Claude Code, GPT, etc.). It communicates via JSON-RPC over stdin/stdout and connects to the meept daemon via Unix socket RPC.
+The MCP (Model Context Protocol) chat server exposes meept sessions to external AI agent platforms (Claude Code, GPT, etc.). It communicates via JSON-RPC over stdin/stdout and connects to the meept platform via Unix socket RPC.
 
 **Key features:**
 - **Session management**: List, create, or attach to chat sessions
 - **Message sending**: Send messages with client identity attribution (`source_client`)
 - **Event polling**: Subscribe to agent progress, other participants' messages, and responses
-- **Status monitoring**: Query daemon health, active agents, and queue depth
+- **Status monitoring**: Query platform health, active agents, and queue depth
 - **History access**: Retrieve recent session messages for context
 
 **MCP tools exposed:**
@@ -31,7 +31,7 @@ The MCP (Model Context Protocol) chat server exposes meept sessions to external 
 | `meept_sessions` | List, create, or attach to chat sessions |
 | `meept_send` | Send a message to a session (with `source_client`) |
 | `meept_events` | Poll events since last call |
-| `meept_status` | Get daemon status |
+| `meept_status` | Get platform status |
 | `meept_session_history` | Get recent messages from a session |
 
 **Starting the server:**
@@ -89,7 +89,7 @@ cua-driver autostart kick
 /bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"
 ```
 
-Verify with `cua-driver --version` and `cua-driver doctor`. On macOS, grant Accessibility and Screen Recording permissions: start the daemon once (`open -n -g -a CuaDriver --args serve`), then run `cua-driver permissions grant`.
+Verify with `cua-driver --version` and `cua-driver doctor`. On macOS, grant Accessibility and Screen Recording permissions: start the platform once (`open -n -g -a CuaDriver --args serve`), then run `cua-driver permissions grant`.
 
 **Enable in meept** (any of the three catalog surfaces):
 
@@ -211,7 +211,7 @@ See the bundled `computer-use` skill (`config/skills/computer-use/SKILL.md`) for
 - User notification of issues
 - Manual resolution options
 
-### MCP Server — Daemon Not Running
+### MCP Server — Platform Not Running
 - Clear error message with remediation instructions
 - Suggestion to run `meept daemon start`
 

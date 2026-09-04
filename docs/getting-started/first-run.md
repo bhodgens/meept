@@ -2,9 +2,9 @@
 
 What happens during your first Meept session and how to verify everything is working.
 
-## Daemon Startup Sequence
+## Platform Startup Sequence
 
-When you run `./bin/meept-daemon -f`, the daemon initializes in this order:
+When you run `./bin/meept-daemon -f`, the platform initializes in this order:
 
 1. **Config loading** — Reads `~/.meept/meept.json5` (JSON5 preferred; legacy `meept.toml` fallback) and `~/.meept/models.json5`
 2. **Component registry** — Registers all internal components
@@ -14,12 +14,12 @@ When you run `./bin/meept-daemon -f`, the daemon initializes in this order:
 6. **Tool registry** — Registers all built-in tools
 7. **Memory system** — Opens SQLite database, loads existing memories
 8. **Scheduler** — Loads scheduled jobs (if enabled)
-9. **Ready** — Daemon accepts connections
+9. **Ready** — Platform accepts connections
 
-## Verifying the Daemon
+## Verifying the Platform Status
 
 ```bash
-# Check daemon status
+# Check platform status
 ./bin/meept status
 ```
 
@@ -45,7 +45,7 @@ When you start `./bin/meept chat`, the TUI opens with:
 
 ```
 You: "Hello, what can you do?"
-  → RPC request to daemon
+  → RPC request to platform
   → Message bus publishes chat.request
   → Dispatcher agent receives message
   → Dispatcher calls platform_agents to discover capabilities
@@ -111,7 +111,7 @@ The planner agent creates a task with steps. Check with `./bin/meept tasks list`
 If something isn't working, check the logs:
 
 ```bash
-# Daemon logs (stdout in foreground mode)
+# Platform logs (stdout in foreground mode)
 # Or check the log file
 ls ~/.meept/meept.log
 ```

@@ -102,9 +102,9 @@ Every scheduled delivery claims its tick atomically in a SQLite store
 
 - **Claim-before-deliver**: `ClaimTick(jobID, tick)` inserts the claim row; a
   constraint violation means the tick was already delivered (possibly by a
-  daemon instance that crashed after claiming), so dispatch is skipped. Work
+  platform instance that crashed after claiming), so dispatch is skipped. Work
   is never duplicated across crashes.
-- **Missed-tick coalescing**: on wake (daemon startup), due ticks since the
+- **Missed-tick coalescing**: on wake (platform startup), due ticks since the
   last wake are grouped per job and only `MAX(tick)` is enqueued, once, with
   `missed_count` metadata on the job events (`missed_count` = number of ticks
   skipped). Disabled mode enqueues every due tick individually.

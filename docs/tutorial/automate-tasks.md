@@ -9,7 +9,7 @@ go from zero to fully automated in about ten minutes.
 User Instructions are plain-English rules that Meept converts into structured
 automation: **"when X happens, do Y."** You write the rule once in natural
 language, the instruction parser turns it into a trigger + action pair, and the
-daemon fires the action whenever the trigger matches. You never have to remember
+platform fires the action whenever the trigger matches. You never have to remember
 the exact syntax -- just type what you want in conversational English.
 
 For the full conceptual background (triggers, actions, storage tiers, context
@@ -19,11 +19,11 @@ injection), see [Concepts: User Instructions](../concepts/instructions.md).
 
 ## Prerequisites
 
-- Meept daemon running (`./bin/meept-daemon -f` or `make go-daemon`)
+- Meept platform running (`./bin/meept-daemon -f` or `make go-daemon`)
 - CLI built (`make build`)
 - You are in a project directory (instructions default to project scope)
 
-If the daemon is not running, start it now:
+If the platform is not running, start it now:
 
 ```bash
 make go-daemon
@@ -207,7 +207,7 @@ meept instructions add "after every commit, remind me to request a code review"
 - Action: `notification`
 
 Meept generates a `.git/hooks/post-commit-user` shell script that dispatches to
-the daemon via RPC when the hook fires. Verify it was created:
+the platform via RPC when the hook fires. Verify it was created:
 
 ```bash
 ls -la .git/hooks/post-commit-user
@@ -334,9 +334,9 @@ created_at: 2026-06-23T09:14:00Z
 
 ## Troubleshooting
 
-### "Daemon not running"
+### "Platform not running"
 
-Start the daemon:
+Start the platform:
 
 ```bash
 make go-daemon
@@ -361,7 +361,7 @@ action tools are: `shell_execute`, `memory_retain`, `notification`,
 1. Check that it is enabled: `meept instructions show <id>`.
 2. Confirm the trigger pattern matches the event you expect. For `post_hook`
    triggers, the glob must match the file path the tool operated on.
-3. Check the daemon log for instruction execution errors:
+3. Check the platform log for instruction execution errors:
    ```bash
    tail -f ~/.meept/logs/daemon.log | grep -i instruction
    ```
@@ -385,4 +385,4 @@ or rename one of them if this is unintended.
 - [Security](../workflows/security.md) -- how risk assessment and validation
   gates work across the platform
 - [Quick Start](../getting-started/quick-start.md) -- if you haven't yet, get
-  the daemon running and try a chat first
+  the platform running and try a chat first

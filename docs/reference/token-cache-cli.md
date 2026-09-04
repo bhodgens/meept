@@ -120,7 +120,7 @@ These flags are available for all `meept cache` subcommands:
 | Flag | Shorthand | Default | Description |
 |------|-----------|---------|-------------|
 | `--debug` | | `""` | Enable debug output (`--debug` or `--debug=file`, use `-` for stderr) |
-| `--socket` | `-s` | `~/.meept/meept.sock` | Unix socket path for daemon connection |
+| `--socket` | `-s` | `~/.meept/meept.sock` | Unix socket path for platform connection |
 | `--state-dir` | `-d` | `~/.meept` | State directory |
 
 ---
@@ -152,15 +152,15 @@ meept --debug=- cache status
 
 ## Error Handling
 
-### Daemon not running
+### Platform not running
 ```
 Error: failed to connect to daemon: dial unix /Users/caimlas/.meept/meept.sock: connect: no such file or directory
 
-Make sure the daemon is running:
+Make sure the platform is running:
   meept daemon start
 ```
 
-**Solution:** Start the daemon with `meept daemon start`.
+**Solution:** Start the platform (`meept daemon start`).
 
 ### Cache not enabled
 ```

@@ -1,6 +1,6 @@
 # Meept HTTP API - Complete Reference
 
-Comprehensive documentation for the Meept HTTP API, exposing full daemon functionality via REST.
+Comprehensive documentation for the Meept HTTP API, exposing full platform functionality via REST.
 
 ## Base URL
 
@@ -45,7 +45,7 @@ API key authentication is also **enabled by default** with an intentionally obvi
    }
    ```
 
-3. **Restart the daemon**
+3. **Restart the platform**
 
 ### Using Authentication
 
@@ -74,7 +74,7 @@ transport: {
 }
 ```
 
-The daemon will log a **security warning** at startup if you're using the default key.
+The platform will log a **security warning** at startup if you're using the default key.
 
 ---
 
@@ -268,14 +268,14 @@ The daemon will log a **security warning** at startup if you're using the defaul
 
 ---
 
-## Daemon
+## Platform
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/daemon/status` | Get daemon status |
-| POST | `/api/v1/daemon/start` | Start daemon |
-| POST | `/api/v1/daemon/stop` | Stop daemon |
-| POST | `/api/v1/daemon/restart` | Restart daemon |
+| GET | `/api/v1/daemon/status` | Get platform status |
+| POST | `/api/v1/daemon/start` | Start platform |
+| POST | `/api/v1/daemon/stop` | Stop platform |
+| POST | `/api/v1/daemon/restart` | Restart platform |
 
 ### Status Response
 ```json

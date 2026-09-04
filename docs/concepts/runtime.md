@@ -50,7 +50,7 @@ Enable in `~/.meept/meept.json5`:
 
 ## Sandbox Backend Selection (sandbox_backend_order / require_sandbox)
 
-`sandbox.sandbox_backend_order` controls which execution backend the daemon
+`sandbox.sandbox_backend_order` controls which execution backend the platform
 resolves at startup:
 
 | Order     | Behavior                                                                    |
@@ -63,11 +63,11 @@ resolves at startup:
 ### Fail-closed semantics
 
 - `require_sandbox: false` (default): if no qualifying backend (docker,
-  bwrap) is available, the daemon falls back to **unsandboxed local exec**
+  bwrap) is available, the platform falls back to **unsandboxed local exec**
   and logs a loud `UNSANDBOXED local fallback` warning.
 - `require_sandbox: true`: if no qualifying backend is available, the shell
   tool is wired to a **refusing backend** — every command fails with an error
-  wrapping `runtime.ErrSandboxRequired`. The daemon never silently degrades
+  wrapping `runtime.ErrSandboxRequired`. The platform never silently degrades
   to unsandboxed execution.
 
 > **Posture distinction:** with `[runtime] enabled = false`, behavior is

@@ -297,7 +297,7 @@ disk and updates the database. Constraints:
 - Check session store is wired correctly
 
 **Bus event not received:**
-- Verify message bus is initialized in daemon
+- Verify message bus is initialized in platform
 - Check subscription topic matches exactly (`project.set`)
 
 ---

@@ -77,7 +77,7 @@ dimension = 1536
 
 2-tier architecture for multi-agent memory sharing.
 
-- **Local**: SQLite database per daemon instance
+- **Local**: SQLite database per platform instance
 - **Shared**: memvid service for cross-instance memory
 - **Hydration**: Fetch relevant memories when a job is claimed
 - **Distillation**: Promote important memories to shared storage

@@ -145,7 +145,7 @@ meept instructions disable <instruction-id>
 | 1 | Invalid input or parse error |
 | 2 | Validation failed (tool not found, risk too high) |
 | 3 | Instruction not found |
-| 4 | Daemon connection error |
+| 4 | Platform connection error |
 
 ## Security
 
@@ -179,7 +179,7 @@ The CLI uses these RPC methods internally:
 
 ## HTTP API
 
-If the daemon HTTP transport is enabled, instructions can be managed via REST API:
+If the platform HTTP transport is enabled, instructions can be managed via REST API:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -269,9 +269,9 @@ The action tool doesn't exist. Valid tools:
 - `file_write` - Write file
 - `git_commit` - Git commit
 
-### "Daemon not running"
+### "Platform not running"
 
-Start the daemon:
+Start the platform:
 ```bash
 make go-daemon
 # or
@@ -282,4 +282,4 @@ make go-daemon
 
 1. Check if it's enabled: `meept instructions show <id>`
 2. Verify trigger pattern matches your action
-3. Check daemon logs: `tail -f ~/.meept/logs/daemon.log | grep instruction`
+3. Check platform logs: `tail -f ~/.meept/logs/daemon.log | grep instruction`

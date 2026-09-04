@@ -11,7 +11,7 @@ meept uses a worker pool to dequeue and process jobs from the internal job queue
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                         meept daemon                              │
+│                         meept platform                            │
 │                                                                   │
 │  ┌──────────────┐         ┌────────────────────────────────┐     │
 │  │ job queue    │────────▶│ worker pool                    │     │
@@ -191,7 +191,7 @@ the `AgentJobProcessor` (in `internal/daemon/components.go`) implements the `Job
 
 - if the job has an `AgentID` and a registry is configured, it dispatches to the agent-specific loop
 - otherwise, it falls back to the main agent loop
-- the processor is wired with `WithRegistry(c.AgentRegistry)` during daemon initialization
+- the processor is wired with `WithRegistry(c.AgentRegistry)` during platform initialization
 
 ```go
 type AgentJobProcessor struct {
@@ -213,9 +213,9 @@ the `Handler` exposes pool control via the message bus:
 | `worker.stats` | get pool statistics |
 | `worker.scale` | scale pool to target count |
 
-### daemon wiring
+### platform wiring
 
-the worker pool is created and started during daemon component initialization:
+the worker pool is created and started during platform component initialization:
 
 1. `AgentJobProcessor` is created with the main agent loop and optional agent registry
 2. `Pool` is created via `NewPool(PoolConfig)` with the queue, processor, message bus, and config
@@ -244,7 +244,7 @@ go test ./internal/worker/... -v
 # with race detection
 go test -race ./internal/worker/... -v
 
-# integration tests (daemon wiring)
+# integration tests (platform wiring)
 go test ./internal/daemon/... -v -run Worker
 
 # end-to-end via cli
@@ -257,7 +257,7 @@ go test ./internal/daemon/... -v -run Worker
 - verify the job queue is configured and jobs are being enqueued
 - check `default_caps` matches the capabilities required by jobs in the queue
 - if using agent-specific routing, ensure a worker with the matching `AgentID` exists
-- check daemon logs for `"failed to add worker"` or `"worker failed to start"` messages
+- check platform logs for `"failed to add worker"` or `"worker failed to start"` messages
 
 **"worker pool not starting"**
 - verify `pool_size` is greater than 0 in config (default: 4)

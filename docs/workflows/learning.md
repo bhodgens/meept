@@ -33,7 +33,7 @@ Adapters (~/.meept/adapters/{domain}/{model}-vN/)
 ## Capture Flow
 
 1. When both `learning.enabled` and `learning.capture.enabled` are true,
-   the daemon creates a `CaptureRecorder` and wires it into each agent loop
+   the platform creates a `CaptureRecorder` and wires it into each agent loop
    via `WithLearningCapture`.
 
 2. After each successful tool call in `executeToolCalls`, the agent loop
@@ -181,7 +181,7 @@ When `manual_only` is **false**:
 
 - CLI `meept learning consolidate` trains each ready domain (grown past last
   successful auto-train size and ≥ threshold).
-- Daemon scheduled consolidate enqueues `pending_auto_train.jsonl` and runs
+- Platform-scheduled consolidate enqueues `pending_auto_train.jsonl` and runs
   training asynchronously via `scripts/train_lora.py`.
 
 When `manual_only` is **true** (default), consolidate only prints a train
@@ -189,7 +189,7 @@ hint. Use `meept learning auto-train` (or `train`) explicitly.
 
 ## Adapter Loading
 
-At daemon startup, the adapter registry (`~/.meept/adapter_registry.json`)
+At platform startup, the adapter registry (`~/.meept/adapter_registry.json`)
 is loaded via `internal/llm/adapter_loader.go`. `LFMLoader` validates PEFT
 artifacts on disk (`adapter_config.json`, `*.safetensors`, etc.), keeps the
 highest `-vN` per domain, sets a `general` (or first) fallback, and builds

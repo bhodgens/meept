@@ -25,7 +25,7 @@ The manager discovers a Chrome/Chromium binary automatically, in this order:
    `chrome` on `PATH`
 3. `/Applications/Google Chrome.app/...` (macOS)
 
-If no binary is found while `enabled = true`, daemon startup logs an error and
+If no binary is found while `enabled = true`, platform startup logs an error and
 the tools are not registered.
 
 - **macOS**: install Google Chrome, or `brew install --cask chromium`
@@ -47,7 +47,7 @@ the tools are not registered.
 
 Sessions are scoped per agent session ID; each gets a singleton headless
 Chrome process (max `max_pages` concurrent). All sessions are torn down on
-daemon shutdown (`Manager.Close`).
+platform shutdown (`Manager.Close`).
 
 ## Security
 

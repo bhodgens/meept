@@ -19,7 +19,7 @@ The HTTP server includes API key authentication middleware
 - Enabled by default (`transport.http.require_auth: true`).
 
 When `require_auth` is true and no keys are configured, the server falls back
-to a per-installation dev key stored at `~/.meept/dev_key` (0600). Both daemon
+to a per-installation dev key stored at `~/.meept/dev_key` (0600). Both platform
 and CLI resolve this file, so local development works out of the box. For any
 exposed deployment, configure explicit keys.
 
@@ -112,7 +112,7 @@ clients. For production, use either option below.
 
 ### Option A: Reverse proxy terminates TLS (recommended)
 
-Run the daemon on loopback HTTP and let Caddy/nginx serve public TLS. With a
+Run the platform on loopback HTTP and let Caddy/nginx serve public TLS. With a
 proxy terminating TLS, you can set `use_tls: false` and bind to
 `127.0.0.1:8081`.
 
@@ -168,22 +168,22 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
   -addext "subjectAltName=DNS:meept.internal,IP:10.0.0.5"
 ```
 
-Point the daemon at it with `tls_cert_file` / `tls_key_file` equivalents in
+Point the platform at it with `tls_cert_file` / `tls_key_file` equivalents in
 the transport config, and disable `auto_tls_cert`. Clients should verify via
 certificate fingerprint where supported instead of disabling verification.
 
 ### Option B: Native TLS with a real certificate
 
-Terminate TLS inside the daemon itself when no proxy sits in front of it.
-Obtain a cert (certbot standalone mode works well since the daemon owns the
-port), then configure the daemon to load the PEM files and turn off auto-
+Terminate TLS inside the platform itself when no proxy sits in front of it.
+Obtain a cert (certbot standalone mode works well since the platform owns the
+port), then configure the platform to load the PEM files and turn off auto-
 generation. Keep renewal simple by running certbot with a deploy hook that
-restarts the daemon, or run everything behind Option A's proxy and avoid the
+restarts the platform, or run everything behind Option A's proxy and avoid the
 problem entirely.
 
 ## Unix Socket RPC Security Model
 
-The daemon exposes a second transport: JSON-RPC 2.0 over a Unix domain
+The platform exposes a second transport: JSON-RPC 2.0 over a Unix domain
 socket (`~/.meept/meept.sock`). It has NO application-layer auth — by
 design:
 
@@ -200,7 +200,7 @@ is, by construction, the daemon owner. Consequences:
   key material on disk beyond what the OS already protects.
 - In a future multi-user deployment, RPC calls bypass per-user identity
   (they act as the owner). Keep `transport.rpc.enabled: false` on any
-  node where untrusted local users exist, or run each user's daemon under
+  node where untrusted local users exist, or run each user's platform instance under
   their own OS account. See the peer-credential note below.
 
 Planned defense-in-depth: verify peer credentials on each accepted
@@ -218,7 +218,7 @@ Tracked as an open question in
 - [ ] Bind address stays `127.0.0.1` unless external access is intended
 - [ ] Real TLS certificate (Option A proxy preferred) or internal CA cert;
       `auto_tls_cert: false` once real certs are in place
-- [ ] Firewall restricts the daemon port to expected sources
+- [ ] Firewall restricts the platform port to expected sources
 - [ ] Rate limits tuned for expected client count
 - [ ] CORS left at localhost-only defaults unless a specific web origin is
       needed

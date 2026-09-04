@@ -2,11 +2,11 @@
 
 ## Overview
 
-Decentralized cluster coordination between meept daemon instances (`internal/cluster/`). Nodes form a peer-to-peer mesh that shares task queue state, agent availability, and membership via gossip plus a git-backed membership registry. Optional WireGuard tunnel provides authenticated transport between nodes.
+Decentralized cluster coordination between meept platform instances (`internal/cluster/`). Nodes form a peer-to-peer mesh that shares task queue state, agent availability, and membership via gossip plus a git-backed membership registry. Optional WireGuard tunnel provides authenticated transport between nodes.
 
 ## Problem
 
-A single meept daemon handles one machine. Multi-node deployments need:
+A single meept platform instance handles one machine. Multi-node deployments need:
 - Shared task queue so any node can claim work
 - Membership awareness so nodes know their peers' capabilities
 - Conflict-free membership changes (nodes can join/leave without coordinator)

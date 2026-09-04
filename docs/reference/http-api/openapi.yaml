@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Meept HTTP API
-  description: REST API for Meept daemon - exposes chat, memory, task queue, skills, and self-improvement capabilities
+  description: REST API for Meept platform - exposes chat, memory, task queue, skills, and self-improvement capabilities
   version: 0.2.0
 
 servers:
@@ -1383,7 +1383,7 @@ components:
         Templates:
           type: object
           nullable: true
-        Daemon:
+        Platform:
           type: object
           nullable: true
         Model:

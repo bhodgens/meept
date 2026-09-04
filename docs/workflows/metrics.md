@@ -11,7 +11,7 @@ meept collects time-series and event-level metrics for agent iterations, tool ex
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                         meept daemon                              │
+│                         meept platform                            │
 │                                                                   │
 │  ┌──────────────┐    ┌──────────────┐    ┌────────────────────┐   │
 │  │ message bus  │───▶│  collector   │───▶│  store (sqlite)    │   │
@@ -256,9 +256,9 @@ the `ResponseAnalyzer` inspects llm responses for quality signals:
 - **code token percentage**: estimates what fraction of the response was code vs. explanation
 - **well-formedness**: validates that edit blocks have matching `<<<<<<< SEARCH` / `>>>>>>> REPLACE` markers
 
-### daemon wiring
+### platform wiring
 
-the metrics store and collector are created during daemon component initialization:
+the metrics store and collector are created during platform component initialization:
 
 1. `Store` is created via `NewStore(StoreConfig)` with the configured database path
 2. `Collector` is created via `NewCollector(store, messageBus, CollectorConfig)` which starts polling and bus subscriptions
@@ -287,7 +287,7 @@ go test ./internal/comm/http/... -v -run Metrics
 
 **"metrics service not available" (http api)**
 - verify `llm.metrics.enabled` is `true` in config
-- check daemon logs for store initialization errors
+- check platform logs for store initialization errors
 - confirm the http transport is enabled in `transport.http.enabled`
 
 **high memory usage from metrics**

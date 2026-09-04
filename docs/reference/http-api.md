@@ -1,6 +1,6 @@
 # HTTP API Reference
 
-The Meept HTTP API exposes full daemon functionality over REST for web/remote clients while preserving the existing RPC transport for CLI/TUI.
+The Meept HTTP API exposes full platform functionality over REST for web/remote clients while preserving the existing RPC transport for CLI/TUI.
 
 ## Base URL
 
@@ -392,14 +392,14 @@ curl -X POST http://localhost:8081/api/v1/bus/call \
 ```
 Response: `{"result": ...}` or `{"error": "..."}`
 
-### Daemon Control
+### Platform Control
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/daemon/status` | Get daemon status |
-| POST | `/api/v1/daemon/restart` | Restart daemon |
-| POST | `/api/v1/daemon/start` | Start daemon |
-| POST | `/api/v1/daemon/stop` | Stop daemon |
+| GET | `/api/v1/daemon/status` | Get platform status |
+| POST | `/api/v1/daemon/restart` | Restart platform |
+| POST | `/api/v1/daemon/start` | Start platform |
+| POST | `/api/v1/daemon/stop` | Stop platform |
 
 ### Models
 
@@ -496,7 +496,7 @@ Returns counters for summarization failures, dropped messages, compaction events
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/agents` | List agents known to the daemon |
+| GET | `/api/v1/agents` | List agents known to the platform |
 | POST | `/api/v1/agents/{id}/delegate` | Delegate a task to a specific agent |
 
 **List Agents:**
@@ -513,7 +513,7 @@ Each agent entry contains:
 - `enabled` — whether the agent is enabled
 - `capabilities` — optional capability tags (omitted when empty)
 
-When the daemon is running with a live agent registry (default), the list reflects the discovered AGENT.md files (8 standard executors plus `researcher` and 5 reviewers, plus any user-defined). Falls back to a static 14-entry list if the registry is unavailable.
+When the platform is running with a live agent registry (default), the list reflects the discovered AGENT.md files (8 standard executors plus `researcher` and 5 reviewers, plus any user-defined). Falls back to a static 14-entry list if the registry is unavailable.
 
 **Delegate Task:**
 ```bash
@@ -868,7 +868,7 @@ curl -X POST http://localhost:8081/mcp \
 - `meept_sessions` - Session management (list/create/attach)
 - `meept_send` - Send messages to sessions
 - `meept_events` - Poll bus events
-- `meept_status` - Get daemon status
+- `meept_status` - Get platform status
 - `meept_session_history` - Get session message history
 
 **SSE Stream:**
@@ -913,7 +913,7 @@ Response:
 }
 ```
 
-Each entry is a `ServerStatusEntry` pairing a `config` (the on-disk JSON5 entry) with a `stats` block. The `stats.state` field is one of `active`, `inactive`, `error`, `disabled`. Counters are in-memory only and reset on daemon restart.
+Each entry is a `ServerStatusEntry` pairing a `config` (the on-disk JSON5 entry) with a `stats` block. The `stats.state` field is one of `active`, `inactive`, `error`, `disabled`. Counters are in-memory only and reset on platform restart.
 
 **Set Enabled:**
 ```bash

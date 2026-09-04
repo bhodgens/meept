@@ -2,13 +2,13 @@
 
 ## Overview
 
-Cross-daemon dispatch with content-addressable file transport. When daemon A dispatches a task to daemon B, B's agent loop opens files exactly as if the work were local — same file context, same workspace state. The mechanism is invisible to the agent layer.
+Cross-instance dispatch with content-addressable file transport. When platform instance A dispatches a task to platform instance B, B's agent loop opens files exactly as if the work were local — same file context, same workspace state. The mechanism is invisible to the agent layer.
 
 Spec: `docs/superpowers/specs/2026-07-01-cluster-resource-model-design.md`.
 
 ## Problem
 
-A remote daemon working on a task had no way to access the files its task required. The cluster mesh could transport small JSON event records (task lifecycle, session turns, memory items) but could not move file content. Existing scaffolding (`TASK_*` event types, `ManagingNode`/`ClaimedByNode` columns, `FullPayloadReplication` flag) was dormant.
+A remote platform instance working on a task had no way to access the files its task required. The cluster mesh could transport small JSON event records (task lifecycle, session turns, memory items) but could not move file content. Existing scaffolding (`TASK_*` event types, `ManagingNode`/`ClaimedByNode` columns, `FullPayloadReplication` flag) was dormant.
 
 ## Components
 
@@ -150,7 +150,7 @@ Metrics emitted via `internal/cluster/metrics.go`:
 
 ## RPC Methods
 
-Registered on the daemon's RPC server:
+Registered on the platform's RPC server:
 
 - `dispatch.submit` — submit a job to a target node. Payload: `target_node`, `agent_id`, `task_description`, `required_resources[]`, `workspace_ref?`, `priority?`.
 - `dispatch.status` — query job status. Payload: `job_id`.
@@ -178,8 +178,8 @@ Unit tests per package (`internal/resources/`, `internal/workspace/`, `internal/
 
 Integration tests in `tests/integration/`:
 
-- `cluster_helpers.go` — N in-process daemons with wired gRPC transports, ResourceManagers, WorkspaceManagers.
-- `dispatch_round_trip_test.go` — two-daemon end-to-end dispatch including refcount cleanup.
+- `cluster_helpers.go` — N in-process platform instances with wired gRPC transports, ResourceManagers, WorkspaceManagers.
+- `dispatch_round_trip_test.go` — two-instance end-to-end dispatch including refcount cleanup.
 - `cas_fetch_streaming_test.go` — blob streaming, hash verification, resume from offset.
 - `workspace_dirty_round_trip_test.go` — dirty snapshot, diff blob generation.
 - `failover_test.go` — job cancellation during execution, context cancellation handling.
@@ -189,5 +189,5 @@ Integration tests in `tests/integration/`:
 
 - **No shared filesystem layer** (NFS/Ceph/sshfs/CRDT sync). Rejected; violates offline autonomy.
 - **No central object store** (MinIO/S3). Violates "no secondary storage system" constraint.
-- **No client→daemon gRPC migration.** Out of scope; tracked in issue #17.
-- **No continuous cross-daemon workspace sync.** Dispatch is transactional. Live collaboration is issue #18.
+- **No client→platform gRPC migration.** Out of scope; tracked in issue #17.
+- **No continuous cross-instance workspace sync.** Dispatch is transactional. Live collaboration is issue #18.

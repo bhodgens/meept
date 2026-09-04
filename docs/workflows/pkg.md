@@ -1,6 +1,6 @@
 # Pkg (Shared Security Package)
 
-Shared, import-cycle-free security primitives used by both the daemon's
+Shared, import-cycle-free security primitives used by both the platform's
 `internal/security` engine and external consumers.
 
 ## How It Works

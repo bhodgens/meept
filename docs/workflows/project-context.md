@@ -5,9 +5,9 @@
 
 ## Problem Statement
 
-Meept has no concept of "which project am I working on." The daemon has a single
+Meept has no concept of "which project am I working on." The platform has a single
 `WorkingDir` set at startup from `os.Getwd()`. Sessions carry no project binding.
-The agent executes tools against whatever path the daemon happens to be running in,
+The agent executes tools against whatever path the platform happens to be running in,
 with no security boundary, no visual indicator, and no cross-machine synchronization.
 
 This creates three classes of problem:
@@ -15,8 +15,8 @@ This creates three classes of problem:
 1. **Mental context**: The user cannot see which project the agent is operating on.
    Running `meept` from the wrong directory is a silent error.
 2. **Security**: There is no filesystem sandboxing. An agent can write anywhere the
-   daemon user has access.
-3. **Cross-machine coordination**: When the daemon runs on a different host than the
+   platform user has access.
+3. **Cross-machine coordination**: When the platform runs on a different host than the
    client, there is no mechanism to synchronize the working tree.
 
 ## Design Decisions
@@ -24,11 +24,11 @@ This creates three classes of problem:
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Project model | Git repository (primary) + local/detached fallback | Git is the natural synchronization mechanism for code projects |
-| Storage | `~/.meept/projects/<name>/` with git clone + worktrees | Hybrid: daemon owns clones, clients can work on own copies |
+| Storage | `~/.meept/projects/<name>/` with git clone + worktrees | Hybrid: platform owns clones, clients can work on own copies |
 | Session binding | One project per session, switchable mid-session | Project context scopes the agent's entire operating environment |
 | Concurrency | One worktree per plan, shared by agents within that plan | Natural isolation boundary; avoids 8x repo duplication |
 | Security | Path sandboxing to project root by default; `--nofence` opt-out | Defense in depth without blocking power users |
-| Cross-machine | Git push/pull as sync; any meept-daemon can clone the same repo | Enables future clustering without bespoke file sync |
+| Cross-machine | Git push/pull as sync; any meept platform instance can clone the same repo | Enables future clustering without bespoke file sync |
 
 ## Project Model
 
@@ -37,7 +37,7 @@ This creates three classes of problem:
 A **project** is a directory tree that the agent operates within. It is one of:
 
 - **git mode**: A git repository cloned into `~/.meept/projects/<name>/`. The
-  daemon manages clone, branch, and worktree operations. Multiple daemon instances
+  platform manages clone, branch, and worktree operations. Multiple platform instances
   can clone the same remote and stay synchronized via git push/pull.
 - **local mode**: A path on the local filesystem with no git tracking. Used for
   scratch work, one-off tasks, or non-code projects. The agent uses a scratch
@@ -55,7 +55,7 @@ Project {
     GitURL      string    // clone URL (remote origin)
     Branch      string    // default branch (default: "main")
 
-    // resolved at runtime per daemon instance
+    // resolved at runtime per platform instance
     LocalPath   string    // absolute path to project root on this machine
 
     // metadata
@@ -66,7 +66,7 @@ Project {
 }
 ```
 
-For git projects, the identity is the GitURL. The ID is a local alias. Two daemon
+For git projects, the identity is the GitURL. The ID is a local alias. Two platform
 instances with the same GitURL are working on the same project and can synchronize
 via git.
 
@@ -78,7 +78,7 @@ When `meept chat` is run, the client auto-detects the project:
 2. If found: use the git repo root as the project path. Extract project name from
    the directory name or git remote URL.
 3. If not found: operate in "local" mode with CWD as the project path.
-4. The auto-detected project is registered in the daemon's project registry on
+4. The auto-detected project is registered in the platform's project registry on
    first use.
 
 The user can override with `--project <name>` or `/project set <name>`.
@@ -134,7 +134,7 @@ Continue? [y/n]"
 
 ### Project Context Injection
 
-When a project is bound to a session, the daemon injects context from the
+When a project is bound to a session, the platform injects context from the
 project root:
 
 1. **CLAUDE.md** / **AGENTS.md** / **.cursorrules**: Parsed and injected into
@@ -145,7 +145,7 @@ project root:
 4. **Git status**: Current branch, dirty state, recent commits injected as
    metadata.
 
-This replaces the current behavior of scanning `daemon.Config.WorkingDir`.
+This replaces the current behavior of scanning `platform.Config.WorkingDir`.
 
 ## Worktree Architecture
 
@@ -249,18 +249,18 @@ The isolation decision can be overridden per-plan via:
 
 ### Cluster Implication (Future)
 
-For clustering, any meept-daemon instance can:
+For clustering, any meept platform instance can:
 
 1. `git clone <GitURL>` into `~/.meept/projects/<name>/`
 2. Create worktrees for its sessions
 3. Push branches to the shared remote
-4. Pull branches from other daemon instances
+4. Pull branches from other platform instances
 
 This requires no bespoke sync protocol -- git IS the sync protocol. Future work
 will add:
 
 - Automatic push-on-commit for shared branches
-- Branch discovery between daemon instances
+- Branch discovery between platform instances
 - Conflict detection and resolution workflows
 - Health monitoring of remote connectivity
 
@@ -325,7 +325,7 @@ Projects can define allowed tools and restrictions:
 
 ### Storage
 
-SQLite table in the daemon's state database:
+SQLite table in the platform's state database:
 
 ```sql
 CREATE TABLE IF NOT EXISTS projects (
@@ -355,7 +355,7 @@ CREATE TABLE IF NOT EXISTS project_worktrees (
 
 ### ProjectManager Component
 
-New daemon component: `internal/project/manager.go`
+New platform component: `internal/project/manager.go`
 
 ```
 ProjectManager {
@@ -531,8 +531,8 @@ Changes:
 4. Auto-detect project from CWD git root on session create
 5. Register auto-detected project in registry
 6. Implement `/project` slash commands
-7. Scope `internal/context` scanning to project path instead of daemon WorkingDir
-8. Wire `ProjectManager` into daemon startup
+7. Scope `internal/context` scanning to project path instead of platform WorkingDir
+8. Wire `ProjectManager` into platform startup
 
 **Files touched**:
 - `internal/project/` (new package)
@@ -554,7 +554,7 @@ Changes:
 2. Auto-create worktree on session-project binding
 3. Route tool execution CWD to session's worktree
 4. Merge session branch to project default branch on session end
-5. Cleanup orphaned worktrees on daemon startup
+5. Cleanup orphaned worktrees on platform startup
 
 **Files touched**:
 - `internal/project/manager.go` (worktree methods)
@@ -600,11 +600,11 @@ Changes:
 
 ### Phase 5: Cross-Machine Sync + Clustering Prep
 
-**Scope**: Git-based sync, multi-daemon coordination.
+**Scope**: Git-based sync, multi-platform coordination.
 
 Changes:
 1. Auto-push on commit (configurable)
-2. Branch discovery between daemon instances
+2. Branch discovery between platform instances
 3. Conflict detection
 4. `meept project sync` for manual sync
 
@@ -622,7 +622,7 @@ Tracked in future issue: `meept-clustered-worktree-sync`.
 
 ## Future Work
 
-- **Clustering**: Any meept-daemon instance clones the same repo, creates worktrees, syncs via git. Issue: `meept-clustered-worktree-sync`.
+- **Clustering**: Any meept platform instance clones the same repo, creates worktrees, syncs via git. Issue: `meept-clustered-worktree-sync`.
 - **Plan-scoped worktrees**: Automatic isolation for complex plans based on heuristics.
 - **Project templates**: Pre-configured project types (Go, Rust, Python) with default allowed tools and fence rules.
 - **Project-level memory**: Episodic memory scoped per project, so memories from one project don't pollute another.

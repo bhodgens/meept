@@ -2,7 +2,7 @@
 
 ## Overview
 
-Meept is a Go-based autonomous agent daemon with multi-agent orchestration, persistent hybrid memory, LLM integration with failover, production-grade execution controls, and extensibility through skills and tools. It operates as a background process with multiple frontends (CLI/TUI, Flutter GUI desktop+web, Telegram, HTTP/WebSocket API, macOS MenuBar, MCP server). It can also drive other coding agents as full peers over ACP (Agent Client Protocol), disabled by default.
+Meept is a Go-based autonomous agent platform with multi-agent orchestration, persistent hybrid memory, LLM integration with failover, production-grade execution controls, and extensibility through skills and tools. It operates as a background process with multiple frontends (CLI/TUI, Flutter GUI desktop+web, Telegram, HTTP/WebSocket API, macOS MenuBar, MCP server). It can also drive other coding agents as full peers over ACP (Agent Client Protocol), disabled by default.
 
 ### Architecture Summary
 
@@ -338,11 +338,11 @@ summary_model = ""           # model for compaction summaries (empty = default)
 
 ### Session Persistence & Branching
 
-Meept bridges its in-memory ConversationStore with SQLite-backed persistent storage, enabling session resumption across daemon restarts and tree-structured conversation branching.
+Meept bridges its in-memory ConversationStore with SQLite-backed persistent storage, enabling session resumption across platform restarts and tree-structured conversation branching.
 
 #### Session Resumption
 
-On daemon startup or when accessing a conversation not in the in-memory cache:
+On platform startup or when accessing a conversation not in the in-memory cache:
 1. Query SQLite for the session's message path from root to the `leaf_message_id` pointer
 2. Reconstruct the `[]llm.ChatMessage` slice including tool calls, compaction entries, and branch summaries
 3. Populate the in-memory `Conversation` object for the agent loop
@@ -450,7 +450,7 @@ Real-time message injection into active agent conversations without restarting t
 
 **Key features:**
 - Generation counters prevent stale queue operations from previous conversations
-- SQLite persistence for follow-up messages survives daemon restarts
+- SQLite persistence for follow-up messages survives platform restarts
 - Write-behind buffering with configurable flush delay
 - Single-message drain for steering (processes one message at a time)
 - Agent lifecycle events for queue registration/unregistration
@@ -1324,13 +1324,13 @@ min_effectiveness = 0.2         # Pass C prune threshold
 pattern_promotion_confidence = 0.7
 pattern_promotion_use_count = 5
 auto_apply = false              # false = proposals go to plan system
-run_on_start = false            # Skip immediate cycle on daemon startup
+run_on_start = false            # Skip immediate cycle on platform startup
 plan_dir = "~/.meept/plans/evolver"  # Where evolver-created plans land
 ```
 
 **Plan sink:** When `auto_apply = false`, verified evolver proposals become
 plans in `skills.evolver.plan_dir` (default `~/.meept/plans/evolver`, a
-user-scoped directory independent of the daemon's working directory). Each
+user-scoped directory independent of the platform's working directory). Each
 machine-originated plan is stamped with `origin: skill-evolver`, a proposal
 id, and the proposed action in its Meta section. A repo's `docs/plans/`
 directory is reserved for human-authored plans only — evolver plans never
@@ -1344,7 +1344,7 @@ Meept continuously improves its own model quality and skill coverage through fou
 
 #### Shadow Training (Model Improvement)
 
-Production LLM traffic is shadowed against a teacher model (typically a stronger cloud model). Preference pairs are captured and exported as training data for an external fine-tuning sidecar — the daemon itself never trains. Trained adapters can be activated through an eval gate (minimum score and record count) and, when hot-swap is enabled, swapped into the serving loop by explicit operator action; there is no in-daemon training loop and no automatic retrain-serve cycle.
+Production LLM traffic is shadowed against a teacher model (typically a stronger cloud model). Preference pairs are captured and exported as training data for an external fine-tuning sidecar — the platform itself never trains. Trained adapters can be activated through an eval gate (minimum score and record count) and, when hot-swap is enabled, swapped into the serving loop by explicit operator action; there is no in-platform training loop and no automatic retrain-serve cycle.
 
 **Location:** `internal/shadow/`
 **Config:** `[shadow]` block in `meept.json5`
@@ -1544,7 +1544,7 @@ Three media specialists sit beside that roster: `image-gen` and `video-gen` each
 | **MCP Server** | Expose Meept as an MCP server for external agent platforms with tool discovery and execution |
 | **ACP Client** | Drive external ACP agents (Codex via codex-acp, OpenCode, others) as full agents over JSON-RPC stdio. Catalog `~/.meept/acp_agents.json5`. `[acp] enabled` defaults false. `permission_mode` is `permissive` (default) or `deny`. Status: `GET /api/v1/acp/agents`. See [Acp](workflows/acp.md). |
 | **Meept-Lite TUI** | Minimalistic alternative TUI using termbox-go with shared library (`sharedclient`) for code reuse |
-| **Desktop Notifications** | macOS native notifications via daemon event emitter, WebSocket, and UNUserNotificationCenter |
+| **Desktop Notifications** | macOS native notifications via platform event emitter, WebSocket, and UNUserNotificationCenter |
 | **Analytics System** | Agent performance analytics, response quality analysis, benchmark framework, and CLI analytics commands. The `model_performance` aggregation table tracks per-model metrics (requests, errors, latency, tokens) with period-based aggregation. The `error_records` table tracks individual errors with `limit_type`, `retry_attempts`, and `final_outcome` for retry analysis. |
 | **Unified HTTP Server** | Single HTTP server serving REST API, WebSocket, and MCP over HTTP+SSE with functional options |
 | **Unified Theming** | Shared color tokens (`theme/tokens.json5`, 18 frozen roles) drive both TUI and GUI. Variants: cyberpunk (default), midnight, solarized. Select via `rendering.ui_theme` in client config or the GUI settings dropdown (live swap). TUI restart-applied; GUI live. See [Theming](configuration/theming.md). |
@@ -1666,9 +1666,9 @@ retention = 30
 ## CLI Commands
 
 ```bash
-# Daemon
-./bin/meept-daemon -f              # Start daemon (foreground)
-./bin/meept-daemon -d              # Start daemon (background)
+# Platform
+./bin/meept-daemon -f              # Start platform (foreground)
+./bin/meept-daemon -d              # Start platform (background)
 
 # Chat
 ./bin/meept chat "What's the weather?"  # One-shot query
@@ -1680,7 +1680,7 @@ retention = 30
 /amend <type> <args>              # Submit amendment request
 
 # Status
-./bin/meept status                 # Show daemon status
+./bin/meept status                 # Show platform status
 ./bin/meept agents                 # List agents
 ./bin/meept tools                  # List tools
 
@@ -1719,7 +1719,7 @@ retention = 30
 ./bin/meept agents set-gate <id> --command="go test ./..."
 ./bin/meept agents migrate         # Migrate legacy bots
 ./bin/meept instructions list      # Standing automation rules
-./bin/meept doctor                 # Daemon health block
+./bin/meept doctor                 # Platform health block
 
 # Cluster
 ./bin/meept cluster status         # Show cluster status
@@ -1755,7 +1755,7 @@ retention = 30
 ./bin/meept projects add <path>    # Register a project directory
 ./bin/meept projects status <name> # Show project binding/worktree state
 
-# Config (dot-notation paths into client/daemon config)
+# Config (dot-notation paths into client/platform config)
 ./bin/meept config get rendering.ui_theme          # Read a config value
 ./bin/meept config set rendering.ui_theme midnight # Write a config value
 
@@ -1902,7 +1902,7 @@ request_review(
 
 ## Collaboration Engine
 
-The CollaborationEngine provides first-class multi-agent collaboration with pluggable modes, session lifecycle management, and budget enforcement. It lives alongside the existing `PairManager`/`PairOrchestrator` and is wired into the daemon's orchestrator and tool registry.
+The CollaborationEngine provides first-class multi-agent collaboration with pluggable modes, session lifecycle management, and budget enforcement. It lives alongside the existing `PairManager`/`PairOrchestrator` and is wired into the platform's orchestrator and tool registry.
 
 ### Collaboration Modes
 

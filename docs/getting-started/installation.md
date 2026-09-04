@@ -16,7 +16,7 @@ Meept is built from source. You need Go 1.22+ and an LLM provider.
 git clone https://github.com/caimlas/meept.git
 cd meept
 
-# Build both daemon and CLI
+# Build both platform and CLI
 make build
 
 # Or build individually
@@ -28,7 +28,7 @@ Binaries are placed in `bin/`:
 
 | Binary | Description |
 |--------|-------------|
-| `bin/meept-daemon` | The background agent daemon |
+| `bin/meept-daemon` | The background agent platform |
 | `bin/meept` | The CLI client |
 
 ## Initial Setup

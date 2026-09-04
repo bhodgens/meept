@@ -136,7 +136,7 @@ go test -race ./internal/llm/ -run 'Quota' -count=1
   `chat_message`).
 - Agent state transitions: running -> quota_wait -> blocked (at 24h), with
   Clear returning to running/idle.
-- Quota blocks are in-memory only; a daemon restart re-probes providers.
+- Quota blocks are in-memory only; a platform restart re-probes providers.
 
 ## Known open gaps (audited 2026-08-31)
 

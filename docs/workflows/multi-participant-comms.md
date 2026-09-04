@@ -129,7 +129,7 @@ Agent completes -> ExtractReport() -> DetermineRouteAction()
 
 ## MCP Chat Server
 
-The MCP (Model Context Protocol) chat server exposes meept sessions to external agent platforms. It communicates via JSON-RPC over stdin/stdout and connects to the meept daemon via the existing Unix socket RPC transport.
+The MCP (Model Context Protocol) chat server exposes meept sessions to external agent platforms. It communicates via JSON-RPC over stdin/stdout and connects to the meept platform via the existing Unix socket RPC transport.
 
 ### Starting the server
 
@@ -138,7 +138,7 @@ meept mcp-chat-server
 ```
 
 The server:
-1. Connects to the daemon via Unix socket RPC
+1. Connects to the platform via Unix socket RPC
 2. Subscribes to bus topics: `chat.message.received`, `chat.response`, `agent.event.*`, `worker.*`
 3. Reads JSON-RPC from stdin, writes responses to stdout
 4. Logs diagnostic info to stderr
@@ -165,7 +165,7 @@ Add to `~/.claude/settings.json`:
 | `meept_sessions` | List, create, or attach to chat sessions |
 | `meept_send` | Send a message to an attached session (includes `source_client`) |
 | `meept_events` | Poll events since last call (agent progress, other participants' messages) |
-| `meept_status` | Get daemon status (active agents, queue depth, connected clients) |
+| `meept_status` | Get platform status (active agents, queue depth, connected clients) |
 | `meept_session_history` | Get recent messages from a session |
 
 **`meept_sessions` actions:**
@@ -202,7 +202,7 @@ Add to `~/.claude/settings.json`:
 - Logs warning with depth and max depth values
 - User sees "routing depth limit reached after N handoffs" plus what was accomplished
 
-### MCP Server — Daemon Not Running
+### MCP Server — Platform Not Running
 - Clear error message with remediation instructions
 - Exit code 1
 

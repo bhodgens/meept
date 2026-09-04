@@ -9,14 +9,14 @@ child environment.
 
 Declare sources under `[secrets.sources]` in `meept.json5`. Each source has:
 
-- `kind` — `"env"` (read from the daemon's environment at startup) or `"file"`
+- `kind` — `"env"` (read from the platform's environment at startup) or `"file"`
   (read from a path; trailing newline trimmed)
 - `hosts` — host suffixes the egress proxy may inject this secret toward
   (consumed by the proxy stage)
 - `header` / `format` — how the value is formatted when injected, e.g.
   `header = "Authorization"`, `format = "Bearer {}"`
 
-The broker eager-loads every source when the daemon starts. A missing env var
+The broker eager-loads every source when the platform starts. A missing env var
 or unreadable file produces one aggregated startup error naming every failure.
 
 Children see the placeholder token `MEEPT_SECRET:<name>` wherever the secret
@@ -87,7 +87,7 @@ enabled = true            // default false
 listen  = "127.0.0.1:0"   // default: loopback, ephemeral port; MUST be loopback
 ```
 
-When enabled, the daemon logs the bound address at startup (`secrets egress
+When enabled, the platform logs the bound address at startup (`secrets egress
 proxy started`) and reports it over RPC status as `secrets_proxy.addr`,
 alongside `secrets_proxy.leak_attempts`. Wire shell profiles or tools with:
 

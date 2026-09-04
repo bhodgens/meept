@@ -2,7 +2,7 @@
 
 Common issues and their solutions.
 
-## Daemon Won't Start
+## Platform Won't Start
 
 ### "models.json5 not found or invalid"
 
@@ -15,7 +15,7 @@ cp config/models.json5 ~/.meept/models.json5
 
 ### "address already in use"
 
-A daemon is already running. Kill it first:
+A platform is already running. Kill it first:
 
 ```bash
 # Find and kill the process
@@ -37,7 +37,7 @@ rm -f ~/.meept/meept.sock
 
 ### "connection refused"
 
-The daemon isn't running. Start it first:
+The platform isn't running. Start it first:
 
 ```bash
 ./bin/meept-daemon -f
@@ -82,7 +82,7 @@ ls -la ~/.meept/meept.sock
 
 ### Slow response
 
-- Check daemon logs for slow LLM calls
+- Check platform logs for slow LLM calls
 - Try a faster model in `models.json5`
 - Reduce `max_context_items` in `[memory.episodic]`
 
@@ -90,7 +90,7 @@ ls -la ~/.meept/meept.sock
 
 ### "database locked"
 
-Only one process can access the SQLite database at a time. Ensure only one daemon is running.
+Only one process can access the SQLite database at a time. Ensure only one platform is running.
 
 ### Memory not persisting
 
@@ -123,14 +123,14 @@ make build
 
 ## Getting More Help
 
-1. Run the daemon in debug mode: `./bin/meept-daemon -f --log-level debug`
+1. Run the platform in debug mode: `./bin/meept-daemon -f --log-level debug`
 2. Check existing issues on [GitHub](https://github.com/caimlas/meept/issues)
 3. Enable audit logging in `[security]` to trace permission decisions
 
 ## Doctor: Diagnose and Repair
 
 `meept doctor` runs health checks against the local install and, when the
-daemon is reachable, merges in its `daemon.health` report.
+the platform is reachable, merges in its `daemon.health` report.
 
 ```bash
 # report-only diagnosis
@@ -150,7 +150,7 @@ Checks performed:
 | config-parse | config file is readable |
 | disk-free | at least 200MB free on the state filesystem (warn below threshold) |
 | orphan-children | meept child processes re-parented to init after a crash |
-| daemon-health | included when the daemon is reachable (`daemon.health` RPC) |
+| daemon-health | included when the platform is reachable (`daemon.health` RPC) |
 
 ### Safe repairs (--fix)
 
@@ -162,7 +162,7 @@ Checks performed:
 
 ### status --json health block
 
-When the daemon is reachable, `meept status --json` includes a `health`
+When the platform is reachable, `meept status --json` includes a `health`
 block with per-check results, version and uptime.
 
 ### Graceful shutdown
@@ -177,7 +177,7 @@ jobs, drains running jobs up to the timeout, closes listeners and exits.
 
 ### Orphan sweep on startup
 
-Children spawned by the daemon carry `MEEPT_DAEMON_CHILD=1`. On boot, the
-daemon reaps tagged processes whose parent is init and whose recorded start
+Children spawned by the platform carry `MEEPT_DAEMON_CHILD=1`. On boot, the
+platform reaps tagged processes whose parent is init and whose recorded start
 predates the current start: SIGTERM first, then SIGKILL after 3 seconds.
 Windows is not supported by this sweep (documented gap).

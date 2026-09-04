@@ -13,7 +13,7 @@ The `internal/eval` package provides two related but distinct capabilities:
 ## Agent Run Evaluation
 
 The harness-eval leaves (01–18 from `docs/plans/20260829-harness-eval/master.md`)
-added measurement, isolation, and honest learning to the daemon. The user-visible
+added measurement, isolation, and honest learning to the platform. The user-visible
 outcome is the `meept eval` CLI plus the HTTP `/api/v1/eval/runs` endpoint.
 
 ### RunRecord shape (C1)

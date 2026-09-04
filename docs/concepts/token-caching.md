@@ -161,7 +161,7 @@ Cache entries are invalidated when:
 ### Cache not working
 
 1. Check if caching is enabled in `meept.toml`
-2. Verify daemon logs for "Token cache initialized" message
+2. Verify platform logs for "Token cache initialized" message
 3. Run `meept cache status` to check if entries are being stored
 
 ### High memory usage

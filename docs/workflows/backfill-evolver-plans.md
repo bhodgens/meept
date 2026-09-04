@@ -22,7 +22,7 @@ go run ./cmd/backfill-evolver-plans -apply     # insert rows
 - Idempotent: ids already present are skipped. Files without a `plan_id`
   (e.g. the decision-framework gap-fill plan) are skipped — file-only by
   design.
-- Config knobs: none (uses `-db`/`-dir` flags; defaults match the daemon's
+- Config knobs: none (uses `-db`/`-dir` flags; defaults match the platform's
   `skills.evolver.plan_dir` default).
 
 ## Edge cases

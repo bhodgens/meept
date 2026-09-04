@@ -158,7 +158,7 @@ Edit your config file (`~/.meept/meept.json5`):
 }
 ```
 
-Restart the daemon for the change to take effect. Compression will automatically apply to tool outputs exceeding `min_tokens_to_compress` tokens.
+Restart the platform for the change to take effect. Compression will automatically apply to tool outputs exceeding `min_tokens_to_compress` tokens.
 
 ### Agent system prompt injection
 
@@ -414,7 +414,7 @@ cat ~/.meept/meept.json5 | jq '.agent.compression.enabled'
 meept config get agent.compression.enabled
 ```
 
-If `enabled` is `false` (the default), nothing will be compressed. Set it to `true` and restart the daemon.
+If `enabled` is `false` (the default), nothing will be compressed. Set it to `true` and restart the platform.
 
 ### Compression not saving tokens
 
@@ -442,7 +442,7 @@ This can happen with aggressive settings (low `min_tokens_to_compress`, non-auto
 **Cause:** The pipeline encountered an error during compression.
 
 Compression failures are non-fatal — the original output is used unchanged. Check log level for details. Common causes:
-- Pipeline is closed (daemon shutting down)
+- Pipeline is closed (platform shutting down)
 - CCR store SQLite errors (disk full, permission issues) — check the store path at `~/.meept/compression.db`
 - Invalid JSON passed to SmartCrusher (falls back to passthrough, not an error)
 

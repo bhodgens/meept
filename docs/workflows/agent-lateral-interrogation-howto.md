@@ -7,20 +7,20 @@ How external AI agents (Claude, GPT, etc.) can communicate with meept, inspect i
 Meept exposes an MCP (Model Context Protocol) server that allows external AI agents to connect to running meept sessions. This enables:
 
 - **Lateral communication** — an external agent can send messages to a meept session and see responses from meept's agent system
-- **Session inspection** — query session history, daemon status, and active workers
+- **Session inspection** — query session history, platform status, and active workers
 - **Event monitoring** — poll for agent progress events, messages from other participants, and agent responses
 - **Multi-participant collaboration** — multiple agents (human via TUI, Claude via MCP, etc.) share the same session
 
 ## Setup
 
-### 1. Start the meept daemon
+### 1. Start the meept platform
 
 ```bash
 meept daemon start
 # or foreground: meept daemon -f
 ```
 
-The daemon must be running before the MCP server can connect.
+The platform must be running before the MCP server can connect.
 
 ### 2. Register meept as an MCP server
 
@@ -47,7 +47,7 @@ The MCP server sends diagnostic output to stderr. Check for:
 meept mcp-chat-server: connected (subscription: sub-xxxxx)
 ```
 
-If you see an error about the daemon not running, start it first.
+If you see an error about the platform not running, start it first.
 
 ## Communication Patterns
 
@@ -97,14 +97,14 @@ If you see an error about the daemon not running, start it first.
 
 ```
 1. Call meept_status()
-   → returns daemon status: active agents, queue depth, connected clients, uptime
+   → returns platform status: active agents, queue depth, connected clients, uptime
 ```
 
 ## Debugging Guide
 
 ### Problem: MCP server won't start
 
-**Check:** Is the daemon running?
+**Check:** Is the platform running?
 
 ```bash
 meept status
@@ -134,10 +134,10 @@ Verify the `session_id` you're sending to exists in the list.
 
 **Check:** Was `source_client` set? If empty, no `chat.message.received` broadcast is emitted, but the message still processes.
 
-**Check:** Daemon logs for the routing decision:
+**Check:** Platform logs for the routing decision:
 
 ```
-# Look for: "Agent completed" and "action" entries in daemon output
+# Look for: "Agent completed" and "action" entries in platform output
 meept daemon -f  # foreground with visible logs
 ```
 
@@ -159,7 +159,7 @@ Events are delivered via polling. If you don't poll, events queue up in the bus 
 
 The report router has a max depth of 5. If an agent chain exceeds 5 handoffs, the router forces a user notification.
 
-**Check daemon logs for:**
+**Check platform logs for:**
 
 ```
 max route depth reached, forcing user notification (depth=5, max=5)
@@ -197,7 +197,7 @@ meept-daemon
     +-- Agent Registry (coder, debugger, planner, etc.)
 ```
 
-The MCP server is stateless — it translates between MCP protocol and meept's existing RPC. All state lives in the daemon.
+The MCP server is stateless — it translates between MCP protocol and meept's existing RPC. All state lives in the platform.
 
 ## Event Types
 
@@ -217,7 +217,7 @@ The MCP server is stateless — it translates between MCP protocol and meept's e
 
 3. **Use session history for context** — When attaching to an existing session, the `attach` action auto-fetches the last 50 messages. For longer context, use `meept_session_history` with a higher limit.
 
-4. **Check status before sending** — A quick `meept_status` call tells you if the daemon is healthy and which agents are active.
+4. **Check status before sending** — A quick `meept_status` call tells you if the platform is healthy and which agents are active.
 
 5. **The `since` parameter is exclusive** — Events at exactly the `since` timestamp are not included. Use the timestamp from the last event you received.
 

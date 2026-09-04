@@ -142,7 +142,7 @@ for the config block and precedence rule).
   (`/props`), and OpenRouter (the same `/api/v1/models` fetch the pricing
   sync uses). OpenAI and Anthropic expose no context length and are never
   queried.
-- **When:** immediately at daemon startup, then every re-sync tick
+- **When:** immediately at platform startup, then every re-sync tick
   (`interval`, default 6h).
 - **What it changes:** in-memory context windows only — resolver model
   entries and the TUI model picker's display catalog. Deltas are logged
@@ -237,11 +237,11 @@ recovers.
 | Queue/specialist jobs | loop park branch | same `AgentLoop` throttle path |
 
 All of these feed ONE shared `agent.TurnParker`
-(`internal/agent/parked_turn.go`) per daemon: it holds
+(`internal/agent/parked_turn.go`) per platform instance: it holds
 `ParkedTurnRecord`s of any failure class, resumes them oldest-first at
 their scheduled time, and answers the surfaces' single query
 `TurnParker.WaitInfo() []ParkWaitInfo` — one `{Class, Next, Pending}` row
-per class with parked work. The parker is memory-only: a daemon restart
+per class with parked work. The parker is memory-only: a platform restart
 drops parked records (logged), and quota blocks re-probe providers anyway.
 
 ### Failure classes and schedules
@@ -297,7 +297,7 @@ identical strings on both surfaces (lowercase per UI rule):
 - quota wait: `quota_wait · reset HH:MM`
 - throttle wait: `quota_wait · throttle retry HH:MM`
 
-`HH:MM` is the daemon-provided resume instant rendered as absolute local
+`HH:MM` is the platform-provided resume instant rendered as absolute local
 time (`QuotaWaitLabel` in `internal/tui/quota_status.go`, mirrored by
 `quotaWaitLabel` in `ui/flutter_ui/lib/features/agents/quota_status.dart`).
 Both surfaces deliberately avoid relative countdowns here: the GUI runs on
@@ -346,7 +346,7 @@ meept status --json
 
 ### Adjust Budget Limits Dynamically
 
-Budget limits are **dynamic** - changes take effect immediately without daemon restart:
+Budget limits are **dynamic** - changes take effect immediately without a platform restart:
 
 1. Edit `~/.meept/meept.json5`
 2. Modify `llm.budget` section
@@ -439,7 +439,7 @@ effective_limit = base_limit * (0.5 + 0.5 * aggressiveness)
 
 ### Monitoring and Alerts
 
-Watch for budget warnings in daemon logs:
+Watch for budget warnings in platform logs:
 ```
 WARN budget hourly limit approaching (85% used)
 ERROR budget daily cost exceeded: $10.00 / $10.00

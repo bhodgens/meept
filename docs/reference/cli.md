@@ -1,10 +1,10 @@
 # CLI Reference
 
-Meept provides a comprehensive command-line interface for interacting with the daemon and managing various aspects of the system.
+Meept provides a comprehensive command-line interface for interacting with the platform and managing various aspects of the system.
 
 ## Overview
 
-The CLI binary is `./bin/meept` and communicates with the daemon via Unix socket JSON-RPC. Running `meept` without arguments launches the interactive TUI.
+The CLI binary is `./bin/meept` and communicates with the platform via Unix socket JSON-RPC. Running `meept` without arguments launches the interactive TUI.
 
 ## Global Flags
 
@@ -53,16 +53,16 @@ echo "Hello world" | meept chat -
 - `meept chat --session <id> "msg"` - Sends to existing session, prints response, exits (errors if session not found)
 - `meept chat --session <id>` (no message) - Opens TUI targeted to that session
 
-### `meept status` - Daemon Status
+### `meept status` - Platform Status
 
-Check daemon status and health.
+Check platform status and health.
 
 ```bash
 meept status
 ```
 
 **Returns:**
-- Daemon status (running/stopped)
+- Platform status (running/stopped)
 - Version information
 - Uptime
 - Registered RPC methods
@@ -185,7 +185,7 @@ meept config get <keypath>
 meept config set <keypath> <value>
 ```
 
-**Sections:** daemon, transport, llm, models, agents, memory, security, mcp, client/tui, scheduler, stt (primary), plus ~20 advanced sections.
+**Sections:** platform, transport, llm, models, agents, memory, security, mcp, client/tui, scheduler, stt (primary), plus ~20 advanced sections.
 
 ### `meept` TUI - Interactive Mode
 
@@ -316,21 +316,21 @@ The `meept tools` CLI command has been removed. To inspect available tools:
 - TUI: `/help` lists slash commands; tool activity appears inline during agent runs.
 - MCP: run `meept mcp-chat-server` to expose meept's tools to an external agent platform.
 
-### `meept daemon` - Daemon Management
+### `meept daemon` - Platform Management
 
-Start and stop the daemon process.
+Start and stop the platform process.
 
 ```bash
-# Start daemon (foreground)
+# Start platform (foreground)
 meept daemon start
 
-# Start daemon (background)
+# Start platform (background)
 meept daemon start --daemon
 
-# Stop daemon
+# Stop platform
 meept daemon stop
 
-# Restart daemon
+# Restart platform
 meept daemon restart
 ```
 
@@ -438,7 +438,7 @@ Verified against the binary. Run `meept <command> --help` for flags.
 | `meept changes` | list, revert | Pending-change staging review |
 | `meept cluster` | debug, init, join, keygen, leave, remote, start, status | P2P cluster mesh |
 | `meept config` | get, list, oauth, set, sync | Config editor + dot-notation get/set (`rendering.ui_theme`, `llm.default_model`, …). `config oauth connect <provider>` runs subscription logins — providers: `github-models`, `google-oauth`, `google-calendar`, `xai-oauth` (SuperGrok), `openai-codex` (ChatGPT Plus/Pro), `anthropic-sub` (Claude Pro/Max). See [OAuth Providers](../workflows/auth.md). |
-| `meept daemon` | restart, start, status, stop | Daemon lifecycle |
+| `meept daemon` | restart, start, status, stop | Platform lifecycle |
 | `meept dispatch` | — | Dispatch tasks to cluster nodes |
 | `meept halo` | — | HALO-style trace analysis |
 | `meept improvements` | apply, list, skip | Improvement proposal workflow |
@@ -460,7 +460,7 @@ Verified against the binary. Run `meept <command> --help` for flags.
 | `meept session` | attach, create, delete, detach, get, list, messages, needs-attention, trace | Chat sessions (alias: `sessions`) |
 | `meept shadow` | adapters, examples, export, export-db, status | Shadow training |
 | `meept skills` | archive, evolve, gaps, history, list, restore, run, show, stats | Skill system + closed-loop evolution (wiki layer + trace store; no new verbs — see docs/workflows/skills.md) |
-| `meept status` | — | Daemon health |
+| `meept status` | — | Platform health |
 | `meept sync` | pull, status | Peer backup sync |
 | `meept task` | create, delete, get, link, list, unlink | Background tasks |
 | `meept templates` | clear, invoke, list, show | Prompt templates |
@@ -476,7 +476,7 @@ Developer-only: `meept dev` (config/model/test helpers), `meept completion` (she
 ### Interactive Development Session
 
 ```bash
-# Start daemon
+# Start platform
 meept daemon start --daemon
 
 # Check status
@@ -503,7 +503,7 @@ meept memory "authentication"
 
 - `0` - Success
 - `1` - General error
-- `2` - Daemon not running
+- `2` - Platform not running
 - `3` - Invalid command or arguments
 - `4` - Permission denied
 - `5` - Network/connection error

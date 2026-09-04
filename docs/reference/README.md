@@ -13,7 +13,7 @@ Complete command-line interface reference covering all commands, flags, and usag
 - **Configuration**: File locations and key settings
 
 ### [RPC API Reference](rpc.md)
-JSON-RPC 2.0 API documentation for programmatic access to the daemon.
+JSON-RPC 2.0 API documentation for programmatic access to the platform.
 
 - **Protocol Details**: JSON-RPC 2.0 over Unix sockets
 - **Methods**: Built-in (`ping`, `status`), Chat (`chat.send`, `chat.stream`), Session management, Job management, Memory operations, Task management
@@ -87,7 +87,7 @@ Comprehensive metrics collection and observability features.
 ## Usage Patterns
 
 ### Development Workflow
-1. Start daemon: `meept daemon start --daemon`
+1. Start platform: `meept daemon start --daemon`
 2. Check status: `meept status`
 3. Interactive session: `meept chat`
 4. Monitor metrics: `meept metrics status`

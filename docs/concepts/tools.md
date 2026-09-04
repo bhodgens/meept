@@ -19,7 +19,7 @@ type Tool interface {
 
 The tool registry manages tool registration and lookup:
 
-- Tools are registered at daemon startup
+- Tools are registered at platform startup
 - Each agent gets a subset of tools (baseline + additional)
 - The LLM sees tool names and descriptions to decide when to use them
 

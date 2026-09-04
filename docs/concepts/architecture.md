@@ -1,6 +1,6 @@
 # Architecture
 
-Meept is a Go daemon with a layered architecture: client interfaces connect through an RPC layer to a message bus, which routes messages to agent loops that use LLM inference and tool execution.
+Meept is a Go platform with a layered architecture: client interfaces connect through an RPC layer to a message bus, which routes messages to agent loops that use LLM inference and tool execution.
 
 ## System Overview
 
@@ -16,7 +16,7 @@ flowchart TB
         AIAgent["AI Agents<br/>via MCP"]
     end
 
-    subgraph Daemon["Daemon Core"]
+    subgraph Platform["Platform Core"]
         DaemonMgr["Daemon Manager<br/>internal/daemon"]
         Config["Config Loader<br/>internal/config"]
         Registry["Component Registry<br/>internal/registry"]
@@ -236,7 +236,7 @@ flowchart LR
 
 ## Key Design Decisions
 
-1. **Daemon model** — Meept runs as a persistent process, not a per-session CLI. This enables job scheduling, persistent memory, and multi-session state.
+1. **Platform model** — Meept runs as a persistent process, not a per-session CLI. This enables job scheduling, persistent memory, and multi-session state.
 
 2. **Message bus** — All communication between components goes through a pub/sub bus. This decouples components and enables easy extension.
 
@@ -246,7 +246,7 @@ flowchart LR
 
 5. **OpenAI-compatible API** — LLM providers all use the OpenAI chat completion format, making it easy to add new providers.
 
-6. **Client-side STT** — Speech-to-text runs entirely in the client (TUI or Flutter), not through the daemon. The `internal/stt` package provides a `Transcriber` interface with pluggable engines (whisper, parakeet, native). Recording and transcription happen locally; only the resulting text is sent to the daemon as a normal chat message.
+6. **Client-side STT** — Speech-to-text runs entirely in the client (TUI or Flutter), not through the platform. The `internal/stt` package provides a `Transcriber` interface with pluggable engines (whisper, parakeet, native). Recording and transcription happen locally; only the resulting text is sent to the platform as a normal chat message.
 
 7. **Employee layer wraps, not duplicates** — The `internal/employee/` package layers constitution, goal loop, and enforcement engine on top of the existing bot runtime (`internal/bot/`). Storage, triggers, and the runner stay shared. Non-employee agents (chat, coder, etc.) skip the employee enforcement stages entirely — no behavior change for existing agents. See [AI Employees](../workflows/employees.md) for the full feature spec.
 

@@ -1,6 +1,6 @@
 # meept CLI
 
-The `meept` binary is the user-facing client for the daemon: chat, session
+The `meept` binary is the user-facing client for the platform: chat, session
 management, config, and operational commands.
 
 ## Command Reference
@@ -15,11 +15,11 @@ Command-level documentation lives beside each command's functional area:
 | `meept projects` | Project binding/sync | [projects](projects.md) |
 | `meept changes` | List/revert journaled staged writes | [change-journal](change-journal.md) |
 | `meept config` | Config editor/getter/setter | [configuration index](../configuration/index.md) |
-| `meept daemon start/stop/restart/status` | Daemon lifecycle | [daemon operations](#daemon-operations) |
+| `meept daemon start/stop/restart/status` | Platform lifecycle | [platform operations](#platform-operations) |
 
-## Daemon Operations
+## Platform Operations
 
-`meept daemon start` launches the daemon in the background; `stop` sends
+`meept daemon start` launches the platform in the background; `stop` sends
 SIGTERM and waits for graceful drain; `restart` stops then starts. Status
 reports PID and uptime from the pidfile at `~/.meept/meept.pid`.
 

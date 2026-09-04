@@ -653,7 +653,7 @@ The `platform_agents` output includes `reachable` (heartbeat seen within
 the last 10 minutes) and `last_seen` for employees. In-process
 specialists are always addressable and omit these fields.
 
-Cross-daemon messaging is out of scope (cluster-level transport later).
+Cross-instance messaging is out of scope (cluster-level transport later).
 
 ---
 

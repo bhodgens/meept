@@ -59,7 +59,7 @@ Only the zero-config servers are enabled by default (no API keys or external ser
 | `git` | uvx | vcs | local git repo operations (log, diff, blame) |
 | `time` | uvx | data | timezone-aware time and conversion |
 
-The remaining 14 servers ship `enabled: false` because they need API keys, OAuth credentials, or external daemons. Enable only the ones you want.
+The remaining 14 servers ship `enabled: false` because they need API keys, OAuth credentials, or external platform instances. Enable only the ones you want.
 
 The `cua-driver` entry (category `automation`) adds background desktop computer-use via a native binary — install commands, enable steps, and its LOW/HIGH risk-rule table are documented under [Cua-Driver Computer-Use Integration](external-integrations.md#cua-driver-computer-use-integration).
 
@@ -67,15 +67,15 @@ The `cua-driver` entry (category `automation`) adds background desktop computer-
 
 Three surfaces toggle the `enabled` flag:
 
-1. **Edit the JSON5 file directly** — set `enabled: true` on the entry and fill in any required env vars, then restart the daemon (or trigger a config reload).
+1. **Edit the JSON5 file directly** — set `enabled: true` on the entry and fill in any required env vars, then restart the platform (or trigger a config reload).
 2. **Interactive config editor** — run `meept config` and open the "mcp servers" section to edit entries; save writes atomically via the same path.
 3. **Menubar app** — open settings, go to the "tools" tab, and flip the toggle on a row.
 
-Toggling via the config editor or menubar writes the change atomically to `~/.meept/mcp_servers.json5` (via `SaveMCPConfig`'s temp-file + rename) and triggers `Manager.Reload`, which starts newly-enabled servers and stops newly-disabled ones without restarting the daemon.
+Toggling via the config editor or menubar writes the change atomically to `~/.meept/mcp_servers.json5` (via `SaveMCPConfig`'s temp-file + rename) and triggers `Manager.Reload`, which starts newly-enabled servers and stops newly-disabled ones without restarting the platform.
 
 ### Env Var Placeholders (`${VAR}`)
 
-Env values in the catalog use `${VAR}` placeholders. Meept does not expand these itself; they are passed through to the subprocess environment at transport-creation time inside `Manager.StartServer`. Export the env vars in your shell before starting the daemon:
+Env values in the catalog use `${VAR}` placeholders. Meept does not expand these itself; they are passed through to the subprocess environment at transport-creation time inside `Manager.StartServer`. Export the env vars in your shell before starting the platform:
 
 ```bash
 export GITHUB_TOKEN="ghp_xxx"
@@ -86,7 +86,7 @@ The `${VAR:-default}` shell-default syntax is also supported. Unknown env vars e
 
 ### Runtime States
 
-Each configured server has a runtime state tracked in memory (resets on daemon restart):
+Each configured server has a runtime state tracked in memory (resets on platform restart):
 
 | state | meaning |
 |-------|---------|
@@ -95,7 +95,7 @@ Each configured server has a runtime state tracked in memory (resets on daemon r
 | `error` | enabled, but failed to start or not connected |
 | `disabled` | `enabled: false`; skipped at startup and on reload |
 
-`CallTool` invocations increment the per-server `requests` counter (success + failure). Failed invocations increment `errors` and populate `last_error` / `last_error_at`. The daemon's health monitor flips enabled-but-disconnected servers to `error` every 60 seconds.
+`CallTool` invocations increment the per-server `requests` counter (success + failure). Failed invocations increment `errors` and populate `last_error` / `last_error_at`. The platform's health monitor flips enabled-but-disconnected servers to `error` every 60 seconds.
 
 ### Example Catalog Entry
 

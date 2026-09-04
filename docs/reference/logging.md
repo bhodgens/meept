@@ -17,7 +17,7 @@ Meept supports standard log levels:
 
 ### Default Log Level
 
-- **Daemon**: INFO (configurable via `[daemon] log_level`)
+- **Platform**: INFO (configurable via `[daemon] log_level`)
 - **CLI**: WARN (unless `--debug` flag is used)
 
 ## Log Configuration
@@ -148,7 +148,7 @@ When running in foreground (`meept-daemon -f`):
 
 ### Background Mode
 
-When running as daemon (`meept-daemon -d`):
+When running as a resident platform (`meept-daemon -d`):
 - Logs go to file (`~/.meept/meept.log`)
 - JSON format for machine parsing
 - Log rotation with size and age limits
@@ -202,7 +202,7 @@ INFO  memory: consolidation completed memories_processed=150
 ### Enable Full Debug Logging
 
 ```bash
-# Start daemon with debug logging
+# Start platform with debug logging
 ./bin/meept-daemon -f --debug
 
 # Or set environment variable
@@ -212,7 +212,7 @@ MEEPT_LOG_LEVEL=DEBUG ./bin/meept-daemon -f
 ### Tail Log Files
 
 ```bash
-# Tail daemon logs
+# Tail platform logs
 tail -f ~/.meept/meept.log
 
 # Filter for specific component
@@ -324,7 +324,7 @@ filebeat.inputs:
 **No logs appearing:**
 - Check log level configuration
 - Verify file permissions
-- Ensure daemon is running
+- Ensure the platform is running
 
 **Log file too large:**
 - Adjust rotation settings

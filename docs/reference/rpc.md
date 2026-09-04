@@ -1,6 +1,6 @@
 # RPC API Reference
 
-Meept uses JSON-RPC 2.0 over Unix sockets for communication between the CLI and daemon.
+Meept uses JSON-RPC 2.0 over Unix sockets for communication between the CLI and platform.
 
 ## Overview
 
@@ -46,9 +46,9 @@ Simple ping/pong for connectivity testing.
 }
 ```
 
-#### `status` / `daemon.status` - Daemon Status
+#### `status` / `daemon.status` - Platform Status (daemon process status)
 
-Get comprehensive daemon status information.
+Get comprehensive platform status information.
 
 **Request:**
 ```json

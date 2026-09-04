@@ -2,10 +2,10 @@
 
 Get Meept running and chatting in under 5 minutes.
 
-## Step 1: Start the Daemon
+## Step 1: Start the Platform
 
 ```bash
-# Start daemon in foreground (you'll see log output)
+# Start platform in foreground (you'll see log output)
 ./bin/meept-daemon -f
 ```
 
@@ -69,7 +69,7 @@ The scheduler agent creates a cron job that fires a reminder through the message
 
 | Command | What It Does |
 |---------|-------------|
-| `./bin/meept status` | Check daemon health and uptime |
+| `./bin/meept status` | Check platform health and uptime |
 | `./bin/meept chat` | Interactive TUI chat |
 | `./bin/meept chat "hello"` | Single message |
 | `./bin/meept memory search "topic"` | Search stored memories |
@@ -112,7 +112,7 @@ flutter build windows  # Windows
 
 ### API Key Configuration
 
-The Flutter app needs an API key to authenticate with the daemon:
+The Flutter app needs an API key to authenticate with the platform:
 
 **Development (default):** The app automatically uses the default dev API key (`meept_dev_default_key_CHANGE_ME`). No configuration needed.
 
@@ -142,7 +142,7 @@ Alternatively, set it in `~/.meept/menubar.json5`:
 
 **401 Unauthorized errors:** The API key is missing or incorrect. Check Settings.
 
-**TLS handshake errors:** Ensure the daemon is running with HTTPS enabled (default). The Flutter app requires HTTPS.
+**TLS handshake errors:** Ensure the platform is running with HTTPS enabled (default). The Flutter app requires HTTPS.
 
-**Connection refused:** Verify the daemon is running on port 8081 (default) in `~/.meept/menubar.json5`.
+**Connection refused:** Verify the platform is running on port 8081 (default) in `~/.meept/menubar.json5`.
 

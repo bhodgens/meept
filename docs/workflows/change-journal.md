@@ -10,7 +10,7 @@ and fence model).
 
 1. **Stage** — `file_edit` / `write_file` / `stage_write` register a pending
    change holding the original content (pre-image) and its SHA256.
-2. **Accept** — when the agent's `resolve` tool accepts the change, the daemon
+2. **Accept** — when the agent's `resolve` tool accepts the change, the platform
    journals the entry *after* writing the modified bytes:
    - `pre_image` — the original bytes (capped at 1 MiB; larger pre-images are
      dropped and the entry becomes non-revertible)

@@ -28,7 +28,7 @@ Meept supports client-side Text-to-Speech (TTS) synthesis for reading assistant 
 ```
 
 **Key properties:**
-- Client-side only (daemon not involved)
+- Client-side only (platform not involved)
 - Piper TTS runs as subprocess (like whisper-cli for STT)
 - Audio playback via `oto` library (cross-platform)
 - Platform-native fallback (`say` on macOS, SAPI on Windows)
@@ -235,7 +235,7 @@ The Flutter client uses `flutter_tts` package for platform-native TTS synthesis:
 - `queue_messages = true`: Queues messages and speaks them sequentially after current playback
 - `max_queue_size`: Maximum queue length (default: 5, overflow drops oldest)
 
-**Note:** The Flutter implementation is client-side and does not involve the daemon.
+**Note:** The Flutter implementation is client-side and does not involve the platform.
 
 ## Queue and Interrupt Behavior
 

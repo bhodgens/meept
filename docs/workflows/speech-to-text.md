@@ -1,7 +1,7 @@
 # Speech-to-Text
 
 ## Overview
-Client-side speech-to-text transcription for both the TUI and Flutter GUI. Activated by double-enter on an empty input field. Supports three pluggable transcription engines: whisper.cpp subprocess, parakeet.cpp subprocess, and OS-native (macOS Speech framework). All recording and transcription happens client-side; the daemon is not involved.
+Client-side speech-to-text transcription for both the TUI and Flutter GUI. Activated by double-enter on an empty input field. Supports three pluggable transcription engines: whisper.cpp subprocess, parakeet.cpp subprocess, and OS-native (macOS Speech framework). All recording and transcription happens client-side; the platform is not involved.
 
 ## Problem
 Typing long messages in the TUI or Flutter UI is slow and inconvenient. Speech input provides a faster, more natural way to compose messages, especially for long-form queries or when the user prefers dictation.

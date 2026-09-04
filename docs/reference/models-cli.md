@@ -196,6 +196,6 @@ $ meept models set-default ollama/llama3.2
 # Start chat with default model
 $ meept chat
 
-# Use specific model via daemon RPC (when running)
+# Use specific model via platform RPC (when running)
 $ meept dev model set anthropic/claude-opus-4-7
 ```

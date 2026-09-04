@@ -9,7 +9,7 @@ When a user sends input while an agent is actively processing, the message is qu
 ```mermaid
 flowchart TD
     User[User presses ENTER] --> Check{Agent active?}
-    Check -->|NO| RPC[Send via RPC to daemon]
+    Check -->|NO| RPC[Send via RPC to platform]
     Check -->|YES| SteerCheck{Steer mode ctrl+s?}
     SteerCheck -->|YES| SQ[Steering Queue max 1, latest wins]
     SteerCheck -->|NO| FQ[Follow-up Queue max 20, FIFO]
