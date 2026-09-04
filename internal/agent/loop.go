@@ -2378,6 +2378,29 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 
 	// Scan output through security orchestrator before returning
 	finalResponse := response
+
+	// AUDIT FIX H2 (bughunt 2026-09-03): a throttled turn PARKS and returns
+	// ("", nil) — the park contract hides the deferral from the caller. But
+	// every success-path side effect below treated that as a completed turn:
+	// reflection recorded a success trajectory for output that never
+	// happened, the learning/LoRA pipelines ingested the same phantom
+	// result, and a blank assistant message was appended to history
+	// (context pollution the resumed turn then inherits). A parked turn is
+	// NOT a completed turn: skip the post-turn success pipeline entirely.
+	// The resume path re-enters RunOnceWithParts and flows through the
+	// normal pipeline once the turn actually completes.
+	turnParked := err == nil && strings.TrimSpace(finalResponse) == "" &&
+		l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait
+	if turnParked {
+		l.logger.Info("turn parked on provider wait — skipping post-turn success pipeline",
+			"conversation", conversationID,
+		)
+		return "", nil
+	}
+	// Catalog reply guard (leaf 05): classify machine-shaped platform_*
+	// dumps and substitute a short user-language fallback before the text
+	// is persisted, notified, or returned. Prose passes byte-identical.
+	finalResponse = applyReplyGuard(finalResponse)
 	if l.securityOrch != nil {
 		scannedText, hasCredentials, warnings := l.securityOrch.ScanOutput(response)
 		if hasCredentials {
@@ -3496,6 +3519,18 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 						)
 						// Fall through to handle no-content response
 						response, err = l.chatWithFailover(ctx, messages, chatOpts...)
+						// AUDIT FIX H1 (bughunt 2026-09-03): chatWithFailover
+						// returns (nil, nil) after a successful throttle park.
+						// The first TTSR retry (above) handles that; this third
+						// call must too — without it a parked turn fell into the
+						// empty-response error branch, so the caller saw a
+						// failure AND the parker would later re-run the same
+						// turn (double execution).
+						if err == nil && response == nil {
+							// Parked during the TTSR third call — same parked
+							// semantics as the main call and first retry.
+							return "", nil
+						}
 						if err != nil {
 							l.logger.Error("LLM call failed after TTSR retry",
 								"iteration", iteration,
@@ -6288,6 +6323,19 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		// loops cloned from the daemon template keep the interactive
 		// lane; the flag default-false keeps specialists background. ---
 		WithInteractiveTurns(l.interactiveTurns),
+		// --- AUDIT FIX C2 (bughunt 2026-09-03): per-session chat loops
+		// cloned from the daemon template must inherit the turn parker —
+		// without it their throttled turns fall back to the visible-error
+		// pass-through and never park (universal-parking invariant D9).
+		// Nil-guarded: loops without a parker (registry specialists)
+		// stay parker-less, same as today. The parker is shared (one
+		// drain loop serves every clone), matching SetThrottleParker's
+		// merged-queue design (leaf 03). ---
+		func(l2 *AgentLoop) {
+			if p := l.TurnParker(); p != nil {
+				l2.SetTurnParker(p)
+			}
+		},
 
 		// --- Tools + security ---
 		WithToolRegistry(l.registry),
