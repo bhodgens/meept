@@ -183,9 +183,18 @@ func (cd *cycleDetector) detectCycle() bool {
 
 	// Rate limit warnings
 	if time.Since(cd.lastWarn) > 30*time.Second {
+		// AUDIT FIX (D-C3, bughunt 2026-09-04): hashArgs("{}") returns the
+		// 5-char literal "empty" — firstArgs[:8] panicked with slice
+		// bounds out of range on exactly the degenerate cycle cycle
+		// detection exists for (a tool called 3x with empty args).
+		// Reproduced by the auditor; clamp the prefix.
+		prefix := firstArgs
+		if len(prefix) > 8 {
+			prefix = prefix[:8]
+		}
 		cd.logger.Warn("Cycle detected in tool calls",
 			"tool", firstTool,
-			"args_hash", firstArgs[:8],
+			"args_hash", prefix,
 			"count", len(recent),
 		)
 		cd.lastWarn = time.Now()
@@ -2921,6 +2930,35 @@ func (l *AgentLoop) discoverRelevantSkills(ctx context.Context, input string, mi
 	}
 
 	matches := ci.MatchWithThreshold(input, minConfidence, 3)
+
+	// Domain-agreement gate (leaf 07): keyword confidence alone lets generic
+	// tokens ("save", "fix", "improve") surface wrong-domain skills
+	// (observation O1: a water-reminder request matched
+	// go-linter-save-hook-revert at 0.72). Require at least one non-stopword
+	// query token (len>=4) to appear in the skill's name, tags, or
+	// description. Pure pass-through when the query yields no domain tokens,
+	// so short/vague inputs are unaffected and threshold semantics are
+	// unchanged — the gate is additional filtering, not a replacement.
+	if len(matches) > 0 {
+		gated := make([]*skills.CapabilityMatch, 0, len(matches))
+		for _, match := range matches {
+			if domainAgrees(input, SkillEntryView{
+				Name:        match.Entry.Name,
+				Tags:        match.Entry.Tags,
+				Description: match.Entry.Description,
+			}) {
+				gated = append(gated, match)
+			} else {
+				l.logger.Debug("Domain gate rejected skill match",
+					"skill", match.Entry.Name,
+					"confidence", match.Confidence,
+					"query", input,
+				)
+			}
+		}
+		matches = gated
+	}
+
 	if len(matches) == 0 {
 		// Record the low-match query so Pass D can surface coverage gaps.
 		// Best-effort: failures are logged at debug level and do not break
@@ -3456,13 +3494,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		// Resolve effective reasoning config and pass to LLM.
 		// Precedence: override > per-turn self-modulated > agent default.
+		// AUDIT FIX (D-H2, bughunt 2026-09-04): reasoningOverride is
+		// written by Set/ClearReasoningOverride under l.mu (RPC thread:
+		// internal/rpc/reasoning.go) — read it under RLock like the
+		// sibling reasoningForNextTurn read below, or -race flags it when
+		// an override changes mid-turn.
 		var reasoningCfg *llm.ReasoningConfig
-		if l.reasoningOverride != nil {
-			reasoningCfg = l.reasoningOverride
+		l.mu.RLock()
+		override := l.reasoningOverride
+		reasoning := l.reasoningForNextTurn
+		l.mu.RUnlock()
+		if override != nil {
+			reasoningCfg = override
 		} else {
-			l.mu.RLock()
-			reasoning := l.reasoningForNextTurn
-			l.mu.RUnlock()
 			if reasoning != "" {
 				reasoningCfg = &llm.ReasoningConfig{Effort: reasoning}
 			} else if l.agentReasoning != nil {

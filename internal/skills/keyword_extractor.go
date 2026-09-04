@@ -246,6 +246,13 @@ func defaultStopWords() map[string]bool {
 		"content",
 		"user", "users",
 		"based",
+		// Generic social/greeting filler: a bare greeting carries no domain
+		// signal, and without it the domain gate (internal/agent/skill_gate.go)
+		// would wrongly key greeting queries to skills whose names contain
+		// e.g. "hell" substrings (observed in leaf 07 table tests).
+		"hello", "hi", "hey",
+		// Temporal filler common in reminder-shaped queries; no domain signal.
+		"every",
 	}
 
 	stopWords := make(map[string]bool)
