@@ -4,7 +4,7 @@ Meept's distributed cluster feature lets multiple `meept-daemon` instances form 
 
 ## Overview
 
-Instead of relying on a single daemon to handle all tasks, you can join several machines into a cluster. Tasks land in a shared queue, any node can claim a task, and if one node goes offline the others pick up the work.
+Instead of relying on a single platform to handle all tasks, you can join several machines into a cluster. Tasks land in a shared queue, any node can claim a task, and if one node goes offline the others pick up the work.
 
 ### How It Works
 
@@ -322,7 +322,7 @@ Cluster status:
 🎉 Cluster coordination active
 ```
 
-This starts the gossip engine, the periodic git sync loop, and enables cluster-wide queue synchronization. The daemon itself does not need a separate flag -- cluster services run alongside the normal agent loop once started.
+This starts the gossip engine, the periodic git sync loop, and enables cluster-wide queue synchronization. The platform itself does not need a separate flag -- cluster services run alongside the normal agent loop once started.
 
 ## Managing Clusters
 

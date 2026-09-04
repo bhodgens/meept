@@ -76,7 +76,7 @@ See `cmd/meept/`, `cmd/meept-daemon/`, and `Makefile` for full command reference
 
 ## Architecture Overview
 
-Meept is a **Go daemon** with skill-based task orchestration, LLM integration,
+Meept is a **Go platform** with skill-based task orchestration, LLM integration,
 memory management, and external integrations.
 
 ### Request Flow
@@ -183,11 +183,15 @@ the meept repo itself). It is NEVER the user's project directory.
 ### WS event type classification
 
 `transformBusEventToWS` in `internal/comm/http/server.go` maps bus topics to
-frontend event types. Only `chat_message` and `chat.response` topics produce
-`type: "chat_message"`. All other `chat.*` lifecycle topics (heartbeats,
-processing, worker events) produce `type: "agent_progress"`. The Flutter client
-creates a visible message bubble for every `chat_message` event — misclassified
-lifecycle events appear as blank messages.
+frontend event types. Only the `chat_message` and `chat.message.received`
+topics produce `type: "chat_message"`. The `chat.response` topic is
+intentionally EXCLUDED from WS relay: it is an RPC reply consumed by
+ChatService for the HTTP response body, and relaying it would double-deliver
+the reply to HTTP+WS clients (Flutter GUI) — do not add it to the
+`chat_message` bucket. All other `chat.*` lifecycle topics (heartbeats,
+processing, worker events) produce `type: "agent_progress"`. The Flutter
+client creates a visible message bubble for every `chat_message` event —
+misclassified lifecycle events appear as blank messages.
 
 Quota events on `agent.quota_wait` MUST be classified as `agent_progress`, never
 `chat_message`. This is enforced by the topic prefix match:

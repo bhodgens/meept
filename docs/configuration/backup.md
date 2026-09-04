@@ -4,7 +4,7 @@ Git-backed SQLite backups for single-node and multi-machine deployments. The bac
 
 ## Overview
 
-When enabled, the backup scheduler runs an immediate backup on daemon startup and then on a recurring ticker. Each backup run:
+When enabled, the backup scheduler runs an immediate backup on platform startup and then on a recurring ticker. Each backup run:
 
 1. Snapshots the local SQLite databases (`local.db`, and any other configured DBs)
 2. Compresses each file with zstd (`.zst` extension)
@@ -65,7 +65,7 @@ Backup is configured under the `backup` key in `~/.meept/meept.json5`:
 
 ### Validation
 
-The scheduler validates config at construction time. The daemon will fail to start the backup scheduler (logged as an error, does not crash the daemon) if:
+The scheduler validates config at construction time. The platform will fail to start the backup scheduler (logged as an error, does not crash the platform) if:
 
 - `enabled: true` but `repo_url` is empty
 - `schedule` is zero or negative
@@ -90,7 +90,7 @@ ssh backup-server "git init --bare /srv/git/meept-backups.git"
 
 ### 2. Configure SSH access
 
-The daemon runs as your user and uses your system's git/SSH configuration. Verify the deploy key or SSH key has push access:
+The platform runs as your user and uses your system's git/SSH configuration. Verify the deploy key or SSH key has push access:
 
 ```bash
 ssh-keygen -t ed25519 -C "meept-backup"
@@ -121,7 +121,7 @@ Edit `~/.meept/meept.json5`:
 }
 ```
 
-### 4. Restart the daemon
+### 4. Restart the platform
 
 ```bash
 meept daemon restart
@@ -156,7 +156,7 @@ DATE                NODE     DATABASE      COMPRESSED   UNCOMPRESSED   SHA256
 2026-06-25          local    local.db      2.1 MB       7.9 MB         e5f6a7b8
 ```
 
-When the daemon is reachable, the list is fetched via RPC (`backup.list`). When the daemon is unreachable, the command falls back to scanning the local `~/.meept/backups/` directory and reading each `manifest.json`.
+When the platform is reachable, the list is fetched via RPC (`backup.list`). When the platform is unreachable, the command falls back to scanning the local `~/.meept/backups/` directory and reading each `manifest.json`.
 
 Use `--json` for machine-readable output.
 
@@ -171,7 +171,7 @@ meept backup push --force
 
 The `--force` flag pushes even if no database changes are detected since the last backup. Without `--force`, the scheduler may skip the push if the compressed output is identical to the previous run.
 
-This command dispatches via RPC (`backup.push`) to the running daemon.
+This command dispatches via RPC (`backup.push`) to the running platform.
 
 ## How Backups Work
 
@@ -229,7 +229,7 @@ To restore from a backup:
 ### From the same machine
 
 ```bash
-# 1. Stop the daemon
+# 1. Stop the platform
 meept daemon stop
 
 # 2. Locate the backup to restore
@@ -242,7 +242,7 @@ zstd -d ~/.meept/backups/2026-06-26/laptop/local.db.zst -o ~/.meept/local.db
 shasum -a 256 ~/.meept/local.db
 # Compare against the sha256 in manifest.json
 
-# 5. Restart the daemon
+# 5. Restart the platform
 meept daemon start
 ```
 
@@ -261,15 +261,15 @@ zstd -d /tmp/backups/backups/2026-06-26/laptop/local.db.zst -o ~/.meept/local.db
 # 4. Verify checksum
 shasum -a 256 ~/.meept/local.db
 
-# 5. Start the daemon
+# 5. Start the platform
 meept daemon start
 ```
 
 ## Troubleshooting
 
-### "backup config is invalid" on daemon startup
+### "backup config is invalid" on platform startup
 
-**Cause**: Config validation failed. Check daemon logs for the specific reason.
+**Cause**: Config validation failed. Check platform logs for the specific reason.
 
 **Fixes**:
 - `enabled: true` requires `repo_url` to be non-empty
@@ -278,7 +278,7 @@ meept daemon start
 
 ### Git push fails with conflict
 
-**Symptoms**: Daemon logs show "push rejected" or "non-fast-forward".
+**Symptoms**: Platform logs show "push rejected" or "non-fast-forward".
 
 **Cause**: Another node pushed to the same backup repo between your last fetch and push.
 

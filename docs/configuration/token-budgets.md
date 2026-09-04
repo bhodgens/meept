@@ -196,7 +196,7 @@ Use `meept status` to view current budget status:
 ```bash
 $ meept status
 
-Daemon Status
+Platform Status
 -------------
   Status:     running
   PID:        12345

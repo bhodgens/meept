@@ -16,7 +16,7 @@ Meept provides a unified backup/sync system supporting three deployment modes:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Meept Daemon                          │
+│                    Meept Platform                          │
 │  ┌──────────────────┐        ┌────────────────────────┐ │
 │  │   local.db       │        │   sync-gossip.db       │ │
 │  │   (unique data)  │        │   (peer data)          │ │
@@ -180,7 +180,7 @@ See `docs/configuration/cluster.md` for full cluster configuration options.
    }
    ```
 
-4. **Restart daemon**:
+4. **Restart platform**:
    ```bash
    meept daemon restart
    ```
@@ -448,12 +448,12 @@ No changes will be made until --dry-run is removed.
 **Diagnosis**:
 1. Check sync status: `meept config sync status`
 2. Verify repo URL matches: `meept config get config_sync.repo_url`
-3. Check daemon logs: `journalctl -u meeft -f`
+3. Check platform logs: `journalctl -u meeft -f`
 
 **Solutions**:
 1. **Manual trigger**: `meept config sync pull`
 2. **Check conflict mode**: If `manual`, conflicts must be resolved first
-3. **Restart daemon**: `meept daemon restart` (if hot-reload failed)
+3. **Restart platform**: `meept daemon restart` (if hot-reload failed)
 
 ### Gossip Events Not Replicating
 

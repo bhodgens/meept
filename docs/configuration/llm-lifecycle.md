@@ -1,6 +1,6 @@
 # LLM Runtime Lifecycle Management
 
-Meept can automatically manage local LLM runtimes (llama.cpp or MLX), including spawning them on daemon startup, monitoring their health, and gracefully shutting them down on exit.
+Meept can automatically manage local LLM runtimes (llama.cpp or MLX), including spawning them on platform startup, monitoring their health, and gracefully shutting them down on exit.
 
 ## Configuration
 
@@ -37,8 +37,8 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
 | `runtime` | string | yes | Runtime type: `llama-cpp` or `mlx` |
 | `model_path` | string | see note | Path to a single model file (supports `~` expansion). Required unless `model_paths` is set |
 | `model_paths` | object | see note | Map of `modelKey` → model path, for multi-model servers sharing one subprocess. Required unless `model_path` is set |
-| `auto_start` | bool | no | Auto-start on daemon startup (default: false) |
-| `auto_stop_on_exit` | bool | no | Stop on daemon shutdown (default: true) |
+| `auto_start` | bool | no | Auto-start on platform startup (default: false) |
+| `auto_stop_on_exit` | bool | no | Stop on platform shutdown (default: true) |
 | `pid_file` | string | yes | Path to PID file for process tracking |
 | `spawn_command` | array | yes | Command and arguments to spawn the runtime |
 | `spawn_timeout_seconds` | int | no | Timeout waiting for runtime to become healthy (default: 60) |
@@ -67,7 +67,7 @@ At least one of the two fields is required. Setting both is allowed; `model_path
 
 ### Localhost requirement
 
-The provider's `options.baseURL` must point at a loopback address (`localhost`, `127.0.0.1`, `::1`, `0:0:0:0:0:0:0:1`). Any other host is rejected at daemon startup with a warning. This applies to all lifecycle-enabled providers regardless of `auto_start`.
+The provider's `options.baseURL` must point at a loopback address (`localhost`, `127.0.0.1`, `::1`, `0:0:0:0:0:0:0:1`). Any other host is rejected at platform startup with a warning. This applies to all lifecycle-enabled providers regardless of `auto_start`.
 
 ## Variable Expansion
 
@@ -113,10 +113,10 @@ If no provider is specified, `local` is used by default.
 
 ## How It Works
 
-1. **Daemon Startup**: The daemon scans all providers for `lifecycle` configurations. For each provider:
+1. **Platform Startup**: The platform scans all providers for `lifecycle` configurations. For each provider:
    - The `options.baseURL` host must be loopback (`localhost`, `127.0.0.1`, `::1`, `0:0:0:0:0:0:0:1`). Non-loopback providers are skipped with a warning.
    - The validated config is registered against an **endpoint key** of the form `<runtime>:<host>:<port>`. Multiple providers on the same endpoint key merge into a single shared subprocess (first spawn command wins; later providers contribute their model paths).
-   - At least one of the provider's models must be in the daemon-wide **in-use set** (referenced by an enabled agent, a model slot, or a model alias). Endpoints with no in-use models are skipped with a debug log.
+   - At least one of the provider's models must be in the platform-wide **in-use set** (referenced by an enabled agent, a model slot, or a model alias). Endpoints with no in-use models are skipped with a debug log.
 
 2. **Health Monitoring**: A background health checker per endpoint polls the runtime's HTTP endpoint every N seconds. Health transitions fan out to every per-model log on the endpoint. If `restart_policy.enabled` is true, unhealthy transitions trigger an auto-restart (see [Auto-Restart Policy](#auto-restart-policy)).
 
@@ -124,7 +124,7 @@ If no provider is specified, `local` is used by default.
 
 4. **PID File Management**: The runtime PID is stored in a file for cross-restart tracking. Stale PID files (from crashes) are automatically cleaned up on next startup. The `pid_file` of the first provider to register an endpoint wins; subsequent providers' `pid_file` values are ignored (debug log if they differ).
 
-5. **Graceful Shutdown**: On daemon exit, each endpoint (not each provider) receives a single SIGTERM, then SIGKILL if it doesn't exit within the timeout. Health checkers are stopped and per-model/per-process log files are closed.
+5. **Graceful Shutdown**: On platform exit, each endpoint (not each provider) receives a single SIGTERM, then SIGKILL if it doesn't exit within the timeout. Health checkers are stopped and per-model/per-process log files are closed.
 
 ## Troubleshooting
 
@@ -132,7 +132,7 @@ If no provider is specified, `local` is used by default.
 
 1. Check that the model file exists at `model_path`
 2. Verify the `spawn_command` is correct (try running it manually)
-3. Check daemon logs for spawn errors
+3. Check platform logs for spawn errors
 
 ### Runtime marked unhealthy
 
@@ -175,7 +175,7 @@ When `enabled: true`, the health checker monitors the runtime and triggers a res
 
 ## HTTP API
 
-Runtime management is available via the HTTP API when the daemon is running:
+Runtime management is available via the HTTP API when the platform is running:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -196,9 +196,9 @@ Runtime management is also available via RPC:
 | `runtime.stop` | `{"provider": "local"}` | Stop a runtime |
 | `runtime.restart` | `{"provider": "local"}` | Restart a runtime |
 
-## Daemon Status
+## Platform Status
 
-Runtime health information is included in the daemon status response (`GET /api/v1/daemon/status`) under the `runtimes` key:
+Runtime health information is included in the platform status response (`GET /api/v1/daemon/status`) under the `runtimes` key:
 
 ```json
 {

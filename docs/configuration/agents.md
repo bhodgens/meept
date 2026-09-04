@@ -1,6 +1,6 @@
 # Agent Configuration
 
-Meept uses a multi-agent system where specialist agents handle different types of tasks. Agents are configured through markdown `AGENT.md` definitions with YAML frontmatter; daemon configuration is JSON5 (a legacy TOML fallback exists).
+Meept uses a multi-agent system where specialist agents handle different types of tasks. Agents are configured through markdown `AGENT.md` definitions with YAML frontmatter; platform configuration is JSON5 (a legacy TOML fallback exists).
 
 Enable and configure the multi-agent system in `~/.meept/meept.json5`:
 

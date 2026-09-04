@@ -9,7 +9,7 @@ Config sync solves the problem of keeping configuration consistent across multip
 - **Shared configs** — cluster-wide defaults applied to every node
 - **Per-node overrides** — node-specific settings deep-merged on top
 
-The syncer runs on each node, pulls the repo on a schedule (default: every 5 minutes), and applies changes locally. For files where hot-reload is supported, changes take effect without a daemon restart.
+The syncer runs on each node, pulls the repo on a schedule (default: every 5 minutes), and applies changes locally. For files where hot-reload is supported, changes take effect without a platform restart.
 
 ### How it differs from backup and peer sync
 
@@ -86,7 +86,7 @@ Config sync uses `backup.node_id` to determine which per-node override directory
 config-sync-repo/
 ├── config/
 │   ├── shared/                 # Cluster-wide configs (applied to all nodes)
-│   │   ├── meept.json5         # Main daemon config
+│   │   ├── meept.json5         # Main platform config
 │   │   ├── models.json5        # LLM model definitions
 │   │   └── mcp_servers.json5   # MCP server catalog
 │   └── nodes/
@@ -127,7 +127,7 @@ For each `.json5` file in `config/nodes/<node_id>/`:
 **Shared** (`config/shared/meept.json5`):
 ```json5
 {
-  daemon: {
+  platform: {
     data_dir: "~/.meept",
     log_level: "info",
   },
@@ -146,7 +146,7 @@ For each `.json5` file in `config/nodes/<node_id>/`:
 **Node override** (`config/nodes/node-a/meept.json5`):
 ```json5
 {
-  daemon: {
+  platform: {
     log_level: "debug",  // override just this field
   },
   llm: {
@@ -158,7 +158,7 @@ For each `.json5` file in `config/nodes/<node_id>/`:
 **Result** (`~/.meept/meept.json5` after merge):
 ```json5
 {
-  daemon: {
+  platform: {
     data_dir: "~/.meept",      // from shared
     log_level: "debug",         // from node override
   },
@@ -185,13 +185,13 @@ After a successful merge, the config syncer triggers reload hooks for each appli
 | File | Hot-reload | Behavior on change |
 |------|-----------|-------------------|
 | `mcp_servers.json5` | Yes | MCP server catalog re-read from disk; `MCPManager.Reload` called. Running servers are stopped/restarted as needed. |
-| `meept.json5` | No (restart required) | Warning logged. Daemon restart needed for changes to take effect. |
+| `meept.json5` | No (restart required) | Warning logged. Platform restart needed for changes to take effect. |
 | `models.json5` | No (restart required) | Warning logged. LLM resolver has no reload method. |
 | `backup.json5` | No (restart required) | Warning logged. Backup scheduler reads config at construction time. |
 
-For files that require a restart, the daemon log will show:
+For files that require a restart, the platform log will show:
 ```
-config sync: meept.json5 changed on disk; daemon restart required for full effect
+config sync: meept.json5 changed on disk; platform restart required for full effect
 ```
 
 ## CLI Commands
@@ -219,7 +219,7 @@ Checkout                        /home/user/.meept/.config-sync/meept-config
 Last commit                     abc1234 (2026-06-26T12:00:00Z)
 ```
 
-The "Last commit" line appears only when the daemon is reachable via RPC and a pull has completed.
+The "Last commit" line appears only when the platform is reachable via RPC and a pull has completed.
 
 ### `meept config sync pull`
 
@@ -229,9 +229,9 @@ Force an immediate config pull and merge, bypassing the schedule.
 meept config sync pull
 ```
 
-This dispatches via RPC (`config_sync.pull`) to the running daemon. The daemon performs a shallow git pull, runs the merger, and triggers reload hooks.
+This dispatches via RPC (`config_sync.pull`) to the running platform. The platform performs a shallow git pull, runs the merger, and triggers reload hooks.
 
-Output is the JSON result from the daemon, typically:
+Output is the JSON result from the platform, typically:
 ```json
 {"status":"ok","commit":"abc1234","files_applied":["meept.json5","mcp_servers.json5"]}
 ```
@@ -246,9 +246,9 @@ meept config sync push -m "add node-c overrides"
 ```
 
 Flags:
-- `-m, --message` — commit message override. When empty, the daemon generates a default message with timestamp.
+- `-m, --message` — commit message override. When empty, the platform generates a default message with timestamp.
 
-This dispatches via RPC (`config_sync.push`) to the running daemon. The daemon:
+This dispatches via RPC (`config_sync.push`) to the running platform. The platform:
 1. Stages all changes in the config-sync checkout
 2. Commits with the provided or default message
 3. Pushes to the remote repository
@@ -291,11 +291,11 @@ meept config sync pull
 
 ### Invalid config skipped
 
-**Symptoms**: Daemon logs show "config sync: merge error" and some files are listed in `FilesSkipped`.
+**Symptoms**: Platform logs show "config sync: merge error" and some files are listed in `FilesSkipped`.
 
 **Cause**: A config file in the repo failed to parse (invalid JSON5, missing required fields, etc.). The syncer skips invalid files and continues with valid ones.
 
-**Diagnosis**: Check daemon logs for the specific parse error. The error includes the file path and reason.
+**Diagnosis**: Check platform logs for the specific parse error. The error includes the file path and reason.
 
 **Fix**: Correct the invalid file in the config repo and push. The next pull cycle will apply it.
 
@@ -307,14 +307,14 @@ meept config sync pull
 
 **Diagnosis**:
 ```bash
-# Check daemon logs for hook errors
+# Check platform logs for hook errors
 journalctl -u meept -g "config sync"
 
 # Verify MCP server status
 meept mcp status
 ```
 
-**Fix**: Correct the underlying issue (e.g., fix the MCP server URL) and trigger another pull. For files that require restart (`meept.json5`, `models.json5`, `backup.json5`), restart the daemon:
+**Fix**: Correct the underlying issue (e.g., fix the MCP server URL) and trigger another pull. For files that require restart (`meept.json5`, `models.json5`, `backup.json5`), restart the platform:
 
 ```bash
 meept daemon restart
@@ -322,9 +322,9 @@ meept daemon restart
 
 ### Clone fails on first run
 
-**Symptoms**: Daemon logs show "config sync: failed to clone" on startup.
+**Symptoms**: Platform logs show "config sync: failed to clone" on startup.
 
-**Cause**: The repository URL is wrong, or the daemon's SSH key does not have access.
+**Cause**: The repository URL is wrong, or the platform's SSH key does not have access.
 
 **Fix**:
 ```bash

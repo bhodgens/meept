@@ -8,7 +8,7 @@ Meept's primary configuration file is JSON5 (a legacy TOML fallback is supported
 
 | File | Format | Purpose | Location |
 |------|--------|---------|----------|
-| `meept.json5` | JSON5 | Daemon settings, features, security, client rendering prefs (`rendering.ui_theme`, …) | `~/.meept/meept.json5` |
+| `meept.json5` | JSON5 | Platform settings, features, security, client rendering prefs (`rendering.ui_theme`, …) | `~/.meept/meept.json5` |
 | `client.json5` | JSON5 | TUI/GUI client settings: keybindings, rendering, speech, theming | `~/.meept/client.json5` |
 | `models.json5` | JSON5 | LLM providers, models, capabilities | `~/.meept/models.json5` |
 
@@ -39,7 +39,7 @@ export OPENROUTER_API_KEY="your-key"  # If using external providers
 export MEEPT_WEB_SECRET="your-secret" # If enabling web interface
 ```
 
-### 5. Start the Daemon
+### 5. Start the Platform
 
 ```bash
 go build -o bin/meept-daemon ./cmd/meept-daemon
@@ -50,7 +50,7 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 
 ### Core Configuration
 
-- **[Daemon](daemon.md)** - Basic daemon settings and logging
+- **[Platform](platform.md)** - Basic platform settings and logging
 - **[Queue](queue.md)** - Job queue persistence and interactive-first scheduling window
 - **[LLM](llm.md)** - Model providers, capabilities, and budget management
 - **[Agents](agents.md)** - Multi-agent system configuration
@@ -101,7 +101,7 @@ Client config lives in `~/.meept/client.json5`. See `config/client.json5` in the
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `connection.transport` | string | `"auto"` | RPC, HTTP, or auto-detect |
-| `connection.address` | string | `"~/.meept/meept.sock"` | Daemon socket path or host:port |
+| `connection.address` | string | `"~/.meept/meept.sock"` | Platform socket path or host:port |
 | `gui.layout` | string | `"toptabs"` | Flutter GUI layout: `"toptabs"` (horizontal tab bar) or `"sidebar"` (left sidebar with session tree) |
 | `vim.enabled` | bool | `false` | Vim keybindings in TUI |
 | `chat.verbosity` | string | `"normal"` | Agent progress verbosity: `"quiet"`, `"normal"`, `"verbose"` |
@@ -125,7 +125,7 @@ Meept uses a priority-based configuration system:
 
 ## Configuration Validation
 
-The daemon validates configuration on startup:
+The platform validates configuration on startup:
 
 - **Syntax checking** for TOML and JSON5
 - **Semantic validation** of field values
@@ -134,7 +134,7 @@ The daemon validates configuration on startup:
 
 ## Dynamic Configuration
 
-Some settings can be reloaded without restarting the daemon:
+Some settings can be reloaded without restarting the platform:
 
 - **LLM budget limits**
 - **Skill configurations**
@@ -170,7 +170,7 @@ Some settings can be reloaded without restarting the daemon:
 
 - **Configuration syntax errors** - Check TOML/JSON5 syntax
 - **Missing environment variables** - Verify all required variables are set
-- **Permission errors** - Ensure daemon user can access configuration files
+- **Permission errors** - Ensure platform user can access configuration files
 - **Feature dependencies** - Some features require others to be enabled
 
 ### Debug Mode

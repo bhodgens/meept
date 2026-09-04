@@ -338,7 +338,7 @@ Notes:
 - Reset times come only from structured body fields or rate-limit headers
   (never guessed from message text). Unknown reset times use
   `default_estimate`.
-- Quota blocks are in-memory; a daemon restart re-probes providers.
+- Quota blocks are in-memory; a platform restart re-probes providers.
 - See `docs/workflows/quota-resilience.md` for the full behavior.
 
 ## Failure Policy Configuration
@@ -469,7 +469,7 @@ llm: {
 Discovery updates the resolver's model set and the display catalog (the
 TUI model picker) in memory only — your models.json5 is never rewritten.
 
-**Verifying it works:** watch the daemon log for `Context discovery
+**Verifying it works:** watch the platform log for `Context discovery
 enabled` (startup, includes `interval` and `allow_context_override`),
 `context window updated` (per changed model, `from` → `to`), and
 `context discovery: ...` warnings when a provider endpoint is
@@ -626,11 +626,11 @@ Meept can automatically manage local LLM runtimes (spawn on startup, health moni
 
 ### Localhost requirement
 
-A provider's `lifecycle` block is only activated when its `options.baseURL` host is a loopback address (`localhost`, `127.0.0.1`, `::1`, or `0:0:0:0:0:0:0:1`). Providers with any other host (private ranges like `192.168.*` or `10.*`, public hostnames, public IPs, or missing `baseURL`) are skipped at daemon startup with a warning. This prevents the daemon from spawning subprocesses against remote or untrusted endpoints.
+A provider's `lifecycle` block is only activated when its `options.baseURL` host is a loopback address (`localhost`, `127.0.0.1`, `::1`, or `0:0:0:0:0:0:0:1`). Providers with any other host (private ranges like `192.168.*` or `10.*`, public hostnames, public IPs, or missing `baseURL`) are skipped at platform startup with a warning. This prevents the platform from spawning subprocesses against remote or untrusted endpoints.
 
 ### Agent-gated startup
 
-A runtime is only spawned at daemon startup when at least one of its provider's models is "in use" — referenced by an enabled agent's `model` field, one of the models.json5 slots (`model`, `small_model`, `classifier_model`, `summarizer_model`), or a `model_aliases` target. Runtimes with no in-use models are skipped with a debug log. Use `meept runtime status` to see the `would_start` verdict per provider.
+A runtime is only spawned at platform startup when at least one of its provider's models is "in use" — referenced by an enabled agent's `model` field, one of the models.json5 slots (`model`, `small_model`, `classifier_model`, `summarizer_model`), or a `model_aliases` target. Runtimes with no in-use models are skipped with a debug log. Use `meept runtime status` to see the `would_start` verdict per provider.
 
 ### Shared process per port
 

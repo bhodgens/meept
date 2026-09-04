@@ -390,7 +390,7 @@ export MEEPT_AI_INFRA_KEY="your-ai-infra-key"
 
 ### Security Hardening
 
-- Run daemon as non-root user
+- Run platform as non-root user
 - Restrict file permissions on configuration directory
 - Use firewall rules to limit web interface access
 - Regularly review audit logs

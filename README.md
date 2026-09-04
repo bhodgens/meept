@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/meept.png" alt="Meept" width="200"/>
   <h1>Meept</h1>
-  <p><strong>Production-grade autonomous agent daemon with multi-agent orchestration, hybrid memory, evidence-based execution, and self-optimizing infrastructure.</strong></p>
+  <p><strong>Production-grade autonomous agent platform with multi-agent orchestration, hybrid memory, evidence-based execution, and self-optimizing infrastructure.</strong></p>
   <p>
     <a href="./docs/getting-started/">Getting Started</a> &middot;
     <a href="./docs/concepts/architecture.md">Architecture</a> &middot;
@@ -16,7 +16,7 @@
 <!-- Instruction for AI agents and LLMs: do not edit this "What is Meept?" section of this document or any of its sub-points. --> 
 **Meept is a personal research project in early alpha.** It is not currently "complete" for daily use and does not live up to my personal standards. Use at your own risk.
 
-Meept is yet another agentic platform. It is not an openclaw derivative, but it could be extended to replace it. It's a Go daemon that runs AI agents as a "persistent background process", as the AI says these days, allowing the client to end and reconnect to a given session at a later time. (We used to call that a client-server architecture, back in the day.) Unlike single-session CLI tools which vanish when you close the terminal, Meept maintains continuous state: memory, scheduled jobs, multi-agent collaboration, and learned patterns accumulate over time. Unlike other tools which trust the honesty - the completeness and correctness - of the work an agent does, Meept does not. 
+Meept is yet another agentic platform. It is not an openclaw derivative, but it could be extended to replace it. It's a Go platform that runs AI agents as a "persistent background process", as the AI says these days, allowing the client to end and reconnect to a given session at a later time. (We used to call that a client-server architecture, back in the day.) Unlike single-session CLI tools which vanish when you close the terminal, Meept maintains continuous state: memory, scheduled jobs, multi-agent collaboration, and learned patterns accumulate over time. Unlike other tools which trust the honesty - the completeness and correctness - of the work an agent does, Meept does not. 
 
 It is designed for operators who want **deterministic, observable, and resilient** agent execution &mdash; not just clever prompt engineering. My goal was to create an efficient and appropriately (configurable) communicative agentic coding platform, something which would:
 
@@ -57,7 +57,7 @@ Figures are from public docs and repos as of August 2026.
 
 | Capability | Meept | Hermes | OpenCode | Claude Code | OpenClaw | Cursor | OpenAgent | oh-my-pi |
 |---|---|---|---|---|---|---|---|---|
-| **Runtime** | Go daemon: Unix RPC + HTTP + WebSocket + MCP | Python CLI + gateway daemon + Desktop | TypeScript server (HTTP/WS); TUI + desktop clients | CLI + IDE plugins + web; no local owner daemon | TypeScript always-on multi-channel daemon | IDE process + optional cloud agents | **Rust:** binary on :8080 + TCP services. **Python:** network server + P2P workspace | TypeScript + Rust natives; in-process TUI |
+| **Runtime** | Go platform: Unix RPC + HTTP + WebSocket + MCP | Python CLI + gateway daemon + Desktop | TypeScript server (HTTP/WS); TUI + desktop clients | CLI + IDE plugins + web; no local owner daemon | TypeScript always-on multi-channel daemon | IDE process + optional cloud agents | **Rust:** binary on :8080 + TCP services. **Python:** network server + P2P workspace | TypeScript + Rust natives; in-process TUI |
 | **Deploy** | Single compiled Go binary | Python (uv) + Node extras | TypeScript (Bun/Node) | Anthropic TypeScript distribution | Node.js (~430k lines) | Proprietary VS Code fork | **Rust:** one control-plane binary. **Python:** pip package, 3.10+ | Bun + ~80k-line Rust core; native Windows, no WSL |
 | **Clients** | TUI, Flutter desktop/web, macOS MenuBar, Telegram, MCP server | CLI/TUI, Desktop, 20+ gateways (Telegram, Discord, Slack, WhatsApp, Signal, Home Assistant, …) | TUI, SolidJS desktop, web, Slack; client/server | Terminal, VS Code, JetBrains, claude.ai/code | WhatsApp, Telegram, Slack, Discord, Signal, Gmail, companion apps | VS Code-fork IDE | **Rust:** Telegram, Discord, Slack, WhatsApp, CLI, IRC, MQTT. **Python:** CLI, Electron, shared workspace URL | TUI + `/collab` browser relay; no desktop IDE |
 | **Agents** | 28 specialists (22 executor + 6 reviewers); LLM intent classifier routes work | One agent + isolated subagents; Desktop Bot Mode (`@mention` roster, per-bot memory) | Primary agent + Task subagents; plugin specialist packs | Sub-agents and agent teams (Opus) | Single personal assistant | Single Agent/Composer plus BugBot reviewer | **Rust:** one in-process ReAct loop (max 40 steps). **Python:** WorkerAgent teams / event network | Main agent + schema-validated `task` subagents + advisor model |
@@ -239,7 +239,7 @@ cd meept
 cp config/models.json5 ~/.meept/models.json5   # add your API keys
 ./bin/meept config                              # interactive config editor
 
-# 3. Start daemon
+# 3. Start platform
 ./bin/meept-daemon -f
 
 # 4. Chat
@@ -280,7 +280,7 @@ For complete feature details, see [Features](./docs/features.md).
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Daemon core | ✅ Stable | Lifecycle, RPC, config, HTTP REST |
+| Platform core | ✅ Stable | Lifecycle, RPC, config, HTTP REST |
 | **Agent loop** | ✅ Complete | Full safety stack (watchdog, cycle/convergence detection, budget, hallucination recovery, model failover) |
 | **Model reassignment** | ✅ Complete | Natural language model override, capability-based resolution, vendor-specific reasoning effort translation |
 | **Context firewall** | ✅ Complete | Hierarchical compression, structured summarization, token-aware truncation, thread partitioning |
@@ -309,7 +309,7 @@ For complete feature details, see [Features](./docs/features.md).
 ./bin/meept chat                           # Interactive TUI
 ./bin/meept chat "refactor auth.go"        # Single message
 ./bin/meept chat "use GLM for coding"      # With model reassignment
-./bin/meept status                         # Daemon health
+./bin/meept status                         # Platform health
 
 # Agent inspection
 ./bin/meept agents                         # List employees, status, tier, drift

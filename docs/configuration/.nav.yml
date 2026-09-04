@@ -1,6 +1,6 @@
 nav:
   - index.md
-  - daemon.md
+  - platform.md
   - llm.md
   - llm-lifecycle.md
   - agents.md

@@ -179,13 +179,13 @@ Copy the above configurations to:
 - `~/.meept/meept.toml`
 - `~/.meept/models.json5`
 
-### 4. Start the Daemon
+### 4. Start the Platform
 
 ```bash
-# Build the daemon
+# Build the platform
 go build -o bin/meept-daemon ./cmd/meept-daemon
 
-# Start the daemon
+# Start the platform
 ./bin/meept-daemon -f
 ```
 
@@ -247,7 +247,7 @@ ollama list
 
 ### Permission Issues
 
-Ensure the daemon can access the configuration directory:
+Ensure the platform can access the configuration directory:
 ```bash
 chmod 700 ~/.meept
 ```
@@ -257,5 +257,5 @@ chmod 700 ~/.meept
 If the socket file gets corrupted:
 ```bash
 rm ~/.meept/meept.sock
-# Restart the daemon
+# Restart the platform
 ```

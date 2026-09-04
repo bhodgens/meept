@@ -136,7 +136,7 @@ Trigger an immediate peer sync, bypassing the schedule.
 meept sync pull
 ```
 
-This command runs locally (does not require the daemon to be running). It:
+This command runs locally (does not require the platform to be running). It:
 1. Loads config from `~/.meept/meept.json5`
 2. Opens `~/.meept/local.db`
 3. Constructs a `SyncPuller` with the configured peers
@@ -270,7 +270,7 @@ ls /tmp/backups/backups/*/   # Lists node ID directories
 
 **Cause**: The peer is running a different version of meept with an incompatible database schema.
 
-**Fix**: Upgrade both machines to the same meept version. Schema migrations run automatically on daemon startup.
+**Fix**: Upgrade both machines to the same meept version. Schema migrations run automatically on platform startup.
 
 ### Sync takes too long
 
