@@ -59,6 +59,7 @@ type ModelDef struct {
 	ContextLimit   int      `json:"context_limit"`
 	MaxOutput      int      `json:"max_output"`
 	Temperature    float64  `json:"temperature"`
+	TopP           float64  `json:"top_p"`
 	MaxConcurrency int      `json:"max_concurrency"` // Max concurrent requests (0 = unlimited)
 	// API overrides the provider transport for this model. Use for image/video
 	// models on a chat provider, or for comfyui/gemini/infsh/http backends.
@@ -258,9 +259,18 @@ func MergeProvidersConfig(base, overlay *ProvidersConfig) *ProvidersConfig {
 
 func cloneProviderConfig(p ProviderConfig) ProviderConfig {
 	out := p
+	// Deep-copy header maps: out.Options is a value copy but the map
+	// headers inside it still alias the source's. A later in-place write
+	// through a clone would otherwise mutate the original config.
+	if p.Options.ExtraHeaders != nil {
+		out.Options.ExtraHeaders = maps.Clone(p.Options.ExtraHeaders)
+	}
 	if p.Models != nil {
 		out.Models = make(map[string]ModelDef, len(p.Models))
 		for k, v := range p.Models {
+			if v.ExtraHeaders != nil {
+				v.ExtraHeaders = maps.Clone(v.ExtraHeaders)
+			}
 			out.Models[k] = v
 		}
 	}
@@ -428,6 +438,8 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 	}
 	// Merge extra HTTP headers: per-model entries win per key over the
 	// provider-level map (same override direction as tool_constraint).
+	// Deep-copy the maps: the provider config is shared and a clone's
+	// headers must never alias the source's.
 	extraHeaders := make(map[string]string, len(opts.ExtraHeaders)+len(modelDef.ExtraHeaders))
 	for k, v := range opts.ExtraHeaders {
 		extraHeaders[k] = v
@@ -443,6 +455,7 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		CostPerMillionOutput: modelDef.OutputCost,
 		MaxTokens:            modelDef.MaxOutput,
 		Temperature:          modelDef.Temperature,
+		TopP:                 modelDef.TopP,
 		ContextLimit:         modelDef.ContextLimit,
 		Capabilities:         caps,
 		ProviderID:           providerID,
