@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1060,4 +1062,176 @@ func TestChatHandler_SessionLoop_DistinctSessionAndConversationIDs(t *testing.T)
 	if got.GetWorkingDir() != projectPath {
 		t.Errorf("GetWorkingDir() = %q, want %q", got.GetWorkingDir(), projectPath)
 	}
+}
+
+// TestChatHandler_BestStepResult covers bestStepResult selection: nil steps,
+// empty results, preference for done (completed/approved) steps, and
+// highest-sequence-wins ordering.
+func TestChatHandler_BestStepResult(t *testing.T) {
+	tests := []struct {
+		name  string
+		steps []*task.TaskStep
+		want  string
+	}{
+		{"nil steps", nil, ""},
+		{"empty results", []*task.TaskStep{{State: task.StepCompleted}}, ""},
+		{"picks completed result", []*task.TaskStep{
+			{State: task.StepCompleted, Result: ""},
+			{State: task.StepApproved, Result: "I created water_reminder.py for you. Run it with python3."},
+		}, "I created water_reminder.py for you. Run it with python3."},
+		{"highest sequence wins", []*task.TaskStep{
+			{Sequence: 0, State: task.StepApproved, Result: "first"},
+			{Sequence: 1, State: task.StepApproved, Result: "second"},
+		}, "second"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := bestStepResult(tc.steps)
+			if got != tc.want {
+				t.Errorf("bestStepResult = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// newTestChatHandlerWithStores builds a ChatHandler wired to a real sqlite
+// task store and step store in a temp dir (mirrors newTestTaskAndStepStore
+// from handoff_test.go — the task store creates both tables in the same DB;
+// the step store gets its own connection to the same file so both stores
+// see each other's data).
+func newTestChatHandlerWithStores(t *testing.T) *ChatHandler {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "tasks.db")
+	taskStore, err := task.NewStore(dbPath, nil)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	t.Cleanup(func() { taskStore.Close() })
+
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	if err != nil {
+		t.Fatalf("failed to open db for step store: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	stepStore, err := task.NewStepStore(db, nil)
+	if err != nil {
+		t.Fatalf("failed to create step store: %v", err)
+	}
+
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+	h.SetTaskStore(taskStore)
+	h.SetStepStore(stepStore)
+	return h
+}
+
+// seedCompletedTaskWithStepResult creates a completed task with a single
+// approved step whose Result is the given user-facing reply.
+func seedCompletedTaskWithStepResult(t *testing.T, h *ChatHandler, result string) string {
+	t.Helper()
+	taskStore := h.taskStore
+	stepStore := h.stepStore
+
+	tk := task.NewTask("sync reply task", "seed task for waitForTaskCompletion")
+	tk.State = task.StateCompleted
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	step := task.NewTaskStep(tk.ID, "summarize result", 0)
+	step.State = task.StepApproved
+	step.Result = result
+	if err := stepStore.Create(step); err != nil {
+		t.Fatalf("failed to create step: %v", err)
+	}
+	return tk.ID
+}
+
+// TestChatHandler_WaitForTaskCompletion_ReturnsStepResult verifies that the
+// sync reply carries the terminal step's real Result text instead of the
+// "Task <id> completed." stub.
+func TestChatHandler_WaitForTaskCompletion_ReturnsStepResult(t *testing.T) {
+	h := newTestChatHandlerWithStores(t)
+	want := "I created water_reminder.py. Run: python3 water_reminder.py"
+	taskID := seedCompletedTaskWithStepResult(t, h, want)
+
+	reply := h.waitForTaskCompletion(context.Background(), taskID)
+
+	if reply != want {
+		t.Errorf("reply = %q, want the step result text %q", reply, want)
+	}
+	if reply == fmt.Sprintf("Task %s completed.", taskID) {
+		t.Fatal("reply is the task-ID stub — regression")
+	}
+}
+
+// TestChatHandler_WaitForTaskCompletion_StubGuard guards the sync-reply
+// stub: a completed task with a non-empty step Result must never yield the
+// "Task <id> completed." stub. The stub is acceptable only when the steps
+// carry no usable result text (empty-result case) or the step store is
+// unreadable (store-error case — per the leaf Notes, the handler logs Debug
+// and falls through to the stub, same as before this change).
+func TestChatHandler_WaitForTaskCompletion_StubGuard(t *testing.T) {
+	const realResult = "Refactored auth middleware. All 42 tests pass."
+
+	t.Run("real step result never yields stub", func(t *testing.T) {
+		h := newTestChatHandlerWithStores(t)
+		taskID := seedCompletedTaskWithStepResult(t, h, realResult)
+
+		reply := h.waitForTaskCompletion(context.Background(), taskID)
+
+		if reply != realResult {
+			t.Errorf("reply = %q, want %q", reply, realResult)
+		}
+		if reply == fmt.Sprintf("Task %s completed.", taskID) {
+			t.Error("reply is the task-ID stub despite a non-empty step Result")
+		}
+	})
+
+	t.Run("empty step results yield stub", func(t *testing.T) {
+		h := newTestChatHandlerWithStores(t)
+		taskID := seedCompletedTaskWithStepResult(t, h, "")
+
+		reply := h.waitForTaskCompletion(context.Background(), taskID)
+
+		if reply != fmt.Sprintf("Task %s completed.", taskID) {
+			t.Errorf("reply = %q, want the stub as last-resort fallback", reply)
+		}
+	})
+
+	t.Run("store error falls back to stub without panic", func(t *testing.T) {
+		dbPath := filepath.Join(t.TempDir(), "tasks.db")
+		taskStore, err := task.NewStore(dbPath, nil)
+		if err != nil {
+			t.Fatalf("failed to create task store: %v", err)
+		}
+		t.Cleanup(func() { taskStore.Close() })
+
+		db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+		if err != nil {
+			t.Fatalf("failed to open db for step store: %v", err)
+		}
+		stepStore, err := task.NewStepStore(db, nil)
+		if err != nil {
+			t.Fatalf("failed to create step store: %v", err)
+		}
+		// Close the underlying DB so ListByTaskID errors at poll time.
+		db.Close()
+
+		h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+		h.SetTaskStore(taskStore)
+		h.SetStepStore(stepStore)
+
+		tk := task.NewTask("sync reply task", "seed task for waitForTaskCompletion")
+		tk.State = task.StateCompleted
+		if err := taskStore.Create(tk); err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+
+		reply := h.waitForTaskCompletion(context.Background(), tk.ID)
+
+		if reply != fmt.Sprintf("Task %s completed.", tk.ID) {
+			t.Errorf("reply = %q, want the stub fallback on store error", reply)
+		}
+	})
 }

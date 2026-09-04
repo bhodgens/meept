@@ -1437,6 +1437,33 @@ func (h *ChatHandler) FormatEnhancedAsyncTaskAck(
 	return sb.String()
 }
 
+// bestStepResult picks the user-facing reply from executed steps: the
+// Result of the highest-sequence completed/approved step that has
+// non-empty text; falls back to any non-empty Result.
+func bestStepResult(steps []*task.TaskStep) string {
+	best := ""
+	bestSeq := -1
+	for _, s := range steps {
+		if s == nil || s.Result == "" {
+			continue
+		}
+		done := s.State == task.StepCompleted || s.State == task.StepApproved
+		if done && s.Sequence > bestSeq {
+			best, bestSeq = s.Result, s.Sequence
+		}
+	}
+	if best != "" {
+		return best
+	}
+	// Fallback: any non-empty result (e.g. approved-state variants).
+	for _, s := range steps {
+		if s != nil && s.Result != "" {
+			return s.Result
+		}
+	}
+	return ""
+}
+
 // fetchStepSummaries retrieves step summaries for a task from the step store.
 func (h *ChatHandler) fetchStepSummaries(taskID string) []TaskStepSummary {
 	if h.stepStore == nil {
@@ -1678,6 +1705,16 @@ func (h *ChatHandler) waitForTaskCompletion(ctx context.Context, taskID string) 
 			if t.State.IsTerminal() {
 				if t.State == task.StateFailed {
 					return fmt.Sprintf("Task %s failed after reaching terminal state.", taskID)
+				}
+				if h.stepStore != nil {
+					if steps, err := h.stepStore.ListByTaskID(taskID); err == nil {
+						if result := bestStepResult(steps); result != "" {
+							return result
+						}
+					} else {
+						h.logger.Debug("Failed to fetch steps for sync reply",
+							"task_id", taskID, "error", err)
+					}
 				}
 				return fmt.Sprintf("Task %s completed.", taskID)
 			}
