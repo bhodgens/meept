@@ -242,16 +242,10 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			OutputCost:    75.0,
 			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse, CapThinking},
 		},
-		{
-			ModelID:       "meta.llama3-70b-instruct-v1:0",
-			Name:          "Llama 3 70B Instruct (Bedrock)",
-			ProviderID:    "bedrock",
-			ContextWindow: 8192,
-			MaxOutput:     2048,
-			InputCost:     2.65,
-			OutputCost:    3.5,
-			Capabilities:  []string{CapCompletion, CapCode, CapReasoning},
-		},
+		// Non-Anthropic Bedrock models (e.g. meta.llama3-*) are deliberately
+		// not listed: the AnthropicClient speaks the InvokeModel Anthropic
+		// wire format only, and no Bedrock Converse transport exists, so
+		// offering them would advertise a path that cannot work.
 	},
 }
 
