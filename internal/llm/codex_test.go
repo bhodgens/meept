@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -157,11 +159,21 @@ func TestCodexChatRequestShape(t *testing.T) {
 		if req.Path != "/responses" {
 			t.Errorf("path = %q, want /responses", req.Path)
 		}
-		if got := req.Header.Get("User-Agent"); got != "codex_cli_rs/0.0.0 (Hermes meept)" {
-			t.Errorf("User-Agent = %q", got)
+		if got := req.Header.Get("User-Agent"); got != codexUserAgent {
+			t.Errorf("User-Agent = %q, want %q", got, codexUserAgent)
 		}
 		if got := req.Header.Get("originator"); got != "codex_cli_rs" {
 			t.Errorf("originator = %q", got)
+		}
+		// codex-rs contract: every /responses request carries the beta opt-in
+		// (openai/codex commit 6f2b01b).
+		if got := req.Header.Get("OpenAI-Beta"); got != codexResponsesBeta {
+			t.Errorf("OpenAI-Beta = %q, want %q", got, codexResponsesBeta)
+		}
+		// session_id stays omitted until per-turn session substitution is
+		// wired for CodexClient (empty values are stripped by net/http).
+		if got := req.Header.Get("session_id"); got != "" {
+			t.Errorf("session_id = %q, want omitted", got)
 		}
 		if got := req.Header.Get("Authorization"); got != "Bearer "+makeJWT(t, "acct-shape") {
 			t.Errorf("Authorization = %q", got)
@@ -529,6 +541,67 @@ func TestGetProviderByIDCodex(t *testing.T) {
 	}
 	if def.BaseURL != "https://chatgpt.com/backend-api/codex" {
 		t.Errorf("BaseURL = %q", def.BaseURL)
+	}
+}
+
+// --- codex-rs wire contract (User-Agent shape, beta header, session_id) ---
+
+// TestCodexUserAgentShape pins the UA to the codex-rs format
+// get_codex_user_agent() emits — upstream's own macOS test asserts
+// ^codex_cli_rs/\d+\.\d+\.\d+ \(Mac OS \d+\.\d+\.\d+; (x86_64|arm64)\) (\S+)$ —
+// with the version pinned to a real release, not a 0.0.0 placeholder.
+func TestCodexUserAgentShape(t *testing.T) {
+	ua := codexClientUserAgent()
+	re := regexp.MustCompile(`^codex_cli_rs/\d+\.\d+\.\d+ \((Mac OS|Linux|Windows) \d+(\.\d+)*; [^;\s]+\) (\S+)$`)
+	if !re.MatchString(ua) {
+		t.Fatalf("User-Agent %q does not match codex-rs shape", ua)
+	}
+	if !strings.HasPrefix(ua, "codex_cli_rs/"+codexCLIVersion+" ") {
+		t.Errorf("User-Agent %q must advertise pinned version %q", ua, codexCLIVersion)
+	}
+	// Arch token follows codex-rs labels: x86_64, never Go's amd64.
+	if runtime.GOARCH == "amd64" && !strings.Contains(ua, "; x86_64)") {
+		t.Errorf("User-Agent %q must map amd64 → x86_64", ua)
+	}
+	if ua != codexUserAgent {
+		t.Errorf("package default UA %q out of sync with codexClientUserAgent() %q", codexUserAgent, ua)
+	}
+}
+
+// TestCodexUserAgentComputedOnce proves the UA (and its OS probe behind it)
+// is computed a single time — init or first request — and not rebuilt per
+// request like the upstream perf issue (openai/codex#36210).
+func TestCodexUserAgentComputedOnce(t *testing.T) {
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	client := newCodexClientForTest(t, srv.URL)
+	before := codexUAInvocations.Load()
+	for i := 0; i < 3; i++ {
+		if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "x"}}); err != nil {
+			t.Fatalf("Chat: %v", err)
+		}
+		<-ch
+	}
+	if got := codexUAInvocations.Load() - before; got != 0 {
+		t.Errorf("UA rebuilt %d times across requests; must be computed once", got)
+	}
+}
+
+// TestCodexSanitizeOSVersion covers the dotted-numeric prefix extraction
+// that keeps the UA's OS-version token always well-formed.
+func TestCodexSanitizeOSVersion(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"26.5.2", "26.5.2"},
+		{"6.12.34-1-MANJARO", "6.12.34"},
+		{"10.0.26100", "10.0.26100"},
+		{"24", "24"},
+		{"garbage", "0.0.0"},
+		{"", "0.0.0"},
+		{".5.2", "0.0.0"},
+	}
+	for _, tt := range tests {
+		if got := sanitizeOSVersion(tt.in); got != tt.want {
+			t.Errorf("sanitizeOSVersion(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
 

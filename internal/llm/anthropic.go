@@ -241,7 +241,9 @@ func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
 	if c.config.ProviderID == ProviderIDBedrock {
 		suffix := "invoke"
 		if streaming {
-			suffix = "invoke_with_response_stream"
+			// Hyphenated form per the Bedrock InvokeModelWithResponseStream
+			// REST route (the underscored variant does not exist).
+			suffix = "invoke-with-response-stream"
 		}
 		// url.PathEscape preserves ':' (valid pchar per RFC 3986) so
 		// "anthropic.claude-sonnet-4-6-v2:0" round-trips correctly.
@@ -702,6 +704,9 @@ type anthropicRequest struct {
 	TopP          *float64               `json:"top_p,omitempty"`
 	StopSequences []string               `json:"stop_sequences,omitempty"`
 	Stream        bool                   `json:"stream,omitempty"`
+	// AnthropicVersion is Bedrock-only: the API version travels in-band
+	// ("bedrock-2023-05-31") rather than as the anthropic-version header.
+	AnthropicVersion string `json:"anthropic_version,omitempty"`
 	// Extended thinking configuration
 	Thinking *anthropicThinkingConfig `json:"thinking,omitempty"`
 }
@@ -711,28 +716,30 @@ type anthropicRequest struct {
 // (SystemBlocks), matching the Anthropic API's polymorphic system parameter.
 func (r *anthropicRequest) MarshalJSON() ([]byte, error) {
 	type requestAlias struct {
-		Model         string                   `json:"model"`
-		MaxTokens     int                      `json:"max_tokens"`
-		System        json.RawMessage          `json:"system,omitempty"`
-		Messages      []anthropicMessage       `json:"messages"`
-		Tools         []anthropicTool          `json:"tools,omitempty"`
-		Temperature   *float64                 `json:"temperature,omitempty"`
-		TopP          *float64                 `json:"top_p,omitempty"`
-		StopSequences []string                 `json:"stop_sequences,omitempty"`
-		Stream        bool                     `json:"stream,omitempty"`
-		Thinking      *anthropicThinkingConfig `json:"thinking,omitempty"`
+		Model            string                   `json:"model"`
+		MaxTokens        int                      `json:"max_tokens"`
+		System           json.RawMessage          `json:"system,omitempty"`
+		Messages         []anthropicMessage       `json:"messages"`
+		Tools            []anthropicTool          `json:"tools,omitempty"`
+		Temperature      *float64                 `json:"temperature,omitempty"`
+		TopP             *float64                 `json:"top_p,omitempty"`
+		StopSequences    []string                 `json:"stop_sequences,omitempty"`
+		Stream           bool                     `json:"stream,omitempty"`
+		AnthropicVersion string                   `json:"anthropic_version,omitempty"`
+		Thinking         *anthropicThinkingConfig `json:"thinking,omitempty"`
 	}
 
 	a := requestAlias{
-		Model:         r.Model,
-		MaxTokens:     r.MaxTokens,
-		Messages:      r.Messages,
-		Tools:         r.Tools,
-		Temperature:   r.Temperature,
-		TopP:          r.TopP,
-		StopSequences: r.StopSequences,
-		Stream:        r.Stream,
-		Thinking:      r.Thinking,
+		Model:            r.Model,
+		MaxTokens:        r.MaxTokens,
+		Messages:         r.Messages,
+		Tools:            r.Tools,
+		Temperature:      r.Temperature,
+		TopP:             r.TopP,
+		StopSequences:    r.StopSequences,
+		Stream:           r.Stream,
+		AnthropicVersion: r.AnthropicVersion,
+		Thinking:         r.Thinking,
 	}
 
 	if len(r.SystemBlocks) > 0 {
@@ -968,6 +975,11 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 		Stream:      stream,
 		Temperature: &opts.temperature,
 	}
+	if c.config.ProviderID == ProviderIDBedrock {
+		// Bedrock carries the API version in-band instead of the
+		// anthropic-version HTTP header (which its endpoint rejects).
+		req.AnthropicVersion = bedrockAnthropicVersion
+	}
 
 	// When prompt caching is enabled and the system prompt contains the
 	// boundary marker, split into cacheable blocks with cache_control markers.
@@ -1082,11 +1094,11 @@ const anthropicOAuthBeta = "oauth-2025-04-20"
 // applyAnthropicAuth sets authentication headers. When an OAuth token
 // resolver is configured (Claude Pro/Max subscription auth), Bearer auth
 // with the oauth beta header replaces x-api-key; anthropic-version stays
-// set in both modes. Bedrock keeps its no-auth-header behavior (SigV4 via
-// the transport).
-func (c *AnthropicClient) applyAnthropicAuth(ctx context.Context, httpReq *http.Request) error {
+// set in both modes. Bedrock requests are signed in place with AWS SigV4
+// (stdlib implementation, see sigv4.go) instead of using Anthropic headers.
+func (c *AnthropicClient) applyAnthropicAuth(ctx context.Context, httpReq *http.Request, body []byte) error {
 	if c.config.ProviderID == ProviderIDBedrock {
-		return nil
+		return c.applyBedrockSigV4(httpReq, body)
 	}
 	httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
 	if c.tokenResolver != nil && c.oauthProvider != "" {
@@ -1100,6 +1112,23 @@ func (c *AnthropicClient) applyAnthropicAuth(ctx context.Context, httpReq *http.
 	}
 	httpReq.Header.Set("x-api-key", c.config.APIKey)
 	return nil
+}
+
+// applyAnthropicExtraHeaders writes the static configured extra HTTP
+// headers (ModelConfig.ExtraHeaders, models.json5 `extra_headers`) onto
+// req. Called after applyAnthropicAuth so config headers can override the
+// defaults (e.g. a custom anthropic-version). Values are sent verbatim —
+// no per-request substitution. On Bedrock the SigV4 signature covers a
+// fixed header set (content-type, host, x-amz-*), so config headers ride
+// unsigned — valid, but overriding a signed x-amz-* header would break
+// auth, so x-amz-* keys should not be configured on Bedrock providers.
+func (c *AnthropicClient) applyAnthropicExtraHeaders(httpReq *http.Request) {
+	for k, v := range c.config.ExtraHeaders {
+		if v == "" {
+			continue
+		}
+		httpReq.Header.Set(k, v)
+	}
 }
 
 func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicRequest) (*Response, error) {
@@ -1119,9 +1148,10 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
-	if err := c.applyAnthropicAuth(ctx, httpReq); err != nil {
+	if err := c.applyAnthropicAuth(ctx, httpReq, body); err != nil {
 		return nil, err
 	}
+	c.applyAnthropicExtraHeaders(httpReq)
 
 	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
@@ -1298,9 +1328,10 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
-	if err := c.applyAnthropicAuth(ctx, httpReq); err != nil {
+	if err := c.applyAnthropicAuth(ctx, httpReq, body); err != nil {
 		return nil, err
 	}
+	c.applyAnthropicExtraHeaders(httpReq)
 
 	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
@@ -1395,8 +1426,14 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 		return nil, &APIError{StatusCode: resp.StatusCode, Detail: detail}
 	}
 
-	// Parse the SSE stream
-	parsedResp, parseErr := c.parseStreamingResponse(resp.Body, progress)
+	// Parse the stream. Bedrock wraps the Anthropic SSE events in AWS
+	// event-stream binary framing (vnd.amazon.eventstream); the adapter
+	// unwraps it into SSE-shaped bytes so the shared parser is unchanged.
+	streamBody := io.Reader(resp.Body)
+	if c.config.ProviderID == ProviderIDBedrock || hasBedrockEventStreamBody(resp.Header) {
+		streamBody = newBedrockEventStreamAdapter(resp.Body)
+	}
+	parsedResp, parseErr := c.parseStreamingResponse(streamBody, progress)
 
 	// Record successful request metrics with actual usage from the stream
 	if c.metricsStore != nil && parseErr == nil && parsedResp != nil {

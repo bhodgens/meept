@@ -99,7 +99,7 @@ func TestAnthropicRequestURL(t *testing.T) {
 			name:      "bedrock claude streaming",
 			cfg:       &ModelConfig{ProviderID: ProviderIDBedrock, BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com", ModelID: "anthropic.claude-sonnet-4-6-v2:0"},
 			streaming: true,
-			want:      "https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-sonnet-4-6-v2:0/invoke_with_response_stream",
+			want:      "https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-sonnet-4-6-v2:0/invoke-with-response-stream",
 		},
 		{
 			name:      "custom provider (not bedrock) non-streaming",

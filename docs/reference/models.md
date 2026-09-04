@@ -399,6 +399,6 @@ Set any limit to `0` to disable it.
 | xAI | openai_chat | API Key | Grok 3 |
 | Groq | openai_chat | API Key | Llama 3.3 70B |
 | Together AI | openai_chat | API Key | Llama 3.3 70B Instruct |
-| AWS Bedrock | bedrock_converse | IAM | Bedrock models |
+| AWS Bedrock | bedrock_converse | IAM (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`) | Bedrock models |
 | ComfyUI | comfyui | None | Local image generation |
 | inference.sh | infsh | API Key | FAL.ai models |

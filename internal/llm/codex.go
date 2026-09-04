@@ -9,18 +9,113 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// Cloudflare-required headers for the ChatGPT Codex backend. These mirror
-// the codex_cli_rs client signature (hermes auxiliary_client.py:780-812).
+// Cloudflare-required headers for the ChatGPT Codex backend, mirroring the
+// best-known-working codex-rs CLI contract. Sources:
+//   - User-Agent shape: openai/codex codex-rs/login/src/auth/default_client.rs
+//     get_codex_user_agent(): "<originator>/<version> (<os type> <os version>;
+//     <arch>) <terminal>" — upstream's own macOS test asserts
+//     ^codex_cli_rs/\d+\.\d+\.\d+ \(Mac OS \d+\.\d+\.\d+; (x86_64|arm64)\) (\S+)$
+//   - OpenAI-Beta + session_id: openai/codex commit 6f2b01b (core request
+//     builder: .header("OpenAI-Beta", "responses=experimental")).
 const (
-	codexUserAgent   = "codex_cli_rs/0.0.0 (Hermes meept)"
+	// codexCLIVersion is the codex-rs release whose wire fingerprint this
+	// client mirrors: rust-v0.153.2 (github.com/openai/codex/releases,
+	// 2026-09-03, latest stable at time of writing). Upstream has rejected
+	// placeholder versions such as 0.0.0, so this must track a real release.
+	codexCLIVersion = "0.153.2"
+
 	codexOriginator  = "codex_cli_rs"
 	codexAuthClaimNS = "https://api.openai.com/auth"
+
+	// codexResponsesBeta is the value codex-rs sends in its OpenAI-Beta
+	// request header on every /responses call.
+	codexResponsesBeta = "responses=experimental"
+
+	// codexUserAgentProduct fills the trailing <terminal> slot of the
+	// codex-rs User-Agent (upstream puts the detected terminal, e.g.
+	// "iTerm2"). meept is headless, so it identifies itself here.
+	codexUserAgentProduct = "meept"
 )
+
+// codexUserAgent is the default User-Agent sent with every Codex request,
+// computed once at init via codexClientUserAgent. It is a var (not a const)
+// only so tests can pin the header value verbatim.
+var codexUserAgent = codexClientUserAgent()
+
+// codexUAInvocations counts codexClientUserAgent calls; the loopback tests
+// use the delta to prove the UA is computed once, not per request.
+var codexUAInvocations atomic.Uint64
+
+// codexOSVersion is the sanitized OS version used in the User-Agent
+// (lazy: the uname syscall result is cached for process lifetime).
+var codexOSVersion = sync.OnceValue(func() string {
+	return sanitizeOSVersion(codexOSVersionRaw())
+})
+
+// codexClientUserAgent builds the codex-rs-shaped User-Agent:
+//
+//	codex_cli_rs/<version> (<os type> <os version>; <arch>) <terminal>
+//
+// e.g. "codex_cli_rs/0.153.2 (Mac OS 26.5.2; arm64) meept". The version is
+// the pinned codexCLIVersion (a real upstream release), the OS type/version
+// and arch mirror the os_info-derived shape codex-rs emits, and the
+// trailing token identifies the client.
+func codexClientUserAgent() string {
+	codexUAInvocations.Add(1)
+	return fmt.Sprintf("%s/%s (%s %s; %s) %s",
+		codexOriginator, codexCLIVersion,
+		codexOSFamily(), codexOSVersion(),
+		codexArch(), codexUserAgentProduct,
+	)
+}
+
+// codexOSFamily maps runtime.GOOS onto the OS-type label the codex-rs
+// os_info crate emits (macOS hosts report "Mac OS").
+func codexOSFamily() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "Mac OS"
+	case "windows":
+		return "Windows"
+	default:
+		return "Linux"
+	}
+}
+
+// codexArch maps runtime.GOARCH onto the architecture labels codex-rs
+// emits ("x86_64", not Go's "amd64").
+func codexArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x86_64"
+	case "386":
+		return "x86"
+	default:
+		return runtime.GOARCH
+	}
+}
+
+// sanitizeOSVersion keeps the leading dotted-numeric prefix of an OS
+// version string ("26.5.2" → "26.5.2", "6.12.34-1-MANJARO" → "6.12.34",
+// ".5.2" or "garbage" → "0.0.0") so the value always matches the
+// \d+(\.\d+)* shape upstream expects.
+func sanitizeOSVersion(s string) string {
+	if s == "" || s[0] < '0' || s[0] > '9' {
+		return "0.0.0"
+	}
+	end := 1
+	for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == '.') {
+		end++
+	}
+	return s[:end]
+}
 
 // codexDefaultTimeout is the per-request HTTP timeout for Codex calls.
 const codexDefaultTimeout = 120 * time.Second
@@ -327,6 +422,24 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", codexUserAgent)
 	req.Header.Set("originator", codexOriginator)
+	// Session affinity: codex-rs sends its per-session UUID in a `session_id`
+	// HEADER (openai/codex commit 6f2b01b). The ${session_id} substitution
+	// sentinel other meept clients support via ModelConfig.ExtraHeaders is
+	// not wired for CodexClient yet, so nothing supplies a value today; an
+	// empty value is stripped by net/http (matching codex-rs omitting the
+	// header when unset). Callers can still set a static session_id via
+	// extra_headers below until per-turn substitution lands.
+	req.Header.Set("session_id", "")
+
+	req.Header.Set("OpenAI-Beta", codexResponsesBeta)
+	// STREAMING DRIFT (documented, intentionally not fixed here): codex-rs
+	// always POSTs stream:true and parses a text/event-stream (see the
+	// Accept: text/event-stream in the upstream request builder); community
+	// reports flag non-streaming requests to /backend-api/codex/responses
+	// as unreliable. This client still sends stream:false and expects a
+	// single JSON document. Switching to SSE requires a Responses-API event
+	// parser (response.output_text.delta / response.completed lifecycle) —
+	// not a contained change, so it stays a tracked follow-up.
 
 	// Resolve OAuth token when a resolver is wired; otherwise fall back to
 	// the static API key.
@@ -346,6 +459,16 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 		if accountID := codexAccountID(token); accountID != "" {
 			req.Header.Set("ChatGPT-Account-ID", accountID)
 		}
+	}
+
+	// Static configured headers (ModelConfig.ExtraHeaders) are applied last
+	// so they can override the Cloudflare/client defaults above. Values are
+	// sent verbatim — no per-request session substitution.
+	for k, v := range cfg.ExtraHeaders {
+		if v == "" {
+			continue
+		}
+		req.Header.Set(k, v)
 	}
 
 	resp, err := c.httpClient.Do(req)
