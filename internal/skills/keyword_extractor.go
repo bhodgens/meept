@@ -224,6 +224,28 @@ func defaultStopWords() map[string]bool {
 		"make", "makes", "made", "get", "gets", "got",
 		"all", "any", "some", "no", "yes", "more", "most", "other",
 		"how", "when", "where", "why",
+		// Generic tool/agent verbs and nouns. These appear in nearly every
+		// agent purpose ("You produce long-form writing...", "You handle
+		// file operations...") and in most task prompts, so extracted
+		// keywords like "write"/"file"/"text" match almost any input and
+		// let keyword pile-ups misroute dispatch (observed: a file-write
+		// request scored writer at 0.77 and stole dispatch from the LLM
+		// classifier).
+		"write", "writes", "writing", "written",
+		"read", "reads", "reading",
+		"file", "files",
+		"text", "texts",
+		"create", "creates", "creating", "created",
+		"produce", "produces", "producing",
+		"handle", "handles", "handling",
+		"support", "supports", "supporting",
+		"provide", "provides", "providing",
+		"system", "systems",
+		"task", "tasks",
+		"work", "works", "working",
+		"content",
+		"user", "users",
+		"based",
 	}
 
 	stopWords := make(map[string]bool)
