@@ -1,117 +1,816 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meept Product Page Mockups</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0a0a0a;
-            color: #fff;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 2rem;
-        }
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
-            background: linear-gradient(135deg, #ff6b00, #00ff41);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        p.subtitle {
-            color: #888;
-            margin-bottom: 3rem;
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.5rem;
-            width: 100%;
-            max-width: 1200px;
-        }
-        .card {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 12px;
-            padding: 1.5rem;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            text-decoration: none;
-            color: inherit;
-        }
-        .card:hover {
-            transform: translateY(-4px);
-            border-color: #ff6b00;
-            box-shadow: 0 8px 32px rgba(255, 107, 0, 0.2);
-        }
-        .card h3 {
-            font-size: 1.25rem;
-            margin-bottom: 0.5rem;
-            color: #ff6b00;
-        }
-        .card p {
-            color: #888;
-            font-size: 0.9rem;
-            line-height: 1.5;
-        }
-        .card .tag {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            background: #00ff41;
-            color: #000;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            margin-top: 1rem;
-        }
-        .card.recommended {
-            border-color: #00ff41;
-            position: relative;
-        }
-        .card.recommended::before {
-            content: '★';
-            position: absolute;
-            top: 1rem;
-            right: 1rem;
-            color: #00ff41;
-            font-size: 1.5rem;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meept — Autonomous Agent Platform</title>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0a0a; --bg-card: #0f0f0f; --border: #1a1a1a;
+  --orange: #ff6b00; --green: #00ff41; --text: #e0e0e0;
+  --text-dim: #888; --text-muted: #555;
+  --mono: 'SF Mono','Fira Code','Cascadia Code','Consolas',monospace;
+  --sans: 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --radius: 12px;
+}
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg); color: var(--text); font-family: var(--sans);
+  line-height: 1.6; font-size: 16px; overflow-x: hidden;
+}
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+.container { max-width: 1120px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+section { margin-bottom: 80px; opacity: 0; transform: translateY(24px); animation: fadeUp 0.6s ease forwards; }
+section:nth-child(2) { animation-delay: 0.08s; }
+section:nth-child(3) { animation-delay: 0.16s; }
+section:nth-child(4) { animation-delay: 0.24s; }
+section:nth-child(5) { animation-delay: 0.32s; }
+section:nth-child(6) { animation-delay: 0.4s; }
+@keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+
+.section-label {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 2px;
+  color: var(--orange); text-transform: uppercase; margin-bottom: 16px;
+}
+.section-label::before { content: '//'; color: var(--orange); margin-right: 8px; }
+
+.card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 32px; position: relative; overflow: hidden;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.card:hover { border-color: var(--orange); box-shadow: 0 0 30px rgba(255,107,0,0.06); }
+.card::after {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--orange), transparent); opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.card:hover::after { opacity: 0.5; }
+.section-full .card { padding: 40px; }
+
+/* NAV */
+.navbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: rgba(10,10,10,0.85); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.navbar-inner {
+  max-width: 1120px; margin: 0 auto; padding: 0 24px; height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.navbar-brand {
+  font-family: var(--mono); font-size: 14px; font-weight: 700;
+  text-decoration: none;
+  background: linear-gradient(90deg, var(--orange), var(--green));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.navbar-links { display: flex; gap: 24px; list-style: none; }
+.navbar-links a {
+  font-family: var(--mono); font-size: 12px; color: var(--orange);
+  text-decoration: none; transition: color 0.2s ease;
+}
+.navbar-links a:hover { color: var(--green); }
+body::after { content: ''; display: block; height: 56px; }
+
+/* HERO */
+.hero { display: flex; align-items: center; gap: 40px; padding: 48px 40px; min-height: 380px; }
+.hero-content { flex: 1; }
+.hero-image {
+  flex-shrink: 0; width: 280px; height: 280px;
+  display: flex; align-items: center; justify-content: center;
+}
+.hero-image img {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  filter: drop-shadow(0 0 20px rgba(255,107,0,0.15));
+}
+.hero h1 {
+  font-family: var(--mono); font-size: clamp(26px, 3.5vw, 40px);
+  font-weight: 700; line-height: 1.2; margin-bottom: 10px;
+}
+.hero h1 .title-orange { color: var(--orange); }
+.hero h1 .title-green { color: var(--green); }
+.hero .tagline { font-size: 17px; color: var(--text-dim); margin-bottom: 26px; max-width: 500px; }
+.hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 28px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px;
+  border-radius: 8px; font-family: var(--mono); font-size: 14px;
+  font-weight: 600; text-decoration: none; cursor: pointer; border: none;
+  transition: all 0.2s ease;
+}
+.btn-primary { background: var(--orange); color: #000; }
+.btn-primary:hover { background: #ff8533; box-shadow: 0 0 20px rgba(255,107,0,0.3); }
+.btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { border-color: var(--green); color: var(--green); }
+
+.terminal {
+  background: #050505; border: 1px solid #222; border-radius: 8px;
+  padding: 16px 20px; font-family: var(--mono); font-size: 13px;
+  min-width: 420px; max-width: 520px;
+}
+.terminal-dots { display: flex; gap: 6px; margin-bottom: 12px; }
+.terminal-dots span { width: 10px; height: 10px; border-radius: 50%; background: #333; }
+.terminal-dots span:nth-child(1) { background: #ff5f57; }
+.terminal-dots span:nth-child(2) { background: #febc2e; }
+.terminal-dots span:nth-child(3) { background: #28c840; }
+.terminal-line { display: flex; gap: 8px; align-items: baseline; }
+.terminal-prompt { color: var(--green); white-space: nowrap; }
+.terminal-cursor {
+  display: inline-block; width: 8px; height: 16px; background: var(--green);
+  animation: blink 1s step-end infinite; vertical-align: middle;
+}
+@keyframes blink { 50% { opacity: 0; } }
+.typewriter-text {
+  display: inline-block; overflow: hidden; white-space: nowrap;
+  animation: typewriter 2.5s steps(28) 1.5s both;
+  border-right: none;
+}
+@keyframes typewriter { from { width: 0; } to { width: 100%; } }
+
+/* FEATURES */
+.features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.feature-card { padding: 28px; }
+.feature-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.feature-icon { font-size: 22px; line-height: 1; }
+.feature-card h3 { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--orange); margin: 0; }
+.feature-card p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+
+/* COMPARISON */
+.comparison-wrap { overflow-x: auto; }
+.comparison-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }
+.comparison-table thead th {
+  font-family: var(--mono); font-size: 12px; font-weight: 600;
+  text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border);
+  color: var(--text-dim); white-space: nowrap;
+}
+.comparison-table thead th.highlight { color: var(--green); }
+.comparison-table thead th.highlight::before {
+  content: '◉ '; font-size: 9px; vertical-align: middle;
+}
+.comparison-table tbody td {
+  padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle;
+}
+.comparison-table tbody tr:hover { background: rgba(255,107,0,0.03); }
+.comparison-table .row-label { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+.dot-yes {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--green); box-shadow: 0 0 4px var(--green); vertical-align: middle;
+}
+.dot-partial {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: #ff8533; box-shadow: 0 0 4px #ff8533; vertical-align: middle;
+}
+.dot-no {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid #333; vertical-align: middle;
+}
+.cell-note {
+  display: block; font-family: var(--mono); font-size: 10px;
+  color: var(--text-muted); margin-top: 3px; line-height: 1.35;
+}
+.val-text { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+.val-text.hl { color: var(--green); }
+.cmp-legend {
+  font-family: var(--mono); font-size: 12px; color: var(--text-muted); margin-bottom: 22px;
+}
+.cmp-legend .dot-yes, .cmp-legend .dot-partial, .cmp-legend .dot-no { margin-right: 4px; }
+.cmp-cat {
+  font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--orange);
+  text-transform: uppercase; letter-spacing: 1px; margin: 30px 0 12px;
+}
+.cmp-cat::before { content: '// '; }
+.cmp-cat:first-of-type { margin-top: 0; }
+.cmp-note {
+  font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-top: 26px;
+}
+.cmp-note a { color: var(--text-dim); }
+.comparison-table.lead-table { min-width: 0; font-size: 13px; }
+.comparison-table.lead-table thead th { font-size: 12px; }
+.comparison-table.lead-table tbody td { padding: 12px 14px; vertical-align: top; }
+
+/* QUICK START */
+.quickstart-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.quickstart-header h2 { font-family: var(--mono); font-size: 18px; color: var(--orange); }
+.copy-btn {
+  font-family: var(--mono); font-size: 11px; padding: 6px 14px;
+  background: transparent; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); cursor: pointer; transition: all 0.2s ease; white-space: nowrap;
+}
+.copy-btn:hover { border-color: var(--green); color: var(--green); }
+.copy-btn.copied { border-color: var(--green); color: var(--green); background: rgba(0,255,65,0.05); }
+.code-block {
+  background: #050505; border: 1px solid #1a1a1a; border-radius: 8px;
+  padding: 24px; font-family: var(--mono); font-size: 13px;
+  line-height: 1.8; overflow-x: auto;
+}
+.cp { color: var(--green); }
+.cc { color: #e0e0e0; }
+.ca { color: #ff8533; }
+.cm { color: var(--text-muted); font-style: italic; }
+.co { color: var(--text-muted); }
+
+/* DEMO */
+.demo-soon {
+  width: 100%; aspect-ratio: 16/9; background: #050505;
+  border: 1px solid var(--border); border-radius: 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+}
+.demo-soon-play { font-size: 30px; color: var(--text-muted); opacity: 0.35; line-height: 1; }
+.demo-soon-text { font-family: var(--mono); font-size: 13px; color: var(--text-muted); letter-spacing: 1px; }
+
+/* DOCS */
+.docs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.doc-link {
+  display: flex; flex-direction: column; padding: 20px; text-decoration: none;
+  color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  transition: all 0.25s ease; background: transparent;
+}
+.doc-link:hover { border-color: var(--green); color: var(--green); }
+.doc-link .doc-icon { font-size: 20px; margin-bottom: 10px; }
+.doc-link .doc-title { font-family: var(--mono); font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.doc-link .doc-desc { font-size: 12px; color: var(--text-muted); }
+
+/* RESPONSIVE */
+@media (max-width: 900px) {
+  .features-grid, .docs-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero-image { display: none; }
+  .terminal { min-width: auto; }
+}
+@media (max-width: 640px) {
+  .container { padding: 0 16px; }
+  section { margin-bottom: 48px; }
+  .card, .section-full .card { padding: 20px; }
+  .hero { padding: 28px 20px; min-height: auto; flex-direction: column; }
+  .features-grid, .docs-grid { grid-template-columns: 1fr; }
+  .hero-ctas { flex-direction: column; }
+  .hero-ctas .btn { width: 100%; justify-content: center; }
+  .comparison-table { font-size: 12px; }
+  .comparison-table thead th, .comparison-table tbody td { padding: 10px 8px; }
+  .quickstart-header { flex-direction: column; }
+  .navbar-links { gap: 14px; }
+  .navbar-inner { padding: 0 16px; }
+}
+</style>
 </head>
 <body>
-    <h1>Meept Product Pages</h1>
-    <p class="subtitle">Design mockups for review — click to preview</p>
 
-    <div class="grid">
-        <a href="approach-a.html" class="card">
-            <h3>Approach A</h3>
-            <p>Terminal Cyberpunk — futuristic CLI aesthetic with scan lines and glowing accents</p>
-            <span class="tag">Dark Mode</span>
-        </a>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="#" class="navbar-brand">meept.dev</a>
+    <ul class="navbar-links">
+      <li><a href="#features">features</a></li>
+      <li><a href="#compare">compare</a></li>
+      <li><a href="#quickstart">quickstart</a></li>
+      <li><a href="#demo">demo</a></li>
+      <li><a href="https://github.com/bhodgens/meept/tree/main/docs" target="_blank" rel="noopener">docs &#x2197;</a></li>
+    </ul>
+  </div>
+</nav>
 
-        <a href="approach-b.html" class="card">
-            <h3>Approach B</h3>
-            <p>Split Personality — diagonal design split between dark/light themes</p>
-            <span class="tag">Dynamic</span>
-        </a>
+<main class="container">
 
-        <a href="approach-c.html" class="card">
-            <h3>Approach C</h3>
-            <p>Modular Blocks — clean grid-based layout with numbered sections</p>
-            <span class="tag">Structured</span>
-        </a>
-
-        <a href="approach-hybrid.html" class="card recommended">
-            <h3>Hybrid (Recommended)</h3>
-            <p>Terminal + Modular — daemon aesthetic meets organized, scannable design</p>
-            <span class="tag">Best of Both</span>
-        </a>
+  <!-- 01: HERO -->
+  <section>
+    <div class="section-label">OVERVIEW</div>
+    <div class="card hero">
+      <div class="hero-content">
+        <h1><span class="title-orange">MEEPT</span><br><span class="title-green">Production-Grade<br>Autonomous Agent Platform</span></h1>
+        <p class="tagline">A self-hosted autonomous agent platform with intelligent agent orchestration, memory-backed conversations, and tool-driven autonomy.</p>
+        <div class="hero-ctas">
+          <a href="#quickstart" class="btn btn-primary">&#x25B6; get started</a>
+          <a href="https://github.com/bhodgens/meept/tree/main/docs" target="_blank" rel="noopener" class="btn btn-secondary">read the docs &#x2192;</a>
+        </div>
+        <div class="terminal">
+          <div class="terminal-dots"><span></span><span></span><span></span></div>
+          <div class="terminal-line">
+            <span class="terminal-prompt">$</span>
+            <span class="typewriter-text">meept chat "fix the auth bug"</span>
+            <span style="color:var(--text-muted);"> &lt;enter&gt;</span>
+          </div>
+          <div style="margin-top:8px; padding-left:20px;">
+            <span style="color:var(--text-muted); font-size:12px;">&#x25CF; classifying intent...</span><br>
+            <span style="color:var(--text-muted); font-size:12px;">&#x25CF; delegating to coder agent</span><br>
+            <span style="color:var(--green); font-size:12px;">&#x25CF; done. PR #42 opened.</span>
+          </div>
+        </div>
+      </div>
+      <div class="hero-image">
+        <img src="assets/meept.png" alt="Meept mascot" />
+      </div>
     </div>
+  </section>
+
+  <!-- 02: FEATURES -->
+  <section>
+    <div class="section-label">FEATURES</div>
+    <div class="features-grid">
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F9E1;</div>
+          <h3>Multi-Agent Orchestration</h3>
+        </div>
+        <p>Dispatcher routes tasks to specialist agents: coder, debugger, planner, analyst, committer.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F4AC;</div>
+          <h3>Memory-Backed Chat</h3>
+        </div>
+        <p>Episodic and task memory via SQLite+FTS5. Agents remember context across sessions.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F6E0;</div>
+          <h3>Built-in Security</h3>
+        </div>
+        <p>Input sanitization, TIRITH scanning, tool gating, TLS--defense in depth.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x2699;&#xFE0E;</div>
+          <h3>Tool Ecosystem</h3>
+        </div>
+        <p>Built-in tools, MCP server integration, skill discovery, and custom tool registration.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F504;</div>
+          <h3>Collaborative Pairs</h3>
+        </div>
+        <p>Channel-based agent pairing with editor token, round-robin, and turn management.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F4C8;</div>
+          <h3>Self-Improvement</h3>
+        </div>
+        <p>Detect, analyze, generate, validate, and apply improvements autonomously.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 03: COMPARISON -->
+  <section>
+    <div class="section-label">COMPARISON</div>
+    <div class="card section-full">
+      <div class="cmp-legend">
+        <span class="dot-yes"></span> implemented &nbsp;&middot;&nbsp;
+        <span class="dot-partial"></span> partial &nbsp;&middot;&nbsp;
+        <span class="dot-no"></span> not implemented
+      </div>
+      <div class="comparison-wrap">
+
+        <div class="cmp-cat">Architecture &amp; Orchestration</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Multi-agent specialists</td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span><span class="cell-note">(Agent Team)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span><span class="cell-note">(rlm children)</span></td><td><span class="dot-partial"></span><span class="cell-note">(subagent)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Intent classification</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">DAG workflow/plans</td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span><span class="cell-note">(PipelineSpec)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Async handoff between agents</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(agent_message)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Dynamic subagent spawning</td><td><span class="dot-yes"></span><span class="cell-note">(request_handoff)</span></td><td><span class="dot-yes"></span><span class="cell-note">(AgentBus)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(rlm())</span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Recursive programmatic subagents</td><td><span class="dot-partial"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(rlm + passivation)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Agent-to-agent messaging</td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span><span class="cell-note">(AgentBus)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(send + receipts)</span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Constitution-bound employees</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Autonomy tiers (reactive/propose/autonomous)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span><span class="cell-note">(bounded auto)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Goal loop with enforcement</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(persistent goals)</span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(/goal + autonomous)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Quality-gated goal completion</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Plan approve/reject lifecycle</td><td><span class="dot-yes"></span></td><td><span class="dot-partial"></span><span class="cell-note">(approval gate)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">Collaboration engine (pair/diff)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Memory &amp; Context</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Short-term conversation store</td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Long-term memory (SQLite/FTS5)</td><td><span class="dot-yes"></span><span class="cell-note">(6 tiers)</span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(JSONL)</span></td><td><span class="dot-yes"></span><span class="cell-note">(SQLite+FTS5)</span></td><td><span class="dot-yes"></span><span class="cell-note">(JSONL)</span></td><td><span class="dot-yes"></span><span class="cell-note">(9 providers)</span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(SQLite FTS)</span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">Vector/semantic search</td><td><span class="dot-yes"></span><span class="cell-note">(sqlite-vec HNSW)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span><span class="cell-note">(optional embeddings)</span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Knowledge graph (PageRank)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(bounded links)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Epistemic memory (claims/trust)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Context compaction / summarization</td><td><span class="dot-yes"></span><span class="cell-note">(3-layer firewall)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span><span class="cell-note">(guarded_mid projection)</span></td><td><span class="dot-yes"></span><span class="cell-note">(summarize+compact)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">Session persistence</td><td><span class="dot-yes"></span><span class="cell-note">(SQLite, tree)</span></td><td><span class="dot-yes"></span><span class="cell-note">(checkpoint)</span></td><td><span class="dot-yes"></span><span class="cell-note">(append-only JSONL)</span></td><td><span class="dot-yes"></span><span class="cell-note">(SQLite)</span></td><td><span class="dot-yes"></span><span class="cell-note">(JSONL)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Conversation branching</td><td><span class="dot-yes"></span></td><td><span class="dot-partial"></span><span class="cell-note">(/revert)</span></td><td><span class="dot-partial"></span><span class="cell-note">(/rewind checksum-guarded)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Steering / follow-up queues</td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Tools &amp; Execution</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Tool count</td><td><span class="val-text hl">40+</span></td><td><span class="val-text">~15</span></td><td><span class="val-text">18</span></td><td><span class="val-text">~30</span></td><td><span class="val-text">~15</span></td><td><span class="val-text">86</span></td><td><span class="val-text">~20</span></td><td><span class="val-text">~10</span></td><td><span class="val-text">~20</span></td></tr>
+            <tr><td class="row-label">MCP client</td><td><span class="dot-yes"></span><span class="cell-note">(20 preconfigured, 6 enabled)</span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="val-text">Limited</span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">MCP server mode</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">ACP client (drive external agents)</td><td><span class="dot-yes"></span><span class="cell-note">(opt-in, default off)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span><span class="cell-note">(ACP server for editors)</span></td><td><span class="dot-partial"></span><span class="cell-note">(opencode acp)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Parallel tool execution</td><td><span class="dot-yes"></span><span class="cell-note">(semaphore)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span><span class="cell-note">(resource-class)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Tool streaming progress</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Browser automation</td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(Playwright)</span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">Computer use (CUA)</td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(macOS)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">GBNF grammar-constrained tools</td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Vision / image describe</td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(mmproj)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Office doc read/write</td><td><span class="val-text hl">MCP only</span></td><td><span class="dot-yes"></span><span class="cell-note">(PDF/DOCX/etc.)</span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="val-text">MCP</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Security &amp; Sandboxing</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Permission system</td><td><span class="dot-yes"></span><span class="cell-note">(SecurityEngine)</span></td><td><span class="dot-yes"></span><span class="cell-note">(allowlist)</span></td><td><span class="dot-yes"></span><span class="cell-note">(JSON policy)</span></td><td><span class="dot-yes"></span><span class="cell-note">(approval ladder)</span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span><span class="cell-note">(allowlist)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Input sanitization</td><td><span class="dot-yes"></span><span class="cell-note">(prompt injection)</span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">Command scanning (Tirith)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Output scanning</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">Taint tracking</td><td><span class="dot-yes"></span><span class="cell-note">(lattice)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Path fencing</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">OS-enforced sandbox</td><td><span class="dot-partial"></span><span class="cell-note">(docker opt-in)</span></td><td><span class="dot-yes"></span><span class="cell-note">(bwrap/container)</span></td><td><span class="dot-yes"></span><span class="cell-note">(bwrap/macOS/Windows)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Network egress policy</td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-yes"></span><span class="cell-note">(proxy+CIDR)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Secret-backed credential injection</td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(placeholder proxy)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Diff preview + write approval</td><td><span class="dot-yes"></span><span class="cell-note">(PendingChanges, FileEdit only)</span></td><td><span class="dot-yes"></span><span class="cell-note">(unified diff all mutations)</span></td><td><span class="dot-yes"></span><span class="cell-note">(checksum rewind)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Fail-closed policy</td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Scheduling &amp; Persistence</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Cron jobs</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Job queue with priorities</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Agent-targeted jobs</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Resident / always-on mode</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(gateway service)</span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(resident supervisor)</span></td><td><span class="dot-yes"></span><span class="cell-note">(gateway)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Crash recovery / resume</td><td><span class="dot-partial"></span></td><td><span class="dot-yes"></span><span class="cell-note">(--resume)</span></td><td><span class="dot-partial"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-yes"></span><span class="cell-note">(worker restart)</span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">P2P cluster mesh</td><td><span class="dot-yes"></span><span class="cell-note">(gossip+WireGuard)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Distributed task queue</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Model &amp; Cost</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Provider count</td><td><span class="val-text hl">10+</span></td><td><span class="val-text">~5</span></td><td><span class="val-text">30+</span></td><td><span class="val-text">~10</span></td><td><span class="val-text">~10</span></td><td><span class="val-text">15+</span></td><td><span class="val-text">2-3</span></td><td><span class="val-text">limited</span></td><td><span class="val-text">~3</span></td></tr>
+            <tr><td class="row-label">Capability-based routing</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Model failover chain</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Token budgeting</td><td><span class="dot-yes"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">Dollar cost tracking</td><td><span class="dot-yes"></span><span class="cell-note">(OpenRouter live)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Reasoning effort support</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Local inference management</td><td><span class="dot-partial"></span><span class="cell-note">(RuntimeManager)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(TurboQuant llama.cpp)</span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Subscription CLI provider</td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(claude/codex)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Self-Improvement &amp; Learning</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Skill evolution (closed loop)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span><span class="cell-note">(/refine)</span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Shadow training (LoRA/DPO)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Reflection collector</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Routing decision log</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Q Agent meta-optimization</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Automated code fixing</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Observability &amp; Ops</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Metrics store</td><td><span class="dot-yes"></span><span class="cell-note">(SQLite TSDB)</span></td><td><span class="dot-yes"></span><span class="cell-note">(artifacts)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span><span class="cell-note">(NDJSON traces)</span></td><td><span class="dot-partial"></span></td><td><span class="dot-yes"></span><span class="cell-note">(cost)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">Structured logging</td><td><span class="dot-yes"></span><span class="cell-note">(slog)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">Health endpoints</td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Benchmark harness</td><td><span class="dot-partial"></span><span class="cell-note">(internal)</span></td><td><span class="dot-yes"></span><span class="cell-note">(14 benchmarks)</span></td><td><span class="dot-yes"></span><span class="cell-note">(context policy)</span></td><td><span class="dot-yes"></span><span class="cell-note">(GAIA published)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Trace replay / prompt drift</td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span><span class="cell-note">(NDJSON+hash)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">UI &amp; Channels</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">TUI</td><td><span class="dot-yes"></span><span class="cell-note">(Bubbletea)</span></td><td><span class="dot-yes"></span><span class="cell-note">(Textual)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span><span class="cell-note">(Ink)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span><span class="cell-note">(prompt_toolkit)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">CLI</td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">GUI (Flutter web+desktop)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">macOS MenuBar app</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Web API + REST</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">WebSocket events</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Telegram bot</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Chat channels (30+)</td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(30+ channels)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">STT / TTS</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Desktop notifications</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Multi-user auth</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span><span class="cell-note">(per-channel allowlists)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Code Intelligence</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">AST tools (tree-sitter)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td></tr>
+            <tr><td class="row-label">LSP client</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">RepoMap / PageRank</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Auto-lint + reflection</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Other</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>FrontierAgent</th>
+              <th>duckagent</th>
+              <th>atomic-agent</th>
+              <th>prime-agent</th>
+              <th>Hermes</th>
+              <th>OpenCode</th>
+              <th>oh-my-pi</th>
+              <th>Claude Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Evidence pipeline (claim-evidence)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Hallucination detection</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Context propagation to subtasks</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Token cache (L1+L2)</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Session branching / forking</td><td><span class="dot-yes"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Change journal with revert</td><td><span class="dot-partial"></span><span class="cell-note">(git checkpoints)</span></td><td><span class="dot-yes"></span><span class="cell-note">(WorkspaceJournal)</span></td><td><span class="dot-yes"></span><span class="cell-note">(checksum rewind)</span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Multi-platform installers</td><td><span class="dot-no"></span></td><td><span class="dot-partial"></span></td><td><span class="dot-yes"></span><span class="cell-note">(static binary)</span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-yes"></span></td></tr>
+            <tr><td class="row-label">Google Calendar integration</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Video generation</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+            <tr><td class="row-label">Image generation</td><td><span class="dot-yes"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td><td><span class="dot-no"></span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmp-cat">Where Meept Leads</div>
+        <table class="comparison-table lead-table">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Meept Advantage</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="row-label">Multi-agent orchestration</td><td>Only framework with 22 specialists + 6 reviewers, intent classification, DAG planning, async handoff, and a collaboration engine covering pair programming, differential A/B, and parallel-team mixture-of-agents (lead + N specialists, presets)</td></tr>
+            <tr><td class="row-label">Memory depth</td><td>6-tier system: episodic (FTS5), task, knowledge graph (PageRank), semantic (vector HNSW), distributed (memvid), epistemic (claims/trust)</td></tr>
+            <tr><td class="row-label">AI Employees</td><td>Only framework with constitution-bound autonomous agents, three autonomy tiers, enforcement engine, and optional quality-gated goal completion</td></tr>
+            <tr><td class="row-label">Evidence pipeline</td><td>Only framework with claim-evidence matching, validation gates, and needs_info routing for human review</td></tr>
+            <tr><td class="row-label">Defense-in-depth security</td><td>Only framework combining taint lattice, input sanitizer, Tirith shell scan, adversarial boundary markers, and fail-closed policy</td></tr>
+            <tr><td class="row-label">Self-improvement loops</td><td>Only framework with closed-loop skill evolution (usage tracking + LLM-judge verifier + versioning), shadow LoRA/DPO training with eval gate, reflection collector, and Q-Agent meta-optimization</td></tr>
+            <tr><td class="row-label">Always-on platform</td><td>Only framework with resident platform + five frontends (TUI/Flutter/MenuBar/Telegram/HTTP+WS) + voice (STT/TTS)</td></tr>
+            <tr><td class="row-label">Cluster mesh</td><td>Only framework with P2P gossip networking, WireGuard sync, and distributed task queue</td></tr>
+            <tr><td class="row-label">MCP server mode</td><td>Only framework that can be consumed BY other agents as an MCP server</td></tr>
+            <tr><td class="row-label">ACP client</td><td>Drive Codex/OpenCode/other Agent Client Protocol agents as full peers (<code style="font-family:var(--mono); font-size:12px;">acp_agent</code>); <code style="font-family:var(--mono); font-size:12px;">[acp] enabled</code> defaults false</td></tr>
+          </tbody>
+        </table>
+
+      </div>
+      <p class="cmp-note">Matrix generated 2026-08-29 from docs/features.md and the agent parity audit — see <a href="https://github.com/bhodgens/meept/blob/main/docs/feature-comparison-matrix.md" target="_blank" rel="noopener">docs/feature-comparison-matrix.md</a> in the repo.</p>
+    </div>
+  </section>
+
+  <!-- 04: QUICK START -->
+  <section>
+    <div class="section-label">QUICK START</div>
+    <div class="card section-full">
+      <div class="quickstart-header">
+        <h2>Install &amp; run in 3 commands</h2>
+        <button class="copy-btn" id="copyBtn" onclick="copyCode()">&#x2398; copy</button>
+      </div>
+      <div class="code-block">
+<span class="cm"># 1. Clone and install the platform</span><br>
+<span class="cp">$</span> <span class="cc">git clone https://github.com/bhodgens/meept.git</span><br>
+<span class="cp">$</span> <span class="cc">cd meept</span><br>
+<span class="cp">$</span> <span class="cc">make install</span><br>
+<br>
+<span class="cm"># 2. Start the platform</span><br>
+<span class="cp">$</span> <span class="cc">meept-daemon</span><br>
+<span class="co">[meept] listening on :8081</span><br>
+<span class="co">[meept] agents loaded: dispatcher, coder, debugger, planner, analyst, committer</span><br>
+<span class="co">[meept] memory store initialized: sqlite://~/.meept/episodic.db</span><br>
+<br>
+<span class="cm"># 3. Chat with your agent</span><br>
+<span class="cp">$</span> <span class="cc">meept chat "fix the auth bug in handlers.go"</span><br>
+<span class="co">[dispatcher] intent: CODE -&gt; routing to coder agent ...</span><br>
+<span class="co">[coder] analyzing handlers.go...</span><br>
+<span class="co">[coder] found 2 vulnerability points -&gt; opened PR #42</span><br>
+<span class="co">[coder] done. 4 files changed, 23 additions, 7 deletions.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05: DEMO -->
+  <section>
+    <div class="section-label">DEMO</div>
+    <div class="card section-full">
+      <h2 style="font-family:var(--mono); font-size:18px; margin-bottom:20px; color: var(--orange);">See it in action</h2>
+      <div class="demo-soon">
+        <span class="demo-soon-play">&#x25B6;</span>
+        <span class="demo-soon-text">demo video — coming soon</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06: DOCS -->
+  <section>
+    <div class="section-label">DOCS</div>
+    <div class="card section-full" style="padding: 28px;">
+      <h2 style="font-family:var(--mono); font-size:18px; margin-bottom:24px; color: var(--orange);">Documentation</h2>
+      <div class="docs-grid">
+        <a class="doc-link" href="https://github.com/bhodgens/meept/tree/main/docs/getting-started" target="_blank" rel="noopener">
+          <div class="doc-icon">&#x1F4D6;</div>
+          <div class="doc-title">Getting Started</div>
+          <div class="doc-desc">Installation and first run</div>
+        </a>
+        <a class="doc-link" href="https://github.com/bhodgens/meept/blob/main/docs/concepts/architecture.md" target="_blank" rel="noopener">
+          <div class="doc-icon">&#x1F9E9;</div>
+          <div class="doc-title">Architecture</div>
+          <div class="doc-desc">System design and components</div>
+        </a>
+        <a class="doc-link" href="https://github.com/bhodgens/meept/blob/main/docs/features.md" target="_blank" rel="noopener">
+          <div class="doc-icon">&#x1F4C8;</div>
+          <div class="doc-title">Features</div>
+          <div class="doc-desc">Full feature reference</div>
+        </a>
+        <a class="doc-link" href="https://github.com/bhodgens/meept/blob/main/docs/reference/cli.md" target="_blank" rel="noopener">
+          <div class="doc-icon">&#x2699;&#xFE0E;</div>
+          <div class="doc-title">CLI Reference</div>
+          <div class="doc-desc">Commands and flags</div>
+        </a>
+        <a class="doc-link" href="https://github.com/bhodgens/meept/blob/main/docs/feature-comparison-matrix.md" target="_blank" rel="noopener">
+          <div class="doc-icon">&#x2696;&#xFE0E;</div>
+          <div class="doc-title">Feature Comparison</div>
+          <div class="doc-desc">Parity matrix vs 8 agent frameworks</div>
+        </a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+function copyCode() {
+  const text = `git clone https://github.com/bhodgens/meept.git && cd meept && make install
+go run ./cmd/meept-daemon
+meept chat "fix the auth bug in handlers.go"`;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = '\u2713 copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.innerHTML = '&#x2398; copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+</script>
 </body>
 </html>
