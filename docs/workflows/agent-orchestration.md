@@ -308,3 +308,27 @@ Fresh-turn sweep clears the persistent override → base model restored
 - `internal/agent/loop.go` — construction-site wiring
   (`SetAgentSpec`/`SetResolver`) and the fresh-turn sweep call
 - `internal/comm/http/server.go` — WS topic classification
+
+## E2E naive-user regression (chat-dispatch-ux)
+
+`scripts/e2e-naive-user-chat.sh` replays the 2026-09-04 naive-user
+transcript against a scratch daemon (temp state dir, temp socket,
+probed free port, sandboxed HOME) and asserts the harness-level
+contract on every reply:
+
+- no `Task <id> completed.` stubs (sync replies carry the real step
+  result — leaf 01);
+- honest failure states — errored steps reject review and fail the
+  task (leaf 02);
+- files land in the session's project dir, never the daemon cwd
+  (leaf 03);
+- no raw platform-tool catalogs or agent rosters become chat replies
+  (leaf 05);
+- quota failures surface as user-visible quota messages (leaf 06);
+- daemon lifecycle hygiene (clean termination, temp-dir removal).
+
+Usage: `bash scripts/e2e-naive-user-chat.sh [--keep]`. Requires a
+provider reachable via env credentials (config/models.json5 is copied
+into the sandbox); provider-unreachable turns are reported as SKIP
+with a printed reason — never silent. `--keep` preserves the scratch
+workdir for inspection.
