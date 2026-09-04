@@ -226,6 +226,63 @@ func TestCapabilityMatcher_MatchAll(t *testing.T) {
 	}
 }
 
+// setupAmbientSkillMap simulates the production keyword tables the
+// capabilities builder produces when an agent has a skill whose NAME embeds
+// codebase-ambient words (agent-daemon-benchmarking → keywords "agent",
+// "daemon", "benchmarking"…), as happens for every agent whose skill roster
+// feeds ExtractFromEntry output into caps.Keywords.
+func setupAmbientSkillMap() *CapabilitiesMap {
+	cm := NewCapabilitiesMap()
+	cm.Add(&AgentCapabilities{
+		AgentID:         "coder",
+		IntentTypes:     []string{"code"},
+		Keywords:        []string{"agent", "daemon", "benchmarking", "agent-daemon-benchmarking", "code", "implement"},
+		AvailableSkills: []string{"agent-daemon-benchmarking"},
+	})
+	return cm
+}
+
+// TestCapabilityMatcher_SkillNameTokensDoNotDispatch is the regression for
+// the skill@0.71-0.74 misroute: a prompt that merely CONTAINS the words
+// "agent" and "daemon" (here quoting platform prose: "meept is an AI agent
+// daemon") must NOT dispatch to an agent just because that agent's keyword
+// table carries skill-name tokens "agent"/"daemon"/"benchmarking". Under the
+// old scoring, word-boundary hits on those tokens scored ~20 → confidence
+// ~0.71-0.74, clearing the dispatcher's 0.7 gate and stealing dispatch from
+// the LLM classifier. The honest path is unaffected: an explicit full skill
+// mention still matches.
+func TestCapabilityMatcher_SkillNameTokensDoNotDispatch(t *testing.T) {
+	matcher := NewCapabilityMatcher(CapabilityMatcherConfig{
+		CapabilitiesMap: setupAmbientSkillMap(),
+	})
+
+	// The exact prompt shape from the misroute history.
+	result := matcher.Match("Create a file named summary.txt containing: meept is an AI agent daemon. Use file_write with direct:true.")
+	if result == nil {
+		return // nil is fine: falls through to the LLM classifier
+	}
+	if result.Confidence >= 0.7 {
+		t.Fatalf("prompt with ambient 'agent daemon' words dispatched at confidence %.3f (>= 0.7 gate), agent=%s keywords=%v; want nil or low confidence",
+			result.Confidence, result.AgentID, result.MatchedKeywords)
+	}
+}
+
+// TestCapabilityMatcher_ExplicitSkillMentionStillMatches guards the fix
+// against over-correction: naming the skill explicitly must still route.
+func TestCapabilityMatcher_ExplicitSkillMentionStillMatches(t *testing.T) {
+	matcher := NewCapabilityMatcher(CapabilityMatcherConfig{
+		CapabilitiesMap: setupAmbientSkillMap(),
+	})
+
+	result := matcher.Match("run agent-daemon-benchmarking on the suite")
+	if result == nil {
+		t.Fatal("explicit skill mention should match, got nil")
+	}
+	if result.AgentID != "coder" {
+		t.Errorf("explicit skill mention routed to %q, want coder", result.AgentID)
+	}
+}
+
 func TestCapabilityMatcher_NilCapabilitiesMap(t *testing.T) {
 	matcher := NewCapabilityMatcher(CapabilityMatcherConfig{
 		CapabilitiesMap: nil,

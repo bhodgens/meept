@@ -65,16 +65,20 @@ func (ke *KeywordExtractor) ExtractFromEntry(entry *SkillIndexEntry) []Extracted
 		})
 	}
 
-	// Extract from tags
+	// Extract from tags. Tags are human-authored, so unlike name tokens
+	// they are kept whole — but the stopword filter still applies: a tag
+	// like "agents" or "benchmarking" carries no routing signal in this
+	// codebase and would otherwise flow into dispatch keyword tables.
 	for _, tag := range entry.Tags {
 		tagLower := strings.ToLower(strings.TrimSpace(tag))
-		if tagLower != "" {
-			keywords = append(keywords, ExtractedKeyword{
-				Keyword: tagLower,
-				Source:  SourceTag,
-				Weight:  SourceWeights[SourceTag],
-			})
+		if tagLower == "" || ke.stopWords[tagLower] {
+			continue
 		}
+		keywords = append(keywords, ExtractedKeyword{
+			Keyword: tagLower,
+			Source:  SourceTag,
+			Weight:  SourceWeights[SourceTag],
+		})
 	}
 
 	// Extract from examples
@@ -253,6 +257,23 @@ func defaultStopWords() map[string]bool {
 		"hello", "hi", "hey",
 		// Temporal filler common in reminder-shaped queries; no domain signal.
 		"every",
+		// Codebase-ambient nouns. Meept's own domain vocabulary is saturated
+		// with "agent"/"daemon"/"skill"/"benchmark": skill names embed them
+		// (agent-daemon-benchmarking), agent purposes use them constantly,
+		// and task prompts mention them ("meept is an AI agent daemon").
+		// extractFromName gives name tokens the TOP weight (1.0), so a
+		// single name token "agent" or "daemon" matched a bare prompt and
+		// skill@0.71-0.74 misroutes preempted the LLM classifier at the
+		// dispatcher's 0.7 gate (meept-bench open-ended-judge run,
+		// 2026-09-04). These words carry no routing signal in this
+		// codebase — any input matches them.
+		"agent", "agents",
+		"daemon", "daemons",
+		"skill", "skills",
+		"benchmark", "benchmarks",
+		"benchmarking",
+		"bench", "benches", "benching",
+		"meept",
 	}
 
 	stopWords := make(map[string]bool)
