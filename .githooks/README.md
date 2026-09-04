@@ -461,3 +461,21 @@ extract_feature_name() {
 - [staticcheck Documentation](https://staticcheck.dev/)
 - [glm-5.2 Model](https://z.ai/) - Z.ai language model
 - CLAUDE.md - Project-specific guidelines
+
+## Pre-push: bench regression gate (pre-push → pre-push-bench)
+
+Before every `git push`, runs the meept-bench regression suite
+(9 tasks, ~2 min) against the local daemon and diffs the result against
+the committed baseline (`~/git/meept-bench/results/baseline/regression.jsonl`).
+
+- **Regressed or errored** → push blocked, scorecard path printed.
+- **Daemon unreachable** → push blocked with instructions (the gate is
+  the point; silent skips would be decorative).
+- **Skip options**: `git push --no-verify` (all hooks) or
+  `MEEPT_BENCH_SKIP=1 git push` (bench gate only).
+- **Re-baseline deliberately** after an intended behavior change:
+  `cp ~/git/meept-bench/results/gate-pre-push/results.jsonl \
+      ~/git/meept-bench/results/baseline/regression.jsonl`
+
+Requires the meept daemon running locally. Config override:
+`MEEPT_BENCH_DIR=/path/to/meept-bench`.

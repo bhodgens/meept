@@ -1,0 +1,9 @@
+#!/opt/homebrew/bin/bash
+# Pre-push hook: runs pre-push-bench (bench regression gate).
+# Other pre-push checks can be chained here.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+"$SCRIPT_DIR/pre-push-bench" || exit 1
+
+exit 0
