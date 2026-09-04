@@ -1,56 +1,73 @@
-# NEXT-STEPS — bughunt wave 2026-09-03 (week of 2026-08-27 + agent loop)
+# NEXT-STEPS — bughunt wave 2026-09-04 (fix wave: prior findings + new delta)
 
-Full report: `.hermes/audits/meept-week-2026-09-03.md`
-Baseline: build green, `go test -p 2 -count=1` green on all 10 changed package groups.
-Mode: REPORT ONLY — no fixes applied; everything below awaits your go-ahead.
+Full report: `.hermes/audits/meept-week-2026-09-04.md`
+Fix wave landed as commits 0088ab38 (H1-H11 + M7/M13) and d5714492 (H7), plus
+c6c07f0b (C1) and 39884594 (C2 leg 1) from parallel sessions — every fix
+parent-verified against the tree.
+
+Round 2 (auditor reports → same-session follow-ups, UNCOMMITTED working tree):
+- **D-C3** cycle-detection panic (`firstArgs[:8]` on "empty") — FIXED, tested.
+- **D-H2** unsynchronized reasoningOverride read (RPC race) — FIXED.
+- **G** legacy-memory hardening: GetByID keeps `is_current=''` rows visible;
+  version MAX now CASTs to INTEGER — FIXED (data loss stopped).
+- **A-HIGH** codex SSE was buffered (streaming cosmetic + keep-alive stall) —
+  FIXED: resp.Body now consumed incrementally; all 17 SSE tests green.
 
 ## Headline
 
-Chat throttle-parking (the week's tree-03 centerpiece) is dead end-to-end in
-production: the parker is never `Start()`ed (components.go:2436) and per-session
-loops never inherit it via ConfigSnapshot (loop.go:6228). Three auditors found it
-independently. Classic green-tests-unwired: tests call Start() themselves.
+The 2026-09-03 report-only wave is now CLOSED OUT: both CRITICALs and all 11
+HIGHs are fixed and tested. Chat throttle-parking works end-to-end (parker
+started, parker inherited by per-session loops), parked turns no longer fake
+success, tier-2 employee episodes survive parking, and paused employees no
+longer execute parked episodes.
 
-## Do now (when authorized) — suggested order
+## Fixed this wave (C1, C2, H1-H11, M7, M13 — all verified)
 
-1. **C1** worker.go:313-326 — requeue branch returns holding `w.mu`; worker
-   deadlocks after one throttle. 2-line fix.
-2. **C2** components.go:2436 + loop.go ConfigSnapshot — add `throttleParker.Start(ctx)`
-   + `WithTurnParker` in the clone options. Restores the D9 no-hang invariant.
-3. **H1-H3** loop.go park contract cluster — missing `(nil, nil)` check at 3498
-   (double-exec), park flows through success pipeline (false reflection/learning
-   data, blank assistant msg, worker "completed"), resume duplicates the user
-   message. One coherent fix in one file.
-4. **H4-H6** employee parker — no dedup (96x duplicate executions on a 24h window),
-   tier-2 resumes into a no-op (Assess result discarded, decideTier2 never runs),
-   resume bypasses the paused-employee gate.
-5. **H8-H9** — a13526d8's intent fix is a no-op (spec.ID seeds IntentTypes[0],
-   matcher takes [0] → inverse mapping dead); only production NewHTTPHook gets a
-   nil allowlist → every configured hook fails before sending. Both one-line-class.
-6. **H7/H10/H11** — TEXT-affinity version stall on migrated DBs (latent);
-   `resume_at` vs `unblock_at` wire mismatch (surfaces never show retry time);
-   conv-id-as-session-id WS misroute for TUI/CLI parked turns.
+1. **C1** worker requeue no longer returns holding w.mu (+ regression test).
+2. **C2** throttleParker.Start(ctx) + ConfigSnapshot parker propagation.
+3. **H1** TTSR third-call parked check (no double execution).
+4. **H2** parked turns skip reflection/learning/history/worker-completed.
+5. **H3** resume no longer duplicates the user message (WithResumedTurn).
+6. **H4** employee episode dedup (employee:phase:trigger key; ~96x → 1).
+7. **H5** tier-2 assess resume re-enters decideTier2 (plans actually created).
+8. **H6** resume honors the pause gate (re-parks at 15m while paused).
+9. **H7** ftstore migration uses INTEGER for version/is_current (no stall at 9).
+10. **H8** intent-type filter via IsValidIntentType (agent-ID pollution gone).
+11. **H9** allowed_urls config field; hooks auto-allow their own URL (feature live).
+12. **H10** unblock_at canonical on park events + dual-read in TUI and Flutter.
+13. **H11** park events keep raw session_id (WS filter no longer drops them).
+14. **M7** PublishBlocking no-subscriber logs at WARN again (drop is visible).
+15. **M13** NormalizeRank now rises with match strength (min_relevance works).
 
-## Decisions needed from you
+## Found, NOT fixed (decisions or clean llm-zone window needed)
 
-- Explicit `retry_count: 0` now means 3 retries (df1cb627). Keep, or document the
-  `-1` opt-out at the config surface?
-- bus.go d48d89b7 demote also silences `PublishBlocking` no-subscriber — the
-  "security-critical, drops unacceptable" path. Restore WARN for blocking mode?
-- M13: `min_relevance` floor filters the strongest matches first (NormalizeRank
-  inverts with score). 0.3→0.1 moved the cliff; want the direction fixed?
-- H9: is the HTTP-hook allowlist supposed to come from config? Schema has no
-  field; currently the feature is structurally dead.
+- **D-H1** duplicate-search rollback can spin at iteration 1 (needs per-turn rollback cap + tests)
+- **D-H3** guard state never resets between turns (Reset() exists, zero callers — wiring + tests)
+- **I-M8 root cause** neither TUI nor Flutter parses `reason`; Flutter copyWith is null-preserving so stale badges stick — needs reason plumbed into both payloads + copyWith nil-override (own PR)
+- **A-M** deltas duplicate across provider rotation (consumer contract needed); codex 429s lack RateLimitError typing
+- **M3/M4/M5** (llm rotation ignores NonRetryable; streaming auth-arm; RetryAt off-by-one): needs a quiet llm window + a tested PR
+- **M6** AGENTS.md chat.response invariant doc is stale (doc-only fix)
+- **M9** HH:MM rendered in three timezones — needs an RFC3339-with-tz convention
+- **M11** json5 duration rewrite breaks compact JSON5 — deliberate line-based design post-aa7eecfe; proper fix is a tokenizer pass
+- **M14** pacing double-claim window (pacing default-off; needs reservation design)
+- **G-L** vote-store FD leak on Close; accesses=0 in eviction scoring; FK delete-order hazard; consolidation.go:307 nil-check ordering (latent)
+- LOW 1-16 from the prior report: dispositions unchanged.
 
-## Not touched
+## Product decisions for you
 
-- Your in-flight uncommitted diff (loop.go blank-stop + attemptStateRecovery) —
-  audited, sound at HEAD call sites; one untested attached-path contract change
-  flagged (blank+stop now returns whitespace success on interactive turns).
-- `cmd/tmp-verify/` — sibling scratch, harmless.
+- retry_count: 0 still means 3 (doc the -1 opt-out at the config surface?).
+- M8/M9 surface parity calls above.
+- H9 semantics: hooks now auto-allow their own URL when allowed_urls is unset —
+  tighter alternative (deny by default) would keep the feature dead; say the word
+  if you want a config validation error instead.
 
 ## Verification debt (disclosed)
 
--race, mutexio/predid, lint-ci, graphs-check, Flutter tests not run in this wave.
-~10 LOW findings (metrics ticker race, RPM slot leak, runtime PID-recycle, etc.)
-rest on code-read only.
+- -short mode everywhere; -race and the full suite still not run.
+- flutter analyze ran on the touched file only.
+- One sibling test edit (internal/agent/registry_test.go, chat-dispatch-ux leaf)
+  was mid-flight and not compiling at handoff — theirs, untouched, likely
+  transient within their session.
+- Gate matrix at handoff: build green; employee/memory/bus/tui/pkg/sqlite/
+  config/comm/worker/daemon/llm/acp/skills tests green -count=1; gofmt/vet/
+  predid/mutexio clean.

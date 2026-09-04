@@ -422,9 +422,9 @@ func (s *VectorShard) Delete(ctx context.Context, memoryID string) error {
 		return nil
 	}
 
-	_, _ = tx.ExecContext(ctx, `DELETE FROM embeddings WHERE rowid = ?`, rowID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
+	_, _ = tx.ExecContext(ctx, `DELETE FROM embeddings WHERE rowid = ?`, rowID)              //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	_, _ = tx.ExecContext(ctx, `DELETE FROM embedding_rowids WHERE memory_id = ?`, memoryID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
-	_, _ = tx.ExecContext(ctx, `DELETE FROM metadata WHERE memory_id = ?`, memoryID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
+	_, _ = tx.ExecContext(ctx, `DELETE FROM metadata WHERE memory_id = ?`, memoryID)         //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 
 	return tx.Commit() //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 }
@@ -461,8 +461,8 @@ func (s *VectorShard) Stats() ShardStats {
 	return stats
 }
 
-func (s *VectorShard) Dimension() int                       { return s.dimension }
-func (s *VectorShard) ShardID() string                      { return s.shardID }
+func (s *VectorShard) Dimension() int  { return s.dimension }
+func (s *VectorShard) ShardID() string { return s.shardID }
 func (s *VectorShard) EFSearch() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

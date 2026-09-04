@@ -1434,9 +1434,12 @@ func (m *Manager) getCurrentVersion(ctx context.Context, id string) int {
 	}
 
 	// Get max version from the SQL column for all memories in the version chain
+	// G-aggravator 2 (bughunt 2026-09-04): on legacy TEXT-affinity chains
+	// MAX(version) string-compares ('' sorts high) and Scan(int) errors →
+	// silent 0 → version numbering restarts. CAST forces numeric compare.
 	var maxVersion int
 	err = db.QueryRowContext(ctx, `
-		SELECT COALESCE(MAX(version), 0)
+		SELECT COALESCE(MAX(CAST(version AS INTEGER)), 0)
 		FROM episodic_memories
 		WHERE id = ? OR parent_id = ?
 	`, rootID, rootID).Scan(&maxVersion)
@@ -1521,7 +1524,7 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 	row := db.QueryRowContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at, last_accessed_at
 		FROM episodic_memories
-		WHERE id = ? AND is_current = 1
+		WHERE id = ? AND (is_current = 1 OR is_current = '')
 	`, id)
 
 	var mem Memory

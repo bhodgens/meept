@@ -499,9 +499,17 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 		}
 	}()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, &ClientError{Message: "failed to read response", Cause: err}
+	// Read the body ONLY on the non-streaming path. The streaming path must
+	// consume resp.Body incrementally (A-HIGH, bughunt 2026-09-04): a
+	// preemptive io.ReadAll made streaming cosmetic — deltas fired only
+	// after server close, and an SSE keep-alive stream that stayed open
+	// stalled the turn until the 120s http timeout.
+	var respBody []byte
+	if !payload.Stream.Enabled {
+		respBody, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, &ClientError{Message: "failed to read response", Cause: err}
+		}
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -519,7 +527,10 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 		// (response.output_text.delta / response.completed lifecycle). The
 		// accumulated Response is equivalent to the non-streaming parse;
 		// see codex_sse.go for the event grammar and upstream citations.
-		return c.parseResponsesSSE(bytes.NewReader(respBody), cfg, onDelta)
+		// resp.Body is consumed INCREMENTALLY by the scanner (deltas fire
+		// as events arrive; stop-at-terminal ends the read without needing
+		// EOF); Close stays with the defer above.
+		return c.parseResponsesSSE(resp.Body, cfg, onDelta)
 	}
 
 	var parsed codexResponsesResponse
