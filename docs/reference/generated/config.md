@@ -1027,8 +1027,33 @@ HTTPHookConfig mirrors agent.HTTPHookConfig for JSON\-based config loading. On d
 	    Method     string            `json:"method"`
 	    Headers    map[string]string `json:"headers"`
 	    Timeout    time.Duration     `json:"timeout"`
-	    RetryCount int               `json:"retry_count"`
-	
+
+	    // RetryCount controls per-execution retry behavior with a three-way
+	    // contract. It is a pointer so the JSON surface can distinguish an
+	    // absent key from an explicit 0:
+	    //
+	    //   omitted (nil) → default of 3 retries (matches Job MaxRetries in
+	    //     internal/queue/job.go and retry_recovery.go)
+	    //   0             → zero retries: exactly one attempt, no backoff
+	    //   -1            → unlimited retries (the loop only bails via
+	    //     context cancellation or a non-retryable error)
+	    //   n             → n retries (n+1 total attempts)
+	    //
+	    // Previously a plain int without a toml tag: TOML loads could not bind
+	    // `retry_count` at all (go\-toml matches by tag; the field\-name fallback
+	    // cannot bridge the underscore), so only JSON5 users could set it — and
+	    // an explicit 0 was silently remapped to 3 by the hook constructor.
+	    RetryCount *int `json:"retry_count,omitempty" toml:"retry_count"`
+
+	    // AllowedURLs are regex patterns the hook URL must match before any
+	    // request is sent (H9, bughunt 2026\-09\-03: the only production
+	    // NewHTTPHook call passed a nil allowlist, so every configured hook
+	    // failed "not in allowlist" before reaching the wire). When empty, the
+	    // daemon wiring auto\-allows the hook's OWN url — the operator already
+	    // pinned the exact destination in config, which is the tighter of the
+	    // two safe defaults.
+	    AllowedURLs []string `json:"allowed_urls,omitempty"`
+
 	    // Async runs the HTTP request in a background goroutine.
 	    Async bool `json:"async,omitempty"`
 	    // AsyncRewake publishes a hook.async_rewake bus signal after successful

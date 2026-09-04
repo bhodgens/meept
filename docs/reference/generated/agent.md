@@ -5220,6 +5220,8 @@ Wait blocks until all in\-flight async executions complete. This is primarily in
 
 HTTPHookConfig serializes hook configuration.
 
+RetryCount contract \(wire via the config.HTTPHookConfig.RetryCount \*int surface\): 0 = zero retries \(exactly one attempt\), \-1 = unlimited retries, n \> 0 = n retries. The absent\-key → default\-3 mapping lives in the daemon wiring \(internal/daemon/epistemic_wiring\.go\), which passes a concrete value; this type's plain int can never express "unset".
+
 	type HTTPHookConfig struct {
 	    URL        string            `json:"url"`
 	    Method     string            `json:"method"`
