@@ -32,8 +32,12 @@ type PacingConfig struct {
 type pacerState struct {
 	// interval is the current enforced gap; 0 = not pacing.
 	interval time.Duration
-	// lastClaim is when this provider's outbound slot was last claimed
-	// (zero until the first Wait for this provider).
+	// lastClaim is the END of the most recently reserved outbound slot
+	// (zero until the first Wait for this provider). With ticket-style
+	// reservation each Wait owns a slot on the provider's outbound
+	// timeline: the slot starts when the previous reservation frees (or
+	// now, whichever is later) and spans the enforced gap, so concurrent
+	// Waits serialize onto distinct slots instead of all waking together.
 	lastClaim time.Time
 	// anchor is the instant the current growth/decay epoch began: the
 	// last throttle growth or the last decay step. A quiet window is
@@ -123,6 +127,16 @@ func NewAdaptivePacer(store *metrics.Store, cfg PacingConfig) *AdaptivePacer {
 // max(learned interval, metrics rate hold); the sleep honors ctx
 // cancellation and never exceeds MaxInterval. Scope guard: Wait never blocks
 // a request outright — callers treat its error (ctx canceled) as abort.
+//
+// Ticket-style reservation (concurrent-Wait gap fix): the slot is RESERVED
+// under the pacer mutex BEFORE the sleep, computed against the provider's
+// reservation timeline rather than the wall clock. Each concurrent Wait
+// therefore owns a distinct start instant spaced one enforced gap apart and
+// wakes into its own slot; previously every concurrent Wait read the same
+// lastClaim, computed the same wait against now, and all woke together
+// (zero enforced gap). Ctx cancellation abandons the caller's slot — the
+// reservation already consumed the timeline position, mirroring a request
+// that was canceled after pacing admitted it.
 func (p *AdaptivePacer) Wait(ctx context.Context, providerID string) error {
 	if p == nil || !p.cfg.Enabled {
 		return nil
@@ -137,17 +151,27 @@ func (p *AdaptivePacer) Wait(ctx context.Context, providerID string) error {
 	st := p.state[providerID]
 	var wait time.Duration
 	if st.lastClaim.IsZero() {
-		// First request per provider claims without waiting.
-		wait = 0
+		// First request per provider claims without waiting (unchanged);
+		// the reservation timeline is seeded one enforced gap out so the
+		// NEXT request — rapid or concurrent — pays the gap exactly as
+		// the pre-reservation code required (need measured from this
+		// first claim).
+		gap := max(hold, st.interval)
+		st.lastClaim = now.Add(gap)
 	} else {
-		need := max(hold, st.interval)
-		if need > 0 {
-			if elapsed := now.Sub(st.lastClaim); elapsed < need {
-				wait = need - elapsed
-			}
+		// Ticket reservation against the provider's timeline: the new
+		// slot starts when the previous reservation frees (or now for
+		// an idle provider) and spans the enforced gap. The slot's END
+		// (not now+wait) becomes the next reservation's baseline, so
+		// concurrent Waits serialize one gap apart.
+		start := st.lastClaim
+		if now.After(start) {
+			start = now
 		}
+		gap := max(hold, st.interval)
+		st.lastClaim = start.Add(gap)
+		wait = start.Sub(now)
 	}
-	st.lastClaim = now.Add(wait)
 	p.state[providerID] = st
 	p.mu.Unlock()
 

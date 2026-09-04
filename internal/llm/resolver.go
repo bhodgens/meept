@@ -1089,6 +1089,36 @@ func (r *Resolver) GetAliasHealth(aliasName string) (currentIndex int, consecuti
 	return health.CurrentIndex, health.ConsecutiveFails, health.CooldownUntil, true
 }
 
+// EndpointBlockUntil reports the CURRENT endpoint-level block deadline for
+// the endpoint identified by cfg (EndpointKey: base-URL host + credential),
+// for the agent loop's timeout-parking path (tree 03): a turn that failed on
+// a timeout-class error against this endpoint parks until the block expires.
+// The read applies the same lazy-expiry rule as resolution (isEndpointBlocked):
+// an expired block reports zero — the endpoint is prober-eligible again and
+// the caller must not park on a stale deadline. Callers should verify
+// liveness with EndpointBlocked before parking; a zero result never blocks
+// anything. A nil cfg reports zero.
+func (r *Resolver) EndpointBlockUntil(cfg *ModelConfig) time.Time {
+	if r == nil || cfg == nil {
+		return time.Time{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	until, ok := r.endpointBlocks[EndpointKey(cfg)]
+	if !ok || !r.clock().Before(until) {
+		return time.Time{}
+	}
+	return until
+}
+
+// EndpointBlocked reports whether the endpoint identified by cfg (EndpointKey
+// identity) is currently under a timeout cooldown (D10). It is the liveness
+// check paired with EndpointBlockUntil: park only when BOTH report the
+// block.
+func (r *Resolver) EndpointBlocked(cfg *ModelConfig) bool {
+	return !r.EndpointBlockUntil(cfg).IsZero()
+}
+
 // GetAllModelsForAlias returns all models configured for an alias.
 func (r *Resolver) GetAllModelsForAlias(aliasName string) ([]*ModelConfig, bool) {
 	r.mu.Lock()

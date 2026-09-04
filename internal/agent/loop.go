@@ -2131,6 +2131,13 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		return "", ErrNoLLMClient
 	}
 
+	// D-H3 (bughunt 2026-09-04): guard state must not persist across turns.
+	// The loop object lives for the whole session, but the no-progress
+	// ladder, rollback ring, reasoning watchdog, and streak-breach flag are
+	// per-turn semantics — a veto-warm ladder or a mid-streak watchdog from
+	// the previous turn would nudge/veto this turn's first tool calls.
+	l.resetTurnGuards()
+
 	// AUDIT FIX H3 (bughunt 2026-09-03): a RESUMED parked turn re-enters
 	// with the same conversation — which still holds the original user
 	// message from the parked attempt. Unconditional AddUserMessage below
@@ -3186,6 +3193,32 @@ func (l *AgentLoop) conversationTokenBudget() int {
 	return DefaultConversationTokenBudget
 }
 
+// maxDuplicateSearchRollbacks caps duplicate-search rollbacks per turn
+// (D-H1, bughunt 2026-09-04): past this many free re-samples the duplicate
+// falls through to normal tool execution so the cycle/no-progress guards can
+// terminate the turn instead of the rollback spinning the loop forever.
+const maxDuplicateSearchRollbacks = 3
+
+// resetTurnGuards clears all per-turn guard state at the START of a turn
+// (D-H3, bughunt 2026-09-04): the AgentLoop persists across turns, so guard
+// state from turn N must not veto or nudge turn N+1's first tool calls.
+// Every pointer is nil-guarded; the streak-breach flag is cleared under mu
+// like its writer in reasoningCycle.
+func (l *AgentLoop) resetTurnGuards() {
+	if l.noProgress != nil {
+		l.noProgress.Reset()
+	}
+	if l.searchRollbk != nil {
+		l.searchRollbk.Reset()
+	}
+	if l.reasonWatch != nil {
+		l.reasonWatch.Reset()
+	}
+	l.mu.Lock()
+	l.reasonWatchStreakBreach = false
+	l.mu.Unlock()
+}
+
 // reasoningCycle runs the main reasoning loop with tool execution.
 func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conversationID string) (string, error) {
 	var totalTokens int
@@ -3194,6 +3227,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	var toolCallCount int
 	convBudget := l.conversationTokenBudget()
 	inWarningZone := false
+
+	// D-H1 (bughunt 2026-09-04): per-turn cap on duplicate-search rollbacks.
+	// The rollback branch `continue`s WITHOUT incrementing the iteration
+	// counter, so a model that keeps re-emitting the identical web_search
+	// spins the loop forever (iteration decremented on every pass). Allow at
+	// most maxDuplicateSearchRollbacks rollbacks per turn; on the next
+	// duplicate the call falls through to normal execution where the
+	// cycle/no-progress ladder vetoes it.
+	searchRollbacks := 0
 
 	// Transition to thinking state at the start of the reasoning cycle.
 	l.safeTransition(StateThinking, "reasoning_cycle_start", map[string]any{
@@ -3730,22 +3772,37 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				response.ToolCalls[0].Function.Name == "web_search" {
 				argsHash := HashToolCall("web_search", response.ToolCalls[0].Function.Arguments)
 				if l.searchRollbk.ShouldRollback(argsHash) {
-					l.logger.Info("Duplicate web_search detected, rolling back for free re-sample",
-						"conversation", conversationID,
-						"iteration", iteration,
-						"args_hash", argsHash[:8],
-					)
-					// Remove the just-added assistant tool-call message plus
-					// any trailing tool results from the previous pair.
-					for conv.LastMessage() != nil && conv.LastMessage().Role != llm.RoleUser {
-						conv.RemoveLast()
+					// D-H1 (bughunt 2026-09-04): cap rollbacks per turn. Without
+					// the cap the `iteration--` + `continue` below re-samples the
+					// same iteration forever when the model repeats the identical
+					// search. Past the cap, fall through to normal execution —
+					// the cycle detector / no-progress ladder veto the repetition.
+					if searchRollbacks >= maxDuplicateSearchRollbacks {
+						l.logger.Warn("Duplicate web_search rollback cap reached, executing normally",
+							"conversation", conversationID,
+							"iteration", iteration,
+							"args_hash", argsHash[:8],
+							"rollbacks", searchRollbacks,
+						)
+					} else {
+						l.logger.Info("Duplicate web_search detected, rolling back for free re-sample",
+							"conversation", conversationID,
+							"iteration", iteration,
+							"args_hash", argsHash[:8],
+						)
+						// Remove the just-added assistant tool-call message plus
+						// any trailing tool results from the previous pair.
+						for conv.LastMessage() != nil && conv.LastMessage().Role != llm.RoleUser {
+							conv.RemoveLast()
+						}
+						// The for-loop's post statement would normally increment
+						// the iteration counter on continue; decrement first so
+						// the re-sample happens on the SAME iteration number
+						// (rollback must not consume iteration budget).
+						searchRollbacks++
+						iteration--
+						continue // re-sample, same iteration number
 					}
-					// The for-loop's post statement would normally increment
-					// the iteration counter on continue; decrement first so
-					// the re-sample happens on the SAME iteration number
-					// (rollback must not consume iteration budget).
-					iteration--
-					continue // re-sample, same iteration number
 				}
 			}
 
@@ -4532,6 +4589,32 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
 			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef, l.sessionID)
 			if err != nil {
+				// Endpoint-blocked parking (tree 02 leaf 04 D10 + tree
+				// 03 leaf 02 D9 composition): every alias candidate sits
+				// in an endpoint-level timeout cooldown (armed only by
+				// throttle-class failures — RecordAliasFailure gates on
+				// the FailureThrottle verdict — so this branch fires on
+				// the transport-timeout path). The turn PARKS on the
+				// existing throttle machinery until the block expires
+				// instead of hot-retrying (ErrAllEndpointsBlocked used
+				// to burn the backoff budget and error the turn): one
+				// lazy-clear prober reconnects while the other agents'
+				// turns wait parked. The parked schedule honors the
+				// block deadline via parkEndpointBlockedTurn.
+				if errors.Is(err, llm.ErrAllEndpointsBlocked) {
+					l.logger.Warn("All alias candidates endpoint-blocked: parking turn until endpoint cooldown clears",
+						"alias", l.modelRef,
+						"attempt", attempt,
+					)
+					if parked, giveUp := l.parkEndpointBlockedTurn(ctx, l.modelRef, servedModel); parked || giveUp != nil {
+						if giveUp != nil {
+							return nil, giveUp
+						}
+						return nil, nil
+					}
+					// No parker wired: fall through to the original
+					// backoff/pass-through below (tree-02 behavior).
+				}
 				l.logger.Warn("Alias resolution failed",
 					"alias", l.modelRef,
 					"attempt", attempt,
@@ -4838,6 +4921,30 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
 			l.resolver.RecordAliasFailure(l.modelRef, err, servedModel)
 			if _, rotateErr := l.resolver.RotateToNextModel(l.modelRef); rotateErr == nil {
+				// Endpoint-wait overhaul: the rotation targets a peer
+				// that may sit in the SAME timeout-armed endpoint
+				// cooldown (endpoint blocks share fate across alias
+				// members). Resolve the target BEFORE spending the
+				// turn's remaining budget dialing it: when everything
+				// is endpoint-blocked, park the turn on the throttle
+				// machinery — one lazy-clear prober reconnects while
+				// this agent waits parked instead of spraying spurious
+				// reconnects. Healthy peers resolve normally and the
+				// rotation proceeds unchanged.
+				if _, resolveErr := l.resolver.ResolveForAlias(l.modelRef, l.sessionID); errors.Is(resolveErr, llm.ErrAllEndpointsBlocked) {
+					l.logger.Warn("All alias candidates endpoint-blocked after timeout: parking turn",
+						"alias", l.modelRef,
+						"error", err,
+					)
+					if parked, giveUp := l.parkEndpointBlockedTurn(ctx, l.modelRef, servedModel); parked || giveUp != nil {
+						if giveUp != nil {
+							return nil, giveUp
+						}
+						return nil, nil
+					}
+					// No parker wired or park refused: keep the
+					// historical pass-through below.
+				}
 				if _, ok := llmBackoff.NextDelay(); !ok {
 					l.logger.Warn("Error rotation retry budget exhausted",
 						"alias", l.modelRef,
@@ -4852,6 +4959,20 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				)
 				continue
 			}
+		}
+		// Timeout-attribute guard (endpoint-wait overhaul): a transport
+		// timeout is FailureThrottle-class inside RecordAliasFailure, so a
+		// timeout that reaches the surface with the endpoint still blocked
+		// means no healthy alias lane remained — a peer prober owns the
+		// reconnect window; surface it directly instead of the generic
+		// retry-budget error (caller decides; no hot-retry into the
+		// blocked endpoint).
+		if isTransportTimeout(err) && l.resolver != nil && l.resolver.EndpointBlocked(servedModel) {
+			l.logger.Warn("Transport timeout with endpoint cooldown live — surfacing without further retries",
+				"alias", l.modelRef,
+				"error", err,
+			)
+			return nil, err
 		}
 		return nil, err
 	}

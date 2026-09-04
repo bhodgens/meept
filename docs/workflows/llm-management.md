@@ -157,21 +157,47 @@ for the config block and precedence rule).
 
 ## Adaptive 429 Pacing
 
-When `llm.failure_policy.pacing.enabled` is true, meept paces outbound
-requests per provider below that provider's effective rate-limit ceiling.
-The loop is observe → interval → decay: every provider response is
-classified (see the failure-policy docs), and a bare throttle 429 — no
-`Retry-After`, no quota signal — doubles the minimum gap between requests
-to that provider, clamped at `max_interval`. Clean traffic decays the gap
-by half per quiet window (one full gap's worth of successful traffic), so
-pacing fades back out as the provider recovers. Independently, the metrics
-store's hourly rate-limit count acts as a floor: while a provider exceeds
-`target_429_per_hour` events in the last hour, the enforced gap never
-drops below `min_interval`, even without fresh 429s. Pacing composes with
-the retry policy — it stretches the gap between requests, it never blocks
-or replaces a retry. See
+When `llm.failure_policy.pacing.enabled` is true (the default), meept
+paces outbound requests per provider below that provider's effective
+rate-limit ceiling. The loop is observe → interval → decay: every provider
+response is classified (see the failure-policy docs), and a bare throttle
+429 — no `Retry-After`, no quota signal — doubles the minimum gap between
+requests to that provider, clamped at `max_interval`. Clean traffic decays
+the gap by half per quiet window (one full gap's worth of successful
+traffic), so pacing fades back out as the provider recovers. Independently,
+the metrics store's hourly rate-limit count acts as a floor: while a
+provider exceeds `target_429_per_hour` events in the last hour, the
+enforced gap never drops below `min_interval`, even without fresh 429s.
+Pacing composes with the retry policy — it stretches the gap between
+requests, it never blocks or replaces a retry. Concurrent requests to one
+provider are ticketed: each Wait reserves a distinct slot one gap apart, so
+a burst of agents hitting the same provider fans out into evenly spaced
+requests instead of waking all at once. See
 [LLM Configuration](../configuration/llm.md#failure-policy-configuration)
-for the knobs; the feature is off by default.
+for the knobs; set `pacing.enabled = false` to opt out.
+
+## Endpoint Timeouts: One Prober, Everyone Else Waits
+
+When a model endpoint TIMES OUT (context deadline, transport timeout —
+distinct from a 429), the resolver blocks the whole endpoint — every model
+sharing its host + credential, across aliases — for the alias `timeout`
+base (30s default), doubling on repeated consistent failures (capped 4×).
+The block's clearing is deliberately lazy: no background timer exists. The
+first request that arrives after expiry is the PROBER — if the endpoint is
+healthy, its success clears the block; if it times out again, the block
+re-arms with a doubled duration. One prober reconnects; nobody else dials
+a dead endpoint on spec.
+
+Agents whose turns hit (or arrive to find) a fully blocked alias do not
+error and do not hot-retry into the blocked endpoint. The agent loop parks
+the turn on the same TurnParker machinery as a throttle wait
+(`quota_wait` state, reason `throttle_wait`): the parked schedule honors
+the endpoint-block expiry, and when the block outlasts the parker's
+`max_wait` the turn surfaces the standard give-up error instead. When the
+prober's success clears the block, the parked turns resume through the
+normal parked-turn path. A timeout on one alias member with a healthy peer
+still rotates and serves immediately — parking engages only when every
+candidate is endpoint-blocked.
 
 ## Grammar-Constrained Tool Calling (GBNF)
 

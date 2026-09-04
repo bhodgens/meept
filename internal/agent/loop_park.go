@@ -317,6 +317,77 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 	return true, nil
 }
 
+// isTransportTimeout reports whether err is a transport-level timeout:
+// context deadline/cancellation or a net.Error with Timeout() — the same
+// classification the resolver uses (VerdictForFailure) to arm the
+// endpoint-level cooldown this file's parking waits on.
+func isTransportTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	return llm.VerdictForFailure(err).Reason == "transport_timeout"
+}
+
+// parkEndpointBlockedTurn parks a turn whose provider call hit a
+// timeout-class failure while the resolver holds an endpoint-level timeout
+// cooldown (tree 02 leaf 04 D10 + tree 03 leaf 02 D4/D8 composition): the
+// failed endpoint is blocked and the lazy-clear probe (first request after
+// expiry; failure re-arms with doubling; success clears) is the ONE
+// reconnecting prober — every other agent's turn waits, parked on the SAME
+// TurnParker machinery and quota_wait state as a throttled turn (D9: no new
+// state, no new error type, no new topic).
+//
+// The ThrottleBackoffError is CONSTRUCTED here (never wrapped from a
+// producer — do not touch errors.go) with RetryAt = the live endpoint-block
+// deadline (llm.EndpointBlockUntil), so the existing parkThrottledTurn
+// scheduling composes unchanged: plan.NextAttempt honors the later of the
+// block expiry and the throttle base step, and the D8 MaxWait give-up keeps
+// applying.
+//
+// Identity resolution: servedModel carries the failed call's EndpointKey
+// identity when known; when it is nil (e.g. the turn's FIRST resolve failed
+// with ErrAllEndpointsBlocked — a peer armed the block moments ago) the
+// alias's members are consulted and the EARLIEST-expiring live block wins —
+// that is when the alias becomes prober-eligible again. When the resolver
+// holds NO live block for the served model or any alias member, the turn is
+// NOT parked here — callers keep their existing behavior.
+func (l *AgentLoop) parkEndpointBlockedTurn(ctx context.Context, aliasName string, servedModel *llm.ModelConfig) (bool, *llm.ThrottleGiveUpError) {
+	if l == nil || l.turnParker == nil || l.resolver == nil {
+		return false, nil
+	}
+	identity := servedModel
+	blockUntil := l.resolver.EndpointBlockUntil(servedModel)
+	if blockUntil.IsZero() {
+		// No live block on the served model: fall back to the alias
+		// members (ErrAllEndpointsBlocked entry — any member's endpoint
+		// may hold the block; wait for the earliest expiry).
+		models, ok := l.resolver.GetAllModelsForAlias(aliasName)
+		if !ok {
+			return false, nil
+		}
+		for _, m := range models {
+			if m == nil {
+				continue
+			}
+			if until := l.resolver.EndpointBlockUntil(m); !until.IsZero() && (blockUntil.IsZero() || until.Before(blockUntil)) {
+				blockUntil = until
+				identity = m
+			}
+		}
+		if blockUntil.IsZero() {
+			// Nothing in the alias is blocked: the endpoint is
+			// prober-eligible (or the failure never armed one).
+			return false, nil
+		}
+	}
+	return l.parkThrottledTurn(ctx, &llm.ThrottleBackoffError{
+		ProviderID: identity.ProviderID,
+		ModelID:    identity.ModelID,
+		RetryAt:    blockUntil,
+		Attempt:    ThrottleParkAttemptFromContext(ctx),
+	})
+}
+
 // resumeThrottledTurn re-runs a parked throttle turn through its original
 // chat entry (RunOnceWithParts) — the TurnParker resume callback for
 // class=FailureThrottle. The previous attempt count rides the context so a
@@ -352,8 +423,11 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 	// existing agent.quota_wait topic with its class + waited duration (D9).
 	// Guarded: the resume callback normally runs on a wired parker, but the
 	// emit must never be able to panic the resume path.
+	// D-M3 (bughunt 2026-09-04): the payload's ParkedAt is the TRUE park
+	// time; rec.ResumeAt may have been rewritten by the parker's MaxWait
+	// soft-stop, which would understate Waited.
 	if l.turnParker != nil {
-		l.turnParker.emitResumeEvent(rec)
+		l.turnParker.emitResumeEvent(rec, turn.ParkedAt)
 	}
 
 	// Attempt growth across park generations: the re-run's park math starts
