@@ -544,8 +544,11 @@ func TestManagerFromFiles_EndToEnd(t *testing.T) {
 
 	cfg := testACPConfig(true, 3)
 	cfg.AgentsFile = catalogPath
-	cfg.DialTimeout = 5
-	cfg.CallTimeout = 10
+	// Generous ceilings: handshake-under-parallel-load took >5s on a busy
+	// box; these tests exercise logic, not timing. 30s still fails fast on
+	// a genuine deadlock.
+	cfg.DialTimeout = 30
+	cfg.CallTimeout = 20
 	m, err := NewManagerFromFiles(cfg)
 	if err != nil {
 		t.Fatalf("NewManagerFromFiles: %v", err)
@@ -554,7 +557,7 @@ func TestManagerFromFiles_EndToEnd(t *testing.T) {
 		t.Fatal("fakeagent build helper returned empty path")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	sess, err := m.GetOrCreate(ctx, "echo", dir)
 	if err != nil {

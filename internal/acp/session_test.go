@@ -23,14 +23,18 @@ func fakeAgentBin(t *testing.T) string {
 func startEcho(t *testing.T, mode string) *Session {
 	t.Helper()
 	bin := fakeAgentBin(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Generous ceilings: these tests exercise handshake/session logic, not
+	// timing. The 5s DialTimeout failed under full-suite parallel load
+	// (subprocess spawn + handshake took >5s on a busy box) and produced
+	// flakes; 30s still fails fast on a genuine deadlock.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
 	s, err := Start(ctx, SessionConfig{
 		AgentID:     "echo",
 		Command:     []string{bin, "-mode", mode},
 		Cwd:         t.TempDir(),
-		DialTimeout: 5 * time.Second,
-		CallTimeout: 8 * time.Second,
+		DialTimeout: 30 * time.Second,
+		CallTimeout: 20 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
