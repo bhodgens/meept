@@ -865,15 +865,19 @@ type FailurePolicyConfig struct {
 	// leaf 03 consumes). Default 3.
 	ShortRetries int `json:"short_retries"       toml:"short_retries"` // default 3
 	// Pacing gates adaptive outbound pacing (D15; tree 02 leaf 05
-	// consumes the full PacingConfig on this schema).
+	// consumes the full PacingConfig on this schema). Default on —
+	// disable with pacing.enabled = false.
 	Pacing PacingConfig `json:"pacing"              toml:"pacing"`
 }
 
 // PacingConfig configures adaptive pacing below a provider's effective
-// rate-limit ceiling (DECISIONS.md D15). Default off; leaf 05 owns the
-// AdaptivePacer that consumes it.
+// rate-limit ceiling (DECISIONS.md D15). Default on (default flipped from
+// the original opt-in after the ticket-reservation gap fix); leaf 05 owns
+// the AdaptivePacer that consumes it.
 type PacingConfig struct {
-	// Enabled turns adaptive pacing on. Default false (D15 gate).
+	// Enabled turns adaptive pacing on. Default true. Set false to
+	// restore the unpaced pass-through (a disabled — or nil — pacer
+	// never waits).
 	Enabled bool `json:"enabled"      toml:"enabled"`
 	// Target429PerHour is the tolerated throttle-429 rate per provider per
 	// hour; a higher observed rate holds the pacing gap at its floor
@@ -894,7 +898,7 @@ const (
 	DefaultFailurePolicyPollFloor         = time.Hour
 	DefaultFailurePolicyShortRetries      = 3
 
-	DefaultPacingEnabled       = false
+	DefaultPacingEnabled       = true
 	DefaultPacingTarget429Hour = 1
 	DefaultPacingMinInterval   = time.Second
 	DefaultPacingMaxInterval   = 30 * time.Second
@@ -925,7 +929,9 @@ func (f *FailurePolicyConfig) GetPacing() PacingConfig { return f.Pacing }
 // defaults: negative durations become the field default, zero means unset
 // and takes the default; non-positive ShortRetries takes the default;
 // pacing intervals normalize the same way and max < min lifts max to min.
-// Idempotent on valid values.
+// Idempotent on valid values. Pacing.Enabled is left as-is: the default-on
+// value is applied by DefaultConfig() (which load unmarshal runs onto), and
+// an explicit pacing.enabled = false must survive every load.
 func NormalizeFailurePolicyDefaults(f *FailurePolicyConfig) {
 	if f.Horizon <= 0 {
 		f.Horizon = DefaultFailurePolicyHorizon
@@ -3441,11 +3447,27 @@ type FileWatcherHookConfig struct {
 // and wired as session lifecycle hooks. Keeping a parallel struct avoids an
 // import cycle between internal/config and internal/agent.
 type HTTPHookConfig struct {
-	URL        string            `json:"url"`
-	Method     string            `json:"method"`
-	Headers    map[string]string `json:"headers"`
-	Timeout    time.Duration     `json:"timeout"`
-	RetryCount int               `json:"retry_count"`
+	URL     string            `json:"url"`
+	Method  string            `json:"method"`
+	Headers map[string]string `json:"headers"`
+	Timeout time.Duration     `json:"timeout"`
+
+	// RetryCount controls per-execution retry behavior with a three-way
+	// contract. It is a pointer so the JSON surface can distinguish an
+	// absent key from an explicit 0:
+	//
+	//   omitted (nil) → default of 3 retries (matches Job MaxRetries in
+	//     internal/queue/job.go and retry_recovery.go)
+	//   0             → zero retries: exactly one attempt, no backoff
+	//   -1            → unlimited retries (the loop only bails via
+	//     context cancellation or a non-retryable error)
+	//   n             → n retries (n+1 total attempts)
+	//
+	// Previously a plain int without a toml tag: TOML loads could not bind
+	// `retry_count` at all (go-toml matches by tag; the field-name fallback
+	// cannot bridge the underscore), so only JSON5 users could set it — and
+	// an explicit 0 was silently remapped to 3 by the hook constructor.
+	RetryCount *int `json:"retry_count,omitempty" toml:"retry_count"`
 
 	// AllowedURLs are regex patterns the hook URL must match before any
 	// request is sent (H9, bughunt 2026-09-03: the only production

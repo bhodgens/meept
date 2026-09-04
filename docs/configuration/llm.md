@@ -358,7 +358,7 @@ llm: {
     poll_floor: "1h",            // polling floor once exponential steps exceed it
     short_retries: 3,            // bounded immediate-retry budget for 5xx in client loops
     pacing: {
-      enabled: false,            // adaptive outbound pacing (opt-in)
+      enabled: true,             // adaptive outbound pacing (default on; disable to opt out)
       target_429_per_hour: 1,    // tolerated throttle-429 rate per provider/hour
       min_interval: "1s",        // shortest gap between requests to one provider
       max_interval: "30s"        // ceiling on the learned pacing gap
@@ -374,7 +374,7 @@ llm: {
 | `base_quota_402_extra` | duration | `5m` | Added to `base_throttle` for payment-required (402) quota errors — 402 waits start minutes longer than the equivalent 429 path. |
 | `poll_floor` | duration | `1h` | Polling floor: once an exponential step would exceed it, every subsequent step is exactly this long (no jitter — polling stays on the hour mark). |
 | `short_retries` | int | `3` | Bounded immediate-retry budget for server errors (5xx) in the client retry loops. |
-| `pacing.enabled` | bool | `false` | Adaptive pacing below a provider's effective rate-limit ceiling (learned from rate-limit metrics). Off by default. |
+| `pacing.enabled` | bool | `true` | Adaptive pacing below a provider's effective rate-limit ceiling (learned from rate-limit metrics). On by default; set `false` to disable. |
 | `pacing.target_429_per_hour` | int | `1` | Tolerated throttle-429 rate per provider per hour: while the observed hourly rate-limit count from the metrics store exceeds this, the enforced gap is held at `min_interval`. Zero/negative reverts to the default. |
 | `pacing.min_interval` | duration | `1s` | Shortest gap between outbound requests to a single provider while pacing. |
 | `pacing.max_interval` | duration | `30s` | Ceiling on the learned pacing gap. |
@@ -386,15 +386,17 @@ Notes:
 - The give-up boundary is a schedule question only: when the horizon is
   reached the turn is surfaced as failed; it is not silently dropped.
 
-When to enable pacing: most providers signal throttling with a
-`Retry-After` header or quota-shaped body, and the retry policy above
-handles them. A few shed load with bare 429s — no `Retry-After`, no quota
-signal — so every request costs a retry slot before backing off. If a
+When to enable pacing: pacing is ON by default. Most providers signal
+throttling with a `Retry-After` header or quota-shaped body, and the retry
+policy above handles them; pacing stays quiet unless a provider actually
+sheds load. A few providers shed load with bare 429s — no `Retry-After`, no
+quota signal — so every request costs a retry slot before backing off. If a
 provider's metrics (`docs/workflows/metrics.md`, rate-limit events) show a
-steady trickle of such bare 429s, enable pacing: meept then stretches the
-gap between outbound requests to that provider (never beyond
+steady trickle of such bare 429s, keep pacing enabled: meept then stretches
+the gap between outbound requests to that provider (never beyond
 `max_interval`, never blocking a request outright) to stay under the
-observed ceiling instead of reacting after each rejection.
+observed ceiling instead of reacting after each rejection. Set
+`pacing.enabled = false` to restore the unpaced pass-through.
 
 ## Adaptive Timeout Configuration
 

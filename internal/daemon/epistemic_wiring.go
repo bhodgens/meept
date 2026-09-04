@@ -208,12 +208,20 @@ func wireHTTPHooks(agentLoop *agent.AgentLoop, cfg config.Config, bus *bus.Messa
 
 	wired := 0
 	for i, hc := range cfg.Hooks.HTTP {
+		// RetryCount pointer resolution: nil (key omitted in config) →
+		// default 3; an explicit value (including 0 = no retries and
+		// -1 = unlimited) passes through dereferenced. See
+		// config.HTTPHookConfig.RetryCount for the three-way contract.
+		retryCount := 3
+		if hc.RetryCount != nil {
+			retryCount = *hc.RetryCount
+		}
 		agentCfg := agent.HTTPHookConfig{
 			URL:         hc.URL,
 			Method:      hc.Method,
 			Headers:     hc.Headers,
 			Timeout:     hc.Timeout,
-			RetryCount:  hc.RetryCount,
+			RetryCount:  retryCount,
 			Async:       hc.Async,
 			AsyncRewake: hc.AsyncRewake,
 		}

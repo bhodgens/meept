@@ -26,6 +26,12 @@ import (
 const HookAsyncRewakeTopic = "hook.async_rewake"
 
 // HTTPHookConfig serializes hook configuration.
+//
+// RetryCount contract (wire via the config.HTTPHookConfig.RetryCount *int
+// surface): 0 = zero retries (exactly one attempt), -1 = unlimited retries,
+// n > 0 = n retries. The absent-key → default-3 mapping lives in the daemon
+// wiring (internal/daemon/epistemic_wiring.go), which passes a concrete
+// value; this type's plain int can never express "unset".
 type HTTPHookConfig struct {
 	URL        string            `json:"url"`
 	Method     string            `json:"method"`
@@ -86,21 +92,13 @@ func NewHTTPHook(config HTTPHookConfig, allowedURLs []string, logger *slog.Logge
 		config.Timeout = 30 * time.Second
 	}
 
-	// Default retry_count to 3 when unset: a zero value previously tripped
-	// executeSync's loop guard (attempt >= RetryCount) at attempt 0, so hooks
-	// with unset retry_count never retried transient failures ("HTTP request
-	// failed after 0 retries"). 3 matches the repo's other retry defaults
-	// (Job MaxRetries in internal/queue/job.go, retry_recovery.go).
-	//
-	// Contract: after construction RetryCount is always >= 1 — 0 is
-	// indistinguishable from "unset" over the JSON config surface and must
-	// mean the default, so negative RetryCount (-1) is the only explicit
-	// "no retries" opt-out. HTTPHookBackoffConfig callers must pass this
-	// normalized value; its MaxAttempts<=0-means-unlimited behavior must
-	// never see the raw pre-construction 0.
-	if config.RetryCount == 0 {
-		config.RetryCount = 3
-	}
+	// RetryCount passes through untouched. Contract: 0 = zero retries
+	// (exactly one attempt — the loop guard trips on the first failure),
+	// -1 = UNLIMITED retries (the attempt guards never fire; the Backoff
+	// preset treats MaxAttempts<=0 as unlimited), n > 0 = n retries. The
+	// "unset means 3" default is applied upstream in the daemon wiring
+	// (internal/daemon/epistemic_wiring.go), where the *int config field
+	// can distinguish an omitted key from an explicit 0.
 
 	// Compile allowed URL patterns
 	allowed := make([]*regexp.Regexp, 0, len(allowedURLs))
@@ -253,6 +251,8 @@ func (h *HTTPHook) executeSync(ctx context.Context, payload any) error {
 
 	// Execute with exponential backoff + jitter retries.
 	// MaxAttempts is set to RetryCount so the Backoff type controls pacing.
+	// RetryCount -1 makes MaxAttempts negative, which Backoff.NextDelay
+	// treats as unlimited (backoff.go: `MaxAttempts > 0 &&`).
 	bo := NewBackoff(HTTPHookBackoffConfig(h.config.RetryCount))
 	if h.logger != nil {
 		bo.WithLogger(h.logger)
@@ -267,7 +267,7 @@ func (h *HTTPHook) executeSync(ctx context.Context, payload any) error {
 				errorBody, _ := io.ReadAll(resp.Body)
 				resp.Body.Close()
 				lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(errorBody))
-				if attempt >= h.config.RetryCount {
+				if hookRetriesExhausted(attempt, h.config.RetryCount) {
 					return lastErr
 				}
 				if !shouldRetryHookError(lastErr) {
@@ -288,16 +288,29 @@ func (h *HTTPHook) executeSync(ctx context.Context, payload any) error {
 
 		// Network/transport error.
 		lastErr = err
-		if attempt >= h.config.RetryCount {
+		if hookRetriesExhausted(attempt, h.config.RetryCount) {
 			return fmt.Errorf("HTTP request failed after %d retries: %w", h.config.RetryCount, err)
 		}
 		if !shouldRetryHookError(err) {
 			return fmt.Errorf("HTTP request failed: %w", err)
 		}
 		if !bo.Sleep(ctx) {
+			if h.config.RetryCount < 0 {
+				// Unlimited-retry mode: Sleep only returns false on
+				// context cancellation (never on MaxAttempts).
+				return fmt.Errorf("HTTP request failed (unlimited retries interrupted by context): %w", err)
+			}
 			return fmt.Errorf("HTTP request failed after %d retries: %w", h.config.RetryCount, err)
 		}
 	}
+}
+
+// hookRetriesExhausted reports whether the executeSync attempt guard should
+// stop after the given 0-based attempt. RetryCount semantics: 0 = no
+// retries (stop on first failure), -1 = unlimited (guard never fires),
+// n > 0 = stop once attempt reaches n (n retries done).
+func hookRetriesExhausted(attempt, retryCount int) bool {
+	return retryCount >= 0 && attempt >= retryCount
 }
 
 // Wait blocks until all in-flight async executions complete.

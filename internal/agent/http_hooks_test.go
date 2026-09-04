@@ -25,20 +25,20 @@ func newTestHTTPHook(t *testing.T, srv *httptest.Server, cfg HTTPHookConfig) *HT
 	return hook
 }
 
-// TestNewHTTPHook_DefaultRetryCount: a zero-value (unset) retry_count must
-// normalize to 3, matching the repo's other retry defaults (Job MaxRetries=3
-// in internal/queue/job.go, retry_recovery.go MaxRetries=3). Regression test
-// for the production bug where unset retry_count meant "never retry".
+// TestNewHTTPHook_DefaultRetryCount: retry_count is a *int upstream in the
+// config surface; the daemon wiring resolves nil (key omitted) to the default
+// of 3 and passes the concrete value here. The constructor itself passes
+// RetryCount through untouched — 3 in, 3 out.
 func TestNewHTTPHook_DefaultRetryCount(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 
-	hook, err := NewHTTPHook(HTTPHookConfig{URL: srv.URL}, []string{srv.URL}, slog.Default())
+	hook, err := NewHTTPHook(HTTPHookConfig{URL: srv.URL, RetryCount: 3}, []string{srv.URL}, slog.Default())
 	if err != nil {
 		t.Fatalf("NewHTTPHook: %v", err)
 	}
 	if hook.config.RetryCount != 3 {
-		t.Fatalf("RetryCount = %d, want 3 (constructor default)", hook.config.RetryCount)
+		t.Fatalf("RetryCount = %d, want 3 (passed through)", hook.config.RetryCount)
 	}
 }
 
@@ -62,11 +62,11 @@ func TestNewHTTPHook_ExplicitRetryCountRespected(t *testing.T) {
 	}
 }
 
-// TestHTTPHook_TransientFailureRetriesByDefault: with retry_count unset,
-// a transient 500 must be retried and the hook must succeed on the second
-// attempt. This is the regression test for the production bug: before the
-// constructor default existed, RetryCount=0 tripped the loop guard at
-// attempt 0 and Execute failed permanently with "after 0 retries".
+// TestHTTPHook_TransientFailureRetriesByDefault: with the wiring default
+// retry_count (3), a transient 500 must be retried and the hook must succeed
+// on the second attempt. This is the regression test for the original
+// production bug where RetryCount=0 tripped the loop guard at attempt 0 and
+// Execute failed permanently with "after 0 retries".
 func TestHTTPHook_TransientFailureRetriesByDefault(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -80,10 +80,11 @@ func TestHTTPHook_TransientFailureRetriesByDefault(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// RetryCount deliberately unset → constructor default (3) must engage.
+	// Wiring default (nil → 3 in epistemic_wiring.go).
 	hook := newTestHTTPHook(t, srv, HTTPHookConfig{
-		URL:    srv.URL,
-		Method: "POST",
+		URL:        srv.URL,
+		Method:     "POST",
+		RetryCount: 3,
 	})
 	if err := hook.Execute(context.Background(), map[string]any{"hi": true}); err != nil {
 		t.Fatalf("Execute should succeed after one transient 500: %v", err)
@@ -93,11 +94,48 @@ func TestHTTPHook_TransientFailureRetriesByDefault(t *testing.T) {
 	}
 }
 
-// TestHTTPHook_NegativeRetryCountDisablesRetries: negative retry_count is the
-// explicit opt-out (0 is indistinguishable from "unset" over the JSON config
-// surface, so it normalizes to the default instead). A permanently failing
-// server must be attempted exactly once with no backoff sleeps.
-func TestHTTPHook_NegativeRetryCountDisablesRetries(t *testing.T) {
+// TestHTTPHook_ZeroRetryCountMeansNoRetries: an explicit retry_count of 0
+// must perform exactly ONE attempt with no retries and no backoff sleeps.
+// This is only expressible because the config surface carries retry_count as
+// a *int (nil = omitted = 3), so 0 is a real operator decision.
+func TestHTTPHook_ZeroRetryCountMeansNoRetries(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	hook := newTestHTTPHook(t, srv, HTTPHookConfig{
+		URL:        srv.URL,
+		Method:     "POST",
+		RetryCount: 0,
+	})
+	err := hook.Execute(context.Background(), map[string]any{"hi": true})
+	if err == nil {
+		t.Fatal("Execute should fail when server always returns 500")
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("server hit %d times, want 1 (retry_count=0 means no retries)", got)
+	}
+}
+
+// TestHTTPHook_UnlimitedRetryCount: retry_count -1 means UNLIMITED retries.
+// A permanently failing server must keep being retried until the context is
+// cancelled. The backoff override forces a tiny deterministic sleep so the
+// loop spins quickly; cancellation bounds the test.
+func TestHTTPHook_UnlimitedRetryCount(t *testing.T) {
+	t.Cleanup(func() {
+		clearPerOperationOverrides()
+		clearDefaultBackoffOverride()
+	})
+	SetPerOperationBackoffOverride("http", BackoffConfig{
+		BaseDelay:  1 * time.Millisecond,
+		MaxDelay:   1 * time.Millisecond,
+		Multiplier: 1.0,
+		Jitter:     0,
+	})
+
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
@@ -110,14 +148,23 @@ func TestHTTPHook_NegativeRetryCountDisablesRetries(t *testing.T) {
 		Method:     "POST",
 		RetryCount: -1,
 	})
-	err := hook.Execute(context.Background(), map[string]any{"hi": true})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	err := hook.Execute(ctx, map[string]any{"hi": true})
 	if err == nil {
-		t.Fatal("Execute should fail when server always returns 500")
+		t.Fatal("Execute should fail when context is cancelled during unlimited retries")
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
-		t.Fatalf("server hit %d times, want 1 (retries disabled)", got)
+	got := int(atomic.LoadInt32(&hits))
+	if got < 3 {
+		t.Fatalf("server hit %d times, want >= 3 (retry_count=-1 must keep retrying until context cancellation)", got)
 	}
 }
+
+// TestHTTPHook_NegativeRetryCountDisablesRetries was removed: under the new
+// contract -1 means UNLIMITED retries (see TestHTTPHook_UnlimitedRetryCount).
+// The explicit "no retries" value is 0 (see TestHTTPHook_ZeroRetryCountMeansNoRetries).
 
 func TestHTTPHook_SyncExecute(t *testing.T) {
 	var called int32
