@@ -2436,7 +2436,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		throttleParker := agent.NewTurnParker(logger, nil, cfg.LLM.QuotaRetry.MaxWait)
 		throttleParker.SetPollInterval(cfg.LLM.QuotaRetry.DeferCheckInterval)
 		throttleParker.SetParkEventBus(msgBus)
+		// AUDIT FIX C2 (bughunt 2026-09-03): the parker was wired but never
+		// Started — Park() only appends, resume happens solely in the ticker
+		// goroutine Start() spawns, so every parked throttle turn sat forever
+		// (dropped at shutdown) while the caller saw ("", nil) success.
+		// Start here with the wiring ctx, mirroring goalTurnParker.Start.
+		//
+		// The resume callback is nil at this point (SetThrottleParker below
+		// installs the class router), and Start no-ops silently when the
+		// callback is nil (parked_turn.go) — so start AFTER wiring.
 		c.ChatHandler.SetThrottleParker(throttleParker)
+		throttleParker.Start(c.ctx)
 		agent.SetFailurePolicyDefaults(llm.FailurePolicyConfig{
 			Horizon:                cfg.LLM.FailurePolicy.Horizon,
 			BaseThrottle:           cfg.LLM.FailurePolicy.BaseThrottle,
@@ -7081,17 +7091,24 @@ func (p *AgentJobProcessor) WithTaskStore(ts *task.Store) *AgentJobProcessor {
 
 // resolveStepWorkingDir finds the working directory for a step job:
 //
-//  1. task -> LinkedSessions -> session.WorktreePath (or ProjectPath)
-//  2. fallback: session whose ConversationID or ID equals the task's
-//     linked session id
+//  1. task -> LinkedSessions -> session.WorktreePath
+//  2. task -> LinkedSessions -> session.ProjectPath
+//  3. task -> LinkedSessions -> session CWD (DetectionContext.CWD,
+//     recorded from `meept chat --cwd`)
+//  4. fallback: session whose ConversationID or ID equals the task's
+//     linked session id, using the same WorktreePath > ProjectPath > CWD
+//     order
 //
-// Returns "" when nothing resolvable; callers fall back to the loop default.
+// The daemon's own working directory is never consulted (AGENTS.md:
+// os.Getwd() is not a sanctioned fallback in daemon code). Returns ""
+// when nothing resolvable; callers fall back to the loop default.
 func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
 	if p.sessionStore == nil || job.TaskID == "" {
 		return ""
 	}
 
 	var projectPath string
+	var cwdPath string
 	if p.taskStore != nil {
 		if t, err := p.taskStore.GetByID(job.TaskID); err == nil && t != nil {
 			for _, sessID := range t.LinkedSessions {
@@ -7114,11 +7131,17 @@ func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
 				if sess.ProjectPath != "" && projectPath == "" {
 					projectPath = sess.ProjectPath
 				}
+				if sess.DetectionContext != nil && sess.DetectionContext.CWD != "" && cwdPath == "" {
+					cwdPath = sess.DetectionContext.CWD
+				}
 			}
 		}
 	}
 	if projectPath != "" {
 		return projectPath
+	}
+	if cwdPath != "" {
+		return cwdPath
 	}
 
 	// Fallback: job.TaskID doubling as a session/conversation key.
@@ -7127,13 +7150,25 @@ func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
 			if sess.WorktreePath != "" {
 				return sess.WorktreePath
 			}
-			return sess.ProjectPath
+			if sess.ProjectPath != "" {
+				return sess.ProjectPath
+			}
+			if sess.DetectionContext != nil {
+				return sess.DetectionContext.CWD
+			}
+			return ""
 		}
 		if sess := p.sessionStore.Get(key); sess != nil {
 			if sess.WorktreePath != "" {
 				return sess.WorktreePath
 			}
-			return sess.ProjectPath
+			if sess.ProjectPath != "" {
+				return sess.ProjectPath
+			}
+			if sess.DetectionContext != nil {
+				return sess.DetectionContext.CWD
+			}
+			return ""
 		}
 	}
 	return ""
