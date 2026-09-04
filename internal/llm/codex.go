@@ -513,13 +513,20 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		detail := string(respBody)
-		if len(detail) > 512 {
-			detail = detail[:512]
-		}
-		return nil, &ClientError{
-			Message: fmt.Sprintf("codex API error (status %d): %s", resp.StatusCode, detail),
-		}
+		// Typed classification (codex_errors.go): 429 becomes
+		// *RateLimitError (Retry-After honored; quota-window bodies become
+		// *QuotaResetError), other non-200s become *APIError — the same
+		// lanes the OpenAI-compat client produces, so PM rotation and the
+		// quota early-exits classify codex failures correctly. The
+		// streaming path has no buffered body (it is consumed
+		// incrementally), so only the header feeds the classification.
+		return nil, codexErrorFromResponse(
+			resp.StatusCode,
+			respBody,
+			resp.Header.Get("Retry-After"),
+			cfg.ProviderID,
+			cfg.ModelID,
+		)
 	}
 
 	if payload.Stream.Enabled {

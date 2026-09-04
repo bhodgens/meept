@@ -591,6 +591,24 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 	return nil, fmt.Errorf("no providers available")
 }
 
+// DeltaCallbackWithAttempt is the attempt-aware delta callback used by
+// ProviderManager rotation (streaming failover, attempt-tagged deltas).
+// attempt is a zero-based index of the provider attempt: 0 = the primary's
+// first try, 1+ = each rotation to the next provider. When attempt increments,
+// the deltas that follow belong to a FRESH stream from a different provider —
+// consumers that accumulate text must RESET (replace, not append) their buffer
+// at that point or the final text duplicates the abandoned attempt's partial
+// content (option B "accumulate with attempt tagging" — task 01 leaf 01).
+// deltaType identifies the chunk channel ("text" for output text; the plain
+// DeltaCallback path only carries text today, but reasoning channels may
+// piggyback here later without another signature break).
+// Returning a non-nil error aborts the stream, mirroring DeltaCallback.
+type DeltaCallbackWithAttempt func(delta string, deltaType string, attempt int) error
+
+// deltaTypeText is the delta channel label for plain output-text chunks —
+// the only channel the DeltaCallback path carries (see DeltaCallbackWithAttempt).
+const deltaTypeText = "text"
+
 // ChatWithDeltaCallback implements StreamingChatter for the manager: the
 // same ordered-provider rotation as Chat, but each provider attempt goes
 // through its Chatter's streaming path when supported (falling back to
@@ -599,11 +617,54 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 // streaming request bypasses rotation entirely — a failing primary then
 // fails the turn even when healthy fallbacks are configured (observed:
 // agnes 5xx rate-limit-check on the streaming path with the local 8B idle).
+//
+// Attempt-tagged deltas (option B "accumulate with attempt tagging"): each
+// rotation gets a zero-based attempt index and the consumer's callback fires
+// through onDeltaWithAttempt with that index, so consumers can RESET their
+// accumulated text when the attempt increments — re-invoking a plain onDelta
+// per attempt made attempt-1 partial text precede attempt-2 full text
+// (duplicated content). Behavior without rotation is unchanged: attempt 0's
+// deltas flow exactly as before.
+//
+// Plain-callback contract under rotation: onDelta receives attempt-0 deltas
+// ONLY. The plain signature has no way to signal a reset, so forwarding the
+// next attempt's deltas would re-introduce the duplication this seam fixes;
+// callers streaming through a rotating manager should use
+// ChatWithDeltaCallbackWithAttempt to receive every attempt's stream tagged.
 func (pm *ProviderManager) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error) {
 	if onDelta == nil {
 		return pm.Chat(ctx, messages, opts...)
 	}
+	// Adapt the plain callback to the attempt-aware one at attempt 0, so
+	// existing single-provider (no-rotation) consumers keep byte-identical
+	// behavior through the same delivery path. Rotated attempts (index > 0)
+	// are suppressed: see the plain-callback contract above.
+	onDeltaWithAttempt := DeltaCallbackWithAttempt(func(delta string, deltaType string, attempt int) error {
+		if attempt != 0 {
+			return nil
+		}
+		return onDelta(delta)
+	})
+	return pm.chatWithAttemptTaggedDeltas(ctx, messages, onDeltaWithAttempt, opts...)
+}
 
+// ChatWithDeltaCallbackWithAttempt is the rotation-aware streaming entry
+// point: identical provider rotation to ChatWithDeltaCallback, but deltas
+// arrive tagged with the zero-based provider-attempt index so the consumer
+// can reset accumulation on rotation. onDeltaWithAttempt must be non-nil.
+func (pm *ProviderManager) ChatWithDeltaCallbackWithAttempt(ctx context.Context, messages []ChatMessage, onDeltaWithAttempt DeltaCallbackWithAttempt, opts ...ChatOption) (*Response, error) {
+	if onDeltaWithAttempt == nil {
+		return pm.Chat(ctx, messages, opts...)
+	}
+	return pm.chatWithAttemptTaggedDeltas(ctx, messages, onDeltaWithAttempt, opts...)
+}
+
+// chatWithAttemptTaggedDeltas drives the ordered-provider rotation and
+// delivers deltas through onDeltaWithAttempt tagged with the per-attempt
+// index. The per-attempt adapter wraps the consumer callback so each
+// underlying chatter keeps seeing a plain DeltaCallback whose invocations
+// are stamped with the CURRENT attempt index at delivery time.
+func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, messages []ChatMessage, onDeltaWithAttempt DeltaCallbackWithAttempt, opts ...ChatOption) (*Response, error) {
 	pm.mu.RLock()
 	if !pm.initialized || len(pm.providers) == 0 {
 		pm.mu.RUnlock()
@@ -618,6 +679,14 @@ func (pm *ProviderManager) ChatWithDeltaCallback(ctx context.Context, messages [
 
 	var lastErr error
 	var attempts int
+	// attempt is the zero-based index of the provider attempt currently
+	// being streamed. attemptAdapter closes over it, so every delta the
+	// underlying chatter delivers is stamped with the right index without
+	// the chatter knowing about rotation.
+	attempt := 0
+	attemptAdapter := func(delta string) error {
+		return onDeltaWithAttempt(delta, deltaTypeText, attempt)
+	}
 
 	for i, entry := range orderedProviders {
 		if healthSnapshot[i] == ProviderStatusDisabled {
@@ -629,6 +698,11 @@ func (pm *ProviderManager) ChatWithDeltaCallback(ctx context.Context, messages [
 		}
 
 		attempts++
+		// attempt is the index of the provider ATTEMPT about to stream
+		// (0 = primary's first try, 1+ = each rotation). Skipped candidates
+		// do not consume an attempt index: consumers only reset on deltas
+		// they actually received a stream for.
+		attempt = attempts - 1
 		start := time.Now()
 
 		var attemptCtx context.Context
@@ -641,7 +715,7 @@ func (pm *ProviderManager) ChatWithDeltaCallback(ctx context.Context, messages [
 		var resp *Response
 		var err error
 		if sc, ok := AsStreamingChatter(entry.Chatter); ok {
-			resp, err = sc.ChatWithDeltaCallback(attemptCtx, messages, onDelta, opts...)
+			resp, err = sc.ChatWithDeltaCallback(attemptCtx, messages, attemptAdapter, opts...)
 		} else {
 			resp, err = entry.Chatter.Chat(attemptCtx, messages, opts...)
 		}

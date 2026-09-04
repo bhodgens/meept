@@ -377,8 +377,10 @@ func TestCodexChatErrorMapping(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 401")
 	}
-	if _, ok := errors.AsType[*ClientError](err); !ok {
-		t.Fatalf("error %v is not *ClientError", err)
+	// Non-200s are typed as *APIError (codex_errors.go), matching the
+	// OpenAI-compat client's error lane — isAuthError/PM rotation key on it.
+	if _, ok := errors.AsType[*APIError](err); !ok {
+		t.Fatalf("error %v is not *APIError", err)
 	}
 	if !strings.Contains(err.Error(), "401") {
 		t.Errorf("error %q missing 401", err.Error())
