@@ -189,13 +189,25 @@ func (s *SQLiteFTSStore) initSchema(ctx context.Context) error {
 // migrateSchema applies schema migrations to existing tables.
 // FIX #0020: Adds columns that may be missing from older database versions.
 func (s *SQLiteFTSStore) migrateSchema(ctx context.Context) error {
-	// Check and add last_accessed_at column if missing (episodic/task memory)
+	// Check and add missing columns with the SAME types the fresh DDL
+	// declares (H7, bughunt 2026-09-04): the old hardcoded "TEXT" for every
+	// column gave version/is_current TEXT affinity on migrated DBs, so
+	// COALESCE(MAX(version),0) compared lexicographically and version
+	// stalled at 9 (MAX('10','9')='9' → duplicate "version 10" rows
+	// forever). last_accessed_at/parent_id/search_text are genuinely TEXT;
+	// version/is_current are INTEGER (episodic.go DDL) and keep their
+	// default-free ADD form (SQLite column default applies per-add).
+	intCols := map[string]bool{"version": true, "is_current": true}
 	columns := []string{"last_accessed_at", "parent_id", "is_current", "version"}
 	if s.searchTextColumn {
 		columns = append(columns, "search_text")
 	}
 	for _, col := range columns {
-		if err := s.addColumnIfMissing(ctx, s.config.TableName, col, "TEXT", "DEFAULT ''"); err != nil {
+		colType, defaultVal := "TEXT", "DEFAULT ''"
+		if intCols[col] {
+			colType, defaultVal = "INTEGER", "DEFAULT 1"
+		}
+		if err := s.addColumnIfMissing(ctx, s.config.TableName, col, colType, defaultVal); err != nil {
 			s.logger.Warn("Column migration failed", "column", col, "error", err)
 		}
 	}
