@@ -4331,7 +4331,10 @@ func (l *AgentLoop) attemptStateRecovery(err error) error {
 		return err
 	case StateBlocked:
 		l.notifyUserBlocked(err)
-		return fmt.Errorf("%w: %s", ErrAgentBlocked, err.Error())
+		// %w preserves the original cause so callers can errors.Is/As
+		// through the ErrAgentBlocked sentinel; the ": " separator keeps
+		// the user-facing message shape identical.
+		return fmt.Errorf("%w: %w", ErrAgentBlocked, err)
 	case StateToolWaiting:
 		l.logger.Info("recovering from tool_waiting — returning to processing_result",
 			"error", err.Error())

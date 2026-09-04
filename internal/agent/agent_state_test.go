@@ -963,30 +963,30 @@ func TestAttemptStateRecovery_ErrorSemantics(t *testing.T) {
 		wantContains string // substring expected in err.Error(); "" = skip
 		wantNotify   int    // expected number of task notifications
 		// wantInputChain: whether the returned error preserves the INPUT
-		// error via %w chaining. False ONLY for the Blocked case, which
-		// deliberately embeds the original's text (%s) behind the
-		// ErrAgentBlocked sentinel — the sentinel is the caller contract.
+		// error via %w chaining. All cases now chain — the Blocked case
+		// wraps ErrAgentBlocked AND the original cause (%w + %w).
 		wantInputChain bool
 	}{
 		{
 			// The sibling-fix contract: Error state is reset to Idle so the
 			// NEXT turn starts clean, but THIS turn's error is propagated.
-			name:      "state_error_resets_to_idle_and_propagates",
-			setup:     []AgentState{StateThinking, StateError},
-			wantState: StateIdle,
-			wantErrIs: original,
+			name:           "state_error_resets_to_idle_and_propagates",
+			setup:          []AgentState{StateThinking, StateError},
+			wantState:      StateIdle,
+			wantErrIs:      original,
 			wantInputChain: true,
 		},
 		{
 			// Blocked state notifies the user AND returns ErrAgentBlocked —
 			// the caller (RunOnce/ProcessTask) surfaces the error reply; the
 			// notification is the async channel. No silent success.
-			name:         "state_blocked_wraps_erragentblocked_and_notifies",
-			setup:        []AgentState{StateThinking, StateToolExecuting, StateBlocked},
-			wantState:    StateBlocked,
-			wantErrIs:    ErrAgentBlocked,
-			wantContains: "llm provider boom",
-			wantNotify:   1,
+			name:           "state_blocked_wraps_erragentblocked_and_notifies",
+			setup:          []AgentState{StateThinking, StateToolExecuting, StateBlocked},
+			wantState:      StateBlocked,
+			wantErrIs:      ErrAgentBlocked,
+			wantContains:   "llm provider boom",
+			wantNotify:     1,
+			wantInputChain: true,
 		},
 		{
 			// ToolWaiting resets to ProcessingResult (un-stuck for the next
@@ -994,18 +994,18 @@ func TestAttemptStateRecovery_ErrorSemantics(t *testing.T) {
 			// is a direct return from reasoningCycle — no loop iteration
 			// follows to synthesize a tool-error result, so returning nil
 			// here reported failed turns as ("", nil) successes.
-			name:      "state_tool_waiting_unsticks_but_propagates",
-			setup:     []AgentState{StateThinking, StateToolExecuting, StateToolWaiting},
-			wantState: StateProcessingResult,
-			wantErrIs: original,
+			name:           "state_tool_waiting_unsticks_but_propagates",
+			setup:          []AgentState{StateThinking, StateToolExecuting, StateToolWaiting},
+			wantState:      StateProcessingResult,
+			wantErrIs:      original,
 			wantInputChain: true,
 		},
 		{
 			// Unknown/unrelated state: nothing to recover, error unchanged.
-			name:      "default_state_passes_error_through",
-			setup:     []AgentState{StateThinking},
-			wantState: StateThinking,
-			wantErrIs: original,
+			name:           "default_state_passes_error_through",
+			setup:          []AgentState{StateThinking},
+			wantState:      StateThinking,
+			wantErrIs:      original,
 			wantInputChain: true,
 		},
 		{
@@ -1013,9 +1013,9 @@ func TestAttemptStateRecovery_ErrorSemantics(t *testing.T) {
 			// user-visible message; state resets to Idle. Input wraps a
 			// *llm.BudgetExceededError; propagation is checked via the
 			// wantInputChain errors.Is against the input itself.
-			name:      "budget_exceeded_propagates_and_resets",
-			setup:     []AgentState{StateThinking, StateError},
-			wantState: StateIdle,
+			name:           "budget_exceeded_propagates_and_resets",
+			setup:          []AgentState{StateThinking, StateError},
+			wantState:      StateIdle,
 			wantInputChain: true,
 		},
 	}
