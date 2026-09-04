@@ -591,6 +591,125 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 	return nil, fmt.Errorf("no providers available")
 }
 
+// ChatWithDeltaCallback implements StreamingChatter for the manager: the
+// same ordered-provider rotation as Chat, but each provider attempt goes
+// through its Chatter's streaming path when supported (falling back to
+// plain Chat for providers that are not StreamingChatters). Without this
+// method the agent loop's AsStreamingChatter(pm) check fails and every
+// streaming request bypasses rotation entirely — a failing primary then
+// fails the turn even when healthy fallbacks are configured (observed:
+// agnes 5xx rate-limit-check on the streaming path with the local 8B idle).
+func (pm *ProviderManager) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error) {
+	if onDelta == nil {
+		return pm.Chat(ctx, messages, opts...)
+	}
+
+	pm.mu.RLock()
+	if !pm.initialized || len(pm.providers) == 0 {
+		pm.mu.RUnlock()
+		return nil, errors.New("provider manager not initialized or no providers configured")
+	}
+	orderedProviders := pm.getOrderedProviders()
+	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
+	for i, e := range orderedProviders {
+		healthSnapshot[i] = e.Health.Status
+	}
+	pm.mu.RUnlock()
+
+	var lastErr error
+	var attempts int
+
+	for i, entry := range orderedProviders {
+		if healthSnapshot[i] == ProviderStatusDisabled {
+			continue
+		}
+		if healthSnapshot[i] == ProviderStatusUnhealthy && len(orderedProviders) > 1 && attempts == 0 {
+			pm.logger.Debug("Skipping unhealthy provider", "provider", entry.Config.ProviderID)
+			continue
+		}
+
+		attempts++
+		start := time.Now()
+
+		var attemptCtx context.Context
+		var cancel context.CancelFunc
+		if pm.config.FailoverTimeout > 0 {
+			attemptCtx, cancel = context.WithTimeout(ctx, pm.config.FailoverTimeout)
+		} else {
+			attemptCtx, cancel = context.WithCancel(ctx)
+		}
+		var resp *Response
+		var err error
+		if sc, ok := AsStreamingChatter(entry.Chatter); ok {
+			resp, err = sc.ChatWithDeltaCallback(attemptCtx, messages, onDelta, opts...)
+		} else {
+			resp, err = entry.Chatter.Chat(attemptCtx, messages, opts...)
+		}
+		cancel()
+
+		latency := time.Since(start)
+
+		if err != nil {
+			lastErr = err
+
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+
+			// Quota checked BEFORE rate limit (per-credential beats
+			// per-provider specificity) — mirrors Chat().
+			switch {
+			case IsQuotaResetError(err):
+				resetAt := time.Time{}
+				if qe, ok := AsQuotaResetError(err); ok {
+					resetAt = qe.ResetAt
+				}
+				pm.mu.Lock()
+				pm.blockQuotaCredential(entry, resetAt)
+				pm.mu.Unlock()
+				pm.logger.Warn("Quota limit hit on streaming call, blocking credential and trying next",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+				)
+				continue
+
+			case IsRateLimitError(err):
+				pm.logger.Warn("Rate limit hit on streaming call, rotating to next provider",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+				)
+				continue
+
+			case isClientError(err):
+				pm.logger.Warn("Client error on streaming call, not rotating (request-level issue)",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+				)
+				return nil, err
+
+			default:
+				pm.recordFailure(entry, err, latency)
+				pm.logger.Warn("Provider streaming call failed, trying next",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+				)
+				continue
+			}
+		}
+
+		pm.recordSuccess(entry, resp, latency)
+		pm.mu.Lock()
+		pm.clearQuotaCredential(entry)
+		pm.mu.Unlock()
+		return resp, nil
+	}
+
+	if lastErr != nil {
+		return nil, fmt.Errorf("all %d provider(s) failed (last: %w)", len(orderedProviders), lastErr)
+	}
+	return nil, fmt.Errorf("no providers available")
+}
+
 // getOrderedProviders returns providers sorted by preference, with
 // quota-blocked credentials (whose block has not expired) filtered out.
 // Callers must hold at least pm.mu.RLock.
