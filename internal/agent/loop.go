@@ -2531,6 +2531,13 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		kind := ClassifyRun(attached, isolated)
 		switch kind {
 		case SpeakNotify:
+			// C3: blank final text (e.g. FinishReason=stop with only
+			// whitespace) is nothing to notify about — skip silently.
+			// reply_to_user mid-turn notifications are unaffected.
+			if strings.TrimSpace(finalResponse) == "" {
+				l.logger.Debug("speak: skipping final-text notify (blank final response)")
+				break
+			}
 			// De-dup (leaf 11 Task 4): if the model already notified via
 			// reply_to_user this turn, drop the duplicate final-text notify
 			// so the user receives exactly one notification.
@@ -3981,8 +3988,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 		}
 
-		// Check for empty response (no tool calls, no content) - nudge the model
-		if strings.TrimSpace(response.Content) == "" {
+		// A FinishReason of "stop" is the model's terminal signal: the turn
+		// must end in THIS iteration rather than looping on a content nudge.
+		// Blank final text falls through to the final-text return path
+		// (RunOnce's speak routing skips blank text, preserving the C3
+		// no-notify contract). One carve-out: a blank response that carries
+		// substantive reasoning is a reasoning-only turn — the exact pattern
+		// the reasoning watchdog above exists to police — so it keeps the
+		// nudge ladder instead of terminating (see
+		// TestGuards_ReasoningWatchdog_Integration).
+		contentBlank := strings.TrimSpace(response.Content) == ""
+		terminalBlankStop := contentBlank &&
+			response.FinishReason == "stop" &&
+			strings.TrimSpace(response.Reasoning) == ""
+		if contentBlank && !terminalBlankStop {
 			l.logger.Warn("LLM returned empty content, nudging for more information",
 				"iteration", iteration,
 				"conversation", conversationID,
@@ -4263,8 +4282,12 @@ func (l *AgentLoop) notifyUserBlocked(err error) {
 //   - StateBlocked: notify the user and return ErrAgentBlocked wrapping the
 //     original error. The caller surfaces this to the user; no auto-retry.
 //   - StateToolWaiting: a tool result timed out — transition back to
-//     ProcessingResult so the loop can synthesize a tool-error result and
-//     continue. Returns nil.
+//     ProcessingResult so the state machine is un-stuck (next turn can
+//     execute tools again), but return the original error: THIS turn still
+//     failed, and the sole call site (reasoningCycle's LLM-failure return)
+//     is a direct `return ""` — no loop iteration follows to synthesize a
+//     tool-error result, so returning nil here reported no-op turns as
+//     successes.
 //   - default: nothing to recover; return err unchanged.
 //
 // It is safe to call when stateMachine is nil (returns err).
@@ -4319,7 +4342,11 @@ func (l *AgentLoop) attemptStateRecovery(err error) error {
 				"error", tErr.Error())
 			return err
 		}
-		return nil
+		// State is un-stuck for the next turn, but THIS turn failed: the
+		// sole call site is a direct return from reasoningCycle — no loop
+		// iteration follows to absorb this error — so returning nil here
+		// reported failed turns as ("", nil) successes.
+		return err
 	default:
 		return err
 	}
@@ -4640,11 +4667,19 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		}
 
 		// Handle quota errors: track the episode, mark the Resolver block,
-		// and return WITHOUT RecordAliasFailure — quota is not an alias
-		// health failure (quota-reset-resilience master contract 4). The
-		// quota waiter (resolver_direct.go) already applied wait+retry, so
-		// by here the quota window has passed without recovery. The caller
-		// (ChatHandler) parks the turn for auto-resume at the reset time.
+		// and ATTEMPT rotation to the next healthy alias candidate before
+		// surfacing anything. Quota is not an alias health failure — NO
+		// RecordAliasFailure (quota-reset-resilience master contract 4) —
+		// but a quota'd candidate must not fail the turn while the alias has
+		// other members: the BlockQuotaEntry/BlockQuotaCredential marks above
+		// make RotateToNextModel skip THIS model, and the loop-top
+		// re-resolve + SwitchModel land the retry on the next candidate
+		// (agnes 429 → local → ollama). The quota waiter (resolver_direct.go)
+		// already applied wait+retry, so by here the quota window has passed
+		// without recovery for THIS model. Only when every candidate is
+		// blocked (or no alias is configured) does the original error return
+		// — the caller (ChatHandler) then parks the turn for auto-resume at
+		// the reset time.
 		var quotaErr *llm.QuotaResetError
 		if errors.As(err, &quotaErr) {
 			unblockAt := quotaErr.ResetAt
@@ -4670,12 +4705,57 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				"model", quotaErr.ModelID,
 				"retry_after", quotaErr.RetryAfter,
 			)
+
+			// Rotate to the next healthy candidate and retry. Bounded by the
+			// shared backoff budget — the same guard as the RateLimitError
+			// branch above; without it a fully-blocked alias would spin.
+			if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
+				if _, rotateErr := l.resolver.RotateToNextModel(l.modelRef); rotateErr == nil {
+					if _, ok := llmBackoff.NextDelay(); !ok {
+						l.logger.Warn("Quota rotation retry budget exhausted",
+							"alias", l.modelRef,
+							"attempts", attempt,
+						)
+						return nil, fmt.Errorf("max retry attempts (%d) reached for quota limit: %w", maxAttempts, err)
+					}
+					l.logger.Info("Rotated to next model after quota limit",
+						"alias", l.modelRef,
+						"attempt", attempt,
+					)
+					continue
+				}
+				// Rotation failed: every candidate is quota-blocked (or the
+				// alias has no other member). Surface the original error for
+				// caller-side parking.
+			}
 			return nil, err
 		}
 
-		// Non-rate-limit error - return immediately
+		// Non-rate-limit error: record alias health, then ATTEMPT rotation to
+		// the next alias candidate before surfacing the failure. A dead
+		// endpoint (connection refused, 5xx) on one member must not fail the
+		// turn while healthier members remain — the mid-alias hop of the
+		// quota chain (agnes 429 → local down → ollama) lands here. Bounded
+		// by the shared backoff budget like every other rotation branch;
+		// when rotation is impossible (no alias, single candidate, all
+		// quota-blocked) the error returns immediately as before.
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
 			l.resolver.RecordAliasFailure(l.modelRef, err, servedModel)
+			if _, rotateErr := l.resolver.RotateToNextModel(l.modelRef); rotateErr == nil {
+				if _, ok := llmBackoff.NextDelay(); !ok {
+					l.logger.Warn("Error rotation retry budget exhausted",
+						"alias", l.modelRef,
+						"attempts", attempt,
+					)
+					return nil, fmt.Errorf("max retry attempts (%d) reached after rotation: %w", maxAttempts, err)
+				}
+				l.logger.Info("Rotated to next model after error",
+					"alias", l.modelRef,
+					"attempt", attempt,
+					"error", err,
+				)
+				continue
+			}
 		}
 		return nil, err
 	}

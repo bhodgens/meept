@@ -215,9 +215,9 @@ func TestRunOnce_AttachedRouterNil_BubbleOnly(t *testing.T) {
 
 // TestRunOnce_DetachedEmptyFinalText_NoNotify verifies the C3 empty-text
 // rule end-to-end: a detached run that ends with empty final text must not
-// notify. The whitespace response exhausts the mock, so the turn ends via
-// the LLM-failure path — which now propagates the error (callers must learn
-// the turn failed) — while the no-notify contract still holds.
+// notify. The whitespace response carries FinishReason=stop, which now
+// terminates the turn cleanly in a single iteration; the loop returns
+// without error while the no-notify contract still holds.
 func TestRunOnce_DetachedEmptyFinalText_NoNotify(t *testing.T) {
 	chatter := newMockChatter(
 		&llm.Response{Content: "   ", FinishReason: "stop", Usage: llm.TokenUsage{TotalTokens: 5}},
@@ -226,10 +226,31 @@ func TestRunOnce_DetachedEmptyFinalText_NoNotify(t *testing.T) {
 	router := NewSpeakRouter(pub.publish)
 
 	loop := newSpeakTestLoop(t, chatter, router, false, false)
-	if _, err := loop.RunOnce(context.Background(), "produce nothing", "conv-speak-empty"); err == nil {
-		t.Fatalf("RunOnce: want error from exhausted LLM mock, got nil")
+	if _, err := loop.RunOnce(context.Background(), "produce nothing", "conv-speak-empty"); err != nil {
+		t.Fatalf("RunOnce: want clean termination on FinishReason=stop with whitespace content, got error: %v", err)
 	}
 	if calls := pub.recorded(); len(calls) != 0 {
 		t.Errorf("deliveries = %d, want 0 (empty final text)", len(calls))
+	}
+	if got := chatter.callCount; got != 1 {
+		t.Errorf("LLM calls = %d, want 1 (whitespace + stop must terminate the turn immediately)", got)
+	}
+}
+
+// TestRunOnce_WhitespaceStop_TerminatesInOneCall is the regression test for
+// the agent-loop whitespace bug: a whitespace-only response with
+// FinishReason=stop is a terminal signal and must end the turn within ONE
+// LLM call — the loop must not nudge-and-iterate again on blank content
+// when the model has signalled stop.
+func TestRunOnce_WhitespaceStop_TerminatesInOneCall(t *testing.T) {
+	chatter := newMockChatter(
+		&llm.Response{Content: "  \n	 ", FinishReason: "stop", Usage: llm.TokenUsage{TotalTokens: 3}},
+	)
+	loop := newSpeakTestLoop(t, chatter, nil, true, false)
+	if _, err := loop.RunOnce(context.Background(), "say nothing", "conv-ws-stop"); err != nil {
+		t.Fatalf("RunOnce: want nil error, got %v", err)
+	}
+	if got := chatter.callCount; got != 1 {
+		t.Errorf("LLM calls = %d, want 1 (FinishReason=stop terminates regardless of content)", got)
 	}
 }
