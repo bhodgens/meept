@@ -338,8 +338,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 			// Quota errors never re-enter the short-retry loop: the window
 			// is hours, not seconds. Return immediately (quota-reset-
 			// resilience contract 1).
-			var quotaErr *QuotaResetError
-			if errors.As(err, &quotaErr) {
+			if _, ok := errors.AsType[*QuotaResetError](err); ok {
 				return nil, err
 			}
 
@@ -363,7 +362,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 				)
 				if attempt < shortRetries {
 					wait := shortThrottleSleep(header, plan, time.Now(), attempt-1)
-					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 && rlErr.RetryAfter < wait {
+					if rlErr, ok := errors.AsType[*RateLimitError](err); ok && rlErr.RetryAfter > 0 && rlErr.RetryAfter < wait {
 						// Parity with the legacy loop: a smaller
 						// server-suggested wait is honored.
 						wait = rlErr.RetryAfter
@@ -564,8 +563,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		if err != nil {
 			// Quota errors never re-enter the short-retry loop (streaming
 			// path): hours-scale window, return immediately.
-			var quotaErr *QuotaResetError
-			if errors.As(err, &quotaErr) {
+			if _, ok := errors.AsType[*QuotaResetError](err); ok {
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -586,7 +584,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 				)
 				if attempt < shortRetries {
 					wait := shortThrottleSleep(header, plan, time.Now(), attempt-1)
-					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 && rlErr.RetryAfter < wait {
+					if rlErr, ok := errors.AsType[*RateLimitError](err); ok && rlErr.RetryAfter > 0 && rlErr.RetryAfter < wait {
 						// Parity with the legacy loop: a smaller
 						// server-suggested wait is honored.
 						wait = rlErr.RetryAfter
@@ -1290,6 +1288,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 		}
 		store := c.metricsStore
 		logger := c.logger
+		//nolint:gosec // goroutine outlives request context
 		go func() {
 			if rerr := store.Record(context.Background(), record); rerr != nil {
 				logger.Debug("metrics record failed", "error", rerr)
@@ -1453,6 +1452,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 		}
 		store := c.metricsStore
 		logger := c.logger
+		//nolint:gosec // goroutine outlives request context
 		go func() {
 			if rerr := store.Record(context.Background(), record); rerr != nil {
 				logger.Debug("metrics record failed", "error", rerr)
