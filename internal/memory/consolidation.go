@@ -304,33 +304,38 @@ func (c *Consolidator) consolidateEpisodic(ctx context.Context, cutoff time.Time
 	// Usefulness eviction (leaf: memory usefulness scoring). When enabled,
 	// harmful and bottom-floor memories are deleted in a dedicated FIRST
 	// batch before any legacy age-based deletes.
-	useCfg := ResolveUsefulEviction(c.manager.config.Usefulness)
-	if useCfg.Enabled && c.manager != nil {
-		if initErr := c.manager.initVoteStore(); initErr != nil {
-			c.logger.Warn("usefulness vote store unavailable; skipping usefulness eviction", "error", initErr)
-		} else if netVotes, voteErr := c.manager.NetVotes(ctx, idsOf(oldMemories)); voteErr != nil {
-			c.logger.Warn("usefulness vote query failed; skipping usefulness eviction", "error", voteErr)
-		} else {
-			plan := PlanUsefulEviction(oldMemories, netVotes, now, useCfg)
-			evict := append(append([]string{}, plan.Harmful...), plan.Floor...)
-			if len(evict) > 0 {
-				deleted, delErr := c.backend.DeleteByIDs(ctx, evict)
-				if delErr != nil {
-					c.logger.Warn("usefulness eviction partially failed",
-						"attempted", len(evict), "error", delErr)
-				}
-				report.archived += deleted
-				evictedSet := make(map[string]bool, len(evict))
-				for _, id := range evict {
-					evictedSet[id] = true
-				}
-				var remaining []MemoryResult
-				for _, m := range oldMemories {
-					if !evictedSet[m.Memory.ID] {
-						remaining = append(remaining, m)
+	// D-M4 ordering fix: check c.manager BEFORE dereferencing it — the
+	// original `c.manager.config.Usefulness` read panicked on a
+	// manager-less consolidator even though the nil branch was right there.
+	if c.manager != nil {
+		useCfg := ResolveUsefulEviction(c.manager.config.Usefulness)
+		if useCfg.Enabled {
+			if initErr := c.manager.initVoteStore(); initErr != nil {
+				c.logger.Warn("usefulness vote store unavailable; skipping usefulness eviction", "error", initErr)
+			} else if netVotes, voteErr := c.manager.NetVotes(ctx, idsOf(oldMemories)); voteErr != nil {
+				c.logger.Warn("usefulness vote query failed; skipping usefulness eviction", "error", voteErr)
+			} else {
+				plan := PlanUsefulEviction(oldMemories, netVotes, now, useCfg)
+				evict := append(append([]string{}, plan.Harmful...), plan.Floor...)
+				if len(evict) > 0 {
+					deleted, delErr := c.backend.DeleteByIDs(ctx, evict)
+					if delErr != nil {
+						c.logger.Warn("usefulness eviction partially failed",
+							"attempted", len(evict), "error", delErr)
 					}
+					report.archived += deleted
+					evictedSet := make(map[string]bool, len(evict))
+					for _, id := range evict {
+						evictedSet[id] = true
+					}
+					var remaining []MemoryResult
+					for _, m := range oldMemories {
+						if !evictedSet[m.Memory.ID] {
+							remaining = append(remaining, m)
+						}
+					}
+					oldMemories = remaining
 				}
-				oldMemories = remaining
 			}
 		}
 	}

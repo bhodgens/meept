@@ -250,3 +250,76 @@ func TestParkTurnEvents_ThrottleResumePayload(t *testing.T) {
 		t.Errorf("session_id = %v, want s-park-resume", ev["session_id"])
 	}
 }
+
+// TestEmitResumeEvent_TrueParkTime (D-M3, bughunt 2026-09-04): when the
+// parker's MaxWait soft-stop rewrites rec.ResumeAt to now+MaxWait, Waited
+// measured from ResumeAt understates the real wait. Passing the payload's
+// true ParkedAt must measure the wait from the actual park instant; a zero
+// trueParkAt falls back to the (possibly rewritten) ResumeAt.
+func TestEmitResumeEvent_TrueParkTime(t *testing.T) {
+	b := bus.New(nil, testLogger())
+	spy := newParkEventSpy(b)
+	defer spy.stop(b)
+
+	clock := &fakeNowFunc{now: time.Now()}
+	parker := NewTurnParker(testLogger(), func(context.Context, ParkedTurnRecord) {}, time.Hour)
+	parker.nowFunc = clock.nowFn
+	parker.SetParkEventBus(b)
+
+	// Timeline (fake clock):
+	//   true park at T-2h
+	//   parker soft-stop rewrites ResumeAt to park+1h = T+1h... use T+50m
+	//   resume fires at T (after a 10m advance)
+	parkInstant := clock.now.Add(-2 * time.Hour)
+	rec := ParkedTurnRecord{
+		ConversationID: "c-true-park",
+		SessionID:      "s-true-park",
+		AgentID:        "a-true-park",
+		Class:          llm.FailureThrottle,
+		// Soft-stopped: the parker scheduled this at parkInstant+maxWait
+		// (1h) — NOT the provider's true unblock time — so ResumeAt no
+		// longer encodes the true park time.
+		ResumeAt: parkInstant.Add(time.Hour),
+	}
+	// Resume fires 10 minutes after "now": waited from the TRUE park is
+	// 2h10m; the soft-stop-rewritten ResumeAt would read only 50m.
+	clock.advance(10 * time.Minute)
+	trueParkAt := parkInstant
+
+	parker.emitResumeEvent(rec, trueParkAt)
+	events := spy.collect(t, 500*time.Millisecond)
+	if len(events) != 1 {
+		t.Fatalf("resume events = %d, want 1 (%+v)", len(events), events)
+	}
+	waitedStr, ok := events[0]["waited"].(string)
+	if !ok || waitedStr == "" {
+		t.Fatalf("waited = %v, want a duration string", events[0]["waited"])
+	}
+	waited, err := time.ParseDuration(waitedStr)
+	if err != nil {
+		t.Fatalf("waited %q not a duration: %v", waitedStr, err)
+	}
+	if waited < 2*time.Hour+9*time.Minute || waited > 2*time.Hour+11*time.Minute {
+		t.Errorf("waited = %v, want ≈2h10m (true park → resume)", waited)
+	}
+
+	// Timeline comment: T+1h ResumeAt − T+10m resume = 50m. A zero
+	// trueParkAt measures from the soft-stop-rewritten ResumeAt, i.e. the
+	// understated 50m rather than the true 2h10m.
+	parker.emitResumeEvent(rec, time.Time{})
+	events = spy.collect(t, 500*time.Millisecond)
+	if len(events) != 1 {
+		t.Fatalf("fallback resume events = %d, want 1 (%+v)", len(events), events)
+	}
+	fallbackStr, ok := events[0]["waited"].(string)
+	if !ok || fallbackStr == "" {
+		t.Fatalf("fallback waited = %v, want a duration string", events[0]["waited"])
+	}
+	fallback, err := time.ParseDuration(fallbackStr)
+	if err != nil {
+		t.Fatalf("fallback waited %q not a duration: %v", fallbackStr, err)
+	}
+	if fallback < 1*time.Hour+9*time.Minute || fallback > 1*time.Hour+11*time.Minute {
+		t.Errorf("fallback waited = %v, want ≈1h10m (rewritten ResumeAt → resume)", fallback)
+	}
+}

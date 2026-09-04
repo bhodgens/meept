@@ -329,8 +329,10 @@ func (l *GoalLoop) ResumeGoalEpisode(ctx context.Context, rec agent.ParkedTurnRe
 	// FRESH record instead of being suppressed by the stale one.
 	l.parker.clearParkDedup(l.employeeID, p.Phase, p.Trigger)
 	// Resume observability (leaf 04, D9): symmetric to the park event, via
-	// the shared parker's event bus on agent.quota_wait.
-	l.parker.turns.EmitResumeEvent(rec)
+	// the shared parker's event bus on agent.quota_wait. Goal payloads carry
+	// no parked_at key (D-M3 note): pass the zero time so Waited falls back
+	// to the scheduled ResumeAt.
+	l.parker.turns.EmitResumeEvent(rec, time.Time{})
 
 	// H6 (bughunt 2026-09-04): resume must honor the operator's pause —
 	// the normal Trigger path rejects paused employees (manager.go Trigger

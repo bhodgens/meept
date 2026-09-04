@@ -245,6 +245,15 @@ func (r *SearchRollback) ShouldRollback(hash string) bool {
 	return ok
 }
 
+// Reset clears the rollback ring (e.g. between turns). Mirrors
+// NoProgressLadder.Reset: lock, empty the ring, clear the membership set.
+func (r *SearchRollback) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ring = r.ring[:0]
+	r.inRing = make(map[string]struct{}, r.window)
+}
+
 // ReasoningWatchdog counts consecutive assistant turns that produced
 // reasoning tokens but neither visible text nor tool calls.
 type ReasoningWatchdog struct {

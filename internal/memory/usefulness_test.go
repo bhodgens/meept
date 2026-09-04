@@ -441,3 +441,36 @@ func TestVoteStore_StandaloneFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// D-M4 (bughunt 2026-09-04): nil-check ordering in consolidateEpisodic.
+// The old code read c.manager.config.Usefulness BEFORE the `c.manager != nil`
+// conjunct, panicking on a manager-less consolidator. A nil manager with the
+// flag ON must now skip usefulness eviction cleanly and still consolidate.
+func TestConsolidateEpisodic_NilManagerWithUsefulnessFlagOn(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-48 * time.Hour)
+	backend := &recordingBackend{memories: makeMemories(3, old)}
+	c := NewConsolidator(ConsolidatorConfig{
+		Manager: nil, // manager-less consolidator: the pre-fix panic path
+		Backend: backend,
+		Logger:  slog.New(slog.DiscardHandler),
+	})
+
+	report, err := c.consolidateEpisodic(context.Background(), now.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("consolidateEpisodic with nil manager: %v", err)
+	}
+	if report == nil {
+		t.Fatal("report must not be nil")
+	}
+	// Usefulness eviction was skipped (no manager); legacy consolidation
+	// still archived all 3 memories into 1 summary.
+	if report.created != 1 || report.archived != 3 {
+		t.Fatalf("legacy consolidation changed: created=%d archived=%d, want 1/3",
+			report.created, report.archived)
+	}
+	if backend.batchNum != 1 {
+		t.Fatalf("nil manager must skip the early usefulness batch, got %d delete batches", backend.batchNum)
+	}
+}

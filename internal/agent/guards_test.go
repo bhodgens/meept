@@ -404,3 +404,219 @@ func TestGuards_ReasoningWatchdog_Integration(t *testing.T) {
 	}
 	assert.True(t, foundNudge, "expected watchdog forcing nudge in conversation")
 }
+
+// ---------------------------------------------------------------------------
+// D-H1 (bughunt 2026-09-04): rollback spin cap
+// ---------------------------------------------------------------------------
+
+// TestGuards_DuplicateSearchRollback_SpinCap: a model that keeps re-emitting
+// the IDENTICAL web_search used to spin the loop forever (each rollback
+// decremented the iteration counter). After maxDuplicateSearchRollbacks
+// rollbacks in one turn, the duplicate must fall through to normal execution
+// and the turn must terminate via the max-iterations path.
+func TestGuards_DuplicateSearchRollback_SpinCap(t *testing.T) {
+	searchCall := func(id int) *llm.Response {
+		return &llm.Response{
+			Content:      "searching",
+			FinishReason: "tool_calls",
+			Usage:        llm.TokenUsage{TotalTokens: 10},
+			ToolCalls: []llm.ToolCall{{
+				ID:   fmt.Sprintf("tc-%d", id),
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      "web_search",
+					Arguments: `{"query":"identical query","limit":5}`,
+				},
+			}},
+		}
+	}
+	chatter := newMockChatter(
+		searchCall(1), // iteration 1: fresh -> executes
+		searchCall(2), // duplicate #1 -> rollback (same iteration re-sample)
+		searchCall(3), // duplicate #2 -> rollback
+		searchCall(4), // duplicate #3 -> rollback (cap now reached)
+		searchCall(5), // duplicate #4 -> NO rollback, executes normally
+		&llm.Response{Content: "done researching", Usage: llm.TokenUsage{TotalTokens: 5}},
+	)
+
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(&mockGuardTool{name: "web_search"})
+	secChecker := security.NewPermissionChecker(security.Config{})
+	loop := NewAgentLoop("test-session", "/tmp",
+		WithLLMChatter(chatter),
+		WithToolRegistry(registry),
+		WithSecurityChecker(secChecker),
+		WithMessageBus(bus.New(nil, slogDiscardLogger())),
+		WithAgentConfig(AgentConfig{
+			MaxIterations: 3, // it1: fresh exec; it2: 3 rollbacks + post-cap exec; it3: final text
+			Guards:        DefaultGuardConfig(),
+		}),
+	)
+	loop.executor = NewExecutor(registry, secChecker)
+
+	response, err := loop.RunOnce(context.Background(), "research", "conv-guards-spin-cap")
+	// Without the cap this never terminates: the loop spins on the same
+	// iteration forever. With the cap the 4th duplicate executes and the
+	// turn completes deterministically.
+	require.NoError(t, err, "capped duplicate loop must terminate, not spin")
+	assert.Equal(t, "done researching", response)
+
+	// Exactly 6 LLM samples: 1 fresh execution + 3 rollbacks + 1 post-cap
+	// execution + final text. A spin would keep sampling past the script.
+	assert.Equal(t, 6, chatter.callCount)
+
+	// Exactly 1 executed-search pair remains: the first rollback pops the
+	// FRESH pair, and only the post-cap execution's pair stays in the
+	// transcript. This pins that rollbacks fired exactly
+	// maxDuplicateSearchRollbacks times (3 pops happened along the way).
+	conv := loop.conversations.Get("conv-guards-spin-cap")
+	require.NotNil(t, conv)
+	pairs := 0
+	for _, m := range conv.GetMessages() {
+		if m.Role == llm.RoleTool {
+			pairs++
+		}
+	}
+	assert.Equal(t, 1, pairs, "fresh pair consumed by first rollback; only post-cap pair remains")
+}
+
+// ---------------------------------------------------------------------------
+// D-H3 (bughunt 2026-09-04): guard reset between turns
+// ---------------------------------------------------------------------------
+
+// TestSearchRollback_Reset: Reset clears the ring; the ring accepts new
+// observations afterwards.
+func TestSearchRollback_Reset(t *testing.T) {
+	r := NewSearchRollback(2)
+	r.Observe("h1")
+	require.True(t, r.ShouldRollback("h1"))
+
+	r.Reset()
+	assert.False(t, r.ShouldRollback("h1"), "reset must clear the ring")
+	assert.Equal(t, 0, len(r.ring), "ring slice must be empty after reset")
+
+	r.Observe("h1")
+	assert.True(t, r.ShouldRollback("h1"), "ring must accept observations after reset")
+}
+
+// TestResetTurnGuards_ClearsGuardState: warming every guard then resetting
+// leaves the loop with clean per-turn state.
+func TestResetTurnGuards_ClearsGuardState(t *testing.T) {
+	loop := NewAgentLoop("test-session", "/tmp")
+
+	// Warm every guard.
+	loop.noProgress.Track("web_search", `{"q":"x"}`, 3, 5)
+	loop.searchRollbk.Observe("h1")
+	loop.reasonWatch.RecordTurn(false, false, 500)
+	loop.mu.Lock()
+	loop.reasonWatchStreakBreach = true
+	loop.mu.Unlock()
+
+	loop.resetTurnGuards()
+
+	// After reset the same call must restart the ladder streak from 1 (OK)
+	// instead of continuing an old streak toward warn/veto.
+	assert.Equal(t, GuardOK, loop.noProgress.Track("web_search", `{"q":"x"}`, 3, 5),
+		"ladder streak must restart after reset")
+	assert.False(t, loop.searchRollbk.ShouldRollback("h1"), "rollback ring must be empty after reset")
+	assert.Equal(t, 0, loop.reasonWatch.Streak(), "watchdog streak must be zero after reset")
+	loop.mu.Lock()
+	breach := loop.reasonWatchStreakBreach
+	loop.mu.Unlock()
+	assert.False(t, breach, "streak-breach flag must clear")
+}
+
+// TestGuards_ResetBetweenTurns: guard state warm from turn 1 (rollback ring
+// holds the search hash, ladder streak in progress) must NOT carry into
+// turn 2 — the same search executes normally instead of rolling back, and
+// the ladder does not escalate to a warn nudge.
+func TestGuards_ResetBetweenTurns(t *testing.T) {
+	// Alternate JSON key order between calls: the normalized no-progress
+	// ladder still tracks them as the SAME call, but the byte-level cycle
+	// detector (hashArgs) sees distinct args — so a cross-turn 3-in-a-row
+	// cycle abort cannot mask the ladder behavior this test pins.
+	const searchArgsA = `{"query":"identical query","limit":5}`
+	const searchArgsB = `{"limit":5,"query":"identical query"}`
+	searchCall := func(id int) *llm.Response {
+		args := searchArgsA
+		if id%2 == 0 {
+			args = searchArgsB
+		}
+		return &llm.Response{
+			Content:      "searching",
+			FinishReason: "tool_calls",
+			Usage:        llm.TokenUsage{TotalTokens: 10},
+			ToolCalls: []llm.ToolCall{{
+				ID:   fmt.Sprintf("tc-%d", id),
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      "web_search",
+					Arguments: args,
+				},
+			}},
+		}
+	}
+	chatter := newMockChatter(
+		searchCall(1), // turn 1, iter 1: fresh -> executes (ladder streak 1)
+		searchCall(2), // turn 1: duplicate #1 -> rollback
+		searchCall(3), // turn 1: duplicate #2 -> rollback
+		searchCall(4), // turn 1: duplicate #3 -> rollback (cap now reached)
+		searchCall(5), // turn 1: duplicate #4 -> cap -> executes (ladder streak 2)
+		&llm.Response{Content: "done turn one", Usage: llm.TokenUsage{TotalTokens: 5}},
+		searchCall(6), // turn 2: identical search — must execute cleanly
+		&llm.Response{Content: "done turn two", Usage: llm.TokenUsage{TotalTokens: 5}},
+	)
+
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(&mockGuardTool{name: "web_search"})
+	secChecker := security.NewPermissionChecker(security.Config{})
+	loop := NewAgentLoop("test-session", "/tmp",
+		WithLLMChatter(chatter),
+		WithToolRegistry(registry),
+		WithSecurityChecker(secChecker),
+		WithMessageBus(bus.New(nil, slogDiscardLogger())),
+		WithAgentConfig(AgentConfig{
+			MaxIterations: 8,
+			Guards:        DefaultGuardConfig(),
+		}),
+	)
+	loop.executor = NewExecutor(registry, secChecker)
+
+	// --- Turn 1 ---
+	_, err := loop.RunOnce(context.Background(), "research", "conv-guards-reset")
+	require.NoError(t, err)
+	require.Equal(t, 6, chatter.callCount, "turn 1: 5 searches + 1 final text")
+
+	// Precondition: turn 1 left the guards hot.
+	argsHash := HashToolCall("web_search", searchArgsA)
+	require.True(t, loop.searchRollbk.ShouldRollback(argsHash),
+		"precondition: rollback ring must be warm after turn 1")
+	require.Equal(t, 2, loop.noProgress.streak,
+		"precondition: ladder streak must be in progress after turn 1")
+
+	// --- Turn 2 ---
+	response, err := loop.RunOnce(context.Background(), "research again", "conv-guards-reset")
+	require.NoError(t, err)
+	require.Equal(t, "done turn two", response)
+	require.Equal(t, 8, chatter.callCount, "turn 2 must consume exactly its 2 scripted samples")
+
+	// Without the reset the turn-2 duplicate would roll back (ring warm) and
+	// the ladder streak would hit warn@3 -> nudge. With the reset it executes
+	// cleanly: turn 1 leaves its post-cap pair, turn 2 adds its own — 2 pairs
+	// total (turn 1's fresh pair was consumed by its first rollback)...
+	conv := loop.conversations.Get("conv-guards-reset")
+	require.NotNil(t, conv)
+	pairs := 0
+	for _, m := range conv.GetMessages() {
+		if m.Role == llm.RoleTool {
+			pairs++
+		}
+	}
+	assert.Equal(t, 2, pairs, "turn 2's duplicate must execute (ring reset), not roll back")
+
+	// ...and no no-progress nudge from a persisted streak.
+	for _, m := range conv.GetMessages() {
+		assert.NotContains(t, m.Content, "no measurable progress",
+			"ladder reset must prevent cross-turn warn escalation")
+	}
+}

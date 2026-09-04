@@ -527,14 +527,26 @@ func (p *TurnParker) emitParkEvent(rec ParkedTurnRecord, modelID, providerID str
 }
 
 // emitResumeEvent publishes the resumed event for rec with the time it
-// actually waited (now - ResumeAt).
-func (p *TurnParker) emitResumeEvent(rec ParkedTurnRecord) {
+// actually waited.
+//
+// D-M3 (bughunt 2026-09-04): rec.ResumeAt is the SCHEDULED resume time,
+// which the parker's MaxWait soft-stop rewrites to now+MaxWait (parked_turn.go
+// Park). ParkedAt is not on the frozen ParkedTurnRecord, but the throttle
+// TurnPayload carries it — pass the true park time through trueParkAt when
+// the caller has it so Waited reflects the real wait (park -> resume),
+// otherwise the computation falls back to now - ResumeAt, which UNDERSTATES
+// the wait whenever a soft-stop fired.
+func (p *TurnParker) emitResumeEvent(rec ParkedTurnRecord, trueParkAt time.Time) {
+	waitedFrom := rec.ResumeAt
+	if !trueParkAt.IsZero() {
+		waitedFrom = trueParkAt
+	}
 	p.publishParkEvent(ParkTurnEvent{
 		AgentID:   rec.AgentID,
 		To:        "running",
 		Reason:    ReasonThrottleResumed,
 		Class:     parkClassString(rec.Class),
-		Waited:    p.now().Sub(rec.ResumeAt).String(),
+		Waited:    p.now().Sub(waitedFrom).String(),
 		SessionID: rec.SessionID,
 		Timestamp: p.now(),
 	})
@@ -565,7 +577,9 @@ func (p *TurnParker) EmitParkEvent(rec ParkedTurnRecord, modelID, providerID str
 
 // EmitResumeEvent is the exported resume-event hook, symmetric to
 // EmitParkEvent: call it from external resume sites right before the turn
-// re-enters its loop.
-func (p *TurnParker) EmitResumeEvent(rec ParkedTurnRecord) {
-	p.emitResumeEvent(rec)
+// re-enters its loop. trueParkAt may be zero when the caller has no park
+// timestamp (Waited then measures from the scheduled ResumeAt — see
+// emitResumeEvent for the D-M3 accuracy note).
+func (p *TurnParker) EmitResumeEvent(rec ParkedTurnRecord, trueParkAt time.Time) {
+	p.emitResumeEvent(rec, trueParkAt)
 }
