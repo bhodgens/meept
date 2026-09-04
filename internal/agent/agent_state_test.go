@@ -3,12 +3,15 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/llm"
 )
 
 func TestAgentState_String(t *testing.T) {
@@ -916,6 +919,178 @@ func TestStateAwareErrorHandling(t *testing.T) {
 			t.Errorf("expected error message to mention %q, got %q", expectedPrefix, got.Error())
 		}
 	})
+}
+
+// capturePublisher is a minimal NotificationPublisher that records task
+// notifications so tests can assert the blocked-state user surfacing.
+type capturePublisher struct {
+	mu     sync.Mutex
+	titles []string
+}
+
+func (c *capturePublisher) PublishTaskNotification(taskID, agentID, notifType, title, message string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.titles = append(c.titles, title)
+}
+
+func (c *capturePublisher) PublishSessionNotification(sessionID, agentID, notifType, title, message string) {
+}
+
+func (c *capturePublisher) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.titles)
+}
+
+// TestAttemptStateRecovery_ErrorSemantics locks in the contract that NO
+// branch of attemptStateRecovery silently swallows a turn failure: every
+// branch must return a non-nil error for a non-nil input (recovery is
+// state-machine hygiene, not success). This is the regression test for the
+// no-op-turn bug where job workers saw ("", nil) from failed LLM turns and
+// marked them as successes.
+func TestAttemptStateRecovery_ErrorSemantics(t *testing.T) {
+	original := errors.New("llm provider boom")
+
+	cases := []struct {
+		name string
+		// setup transitions the loop's state machine to the state under test
+		// before attemptStateRecovery runs (Idle is reached by construction).
+		setup []AgentState
+		// wantState is the state the machine must be in after recovery.
+		wantState    AgentState
+		wantErrIs    error  // nil = no sentinel check
+		wantContains string // substring expected in err.Error(); "" = skip
+		wantNotify   int    // expected number of task notifications
+		// wantInputChain: whether the returned error preserves the INPUT
+		// error via %w chaining. False ONLY for the Blocked case, which
+		// deliberately embeds the original's text (%s) behind the
+		// ErrAgentBlocked sentinel — the sentinel is the caller contract.
+		wantInputChain bool
+	}{
+		{
+			// The sibling-fix contract: Error state is reset to Idle so the
+			// NEXT turn starts clean, but THIS turn's error is propagated.
+			name:      "state_error_resets_to_idle_and_propagates",
+			setup:     []AgentState{StateThinking, StateError},
+			wantState: StateIdle,
+			wantErrIs: original,
+			wantInputChain: true,
+		},
+		{
+			// Blocked state notifies the user AND returns ErrAgentBlocked —
+			// the caller (RunOnce/ProcessTask) surfaces the error reply; the
+			// notification is the async channel. No silent success.
+			name:         "state_blocked_wraps_erragentblocked_and_notifies",
+			setup:        []AgentState{StateThinking, StateToolExecuting, StateBlocked},
+			wantState:    StateBlocked,
+			wantErrIs:    ErrAgentBlocked,
+			wantContains: "llm provider boom",
+			wantNotify:   1,
+		},
+		{
+			// ToolWaiting resets to ProcessingResult (un-stuck for the next
+			// turn) but still returns the original error: the sole call site
+			// is a direct return from reasoningCycle — no loop iteration
+			// follows to synthesize a tool-error result, so returning nil
+			// here reported failed turns as ("", nil) successes.
+			name:      "state_tool_waiting_unsticks_but_propagates",
+			setup:     []AgentState{StateThinking, StateToolExecuting, StateToolWaiting},
+			wantState: StateProcessingResult,
+			wantErrIs: original,
+			wantInputChain: true,
+		},
+		{
+			// Unknown/unrelated state: nothing to recover, error unchanged.
+			name:      "default_state_passes_error_through",
+			setup:     []AgentState{StateThinking},
+			wantState: StateThinking,
+			wantErrIs: original,
+			wantInputChain: true,
+		},
+		{
+			// Budget exhaustion propagates so the caller can surface a
+			// user-visible message; state resets to Idle. Input wraps a
+			// *llm.BudgetExceededError; propagation is checked via the
+			// wantInputChain errors.Is against the input itself.
+			name:      "budget_exceeded_propagates_and_resets",
+			setup:     []AgentState{StateThinking, StateError},
+			wantState: StateIdle,
+			wantInputChain: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			loop := NewAgentLoop("recovery-test", "/tmp/test")
+			for _, s := range tc.setup {
+				if err := loop.stateMachine.Transition(s, "test_setup", nil); err != nil {
+					t.Fatalf("setup transition to %s failed: %v", s, err)
+				}
+			}
+			pub := &capturePublisher{}
+			loop.notificationPublisher = pub
+
+			in := original
+			if tc.name == "budget_exceeded_propagates_and_resets" {
+				in = fmt.Errorf("wrapped: %w", &llm.BudgetExceededError{
+					Message: "per-session budget exceeded",
+					Reason:  llm.BudgetLimitPerSession,
+					Used:    100,
+					Limit:   100,
+				})
+			}
+
+			got := loop.attemptStateRecovery(in)
+
+			// Core contract: a failed turn must NEVER look like a success.
+			if got == nil {
+				t.Fatalf("attemptStateRecovery(%s) returned nil — silent turn-failure swallow", tc.name)
+			}
+			if tc.wantInputChain && !errors.Is(got, in) {
+				t.Fatalf("errors.Is(got, input) = false, got %v", got)
+			}
+			if tc.wantErrIs != nil && !errors.Is(got, tc.wantErrIs) {
+				t.Fatalf("errors.Is(got, %v) = false, got %v", tc.wantErrIs, got)
+			}
+			if tc.wantContains != "" && !strings.Contains(got.Error(), tc.wantContains) {
+				t.Fatalf("error %q missing expected substring %q", got.Error(), tc.wantContains)
+			}
+			if cur := loop.stateMachine.CurrentState(); cur != tc.wantState {
+				t.Fatalf("post-recovery state = %v, want %v", cur, tc.wantState)
+			}
+			if notify := pub.count(); notify != tc.wantNotify {
+				t.Fatalf("task notifications = %d, want %d", notify, tc.wantNotify)
+			}
+		})
+	}
+}
+
+// TestAttemptStateRecovery_NilErrorNoOp guards the nil-input contract: a nil
+// error is not a failure and must pass through untouched (no state change,
+// no panic).
+func TestAttemptStateRecovery_NilErrorNoOp(t *testing.T) {
+	loop := NewAgentLoop("recovery-nil-test", "/tmp/test")
+	if err := loop.stateMachine.Transition(StateThinking, "test_setup", nil); err != nil {
+		t.Fatalf("setup transition failed: %v", err)
+	}
+	if got := loop.attemptStateRecovery(nil); got != nil {
+		t.Fatalf("attemptStateRecovery(nil) = %v, want nil", got)
+	}
+	if cur := loop.stateMachine.CurrentState(); cur != StateThinking {
+		t.Fatalf("state changed on nil input: %v, want thinking", cur)
+	}
+}
+
+// TestAttemptStateRecovery_NilStateMachine verifies the documented nil-guard:
+// without a state machine the error passes through unchanged.
+func TestAttemptStateRecovery_NilStateMachine(t *testing.T) {
+	loop := NewAgentLoop("recovery-nosm-test", "/tmp/test")
+	loop.stateMachine = nil
+	original := errors.New("boom")
+	if got := loop.attemptStateRecovery(original); !errors.Is(got, original) {
+		t.Fatalf("attemptStateRecovery with nil stateMachine = %v, want original", got)
+	}
 }
 
 // TestHTTPStateEndpoint verifies the snapshot returned by GetStateSnapshot

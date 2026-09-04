@@ -129,10 +129,10 @@ func TestAgentLoop_RateLimitErrorStillRotates(t *testing.T) {
 
 	// Bounded termination: the budget exhausts across rotations. RunOnce
 	// absorbs the terminal error via attemptStateRecovery (StateError →
-	// recovery_reset → Idle, returns nil) — the OBSERVABLE bound is the
-	// chatter call count: pre-fix this spun at 43k+ calls in 50s; bounded,
-	// it stops at maxAttempts+1 (initial + one retry per consumed budget
-	// slot across both alias models).
+	// recovery_reset → Idle, returns the original error) — the OBSERVABLE
+	// bound is the chatter call count: pre-fix this spun at 43k+ calls in
+	// 50s; bounded, it stops at maxAttempts+1 (initial + one retry per
+	// consumed budget slot across both alias models).
 	_, _ = loop.RunOnce(context.Background(), "hello", "conv-ratelimit-rotate")
 	got := chatter.chatterCalls()
 	if got < 2 {
