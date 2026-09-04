@@ -2047,6 +2047,13 @@
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
+    "file": "internal/llm/codex.go",
+    "line": 526
+  },
+  {
+    "method": "GET",
+    "path": "Retry-After",
+    "handler": "",
     "file": "internal/llm/errors_quota.go",
     "line": 292
   },
@@ -2244,21 +2251,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6494
+    "line": 6509
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6505
+    "line": 6520
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6486
+    "line": 6501
   },
   {
     "method": "GET",
@@ -2405,14 +2412,14 @@
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1006
+    "line": 1015
   },
   {
     "method": "GET",
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1143
+    "line": 1152
   },
   {
     "method": "GET",
