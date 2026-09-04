@@ -2122,6 +2122,15 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		return "", ErrNoLLMClient
 	}
 
+	// AUDIT FIX H3 (bughunt 2026-09-03): a RESUMED parked turn re-enters
+	// with the same conversation — which still holds the original user
+	// message from the parked attempt. Unconditional AddUserMessage below
+	// duplicated it (user: X → assistant: "" → user: X). The resume path
+	// (loop_park.go resumeThrottledTurn / handler quota resume) marks the
+	// context with WithResumedTurn; this flag suppresses ONLY the history
+	// re-add, everything else in the turn runs identically.
+	skipUserMessageAdd := ResumedTurnFromContext(ctx)
+
 	// Throttle-park dispatch stash (tree 03 leaf 02): if the provider
 	// throttles mid-turn, parkThrottledTurn needs the ORIGINAL dispatch
 	// (message/parts/conversation) to build the resume payload. Set for the
@@ -2344,10 +2353,15 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	if l.securityOrch != nil {
 		wrappedMessage = l.securityOrch.WrapUserInput(sanitizedMessage)
 	}
-	if len(parts) > 0 {
-		conv.AddUserMessageWithParts(wrappedMessage, parts)
-	} else {
-		conv.AddUserMessage(wrappedMessage)
+	// AUDIT FIX H3: resumed turns skip the history re-add — the original
+	// user message is already in the conversation (see the flag's comment
+	// at the top of this function).
+	if !skipUserMessageAdd {
+		if len(parts) > 0 {
+			conv.AddUserMessageWithParts(wrappedMessage, parts)
+		} else {
+			conv.AddUserMessage(wrappedMessage)
+		}
 	}
 
 	// Truncate if needed

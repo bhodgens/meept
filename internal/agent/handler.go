@@ -1599,7 +1599,9 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 	)
 
 	loop := h.sessionLoop(turn.ConversationID)
-	reply, err := loop.RunOnceWithParts(ctx, turn.Message, turn.Parts, turn.ConversationID)
+	// H3 (bughunt 2026-09-03): resumed turns must not re-add the user
+	// message — the parked attempt already placed it in the conversation.
+	reply, err := loop.RunOnceWithParts(WithResumedTurn(ctx), turn.Message, turn.Parts, turn.ConversationID)
 	if err != nil {
 		// Still quota-blocked (reset drifted) or a new failure: park again
 		// if the error is quota and the window is knowable; otherwise push
@@ -1833,8 +1835,10 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 	)
 
 	// Run the turn through the same path as a normal chat request.
+	// H3 (bughunt 2026-09-03): resumed turns must not re-add the user
+	// message — the parked attempt already placed it in the conversation.
 	loop := h.sessionLoop(turn.ConversationID)
-	reply, err := loop.RunOnceWithParts(ctx, turn.Message, turn.Parts, turn.ConversationID)
+	reply, err := loop.RunOnceWithParts(WithResumedTurn(ctx), turn.Message, turn.Parts, turn.ConversationID)
 
 	if err != nil {
 		h.logger.Error("resumed turn failed",

@@ -418,12 +418,19 @@ func (p *TurnParker) drainDue(ctx context.Context) {
 // Go duration string (a display-input value, never formatted client-side
 // into wall-clock claims).
 type ParkTurnEvent struct {
-	AgentID    string    `json:"agent_id"`
-	To         string    `json:"to,omitempty"`
-	Reason     string    `json:"reason"`
-	Class      string    `json:"class,omitempty"`
-	ResumeAt   string    `json:"resume_at,omitempty"` // RFC3339
-	Waited     string    `json:"waited,omitempty"`    // Go duration string
+	AgentID string `json:"agent_id"`
+	To      string `json:"to,omitempty"`
+	Reason  string `json:"reason"`
+	Class   string `json:"class,omitempty"`
+	// UnblockAt is the wire key BOTH surfaces already read
+	// (tui/app.go "unblock_at", flutter api_models.dart "unblock_at") —
+	// H10 (bughunt 2026-09-03): the old `resume_at` key was invisible to
+	// both, so the "throttle retry HH:MM" badge never rendered from a park
+	// event. UnblockAt is the canonical field; ResumeAt (below) is kept as
+	// a duplicate for any consumer of the original leaf-04 vocabulary.
+	UnblockAt  string    `json:"unblock_at,omitempty"` // RFC3339
+	ResumeAt   string    `json:"resume_at,omitempty"`  // RFC3339 (legacy alias)
+	Waited     string    `json:"waited,omitempty"`     // Go duration string
 	SessionID  string    `json:"session_id,omitempty"`
 	ModelID    string    `json:"model_id,omitempty"`
 	ProviderID string    `json:"provider_id,omitempty"`
@@ -510,7 +517,8 @@ func (p *TurnParker) emitParkEvent(rec ParkedTurnRecord, modelID, providerID str
 		To:         "quota_wait",
 		Reason:     reason,
 		Class:      parkClassString(rec.Class),
-		ResumeAt:   rec.ResumeAt.Format(time.RFC3339),
+		UnblockAt:  rec.ResumeAt.Format(time.RFC3339), // H10: key surfaces read
+		ResumeAt:   rec.ResumeAt.Format(time.RFC3339), // legacy leaf-04 alias
 		SessionID:  rec.SessionID,
 		ModelID:    modelID,
 		ProviderID: providerID,

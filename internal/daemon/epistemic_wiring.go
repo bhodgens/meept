@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
@@ -216,7 +217,15 @@ func wireHTTPHooks(agentLoop *agent.AgentLoop, cfg config.Config, bus *bus.Messa
 			Async:       hc.Async,
 			AsyncRewake: hc.AsyncRewake,
 		}
-		hook, err := agent.NewHTTPHook(agentCfg, nil, logger.With("hook", "http", "index", i))
+		// H9 (bughunt 2026-09-03): an empty allowlist makes every hook fail
+		// "not in allowlist" before any request is sent (the old nil pass
+		// made the whole HTTP-hook feature structurally dead). Default to
+		// allowing the hook's OWN url; AllowedURLs widens it.
+		allow := hc.AllowedURLs
+		if len(allow) == 0 && hc.URL != "" {
+			allow = []string{"^" + regexp.QuoteMeta(hc.URL) + "$"}
+		}
+		hook, err := agent.NewHTTPHook(agentCfg, allow, logger.With("hook", "http", "index", i))
 		if err != nil {
 			logger.Warn("failed to wire HTTP hook",
 				"url", hc.URL,

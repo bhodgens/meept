@@ -165,10 +165,16 @@ class AgentQuotaPayload {
   });
 
   factory AgentQuotaPayload.fromJson(Map<String, dynamic> json) {
+    // H10 (bughunt 2026-09-04): park events serialize the retry time as
+    // "resume_at" (ParkTurnEvent.ResumeAt); quota-episode events use
+    // "unblock_at" (QuotaEvent.UnblockAt). Read BOTH so the agents-tab
+    // wait label renders for every parked-turn class.
+    final unblockAt = (json['unblock_at'] as String?) ??
+        (json['resume_at'] as String?);
     return AgentQuotaPayload(
       agentId: json['agent_id'] as String? ?? '',
       to: json['to'] as String? ?? '',
-      unblockAt: json['unblock_at'] as String?,
+      unblockAt: unblockAt,
       escalation: json['escalation'] as String?,
       fallbackModel: json['fallback_model'] as String?,
       waitClass: json['class'] as String?,

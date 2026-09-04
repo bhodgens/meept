@@ -137,9 +137,15 @@ func (b *MessageBus) PublishExternalOnly(topic string, msg *models.BusMessage) i
 
 // publish is the shared core for Publish, PublishBlocking, and PublishExternalOnly.
 // A publish with no subscribers is normal for fire-and-forget informational
-// events, so it always logs at DEBUG; externalOnly only marks the log line as
+// events, so it logs at DEBUG; externalOnly only marks the log line as
 // an external-only topic. When blocking is true, sends to subscriber channels
 // use a 5-second timeout instead of non-blocking select-default.
+//
+// M7 (bughunt 2026-09-04): PublishBlocking's contract is "security-critical,
+// drops unacceptable" (approval requests) — a no-subscriber publish there is
+// a DROPPED event, not a boring one, so it logs at WARN to keep the loss
+// visible (the demote in d48d89b7 silenced it along with the informational
+// paths).
 func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly, blocking bool) int {
 	if msg == nil {
 		return 0
@@ -148,8 +154,9 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly,
 	b.mu.RLock()
 	subs := b.subscribers[topic]
 
-	// Check for zero subscribers - informational (Debug); Error only when
-	// panic mode is enabled so tests catch missing wiring.
+	// Check for zero subscribers - informational (Debug) for fire-and-forget
+	// publish; Error only when panic mode is enabled so tests catch missing
+	// wiring; WARN for blocking publishes (a dropped security-critical event).
 	if len(subs) == 0 {
 		// Check wildcard subscribers too
 		hasWildcardSubs := false
@@ -164,13 +171,20 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly,
 
 		if !hasWildcardSubs {
 			b.mu.RUnlock()
-			if externalOnly {
+			switch {
+			case blocking:
+				b.logger.Warn("bus: PublishBlocking with no subscribers — event dropped",
+					"topic", topic,
+					"source", msg.Source,
+					"msg_id", msg.ID,
+				)
+			case externalOnly:
 				b.logger.Debug("bus: Publish with no subscribers (external-only topic)",
 					"topic", topic,
 					"source", msg.Source,
 					"msg_id", msg.ID,
 				)
-			} else {
+			default:
 				b.logger.Debug("bus: Publish with no subscribers",
 					"topic", topic,
 					"source", msg.Source,

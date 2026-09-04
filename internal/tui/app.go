@@ -1643,8 +1643,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
 					if agentID, ok := payloadMap["agent_id"].(string); ok {
 						var waitUntil *time.Time
-						if unblockAtStr, ok := payloadMap["unblock_at"].(string); ok && unblockAtStr != "" {
-							if t, err := time.Parse(time.RFC3339, unblockAtStr); err == nil {
+						// H10 (bughunt 2026-09-04): park events serialize the
+						// retry time as "resume_at" (ParkTurnEvent.ResumeAt);
+						// quota-episode events use "unblock_at"
+						// (QuotaEvent.UnblockAt). Read BOTH so the agents-tab
+						// wait label renders for every parked-turn class.
+						rawWhen := ""
+						if s, ok := payloadMap["unblock_at"].(string); ok {
+							rawWhen = s
+						}
+						if rawWhen == "" {
+							if s, ok := payloadMap["resume_at"].(string); ok {
+								rawWhen = s
+							}
+						}
+						if rawWhen != "" {
+							if t, err := time.Parse(time.RFC3339, rawWhen); err == nil {
 								waitUntil = &t
 							}
 						}

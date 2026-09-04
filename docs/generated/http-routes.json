@@ -81,14 +81,28 @@
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1236
+    "line": 1268
   },
   {
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1347
+    "line": 1379
+  },
+  {
+    "method": "GET",
+    "path": "Content-Type",
+    "handler": "",
+    "file": "internal/llm/sigv4.go",
+    "line": 72
+  },
+  {
+    "method": "GET",
+    "path": "Content-Type",
+    "handler": "",
+    "file": "internal/llm/bedrock.go",
+    "line": 120
   },
   {
     "method": "GET",
@@ -2041,28 +2055,28 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1244
+    "line": 1276
   },
   {
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 2035
+    "line": 2063
   },
   {
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/anthropic.go",
-    "line": 1192
+    "line": 1220
   },
   {
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/anthropic.go",
-    "line": 1365
+    "line": 1395
   },
   {
     "method": "GET",
@@ -2230,21 +2244,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6484
+    "line": 6494
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6495
+    "line": 6505
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6476
+    "line": 6486
   },
   {
     "method": "GET",

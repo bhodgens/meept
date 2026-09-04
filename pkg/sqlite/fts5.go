@@ -201,20 +201,23 @@ func Rank() string {
 	return "rank"
 }
 
-// NormalizeRank converts an FTS5 rank value to a [0.0, 1.0] score.
-// FTS5 rank values are negative (more negative = better match).
+// NormalizeRank converts an FTS5 rank value to a [0.0, 1.0) relevance
+// score. FTS5 rank values are negative (more negative = better match), so
+// the score is normalized to RISE with match strength:
+//
+//	score = |rank| / (1 + |rank|)
+//
+// rank 0 (no signal) → 0.0; rank -1 → 0.5; rank -9 → 0.9. Monotonicity is
+// the whole point (M13, bughunt 2026-09-04): the previous 1/(1+|rank|)
+// map DECREASED as matches improved, so any positive min_relevance floor
+// filtered the strongest matches first — the 7ee95a53 0.3→0.1 default
+// change moved the cliff, it didn't remove it.
 func NormalizeRank(rank float64) float64 {
 	if rank >= 0 {
 		return 0.0
 	}
-	return 1.0 / (1.0 + abs(rank))
-}
-
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
+	a := -rank
+	return a / (1.0 + a)
 }
 
 // CreateFTS5Table returns SQL to create an FTS5 virtual table.

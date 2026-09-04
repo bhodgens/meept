@@ -115,6 +115,29 @@ func WithThrottleParkAttempt(ctx context.Context, attempt int) context.Context {
 	return context.WithValue(ctx, throttleParkAttemptKey{}, attempt)
 }
 
+// resumedTurnKey carries the resumed-turn marker (H3, bughunt 2026-09-03):
+// a resumed parked turn re-enters RunOnceWithParts on a conversation that
+// already holds the original user message; the marker suppresses ONLY the
+// history re-add so the model context does not see the turn duplicated
+// (user: X → assistant: "" → user: X).
+type resumedTurnKey struct{}
+
+// WithResumedTurn marks ctx as a RESUMED parked turn (throttle and quota
+// resume paths; fresh turns use a plain context).
+func WithResumedTurn(ctx context.Context) context.Context {
+	return context.WithValue(ctx, resumedTurnKey{}, true)
+}
+
+// ResumedTurnFromContext reports whether ctx marks a resumed parked turn.
+// False for fresh turns and nil contexts.
+func ResumedTurnFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(resumedTurnKey{}).(bool)
+	return v
+}
+
 // ThrottleParkAttemptFromContext returns the previous park generation's
 // attempt count, or 0 for a fresh turn.
 func ThrottleParkAttemptFromContext(ctx context.Context) int {
@@ -236,17 +259,25 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 	l.mu.RLock()
 	sessionID := l.currentSessionID
 	l.mu.RUnlock()
-	if sessionID == "" {
+	// AUDIT FIX H11 (bughunt 2026-09-03): the old fallback stamped the
+	// CONVERSATION id into SessionID (and both record fields), so the WS
+	// filter (server.go session_id match) dropped park events for
+	// TUI/CLI-originated turns — the client subscribed on its session id,
+	// never on conv-*. With no session binding, leave SessionID empty:
+	// events with neither id broadcast to all connections (documented
+	// backward-compat path), which is correct for an unbound loop.
+	conversationID := sessionID
+	if conversationID == "" {
 		l.throttleMu.Lock()
 		if l.throttleTurnCtx != nil {
-			sessionID = l.throttleTurnCtx.conversationID
+			conversationID = l.throttleTurnCtx.conversationID
 		}
 		l.throttleMu.Unlock()
 	}
-	payload := l.captureThrottlePayload(sessionID, terr.ProviderID, terr.ModelID, now)
+	payload := l.captureThrottlePayload(conversationID, terr.ProviderID, terr.ModelID, now)
 
 	rec := ParkedTurnRecord{
-		ConversationID: sessionID,
+		ConversationID: conversationID,
 		SessionID:      sessionID,
 		AgentID:        l.agentID,
 		Class:          llm.FailureThrottle,
@@ -326,8 +357,10 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 	}
 
 	// Attempt growth across park generations: the re-run's park math starts
-	// from this generation's attempt+1.
-	resumeCtx := WithThrottleParkAttempt(ctx, rec.Attempt+1)
+	// from this generation's attempt+1. H3 (bughunt 2026-09-03): the marker
+	// also suppresses the user-message history re-add inside
+	// RunOnceWithParts — the parked attempt already added it.
+	resumeCtx := WithThrottleParkAttempt(WithResumedTurn(ctx), rec.Attempt+1)
 	_, err = l.RunOnceWithParts(resumeCtx, turn.Message, turn.Parts, turn.ConversationID)
 	if err != nil {
 		// A ThrottleBackoffError already re-parked inside the loop (grown

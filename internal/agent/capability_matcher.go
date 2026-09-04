@@ -308,17 +308,28 @@ func (m *CapabilityMatcher) findAgentForSkill(skillName string) string {
 
 // getDefaultIntentType returns the default intent type for an agent.
 func (m *CapabilityMatcher) getDefaultIntentType(agentID string) string {
+	// AUDIT FIX H8 (bughunt 2026-09-03): the capability builder seeds the
+	// agent ID (and raw skill tags) into IntentTypes, so IntentTypes[0] was
+	// usually the agent ID itself — the a13526d8 inverse mapping below was
+	// unreachable in production and Intent.Type stayed polluted with agent
+	// IDs (dispatch log + intent metrics corruption). Filter to entries
+	// that are ACTUAL intent types and take the first real one.
 	if m.capMap != nil {
 		caps := m.capMap.Get(agentID)
-		if caps != nil && len(caps.IntentTypes) > 0 {
-			return caps.IntentTypes[0]
+		if caps != nil {
+			for _, it := range caps.IntentTypes {
+				if IsValidIntentType(it) {
+					return it
+				}
+			}
 		}
 	}
-	// No capability metadata: derive the intent type from the agent's
-	// natural mapping instead of returning the agent id verbatim. Agent ids
-	// are not intent types — leaking them into Intent.Type corrupted the
-	// dispatch log (intent_type=coder/committer/video-gen) and any
-	// downstream intent-type metrics.
+	// No capability metadata (or metadata carries no valid intent type):
+	// derive the intent type from the agent's natural mapping instead of
+	// returning the agent id verbatim. Agent ids are not intent types —
+	// leaking them into Intent.Type corrupted the dispatch log
+	// (intent_type=coder/committer/video-gen) and any downstream
+	// intent-type metrics.
 	for _, it := range intentTypesForDefaultAgent {
 		if it.DefaultAgent() == agentID {
 			return string(it)

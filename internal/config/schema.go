@@ -3441,6 +3441,15 @@ type HTTPHookConfig struct {
 	Timeout    time.Duration     `json:"timeout"`
 	RetryCount int               `json:"retry_count"`
 
+	// AllowedURLs are regex patterns the hook URL must match before any
+	// request is sent (H9, bughunt 2026-09-03: the only production
+	// NewHTTPHook call passed a nil allowlist, so every configured hook
+	// failed "not in allowlist" before reaching the wire). When empty, the
+	// daemon wiring auto-allows the hook's OWN url — the operator already
+	// pinned the exact destination in config, which is the tighter of the
+	// two safe defaults.
+	AllowedURLs []string `json:"allowed_urls,omitempty"`
+
 	// Async runs the HTTP request in a background goroutine.
 	Async bool `json:"async,omitempty"`
 	// AsyncRewake publishes a hook.async_rewake bus signal after successful

@@ -42,12 +42,21 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
 )
+
+// pausedRepollInterval is how long a paused employee's parked episode
+// waits before re-checking the pause state (H6 resume gate). The episode
+// is NOT dropped while the employee is paused — pause is not cancel — it
+// re-parks on this cadence until the employee resumes (or the payload is
+// superseded by a newer park via the DedupKey).
+const pausedRepollInterval = 15 * time.Minute
 
 // goalTurnPayload is the TurnPayload encoding for parked goal-loop
 // episodes. Phase selects the resume re-entry point:
@@ -81,6 +90,14 @@ type EpisodeParker struct {
 	turns  *agent.TurnParker
 	policy llm.FailurePolicyConfig
 	logger *slog.Logger
+
+	// H4 dedup (bughunt 2026-09-04): employee+phase+trigger-identity →
+	// scheduled resume time for currently-parked episodes. Guarded by
+	// dedupMu; entries are added on park and removed when the shared
+	// parker drains the record (RemoveParkDedup callback below) or the
+	// park is refused.
+	dedupMu        sync.Mutex
+	parkedEpisodes map[string]time.Time
 }
 
 // NewEpisodeParker wires a GoalLoop-facing parker over the shared
@@ -90,7 +107,12 @@ func NewEpisodeParker(turns *agent.TurnParker, policy llm.FailurePolicyConfig, l
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &EpisodeParker{turns: turns, policy: policy, logger: logger}
+	return &EpisodeParker{
+		turns:          turns,
+		policy:         policy,
+		logger:         logger,
+		parkedEpisodes: make(map[string]time.Time),
+	}
 }
 
 // SetTurnParker installs (or replaces) the underlying shared parker.
@@ -172,6 +194,7 @@ func (p *EpisodeParker) park(employeeID, sessionID string, class llm.FailureClas
 	if p == nil || p.turns == nil {
 		return false
 	}
+	now := time.Now().UTC()
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		p.logger.Warn("goal episode park: payload marshal failed — giving up",
@@ -186,7 +209,37 @@ func (p *EpisodeParker) park(employeeID, sessionID string, class llm.FailureClas
 		ResumeAt:       resumeAt,
 		TurnPayload:    raw,
 	}
-	if !p.turns.Park(rec) {
+	// H4 (bughunt 2026-09-04): episode-level dedup. While an episode is
+	// parked, every scheduler tick re-fires the same trigger, hits the
+	// same provider wait, and would park a fresh record — N ticks during
+	// a 24h quota window ≈ N duplicate full executions at reset. The
+	// parker's own queue is identity-agnostic (chat turns are
+	// intentionally NOT deduped: two different user messages are two
+	// turns), so episode identity is enforced HERE, in employee scope,
+	// keyed on employee+phase+trigger-identity (FiredAt excluded —
+	// scheduler ticks re-fire with fresh timestamps).
+	dedupKey := employeeID + ":" + payload.Phase + ":" + triggerKey(payload.Trigger)
+	p.dedupMu.Lock()
+	if due, exists := p.parkedEpisodes[dedupKey]; exists && due.After(now) {
+		p.dedupMu.Unlock()
+		p.logger.Debug("goal episode already parked — dedup suppressed duplicate park",
+			"employee_id", employeeID,
+			"phase", payload.Phase,
+			"resume_at", due.Format(time.RFC3339),
+		)
+		// The episode IS parked and scheduled; this tick's failure is
+		// absorbed the same as a fresh park would (parked = no error).
+		return true
+	}
+	p.parkedEpisodes[dedupKey] = resumeAt
+	p.dedupMu.Unlock()
+	parked := p.turns.Park(rec)
+	if !parked {
+		// Park refused → the record is not queued; clear the dedup claim
+		// so a later tick can park fresh.
+		p.dedupMu.Lock()
+		delete(p.parkedEpisodes, dedupKey)
+		p.dedupMu.Unlock()
 		return false
 	}
 	// Park observability (leaf 04, D9): the parked episode surfaces on the
@@ -194,6 +247,19 @@ func (p *EpisodeParker) park(employeeID, sessionID string, class llm.FailureClas
 	// — the goal loop needs no bus wiring of its own.
 	p.turns.EmitParkEvent(rec, "", "")
 	return true
+}
+
+// clearParkDedup removes an episode's dedup claim (drain time). Employee
+// and phase come from the draining record; the trigger identity is
+// normalized exactly as at park time (H4).
+func (p *EpisodeParker) clearParkDedup(employeeID, phase string, trigger *TriggerEvent) {
+	if p == nil {
+		return
+	}
+	key := employeeID + ":" + phase + ":" + triggerKey(trigger)
+	p.dedupMu.Lock()
+	delete(p.parkedEpisodes, key)
+	p.dedupMu.Unlock()
 }
 
 // maybeParkProviderWait classifies err as a provider wait and, on a
@@ -258,13 +324,55 @@ func (l *GoalLoop) ResumeGoalEpisode(ctx context.Context, rec agent.ParkedTurnRe
 		"class", rec.Class,
 		"phase", p.Phase,
 	)
+	// H4 (bughunt 2026-09-04): the episode is draining — clear the dedup
+	// claim recorded at park time so a post-resume provider wait parks a
+	// FRESH record instead of being suppressed by the stale one.
+	l.parker.clearParkDedup(l.employeeID, p.Phase, p.Trigger)
 	// Resume observability (leaf 04, D9): symmetric to the park event, via
 	// the shared parker's event bus on agent.quota_wait.
 	l.parker.turns.EmitResumeEvent(rec)
+
+	// H6 (bughunt 2026-09-04): resume must honor the operator's pause —
+	// the normal Trigger path rejects paused employees (manager.go Trigger
+	// → GetBot → Enabled check, "employee is paused"), so the resume
+	// callback must not bypass that gate. A paused employee's episode is
+	// re-parked at the repoll cadence instead of dropped (pause is not
+	// cancel); it resumes when the operator lifts the pause.
+	if l.statusFn != nil && strings.EqualFold(l.statusFn(), "paused") {
+		repoll := time.Now().UTC().Add(pausedRepollInterval)
+		rec.ResumeAt = repoll
+		if l.parker.turns.Park(rec) {
+			// Re-arm the H4 dedup claim for the repoll window so scheduler
+			// ticks during the pause cannot park duplicates.
+			l.parker.dedupMu.Lock()
+			l.parker.parkedEpisodes[l.employeeID+":"+p.Phase+":"+triggerKey(p.Trigger)] = repoll
+			l.parker.dedupMu.Unlock()
+			l.logger.Info("resumed goal episode deferred: employee is paused — re-parked",
+				"employee_id", l.employeeID,
+				"phase", p.Phase,
+				"repoll_at", repoll.Format(time.RFC3339),
+			)
+			return
+		}
+		// The parker refused (e.g. zero/past resume time); fall through
+		// and execute rather than silently losing the episode.
+		l.logger.Warn("resumed goal episode: paused re-park refused — executing anyway",
+			"employee_id", l.employeeID)
+	}
+
 	switch p.Phase {
 	case "assess":
-		if _, err := l.Assess(ctx, normalizedTrigger(p.Trigger)); err != nil {
-			l.logger.Warn("resumed goal episode assess failed",
+		// H5 (bughunt 2026-09-04): tier-2 parks during Assess with phase
+		// "assess", but tier-2's Assess only PROPOSES — decideTier2
+		// (Assess → Plan → pending_approval) is the completion of the
+		// interrupted propose step. The old resume called l.Assess and
+		// DISCARDED the candidates, so tier-2 parked episodes silently
+		// produced nothing. decideTier2 carries the plan cap and
+		// approval-routing logic; calling it here re-enters the exact
+		// phase that was interrupted. Tier-1/3 phases unchanged (their
+		// decide* functions already run the full assess+execute cycle).
+		if err := l.decideTier2(ctx, normalizedTrigger(p.Trigger), l.logger); err != nil {
+			l.logger.Warn("resumed goal episode tier2 assess failed",
 				"employee_id", l.employeeID, "error", err)
 		}
 	case "tier1":
@@ -314,4 +422,16 @@ func normalizedTrigger(t *TriggerEvent) TriggerEvent {
 		t.FiredAt = time.Now().UTC()
 	}
 	return *t
+}
+
+// triggerKey is the dedup component for the parked-episode key (H4): the
+// semantic identity of the trigger, IGNORING FiredAt. Scheduler ticks
+// re-fire the same assess trigger with fresh timestamps; without this
+// normalization every tick would look like a distinct episode and N
+// ticks during a quota window would park N duplicate executions.
+func triggerKey(t *TriggerEvent) string {
+	if t == nil {
+		return "nil"
+	}
+	return t.Source + "|" + t.Topic
 }
