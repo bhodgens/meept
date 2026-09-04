@@ -129,6 +129,34 @@ before reading source.
 
 ## Critical Invariants
 
+### Chat replies must be honest and user-shaped
+
+The chat path (sync dispatch and task-completion events) is the user's
+only window into the daemon. These contracts were added after the
+2026-09-04 naive-user comparison (docs/plans/chat-dispatch-ux/) and
+are guarded by `scripts/e2e-naive-user-chat.sh`:
+
+- **Sync replies carry the real step result.** `waitForTaskCompletion`
+  (internal/agent/handler.go) returns the terminal step's `Result` —
+  never the `Task <id> completed.` stub except when every step result
+  is empty or the store errors.
+- **Errored steps never pass review.** `ReviewStep` gates on
+  `stepHasError` before every policy path; a task with any failed step
+  finalizes `StateFailed` and its `task.completed` payload carries
+  `"status": "failed"` plus the error text as `result`.
+- **Step jobs run in the session's directory.** `resolveStepWorkingDir`
+  resolves WorktreePath > ProjectPath > session `DetectionContext.CWD`
+  > "". Never fall back to the daemon's CWD (see also the os.Getwd
+  rule above).
+- **Machine-shaped output never becomes a reply.** `RunOnceWithParts`
+  applies `applyReplyGuard` — raw `platform_*` tool dumps, agent
+  rosters, and status JSON are replaced with user-language fallbacks.
+- **Quota failures surface to the user.** Terminal
+  `*llm.QuotaResetError` in a step job publishes the existing
+  `agent.quota_wait` event and appends a user-language quota sentence
+  to the stored step Result. Quota is still never an alias failure and
+  never re-queued through the tactical retry gate.
+
 ### session_id vs conversation_id
 
 `session_id` (primary key, e.g. `session-abc123`) and `conversation_id`
