@@ -271,16 +271,16 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-sync-reply-result | REVIEWED | 1 | commit b3eb4878; no deviations; stub-guard test pins fallback semantics |
-| 02-honest-completion | REVIEWED | 1 | commit 892efbe3; gate hoisted above policy paths (required, red-phase verified); firstLine reused; success guard test added |
-| 03-step-cwd-fallback | REVIEWED | 1 | commit 39884594; deviation: CWD lives in Session.DetectionContext.CWD (nil-guarded), not a top-level field — implementer correct, master anchor imprecise |
-| 04-task-loop-schema-wiring | REVIEWED | 1 | commit 845f9efa; parent-registry application (FilteredToolRegistry delegates — covers cached loops); wiring at :2277 (registry nil at :1422) |
-| 05-catalog-reply-guard | REVIEWED | 1 | commit aca55f78; line-shape prose ratio (documented deviation); carries 2 sibling-audit loop.go hunks (H1/C2) — flagged in commit msg for that session |
-| 06-quota-user-surfacing | REVIEWED | 1 | commit 93a11911; WithBus setter added (none existed); Contract-6 sentence over Task-1 snippet; Task 2 needed zero impl (verified data flow); 1 transient suite FAIL was flake — two clean reruns |
-| 07-skill-discovery-gate | REVIEWED | 1 | commit c3b334cd; StopWordSet accessor (single source); carries 2 sibling-bughunt loop.go hunks (D-C3/D-H2) flagged in msg |
-| 08-skill-parser-tolerance | REVIEWED | 1 | commit b5c0fd1e; stringList mechanism; alt-name passes swapped too (blessed by leaf Notes); full repo build green at commit |
-| 09-graph-orphan-annotation | REVIEWED | 1 | commit 6ad221a0; graphs-check green; regen rerun scheduled at integration gate (working-tree drift from leaves 02/04 + sibling audit) |
-| 10-e2e-regression | REVIEWED | 2 | commit 95aa327a; final live run 16 PASS/1 FAIL (A5 continuity thin spot — follow-up leaf candidate)/0 SKIP |
+| 01-sync-reply-result | COMPLETE | 1 | commit b3eb4878; no deviations; stub-guard test pins fallback semantics |
+| 02-honest-completion | COMPLETE | 1 | commit 892efbe3; gate hoisted above policy paths (required, red-phase verified); firstLine reused; success guard test added |
+| 03-step-cwd-fallback | COMPLETE | 1 | commit 39884594; deviation: CWD lives in Session.DetectionContext.CWD (nil-guarded), not a top-level field — implementer correct, master anchor imprecise |
+| 04-task-loop-schema-wiring | COMPLETE | 1 | commit 845f9efa; parent-registry application (FilteredToolRegistry delegates — covers cached loops); wiring at :2277 (registry nil at :1422) |
+| 05-catalog-reply-guard | COMPLETE | 1 | commit aca55f78; line-shape prose ratio (documented deviation); carries 2 sibling-audit loop.go hunks (H1/C2) — flagged in commit msg for that session |
+| 06-quota-user-surfacing | COMPLETE | 1 | commit 93a11911; WithBus setter added (none existed); Contract-6 sentence over Task-1 snippet; Task 2 needed zero impl (verified data flow); 1 transient suite FAIL was flake — two clean reruns |
+| 07-skill-discovery-gate | COMPLETE | 1 | commit c3b334cd; StopWordSet accessor (single source); carries 2 sibling-bughunt loop.go hunks (D-C3/D-H2) flagged in msg |
+| 08-skill-parser-tolerance | COMPLETE | 1 | commit b5c0fd1e; stringList mechanism; alt-name passes swapped too (blessed by leaf Notes); full repo build green at commit |
+| 09-graph-orphan-annotation | COMPLETE | 1 | commit 6ad221a0; graphs-check green; regen rerun scheduled at integration gate (working-tree drift from leaves 02/04 + sibling audit) |
+| 10-e2e-regression | COMPLETE | 2 | commit 95aa327a; final live run 16 PASS/1 FAIL (A5 continuity thin spot — follow-up leaf candidate)/0 SKIP |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
