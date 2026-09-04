@@ -652,3 +652,8 @@ These were raised during Phase-1 intake but did not survive verification. They a
 - 8B ruled out for classification: reasoning-tuned, and the classifier explicitly disables thinking (noThinkingOpt) — reasoning advantage moot, 4x memory.
 - Candidate replacement: LFM2.5-Encoder-350M-Prompt-Router — zero-shot lane routing in one encoder pass, CPU-friendly, lanes as free text (maps 1:1 to dispatcher intents). Fine-tune cookbook exists for custom lanes. Prior in-repo LoRA infra (config/training/*.yaml, scripts/train_lora.py, internal/learning capture pipeline) exists but ~/.meept/learning never accumulated data (pipeline not exercised).
 - Follow-ups: gate capability matcher behind config (default off); surface classification method in dispatch log + transcripts.
+
+### Prompt-Router sidecar (2026-09-04, resolved)
+- Live classifier replaced by LFM2.5-Encoder-350M-Prompt-Router sidecar (scripts/prompt_router_sidecar.py, port 8082, stdlib HTTP, runtime-managed). Zero-shot lanes = dispatcher intent set.
+- Calibration gotcha: raw softmax top-lane prob (0.54-0.66 for decisive routes) sits BELOW the dispatcher's intent thresholds (0.5-0.85, tuned on generative self-assessed conf) and ShouldUseLLMResult rejects SILENTLY (no warn) → falls to heuristic. Sidecar odds-normalizes: conf = p/(p+1/N).
+- Capability matcher default OFF (agents.capability_match_enabled); ambient stopwords (agent/daemon/skill/bench/meept) added to extractor; tag extraction now applies stopwords too.
