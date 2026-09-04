@@ -170,8 +170,8 @@ func TestCodexChatRequestShape(t *testing.T) {
 		if got := req.Header.Get("OpenAI-Beta"); got != codexResponsesBeta {
 			t.Errorf("OpenAI-Beta = %q, want %q", got, codexResponsesBeta)
 		}
-		// session_id stays omitted until per-turn session substitution is
-		// wired for CodexClient (empty values are stripped by net/http).
+		// No WithTaskScope → no session ID → the built-in session_id header
+		// is omitted (matching codex-rs).
 		if got := req.Header.Get("session_id"); got != "" {
 			t.Errorf("session_id = %q, want omitted", got)
 		}

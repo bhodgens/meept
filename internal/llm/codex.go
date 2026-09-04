@@ -153,9 +153,10 @@ func codexAccountID(token string) string {
 	return id
 }
 
-// CodexClient talks to the ChatGPT Codex backend (Responses API dialect).
-// It implements Chatter using the non-streaming /responses endpoint with
-// the Cloudflare-required client headers.
+// CodexClient talks to the ChatGPT Codex backend (Responses API dialect)
+// with the Cloudflare-required client headers. Streaming callers go through
+// ChatWithDeltaCallback (stream:true + text/event-stream, mirroring the
+// codex-rs contract); plain Chat keeps the single-JSON exchange.
 type CodexClient struct {
 	configMu      sync.RWMutex
 	config        *ModelConfig
@@ -233,16 +234,18 @@ func (c *CodexClient) Config() *ModelConfig {
 	return c.config
 }
 
-// codexResponsesPayload is the wire shape of the non-streaming /responses call.
+// codexResponsesPayload is the wire shape of the /responses call. Stream is
+// a codexResponsesStreamRequest (bool wire form) rather than a bare bool so
+// the streaming and non-streaming callers share one payload type.
 type codexResponsesPayload struct {
-	Model        string           `json:"model"`
-	Input        string           `json:"input"`
-	Instructions string           `json:"instructions,omitempty"`
-	Stream       bool             `json:"stream"`
-	Store        bool             `json:"store"`
-	Tools        []map[string]any `json:"tools,omitempty"`
-	ToolChoice   string           `json:"tool_choice,omitempty"`
-	MaxTokens    int              `json:"max_output_tokens,omitempty"`
+	Model        string                      `json:"model"`
+	Input        string                      `json:"input"`
+	Instructions string                      `json:"instructions,omitempty"`
+	Stream       codexResponsesStreamRequest `json:"stream"`
+	Store        bool                        `json:"store"`
+	Tools        []map[string]any            `json:"tools,omitempty"`
+	ToolChoice   string                      `json:"tool_choice,omitempty"`
+	MaxTokens    int                         `json:"max_output_tokens,omitempty"`
 }
 
 // codexResponsesResponse is the subset of the /responses response we parse.
@@ -267,7 +270,10 @@ type codexResponsesResponse struct {
 	} `json:"usage"`
 }
 
-// Chat sends a non-streaming Responses request and returns the parsed Response.
+// Chat sends a non-streaming Responses request (stream:false + single JSON
+// body) and returns the parsed Response. Callers wanting incremental deltas
+// use ChatWithDeltaCallback, which streams via the Responses-API SSE
+// protocol (codex_sse.go).
 func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
 	c.configMu.RLock()
 	cfg := c.config
@@ -284,8 +290,8 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 		opt(chatOpts)
 	}
 
-	payload := c.buildPayload(messages, cfg, chatOpts)
-	resp, err := c.doRequest(ctx, payload, cfg)
+	payload := c.buildPayload(messages, cfg, chatOpts, false)
+	resp, err := c.doRequest(ctx, payload, cfg, chatOpts.sessionID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -339,11 +345,13 @@ func (c *CodexClient) ChatWithProgress(ctx context.Context, messages []ChatMessa
 // buildPayload converts ChatMessages into the Codex Responses payload:
 // last user message → input, concatenated system messages → instructions,
 // tools in the flat Responses shape (name/description/parameters at top
-// level, not nested under "function").
-func (c *CodexClient) buildPayload(messages []ChatMessage, cfg *ModelConfig, chatOpts *chatOptions) *codexResponsesPayload {
+// level, not nested under "function"). stream selects wire streaming:
+// true POSTs stream:true + Accept: text/event-stream (the codex-rs
+// contract), false keeps the single-JSON non-streaming exchange.
+func (c *CodexClient) buildPayload(messages []ChatMessage, cfg *ModelConfig, chatOpts *chatOptions, stream bool) *codexResponsesPayload {
 	payload := &codexResponsesPayload{
 		Model:  cfg.ModelID,
-		Stream: false,
+		Stream: codexResponsesStreamRequest{Enabled: stream},
 		Store:  false,
 	}
 
@@ -405,8 +413,12 @@ func (c *CodexClient) buildPayload(messages []ChatMessage, cfg *ModelConfig, cha
 }
 
 // doRequest sends the payload and parses the response. cfg must be captured
-// under lock by the caller.
-func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayload, cfg *ModelConfig) (*Response, error) {
+// under lock by the caller. sessionID is the current turn's session ID
+// (WithTaskScope) used for session-affinity headers; empty when unset.
+// onDelta selects the wire protocol: non-nil consumes the Responses-API SSE
+// event stream (payload must be built with stream=true); nil parses the
+// legacy single-JSON body.
+func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayload, cfg *ModelConfig, sessionID string, onDelta DeltaCallback) (*Response, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
@@ -419,27 +431,27 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	// codex-rs streams every /responses call: its request builder inserts
+	// Accept: text/event-stream (codex-rs/codex-api/src/endpoint/responses.rs,
+	// ResponsesClient::stream). Mirror that on the streaming path.
+	if payload.Stream.Enabled {
+		req.Header.Set("Accept", "text/event-stream")
+	} else {
+		req.Header.Set("Accept", "application/json")
+	}
 	req.Header.Set("User-Agent", codexUserAgent)
 	req.Header.Set("originator", codexOriginator)
 	// Session affinity: codex-rs sends its per-session UUID in a `session_id`
-	// HEADER (openai/codex commit 6f2b01b). The ${session_id} substitution
-	// sentinel other meept clients support via ModelConfig.ExtraHeaders is
-	// not wired for CodexClient yet, so nothing supplies a value today; an
-	// empty value is stripped by net/http (matching codex-rs omitting the
-	// header when unset). Callers can still set a static session_id via
-	// extra_headers below until per-turn substitution lands.
-	req.Header.Set("session_id", "")
+	// HEADER (openai/codex commit 6f2b01b). The value is the current turn's
+	// session ID (WithTaskScope → chatOptions.sessionID); when unset the
+	// header is omitted entirely, matching codex-rs. The sentinel-
+	// substitution pass over ExtraHeaders below can override or supply this
+	// same header config-side.
+	if sessionID != "" {
+		req.Header.Set("session_id", sessionID)
+	}
 
 	req.Header.Set("OpenAI-Beta", codexResponsesBeta)
-	// STREAMING DRIFT (documented, intentionally not fixed here): codex-rs
-	// always POSTs stream:true and parses a text/event-stream (see the
-	// Accept: text/event-stream in the upstream request builder); community
-	// reports flag non-streaming requests to /backend-api/codex/responses
-	// as unreliable. This client still sends stream:false and expects a
-	// single JSON document. Switching to SSE requires a Responses-API event
-	// parser (response.output_text.delta / response.completed lifecycle) —
-	// not a contained change, so it stays a tracked follow-up.
 
 	// Resolve OAuth token when a resolver is wired; otherwise fall back to
 	// the static API key.
@@ -462,9 +474,15 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 	}
 
 	// Static configured headers (ModelConfig.ExtraHeaders) are applied last
-	// so they can override the Cloudflare/client defaults above. Values are
-	// sent verbatim — no per-request session substitution.
+	// so they can override the Cloudflare/client defaults above. Values
+	// support the "${session_id}" sentinel (exact full-value match, same
+	// contract as the OpenAI-shaped client's applyExtraHeaders): it is
+	// substituted with the current turn's session ID, and a value empty
+	// after substitution omits the header.
 	for k, v := range cfg.ExtraHeaders {
+		if v == sessionIDHeaderSentinel {
+			v = sessionID
+		}
 		if v == "" {
 			continue
 		}
@@ -494,6 +512,14 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 		return nil, &ClientError{
 			Message: fmt.Sprintf("codex API error (status %d): %s", resp.StatusCode, detail),
 		}
+	}
+
+	if payload.Stream.Enabled {
+		// Streaming exchange: the body is a Responses-API SSE event stream
+		// (response.output_text.delta / response.completed lifecycle). The
+		// accumulated Response is equivalent to the non-streaming parse;
+		// see codex_sse.go for the event grammar and upstream citations.
+		return c.parseResponsesSSE(bytes.NewReader(respBody), cfg, onDelta)
 	}
 
 	var parsed codexResponsesResponse
