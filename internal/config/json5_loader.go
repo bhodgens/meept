@@ -37,7 +37,7 @@ func LoadJSON5(path string, v any) error {
 	// Standardize JSON5 to JSON
 	stdJSON, err := hujson.Standardize([]byte(content))
 	if err != nil {
-		return fmt.Errorf("failed to parse JSON5 config %s: %w (JSON5 supports comments (// and /* */), trailing commas, and unquoted keys; check for syntax errors near the reported position)", path, err)
+		return fmt.Errorf("failed to parse JSON5 config %s: %w (hujson accepts comments (// and /* */) and trailing commas; keys must be quoted; check for syntax errors near the reported position)", path, err)
 	}
 
 	// Unmarshal with detailed error handling for type mismatches
