@@ -62,6 +62,13 @@ type Server struct {
 	// key is omitted from status responses.
 	SecretsProxyStatusGetter func() map[string]any
 
+	// DispatcherStatsGetter is an optional callback returning the dispatcher's
+	// per-classification-method dispatch counts (ByMethod map). When set, the
+	// counts are included in the status response under
+	// "by_classification_method" for regression tracking; nil result means
+	// the key is omitted.
+	DispatcherStatsGetter func() map[string]int
+
 	// Connection tracking
 	connMu   sync.Mutex
 	conns    map[net.Conn]struct{}
@@ -502,6 +509,14 @@ func (s *Server) registerBuiltinHandlers() {
 		if s.SecretsProxyStatusGetter != nil {
 			if sp := s.SecretsProxyStatusGetter(); sp != nil {
 				result["secrets_proxy"] = sp
+			}
+		}
+
+		// Include per-classification-method dispatch counts if a getter is
+		// configured (classifier regression tracking).
+		if s.DispatcherStatsGetter != nil {
+			if byMethod := s.DispatcherStatsGetter(); byMethod != nil {
+				result["by_classification_method"] = byMethod
 			}
 		}
 

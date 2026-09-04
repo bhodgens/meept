@@ -95,6 +95,14 @@ type Intent struct {
 	// SuggestedMode is the synthesized planning mode (Thread D complexity routing).
 	// Populated by suggestMode in ClassifyAndRoute. Empty means no suggestion.
 	SuggestedMode string `json:"suggested_mode,omitempty"`
+	// Method records which classifier produced this intent (e.g.
+	// "capability_matcher", "llm", "keyword", "semantic",
+	// "heuristic_fallback", "short_message_guard", "fallback",
+	// "compound", "instruction_parser"). Empty when the intent did not
+	// come from a classifier branch (e.g. clarification requests). Set at
+	// each classify branch next to recordClassificationMethod and logged
+	// in the "Dispatched request" line for regression tracking.
+	Method string `json:"classification_method,omitempty"`
 }
 
 // MemoryContext wraps memory results with conversation metadata.
@@ -684,6 +692,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 					Confidence: parsed.Confidence,
 					AgentType:  config.AgentIDChat,
 					Summary:    extractSummary(input),
+					Method:     "instruction_parser",
 				},
 				AgentID:     config.AgentIDChat,
 				Instruction: parsed,
@@ -800,6 +809,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		"agent", intent.AgentType,
 		"intent_type", intent.Type,
 		"confidence", intent.Confidence,
+		"classification_method", intent.Method,
 		"memory_refs", len(intent.MemoryRefs),
 		"has_task", createdTask != nil,
 		"has_model_override", parseResult.Found,
@@ -854,6 +864,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			Confidence: 0.9,
 			AgentType:  config.AgentIDChat,
 			Summary:    extractSummary(input),
+			Method:     "short_message_guard",
 		}, nil
 	}
 
@@ -872,6 +883,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				Confidence: result.Confidence,
 				AgentType:  result.AgentID,
 				Summary:    extractSummary(input),
+				Method:     "capability_matcher",
 			}
 			d.recordClassificationMethod("capability_matcher")
 			d.recordAgent(result.AgentID)
@@ -899,6 +911,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				d.recordClassificationMethod("llm")
 				d.recordAgent(intent.AgentType)
 				d.recordIntentType(intent.Type)
+				intent.Method = "llm"
 				return d.applyContextWeighting(intent, memCtx, input), nil
 			}
 			d.logger.Debug("LLM classifier result below threshold",
@@ -929,6 +942,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 					Confidence: 0.6,
 					AgentType:  config.AgentIDChat,
 					Summary:    extractSummary(input),
+					Method:     "llm_empty_fallback_chat",
 				}, nil
 			}
 		}
@@ -945,6 +959,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			d.recordClassificationMethod("keyword")
 			d.recordAgent(intent.AgentType)
 			d.recordIntentType(intent.Type)
+			intent.Method = "keyword"
 			return d.applyContextWeighting(intent, memCtx, input), nil
 		}
 		if intent != nil {
@@ -971,6 +986,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				Summary:    extractSummary(input),
 			}
 			d.recordClassificationMethod("semantic")
+			intent.Method = "semantic"
 			d.recordAgent(intent.AgentType)
 			d.recordIntentType(intent.Type)
 			return d.applyContextWeighting(intent, memCtx, input), nil
@@ -988,6 +1004,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		d.recordClassificationMethod("heuristic_fallback")
 		d.recordAgent(heuristic.AgentType)
 		d.recordIntentType(heuristic.Type)
+		heuristic.Method = "heuristic_fallback"
 		return d.applyContextWeighting(heuristic, memCtx, input), nil
 	}
 
@@ -1001,6 +1018,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		Confidence: 0.3,
 		AgentType:  config.AgentIDChat,
 		Summary:    "Could not determine intent, clarifying with user",
+		Method:     "fallback",
 	}, nil
 
 }
@@ -1548,6 +1566,7 @@ func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiInt
 		Intent: &Intent{
 			Type:    string(IntentCompound),
 			Summary: multi.Summary,
+			Method:  "compound",
 		},
 		OriginalInput: input,
 		Steps:         steps,
@@ -2735,18 +2754,22 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 	classifierMethod := ""
 	taskID := ""
 
+	// Extract the classification method from the intent when it carries one
+	// (each classify branch sets Intent.Method); fall back to the
+	// dispatcher's last-recorded method for paths that don't (e.g. agent
+	// overrides reusing a classified intent).
 	if result != nil {
 		agentID = result.AgentID
 		if result.Intent != nil {
 			intentType = result.Intent.Type
 			confidence = result.Intent.Confidence
+			classifierMethod = result.Intent.Method
 		}
 		if result.Task != nil {
 			taskID = result.Task.ID
 		}
 	}
-	// Extract the classification method from the dispatcher's last-recorded method.
-	if d.stats != nil {
+	if classifierMethod == "" && d.stats != nil {
 		d.stats.mu.RLock()
 		classifierMethod = d.lastClassifierMethod
 		d.stats.mu.RUnlock()

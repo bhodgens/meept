@@ -300,6 +300,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			rpcServer.SecretsProxyStatusGetter = components.SecretsProxyStatus
 		}
 
+		// Wire dispatcher classification-method stats getter (exposes the
+		// dispatcher's ByMethod dispatch counts via daemon.status for
+		// classifier regression tracking).
+		if rpcServer != nil && components.Dispatcher != nil {
+			rpcServer.DispatcherStatsGetter = func() map[string]int {
+				return components.Dispatcher.GetStats().ByMethod
+			}
+		}
+
 		// Wire budget stats getter (FIX #0031/#0035 - exposes token budget via RPC)
 		if rpcServer != nil && components.LLMClient != nil {
 			budget := components.LLMClient.Budget()
