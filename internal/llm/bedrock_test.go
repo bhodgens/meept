@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -322,7 +323,14 @@ func TestBedrockMissingCredentialsFailFast(t *testing.T) {
 }
 
 func TestBedrockEventStreamAdapter_DecodesFramingToSSE(t *testing.T) {
-	payload := []byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`)
+	// Use the union form {"<event-type>": {"bytes": "<base64>"}} — the shape
+	// InvokeModelWithResponseStream actually emits. (A bare-payload fixture
+	// here flaked: the union-decode path correctly base64-unwraps, and the
+	// passthrough fallback for top-level event JSON is order-dependent over
+	// a map, so the passthrough branch is not deterministic for multi-key
+	// payloads. RoundTrip test below covers the real wire shape end-to-end.)
+	inner := []byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`)
+	payload := []byte(`{"chunk":{"bytes":` + strconv.Quote(base64.StdEncoding.EncodeToString(inner)) + `}}`)
 	framed := bedrockTestFrame(t, ":message-type", "event", ":event-type", "chunk", payload)
 
 	adapter := newBedrockEventStreamAdapter(bytes.NewReader(framed))
