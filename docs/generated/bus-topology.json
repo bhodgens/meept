@@ -73,7 +73,7 @@
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
-        "line": 5913,
+        "line": 6051,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -84,7 +84,7 @@
     "agent.iteration.completed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 6121,
+        "line": 6259,
         "payload_keys": [
           "agent_id",
           "conversation_id",
@@ -96,7 +96,7 @@
     "agent.lifecycle.ended": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2253,
+        "line": 2262,
         "payload_keys": [],
         "via_const": true
       }
@@ -104,7 +104,7 @@
     "agent.lifecycle.started": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2193,
+        "line": 2202,
         "payload_keys": [],
         "via_const": true
       }
@@ -130,7 +130,7 @@
     "agent.progress": [
       {
         "file": "internal/agent/loop.go",
-        "line": 5978,
+        "line": 6116,
         "payload_keys": [
           "detail",
           "iteration",
@@ -141,7 +141,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 6032,
+        "line": 6170,
         "payload_keys": [
           "conversation_id",
           "detail",
@@ -171,7 +171,7 @@
     "agent.queue.followup.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 6103,
+        "line": 6241,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -208,7 +208,7 @@
     "agent.queue.steer.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 6079,
+        "line": 6217,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -233,7 +233,7 @@
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
-        "line": 5943,
+        "line": 6081,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -274,13 +274,13 @@
     "budget-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1808,
+        "line": 1849,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 1820,
+        "line": 1861,
         "payload_keys": [],
         "via_helper": true
       }
@@ -398,7 +398,7 @@
     "collab-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2007,
+        "line": 2048,
         "payload_keys": [],
         "via_helper": true
       }
@@ -574,7 +574,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2482,
+        "line": 2492,
         "payload_keys": []
       }
     ],
@@ -595,7 +595,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4183,
+        "line": 4193,
         "payload_keys": [
           "name",
           "tags",
@@ -632,7 +632,7 @@
     "hook.async_rewake": [
       {
         "file": "internal/agent/http_hooks.go",
-        "line": 191,
+        "line": 207,
         "payload_keys": [
           "hook_name",
           "hook_type",
@@ -675,7 +675,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
-        "line": 6052,
+        "line": 6190,
         "payload_keys": [
           "conversation_id",
           "total_tokens"
@@ -797,7 +797,7 @@
     "pair-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2053,
+        "line": 2094,
         "payload_keys": [],
         "via_helper": true
       }
@@ -876,7 +876,7 @@
     "pair.start": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1720,
+        "line": 1759,
         "payload_keys": [],
         "via_const": true
       }
@@ -1146,7 +1146,7 @@
     "queue.job.retry": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1066,
+        "line": 1099,
         "payload_keys": [],
         "via_helper": true
       },
@@ -1228,13 +1228,13 @@
     "quota-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1607,
+        "line": 1636,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 1618,
+        "line": 1647,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1654,7 +1654,7 @@
     "session.title_updated": [
       {
         "file": "internal/agent/loop.go",
-        "line": 6968,
+        "line": 7119,
         "payload_keys": [
           "description",
           "name",
@@ -1730,14 +1730,14 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 7041,
+        "line": 7051,
         "payload_keys": []
       }
     ],
     "step.review_completed": [
       {
         "file": "internal/agent/review_manager.go",
-        "line": 566,
+        "line": 590,
         "payload_keys": [
           "confidence",
           "feedback",
@@ -1847,7 +1847,7 @@
     "task.completed": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 880,
+        "line": 911,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1897,7 +1897,7 @@
     "task.error": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1024,
+        "line": 1057,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1905,7 +1905,7 @@
     "task.failed": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1156,
+        "line": 1189,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1928,7 +1928,7 @@
     "task.handoff_created": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1713,
+        "line": 1787,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2023,19 +2023,19 @@
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 909,
+        "line": 942,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 1181,
+        "line": 1214,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 1253,
+        "line": 1286,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2059,7 +2059,7 @@
     "task.review_completed": [
       {
         "file": "internal/agent/review_manager.go",
-        "line": 583,
+        "line": 607,
         "payload_keys": [
           "confidence",
           "feedback",
@@ -2196,13 +2196,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5714,
+        "line": 5724,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 5751,
+        "line": 5761,
         "payload_keys": [],
         "via_const": true
       }
@@ -2561,7 +2561,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2460,
+        "line": 2470,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2576,7 +2576,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3109,
+        "line": 3119,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -2985,7 +2985,7 @@
     "replyTopic": [
       {
         "file": "internal/bus/bus.go",
-        "line": 342,
+        "line": 344,
         "subscriber_id": "msg.ID"
       },
       {
@@ -3314,7 +3314,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6971,
+        "line": 6981,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3708,7 +3708,6 @@
       "agent.queue.persisted",
       "agent.queue.steer.added",
       "agent.queue.steer.injected",
-      "agent.result",
       "agent.state.changed",
       "cluster.event.broadcast",
       "cluster.event.heartbeat",

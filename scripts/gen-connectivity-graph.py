@@ -708,6 +708,10 @@ def cross_reference(publishers, subscribers):
         # Forward-looking hook: Orchestrator subscribes; ContextFirewall does
         # not emit bus events yet (orchestrator.go handleContextCompressed).
         "llm.context_compressed": "forward-looking subscription; publisher (ContextFirewall) not yet implemented",
+        # Agent loops publish run results on agent.result; the chat reply
+        # path uses chat.response instead. The topic is an external/debug
+        # tap (TUI event subscriptions), so no daemon subscriber is expected.
+        "agent.result": "external/debug tap; chat replies flow via chat.response",
     }
 
     orphan_publishers = pub_topics - expanded_subs - runtime_dynamic - set(annotated_orphans)
