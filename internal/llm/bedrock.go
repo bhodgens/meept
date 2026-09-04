@@ -314,17 +314,27 @@ func decodeBedrockEventPayload(env *bedrockEventFrame) ([]byte, bool, error) {
 	}
 
 	// Passthrough: the union's single member is already the event JSON, or
-	// a member named after the event type holds the JSON directly.
+	// a member named after the event type holds the JSON directly. The
+	// unnamed fallback prefers the lexicographically SMALLEST member name so
+	// multi-member payloads decode deterministically (Go map iteration order
+	// is randomized; picking "whichever iterates first" flaked ~1-in-8 on
+	// multi-key payloads).
 	if len(union) > 0 {
+		if member, ok := union[et]; ok && looksLikeJSON(member) {
+			return sseFrameBytes(et, member), true, nil
+		}
+		firstName := ""
+		var firstMember json.RawMessage
 		for name, member := range union {
-			if name == et && looksLikeJSON(member) {
-				return sseFrameBytes(et, member), true, nil
+			if !looksLikeJSON(member) {
+				continue
+			}
+			if firstName == "" || name < firstName {
+				firstName, firstMember = name, member
 			}
 		}
-		for _, member := range union {
-			if looksLikeJSON(member) {
-				return sseFrameBytes(et, member), true, nil
-			}
+		if firstName != "" {
+			return sseFrameBytes(et, firstMember), true, nil
 		}
 	}
 	return nil, false, fmt.Errorf("bedrock: event %s payload has no decodable member", et)
