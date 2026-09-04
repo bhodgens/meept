@@ -321,7 +321,19 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 		// normal return below does that). Give-up (schedule unknown or
 		// beyond the BackoffPlan horizon) and genuine failures keep the
 		// existing Fail/retry path byte-identically below.
+		//
+		// AUDIT FIX (auditor E, mutex leak): the requeue return path
+		// used to `return true, nil` while still holding w.mu and with
+		// the worker left in StateProcessing — the next run-loop poll,
+		// Stop(), and every GetState/GetStats/GetCurrentJob reader
+		// deadlocked, and (post-unlock) the FSM could never leave
+		// Processing, permanently starving the worker. Mirror the
+		// success path's Processing → Complete transition (valid per
+		// ValidTransitions; the next tryProcessJob resets Complete →
+		// Idle) and release the lock BEFORE returning.
 		if requeued := w.requeueOnProviderWait(ctx, job, processErr); requeued {
+			w.setStateWithJob(StateComplete, job.ID)
+			w.mu.Unlock()
 			return true, nil
 		}
 
