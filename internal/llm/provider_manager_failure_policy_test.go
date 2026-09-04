@@ -44,12 +44,12 @@ func TestProviderManager_DefaultPolicyUntouched(t *testing.T) {
 // injected ~1ms step instead of the 30s production default. Nil-receiver
 // and nil-config safety are covered at the end.
 func TestProviderManager_SetFailurePolicyConfig(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	// Bare 429 forever: under a fast policy the client must exhaust its
 	// short budget in milliseconds; under the production default the very
 	// first in-loop wait would be 30s.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"message":"429 bare"}}`))

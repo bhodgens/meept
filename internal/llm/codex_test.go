@@ -377,8 +377,7 @@ func TestCodexChatErrorMapping(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 401")
 	}
-	var ce *ClientError
-	if !errors.As(err, &ce) {
+	if _, ok := errors.AsType[*ClientError](err); !ok {
 		t.Fatalf("error %v is not *ClientError", err)
 	}
 	if !strings.Contains(err.Error(), "401") {
@@ -398,8 +397,7 @@ func TestCodexChatTokenResolverError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var ce *ClientError
-	if !errors.As(err, &ce) {
+	if _, ok := errors.AsType[*ClientError](err); !ok {
 		t.Fatalf("error %v is not *ClientError", err)
 	}
 	if !strings.Contains(err.Error(), "failed to resolve OAuth token") {
@@ -414,8 +412,7 @@ func TestCodexChatBadJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unparseable body")
 	}
-	var ce *ClientError
-	if !errors.As(err, &ce) {
+	if _, ok := errors.AsType[*ClientError](err); !ok {
 		t.Fatalf("error %v is not *ClientError", err)
 	}
 }
@@ -575,7 +572,7 @@ func TestCodexUserAgentComputedOnce(t *testing.T) {
 	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
 	client := newCodexClientForTest(t, srv.URL)
 	before := codexUAInvocations.Load()
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "x"}}); err != nil {
 			t.Fatalf("Chat: %v", err)
 		}

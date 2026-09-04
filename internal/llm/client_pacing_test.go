@@ -41,11 +41,11 @@ func newPacingTestClient(t *testing.T, srv *httptest.Server, handler http.Handle
 // the pacer; immediate follow-up requests to the same provider are spaced
 // by the learned MinInterval.
 func TestClientPacing_ThrottleSpacesFollowUps(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		if atomic.LoadInt32(&hits) == 1 {
+		if hits.Load() == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte("slow down"))
 			return
@@ -68,7 +68,7 @@ func TestClientPacing_ThrottleSpacesFollowUps(t *testing.T) {
 	}
 	t.Logf("sleeps after chat 1 (retry attempt gap included): %v", *sleeps)
 	// Rapid follow-ups after the learned throttle: spaced by MinInterval.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, err := c.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "again"}}); err != nil {
 			t.Fatalf("chat %d: %v", i+2, err)
 		}
@@ -81,9 +81,9 @@ func TestClientPacing_ThrottleSpacesFollowUps(t *testing.T) {
 // TestClientPacing_NilPacerNoWait: without a pacer, rapid calls are never
 // delayed (regression: wiring must be inert when disabled).
 func TestClientPacing_NilPacerNoWait(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
 	}))
@@ -96,12 +96,12 @@ func TestClientPacing_NilPacerNoWait(t *testing.T) {
 		APIKey:     "k",
 	}, WithLogger(discardLogger()))
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := c.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}}); err != nil {
 			t.Fatalf("chat %d: %v", i, err)
 		}
 	}
-	if got := atomic.LoadInt32(&hits); got != 3 {
+	if got := hits.Load(); got != 3 {
 		t.Errorf("hits = %d, want 3 (nil pacer must not gap)", got)
 	}
 }

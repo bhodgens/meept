@@ -180,16 +180,16 @@ func TestShutdownBlocksAutoRestart_RaceWithStopAll(t *testing.T) {
 	cb := mgr.makeHealthCallback(endpointKey)
 
 	const callbacks = 20
-	var firedCount int32
+	var firedCount atomic.Int32
 	var wg sync.WaitGroup
 	wg.Add(callbacks + 1)
 
 	// Launcher: fires unhealthy transitions as fast as possible.
-	for i := 0; i < callbacks; i++ {
+	for range callbacks {
 		go func() {
 			defer wg.Done()
 			cb(false)
-			atomic.AddInt32(&firedCount, 1)
+			firedCount.Add(1)
 		}()
 	}
 
@@ -221,7 +221,7 @@ func TestShutdownBlocksAutoRestart_RaceWithStopAll(t *testing.T) {
 	// so even if attempts was incremented, the spawn is aborted.
 	if _, err := os.Stat(pidFile); err == nil {
 		t.Errorf("PID file %s exists; a restart spawned a subprocess despite shutdown (fired=%d callbacks, attempts=%d)",
-			pidFile, atomic.LoadInt32(&firedCount), func() int {
+			pidFile, firedCount.Load(), func() int {
 				mgr.mu.Lock()
 				defer mgr.mu.Unlock()
 				return ep.rs.attempts

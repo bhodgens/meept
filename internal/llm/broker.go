@@ -492,8 +492,7 @@ func isRetryableError(err error) bool {
 	// (Anthropic "Overloaded") and other 5xx codes are detected. The previous
 	// substring match on "5" + "00"/"02"/"03"/"04" missed 529 and could false
 	// positive on arbitrary error strings containing those digits.
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		return apiErr.StatusCode >= 500 && apiErr.StatusCode < 600
 	}
 	return false

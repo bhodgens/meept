@@ -412,7 +412,7 @@ func TestBudgetConcurrentScopeAccess(t *testing.T) {
 	}, nil)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -546,7 +546,7 @@ func TestBudgetWaitForRateLimitReservation(t *testing.T) {
 	var wg sync.WaitGroup
 	immediateCh := make(chan int, N)
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()

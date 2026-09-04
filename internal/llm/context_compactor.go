@@ -801,8 +801,8 @@ func (c *ContextCompactor) pruneToolOutputs(messages []ChatMessage) []ChatMessag
 	protectedTokens := 0
 
 	// Walk backward to determine which tool outputs are outside the protected window.
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for i, msg := range slices.Backward(messages) {
+
 		if msg.Role != RoleTool {
 			continue
 		}

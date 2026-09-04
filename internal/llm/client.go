@@ -561,8 +561,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			// Quota errors never re-enter the short-retry loop: the window
 			// is hours, not seconds. Return immediately; the caller decides
 			// whether to wait/rotate (quota-reset-resilience contract 1).
-			var quotaErr *QuotaResetError
-			if errors.As(err, &quotaErr) {
+			if _, ok := errors.AsType[*QuotaResetError](err); ok {
 				return nil, err
 			}
 
@@ -768,8 +767,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			// as Chat() above.
 			// Quota errors never re-enter the short-retry loop (streaming
 			// path): hours-scale window, return immediately.
-			var quotaErr *QuotaResetError
-			if errors.As(err, &quotaErr) {
+			if _, ok := errors.AsType[*QuotaResetError](err); ok {
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -1589,8 +1587,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		// contract 1). QuotaResetError wraps a 429 APIError, so without this
 		// branch the retryable check would short-retry it. Placement is
 		// BEFORE any retryable check — semantically unchanged (leaf 03).
-		var quotaErr *QuotaResetError
-		if errors.As(err, &quotaErr) {
+		if _, ok := errors.AsType[*QuotaResetError](err); ok {
 			return nil, err
 		}
 
@@ -2031,16 +2028,13 @@ func (c *Client) Config() *ModelConfig {
 // the request layer, and Classify only needs the status for the
 // throttle/server/fatal buckets once quota is off the table).
 func errorStatusAndHeader(err error) (int, http.Header) {
-	var rlErr *RateLimitError
-	if errors.As(err, &rlErr) {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) {
+	if _, ok := errors.AsType[*RateLimitError](err); ok {
+		if apiErr, ok := errors.AsType[*APIError](err); ok {
 			return apiErr.StatusCode, nil
 		}
 		return http.StatusTooManyRequests, nil
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		return apiErr.StatusCode, nil
 	}
 	return 0, nil

@@ -19,7 +19,7 @@ func TestAnthropicCacheControl(t *testing.T) {
 		BaseURL:     "https://api.anthropic.com",
 		APIKey:      testAPIKey,
 		MaxTokens:   1024,
-		PromptCache: &PromptCacheConfig{Enabled: boolPtr(true)},
+		PromptCache: &PromptCacheConfig{Enabled: new(true)},
 	}
 	c := NewAnthropicClient(cfg)
 
@@ -71,7 +71,7 @@ func TestAnthropicCacheControlDisabled(t *testing.T) {
 		BaseURL:     "https://api.anthropic.com",
 		APIKey:      testAPIKey,
 		MaxTokens:   1024,
-		PromptCache: &PromptCacheConfig{Enabled: boolPtr(false)},
+		PromptCache: &PromptCacheConfig{Enabled: new(false)},
 	}
 	c := NewAnthropicClient(cfg)
 
@@ -118,7 +118,7 @@ func TestBoundaryStripped(t *testing.T) {
 				BaseURL:     "https://api.anthropic.com",
 				APIKey:      testAPIKey,
 				MaxTokens:   1024,
-				PromptCache: &PromptCacheConfig{Enabled: boolPtr(tt.enabled)},
+				PromptCache: &PromptCacheConfig{Enabled: new(tt.enabled)},
 			}
 			c := NewAnthropicClient(cfg)
 

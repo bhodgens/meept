@@ -13,9 +13,9 @@ func TestReasoningConfig_IsZero(t *testing.T) {
 		{"nil", nil, true},
 		{"empty struct", &ReasoningConfig{}, true},
 		{"effort only", &ReasoningConfig{Effort: "high"}, false},
-		{"budget only", &ReasoningConfig{BudgetTokens: intPtr(8000)}, false},
+		{"budget only", &ReasoningConfig{BudgetTokens: new(8000)}, false},
 		{"force only", &ReasoningConfig{Force: true}, false},
-		{"enabled false", &ReasoningConfig{Enabled: boolPtr(false)}, false},
+		{"enabled false", &ReasoningConfig{Enabled: new(false)}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -38,8 +38,8 @@ func TestReasoningConfig_ResolveEnabled(t *testing.T) {
 		{"low", &ReasoningConfig{Effort: "low"}, true},
 		{"high", &ReasoningConfig{Effort: "high"}, true},
 		{"max", &ReasoningConfig{Effort: "max"}, true},
-		{"enabled true overrides effort none", &ReasoningConfig{Effort: "none", Enabled: boolPtr(true)}, true},
-		{"enabled false overrides effort high", &ReasoningConfig{Effort: "high", Enabled: boolPtr(false)}, false},
+		{"enabled true overrides effort none", &ReasoningConfig{Effort: "none", Enabled: new(true)}, true},
+		{"enabled false overrides effort high", &ReasoningConfig{Effort: "high", Enabled: new(false)}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,8 +59,8 @@ func TestReasoningConfig_Validate(t *testing.T) {
 		{"nil", nil, false},
 		{"empty", &ReasoningConfig{}, false},
 		{"valid effort", &ReasoningConfig{Effort: "high"}, false},
-		{"enabled false + effort none", &ReasoningConfig{Effort: "none", Enabled: boolPtr(false)}, false},
-		{"enabled false + effort high (conflict)", &ReasoningConfig{Effort: "high", Enabled: boolPtr(false)}, true},
+		{"enabled false + effort none", &ReasoningConfig{Effort: "none", Enabled: new(false)}, false},
+		{"enabled false + effort high (conflict)", &ReasoningConfig{Effort: "high", Enabled: new(false)}, true},
 		{"invalid effort", &ReasoningConfig{Effort: "turbo"}, true},
 	}
 	for _, tt := range tests {
@@ -263,5 +263,12 @@ func TestDefaultBudgetTable(t *testing.T) {
 }
 
 // Helpers
-func intPtr(v int) *int    { return &v }
-func boolPtr(v bool) *bool { return &v }
+//
+//go:fix inline
+func intPtr(v int) *int { return new(v) }
+
+//go:fix inline
+func boolPtr(v bool) *bool { return new(v) }
+
+var _ = intPtr // referenced below via table fixtures; keeps linters satisfied if a sweep temporarily unuses them
+var _ = boolPtr

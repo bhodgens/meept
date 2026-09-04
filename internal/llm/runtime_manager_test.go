@@ -214,8 +214,8 @@ func TestRuntimeManager_StopAll_RespectsAutoStop(t *testing.T) {
 		HealthThreshold: 1,
 	}
 
-	mgr.RegisterConfig("stop-me", cfg1, server.URL)
-	mgr.RegisterConfig("keep-me", cfg2, server.URL)
+	_ = mgr.RegisterConfig("stop-me", cfg1, server.URL) // fixture setup
+	_ = mgr.RegisterConfig("keep-me", cfg2, server.URL) // fixture setup
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -242,7 +242,7 @@ func TestRuntimeManager_StopAll_RespectsAutoStop(t *testing.T) {
 	}
 
 	// Clean up leftover process
-	mgr.StopProvider(stopCtx, "keep-me")
+	_ = mgr.StopProvider(stopCtx, "keep-me") // teardown best-effort
 }
 
 func TestRuntimeManager_StartStopProvider(t *testing.T) {
@@ -268,7 +268,7 @@ func TestRuntimeManager_StartStopProvider(t *testing.T) {
 		HealthThreshold: 1,
 	}
 
-	mgr.RegisterConfig("individual", cfg, server.URL)
+	_ = mgr.RegisterConfig("individual", cfg, server.URL) // fixture setup
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -531,7 +531,7 @@ func TestRuntimeManager_InUseGate_IncludesModel(t *testing.T) {
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stopCancel()
-	mgr.StopAll(stopCtx)
+	_ = mgr.StopAll(stopCtx) // teardown best-effort
 }
 
 // capturingHandler is a minimal slog.Handler that records log messages and

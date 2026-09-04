@@ -93,12 +93,10 @@ func IsRateLimitError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var rlErr *RateLimitError
-	if errors.As(err, &rlErr) {
+	if _, ok := errors.AsType[*RateLimitError](err); ok {
 		return true
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		return apiErr.StatusCode == http.StatusTooManyRequests
 	}
 	if unwrapper, ok := err.(interface{ Unwrap() error }); ok {
@@ -114,8 +112,7 @@ func AsRateLimitError(err error, providerID, modelID string) (*RateLimitError, b
 	if err == nil {
 		return nil, false
 	}
-	var rlErr *RateLimitError
-	if errors.As(err, &rlErr) {
+	if rlErr, ok := errors.AsType[*RateLimitError](err); ok {
 		return rlErr, true
 	}
 	var apiErr *APIError
@@ -137,34 +134,28 @@ func UserMessage(err error) string {
 	}
 	// Try QuotaResetError first (most specific; wraps a 429 APIError so it
 	// must be checked before RateLimitError/APIError).
-	var quotaErr *QuotaResetError
-	if errors.As(err, &quotaErr) {
+	if quotaErr, ok := errors.AsType[*QuotaResetError](err); ok {
 		return quotaErr.UserMessage()
 	}
 	// ThrottleGiveUpError (tree 03 leaf 02, D8): abandoned-throttle surface,
 	// checked before RateLimitError (it describes the same 429 family).
-	var throttleGiveUpErr *ThrottleGiveUpError
-	if errors.As(err, &throttleGiveUpErr) {
+	if throttleGiveUpErr, ok := errors.AsType[*ThrottleGiveUpError](err); ok {
 		return throttleGiveUpErr.UserMessage()
 	}
 	// Try RateLimitError (most specific)
-	var rlErr *RateLimitError
-	if errors.As(err, &rlErr) {
+	if rlErr, ok := errors.AsType[*RateLimitError](err); ok {
 		return rlErr.UserMessage()
 	}
 	// Try BudgetExceededError
-	var budgetErr *BudgetExceededError
-	if errors.As(err, &budgetErr) {
+	if budgetErr, ok := errors.AsType[*BudgetExceededError](err); ok {
 		return budgetErr.UserMessage()
 	}
 	// Try APIError
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		return apiErr.UserMessage()
 	}
 	// Try ClientError
-	var clientErr *ClientError
-	if errors.As(err, &clientErr) {
+	if clientErr, ok := errors.AsType[*ClientError](err); ok {
 		return clientErr.UserMessage()
 	}
 	// Fallback
@@ -197,8 +188,7 @@ func IsNonRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
-	var nonRetryableErr NonRetryableError
-	if errors.As(err, &nonRetryableErr) {
+	if nonRetryableErr, ok := errors.AsType[NonRetryableError](err); ok {
 		return nonRetryableErr.NonRetryable()
 	}
 	return false
@@ -584,16 +574,13 @@ func ClassifyClassificationFailure(err error) ClassificationFailureKind {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return ClassificationFailureTimeout
 	}
-	var budgetErr *BudgetExceededError
-	if errors.As(err, &budgetErr) {
+	if _, ok := errors.AsType[*BudgetExceededError](err); ok {
 		return ClassificationFailureBudget
 	}
-	var capErr *CapabilityError
-	if errors.As(err, &capErr) {
+	if _, ok := errors.AsType[*CapabilityError](err); ok {
 		return ClassificationFailureUnavailable
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		switch {
 		case apiErr.StatusCode == 429:
 			return ClassificationFailureUnavailable // rate limited

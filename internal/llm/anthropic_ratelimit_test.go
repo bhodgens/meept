@@ -49,10 +49,10 @@ const anthropicSSEBody = "event: message_start\ndata: {\"type\":\"message_start\
 // TestAnthropicChat_RetryAfterThenSuccess (leaf Task 3): a throttled 429
 // with Retry-After:1 is retried once, then the scripted success lands.
 func TestAnthropicChat_RetryAfterThenSuccess(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	idx := int32(0)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if atomic.CompareAndSwapInt32(&idx, 0, 1) {
 			w.Header().Set("Retry-After", "1")
@@ -75,7 +75,7 @@ func TestAnthropicChat_RetryAfterThenSuccess(t *testing.T) {
 	if resp == nil || resp.Content != "ok" {
 		t.Fatalf("resp = %+v, want content ok", resp)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want 2", got)
 	}
 }
@@ -85,9 +85,9 @@ func TestAnthropicChat_RetryAfterThenSuccess(t *testing.T) {
 // throttling exhausts the short budget and returns ThrottleBackoffError
 // (NOT ClientError) with plan-derived RetryAt (D4/D8).
 func TestAnthropicChat_Bare429ExhaustionReturnsThrottleBackoff(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		// Plain-text body: no rate_limit_error type, no quota keywords —
 		// the D7 bare-throttle bucket (parity corpus, anthropic_ratelimit
@@ -103,15 +103,14 @@ func TestAnthropicChat_Bare429ExhaustionReturnsThrottleBackoff(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var clientErr *ClientError
-	if errors.As(err, &clientErr) {
+	if _, ok := errors.AsType[*ClientError](err); ok {
 		t.Fatalf("got ClientError, want ThrottleBackoffError: %v", err)
 	}
 	var tbErr *ThrottleBackoffError
 	if !errors.As(err, &tbErr) {
 		t.Fatalf("expected ThrottleBackoffError, got %T: %v", err, err)
 	}
-	if got := atomic.LoadInt32(&hits); got != int32(fastAnthropicPolicyCfg.ShortRetries) {
+	if got := hits.Load(); got != int32(fastAnthropicPolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
 		t.Errorf("server hits = %d, want %d (ShortRetries budget)", got, fastAnthropicPolicyCfg.ShortRetries)
 	}
 	if tbErr.ProviderID != "anthropic" || tbErr.ModelID != "claude-test" {
@@ -131,9 +130,9 @@ func TestAnthropicChat_Bare429ExhaustionReturnsThrottleBackoff(t *testing.T) {
 // anthropic loop: a scripted 402 surfaces QuotaResetError after exactly ONE
 // attempt (402 = retry-with-estimate; SHARED-CONVENTIONS §2).
 func TestAnthropicChat_402QuotaImmediate(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusPaymentRequired)
 		_, _ = w.Write([]byte(`{"error":{"type":"insufficient_quota","message":"billing"}}`))
@@ -145,11 +144,10 @@ func TestAnthropicChat_402QuotaImmediate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Errorf("server hits = %d, want 1 (quota exits immediately)", got)
 	}
-	var quotaErr *QuotaResetError
-	if !errors.As(err, &quotaErr) {
+	if _, ok := errors.AsType[*QuotaResetError](err); !ok {
 		t.Fatalf("expected QuotaResetError, got %T: %v", err, err)
 	}
 }
@@ -157,10 +155,10 @@ func TestAnthropicChat_402QuotaImmediate(t *testing.T) {
 // TestAnthropicChat_500ThenSuccess pins the 5xx path: a server error is
 // short-retried and the success lands.
 func TestAnthropicChat_500ThenSuccess(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	idx := int32(0)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if atomic.CompareAndSwapInt32(&idx, 0, 1) {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -179,7 +177,7 @@ func TestAnthropicChat_500ThenSuccess(t *testing.T) {
 	if resp == nil || resp.Content != "ok" {
 		t.Fatalf("resp = %+v, want content ok", resp)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want 2", got)
 	}
 }
@@ -187,9 +185,9 @@ func TestAnthropicChat_500ThenSuccess(t *testing.T) {
 // TestAnthropicChat_500ExhaustionKeepsClientError pins the leaf Notes rule:
 // server-error exhaustion keeps the historical ClientError shape.
 func TestAnthropicChat_500ExhaustionKeepsClientError(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":{"type":"api_error","message":"boom"}}`))
@@ -208,7 +206,7 @@ func TestAnthropicChat_500ExhaustionKeepsClientError(t *testing.T) {
 	if !strings.Contains(clientErr.Message, "attempts failed") {
 		t.Errorf("Message = %q, want the 'All N attempts failed' shape", clientErr.Message)
 	}
-	if got := atomic.LoadInt32(&hits); got != int32(fastAnthropicPolicyCfg.ShortRetries) {
+	if got := hits.Load(); got != int32(fastAnthropicPolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
 		t.Errorf("server hits = %d, want %d", got, fastAnthropicPolicyCfg.ShortRetries)
 	}
 }
@@ -217,9 +215,9 @@ func TestAnthropicChat_500ExhaustionKeepsClientError(t *testing.T) {
 // pins the same semantics on the anthropic STREAMING loop (pre-first-token
 // gating preserved: the 429 arrives before the SSE scanner starts).
 func TestAnthropicChatWithProgress_Bare429ExhaustionReturnsThrottleBackoff(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte("Too many requests, please slow down."))
@@ -234,15 +232,14 @@ func TestAnthropicChatWithProgress_Bare429ExhaustionReturnsThrottleBackoff(t *te
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var clientErr *ClientError
-	if errors.As(err, &clientErr) {
+	if _, ok := errors.AsType[*ClientError](err); ok {
 		t.Fatalf("got ClientError, want ThrottleBackoffError: %v", err)
 	}
 	var tbErr *ThrottleBackoffError
 	if !errors.As(err, &tbErr) {
 		t.Fatalf("expected ThrottleBackoffError, got %T: %v", err, err)
 	}
-	if got := atomic.LoadInt32(&hits); got != int32(fastAnthropicPolicyCfg.ShortRetries) {
+	if got := hits.Load(); got != int32(fastAnthropicPolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
 		t.Errorf("server hits = %d, want %d", got, fastAnthropicPolicyCfg.ShortRetries)
 	}
 	lower := start.Add(fastAnthropicPolicyCfg.BaseThrottle)
@@ -255,10 +252,10 @@ func TestAnthropicChatWithProgress_Bare429ExhaustionReturnsThrottleBackoff(t *te
 // TestAnthropicChatWithProgress_RetryAfterThenSuccess pins the streaming
 // retry path with SSE-encoded success after a throttled first response.
 func TestAnthropicChatWithProgress_RetryAfterThenSuccess(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	idx := int32(0)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if atomic.CompareAndSwapInt32(&idx, 0, 1) {
 			w.Header().Set("Retry-After", "1")
@@ -284,7 +281,7 @@ func TestAnthropicChatWithProgress_RetryAfterThenSuccess(t *testing.T) {
 	if resp == nil || resp.Content != "ok" {
 		t.Fatalf("resp = %+v, want content ok", resp)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want 2", got)
 	}
 }
@@ -292,9 +289,9 @@ func TestAnthropicChatWithProgress_RetryAfterThenSuccess(t *testing.T) {
 // TestAnthropicChat_ShortRetriesOneHonored is leaf Task 5 on anthropic:
 // ShortRetries=1 must yield exactly one attempt before escalation.
 func TestAnthropicChat_ShortRetriesOneHonored(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte("Too many requests, please slow down."))
@@ -312,7 +309,7 @@ func TestAnthropicChat_ShortRetriesOneHonored(t *testing.T) {
 	if !errors.As(err, &tbErr) {
 		t.Fatalf("expected ThrottleBackoffError, got %T: %v", err, err)
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Errorf("server hits = %d, want 1 (ShortRetries=1)", got)
 	}
 	if tbErr.Attempt != 1 {

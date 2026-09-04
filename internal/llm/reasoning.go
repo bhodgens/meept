@@ -1,5 +1,7 @@
 package llm
 
+import "maps"
+
 import "fmt"
 
 // Reasoning effort tier constants. The zero value (empty string) means "do not
@@ -41,9 +43,7 @@ var defaultBudgetTable = map[string]int{
 // table.
 func DefaultBudgetTable() map[string]int {
 	out := make(map[string]int, len(defaultBudgetTable))
-	for k, v := range defaultBudgetTable {
-		out[k] = v
-	}
+	maps.Copy(out, defaultBudgetTable)
 	return out
 }
 

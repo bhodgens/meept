@@ -333,7 +333,7 @@ func TestGrammarNeverPanics(t *testing.T) {
 	}
 	deep := ParameterProperty{Type: "object"}
 	cur := &deep
-	for i := 0; i < 50; i++ { // pathological depth chain
+	for range 50 { // pathological depth chain
 		next := ParameterProperty{Type: "object"}
 		next.Items = cur
 		cur = &next

@@ -1,5 +1,7 @@
 package llm
 
+import "maps"
+
 import "sync"
 
 // ModelCatalogEntry defines a model in the catalog.
@@ -292,9 +294,7 @@ func CatalogSnapshot() map[string][]ModelCatalogEntry {
 	catalogMu.RLock()
 	defer catalogMu.RUnlock()
 	out := make(map[string][]ModelCatalogEntry, len(ProviderModels))
-	for k, v := range ProviderModels {
-		out[k] = v
-	}
+	maps.Copy(out, ProviderModels)
 	return out
 }
 

@@ -29,10 +29,10 @@ var versionSuffix = regexp.MustCompile(`-v(\d+)$`)
 type LoadedAdapter struct {
 	Domain  string
 	Path    string
-	Model   interface{} // reserved for future native PEFT bindings
-	ID      string      // registry id, e.g. "code-lfm2.5-8b-v2"
-	Version int         // parsed from path suffix -vN (0 if unknown)
-	Ready   bool        // true when PEFT artifacts exist on disk
+	Model   any    // reserved for future native PEFT bindings
+	ID      string // registry id, e.g. "code-lfm2.5-8b-v2"
+	Version int    // parsed from path suffix -vN (0 if unknown)
+	Ready   bool   // true when PEFT artifacts exist on disk
 }
 
 // LFMLoader manages LFM2.5 model + adapter loading.

@@ -50,9 +50,9 @@ func TestQuotaClient_ClassifiesQuotaErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var hits int32
+			var hits atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				atomic.AddInt32(&hits, 1)
+				hits.Add(1)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.body))
@@ -77,7 +77,7 @@ func TestQuotaClient_ClassifiesQuotaErrors(t *testing.T) {
 				t.Fatal("expected error")
 			}
 
-			if got := atomic.LoadInt32(&hits); got != tt.wantAttempts {
+			if got := hits.Load(); got != tt.wantAttempts {
 				t.Errorf("server hits = %d, want %d (quota must not short-retry)", got, tt.wantAttempts)
 			}
 
@@ -182,9 +182,9 @@ func TestQuotaClient_DeltaCallbackQuotaErrorNoShortRetry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var hits int32
+			var hits atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				atomic.AddInt32(&hits, 1)
+				hits.Add(1)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.body))
@@ -211,7 +211,7 @@ func TestQuotaClient_DeltaCallbackQuotaErrorNoShortRetry(t *testing.T) {
 				t.Fatal("expected error")
 			}
 
-			if got := atomic.LoadInt32(&hits); got != tt.wantAttempts {
+			if got := hits.Load(); got != tt.wantAttempts {
 				t.Errorf("server hits = %d, want %d", got, tt.wantAttempts)
 			}
 

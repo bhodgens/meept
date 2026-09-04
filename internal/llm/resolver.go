@@ -522,7 +522,7 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 		if r.isQuotaBlocked(health, alias.Models[health.CurrentIndex]) {
 			nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
 			rotated := false
-			for i := 0; i < len(alias.Models); i++ {
+			for range len(alias.Models) {
 				candidate := alias.Models[nextIdx]
 				if !r.isQuotaBlocked(health, candidate) {
 					health.CurrentIndex = nextIdx
@@ -554,7 +554,7 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 	if r.isEndpointBlocked(health, alias.Models[health.CurrentIndex]) {
 		nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
 		rotated := false
-		for i := 0; i < len(alias.Models); i++ {
+		for range len(alias.Models) {
 			candidate := alias.Models[nextIdx]
 			if !r.isEndpointBlocked(health, candidate) {
 				health.CurrentIndex = nextIdx
@@ -684,7 +684,7 @@ func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, heal
 	// pin there anyway (resolve cannot return an error here).
 	if r.quotaEnabled() {
 		startIdx := nextIdx
-		for i := 0; i < len(alias.Models); i++ {
+		for range len(alias.Models) {
 			if !r.isQuotaBlocked(health, alias.Models[nextIdx]) {
 				break
 			}
@@ -777,8 +777,7 @@ func VerdictForFailure(err error) PolicyVerdict {
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return PolicyVerdict{Class: FailureThrottle, Reason: "transport_timeout"}
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		return Classify(apiErr.StatusCode, nil, []byte(apiErr.Detail), time.Now())
 	}
 	return PolicyVerdict{Class: FailureNone}
@@ -847,14 +846,8 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 		// (documented — there is no provider Options.Timeout to use as
 		// the ceiling; leaf Contract 3).
 		health.TimeoutBlocks++
-		multiplier := 1 << uint(health.TimeoutBlocks-1)
-		if multiplier > 4 {
-			multiplier = 4
-		}
-		blockDuration := alias.Timeout * time.Duration(multiplier)
-		if blockDuration > 4*alias.Timeout {
-			blockDuration = 4 * alias.Timeout
-		}
+		multiplier := min(1<<uint(health.TimeoutBlocks-1), 4)
+		blockDuration := min(alias.Timeout*time.Duration(multiplier), 4*alias.Timeout)
 		health.TimeoutBlockUntil = r.clock().Add(blockDuration)
 	}
 
@@ -1055,7 +1048,7 @@ func (r *Resolver) RotateToNextModel(aliasName string) (*ModelConfig, error) {
 	prevIdx := health.CurrentIndex
 	nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
 	rotated := false
-	for i := 0; i < len(alias.Models); i++ {
+	for range len(alias.Models) {
 		if !r.isQuotaBlocked(health, alias.Models[nextIdx]) {
 			rotated = true
 			break

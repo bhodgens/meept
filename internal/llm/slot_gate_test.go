@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync"
 	"testing"
@@ -97,33 +98,27 @@ func TestSlotGateInteractiveJumpsQueue(t *testing.T) {
 	wg := sync.WaitGroup{}
 	// Background waiters first, enqueued STRICTLY in order (serialize
 	// with sleeps — goroutine start order is not FIFO).
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if g.acquire(context.Background(), false) == nil {
 			order <- "bg0"
 			g.release()
 		}
-	}()
+	})
 	time.Sleep(30 * time.Millisecond)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if g.acquire(context.Background(), false) == nil {
 			order <- "bg1"
 			g.release()
 		}
-	}()
+	})
 	time.Sleep(30 * time.Millisecond)
 	// ...then the interactive one jumps them all.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if g.acquire(context.Background(), true) == nil {
 			order <- "interactive"
 			g.release()
 		}
-	}()
+	})
 	time.Sleep(50 * time.Millisecond)
 
 	g.release()
@@ -270,7 +265,7 @@ func TestSlotGateCtxCancelDequeues(t *testing.T) {
 		if err == nil {
 			t.Fatal("cancelled waiter got a nil error (grant while held)")
 		}
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want context.Canceled", err)
 		}
 	case <-time.After(time.Second):
@@ -310,7 +305,7 @@ func TestSlotGateCtxCancelInteractive(t *testing.T) {
 	cancel()
 	select {
 	case err := <-errCh:
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want context.Canceled", err)
 		}
 	case <-time.After(time.Second):

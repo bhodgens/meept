@@ -362,13 +362,16 @@ func TestConfigFromSchema_Roundtrip(t *testing.T) {
 
 	// And the produced config enables the resolver's skip logic.
 	r := newTestResolver(nil)
-	r.SetQuotaConfig(ptrTo(got))
+	r.SetQuotaConfig(new(got))
 	if !r.quotaEnabled() {
 		t.Error("expected ConfigFromSchema-produced config to enable quota logic")
 	}
 }
 
-func ptrTo(q QuotaWaitConfig) *QuotaWaitConfig { return &q }
+//go:fix inline
+func ptrTo(q QuotaWaitConfig) *QuotaWaitConfig { return new(q) }
+
+var _ = ptrTo // table-fixture helper; keeps `unused` satisfied between sweeps
 
 // TestResolverQuota_StickyPinSkipsBlockedModel verifies that a sticky-pinned
 // caller is not served a quota-blocked model: the pin is released and the

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -810,9 +811,9 @@ func (f *ContextFirewall) summarizeAndRestart(ctx context.Context, messages []Ch
 	restart = append(restart, summaryMsg)
 
 	// Find the last user message by walking backward.
-	for i := len(nonSystem) - 1; i >= 0; i-- {
-		if nonSystem[i].Role == RoleUser {
-			restart = append(restart, nonSystem[i])
+	for _, n := range slices.Backward(nonSystem) {
+		if n.Role == RoleUser {
+			restart = append(restart, n)
 			break
 		}
 	}

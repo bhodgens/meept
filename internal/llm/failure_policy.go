@@ -84,7 +84,7 @@ func (p BackoffPlan) NextAttempt(now time.Time, attempt int, prior time.Time) ti
 	// Max keeps 2^attempt from overflowing int/Duration on huge counts.
 	step := p.Base
 	if step < p.Max {
-		for i := 0; i < attempt; i++ {
+		for range attempt {
 			step *= 2
 			if step >= p.Max {
 				step = p.Max

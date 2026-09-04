@@ -145,7 +145,7 @@ func TestAdaptivePacer_CleanDecayAfterQuietWindows(t *testing.T) {
 	p, clock, _ := newTestPacer(t, nil, testPacingCfg())
 
 	// Grow to the ceiling.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		p.Observe(PolicyVerdict{Class: FailureThrottle}, "prov")
 		clock.Advance(time.Second)
 	}
@@ -365,7 +365,7 @@ func newPacingTestStore(t *testing.T) *llmmetrics.Store {
 // seedPacingRows records n rate-limit rows for a provider.
 func seedPacingRows(t *testing.T, store *llmmetrics.Store, provider string, n int, at time.Time) {
 	t.Helper()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		err := store.Record(context.Background(), llmmetrics.RequestRecord{
 			Timestamp:  at.Add(time.Duration(i) * time.Second),
 			ProviderID: provider,

@@ -14,11 +14,11 @@ import (
 // causes immediate rotation to the next provider without marking the provider
 // unhealthy.
 func TestProviderManager_RateLimitRotatesImmediately(t *testing.T) {
-	var primaryCalls int32
-	var backupCalls int32
+	var primaryCalls atomic.Int32
+	var backupCalls atomic.Int32
 
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&primaryCalls, 1)
+		primaryCalls.Add(1)
 		// Return 429 (the OpenAI client returns APIError{429} for this)
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error": {"message": "rate limit exceeded"}}`))
@@ -26,7 +26,7 @@ func TestProviderManager_RateLimitRotatesImmediately(t *testing.T) {
 	defer primaryServer.Close()
 
 	backupServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&backupCalls, 1)
+		backupCalls.Add(1)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{
 			"id": "chatcmpl-123",
@@ -60,12 +60,12 @@ func TestProviderManager_RateLimitRotatesImmediately(t *testing.T) {
 	}
 
 	// Primary should have been called (it was rate-limited)
-	if atomic.LoadInt32(&primaryCalls) < 1 {
+	if primaryCalls.Load() < 1 {
 		t.Error("expected primary to be called at least once")
 	}
 
 	// Backup should be called
-	if atomic.LoadInt32(&backupCalls) < 1 {
+	if backupCalls.Load() < 1 {
 		t.Error("expected backup to be called")
 	}
 
@@ -81,18 +81,18 @@ func TestProviderManager_RateLimitRotatesImmediately(t *testing.T) {
 // TestProviderManager_AuthErrorMarksUnhealthy verifies that a 401 or 403 error
 // marks the provider as unhealthy.
 func TestProviderManager_AuthErrorMarksUnhealthy(t *testing.T) {
-	var primaryCalls int32
-	var backupCalls int32
+	var primaryCalls atomic.Int32
+	var backupCalls atomic.Int32
 
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&primaryCalls, 1)
+		primaryCalls.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error": {"message": "invalid api key"}}`))
 	}))
 	defer primaryServer.Close()
 
 	backupServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&backupCalls, 1)
+		backupCalls.Add(1)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{
 			"id": "chatcmpl-123",
@@ -133,18 +133,18 @@ func TestProviderManager_AuthErrorMarksUnhealthy(t *testing.T) {
 // TestProviderManager_ClientErrorDoesNotRotate verifies that a 400 error
 // is returned directly without rotating to the next provider.
 func TestProviderManager_ClientErrorDoesNotRotate(t *testing.T) {
-	var primaryCalls int32
-	var backupCalls int32
+	var primaryCalls atomic.Int32
+	var backupCalls atomic.Int32
 
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&primaryCalls, 1)
+		primaryCalls.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error": {"message": "invalid request"}}`))
 	}))
 	defer primaryServer.Close()
 
 	backupServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&backupCalls, 1)
+		backupCalls.Add(1)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{
 			"id": "chatcmpl-123",
@@ -175,8 +175,8 @@ func TestProviderManager_ClientErrorDoesNotRotate(t *testing.T) {
 	}
 
 	// Backup should NOT have been called (400 is request-level, not provider-level)
-	if atomic.LoadInt32(&backupCalls) != 0 {
-		t.Errorf("backup should not be called for 400 error, got %d calls", atomic.LoadInt32(&backupCalls))
+	if backupCalls.Load() != 0 {
+		t.Errorf("backup should not be called for 400 error, got %d calls", backupCalls.Load())
 	}
 
 	// Error should contain something about the 400

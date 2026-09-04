@@ -140,10 +140,7 @@ func (p *AdaptivePacer) Wait(ctx context.Context, providerID string) error {
 		// First request per provider claims without waiting.
 		wait = 0
 	} else {
-		need := st.interval
-		if hold > need {
-			need = hold
-		}
+		need := max(hold, st.interval)
 		if need > 0 {
 			if elapsed := now.Sub(st.lastClaim); elapsed < need {
 				wait = need - elapsed

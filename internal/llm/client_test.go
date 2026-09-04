@@ -504,14 +504,12 @@ func TestClientConcurrencyLimit(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range numRequests {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := client.Chat(context.Background(), []ChatMessage{
 				{Role: RoleUser, Content: "Hello"},
 			})
 			errChan <- err
-		}()
+		})
 	}
 
 	wg.Wait()

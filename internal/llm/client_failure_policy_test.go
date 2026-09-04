@@ -137,7 +137,7 @@ func TestClientChat_Bare429ExhaustionReturnsThrottleBackoff(t *testing.T) {
 	if !errors.As(err, &tbErr) {
 		t.Fatalf("expected ThrottleBackoffError, got %T: %v", err, err)
 	}
-	if got := atomic.LoadInt32(&hits); got != int32(fastFailurePolicyCfg.ShortRetries) {
+	if got := atomic.LoadInt32(&hits); got != int32(fastFailurePolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
 		t.Errorf("server hits = %d, want %d (ShortRetries budget)", got, fastFailurePolicyCfg.ShortRetries)
 	}
 	if tbErr.ProviderID != "openai" || tbErr.ModelID != "gpt-test" {
@@ -185,8 +185,7 @@ func TestClientChat_402QuotaImmediate(t *testing.T) {
 	if got := atomic.LoadInt32(&hits); got != 1 {
 		t.Errorf("server hits = %d, want 1 (quota exits immediately)", got)
 	}
-	var quotaErr *QuotaResetError
-	if !errors.As(err, &quotaErr) {
+	if _, ok := errors.AsType[*QuotaResetError](err); !ok {
 		t.Fatalf("expected QuotaResetError, got %T: %v", err, err)
 	}
 }
@@ -240,7 +239,7 @@ func TestClientChat_500ExhaustionKeepsClientError(t *testing.T) {
 		t.Errorf("Message = %q, want the 'All N attempts failed' shape", clientErr.Message)
 	}
 	_ = want
-	if got := atomic.LoadInt32(&hits); got != int32(fastFailurePolicyCfg.ShortRetries) {
+	if got := atomic.LoadInt32(&hits); got != int32(fastFailurePolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
 		t.Errorf("server hits = %d, want %d", got, fastFailurePolicyCfg.ShortRetries)
 	}
 }
@@ -264,8 +263,7 @@ func TestClientChat_QuotaBody429Immediate(t *testing.T) {
 	if got := atomic.LoadInt32(&hits); got != 1 {
 		t.Errorf("server hits = %d, want 1 (quota 429 exits immediately)", got)
 	}
-	var quotaErr *QuotaResetError
-	if !errors.As(err, &quotaErr) {
+	if _, ok := errors.AsType[*QuotaResetError](err); !ok {
 		t.Fatalf("expected QuotaResetError, got %T: %v", err, err)
 	}
 }

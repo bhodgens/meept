@@ -274,7 +274,7 @@ func TestNewLMStudioFetcher(t *testing.T) {
 	v0 := `{"data":[{"id":"Qwen2.5-7B-Instruct","max_context_length":32768}]}`
 	srv := lmStudioFixtureServer(t, v1, http.StatusOK, v0, http.StatusOK)
 
-	var f Fetcher = NewLMStudioFetcher(srv.Client(), slog.Default())
+	var f = NewLMStudioFetcher(srv.Client(), slog.Default())
 	got, err := f(context.Background(), srv.URL, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

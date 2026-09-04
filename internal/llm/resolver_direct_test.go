@@ -220,7 +220,7 @@ func TestQuotaWaitChatter_NonQuotaErrorReturnedImmediately(t *testing.T) {
 
 	ch := newQuotaWaitChatter(fc, QuotaWaitConfig{Enabled: true, MaxWait: 24 * time.Hour, DefaultEstimate: time.Hour}, nil)
 	_, err := ch.Chat(context.Background(), nil)
-	if err != want {
+	if !errors.Is(err, want) {
 		t.Fatalf("expected %v, got: %v", want, err)
 	}
 	if fc.callCount != 1 {

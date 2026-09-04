@@ -37,7 +37,7 @@ func TestProcessLogger_Rotation(t *testing.T) {
 
 	chunk := bytes.Repeat([]byte("a"), 1024*1024) // 1MB
 	// Write 11MB total so rotation triggers at least once (cap is 10MB).
-	for i := 0; i < 11; i++ {
+	for i := range 11 {
 		if _, err := pl.Stdout().Write(chunk); err != nil {
 			t.Fatalf("write %d: %v", i, err)
 		}
@@ -100,7 +100,7 @@ func TestProcessLogger_StdoutStderrShareFile_AfterRotation(t *testing.T) {
 
 	// Write enough through stdout alone to force rotation.
 	chunk := bytes.Repeat([]byte("b"), 1024*1024)
-	for i := 0; i < 11; i++ {
+	for i := range 11 {
 		if _, err := pl.Stdout().Write(chunk); err != nil {
 			t.Fatalf("stdout write %d: %v", i, err)
 		}
@@ -154,7 +154,7 @@ func TestProcessLogger_StdoutStderrShareFile_Concurrent(t *testing.T) {
 	const writers = 4
 	const perWriter = 256 * 1024 // 256KB each; total 1MB across both streams x writers
 	var wg sync.WaitGroup
-	for i := 0; i < writers; i++ {
+	for range writers {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()

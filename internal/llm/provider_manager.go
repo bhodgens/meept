@@ -1289,8 +1289,7 @@ func isAuthError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		return apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden
 	}
 	return false
@@ -1302,8 +1301,7 @@ func isClientError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		status := apiErr.StatusCode
 		return status >= 400 && status < 500 &&
 			status != http.StatusUnauthorized &&

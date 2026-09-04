@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -168,9 +169,7 @@ func (d *ContextDiscovery) Sync(ctx context.Context) error {
 				"provider", j.providerID, "error", err)
 			continue
 		}
-		for k, v := range ctxs {
-			all[k] = v
-		}
+		maps.Copy(all, ctxs)
 	}
 
 	d.applyDiscovered(all)
@@ -446,8 +445,7 @@ func getJSONTolerant[T any](ctx context.Context, client *http.Client, logger *sl
 	var zero T
 	out, err := getJSON[T](ctx, client, url, apiKey)
 	if err != nil {
-		var de *jsonDecodeError
-		if errors.As(err, &de) {
+		if _, ok := errors.AsType[*jsonDecodeError](err); ok {
 			logger.Warn("context discovery: malformed JSON response", "url", url, "error", err)
 			return zero, nil
 		}

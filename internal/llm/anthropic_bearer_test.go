@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -123,7 +124,8 @@ func TestAnthropicBearer_ResolverError(t *testing.T) {
 // asClientError wraps errors.As without importing errors twice in style.
 func asClientError(err error, target **ClientError) bool {
 	for err != nil {
-		if ce, ok := err.(*ClientError); ok {
+		ce := &ClientError{}
+		if errors.As(err, &ce) {
 			*target = ce
 			return true
 		}

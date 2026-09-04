@@ -233,12 +233,8 @@ func MergeProvidersConfig(base, overlay *ProvidersConfig) *ProvidersConfig {
 	}
 	if len(overlay.ModelAliases) > 0 {
 		aliases := make(map[string]ModelAliasEntry, len(base.ModelAliases)+len(overlay.ModelAliases))
-		for k, v := range base.ModelAliases {
-			aliases[k] = v
-		}
-		for k, v := range overlay.ModelAliases {
-			aliases[k] = v
-		}
+		maps.Copy(aliases, base.ModelAliases)
+		maps.Copy(aliases, overlay.ModelAliases)
 		out.ModelAliases = aliases
 	}
 	providers := make(map[string]ProviderConfig, len(base.Providers)+len(overlay.Providers))
@@ -305,9 +301,7 @@ func mergeProviderConfig(base, overlay ProviderConfig) ProviderConfig {
 	if out.Models == nil {
 		out.Models = map[string]ModelDef{}
 	}
-	for id, def := range overlay.Models {
-		out.Models[id] = def
-	}
+	maps.Copy(out.Models, overlay.Models)
 	return out
 }
 
@@ -441,12 +435,8 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 	// Deep-copy the maps: the provider config is shared and a clone's
 	// headers must never alias the source's.
 	extraHeaders := make(map[string]string, len(opts.ExtraHeaders)+len(modelDef.ExtraHeaders))
-	for k, v := range opts.ExtraHeaders {
-		extraHeaders[k] = v
-	}
-	for k, v := range modelDef.ExtraHeaders {
-		extraHeaders[k] = v
-	}
+	maps.Copy(extraHeaders, opts.ExtraHeaders)
+	maps.Copy(extraHeaders, modelDef.ExtraHeaders)
 	return &ModelConfig{
 		BaseURL:              opts.BaseURL,
 		ModelID:              name,

@@ -599,7 +599,7 @@ func TestBackoffWithJitter(t *testing.T) {
 
 	t.Run("with jitter is in range", func(t *testing.T) {
 		delay := 10 * time.Second
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			got := BackoffWithJitter(delay, 0, true)
 			if got < 0 || got > delay {
 				t.Errorf("iteration %d: jitter %v out of [0, %v]", i, got, delay)
@@ -610,7 +610,7 @@ func TestBackoffWithJitter(t *testing.T) {
 	t.Run("with jitter capped at max", func(t *testing.T) {
 		delay := 100 * time.Second
 		maxDelay := 10 * time.Second
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			got := BackoffWithJitter(delay, maxDelay, true)
 			if got < 0 || got > maxDelay {
 				t.Errorf("iteration %d: jitter %v out of [0, %v]", i, got, maxDelay)
@@ -628,8 +628,8 @@ func TestBackoffWithJitter(t *testing.T) {
 func TestParseOpenRouterError_ByteEscapedMessage(t *testing.T) {
 	// Test with the message field properly JSON-escaped (as it would be in real HTTP response)
 	// The inner JSON is already escaped as a string value within the outer JSON
-	outer := map[string]interface{}{
-		"error": map[string]interface{}{
+	outer := map[string]any{
+		"error": map[string]any{
 			"message": `Error from provider(nw,moonshotai/Kimi-K2.6: 429): {"error":{"type":"rate_limit_error","code":"tpm_uncached_exceeded","message":"Uncached token rate limit exceeded for moonshotai/Kimi-K2.6. Cold-prefill tokens: 289280, Limit: 200000.","retry_after":2.0,"retry_strategy":{"type":"tpm_uncached","suggested_initial_delay_s":2.0,"max_delay_s":60.0,"backoff":"exponential","backoff_base":2.0,"jitter":true},"retriable":true,"context":{"budget":5,"in_flight":0,"model":"moonshotai/Kimi-K2.6","limit_type":"tpm_uncached","tpm_window_tokens":289280,"tpm_limit":200000}}}`,
 			"code":    429,
 		},
@@ -680,7 +680,7 @@ func TestRateLimitError_Unwrap(t *testing.T) {
 	if !errors.Is(rlErr, cause) {
 		t.Error("Unwrap should expose Cause")
 	}
-	if unwrapped := rlErr.Unwrap(); unwrapped != cause {
+	if unwrapped := rlErr.Unwrap(); !errors.Is(unwrapped, cause) {
 		t.Errorf("Unwrap() = %v, want %v", unwrapped, cause)
 	}
 }

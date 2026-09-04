@@ -668,7 +668,9 @@ func (e *StreamAbortedError) Error() string {
 }
 
 // Ptr returns a pointer to the given value.
-func Ptr[T any](v T) *T { return &v }
+//
+//go:fix inline
+func Ptr[T any](v T) *T { return new(v) }
 
 // DerefOr returns the dereferenced value of p, or def if p is nil.
 func DerefOr[T any](p *T, def T) T {

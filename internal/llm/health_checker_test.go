@@ -174,12 +174,10 @@ func TestHealthChecker_Concurrent_Safety(t *testing.T) {
 	hc.Start(context.Background())
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			_ = hc.IsHealthy()
-		}()
+		})
 	}
 
 	wg.Wait()

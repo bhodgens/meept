@@ -81,7 +81,7 @@ func newFakeHub(t *testing.T) *fakeHub {
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
-		w.Write(body[start:])
+		_, _ = w.Write(body[start:]) // test fixture; write errors irrelevant
 	})
 	h.srv = httptest.NewServer(mux)
 	t.Cleanup(h.srv.Close)
@@ -232,7 +232,7 @@ func TestPull_ShaVerifyAndCorruptRejection(t *testing.T) {
 	hub.addRepo("org/repo", map[string]string{"m.gguf": body})
 	s := openStore(t, hub)
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		rec, err := s.Pull(context.Background(), "org/repo", "", nil)
 		if err != nil {
 			t.Fatalf("Pull #%d: %v", i+1, err)
