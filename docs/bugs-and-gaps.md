@@ -645,3 +645,10 @@ These were raised during Phase-1 intake but did not survive verification. They a
 - `internal/clawskills/installer.go` partial-extract cleanup — **Confirmed present** (`os.RemoveAll(skillPath)` on verification failure at line 125); the weakness instead is in the zip entry-path check (see #17).
 - `internal/selfimprove/learning.go` LearningPipeline wiring — **Refuted**: wired via `LearningConsolidatorAdapter` in `internal/daemon/components.go:243-253, 681-686`.
 - `internal/comm/telegram/bot.go` allowed-users enforcement — **Refuted**: `Bot.isAllowed` is called on every incoming message at `internal/comm/telegram/bot.go:199-206`.
+
+## Classifier findings (2026-09-03 session)
+
+- Misroutes were capability-matcher keyword pollution, not 1.2B LLM failures: 1.2B outputs (code 0.95, chat 0.95/0.9) were all correct in sampled window. Fixed via extractor stopwords (write/file/text/create/etc).
+- 8B ruled out for classification: reasoning-tuned, and the classifier explicitly disables thinking (noThinkingOpt) — reasoning advantage moot, 4x memory.
+- Candidate replacement: LFM2.5-Encoder-350M-Prompt-Router — zero-shot lane routing in one encoder pass, CPU-friendly, lanes as free text (maps 1:1 to dispatcher intents). Fine-tune cookbook exists for custom lanes. Prior in-repo LoRA infra (config/training/*.yaml, scripts/train_lora.py, internal/learning capture pipeline) exists but ~/.meept/learning never accumulated data (pipeline not exercised).
+- Follow-ups: gate capability matcher behind config (default off); surface classification method in dispatch log + transcripts.
