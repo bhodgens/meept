@@ -33,7 +33,7 @@ func TestDefaultConfig_FailurePolicy(t *testing.T) {
 		t.Errorf("short_retries = %d, want %d", fp.ShortRetries, DefaultFailurePolicyShortRetries)
 	}
 	if fp.Pacing.Enabled != DefaultPacingEnabled {
-		t.Errorf("pacing.enabled = %v, want %v (D15: pacing is opt-in)", fp.Pacing.Enabled, DefaultPacingEnabled)
+		t.Errorf("pacing.enabled = %v, want %v (pacing defaults ON; explicit false survives load)", fp.Pacing.Enabled, DefaultPacingEnabled)
 	}
 	if fp.Pacing.MinInterval != DefaultPacingMinInterval {
 		t.Errorf("pacing.min_interval = %v, want %v", fp.Pacing.MinInterval, DefaultPacingMinInterval)
