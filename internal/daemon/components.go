@@ -2797,6 +2797,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
 	jobProc := NewAgentJobProcessor(c.AgentLoop, logger)
+	if c.msgBus != nil {
+		// Job-level quota surfacing (leaf 06): step jobs failing terminal on
+		// a provider quota block publish the existing agent.quota_wait event.
+		jobProc.WithBus(c.msgBus)
+	}
 	if c.AgentRegistry != nil {
 		jobProc.WithRegistry(c.AgentRegistry)
 	}
@@ -7067,6 +7072,11 @@ type AgentJobProcessor struct {
 	taskStore    *task.Store
 	sessionStore session.Store
 	logger       *slog.Logger
+	// bus carries job-level quota surfacing (leaf 06): step jobs that fail
+	// terminal on a provider quota block publish the EXISTING agent.quota_wait
+	// event so the user hears the real cause. Nil (the default for processors
+	// built without WithBus) keeps publishing silent.
+	bus *bus.MessageBus
 }
 
 // NewAgentJobProcessor creates a new agent job processor.
@@ -7094,6 +7104,15 @@ func (p *AgentJobProcessor) WithSessionStore(ss session.Store) *AgentJobProcesso
 // sessions when resolving the working directory.
 func (p *AgentJobProcessor) WithTaskStore(ts *task.Store) *AgentJobProcessor {
 	p.taskStore = ts
+	return p
+}
+
+// WithBus sets the message bus used for job-level quota surfacing (leaf 06):
+// a step job failing terminal on a provider quota block publishes the
+// EXISTING agent.quota_wait event. Nil bus (the default) keeps the event
+// silent — processors built without a bus must stay fully functional.
+func (p *AgentJobProcessor) WithBus(b *bus.MessageBus) *AgentJobProcessor {
+	p.bus = b
 	return p
 }
 
@@ -7310,6 +7329,33 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	// Execute
 	response, err := agentLoop.RunOnce(ctx, prompt, conversationID)
 	if err != nil {
+		// Job-level quota surfacing (leaf 06): the primary loop parks quota
+		// waits via QuotaResumeWatcher and the goal loop has its own parker,
+		// but a step job whose RunOnce still escapes a *llm.QuotaResetError
+		// (every rotation candidate blocked) previously surfaced as a bare
+		// "agent execution failed" — the user never heard the word quota
+		// (finding F6). Classify, publish the EXISTING agent.quota_wait
+		// event (WS-classified agent_progress per AGENTS.md), and stamp the
+		// error text with the user-facing sentence — TacticalScheduler.
+		// OnJobFailed stores the returned error string verbatim as the step
+		// Result (tactical.go SetResult), so the chat reply quotes it.
+		// Quota is NOT an alias failure: no RecordAliasFailure, no retry or
+		// block mutation here — the loop already did its rotation/parking
+		// before the error escaped.
+		var quotaErr *llm.QuotaResetError
+		if errors.As(err, &quotaErr) {
+			p.publishQuotaWait(job, stepPayload.TaskID, quotaErr)
+			unblockAt := quotaErr.ResetAt
+			if unblockAt.IsZero() {
+				unblockAt = time.Now().Add(quotaErr.RetryAfter)
+			}
+			// Append ONLY the sentence here: the legacy
+			// "agent execution failed: %w" wrap below stays the single
+			// prefix source (non-quota errors byte-identical, no doubled
+			// prefix on the quota path).
+			err = fmt.Errorf("%w (quota wait: %s/%s is rate-limited until %s. your request is saved and will need a re-ask once the limit resets.)",
+				err, quotaErr.ProviderID, quotaErr.ModelID, unblockAt.Format(time.RFC3339))
+		}
 		p.logger.Error("Agent execution failed",
 			"job_id", job.ID,
 			"agent_id", job.AgentID,
@@ -7347,6 +7393,94 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 
 // Ensure AgentJobProcessor implements worker.JobProcessor
 var _ worker.JobProcessor = (*AgentJobProcessor)(nil)
+
+// publishQuotaWait emits the job-level quota event (leaf 06) on the EXISTING
+// agent.quota_wait topic — the same topic the loop parkers use, so the WS
+// "agent.quota" prefix classification keeps treating it as agent_progress
+// (AGENTS.md invariant; zero new topics). Payload follows the leaf contract:
+// class="quota_wait", conversation_id/session_id from the task's linked
+// sessions (empty keys omitted), agent_id/task_id, RFC3339 unblock_at
+// (ResetAt, else now+RetryAfter), lowercase user-facing message, plus
+// provider_id/model_id (the QuotaNotifier consumer reads both). Best-effort
+// like every parker side channel: a task-store or marshal failure logs at
+// warn and never alters the failure itself. Nil-receiver-safe on the bus:
+// processors built without WithBus stay silent.
+func (p *AgentJobProcessor) publishQuotaWait(job *queue.Job, taskID string, quotaErr *llm.QuotaResetError) {
+	if p == nil || p.bus == nil || quotaErr == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"class":       "quota_wait",
+		"agent_id":    job.AgentID,
+		"provider_id": quotaErr.ProviderID,
+		"model_id":    quotaErr.ModelID,
+	}
+	if taskID != "" {
+		payload["task_id"] = taskID
+	} else if job.TaskID != "" {
+		payload["task_id"] = job.TaskID
+	}
+
+	// Address via the task's linked sessions (same lookup pattern as
+	// resolveStepWorkingDir: LinkedSessions hold conversation IDs, so try
+	// the conversation lookup first, then the bare ID).
+	if p.sessionStore != nil {
+		linkedID := taskID
+		if linkedID == "" {
+			linkedID = job.TaskID
+		}
+		if linkedID != "" && p.taskStore != nil {
+			if t, err := p.taskStore.GetByID(linkedID); err == nil && t != nil {
+				for _, sessID := range t.LinkedSessions {
+					sess := p.sessionStore.GetByConversationID(sessID)
+					if sess == nil {
+						sess = p.sessionStore.Get(sessID)
+					}
+					if sess == nil {
+						continue
+					}
+					if sess.ConversationID != "" {
+						payload["conversation_id"] = sess.ConversationID
+					}
+					if sess.ID != "" {
+						payload["session_id"] = sess.ID
+					}
+					break
+				}
+			}
+		}
+	}
+
+	unblockAt := quotaErr.ResetAt
+	if unblockAt.IsZero() {
+		unblockAt = time.Now().Add(quotaErr.RetryAfter)
+	}
+	if !unblockAt.IsZero() {
+		payload["unblock_at"] = unblockAt.Format(time.RFC3339)
+	}
+	payload["message"] = fmt.Sprintf("quota wait: %s/%s is rate-limited until %s. your request is saved and will need a re-ask once the limit resets.",
+		quotaErr.ProviderID, quotaErr.ModelID, unblockAt.Format(time.RFC3339))
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, job.AgentID, payload)
+	if err != nil {
+		p.logger.Warn("quota_wait event marshal failed — event dropped",
+			"job_id", job.ID,
+			"agent_id", job.AgentID,
+			"error", err,
+		)
+		return
+	}
+	msg.Topic = "agent.quota_wait"
+	p.bus.Publish("agent.quota_wait", msg)
+	p.logger.Info("Published job-level quota_wait event",
+		"job_id", job.ID,
+		"agent_id", job.AgentID,
+		"provider", quotaErr.ProviderID,
+		"model", quotaErr.ModelID,
+		"unblock_at", unblockAt.Format(time.RFC3339),
+	)
+}
 
 // webHandlerAdapter adapts AgentLoop and StatusHandler to the web.Handler interface.
 type webHandlerAdapter struct {
