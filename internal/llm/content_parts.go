@@ -56,9 +56,9 @@ func ContentFromParts(parts []ContentPart, useDescription bool) string {
 				continue
 			}
 			if useDescription && p.ImageURL.Description != "" {
-				sb.WriteString(fmt.Sprintf("[image: %s]", p.ImageURL.Description))
+				fmt.Fprintf(&sb, "[image: %s]", p.ImageURL.Description)
 			} else {
-				sb.WriteString(fmt.Sprintf("[image: %s]", p.ImageURL.URL))
+				fmt.Fprintf(&sb, "[image: %s]", p.ImageURL.URL)
 			}
 		}
 	}

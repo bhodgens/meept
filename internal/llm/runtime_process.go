@@ -113,7 +113,10 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 
 	// Write PID file
 	if err := p.writePIDFile(p.pid); err != nil {
-		p.cmd.Process.Kill()
+		// Best-effort kill: the spawn is being abandoned; a Kill error
+		// would only mask the writePIDFile cause (process is reaped by
+		// the wait goroutine regardless).
+		_ = p.cmd.Process.Kill()
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
@@ -187,12 +190,15 @@ func (p *RuntimeProcess) Stop(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				killProcessGroup(cmd, syscall.SIGKILL)
-				os.Remove(p.pidFile)
+				// Best-effort kill + cleanup on cancellation: a Kill error
+				// after ctx.Done cannot be surfaced to a caller that has
+				// already given up, and the returned nil IS the signal.
+				_ = killProcessGroup(cmd, syscall.SIGKILL)
+				os.Remove(p.pidFile) //nolint:errcheck // ctx already cancelled; nothing to report to
 				return nil
 			case <-ticker.C:
 				if !p.isProcessRunning(cmd.Process.Pid) {
-					os.Remove(p.pidFile)
+					os.Remove(p.pidFile) //nolint:errcheck // process already exited; stale file removal is best-effort
 					return nil
 				}
 			}
@@ -202,11 +208,11 @@ func (p *RuntimeProcess) Stop(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		// Force-kill the process group on context cancellation
-		killProcessGroup(cmd, syscall.SIGKILL)
+		_ = killProcessGroup(cmd, syscall.SIGKILL)
 	case <-waitDone:
 	}
 
-	os.Remove(p.pidFile)
+	os.Remove(p.pidFile) //nolint:errcheck // terminal cleanup; the runtime result is already decided
 	return nil
 }
 

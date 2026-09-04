@@ -372,7 +372,12 @@ func (m *RuntimeManager) StartAll(ctx context.Context) error {
 
 		// Wait for healthy.
 		if err := item.hc.WaitForHealthy(ctx, item.cfg.SpawnTimeout); err != nil {
-			item.proc.Stop(ctx)
+			// Best-effort cleanup: the spawn already failed; a Stop error
+			// would only mask the WaitForHealthy cause.
+			if stopErr := item.proc.Stop(ctx); stopErr != nil {
+				m.logger.Debug("runtime stop after failed health wait also failed",
+					"endpoint_key", item.endpointKey, "error", stopErr)
+			}
 			m.logger.Error("Runtime did not become healthy", "endpoint_key", item.endpointKey, "error", err)
 			return fmt.Errorf("runtime %s did not become healthy: %w", item.endpointKey, err)
 		}
@@ -615,7 +620,12 @@ func (m *RuntimeManager) StartProvider(ctx context.Context, providerID string) e
 	ep.hc.Start(ctx)
 
 	if err := ep.hc.WaitForHealthy(ctx, cfg.SpawnTimeout); err != nil {
-		ep.proc.Stop(ctx)
+		// Best-effort cleanup: the spawn already failed; a Stop error would
+		// only mask the WaitForHealthy cause.
+		if stopErr := ep.proc.Stop(ctx); stopErr != nil {
+			m.logger.Debug("runtime stop after failed health wait also failed",
+				"provider", providerID, "error", stopErr)
+		}
 		return fmt.Errorf("runtime %s did not become healthy: %w", providerID, err)
 	}
 

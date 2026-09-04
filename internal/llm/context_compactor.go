@@ -319,7 +319,7 @@ func (c *ContextCompactor) summarizeMessages(ctx context.Context, messages []Cha
 		b.WriteString(conversationText)
 		b.WriteString("\n\n## User Messages (preserve verbatim in summary)\n")
 		for i, msg := range userMsgs {
-			b.WriteString(fmt.Sprintf("- [turn %d]: %q\n", i+1, msg))
+			fmt.Fprintf(&b, "- [turn %d]: %q\n", i+1, msg)
 		}
 		conversationText = b.String()
 	}

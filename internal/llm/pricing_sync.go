@@ -231,9 +231,11 @@ func (ps *PricingSyncer) StartPeriodicSync(ctx context.Context) chan struct{} {
 	return stop
 }
 
-// parseFloat safely parses a price string.
+// parseFloat safely parses a price string. A malformed value parses as 0,
+// which callers treat as "unknown price".
 func parseFloat(s string) float64 {
 	var f float64
-	fmt.Sscanf(s, "%f", &f)
+	//nolint:errcheck // best-effort parse; malformed input intentionally yields 0
+	_, _ = fmt.Sscanf(s, "%f", &f)
 	return f
 }

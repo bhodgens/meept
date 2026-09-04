@@ -86,8 +86,8 @@ func FetchLMStudioContexts(ctx context.Context, client *http.Client, logger *slo
 	listURL := strings.TrimSuffix(baseURL, "/") + "/v1/models"
 	list, err := getJSONTolerant[lmStudioModelsResponse](ctx, client, logger, listURL, apiKey)
 	if err != nil {
-		logger.Warn("context discovery: LM Studio /v1/models fetch failed",
-			"baseURL", baseURL, "error", err)
+		logger.Warn("context discovery: lm_studio /v1/models fetch failed",
+			"base_url", baseURL, "error", err)
 		return out, nil
 	}
 	if len(list.Data) == 0 {
@@ -100,8 +100,8 @@ func FetchLMStudioContexts(ctx context.Context, client *http.Client, logger *slo
 	v0URL := strings.TrimSuffix(baseURL, "/") + "/api/v0/models"
 	v0, err := getJSONTolerant[lmStudioV0Response](ctx, client, logger, v0URL, apiKey)
 	if err != nil {
-		logger.Warn("context discovery: LM Studio /api/v0/models fetch failed; contexts unknown",
-			"baseURL", baseURL, "error", err)
+		logger.Warn("context discovery: lm_studio /api/v0/models fetch failed; contexts unknown",
+			"base_url", baseURL, "error", err)
 		v0 = lmStudioV0Response{}
 	}
 

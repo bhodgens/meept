@@ -1629,7 +1629,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			// D4: backoff honoring the server Retry-After (ParseRetryAfter)
 			// over the plan's computed step, capped by the plan (D8).
 			backoff := shortThrottleSleep(header, plan, time.Now(), attempt)
-			if rl, ok := err.(*RateLimitError); ok && rl.RetryAfter > 0 && rl.RetryAfter < backoff {
+			if rl, ok := errors.AsType[*RateLimitError](err); ok && rl.RetryAfter > 0 && rl.RetryAfter < backoff {
 				// Parity with the legacy loop: a server-suggested shorter
 				// wait (body retry_after) is honored — never wait longer
 				// than the provider demands when it gave a smaller number.

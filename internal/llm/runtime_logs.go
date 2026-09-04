@@ -293,7 +293,7 @@ func OpenProcessLogger(host, port string) (*ProcessLogger, error) {
 	var (
 		filePtr   **os.File
 		written   int64
-		atLineEnd bool = true
+		atLineEnd = true
 	)
 	writtenPtr := &written
 	atLineEndPtr := &atLineEnd

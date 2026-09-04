@@ -417,11 +417,16 @@ type genericProviderInner struct {
 
 // ParseOpenRouterError extracts structured error info from OpenRouter-style JSON bodies.
 // Returns nil if the body does not match the expected OpenRouter format.
+// The json.Unmarshal errors are intentional nils: an unparseable body simply
+// doesn't match the format this parser probes for (callers fall through to
+// the next parser in the chain), so the parse error itself is not a failure
+// worth surfacing.
 func ParseOpenRouterError(body []byte) *ProviderError {
 	// Try parsing outer envelope
 	var outer openRouterOuter
 	if err := json.Unmarshal(body, &outer); err != nil || outer.Error == nil || outer.Error.Message == "" {
-		return nil
+		_ = err
+		return nil //nolint:nilerr // probe parser: unparseable body = format mismatch, by contract
 	}
 
 	msg := outer.Error.Message
@@ -429,12 +434,12 @@ func ParseOpenRouterError(body []byte) *ProviderError {
 	// Look for the inner JSON pattern: after "429): " or "): {"
 	innerJSON := extractInnerJSON(msg)
 	if innerJSON == "" {
-		return nil
+		return nil //nolint:nilerr // not the expected OpenRouter shape; caller probes the next parser
 	}
 
 	var inner openRouterInner
 	if err := json.Unmarshal([]byte(innerJSON), &inner); err != nil {
-		return nil
+		return nil //nolint:nilerr // inner body isn't JSON — format mismatch, by contract
 	}
 
 	detail := &ProviderError{
@@ -472,11 +477,14 @@ func ParseOpenRouterError(body []byte) *ProviderError {
 }
 
 // ParseGenericProviderError tries to parse a generic {error:{type,message,code}} JSON body.
-// Returns nil if the body does not match this format.
+// Returns nil if the body does not match this format. The json.Unmarshal
+// error is an intentional nil: an unparseable body is a format mismatch
+// (the caller probes the next parser), not a failure to surface.
 func ParseGenericProviderError(body []byte) *ProviderError {
 	var parsed genericProviderError
 	if err := json.Unmarshal(body, &parsed); err != nil || parsed.Error == nil {
-		return nil
+		_ = err
+		return nil //nolint:nilerr // probe parser: unparseable body = format mismatch, by contract
 	}
 
 	if parsed.Error.Type == "" && parsed.Error.Code == "" && parsed.Error.Message == "" {
@@ -547,8 +555,10 @@ func BackoffWithJitter(delay time.Duration, maxDelay time.Duration, useJitter bo
 		delay = maxDelay
 	}
 	if useJitter {
-		// Full jitter: uniform random in [0, delay]
-		return time.Duration(rand.Int64N(int64(delay) + 1))
+		// Full jitter: uniform random in [0, delay]. math/rand/v2 is the
+		// right generator here — jitter only spreads retry timing to avoid
+		// thundering herds; it has no security requirement (G404).
+		return time.Duration(rand.Int64N(int64(delay) + 1)) //nolint:gosec // G404: retry jitter, not security-sensitive
 	}
 	return delay
 }
