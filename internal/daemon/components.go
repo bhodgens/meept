@@ -2271,6 +2271,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
 
+		// Wire tool-schema mode for task-scoped loops (chat-dispatch-ux
+		// leaf 04): the registry pushes the resolved mode into the shared
+		// tool registry so specialist loops inherit the same indexed
+		// stubbing the primary loop gets via SetSchemaModeConfig above.
+		// Must run after registry construction — c.AgentRegistry is nil at
+		// the primary-loop wiring site (components.go:1422).
+		c.AgentRegistry.SetSchemaModeConfig(cfg.Agent.Tools)
+
 		// Backward-compat notice: if a legacy ~/.meept/agents.json5 exists,
 		// warn the user that it is no longer read. One-time log per startup.
 		if homeDir, err := os.UserHomeDir(); err == nil {

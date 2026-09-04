@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/tools"
 )
 
 // silentLogger returns a logger that discards output, for noise-free tests.
@@ -952,4 +954,195 @@ func TestGate_MergeSpec_Reload(t *testing.T) {
 	if merged.Gate.SkipWhenUnchanged {
 		t.Errorf("mergeSpec Gate.SkipWhenUnchanged = true, want false (prefer AGENT.md)")
 	}
+}
+
+// --- Task-loop schema-mode wiring (chat-dispatch-ux leaf 04) ---
+
+// taskSchemaTool is a fixture tool for registry schema-mode tests. It is NOT
+// in DefaultAlwaysFullTools() and carries a non-empty parameter schema so
+// stubbing is observable: under indexed mode its definition collapses to an
+// empty object schema with a " use tool_view{name}." description suffix.
+type taskSchemaTool struct {
+	name string
+}
+
+func (t *taskSchemaTool) Name() string        { return t.name }
+func (t *taskSchemaTool) Description() string { return "task schema fixture tool" }
+func (t *taskSchemaTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: "object",
+		Properties: map[string]llm.ParameterProperty{
+			"q": {Type: "string", Description: "the query"},
+		},
+		Required: []string{"q"},
+	}
+}
+func (t *taskSchemaTool) Execute(_ context.Context, _ map[string]any) (any, error) {
+	return map[string]any{"ok": true}, nil
+}
+func (t *taskSchemaTool) IsReadOnly(map[string]any) bool        { return true }
+func (t *taskSchemaTool) IsConcurrencySafe(map[string]any) bool { return true }
+
+// newTestRegistryWithTaskTools builds an AgentRegistry wired to a real
+// *tools.Registry carrying the always-full core tool "shell" plus a non-core
+// fixture "task_schema_extra". The coder spec additionally allows the
+// fixture, so the loop's FilteredToolRegistry exposes both through the
+// shared parent.
+func newTestRegistryWithTaskTools(t *testing.T) *AgentRegistry {
+	t.Helper()
+	toolReg := tools.NewRegistry(nil)
+	toolReg.Register(&taskSchemaTool{name: "shell"})
+	toolReg.Register(&taskSchemaTool{name: "task_schema_extra"})
+	r := &AgentRegistry{
+		specs:           make(map[string]*AgentSpec),
+		loops:           make(map[string]map[string]*AgentLoop),
+		activeQueues:    make(map[string]*QueueEntry),
+		logger:          silentLogger(),
+		sharedConvStore: NewConversationStore(100),
+		tools:           toolReg,
+	}
+	r.specs["coder"] = &AgentSpec{
+		ID:              "coder",
+		Name:            "coder",
+		Role:            RoleExecutor,
+		Enabled:         true,
+		AdditionalTools: []string{"shell", "task_schema_extra"},
+	}
+	return r
+}
+
+// findTaskSchemaDef returns the definition for name among defs, failing the
+// test if absent. Mirrors findSchemaDef / findWiringDef in the sibling test
+// files so assertion style stays consistent.
+func findTaskSchemaDef(t *testing.T, defs []llm.ToolDefinition, name string) llm.ToolDefinition {
+	t.Helper()
+	for _, d := range defs {
+		if d.Function.Name == name {
+			return d
+		}
+	}
+	t.Fatalf("tool %q not found among %d definitions", name, len(defs))
+	return llm.ToolDefinition{}
+}
+
+// TestAgentRegistry_TaskScopedLoopGetsIndexedSchema verifies that a
+// task-scoped loop built via GetForTask inherits the registry's schema-mode
+// config: the non-core tool ships a stubbed empty schema with a tool_view
+// expansion instruction, while the always-full core tool keeps its schema.
+func TestAgentRegistry_TaskScopedLoopGetsIndexedSchema(t *testing.T) {
+	r := newTestRegistryWithTaskTools(t)
+	r.SetSchemaModeConfig(config.AgentToolsConfig{}) // zero value = indexed default
+
+	loop, err := r.GetForTask("coder", "task-schema-1")
+	if err != nil {
+		t.Fatalf("GetForTask: %v", err)
+	}
+
+	// The loop's registry is a FilteredToolRegistry wrapping the shared
+	// parent; stubbing lives on the parent and is visible through the
+	// filtered view's GetDefinitions.
+	defs := loopRegistryDefinitions(t, loop)
+
+	shell := findTaskSchemaDef(t, defs, "shell")
+	if len(shell.Function.Parameters.Properties) == 0 {
+		t.Error(`always-full core tool "shell" must keep its parameter properties`)
+	}
+	if len(shell.Function.Parameters.Required) == 0 {
+		t.Error(`always-full core tool "shell" must keep its required list`)
+	}
+
+	extra := findTaskSchemaDef(t, defs, "task_schema_extra")
+	if len(extra.Function.Parameters.Properties) != 0 {
+		t.Errorf("non-core tool must be stubbed to an empty schema under indexed mode; got %d properties",
+			len(extra.Function.Parameters.Properties))
+	}
+	if !strings.Contains(extra.Function.Description, " use tool_view{task_schema_extra}.") {
+		t.Errorf("stubbed description %q must contain tool_view expansion instruction",
+			extra.Function.Description)
+	}
+}
+
+// TestAgentRegistry_SchemaModeConfigFullRestoresLegacy verifies that
+// schema_mode "full" ships complete schemas for every tool, matching the
+// primary loop's resolution semantics.
+func TestAgentRegistry_SchemaModeConfigFullRestoresLegacy(t *testing.T) {
+	r := newTestRegistryWithTaskTools(t)
+	r.SetSchemaModeConfig(config.AgentToolsConfig{SchemaMode: "full"})
+
+	loop, err := r.GetForTask("coder", "task-schema-full")
+	if err != nil {
+		t.Fatalf("GetForTask: %v", err)
+	}
+
+	defs := loopRegistryDefinitions(t, loop)
+	extra := findTaskSchemaDef(t, defs, "task_schema_extra")
+	if len(extra.Function.Parameters.Properties) == 0 {
+		t.Fatal(`schema_mode "full" must restore complete parameter schemas for all tools`)
+	}
+	if len(extra.Function.Parameters.Required) == 0 {
+		t.Fatal(`schema_mode "full" must preserve the required list`)
+	}
+}
+
+// TestAgentRegistry_SchemaModeBeforeLoopCreation verifies the config is
+// honored for loops created after SetSchemaModeConfig (createLoop consults
+// the stored config even when no GetForTask happened first).
+func TestAgentRegistry_SchemaModeBeforeLoopCreation(t *testing.T) {
+	r := newTestRegistryWithTaskTools(t)
+	r.SetSchemaModeConfig(config.AgentToolsConfig{SchemaMode: "indexed"})
+
+	loop, err := r.GetForTask("coder", "task-schema-order")
+	if err != nil {
+		t.Fatalf("GetForTask: %v", err)
+	}
+
+	defs := loopRegistryDefinitions(t, loop)
+	extra := findTaskSchemaDef(t, defs, "task_schema_extra")
+	if len(extra.Function.Parameters.Properties) != 0 {
+		t.Errorf("loop created after SetSchemaModeConfig must ship a stubbed schema; got %d properties",
+			len(extra.Function.Parameters.Properties))
+	}
+}
+
+// TestAgentRegistry_PlaceholderRegistrySetSchemaModeSafe proves that a
+// placeholder tool registry lacking SetSchemaMode does not panic when the
+// registry's schema-mode config is applied (interface-assertion guard).
+type placeholderToolRegistry struct{}
+
+func (placeholderToolRegistry) Get(name string) tools.Tool           { return nil }
+func (placeholderToolRegistry) List() []tools.Tool                   { return nil }
+func (placeholderToolRegistry) GetDefinitions() []llm.ToolDefinition { return nil }
+
+// TestAgentRegistry_PlaceholderRegistrySetSchemaModeSafe exercises the
+// interface assertion in applySchemaModeLocked with a registry that does not
+// implement SetSchemaMode — it must not panic and must leave the registry
+// untouched.
+func TestAgentRegistry_PlaceholderRegistrySetSchemaModeSafe(t *testing.T) {
+	r := newTestRegistryWithTaskTools(t)
+	r.tools = placeholderToolRegistry{}
+	r.SetSchemaModeConfig(config.AgentToolsConfig{SchemaMode: "full"})
+
+	// No panic above is the assertion; GetForTask must still succeed and
+	// the placeholder registry must be left untouched.
+	if _, err := r.GetForTask("coder", "task-schema-placeholder"); err != nil {
+		t.Fatalf("GetForTask with placeholder registry: %v", err)
+	}
+}
+
+// loopRegistryDefinitions fetches the tool registry attached to a loop built
+// by GetForTask and returns its LLM definitions. Loops do not expose their
+// registry directly, so this helper reaches through the package-private
+// field (tests live in the same package).
+func loopRegistryDefinitions(t *testing.T, loop *AgentLoop) []llm.ToolDefinition {
+	t.Helper()
+	if loop == nil {
+		t.Fatal("loop is nil")
+	}
+	loop.mu.RLock()
+	reg := loop.registry
+	loop.mu.RUnlock()
+	if reg == nil {
+		t.Fatal("loop has no tool registry attached")
+	}
+	return reg.GetDefinitions()
 }

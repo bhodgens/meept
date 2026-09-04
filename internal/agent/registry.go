@@ -17,6 +17,7 @@ import (
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/security"
 )
 
@@ -92,6 +93,14 @@ type AgentRegistry struct {
 	// guardsCfg holds [agent.guards] settings from the config file
 	// (leaf 07); applied to every loop created by this registry.
 	guardsCfg config.AgentGuardsConfig
+
+	// schemaModeCfg holds the [agent.tools] tool-schema settings (leaf 04).
+	// It is applied to the shared parent tool registry so every task-scoped
+	// loop observes the same stubbed definitions through its filtered view
+	// (FilteredToolRegistry delegates GetDefinitions to the parent). Both
+	// fields are guarded by mu.
+	schemaModeCfg config.AgentToolsConfig
+	schemaModeSet bool
 
 	// Learning + evolution wiring (WikiSkill raw layer, arXiv:2608.27454):
 	// shared across all registry-created loops so specialist agents record
@@ -395,6 +404,13 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	if r.tools != nil {
 		// Filter tools based on spec
 		filtered := r.filterTools(spec)
+		// Task-loop schema wiring (leaf 04): push the resolved schema mode
+		// into the loop's registry. FilteredToolRegistry does not implement
+		// SetSchemaMode; the assertion fires against the shared parent
+		// *tools.Registry so the new loop inherits the stubbed definitions
+		// through its filtered view. Placeholder registries are guarded by
+		// the assertion (no panic).
+		r.applySchemaModeLocked()
 		opts = append(opts, WithToolRegistry(filtered))
 	}
 
@@ -657,6 +673,53 @@ func (r *AgentRegistry) SetUsageTracker(ut lifecycleUsageTracker) {
 	r.mu.Lock()
 	r.usageTracker = ut
 	r.mu.Unlock()
+}
+
+// SetSchemaModeConfig supplies the [agent.tools] tool-schema settings
+// (chat-dispatch-ux leaf 04) for task-scoped loops created by this registry.
+// The effective mode is pushed into the shared parent tool registry, so the
+// setting covers every loop already served by the registry as well as every
+// loop createLoop builds afterwards: FilteredToolRegistry delegates
+// GetDefinitions to its parent, so parent-level stubbing is exactly what
+// task-scoped loops observe. Resolution semantics mirror the primary loop's
+// applySchemaModeLocked (loop.go): "" / anything-but-"full" resolves to
+// indexed (default-on), "full" restores legacy full-schema payloads;
+// an empty AlwaysFull falls back to config.DefaultAlwaysFullTools(). Safe
+// for placeholder registries that do not implement SetSchemaMode (guarded
+// by an interface assertion — no panic).
+func (r *AgentRegistry) SetSchemaModeConfig(cfg config.AgentToolsConfig) {
+	r.mu.Lock()
+	r.schemaModeCfg = cfg
+	r.schemaModeSet = true
+	r.applySchemaModeLocked()
+	r.mu.Unlock()
+}
+
+// applySchemaModeLocked pushes the effective schema mode into the shared
+// parent tool registry. r.mu must be held by the caller. No-op when the
+// registry does not expose SetSchemaMode (e.g. placeholder registries).
+func (r *AgentRegistry) applySchemaModeLocked() {
+	if r.tools == nil {
+		return
+	}
+	sm, ok := r.tools.(interface {
+		SetSchemaMode(tools.SchemaMode, []string)
+	})
+	if !ok {
+		return
+	}
+
+	mode := tools.SchemaModeIndexed
+	alwaysFull := config.DefaultAlwaysFullTools()
+	if r.schemaModeSet {
+		if r.schemaModeCfg.SchemaMode == "full" {
+			mode = tools.SchemaModeFull
+		}
+		if len(r.schemaModeCfg.AlwaysFull) > 0 {
+			alwaysFull = r.schemaModeCfg.AlwaysFull
+		}
+	}
+	sm.SetSchemaMode(mode, alwaysFull)
 }
 
 // SetLearningPipeline wires the learning pipeline (Judge/Distill) into every
