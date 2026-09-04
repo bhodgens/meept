@@ -102,6 +102,26 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 	policy := rm.policy
 	rm.mu.RUnlock()
 
+	// FAIL: Tool execution failed — nothing meaningful to review. The step
+	// must not pass review: an approved error is how "Task completed" stubs
+	// lied to users (2026-09-04 finding F2). This gate runs before every
+	// policy path (needs-review, auto-approve, heuristic) so an error step
+	// can never be laundered into an approval.
+	if rm.stepHasError(step) {
+		rm.logger.Info("Review rejected: step execution produced an error",
+			"step_id", step.ID,
+			"tool_hint", step.ToolHint,
+		)
+		if err := rm.stepStore.SetState(step.ID, task.StepFailed); err != nil {
+			rm.logger.Error("Failed to set error step to failed", "error", err)
+		}
+		return &ReviewResult{
+			Status:     ReviewRejected,
+			Feedback:   "Rejected: step execution error — " + truncateString(firstLine(step.Result), 200),
+			Confidence: 1.0,
+		}, nil
+	}
+
 	// Check if review is needed based on policy
 	if !policy.NeedsReview(step) {
 		rm.logger.Debug("Step does not require review", "step_id", step.ID)
@@ -147,17 +167,21 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		}, nil
 	}
 
-	// SKIP: Tool execution failed — nothing meaningful to review.
-	// The step has already been or will be marked as failed; spawning a
-	// reviewer agent to confirm an error is pure token waste.
+	// FAIL backstop: Tool execution failed — nothing meaningful to review.
+	// Unreachable when the pre-policy gate above fires, but kept as a
+	// hard guarantee: no code path in ReviewStep may return ReviewApproved
+	// for an error step (2026-09-04 finding F2).
 	if rm.stepHasError(step) {
-		rm.logger.Info("Skipping review: step execution produced an error",
+		rm.logger.Info("Review rejected: step execution produced an error",
 			"step_id", step.ID,
 			"tool_hint", step.ToolHint,
 		)
+		if err := rm.stepStore.SetState(step.ID, task.StepFailed); err != nil {
+			rm.logger.Error("Failed to set error step to failed", "error", err)
+		}
 		return &ReviewResult{
-			Status:     ReviewApproved,
-			Feedback:   "Skipped review — step has execution error",
+			Status:     ReviewRejected,
+			Feedback:   "Rejected: step execution error — " + truncateString(firstLine(step.Result), 200),
 			Confidence: 1.0,
 		}, nil
 	}
@@ -857,8 +881,12 @@ func (rm *ReviewManager) isTrivialTask(step *task.TaskStep) bool {
 // heuristicReviewPasses performs a lightweight, non-LLM check to determine
 // whether a low-risk step should pass review. It returns true when the
 // step has a non-empty, meaningful result — the default state for benign
-// operations that did not fail.
+// operations that did not fail. Error-shaped results never pass: a long
+// error string is still an error.
 func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
+	if rm.stepHasError(step) {
+		return false
+	}
 	result := strings.TrimSpace(step.Result)
 	if result == "" {
 		return false

@@ -804,11 +804,22 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		}
 	}
 
-	// Check if all steps are completed/approved
+	// Check if all steps are completed/approved. A task whose steps are all
+	// in terminal states but that contains failures must still reach the
+	// finalization block below — AreAllCompleted is success-only by design
+	// (it returns false on any StepFailed), so a terminal-with-failures
+	// check is what lets the task finalize as StateFailed.
 	allDone, err := ts.stepStore.AreAllCompleted(step.TaskID)
 	if err != nil {
 		ts.logger.Error("Failed to check task completion", "error", err)
 		return nil
+	}
+	if !allDone {
+		if terminal, terr := ts.allStepsTerminalWithFailures(step.TaskID); terr != nil {
+			ts.logger.Error("Failed to check terminal state with failures", "task_id", step.TaskID, "error", terr)
+		} else if terminal {
+			allDone = true
+		}
 	}
 
 	// Load task for state transition / progress reporting.
@@ -850,7 +861,18 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		// Clean up validation gate counter for completed task
 		ts.cleanupValidationGateCounter(step.TaskID)
 
-		t.SetState(task.StateCompleted)
+		// Honest completion (2026-09-04 finding F2): any failed step fails
+		// the task. The step error text becomes the user-visible result.
+		failedSteps, ferr := ts.failedStepsForTask(step.TaskID)
+		if ferr != nil {
+			ts.logger.Error("Failed to list failed steps", "task_id", step.TaskID, "error", ferr)
+		}
+		taskFailed := len(failedSteps) > 0
+		if taskFailed {
+			t.SetState(task.StateFailed)
+		} else {
+			t.SetState(task.StateCompleted)
+		}
 		if err := ts.taskStore.Update(t); err != nil {
 			ts.logger.Error("Failed to set task completed", "error", err)
 		}
@@ -864,6 +886,15 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		stepSummaries := ts.buildStepSummaries(step.TaskID)
 		executionTime := t.ExecutionTime().Round(time.Second).String()
 		resultSummary := ts.buildResultSummary(stepSummaries)
+
+		// Honest completion payload: "status" tells subscribers whether the
+		// task actually succeeded, and a failed task's "result" carries the
+		// first failed step's error text instead of a success summary.
+		completionStatus := "completed"
+		if taskFailed {
+			completionStatus = "failed"
+			resultSummary = truncateString(firstLine(failedSteps[0].Result), 400)
+		}
 
 		// Extract unique agents used
 		agentSet := make(map[string]struct{})
@@ -886,12 +917,14 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			"steps":           stepSummaries,
 			"execution_time":  executionTime,
 			"result":          resultSummary,
+			"status":          completionStatus,
 			"agents_used":     agentsUsed,
 			KeyTokenUsage:     t.TokenUsage,
 		})
 
-		ts.logger.Info("Task completed",
+		ts.logger.Info("Task finalized",
 			"task_id", step.TaskID,
+			"status", completionStatus,
 			"steps_completed", t.CompletedJobs,
 			"steps_total", t.TotalJobs,
 			"agents_used", agentsUsed,
@@ -1395,6 +1428,47 @@ func (ts *TacticalScheduler) runValidationGate(_ context.Context, taskID string)
 	return nil
 }
 
+// allStepsTerminalWithFailures reports whether every step for a task is in a
+// terminal state AND at least one of them failed. AreAllCompleted is
+// success-only (it returns false whenever any step is StepFailed), so this
+// check is what lets a task with failures reach finalization — it must
+// finalize as StateFailed instead of hanging in an active state forever.
+func (ts *TacticalScheduler) allStepsTerminalWithFailures(taskID string) (bool, error) {
+	steps, err := ts.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		return false, fmt.Errorf("failed to list steps: %w", err)
+	}
+	if len(steps) == 0 {
+		return false, nil // Nothing to finalize here; AreAllCompleted already treats this as done.
+	}
+	hasFailed := false
+	for _, s := range steps {
+		if !s.State.IsTerminal() {
+			return false, nil
+		}
+		if s.State == task.StepFailed {
+			hasFailed = true
+		}
+	}
+	return hasFailed, nil
+}
+
+// failedStepsForTask returns the failed steps for a task, ordered by sequence.
+// An empty result means the task carried no failures.
+func (ts *TacticalScheduler) failedStepsForTask(taskID string) ([]*task.TaskStep, error) {
+	steps, err := ts.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list steps: %w", err)
+	}
+	var failed []*task.TaskStep
+	for _, s := range steps {
+		if s.State == task.StepFailed {
+			failed = append(failed, s)
+		}
+	}
+	return failed, nil
+}
+
 // buildStepSummaries creates an array of step summaries for task completion events.
 func (ts *TacticalScheduler) buildStepSummaries(taskID string) []map[string]any {
 	allSteps, err := ts.stepStore.ListByTaskID(taskID)
@@ -1409,7 +1483,7 @@ func (ts *TacticalScheduler) buildStepSummaries(taskID string) []map[string]any 
 			"id":                  s.ID,
 			"description":         s.Description,
 			"state":               string(s.State),
-			"result":              truncateString(s.Result, 100),
+			"result":              truncateString(s.Result, 400),
 			KeyAgentID:            s.AgentID,
 			"accumulated_context": truncateString(s.AccumulatedContext, 200),
 		}
