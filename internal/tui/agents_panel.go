@@ -100,12 +100,16 @@ type AgentSummary struct {
 	// primary provider waits out its quota reset.
 	// QuotaWaitClass is the parked-turn class from the leaf 04 event
 	// payload ("quota"|"throttle"; "" legacy) — it selects the wait label
-	// via QuotaWaitLabel.
+	// via QuotaWaitLabel. QuotaWaitReason is the I-M8 reason key
+	// ("quota_wait"|"throttle_wait"|"throttle_resumed"|"throttle_give_up";
+	// "" on legacy events) — a give-up renders the give-up badge instead
+	// of a wait label.
 	QuotaWaitUntil     *time.Time `json:"quota_wait_until,omitempty"`
 	QuotaModel         string     `json:"quota_model,omitempty"`
 	QuotaBlocked       bool       `json:"quota_blocked,omitempty"`
 	QuotaFallbackModel string     `json:"quota_fallback_model,omitempty"`
 	QuotaWaitClass     string     `json:"quota_wait_class,omitempty"`
+	QuotaWaitReason    string     `json:"quota_wait_reason,omitempty"`
 }
 
 // AgentDetail is the drill-in payload. Combines the employee definition
@@ -245,7 +249,10 @@ func (p *AgentsPanel) Init() tea.Cmd {
 // means "clear any quota episode for this agent" (quota_cleared / back to
 // running). waitClass is the leaf 04 park event's class payload
 // ("quota"|"throttle"; "" for legacy events and tier refreshes) — it rides
-// through to the row so the badge renders the right wait label.
+// through to the row so the badge renders the right wait label. waitReason
+// is the I-M8 reason payload ("quota_wait"|"throttle_wait"|
+// "throttle_resumed"|"throttle_give_up"; "" legacy) — a give-up renders the
+// give-up badge instead of a wait label.
 type quotaStateMsg struct {
 	agentID       string
 	to            string
@@ -255,6 +262,7 @@ type quotaStateMsg struct {
 	fallbackModel string
 	escalation    string // "" | warn | action_recommended | blocked (leaf 05 tier vocabulary)
 	waitClass     string // "quota" | "throttle" | "" (leaf 04 park-event class)
+	waitReason    string // "quota_wait" | "throttle_wait" | "throttle_resumed" | "throttle_give_up" | "" (I-M8)
 }
 
 // quotaCountdownTickMsg re-renders quota badges so the live countdown stays
@@ -494,6 +502,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.agents[i].QuotaBlocked = false
 					p.agents[i].QuotaFallbackModel = msg.fallbackModel
 					p.agents[i].QuotaWaitClass = msg.waitClass
+					p.agents[i].QuotaWaitReason = msg.waitReason
 					p.agents[i].Status = AgentStateQuotaWait
 				case AgentStateBlocked:
 					// Blocked wins over wait time; keep the model info so
@@ -510,6 +519,20 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 						p.agents[i].QuotaWaitUntil = msg.waitUntil
 					}
 				case "":
+					// I-M8: a throttle give-up (wait past MaxWait, D8) is a
+					// failure surface, not a parked state and not a clear.
+					// It arrives with to == "" and no unblock time; store the
+					// reason so the badge renders the give-up label instead of
+					// a wait label. The episode fully clears on the next
+					// running/resume event.
+					if msg.waitReason == ReasonThrottleGiveUp {
+						p.agents[i].QuotaWaitReason = msg.waitReason
+						if msg.waitClass != "" {
+							p.agents[i].QuotaWaitClass = msg.waitClass
+						}
+						p.updateAgentsTable()
+						break
+					}
 					// Tier escalation refresh (12h warn / 20h
 					// action_recommended fire with to == "" while the
 					// episode is live): update the unblock time when the
@@ -532,6 +555,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.agents[i].QuotaBlocked = false
 					p.agents[i].QuotaFallbackModel = ""
 					p.agents[i].QuotaWaitClass = ""
+					p.agents[i].QuotaWaitReason = ""
 					p.agents[i].Status = "running"
 				default:
 					// quota_cleared / running: drop episode state entirely.
@@ -540,6 +564,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.agents[i].QuotaBlocked = false
 					p.agents[i].QuotaFallbackModel = ""
 					p.agents[i].QuotaWaitClass = ""
+					p.agents[i].QuotaWaitReason = ""
 					p.agents[i].Status = "running"
 				}
 				p.updateAgentsTable()
@@ -709,9 +734,11 @@ func (p *AgentsPanel) updateAgentsTable() {
 	rows := make([]table.Row, len(p.agents))
 	for i, a := range p.agents {
 		statusCell := p.statusBadge(a.Status)
-		// If quota state is present, override the status cell.
-		if a.QuotaWaitUntil != nil || a.QuotaBlocked {
-			statusCell = p.quotaStatusBadge(a.QuotaWaitUntil, a.QuotaBlocked, a.QuotaWaitClass)
+		// If quota state is present, override the status cell. A stored
+		// give-up reason also overrides: the give-up badge is the failure
+		// surface (I-M8) even after the wait time passed.
+		if a.QuotaWaitUntil != nil || a.QuotaBlocked || a.QuotaWaitReason == ReasonThrottleGiveUp {
+			statusCell = p.quotaStatusBadge(a.QuotaWaitUntil, a.QuotaBlocked, a.QuotaWaitClass, a.QuotaWaitReason)
 		}
 		rows[i] = table.Row{
 			truncate(a.ID, 18),
@@ -770,17 +797,25 @@ func orTime(p *time.Time) time.Time {
 // blocked is false the agent has no quota episode and the empty string is
 // returned so rendering is unchanged (regression safety). When both wait
 // time and blocked are present, the blocked label wins. waitClass is the
-// park event's class wire value ("quota"|"throttle"|"" legacy): it selects
+// park event's class wire value ("quota"|"throttle"|""): it selects
 // the leaf 04 wait label ("quota_wait · reset HH:MM" vs "quota_wait ·
-// throttle retry HH:MM", QuotaWaitLabel).
-func (p *AgentsPanel) quotaStatusBadge(waitUntil *time.Time, blocked bool, waitClass string) string {
+// throttle retry HH:MM", QuotaWaitLabel). waitReason is the I-M8 reason
+// wire value ("quota_wait"|"throttle_wait"|"throttle_resumed"|
+// "throttle_give_up"|""): a give-up renders the give-up badge instead of a
+// wait label.
+func (p *AgentsPanel) quotaStatusBadge(waitUntil *time.Time, blocked bool, waitClass, waitReason string) string {
 	if blocked {
 		return RenderAgentStatus(AgentStateBlocked)
+	}
+	// I-M8: a throttle give-up is a failure surface, not a wait — the
+	// badge must not imply the agent is still parked.
+	if waitReason == ReasonThrottleGiveUp {
+		return QuotaWaitLabel(waitClass, waitReason, time.Time{})
 	}
 	if waitUntil == nil {
 		return ""
 	}
-	return QuotaWaitLabel(waitClass, *waitUntil)
+	return QuotaWaitLabel(waitClass, waitReason, *waitUntil)
 }
 
 func (p *AgentsPanel) tierShort(tier string) string {
@@ -958,11 +993,12 @@ func (p *AgentsPanel) renderDetail() string {
 	b.WriteString(valueStyle.Render(d.Agent.Tier))
 	b.WriteString("\n")
 	b.WriteString(labelStyle.Render("status:"))
-	if d.Agent.QuotaBlocked || d.Agent.QuotaWaitUntil != nil {
+	if d.Agent.QuotaBlocked || d.Agent.QuotaWaitUntil != nil || d.Agent.QuotaWaitReason == ReasonThrottleGiveUp {
 		// Quota episode: show the colored quota status instead of the base
 		// status, plus the primary/active model lines when a fallback is
-		// carrying the work.
-		b.WriteString(p.quotaStatusBadge(d.Agent.QuotaWaitUntil, d.Agent.QuotaBlocked, d.Agent.QuotaWaitClass))
+		// carrying the work. A give-up reason (I-M8) renders the give-up
+		// badge even after the wait time passed.
+		b.WriteString(p.quotaStatusBadge(d.Agent.QuotaWaitUntil, d.Agent.QuotaBlocked, d.Agent.QuotaWaitClass, d.Agent.QuotaWaitReason))
 		b.WriteString("\n")
 		for _, line := range RenderQuotaDetailLines(
 			d.Agent.QuotaModel, d.Agent.QuotaFallbackModel,

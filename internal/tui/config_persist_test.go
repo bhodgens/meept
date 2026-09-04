@@ -158,3 +158,56 @@ func TestLoadClientConfigPath_ProjectLocal(t *testing.T) {
 		t.Errorf("path = %q, want %q", path, wantPath)
 	}
 }
+
+// TestLoadClientConfig_TimeDisplay pins the M9 rendering.time_display
+// contract: absent key keeps the "daemon" default, "local" parses through,
+// and SetQuotaTimeDisplay accepts the two vocabulary values only.
+func TestLoadClientConfig_TimeDisplay(t *testing.T) {
+	t.Cleanup(func() { SetQuotaTimeDisplay(TimeDisplayDaemon) })
+	tmp := t.TempDir()
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+
+	// Default (no file): time_display is "daemon".
+	cfg := DefaultClientConfig()
+	if cfg.Rendering.TimeDisplay != TimeDisplayDaemon {
+		t.Errorf("default time_display = %q, want %q", cfg.Rendering.TimeDisplay, TimeDisplayDaemon)
+	}
+
+	// "local" parses through the JSON5 loader.
+	meeptDir := filepath.Join(tmp, ".meept")
+	if err := os.MkdirAll(meeptDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	localPath := filepath.Join(meeptDir, "client.json5")
+	if err := os.WriteFile(localPath, []byte(`{"rendering":{"time_display":"local"}}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	loaded, err := loadConfigFile(localPath)
+	if err != nil {
+		t.Fatalf("loadConfigFile: %v", err)
+	}
+	if loaded.Rendering.TimeDisplay != TimeDisplayLocal {
+		t.Errorf("loaded time_display = %q, want %q", loaded.Rendering.TimeDisplay, TimeDisplayLocal)
+	}
+
+	// SetQuotaTimeDisplay: "local" flips, unknown values keep the setting.
+	SetQuotaTimeDisplay(TimeDisplayLocal)
+	if QuotaTimeDisplay != TimeDisplayLocal {
+		t.Errorf("after SetQuotaTimeDisplay(local): QuotaTimeDisplay = %q", QuotaTimeDisplay)
+	}
+	SetQuotaTimeDisplay("bogus")
+	if QuotaTimeDisplay != TimeDisplayLocal {
+		t.Errorf("unknown value changed the setting: QuotaTimeDisplay = %q", QuotaTimeDisplay)
+	}
+	SetQuotaTimeDisplay(TimeDisplayDaemon)
+	if QuotaTimeDisplay != TimeDisplayDaemon {
+		t.Errorf("after SetQuotaTimeDisplay(daemon): QuotaTimeDisplay = %q", QuotaTimeDisplay)
+	}
+}

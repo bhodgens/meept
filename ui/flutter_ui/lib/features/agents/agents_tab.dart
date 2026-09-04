@@ -10,7 +10,7 @@ import '../../providers/providers.dart';
 import '../../providers/tab_activation_provider.dart'
     show keyboardFocusProvider;
 import '../../models/api_models.dart';
-import '../../providers/agent_provider.dart';
+// agent_provider symbols come via providers.dart (exports agent_provider).
 import 'eval_runs_panel.dart';
 import 'facts_panel.dart';
 import 'quota_status.dart';
@@ -91,6 +91,9 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
           escalation: quota.escalation,
           // Parked-turn class (leaf 04); null-safe for legacy events.
           waitClass: quota.waitClass,
+          // Park lifecycle reason (I-M8: throttle_give_up etc.); null-safe
+          // for legacy events.
+          reason: quota.reason,
         );
       } catch (_) {
         // malformed quota payload — ignore without crash
@@ -295,6 +298,9 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     bool isKeyboardSelected,
     AgentQuotaState? quotaState,
   ) {
+    // M9: honor the client-local time toggle (default off — daemon clock).
+    final useDeviceTime =
+        ref.watch(renderingPrefsProvider).useDeviceTimeForQuota;
     return InkWell(
       key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
@@ -349,7 +355,10 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ),
             if (quotaState != null) ...[
               const SizedBox(height: 4),
-              QuotaStatusBadge(quotaState: quotaState),
+              QuotaStatusBadge(
+                quotaState: quotaState,
+                useDeviceTime: useDeviceTime,
+              ),
             ],
           ],
         ),
@@ -363,12 +372,19 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     // primary/active model lines under the agent name. The event's
     // model_id (primary model) is not stored in AgentQuotaState yet, so
     // the primary line degrades to "unknown" via quotaDetailLines.
+    // M9: quotaDetailLines renders the daemon-local HH:MM by default (the
+    // offset captured from the wire RFC3339), device-local when the
+    // settings toggle is on.
+    final useDeviceTime =
+        ref.watch(renderingPrefsProvider).useDeviceTimeForQuota;
     final quotaState = ref.watch(agentProvider).quotaEpisodes[agent.id];
     final quotaBlocked = quotaState?.quotaBlocked ?? false;
     final quotaLines = quotaDetailLines(
       null,
       quotaState?.fallbackModel,
       quotaState?.quotaWaitUntilEpoch,
+      waitUntilOffsetMinutes: quotaState?.quotaWaitUntilOffsetMinutes,
+      useDeviceTime: useDeviceTime,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

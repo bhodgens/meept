@@ -68,22 +68,83 @@ void main() {
       const state = AgentQuotaState(quotaBlocked: false);
       expect(state.quotaBlocked, isFalse);
       expect(state.quotaWaitUntilEpoch, isNull);
+      expect(state.quotaWaitUntilOffsetMinutes, isNull);
       expect(state.fallbackModel, isNull);
       expect(state.escalation, isNull);
+      expect(state.reason, isNull);
     });
 
     test('copyWith preserves unprovided fields', () {
       const original = AgentQuotaState(
         quotaBlocked: true,
         quotaWaitUntilEpoch: 123456789,
+        quotaWaitUntilOffsetMinutes: 120,
         fallbackModel: 'glm-4.7',
         escalation: 'warn',
+        waitClass: 'throttle',
+        reason: 'throttle_wait',
       );
       final copy = original.copyWith(quotaBlocked: false);
       expect(copy.quotaBlocked, isFalse);
       expect(copy.quotaWaitUntilEpoch, 123456789);
+      expect(copy.quotaWaitUntilOffsetMinutes, 120);
       expect(copy.fallbackModel, 'glm-4.7');
       expect(copy.escalation, 'warn');
+      expect(copy.waitClass, 'throttle');
+      expect(copy.reason, 'throttle_wait');
+    });
+
+    // I-M8 regression: the old copyWith used null-preserving nullable
+    // parameters, so `copyWith(x: null)` was identical to omitting x — a
+    // clear/park event carrying an empty reason could never clear stale
+    // badge state. The sentinel-based copyWith makes explicit null a
+    // distinct "clear" instruction.
+    group('copyWith clear-vs-absent (I-M8 stale badge regression)', () {
+      const original = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: 123456789,
+        quotaWaitUntilOffsetMinutes: 120,
+        fallbackModel: 'glm-4.7',
+        escalation: 'warn',
+        waitClass: 'throttle',
+        reason: 'throttle_wait',
+      );
+
+      test('explicit null clears nullable fields', () {
+        final cleared = original.copyWith(
+          fallbackModel: null,
+          escalation: null,
+          waitClass: null,
+          reason: null,
+        );
+        expect(cleared.fallbackModel, isNull);
+        expect(cleared.escalation, isNull);
+        expect(cleared.waitClass, isNull);
+        expect(cleared.reason, isNull);
+        // Non-targeted fields stay.
+        expect(cleared.quotaWaitUntilEpoch, 123456789);
+        expect(cleared.quotaWaitUntilOffsetMinutes, 120);
+      });
+
+      test('explicit null clears the wait time (resume/clear events)', () {
+        final cleared = original.copyWith(
+          quotaWaitUntilEpoch: null,
+          quotaWaitUntilOffsetMinutes: null,
+        );
+        expect(cleared.quotaWaitUntilEpoch, isNull);
+        expect(cleared.quotaWaitUntilOffsetMinutes, isNull);
+        // Untouched fields preserved.
+        expect(cleared.reason, 'throttle_wait');
+      });
+
+      test('omitted fields are preserved (not cleared)', () {
+        final copy = original.copyWith(reason: 'throttle_give_up');
+        expect(copy.reason, 'throttle_give_up');
+        expect(copy.fallbackModel, 'glm-4.7');
+        expect(copy.escalation, 'warn');
+        expect(copy.waitClass, 'throttle');
+        expect(copy.quotaWaitUntilEpoch, 123456789);
+      });
     });
   });
 
@@ -212,6 +273,123 @@ void main() {
       );
 
       expect(notifier.state.quotaEpisodes, isEmpty);
+    });
+
+    // I-M8: a give-up (to == "", no unblock time) stores the reason — the
+    // episode is a failure surface, not a clear — and a later resume
+    // clears the episode entirely.
+    test('to="" throttle_give_up stores the reason on the episode', () async {
+      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+      await notifier.loadAgents();
+
+      // Live throttle episode.
+      notifier.handleQuotaEvent(
+        agentId: 'agent-giveup',
+        to: 'quota_wait',
+        unblockAt: '2026-08-31T12:00:00Z',
+        waitClass: 'throttle',
+        reason: 'throttle_wait',
+      );
+      expect(
+        notifier.state.quotaEpisodes['agent-giveup']!.reason,
+        'throttle_wait',
+      );
+
+      // Give-up: reason stored, episode NOT removed.
+      notifier.handleQuotaEvent(
+        agentId: 'agent-giveup',
+        to: '',
+        waitClass: 'throttle',
+        reason: 'throttle_give_up',
+      );
+      final ep = notifier.state.quotaEpisodes['agent-giveup'];
+      expect(ep, isNotNull);
+      expect(ep!.reason, 'throttle_give_up');
+
+      // Resume clears the episode entirely.
+      notifier.handleQuotaEvent(
+        agentId: 'agent-giveup',
+        to: 'running',
+      );
+      expect(notifier.state.quotaEpisodes.containsKey('agent-giveup'),
+          isFalse);
+    });
+
+    // I-M8 stale-badge fix: a tier-refresh event that explicitly carries
+    // empty-string fields must CLEAR them (sentinel copyWith), while
+    // absent (null) fields stay untouched.
+    test('to="" with explicit empty fields clears them, absent preserves',
+        () async {
+      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+      await notifier.loadAgents();
+
+      notifier.handleQuotaEvent(
+        agentId: 'agent-stale',
+        to: 'quota_wait',
+        unblockAt: '2026-08-31T12:00:00Z',
+        fallbackModel: 'glm-4.7',
+        waitClass: 'throttle',
+        reason: 'throttle_wait',
+      );
+      var ep = notifier.state.quotaEpisodes['agent-stale']!;
+      expect(ep.fallbackModel, 'glm-4.7');
+      expect(ep.waitClass, 'throttle');
+      expect(ep.reason, 'throttle_wait');
+
+      // Refresh event: escalation arrives; fallbackModel/waitClass/reason
+      // are ABSENT (null) → preserved.
+      notifier.handleQuotaEvent(
+        agentId: 'agent-stale',
+        to: '',
+        unblockAt: '2026-08-31T13:30:00Z',
+        escalation: 'warn',
+      );
+      ep = notifier.state.quotaEpisodes['agent-stale']!;
+      expect(ep.escalation, 'warn');
+      expect(ep.fallbackModel, 'glm-4.7',
+          reason: 'absent field must be preserved');
+      expect(ep.waitClass, 'throttle');
+      expect(ep.reason, 'throttle_wait');
+
+      // Now a refresh carrying an EXPLICIT empty reason/waitClass clears
+      // them — under the old copyWith this was impossible.
+      notifier.handleQuotaEvent(
+        agentId: 'agent-stale',
+        to: '',
+        unblockAt: '2026-08-31T13:30:00Z',
+        escalation: 'warn',
+        fallbackModel: '',
+        waitClass: '',
+        reason: '',
+      );
+      ep = notifier.state.quotaEpisodes['agent-stale']!;
+      expect(ep.fallbackModel, isNull,
+          reason: 'explicit empty must clear the stale value');
+      expect(ep.waitClass, isNull);
+      expect(ep.reason, isNull);
+    });
+
+    test('reason parses through handleQuotaEvent for park events', () async {
+      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+      await notifier.loadAgents();
+
+      notifier.handleQuotaEvent(
+        agentId: 'agent-r',
+        to: 'quota_wait',
+        unblockAt: '2026-08-31T12:00:00Z',
+        waitClass: 'quota',
+        reason: 'quota_wait',
+      );
+      expect(notifier.state.quotaEpisodes['agent-r']!.reason, 'quota_wait');
+
+      // Legacy event with no reason replaces the episode: reason resets.
+      notifier.handleQuotaEvent(
+        agentId: 'agent-r',
+        to: 'quota_wait',
+        unblockAt: '2026-08-31T12:30:00Z',
+        waitClass: 'quota',
+      );
+      expect(notifier.state.quotaEpisodes['agent-r']!.reason, isNull);
     });
 
     test('quota_wait stores escalation "" and later to="" warn stores "warn"', () async {
@@ -343,6 +521,36 @@ void main() {
       };
       // Should not throw
       expect(() => AgentProgress.fromJson(json), returnsNormally);
+    });
+
+    // I-M8: the park-event reason rides the payload into the model.
+    test('parses reason into the payload (I-M8)', () {
+      final json = {
+        'type': 'agent_progress',
+        'agent_id': 'agent-reason',
+        'message': 'throttle wait',
+        'tier': 1,
+        'to': 'quota_wait',
+        'reason': 'throttle_wait',
+        'class': 'throttle',
+        'unblock_at': '2026-09-02T14:05:00+02:00',
+        'timestamp': '2026-09-02T12:00:00Z',
+      };
+      final payload = AgentProgress.fromJson(json).quota!;
+      expect(payload.reason, 'throttle_wait');
+    });
+
+    test('reason is null on legacy events without the key', () {
+      final json = {
+        'type': 'agent_progress',
+        'agent_id': 'agent-legacy',
+        'message': 'quota wait',
+        'tier': 1,
+        'to': 'quota_wait',
+        'unblock_at': '2026-08-31T12:00:00Z',
+        'timestamp': '2026-08-31T10:00:00Z',
+      };
+      expect(AgentProgress.fromJson(json).quota!.reason, isNull);
     });
   });
 
@@ -497,6 +705,194 @@ void main() {
       );
       final ep = notifier.state.quotaEpisodes['agent-wc']!;
       expect(ep.waitClass, equals('throttle'));
+    });
+
+    // I-M8: a give-up reason flips the badge to the failure surface.
+    test('throttle_give_up reason renders give-up label', () {
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: epochOf(unblock),
+        waitClass: 'throttle',
+        reason: 'throttle_give_up',
+      );
+      expect(
+        quotaWaitLabel(state),
+        equals('throttle gave up · action required'),
+      );
+    });
+
+    // I-M8: wait reasons do not disturb the wait label.
+    test('throttle_wait/throttle_resumed reasons keep wait labels', () {
+      expect(
+        quotaWaitLabel(AgentQuotaState(
+          quotaBlocked: false,
+          quotaWaitUntilEpoch: epochOf(unblock),
+          waitClass: 'throttle',
+          reason: 'throttle_wait',
+        )),
+        equals('quota_wait · throttle retry 14:05'),
+      );
+      expect(
+        quotaWaitLabel(AgentQuotaState(
+          quotaBlocked: false,
+          quotaWaitUntilEpoch: epochOf(unblock),
+          waitClass: 'quota',
+          reason: 'quota_wait',
+        )),
+        equals('quota_wait · reset 14:05'),
+      );
+    });
+
+    test('give-up label renders even with no wait time', () {
+      expect(
+        quotaWaitLabel(const AgentQuotaState(
+          quotaBlocked: false,
+          reason: 'throttle_give_up',
+        )),
+        equals('throttle gave up · action required'),
+      );
+    });
+  });
+
+  // M9 timezone convention: default rendering honors the DAEMON's offset
+  // (embedded in the wire RFC3339, captured at parse time) — never UTC,
+  // never the device zone; the toggle switches to device-local.
+  group('quota time display (M9)', () {
+    // 2026-09-02 14:05 at +02:00 == 12:05 UTC == 08:05 at -04:00.
+    // These wall-clocks are fixed facts about the fixture; the epoch is
+    // the same instant in all three encodings.
+    final daemonWall = DateTime.parse('2026-09-02T14:05:00+02:00');
+    // 2026-09-02T12:05:00Z.
+    final daemonEpoch = DateTime.parse('2026-09-02T12:05:00Z')
+        .millisecondsSinceEpoch;
+    const daemonOffsetMinutes = 120;
+
+    int epochOf(DateTime t) => t.millisecondsSinceEpoch;
+
+    test('default renders the daemon wall-clock, not UTC/device', () {
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: daemonWall.millisecondsSinceEpoch,
+        quotaWaitUntilOffsetMinutes: daemonOffsetMinutes,
+        waitClass: 'quota',
+      );
+      expect(
+        quotaWaitLabel(state),
+        equals('quota_wait · reset 14:05'),
+        reason: 'the +02:00 offset embedded in the wire value is honored',
+      );
+    });
+
+    test('UTC-encoded instant with a daemon offset renders daemon wall-clock',
+        () {
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: daemonEpoch,
+        quotaWaitUntilOffsetMinutes: daemonOffsetMinutes,
+      );
+      expect(quotaWaitLabel(state), equals('quota_wait · reset 14:05'));
+    });
+
+    test('local toggle converts to the device zone', () {
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: daemonEpoch,
+        quotaWaitUntilOffsetMinutes: daemonOffsetMinutes,
+      );
+      final expected = DateTime.fromMillisecondsSinceEpoch(daemonEpoch)
+          .toIso8601String()
+          .substring(11, 16);
+      expect(
+        quotaWaitLabel(state, useDeviceTime: true),
+        equals('quota_wait · reset $expected'),
+      );
+      // The same instant must render identically regardless of which zone
+      // encoding the wire used.
+      final fromDaemonWall = quotaWaitLabel(
+        AgentQuotaState(
+          quotaBlocked: false,
+          quotaWaitUntilEpoch: epochOf(daemonWall),
+          quotaWaitUntilOffsetMinutes: daemonOffsetMinutes,
+        ),
+        useDeviceTime: true,
+      );
+      expect(fromDaemonWall, equals('quota_wait · reset $expected'));
+    });
+
+    test('client in the daemon zone renders the same with toggle on or off',
+        () {
+      // When the device offset equals the daemon offset, both paths must
+      // agree (the offset-equality shortcut is only valid then).
+      final deviceOffsetMinutes =
+          DateTime.now().timeZoneOffset.inMinutes;
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: daemonEpoch,
+        quotaWaitUntilOffsetMinutes: deviceOffsetMinutes,
+      );
+      final deviceWall = DateTime.fromMillisecondsSinceEpoch(daemonEpoch)
+          .toIso8601String()
+          .substring(11, 16);
+      expect(quotaWaitLabel(state), equals('quota_wait · reset $deviceWall'));
+      expect(
+        quotaWaitLabel(state, useDeviceTime: true),
+        equals('quota_wait · reset $deviceWall'),
+      );
+    });
+
+    test('unknown offset falls back to device interpretation', () {
+      // Pre-M9 events (epoch parsed without a captured offset) keep the
+      // previous device rendering instead of rendering nothing.
+      final state = AgentQuotaState(
+        quotaBlocked: false,
+        quotaWaitUntilEpoch: daemonEpoch,
+      );
+      final deviceWall = DateTime.fromMillisecondsSinceEpoch(daemonEpoch)
+          .toIso8601String()
+          .substring(11, 16);
+      expect(quotaWaitLabel(state), equals('quota_wait · reset $deviceWall'));
+    });
+
+    test('detail lines render daemon wall-clock + zone hint by default', () {
+      final lines = quotaDetailLines(
+        'claude-opus-4',
+        'glm-4.7',
+        daemonEpoch,
+        waitUntilOffsetMinutes: daemonOffsetMinutes,
+      );
+      expect(lines, hasLength(2));
+      expect(
+        lines[0],
+        equals('primary: claude-opus-4 (blocked until 14:05 +02)'),
+        reason: 'daemon wall-clock, not UTC 12:05, with a zone hint',
+      );
+    });
+
+    test('detail lines: UTC offset renders no zone hint', () {
+      final lines = quotaDetailLines(
+        'claude-opus-4',
+        'glm-4.7',
+        daemonEpoch,
+        waitUntilOffsetMinutes: 0,
+      );
+      expect(lines[0], contains('blocked until '));
+      expect(lines[0], isNot(contains('+')));
+      expect(lines[0], isNot(contains('-0')));
+    });
+
+    test('handleQuotaEvent captures the daemon offset from the wire', () {
+      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+      notifier.handleQuotaEvent(
+        agentId: 'agent-m9',
+        to: 'quota_wait',
+        unblockAt: '2026-09-02T14:05:00+02:00',
+      );
+      final ep = notifier.state.quotaEpisodes['agent-m9']!;
+      expect(ep.quotaWaitUntilOffsetMinutes, 120);
+      expect(
+        ep.quotaWaitUntilEpoch,
+        DateTime.parse('2026-09-02T12:05:00Z').millisecondsSinceEpoch,
+      );
     });
   });
 

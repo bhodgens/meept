@@ -61,6 +61,15 @@ const _prefs = <_Pref>[
     kind: _PrefKind.boolToggle,
     choices: null,
   ),
+  // M9: quota HH:MM timestamps render in the daemon's timezone by
+  // default; this toggle switches the agents-tab badges/detail lines to
+  // the device zone. Persisted as rendering.time_display ("local").
+  (
+    key: 'rendering.time_display',
+    label: 'use device time for agent timestamps',
+    kind: _PrefKind.boolToggle,
+    choices: null,
+  ),
   (
     key: 'rendering.word_wrap',
     label: 'word wrap',
@@ -247,7 +256,9 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
       }
       if (mounted) {
         // Rendering prefs: keep the live provider in sync so chat
-        // re-renders immediately (markdown, word wrap, auto-resume).
+        // re-renders immediately (markdown, word wrap, auto-resume,
+        // quota time display). time_display is stored as "daemon"|"local"
+        // but edited through a boolean toggle.
         final rp = ref.read(renderingPrefsProvider.notifier);
         if (key == 'rendering.markdown') {
           rp.setMarkdown(value as bool);
@@ -255,6 +266,8 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
           rp.setWordWrap(value as bool);
         } else if (key == 'session.auto_resume') {
           rp.setAutoResume(value as bool);
+        } else if (key == 'rendering.time_display') {
+          rp.setUseDeviceTimeForQuota(value as bool);
         }
       }
     } catch (e) {

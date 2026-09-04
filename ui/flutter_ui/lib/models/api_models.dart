@@ -139,13 +139,20 @@ class CalendarEvent {
 
 /// Quota payload attached to an agent_progress event (agent.quota_wait bus).
 ///
-/// Fields come from internal/agent/quota_episode.go:QuotaEvent.
+/// Fields come from internal/agent/quota_episode.go:QuotaEvent and
+/// internal/agent/parked_turn.go:ParkTurnEvent.
 class AgentQuotaPayload {
   /// Agent id (copied from the top-level agent_id).
   final String agentId;
   /// Transition target: "quota_wait", "blocked", or "running".
   final String to;
-  /// Optional RFC3339 unblock time. Null when clearing.
+  /// Park lifecycle reason (I-M8): "quota_wait" | "throttle_wait" |
+  /// "throttle_resumed" | "throttle_give_up"; null when the backend sent
+  /// none (legacy events). A give-up renders the give-up badge instead of
+  /// a wait label.
+  final String? reason;
+  /// Optional RFC3339 unblock time with the DAEMON's UTC offset embedded
+  /// (producers Format(time.RFC3339)). Null when clearing.
   final String? unblockAt;
   /// Escalation tier label ("warn", "action_recommended", "blocked", "").
   final String? escalation;
@@ -158,6 +165,7 @@ class AgentQuotaPayload {
   const AgentQuotaPayload({
     required this.agentId,
     required this.to,
+    this.reason,
     this.unblockAt,
     this.escalation,
     this.fallbackModel,
@@ -174,6 +182,7 @@ class AgentQuotaPayload {
     return AgentQuotaPayload(
       agentId: json['agent_id'] as String? ?? '',
       to: json['to'] as String? ?? '',
+      reason: json['reason'] as String?,
       unblockAt: unblockAt,
       escalation: json['escalation'] as String?,
       fallbackModel: json['fallback_model'] as String?,

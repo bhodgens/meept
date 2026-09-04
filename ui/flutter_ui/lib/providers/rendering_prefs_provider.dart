@@ -15,17 +15,30 @@ class RenderingPrefs {
     this.markdown = true,
     this.wordWrap = true,
     this.autoResume = true,
+    this.useDeviceTimeForQuota = false,
   });
 
   final bool markdown;
   final bool wordWrap;
   final bool autoResume;
+  /// M9 timezone convention: when false (the default) agent quota HH:MM
+  /// timestamps render the DAEMON's wall-clock (the offset embedded in the
+  /// wire RFC3339); when true they render in the device zone. Mirrors the
+  /// TUI's client.json5 `rendering.time_display: "daemon"|"local"`.
+  final bool useDeviceTimeForQuota;
 
-  RenderingPrefs copyWith({bool? markdown, bool? wordWrap, bool? autoResume}) {
+  RenderingPrefs copyWith({
+    bool? markdown,
+    bool? wordWrap,
+    bool? autoResume,
+    bool? useDeviceTimeForQuota,
+  }) {
     return RenderingPrefs(
       markdown: markdown ?? this.markdown,
       wordWrap: wordWrap ?? this.wordWrap,
       autoResume: autoResume ?? this.autoResume,
+      useDeviceTimeForQuota:
+          useDeviceTimeForQuota ?? this.useDeviceTimeForQuota,
     );
   }
 }
@@ -51,6 +64,12 @@ class RenderingPrefsNotifier extends StateNotifier<RenderingPrefs> {
         autoResume: session is Map && session['auto_resume'] is bool
             ? session['auto_resume'] as bool
             : true,
+        // M9: rendering.time_display is "daemon" | "local" (default
+        // "daemon"). Anything but an explicit "local" keeps the default.
+        useDeviceTimeForQuota:
+            rendering is Map && rendering['time_display'] is String
+                ? rendering['time_display'] as String == 'local'
+                : false,
       );
     } catch (_) {
       // Offline / unreachable — defaults already set.
@@ -60,6 +79,8 @@ class RenderingPrefsNotifier extends StateNotifier<RenderingPrefs> {
   void setMarkdown(bool v) => state = state.copyWith(markdown: v);
   void setWordWrap(bool v) => state = state.copyWith(wordWrap: v);
   void setAutoResume(bool v) => state = state.copyWith(autoResume: v);
+  void setUseDeviceTimeForQuota(bool v) =>
+      state = state.copyWith(useDeviceTimeForQuota: v);
 }
 
 /// Lenient parse of the client config text: strips JSON5 comments and

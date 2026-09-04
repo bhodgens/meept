@@ -7,6 +7,14 @@
 // Parity: FormatQuotaCountdown is the exact countdown format leaf 09 mirrors
 // in Flutter (ui/flutter_ui/lib/features/agents/quota_status.dart) — do not
 // change the strings without updating the GUI side.
+//
+// M9 timezone convention: quota timestamps ride the wire as RFC3339 with the
+// DAEMON's offset embedded (producers Format(time.RFC3339)). Surfaces render
+// DAEMON-LOCAL time by default — the HH:MM shown is the wall-clock in the
+// offset embedded in the string, never converted to the client's zone and
+// never UTC. A client MAY opt into client-local rendering via
+// client.json5 rendering.time_display ("daemon"|"local", default "daemon");
+// the choice is plumbed through SetQuotaTimeDisplay at startup.
 package tui
 
 import (
@@ -20,6 +28,74 @@ const (
 	AgentStateQuotaWait = "quota_wait"
 	AgentStateBlocked   = "blocked"
 )
+
+// Time display modes (M9): how quota HH:MM timestamps are rendered.
+//
+//	TimeDisplayDaemon — render the wall-clock embedded in the RFC3339
+//	                   string (the daemon's local time). Default.
+//	TimeDisplayLocal  — convert to the client's local zone before
+//	                   formatting. Opt-in via rendering.time_display.
+const (
+	TimeDisplayDaemon = "daemon"
+	TimeDisplayLocal  = "local"
+)
+
+// QuotaTimeDisplay selects how quota HH:MM timestamps render on this client.
+// Set once at startup from client.json5 rendering.time_display via
+// SetQuotaTimeDisplay. A package-level var is deliberate here (config-plumbing
+// an instance through every render helper would thread the value through
+// pure functions used by tests and the table builder); it is only written
+// during client construction, before any rendering happens.
+var QuotaTimeDisplay = TimeDisplayDaemon
+
+// SetQuotaTimeDisplay applies a rendering.time_display value. Empty or
+// unknown values keep the current setting (daemon default is installed at
+// startup; unknown explicit values are logged by the caller).
+func SetQuotaTimeDisplay(mode string) {
+	switch mode {
+	case TimeDisplayDaemon, TimeDisplayLocal:
+		QuotaTimeDisplay = mode
+	}
+}
+
+// renderQuotaHHmm formats t as HH:MM per the M9 convention: daemon-local
+// (the offset embedded in the parsed RFC3339 value) by default, client-local
+// when QuotaTimeDisplay == TimeDisplayLocal. Never UTC.
+func renderQuotaHHmm(t time.Time) string {
+	if QuotaTimeDisplay == TimeDisplayLocal {
+		t = t.Local()
+	}
+	return t.Format("15:04")
+}
+
+// renderQuotaTime is renderQuotaHHmm plus the zone abbreviation, used by the
+// detail view where the zone matters ("15:04 MST"). The zone shown is the
+// daemon's when rendering daemon-local, the client's otherwise.
+func renderQuotaTime(t time.Time) string {
+	if QuotaTimeDisplay == TimeDisplayLocal {
+		t = t.Local()
+	}
+	return t.Format("15:04 MST")
+}
+
+// Park lifecycle reason strings mirrored from
+// internal/agent/parked_turn.go (consumers re-declare the wire vocabulary
+// so internal/tui does not import internal/agent).
+const (
+	ReasonQuotaWait       = "quota_wait"       // park (class=quota)
+	ReasonThrottleWait    = "throttle_wait"    // park (class=throttle)
+	ReasonThrottleResumed = "throttle_resumed" // resume (class=throttle)
+	ReasonThrottleGiveUp  = "throttle_give_up" // give-up past MaxWait (D8)
+)
+
+// reasonQuotaGiveUpText is the give-up badge text (I-M8): a throttle wait
+// past MaxWait abandons the turn (D8 ThrottleGiveUpError) — the agent is no
+// longer waiting, so the badge must not render a wait label. The Flutter
+// badge renders this label in the red (error) tone, mirroring the blocked
+// badge; the TUI table cell is plain text like every other status cell.
+func reasonQuotaGiveUpText() string {
+	return "throttle gave up · action required"
+}
 
 // QuotaCountdownText returns the countdown hint for an unblock time. The
 // prefix ("quota resets in") is shared with the Flutter badge so both
@@ -72,18 +148,31 @@ func RenderAgentStatus(status string) string {
 }
 
 // QuotaWaitLabel renders the agents-tab wait label for a parked turn
-// (tree 03 leaf 04 Task 3, TUI + Flutter parity — the Flutter side mirrors
-// this byte-for-byte in ui/flutter_ui/lib/features/agents/quota_status.dart;
-// change both together):
+// (tree 03 leaf 04 Task 3 + I-M8 reason, TUI + Flutter parity — the Flutter
+// side mirrors this byte-for-byte in
+// ui/flutter_ui/lib/features/agents/quota_status.dart; change both together):
 //
 //	quota class (or absent — legacy events): "quota_wait · reset HH:MM"
 //	throttle class:                          "quota_wait · throttle retry HH:MM"
+//	throttle give-up reason (I-M8):          "throttle gave up · action required"
 //
-// HH:MM is the ABSOLUTE time of unblockAt (the daemon-provided resume
-// instant), never relative countdown math: the GUI runs on web where client
-// wall clocks cannot be trusted (leaf Notes). Lowercase per repo UI rule.
-func QuotaWaitLabel(class string, unblockAt time.Time) string {
-	hhmm := unblockAt.Format("15:04")
+// reason is the park-event payload's reason key ("quota_wait" |
+// "throttle_wait" | "throttle_resumed" | "throttle_give_up"; "" on legacy
+// events). Resume and legacy events fall through to the class-selected wait
+// label; only a give-up changes the shape (it is a failure surface, not a
+// wait).
+//
+// HH:MM is the ABSOLUTE time of unblockAt per the M9 convention
+// (renderQuotaHHmm): the daemon's local wall-clock embedded in the
+// RFC3339 wire value by default, client-local when rendering.time_display
+// is "local". Never relative countdown math: the GUI runs on web where
+// client wall clocks cannot be trusted (leaf Notes). Lowercase per repo UI
+// rule.
+func QuotaWaitLabel(class, reason string, unblockAt time.Time) string {
+	if reason == ReasonThrottleGiveUp {
+		return reasonQuotaGiveUpText()
+	}
+	hhmm := renderQuotaHHmm(unblockAt)
 	if class == "throttle" {
 		return "quota_wait · throttle retry " + hhmm
 	}
@@ -98,14 +187,16 @@ func QuotaWaitLabel(class string, unblockAt time.Time) string {
 //	primary: <model> (blocked until <time>)
 //	active: <fallback model>
 //
-// (unblockAt zero renders "unknown").
+// (unblockAt zero renders "unknown"). <time> follows the M9 convention
+// (renderQuotaTime): the daemon-local wall-clock by default — never UTC as
+// the pre-M9 implementation rendered — or client-local when the toggle is on.
 func RenderQuotaDetailLines(primaryModel, fallbackModel string, unblockAt time.Time) []string {
 	if fallbackModel == "" {
 		return nil
 	}
 	until := "unknown"
 	if !unblockAt.IsZero() {
-		until = unblockAt.Format("15:04 MST")
+		until = renderQuotaTime(unblockAt)
 	}
 	return []string{
 		fmt.Sprintf("primary: %s (blocked until %s)", primaryModel, until),

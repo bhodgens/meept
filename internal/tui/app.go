@@ -261,6 +261,17 @@ func NewApp(socketPath string, cwd string) *App {
 		slog.Debug("client config: failed to set viz theme, using built-in defaults",
 			"theme", clientConfig.Rendering.UITheme, "error", err)
 	}
+	// M9: quota HH:MM timestamps render daemon-local by default (the offset
+	// embedded in the wire RFC3339); "local" opts into client-local
+	// rendering. Unknown values keep the daemon default (logged).
+	if m := clientConfig.Rendering.TimeDisplay; m != "" && m != TimeDisplayDaemon {
+		if m == TimeDisplayLocal {
+			SetQuotaTimeDisplay(TimeDisplayLocal)
+		} else {
+			slog.Warn("client config: unknown rendering.time_display, using default",
+				"value", m, "default", TimeDisplayDaemon)
+		}
+	}
 	styles := DefaultStyles()
 
 	// Get current working directory for display
@@ -1671,6 +1682,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// on legacy events) — selects the wait label rendered
 						// by the agents-tab badge (QuotaWaitLabel).
 						waitClass, _ := payloadMap["class"].(string)
+						// Park lifecycle reason (I-M8: "quota_wait"|
+						// "throttle_wait"|"throttle_resumed"|
+						// "throttle_give_up"; "" on legacy events) — a give-up
+						// renders the give-up badge instead of a wait label.
+						waitReason, _ := payloadMap["reason"].(string)
 						if cmd := a.agents.Update(quotaStateMsg{
 							agentID:       agentID,
 							to:            to,
@@ -1680,6 +1696,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							fallbackModel: fallbackModel,
 							escalation:    escalation,
 							waitClass:     waitClass,
+							waitReason:    waitReason,
 						}); cmd != nil {
 							cmds = append(cmds, cmd)
 						}

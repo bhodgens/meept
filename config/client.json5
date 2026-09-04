@@ -76,6 +76,11 @@
     "show_header": true,
     // Enable animated dispatch visualization in sidebar
     "sidebar_animation": true,
+    // How agent quota HH:MM timestamps render (agents panel badge + detail
+    // view): "daemon" shows the wall-clock in the daemon's timezone
+    // (embedded in the event's RFC3339 timestamp — the default);
+    // "local" converts to this client's timezone.
+    "time_display": "daemon",
     // Sidebar panel configuration
     "sidebar": {
       "show_metrics": true,       // Show metrics sparklines panel

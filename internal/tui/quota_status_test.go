@@ -82,57 +82,115 @@ func TestFormatQuotaCountdown(t *testing.T) {
 // parity, lowercase): a quota-class wait renders "quota_wait · reset HH:MM",
 // a throttle-class wait renders "quota_wait · throttle retry HH:MM" — both
 // absolute HH:MM of the daemon-provided resume time (never relative math —
-// the GUI runs on web and cannot trust client wall clocks).
+// the GUI runs on web and cannot trust client wall clocks) — and I-M8 adds
+// the reason dimension: a throttle_give_up renders the give-up badge instead
+// of any wait label, while resume/legacy reasons fall through to the
+// class-selected wait label.
 func TestQuotaWaitLabel(t *testing.T) {
 	unblock := time.Date(2026, 9, 2, 14, 5, 0, 0, time.Local)
 	tests := []struct {
 		name      string
 		class     string
+		reason    string
 		unblockAt time.Time
 		expect    string
 	}{
-		{"quota class", "quota", unblock, "quota_wait · reset 14:05"},
-		{"absent class defaults to quota semantics", "", unblock, "quota_wait · reset 14:05"},
-		{"throttle class", "throttle", unblock, "quota_wait · throttle retry 14:05"},
-		{"throttle past due still absolute", "throttle", time.Date(2026, 9, 1, 9, 1, 0, 0, time.Local), "quota_wait · throttle retry 09:01"},
+		{"quota class", "quota", "", unblock, "quota_wait · reset 14:05"},
+		{"absent class defaults to quota semantics", "", "", unblock, "quota_wait · reset 14:05"},
+		{"throttle class", "throttle", "", unblock, "quota_wait · throttle retry 14:05"},
+		{"throttle past due still absolute", "throttle", "", time.Date(2026, 9, 1, 9, 1, 0, 0, time.Local), "quota_wait · throttle retry 09:01"},
+		// I-M8 reason dimension.
+		{"throttle_wait reason keeps wait label", "throttle", ReasonThrottleWait, unblock, "quota_wait · throttle retry 14:05"},
+		{"quota_wait reason keeps reset label", "quota", ReasonQuotaWait, unblock, "quota_wait · reset 14:05"},
+		{"throttle_resumed reason keeps wait label", "throttle", ReasonThrottleResumed, unblock, "quota_wait · throttle retry 14:05"},
+		{"throttle_give_up renders give-up badge", "throttle", ReasonThrottleGiveUp, unblock, "throttle gave up · action required"},
+		{"throttle_give_up wins even with zero time", "", ReasonThrottleGiveUp, time.Time{}, "throttle gave up · action required"},
 	}
 	for _, tt := range tests {
-		if got := QuotaWaitLabel(tt.class, tt.unblockAt); got != tt.expect {
-			t.Errorf("%s: QuotaWaitLabel(%q) = %q, want %q", tt.name, tt.class, got, tt.expect)
+		if got := QuotaWaitLabel(tt.class, tt.reason, tt.unblockAt); got != tt.expect {
+			t.Errorf("%s: QuotaWaitLabel(%q, %q) = %q, want %q", tt.name, tt.class, tt.reason, got, tt.expect)
 		}
 	}
+}
+
+// TestQuotaWaitLabel_TimeDisplay pins the M9 timezone convention: the label
+// renders the DAEMON-LOCAL wall-clock embedded in the wire RFC3339 value by
+// default (never UTC, never device-local), and flips to client-local when
+// rendering.time_display == "local". Both surfaces share the rule (Flutter
+// parity in quota_status.dart).
+func TestQuotaWaitLabel_TimeDisplay(t *testing.T) {
+	t.Cleanup(func() { SetQuotaTimeDisplay(TimeDisplayDaemon) })
+
+	// 2026-09-02 14:05 in +02:00 (daemon zone), i.e. 12:05 UTC.
+	unblock := time.Date(2026, 9, 2, 14, 5, 0, 0, time.FixedZone("daemon", 2*60*60))
+
+	// Default (daemon): the embedded offset's wall-clock is rendered.
+	SetQuotaTimeDisplay(TimeDisplayDaemon)
+	if got, want := QuotaWaitLabel("quota", "", unblock), "quota_wait · reset 14:05"; got != want {
+		t.Errorf("daemon display: QuotaWaitLabel = %q, want %q (embedded offset wall-clock)", got, want)
+	}
+
+	// UTC fixture must NOT render the UTC clock under daemon display.
+	utc := time.Date(2026, 9, 2, 12, 5, 0, 0, time.UTC)
+	if got, want := QuotaWaitLabel("quota", "", utc), "quota_wait · reset 12:05"; got != want {
+		t.Errorf("daemon display of UTC value: QuotaWaitLabel = %q, want %q (offset embedded in the string)", got, want)
+	}
+
+	// Local toggle: the same instant converts to the client's zone.
+	SetQuotaTimeDisplay(TimeDisplayLocal)
+	localWall := unblock.Local().Format("15:04")
+	if got := QuotaWaitLabel("throttle", "", unblock); got != "quota_wait · throttle retry "+localWall {
+		t.Errorf("local display: QuotaWaitLabel = %q, want throttle retry in client zone (%q)", got, localWall)
+	}
+	// Same instant must render identically from either zone encoding.
+	if QuotaWaitLabel("quota", "", unblock) != QuotaWaitLabel("quota", "", utc) {
+		t.Errorf("local display: same instant rendered differently from different zone encodings")
+	}
+
+	// Restore daemon display for the rest of the run.
+	SetQuotaTimeDisplay(TimeDisplayDaemon)
 }
 
 func TestQuotaStatus_Badges(t *testing.T) {
 	p := &AgentsPanel{}
 
 	// Blocked: error-tone label with the action-required hint (unchanged).
-	if got := p.quotaStatusBadge(nil, true, ""); got != "blocked · action required" {
+	if got := p.quotaStatusBadge(nil, true, "", ""); got != "blocked · action required" {
 		t.Errorf("blocked badge = %q, want %q", got, "blocked · action required")
 	}
 
 	// Quota wait (class quota): "quota_wait · reset HH:MM" of the unblock
 	// time.
 	future := time.Now().Add(3*time.Hour + 12*time.Minute)
-	got := p.quotaStatusBadge(&future, false, "quota")
+	got := p.quotaStatusBadge(&future, false, "quota", "")
 	if want := "quota_wait · reset " + future.Format("15:04"); got != want {
 		t.Errorf("quota wait badge = %q, want %q", got, want)
 	}
 
 	// Throttle wait: "quota_wait · throttle retry HH:MM".
-	got = p.quotaStatusBadge(&future, false, "throttle")
+	got = p.quotaStatusBadge(&future, false, "throttle", "")
 	if want := "quota_wait · throttle retry " + future.Format("15:04"); got != want {
 		t.Errorf("throttle wait badge = %q, want %q", got, want)
 	}
 
 	// Absent class (pre-leaf-04 event): defaults to quota semantics.
-	got = p.quotaStatusBadge(&future, false, "")
+	got = p.quotaStatusBadge(&future, false, "", "")
 	if want := "quota_wait · reset " + future.Format("15:04"); got != want {
 		t.Errorf("absent-class badge = %q, want %q", got, want)
 	}
 
-	// Blocked wins over wait time.
-	got = p.quotaStatusBadge(&future, true, "throttle")
+	// I-M8: throttle give-up renders the give-up badge — even with a nil
+	// wait time (the give-up event carries no unblock time) — instead of
+	// empty or a wait label.
+	if got := p.quotaStatusBadge(nil, false, "throttle", ReasonThrottleGiveUp); got != "throttle gave up · action required" {
+		t.Errorf("give-up badge (no wait time) = %q, want give-up label", got)
+	}
+	if got := p.quotaStatusBadge(&future, false, "throttle", ReasonThrottleGiveUp); got != "throttle gave up · action required" {
+		t.Errorf("give-up badge (with wait time) = %q, want give-up label (wins over wait label)", got)
+	}
+
+	// Blocked wins over wait time AND reason.
+	got = p.quotaStatusBadge(&future, true, "throttle", ReasonThrottleGiveUp)
 	if got != "blocked · action required" {
 		t.Errorf("blocked+wait badge = %q, want blocked label", got)
 	}
@@ -142,7 +200,7 @@ func TestQuotaStatus_Badges(t *testing.T) {
 // byte-identically to before (regression safety).
 func TestQuotaStatus_NoEpisode(t *testing.T) {
 	p := &AgentsPanel{}
-	if got := p.quotaStatusBadge(nil, false, ""); got != "" {
+	if got := p.quotaStatusBadge(nil, false, "", ""); got != "" {
 		t.Errorf("expected empty badge when no quota state, got %q", got)
 	}
 }
@@ -193,21 +251,39 @@ func stripANSI(s string) string {
 // ---------- detail-view primary/active model lines ----------
 
 func TestRenderQuotaDetailLines(t *testing.T) {
-	until := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	t.Cleanup(func() { SetQuotaTimeDisplay(TimeDisplayDaemon) })
 
-	lines := RenderQuotaDetailLines("claude-opus-4", "glm-4.7", until)
+	// M9 daemon-local fixture: 12:00 UTC == 14:00 in +02:00. The detail
+	// line must render the wall-clock EMBEDDED in the value (14:00), not
+	// UTC (the pre-M9 bug) and not device-local.
+	until := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	untilDaemon := until.In(time.FixedZone("daemon", 2*60*60))
+
+	SetQuotaTimeDisplay(TimeDisplayDaemon)
+	lines := RenderQuotaDetailLines("claude-opus-4", "glm-4.7", untilDaemon)
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want 2: %v", len(lines), lines)
 	}
 	if !strings.HasPrefix(lines[0], "primary: claude-opus-4 (blocked until ") {
 		t.Errorf("line 0 = %q, want primary model with blocked-until", lines[0])
 	}
-	if !strings.Contains(lines[0], "12:00") {
-		t.Errorf("line 0 = %q, want formatted time", lines[0])
+	if !strings.Contains(lines[0], "14:00") {
+		t.Errorf("line 0 = %q, want daemon-local HH:MM (14:00, embedded offset)", lines[0])
+	}
+	if strings.Contains(lines[0], "UTC") {
+		t.Errorf("line 0 = %q, must not render UTC under daemon display", lines[0])
 	}
 	if lines[1] != "active: glm-4.7" {
 		t.Errorf("line 1 = %q, want %q", lines[1], "active: glm-4.7")
 	}
+
+	// Local toggle: the same instant renders in the client zone.
+	SetQuotaTimeDisplay(TimeDisplayLocal)
+	lines = RenderQuotaDetailLines("claude-opus-4", "glm-4.7", untilDaemon)
+	if !strings.Contains(lines[0], untilDaemon.Local().Format("15:04")) {
+		t.Errorf("local display: line 0 = %q, want client-local HH:MM", lines[0])
+	}
+	SetQuotaTimeDisplay(TimeDisplayDaemon)
 
 	// No fallback -> no extra lines (agents never quota-hit unaffected).
 	if got := RenderQuotaDetailLines("claude-opus-4", "", until); got != nil {
@@ -366,6 +442,89 @@ func TestQuotaStateMsg_TierEscalationRefresh(t *testing.T) {
 	a = p.agents[0]
 	if a.Status != "running" || a.QuotaWaitUntil != nil || a.QuotaBlocked || a.QuotaFallbackModel != "" {
 		t.Errorf("after bare to==\"\": %+v, want episode data cleared", a)
+	}
+}
+
+// TestQuotaStateMsg_ThrottleGiveUp pins the I-M8 give-up handling: the
+// give-up event arrives with to == "" and no unblock time — it must store
+// the reason (rendering the give-up badge) instead of being treated as a
+// clear, and the next running/resume event must clear it again.
+func TestQuotaStateMsg_ThrottleGiveUp(t *testing.T) {
+	p := NewAgentsPanel(nil)
+	unblock := time.Now().Add(30 * time.Minute)
+
+	// Live throttle episode first.
+	p.agents = []AgentSummary{{ID: "agent-1", Status: "running"}}
+	p.Update(quotaStateMsg{
+		agentID:    "agent-1",
+		to:         AgentStateQuotaWait,
+		waitUntil:  &unblock,
+		waitClass:  "throttle",
+		waitReason: ReasonThrottleWait,
+	})
+	if got := p.agents[0].QuotaWaitReason; got != ReasonThrottleWait {
+		t.Fatalf("after throttle park: reason = %q, want %q", got, ReasonThrottleWait)
+	}
+
+	// Give-up (to == "", no unblock time): reason stored, episode not
+	// cleared, badge renders the give-up label.
+	p.Update(quotaStateMsg{
+		agentID:    "agent-1",
+		to:         "",
+		waitClass:  "throttle",
+		waitReason: ReasonThrottleGiveUp,
+	})
+	a := p.agents[0]
+	if a.QuotaWaitReason != ReasonThrottleGiveUp {
+		t.Errorf("after give-up: reason = %q, want %q", a.QuotaWaitReason, ReasonThrottleGiveUp)
+	}
+	if cell := stripANSI(p.table.Rows()[0][1]); cell != "throttle gave up · action required" {
+		t.Errorf("after give-up: badge cell = %q, want give-up label", cell)
+	}
+
+	// Resume event (to == running) clears everything including the reason.
+	p.Update(quotaStateMsg{agentID: "agent-1", to: "running"})
+	a = p.agents[0]
+	if a.QuotaWaitReason != "" || a.Status != "running" {
+		t.Errorf("after resume: %+v, want reason cleared and status running", a)
+	}
+	if cell := stripANSI(p.table.Rows()[0][1]); cell != "running" {
+		t.Errorf("after resume: badge cell = %q, want \"running\"", cell)
+	}
+}
+
+// TestQuotaStateMsg_ReasonThreading verifies each reason wire value rides
+// through quotaStateMsg into the cached episode (I-M8).
+func TestQuotaStateMsg_ReasonThreading(t *testing.T) {
+	p := NewAgentsPanel(nil)
+	unblock := time.Now().Add(time.Hour)
+
+	for _, tc := range []struct {
+		name   string
+		reason string
+	}{
+		{"quota park", ReasonQuotaWait},
+		{"throttle park", ReasonThrottleWait},
+		{"throttle resume", ReasonThrottleResumed},
+	} {
+		p.agents = []AgentSummary{{ID: "agent-1", Status: "running"}}
+		p.Update(quotaStateMsg{
+			agentID:    "agent-1",
+			to:         AgentStateQuotaWait,
+			waitUntil:  &unblock,
+			waitClass:  "throttle",
+			waitReason: tc.reason,
+		})
+		if got := p.agents[0].QuotaWaitReason; got != tc.reason {
+			t.Errorf("%s: QuotaWaitReason = %q, want %q", tc.name, got, tc.reason)
+		}
+	}
+
+	// Legacy event (no reason key) leaves the reason empty.
+	p.agents = []AgentSummary{{ID: "agent-1", Status: "running"}}
+	p.Update(quotaStateMsg{agentID: "agent-1", to: AgentStateQuotaWait, waitUntil: &unblock})
+	if got := p.agents[0].QuotaWaitReason; got != "" {
+		t.Errorf("legacy event: QuotaWaitReason = %q, want empty", got)
 	}
 }
 

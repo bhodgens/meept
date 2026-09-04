@@ -52,6 +52,11 @@ type RenderingConfig struct {
 	ShowHeader         bool          `json:"show_header"`         // Show header bar with session info (default: true)
 	SidebarAnimation   bool          `json:"sidebar_animation"`   // Enable animated dispatch visualization in sidebar (default: true)
 	Sidebar            SidebarConfig `json:"sidebar"`             // Sidebar panel configuration
+	// TimeDisplay selects how agent quota HH:MM timestamps render (M9):
+	// "daemon" renders the wall-clock embedded in the event's RFC3339
+	// value (the daemon's local time — the default), "local" converts to
+	// the client's local zone. See quota_status.go SetQuotaTimeDisplay.
+	TimeDisplay string `json:"time_display"` // "daemon" | "local" (default: "daemon")
 }
 
 // InputConfig defines input textarea behavior settings.
@@ -181,6 +186,7 @@ func DefaultClientConfig() *ClientConfig {
 			WordWrap:           true,
 			ShowHeader:         true,
 			SidebarAnimation:   true,
+			TimeDisplay:        TimeDisplayDaemon,
 			Sidebar: SidebarConfig{
 				ShowMetrics:      true,
 				ShowActivityFeed: true,
