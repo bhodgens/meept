@@ -194,13 +194,13 @@
 |----------|--------|---------------|
 | **OS-enforced sandboxing** | duckagent (bwrap/macOS/Windows), FrontierAgent (bwrap/container) | Meept's docker backend is opt-in and degrades to unsandboxed on failure |
 | **Network egress policy** | duckagent (host+CIDR maps, NO_PROXY scrubbing) | Zero network-layer control in meept |
-| **Secret-backed credential injection** | duckagent (reverse-proxy placeholder) | Shell execution inherits full daemon env via `os.Environ()` |
+| **Secret-backed credential injection** | duckagent (reverse-proxy placeholder) | Meept's broker uses placeholder env injection + loopback egress proxy instead of a reverse proxy; raw env inheritance is gone for declared secrets |
 | **Diff preview + reversible journal** | FrontierAgent (WorkspaceJournal, /revert), duckagent (checksum rewind) | Meept has PendingChangesRegistry but only for FileEditTool, no user-facing surface |
-| **Computer use / browser** | atomic-agent (Playwright), Hermes (macOS CUA) | Not implemented in meept |
+| **Computer use / browser** | atomic-agent (Playwright suite), Hermes (macOS CUA) | Meept ships both opt-in (headless-Chrome tool family + cua-driver MCP), but neither is enabled by default |
 | **Local inference ownership** | atomic-agent (TurboQuant llama.cpp, GBNF, subscription CLI) | Meept assumes external endpoints; no model management or KV-cache economics |
 | **30+ chat channels** | duckagent (Slack, Discord, Signal, Teams, Home Assistant, etc.) | Meept: Telegram + Web API + MenuBar only |
-| **Benchmark + published results** | FrontierAgent (14 benchmarks), atomic-agent (GAIA L1) | Meept has internal eval but no public harness or scorecards |
-| **Crash-safe scheduling** | prime-agent (tick claiming, coalesced missed ticks), duckagent (tombstones) | Meept's mutable job rows lack atomic semantics |
+| **Benchmark + published results** | FrontierAgent (14 benchmarks), atomic-agent (GAIA L1) | Meept-bench is external and working but has no published scorecards yet |
+| **Crash-safe scheduling** | prime-agent (tick claiming, coalesced missed ticks), duckagent (tombstones) | Meept's queue claims are atomic and startup-reclaimed, but not tombstoned/coalesced |
 | **OpenAI-compatible API** | duckagent + atomic-agent (`POST /v1/chat/completions`) | Meept exposes REST/WS/MCP but not this shape |
 
 ---
@@ -245,9 +245,9 @@ Category Dominance (X count across 28 features)
 
 3. **Meept's breadth advantage comes from the daemon model**: being an always-on personal agent enables scheduling, memory depth, multi-frontend, and autonomous employees. Per-invocation CLIs (FrontierAgent, atomic-agent) can't match this without significant architectural change.
 
-4. **The biggest opportunity gap is computer use/browser automation**: atomic-agent has a full Playwright suite; Hermes has macOS CUA. Meept has neither. This blocks GAIA L3 and WebArena benchmarks.
+4. **Computer use/browser automation is now shipped but opt-in**: Meept has a headless-Chrome tool family and a cua-driver MCP server with a dedicated security tier; atomic-agent's Playwright suite and Hermes's macOS CUA still lead on default-on depth. This keeps GAIA L3 and WebArena in reach.
 
-5. **Output evaluation evidence is the next milestone**: FrontierAgent and atomic-agent publish benchmark scores. Meept has internal eval packages but no public harness or scorecards. The meept-bench repo (scaffolded 2026-08-24) addresses this.
+5. **Output evaluation evidence is the next milestone**: FrontierAgent and atomic-agent publish benchmark scores. Meept-bench (external harness, live regression gate) plus the in-daemon eval suite close the mechanism gap; published scorecards remain the outstanding step.
 
 ---
 
