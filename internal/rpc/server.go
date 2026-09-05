@@ -69,6 +69,12 @@ type Server struct {
 	// the key is omitted.
 	DispatcherStatsGetter func() map[string]int
 
+	// DeterministicToolsGetter is an optional callback disclosing whether
+	// the deterministic (cached-fetch) tool gate is live (phase-2-3 P2.3).
+	// When non-nil, the status response carries "deterministic_tools" so
+	// meept-bench can preflight suites that require tools.cached_fetch.
+	DeterministicToolsGetter func() bool
+
 	// Connection tracking
 	connMu   sync.Mutex
 	conns    map[net.Conn]struct{}
@@ -518,6 +524,12 @@ func (s *Server) registerBuiltinHandlers() {
 			if byMethod := s.DispatcherStatsGetter(); byMethod != nil {
 				result["by_classification_method"] = byMethod
 			}
+		}
+
+		// Include the deterministic (cached-fetch) gate disclosure when a
+		// getter is configured (meept-bench suite preflight, P2.3).
+		if s.DeterministicToolsGetter != nil {
+			result["deterministic_tools"] = s.DeterministicToolsGetter()
 		}
 
 		// Include budget stats if a getter is configured (FIX #0031/#0035)

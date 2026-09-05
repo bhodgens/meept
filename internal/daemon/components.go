@@ -1548,6 +1548,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		statusOpts = append(statusOpts, WithBudgetTracker(budgetTracker))
 	}
 	c.StatusHandler = NewStatusHandler(msgBus, logger, statusOpts...)
+	// Surface the deterministic (cached-fetch) gate in `status` so
+	// meept-bench can verify the mode is live before running suites
+	// (phase-2-3 P2.3). Env override consulted to match tool-call-time
+	// gating exactly.
+	c.StatusHandler.deterministicTools = cfg.Agent.Tools.DeterministicTools || builtin.DeterministicToolsEnvEnabled()
 
 	// Create vector shard manager for semantic search
 	var vectorSearcher memory.VectorSearcher
@@ -2191,6 +2196,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		taskStore = c.TaskRegistry.Store()
 	}
 	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, c.TokenStore)
+
+	// Deterministic (cached-fetch) tool variant for meept-bench
+	// reproducibility (phase-2-3 P2.3): when enabled, web tools are
+	// re-registered as cache-gated wrappers; off => no-op.
+	applyDeterministicToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
 
 
 	acpMgr, acpErr := applyACPFromConfig(cfg.ACP)
@@ -7054,6 +7064,10 @@ type StatusHandler struct {
 	startTime     time.Time
 	cancel        context.CancelFunc
 	budgetTracker *llm.Budget
+	// deterministicTools mirrors the [agent.tools].deterministic_tools
+	// gate (OR'd with the MEEPT_DETERMINISTIC_TOOLS env override) so the
+	// `status` payload can disclose cached-fetch mode to meept-bench.
+	deterministicTools bool
 }
 
 // StatusHandlerOption is a functional option for configuring StatusHandler.
@@ -7119,6 +7133,9 @@ func (h *StatusHandler) handleStatusRequest(msg *models.BusMessage) {
 		"uptime_seconds":  uptime,
 		"version":         "0.2.0-go",
 		"bus_subscribers": len(h.bus.Stats()),
+		// Deterministic (cached-fetch) tool mode, for meept-bench suite
+		// preflight (phase-2-3 P2.3).
+		"deterministic_tools": h.deterministicTools,
 	}
 
 	// Include token usage from budget tracker if available

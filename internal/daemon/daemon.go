@@ -309,6 +309,16 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			}
 		}
 
+		// Wire deterministic (cached-fetch) gate disclosure (phase-2-3
+		// P2.3): lets meept-bench verify the mode is live via daemon.status
+		// before running suites requiring tools.cached_fetch. Reads the
+		// status handler's mirrored gate so env-override and config agree.
+		if rpcServer != nil && components.StatusHandler != nil {
+			rpcServer.DeterministicToolsGetter = func() bool {
+				return components.StatusHandler.deterministicTools
+			}
+		}
+
 		// Wire budget stats getter (FIX #0031/#0035 - exposes token budget via RPC)
 		if rpcServer != nil && components.LLMClient != nil {
 			budget := components.LLMClient.Budget()

@@ -1347,6 +1347,13 @@ type AgentToolsConfig struct {
 	// AlwaysFull names tools that always ship their complete parameter
 	// schema even under indexed mode. Nil/empty -> DefaultAlwaysFullTools().
 	AlwaysFull []string `json:"always_full" toml:"always_full"`
+	// DeterministicTools enables cached-fetch mode: web_fetch/websearch
+	// serve exclusively from the local fixture cache
+	// (~/.meept/tool-cache or $MEEPT_TOOL_CACHE_DIR); a cache miss fails
+	// with an explicit "cache-miss" error and never touches the network.
+	// Used by meept-bench for reproducible suites. The
+	// MEEPT_DETERMINISTIC_TOOLS env var ORs with this at call time.
+	DeterministicTools bool `json:"deterministic_tools" toml:"deterministic_tools"`
 }
 
 // Validate checks the [agent.tools] section. Unknown schema_mode values are
