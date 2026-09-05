@@ -1255,3 +1255,37 @@ func TestDeriveRoutingPath_ModelRefFallback(t *testing.T) {
 	loop.modelRef = "deep"
 	require.Equal(t, "alias:deep", loop.deriveRoutingPath())
 }
+
+// TestAgentLoop_SessionConversation verifies the SessionConversation accessor:
+// auto-vivification for unknown IDs, cache identity across calls, and
+// integration with the canonical GetConversation read path.
+func TestAgentLoop_SessionConversation(t *testing.T) {
+	loop := NewAgentLoop("test-session", "/tmp")
+	if loop == nil {
+		t.Fatal("NewAgentLoop returned nil")
+	}
+
+	conv := loop.SessionConversation("conv-x")
+	if conv == nil {
+		t.Fatal("SessionConversation returned nil for unknown ID; want auto-vivified conversation")
+	}
+
+	// Cache identity: a second call with the same ID must return the SAME
+	// pointer so writes through either handle are visible to the other.
+	again := loop.SessionConversation("conv-x")
+	if again != conv {
+		t.Fatal("SessionConversation returned a different pointer for the same ID; want cache identity")
+	}
+
+	// Writes through the accessor are visible via the canonical read path.
+	conv.AddUserMessage("hello")
+	if got := loop.GetConversation("conv-x"); got != conv {
+		t.Fatal("GetConversation did not return the conversation created via SessionConversation")
+	}
+
+	// Distinct IDs yield distinct conversations.
+	other := loop.SessionConversation("conv-y")
+	if other == nil || other == conv {
+		t.Fatal("SessionConversation should return distinct conversations for distinct IDs")
+	}
+}

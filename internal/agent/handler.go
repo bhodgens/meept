@@ -642,6 +642,12 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	var reply string
 	var err error
 	var result *DispatchResult
+	// recordOnTaskPath is set when the reply was produced by the task path
+	// (route_to_agent or sync_dispatch). Only those paths need the exchange
+	// mirrored into the session conversation: the direct path already
+	// records both sides via RunOnce's AddUserMessage/AddAssistantMessage,
+	// so recording here too would double-append.
+	recordOnTaskPath := false
 
 	if h.dispatcher != nil {
 		// Multi-agent mode: classify and route through dispatcher
@@ -763,6 +769,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				)
 				h.publishPlanRequest(result, conversationID)
 				reply = h.waitForTaskCompletion(ctx, result.Task.ID)
+				recordOnTaskPath = true
 			} else {
 				// Async dispatch: send ack immediately, let orchestrator handle it
 				h.logger.Info("Async dispatch: sending ack and publishing plan request",
@@ -796,6 +803,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 					"confidence", result.Intent.Confidence,
 				)
 				reply, err = h.dispatcher.RouteToAgent(ctx, result, conversationID)
+				recordOnTaskPath = true
 			}
 		}
 
@@ -911,10 +919,57 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	if effectiveAgentID == "" && result != nil {
 		effectiveAgentID = result.AgentID
 	}
+	// Session-continuity (task-turn session record): mirror the exchange into
+	// the session conversation so follow-up turns share task context. The
+	// recorder is best-effort and must never break the reply path.
+	if recordOnTaskPath {
+		h.recordExchangeInSessionConv(conversationID, req.Message, response.Reply)
+	}
 	h.persistExchange(persistID, req.Message, req.Parts, response.Reply, effectiveAgentID)
 
 	// Send response
 	h.sendResponse(msg.ID, response)
+}
+
+// recordExchangeInSessionConv best-effort mirrors a completed task-path
+// exchange (route_to_agent / sync_dispatch) into the SESSION conversation so
+// the next turn's model context includes what was just done. The task path
+// normally records only into the task-scoped step conversation; without this
+// mirror the session conversation never sees the exchange.
+//
+// Best-effort by contract: every step is nil-safe, failures are logged at
+// Warn level, and no error is ever propagated to the reply path. The
+// assistant entry is appended only when the reply is non-empty. Passing the
+// same (conversationID, userMsg, reply) pair twice is a no-op (last-user
+// entry guard), and the call site runs at most once per exchange — the
+// direct path is never recorded here (RunOnce already records it, and
+// double-appending would corrupt context).
+func (h *ChatHandler) recordExchangeInSessionConv(conversationID, userMsg, reply string) {
+	if h == nil || conversationID == "" {
+		return
+	}
+	loop := h.sessionLoop(conversationID)
+	if loop == nil {
+		h.logger.Warn("session exchange record skipped: no loop",
+			"conversation", conversationID)
+		return
+	}
+	conv := loop.SessionConversation(conversationID)
+	if conv == nil {
+		h.logger.Warn("session exchange record skipped: no conversation",
+			"conversation", conversationID)
+		return
+	}
+	// Guard against a duplicate append for the same exchange: if the last
+	// user entry already carries this exact request, the exchange was
+	// recorded once already.
+	if last := conv.LastUserMessage(); last == userMsg {
+		return
+	}
+	conv.AddUserMessage(userMsg)
+	if reply != "" {
+		conv.AddAssistantMessage(reply)
+	}
 }
 
 // persistExchange saves the user message and assistant reply to the session

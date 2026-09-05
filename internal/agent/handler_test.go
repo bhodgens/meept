@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
@@ -1233,5 +1234,87 @@ func TestChatHandler_WaitForTaskCompletion_StubGuard(t *testing.T) {
 		if reply != fmt.Sprintf("Task %s completed.", tk.ID) {
 			t.Errorf("reply = %q, want the stub fallback on store error", reply)
 		}
+	})
+}
+
+// TestChatHandler_RecordExchangeInSessionConv verifies that the task-path
+// recorder writes both sides of the exchange into the SESSION conversation:
+// user entry with the request text, assistant entry with the reply text,
+// no assistant entry when the reply is empty, no duplication when called
+// again for the same exchange, and full nil-safety.
+func TestChatHandler_RecordExchangeInSessionConv(t *testing.T) {
+	t.Run("records_user_and_assistant_entries", func(t *testing.T) {
+		h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+		loop := NewAgentLoop("test-session", "/tmp")
+		h.loop = loop
+
+		h.recordExchangeInSessionConv("conv-rec", "fix the build", "done: build green")
+
+		conv := h.loop.SessionConversation("conv-rec")
+		msgs := conv.GetMessages()
+		if len(msgs) != 2 {
+			t.Fatalf("conversation has %d messages, want 2 (user+assistant)", len(msgs))
+		}
+		if msgs[0].Role != llm.RoleUser || msgs[0].Content != "fix the build" {
+			t.Errorf("msgs[0] = {%s %q}, want {user %q}", msgs[0].Role, msgs[0].Content, "fix the build")
+		}
+		if msgs[1].Role != llm.RoleAssistant || msgs[1].Content != "done: build green" {
+			t.Errorf("msgs[1] = {%s %q}, want {assistant %q}", msgs[1].Role, msgs[1].Content, "done: build green")
+		}
+	})
+
+	t.Run("empty_reply_no_assistant_entry", func(t *testing.T) {
+		h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+		h.loop = NewAgentLoop("test-session", "/tmp")
+
+		h.recordExchangeInSessionConv("conv-empty", "fix the build", "")
+
+		msgs := h.loop.SessionConversation("conv-empty").GetMessages()
+		if len(msgs) != 1 {
+			t.Fatalf("conversation has %d messages, want 1 (user only)", len(msgs))
+		}
+		if msgs[0].Role != llm.RoleUser {
+			t.Errorf("msgs[0].Role = %q, want user", msgs[0].Role)
+		}
+	})
+
+	t.Run("no_duplicate_on_second_call", func(t *testing.T) {
+		h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+		h.loop = NewAgentLoop("test-session", "/tmp")
+
+		h.recordExchangeInSessionConv("conv-dup", "fix the build", "done")
+		h.recordExchangeInSessionConv("conv-dup", "fix the build", "done")
+
+		msgs := h.loop.SessionConversation("conv-dup").GetMessages()
+		if len(msgs) != 2 {
+			t.Fatalf("conversation has %d messages after repeat call, want 2 (no double-record)", len(msgs))
+		}
+	})
+
+	t.Run("separate_exchanges_both_recorded", func(t *testing.T) {
+		h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+		h.loop = NewAgentLoop("test-session", "/tmp")
+
+		h.recordExchangeInSessionConv("conv-multi", "turn one", "reply one")
+		h.recordExchangeInSessionConv("conv-multi", "turn two", "reply two")
+
+		msgs := h.loop.SessionConversation("conv-multi").GetMessages()
+		if len(msgs) != 4 {
+			t.Fatalf("conversation has %d messages after two distinct exchanges, want 4", len(msgs))
+		}
+		if msgs[2].Content != "turn two" || msgs[3].Content != "reply two" {
+			t.Errorf("second exchange not appended in order: %q / %q", msgs[2].Content, msgs[3].Content)
+		}
+	})
+
+	t.Run("nil_loop_no_panic", func(t *testing.T) {
+		h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+		h.recordExchangeInSessionConv("conv-nil", "msg", "reply") // must not panic
+	})
+
+	t.Run("empty_conversation_id_no_panic", func(t *testing.T) {
+		h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+		h.loop = NewAgentLoop("test-session", "/tmp")
+		h.recordExchangeInSessionConv("", "msg", "reply") // must not panic
 	})
 }

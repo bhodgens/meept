@@ -6458,6 +6458,18 @@ func (l *AgentLoop) GetConversation(id string) *Conversation {
 	return l.conversations.GetIfExists(id)
 }
 
+// SessionConversation returns the conversation for the given session/conversation
+// ID, creating it on first access (ConversationStore.Get auto-vivifies: a miss
+// allocates a new Conversation, inserts it into the LRU cache, and returns it,
+// so the result is never nil for a non-nil receiver). Unlike GetConversation,
+// which only reads existing entries, this is safe to use when the session
+// conversation may not exist yet — e.g. recording a task-path exchange into
+// the session conversation before any direct-path turn has run. Successive
+// calls with the same ID return the same *Conversation (cache identity).
+func (l *AgentLoop) SessionConversation(id string) *Conversation {
+	return l.conversations.Get(id)
+}
+
 // ClearConversation removes a conversation.
 func (l *AgentLoop) ClearConversation(id string) {
 	l.conversations.Delete(id)
