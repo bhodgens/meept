@@ -889,7 +889,16 @@ func TestEvolverScheduler_SkipsInitialCycle(t *testing.T) {
 // works: when runOnStart=true, the scheduler runs one cycle before entering
 // the tick loop. This guards against regressions where the gate accidentally
 // always skips.
+//
+// HOME is pinned to a temp dir: without it, the Writer's tier resolution
+// runs a full discovery scan against the REAL ~/.claude/skills (hundreds of
+// skills on a developer machine), making the cycle duration
+// environment-dependent. Under -race that scan alone exceeds the old fixed
+// 150ms sleep, cancel() landed mid-cycle before the LLM call, and the test
+// failed. Completion is now awaited event-driven (poll the call counter)
+// instead of by fixed sleep.
 func TestEvolverScheduler_RunOnStartTrue(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // discovery must not scan the real home
 	dir := t.TempDir()
 	usage := newStubUsageTracker()
 
@@ -923,8 +932,13 @@ func TestEvolverScheduler_RunOnStartTrue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go sched.Start(ctx)
 
-	// Wait for the immediate cycle to fire.
-	time.Sleep(150 * time.Millisecond)
+	// Wait event-driven for the run-on-start cycle to reach the LLM: poll
+	// the call counter with a deadline. A fixed sleep here was timing luck
+	// (failed under -race once discovery scanned the real HOME).
+	deadline := time.Now().Add(10 * time.Second)
+	for mockLLM.CallCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	cancel()
 	sched.Stop()
