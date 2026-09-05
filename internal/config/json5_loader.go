@@ -48,12 +48,25 @@ func LoadJSON5(path string, v any) error {
 }
 
 // stringDurationKeys are config keys declared as STRING fields whose values
-// happen to look like Go durations (e.g. queue.interactive_window holds "5m"
-// and must stay a string). preprocessDurations must not rewrite their values
-// to nanosecond integers — the schema validator rejects the number
-// (configui save/load roundtrip regression, tree 04 leaf 01 follow-up).
+// happen to look like Go durations and must stay strings. preprocessDurations
+// must not rewrite their values to nanosecond integers — the schema declares
+// string and json.Unmarshal rejects the number (configui save/load roundtrip
+// regression, tree 04 leaf 01 follow-up). Keys are the bare field names;
+// duration-typed fields (time.Duration) still convert in both passes.
+//
+// IMPORTANT: when adding a duration-STRING config field, register it here —
+// otherwise a quoted value like "5m" silently becomes an integer and config
+// load fails. Known members:
+//
+//	queue.interactive_window          — held as string, parsed at use site
+//	oauth.refresh_interval            — time.ParseDuration at wiring (components.go)
+//	oauth.refresh_margin              — time.ParseDuration at wiring (components.go)
+//	agent.worker_pool.idle_timeout    — time.ParseDuration (agent_manager_wiring.go)
 var stringDurationKeys = map[string]bool{
 	"interactive_window": true,
+	"refresh_interval":   true,
+	"refresh_margin":     true,
+	"idle_timeout":       true,
 }
 
 // preprocessDurations applies the shared duration preprocessing used by both
