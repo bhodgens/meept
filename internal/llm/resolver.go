@@ -796,7 +796,27 @@ func VerdictForFailure(err error) PolicyVerdict {
 // default). FailureQuota never reaches this function (quota blocks are
 // recorded by the agent loop); other classes only advance the alias
 // cooldown as before.
+//
+// Quota guard (quota-reset-resilience master contract 4, bughunt
+// 2026-09-04): a *QuotaResetError is NEVER an alias failure. The loop's
+// quota branch is guarded, but analyzer/classifier call sites passed raw
+// Chat errors through — and a QuotaResetError unwraps to a 429 APIError,
+// whose Classify verdict is FailureThrottle, so quota advanced the alias
+// cooldown AND armed endpoint blocks. Enforced here so every current and
+// future call site is safe.
 func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *ModelConfig) {
+	if IsQuotaResetError(err) {
+		r.logger.Warn("Quota error not recorded as alias failure (contract 4)",
+			"alias", aliasName,
+			"provider", func() string {
+				if failedModel != nil {
+					return failedModel.ProviderID
+				}
+				return ""
+			}(),
+		)
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
