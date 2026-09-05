@@ -1552,6 +1552,28 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
+	// Reclaim crash-orphaned queue jobs: reset jobs stuck in claimed/processing
+	// from a previous run back to pending so they re-execute. Only claims
+	// updated strictly before this process started are reset — the worker
+	// pool began claiming inside Components.Start above, so this run's own
+	// claims must never be swept. The owning process of any older claim is
+	// provably gone (single-node startup recovery, the crash-safe sibling of
+	// the cluster ReclaimIfStale path).
+	if d.components != nil && d.components.Queue != nil {
+		if pq, ok := d.components.Queue.(*queue.PersistentQueue); ok && pq != nil {
+			// RFC3339 truncates to seconds; back off one second so a job
+			// claimed in the same wall-clock second as d.startTime (this
+			// run's own fresh claims) can never match `updated_at < ?`.
+			cutoff := d.startTime.Add(-time.Second)
+			count, err := pq.ResetStaleClaimsAtStartup(ctx, cutoff)
+			if err != nil {
+				d.logger.Error("daemon: failed to reclaim crash-orphaned queue jobs", "error", err)
+			} else if count > 0 {
+				d.logger.Info("daemon: reclaimed crash-orphaned queue jobs from previous run", "count", count)
+			}
+		}
+	}
+
 	// Start HTTP server for menubar app
 	if d.httpServer != nil {
 		go func() {

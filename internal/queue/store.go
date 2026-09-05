@@ -701,6 +701,94 @@ func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 	return nil
 }
 
+// ResetStaleClaimsAtStartup resets all jobs left in claimed/processing state
+// by a previous daemon process back to pending so they re-execute after a
+// crash. It is the single-node counterpart of the cluster reclaim path
+// (ResetToPending via ClusterQueue.reclaimJobUnlocked): on startup the process
+// that held the claims is provably dead, so every pre-boot claim qualifies.
+//
+// claimsBefore filters the sweep to jobs whose last update happened strictly
+// before that timestamp. Daemon startup passes its process start time because
+// the worker pool starts (inside Components.Start) before the recovery block
+// runs — claims written by THIS process must never be reset. RFC3339 truncates
+// to seconds, so callers pass claimsBefore.Add(-time.Second) to stay safe.
+//
+// The reset mirrors ResetToPending exactly: claimed_by/result/error and the
+// cluster claim columns are cleared, retry_count and next_retry_at are
+// PRESERVED so a re-claimed orphan keeps its original retry budget/backoff
+// (a crash is not a job failure). Updates run in a single transaction so a
+// crash mid-sweep cannot leave a half-reset mix of states. Returns the
+// number of jobs that were reset.
+func (s *Store) ResetStaleClaimsAtStartup(ctx context.Context, claimsBefore time.Time) (int, error) {
+	// Snapshot: how many jobs qualify right now, for the return value.
+	// The UPDATE below re-checks the same predicates under the transaction,
+	// so a concurrent claim cannot be reset by this sweep.
+	var staleIDs []string
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id FROM jobs
+		WHERE state IN ('claimed', 'processing')
+		  AND updated_at < ?`,
+		claimsBefore.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("failed to query stale job claims: %w", err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			s.logger.Error("Failed to scan stale claim job ID", "error", err)
+			continue
+		}
+		staleIDs = append(staleIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("failed to iterate stale job claims: %w", err)
+	}
+
+	if len(staleIDs) == 0 {
+		return 0, nil
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin startup reclaim transaction: %w", err)
+	}
+	// Safe to call after Commit; a no-op on a committed transaction.
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE jobs
+		SET state = 'pending',
+		    claimed_by = NULL,
+		    result = NULL,
+		    error = NULL,
+		    timeout_at = NULL,
+		    last_heartbeat_at = NULL,
+		    updated_at = ?
+		WHERE state IN ('claimed', 'processing')
+		  AND updated_at < ?`,
+		now, claimsBefore.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("failed to reset stale job claims: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit startup reclaim: %w", err)
+	}
+
+	reset, _ := result.RowsAffected()
+	if reset != int64(len(staleIDs)) {
+		// A concurrent claim/complete raced the sweep between snapshot and
+		// UPDATE. The predicates re-checked under the transaction, so the
+		// lower count is correct — log it rather than overstate.
+		s.logger.Warn("startup reclaim raced with concurrent job state change",
+			"snapshot_count", len(staleIDs), "reset_count", reset)
+	}
+	s.logger.Info("startup reclaim: reset crash-orphaned job claims to pending",
+		"count", reset)
+	return int(reset), nil
+}
+
 // ListByState returns jobs in a given state.
 func (s *Store) ListByState(state JobState, limit int) ([]*Job, error) {
 	rows, err := s.db.Query(`

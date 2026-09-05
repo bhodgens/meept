@@ -438,6 +438,21 @@ func (q *PersistentQueue) DeadLetterStats(ctx context.Context) (int, error) {
 	return q.store.DeadLetterStats()
 }
 
+// ResetStaleClaimsAtStartup resets crash-orphaned job claims (claimed/processing
+// rows updated strictly before claimsBefore) back to pending. Single-node
+// startup recovery for jobs whose owning process died mid-flight; see
+// Store.ResetStaleClaimsAtStartup for semantics.
+func (q *PersistentQueue) ResetStaleClaimsAtStartup(ctx context.Context, claimsBefore time.Time) (int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		return 0, fmt.Errorf("queue is closed")
+	}
+
+	return q.store.ResetStaleClaimsAtStartup(ctx, claimsBefore)
+}
+
 // Close closes the queue.
 func (q *PersistentQueue) Close() error {
 	q.mu.Lock()
