@@ -46,6 +46,9 @@ ALLOWLIST=(
   "tests/context_management_test.go"
   "scripts/audit-utf8-byte-arithmetic.py"
   "ui/flutter_ui/lib/features/home/sidebar_home_screen.dart"
+  ".firecrawl/intentgate.json"
+  ".firecrawl/oh-my-openagent-repo.md"
+  ".firecrawl/oh-my-openagent.json"
 )
 
 is_allowlisted() {
