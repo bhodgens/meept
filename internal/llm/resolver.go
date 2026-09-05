@@ -661,6 +661,13 @@ func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, heal
 		case pinnedIdx >= len(alias.Models):
 			// Stale pin beyond the configured model list (config changed).
 			delete(health.StickyPins, callerKey)
+		case r.isEndpointBlocked(health, alias.Models[pinnedIdx]):
+			// D10 shared fate: the pinned model's endpoint sits in a
+			// timeout cooldown — release the pin so the caller re-pins
+			// to a candidate on a live endpoint (bughunt round-1,
+			// auditor 2 finding 4; sticky aliases previously bypassed
+			// endpoint blocks entirely).
+			delete(health.StickyPins, callerKey)
 		case !health.inCooldown(now) || !health.failedModelMatches(alias, pinnedIdx):
 			// The pinned model is still usable: either the alias is healthy
 			// or the active cooldown belongs to a different model.
@@ -697,9 +704,41 @@ func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, heal
 			)
 		}
 	}
+	// Skip endpoint-blocked candidates with the same one-full-lap cap
+	// (bughunt round-1 sticky-caller gap): a blocked candidate never
+	// wins a NEW pin while an unblocked member exists.
+	if r.hasEndpointBlocks() {
+		startIdx := nextIdx
+		for range len(alias.Models) {
+			if !r.isEndpointBlocked(health, alias.Models[nextIdx]) {
+				break
+			}
+			nextIdx = (nextIdx + 1) % len(alias.Models)
+		}
+		if nextIdx == startIdx && r.isEndpointBlocked(health, alias.Models[nextIdx]) {
+			r.logger.Warn("All alias models endpoint-blocked; serving rotation-head candidate anyway",
+				"alias", aliasName,
+				"model", alias.Models[nextIdx].ModelID,
+			)
+		}
+	}
 	health.StickyPins[callerKey] = nextIdx
 	health.CurrentIndex = (nextIdx + 1) % len(alias.Models)
 	return r.recordStickyDecision(alias, aliasName, nextIdx, "sticky_request_new")
+}
+
+// hasEndpointBlocks reports whether the resolver currently holds any live
+// endpoint-level timeout block. Callers must hold Resolver.mu. Cheap gate so
+// the sticky re-pin path skips the per-candidate scan on resolvers that
+// never armed a block.
+func (r *Resolver) hasEndpointBlocks() bool {
+	now := r.clock()
+	for _, until := range r.endpointBlocks {
+		if now.Before(until) {
+			return true
+		}
+	}
+	return false
 }
 
 // releaseQuotaBlockedPin drops every sticky pin whose pinned model is
