@@ -301,7 +301,17 @@ func mergeProviderConfig(base, overlay ProviderConfig) ProviderConfig {
 	if out.Models == nil {
 		out.Models = map[string]ModelDef{}
 	}
-	maps.Copy(out.Models, overlay.Models)
+	// Copy overlay models with the same deep-copy contract as
+	// cloneProviderConfig: a maps.Copy of ModelDef values would leave each
+	// overlay model's ExtraHeaders aliasing the overlay source map, and a
+	// later in-place write through the merged config would mutate the
+	// original provider config.
+	for k, v := range overlay.Models {
+		if v.ExtraHeaders != nil {
+			v.ExtraHeaders = maps.Clone(v.ExtraHeaders)
+		}
+		out.Models[k] = v
+	}
 	return out
 }
 

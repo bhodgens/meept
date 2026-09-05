@@ -215,6 +215,37 @@ func TestMergeProviderConfigMergesExtraHeaders(t *testing.T) {
 	}
 }
 
+// TestMergeProviderConfigOverlayModelHeadersNotAliased pins the deep-copy
+// contract on the overlay-models path: maps.Copy of ModelDef values leaves
+// each overlay model's ExtraHeaders aliasing the overlay source map, so an
+// in-place write through the merged config would mutate the original
+// provider config (same class as the 515dba45 cloneProviderConfig fix).
+func TestMergeProviderConfigOverlayModelHeadersNotAliased(t *testing.T) {
+	overlayHeaders := map[string]string{"X-Session": "${session_id}"}
+	overlay := ProviderConfig{
+		API: "openai",
+		Models: map[string]ModelDef{
+			"kimi": {Name: "kimi-k2.6", ExtraHeaders: overlayHeaders},
+		},
+	}
+	base := ProviderConfig{API: "openai"}
+
+	merged := mergeProviderConfig(base, overlay)
+	mm, ok := merged.Models["kimi"]
+	if !ok {
+		t.Fatal("merged config lost overlay model kimi")
+	}
+	if mm.ExtraHeaders == nil {
+		t.Fatal("merged model lost its ExtraHeaders")
+	}
+	// Write through the merged config and prove the source is untouched.
+	mm.ExtraHeaders["X-Session"] = "mutated"
+	if overlay.Models["kimi"].ExtraHeaders["X-Session"] != "${session_id}" {
+		t.Fatal("merged model ExtraHeaders alias the overlay source map — " +
+			"overlay config was mutated through the merge result")
+	}
+}
+
 func TestResolveModelRefParsesExtraHeaders(t *testing.T) {
 	cfg := &ProvidersConfig{
 		Providers: map[string]ProviderConfig{
