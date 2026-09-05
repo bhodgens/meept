@@ -1445,6 +1445,12 @@ func (m *Manager) getCurrentVersion(ctx context.Context, id string) int {
 	`, rootID, rootID).Scan(&maxVersion)
 
 	if err != nil {
+		// A swallowed error here restarts version numbering at 1 and mints
+		// duplicate chain versions — log loudly instead of silently.
+		m.logger.Warn("getCurrentVersion query failed; version numbering may restart",
+			"id", id,
+			"error", err,
+		)
 		return 0
 	}
 
