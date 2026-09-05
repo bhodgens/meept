@@ -112,8 +112,8 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 			}
 			report.Error += err.Error()
 			errorCount++
-		}
-		if errorCount == maxConsolidationErrors+1 {
+		} else if errorCount == maxConsolidationErrors {
+			// First error past the cap: append the omission notice once.
 			report.Error += "; ... (additional errors omitted)"
 			errorCount++
 		}
@@ -132,9 +132,10 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 			}
 			report.Error += err.Error()
 			errorCount++
-		}
-		if errorCount == maxConsolidationErrors+1 {
+		} else if errorCount == maxConsolidationErrors {
+			// First error past the cap: append the omission notice once.
 			report.Error += "; ... (additional errors omitted)"
+			errorCount++
 		}
 		c.logger.Error("Task deduplication failed", "error", err)
 	} else {
