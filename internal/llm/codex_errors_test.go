@@ -101,6 +101,25 @@ func TestCodex429QuotaWindowBodyTypedAsQuotaReset(t *testing.T) {
 	}
 }
 
+// TestCodex402TypedAsQuotaReset pins the 402 lane: billing exhaustion on
+// codex must surface as *QuotaResetError (the client.go:1332 contract) so
+// ProviderManager rotates and the loop's quota branch fires — not a plain
+// *APIError, which isClientError treats as terminal.
+func TestCodex402TypedAsQuotaReset(t *testing.T) {
+	srv := newCodexStatusServer(t, http.StatusPaymentRequired, nil,
+		`{"error":{"message":"billing limit reached"}}`)
+	client := newCodexClientForTest(t, srv.URL)
+
+	_, err := client.Chat(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "x"}})
+	if err == nil {
+		t.Fatal("expected error for 402")
+	}
+	if _, ok := errors.AsType[*QuotaResetError](err); !ok {
+		t.Fatalf("error %v (%T) is not *QuotaResetError — 402 must take the quota lane", err, err)
+	}
+}
+
 // TestCodex5xxTypedAsAPIError pins the other non-200 lane: 500 surfaces as
 // *APIError (retryable-status lane), never the old *ClientError.
 func TestCodex5xxTypedAsAPIError(t *testing.T) {

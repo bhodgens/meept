@@ -7,6 +7,10 @@
 //	      when the body carries a usage-window/billing shape (leaf-01 rule —
 //	      the quota NonRetryable early-exit upstream of every retry loop
 //	      depends on this), wrapping a *APIError as its Cause
+//	402 → *QuotaResetError (billing exhaustion = retry-with-estimate, the
+//	      client.go:1332 contract; without this lane codex 402s fell to
+//	      plain *APIError, PM isClientError blocked rotation, and the
+//	      loop's quota branch never fired)
 //	other non-200 → *APIError{StatusCode, Detail}
 //
 // This file lives outside errors.go (owned by another workstream); it only
@@ -37,7 +41,7 @@ func codexErrorFromResponse(statusCode int, respBody []byte, retryAfterHeader, p
 		detail = detail[:maxDetail]
 	}
 
-	if statusCode == http.StatusTooManyRequests {
+	if statusCode == http.StatusTooManyRequests || statusCode == http.StatusPaymentRequired {
 		retryAfter := parseRetryAfter(retryAfterHeader)
 
 		// Structured 429 metadata (OpenRouter / generic {error:{...}} JSON).
@@ -59,6 +63,29 @@ func codexErrorFromResponse(statusCode int, respBody []byte, retryAfterHeader, p
 				qe.Cause = &APIError{StatusCode: statusCode, Detail: detail}
 				return qe
 			}
+		}
+
+		// 402 = billing exhaustion, unconditionally quota (client.go:1332
+		// contract: PaymentRequired is retry-with-estimate, never a client
+		// error). Without this lane a codex 402 fell to plain *APIError,
+		// ProviderManager's isClientError blocked rotation, and the loop's
+		// quota branch (park + re-ask UX) never fired.
+		if statusCode == http.StatusPaymentRequired {
+			qe := ParseQuotaResponse(statusCode, nil, respBody, QuotaContext{
+				ProviderID: providerID,
+				ModelID:    modelID,
+			})
+			if qe == nil {
+				// Body lacked a parseable quota shape; synthesize the
+				// minimal billing-exhaustion error so the quota lane
+				// still owns the failure.
+				qe = &QuotaResetError{
+					ProviderID: providerID,
+					ModelID:    modelID,
+				}
+			}
+			qe.Cause = &APIError{StatusCode: statusCode, Detail: detail}
+			return qe
 		}
 
 		rlErr := &RateLimitError{
