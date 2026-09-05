@@ -112,7 +112,7 @@ func TestAgentJobProcessor_QuotaErrorPublishesEvent(t *testing.T) {
 		t.Errorf("agent_id = %v", payload["agent_id"])
 	}
 	if _, ok := payload["unblock_at"].(string); !ok {
-		t.Errorf("unblock_at missing/非-string: %v", payload["unblock_at"])
+		t.Errorf("unblock_at missing or not a string: %v", payload["unblock_at"])
 	}
 }
 ```
