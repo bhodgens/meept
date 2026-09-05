@@ -1,0 +1,137 @@
+#!/opt/homebrew/bin/bash
+# pre-commit-ascii — block commits introducing non-English (CJK/Hangul/etc.)
+# characters into tracked TEXT files.
+#
+# Background (2026-09-04): CJK characters leaked into Go comments and plan
+# docs (非-string, 某些, 保持, 隐式状态) — invisible in some terminals and
+# confusing in review. This hook fails the commit when a STAGED text file
+# contains such characters.
+#
+# What is checked: CJK ideographs, Kana, Hangul, fullwidth forms, CJK
+# compatibility forms — the scripts that actual leaks used.
+#
+# What is NOT checked (deliberate — they pre-exist repo-wide and are
+# legitimate): typographic punctuation (em-dash —, arrows →, box-drawing
+# ─│┌, middle dot ·, checkmarks ✅), Latin-1 accented letters in binary
+# assets, and binary files themselves (skipped via git's -I heuristic).
+#
+# Existing violations (grandfathered): a handful of historical docs/plan
+# files plus two Go files carry CJK today (see ALLOWLIST). They fail only
+# when MODIFIED — the hook checks staged changes, not the whole tree —
+# and each staged file with hits is named in the failure output so the
+# author cleans it in the same commit. To scrub an existing file, fix and
+# commit it; the hook then stops flagging it.
+#
+# Usage:
+#   .githooks/pre-commit-ascii            # check staged files (hook mode)
+#   .githooks/pre-commit-ascii --all      # check every tracked text file
+#   .githooks/pre-commit-ascii <file...>  # check specific files
+#
+# Install: called from .githooks/pre-commit. Requires /opt/homebrew/bin/bash
+# (same as the other sub-hooks) and python3.
+
+set -e
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+MODE="${1:-staged}"
+shift 2>/dev/null || true
+
+# ALLOWLIST — text files that legitimately contain CJK (unicode test
+# fixtures, docs about unicode handling, UI mock comments). Exact paths,
+# one per line. Keep minimal; every entry is reviewed code.
+ALLOWLIST=(
+  "tests/context_management_test.go"
+  "scripts/audit-utf8-byte-arithmetic.py"
+  "ui/flutter_ui/lib/features/home/sidebar_home_screen.dart"
+)
+
+is_allowlisted() {
+  local candidate="$1"
+  for allowed in "${ALLOWLIST[@]}"; do
+    [ "$candidate" = "$allowed" ] && return 0
+  done
+  return 1
+}
+
+# Collect candidate files.
+case "$MODE" in
+  --all)
+    FILES=$(git ls-files)
+    ;;
+  staged|"")
+    FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+    ;;
+  *)
+    FILES="$*"
+    ;;
+esac
+
+VIOLATIONS=0
+CHECKED=0
+
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  [ -f "$f" ] || continue          # skip deleted paths
+  is_allowlisted "$f" && continue  # reviewed CJK-legitimate files
+  CHECKED=$((CHECKED + 1))
+
+  # Binary files: git grep -I succeeds on text, fails (rc=1) on binary.
+  if ! git grep -I --quiet -e '' -- "$f" 2>/dev/null; then
+    continue
+  fi
+
+  # CJK/Hangul/fullwidth detection with line:col: text reporting.
+  HITS=$(python3 - "$f" <<'PY'
+import sys, re
+
+path = sys.argv[1]
+# CJK Radicals..Unified Ideographs, Kana & HangulJamo ranges, Compatibility
+# Ideographs, Halfwidth/Fullwidth Forms. Hangul syllables AC00-D7AF included.
+cjk = re.compile(
+    "[\u1100-\u11FF"   # Hangul Jamo
+    "\u2E80-\u9FFF"    # CJK radicals, Kangxi, CJK symbols+ideographs, Kana
+    "\uAC00-\uD7AF"    # Hangul syllables
+    "\uF900-\uFAFF"    # CJK compatibility ideographs
+    "\uFF00-\uFFEF"    # halfwidth and fullwidth forms
+    "]"
+)
+
+try:
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for n, line in enumerate(fh, 1):
+            m = cjk.search(line)
+            if m:
+                col = m.start() + 1
+                snippet = line.rstrip()[:120]
+                print(f"{path}:{n}:{col}: {snippet}")
+except Exception as e:
+    print(f"{path}:0:0: unreadable ({e})")
+PY
+)
+
+  if [ -n "$HITS" ]; then
+    if [ "$VIOLATIONS" -eq 0 ]; then
+      echo ""
+      echo -e "${RED}Non-English (CJK/Hangul/fullwidth) characters found:${NC}"
+    fi
+    echo "$HITS" | sed 's/^/  /'
+    VIOLATIONS=$((VIOLATIONS + 1))
+  fi
+done <<< "$FILES"
+
+if [ "$VIOLATIONS" -gt 0 ]; then
+  echo ""
+  echo -e "${RED}FAIL: $VIOLATIONS file(s) contain non-English characters.${NC}"
+  echo -e "${YELLOW}This repo is English-only. Translate the flagged comments/text"
+  echo -e "to English in this commit. If a file is a test fixture that"
+  echo -e "legitimately needs CJK (e.g. unicode handling tests), add its path"
+  echo -e "to the ALLOWLIST section of .githooks/pre-commit-ascii.${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}ascii-check ok ($CHECKED file(s) scanned).${NC}"
+exit 0
