@@ -603,8 +603,9 @@ All config uses **JSON5** format. Templates in `config/`, copied on
 
 - **Main**: `~/.meept/meept.json5`
 - **Models**: `config/models.json5` (capability-based resolution)
-- **MCP servers**: `~/.meept/mcp_servers.json5` (20 preconfigured, 6 enabled
-  by default)
+- **MCP servers**: `~/.meept/mcp_servers.json5` (22 preconfigured, 7 enabled
+  by default — incl. `obscura` browser MCP, enabled; `excel` xlsx fallback,
+  disabled)
 - **ACP agents**: `~/.meept/acp_agents.json5` (catalog of external ACP
   agents; `[acp] enabled` defaults false — no subprocesses until opted in)
 - **UI theme** (TUI + GUI): shared tokens in `theme/tokens.json5`; select per

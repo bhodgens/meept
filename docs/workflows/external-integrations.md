@@ -111,6 +111,39 @@ The classification is prefix-matched on the registered name (`pkg/security.Compu
 
 See the bundled `computer-use` skill (`config/skills/computer-use/SKILL.md`) for the recommended capture → act → verify loop.
 
+### Obscura Browser Integration
+
+`obscura` (open source, [h4ckf0r0day/obscura](https://github.com/h4ckf0r0day/obscura), Apache 2.0) is a headless browser engine written in Rust and built for AI agents and web scraping. It runs real JavaScript via embedded V8, speaks the Chrome DevTools Protocol, and acts as a lightweight drop-in alternative to headless Chrome (~30 MB RSS per instance vs ~200 MB, per the project). It ships in the MCP default catalog (`config/mcp_servers.json5`) as `obscura`, **enabled by default** when the built binary exists at the catalog's absolute path.
+
+The MCP server (`obscura mcp`, stdio) exposes a live browser session as a `browser_*` tool family: `browser_navigate`, `browser_snapshot`, `browser_markdown`, `browser_links`, `browser_click`, `browser_fill`, `browser_type`, `browser_evaluate`, `browser_screenshot`, `browser_pdf`, tabs, and cookies. Tools operate on the current page; navigate first, then read or act.
+
+**Install the engine** (requires Rust 1.75+; first build compiles V8, ~5 min):
+
+```bash
+git clone https://github.com/h4ckf0r0day/obscura.git
+cd obscura
+cargo build --release
+# binaries land in target/release/ (obscura, obscura-worker)
+```
+
+Verify with `obscura --version`.
+
+**Enable in meept** (any of the three catalog surfaces):
+
+1. Edit `~/.meept/mcp_servers.json5`: set `enabled: true` on the `obscura` entry.
+2. TUI: press `ctl-x o` (mcp menu), select `obscura`, press `e`.
+3. Menubar app: settings → tools tab, toggle the switch.
+
+The shipped catalog entry points at the meept-local build path (`/Users/caimlas/git/obscura/target/release/obscura`) and ships `enabled: true`; if the binary is absent the launch fails per-server without affecting the rest of the catalog. Geo-vantaged reads (map-pack style checks "as a searcher in city X") combine Obscura's `OBSCURA_GEO_LOCATION` (`lat,lon`), `OBSCURA_TIMEZONE`, and `OBSCURA_PROXY` env passthrough — declared in the entry's `env` block or exported before daemon start.
+
+Tools register under the server-name prefix — `obscura.browser_navigate`, `obscura.browser_snapshot`, etc. (see [MCP default catalog](tool-routing.md#mcp-default-catalog) for how namespacing works).
+
+**Security notes:**
+
+- Obscura blocks loopback/RFC1918/link-local targets by default (`--allow-private-network` relaxes this; keep it off).
+- The catalog entry runs without stealth; append `--stealth` to the `command` array for a consistent browser fingerprint plus the bundled tracker blocklist, and `--obey-robots` for robots.txt compliance.
+- Same SSRF posture applies as any web tool: meept's `[security.ssrf]` guard covers built-in fetch/browser tools; MCP tool calls bypass it, so keep the Obscura-level private-network block enabled when scraping untrusted URLs.
+
 ### Web API Integration
 - **HTTP/JSON API**: RESTful interface for external clients
 - **Authentication**: API key or token-based access

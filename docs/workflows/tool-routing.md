@@ -30,7 +30,7 @@ Agent Request → Tool Registry → Security Check → Tool Execution → Result
 
 ## MCP Default Catalog
 
-Meept ships a default catalog of 20 preconfigured MCP (Model Context Protocol) servers in `config/mcp_servers.json5`. The template is copied to `~/.meept/mcp_servers.json5` on `make install` if no file exists there yet. Each entry is fully configured with the correct command (`npx` or `uvx` as appropriate), environment variables, category, and description.
+Meept ships a default catalog of 22 preconfigured MCP (Model Context Protocol) servers in `config/mcp_servers.json5`. The template is copied to `~/.meept/mcp_servers.json5` on `make install` if no file exists there yet. Each entry is fully configured with the correct command (`npx` or `uvx` as appropriate), environment variables, category, and description.
 
 ### MCP Security Considerations
 
@@ -59,9 +59,24 @@ Only the zero-config servers are enabled by default (no API keys or external ser
 | `git` | uvx | vcs | local git repo operations (log, diff, blame) |
 | `time` | uvx | data | timezone-aware time and conversion |
 
-The remaining 14 servers ship `enabled: false` because they need API keys, OAuth credentials, or external platform instances. Enable only the ones you want.
+The remaining 15 servers ship `enabled: false` because they need API keys, OAuth credentials, external platform instances, or a natively-installed binary. Enable only the ones you want.
 
 The `cua-driver` entry (category `automation`) adds background desktop computer-use via a native binary — install commands, enable steps, and its LOW/HIGH risk-rule table are documented under [Cua-Driver Computer-Use Integration](external-integrations.md#cua-driver-computer-use-integration).
+
+The `obscura` entry (category `browser`) adds the Obscura headless browser engine — a Rust, V8-based, CDP-compatible browser purpose-built for agents, exposing the full `browser_*` tool family over stdio MCP. Install commands and enable steps are documented under [Obscura Browser Integration](external-integrations.md#obscura-browser-integration).
+
+The `excel` entry (category `data`, **disabled by default**) is a higher-capability xlsx fallback (`uvx excel-mcp-server`: pivot tables, charts, conditional formatting) for when the built-in `spreadsheet_write` tool is not enough. It ships disabled because an MCP subprocess write bypasses the built-in tools' session fence and `pending_changes` review gate — enable it only for reports that genuinely need pivot-table-class output.
+
+## Built-in Web & Output Tools
+
+| tool | category | purpose |
+|------|----------|---------|
+| `web_fetch` | web | HTTP(S) fetch, HTML stripped to text; PDF responses are detected (content-type or `%PDF` magic bytes) and return a pointer to `pdf_read` instead of binary garbage |
+| `web_search` | web | DuckDuckGo search |
+| `pdf_read` | web | Read a PDF's text layer from a local path or URL (page ranges, char cap); scanned PDFs return an explicit "no text layer" note instead of failing |
+| `spreadsheet_write` | filesystem | Write CSV or XLSX audit/tabular output (headers, typed cells, yellow row highlighting in xlsx) inside the session working dir |
+
+All three web-side tools (`web_fetch`, `web_search`, `pdf_read`) run under the `[security.ssrf]` guard; `spreadsheet_write` writes resolve inside the session working-dir fence and refuse paths that escape it.
 
 ### Enabling a Server
 
