@@ -394,6 +394,46 @@ func (m *Manager) ListAutoClaims(ctx context.Context, createdAfter time.Time, li
 	return out, nil
 }
 
+// ListExpiredClaims returns non-rejected claims whose valid_to is in the past
+// at call time, newest first, up to limit (default 20). Claims with no
+// valid_to (unbounded) are never returned. Surfaced by the memory tool / CLI
+// so users can see what has silently aged out of trust-weighted results.
+func (m *Manager) ListExpiredClaims(ctx context.Context, limit int) ([]MemoryResult, error) {
+	m.mu.RLock()
+	initialized := m.initialized
+	m.mu.RUnlock()
+	if !initialized {
+		return nil, errors.New("memory manager not initialized")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	results, err := m.Search(ctx, MemoryQuery{
+		Type:  MemoryTypeClaim,
+		Limit: limit * 4,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search expired claims: %w", err)
+	}
+	var out []MemoryResult
+	for _, r := range results {
+		if r.Memory.Type != MemoryTypeClaim {
+			continue
+		}
+		if ClaimStatus(asString(r.Memory.Metadata["status"])).IsRejected() {
+			continue
+		}
+		if claimInForce(r.Memory, time.Now()) {
+			continue // not expired (includes unbounded claims)
+		}
+		out = append(out, r)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 // ListPendingReviews returns decisions whose ReviewAt is before the given
 // time, and predictions whose Horizon is before the given time.
 func (m *Manager) ListPendingReviews(ctx context.Context, before time.Time) (decisions, predictions []MemoryResult, err error) {
@@ -464,6 +504,7 @@ func (m *Manager) ListPendingReviews(ctx context.Context, before time.Time) (dec
 func (m *Manager) FindCanonicalFor(ctx context.Context, topic string) (*Memory, error) {
 	m.mu.RLock()
 	initialized := m.initialized
+	logger := m.logger
 	m.mu.RUnlock()
 	if !initialized {
 		return nil, errors.New("memory manager not initialized")
@@ -486,6 +527,13 @@ func (m *Manager) FindCanonicalFor(ctx context.Context, topic string) (*Memory, 
 		if asString(r.Memory.Metadata["canonical_for"]) != topic {
 			continue
 		}
+		if !claimInForce(r.Memory, time.Now()) {
+			// Expired — never canonical (plan: claim-temporal-validity);
+			// log at debug so surfaces can explain the drop.
+			logger.Debug("canonical candidate excluded: expired",
+				"claim_id", r.Memory.ID, "reason", "expired")
+			continue
+		}
 		status := ClaimStatus(asString(r.Memory.Metadata["status"]))
 		if status.IsEligibleCanonical() {
 			mem := r.Memory
@@ -495,6 +543,13 @@ func (m *Manager) FindCanonicalFor(ctx context.Context, topic string) (*Memory, 
 	// Second pass: any eligible claim matching the topic.
 	for _, r := range results {
 		if r.Memory.Type != MemoryTypeClaim {
+			continue
+		}
+		if !claimInForce(r.Memory, time.Now()) {
+			// Expired — never canonical (plan: claim-temporal-validity);
+			// log at debug so surfaces can explain the drop.
+			logger.Debug("canonical candidate excluded: expired",
+				"claim_id", r.Memory.ID, "reason", "expired")
 			continue
 		}
 		status := ClaimStatus(asString(r.Memory.Metadata["status"]))

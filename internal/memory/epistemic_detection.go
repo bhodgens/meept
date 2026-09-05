@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // DefaultDetectionThreshold is the minimum LLM confidence for an epistemic
@@ -123,6 +124,14 @@ func (d *EpistemicDetector) DetectRelationships(ctx context.Context, newMem Memo
 			if ClaimStatus(asString(r.Memory.Metadata["status"])).IsRejected() {
 				continue
 			}
+		}
+		// Exclude expired/not-yet-in-force claims — they can't be
+		// relationship targets either. Hard-exclude (plan: claim-temporal-
+		// validity); log at debug so surfaces can explain the drop.
+		if !claimInForce(r.Memory, time.Now()) {
+			d.logger.Debug("detector candidate excluded: expired",
+				"claim_id", r.Memory.ID, "reason", "expired")
+			continue
 		}
 		candidates = append(candidates, r.Memory)
 	}

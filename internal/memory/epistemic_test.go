@@ -382,3 +382,173 @@ func TestManagerSetEpistemicDetector(t *testing.T) {
 	d := NewEpistemicDetector(EpistemicDetectorConfig{})
 	m.SetEpistemicDetector(d)
 }
+
+// fakeClassifier implements ClassifierLLM for tests, capturing the candidate
+// memories it receives so tests can assert on the detector's filtering.
+type fakeClassifier struct {
+	sawCandidates []Memory
+}
+
+func (f *fakeClassifier) ClassifyRelationships(_ context.Context, _ Memory, candidates []Memory) ([]EdgeVerdict, error) {
+	f.sawCandidates = append(f.sawCandidates, candidates...)
+	return nil, nil
+}
+
+func TestListExpiredClaims(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t)
+	ctx := context.Background()
+
+	past := time.Now().UTC().Add(-time.Hour)
+	future := time.Now().UTC().Add(time.Hour)
+	rfc := func(t time.Time) string { return t.Format(time.RFC3339) }
+
+	store := func(text string, extra map[string]any) string {
+		id, err := m.StoreClaim(ctx, Claim{Text: text, Status: ClaimStatusConfirmed})
+		if err != nil {
+			t.Fatalf("store %q: %v", text, err)
+		}
+		// Direct metadata injection: StoreClaim alone cannot express
+		// "stored earlier with a now-past valid_to" without a real clock,
+		// so stamp the window on the stored row (same in-place path leaf 01
+		// added).
+		mem, err := m.GetByID(ctx, id)
+		if err != nil {
+			t.Fatalf("load %q: %v", text, err)
+		}
+		for k, v := range extra {
+			mem.Metadata[k] = v
+		}
+		if err := m.stampMetadataInPlace(ctx, mem); err != nil {
+			t.Fatalf("stamp %q: %v", text, err)
+		}
+		return id
+	}
+
+	expiredID := store("expired claim", map[string]any{"valid_to": rfc(past)})
+	_ = store("live claim", map[string]any{"valid_to": rfc(future)})
+	_ = store("unbounded claim", nil)
+	_ = store("expired but rejected", map[string]any{"valid_to": rfc(past), "status": string(ClaimStatusRejected)})
+
+	got, err := m.ListExpiredClaims(ctx, 20)
+	if err != nil {
+		t.Fatalf("ListExpiredClaims: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1; got %+v", len(got), got)
+	}
+	if got[0].Memory.ID != expiredID {
+		t.Errorf("got %s, want %s", got[0].Memory.ID, expiredID)
+	}
+}
+
+func TestListExpiredClaimsUninitialized(t *testing.T) {
+	m := NewManager(ManagerConfig{})
+	if _, err := m.ListExpiredClaims(context.Background(), 10); err == nil {
+		t.Error("ListExpiredClaims should fail on uninitialized manager")
+	}
+}
+
+func TestDetectRelationshipsExcludesExpiredCandidates(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name          string
+		validTo       time.Time // zero = unbounded
+		wantCandidate bool
+	}{
+		{"live candidate passes", time.Now().UTC().Add(time.Hour), true},
+		{"expired candidate excluded", time.Now().UTC().Add(-time.Hour), false},
+		{"unbounded candidate passes", time.Time{}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t)
+			ctx := context.Background()
+
+			// Fixture text shares every token with the probe content so the
+			// candidate is found by both the FTS5 (AND) and LIKE search
+			// backends.
+			id, err := m.StoreClaim(ctx, Claim{Text: "zapneon probe fact", Status: ClaimStatusConfirmed})
+			if err != nil {
+				t.Fatalf("store: %v", err)
+			}
+			if !tc.validTo.IsZero() {
+				mem, err := m.GetByID(ctx, id)
+				if err != nil {
+					t.Fatalf("load: %v", err)
+				}
+				mem.Metadata["valid_to"] = tc.validTo.Format(time.RFC3339)
+				if err := m.stampMetadataInPlace(ctx, mem); err != nil {
+					t.Fatalf("stamp: %v", err)
+				}
+			}
+
+			fc := &fakeClassifier{}
+			d := NewEpistemicDetector(EpistemicDetectorConfig{Manager: m, Classifier: fc})
+			if _, err := d.DetectRelationships(ctx, Memory{
+				ID:      "probe-1",
+				Type:    MemoryTypeClaim,
+				Content: "zapneon probe",
+			}); err != nil {
+				t.Fatalf("DetectRelationships: %v", err)
+			}
+			saw := false
+			for _, c := range fc.sawCandidates {
+				if c.ID == id {
+					saw = true
+					break
+				}
+			}
+			if saw != tc.wantCandidate {
+				t.Fatalf("candidate %s seen = %v, want %v (saw %d candidates)",
+					id, saw, tc.wantCandidate, len(fc.sawCandidates))
+			}
+		})
+	}
+}
+
+func TestFindCanonicalForSkipsExpired(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t)
+	ctx := context.Background()
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+
+	expiredID, err := m.StoreClaim(ctx, Claim{Text: "zap config", Status: ClaimStatusConfirmed})
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	// Stamp expired window on the only matching claim.
+	mem, err := m.GetByID(ctx, expiredID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	mem.Metadata["valid_to"] = past
+	if err := m.stampMetadataInPlace(ctx, mem); err != nil {
+		t.Fatalf("stamp: %v", err)
+	}
+
+	_, err = m.FindCanonicalFor(ctx, "zap config")
+	if err == nil {
+		t.Fatalf("expected ErrNotFound for fully-expired topic, got a canonical claim")
+	}
+}
+
+func TestFindCanonicalForUnboundedStillEligible(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t)
+	ctx := context.Background()
+
+	// No validity metadata: unbounded claims must remain canonical-eligible.
+	id, err := m.StoreClaim(ctx, Claim{Text: "quixote config", Status: ClaimStatusConfirmed})
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	got, err := m.FindCanonicalFor(ctx, "quixote config")
+	if err != nil {
+		t.Fatalf("FindCanonicalFor: %v", err)
+	}
+	if got.ID != id {
+		t.Errorf("canonical = %s, want %s", got.ID, id)
+	}
+}
