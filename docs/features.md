@@ -1051,6 +1051,8 @@ Meept provides built-in tools and supports MCP (Model Context Protocol) for exte
 - Platform: `platform_agents`, `platform_status`, `platform_tools`, `delegate_task`, `request_handoff`
 - ACP: `acp_agent` (launch/send/read/stop against cataloged ACP agents; `[acp]` disabled by default)
 - Git: `git_commit`, `git_diff`, `git_status`
+- Browser: `browser_navigate`, `browser_click`, `browser_type`, `browser_read_text`, `browser_screenshot`, `browser_close` (opt-in, `[browser] enabled`; SSRF-guarded headless Chrome — see [Browser Automation](workflows/browser-automation.md))
+- Vision: no dedicated tool — multimodal image input flows through chat (`image_url` content parts); the agent loop runs a vision pre-flight that describes undescribed images before the main turn and caches the descriptions into memory (searchable)
 
 #### Knowledge Graph Tools
 | Tool | Description |
@@ -1549,6 +1551,12 @@ Three media specialists sit beside that roster: `image-gen` and `video-gen` each
 | **Unified HTTP Server** | Single HTTP server serving REST API, WebSocket, and MCP over HTTP+SSE with functional options |
 | **Unified Theming** | Shared color tokens (`theme/tokens.json5`, 18 frozen roles) drive both TUI and GUI. Variants: cyberpunk (default), midnight, solarized. Select via `rendering.ui_theme` in client config or the GUI settings dropdown (live swap). TUI restart-applied; GUI live. See [Theming](configuration/theming.md). |
 | **Speech-to-Text / TTS** | STT via native capture and Parakeet models; TTS with voice management and playback commands (`meept tts`). Wired into chat input/output. See [STT](workflows/speech-to-text.md) and [TTS](workflows/tts.md). |
+| **Browser Automation** | Opt-in headless Chrome tool family (`browser_navigate`/`click`/`type`/`read_text`/`screenshot`/`close`) behind the shared SSRF guard. `[browser] enabled` defaults false. See [Browser Automation](workflows/browser-automation.md). |
+| **Computer Use (CUA)** | Drive the host desktop via the `cua-driver` MCP server (capture/click/type/hotkey/scroll/drag) — shipped in the MCP catalog (`config/mcp_servers.json5`), disabled by default. Dedicated security tier: observation actions LOW, input-injection actions HIGH with confirmation, unknown actions fail-closed. |
+| **GBNF Grammar-Constrained Tools** | Opt-in (`[agent.tools] gbnf_constrained`) schema→grammar attachment for tool calls: llama.cpp `grammar`, vLLM `guided_grammar`, or `json_schema` response format. Per-model `tool_constraint` capability. |
+| **Vision (Multimodal Input)** | Send images in chat (TUI file-path detection, ACP image blocks, HTTP upload); providers serialize `image_url`/Anthropic content blocks; vision pre-flight auto-describes undescribed images and caches descriptions into searchable memory. |
+| **Secrets Broker & Credential Injection** | Declared secret sources (`[secrets.sources]`) load into a memory-only broker; tool/MCP subprocesses receive `MEEPT_SECRET:<name>` placeholders, never raw values; loopback egress proxy (`[secrets.proxy]`) resolves placeholders for allowlisted hosts with leak detection. See [Secrets](workflows/secrets.md). |
+| **External Benchmark Harness** | meept-bench drives the live daemon over its JSON-RPC unix socket: fresh git worktree per task, pluggable checkers, LLM judge, scorecards, and a diff-based regression gate. In-daemon eval suite (`meept eval`) covers oracle/judge/pass@k/classifier benchmarks. |
 
 ### External Integrations
 

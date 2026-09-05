@@ -28,7 +28,7 @@
 | DAG workflow/plans | X | X (PipelineSpec) | - | - | - | - | - | - | - |
 | Async handoff between agents | X | - | - | - | X (agent_message) | - | - | - | - |
 | Dynamic subagent spawning | X (request_handoff) | X (AgentBus) | - | - | X (rlm()) | ~ | - | - | - |
-| Recursive programmatic subagents | ~ | X | - | - | X (rlm + passivation) | - | - | - | - |
+| Recursive programmatic subagents | ~ (one-level in production: children can't re-delegate; bounded depth-2/3 recursion code exists but unwired) | X | - | - | X (rlm + passivation) | - | - | - | - |
 | Agent-to-agent messaging | X | X (AgentBus) | - | - | X (send + receipts) | ~ | - | - | - |
 | Constitution-bound employees | X | - | - | - | - | - | - | - | - |
 | Autonomy tiers (reactive/propose/autonomous) | X | - | - | - | ~ (bounded auto) | - | - | - | - |
@@ -61,10 +61,10 @@
 | ACP client (drive external agents) | X (opt-in, default off) | - | - | - | - | ~ (ACP server for editors) | ~ (`opencode acp`) | - | - |
 | Parallel tool execution | X (semaphore) | X | X | X (resource-class) | X | X | X | X | X |
 | Tool streaming progress | X | - | - | - | - | - | - | - | - |
-| Browser automation | - | - | - | X (Playwright) | - | ~ | - | - | ~ |
-| Computer use (CUA) | - | - | - | - | - | X (macOS) | - | - | - |
-| GBNF grammar-constrained tools | - | - | - | X | - | - | - | - | - |
-| Vision / image describe | - | - | - | X (mmproj) | - | - | - | - | - |
+| Browser automation | X (opt-in `[browser]`; SSRF-guarded headless Chrome tool family) | - | - | X (Playwright) | - | ~ | - | - | ~ |
+| Computer use (CUA) | X (opt-in `cua-driver` MCP, security-tiered) | - | - | - | - | X (macOS) | - | - | - |
+| GBNF grammar-constrained tools | X (opt-in `gbnf_constrained`) | - | - | X | - | - | - | - | - |
+| Vision / image describe | X (multimodal input + auto pre-flight describe) | - | - | X (mmproj) | - | - | - | - | - |
 | Office doc read/write | MCP only | X (PDF/DOCX/etc.) | - | X | - | MCP | - | - | X |
 
 ### Security & Sandboxing
@@ -79,7 +79,7 @@
 | Path fencing | X | - | - | - | - | X | - | - | - |
 | OS-enforced sandbox | ~ (docker opt-in) | X (bwrap/container) | X (bwrap/macOS/Windows) | - | - | - | - | - | - |
 | Network egress policy | - | ~ | X (proxy+CIDR) | - | - | - | - | - | - |
-| Secret-backed credential injection | - | - | X (placeholder proxy) | - | - | - | - | - | - |
+| Secret-backed credential injection | X (opt-in: `[secrets.sources]` broker + `MEEPT_SECRET:` placeholder env injection; loopback egress proxy) | - | X (placeholder proxy) | - | - | - | - | - | - |
 | Diff preview + write approval | X (PendingChanges, FileEdit only) | X (unified diff all mutations) | X (checksum rewind) | X | ~ | - | - | - | X |
 | Fail-closed policy | X | X | X | - | - | - | - | - | ~ |
 
@@ -91,7 +91,7 @@
 | Job queue with priorities | X | - | - | - | - | - | - | - | - |
 | Agent-targeted jobs | X | - | - | - | - | - | - | - | - |
 | Daemon / resident mode | X | - | X (gateway service) | - | X (daemon supervisor) | X (gateway) | - | - | - |
-| Crash recovery / resume | ~ | X (--resume) | ~ | ~ | X (worker restart) | ~ | - | - | ~ |
+| Crash recovery / resume | ~ (durable queue/sessions/scheduler; parked turns memory-only by design; single-node in-flight jobs not requeued) | X (--resume) | ~ | ~ | X (worker restart) | ~ | - | - | ~ |
 | P2P cluster mesh | X (gossip+WireGuard) | - | - | - | - | - | - | - | - |
 | Distributed task queue | X | - | - | - | - | - | - | - | - |
 
@@ -106,7 +106,7 @@
 | Dollar cost tracking | X (OpenRouter live) | - | - | - | - | ~ | - | - | - |
 | Reasoning effort support | X | - | - | - | - | ~ | - | - | X |
 | Local inference management | ~ (RuntimeManager) | - | - | X (TurboQuant llama.cpp) | - | ~ | - | - | - |
-| Subscription CLI provider | - | - | - | X (claude/codex) | X | - | - | - | - |
+| Subscription CLI provider | X (opt-in: ACP client drives codex-acp; claude/opencode are catalog entries away) | - | - | X (claude/codex) | X | - | - | - | - |
 
 ### Self-Improvement & Learning
 
@@ -126,7 +126,7 @@
 | Metrics store | X (SQLite TSDB) | X (artifacts) | X | X (NDJSON traces) | ~ | X (cost) | - | - | ~ |
 | Structured logging | X (slog) | X | X | X | X | X | - | - | ~ |
 | Health endpoints | X | X | X | X | X | X | - | - | - |
-| Benchmark harness | ~ (internal) | X (14 benchmarks) | X (context policy) | X (GAIA published) | - | - | - | - | - |
+| Benchmark harness | X (external meept-bench over JSON-RPC + internal eval suite) | X (14 benchmarks) | X (context policy) | X (GAIA published) | - | - | - | - | - |
 | Trace replay / prompt drift | - | X | X | X (NDJSON+hash) | - | - | - | - | - |
 
 ### UI & Channels
@@ -251,4 +251,4 @@ Category Dominance (X count across 28 features)
 
 ---
 
-*Matrix generated 2026-08-29 from `docs/features.md`, `docs/research/2026-08-24-agent-parity-audit.md`, and direct repo inspection. MCP catalog count from `config/mcp_servers.json5`. Updated 2026-08-29 for ACP client (`acp_agent`, `[acp]` disabled by default).*
+*Matrix generated 2026-08-29 from `docs/features.md`, `docs/research/2026-08-24-agent-parity-audit.md`, and direct repo inspection. MCP catalog count from `config/mcp_servers.json5`. Updated 2026-08-29 for ACP client (`acp_agent`, `[acp]` disabled by default). Updated 2026-09-04 after code re-validation: browser automation, computer use, GBNF tool constraints, vision input, secrets broker/credential injection, subscription-CLI-over-ACP, and the meept-bench harness marked X (all opt-in or external by design); crash-recovery and recursion rationales sharpened (queue claims are atomic; parked turns are memory-only by design; production delegation is one-level).*
