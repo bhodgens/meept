@@ -156,13 +156,11 @@ func checkProcessAlive(pid int) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-// readPID reads a PID from the given file path.
+// readPID reads a PID from the given file path. Accepts both the current
+// JSON runtime-pidfile format and legacy bare-int files (delegates to
+// llm.ParsePIDFile so CLI and daemon never drift on the format).
 func readPID(path string) (int, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(strings.TrimSpace(string(data)))
+	return llm.ParsePIDFile(path)
 }
 
 // runRuntimeStatusFormatted shows the current runtime status in the requested format.

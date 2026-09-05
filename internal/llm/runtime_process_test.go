@@ -2,10 +2,10 @@ package llm_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -67,17 +67,24 @@ func TestRuntimeProcess_PIDWriteRead(t *testing.T) {
 		t.Fatalf("failed to read PID file: %v", err)
 	}
 
-	pid, err := strconv.Atoi(string(data))
-	if err != nil {
-		t.Fatalf("failed to parse PID from file: %v", err)
+	// The pidfile is JSON: {"pid":N,"token":"<instance token>"}.
+	var entry struct {
+		PID   int    `json:"pid"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(data, &entry); err != nil {
+		t.Fatalf("failed to parse PID file JSON: %v", err)
 	}
 
-	if pid <= 0 {
-		t.Errorf("expected positive PID, got %d", pid)
+	if entry.PID <= 0 {
+		t.Errorf("expected positive PID, got %d", entry.PID)
+	}
+	if entry.Token == "" {
+		t.Error("pidfile written by Start must carry a non-empty instance token")
 	}
 
-	if p.PID() != pid {
-		t.Errorf("expected PID %d, got %d", pid, p.PID())
+	if p.PID() != entry.PID {
+		t.Errorf("expected PID %d, got %d", entry.PID, p.PID())
 	}
 
 	if !p.IsRunning() {

@@ -1,7 +1,11 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -24,7 +29,19 @@ type RuntimeProcess struct {
 	cmd     *exec.Cmd
 	pid     int
 	pidFile string
-	// spawnedByUs records whether THIS instance spawned or adopted the
+	// instanceToken identifies the manager INSTANCE that constructed this
+	// RuntimeProcess (a fresh 16-byte random token per construction — i.e.
+	// per daemon boot, or per short-lived constructing process). It is
+	// written into pidfiles this instance spawns and checked on adoption:
+	// a pidfile whose token matches ours was written by this same instance
+	// (same-boot re-Start path) and its process may be adopted as OWNED;
+	// a foreign token (a second daemon, a test binary, a CLI process —
+	// anything sharing the run dir) or a legacy tokenless pidfile is adopted
+	// as OBSERVED, NOT OWNED. Such a process must never be killed through
+	// Stop()/StopAll(); only its live state and endpoint health are this
+	// instance's business.
+	instanceToken string
+	// spawnedByUs records whether THIS instance spawned or owned-adopted the
 	// runtime process. Only an owner may Stop it: a secondary process (CLI
 	// invocation, eval harness, tool subprocess) that constructed the LLM
 	// stack and exits must never kill the daemon's healthy llama-server via
@@ -35,12 +52,57 @@ type RuntimeProcess struct {
 	waitDone chan error
 }
 
+// pidfileEntry is the on-disk pidfile record. The current format is a JSON
+// object: {"pid":1234,"token":"<hex>"} written atomically (temp file +
+// rename). Pidfiles written before instance tokens existed are a bare
+// decimal integer; parsePIDFile still accepts that legacy format, and an
+// entry with an empty Token is treated as OBSERVED-NOT-OWNED on adoption.
+type pidfileEntry struct {
+	PID   int    `json:"pid"`
+	Token string `json:"token,omitempty"`
+}
+
+// ParsePIDFile reads and parses a runtime pidfile, returning its PID.
+// Accepts both the current JSON format and the legacy bare-int format.
+// Exported for CLI consumers (cmd/meept runtime start/stop) that inspect
+// the same pidfiles without owning a RuntimeProcess.
+func ParsePIDFile(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	var entry pidfileEntry
+	if err := json.Unmarshal(data, &entry); err == nil && entry.PID > 0 {
+		return entry.PID, nil
+	}
+	// Legacy bare-int pidfile.
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, fmt.Errorf("invalid pidfile %s: %w", path, err)
+	}
+	return pid, nil
+}
+
 // NewRuntimeProcess creates a new process manager.
 func NewRuntimeProcess(cfg *RuntimeConfig) *RuntimeProcess {
 	return &RuntimeProcess{
-		config:  cfg,
-		pidFile: cfg.PIDFile,
+		config:        cfg,
+		pidFile:       cfg.PIDFile,
+		instanceToken: newInstanceToken(),
 	}
+}
+
+// newInstanceToken generates the identity token for one manager instance:
+// 16 crypto/rand bytes, hex-encoded. There is no predictable fallback: a
+// guessable token would defeat the ownership guarantee, so rand failure
+// degrades to the empty token, which adoption treats as
+// observed-not-owned (the safe direction).
+func newInstanceToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
 }
 
 // AlreadyRunning reports whether the runtime process is already running
@@ -50,15 +112,25 @@ func NewRuntimeProcess(cfg *RuntimeConfig) *RuntimeProcess {
 // already-running process should not have its log truncated because no new
 // subprocess will be spawned.
 func (p *RuntimeProcess) AlreadyRunning() bool {
-	pid, err := p.readPIDFile()
-	if err != nil || pid <= 0 {
+	entry, err := p.readPIDFile()
+	if err != nil || entry.PID <= 0 {
 		return false
 	}
-	return p.isProcessRunning(pid)
+	return p.isProcessRunning(entry.PID)
 }
 
 // Start spawns the runtime process. stdout and stderr are used for the
 // subprocess's output streams; nil falls back to os.Stdout/os.Stderr.
+//
+// Adoption semantics (docs/bugs-and-gaps.md "Runtime adoption ownership
+// race"): if the PID file names a live process,
+//   - a pidfile carrying THIS instance's token (same-boot re-Start) is
+//     adopted as OWNED — spawnedByUs stays true and Stop() remains
+//     authorized;
+//   - anything else (a foreign instance sharing the run dir, or a legacy
+//     tokenless pidfile) is adopted as OBSERVED, NOT OWNED — this instance
+//     records the PID and lets health checks verify the endpoint, but
+//     Stop()/StopAll() refuse to kill a process it never spawned.
 func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) error {
 	if stdout == nil {
 		stdout = os.Stdout
@@ -69,14 +141,31 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// Check if already running via PID file
-	if pid, err := p.readPIDFile(); err == nil && pid > 0 {
-		if p.isProcessRunning(pid) {
-			// Adopt the existing process: record its PID so this instance
-			// is its authoritative owner (can Stop it), while NOT spawning
-			// a duplicate that would race for the port and die.
-			p.pid = pid
-			p.spawnedByUs = true
-			return nil // Already running
+	if entry, err := p.readPIDFile(); err == nil && entry.PID > 0 {
+		if p.isProcessRunning(entry.PID) {
+			if entry.Token == p.instanceToken {
+				// Same-instance re-Start: the live process carries THIS
+				// boot's token (e.g. a health-driven restart of a runtime
+				// we spawned earlier in this boot). Adopt as OWNED so
+				// Stop() remains authorized.
+				p.pid = entry.PID
+				p.spawnedByUs = true
+				return nil // Already running (ours)
+			}
+			// Cross-instance adoption (second daemon boot, test binary,
+			// CLI process — anything sharing this run dir) or a legacy
+			// tokenless pidfile: adopt as OBSERVED, NOT OWNED. Record the
+			// PID so Start is a no-op and health checks can verify the
+			// endpoint, but do NOT grant kill rights: Stop() skips
+			// non-owned processes, so a foreign instance's StopAll can no
+			// longer take down a runtime it never spawned.
+			p.pid = entry.PID
+			p.spawnedByUs = false
+			slog.Info("adopted external runtime (observed, not owned)",
+				"pid", entry.PID,
+				"pid_file", p.pidFile,
+				"legacy_format", entry.Token == "")
+			return nil // Already running (foreign)
 		}
 		// Stale PID file
 		os.Remove(p.pidFile)
@@ -111,8 +200,8 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 
 	p.pid = p.cmd.Process.Pid
 
-	// Write PID file
-	if err := p.writePIDFile(p.pid); err != nil {
+	// Write PID file (atomic; carries this instance's identity token).
+	if err := p.writePIDFile(pidfileEntry{PID: p.pid, Token: p.instanceToken}); err != nil {
 		// Best-effort kill: the spawn is being abandoned; a Kill error
 		// would only mask the writePIDFile cause (process is reaped by
 		// the wait goroutine regardless).
@@ -140,20 +229,21 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 }
 
 // Stop gracefully terminates the runtime process.
-// Non-owners are refused: a RuntimeProcess that neither spawned nor adopted
-// the runtime (e.g. the LLM stack constructed inside a short-lived CLI or
-// eval subprocess) must not kill the daemon's healthy llama-server through
-// the shared PID file.
+// Non-owners are refused: a RuntimeProcess that neither spawned nor
+// owned-adopted the runtime (e.g. the LLM stack constructed inside a
+// short-lived CLI or eval subprocess, or an instance that adopted a foreign
+// instance's runtime as observed-not-owned) must not kill the daemon's
+// healthy llama-server through the shared PID file.
 func (p *RuntimeProcess) Stop(ctx context.Context) error {
 	p.mu.Lock()
 	if !p.spawnedByUs {
 		p.mu.Unlock()
-		return nil // Not ours to stop — daemon owns this runtime.
+		return nil // Not ours to stop — another instance owns this runtime.
 	}
 	if p.cmd == nil || p.cmd.Process == nil {
 		// Try to recover from PID file
-		if pid, err := p.readPIDFile(); err == nil && pid > 0 {
-			proc, err := os.FindProcess(pid)
+		if entry, err := p.readPIDFile(); err == nil && entry.PID > 0 {
+			proc, err := os.FindProcess(entry.PID)
 			if err != nil {
 				p.mu.Unlock()
 				return nil
@@ -237,8 +327,8 @@ func (p *RuntimeProcess) IsRunning() bool {
 // StalePIDRemoval cleans up a stale PID file for a given runtime config.
 // This is useful when the daemon restarts and discovers orphaned PID files.
 func (p *RuntimeProcess) StalePIDRemoval() {
-	if pid, err := p.readPIDFile(); err == nil && pid > 0 {
-		if !p.isProcessRunning(pid) {
+	if entry, err := p.readPIDFile(); err == nil && entry.PID > 0 {
+		if !p.isProcessRunning(entry.PID) {
 			os.Remove(p.pidFile)
 		}
 	}
@@ -267,18 +357,63 @@ func killProcessGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 	return syscall.Kill(-pgid, sig)
 }
 
-func (p *RuntimeProcess) writePIDFile(pid int) error {
+func (p *RuntimeProcess) writePIDFile(entry pidfileEntry) error {
 	dir := filepath.Dir(p.pidFile)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(p.pidFile, []byte(strconv.Itoa(pid)), 0o600)
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	// Atomic write: never let a concurrent reader (AlreadyRunning, another
+	// instance adopting) observe a torn or half-written pidfile.
+	tmp, err := os.CreateTemp(dir, filepath.Base(p.pidFile)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename below has succeeded
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, p.pidFile)
 }
 
-func (p *RuntimeProcess) readPIDFile() (int, error) {
+func (p *RuntimeProcess) readPIDFile() (pidfileEntry, error) {
 	data, err := os.ReadFile(p.pidFile)
 	if err != nil {
-		return 0, err
+		return pidfileEntry{}, err
 	}
-	return strconv.Atoi(string(data))
+	return parsePIDFile(data)
+}
+
+// parsePIDFile accepts both the current JSON pidfile format and the legacy
+// bare-decimal-integer format. Legacy entries carry no token: adoption of
+// the process they name is downgraded to observed-not-owned.
+func parsePIDFile(data []byte) (pidfileEntry, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return pidfileEntry{}, fmt.Errorf("empty pidfile")
+	}
+	var entry pidfileEntry
+	if trimmed[0] == '{' {
+		if err := json.Unmarshal(trimmed, &entry); err != nil {
+			return pidfileEntry{}, fmt.Errorf("invalid pidfile JSON: %w", err)
+		}
+	} else {
+		pid, err := strconv.Atoi(string(trimmed))
+		if err != nil {
+			return pidfileEntry{}, fmt.Errorf("invalid pidfile (neither JSON nor integer): %w", err)
+		}
+		entry.PID = pid
+	}
+	if entry.PID <= 0 {
+		return pidfileEntry{}, fmt.Errorf("invalid pid %d in pidfile", entry.PID)
+	}
+	return entry, nil
 }
