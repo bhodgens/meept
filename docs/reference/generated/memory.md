@@ -4,6 +4,8 @@
 
 	import "github.com/caimlas/meept/internal/memory"
 
+Typed user\-memory facts \(harness\-eval leaf 12, book ch3 "user memory"\): a compact, typed model of the user that survives sessions. Facts are distinct from episodic transcripts and the personality profile: they carry a kind \(preference/restriction/account/temporal\), a conflict rule \(last\-write\-wins with history via ValidUntil\), and temporal validity windows. No new vector engine — SQLite beside the existing stores.
+
 Package memory provides memory storage and retrieval for meept.
 
 Package memory provides memory storage and retrieval for meept.
@@ -17,8 +19,19 @@ Package memory provides memory storage and retrieval for meept.
 - [func ClusterBySimilarity\(ctx context.Context, memories \[\]Memory, threshold float64, embedder EmbeddingProvider\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarity>)
 - [func ClusterBySimilarityFromResults\(ctx context.Context, results \[\]MemoryResult, threshold float64, embedder EmbeddingProvider, logger \*slog.Logger\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarityFromResults>)
 - [func EffectiveAutoTrustWeight\(configured float64\) float64](<#EffectiveAutoTrustWeight>)
+- [func EncodeLesson\(l Lesson\) \(string, error\)](<#EncodeLesson>)
+- [func EncodeProcedure\(p Procedure\) \(string, error\)](<#EncodeProcedure>)
+- [func ExtractJSONFromLLM\(s string\) string](<#ExtractJSONFromLLM>)
+- [func FormatMemoryWithFreshness\(content string, updatedAt \*time.Time\) string](<#FormatMemoryWithFreshness>)
+- [func IsDistillDomain\(domain string\) bool](<#IsDistillDomain>)
 - [func IsEpistemicType\(t MemoryType\) bool](<#IsEpistemicType>)
+- [func MemoryFreshnessText\(ageDays int\) string](<#MemoryFreshnessText>)
+- [func MigrateToDualDB\(dataDir string, nodeID string, logger \*slog.Logger\) error](<#MigrateToDualDB>)
 - [func ParseMetadata\(jsonStr string\) map\[string\]any](<#ParseMetadata>)
+- [func ScoreCandidate\(mem Memory, netVotes int, accesses int, now time.Time, w Weights\) float64](<#ScoreCandidate>)
+- [func StampFacts\(facts \[\]MemoryFact, ownerID, sourceSession string, at time.Time\)](<#StampFacts>)
+- [func Usefulness\(sumVotes, accesses int, ageDays float64, w Weights\) float64](<#Usefulness>)
+- [func ValidateDistilledContent\(category, content string\) error](<#ValidateDistilledContent>)
 - [type AmbientCandidate](<#AmbientCandidate>)
   - [func ParseAmbientCandidates\(raw \[\]byte\) \(\[\]AmbientCandidate, error\)](<#ParseAmbientCandidates>)
 - [type AmbientClassifierLLM](<#AmbientClassifierLLM>)
@@ -33,6 +46,15 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(s ClaimStatus\) IsRejected\(\) bool](<#ClaimStatus.IsRejected>)
   - [func \(s ClaimStatus\) TrustWeight\(autoWeight float64\) float64](<#ClaimStatus.TrustWeight>)
 - [type ClassifierLLM](<#ClassifierLLM>)
+- [type CompactionConfig](<#CompactionConfig>)
+- [type CompactionResult](<#CompactionResult>)
+- [type Compactor](<#Compactor>)
+  - [func NewCompactor\(cfg CompactionConfig\) \*Compactor](<#NewCompactor>)
+  - [func \(c \*Compactor\) Compact\(ctx context.Context, turns \[\]TurnRecord\) \(\*CompactionResult, \[\]TurnRecord\)](<#Compactor.Compact>)
+  - [func \(c \*Compactor\) CompactToolCalls\(calls \[\]ToolCall\) \[\]ToolCall](<#Compactor.CompactToolCalls>)
+  - [func \(c \*Compactor\) CompactTurns\(turns \[\]TurnRecord\) \[\]TurnRecord](<#Compactor.CompactTurns>)
+  - [func \(c \*Compactor\) Config\(\) CompactionConfig](<#Compactor.Config>)
+  - [func \(c \*Compactor\) GenerateSummary\(ctx context.Context, turns \[\]TurnRecord\) string](<#Compactor.GenerateSummary>)
 - [type ConsolidationBackend](<#ConsolidationBackend>)
 - [type ConsolidationReport](<#ConsolidationReport>)
 - [type Consolidator](<#Consolidator>)
@@ -45,6 +67,31 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(c \*Consolidator\) Stop\(\)](<#Consolidator.Stop>)
 - [type ConsolidatorConfig](<#ConsolidatorConfig>)
 - [type Decision](<#Decision>)
+- [type DistillItem](<#DistillItem>)
+- [type DistillQueueSummary](<#DistillQueueSummary>)
+- [type DistillSummarizer](<#DistillSummarizer>)
+- [type DualStore](<#DualStore>)
+  - [func NewDualStore\(dataDir string, nodeID string, logger \*slog.Logger\) \(\*DualStore, error\)](<#NewDualStore>)
+  - [func \(s \*DualStore\) Close\(\) error](<#DualStore.Close>)
+  - [func \(s \*DualStore\) GetMemories\(ctx context.Context, query \*MemoryQuery\) \(\[\]MemoryResult, error\)](<#DualStore.GetMemories>)
+  - [func \(s \*DualStore\) GetMemoriesByType\(ctx context.Context, memType MemoryType, limit int\) \(\[\]MemoryResult, error\)](<#DualStore.GetMemoriesByType>)
+  - [func \(s \*DualStore\) GetMemoryCountByOwner\(ctx context.Context\) \(local int, gossip int, err error\)](<#DualStore.GetMemoryCountByOwner>)
+  - [func \(s \*DualStore\) GetRecentMemories\(ctx context.Context, limit int\) \(\[\]MemoryResult, error\)](<#DualStore.GetRecentMemories>)
+  - [func \(s \*DualStore\) GetSession\(ctx context.Context, sessionID string\) \(\*Session, error\)](<#DualStore.GetSession>)
+  - [func \(s \*DualStore\) GetSessionTurnCountByOwner\(ctx context.Context\) \(local int, gossip int, err error\)](<#DualStore.GetSessionTurnCountByOwner>)
+  - [func \(s \*DualStore\) GetSessions\(ctx context.Context\) \(\[\]\*Session, error\)](<#DualStore.GetSessions>)
+  - [func \(s \*DualStore\) GetTurnsForSession\(ctx context.Context, sessionID string\) \(\[\]\*Turn, error\)](<#DualStore.GetTurnsForSession>)
+  - [func \(s \*DualStore\) GossipDB\(\) \*sql.DB](<#DualStore.GossipDB>)
+  - [func \(s \*DualStore\) IsLocal\(nodeID string\) bool](<#DualStore.IsLocal>)
+  - [func \(s \*DualStore\) LocalDB\(\) \*sql.DB](<#DualStore.LocalDB>)
+  - [func \(s \*DualStore\) PublishTurn\(sessionID, turnID, role, content string, ts time.Time\) error](<#DualStore.PublishTurn>)
+  - [func \(s \*DualStore\) SetGossipPublisher\(pub GossipPublisher\)](<#DualStore.SetGossipPublisher>)
+  - [func \(s \*DualStore\) StoreMemory\(ctx context.Context, mem \*Memory\) error](<#DualStore.StoreMemory>)
+  - [func \(s \*DualStore\) StoreRemoteMemory\(ctx context.Context, mem \*Memory, sourceNode string\) error](<#DualStore.StoreRemoteMemory>)
+  - [func \(s \*DualStore\) StoreRemoteSession\(ctx context.Context, sess \*Session, sourceNode string\) error](<#DualStore.StoreRemoteSession>)
+  - [func \(s \*DualStore\) StoreRemoteTurn\(ctx context.Context, turn \*Turn, sourceNode string\) error](<#DualStore.StoreRemoteTurn>)
+  - [func \(s \*DualStore\) StoreSession\(ctx context.Context, sess \*Session\) error](<#DualStore.StoreSession>)
+  - [func \(s \*DualStore\) StoreTurn\(ctx context.Context, turn \*Turn\) error](<#DualStore.StoreTurn>)
 - [type EdgeType](<#EdgeType>)
 - [type EdgeVerdict](<#EdgeVerdict>)
   - [func ParseClassifierJSON\(raw \[\]byte\) \(\[\]EdgeVerdict, error\)](<#ParseClassifierJSON>)
@@ -66,6 +113,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(e \*EpisodicMemory\) HasFTS5\(\) bool](<#EpisodicMemory.HasFTS5>)
   - [func \(e \*EpisodicMemory\) Initialize\(ctx context.Context\) error](<#EpisodicMemory.Initialize>)
   - [func \(e \*EpisodicMemory\) Search\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#EpisodicMemory.Search>)
+  - [func \(e \*EpisodicMemory\) SearchOptions\(ctx context.Context, p SearchParams\) \(\[\]MemoryResult, error\)](<#EpisodicMemory.SearchOptions>)
   - [func \(e \*EpisodicMemory\) Store\(ctx context.Context, content, category string, metadata map\[string\]any\) \(string, error\)](<#EpisodicMemory.Store>)
 - [type EpistemicDetector](<#EpistemicDetector>)
   - [func NewEpistemicDetector\(cfg EpistemicDetectorConfig\) \*EpistemicDetector](<#NewEpistemicDetector>)
@@ -73,6 +121,14 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(d \*EpistemicDetector\) PersistCandidateEdges\(ctx context.Context, edges \[\]MemoryEdge\) error](<#EpistemicDetector.PersistCandidateEdges>)
 - [type EpistemicDetectorConfig](<#EpistemicDetectorConfig>)
 - [type FTSConfig](<#FTSConfig>)
+- [type FactKind](<#FactKind>)
+- [type FactStore](<#FactStore>)
+  - [func NewFactStore\(dbPath string\) \(\*FactStore, error\)](<#NewFactStore>)
+  - [func \(s \*FactStore\) Close\(\) error](<#FactStore.Close>)
+  - [func \(s \*FactStore\) GetActive\(ctx context.Context, ownerID string, at time.Time\) \(\[\]MemoryFact, error\)](<#FactStore.GetActive>)
+  - [func \(s \*FactStore\) Search\(ctx context.Context, ownerID, query, kind string\) \(\[\]MemoryFact, error\)](<#FactStore.Search>)
+  - [func \(s \*FactStore\) Upsert\(ctx context.Context, f MemoryFact\) error](<#FactStore.Upsert>)
+- [type GossipPublisher](<#GossipPublisher>)
 - [type GraphStats](<#GraphStats>)
 - [type Handler](<#Handler>)
   - [func NewHandler\(manager \*Manager, msgBus \*bus.MessageBus, logger \*slog.Logger\) \*Handler](<#NewHandler>)
@@ -80,6 +136,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(h \*Handler\) SetSecurityOrchestrator\(secOrch \*intsecurity.Orchestrator\)](<#Handler.SetSecurityOrchestrator>)
   - [func \(h \*Handler\) Start\(ctx context.Context\) error](<#Handler.Start>)
   - [func \(h \*Handler\) Stop\(ctx context.Context\) error](<#Handler.Stop>)
+- [type IndexResult](<#IndexResult>)
 - [type KnowledgeGraph](<#KnowledgeGraph>)
   - [func NewKnowledgeGraph\(cfg KnowledgeGraphConfig\) \*KnowledgeGraph](<#NewKnowledgeGraph>)
   - [func \(g \*KnowledgeGraph\) AddEdge\(ctx context.Context, edge MemoryEdge\) error](<#KnowledgeGraph.AddEdge>)
@@ -106,6 +163,8 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(g \*KnowledgeGraph\) Initialize\(ctx context.Context\) error](<#KnowledgeGraph.Initialize>)
   - [func \(g \*KnowledgeGraph\) RankResults\(ctx context.Context, results \[\]MemoryResult, alpha float64\) \(\[\]MemoryResult, error\)](<#KnowledgeGraph.RankResults>)
 - [type KnowledgeGraphConfig](<#KnowledgeGraphConfig>)
+- [type Lesson](<#Lesson>)
+  - [func DecodeLesson\(content string\) \(\*Lesson, error\)](<#DecodeLesson>)
 - [type Manager](<#Manager>)
   - [func NewManager\(cfg ManagerConfig\) \*Manager](<#NewManager>)
   - [func \(m \*Manager\) AddMemoryRelation\(ctx context.Context, sourceID, targetID string, edgeType EdgeType, weight float64\) error](<#Manager.AddMemoryRelation>)
@@ -114,7 +173,10 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) Config\(\) config.MemoryConfig](<#Manager.Config>)
   - [func \(m \*Manager\) Consolidate\(ctx context.Context\) \(\*ConsolidationReport, error\)](<#Manager.Consolidate>)
   - [func \(m \*Manager\) Delete\(ctx context.Context, id string\) error](<#Manager.Delete>)
+  - [func \(m \*Manager\) Distill\(ctx context.Context, src \[\]Memory\) \(\*Memory, error\)](<#Manager.Distill>)
   - [func \(m \*Manager\) DistributedConfig\(\) config.DistributedMemoryConfig](<#Manager.DistributedConfig>)
+  - [func \(m \*Manager\) DrainDistillQueue\(ctx context.Context\) \(DistillQueueSummary, error\)](<#Manager.DrainDistillQueue>)
+  - [func \(m \*Manager\) DualStore\(\) \*DualStore](<#Manager.DualStore>)
   - [func \(m \*Manager\) Embedder\(\) EmbeddingProvider](<#Manager.Embedder>)
   - [func \(m \*Manager\) Episodic\(\) \*EpisodicMemory](<#Manager.Episodic>)
   - [func \(m \*Manager\) EpistemicDetector\(\) \*EpistemicDetector](<#Manager.EpistemicDetector>)
@@ -123,6 +185,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) GetByIDs\(ctx context.Context, ids \[\]string\) \(\[\]Memory, error\)](<#Manager.GetByIDs>)
   - [func \(m \*Manager\) GetCachedPrefetch\(query string, maxItems int\) \(string, bool\)](<#Manager.GetCachedPrefetch>)
   - [func \(m \*Manager\) GetExpiredMemories\(ctx context.Context, days int\) \(\[\]Memory, error\)](<#Manager.GetExpiredMemories>)
+  - [func \(m \*Manager\) GetFactStore\(\) \*FactStore](<#Manager.GetFactStore>)
   - [func \(m \*Manager\) GetGraphStats\(ctx context.Context\) \(\*GraphStats, error\)](<#Manager.GetGraphStats>)
   - [func \(m \*Manager\) GetRecent\(ctx context.Context, limit int\) \(\[\]MemoryResult, error\)](<#Manager.GetRecent>)
   - [func \(m \*Manager\) GetRelatedMemories\(ctx context.Context, memoryID string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.GetRelatedMemories>)
@@ -136,21 +199,29 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) IsInitialized\(\) bool](<#Manager.IsInitialized>)
   - [func \(m \*Manager\) IsMemvidActive\(\) bool](<#Manager.IsMemvidActive>)
   - [func \(m \*Manager\) ListAutoClaims\(ctx context.Context, createdAfter time.Time, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListAutoClaims>)
+  - [func \(m \*Manager\) ListExpiredClaims\(ctx context.Context, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListExpiredClaims>)
   - [func \(m \*Manager\) ListPendingReviews\(ctx context.Context, before time.Time\) \(decisions, predictions \[\]MemoryResult, err error\)](<#Manager.ListPendingReviews>)
   - [func \(m \*Manager\) MarkResolved\(ctx context.Context, predictionID, outcome string\) \(string, error\)](<#Manager.MarkResolved>)
   - [func \(m \*Manager\) MarkSuperseded\(ctx context.Context, oldID, newID string\) \(redirectedEdges int, auditID string, err error\)](<#Manager.MarkSuperseded>)
   - [func \(m \*Manager\) MemvidClient\(\) \*memvid.Client](<#Manager.MemvidClient>)
+  - [func \(m \*Manager\) NetVotes\(ctx context.Context, ids \[\]string\) \(map\[string\]int, error\)](<#Manager.NetVotes>)
+  - [func \(m \*Manager\) OpenFactStore\(dbPath string\) \(\*FactStore, error\)](<#Manager.OpenFactStore>)
   - [func \(m \*Manager\) Personality\(\) \*PersonalityMemory](<#Manager.Personality>)
   - [func \(m \*Manager\) PromoteClaim\(ctx context.Context, claimID string\) error](<#Manager.PromoteClaim>)
+  - [func \(m \*Manager\) QueueDistill\(item DistillItem\)](<#Manager.QueueDistill>)
   - [func \(m \*Manager\) QueuePrefetch\(query string, maxItems int\)](<#Manager.QueuePrefetch>)
   - [func \(m \*Manager\) RecordReview\(ctx context.Context, decisionID, actualOutcome string\) \(float64, string, error\)](<#Manager.RecordReview>)
   - [func \(m \*Manager\) RecordSessionMemories\(ctx context.Context, sessionID string, memoryIDs \[\]string\) error](<#Manager.RecordSessionMemories>)
+  - [func \(m \*Manager\) RecordVote\(id string, delta int, reason string\) error](<#Manager.RecordVote>)
   - [func \(m \*Manager\) RejectClaim\(ctx context.Context, claimID string\) error](<#Manager.RejectClaim>)
+  - [func \(m \*Manager\) RelevantDistilled\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.RelevantDistilled>)
   - [func \(m \*Manager\) ScopedManager\(botID string\) \*ScopedMemoryManager](<#Manager.ScopedManager>)
   - [func \(m \*Manager\) Search\(ctx context.Context, query MemoryQuery\) \(\[\]MemoryResult, error\)](<#Manager.Search>)
   - [func \(m \*Manager\) SearchHybrid\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchHybrid>)
   - [func \(m \*Manager\) SearchSemantic\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchSemantic>)
   - [func \(m \*Manager\) SearchWithGraph\(ctx context.Context, query MemoryQuery, alpha float64\) \(\[\]MemoryResult, error\)](<#Manager.SearchWithGraph>)
+  - [func \(m \*Manager\) SetDistillSummarizer\(s DistillSummarizer\)](<#Manager.SetDistillSummarizer>)
+  - [func \(m \*Manager\) SetDualStore\(ds \*DualStore\)](<#Manager.SetDualStore>)
   - [func \(m \*Manager\) SetEpistemicDetector\(d \*EpistemicDetector\)](<#Manager.SetEpistemicDetector>)
   - [func \(m \*Manager\) StartPeriodicConsolidation\(ctx context.Context\)](<#Manager.StartPeriodicConsolidation>)
   - [func \(m \*Manager\) StartPrefetchService\(ctx context.Context\)](<#Manager.StartPrefetchService>)
@@ -168,9 +239,12 @@ Package memory provides memory storage and retrieval for meept.
 - [type Memory](<#Memory>)
   - [func \(m \*Memory\) MetadataJSON\(\) string](<#Memory.MetadataJSON>)
 - [type MemoryEdge](<#MemoryEdge>)
+- [type MemoryFact](<#MemoryFact>)
+  - [func ExtractFactsFromMessages\(msgs \[\]string\) \[\]MemoryFact](<#ExtractFactsFromMessages>)
 - [type MemoryNode](<#MemoryNode>)
 - [type MemoryQuery](<#MemoryQuery>)
 - [type MemoryResult](<#MemoryResult>)
+  - [func RankForUsefulness\(candidates \[\]MemoryResult, netVotes map\[string\]int, now time.Time, w Weights\) \[\]MemoryResult](<#RankForUsefulness>)
 - [type MemoryStats](<#MemoryStats>)
 - [type MemoryType](<#MemoryType>)
 - [type MemvidConsolidationBackend](<#MemvidConsolidationBackend>)
@@ -182,6 +256,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(b \*MemvidConsolidationBackend\) GetOldMemories\(ctx context.Context, olderThan time.Time, limit int\) \(\[\]MemoryResult, error\)](<#MemvidConsolidationBackend.GetOldMemories>)
   - [func \(b \*MemvidConsolidationBackend\) StoreExpiredSummary\(ctx context.Context, mem Memory, category string\) \(string, error\)](<#MemvidConsolidationBackend.StoreExpiredSummary>)
   - [func \(b \*MemvidConsolidationBackend\) StoreSummary\(ctx context.Context, content, category string, metadata map\[string\]any\) \(string, error\)](<#MemvidConsolidationBackend.StoreSummary>)
+- [type OversizedTraceSummary](<#OversizedTraceSummary>)
 - [type PersonalityMemory](<#PersonalityMemory>)
   - [func NewPersonalityMemory\(cfg PersonalityMemoryConfig\) \*PersonalityMemory](<#NewPersonalityMemory>)
   - [func \(p \*PersonalityMemory\) Close\(\) error](<#PersonalityMemory.Close>)
@@ -200,7 +275,14 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(s \*PersonalityStore\) GetAll\(ctx context.Context\) \(map\[string\]\[\]string, error\)](<#PersonalityStore.GetAll>)
   - [func \(s \*PersonalityStore\) Set\(ctx context.Context, key, value string\) error](<#PersonalityStore.Set>)
 - [type Prediction](<#Prediction>)
+- [type Procedure](<#Procedure>)
+  - [func DecodeProcedure\(content string\) \(\*Procedure, error\)](<#DecodeProcedure>)
 - [type Question](<#Question>)
+- [type ReportArtifact](<#ReportArtifact>)
+- [type ReportStore](<#ReportStore>)
+  - [func NewReportStore\(dbPath string\) \*ReportStore](<#NewReportStore>)
+  - [func \(rs \*ReportStore\) EnsureReportFile\(tx \*sql.Tx, runID string, content string\) \(\*ReportArtifact, error\)](<#ReportStore.EnsureReportFile>)
+  - [func \(rs \*ReportStore\) OutputDirForRun\(runID string\) string](<#ReportStore.OutputDirForRun>)
 - [type SQLiteConsolidationBackend](<#SQLiteConsolidationBackend>)
   - [func NewSQLiteConsolidationBackend\(episodic \*EpisodicMemory, task \*TaskMemory, manager \*Manager\) \*SQLiteConsolidationBackend](<#NewSQLiteConsolidationBackend>)
   - [func \(b \*SQLiteConsolidationBackend\) DeleteByIDs\(ctx context.Context, ids \[\]string\) \(int, error\)](<#SQLiteConsolidationBackend.DeleteByIDs>)
@@ -241,10 +323,21 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(s \*ScopedMemoryManager\) SearchSemantic\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#ScopedMemoryManager.SearchSemantic>)
   - [func \(s \*ScopedMemoryManager\) SearchWithGraph\(ctx context.Context, query MemoryQuery, alpha float64\) \(\[\]MemoryResult, error\)](<#ScopedMemoryManager.SearchWithGraph>)
   - [func \(s \*ScopedMemoryManager\) Store\(ctx context.Context, mem Memory\) \(string, error\)](<#ScopedMemoryManager.Store>)
+- [type SearchMatch](<#SearchMatch>)
+- [type SearchParams](<#SearchParams>)
+- [type SearchTraceResult](<#SearchTraceResult>)
+- [type Session](<#Session>)
 - [type ShardManagerVectorSearcher](<#ShardManagerVectorSearcher>)
   - [func NewShardManagerVectorSearcher\(manager \*vector.ShardManager, shardTypes \[\]vector.ShardType\) \*ShardManagerVectorSearcher](<#NewShardManagerVectorSearcher>)
   - [func \(s \*ShardManagerVectorSearcher\) Manager\(\) \*vector.ShardManager](<#ShardManagerVectorSearcher.Manager>)
   - [func \(s \*ShardManagerVectorSearcher\) Search\(ctx context.Context, query string, limit int\) \(\[\]VectorSearchResult, error\)](<#ShardManagerVectorSearcher.Search>)
+- [type SpanRecord](<#SpanRecord>)
+  - [func \(s \*SpanRecord\) IsAgentSpan\(\) bool](<#SpanRecord.IsAgentSpan>)
+- [type SpanRecordSlice](<#SpanRecordSlice>)
+  - [func \(s SpanRecordSlice\) Len\(\) int](<#SpanRecordSlice.Len>)
+  - [func \(s SpanRecordSlice\) Less\(i, j int\) bool](<#SpanRecordSlice.Less>)
+  - [func \(s SpanRecordSlice\) Swap\(i, j int\)](<#SpanRecordSlice.Swap>)
+- [type SpanView](<#SpanView>)
 - [type StoreOptions](<#StoreOptions>)
 - [type SummarizeRequest](<#SummarizeRequest>)
   - [func \(r \*SummarizeRequest\) ToJSON\(\) string](<#SummarizeRequest.ToJSON>)
@@ -266,14 +359,71 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(t \*TaskMemory\) HasFTS5\(\) bool](<#TaskMemory.HasFTS5>)
   - [func \(t \*TaskMemory\) Initialize\(ctx context.Context\) error](<#TaskMemory.Initialize>)
   - [func \(t \*TaskMemory\) Search\(ctx context.Context, query, domain string, limit int\) \(\[\]MemoryResult, error\)](<#TaskMemory.Search>)
+  - [func \(t \*TaskMemory\) SearchOptions\(ctx context.Context, p SearchParams\) \(\[\]MemoryResult, error\)](<#TaskMemory.SearchOptions>)
   - [func \(t \*TaskMemory\) Store\(ctx context.Context, content, domain string, metadata map\[string\]any\) \(string, error\)](<#TaskMemory.Store>)
 - [type TaskMemoryConfig](<#TaskMemoryConfig>)
   - [func DefaultTaskMemoryConfig\(dataDir string\) TaskMemoryConfig](<#DefaultTaskMemoryConfig>)
+- [type ToolCall](<#ToolCall>)
+- [type TraceIndexBuilder](<#TraceIndexBuilder>)
+  - [func NewTraceIndexBuilder\(sourcePath string\) \*TraceIndexBuilder](<#NewTraceIndexBuilder>)
+  - [func \(b \*TraceIndexBuilder\) BuildOrReuse\(ctx context.Context\) \(\*IndexResult, error\)](<#TraceIndexBuilder.BuildOrReuse>)
+- [type TraceIndexMeta](<#TraceIndexMeta>)
+  - [func \(m \*TraceIndexMeta\) Fingerprint\(\) string](<#TraceIndexMeta.Fingerprint>)
+  - [func \(m TraceIndexMeta\) MarshalJSON\(\) \(\[\]byte, error\)](<#TraceIndexMeta.MarshalJSON>)
+  - [func \(m \*TraceIndexMeta\) UnmarshalJSON\(data \[\]byte\) error](<#TraceIndexMeta.UnmarshalJSON>)
+- [type TraceIndexRow](<#TraceIndexRow>)
+  - [func \(r TraceIndexRow\) MarshalJSON\(\) \(\[\]byte, error\)](<#TraceIndexRow.MarshalJSON>)
+  - [func \(r \*TraceIndexRow\) Truncate\(maxSliceLen int\)](<#TraceIndexRow.Truncate>)
+  - [func \(r \*TraceIndexRow\) UnmarshalJSON\(data \[\]byte\) error](<#TraceIndexRow.UnmarshalJSON>)
+- [type TraceStore](<#TraceStore>)
+  - [func LoadTraceStore\(sourcePath string\) \(\*TraceStore, error\)](<#LoadTraceStore>)
+  - [func NewTraceStore\(sourcePath string, builder \*TraceIndexBuilder\) \(\*TraceStore, error\)](<#NewTraceStore>)
+  - [func \(s \*TraceStore\) GetSpansForTrace\(traceID string\) \(\[\]string, error\)](<#TraceStore.GetSpansForTrace>)
+  - [func \(s \*TraceStore\) GetTraceIDs\(\) \[\]string](<#TraceStore.GetTraceIDs>)
+  - [func \(s \*TraceStore\) GetTraceIndexRow\(traceID string\) \(TraceIndexRow, bool\)](<#TraceStore.GetTraceIndexRow>)
+  - [func \(s \*TraceStore\) ListSpans\(spanIDs \[\]string\) \(\[\]SpanView, error\)](<#TraceStore.ListSpans>)
+  - [func \(s \*TraceStore\) ListTraceIDs\(\) \(\[\]string, error\)](<#TraceStore.ListTraceIDs>)
+  - [func \(s \*TraceStore\) SearchSpans\(traceID, spanPattern, attrPattern string, maxMatches int\) \(\*SearchTraceResult, error\)](<#TraceStore.SearchSpans>)
+  - [func \(s \*TraceStore\) SearchTrace\(traceID, pattern string, maxMatches int\) \(\*SearchTraceResult, error\)](<#TraceStore.SearchTrace>)
+  - [func \(s \*TraceStore\) SourcePath\(\) string](<#TraceStore.SourcePath>)
+  - [func \(s \*TraceStore\) ViewSpans\(traceID string, spanIDs \[\]string\) \(\*ViewTraceResult, error\)](<#TraceStore.ViewSpans>)
+  - [func \(s \*TraceStore\) ViewTrace\(traceID string\) \(\*ViewTraceResult, error\)](<#TraceStore.ViewTrace>)
+- [type Turn](<#Turn>)
+- [type TurnRecord](<#TurnRecord>)
+- [type UsefulEvictionConfig](<#UsefulEvictionConfig>)
+  - [func ResolveUsefulEviction\(cfg config.MemoryUsefulnessConfig\) UsefulEvictionConfig](<#ResolveUsefulEviction>)
+- [type UsefulnessEvictionPlan](<#UsefulnessEvictionPlan>)
+  - [func PlanUsefulEviction\(candidates \[\]MemoryResult, netVotes map\[string\]int, now time.Time, cfg UsefulEvictionConfig\) UsefulnessEvictionPlan](<#PlanUsefulEviction>)
 - [type VectorSearchResult](<#VectorSearchResult>)
 - [type VectorSearcher](<#VectorSearcher>)
+- [type ViewTraceResult](<#ViewTraceResult>)
+- [type VoteRecord](<#VoteRecord>)
+- [type Weights](<#Weights>)
+  - [func DefaultWeights\(\) Weights](<#DefaultWeights>)
 
 
 ## Constants
+
+<a name="TypeLesson"></a>Distilled memory types and domains \(loop\-economics leaf 15\).
+
+Lessons are distilled principles \("always X before Y because Z"\); procedures are reusable how\-to templates that are NEVER auto\-executed — they are surfaced as reference outlines in the system prompt only.
+
+	const (
+	    TypeLesson    MemoryType = "lesson"
+	    TypeProcedure MemoryType = "procedure"
+	
+	    DomainLesson    = "lesson"
+	    DomainProcedure = "procedure"
+	)
+
+<a name="MaxLessonPrincipleChars"></a>Length caps enforced at distill time.
+
+	const (
+	    // MaxLessonPrincipleChars caps the lesson principle length.
+	    MaxLessonPrincipleChars = 280
+	    // MaxProcedureSteps caps the number of steps in a procedure.
+	    MaxProcedureSteps = 20
+	)
 
 <a name="DomainGeneral"></a>Default memory domain constants.
 
@@ -283,6 +433,19 @@ Package memory provides memory storage and retrieval for meept.
 	    DomainCommands = "commands"
 	)
 
+<a name="DiscoveryAttrTruncationChars"></a>Truncation budgets model HALO's two\-tier pattern. Discovery \(view\_trace / search\_trace\) uses a tighter cap so the agent can inspect many spans at once; surgical \(view\_spans\) allows 4x because the agent has already identified which span it cares about.
+
+	const (
+	    DiscoveryAttrTruncationChars = 4096   // 4 KB for view_trace / search_trace
+	    SurgicalAttrTruncationChars  = 16384  // 16 KB for view_spans (4x — "zoom in")
+	    ViewTraceResponseBytesBudget = 150000 // ~150 KB total response budget
+	    ViewSpansMaxIDs              = 200    // max span_ids per view_spans call
+	)
+
+<a name="CurrentSchemaVersion"></a>CurrentSchemaVersion is the current index schema version.
+
+	const CurrentSchemaVersion = 1
+
 <a name="DefaultAutoClaimTrustWeight"></a>DefaultAutoClaimTrustWeight is the default trust weight applied to ambient\-extracted claims. Configurable via EpistemicConfig.AutoTrustWeight.
 
 	const DefaultAutoClaimTrustWeight = 0.5
@@ -291,11 +454,46 @@ Package memory provides memory storage and retrieval for meept.
 
 	const DefaultDetectionThreshold = 0.7
 
+<a name="DefaultDistillMinRelevance"></a>DefaultDistillMinRelevance is the minimum search relevance for a distilled memory to be injected into a system prompt \(confidence\-threshold pattern\).
+
+	const DefaultDistillMinRelevance = 0.3
+
+<a name="DefaultDistillSimilarity"></a>DefaultDistillSimilarity is the cosine/token\-similarity threshold above which a newly distilled entry is considered a duplicate of an existing one.
+
+	const DefaultDistillSimilarity = 0.85
+
+<a name="HarmfulVoteThreshold"></a>HarmfulVoteThreshold is the net\-vote level at or below which a memory is considered harmful and is evicted regardless of age when usefulness scoring is enabled.
+
+	const HarmfulVoteThreshold = -2
+
+<a name="MaxReasonBytes"></a>MaxReasonBytes caps the stored reason length for a vote.
+
+	const MaxReasonBytes = 512
+
 <a name="PotentialContradictionThreshold"></a>PotentialContradictionThreshold is the lower bound below DefaultDetectionThreshold. Candidates in \[PotentialContradictionThreshold, DefaultDetectionThreshold\) are written as potential\_contradicts edges with low weight for review surfacing.
 
 	const PotentialContradictionThreshold = 0.4
 
+<a name="ReportArtifactType"></a>
+
+	const ReportArtifactType = "report_markdown"
+
 ## Variables
+
+<a name="ErrDistillDisabled"></a>Sentinel errors for the distill pipeline.
+
+	var (
+	    // ErrDistillDisabled is returned when the [memory.distill] flag is off.
+	    ErrDistillDisabled = errors.New("memory distillation is disabled")
+	    // ErrDuplicateDistill is returned when a distilled entry closely matches
+	    // an existing memory (cosine/Jaccard above the threshold).
+	    ErrDuplicateDistill = errors.New("distilled memory duplicates an existing memory")
+	    // ErrMalformedDistilled is returned when stored distilled content is not
+	    // valid JSON for its type. Malformed entries must be rejected at read.
+	    ErrMalformedDistilled = errors.New("malformed distilled memory content")
+	    // ErrNoDistillSummarizer is returned when no summarizer is wired.
+	    ErrNoDistillSummarizer = errors.New("no distill summarizer configured")
+	)
 
 <a name="EpistemicMemTypes"></a>EpistemicMemTypes lists all memory types treated as epistemic by the detection pipeline and helper methods.
 
@@ -331,6 +529,41 @@ ClusterBySimilarityFromResults is a convenience wrapper that extracts the underl
 
 EffectiveAutoTrustWeight returns the configured auto\-trust weight or the default when the configured value is zero, negative, or greater than 1.
 
+<a name="EncodeLesson"></a>
+## func EncodeLesson
+
+	func EncodeLesson(l Lesson) (string, error)
+
+EncodeLesson validates caps and serializes a Lesson to stored content JSON.
+
+<a name="EncodeProcedure"></a>
+## func EncodeProcedure
+
+	func EncodeProcedure(p Procedure) (string, error)
+
+EncodeProcedure validates caps and serializes a Procedure to stored content.
+
+<a name="ExtractJSONFromLLM"></a>
+## func ExtractJSONFromLLM
+
+	func ExtractJSONFromLLM(s string) string
+
+ExtractJSONFromLLM extracts the first \{...\} block from an LLM response, tolerating markdown fences and prose wrappers.
+
+<a name="FormatMemoryWithFreshness"></a>
+## func FormatMemoryWithFreshness
+
+	func FormatMemoryWithFreshness(content string, updatedAt *time.Time) string
+
+FormatMemoryWithFreshness appends a staleness caveat to memory content when the memory was last updated more than one day ago. If updatedAt is nil the content is returned unchanged.
+
+<a name="IsDistillDomain"></a>
+## func IsDistillDomain
+
+	func IsDistillDomain(domain string) bool
+
+IsDistillDomain reports whether a task\-domain string is a distill domain.
+
 <a name="IsEpistemicType"></a>
 ## func IsEpistemicType
 
@@ -338,12 +571,68 @@ EffectiveAutoTrustWeight returns the configured auto\-trust weight or the defaul
 
 IsEpistemicType reports whether a MemoryType is one of the epistemic types \(claim, decision, prediction, question\).
 
+<a name="MemoryFreshnessText"></a>
+## func MemoryFreshnessText
+
+	func MemoryFreshnessText(ageDays int) string
+
+MemoryFreshnessText returns a staleness caveat for memories older than one day. Fresh memories \(age \<= 1 day\) return an empty string.
+
+<a name="MigrateToDualDB"></a>
+## func MigrateToDualDB
+
+	func MigrateToDualDB(dataDir string, nodeID string, logger *slog.Logger) error
+
+MigrateToDualDB migrates from legacy single\-DB storage \(sessions.db, memory.db\) into the dual\-store layout \(local.db, sync\-gossip.db\).
+
+Steps:
+
+1. Snapshot existing .db files into migration\-backup/.
+2. Rename sessions.db → local.db \(it already has the session schema\).
+3. Merge memory.db tables into local.db where tables differ.
+4. Create an empty sync\-gossip.db with gossip schema.
+
+All operations are destructive after step 2 \(files are moved\); a backup directory is created first so nothing is lost.
+
 <a name="ParseMetadata"></a>
 ## func ParseMetadata
 
 	func ParseMetadata(jsonStr string) map[string]any
 
 ParseMetadata parses a JSON string into metadata.
+
+<a name="ScoreCandidate"></a>
+## func ScoreCandidate
+
+	func ScoreCandidate(mem Memory, netVotes int, accesses int, now time.Time, w Weights) float64
+
+ScoreCandidate computes the usefulness score of one memory against a batched net\-vote map.
+
+<a name="StampFacts"></a>
+## func StampFacts
+
+	func StampFacts(facts []MemoryFact, ownerID, sourceSession string, at time.Time)
+
+StampFacts fills OwnerID, SourceSession, and UpdatedAt on extracted facts \(helper for callers; keeps Extract pure and testable\).
+
+<a name="Usefulness"></a>
+## func Usefulness
+
+	func Usefulness(sumVotes, accesses int, ageDays float64, w Weights) float64
+
+Usefulness computes the usefulness score for a memory:
+
+	clamp01(base + Wv*sumVotes + Wa*log1p(accesses) - Ws*ageDays)
+	
+
+sumVotes is the signed net total of votes \(\+1/\-1 each\).
+
+<a name="ValidateDistilledContent"></a>
+## func ValidateDistilledContent
+
+	func ValidateDistilledContent(category, content string) error
+
+ValidateDistilledContent rejects malformed stored distilled JSON at read time. Content for a memory whose category is "lesson" or "procedure" must parse as the corresponding structure; anything else returns ErrMalformedDistilled. Non\-distill categories return nil.
 
 <a name="AmbientCandidate"></a>
 ## type AmbientCandidate
@@ -430,6 +719,17 @@ Claim is a structured assertion of belief.
 	    Confidence float64     // 0.0-1.0, user-asserted
 	    Tags       []string    // controlled-vocabulary tags
 	    Status     ClaimStatus // lifecycle status
+	
+	    // ObservedAt is when the claim was observed to be true. Zero means
+	    // "store time" (readers fall back to the memory's CreatedAt).
+	    ObservedAt time.Time
+	    // ValidFrom is the earliest instant the claim is in force. Nil = unbounded.
+	    ValidFrom *time.Time
+	    // ValidTo is the latest instant the claim is in force. Nil = unbounded.
+	    ValidTo *time.Time
+	    // Rev is the monotonic revision counter. 0 on create; incremented by 1
+	    // on each supersede of the claim lineage (stored on the successor).
+	    Rev int64
 	}
 
 <a name="ClaimStatus"></a>
@@ -489,6 +789,110 @@ ClassifierLLM is the interface the detector uses to classify candidate memory pa
 	    // returns one EdgeVerdict per relevant pair.
 	    ClassifyRelationships(ctx context.Context, newMem Memory, candidates []Memory) ([]EdgeVerdict, error)
 	}
+
+<a name="CompactionConfig"></a>
+## type CompactionConfig
+
+CompactionConfig controls how the compactor reduces turn and tool\-call data.
+
+	type CompactionConfig struct {
+	    // MaxTurnsBeforeCompact triggers compaction when the turn list exceeds
+	    // this threshold. Defaults to 50.
+	    MaxTurnsBeforeCompact int
+	
+	    // MaxToolCallsPerTurn limits how many tool calls are preserved per turn.
+	    // Extra calls beyond this are discarded. Defaults to 10.
+	    MaxToolCallsPerTurn int
+	
+	    // KeepLastNTurns is the number of most-recent turns that are never
+	    // compacted regardless of config. Defaults to 10.
+	    KeepLastNTurns int
+	
+	    // LLM is an optional chat client used for intelligent summarization of
+	    // compacted regions. When nil, GenerateSummary produces heuristic text
+	    // instead.
+	    LLM llm.Chatter
+	}
+
+<a name="CompactionResult"></a>
+## type CompactionResult
+
+CompactionResult reports the stats and summary produced by a compaction run.
+
+	type CompactionResult struct {
+	    // OriginalTurnCount is the number of turns before compaction.
+	    OriginalTurnCount int
+	
+	    // CompactedTurnCount is the number of turns after compaction.
+	    CompactedTurnCount int
+	
+	    // CompressionRatio is the fraction of turns retained (0.0-1.0).
+	    // A ratio of 0.4 means 60% of turns were compacted away.
+	    CompressionRatio float64
+	
+	    // Summary is a human-readable description of what was compacted.
+	    Summary string
+	}
+
+<a name="Compactor"></a>
+## type Compactor
+
+Compactor compacts tool calls and turns for memory retention.
+
+	type Compactor struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewCompactor"></a>
+### func NewCompactor
+
+	func NewCompactor(cfg CompactionConfig) *Compactor
+
+NewCompactor creates a compactor with the given configuration. Zero values in the config are replaced by the documented defaults.
+
+<a name="Compactor.Compact"></a>
+### func \(\*Compactor\) Compact
+
+	func (c *Compactor) Compact(ctx context.Context, turns []TurnRecord) (*CompactionResult, []TurnRecord)
+
+Compact runs the full compaction pipeline on the given turns and returns both a result report and the compacted turn list.
+
+Pipeline:
+
+1. If len\(turns\) \<= MaxTurnsBeforeCompact, return unchanged \(ratio 1.0\).
+2. Reserve the last KeepLastNTurns turns unconditionally.
+3. Merge consecutive tool \+ observation pairs into single calls.
+4. Deduplicate adjacent observation turns \(longer content wins\).
+5. Trim each turn's ToolCalls slice to MaxToolCallsPerTurn.
+6. When the compactable region is large, replace its middle with a summary turn.
+
+<a name="Compactor.CompactToolCalls"></a>
+### func \(\*Compactor\) CompactToolCalls
+
+	func (c *Compactor) CompactToolCalls(calls []ToolCall) []ToolCall
+
+CompactToolCalls removes duplicate tool calls, keeping only the first occurrence of each \(ToolName, Arguments\) pair.
+
+<a name="Compactor.CompactTurns"></a>
+### func \(\*Compactor\) CompactTurns
+
+	func (c *Compactor) CompactTurns(turns []TurnRecord) []TurnRecord
+
+CompactTurns is a convenience wrapper: compacts turns and returns only the list.
+
+<a name="Compactor.Config"></a>
+### func \(\*Compactor\) Config
+
+	func (c *Compactor) Config() CompactionConfig
+
+Config returns a copy of the compactor's configuration.
+
+<a name="Compactor.GenerateSummary"></a>
+### func \(\*Compactor\) GenerateSummary
+
+	func (c *Compactor) GenerateSummary(ctx context.Context, turns []TurnRecord) string
+
+GenerateSummary returns a human\-readable summary of the given turns. When the compactor's LLM config is set it is used; otherwise a heuristic summary is produced.
 
 <a name="ConsolidationBackend"></a>
 ## type ConsolidationBackend
@@ -644,6 +1048,200 @@ Decision is a recorded call with expected outcome and review schedule.
 	    Status          string     // "open", "reviewed", "superseded"
 	}
 
+<a name="DistillItem"></a>
+## type DistillItem
+
+DistillItem is a queued distillation request originating from a reflection collector proposal of kind "pattern".
+
+	type DistillItem struct {
+	    // Kind is "lesson" or "procedure".
+	    Kind string `json:"kind"`
+	    // Change is the proposed distilled content seed (raw observation).
+	    Change string `json:"change"`
+	    // Justification is why this pattern was proposed.
+	    Justification string `json:"justification,omitempty"`
+	    // EvidenceIDs are memory IDs supporting the pattern.
+	    EvidenceIDs []string `json:"evidence_ids,omitempty"`
+	}
+
+<a name="DistillQueueSummary"></a>
+## type DistillQueueSummary
+
+DistillQueueSummary reports the outcome of one drain pass.
+
+	type DistillQueueSummary struct {
+	    Stored     int
+	    Duplicates int
+	    Retained   int
+	}
+
+<a name="DistillSummarizer"></a>
+## type DistillSummarizer
+
+DistillSummarizer condenses a set of source memories into the structured JSON payload for a distill kind \("lesson" or "procedure"\). The production implementation wraps the manager's LLM client; tests inject fakes.
+
+	type DistillSummarizer interface {
+	    SummarizeForDistill(ctx context.Context, kind string, sources []Memory) (string, error)
+	}
+
+<a name="DualStore"></a>
+## type DualStore
+
+DualStore routes memory operations between local.db \(own data\) and sync\-gossip.db \(replicated data from peers\). Local reads take precedence; gossip data fills in gaps for merged queries.
+
+	type DualStore struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewDualStore"></a>
+### func NewDualStore
+
+	func NewDualStore(dataDir string, nodeID string, logger *slog.Logger) (*DualStore, error)
+
+runs their schemas, and returns a DualStore. The caller should call Close\(\) when done.
+
+<a name="DualStore.Close"></a>
+### func \(\*DualStore\) Close
+
+	func (s *DualStore) Close() error
+
+Close closes both database connections.
+
+<a name="DualStore.GetMemories"></a>
+### func \(\*DualStore\) GetMemories
+
+	func (s *DualStore) GetMemories(ctx context.Context, query *MemoryQuery) ([]MemoryResult, error)
+
+GetMemories retrieves memories with optional filtering, merging local and gossip data. Local results appear first, then gossip. Duplicate IDs are deduplicated \(local wins\).
+
+<a name="DualStore.GetMemoriesByType"></a>
+### func \(\*DualStore\) GetMemoriesByType
+
+	func (s *DualStore) GetMemoriesByType(ctx context.Context, memType MemoryType, limit int) ([]MemoryResult, error)
+
+GetMemoriesByType retrieves memories filtered by type, merged from both DBs.
+
+<a name="DualStore.GetMemoryCountByOwner"></a>
+### func \(\*DualStore\) GetMemoryCountByOwner
+
+	func (s *DualStore) GetMemoryCountByOwner(ctx context.Context) (local int, gossip int, err error)
+
+GetMemoryCountByOwner returns how many memories are stored locally vs in gossip.
+
+<a name="DualStore.GetRecentMemories"></a>
+### func \(\*DualStore\) GetRecentMemories
+
+	func (s *DualStore) GetRecentMemories(ctx context.Context, limit int) ([]MemoryResult, error)
+
+GetRecentMemories retrieves the most recent memories up to limit, merged.
+
+<a name="DualStore.GetSession"></a>
+### func \(\*DualStore\) GetSession
+
+	func (s *DualStore) GetSession(ctx context.Context, sessionID string) (*Session, error)
+
+GetSession retrieves a session by ID, checking local.db first and then gossip.db. Returns nil, nil when the session does not exist in either DB.
+
+<a name="DualStore.GetSessionTurnCountByOwner"></a>
+### func \(\*DualStore\) GetSessionTurnCountByOwner
+
+	func (s *DualStore) GetSessionTurnCountByOwner(ctx context.Context) (local int, gossip int, err error)
+
+GetSessionTurnCountByOwner returns how many turns are stored locally vs gossip. Useful for diagnostics and tests.
+
+<a name="DualStore.GetSessions"></a>
+### func \(\*DualStore\) GetSessions
+
+	func (s *DualStore) GetSessions(ctx context.Context) ([]*Session, error)
+
+GetSessions returns every session across both DBs \(local first, then gossip\). Duplicate IDs are deduplicated: local wins.
+
+<a name="DualStore.GetTurnsForSession"></a>
+### func \(\*DualStore\) GetTurnsForSession
+
+	func (s *DualStore) GetTurnsForSession(ctx context.Context, sessionID string) ([]*Turn, error)
+
+GetTurnsForSession returns all turns for a session \(local first, then gossip\), ordered by timestamp ascending within each shard.
+
+<a name="DualStore.GossipDB"></a>
+### func \(\*DualStore\) GossipDB
+
+	func (s *DualStore) GossipDB() *sql.DB
+
+GossipDB returns the gossip database handle \(for advanced use\).
+
+<a name="DualStore.IsLocal"></a>
+### func \(\*DualStore\) IsLocal
+
+	func (s *DualStore) IsLocal(nodeID string) bool
+
+IsLocal returns true if nodeID matches the local node's ID.
+
+<a name="DualStore.LocalDB"></a>
+### func \(\*DualStore\) LocalDB
+
+	func (s *DualStore) LocalDB() *sql.DB
+
+LocalDB returns the local database handle \(for advanced use\).
+
+<a name="DualStore.PublishTurn"></a>
+### func \(\*DualStore\) PublishTurn
+
+	func (s *DualStore) PublishTurn(sessionID, turnID, role, content string, ts time.Time) error
+
+PublishTurn adapts the DualStore to the session package's TurnGossipPublisher interface. It writes the turn to local.db and then publishes a SESSION\_TURN gossip event. The session package calls this method \(via the interface\) after a successful SaveMessages commit so that peers see the turn via gossip.
+
+The method is non\-blocking: gossip publication runs in a goroutine. The TurnID is caller\-supplied and used as the primary key for idempotency \(INSERT OR REPLACE\).
+
+<a name="DualStore.SetGossipPublisher"></a>
+### func \(\*DualStore\) SetGossipPublisher
+
+	func (s *DualStore) SetGossipPublisher(pub GossipPublisher)
+
+SetGossipPublisher configures the gossip publisher for cluster sync so that local memory writes are automatically broadcast to peers.
+
+<a name="DualStore.StoreMemory"></a>
+### func \(\*DualStore\) StoreMemory
+
+	func (s *DualStore) StoreMemory(ctx context.Context, mem *Memory) error
+
+StoreMemory persists a memory record to the appropriate database based on ownership. If the memory is from this node \(source\_node absent or equal to localNodeID\) it goes to local.db; otherwise to gossip.db. Local writes are also broadcast to gossip peers \(non\-blocking\).
+
+<a name="DualStore.StoreRemoteMemory"></a>
+### func \(\*DualStore\) StoreRemoteMemory
+
+	func (s *DualStore) StoreRemoteMemory(ctx context.Context, mem *Memory, sourceNode string) error
+
+StoreRemoteMemory writes a memory from a peer node to gossip.db.
+
+<a name="DualStore.StoreRemoteSession"></a>
+### func \(\*DualStore\) StoreRemoteSession
+
+	func (s *DualStore) StoreRemoteSession(ctx context.Context, sess *Session, sourceNode string) error
+
+StoreRemoteSession writes a session received from a peer to gossip.db. Used by the gossip handler to record sessions observed from other nodes.
+
+<a name="DualStore.StoreRemoteTurn"></a>
+### func \(\*DualStore\) StoreRemoteTurn
+
+	func (s *DualStore) StoreRemoteTurn(ctx context.Context, turn *Turn, sourceNode string) error
+
+StoreRemoteTurn writes a turn received from a peer to gossip.db. Used by the gossip handler for SESSION\_TURN events from other nodes.
+
+<a name="DualStore.StoreSession"></a>
+### func \(\*DualStore\) StoreSession
+
+	func (s *DualStore) StoreSession(ctx context.Context, sess *Session) error
+
+StoreSession writes a session to local.db \(this node owns it\) and publishes a SESSION\_CREATED gossip event when a publisher is configured. The caller must populate Session.ID; if it is empty the write is rejected rather than silently generating one \(sessions are created upstream by the session store, which has its own ID generation contract\).
+
+<a name="DualStore.StoreTurn"></a>
+### func \(\*DualStore\) StoreTurn
+
+	func (s *DualStore) StoreTurn(ctx context.Context, turn *Turn) error
+
+StoreTurn writes a turn to local.db \(this node created it\) and publishes a SESSION\_TURN gossip event when a publisher is configured. Caller must populate Turn.TurnID; the production path \(session SQLiteStore\) generates IDs via pkg/id and passes them in.
+
 <a name="EdgeType"></a>
 ## type EdgeType
 
@@ -738,7 +1336,7 @@ NewEpisodicMemory creates a new episodic memory instance.
 
 	func (e *EpisodicMemory) Close() error
 
-Close releases all resources.
+Close releases all resources. It cancels the shutdown context to stop background goroutines, waits for in\-flight updates to complete, then closes the underlying store.
 
 <a name="EpisodicMemory.Count"></a>
 ### func \(\*EpisodicMemory\) Count
@@ -831,6 +1429,13 @@ Initialize sets up the database schema and connections.
 
 Search finds episodic memories matching the query. Uses FTS5 when available, falls back to LIKE\-based queries otherwise.
 
+<a name="EpisodicMemory.SearchOptions"></a>
+### func \(\*EpisodicMemory\) SearchOptions
+
+	func (e *EpisodicMemory) SearchOptions(ctx context.Context, p SearchParams) ([]MemoryResult, error)
+
+SearchOptions finds episodic memories with full option control.
+
 <a name="EpisodicMemory.Store"></a>
 ### func \(\*EpisodicMemory\) Store
 
@@ -910,6 +1515,86 @@ FTSConfig holds configuration for SQLite FTS5 storage.
 	    Schema []string
 	    // Triggers are the FTS sync trigger statements
 	    Triggers []string
+	    // SearchTextColumn enables the search_text column: a flattened,
+	    // canonical text projection of content that FTS indexes instead of raw
+	    // content. Set true for stores whose content may be structured (e.g.
+	    // distilled JSON payloads) so BM25 ranks words, not JSON syntax.
+	    SearchTextColumn bool
+	}
+
+<a name="FactKind"></a>
+## type FactKind
+
+FactKind classifies a MemoryFact.
+
+	type FactKind string
+
+<a name="FactPreference"></a>Supported fact kinds.
+
+	const (
+	    // FactPreference is a durable user preference ("prefers window seats").
+	    FactPreference FactKind = "preference"
+	    // FactRestriction is a constraint the agent must respect
+	    // ("vegetarian", "allergic to peanuts").
+	    FactRestriction FactKind = "restriction"
+	    // FactAccount is a credential-adjacent identifier fragment
+	    // ("United MileagePlus 12345678"). Never store raw secrets here.
+	    FactAccount FactKind = "account"
+	    // FactTemporal is a date-bound fact ("travels to Tokyo next Friday").
+	    FactTemporal FactKind = "temporal"
+	)
+
+<a name="FactStore"></a>
+## type FactStore
+
+FactStore persists MemoryFacts in SQLite. Multiuser\-off behaviour: OwnerID is the empty string and GetActive\(""\) matches only empty\-owner rows — the disabled path stays byte\-identical in behavior. Concurrency: SQLite single\-writer mode \(MaxOpenConns=1\) serializes writes; the Upsert close\+insert pair is atomic via a transaction, so no Go\-side lock is held across I/O.
+
+	type FactStore struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewFactStore"></a>
+### func NewFactStore
+
+	func NewFactStore(dbPath string) (*FactStore, error)
+
+NewFactStore opens \(creating if needed\) the facts database at dbPath.
+
+<a name="FactStore.Close"></a>
+### func \(\*FactStore\) Close
+
+	func (s *FactStore) Close() error
+
+Close closes the underlying database.
+
+<a name="FactStore.GetActive"></a>
+### func \(\*FactStore\) GetActive
+
+	func (s *FactStore) GetActive(ctx context.Context, ownerID string, at time.Time) ([]MemoryFact, error)
+
+GetActive returns facts visible for ownerID at instant at: rows whose ValidFrom \<= at \(or NULL\) and ValidUntil \> at \(or NULL\). Boundary rule: at == ValidUntil is EXCLUDED \(the fact has ended\).
+
+<a name="FactStore.Search"></a>
+### func \(\*FactStore\) Search
+
+	func (s *FactStore) Search(ctx context.Context, ownerID, query, kind string) ([]MemoryFact, error)
+
+Search returns active facts for ownerID whose Key or Value contains query \(case\-insensitive substring\), optionally restricted to one kind. Empty query matches everything.
+
+<a name="FactStore.Upsert"></a>
+### func \(\*FactStore\) Upsert
+
+	func (s *FactStore) Upsert(ctx context.Context, f MemoryFact) error
+
+Upsert writes f. When an active fact with the same OwnerID\+Kind\+Key exists, the previous row is closed with ValidUntil=now \(last\-write\-wins with history\) and the new row is inserted.
+
+<a name="GossipPublisher"></a>
+## type GossipPublisher
+
+GossipPublisher is the interface for publishing cluster gossip events. Implemented by cluster.GossipEngine to avoid importing internal/cluster from the memory package.
+
+	type GossipPublisher interface {
+	    PublishClusterEvent(eventType models.ClusterEventType, payload any) error
 	}
 
 <a name="GraphStats"></a>
@@ -973,6 +1658,16 @@ Start begins listening for memory requests.
 	func (h *Handler) Stop(ctx context.Context) error
 
 Stop stops the handler.
+
+<a name="IndexResult"></a>
+## type IndexResult
+
+IndexResult holds both index rows and metadata from a build.
+
+	type IndexResult struct {
+	    Rows []TraceIndexRow
+	    Meta TraceIndexMeta
+	}
 
 <a name="KnowledgeGraph"></a>
 ## type KnowledgeGraph
@@ -1165,6 +1860,24 @@ KnowledgeGraphConfig holds configuration for the knowledge graph.
 	    CacheTTL      time.Duration // Cache validity (default: 5m)
 	}
 
+<a name="Lesson"></a>
+## type Lesson
+
+Lesson is a distilled principle with supporting evidence references.
+
+	type Lesson struct {
+	    Principle   string   `json:"principle"`
+	    Because     string   `json:"because,omitempty"`
+	    EvidenceIDs []string `json:"evidence_ids,omitempty"`
+	}
+
+<a name="DecodeLesson"></a>
+### func DecodeLesson
+
+	func DecodeLesson(content string) (*Lesson, error)
+
+DecodeLesson parses stored content into a Lesson, rejecting malformed JSON.
+
 <a name="Manager"></a>
 ## type Manager
 
@@ -1223,12 +1936,33 @@ Consolidate runs memory consolidation \(SQLite backend only\).
 
 Delete removes a memory by ID from the appropriate backend.
 
+<a name="Manager.Distill"></a>
+### func \(\*Manager\) Distill
+
+	func (m *Manager) Distill(ctx context.Context, src []Memory) (*Memory, error)
+
+Distill condenses source memories into a single lesson or procedure memory using the summarization infra, enforcing length caps, deduping against existing memories \(cosine \> threshold on embeddings when an embedder is wired, else token\-Jaccard\), and storing the result. The kind is taken from src\[0\].Category \("lesson" default, or "procedure"\).
+
 <a name="Manager.DistributedConfig"></a>
 ### func \(\*Manager\) DistributedConfig
 
 	func (m *Manager) DistributedConfig() config.DistributedMemoryConfig
 
 DistributedConfig returns the distributed memory configuration.
+
+<a name="Manager.DrainDistillQueue"></a>
+### func \(\*Manager\) DrainDistillQueue
+
+	func (m *Manager) DrainDistillQueue(ctx context.Context) (DistillQueueSummary, error)
+
+DrainDistillQueue processes every pending distill item: summarize, enforce caps, dedupe against existing memories, and store. A summarizer failure retains the remaining items in the queue \(graceful skip\) and returns the error. Duplicates are dropped \(not retained\).
+
+<a name="Manager.DualStore"></a>
+### func \(\*Manager\) DualStore
+
+	func (m *Manager) DualStore() *DualStore
+
+DualStore returns the wired DualStore, or nil when cluster routing is not configured. Callers must nil\-check.
 
 <a name="Manager.Embedder"></a>
 ### func \(\*Manager\) Embedder
@@ -1285,6 +2019,13 @@ GetCachedPrefetch retrieves prefetched context from cache.
 	func (m *Manager) GetExpiredMemories(ctx context.Context, days int) ([]Memory, error)
 
 GetExpiredMemories returns memories that haven't been accessed in the specified number of days.
+
+<a name="Manager.GetFactStore"></a>
+### func \(\*Manager\) GetFactStore
+
+	func (m *Manager) GetFactStore() *FactStore
+
+GetFactStore returns the typed user\-memory fact store, or nil when OpenFactStore has not been called. Nil\-safe by design \(harness\-eval leaf 12\).
 
 <a name="Manager.GetGraphStats"></a>
 ### func \(\*Manager\) GetGraphStats
@@ -1377,6 +2118,13 @@ IsMemvidActive returns true if memvid is the active backend.
 
 ListAutoClaims returns claims with status=auto, optionally filtered by created\_after for incremental review prompts.
 
+<a name="Manager.ListExpiredClaims"></a>
+### func \(\*Manager\) ListExpiredClaims
+
+	func (m *Manager) ListExpiredClaims(ctx context.Context, limit int) ([]MemoryResult, error)
+
+ListExpiredClaims returns non\-rejected claims whose valid\_to is in the past at call time, newest first, up to limit \(default 20\). Claims with no valid\_to \(unbounded\) are never returned. Surfaced by the memory tool / CLI so users can see what has silently aged out of trust\-weighted results.
+
 <a name="Manager.ListPendingReviews"></a>
 ### func \(\*Manager\) ListPendingReviews
 
@@ -1407,6 +2155,20 @@ auto claims cannot supersede confirmed/promoted claims.
 
 MemvidClient returns the memvid client if active.
 
+<a name="Manager.NetVotes"></a>
+### func \(\*Manager\) NetVotes
+
+	func (m *Manager) NetVotes(ctx context.Context, ids []string) (map[string]int, error)
+
+NetVotes returns the summed vote delta for each given memory ID using one batched query. Missing entries have no votes \(net 0\).
+
+<a name="Manager.OpenFactStore"></a>
+### func \(\*Manager\) OpenFactStore
+
+	func (m *Manager) OpenFactStore(dbPath string) (*FactStore, error)
+
+OpenFactStore opens \(creating if needed\) the memory\_facts database at dbPath and installs it on the Manager. Idempotent: a second call returns the existing store.
+
 <a name="Manager.Personality"></a>
 ### func \(\*Manager\) Personality
 
@@ -1420,6 +2182,13 @@ Personality returns the personality memory subsystem.
 	func (m *Manager) PromoteClaim(ctx context.Context, claimID string) error
 
 PromoteClaim transitions an auto claim to promoted status.
+
+<a name="Manager.QueueDistill"></a>
+### func \(\*Manager\) QueueDistill
+
+	func (m *Manager) QueueDistill(item DistillItem)
+
+QueueDistill appends a distillation request to the pending queue. Items sit until DrainDistillQueue is invoked \(evolver cycle timing — no scheduler of its own\). No\-op when the distill flag is off \(flag gates everything\).
 
 <a name="Manager.QueuePrefetch"></a>
 ### func \(\*Manager\) QueuePrefetch
@@ -1442,12 +2211,26 @@ RecordReview closes a decision with the actual outcome and scores the expected\-
 
 RecordSessionMemories creates temporal edges between memories from a session.
 
+<a name="Manager.RecordVote"></a>
+### func \(\*Manager\) RecordVote
+
+	func (m *Manager) RecordVote(id string, delta int, reason string) error
+
+RecordVote records a usefulness vote \(\+1 or \-1\) on a memory with an optional reason \(capped at 512 bytes\). Returns an error if delta is not exactly \+1 or \-1, or if the memory does not exist.
+
 <a name="Manager.RejectClaim"></a>
 ### func \(\*Manager\) RejectClaim
 
 	func (m *Manager) RejectClaim(ctx context.Context, claimID string) error
 
 RejectClaim transitions a claim to rejected status.
+
+<a name="Manager.RelevantDistilled"></a>
+### func \(\*Manager\) RelevantDistilled
+
+	func (m *Manager) RelevantDistilled(ctx context.Context, query string, limit int) ([]MemoryResult, error)
+
+RelevantDistilled returns stored lessons and procedures relevant to the query, above the minimum\-relevance threshold, capped at limit. Returns nothing when the distill flag is off \(flag\-off = zero behavior change\).
 
 <a name="Manager.ScopedManager"></a>
 ### func \(\*Manager\) ScopedManager
@@ -1483,6 +2266,20 @@ SearchSemantic performs vector similarity search for memories. If the vector sto
 	func (m *Manager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64) ([]MemoryResult, error)
 
 SearchWithGraph searches memories and applies graph\-aware ranking. The alpha parameter controls PageRank influence: 0 = pure relevance, 1 = pure PageRank.
+
+<a name="Manager.SetDistillSummarizer"></a>
+### func \(\*Manager\) SetDistillSummarizer
+
+	func (m *Manager) SetDistillSummarizer(s DistillSummarizer)
+
+SetDistillSummarizer overrides the summarizer used by Distill. Primarily for tests; production falls back to the manager's LLM client wrapper.
+
+<a name="Manager.SetDualStore"></a>
+### func \(\*Manager\) SetDualStore
+
+	func (m *Manager) SetDualStore(ds *DualStore)
+
+SetDualStore wires the cluster\-aware DualStore so that memory writes can be mirrored to gossip peers and merged reads can include gossip data. Nil values are ignored per CLAUDE.md nil\-guard convention; passing nil after a prior non\-nil store detaches the manager from cluster sync but does NOT close the DualStore \(the caller — typically the daemon — owns the lifecycle\).
 
 <a name="Manager.SetEpistemicDetector"></a>
 ### func \(\*Manager\) SetEpistemicDetector
@@ -1664,6 +2461,39 @@ MemoryEdge represents a directed edge between two memories.
 	    Metadata   map[string]any `json:"metadata,omitempty"`
 	}
 
+<a name="MemoryFact"></a>
+## type MemoryFact
+
+MemoryFact is one typed, time\-scoped fact about a user.
+
+	type MemoryFact struct {
+	    ID            string     `json:"id"`
+	    OwnerID       string     `json:"owner_id"` // empty = daemon owner (multiuser off)
+	    Kind          FactKind   `json:"kind"`
+	    Key           string     `json:"key"`
+	    Value         string     `json:"value"`
+	    ValidFrom     *time.Time `json:"valid_from,omitempty"`
+	    ValidUntil    *time.Time `json:"valid_until,omitempty"`
+	    SourceSession string     `json:"source_session,omitempty"`
+	    UpdatedAt     time.Time  `json:"updated_at"`
+	}
+
+<a name="ExtractFactsFromMessages"></a>
+### func ExtractFactsFromMessages
+
+	func ExtractFactsFromMessages(msgs []string) []MemoryFact
+
+ExtractFactsFromMessages is the v1 heuristic fact extractor \(leaf 12\): a pure function over dialogue lines producing typed MemoryFacts. It is deliberately conservative — it captures only unambiguous patterns. The signature is the seam for a later LLM\-backed extractor; call sites must not assume coverage, only safety.
+
+Patterns captured:
+
+- preference: "I prefer X", "I like X", "I usually X"
+- restriction: "I'm allergic to X", "I am allergic to X", "I'm vegetarian", "I am vegan", "I can't eat X", "I cannot eat X"
+- account: "my \<name\> number is \<alnum\-id\>"
+- temporal: "on \<date phrase\> I will \<commitment\>"
+
+Every returned fact carries sourceSession and UpdatedAt from the caller via stampFacts; here they are left zero so tests can assert shape.
+
 <a name="MemoryNode"></a>
 ## type MemoryNode
 
@@ -1695,6 +2525,10 @@ MemoryQuery describes a search request against the memory system.
 	    Limit int `json:"limit"`
 	    // MinRelevance discards results below this threshold.
 	    MinRelevance float64 `json:"min_relevance,omitempty"`
+	    // MatchAny relaxes free-text matching to ANY-token (FTS5 OR joined)
+	    // instead of the default ALL-token (AND). Useful for relevance ranking,
+	    // where partial term overlap should still surface documents.
+	    MatchAny bool `json:"match_any,omitempty"`
 	}
 
 <a name="MemoryResult"></a>
@@ -1710,6 +2544,13 @@ MemoryResult is a memory item returned from a search with relevance info.
 	    // Source is a human-readable label for the subsystem (e.g., "episodic", "task:code").
 	    Source string `json:"source"`
 	}
+
+<a name="RankForUsefulness"></a>
+### func RankForUsefulness
+
+	func RankForUsefulness(candidates []MemoryResult, netVotes map[string]int, now time.Time, w Weights) []MemoryResult
+
+RankForUsefulness sorts candidates by usefulness score descending \(highest\-value memories first\). Ties fall back to newer\-first so output stays deterministic. It mutates and returns the slice.
 
 <a name="MemoryStats"></a>
 ## type MemoryStats
@@ -1819,6 +2660,19 @@ NewMemvidConsolidationBackend creates a consolidation backend for the memvid ser
 	func (b *MemvidConsolidationBackend) StoreSummary(ctx context.Context, content, category string, metadata map[string]any) (string, error)
 
 
+
+<a name="OversizedTraceSummary"></a>
+## type OversizedTraceSummary
+
+OversizedTraceSummary is returned when a trace would exceed the response budget. Rather than silently truncating or erroring, we return planning metadata so the agent can choose a more targeted follow\-up. Modeled after HALO's OversizedTraceSummary \(trace\_query\_models.py:135\).
+
+	type OversizedTraceSummary struct {
+	    SpanCount            int      `json:"span_count"`
+	    SpanResponseBytesMax int      `json:"span_response_bytes_max"`
+	    TopSpanNames         []string `json:"top_span_names"`
+	    ErrorSpanCount       int      `json:"error_span_count"`
+	    Recommendation       string   `json:"recommendation"`
+	}
 
 <a name="PersonalityMemory"></a>
 ## type PersonalityMemory
@@ -1961,6 +2815,24 @@ Prediction is a forecast with horizon and resolution tracking.
 	    ResolvedAt      *time.Time // when the prediction was resolved
 	}
 
+<a name="Procedure"></a>
+## type Procedure
+
+Procedure is a reusable how\-to template. It is documentation, not an executable recipe: nothing in meept runs these steps automatically.
+
+	type Procedure struct {
+	    Title        string   `json:"title"`
+	    Steps        []string `json:"steps"`
+	    TriggerHints []string `json:"trigger_hints,omitempty"`
+	}
+
+<a name="DecodeProcedure"></a>
+### func DecodeProcedure
+
+	func DecodeProcedure(content string) (*Procedure, error)
+
+DecodeProcedure parses stored content into a Procedure, rejecting malformed JSON.
+
 <a name="Question"></a>
 ## type Question
 
@@ -1972,6 +2844,50 @@ Question is an open question the user is tracking.
 	    Status        string   // "open", "answered"
 	    AnswerClaim   string   // claim ID that answers it (if answered)
 	}
+
+<a name="ReportArtifact"></a>
+## type ReportArtifact
+
+ReportArtifact represents a persisted analysis report on disk. Modeled after HALO's halo\_run\_artifacts table \(report.ts:8\-15\).
+
+	type ReportArtifact struct {
+	    ID           string    `json:"id"`
+	    RunID        string    `json:"run_id"`
+	    ArtifactType string    `json:"artifact_type"` // always "report_markdown"
+	    Path         string    `json:"path"`
+	    SizeBytes    int64     `json:"size_bytes"`
+	    CreatedAt    time.Time `json:"created_at"`
+	}
+
+<a name="ReportStore"></a>
+## type ReportStore
+
+ReportStore manages on\-disk report artifacts with SQLite tracking.
+
+	type ReportStore struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewReportStore"></a>
+### func NewReportStore
+
+	func NewReportStore(dbPath string) *ReportStore
+
+NewReportStore creates a store for the given database path.
+
+<a name="ReportStore.EnsureReportFile"></a>
+### func \(\*ReportStore\) EnsureReportFile
+
+	func (rs *ReportStore) EnsureReportFile(tx *sql.Tx, runID string, content string) (*ReportArtifact, error)
+
+EnsureReportFile materializes a report as markdown and tracks in SQLite. Returns null when report is empty. Rewrites if missing or stale. Modeled after HALO's ensureHaloReportFile \(report.ts:30\-54\).
+
+<a name="ReportStore.OutputDirForRun"></a>
+### func \(\*ReportStore\) OutputDirForRun
+
+	func (rs *ReportStore) OutputDirForRun(runID string) string
+
+OutputDirForRun returns the output directory for a run ID. Exported for use by report renderers.
 
 <a name="SQLiteConsolidationBackend"></a>
 ## type SQLiteConsolidationBackend
@@ -2267,6 +3183,67 @@ SearchWithGraph performs graph\-aware search, scoped to this bot. A non\-positiv
 
 Store persists a memory tagged with the bot ID. The bot\_id is injected into the Memory struct so downstream storage backends include it in metadata.
 
+<a name="SearchMatch"></a>
+## type SearchMatch
+
+SearchMatch represents a span that matched a search regex, with context.
+
+	type SearchMatch struct {
+	    SpanID   string `json:"span_id"`
+	    TraceID  string `json:"trace_id"`
+	    Scope    string `json:"scope,omitempty"`
+	    LineNum  int    `json:"line_num"`
+	    MatchLen int    `json:"match_len"`
+	    Raw      string `json:"raw,omitempty"`
+	}
+
+<a name="SearchParams"></a>
+## type SearchParams
+
+SearchParams carries search options shared by task and episodic stores.
+
+	type SearchParams struct {
+	    // Query is the free-text search string.
+	    Query string
+	    // Domain (task store only) restricts results to one domain.
+	    Domain string
+	    // Limit caps the number of results.
+	    Limit int
+	    // MatchAny relaxes FTS matching to ANY-token (OR joined).
+	    MatchAny bool
+	}
+
+<a name="SearchTraceResult"></a>
+## type SearchTraceResult
+
+SearchTraceResult is the response from SearchTrace.
+
+	type SearchTraceResult struct {
+	    TraceID   string        `json:"trace_id,omitempty"`
+	    Pattern   string        `json:"pattern"`
+	    TotalHits int           `json:"total_hits"`
+	    Matches   []SearchMatch `json:"matches"`
+	}
+
+<a name="Session"></a>
+## type Session
+
+Session is the dual\-store's session representation. It mirrors the columns of the sessions table in schema\_local.sql / schema\_gossip.sql. The fields are intentionally a subset of internal/session.Session that are meaningful for cross\-node replication; presentation\-layer concerns \(workers, designation, etc.\) stay in the session package.
+
+	type Session struct {
+	    ID             string         `json:"id"`
+	    Name           string         `json:"name"`
+	    ConversationID string         `json:"conversation_id"`
+	    CreatedAt      time.Time      `json:"created_at"`
+	    LastActivity   time.Time      `json:"last_activity"`
+	    Description    string         `json:"description,omitempty"`
+	    ProjectID      string         `json:"project_id,omitempty"`
+	    ProjectPath    string         `json:"project_path,omitempty"`
+	    NoFence        bool           `json:"no_fence,omitempty"`
+	    Metadata       map[string]any `json:"metadata,omitempty"`
+	    SourceNode     string         `json:"source_node,omitempty"` // only set for gossip-sourced sessions
+	}
+
 <a name="ShardManagerVectorSearcher"></a>
 ## type ShardManagerVectorSearcher
 
@@ -2296,6 +3273,93 @@ Manager returns the underlying ShardManager for advanced operations.
 	func (s *ShardManagerVectorSearcher) Search(ctx context.Context, query string, limit int) ([]VectorSearchResult, error)
 
 Search implements the VectorSearcher interface.
+
+<a name="SpanRecord"></a>
+## type SpanRecord
+
+SpanRecord represents a single span record from trace JSONL. Fields correspond to the typical OTEL/halo trace schema.
+
+	type SpanRecord struct {
+	    TraceID   string    `json:"trace_id"`
+	    SpanID    string    `json:"span_id"`
+	    ParentID  string    `json:"parent_id,omitempty"`
+	    StartTime time.Time `json:"start_time"`
+	    EndTime   time.Time `json:"end_time"`
+	    Service   string    `json:"service,omitempty"`
+	    Model     string    `json:"model,omitempty"`
+	
+	    // Agent attribution
+	    AgentName string `json:"agent_name,omitempty"`
+	    AgentID   string `json:"agent_id,omitempty"`
+	
+	    // Token accounting
+	    InputTokens  int `json:"input_tokens,omitempty"`
+	    OutputTokens int `json:"output_tokens,omitempty"`
+	
+	    // Flags
+	    HasError  bool   `json:"has_error,omitempty"`
+	    ErrorType string `json:"error_type,omitempty"`
+	
+	    // Raw payload fields (kept for surgical queries)
+	    Input      string            `json:"input,omitempty"`
+	    Output     string            `json:"output,omitempty"`
+	    Attributes map[string]string `json:"attributes,omitempty"`
+	    ToolName   string            `json:"tool_name,omitempty"`
+	    ToolError  bool              `json:"tool_error,omitempty"`
+	
+	    // RawLine preserves the original JSON string for regex search.
+	    RawLine string `json:"-"`
+	}
+
+<a name="SpanRecord.IsAgentSpan"></a>
+### func \(\*SpanRecord\) IsAgentSpan
+
+	func (s *SpanRecord) IsAgentSpan() bool
+
+IsAgentSpan returns true if the span has agent attribution.
+
+<a name="SpanRecordSlice"></a>
+## type SpanRecordSlice
+
+SpanRecordSlice is a sortable slice of SpanRecord.
+
+	type SpanRecordSlice []SpanRecord
+
+<a name="SpanRecordSlice.Len"></a>
+### func \(SpanRecordSlice\) Len
+
+	func (s SpanRecordSlice) Len() int
+
+
+
+<a name="SpanRecordSlice.Less"></a>
+### func \(SpanRecordSlice\) Less
+
+	func (s SpanRecordSlice) Less(i, j int) bool
+
+
+
+<a name="SpanRecordSlice.Swap"></a>
+### func \(SpanRecordSlice\) Swap
+
+	func (s SpanRecordSlice) Swap(i, j int)
+
+
+
+<a name="SpanView"></a>
+## type SpanView
+
+SpanView is the simplified span view used by the RLM analyzer.
+
+	type SpanView struct {
+	    SpanID       string
+	    SpanName     string
+	    Service      string
+	    Model        string
+	    InputTokens  int
+	    OutputTokens int
+	    HasError     bool
+	}
 
 <a name="StoreOptions"></a>
 ## type StoreOptions
@@ -2458,6 +3522,13 @@ Initialize sets up the database schema and connections.
 
 Search finds task memories matching the query. Uses FTS5 when available, falls back to LIKE\-based queries otherwise. If domain is specified, results are limited to that domain.
 
+<a name="TaskMemory.SearchOptions"></a>
+### func \(\*TaskMemory\) SearchOptions
+
+	func (t *TaskMemory) SearchOptions(ctx context.Context, p SearchParams) ([]MemoryResult, error)
+
+SearchOptions finds task memories with full option control.
+
 <a name="TaskMemory.Store"></a>
 ### func \(\*TaskMemory\) Store
 
@@ -2487,6 +3558,288 @@ TaskMemoryConfig holds configuration for task memory.
 
 DefaultTaskMemoryConfig returns configuration with sensible defaults.
 
+<a name="ToolCall"></a>
+## type ToolCall
+
+ToolCall represents a tool invocation for compaction purposes.
+
+	type ToolCall struct {
+	    ToolName  string
+	    Arguments string // JSON-encoded argument map
+	    Result    string
+	    Seq       int
+	}
+
+<a name="TraceIndexBuilder"></a>
+## type TraceIndexBuilder
+
+TraceIndexBuilder builds the sidecar index for a source JSONL file and exposes a single entry point for loading trace rows.
+
+	type TraceIndexBuilder struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTraceIndexBuilder"></a>
+### func NewTraceIndexBuilder
+
+	func NewTraceIndexBuilder(sourcePath string) *TraceIndexBuilder
+
+NewTraceIndexBuilder creates a builder for the given source JSONL.
+
+<a name="TraceIndexBuilder.BuildOrReuse"></a>
+### func \(\*TraceIndexBuilder\) BuildOrReuse
+
+	func (b *TraceIndexBuilder) BuildOrReuse(ctx context.Context) (*IndexResult, error)
+
+BuildOrReuse builds the sidecar index or returns cached if source unchanged. Checks staleness via source size \+ mtime fingerprint. Writes atomically via .tmp \-\> rename.
+
+<a name="TraceIndexMeta"></a>
+## type TraceIndexMeta
+
+TraceIndexMeta is the sidecar metadata for staleness detection. Modeled after HALO's TraceIndexMeta \(trace\_index\_builder.py:92\-124\).
+
+	type TraceIndexMeta struct {
+	    SchemaVersion int       `json:"schema_version"` // currently 1
+	    TraceCount    int       `json:"trace_count"`
+	    SourceSize    int64     `json:"source_size"`     // byte size of source JSONL
+	    SourceMtimeNs int64     `json:"source_mtime_ns"` // modification time nanoseconds
+	    BuiltAt       time.Time `json:"built_at"`
+	}
+
+<a name="TraceIndexMeta.Fingerprint"></a>
+### func \(\*TraceIndexMeta\) Fingerprint
+
+	func (m *TraceIndexMeta) Fingerprint() string
+
+Fingerprint returns a staleness fingerprint: size \+ mtime.
+
+<a name="TraceIndexMeta.MarshalJSON"></a>
+### func \(TraceIndexMeta\) MarshalJSON
+
+	func (m TraceIndexMeta) MarshalJSON() ([]byte, error)
+
+MarshalJSON implements json.Marshaler for TraceIndexMeta.
+
+<a name="TraceIndexMeta.UnmarshalJSON"></a>
+### func \(\*TraceIndexMeta\) UnmarshalJSON
+
+	func (m *TraceIndexMeta) UnmarshalJSON(data []byte) error
+
+UnmarshalJSON implements json.Unmarshaler for TraceIndexMeta.
+
+<a name="TraceIndexRow"></a>
+## type TraceIndexRow
+
+TraceIndexRow is the sidecar index row for one trace\_id. Modeled after HALO's TraceIndexRow \(trace\_index\_models.py:6\). It aggregates span\-level data into a per\-trace rollup for efficient seeking.
+
+	type TraceIndexRow struct {
+	    TraceID                   string    `json:"trace_id"`
+	    ByteOffsets               []int64   `json:"byte_offsets"` // file offset per span
+	    ByteLengths               []int64   `json:"byte_lengths"` // line byte length per span
+	    SpanCount                 int       `json:"span_count"`
+	    StartTime                 time.Time `json:"start_time"`
+	    EndTime                   time.Time `json:"end_time"`
+	    HasErrors                 bool      `json:"has_errors"`
+	    ServiceNames              []string  `json:"service_names,omitempty"`
+	    ModelNames                []string  `json:"model_names,omitempty"`
+	    TokenNames                []string  `json:"token_names,omitempty"`
+	    TotalInputTokens          int       `json:"total_input_tokens"`
+	    TotalOutputTokens         int       `json:"total_output_tokens"`
+	    AgentNames                []string  `json:"agent_names,omitempty"`
+	    AgentIDs                  []string  `json:"agent_ids,omitempty"`
+	    MissingParentCount        int       `json:"missing_parent_count"`
+	    MissingAgentIdentityCount int       `json:"missing_agent_identity_count"`
+	    OtelErrorSpanCount        int       `json:"otel_error_span_count"`
+	    ToolErrorSpanCount        int       `json:"tool_error_span_count"`
+	}
+
+<a name="TraceIndexRow.MarshalJSON"></a>
+### func \(TraceIndexRow\) MarshalJSON
+
+	func (r TraceIndexRow) MarshalJSON() ([]byte, error)
+
+MarshalJSON implements json.Marshaler for TraceIndexRow.
+
+<a name="TraceIndexRow.Truncate"></a>
+### func \(\*TraceIndexRow\) Truncate
+
+	func (r *TraceIndexRow) Truncate(maxSliceLen int)
+
+Truncate truncates all string slice fields to prevent unbounded memory usage.
+
+<a name="TraceIndexRow.UnmarshalJSON"></a>
+### func \(\*TraceIndexRow\) UnmarshalJSON
+
+	func (r *TraceIndexRow) UnmarshalJSON(data []byte) error
+
+UnmarshalJSON implements json.Unmarshaler for TraceIndexRow.
+
+<a name="TraceStore"></a>
+## type TraceStore
+
+TraceStore provides surgical read/query/render over trace JSONL via a sidecar index. All read methods are read\-only and safe for concurrent use.
+
+	type TraceStore struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="LoadTraceStore"></a>
+### func LoadTraceStore
+
+	func LoadTraceStore(sourcePath string) (*TraceStore, error)
+
+LoadTraceStore is a convenience wrapper that constructs a builder, calls BuildOrReuse to get \(or build\) the sidecar index, and returns a fully\-populated TraceStore.
+
+<a name="NewTraceStore"></a>
+### func NewTraceStore
+
+	func NewTraceStore(sourcePath string, builder *TraceIndexBuilder) (*TraceStore, error)
+
+NewTraceStore creates a store backed by the given source JSONL and optional builder. If a builder is provided it is used to build the sidecar index and populate rows; otherwise the store scans source directly.
+
+<a name="TraceStore.GetSpansForTrace"></a>
+### func \(\*TraceStore\) GetSpansForTrace
+
+	func (s *TraceStore) GetSpansForTrace(traceID string) ([]string, error)
+
+GetSpansForTrace returns the span IDs for a given trace from the sidecar index.
+
+<a name="TraceStore.GetTraceIDs"></a>
+### func \(\*TraceStore\) GetTraceIDs
+
+	func (s *TraceStore) GetTraceIDs() []string
+
+GetTraceIDs returns all known trace IDs.
+
+<a name="TraceStore.GetTraceIndexRow"></a>
+### func \(\*TraceStore\) GetTraceIndexRow
+
+	func (s *TraceStore) GetTraceIndexRow(traceID string) (TraceIndexRow, bool)
+
+GetTraceIndexRow returns the index row for a trace, if known.
+
+<a name="TraceStore.ListSpans"></a>
+### func \(\*TraceStore\) ListSpans
+
+	func (s *TraceStore) ListSpans(spanIDs []string) ([]SpanView, error)
+
+ListSpans returns span views by IDs, reading directly from source JSONL.
+
+<a name="TraceStore.ListTraceIDs"></a>
+### func \(\*TraceStore\) ListTraceIDs
+
+	func (s *TraceStore) ListTraceIDs() ([]string, error)
+
+ListTraceIDs returns all known trace IDs \(satisfies TraceStoreReader\).
+
+<a name="TraceStore.SearchSpans"></a>
+### func \(\*TraceStore\) SearchSpans
+
+	func (s *TraceStore) SearchSpans(traceID, spanPattern, attrPattern string, maxMatches int) (*SearchTraceResult, error)
+
+SearchSpans is a convenience wrapper around SearchTrace for agent use. spanPattern is matched against span\_id/service/model fields; attrPattern is matched against arbitrary JSON content.
+
+<a name="TraceStore.SearchTrace"></a>
+### func \(\*TraceStore\) SearchTrace
+
+	func (s *TraceStore) SearchTrace(traceID, pattern string, maxMatches int) (*SearchTraceResult, error)
+
+SearchTrace runs a compiled regexp over raw JSONL lines of one trace and returns up to maxMatches SearchMatch records with context windows.
+
+<a name="TraceStore.SourcePath"></a>
+### func \(\*TraceStore\) SourcePath
+
+	func (s *TraceStore) SourcePath() string
+
+SourcePath returns the path to the source JSONL file backing the store.
+
+<a name="TraceStore.ViewSpans"></a>
+### func \(\*TraceStore\) ViewSpans
+
+	func (s *TraceStore) ViewSpans(traceID string, spanIDs []string) (*ViewTraceResult, error)
+
+ViewSpans returns up to 200 named span\_ids with a surgical 16 KB per\-attribute cap. Like ViewTrace it gates on the overall budget, but the per\-attribute cap is higher so the agent actually gets more bytes per span than via ViewTrace \-\- the deliberate "zoom in" affordance that makes view\_spans complementary to search\_trace.
+
+<a name="TraceStore.ViewTrace"></a>
+### func \(\*TraceStore\) ViewTrace
+
+	func (s *TraceStore) ViewTrace(traceID string) (*ViewTraceResult, error)
+
+ViewTrace returns all spans of one trace.
+
+Each string attribute is truncated to DiscoveryAttrTruncationChars \(4 KB\). The total raw response is budgeted at ViewTraceResponseBytesBudget \(\~150 KB\). When the budget would be exceeded the method returns an OversizedTraceSummary instead, guiding the agent toward targeted search \+ view\_spans.
+
+<a name="Turn"></a>
+## type Turn
+
+Turn is the dual\-store's turn representation, mirroring the turns table.
+
+	type Turn struct {
+	    TurnID     string         `json:"turn_id"`
+	    SessionID  string         `json:"session_id"`
+	    Role       string         `json:"role"`
+	    Content    string         `json:"content"`
+	    Timestamp  time.Time      `json:"timestamp"`
+	    Metadata   map[string]any `json:"metadata,omitempty"`
+	    SourceNode string         `json:"source_node,omitempty"` // only set for gossip-sourced turns
+	}
+
+<a name="TurnRecord"></a>
+## type TurnRecord
+
+TurnRecord is a memory\-level turn record that may contain tool calls, thinking content, or plain observations.
+
+	type TurnRecord struct {
+	    Index      int
+	    Type       string // "tool", "thinking", "observation", "final", "user"
+	    ToolName   string
+	    ToolInput  string // JSON-encoded
+	    ToolOutput string
+	    Content    string
+	    Tokens     int
+	    ToolCalls  []ToolCall
+	}
+
+<a name="UsefulEvictionConfig"></a>
+## type UsefulEvictionConfig
+
+UsefulEvictionConfig is the resolved \(default\-applied\) usefulness config used by the consolidator.
+
+	type UsefulEvictionConfig struct {
+	    Enabled  bool
+	    FloorPct float64
+	    Weights  Weights
+	}
+
+<a name="ResolveUsefulEviction"></a>
+### func ResolveUsefulEviction
+
+	func ResolveUsefulEviction(cfg config.MemoryUsefulnessConfig) UsefulEvictionConfig
+
+ResolveUsefulEviction applies package defaults to the raw config values so a zero\-value config behaves sensibly even when partially specified.
+
+<a name="UsefulnessEvictionPlan"></a>
+## type UsefulnessEvictionPlan
+
+UsefulnessEvictionPlan separates harmful memories and the bottom floor\-pct of candidates \(by usefulness\) from survivors.
+
+	type UsefulnessEvictionPlan struct {
+	    // Harmful are memories with net votes <= -2; evicted regardless of age.
+	    Harmful []string
+	    // Floor are the lowest-usefulness memories within the floor percentile;
+	    // evicted before any age-based rule.
+	    Floor []string
+	    // Survivors are the remaining candidates in usefulness-descending order.
+	    Survivors []MemoryResult
+	}
+
+<a name="PlanUsefulEviction"></a>
+### func PlanUsefulEviction
+
+	func PlanUsefulEviction(candidates []MemoryResult, netVotes map[string]int, now time.Time, cfg UsefulEvictionConfig) UsefulnessEvictionPlan
+
+PlanUsefulEviction ranks candidates and splits them into harmful / floor / survivor sets. floorCount is max\(int\(floorPct\*len\), 0\) and never consumes all candidates when len \> 1.
+
 <a name="VectorSearchResult"></a>
 ## type VectorSearchResult
 
@@ -2508,5 +3861,46 @@ VectorSearcher is the interface the Manager uses for semantic/vector search. Thi
 	type VectorSearcher interface {
 	    Search(ctx context.Context, query string, limit int) ([]VectorSearchResult, error)
 	}
+
+<a name="ViewTraceResult"></a>
+## type ViewTraceResult
+
+ViewTraceResult is a union type \-\- either spans or an oversized summary.
+
+	type ViewTraceResult struct {
+	    Spans     []SpanRecord           `json:"spans,omitempty"`
+	    Oversized *OversizedTraceSummary `json:"oversized,omitempty"`
+	}
+
+<a name="VoteRecord"></a>
+## type VoteRecord
+
+VoteRecord is a single usefulness vote on a memory.
+
+	type VoteRecord struct {
+	    MemoryID  string    `json:"memory_id"`
+	    Delta     int       `json:"delta"` // +1 or -1
+	    Reason    string    `json:"reason,omitempty"`
+	    CreatedAt time.Time `json:"created_at"`
+	}
+
+<a name="Weights"></a>
+## type Weights
+
+Weights holds the usefulness scoring weights.
+
+	type Weights struct {
+	    Base float64 // baseline score for an unvoted, unused, brand-new memory
+	    Wv   float64 // weight per unit of net vote sum
+	    Wa   float64 // weight for log1p(accesses)
+	    Ws   float64 // penalty per day of age
+	}
+
+<a name="DefaultWeights"></a>
+### func DefaultWeights
+
+	func DefaultWeights() Weights
+
+DefaultWeights returns the default usefulness weights \(config\-overridable\).
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)
