@@ -448,8 +448,14 @@ func TestVoteStore_StandaloneFallback(t *testing.T) {
 // conjunct, panicking on a manager-less consolidator. A nil manager with the
 // flag ON must now skip usefulness eviction cleanly and still consolidate.
 func TestConsolidateEpisodic_NilManagerWithUsefulnessFlagOn(t *testing.T) {
+	// Midnight-safe fixture: anchor the memory timestamps at local NOON so
+	// all three memories (+0h/+1h/+2h) land on one calendar day regardless
+	// of when the test runs. The original now.Add(-48h) fixture crossed
+	// local midnight when the suite ran shortly after 00:00, splitting
+	// summarizeByDate into two day groups (created=2) and failing the
+	// created==1 assertion — wall-clock luck, not behavior.
 	now := time.Now()
-	old := now.Add(-48 * time.Hour)
+	old := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location()).Add(-48 * time.Hour)
 	backend := &recordingBackend{memories: makeMemories(3, old)}
 	c := NewConsolidator(ConsolidatorConfig{
 		Manager: nil, // manager-less consolidator: the pre-fix panic path
