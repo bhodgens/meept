@@ -286,8 +286,8 @@ func (h *HTTPHook) executeSync(ctx context.Context, payload any) error {
 			return nil
 		}
 
-		// Network/transport error.
-		lastErr = err
+		// Network/transport error. lastErr is not updated here: every
+		// branch below formats the error into the returned value directly.
 		if hookRetriesExhausted(attempt, h.config.RetryCount) {
 			return fmt.Errorf("HTTP request failed after %d retries: %w", h.config.RetryCount, err)
 		}

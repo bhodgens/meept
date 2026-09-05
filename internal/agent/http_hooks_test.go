@@ -100,11 +100,11 @@ func TestHTTPHook_TransientFailureRetriesByDefault(t *testing.T) {
 // drained body on attempt 2+ ("http: ContentLength=30 with Body length 0").
 func TestHTTPHook_RetryResendsBody(t *testing.T) {
 	const payload = `{"prompt":"retry-me"}`
-	var hits int32
+	var hits atomic.Int32
 	var secondBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		n := atomic.AddInt32(&hits, 1)
+		n := hits.Add(1)
 		if n == 2 {
 			secondBody = string(b)
 		}
@@ -118,7 +118,7 @@ func TestHTTPHook_RetryResendsBody(t *testing.T) {
 		RetryCount: 1,
 	})
 	_ = hook.Execute(context.Background(), json.RawMessage(payload))
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Fatalf("server hit %d times, want 2 (retry_count=1)", got)
 	}
 	if secondBody != payload {
