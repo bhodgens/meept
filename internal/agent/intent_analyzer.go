@@ -102,13 +102,11 @@ func (ia *IntentAnalyzer) WithAmbiguityThreshold(threshold float64) *IntentAnaly
 	return ia
 }
 
-// AnalyzeTrueIntent performs a lightweight LLM-based analysis of the user's true intent.
-func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string) (*TrueIntentAnalysis, error) {
-	if ia.client == nil {
-		return nil, fmt.Errorf("intent analyzer: no client configured")
-	}
-
-	systemPrompt := `You are an intent analysis assistant. Analyze the user's input and return ONLY valid JSON with these exact fields:
+// intentAnalysisSystemPrompt is the system prompt sent with every intent
+// analysis call. The final two rules (session activity) are context-
+// conditioned ambiguity rules: they are present in EVERY call and are
+// harmless when no session activity is provided.
+const intentAnalysisSystemPrompt = `You are an intent analysis assistant. Analyze the user's input and return ONLY valid JSON with these exact fields:
 - goal (string): What the user actually wants
 - ambiguity (number 0.0-1.0): How ambiguous the request is (1.0 = very ambiguous)
 - scope (string): One of "narrow", "medium", "broad"
@@ -125,12 +123,65 @@ Rules:
 - scope must be exactly "narrow", "medium", or "broad"
 - category must be exactly one of the allowed values
 - suggested_mode must be exactly one of the allowed values
-- Keep the response concise.`
+- Keep the response concise.
+- Recent session activity may be provided with the input. Use it to resolve pronouns and references ('the change', 'the file', 'it') against what was just done.
+- If the input is a short follow-up question about the recent activity and the activity makes the referent clear, set ambiguity LOW and proceed — do not ask the user to re-specify.`
 
-	messages := []llm.ChatMessage{
-		{Role: llm.RoleSystem, Content: systemPrompt},
-		{Role: llm.RoleUser, Content: input},
+// buildActivityBlock formats the [Recent session activity] appendix from the
+// contract (leaf 02 of session-aware-intent-gate). Callers must only invoke
+// this with a non-empty digest. state/agent segments are omitted when empty;
+// the Result summary line is omitted when the summary is empty.
+func buildActivityBlock(d *SessionContextDigest) string {
+	var sb strings.Builder
+	sb.WriteString("\n\n[Recent session activity]\n")
+	sb.WriteString("Last task: ")
+	sb.WriteString(d.LastTaskName)
+	if d.LastTaskState != "" || d.LastTaskAgent != "" {
+		segments := make([]string, 0, 2)
+		if d.LastTaskState != "" {
+			segments = append(segments, "state: "+d.LastTaskState)
+		}
+		if d.LastTaskAgent != "" {
+			segments = append(segments, "agent: "+d.LastTaskAgent)
+		}
+		sb.WriteString(" (")
+		sb.WriteString(strings.Join(segments, ", "))
+		sb.WriteString(")")
 	}
+	if d.LastResultSummary != "" {
+		sb.WriteString("\nResult summary: ")
+		sb.WriteString(d.LastResultSummary)
+	}
+	return sb.String()
+}
+
+// buildAnalysisMessages constructs the chat messages for intent analysis.
+// A nil or empty digest yields exactly the contextless messages
+// [{system, intentAnalysisSystemPrompt}, {user, input}] — byte-identical to
+// pre-session behavior. A non-empty digest appends the [Recent session
+// activity] block to the user message.
+func (ia *IntentAnalyzer) buildAnalysisMessages(input string, sessionContext *SessionContextDigest) []llm.ChatMessage {
+	userContent := input
+	if !sessionContext.IsEmpty() {
+		userContent += buildActivityBlock(sessionContext)
+	}
+	return []llm.ChatMessage{
+		{Role: llm.RoleSystem, Content: intentAnalysisSystemPrompt},
+		{Role: llm.RoleUser, Content: userContent},
+	}
+}
+
+// AnalyzeTrueIntent performs a lightweight LLM-based analysis of the user's
+// true intent. sessionContext, when non-nil and non-empty, appends a compact
+// [Recent session activity] block to the user message so pronouns and
+// references ("the change", "it") can be resolved against recent work; a nil
+// or empty digest keeps the prompt byte-identical to the contextless form.
+func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string, sessionContext *SessionContextDigest) (*TrueIntentAnalysis, error) {
+	if ia.client == nil {
+		return nil, fmt.Errorf("intent analyzer: no client configured")
+	}
+
+	messages := ia.buildAnalysisMessages(input, sessionContext)
 
 	resp, err := ia.chatWithFailover(ctx, messages,
 		llm.WithMaxTokens(ia.tokenCap),

@@ -660,9 +660,12 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 3. Build memory context with session history
 	memCtx := d.buildMemoryContext(ctx, input, sessionID)
 
-	// 3.5. IntentGate-style true intent analysis
+	// 3.5. IntentGate-style true intent analysis. The session digest is
+	// built BEFORE the call so the analyzer can resolve references against
+	// recent session activity (leaf 02 of session-aware-intent-gate).
 	if d.intentAnalyzer != nil {
-		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, input)
+		digest := d.buildSessionContextDigest(sessionID)
+		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, input, digest)
 		if err == nil && analysis != nil {
 			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) {
 				return d.buildClarificationResult(input, analysis, sessionID)
@@ -1261,9 +1264,12 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 		"combined_len", len(combinedInput),
 	)
 
-	// Re-analyze the combined input with the intent analyzer.
+	// Re-analyze the combined input with the intent analyzer. The session
+	// digest is built BEFORE the call so the analyzer can resolve references
+	// against recent session activity (leaf 02 of session-aware-intent-gate).
 	if d.intentAnalyzer != nil {
-		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, combinedInput)
+		digest := d.buildSessionContextDigest(sessionID)
+		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, combinedInput, digest)
 		if err == nil && analysis != nil {
 			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) {
 				d.logger.Info("Still ambiguous after clarification, asking follow-up",

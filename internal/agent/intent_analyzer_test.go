@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -302,8 +303,117 @@ func TestIntentAnalyzer_AnalyzeTrueIntent_NoClient(t *testing.T) {
 	ia := NewIntentAnalyzer(nil, slog.Default())
 	ctx := context.Background()
 
-	_, err := ia.AnalyzeTrueIntent(ctx, "test input")
+	_, err := ia.AnalyzeTrueIntent(ctx, "test input", nil)
 	if err == nil {
 		t.Error("Expected error when client is nil, got nil")
 	}
+}
+
+// --- Session-aware analysis (leaf 02 of session-aware-intent-gate) ---
+//
+// IntentAnalyzer stores a concrete *llm.Client, which cannot be backed by a
+// stub, so message construction is factored into the unexported
+// buildAnalysisMessages helper and unit-tested directly here. End-to-end
+// capture of the exact messages sent through a real *llm.Client is covered
+// by the httptest-backed tests in intent_session_rules_test.go.
+
+const (
+	testRule1Substr    = "Recent session activity may be provided with the input"
+	testRule2Substr    = "If the input is a short follow-up question about the recent activity"
+	testActivitySubstr = "[Recent session activity]"
+)
+
+// requireSessionRules asserts both context-conditioned ambiguity rules are
+// present in the system prompt (they must appear in EVERY call).
+func requireSessionRules(t *testing.T, systemPrompt string) {
+	t.Helper()
+	if !strings.Contains(systemPrompt, testRule1Substr) {
+		t.Errorf("system prompt missing session-activity pronoun rule; got:\n%s", systemPrompt)
+	}
+	if !strings.Contains(systemPrompt, testRule2Substr) {
+		t.Errorf("system prompt missing follow-up LOW-ambiguity rule; got:\n%s", systemPrompt)
+	}
+}
+
+func TestIntentAnalyzer_BuildAnalysisMessages_Contextless(t *testing.T) {
+	ia := NewIntentAnalyzer(nil, digestTestLogger())
+	const input = "did the change get made?"
+
+	cases := map[string]*SessionContextDigest{
+		"nil digest":   nil,
+		"empty digest": {},
+	}
+
+	for name, digest := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := ia.buildAnalysisMessages(input, digest)
+			if len(got) != 2 {
+				t.Fatalf("len(messages) = %d, want 2", len(got))
+			}
+			if got[0].Role != llm.RoleSystem {
+				t.Errorf("messages[0].Role = %q, want system", got[0].Role)
+			}
+			if got[1].Role != llm.RoleUser {
+				t.Errorf("messages[1].Role = %q, want user", got[1].Role)
+			}
+			// Byte-identical contextless behavior: user message is the raw
+			// input alone, no activity block.
+			if got[1].Content != input {
+				t.Errorf("user message not byte-identical to input:\n got: %q\nwant: %q", got[1].Content, input)
+			}
+			if strings.Contains(got[1].Content, testActivitySubstr) {
+				t.Errorf("contextless user message contains activity block: %q", got[1].Content)
+			}
+			requireSessionRules(t, got[0].Content)
+		})
+	}
+}
+
+func TestIntentAnalyzer_BuildAnalysisMessages_WithDigest(t *testing.T) {
+	ia := NewIntentAnalyzer(nil, digestTestLogger())
+
+	digest := &SessionContextDigest{
+		LastTaskName:      "Fix the login bug",
+		LastTaskState:     "completed",
+		LastTaskAgent:     "coder",
+		LastResultSummary: "Fixed the login bug.",
+	}
+
+	got := ia.buildAnalysisMessages("did the change get made?", digest)
+	if len(got) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(got))
+	}
+
+	wantUser := "did the change get made?" +
+		"\n\n[Recent session activity]\n" +
+		"Last task: Fix the login bug (state: completed, agent: coder)\n" +
+		"Result summary: Fixed the login bug."
+	if got[1].Content != wantUser {
+		t.Errorf("user message:\n got: %q\nwant: %q", got[1].Content, wantUser)
+	}
+	requireSessionRules(t, got[0].Content)
+}
+
+func TestIntentAnalyzer_BuildAnalysisMessages_PartialDigest(t *testing.T) {
+	ia := NewIntentAnalyzer(nil, digestTestLogger())
+
+	// Name present; state, agent, and summary empty.
+	digest := &SessionContextDigest{LastTaskName: "Pending work item"}
+
+	got := ia.buildAnalysisMessages("what about the change?", digest)
+	if len(got) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(got))
+	}
+
+	wantUser := "what about the change?\n\n[Recent session activity]\nLast task: Pending work item"
+	if got[1].Content != wantUser {
+		t.Errorf("user message:\n got: %q\nwant: %q", got[1].Content, wantUser)
+	}
+	if strings.Contains(got[1].Content, "Result summary:") {
+		t.Errorf("user message contains Result summary line despite empty summary: %q", got[1].Content)
+	}
+	if strings.Contains(got[1].Content, "state:") {
+		t.Errorf("user message contains state segment despite empty state: %q", got[1].Content)
+	}
+	requireSessionRules(t, got[0].Content)
 }
