@@ -34,9 +34,22 @@ func NewStore(dbPath string, logger *slog.Logger) (*Store, error) {
 		logger = slog.Default()
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	// modernc.org/sqlite honors `_pragma=...` DSN params only; the
+	// mattn-style `_journal_mode`/`_busy_timeout` keys used here previously
+	// were silently ignored (see internal/plan/store_sqlite.go for the same
+	// rationale). WAL + busy_timeout keep parallel job claims/acks from
+	// turning into a SQLITE_BUSY storm.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	// Serialize writes at the connection-pool level: sqlite allows exactly
+	// one writer at a time, so a pool wider than the writer count only adds
+	// BUSY handoffs. Multiple *readers* remain allowed under WAL.
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	store := &Store{
