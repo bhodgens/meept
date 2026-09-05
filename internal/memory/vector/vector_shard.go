@@ -135,6 +135,10 @@ func NewVectorShardFromConfig(cfg VectorShardConfig) (*VectorShard, error) {
 	}
 
 	if err := shard.createIndex(); err != nil {
+		// Shadowed-err note (bughunt round-1): createIndex's failure is a
+		// NEW err here, so the deferred close above (which checks the
+		// OUTER err) would not fire and db would leak. Close explicitly.
+		db.Close()
 		return nil, fmt.Errorf("failed to create index: %w", err)
 	}
 
