@@ -92,6 +92,17 @@ type Claim struct {
 	Confidence float64     // 0.0-1.0, user-asserted
 	Tags       []string    // controlled-vocabulary tags
 	Status     ClaimStatus // lifecycle status
+
+	// ObservedAt is when the claim was observed to be true. Zero means
+	// "store time" (readers fall back to the memory's CreatedAt).
+	ObservedAt time.Time
+	// ValidFrom is the earliest instant the claim is in force. Nil = unbounded.
+	ValidFrom *time.Time
+	// ValidTo is the latest instant the claim is in force. Nil = unbounded.
+	ValidTo *time.Time
+	// Rev is the monotonic revision counter. 0 on create; incremented by 1
+	// on each supersede of the claim lineage (stored on the successor).
+	Rev int64
 }
 
 // Decision is a recorded call with expected outcome and review schedule.
@@ -127,6 +138,35 @@ func asString(v any) string {
 		return s
 	}
 	return ""
+}
+
+// claimRev reads the monotonic revision counter from claim metadata.
+// Absent or non-numeric values read as 0 (backward compatibility with
+// claims stored before temporal metadata existed). Metadata that has
+// round-tripped through JSON stores numbers as float64.
+func claimRev(meta map[string]any) int64 {
+	if v, ok := meta["rev"].(float64); ok {
+		return int64(v)
+	}
+	return 0
+}
+
+// claimInForce reports whether a claim memory is inside its validity window
+// at the given instant. Absent bounds are unbounded. Malformed timestamps are
+// treated as unbounded (fail-open) so a corrupt key cannot silently hide a
+// claim from enforcement.
+func claimInForce(mem Memory, now time.Time) bool {
+	if vf, ok := mem.Metadata["valid_from"].(string); ok && vf != "" {
+		if t, err := time.Parse(time.RFC3339, vf); err == nil && t.After(now) {
+			return false // not yet in force
+		}
+	}
+	if vt, ok := mem.Metadata["valid_to"].(string); ok && vt != "" {
+		if t, err := time.Parse(time.RFC3339, vt); err == nil && t.Before(now) {
+			return false // expired
+		}
+	}
+	return true
 }
 
 // stringTokenSet splits s on whitespace into a set of lowercase tokens.
@@ -180,6 +220,22 @@ func (m *Manager) StoreClaim(ctx context.Context, c Claim) (string, error) {
 	}
 	if len(c.Tags) > 0 {
 		meta["tags"] = c.Tags
+	}
+	// Temporal + revision metadata (plan: claim-temporal-validity). Zero/nil
+	// values omit the key so legacy-shaped claims produce byte-identical
+	// metadata to before (backward compat). Follows the review_at/horizon
+	// RFC3339 precedent in StoreDecision/StorePrediction.
+	if !c.ObservedAt.IsZero() {
+		meta["observed_at"] = c.ObservedAt.Format(time.RFC3339)
+	}
+	if c.ValidFrom != nil {
+		meta["valid_from"] = c.ValidFrom.Format(time.RFC3339)
+	}
+	if c.ValidTo != nil {
+		meta["valid_to"] = c.ValidTo.Format(time.RFC3339)
+	}
+	if c.Rev != 0 {
+		meta["rev"] = c.Rev
 	}
 	return m.Store(ctx, Memory{
 		Type:     MemoryTypeClaim,
@@ -481,6 +537,28 @@ func (m *Manager) MarkSuperseded(ctx context.Context, oldID, newID string) (redi
 			newID, oldStatus, oldID)
 	}
 
+	// Temporal + revision stamping (plan: claim-temporal-validity).
+	// The successor carries old rev + 1; the superseded claim's validity
+	// window closes at the supersede instant. Both are stamped in place so
+	// the graph edge targets stay valid.
+	supersedeAt := time.Now().UTC()
+	oldRev := claimRev(oldMem.Metadata)
+	if newMem.Metadata == nil {
+		newMem.Metadata = make(map[string]any)
+	}
+	newMem.Metadata["rev"] = oldRev + 1
+	if err := m.stampMetadataInPlace(ctx, newMem); err != nil {
+		return 0, "", fmt.Errorf("stamp successor rev: %w", err)
+	}
+	if oldMem.Metadata == nil {
+		oldMem.Metadata = make(map[string]any)
+	}
+	oldMem.Metadata["valid_to"] = supersedeAt.Format(time.RFC3339)
+	oldMem.Metadata["superseded_at"] = supersedeAt.Format(time.RFC3339)
+	if err := m.stampMetadataInPlace(ctx, oldMem); err != nil {
+		return 0, "", fmt.Errorf("stamp superseded validity: %w", err)
+	}
+
 	// Mark old version non-current.
 	if err := m.markVersionNonCurrent(ctx, oldID); err != nil {
 		return 0, "", fmt.Errorf("mark old non-current: %w", err)
@@ -530,6 +608,35 @@ func (m *Manager) MarkSuperseded(ctx context.Context, oldID, newID string) (redi
 		}
 	}
 	return redirectedEdges, auditID, nil
+}
+
+// stampMetadataInPlace persists a claim's metadata onto its existing row
+// without minting a new version row or changing the memory ID. Used by the
+// supersede path: StoreVersioned would create a NEW row ID, which would
+// orphan the EdgeTypeSuperseded edge target and any evidence edges that
+// point at these IDs.
+//
+// Collects the metadata under the manager RLock, releases it, then performs
+// the DB write (mutexio: no I/O under lock).
+func (m *Manager) stampMetadataInPlace(ctx context.Context, mem *Memory) error {
+	m.mu.RLock()
+	initialized := m.initialized
+	epis := m.episodic
+	m.mu.RUnlock()
+	if !initialized {
+		return errors.New("memory manager not initialized")
+	}
+	if epis == nil {
+		return errors.New("episodic memory not available")
+	}
+	metaJSON := (&Memory{Metadata: mem.Metadata}).MetadataJSON()
+	db := epis.store.GetDB()
+	_, err := db.ExecContext(ctx,
+		"UPDATE episodic_memories SET metadata_json = ? WHERE id = ?", metaJSON, mem.ID)
+	if err != nil {
+		return fmt.Errorf("stamp metadata for %s: %w", mem.ID, err)
+	}
+	return nil
 }
 
 // MarkResolved closes a prediction with the given outcome.
