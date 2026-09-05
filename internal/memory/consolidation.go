@@ -89,11 +89,17 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 	report := &ConsolidationReport{}
 	var errorCount int
 
-	// Access-based expiration (run before consolidation)
-	cfg := c.manager.Config().Expiration
-	if cfg.Enabled && cfg.AccessExpirationDays > 0 {
-		accessReport := c.runAccessBasedExpiration(ctx)
-		report.Expired = accessReport.Expired
+	// Access-based expiration (run before consolidation). Nil-manager
+	// guard (D-M4 companion): consolidateEpisodic checks c.manager, but
+	// Run read c.manager.Config() UNGUARDED first — a manager-less
+	// consolidator panicked here (its own test dodged it by calling
+	// consolidateEpisodic directly).
+	if c.manager != nil {
+		cfg := c.manager.Config().Expiration
+		if cfg.Enabled && cfg.AccessExpirationDays > 0 {
+			accessReport := c.runAccessBasedExpiration(ctx)
+			report.Expired = accessReport.Expired
+		}
 	}
 
 	// Episodic consolidation
@@ -234,6 +240,9 @@ func (c *Consolidator) runEpistemicDetectionPass(ctx context.Context) int {
 // removed memories; non-zero storeErrors/deleteErrors are logged at
 // warn level above.
 func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) *ConsolidationReport {
+	if c.manager == nil {
+		return &ConsolidationReport{}
+	}
 	cfg := c.manager.Config().Expiration
 	expiredMemories, err := c.backend.GetExpiredMemories(ctx, cfg.AccessExpirationDays)
 	if err != nil {

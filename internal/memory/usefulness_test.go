@@ -480,3 +480,28 @@ func TestConsolidateEpisodic_NilManagerWithUsefulnessFlagOn(t *testing.T) {
 		t.Fatalf("nil manager must skip the early usefulness batch, got %d delete batches", backend.batchNum)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// D-M4 companion (bughunt round-1, auditor 4 finding 7): Run() itself read
+// c.manager.Config().Expiration BEFORE any nil check — a manager-less
+// consolidator panicked in Run even though consolidateEpisodic was guarded
+// (the test above dodged it by calling consolidateEpisodic directly). Run
+// must complete on a manager-less consolidator.
+func TestConsolidatorRun_NilManagerDoesNotPanic(t *testing.T) {
+	now := time.Now()
+	old := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location()).Add(-48 * time.Hour)
+	backend := &recordingBackend{memories: makeMemories(2, old)}
+	c := NewConsolidator(ConsolidatorConfig{
+		Manager: nil,
+		Backend: backend,
+		Logger:  slog.New(slog.DiscardHandler),
+	})
+
+	report, err := c.Run(context.Background(), 24)
+	if err != nil {
+		t.Fatalf("Run with nil manager: %v", err)
+	}
+	if report == nil {
+		t.Fatal("report must not be nil")
+	}
+}
