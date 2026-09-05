@@ -657,3 +657,7 @@ These were raised during Phase-1 intake but did not survive verification. They a
 - Live classifier replaced by LFM2.5-Encoder-350M-Prompt-Router sidecar (scripts/prompt_router_sidecar.py, port 8082, stdlib HTTP, runtime-managed). Zero-shot lanes = dispatcher intent set.
 - Calibration gotcha: raw softmax top-lane prob (0.54-0.66 for decisive routes) sits BELOW the dispatcher's intent thresholds (0.5-0.85, tuned on generative self-assessed conf) and ShouldUseLLMResult rejects SILENTLY (no warn) → falls to heuristic. Sidecar odds-normalizes: conf = p/(p+1/N).
 - Capability matcher default OFF (agents.capability_match_enabled); ambient stopwords (agent/daemon/skill/bench/meept) added to extractor; tag extraction now applies stopwords too.
+
+### Runtime-test isolation hazard (2026-09-05)
+- meept runtime-manager unit tests spin REAL llama/sidecar runtimes against real ports/pidfiles — running them while a live daemon is up churns the production runtimes (observed 2026-09-04 23:46 + 2026-09-05 14:29: spawn_success→stop loops across 8080/8081/8082). Tests need ephemeral ports + scratch pidfile/cache dirs.
+- meept-bench --repo defaults to CWD (runner.go:54); headless scripts must pass --repo explicitly.
