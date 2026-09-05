@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -646,6 +647,23 @@ type AgentLoop struct {
 	// Session persistence (wired after construction)
 	sessionStore sessionStore
 
+	// sessionReader is a narrow, structural view of the session store for
+	// conversation-history restore on cache miss (session-continuity leaf
+	// 02). Wired via SetSessionStore when the passed store implements
+	// GetMessages; never used for writes.
+	sessionReader sessionMessageReader
+
+	// restoreMessageLimit is session.restore_message_limit (0 = restore
+	// all). Consumed by conversationRestoreFn to tail-cap restored
+	// history.
+	restoreMessageLimit int
+
+	// conversationRestoreFn hydrates a conversation from the session store
+	// on cache miss (session-continuity leaf 02). Nil until SetSessionStore
+	// receives a store implementing sessionMessageReader. Consumed by
+	// conversations.GetOrRestore on the turn path (RunOnceWithParts).
+	conversationRestoreFn func(id string) ([]llm.ChatMessage, error)
+
 	// Branch navigation (wired after construction)
 	branchManager branchManager
 
@@ -774,6 +792,17 @@ type sessionStore interface {
 // branchManager is an interface for branch navigation operations needed by AgentLoop.
 type branchManager interface {
 	ListBranches(sessionID string) ([]interface{}, error)
+}
+
+// sessionMessageReader is a narrow structural interface for reading
+// persisted session messages. It is satisfied by session.Store and
+// asserted at SetSessionStore time; existing sessionStore fakes are
+// unaffected because the assertion is optional. NOTE: the return type is
+// session.Message because Go interface satisfaction requires an exact
+// return-type match ([]session.Message cannot satisfy []sessionMessage),
+// and loop.go already imports internal/session.
+type sessionMessageReader interface {
+	GetMessages(sessionID string, offset, limit int) ([]session.Message, error)
 }
 
 // MCPServerInfo describes a connected MCP server for system prompt context.
@@ -2299,8 +2328,21 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		sanitizedMessage = cleanText
 	}
 
-	// Get or create conversation
-	conv := l.conversations.Get(conversationID)
+	// Get or restore conversation. Cache hit returns immediately; a miss
+	// hydrates the conversation from the session store via
+	// conversationRestoreFn (session-continuity leaf 02). GetOrRestore's
+	// restoreFn is a zero-arg closure, so the conversation ID is captured;
+	// a nil loop restore fn (no reader wired) degrades to Get + create.
+	conv, restoreErr := l.conversations.GetOrRestore(conversationID, func() ([]llm.ChatMessage, error) {
+		if l.conversationRestoreFn == nil {
+			return nil, nil
+		}
+		return l.conversationRestoreFn(conversationID)
+	})
+	if restoreErr != nil {
+		// conv is a fresh conversation; the turn proceeds unaffected.
+		l.logRestoreFailure(conversationID, restoreErr)
+	}
 
 	// Protect the conversation from LRU eviction while this turn is in-flight.
 	conv.MarkActive()
@@ -6610,6 +6652,16 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 			if l.sessionStore != nil {
 				l2.sessionStore = l.sessionStore
 			}
+			// Conversation-restore wiring (session-continuity leaf 02):
+			// clones get their own ConversationStore, so each clone needs
+			// the reader + restore fn or a cache miss would start empty.
+			// conversationRestoreFn is stateless (captures reader + limit),
+			// so sharing the template's instance is safe.
+			l2.restoreMessageLimit = l.restoreMessageLimit
+			if l.sessionReader != nil {
+				l2.sessionReader = l.sessionReader
+				l2.conversationRestoreFn = l.conversationRestoreFn
+			}
 		},
 		func(l2 *AgentLoop) {
 			if l.branchManager != nil {
@@ -6744,15 +6796,93 @@ func (l *AgentLoop) SetFileWatcher(fw *FileWatcherHook) {
 }
 
 // SetSessionStore wires a session store and config for persistence.
-// Stub implementation: the session store reference is retained for future use.
+// When the store implements sessionMessageReader (GetMessages), it is
+// additionally wired as the conversation-history restore source and the
+// restore limit is extracted from sessionCfg (config.SessionConfig).
 func (l *AgentLoop) SetSessionStore(store any, sessionCfg any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// Config first: buildConversationRestoreFn captures the restore limit
+	// at construction time, so it must be extracted before wiring.
+	if cfg, ok := sessionCfg.(config.SessionConfig); ok {
+		l.restoreMessageLimit = cfg.RestoreMessageLimit
+	}
 	if store != nil {
 		if ss, ok := store.(sessionStore); ok {
 			l.sessionStore = ss
 		}
+		// Narrow, optional assertion: stores that can read persisted
+		// messages also power conversation restore on cache miss
+		// (session-continuity leaf 02). Existing sessionStore fakes that
+		// lack GetMessages simply skip this branch.
+		if mr, ok := store.(sessionMessageReader); ok {
+			l.sessionReader = mr
+			l.conversationRestoreFn = l.buildConversationRestoreFn()
+		}
 	}
+}
+
+// buildConversationRestoreFn returns the restore function handed to
+// ConversationStore.GetOrRestore on cache miss. It reads persisted
+// messages, filters to user/assistant entries, sorts ascending by
+// timestamp, and tail-caps to restoreMessageLimit (0 = all). Unknown IDs
+// and empty histories return an empty (non-nil) slice with a nil error so
+// GetOrRestore yields a fresh conversation.
+func (l *AgentLoop) buildConversationRestoreFn() func(id string) ([]llm.ChatMessage, error) {
+	reader := l.sessionReader
+	limit := l.restoreMessageLimit
+	return func(id string) ([]llm.ChatMessage, error) {
+		if reader == nil || id == "" {
+			return []llm.ChatMessage{}, nil
+		}
+		// Both production stores treat limit<=0 as "no rows" (SQLite
+		// LIMIT 0; MemoryStore min(offset+0, len)), so limit 0 must be
+		// translated to a fetch-all sentinel. The reader has no count
+		// API, so restore always fetches all rows (ascending store order)
+		// and applies restoreMessageLimit as an in-memory TAIL cap below —
+		// fetching only `limit` rows would return the OLDEST N.
+		fetchLimit := math.MaxInt32
+		rows, err := reader.GetMessages(id, 0, fetchLimit)
+		if err != nil {
+			// GetOrRestore falls back to a fresh conversation on error;
+			// the error is logged by the caller (see logRestoreFailure).
+			return nil, err
+		}
+		out := make([]llm.ChatMessage, 0, len(rows))
+		for _, row := range rows {
+			// Filter to user/assistant "message" entries — session_messages
+			// also carries system/anchor/summary/compaction rows that must
+			// not leak into model-visible history (leaf Notes).
+			if row.EntryType != "message" ||
+				(row.Role != string(llm.RoleUser) && row.Role != string(llm.RoleAssistant)) {
+				continue
+			}
+			out = append(out, llm.ChatMessage{
+				Role:    llm.Role(row.Role),
+				Content: row.Content,
+			})
+		}
+		// GetMessages returns ascending (SQLite ORDER BY id; memory store
+		// is append-ordered). Rows were appended in store order, which the
+		// contract treats as ascending timestamp; the tail cap below
+		// preserves relative order. (Role/Content filtering already
+		// happened above; the tail cap takes the MOST RECENT N, i.e. the
+		// END of the ascending list.)
+		if limit > 0 && len(out) > limit {
+			out = out[len(out)-limit:]
+		}
+		return out, nil
+	}
+}
+
+// logRestoreFailure logs a restore failure exactly once per turn-path
+// acquisition. The conversation is already a fresh instance at this point,
+// so the turn proceeds unaffected.
+func (l *AgentLoop) logRestoreFailure(id string, err error) {
+	l.logger.Warn("conversation restore failed; starting fresh",
+		"conversation", id,
+		"error", err,
+	)
 }
 
 // SetBranchManager wires a branch manager for in-memory cache coordination.
