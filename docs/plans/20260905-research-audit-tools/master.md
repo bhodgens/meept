@@ -195,13 +195,20 @@ For each child document:
 
 | Doc | Status | Notes |
 |-----|--------|-------|
-| 01-mcp-catalog.md | REVIEWED | 2026-09-05. Orchestrator re-ran catalog tests (config + mcp ok). Deviations accepted: replaced pre-existing uncommitted obscura stub (name-uniqueness), test-only Go additions in internal/config/catalog_test.go. | 
-| 02-pdf-read/01-pdf-lib-wiring.md | REVIEWED | 2026-09-05. Orchestrator verified API-drift claims via go doc (NewReader=ReaderAt, Page no-error w/ bounds guard, GetPlainText nil-safe) — agent corrected the brief correctly. Note text verbatim (:90). Tests ok. Pseudo-version dep noted (no v0.3.0 tag exists). |
-| 02-pdf-read/02-tool-surface.md | REVIEWED | 2026-09-05. COMMITTED. Registration block verified in place (components.go ~:5489, after webFetchTool, 100KB + webSSRFGuard). secOrch fully mirrored incl. output sanitization. os.Getwd: 0 hits. Own test runs: builtin PDF ok + daemon Wiring/Registry ok. |
-| 02-pdf-read/03-webfetch-sniff.md | IMPLEMENTED | 2026-09-05. Orchestrator review PASS: guards at :270+:480 pre-stripHTML, Contract B text verbatim, own test run ok (15/15). Full-suite re-verify at integration. |
-| 03-spreadsheet/01-csv-writer.md | REVIEWED | 2026-09-05. Orchestrator code review PASS (seam + contract verbatim) + independent test re-run ok after package settled. Placeholder collision with xlsx leaf resolved by canonical file landing (xlsx leaf consumed it, did not touch). |
-| 03-spreadsheet/02-xlsx-writer.md | REVIEWED | 2026-09-05. Orchestrator review PASS: seam verbatim, streaming WriteTo, dedupe -1 guard correct, highlight row math header-aware; LICENSE independently verified BSD-3 in module cache. Deps: excelize v2.11.0 + indirects only. 7/7 tests ok. |
-| 03-spreadsheet/03-registration.md | REVIEWED | 2026-09-05. COMMITTED. Registration verified after pdfReadTool (:5497). Accepted deviations: no SetWorkingDir (ctx convention covers it, setter would be dead API); in-tool unconditional fence instead of nil-able FenceChecker — correct per Contract C. Own runs: Spreadsheet/CSV/XLSX ok + daemon Wiring/Registry ok. |
+| 01-mcp-catalog.md | COMPLETE | 2026-09-05. COMMITTED 826a5651. Catalog tests re-run by orchestrator. |
+| 02-pdf-read/01-pdf-lib-wiring.md | COMPLETE | 2026-09-05. COMMITTED 49841775. API-drift claims verified via go doc. |
+| 02-pdf-read/02-tool-surface.md | COMPLETE | 2026-09-05. COMMITTED 9b017602. Registration + secOrch mirror verified. |
+| 02-pdf-read/03-webfetch-sniff.md | COMPLETE | 2026-09-05. COMMITTED 49841775. Both paths guarded pre-stripHTML. |
+| 03-spreadsheet/01-csv-writer.md | COMPLETE | 2026-09-05. COMMITTED 49841775. |
+| 03-spreadsheet/02-xlsx-writer.md | COMPLETE | 2026-09-05. COMMITTED 49841775. BSD-3 license verified in module cache. |
+| 03-spreadsheet/03-registration.md | COMPLETE | 2026-09-05. COMMITTED dffca16e. |
+
+## PROJECT COMPLETE (2026-09-05)
+
+Integration verified: `go build ./...` clean, daemon builds, short suites for
+internal/tools/..., internal/config, internal/tools/mcp, internal/daemon all ok.
+Line-number corruption grep: 0 hits. Docs: AGENTS.md + tool-routing.md +
+external-integrations.md updated in f0b0c62f.
 
 ## Review Checklist (root)
 
