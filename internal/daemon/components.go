@@ -5486,6 +5486,15 @@ func registerBuiltinTools(
 	}
 	registry.Register(webFetchTool)
 
+	// PDF reading tool (plan 20260905-research-audit-tools, Contract A):
+	// text-layer extraction for PDF URLs/files; scanned PDFs return an
+	// explicit no-text-layer note rather than binary garbage.
+	pdfReadTool := builtin.NewPDFReadTool(100000, webSSRFGuard)
+	if secOrch != nil {
+		pdfReadTool.SetSecurityOrchestrator(secOrch)
+	}
+	registry.Register(pdfReadTool)
+
 	// Web search tool (DuckDuckGo)
 	webSearchTool := builtin.NewWebSearchTool(15 * time.Second)
 	if webSSRFGuard != nil {
