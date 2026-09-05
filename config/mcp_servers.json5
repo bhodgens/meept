@@ -303,5 +303,35 @@
       "type": "stdio",
       "command": ["cua-driver", "mcp"],
     },
+
+    // obscura: local-build headless browser engine (rust, apache-2.0) with
+    // built-in anti-detect, ~30 browser_* tools over stdio mcp. binary is
+    // the local release build (0.1.0-dev, 2026-09-05) at an absolute path —
+    // absolute because obscura is not on a standard path for the daemon's
+    // launch environment. supports geo-vantaged reads via OBSCURA_GEO_LOCATION
+    // ("lat,lon") + OBSCURA_TIMEZONE + OBSCURA_PROXY env passthrough.
+    // upstream: https://github.com/h4ckf0r0day/obscura
+    {
+      "name": "obscura",
+      "enabled": true,
+      "category": "browser",
+      "description": "obscura headless browser MCP: navigate/snapshot/markdown/evaluate/forms/cookies; anti-detect; geo+tz+proxy shim",
+      "type": "stdio",
+      "command": ["/Users/caimlas/git/obscura/target/release/obscura", "mcp"],
+    },
+
+    // excel: higher-capability xlsx manipulation fallback (pivot tables,
+    // charts, conditional formatting) via uvx. disabled by default: a
+    // subprocess write bypasses the pending_changes fence. enable only
+    // when the native spreadsheet_write tool's csv/xlsx surface is not
+    // enough. upstream: https://github.com/haris-musa/excel-mcp-server
+    {
+      "name": "excel",
+      "enabled": false,
+      "category": "data",
+      "description": "excel-mcp-server fallback: pivot tables, charts, formatting for xlsx when native spreadsheet_write is insufficient",
+      "type": "stdio",
+      "command": ["uvx", "excel-mcp-server", "stdio"],
+    },
   ],
 }

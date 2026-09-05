@@ -45,3 +45,94 @@ func TestCatalogCuaDriverEntry(t *testing.T) {
 		t.Errorf("env should be empty, got %v", found.Env)
 	}
 }
+
+// TestCatalogObscuraEntry verifies the shipped catalog parses and the
+// obscura entry is present exactly once, enabled by default, and launches
+// the local release build at its absolute path ("... obscura", "mcp") over
+// stdio in the browser category.
+func TestCatalogObscuraEntry(t *testing.T) {
+	cfg, err := LoadMCPConfig("../../config/mcp_servers.json5")
+	if err != nil {
+		t.Fatalf("LoadMCPConfig(catalog) failed: %v", err)
+	}
+
+	var found *mcp.ServerConfig
+	hits := 0
+	for i := range cfg.Servers {
+		if cfg.Servers[i].Name == "obscura" {
+			hits++
+			found = &cfg.Servers[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("obscura entry missing from catalog (%d servers)", len(cfg.Servers))
+	}
+	if hits != 1 {
+		t.Errorf("obscura entry appears %d times; server names must be unique", hits)
+	}
+
+	if !found.IsEnabled() {
+		t.Error("obscura must ship enabled: true")
+	}
+	wantCmd := []string{"/Users/caimlas/git/obscura/target/release/obscura", "mcp"}
+	if got := found.Command; len(got) != 2 || got[0] != wantCmd[0] || got[1] != wantCmd[1] {
+		t.Errorf("command = %v, want %v", got, wantCmd)
+	}
+	if found.Type != "" && found.Type != "stdio" {
+		t.Errorf("type = %q, want stdio (or empty for default)", found.Type)
+	}
+	if found.Category != "browser" {
+		t.Errorf("category = %q, want browser", found.Category)
+	}
+	if found.Description == "" {
+		t.Error("description should be non-empty for TUI display")
+	}
+	if len(found.Env) != 0 {
+		t.Errorf("env should be empty, got %v", found.Env)
+	}
+}
+
+// TestCatalogExcelEntry verifies the shipped catalog parses and the excel
+// fallback entry is present, disabled by default, and launches
+// "uvx excel-mcp-server stdio" over stdio in the data category.
+func TestCatalogExcelEntry(t *testing.T) {
+	cfg, err := LoadMCPConfig("../../config/mcp_servers.json5")
+	if err != nil {
+		t.Fatalf("LoadMCPConfig(catalog) failed: %v", err)
+	}
+
+	var found *mcp.ServerConfig
+	hits := 0
+	for i := range cfg.Servers {
+		if cfg.Servers[i].Name == "excel" {
+			hits++
+			found = &cfg.Servers[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("excel entry missing from catalog (%d servers)", len(cfg.Servers))
+	}
+	if hits != 1 {
+		t.Errorf("excel entry appears %d times; server names must be unique", hits)
+	}
+
+	if found.IsEnabled() {
+		t.Error("excel must ship enabled: false")
+	}
+	wantCmd := []string{"uvx", "excel-mcp-server", "stdio"}
+	if got := found.Command; len(got) != 3 || got[0] != wantCmd[0] || got[1] != wantCmd[1] || got[2] != wantCmd[2] {
+		t.Errorf("command = %v, want %v", got, wantCmd)
+	}
+	if found.Type != "" && found.Type != "stdio" {
+		t.Errorf("type = %q, want stdio (or empty for default)", found.Type)
+	}
+	if found.Category != "data" {
+		t.Errorf("category = %q, want data", found.Category)
+	}
+	if found.Description == "" {
+		t.Error("description should be non-empty for TUI display")
+	}
+	if len(found.Env) != 0 {
+		t.Errorf("env should be empty, got %v", found.Env)
+	}
+}
