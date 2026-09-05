@@ -13,9 +13,10 @@ import (
 // Pacing sub-block; the daemon maps the canonical values onto it at wiring
 // time (internal/llm cannot import internal/config — import cycle).
 type PacingConfig struct {
-	// Enabled gates pacing (D15: default OFF). A disabled — or nil —
-	// pacer is byte-identical to no pacer: Wait returns immediately and
-	// Observe mutates nothing.
+	// Enabled gates pacing (default ON as of fda25177 —
+	// pacing_default_test.go pins this; the earlier D15 default-OFF
+	// wording was stale). A disabled — or nil — pacer is byte-identical
+	// to no pacer: Wait returns immediately and Observe mutates nothing.
 	Enabled bool
 	// Target429PerHour is the tolerated throttle-429 rate per provider per
 	// hour ("tolerate at most N throttle 429/hour/provider"). A higher
