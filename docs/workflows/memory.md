@@ -73,6 +73,32 @@ ws = 0.005
 - **Periodic Updates**: Refreshed every N conversations
 - **Response Style Influence**: Adapts to user preferences
 
+### Claim Temporal Validity
+
+Claims carry optional temporal bounds and a monotonic revision counter.
+
+| Field | Metadata key | Meaning |
+|-------|--------------|---------|
+| ObservedAt | `observed_at` | when the claim was observed true (RFC3339; absent = store time) |
+| ValidFrom | `valid_from` | earliest instant the claim is in force (RFC3339; absent = unbounded) |
+| ValidTo | `valid_to` | latest instant the claim is in force (RFC3339; absent = unbounded) |
+| Rev | `rev` | monotonic revision; 0 on create, +1 on each supersede |
+
+Behavior:
+
+- **Supersede** (`meept memory supersede`) stamps the successor with
+  `rev = old rev + 1` and closes the superseded claim's window with
+  `valid_to = supersede time` (in place; graph edges keep pointing at the
+  same IDs).
+- **Enforcement:** claims outside their window are hard-excluded from
+  relationship detection and canonical-claim selection, with an explicit
+  `expired` reason logged — they never silently vanish from auditability.
+- **Visibility:** `meept memory expired` and the `list_expired_claims` tool
+  list them; `retain_claim` accepts `valid_from` / `valid_to` /
+  `observed_at` (RFC3339).
+- **Backward compatibility:** claims stored before this feature have none of
+  these keys and behave as unbounded, rev 0.
+
 ## Configuration
 
 ```toml

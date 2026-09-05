@@ -31,6 +31,7 @@ Examples:
 	cmd.AddCommand(newMemorySupersedeCmd())
 	cmd.AddCommand(newMemoryPromoteCmd())
 	cmd.AddCommand(newMemoryRejectCmd())
+	cmd.AddCommand(newMemoryExpiredCmd())
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 10, "Maximum number of results")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -454,6 +455,98 @@ func newMemoryPromoteCmd() *cobra.Command {
 			return nil
 		},
 	}
+	return cmd
+}
+
+func newMemoryExpiredCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "expired",
+		Short: "list claims whose validity window has closed",
+		Long: `List epistemic claims whose valid_to timestamp is in the past.
+
+Expired claims are hard-excluded from trust-weighted results; this command
+shows what has aged out so it can be re-verified or rejected.
+
+Examples:
+  meept memory expired           # List expired claims (max 20)
+  meept memory expired --limit 50`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			limit, err := cmd.Flags().GetInt("limit")
+			if err != nil {
+				return fmt.Errorf("read limit flag: %w", err)
+			}
+
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			rawResult, err := client.Call("memory.listExpired", map[string]any{"limit": limit})
+			if err != nil {
+				return fmt.Errorf("failed to list expired claims: %w", err)
+			}
+
+			var result struct {
+				Claims []struct {
+					MemoryID string `json:"memory_id"`
+					Text     string `json:"text"`
+					ValidTo  string `json:"valid_to"`
+					Rev      int64  `json:"rev"`
+					Status   any    `json:"status"`
+				} `json:"claims"`
+				// Newer daemons return raw memory results instead.
+				Memories []struct {
+					Memory struct {
+						ID       string         `json:"id"`
+						Content  string         `json:"content"`
+						Metadata map[string]any `json:"metadata"`
+					} `json:"memory"`
+				} `json:"memories"`
+			}
+			if err := json.Unmarshal(rawResult, &result); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			type row struct {
+				id, text, validTo string
+				rev               int64
+			}
+			var rows []row
+			for _, c := range result.Claims {
+				status, _ := c.Status.(string)
+				if status == "" {
+					continue
+				}
+				rows = append(rows, row{id: c.MemoryID, text: c.Text, validTo: c.ValidTo, rev: c.Rev})
+			}
+			if len(rows) == 0 {
+				for _, m := range result.Memories {
+					vt, _ := m.Memory.Metadata["valid_to"].(string)
+					rev := int64(0)
+					if f, ok := m.Memory.Metadata["rev"].(float64); ok {
+						rev = int64(f)
+					}
+					rows = append(rows, row{id: m.Memory.ID, text: m.Memory.Content, validTo: vt, rev: rev})
+				}
+			}
+
+			if len(rows) == 0 {
+				fmt.Println("no expired claims")
+				return nil
+			}
+			for _, r := range rows {
+				text := strings.ReplaceAll(r.text, "\n", " ")
+				runes := []rune(text)
+				if len(runes) > 80 {
+					text = string(runes[:80])
+				}
+				fmt.Printf("%s  rev=%d  valid_to=%s  %s\n", r.id, r.rev, r.validTo, text)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().Int("limit", 20, "max claims to list")
 	return cmd
 }
 

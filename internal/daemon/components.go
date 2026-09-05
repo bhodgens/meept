@@ -5571,6 +5571,7 @@ func registerBuiltinTools(
 
 		// Epistemic memory tools (Path A: explicit retention + destructive actions)
 		registry.Register(builtin.NewRetainClaimTool(memoryMgr))
+		registry.Register(builtin.NewListExpiredClaimsTool(memoryMgr))
 		registry.Register(builtin.NewRetainDecisionTool(memoryMgr))
 		registry.Register(builtin.NewRetainPredictionTool(memoryMgr))
 		registry.Register(builtin.NewMarkSupersededTool(memoryMgr, memoryMgr.Graph()))
