@@ -36,7 +36,9 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bot"
+	"github.com/caimlas/meept/internal/gate"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/pkg/id"
@@ -270,6 +272,12 @@ type GoalLoop struct {
 	// auditStore, when non-nil, receives an AuditFinding record whenever
 	// decideTier3 escalates a candidate to plan signoff (leaf 03).
 	auditStore *AuditStore
+
+	// chainStore, when set, receives one auditlog gate_result record after
+	// every completed quality-gate run (tamper-evident-audit-log leaf 02).
+	// Emit failures are logged and swallowed; the gate flow is never gated
+	// on the chain. Set once via SetChainStore at wiring time.
+	chainStore ChainEmitter
 
 	// Quality-gate wiring (leaf 08: quality-gated autonomy). gateBackend
 	// is the ExecutionBackend used to run gate commands and hash the
@@ -1011,10 +1019,15 @@ func (l *GoalLoop) runCompletionGate(ctx context.Context, cfg GateConfig, logger
 	if workdir == "" {
 		return nil, errors.New("gate configured but no workspace directory set")
 	}
+	gateStart := time.Now()
 	res, state, err := RunGate(ctx, cfg, backend, workdir, &prev)
 	if err != nil {
 		return nil, err
 	}
+	// Tamper-evident audit chain (leaf 02): every completed gate run is
+	// chained. Failures are logged, never fatal (master.md C5). The goal ID
+	// comes from the loop's active goal; empty when none is active.
+	l.emitGateResult(ctx, l.activeGoalID(ctx), *res, time.Since(gateStart))
 	l.mu.Lock()
 	l.lastGateState = state
 	if res.Passed {
@@ -1027,6 +1040,55 @@ func (l *GoalLoop) runCompletionGate(ctx context.Context, cfg GateConfig, logger
 	l.mu.Unlock()
 	logger.Debug("completion gate finished", "passed", res.Passed, "skipped", res.Skipped)
 	return res, nil
+}
+
+// SetChainStore wires the audit chain emitter for gate-result records.
+// Nil is ignored (setter nil-guard).
+func (l *GoalLoop) SetChainStore(e ChainEmitter) {
+	if e == nil {
+		return
+	}
+	l.mu.Lock()
+	l.chainStore = e
+	l.mu.Unlock()
+}
+
+// activeGoalID returns the active goal's ID, or "" when none is active. The
+// chain record omits goal_id in that case rather than inventing an ID.
+func (l *GoalLoop) activeGoalID(ctx context.Context) string {
+	goal, err := l.lookupActiveGoal(ctx)
+	if err != nil || goal == nil {
+		return ""
+	}
+	return goal.ID
+}
+
+// gateResultRecord maps a gate outcome to a chain record. The gate command
+// output is reduced to its SHA-256 — never stored raw (master.md C4).
+func gateResultRecord(goalID string, res gate.GateResult, dur time.Duration) auditlog.Record {
+	payload := map[string]any{
+		"goal_id":       goalID,
+		"passed":        res.Passed,
+		"skipped":       res.Skipped,
+		"duration_ms":   dur.Milliseconds(),
+		"output_sha256": auditlog.OutputSHA256(res.Output),
+	}
+	return auditlog.Record{
+		Type:    "gate_result",
+		Payload: auditlog.SanitizePayload(payload),
+		At:      time.Now().UTC(),
+	}
+}
+
+// emitGateResult chains a gate outcome. Failures are logged, never fatal
+// (frozen policy, master.md C5).
+func (l *GoalLoop) emitGateResult(ctx context.Context, goalID string, res gate.GateResult, dur time.Duration) {
+	if l.chainStore == nil {
+		return
+	}
+	if err := l.chainStore.Emit(gateResultRecord(goalID, res, dur)); err != nil {
+		slog.Warn("audit chain gate emit failed", "err", err, "goal_id", goalID)
+	}
 }
 
 // SetGateConfig installs the quality-gate config for this loop's active goal.

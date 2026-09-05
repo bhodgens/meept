@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -171,6 +172,38 @@ func NewManagerFromConfig(
 			"error", err)
 	} else {
 		result.AuditStore = as
+	}
+
+	// Construct the audit chain store (tamper-evident-audit-log leaf 02)
+	// mirroring the shared/standalone duality of the findings store above.
+	//
+	// Ownership: on the shared-DB path the chain store wraps the SAME
+	// *sql.DB pool as the other employee stores and is never closed
+	// independently (closing is owned by whoever closes the shared handle,
+	// e.g. the daemon's AuditStore.Close). On the standalone path the
+	// chain store opens audit_chain.db next to audit.db and owns that
+	// handle; its lifetime matches the daemon process, the same convention
+	// as the other stores wired here (wiring does not manage teardown).
+	//
+	// Construction is non-fatal: a chain failure leaves the findings store
+	// fully functional with chaining disabled (master.md C5 — findings
+	// remain the primary record; nil emitter = chaining disabled).
+	var chainStore *auditlog.Store
+	if sharedDB != nil {
+		// OpenStoreFromDB migrates and pins the shared pool to one
+		// connection, which serializes chain appends at the SQLite level.
+		chainStore, err = auditlog.OpenStoreFromDB(sharedDB, logger)
+	} else {
+		chainStore, err = auditlog.OpenStore(
+			filepath.Join(employeesDir, "audit_chain.db"), logger)
+	}
+	if err != nil {
+		empLog.Warn("employee wiring: audit chain store init failed; chaining disabled",
+			"error", err)
+		chainStore = nil
+	}
+	if as != nil && chainStore != nil {
+		as.SetChainEmitter(chainStore)
 	}
 
 	// Construct the Manager with all stores wired. Pass the undecorated
