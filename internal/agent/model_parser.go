@@ -173,16 +173,18 @@ func (p *ModelReassignmentParser) Parse(input string) *ParseResult {
 		Instruction: input,
 	}
 
-	// Try to match patterns
+	// Try to match patterns. A pattern whose match yields no plausible
+	// model reference (a prose false positive, e.g. "search memory for it"
+	// against the loose "X for Y" pattern) does not abort the scan — the
+	// scan continues so a later, valid match can still win. Only when NO
+	// pattern produces a plausible reference is the input treated as
+	// directive-free.
 	matched := false
 	for _, pattern := range p.patterns {
 		matches := pattern.FindStringSubmatch(input)
 		if matches == nil {
 			continue
 		}
-
-		matched = true
-		result.Found = true
 
 		// Extract named groups
 		modelsMatch := p.extractGroup(pattern, "models", matches)
@@ -194,6 +196,14 @@ func (p *ModelReassignmentParser) Parse(input string) *ParseResult {
 			directive.ModelReferences = p.parseModelReferences(modelsMatch)
 		}
 
+		if len(directive.ModelReferences) == 0 {
+			// Prose false positive — keep scanning.
+			continue
+		}
+
+		matched = true
+		result.Found = true
+
 		// Parse scope
 		if scopeMatch != "" {
 			directive.TargetScope = strings.TrimSpace(scopeMatch)
@@ -202,7 +212,7 @@ func (p *ModelReassignmentParser) Parse(input string) *ParseResult {
 			directive.TargetScope = actionMatch
 		}
 
-		break // Use first matching pattern
+		break // Use first pattern that yields a plausible directive
 	}
 
 	if !matched {
@@ -219,12 +229,20 @@ func (p *ModelReassignmentParser) Parse(input string) *ParseResult {
 	// Resolve model references to actual model configs
 	// (This is done by the caller with access to resolver)
 
-	// Check for ambiguities
+	// Check for ambiguities. If NO plausible model reference was parsed,
+	// the directive match was a false positive on ordinary prose (e.g.
+	// "search memory for it first" matches the loose "X for Y" pattern
+	// with models=". Search memory" scope="it") — a clarification here
+	// hijacked real task prompts and routed them to chat before the
+	// intent classifier ever ran. Treat it as no-match.
 	if len(directive.ModelReferences) == 0 {
-		result.Ambiguities = append(result.Ambiguities, "no_models_parsed")
-		directive.ClarificationNeeded = true
-		directive.ClarificationQuestions = append(directive.ClarificationQuestions,
-			"I couldn't identify specific model names. Which model would you like to use?")
+		if result.Ambiguities == nil {
+			result.Ambiguities = []string{"no_models_parsed"}
+		}
+		directive.ClarificationNeeded = false
+		result.Found = false
+		result.Directive = nil
+		return result
 	}
 
 	if directive.TargetScope == "" {
@@ -305,13 +323,54 @@ func (p *ModelReassignmentParser) parseModelReferences(input string) []string {
 				refs = append(refs, resolved)
 				continue
 			}
+			// Plausibility filter: prose fragments caught by the loose
+			// "X for Y" regexes (e.g. models=". Search memory" scope="it")
+			// must not count as model references — otherwise any task
+			// prompt mentioning "for <word>" triggers a bogus directive
+			// clarification and hijacks routing. A plausible reference is
+			// single-word (multi-word parts were already resolved via
+			// provider/alias above), alphanumeric-identifier-shaped, and
+			// not a common English word.
+			if len(words) == 1 && isPlausibleModelRef(firstWord) {
+				refs = append(refs, part)
+			}
+			continue
 		}
 
-		// Keep as-is if nothing else matched - it might be a direct model ref like "zai/glm-4.7"
-		refs = append(refs, part)
+		// Keep single-word parts as-is if nothing else matched — they
+		// might be direct model refs like "zai/glm-4.7".
+		if isPlausibleModelRef(part) {
+			refs = append(refs, part)
+		}
 	}
 
 	return refs
+}
+
+// isPlausibleModelRef reports whether s looks like a model reference
+// rather than an ordinary English word or sentence fragment. Used to
+// reject prose captured by the loose directive patterns.
+func isPlausibleModelRef(s string) bool {
+	if s == "" {
+		return false
+	}
+	// Must start with a letter or digit (rejects ". Search", "(it", etc.)
+	first := s[0]
+	isAlnumStart := (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || (first >= '0' && first <= '9')
+	if !isAlnumStart {
+		return false
+	}
+	// Must not contain whitespace or sentence punctuation.
+	if strings.ContainsAny(s, " 	(),;:!?'\"") {
+		return false
+	}
+	// Reject pure common-word refs via a small denylist (words that slip
+	// through the regex but are obviously prose).
+	switch strings.ToLower(s) {
+	case "it", "this", "that", "them", "the", "memory", "me", "us", "you":
+		return false
+	}
+	return true
 }
 
 // ResolveScope resolves a scope keyword to an IntentType.
