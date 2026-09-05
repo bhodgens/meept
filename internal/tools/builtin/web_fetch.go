@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -263,6 +264,22 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 	contentType := resp.Header.Get("Content-Type")
 	text := string(body)
 
+	// Never pass PDF bytes through stripHTML or text processing: sniff
+	// first and redirect to the pdf_read tool (Contract B,
+	// plan 20260905-research-audit-tools).
+	if pdfSniff(contentType, body) {
+		return tools.ToolResult{
+			Success: true,
+			Result: FetchResult{
+				Content:     fmt.Sprintf("PDF detected (%d bytes). Use the pdf_read tool to extract text.", len(body)),
+				URL:         resp.Request.URL.String(),
+				StatusCode:  resp.StatusCode,
+				ContentType: "application/pdf",
+			},
+			TaintLabel: taint.TaintExternal, // web-sourced content is externally tainted
+		}, nil
+	}
+
 	// Strip HTML if the response looks like HTML
 	if strings.Contains(strings.ToLower(contentType), "html") || strings.HasPrefix(strings.TrimSpace(text), "<!") {
 		text = stripHTML(text)
@@ -312,6 +329,15 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 		Evidence:   evidence,
 		TaintLabel: taint.TaintExternal, // web-sourced content is externally tainted
 	}, nil
+}
+
+// pdfSniff reports whether the response is a PDF, per Contract B
+// (plan 20260905-research-audit-tools): content-type OR %PDF magic bytes.
+func pdfSniff(contentType string, body []byte) bool {
+	if strings.Contains(strings.ToLower(contentType), "application/pdf") {
+		return true
+	}
+	return bytes.HasPrefix(body, []byte("%PDF"))
 }
 
 // stripHTML converts HTML to plain text using a proper HTML parser.
@@ -447,6 +473,22 @@ func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any
 
 	contentType := resp.Header.Get("Content-Type")
 	text := string(body)
+
+	// Never pass PDF bytes through stripHTML or text processing: sniff
+	// first and redirect to the pdf_read tool (Contract B,
+	// plan 20260905-research-audit-tools).
+	if pdfSniff(contentType, body) {
+		return tools.ToolResult{
+			Success: true,
+			Result: FetchResult{
+				Content:     fmt.Sprintf("PDF detected (%d bytes). Use the pdf_read tool to extract text.", len(body)),
+				URL:         resp.Request.URL.String(),
+				StatusCode:  resp.StatusCode,
+				ContentType: "application/pdf",
+			},
+			TaintLabel: taint.TaintExternal, // web-sourced content is externally tainted
+		}, nil
+	}
 
 	if strings.Contains(strings.ToLower(contentType), "html") || strings.HasPrefix(strings.TrimSpace(text), "<!") {
 		text = stripHTML(text)

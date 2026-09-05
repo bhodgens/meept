@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -554,5 +555,153 @@ func TestWebFetchTool_TaintLabel_Streaming(t *testing.T) {
 
 	if toolResult.TaintLabel != taint.TaintExternal {
 		t.Errorf("expected TaintLabel=%q, got %q", taint.TaintExternal, toolResult.TaintLabel)
+	}
+}
+
+// pdfSniffFixture is one row of the PDF sniff guard test table: a response
+// the test server serves and the expected outcome per Contract B
+// (plan 20260905-research-audit-tools).
+type pdfSniffFixture struct {
+	name        string
+	contentType string
+	body        []byte
+	wantHint    bool // true: expect the redirect-to-pdf_read hint
+}
+
+// fetchVia exercises the tool entry point named by via ("execute" or
+// "streaming") against the fixture's response.
+func (f pdfSniffFixture) fetchVia(t *testing.T, via string) FetchResult {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", f.contentType)
+		_, _ = w.Write(f.body)
+	}))
+	defer server.Close()
+
+	tool := NewWebFetchTool(time.Second*5, 50000)
+	// Test server binds to 127.0.0.1; bypass SSRF filter for these unit tests.
+	tool.SetAllowPrivateRanges(true)
+
+	var (
+		result any
+		err    error
+	)
+	switch via {
+	case "execute":
+		result, err = tool.Execute(context.Background(), map[string]any{"url": server.URL})
+	case "streaming":
+		result, err = tool.ExecuteStreaming(context.Background(), map[string]any{"url": server.URL}, func(tools.ProgressUpdate) {})
+	default:
+		t.Fatalf("unknown via %q", via)
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return unwrapFetchResult(t, result)
+}
+
+// TestWebFetchTool_PDFSniff verifies Contract B on both fetch paths: a
+// response that sniffs as a PDF (content-type or %PDF magic bytes) must be
+// short-circuited to a redirect-to-pdf_read hint instead of being passed
+// through stripHTML and text processing.
+func TestWebFetchTool_PDFSniff(t *testing.T) {
+	pdfBody := []byte("%PDF-1.7\n%âãÏÓ\n1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\ntrailer\n<< /Size 3 >>\n%%EOF")
+
+	htmlBody := []byte(`<!DOCTYPE html>
+<html>
+<head><title>Fine</title></head>
+<body><p>Just a normal page.</p></body>
+</html>`)
+
+	garbageBody := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, 0x02, 0xFE, 0xFF, 0x00, 0xAB}
+
+	hint := fmt.Sprintf("PDF detected (%d bytes). Use the pdf_read tool to extract text.", len(pdfBody))
+
+	fixtures := []pdfSniffFixture{
+		{
+			name:        "content-type application/pdf returns hint",
+			contentType: "application/pdf",
+			body:        pdfBody,
+			wantHint:    true,
+		},
+		{
+			name:        "generic content-type with %PDF- magic bytes returns hint",
+			contentType: "application/octet-stream",
+			body:        pdfBody,
+			wantHint:    true,
+		},
+		{
+			name:        "normal HTML unchanged",
+			contentType: "text/html; charset=utf-8",
+			body:        htmlBody,
+			wantHint:    false,
+		},
+		{
+			name:        "binary garbage without PDF markers unchanged",
+			contentType: "application/octet-stream",
+			body:        garbageBody,
+			wantHint:    false,
+		},
+	}
+
+	// paths lists both fetch paths under Contract B: the Execute path and
+	// the streaming (headers-variant) path.
+	paths := []string{"execute", "streaming"}
+
+	for _, via := range paths {
+		t.Run(via, func(t *testing.T) {
+			for _, f := range fixtures {
+				t.Run(f.name, func(t *testing.T) {
+					got := f.fetchVia(t, via)
+
+					if f.wantHint {
+						want := fmt.Sprintf("PDF detected (%d bytes). Use the pdf_read tool to extract text.", len(f.body))
+						if got.Content != want {
+							t.Errorf("hint mismatch:\n got %q\nwant %q", got.Content, want)
+						}
+						if got.ContentType != "application/pdf" {
+							t.Errorf("expected ContentType %q, got %q", "application/pdf", got.ContentType)
+						}
+						if !strings.HasPrefix(got.Content, "PDF detected") {
+							t.Errorf("expected hint, got garbage text %q", got.Content[:min(60, len(got.Content))])
+						}
+					} else {
+						if got.Content == hint {
+							t.Errorf("hint fired on non-PDF response: %q", got.Content)
+						}
+						if got.ContentType == "application/pdf" && f.contentType != "application/pdf" {
+							t.Errorf("expected ContentType %q, got %q", f.contentType, got.ContentType)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestPdfSniff unit-tests the sniff helper's two detection branches and
+// its non-PDF negatives directly.
+func TestPdfSniff(t *testing.T) {
+	cases := []struct {
+		name        string
+		contentType string
+		body        []byte
+		want        bool
+	}{
+		{"content-type only", "application/pdf", []byte("whatever"), true},
+		{"content-type with charset", "application/pdf; charset=binary", []byte("whatever"), true},
+		{"magic bytes only", "application/octet-stream", []byte("%PDF-1.4 body"), true},
+		{"magic bytes empty content-type", "", []byte("%PDF-1.7\nrest"), true},
+		{"neither", "text/html", []byte("<html></html>"), false},
+		{"empty everything", "", nil, false},
+		{"pdf marker mid-body not at start", "text/plain", []byte("see %PDF- inside"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pdfSniff(tc.contentType, tc.body); got != tc.want {
+				t.Errorf("pdfSniff(%q, %q) = %v, want %v", tc.contentType, tc.body, got, tc.want)
+			}
+		})
 	}
 }
