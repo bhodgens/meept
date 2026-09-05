@@ -170,8 +170,7 @@ func TestCodex429QuotaWindowBodyOnStreamingPath(t *testing.T) {
 		t.Fatal("expected error for 429 on streaming path")
 	}
 
-	var qErr *QuotaResetError
-	if !errors.As(err, &qErr) {
+	if _, ok := errors.AsType[*QuotaResetError](err); !ok {
 		t.Fatalf("streaming error %v (%T) is not *QuotaResetError — quota body unread", err, err)
 	}
 }
