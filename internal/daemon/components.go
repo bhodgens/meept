@@ -130,6 +130,14 @@ type Components struct {
 	SessionHandler            *session.Handler
 	EmbeddingWorker           *session.EmbeddingWorker
 
+	// ParkStore persists parked turns (quota/throttle-parked chat turns
+	// and goal-loop episodes) across daemon restarts
+	// (agent.SQLiteParkStore over <data_dir>/parks.db). Nil when the
+	// store failed to open — parkers then run memory-only with their
+	// legacy drop-at-shutdown behaviour. Owned here so stopComponents
+	// closes the handle after the parkers have stopped.
+	ParkStore *agent.SQLiteParkStore
+
 	// Multi-agent orchestration components
 	Queue         queue.Queue
 	QueueHandler  *queue.Handler
@@ -1827,6 +1835,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.SessionStore = sessionStore
 	}
 
+	// Parked-turn persistence (durability for D9 universal parking):
+	// quota/throttle-parked chat turns and goal-loop episodes survive
+	// daemon restarts via a dedicated parks.db. Deliberately NOT the
+	// session store's handle: the parker writes from resume goroutines,
+	// and a separate WAL database keeps lock contention off the chat
+	// hot path. Best-effort like every parker side channel — a failed
+	// open logs a warning and every parker runs memory-only (the exact
+	// pre-persistence behaviour).
+	parksDB := filepath.Join(cfg.Daemon.DataDir, "parks.db")
+	parkStore, parkStoreErr := agent.NewSQLiteParkStore(parksDB, logger.With("component", "park-store"))
+	if parkStoreErr != nil {
+		logger.Warn("Failed to create park store — parked turns will NOT survive restarts",
+			"error", parkStoreErr)
+	} else {
+		c.ParkStore = parkStore
+	}
+
 	// Create session handler with summarizer if LLM is available
 	sessionOpts := []session.HandlerOption{}
 	var summarizer *session.Summarizer
@@ -2167,6 +2192,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, c.TokenStore)
 
+
 	acpMgr, acpErr := applyACPFromConfig(cfg.ACP)
 	if acpErr != nil {
 		return nil, acpErr
@@ -2434,6 +2460,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if c.ChatHandler.QuotaResumeWatcher() != nil {
 			c.ChatHandler.QuotaResumeWatcher().SetParkEventBus(msgBus)
 		}
+		// Parked-turn persistence (chat kind): quota-parked chat turns
+		// survive restarts and auto-resume on the next boot. Nil-safe
+		// when the park store is absent (memory-only fallback).
+		if c.ParkStore != nil && c.ChatHandler.QuotaResumeWatcher() != nil {
+			c.ChatHandler.QuotaResumeWatcher().SetParkPersistence(c.ParkStore)
+		}
 
 		// Throttle parking (llm-resilience-forest tree 03 leaf 02, D4/D8):
 		// the loop parks ThrottleBackoffError turns on a TurnParker whose
@@ -2455,6 +2487,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// The resume callback is nil at this point (SetThrottleParker below
 		// installs the class router), and Start no-ops silently when the
 		// callback is nil (parked_turn.go) — so start AFTER wiring.
+		// Parked-turn persistence: the chat parker's rows are scoped
+		// kind=chat in parks.db. Wired before Start (below) so the first
+		// Start re-arms chat turns parked before this boot. Nil-safe:
+		// when the park store failed to open, parking stays memory-only.
+		if c.ParkStore != nil {
+			throttleParker.SetParkPersistence(c.ParkStore, agent.ParkKindChat)
+		}
 		c.ChatHandler.SetThrottleParker(throttleParker)
 		throttleParker.Start(c.ctx)
 		agent.SetFailurePolicyDefaults(llm.FailurePolicyConfig{
@@ -4082,6 +4121,42 @@ func (c *Components) Start(ctx context.Context) error {
 			// resumes emit the same ParkTurnEvent on agent.quota_wait as the
 			// chat parkers, so the agents-tab wait labels cover employees.
 			goalTurnParker.SetParkEventBus(c.msgBus)
+			// Parked-turn persistence (episode kind): parked episodes survive
+			// daemon restarts — saved at park, deleted at resume, re-armed on
+			// the next start. The key override carries the H4 dedup identity
+			// (employee + phase + trigger, FiredAt excluded) so a re-parked
+			// episode overwrites its own row instead of accumulating
+			// duplicates across restarts. The payload shape is the
+			// employee-local goalTurnPayload, decoded leniently here so
+			// malformed payloads still persist under a fallback key.
+			if c.ParkStore != nil {
+				goalTurnParker.SetParkPersistence(c.ParkStore, agent.ParkKindEpisode)
+				// Key mirrors the employee parker's H4 identity:
+				// employee + phase + trigger (source|topic), FiredAt excluded
+				// — nil triggers (reflect/approve phases) normalize to "nil",
+				// exactly like employee.triggerKey. Loops are one-episode-at-
+				// a-time per employee, so this is unique per live park.
+				goalTurnParker.SetParkKey(func(rec agent.ParkedTurnRecord) string {
+					var p struct {
+						Phase   string `json:"phase"`
+						Trigger *struct {
+							Source string `json:"source"`
+							Topic  string `json:"topic"`
+						} `json:"trigger"`
+					}
+					if uerr := json.Unmarshal(rec.TurnPayload, &p); uerr != nil {
+						// Lenient decode: a malformed legacy payload still
+						// persists under the nil-trigger fallback key.
+						p.Phase = ""
+						p.Trigger = nil
+					}
+					triggerID := "nil"
+					if p.Trigger != nil {
+						triggerID = p.Trigger.Source + "|" + p.Trigger.Topic
+					}
+					return rec.AgentID + "|" + p.Phase + "|" + triggerID
+				})
+			}
 			goalEpisodeParker := employee.NewEpisodeParker(goalTurnParker, policyCfg,
 				c.Logger.With("component", "goal-episode-parker"))
 
@@ -4578,6 +4653,20 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		if err := c.ChatHandler.Stop(ctx); err != nil {
 			lastErr = err
 		}
+	}
+
+	// Close the park store AFTER the parkers have stopped (ChatHandler.Stop
+	// above joined the quota watcher; the goal-episode parker is joined by
+	// the manager wiring). Rows stay on disk by design: parked turns
+	// re-arm on the next boot — keep, never drop, per the durability goal.
+	if c.ParkStore != nil {
+		if err := c.ParkStore.Close(); err != nil {
+			c.Logger.Error("Failed to close park store", "error", err)
+			lastErr = err
+		} else {
+			c.Logger.Info("Park store closed")
+		}
+		c.ParkStore = nil
 	}
 
 	if c.StatusHandler != nil {

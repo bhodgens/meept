@@ -16,10 +16,16 @@ package agent
 //   - maxWait <= 0 falls back to llm.DefaultQuotaMaxWait (same default
 //     source as the quota watcher, now per-parker).
 //
-// The parker is memory-only: records parked when Stop runs are dropped
-// (logged at warn) and are not persisted across restarts — mirroring
-// QuotaResumeWatcher, which holds no persistence either (quota blocks are
-// in-memory, so a restart re-probes providers anyway).
+// Persistence (park_store_sqlite.go): when a ParkPersistence is wired via
+// SetParkPersistence, every accepted Park mirrors its record to the store
+// under a kind-scoped persistence key, every resumed record's row is
+// deleted before its resume callback runs (at-most-once: a crash mid-resume
+// cannot double-deliver a reply), and Start re-arms surviving rows from the
+// last run — expired rows are pruned at load. Without a wired store the
+// parker stays memory-only: records parked when Stop runs are dropped
+// (logged at warn) and are not persisted across restarts — mirroring the
+// pre-persistence QuotaResumeWatcher (quota blocks were in-memory, so a
+// restart re-probed providers anyway).
 
 import (
 	"context"
@@ -37,6 +43,12 @@ import (
 // records. It is the canonical source for DefaultQuotaResumePollInterval
 // (quota_resume.go), which remains the exported quota-facing alias.
 const DefaultTurnParkerPollInterval = 10 * time.Minute
+
+// parkPersistTimeout bounds each persistence round-trip (save/delete)
+// issued by the parker. Park runs on the caller's request path, so the
+// bound must stay small; a timed-out write is logged and the record
+// continues memory-only.
+const parkPersistTimeout = 5 * time.Second
 
 // ParkedTurnRecord is the class-agnostic parked-turn record (frozen;
 // SHARED-CONVENTIONS §4.5 / master Contract 1). NAME GUARD: the type is
@@ -73,8 +85,9 @@ type ParkedTurnRecord struct {
 //
 // A panicking resume callback is recovered, logged, and its record
 // dropped — the watcher keeps serving later records. The parker is
-// best-effort: records parked when Stop runs are dropped (logged at warn)
-// and are not persisted across restarts.
+// best-effort in memory: with persistence wired, records parked when Stop
+// runs survive in the store and re-arm on the next Start (Stop only logs
+// the count); without persistence they are dropped (logged at warn).
 type TurnParker struct {
 	logger       *slog.Logger
 	pollInterval time.Duration
@@ -86,8 +99,26 @@ type TurnParker struct {
 	// to outside the mutex; installed once at wiring time.
 	parkEventBus parkEventBus
 
+	// parkPersistence, when set, mirrors parked records to durable
+	// storage (park_store_sqlite.go). Like parkEventBus it is installed
+	// once at wiring time, before Start, and read without the mutex.
+	// Nil = memory-only behaviour (unchanged legacy semantics).
+	parkPersistence ParkPersistence
+	// parkKind scopes this parker's persisted rows (chat vs episode);
+	// meaningful only when parkPersistence is set.
+	parkKind ParkKind
+	// parkKeyOverride, when set, derives a record's persistence key
+	// (dedup identity) instead of the chat-side default. Episode wiring
+	// uses it so a re-parked episode overwrites its own row (the
+	// table-level twin of the employee parker's H4 dedup map). Installed
+	// at wiring time like the fields above.
+	parkKeyOverride func(rec ParkedTurnRecord) string
+
 	mu         sync.Mutex
 	parked     []ParkedTurnRecord
+	// parkKeys parallel-parks persistence keys (index-aligned while the
+	// record is queued; "" for records parked without persistence).
+	parkKeys   []string
 	resumeFunc func(ctx context.Context, turn ParkedTurnRecord)
 
 	cancel   context.CancelFunc
@@ -156,7 +187,10 @@ func (p *TurnParker) SetResumeFunc(resume func(context.Context, ParkedTurnRecord
 }
 
 // Start begins the background polling loop. Safe to call once; subsequent
-// calls are no-ops.
+// calls are no-ops. With persistence wired (SetParkPersistence), the first
+// Start also re-arms records persisted by the previous run: survivors are
+// queued, expired rows are pruned by the store, and already-due records
+// drain immediately.
 func (p *TurnParker) Start(ctx context.Context) {
 	if p == nil || p.resumeFunc == nil {
 		return
@@ -169,6 +203,8 @@ func (p *TurnParker) Start(ctx context.Context) {
 	runCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 	p.mu.Unlock()
+
+	p.reArm(ctx)
 
 	p.wg.Add(1)
 	go func() {
@@ -191,7 +227,8 @@ func (p *TurnParker) Start(ctx context.Context) {
 }
 
 // Stop halts the polling loop and waits for it to exit. Records that have
-// not yet resumed are logged and dropped.
+// not yet resumed stay in the persistence store (if wired) and re-arm on
+// the next Start; without persistence they are logged and dropped.
 func (p *TurnParker) Stop() {
 	if p == nil {
 		return
@@ -206,8 +243,33 @@ func (p *TurnParker) Stop() {
 
 	p.wg.Wait()
 	if remaining > 0 {
-		p.logger.Warn("turn parker stopped with parked records dropped", "dropped", remaining)
+		if p.parkPersistence != nil {
+			p.logger.Info("turn parker stopped — parked records persisted for next start",
+				"parked", remaining,
+				"kind", string(p.parkKind),
+			)
+		} else {
+			p.logger.Warn("turn parker stopped with parked records dropped", "dropped", remaining)
+		}
 	}
+}
+
+// parkKeyForNewRecord derives the persistence key for a freshly parked
+// record. Chat turns are intentionally NOT deduped (two different user
+// messages are two turns), so the key gets a wall-clock nanosecond
+// component; episode parkers override per-record keys via SetParkKey
+// (their H4 dedup identity lives in the payload, not the record). Called
+// with the parker mutex HELD (pure computation, no I/O).
+func (p *TurnParker) parkKeyForNewRecord(rec ParkedTurnRecord) string {
+	if p.parkPersistence == nil {
+		return ""
+	}
+	if p.parkKeyOverride != nil {
+		if key := p.parkKeyOverride(rec); key != "" {
+			return key
+		}
+	}
+	return parkClassString(rec.Class) + "|" + rec.SessionID + "|" + p.now().UTC().Format(chatPersistenceKeyTimeFormat)
 }
 
 // Park enqueues a record for later retry once its resume time passes.
@@ -247,17 +309,24 @@ func (p *TurnParker) Park(turn ParkedTurnRecord) bool {
 	turn.ResumeAt = scheduledAt
 	p.mu.Lock()
 	p.parked = append(p.parked, turn)
+	// Persistence key: chat parkers (no payload context here) use the
+	// class + session + park-time-nanoseconds key so distinct turns stay
+	// distinct; re-armed records keep the key they were stored under.
+	parkKey := p.parkKeyForNewRecord(turn)
+	p.parkKeys = append(p.parkKeys, parkKey)
 	n := len(p.parked)
 	// Keep the queue ordered by resume time so drainDue can pop from the
 	// front without scanning (typical case: homogeneous resume times).
 	for i := n - 1; i > 0; i-- {
 		if p.parked[i].ResumeAt.Before(p.parked[i-1].ResumeAt) {
 			p.parked[i], p.parked[i-1] = p.parked[i-1], p.parked[i]
+			p.parkKeys[i], p.parkKeys[i-1] = p.parkKeys[i-1], p.parkKeys[i]
 		} else {
 			break
 		}
 	}
 	p.mu.Unlock()
+	p.persistPark(parkKey, turn)
 	p.logger.Info("parked turn pending resume",
 		"class", turn.Class,
 		"session_id", turn.SessionID,
@@ -365,10 +434,22 @@ func (p *TurnParker) drainDue(ctx context.Context) {
 		return
 	}
 	due := p.parked[:dueIdx]
+	dueKeys := p.parkKeys[:dueIdx]
 	remaining := make([]ParkedTurnRecord, len(p.parked)-dueIdx)
 	copy(remaining, p.parked[dueIdx:])
+	remainingKeys := make([]string, len(p.parkKeys)-dueIdx)
+	copy(remainingKeys, p.parkKeys[dueIdx:])
 	p.parked = remaining
+	p.parkKeys = remainingKeys
 	p.mu.Unlock()
+	// Persistence delete happens BEFORE each resume callback: if the
+	// daemon dies mid-resume the row is already gone, so the record
+	// re-arms on the next boot exactly zero times (at-most-once resume —
+	// a surviving row could never double-deliver a reply). Delete
+	// failures are logged, not fatal: the drain continues.
+	for _, key := range dueKeys {
+		p.unpersistPark(key)
+	}
 	p.logger.Info("resume window passed — resuming parked records",
 		"class", due[0].Class,
 		"count", len(due),
@@ -479,6 +560,112 @@ func (p *TurnParker) SetParkEventBus(b parkEventBus) {
 		return
 	}
 	p.parkEventBus = b
+}
+
+// SetParkPersistence wires durable parked-turn storage
+// (park_store_sqlite.go) and the ParkKind scoping its rows. Nil store
+// restores memory-only behaviour. Like SetParkEventBus this is a
+// wiring-time setter: call it once, before Start (re-arm happens in
+// Start), so no lock is needed afterwards.
+func (p *TurnParker) SetParkPersistence(store ParkPersistence, kind ParkKind) {
+	if p == nil || store == nil {
+		return
+	}
+	p.parkPersistence = store
+	p.parkKind = kind
+}
+
+// SetParkKey installs a per-record persistence-key override (episode
+// wiring: the H4 employee+phase+trigger identity derived from
+// goalTurnPayload). Nil disables the override (chat-side default keys).
+// Wiring-time setter, like SetParkPersistence.
+func (p *TurnParker) SetParkKey(keyFn func(rec ParkedTurnRecord) string) {
+	if p == nil {
+		return
+	}
+	p.parkKeyOverride = keyFn
+}
+
+// reArm loads this parker's kind from the persistence store and queues
+// every surviving record (expired rows are pruned by Load itself). Called
+// from Start before the polling goroutine spawns, so records whose resume
+// time already passed while the daemon was down are drained by the
+// immediate drainDue below — within one poll interval of boot instead of
+// one poll interval late.
+//
+// Persistence is load-best-effort: a store failure logs and leaves the
+// in-memory queue empty (the daemon still runs; the records are retried on
+// the next boot).
+func (p *TurnParker) reArm(ctx context.Context) {
+	if p.parkPersistence == nil {
+		return
+	}
+	now := p.now()
+	records, keys, err := p.parkPersistence.Load(ctx, p.parkKind, now)
+	if err != nil {
+		p.logger.Warn("park persistence: re-arm load failed — records left for next boot",
+			"kind", string(p.parkKind),
+			"error", err,
+		)
+		return
+	}
+	if len(records) == 0 {
+		return
+	}
+	p.mu.Lock()
+	for i, rec := range records {
+		p.parked = append(p.parked, rec)
+		p.parkKeys = append(p.parkKeys, keys[i])
+	}
+	sort.SliceStable(p.parked, func(i, j int) bool {
+		return p.parked[i].ResumeAt.Before(p.parked[j].ResumeAt)
+	})
+	n := len(p.parked)
+	p.mu.Unlock()
+	p.logger.Info("park persistence: re-armed records from previous run",
+		"kind", string(p.parkKind),
+		"count", n,
+	)
+	// Records whose wait expired while the daemon was down resume
+	// immediately (persistence extends MaxWait past shutdown; the
+	// pre-persistence contract dropped them entirely).
+	p.drainDue(ctx)
+}
+
+// persistPark mirrors an accepted park to the store. Best-effort: a
+// failure is logged and the turn stays parked in memory only (matching
+// the legacy no-persistence behaviour for that record).
+func (p *TurnParker) persistPark(key string, rec ParkedTurnRecord) {
+	if p.parkPersistence == nil || key == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), parkPersistTimeout)
+	defer cancel()
+	if err := p.parkPersistence.Save(ctx, p.parkKind, key, rec); err != nil {
+		p.logger.Warn("park persistence: save failed — record parked in memory only",
+			"kind", string(p.parkKind),
+			"session_id", rec.SessionID,
+			"error", err,
+		)
+	}
+}
+
+// unpersistPark removes a record's row. Called on resume (delete happens
+// BEFORE the callback: at-most-once resume, no resurrection) and on
+// post-restart drops. Best-effort: a failure is logged and never blocks
+// the drain loop.
+func (p *TurnParker) unpersistPark(key string) {
+	if p.parkPersistence == nil || key == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), parkPersistTimeout)
+	defer cancel()
+	if err := p.parkPersistence.Delete(ctx, p.parkKind, key); err != nil {
+		p.logger.Warn("park persistence: delete failed — record may re-arm on next boot",
+			"kind", string(p.parkKind),
+			"error", err,
+		)
+	}
 }
 
 // publishParkEvent marshals ev and publishes it on the agent.quota_wait

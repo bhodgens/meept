@@ -33,9 +33,15 @@ package employee
 // documented new state), with goalTurnPayload as its re-entry snapshot.
 // No parallel episode store and no new bus topics.
 //
-// The parker is memory-only (leaf 01): a daemon restart drops parked
-// episodes; the periodic scheduler (ScheduleAssessJobs) naturally
-// re-assesses those employees on its next tick.
+// The parker is durable since parked-turn persistence: when the daemon
+// wires agent.SQLiteParkStore, parked episodes survive a daemon restart —
+// they are written to the parked_turns table at park time, deleted at
+// resume, and re-armed into the shared parker on the next start (the
+// periodic scheduler ALSO re-assesses those employees on its next tick,
+// so both paths can fire after a restart; that is acceptable double
+// coverage, and the H4 dedup still collapses duplicate re-parks of the
+// same trigger within one process). Without a wired store the parker
+// stays memory-only (leaf 01): a restart drops parked episodes.
 
 import (
 	"context"

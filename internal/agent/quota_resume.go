@@ -111,15 +111,18 @@ func recordToQuotaTurn(rec ParkedTurnRecord) (QuotaParkedTurn, error) {
 // parked (the caller surfaces the error instead), matching contract 7's
 // "schedule requeue at min(unblockAt, now+MaxWait)".
 //
-// The watcher is best-effort: turns parked when the daemon shuts down are
-// dropped (logged at warn) and are not persisted across restarts. Quota
-// blocks are in-memory, so a restart re-probes providers anyway.
+// The watcher is best-effort in memory: when the daemon wires parked-turn
+// persistence (SetParkPersistence → the inner TurnParker), turns parked at
+// shutdown survive in the store and auto-resume on the next start. Without
+// it, turns parked when the daemon shuts down are dropped (logged at warn)
+// and are not persisted across restarts; quota blocks are in-memory, so a
+// restart re-probes providers anyway.
 //
 // Since tree 03 leaf 01 this is a delegating wrapper over a TurnParker:
 // the watcher refuses over-MaxWait waits (quota contract) before the
 // parker's generic min(ResumeAt, now+MaxWait) soft-stop can reschedule,
-// and owns the quota-facing log lines. Persistence: none — the underlying
-// TurnParker is memory-only, mirroring the original watcher.
+// and owns the quota-facing log lines. Persistence: rides the inner
+// TurnParker's ParkPersistence when wired (chat kind); none otherwise.
 type QuotaResumeWatcher struct {
 	logger     *slog.Logger
 	maxWait    time.Duration
@@ -292,6 +295,17 @@ func (w *QuotaResumeWatcher) SetParkEventBus(b parkEventBus) {
 		return
 	}
 	w.turns.SetParkEventBus(b)
+}
+
+// SetParkPersistence forwards parked-turn persistence to the inner
+// TurnParker (chat kind), so quota-parked chat turns survive daemon
+// restarts and re-arm on the next start. Nil-guarded; wiring-time setter —
+// call before Start (re-arm happens in Start).
+func (w *QuotaResumeWatcher) SetParkPersistence(store ParkPersistence) {
+	if w == nil || store == nil {
+		return
+	}
+	w.turns.SetParkPersistence(store, ParkKindChat)
 }
 
 // drainDue resumes every parked turn whose unblock time has passed,
