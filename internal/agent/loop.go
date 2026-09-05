@@ -4104,7 +4104,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				len(strings.Fields(response.Reasoning)), // approx tokens; cheap proxy
 			)
 			if l.reasonWatch.Breach(l.guards.ReasoningTokenCap, l.guards.ReasoningStreakTurns) {
-				if l.reasonWatchStreakBreach {
+				l.mu.Lock()
+				breached := l.reasonWatchStreakBreach
+				l.reasonWatchStreakBreach = true
+				l.mu.Unlock()
+				if breached {
 					// Second breach: terminate gracefully.
 					l.logger.Warn("Reasoning-only streak breached twice, terminating gracefully",
 						"iteration", iteration,
@@ -4125,10 +4129,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				)
 				conv.AddAssistantMessage("[reasoning-only turn]")
 				conv.AddUserMessage("[system: you have been thinking without producing output. provide your answer as visible text or make a tool call now.]")
-				l.reasonWatchStreakBreach = true
 				continue
 			}
+			l.mu.Lock()
 			l.reasonWatchStreakBreach = false
+			l.mu.Unlock()
 		}
 
 		// Record response for convergence detection
