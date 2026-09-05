@@ -1,0 +1,17 @@
+# Binary assets — never diff, never text-scan
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.db binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+animation binary
+*.test binary
