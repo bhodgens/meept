@@ -267,8 +267,11 @@ All of these feed ONE shared `agent.TurnParker`
 `ParkedTurnRecord`s of any failure class, resumes them oldest-first at
 their scheduled time, and answers the surfaces' single query
 `TurnParker.WaitInfo() []ParkWaitInfo` — one `{Class, Next, Pending}` row
-per class with parked work. The parker is memory-only: a platform restart
-drops parked records (logged), and quota blocks re-probe providers anyway.
+per class with parked work. The parker is durable: every accepted park
+mirrors to `parks.db` (SQLite WAL), a successful resume deletes its row
+(at-most-once), and startup re-arms surviving records after pruning
+expired ones. Rows are kept on graceful shutdown; when the store fails
+to open the parker degrades to memory-only with a warning.
 
 ### Failure classes and schedules
 

@@ -28,7 +28,7 @@
 | DAG workflow/plans | X | X (PipelineSpec) | - | - | - | - | - | - | - |
 | Async handoff between agents | X | - | - | - | X (agent_message) | - | - | - | - |
 | Dynamic subagent spawning | X (request_handoff) | X (AgentBus) | - | - | X (rlm()) | ~ | - | - | - |
-| Recursive programmatic subagents | ~ (one-level in production: children can't re-delegate; bounded depth-2/3 recursion code exists but unwired) | X | - | - | X (rlm + passivation) | - | - | - | - |
+| Recursive programmatic subagents | X (one-level `delegate_task` + `request_handoff` wired into BaselineTools; bounded depth-2/3 recursion machinery exists but unwired) | X | - | - | X (rlm + passivation) | - | - | - | - |
 | Agent-to-agent messaging | X | X (AgentBus) | - | - | X (send + receipts) | ~ | - | - | - |
 | Constitution-bound employees | X | - | - | - | - | - | - | - | - |
 | Autonomy tiers (reactive/propose/autonomous) | X | - | - | - | ~ (bounded auto) | - | - | - | - |
@@ -91,7 +91,7 @@
 | Job queue with priorities | X | - | - | - | - | - | - | - | - |
 | Agent-targeted jobs | X | - | - | - | - | - | - | - | - |
 | Daemon / resident mode | X | - | X (gateway service) | - | X (daemon supervisor) | X (gateway) | - | - | - |
-| Crash recovery / resume | ~ (durable queue/sessions/scheduler; parked turns memory-only by design; single-node in-flight jobs not requeued) | X (--resume) | ~ | ~ | X (worker restart) | ~ | - | - | ~ |
+| Crash recovery / resume | X (durable queue with atomic claims + startup reclaim of crash-orphaned jobs; persisted parked turns re-arm on boot; sessions + scheduler jobs survive restart) | X (--resume) | ~ | ~ | X (worker restart) | ~ | - | - | ~ |
 | P2P cluster mesh | X (gossip+WireGuard) | - | - | - | - | - | - | - | - |
 | Distributed task queue | X | - | - | - | - | - | - | - | - |
 
@@ -251,4 +251,5 @@ Category Dominance (X count across 28 features)
 
 ---
 
-*Matrix generated 2026-08-29 from `docs/features.md`, `docs/research/2026-08-24-agent-parity-audit.md`, and direct repo inspection. MCP catalog count from `config/mcp_servers.json5`. Updated 2026-08-29 for ACP client (`acp_agent`, `[acp]` disabled by default). Updated 2026-09-04 after code re-validation: browser automation, computer use, GBNF tool constraints, vision input, secrets broker/credential injection, subscription-CLI-over-ACP, and the meept-bench harness marked X (all opt-in or external by design); crash-recovery and recursion rationales sharpened (queue claims are atomic; parked turns are memory-only by design; production delegation is one-level).*
+*Matrix generated 2026-08-29 from `docs/features.md`, `docs/research/2026-08-24-agent-parity-audit.md`, and direct repo inspection. MCP catalog count from `config/mcp_servers.json5`. Updated 2026-08-29 for ACP client (`acp_agent`, `[acp]` disabled by default). Updated 2026-09-04 after code re-validation: browser automation, computer use, GBNF tool constraints, vision input, secrets broker/credential injection, subscription-CLI-over-ACP, and the meept-bench harness marked X (all opt-in or external by design); crash-recovery and recursion rationales sharpened (queue claims are atomic; parked turns are memory-only by design; production delegation is one-level). Updated 2026-09-05: crash recovery upgraded to X (startup reclaim of crash-orphaned queue jobs + durable parked-turn persistence landed); recursive subagents upgraded to X (request_handoff now wired into BaselineTools; depth-capped recursion machinery still unwired, noted).*
+
