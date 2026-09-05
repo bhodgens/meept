@@ -90,6 +90,7 @@ PROJECT_DIR="$WORK/project"
 SOCK="$STATE/meept.sock"
 DAEMON_LOG="$WORK/daemon.log"
 REPLIES="$WORK/replies"
+A5_OK=0   # set to 1 only when A5 PASSes on a provider-available T3 turn
 DAEMON_BIN="$WORK/bin/meept-daemon"
 CLI_BIN="$WORK/bin/meept"
 DPID=""
@@ -717,13 +718,23 @@ PY
     if mcp_send t3 "$T3"; then
       print_reply_preview "$REPLIES/t3.txt"
       assert_reply_shape t3 "$REPLIES/t3.txt"
-      # A5: continuity — the status turn references the artifact. The wrap
-      # envelope ({"response": ...}) is JSON-escaped, so also accept the
-      # escaped spelling 'hello.txt' split across escapes.
+      # A5: continuity — the status turn references the artifact AND is not a
+      # bare clarification request ("which file?"). The wrap envelope
+      # ({"response": ...}) is JSON-escaped, so also accept the escaped
+      # spelling 'hello.txt' split across escapes.
       if grep -qi 'hello\.txt\|hello\\.\\.txt' "$REPLIES/t3.txt"; then
-        note_result PASS "A5" "T3 reply references hello.txt (session continuity)"
+        if grep -q '?' "$REPLIES/t3.txt"; then
+          note_result FAIL "A5" "T3 is a bare clarification request — continuity gap"
+        else
+          A5_OK=1
+          note_result PASS "A5" "T3 reply references hello.txt and answers the question (session continuity)"
+        fi
       else
-        note_result FAIL "A5" "T3 reply does not reference hello.txt"
+        if grep -q '?' "$REPLIES/t3.txt"; then
+          note_result FAIL "A5" "T3 is a bare clarification request — continuity gap"
+        else
+          note_result FAIL "A5" "T3 reply does not reference hello.txt"
+        fi
       fi
     else
       rc=$?
@@ -789,8 +800,15 @@ if [ "${#SKIPS[@]}" -gt 0 ]; then
   done
 fi
 
+log ""
+if [ "$A5_OK" = "1" ]; then
+  log "A5 continuity: PASS"
+else
+  log "A5 continuity: NOT PASSED (A5 did not pass on a provider-available T3 turn)"
+fi
+log ""
+
 if [ "${#FAILURES[@]}" -gt 0 ]; then
-  log ""
   log "RESULT: FAIL (integration bug or broken contract — see FAILED list)"
   exit 1
 fi
