@@ -31,6 +31,10 @@ func TestSelectAgent(t *testing.T) {
 		{"fix", "debugger"},
 		{"analyze", "analyst"},
 		{"research", "researcher"},
+		// Fetch-and-write tasks have no dedicated hint and fall through to
+		// chat; researcher is the agent that owns web_fetch+file_write
+		// together (GAP 2).
+		{"file_write", "chat"},
 		{"git", "committer"},
 		{"commit", "committer"},
 		{"schedule", "scheduler"},

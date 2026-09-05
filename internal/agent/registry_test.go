@@ -290,9 +290,10 @@ func TestLoadAgentDefinitions_AllBundled(t *testing.T) {
 		}
 	}
 
-	// Researcher should have web_fetch / web_search tools.
+	// Researcher should have web_fetch / web_search tools, plus file_write so
+	// it can persist fetched content (GAP 2: single-agent fetch+write).
 	if spec, ok := r.GetSpec(config.AgentIDResearcher); ok {
-		for _, want := range []string{"web_fetch", "web_search"} {
+		for _, want := range []string{"web_fetch", "web_search", "file_write"} {
 			if !spec.HasTool(want) {
 				t.Errorf("researcher missing additional tool %q (has %v)", want, spec.AdditionalTools)
 			}

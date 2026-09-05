@@ -77,6 +77,13 @@ type TacticalScheduler struct {
 	// don't implement the full session.Store. Nil = no session context; all
 	// jobs then stamp Interactive=false by construction (R4 (c)).
 	sessions sessionStoreReader
+
+	// stepStoreReadHook, when set, is consulted before every
+	// stepStore.GetByID/GetByJobID read. Returning a non-nil override
+	// short-circuits the real read — the test seam that reproduces the
+	// 2026-09-05 SQLITE_BUSY panic (GetByID returning (nil, err) at the
+	// step-state refresh) deterministically. Production never sets it.
+	stepStoreReadHook func(id string, byJob bool) (*task.TaskStep, error)
 }
 
 // sessionStoreReader is the narrow session lookup the scheduler needs.
@@ -92,6 +99,28 @@ func (ts *TacticalScheduler) SetSessionStore(store sessionStoreReader) {
 	if store != nil {
 		ts.sessions = store
 	}
+}
+
+// getStepByID fetches a step by ID through the optional test read hook.
+// The hook short-circuits with its override when set (test-only fault
+// injection); production never sets it and always hits the real store.
+func (ts *TacticalScheduler) getStepByID(id string) (*task.TaskStep, error) {
+	if ts.stepStoreReadHook != nil {
+		if step, err := ts.stepStoreReadHook(id, false); step != nil || err != nil {
+			return step, err
+		}
+	}
+	return ts.stepStore.GetByID(id)
+}
+
+// getStepByJobID is getStepByID's by-job-ID counterpart.
+func (ts *TacticalScheduler) getStepByJobID(jobID string) (*task.TaskStep, error) {
+	if ts.stepStoreReadHook != nil {
+		if step, err := ts.stepStoreReadHook(jobID, true); step != nil || err != nil {
+			return step, err
+		}
+	}
+	return ts.stepStore.GetByJobID(jobID)
 }
 
 // resolveStepSession backfills step.SessionID from the task's linked sessions
@@ -512,7 +541,7 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	startTime := time.Now()
 
 	// Find step by job ID
-	step, err := ts.stepStore.GetByJobID(jobID)
+	step, err := ts.getStepByJobID(jobID)
 	if err != nil {
 		return fmt.Errorf("failed to find step for job %s: %w", jobID, err)
 	}
@@ -781,9 +810,21 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	}
 
 	// Check for newly unblocked steps (only if step was approved/completed)
-	step, err = ts.stepStore.GetByID(step.ID) // Refresh step state
+	//
+	// BUG FIX (2026-09-05 daemon panic): GetByID returns (nil, err) on any
+	// failure — including transient SQLITE_BUSY under parallel step jobs.
+	// The previous code logged step.ID *after* reassigning step, so a nil
+	// step dereferenced a nil pointer and panicked the daemon. Capture the
+	// ID up front and guard the nil step.
+	stepID := step.ID
+	step, err = ts.getStepByID(stepID) // Refresh step state
 	if err != nil {
-		ts.logger.Error("Failed to refresh step state", "step_id", step.ID, "error", err)
+		ts.logger.Error("Failed to refresh step state", "step_id", stepID, "error", err)
+		return nil
+	}
+	if step == nil {
+		// Store guarantees non-nil on success, but never deref a nil step.
+		ts.logger.Error("Refreshed step state is nil", "step_id", stepID)
 		return nil
 	}
 	if step.State == task.StepCompleted || step.State == task.StepApproved {
@@ -1875,6 +1916,8 @@ func agentIDToToolHint(agentID string) string {
 		return string(IntentDebug)
 	case config.AgentIDAnalyst:
 		return string(IntentAnalyze)
+	case config.AgentIDResearcher:
+		return string(IntentResearch)
 	case config.AgentIDCommitter:
 		return string(IntentGit)
 	case config.AgentIDScheduler:

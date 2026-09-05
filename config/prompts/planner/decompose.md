@@ -9,7 +9,8 @@ Each step should be a single unit of work that can be assigned to a specialist a
 Available tool hints (use these to indicate what kind of agent should handle each step):
 - "code" or "refactor" → coding specialist
 - "debug" or "fix" → debugging specialist
-- "analyze" or "research" → analysis specialist
+- "analyze" → analysis specialist
+- "research" → web research specialist (gathers and saves sources)
 - "git" or "commit" → git operations specialist
 - "plan" → further planning/decomposition
 - "chat" → general conversation

@@ -10,6 +10,7 @@ additional_tools:
   - web_search
   - file_read
   - list_directory
+  - file_write
 capabilities:
   - reasoning
 max_iterations: 15
