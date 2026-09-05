@@ -22,6 +22,10 @@ func TestSanitizeCatalogReply(t *testing.T) {
 		{"status json", "{\n  \"status\": \"running\",\n  \"uptime_seconds\": 1840.8,\n  \"version\": \"1.0\"\n}", false, "platform"},
 		{"tool catalog", "### Shell Tools\n\n- **shell**: Execute a shell command...\n\n*Total: 75 tools*", false, "tools"},
 		{"agent roster", "## Available Agents\n\n### Coder (`coder`)\n**Role**: executor\n\nYou are Meept, an autonomous assistant serving your creator.\n\n*Total: 28 agents*", false, "agents"},
+		// A2 regression (2026-09-04 e2e): a roster wrapped in preamble prose
+		// cleared the 40% prose bar and leaked. The header must ALWAYS
+		// sanitize — the prose escape hatch applies only to other shapes.
+		{"prose-wrapped roster still sanitizes", "Sure! here are the specialists I can call on to help you today.\n\n## Available Agents\n\n### Coder (`coder`)\n**Role**: executor\n\n*Total: 28 agents*\n\nlet me know which one you'd like!", false, "agents"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

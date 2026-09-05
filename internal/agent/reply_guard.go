@@ -46,11 +46,12 @@ func sanitizeCatalogReply(reply string) string {
 		return reply
 	}
 
-	// Prose pass-through: a reply whose non-blank lines are mostly running
-	// text (>40% outside structural bullet/header/brace lines) is the model
-	// speaking, not a dump. Catalog replies are dominated by '-'/'*' bullet
-	// lines, markdown headers, and JSON braces, so they stay under the bar.
-	if proseLineRatio(reply) > 0.40 {
+	// Prose pass-through — EXCEPT for the agent roster (A2 leak, 2026-09-04
+	// e2e run: a roster wrapped in enough preamble prose cleared the 40%
+	// bar and shipped to a naive user). The roster header is unambiguous:
+	// no legitimate assistant reply contains it, so it always sanitizes.
+	// Headerless dumps still get the prose-ratio escape hatch.
+	if category != "agents" && proseLineRatio(reply) > 0.40 {
 		return reply
 	}
 
