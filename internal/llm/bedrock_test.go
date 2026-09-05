@@ -419,8 +419,13 @@ func buildBedrockTestHeaders(pairs ...string) []byte {
 		name, val := pairs[i], pairs[i+1] //nolint:gosec // G602: i+1 is always in range for pair-wise iteration
 		buf.WriteByte(byte(len(name)))    //nolint:gosec // G115: header names are short constants
 		buf.WriteString(name)
-		buf.WriteByte(0x07)           // header value type: 7-bit length string
-		buf.WriteByte(byte(len(val))) //nolint:gosec // G115: header values are short constants
+		buf.WriteByte(0x07) // header value type: string
+		// Per the Amazon event-stream spec the string value length is a
+		// 2-byte big-endian uint16 — not 1 byte. (The old 1-byte fixture
+		// encoded the same wrong shape the old parser read, so the suite
+		// validated the bug.)
+		buf.WriteByte(byte(len(val) >> 8)) //nolint:gosec // G115: header values are short constants
+		buf.WriteByte(byte(len(val)))
 		buf.WriteString(val)
 	}
 	return buf.Bytes()
@@ -431,6 +436,39 @@ func binaryBigEndianPut(dst []byte, v uint32) {
 	dst[1] = byte(v >> 16) //nolint:gosec // G115
 	dst[2] = byte(v >> 8)  //nolint:gosec // G115
 	dst[3] = byte(v)       //nolint:gosec // G115
+}
+
+// TestBedrockHeadersSpecShape pins the Amazon event-stream header encoding:
+// string values carry a 2-byte big-endian uint16 length, and a decoder must
+// consume the whole block without desyncing when several headers follow one
+// another. The pre-fix parser read a 1-byte length for type 0x07, so a real
+// frame (`:message-type` = 07 00 05 "event") desynced on the very first
+// header and every event was silently dropped.
+func TestBedrockHeadersSpecShape(t *testing.T) {
+	// :message-type=event, :event-type=content_block_delta — the real
+	// multi-header shape, encoded with 2-byte big-endian string lengths.
+	var h bytes.Buffer
+	h.WriteByte(byte(len(":message-type")))
+	h.WriteString(":message-type")
+	h.WriteByte(0x07)
+	h.WriteByte(0x00)
+	h.WriteByte(0x05)
+	h.WriteString("event")
+	h.WriteByte(byte(len(":event-type")))
+	h.WriteString(":event-type")
+	h.WriteByte(0x07)
+	h.WriteByte(0x00)
+	h.WriteByte(byte(len("content_block_delta")))
+	h.WriteString("content_block_delta")
+
+	hdrs := parseBedrockHeaders(h.Bytes())
+	if got := string(hdrs[":message-type"]); got != "event" {
+		t.Errorf(":message-type = %q, want %q", got, "event")
+	}
+	if got := string(hdrs[":event-type"]); got != "content_block_delta" {
+		t.Errorf(":event-type = %q, want %q (parser desynced or dropped the header)",
+			got, "content_block_delta")
+	}
 }
 
 // TestBedrockStreamRoundTripThroughRealParser feeds a full Bedrock

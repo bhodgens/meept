@@ -204,9 +204,13 @@ func readBedrockEventFrame(r *bufio.Reader) (*bedrockEventFrame, error) {
 	return &bedrockEventFrame{headers: hdrs, payload: payload}, nil
 }
 
-// parseBedrockHeaders decodes the header block of one event-stream frame.
-// Unsupported header value types are skipped (the two headers this decoder
-// needs — :message-type and :event-type — are 7-bit strings).
+// parseBedrockHeaders decodes the header block of one event-stream frame
+// per the Amazon event-stream spec (smithy.io/2.0/aws/amazon-eventstream):
+// value types 0x00-0x09 with fixed-size scalars and 2-byte big-endian
+// uint16 length prefixes for string (0x07) and byte_array (0x06) values.
+// Unsupported value types are skipped so the stream stays aligned (the two
+// headers this decoder needs — :message-type and :event-type — are
+// strings).
 func parseBedrockHeaders(b []byte) map[string][]byte {
 	hdrs := make(map[string][]byte)
 	for len(b) > 0 {
@@ -224,31 +228,46 @@ func parseBedrockHeaders(b []byte) map[string][]byte {
 		b = b[1:]
 		var val []byte
 		switch vt {
-		case 0x07: // 7-bit length string
-			if len(b) == 0 {
+		case 0x07: // string: 2-byte big-endian length + UTF-8 bytes
+			if len(b) < 2 {
 				return hdrs
 			}
-			vl := int(b[0])
-			b = b[1:]
+			vl := int(b[0])<<8 | int(b[1])
+			b = b[2:]
 			if vl > len(b) {
 				return hdrs
 			}
 			val, b = b[:vl], b[vl:]
-		case 0x04: // 16-bit signed int
+		case 0x06: // byte_array: 2-byte big-endian length + raw bytes
 			if len(b) < 2 {
 				return hdrs
 			}
+			vl := int(b[0])<<8 | int(b[1])
 			b = b[2:]
-		case 0x05: // 64-bit signed int
+			if vl > len(b) {
+				return hdrs
+			}
+			val, b = b[:vl], b[vl:]
+		case 0x04: // integer: 4 bytes
+			if len(b) < 4 {
+				return hdrs
+			}
+			b = b[4:]
+		case 0x05: // long: 8 bytes
 			if len(b) < 8 {
 				return hdrs
 			}
 			b = b[8:]
-		case 0x06: // 64-bit float
+		case 0x08: // timestamp: 8 bytes (epoch millis)
 			if len(b) < 8 {
 				return hdrs
 			}
 			b = b[8:]
+		case 0x09: // uuid: 16 bytes
+			if len(b) < 16 {
+				return hdrs
+			}
+			b = b[16:]
 		case 0x00: // true
 		case 0x01: // false
 		case 0x02: // byte
@@ -256,7 +275,7 @@ func parseBedrockHeaders(b []byte) map[string][]byte {
 				return hdrs
 			}
 			b = b[1:]
-		case 0x03: // 16-bit short
+		case 0x03: // short
 			if len(b) < 2 {
 				return hdrs
 			}
