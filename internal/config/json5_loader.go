@@ -98,6 +98,12 @@ func quoteBareDurations(content string) string {
 			for i < len(content) && content[i] != '"' {
 				if content[i] == '\\' {
 					i++
+					if i >= len(content) {
+						// Truncated input ending in a bare backslash:
+						// stop scanning; the string passes through
+						// verbatim and hujson reports the real error.
+						break
+					}
 				}
 				i++
 			}
@@ -204,6 +210,12 @@ func convertQuotedDurations(data string) string {
 			for i < len(data) && data[i] != '"' {
 				if data[i] == '\\' {
 					i++
+					if i >= len(data) {
+						// Truncated input ending in a bare backslash:
+						// stop scanning; the string passes through
+						// verbatim and hujson reports the real error.
+						break
+					}
 				}
 				i++
 			}
