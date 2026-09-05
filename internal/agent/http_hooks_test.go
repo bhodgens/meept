@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -149,6 +150,46 @@ func TestHTTPHook_ZeroRetryCountMeansNoRetries(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&hits); got != 1 {
 		t.Fatalf("server hit %d times, want 1 (retry_count=0 means no retries)", got)
+	}
+}
+
+// TestHTTPHook_UnlimitedRetryStopsOnAuthFailure pins the non-retryable
+// guard: with retry_count=-1 a permanent 401 must be returned on the FIRST
+// attempt — the old unconditional shouldRetryHookError fallback retried
+// auth failures forever (bounded only by backoff and context), hammering a
+// dead endpoint from a background goroutine.
+func TestHTTPHook_UnlimitedRetryStopsOnAuthFailure(t *testing.T) {
+	t.Cleanup(func() {
+		clearPerOperationOverrides()
+	})
+	SetPerOperationBackoffOverride("http", BackoffConfig{
+		BaseDelay:  1 * time.Millisecond,
+		MaxDelay:   1 * time.Millisecond,
+		Multiplier: 1.0,
+		Jitter:     0,
+	})
+
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	hook := newTestHTTPHook(t, srv, HTTPHookConfig{
+		URL:        srv.URL,
+		Method:     "POST",
+		RetryCount: -1,
+	})
+	err := hook.Execute(context.Background(), map[string]any{"hi": true})
+	if err == nil {
+		t.Fatal("Execute should fail on permanent 401")
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("server hit %d times, want 1 (401 is non-retryable even with retry_count=-1)", got)
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error %q lost the HTTP status detail", err.Error())
 	}
 }
 

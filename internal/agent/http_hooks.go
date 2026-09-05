@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -266,7 +267,7 @@ func (h *HTTPHook) executeSync(ctx context.Context, payload any) error {
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 				errorBody, _ := io.ReadAll(resp.Body)
 				resp.Body.Close()
-				lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(errorBody))
+				lastErr = &HTTPError{StatusCode: resp.StatusCode, Body: string(errorBody), URL: h.config.URL}
 				if hookRetriesExhausted(attempt, h.config.RetryCount) {
 					return lastErr
 				}
@@ -323,12 +324,24 @@ func (h *HTTPHook) Wait() {
 // retry on the given error. It uses IsRetryable from backoff.go for
 // structured classification, falling back to err != nil for plain
 // transport errors that lack structured metadata.
+//
+// Non-retryable statuses (401/403/404 — auth and routing problems that no
+// backoff can fix) return false via the HTTPError classification, so
+// retry_count=-1 (unlimited) cannot hammer a dead endpoint forever. Plain
+// transport errors still fall through to retryable: they are the
+// connection-reset/EOF class the loop exists to ride out.
 func shouldRetryHookError(err error) bool {
 	if err == nil {
 		return false
 	}
 	if IsRetryable(err) {
 		return true
+	}
+	// A non-retryable HTTP status (e.g. 401/403/404) that reached this
+	// function was classified non-retryable by IsRetryable above — stop.
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
+		return false
 	}
 	// Fallback: retry on any non-nil error to preserve the original
 	// behavior where all transport errors were retried.
