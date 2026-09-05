@@ -67,7 +67,12 @@ func signSigV4(httpReq *http.Request, body []byte, creds awsCredentials, region,
 	// Canonical headers: lowercase names, trimmed values, sorted by name.
 	// Host comes from the URL (Go does not populate req.Host for
 	// client-constructed requests); every x-amz-* header we just set is
-	// included, matching AWS SDK signing behavior.
+	// included, matching AWS SDK signing behavior. Any OTHER header
+	// already present on the request at signing time (e.g. Bedrock extra
+	// headers folded in by applyBedrockSigV4 above this call) is signed
+	// too — the AWS signed-header list is computed from the request as it
+	// will be sent, so omitting a present header would produce a signature
+	// the server recomputes differently.
 	signed := map[string]string{
 		"content-type":         httpReq.Header.Get("Content-Type"),
 		"host":                 httpReq.URL.Host,
@@ -76,6 +81,29 @@ func signSigV4(httpReq *http.Request, body []byte, creds awsCredentials, region,
 	}
 	if creds.SessionToken != "" {
 		signed["x-amz-security-token"] = creds.SessionToken
+	}
+	for name, vals := range httpReq.Header {
+		lk := strings.ToLower(name)
+		if _, reserved := signed[lk]; reserved {
+			continue
+		}
+		if strings.HasPrefix(lk, "x-amz-") || lk == "authorization" ||
+			lk == "user-agent" || lk == "content-length" || lk == "accept-encoding" {
+			// Reserved/transport headers: x-amz-* and content-type are
+			// pinned above; authorization, user-agent, content-length,
+			// and accept-encoding are excluded per SigV4 convention
+			// (transport or credential-derived, not semantically part
+			// of the request).
+			continue
+		}
+		if lk := strings.ToLower(name); lk == "accept" || lk == "accept-encoding" {
+			// Transport negotiation headers: excluded from the signed set
+			// per SigV4 convention (they describe the client transport,
+			// not the request semantics; Go's transport may also rewrite
+			// them on the wire, which would invalidate the signature).
+			continue
+		}
+		signed[lk] = strings.Join(vals, ",")
 	}
 	names := make([]string, 0, len(signed))
 	for name := range signed {
