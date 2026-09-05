@@ -151,6 +151,31 @@ func TestCodex429TypedErrorOnStreamingPath(t *testing.T) {
 	}
 }
 
+// TestCodex429QuotaWindowBodyOnStreamingPath pins the quota early-exit on
+// the STREAMING error path: a 429 whose body carries the usage-window shape
+// must classify as *QuotaResetError even in streaming mode. The error path
+// drains the body on both modes — with the body unread, streaming 429s
+// degraded to RateLimitError and short-retried a hours-long quota window.
+func TestCodex429QuotaWindowBodyOnStreamingPath(t *testing.T) {
+	resetsAt := time.Now().Add(2 * time.Hour).Unix()
+	body := `{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":` +
+		formatUnix(resetsAt) + `}}`
+	srv := newCodexStatusServer(t, http.StatusTooManyRequests, nil, body)
+	client := newCodexClientForTest(t, srv.URL)
+
+	_, err := client.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "x"}},
+		func(string) error { return nil })
+	if err == nil {
+		t.Fatal("expected error for 429 on streaming path")
+	}
+
+	var qErr *QuotaResetError
+	if !errors.As(err, &qErr) {
+		t.Fatalf("streaming error %v (%T) is not *QuotaResetError — quota body unread", err, err)
+	}
+}
+
 // formatUnix renders a unix-seconds timestamp as a JSON number literal
 // (parseQuotaBody decodes resets_at as float64).
 func formatUnix(sec int64) string {

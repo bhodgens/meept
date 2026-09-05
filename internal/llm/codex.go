@@ -499,13 +499,19 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 		}
 	}()
 
-	// Read the body ONLY on the non-streaming path. The streaming path must
-	// consume resp.Body incrementally (A-HIGH, bughunt 2026-09-04): a
-	// preemptive io.ReadAll made streaming cosmetic — deltas fired only
-	// after server close, and an SSE keep-alive stream that stayed open
-	// stalled the turn until the 120s http timeout.
+	// Read the body ONLY on paths that consume it. The streaming SUCCESS
+	// path must consume resp.Body incrementally (A-HIGH, bughunt
+	// 2026-09-04): a preemptive io.ReadAll made streaming cosmetic —
+	// deltas fired only after server close, and an SSE keep-alive stream
+	// that stayed open stalled the turn until the 120s http timeout. The
+	// ERROR path drains the body on BOTH modes: on a non-200 the stream
+	// never starts, and quota-window 429 bodies must reach
+	// codexErrorFromResponse on the streaming path too, or every
+	// streaming 429 degrades to RateLimitError and short-retries a
+	// hours-long quota window (anthropic.go handles streaming errors the
+	// same way).
 	var respBody []byte
-	if !payload.Stream.Enabled {
+	if resp.StatusCode != http.StatusOK || !payload.Stream.Enabled {
 		respBody, err = io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, &ClientError{Message: "failed to read response", Cause: err}
