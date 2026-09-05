@@ -661,3 +661,7 @@ These were raised during Phase-1 intake but did not survive verification. They a
 ### Runtime-test isolation hazard (2026-09-05)
 - meept runtime-manager unit tests spin REAL llama/sidecar runtimes against real ports/pidfiles — running them while a live daemon is up churns the production runtimes (observed 2026-09-04 23:46 + 2026-09-05 14:29: spawn_success→stop loops across 8080/8081/8082). Tests need ephemeral ports + scratch pidfile/cache dirs.
 - meept-bench --repo defaults to CWD (runner.go:54); headless scripts must pass --repo explicitly.
+
+### Runtime adoption ownership race (2026-09-05, diagnosed)
+- `RuntimeProcess.Start` (runtime_process.go:75) ADOPTS any live pidfile process and sets `spawnedByUs=true` — making the adopter the kill-authority. Any second manager instance sharing the run dir (a test binary, a second daemon) then legitimately `StopAll`s the production runtimes. Observed twice (09-04 23:46, 09-05 14:29): spawn_success→stop churn across 8080/8081/8082 correlated with agent build/test cycles. The "stop" endpoint events only emit from StopAll/StopProvider, so an external kill was ruled out — the kills came through an adopting manager.
+- Fix shape: pidfile records the writer's identity (daemon boot token / process start-time); adoption downgrades to observed-not-owned (`spawnedByUs=false` → Stop skips) unless identity matches. Related: runtime tests must use scratch run dirs (see isolation hazard above).
