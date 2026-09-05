@@ -237,18 +237,6 @@ func (h *HTTPHook) executeSync(ctx context.Context, payload any) error {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, h.config.Method, h.config.URL, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	// Add headers
-	for k, v := range h.config.Headers {
-		req.Header.Set(k, v)
-	}
-
 	// Execute with exponential backoff + jitter retries.
 	// MaxAttempts is set to RetryCount so the Backoff type controls pacing.
 	// RetryCount -1 makes MaxAttempts negative, which Backoff.NextDelay
@@ -260,6 +248,18 @@ func (h *HTTPHook) executeSync(ctx context.Context, payload any) error {
 
 	var lastErr error
 	for attempt := 0; ; attempt++ {
+		// Rebuild the request each attempt: http.Request bodies are
+		// one-shot readers. Reusing a request whose body was consumed by
+		// a failed attempt sends Content-Length=N with an empty body on
+		// every subsequent retry (corrupt wire on 5xx/429-class paths).
+		req, err := http.NewRequestWithContext(ctx, h.config.Method, h.config.URL, bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range h.config.Headers {
+			req.Header.Set(k, v)
+		}
 		resp, err := h.client.Do(req)
 		if err == nil {
 			// Check response status.

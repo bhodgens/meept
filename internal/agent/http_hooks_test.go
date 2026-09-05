@@ -94,6 +94,38 @@ func TestHTTPHook_TransientFailureRetriesByDefault(t *testing.T) {
 	}
 }
 
+// TestHTTPHook_RetryResendsBody: a retry after a failed attempt must carry
+// the FULL request body again. The retry loop rebuilds the request per
+// attempt; reusing one http.Request would send Content-Length=N with a
+// drained body on attempt 2+ ("http: ContentLength=30 with Body length 0").
+func TestHTTPHook_RetryResendsBody(t *testing.T) {
+	const payload = `{"prompt":"retry-me"}`
+	var hits int32
+	var secondBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		n := atomic.AddInt32(&hits, 1)
+		if n == 2 {
+			secondBody = string(b)
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	hook := newTestHTTPHook(t, srv, HTTPHookConfig{
+		URL:        srv.URL,
+		Method:     "POST",
+		RetryCount: 1,
+	})
+	_ = hook.Execute(context.Background(), json.RawMessage(payload))
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Fatalf("server hit %d times, want 2 (retry_count=1)", got)
+	}
+	if secondBody != payload {
+		t.Fatalf("retry attempt sent body %q, want %q", secondBody, payload)
+	}
+}
+
 // TestHTTPHook_ZeroRetryCountMeansNoRetries: an explicit retry_count of 0
 // must perform exactly ONE attempt with no retries and no backoff sleeps.
 // This is only expressible because the config surface carries retry_count as
