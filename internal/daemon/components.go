@@ -5495,6 +5495,11 @@ func registerBuiltinTools(
 	}
 	registry.Register(pdfReadTool)
 
+	// spreadsheet_write (plan 20260905-research-audit-tools, Contract C):
+	// CSV/XLSX output for audit data; writes pass through the session
+	// working-dir fence.
+	registry.Register(builtin.NewSpreadsheetWriteTool())
+
 	// Web search tool (DuckDuckGo)
 	webSearchTool := builtin.NewWebSearchTool(15 * time.Second)
 	if webSSRFGuard != nil {
