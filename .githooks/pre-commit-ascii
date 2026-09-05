@@ -3,9 +3,8 @@
 # characters into tracked TEXT files.
 #
 # Background (2026-09-04): CJK characters leaked into Go comments and plan
-# docs (非-string, 某些, 保持, 隐式状态) — invisible in some terminals and
-# confusing in review. This hook fails the commit when a STAGED text file
-# contains such characters.
+# docs — invisible in some terminals and confusing in review. This hook
+# fails the commit when a STAGED text file contains such characters.
 #
 # What is checked: CJK ideographs, Kana, Hangul, fullwidth forms, CJK
 # compatibility forms — the scripts that actual leaks used.
