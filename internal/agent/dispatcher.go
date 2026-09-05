@@ -2769,11 +2769,13 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 			taskID = result.Task.ID
 		}
 	}
-	if classifierMethod == "" && d.stats != nil {
-		d.stats.mu.RLock()
-		classifierMethod = d.lastClassifierMethod
-		d.stats.mu.RUnlock()
-	}
+	// classifierMethod intentionally stays empty for dispatches whose
+	// intent carries no Method: there is no honest classification to
+	// attribute, and falling back to a previous message's method would
+	// contaminate the ByMethod regression stats (a /skill invocation
+	// right after a keyword-classified message would count as keyword).
+	// Consumers of GetStats treat the empty bucket as "non-classified
+	// path" (skill execution, plan clarification, agent overrides).
 
 	errStr := ""
 	if dispatchErr != nil {
