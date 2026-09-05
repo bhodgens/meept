@@ -21,7 +21,7 @@ Comprehensive testing of the Meept platform identified **37+ unique bugs** acros
 | Wave 1 Phase 7+8+12 | Git + Schedule + Security | 1 | 20 tests | *blocked by rate limit* |
 | Wave 2 (sequential) | Phases 2-13 | 1 | 50+ tests | *blocked by rate limit after ~5 tests* |
 
-##所有 Issues by Severity
+## All Issues by Severity
 
 ### Critical (5 issues)
 | # | Component | Title |

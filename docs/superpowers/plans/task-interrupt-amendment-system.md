@@ -496,7 +496,7 @@ func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any
         msgText = "Cancelled by user"
     }
 
-    //触发 interrupt
+    // Trigger interrupt
     if err := h.registry.interruptMgr.Trigger(params.ID, reason, msgText); err != nil {
         return nil, err
     }

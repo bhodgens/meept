@@ -37,7 +37,7 @@ When `nudge_attempts` exhausts, there's no further fallback:
 - No user notification that classification failed
 - No suggestion to rephrase
 
-## Solutions (from竞品 Analysis)
+## Solutions (from Competitor Analysis)
 
 ### Pattern 1: Hermes Agent - Multi-Model Cascade
 Hermes uses a cascading fallback:

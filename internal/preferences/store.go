@@ -493,7 +493,7 @@ func generateSaveID() string {
 	// Use pkg/id.Generate which handles crypto/rand failure gracefully
 	// with a documented zero-suffix fallback rather than predictable time-based IDs
 	fullID := id.Generate("")
-	// Return last 16 hex chars to保持 compatibility with existing ID format
+	// Return last 16 hex chars to preserve compatibility with existing ID format
 	if len(fullID) >= 16 {
 		return fullID[len(fullID)-16:]
 	}

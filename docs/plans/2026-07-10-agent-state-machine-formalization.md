@@ -28,8 +28,8 @@ Formalize Meept's agent loop state management by introducing an explicit state m
 ```go
 // conversation.go: TurnBudgetTracker has implicit state
 type TurnBudgetTracker struct {
-    warningZone     bool //隐式状态: budget nearly depleted
-    wrapUpRequested bool //隐式状态：must wrap up
+    warningZone     bool // implicit state: budget nearly depleted
+    wrapUpRequested bool // implicit state: must wrap up
 }
 
 // loop.go: reasoningCycle uses iteration-based state

@@ -184,7 +184,7 @@ type IndexResult struct {
 
 // NewTraceIndexBuilder creates a builder for the given source JSONL.
 func NewTraceIndexBuilder(sourcePath string) *TraceIndexBuilder {
-    base :=源
+    base := src
     return &TraceIndexBuilder{
         sourcePath: sourcePath,
         indexPath:  base + ".meept-index.jsonl",

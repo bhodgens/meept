@@ -25,7 +25,7 @@ type CCRStore interface {
 	Retrieve(ctx context.Context, hash string) (*CCREntry, error)
 
 	// Search finds content within a compressed entry by query.
-	// Used for SmartCrusher results where only某些 items are needed.
+	// Used for SmartCrusher results where only some items are needed.
 	// Returns nil if the entry doesn't exist.
 	Search(ctx context.Context, hash, query string) ([]CCRSearchResult, error)
 

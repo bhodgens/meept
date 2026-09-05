@@ -418,7 +418,7 @@ Also carried forward from Round 7 (still deferred, design-level):
 
 3. **`-race`-invisible concurrency fragility** (deferred)
    - `llm/context_firewall.go` SetCompactor writes pointer without lock, but `-race` doesn't fire because all calls in current code paths come from the same goroutine
-   -这类 "passes -race today, fails tomorrow" patterns are worth flagging even when not immediately actionable
+   - This class of "passes -race today, fails tomorrow" patterns are worth flagging even when not immediately actionable
 
 4. **Allowlist / contract mismatch** (silent failure)
    - `queue/cluster_queue.go:290` RecordClaimEvent allowlist casing mismatch — every call errored, silently. The cluster_events table has been empty for the code's entire lifetime. This is the kind of bug that single-package reviewers miss: the bug isn't in `cluster_queue.go` alone, it's in the contract between `cluster_queue.go` and its callers (which use lowercase strings).

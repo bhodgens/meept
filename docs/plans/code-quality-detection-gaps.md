@@ -316,7 +316,7 @@ All feature specs MUST include:
 ```
 
 #### 4.2: LLM Verification Skill
-**File:**技能: `verify-plan-against-code` (existing — enhance)
+**File:** Skill: `verify-plan-against-code` (existing — enhance)
 
 Add timestamp semantic verification:
 

@@ -58,7 +58,7 @@
 Phase 6 achieved maximum meaningful deduplication:
 
 1. **Pure data/logic** → shared in `internal/sharedclient/`
-   - Slash parsing, autocomplete filtering, history数据结构, session CRUD
+   - Slash parsing, autocomplete filtering, history data structures, session CRUD
 
 2. **UI framework integration** → remains framework-specific
    - Bubble Tea (MVU, lipgloss, tea.Cmd) for main TUI
