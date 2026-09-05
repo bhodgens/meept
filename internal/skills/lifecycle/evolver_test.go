@@ -845,6 +845,7 @@ func TestEvolver_PassB_NonAllDomain(t *testing.T) {
 // that the scheduler enters the tick loop without firing within a window
 // shorter than the configured interval.
 func TestEvolverScheduler_SkipsInitialCycle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // discovery must not scan the real home
 	dir := t.TempDir()
 	usage := newStubUsageTracker()
 	writer := NewWriter(dir, slog.Default())
