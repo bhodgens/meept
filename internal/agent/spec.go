@@ -134,6 +134,7 @@ var BaselineTools = []string{
 	ToolPlatformStatus,
 	ToolPlatformAgents,
 	ToolPlatformTools,
+	ToolRequestHandoff, // safe for every specialist: pure bus publish; runaway cascades are bounded by the orchestrator's maxHandoffSteps (tactical.go)
 	"project_info",
 	"delegate_task",
 }

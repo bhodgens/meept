@@ -17,17 +17,17 @@ Meept uses a multi-agent architecture where specialist agents handle different t
 | Agent ID | Purpose | Additional Tools |
 |----------|---------|------------------|
 | `chat` | General conversation | `web_fetch`, `web_search` |
-| `coder` | File ops, shell, coding | `file_read`, `file_write`, `file_delete`, `list_directory`, `shell_execute`, `request_handoff` |
-| `debugger` | Troubleshooting, bug fixing | `file_read`, `file_write`, `shell_execute`, `request_handoff` |
+| `coder` | File ops, shell, coding | `file_read`, `file_write`, `file_delete`, `list_directory`, `shell_execute` |
+| `debugger` | Troubleshooting, bug fixing | `file_read`, `file_write`, `shell_execute` |
 | `planner` | Task decomposition, planning | (baseline only) |
-| `analyst` | Synthesizes information, draws insights, summarizes | `web_fetch`, `web_search`, `file_read`, `list_directory`, `request_handoff` |
+| `analyst` | Synthesizes information, draws insights, summarizes | `web_fetch`, `web_search`, `file_read`, `list_directory` |
 | `researcher` | Gathers information from web, documentation, codebase | `web_fetch`, `web_search`, `file_read`, `list_directory` |
 | `committer` | Git operations | `shell_execute` |
 | `scheduler` | Job scheduling | `schedule_create`, `schedule_list`, `schedule_delete` |
-| `writer` | Long-form writing (essays, docs, briefs) | `file_read`, `file_write`, `request_handoff` |
-| `architect` | System design, tech evaluation, trade-off analysis | `file_read`, `list_directory`, `request_handoff` |
-| `skeptic` | Stress-tests claims, surfaces contradictions | `memory_search`, `file_read`, `request_handoff` |
-| `librarian` | Memory steward — reflection, tag hygiene, epistemic integrity | `memory_store`, `memory_search`, `request_handoff` |
+| `writer` | Long-form writing (essays, docs, briefs) | `file_read`, `file_write` |
+| `architect` | System design, tech evaluation, trade-off analysis | `file_read`, `list_directory` |
+| `skeptic` | Stress-tests claims, surfaces contradictions | `memory_search`, `file_read` |
+| `librarian` | Memory steward — reflection, tag hygiene, epistemic integrity | `memory_store`, `memory_search` |
 | `image-gen` | Expand a brief (`enhancer_model`, default `small`) then generate an image | `generate_image`, `file_read`, `file_write`, `shell_execute`, `web_fetch` |
 | `video-gen` | Expand a brief (`enhancer_model`, default `small`) then generate a video clip | `generate_video`, `file_read`, `file_write`, `shell_execute`, `web_fetch` |
 | `image-id` | Identify subject, text, style, and source clues in an image | `file_read`, `web_fetch`, `web_search` |
@@ -153,6 +153,8 @@ Agents discover each other using platform tools:
 ### Dynamic Agent Handoff
 
 The `request_handoff` tool allows an agent executing within the orchestrator pipeline to dynamically inject a new step and re-route to another agent mid-task, without going through the dispatcher or waiting for the full DAG to complete.
+
+Every agent holds `request_handoff` as a baseline tool (it only validates input and publishes a bus event; runaway cascades are bounded by `MaxHandoffSteps` below).
 
 | | `delegate_task` | `request_handoff` |
 |---|---|---|

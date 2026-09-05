@@ -26,6 +26,7 @@ const (
 	ToolPlatformStatus   = "platform_status"
 	ToolPlatformAgents   = "platform_agents"
 	ToolPlatformTools    = "platform_tools"
+	ToolRequestHandoff   = "request_handoff"
 	ToolWebSearch        = "web_search"
 	ToolWebFetch         = "web_fetch"
 	ToolCodeRead         = "code_read"

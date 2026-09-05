@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -11,12 +12,11 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
-
-	"database/sql"
 
 	_ "modernc.org/sqlite"
 )
@@ -1164,5 +1164,317 @@ func TestStepHandoff_Truncation_FollowUpHintsCount(t *testing.T) {
 	h.Truncate()
 	if len(h.FollowUpHints) > 5 {
 		t.Errorf("follow_up_hints count not capped: got %d, want <= 5", len(h.FollowUpHints))
+	}
+}
+
+// stubHandoffTool is a minimal tools.Tool fixture that wraps a delegate
+// Execute function, so tests can exercise a specialist tool call end-to-end
+// without importing internal/tools/builtin (import cycle: builtin imports
+// agent). It mirrors the real RequestHandoffTool contract: returns a
+// HandoffResult-shaped map and always reports TerminateHint=true.
+type stubHandoffTool struct {
+	name    string
+	execute func(ctx context.Context, args map[string]any) (any, error)
+}
+
+func (t *stubHandoffTool) Name() string        { return t.name }
+func (t *stubHandoffTool) Description() string { return "stub handoff fixture" }
+func (t *stubHandoffTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{Type: "object"}
+}
+func (t *stubHandoffTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	return t.execute(ctx, args)
+}
+func (t *stubHandoffTool) IsReadOnly(map[string]any) bool        { return true }
+func (t *stubHandoffTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (t *stubHandoffTool) TerminateHint(map[string]any) bool     { return true }
+
+// requestHandoffExecute is the request_handoff contract as the daemon wires it
+// (internal/daemon/components.go): validate args, publish HandoffPayload on
+// orchestrator.handoff as a BusMessage, return the HandoffResult shape. Kept
+// in this test file as the tool-side mirror of HandleHandoff so the round-trip
+// test proves the surfaces stay compatible even though the packages cannot
+// share code.
+func requestHandoffExecute(bus *bus.MessageBus, agentExists func(string) bool) func(context.Context, map[string]any) (any, error) {
+	return func(_ context.Context, args map[string]any) (any, error) {
+		taskID, _ := args["task_id"].(string)
+		fromStepID, _ := args["from_step_id"].(string)
+		toAgentID, _ := args["to_agent_id"].(string)
+		description, _ := args["description"].(string)
+		fromAgentID, _ := args["from_agent_id"].(string)
+		partialResult, _ := args["partial_result"].(string)
+
+		if taskID == "" || fromStepID == "" || toAgentID == "" || description == "" {
+			return map[string]any{"success": false, "error": "missing required field"}, nil
+		}
+		if agentExists != nil && !agentExists(toAgentID) {
+			return map[string]any{"success": false, "error": "agent not found"}, nil
+		}
+
+		// HandoffRequest carries the same JSON field names as the real tool's
+		// builtin.HandoffPayload, so HandleHandoff's unmarshal target sees an
+		// identical wire shape.
+		payload, err := json.Marshal(HandoffRequest{
+			TaskID:        taskID,
+			FromStepID:    fromStepID,
+			FromAgentID:   fromAgentID,
+			ToAgentID:     toAgentID,
+			Description:   description,
+			PartialResult: partialResult,
+			InjectAfter:   true,
+		})
+		if err != nil {
+			return map[string]any{"success": false, "error": err.Error()}, nil
+		}
+
+		const handoffTopic = "orchestrator.handoff" // same topic the real tool publishes and the orchestrator subscribes to
+		bus.Publish(handoffTopic, &models.BusMessage{
+			Type:      models.MessageTypeEvent,
+			Topic:     handoffTopic,
+			Source:    "request_handoff",
+			Timestamp: time.Now().UTC(),
+			Payload:   payload,
+		})
+
+		return map[string]any{
+			"success":     true,
+			"task_id":     taskID,
+			"to_agent_id": toAgentID,
+			"description": description,
+			"message":     "handoff requested",
+		}, nil
+	}
+}
+
+// TestSpecialistRequestHandoff_OrchestratorRoundTrip proves the wired
+// capability end to end: a specialist's resolved tool surface includes
+// request_handoff (via filterTools over the baseline), a call to the tool
+// publishes on orchestrator.handoff, the running orchestrator consumes the
+// event through HandleHandoff, and a real DAG step for the target agent
+// materializes with the handoff metadata.
+func TestSpecialistRequestHandoff_OrchestratorRoundTrip(t *testing.T) {
+	taskStore, stepStore := newTestTaskAndStepStore(t)
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	// Task + originating step owned by "coder".
+	tk := task.NewTask("task-roundtrip-1", "specialist handoff round trip")
+	tk.TotalJobs = 1
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	fromStep := task.NewTaskStep(tk.ID, "coding step", 1)
+	fromStep.State = task.StepCompleted
+	if err := stepStore.Create(fromStep); err != nil {
+		t.Fatalf("failed to create from step: %v", err)
+	}
+
+	// Specialist's resolved surface: baseline + additional, filtered like the
+	// registry does. request_handoff must be exposed through the filter.
+	toolReg := NewPlaceholderToolRegistry()
+	toolReg.Register(&stubHandoffTool{
+		name:    ToolRequestHandoff,
+		execute: requestHandoffExecute(msgBus, func(id string) bool { return id == config.AgentIDDebugger }),
+	})
+	coderSpec := &AgentSpec{ID: config.AgentIDCoder, Enabled: true, Role: RoleExecutor, CanDelegate: false}
+	tool := NewFilteredToolRegistry(toolReg, coderSpec.AllTools()).Get(ToolRequestHandoff)
+	if tool == nil {
+		t.Fatal("coder spec's resolved tool surface must include request_handoff")
+	}
+
+	// Orchestrator + tactical scheduler consume the event, exactly as the
+	// daemon wires them at startup. They must be RUNNING before the tool
+	// publishes: the bus has no persistence, so events published with zero
+	// subscribers are dropped.
+	scheduler := NewTacticalScheduler(TacticalSchedulerConfig{
+		StepStore:           stepStore,
+		TaskStore:           taskStore,
+		Queue:               &mockQueue{},
+		Bus:                 msgBus,
+		Logger:              slogDiscardLogger(),
+		MaxHandoffSteps:     5, // production default (config/meept.json5 max_handoff_steps)
+		HandoffUseAmendment: false,
+	})
+	orchestrator := NewOrchestrator(OrchestratorDeps{
+		Tactical: scheduler,
+		Bus:      msgBus,
+		Logger:   slogDiscardLogger(),
+	})
+	ctx := t.Context()
+	if err := orchestrator.Start(ctx); err != nil {
+		t.Fatalf("failed to start orchestrator: %v", err)
+	}
+	defer func() { _ = orchestrator.Stop(context.Background()) }()
+	time.Sleep(10 * time.Millisecond)
+
+	// Call the tool as the specialist would.
+	args := map[string]any{
+		"task_id":        tk.ID,
+		"from_step_id":   fromStep.ID,
+		"from_agent_id":  config.AgentIDCoder,
+		"to_agent_id":    config.AgentIDDebugger,
+		"description":    "Debug the failing test",
+		"partial_result": "Implemented feature X",
+	}
+	result, err := tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("request_handoff execute failed: %v", err)
+	}
+	res, ok := result.(map[string]any)
+	if !ok || res["success"] != true {
+		t.Fatalf("expected successful HandoffResult, got %v", result)
+	}
+
+	// Wait for the async handler to process the published event.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		steps, err := stepStore.ListByTaskID(tk.ID)
+		if err != nil {
+			t.Fatalf("failed to list steps: %v", err)
+		}
+		if len(steps) >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("orchestrator did not materialize the handoff step within 2s")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	steps, err := stepStore.ListByTaskID(tk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+	var injected *task.TaskStep
+	for _, s := range steps {
+		if s.ID != fromStep.ID {
+			injected = s
+			break
+		}
+	}
+	if injected == nil {
+		t.Fatal("handoff step not found after orchestrator processing")
+	}
+	if !isHandoffStep(injected) {
+		t.Error("injected step should be marked as a handoff step")
+	}
+	if injected.Description != "Debug the failing test" {
+		t.Errorf("injected step description = %q, want %q", injected.Description, "Debug the failing test")
+	}
+	if injected.ToolHint != "debug" {
+		t.Errorf("injected step tool_hint = %q, want %q (derived from debugger)", injected.ToolHint, "debug")
+	}
+	if injected.AccumulatedContext == "" || !strings.Contains(injected.AccumulatedContext, "Implemented feature X") {
+		t.Errorf("injected step should carry the partial result in AccumulatedContext, got %q", injected.AccumulatedContext)
+	}
+}
+
+// TestSpecialistRequestHandoff_CascadeBoundedByMaxHandoffSteps proves the
+// orchestrator's maxHandoffSteps guard holds when the handoff events originate
+// from specialist tool calls (the new baseline surface) rather than being
+// synthesized directly: 6 tool-driven requests against a task already at the
+// limit of 5 must all be rejected with the rate-limit error.
+func TestSpecialistRequestHandoff_CascadeBoundedByMaxHandoffSteps(t *testing.T) {
+	taskStore, stepStore := newTestTaskAndStepStore(t)
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tk := task.NewTask("task-cascade-1", "cascade bound test")
+	tk.TotalJobs = 6
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	fromStep := task.NewTaskStep(tk.ID, "initial step", 1)
+	fromStep.State = task.StepCompleted
+	if err := stepStore.Create(fromStep); err != nil {
+		t.Fatalf("failed to create from step: %v", err)
+	}
+
+	// Seed 5 handoff steps — the production default max (config
+	// max_handoff_steps: 5).
+	for i := 0; i < 5; i++ {
+		hs := task.NewTaskStep(tk.ID, fmt.Sprintf("handoff step %d", i), 100+i)
+		hs.State = task.StepPending
+		hs.IsHandoff = true
+		if err := stepStore.Create(hs); err != nil {
+			t.Fatalf("failed to create seeded handoff step %d: %v", i, err)
+		}
+	}
+
+	scheduler := NewTacticalScheduler(TacticalSchedulerConfig{
+		StepStore:           stepStore,
+		TaskStore:           taskStore,
+		Queue:               &mockQueue{},
+		Bus:                 msgBus,
+		Logger:              slogDiscardLogger(),
+		MaxHandoffSteps:     5,
+		HandoffUseAmendment: false,
+	})
+
+	// Drive the limit through the TOOL surface: the specialist calls
+	// request_handoff, the event is published on the bus, and the orchestrator
+	// subscription runs HandleHandoff — the same path a real cascade takes.
+	toolReg := NewPlaceholderToolRegistry()
+	toolReg.Register(&stubHandoffTool{
+		name:    ToolRequestHandoff,
+		execute: requestHandoffExecute(msgBus, func(string) bool { return true }),
+	})
+	spec := &AgentSpec{ID: config.AgentIDCoder, Enabled: true, Role: RoleExecutor, CanDelegate: false}
+	tool := NewFilteredToolRegistry(toolReg, spec.AllTools()).Get(ToolRequestHandoff)
+	if tool == nil {
+		t.Fatal("coder spec's resolved tool surface must include request_handoff")
+	}
+
+	// Orchestrator + tactical scheduler must be RUNNING before the tool
+	// publishes: the bus has no persistence, so events published with zero
+	// subscribers are dropped.
+	orchestrator := NewOrchestrator(OrchestratorDeps{
+		Tactical: scheduler,
+		Bus:      msgBus,
+		Logger:   slogDiscardLogger(),
+	})
+	ctx := t.Context()
+	if err := orchestrator.Start(ctx); err != nil {
+		t.Fatalf("failed to start orchestrator: %v", err)
+	}
+	defer func() { _ = orchestrator.Stop(context.Background()) }()
+	time.Sleep(10 * time.Millisecond)
+
+	for i := 0; i < 3; i++ {
+		result, err := tool.Execute(context.Background(), map[string]any{
+			"task_id":       tk.ID,
+			"from_step_id":  fromStep.ID,
+			"from_agent_id": config.AgentIDCoder,
+			"to_agent_id":   config.AgentIDPlanner,
+			"description":   fmt.Sprintf("cascade attempt %d — must be rejected", i),
+		})
+		if err != nil {
+			t.Fatalf("tool execute %d returned Go error: %v", i, err)
+		}
+		res, ok := result.(map[string]any)
+		if !ok || res["success"] != true {
+			t.Fatalf("tool execute %d: expected success (the tool publishes and returns; limiting happens downstream), got %v", i, result)
+		}
+	}
+
+	// Give the async handlers time to (attempt to) process the events, then
+	// verify none slipped past the limit.
+	time.Sleep(300 * time.Millisecond)
+
+	steps, err := stepStore.ListByTaskID(tk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+	handoffCount := 0
+	for _, s := range steps {
+		if isHandoffStep(s) {
+			handoffCount++
+		}
+	}
+	if handoffCount > 5 {
+		t.Errorf("maxHandoffSteps=5 breached via tool-surface handoffs: %d handoff steps exist", handoffCount)
+	}
+	if handoffCount != 5 {
+		t.Errorf("expected the 5 seeded handoff steps to remain (all 3 tool requests rejected), got %d", handoffCount)
 	}
 }
