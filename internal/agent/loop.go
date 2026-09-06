@@ -3241,6 +3241,29 @@ func (l *AgentLoop) conversationTokenBudget() int {
 // terminate the turn instead of the rollback spinning the loop forever.
 const maxDuplicateSearchRollbacks = 3
 
+// flushDeferredToolResults closes out an aborted tool-call iteration: every
+// tool call the assistant message announced must receive a tool-role reply
+// before the next provider call, and any deferred guard nudges are appended
+// after those results (never interleaved between calls and results).
+// Call it immediately before returning early from the tool-execution block
+// (cycle-detector abort, veto termination). results may be nil when execution
+// never started.
+func flushDeferredToolResults(conv *Conversation, toolCalls []llm.ToolCall, results []*ExecutionResult, pendingNudges int) {
+	answered := make(map[string]bool, len(results))
+	for _, r := range results {
+		answered[r.ToolCallID] = true
+	}
+	for _, tc := range toolCalls {
+		if answered[tc.ID] {
+			continue // real result already recorded
+		}
+		conv.AddToolResult(tc.ID, "[aborted: the loop stopped before this call ran]")
+	}
+	for i := 0; i < pendingNudges; i++ {
+		conv.AddUserMessage("[system: no measurable progress; change approach.]")
+	}
+}
+
 // resetTurnGuards clears all per-turn guard state at the START of a turn
 // (D-H3, bughunt 2026-09-04): the AgentLoop persists across turns, so guard
 // state from turn N must not veto or nudge turn N+1's first tool calls.
@@ -3928,8 +3951,17 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					break
 				}
 			}
-
-			// Record tool calls for cycle detection
+			// Leaf 07 guard: normalized no-progress ladder. Composes with
+			// (does not replace) the byte-level cycle detector above.
+			// NOTE: guard nudges DEFER user-message injection until AFTER
+			// the tool-result loop below — inserting a user message between
+			// the assistant tool_calls entry and its tool results produces
+			// assistant(tool_calls)→user(nudge)→tool(result), which strict
+			// providers (GLM/Qwen/OpenAI/Anthropic) reject with HTTP 400
+			// (bughunt round-2 HIGH-1). Veto/abort paths must still flush
+			// deferred nudges as synthetic tool results so no tool call
+			// dangles (HIGH-2).
+			pendingNudges := 0
 			for _, tc := range response.ToolCalls {
 				// Leaf 07 guard: normalized no-progress ladder. Composes with
 				// (does not replace) the byte-level cycle detector above.
@@ -3941,7 +3973,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 							"tool", tc.Function.Name,
 							"conversation", conversationID,
 						)
-						conv.AddUserMessage("[system: no measurable progress; change approach.]")
+						pendingNudges++
 					case GuardVeto:
 						l.logger.Warn("No-progress veto",
 							"tool", tc.Function.Name,
@@ -3955,11 +3987,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 								"reason":       "no_progress_vetoes",
 								"conversation": conversationID,
 							})
+							flushDeferredToolResults(conv, response.ToolCalls, results, pendingNudges)
 							return "I stopped because my recent actions were repeating without measurable progress. " +
 								"Here is what I accomplished so far -- please provide more specific guidance if you'd like me to continue.", nil
 						}
-						// Inject veto nudge so the model changes approach.
-						conv.AddUserMessage("[system: your repeated tool call was blocked: no measurable progress; change approach.]")
+						// Inject veto nudge AFTER the tool results (see NOTE).
+						pendingNudges++
 					}
 				}
 
@@ -3975,6 +4008,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 						"iteration", iteration,
 						"tool", tc.Function.Name,
 					)
+					// Flush synthetic tool results first: the assistant
+					// tool_calls entry is already in the conversation, and
+					// returning with unanswered calls poisons every later
+					// provider call on this conversation (HIGH-2).
+					flushDeferredToolResults(conv, response.ToolCalls, results, pendingNudges)
 					exhaustMsg := fmt.Sprintf("I detected I was repeating the same action (%s) and stopped to avoid getting stuck. "+
 						"Please provide more specific guidance or clarify what you'd like me to do.", tc.Function.Name)
 					return exhaustMsg, ErrCycleDetected
@@ -4048,6 +4086,13 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 						l.logger.Warn("learning capture failed", "error", err)
 					}
 				}
+			}
+
+			// Deliver deferred guard nudges AFTER the tool results so the
+			// assistant(tool_calls)→tool(result) pairing is never broken by
+			// an interleaved user message (bughunt round-2 HIGH-1).
+			for i := 0; i < pendingNudges; i++ {
+				conv.AddUserMessage("[system: no measurable progress; change approach.]")
 			}
 
 			// Publish agent result event
