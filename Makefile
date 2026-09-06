@@ -251,18 +251,18 @@ install: build menubar-app build-gui
 		echo "  copied prompts"; \
 	fi
 	@echo ""
-	@echo "Installing bundled skills (no-clobber)..."
-	@mkdir -p $(MEEPT_HOME)/skills
-	@for d in config/skills/*/; do \
-		name=$$(basename $$d); \
-		if [ ! -d "$(MEEPT_HOME)/skills/$$name" ]; then \
-			cp -R "$$d" "$(MEEPT_HOME)/skills/$$name"; \
-			echo "  installed skill $$name"; \
-		else \
-			echo "  skipping $$name (exists)"; \
-		fi; \
-	done
+	@$(MAKE) sync-config
 	@echo "Install complete. Edit $(MEEPT_HOME)/meept.json5 to configure."
+
+# sync-config: merge shipped config/{skills,agents,prompts} into the meept
+# home ($MEEPT_HOME, default ~/.meept) with no-clobber semantics
+# (see scripts/install-sync.py). User-modified files are preserved; new
+# defaults land as <file>.new for manual review. Interactive collisions
+# prompt when run from a tty. `--drift-test` self-verifies the merge matrix.
+# Runs as part of `make install` and standalone.
+sync-config:
+	@python3 scripts/install-sync.py config
+	@python3 scripts/install-sync.py --drift-test
 
 # =============================================================================
 # Testing

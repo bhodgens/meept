@@ -4,7 +4,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // Preset name constants used throughout the codebase.
@@ -59,12 +58,9 @@ func LoadPresetsConfig(path string) (*PresetConfig, error) {
 // LoadPresetsConfigDefault loads presets from default locations.
 func LoadPresetsConfigDefault() (*PresetConfig, error) {
 	// Try user override first
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		userPath := filepath.Join(homeDir, ".meept", "presets.json5")
-		if _, err := os.Stat(userPath); err == nil {
-			return LoadPresetsConfig(userPath)
-		}
+	userPath := MeeptPath("presets.json5")
+	if _, err := os.Stat(userPath); err == nil {
+		return LoadPresetsConfig(userPath)
 	}
 
 	// Try project-local

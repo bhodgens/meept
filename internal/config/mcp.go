@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/caimlas/meept/internal/tools/mcp"
 )
@@ -29,13 +28,10 @@ func LoadMCPConfig(path string) (*MCPServersConfig, error) {
 	return &cfg, nil
 }
 
-// LoadMCPConfigDefault loads MCP config from the default location (~/.meept/mcp_servers.json5).
+// LoadMCPConfigDefault loads MCP config from the default location
+// ($MEEPT_HOME/mcp_servers.json5, default ~/.meept/mcp_servers.json5).
 func LoadMCPConfigDefault() (*MCPServersConfig, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return &MCPServersConfig{Servers: []mcp.ServerConfig{}}, err
-	}
-	return LoadMCPConfig(filepath.Join(homeDir, ".meept", "mcp_servers.json5"))
+	return LoadMCPConfig(MeeptPath("mcp_servers.json5"))
 }
 
 // SaveMCPConfig writes the MCP server configuration atomically.

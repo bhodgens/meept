@@ -37,8 +37,8 @@ import (
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/debug"
-	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/effects"
+	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
@@ -2241,7 +2241,6 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// re-registered as cache-gated wrappers; off => no-op.
 	applyDeterministicToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
 
-
 	acpMgr, acpErr := applyACPFromConfig(cfg.ACP)
 	if acpErr != nil {
 		return nil, acpErr
@@ -2333,8 +2332,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			ToolRegistry:          c.ToolRegistry,
 			ShadowManager:         c.ShadowManager,
 			Logger:                logger,
-			BundledAgentsPath:     "config/agents",
-			BundledPromptsPath:    "config/prompts",
+			BundledAgentsPath:     resolveBundledPath("config/agents"),
+			BundledPromptsPath:    resolveBundledPath("config/prompts"),
 			Watchdog:              c.Watchdog,
 			HallucinationDetector: c.HallucinationDetector,
 			ArtifactManager:       c.ArtifactManager,

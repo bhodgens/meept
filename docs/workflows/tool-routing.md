@@ -32,6 +32,8 @@ Agent Request → Tool Registry → Security Check → Tool Execution → Result
 
 Meept ships a default catalog of 22 preconfigured MCP (Model Context Protocol) servers in `config/mcp_servers.json5`. The template is copied to `~/.meept/mcp_servers.json5` on `make install` if no file exists there yet. Each entry is fully configured with the correct command (`npx` or `uvx` as appropriate), environment variables, category, and description.
 
+Shipped skills, agent rosters, and prompt components (`config/skills/`, `config/agents/`, `config/prompts/`) are merged into the meept home (`$MEEPT_HOME`, default `~/.meept`) by `make install` or standalone via `make sync-config`. The merge never clobbers: files you modified keep your version and the new default lands beside it as `<file>.new` for review; collisions prompt interactively when run from a terminal. `make sync-config` also runs the self-verifying drift test (`scripts/install-sync.py --drift-test`, 9-case merge matrix).
+
 ### Installing Missing MCP Dependencies
 
 `meept doctor --fix --install-missing` audits the enabled stdio entries in

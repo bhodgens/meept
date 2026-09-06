@@ -626,9 +626,17 @@ All config uses **JSON5** format. Templates in `config/`, copied on
   opt-in (consent per command). Daemon/launchd/menubar launches augment
   PATH via `internal/daemon/daemonpath.go` `DaemonPath()` (menubar keeps
   a synced Swift copy) — keep new guaranteed dirs in both.
-- **Skills**: `config/skills/` ships via `make install` into
-  `~/.meept/skills/` (no-clobber). Frontmatter `requires-tools:` gates
+- **Skills**: `config/skills/` ships via `make install` / `make sync-config`
+  into `~/.meept/skills/` (merge, no-clobber: user-modified files are kept,
+  new defaults land as `<file>.new` — see `scripts/install-sync.py`).
+  Frontmatter `requires-tools:` gates
   execution on tool availability (see docs/workflows/skills.md).
+- **Home dir**: everything meept reads/writes lives under one home —
+  `$MEEPT_HOME` when the env var is set, else `~/.meept`
+  (`config.MeeptHome()` / `MeeptPath()` in internal/config/home.go are THE
+  resolution points; config paths carrying the `~/.meept` prefix are
+  redirected through it too). Set `MEEPT_HOME` consistently for daemon,
+  CLI, and `make sync-config` — they all honor it.
 - **ACP agents**: `~/.meept/acp_agents.json5` (catalog of external ACP
   agents; `[acp] enabled` defaults false — no subprocesses until opted in)
 - **UI theme** (TUI + GUI): shared tokens in `theme/tokens.json5`; select per

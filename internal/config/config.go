@@ -124,20 +124,16 @@ func wrapTOMLUnmarshalError(err error, configPath string) error {
 
 // LoadDefault loads configuration from the default location.
 // Prefers JSON5, falls back to TOML for backward compatibility.
+// The location is MeeptHome() (MEEPT_HOME override or ~/.meept).
 func LoadDefault() (*Config, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return DefaultConfig(), err
-	}
-
 	// Try JSON5 first
-	json5Path := filepath.Join(homeDir, ".meept", "meept.json5")
+	json5Path := MeeptPath("meept.json5")
 	if _, err := os.Stat(json5Path); err == nil {
 		return LoadJSON5Config(json5Path)
 	}
 
 	// Fall back to TOML
-	tomlPath := filepath.Join(homeDir, ".meept", "meept.toml")
+	tomlPath := MeeptPath("meept.toml")
 	return Load(tomlPath)
 }
 
@@ -277,6 +273,20 @@ func expandPath(path string) string {
 		}
 	}
 
+	// MEEPT_HOME override (config-home consistency): a leading "~/.meept"
+	// prefix — the shipped default for every meept path — is redirected to
+	// the override directory. MEEPT_HOME="/x" turns "~/.meept/memory" into
+	// "/x/memory". Other ~ paths expand normally.
+	if override := os.Getenv(EnvMeeptHome); override != "" {
+		override = expandTilde(override)
+		if path == "~/"+DefaultHomeRel {
+			return override
+		}
+		if strings.HasPrefix(path, "~/"+DefaultHomeRel+"/") {
+			return filepath.Join(override, path[len("~/"+DefaultHomeRel+"/"):])
+		}
+	}
+
 	if path == "~" {
 		return homeDir
 	}
@@ -410,15 +420,11 @@ func LoadModelsConfig(path string) (*ModelsConfig, error) {
 }
 
 // LoadModelsConfigDefault loads models config from the default location.
-// Priority: user config (~/.meept/models.json5) > project config (config/models.json5)
+// Priority: user config ($MEEPT_HOME/models.json5, default ~/.meept) >
+// project config (config/models.json5)
 func LoadModelsConfigDefault() (*ModelsConfig, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
-	}
-
 	// Try user config first (FIX #0001 - user config takes precedence)
-	userPath := filepath.Join(homeDir, ".meept", "models.json5")
+	userPath := MeeptPath("models.json5")
 	if _, err := os.Stat(userPath); err == nil {
 		return LoadModelsConfig(userPath)
 	}
@@ -428,7 +434,7 @@ func LoadModelsConfigDefault() (*ModelsConfig, error) {
 		return LoadModelsConfig("config/models.json5")
 	}
 
-	return nil, fmt.Errorf("models.json5 not found in ~/.meept/ or config/")
+	return nil, fmt.Errorf("models.json5 not found in %s or config/", MeeptHome())
 }
 
 // StripJSON5Comments converts JSON5 to strict JSON, handling comments,
