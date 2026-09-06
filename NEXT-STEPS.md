@@ -52,20 +52,22 @@ Trees 1-3 (gaps #1, #2, #4) + tree 4 (#3, full frontier):
 
 ## Open follow-ups
 
-1. **memory.listExpired RPC handler** (claim-validity OPEN-QUESTIONS Q4):
-   one-file follow-up in internal/rpc/epistemic.go. Until it lands,
-   `meept memory expired` round-trips to the daemon and gets
-   method-not-found; the in-process tool works today.
-2. **Production worktree provisioner**: leaf 04 wires flag + consumption
-   only; a real provisioner (git worktree factory per active phase) is
-   the remaining piece to make parallel phases write-isolated. Until
-   then, run parallel phases only on plans without file-write conflicts.
-3. **Park store DSN** (above) + Abandon-reason persistence (effects
-   schema has no reason column; documented in code).
-4. **Scratch files** (rm denied by shell approval during session — delete
-   manually): ~/git/meet (typo'd repo path), meept internal/auditlog_tmp/,
-   meept internal/agent/tmpdbg_test.go, meept cmd/skillparse_main.go
-   (parallel session's stray; breaks repo-wide `go build ./...`).
+1. **~~memory.listExpired RPC handler~~ DONE** (35d043a9): direct handler
+   over Manager.ListExpiredClaims; `meept memory expired` works end to
+   end; connectivity graphs regenerated.
+2. **~~Production worktree provisioner~~ DONE** (256e620a): with
+   `plans.parallel_phases: true`, concurrently active phases get
+   isolated `git worktree` checkouts of the active project under
+   `<state_dir>/phase-worktrees/<task>-<phase>`; idempotent per phase,
+   degrades to no-worktree for non-git projects (phase runs shared).
+3. **~~Park store DSN + Abandon reason~~ DONE** (eb3e6230): park store
+   moved to the `_pragma=` DSN form (WAL + busy timeout actually
+   applied now); effects ledger DSN aligned; abandon reasons persist.
+4. **Scratch files** (rm DENIED by user approval twice — user-owned;
+   delete manually if wanted): ~/git/meet (typo'd repo path),
+   meept internal/auditlog_tmp/, meept internal/agent/tmpdbg_test.go,
+   meept cmd/skillparse_main.go (stray; breaks repo-wide
+   `go build ./cmd/...` with undefined skills.Parse).
 5. Pre-existing (not this program): full-repo mutexio failure in
    internal/agent/intent_session_rules_test.go:83; enforcement.go's four
    grandfathered `_ = autoPause(...)` sites.
