@@ -573,6 +573,41 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 		)
 	}
 
+	// Return the active model — but only if it survived BOTH filters. The
+	// quota pass and endpoint pass each rotate using their own predicate,
+	// so sequential passes can hand the cursor back and forth: with
+	// models=[A,B], A quota-blocked-only and B endpoint-blocked-only, the
+	// quota pass rotates A→B and the endpoint pass rotates B→A, returning
+	// the quota-blocked A (bughunt round-2 auditor 3, finding 1). Re-
+	// validate the winner and keep rotating past doubly-blocked models.
+	if (r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[health.CurrentIndex])) ||
+		r.isEndpointBlocked(health, alias.Models[health.CurrentIndex]) {
+		n := len(alias.Models)
+		finalIdx := -1
+		for i := 0; i < n; i++ {
+			idx := (health.CurrentIndex + i) % n
+			blocked := r.isEndpointBlocked(health, alias.Models[idx]) ||
+				(r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[idx]))
+			if !blocked {
+				finalIdx = idx
+				break
+			}
+		}
+		if finalIdx < 0 {
+			// Every candidate carries some block: report by precedence —
+			// quota wins (documented ordering: quota > endpoint > alias).
+			return nil, fmt.Errorf("%w: alias %q (all %d model(s) blocked)",
+				ErrAllModelsQuotaBlocked, aliasName, n)
+		}
+		if finalIdx != health.CurrentIndex {
+			r.logger.Info("Rotated to jointly-unblocked candidate",
+				"alias", aliasName,
+				"new_index", finalIdx,
+			)
+			health.CurrentIndex = finalIdx
+		}
+	}
+
 	// Return the active model
 	if health.CurrentIndex < len(alias.Models) {
 		chosen := alias.Models[health.CurrentIndex]
