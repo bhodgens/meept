@@ -42,6 +42,18 @@ func TestLearnFromVideoSkillParses(t *testing.T) {
 	if !containsFold(skill.Body, "SHOW THE DRAFT") {
 		t.Error("body missing the user-confirmation step (step 5 must not be softened)")
 	}
+	// transcript-large-corpus leaf 03: the learn workflow is file-backed.
+	// The skill must teach output_path + file_read paging as the primary
+	// path and summarize=true for gist requests — never the impossible
+	// in-context chunk summarization.
+	for _, want := range []string{"output_path", "file_read", "summarize=true"} {
+		if !containsFold(skill.Body, want) {
+			t.Errorf("body missing file-backed workflow marker %q", want)
+		}
+	}
+	if containsFold(skill.Body, "40k") {
+		t.Error("body still teaches in-context chunk summarization (\"40k\"); must use the file-backed workflow")
+	}
 }
 
 // containsFold reports whether s contains substr (ASCII case-insensitive).

@@ -355,13 +355,23 @@ commands; nothing about linked assets bypasses security.
 
 The shipped `learn-from-video` skill (`config/skills/learn-from-video/`)
 composes the chain end to end: `transcript_fetch` fetches a YouTube
-transcript, the model extracts the generalizable procedure, and
-`skills_create`/`skills_patch` persist it — with a mandatory show-the-draft
-confirmation step before any write. Note that `skills_patch` resolves the
-target skill through the registry snapshot loaded at daemon startup, so a
-skill written by `skills_create` in the same session is picked up on the
-next daemon restart. An RPC write surface (`skills.create`) is future work;
-the agent tools are the supported path.
+transcript with `output_path` set so the full text lands on disk (tool
+results are bounded; the conversation never carries the bulk), the model
+pages the file with `file_read` (~400-line slices via offset/limit),
+taking structured notes per slice — steps, decision rules, tool/API
+names, numbers, and the WHY — then distills the generalizable procedure
+from those notes, and `skills_create`/`skills_patch` persist it — with a
+mandatory show-the-draft confirmation step before any write. When the
+user wants a gist ("describe the shape") rather than a durable skill,
+the skill routes to `transcript_fetch` with `summarize=true` and works
+from the ~4k digest; the file is paged only for verbatim detail (see
+[external-integrations](external-integrations.md#transcript-fetch-integration)
+for the file-backed output and local summarization contracts). Note that
+`skills_patch` resolves the target skill through the registry snapshot
+loaded at daemon startup, so a skill written by `skills_create` in the
+same session is picked up on the next daemon restart. An RPC write
+surface (`skills.create`) is future work; the agent tools are the
+supported path.
 
 ## Wiki Layer
 
