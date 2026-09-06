@@ -294,16 +294,21 @@ func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, 
 		return
 	}
 	agentID := ""
+	sessionID := ""
 	if chatOpts != nil {
 		agentID = chatOpts.agentID
+		sessionID = chatOpts.sessionID
 	}
 	//nolint:gosec // goroutine outlives request context
 	go func() {
 		c.usageStore.RecordLLMCall(appmetrics.LLMCallRecord{
-			Timestamp:    time.Now(),
-			Provider:     cfg.ProviderID,
-			ModelID:      cfg.ModelID,
-			AgentID:      agentID,
+			Timestamp: time.Now(),
+			Provider:  cfg.ProviderID,
+			ModelID:   cfg.ModelID,
+			AgentID:   agentID,
+			SessionID: sessionID,
+			// Codex usage payloads decode input/output/cached only;
+			// ReasoningTokens stays 0 (not reported).
 			TokensSent:   usage.PromptTokens,
 			TokensRecv:   usage.CompletionTokens,
 			TokensCached: usage.CachedTokens,

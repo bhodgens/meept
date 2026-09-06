@@ -248,9 +248,12 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     provider        TEXT NOT NULL DEFAULT '',
     model_id        TEXT NOT NULL DEFAULT '',
     agent_id        TEXT NOT NULL DEFAULT '',
+    session_id      TEXT NOT NULL DEFAULT '',
     tokens_sent     INTEGER NOT NULL DEFAULT 0,
     tokens_received INTEGER NOT NULL DEFAULT 0,
     tokens_cached   INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     error           INTEGER NOT NULL DEFAULT 0,
     error_message   TEXT NOT NULL DEFAULT '',
     latency_ms      INTEGER NOT NULL DEFAULT 0,
@@ -337,6 +340,7 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_log_intent ON dispatch_log(intent_type);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_ts ON llm_calls(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_provider_ts ON llm_calls(provider, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_agent_ts ON llm_calls(agent_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_session_ts ON llm_calls(session_id, timestamp DESC);
 `
 
 	_, err := s.db.Exec(schema)
@@ -354,6 +358,26 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_agent_ts ON llm_calls(agent_id, timesta
 	if _, err := s.db.Exec("ALTER TABLE model_performance ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("failed to add model_performance.agent_id: %w", err)
+		}
+	}
+
+	// llm_calls detail columns (tokscale ingest): session id + provider
+	// reasoning/cache-creation token counts. Same tolerate-duplicate-column
+	// pattern as above — pre-existing DBs get the NOT NULL DEFAULTs, which
+	// are correct (unknown session, tokens not reported).
+	if _, err := s.db.Exec("ALTER TABLE llm_calls ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add llm_calls.session_id: %w", err)
+		}
+	}
+	if _, err := s.db.Exec("ALTER TABLE llm_calls ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add llm_calls.reasoning_tokens: %w", err)
+		}
+	}
+	if _, err := s.db.Exec("ALTER TABLE llm_calls ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add llm_calls.cache_creation_tokens: %w", err)
 		}
 	}
 	return nil
@@ -588,19 +612,24 @@ func (s *Store) RecordModelPerformance(_ context.Context, record ModelPerformanc
 // LLMCallRecord captures one completed LLM call for token accounting.
 // All fields are required except ErrorMessage (empty on success) and
 // LatencyMs/DurationMs (0 when unknown). AgentID may be empty when the
-// caller has no agent identity.
+// caller has no agent identity. SessionID is the raw chat/session id,
+// "" when unknown. ReasoningTokens/CacheCreationTokens are 0 when the
+// provider did not report them (NOT "zero occurred").
 type LLMCallRecord struct {
-	Timestamp    time.Time
-	Provider     string
-	ModelID      string
-	AgentID      string
-	TokensSent   int // prompt tokens
-	TokensRecv   int // completion tokens
-	TokensCached int // prompt cache reads (0 when provider doesn't report)
-	IsError      bool
-	ErrorMessage string
-	LatencyMs    int64
-	DurationMs   float64 // wall-clock duration (duplicate of LatencyMs kept for schema parity)
+	Timestamp           time.Time
+	Provider            string
+	ModelID             string
+	AgentID             string
+	SessionID           string // "" when unknown
+	TokensSent          int    // prompt tokens
+	TokensRecv          int    // completion tokens
+	TokensCached        int    // prompt cache reads (0 when provider doesn't report)
+	ReasoningTokens     int    // reasoning/thinking output tokens (0 = not reported)
+	CacheCreationTokens int    // prompt cache writes (0 = not reported)
+	IsError             bool
+	ErrorMessage        string
+	LatencyMs           int64
+	DurationMs          float64 // wall-clock duration (duplicate of LatencyMs kept for schema parity)
 }
 
 // RecordLLMCall appends one LLM call to llm_calls and updates the
@@ -621,11 +650,13 @@ func (s *Store) RecordLLMCall(record LLMCallRecord) {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO llm_calls
-			(timestamp, provider, model_id, agent_id, tokens_sent, tokens_received,
-			 tokens_cached, error, error_message, latency_ms, duration)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(timestamp, provider, model_id, agent_id, session_id, tokens_sent,
+			 tokens_received, tokens_cached, reasoning_tokens, cache_creation_tokens,
+			 error, error_message, latency_ms, duration)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts.UTC().Format(time.RFC3339), record.Provider, record.ModelID, record.AgentID,
-		record.TokensSent, record.TokensRecv, record.TokensCached, isErr,
+		record.SessionID, record.TokensSent, record.TokensRecv, record.TokensCached,
+		record.ReasoningTokens, record.CacheCreationTokens, isErr,
 		record.ErrorMessage, record.LatencyMs, record.DurationMs,
 	)
 	if err != nil {

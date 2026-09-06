@@ -282,20 +282,24 @@ func (c *AnthropicClient) recordUsageStore(usage TokenUsage, isErr bool, errMsg 
 	//nolint:gosec // goroutine outlives request context
 	go func() {
 		agentID := ""
+		sessionID := ""
 		if chatOpts != nil {
 			agentID = chatOpts.agentID
+			sessionID = chatOpts.sessionID
 		}
 		c.usageStore.RecordLLMCall(appmetrics.LLMCallRecord{
-			Timestamp:    time.Now(),
-			Provider:     cfg.ProviderID,
-			ModelID:      cfg.ModelID,
-			AgentID:      agentID,
-			TokensSent:   usage.PromptTokens,
-			TokensRecv:   usage.CompletionTokens,
-			TokensCached: usage.CachedTokens,
-			IsError:      isErr,
-			ErrorMessage: errMsg,
-			LatencyMs:    latencyMs,
+			Timestamp:           time.Now(),
+			Provider:            cfg.ProviderID,
+			ModelID:             cfg.ModelID,
+			AgentID:             agentID,
+			SessionID:           sessionID,
+			TokensSent:          usage.PromptTokens,
+			TokensRecv:          usage.CompletionTokens,
+			TokensCached:        usage.CachedTokens,
+			CacheCreationTokens: usage.CacheCreationTokens,
+			IsError:             isErr,
+			ErrorMessage:        errMsg,
+			LatencyMs:           latencyMs,
 		})
 	}()
 }
@@ -1704,10 +1708,11 @@ func (c *AnthropicClient) buildResponseFromBlocks(blocks []contentBlockAccum, st
 		Content:   finalContent,
 		ToolCalls: toolCalls,
 		Usage: TokenUsage{
-			PromptTokens:     usage.InputTokens,
-			CompletionTokens: usage.OutputTokens,
-			TotalTokens:      usage.InputTokens + usage.OutputTokens,
-			CachedTokens:     usage.CacheReadInputTokens,
+			PromptTokens:        usage.InputTokens,
+			CompletionTokens:    usage.OutputTokens,
+			TotalTokens:         usage.InputTokens + usage.OutputTokens,
+			CachedTokens:        usage.CacheReadInputTokens,
+			CacheCreationTokens: usage.CacheCreationInputTokens,
 		},
 		Model:        c.config.ModelID,
 		FinishReason: stopReason,
@@ -1752,10 +1757,11 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) *Response {
 		Content:   finalContent,
 		ToolCalls: toolCalls,
 		Usage: TokenUsage{
-			PromptTokens:     apiResp.Usage.InputTokens,
-			CompletionTokens: apiResp.Usage.OutputTokens,
-			TotalTokens:      apiResp.Usage.InputTokens + apiResp.Usage.OutputTokens,
-			CachedTokens:     apiResp.Usage.CacheReadInputTokens,
+			PromptTokens:        apiResp.Usage.InputTokens,
+			CompletionTokens:    apiResp.Usage.OutputTokens,
+			TotalTokens:         apiResp.Usage.InputTokens + apiResp.Usage.OutputTokens,
+			CachedTokens:        apiResp.Usage.CacheReadInputTokens,
+			CacheCreationTokens: apiResp.Usage.CacheCreationInputTokens,
 		},
 		Model:        apiResp.Model,
 		FinishReason: apiResp.StopReason,

@@ -494,3 +494,78 @@ func TestAnthropicClient_BuildRequest_ToolResultIsError(t *testing.T) {
 		})
 	}
 }
+
+// TestAnthropicClient_UsageStoreCarriesSessionAndCacheCreation verifies the
+// Anthropic path stamps chatOptions.sessionID and
+// usage.cache_creation_input_tokens (via TokenUsage.CacheCreationTokens)
+// into the llm_calls row (tokscale ingest leaf 01).
+func TestAnthropicClient_UsageStoreCarriesSessionAndCacheCreation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"id": "m_toks", "type": "message", "role": "assistant", "model": "claude-test",
+			"stop_reason": "end_turn",
+			"content": []map[string]any{
+				{"type": "text", "text": "ok"},
+			},
+			"usage": map[string]any{
+				"input_tokens":                100,
+				"output_tokens":               50,
+				"cache_creation_input_tokens": 40,
+				"cache_read_input_tokens":     20,
+			},
+		}
+		b, _ := json.Marshal(resp)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
+	}))
+	defer server.Close()
+
+	store, dbPath := newUsageTestStoreAtPath(t, filepath.Join(t.TempDir(), "metrics.db"))
+	db := openLLMCallsSidecar(t, dbPath)
+	cfg := &ModelConfig{
+		ProviderID: "anthropic",
+		ModelID:    "claude-test",
+		BaseURL:    server.URL,
+		APIKey:     "test-key",
+		MaxTokens:  128,
+	}
+	c := NewAnthropicClient(cfg)
+	c.SetUsageStore(store)
+
+	_, err := c.Chat(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hello"}},
+		WithAgentScope("coder"), WithTaskScope("task-1", "sess-anth"))
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	var rows []struct {
+		SessionID           string `db:"session_id"`
+		ReasoningTokens     int    `db:"reasoning_tokens"`
+		CacheCreationTokens int    `db:"cache_creation_tokens"`
+		TokensCached        int    `db:"tokens_cached"`
+	}
+	pollUntil(t, func() bool {
+		return db.Select(&rows,
+			`SELECT session_id, reasoning_tokens, cache_creation_tokens, tokens_cached FROM llm_calls`) == nil &&
+			len(rows) == 1
+	})
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 llm_calls row, got %d", len(rows))
+	}
+	if rows[0].SessionID != "sess-anth" {
+		t.Errorf("SessionID = %q, want sess-anth", rows[0].SessionID)
+	}
+	if rows[0].CacheCreationTokens != 40 {
+		t.Errorf("CacheCreationTokens = %d, want 40", rows[0].CacheCreationTokens)
+	}
+	if rows[0].TokensCached != 20 {
+		t.Errorf("TokensCached = %d, want 20", rows[0].TokensCached)
+	}
+	// anthropicUsage does not decode a reasoning/thinking token field; the
+	// frozen semantics say 0 = "provider did not report" here.
+	if rows[0].ReasoningTokens != 0 {
+		t.Errorf("ReasoningTokens = %d, want 0 (not reported by anthropicUsage)", rows[0].ReasoningTokens)
+	}
+}

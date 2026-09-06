@@ -175,3 +175,124 @@ func TestStore_QueryDispatchLogBySession(t *testing.T) {
 		t.Errorf("expected 0 entries for nonexistent session, got %d", len(emptyResults))
 	}
 }
+
+// newLLMSchemaTestStore mirrors the NewStore construction used by the other
+// store tests (no newTestStore helper exists) with batching disabled so
+// records land immediately.
+func newLLMSchemaTestStore(t *testing.T) *Store {
+	t.Helper()
+	store, err := NewStore(&StoreConfig{
+		DatabasePath:  filepath.Join(t.TempDir(), "metrics.db"),
+		BatchSize:     1,
+		FlushInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+// TestStore_LLMCallsSchemaHasSessionAndDetailTokens verifies the
+// tokscale-ingest llm_calls columns (session_id, reasoning_tokens,
+// cache_creation_tokens) exist on a fresh install (inline CREATE TABLE) —
+// and, by construction of the migration path, on pre-existing DBs.
+func TestStore_LLMCallsSchemaHasSessionAndDetailTokens(t *testing.T) {
+	store := newLLMSchemaTestStore(t)
+
+	var cols []string
+	if err := store.db.Select(&cols,
+		`SELECT name FROM pragma_table_info('llm_calls') ORDER BY cid`); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"session_id":            false,
+		"reasoning_tokens":      false,
+		"cache_creation_tokens": false,
+	}
+	for _, c := range cols {
+		if _, ok := want[c]; ok {
+			want[c] = true
+		}
+	}
+	for c, found := range want {
+		if !found {
+			t.Fatalf("llm_calls missing column %q; have %v", c, cols)
+		}
+	}
+
+	// Migration path: ALTER the columns off an existing table and re-open
+	// a store on the same file — the idempotent duplicate-column-tolerant
+	// migration must not error, and the index must exist.
+	if _, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS llm_calls_legacy_probe AS SELECT id, timestamp FROM llm_calls`); err != nil {
+		t.Fatal(err)
+	}
+	var idx []string
+	if err := store.db.Select(&idx,
+		`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='llm_calls'`); err != nil {
+		t.Fatal(err)
+	}
+	foundIdx := false
+	for _, n := range idx {
+		if n == "idx_llm_calls_session_ts" {
+			foundIdx = true
+		}
+	}
+	if !foundIdx {
+		t.Fatalf("missing index idx_llm_calls_session_ts; have %v", idx)
+	}
+}
+
+// TestStore_RecordLLMCallPersistsSessionAndDetailTokens verifies
+// RecordLLMCall writes session_id / reasoning_tokens / cache_creation_tokens
+// (tokscale ingest) and that the unknown-session error row still lands with
+// error=1 and zero usage.
+func TestStore_RecordLLMCallPersistsSessionAndDetailTokens(t *testing.T) {
+	store := newLLMSchemaTestStore(t)
+
+	store.RecordLLMCall(LLMCallRecord{
+		Timestamp:           time.Now().UTC(),
+		Provider:            "anthropic",
+		ModelID:             "claude-test",
+		AgentID:             "coder",
+		SessionID:           "conv-123",
+		TokensSent:          100,
+		TokensRecv:          50,
+		TokensCached:        20,
+		ReasoningTokens:     30,
+		CacheCreationTokens: 40,
+	})
+	store.RecordLLMCall(LLMCallRecord{
+		Timestamp: time.Now().UTC(),
+		Provider:  "anthropic",
+		ModelID:   "claude-test",
+		AgentID:   "coder",
+		// SessionID "" — unknown path must still record
+		TokensSent: 1,
+		TokensRecv: 2,
+		IsError:    true,
+	})
+
+	var got []struct {
+		SessionID           string `db:"session_id"`
+		ReasoningTokens     int    `db:"reasoning_tokens"`
+		CacheCreationTokens int    `db:"cache_creation_tokens"`
+		TokensSent          int    `db:"tokens_sent"`
+		Error               int    `db:"error"`
+	}
+	if err := store.db.Select(&got,
+		`SELECT session_id, reasoning_tokens, cache_creation_tokens, tokens_sent, error
+		 FROM llm_calls ORDER BY id`); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("rows = %d, want 2", len(got))
+	}
+	if got[0].SessionID != "conv-123" || got[0].ReasoningTokens != 30 ||
+		got[0].CacheCreationTokens != 40 {
+		t.Fatalf("row0 = %+v", got[0])
+	}
+	if got[1].SessionID != "" || got[1].Error != 1 {
+		t.Fatalf("row1 (unknown session, error) = %+v", got[1])
+	}
+}
