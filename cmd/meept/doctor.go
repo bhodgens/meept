@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/spf13/cobra"
 )
 
@@ -110,6 +112,11 @@ func runDoctor(fix bool) error {
 	} else {
 		checks = append(checks, doctorCheck{name: "orphan-children", ok: true, detail: "none found"})
 	}
+
+	// --- mcp catalog dependency checks (Contract B) ---
+	// One line per ENABLED stdio catalog entry. A catalog-load failure is
+	// a single warn line, never an abort.
+	checks = append(checks, mcpDependencyChecksDoctor()...)
 
 	// --- RPC fallback / enrichment ---
 	if client, err := connectDaemon(); err == nil {
@@ -314,4 +321,96 @@ func intList(pids []int) string {
 		parts[i] = strconv.Itoa(p)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// --- mcp catalog dependency checks (Contract B) ---
+
+// mcpDependencyChecksDoctor loads the mcp catalog via the existing config
+// loading path and builds the dependency checks for every enabled stdio
+// entry. A load failure yields a single warn check instead of aborting
+// doctor; a nil/empty catalog yields no checks.
+func mcpDependencyChecksDoctor() []doctorCheck {
+	cfg, err := config.LoadMCPConfigDefault()
+	if err != nil {
+		return []doctorCheck{mcpCatalogFailureCheck(err.Error())}
+	}
+	return mcpDependencyChecks(cfg)
+}
+
+// mcpDependencyChecks builds one check per enabled stdio catalog entry.
+// Disabled servers and http-transport servers produce no check: http has
+// no local binary dependency, and disabled entries are not launched.
+func mcpDependencyChecks(cfg *config.MCPServersConfig) []doctorCheck {
+	if cfg == nil {
+		return nil
+	}
+	var checks []doctorCheck
+	for _, srv := range cfg.Servers {
+		if !srv.IsEnabled() || !isStdioServer(srv) {
+			continue
+		}
+		if len(srv.Command) == 0 {
+			continue
+		}
+		checks = append(checks, mcpDependencyCheck(srv.Name, srv.Command[0], srv.InstallHint))
+	}
+	return checks
+}
+
+// isStdioServer reports whether the entry launches a local stdio process.
+// Mirrors the manager's inference: explicit type, else command presence.
+func isStdioServer(srv mcp.ServerConfig) bool {
+	if srv.Type != "" {
+		return srv.Type == "stdio"
+	}
+	return len(srv.Command) > 0
+}
+
+// mcpDependencyCheck builds the doctorCheck for one enabled stdio server.
+// Bare command names are resolved via exec.LookPath; absolute paths are
+// stat()'d instead (LookPath rejects absolute paths containing path
+// separators on some platforms). Missing binaries are data in the detail,
+// never an abort.
+func mcpDependencyCheck(name, command0, installHint string) doctorCheck {
+	_, found := lookupBinary(command0)
+	check := doctorCheck{
+		name: "mcp:" + name,
+		ok:   found,
+	}
+	if found {
+		check.detail = command0 + " found in path"
+		return check
+	}
+	check.detail = command0 + " not found"
+	if installHint != "" {
+		check.detail += " — install: " + installHint
+	}
+	return check
+}
+
+// mcpCatalogFailureCheck is the single warn line emitted when the catalog
+// itself cannot be loaded; doctor continues with the remaining checks.
+func mcpCatalogFailureCheck(errText string) doctorCheck {
+	return doctorCheck{
+		name:   "mcp:catalog",
+		ok:     false,
+		warn:   true,
+		detail: "could not load mcp catalog — " + errText,
+	}
+}
+
+// lookupBinary resolves command0: bare names via exec.LookPath, absolute
+// paths via os.Stat (+ executable bit enforcement via Mode().Perm()).
+func lookupBinary(command0 string) (string, bool) {
+	if filepath.IsAbs(command0) {
+		info, err := os.Stat(command0)
+		if err != nil {
+			return "", false
+		}
+		return command0, info.Mode().Perm()&0o111 != 0
+	}
+	if path, err := exec.LookPath(command0); err == nil {
+		return path, true
+	}
+	return "", false
 }
