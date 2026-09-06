@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	appmetrics "github.com/caimlas/meept/internal/metrics"
 )
 
 // ProviderStatus represents the health status of a provider.
@@ -109,6 +111,9 @@ type ProviderManager struct {
 	// quotaMaxWait caps how far into the future a quota block is persisted.
 	// Zero means DefaultQuotaMaxWait.
 	quotaMaxWait time.Duration
+	// usageStore is the app-level metrics store fanned out to every
+	// managed chatter (metrics.db llm_calls accounting). Guarded by mu.
+	usageStore *appmetrics.Store
 	// failurePolicy is the failure-policy config propagated onto
 	// OpenAI-compatible Client chatters (SetFailurePolicyConfig). Nil =
 	// clients keep their package defaults (30s throttle / 1h floor / 24h
@@ -1100,6 +1105,21 @@ func (pm *ProviderManager) SetCostOptimized(enabled bool) {
 	pm.config.CostOptimized = enabled
 }
 
+// SetUsageStore attaches the app-level metrics store (metrics.db) to every
+// managed chatter (and to future ones via AddProvider) for per-provider
+// /per-agent token accounting. Nil-safe.
+func (pm *ProviderManager) SetUsageStore(store *appmetrics.Store) {
+	if pm == nil || store == nil {
+		return
+	}
+	pm.mu.Lock()
+	pm.usageStore = store
+	for _, entry := range pm.providers {
+		AttachUsageStore(entry.Chatter, store)
+	}
+	pm.mu.Unlock()
+}
+
 // AddProvider adds a new provider dynamically.
 func (pm *ProviderManager) AddProvider(cfg *ModelConfig, priority int) {
 	pm.mu.Lock()
@@ -1382,4 +1402,23 @@ func isClientError(err error) bool {
 			status != http.StatusTooManyRequests
 	}
 	return false
+}
+
+// UsageStoreAttacher is implemented by LLM clients that can record
+// per-provider/per-agent token accounting into the app-level metrics
+// store (metrics.db llm_calls).
+type UsageStoreAttacher interface {
+	SetUsageStore(store *appmetrics.Store)
+}
+
+// AttachUsageStore attaches the store to a Chatter when the underlying
+// client implements UsageStoreAttacher. No-op otherwise (unknown Chatter
+// implementations keep their current behavior). Nil-safe.
+func AttachUsageStore(chatter Chatter, store *appmetrics.Store) {
+	if chatter == nil || store == nil {
+		return
+	}
+	if sa, ok := chatter.(UsageStoreAttacher); ok {
+		sa.SetUsageStore(store)
+	}
 }

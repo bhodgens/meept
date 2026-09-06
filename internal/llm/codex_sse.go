@@ -155,8 +155,11 @@ type codexResponsesResp struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details"`
 	Usage *struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens        int `json:"input_tokens"`
+		OutputTokens       int `json:"output_tokens"`
+		InputTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"input_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -188,6 +191,7 @@ func handleResponsesSSEEvent(ev codexResponsesSSEEvent, acc *codexStreamAccumula
 				PromptTokens:     ev.Resp.Usage.InputTokens,
 				CompletionTokens: ev.Resp.Usage.OutputTokens,
 				TotalTokens:      ev.Resp.Usage.InputTokens + ev.Resp.Usage.OutputTokens,
+				CachedTokens:     ev.Resp.Usage.InputTokensDetails.CachedTokens,
 			}
 		}
 		return true, nil
@@ -317,6 +321,7 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 	payload := c.buildPayload(messages, cfg, chatOpts, true)
 	resp, err := c.doRequest(ctx, payload, cfg, chatOpts.sessionID, onDelta)
 	if err != nil {
+		c.recordUsageStore(cfg, chatOpts, TokenUsage{}, true, err.Error())
 		return nil, err
 	}
 
@@ -336,6 +341,10 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 			}
 		}
 	}
+
+	// Per-provider/per-agent token accounting (metrics.db llm_calls).
+	c.recordUsageStore(cfg, chatOpts, resp.Usage, false, "")
+
 	return resp, nil
 }
 

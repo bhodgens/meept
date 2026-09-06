@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS model_performance (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     model_id        TEXT NOT NULL,
     provider        TEXT NOT NULL DEFAULT '',
+    agent_id        TEXT NOT NULL DEFAULT '',
     total_requests  INTEGER NOT NULL DEFAULT 0,
     total_errors    INTEGER NOT NULL DEFAULT 0,
     avg_latency_ms  REAL NOT NULL DEFAULT 0,
@@ -235,7 +236,25 @@ CREATE TABLE IF NOT EXISTS model_performance (
     period_start    TEXT NOT NULL,
     period_end      TEXT NOT NULL,
     updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    UNIQUE(model_id, provider, period_start)
+    UNIQUE(model_id, provider, agent_id, period_start)
+);
+
+-- Per-call LLM token accounting (append-only; windowed queries are SQL
+-- aggregations over this table — rollup rows in model_performance lose
+-- windowing). One row per completed LLM call (success or terminal failure).
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    provider        TEXT NOT NULL DEFAULT '',
+    model_id        TEXT NOT NULL DEFAULT '',
+    agent_id        TEXT NOT NULL DEFAULT '',
+    tokens_sent     INTEGER NOT NULL DEFAULT 0,
+    tokens_received INTEGER NOT NULL DEFAULT 0,
+    tokens_cached   INTEGER NOT NULL DEFAULT 0,
+    error           INTEGER NOT NULL DEFAULT 0,
+    error_message   TEXT NOT NULL DEFAULT '',
+    latency_ms      INTEGER NOT NULL DEFAULT 0,
+    duration        REAL NOT NULL DEFAULT 0
 );
 
 -- Error records for retry tracking
@@ -315,10 +334,29 @@ CREATE INDEX IF NOT EXISTS idx_test_runs_ts ON test_runs(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_dispatch_log_ts ON dispatch_log(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_dispatch_log_session ON dispatch_log(session_id);
 CREATE INDEX IF NOT EXISTS idx_dispatch_log_intent ON dispatch_log(intent_type);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_ts ON llm_calls(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_provider_ts ON llm_calls(provider, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_agent_ts ON llm_calls(agent_id, timestamp DESC);
 `
 
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migration tolerance for pre-existing databases: SQLite's CREATE TABLE
+	// IF NOT EXISTS does not alter tables that already exist, so older DBs
+	// are missing the agent_id column (and its UNIQUE-constraint change).
+	// ALTER TABLE ADD COLUMN is idempotent-safe here only because we
+	// tolerate "duplicate column name" — it errors on DBs that already
+	// have it and succeeds on DBs that don't. Existing rows get the
+	// DEFAULT '' agent_id, which is correct (unknown agent).
+	if _, err := s.db.Exec("ALTER TABLE model_performance ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add model_performance.agent_id: %w", err)
+		}
+	}
+	return nil
 }
 
 // flushLoop periodically flushes batched metrics.
@@ -472,7 +510,7 @@ func (s *Store) aggregateHourly() {
 	// Apply retention policy to audit tables (default 30 days)
 	if s.retentionDays > 0 {
 		cutoff := fmt.Sprintf("-%d days", s.retentionDays)
-		retentionTables := []string{"events", "error_records", "dispatch_log", "response_quality", "lint_runs", "test_runs"}
+		retentionTables := []string{"events", "error_records", "dispatch_log", "response_quality", "lint_runs", "test_runs", "llm_calls"}
 		for _, table := range retentionTables {
 			query := fmt.Sprintf("DELETE FROM %s WHERE timestamp < datetime('now', ?)", table)
 			if _, err := s.db.Exec(query, cutoff); err != nil {
@@ -526,14 +564,17 @@ func (s *Store) RecordEvent(eventType, severity, message string, context map[str
 }
 
 // RecordModelPerformance upserts a model performance record.
-// Uses INSERT OR REPLACE against the UNIQUE(model_id, provider, period_start) constraint.
+// Uses INSERT OR REPLACE against the UNIQUE(model_id, provider, agent_id,
+// period_start) constraint (pre-migration databases carry the older
+// 3-column constraint and keep their coarser rollup granularity; the
+// per-agent detail lives in llm_calls regardless).
 func (s *Store) RecordModelPerformance(_ context.Context, record ModelPerformanceRecord) error {
 	_, err := s.db.Exec(
 		`INSERT OR REPLACE INTO model_performance
-			(model_id, provider, total_requests, total_errors, avg_latency_ms,
+			(model_id, provider, agent_id, total_requests, total_errors, avg_latency_ms,
 			 avg_tokens_in, avg_tokens_out, period_start, period_end, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		record.ModelID, record.Provider, record.TotalRequests, record.TotalErrors,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.ModelID, record.Provider, record.AgentID, record.TotalRequests, record.TotalErrors,
 		record.AvgLatencyMs, record.AvgTokensIn, record.AvgTokensOut,
 		record.PeriodStart, record.PeriodEnd, time.Now().UTC().Format(time.RFC3339),
 	)
@@ -542,6 +583,136 @@ func (s *Store) RecordModelPerformance(_ context.Context, record ModelPerformanc
 			"model_id", record.ModelID, "provider", record.Provider)
 	}
 	return err
+}
+
+// LLMCallRecord captures one completed LLM call for token accounting.
+// All fields are required except ErrorMessage (empty on success) and
+// LatencyMs/DurationMs (0 when unknown). AgentID may be empty when the
+// caller has no agent identity.
+type LLMCallRecord struct {
+	Timestamp    time.Time
+	Provider     string
+	ModelID      string
+	AgentID      string
+	TokensSent   int // prompt tokens
+	TokensRecv   int // completion tokens
+	TokensCached int // prompt cache reads (0 when provider doesn't report)
+	IsError      bool
+	ErrorMessage string
+	LatencyMs    int64
+	DurationMs   float64 // wall-clock duration (duplicate of LatencyMs kept for schema parity)
+}
+
+// RecordLLMCall appends one LLM call to llm_calls and updates the
+// model_performance rollup (per model+provider+agent within the call's
+// hour bucket) so both the append-only log and the legacy rollup stay
+// current. Storage failures are logged, never fatal to the caller.
+func (s *Store) RecordLLMCall(record LLMCallRecord) {
+	ts := record.Timestamp
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	isErr := 0
+	if record.IsError {
+		isErr = 1
+	}
+	if record.DurationMs == 0 {
+		record.DurationMs = float64(record.LatencyMs)
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO llm_calls
+			(timestamp, provider, model_id, agent_id, tokens_sent, tokens_received,
+			 tokens_cached, error, error_message, latency_ms, duration)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ts.UTC().Format(time.RFC3339), record.Provider, record.ModelID, record.AgentID,
+		record.TokensSent, record.TokensRecv, record.TokensCached, isErr,
+		record.ErrorMessage, record.LatencyMs, record.DurationMs,
+	)
+	if err != nil {
+		s.logger.Error("failed to record llm call", "error", err,
+			"provider", record.Provider, "model_id", record.ModelID)
+		return
+	}
+
+	// Rollup into model_performance (hour-bucketed, per model+provider+agent)
+	// via incremental UPSERT so the legacy aggregation stays usable.
+	periodStart := ts.UTC().Truncate(time.Hour).Format(time.RFC3339)
+	upsert := `INSERT INTO model_performance
+			(model_id, provider, agent_id, total_requests, total_errors, avg_latency_ms,
+			 avg_tokens_in, avg_tokens_out, period_start, period_end, updated_at)
+		 VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+		 ON CONFLICT(model_id, provider, agent_id, period_start) DO UPDATE SET
+			total_requests = total_requests + 1,
+			total_errors   = total_errors + excluded.total_errors,
+			avg_latency_ms = (model_performance.avg_latency_ms * model_performance.total_requests + excluded.avg_latency_ms) / (model_performance.total_requests + 1),
+			avg_tokens_in  = (model_performance.avg_tokens_in  * model_performance.total_requests + excluded.avg_tokens_in)  / (model_performance.total_requests + 1),
+			avg_tokens_out = (model_performance.avg_tokens_out * model_performance.total_requests + excluded.avg_tokens_out) / (model_performance.total_requests + 1),
+			period_end     = excluded.period_end,
+			updated_at     = strftime('%Y-%m-%dT%H:%M:%SZ','now')`
+	_, err = s.db.Exec(upsert,
+		record.ModelID, record.Provider, record.AgentID, isErr,
+		float64(record.LatencyMs), float64(record.TokensSent), float64(record.TokensRecv),
+		periodStart, ts.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		// Old databases keep the pre-migration UNIQUE(model_id, provider,
+		// period_start) index; retry with INSERT OR REPLACE so the rollup
+		// still works there (it overwrites the coarse row — acceptable on
+		// legacy schemas, since llm_calls carries the full detail).
+		coarse := `INSERT OR REPLACE INTO model_performance
+			(model_id, provider, agent_id, total_requests, total_errors, avg_latency_ms,
+			 avg_tokens_in, avg_tokens_out, period_start, period_end, updated_at)
+		 VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))`
+		if _, err2 := s.db.Exec(coarse,
+			record.ModelID, record.Provider, record.AgentID, isErr,
+			float64(record.LatencyMs), float64(record.TokensSent), float64(record.TokensRecv),
+			periodStart, ts.UTC().Format(time.RFC3339),
+		); err2 != nil {
+			s.logger.Error("failed to upsert model performance rollup", "error", err,
+				"fallback_error", err2, "model_id", record.ModelID)
+		}
+	}
+}
+
+// LLMUsageRow is one aggregated window row: token sums per provider (and,
+// when groupByAgent is true, per agent).
+type LLMUsageRow struct {
+	Provider     string  `db:"provider" json:"provider"`
+	AgentID      string  `db:"agent_id" json:"agent_id"`
+	Calls        int64   `db:"calls" json:"calls"`
+	Errors       int64   `db:"errors" json:"errors"`
+	TokensSent   int64   `db:"tokens_sent" json:"tokens_sent"`
+	TokensRecv   int64   `db:"tokens_received" json:"tokens_received"`
+	TokensCached int64   `db:"tokens_cached" json:"tokens_cached"`
+	AvgLatencyMs float64 `db:"avg_latency_ms" json:"avg_latency_ms"`
+}
+
+// QueryLLMCallUsage aggregates llm_calls over a window. When groupByAgent
+// is false rows are per provider (agent_id = ”); when true rows are per
+// provider+agent pair. from/to bound the window (both required).
+func (s *Store) QueryLLMCallUsage(from, to time.Time, groupByAgent bool) ([]LLMUsageRow, error) {
+	groupExpr := "provider"
+	if groupByAgent {
+		groupExpr = "provider, agent_id"
+	}
+	// groupExpr is built from a fixed constant above, never user input.
+	query := fmt.Sprintf(`SELECT provider, agent_id, COUNT(*) AS calls,
+			SUM(error) AS errors,
+			SUM(tokens_sent) AS tokens_sent,
+			SUM(tokens_received) AS tokens_received,
+			SUM(tokens_cached) AS tokens_cached,
+			AVG(latency_ms) AS avg_latency_ms
+		FROM llm_calls
+		WHERE timestamp >= ? AND timestamp <= ?
+		GROUP BY %s
+		ORDER BY tokens_sent DESC`, groupExpr) //nolint:gosec // constant expression
+	var rows []LLMUsageRow
+	err := s.db.Select(&rows, query,
+		from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query llm call usage: %w", err)
+	}
+	return rows, nil
 }
 
 // RecordError inserts an error record for retry tracking.
@@ -950,6 +1121,7 @@ type ModelPerformanceRecord struct {
 	ID            int64   `db:"id" json:"id"`
 	ModelID       string  `db:"model_id" json:"model_id"`
 	Provider      string  `db:"provider" json:"provider"`
+	AgentID       string  `db:"agent_id" json:"agent_id"`
 	TotalRequests int     `db:"total_requests" json:"total_requests"`
 	TotalErrors   int     `db:"total_errors" json:"total_errors"`
 	AvgLatencyMs  float64 `db:"avg_latency_ms" json:"avg_latency_ms"`

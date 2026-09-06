@@ -14,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	appmetrics "github.com/caimlas/meept/internal/metrics"
 )
 
 // Cloudflare-required headers for the ChatGPT Codex backend, mirroring the
@@ -165,6 +167,9 @@ type CodexClient struct {
 	logger        *slog.Logger
 	tokenResolver TokenResolver
 	oauthProvider string
+	// usageStore is the app-level metrics store (metrics.db). See
+	// Client.usageStore.
+	usageStore *appmetrics.Store
 }
 
 // CodexClientOption is a functional option for NewCodexClient.
@@ -195,6 +200,15 @@ func WithCodexTimeout(d time.Duration) CodexClientOption {
 			c.httpClient.Timeout = d
 		}
 	}
+}
+
+// SetUsageStore attaches the app-level metrics store (metrics.db) for
+// per-provider/per-agent token accounting. Nil-safe.
+func (c *CodexClient) SetUsageStore(store *appmetrics.Store) {
+	if c == nil || store == nil {
+		return
+	}
+	c.usageStore = store
 }
 
 // WithCodexTokenResolver wires an OAuth token resolver. A nil resolver is
@@ -265,9 +279,38 @@ type codexResponsesResponse struct {
 		Arguments string `json:"arguments"`
 	} `json:"output"`
 	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens        int `json:"input_tokens"`
+		OutputTokens       int `json:"output_tokens"`
+		InputTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"input_tokens_details"`
 	} `json:"usage"`
+}
+
+// recordUsageStore appends one completed call to the app-level metrics
+// store (metrics.db llm_calls + model_performance). No-op without a store.
+func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, usage TokenUsage, isErr bool, errMsg string) {
+	if c.usageStore == nil || cfg == nil {
+		return
+	}
+	agentID := ""
+	if chatOpts != nil {
+		agentID = chatOpts.agentID
+	}
+	//nolint:gosec // goroutine outlives request context
+	go func() {
+		c.usageStore.RecordLLMCall(appmetrics.LLMCallRecord{
+			Timestamp:    time.Now(),
+			Provider:     cfg.ProviderID,
+			ModelID:      cfg.ModelID,
+			AgentID:      agentID,
+			TokensSent:   usage.PromptTokens,
+			TokensRecv:   usage.CompletionTokens,
+			TokensCached: usage.CachedTokens,
+			IsError:      isErr,
+			ErrorMessage: errMsg,
+		})
+	}()
 }
 
 // Chat sends a non-streaming Responses request (stream:false + single JSON
@@ -293,6 +336,7 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 	payload := c.buildPayload(messages, cfg, chatOpts, false)
 	resp, err := c.doRequest(ctx, payload, cfg, chatOpts.sessionID, nil)
 	if err != nil {
+		c.recordUsageStore(cfg, chatOpts, TokenUsage{}, true, err.Error())
 		return nil, err
 	}
 
@@ -312,6 +356,10 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 			}
 		}
 	}
+
+	// Per-provider/per-agent token accounting (metrics.db llm_calls).
+	c.recordUsageStore(cfg, chatOpts, resp.Usage, false, "")
+
 	return resp, nil
 }
 
@@ -596,6 +644,7 @@ func (c *CodexClient) parseResponse(parsed *codexResponsesResponse, cfg *ModelCo
 		PromptTokens:     parsed.Usage.InputTokens,
 		CompletionTokens: parsed.Usage.OutputTokens,
 		TotalTokens:      parsed.Usage.InputTokens + parsed.Usage.OutputTokens,
+		CachedTokens:     parsed.Usage.InputTokensDetails.CachedTokens,
 	}
 	if hasFunctionCall {
 		resp.FinishReason = "tool_calls"

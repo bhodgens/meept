@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm/metrics"
+	appmetrics "github.com/caimlas/meept/internal/metrics"
 )
 
 const (
@@ -105,6 +106,11 @@ type Client struct {
 	oauthProvider string
 	extraHeaders  map[string]string
 	uploadStore   UploadStore
+	// usageStore is the app-level metrics store (metrics.db). When set,
+	// every completed call (success or terminal failure) appends to the
+	// llm_calls ledger and the model_performance rollup for per-provider
+	// /per-agent token accounting.
+	usageStore *appmetrics.Store
 	// quotaMaxWait is the upper bound applied to derived quota waits
 	// (llm.quota_retry.max_wait). Zero falls back to DefaultQuotaMaxWait.
 	// Classification itself is always on: a quota-window error must be
@@ -277,6 +283,15 @@ func (c *Client) SetMetricsStore(store *metrics.Store) {
 	if store != nil {
 		c.metricsStore = store
 	}
+}
+
+// SetUsageStore attaches the app-level metrics store (metrics.db) for
+// per-provider/per-agent token accounting. Nil-safe.
+func (c *Client) SetUsageStore(store *appmetrics.Store) {
+	if c == nil || store == nil {
+		return
+	}
+	c.usageStore = store
 }
 
 // WithTimeoutCalculator sets the adaptive timeout calculator for the client.
@@ -656,6 +671,9 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
+		// Per-provider/per-agent token accounting (metrics.db llm_calls).
+		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, resp.Usage, false, "", 0)
+
 		return resp, nil
 	}
 
@@ -663,10 +681,12 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	// already returned ThrottleBackoffError above); reaching here means the
 	// remaining retries were server errors — the historical ClientError
 	// shape stands (leaf Notes).
-	return nil, &ClientError{
+	allFailed := &ClientError{
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
+	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, TokenUsage{}, true, allFailed.Message, 0)
+	return nil, allFailed
 }
 
 // ChatWithProgress sends a chat completion request with progress reporting.
@@ -873,14 +893,19 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		// Report completion with token count
 		reportProgress(ProgressStageDone, fmt.Sprintf("Complete: %d tokens", resp.Usage.TotalTokens))
 
+		// Per-provider/per-agent token accounting (metrics.db llm_calls).
+		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, resp.Usage, false, "", 0)
+
 		return resp, nil
 	}
 
 	reportProgress(ProgressStageDone, fmt.Sprintf("Failed after %d attempts", shortRetries))
-	return nil, &ClientError{
+	allFailed := &ClientError{
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
+	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, TokenUsage{}, true, allFailed.Message, 0)
+	return nil, allFailed
 }
 
 // chatOptions holds options for a chat request.
@@ -894,8 +919,12 @@ type chatOptions struct {
 	stopSequences    []string
 	taskID           string
 	sessionID        string
-	reasoning        *ReasoningConfig
-	adapterPath      string // LoRA adapter path for providers that support it
+	// agentID is the calling agent's identity (coder/researcher/...),
+	// stamped by the agent loop and recorded into per-agent token
+	// accounting. Empty when the caller has no agent identity.
+	agentID     string
+	reasoning   *ReasoningConfig
+	adapterPath string // LoRA adapter path for providers that support it
 	// grammarMode is the tool-call grammar constraint mode for this request
 	// ("", see gbnf.go constraint constants). Set via WithGrammar.
 	grammarMode string
@@ -971,6 +1000,16 @@ func WithTaskScope(taskID, sessionID string) ChatOption {
 	return func(o *chatOptions) {
 		o.taskID = taskID
 		o.sessionID = sessionID
+	}
+}
+
+// WithAgentScope sets the calling agent's identity for per-agent token
+// accounting. Empty string is a no-op (unknown agent).
+func WithAgentScope(agentID string) ChatOption {
+	return func(o *chatOptions) {
+		if agentID != "" {
+			o.agentID = agentID
+		}
 	}
 }
 
@@ -1432,6 +1471,30 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 // identify the failure kind without string matching.
 var ErrEmptyResponse = &ClientError{Message: "empty content"}
 
+// recordUsageStore appends one completed LLM call to the app-level metrics
+// store (metrics.db llm_calls ledger + model_performance rollup). No-op when
+// no usage store is attached. Storage errors are logged, never fatal.
+func (c *Client) recordUsageStore(providerID, modelID, agentID string, usage TokenUsage, isErr bool, errMsg string, latencyMs int64) {
+	if c.usageStore == nil {
+		return
+	}
+	//nolint:gosec // goroutine outlives request context
+	go func() {
+		c.usageStore.RecordLLMCall(appmetrics.LLMCallRecord{
+			Timestamp:    time.Now(),
+			Provider:     providerID,
+			ModelID:      modelID,
+			AgentID:      agentID,
+			TokensSent:   usage.PromptTokens,
+			TokensRecv:   usage.CompletionTokens,
+			TokensCached: usage.CachedTokens,
+			IsError:      isErr,
+			ErrorMessage: errMsg,
+			LatencyMs:    latencyMs,
+		})
+	}()
+}
+
 // parseResponse converts a raw ChatResponse to a Response.
 func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 	if len(chatResp.Choices) == 0 {
@@ -1593,6 +1656,11 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 					_ = c.metricsStore.Record(context.Background(), record)
 				}()
 			}
+
+			// Per-provider/per-agent token accounting (metrics.db llm_calls).
+			if resp != nil {
+				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, resp.Usage, false, "", 0)
+			}
 			return resp, nil
 		}
 		lastErr = err
@@ -1684,10 +1752,12 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		}
 	}
 
-	return nil, &ClientError{
+	streamFailed := &ClientError{
 		Message: fmt.Sprintf("streaming failed after %d attempts", shortRetries),
 		Cause:   lastErr,
 	}
+	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, TokenUsage{}, true, streamFailed.Message, 0)
+	return nil, streamFailed
 }
 
 // doStreamRequest performs a single streaming HTTP request and invokes onDelta for each chunk.
@@ -1896,9 +1966,12 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
 			Usage *struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
+				PromptTokens        int `json:"prompt_tokens"`
+				CompletionTokens    int `json:"completion_tokens"`
+				TotalTokens         int `json:"total_tokens"`
+				PromptTokensDetails struct {
+					CachedTokens int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
@@ -1912,6 +1985,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 				PromptTokens:     chunk.Usage.PromptTokens,
 				CompletionTokens: chunk.Usage.CompletionTokens,
 				TotalTokens:      chunk.Usage.TotalTokens,
+				CachedTokens:     chunk.Usage.PromptTokensDetails.CachedTokens,
 			}
 		}
 		if len(chunk.Choices) == 0 {

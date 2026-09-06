@@ -2580,7 +2580,10 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		}()
 	}
 
-	// Add final response to conversation
+	// Add final response to conversation. If the last iteration ended
+	// mid-tool-sequence (guard flush appended synthetic tool results),
+	// the flushed results already answer the dangling tool_calls, so a
+	// plain assistant text here is protocol-safe.
 	conv.AddAssistantMessage(finalResponse)
 
 	// Roster quality gate (leaf 04-coder-gates): the ONE post-turn hook
@@ -4642,9 +4645,15 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	l.mu.RLock()
 	taskID := l.currentTaskID
 	sessionID := l.currentSessionID
+	agentID := l.agentID
 	l.mu.RUnlock()
 	if taskID != "" || sessionID != "" {
 		opts = append([]llm.ChatOption{llm.WithTaskScope(taskID, sessionID)}, opts...)
+	}
+	// Stamp the calling agent's identity for per-agent token accounting
+	// (metrics.db llm_calls). Empty agentID is a no-op inside the option.
+	if agentID != "" {
+		opts = append([]llm.ChatOption{llm.WithAgentScope(agentID)}, opts...)
 	}
 
 	// Domain-aware adapter routing: if a LoRA adapter router is wired

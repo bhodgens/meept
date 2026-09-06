@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm/metrics"
+	appmetrics "github.com/caimlas/meept/internal/metrics"
 )
 
 const (
@@ -53,6 +54,9 @@ type AnthropicClient struct {
 	uploadStore   UploadStore
 	tokenResolver TokenResolver
 	oauthProvider string
+	// usageStore is the app-level metrics store (metrics.db). See
+	// Client.usageStore.
+	usageStore *appmetrics.Store
 	// quotaMaxWait is the upper bound applied to derived quota waits. Zero
 	// falls back to DefaultQuotaMaxWait. See Client.quotaMaxWait.
 	quotaMaxWait time.Duration
@@ -147,6 +151,15 @@ func WithAnthropicLogger(logger *slog.Logger) AnthropicClientOption {
 	return func(c *AnthropicClient) {
 		c.logger = logger
 	}
+}
+
+// SetUsageStore attaches the app-level metrics store (metrics.db) for
+// per-provider/per-agent token accounting. Nil-safe.
+func (c *AnthropicClient) SetUsageStore(store *appmetrics.Store) {
+	if c == nil || store == nil {
+		return
+	}
+	c.usageStore = store
 }
 
 // WithAnthropicTimeout sets the HTTP timeout for the client.
@@ -254,6 +267,37 @@ func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
 	// doesn't yield /v1/v1/messages.
 	base = strings.TrimSuffix(base, "/v1")
 	return base + "/v1/messages"
+}
+
+// recordUsageStore appends one completed call to the app-level metrics
+// store (metrics.db llm_calls + model_performance). No-op without a store.
+func (c *AnthropicClient) recordUsageStore(usage TokenUsage, isErr bool, errMsg string, latencyMs int64, chatOpts *chatOptions) {
+	if c.usageStore == nil {
+		return
+	}
+	cfg := c.config
+	if cfg == nil {
+		return
+	}
+	//nolint:gosec // goroutine outlives request context
+	go func() {
+		agentID := ""
+		if chatOpts != nil {
+			agentID = chatOpts.agentID
+		}
+		c.usageStore.RecordLLMCall(appmetrics.LLMCallRecord{
+			Timestamp:    time.Now(),
+			Provider:     cfg.ProviderID,
+			ModelID:      cfg.ModelID,
+			AgentID:      agentID,
+			TokensSent:   usage.PromptTokens,
+			TokensRecv:   usage.CompletionTokens,
+			TokensCached: usage.CachedTokens,
+			IsError:      isErr,
+			ErrorMessage: errMsg,
+			LatencyMs:    latencyMs,
+		})
+	}()
 }
 
 // Chat sends a chat completion request to Anthropic's Messages API.
@@ -409,6 +453,9 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 			}
 		}
 
+		// Per-provider/per-agent token accounting (metrics.db llm_calls).
+		c.recordUsageStore(resp.Usage, false, "", 0, chatOpts)
+
 		if c.budget != nil {
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
 			// Record cost with scope if model pricing is available
@@ -437,10 +484,12 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	// D8 exhaustion cap: throttle escalations already returned
 	// ThrottleBackoffError above; reaching here means the remaining retries
 	// were server errors — the historical ClientError shape stands.
-	return nil, &ClientError{
+	allFailed := &ClientError{
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
+	c.recordUsageStore(TokenUsage{}, true, allFailed.Message, 0, chatOpts)
+	return nil, allFailed
 }
 
 // ChatWithProgress sends a chat completion request with progress reporting.
@@ -637,6 +686,9 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 
 		reportProgress(ProgressStageStreaming, "Receiving response...")
 
+		// Per-provider/per-agent token accounting (metrics.db llm_calls).
+		c.recordUsageStore(resp.Usage, false, "", 0, chatOpts)
+
 		if c.budget != nil {
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
 			// Record cost with scope if model pricing is available
@@ -669,10 +721,12 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 	}
 
 	reportProgress(ProgressStageDone, fmt.Sprintf("Failed after %d attempts", shortRetries))
-	return nil, &ClientError{
+	allFailed := &ClientError{
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
+	c.recordUsageStore(TokenUsage{}, true, allFailed.Message, 0, chatOpts)
+	return nil, allFailed
 }
 
 // Anthropic API request structures

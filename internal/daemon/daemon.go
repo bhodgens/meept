@@ -537,6 +537,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		components.Dispatcher.SetMetricsStore(metricsStore)
 	}
 
+	// Per-provider/per-agent token accounting (metrics.db llm_calls):
+	// attach the store to every LLM chatter so each completed call
+	// appends to the ledger and the model_performance rollup.
+	if metricsStore != nil && components != nil && components.LLMClient != nil {
+		components.LLMClient.SetUsageStore(metricsStore)
+	}
+	if metricsStore != nil && components != nil {
+		if pm, ok := components.LLMProvider.(llm.UsageStoreAttacher); ok {
+			pm.SetUsageStore(metricsStore)
+		}
+	}
+
 	// Register dispatch trace handlers
 	if rpcServer != nil && metricsStore != nil {
 		rpc.RegisterDispatchHandlers(rpcServer, metricsStore)
