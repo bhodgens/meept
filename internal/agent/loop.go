@@ -2183,6 +2183,20 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	l.setThrottleTurnContext(userMessage, parts, conversationID)
 	defer l.clearThrottleTurnContext()
 
+	// Scope this turn's LLM calls to the conversation for per-session token
+	// accounting (metrics.db llm_calls.session_id). currentSessionID is only
+	// populated on the task path (setTaskScope); interactive turns carry the
+	// conversation id as a parameter, so snapshot and restore it here.
+	l.mu.Lock()
+	prevSessionID := l.currentSessionID
+	l.currentSessionID = conversationID
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		l.currentSessionID = prevSessionID
+		l.mu.Unlock()
+	}()
+
 	// Trace: log loop identity at execution start so we can verify the
 	// correct session-scoped loop (with the right workingDir) is running.
 	l.logger.Debug("RunOnceWithParts: agent loop executing",
