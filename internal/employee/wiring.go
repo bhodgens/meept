@@ -214,6 +214,20 @@ func NewManagerFromConfig(
 	mgr := NewManagerWithStores(botMgr, botStore, cs, gs, as, logger)
 	result.Manager = mgr
 
+	// Hand the chain handle to the RPC layer (agents.audit.verify). The
+	// daemon constructs the employee RPCHandler with the Manager alone,
+	// so the handle threads through the Manager rather than a direct
+	// RPCHandler field poke.
+	if chainStore != nil {
+		mgr.SetAuditChain(chainStore.ChainDB())
+
+		// Periodic off-host anchoring (master.md C6). Hourly by default;
+		// runs on the daemon lifecycle context and exits on Stop.
+		anchorJob := auditlog.NewAnchorJob(chainStore,
+			employeesDir, auditlog.DefaultAnchorInterval, logger)
+		go anchorJob.Run(ctx)
+	}
+
 	// Apply optional wiring (e.g. migrator LLM injection). Each option is
 	// nil-guarded internally.
 	for _, opt := range opts {

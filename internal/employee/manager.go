@@ -524,6 +524,12 @@ type Manager struct {
 	goalStore         *GoalStore
 	auditStore        *AuditStore
 
+	// auditChain is the hash-chained audit log's database handle, wired by
+	// the daemon for the agents.audit.verify RPC (tamper-evident audit log
+	// leaf 03). Nil when the chain store is not configured. Guarded by mu;
+	// it is a read-only handle for verification, never written under lock.
+	auditChain *sql.DB
+
 	// planCreator is an optional callback injected by the daemon wiring
 	// to route amendments via Plan signoff. Nil means amendments apply
 	// directly (used in tests and single-user setups). Written via
@@ -740,6 +746,29 @@ func (m *Manager) AuditStore() *AuditStore {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.auditStore
+}
+
+// SetAuditChain wires the hash-chained audit log's database handle for the
+// agents.audit.verify RPC. Nil is ignored (setter nil-guard convention).
+// The daemon passes auditStore.ChainDB() after wiring the chain store;
+// the RPCHandler reaches it through the Manager because the daemon
+// constructs NewRPCHandler with the Manager alone.
+func (m *Manager) SetAuditChain(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	m.mu.Lock()
+	m.auditChain = db
+	m.mu.Unlock()
+}
+
+// AuditChain returns the wired audit-chain database handle. May be nil when
+// the chain store is not configured (chaining disabled). Callers must
+// nil-check the result.
+func (m *Manager) AuditChain() *sql.DB {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.auditChain
 }
 
 // SetPostTurnAuditor wires the PostTurnAuditor used by the post-turn audit

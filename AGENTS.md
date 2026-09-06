@@ -96,6 +96,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Tools** | `internal/tools` (registry, builtin/*, mcp), `internal/acp` (ACP client wire) |
 | **Security** | `internal/security` (engine, sanitizer, tirith, tls, fence), `internal/auth` (multi-user store: users/keys/expiry, quota+permission stubs) |
 | **Employee** | `internal/employee` (constitution, goal, goal_loop, enforcement, authority, manager) |
+| **Audit Chain** | `internal/auditlog` (canonical JSON, hash chain, store, anchoring, verification) |
 | **Session** | `internal/session` (store, store_sqlite, threads, messages) |
 | **Services** | `internal/services` (chat, session, terminal, push, reflection) |
 | **Project** | `internal/project` (manager, init_deep, detection) |

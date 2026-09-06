@@ -45,12 +45,14 @@ func HashRecord(rec Record) (string, error) {
 }
 
 // VerifyResult reports the outcome of a full-chain walk (master.md C1).
+// Tags pin the RPC result shape for agents.audit.verify (master.md C7):
+// {"ok":bool,"records":uint64,"head":string,"broken_at":uint64,"reason":string}.
 type VerifyResult struct {
-	OK       bool
-	Records  uint64
-	Head     string
-	BrokenAt uint64
-	Reason   string
+	OK       bool   `json:"ok"`
+	Records  uint64 `json:"records"`
+	Head     string `json:"head"`
+	BrokenAt uint64 `json:"broken_at"`
+	Reason   string `json:"reason"`
 }
 
 // VerifyChain walks the audit_log_chain table in seq order and verifies each

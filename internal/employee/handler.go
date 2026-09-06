@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bot"
 )
 
@@ -122,6 +123,7 @@ func (h *RPCHandler) Handlers() map[string]func(context.Context, json.RawMessage
 		// Audit (spec line 539)
 		"agents.audit.list":    h.handleAuditList,
 		"agents.audit.resolve": h.handleAuditResolve,
+		"agents.audit.verify":  h.handleAuditVerify,
 
 		// Migration (spec line 540)
 		"agents.migrate": h.handleMigrate,
@@ -638,6 +640,21 @@ func (h *RPCHandler) handleAuditResolve(ctx context.Context, raw json.RawMessage
 		"finding_id": req.FindingID,
 		"status":     "resolved",
 	}, nil
+}
+
+// handleAuditVerify verifies the full hash chain (tamper-evident audit log
+// leaf 03). The result mirrors auditlog.VerifyResult; verification failure is
+// DATA (broken chain), not an RPC error — only infrastructure errors return
+// err. Params: {} (none).
+func (h *RPCHandler) handleAuditVerify(ctx context.Context, raw json.RawMessage) (any, error) {
+	if h.manager == nil {
+		return nil, errNotConfigured
+	}
+	chainDB := h.manager.AuditChain()
+	if chainDB == nil {
+		return nil, errNotConfigured
+	}
+	return auditlog.VerifyChain(ctx, chainDB)
 }
 
 // ---------------------------------------------------------------------------

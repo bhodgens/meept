@@ -162,6 +162,35 @@ Semantics (`internal/employee/gate.go`):
 - Gate output may contain code and is therefore never logged above debug level;
   gate runs are recorded in the employee audit trail.
 
+### Tamper-evident audit chain
+
+Every audit finding and every goal quality-gate result is appended to a
+hash-chained, append-only log (`internal/auditlog`, table
+`audit_log_chain` in the employees SQLite database). Each record carries:
+
+- `seq` — monotonic sequence number starting at 1
+- `prev_hash` — the previous record's hash (empty for the first record)
+- `record_hash` — SHA-256 over the record's canonical JSON (sorted keys, no
+  insignificant whitespace; `record_hash` itself excluded)
+
+The chain is INSERT-only by convention. Payloads are sanitized before
+storage: keys or values that look like credentials are redacted, and gate
+command output is reduced to a SHA-256 digest (never stored raw).
+
+**Anchoring:** every hour the daemon appends the current
+`{exported_at, seq, chain_head}` digest to
+`~/.meept/employees/anchors/audit-anchors.jsonl`. Copy that file off-host;
+a stored digest proves the chain state at export time even if the host is
+later compromised.
+
+**Verification:**
+
+    meept agents audit --verify
+
+Walks the full chain and re-computes every hash. Exits non-zero and prints
+the first broken sequence number when the log was tampered with. Anchor
+lines can be cross-checked against the reported `chain_head`.
+
 ### Roster gate vs employee gate
 
 The **employee gate** above is the autonomous-goal completion check controlled

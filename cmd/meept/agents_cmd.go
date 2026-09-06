@@ -1236,6 +1236,7 @@ func newAgentsAuditCmd() *cobra.Command {
 	var since string
 	var resolveID string
 	var resolveAs string
+	var verify bool
 
 	cmd := &cobra.Command{
 		Use:   "audit <id>",
@@ -1246,18 +1247,63 @@ finding.
 Severity is color-coded: red=critical, yellow=warning, white=info.
 
 Examples:
-  meept agents audit researcher                       # recent findings
-  meept agents audit researcher --since=24h           # last 24 hours
+  meept agents audit --verify                       # verify hash chain
+  meept agents audit researcher                     # recent findings
+  meept agents audit researcher --since=24h         # last 24 hours
   meept agents audit researcher --resolve f-123 --as=false_positive`,
-		Args: cobra.ExactArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			// --verify needs no employee id; zero positional args allowed.
+			if verify {
+				if len(args) > 1 {
+					return fmt.Errorf("accepts at most 1 arg when --verify is set, received %d", len(args))
+				}
+				return nil
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("accepts 1 arg (employee id), received %d (or use --verify)", len(args))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			agentID := args[0]
-
 			client, err := connectDaemon()
 			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()
+
+			// Verify the full audit hash chain (tamper-evident audit log
+			// leaf 03). Broken chain → non-zero exit (RunE error).
+			if verify {
+				rawResult, err := client.Call("agents.audit.verify", map[string]any{})
+				if err != nil {
+					return fmt.Errorf("failed to verify audit chain: %w", err)
+				}
+				var resultMap map[string]any
+				if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+					return fmt.Errorf("failed to parse response: %w", err)
+				}
+				if errMsg := rpcError(resultMap); errMsg != "" {
+					return fmt.Errorf("%s", errMsg)
+				}
+				okv, _ := resultMap["ok"].(bool) // two-value assertion (AGENTS.md)
+				records, _ := resultMap["records"].(float64)
+				head, _ := resultMap["head"].(string)
+				brokenAt, _ := resultMap["broken_at"].(float64)
+				reason, _ := resultMap["reason"].(string)
+				if !okv {
+					return fmt.Errorf("audit chain BROKEN at seq %d: %s",
+						int64(brokenAt), reason)
+				}
+				headPrefix := head
+				if len(headPrefix) > 12 {
+					headPrefix = headPrefix[:12]
+				}
+				fmt.Printf("audit chain ok: %d records, head %s\n",
+					int64(records), headPrefix)
+				return nil
+			}
+
+			agentID := args[0]
 
 			// Resolve a finding.
 			if resolveID != "" {
@@ -1350,5 +1396,7 @@ Examples:
 	cmd.Flags().StringVar(&since, "since", "", "only show findings newer than this duration (e.g. '24h', '7d')")
 	cmd.Flags().StringVar(&resolveID, "resolve", "", "resolve a finding by ID")
 	cmd.Flags().StringVar(&resolveAs, "as", "", "resolution type (e.g. 'false_positive', 'acknowledged', 'fixed')")
+	cmd.Flags().BoolVar(&verify, "verify", false,
+		"verify the full audit hash chain and exit")
 	return cmd
 }

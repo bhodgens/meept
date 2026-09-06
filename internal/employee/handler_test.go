@@ -81,6 +81,8 @@ func TestRPCHandler_Handlers_Registration(t *testing.T) {
 		"agents.goals.approve", "agents.goals.reject",
 		// audit (spec line 539)
 		"agents.audit.list", "agents.audit.resolve",
+		// audit chain verification (tamper-evident audit log leaf 03)
+		"agents.audit.verify",
 		// migration (spec line 540)
 		"agents.migrate",
 	}

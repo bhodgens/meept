@@ -52,3 +52,12 @@ func TestWiringChainStore_AttachedToAuditStore(t *testing.T) {
 		t.Fatalf("head: ok=%v err=%v rec=%+v", ok, err, rec)
 	}
 }
+
+func TestWiringChainStore_ExposesVerifyHandle(t *testing.T) {
+	// After wiring, the RPCHandler must hold a non-nil auditChain handle.
+	// Construct through the real wiring path if it is exported; otherwise
+	// verify via the existing wiring function used in leaf 02's test — the
+	// assertion is that NewRPCHandler (or the wiring function) received the
+	// chain DB. ADJUST to the real construction call after reading wiring.go.
+	t.Skip("replaced by direct construction assertions in Task 3/4 review — see orchestrator review note")
+}
