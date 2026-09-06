@@ -9,4 +9,5 @@ import (
 func TestAnalyzer(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, Analyzer, "bad")
+	analysistest.Run(t, testdata, Analyzer, "clean")
 }

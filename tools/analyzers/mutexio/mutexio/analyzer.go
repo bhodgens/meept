@@ -218,6 +218,19 @@ func checkBody(pass *analysis.Pass, body *ast.BlockStmt, nolintLines map[string]
 	deferCalls := collectDeferCalls(body)
 	var calls []callInfo
 	ast.Inspect(body, func(n ast.Node) bool {
+		// Do not descend into nested function literals. Each FuncLit is
+		// scanned by its own checkBody invocation (see run()'s Preorder),
+		// and its Lock/Unlock pairs must not leak into this scope: a
+		// `defer mu.Unlock()` inside a closure releases when the closure
+		// returns, not when the enclosing function returns. Scanning it
+		// here would pair the lock against THIS body's end and flag every
+		// call after the closure (classic false positive: table-driven
+		// tests where the hook closure locks and a later t.Run gets
+		// flagged).
+		if fl, ok := n.(*ast.FuncLit); ok {
+			_ = fl
+			return false
+		}
 		ce, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
