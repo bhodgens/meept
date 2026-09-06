@@ -157,3 +157,34 @@ add a task-resolution step for zero behavioral gain.
 
 **Impact:** per-plan ⇒ leaf 02 signature change + new lookup path;
 rejected unless multi-task-per-plan execution becomes real.
+
+## Do NOT commit independently
+
+This file is reference documentation inside the phase-frontier-parallel plan
+tree, not a dispatchable implementation leaf. It is committed together with
+the tree's master.md as one unit — never as its own commit.
+
+## Self-Verification Checklist
+
+- [ ] This document is reference documentation, not a dispatchable
+      implementation leaf — no code changes, no file edits, no test runs
+      belong to it.
+- [ ] Every open question carries Q / Rec / Impact, and resolved questions
+      point at the contract or leaf that closed them.
+- [ ] Nothing here contradicts the pinned contracts in master.md.
+
+## Implementation errata (leaf 01, 2026-09-05)
+
+The leaf's test-table cases 4, 5, and 9 contradicted the frozen rules.
+Frozen rules win; implementation + tests follow the rules:
+
+- Case 4: leaf expected {A,B}; optional consumes DO create edges (rule 1)
+  and gate 2b blocks on busy A. Rule-correct: {A}.
+- Case 5: leaf expected cycle=false; rule 4 (empty ready + non-empty
+  nodes) forces true for the pinned fixture. Rule-correct: cycle=true.
+- Case 9: with the pinned fixture (available={}), C's required consume
+  `a` fails gate 2a, so {A,C} is unreachable. Rule-correct: {A}.
+
+Also: Contract A's exported names (PhaseNode/ComputePhaseFrontier) are
+implemented unexported (phaseNode/computePhaseFrontier) per leaf Task 2
++ master conventions; same-package consumers (leaf 02) are unaffected.
