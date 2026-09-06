@@ -61,6 +61,11 @@ type Client interface {
 	CancelTask(taskID string) error
 	LinkTaskSession(taskID, sessionID string) error
 	UnlinkTaskSession(taskID, sessionID string) error
+	// ApproveTask resumes a task paused at the approval gate
+	// (StrategicPlanner.ApprovePlan) — persists pending steps and schedules.
+	ApproveTask(taskID string) error
+	// RejectTask cancels a task awaiting approval.
+	RejectTask(taskID, reason string) error
 
 	// Queue methods
 	RetryQueueJob(jobID string) error

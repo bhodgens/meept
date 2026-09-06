@@ -472,8 +472,14 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		"criteria_count", len(spec.Criteria),
 	)
 
-	// Update task job count
+	// Update task job count. Counters reset too: on escalation re-plans
+	// this Plan call runs on a task whose CompletedJobs/FailedJobs already
+	// count the SUPERSEDED plan generation. Keeping them produced progress
+	// > 100% (observed: 3 completed of 2 total, 150%) because the new
+	// generation starts from zero steps.
 	t.TotalJobs = len(steps)
+	t.CompletedJobs = 0
+	t.FailedJobs = 0
 	t.SetState(task.StateExecuting)
 	if err := sp.taskStore.Update(t); err != nil {
 		sp.logger.Error("Failed to update task after planning", "error", err)
@@ -1274,6 +1280,8 @@ func (sp *StrategicPlanner) awaitUserApproval(ctx context.Context, t *task.Task,
 	}
 
 	t.TotalJobs = len(steps)
+	t.CompletedJobs = 0
+	t.FailedJobs = 0
 	t.SetState(task.StateAwaitingApproval)
 	if err := sp.taskStore.Update(t); err != nil {
 		sp.logger.Error("Failed to update task to awaiting_approval", "error", err)
