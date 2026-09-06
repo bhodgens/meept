@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -416,4 +418,56 @@ func TestIntentAnalyzer_BuildAnalysisMessages_PartialDigest(t *testing.T) {
 		t.Errorf("user message contains state segment despite empty state: %q", got[1].Content)
 	}
 	requireSessionRules(t, got[0].Content)
+}
+
+// TestIntentAnalyzer_ResolvedModel verifies the provenance accessor returns
+// the resolved "provider/model" that actually served the analysis (leaf 01
+// of classifier-observability). The primary alias candidate fails with an
+// empty response, forcing the documented rotation to the secondary, so the
+// resolved model must be p2/m2 — not the initially-configured p1/m1.
+func TestIntentAnalyzer_ResolvedModel(t *testing.T) {
+	_, _, primaryCfg, secondaryCfg := failoverTestServers(
+		t, emptyContentResponse(), validAnalysisResponse())
+	resolver := newFailoverResolver(t, primaryCfg, secondaryCfg)
+
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{
+		ModelConfig: primaryCfg,
+		Resolver:    resolver,
+		AliasName:   testClassifierAlias,
+	}, llm.NewClient(primaryCfg), slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	if got := ia.ResolvedModel(); got != "" {
+		t.Fatalf("ResolvedModel() before any analysis = %q, want empty", got)
+	}
+
+	if _, err := ia.AnalyzeTrueIntent(context.Background(), "fix this bug please", nil); err != nil {
+		t.Fatalf("AnalyzeTrueIntent failed: %v", err)
+	}
+
+	if got := ia.ResolvedModel(); got != "p2/m2" {
+		t.Errorf("ResolvedModel() after failover = %q, want %q", got, "p2/m2")
+	}
+}
+
+// TestIntentAnalyzer_ResolvedModel_NoRotation covers the no-failover path:
+// the analyzer reports the model it was constructed with.
+func TestIntentAnalyzer_ResolvedModel_NoRotation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(validAnalysisResponse()))
+	}))
+	defer srv.Close()
+
+	cfg := &llm.ModelConfig{BaseURL: srv.URL, ModelID: "primary", ProviderID: "p1"}
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{
+		ModelConfig: cfg,
+	}, llm.NewClient(cfg), slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	if _, err := ia.AnalyzeTrueIntent(context.Background(), "fix this bug please", nil); err != nil {
+		t.Fatalf("AnalyzeTrueIntent failed: %v", err)
+	}
+
+	if got := ia.ResolvedModel(); got != "p1/primary" {
+		t.Errorf("ResolvedModel() = %q, want %q", got, "p1/primary")
+	}
 }

@@ -94,6 +94,13 @@ type LLMClassifier struct {
 	// for calls that don't use the precomputed tokenCap.
 	modelConfig *llm.ModelConfig
 
+	// servedModel is the resolved "provider/model" of the endpoint the
+	// classifier is currently configured to serve from (provenance, leaf 01
+	// of classifier-observability). Initialized from the constructor's
+	// model config and refreshed whenever alias failover reconfigures the
+	// client, so ResolvedModel() reports the model that ACTUALLY served.
+	servedModel string
+
 	// resolver enables alias-based failover (leaf 03 of
 	// classifier-reliability). When non-nil (with aliasName set), a failed
 	// Chat attempt records an alias failure, rotates to the next candidate,
@@ -165,7 +172,18 @@ func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifi
 
 		resolver:  cfg.Resolver,
 		aliasName: cfg.AliasName,
+
+		servedModel: resolvedModelID(cfg.ModelConfig),
 	}
+}
+
+// ResolvedModel returns the resolved "provider/model" of the LLM that served
+// this classifier's calls (provenance, leaf 01 of classifier-observability).
+// It reflects the model the client is currently configured with, including
+// any alias-failover rotation. Empty when the serving model is unknown —
+// consumers must treat empty as "no provenance", never fabricate one.
+func (c *LLMClassifier) ResolvedModel() string {
+	return c.servedModel
 }
 
 // slogAdapter bridges *slog.Logger to the Logger interface.
@@ -227,6 +245,10 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 			}
 			c.client.Reconfigure(nextCfg)
 			c.unavailable.Store(false)
+			c.modelConfig = nextCfg
+			// Provenance tracking (leaf 01 of classifier-observability):
+			// the rotated candidate is now the serving model.
+			c.servedModel = resolvedModelID(nextCfg)
 			c.logger.Info("LLM classifier rotated to next alias candidate during cooldown",
 				"alias", c.aliasName,
 				"model", nextCfg.ProviderID+"/"+nextCfg.ModelID,
@@ -312,6 +334,11 @@ func (c *LLMClassifier) chatWithFailover(ctx context.Context, messages []llm.Cha
 		"error", err,
 	)
 	c.client.Reconfigure(nextCfg)
+	c.modelConfig = nextCfg
+	// Provenance tracking (leaf 01 of classifier-observability): from here
+	// on, ResolvedModel() must report the rotated candidate — the model
+	// that actually serves the classification.
+	c.servedModel = resolvedModelID(nextCfg)
 
 	resp, err = attempt()
 	if err == nil {

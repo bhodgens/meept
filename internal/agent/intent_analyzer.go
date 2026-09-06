@@ -50,6 +50,13 @@ type IntentAnalyzer struct {
 	// (issue #30). Nil is allowed — attribution is skipped.
 	modelConfig *llm.ModelConfig
 
+	// servedModel is the resolved "provider/model" of the endpoint the
+	// analyzer is currently configured to serve from (provenance, leaf 01
+	// of classifier-observability). Initialized from the constructor's
+	// model config and refreshed whenever alias failover reconfigures the
+	// client, so ResolvedModel() reports the model that ACTUALLY served.
+	servedModel string
+
 	// failFast disables alias rotation (classifier-observability leaf 02):
 	// when true, chatWithFailover returns the primary error immediately on
 	// failure instead of recording an alias failure and rotating. Default
@@ -106,7 +113,28 @@ func newIntentAnalyzerWithConfig(cfg IntentAnalyzerConfig, client *llm.Client, l
 		aliasName:          cfg.AliasName,
 		modelConfig:        cfg.ModelConfig,
 		failFast:           cfg.FailFast,
+		servedModel:        resolvedModelID(cfg.ModelConfig),
 	}
+}
+
+// resolvedModelID formats a model config as its "provider/model" provenance
+// id. A nil config (or missing provider id) yields "" — unknown provenance
+// must stay empty, not be faked (leaf 01 of classifier-observability).
+func resolvedModelID(cfg *llm.ModelConfig) string {
+	if cfg == nil || cfg.ProviderID == "" {
+		return ""
+	}
+	return cfg.ProviderID + "/" + cfg.ModelID
+}
+
+// ResolvedModel returns the resolved "provider/model" of the LLM that served
+// the analyzer's calls (provenance, leaf 01 of classifier-observability). It
+// reflects the model the client is currently configured with, including any
+// alias-failover rotation performed by chatWithFailover. Empty when the
+// serving model is unknown (no model config, or a config without a provider
+// id) — consumers must treat empty as "no provenance", never fabricate one.
+func (ia *IntentAnalyzer) ResolvedModel() string {
+	return ia.servedModel
 }
 
 // WithAmbiguityThreshold sets a custom ambiguity threshold.
@@ -267,6 +295,11 @@ func (ia *IntentAnalyzer) chatWithFailover(ctx context.Context, messages []llm.C
 		"error", err,
 	)
 	ia.client.Reconfigure(nextCfg)
+	ia.modelConfig = nextCfg
+	// Provenance tracking (leaf 01 of classifier-observability): from here
+	// on, ResolvedModel() must report the rotated candidate — the model
+	// that actually serves the analysis.
+	ia.servedModel = resolvedModelID(nextCfg)
 
 	resp, err = attempt()
 	if err == nil {

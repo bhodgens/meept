@@ -103,6 +103,14 @@ type Intent struct {
 	// each classify branch next to recordClassificationMethod and logged
 	// in the "Dispatched request" line for regression tracking.
 	Method string `json:"classification_method,omitempty"`
+	// Model is the resolved "provider/model" of the classifier/analyzer
+	// LLM that actually served this classification (provenance, leaf 01
+	// of classifier-observability). Set only at LLM-served classify
+	// branches, from the model the serving component resolved (including
+	// any alias-failover rotation). Empty for deterministic branches
+	// (keyword/heuristic/guard/etc.) and when all LLM candidates failed —
+	// honest provenance: no model, no attribution.
+	Model string `json:"model,omitempty"`
 }
 
 // MemoryContext wraps memory results with conversation metadata.
@@ -922,6 +930,10 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				d.recordAgent(intent.AgentType)
 				d.recordIntentType(intent.Type)
 				intent.Method = "llm"
+				// Provenance (leaf 01 of classifier-observability): the
+				// model that actually served this classification, including
+				// any failover rotation. Empty when unknown — honest.
+				intent.Model = d.llmClassifier.ResolvedModel()
 				return d.applyContextWeighting(intent, memCtx, input), nil
 			}
 			d.logger.Debug("LLM classifier result below threshold",

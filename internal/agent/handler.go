@@ -184,6 +184,12 @@ type ChatResponse struct {
 	ConversationID string `json:"conversation_id"`
 	SessionID      string `json:"session_id,omitempty"` // original session ID for WS routing
 	Error          string `json:"error,omitempty"`
+	// Meta carries classification provenance for the reply (leaf 01 of
+	// classifier-observability): which classifier served it, which model,
+	// the analyzer's ambiguity score, and whether session context was used.
+	// Populated only on the classified reply path (result.Intent != nil);
+	// omitted entirely otherwise. Additive metadata — reply text unchanged.
+	Meta map[string]string `json:"meta,omitempty"`
 }
 
 // NewChatHandler creates a new ChatHandler.
@@ -948,6 +954,15 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		response.Reply = reply
 	}
 
+	// Classification provenance (leaf 01 of classifier-observability):
+	// attach metadata describing how this reply was classified — method,
+	// serving model, ambiguity, session-digest usage. Only on the
+	// classified path (result.Intent != nil); direct-mode replies carry no
+	// Meta at all (additive metadata, reply text unchanged).
+	if result != nil && result.Intent != nil {
+		response.Meta = provenanceMeta(result.Intent)
+	}
+
 	// Persist the user message and assistant reply so HTTP-only clients
 	// (Flutter GUI) can reload conversation history after switching sessions.
 	// Resolve the effective agent ID for message attribution: prefer the
@@ -1109,6 +1124,30 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 }
 
 // sendResponse publishes a chat response.
+// provenanceMeta builds the classification-provenance metadata attached to
+// classified replies (leaf 01 of classifier-observability). Keys:
+//   - classification_method: which classifier branch produced the intent
+//   - classification_model:  "provider/model" that served an LLM-served
+//     classification ("" for deterministic branches — honest provenance)
+//   - ambiguity: analyzer ambiguity score, %.2f — only when the analyzer ran
+//   - session_digest_used: "true" — only when the analyzer ran (a non-nil
+//     TrueAnalysis implies the session digest was part of its context)
+//
+// intent must be non-nil. Returns nil for analyzer-free classifications'
+// optional keys when they don't apply, so the JSON `meta` object stays
+// minimal; the method key is always present.
+func provenanceMeta(intent *Intent) map[string]string {
+	meta := map[string]string{
+		"classification_method": intent.Method,
+		"classification_model":  intent.Model,
+	}
+	if intent.TrueAnalysis != nil {
+		meta["ambiguity"] = fmt.Sprintf("%.2f", intent.TrueAnalysis.Ambiguity)
+		meta["session_digest_used"] = "true"
+	}
+	return meta
+}
+
 func (h *ChatHandler) sendResponse(replyTo string, response ChatResponse) {
 	payload, err := json.Marshal(response)
 	if err != nil {

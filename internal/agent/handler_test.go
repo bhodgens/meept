@@ -1318,3 +1318,172 @@ func TestChatHandler_RecordExchangeInSessionConv(t *testing.T) {
 		h.recordExchangeInSessionConv("", "msg", "reply") // must not panic
 	})
 }
+
+// TestChatResponse_ProvenanceMeta_Marshal verifies the additive Meta field
+// serializes under the "meta" JSON key and round-trips (leaf 01 of
+// classifier-observability).
+func TestChatResponse_ProvenanceMeta_Marshal(t *testing.T) {
+	resp := ChatResponse{
+		Reply:          "did the thing",
+		ConversationID: "conv-prov",
+		Meta: map[string]string{
+			"classification_method": "llm",
+			"classification_model":  "agnes/glm",
+			"ambiguity":             "0.80",
+			"session_digest_used":   "true",
+		},
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	if !strings.Contains(string(data), `"meta":{`) {
+		t.Errorf("marshaled response missing meta key: %s", data)
+	}
+
+	var decoded ChatResponse
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if decoded.Meta["classification_method"] != "llm" ||
+		decoded.Meta["classification_model"] != "agnes/glm" ||
+		decoded.Meta["ambiguity"] != "0.80" ||
+		decoded.Meta["session_digest_used"] != "true" {
+		t.Errorf("Meta round-trip mismatch: %+v", decoded.Meta)
+	}
+}
+
+// TestChatResponse_MetaOmittedWhenNil verifies meta is absent (not an empty
+// object) when unclassified.
+func TestChatResponse_MetaOmittedWhenNil(t *testing.T) {
+	data, err := json.Marshal(ChatResponse{Reply: "hi", ConversationID: "c"})
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	if strings.Contains(string(data), "meta") {
+		t.Errorf("meta key must be omitted when Meta is nil: %s", data)
+	}
+}
+
+// ambiguousAnalysisResponse returns a chat completion whose content is a
+// valid analysis JSON with ambiguity 0.9 (above the 0.6 default threshold),
+// forcing the clarification path.
+func ambiguousAnalysisResponse() string {
+	b, _ := json.Marshal(map[string]any{
+		"choices": []map[string]any{
+			{"message": map[string]any{"role": "assistant", "content": `{"goal":"do something","ambiguity":0.9,"scope":"broad","category":"other","suggested_questions":["what?"],"confidence":0.9}`}},
+		},
+	})
+	return string(b)
+}
+
+// TestHandleRequest_ProvenanceMetaOnClassifiedReply drives the full
+// classified reply path through handleRequest -> ClassifyAndRoute -> analyzer
+// (httptest failover to the secondary alias candidate) -> clarification
+// result -> chat.response. The reply must carry provenance metadata from the
+// analyzer's TrueAnalysis (ambiguity + digest usage); method/model stay empty
+// because no classifier branch served this intent — honest provenance.
+func TestHandleRequest_ProvenanceMetaOnClassifiedReply(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+
+	_, _, primaryCfg, secondaryCfg := failoverTestServers(
+		t, emptyContentResponse(), ambiguousAnalysisResponse())
+	resolver := newFailoverResolver(t, primaryCfg, secondaryCfg)
+
+	dispatcher := NewDispatcher(DispatcherConfig{
+		ClassifierClient:      llm.NewClient(primaryCfg),
+		ClassifierModel:       "primary",
+		ClassifierModelConfig: primaryCfg,
+		Resolver:              resolver,
+	})
+
+	handler := NewChatHandler(nil, dispatcher, msgBus, slogDiscardLogger())
+
+	sub := msgBus.Subscribe("prov-test", "chat.response")
+	defer msgBus.Unsubscribe(sub)
+
+	payload, _ := json.Marshal(ChatRequest{
+		Message:        "what are your capabilities",
+		ConversationID: "conv-prov-meta",
+	})
+	reqMsg := &models.BusMessage{
+		ID:        "prov-req-1",
+		Type:      models.MessageTypeRequest,
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	}
+
+	handler.handleRequest(context.Background(), reqMsg)
+
+	select {
+	case msg := <-sub.Channel:
+		var resp ChatResponse
+		if err := json.Unmarshal(msg.Payload, &resp); err != nil {
+			t.Fatalf("unmarshal chat.response: %v", err)
+		}
+		if resp.Error != "" {
+			t.Fatalf("unexpected error response: %s", resp.Error)
+		}
+		if resp.Meta == nil {
+			t.Fatal("classified reply missing Meta entirely")
+		}
+		if _, ok := resp.Meta["classification_method"]; !ok {
+			t.Errorf("classification_method key missing: %+v", resp.Meta)
+		}
+		if resp.Meta["ambiguity"] != "0.90" {
+			t.Errorf("ambiguity = %q, want 0.90", resp.Meta["ambiguity"])
+		}
+		if resp.Meta["session_digest_used"] != "true" {
+			t.Errorf("session_digest_used = %q, want true", resp.Meta["session_digest_used"])
+		}
+		if resp.Meta["classification_model"] != "" {
+			t.Errorf("classification_model = %q, want empty (no classifier branch served this intent)", resp.Meta["classification_model"])
+		}
+		if resp.Reply == "" {
+			t.Error("reply text must be unchanged (non-empty)")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for chat.response")
+	}
+}
+
+// TestHandleRequest_ProvenanceMetaOmittedOnUnclassified verifies the direct
+// mode contract: no dispatcher → no Intent → Meta omitted entirely.
+func TestHandleRequest_ProvenanceMetaOmittedOnUnclassified(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	loop := NewAgentLoop("test-session", "/tmp")
+	handler := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
+
+	sub := msgBus.Subscribe("prov-test-nil", "chat.response")
+	defer msgBus.Unsubscribe(sub)
+
+	payload, _ := json.Marshal(ChatRequest{
+		Message:        "hello from claude",
+		ConversationID: "conv-prov-nil",
+		SourceClient:   "claude",
+	})
+	reqMsg := &models.BusMessage{
+		ID:        "prov-req-2",
+		Type:      models.MessageTypeRequest,
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	}
+
+	handler.handleRequest(context.Background(), reqMsg)
+
+	select {
+	case msg := <-sub.Channel:
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(msg.Payload, &raw); err != nil {
+			t.Fatalf("unmarshal chat.response: %v", err)
+		}
+		if _, ok := raw["meta"]; ok {
+			t.Errorf("meta key present on unclassified reply: %s", msg.Payload)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for chat.response")
+	}
+}

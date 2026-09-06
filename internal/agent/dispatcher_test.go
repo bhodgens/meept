@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
 )
@@ -1200,5 +1201,133 @@ func TestMultiTurnRoutingConsistency(t *testing.T) {
 	intents = c.ClassifyAll(ctx, "Read the file and check it contains the number 42", nil)
 	if len(intents) > 0 && intents[0].AgentType != config.AgentIDCoder {
 		t.Errorf("second turn: expected coder agent for follow-up, got %v", intents[0])
+	}
+}
+
+// TestDispatcher_LLMClassifyIntent_ModelSet verifies Intent.Model provenance
+// end-to-end: the classifier alias's first candidate serves an empty response
+// (forcing rotation to the secondary), the surviving model classifies the
+// input, and the classified intent carries that model's "provider/model" id.
+func TestDispatcher_LLMClassifyIntent_ModelSet(t *testing.T) {
+	_, _, primaryCfg, secondaryCfg := failoverTestServers(
+		t, emptyContentResponse(), validIntentResponse())
+	resolver := newFailoverResolver(t, primaryCfg, secondaryCfg)
+
+	d := NewDispatcher(DispatcherConfig{
+		ClassifierClient:      llm.NewClient(primaryCfg),
+		ClassifierModel:       "primary",
+		ClassifierModelConfig: primaryCfg,
+		Resolver:              resolver,
+	})
+
+	intent, err := d.classifyIntent(context.Background(), "write some code", nil)
+	if err != nil {
+		t.Fatalf("classifyIntent failed: %v", err)
+	}
+	if intent == nil {
+		t.Fatal("classifyIntent returned nil intent")
+	}
+	if intent.Method != "llm" {
+		t.Fatalf("Method = %q, want llm", intent.Method)
+	}
+	if intent.Model != "p2/m2" {
+		t.Errorf("Model = %q, want %q (model that actually served the classification)", intent.Model, "p2/m2")
+	}
+}
+
+// TestDispatcher_NonLLMBranches_ModelEmpty verifies honest provenance: the
+// deterministic branches classify without any model, so Intent.Model must
+// stay empty.
+func TestDispatcher_NonLLMBranches_ModelEmpty(t *testing.T) {
+	d := NewDispatcher(DispatcherConfig{})
+
+	inputs := map[string]string{
+		"keyword_fallback": "hello",
+		"heuristic":        "plan the launch event for the new website",
+	}
+	for name, input := range inputs {
+		intent, err := d.classifyIntent(context.Background(), input, nil)
+		if err != nil || intent == nil {
+			t.Fatalf("%s: classifyIntent(%q) = %v, %v; want intent", name, input, intent, err)
+		}
+		if intent.Model != "" {
+			t.Errorf("%s: Model = %q, want empty (non-LLM branch must not fake provenance)", name, intent.Model)
+		}
+	}
+
+	// Short/simple guard branch: skip entirely when the LLM classifier is
+	// present and serving, to avoid cross-test state from the shared
+	// classifier cooldown.
+	d2 := NewDispatcher(DispatcherConfig{})
+	intent, err := d2.classifyIntent(context.Background(), "hi", nil)
+	if err != nil || intent == nil {
+		t.Fatalf("guard: classifyIntent = %v, %v; want intent", intent, err)
+	}
+	if intent.Method != "short_message_guard" {
+		t.Fatalf("guard: Method = %q, want short_message_guard", intent.Method)
+	}
+	if intent.Model != "" {
+		t.Errorf("guard: Model = %q, want empty", intent.Model)
+	}
+}
+
+// TestClassifyAndRoute_IntentModelPropagated verifies that a model-served
+// classification keeps its provenance through the full ClassifyAndRoute
+// pipeline (task creation, step 5.x post-processing).
+func TestClassifyAndRoute_IntentModelPropagated(t *testing.T) {
+	_, _, primaryCfg, secondaryCfg := failoverTestServers(
+		t, emptyContentResponse(), validIntentResponse())
+	resolver := newFailoverResolver(t, primaryCfg, secondaryCfg)
+
+	d := NewDispatcher(DispatcherConfig{
+		ClassifierClient:      llm.NewClient(primaryCfg),
+		ClassifierModel:       "primary",
+		ClassifierModelConfig: primaryCfg,
+		Resolver:              resolver,
+	})
+
+	// Run the analyzer first in fail-fast mode so IT doesn't rotate the
+	// shared alias; the classifier is the component whose provenance this
+	// test asserts.
+	d.intentAnalyzer.failFast = true
+	result, err := d.ClassifyAndRoute(context.Background(), "commit these changes please", "prov-conv-1", nil, "")
+	if err != nil {
+		t.Fatalf("ClassifyAndRoute failed: %v", err)
+	}
+	if result == nil || result.Intent == nil {
+		t.Fatal("ClassifyAndRoute returned nil result/intent")
+	}
+	if result.Intent.Method != "llm" {
+		t.Fatalf("Method = %q, want llm", result.Intent.Method)
+	}
+	if result.Intent.Model != "p2/m2" {
+		t.Errorf("Model = %q, want %q", result.Intent.Model, "p2/m2")
+	}
+}
+
+// TestDispatcher_ResolvedModelCapturedInIntentConfigError exercises the
+// degradation path: when every classifier candidate fails, provenance must
+// stay empty — the fallback intent was not served by any model.
+func TestDispatcher_ResolvedModelCapturedInIntentConfigError(t *testing.T) {
+	_, _, primaryCfg, secondaryCfg := failoverTestServers(
+		t, emptyContentResponse(), emptyContentResponse())
+	resolver := newFailoverResolver(t, primaryCfg, secondaryCfg)
+
+	d := NewDispatcher(DispatcherConfig{
+		ClassifierClient:      llm.NewClient(primaryCfg),
+		ClassifierModel:       "primary",
+		ClassifierModelConfig: primaryCfg,
+		Resolver:              resolver,
+	})
+
+	intent, err := d.classifyIntent(context.Background(), "hello there, how are you doing today my friend", nil)
+	if err != nil {
+		t.Fatalf("classifyIntent failed: %v", err)
+	}
+	if intent == nil {
+		t.Fatal("classifyIntent returned nil")
+	}
+	if intent.Model != "" {
+		t.Errorf("Model = %q, want empty (all classifier candidates failed)", intent.Model)
 	}
 }
