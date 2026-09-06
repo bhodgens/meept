@@ -122,12 +122,14 @@ type SQLiteParkStore struct {
 
 // NewSQLiteParkStore opens (and migrates) the parked-turn table on the
 // database at dbPath. The DSN matches the session/queue stores: WAL
-// journal + 5s busy timeout.
+// journal + 5s busy timeout. modernc.org/sqlite honors only
+// `_pragma=`-style DSN parameters (the queue/task stores use the same
+// form), so `_journal_mode=`-style keys would be silently ignored.
 func NewSQLiteParkStore(dbPath string, logger *slog.Logger) (*SQLiteParkStore, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return nil, fmt.Errorf("park store: failed to open database: %w", err)
 	}

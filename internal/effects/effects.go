@@ -64,6 +64,9 @@ type EffectRecord struct {
 	CompletedAt        *time.Time      `json:"completed_at,omitempty"`
 	Payload            json.RawMessage `json:"payload,omitempty"`
 	Receipt            json.RawMessage `json:"receipt,omitempty"`
+	// AbandonReason is the reason recorded when the effect was abandoned
+	// (CLI `effects reconcile --abandon --reason ...`). Empty otherwise.
+	AbandonReason string `json:"abandon_reason,omitempty"`
 }
 
 // Ledger is the effect-idempotency store. Implementations: SQLiteLedger

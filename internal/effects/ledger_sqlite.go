@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS effects_ledger (
     executed_at         TEXT,
     completed_at        TEXT,
     payload             TEXT,
-    receipt             TEXT
+    receipt             TEXT,
+    abandon_reason      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_effects_ledger_state
@@ -50,17 +51,18 @@ type SQLiteLedger struct {
 }
 
 // NewSQLiteLedger opens (and migrates) the effects_ledger table on the
-// database at dbPath. The DSN matches the park store's convention; note
-// that modernc.org/sqlite v1.50.1 only honors `_pragma=`-style DSN
-// parameters, so WAL is additionally enforced by sqliteLedgerPragma and
-// single-writer serialization (the busy_timeout equivalent) by capping the
-// pool at one connection — concurrent Claims of one key then serialize on
-// the single connection instead of failing with SQLITE_BUSY.
+// database at dbPath. The DSN uses `_pragma=`-style parameters —
+// modernc.org/sqlite v1.50.1 only honors that form (same convention as
+// the queue/task/park stores) — and WAL is additionally enforced by
+// sqliteLedgerPragma, with single-writer serialization (the
+// busy_timeout equivalent for in-process contention) by capping the
+// pool at one connection: concurrent Claims of one key then serialize
+// on the single connection instead of failing with SQLITE_BUSY.
 func NewSQLiteLedger(dbPath string, logger *slog.Logger) (*SQLiteLedger, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return nil, fmt.Errorf("effects ledger: failed to open database: %w", err)
 	}
@@ -68,6 +70,16 @@ func NewSQLiteLedger(dbPath string, logger *slog.Logger) (*SQLiteLedger, error) 
 	if _, err := db.Exec(effectsLedgerSchema + sqliteLedgerPragma); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("effects ledger: failed to migrate effects_ledger: %w", err)
+	}
+	// In-place column addition for pre-existing databases (CREATE TABLE IF
+	// NOT EXISTS does not alter an existing table). Duplicate-add errors
+	// are the expected steady state on migrated DBs.
+	if _, err := db.Exec(`ALTER TABLE effects_ledger ADD COLUMN abandon_reason TEXT`); err != nil {
+		s := fmt.Sprintf("%v", err)
+		if !strings.Contains(s, "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("effects ledger: failed to add abandon_reason column: %w", err)
+		}
 	}
 	logger.Info("effects ledger initialized", "path", dbPath)
 	return &SQLiteLedger{db: db, logger: logger}, nil
@@ -162,15 +174,14 @@ WHERE key = ? AND state IN ('claimed','receipted')`
 	return nil
 }
 
-// Abandon implements Ledger: claimed/receipted -> abandoned.
+// Abandon implements Ledger: claimed/receipted -> abandoned. The reason is
+// persisted on the row (abandon_reason) for CLI/human reconciliation.
 func (s *SQLiteLedger) Abandon(ctx context.Context, key string, reason string) error {
-	// reason is accepted for the pinned surface; the abandoned row itself
-	// is terminal, so there is nowhere durable to fold it yet.
 	const update = `
 UPDATE effects_ledger
-SET state = 'abandoned'
+SET state = 'abandoned', abandon_reason = ?
 WHERE key = ? AND state IN ('claimed','receipted')`
-	res, err := s.db.ExecContext(ctx, update, key)
+	res, err := s.db.ExecContext(ctx, update, reason, key)
 	if err != nil {
 		return fmt.Errorf("effects ledger: abandon %s: %w", key, err)
 	}
@@ -190,7 +201,7 @@ func (s *SQLiteLedger) ReconcilePending(ctx context.Context) ([]EffectRecord, er
 	const query = `
 SELECT key, state, task_id, step_id, session_id, tool,
        provider_idempotent, claimed_at, executed_at, completed_at,
-       payload, receipt
+       payload, receipt, abandon_reason
 FROM effects_ledger
 WHERE state IN ('claimed','receipted')
 ORDER BY claimed_at ASC`
@@ -218,17 +229,17 @@ func (s *SQLiteLedger) Get(ctx context.Context, key string) (*EffectRecord, erro
 	const query = `
 SELECT key, state, task_id, step_id, session_id, tool,
        provider_idempotent, claimed_at, executed_at, completed_at,
-       payload, receipt
+       payload, receipt, abandon_reason
 FROM effects_ledger
 WHERE key = ?`
 	var rec EffectRecord
 	var claimedAt string
-	var executedAt, completedAt, payload, receipt sql.NullString
+	var executedAt, completedAt, payload, receipt, abandonReason sql.NullString
 	var providerIdempotent int
 	err := s.db.QueryRowContext(ctx, query, key).Scan(
 		&rec.Key, &rec.State, &rec.TaskID, &rec.StepID, &rec.SessionID, &rec.Tool,
 		&providerIdempotent, &claimedAt, &executedAt, &completedAt,
-		&payload, &receipt,
+		&payload, &receipt, &abandonReason,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -236,7 +247,7 @@ WHERE key = ?`
 		}
 		return nil, fmt.Errorf("effects ledger: read record %s: %w", key, err)
 	}
-	out, err := buildRecord(rec, providerIdempotent, claimedAt, executedAt, completedAt, payload, receipt)
+	out, err := buildRecord(rec, providerIdempotent, claimedAt, executedAt, completedAt, payload, receipt, abandonReason)
 	if err != nil {
 		return nil, fmt.Errorf("effects ledger: record %s: %w", key, err)
 	}
@@ -256,25 +267,25 @@ func (s *SQLiteLedger) transitionErrFor(ctx context.Context, key, action string)
 	return fmt.Errorf("effects ledger: %s %s: %w", action, key, validateTransition(rec.State, action))
 }
 
-// scanEffectRecord scans one row of the shared 12-column SELECT.
+// scanEffectRecord scans one row of the shared 13-column SELECT.
 func scanEffectRecord(rows *sql.Rows) (*EffectRecord, error) {
 	var rec EffectRecord
 	var claimedAt string
-	var executedAt, completedAt, payload, receipt sql.NullString
+	var executedAt, completedAt, payload, receipt, abandonReason sql.NullString
 	var providerIdempotent int
 	if err := rows.Scan(
 		&rec.Key, &rec.State, &rec.TaskID, &rec.StepID, &rec.SessionID, &rec.Tool,
 		&providerIdempotent, &claimedAt, &executedAt, &completedAt,
-		&payload, &receipt,
+		&payload, &receipt, &abandonReason,
 	); err != nil {
 		return nil, err
 	}
-	return buildRecord(rec, providerIdempotent, claimedAt, executedAt, completedAt, payload, receipt)
+	return buildRecord(rec, providerIdempotent, claimedAt, executedAt, completedAt, payload, receipt, abandonReason)
 }
 
 // buildRecord assembles the EffectRecord from raw scanned columns.
 func buildRecord(rec EffectRecord, providerIdempotent int, claimedAt string,
-	executedAt, completedAt, payload, receipt sql.NullString) (*EffectRecord, error) {
+	executedAt, completedAt, payload, receipt, abandonReason sql.NullString) (*EffectRecord, error) {
 	claimed, err := time.Parse(time.RFC3339Nano, claimedAt)
 	if err != nil {
 		return nil, fmt.Errorf("parse claimed_at %q: %w", claimedAt, err)
@@ -297,6 +308,7 @@ func buildRecord(rec EffectRecord, providerIdempotent int, claimedAt string,
 	}
 	rec.Payload = textToRaw(payload)
 	rec.Receipt = textToRaw(receipt)
+	rec.AbandonReason = abandonReason.String
 	return &rec, nil
 }
 

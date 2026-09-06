@@ -106,6 +106,7 @@ func (m *MemoryLedger) Abandon(ctx context.Context, key string, reason string) e
 		return err
 	}
 	rec.State = StateAbandoned
+	rec.AbandonReason = reason
 	m.records[key] = rec
 	m.mu.Unlock()
 	return nil

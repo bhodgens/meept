@@ -159,3 +159,49 @@ func TestSQLiteLedgerUniqueConstraintPath(t *testing.T) {
 		t.Fatalf("get unknown: err=%v, want ErrUnknownKey", err)
 	}
 }
+
+// TestSQLiteLedgerAbandonReasonPersists pins the abandon-reason contract:
+// the reason recorded at Abandon survives reopen and round-trips on Get,
+// while non-abandoned records carry an empty reason.
+func TestSQLiteLedgerAbandonReasonPersists(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "effects.db")
+
+	l1, err := NewSQLiteLedger(dbPath, testLogger())
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	key := EffectKey("backup.git_push", "sess-9", "step-1")
+	if _, _, err := l1.Claim(ctx, key, EffectMeta{
+		Tool: "backup.git_push", SessionID: "sess-9", ProviderIdempotent: true,
+	}); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	const reason = "remote rejected push; needs manual rebase"
+	if err := l1.Abandon(ctx, key, reason); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	if err := l1.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	l2, err := NewSQLiteLedger(dbPath, testLogger())
+	if err != nil {
+		t.Fatalf("reopen ledger: %v", err)
+	}
+	defer func() {
+		if cerr := l2.Close(); cerr != nil {
+			t.Errorf("close 2: %v", cerr)
+		}
+	}()
+	rec, err := l2.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("get after reopen: %v", err)
+	}
+	if rec.State != StateAbandoned {
+		t.Errorf("state = %q, want abandoned", rec.State)
+	}
+	if rec.AbandonReason != reason {
+		t.Errorf("abandon_reason = %q, want %q", rec.AbandonReason, reason)
+	}
+}
