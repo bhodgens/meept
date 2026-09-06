@@ -123,6 +123,8 @@ class DaemonController {
         let process = Process()
         process.launchPath = "/bin/launchctl"
         process.arguments = args
+        // PATH env so launchctl-spawned daemon sees the guaranteed dirs.
+        process.environment = ProcessInfo.processInfo.environment.merging(["PATH": Self.daemonPATH()]) { (_, new) in new }
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -137,6 +139,38 @@ class DaemonController {
         } catch {
             return (false, error.localizedDescription)
         }
+    }
+
+    /// PATH for spawned processes: inherited PATH first, then guaranteed
+    /// dirs appended if absent. Keep in sync with internal/daemon/daemonpath.go
+    /// DaemonPath() (issue #32).
+    private static func daemonPATH() -> String {
+        let home = NSHomeDirectory()
+        let guaranteedDirs = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(home)/.local/bin",
+            "\(home)/go/bin",
+            "\(home)/.cargo/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ]
+
+        var seen = Set<String>()
+        var dirs: [String] = []
+        let inherited = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        for dir in inherited.split(separator: ":").map(String.init) where !dir.isEmpty {
+            if seen.insert(dir).inserted {
+                dirs.append(dir)
+            }
+        }
+        for dir in guaranteedDirs where !seen.contains(dir) {
+            seen.insert(dir)
+            dirs.append(dir)
+        }
+        return dirs.joined(separator: ":")
     }
 }
 
