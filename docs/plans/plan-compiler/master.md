@@ -307,7 +307,7 @@ site + task.approve RPC pattern (internal/rpc/task_approval.go) INLINED.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-dialect-spec.md | PENDING | 0 | |
+| 01-dialect-spec.md | COMPLETE | 1 | Committed 64682470; judgment calls: same-phase step refs allowed (persisted intra-phase), cycle class documented unreachable-but-implemented |
 | 02-compiler.md | PENDING | 0 | |
 | 03-tree-emission.md | PENDING | 0 | |
 | 04-seal-wiring.md | PENDING | 0 | |
