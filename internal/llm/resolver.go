@@ -940,7 +940,14 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 		// (documented — there is no provider Options.Timeout to use as
 		// the ceiling; leaf Contract 3).
 		health.TimeoutBlocks++
-		multiplier := min(1<<uint(health.TimeoutBlocks-1), 4)
+		// Cap the shift OPERAND (not just the multiplier): at
+		// TimeoutBlocks==64, 1<<63 wraps negative, min picks it, and the
+		// negative blockDuration puts TimeoutBlockUntil in the past —
+		// permanently disabling the block for the rest of the streak
+		// (bughunt round-2 auditor 3, finding 3). Same pattern as the
+		// cooldown backoff shift cap above.
+		shift := min(health.TimeoutBlocks-1, 2) // 1<<2 = 4x = the multiplier cap
+		multiplier := min(1<<uint(shift), 4)
 		blockDuration := min(alias.Timeout*time.Duration(multiplier), 4*alias.Timeout)
 		health.TimeoutBlockUntil = r.clock().Add(blockDuration)
 	}
