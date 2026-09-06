@@ -251,6 +251,17 @@ install: build menubar-app build-gui
 		echo "  copied prompts"; \
 	fi
 	@echo ""
+	@echo "Installing bundled skills (no-clobber)..."
+	@mkdir -p $(MEEPT_HOME)/skills
+	@for d in config/skills/*/; do \
+		name=$$(basename $$d); \
+		if [ ! -d "$(MEEPT_HOME)/skills/$$name" ]; then \
+			cp -R "$$d" "$(MEEPT_HOME)/skills/$$name"; \
+			echo "  installed skill $$name"; \
+		else \
+			echo "  skipping $$name (exists)"; \
+		fi; \
+	done
 	@echo "Install complete. Edit $(MEEPT_HOME)/meept.json5 to configure."
 
 # =============================================================================
@@ -842,8 +853,23 @@ uninstall-all: uninstall uninstall-gui
 	rm -f ~/.meept/projects.db
 	@echo "Removing memory databases..."
 	rm -rf ~/.meept/memory/
-	@echo "Removing cached skills and plugins..."
-	rm -rf ~/.meept/skills/
+	@echo "Removing bundled skills (user-modified skills are kept)..."
+	@if [ -d ~/.meept/skills ]; then \
+		for d in ~/.meept/skills/*/; do \
+			[ -e "$$d" ] || continue; \
+			name=$$(basename $$d); \
+			if [ -d "config/skills/$$name" ] && diff -r "$$d" "config/skills/$$name" >/dev/null 2>&1; then \
+				rm -rf "$$d"; \
+				echo "  removed bundled skill $$name"; \
+			else \
+				echo "  keeping $$name (user-modified or custom)"; \
+			fi; \
+		done; \
+		if [ -z "$$(ls -A ~/.meept/skills 2>/dev/null)" ]; then \
+			rmdir ~/.meept/skills; \
+		fi; \
+	fi
+	@echo "Removing cached plugins..."
 	rm -rf ~/.meept/plugins/
 	@echo "Removing workspaces..."
 	rm -rf ~/.meept/workspaces/
