@@ -223,10 +223,10 @@ Orchestrator verifies per leaf, in-session:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-file-backed-output | PENDING | 0 | |
-| 02-summarize-mode | PENDING | 0 | |
-| 03-skill-and-docs | PENDING | 0 | |
-| 04-wiring | PENDING | 0 | |
+| 01-file-backed-output | COMPLETE (2026-09-06) | 1 | 81753289. Contract-exact: resolution order wd->fallback, full text pre-slicing, preview+pointer, path key only when requested. FallbackOutputDir frozen in both defaults + expandConfigPaths. Existing pagination tests untouched. |
+| 02-summarize-mode | COMPLETE (2026-09-06) | 1 | e9de5e7f. Map-reduce per contract (12k windows/500 overlap/200 backoff, verbatim prompts + errors), 12 fake-chatter tests, composes with output_path. Sibling write races mid-run recovered by the implementer; final diff verified clean. |
+| 03-skill-and-docs | COMPLETE (2026-09-06) | 1 | f5f642fd. Catalog test updated TDD-first with anti-"40k" guard; skill teaches output_path paging + summarize=true routing; both workflow docs match contracts. |
+| 04-wiring | COMPLETE (2026-09-06) | 1 | 4b85c0d6. Dedicated client gated on both knobs; SetSummarizer only when enabled; functional injection probes; single registerBuiltinTools caller. AGENTS.md no-change verified. Deviation approved: dedicated-else-chain selection at the call site (the existing summarizerChatter param is the main provider, unusable here). |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
