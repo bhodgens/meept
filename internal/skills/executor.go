@@ -54,9 +54,18 @@ type ExecutorError struct {
 	SkillName string
 	Message   string
 	Cause     error
+
+	// raw, when non-empty, is returned verbatim by Error() instead of the
+	// default `skill %q: %s` formatting. It lets contract-mandated exact
+	// messages (e.g. requires-tools failures) render byte-verbatim while
+	// SkillName stays available to programmatic consumers.
+	raw string
 }
 
 func (e *ExecutorError) Error() string {
+	if e.raw != "" {
+		return e.raw
+	}
 	if e.Cause != nil {
 		return fmt.Sprintf("skill %q: %s: %v", e.SkillName, e.Message, e.Cause)
 	}
@@ -67,6 +76,11 @@ func (e *ExecutorError) Unwrap() error {
 	return e.Cause
 }
 
+// ToolAvailabilityFunc reports whether a named tool is currently available:
+// a bare built-in tool name or a server-qualified MCP tool name
+// ("server.tool"). Names are matched with plain string comparison.
+type ToolAvailabilityFunc func(toolName string) bool
+
 // Executor executes skills using the LLM client.
 type Executor struct {
 	resolver              *llm.Resolver
@@ -75,6 +89,7 @@ type Executor struct {
 	lazyLoader            *LazySkillLoader
 	prerequisiteChecker   PrerequisiteChecker
 	validatePrerequisites bool
+	toolAvailability      ToolAvailabilityFunc
 	toolMapper            *HermesToolMapper
 	tokenResolver         llm.TokenResolver
 	extraHeaders          map[string]string
@@ -124,6 +139,25 @@ func WithPrerequisiteChecker(checker PrerequisiteChecker) ExecutorOption {
 func WithValidatePrerequisites(enabled bool) ExecutorOption {
 	return func(e *Executor) {
 		e.validatePrerequisites = enabled
+	}
+}
+
+// WithToolAvailability sets the tool availability checker used to enforce a
+// skill's requires-tools frontmatter. Nil checker is ignored.
+func WithToolAvailability(fn ToolAvailabilityFunc) ExecutorOption {
+	return func(e *Executor) {
+		if fn != nil {
+			e.toolAvailability = fn
+		}
+	}
+}
+
+// SetToolAvailability sets the tool availability checker used to enforce a
+// skill's requires-tools frontmatter. Nil fn is ignored so a previously set
+// checker is retained.
+func (e *Executor) SetToolAvailability(fn ToolAvailabilityFunc) {
+	if fn != nil {
+		e.toolAvailability = fn
 	}
 }
 
@@ -197,6 +231,34 @@ func applySkillDirContext(execBody, dir string) string {
 	return "skill_dir: " + dir + "\n\n" + strings.ReplaceAll(execBody, "SKILL_DIR", dir)
 }
 
+// checkRequiredTools enforces a skill's requires-tools frontmatter. Runs
+// only when tool-requirement validation is enabled (validatePrerequisites)
+// and an availability checker is configured; returns nil otherwise. When the
+// skill lists unavailable tools, it returns an ExecutorError naming them.
+// It must run before CheckPrerequisites so a missing tool fails before any
+// prerequisite probe side effects.
+func (e *Executor) checkRequiredTools(skill *Skill) error {
+	if !e.validatePrerequisites || e.toolAvailability == nil || len(skill.RequiresTools) == 0 {
+		return nil
+	}
+	var missing []string
+	for _, tool := range skill.RequiresTools {
+		if !e.toolAvailability(tool) {
+			missing = append(missing, tool)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	detail := fmt.Sprintf("requires unavailable tool(s): %s — run 'meept doctor' to diagnose",
+		strings.Join(missing, ", "))
+	return &ExecutorError{
+		SkillName: skill.Name,
+		Message:   detail,
+		raw:       "skill " + skill.Name + " " + detail,
+	}
+}
+
 // Execute runs a skill with the given input and returns the result.
 func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*SkillExecutionResult, error) {
 	if skill == nil {
@@ -210,6 +272,11 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 		"name", skill.Name,
 		"requires", skill.Requires,
 	)
+
+	// Enforce requires-tools before any prerequisite probes or side effects.
+	if err := e.checkRequiredTools(skill); err != nil {
+		return nil, err
+	}
 
 	// Validate Hermes prerequisites if configured and present.
 	if e.validatePrerequisites && skill.Prerequisites != nil && e.prerequisiteChecker != nil {
@@ -422,6 +489,11 @@ func (e *Executor) ExecuteWithMessages(
 	}
 	if e.resolver == nil {
 		return nil, ErrNoResolver
+	}
+
+	// Enforce requires-tools before any prerequisite probes or side effects.
+	if err := e.checkRequiredTools(skill); err != nil {
+		return nil, err
 	}
 
 	// Validate Hermes prerequisites if configured and present.

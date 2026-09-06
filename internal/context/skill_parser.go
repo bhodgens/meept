@@ -108,10 +108,11 @@ func extractYAMLFrontmatter(content string) (frontmatter, body string, err error
 
 // skillFrontmatter represents the YAML frontmatter for a skill.
 type skillFrontmatter struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description"`
-	Version     string   `yaml:"version"`
-	Requires    []string `yaml:"requires"`
+	Name          string   `yaml:"name"`
+	Description   string   `yaml:"description"`
+	Version       string   `yaml:"version"`
+	Requires      []string `yaml:"requires"`
+	RequiresTools []string `yaml:"requires-tools"`
 }
 
 // parseSkillFrontmatter parses the YAML frontmatter into a Skill.
@@ -134,6 +135,7 @@ func parseSkillFrontmatter(frontmatter string, skill *Skill) error {
 		skill.Version = "0.1.0"
 	}
 	skill.Requires = fm.Requires
+	skill.RequiresTools = fm.RequiresTools
 	skill.Triggers = extractTriggersFromDescription(skill.Description)
 	skill.Category = inferSkillCategory(skill.Slug, skill.Path)
 	return nil

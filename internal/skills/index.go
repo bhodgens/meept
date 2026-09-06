@@ -14,6 +14,9 @@ type SkillIndexEntry struct {
 	Description string `json:"description"`
 	// Requires lists capability tags (e.g., ["code", "reasoning"]).
 	Requires []string `json:"requires,omitempty"`
+	// RequiresTools lists tools the skill needs at execution time
+	// (bare built-in names or server-qualified MCP names, "server.tool").
+	RequiresTools []string `json:"requires_tools,omitempty"`
 	// Tags are categorization labels.
 	Tags []string `json:"tags,omitempty"`
 	// Path is the filesystem path for lazy loading.

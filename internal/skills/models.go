@@ -37,6 +37,14 @@ type Skill struct {
 	// Examples: ["code", "reasoning"], ["tool_use"], etc.
 	Requires []string `json:"requires,omitempty"`
 
+	// RequiresTools lists tools the skill needs at execution time.
+	// Entries are full registered tool names: bare built-in names
+	// ("web_fetch") or server-qualified MCP names ("cua-driver.capture").
+	// Availability is matched with plain string comparison; when a checker
+	// is configured and validation is enabled, execution fails before any
+	// side effects if any listed tool is unavailable.
+	RequiresTools []string `json:"requires_tools,omitempty"`
+
 	// Tags are categorization labels for the skill.
 	Tags []string `json:"tags,omitempty"`
 

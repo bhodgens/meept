@@ -125,9 +125,13 @@ type Skill struct {
 	Description string
 	Version     string
 	Requires    []string // Capabilities required
-	Content     string
-	Category    string
-	Triggers    []string // When to trigger this skill
+	// RequiresTools lists tools the skill needs at execution time.
+	// Entries are bare built-in tool names or server-qualified MCP tool
+	// names (server.tool), matched exactly against tool availability.
+	RequiresTools []string
+	Content       string
+	Category      string
+	Triggers      []string // When to trigger this skill
 }
 
 // NewArtifacts creates a new Artifacts instance
