@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/internal/task"
 )
 
 // startNextPhase transitions a task from a completed phase to the next.
-// It assigns fresh conversationIDs (no raw history propagation), injects
-// consumes artifacts + phase description as structured context, and gates
-// on checkPhaseReady.
+// It keeps the serial list-order selection (next phase after
+// completedPhaseName) and delegates the actual phase start to startPhase.
 //
 // Returns nil (no-op) if there is no next phase after completedPhaseName.
 func (o *Orchestrator) startNextPhase(ctx context.Context, taskID, completedPhaseName string) error {
@@ -40,34 +40,65 @@ func (o *Orchestrator) startNextPhase(ctx context.Context, taskID, completedPhas
 		return nil
 	}
 
-	// 2. Find the phase spec to get consumes/produces declarations.
-	phaseSpec, err := o.getPlanPhaseSpec(ctx, taskID, nextPhase.Name)
+	return o.startPhase(ctx, taskID, nextPhase, completedPhaseName)
+}
+
+// startPhase activates a single phase: it loads the phase spec, gates on
+// checkPhaseReady, renders startup context, stamps fresh conversationIDs
+// (phase-<phaseID>-<stepID>) plus accumulated context over the phase's
+// steps, and notifies phase-transition subscribers.
+//
+// Extracted verbatim from startNextPhase's steps 2-5 so both the serial
+// path (startNextPhase, fromPhase = completed phase name) and the frontier
+// path (advancePhasesFrontier, fromPhase = "") share one implementation.
+//
+// Re-entrancy guard: if every step of p is already past StepPending, the
+// phase was already started and stamping would be a no-op overwrite — skip
+// it (protection against double terminal events under frontier dispatch).
+func (o *Orchestrator) startPhase(ctx context.Context, taskID string, p *plan.PlanPhase, fromPhase string) error {
+	// Find the phase spec to get consumes/produces declarations.
+	phaseSpec, err := o.getPlanPhaseSpec(ctx, taskID, p.Name)
 	if err != nil {
 		o.logger.Warn("could not load phase spec for context injection",
-			"phase", nextPhase.Name, "error", err)
-		phaseSpec = &PlanPhaseSpec{Name: nextPhase.Name}
+			"phase", p.Name, "error", err)
+		phaseSpec = &PlanPhaseSpec{Name: p.Name}
 	}
 
-	// 3. Gate on consumes readiness.
+	// Gate on consumes readiness.
 	if o.artifacts != nil {
 		if err := checkPhaseReady(phaseSpec, o.artifacts); err != nil {
 			return fmt.Errorf("phase not ready: %w", err)
 		}
 	}
 
-	// 4. Build startup context.
+	// Build startup context.
 	startupCtx := o.renderPhaseStartup(phaseSpec, o.artifacts)
 
-	// 5. Update steps: fresh conversationID + startup context.
+	// Update steps: fresh conversationID + startup context.
 	if o.stepStore == nil {
 		return fmt.Errorf("step store not wired")
 	}
-	steps, err := o.stepStore.GetPhaseSteps(taskID, nextPhase.Name)
+	steps, err := o.stepStore.GetPhaseSteps(taskID, p.Name)
 	if err != nil {
 		return fmt.Errorf("get steps by phase: %w", err)
 	}
+	// Re-entrancy guard: any step past StepPending means the phase already
+	// started (stamping again would be a no-op anyway). Uses the shared
+	// task state constants rather than reimplementing state checks.
+	allPastPending := true
 	for _, step := range steps {
-		step.ConversationID = fmt.Sprintf("phase-%s-%s", nextPhase.ID, step.ID)
+		if step.State == task.StepPending {
+			allPastPending = false
+			break
+		}
+	}
+	if allPastPending {
+		o.logger.Debug("phase already started; skipping double-start",
+			"task_id", taskID, "phase", p.Name)
+		return nil
+	}
+	for _, step := range steps {
+		step.ConversationID = fmt.Sprintf("phase-%s-%s", p.ID, step.ID)
 		step.AccumulatedContext = startupCtx
 	}
 	if err := o.stepStore.UpdatePhaseSteps(steps); err != nil {
@@ -80,14 +111,14 @@ func (o *Orchestrator) startNextPhase(ctx context.Context, taskID, completedPhas
 	if o.onPhaseTransition != nil {
 		func() {
 			defer func() { _ = recover() }()
-			o.onPhaseTransition(taskID, completedPhaseName, nextPhase.Name)
+			o.onPhaseTransition(taskID, fromPhase, p.Name)
 		}()
 	}
 
 	o.logger.Info("Phase transition",
 		"task_id", taskID,
-		"from", completedPhaseName,
-		"to", nextPhase.Name,
+		"from", fromPhase,
+		"to", p.Name,
 		"steps", len(steps),
 	)
 	return nil

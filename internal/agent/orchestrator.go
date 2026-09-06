@@ -55,6 +55,17 @@ type Orchestrator struct {
 	// hierarchies and emit observability events. See startNextPhase.
 	onPhaseTransition func(taskID, fromPhase, toPhase string)
 
+	// parallelPhases enables frontier dispatch: on phase completion, all
+	// ready phases start together (advancePhasesFrontier) instead of the
+	// serial next-in-list-order startNextPhase. Zero value false — serial
+	// default; deliberately NOT settable via OrchestratorDeps (Contract B).
+	parallelPhases bool
+
+	// frontierInflight is the per-task single-flight guard for
+	// advancePhasesFrontier (Contract B): taskID -> *atomic.Bool, guarded
+	// by CompareAndSwap so no mutex is held across store I/O (mutexio).
+	frontierInflight sync.Map
+
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
@@ -93,6 +104,14 @@ func (o *Orchestrator) SetPhaseTransitionHook(fn func(taskID, fromPhase, toPhase
 	if fn != nil {
 		o.onPhaseTransition = fn
 	}
+}
+
+// SetParallelPhases enables or disables frontier dispatch of plan phases
+// (plans.parallel_phases). Default false: serial next-in-list-order
+// behavior, byte-identical to the pre-frontier implementation. Plain-bool
+// setter — nil-guard convention does not apply (Contract B).
+func (o *Orchestrator) SetParallelPhases(enabled bool) {
+	o.parallelPhases = enabled
 }
 
 // NewOrchestrator creates a new orchestrator.
@@ -388,10 +407,15 @@ func (o *Orchestrator) maybeTransitionPhase(ctx context.Context, stepID, taskID 
 	if !complete {
 		return // more steps remain in the current phase
 	}
-	if err := o.startNextPhase(ctx, taskID, step.Phase); err != nil {
-		o.logger.Warn("phase transition failed",
-			"task_id", taskID, "from_phase", step.Phase, "error", err)
+	if !o.parallelPhases {
+		// Legacy serial path: next phase in list order.
+		if err := o.startNextPhase(ctx, taskID, step.Phase); err != nil {
+			o.logger.Warn("phase transition failed",
+				"task_id", taskID, "from_phase", step.Phase, "error", err)
+		}
+		return
 	}
+	o.advancePhasesFrontier(ctx, taskID)
 }
 
 // extractTaskIDFromJob extracts the task ID from a job ID by looking up the job.
