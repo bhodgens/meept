@@ -136,3 +136,41 @@ func TestCatalogExcelEntry(t *testing.T) {
 		t.Errorf("env should be empty, got %v", found.Env)
 	}
 }
+
+// TestCatalogInstallHints is the regression fence for catalog additions:
+// every stdio entry must carry a non-empty install_hint (the shell command
+// a user can run to install the server's missing dependency); http-transport
+// entries must NOT (they have no external binary dependency).
+func TestCatalogInstallHints(t *testing.T) {
+	cfg, err := LoadMCPConfig("../../config/mcp_servers.json5")
+	if err != nil {
+		t.Fatalf("LoadMCPConfig(catalog) failed: %v", err)
+	}
+
+	stdio, http := 0, 0
+	for i := range cfg.Servers {
+		s := &cfg.Servers[i]
+		isStdio := s.Type == "stdio" || (s.Type == "" && len(s.Command) > 0)
+		switch {
+		case isStdio:
+			stdio++
+			if s.InstallHint == "" {
+				t.Errorf("stdio entry %q has empty install_hint (needed so doctor can tell the user how to install the dependency)", s.Name)
+			}
+		case s.Type == "http":
+			http++
+			if s.InstallHint != "" {
+				t.Errorf("http entry %q must not set install_hint, got %q", s.Name, s.InstallHint)
+			}
+		default:
+			t.Errorf("entry %q has unknown transport: type=%q command=%v url=%q", s.Name, s.Type, s.Command, s.URL)
+		}
+	}
+	if stdio+http != len(cfg.Servers) {
+		t.Errorf("classified %d of %d entries", stdio+http, len(cfg.Servers))
+	}
+	if stdio == 0 {
+		t.Error("catalog has no stdio entries; TestCatalogInstallHints is vacuous")
+	}
+	t.Logf("install hints verified: %d stdio, %d http", stdio, http)
+}
