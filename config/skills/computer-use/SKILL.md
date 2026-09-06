@@ -6,6 +6,8 @@ tags:
   - desktop
 requires:
   - reasoning
+requires-tools:
+  - cua-driver.capture
 risk_level: high
 allowed-tools:
   - cua-driver.capture

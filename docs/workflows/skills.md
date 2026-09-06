@@ -18,6 +18,29 @@ Hardcoded functionality limits adaptability and requires code changes for new ca
 3. **System-wide**: `~/.config/meept/skills/`
 When multiple skills have the same name, the highest-priority version wins.
 
+### Bundled skills
+
+`make install` ships the repo's bundled skills (`config/skills/`) to
+`~/.meept/skills/` (one directory per skill):
+
+- **No-clobber**: an existing skill directory in `~/.meept/skills/` is
+  never overwritten. `make install` prints `skipping <name> (exists)` for
+  those and `installed skill <name>` for fresh installs.
+- **User edits shadow bundled**: discovery resolves `~/.meept/skills/`
+  above the bundled source (and project-local `.meept/skills/` above
+  both). Editing or replacing an installed bundled skill is safe —
+  reinstalls will not revert it.
+- **Uninstall safety**: `make uninstall-all` removes a skill directory
+  under `~/.meept/skills/` only when it is byte-identical to the bundled
+  copy in `config/skills/`. User-modified or custom skills are listed and
+  kept.
+- **Re-install a bundled skill**: delete its directory, then re-run
+  `make install`:
+
+  ```sh
+  rm -rf ~/.meept/skills/web-browsing && make install
+  ```
+
 ### SKILL.md Format
 ```markdown
 ---
@@ -38,6 +61,32 @@ When reviewing code, check for:
 - Security: No vulnerabilities or issues
 - Completeness: Error cases handled appropriately
 ```
+
+### Tool requirements
+
+A skill can declare concrete tool dependencies in frontmatter with the
+`requires-tools` key:
+
+```yaml
+---
+name: Web Shot
+requires-tools:
+  - web_fetch
+  - cua-driver.capture
+---
+```
+
+Matching semantics: each entry is a full registered tool name. A bare
+name (`web_fetch`) must exist in the live builtin tool registry; a
+server-qualified name (`cua-driver.capture`) must be exposed by a
+registered, enabled MCP server.
+
+Failure behavior: when `skills.validate_prerequisites` is enabled, the
+executor checks every entry before running the skill. If any tool is
+unavailable, execution is refused with an error naming them:
+`skill <name> requires unavailable tool(s): <list> — run 'meept doctor'
+to diagnose`. Skills without the key are unaffected — no tool check
+runs for them.
 
 ### Model Resolution
 - Skills declare `requires: [code, reasoning]` in YAML

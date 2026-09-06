@@ -2,6 +2,8 @@
 name: learn-from-video
 description: "Turn a YouTube video (lecture, tutorial, demo) into a reusable skill: fetch the transcript, extract the generalizable procedure, and persist it as a new or updated skill."
 tags: [media, learning, skills]
+requires-tools:
+  - transcript_fetch
 ---
 
 # learn from video
