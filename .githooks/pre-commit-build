@@ -66,7 +66,7 @@ fi
 #    computed from export data so it stays fast (~1s). Dirty non-staged
 #    packages are EXCLUDED — a foreign session's half-written file must not
 #    block this commit when the commit itself is self-consistent.
-if command -v go >/dev/null && go list -deps=none ./... >/dev/null 2>&1; then
+if command -v go >/dev/null && go list ./... >/dev/null 2>&1; then
   DOWNSTREAM=""
   while IFS= read -r pkg; do
     [ -z "$pkg" ] && continue
@@ -90,7 +90,7 @@ $pkg
       fi
     done
   done <<EOF
-$(go list -deps=none ./... 2>/dev/null)
+$(go list ./... 2>/dev/null)
 EOF
 
   if [ -n "$DOWNSTREAM" ]; then
