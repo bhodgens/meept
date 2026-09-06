@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/caimlas/meept/internal/skills"
@@ -243,6 +244,33 @@ func (w *Writer) WriteSkill(name, content string) error {
 	if err := w.recordSHA(contentSHA, name); err != nil {
 		w.logger.Warn("Failed to persist skill SHA index",
 			"name", name, "error", err)
+	}
+
+	// Register the freshly written skill in the in-memory registry so that
+	// same-session consumers (skills_patch, registry.Get) see it without a
+	// daemon restart. Mirrors RestoreSkill's re-parse-then-register discipline:
+	// a parse failure logs a warning and continues (the write itself
+	// succeeded). Register replaces same-name entries, so the overwrite path
+	// refreshes the registry correctly.
+	if w.registry != nil {
+		skill, err := skills.ParseSkillFile(targetPath)
+		if err != nil {
+			w.logger.Warn("Failed to re-parse written skill for registry",
+				"name", name,
+				"path", targetPath,
+				"error", err,
+			)
+		} else {
+			// ParseSkillFile does not assign a discovery tier; when the write
+			// landed under the Writer's own root (the user-tier skills
+			// directory, where new skills are created), tag the parsed skill
+			// with that tier. Tier-written skills keep the parser's zero
+			// Priority, mirroring RestoreSkill.
+			if strings.HasPrefix(targetPath, w.skillsDir+string(filepath.Separator)) {
+				skill.Priority = skills.PriorityUser
+			}
+			w.registry.Register(skill)
+		}
 	}
 
 	w.logger.Info("Skill written", "name", name, "path", targetPath)

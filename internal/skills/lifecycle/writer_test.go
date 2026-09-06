@@ -202,6 +202,62 @@ func TestWriterRegistrySync(t *testing.T) {
 	}
 }
 
+// TestWriterWriteSkillRegistersInRegistry verifies that WriteSkill registers
+// the newly written skill into the injected registry immediately, so that
+// same-session consumers (skills_patch, registry.Get) see it without a
+// daemon restart.
+func TestWriterWriteSkillRegistersInRegistry(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWriter(dir, nil)
+	r := skills.NewRegistry()
+	w.SetRegistry(r)
+
+	content := "---\nname: test-skill\ndescription: A test skill\n---\n\n# test-skill\n\nRegistry write.\n"
+	if err := w.WriteSkill("test-skill", content); err != nil {
+		t.Fatalf("WriteSkill failed: %v", err)
+	}
+
+	got := r.Get("test-skill")
+	if got == nil {
+		t.Fatal("Skill should be registered in the registry immediately after WriteSkill")
+	}
+	if got.Name != "test-skill" {
+		t.Errorf("registered Name = %q, want %q", got.Name, "test-skill")
+	}
+	// ParseSkillText trims the body after frontmatter.
+	wantBody := "# test-skill\n\nRegistry write."
+	if got.Body != wantBody {
+		t.Errorf("registered Body = %q, want %q", got.Body, wantBody)
+	}
+}
+
+// TestWriterWriteSkillOverwriteRefreshesRegistry verifies that re-writing an
+// existing skill (same name, new content) refreshes the registry entry, since
+// Register replaces same-name entries.
+func TestWriterWriteSkillOverwriteRefreshesRegistry(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWriter(dir, nil)
+	r := skills.NewRegistry()
+	w.SetRegistry(r)
+
+	v1 := "---\nname: test-skill\ndescription: v1\n---\n\nbody one\n"
+	if err := w.WriteSkill("test-skill", v1); err != nil {
+		t.Fatalf("WriteSkill v1 failed: %v", err)
+	}
+	v2 := "---\nname: test-skill\ndescription: v2\n---\n\nbody two\n"
+	if err := w.WriteSkill("test-skill", v2); err != nil {
+		t.Fatalf("WriteSkill v2 failed: %v", err)
+	}
+
+	got := r.Get("test-skill")
+	if got == nil {
+		t.Fatal("Skill should be registered after overwrite")
+	}
+	if got.Body != "body two" {
+		t.Errorf("registered Body after overwrite = %q, want %q", got.Body, "body two")
+	}
+}
+
 // TestWriterAtomicWrite verifies that no .tmp file is left behind after a
 // successful write.
 func TestWriterAtomicWrite(t *testing.T) {
