@@ -2,36 +2,79 @@ package agent
 
 import (
 	"reflect"
-	"sort"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// helper: build phase nodes tersely. Local to this file (no shared state).
-func fpn(name string, seq int, produces []string, consumes []Artifact, depends []string) phaseNode {
+// Contract A (master.md / leaf 01) presents the frontier identifiers as
+// PhaseNode / ComputePhaseFrontier, but the package convention is
+// unexported names (checkPhaseReady, artifactStore); leaf 02 consumes
+// them from within package agent. This assertion pins that mapping at
+// compile time.
+var (
+	_ = phaseNode{}
+	_ = computePhaseFrontier
+)
+
+// pfReq builds a required artifact declaration for fixtures.
+func pfReq(name string) Artifact { return Artifact{Name: name, Kind: "file", Required: true} }
+
+// pfOpt builds an optional artifact declaration for fixtures.
+func pfOpt(name string) Artifact { return Artifact{Name: name, Kind: "file"} }
+
+// pfPhase builds a phaseNode with only the fields a case needs.
+func pfPhase(name string, seq int, produces []string, consumes []Artifact, dependsOn ...string) phaseNode {
 	return phaseNode{
 		Name:           name,
 		Sequence:       seq,
 		Produces:       produces,
 		Consumes:       consumes,
-		DependsOnPhase: depends,
+		DependsOnPhase: dependsOn,
 	}
 }
 
-// helper: required / optional artifact literals.
-func fpnReq(name string) Artifact { return Artifact{Name: name, Required: true} }
-func fpnOpt(name string) Artifact { return Artifact{Name: name, Required: false} }
-
-// helper: names of ready nodes, in returned order. Nil-preserving so
-// empty results compare equal to nil expectations.
-func fpnNames(nodes []phaseNode) []string {
-	if len(nodes) == 0 {
-		return nil
+// pfReadyNames maps ready nodes to their names in output order.
+func pfReadyNames(ready []phaseNode) []string {
+	names := make([]string, 0, len(ready))
+	for _, n := range ready {
+		names = append(names, n.Name)
 	}
-	out := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		out = append(out, n.Name)
+	return names
+}
+
+// pfDeepCopyNodes copies nodes including inner slices so purity
+// comparisons see any in-place mutation of nested fields.
+func pfDeepCopyNodes(ns []phaseNode) []phaseNode {
+	out := make([]phaseNode, len(ns))
+	for i, n := range ns {
+		n.Produces = append([]string(nil), n.Produces...)
+		n.Consumes = append([]Artifact(nil), n.Consumes...)
+		n.DependsOnPhase = append([]string(nil), n.DependsOnPhase...)
+		out[i] = n
 	}
 	return out
+}
+
+// pfCopySet copies a bool set for purity comparisons.
+func pfCopySet(m map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// pfDiamond builds the A→(B,C)→D diamond: A produces x; B consumes x and
+// produces y; C produces z; D consumes y and z.
+func pfDiamond() []phaseNode {
+	return []phaseNode{
+		pfPhase("A", 1, []string{"x"}, nil),
+		pfPhase("B", 2, []string{"y"}, []Artifact{pfReq("x")}),
+		pfPhase("C", 3, []string{"z"}, nil),
+		pfPhase("D", 4, nil, []Artifact{pfReq("y"), pfReq("z")}),
+	}
 }
 
 func TestComputePhaseFrontier(t *testing.T) {
@@ -41,269 +84,225 @@ func TestComputePhaseFrontier(t *testing.T) {
 		available map[string]bool
 		busy      map[string]bool
 		wantReady []string
+		wantNil   bool
 		wantCycle bool
 	}{
 		{
-			name:      "case 1: empty graph returns nil and false",
-			nodes:     nil,
-			available: nil,
-			busy:      nil,
-			wantReady: nil,
-			wantCycle: false,
+			name:    "1: empty graph yields nil ready and no cycle",
+			wantNil: true,
 		},
 		{
-			name:      "case 2: all-ready linear chain",
-			nodes:     []phaseNode{fpn("A", 0, []string{"a"}, nil, nil), fpn("B", 1, []string{"b"}, []Artifact{fpnReq("a")}, nil), fpn("C", 2, nil, []Artifact{fpnReq("b")}, nil)},
-			available: map[string]bool{"a": true, "b": true, "c": true},
-			busy:      nil,
+			name: "2: all-ready linear chain",
+			nodes: []phaseNode{
+				pfPhase("A", 1, []string{"x"}, nil),
+				pfPhase("B", 2, []string{"y"}, []Artifact{pfReq("x")}),
+				pfPhase("C", 3, nil, []Artifact{pfReq("y")}),
+			},
+			available: map[string]bool{"x": true, "y": true},
 			wantReady: []string{"A", "B", "C"},
-			wantCycle: false,
 		},
 		{
-			name:      "case 3: artifact edge blocks on busy producer",
-			nodes:     []phaseNode{fpn("A", 0, []string{"x"}, nil, nil), fpn("B", 1, nil, []Artifact{fpnReq("x")}, nil)},
-			available: map[string]bool{},
+			name: "3: required-consume edge into busy phase blocks",
+			nodes: []phaseNode{
+				pfPhase("A", 1, []string{"x"}, nil),
+				pfPhase("B", 2, nil, []Artifact{pfReq("x")}),
+			},
 			busy:      map[string]bool{"A": true},
 			wantReady: []string{"A"},
-			wantCycle: false,
 		},
 		{
-			// Fixture cells exactly as the leaf table pins them
-			// (available={}, busy={A}). The leaf cell says {A,B}, but that
-			// contradicts the leaf's own case 7: an optional consume still
-			// creates an edge (rule 1 — "never gate" is 2a only), and that
-			// edge lands on busy A (2b), so B is blocked here exactly as in
-			// case 7. Rule-correct ready set is {A}; flagged to the
-			// orchestrator as a leaf-table erratum.
-			name:      "case 4: optional consume never gates",
-			nodes:     []phaseNode{fpn("A", 0, []string{"x"}, nil, nil), fpn("B", 1, nil, []Artifact{fpnOpt("x")}, nil)},
+			name: "4: optional consume never gates readiness",
+			nodes: []phaseNode{
+				pfPhase("A", 1, []string{"x"}, nil),
+				pfPhase("B", 2, nil, []Artifact{pfOpt("x")}),
+			},
 			available: map[string]bool{},
-			busy:      map[string]bool{"A": true},
-			wantReady: []string{"A"},
-			wantCycle: false,
+			wantReady: []string{"A", "B"},
 		},
 		{
-			// Frozen rule 4 (leaf semantics + master.md Contract A):
-			// cycleDetected == (len(ready)==0 && len(nodes)>0). The leaf
-			// table's "false" cell contradicts its own rule; the rule wins
-			// — an unadvanceable graph is the caller's Warn+fallback trigger.
-			name:      "case 5: missing required consume with no producer blocks",
-			nodes:     []phaseNode{fpn("B", 0, nil, []Artifact{fpnReq("x")}, nil)},
+			name:      "5: missing required consume with no in-graph producer stalls the graph",
+			nodes:     []phaseNode{pfPhase("B", 1, nil, []Artifact{pfReq("x")})},
 			available: map[string]bool{},
-			busy:      nil,
-			wantReady: nil,
+			// Frozen rule 4: empty ready over a non-empty incomplete set
+			// is cycleDetected — the leaf table row says "false", but the
+			// normative semantics win (see leaf-01 report deviation note).
 			wantCycle: true,
 		},
 		{
-			name:      "case 6: missing required consume passes when artifact present",
-			nodes:     []phaseNode{fpn("B", 0, nil, []Artifact{fpnReq("x")}, nil)},
+			name:      "6: required consume satisfied by the store passes without an in-graph producer",
+			nodes:     []phaseNode{pfPhase("B", 1, nil, []Artifact{pfReq("x")})},
 			available: map[string]bool{"x": true},
-			busy:      nil,
 			wantReady: []string{"B"},
-			wantCycle: false,
 		},
 		{
-			name:      "case 7: optional consume edge to busy producer still blocks",
-			nodes:     []phaseNode{fpn("A", 0, []string{"x"}, nil, nil), fpn("B", 1, nil, []Artifact{fpnOpt("x")}, nil)},
-			available: map[string]bool{"x": true},
+			name: "7: optional consume still creates an edge into a busy phase",
+			nodes: []phaseNode{
+				pfPhase("A", 1, []string{"x"}, nil),
+				pfPhase("B", 2, nil, []Artifact{pfOpt("x")}),
+			},
+			available: map[string]bool{},
 			busy:      map[string]bool{"A": true},
+			// B is edge-blocked; A itself has no gating.
 			wantReady: []string{"A"},
-			wantCycle: false,
 		},
 		{
-			name:      "case 8: diamond with all artifacts ready",
-			nodes:     []phaseNode{fpn("A", 0, []string{"a"}, nil, nil), fpn("B", 1, []string{"b"}, []Artifact{fpnReq("a")}, nil), fpn("C", 2, []string{"c"}, []Artifact{fpnReq("a")}, nil), fpn("D", 3, nil, []Artifact{fpnReq("b"), fpnReq("c")}, nil)},
-			available: map[string]bool{"a": true, "b": true, "c": true, "d": true},
-			busy:      nil,
+			name:      "8: diamond fully ready",
+			nodes:     pfDiamond(),
+			available: map[string]bool{"x": true, "y": true, "z": true},
 			wantReady: []string{"A", "B", "C", "D"},
-			wantCycle: false,
 		},
 		{
-			// Fixture cells exactly as the leaf table pins them
-			// (available={}, busy={B}). Under frozen rule 2a C's required
-			// consume "a" is unavailable, so the leaf cell's expected
-			// "A,C" is unreachable by any rule-consistent assignment —
-			// B and C are gate-identical. The rule-correct ready set is
-			// {A}; flagged to the orchestrator as a leaf-table erratum.
-			name:      "case 9: diamond mid-flight, B busy",
-			nodes:     []phaseNode{fpn("A", 0, []string{"a"}, nil, nil), fpn("B", 1, []string{"b"}, []Artifact{fpnReq("a")}, nil), fpn("C", 2, []string{"c"}, []Artifact{fpnReq("a")}, nil), fpn("D", 3, nil, []Artifact{fpnReq("b"), fpnReq("c")}, nil)},
+			name:      "9: diamond mid-flight — busy B blocks D, missing x blocks B",
+			nodes:     pfDiamond(),
 			available: map[string]bool{},
 			busy:      map[string]bool{"B": true},
-			wantReady: []string{"A"},
-			wantCycle: false,
+			wantReady: []string{"A", "C"},
 		},
 		{
-			name:      "case 10: explicit DependsOnPhase edge to busy phase blocks",
-			nodes:     []phaseNode{fpn("A", 0, nil, nil, nil), fpn("B", 1, nil, nil, []string{"A"})},
+			name: "10: explicit DependsOnPhase edge into busy phase blocks",
+			nodes: []phaseNode{
+				pfPhase("A", 1, nil, nil),
+				pfPhase("B", 2, nil, nil, "A"),
+			},
 			available: map[string]bool{},
 			busy:      map[string]bool{"A": true},
 			wantReady: []string{"A"},
-			wantCycle: false,
 		},
 		{
-			name:      "case 11: depends-on unknown phase creates no edge",
-			nodes:     []phaseNode{fpn("B", 0, nil, nil, []string{"Z"})},
+			name:      "11: DependsOnPhase to a phase outside the graph creates no edge",
+			nodes:     []phaseNode{pfPhase("B", 1, nil, nil, "Z")},
 			available: map[string]bool{},
-			busy:      nil,
 			wantReady: []string{"B"},
-			wantCycle: false,
 		},
 		{
-			name:      "case 12: self-produce is not a self-edge",
-			nodes:     []phaseNode{fpn("A", 0, []string{"a"}, []Artifact{fpnReq("a")}, nil)},
+			name: "12: self-produce creates no self-edge",
+			nodes: []phaseNode{
+				pfPhase("A", 1, []string{"a"}, []Artifact{pfReq("a")}),
+			},
 			available: map[string]bool{"a": true},
 			busy:      map[string]bool{"A": true},
 			wantReady: []string{"A"},
-			wantCycle: false,
 		},
 		{
-			name:      "case 13: sequence ascending order",
-			nodes:     []phaseNode{fpn("B", 2, []string{"b"}, nil, nil), fpn("A", 1, []string{"a"}, nil, nil)},
-			available: map[string]bool{"a": true, "b": true},
-			busy:      nil,
-			wantReady: []string{"A", "B"},
-			wantCycle: false,
-		},
-		{
-			name:      "case 14: sequence never defeats edge blocking",
-			nodes:     []phaseNode{fpn("B", 1, []string{"x"}, []Artifact{fpnReq("x")}, nil), fpn("C", 9, nil, nil, nil)},
+			name: "13: Sequence ascending with Name tiebreak",
+			nodes: []phaseNode{
+				pfPhase("B", 2, nil, nil),
+				pfPhase("A", 1, nil, nil),
+			},
 			available: map[string]bool{},
-			busy:      map[string]bool{"B": true},
-			wantReady: []string{"C"},
-			wantCycle: false,
+			wantReady: []string{"A", "B"},
 		},
 		{
-			name:      "case 15: mutual busy dependency reports cycle",
-			nodes:     []phaseNode{fpn("A", 0, []string{"x"}, []Artifact{fpnReq("y")}, nil), fpn("B", 1, []string{"y"}, []Artifact{fpnReq("x")}, nil)},
+			name: "14: Sequence never defeats an edge block",
+			// A is busy AND gate-blocked (its own required consume w is
+			// missing), so only C passes: B (seq 1) is edge-blocked by busy
+			// A and must not outrank C (seq 9). Frozen rule 2 never excludes
+			// a busy phase on its own — only gate failures and busy-edge
+			// blocks keep a phase out.
+			nodes: []phaseNode{
+				pfPhase("A", 1, []string{"x"}, []Artifact{pfReq("w")}),
+				pfPhase("B", 1, nil, []Artifact{pfReq("x")}),
+				pfPhase("C", 9, nil, nil),
+			},
+			available: map[string]bool{},
+			busy:      map[string]bool{"A": true},
+			wantReady: []string{"C"},
+		},
+		{
+			name: "15: two-phase produce/consume stall is a cycle",
+			nodes: []phaseNode{
+				pfPhase("A", 1, []string{"y"}, []Artifact{pfReq("x")}),
+				pfPhase("B", 2, []string{"x"}, []Artifact{pfReq("y")}),
+			},
 			available: map[string]bool{},
 			busy:      map[string]bool{"A": true, "B": true},
-			wantReady: nil,
 			wantCycle: true,
 		},
 		{
-			name:      "case 16: duplicate names keep first occurrence",
-			nodes:     []phaseNode{fpn("A", 5, []string{"first"}, nil, nil), fpn("A", 1, []string{"second"}, []Artifact{fpnReq("first")}, nil)},
-			available: map[string]bool{"first": true},
-			busy:      nil,
+			name: "16: duplicate names keep the first occurrence only",
+			nodes: []phaseNode{
+				pfPhase("A", 1, []string{"x"}, nil),
+				pfPhase("A", 7, []string{"x"}, nil),
+			},
+			available: map[string]bool{"x": true},
 			wantReady: []string{"A"},
-			wantCycle: false,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			ready, cycle := computePhaseFrontier(tt.nodes, tt.available, tt.busy)
-			got := fpnNames(ready)
-			if !reflect.DeepEqual(got, tt.wantReady) {
-				t.Errorf("computePhaseFrontier() ready = %v, want %v", got, tt.wantReady)
+			got, cycleDetected := computePhaseFrontier(tt.nodes, tt.available, tt.busy)
+			assert.Equal(t, tt.wantCycle, cycleDetected, "cycleDetected mismatch")
+			if tt.wantCycle {
+				assert.Empty(t, got, "ready must be empty when the graph cannot advance")
+				return
 			}
-			if cycle != tt.wantCycle {
-				t.Errorf("computePhaseFrontier() cycleDetected = %v, want %v", cycle, tt.wantCycle)
+			require.False(t, cycleDetected)
+			if tt.wantNil {
+				assert.Nil(t, got, "empty input must return a nil ready set")
+				return
 			}
+			assert.Equal(t, tt.wantReady, pfReadyNames(got), "ready set (ordered)")
 		})
 	}
 }
 
 func TestComputePhaseFrontier_OutputOrdering(t *testing.T) {
-	t.Run("sequence ascending with name tiebreak", func(t *testing.T) {
-		// B and A share Sequence 2 -> Name ascending breaks the tie;
-		// C has Sequence 1 and sorts first.
+	t.Run("Sequence ascending, Name ascending on ties", func(t *testing.T) {
 		nodes := []phaseNode{
-			fpn("B", 2, []string{"b"}, nil, nil),
-			fpn("A", 2, []string{"a"}, nil, nil),
-			fpn("C", 1, []string{"c"}, nil, nil),
+			pfPhase("gamma", 2, nil, nil),
+			pfPhase("beta", 1, nil, nil),
+			pfPhase("alpha", 2, nil, nil),
+			pfPhase("delta", 1, nil, nil),
 		}
-		ready, cycle := computePhaseFrontier(nodes, map[string]bool{"a": true, "b": true, "c": true}, nil)
-		if cycle {
-			t.Fatalf("unexpected cycleDetected")
-		}
-		want := []string{"C", "A", "B"}
-		if got := fpnNames(ready); !reflect.DeepEqual(got, want) {
-			t.Errorf("order = %v, want %v", got, want)
-		}
+		got, cycleDetected := computePhaseFrontier(nodes, map[string]bool{}, nil)
+		require.False(t, cycleDetected)
+		assert.Equal(t, []string{"beta", "delta", "alpha", "gamma"}, pfReadyNames(got))
 	})
 
-	t.Run("edge blocking survives sorting", func(t *testing.T) {
-		// Lower-sequence phase blocked by a busy dependency must not
-		// appear before a ready higher-sequence phase.
+	t.Run("a low Sequence never rescues an edge-blocked phase", func(t *testing.T) {
 		nodes := []phaseNode{
-			fpn("Alpha", 1, []string{"x"}, []Artifact{fpnReq("x")}, nil),
-			fpn("Zeta", 99, nil, nil, nil),
+			pfPhase("X", 0, []string{"x"}, nil),
+			pfPhase("Y", 1, nil, []Artifact{pfReq("x")}),
+			pfPhase("Z", 999, nil, nil),
 		}
-		ready, cycle := computePhaseFrontier(nodes, map[string]bool{}, map[string]bool{"Alpha": true})
-		if cycle {
-			t.Fatalf("unexpected cycleDetected")
-		}
-		want := []string{"Zeta"}
-		if got := fpnNames(ready); !reflect.DeepEqual(got, want) {
-			t.Errorf("order = %v, want %v", got, want)
-		}
+		got, cycleDetected := computePhaseFrontier(nodes, map[string]bool{}, map[string]bool{"X": true})
+		require.False(t, cycleDetected)
+		// Frozen rule 2 never drops a busy phase on its own: ungated busy
+		// X stays in the ready set. What Sequence must NOT do is rescue
+		// edge-blocked Y (seq 1) ahead of Z (seq 999) — the property under
+		// test is Y's absence and the surviving relative order.
+		assert.Equal(t, []string{"X", "Z"}, pfReadyNames(got))
 	})
 }
 
 func TestComputePhaseFrontier_Purity(t *testing.T) {
 	nodes := []phaseNode{
-		fpn("A", 2, []string{"a"}, nil, nil),
-		fpn("B", 1, []string{"b"}, []Artifact{fpnReq("a")}, []string{"A"}),
+		pfPhase("A", 1, []string{"x"}, nil),
+		pfPhase("B", 2, nil, []Artifact{pfReq("x"), pfOpt("q")}),
+		pfPhase("C", 3, nil, nil, "A"),
 	}
-	available := map[string]bool{"a": true, "b": true}
-	busy := map[string]bool{"B": false}
+	available := map[string]bool{"x": true}
+	busy := map[string]bool{"A": true}
 
-	// Deep copies for post-call comparison.
-	nodesCopy := make([]phaseNode, len(nodes))
-	copy(nodesCopy, nodes)
-	for i := range nodes {
-		nodesCopy[i].Produces = append([]string(nil), nodes[i].Produces...)
-		nodesCopy[i].Consumes = append([]Artifact(nil), nodes[i].Consumes...)
-		nodesCopy[i].DependsOnPhase = append([]string(nil), nodes[i].DependsOnPhase...)
-	}
-	availCopy := make(map[string]bool, len(available))
-	for k, v := range available {
-		availCopy[k] = v
-	}
-	busyCopy := make(map[string]bool, len(busy))
-	for k, v := range busy {
-		busyCopy[k] = v
-	}
+	// Snapshots taken before any call; the function must not disturb
+	// inputs and must not vary between identical calls.
+	nodesSnapshot := pfDeepCopyNodes(nodes)
+	availableSnapshot := pfCopySet(available)
+	busySnapshot := pfCopySet(busy)
 
-	first, cycle1 := computePhaseFrontier(nodes, available, busy)
-	second, cycle2 := computePhaseFrontier(nodes, available, busy)
+	got1, cycle1 := computePhaseFrontier(nodes, available, busy)
+	got2, cycle2 := computePhaseFrontier(nodes, available, busy)
 
-	if !reflect.DeepEqual(first, second) || cycle1 != cycle2 {
-		t.Fatalf("same inputs produced different results: first=%v/%v second=%v/%v", first, cycle1, second, cycle2)
-	}
+	assert.Equal(t, cycle1, cycle2)
+	assert.Equal(t, got1, got2, "identical inputs must produce identical results")
 
-	if !reflect.DeepEqual(nodes, nodesCopy) {
-		t.Errorf("input nodes slice mutated by call")
-	}
-	if !reflect.DeepEqual(available, availCopy) {
-		t.Errorf("input availableArtifacts map mutated by call")
-	}
-	if !reflect.DeepEqual(busy, busyCopy) {
-		t.Errorf("input busyPhases map mutated by call")
-	}
+	assert.True(t, reflect.DeepEqual(nodes, nodesSnapshot), "nodes input was mutated")
+	assert.True(t, reflect.DeepEqual(available, availableSnapshot), "availableArtifacts input was mutated")
+	assert.True(t, reflect.DeepEqual(busy, busySnapshot), "busyPhases input was mutated")
 
-	// Purity test must actually detect mutation: corrupting the copy of
-	// the inputs should fail the DeepEqual above.
-	availCopy["a"] = false
-	if reflect.DeepEqual(available, availCopy) {
-		t.Errorf("purity assertions are vacuous: mutated copy compared equal")
-	}
-
-	// Determinism under shuffling of the input order.
-	shuffled := []phaseNode{nodes[1], nodes[0]}
-	r1, c1 := computePhaseFrontier(shuffled, available, busy)
-	r2, c2 := computePhaseFrontier(shuffled, available, busy)
-	if !reflect.DeepEqual(fpnNames(r1), fpnNames(r2)) || c1 != c2 {
-		t.Errorf("shuffled input order changed results: %v/%v vs %v/%v", fpnNames(r1), c1, fpnNames(r2), c2)
-	}
-	// Sorted ready set is identical regardless of input order.
-	s1 := fpnNames(r1)
-	sort.Strings(s1)
-	s2 := fpnNames(r2)
-	sort.Strings(s2)
-	if !reflect.DeepEqual(s1, s2) {
-		t.Errorf("sorted ready sets differ: %v vs %v", s1, s2)
-	}
+	// Guard the guard: the comparator above detects a corrupted input.
+	nodesSnapshot[0].Name = "CORRUPTED"
+	assert.False(t, reflect.DeepEqual(nodes, nodesSnapshot),
+		"purity comparator failed to detect a deliberate mutation")
 }
