@@ -194,6 +194,64 @@ so the full ingest → synthesis → persist chain works there — see
 [skills](skills.md#agent-facing-skill-authoring) and the shipped
 `learn-from-video` skill.
 
+#### File-backed output
+
+`transcript_fetch` accepts an optional `output_path` parameter. Tool results
+are capped (~9k chars), so large transcripts can never reach the model whole
+— pass `output_path` and page the file with `file_read` instead.
+
+- **Path resolution order:** relative paths resolve against the session
+  working dir (`tools.WorkingDirFromContext`); when the context carries no
+  working dir, they fall back to the configured fallback root
+  (`[transcript] fallback_output_dir`, default `~/.meept/media`). Absolute
+  paths pass through unchanged. The daemon CWD is never used.
+- **Write mode:** the full formatted transcript is written to the resolved
+  path before any pagination slicing; parent dirs are created with mode
+  `0o755`, the file is written `0o644`. A write failure is a hard error —
+  no silent fallback to in-result output.
+- **Result shape:** `content` carries a bounded preview — when the text
+  fits the `max_chars` window, the first ~1000 chars plus a
+  `...[full transcript at <path>]` pointer line (and `truncated` is
+  `false`); when it does not fit, `content` is the paginated window exactly
+  as without `output_path` (`offset`/`max_chars` honored, suffix appended
+  when clipped). The result map gains `path` (the resolved absolute path,
+  omitted when `output_path` was not given) alongside the existing
+  `total_chars` key. Page the rest of the file via `file_read`
+  (`offset`/`limit`).
+- Without `output_path`, behavior is unchanged.
+
+#### Local summarization
+
+`transcript_fetch` accepts an optional `summarize` boolean (default
+`false`): instead of returning raw text, the tool runs a map-reduce
+summarization inside the tool process.
+
+- **Config:** `[transcript] summarize_enabled` (default `false` — it spends
+  LLM tokens per call) gates daemon-side registration, and
+  `[transcript] summarize_model` (default `""`) names the model; the empty
+  value resolves through the `summarizer_model` -> `small_model` fallback
+  chain (the `c.SummarizerClient` chatter is injected into the tool).
+- **Algorithm:** the formatted text is sliced into ~12k-char windows with
+  500-char overlap (whitespace backoff at boundaries; a text shorter than
+  one window skips the map stage). Each window is summarized with one
+  `llm.Chatter` call ("preserve steps, decision rules, tool/API names,
+  numbers, and the WHY; drop filler; max 300 words"), then the per-chunk
+  summaries are merged by a single reduce call ("keep every step, rule,
+  name, and number; max 800 words").
+- **Result shape:** `content` is the digest, capped at 4000 chars (the
+  truncation suffix is appended when capped), plus `summarized = true`,
+  `chunk_count` (number of windows), and the existing `total_chars`/
+  `video_id` keys. When `output_path` is also given, the full text is
+  still written to disk and `path` appears in the result — the digest for
+  reasoning, the file for verbatim detail.
+- **Errors:** a nil/unconfigured chatter returns
+  `transcript_fetch: summarization not configured (set [transcript] summarize_enabled = true and a summarizer_model or small_model in models.json5)`.
+  A chatter failure names the failed stage
+  (`transcript_fetch: summarization map stage failed` / `... reduce stage
+  failed`); hitting the tool's `timeout_seconds` deadline mid-way returns
+  `transcript_fetch: summarization timed out`. No partial digest is
+  returned.
+
 ### Web API Integration
 - **HTTP/JSON API**: RESTful interface for external clients
 - **Authentication**: API key or token-based access

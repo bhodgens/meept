@@ -15,12 +15,22 @@ captured as a durable skill — not just summarized.
 ## workflow
 1. Call `transcript_fetch` with the URL. If it errors, surface the
    install guidance verbatim; do not improvise a fallback without
-   asking.
-2. If the transcript exceeds ~50k characters, summarize it in
-   overlapping ~40k chunks (2k overlap) before synthesis.
-3. Extract what generalizes: steps, decision rules, failure modes,
-   tool/API names, and the WHY behind choices. Discard one-off
-   specifics (names, prices, dates) unless the user asked for them.
+   asking. For learn workflows add `output_path=<path>` (relative
+   paths land in the session working dir) so the full transcript is
+   written to disk and the tool returns only a bounded preview.
+2. Read the transcript file with `file_read` in ~400-line slices
+   (offset/limit). After each slice, write structured notes: steps,
+   decision rules, tool/API names, numbers, and the WHY. Keep notes
+   short enough to hold the whole video's notes in mind at synthesis
+   (~2-4k chars).
+2.5. If the user asks to "describe the shape" / summarize the video
+   rather than learn it, call `transcript_fetch` with `summarize=true`
+   instead and work from the digest; page the file only for verbatim
+   detail.
+3. Distill what generalizes from your notes: steps, decision rules,
+   failure modes, tool/API names, and the WHY behind choices. Discard
+   one-off specifics (names, prices, dates) unless the user asked for
+   them.
 4. Draft the skill: frontmatter (kebab-case name derived from the
    topic; one-line description; tags), body with: when to use,
    prerequisites, numbered procedure, decision rules, verification
@@ -32,6 +42,8 @@ captured as a durable skill — not just summarized.
 ## decision rules
 - The video teaches a PROCEDURE -> skill. It only reports NEWS ->
   offer a summary instead.
+- Full transcript needed verbatim -> output_path + `file_read` paging.
+  Gist only -> `summarize=true`.
 - Existing skill covers the topic -> propose `skills_patch` with the
   exact old_string; never blind-rewrite.
 - Ambiguous or conflicting steps in the transcript -> ask the user;
