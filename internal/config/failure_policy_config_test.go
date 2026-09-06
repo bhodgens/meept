@@ -12,7 +12,8 @@ import (
 // TestDefaultConfig_FailurePolicy verifies the frozen defaults for the
 // [llm.failure_policy] section (llm-resilience-forest tree 02 leaf 02,
 // DECISIONS.md D5/D8): exponential base 30s, 402 quota extra 5m, 1h polling
-// floor, 24h give-up horizon, 3 short retries, pacing off.
+// floor, 24h give-up horizon, 3 short retries, pacing ON (fda25177 flipped
+// the default; 8365c5f5 fixed the assertion, this header comment lagged).
 func TestDefaultConfig_FailurePolicy(t *testing.T) {
 	c := DefaultConfig()
 	fp := c.LLM.FailurePolicy
