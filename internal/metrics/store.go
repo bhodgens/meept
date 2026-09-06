@@ -340,7 +340,6 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_log_intent ON dispatch_log(intent_type);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_ts ON llm_calls(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_provider_ts ON llm_calls(provider, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_agent_ts ON llm_calls(agent_id, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_llm_calls_session_ts ON llm_calls(session_id, timestamp DESC);
 `
 
 	_, err := s.db.Exec(schema)
@@ -379,6 +378,15 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_session_ts ON llm_calls(session_id, tim
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("failed to add llm_calls.cache_creation_tokens: %w", err)
 		}
+	}
+
+	// The session index must be created AFTER the session_id column exists:
+	// on a pre-migration database this whole function runs against the old
+	// schema, so an index on session_id inside the script above would fail
+	// the entire store open ("no such column: session_id") before the ALTERs
+	// below had a chance to add it.
+	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_llm_calls_session_ts ON llm_calls(session_id, timestamp DESC)"); err != nil {
+		return fmt.Errorf("failed to create idx_llm_calls_session_ts: %w", err)
 	}
 	return nil
 }
