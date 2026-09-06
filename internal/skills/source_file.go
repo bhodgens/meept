@@ -150,11 +150,11 @@ func (s *FileSource) scanTier(ctx context.Context, tier DiscoveryTier, skills ma
 			// Look for SKILL.md inside the directory
 			skillFile := filepath.Join(entryPath, "SKILL.md")
 			if _, err := os.Stat(skillFile); err == nil {
-				s.loadSkillFile(skillFile, tier.Priority, skills)
+				s.loadSkillFile(skillFile, tier.Priority, skills, entryPath)
 			}
 		} else if isSkillFile(entry.Name()) {
 			// Support flat .md files (not SKILL.md, which would be at root)
-			s.loadSkillFile(entryPath, tier.Priority, skills)
+			s.loadSkillFile(entryPath, tier.Priority, skills, "")
 		}
 	}
 
@@ -162,7 +162,9 @@ func (s *FileSource) scanTier(ctx context.Context, tier DiscoveryTier, skills ma
 }
 
 // loadSkillFile loads a single skill file and adds it to the skills map with priority shadowing.
-func (s *FileSource) loadSkillFile(path string, priority int, skills map[string]*Skill) {
+// skillDir is the directory containing SKILL.md for directory-layout skills
+// (empty for flat-layout skills); when non-empty, linked assets are scanned.
+func (s *FileSource) loadSkillFile(path string, priority int, skills map[string]*Skill, skillDir string) {
 	skill, err := ParseSkillFile(path)
 	if err != nil {
 		if errors.Is(err, ErrNoFrontmatter) {
@@ -186,6 +188,10 @@ func (s *FileSource) loadSkillFile(path string, priority int, skills map[string]
 	}
 
 	skill.Priority = priority
+	if skillDir != "" {
+		skill.Dir = skillDir
+		skill.LinkedAssets = s.scanLinkedAssets(skillDir)
+	}
 	if skill.Source == "" {
 		skill.Source = "meept"
 	}
@@ -215,6 +221,60 @@ func (s *FileSource) loadSkillFile(path string, priority int, skills map[string]
 		"path", path,
 		"priority", priority,
 	)
+}
+
+// scanLinkedAssets walks one level of subdirectories under skillDir and
+// classifies each regular file as a linked asset. Symlinks are skipped and
+// unreadable subdirectories are logged at debug and skipped — this function
+// never fails discovery.
+func (s *FileSource) scanLinkedAssets(skillDir string) []LinkedAsset {
+	subdirs, err := os.ReadDir(skillDir)
+	if err != nil {
+		s.logger.Debug("Failed to read skill directory for linked assets",
+			"dir", skillDir,
+			"error", err,
+		)
+		return nil
+	}
+
+	var assets []LinkedAsset
+	for _, sub := range subdirs {
+		// Only regular directories; skip symlinked entries entirely.
+		if !sub.IsDir() || sub.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+
+		files, err := os.ReadDir(filepath.Join(skillDir, sub.Name()))
+		if err != nil {
+			s.logger.Debug("Failed to read skill asset subdirectory",
+				"dir", sub.Name(),
+				"error", err,
+			)
+			continue
+		}
+
+		for _, f := range files {
+			// Skip symlinks and nested directories (one level deep only).
+			if f.IsDir() || f.Type()&os.ModeSymlink != 0 {
+				continue
+			}
+			relPath := sub.Name() + "/" + f.Name()
+			kind := classifyAsset(relPath)
+			if kind == "" {
+				continue
+			}
+			assets = append(assets, LinkedAsset{
+				Name:    f.Name(),
+				RelPath: relPath,
+				Kind:    kind,
+			})
+		}
+	}
+
+	sort.Slice(assets, func(i, j int) bool {
+		return assets[i].RelPath < assets[j].RelPath
+	})
+	return assets
 }
 
 // scanTierMetadataOnly scans a single tier directory for skill metadata.

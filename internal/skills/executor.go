@@ -185,6 +185,18 @@ func NewExecutor(resolver *llm.Resolver, opts ...ExecutorOption) *Executor {
 	return e
 }
 
+// applySkillDirContext composes the skill execution body for a skill with
+// a directory layout: it substitutes the SKILL_DIR literal with the skill
+// directory (applied after Hermes tool-reference translation) and prepends
+// a `skill_dir: <Dir>` context line. Flat-layout skills (dir == "") are
+// returned unchanged.
+func applySkillDirContext(execBody, dir string) string {
+	if dir == "" {
+		return execBody
+	}
+	return "skill_dir: " + dir + "\n\n" + strings.ReplaceAll(execBody, "SKILL_DIR", dir)
+}
+
 // Execute runs a skill with the given input and returns the result.
 func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*SkillExecutionResult, error) {
 	if skill == nil {
@@ -215,6 +227,9 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 	if e.toolMapper != nil && skill.SourceOrigin == "hermes" {
 		execBody = e.toolMapper.TranslateToolReferences(skill.Body)
 	}
+
+	// Expose the skill directory for directory-layout skills.
+	execBody = applySkillDirContext(execBody, skill.Dir)
 
 	// Start MCP runtime if skill declares MCP servers.
 	var mcpRuntime *MCPRuntime
@@ -425,6 +440,9 @@ func (e *Executor) ExecuteWithMessages(
 	if e.toolMapper != nil && skill.SourceOrigin == "hermes" {
 		execBody = e.toolMapper.TranslateToolReferences(skill.Body)
 	}
+
+	// Expose the skill directory for directory-layout skills.
+	execBody = applySkillDirContext(execBody, skill.Dir)
 
 	// Start MCP runtime if skill declares MCP servers.
 	var mcpRuntime *MCPRuntime

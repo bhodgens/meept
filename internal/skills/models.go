@@ -92,6 +92,50 @@ type Skill struct {
 	// SourceOrigin tracks which skill system the skill originated from.
 	// Values: "meept" (default), "claude", "hermes".
 	SourceOrigin string `json:"source_origin,omitempty"`
+
+	// Dir is the directory containing SKILL.md for directory-layout skills.
+	// Empty for flat-layout skills (<tier>/<name>.md). The executor exposes
+	// this to the agent as the skill_dir execution context.
+	Dir string `json:"dir,omitempty"`
+
+	// LinkedAssets lists helper files stored next to SKILL.md in Dir
+	// (scripts/, references/, templates/, assets/ — one level deep).
+	// Nil for flat-layout skills.
+	LinkedAssets []LinkedAsset `json:"linked_assets,omitempty"`
+}
+
+// LinkedAsset describes a helper file linked to a directory-layout skill.
+type LinkedAsset struct {
+	// Name is the basename of the asset file.
+	Name string `json:"name"`
+	// RelPath is the path of the asset relative to the skill directory,
+	// slash-separated (e.g. "scripts/x.py").
+	RelPath string `json:"rel_path"`
+	// Kind classifies the asset: "script", "reference", "template", or "asset".
+	Kind string `json:"kind"`
+}
+
+// classifyAsset classifies a skill-relative asset path by its first path
+// segment. Returns "script" for scripts/, "reference" for references/,
+// "template" for templates/, "asset" for assets/, and "" for anything
+// outside the known directories (including SKILL.md itself and empty paths).
+func classifyAsset(relPath string) string {
+	first := relPath
+	if i := strings.IndexByte(relPath, '/'); i >= 0 {
+		first = relPath[:i]
+	}
+	switch first {
+	case "scripts":
+		return "script"
+	case "references":
+		return "reference"
+	case "templates":
+		return "template"
+	case "assets":
+		return "asset"
+	default:
+		return ""
+	}
 }
 
 // HasCapability checks if the skill requires a specific capability.
