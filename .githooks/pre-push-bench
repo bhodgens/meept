@@ -56,10 +56,20 @@ if ! "$BENCH_BIN" doctor >/dev/null 2>&1; then
   exit 1
 fi
 
-# Run the gate.
+# Run the gate. DEV_GATE default: force the LOCAL 8B (local/lfm-8b-q4) so
+# pushes never depend on (or burn) cloud quota. Override with
+# MEEPT_GATE_MODEL="" to use the daemon default chain, or any other model.
+GATE_MODEL="${MEEPT_GATE_MODEL-local/lfm-8b-q4}"
+MODEL_ARG=""
+if [ -n "$GATE_MODEL" ]; then
+  MODEL_ARG="--model $GATE_MODEL"
+  echo -e "${BLUE}   Gate model: $GATE_MODEL (set MEEPT_GATE_MODEL to override)${NC}"
+fi
+
 mkdir -p "$OUT"
 if ! "$BENCH_BIN" run --suite "$BENCH_DIR/suites/regression.json" \
-     --out "$OUT" --auto-approved; then
+     --out "$OUT" --auto-approved $MODEL_ARG \
+     --judge-cmd "python3 scripts/judge-local.py"; then
   RUN_EXIT=$?
   echo ""
   echo -e "${RED}❌ Bench suite run failed (exit $RUN_EXIT) — push blocked.${NC}"
