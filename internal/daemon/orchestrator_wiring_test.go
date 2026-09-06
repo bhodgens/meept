@@ -261,10 +261,6 @@ func (f *wiringFixture) seedStep(id, phase string, seq int) {
 	}
 }
 
-// orchSteps returns the orchestrator's step store (same store the fixture
-// holds; accessor keeps the seed helpers readable).
-func (f *wiringFixture) orchSteps() *task.StepStore { return f.store }
-
 // taskForWiring returns the task store used to seed the fixture task.
 // The fixture task is created directly through the step store's DB-backed
 // task store, accessed via the tactical scheduler's task store.
