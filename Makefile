@@ -1035,3 +1035,17 @@ analyzers: selflock
 
 compare-prep:
 	@CLEAN="$(CLEAN)" bash scripts/compare-prep.sh
+
+# =============================================================================
+# E2E Regression
+# =============================================================================
+
+# Naive-user chat regression: boots a scratch daemon (temp state dir, temp
+# socket, probed port — never the live daemon), replays the 4-turn transcript,
+# asserts reply honesty/continuity/artifact contracts (A1-A6).
+#   make e2e-chat              # run once
+#   make e2e-chat E2E_ARGS="--keep"   # keep the scratch workdir for forensics
+#   MEEPT_E2E_TURN_TIMEOUT=540 make e2e-chat  # raise per-turn timeout
+.PHONY: e2e-chat
+e2e-chat:
+	@bash scripts/e2e-naive-user-chat.sh $(E2E_ARGS)
