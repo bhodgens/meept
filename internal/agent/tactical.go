@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,9 +27,49 @@ import (
 // ErrNoExecutionSlot is returned when the semaphore blocks a step from executing.
 var ErrNoExecutionSlot = errors.New("no available execution slot")
 
+// DefaultQuotaDeferralPolicy bounds quota-aware job deferral: a
+// quota-classified job failure re-queues the job instead of failing it, at
+// most MaxDeferrals times and within MaxTotalDeferral of the FIRST deferral;
+// past either bound the job fails with a "quota-deferred exhausted" error.
+// Defaults follow the quota-resilience max-wait shape (10 attempts, 6h) —
+// an agnes 5h quota park fits inside one deferral window.
+func DefaultQuotaDeferralPolicy() QuotaDeferralPolicy {
+	return QuotaDeferralPolicy{
+		MaxDeferrals:      10,
+		MaxTotalDeferral:  6 * time.Hour,
+		UnknownResetDelay: 5 * time.Minute,
+	}
+}
+
+// QuotaDeferralPolicy configures quota-aware job deferral in
+// TacticalScheduler.OnJobFailed. A policy with MaxDeferrals<=0 or
+// MaxTotalDeferral<=0 disables deferral (legacy failure behavior).
+type QuotaDeferralPolicy struct {
+	// MaxDeferrals caps how many times one step may be quota-deferred.
+	MaxDeferrals int
+	// MaxTotalDeferral caps the wall-clock span from the step's first
+	// deferral; a reset scheduled past the span fails the step instead.
+	MaxTotalDeferral time.Duration
+	// UnknownResetDelay is the requeue delay when the quota reset time is
+	// unknown (ErrAllModelsQuotaBlocked carries no schedule).
+	UnknownResetDelay time.Duration
+}
+
 // tacticalSeq provides a monotonically increasing sequence counter for handoff steps,
 // replacing the old time.Now().UnixNano()%1000 pattern that produced predictable IDs.
 var tacticalSeq atomic.Uint64
+
+// quotaResetPatterns extracts RFC3339 timestamps from quota error text for
+// the scheduler's reset-time recovery. QuotaResetError.Error() renders
+// "resets_at=RFC3339"; the daemon's job-level quota stamp renders
+// "... rate-limited until RFC3339. ..."; bus JSON frequently carries the
+// same timestamps in `"resets_at":"RFC3339"` shape. QuotaResetError.ResetAt
+// itself never survives the message-bus stringification, so this regex IS
+// the recovery path for OnJobFailed (which receives only a string).
+var quotaResetPatterns = regexp.MustCompile(
+	`resets_at[=:]\s*"?(\d{4}-\d{2}-\d{2}T[^\s",}]+)"?` +
+		`|rate-limited until (\d{4}-\d{2}-\d{2}T[^\s",}]+)` +
+		`|"resets_at"\s*:\s*"(\d{4}-\d{2}-\d{2}T[^"]+)"`)
 
 // StepJobPayload is the payload stored in a queue job for a task step.
 type StepJobPayload struct {
@@ -65,6 +107,18 @@ type TacticalScheduler struct {
 	maxHandoffSteps        int                      // Max handoff steps per task (0 = unlimited)
 	handoffUseAmendment    bool                     // Route handoffs through amendment system
 	amendmentMgr           AmendmentSubmitter       // Optional: enables amendment-based step creation
+
+	// Quota deferral (quota-aware job deferral): when a step job's failure
+	// is quota-class, the step is DEFERRED instead of failed — the job is
+	// requeued to pending (no retry consumed) with a not-before gate at the
+	// quota reset time, so it survives multi-hour provider quota parks.
+	// Counters are per step ID; cleaned up on terminal completion/failure.
+	quotaDeferrals      map[string]int       // step ID -> deferral count
+	quotaDeferralFirst  map[string]time.Time // step ID -> first deferral time
+	quotaDeferralPolicy QuotaDeferralPolicy
+
+	// quotaDeferralMu protects the two quota-deferral counters.
+	quotaDeferralMu sync.Mutex
 
 	// handoffPropagator, when set, replaces propagateContextToNextStepsLegacy.
 	// Set by the daemon when the orchestrator is wired with handoff deps
@@ -224,6 +278,11 @@ type TacticalSchedulerConfig struct {
 	MaxHandoffSteps        int                // Max handoff steps per task (0 = unlimited, default: 5)
 	HandoffUseAmendment    bool               // Route handoffs through amendment system (default: true)
 	AmendmentManager       AmendmentSubmitter // Optional: enables amendment-based step creation
+
+	// QuotaDeferral, when non-nil, overrides the default quota-deferral
+	// policy (10 deferrals, 6h total). A policy with MaxDeferrals<=0 or
+	// MaxTotalDeferral<=0 disables deferral entirely (legacy behavior).
+	QuotaDeferral *QuotaDeferralPolicy
 }
 
 // NewTacticalScheduler creates a new tactical scheduler.
@@ -245,6 +304,13 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 	validationGateInterval := cfg.ValidationGateInterval
 	if validationGateInterval <= 0 {
 		validationGateInterval = 3
+	}
+	// Quota-deferral policy: explicit override, else the defaults
+	// (10 deferrals / 6h). MaxDeferrals<=0 or MaxTotalDeferral<=0 disables
+	// deferral entirely.
+	quotaDeferralPolicy := DefaultQuotaDeferralPolicy()
+	if cfg.QuotaDeferral != nil {
+		quotaDeferralPolicy = *cfg.QuotaDeferral
 	}
 
 	// Initialize semaphores
@@ -274,6 +340,9 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		validationGateInterval: validationGateInterval,
 		validationGateCounter:  make(map[string]int),
 		validationGateMu:       sync.Mutex{},
+		quotaDeferrals:         make(map[string]int),
+		quotaDeferralFirst:     make(map[string]time.Time),
+		quotaDeferralPolicy:    quotaDeferralPolicy,
 		maxHandoffSteps:        cfg.MaxHandoffSteps,
 		handoffUseAmendment:    cfg.HandoffUseAmendment,
 		amendmentMgr:           cfg.AmendmentManager,
@@ -535,6 +604,90 @@ func (ts *TacticalScheduler) releaseSlots(agentID string) {
 	}
 }
 
+// clearQuotaDeferrals drops the step's quota-deferral counters. Called on
+// any terminal step outcome (completion or final failure) so the map does
+// not grow unbounded.
+func (ts *TacticalScheduler) clearQuotaDeferrals(stepID string) {
+	ts.quotaDeferralMu.Lock()
+	defer ts.quotaDeferralMu.Unlock()
+	delete(ts.quotaDeferrals, stepID)
+	delete(ts.quotaDeferralFirst, stepID)
+}
+
+// quotaResetAtFromMessage extracts the earliest quota reset time from a
+// serialized quota error message. The bus delivers OnJobFailed an error
+// STRING; structured QuotaResetError.ResetAt never survives that hop, but
+// QuotaResetError.Error() embeds "resets_at=<RFC3339>" and the
+// daemon's quota-wait stamp embeds "until <RFC3339>". Returns the zero time
+// when no future reset time can be recovered.
+func quotaResetAtFromMessage(errMsg string) time.Time {
+	var earliest time.Time
+	for _, m := range quotaResetPatterns.FindAllStringSubmatch(errMsg, -1) {
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(m[1]))
+		if err != nil || !t.After(time.Now()) {
+			continue // unparseable or already past — no wait worth scheduling
+		}
+		if earliest.IsZero() || t.Before(earliest) {
+			earliest = t
+		}
+	}
+	return earliest
+}
+
+// quotaDeferralScheduled decides whether the step may be deferred for this
+// quota failure and, if so, when to requeue it. Mirrors the worker's
+// provider-wait give-up logic (internal/worker requeueOnProviderWait): an
+// unknown reset waits UnknownResetDelay; a reset beyond the policy's total
+// span from the FIRST deferral, or an exhausted deferral count, gives up.
+// Returns (resumeAt, true) to defer or (zero, false) to keep the legacy
+// failure path.
+func (ts *TacticalScheduler) quotaDeferralScheduled(stepID string, errMsg string, now time.Time) (time.Time, bool) {
+	policy := ts.quotaDeferralPolicy
+	if policy.MaxDeferrals <= 0 || policy.MaxTotalDeferral <= 0 {
+		return time.Time{}, false // deferral disabled
+	}
+
+	ts.quotaDeferralMu.Lock()
+	count := ts.quotaDeferrals[stepID]
+	first, hasFirst := ts.quotaDeferralFirst[stepID]
+	ts.quotaDeferralMu.Unlock()
+
+	if count >= policy.MaxDeferrals {
+		return time.Time{}, false
+	}
+	deadline := now.Add(policy.MaxTotalDeferral)
+	if hasFirst && now.Sub(first) >= policy.MaxTotalDeferral {
+		return time.Time{}, false
+	}
+	if hasFirst {
+		deadline = first.Add(policy.MaxTotalDeferral)
+	}
+
+	resumeAt := quotaResetAtFromMessage(errMsg)
+	if resumeAt.IsZero() {
+		if policy.UnknownResetDelay <= 0 {
+			return time.Time{}, false
+		}
+		resumeAt = now.Add(policy.UnknownResetDelay)
+	}
+	if resumeAt.After(deadline) {
+		return time.Time{}, false
+	}
+	return resumeAt, true
+}
+
+// recordQuotaDeferral persists the deferral counters for a step AFTER the
+// requeue has been accepted.
+func (ts *TacticalScheduler) recordQuotaDeferral(stepID string, now time.Time) int {
+	ts.quotaDeferralMu.Lock()
+	defer ts.quotaDeferralMu.Unlock()
+	ts.quotaDeferrals[stepID]++
+	if _, ok := ts.quotaDeferralFirst[stepID]; !ok {
+		ts.quotaDeferralFirst[stepID] = now
+	}
+	return ts.quotaDeferrals[stepID]
+}
+
 // OnJobCompleted handles a completed job by updating the step, promoting
 // newly unblocked steps, and checking task completion.
 func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, result json.RawMessage) error {
@@ -585,6 +738,9 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 
 	// Release semaphore slots for this completed job
 	defer ts.releaseSlots(step.AgentID)
+
+	// Terminal completion: drop any quota-deferral counters for this step.
+	ts.clearQuotaDeferrals(step.ID)
 
 	// Store the result and extract evidence
 	resultStr := ""
@@ -1094,6 +1250,67 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 	// Release semaphore slots for this failed job
 	defer ts.releaseSlots(step.AgentID)
 
+	// Quota-aware job deferral (quota-reset-resilience): a quota-classified
+	// failure is a provider wait, NOT a step failure. If the queue supports
+	// requeueing (queue.Requeueable — PersistentQueue does), reset the job
+	// to pending with a not-before gate at the quota reset time without
+	// consuming a retry, bounded by the deferral policy (max 10 deferrals /
+	// 6h from the first). The step returns to "scheduled" and its error
+	// result is cleared, so the task neither fails nor advances past work
+	// that never ran. On re-claim after the gate elapses the job re-runs
+	// normally. Bounds exhausted → fall through to the legacy failure path,
+	// which surfaces a "quota-deferred exhausted" step result. Non-quota
+	// errors never enter this branch.
+	if isQuotaClassFailure(jobErr) {
+		if rq, ok := ts.queue.(queue.Requeueable); ok {
+			resumeAt, deferOK := ts.quotaDeferralScheduled(step.ID, jobErr, time.Now())
+			if deferOK {
+				if requeueErr := rq.Requeue(ctx, jobID, resumeAt); requeueErr != nil {
+					ts.logger.Error("Failed to requeue job on quota wait",
+						"job_id", jobID,
+						"step_id", step.ID,
+						"error", requeueErr,
+					)
+					// fall through to legacy failure path
+				} else {
+					deferralCount := ts.recordQuotaDeferral(step.ID, time.Now())
+					// Reset step state to scheduled for the deferred re-run
+					if err := ts.stepStore.SetState(step.ID, task.StepScheduled); err != nil {
+						ts.logger.Error("Failed to reset step state for quota deferral", "step_id", step.ID, "error", err)
+					}
+					// Clear the error result — the step has not failed, it waits
+					if err := ts.stepStore.SetResult(step.ID, ""); err != nil {
+						ts.logger.Error("Failed to clear step result for quota deferral", "step_id", step.ID, "error", err)
+					} else {
+						step.Result = ""
+					}
+					ts.logger.Info("Quota-class failure: job deferred to quota reset",
+						"job_id", jobID,
+						"step_id", step.ID,
+						"task_id", step.TaskID,
+						"deferred_quota", true,
+						"deferral_count", deferralCount,
+						"resume_at", resumeAt.Format(time.RFC3339),
+					)
+					ts.publishEvent("queue.job.deferred_quota", map[string]any{
+						"job_id":    jobID,
+						"task_id":   step.TaskID,
+						"step_id":   step.ID,
+						"resume_at": resumeAt.Format(time.RFC3339),
+						"deferrals": deferralCount,
+					})
+					return nil // deferred, not failed
+				}
+			}
+			// Bounds exhausted (or the schedule exceeded them): stamp the
+			// error so the surfaced step result says WHY, then fall through.
+			if !deferOK {
+				jobErr = "quota-deferred exhausted (" + strconv.Itoa(ts.quotaDeferralPolicy.MaxDeferrals) +
+					" deferrals / " + ts.quotaDeferralPolicy.MaxTotalDeferral.String() + "): " + jobErr
+			}
+		}
+	}
+
 	// Publish error to chat immediately (not silent)
 	ts.publishEvent("task.error", map[string]any{
 		KeyTaskID:                step.TaskID,
@@ -1141,6 +1358,9 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 					"job_id": jobID,
 					"reason": reason,
 				})
+				// The retry consumed the failure: a later completion (or the
+				// eventual terminal outcome) re-arms the quota-deferral window.
+				ts.clearQuotaDeferrals(step.ID)
 				return nil // Job has been requeued, don't mark as failed
 			}
 		default:
@@ -1355,6 +1575,34 @@ func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
 // Prefer this method when the original error value is available.
 func (ts *TacticalScheduler) isRateLimitErrorFromErr(err error) bool {
 	return errcls.IsRateLimit(err)
+}
+
+// isQuotaClassFailure classifies a serialized step-job failure as
+// quota-class, the trigger for quota-aware deferral. Two quota shapes
+// survive the message-bus stringification:
+//
+//   - *llm.QuotaResetError ("quota limit exceeded: provider=... resets_at=...")
+//   - the daemon's job-level quota stamp ("quota wait: p/m is rate-limited
+//     until ...; your request is saved and will need a re-ask once the limit
+//     resets.") wrapping the QuotaResetError
+//
+// llm.ErrAllModelsQuotaBlocked never escapes a step job as an error value
+// (the loop's quota branch returns the original QuotaResetError when every
+// candidate is blocked, and the daemon stamps THAT), so its text is not a
+// trigger here — but the "all models ... quota-blocked" resolver wrap is
+// matched defensively for direct queue consumers. There is deliberately no
+// bare "rate limit" match: short-cycle RateLimitErrors keep the existing
+// backoff-retry path.
+func isQuotaClassFailure(errMsg string) bool {
+	if strings.Contains(errMsg, "quota limit exceeded") ||
+		strings.Contains(errMsg, "quota wait:") ||
+		strings.Contains(errMsg, "quota-blocked") {
+		return true
+	}
+	// Structured fingerprint: any error carrying a resets_at RFC3339 stamp
+	// is quota-shaped by construction (no other error class renders one).
+	return quotaResetAtFromMessage(errMsg) != time.Time{} ||
+		strings.Contains(errMsg, "all models in alias are quota-blocked")
 }
 
 // isRetryableError checks if an error is transient and worth retrying.
