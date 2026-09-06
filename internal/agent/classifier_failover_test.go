@@ -143,7 +143,7 @@ func TestIntentAnalyzer_RotatesOnEmptyResponse(t *testing.T) {
 		AliasName:   testClassifierAlias,
 	}, llm.NewClient(primaryCfg), nil)
 
-	analysis, err := ia.AnalyzeTrueIntent(context.Background(), "fix this bug please")
+	analysis, err := ia.AnalyzeTrueIntent(context.Background(), "fix this bug please", nil)
 	if err != nil {
 		t.Fatalf("expected success after rotation, got error: %v", err)
 	}

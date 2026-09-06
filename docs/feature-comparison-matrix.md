@@ -56,7 +56,7 @@
 | Feature | Meept | FrontierAgent | duckagent | atomic-agent | prime-agent | Hermes | OpenCode | oh-my-pi | Claude Code |
 |---------|:-----:|:-------------:|:---------:|:------------:|:-----------:|:------:|:--------:|:--------:|:-----------:|
 | Tool count | 40+ | ~15 | 18 | ~30 | ~15 | 86 | ~20 | ~10 | ~20 |
-| MCP client | X (20 preconfigured, 6 enabled) | - | X | X | X | X | Limited | - | X |
+| MCP client | X (21 preconfigured, 6 enabled) | - | X | X | X | X | Limited | - | X |
 | MCP server mode | X | - | - | - | - | - | - | - | - |
 | ACP client (drive external agents) | X (opt-in, default off) | - | - | - | - | ~ (ACP server for editors) | ~ (`opencode acp`) | - | - |
 | Parallel tool execution | X (semaphore) | X | X | X (resource-class) | X | X | X | X | X |
