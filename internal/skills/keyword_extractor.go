@@ -121,7 +121,14 @@ func (ke *KeywordExtractor) extractFromName(name string) []string {
 	var keywords []string
 
 	nameLower := strings.ToLower(name)
-	keywords = append(keywords, nameLower) // Full name
+	// A skill NAMED a stopword ("bench", "agent", "files") must not emit
+	// the bare word as a weight-1.0 keyword — it saturates every prompt
+	// and preempts the LLM classifier (the same misroute class the
+	// stopword filter targets for split tokens). Multi-word names whose
+	// joined form is not itself a stopword are unaffected.
+	if !ke.stopWords[nameLower] {
+		keywords = append(keywords, nameLower) // Full name
+	}
 
 	// Split by common separators
 	parts := nameSplitter.Split(nameLower, -1)

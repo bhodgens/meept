@@ -94,3 +94,21 @@ func TestStopWordSet_ContainsAmbientNouns(t *testing.T) {
 		}
 	}
 }
+
+// TestExtractFromName_DropsStopwordWholeName closes the sibling gap of the
+// component-token fix: a skill NAMED a stopword ("bench", "agent") must not
+// emit the bare word as a full-name keyword — it saturates every prompt and
+// preempts the LLM classifier at the dispatcher's 0.7 gate. Distinctive
+// multi-word names are unaffected (see KeepsDistinctiveTokens).
+func TestExtractFromName_DropsStopwordWholeName(t *testing.T) {
+	ke := NewKeywordExtractor()
+
+	for _, name := range []string{"bench", "agent", "files", "writing", "users"} {
+		got := ke.extractFromName(name)
+		for _, kw := range got {
+			if kw == name {
+				t.Errorf("extractFromName(%q) emitted the stopword name itself as a keyword: %v", name, got)
+			}
+		}
+	}
+}
