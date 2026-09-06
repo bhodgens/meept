@@ -415,6 +415,36 @@ else
   die "scratch daemon did not become ready within ${SOCKET_WAIT_SECONDS}s"
 fi
 
+# 4b. Wait for local MLX runtimes (classifier + general) to finish loading.
+# The daemon starts them lazily/asynchronously; a classification fired before
+# the model server is healthy burns alias-failure cooldowns and rotates to
+# fallbacks. Poll each runtime's /health for up to 120s.
+wait_for_runtime() {
+  local port="$1" name="$2" i=0
+  while [ "$i" -lt 120 ]; do
+    if curl -sf -m 3 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+      log "  $name runtime healthy on :$port (after ${i}s)"
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  warn "$name runtime on :$port not healthy after 120s (classification may SKIP/fallback)"
+  return 1
+}
+
+# Extract the remapped MLX ports from the sandboxed models config.
+MLX_CLASS_PORT=$(grep -o '127\.0\.0\.1:[0-9]*' "$HOME_DIR/.meept/models.json5" \
+  | sed 's/127\.0\.0\.1://' | sort -u | head -1)
+MLX_GEN_PORT=$(grep -o '127\.0\.0\.1:[0-9]*' "$HOME_DIR/.meept/models.json5" \
+  | sed 's/127\.0\.0\.1://' | sort -u | tail -1)
+if [ -n "$MLX_CLASS_PORT" ]; then
+  wait_for_runtime "$MLX_CLASS_PORT" "classifier" || true
+fi
+if [ -n "$MLX_GEN_PORT" ] && [ "$MLX_GEN_PORT" != "$MLX_CLASS_PORT" ]; then
+  wait_for_runtime "$MLX_GEN_PORT" "general" || true
+fi
+
 # 5. Session + project wiring.
 # NOTE: `meept session create` cannot be used here — its `-d/--description`
 # shorthand collides with the root `-d/--state-dir` shorthand and cobra
