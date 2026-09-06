@@ -49,6 +49,12 @@ type IntentAnalyzer struct {
 	// endpoint; passed to RecordAliasFailure for failure attribution
 	// (issue #30). Nil is allowed — attribution is skipped.
 	modelConfig *llm.ModelConfig
+
+	// failFast disables alias rotation (classifier-observability leaf 02):
+	// when true, chatWithFailover returns the primary error immediately on
+	// failure instead of recording an alias failure and rotating. Default
+	// false — production keeps rotation.
+	failFast bool
 }
 
 // NewIntentAnalyzer creates a new IntentAnalyzer with the given LLM client and logger.
@@ -71,6 +77,12 @@ type IntentAnalyzerConfig struct {
 	// AliasName is the resolver alias used for failover (e.g. "classifier").
 	// Required when Resolver != nil; ignored otherwise.
 	AliasName string
+	// FailFast disables alias rotation: when true, a failed primary attempt
+	// returns the primary error immediately instead of rotating to weaker
+	// alias members. Default false — production keeps rotation. Exists to
+	// make classifier failures honest during testing/iteration
+	// (classifier-observability leaf 02).
+	FailFast bool
 }
 
 // newIntentAnalyzer is the shared constructor; tokenCapOverride of 0 means
@@ -93,6 +105,7 @@ func newIntentAnalyzerWithConfig(cfg IntentAnalyzerConfig, client *llm.Client, l
 		resolver:           cfg.Resolver,
 		aliasName:          cfg.AliasName,
 		modelConfig:        cfg.ModelConfig,
+		failFast:           cfg.FailFast,
 	}
 }
 
@@ -151,6 +164,12 @@ func buildActivityBlock(d *SessionContextDigest) string {
 	if d.LastResultSummary != "" {
 		sb.WriteString("\nResult summary: ")
 		sb.WriteString(d.LastResultSummary)
+	}
+	// Leaf 03: append the working directory line only when set, so the
+	// block never ends with a dangling newline when it is absent.
+	if d.WorkingDirectory != "" {
+		sb.WriteString("\nWorking directory: ")
+		sb.WriteString(d.WorkingDirectory)
 	}
 	return sb.String()
 }
@@ -219,6 +238,16 @@ func (ia *IntentAnalyzer) chatWithFailover(ctx context.Context, messages []llm.C
 			ia.resolver.RecordAliasSuccess(ia.aliasName)
 		}
 		return resp, nil
+	}
+	// Classifier fail-fast (classifier-observability leaf 02): when
+	// configured, surface the primary's error honestly — no alias-failure
+	// recording, no rotation, no retry.
+	if ia.failFast {
+		ia.logger.Warn("classifier fail-fast: no rotation (configured)",
+			"alias", ia.aliasName,
+			"error", err,
+		)
+		return nil, err
 	}
 	if ia.resolver == nil || ia.aliasName == "" {
 		return nil, err

@@ -320,10 +320,16 @@ type DispatcherConfig struct {
 	// Empty defaults to "classifier" when Resolver is set.
 	ClassifierAlias   string
 	ClassifierTimeout time.Duration // Per-classification timeout; 0 = defaultClassifierTimeout (10s).
-	CapabilityMatcher *CapabilityMatcher
-	EmbeddingClient   EmbeddingClient
-	SessionMaxAge     time.Duration
-	PlanManager       *plan.PlanManager
+	// ClassifierFailFast disables classifier alias rotation: when true, the
+	// intent analyzer returns the primary classifier's error immediately
+	// instead of rotating to weaker alias members. Default false —
+	// production keeps rotation; for testing/iteration
+	// (classifier-observability leaf 02).
+	ClassifierFailFast bool
+	CapabilityMatcher  *CapabilityMatcher
+	EmbeddingClient    EmbeddingClient
+	SessionMaxAge      time.Duration
+	PlanManager        *plan.PlanManager
 	// AmbiguityThreshold configures the IntentAnalyzer's gate for blocking
 	// routing on high-ambiguity inputs. 0 means use the legacy const
 	// (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
@@ -399,6 +405,7 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 			ModelConfig: cfg.ClassifierModelConfig,
 			Resolver:    failoverResolver,
 			AliasName:   failoverAlias,
+			FailFast:    cfg.ClassifierFailFast,
 		}, classifierClient, cfg.Logger)
 		if cfg.AmbiguityThreshold > 0 {
 			ia = ia.WithAmbiguityThreshold(cfg.AmbiguityThreshold)

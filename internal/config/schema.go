@@ -2244,6 +2244,12 @@ type OrchestratorConfig struct {
 	InterviewAmbiguityThreshold float64 `json:"interview_ambiguity_threshold" toml:"interview_ambiguity_threshold"` // planner: conducts interview for plan-mode when >= this
 	MaxStepsPerPhase            int     `json:"max_steps_per_phase"           toml:"max_steps_per_phase"`           // Thread C+F: per-phase step cap
 	MaxPhases                   int     `json:"max_phases"                    toml:"max_phases"`                    // Thread C+F: phase count soft cap
+	// ClassifierFailFast disables classifier alias rotation: when true,
+	// the intent analyzer fails the turn with the primary classifier's
+	// error instead of rotating to weaker alias members. Default false —
+	// production keeps rotation; exists to make classifier failures
+	// honest during testing/iteration.
+	ClassifierFailFast bool `json:"classifier_fail_fast" toml:"classifier_fail_fast"`
 }
 
 // EvalConfig holds eval-harness settings (harness-eval leaf 15, contract:
@@ -2885,6 +2891,7 @@ func DefaultConfig() *Config {
 			InterviewAmbiguityThreshold: 0.6,
 			MaxStepsPerPhase:            8,
 			MaxPhases:                   12,
+			ClassifierFailFast:          false, // production keeps rotation; fail-fast is a testing mode
 		},
 		Learning: LearningConfig{
 			Enabled:     true,

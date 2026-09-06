@@ -2449,6 +2449,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			ClassifierTimeout:  15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
 			SessionMaxAge:      30 * time.Minute,
 			AmbiguityThreshold: cfg.Orchestrator.AmbiguityThreshold,
+			// Classifier fail-fast (classifier-observability leaf 02):
+			// honest primary-classifier errors for testing when enabled.
+			ClassifierFailFast: cfg.Orchestrator.ClassifierFailFast,
 		})
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
