@@ -41,6 +41,7 @@ func (h *EpistemicHandler) RegisterEpistemicHandlers(server *Server) {
 	server.RegisterHandler("memory.promoteClaim", h.handlePromoteClaim)
 	server.RegisterHandler("memory.rejectClaim", h.handleRejectClaim)
 	server.RegisterHandler("memory.listAutoClaims", h.handleListAutoClaims)
+	server.RegisterHandler("memory.listExpired", h.handleListExpiredClaims)
 	server.RegisterHandler("memory.purgeAutoClaims", h.handlePurgeAutoClaims)
 	server.RegisterHandler("memory.listPendingReviews", h.handleListPendingReviews)
 	server.RegisterHandler("memory.findCanonical", h.handleFindCanonical)
@@ -264,6 +265,35 @@ func (h *EpistemicHandler) handleListAutoClaims(ctx context.Context, params json
 		return nil, err
 	}
 	return map[string]any{"claims": claims}, nil
+}
+
+type listExpiredClaimsParams struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+// handleListExpiredClaims returns non-rejected claims whose valid_to is in
+// the past (memory.Manager.ListExpiredClaims). Backs `meept memory expired`
+// and the list_expired_claims agent tool's RPC transport.
+func (h *EpistemicHandler) handleListExpiredClaims(ctx context.Context, params json.RawMessage) (any, error) {
+	mgr, err := h.managerOrErr()
+	if err != nil {
+		return nil, err
+	}
+	var p listExpiredClaimsParams
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("invalid params: %w", err)
+		}
+	}
+	limit := p.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	claims, err := mgr.ListExpiredClaims(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"memories": claims}, nil
 }
 
 type purgeAutoClaimsParams struct {
