@@ -2895,6 +2895,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// a provider quota block publish the existing agent.quota_wait event.
 		jobProc.WithBus(c.msgBus)
 	}
+	if c.Orchestrator != nil {
+		// Per-phase worktree consumption (phase-frontier-parallel Contract
+		// C): step dispatch prefers the orchestrator's provisioned phase
+		// worktree. Nil orchestrator (single-agent mode) keeps legacy
+		// resolution.
+		jobProc.WithOrchestrator(c.Orchestrator)
+	}
 	if c.AgentRegistry != nil {
 		jobProc.WithRegistry(c.AgentRegistry)
 	}
@@ -7315,6 +7322,12 @@ type AgentJobProcessor struct {
 	taskStore    *task.Store
 	sessionStore session.Store
 	logger       *slog.Logger
+	// orchestrator (optional, via WithOrchestrator) is the per-phase
+	// worktree consumption surface (phase-frontier-parallel Contract C):
+	// resolveStepWorkingDirFor prefers orchestrator.PhaseWorktree over the
+	// session precedence. Nil = phase worktrees never participate (all
+	// pre-leaf-04 behavior).
+	orchestrator *agent.Orchestrator
 	// bus carries job-level quota surfacing (leaf 06): step jobs that fail
 	// terminal on a provider quota block publish the EXISTING agent.quota_wait
 	// event so the user hears the real cause. Nil (the default for processors
@@ -7357,6 +7370,36 @@ func (p *AgentJobProcessor) WithTaskStore(ts *task.Store) *AgentJobProcessor {
 func (p *AgentJobProcessor) WithBus(b *bus.MessageBus) *AgentJobProcessor {
 	p.bus = b
 	return p
+}
+
+// WithOrchestrator sets the orchestrator reference used for per-phase
+// worktree consumption (phase-frontier-parallel Contract C). Nil-guarded:
+// a nil orchestrator leaves resolution entirely on the session precedence.
+func (p *AgentJobProcessor) WithOrchestrator(o *agent.Orchestrator) *AgentJobProcessor {
+	if o != nil {
+		p.orchestrator = o
+	}
+	return p
+}
+
+// resolveStepWorkingDirFor resolves the working directory for a step job,
+// preferring the step's provisioned per-phase worktree (Contract C) over
+// the session precedence chain. stepID (may be "") selects the phase via
+// the step record; when no phase worktree applies — no step/phase, serial
+// mode, provisioner never cached a path — resolution falls back to
+// resolveStepWorkingDir unchanged.
+//
+// Mutex scope: PhaseWorktree reads a sync.Map (lock-free); the store read
+// happens WITHOUT holding any lock, matching mutexio constraints.
+func (p *AgentJobProcessor) resolveStepWorkingDirFor(job *queue.Job, stepID string) string {
+	if p.orchestrator != nil && stepID != "" && p.taskStore != nil {
+		if step, err := p.taskStore.StepStore().GetByID(stepID); err == nil && step != nil && step.Phase != "" {
+			if wt := p.orchestrator.PhaseWorktree(job.TaskID, step.Phase); wt != "" {
+				return wt
+			}
+		}
+	}
+	return p.resolveStepWorkingDir(job)
 }
 
 // resolveStepWorkingDir finds the working directory for a step job:
@@ -7495,13 +7538,16 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			// project binding (set via project.set). Without this, step-job
 			// loops run in the daemon's default cwd instead of the caller's
 			// project — found by meept-bench: file writes landed outside the
-			// benchmark worktree.
-			if wd := p.resolveStepWorkingDir(job); wd != "" {
+			// benchmark worktree. Per-phase worktrees (phase-frontier-parallel
+			// Contract C) take precedence over the session chain when the
+			// orchestrator provisioned one for this step's phase.
+			if wd := p.resolveStepWorkingDirFor(job, stepPayload.StepID); wd != "" {
 				loop.SetWorkingDir(wd)
 				p.logger.Info("Step job working dir resolved",
 					"job_id", job.ID,
 					"task_id", job.TaskID,
 					"working_dir", wd,
+					"phase_worktree", wd != p.resolveStepWorkingDir(job),
 				)
 			}
 			agentLoop = loop

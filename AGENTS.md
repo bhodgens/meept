@@ -363,6 +363,20 @@ or provenance tasks — for those, the history IS the deliverable (SKILL.state
 §7). The state Σ uses null-deletion semantics: explicit `null` deletes a key,
 a missing key leaves it unchanged.
 
+### Phase dispatch mode is per-config opt-in
+
+`plans.parallel_phases` (default false) preserves strict serial plan phases;
+when true, phase starts are frontier-driven (artifact + dependency gating;
+list order is a tiebreak only), conversationIDs stay phase-scoped
+(`phase-<phaseID>-<stepID>`), per-phase worktrees are provisioned via the
+orchestrator hook (leaf 03) and win in step working-dir resolution
+(`internal/daemon` `resolveStepWorkingDirFor`: phase worktree > session
+WorktreePath > ProjectPath > session CWD), and BudgetHierarchy phase
+selection is per-phase (multi-select). Subscribers to the phase-transition
+hook must tolerate `fromPhase == ""` (frontier activations have no completed
+predecessor). Flipping the default is a product decision, not a code cleanup.
+See docs/workflows/agent-orchestration.md (phase frontier section).
+
 ### Skill evolver ordering: constructed after its dependencies
 
 The evolver requires `SkillUsageTracker`, `SkillWriter`, and `PlanManager`.

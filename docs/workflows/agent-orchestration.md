@@ -41,6 +41,58 @@ Single-agent systems struggle with complex tasks requiring different expertise. 
 10. **Report Routing**: `ReportRouter` determines next action (close, handoff, notify user, or error)
 11. **Completion**: Results returned to user
 
+### Phase frontier (parallel phases)
+
+By default, plan phases run **strictly serially**: when a phase completes,
+the orchestrator starts the next phase in list order. Setting
+`plans.parallel_phases = true` (config key `plans.parallel_phases`, default
+`false`) switches phase dispatch to a **ready frontier**: after each phase
+terminal event, every phase whose dependencies are satisfied starts at once.
+
+**Frontier rule.** A phase is ready to start when:
+
+1. every *required* artifact it declares in `Consumes` is present in the
+   artifact store (produced by a completed step of another phase). Optional
+   consumes are best-effort and never block;
+2. no phase it transitively depends on still has unfinished steps.
+   Dependency edges are: every consume (required or optional) whose
+   producing phase exists, plus cross-phase step `DependsOn` links (a step
+   in phase X depending on a step in phase Y creates an X→Y edge).
+
+The phase list order is only a tiebreak (stable start ordering) and an
+anti-cycle escape: if the remaining graph cannot advance, the orchestrator
+logs a warning and falls back to the serial list-order pick rather than
+deadlocking.
+
+**Enabling it.** Set `plans.parallel_phases = true` under `plans` in
+`~/.meept/meept.json5` (or the project config). The default `false`
+preserves byte-identical serial behavior. Parallel-friendly plans declare
+`Produces`/`Consume` artifacts on their phases and group independent work
+into sibling phases — a plan with no artifact declarations falls back to
+effectively serial dispatch, safely.
+
+**Per-phase worktrees.** When the orchestrator's worktree provisioner is
+wired, each starting phase under parallel mode gets its own worktree, and
+step jobs of that phase run in it: the step working-dir resolution prefers
+the phase worktree over the session chain
+(`phase worktree > WorktreePath > ProjectPath > session CWD`). The
+worktree is skipped — and the session chain used unchanged — when the flag
+is off (serial mode), when no provisioner is wired, when the plan performs
+no file writes (the provisioner returns "no worktree needed"), or when
+provisioning fails (a Warn is logged; the phase proceeds without
+isolation).
+
+**Budgets.** Under parallel phases, the per-loop budget hierarchy selects
+the phase context per-phase (each phase start advances the loop's budget
+phase), so concurrent phases each see their own budget tier rather than
+sharing the serial "current phase" slot.
+
+**Observability.** Each phase start fires the existing phase-transition
+hook (the same one serial mode uses; frontier activations report an empty
+`fromPhase`). Completion still publishes `plan.phase_completed` and step
+progress still publishes `task.progress`. **No new bus topics** were added
+for parallel dispatch.
+
 ### Report Router (Multi-Agent Handoff)
 
 When an agent completes, the `ReportRouter` examines its structured report and decides what to do next. This replaces the previous behavior where routing decisions were computed but never acted on.

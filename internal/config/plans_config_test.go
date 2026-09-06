@@ -1,0 +1,118 @@
+package config
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/pelletier/go-toml/v2"
+)
+
+// TestDefaultConfig_PlansParallelPhasesDefault verifies the serial default
+// (phase-frontier-parallel Contract C): absent key means ParallelPhases ==
+// false, preserving strict serial phases byte-for-byte.
+func TestDefaultConfig_PlansParallelPhasesDefault(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Plans.ParallelPhases {
+		t.Error("plans.parallel_phases default = true, want false (serial default)")
+	}
+	if err := cfg.Plans.Validate(); err != nil {
+		t.Errorf("default plans config should validate: %v", err)
+	}
+}
+
+// TestPlansConfig_ParallelPhasesValidate verifies the flag does not break
+// Validate in either state — a bool needs no validation, but the combined
+// config (mode + flag) must still pass through unchanged.
+func TestPlansConfig_ParallelPhasesValidate(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  PlansConfig
+	}{
+		{
+			name: "false validates",
+			cfg:  PlansConfig{Mode: "always", ParallelPhases: false},
+		},
+		{
+			name: "true validates",
+			cfg:  PlansConfig{Mode: "always", ParallelPhases: true},
+		},
+		{
+			name: "true with empty mode validates",
+			cfg:  PlansConfig{ParallelPhases: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.cfg.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestPlansConfig_ParallelPhasesTOMLKey pins the exact TOML key
+// plans.parallel_phases: absent key decodes false, key present decodes true,
+// and a round trip preserves the value. The wrapper mirrors the real load
+// path (Config.Plans under the `plans` TOML table).
+func TestPlansConfig_ParallelPhasesTOMLKey(t *testing.T) {
+	type doc struct {
+		Plans PlansConfig `toml:"plans"`
+	}
+
+	// Absent key -> false.
+	var absent doc
+	if err := toml.Unmarshal([]byte("[plans]\nmode = \"always\"\n"), &absent); err != nil {
+		t.Fatalf("toml.Unmarshal absent: %v", err)
+	}
+	if absent.Plans.ParallelPhases {
+		t.Error("absent parallel_phases key decoded true, want false")
+	}
+
+	// Key present -> true.
+	var present doc
+	if err := toml.Unmarshal([]byte("[plans]\nmode = \"always\"\nparallel_phases = true\n"), &present); err != nil {
+		t.Fatalf("toml.Unmarshal present: %v", err)
+	}
+	if !present.Plans.ParallelPhases {
+		t.Error("parallel_phases = true decoded false, want true")
+	}
+
+	// Round trip preserves the value and the key name.
+	data, err := toml.Marshal(present)
+	if err != nil {
+		t.Fatalf("toml.Marshal: %v", err)
+	}
+	var out doc
+	if err := toml.Unmarshal(data, &out); err != nil {
+		t.Fatalf("toml.Unmarshal round trip: %v", err)
+	}
+	if !out.Plans.ParallelPhases {
+		t.Errorf("round trip lost parallel_phases; marshaled:\n%s", data)
+	}
+}
+
+// TestPlansConfig_ParallelPhasesJSONKey pins the exact JSON key
+// plans.parallel_phases (meept.json5 load path).
+func TestPlansConfig_ParallelPhasesJSONKey(t *testing.T) {
+	// Absent key -> false.
+	var absent struct {
+		Plans PlansConfig `json:"plans"`
+	}
+	if err := json.Unmarshal([]byte(`{"plans":{"mode":"always"}}`), &absent); err != nil {
+		t.Fatalf("json.Unmarshal absent: %v", err)
+	}
+	if absent.Plans.ParallelPhases {
+		t.Error("absent parallel_phases key decoded true, want false")
+	}
+
+	// Key present -> true.
+	var present struct {
+		Plans PlansConfig `json:"plans"`
+	}
+	if err := json.Unmarshal([]byte(`{"plans":{"mode":"always","parallel_phases":true}}`), &present); err != nil {
+		t.Fatalf("json.Unmarshal present: %v", err)
+	}
+	if !present.Plans.ParallelPhases {
+		t.Error("parallel_phases = true decoded false, want true")
+	}
+}

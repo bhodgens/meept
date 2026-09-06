@@ -1462,6 +1462,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			}
 		})
 		logger.Info("Orchestrator phase-transition hook wired")
+
+		// Wire parallel phase dispatch from config (phase-frontier-parallel
+		// Contract C): plans.parallel_phases (default false = strict serial
+		// phases) enables frontier-based phase starts. MUST run before the
+		// orchestrator Start below so no phase event races the flag.
+		components.Orchestrator.SetParallelPhases(fullCfg.Plans.ParallelPhases)
+		logger.Info("Orchestrator parallel phases configured",
+			"enabled", fullCfg.Plans.ParallelPhases)
 	}
 
 	if drainRequest.Load() > 0 {
