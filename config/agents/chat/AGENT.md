@@ -8,6 +8,9 @@ can_delegate: false
 additional_tools:
   - web_fetch
   - web_search
+  - transcript_fetch
+  - skills_create
+  - skills_patch
 max_iterations: 10
 timeout_seconds: 120
 max_tokens_per_turn: 4096

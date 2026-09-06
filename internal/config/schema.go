@@ -110,6 +110,7 @@ type Config struct {
 	Media               MediaConfig               `json:"media"               toml:"media"`
 	Secrets             SecretsConfig             `json:"secrets"             toml:"secrets"`
 	Browser             BrowserConfig             `json:"browser"             toml:"browser"`
+	Transcript          TranscriptConfig          `json:"transcript"          toml:"transcript"`
 	MultiUser           MultiUserConfig           `json:"multiuser"           toml:"multiuser"`
 }
 
@@ -136,6 +137,38 @@ type BrowserConfig struct {
 // HeadlessEnabled returns the effective headless setting (default true).
 func (c BrowserConfig) HeadlessEnabled() bool {
 	return c.Headless == nil || *c.Headless
+}
+
+// TranscriptConfig configures the transcript_fetch tool ([transcript]).
+// Disabled by default: the tool shells out to an external Python dependency
+// (youtube-transcript-api), so it is opt-in like [browser]. When enabled=false
+// the transcript_fetch tool is absent from the registry entirely.
+//
+//gendoc:section transcript
+//gendoc:desc YouTube transcript ingest (transcript_fetch) via the youtube-transcript-api Python package.
+//gendoc:example [transcript] enabled = true
+type TranscriptConfig struct {
+	// Enabled toggles the transcript_fetch tool. Default false: enabling
+	// requires the youtube-transcript-api Python package on the host.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// PythonPath overrides the interpreter used for the subprocess. Default
+	// "python3".
+	PythonPath string `json:"python_path" toml:"python_path"`
+	// ModuleName is the Python module the subprocess imports. Default
+	// "youtube-transcript-api".
+	ModuleName string `json:"module_name" toml:"module_name"`
+	// TimeoutSeconds bounds the subprocess run. Default 60.
+	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+}
+
+// DefaultTranscriptConfig returns transcript ingest defaults.
+func DefaultTranscriptConfig() TranscriptConfig {
+	return TranscriptConfig{
+		Enabled:        false,
+		PythonPath:     "python3",
+		ModuleName:     "youtube-transcript-api",
+		TimeoutSeconds: 60,
+	}
 }
 
 // SecretsConfig holds declared secrets loaded into the daemon's secret broker
@@ -342,6 +375,14 @@ type PlansConfig struct {
 	Storage      PlansStorageConfig      `json:"storage"       toml:"storage"`
 	Approval     PlansApprovalConfig     `json:"approval"      toml:"approval"`
 	Confirmation PlansConfirmationConfig `json:"confirmation"  toml:"confirmation"`
+
+	// ParallelPhases enables frontier-based phase dispatch: multiple
+	// plan phases run concurrently when their Produces/Consumes
+	// dependencies allow. Default false = strict serial phases
+	// (legacy behavior). Meaningful parallelism requires plans whose
+	// phases declare Produces/Consumes artifacts. See
+	// docs/workflows/agent-orchestration.md (phase frontier section).
+	ParallelPhases bool `json:"parallel_phases" toml:"parallel_phases"`
 }
 
 // Validate validates the PlansConfig.
@@ -2913,6 +2954,14 @@ func DefaultConfig() *Config {
 			},
 		},
 		Media: DefaultMediaConfig(),
+		Transcript: TranscriptConfig{
+			// Frozen section defaults; the enabled gate stays false
+			// (external dependency, opt-in like [browser]).
+			Enabled:        DefaultTranscriptConfig().Enabled,
+			PythonPath:     DefaultTranscriptConfig().PythonPath,
+			ModuleName:     DefaultTranscriptConfig().ModuleName,
+			TimeoutSeconds: DefaultTranscriptConfig().TimeoutSeconds,
+		},
 		Secrets: SecretsConfig{
 			// Empty non-nil map: no secrets declared by default. Real values
 			// are loaded into the broker at startup; children only ever see

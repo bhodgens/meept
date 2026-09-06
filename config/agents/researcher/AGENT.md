@@ -11,6 +11,7 @@ additional_tools:
   - file_read
   - list_directory
   - file_write
+  - transcript_fetch
 capabilities:
   - reasoning
 max_iterations: 15

@@ -251,6 +251,69 @@ relative paths are rejected.
 }
 ```
 
+## Agent-facing skill authoring
+
+Agents can author and edit skills directly through two builtin tools,
+`skills_create` and `skills_patch` (registered in
+`internal/daemon/components.go` `registerSkillAuthoringTools`, wired in the
+main tools block where the skills writer/registry are already live).
+
+### the two tools
+
+| tool | parameters | behavior |
+|------|-----------|----------|
+| `skills_create` | `name` (kebab-case, required), `description` (one-line, required), `body` (markdown after the frontmatter, required), `tags` (optional) | assembles the SKILL.md frontmatter + body, validates through the skills parser, then writes via `lifecycle.Writer.WriteSkill`. Refuses invalid names (`^[a-z0-9][a-z0-9-]*$`), empty bodies, and content that duplicates an existing skill's SHA. |
+| `skills_patch` | `name` (required), plus either `old_string` + `new_string` (replace mode) or `content` (rewrite mode) — never both | replace mode loads the current body, requires `old_string` to occur exactly once, swaps, and writes. rewrite mode validates and rewrites the whole SKILL.md. |
+
+Both tools return the concrete path they wrote.
+
+### risk and confirmation
+
+Both authoring tools classify **HIGH** (self-modification: the agent edits
+its own future instructions). With the default
+`require_confirmation_high = true`, every `skills_create`/`skills_patch`
+call pauses for user confirmation before it runs. The rules seed as mutable
+base rules in the security DB, so operators can re-rate them per deployment;
+`transcript_fetch` (the ingest counterpart, see
+[external integrations](external-integrations.md#transcript-fetch)) seeds
+LOW. See [security](security.md) for the confirmation flow.
+
+### tier targeting and versioning
+
+- **new skills land in the user tier** (`~/.meept/skills/<name>/SKILL.md`)
+  via the writer's tier resolver — the highest-priority writable tier.
+- **the system tier (`~/.config/meept/skills/`) is read-only** to the
+  authoring tools. `skills_patch` refuses to touch a system-tier skill and
+  says so; write a user-tier skill with the same name to override it.
+- every write to an existing skill passes through `lifecycle.Writer`, which
+  captures a versioned snapshot of the previous content before overwriting
+  (when the versioner is wired, the daemon default). Archive/restore reuse
+  the same writer.
+
+### directory-layout skills and linked assets
+
+`skills.list` / `skills.get` expose `dir` (the directory containing
+SKILL.md, empty for flat skills) and `linked_assets` (helper files in the
+skill directory's `scripts/`, `references/`, `templates/`, `assets/`
+subdirectories, one level deep). When a directory-layout skill executes, the
+execution context includes a `skill_dir: <Dir>` line and any `SKILL_DIR`
+literal in the skill body is substituted with the same value — so skill
+bodies can invoke helper scripts relative to their own directory through
+the normal `shell_execute` risk classification. Helper scripts run as shell
+commands; nothing about linked assets bypasses security.
+
+### the composition flow
+
+The shipped `learn-from-video` skill (`config/skills/learn-from-video/`)
+composes the chain end to end: `transcript_fetch` fetches a YouTube
+transcript, the model extracts the generalizable procedure, and
+`skills_create`/`skills_patch` persist it — with a mandatory show-the-draft
+confirmation step before any write. Note that `skills_patch` resolves the
+target skill through the registry snapshot loaded at daemon startup, so a
+skill written by `skills_create` in the same session is picked up on the
+next daemon restart. An RPC write surface (`skills.create`) is future work;
+the agent tools are the supported path.
+
 ## Wiki Layer
 
 The wiki is the persistent knowledge store behind skill evolution

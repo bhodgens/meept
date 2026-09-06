@@ -48,6 +48,56 @@ func TestSeedRulesToolRules(t *testing.T) {
 	}
 }
 
+// TestSkillToolSeedRules verifies the seed rules for the skill-authoring
+// and media-ingest tools (skill-authoring-and-media-ingest leaf 05):
+// transcript_fetch is observation-only LOW; skills_create and skills_patch
+// are HIGH (the agent edits its own future instructions — self-modification)
+// and require confirmation. Without explicit rules these tool names fall
+// through lookupBaseRule to the MEDIUM default, under-rating
+// self-modification; the seed rules make the classification explicit and
+// the DB keeps operator overrides authoritative.
+func TestSkillToolSeedRules(t *testing.T) {
+	data := SeedRules()
+
+	want := map[string]struct {
+		risk      RiskLevel
+		confirm   bool
+		action    string
+		immutable bool
+	}{
+		"transcript_fetch": {RiskLow, false, "network_request", false},
+		"skills_create":    {RiskHigh, true, "skills_create", false},
+		"skills_patch":     {RiskHigh, true, "skills_patch", false},
+	}
+
+	seen := map[string]bool{}
+	for _, rule := range data.ToolRules {
+		w, ok := want[rule.ToolName]
+		if !ok {
+			continue
+		}
+		seen[rule.ToolName] = true
+		if rule.RiskLevel != w.risk {
+			t.Errorf("%s risk = %v, want %v", rule.ToolName, rule.RiskLevel, w.risk)
+		}
+		if rule.RequiresConfirmation != w.confirm {
+			t.Errorf("%s requires_confirmation = %v, want %v", rule.ToolName, rule.RequiresConfirmation, w.confirm)
+		}
+		if rule.Action != w.action {
+			t.Errorf("%s action = %q, want %q", rule.ToolName, rule.Action, w.action)
+		}
+		if rule.Immutable != w.immutable {
+			t.Errorf("%s immutable = %v, want %v", rule.ToolName, rule.Immutable, w.immutable)
+		}
+	}
+
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("missing seed tool rule for %q", name)
+		}
+	}
+}
+
 func TestSeedRulesCommandPatterns(t *testing.T) {
 	data := SeedRules()
 

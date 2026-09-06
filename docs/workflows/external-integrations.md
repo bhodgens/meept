@@ -144,6 +144,56 @@ Tools register under the server-name prefix — `obscura.browser_navigate`, `obs
 - The catalog entry runs without stealth; append `--stealth` to the `command` array for a consistent browser fingerprint plus the bundled tracker blocklist, and `--obey-robots` for robots.txt compliance.
 - Same SSRF posture applies as any web tool: meept's `[security.ssrf]` guard covers built-in fetch/browser tools; MCP tool calls bypass it, so keep the Obscura-level private-network block enabled when scraping untrusted URLs.
 
+### Transcript Fetch Integration
+
+`transcript_fetch` is a builtin tool (not MCP) that fetches YouTube video
+transcripts via the [`youtube-transcript-api`](https://pypi.org/project/youtube-transcript-api/)
+Python package, executed as a subprocess — the same pattern as STT's
+whisper.cpp subprocess. Disabled by default (`[transcript] enabled = false`);
+when disabled the tool is absent from the registry, and nothing else depends
+on it.
+
+**Install the dependency:**
+
+```bash
+python3 -m pip install youtube-transcript-api
+```
+
+**Config keys** (meept.toml; defaults shown):
+
+```toml
+[transcript]
+enabled = false
+python_path = "python3"
+module_name = "youtube-transcript-api"
+timeout_seconds = 60
+```
+
+**URL forms accepted:** `youtube.com/watch?v=<id>`, `youtu.be/<id>`,
+`youtube.com/shorts/<id>`, `/embed/<id>`, `/live/<id>`, `m.youtube.com` /
+`music.youtube.com` watch forms, or a raw 11-character video ID. Any other
+input returns `transcript_fetch: not a youtube video url or video id`.
+
+**Error behaviors** (all surfaced as actionable tool errors):
+
+| condition | error |
+|-----------|-------|
+| dependency missing / bad interpreter | `youtube-transcript-api not installed (install: <python> -m pip install youtube-transcript-api)` |
+| transcripts turned off for the video | `transcripts are disabled for this video` |
+| video private/removed/geo-blocked | `video unavailable` |
+| subprocess exceeds `timeout_seconds` | `timed out after Ns` |
+| other subprocess failure | stderr detail passed through verbatim |
+
+Output is the plain transcript text (optionally with `[MM:SS]` timestamps via
+the `timestamps` parameter; a `language` parameter takes a BCP-47 preference
+and falls back to the default transcript). The result is truncated at the
+standard tool-result cap. Risk class: LOW — observation-only, no
+confirmation gate. `researcher` and `analyst` carry `transcript_fetch` for
+ingest; the `chat` agent additionally carries `skills_create`/`skills_patch`,
+so the full ingest → synthesis → persist chain works there — see
+[skills](skills.md#agent-facing-skill-authoring) and the shipped
+`learn-from-video` skill.
+
 ### Web API Integration
 - **HTTP/JSON API**: RESTful interface for external clients
 - **Authentication**: API key or token-based access

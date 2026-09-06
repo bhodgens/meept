@@ -2234,7 +2234,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, c.TokenStore)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, c.SkillWriter, c.SkillRegistry, c.TokenStore)
 
 	// Deterministic (cached-fetch) tool variant for meept-bench
 	// reproducibility (phase-2-3 P2.3): when enabled, web tools are
@@ -5359,6 +5359,39 @@ func convertShadowConfig(cfg config.ShadowConfig) *shadow.Config {
 	}
 }
 
+// registerSkillAuthoringTools constructs and registers the agent-facing
+// skill authoring tools (skill-authoring-and-media-ingest leaves 02/03).
+// skillCtx must carry a non-nil writer and registry: both handles come from
+// the skills system initialized earlier in NewComponents (initializeSkills
+// runs at components.go:869 and assigns SkillWriter at :1183, before
+// registerBuiltinTools executes at :2237). The wiring test
+// TestSkillAuthoringToolsRegisteredWithLiveHandles proves the handles are
+// live by executing the tools end-to-end. Registration is unconditional:
+// self-modification risk is governed by the security engine (skills_create /
+// skills_patch seed HIGH), not by an enable flag.
+func registerSkillAuthoringTools(
+	registry *tools.Registry,
+	skillCtx skillAuthoringContext,
+	logger *slog.Logger,
+) {
+	createTool := builtin.NewSkillCreateTool(skillCtx.writer, logger)
+	if skillCtx.registry != nil {
+		createTool.SetRegistry(skillCtx.registry)
+	}
+	registry.Register(createTool)
+
+	registry.Register(builtin.NewSkillPatchTool(skillCtx.registry, skillCtx.writer, logger))
+}
+
+// skillAuthoringContext bundles the skill-system handles the authoring
+// tools need. A nil-field construction is a programming error at the call
+// site (the wiring test fails loudly); the tools themselves still nil-guard
+// at Execute time.
+type skillAuthoringContext struct {
+	writer   *lifecycle.Writer
+	registry *skills.Registry
+}
+
 // registerBuiltinTools registers all builtin tools with the registry.
 func registerBuiltinTools(
 	registry *tools.Registry,
@@ -5379,6 +5412,9 @@ func registerBuiltinTools(
 	resolver *llm.Resolver,
 	ssrfCfg config.SSRFConfig,
 	browserCfg config.BrowserConfig,
+	transcriptCfg config.TranscriptConfig,
+	skillWriter *lifecycle.Writer,
+	skillRegistry *skills.Registry,
 	tokenStore llm.TokenResolver,
 ) {
 	readCache := builtin.NewReadCache(30)
@@ -5582,6 +5618,34 @@ func registerBuiltinTools(
 			logger.Info("browser automation tools registered", "headless", browserCfg.HeadlessEnabled(), "max_pages", browserCfg.MaxPages)
 		}
 	}
+
+	// transcript_fetch ([transcript], disabled by default — external
+	// Python dependency, opt-in like [browser]). Disabled => the tool is
+	// absent from the registry. Configured fields (python path, module,
+	// timeout) flow straight into the tool's subprocess invocation.
+	if transcriptCfg.Enabled {
+		registry.Register(builtin.NewTranscriptFetchTool(builtin.TranscriptConfig{
+			PythonPath:     transcriptCfg.PythonPath,
+			ModuleName:     transcriptCfg.ModuleName,
+			TimeoutSeconds: transcriptCfg.TimeoutSeconds,
+		}, logger))
+		logger.Info("transcript_fetch tool registered",
+			"python_path", transcriptCfg.PythonPath,
+			"module_name", transcriptCfg.ModuleName,
+			"timeout_seconds", transcriptCfg.TimeoutSeconds,
+		)
+	}
+
+	// skills_create / skills_patch (skill authoring). Unconditionally
+	// registered: the writer and registry come from the skills system,
+	// initialized earlier in NewComponents, so the handles are live here.
+	// Self-modification risk is governed by the security engine's HIGH
+	// seed rules, not by an enable flag.
+	registerSkillAuthoringTools(registry, skillAuthoringContext{
+		writer:   skillWriter,
+		registry: skillRegistry,
+	}, logger)
+	logger.Info("skill authoring tools registered", "tools", []string{"skills_create", "skills_patch"})
 
 	// Image/video generation (models.json5 refs)
 	media := config.EffectiveMediaConfig(mediaCfg)

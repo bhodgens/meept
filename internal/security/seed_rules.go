@@ -79,6 +79,18 @@ func seedToolRules() []SeedToolRule {
 		{ToolName: "web_search", Action: "network_request", RiskLevel: RiskLow, Description: "Search the web", RequiresConfirmation: false, Immutable: false},
 		{ToolName: "generate_image", Action: "network_request", RiskLevel: RiskMedium, Description: "Generate an image via a configured media provider", RequiresConfirmation: false, Immutable: false},
 		{ToolName: "generate_video", Action: "network_request", RiskLevel: RiskMedium, Description: "Generate a video via a configured media provider", RequiresConfirmation: false, Immutable: false},
+
+		// Skill authoring and media ingest (skill-authoring-and-media-ingest
+		// leaf 05). transcript_fetch is observation-only (fetches a YouTube
+		// transcript via the youtube-transcript-api subprocess). The
+		// authoring tools are HIGH self-modification: the agent edits its
+		// own future instructions, so every call requires user confirmation
+		// under the default require_confirmation_high gate. Explicit base
+		// rules prevent the tool names from falling through to the MEDIUM
+		// default; operators can still override in the DB (mutable).
+		{ToolName: "transcript_fetch", Action: "network_request", RiskLevel: RiskLow, Description: "Fetch a YouTube video transcript via the youtube-transcript-api subprocess", RequiresConfirmation: false, Immutable: false},
+		{ToolName: "skills_create", Action: "skills_create", RiskLevel: RiskHigh, Description: "Create a new skill (agent-authored instructions; self-modification)", RequiresConfirmation: true, Immutable: false},
+		{ToolName: "skills_patch", Action: "skills_patch", RiskLevel: RiskHigh, Description: "Patch an existing skill (agent-authored instructions; self-modification)", RequiresConfirmation: true, Immutable: false},
 	}
 }
 
