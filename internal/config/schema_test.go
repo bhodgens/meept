@@ -24,6 +24,9 @@ func TestTranscriptToolConfigDefaults(t *testing.T) {
 	if c.Transcript.TimeoutSeconds != 60 {
 		t.Fatalf("timeout_seconds: %d", c.Transcript.TimeoutSeconds)
 	}
+	if c.Transcript.FallbackOutputDir != "~/.meept/media" {
+		t.Fatalf("fallback_output_dir: %q", c.Transcript.FallbackOutputDir)
+	}
 }
 
 func TestDefaultConfig_SkillsWikiState(t *testing.T) {

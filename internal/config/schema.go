@@ -159,15 +159,21 @@ type TranscriptConfig struct {
 	ModuleName string `json:"module_name" toml:"module_name"`
 	// TimeoutSeconds bounds the subprocess run. Default 60.
 	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	// FallbackOutputDir is the directory relative output_path values
+	// join when the session context carries no working directory (the
+	// tool is called outside a workspace). Mirrors MediaConfig.OutputDir
+	// resolution; default "~/.meept/media" when empty.
+	FallbackOutputDir string `json:"fallback_output_dir" toml:"fallback_output_dir"`
 }
 
 // DefaultTranscriptConfig returns transcript ingest defaults.
 func DefaultTranscriptConfig() TranscriptConfig {
 	return TranscriptConfig{
-		Enabled:        false,
-		PythonPath:     "python3",
-		ModuleName:     "youtube-transcript-api",
-		TimeoutSeconds: 60,
+		Enabled:           false,
+		PythonPath:        "python3",
+		ModuleName:        "youtube-transcript-api",
+		TimeoutSeconds:    60,
+		FallbackOutputDir: "~/.meept/media",
 	}
 }
 
@@ -2957,10 +2963,11 @@ func DefaultConfig() *Config {
 		Transcript: TranscriptConfig{
 			// Frozen section defaults; the enabled gate stays false
 			// (external dependency, opt-in like [browser]).
-			Enabled:        DefaultTranscriptConfig().Enabled,
-			PythonPath:     DefaultTranscriptConfig().PythonPath,
-			ModuleName:     DefaultTranscriptConfig().ModuleName,
-			TimeoutSeconds: DefaultTranscriptConfig().TimeoutSeconds,
+			Enabled:           DefaultTranscriptConfig().Enabled,
+			PythonPath:        DefaultTranscriptConfig().PythonPath,
+			ModuleName:        DefaultTranscriptConfig().ModuleName,
+			TimeoutSeconds:    DefaultTranscriptConfig().TimeoutSeconds,
+			FallbackOutputDir: DefaultTranscriptConfig().FallbackOutputDir,
 		},
 		Secrets: SecretsConfig{
 			// Empty non-nil map: no secrets declared by default. Real values

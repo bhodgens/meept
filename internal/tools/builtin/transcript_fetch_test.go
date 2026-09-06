@@ -3,9 +3,14 @@ package builtin
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/tools"
 )
 
 func TestTranscriptFetch_Execute_FakeRunner(t *testing.T) {
@@ -505,6 +510,11 @@ func TestTranscriptFetch_NameAndSchema(t *testing.T) {
 	} else if p.Type != schemaTypeInteger {
 		t.Errorf("max_chars.Type = %q, want %q", p.Type, schemaTypeInteger)
 	}
+	if p, ok := props["output_path"]; !ok {
+		t.Error("schema missing \"output_path\" property")
+	} else if p.Type != schemaTypeString {
+		t.Errorf("output_path.Type = %q, want %q", p.Type, schemaTypeString)
+	}
 	if len(params.Required) != 1 || params.Required[0] != "url" {
 		t.Errorf("Required = %v, want exactly [\"url\"] (offset/max_chars optional)", params.Required)
 	}
@@ -539,4 +549,226 @@ func TestTranscriptFetch_NameAndSchema(t *testing.T) {
 
 	// Nil logger must not panic on construction or use.
 	_ = NewTranscriptFetchTool(TranscriptConfig{}, nil)
+}
+
+// newTranscriptTestTool returns a tool whose runner serves the canned
+// two-segment transcript "hello\nworld" (12 chars). Shared by the
+// output_path tests so none of them touches a real subprocess.
+func newTranscriptTestTool(t *testing.T) *TranscriptFetchTool {
+	t.Helper()
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	tool.SetTranscriptRunner(func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
+		stdout := "{\"text\": \"hello\", \"start\": 0.0}\n{\"text\": \"world\", \"start\": 65.0}\n"
+		return []byte(stdout), nil, nil
+	})
+	return tool
+}
+
+func TestTranscriptFetch_ResolveOutputPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	abs := filepath.Join(t.TempDir(), "out.txt")
+	wd := t.TempDir()
+	fallbackRoot := filepath.Join(t.TempDir(), "fallback")
+	fallbackWant := filepath.Join(fallbackRoot, "sub", "tr.txt")
+
+	tests := []struct {
+		name     string
+		raw      string
+		withWD   bool
+		fallback string
+		want     string
+		wantErr  bool
+	}{
+		{
+			name:    "absolute passes through",
+			raw:     abs,
+			want:    abs,
+			wantErr: false,
+		},
+		{
+			name:   "relative joins working dir",
+			raw:    "sub/tr.txt",
+			withWD: true,
+			want:   filepath.Join(wd, "sub", "tr.txt"),
+		},
+		{
+			name:     "relative without working dir joins fallback root",
+			raw:      "sub/tr.txt",
+			fallback: fallbackRoot,
+			want:     fallbackWant,
+		},
+		{
+			name: "tilde expands to home",
+			raw:  "~/meept-tr-test/x.txt",
+			want: filepath.Join(home, "meept-tr-test", "x.txt"),
+		},
+		{
+			name: "empty raw resolves to nothing",
+			raw:  "",
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := NewTranscriptFetchTool(TranscriptConfig{FallbackOutputDir: tt.fallback}, nil)
+			ctx := context.Background()
+			if tt.withWD {
+				ctx = tools.ContextWithWorkingDir(ctx, wd)
+			}
+			got, err := tool.resolveOutputPath(ctx, tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("resolveOutputPath(%q) error = %v, wantErr %v", tt.raw, err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("resolveOutputPath(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTranscriptFetch_OutputPath_Fits(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "nested", "deep", "tr.txt")
+	tool := newTranscriptTestTool(t)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":         "DWoJZs6TuVs",
+		"output_path": out,
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	m, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", res)
+	}
+
+	full := "hello\nworld"
+	// File on disk carries the FULL text (nested parents created).
+	data, rerr := os.ReadFile(out)
+	if rerr != nil {
+		t.Fatalf("output file missing: %v", rerr)
+	}
+	if string(data) != full {
+		t.Errorf("file content = %q, want %q", data, full)
+	}
+	info, rerr := os.Stat(out)
+	if rerr != nil {
+		t.Fatalf("stat: %v", rerr)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("file mode = %v, want 0644", info.Mode().Perm())
+	}
+
+	// Result: bounded head preview + pointer line naming the path.
+	wantContent := full + fmt.Sprintf("\n...[full transcript at %s]", out)
+	if got := m["content"]; got != wantContent {
+		t.Errorf("content = %q, want %q", got, wantContent)
+	}
+	if got := m["path"]; got != out {
+		t.Errorf("path = %v, want %v", got, out)
+	}
+	if got, ok := m["truncated"].(bool); !ok || got {
+		t.Errorf("truncated = %v (%T), want false", m["truncated"], m["truncated"])
+	}
+	if got := m["total_chars"]; got != len(full) {
+		t.Errorf("total_chars = %v, want %d", got, len(full))
+	}
+}
+
+func TestTranscriptFetch_OutputPath_Paginated(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "tr.txt")
+	tool := newTranscriptTestTool(t)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":         "DWoJZs6TuVs",
+		"output_path": out,
+		"offset":      0,
+		"max_chars":   5,
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	m := res.(map[string]any)
+
+	// Pagination window keeps today's exact semantics (suffix included).
+	if got := m["content"]; got != "hello"+transcriptTruncationSuffix {
+		t.Errorf("content = %q, want %q", got, "hello"+transcriptTruncationSuffix)
+	}
+	if got := m["path"]; got != out {
+		t.Errorf("path = %v, want %v", got, out)
+	}
+	// The file still carries the FULL text, not the window.
+	data, rerr := os.ReadFile(out)
+	if rerr != nil {
+		t.Fatalf("output file missing: %v", rerr)
+	}
+	if string(data) != "hello\nworld" {
+		t.Errorf("file content = %q, want %q", data, "hello\nworld")
+	}
+}
+
+func TestTranscriptFetch_OutputPath_WriteError(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	tool := newTranscriptTestTool(t)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":         "DWoJZs6TuVs",
+		"output_path": filepath.Join(blocker, "tr.txt"),
+	})
+	if err == nil {
+		t.Fatalf("Execute error = nil, want write failure mentioning the path")
+	}
+	if !strings.Contains(err.Error(), "tr.txt") {
+		t.Errorf("error = %q, want it to mention the output path", err)
+	}
+	if res != nil {
+		t.Errorf("result = %v, want nil on write failure", res)
+	}
+}
+
+func TestTranscriptFetch_OutputPath_Empty_NoPathKey(t *testing.T) {
+	tool := newTranscriptTestTool(t)
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url": "DWoJZs6TuVs",
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	m := res.(map[string]any)
+	if _, has := m["path"]; has {
+		t.Error("result must not carry a \"path\" key when output_path is absent")
+	}
+}
+
+func TestTranscriptFetch_OutputPath_RelativeUsesFallbackDir(t *testing.T) {
+	fallback := t.TempDir()
+	tool := newTranscriptTestTool(t)
+	// Explicit config (no working dir in ctx): relative output_path
+	// must land under the tool's fallback root.
+	tool.fallbackOutputDir = fallback
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":         "DWoJZs6TuVs",
+		"output_path": "gen/tr.txt",
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	want := filepath.Join(fallback, "gen", "tr.txt")
+	m := res.(map[string]any)
+	if got := m["path"]; got != want {
+		t.Errorf("path = %v, want %v", got, want)
+	}
+	if _, rerr := os.Stat(want); rerr != nil {
+		t.Errorf("file not written to fallback root: %v", rerr)
+	}
 }
