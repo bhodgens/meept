@@ -1,6 +1,8 @@
 {
   // Default model for general use (provider/model-id format)
-  "model": "zai/glm-5.2",
+  // Local-first: LFM2.5-8B-A1B GGUF on the local llama.cpp runtime (no cloud
+  // tokens for e2e/everyday runs). Cloud models stay available via aliases.
+  "model": "local/lfm-8b-f16",
 
   // Fast/cheap model for classification, summarization
   // Use "classifier" or "summarizer" aliases for automatic fallback
@@ -24,10 +26,11 @@
   "model_aliases": {
     "classifier": {
       "models": [
-        "local/lfm-1.2b-q8",        // Primary: Best overall (69.1% accuracy, 2.9% error rate, 279ms)
-        "local/lfm-8b-f16",         // Fallback 1: LFM2.5-8B-A1B-GGUF-F16
-        "zai/glm-4.5-air",          // Fallback 2: remote API
-        "ollama/llama3.2"           // Fallback 3: local Ollama
+        "local-mlx/lfm-combined-sft", // Primary: fine-tuned LFM2.5 intent classifier (platform-intrinsic; change only for explicit A/B testing)
+        "local/lfm-8b-f16",           // Fallback 1: LFM2.5-8B-A1B-GGUF-F16
+        "local/lfm-1.2b-q8",          // Fallback 2: fast, best-effort
+        "zai/glm-4.5-air",            // Fallback 3: remote API
+        "ollama/llama3.2"             // Fallback 4: local Ollama
       ],
       "timeout": 10,
       "max_fails": 2
@@ -83,10 +86,58 @@
   "default_timeout": 3000,
 
   // Providers to skip entirely
-  // NOTE: "local" re-enabled for llama.cpp GGUF support (MLX still disabled)
-  "disabled_providers": ["gala-mlx", "gala-llama"],
+  // NOTE: MLX re-enabled 2026-09-06 — the July SIGKILL root cause was the
+  // daemon's StartAll context cancellation, fixed for ALL runtimes in
+  // a5312a64 (context.WithoutCancel, runtime_process.go). Platform design:
+  // MLX on Apple metal, llama.cpp elsewhere.
+  "disabled_providers": ["gala-llama"],
 
   "providers": {
+    // MLX runtime (Apple metal platform design): serves the fine-tuned
+    // LFM2.5-1.2B combined-serialized-SFT intent classifier. Re-enabled
+    // 2026-09-06 after the StartAll context-cancellation SIGKILL root cause
+    // was fixed (a5312a64). This model is an intrinsic part of the platform
+    // design — do not change without an explicit A/B testing instruction.
+    "local-mlx": {
+      "api": "openai",
+      "options": {
+        "baseURL": "http://127.0.0.1:8081/v1"
+      },
+      "lifecycle": {
+        "runtime": "mlx",
+        "model_path": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
+        "auto_start": true,
+        "auto_stop_on_exit": true,
+        "pid_file": "~/.meept/run/mlx-classifier.pid",
+        "spawn_command": ["mlx_lm", "server", "--model", "${MODEL_PATH}", "--port", "8081"],
+        "spawn_timeout_seconds": 90,
+        "health_check": {
+          "endpoint": "/health",
+          "interval_seconds": 10,
+          "timeout_seconds": 5,
+          "unhealthy_threshold": 9
+        },
+        "restart_policy": {
+          "enabled": true,
+          "max_attempts": 3,
+          "cooldown_seconds": 30,
+          "reset_after_seconds": 300
+        }
+      },
+      "models": {
+        "lfm-combined-sft": {
+          // mlx_lm.server reports the model ID as the path passed via --model.
+          "name": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
+          "path": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
+          "capabilities": ["completion", "code", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 8192,
+          "max_output": 512,
+          "temperature": 0.1
+        }
+      }
+    },
     "local": {
       "api": "openai",
       "options": {
