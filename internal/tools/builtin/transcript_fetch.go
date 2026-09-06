@@ -124,6 +124,14 @@ func (t *TranscriptFetchTool) Parameters() llm.FunctionParameters {
 				Type:        schemaTypeString,
 				Description: "Preferred transcript language code (e.g. \"en\", \"es\"). Falls back to the default transcript when unavailable.",
 			},
+			"offset": {
+				Type:        schemaTypeInteger,
+				Description: "Character offset into the returned transcript text (the same formatted form, timestamps included) at which to start this page. Defaults to 0.",
+			},
+			"max_chars": {
+				Type:        schemaTypeInteger,
+				Description: "Maximum characters of transcript text to return for this page (excluding any truncation suffix), capped at 100000. Defaults to 100000. Use with offset to paginate long transcripts; the response carries total_chars and offset for computing the next page.",
+			},
 		},
 		Required: []string{"url"},
 	}
@@ -141,6 +149,8 @@ type transcriptParams struct {
 	URL        string `json:"url"`
 	Timestamps bool   `json:"timestamps"`
 	Language   string `json:"language"`
+	Offset     int    `json:"offset"`
+	MaxChars   int    `json:"max_chars"`
 }
 
 // Execute fetches the transcript for the requested video and returns
@@ -172,21 +182,61 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 	if err != nil {
 		return nil, err
 	}
-	if len(text) > TranscriptMaxOutputLength {
-		text = text[:TranscriptMaxOutputLength] + transcriptTruncationSuffix
+	// Pagination slices the FORMATTED text (timestamps included), so
+	// offsets stay consistent with the text the caller received. Total
+	// is captured before any mutation; the truncated flag is computed
+	// BEFORE the suffix mutation (computing it after appending
+	// "...[truncated]" made the flag an accident of suffix length).
+	totalChars := len(text)
+
+	// Normalize pagination: negative or oversized offsets clamp to the
+	// valid range; max_chars <= 0 falls back to the 100k default and is
+	// hard-capped at it.
+	offset := p.Offset
+	if offset < 0 {
+		offset = 0
 	}
+	if offset > totalChars {
+		offset = totalChars
+	}
+	maxChars := p.MaxChars
+	if maxChars <= 0 {
+		maxChars = TranscriptMaxOutputLength
+	}
+	if maxChars > TranscriptMaxOutputLength {
+		maxChars = TranscriptMaxOutputLength
+	}
+
+	end := offset + maxChars
+	if end > totalChars {
+		end = totalChars
+	}
+	page := text[offset:end]
+	// Clipped = the remaining text after the offset exceeded max_chars.
+	// Computed from lengths captured BEFORE any mutation, never from the
+	// post-suffix length (which made the flag an accident of suffix
+	// length). With default pagination this degenerates to the legacy
+	// "full text exceeded the 100k cap" semantics.
+	clipped := totalChars-offset > maxChars
+	if clipped {
+		// Content was actually cut: mark it in-band for the caller.
+		page += transcriptTruncationSuffix
+	}
+	truncated := clipped
 
 	t.logger.Debug("fetched youtube transcript",
 		"video_id", videoID,
 		"language", p.Language,
 		"timestamps", p.Timestamps,
-		"chars", len(text))
+		"chars", len(page))
 
 	return map[string]any{
-		"video_id":   videoID,
-		"content":    text,
-		"truncated":  len(text) > TranscriptMaxOutputLength,
-		"timestamps": p.Timestamps,
+		"video_id":    videoID,
+		"content":     page,
+		"truncated":   truncated,
+		"timestamps":  p.Timestamps,
+		"offset":      offset,
+		"total_chars": totalChars,
 	}, nil
 }
 

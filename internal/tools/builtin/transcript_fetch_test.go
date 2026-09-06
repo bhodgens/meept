@@ -236,7 +236,7 @@ func TestTranscriptFetch_Execute_BadURL(t *testing.T) {
 
 func TestTranscriptFetch_Execute_Truncation(t *testing.T) {
 	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
-		// Each "word \n" line is 6 formatted chars; 25k lines = 150k
+		// Each "word \n" line is 6 formatted chars; 25k lines = 149999
 		// formatted chars, comfortably over the 100k cap.
 		var b strings.Builder
 		for i := 0; i < 25000; i++ {
@@ -258,11 +258,135 @@ func TestTranscriptFetch_Execute_Truncation(t *testing.T) {
 	if !strings.HasSuffix(content, "...[truncated]") {
 		t.Errorf("content does not end with truncation suffix: %q", content[len(content)-40:])
 	}
-	if len(content) > TranscriptMaxOutputLength+len("...[truncated]") {
-		t.Errorf("content length = %d, exceeds cap", len(content))
-	}
 	if m["truncated"] != true {
 		t.Error("truncated flag = false, want true")
+	}
+	// Pagination metadata is always present, even for unpaginated calls.
+	if got, ok := m["total_chars"].(int); !ok || got != 149999 {
+		t.Errorf("total_chars = %v (%T), want 149999", m["total_chars"], m["total_chars"])
+	}
+	if got, ok := m["offset"].(int); !ok || got != 0 {
+		t.Errorf("offset = %v (%T), want 0", m["offset"], m["offset"])
+	}
+}
+
+func TestTranscriptFetch_Execute_Pagination(t *testing.T) {
+	// The runner fakes Python stdout (JSON lines); the tool formats each
+	// segment as "text\n", so 20 segments of "abcdefghi" yield exactly
+	// 199 formatted chars: chars 100..149 are five whole lines.
+	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
+		var b strings.Builder
+		for i := 0; i < 20; i++ {
+			b.WriteString(`{"text": "abcdefghi", "start": 0.0}` + "\n")
+		}
+		return []byte(b.String()), nil, nil
+	}
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	tool.SetTranscriptRunner(runner)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"offset":    100,
+		"max_chars": 50,
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	m, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", res)
+	}
+	// Chars 100-150 of the formatted text; the page was clipped at its
+	// end, so the truncation suffix is appended after the 50 chars.
+	wantPrefix := strings.Repeat("abcdefghi\n", 5)
+	got := m["content"].(string)
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Errorf("content = %q, want prefix %q", got, wantPrefix)
+	}
+	if !strings.HasSuffix(got, transcriptTruncationSuffix) {
+		t.Errorf("clipped page must carry truncation suffix, got %q", got)
+	}
+	if len(got) != 50+len(transcriptTruncationSuffix) {
+		t.Errorf("content length = %d, want %d (50 slice chars + suffix)", len(got), 50+len(transcriptTruncationSuffix))
+	}
+	if got := m["total_chars"]; got != 199 {
+		t.Errorf("total_chars = %v (%T), want 199", m["total_chars"], m["total_chars"])
+	}
+	if got := m["offset"]; got != 100 {
+		t.Errorf("offset = %v (%T), want 100", m["offset"], m["offset"])
+	}
+	if m["truncated"] != true {
+		t.Error("truncated flag = false, want true (slice was clipped by max_chars)")
+	}
+}
+
+func TestTranscriptFetch_Execute_OffsetBeyondTotal(t *testing.T) {
+	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
+		var b strings.Builder
+		for i := 0; i < 20; i++ {
+			b.WriteString(`{"text": "abcdefghi", "start": 0.0}` + "\n")
+		}
+		return []byte(b.String()), nil, nil
+	}
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	tool.SetTranscriptRunner(runner)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":    "DWoJZs6TuVs",
+		"offset": 500,
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	m := res.(map[string]any)
+	if got := m["content"]; got != "" {
+		t.Errorf("content = %q, want empty", got)
+	}
+	if got := m["total_chars"]; got != 199 {
+		t.Errorf("total_chars = %v (%T), want 199", m["total_chars"], m["total_chars"])
+	}
+	if got := m["offset"]; got != 199 {
+		t.Errorf("offset = %v (%T), want 199 (echo clamped to total)", m["offset"], m["offset"])
+	}
+	if m["truncated"] != false {
+		t.Error("truncated flag = true, want false (nothing was clipped)")
+	}
+}
+
+// TestTranscriptFetch_Execute_NoFalseTruncationUnderCap pins the BUG B
+// fix: a transcript BELOW the 100k cap must never carry the truncated
+// flag or suffix. 10000 lines of "abcdefgh\n" format to exactly 89999
+// chars.
+func TestTranscriptFetch_Execute_NoFalseTruncationUnderCap(t *testing.T) {
+	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
+		var b strings.Builder
+		for i := 0; i < 10000; i++ {
+			b.WriteString(`{"text": "abcdefgh", "start": 0.0}` + "\n")
+		}
+		return []byte(b.String()), nil, nil
+	}
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	tool.SetTranscriptRunner(runner)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url": "DWoJZs6TuVs",
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	m := res.(map[string]any)
+	if m["truncated"] != false {
+		t.Error("truncated flag = true, want false for a sub-cap transcript")
+	}
+	content := m["content"].(string)
+	if strings.HasSuffix(content, transcriptTruncationSuffix) {
+		t.Errorf("content must not carry truncation suffix, got %q tail", content[len(content)-40:])
+	}
+	if got := m["total_chars"]; got != 89999 {
+		t.Errorf("total_chars = %v, want 89999", got)
+	}
+	if len(content) != 89999 {
+		t.Errorf("content length = %d, want 89999 (whole transcript, no page clipping)", len(content))
 	}
 }
 
@@ -370,6 +494,19 @@ func TestTranscriptFetch_NameAndSchema(t *testing.T) {
 		t.Error("schema missing \"language\" property")
 	} else if p.Type != schemaTypeString {
 		t.Errorf("language.Type = %q, want %q", p.Type, schemaTypeString)
+	}
+	if p, ok := props["offset"]; !ok {
+		t.Error("schema missing \"offset\" property")
+	} else if p.Type != schemaTypeInteger {
+		t.Errorf("offset.Type = %q, want %q", p.Type, schemaTypeInteger)
+	}
+	if p, ok := props["max_chars"]; !ok {
+		t.Error("schema missing \"max_chars\" property")
+	} else if p.Type != schemaTypeInteger {
+		t.Errorf("max_chars.Type = %q, want %q", p.Type, schemaTypeInteger)
+	}
+	if len(params.Required) != 1 || params.Required[0] != "url" {
+		t.Errorf("Required = %v, want exactly [\"url\"] (offset/max_chars optional)", params.Required)
 	}
 
 	// Config defaults.
