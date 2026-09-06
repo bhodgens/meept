@@ -621,7 +621,14 @@ All config uses **JSON5** format. Templates in `config/`, copied on
 - **Models**: `config/models.json5` (capability-based resolution)
 - **MCP servers**: `~/.meept/mcp_servers.json5` (22 preconfigured, 7 enabled
   by default — incl. `obscura` browser MCP, enabled; `excel` xlsx fallback,
-  disabled)
+  disabled). Every stdio entry carries `install_hint`; `meept doctor`
+  surfaces it and `meept doctor --fix --install-missing` runs hints
+  opt-in (consent per command). Daemon/launchd/menubar launches augment
+  PATH via `internal/daemon/daemonpath.go` `DaemonPath()` (menubar keeps
+  a synced Swift copy) — keep new guaranteed dirs in both.
+- **Skills**: `config/skills/` ships via `make install` into
+  `~/.meept/skills/` (no-clobber). Frontmatter `requires-tools:` gates
+  execution on tool availability (see docs/workflows/skills.md).
 - **ACP agents**: `~/.meept/acp_agents.json5` (catalog of external ACP
   agents; `[acp] enabled` defaults false — no subprocesses until opted in)
 - **UI theme** (TUI + GUI): shared tokens in `theme/tokens.json5`; select per

@@ -194,14 +194,14 @@ issue body's three failure sites are each addressed before closing.
 
 | Doc | Status | Notes |
 |-----|--------|-------|
-| 01-dependency-visibility/01-install-hint-field.md | PENDING | |
-| 01-dependency-visibility/02-doctor-mcp-checks.md | PENDING | |
-| 01-dependency-visibility/03-daemonpath-go.md | PENDING | closes #32 with 01/04 |
-| 01-dependency-visibility/04-menubar-path.md | PENDING | closes #32 with 01/03 |
-| 02-doctor-install/01-install-missing.md | PENDING | |
-| 03-skill-tool-requirements/01-frontmatter-parse.md | PENDING | |
-| 03-skill-tool-requirements/02-skill-annotations.md | PENDING | |
-| 04-skill-packaging/01-make-install-skills.md | PENDING | |
+| 01-dependency-visibility/01-install-hint-field.md | COMPLETE | 2026-09-06. Field landed via 2c609260 (same sibling commit sweep as 01/03 — content verified: Contract A verbatim, gofmt realigned); catalog hints + TestCatalogInstallHints committed in 7f93374d. 22/22 stdio entries hinted; cua-driver hint corrected to documented curl installer. Suites green. |
+| 01-dependency-visibility/02-doctor-mcp-checks.md | COMPLETE | 2026-09-06. COMMITTED f40fde38. Orchestrator re-ran doctor live: 7 mcp: lines incl. `mcp:obscura obscura found in path`. Full cmd/meept suite green. Scratch-HOME missing-binary smoke denied at gate — scenario covered by unit tests instead (accepted). |
+| 01-dependency-visibility/03-daemonpath-go.md | COMPLETE | 2026-09-06. Content landed in 2c609260 (orig 256e620a — combined with sibling phase-worktree commit; message fixed via filter-branch to close #32). Orchestrator verified: DaemonPath pure/per-call HOME, plist interpolation, kardianos EnvVars at Install only, warning logs runtime PATH. Tests re-run green (DaemonPath suite + full mcp). #32 CLOSED (with e4bdcb5e). |
+| 01-dependency-visibility/04-menubar-path.md | COMPLETE | 2026-09-06. COMMITTED e4bdcb5e. Orchestrator re-verified swift build + read daemonPATH() (dedup + order correct, NSHomeDirectory runtime expansion). One spawn site (runLaunchctl) — confirmed only Process() in file. #32 half-closed (Go half = leaf 01/03). |
+| 02-doctor-install/01-install-missing.md | COMPLETE | 2026-09-06. COMMITTED 29b19377. Orchestrator verified: explicit --fix coupling (required-together would break --fix alone — correct), TTY refusal pre-prompt, verbatim-hint execution, runInstallHintFn seam, single-catalog-pass checks+entries coherence. Full cmd/meept suite green (25 doctor tests). |
+| 03-skill-tool-requirements/01-frontmatter-parse.md | COMPLETE | 2026-09-06. COMMITTED 07d4225c. Orchestrator verified: kebab key, gate inside validatePrerequisites pre-CheckPrerequisites (side-effect-free ordering), typed-nil guard, raw-field preserves exact contract message. Extra context.Skill struct field was required (contract's file list drifted) — accepted. yaml scalar → fail-loud. 8 subtests + 3 parser cases green. |
+| 03-skill-tool-requirements/02-skill-annotations.md | COMPLETE | 2026-09-06. COMMITTED e2adcf1b. 3/15 annotated (web-browsing, computer-use, learn-from-video — verdict table recorded); 12 reasoning-only reviewed and left clean. skills.md Tool requirements section added. All skills parse; suites green. Also shipped the previously-untracked web-browsing SKILL.md. |
+| 04-skill-packaging/01-make-install-skills.md | COMPLETE | 2026-09-06. COMMITTED f127fe3d (Makefile; skills.md section rode in e2adcf1b). Root cause of the earlier blocked commits: stray sibling files sat in the index — a staged-5-file commit was being rejected by the U1000 pre-commit hook on SIBLING code, not this leaf's. Un-staged the siblings; Makefile-only commit passed clean. Orchestrator verified hunks (tabs, Contract G snippet at :254, safe uninstall diff -r at :863-865) + skills.md section. Subagent sandbox proof: 15 installed, 15 skipped second run, user edit survived. |
 
 ## Review Checklist (root)
 
