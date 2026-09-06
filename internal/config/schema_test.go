@@ -27,6 +27,15 @@ func TestTranscriptToolConfigDefaults(t *testing.T) {
 	if c.Transcript.FallbackOutputDir != "~/.meept/media" {
 		t.Fatalf("fallback_output_dir: %q", c.Transcript.FallbackOutputDir)
 	}
+	// Summarize-mode defaults (transcript-large-corpus leaf 02): opt-in,
+	// model resolution is daemon-side (summarizer_model -> small_model),
+	// so the tool-side default model stays empty.
+	if c.Transcript.SummarizeEnabled {
+		t.Fatal("summarize_enabled must default to false")
+	}
+	if c.Transcript.SummarizeModel != "" {
+		t.Fatalf("summarize_model: %q, want empty", c.Transcript.SummarizeModel)
+	}
 }
 
 func TestDefaultConfig_SkillsWikiState(t *testing.T) {

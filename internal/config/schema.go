@@ -164,6 +164,14 @@ type TranscriptConfig struct {
 	// tool is called outside a workspace). Mirrors MediaConfig.OutputDir
 	// resolution; default "~/.meept/media" when empty.
 	FallbackOutputDir string `json:"fallback_output_dir" toml:"fallback_output_dir"`
+	// SummarizeEnabled opts in to transcript_fetch's summarize mode at
+	// the config level. The tool itself does not read this field —
+	// registration gating is daemon wiring (leaf 04). Default false.
+	SummarizeEnabled bool `json:"summarize_enabled" toml:"summarize_enabled"`
+	// SummarizeModel names the summarizer model to use. Default "":
+	// daemon-side resolution (summarizer_model -> small_model) decides
+	// the concrete client (leaf 04), not the tool.
+	SummarizeModel string `json:"summarize_model" toml:"summarize_model"`
 }
 
 // DefaultTranscriptConfig returns transcript ingest defaults.
@@ -174,6 +182,8 @@ func DefaultTranscriptConfig() TranscriptConfig {
 		ModuleName:        "youtube-transcript-api",
 		TimeoutSeconds:    60,
 		FallbackOutputDir: "~/.meept/media",
+		SummarizeEnabled:  false,
+		SummarizeModel:    "",
 	}
 }
 
@@ -2968,6 +2978,8 @@ func DefaultConfig() *Config {
 			ModuleName:        DefaultTranscriptConfig().ModuleName,
 			TimeoutSeconds:    DefaultTranscriptConfig().TimeoutSeconds,
 			FallbackOutputDir: DefaultTranscriptConfig().FallbackOutputDir,
+			SummarizeEnabled:  DefaultTranscriptConfig().SummarizeEnabled,
+			SummarizeModel:    DefaultTranscriptConfig().SummarizeModel,
 		},
 		Secrets: SecretsConfig{
 			// Empty non-nil map: no secrets declared by default. Real values

@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 )
 
@@ -402,6 +404,385 @@ func TestTranscriptFetch_SetTranscriptRunner_NilGuard(t *testing.T) {
 	tool.SetTranscriptRunner(nil)
 	if tool.runner == nil {
 		t.Fatal("SetTranscriptRunner(nil) cleared the default runner")
+	}
+}
+
+// transcriptFakeChatter is the in-test llm.Chatter fake: it records every
+// call's user-role content in order and returns canned responses —
+// "map-summary-N" for map-stage calls and the configured digest for the
+// reduce stage. No real LLM is ever contacted. errOnCall lets tests
+// fault-inject a specific 1-based call.
+type transcriptFakeChatter struct {
+	mu        sync.Mutex
+	calls     []llm.ChatMessage
+	contents  []string // user-role content per call, order-preserved
+	resp      *llm.Response
+	err       error
+	errOnCall map[int]error // 1-based call index -> error override
+}
+
+func (f *transcriptFakeChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, messages...)
+	for _, m := range messages {
+		if m.Role == llm.RoleUser {
+			f.contents = append(f.contents, m.Content)
+		}
+	}
+	idx := len(f.contents)
+	if e, ok := f.errOnCall[idx]; ok && e != nil {
+		return nil, e
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	// Stage-aware canned responses: f.resp is the REDUCE-stage digest
+	// (detected by the reduce system prompt); map-stage calls always
+	// get the default map-summary-N so tests can see distinct windows.
+	isReduce := false
+	for _, m := range messages {
+		if m.Role == llm.RoleSystem && m.Content == transcriptSummarizeReduceSystem {
+			isReduce = true
+			break
+		}
+	}
+	if isReduce && f.resp != nil {
+		return f.resp, nil
+	}
+	return &llm.Response{Content: fmt.Sprintf("map-summary-%d", idx)}, nil
+}
+
+func (f *transcriptFakeChatter) ChatWithProgress(ctx context.Context, messages []llm.ChatMessage, progress llm.ProgressCallback, opts ...llm.ChatOption) (*llm.Response, error) {
+	return f.Chat(ctx, messages, opts...)
+}
+
+func (f *transcriptFakeChatter) Config() *llm.ModelConfig { return &llm.ModelConfig{} }
+
+// summarizeChatterFor returns a tool with the fake chatter wired and a
+// runner producing a single-segment transcript of n words (each word is
+// 6 chars + separator, so len(text) ~= 6n).
+func summarizeChatterFor(t *testing.T, words int, ch *transcriptFakeChatter) *TranscriptFetchTool {
+	t.Helper()
+	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
+		var b strings.Builder
+		for i := 0; i < words; i++ {
+			fmt.Fprintf(&b, "w%05d ", i)
+		}
+		stdout := fmt.Sprintf("{\"text\": %q, \"start\": 0.0}\n", strings.TrimRight(b.String(), " "))
+		return []byte(stdout), nil, nil
+	}
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	tool.SetTranscriptRunner(runner)
+	tool.SetSummarizer(ch)
+	return tool
+}
+
+func TestTranscriptFetch_Summarize_ShortText_SingleReduce(t *testing.T) {
+	ch := &transcriptFakeChatter{resp: &llm.Response{Content: "reduced-digest"}}
+	tool := summarizeChatterFor(t, 100, ch) // ~600 chars < one 12k window
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"summarize": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	if got := len(ch.contents); got != 1 {
+		t.Fatalf("chat calls = %d, want 1 (reduce only, map skipped)", got)
+	}
+	m := res.(map[string]any)
+	if m["content"] != "reduced-digest" {
+		t.Errorf("content = %v, want reduced-digest", m["content"])
+	}
+	if m["chunk_count"] != 1 {
+		t.Errorf("chunk_count = %v, want 1", m["chunk_count"])
+	}
+	if m["summarized"] != true {
+		t.Errorf("summarized = %v, want true", m["summarized"])
+	}
+	// total_chars reports the pre-summarization text length (the same
+	// ~6n word shape the runner produced).
+	if tc, ok := m["total_chars"].(int); !ok || tc < 500 || tc > 700 {
+		t.Errorf("total_chars = %v, want ~600 for 100 short words", m["total_chars"])
+	}
+	if m["video_id"] != "DWoJZs6TuVs" {
+		t.Errorf("video_id = %v, want DWoJZs6TuVs", m["video_id"])
+	}
+}
+
+func TestTranscriptFetch_Summarize_LongText_MapReduce(t *testing.T) {
+	ch := &transcriptFakeChatter{resp: &llm.Response{Content: "reduced-digest"}}
+	tool := summarizeChatterFor(t, 6000, ch) // ~36k chars -> 3-4 windows
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"summarize": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	n := len(ch.contents)
+	if n <= 1 || n > 5 {
+		t.Fatalf("chat calls = %d, want 3-4 (map windows + 1 reduce)", n)
+	}
+	// Each map call's user content is a window: bounded by window +
+	// overlap, never empty.
+	for i, win := range ch.contents[:n-1] {
+		if len(win) == 0 {
+			t.Errorf("window %d empty", i)
+		}
+		if len(win) > transcriptSummarizeWindowChars+transcriptSummarizeOverlapChars+1 {
+			t.Errorf("window %d len = %d, exceeds window+overlap", i, len(win))
+		}
+	}
+	// Reduce call's user content joins all map outputs.
+	reduceIn := ch.contents[n-1]
+	for i := 1; i <= n-1; i++ {
+		if !strings.Contains(reduceIn, fmt.Sprintf("map-summary-%d", i)) {
+			t.Errorf("reduce input missing map-summary-%d", i)
+		}
+	}
+	m := res.(map[string]any)
+	if m["content"] != "reduced-digest" {
+		t.Errorf("content = %v, want reduced-digest", m["content"])
+	}
+	if got := m["chunk_count"]; got != n-1 {
+		t.Errorf("chunk_count = %v, want %d", got, n-1)
+	}
+}
+
+func TestTranscriptFetch_Summarize_MapStageError(t *testing.T) {
+	ch := &transcriptFakeChatter{
+		errOnCall: map[int]error{1: errors.New("boom-map")},
+	}
+	tool := summarizeChatterFor(t, 6000, ch) // multi-window
+
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"summarize": true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "map stage failed") {
+		t.Fatalf("error = %v, want map stage failure", err)
+	}
+}
+
+func TestTranscriptFetch_Summarize_ReduceStageError(t *testing.T) {
+	ch := &transcriptFakeChatter{
+		errOnCall: map[int]error{5: errors.New("boom-reduce")},
+	}
+	tool := summarizeChatterFor(t, 6000, ch) // 4 windows -> reduce is call 5
+
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"summarize": true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "reduce stage failed") {
+		t.Fatalf("error = %v, want reduce stage failure", err)
+	}
+}
+
+func TestTranscriptFetch_Summarize_DigestCapped(t *testing.T) {
+	big := strings.Repeat("d", 5000)
+	ch := &transcriptFakeChatter{resp: &llm.Response{Content: big}}
+	tool := summarizeChatterFor(t, 100, ch)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"summarize": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	m := res.(map[string]any)
+	content := m["content"].(string)
+	if len(content) > 4000+len(transcriptTruncationSuffix) {
+		t.Fatalf("content len = %d, want capped at 4000 + suffix", len(content))
+	}
+	if !strings.HasSuffix(content, transcriptTruncationSuffix) {
+		t.Errorf("content missing truncation suffix")
+	}
+	if !strings.HasPrefix(content, "dddd") {
+		t.Errorf("capped content lost the digest head")
+	}
+}
+
+func TestTranscriptFetch_Summarize_NilSummarizer_ConfigError(t *testing.T) {
+	tool := summarizeChatterFor(t, 100, &transcriptFakeChatter{})
+	tool.summarizer = nil // simulate un-wired daemon
+
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"summarize": true,
+	})
+	want := "transcript_fetch: summarization not configured (set [transcript] summarize_enabled = true and a summarizer_model or small_model in models.json5)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want exactly %q", err, want)
+	}
+}
+
+func TestTranscriptFetch_SplitIntoWindows(t *testing.T) {
+	// Empty input yields no windows.
+	if ws := splitIntoWindows(""); ws != nil {
+		t.Fatalf("empty text: %v, want nil", ws)
+	}
+	// Short text: a single identical window.
+	if ws := splitIntoWindows("hello world"); len(ws) != 1 || ws[0] != "hello world" {
+		t.Fatalf("short text: %v, want one identical window", ws)
+	}
+	// Exact boundary: a 12k text yields exactly one window unchanged.
+	exact := strings.Repeat("a", transcriptSummarizeWindowChars)
+	if ws := splitIntoWindows(exact); len(ws) != 1 || ws[0] != exact {
+		t.Fatalf("exact 12k text: %d windows, want 1 identical", len(ws))
+	}
+	// Long text: multiple windows, each bounded by window+overlap.
+	long := strings.Repeat("abcdefghij", 3000) // 30k, no whitespace
+	ws := splitIntoWindows(long)
+	if len(ws) < 2 {
+		t.Fatalf("30k text: %d windows, want >= 2", len(ws))
+	}
+	for i, w := range ws {
+		if len(w) > transcriptSummarizeWindowChars+transcriptSummarizeOverlapChars+1 {
+			t.Errorf("window %d len = %d, exceeds window+overlap", i, len(w))
+		}
+	}
+	// Overlap correctness: each window starts with the previous
+	// window's tail (whitespace backoff only ever shrinks a window,
+	// so the overlap prefix survives verbatim).
+	for i := 1; i < len(ws); i++ {
+		prev := ws[i-1]
+		tail := prev[max(0, len(prev)-transcriptSummarizeOverlapChars):]
+		if !strings.HasPrefix(ws[i], tail) {
+			t.Errorf("window %d does not start with the previous window's tail", i)
+		}
+	}
+	// Whitespace backoff: windows never end mid-word. Words are exactly
+	// 21 bytes (20 'x' + space), so every trimmed window must end with
+	// a COMPLETE word: the final 20 chars are all 'x' and the char
+	// before them is a space. (Positional checks against the original
+	// text don't work here — windows beyond the first start mid-text.)
+	spaced := ""
+	for i := 0; i < 2500; i++ {
+		spaced += strings.Repeat("x", 20) + " "
+	}
+	for i, w := range splitIntoWindows(spaced) {
+		trimmed := strings.TrimRight(w, " ")
+		if len(trimmed) < 21 {
+			continue
+		}
+		if strings.Trim(trimmed[len(trimmed)-20:], "x") != "" {
+			t.Errorf("window %d ends inside a word (tail %q)", i, trimmed[len(trimmed)-20:])
+		}
+		if trimmed[len(trimmed)-21] != ' ' {
+			t.Errorf("window %d ends mid-word (char before final word %q)", i, trimmed[len(trimmed)-21])
+		}
+	}
+}
+
+func TestTranscriptFetch_Summarize_WithOutputPath(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "tr.txt")
+	ch := &transcriptFakeChatter{resp: &llm.Response{Content: "reduced-digest"}}
+	tool := summarizeChatterFor(t, 100, ch)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":         "DWoJZs6TuVs",
+		"summarize":   true,
+		"output_path": out,
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	// The file carries the FULL text, not the digest (leaf-01 behavior
+	// composes with summarize).
+	data, rerr := os.ReadFile(out)
+	if rerr != nil {
+		t.Fatalf("output file missing: %v", rerr)
+	}
+	if len(data) < 500 {
+		t.Errorf("file content len = %d, want the full ~600-char transcript", len(data))
+	}
+	if strings.Contains(string(data), "reduced-digest") {
+		t.Errorf("file carries the digest, want the full transcript")
+	}
+	m := res.(map[string]any)
+	if m["content"] != "reduced-digest" {
+		t.Errorf("content = %v, want reduced-digest", m["content"])
+	}
+	if m["summarized"] != true {
+		t.Errorf("summarized = %v, want true", m["summarized"])
+	}
+	if m["chunk_count"] != 1 {
+		t.Errorf("chunk_count = %v, want 1", m["chunk_count"])
+	}
+	if m["path"] != out {
+		t.Errorf("path = %v, want %v", m["path"], out)
+	}
+}
+
+func TestTranscriptFetch_Summarize_NoOutputPath_NoPathKey(t *testing.T) {
+	ch := &transcriptFakeChatter{resp: &llm.Response{Content: "reduced-digest"}}
+	tool := summarizeChatterFor(t, 100, ch)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"summarize": true,
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	m := res.(map[string]any)
+	if m["content"] != "reduced-digest" {
+		t.Errorf("content = %v, want reduced-digest", m["content"])
+	}
+	if _, ok := m["path"]; ok {
+		t.Errorf("path key present without output_path")
+	}
+}
+
+func TestTranscriptFetch_Summarize_False_NoChatCalls(t *testing.T) {
+	ch := &transcriptFakeChatter{resp: &llm.Response{Content: "reduced-digest"}}
+	tool := summarizeChatterFor(t, 100, ch)
+
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url": "DWoJZs6TuVs", // summarize absent -> verbatim path
+	})
+	if err != nil {
+		t.Fatalf("Execute unexpected error: %v", err)
+	}
+	if got := len(ch.calls); got != 0 {
+		t.Fatalf("chat calls = %d, want 0 when summarize is absent", got)
+	}
+	m := res.(map[string]any)
+	content := m["content"].(string)
+	if !strings.HasPrefix(content, "w00000") {
+		t.Errorf("content = %q, want the verbatim transcript", content)
+	}
+	if _, ok := m["summarized"]; ok {
+		t.Errorf("summarized key present when summarize is absent")
+	}
+}
+
+func TestTranscriptFetch_SetSummarizer_NilGuard(t *testing.T) {
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	// Nil must be ignored, leaving the summarizer unset (nil-guard
+	// convention; mirrors SetTranscriptRunner).
+	tool.SetSummarizer(nil)
+	if tool.summarizer != nil {
+		t.Fatal("SetSummarizer(nil) set the summarizer field")
+	}
+}
+
+func TestTranscriptFetch_Parameters_Summarize(t *testing.T) {
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	props := tool.Parameters().Properties
+	p, ok := props["summarize"]
+	if !ok {
+		t.Fatal("summarize parameter missing from Parameters()")
+	}
+	if p.Type != schemaTypeBoolean {
+		t.Errorf("summarize type = %q, want %q", p.Type, schemaTypeBoolean)
 	}
 }
 

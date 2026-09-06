@@ -41,6 +41,34 @@ const (
 	transcriptTruncationSuffix = "...[truncated]"
 	// transcriptFilePointerSuffix names the file carrying the full text.
 	transcriptFilePointerSuffix = "\n...[full transcript at %s]"
+
+	// transcriptSummarizeWindowChars is the map-stage window size: text
+	// at or below this length gets a single reduce call over the whole
+	// text; longer text is sliced into windows of this size.
+	transcriptSummarizeWindowChars = 12000
+	// transcriptSummarizeOverlapChars is how much consecutive windows
+	// overlap, so sentences straddling a boundary survive in at least
+	// one window whole.
+	transcriptSummarizeOverlapChars = 500
+	// transcriptSummarizeBackoffChars bounds the whitespace backoff when
+	// searching backwards from a window boundary for a word break.
+	transcriptSummarizeBackoffChars = 200
+	// transcriptSummarizeDigestChars caps the final digest returned in
+	// the result content (~4k chars keeps the conversation small).
+	transcriptSummarizeDigestChars = 4000
+
+	// transcriptSummarizeMapSystem is the MAP-stage system prompt
+	// (contract text; do not paraphrase).
+	transcriptSummarizeMapSystem = "Summarize this transcript segment. Preserve: steps, decision rules, tool/API names, numbers, and the WHY behind choices. Drop filler and repetition. Max 300 words."
+	// transcriptSummarizeReduceSystem is the REDUCE-stage system prompt
+	// (contract text; do not paraphrase).
+	transcriptSummarizeReduceSystem = "Merge these segment summaries into one coherent summary. Keep every step, rule, name, and number. Max 800 words."
+	// transcriptSummarizeSep joins per-chunk summaries for the reduce call.
+	transcriptSummarizeSep = "\n---\n"
+
+	// transcriptSummarizeNotConfiguredError is returned when summarize
+	// mode runs without a wired summarizer client. Verbatim contract.
+	transcriptSummarizeNotConfiguredError = "transcript_fetch: summarization not configured (set [transcript] summarize_enabled = true and a summarizer_model or small_model in models.json5)"
 )
 
 // transcriptRunnerFunc is the injectable subprocess command runner. It
@@ -80,6 +108,10 @@ type TranscriptFetchTool struct {
 	// runner executes the Python subprocess; defaults to
 	// execCommandContextRunner (exec.CommandContext). Injectable for tests.
 	runner transcriptRunnerFunc
+	// summarizer is the optional local summarizer client (llm.Chatter)
+	// used by summarize mode. Nil until SetSummarizer wires it; nil +
+	// summarize=true yields the config error.
+	summarizer llm.Chatter
 }
 
 // NewTranscriptFetchTool creates a new transcript fetch tool, applying
@@ -119,12 +151,22 @@ func (t *TranscriptFetchTool) SetTranscriptRunner(fn transcriptRunnerFunc) {
 	}
 }
 
+// SetSummarizer injects the local summarizer client used by summarize
+// mode. Nil is ignored, leaving the field unset (nil-guard convention).
+// Must be called before the tool serves requests; the daemon wires it
+// when [transcript] summarize_enabled is true (leaf 04 wiring).
+func (t *TranscriptFetchTool) SetSummarizer(chatter llm.Chatter) {
+	if chatter != nil {
+		t.summarizer = chatter
+	}
+}
+
 func (t *TranscriptFetchTool) Name() string { return "transcript_fetch" }
 
 func (t *TranscriptFetchTool) Category() string { return "web" }
 
 func (t *TranscriptFetchTool) Description() string {
-	return "Fetch the transcript of a YouTube video and return it as plain text. Accepts any YouTube URL form (watch, youtu.be, shorts, embed, live) or a bare 11-character video ID. Auto-generated and human transcripts are both supported. Useful for reading video content without watching it."
+	return "Fetch the transcript of a YouTube video and return it as plain text. Accepts any YouTube URL form (watch, youtu.be, shorts, embed, live) or a bare 11-character video ID. Auto-generated and human transcripts are both supported. Useful for reading video content without watching it. Supports an optional summarize mode that returns an LLM digest instead of the verbatim text."
 }
 
 func (t *TranscriptFetchTool) Parameters() llm.FunctionParameters {
@@ -155,6 +197,10 @@ func (t *TranscriptFetchTool) Parameters() llm.FunctionParameters {
 				Type:        schemaTypeString,
 				Description: "Optional file path to write the full formatted transcript to. Relative paths resolve against the session working directory (falling back to the configured output root outside a workspace); parent directories are created automatically. The response carries the resolved path plus a bounded preview, or the normal paginated window when offset/max_chars is used.",
 			},
+			"summarize": {
+				Type:        schemaTypeBoolean,
+				Description: "If true, return an LLM-generated digest of the transcript (map-reduce over ~12k-char windows via the configured local summarizer) instead of verbatim text. offset/max_chars pagination is ignored in this mode. Composes with output_path: the full text still goes to disk while the response carries the digest. Errors with configuration guidance when no summarizer is wired.",
+			},
 		},
 		Required: []string{"url"},
 	}
@@ -175,10 +221,12 @@ type transcriptParams struct {
 	Offset     int    `json:"offset"`
 	MaxChars   int    `json:"max_chars"`
 	OutputPath string `json:"output_path"`
+	Summarize  bool   `json:"summarize"`
 }
 
 // Execute fetches the transcript for the requested video and returns
-// plain text (optionally timestamped) as a tool result.
+// plain text (optionally timestamped) as a tool result. With
+// summarize=true it instead returns a map-reduce digest.
 func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	// Typed struct parse: the two-value map walk used elsewhere is not
 	// needed; re-marshal a normalized map and decode.
@@ -219,6 +267,39 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 		if err := writeTranscriptFile(outPath, text); err != nil {
 			return nil, err
 		}
+	}
+	// Summarize mode: map-reduce the FULL text into a digest and return
+	// it instead of paginating. Branch order matters — this runs after
+	// the output_path write (the file still receives the full text, so
+	// summarize composes with leaf-01 file-backed output) and BEFORE
+	// pagination. Summarize and pagination are mutually exclusive paths
+	// in one call: when summarize=true, offset/max_chars are IGNORED —
+	// the digest is already conversation-sized (~4k chars).
+	if p.Summarize {
+		if t.summarizer == nil {
+			return nil, errors.New(transcriptSummarizeNotConfiguredError)
+		}
+		digest, chunkCount, err := t.summarizeText(ctx, text)
+		if err != nil {
+			return nil, err
+		}
+		t.logger.Debug("summarized youtube transcript",
+			"video_id", videoID,
+			"chunks", chunkCount,
+			"source_chars", len(text))
+		result := map[string]any{
+			"video_id":    videoID,
+			"content":     digest,
+			"summarized":  true,
+			"chunk_count": chunkCount,
+			"total_chars": len(text),
+			"timestamps":  p.Timestamps,
+		}
+		// Contract: "path" appears only when output_path was given.
+		if outPath != "" {
+			result["path"] = outPath
+		}
+		return result, nil
 	}
 	// Pagination slices the FORMATTED text (timestamps included), so
 	// offsets stay consistent with the text the caller received. Total
@@ -292,6 +373,129 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 		result["path"] = outPath
 	}
 	return result, nil
+}
+
+// summarizeText runs the sequential map-reduce over text through the
+// injected summarizer chatter and returns the trimmed/capped digest
+// plus the chunk count (1 for the short-text single-reduce path, else
+// the window count). No goroutines: each stage waits for the previous.
+// The caller's ctx deadline (set in Execute from timeoutSeconds) bounds
+// the whole operation.
+func (t *TranscriptFetchTool) summarizeText(ctx context.Context, text string) (string, int, error) {
+	chat := func(system, user string) (string, error) {
+		resp, err := t.summarizer.Chat(ctx, []llm.ChatMessage{
+			{Role: llm.RoleSystem, Content: system},
+			{Role: llm.RoleUser, Content: user},
+		})
+		if err != nil {
+			return "", err
+		}
+		if resp == nil {
+			return "", errors.New("empty summarizer response")
+		}
+		// Models add whitespace; trim before capping.
+		return strings.TrimSpace(resp.Content), nil
+	}
+	// Stage failure mapping: a deadline abort surfaces as a timeout,
+	// otherwise the failing stage is named (map/reduce) — no partial
+	// digest is ever returned.
+	stageErr := func(stage string, err error) error {
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded {
+			return errors.New("transcript_fetch: summarization timed out")
+		}
+		return fmt.Errorf("transcript_fetch: summarization %s stage failed: %w", stage, err)
+	}
+
+	if len(text) <= transcriptSummarizeWindowChars {
+		// Short text: single reduce call over the whole text; the map
+		// stage is skipped.
+		digest, err := chat(transcriptSummarizeReduceSystem, text)
+		if err != nil {
+			return "", 0, stageErr("reduce", err)
+		}
+		return capSummarizeDigest(digest), 1, nil
+	}
+
+	windows := splitIntoWindows(text)
+	summaries := make([]string, 0, len(windows))
+	for _, w := range windows {
+		s, err := chat(transcriptSummarizeMapSystem, w)
+		if err != nil {
+			return "", 0, stageErr("map", err)
+		}
+		summaries = append(summaries, s)
+	}
+	joined := strings.Join(summaries, transcriptSummarizeSep)
+	digest, err := chat(transcriptSummarizeReduceSystem, joined)
+	if err != nil {
+		return "", 0, stageErr("reduce", err)
+	}
+	return capSummarizeDigest(digest), len(windows), nil
+}
+
+// capSummarizeDigest trims the digest and caps it at
+// transcriptSummarizeDigestChars, appending the truncation suffix when
+// content was cut.
+func capSummarizeDigest(digest string) string {
+	digest = strings.TrimSpace(digest)
+	if len(digest) > transcriptSummarizeDigestChars {
+		digest = digest[:transcriptSummarizeDigestChars] + transcriptTruncationSuffix
+	}
+	return digest
+}
+
+// splitIntoWindows slices text into ~transcriptSummarizeWindowChars
+// windows with transcriptSummarizeOverlapChars overlap. Window
+// boundaries back off to the nearest whitespace byte (never mid-word
+// when a break is reachable within the backoff budget); the next window
+// starts overlap chars before the previous window's end, so its head
+// literally repeats the previous window's tail. Empty input returns
+// nil; text at or below one window returns a single window unchanged.
+func splitIntoWindows(text string) []string {
+	if text == "" {
+		return nil
+	}
+	if len(text) <= transcriptSummarizeWindowChars {
+		return []string{text}
+	}
+	const ws = " \t\n\r"
+	var windows []string
+	start := 0
+	for start < len(text) {
+		endCut := start + transcriptSummarizeWindowChars
+		if endCut >= len(text) {
+			// Final window: the remainder, unmodified.
+			windows = append(windows, text[start:])
+			break
+		}
+		// Whitespace backoff: walk backwards from the boundary looking
+		// for a separator to end the window just before.
+		cut := endCut
+		for back := 0; cut > start+1 && back < transcriptSummarizeBackoffChars; back++ {
+			if strings.IndexByte(ws, text[cut-1]) >= 0 {
+				cut--
+				break
+			}
+			cut--
+		}
+		w := strings.TrimRight(text[start:cut], ws)
+		if w == "" {
+			// Degenerate whitespace-only span: skip it, keep scanning.
+			start = cut
+			continue
+		}
+		windows = append(windows, w)
+		// Next window starts overlap chars before this window's end
+		// (measured on the trimmed window, so the overlap is exact).
+		next := start + len(w) - transcriptSummarizeOverlapChars
+		if next <= start {
+			// Degenerate window shorter than the overlap: advance
+			// without repetition rather than stalling.
+			next = start + len(w)
+		}
+		start = next
+	}
+	return windows
 }
 
 // resolveOutputPath resolves a raw output_path against the session
