@@ -283,6 +283,10 @@ func (m *ServiceManager) Install() error {
 		Description: "Meept AI daemon -- agent loop orchestration",
 		Executable:  m.daemonPath,
 		Arguments:   []string{},
+		// kardianos/service.Config.EnvVars (verified via `go doc`) lands in
+		// the generated launchd plist's EnvironmentVariables, fixing issue
+		// #32 ("works in shell, fails under launchd").
+		EnvVars: map[string]string{"PATH": DaemonPath()},
 	}
 
 	svc, err := service.New(prg, cfg)
@@ -326,10 +330,10 @@ func (m *ServiceManager) writePlistAndLoad(label string) {
     <key>KeepAlive</key><true/>
     <key>WorkingDirectory</key><string>%s</string>
     <key>EnvironmentVariables</key>
-    <dict><key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin</string></dict>
+    <dict><key>PATH</key><string>%s</string></dict>
 </dict>
 </plist>
-`, label, m.daemonPath, getHomeDirOrFallback())
+`, label, m.daemonPath, getHomeDirOrFallback(), DaemonPath())
 
 	if err := os.WriteFile(plistPath, []byte(plist), 0o600); err != nil {
 		return

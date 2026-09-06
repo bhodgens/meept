@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -20,17 +21,25 @@ import (
 
 // ServerConfig defines the configuration for an MCP server.
 type ServerConfig struct {
-	Name           string            `json:"name"`
-	Enabled        *bool             `json:"enabled,omitempty"` // nil/absent = true (backward compat)
-	Command        []string          `json:"command,omitempty"` // For stdio transport
-	URL            string            `json:"url,omitempty"`     // For HTTP transport
-	Type           string            `json:"type,omitempty"`    // "stdio" or "http"
-	Env            map[string]string `json:"env,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`          // For HTTP transport
-	Description    string            `json:"description,omitempty"`      // Optional, for UI display
-	Category       string            `json:"category,omitempty"`         // Optional, for UI grouping
-	RateLimitRPS   float64           `json:"rate_limit_rps,omitempty"`   // Requests per second (default: 10)
-	RateLimitBurst int               `json:"rate_limit_burst,omitempty"` // Burst size (default: 20)
+	Name        string            `json:"name"`
+	Enabled     *bool             `json:"enabled,omitempty"` // nil/absent = true (backward compat)
+	Command     []string          `json:"command,omitempty"` // For stdio transport
+	URL         string            `json:"url,omitempty"`     // For HTTP transport
+	Type        string            `json:"type,omitempty"`    // "stdio" or "http"
+	Env         map[string]string `json:"env,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`     // For HTTP transport
+	Description string            `json:"description,omitempty"` // Optional, for UI display
+	Category    string            `json:"category,omitempty"`    // Optional, for UI grouping
+	// InstallHint is the shell command that installs the server's
+	// dependency when it is missing from PATH (e.g. "npm install -g
+	// @modelcontextprotocol/server-github", "brew install uv",
+	// "cargo install --path <obscura-checkout>/crates/obscura"). Empty
+	// means the entry has no external binary dependency (http transport)
+	// or no known installer. Display-only: meept NEVER executes it
+	// without explicit user consent (see doctor --install-missing).
+	InstallHint    string  `json:"install_hint,omitempty"`
+	RateLimitRPS   float64 `json:"rate_limit_rps,omitempty"`   // Requests per second (default: 10)
+	RateLimitBurst int     `json:"rate_limit_burst,omitempty"` // Burst size (default: 20)
 }
 
 // IsEnabled reports whether the server should be started. A nil Enabled
@@ -369,6 +378,18 @@ func (m *Manager) StartServer(ctx context.Context, cfg ServerConfig) error {
 
 	// Connect — no lock held during subprocess I/O
 	if err := client.Connect(ctx); err != nil {
+		// Diagnosability for "works in shell, fails under launchd" (issue
+		// #32): log the PATH a subprocess would actually see. The stdio
+		// transport sets cmd.Env = os.Environ() (transport/stdio.go), so
+		// runtime subprocess PATH == this daemon process's PATH — which
+		// launchd gives as the narrow /usr/bin:/bin:/usr/sbin:/sbin. The
+		// plist-time guarantee is daemon.DaemonPath(); here we log runtime
+		// reality instead.
+		m.logger.Warn("mcp server launch failed",
+			"server", cfg.Name,
+			"error", err,
+			"daemon_path", os.Getenv("PATH"),
+		)
 		wrapped := fmt.Errorf("server %q: failed to connect: %w", cfg.Name, err)
 		recordError(wrapped.Error())
 		return wrapped

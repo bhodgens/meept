@@ -1470,6 +1470,28 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		components.Orchestrator.SetParallelPhases(fullCfg.Plans.ParallelPhases)
 		logger.Info("Orchestrator parallel phases configured",
 			"enabled", fullCfg.Plans.ParallelPhases)
+
+		// Production per-phase worktree provisioner (phase-frontier
+		// follow-up): concurrently active phases get isolated `git
+		// worktree` checkouts of the active project. Failures degrade to
+		// no-worktree inside the orchestrator (Warn, phase continues).
+		if fullCfg.Plans.ParallelPhases && components.ProjectManager != nil {
+			wtRoot := filepath.Join(cfg.StateDir, "phase-worktrees")
+			if fullCfg.Daemon.DataDir != "" {
+				wtRoot = filepath.Join(fullCfg.Daemon.DataDir, "phase-worktrees")
+			}
+			pm := components.ProjectManager
+			components.Orchestrator.SetPhaseWorktreeProvisioner(
+				phaseWorktreeProvisioner(wtRoot, func(ctx context.Context) string {
+					proj, err := pm.GetActive(ctx)
+					if err != nil || proj == nil || proj.LocalPath == "" {
+						return ""
+					}
+					return proj.LocalPath
+				}, logger))
+			logger.Info("Phase worktree provisioner wired",
+				"root", wtRoot)
+		}
 	}
 
 	if drainRequest.Load() > 0 {

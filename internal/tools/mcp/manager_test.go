@@ -1,9 +1,12 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -201,5 +204,84 @@ func TestCallTool_RateLimitEnforced(t *testing.T) {
 	// Second immediate Allow() should fail (rate limited)
 	if limiter.Allow() {
 		t.Error("expected second Allow() to be rate limited")
+	}
+}
+
+// TestStartServer_LaunchFailureWarnsDaemonPath verifies the issue #32
+// diagnosability warning: a stdio server whose binary cannot exist must
+// emit a single Warn line carrying the daemon's runtime PATH (what a
+// subprocess would see via cmd.Env = os.Environ() in transport/stdio.go),
+// so "works in shell, fails under launchd" is diagnosable from the log
+// alone. Seam: the Manager's injectable *slog.Logger (captured via a
+// buffer-backed slog handler) — no code refactor needed.
+func TestStartServer_LaunchFailureWarnsDaemonPath(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	m := NewManager(logger)
+
+	err := m.StartServer(context.Background(), ServerConfig{
+		Name:    "no-such-server",
+		Command: []string{"/nonexistent-binary-xyz"},
+		Type:    "stdio",
+	})
+	if err == nil {
+		t.Fatal("expected StartServer to fail for a nonexistent binary")
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "mcp server launch failed") {
+		t.Fatalf("expected warning line %q in log output, got:\n%s", "mcp server launch failed", out)
+	}
+	for _, want := range []string{`server=no-such-server`, "daemon_path=" + os.Getenv("PATH")} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in log output, got:\n%s", want, out)
+		}
+	}
+
+	// Failure must also be recorded in stats (StateError), matching the
+	// contract of the surrounding error path.
+	m.mu.RLock()
+	st := m.stats["no-such-server"]
+	m.mu.RUnlock()
+	if st == nil || st.State != StateError {
+		t.Fatalf("expected StateError stats entry for failed launch, got %+v", st)
+	}
+}
+
+// TestServerConfigInstallHintRoundTrip verifies the install_hint field
+// round-trips through JSON when set and is omitted entirely when empty
+// (omitempty keeps absent entries clean for existing configs).
+func TestServerConfigInstallHintRoundTrip(t *testing.T) {
+	in := `{"name":"github","type":"stdio","command":["npx","-y","@modelcontextprotocol/server-github"],"install_hint":"npm install -g @modelcontextprotocol/server-github"}`
+	var sc ServerConfig
+	if err := json.Unmarshal([]byte(in), &sc); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if sc.InstallHint != "npm install -g @modelcontextprotocol/server-github" {
+		t.Errorf("InstallHint = %q, want the npm hint", sc.InstallHint)
+	}
+
+	out, err := json.Marshal(sc)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	var back ServerConfig
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatalf("re-unmarshal failed: %v", err)
+	}
+	if back.InstallHint != sc.InstallHint {
+		t.Errorf("round-trip InstallHint = %q, want %q", back.InstallHint, sc.InstallHint)
+	}
+	if !strings.Contains(string(out), `"install_hint"`) {
+		t.Errorf("marshaled JSON missing install_hint key: %s", out)
+	}
+
+	var empty ServerConfig
+	emptyOut, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal empty failed: %v", err)
+	}
+	if strings.Contains(string(emptyOut), "install_hint") {
+		t.Errorf("empty InstallHint should be omitted (omitempty), got: %s", emptyOut)
 	}
 }
