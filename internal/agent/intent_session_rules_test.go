@@ -75,12 +75,15 @@ type capturedChatRequest struct {
 func (cs *captureServer) lastMessages(t *testing.T) []llm.ChatMessage {
 	t.Helper()
 	cs.mu.Lock()
-	defer cs.mu.Unlock()
 	if len(cs.bodies) == 0 {
+		cs.mu.Unlock()
 		t.Fatal("no chat requests captured")
 	}
+	// Collect under lock; decode outside (mutexio: no Unmarshal under lock).
+	body := cs.bodies[len(cs.bodies)-1]
+	cs.mu.Unlock()
 	var req capturedChatRequest
-	if err := json.Unmarshal(cs.bodies[len(cs.bodies)-1], &req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		t.Fatalf("decode captured request: %v", err)
 	}
 	return req.Messages
