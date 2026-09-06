@@ -4,6 +4,7 @@
 /bin/meept
 /meept-lite
 /llmdoc
+/.meept/
 
 # IDE
 .idea/
