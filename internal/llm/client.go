@@ -1510,11 +1510,19 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 
 	content := msg.ContentString()
 
+	// MLX-served LFM2.5 models emit tool calls in their native marker syntax
+	// (<|tool_call_start|>[fn(...)]<|tool_call_end|>) as plain content —
+	// mlx_lm server has no tool-call extractor (llama.cpp does). Recover the
+	// structured calls before the empty-content check, since a reply can be
+	// markers-only with empty plain content.
+	var lfmCalls []ToolCall
+	content, lfmCalls = parseLFMToolCalls(content)
+
 	// Empty content with no tool calls is the "model said nothing" failure.
 	// Surface the sentinel so ClassifyClassificationFailure sees
 	// ClassificationFailureEmptyResponse instead of falling back to
 	// string-matching heuristics.
-	if content == "" && len(msg.ToolCalls) == 0 {
+	if content == "" && len(msg.ToolCalls) == 0 && len(lfmCalls) == 0 {
 		return nil, ErrEmptyResponse
 	}
 
@@ -1524,6 +1532,9 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 		for i, tc := range msg.ToolCalls {
 			toolCalls[i] = tc.ToToolCall()
 		}
+	}
+	if len(lfmCalls) > 0 {
+		toolCalls = append(toolCalls, lfmCalls...)
 	}
 
 	model := chatResp.Model
