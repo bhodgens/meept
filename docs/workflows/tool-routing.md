@@ -32,6 +32,17 @@ Agent Request → Tool Registry → Security Check → Tool Execution → Result
 
 Meept ships a default catalog of 22 preconfigured MCP (Model Context Protocol) servers in `config/mcp_servers.json5`. The template is copied to `~/.meept/mcp_servers.json5` on `make install` if no file exists there yet. Each entry is fully configured with the correct command (`npx` or `uvx` as appropriate), environment variables, category, and description.
 
+### Installing Missing MCP Dependencies
+
+`meept doctor --fix --install-missing` audits the enabled stdio entries in
+`~/.meept/mcp_servers.json5` for missing binaries and offers to install them.
+For each missing server it prints the entry's `install_hint`, asks
+`run this command? [y/N]`, and only on an explicit `y`/`yes` runs the hint
+verbatim under `sh -c` (10 minute ceiling). Hints are never constructed by
+meept, refusals and command failures skip to the next server, and the run
+requires an interactive terminal. Answer `n` or press enter to skip any
+command you would rather run yourself.
+
 ### MCP Security Considerations
 
 > **Important:** MCP tools are external servers that return arbitrary content. As of 2026-06-23:

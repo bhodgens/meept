@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -35,6 +38,7 @@ type doctorCheck struct {
 
 func newDoctorCmd() *cobra.Command {
 	var fix bool
+	var installMissing bool
 
 	cmd := &cobra.Command{
 		Use:   "doctor",
@@ -46,17 +50,40 @@ and orphaned children. When the daemon is reachable its daemon.health
 report is included.
 
 --fix performs only safe repairs: removing a stale pidfile or socket file,
-and killing orphaned meept child processes. Everything else is report-only.`,
+and killing orphaned meept child processes. Everything else is report-only.
+
+--install-missing runs the install_hint shell command of each missing mcp
+server dependency. It requires --fix and prompts before every command;
+hints come from your mcp_servers.json5 and are executed verbatim.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctor(fix)
+			return runDoctor(fix, installMissing)
 		},
 	}
 
 	cmd.Flags().BoolVar(&fix, "fix", false, "Apply safe repairs (stale pidfile/socket removal, orphan kill)")
+	cmd.Flags().BoolVar(&installMissing, "install-missing", false,
+		"run install_hint commands for missing mcp server dependencies "+
+			"(requires --fix; prompts before each; hints come from your mcp_servers.json5 and are executed verbatim)")
 	return cmd
 }
 
-func runDoctor(fix bool) error {
+// validateDoctorFlags is the explicit flag-combination guard for doctor.
+// --install-missing executes shell commands, so it may only run under the
+// user's explicit --fix opt-in. This check (not cobra's
+// MarkFlagsRequiredTogether) is used on purpose: required-together would
+// reject `doctor --fix` alone, which must keep working.
+func validateDoctorFlags(fix, installMissing bool) error {
+	if installMissing && !fix {
+		return fmt.Errorf("--install-missing requires --fix")
+	}
+	return nil
+}
+
+func runDoctor(fix, installMissing bool) error {
+	if err := validateDoctorFlags(fix, installMissing); err != nil {
+		return err
+	}
+
 	stateDirPath := stateDir
 	if stateDirPath == "" {
 		home, _ := os.UserHomeDir()
@@ -116,7 +143,20 @@ func runDoctor(fix bool) error {
 	// --- mcp catalog dependency checks (Contract B) ---
 	// One line per ENABLED stdio catalog entry. A catalog-load failure is
 	// a single warn line, never an abort.
-	checks = append(checks, mcpDependencyChecksDoctor()...)
+	mcpChecks, mcpEntries := mcpDependencyChecksDoctor()
+	checks = append(checks, mcpChecks...)
+
+	// --- --install-missing (Contract E) ---
+	// Collect the missing-with-hint servers from the check data and offer
+	// to run each one's install_hint (verbatim, prompted). Runs after the
+	// checks block so the diagnostics report is already on screen.
+	if installMissing {
+		candidates := missingInstallCandidates(mcpChecks, mcpEntries)
+		if err := runInstallMissingFlow(context.Background(), candidates, os.Stdout, os.Stderr,
+			os.Stdin, stdinIsTerminal(), runInstallHintFn); err != nil {
+			return err
+		}
+	}
 
 	// --- RPC fallback / enrichment ---
 	if client, err := connectDaemon(); err == nil {
@@ -327,14 +367,17 @@ func intList(pids []int) string {
 
 // mcpDependencyChecksDoctor loads the mcp catalog via the existing config
 // loading path and builds the dependency checks for every enabled stdio
-// entry. A load failure yields a single warn check instead of aborting
-// doctor; a nil/empty catalog yields no checks.
-func mcpDependencyChecksDoctor() []doctorCheck {
+// entry, plus the same entries as (name, binary, hint) triples. The two
+// slices are index-parallel; a load failure yields a single warn check
+// (with nil entries) instead of aborting doctor. A nil/empty catalog
+// yields no checks and no entries.
+func mcpDependencyChecksDoctor() ([]doctorCheck, []mcpDepEntry) {
 	cfg, err := config.LoadMCPConfigDefault()
 	if err != nil {
-		return []doctorCheck{mcpCatalogFailureCheck(err.Error())}
+		return []doctorCheck{mcpCatalogFailureCheck(err.Error())}, nil
 	}
-	return mcpDependencyChecks(cfg)
+	entries := mcpDependencyEntries(cfg)
+	return mcpDependencyChecks(cfg), entries
 }
 
 // mcpDependencyChecks builds one check per enabled stdio catalog entry.
@@ -364,6 +407,35 @@ func isStdioServer(srv mcp.ServerConfig) bool {
 		return srv.Type == "stdio"
 	}
 	return len(srv.Command) > 0
+}
+
+// mcpDepEntry is one enabled stdio catalog entry as (name, binary, hint):
+// the data install-missing needs without string-parsing check details.
+type mcpDepEntry struct {
+	name        string
+	command     string
+	installHint string
+}
+
+// mcpDependencyEntries returns the enabled stdio entries as triples. It
+// keeps mcpDependencyChecks' filtering and catalog order exactly — the
+// check slice and the install candidates can never disagree about which
+// servers are enabled or missing.
+func mcpDependencyEntries(cfg *config.MCPServersConfig) []mcpDepEntry {
+	if cfg == nil {
+		return nil
+	}
+	var entries []mcpDepEntry
+	for _, srv := range cfg.Servers {
+		if !srv.IsEnabled() || !isStdioServer(srv) {
+			continue
+		}
+		if len(srv.Command) == 0 {
+			continue
+		}
+		entries = append(entries, mcpDepEntry{name: srv.Name, command: srv.Command[0], installHint: srv.InstallHint})
+	}
+	return entries
 }
 
 // mcpDependencyCheck builds the doctorCheck for one enabled stdio server.
@@ -413,4 +485,101 @@ func lookupBinary(command0 string) (string, bool) {
 		return path, true
 	}
 	return "", false
+}
+
+// --- --install-missing executor (Contract E) ---
+
+// runInstallFn is the runner signature shared by runInstallHint and the
+// test stubs that swap in for it.
+type runInstallFn func(ctx context.Context, hint string, stdout, stderr io.Writer) error
+
+// runInstallHintFn is the seam for runInstallHint. Tests swap it to record
+// or stub hint execution; production code always calls the var, so flow
+// tests can prove the consent boundary without executing anything.
+var runInstallHintFn runInstallFn = runInstallHint
+
+// stdinIsTerminal reports whether os.Stdin is a character device (a TTY).
+// Piped or redirected stdin means no human can answer the consent prompts,
+// so install-missing refuses up front.
+func stdinIsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// missingInstallCandidates pairs the enabled-stdio entries with their
+// index-parallel checks and returns the missing ones that carry an
+// install_hint, in catalog order. A missing binary without a hint cannot
+// be installed, so it is not offered. Data-driven — no string parsing of
+// check details.
+func missingInstallCandidates(checks []doctorCheck, entries []mcpDepEntry) []mcpDepEntry {
+	if len(entries) != len(checks) {
+		return nil
+	}
+	var missing []mcpDepEntry
+	for i, c := range checks {
+		if c.ok || entries[i].installHint == "" || c.name != "mcp:"+entries[i].name {
+			continue
+		}
+		missing = append(missing, entries[i])
+	}
+	return missing
+}
+
+// runInstallMissingFlow drives the per-server install loop. stdout/stderr
+// carry all output; r is the consent stream; tty reports whether stdin is
+// interactive — the refusal is printed before any prompt; run executes a
+// consented hint. A failed install prints its result line and the loop
+// continues to the next server.
+func runInstallMissingFlow(ctx context.Context, entries []mcpDepEntry, stdout, stderr io.Writer,
+	r io.Reader, tty bool, run runInstallFn) error {
+	if !tty {
+		fmt.Fprintln(stdout, "--install-missing requires an interactive terminal")
+		return nil
+	}
+	if len(entries) == 0 {
+		fmt.Fprintln(stdout, "no missing mcp dependencies.")
+		return nil
+	}
+	for _, e := range entries {
+		fmt.Fprintf(stdout, "install for %s: %s\n", e.name, e.installHint)
+		if !confirmInstall(r, stdout, e.installHint) {
+			continue
+		}
+		err := run(ctx, e.installHint, stdout, stderr)
+		if err == nil {
+			fmt.Fprintf(stdout, "installed %s: ok\n", e.name)
+			continue
+		}
+		fmt.Fprintf(stdout, "installed %s: failed (%v)\n", e.name, err)
+	}
+	return nil
+}
+
+// confirmInstall writes the prompt to w, reads exactly one line from r,
+// and accepts only y/yes case-insensitively. Empty input or EOF is a
+// refusal — it never hangs and never auto-consents.
+func confirmInstall(r io.Reader, w io.Writer, hint string) bool {
+	fmt.Fprintf(w, "run this command? [y/N] ")
+	line, _ := bufio.NewReader(r).ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// runInstallHint executes the catalog's install_hint verbatim under sh -c
+// with a 10m ceiling. meept never constructs or rewrites the command. It
+// is a plain function; tests stub the runInstallHintFn var above.
+func runInstallHint(ctx context.Context, hint string, stdout, stderr io.Writer) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", hint)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	return cmd.Run()
 }
