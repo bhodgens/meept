@@ -63,12 +63,18 @@ Trees 1-3 (gaps #1, #2, #4) + tree 4 (#3, full frontier):
 3. **~~Park store DSN + Abandon reason~~ DONE** (eb3e6230): park store
    moved to the `_pragma=` DSN form (WAL + busy timeout actually
    applied now); effects ledger DSN aligned; abandon reasons persist.
-4. **Scratch files** (rm DENIED by user approval twice — user-owned;
-   delete manually if wanted): ~/git/meet (typo'd repo path),
-   meept internal/auditlog_tmp/, meept internal/agent/tmpdbg_test.go,
-   meept cmd/skillparse_main.go (stray; breaks repo-wide
-   `go build ./cmd/...` with undefined skills.Parse).
-5. Pre-existing (not this program): full-repo mutexio failure in
+4. **~~Approval-gate wiring + progress over-count~~ DONE** (286e2dda):
+   task.approve/task.reject RPC + `meept task approve|reject` close the
+   awaiting_approval loop (live-verified: approve → executing →
+   steps scheduled); Plan() resets Completed/FailedJobs on re-plan so
+   progress can no longer exceed 100%.
+5. **Agnes credential**: models.json5 now reads ${AGNRES_API_KEY} —
+   the shell exports AGNRES_ (no second E); AGNES_ is commented out in
+   .bashrc. 401s are gone; Agnes free tier then hit HTTP 429 mid-run
+   (quota parking deferred jobs correctly). Live synthetic still
+   incomplete: rerun after quota reset. The 8B fallback planner could
+   not emit valid phase JSON (3-phase plans fell back to single-phase).
+6. Pre-existing (not this program): full-repo mutexio failure in
    internal/agent/intent_session_rules_test.go:83; enforcement.go's four
    grandfathered `_ = autoPause(...)` sites.
 
