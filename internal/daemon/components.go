@@ -99,10 +99,16 @@ type Components struct {
 	ClassifierClient      *llm.Client      // Separate client for intent classification (nil = use LLMClient)
 	ClassifierModelConfig *llm.ModelConfig // Resolved model config for the classifier endpoint (for token caps)
 	SummarizerClient      *llm.Client      // Separate client for session summarization (nil = use LLMClient)
-	LLMResolver           *llm.Resolver
-	ToolRegistry          *tools.Registry
-	SecurityChecker       *security.PermissionChecker
-	BudgetCleanupStop     chan struct{} // Stop channel for budget periodic cleanup
+	// TranscriptSummarizerClient is the dedicated summarizer for
+	// transcript_fetch's summarize mode. Non-nil ONLY when
+	// [transcript] summarize_enabled is true AND summarize_model names a
+	// model; nil means summarize mode uses SummarizerClient (chain
+	// default) when enabled.
+	TranscriptSummarizerClient *llm.Client
+	LLMResolver                *llm.Resolver
+	ToolRegistry               *tools.Registry
+	SecurityChecker            *security.PermissionChecker
+	BudgetCleanupStop          chan struct{} // Stop channel for budget periodic cleanup
 	// EvolverPlanStore backs the evolver-DEDICATED PlanManager (plan sink).
 	// Owned by the evolver wiring, NOT the shared plan system: closed in
 	// stopComponents, never by the daemon's plan-store shutdown.
@@ -853,6 +859,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Info("Summarizer LLM client initialized", "model", summarizerRef)
 		} else {
 			logger.Info("Summarizer will use main LLM client", "reason", "no summarizer_model or small_model configured")
+		}
+
+		// Dedicated transcript summarizer: built ONLY when summarize
+		// mode is enabled AND a distinct model ref is configured. Empty
+		// summarize_model keeps the chain default (SummarizerClient).
+		if cfg.Transcript.SummarizeEnabled && cfg.Transcript.SummarizeModel != "" {
+			c.TranscriptSummarizerClient = createAuxiliaryLLMClientWithResolver(
+				c.ModelsConfig,
+				cfg.Transcript.SummarizeModel,
+				c.LLMResolver,
+				logger.With("component", "transcript-summarizer-llm"),
+				budgetTracker,
+			)
 		}
 	} else {
 		logger.Error("FATAL: No LLM configured - chat will not work",
@@ -2234,7 +2253,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, c.SkillWriter, c.SkillRegistry, c.TokenStore)
+	// Transcript summarize chatter: the dedicated summarize_model client
+	// when one was built, else the summarizer chain default (both nil
+	// when no model resolved — the tool's config error stays honest).
+	transcriptChatter := c.TranscriptSummarizerClient
+	if transcriptChatter == nil {
+		transcriptChatter = c.SummarizerClient
+	}
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore)
 
 	// Deterministic (cached-fetch) tool variant for meept-bench
 	// reproducibility (phase-2-3 P2.3): when enabled, web tools are
@@ -5419,6 +5445,7 @@ func registerBuiltinTools(
 	ssrfCfg config.SSRFConfig,
 	browserCfg config.BrowserConfig,
 	transcriptCfg config.TranscriptConfig,
+	summarizerClient *llm.Client,
 	skillWriter *lifecycle.Writer,
 	skillRegistry *skills.Registry,
 	tokenStore llm.TokenResolver,
@@ -5630,15 +5657,36 @@ func registerBuiltinTools(
 	// absent from the registry. Configured fields (python path, module,
 	// timeout) flow straight into the tool's subprocess invocation.
 	if transcriptCfg.Enabled {
-		registry.Register(builtin.NewTranscriptFetchTool(builtin.TranscriptConfig{
-			PythonPath:     transcriptCfg.PythonPath,
-			ModuleName:     transcriptCfg.ModuleName,
-			TimeoutSeconds: transcriptCfg.TimeoutSeconds,
-		}, logger))
+		tool := builtin.NewTranscriptFetchTool(builtin.TranscriptConfig{
+			PythonPath:        transcriptCfg.PythonPath,
+			ModuleName:        transcriptCfg.ModuleName,
+			TimeoutSeconds:    transcriptCfg.TimeoutSeconds,
+			FallbackOutputDir: transcriptCfg.FallbackOutputDir,
+		}, logger)
+		// Summarize gating: a chatter is injected ONLY when
+		// summarize_enabled (SetSummarizer is not called otherwise, so
+		// summarize=true yields the tool's honest nil-chatter config
+		// error). The threaded client is the chain default
+		// (SummarizerClient) or the dedicated summarize_model client
+		// when one was built — selected at the NewComponents call site.
+		// A nil client leaves the chatter unset and the tool's config
+		// error is the honest runtime answer.
+		if transcriptCfg.SummarizeEnabled {
+			if summarizerClient != nil {
+				tool.SetSummarizer(summarizerClient)
+			}
+			modelRef := "summarizer chain"
+			if transcriptCfg.SummarizeModel != "" {
+				modelRef = transcriptCfg.SummarizeModel
+			}
+			logger.Info("transcript summarize enabled", "model", modelRef)
+		}
+		registry.Register(tool)
 		logger.Info("transcript_fetch tool registered",
 			"python_path", transcriptCfg.PythonPath,
 			"module_name", transcriptCfg.ModuleName,
 			"timeout_seconds", transcriptCfg.TimeoutSeconds,
+			"fallback_output_dir", transcriptCfg.FallbackOutputDir,
 		)
 	}
 
