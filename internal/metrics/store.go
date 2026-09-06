@@ -534,7 +534,10 @@ func (s *Store) aggregateHourly() {
 	// Apply retention policy to audit tables (default 30 days)
 	if s.retentionDays > 0 {
 		cutoff := fmt.Sprintf("-%d days", s.retentionDays)
-		retentionTables := []string{"events", "error_records", "dispatch_log", "response_quality", "lint_runs", "test_runs", "llm_calls"}
+		// llm_calls is exempt from time-based retention: it is tokscale's
+		// ingest source (docs/plans/20260906-tokscale-ingest/master.md,
+		// Contract D) and must persist year-scale history for aggregation.
+		retentionTables := []string{"events", "error_records", "dispatch_log", "response_quality", "lint_runs", "test_runs"}
 		for _, table := range retentionTables {
 			query := fmt.Sprintf("DELETE FROM %s WHERE timestamp < datetime('now', ?)", table)
 			if _, err := s.db.Exec(query, cutoff); err != nil {

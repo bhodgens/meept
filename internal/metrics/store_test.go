@@ -296,3 +296,56 @@ func TestStore_RecordLLMCallPersistsSessionAndDetailTokens(t *testing.T) {
 		t.Fatalf("row1 (unknown session, error) = %+v", got[1])
 	}
 }
+
+// TestStore_RetentionPreservesLLMCalls pins the retention exemption:
+// llm_calls is tokscale's ingest source and must survive the time-based
+// purge, while other tables keep purging after DefaultRetentionDays.
+func TestStore_RetentionPreservesLLMCalls(t *testing.T) {
+	// Same pattern as newLLMSchemaTestStore, but with the retention
+	// policy active (DefaultStoreConfig's RetentionDays) so the purge
+	// under test actually runs.
+	store, err := NewStore(&StoreConfig{
+		DatabasePath:  filepath.Join(t.TempDir(), "metrics.db"),
+		BatchSize:     1,
+		FlushInterval: time.Hour,
+		RetentionDays: DefaultRetentionDays,
+	})
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	old := time.Now().UTC().Add(-90 * 24 * time.Hour)
+	store.RecordLLMCall(LLMCallRecord{
+		Timestamp:  old,
+		Provider:   "anthropic",
+		ModelID:    "claude-old",
+		SessionID:  "conv-old",
+		TokensSent: 10,
+		TokensRecv: 5,
+	})
+
+	// Control table that must still purge: dispatch_log (old row).
+	if _, err := store.db.Exec(
+		`INSERT INTO dispatch_log (timestamp, session_id) VALUES (?, 's1')`,
+		old.Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+
+	store.aggregateHourly()
+
+	var llm int
+	if err := store.db.Get(&llm, `SELECT COUNT(*) FROM llm_calls`); err != nil {
+		t.Fatal(err)
+	}
+	if llm != 1 {
+		t.Fatalf("llm_calls rows after purge = %d, want 1 (exempt)", llm)
+	}
+	var disp int
+	if err := store.db.Get(&disp, `SELECT COUNT(*) FROM dispatch_log`); err != nil {
+		t.Fatal(err)
+	}
+	if disp != 0 {
+		t.Fatalf("dispatch_log rows after purge = %d, want 0 (still purged)", disp)
+	}
+}
