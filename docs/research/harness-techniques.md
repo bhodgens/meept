@@ -21,7 +21,7 @@ Status counts: shipped 23, partial 10, candidate 9, skip 0
 | --- | --- | --- | --- | --- |
 | Google A2A agent protocol | candidate | [A2A announcement](https://developers.googleblog.com/en/a2a-a-new-era-of-agent-interoperability/) | — | HTTP only if implemented. Unix RPC stays owner-trusted. Complements MCP. |
 | ACP client (external coding agents) | partial | [ACP agent runtime plan](../../plans/acp-agent-runtime/master.md) | `plans/acp-agent-runtime/master.md` | Config/leaves landing 2026-08-29. Runtime not complete. Distinct from zcode subprocess worker. |
-| MCP client and server | shipped | — | `config/mcp_servers.json5`, `cmd/meept/mcp_chat_server.go` | 20 catalog servers, 6 enabled. Reverse MCP chat server ships. A2A does not. |
+| MCP client and server | shipped | — | `config/mcp_servers.json5`, `cmd/meept/mcp_chat_server.go` | 21 catalog servers, 6 enabled. Reverse MCP chat server ships. A2A does not. |
 
 ## loop
 

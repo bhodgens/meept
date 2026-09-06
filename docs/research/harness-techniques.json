@@ -483,7 +483,7 @@
           "path": "cmd/meept/mcp_chat_server.go"
         }
       ],
-      "notes": "20 catalog servers, 6 enabled. Reverse MCP chat server ships. A2A does not."
+      "notes": "21 catalog servers, 6 enabled. Reverse MCP chat server ships. A2A does not."
     },
     {
       "id": "acp-client",

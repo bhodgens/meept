@@ -11,7 +11,10 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 ## Index
 
 - Constants
+- [func CanonicalName\(tool Tool\) string](<#CanonicalName>)
+- [func ContextWithWorkingDir\(ctx context.Context, dir string\) context.Context](<#ContextWithWorkingDir>)
 - [func GetCategory\(t Tool\) string](<#GetCategory>)
+- [func WorkingDirFromContext\(ctx context.Context\) string](<#WorkingDirFromContext>)
 - [type Categorizer](<#Categorizer>)
 - [type CategoryTools](<#CategoryTools>)
 - [type Deferrable](<#Deferrable>)
@@ -22,21 +25,28 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 - [type ProgressUpdate](<#ProgressUpdate>)
 - [type Registry](<#Registry>)
   - [func NewRegistry\(logger \*slog.Logger\) \*Registry](<#NewRegistry>)
+  - [func \(r \*Registry\) CanonicalNames\(\) map\[string\]struct\{\}](<#Registry.CanonicalNames>)
   - [func \(r \*Registry\) CategorizedTools\(\) \[\]CategoryTools](<#Registry.CategorizedTools>)
   - [func \(r \*Registry\) Count\(\) int](<#Registry.Count>)
   - [func \(r \*Registry\) Execute\(ctx context.Context, name string, args map\[string\]any\) \(\*ToolResult, error\)](<#Registry.Execute>)
   - [func \(r \*Registry\) ExecuteWithRetry\(ctx context.Context, name string, args map\[string\]any\) \(\*ToolResult, error\)](<#Registry.ExecuteWithRetry>)
   - [func \(r \*Registry\) Get\(name string\) Tool](<#Registry.Get>)
   - [func \(r \*Registry\) GetDefinitions\(\) \[\]llm.ToolDefinition](<#Registry.GetDefinitions>)
+  - [func \(r \*Registry\) IsCanonicalName\(name string\) bool](<#Registry.IsCanonicalName>)
   - [func \(r \*Registry\) List\(\) \[\]Tool](<#Registry.List>)
   - [func \(r \*Registry\) Names\(\) \[\]string](<#Registry.Names>)
   - [func \(r \*Registry\) Register\(tool Tool\)](<#Registry.Register>)
+  - [func \(r \*Registry\) SetSchemaMode\(mode SchemaMode, alwaysFull \[\]string\)](<#Registry.SetSchemaMode>)
   - [func \(r \*Registry\) ToLLMDefinitions\(\) \[\]llm.ToolDefinition](<#Registry.ToLLMDefinitions>)
   - [func \(r \*Registry\) ToolsByCategory\(\) map\[string\]\[\]string](<#Registry.ToolsByCategory>)
   - [func \(r \*Registry\) Unregister\(name string\) error](<#Registry.Unregister>)
+- [type SchemaMode](<#SchemaMode>)
 - [type StreamingTool](<#StreamingTool>)
 - [type TerminatingTool](<#TerminatingTool>)
 - [type Tool](<#Tool>)
+- [type ToolDefaults](<#ToolDefaults>)
+  - [func \(ToolDefaults\) IsConcurrencySafe\(map\[string\]any\) bool](<#ToolDefaults.IsConcurrencySafe>)
+  - [func \(ToolDefaults\) IsReadOnly\(map\[string\]any\) bool](<#ToolDefaults.IsReadOnly>)
 - [type ToolExecutor](<#ToolExecutor>)
 - [type ToolInfo](<#ToolInfo>)
 - [type ToolResult](<#ToolResult>)
@@ -102,12 +112,35 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 	    SchemaPropCapabilities   = "capabilities"
 	)
 
+<a name="CanonicalName"></a>
+## func CanonicalName
+
+	func CanonicalName(tool Tool) string
+
+CanonicalName returns the canonical registration name for a tool. The canonical name is the value returned by Tool.Name\(\), normalized to lowercase with surrounding whitespace trimmed. This is the single source of truth for how tool names appear in constitution tool references \(tools\_allowed / tools\_forbidden\) and in the tool registry's lookup key.
+
+C3: This function exists so that constitution tool references can be validated against canonical names at load time. Callers should use this function when comparing user\-provided or constitution\-declared tool names to the registry — never compare raw strings directly.
+
+<a name="ContextWithWorkingDir"></a>
+## func ContextWithWorkingDir
+
+	func ContextWithWorkingDir(ctx context.Context, dir string) context.Context
+
+ContextWithWorkingDir returns a new context with the working directory injected. Used by the agent loop to give tools access to the session's project path without shared mutable state.
+
 <a name="GetCategory"></a>
 ## func GetCategory
 
 	func GetCategory(t Tool) string
 
 GetCategory returns the tool's category, or "general" if it doesn't implement Categorizer.
+
+<a name="WorkingDirFromContext"></a>
+## func WorkingDirFromContext
+
+	func WorkingDirFromContext(ctx context.Context) string
+
+WorkingDirFromContext extracts the working directory from ctx, if set. Returns empty string when not present.
 
 <a name="Categorizer"></a>
 ## type Categorizer
@@ -253,6 +286,13 @@ The registry is thread\-safe and can be used concurrently by multiple goroutines
 
 NewRegistry creates a new empty tool registry.
 
+<a name="Registry.CanonicalNames"></a>
+### func \(\*Registry\) CanonicalNames
+
+	func (r *Registry) CanonicalNames() map[string]struct{}
+
+CanonicalNames returns a sorted list of all canonical tool names currently registered. This is the set against which constitution tool references should be validated.
+
 <a name="Registry.CategorizedTools"></a>
 ### func \(\*Registry\) CategorizedTools
 
@@ -295,6 +335,13 @@ Get returns a tool by name, or nil if not found.
 
 GetDefinitions returns tool definitions for the LLM. This is an alias for ToLLMDefinitions for compatibility with agent.ToolRegistry.
 
+<a name="Registry.IsCanonicalName"></a>
+### func \(\*Registry\) IsCanonicalName
+
+	func (r *Registry) IsCanonicalName(name string) bool
+
+IsCanonicalName reports whether the given name matches a registered tool after normalization. Returns false for empty strings.
+
 <a name="Registry.List"></a>
 ### func \(\*Registry\) List
 
@@ -316,12 +363,25 @@ Names returns a sorted list of all registered tool names.
 
 Register adds a tool to the registry. If a tool with the same name already exists, it will be replaced.
 
+<a name="Registry.SetSchemaMode"></a>
+### func \(\*Registry\) SetSchemaMode
+
+	func (r *Registry) SetSchemaMode(mode SchemaMode, alwaysFull []string)
+
+SetSchemaMode configures how tool definitions are exposed to the LLM.
+
+In SchemaModeIndexed, tools named in alwaysFull keep their complete schemas; all other tools are stubbed to a one\-line description ending in \` use tool\_view\{name\}.\` and an empty object parameter schema. The tool\_view meta tool is always implicitly added to the always\-full set so the expansion mechanism is itself never stubbed, even if the caller omits it. In SchemaModeFull \(and for any unrecognized mode value, which is treated as full\) every tool ships its complete schema — byte\-identical legacy behavior.
+
+It is safe to call at runtime while other goroutines read definitions; mode switches take effect on the next GetDefinitions/ToLLMDefinitions call. Note that switching modes changes the definitions payload and will invalidate provider\-side prompt caches by design.
+
 <a name="Registry.ToLLMDefinitions"></a>
 ### func \(\*Registry\) ToLLMDefinitions
 
 	func (r *Registry) ToLLMDefinitions() []llm.ToolDefinition
 
 ToLLMDefinitions converts all registered tools to LLM tool definitions. This format is suitable for passing to the LLM client's tools parameter.
+
+In indexed schema mode, non\-core tools are stubbed \(see SetSchemaMode\). The mode/alwaysFull state is snapshotted under the lock and the definition building happens outside it, so schema transformation work never runs while holding the mutex.
 
 <a name="Registry.ToolsByCategory"></a>
 ### func \(\*Registry\) ToolsByCategory
@@ -336,6 +396,26 @@ ToolsByCategory returns all registered tools grouped by their category. Tools th
 	func (r *Registry) Unregister(name string) error
 
 Unregister removes a tool from the registry. Returns an error if the tool is not found.
+
+<a name="SchemaMode"></a>
+## type SchemaMode
+
+SchemaMode controls how tool definitions are exposed to the LLM.
+
+SchemaModeFull ships every tool's complete parameter schema \(legacy behavior\). SchemaModeIndexed collapses non\-core tools to a one\-line description that instructs the model to call tool\_view\{name\} for the full schema, conserving tokens on every request.
+
+	type SchemaMode string
+
+<a name="SchemaModeFull"></a>
+
+	const (
+	    // SchemaModeFull ships complete parameter schemas for every tool.
+	    // This is the registry's default; callers must opt in to indexed mode.
+	    SchemaModeFull SchemaMode = "full"
+	    // SchemaModeIndexed stubs non-core tools to one-line descriptions and
+	    // empty object schemas; the alwaysFull set keeps core tools intact.
+	    SchemaModeIndexed SchemaMode = "indexed"
+	)
 
 <a name="StreamingTool"></a>
 ## type StreamingTool
@@ -386,7 +466,41 @@ A tool provides metadata \(name, description, parameters\) that is sent to the L
 	    // Arguments are parsed from the JSON provided by the LLM.
 	    // Returns the result as a map, or an error if execution fails.
 	    Execute(ctx context.Context, args map[string]any) (any, error)
+	
+	    // IsReadOnly reports whether the tool call with the given input is a
+	    // read-only operation that does not mutate any state. Read-only tools
+	    // can be safely parallelized and cached. The input map contains the
+	    // parsed tool arguments so implementations can make input-dependent
+	    // decisions (e.g., shell commands that only read vs. write).
+	    IsReadOnly(input map[string]any) bool
+	
+	    // IsConcurrencySafe reports whether the tool call with the given input
+	    // can safely execute concurrently with other tool calls. Tools that
+	    // are concurrency-safe may be parallelized even if they are not
+	    // strictly read-only (e.g., independent file writes to different paths).
+	    IsConcurrencySafe(input map[string]any) bool
 	}
+
+<a name="ToolDefaults"></a>
+## type ToolDefaults
+
+ToolDefaults provides default implementations for the safety\-query methods on the Tool interface. Embed this struct in tool implementations to inherit conservative defaults \(not read\-only, not concurrency\-safe\) and override only the methods that apply.
+
+	type ToolDefaults struct{}
+
+<a name="ToolDefaults.IsConcurrencySafe"></a>
+### func \(ToolDefaults\) IsConcurrencySafe
+
+	func (ToolDefaults) IsConcurrencySafe(map[string]any) bool
+
+IsConcurrencySafe returns false by default. Tools that can safely execute concurrently should override this method to return true.
+
+<a name="ToolDefaults.IsReadOnly"></a>
+### func \(ToolDefaults\) IsReadOnly
+
+	func (ToolDefaults) IsReadOnly(map[string]any) bool
+
+IsReadOnly returns false by default. Tools that are always read\-only should override this method to return true.
 
 <a name="ToolExecutor"></a>
 ## type ToolExecutor

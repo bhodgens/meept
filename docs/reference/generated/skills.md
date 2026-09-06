@@ -20,6 +20,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 - Variables
 - [func CheckPrerequisites\(checker PrerequisiteChecker, prereqs \*HermesPrerequisites\) error](<#CheckPrerequisites>)
 - [func IsClaudeSkillPath\(path string\) bool](<#IsClaudeSkillPath>)
+- [func StopWordSet\(\) map\[string\]bool](<#StopWordSet>)
 - [type CapabilityIndex](<#CapabilityIndex>)
   - [func BuildCapabilityIndex\(skillIndex \*SkillIndex, opts ...CapabilityIndexOption\) \*CapabilityIndex](<#BuildCapabilityIndex>)
   - [func NewCapabilityIndex\(opts ...CapabilityIndexOption\) \*CapabilityIndex](<#NewCapabilityIndex>)
@@ -56,6 +57,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(d \*Discovery\) DiscoverWithContext\(ctx context.Context\) \(\[\]\*Skill, error\)](<#Discovery.DiscoverWithContext>)
   - [func \(d \*Discovery\) GetSkill\(name string\) \*Skill](<#Discovery.GetSkill>)
   - [func \(d \*Discovery\) ListSkills\(\) \[\]string](<#Discovery.ListSkills>)
+  - [func \(d \*Discovery\) ResolveTierPath\(skillName string\) \(tierRoot, skillPath, source string, err error\)](<#Discovery.ResolveTierPath>)
   - [func \(d \*Discovery\) Sources\(\) \[\]SkillSource](<#Discovery.Sources>)
 - [type DiscoveryOption](<#DiscoveryOption>)
   - [func WithDiscoveryLogger\(logger \*slog.Logger\) DiscoveryOption](<#WithDiscoveryLogger>)
@@ -72,6 +74,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(e \*Executor\) GetModelForSkill\(skill \*Skill\) \(\*llm.ModelConfig, error\)](<#Executor.GetModelForSkill>)
   - [func \(e \*Executor\) LazyLoader\(\) \*LazySkillLoader](<#Executor.LazyLoader>)
   - [func \(e \*Executor\) SetLazyLoader\(loader \*LazySkillLoader\)](<#Executor.SetLazyLoader>)
+  - [func \(e \*Executor\) SetToolAvailability\(fn ToolAvailabilityFunc\)](<#Executor.SetToolAvailability>)
 - [type ExecutorError](<#ExecutorError>)
   - [func \(e \*ExecutorError\) Error\(\) string](<#ExecutorError.Error>)
   - [func \(e \*ExecutorError\) Unwrap\(\) error](<#ExecutorError.Unwrap>)
@@ -83,6 +86,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func WithLazyLoader\(loader \*LazySkillLoader\) ExecutorOption](<#WithLazyLoader>)
   - [func WithPrerequisiteChecker\(checker PrerequisiteChecker\) ExecutorOption](<#WithPrerequisiteChecker>)
   - [func WithSecurityOrchestrator\(orch \*intsecurity.Orchestrator\) ExecutorOption](<#WithSecurityOrchestrator>)
+  - [func WithToolAvailability\(fn ToolAvailabilityFunc\) ExecutorOption](<#WithToolAvailability>)
   - [func WithToolMapper\(mapper \*HermesToolMapper\) ExecutorOption](<#WithToolMapper>)
   - [func WithValidatePrerequisites\(enabled bool\) ExecutorOption](<#WithValidatePrerequisites>)
 - [type ExtractedKeyword](<#ExtractedKeyword>)
@@ -123,6 +127,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(l \*LazySkillLoader\) Preload\(ctx context.Context, names \[\]string\) error](<#LazySkillLoader.Preload>)
   - [func \(l \*LazySkillLoader\) SetIndex\(index \*SkillIndex\)](<#LazySkillLoader.SetIndex>)
   - [func \(l \*LazySkillLoader\) Stats\(\) LoaderStats](<#LazySkillLoader.Stats>)
+- [type LinkedAsset](<#LinkedAsset>)
 - [type LoaderStats](<#LoaderStats>)
 - [type MCPRuntime](<#MCPRuntime>)
   - [func NewMCPRuntime\(configs \[\]MCPServerConfig, logger \*slog.Logger\) \*MCPRuntime](<#NewMCPRuntime>)
@@ -192,6 +197,8 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(t \*SkillMCPTool\) Category\(\) string](<#SkillMCPTool.Category>)
   - [func \(t \*SkillMCPTool\) Description\(\) string](<#SkillMCPTool.Description>)
   - [func \(t \*SkillMCPTool\) Execute\(ctx context.Context, args map\[string\]any\) \(any, error\)](<#SkillMCPTool.Execute>)
+  - [func \(t \*SkillMCPTool\) IsConcurrencySafe\(map\[string\]any\) bool](<#SkillMCPTool.IsConcurrencySafe>)
+  - [func \(t \*SkillMCPTool\) IsReadOnly\(map\[string\]any\) bool](<#SkillMCPTool.IsReadOnly>)
   - [func \(t \*SkillMCPTool\) Name\(\) string](<#SkillMCPTool.Name>)
   - [func \(t \*SkillMCPTool\) Parameters\(\) llm.FunctionParameters](<#SkillMCPTool.Parameters>)
   - [func \(t \*SkillMCPTool\) ToLLMDefinition\(\) llm.ToolDefinition](<#SkillMCPTool.ToLLMDefinition>)
@@ -199,6 +206,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 - [type SkillMetadata](<#SkillMetadata>)
   - [func DefaultMetadata\(\) SkillMetadata](<#DefaultMetadata>)
 - [type SkillSource](<#SkillSource>)
+- [type ToolAvailabilityFunc](<#ToolAvailabilityFunc>)
 - [type ToolDef](<#ToolDef>)
 
 
@@ -234,6 +242,10 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 	    ErrNoName        = errors.New("skill has no name in frontmatter")
 	)
 
+<a name="ErrSkillNotFound"></a>ErrSkillNotFound is returned by ResolveTierPath when the named skill does not exist in any configured discovery tier. Callers can detect this case with errors.Is.
+
+	var ErrSkillNotFound = errors.New("skill not found in any discovery tier")
+
 <a name="SourceWeights"></a>SourceWeights defines the relevance weight for each keyword source.
 
 	var SourceWeights = map[KeywordSource]float64{
@@ -256,6 +268,13 @@ CheckPrerequisites is a convenience function that runs all prerequisite checks f
 	func IsClaudeSkillPath(path string) bool
 
 IsClaudeSkillPath returns true if the path is under a \~/.claude/skills/ directory \(expanded or literal\).
+
+<a name="StopWordSet"></a>
+## func StopWordSet
+
+	func StopWordSet() map[string]bool
+
+StopWordSet returns a fresh set of the package's default stop words — the same single source of truth \(defaultStopWords\) used by the keyword extractor \(and extended by commit e0d08e2f with the generic tool verbs/nouns\). Other packages \(e.g. internal/agent's skill\-discovery domain gate\) call this instead of forking a second list.
 
 <a name="CapabilityIndex"></a>
 ## type CapabilityIndex
@@ -542,6 +561,17 @@ GetSkill returns a skill by name from the last discovery.
 
 ListSkills returns all discovered skill names.
 
+<a name="Discovery.ResolveTierPath"></a>
+### func \(\*Discovery\) ResolveTierPath
+
+	func (d *Discovery) ResolveTierPath(skillName string) (tierRoot, skillPath, source string, err error)
+
+ResolveTierPath returns the tier actually holding the named skill, per the same precedence discovery itself applies \(project \> user \> claude \> hermes \> system; lower Priority value wins\).
+
+It runs a fresh discovery pass \(so the lookup reflects current disk state\) and derives its answer from the discovery results' own Path/Priority/Source metadata — the tier list is never duplicated here.
+
+tierRoot is the skills directory of the winning tier \(e.g. the resolved Claude tier directory on machines where the skill lives there\); skillPath is the SKILL.md file inside it. The returned paths use the filesystem casing of the on\-disk directory, not the requested skill name.
+
 <a name="Discovery.Sources"></a>
 ### func \(\*Discovery\) Sources
 
@@ -659,6 +689,13 @@ LazyLoader returns the configured lazy loader \(may be nil\).
 
 SetLazyLoader sets the lazy loader for on\-demand skill loading.
 
+<a name="Executor.SetToolAvailability"></a>
+### func \(\*Executor\) SetToolAvailability
+
+	func (e *Executor) SetToolAvailability(fn ToolAvailabilityFunc)
+
+SetToolAvailability sets the tool availability checker used to enforce a skill's requires\-tools frontmatter. Nil fn is ignored so a previously set checker is retained.
+
 <a name="ExecutorError"></a>
 ## type ExecutorError
 
@@ -668,6 +705,7 @@ ExecutorError wraps an execution error with context.
 	    SkillName string
 	    Message   string
 	    Cause     error
+	    // contains filtered or unexported fields
 	}
 
 <a name="ExecutorError.Error"></a>
@@ -739,6 +777,13 @@ WithPrerequisiteChecker sets a prerequisite checker for Hermes skill validation.
 	func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) ExecutorOption
 
 WithSecurityOrchestrator sets the security orchestrator for the executor. When set, skill outputs are sanitized for credential leakage and other security threats, and taint labels are propagated to execution results. Nil orchestrator is ignored \(no security scanning\).
+
+<a name="WithToolAvailability"></a>
+### func WithToolAvailability
+
+	func WithToolAvailability(fn ToolAvailabilityFunc) ExecutorOption
+
+WithToolAvailability sets the tool availability checker used to enforce a skill's requires\-tools frontmatter. Nil checker is ignored.
 
 <a name="WithToolMapper"></a>
 ### func WithToolMapper
@@ -1080,6 +1125,21 @@ SetIndex updates the skill index \(useful for reloading\).
 
 Stats returns current loader statistics.
 
+<a name="LinkedAsset"></a>
+## type LinkedAsset
+
+LinkedAsset describes a helper file linked to a directory\-layout skill.
+
+	type LinkedAsset struct {
+	    // Name is the basename of the asset file.
+	    Name string `json:"name"`
+	    // RelPath is the path of the asset relative to the skill directory,
+	    // slash-separated (e.g. "scripts/x.py").
+	    RelPath string `json:"rel_path"`
+	    // Kind classifies the asset: "script", "reference", "template", or "asset".
+	    Kind string `json:"kind"`
+	}
+
 <a name="LoaderStats"></a>
 ## type LoaderStats
 
@@ -1370,6 +1430,14 @@ Skill represents a parsed skill definition from a SKILL.md file.
 	    // Examples: ["code", "reasoning"], ["tool_use"], etc.
 	    Requires []string `json:"requires,omitempty"`
 	
+	    // RequiresTools lists tools the skill needs at execution time.
+	    // Entries are full registered tool names: bare built-in names
+	    // ("web_fetch") or server-qualified MCP names ("cua-driver.capture").
+	    // Availability is matched with plain string comparison; when a checker
+	    // is configured and validation is enabled, execution fails before any
+	    // side effects if any listed tool is unavailable.
+	    RequiresTools []string `json:"requires_tools,omitempty"`
+	
 	    // Tags are categorization labels for the skill.
 	    Tags []string `json:"tags,omitempty"`
 	
@@ -1412,6 +1480,12 @@ Skill represents a parsed skill definition from a SKILL.md file.
 	    // Empty means default behavior (description + execute button).
 	    UIType string `json:"ui_type,omitempty"`
 	
+	    // State enables SKILL.state mode for this skill (arXiv:2608.26263):
+	    // the skill executes via SkillStateRuntime with an explicit Σ state
+	    // object instead of the append-only conversation. Set by the
+	    // `state: true` frontmatter flag; leaf 05 owns activation.
+	    State bool `json:"state,omitempty"`
+	
 	    // Prerequisites holds Hermes-Agent runtime requirements (env vars, commands, packages).
 	    // Nil for Meept-native skills.
 	    Prerequisites *HermesPrerequisites `json:"prerequisites,omitempty" yaml:"prerequisites,omitempty"`
@@ -1419,6 +1493,16 @@ Skill represents a parsed skill definition from a SKILL.md file.
 	    // SourceOrigin tracks which skill system the skill originated from.
 	    // Values: "meept" (default), "claude", "hermes".
 	    SourceOrigin string `json:"source_origin,omitempty"`
+	
+	    // Dir is the directory containing SKILL.md for directory-layout skills.
+	    // Empty for flat-layout skills (<tier>/<name>.md). The executor exposes
+	    // this to the agent as the skill_dir execution context.
+	    Dir string `json:"dir,omitempty"`
+	
+	    // LinkedAssets lists helper files stored next to SKILL.md in Dir
+	    // (scripts/, references/, templates/, assets/ — one level deep).
+	    // Nil for flat-layout skills.
+	    LinkedAssets []LinkedAsset `json:"linked_assets,omitempty"`
 	}
 
 <a name="ParseSkillFile"></a>
@@ -1633,6 +1717,9 @@ SkillIndexEntry holds skill metadata only \(no body\) for fast lookup.
 	    Description string `json:"description"`
 	    // Requires lists capability tags (e.g., ["code", "reasoning"]).
 	    Requires []string `json:"requires,omitempty"`
+	    // RequiresTools lists tools the skill needs at execution time
+	    // (bare built-in names or server-qualified MCP names, "server.tool").
+	    RequiresTools []string `json:"requires_tools,omitempty"`
 	    // Tags are categorization labels.
 	    Tags []string `json:"tags,omitempty"`
 	    // Path is the filesystem path for lazy loading.
@@ -1686,6 +1773,7 @@ SkillIndexMatch holds an entry with its match score.
 SkillMCPTool wraps a tool from a skill\-embedded MCP server as a tools.Tool. Unlike mcp.MCPTool which routes through the global Manager, this calls the MCP client directly for skill\-scoped tool execution.
 
 	type SkillMCPTool struct {
+	    tools.ToolDefaults
 	    // contains filtered or unexported fields
 	}
 
@@ -1716,6 +1804,20 @@ Category returns the tool category.
 	func (t *SkillMCPTool) Execute(ctx context.Context, args map[string]any) (any, error)
 
 Execute invokes the MCP tool via the client directly.
+
+<a name="SkillMCPTool.IsConcurrencySafe"></a>
+### func \(\*SkillMCPTool\) IsConcurrencySafe
+
+	func (t *SkillMCPTool) IsConcurrencySafe(map[string]any) bool
+
+
+
+<a name="SkillMCPTool.IsReadOnly"></a>
+### func \(\*SkillMCPTool\) IsReadOnly
+
+	func (t *SkillMCPTool) IsReadOnly(map[string]any) bool
+
+
 
 <a name="SkillMCPTool.Name"></a>
 ### func \(\*SkillMCPTool\) Name
@@ -1756,10 +1858,10 @@ SkillMetadata holds the parsed YAML frontmatter from a SKILL.md file.
 	type SkillMetadata struct {
 	    Name          string            `yaml:"name"`
 	    Description   string            `yaml:"description"`
-	    Requires      []string          `yaml:"requires"`
-	    Tags          []string          `yaml:"tags"`
-	    Examples      []string          `yaml:"examples"`
-	    AllowedTools  []string          `yaml:"allowed-tools"`
+	    Requires      stringList        `yaml:"requires"`
+	    Tags          stringList        `yaml:"tags"`
+	    Examples      stringList        `yaml:"examples"`
+	    AllowedTools  stringList        `yaml:"allowed-tools"`
 	    RiskLevel     string            `yaml:"risk-level"`
 	    MaxIterations int               `yaml:"max-iterations"`
 	    Temperature   *float64          `yaml:"temperature"`
@@ -1767,8 +1869,12 @@ SkillMetadata holds the parsed YAML frontmatter from a SKILL.md file.
 	    MCPServers    []MCPServerConfig `yaml:"mcp-servers"`
 	    UIType        string            `yaml:"ui-type"`
 	
+	    // State is the SKILL.state opt-in flag (frontmatter `state: true`).
+	    State bool `yaml:"state"`
+	
 	    // Claude-specific fields (parsed separately, merged into Tags).
-	    Trigger string `yaml:"trigger"`
+	    Trigger  string     `yaml:"trigger"`
+	    Triggers stringList `yaml:"triggers"`
 	
 	    // Hermes-specific fields (populated during 4th parse pass).
 	    HermesPrereqs *HermesPrerequisites `yaml:"-"`
@@ -1793,6 +1899,13 @@ SkillSource provides skills from a specific source.
 	    // Discover scans the source and returns discovered skills.
 	    Discover(ctx context.Context) ([]*Skill, error)
 	}
+
+<a name="ToolAvailabilityFunc"></a>
+## type ToolAvailabilityFunc
+
+ToolAvailabilityFunc reports whether a named tool is currently available: a bare built\-in tool name or a server\-qualified MCP tool name \("server.tool"\). Names are matched with plain string comparison.
+
+	type ToolAvailabilityFunc func(toolName string) bool
 
 <a name="ToolDef"></a>
 ## type ToolDef

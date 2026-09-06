@@ -6,9 +6,14 @@
 
 Package scheduler provides cron\-based job scheduling for the meept daemon.
 
+Package scheduler — rewake.go is the timer→rewake adapter: it bridges scheduler job completion onto the EXISTING hook.async\_rewake topic that the agent loop's rewake consumer is already subscribed to. It is not a new bus topic: the topic literal mirrors internal/agent's HookAsyncRewakeTopic \(the agent package owns the const; importing it from scheduler would invert the layering the leaf spec fixes: agent must stay scheduler\-agnostic\).
+
+Session mapping: scheduler jobs carry no conversation/session identity \(a timer fires for the daemon, not for one chat\), so the published payload has an empty session\_id. Per the loop\_rewake contract, empty session\_id is a broadcast — every loop with an armed consumer wakes. This is the correct behavior for timer completion: any active loop may need to react to a job finishing.
+
 ## Index
 
 - Constants
+- [func NotifyJobComplete\(publish func\(topic string, msg \*models.BusMessage\) int, msg \*models.BusMessage\) int](<#NotifyJobComplete>)
 - [func RegisterRPCHandlers\(server \*rpc.Server, scheduler \*Scheduler\)](<#RegisterRPCHandlers>)
 - [func ValidateJobConfig\(cfg JobConfig\) error](<#ValidateJobConfig>)
 - [type AddJobParams](<#AddJobParams>)
@@ -17,11 +22,15 @@ Package scheduler provides cron\-based job scheduling for the meept daemon.
   - [func NewAgentJob\(cfg JobConfig, msgBus \*bus.MessageBus\) \(\*AgentJob, error\)](<#NewAgentJob>)
   - [func \(j \*AgentJob\) Execute\(ctx context.Context\) error](<#AgentJob.Execute>)
 - [type AgentJobConfig](<#AgentJobConfig>)
+- [type ExecutionOptions](<#ExecutionOptions>)
 - [type GetJobParams](<#GetJobParams>)
 - [type InstructionScheduler](<#InstructionScheduler>)
   - [func NewInstructionScheduler\(s \*Scheduler, store \*preferences.Store, logger \*slog.Logger\) \*InstructionScheduler](<#NewInstructionScheduler>)
   - [func \(s \*InstructionScheduler\) Start\(ctx context.Context\) error](<#InstructionScheduler.Start>)
   - [func \(s \*InstructionScheduler\) SyncCronInstructions\(\) error](<#InstructionScheduler.SyncCronInstructions>)
+- [type IntervalJob](<#IntervalJob>)
+  - [func NewIntervalJob\(cfg JobConfig\) \(\*IntervalJob, error\)](<#NewIntervalJob>)
+  - [func \(j \*IntervalJob\) Execute\(\_ context.Context\) error](<#IntervalJob.Execute>)
 - [type Job](<#Job>)
   - [func CreateJob\(cfg JobConfig, msgBus \*bus.MessageBus\) \(Job, error\)](<#CreateJob>)
   - [func CreateJobWithDeps\(cfg JobConfig, deps \*JobDependencies\) \(Job, error\)](<#CreateJobWithDeps>)
@@ -43,6 +52,7 @@ Package scheduler provides cron\-based job scheduling for the meept daemon.
 - [type MemoryOptimizerAdapter](<#MemoryOptimizerAdapter>)
   - [func \(a \*MemoryOptimizerAdapter\) ConsolidateMemory\(ctx context.Context\) error](<#MemoryOptimizerAdapter.ConsolidateMemory>)
   - [func \(a \*MemoryOptimizerAdapter\) UpdateGraphMetrics\(ctx context.Context\) error](<#MemoryOptimizerAdapter.UpdateGraphMetrics>)
+- [type MissedTickRun](<#MissedTickRun>)
 - [type NotificationEmitter](<#NotificationEmitter>)
 - [type NotificationEvent](<#NotificationEvent>)
 - [type OptimizationJob](<#OptimizationJob>)
@@ -50,6 +60,8 @@ Package scheduler provides cron\-based job scheduling for the meept daemon.
   - [func \(j \*OptimizationJob\) Execute\(ctx context.Context\) error](<#OptimizationJob.Execute>)
 - [type OptimizationJobConfig](<#OptimizationJobConfig>)
 - [type Option](<#Option>)
+  - [func WithClaimRetentionDays\(days int\) Option](<#WithClaimRetentionDays>)
+  - [func WithCoalesceMissed\(enabled bool\) Option](<#WithCoalesceMissed>)
   - [func WithDataDir\(dir string\) Option](<#WithDataDir>)
   - [func WithJobDependencies\(deps \*JobDependencies\) Option](<#WithJobDependencies>)
   - [func WithLogger\(logger \*slog.Logger\) Option](<#WithLogger>)
@@ -76,18 +88,23 @@ Package scheduler provides cron\-based job scheduling for the meept daemon.
 - [type Scheduler](<#Scheduler>)
   - [func NewScheduler\(cfg config.SchedulerConfig, msgBus \*bus.MessageBus, opts ...Option\) \(\*Scheduler, error\)](<#NewScheduler>)
   - [func \(s \*Scheduler\) Bus\(\) \*bus.MessageBus](<#Scheduler.Bus>)
+  - [func \(s \*Scheduler\) ClaimCount\(\) \(int64, error\)](<#Scheduler.ClaimCount>)
+  - [func \(s \*Scheduler\) ClaimTick\(jobID string, tick time.Time\) \(claimed bool, err error\)](<#Scheduler.ClaimTick>)
   - [func \(s \*Scheduler\) GetJob\(jobID string\) \(JobInfo, bool\)](<#Scheduler.GetJob>)
+  - [func \(s \*Scheduler\) GetLastWake\(\) \(time.Time, error\)](<#Scheduler.GetLastWake>)
   - [func \(s \*Scheduler\) JobCount\(\) int](<#Scheduler.JobCount>)
   - [func \(s \*Scheduler\) ListJobs\(\) \[\]JobInfo](<#Scheduler.ListJobs>)
   - [func \(s \*Scheduler\) Location\(\) \*time.Location](<#Scheduler.Location>)
   - [func \(s \*Scheduler\) Name\(\) string](<#Scheduler.Name>)
   - [func \(s \*Scheduler\) NextRun\(jobID string\) \(time.Time, error\)](<#Scheduler.NextRun>)
   - [func \(s \*Scheduler\) PauseJob\(jobID string\) error](<#Scheduler.PauseJob>)
+  - [func \(s \*Scheduler\) ProcessMissedTicks\(now time.Time\) \(\[\]MissedTickRun, error\)](<#Scheduler.ProcessMissedTicks>)
   - [func \(s \*Scheduler\) ResumeJob\(jobID string\) error](<#Scheduler.ResumeJob>)
   - [func \(s \*Scheduler\) RunNow\(jobID string\) error](<#Scheduler.RunNow>)
   - [func \(s \*Scheduler\) Running\(\) bool](<#Scheduler.Running>)
   - [func \(s \*Scheduler\) Schedule\(job Job\) \(string, error\)](<#Scheduler.Schedule>)
   - [func \(s \*Scheduler\) ScheduleConfig\(cfg JobConfig\) \(string, error\)](<#Scheduler.ScheduleConfig>)
+  - [func \(s \*Scheduler\) SetLastWake\(wake time.Time\) error](<#Scheduler.SetLastWake>)
   - [func \(s \*Scheduler\) Start\(ctx context.Context\) error](<#Scheduler.Start>)
   - [func \(s \*Scheduler\) Stop\(ctx context.Context\) error](<#Scheduler.Stop>)
   - [func \(s \*Scheduler\) Store\(\) \*Store](<#Scheduler.Store>)
@@ -128,10 +145,28 @@ Package scheduler provides cron\-based job scheduling for the meept daemon.
 <a name="SchedulerKeyJobID"></a>Map key constants for scheduler event payloads.
 
 	const (
-	    SchedulerKeyJobID   = "job_id"
-	    SchedulerKeySuccess = "success"
-	    SchedulerKeyEvent   = "event"
+	    SchedulerKeyJobID       = "job_id"
+	    SchedulerKeySuccess     = "success"
+	    SchedulerKeyEvent       = "event"
+	    SchedulerKeyMissedCount = "missed_count"
 	)
+
+<a name="DefaultClaimRetentionDays"></a>DefaultClaimRetentionDays is the default retention for claimed ticks.
+
+	const DefaultClaimRetentionDays = 7
+
+<a name="HookAsyncRewakeTopic"></a>HookAsyncRewakeTopic is the EXISTING rewake bus topic consumed by the agent loop \(internal/agent.HookAsyncRewakeTopic\). Duplicated as a literal to preserve package layering; a test pins both spellings equal.
+
+	const HookAsyncRewakeTopic = "hook.async_rewake"
+
+<a name="NotifyJobComplete"></a>
+## func NotifyJobComplete
+
+	func NotifyJobComplete(publish func(topic string, msg *models.BusMessage) int, msg *models.BusMessage) int
+
+NotifyJobComplete publishes a hook.async\_rewake signal with Source=timer so any armed agent loop wakes at its next iteration boundary. No mid\-turn interrupt: the rewake consumer buffers the signal and injectRewakes delivers it as a system note.
+
+publish is injectable for tests \(pass nil to treat it as a no\-op\). msg, if non\-nil, is published to HookAsyncRewakeTopic via publish; the scheduler calls this from its single central job\-completion site so every job type \(agent/shell/reminder/…, cron and RunNow alike\) rewakes the daemon.
 
 <a name="RegisterRPCHandlers"></a>
 ## func RegisterRPCHandlers
@@ -213,6 +248,25 @@ AgentJobConfig holds configuration for agent jobs.
 	    Temperature float64           `json:"temperature,omitempty"`
 	}
 
+<a name="ExecutionOptions"></a>
+## type ExecutionOptions
+
+ExecutionOptions carries per\-delivery context from the dispatch boundary into executeJob.
+
+	type ExecutionOptions struct {
+	    // Tick is the scheduled tick being delivered. Zero means unknown
+	    // (e.g. manual RunNow), in which case executeJob falls back to the
+	    // execution start time for claiming.
+	    Tick time.Time
+	    // MissedCount is the number of ticks coalesced into this delivery
+	    // (0 for normal fires and accumulate mode).
+	    MissedCount int
+	    // PreClaimed marks that the caller already claimed Tick atomically
+	    // (the missed-tick sweep does claim-then-dispatch); executeJob must
+	    // not re-claim it, which would read as a duplicate and skip delivery.
+	    PreClaimed bool
+	}
+
 <a name="GetJobParams"></a>
 ## type GetJobParams
 
@@ -251,6 +305,29 @@ Start begins syncing cron instructions.
 	func (s *InstructionScheduler) SyncCronInstructions() error
 
 SyncCronInstructions loads cron\-type instructions and creates/removes jobs.
+
+<a name="IntervalJob"></a>
+## type IntervalJob
+
+IntervalJob is a persisted placeholder for the transient simpleIntervalJob created by employeeSchedulerAdapter. Its Execute is a no\-op because the actual callback is re\-registered at startup by the adapter.
+
+	type IntervalJob struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewIntervalJob"></a>
+### func NewIntervalJob
+
+	func NewIntervalJob(cfg JobConfig) (*IntervalJob, error)
+
+NewIntervalJob creates a placeholder job from persisted config.
+
+<a name="IntervalJob.Execute"></a>
+### func \(\*IntervalJob\) Execute
+
+	func (j *IntervalJob) Execute(_ context.Context) error
+
+Execute is a no\-op — the real callback lives in simpleIntervalJob.
 
 <a name="Job"></a>
 ## type Job
@@ -381,6 +458,7 @@ JobType represents the type of a job.
 	    JobTypeOptimization JobType = "optimization" // Memory graph optimization
 	    JobTypeSecurity     JobType = "security"     // Security scans
 	    JobTypeLearning     JobType = "learning"     // Learning consolidation
+	    JobTypeInterval     JobType = "interval"     // Generic interval callback
 	)
 
 <a name="LearningConsolidator"></a>
@@ -485,6 +563,17 @@ MemoryOptimizerAdapter wraps separate functions to satisfy MemoryOptimizer.
 
 
 
+<a name="MissedTickRun"></a>
+## type MissedTickRun
+
+MissedTickRun describes a catch\-up delivery produced by ProcessMissedTicks.
+
+	type MissedTickRun struct {
+	    JobID       string
+	    Tick        time.Time // MAX(tick) among due ticks when coalescing
+	    MissedCount int       // ticks skipped by coalescing (due-1); 0 in accumulate mode
+	}
+
 <a name="NotificationEmitter"></a>
 ## type NotificationEmitter
 
@@ -545,6 +634,20 @@ OptimizationJobConfig holds configuration for optimization jobs.
 Option is a functional option for configuring the Scheduler.
 
 	type Option func(*Scheduler) error
+
+<a name="WithClaimRetentionDays"></a>
+### func WithClaimRetentionDays
+
+	func WithClaimRetentionDays(days int) Option
+
+WithClaimRetentionDays sets the claimed\-tick retention window \(scheduler claim\_retention\_days\). Claims older than this are pruned on startup. Non\-positive values fall back to DefaultClaimRetentionDays \(7\).
+
+<a name="WithCoalesceMissed"></a>
+### func WithCoalesceMissed
+
+	func WithCoalesceMissed(enabled bool) Option
+
+WithCoalesceMissed controls missed\-tick coalescing \(scheduler coalesce\_missed\). Default true: after downtime, only the latest due tick per job is delivered once, with missed\_count metadata. Set false to restore the accumulate\-each behavior \(one delivery per missed tick\).
 
 <a name="WithDataDir"></a>
 ### func WithDataDir
@@ -747,12 +850,33 @@ NewScheduler creates a new Scheduler instance.
 
 Bus returns the message bus.
 
+<a name="Scheduler.ClaimCount"></a>
+### func \(\*Scheduler\) ClaimCount
+
+	func (s *Scheduler) ClaimCount() (int64, error)
+
+ClaimCount returns the number of claimed tick rows \(inspection/test aid\).
+
+<a name="Scheduler.ClaimTick"></a>
+### func \(\*Scheduler\) ClaimTick
+
+	func (s *Scheduler) ClaimTick(jobID string, tick time.Time) (claimed bool, err error)
+
+ClaimTick atomically claims a tick for a job before delivery. It returns false without error when the tick was already claimed \(constraint violation\), which marks it delivered — callers must skip dispatch.
+
 <a name="Scheduler.GetJob"></a>
 ### func \(\*Scheduler\) GetJob
 
 	func (s *Scheduler) GetJob(jobID string) (JobInfo, bool)
 
 GetJob returns information about a specific job.
+
+<a name="Scheduler.GetLastWake"></a>
+### func \(\*Scheduler\) GetLastWake
+
+	func (s *Scheduler) GetLastWake() (time.Time, error)
+
+GetLastWake returns the persisted last wake time \(zero if never set\).
 
 <a name="Scheduler.JobCount"></a>
 ### func \(\*Scheduler\) JobCount
@@ -796,6 +920,15 @@ NextRun returns the next scheduled run time for a job.
 
 PauseJob pauses a job \(removes from cron but keeps in store\).
 
+<a name="Scheduler.ProcessMissedTicks"></a>
+### func \(\*Scheduler\) ProcessMissedTicks
+
+	func (s *Scheduler) ProcessMissedTicks(now time.Time) ([]MissedTickRun, error)
+
+ProcessMissedTicks computes due ticks per job since lastWake and delivers them. With coalesce\_missed enabled \(default\) only the latest tick per job is delivered, once, with missed\_count metadata logged at info level; disabled, every due tick is delivered individually. lastWake is advanced to now after the sweep.
+
+The scheduler must be running. Call this once at startup \(Start does this automatically\) or after known downtime; cron fires continue to use the claim\-before\-deliver path, so double delivery cannot occur either way.
+
 <a name="Scheduler.ResumeJob"></a>
 ### func \(\*Scheduler\) ResumeJob
 
@@ -830,6 +963,13 @@ Schedule adds a job to the scheduler.
 	func (s *Scheduler) ScheduleConfig(cfg JobConfig) (string, error)
 
 ScheduleConfig creates and schedules a job from a JobConfig.
+
+<a name="Scheduler.SetLastWake"></a>
+### func \(\*Scheduler\) SetLastWake
+
+	func (s *Scheduler) SetLastWake(wake time.Time) error
+
+SetLastWake persists the last wake time.
 
 <a name="Scheduler.Start"></a>
 ### func \(\*Scheduler\) Start
@@ -941,6 +1081,17 @@ NewShellJob creates a new shell job.
 	func (j *ShellJob) Execute(ctx context.Context) error
 
 Execute runs the shell command.
+
+SECURITY NOTE: The fence check for the working directory and command arguments happens at job CREATION time \(in tool\_schedule\_create.go\). There is a TOCTOU \(time\-of\-check\-time\-of\-use\) window between creation and execution where:
+
+1. The working directory could be modified
+2. Files referenced could be replaced with symlinks to sensitive locations
+
+For high\-security deployments, consider:
+
+- Storing resolved realpath of workDir at creation and verifying at execution
+- Re\-validating fence.CheckCommand\(\) at execution time \(requires injecting FenceChecker into ShellJob via NewShellJob\)
+- Using openat2\(\) with RESOLVE\_BENEATH for path operations
 
 <a name="ShellJobConfig"></a>
 ## type ShellJobConfig

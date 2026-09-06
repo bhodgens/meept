@@ -9,17 +9,22 @@ Package bus provides a channel\-based pub/sub message bus.
 ## Index
 
 - Constants
+- [func SetPanicOnUndrainedSubscription\(enabled bool\)](<#SetPanicOnUndrainedSubscription>)
 - [type Config](<#Config>)
   - [func DefaultConfig\(\) \*Config](<#DefaultConfig>)
 - [type MessageBus](<#MessageBus>)
   - [func New\(cfg \*Config, logger \*slog.Logger\) \*MessageBus](<#New>)
   - [func \(b \*MessageBus\) Close\(\)](<#MessageBus.Close>)
+  - [func \(b \*MessageBus\) HasSubscribers\(topic string\) bool](<#MessageBus.HasSubscribers>)
   - [func \(b \*MessageBus\) Publish\(topic string, msg \*models.BusMessage\) int](<#MessageBus.Publish>)
+  - [func \(b \*MessageBus\) PublishBlocking\(topic string, msg \*models.BusMessage\) int](<#MessageBus.PublishBlocking>)
+  - [func \(b \*MessageBus\) PublishExternalOnly\(topic string, msg \*models.BusMessage\) int](<#MessageBus.PublishExternalOnly>)
   - [func \(b \*MessageBus\) Request\(ctx context.Context, topic string, msg \*models.BusMessage\) \(\*models.BusMessage, error\)](<#MessageBus.Request>)
   - [func \(b \*MessageBus\) Stats\(\) map\[string\]int](<#MessageBus.Stats>)
   - [func \(b \*MessageBus\) Subscribe\(id, topic string\) \*Subscriber](<#MessageBus.Subscribe>)
   - [func \(b \*MessageBus\) Unsubscribe\(sub \*Subscriber\)](<#MessageBus.Unsubscribe>)
 - [type MessageCallback](<#MessageCallback>)
+- [type SubMetadata](<#SubMetadata>)
 - [type Subscriber](<#Subscriber>)
 - [type SubscriptionHandler](<#SubscriptionHandler>)
   - [func NewSubscriptionHandler\(bus \*MessageBus, logger \*slog.Logger\) \*SubscriptionHandler](<#NewSubscriptionHandler>)
@@ -36,6 +41,11 @@ Package bus provides a channel\-based pub/sub message bus.
 	    EventAgentStarted   = "agent.lifecycle.started"
 	    EventAgentEnded     = "agent.lifecycle.ended"
 	    EventAgentIteration = "agent.iteration.completed"
+	
+	    // EventAgentStateChanged is published when an agent transitions between
+	    // formal states (see internal/agent/agent_state.go). Payload is
+	    // agent.StateTransition.
+	    EventAgentStateChanged = "agent.state.changed"
 	)
 
 <a name="EventSessionStart"></a>Session lifecycle event topics.
@@ -56,6 +66,13 @@ Package bus provides a channel\-based pub/sub message bus.
 	    EventQueuePersisted        = "agent.queue.persisted"
 	    EventQueueStatus           = "agent.queue.status"
 	)
+
+<a name="SetPanicOnUndrainedSubscription"></a>
+## func SetPanicOnUndrainedSubscription
+
+	func SetPanicOnUndrainedSubscription(enabled bool)
+
+SetPanicOnUndrainedSubscription enables/disables error\-level logging mode for testing. When enabled, Publish\(\) logs at Error level if no subscribers exist for the topic.
 
 <a name="Config"></a>
 ## type Config
@@ -96,12 +113,33 @@ New creates a new MessageBus.
 
 Close shuts down the message bus and closes all subscriber channels.
 
+<a name="MessageBus.HasSubscribers"></a>
+### func \(\*MessageBus\) HasSubscribers
+
+	func (b *MessageBus) HasSubscribers(topic string) bool
+
+HasSubscribers reports whether any subscriber \(direct or wildcard\) is registered for the given topic. Use this to skip expensive publishes when nobody is listening \(e.g., SSE heartbeats in non\-streaming mode\).
+
 <a name="MessageBus.Publish"></a>
 ### func \(\*MessageBus\) Publish
 
 	func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int
 
-Publish sends a message to all subscribers of the topic. It also publishes to wildcard subscribers \(e.g., "agent.\*" matches "agent.status"\).
+Publish sends a message to all subscribers of the topic. It also publishes to wildcard subscribers \(e.g., "agent.\*" matches "agent.status"\). A nil msg is silently dropped to protect subscriber goroutines from nil\-pointer dereferences when reading the message.
+
+<a name="MessageBus.PublishBlocking"></a>
+### func \(\*MessageBus\) PublishBlocking
+
+	func (b *MessageBus) PublishBlocking(topic string, msg *models.BusMessage) int
+
+PublishBlocking sends a message to all subscribers, blocking until the message is enqueued in every subscriber's channel or a 5\-second timeout elapses. Use this for security\-critical events where message drops are unacceptable \(e.g., approval requests\). Returns the number of subscribers the message was delivered to.
+
+<a name="MessageBus.PublishExternalOnly"></a>
+### func \(\*MessageBus\) PublishExternalOnly
+
+	func (b *MessageBus) PublishExternalOnly(topic string, msg *models.BusMessage) int
+
+PublishExternalOnly is like Publish but marks the "no subscribers" debug log as an external\-only topic. Use this for fire\-and\-forget event topics that are informational and expected to have no subscriber when no TUI/MCP client is connected \(e.g., worker.\*, chat.message.received\). The panicOnUndrainedSubscription behavior is unchanged — it now logs at Error level instead of panicking, so tests still catch missing wiring.
 
 <a name="MessageBus.Request"></a>
 ### func \(\*MessageBus\) Request
@@ -137,6 +175,17 @@ Unsubscribe removes a subscription.
 MessageCallback is invoked when a message arrives on a subscribed topic.
 
 	type MessageCallback func(ctx context.Context, topic string, msg any)
+
+<a name="SubMetadata"></a>
+## type SubMetadata
+
+SubMetadata tracks subscription metadata for debugging dead subscriptions.
+
+	type SubMetadata struct {
+	    Topic     string
+	    CreatedAt time.Time
+	    Caller    string // runtime.Caller(2) - where Subscribe was called
+	}
 
 <a name="Subscriber"></a>
 ## type Subscriber

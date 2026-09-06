@@ -6,6 +6,23 @@
 
 Package llm provides LLM client functionality for various providers.
 
+CodexClient typed HTTP\-status errors \(codex 429/API\-status classification\).
+
+The codex backend is OpenAI\-compatible at the error layer, so non\-200 responses are classified exactly like client.go's OpenAI\-shaped path:
+
+	429 → *RateLimitError (Retry-After header honored) or *QuotaResetError
+	      when the body carries a usage-window/billing shape (leaf-01 rule —
+	      the quota NonRetryable early-exit upstream of every retry loop
+	      depends on this), wrapping a *APIError as its Cause
+	402 → *QuotaResetError (billing exhaustion = retry-with-estimate, the
+	      client.go:1332 contract; without this lane codex 402s fell to
+	      plain *APIError, PM isClientError blocked rotation, and the
+	      loop's quota branch never fired)
+	other non-200 → *APIError{StatusCode, Detail}
+	
+
+This file lives outside errors.go \(owned by another workstream\); it only CONSUMES the package's existing public parse helpers.
+
 Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 
 Package llm provides LLM client functionality for OpenAI\-compatible APIs.
@@ -16,33 +33,67 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 
 - Constants
 - Variables
+- [func AttachGrammar\(reqPayload map\[string\]any, mode string, g string\)](<#AttachGrammar>)
 - [func BackoffWithJitter\(delay time.Duration, maxDelay time.Duration, useJitter bool\) time.Duration](<#BackoffWithJitter>)
 - [func BuildModelsInUse\(agents \[\]AgentModelRef, slots ModelSlots, aliases map\[string\]ModelAliasEntry, disabled \[\]string\) map\[string\]struct\{\}](<#BuildModelsInUse>)
+- [func CatalogSnapshot\(\) map\[string\]\[\]ModelCatalogEntry](<#CatalogSnapshot>)
 - [func ClassificationUserGuidance\(err error\) string](<#ClassificationUserGuidance>)
+- [func ClassifyPromptSections\(sections \[\]string\) \(static \[\]string, dynamic \[\]string\)](<#ClassifyPromptSections>)
 - [func ComputeEndpointKey\(runtime, baseURL string\) string](<#ComputeEndpointKey>)
 - [func ContainsSupportedRuntime\(runtimes \[\]string\) bool](<#ContainsSupportedRuntime>)
 - [func ContentFromParts\(parts \[\]ContentPart, useDescription bool\) string](<#ContentFromParts>)
 - [func CountToolDefinitionsTokens\(tools \[\]ToolDefinition, tokenizer Tokenizer\) int](<#CountToolDefinitionsTokens>)
 - [func DefaultBudgetTable\(\) map\[string\]int](<#DefaultBudgetTable>)
 - [func DerefOr\[T any\]\(p \*T, def T\) T](<#DerefOr>)
+- [func EndpointKey\(cfg \*ModelConfig\) string](<#EndpointKey>)
 - [func EstimateTokenCountHeuristic\(content string\) int](<#EstimateTokenCountHeuristic>)
+- [func FetchLMStudioContexts\(ctx context.Context, client \*http.Client, logger \*slog.Logger, baseURL, apiKey string\) \(map\[string\]int, error\)](<#FetchLMStudioContexts>)
+- [func FetchLocalModelsContexts\(ctx context.Context, client \*http.Client, logger \*slog.Logger, baseURL string, modelKeys \[\]string\) map\[string\]int](<#FetchLocalModelsContexts>)
+- [func FetchOllamaContexts\(ctx context.Context, client \*http.Client, logger \*slog.Logger, baseURL, apiKey string\) \(map\[string\]int, error\)](<#FetchOllamaContexts>)
+- [func FetchOpenRouterContexts\(ctx context.Context, client \*http.Client, logger \*slog.Logger, baseURL, apiKey string\) \(map\[string\]int, error\)](<#FetchOpenRouterContexts>)
 - [func FormatPIDFilePath\(pidFile string\) \(string, error\)](<#FormatPIDFilePath>)
+- [func GBNFConstrainedEnabled\(\) bool](<#GBNFConstrainedEnabled>)
+- [func GrammarForTools\(defs \[\]ToolDefinition\) \(string, bool\)](<#GrammarForTools>)
 - [func HasImageParts\(parts \[\]ContentPart\) bool](<#HasImageParts>)
 - [func HasUndescribedImages\(parts \[\]ContentPart\) bool](<#HasUndescribedImages>)
 - [func IsLoopbackBaseURL\(baseURL string\) bool](<#IsLoopbackBaseURL>)
 - [func IsNonRetryable\(err error\) bool](<#IsNonRetryable>)
+- [func IsQuotaResetError\(err error\) bool](<#IsQuotaResetError>)
 - [func IsRateLimitError\(err error\) bool](<#IsRateLimitError>)
 - [func IsRateLimitErrorMessage\(errMsg string\) bool](<#IsRateLimitErrorMessage>)
 - [func IsSupportedRuntime\(rt string\) bool](<#IsSupportedRuntime>)
 - [func IsValidEffort\(s string\) bool](<#IsValidEffort>)
+- [func JSONSchemaForTools\(defs \[\]ToolDefinition\) string](<#JSONSchemaForTools>)
+- [func NewMetricsStoreForPacing\(dbPath string\) \(\*metrics.Store, error\)](<#NewMetricsStoreForPacing>)
+- [func ParsePIDFile\(path string\) \(int, error\)](<#ParsePIDFile>)
+- [func ParseRetryAfter\(header http.Header\) \(date time.Time, delta time.Duration, present bool\)](<#ParseRetryAfter>)
+- [func PriorityOf\(opts \[\]ChatOption\) bool](<#PriorityOf>)
 - [func Ptr\[T any\]\(v T\) \*T](<#Ptr>)
+- [func QuotaCredentialKey\(providerID string, cfg \*ModelConfig\) string](<#QuotaCredentialKey>)
 - [func ResolveBudget\(rc \*ReasoningConfig, agent \*AgentReasoningConfig, modelDefault \*ReasoningConfig, globalBudgets map\[string\]int\) \*int](<#ResolveBudget>)
 - [func RunModelPicker\(config ModelPickerConfig\) \(\*ProviderDef, \*ModelCatalogEntry, error\)](<#RunModelPicker>)
+- [func SchemaModeValid\(s string\) bool](<#SchemaModeValid>)
+- [func SetCatalogContextWindow\(providerID, modelID string, contextWindow int\) bool](<#SetCatalogContextWindow>)
+- [func SetGBNFConstrained\(on bool\)](<#SetGBNFConstrained>)
+- [func StripPromptCacheBoundary\(s string\) string](<#StripPromptCacheBoundary>)
 - [func SupportedRuntimes\(\) \[\]string](<#SupportedRuntimes>)
+- [func ToolConstraintForRuntime\(rt RuntimeType\) string](<#ToolConstraintForRuntime>)
+- [func ToolConstraintSupported\(mode string\) bool](<#ToolConstraintSupported>)
 - [func UserMessage\(err error\) string](<#UserMessage>)
 - [type APIError](<#APIError>)
   - [func \(e \*APIError\) Error\(\) string](<#APIError.Error>)
   - [func \(e \*APIError\) UserMessage\(\) string](<#APIError.UserMessage>)
+- [type AdapterEntry](<#AdapterEntry>)
+- [type AdapterRegistry](<#AdapterRegistry>)
+  - [func LoadAdapterRegistry\(registryPath string\) \(\*AdapterRegistry, error\)](<#LoadAdapterRegistry>)
+- [type AdapterRouter](<#AdapterRouter>)
+  - [func NewAdapterRouter\(adapters map\[string\]\*LoadedAdapter, fallback \*LoadedAdapter\) \*AdapterRouter](<#NewAdapterRouter>)
+  - [func NewAdapterRouterFromLoader\(loader \*LFMLoader\) \*AdapterRouter](<#NewAdapterRouterFromLoader>)
+  - [func \(r \*AdapterRouter\) SelectAdapter\(domain string\) \*LoadedAdapter](<#AdapterRouter.SelectAdapter>)
+- [type AdaptivePacer](<#AdaptivePacer>)
+  - [func NewAdaptivePacer\(store \*metrics.Store, cfg PacingConfig\) \*AdaptivePacer](<#NewAdaptivePacer>)
+  - [func \(p \*AdaptivePacer\) Observe\(v PolicyVerdict, providerID string\)](<#AdaptivePacer.Observe>)
+  - [func \(p \*AdaptivePacer\) Wait\(ctx context.Context, providerID string\) error](<#AdaptivePacer.Wait>)
 - [type AgentModelRef](<#AgentModelRef>)
 - [type AgentReasoningConfig](<#AgentReasoningConfig>)
   - [func \(a \*AgentReasoningConfig\) ClampEffort\(effort string\) string](<#AgentReasoningConfig.ClampEffort>)
@@ -55,6 +106,8 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(c \*AnthropicClient\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#AnthropicClient.ChatWithProgress>)
   - [func \(c \*AnthropicClient\) Close\(\) error](<#AnthropicClient.Close>)
   - [func \(c \*AnthropicClient\) Config\(\) \*ModelConfig](<#AnthropicClient.Config>)
+  - [func \(c \*AnthropicClient\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#AnthropicClient.SetFailurePolicyConfig>)
+  - [func \(c \*AnthropicClient\) SetQuotaMaxWait\(d time.Duration\)](<#AnthropicClient.SetQuotaMaxWait>)
 - [type AnthropicClientOption](<#AnthropicClientOption>)
   - [func WithAnthropicBudget\(budget \*Budget\) AnthropicClientOption](<#WithAnthropicBudget>)
   - [func WithAnthropicLogger\(logger \*slog.Logger\) AnthropicClientOption](<#WithAnthropicLogger>)
@@ -62,8 +115,13 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func WithAnthropicTimeout\(timeout time.Duration\) AnthropicClientOption](<#WithAnthropicTimeout>)
   - [func WithAnthropicTimeoutCalculator\(calc \*metrics.Calculator\) AnthropicClientOption](<#WithAnthropicTimeoutCalculator>)
   - [func WithAnthropicTokenCache\(cache ResponseCache\) AnthropicClientOption](<#WithAnthropicTokenCache>)
+  - [func WithAnthropicTokenResolver\(tr TokenResolver, provider string\) AnthropicClientOption](<#WithAnthropicTokenResolver>)
   - [func WithAnthropicUploadStore\(store UploadStore\) AnthropicClientOption](<#WithAnthropicUploadStore>)
 - [type AuthType](<#AuthType>)
+- [type BackoffPlan](<#BackoffPlan>)
+  - [func DefaultBackoffPlan\(class FailureClass, now time.Time, cfg FailurePolicyConfig\) BackoffPlan](<#DefaultBackoffPlan>)
+  - [func \(p BackoffPlan\) NextAttempt\(now time.Time, attempt int, prior time.Time\) time.Time](<#BackoffPlan.NextAttempt>)
+  - [func \(p BackoffPlan\) ShouldGiveUp\(now time.Time\) bool](<#BackoffPlan.ShouldGiveUp>)
 - [type BrokerConfig](<#BrokerConfig>)
 - [type BrokerStatus](<#BrokerStatus>)
 - [type Budget](<#Budget>)
@@ -79,6 +137,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(b \*Budget\) RecordTaskUsage\(taskID string, tokens int\)](<#Budget.RecordTaskUsage>)
   - [func \(b \*Budget\) RecordUsage\(usage TokenUsage\)](<#Budget.RecordUsage>)
   - [func \(b \*Budget\) RecordUsageWithScope\(usage TokenUsage, taskID, sessionID string\)](<#Budget.RecordUsageWithScope>)
+  - [func \(b \*Budget\) ReleaseRateLimitSlot\(\)](<#Budget.ReleaseRateLimitSlot>)
   - [func \(b \*Budget\) RemoveSession\(\_ context.Context, sessionID string\)](<#Budget.RemoveSession>)
   - [func \(b \*Budget\) RemoveSessionCost\(\_ context.Context, sessionID string\)](<#Budget.RemoveSessionCost>)
   - [func \(b \*Budget\) RemoveTask\(\_ context.Context, taskID string\)](<#Budget.RemoveTask>)
@@ -102,9 +161,11 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type CacheKeyBuilder](<#CacheKeyBuilder>)
   - [func NewCacheKeyBuilder\(fileAware bool\) \*CacheKeyBuilder](<#NewCacheKeyBuilder>)
   - [func \(b \*CacheKeyBuilder\) Build\(prompt, modelID string, messages \[\]ChatMessage\) CacheKey](<#CacheKeyBuilder.Build>)
+  - [func \(b \*CacheKeyBuilder\) BuildPrefixAwareKey\(modelID string, systemPrompt \[\]string, messages \[\]ChatMessage\) CacheKey](<#CacheKeyBuilder.BuildPrefixAwareKey>)
   - [func \(b \*CacheKeyBuilder\) ComputeFileHashes\(paths \[\]string\) map\[string\]string](<#CacheKeyBuilder.ComputeFileHashes>)
   - [func \(b \*CacheKeyBuilder\) ComputePromptHash\(messages \[\]ChatMessage\) string](<#CacheKeyBuilder.ComputePromptHash>)
   - [func \(b \*CacheKeyBuilder\) ExtractFileReferences\(prompt string\) \[\]string](<#CacheKeyBuilder.ExtractFileReferences>)
+- [type CacheScope](<#CacheScope>)
 - [type CacheStats](<#CacheStats>)
 - [type CapabilityError](<#CapabilityError>)
   - [func \(e \*CapabilityError\) Error\(\) string](<#CapabilityError.Error>)
@@ -112,9 +173,15 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*ChatMessage\) ToOpenAIDict\(\) map\[string\]any](<#ChatMessage.ToOpenAIDict>)
   - [func \(m \*ChatMessage\) ToOpenAIDictWithStore\(store UploadStore\) map\[string\]any](<#ChatMessage.ToOpenAIDictWithStore>)
 - [type ChatOption](<#ChatOption>)
+  - [func DisableThinking\(\) ChatOption](<#DisableThinking>)
+  - [func WithAdapter\(path string\) ChatOption](<#WithAdapter>)
   - [func WithFrequencyPenalty\(p float64\) ChatOption](<#WithFrequencyPenalty>)
+  - [func WithGrammar\(mode string\) ChatOption](<#WithGrammar>)
   - [func WithMaxTokens\(tokens int\) ChatOption](<#WithMaxTokens>)
   - [func WithPresencePenalty\(p float64\) ChatOption](<#WithPresencePenalty>)
+  - [func WithPriority\(interactive bool\) ChatOption](<#WithPriority>)
+  - [func WithRawGrammar\(grammar string\) ChatOption](<#WithRawGrammar>)
+  - [func WithReasoning\(rc \*ReasoningConfig\) ChatOption](<#WithReasoning>)
   - [func WithStopSequences\(seqs \[\]string\) ChatOption](<#WithStopSequences>)
   - [func WithTaskScope\(taskID, sessionID string\) ChatOption](<#WithTaskScope>)
   - [func WithTemperature\(temp float64\) ChatOption](<#WithTemperature>)
@@ -134,7 +201,11 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(c \*Client\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#Client.ChatWithProgress>)
   - [func \(c \*Client\) Close\(\) error](<#Client.Close>)
   - [func \(c \*Client\) Config\(\) \*ModelConfig](<#Client.Config>)
+  - [func \(c \*Client\) Reconfigure\(cfg \*ModelConfig\)](<#Client.Reconfigure>)
+  - [func \(c \*Client\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#Client.SetFailurePolicyConfig>)
   - [func \(c \*Client\) SetMetricsStore\(store \*metrics.Store\)](<#Client.SetMetricsStore>)
+  - [func \(c \*Client\) SetPacer\(p \*AdaptivePacer\)](<#Client.SetPacer>)
+  - [func \(c \*Client\) SetQuotaMaxWait\(d time.Duration\)](<#Client.SetQuotaMaxWait>)
   - [func \(c \*Client\) SwitchModel\(config \*ModelConfig\) error](<#Client.SwitchModel>)
 - [type ClientError](<#ClientError>)
   - [func \(e \*ClientError\) Error\(\) string](<#ClientError.Error>)
@@ -151,6 +222,17 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func WithTokenCache\(cache ResponseCache\) ClientOption](<#WithTokenCache>)
   - [func WithTokenResolver\(tr TokenResolver, provider string\) ClientOption](<#WithTokenResolver>)
   - [func WithUploadStore\(store UploadStore\) ClientOption](<#WithUploadStore>)
+- [type CodexClient](<#CodexClient>)
+  - [func NewCodexClient\(cfg \*ModelConfig, opts ...CodexClientOption\) \*CodexClient](<#NewCodexClient>)
+  - [func \(c \*CodexClient\) Chat\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#CodexClient.Chat>)
+  - [func \(c \*CodexClient\) ChatWithDeltaCallback\(ctx context.Context, messages \[\]ChatMessage, onDelta DeltaCallback, opts ...ChatOption\) \(\*Response, error\)](<#CodexClient.ChatWithDeltaCallback>)
+  - [func \(c \*CodexClient\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#CodexClient.ChatWithProgress>)
+  - [func \(c \*CodexClient\) Config\(\) \*ModelConfig](<#CodexClient.Config>)
+- [type CodexClientOption](<#CodexClientOption>)
+  - [func WithCodexBudget\(b \*Budget\) CodexClientOption](<#WithCodexBudget>)
+  - [func WithCodexLogger\(l \*slog.Logger\) CodexClientOption](<#WithCodexLogger>)
+  - [func WithCodexTimeout\(d time.Duration\) CodexClientOption](<#WithCodexTimeout>)
+  - [func WithCodexTokenResolver\(tr TokenResolver, provider string\) CodexClientOption](<#WithCodexTokenResolver>)
 - [type CompactResult](<#CompactResult>)
 - [type CompactorConfig](<#CompactorConfig>)
   - [func DefaultCompactorConfig\(\) CompactorConfig](<#DefaultCompactorConfig>)
@@ -172,6 +254,17 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(c \*ContextCompressor\) Compress\(ctx context.Context, messages \[\]ChatMessage, utilization float64\) CompressionResult](<#ContextCompressor.Compress>)
   - [func \(c \*ContextCompressor\) SetCompactor\(compactor \*ContextCompactor\)](<#ContextCompressor.SetCompactor>)
   - [func \(c \*ContextCompressor\) Stats\(\) CompressionStatsSnapshot](<#ContextCompressor.Stats>)
+- [type ContextDiscovery](<#ContextDiscovery>)
+  - [func NewContextDiscovery\(cfg ContextDiscoveryConfig, client \*http.Client\) \*ContextDiscovery](<#NewContextDiscovery>)
+  - [func \(d \*ContextDiscovery\) Client\(\) \*http.Client](<#ContextDiscovery.Client>)
+  - [func \(d \*ContextDiscovery\) Enabled\(\) bool](<#ContextDiscovery.Enabled>)
+  - [func \(d \*ContextDiscovery\) RegisterFetcher\(providerID string, f Fetcher\)](<#ContextDiscovery.RegisterFetcher>)
+  - [func \(d \*ContextDiscovery\) SetEndpoint\(providerID, baseURL, apiKey string\)](<#ContextDiscovery.SetEndpoint>)
+  - [func \(d \*ContextDiscovery\) SetLogger\(l \*slog.Logger\)](<#ContextDiscovery.SetLogger>)
+  - [func \(d \*ContextDiscovery\) SetResolver\(r \*Resolver\)](<#ContextDiscovery.SetResolver>)
+  - [func \(d \*ContextDiscovery\) Start\(ctx context.Context\)](<#ContextDiscovery.Start>)
+  - [func \(d \*ContextDiscovery\) Sync\(ctx context.Context\) error](<#ContextDiscovery.Sync>)
+- [type ContextDiscoveryConfig](<#ContextDiscoveryConfig>)
 - [type ContextFirewall](<#ContextFirewall>)
   - [func NewContextFirewall\(inner Chatter, model \*ModelConfig, cfg ContextFirewallConfig, summaryModel Chatter, logger \*slog.Logger, tokenizer Tokenizer\) \*ContextFirewall](<#NewContextFirewall>)
   - [func \(f \*ContextFirewall\) Chat\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#ContextFirewall.Chat>)
@@ -199,6 +292,11 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(cs \*CredentialStore\) Set\(providerID, apiKey string\) error](<#CredentialStore.Set>)
 - [type CutResult](<#CutResult>)
 - [type DeltaCallback](<#DeltaCallback>)
+- [type DeltaCallbackWithAttempt](<#DeltaCallbackWithAttempt>)
+- [type FailureClass](<#FailureClass>)
+- [type FailurePolicyConfig](<#FailurePolicyConfig>)
+- [type Fetcher](<#Fetcher>)
+  - [func NewLMStudioFetcher\(client \*http.Client, logger \*slog.Logger\) Fetcher](<#NewLMStudioFetcher>)
 - [type FileOperationSet](<#FileOperationSet>)
   - [func NewFileOperationSet\(\) \*FileOperationSet](<#NewFileOperationSet>)
   - [func \(f \*FileOperationSet\) FileCount\(\) int](<#FileOperationSet.FileCount>)
@@ -207,6 +305,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type FirewallStats](<#FirewallStats>)
 - [type FunctionDef](<#FunctionDef>)
 - [type FunctionParameters](<#FunctionParameters>)
+- [type HandoffResult](<#HandoffResult>)
 - [type HealthChangeCallback](<#HealthChangeCallback>)
 - [type HealthCheckConfig](<#HealthCheckConfig>)
 - [type HealthChecker](<#HealthChecker>)
@@ -250,12 +349,17 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(c \*L2Cache\) Start\(\)](<#L2Cache.Start>)
 - [type L2CacheConfig](<#L2CacheConfig>)
 - [type L2InspectEntry](<#L2InspectEntry>)
+- [type LFMLoader](<#LFMLoader>)
+  - [func NewLFMLoader\(baseModel, modelPath string, logger \*slog.Logger\) \*LFMLoader](<#NewLFMLoader>)
+  - [func \(l \*LFMLoader\) LoadAllAdapters\(registry \*AdapterRegistry\) error](<#LFMLoader.LoadAllAdapters>)
 - [type LimitBudget](<#LimitBudget>)
 - [type LivePrice](<#LivePrice>)
+- [type LoadedAdapter](<#LoadedAdapter>)
 - [type MetricsRecorder](<#MetricsRecorder>)
 - [type ModelAliasEntry](<#ModelAliasEntry>)
 - [type ModelBroker](<#ModelBroker>)
   - [func NewModelBroker\(cfg BrokerConfig\) \*ModelBroker](<#NewModelBroker>)
+  - [func \(b \*ModelBroker\) ActiveQuotaBlocks\(\) \[\]QuotaBlockStatus](<#ModelBroker.ActiveQuotaBlocks>)
   - [func \(b \*ModelBroker\) Chat\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#ModelBroker.Chat>)
   - [func \(b \*ModelBroker\) ChatWithModel\(ctx context.Context, modelRef string, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#ModelBroker.ChatWithModel>)
   - [func \(b \*ModelBroker\) ChatWithModelProgress\(ctx context.Context, modelRef string, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#ModelBroker.ChatWithModelProgress>)
@@ -263,6 +367,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(b \*ModelBroker\) ChatterForModel\(modelRef string\) Chatter](<#ModelBroker.ChatterForModel>)
   - [func \(b \*ModelBroker\) Config\(\) \*ModelConfig](<#ModelBroker.Config>)
   - [func \(b \*ModelBroker\) GetStatus\(\) BrokerStatus](<#ModelBroker.GetStatus>)
+  - [func \(b \*ModelBroker\) QuotaBlockedUntil\(credentialKey string\) time.Time](<#ModelBroker.QuotaBlockedUntil>)
   - [func \(b \*ModelBroker\) UpdateHealth\(ctx context.Context\) error](<#ModelBroker.UpdateHealth>)
 - [type ModelCatalogEntry](<#ModelCatalogEntry>)
   - [func GetAllCatalogModels\(\) \[\]ModelCatalogEntry](<#GetAllCatalogModels>)
@@ -271,6 +376,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type ModelConfig](<#ModelConfig>)
   - [func GetAllModels\(cfg \*ProvidersConfig\) \[\]\*ModelConfig](<#GetAllModels>)
   - [func ResolveModelRef\(ref string, cfg \*ProvidersConfig\) \*ModelConfig](<#ResolveModelRef>)
+  - [func \(m \*ModelConfig\) GenerationTransport\(\) string](<#ModelConfig.GenerationTransport>)
   - [func \(m \*ModelConfig\) HasCapabilities\(caps \[\]string\) bool](<#ModelConfig.HasCapabilities>)
   - [func \(m \*ModelConfig\) HasCapability\(capability string\) bool](<#ModelConfig.HasCapability>)
   - [func \(m \*ModelConfig\) TotalCost\(\) float64](<#ModelConfig.TotalCost>)
@@ -289,9 +395,20 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*ModelPicker\) WasCancelled\(\) bool](<#ModelPicker.WasCancelled>)
 - [type ModelPickerConfig](<#ModelPickerConfig>)
 - [type ModelPickerMode](<#ModelPickerMode>)
+- [type ModelRecord](<#ModelRecord>)
 - [type ModelSlots](<#ModelSlots>)
+- [type ModelStore](<#ModelStore>)
+  - [func OpenModelStore\(dir string\) \(\*ModelStore, error\)](<#OpenModelStore>)
+  - [func OpenModelStoreForTesting\(dir string, client \*http.Client, baseURL string\) \(\*ModelStore, error\)](<#OpenModelStoreForTesting>)
+  - [func \(s \*ModelStore\) Get\(name string\) \(ModelRecord, bool\)](<#ModelStore.Get>)
+  - [func \(s \*ModelStore\) List\(\) \[\]ModelRecord](<#ModelStore.List>)
+  - [func \(s \*ModelStore\) Pull\(ctx context.Context, repoID, quant string, progress func\(done, total int64\)\) \(\*ModelRecord, error\)](<#ModelStore.Pull>)
 - [type NonRetryableError](<#NonRetryableError>)
+- [type PacingConfig](<#PacingConfig>)
 - [type ParameterProperty](<#ParameterProperty>)
+- [type PolicyVerdict](<#PolicyVerdict>)
+  - [func Classify\(statusCode int, header http.Header, body \[\]byte, now time.Time\) PolicyVerdict](<#Classify>)
+  - [func VerdictForFailure\(err error\) PolicyVerdict](<#VerdictForFailure>)
 - [type PricingSyncer](<#PricingSyncer>)
   - [func NewPricingSyncer\(cfg PricingSyncerConfig\) \*PricingSyncer](<#NewPricingSyncer>)
   - [func \(ps \*PricingSyncer\) FetchOpenRouter\(ctx context.Context\) \(map\[string\]\*LivePrice, error\)](<#PricingSyncer.FetchOpenRouter>)
@@ -309,6 +426,8 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(p \*ProcessLogger\) Truncate\(\)](<#ProcessLogger.Truncate>)
 - [type ProgressCallback](<#ProgressCallback>)
 - [type ProgressStage](<#ProgressStage>)
+- [type PromptCacheConfig](<#PromptCacheConfig>)
+  - [func \(p \*PromptCacheConfig\) IsEnabled\(\) bool](<#PromptCacheConfig.IsEnabled>)
 - [type ProviderConfig](<#ProviderConfig>)
   - [func \(p ProviderConfig\) DefaultSpawnTimeout\(\) time.Duration](<#ProviderConfig.DefaultSpawnTimeout>)
   - [func \(p ProviderConfig\) EnsurePIDDir\(\) error](<#ProviderConfig.EnsurePIDDir>)
@@ -330,16 +449,18 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func ListProviders\(transport ProviderTransport\) \[\]ProviderDef](<#ListProviders>)
   - [func ProvidersFromConfig\(cfg \*ProvidersConfig\) \[\]ProviderDef](<#ProvidersFromConfig>)
 - [type ProviderEntry](<#ProviderEntry>)
-- [type ProviderErrorDetail](<#ProviderErrorDetail>)
-  - [func ParseGenericProviderError\(body \[\]byte\) \*ProviderErrorDetail](<#ParseGenericProviderError>)
-  - [func ParseOpenRouterError\(body \[\]byte\) \*ProviderErrorDetail](<#ParseOpenRouterError>)
-  - [func ParseRateLimitBody\(body \[\]byte\) \*ProviderErrorDetail](<#ParseRateLimitBody>)
-  - [func \(d \*ProviderErrorDetail\) Error\(\) string](<#ProviderErrorDetail.Error>)
+- [type ProviderError](<#ProviderError>)
+  - [func ParseGenericProviderError\(body \[\]byte\) \*ProviderError](<#ParseGenericProviderError>)
+  - [func ParseOpenRouterError\(body \[\]byte\) \*ProviderError](<#ParseOpenRouterError>)
+  - [func ParseRateLimitBody\(body \[\]byte\) \*ProviderError](<#ParseRateLimitBody>)
+  - [func \(d \*ProviderError\) Error\(\) string](<#ProviderError.Error>)
 - [type ProviderHealth](<#ProviderHealth>)
 - [type ProviderManager](<#ProviderManager>)
   - [func NewProviderManager\(cfg ProviderManagerConfig\) \*ProviderManager](<#NewProviderManager>)
   - [func \(pm \*ProviderManager\) AddProvider\(cfg \*ModelConfig, priority int\)](<#ProviderManager.AddProvider>)
   - [func \(pm \*ProviderManager\) Chat\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#ProviderManager.Chat>)
+  - [func \(pm \*ProviderManager\) ChatWithDeltaCallback\(ctx context.Context, messages \[\]ChatMessage, onDelta DeltaCallback, opts ...ChatOption\) \(\*Response, error\)](<#ProviderManager.ChatWithDeltaCallback>)
+  - [func \(pm \*ProviderManager\) ChatWithDeltaCallbackWithAttempt\(ctx context.Context, messages \[\]ChatMessage, onDeltaWithAttempt DeltaCallbackWithAttempt, opts ...ChatOption\) \(\*Response, error\)](<#ProviderManager.ChatWithDeltaCallbackWithAttempt>)
   - [func \(pm \*ProviderManager\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#ProviderManager.ChatWithProgress>)
   - [func \(pm \*ProviderManager\) Config\(\) \*ModelConfig](<#ProviderManager.Config>)
   - [func \(pm \*ProviderManager\) DisableProvider\(providerID string\) error](<#ProviderManager.DisableProvider>)
@@ -352,6 +473,8 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(pm \*ProviderManager\) RemoveProvider\(providerID string\) error](<#ProviderManager.RemoveProvider>)
   - [func \(pm \*ProviderManager\) ResetProviderHealth\(providerID string\) error](<#ProviderManager.ResetProviderHealth>)
   - [func \(pm \*ProviderManager\) SetCostOptimized\(enabled bool\)](<#ProviderManager.SetCostOptimized>)
+  - [func \(pm \*ProviderManager\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#ProviderManager.SetFailurePolicyConfig>)
+  - [func \(pm \*ProviderManager\) SetQuotaMaxWait\(d time.Duration\)](<#ProviderManager.SetQuotaMaxWait>)
   - [func \(pm \*ProviderManager\) StartHealthChecks\(ctx context.Context\)](<#ProviderManager.StartHealthChecks>)
   - [func \(pm \*ProviderManager\) Stop\(\)](<#ProviderManager.Stop>)
 - [type ProviderManagerConfig](<#ProviderManagerConfig>)
@@ -362,7 +485,24 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type ProvidersConfig](<#ProvidersConfig>)
   - [func LoadProvidersConfig\(path string\) \(\*ProvidersConfig, error\)](<#LoadProvidersConfig>)
   - [func LoadProvidersConfigDefault\(\) \(\*ProvidersConfig, error\)](<#LoadProvidersConfigDefault>)
+  - [func MergeProvidersConfig\(base, overlay \*ProvidersConfig\) \*ProvidersConfig](<#MergeProvidersConfig>)
 - [type QualityMetrics](<#QualityMetrics>)
+- [type QuotaBlockStatus](<#QuotaBlockStatus>)
+- [type QuotaContext](<#QuotaContext>)
+- [type QuotaResetError](<#QuotaResetError>)
+  - [func AsQuotaResetError\(err error\) \(\*QuotaResetError, bool\)](<#AsQuotaResetError>)
+  - [func ParseQuotaResponse\(statusCode int, header http.Header, body \[\]byte, known QuotaContext\) \*QuotaResetError](<#ParseQuotaResponse>)
+  - [func \(e \*QuotaResetError\) Error\(\) string](<#QuotaResetError.Error>)
+  - [func \(e \*QuotaResetError\) NonRetryable\(\) bool](<#QuotaResetError.NonRetryable>)
+  - [func \(e \*QuotaResetError\) Unwrap\(\) error](<#QuotaResetError.Unwrap>)
+  - [func \(e \*QuotaResetError\) UserMessage\(\) string](<#QuotaResetError.UserMessage>)
+- [type QuotaWaitConfig](<#QuotaWaitConfig>)
+  - [func ConfigFromSchema\(qrc interface \{
+    GetEnabled\(\) bool
+    GetMaxWait\(\) time.Duration
+    GetDefaultEstimate\(\) time.Duration
+    GetDeferCheckInterval\(\) time.Duration
+\}\) QuotaWaitConfig](<#ConfigFromSchema>)
 - [type RateLimitError](<#RateLimitError>)
   - [func AsRateLimitError\(err error, providerID, modelID string\) \(\*RateLimitError, bool\)](<#AsRateLimitError>)
   - [func \(e \*RateLimitError\) Error\(\) string](<#RateLimitError.Error>)
@@ -377,8 +517,15 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(r \*ReasoningConfig\) Validate\(\) error](<#ReasoningConfig.Validate>)
 - [type Resolver](<#Resolver>)
   - [func NewResolver\(cfg \*ProvidersConfig, logger \*slog.Logger\) \*Resolver](<#NewResolver>)
+  - [func \(r \*Resolver\) ActiveQuotaBlocks\(\) \[\]QuotaBlockStatus](<#Resolver.ActiveQuotaBlocks>)
   - [func \(r \*Resolver\) AllModels\(\) \[\]\*ModelConfig](<#Resolver.AllModels>)
+  - [func \(r \*Resolver\) BlockQuotaCredential\(aliasName, credentialKey string, unblockAt time.Time\)](<#Resolver.BlockQuotaCredential>)
+  - [func \(r \*Resolver\) BlockQuotaEntry\(aliasName, providerID, modelID string, unblockAt time.Time\)](<#Resolver.BlockQuotaEntry>)
+  - [func \(r \*Resolver\) ClearQuotaBlocks\(aliasName string\)](<#Resolver.ClearQuotaBlocks>)
   - [func \(r \*Resolver\) DefaultModel\(\) \*ModelConfig](<#Resolver.DefaultModel>)
+  - [func \(r \*Resolver\) EffectiveSchemaMode\(providerID, modelID, globalMode string\) string](<#Resolver.EffectiveSchemaMode>)
+  - [func \(r \*Resolver\) EndpointBlockUntil\(cfg \*ModelConfig\) time.Time](<#Resolver.EndpointBlockUntil>)
+  - [func \(r \*Resolver\) EndpointBlocked\(cfg \*ModelConfig\) bool](<#Resolver.EndpointBlocked>)
   - [func \(r \*Resolver\) FindByCapabilities\(caps \[\]string\) \[\]\*ModelConfig](<#Resolver.FindByCapabilities>)
   - [func \(r \*Resolver\) FindByProvider\(providerID string\) \[\]\*ModelConfig](<#Resolver.FindByProvider>)
   - [func \(r \*Resolver\) FindCheapest\(caps \[\]string\) \*ModelConfig](<#Resolver.FindCheapest>)
@@ -386,14 +533,23 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(r \*Resolver\) GetAllModelsForAlias\(aliasName string\) \(\[\]\*ModelConfig, bool\)](<#Resolver.GetAllModelsForAlias>)
   - [func \(r \*Resolver\) HasAlias\(aliasName string\) bool](<#Resolver.HasAlias>)
   - [func \(r \*Resolver\) HasHealthyModels\(aliasName string\) bool](<#Resolver.HasHealthyModels>)
-  - [func \(r \*Resolver\) RecordAliasFailure\(aliasName string, err error\)](<#Resolver.RecordAliasFailure>)
+  - [func \(r \*Resolver\) ImageModel\(\) \*ModelConfig](<#Resolver.ImageModel>)
+  - [func \(r \*Resolver\) QuotaBlockedUntil\(credentialKey string\) time.Time](<#Resolver.QuotaBlockedUntil>)
+  - [func \(r \*Resolver\) RecordAliasFailure\(aliasName string, err error, failedModel \*ModelConfig\)](<#Resolver.RecordAliasFailure>)
   - [func \(r \*Resolver\) RecordAliasSuccess\(aliasName string\)](<#Resolver.RecordAliasSuccess>)
-  - [func \(r \*Resolver\) ResolveForAlias\(aliasName string\) \(\*ModelConfig, error\)](<#Resolver.ResolveForAlias>)
+  - [func \(r \*Resolver\) ResolveEscalationRef\(ref string\) \(string, error\)](<#Resolver.ResolveEscalationRef>)
+  - [func \(r \*Resolver\) ResolveForAlias\(aliasName string, callerKey string\) \(\*ModelConfig, error\)](<#Resolver.ResolveForAlias>)
   - [func \(r \*Resolver\) ResolveForSkill\(skill \*SkillRequirements, currentModel \*ModelConfig\) \(\*ModelConfig, error\)](<#Resolver.ResolveForSkill>)
+  - [func \(r \*Resolver\) ResolveGeneration\(ref, kind string\) \(\*ModelConfig, error\)](<#Resolver.ResolveGeneration>)
+  - [func \(r \*Resolver\) ResolveModelTier\(tier string, fallback string\) string](<#Resolver.ResolveModelTier>)
   - [func \(r \*Resolver\) ResolveRef\(ref string\) \*ModelConfig](<#Resolver.ResolveRef>)
   - [func \(r \*Resolver\) RotateToNextModel\(aliasName string\) \(\*ModelConfig, error\)](<#Resolver.RotateToNextModel>)
+  - [func \(r \*Resolver\) SetContextLimits\(discovered map\[string\]int, override bool, logger \*slog.Logger\)](<#Resolver.SetContextLimits>)
   - [func \(r \*Resolver\) SetPricingSyncer\(ps \*PricingSyncer\)](<#Resolver.SetPricingSyncer>)
+  - [func \(r \*Resolver\) SetQuotaConfig\(cfg \*QuotaWaitConfig\)](<#Resolver.SetQuotaConfig>)
+  - [func \(r \*Resolver\) SetRoutingLogger\(rl \*RoutingLogger\)](<#Resolver.SetRoutingLogger>)
   - [func \(r \*Resolver\) SmallModel\(\) \*ModelConfig](<#Resolver.SmallModel>)
+  - [func \(r \*Resolver\) VideoModel\(\) \*ModelConfig](<#Resolver.VideoModel>)
 - [type Response](<#Response>)
   - [func \(r \*Response\) HasToolCalls\(\) bool](<#Response.HasToolCalls>)
 - [type ResponseCache](<#ResponseCache>)
@@ -402,13 +558,23 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type RestartPolicyConfig](<#RestartPolicyConfig>)
 - [type RetryStrategy](<#RetryStrategy>)
 - [type Role](<#Role>)
+- [type RoutingDecision](<#RoutingDecision>)
+- [type RoutingLogger](<#RoutingLogger>)
+  - [func NewRoutingLogger\(dbPath string, logger \*slog.Logger\) \(\*RoutingLogger, error\)](<#NewRoutingLogger>)
+  - [func \(rl \*RoutingLogger\) ByModel\(ctx context.Context, modelID string, limit int\) \(\[\]RoutingDecision, error\)](<#RoutingLogger.ByModel>)
+  - [func \(rl \*RoutingLogger\) Close\(\) error](<#RoutingLogger.Close>)
+  - [func \(rl \*RoutingLogger\) Recent\(ctx context.Context, limit int\) \(\[\]RoutingDecision, error\)](<#RoutingLogger.Recent>)
+  - [func \(rl \*RoutingLogger\) Record\(ctx context.Context, dec RoutingDecision\) error](<#RoutingLogger.Record>)
 - [type RuntimeConfig](<#RuntimeConfig>)
   - [func ValidateAndNormalize\(cfg RuntimeLifecycleConfig\) \(\*RuntimeConfig, error\)](<#ValidateAndNormalize>)
 - [type RuntimeLifecycleConfig](<#RuntimeLifecycleConfig>)
 - [type RuntimeManager](<#RuntimeManager>)
   - [func NewRuntimeManager\(logger \*slog.Logger\) \*RuntimeManager](<#NewRuntimeManager>)
+  - [func \(m \*RuntimeManager\) EndpointBaseURL\(providerID string\) \(string, bool\)](<#RuntimeManager.EndpointBaseURL>)
   - [func \(m \*RuntimeManager\) GetHealthChecker\(providerID string\) \(\*HealthChecker, bool\)](<#RuntimeManager.GetHealthChecker>)
+  - [func \(m \*RuntimeManager\) ModelKeys\(providerID string\) \[\]string](<#RuntimeManager.ModelKeys>)
   - [func \(m \*RuntimeManager\) RegisterConfig\(providerID string, cfg \*RuntimeConfig, baseURL string\) error](<#RuntimeManager.RegisterConfig>)
+  - [func \(m \*RuntimeManager\) RegisterLocalModel\(rec ModelRecord\) error](<#RuntimeManager.RegisterLocalModel>)
   - [func \(m \*RuntimeManager\) RestartProvider\(ctx context.Context, providerID string\) error](<#RuntimeManager.RestartProvider>)
   - [func \(m \*RuntimeManager\) SetMetricsRecorder\(rec MetricsRecorder\)](<#RuntimeManager.SetMetricsRecorder>)
   - [func \(m \*RuntimeManager\) SetModelsInUse\(set map\[string\]struct\{\}\)](<#RuntimeManager.SetModelsInUse>)
@@ -431,6 +597,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func ParseRuntimeType\(s string\) \(RuntimeType, error\)](<#ParseRuntimeType>)
   - [func \(rt RuntimeType\) IsValid\(\) bool](<#RuntimeType.IsValid>)
   - [func \(rt RuntimeType\) String\(\) string](<#RuntimeType.String>)
+- [type SessionSummaryResult](<#SessionSummaryResult>)
 - [type SkillRequirements](<#SkillRequirements>)
 - [type Status](<#Status>)
 - [type StreamAbortedError](<#StreamAbortedError>)
@@ -438,6 +605,23 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type StreamingChatter](<#StreamingChatter>)
   - [func AsStreamingChatter\(c Chatter\) \(StreamingChatter, bool\)](<#AsStreamingChatter>)
 - [type SummaryExtract](<#SummaryExtract>)
+- [type SystemPromptBlock](<#SystemPromptBlock>)
+  - [func BuildSystemPromptBlocks\(sections \[\]string\) \[\]SystemPromptBlock](<#BuildSystemPromptBlocks>)
+- [type TaskSummarizer](<#TaskSummarizer>)
+  - [func NewTaskSummarizer\(chatter Chatter, tokenizer Tokenizer\) \*TaskSummarizer](<#NewTaskSummarizer>)
+  - [func \(s \*TaskSummarizer\) SummarizeHandoff\(ctx context.Context, messages \[\]ChatMessage\) \(HandoffResult, error\)](<#TaskSummarizer.SummarizeHandoff>)
+  - [func \(s \*TaskSummarizer\) SummarizeSession\(ctx context.Context, messages \[\]ChatMessage\) \(SessionSummaryResult, error\)](<#TaskSummarizer.SummarizeSession>)
+  - [func \(s \*TaskSummarizer\) SummarizeTaskTitle\(ctx context.Context, messages \[\]ChatMessage, maxLen int\) \(TaskTitleResult, error\)](<#TaskSummarizer.SummarizeTaskTitle>)
+- [type TaskTitleResult](<#TaskTitleResult>)
+- [type ThrottleBackoffError](<#ThrottleBackoffError>)
+  - [func AsThrottleBackoffError\(err error\) \(\*ThrottleBackoffError, bool\)](<#AsThrottleBackoffError>)
+  - [func \(e \*ThrottleBackoffError\) Error\(\) string](<#ThrottleBackoffError.Error>)
+  - [func \(e \*ThrottleBackoffError\) Unwrap\(\) error](<#ThrottleBackoffError.Unwrap>)
+- [type ThrottleGiveUpError](<#ThrottleGiveUpError>)
+  - [func AsThrottleGiveUpError\(err error\) \(\*ThrottleGiveUpError, bool\)](<#AsThrottleGiveUpError>)
+  - [func \(e \*ThrottleGiveUpError\) Error\(\) string](<#ThrottleGiveUpError.Error>)
+  - [func \(e \*ThrottleGiveUpError\) NonRetryable\(\) bool](<#ThrottleGiveUpError.NonRetryable>)
+  - [func \(e \*ThrottleGiveUpError\) UserMessage\(\) string](<#ThrottleGiveUpError.UserMessage>)
 - [type TiktokenTokenizer](<#TiktokenTokenizer>)
   - [func NewTiktokenTokenizer\(encoding string\) \*TiktokenTokenizer](<#NewTiktokenTokenizer>)
   - [func \(t \*TiktokenTokenizer\) CountTokens\(text string\) int](<#TiktokenTokenizer.CountTokens>)
@@ -488,12 +672,28 @@ Summaries produced by summarizeWithLevel are wrapped in these markers to indicat
 	    ContextSummaryEnd   = "<<<END_CONTEXT_SUMMARY>>>"
 	)
 
+<a name="ToolConstraintLlamaCPP"></a>GBNF constraint modes. A provider endpoint declares which wire key it honors via its tool\_constraint capability:
+
+	"llamacpp"    -> payload["grammar"]          (llama.cpp server)
+	"vllm"        -> payload["guided_grammar"]   (vLLM)
+	"json_schema" -> payload["response_format"]  (OpenAI-compat structured outputs)
+	
+
+Empty means the endpoint accepts no grammar constraint; nothing is attached.
+
+	const (
+	    ToolConstraintLlamaCPP  = "llamacpp"
+	    ToolConstraintVLLM      = "vllm"
+	    ToolConstraintJSONSchea = "json_schema"
+	)
+
 <a name="ProviderIDAnthropic"></a>Provider ID constants used across catalog, registry, and broker.
 
 	const (
 	    ProviderIDAnthropic = "anthropic"
 	    ProviderIDOpenAI    = "openai"
 	    ProviderIDOllama    = "ollama"
+	    ProviderIDLMStudio  = "lmstudio"
 	    ProviderIDZAI       = "zai"
 	    ProviderIDGoogle    = "google"
 	    ProviderIDDeepSeek  = "deepseek"
@@ -517,6 +717,12 @@ Summaries produced by summarizeWithLevel are wrapped in these markers to indicat
 	    CapStreaming  = "streaming"
 	    CapCompletion = "completion"
 	    CapTools      = "tools"
+	    CapImageGen   = "image"
+	    CapVideoGen   = "video"
+	    // CapToolConstraint marks a model endpoint as supporting grammar-
+	    // constrained tool calling. The specific wire mode lives in
+	    // ModelConfig.ToolConstraint ("llamacpp"|"vllm"|"json_schema").
+	    CapToolConstraint = "tool_constraint"
 	
 	    // Metrics dimension keys.
 	    KeyLevel = "level"
@@ -532,6 +738,18 @@ Summaries produced by summarizeWithLevel are wrapped in these markers to indicat
 	    ReasoningXHigh  = "xhigh"  // extra-deep thinking
 	    ReasoningMax    = "max"    // maximum thinking budget
 	)
+
+<a name="DefaultQuotaMaxWait"></a>DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without importing internal/config \(which would create a cycle via tools/mcp\).
+
+	const DefaultQuotaMaxWait = 24 * time.Hour
+
+<a name="LocalModelsProviderID"></a>LocalModelsProviderID is the synthetic provider alias that pulled local models register under.
+
+	const LocalModelsProviderID = "local-models"
+
+<a name="PromptCacheBoundary"></a>PromptCacheBoundary is a sentinel marker inserted into system prompt section lists to delineate static \(cacheable across sessions\) content from dynamic \(session\-specific\) content. Sections appearing before the boundary are classified as static; sections after it are classified as dynamic.
+
+	const PromptCacheBoundary = "__MEEPT_PROMPT_CACHE_BOUNDARY__"
 
 ## Variables
 
@@ -579,6 +797,16 @@ Summaries produced by summarizeWithLevel are wrapped in these markers to indicat
 	        BaseURL:   "http://localhost:11434/v1",
 	        DocURL:    "https://ollama.ai/docs",
 	        Supports:  []string{CapStreaming, "local"},
+	    },
+	
+	    {
+	        ID:        ProviderIDLMStudio,
+	        Name:      "LM Studio",
+	        Transport: TransportOpenAIChat,
+	        AuthType:  AuthEnvVar,
+	        BaseURL:   "http://localhost:1234/v1",
+	        DocURL:    "https://lmstudio.ai/docs/api",
+	        Supports:  []string{CapStreaming, CapTools, "local"},
 	    },
 	
 	    {
@@ -672,9 +900,43 @@ Summaries produced by summarizeWithLevel are wrapped in these markers to indicat
 	        DocURL:    "https://ai.google.dev",
 	        Supports:  []string{CapStreaming, CapTools, CapImages},
 	    },
+	    {
+	        ID:        "openai-codex",
+	        Name:      "ChatGPT / Codex",
+	        Transport: TransportCodexResponses,
+	        AuthType:  AuthOAuthDevice,
+	        BaseURL:   "https://chatgpt.com/backend-api/codex",
+	        DocURL:    "https://developers.openai.com/codex",
+	        Supports:  []string{CapStreaming, CapTools, CapReasoning},
+	    },
+	    {
+	        ID:        "anthropic-sub",
+	        Name:      "Claude (Pro/Max subscription)",
+	        Transport: TransportAnthropicMessages,
+	        AuthType:  AuthOAuthDevice,
+	        BaseURL:   "https://api.anthropic.com",
+	        DocURL:    "https://docs.anthropic.com",
+	        Supports:  []string{CapStreaming, CapTools, CapImages, CapThinking},
+	    },
 	}
 
-<a name="ProviderModels"></a>ProviderModels maps provider IDs to their model catalogs.
+<a name="ErrAllEndpointsBlocked"></a>ErrAllEndpointsBlocked is returned by ResolveForAlias when every candidate model in the alias is blocked by an endpoint\-level timeout cooldown or by an armed alias\-level explicit\-timeout block \(tree 02 leaf 04, DECISIONS.md D10\). It is DISTINCT from ErrAllModelsQuotaBlocked \(the two failure classes have different horizons and different clearing rules\) — check with errors.Is, never string matching.
+
+	var ErrAllEndpointsBlocked = errors.New("all models in alias are endpoint-blocked")
+
+<a name="ErrAllModelsQuotaBlocked"></a>ErrAllModelsQuotaBlocked is returned by ResolveForAlias and RotateToNextModel when every candidate model in the alias is currently quota\-blocked. Callers should treat it as a retry\-later condition \(the alias unblocks when the earliest quota reset elapses\), not a config error.
+
+	var ErrAllModelsQuotaBlocked = errors.New("all models in alias are quota-blocked")
+
+<a name="ErrEmptyResponse"></a>ErrEmptyResponse is returned when the model replies with an empty body. It is a sentinel so callers \(e.g. ClassifyClassificationFailure\) can identify the failure kind without string matching.
+
+	var ErrEmptyResponse = &ClientError{Message: "empty content"}
+
+<a name="GBNFConstrained"></a>GBNFConstrained is the global kill\-switch for grammar\-constrained tool calling \(\[agent.tools\] gbnf\_constrained\). Default FALSE: no grammar is attached anywhere until explicitly enabled. Set via SetGBNFConstrained at daemon wiring time.
+
+	var GBNFConstrained = false
+
+<a name="ProviderModels"></a>
 
 	var ProviderModels = map[string][]ModelCatalogEntry{
 	    ProviderIDAnthropic: {
@@ -888,18 +1150,23 @@ Summaries produced by summarizeWithLevel are wrapped in these markers to indicat
 	            OutputCost:    75.0,
 	            Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse, CapThinking},
 	        },
-	        {
-	            ModelID:       "meta.llama3-70b-instruct-v1:0",
-	            Name:          "Llama 3 70B Instruct (Bedrock)",
-	            ProviderID:    "bedrock",
-	            ContextWindow: 8192,
-	            MaxOutput:     2048,
-	            InputCost:     2.65,
-	            OutputCost:    3.5,
-	            Capabilities:  []string{CapCompletion, CapCode, CapReasoning},
-	        },
 	    },
 	}
+
+<a name="AttachGrammar"></a>
+## func AttachGrammar
+
+	func AttachGrammar(reqPayload map[string]any, mode string, g string)
+
+AttachGrammar attaches a grammar constraint to a request payload using the wire format appropriate for the given mode. Unknown modes are a no\-op.
+
+	mode "llamacpp":    payload["grammar"] = g
+	mode "vllm":        payload["guided_grammar"] = g
+	mode "json_schema": payload["response_format"] =
+	                    {"type":"json_schema","json_schema":<g parsed as JSON schema>}
+	
+
+For json\_schema mode g should be the JSON\-encoded schema produced by JSONSchemaForTools.
 
 <a name="BackoffWithJitter"></a>
 ## func BackoffWithJitter
@@ -917,10 +1184,17 @@ BuildModelsInUse computes the set of "provider/model" identifiers that should ga
 
 1. enabled agent definitions \(agent.Model in provider/model form\)
 2. the four models.json5 slots \(model, small\_model, classifier\_model, summarizer\_model\)
-3. alias expansion \(single\-level\): for any added value that names an alias, each model in that alias's Models list is also included
+3. alias expansion: every configured model alias contributes ALL of its members to the set. Alias members are explicitly configured failover targets, so their endpoints pre\-warm at boot instead of being found dead on first failover. Slot/agent values may name an alias by bare name \(e.g. classifier\_model: "classifier"\); such names cannot enter the provider/model set themselves, but expanding every configured alias covers them \(and provider/model\-form alias keys equally\).
 4. disabled\-providers filter: any model whose provider appears in \`disabled\` is removed from the set.
 
-Values without a "/" separator are skipped \(with a debug log\) since they cannot be matched against provider/model\-key form.
+Values without a "/" separator are skipped \(with a debug log\) since they cannot be matched against provider/model\-key form. Endpoints whose models appear in no agent ref, slot, or alias member remain gated off at boot.
+
+<a name="CatalogSnapshot"></a>
+## func CatalogSnapshot
+
+	func CatalogSnapshot() map[string][]ModelCatalogEntry
+
+CatalogSnapshot returns a shallow copy of the provider \-\> models catalog map for callers that need to range over the whole catalog \(e.g. the pricing syncer's merge step\). Slice contents are shared but immutable \(writers replace slices wholesale\).
 
 <a name="ClassificationUserGuidance"></a>
 ## func ClassificationUserGuidance
@@ -928,6 +1202,13 @@ Values without a "/" separator are skipped \(with a debug log\) since they canno
 	func ClassificationUserGuidance(err error) string
 
 ClassificationUserGuidance returns a user\-friendly message explaining why classification failed and what the user can do about it.
+
+<a name="ClassifyPromptSections"></a>
+## func ClassifyPromptSections
+
+	func ClassifyPromptSections(sections []string) (static []string, dynamic []string)
+
+ClassifyPromptSections splits a slice of prompt sections into static and dynamic groups based on the PromptCacheBoundary marker. Sections before the boundary are static; sections after it are dynamic. Empty strings and the boundary marker itself are excluded from both groups. If no boundary is present, all non\-empty sections are classified as static.
 
 <a name="ComputeEndpointKey"></a>
 ## func ComputeEndpointKey
@@ -971,6 +1252,13 @@ DefaultBudgetTable returns a copy of the hardcoded tier→budget defaults. Calle
 
 DerefOr returns the dereferenced value of p, or def if p is nil.
 
+<a name="EndpointKey"></a>
+## func EndpointKey
+
+	func EndpointKey(cfg *ModelConfig) string
+
+EndpointKey returns the cooldown identity for a model's base endpoint: endpoint URL host \+ credential fingerprint \(QuotaCredentialKey's provider portion; audit R2\). Host\-only keys are wrong in this repo's config practice — gala\-mlx and gala\-llama share one host while xai \(API key\) and xai\-oauth \(subscription\) share api.x.ai with unrelated credentials — so models share timeout fate ONLY when both host and credential match \(DECISIONS.md D10\). A nil or hostless config falls back to a stable, non\-empty key derived from the credential alone.
+
 <a name="EstimateTokenCountHeuristic"></a>
 ## func EstimateTokenCountHeuristic
 
@@ -978,12 +1266,64 @@ DerefOr returns the dereferenced value of p, or def if p is nil.
 
 EstimateTokenCountHeuristic estimates tokens using the 3 chars/token heuristic. This is exported for use by other packages that need a quick estimate.
 
+<a name="FetchLMStudioContexts"></a>
+## func FetchLMStudioContexts
+
+	func FetchLMStudioContexts(ctx context.Context, client *http.Client, logger *slog.Logger, baseURL, apiKey string) (map[string]int, error)
+
+FetchLMStudioContexts discovers LM Studio models and their context lengths. The apiKey parameter is accepted to satisfy the ContextDiscovery Fetcher closure shape \(context\_discovery.go\) — LM Studio serves without auth locally, so it is unused beyond leaf 01's shared getJSON helpers \(a non\-empty value simply adds a Bearer header, matching Ollama's fetcher\).
+
+Failures are tolerated, not surfaced:
+
+- /v1/models unreachable/non\-2xx/malformed → empty result \+ warning.
+- /api/v0/models unreachable/non\-2xx/malformed → ids kept, context 0.
+- Hostile ids \(see sanitizeLMStudioModelID\) skipped \+ logged.
+
+<a name="FetchLocalModelsContexts"></a>
+## func FetchLocalModelsContexts
+
+	func FetchLocalModelsContexts(ctx context.Context, client *http.Client, logger *slog.Logger, baseURL string, modelKeys []string) map[string]int
+
+FetchLocalModelsContexts fetches the llama.cpp server's default n\_ctx via /props. The endpoint serves ONE default n\_ctx per server while multiple GGUFs merge into one endpoint, so the value applies as the default for every model key listed. Keys are LocalModelsProviderID \+ "/" \+ modelKey.
+
+<a name="FetchOllamaContexts"></a>
+## func FetchOllamaContexts
+
+	func FetchOllamaContexts(ctx context.Context, client *http.Client, logger *slog.Logger, baseURL, apiKey string) (map[string]int, error)
+
+FetchOllamaContexts lists models via /api/tags then queries /api/show per model for its context length. Malformed JSON is tolerated: it yields an empty result with a logged warning \(leaf Task 1\), while transport\-level failures surface as errors for Sync to log\-and\-skip.
+
+<a name="FetchOpenRouterContexts"></a>
+## func FetchOpenRouterContexts
+
+	func FetchOpenRouterContexts(ctx context.Context, client *http.Client, logger *slog.Logger, baseURL, apiKey string) (map[string]int, error)
+
+FetchOpenRouterContexts parses context lengths from OpenRouter's models endpoint. Keys are registry ids: openrouter/\<openrouter\-id\>. Malformed JSON is tolerated: empty result \+ logged warning \(leaf Task 1\).
+
 <a name="FormatPIDFilePath"></a>
 ## func FormatPIDFilePath
 
 	func FormatPIDFilePath(pidFile string) (string, error)
 
 FormatPIDFilePath validates and returns an absolute PID file path.
+
+<a name="GBNFConstrainedEnabled"></a>
+## func GBNFConstrainedEnabled
+
+	func GBNFConstrainedEnabled() bool
+
+GBNFConstrainedEnabled reads the global switch atomically.
+
+<a name="GrammarForTools"></a>
+## func GrammarForTools
+
+	func GrammarForTools(defs []ToolDefinition) (string, bool)
+
+GrammarForTools converts tool definitions into a GBNF grammar constraining tool\-call output to valid JSON for the supported schema subset.
+
+Root allows a single object OR an array of objects. Supported constructs: string \(with optional enum\), number, integer, boolean, array\<supported\>, object\{properties,required\} — nested to depth 3. Required properties are emitted before optional ones \(GBNF ordering\).
+
+Any tool containing an unsupported construct is excluded from the grammar. complete is false when any tool was excluded OR when defs is empty. This function never panics on arbitrary input.
 
 <a name="HasImageParts"></a>
 ## func HasImageParts
@@ -1012,6 +1352,13 @@ IsLoopbackBaseURL reports whether the baseURL's host is a loopback address. Retu
 	func IsNonRetryable(err error) bool
 
 IsNonRetryable checks if an error is non\-retryable.
+
+<a name="IsQuotaResetError"></a>
+## func IsQuotaResetError
+
+	func IsQuotaResetError(err error) bool
+
+IsQuotaResetError returns true if err is \(or wraps\) a QuotaResetError.
 
 <a name="IsRateLimitError"></a>
 ## func IsRateLimitError
@@ -1043,12 +1390,70 @@ IsSupportedRuntime checks if the given runtime string is supported.
 
 IsValidEffort reports whether s is a recognized effort tier \(including the empty string and "none"\).
 
+<a name="JSONSchemaForTools"></a>
+## func JSONSchemaForTools
+
+	func JSONSchemaForTools(defs []ToolDefinition) string
+
+JSONSchemaForTools converts tool definitions into a JSON Schema document \(as a JSON\-encoded string\) suitable for response\_format structured\-output endpoints. Unlike the GBNF converter this path tolerates the full schema surface \(oneOf etc.\), so ALL tools are included; enum tightness may be lower than the GBNF path depending on server support. Never panics on arbitrary input.
+
+<a name="NewMetricsStoreForPacing"></a>
+## func NewMetricsStoreForPacing
+
+	func NewMetricsStoreForPacing(dbPath string) (*metrics.Store, error)
+
+NewMetricsStoreForPacing opens a small metrics store dedicated to the pacer's rate\-hold query \(tree 02 leaf 05 daemon wiring\). Uses conservative defaults: 30\-day retention, 1h stats window.
+
+<a name="ParsePIDFile"></a>
+## func ParsePIDFile
+
+	func ParsePIDFile(path string) (int, error)
+
+ParsePIDFile reads and parses a runtime pidfile, returning its PID. Accepts both the current JSON format and the legacy bare\-int format. Exported for CLI consumers \(cmd/meept runtime start/stop\) that inspect the same pidfiles without owning a RuntimeProcess.
+
+<a name="ParseRetryAfter"></a>
+## func ParseRetryAfter
+
+	func ParseRetryAfter(header http.Header) (date time.Time, delta time.Duration, present bool)
+
+ParseRetryAfter extracts a retry schedule from an HTTP error response's headers in one place \(DECISIONS.md D6: fully implement the RFC7231 HTTP\-date forms \+ the RFC7231/RFC3339 delta\-seconds form; consolidation of the per\-loop parseRetryAfterSeconds / parseQuotaResetHeader helpers\).
+
+Returns:
+
+- date: the parsed absolute instant for date\-form headers and date\-valued provider headers \(zero for delta\-seconds headers\);
+- delta: the parsed relative duration for delta\-seconds headers \(zero for date forms; time.Until\(date\) for date forms, which is negative for past dates\);
+- present: whether any recognizable header was found.
+
+Callers compose the schedule as: retryAt = date when non\-zero, else now\+delta. A date in the past yields a negative delta — the caller clamps \(leaf rule\).
+
+Try order is spec order first — delta\-seconds, IMF\-fixdate, RFC850, asctime, then RFC3339 — followed by the provider\-specific reset headers preserved verbatim from parseQuotaResetHeader \(anthropic\-ratelimit\-\*\-reset, X\-Codex\-\*\). A standard Retry\-After always beats a provider header.
+
+<a name="PriorityOf"></a>
+## func PriorityOf
+
+	func PriorityOf(opts []ChatOption) bool
+
+PriorityOf reports whether the given options mark the turn INTERACTIVE for model\-slot acquisition \(tree 04 leaf 03, D11\). It is the inspection counterpart of WithPriority: a priority\-less \(nil / empty\) option slice or one never passing WithPriority reads as false \(background\), which is exactly how the client's acquire path treats such callers. Test\-facing seam for callers that stub the Chatter and assert on option contents.
+
 <a name="Ptr"></a>
 ## func Ptr
 
 	func Ptr[T any](v T) *T
 
 Ptr returns a pointer to the given value.
+
+<a name="QuotaCredentialKey"></a>
+## func QuotaCredentialKey
+
+	func QuotaCredentialKey(providerID string, cfg *ModelConfig) string
+
+QuotaCredentialKey returns a stable identity for a provider credential:
+
+	literal apiKey  -> providerID + ":key:" + first 12 hex of sha256(apiKey)
+	env-based key   -> providerID + ":env:" + envVarName
+	OAuth provider  -> providerID + ":oauth:" + OAuthProvider
+	nothing identifiable -> providerID + ":default"
+	
 
 <a name="ResolveBudget"></a>
 ## func ResolveBudget
@@ -1074,12 +1479,54 @@ Returns nil when rc is nil/zero so callers can omit the budget from wire payload
 
 RunModelPicker runs the model picker TUI and returns the selected provider/model.
 
+<a name="SchemaModeValid"></a>
+## func SchemaModeValid
+
+	func SchemaModeValid(s string) bool
+
+SchemaModeValid reports whether s is a recognized schema\-mode string: "" \(unset\), "full", or "indexed". Unknown strings are rejected at \[agent.tools\] config\-load validation and warn\-ignored at models.json5 resolve time.
+
+<a name="SetCatalogContextWindow"></a>
+## func SetCatalogContextWindow
+
+	func SetCatalogContextWindow(providerID, modelID string, contextWindow int) bool
+
+SetCatalogContextWindow updates one entry's ContextWindow. The slice is copied and replaced \(never mutated in place\) so existing snapshots stay consistent. Returns false when the provider/model is unknown.
+
+<a name="SetGBNFConstrained"></a>
+## func SetGBNFConstrained
+
+	func SetGBNFConstrained(on bool)
+
+SetGBNFConstrained sets the global gbnf\_constrained switch.
+
+<a name="StripPromptCacheBoundary"></a>
+## func StripPromptCacheBoundary
+
+	func StripPromptCacheBoundary(s string) string
+
+StripPromptCacheBoundary removes the PromptCacheBoundary sentinel and any surrounding blank\-line separators from a system prompt string. This must be called before sending the prompt to any provider so the internal marker is never leaked to the API.
+
 <a name="SupportedRuntimes"></a>
 ## func SupportedRuntimes
 
 	func SupportedRuntimes() []string
 
 SupportedRuntimes returns the list of supported runtime types.
+
+<a name="ToolConstraintForRuntime"></a>
+## func ToolConstraintForRuntime
+
+	func ToolConstraintForRuntime(rt RuntimeType) string
+
+ToolConstraintForRuntime returns the grammar\-constraint mode a managed runtime endpoint auto\-declares. llama.cpp's server accepts the native \`grammar\` field; MLX\-server exposes an OpenAI\-compatible API without any grammar field, so it declares none \(empty\).
+
+<a name="ToolConstraintSupported"></a>
+## func ToolConstraintSupported
+
+	func ToolConstraintSupported(mode string) bool
+
+ToolConstraintSupported reports whether a mode string is a recognized constraint mode.
 
 <a name="UserMessage"></a>
 ## func UserMessage
@@ -1111,6 +1558,108 @@ APIError is returned when the remote API returns an error response.
 	func (e *APIError) UserMessage() string
 
 
+
+<a name="AdapterEntry"></a>
+## type AdapterEntry
+
+AdapterEntry describes a single adapter for loading purposes.
+
+	type AdapterEntry struct {
+	    ID          string `json:"id"`
+	    Domain      string `json:"domain"`
+	    Model       string `json:"model"`
+	    Path        string `json:"path"`
+	    CreatedAt   string `json:"created_at"`
+	    TrainingMD5 string `json:"training_md5"`
+	    Enabled     bool   `json:"enabled"`
+	}
+
+<a name="AdapterRegistry"></a>
+## type AdapterRegistry
+
+AdapterRegistry holds a list of trained LoRA adapter entries. This type is defined locally in the llm package to avoid an import cycle with internal/config. Version and GeneratedAt preserve the provenance fields written by scripts/generate\_adapter\_config.py so they are not silently dropped on load.
+
+	type AdapterRegistry struct {
+	    Adapters    []AdapterEntry `json:"adapters"`
+	    Version     int            `json:"version"`
+	    GeneratedAt string         `json:"generated_at"`
+	}
+
+<a name="LoadAdapterRegistry"></a>
+### func LoadAdapterRegistry
+
+	func LoadAdapterRegistry(registryPath string) (*AdapterRegistry, error)
+
+LoadAdapterRegistry reads the adapter registry JSON file. If the file does not exist, an empty registry is returned \(no error\).
+
+<a name="AdapterRouter"></a>
+## type AdapterRouter
+
+AdapterRouter selects the right adapter per request based on domain.
+
+	type AdapterRouter struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewAdapterRouter"></a>
+### func NewAdapterRouter
+
+	func NewAdapterRouter(adapters map[string]*LoadedAdapter, fallback *LoadedAdapter) *AdapterRouter
+
+NewAdapterRouter creates an AdapterRouter from a domain\-\>adapter map and an optional fallback adapter.
+
+<a name="NewAdapterRouterFromLoader"></a>
+### func NewAdapterRouterFromLoader
+
+	func NewAdapterRouterFromLoader(loader *LFMLoader) *AdapterRouter
+
+NewAdapterRouterFromLoader builds a router using the loader's domain map and its resolved Fallback \(general / first ready adapter\).
+
+<a name="AdapterRouter.SelectAdapter"></a>
+### func \(\*AdapterRouter\) SelectAdapter
+
+	func (r *AdapterRouter) SelectAdapter(domain string) *LoadedAdapter
+
+SelectAdapter returns the adapter for the given domain, or the fallback if no domain\-specific adapter exists. Returns nil if neither exists. Ready=false adapters are skipped so inference never points at incomplete dirs.
+
+<a name="AdaptivePacer"></a>
+## type AdaptivePacer
+
+AdaptivePacer paces outbound requests per provider below the provider's effective rate\-limit ceiling, learned from rate\-limit history \(DECISIONS.md D15\). It composes with — never replaces — the retry loops: Wait only ever sleeps a bounded gap, it never blocks a request outright.
+
+Interval state machine \(injected clock, deterministic\):
+
+- Observe\(FailureThrottle\): interval grows ×2 from MinInterval, clamped at MaxInterval \(D7: throttle only — quota\-class failures are the park path and never pace\).
+- Observe\(FailureNone\) after a full quiet window \(one learned interval of clean traffic since the anchor\): interval decays ×0.5, floored at zero \(halving below MinInterval turns pacing off\).
+- Other classes are neutral: they neither grow nor decay.
+- Independently, a metrics\-store hourly 429 rate above Target holds the enforced gap at MinInterval even without fresh Observe calls, so a decayed interval cannot unpace a provider that is still shedding load.
+
+	type AdaptivePacer struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewAdaptivePacer"></a>
+### func NewAdaptivePacer
+
+	func NewAdaptivePacer(store *metrics.Store, cfg PacingConfig) *AdaptivePacer
+
+NewAdaptivePacer builds a pacer. Invalid config values take the documented defaults \(target 1/hour, min 1s, max 30s; max \< min lifts max to the 30s default, mirroring config.NormalizeFailurePolicyDefaults\). A nil store is valid: the pacer runs purely on Observe feedback with no rate hold.
+
+<a name="AdaptivePacer.Observe"></a>
+### func \(\*AdaptivePacer\) Observe
+
+	func (p *AdaptivePacer) Observe(v PolicyVerdict, providerID string)
+
+Observe feeds a policy verdict back into the interval state machine. Throttle verdicts grow the gap \(D7: provider\-load 429s\), clean traffic decays it across quiet windows, and every other class — notably quota — is neutral so pacing never reacts to quota\-class failures.
+
+<a name="AdaptivePacer.Wait"></a>
+### func \(\*AdaptivePacer\) Wait
+
+	func (p *AdaptivePacer) Wait(ctx context.Context, providerID string) error
+
+Wait sleeps until the next outbound request to providerID is allowed and claims the slot. It always returns nil for a disabled \(or nil\) pacer, and never waits on a provider's FIRST request. The enforced gap is max\(learned interval, metrics rate hold\); the sleep honors ctx cancellation and never exceeds MaxInterval. Scope guard: Wait never blocks a request outright — callers treat its error \(ctx canceled\) as abort.
+
+Ticket\-style reservation \(concurrent\-Wait gap fix\): the slot is RESERVED under the pacer mutex BEFORE the sleep, computed against the provider's reservation timeline rather than the wall clock. Each concurrent Wait therefore owns a distinct start instant spaced one enforced gap apart and wakes into its own slot; previously every concurrent Wait read the same lastClaim, computed the same wait against now, and all woke together \(zero enforced gap\). Ctx cancellation abandons the caller's slot — the reservation already consumed the timeline position, mirroring a request that was canceled after pacing admitted it.
 
 <a name="AgentModelRef"></a>
 ## type AgentModelRef
@@ -1168,9 +1717,12 @@ ToReasoningConfig converts the agent config into a request\-level ReasoningConfi
 AliasEntry holds the resolved models and configuration for an alias.
 
 	type AliasEntry struct {
-	    Models   []*ModelConfig // Ordered by priority (first = primary)
-	    Timeout  time.Duration  // Base cooldown timeout after failure
-	    MaxFails int            // Max consecutive failures before rotation
+	    Models                 []*ModelConfig // Ordered by priority (first = primary)
+	    Timeout                time.Duration  // Base cooldown timeout after failure
+	    MaxFails               int            // Max consecutive failures before rotation
+	    DefaultModel           string         // Optional: revert to this model after cooldown
+	    BalancedStickyRequests bool           // Optional: pin callers to single model
+	    // contains filtered or unexported fields
 	}
 
 <a name="AliasHealth"></a>
@@ -1178,11 +1730,38 @@ AliasEntry holds the resolved models and configuration for an alias.
 
 AliasHealth tracks the health and rotation state of an alias.
 
+Locking convention \(issue \#29\): Resolver.mu is the SINGLE lock guarding every field of this struct. Do NOT add a second mutex here — new fields join the Resolver.mu regime, and helper methods on this type must be documented "callers must hold Resolver.mu" and only be called with it held.
+
 	type AliasHealth struct {
-	    CurrentIndex     int       // Which model in the rotation is currently active
-	    ConsecutiveFails int       // Number of consecutive failures on the current model
-	    LastFailure      time.Time // When the last failure occurred
-	    CooldownUntil    time.Time // Don't use the current model until this time
+	    CurrentIndex     int
+	    ConsecutiveFails int
+	    LastFailure      time.Time
+	    CooldownUntil    time.Time
+	    StickyPins       map[string]int
+	    // RevertAt arms default-model reversion: when non-zero, rotation reverts
+	    // to AliasEntry.DefaultModel after this deadline (armed by
+	    // RecordAliasFailure when default_model is configured).
+	    RevertAt time.Time
+	    // FailedProviderID/FailedModelID identify the model that most recently
+	    // failed (empty = no known failure). Sticky pins are matched against
+	    // this IDENTITY — not a rotation index — so interleaved resolves for
+	    // other models cannot misattribute the failure (issue #30).
+	    FailedProviderID string
+	    FailedModelID    string
+	
+	    // Alias-level explicit-timeout state (tree 02 leaf 04, DECISIONS.md
+	    // D10). TimeoutArmed is true only when the alias CONFIG declared a
+	    // nonzero timeout: — without it these fields stay zero forever and no
+	    // alias-level block ever applies. TimeoutStreak counts CONSECUTIVE
+	    // failures of the SAME member model (FailedProviderID/FailedModelID
+	    // identity); TimeoutBlockUntil is the current alias-block deadline
+	    // (zero = not blocked); TimeoutBlocks counts blocks ARMED so far and
+	    // drives the incremental doubling ladder (1x, 2x, 4x base — capped).
+	    TimeoutArmed      bool
+	    TimeoutStreak     int
+	    TimeoutBlockUntil time.Time
+	    TimeoutBlocks     int
+	    // contains filtered or unexported fields
 	}
 
 <a name="AnthropicClient"></a>
@@ -1228,6 +1807,20 @@ Close closes the client and releases resources.
 	func (c *AnthropicClient) Config() *ModelConfig
 
 Config returns the current model configuration.
+
+<a name="AnthropicClient.SetFailurePolicyConfig"></a>
+### func \(\*AnthropicClient\) SetFailurePolicyConfig
+
+	func (c *AnthropicClient) SetFailurePolicyConfig(cfg *FailurePolicyConfig)
+
+SetFailurePolicyConfig injects the tree\-02 failure\-policy config \(leaf 03 Task 5\). Mirrors Client.SetFailurePolicyConfig: nil\-safe, and a non\- positive ShortRetries falls back to the default 3.
+
+<a name="AnthropicClient.SetQuotaMaxWait"></a>
+### func \(\*AnthropicClient\) SetQuotaMaxWait
+
+	func (c *AnthropicClient) SetQuotaMaxWait(d time.Duration)
+
+SetQuotaMaxWait sets the quota wait upper bound. Nil\-receiver safe.
 
 <a name="AnthropicClientOption"></a>
 ## type AnthropicClientOption
@@ -1278,6 +1871,13 @@ WithAnthropicTimeoutCalculator sets the adaptive timeout calculator for the clie
 
 WithAnthropicTokenCache sets the token cache for the Anthropic client.
 
+<a name="WithAnthropicTokenResolver"></a>
+### func WithAnthropicTokenResolver
+
+	func WithAnthropicTokenResolver(tr TokenResolver, provider string) AnthropicClientOption
+
+WithAnthropicTokenResolver sets the OAuth token resolver and provider name for subscription \(Bearer\) auth. The resolver takes precedence over the static API key. A nil resolver is ignored.
+
 <a name="WithAnthropicUploadStore"></a>
 ### func WithAnthropicUploadStore
 
@@ -1301,6 +1901,42 @@ AuthType defines how authentication is performed.
 	    AuthEnvVar        AuthType = "env"
 	)
 
+<a name="BackoffPlan"></a>
+## type BackoffPlan
+
+BackoffPlan converts a failure class \+ attempt count into deterministic attempt times \(tree 02 Contract 2, DECISIONS.md D8\). Pure value type; injected now at every call; NO jitter — jitter stays at the call sites' short sleeps so long\-horizon polling is exact hourly.
+
+	type BackoffPlan struct {
+	    Base     time.Duration // first retry delay (throttle 30s; 402 = +5m, D5)
+	    Max      time.Duration // polling floor once reached (default 1h)
+	    GiveUpAt time.Time     // now + Horizon (default 24h, llm.failure_policy.horizon)
+	}
+
+<a name="DefaultBackoffPlan"></a>
+### func DefaultBackoffPlan
+
+	func DefaultBackoffPlan(class FailureClass, now time.Time, cfg FailurePolicyConfig) BackoffPlan
+
+DefaultBackoffPlan builds the schedule for a failure class at time now from cfg. Base selection per DECISIONS.md: FailureQuota adds BaseQuota402Extra to BaseThrottle \(D5 — 402 quota waits start minutes longer than the 429 path\); every other class uses BaseThrottle directly.
+
+<a name="BackoffPlan.NextAttempt"></a>
+### func \(BackoffPlan\) NextAttempt
+
+	func (p BackoffPlan) NextAttempt(now time.Time, attempt int, prior time.Time) time.Time
+
+NextAttempt returns the earliest time the next attempt may run:
+
+- The computed exponential step for attempt \(attempt=0 is the FIRST retry\): Base \* 2^attempt, capped at Max — once a step would exceed Max, the step is exactly Max \(D8 polling floor, hourly, exact\).
+- prior \(a server\-provided retry time, zero = none\) wins when it is LATER than the computed step — never retry before the server says — but is capped at GiveUpAt: never wait longer than the horizon \(D8\).
+- The result never lands after GiveUpAt.
+
+<a name="BackoffPlan.ShouldGiveUp"></a>
+### func \(BackoffPlan\) ShouldGiveUp
+
+	func (p BackoffPlan) ShouldGiveUp(now time.Time) bool
+
+ShouldGiveUp answers the SCHEDULE question only: has now reached GiveUpAt? \(D8 cap.\) The decision to surface a user\-facing error belongs to callers — leaf 03's short loops and tree 03's parking layer.
+
 <a name="BrokerConfig"></a>
 ## type BrokerConfig
 
@@ -1317,6 +1953,10 @@ BrokerConfig configures a ModelBroker.
 	    TokenCache      ResponseCache
 	    TokenResolver   TokenResolver
 	    Logger          *slog.Logger
+	    // QuotaRetry gates quota-aware wait+retry wrapping of ChatterForModel
+	    // returned chatters. When enabled, the returned Chatter is a
+	    // quotaWaitChatter. Default: disabled.
+	    QuotaRetry QuotaWaitConfig
 	}
 
 <a name="BrokerStatus"></a>
@@ -1421,6 +2061,13 @@ RecordUsage records a completed API call's token usage.
 
 RecordUsageWithScope records token usage and tracks it per\-task and per\-session.
 
+<a name="Budget.ReleaseRateLimitSlot"></a>
+### func \(\*Budget\) ReleaseRateLimitSlot
+
+	func (b *Budget) ReleaseRateLimitSlot()
+
+ReleaseRateLimitSlot releases the most recently reserved RPM slot. Call this when a request that called WaitForRateLimit fails before reaching the API \(e.g., concurrency limit acquisition fails, payload marshalling error\), so the reserved timestamp doesn't artificially consume rate\-limit capacity.
+
 <a name="Budget.RemoveSession"></a>
 ### func \(\*Budget\) RemoveSession
 
@@ -1463,7 +2110,7 @@ StartPeriodicCleanup starts a background goroutine that periodically removes tas
 
 WaitForRateLimit blocks until the RPM rate limit window allows another request. If rateLimitRPM is 0 \(unlimited\), this returns immediately.
 
-LLM\-M1 FIX: This method reserves a rate\-limit slot by appending time.Now\(\) to requestTimestamps when capacity is available. Without the reservation, N concurrent callers would all observe the same spare capacity and all proceed, exceeding RPM. RecordUsage appends again post\-completion; the reservation is a conservative over\-count that is safe for rate limiting.
+This method is the sole appender to requestTimestamps. It reserves a rate\-limit slot by appending time.Now\(\) when capacity is available. Without the reservation, N concurrent callers would all observe the same spare capacity and all proceed, exceeding RPM. RecordUsage does NOT append to requestTimestamps — the reservation here is the single source of truth for RPM accounting, giving exactly one timestamp per request.
 
 <a name="BudgetCheckResult"></a>
 ## type BudgetCheckResult
@@ -1654,6 +2301,13 @@ NewCacheKeyBuilder returns a builder initialised with the given file\-aware flag
 
 Build constructs a complete CacheKey from the given model ID, messages, and \(optionally\) a standalone prompt string. If FileAware is enabled, file references are extracted from the prompt and all message contents, their contents are hashed, and the hashes are included in the key.
 
+<a name="CacheKeyBuilder.BuildPrefixAwareKey"></a>
+### func \(\*CacheKeyBuilder\) BuildPrefixAwareKey
+
+	func (b *CacheKeyBuilder) BuildPrefixAwareKey(modelID string, systemPrompt []string, messages []ChatMessage) CacheKey
+
+BuildPrefixAwareKey constructs a CacheKey whose PromptHash encodes three independent prefix segments: static system prompt content, dynamic \(session\-specific\) system prompt content, and the message history. This allows cache lookups to match on the stable static prefix even when dynamic context changes between calls.
+
 <a name="CacheKeyBuilder.ComputeFileHashes"></a>
 ### func \(\*CacheKeyBuilder\) ComputeFileHashes
 
@@ -1679,6 +2333,26 @@ ExtractFileReferences parses the prompt text and returns a deduplicated, sorted 
 - "file:" prefix: file: /path/to/file.go
 - "@" notation: @src/main.go
 - Line references: path/to/file.go:42
+
+<a name="CacheScope"></a>
+## type CacheScope
+
+CacheScope indicates the caching lifetime of a prompt block.
+
+	type CacheScope int
+
+<a name="CacheScopeNone"></a>
+
+	const (
+	    // CacheScopeNone indicates the block should not be cached.
+	    CacheScopeNone CacheScope = iota
+	    // CacheScopeStatic indicates the block is stable across sessions and can
+	    // be cached indefinitely (until the prompt template changes).
+	    CacheScopeStatic
+	    // CacheScopeSession indicates the block is specific to the current session
+	    // and should be cached only for the session lifetime.
+	    CacheScopeSession
+	)
 
 <a name="CacheStats"></a>
 ## type CacheStats
@@ -1763,12 +2437,33 @@ ChatOption is a functional option for configuring a chat request.
 
 	type ChatOption func(*chatOptions)
 
+<a name="DisableThinking"></a>
+### func DisableThinking
+
+	func DisableThinking() ChatOption
+
+DisableThinking returns a ChatOption that explicitly disables reasoning/thinking for the request. It is the shared seam for small, fixed\-prompt machine\-parsed calls \(intent classification, session/task summarization\): a thinking model would otherwise burn the output budget on chain\-of\-thought and leak reasoning into the parsed result. The config is translated per\-vendor by applyOpenAICompatReasoning / applyAnthropicReasoning \(e.g. chat\_template\_kwargs.enable\_thinking=false for llama.cpp\-style servers\). The wire field remains subject to capability gating \(shouldSendReasoning\), so pair with output\-side stripping \(stripThinking\) for defense in depth.
+
+<a name="WithAdapter"></a>
+### func WithAdapter
+
+	func WithAdapter(path string) ChatOption
+
+WithAdapter sets the LoRA adapter path to use for this request. The path is passed through to providers that support adapter selection \(e.g. a local LFM inference server\). Providers that do not support adapters silently ignore it.
+
 <a name="WithFrequencyPenalty"></a>
 ### func WithFrequencyPenalty
 
 	func WithFrequencyPenalty(p float64) ChatOption
 
 WithFrequencyPenalty sets the frequency penalty for the chat request.
+
+<a name="WithGrammar"></a>
+### func WithGrammar
+
+	func WithGrammar(mode string) ChatOption
+
+WithGrammar enables GBNF/grammar\-constrained tool calling for this request using the given constraint mode \("llamacpp", "vllm", or "json\_schema"\). The grammar is only attached when tools are present AND the resolved model config declares a matching tool\_constraint capability AND the global \[agent.tools\] gbnf\_constrained switch is on. An incomplete grammar warns once per session and is skipped.
 
 <a name="WithMaxTokens"></a>
 ### func WithMaxTokens
@@ -1783,6 +2478,27 @@ WithMaxTokens sets the max tokens for the chat request.
 	func WithPresencePenalty(p float64) ChatOption
 
 WithPresencePenalty sets the presence penalty for the chat request.
+
+<a name="WithPriority"></a>
+### func WithPriority
+
+	func WithPriority(interactive bool) ChatOption
+
+WithPriority marks this chat turn INTERACTIVE for model\-slot acquisition \(tree 04 leaf 03\): when model concurrency is capped, an interactive acquire is granted ahead of waiting background acquires, bounded by a starvation guard \(3 interactive grants → 1 background\). Default is false \(background\) for all callers that never pass this — byte\-identical ordering semantics to the prior channel semaphore. This affects acquisition ordering only; nothing is added to the request payload. Per D11, exactly two tiers exist: interactive chat turns \(true\) and everything else \(false, the default\).
+
+<a name="WithRawGrammar"></a>
+### func WithRawGrammar
+
+	func WithRawGrammar(grammar string) ChatOption
+
+WithRawGrammar attaches the caller's GBNF grammar body directly to the request payload \(llamacpp wire format: payload\["grammar"\]\) when the global GBNFConstrained switch is on. Unlike WithGrammar, this does NOT require tools on the request or a model tool\_constraint capability — it is for constraining free\-form structured output \(e.g. the SKILL.state response envelope\) on tool\-free calls. An empty grammar is a no\-op.
+
+<a name="WithReasoning"></a>
+### func WithReasoning
+
+	func WithReasoning(rc *ReasoningConfig) ChatOption
+
+WithReasoning sets the reasoning/thinking effort for the chat request. The config is translated to vendor\-specific wire formats via applyOpenAICompatReasoning \(OpenAI\-compatible path\) or applyAnthropicReasoning \(Anthropic path\).
 
 <a name="WithStopSequences"></a>
 ### func WithStopSequences
@@ -1968,12 +2684,40 @@ Close closes the client \(releases resources\).
 
 
 
+<a name="Client.Reconfigure"></a>
+### func \(\*Client\) Reconfigure
+
+	func (c *Client) Reconfigure(cfg *ModelConfig)
+
+Reconfigure swaps the client's underlying ModelConfig under configMu so subsequent Chat calls target the new endpoint/model. Used by alias failover \(leaf 03 of classifier\-reliability\): the classifier and intent analyzer keep a single \*llm.Client and rotate its config when the active candidate fails. Safe for concurrent readers: Chat snapshots cfg under c.configMu.RLock, and all other reads go through the same lock.
+
+<a name="Client.SetFailurePolicyConfig"></a>
+### func \(\*Client\) SetFailurePolicyConfig
+
+	func (c *Client) SetFailurePolicyConfig(cfg *FailurePolicyConfig)
+
+SetFailurePolicyConfig injects the tree\-02 failure\-policy config \(leaf 03 Task 5\): ShortRetries bounds all retry loops; a nil or invalid \(\<=0\) ShortRetries keeps the nil\-safe default of 3 \(config.DefaultFailurePolicy\- ShortRetries\). Nil\-receiver safe. The wiring point mirrors SetQuotaMaxWait; the daemon maps config.FailurePolicyConfig onto \*llm.FailurePolicyConfig there \(internal/llm cannot import internal/config — import cycle\).
+
 <a name="Client.SetMetricsStore"></a>
 ### func \(\*Client\) SetMetricsStore
 
 	func (c *Client) SetMetricsStore(store *metrics.Store)
 
 SetMetricsStore sets the metrics store after client creation. This is used when the metrics store is created after the client \(e.g. in daemon wiring where the store lives in daemon.go\).
+
+<a name="Client.SetPacer"></a>
+### func \(\*Client\) SetPacer
+
+	func (c *Client) SetPacer(p *AdaptivePacer)
+
+SetPacer injects the adaptive 429 pacer \(tree 02 leaf 05, D15\). Nil pacer \(or nil receiver\) = pacing off, zero overhead — the guard is the typed\-nil pattern \(repo rule\): a nil \*AdaptivePacer must not produce a non\-nil interface that later panics.
+
+<a name="Client.SetQuotaMaxWait"></a>
+### func \(\*Client\) SetQuotaMaxWait
+
+	func (c *Client) SetQuotaMaxWait(d time.Duration)
+
+SetQuotaMaxWait sets the quota wait upper bound. Nil\-receiver safe.
 
 <a name="Client.SwitchModel"></a>
 ### func \(\*Client\) SwitchModel
@@ -2032,7 +2776,7 @@ WithBudget sets the token budget for the client.
 
 	func WithConcurrencyLimit(maxConcurrency int) ClientOption
 
-WithConcurrencyLimit sets the maximum concurrent requests for this client. When maxConcurrency is 0 or negative, no limit is enforced \(unlimited\). The limit is enforced using a semaphore \(buffered channel\).
+WithConcurrencyLimit sets the maximum concurrent requests for this client. When maxConcurrency is 0 or negative, no limit is enforced \(unlimited\). The limit is enforced using a two\-lane slot gate \(tree 04 leaf 03\): interactive acquires jump background waiters, bounded by a starvation guard \(slot\_gate.go\).
 
 <a name="WithExtraHeaders"></a>
 ### func WithExtraHeaders
@@ -2089,6 +2833,85 @@ WithTokenResolver sets the OAuth token resolver and provider name for the client
 	func WithUploadStore(store UploadStore) ClientOption
 
 WithUploadStore sets the upload store for resolving image file references.
+
+<a name="CodexClient"></a>
+## type CodexClient
+
+CodexClient talks to the ChatGPT Codex backend \(Responses API dialect\) with the Cloudflare\-required client headers. Streaming callers go through ChatWithDeltaCallback \(stream:true \+ text/event\-stream, mirroring the codex\-rs contract\); plain Chat keeps the single\-JSON exchange.
+
+	type CodexClient struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewCodexClient"></a>
+### func NewCodexClient
+
+	func NewCodexClient(cfg *ModelConfig, opts ...CodexClientOption) *CodexClient
+
+NewCodexClient creates a CodexClient with defaults: 120s HTTP timeout, slog.Default\(\) logger.
+
+<a name="CodexClient.Chat"></a>
+### func \(\*CodexClient\) Chat
+
+	func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error)
+
+Chat sends a non\-streaming Responses request \(stream:false \+ single JSON body\) and returns the parsed Response. Callers wanting incremental deltas use ChatWithDeltaCallback, which streams via the Responses\-API SSE protocol \(codex\_sse.go\).
+
+<a name="CodexClient.ChatWithDeltaCallback"></a>
+### func \(\*CodexClient\) ChatWithDeltaCallback
+
+	func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error)
+
+ChatWithDeltaCallback implements StreamingChatter for CodexClient. It POSTs stream:true with Accept: text/event\-stream \(the codex\-rs wire contract\) and invokes onDelta for each output\_text delta. A non\-nil onDelta error aborts the stream and is returned. nil onDelta falls back to plain Chat.
+
+<a name="CodexClient.ChatWithProgress"></a>
+### func \(\*CodexClient\) ChatWithProgress
+
+	func (c *CodexClient) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error)
+
+ChatWithProgress behaves like Chat, reporting start/done progress stages. The Responses call is non\-streaming, so intermediate stages are not available; the callback receives ProgressStageStarting before the request and ProgressStageDone after a successful parse.
+
+<a name="CodexClient.Config"></a>
+### func \(\*CodexClient\) Config
+
+	func (c *CodexClient) Config() *ModelConfig
+
+Config returns the current model configuration.
+
+<a name="CodexClientOption"></a>
+## type CodexClientOption
+
+CodexClientOption is a functional option for NewCodexClient.
+
+	type CodexClientOption func(*CodexClient)
+
+<a name="WithCodexBudget"></a>
+### func WithCodexBudget
+
+	func WithCodexBudget(b *Budget) CodexClientOption
+
+WithCodexBudget attaches a token budget for usage recording.
+
+<a name="WithCodexLogger"></a>
+### func WithCodexLogger
+
+	func WithCodexLogger(l *slog.Logger) CodexClientOption
+
+WithCodexLogger sets the client logger.
+
+<a name="WithCodexTimeout"></a>
+### func WithCodexTimeout
+
+	func WithCodexTimeout(d time.Duration) CodexClientOption
+
+WithCodexTimeout sets the per\-request HTTP timeout.
+
+<a name="WithCodexTokenResolver"></a>
+### func WithCodexTokenResolver
+
+	func WithCodexTokenResolver(tr TokenResolver, provider string) CodexClientOption
+
+WithCodexTokenResolver wires an OAuth token resolver. A nil resolver is ignored so callers can pass through unset values unconditionally.
 
 <a name="CompactResult"></a>
 ## type CompactResult
@@ -2302,6 +3125,95 @@ SetCompactor sets the ContextCompactor for smart summarization.
 	func (c *ContextCompressor) Stats() CompressionStatsSnapshot
 
 Stats returns a snapshot of the cumulative compression statistics.
+
+<a name="ContextDiscovery"></a>
+## type ContextDiscovery
+
+ContextDiscovery fetches per\-model context lengths from provider endpoints and merges them into the model registry per the precedence rule \(master Contract 3\).
+
+	type ContextDiscovery struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewContextDiscovery"></a>
+### func NewContextDiscovery
+
+	func NewContextDiscovery(cfg ContextDiscoveryConfig, client *http.Client) *ContextDiscovery
+
+NewContextDiscovery creates a new context\-length discovery syncer.
+
+<a name="ContextDiscovery.Client"></a>
+### func \(\*ContextDiscovery\) Client
+
+	func (d *ContextDiscovery) Client() *http.Client
+
+Client returns the syncer's HTTP client for fetcher closures that build their own requests.
+
+<a name="ContextDiscovery.Enabled"></a>
+### func \(\*ContextDiscovery\) Enabled
+
+	func (d *ContextDiscovery) Enabled() bool
+
+Enabled reports whether discovery is on.
+
+<a name="ContextDiscovery.RegisterFetcher"></a>
+### func \(\*ContextDiscovery\) RegisterFetcher
+
+	func (d *ContextDiscovery) RegisterFetcher(providerID string, f Fetcher)
+
+RegisterFetcher registers a fetcher under a provider ID \(master Contract 1; leaf 03 codes against this exact signature\). Registering for a provider without an endpoint is harmless: Sync skips it.
+
+<a name="ContextDiscovery.SetEndpoint"></a>
+### func \(\*ContextDiscovery\) SetEndpoint
+
+	func (d *ContextDiscovery) SetEndpoint(providerID, baseURL, apiKey string)
+
+SetEndpoint records the base URL \(and optional API key\) a provider's fetcher should be called with. The daemon wiring resolves these from provider config; the local\-models endpoint comes from the RuntimeManager's llama.cpp endpoint key.
+
+<a name="ContextDiscovery.SetLogger"></a>
+### func \(\*ContextDiscovery\) SetLogger
+
+	func (d *ContextDiscovery) SetLogger(l *slog.Logger)
+
+SetLogger overrides the default logger. Call before Start.
+
+<a name="ContextDiscovery.SetResolver"></a>
+### func \(\*ContextDiscovery\) SetResolver
+
+	func (d *ContextDiscovery) SetResolver(r *Resolver)
+
+SetResolver attaches the resolver whose model sets the merge writes into \(audit R3 write path\). Pass nil to write only the display catalog. No\-op on a nil receiver to honor the typed\-nil setter rule \(AGENTS.md\).
+
+<a name="ContextDiscovery.Start"></a>
+### func \(\*ContextDiscovery\) Start
+
+	func (d *ContextDiscovery) Start(ctx context.Context)
+
+Start runs the ticker loop at the configured interval. The initial sync happens in the background \(PricingSyncer pattern\); the loop exits when ctx is cancelled.
+
+<a name="ContextDiscovery.Sync"></a>
+### func \(\*ContextDiscovery\) Sync
+
+	func (d *ContextDiscovery) Sync(ctx context.Context) error
+
+Sync fetches from every registered fetcher and merges the results per the precedence rule. A single provider's failure is logged and skipped \(PricingSyncer error tolerance\), never a hard error.
+
+<a name="ContextDiscoveryConfig"></a>
+## type ContextDiscoveryConfig
+
+ContextDiscoveryConfig configures the context\-length discovery syncer.
+
+	type ContextDiscoveryConfig struct {
+	    // Enabled turns discovery on. Default false (zero-value OFF; no
+	    // network traffic when off).
+	    Enabled bool
+	    // Interval is the re-sync cadence. Zero means the 6h default.
+	    Interval time.Duration
+	    // AllowContextOverride lets a discovered value replace a NON-ZERO
+	    // catalog/config value. Explicit models.json5 context_limit values
+	    // always win regardless of this flag.
+	    AllowContextOverride bool
+	}
 
 <a name="ContextFirewall"></a>
 ## type ContextFirewall
@@ -2547,6 +3459,74 @@ DeltaCallback is invoked for each content chunk during a streaming response.
 
 	type DeltaCallback func(delta string) error
 
+<a name="DeltaCallbackWithAttempt"></a>
+## type DeltaCallbackWithAttempt
+
+DeltaCallbackWithAttempt is the attempt\-aware delta callback used by ProviderManager rotation \(streaming failover, attempt\-tagged deltas\). attempt is a zero\-based index of the provider attempt: 0 = the primary's first try, 1\+ = each rotation to the next provider. When attempt increments, the deltas that follow belong to a FRESH stream from a different provider — consumers that accumulate text must RESET \(replace, not append\) their buffer at that point or the final text duplicates the abandoned attempt's partial content \(option B "accumulate with attempt tagging" — task 01 leaf 01\). deltaType identifies the chunk channel \("text" for output text; the plain DeltaCallback path only carries text today, but reasoning channels may piggyback here later without another signature break\). Returning a non\-nil error aborts the stream, mirroring DeltaCallback.
+
+	type DeltaCallbackWithAttempt func(delta string, deltaType string, attempt int) error
+
+<a name="FailureClass"></a>
+## type FailureClass
+
+FailureClass buckets an LLM\-provider error response into the failure\-policy classes \(SHARED\-CONVENTIONS §4.1; DECISIONS.md D4: throttle and quota are different classes with different horizons under one handler\).
+
+	type FailureClass int
+
+<a name="FailureNone"></a>
+
+	const (
+	    FailureNone        FailureClass = iota // not a failure
+	    FailureThrottle                        // 429/503, provider load; long-horizon backoff (D7)
+	    FailureQuota                           // 429/402 with quota-shaped signal; park until reset
+	    FailureServerError                     // 5xx; bounded retry
+	    FailureFatal                           // 4xx except 402/429; no retry
+	)
+
+<a name="FailurePolicyConfig"></a>
+## type FailurePolicyConfig
+
+FailurePolicyConfig mirrors the canonical config.FailurePolicyConfig \(llm.failure\_policy knobs, tree 02 leaf 02\). Defined locally to avoid the internal/llm \-\> internal/config import cycle \(internal/config transitively imports internal/llm\); the canonical type satisfies this shape 1:1, and internal/config maps onto it the same way llm.ConfigFromSchema maps QuotaRetryConfig onto QuotaWaitConfig \(resolver\_direct.go precedent\).
+
+	type FailurePolicyConfig struct {
+	    // Horizon is the give-up cap: DefaultBackoffPlan sets
+	    // GiveUpAt = now + Horizon (D8: 24h default; on cap the turn fails).
+	    Horizon time.Duration
+	    // BaseThrottle is the first-retry delay for FailureThrottle (D8 30s
+	    // default) and the fallback base for all other classes.
+	    BaseThrottle time.Duration
+	    // BaseQuota402Extra is added to BaseThrottle for FailureQuota (D5:
+	    // 402 quota waits start "longer by minutes" than the 429 path; 5m).
+	    BaseQuota402Extra time.Duration
+	    // PollFloor is the polling floor: once an exponential step would
+	    // exceed it, all subsequent steps are exactly PollFloor (D8: 1h).
+	    PollFloor time.Duration
+	    // ShortRetries is the bounded immediate-retry budget for 5xx in the
+	    // short loops (D8 leaf-03 consumption; carried on the schema here so
+	    // leaf 03 only reads it).
+	    ShortRetries int
+	    // Pacing gating knobs (D15; tree 02 leaf 05 consumption — carried on
+	    // the schema here so leaf 05's PacingConfig maps onto it 1:1).
+	    PacingEnabled          bool
+	    PacingTarget429PerHour int
+	    PacingMinInterval      time.Duration
+	    PacingMaxInterval      time.Duration
+	}
+
+<a name="Fetcher"></a>
+## type Fetcher
+
+Fetcher fetches context lengths for one provider. Keys are "provider/model" ids matching registry ids. baseURL is the provider's resolved endpoint base \(leaf 03 registers its fetcher against this signature — master Contract 1 pins it\).
+
+	type Fetcher func(ctx context.Context, baseURL, apiKey string) (map[string]int, error)
+
+<a name="NewLMStudioFetcher"></a>
+### func NewLMStudioFetcher
+
+	func NewLMStudioFetcher(client *http.Client, logger *slog.Logger) Fetcher
+
+NewLMStudioFetcher returns a ContextDiscovery Fetcher \(leaf 01's registered shape: func\(ctx, baseURL, apiKey\) \(map\[string\]int, error\)\) bound to the given HTTP client and logger. The daemon wiring \(orchestrator task, NOT this leaf — components.go is owned elsewhere\) registers it via ContextDiscovery.RegisterFetcher\(ProviderIDLMStudio, NewLMStudioFetcher\(...\)\) after resolving the base URL from provider config, mirroring the ollama/openrouter/local\-models registrations.
+
 <a name="FileOperationSet"></a>
 ## type FileOperationSet
 
@@ -2632,6 +3612,17 @@ FunctionParameters defines the parameters for a function.
 	    Type       string                       `json:"type"`
 	    Properties map[string]ParameterProperty `json:"properties"`
 	    Required   []string                     `json:"required,omitempty"`
+	}
+
+<a name="HandoffResult"></a>
+## type HandoffResult
+
+HandoffResult holds the result of a handoff summary generation.
+
+	type HandoffResult struct {
+	    Summary    string
+	    TokensUsed int
+	    Sections   map[string]string
 	}
 
 <a name="HealthChangeCallback"></a>
@@ -2989,6 +3980,33 @@ L2InspectEntry is a lightweight result for inspection.
 	    FileHashes map[string]string
 	}
 
+<a name="LFMLoader"></a>
+## type LFMLoader
+
+LFMLoader manages LFM2.5 model \+ adapter loading.
+
+	type LFMLoader struct {
+	    BaseModel string // "lfm2.5-8b" or "lfm2.5-1.2b"
+	    ModelPath string
+	    Adapters  map[string]*LoadedAdapter // domain -> best adapter
+	    Fallback  *LoadedAdapter            // "general" domain or first ready adapter
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewLFMLoader"></a>
+### func NewLFMLoader
+
+	func NewLFMLoader(baseModel, modelPath string, logger *slog.Logger) *LFMLoader
+
+NewLFMLoader creates a new LFMLoader with the given base model identifier.
+
+<a name="LFMLoader.LoadAllAdapters"></a>
+### func \(\*LFMLoader\) LoadAllAdapters
+
+	func (l *LFMLoader) LoadAllAdapters(registry *AdapterRegistry) error
+
+LoadAllAdapters loads enabled adapters matching the base model. Highest \-vN wins per domain. Incomplete adapter dirs are skipped. Fallback is set to "general" if present, else the first ready adapter by domain name.
+
 <a name="LimitBudget"></a>
 ## type LimitBudget
 
@@ -3014,6 +4032,20 @@ LivePrice holds a dynamically fetched price for a model.
 	    FetchedAt  time.Time
 	}
 
+<a name="LoadedAdapter"></a>
+## type LoadedAdapter
+
+LoadedAdapter represents a loaded LoRA adapter and its metadata. PEFT weight tensors live on disk \(trained by Python\); the Go side validates artifacts and routes adapter paths at inference time.
+
+	type LoadedAdapter struct {
+	    Domain  string
+	    Path    string
+	    Model   any    // reserved for future native PEFT bindings
+	    ID      string // registry id, e.g. "code-lfm2.5-8b-v2"
+	    Version int    // parsed from path suffix -vN (0 if unknown)
+	    Ready   bool   // true when PEFT artifacts exist on disk
+	}
+
 <a name="MetricsRecorder"></a>
 ## type MetricsRecorder
 
@@ -3031,9 +4063,11 @@ MetricsRecorder records runtime\-related metrics.
 ModelAliasEntry represents a model alias configuration.
 
 	type ModelAliasEntry struct {
-	    Models   []string `json:"models"`    // List of "provider/model-id" in priority order
-	    Timeout  int      `json:"timeout"`   // Cooldown timeout in seconds after failure
-	    MaxFails int      `json:"max_fails"` // Max consecutive failures before rotation
+	    Models                 []string `json:"models"`    // List of "provider/model-id" in priority order
+	    Timeout                int      `json:"timeout"`   // Cooldown timeout in seconds after failure
+	    MaxFails               int      `json:"max_fails"` // Max consecutive failures before rotation
+	    DefaultModel           string   `json:"default_model,omitempty"`
+	    BalancedStickyRequests bool     `json:"balanced_sticky_requests,omitempty"`
 	}
 
 <a name="ModelBroker"></a>
@@ -3051,6 +4085,13 @@ ModelBroker manages multiple LLM providers and routes requests with health aware
 	func NewModelBroker(cfg BrokerConfig) *ModelBroker
 
 NewModelBroker creates a new model broker.
+
+<a name="ModelBroker.ActiveQuotaBlocks"></a>
+### func \(\*ModelBroker\) ActiveQuotaBlocks
+
+	func (b *ModelBroker) ActiveQuotaBlocks() []QuotaBlockStatus
+
+ActiveQuotaBlocks returns any active quota block statuses. Broker stub: always nil.
 
 <a name="ModelBroker.Chat"></a>
 ### func \(\*ModelBroker\) Chat
@@ -3085,7 +4126,7 @@ ChatWithProgress sends a request with progress reporting. D2 FIX: On runtime fai
 
 	func (b *ModelBroker) ChatterForModel(modelRef string) Chatter
 
-ChatterForModel returns a Chatter for a specific model reference. Returns nil if the model is not found in the broker. The returned Chatter can be used directly for chat operations.
+ChatterForModel returns a Chatter for a specific model reference. Returns nil if the model is not found in the broker. The returned Chatter can be used directly for chat operations. If broker.config.QuotaRetry.Enabled, the returned Chatter is wrapped in quotaWaitChatter for quota\-aware wait\+retry.
 
 <a name="ModelBroker.Config"></a>
 ### func \(\*ModelBroker\) Config
@@ -3100,6 +4141,13 @@ Config returns the model configuration of the primary \(first healthy\) provider
 	func (b *ModelBroker) GetStatus() BrokerStatus
 
 GetStatus returns a snapshot of broker health.
+
+<a name="ModelBroker.QuotaBlockedUntil"></a>
+### func \(\*ModelBroker\) QuotaBlockedUntil
+
+	func (b *ModelBroker) QuotaBlockedUntil(credentialKey string) time.Time
+
+QuotaBlockedUntil returns the earliest time at which the given credential key will be unblocked, zero if never blocked. Broker stub: always zero.
 
 <a name="ModelBroker.UpdateHealth"></a>
 ### func \(\*ModelBroker\) UpdateHealth
@@ -3122,6 +4170,10 @@ ModelCatalogEntry defines a model in the catalog.
 	    InputCost     float64  // Cost per million input tokens (USD)
 	    OutputCost    float64  // Cost per million output tokens (USD)
 	    Capabilities  []string // Model capabilities
+	    // SchemaMode is an optional display/wiring hint for the model's
+	    // tool-schema mode ("full"|"indexed", loop-economics leaf 02). Empty
+	    // means no per-model override in the static catalog.
+	    SchemaMode string `json:"schema_mode,omitempty"`
 	}
 
 <a name="GetAllCatalogModels"></a>
@@ -3165,6 +4217,17 @@ ModelConfig holds configuration for a specific LLM model endpoint.
 	    ContextLimit         int
 	    Capabilities         map[string]bool
 	    ProviderID           string
+	    // ToolConstraint declares the grammar-constraint wire mode this
+	    // endpoint supports for tool calls: "llamacpp", "vllm", or
+	    // "json_schema". Empty means no constraint support (no grammar is
+	    // ever attached). See internal/llm/gbnf.go.
+	    ToolConstraint string
+	    // SchemaMode is the resolved tool-schema mode for this endpoint
+	    // ("full"|"indexed", loop-economics leaf 02). Empty means no
+	    // model/provider-level override; the effective mode falls back to the
+	    // global [agent.tools].schema_mode (default "indexed") via
+	    // Resolver.EffectiveSchemaMode.
+	    SchemaMode string
 	    // OAuthProvider identifies the OAuth provider (e.g. "github-models",
 	    // "google-oauth") whose token should be used in place of a static API
 	    // key. When non-empty, the LLM client resolves a fresh access token
@@ -3180,10 +4243,36 @@ ModelConfig holds configuration for a specific LLM model endpoint.
 	    // to this model/provider. When 0, no limit is enforced (unlimited).
 	    // Use this to prevent overwhelming rate-limited APIs or local LLMs.
 	    MaxConcurrency int
+	    // ConfiguredTimeout records whether the ORIGINATING config declared a
+	    // nonzero timeout: for this alias (tree 02 leaf 04, DECISIONS.md D10).
+	    // It is set for every model built from that alias's entry and mirrors
+	    // the alias-level flag; the alias's Timeout field alone cannot carry
+	    // the distinction because NewResolver substitutes the 30s default.
+	    ConfiguredTimeout bool
 	    // DefaultReasoning is the model-level default reasoning effort/budget
 	    // configuration. When non-nil, it is used if no per-request or agent-level
 	    // reasoning override is present.
 	    DefaultReasoning *ReasoningConfig
+	    // PromptCache controls prompt caching behavior. When nil, caching is
+	    // enabled by default.
+	    PromptCache *PromptCacheConfig
+	    // ProviderAPI is the provider-level api field (openai, comfyui, gemini, …).
+	    ProviderAPI string
+	    // CatalogRef is "provider/map-key" as written in models.json5.
+	    CatalogRef string
+	    // GenerationAPI is an optional per-model transport override.
+	    GenerationAPI string
+	    // Workflow is a ComfyUI API-format workflow path.
+	    Workflow string
+	    // GenerationURL is a full URL for kind=http models.
+	    GenerationURL string
+	    // BodyTemplate is the JSON body template for kind=http models.
+	    BodyTemplate map[string]any
+	    // ResponseURLPath / ResponseB64Path extract the asset from an http response.
+	    ResponseURLPath string
+	    ResponseB64Path string
+	    ImageApp        string
+	    VideoApp        string
 	}
 
 <a name="GetAllModels"></a>
@@ -3199,6 +4288,13 @@ GetAllModels returns all available models from the configuration.
 	func ResolveModelRef(ref string, cfg *ProvidersConfig) *ModelConfig
 
 ResolveModelRef resolves a "provider/model\-id" reference to a ModelConfig.
+
+<a name="ModelConfig.GenerationTransport"></a>
+### func \(\*ModelConfig\) GenerationTransport
+
+	func (m *ModelConfig) GenerationTransport() string
+
+GenerationTransport returns the image/video backend for this model. Model\-level api wins. Else provider api if it is a generation transport. Else infer openai\_images / openai\_videos from capabilities.
 
 <a name="ModelConfig.HasCapabilities"></a>
 ### func \(\*ModelConfig\) HasCapabilities
@@ -3234,7 +4330,33 @@ ModelDef represents a model definition in the config.
 	    ContextLimit   int      `json:"context_limit"`
 	    MaxOutput      int      `json:"max_output"`
 	    Temperature    float64  `json:"temperature"`
+	    TopP           float64  `json:"top_p"`
 	    MaxConcurrency int      `json:"max_concurrency"` // Max concurrent requests (0 = unlimited)
+	    // API overrides the provider transport for this model. Use for image/video
+	    // models on a chat provider, or for comfyui/gemini/infsh/http backends.
+	    API             string         `json:"api,omitempty"`
+	    Workflow        string         `json:"workflow,omitempty"`
+	    GenerationURL   string         `json:"generation_url,omitempty"`
+	    BodyTemplate    map[string]any `json:"body_template,omitempty"`
+	    ResponseURLPath string         `json:"response_url_json_path,omitempty"`
+	    ResponseB64Path string         `json:"response_b64_json_path,omitempty"`
+	    ImageApp        string         `json:"image_app,omitempty"`
+	    VideoApp        string         `json:"video_app,omitempty"`
+	    // OAuthProvider names an auth registry provider whose stored token is
+	    // used as the Bearer credential (e.g. "xai-oauth").
+	    OAuthProvider string `json:"oauth_provider,omitempty"`
+	    // ToolConstraint overrides the provider-level grammar-constraint wire
+	    // mode for this model ("llamacpp"|"vllm"|"json_schema"). Empty inherits
+	    // the provider setting.
+	    ToolConstraint string `json:"tool_constraint,omitempty"`
+	    // SchemaMode overrides the provider-level tool-schema mode for this
+	    // model ("full"|"indexed", loop-economics leaf 02). Empty inherits
+	    // the provider setting. Unknown values are ignored at resolve time.
+	    SchemaMode string `json:"schema_mode,omitempty"`
+	    // ExtraHeaders overrides/extends the provider-level extra HTTP headers
+	    // for this model (merged per key over the provider map). See
+	    // ProviderOptionsConfig.ExtraHeaders for the "${session_id}" sentinel.
+	    ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	}
 
 <a name="ModelLogger"></a>
@@ -3353,6 +4475,20 @@ ModelPickerMode defines the current picker mode.
 	    ModeSelectModel
 	)
 
+<a name="ModelRecord"></a>
+## type ModelRecord
+
+ModelRecord describes one locally pulled GGUF model file.
+
+	type ModelRecord struct {
+	    Name    string    `json:"name"`
+	    RepoID  string    `json:"repo_id"`
+	    File    string    `json:"file"`
+	    Bytes   int64     `json:"bytes"`
+	    SHA256  string    `json:"sha256"`
+	    AddedAt time.Time `json:"added_at"`
+	}
+
 <a name="ModelSlots"></a>
 ## type ModelSlots
 
@@ -3365,6 +4501,50 @@ ModelSlots bundles the four slot fields from ProvidersConfig / models.json5.
 	    SummarizerModel string
 	}
 
+<a name="ModelStore"></a>
+## type ModelStore
+
+ModelStore manages \~/.meept/models: pulled GGUF files plus an index.json describing them. Downloads come straight from the HuggingFace resolve endpoints over plain HTTPS \(no SDK\); HF\_TOKEN is used as a bearer token when set.
+
+	type ModelStore struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="OpenModelStore"></a>
+### func OpenModelStore
+
+	func OpenModelStore(dir string) (*ModelStore, error)
+
+OpenModelStore opens \(creating if needed\) the model store rooted at dir.
+
+<a name="OpenModelStoreForTesting"></a>
+### func OpenModelStoreForTesting
+
+	func OpenModelStoreForTesting(dir string, client *http.Client, baseURL string) (*ModelStore, error)
+
+OpenModelStoreForTesting is the test seam: injectable HTTP client and hub base URL.
+
+<a name="ModelStore.Get"></a>
+### func \(\*ModelStore\) Get
+
+	func (s *ModelStore) Get(name string) (ModelRecord, bool)
+
+Get returns the record with the given name.
+
+<a name="ModelStore.List"></a>
+### func \(\*ModelStore\) List
+
+	func (s *ModelStore) List() []ModelRecord
+
+List returns all records.
+
+<a name="ModelStore.Pull"></a>
+### func \(\*ModelStore\) Pull
+
+	func (s *ModelStore) Pull(ctx context.Context, repoID, quant string, progress func(done, total int64)) (*ModelRecord, error)
+
+Pull downloads repoID's selected GGUF into the store. progress may be nil. Resumable: an existing \<file\>.part continues via Range; servers without Range support cause a clean restart.
+
 <a name="NonRetryableError"></a>
 ## type NonRetryableError
 
@@ -3373,6 +4553,28 @@ NonRetryableError marks errors that should not be retried. Budget exhaustion \(B
 	type NonRetryableError interface {
 	    NonRetryable() bool
 	    // contains filtered or unexported methods
+	}
+
+<a name="PacingConfig"></a>
+## type PacingConfig
+
+PacingConfig configures adaptive outbound pacing \(DECISIONS.md D15, tree 02 leaf 05\). It is the local mirror of config.FailurePolicyConfig's Pacing sub\-block; the daemon maps the canonical values onto it at wiring time \(internal/llm cannot import internal/config — import cycle\).
+
+	type PacingConfig struct {
+	    // Enabled gates pacing (default ON as of fda25177 —
+	    // pacing_default_test.go pins this; the earlier D15 default-OFF
+	    // wording was stale). A disabled — or nil — pacer is byte-identical
+	    // to no pacer: Wait returns immediately and Observe mutates nothing.
+	    Enabled bool
+	    // Target429PerHour is the tolerated throttle-429 rate per provider per
+	    // hour ("tolerate at most N throttle 429/hour/provider"). A higher
+	    // observed hourly rate holds the enforced gap at MinInterval.
+	    Target429PerHour int
+	    // MinInterval is the smallest enforced gap between outbound requests
+	    // to one provider (the pacing floor).
+	    MinInterval time.Duration
+	    // MaxInterval is the ceiling: learned intervals never exceed it.
+	    MaxInterval time.Duration
 	}
 
 <a name="ParameterProperty"></a>
@@ -3385,7 +4587,48 @@ ParameterProperty defines a single parameter property.
 	    Description string             `json:"description,omitempty"`
 	    Enum        []string           `json:"enum,omitempty"`
 	    Items       *ParameterProperty `json:"items,omitempty"`
+	    // Properties and Required support nested object schemas (used by the
+	    // GBNF/json-schema tool-call converters). Absent for non-object props.
+	    Properties map[string]ParameterProperty `json:"properties,omitempty"`
+	    Required   []string                     `json:"required,omitempty"`
 	}
+
+<a name="PolicyVerdict"></a>
+## type PolicyVerdict
+
+PolicyVerdict is the single decision returned for any provider error \(SHARED\-CONVENTIONS §4.1 Contract 1\).
+
+	type PolicyVerdict struct {
+	    Class   FailureClass
+	    RetryAt time.Time // earliest next attempt; zero = no retry scheduled
+	    Park    bool      // true = park the turn, release the agent slot
+	    GiveUp  bool      // true = surface a user-facing failure now
+	    Reason  string    // machine-readable
+	}
+
+<a name="Classify"></a>
+### func Classify
+
+	func Classify(statusCode int, header http.Header, body []byte, now time.Time) PolicyVerdict
+
+Classify is the ONE entry point all clients call for any non\-2xx response or transport error \(DECISIONS.md D4\). It generalizes the frozen classifyQuotaDecision \(errors\_quota.go, whose tests stay green and whose call sites leaf 03 rewires\) with the D7 keyword buckets.
+
+Semantics:
+
+- 402 is ALWAYS quota \(D5\), reason "status\_402".
+- 429 with a quota signal \(structured body code, quota\-window reset header, or D7 keyword\) is quota; a bare 429 WITHOUT any quota signal is throttle so spurious provider\-load 429s never inherit quota\-length delays \(D7 core\).
+- 5xx is server error \(bounded retry, not park\); a 503 Retry\-After is schedule input for leaf 02, not class input.
+- Other 4xx is fatal.
+- Everything else \(2xx, transport/redirect codes the caller already handles\) is none, with Reason "".
+
+Leaf scope: RetryAt is always zero, Park and GiveUp always false — schedules are tree 02 leaf 02's job \(D8\) and parking is tree 03's \(D9\). now is accepted for schedule symmetry with leaf 02 and future clock injection; classification itself is time\-independent today.
+
+<a name="VerdictForFailure"></a>
+### func VerdictForFailure
+
+	func VerdictForFailure(err error) PolicyVerdict
+
+VerdictForFailure maps a failure into the leaf\-01 policy vocabulary, adding the transport seam audit M4 requires: status\-bearing errors go through Classify; transport timeouts \(context deadline, net.Error timeout\) reach this path WITHOUT an HTTP status/body and would otherwise never fire endpoint cooldowns — inverting D10's purpose. A wrapped FailureQuota verdict \(QuotaResetError\) unwraps through so the quota class is preserved; anything else is FailureNone \(alias cooldown still applies, but no endpoint block\).
 
 <a name="PricingSyncer"></a>
 ## type PricingSyncer
@@ -3532,6 +4775,24 @@ ProgressStage represents the current stage of an LLM request.
 	    // ProgressStageDone is when the request is complete.
 	    ProgressStageDone
 	)
+
+<a name="PromptCacheConfig"></a>
+## type PromptCacheConfig
+
+PromptCacheConfig controls prompt caching behavior for providers that support it \(e.g. Anthropic's cache\_control markers\).
+
+	type PromptCacheConfig struct {
+	    // Enabled controls whether prompt cache blocks are emitted. Defaults to
+	    // true when the struct is zero-valued (use IsEnabled to check).
+	    Enabled *bool `json:"enabled" yaml:"enabled"`
+	}
+
+<a name="PromptCacheConfig.IsEnabled"></a>
+### func \(\*PromptCacheConfig\) IsEnabled
+
+	func (p *PromptCacheConfig) IsEnabled() bool
+
+IsEnabled reports whether prompt caching is active. A nil Enabled pointer means "default true".
 
 <a name="ProviderConfig"></a>
 ## type ProviderConfig
@@ -3702,12 +4963,12 @@ ProviderEntry represents a configured provider with its health state.
 	    Priority int // Lower = higher priority (0 = primary)
 	}
 
-<a name="ProviderErrorDetail"></a>
-## type ProviderErrorDetail
+<a name="ProviderError"></a>
+## type ProviderError
 
-ProviderErrorDetail is a provider\-agnostic structured error.
+ProviderError is a provider\-agnostic structured error.
 
-	type ProviderErrorDetail struct {
+	type ProviderError struct {
 	    Type          string        // "rate_limit_error", "authentication_error", etc.
 	    Code          string        // "tpm_uncached_exceeded", "insufficient_quota", etc.
 	    Message       string        // Human-readable message
@@ -3720,28 +4981,28 @@ ProviderErrorDetail is a provider\-agnostic structured error.
 <a name="ParseGenericProviderError"></a>
 ### func ParseGenericProviderError
 
-	func ParseGenericProviderError(body []byte) *ProviderErrorDetail
+	func ParseGenericProviderError(body []byte) *ProviderError
 
-ParseGenericProviderError tries to parse a generic \{error:\{type,message,code\}\} JSON body. Returns nil if the body does not match this format.
+ParseGenericProviderError tries to parse a generic \{error:\{type,message,code\}\} JSON body. Returns nil if the body does not match this format. The json.Unmarshal error is an intentional nil: an unparseable body is a format mismatch \(the caller probes the next parser\), not a failure to surface.
 
 <a name="ParseOpenRouterError"></a>
 ### func ParseOpenRouterError
 
-	func ParseOpenRouterError(body []byte) *ProviderErrorDetail
+	func ParseOpenRouterError(body []byte) *ProviderError
 
-ParseOpenRouterError extracts structured error info from OpenRouter\-style JSON bodies. Returns nil if the body does not match the expected OpenRouter format.
+ParseOpenRouterError extracts structured error info from OpenRouter\-style JSON bodies. Returns nil if the body does not match the expected OpenRouter format. The json.Unmarshal errors are intentional nils: an unparseable body simply doesn't match the format this parser probes for \(callers fall through to the next parser in the chain\), so the parse error itself is not a failure worth surfacing.
 
 <a name="ParseRateLimitBody"></a>
 ### func ParseRateLimitBody
 
-	func ParseRateLimitBody(body []byte) *ProviderErrorDetail
+	func ParseRateLimitBody(body []byte) *ProviderError
 
-ParseRateLimitBody attempts to parse a 429 response body into a ProviderErrorDetail. It tries OpenRouter format first, then generic JSON, and falls back to nil.
+ParseRateLimitBody attempts to parse a 429 response body into a ProviderError. It tries OpenRouter format first, then generic JSON, and falls back to nil.
 
-<a name="ProviderErrorDetail.Error"></a>
-### func \(\*ProviderErrorDetail\) Error
+<a name="ProviderError.Error"></a>
+### func \(\*ProviderError\) Error
 
-	func (d *ProviderErrorDetail) Error() string
+	func (d *ProviderError) Error() string
 
 
 
@@ -3794,6 +5055,24 @@ AddProvider adds a new provider dynamically.
 	func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error)
 
 Chat sends a chat completion request with automatic failover.
+
+<a name="ProviderManager.ChatWithDeltaCallback"></a>
+### func \(\*ProviderManager\) ChatWithDeltaCallback
+
+	func (pm *ProviderManager) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error)
+
+ChatWithDeltaCallback implements StreamingChatter for the manager: the same ordered\-provider rotation as Chat, but each provider attempt goes through its Chatter's streaming path when supported \(falling back to plain Chat for providers that are not StreamingChatters\). Without this method the agent loop's AsStreamingChatter\(pm\) check fails and every streaming request bypasses rotation entirely — a failing primary then fails the turn even when healthy fallbacks are configured \(observed: agnes 5xx rate\-limit\-check on the streaming path with the local 8B idle\).
+
+Attempt\-tagged deltas \(option B "accumulate with attempt tagging"\): each rotation gets a zero\-based attempt index and the consumer's callback fires through onDeltaWithAttempt with that index, so consumers can RESET their accumulated text when the attempt increments — re\-invoking a plain onDelta per attempt made attempt\-1 partial text precede attempt\-2 full text \(duplicated content\). Behavior without rotation is unchanged: attempt 0's deltas flow exactly as before.
+
+Plain\-callback contract under rotation: onDelta receives attempt\-0 deltas ONLY. The plain signature has no way to signal a reset, so forwarding the next attempt's deltas would re\-introduce the duplication this seam fixes; callers streaming through a rotating manager should use ChatWithDeltaCallbackWithAttempt to receive every attempt's stream tagged.
+
+<a name="ProviderManager.ChatWithDeltaCallbackWithAttempt"></a>
+### func \(\*ProviderManager\) ChatWithDeltaCallbackWithAttempt
+
+	func (pm *ProviderManager) ChatWithDeltaCallbackWithAttempt(ctx context.Context, messages []ChatMessage, onDeltaWithAttempt DeltaCallbackWithAttempt, opts ...ChatOption) (*Response, error)
+
+ChatWithDeltaCallbackWithAttempt is the rotation\-aware streaming entry point: identical provider rotation to ChatWithDeltaCallback, but deltas arrive tagged with the zero\-based provider\-attempt index so the consumer can reset accumulation on rotation. onDeltaWithAttempt must be non\-nil.
 
 <a name="ProviderManager.ChatWithProgress"></a>
 ### func \(\*ProviderManager\) ChatWithProgress
@@ -3879,6 +5158,20 @@ ResetProviderHealth resets health metrics for a provider.
 
 SetCostOptimized enables or disables cost\-optimized routing.
 
+<a name="ProviderManager.SetFailurePolicyConfig"></a>
+### func \(\*ProviderManager\) SetFailurePolicyConfig
+
+	func (pm *ProviderManager) SetFailurePolicyConfig(cfg *FailurePolicyConfig)
+
+SetFailurePolicyConfig propagates a failure\-policy config onto every OpenAI\-compatible Client chatter this manager owns \(existing and future\), mirroring Client.SetFailurePolicyConfig. Tests inject tiny throttle durations so in\-loop retry waits are near\-zero; production callers leave it unset and keep the client\-level defaults \(30s/1h/24h\). Anthropic and Codex chatters are unaffected \(their own policy seams are untouched\). Nil\-receiver and nil\-config safe; a nil cfg restores the default.
+
+<a name="ProviderManager.SetQuotaMaxWait"></a>
+### func \(\*ProviderManager\) SetQuotaMaxWait
+
+	func (pm *ProviderManager) SetQuotaMaxWait(d time.Duration)
+
+SetQuotaMaxWait caps how far into the future a provider credential stays quota\-blocked after a QuotaResetError \(block horizon = min\(ResetAt, now\+d\)\). Zero or negative restores DefaultQuotaMaxWait. No\-op on a nil receiver to honor the typed\-nil setter rule \(AGENTS.md\).
+
 <a name="ProviderManager.StartHealthChecks"></a>
 ### func \(\*ProviderManager\) StartHealthChecks
 
@@ -3927,6 +5220,7 @@ ProviderManagerConfig holds configuration for the provider manager.
 	    // device-code authentication. If nil, OAuth providers will fail at chat
 	    // time with a clear error.
 	    TokenResolver TokenResolver
+	    // contains filtered or unexported fields
 	}
 
 <a name="ProviderOptionsConfig"></a>
@@ -3938,6 +5232,23 @@ ProviderOptionsConfig holds provider\-specific options.
 	    BaseURL string `json:"baseURL"`
 	    APIKey  string `json:"apiKey"` //nolint:gosec // field name, not a secret
 	    Timeout int    `json:"timeout"`
+	    // ToolConstraint declares the grammar-constraint wire mode every model
+	    // on this provider supports for tool calls: "llamacpp", "vllm", or
+	    // "json_schema". Empty (default) = no constraint support. Per-model
+	    // tool_constraint overrides this value.
+	    ToolConstraint string `json:"tool_constraint,omitempty"`
+	    // SchemaMode is the provider-level default tool-schema mode
+	    // ("full"|"indexed", loop-economics leaf 02). Empty inherits the global
+	    // [agent.tools].schema_mode. Per-model schema_mode overrides this value.
+	    // Unknown values are ignored at resolve time (warn + fall through).
+	    SchemaMode string `json:"schema_mode,omitempty"`
+	    // ExtraHeaders are additional HTTP headers sent with every request to
+	    // this provider (e.g. x-opencode-session for session affinity on the
+	    // OpenCode Zen/Go gateway). Per-model extra_headers merge over these
+	    // per key. The sentinel value "${session_id}" is substituted with the
+	    // current turn's session ID at request time; a header whose value is
+	    // empty after substitution is omitted.
+	    ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	}
 
 <a name="ProviderStatus"></a>
@@ -3997,6 +5308,9 @@ ProvidersConfig represents the full models.json5 configuration.
 	    SmallModel        string                     `json:"small_model"`
 	    ClassifierModel   string                     `json:"classifier_model"`
 	    SummarizerModel   string                     `json:"summarizer_model"`
+	    VisionModel       string                     `json:"vision_model"`
+	    ImageModel        string                     `json:"image_model"`
+	    VideoModel        string                     `json:"video_model"`
 	    DisabledProviders []string                   `json:"disabled_providers"`
 	    ModelAliases      map[string]ModelAliasEntry `json:"model_aliases"`
 	    Providers         map[string]ProviderConfig  `json:"providers"`
@@ -4014,7 +5328,14 @@ LoadProvidersConfig loads providers configuration from a JSON5 file.
 
 	func LoadProvidersConfigDefault() (*ProvidersConfig, error)
 
-LoadProvidersConfigDefault loads providers config from the default locations. Priority: user config \(\~/.meept/models.json5\) \> project config \(config/models.json5\)
+LoadProvidersConfigDefault loads providers config from the default locations. Bundled config/models.json5 is the base. \~/.meept/models.json5 overlays it \(user slots, aliases, and models win\). Missing image/video entries in the user file still come from the bundled catalog.
+
+<a name="MergeProvidersConfig"></a>
+### func MergeProvidersConfig
+
+	func MergeProvidersConfig(base, overlay *ProvidersConfig) *ProvidersConfig
+
+MergeProvidersConfig overlays user config on bundled config. Non\-empty user slots win. User aliases replace by name. User providers merge: new providers are added; existing providers keep bundled models unless the user defines the same model id.
 
 <a name="QualityMetrics"></a>
 ## type QualityMetrics
@@ -4028,6 +5349,115 @@ QualityMetrics tracks compression quality for a single compression pass.
 	    SummaryLevel     int              // Highest summary level in the output messages
 	    CompressionStage CompressionStage // Stage that produced this result
 	}
+
+<a name="QuotaBlockStatus"></a>
+## type QuotaBlockStatus
+
+QuotaBlockStatus is a snapshot of an active quota block for broker/query APIs.
+
+	type QuotaBlockStatus struct {
+	    AliasName     string
+	    ProviderID    string
+	    ModelID       string
+	    CredentialKey string
+	    Code          string
+	    ResetAt       time.Time
+	    Remaining     time.Duration // time until reset; zero if unknown
+	}
+
+<a name="QuotaContext"></a>
+## type QuotaContext
+
+QuotaContext carries metadata for parsing quota responses.
+
+	type QuotaContext struct {
+	    ProviderID string
+	    ModelID    string
+	    MaxWait    time.Duration
+	}
+
+<a name="QuotaResetError"></a>
+## type QuotaResetError
+
+QuotaResetError is a recoverable\-by\-waiting provider cap: a subscription usage window, plan quota, or billing exhaustion. Distinct from RateLimitError \(seconds\-scale backoff\). The client retry loop must NOT short\-retry it; the broker treats it as rotate\-and\-block.
+
+	type QuotaResetError struct {
+	    ProviderID string
+	    ModelID    string
+	    Code       string        // "usage_limit_reached", "insufficient_quota", "quota_exceeded", etc.
+	    Message    string        // raw body detail, truncated to 500 chars
+	    ResetAt    time.Time     // absolute reset time; zero = unknown
+	    RetryAfter time.Duration // derived wait; min(ResetAt-now, MaxWait) when known
+	    MaxWait    time.Duration // upper bound from config (default 24h)
+	    StatusCode int           // 429 or 402
+	    Cause      error
+	}
+
+<a name="AsQuotaResetError"></a>
+### func AsQuotaResetError
+
+	func AsQuotaResetError(err error) (*QuotaResetError, bool)
+
+
+
+<a name="ParseQuotaResponse"></a>
+### func ParseQuotaResponse
+
+	func ParseQuotaResponse(statusCode int, header http.Header, body []byte, known QuotaContext) *QuotaResetError
+
+ParseQuotaResponse classifies an HTTP error response as a quota reset. statusCode must be 429 or 402; anything else returns nil. Precedence: structured body fields \-\> rate\-limit headers \-\> nil. Unknown reset time =\> zero ResetAt \(caller applies config default estimate\).
+
+<a name="QuotaResetError.Error"></a>
+### func \(\*QuotaResetError\) Error
+
+	func (e *QuotaResetError) Error() string
+
+
+
+<a name="QuotaResetError.NonRetryable"></a>
+### func \(\*QuotaResetError\) NonRetryable
+
+	func (e *QuotaResetError) NonRetryable() bool
+
+NonRetryable returns true so the client short\-retry loop exits immediately.
+
+<a name="QuotaResetError.Unwrap"></a>
+### func \(\*QuotaResetError\) Unwrap
+
+	func (e *QuotaResetError) Unwrap() error
+
+
+
+<a name="QuotaResetError.UserMessage"></a>
+### func \(\*QuotaResetError\) UserMessage
+
+	func (e *QuotaResetError) UserMessage() string
+
+
+
+<a name="QuotaWaitConfig"></a>
+## type QuotaWaitConfig
+
+QuotaWaitConfig holds the minimal settings for quota\-aware wait\+retry. Defined locally to avoid import cycles: internal/config transitively imports internal/llm via tools/mcp/client.go.
+
+	type QuotaWaitConfig struct {
+	    Enabled            bool
+	    MaxWait            time.Duration
+	    DefaultEstimate    time.Duration
+	    DeferCheckInterval time.Duration
+	}
+
+<a name="ConfigFromSchema"></a>
+### func ConfigFromSchema
+
+	func ConfigFromSchema(qrc interface {
+	    GetEnabled() bool
+	    GetMaxWait() time.Duration
+	    GetDefaultEstimate() time.Duration
+	    GetDeferCheckInterval() time.Duration
+	}) QuotaWaitConfig
+
+ConfigFromSchema copies the canonical config.QuotaRetryConfig into a QuotaWaitConfig. Callers must hold any needed locks; this function is cheap \(only copies fields\).
 
 <a name="RateLimitError"></a>
 ## type RateLimitError
@@ -4171,6 +5601,13 @@ Resolver resolves model selection based on capability matching.
 
 NewResolver creates a new model resolver.
 
+<a name="Resolver.ActiveQuotaBlocks"></a>
+### func \(\*Resolver\) ActiveQuotaBlocks
+
+	func (r *Resolver) ActiveQuotaBlocks() []QuotaBlockStatus
+
+ActiveQuotaBlocks returns all active quota block statuses.
+
 <a name="Resolver.AllModels"></a>
 ### func \(\*Resolver\) AllModels
 
@@ -4178,12 +5615,54 @@ NewResolver creates a new model resolver.
 
 AllModels returns all available model configurations.
 
+<a name="Resolver.BlockQuotaCredential"></a>
+### func \(\*Resolver\) BlockQuotaCredential
+
+	func (r *Resolver) BlockQuotaCredential(aliasName, credentialKey string, unblockAt time.Time)
+
+BlockQuotaCredential records a quota block for a credential key.
+
+<a name="Resolver.BlockQuotaEntry"></a>
+### func \(\*Resolver\) BlockQuotaEntry
+
+	func (r *Resolver) BlockQuotaEntry(aliasName, providerID, modelID string, unblockAt time.Time)
+
+BlockQuotaEntry records a quota block for a provider/model pair.
+
+<a name="Resolver.ClearQuotaBlocks"></a>
+### func \(\*Resolver\) ClearQuotaBlocks
+
+	func (r *Resolver) ClearQuotaBlocks(aliasName string)
+
+ClearQuotaBlocks clears all quota blocks for an alias.
+
 <a name="Resolver.DefaultModel"></a>
 ### func \(\*Resolver\) DefaultModel
 
 	func (r *Resolver) DefaultModel() *ModelConfig
 
 DefaultModel returns the default model configuration.
+
+<a name="Resolver.EffectiveSchemaMode"></a>
+### func \(\*Resolver\) EffectiveSchemaMode
+
+	func (r *Resolver) EffectiveSchemaMode(providerID, modelID, globalMode string) string
+
+EffectiveSchemaMode resolves the tool\-schema mode for the given provider and model, honoring the full precedence chain described above. It is a pure function of configuration \(thread\-safe\): it reads the resolver's ProvidersConfig and the globalMode argument supplied by the caller \(typically config.Agent.Tools.SchemaMode, where "" means the indexed default\). Unknown provider/model references simply fall through to the provider/global path.
+
+<a name="Resolver.EndpointBlockUntil"></a>
+### func \(\*Resolver\) EndpointBlockUntil
+
+	func (r *Resolver) EndpointBlockUntil(cfg *ModelConfig) time.Time
+
+EndpointBlockUntil reports the CURRENT endpoint\-level block deadline for the endpoint identified by cfg \(EndpointKey: base\-URL host \+ credential\), for the agent loop's timeout\-parking path \(tree 03\): a turn that failed on a timeout\-class error against this endpoint parks until the block expires. The read applies the same lazy\-expiry rule as resolution \(isEndpointBlocked\): an expired block reports zero — the endpoint is prober\-eligible again and the caller must not park on a stale deadline. Callers should verify liveness with EndpointBlocked before parking; a zero result never blocks anything. A nil cfg reports zero.
+
+<a name="Resolver.EndpointBlocked"></a>
+### func \(\*Resolver\) EndpointBlocked
+
+	func (r *Resolver) EndpointBlocked(cfg *ModelConfig) bool
+
+EndpointBlocked reports whether the endpoint identified by cfg \(EndpointKey identity\) is currently under a timeout cooldown \(D10\). It is the liveness check paired with EndpointBlockUntil: park only when BOTH report the block.
 
 <a name="Resolver.FindByCapabilities"></a>
 ### func \(\*Resolver\) FindByCapabilities
@@ -4237,28 +5716,53 @@ HasHealthyModels reports whether an alias has at least one model that can serve 
 - It is the currently active model AND not in cooldown, OR
 - It is a non\-current model \(always available for rotation, per the ResolveForAlias rotation semantics\)
 
-Because non\-current models are always considered available, this function only returns false when the alias has exactly one model AND that single model is currently in cooldown.
+Because non\-current models are always considered available, this function HasHealthyModels checks if the alias has at least one model that is not in cooldown and not quota\-blocked.
+
+<a name="Resolver.ImageModel"></a>
+### func \(\*Resolver\) ImageModel
+
+	func (r *Resolver) ImageModel() *ModelConfig
+
+ImageModel returns the configured image\-generation model, if any.
+
+<a name="Resolver.QuotaBlockedUntil"></a>
+### func \(\*Resolver\) QuotaBlockedUntil
+
+	func (r *Resolver) QuotaBlockedUntil(credentialKey string) time.Time
+
+QuotaBlockedUntil returns the earliest unblock time for a credential key across all aliases.
 
 <a name="Resolver.RecordAliasFailure"></a>
 ### func \(\*Resolver\) RecordAliasFailure
 
-	func (r *Resolver) RecordAliasFailure(aliasName string, err error)
+	func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *ModelConfig)
 
-RecordAliasFailure records a failure for cooldown tracking.
+RecordAliasFailure records a failure for cooldown tracking. failedModel identifies the model that failed; pass nil when unknown \(the failure is then attributed to no specific model and no sticky pins are released by identity\). Callers should pass the ModelConfig the failed request was served by.
+
+Failure\-class routing \(tree 02 leaf 04, DECISIONS.md D10\): a FailureThrottle verdict \(bare 429, transport timeout\) ALSO blocks the failed model's whole base ENDPOINT — cross\-alias, keyed by host \+ credential \(EndpointKey\) — for the alias timeout base \(or the 30s default\). FailureQuota never reaches this function \(quota blocks are recorded by the agent loop\); other classes only advance the alias cooldown as before.
+
+Quota guard \(quota\-reset\-resilience master contract 4, bughunt 2026\-09\-04\): a \*QuotaResetError is NEVER an alias failure. The loop's quota branch is guarded, but analyzer/classifier call sites passed raw Chat errors through — and a QuotaResetError unwraps to a 429 APIError, whose Classify verdict is FailureThrottle, so quota advanced the alias cooldown AND armed endpoint blocks. Enforced here so every current and future call site is safe.
 
 <a name="Resolver.RecordAliasSuccess"></a>
 ### func \(\*Resolver\) RecordAliasSuccess
 
 	func (r *Resolver) RecordAliasSuccess(aliasName string)
 
-RecordAliasSuccess records a success, resetting failure counter.
+RecordAliasSuccess records a success, resetting failure counter and lazily deleting EXPIRED quota block entries for this alias \(both the per\-entry and per\-credential maps\) plus EXPIRED endpoint\-level timeout blocks \(tree 02 leaf 04 — same single lazy\-clearing pattern; no second mechanism\) to bound map growth. Unexpired blocks are left in place — a success on one model says nothing about another model's \(or credential pool's\) quota window.
+
+<a name="Resolver.ResolveEscalationRef"></a>
+### func \(\*Resolver\) ResolveEscalationRef
+
+	func (r *Resolver) ResolveEscalationRef(ref string) (string, error)
+
+ResolveEscalationRef resolves an escalation target — an alias name or a "provider/model" ref — to a model ref string usable as a loop model ref. Implements agent.ModelResolver. Named ResolveEscalationRef, not ResolveRef, because \*Resolver already defines ResolveRef\(ref string\) \*ModelConfig above \(audit B2: a same\-name/different\-signature method would not compile\). Alias resolution INHERITS alias rotation, cooldowns, and quota blocks: a fully quota\-blocked escalation alias surfaces ErrAllModelsQuotaBlocked and the loop's existing quota handling takes over \(SHARED\-CONVENTIONS §2 — no second handling path\).
 
 <a name="Resolver.ResolveForAlias"></a>
 ### func \(\*Resolver\) ResolveForAlias
 
-	func (r *Resolver) ResolveForAlias(aliasName string) (*ModelConfig, error)
+	func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelConfig, error)
 
-ResolveForAlias resolves an alias to a specific model, handling rotation. It returns the currently active model for the given alias.
+ResolveForAlias resolves an alias to a specific model, handling rotation. It returns the currently active model for the given alias. When callerKey is non\-empty and BalancedStickyRequests is true, the caller is pinned to a single model within the alias.
 
 <a name="Resolver.ResolveForSkill"></a>
 ### func \(\*Resolver\) ResolveForSkill
@@ -4266,6 +5770,25 @@ ResolveForAlias resolves an alias to a specific model, handling rotation. It ret
 	func (r *Resolver) ResolveForSkill(skill *SkillRequirements, currentModel *ModelConfig) (*ModelConfig, error)
 
 ResolveForSkill selects the appropriate model for a skill. If skill is nil or has no requirements, returns the current or default model. Otherwise, finds the cheapest model that satisfies the requirements.
+
+<a name="Resolver.ResolveGeneration"></a>
+### func \(\*Resolver\) ResolveGeneration
+
+	func (r *Resolver) ResolveGeneration(ref, kind string) (*ModelConfig, error)
+
+ResolveGeneration resolves a model ref or alias for image/video generation. Empty ref uses the image\_model / video\_model slot, then the cheapest model with the matching capability.
+
+<a name="Resolver.ResolveModelTier"></a>
+### func \(\*Resolver\) ResolveModelTier
+
+	func (r *Resolver) ResolveModelTier(tier string, fallback string) string
+
+ResolveModelTier resolves a model tier name to a concrete model ID. Known tiers:
+
+- "fast": resolves to the configured small/fast model \(SmallModel\).
+- "default": resolves to the default model.
+
+If the tier is empty, unknown, or the tier's model is not configured, the fallback model ID is returned. If fallback is also empty, an empty string is returned \(caller should use its own default\).
 
 <a name="Resolver.ResolveRef"></a>
 ### func \(\*Resolver\) ResolveRef
@@ -4281,6 +5804,17 @@ ResolveRef resolves a "provider/model\-id" reference.
 
 RotateToNextModel forces rotation to the next model in an alias and resets failure counters. Returns the new model config after rotation.
 
+<a name="Resolver.SetContextLimits"></a>
+### func \(\*Resolver\) SetContextLimits
+
+	func (r *Resolver) SetContextLimits(discovered map[string]int, override bool, logger *slog.Logger)
+
+SetContextLimits applies discovered context lengths to the resolver's model pointer sets under r.mu \(audit R3 — there is no separate mutable registry: r.allModels, alias members, defaultModel and smallModel are the pointers per\-call modelConfigFrom copies and ResolveForAlias hand out, so mutating them is what makes the runtime ContextLimit consumer — context\_firewall.go's budget math on ModelConfig.ContextLimit — observe fresh values\). Precedence per master Contract 3:
+
+1. an explicit models.json5 context\_limit wins ALWAYS — on ModelConfig a non\-zero ContextLimit can only come from json5 \(modelConfigFrom never consults the static catalog\), so \`\!= 0\` marks explicit;
+2. a 0/absent value accepts the discovered value; when the model's own value is 0 but the display catalog carries one \(catalog\-only cell\), the catalog value is treated as current;
+3. \`override\` \(allow\_context\_override\) additionally lets a discovered value replace that non\-zero value.
+
 <a name="Resolver.SetPricingSyncer"></a>
 ### func \(\*Resolver\) SetPricingSyncer
 
@@ -4288,12 +5822,33 @@ RotateToNextModel forces rotation to the next model in an alias and resets failu
 
 SetPricingSyncer sets the pricing syncer for live cost enrichment on resolved models.
 
+<a name="Resolver.SetQuotaConfig"></a>
+### func \(\*Resolver\) SetQuotaConfig
+
+	func (r *Resolver) SetQuotaConfig(cfg *QuotaWaitConfig)
+
+SetQuotaConfig attaches quota\-aware retry settings. Pass nil to disable quota blocking; a zero\-value QuotaWaitConfig also means DISABLED \(callers that want enabled\-with\-defaults must populate the fields — see ConfigFromSchema\). No\-op on a nil receiver to honor the typed\-nil setter rule \(AGENTS.md\).
+
+<a name="Resolver.SetRoutingLogger"></a>
+### func \(\*Resolver\) SetRoutingLogger
+
+	func (r *Resolver) SetRoutingLogger(rl *RoutingLogger)
+
+SetRoutingLogger attaches a routing decision logger. Pass nil to disable \(the setter is a no\-op on nil to honor the CLAUDE.md typed\-nil setter rule\).
+
 <a name="Resolver.SmallModel"></a>
 ### func \(\*Resolver\) SmallModel
 
 	func (r *Resolver) SmallModel() *ModelConfig
 
 SmallModel returns the small/fast model configuration.
+
+<a name="Resolver.VideoModel"></a>
+### func \(\*Resolver\) VideoModel
+
+	func (r *Resolver) VideoModel() *ModelConfig
+
+VideoModel returns the configured video\-generation model, if any.
 
 <a name="Response"></a>
 ## type Response
@@ -4405,6 +5960,68 @@ Role represents the role of a message in a conversation.
 	    RoleTool      Role = "tool"
 	)
 
+<a name="RoutingDecision"></a>
+## type RoutingDecision
+
+RoutingDecision captures a single model\-resolution outcome for later mining. The routing log is the training\-set foundation for the student\-learns\-routing loop.
+
+	type RoutingDecision struct {
+	    ID               string    `json:"id" db:"id"`
+	    RequestID        string    `json:"request_id" db:"request_id"`
+	    Timestamp        time.Time `json:"timestamp" db:"timestamp"`
+	    ChosenModelID    string    `json:"chosen_model_id" db:"chosen_model_id"`
+	    ChosenProviderID string    `json:"chosen_provider_id" db:"chosen_provider_id"`
+	    Alias            string    `json:"alias,omitempty" db:"alias"`
+	    Reason           string    `json:"reason,omitempty" db:"reason"`
+	    Skill            string    `json:"skill,omitempty" db:"skill"`
+	    EmployeeID       string    `json:"employee_id,omitempty" db:"employee_id"`
+	    CandidatesJSON   string    `json:"candidates_json,omitempty" db:"candidates_json"`
+	}
+
+<a name="RoutingLogger"></a>
+## type RoutingLogger
+
+RoutingLogger persists RoutingDecisions to SQLite for later mining. It follows the security.Engine / lifecycle.UsageTrackerImpl pattern: WAL journal mode, MaxOpenConns\(1\) to avoid SQLITE\_BUSY under concurrent writes, and schema initialization on construction.
+
+	type RoutingLogger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewRoutingLogger"></a>
+### func NewRoutingLogger
+
+	func NewRoutingLogger(dbPath string, logger *slog.Logger) (*RoutingLogger, error)
+
+NewRoutingLogger opens \(creating if necessary\) the routing log at dbPath. The dbPath follows the lifecycle.UsageTrackerImpl convention: \`path?\_journal\_mode=WAL&\_busy\_timeout=5000\`. A leading \`\~\` is expanded to the user's home directory. If logger is nil, slog.Default\(\) is used.
+
+<a name="RoutingLogger.ByModel"></a>
+### func \(\*RoutingLogger\) ByModel
+
+	func (rl *RoutingLogger) ByModel(ctx context.Context, modelID string, limit int) ([]RoutingDecision, error)
+
+ByModel returns decisions whose chosen\_model\_id matches modelID, most recent first. limit caps the result count \(default 100 if non\-positive\).
+
+<a name="RoutingLogger.Close"></a>
+### func \(\*RoutingLogger\) Close
+
+	func (rl *RoutingLogger) Close() error
+
+Close releases the database connection. Safe to call multiple times; a nil receiver or nil db returns nil.
+
+<a name="RoutingLogger.Recent"></a>
+### func \(\*RoutingLogger\) Recent
+
+	func (rl *RoutingLogger) Recent(ctx context.Context, limit int) ([]RoutingDecision, error)
+
+Recent returns the most recent N decisions, newest\-first. A non\-positive limit defaults to 100.
+
+<a name="RoutingLogger.Record"></a>
+### func \(\*RoutingLogger\) Record
+
+	func (rl *RoutingLogger) Record(ctx context.Context, dec RoutingDecision) error
+
+Record persists a decision. ID and Timestamp are filled in if zero. Errors from the underlying INSERT are wrapped and returned; the caller decides whether to drop or propagate.
+
 <a name="RuntimeConfig"></a>
 ## type RuntimeConfig
 
@@ -4429,6 +6046,9 @@ RuntimeConfig holds validated runtime configuration.
 	    RestartMaxAttempts int
 	    RestartCooldown    time.Duration
 	    RestartResetAfter  time.Duration
+	    // ToolConstraint is the grammar-constraint wire mode this managed
+	    // runtime auto-declares ("llamacpp" for llama.cpp, "" for MLX).
+	    ToolConstraint string
 	}
 
 <a name="ValidateAndNormalize"></a>
@@ -4472,12 +6092,26 @@ RuntimeManager manages local LLM runtime lifecycle. Processes are shared by endp
 
 NewRuntimeManager creates a new manager.
 
+<a name="RuntimeManager.EndpointBaseURL"></a>
+### func \(\*RuntimeManager\) EndpointBaseURL
+
+	func (m *RuntimeManager) EndpointBaseURL(providerID string) (string, bool)
+
+EndpointBaseURL returns the resolved base URL for a provider's runtime endpoint \(context\-discovery leaf 01: the llama.cpp /props fetch needs the same base URL RuntimeManager resolved, not the provider config's\). ok is false when the provider has no registered running endpoint.
+
 <a name="RuntimeManager.GetHealthChecker"></a>
 ### func \(\*RuntimeManager\) GetHealthChecker
 
 	func (m *RuntimeManager) GetHealthChecker(providerID string) (*HealthChecker, bool)
 
 GetHealthChecker returns the health checker for a provider.
+
+<a name="RuntimeManager.ModelKeys"></a>
+### func \(\*RuntimeManager\) ModelKeys
+
+	func (m *RuntimeManager) ModelKeys(providerID string) []string
+
+ModelKeys returns the model keys registered for a provider's runtime endpoint \(context\-discovery leaf 01: the llama.cpp /props default is applied per registered model key\). Keys are returned in sorted order.
 
 <a name="RuntimeManager.RegisterConfig"></a>
 ### func \(\*RuntimeManager\) RegisterConfig
@@ -4487,6 +6121,13 @@ GetHealthChecker returns the health checker for a provider.
 RegisterConfig registers a runtime configuration. If the endpoint key \(cfg.EndpointKey or derived from baseURL\) already exists, this provider's models are merged into the existing process; spawn\_command on the first registration wins. Per\-model loggers are opened and a \`register\` event is logged for each model key.
 
 Model identity resolution: the in\-use gate and per\-model loggers key on the provider's real model IDs \(cfg.ModelKeys when populated by the caller\). When cfg.ModelKeys is empty \(legacy callers\), it falls back to the cfg.ModelPaths map keys — for legacy single\-model configs synthesized under the "default" key, this means the gate will look for "\<provider\>/default" unless the daemon pre\-populates ModelKeys from the provider's models map.
+
+<a name="RuntimeManager.RegisterLocalModel"></a>
+### func \(\*RuntimeManager\) RegisterLocalModel
+
+	func (m *RuntimeManager) RegisterLocalModel(rec ModelRecord) error
+
+RegisterLocalModel wires a pulled GGUF into the runtime manager under the local\-models provider. Repeated calls merge models into one shared llama\-server endpoint config so a single spawned process serves them all. The model file must exist and be non\-empty.
 
 <a name="RuntimeManager.RestartProvider"></a>
 ### func \(\*RuntimeManager\) RestartProvider
@@ -4602,12 +6243,17 @@ StalePIDRemoval cleans up a stale PID file for a given runtime config. This is u
 
 Start spawns the runtime process. stdout and stderr are used for the subprocess's output streams; nil falls back to os.Stdout/os.Stderr.
 
+Adoption semantics \(docs/bugs\-and\-gaps.md "Runtime adoption ownership race"\): if the PID file names a live process,
+
+- a pidfile carrying THIS instance's token \(same\-boot re\-Start\) is adopted as OWNED — spawnedByUs stays true and Stop\(\) remains authorized;
+- anything else \(a foreign instance sharing the run dir, or a legacy tokenless pidfile\) is adopted as OBSERVED, NOT OWNED — this instance records the PID and lets health checks verify the endpoint, but Stop\(\)/StopAll\(\) refuse to kill a process it never spawned.
+
 <a name="RuntimeProcess.Stop"></a>
 ### func \(\*RuntimeProcess\) Stop
 
 	func (p *RuntimeProcess) Stop(ctx context.Context) error
 
-Stop gracefully terminates the runtime process.
+Stop gracefully terminates the runtime process. Non\-owners are refused: a RuntimeProcess that neither spawned nor owned\-adopted the runtime \(e.g. the LLM stack constructed inside a short\-lived CLI or eval subprocess, or an instance that adopted a foreign instance's runtime as observed\-not\-owned\) must not kill the daemon's healthy llama\-server through the shared PID file.
 
 <a name="RuntimeStatus"></a>
 ## type RuntimeStatus
@@ -4660,6 +6306,16 @@ IsValid checks if the runtime type string is valid.
 	func (rt RuntimeType) String() string
 
 String returns a human\-readable representation of the runtime type.
+
+<a name="SessionSummaryResult"></a>
+## type SessionSummaryResult
+
+SessionSummaryResult holds the result of a session summarization.
+
+	type SessionSummaryResult struct {
+	    Summary    string
+	    TokensUsed int
+	}
 
 <a name="SkillRequirements"></a>
 ## type SkillRequirements
@@ -4754,6 +6410,144 @@ SummaryExtract holds structured information extracted from a conversation during
 	    FileEdits           []string `json:"file_edits"`  // Files edited (compaction)
 	    ErrorsEncountered   []string `json:"errors"`      // Errors encountered (compaction)
 	}
+
+<a name="SystemPromptBlock"></a>
+## type SystemPromptBlock
+
+SystemPromptBlock is a contiguous chunk of system prompt text tagged with its cache scope.
+
+	type SystemPromptBlock struct {
+	    Text       string
+	    CacheScope CacheScope
+	}
+
+<a name="BuildSystemPromptBlocks"></a>
+### func BuildSystemPromptBlocks
+
+	func BuildSystemPromptBlocks(sections []string) []SystemPromptBlock
+
+BuildSystemPromptBlocks groups classified prompt sections into SystemPromptBlock values suitable for prefix\-aware caching. Static sections are joined into a single CacheScopeStatic block; dynamic sections are joined into a single CacheScopeSession block. Empty groups produce no block.
+
+<a name="TaskSummarizer"></a>
+## type TaskSummarizer
+
+TaskSummarizer generates concise summaries for task management.
+
+	type TaskSummarizer struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTaskSummarizer"></a>
+### func NewTaskSummarizer
+
+	func NewTaskSummarizer(chatter Chatter, tokenizer Tokenizer) *TaskSummarizer
+
+NewTaskSummarizer creates a new summarizer using the provided chatter.
+
+<a name="TaskSummarizer.SummarizeHandoff"></a>
+### func \(\*TaskSummarizer\) SummarizeHandoff
+
+	func (s *TaskSummarizer) SummarizeHandoff(ctx context.Context, messages []ChatMessage) (HandoffResult, error)
+
+SummarizeHandoff generates a structured handoff summary for agent transitions.
+
+<a name="TaskSummarizer.SummarizeSession"></a>
+### func \(\*TaskSummarizer\) SummarizeSession
+
+	func (s *TaskSummarizer) SummarizeSession(ctx context.Context, messages []ChatMessage) (SessionSummaryResult, error)
+
+SummarizeSession generates a medium\-length summary of a coding session.
+
+<a name="TaskSummarizer.SummarizeTaskTitle"></a>
+### func \(\*TaskSummarizer\) SummarizeTaskTitle
+
+	func (s *TaskSummarizer) SummarizeTaskTitle(ctx context.Context, messages []ChatMessage, maxLen int) (TaskTitleResult, error)
+
+SummarizeTaskTitle generates a short, distinctive title for a task or subagent job.
+
+<a name="TaskTitleResult"></a>
+## type TaskTitleResult
+
+TaskTitleResult holds the result of a task title generation.
+
+	type TaskTitleResult struct {
+	    Title      string
+	    TokensUsed int
+	    Truncated  bool
+	}
+
+<a name="ThrottleBackoffError"></a>
+## type ThrottleBackoffError
+
+ThrottleBackoffError reports sustained provider throttling that exceeded the short in\-loop retry budget \(tree 02 leaf 03, DECISIONS.md D4/D8\): a bare 429/503 load\-shedding episode is NOT quota and NOT a dead model, so after the short retries burn out the loop returns this instead of a ClientError. RetryAt is the earliest future attempt time from the BackoffPlan \(server Retry\-After honored when later, capped by the plan horizon\), letting the caller \(agent loop, tree 03 parking\) park the turn until then. Implements error \+ Unwrap so errors.As traverses the cause.
+
+	type ThrottleBackoffError struct {
+	    ProviderID string
+	    ModelID    string
+	    RetryAt    time.Time
+	    Attempt    int
+	    Cause      error
+	}
+
+<a name="AsThrottleBackoffError"></a>
+### func AsThrottleBackoffError
+
+	func AsThrottleBackoffError(err error) (*ThrottleBackoffError, bool)
+
+AsThrottleBackoffError returns the \*ThrottleBackoffError in err's chain, mirroring AsQuotaResetError \(errors\_quota.go\). Tree 03 leaf 03 consumes it to route park decisions off the verdict class.
+
+<a name="ThrottleBackoffError.Error"></a>
+### func \(\*ThrottleBackoffError\) Error
+
+	func (e *ThrottleBackoffError) Error() string
+
+
+
+<a name="ThrottleBackoffError.Unwrap"></a>
+### func \(\*ThrottleBackoffError\) Unwrap
+
+	func (e *ThrottleBackoffError) Unwrap() error
+
+
+
+<a name="ThrottleGiveUpError"></a>
+## type ThrottleGiveUpError
+
+ThrottleGiveUpError is the D8 give\-up surface for provider throttling \(tree 03 leaf 02\): the turn hit a ThrottleBackoffError but waiting until the backoff plan's next attempt would exceed the parking MaxWait cap, so the turn is abandoned rather than parked. The queue/goal policy applies its own retry policy on top \(D8\). Non\-retryable: an abandoned turn never re\-enters any retry loop.
+
+	type ThrottleGiveUpError struct {
+	    ProviderID string
+	    ModelID    string
+	    Waited     time.Duration // the wait that would have been required
+	}
+
+<a name="AsThrottleGiveUpError"></a>
+### func AsThrottleGiveUpError
+
+	func AsThrottleGiveUpError(err error) (*ThrottleGiveUpError, bool)
+
+AsThrottleGiveUpError returns the \*ThrottleGiveUpError in err's chain, mirroring AsThrottleBackoffError.
+
+<a name="ThrottleGiveUpError.Error"></a>
+### func \(\*ThrottleGiveUpError\) Error
+
+	func (e *ThrottleGiveUpError) Error() string
+
+
+
+<a name="ThrottleGiveUpError.NonRetryable"></a>
+### func \(\*ThrottleGiveUpError\) NonRetryable
+
+	func (e *ThrottleGiveUpError) NonRetryable() bool
+
+NonRetryable returns true so no retry loop re\-enters an abandoned turn.
+
+<a name="ThrottleGiveUpError.UserMessage"></a>
+### func \(\*ThrottleGiveUpError\) UserMessage
+
+	func (e *ThrottleGiveUpError) UserMessage() string
+
+UserMessage renders the D8 wording: provider, waited duration, next step. Mirrors QuotaResetError.UserMessage \(errors\_quota.go\).
 
 <a name="TiktokenTokenizer"></a>
 ## type TiktokenTokenizer

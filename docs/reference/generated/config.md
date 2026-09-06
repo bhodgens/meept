@@ -13,36 +13,75 @@ Package config provides configuration loading and validation for meept.
 ## Index
 
 - Constants
+- Variables
+- [func DeepMerge\(dst, src map\[string\]any\) map\[string\]any](<#DeepMerge>)
+- [func DefaultAlwaysFullTools\(\) \[\]string](<#DefaultAlwaysFullTools>)
 - [func EnsureDataDir\(cfg \*Config\) error](<#EnsureDataDir>)
-- [func ExpandEnvVars\(s string\) string](<#ExpandEnvVars>)
+- [func ExpandEnvVars\(s string\) \(string, error\)](<#ExpandEnvVars>)
 - [func LoadJSON5\(path string, v any\) error](<#LoadJSON5>)
 - [func LoadJSON5WithDefault\(path string, v any\) error](<#LoadJSON5WithDefault>)
+- [func NormalizeAgentGuardsDefaults\(g \*AgentGuardsConfig\)](<#NormalizeAgentGuardsDefaults>)
+- [func NormalizeContextDiscoveryDefaults\(c \*ContextDiscoveryConfig\)](<#NormalizeContextDiscoveryDefaults>)
+- [func NormalizeEvolverDefaults\(e \*SkillsEvolverConfig\) error](<#NormalizeEvolverDefaults>)
+- [func NormalizeFailurePolicyDefaults\(f \*FailurePolicyConfig\)](<#NormalizeFailurePolicyDefaults>)
+- [func NormalizeQuotaRetryDefaults\(q \*QuotaRetryConfig\)](<#NormalizeQuotaRetryDefaults>)
+- [func NormalizeRuntimeDefaults\(rc \*RuntimeConfig\)](<#NormalizeRuntimeDefaults>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
+- [func SaveACPAgents\(path string, cfg \*ACPAgentsConfig\) error](<#SaveACPAgents>)
 - [func SaveMCPConfig\(path string, cfg \*MCPServersConfig\) error](<#SaveMCPConfig>)
 - [func StripJSON5Comments\(s string\) string](<#StripJSON5Comments>)
 - [func UnmarshalJSON5\(data \[\]byte, v any\) error](<#UnmarshalJSON5>)
+- [type ACPAgentEntry](<#ACPAgentEntry>)
+- [type ACPAgentsConfig](<#ACPAgentsConfig>)
+  - [func LoadACPAgents\(path string\) \(\*ACPAgentsConfig, error\)](<#LoadACPAgents>)
+- [type ACPConfig](<#ACPConfig>)
+  - [func \(c \*ACPConfig\) Validate\(\) error](<#ACPConfig.Validate>)
 - [type AIInfraConfig](<#AIInfraConfig>)
 - [type ASTConfig](<#ASTConfig>)
+- [type AdapterEntry](<#AdapterEntry>)
+- [type AdapterRegistry](<#AdapterRegistry>)
+- [type AgentBackoffConfig](<#AgentBackoffConfig>)
+- [type AgentBudgetConfig](<#AgentBudgetConfig>)
+- [type AgentBudgetPhasesConfig](<#AgentBudgetPhasesConfig>)
+- [type AgentBudgetThresholds](<#AgentBudgetThresholds>)
 - [type AgentCompactionConfig](<#AgentCompactionConfig>)
 - [type AgentCompressionConfig](<#AgentCompressionConfig>)
 - [type AgentConfig](<#AgentConfig>)
+- [type AgentGuardsConfig](<#AgentGuardsConfig>)
 - [type AgentLintConfig](<#AgentLintConfig>)
+- [type AgentParallelToolConfig](<#AgentParallelToolConfig>)
 - [type AgentQueuesConfig](<#AgentQueuesConfig>)
 - [type AgentReflectionConfig](<#AgentReflectionConfig>)
+- [type AgentRetryConfig](<#AgentRetryConfig>)
+- [type AgentStateTrackingConfig](<#AgentStateTrackingConfig>)
+- [type AgentToolProfileConfig](<#AgentToolProfileConfig>)
+- [type AgentToolsConfig](<#AgentToolsConfig>)
+  - [func \(c \*AgentToolsConfig\) Validate\(\) error](<#AgentToolsConfig.Validate>)
+- [type AgentWorkerPoolConfig](<#AgentWorkerPoolConfig>)
 - [type AgentsConfig](<#AgentsConfig>)
 - [type AmbientExtractionConfig](<#AmbientExtractionConfig>)
 - [type AnalyticsConfig](<#AnalyticsConfig>)
+- [type BackupConfig](<#BackupConfig>)
+  - [func DefaultBackupConfig\(\) BackupConfig](<#DefaultBackupConfig>)
+  - [func \(c \*BackupConfig\) IsValidated\(\) bool](<#BackupConfig.IsValidated>)
+  - [func \(c \*BackupConfig\) Validate\(\) error](<#BackupConfig.Validate>)
 - [type BotsConfig](<#BotsConfig>)
+- [type BrowserConfig](<#BrowserConfig>)
+  - [func \(c BrowserConfig\) HeadlessEnabled\(\) bool](<#BrowserConfig.HeadlessEnabled>)
 - [type BudgetConfig](<#BudgetConfig>)
+- [type BwrapRuntimeConfig](<#BwrapRuntimeConfig>)
 - [type CacheConfig](<#CacheConfig>)
 - [type CalendarConfig](<#CalendarConfig>)
 - [type ClusterConfig](<#ClusterConfig>)
   - [func DefaultClusterConfig\(\) ClusterConfig](<#DefaultClusterConfig>)
+- [type ClusterDispatchConfig](<#ClusterDispatchConfig>)
 - [type ClusterGitConfig](<#ClusterGitConfig>)
 - [type ClusterGossipConfig](<#ClusterGossipConfig>)
 - [type ClusterNetworkConfig](<#ClusterNetworkConfig>)
 - [type ClusterQueueConfig](<#ClusterQueueConfig>)
+- [type ClusterResourcesConfig](<#ClusterResourcesConfig>)
 - [type ClusterSecurityConfig](<#ClusterSecurityConfig>)
+- [type ClusterWorkspaceConfig](<#ClusterWorkspaceConfig>)
 - [type CodeIntelConfig](<#CodeIntelConfig>)
 - [type CompactionConfig](<#CompactionConfig>)
 - [type Config](<#Config>)
@@ -51,20 +90,71 @@ Package config provides configuration loading and validation for meept.
   - [func LoadDefault\(\) \(\*Config, error\)](<#LoadDefault>)
   - [func LoadJSON5Config\(path string\) \(\*Config, error\)](<#LoadJSON5Config>)
   - [func \(c \*Config\) ChatTimeout\(\) time.Duration](<#Config.ChatTimeout>)
+  - [func \(c \*Config\) InteractiveWindow\(\) time.Duration](<#Config.InteractiveWindow>)
   - [func \(c \*Config\) ShutdownTimeout\(\) time.Duration](<#Config.ShutdownTimeout>)
+  - [func \(c \*Config\) ValidateAll\(\) error](<#Config.ValidateAll>)
+- [type ConfigSyncConfig](<#ConfigSyncConfig>)
+  - [func DefaultConfigSyncConfig\(\) ConfigSyncConfig](<#DefaultConfigSyncConfig>)
+  - [func \(c \*ConfigSyncConfig\) IsValidated\(\) bool](<#ConfigSyncConfig.IsValidated>)
+  - [func \(c \*ConfigSyncConfig\) Validate\(\) error](<#ConfigSyncConfig.Validate>)
+- [type ConfigSyncError](<#ConfigSyncError>)
+  - [func \(e \*ConfigSyncError\) Error\(\) string](<#ConfigSyncError.Error>)
+  - [func \(e \*ConfigSyncError\) Unwrap\(\) error](<#ConfigSyncError.Unwrap>)
+- [type ConfigSyncer](<#ConfigSyncer>)
+  - [func NewConfigSyncer\(cfg ConfigSyncConfig, nodeID, baseDir string, logger \*slog.Logger\) \(\*ConfigSyncer, error\)](<#NewConfigSyncer>)
+  - [func \(s \*ConfigSyncer\) LastAppliedCommit\(\) string](<#ConfigSyncer.LastAppliedCommit>)
+  - [func \(s \*ConfigSyncer\) LastCommitHash\(\) string](<#ConfigSyncer.LastCommitHash>)
+  - [func \(s \*ConfigSyncer\) NodeID\(\) string](<#ConfigSyncer.NodeID>)
+  - [func \(s \*ConfigSyncer\) PullSchedule\(\) time.Duration](<#ConfigSyncer.PullSchedule>)
+  - [func \(s \*ConfigSyncer\) PushLocalChanges\(ctx context.Context, message string\) error](<#ConfigSyncer.PushLocalChanges>)
+  - [func \(s \*ConfigSyncer\) RegisterReloadHook\(path string, fn ReloadFunc\)](<#ConfigSyncer.RegisterReloadHook>)
+  - [func \(s \*ConfigSyncer\) ReloadRegistry\(\) \*ReloadRegistry](<#ConfigSyncer.ReloadRegistry>)
+  - [func \(s \*ConfigSyncer\) RepoURL\(\) string](<#ConfigSyncer.RepoURL>)
+  - [func \(s \*ConfigSyncer\) SetBaseDir\(baseDir string\)](<#ConfigSyncer.SetBaseDir>)
+  - [func \(s \*ConfigSyncer\) Start\(ctx context.Context\)](<#ConfigSyncer.Start>)
+  - [func \(s \*ConfigSyncer\) Status\(\) SyncStatus](<#ConfigSyncer.Status>)
+  - [func \(s \*ConfigSyncer\) Stop\(\)](<#ConfigSyncer.Stop>)
+- [type ContextDiscoveryConfig](<#ContextDiscoveryConfig>)
 - [type DaemonConfig](<#DaemonConfig>)
 - [type DetectionConfig](<#DetectionConfig>)
 - [type DistillationConfig](<#DistillationConfig>)
 - [type DistributedMemoryConfig](<#DistributedMemoryConfig>)
 - [type DockerRuntimeConfig](<#DockerRuntimeConfig>)
+- [type EgressConfig](<#EgressConfig>)
+- [type EgressRuleConfig](<#EgressRuleConfig>)
 - [type EmbeddingConfig](<#EmbeddingConfig>)
 - [type EmployeesAuditConfig](<#EmployeesAuditConfig>)
+  - [func \(c \*EmployeesAuditConfig\) Validate\(\) error](<#EmployeesAuditConfig.Validate>)
 - [type EmployeesAutoPauseConfig](<#EmployeesAutoPauseConfig>)
 - [type EmployeesConfig](<#EmployeesConfig>)
+  - [func \(c \*EmployeesConfig\) Validate\(\) error](<#EmployeesConfig.Validate>)
+- [type EmployeesDefaultsConfig](<#EmployeesDefaultsConfig>)
+- [type EmployeesGateConfig](<#EmployeesGateConfig>)
+- [type EnvPolicyConfig](<#EnvPolicyConfig>)
 - [type EpisodicConfig](<#EpisodicConfig>)
 - [type EpistemicConfig](<#EpistemicConfig>)
+- [type ErrEnvVarCycle](<#ErrEnvVarCycle>)
+  - [func \(e ErrEnvVarCycle\) Error\(\) string](<#ErrEnvVarCycle.Error>)
+  - [func \(ErrEnvVarCycle\) Is\(err error\) bool](<#ErrEnvVarCycle.Is>)
 - [type ErrorsConfig](<#ErrorsConfig>)
+- [type EvalConfig](<#EvalConfig>)
+  - [func \(c \*EvalConfig\) Validate\(\) error](<#EvalConfig.Validate>)
+- [type FailurePolicyConfig](<#FailurePolicyConfig>)
+  - [func \(f \*FailurePolicyConfig\) GetBaseQuota402Extra\(\) time.Duration](<#FailurePolicyConfig.GetBaseQuota402Extra>)
+  - [func \(f \*FailurePolicyConfig\) GetBaseThrottle\(\) time.Duration](<#FailurePolicyConfig.GetBaseThrottle>)
+  - [func \(f \*FailurePolicyConfig\) GetHorizon\(\) time.Duration](<#FailurePolicyConfig.GetHorizon>)
+  - [func \(f \*FailurePolicyConfig\) GetPacing\(\) PacingConfig](<#FailurePolicyConfig.GetPacing>)
+  - [func \(f \*FailurePolicyConfig\) GetPollFloor\(\) time.Duration](<#FailurePolicyConfig.GetPollFloor>)
+  - [func \(f \*FailurePolicyConfig\) GetShortRetries\(\) int](<#FailurePolicyConfig.GetShortRetries>)
 - [type FileWatcherHookConfig](<#FileWatcherHookConfig>)
+- [type GitCheckout](<#GitCheckout>)
+  - [func NewGitCheckout\(repoURL, checkoutDir string, logger \*slog.Logger\) \(\*GitCheckout, error\)](<#NewGitCheckout>)
+  - [func \(g \*GitCheckout\) CommitAndPush\(\_ context.Context, message string\) error](<#GitCheckout.CommitAndPush>)
+  - [func \(g \*GitCheckout\) GetLatestCommit\(\) \(string, error\)](<#GitCheckout.GetLatestCommit>)
+  - [func \(g \*GitCheckout\) IsDirty\(\) \(bool, error\)](<#GitCheckout.IsDirty>)
+  - [func \(g \*GitCheckout\) Path\(\) string](<#GitCheckout.Path>)
+  - [func \(g \*GitCheckout\) Pull\(\_ context.Context\) \(commitHash string, changed bool, err error\)](<#GitCheckout.Pull>)
+  - [func \(g \*GitCheckout\) Repo\(\) \*git.Repository](<#GitCheckout.Repo>)
 - [type HTTPHookConfig](<#HTTPHookConfig>)
 - [type HTTPTransportConfig](<#HTTPTransportConfig>)
 - [type HooksConfig](<#HooksConfig>)
@@ -78,20 +168,34 @@ Package config provides configuration loading and validation for meept.
 - [type LLMSimpleFeatureConfig](<#LLMSimpleFeatureConfig>)
 - [type LSPConfig](<#LSPConfig>)
 - [type LSPServerConfig](<#LSPServerConfig>)
+- [type LearningCaptureConfig](<#LearningCaptureConfig>)
+- [type LearningConfig](<#LearningConfig>)
+- [type LearningRetentionConfig](<#LearningRetentionConfig>)
+- [type LearningTrainingConfig](<#LearningTrainingConfig>)
 - [type MCPConfig](<#MCPConfig>)
 - [type MCPServersConfig](<#MCPServersConfig>)
   - [func LoadMCPConfig\(path string\) \(\*MCPServersConfig, error\)](<#LoadMCPConfig>)
   - [func LoadMCPConfigDefault\(\) \(\*MCPServersConfig, error\)](<#LoadMCPConfigDefault>)
+- [type MediaConfig](<#MediaConfig>)
+  - [func DefaultMediaConfig\(\) MediaConfig](<#DefaultMediaConfig>)
+  - [func EffectiveMediaConfig\(cfg MediaConfig\) MediaConfig](<#EffectiveMediaConfig>)
 - [type MemoryBackend](<#MemoryBackend>)
 - [type MemoryCachingConfig](<#MemoryCachingConfig>)
 - [type MemoryCategoryLimit](<#MemoryCategoryLimit>)
 - [type MemoryConfig](<#MemoryConfig>)
   - [func \(c \*MemoryConfig\) GetLimitsForProject\(projectPath string\) MemoryLimitsConfig](<#MemoryConfig.GetLimitsForProject>)
+- [type MemoryDistillConfig](<#MemoryDistillConfig>)
 - [type MemoryExpirationConfig](<#MemoryExpirationConfig>)
 - [type MemoryLimitsConfig](<#MemoryLimitsConfig>)
 - [type MemorySecurityConfig](<#MemorySecurityConfig>)
+- [type MemoryUsefulnessConfig](<#MemoryUsefulnessConfig>)
 - [type MemoryVersioningConfig](<#MemoryVersioningConfig>)
 - [type MemvidConfig](<#MemvidConfig>)
+- [type MergeResult](<#MergeResult>)
+- [type Merger](<#Merger>)
+  - [func NewMerger\(baseDir, checkoutDir, nodeID string, l logger\) \*Merger](<#NewMerger>)
+  - [func \(m \*Merger\) FileWouldChange\(path string\) \(bool, error\)](<#Merger.FileWouldChange>)
+  - [func \(m \*Merger\) Merge\(commitHash string\) \(\*MergeResult, error\)](<#Merger.Merge>)
 - [type Model](<#Model>)
 - [type ModelParams](<#ModelParams>)
 - [type ModelPreset](<#ModelPreset>)
@@ -99,17 +203,24 @@ Package config provides configuration loading and validation for meept.
   - [func LoadModelsConfig\(path string\) \(\*ModelsConfig, error\)](<#LoadModelsConfig>)
   - [func LoadModelsConfigDefault\(\) \(\*ModelsConfig, error\)](<#LoadModelsConfigDefault>)
 - [type MultiAgentConfig](<#MultiAgentConfig>)
+- [type MultiUserConfig](<#MultiUserConfig>)
 - [type NativeConfig](<#NativeConfig>)
 - [type NotificationsConfig](<#NotificationsConfig>)
 - [type OAuthConfig](<#OAuthConfig>)
 - [type OAuthProviderEntry](<#OAuthProviderEntry>)
 - [type OrchestratorConfig](<#OrchestratorConfig>)
 - [type PTYConfig](<#PTYConfig>)
+- [type PacingConfig](<#PacingConfig>)
 - [type ParakeetConfig](<#ParakeetConfig>)
+- [type PeerSyncConfig](<#PeerSyncConfig>)
+  - [func DefaultPeerSyncConfig\(\) PeerSyncConfig](<#DefaultPeerSyncConfig>)
+  - [func \(c \*PeerSyncConfig\) IsValidated\(\) bool](<#PeerSyncConfig.IsValidated>)
+  - [func \(c \*PeerSyncConfig\) Validate\(\) error](<#PeerSyncConfig.Validate>)
 - [type PersonalityConfig](<#PersonalityConfig>)
 - [type PiperTTSConfig](<#PiperTTSConfig>)
 - [type PlansApprovalConfig](<#PlansApprovalConfig>)
 - [type PlansConfig](<#PlansConfig>)
+  - [func \(c \*PlansConfig\) Validate\(\) error](<#PlansConfig.Validate>)
 - [type PlansConfirmationConfig](<#PlansConfirmationConfig>)
 - [type PlansStorageConfig](<#PlansStorageConfig>)
 - [type PlansThresholdConfig](<#PlansThresholdConfig>)
@@ -121,21 +232,41 @@ Package config provides configuration loading and validation for meept.
   - [func \(p \*PresetConfig\) ApplyPreset\(model \*Model, presetName string\) error](<#PresetConfig.ApplyPreset>)
   - [func \(p \*PresetConfig\) GetPreset\(name string\) \(\*ModelPreset, error\)](<#PresetConfig.GetPreset>)
   - [func \(p \*PresetConfig\) ListPresets\(\) \[\]string](<#PresetConfig.ListPresets>)
+- [type ProjectRecentConfig](<#ProjectRecentConfig>)
 - [type ProjectsConfig](<#ProjectsConfig>)
 - [type Provider](<#Provider>)
 - [type ProviderOptions](<#ProviderOptions>)
 - [type QAgentConfig](<#QAgentConfig>)
 - [type QueueConfig](<#QueueConfig>)
+- [type QuotaRetryConfig](<#QuotaRetryConfig>)
+  - [func \(q \*QuotaRetryConfig\) GetDefaultEstimate\(\) time.Duration](<#QuotaRetryConfig.GetDefaultEstimate>)
+  - [func \(q \*QuotaRetryConfig\) GetDeferCheckInterval\(\) time.Duration](<#QuotaRetryConfig.GetDeferCheckInterval>)
+  - [func \(q \*QuotaRetryConfig\) GetEnabled\(\) bool](<#QuotaRetryConfig.GetEnabled>)
+  - [func \(q \*QuotaRetryConfig\) GetMaxWait\(\) time.Duration](<#QuotaRetryConfig.GetMaxWait>)
 - [type RPCTransportConfig](<#RPCTransportConfig>)
 - [type ReasoningGlobalConfig](<#ReasoningGlobalConfig>)
 - [type RecordingConfig](<#RecordingConfig>)
+- [type ReflectionCollectorConfig](<#ReflectionCollectorConfig>)
+- [type ReloadFunc](<#ReloadFunc>)
+- [type ReloadRegistry](<#ReloadRegistry>)
+  - [func NewReloadRegistry\(\) \*ReloadRegistry](<#NewReloadRegistry>)
+  - [func \(r \*ReloadRegistry\) Len\(path string\) int](<#ReloadRegistry.Len>)
+  - [func \(r \*ReloadRegistry\) Register\(path string, fn ReloadFunc\)](<#ReloadRegistry.Register>)
+  - [func \(r \*ReloadRegistry\) RegisteredHooks\(\) \[\]string](<#ReloadRegistry.RegisteredHooks>)
+  - [func \(r \*ReloadRegistry\) Trigger\(path string, commitHash string\)](<#ReloadRegistry.Trigger>)
+- [type ResolverConfig](<#ResolverConfig>)
 - [type ReviewConfig](<#ReviewConfig>)
 - [type RuntimeConfig](<#RuntimeConfig>)
+- [type SSRFConfig](<#SSRFConfig>)
 - [type STTConfig](<#STTConfig>)
 - [type SafetyConfig](<#SafetyConfig>)
 - [type SandboxConfig](<#SandboxConfig>)
 - [type SchedulerConfig](<#SchedulerConfig>)
+- [type SecretSources](<#SecretSources>)
+- [type SecretsConfig](<#SecretsConfig>)
+- [type SecretsProxyConfig](<#SecretsProxyConfig>)
 - [type SecurityConfig](<#SecurityConfig>)
+  - [func \(c \*SecurityConfig\) Validate\(\) error](<#SecurityConfig.Validate>)
 - [type SelfImproveConfig](<#SelfImproveConfig>)
 - [type SessionConfig](<#SessionConfig>)
 - [type ShadowAdaptersConfig](<#ShadowAdaptersConfig>)
@@ -148,9 +279,13 @@ Package config provides configuration loading and validation for meept.
 - [type ShadowQualityConfig](<#ShadowQualityConfig>)
 - [type ShadowShadowingConfig](<#ShadowShadowingConfig>)
 - [type ShadowTeacherConfig](<#ShadowTeacherConfig>)
+- [type ShellPermissionsConfig](<#ShellPermissionsConfig>)
 - [type SkillsConfig](<#SkillsConfig>)
 - [type SkillsEvolverConfig](<#SkillsEvolverConfig>)
+- [type SkillsStateConfig](<#SkillsStateConfig>)
+- [type SkillsWikiConfig](<#SkillsWikiConfig>)
 - [type SyncConfig](<#SyncConfig>)
+- [type SyncStatus](<#SyncStatus>)
 - [type TTSBehaviorConfig](<#TTSBehaviorConfig>)
 - [type TTSConfig](<#TTSConfig>)
 - [type TTSPlaybackConfig](<#TTSPlaybackConfig>)
@@ -162,9 +297,12 @@ Package config provides configuration loading and validation for meept.
 - [type TelegramConfig](<#TelegramConfig>)
 - [type TestHarnessConfig](<#TestHarnessConfig>)
 - [type ToolingConfig](<#ToolingConfig>)
+- [type TranscriptConfig](<#TranscriptConfig>)
+  - [func DefaultTranscriptConfig\(\) TranscriptConfig](<#DefaultTranscriptConfig>)
 - [type TransportConfig](<#TransportConfig>)
 - [type UploadsConfig](<#UploadsConfig>)
 - [type ValidationConfig](<#ValidationConfig>)
+- [type VerificationDefaults](<#VerificationDefaults>)
 - [type WatchdogConfig](<#WatchdogConfig>)
 - [type WebConfig](<#WebConfig>)
 - [type WhisperConfig](<#WhisperConfig>)
@@ -202,6 +340,11 @@ Package config provides configuration loading and validation for meept.
 	    AgentIDArchitect = "architect"
 	    AgentIDSkeptic   = "skeptic"
 	    AgentIDLibrarian = "librarian"
+	
+	    // Media specialists (image/video generation + image identification).
+	    AgentIDImageGen = "image-gen"
+	    AgentIDVideoGen = "video-gen"
+	    AgentIDImageID  = "image-id"
 	)
 
 <a name="AgentRoleDispatcher"></a>Agent role constants used for role validation and assignment.
@@ -214,6 +357,104 @@ Package config provides configuration loading and validation for meept.
 	    AgentRoleBot            = "bot"
 	)
 
+<a name="DefaultQuotaRetryMaxWait"></a>Defaults for llm.quota\_retry \(quota\-reset\-resilience plan leaf 02\).
+
+	const (
+	    DefaultQuotaRetryMaxWait            = 24 * time.Hour
+	    DefaultQuotaRetryDefaultEstimate    = time.Hour
+	    DefaultQuotaRetryDeferCheckInterval = 10 * time.Minute
+	)
+
+<a name="DefaultFailurePolicyHorizon"></a>Defaults for llm.failure\_policy \(tree 02 leaf 02, DECISIONS.md D5/D8\).
+
+	const (
+	    DefaultFailurePolicyHorizon           = 24 * time.Hour
+	    DefaultFailurePolicyBaseThrottle      = 30 * time.Second
+	    DefaultFailurePolicyBaseQuota402Extra = 5 * time.Minute
+	    DefaultFailurePolicyPollFloor         = time.Hour
+	    DefaultFailurePolicyShortRetries      = 3
+	
+	    DefaultPacingEnabled       = true
+	    DefaultPacingTarget429Hour = 1
+	    DefaultPacingMinInterval   = time.Second
+	    DefaultPacingMaxInterval   = 30 * time.Second
+	)
+
+<a name="DefaultCfgNoProgressWarnAt"></a>Defaults for \[agent.guards\] — keep in sync with agent.DefaultGuardConfig\(\).
+
+	const (
+	    DefaultCfgNoProgressWarnAt     = 3
+	    DefaultCfgNoProgressVetoAt     = 5
+	    DefaultCfgGracefulAfterVetoes  = 3
+	    DefaultCfgRollbackWindow       = 10
+	    DefaultCfgReasoningTokenCap    = 16384
+	    DefaultCfgReasoningStreakTurns = 3
+	)
+
+<a name="DefaultContextDiscoveryInterval"></a>Defaults for llm.context\_discovery \(tree 05 leaf 01\).
+
+	const (
+	    DefaultContextDiscoveryInterval = 6 * time.Hour
+	)
+
+<a name="DefaultEvolverPlanDir"></a>DefaultEvolverPlanDir is the user\-scoped sink where machine\-originated \(evolver\) plans land. Machine plans must never depend on the daemon's arbitrary CWD, and must never pollute a repo's docs/plans \(which is reserved for human\-authored plans\).
+
+	const DefaultEvolverPlanDir = "~/.meept/plans/evolver"
+
+## Variables
+
+<a name="ErrGitConflict"></a>Sentinel errors for the config sync subsystem.
+
+	var (
+	    ErrGitConflict     = fmt.Errorf("config sync: git conflict (manual resolution required)")
+	    ErrConfigInvalid   = fmt.Errorf("config sync: invalid JSON5 syntax")
+	    ErrReloadFailed    = fmt.Errorf("config sync: hot-reload failed")
+	    ErrRepoUnreachable = fmt.Errorf("config sync: git repo unreachable")
+	    ErrCheckoutDirty   = fmt.Errorf("config sync: working tree has uncommitted changes")
+	)
+
+<a name="DefaultEnvAllowlist"></a>DefaultEnvAllowlist is the default extra\-allowlist applied in allowlist mode \(on top of runtime.BaseEnvKeys\): variables commonly needed by shells that carry no credential value.
+
+	var DefaultEnvAllowlist = []string{"SSH_AUTH_SOCK", "DISPLAY"}
+
+<a name="DefaultEnvDenyGlobs"></a>DefaultEnvDenyGlobs is the default set of env\-name deny globs applied when DenyGlobs is empty: common secret\-ish suffixes/patterns.
+
+	var DefaultEnvDenyGlobs = []string{"*KEY*", "*TOKEN*", "*SECRET*", "*PASSWORD*", "*CREDENTIAL*"}
+
+<a name="ErrBackupInvalid"></a>ErrBackupInvalid is returned when BackupConfig validation fails.
+
+	var ErrBackupInvalid = fmt.Errorf("backup config is invalid")
+
+<a name="ErrConfigSyncInvalid"></a>
+
+	var ErrConfigSyncInvalid = fmt.Errorf("config sync config is invalid")
+
+<a name="ErrPushNoCheckout"></a>ErrPushNoCheckout is returned when PushLocalChanges is invoked on a ConfigSyncer whose underlying GitCheckout is nil \(e.g. cluster disabled or sync not yet started\). We avoid reusing ErrRepoUnreachable here so callers can distinguish "never configured" from "transient network failure"; both ultimately wrap ErrRepoUnreachable for operator\-facing messages via errors.Is.
+
+	var ErrPushNoCheckout = errors.New("config sync: git checkout not initialized")
+
+<a name="DeepMerge"></a>
+## func DeepMerge
+
+	func DeepMerge(dst, src map[string]any) map[string]any
+
+DeepMerge returns a new map that merges src on top of dst:
+
+- Object values are recursively merged.
+- Array and scalar values from src replace the corresponding dst value.
+- A JSON null in src deletes the corresponding key from dst.
+
+dst is not mutated; the returned map shares sub\-maps only at unmodified keys.
+
+Implements RFC 7396 JSON Merge Patch semantics.
+
+<a name="DefaultAlwaysFullTools"></a>
+## func DefaultAlwaysFullTools
+
+	func DefaultAlwaysFullTools() []string
+
+DefaultAlwaysFullTools returns the curated core\-tool list that keeps its full parameter schema under indexed schema mode. Returns a fresh copy on every call so callers may mutate the result freely.
+
 <a name="EnsureDataDir"></a>
 ## func EnsureDataDir
 
@@ -224,9 +465,9 @@ EnsureDataDir creates the data directory if it doesn't exist.
 <a name="ExpandEnvVars"></a>
 ## func ExpandEnvVars
 
-	func ExpandEnvVars(s string) string
+	func ExpandEnvVars(s string) (string, error)
 
-ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\). Implements recursion depth limiting to detect cyclic env var references.
+ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\). Implements recursion depth limiting to detect cyclic env var references. Returns ErrEnvVarCycle when a cycle is detected.
 
 <a name="LoadJSON5"></a>
 ## func LoadJSON5
@@ -242,12 +483,61 @@ LoadJSON5 reads a JSON5 file, expands environment variables, standardizes to JSO
 
 LoadJSON5WithDefault loads JSON5 from path, or returns default if not found.
 
+<a name="NormalizeAgentGuardsDefaults"></a>
+## func NormalizeAgentGuardsDefaults
+
+	func NormalizeAgentGuardsDefaults(g *AgentGuardsConfig)
+
+NormalizeAgentGuardsDefaults fills ship\-on defaults for zero\-valued fields.
+
+<a name="NormalizeContextDiscoveryDefaults"></a>
+## func NormalizeContextDiscoveryDefaults
+
+	func NormalizeContextDiscoveryDefaults(c *ContextDiscoveryConfig)
+
+NormalizeContextDiscoveryDefaults clamps invalid context\_discovery values to defaults: negative durations become the field default; zero means unset and takes the default. Idempotent on valid values.
+
+<a name="NormalizeEvolverDefaults"></a>
+## func NormalizeEvolverDefaults
+
+	func NormalizeEvolverDefaults(e *SkillsEvolverConfig) error
+
+NormalizeEvolverDefaults normalizes the skills.evolver section: an empty PlanDir resolves to the user\-scoped sink \(\~\-expanded\), a \~\-prefixed PlanDir is expanded, and a relative PlanDir is rejected \(machine plan landing must not depend on the daemon's arbitrary CWD\). Mirrors the load\-boundary normalization contract of NormalizeQuotaRetryDefaults.
+
+<a name="NormalizeFailurePolicyDefaults"></a>
+## func NormalizeFailurePolicyDefaults
+
+	func NormalizeFailurePolicyDefaults(f *FailurePolicyConfig)
+
+NormalizeFailurePolicyDefaults clamps invalid failure\_policy values to defaults: negative durations become the field default, zero means unset and takes the default; non\-positive ShortRetries takes the default; pacing intervals normalize the same way and max \< min lifts max to min. Idempotent on valid values. Pacing.Enabled is left as\-is: the default\-on value is applied by DefaultConfig\(\) \(which load unmarshal runs onto\), and an explicit pacing.enabled = false must survive every load.
+
+<a name="NormalizeQuotaRetryDefaults"></a>
+## func NormalizeQuotaRetryDefaults
+
+	func NormalizeQuotaRetryDefaults(q *QuotaRetryConfig)
+
+NormalizeQuotaRetryDefaults clamps invalid quota\_retry values to defaults: negative durations \(JSON5 numeric values\) become the field default; zero durations mean unset and take the default. Enabled is left as\-is — the default\-true behavior is provided by DefaultConfig\(\), and Normalize is safe to call repeatedly \(idempotent on valid values\).
+
+<a name="NormalizeRuntimeDefaults"></a>
+## func NormalizeRuntimeDefaults
+
+	func NormalizeRuntimeDefaults(rc *RuntimeConfig)
+
+NormalizeRuntimeDefaults fills safe defaults for [runtime](<https://pkg.go.dev/runtime/>).env\_policy: empty Mode becomes "allowlist"; empty DenyGlobs become the standard credential\-glob set; empty Allowlist gets a small non\-secret convenience set. Explicit user values are preserved untouched.
+
 <a name="ParseLogLevel"></a>
 ## func ParseLogLevel
 
 	func ParseLogLevel(level string) slog.Level
 
 ParseLogLevel converts a string log level to slog.Level.
+
+<a name="SaveACPAgents"></a>
+## func SaveACPAgents
+
+	func SaveACPAgents(path string, cfg *ACPAgentsConfig) error
+
+SaveACPAgents writes the ACP agent catalog atomically. Writes to path\+".tmp" then renames into place \(POSIX atomic\).
 
 <a name="SaveMCPConfig"></a>
 ## func SaveMCPConfig
@@ -268,7 +558,59 @@ StripJSON5Comments converts JSON5 to strict JSON, handling comments, trailing co
 
 	func UnmarshalJSON5(data []byte, v any) error
 
-UnmarshalJSON5 parses JSON5\-formatted bytes into a struct. Unlike LoadJSON5, this does NOT expand environment variables. It also handles Go\-style duration literals \(e.g. 30s, 2m\) and Go duration string values \(e.g. "30s"\) in JSON.
+UnmarshalJSON5 parses JSON5\-formatted bytes into a struct. Unlike LoadJSON5, this does NOT expand environment variables. It also handles Go duration string values \(e.g. "30s"\) in JSON.
+
+<a name="ACPAgentEntry"></a>
+## type ACPAgentEntry
+
+ACPAgentEntry is one agent in the ACP catalog.
+
+	type ACPAgentEntry struct {
+	    ID          string            `json:"id"`
+	    Description string            `json:"description,omitempty"`
+	    Command     []string          `json:"command"`
+	    Env         map[string]string `json:"env,omitempty"`
+	    Cwd         string            `json:"cwd,omitempty"`
+	    DefaultMode string            `json:"default_mode,omitempty"`
+	    Enabled     bool              `json:"enabled"`
+	}
+
+<a name="ACPAgentsConfig"></a>
+## type ACPAgentsConfig
+
+ACPAgentsConfig is the acp\_agents.json5 catalog structure.
+
+	type ACPAgentsConfig struct {
+	    Agents []ACPAgentEntry `json:"agents"`
+	}
+
+<a name="LoadACPAgents"></a>
+### func LoadACPAgents
+
+	func LoadACPAgents(path string) (*ACPAgentsConfig, error)
+
+LoadACPAgents loads ACP agent catalog configuration from a JSON5 file. If the file doesn't exist, returns an empty config \(not an error\).
+
+<a name="ACPConfig"></a>
+## type ACPConfig
+
+ACPConfig holds Agent Client Protocol client settings.
+
+	type ACPConfig struct {
+	    Enabled        bool   `json:"enabled"         toml:"enabled"`
+	    AgentsFile     string `json:"agents_file"     toml:"agents_file"`
+	    DialTimeout    int    `json:"dial_timeout"    toml:"dial_timeout"`
+	    CallTimeout    int    `json:"call_timeout"    toml:"call_timeout"`
+	    MaxAgents      int    `json:"max_agents"      toml:"max_agents"`
+	    PermissionMode string `json:"permission_mode" toml:"permission_mode"`
+	}
+
+<a name="ACPConfig.Validate"></a>
+### func \(\*ACPConfig\) Validate
+
+	func (c *ACPConfig) Validate() error
+
+Validate checks the \[acp\] section. Invalid timeouts, agent caps, or permission modes fail fast at config load.
 
 <a name="AIInfraConfig"></a>
 ## type AIInfraConfig
@@ -298,6 +640,80 @@ ASTConfig holds AST parsing settings.
 	    CacheMaxSize int `json:"cache_max_size" toml:"cache_max_size"`
 	    // CacheTTLMinutes is how long cached results remain valid
 	    CacheTTLMinutes int `json:"cache_ttl_minutes" toml:"cache_ttl_minutes"`
+	}
+
+<a name="AdapterEntry"></a>
+## type AdapterEntry
+
+AdapterEntry describes a single trained adapter.
+
+	type AdapterEntry struct {
+	    ID          string `json:"id"` // "code-lfm2.5-8b-v1"
+	    Domain      string `json:"domain"`
+	    Model       string `json:"model"` // "lfm2.5-8b"
+	    Path        string `json:"path"`  // "~/.meept/adapters/code/lfm2.5-8b-v1"
+	    CreatedAt   string `json:"created_at"`
+	    TrainingMD5 string `json:"training_md5"` // Dataset fingerprint
+	    Enabled     bool   `json:"enabled"`
+	}
+
+<a name="AdapterRegistry"></a>
+## type AdapterRegistry
+
+AdapterRegistry is the on\-disk registry of trained LoRA adapters.
+
+	type AdapterRegistry struct {
+	    Adapters    []AdapterEntry `json:"adapters"`
+	    Version     int            `json:"version"`
+	    GeneratedAt string         `json:"generated_at,omitempty"`
+	}
+
+<a name="AgentBackoffConfig"></a>
+## type AgentBackoffConfig
+
+AgentBackoffConfig holds per\-operation backoff parameters. BaseDelay/MaxDelay are time.Duration: the JSON5 loader's duration preprocessing converts quoted "1s"\-style values to nanosecond integers for unmarshaling, and the TOML path accepts Go duration strings — a plain string field here broke the JSON5 write→reload round\-trip \(configui savepaths tests\).
+
+	type AgentBackoffConfig struct {
+	    BaseDelay  time.Duration `json:"base_delay"  toml:"base_delay"` // e.g. "1s"
+	    MaxDelay   time.Duration `json:"max_delay"   toml:"max_delay"`  // e.g. "30s"
+	    Multiplier float64       `json:"multiplier"  toml:"multiplier"`
+	    Jitter     float64       `json:"jitter"      toml:"jitter"`
+	    Budget     int           `json:"budget"      toml:"budget"` // per-operation retry budget (0 = use DefaultBudget)
+	}
+
+<a name="AgentBudgetConfig"></a>
+## type AgentBudgetConfig
+
+AgentBudgetConfig configures hierarchical task/phase/turn token budgets.
+
+	type AgentBudgetConfig struct {
+	    Total             int                     `json:"total"              toml:"total"`          // Total task budget in tokens
+	    ReservedRatio     float64                 `json:"reserved_ratio"     toml:"reserved_ratio"` // Emergency reserve fraction (0.0-1.0)
+	    Phases            AgentBudgetPhasesConfig `json:"phases"             toml:"phases"`
+	    WarningThresholds AgentBudgetThresholds   `json:"warning_thresholds" toml:"warning_thresholds"`
+	}
+
+<a name="AgentBudgetPhasesConfig"></a>
+## type AgentBudgetPhasesConfig
+
+AgentBudgetPhasesConfig configures phase\-level budget allocation behavior.
+
+	type AgentBudgetPhasesConfig struct {
+	    Enabled      bool `json:"enabled"       toml:"enabled"`
+	    AutoAllocate bool `json:"auto_allocate" toml:"auto_allocate"` // Auto-distribute if not specified
+	    Carryover    bool `json:"carryover"     toml:"carryover"`     // Unused phase budget carries to next phase
+	    Borrowing    bool `json:"borrowing"     toml:"borrowing"`     // Allow phases to borrow from reserve
+	}
+
+<a name="AgentBudgetThresholds"></a>
+## type AgentBudgetThresholds
+
+AgentBudgetThresholds holds warning thresholds for each budget scope.
+
+	type AgentBudgetThresholds struct {
+	    Task  float64 `json:"task"  toml:"task"`  // default 0.7
+	    Phase float64 `json:"phase" toml:"phase"` // default 0.8
+	    Turn  float64 `json:"turn"  toml:"turn"`  // default 0.9
 	}
 
 <a name="AgentCompactionConfig"></a>
@@ -388,6 +804,41 @@ AgentConfig holds agent loop settings.
 	    Lint AgentLintConfig `json:"lint" toml:"lint"`
 	    // Compression holds prompt compression settings for tool outputs and conversation
 	    Compression AgentCompressionConfig `json:"compression" toml:"compression"`
+	    // WorkerPool configures the per-session AgentLoop worker pool.
+	    // When enabled, the daemon constructs an agent.Manager and a lazy
+	    // WorkerPool for session-scoped dispatch. Zero-value fields fall back
+	    // to daemon.DefaultWorkerPoolConfig() at wiring time.
+	    WorkerPool AgentWorkerPoolConfig `json:"worker_pool" toml:"worker_pool"`
+	    // Retry configures exponential backoff retry behavior for LLM, tool, and HTTP operations.
+	    Retry AgentRetryConfig `json:"retry" toml:"retry"`
+	    // StateTracking configures the agent state machine observability hooks.
+	    StateTracking AgentStateTrackingConfig `json:"state_tracking" toml:"state_tracking"`
+	    // Budget configures hierarchical task/phase/turn token budgets.
+	    Budget AgentBudgetConfig `json:"budget" toml:"budget"`
+	    // ParallelToolExec configures dependency-aware parallel tool execution.
+	    ParallelToolExec AgentParallelToolConfig `json:"parallel_tool_execution" toml:"parallel_tool_execution"`
+	    // Guards configures loop-safety guards (leaf 07): no-progress ladder,
+	    // duplicate-search rollback, reasoning-only watchdog. Zero values
+	    // normalize to ship-on defaults via NormalizeAgentGuardsDefaults.
+	    Guards AgentGuardsConfig `json:"guards" toml:"guards"`
+	    // Tools configures tool-call handling for the agent loop, including
+	    // grammar-constrained (GBNF) tool calling.
+	    Tools AgentToolsConfig `json:"tools" toml:"tools"`
+	}
+
+<a name="AgentGuardsConfig"></a>
+## type AgentGuardsConfig
+
+AgentGuardsConfig mirrors agent.GuardConfig for the \[agent.guards\] TOML section. It lives here because internal/config cannot import internal/agent \(the dependency points the other way\). Zero values mean "use default".
+
+	type AgentGuardsConfig struct {
+	    NoProgressWarnAt        int  `json:"no_progress_warn_at"         toml:"no_progress_warn_at"`
+	    NoProgressVetoAt        int  `json:"no_progress_veto_at"         toml:"no_progress_veto_at"`
+	    GracefulAfterVetoes     int  `json:"graceful_after_vetoes"       toml:"graceful_after_vetoes"`
+	    DuplicateSearchRollback bool `json:"duplicate_search_rollback"   toml:"duplicate_search_rollback"`
+	    RollbackWindow          int  `json:"rollback_window"             toml:"rollback_window"`
+	    ReasoningTokenCap       int  `json:"reasoning_token_cap"         toml:"reasoning_token_cap"`
+	    ReasoningStreakTurns    int  `json:"reasoning_streak_turns"      toml:"reasoning_streak_turns"`
 	}
 
 <a name="AgentLintConfig"></a>
@@ -406,6 +857,18 @@ AgentLintConfig holds linting and test runner settings.
 	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
 	    // MaxOutputLines limits the number of output lines captured
 	    MaxOutputLines int `json:"max_output_lines" toml:"max_output_lines"`
+	}
+
+<a name="AgentParallelToolConfig"></a>
+## type AgentParallelToolConfig
+
+AgentParallelToolConfig configures dependency\-aware parallel tool execution.
+
+	type AgentParallelToolConfig struct {
+	    Enabled         bool                              `json:"enabled"          toml:"enabled"`
+	    BaseParallelism int                               `json:"base_parallelism" toml:"base_parallelism"`
+	    Adaptive        bool                              `json:"adaptive"         toml:"adaptive"`
+	    Profiles        map[string]AgentToolProfileConfig `json:"profiles"         toml:"profiles"`
 	}
 
 <a name="AgentQueuesConfig"></a>
@@ -455,6 +918,82 @@ AgentReflectionConfig holds reflection settings for auto\-lint/test fixing. Mult
 	    TestCmd string `json:"test_cmd" toml:"test_cmd"`
 	}
 
+<a name="AgentRetryConfig"></a>
+## type AgentRetryConfig
+
+AgentRetryConfig configures exponential backoff retry behavior for LLM, tool, and HTTP operations.
+
+	type AgentRetryConfig struct {
+	    Enabled       bool                          `json:"enabled"        toml:"enabled"`
+	    DefaultBudget int                           `json:"default_budget" toml:"default_budget"` // Max retries per operation chain
+	    Backoff       AgentBackoffConfig            `json:"backoff"        toml:"backoff"`
+	    PerOperation  map[string]AgentBackoffConfig `json:"per_operation"  toml:"per_operation"` // keys: "llm", "tool_web", "tool_shell", "http"
+	}
+
+<a name="AgentStateTrackingConfig"></a>
+## type AgentStateTrackingConfig
+
+AgentStateTrackingConfig configures the agent state machine observability hooks.
+
+	type AgentStateTrackingConfig struct {
+	    Enabled    bool `json:"enabled"     toml:"enabled"`
+	    MaxHistory int  `json:"max_history" toml:"max_history"` // default 100
+	    Persist    bool `json:"persist"     toml:"persist"`     // enable SQLite persistence (Phase 5)
+	    EmitEvents bool `json:"emit_events" toml:"emit_events"` // publish bus events on transitions
+	}
+
+<a name="AgentToolProfileConfig"></a>
+## type AgentToolProfileConfig
+
+AgentToolProfileConfig holds per\-profile parallelism settings.
+
+	type AgentToolProfileConfig struct {
+	    Parallelism int `json:"parallelism" toml:"parallelism"`
+	}
+
+<a name="AgentToolsConfig"></a>
+## type AgentToolsConfig
+
+AgentToolsConfig holds \[agent.tools\] settings. GBNFConstrained is the global kill\-switch for grammar\-constrained tool calling: when true, the LLM client attaches a grammar to chat requests on endpoints that declare a matching tool\_constraint capability. Default false.
+
+SchemaMode controls how tool definitions are exposed to the LLM \(loop\-economics leaf 02\): "indexed" \(the default when empty\) stubs non\-core tools to one\-line descriptions ending in " use tool\_view\{name\}."; "full" ships every tool's complete parameter schema \(legacy behavior\). AlwaysFull lists tool names that always ship full schemas under indexed mode; an empty/nil list falls back to DefaultAlwaysFullTools\(\) at loop wiring time.
+
+	type AgentToolsConfig struct {
+	    GBNFConstrained bool `json:"gbnf_constrained" toml:"gbnf_constrained"`
+	    // SchemaMode is the global tool-schema mode: "", "full", or "indexed".
+	    // Empty means "indexed" (indexed is default-on; "full" restores legacy).
+	    SchemaMode string `json:"schema_mode" toml:"schema_mode"`
+	    // AlwaysFull names tools that always ship their complete parameter
+	    // schema even under indexed mode. Nil/empty -> DefaultAlwaysFullTools().
+	    AlwaysFull []string `json:"always_full" toml:"always_full"`
+	    // DeterministicTools enables cached-fetch mode: web_fetch/websearch
+	    // serve exclusively from the local fixture cache
+	    // (~/.meept/tool-cache or $MEEPT_TOOL_CACHE_DIR); a cache miss fails
+	    // with an explicit "cache-miss" error and never touches the network.
+	    // Used by meept-bench for reproducible suites. The
+	    // MEEPT_DETERMINISTIC_TOOLS env var ORs with this at call time.
+	    DeterministicTools bool `json:"deterministic_tools" toml:"deterministic_tools"`
+	}
+
+<a name="AgentToolsConfig.Validate"></a>
+### func \(\*AgentToolsConfig\) Validate
+
+	func (c *AgentToolsConfig) Validate() error
+
+Validate checks the \[agent.tools\] section. Unknown schema\_mode values are rejected with an error naming agent.tools.schema\_mode so a typo fails fast at config load instead of silently shipping full schemas.
+
+<a name="AgentWorkerPoolConfig"></a>
+## type AgentWorkerPoolConfig
+
+AgentWorkerPoolConfig configures the per\-session AgentLoop worker pool.
+
+	type AgentWorkerPoolConfig struct {
+	    Enabled           bool   `json:"enabled"            toml:"enabled"`
+	    MaxWorkers        int    `json:"max_workers"        toml:"max_workers"`
+	    MaxLoopsPerWorker int    `json:"max_loops_per_worker" toml:"max_loops_per_worker"`
+	    IdleTimeout       string `json:"idle_timeout"       toml:"idle_timeout"` // duration string e.g. "5m"
+	}
+
 <a name="AgentsConfig"></a>
 ## type AgentsConfig
 
@@ -476,6 +1015,12 @@ AgentsConfig holds agent configuration settings.
 	
 	    // DispatcherID is the agent ID that handles intake/routing.
 	    DispatcherID string `json:"dispatcher_id" toml:"dispatcher_id"`
+	
+	    // CapabilityMatchEnabled enables the keyword-based capability matcher
+	    // used as a fast routing step in the dispatcher. Default false: when
+	    // disabled the dispatcher skips keyword-based capability matching and
+	    // relies on the LLM intent classifier (with keyword-table fallback).
+	    CapabilityMatchEnabled bool `json:"capability_match_enabled" toml:"capability_match_enabled"`
 	}
 
 <a name="AmbientExtractionConfig"></a>
@@ -502,6 +1047,41 @@ AnalyticsConfig holds configuration for the analytics system.
 	    RetentionDays int  `json:"retention_days,omitempty"   toml:"retention_days"`
 	}
 
+<a name="BackupConfig"></a>
+## type BackupConfig
+
+BackupConfig holds configuration for the git backup scheduler.
+
+	type BackupConfig struct {
+	    Enabled       bool          `json:"enabled"        toml:"enabled"`
+	    RepoURL       string        `json:"repo_url"       toml:"repo_url"`
+	    CheckoutDir   string        `json:"checkout_dir"   toml:"checkout_dir"`
+	    Schedule      time.Duration `json:"schedule"       toml:"schedule"`
+	    RetentionDays int           `json:"retention_days" toml:"retention_days"`
+	    NodeID        string        `json:"node_id"        toml:"node_id"`
+	}
+
+<a name="DefaultBackupConfig"></a>
+### func DefaultBackupConfig
+
+	func DefaultBackupConfig() BackupConfig
+
+DefaultBackupConfig returns sensible defaults.
+
+<a name="BackupConfig.IsValidated"></a>
+### func \(\*BackupConfig\) IsValidated
+
+	func (c *BackupConfig) IsValidated() bool
+
+IsValidated reports whether c is enabled and fully configured.
+
+<a name="BackupConfig.Validate"></a>
+### func \(\*BackupConfig\) Validate
+
+	func (c *BackupConfig) Validate() error
+
+Validate checks that BackupConfig is valid when enabled.
+
 <a name="BotsConfig"></a>
 ## type BotsConfig
 
@@ -515,6 +1095,31 @@ BotsConfig holds configuration for the persistent bot framework.
 	    AutoPauseOnConsecutiveFails int    `json:"auto_pause_on_consecutive_failures" toml:"auto_pause_on_consecutive_failures"`
 	    WebhookEnabled              bool   `json:"webhook_enabled" toml:"webhook_enabled"`
 	}
+
+<a name="BrowserConfig"></a>
+## type BrowserConfig
+
+BrowserConfig configures the headless browser automation tool family \(\[browser\]\). Disabled by default: when enabled=false the browser\_\* tools are absent from the registry entirely.
+
+	type BrowserConfig struct {
+	    // Enabled toggles the browser tool family. Default false. When true,
+	    // a chrome/chromium binary must be discoverable at startup.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // ChromePath overrides binary discovery (absolute path to a
+	    // chrome/chromium executable). Empty means auto-discover.
+	    ChromePath string `json:"chrome_path" toml:"chrome_path"`
+	    // Headless launches Chrome without a visible window. Default true.
+	    Headless *bool `json:"headless" toml:"headless"`
+	    // MaxPages caps concurrent per-session browser instances. Default 3.
+	    MaxPages int `json:"max_pages" toml:"max_pages"`
+	}
+
+<a name="BrowserConfig.HeadlessEnabled"></a>
+### func \(BrowserConfig\) HeadlessEnabled
+
+	func (c BrowserConfig) HeadlessEnabled() bool
+
+HeadlessEnabled returns the effective headless setting \(default true\).
 
 <a name="BudgetConfig"></a>
 ## type BudgetConfig
@@ -532,6 +1137,17 @@ BudgetConfig holds token budget settings.
 	    PerSessionTokenLimit int     `json:"per_session_token_limit" toml:"per_session_token_limit"`
 	    PerTaskCostLimit     float64 `json:"per_task_cost_limit"  toml:"per_task_cost_limit"`
 	    PerSessionCostLimit  float64 `json:"per_session_cost_limit" toml:"per_session_cost_limit"`
+	}
+
+<a name="BwrapRuntimeConfig"></a>
+## type BwrapRuntimeConfig
+
+BwrapRuntimeConfig configures the bubblewrap backend. Mirrors runtime.BwrapConfig \(config does not import runtime; mapping happens in internal/daemon/components.go per existing convention\).
+
+	type BwrapRuntimeConfig struct {
+	    BinaryPath string   `json:"binary_path" toml:"binary_path"`
+	    ExtraArgs  []string `json:"extra_args"  toml:"extra_args"`
+	    TmpfsDirs  []string `json:"tmpfs_dirs"  toml:"tmpfs_dirs"`
 	}
 
 <a name="CacheConfig"></a>
@@ -568,8 +1184,11 @@ CalendarConfig holds Google Calendar integration settings. OAuth credentials are
 	    CalendarID string `json:"calendar_id" toml:"calendar_id"`
 	    // ReminderEnabled turns on the reminder watcher for upcoming events
 	    ReminderEnabled bool `json:"reminder_enabled" toml:"reminder_enabled"`
-	    // ReminderCheckInterval is how often to check for upcoming events (default: 5m)
-	    ReminderCheckInterval string `json:"reminder_check_interval" toml:"reminder_check_interval"`
+	    // ReminderCheckInterval is how often to check for upcoming events (default: 5m).
+	    // time.Duration: the JSON5 loader's duration preprocessing turns quoted
+	    // "5m" values into nanosecond integers, so a string field breaks the
+	    // JSON5 write→reload round-trip.
+	    ReminderCheckInterval time.Duration `json:"reminder_check_interval" toml:"reminder_check_interval"`
 	    // ReminderAdvanceMinutes triggers reminders this many minutes before an event
 	    ReminderAdvanceMinutes int `json:"reminder_advance_minutes" toml:"reminder_advance_minutes"`
 	}
@@ -590,6 +1209,13 @@ ClusterConfig holds distributed cluster settings.
 	    Queue       ClusterQueueConfig    `json:"queue" toml:"queue"`
 	    Git         ClusterGitConfig      `json:"git" toml:"git"`
 	    Security    ClusterSecurityConfig `json:"security" toml:"security"`
+	
+	    // Cluster resource model (spec 2026-07-01-cluster-resource-model-design.md).
+	    // CAS store, ephemeral workspaces, and dispatch defaults. Nil-safe zero
+	    // values disable resource-model features.
+	    Resources ClusterResourcesConfig `json:"resources" toml:"resources"`
+	    Workspace ClusterWorkspaceConfig `json:"workspace" toml:"workspace"`
+	    Dispatch  ClusterDispatchConfig  `json:"dispatch" toml:"dispatch"`
 	}
 
 <a name="DefaultClusterConfig"></a>
@@ -598,6 +1224,21 @@ ClusterConfig holds distributed cluster settings.
 	func DefaultClusterConfig() ClusterConfig
 
 DefaultClusterConfig returns default cluster configuration.
+
+<a name="ClusterDispatchConfig"></a>
+## type ClusterDispatchConfig
+
+ClusterDispatchConfig configures cross\-daemon dispatch behavior including peer fallback and scheduler capacity policies. See spec §2.5, §9.
+
+	type ClusterDispatchConfig struct {
+	    DefaultClaimTimeout       time.Duration `json:"default_claim_timeout" toml:"default_claim_timeout"`
+	    ResultDeliveryTimeout     time.Duration `json:"result_delivery_timeout" toml:"result_delivery_timeout"`
+	    PeerFallbackPolicy        string        `json:"peer_fallback_policy" toml:"peer_fallback_policy"`                 // always | never | if_capacity
+	    SchedulerNoCapacityPolicy string        `json:"scheduler_no_capacity_policy" toml:"scheduler_no_capacity_policy"` // queue | run_local
+	    PeerDropCooldown          time.Duration `json:"peer_drop_cooldown" toml:"peer_drop_cooldown"`
+	    QuarantinePeriod          time.Duration `json:"quarantine_period" toml:"quarantine_period"`
+	    QuarantineThreshold       int           `json:"quarantine_threshold" toml:"quarantine_threshold"`
+	}
 
 <a name="ClusterGitConfig"></a>
 ## type ClusterGitConfig
@@ -644,6 +1285,19 @@ ClusterQueueConfig holds cluster queue settings.
 	    FullPayloadReplication  bool          `json:"full_payload_replication" toml:"full_payload_replication"`
 	}
 
+<a name="ClusterResourcesConfig"></a>
+## type ClusterResourcesConfig
+
+ClusterResourcesConfig configures the CAS transit cache. Files enter only when referenced by an in\-flight dispatched task; refcount\-driven eviction removes them once no task references them. Local\-only files never enter CAS. See spec §4.1, §2.4, §7, §9.
+
+	type ClusterResourcesConfig struct {
+	    CASStoreDir           string        `json:"cas_store_dir" toml:"cas_store_dir"`
+	    CASCapacityBytes      int64         `json:"cas_capacity_bytes" toml:"cas_capacity_bytes"`
+	    EvictionSweepInterval time.Duration `json:"eviction_sweep_interval" toml:"eviction_sweep_interval"`
+	    PinnedHashes          []string      `json:"pinned_hashes" toml:"pinned_hashes"`
+	    HashAlgorithm         string        `json:"hash_algorithm" toml:"hash_algorithm"`
+	}
+
 <a name="ClusterSecurityConfig"></a>
 ## type ClusterSecurityConfig
 
@@ -652,6 +1306,16 @@ ClusterSecurityConfig holds cluster security settings.
 	type ClusterSecurityConfig struct {
 	    RequireNodeSignatures  bool `json:"require_node_signatures" toml:"require_node_signatures"`
 	    Ed25519KeyRotationDays int  `json:"ed25519_key_rotation_days" toml:"ed25519_key_rotation_days"`
+	}
+
+<a name="ClusterWorkspaceConfig"></a>
+## type ClusterWorkspaceConfig
+
+ClusterWorkspaceConfig configures ephemeral per\-job working trees. See spec §4.2, §9.
+
+	type ClusterWorkspaceConfig struct {
+	    WorktreeRoot      string `json:"worktree_root" toml:"worktree_root"`
+	    GitFallbackToPeer bool   `json:"git_fallback_to_peer" toml:"git_fallback_to_peer"`
 	}
 
 <a name="CodeIntelConfig"></a>
@@ -692,49 +1356,62 @@ CompactionConfig configures LLM\-based context compaction.
 Config is the root configuration structure loaded from meept.toml.
 
 	type Config struct {
-	    Daemon            DaemonConfig            `json:"daemon"             toml:"daemon"`
-	    Transport         TransportConfig         `json:"transport"          toml:"transport"`
-	    LLM               LLMConfig               `json:"llm"                toml:"llm"`
-	    Memory            MemoryConfig            `json:"memory"             toml:"memory"`
-	    Memvid            MemvidConfig            `json:"memvid"             toml:"memvid"`
-	    MultiAgent        MultiAgentConfig        `json:"multiagent"         toml:"multiagent"`
-	    Agents            AgentsConfig            `json:"agents"             toml:"agents"`
-	    Agent             AgentConfig             `json:"agent"              toml:"agent"`
-	    Security          SecurityConfig          `json:"security"           toml:"security"`
-	    Scheduler         SchedulerConfig         `json:"scheduler"          toml:"scheduler"`
-	    Queue             QueueConfig             `json:"queue"              toml:"queue"`
-	    Workers           WorkersConfig           `json:"workers"            toml:"workers"`
-	    Isolation         IsolationConfig         `json:"isolation"          toml:"isolation"`
-	    Telegram          TelegramConfig          `json:"telegram"           toml:"telegram"`
-	    Web               WebConfig               `json:"web"                toml:"web"`
-	    MCP               MCPConfig               `json:"mcp"                toml:"mcp"`
-	    Plugins           PluginsConfig           `json:"plugins"            toml:"plugins"`
-	    Workspace         WorkspaceConfig         `json:"workspace"          toml:"workspace"`
-	    Skills            SkillsConfig            `json:"skills"             toml:"skills"`
-	    SelfImprove       SelfImproveConfig       `json:"selfimprove"        toml:"selfimprove"`
-	    Orchestrator      OrchestratorConfig      `json:"orchestrator"       toml:"orchestrator"`
-	    Shadow            ShadowConfig            `json:"shadow"             toml:"shadow"`
-	    DistributedMemory DistributedMemoryConfig `json:"distributed_memory" toml:"distributed_memory"`
-	    QAgent            QAgentConfig            `json:"q_agent"            toml:"q_agent"`
-	    CodeIntel         CodeIntelConfig         `json:"code_intel"         toml:"code_intel"`
-	    Calendar          CalendarConfig          `json:"calendar"           toml:"calendar"`
-	    Tooling           ToolingConfig           `json:"tooling"            toml:"tooling"`
-	    Compaction        CompactionConfig        `json:"compaction"         toml:"compaction"`
-	    Session           SessionConfig           `json:"session"            toml:"session"`
-	    Cluster           ClusterConfig           `json:"cluster"             toml:"cluster"`
-	    Bots              BotsConfig              `json:"bots"                toml:"bots"`
-	    Employees         EmployeesConfig         `json:"employees"           toml:"employees"`
-	    Plans             PlansConfig             `json:"plans"               toml:"plans"`
-	    Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
-	    STT               STTConfig               `json:"stt"                 toml:"stt"`
-	    TTS               TTSConfig               `json:"tts"                 toml:"tts"`
-	    OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
-	    Analytics         AnalyticsConfig         `json:"analytics,omitempty" toml:"analytics"`
-	    Notifications     NotificationsConfig     `json:"notifications,omitempty" toml:"notifications"`
-	    Runtime           RuntimeConfig           `json:"runtime"             toml:"runtime"`
-	    PTY               PTYConfig               `json:"pty"                  toml:"pty"`
-	    Reasoning         ReasoningGlobalConfig   `json:"reasoning"            toml:"reasoning"`
-	    Hooks             HooksConfig             `json:"hooks"                toml:"hooks"`
+	    Daemon              DaemonConfig              `json:"daemon"             toml:"daemon"`
+	    Transport           TransportConfig           `json:"transport"          toml:"transport"`
+	    LLM                 LLMConfig                 `json:"llm"                toml:"llm"`
+	    Memory              MemoryConfig              `json:"memory"             toml:"memory"`
+	    Memvid              MemvidConfig              `json:"memvid"             toml:"memvid"`
+	    MultiAgent          MultiAgentConfig          `json:"multiagent"         toml:"multiagent"`
+	    Agents              AgentsConfig              `json:"agents"             toml:"agents"`
+	    Agent               AgentConfig               `json:"agent"              toml:"agent"`
+	    Security            SecurityConfig            `json:"security"           toml:"security"`
+	    Scheduler           SchedulerConfig           `json:"scheduler"          toml:"scheduler"`
+	    Queue               QueueConfig               `json:"queue"              toml:"queue"`
+	    Workers             WorkersConfig             `json:"workers"            toml:"workers"`
+	    Isolation           IsolationConfig           `json:"isolation"          toml:"isolation"`
+	    Telegram            TelegramConfig            `json:"telegram"           toml:"telegram"`
+	    Web                 WebConfig                 `json:"web"                toml:"web"`
+	    MCP                 MCPConfig                 `json:"mcp"                toml:"mcp"`
+	    ACP                 ACPConfig                 `json:"acp"                toml:"acp"`
+	    Plugins             PluginsConfig             `json:"plugins"            toml:"plugins"`
+	    Workspace           WorkspaceConfig           `json:"workspace"          toml:"workspace"`
+	    Skills              SkillsConfig              `json:"skills"             toml:"skills"`
+	    SelfImprove         SelfImproveConfig         `json:"selfimprove"        toml:"selfimprove"`
+	    Eval                EvalConfig                `json:"eval"               toml:"eval"`
+	    Orchestrator        OrchestratorConfig        `json:"orchestrator"       toml:"orchestrator"`
+	    Shadow              ShadowConfig              `json:"shadow"             toml:"shadow"`
+	    DistributedMemory   DistributedMemoryConfig   `json:"distributed_memory" toml:"distributed_memory"`
+	    QAgent              QAgentConfig              `json:"q_agent"            toml:"q_agent"`
+	    CodeIntel           CodeIntelConfig           `json:"code_intel"         toml:"code_intel"`
+	    Calendar            CalendarConfig            `json:"calendar"           toml:"calendar"`
+	    Tooling             ToolingConfig             `json:"tooling"            toml:"tooling"`
+	    Compaction          CompactionConfig          `json:"compaction"         toml:"compaction"`
+	    Session             SessionConfig             `json:"session"            toml:"session"`
+	    Cluster             ClusterConfig             `json:"cluster"             toml:"cluster"`
+	    Bots                BotsConfig                `json:"bots"                toml:"bots"`
+	    Employees           EmployeesConfig           `json:"employees"           toml:"employees"`
+	    Plans               PlansConfig               `json:"plans"               toml:"plans"`
+	    Projects            ProjectsConfig            `json:"projects"            toml:"projects"`
+	    ProjectsRecent      ProjectRecentConfig       `json:"projects_recent"     toml:"projects_recent"`
+	    STT                 STTConfig                 `json:"stt"                 toml:"stt"`
+	    TTS                 TTSConfig                 `json:"tts"                 toml:"tts"`
+	    OAuth               OAuthConfig               `json:"oauth"               toml:"oauth"`
+	    Analytics           AnalyticsConfig           `json:"analytics,omitempty" toml:"analytics"`
+	    Notifications       NotificationsConfig       `json:"notifications,omitempty" toml:"notifications"`
+	    Runtime             RuntimeConfig             `json:"runtime"             toml:"runtime"`
+	    PTY                 PTYConfig                 `json:"pty"                  toml:"pty"`
+	    Reasoning           ReasoningGlobalConfig     `json:"reasoning"            toml:"reasoning"`
+	    Hooks               HooksConfig               `json:"hooks"                toml:"hooks"`
+	    ReflectionCollector ReflectionCollectorConfig `json:"reflection_collector" toml:"reflection_collector"`
+	    Backup              BackupConfig              `json:"backup"              toml:"backup"`
+	    PeerSync            PeerSyncConfig            `json:"peer_sync"           toml:"peer_sync"`
+	    ConfigSync          ConfigSyncConfig          `json:"config_sync"         toml:"config_sync"`
+	    Learning            LearningConfig            `json:"learning"            toml:"learning"`
+	    Media               MediaConfig               `json:"media"               toml:"media"`
+	    Secrets             SecretsConfig             `json:"secrets"             toml:"secrets"`
+	    Browser             BrowserConfig             `json:"browser"             toml:"browser"`
+	    Transcript          TranscriptConfig          `json:"transcript"          toml:"transcript"`
+	    MultiUser           MultiUserConfig           `json:"multiuser"           toml:"multiuser"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -772,6 +1449,13 @@ LoadJSON5Config loads configuration from a JSON5 file.
 
 ChatTimeout returns the configured chat response timeout, falling back to 2m.
 
+<a name="Config.InteractiveWindow"></a>
+### func \(\*Config\) InteractiveWindow
+
+	func (c *Config) InteractiveWindow() time.Duration
+
+InteractiveWindow returns the D11 session\-interactivity recency window \(queue.interactive\_window\), falling back to the Q1 default of 5 minutes when unset or unparseable. Leaf 02 consumes this when stamping enqueued jobs with the interactive flag.
+
 <a name="Config.ShutdownTimeout"></a>
 ### func \(\*Config\) ShutdownTimeout
 
@@ -779,20 +1463,211 @@ ChatTimeout returns the configured chat response timeout, falling back to 2m.
 
 ShutdownTimeout returns the configured shutdown timeout, falling back to 10s.
 
+<a name="Config.ValidateAll"></a>
+### func \(\*Config\) ValidateAll
+
+	func (c *Config) ValidateAll() error
+
+ValidateAll validates all config sections and returns the first error encountered. This should be called at daemon startup to fail fast on invalid configuration.
+
+<a name="ConfigSyncConfig"></a>
+## type ConfigSyncConfig
+
+ConfigSyncConfig holds configuration for config\-file synchronization via git. This is separate from PeerSyncConfig \(backup sync\) — it pulls config files from a shared repo and merges them into the local config directory.
+
+	type ConfigSyncConfig struct {
+	    // Enabled turns on periodic config pulling from a shared git repo
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // RepoURL is the git repo URL containing shared configs
+	    RepoURL string `json:"repo_url" toml:"repo_url"`
+	    // PullSchedule is the interval between config pulls (0 = disabled)
+	    PullSchedule time.Duration `json:"pull_schedule" toml:"pull_schedule"`
+	    // ConflictMode resolves conflicts: "local-wins", "remote-wins", "manual"
+	    ConflictMode string `json:"conflict_mode" toml:"conflict_mode"`
+	}
+
+<a name="DefaultConfigSyncConfig"></a>
+### func DefaultConfigSyncConfig
+
+	func DefaultConfigSyncConfig() ConfigSyncConfig
+
+DefaultConfigSyncConfig returns sensible defaults.
+
+<a name="ConfigSyncConfig.IsValidated"></a>
+### func \(\*ConfigSyncConfig\) IsValidated
+
+	func (c *ConfigSyncConfig) IsValidated() bool
+
+IsValidated reports whether c is enabled and fully configured.
+
+<a name="ConfigSyncConfig.Validate"></a>
+### func \(\*ConfigSyncConfig\) Validate
+
+	func (c *ConfigSyncConfig) Validate() error
+
+Validate checks that ConfigSyncConfig is valid when enabled.
+
+<a name="ConfigSyncError"></a>
+## type ConfigSyncError
+
+ConfigSyncError wraps contextual information for sync\-phase errors.
+
+	type ConfigSyncError struct {
+	    Op   string // "pull", "merge", "reload", "checkout"
+	    Path string // config file or repo path
+	    Err  error
+	}
+
+<a name="ConfigSyncError.Error"></a>
+### func \(\*ConfigSyncError\) Error
+
+	func (e *ConfigSyncError) Error() string
+
+
+
+<a name="ConfigSyncError.Unwrap"></a>
+### func \(\*ConfigSyncError\) Unwrap
+
+	func (e *ConfigSyncError) Unwrap() error
+
+
+
+<a name="ConfigSyncer"></a>
+## type ConfigSyncer
+
+ConfigSyncer manages periodic config pulling from a git repo, merging, and triggering reload hooks when configs change.
+
+	type ConfigSyncer struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewConfigSyncer"></a>
+### func NewConfigSyncer
+
+	func NewConfigSyncer(cfg ConfigSyncConfig, nodeID, baseDir string, logger *slog.Logger) (*ConfigSyncer, error)
+
+NewConfigSyncer creates a ConfigSyncer. baseDir is the target directory for merged configs \(e.g. \~/.meept\).
+
+<a name="ConfigSyncer.LastAppliedCommit"></a>
+### func \(\*ConfigSyncer\) LastAppliedCommit
+
+	func (s *ConfigSyncer) LastAppliedCommit() string
+
+LastAppliedCommit returns the commit hash of the most recent successfully merged pull. Returns empty string if no merge has ever completed.
+
+<a name="ConfigSyncer.LastCommitHash"></a>
+### func \(\*ConfigSyncer\) LastCommitHash
+
+	func (s *ConfigSyncer) LastCommitHash() string
+
+LastCommitHash returns the latest known commit hash.
+
+<a name="ConfigSyncer.NodeID"></a>
+### func \(\*ConfigSyncer\) NodeID
+
+	func (s *ConfigSyncer) NodeID() string
+
+NodeID returns the node identifier used for per\-node overrides.
+
+<a name="ConfigSyncer.PullSchedule"></a>
+### func \(\*ConfigSyncer\) PullSchedule
+
+	func (s *ConfigSyncer) PullSchedule() time.Duration
+
+PullSchedule returns the pull interval.
+
+<a name="ConfigSyncer.PushLocalChanges"></a>
+### func \(\*ConfigSyncer\) PushLocalChanges
+
+	func (s *ConfigSyncer) PushLocalChanges(ctx context.Context, message string) error
+
+PushLocalChanges commits any local working\-tree changes in the config checkout and pushes them to the remote. It wraps GitCheckout.CommitAndPush with nil\-guarding and meaningful errors so callers \(RPC handler, CLI\) get consistent diagnostics.
+
+The message argument becomes the commit message. If empty, a default "auto: config sync push" message is used.
+
+<a name="ConfigSyncer.RegisterReloadHook"></a>
+### func \(\*ConfigSyncer\) RegisterReloadHook
+
+	func (s *ConfigSyncer) RegisterReloadHook(path string, fn ReloadFunc)
+
+RegisterReloadHook adds a callback invoked when a specific config file path changes.
+
+<a name="ConfigSyncer.ReloadRegistry"></a>
+### func \(\*ConfigSyncer\) ReloadRegistry
+
+	func (s *ConfigSyncer) ReloadRegistry() *ReloadRegistry
+
+ReloadRegistry is exported for use in daemon wiring.
+
+<a name="ConfigSyncer.RepoURL"></a>
+### func \(\*ConfigSyncer\) RepoURL
+
+	func (s *ConfigSyncer) RepoURL() string
+
+RepoURL returns the configured repo URL.
+
+<a name="ConfigSyncer.SetBaseDir"></a>
+### func \(\*ConfigSyncer\) SetBaseDir
+
+	func (s *ConfigSyncer) SetBaseDir(baseDir string)
+
+SetBaseDir sets the config base directory after creation.
+
+<a name="ConfigSyncer.Start"></a>
+### func \(\*ConfigSyncer\) Start
+
+	func (s *ConfigSyncer) Start(ctx context.Context)
+
+Start begins the periodic pull loop. It returns immediately; call Stop\(\) to shut down.
+
+<a name="ConfigSyncer.Status"></a>
+### func \(\*ConfigSyncer\) Status
+
+	func (s *ConfigSyncer) Status() SyncStatus
+
+Status returns current sync status information.
+
+<a name="ConfigSyncer.Stop"></a>
+### func \(\*ConfigSyncer\) Stop
+
+	func (s *ConfigSyncer) Stop()
+
+Stop halts the periodic pull loop.
+
+<a name="ContextDiscoveryConfig"></a>
+## type ContextDiscoveryConfig
+
+ContextDiscoveryConfig configures provider context\-length discovery \(DECISIONS.md D13\): a background syncer fills model context lengths from the provider endpoints that expose them \(Ollama /api/show, OpenRouter models, llama.cpp /props\). OpenAI and Anthropic expose no context length, so they are never queried.
+
+	type ContextDiscoveryConfig struct {
+	    // Enabled turns discovery on. Default false — zero behavior change
+	    // when off (no syncer constructed, no network traffic).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Interval is the re-sync cadence. Zero/negative means the 6h default
+	    // (deliberately slow: the OpenRouter fetch shares the pricing sync's
+	    // politeness budget).
+	    Interval time.Duration `json:"interval" toml:"interval"`
+	    // AllowContextOverride lets a discovered value replace a non-zero
+	    // CATALOG context value. Explicit models.json5 context_limit values
+	    // always win regardless of this flag (master Contract 3 precedence).
+	    AllowContextOverride bool `json:"allow_context_override" toml:"allow_context_override"`
+	}
+
 <a name="DaemonConfig"></a>
 ## type DaemonConfig
 
 DaemonConfig holds daemon\-specific settings.
 
 	type DaemonConfig struct {
-	    SocketPath         string            `json:"socket_path"         toml:"socket_path"`
-	    PIDFile            string            `json:"pid_file"             toml:"pid_file"`
-	    LogLevel           string            `json:"log_level"             toml:"log_level"`
-	    DataDir            string            `json:"data_dir"             toml:"data_dir"`
-	    ShutdownTimeout    string            `json:"shutdown_timeout"     toml:"shutdown_timeout"`
-	    ChatTimeoutSeconds int               `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
-	    Uploads            UploadsConfig     `json:"uploads"              toml:"uploads"`
-	    UserInstructions   InstructionConfig `json:"user_instructions"    toml:"user_instructions"`
+	    SocketPath         string               `json:"socket_path"         toml:"socket_path"`
+	    PIDFile            string               `json:"pid_file"             toml:"pid_file"`
+	    LogLevel           string               `json:"log_level"             toml:"log_level"`
+	    DataDir            string               `json:"data_dir"             toml:"data_dir"`
+	    ShutdownTimeout    time.Duration        `json:"shutdown_timeout"     toml:"shutdown_timeout"`
+	    ChatTimeoutSeconds int                  `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	    Uploads            UploadsConfig        `json:"uploads"              toml:"uploads"`
+	    UserInstructions   InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
+	    Verification       VerificationDefaults `json:"verification"         toml:"verification"`
 	}
 
 <a name="DetectionConfig"></a>
@@ -865,6 +1740,35 @@ DockerRuntimeConfig holds Docker backend settings.
 	    AutoCleanup bool `json:"auto_cleanup" toml:"auto_cleanup"`
 	}
 
+<a name="EgressConfig"></a>
+## type EgressConfig
+
+EgressConfig configures outbound egress policy for proxied child traffic.
+
+	type EgressConfig struct {
+	    // Mode selects behavior: "allow" (default, passthrough unchanged),
+	    // "deny" (all proxied egress blocked), or "proxy" (rules consulted
+	    // pre-injection; no match permits).
+	    Mode string `json:"mode" toml:"mode"`
+	    // Rules is the ordered first-match-wins rule table. Match is a host
+	    // suffix (e.g. ".example.com") or CIDR (e.g. "10.0.0.0/8"); Action is
+	    // "allow", "ask", or "deny".
+	    Rules []EgressRuleConfig `json:"rules" toml:"rules"`
+	    // ScrubNoProxy clears NO_PROXY/no_proxy for children when the proxy is
+	    // active so traffic actually flows through it. Default true.
+	    ScrubNoProxy bool `json:"scrub_no_proxy" toml:"scrub_no_proxy"`
+	}
+
+<a name="EgressRuleConfig"></a>
+## type EgressRuleConfig
+
+EgressRuleConfig is one \[security.egress.rules\] entry.
+
+	type EgressRuleConfig struct {
+	    Match  string `json:"match"  toml:"match"`  // host suffix or CIDR
+	    Action string `json:"action" toml:"action"` // allow | ask | deny
+	}
+
 <a name="EmbeddingConfig"></a>
 ## type EmbeddingConfig
 
@@ -890,14 +1794,15 @@ EmployeesAuditConfig configures the constitution audit checkpoints \(post\-turn 
 	type EmployeesAuditConfig struct {
 	    // Model is the alias (from config/models.json5) used for the post-turn
 	    // and periodic audits. Small models are recommended to keep audit cost
-	    // low relative to the employee's working model.
+	    // low relative to the employee's working model. When empty (the default),
+	    // the daemon falls back to the top-level small_model, then default_model.
 	    Model string `json:"model" toml:"model"`
 	
 	    // PeriodicInterval is the global default cadence for the periodic
 	    // bulk audit (Checkpoint 3). Per-employee AssessmentInterval overrides
 	    // this for the GoalLoop; this value is used when the employee doesn't
 	    // declare its own interval.
-	    PeriodicInterval string `json:"periodic_interval" toml:"periodic_interval"`
+	    PeriodicInterval time.Duration `json:"periodic_interval" toml:"periodic_interval"`
 	
 	    // DriftPauseThreshold is the drift score (0.0-1.0) above which the
 	    // periodic auditor auto-pauses the employee. Drift measures slow
@@ -909,7 +1814,18 @@ EmployeesAuditConfig configures the constitution audit checkpoints \(post\-turn 
 	    // SQLite before being archived. Older findings are pruned by a
 	    // scheduler job.
 	    FindingsRetentionDays int `json:"findings_retention_days" toml:"findings_retention_days"`
+	
+	    // ApprovalTimeout is the duration after which a plan stuck in
+	    // PendingApproval is auto-rejected (spec line 591). Default: 168h.
+	    ApprovalTimeout time.Duration `json:"approval_timeout" toml:"approval_timeout"`
 	}
+
+<a name="EmployeesAuditConfig.Validate"></a>
+### func \(\*EmployeesAuditConfig\) Validate
+
+	func (c *EmployeesAuditConfig) Validate() error
+
+Validate validates the EmployeesAuditConfig.
 
 <a name="EmployeesAutoPauseConfig"></a>
 ## type EmployeesAutoPauseConfig
@@ -953,6 +1869,67 @@ EmployeesConfig configures the AI Employee framework. The employee layer wraps t
 	    // enforcement engine. A paused employee cannot self-resume; only an
 	    // operator can call `meept agents resume <id>`.
 	    AutoPause EmployeesAutoPauseConfig `json:"auto_pause" toml:"auto_pause"`
+	
+	    // Defaults holds per-aspect defaults merged under each employee's own
+	    // definition. Currently only gate is defined.
+	    Defaults EmployeesDefaultsConfig `json:"defaults" toml:"defaults"`
+	}
+
+<a name="EmployeesConfig.Validate"></a>
+### func \(\*EmployeesConfig\) Validate
+
+	func (c *EmployeesConfig) Validate() error
+
+Validate validates the EmployeesConfig.
+
+<a name="EmployeesDefaultsConfig"></a>
+## type EmployeesDefaultsConfig
+
+EmployeesDefaultsConfig carries employee\-layer default blocks.
+
+	type EmployeesDefaultsConfig struct {
+	    // Gate configures the default quality gate (completion check) for all
+	    // employees/goals that do not declare their own gate.command. An empty
+	    // Command means no gate (legacy model-judgment-only completion).
+	    Gate EmployeesGateConfig `json:"gate" toml:"gate"`
+	}
+
+<a name="EmployeesGateConfig"></a>
+## type EmployeesGateConfig
+
+EmployeesGateConfig mirrors the quality\-gate settings in internal/employee.GateConfig. It lives in the config package to avoid an import from config → employee; the Manager translates between the two shapes. See docs/workflows/employees.md \("Quality gate"\).
+
+	type EmployeesGateConfig struct {
+	    // Enabled is the global kill switch for quality gates. When false
+	    // (the default), no completion gate runs even if a command is set
+	    // on a goal or in this defaults block. When true, a non-empty
+	    // Command on the goal (or this default) is executed before a goal
+	    // may be marked complete.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Command is the shell command run in the employee's project directory.
+	    // Exit 0 passes; anything else fails. Empty = no gate (legacy).
+	    Command string `json:"command" toml:"command"`
+	    // TimeoutSeconds kills the gate command after this many seconds.
+	    // Zero/negative = 300.
+	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	    // SkipWhenUnchanged skips re-running a previously failed gate when the
+	    // workspace (git status + HEAD) hash is unchanged since the failure.
+	    SkipWhenUnchanged bool `json:"skip_when_unchanged" toml:"skip_when_unchanged"`
+	}
+
+<a name="EnvPolicyConfig"></a>
+## type EnvPolicyConfig
+
+EnvPolicyConfig configures child environment construction. This mirrors the shape of runtime.EnvPolicyConfig \(internal/runtime/envpolicy.go\) rather than importing it: internal/config does NOT import internal/runtime today, and the existing convention is field mirroring \+ explicit mapping in internal/daemon/components.go \(see RuntimeConfig.Docker vs runtime.DockerConfig\). Keeping it that way preserves the current dependency direction and avoids any import\-cycle risk.
+
+	type EnvPolicyConfig struct {
+	    // Mode is "allowlist" (default after normalization) or "inherit".
+	    Mode string `json:"env_mode" toml:"env_mode"`
+	    // Allowlist lists extra variable names passed through in allowlist mode.
+	    Allowlist []string `json:"env_allowlist" toml:"env_allowlist"`
+	    // DenyGlobs are name globs (path.Match syntax) always stripped in
+	    // allowlist mode. Defaults applied by NormalizeRuntimeDefaults.
+	    DenyGlobs []string `json:"env_deny_globs" toml:"env_deny_globs"`
 	}
 
 <a name="EpisodicConfig"></a>
@@ -978,6 +1955,29 @@ EpistemicConfig holds epistemic memory platform settings.
 	    MaxPendingReviews     int                     `json:"max_pending_reviews"     toml:"max_pending_reviews"`
 	}
 
+<a name="ErrEnvVarCycle"></a>
+## type ErrEnvVarCycle
+
+ErrEnvVarCycle is returned when environment variable expansion detects a cycle.
+
+	type ErrEnvVarCycle struct {
+	    Input string
+	}
+
+<a name="ErrEnvVarCycle.Error"></a>
+### func \(ErrEnvVarCycle\) Error
+
+	func (e ErrEnvVarCycle) Error() string
+
+
+
+<a name="ErrEnvVarCycle.Is"></a>
+### func \(ErrEnvVarCycle\) Is
+
+	func (ErrEnvVarCycle) Is(err error) bool
+
+Is reports whether err is an ErrEnvVarCycle.
+
 <a name="ErrorsConfig"></a>
 ## type ErrorsConfig
 
@@ -991,6 +1991,109 @@ ErrorsConfig holds error handling settings.
 	    // MaxSuggestionLength limits the length of error suggestions
 	    MaxSuggestionLength int `json:"max_suggestion_length" toml:"max_suggestion_length"`
 	}
+
+<a name="EvalConfig"></a>
+## type EvalConfig
+
+EvalConfig holds eval\-harness settings \(harness\-eval leaf 15, contract: two\-layer flags\). When Enabled is false, production behavior is unchanged — gates still follow each AGENT.md's gate.command. The ablation knobs are for eval runs and model\-swap experiments; they are not a user\-facing off switch for security \(the isolation flag only affects spawn context, never fence/tirith\).
+
+	type EvalConfig struct {
+	    // Enabled gates eval-run recording and the metrics observer.
+	    Enabled bool `json:"enabled"    toml:"enabled"`
+	    // Gates enables the roster coder-gate during eval runs (default on when
+	    // eval.enabled; AGENT.md gate.command still decides whether a gate runs
+	    // at all).
+	    Gates bool `json:"gates"      toml:"gates"`
+	    // StatusBar enables the [status] prompt block during eval runs.
+	    StatusBar bool `json:"status_bar" toml:"status_bar"`
+	    // Isolation enables ArtifactOnly spawn context during eval runs. This
+	    // flag can NEVER disable isolation — false falls back to the default
+	    // ArtifactOnly behavior; it cannot enable SharedTranscript.
+	    Isolation bool `json:"isolation"  toml:"isolation"`
+	}
+
+<a name="EvalConfig.Validate"></a>
+### func \(\*EvalConfig\) Validate
+
+	func (c *EvalConfig) Validate() error
+
+Validate checks the \[eval\] config for impossible values.
+
+<a name="FailurePolicyConfig"></a>
+## type FailurePolicyConfig
+
+FailurePolicyConfig configures the long\-horizon failure\-policy schedule \(llm\-resilience\-forest tree 02 leaf 02, DECISIONS.md D8\): exponential backoff from a per\-class base, a 1h polling floor, and a 24h give\-up horizon. Written to disk as llm.failure\_policy. leaf 03 \(retry loops\) and leaf 05 \(adaptive pacing, D15\) consume these knobs.
+
+Zero\-value semantics: like QuotaRetryConfig, Load/LoadJSON5Config unmarshal user config ONTO DefaultConfig\(\), so an unset section inherits the defaults below; NormalizeFailurePolicyDefaults clamps zero/negative durations and a non\-positive ShortRetries for a directly\-constructed zero\-value struct.
+
+	type FailurePolicyConfig struct {
+	    // Horizon is the give-up cap: a failing model is retried only until
+	    // now+Horizon; past it the turn fails with a user-facing error and
+	    // the queue/goal-loop applies its own retry policy (D8). Default 24h.
+	    Horizon time.Duration `json:"horizon"             toml:"horizon"` // default 24h
+	    // BaseThrottle is the first-retry delay for provider-load throttling
+	    // (429 without quota signal) and the fallback base for all other
+	    // classes. Default 30s.
+	    BaseThrottle time.Duration `json:"base_throttle"       toml:"base_throttle"` // default 30s
+	    // BaseQuota402Extra is added to base_throttle for payment-required
+	    // quota errors: 402 waits start minutes longer than the 429 path
+	    // (D5). Default 5m.
+	    BaseQuota402Extra time.Duration `json:"base_quota_402_extra" toml:"base_quota_402_extra"` // default 5m
+	    // PollFloor is the polling floor: once an exponential step would
+	    // exceed it, all subsequent steps are exactly PollFloor (exact, no
+	    // jitter). Default 1h.
+	    PollFloor time.Duration `json:"poll_floor"          toml:"poll_floor"` // default 1h
+	    // ShortRetries is the bounded immediate-retry budget for
+	    // server-error (5xx) responses in the client retry loops (tree 02
+	    // leaf 03 consumes). Default 3.
+	    ShortRetries int `json:"short_retries"       toml:"short_retries"` // default 3
+	    // Pacing gates adaptive outbound pacing (D15; tree 02 leaf 05
+	    // consumes the full PacingConfig on this schema). Default on —
+	    // disable with pacing.enabled = false.
+	    Pacing PacingConfig `json:"pacing"              toml:"pacing"`
+	}
+
+<a name="FailurePolicyConfig.GetBaseQuota402Extra"></a>
+### func \(\*FailurePolicyConfig\) GetBaseQuota402Extra
+
+	func (f *FailurePolicyConfig) GetBaseQuota402Extra() time.Duration
+
+GetBaseQuota402Extra returns BaseQuota402Extra. See GetHorizon.
+
+<a name="FailurePolicyConfig.GetBaseThrottle"></a>
+### func \(\*FailurePolicyConfig\) GetBaseThrottle
+
+	func (f *FailurePolicyConfig) GetBaseThrottle() time.Duration
+
+GetBaseThrottle returns BaseThrottle. See GetHorizon.
+
+<a name="FailurePolicyConfig.GetHorizon"></a>
+### func \(\*FailurePolicyConfig\) GetHorizon
+
+	func (f *FailurePolicyConfig) GetHorizon() time.Duration
+
+GetHorizon returns Horizon. Part of the getter surface internal/llm reads through an anonymous parameter interface \(kept interface\-based to avoid an internal/llm \-\> internal/config import cycle\).
+
+<a name="FailurePolicyConfig.GetPacing"></a>
+### func \(\*FailurePolicyConfig\) GetPacing
+
+	func (f *FailurePolicyConfig) GetPacing() PacingConfig
+
+GetPacing returns the pacing sub\-block \(tree 02 leaf 05, D15\). See GetHorizon for the interface rationale.
+
+<a name="FailurePolicyConfig.GetPollFloor"></a>
+### func \(\*FailurePolicyConfig\) GetPollFloor
+
+	func (f *FailurePolicyConfig) GetPollFloor() time.Duration
+
+GetPollFloor returns PollFloor. See GetHorizon.
+
+<a name="FailurePolicyConfig.GetShortRetries"></a>
+### func \(\*FailurePolicyConfig\) GetShortRetries
+
+	func (f *FailurePolicyConfig) GetShortRetries() int
+
+GetShortRetries returns ShortRetries. See GetHorizon.
 
 <a name="FileWatcherHookConfig"></a>
 ## type FileWatcherHookConfig
@@ -1013,9 +2116,69 @@ FileWatcherHookConfig controls the file watcher hook that monitors the filesyste
 	
 	    // AsyncRewake, when true (Async must also be true), publishes a
 	    // hook.async_rewake bus signal after the async callback finishes so
-	    // the agent loop wakes up and can react to the file change.
+	    // the agent loop can wake up and react to the file change. Since the
+	    // loop keeps its own watcher, its consumer treats the signal (whose
+	    // session_id is typically empty) as a broadcast to itself.
 	    AsyncRewake bool `json:"async_rewake,omitempty"`
 	}
+
+<a name="GitCheckout"></a>
+## type GitCheckout
+
+GitCheckout manages the config repo checkout lifecycle.
+
+	type GitCheckout struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewGitCheckout"></a>
+### func NewGitCheckout
+
+	func NewGitCheckout(repoURL, checkoutDir string, logger *slog.Logger) (*GitCheckout, error)
+
+NewGitCheckout creates a new GitCheckout and performs an initial shallow clone if needed.
+
+<a name="GitCheckout.CommitAndPush"></a>
+### func \(\*GitCheckout\) CommitAndPush
+
+	func (g *GitCheckout) CommitAndPush(_ context.Context, message string) error
+
+CommitAndPush creates a commit from working tree changes and attempts push.
+
+<a name="GitCheckout.GetLatestCommit"></a>
+### func \(\*GitCheckout\) GetLatestCommit
+
+	func (g *GitCheckout) GetLatestCommit() (string, error)
+
+GetLatestCommit returns the latest commit hash in the repo.
+
+<a name="GitCheckout.IsDirty"></a>
+### func \(\*GitCheckout\) IsDirty
+
+	func (g *GitCheckout) IsDirty() (bool, error)
+
+IsDirty returns true if the working tree has uncommitted changes.
+
+<a name="GitCheckout.Path"></a>
+### func \(\*GitCheckout\) Path
+
+	func (g *GitCheckout) Path() string
+
+Path returns the checkout directory.
+
+<a name="GitCheckout.Pull"></a>
+### func \(\*GitCheckout\) Pull
+
+	func (g *GitCheckout) Pull(_ context.Context) (commitHash string, changed bool, err error)
+
+Pull attempts a shallow pull. Returns \(commitHash, changed, error\). If the working tree is dirty, pulls are skipped to avoid local changes overwriting.
+
+<a name="GitCheckout.Repo"></a>
+### func \(\*GitCheckout\) Repo
+
+	func (g *GitCheckout) Repo() *git.Repository
+
+Repo returns the underlying git.Repository, if available.
 
 <a name="HTTPHookConfig"></a>
 ## type HTTPHookConfig
@@ -1023,11 +2186,11 @@ FileWatcherHookConfig controls the file watcher hook that monitors the filesyste
 HTTPHookConfig mirrors agent.HTTPHookConfig for JSON\-based config loading. On daemon startup the entries are converted to agent.HTTPHookConfig values and wired as session lifecycle hooks. Keeping a parallel struct avoids an import cycle between internal/config and internal/agent.
 
 	type HTTPHookConfig struct {
-	    URL        string            `json:"url"`
-	    Method     string            `json:"method"`
-	    Headers    map[string]string `json:"headers"`
-	    Timeout    time.Duration     `json:"timeout"`
-
+	    URL     string            `json:"url"`
+	    Method  string            `json:"method"`
+	    Headers map[string]string `json:"headers"`
+	    Timeout time.Duration     `json:"timeout"`
+	
 	    // RetryCount controls per-execution retry behavior with a three-way
 	    // contract. It is a pointer so the JSON surface can distinguish an
 	    // absent key from an explicit 0:
@@ -1040,24 +2203,26 @@ HTTPHookConfig mirrors agent.HTTPHookConfig for JSON\-based config loading. On d
 	    //   n             → n retries (n+1 total attempts)
 	    //
 	    // Previously a plain int without a toml tag: TOML loads could not bind
-	    // `retry_count` at all (go\-toml matches by tag; the field\-name fallback
+	    // `retry_count` at all (go-toml matches by tag; the field-name fallback
 	    // cannot bridge the underscore), so only JSON5 users could set it — and
 	    // an explicit 0 was silently remapped to 3 by the hook constructor.
 	    RetryCount *int `json:"retry_count,omitempty" toml:"retry_count"`
-
+	
 	    // AllowedURLs are regex patterns the hook URL must match before any
-	    // request is sent (H9, bughunt 2026\-09\-03: the only production
+	    // request is sent (H9, bughunt 2026-09-03: the only production
 	    // NewHTTPHook call passed a nil allowlist, so every configured hook
 	    // failed "not in allowlist" before reaching the wire). When empty, the
-	    // daemon wiring auto\-allows the hook's OWN url — the operator already
+	    // daemon wiring auto-allows the hook's OWN url — the operator already
 	    // pinned the exact destination in config, which is the tighter of the
 	    // two safe defaults.
 	    AllowedURLs []string `json:"allowed_urls,omitempty"`
-
+	
 	    // Async runs the HTTP request in a background goroutine.
 	    Async bool `json:"async,omitempty"`
 	    // AsyncRewake publishes a hook.async_rewake bus signal after successful
-	    // async completion.
+	    // async completion. The agent loop subscribes to this topic and injects
+	    // a wake into the conversation whose ID matches the payload's
+	    // session_id (session hooks stamp it from the lifecycle state).
 	    AsyncRewake bool `json:"async_rewake,omitempty"`
 	}
 
@@ -1067,20 +2232,22 @@ HTTPHookConfig mirrors agent.HTTPHookConfig for JSON\-based config loading. On d
 HTTPTransportConfig configures the HTTP REST transport.
 
 	type HTTPTransportConfig struct {
-	    Enabled       bool     `json:"enabled"       toml:"enabled"`           // Enable HTTP server (default: false)
-	    Addr          string   `json:"addr"          toml:"addr"`              // Listen address (default: ":8081")
-	    UseTLS        bool     `json:"use_tls"       toml:"use_tls"`           // Enable HTTPS
-	    AutoTLSCert   bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`     // Auto-generate self-signed cert
-	    TLSCertFile   string   `json:"tls_cert_file" toml:"tls_cert_file"`     // TLS certificate file path
-	    TLSKeyFile    string   `json:"tls_key_file"  toml:"tls_key_file"`      // TLS key file path
-	    TLSMinVersion string   `json:"tls_min_version" toml:"tls_min_version"` // Minimum TLS version
-	    RequireAuth   bool     `json:"require_auth"  toml:"require_auth"`      // Require API key auth
-	    APIKeys       []string `json:"api_keys"      toml:"api_keys"`          // Valid API keys
-	    REST          bool     `json:"rest"          toml:"rest"`              // Enable REST API
-	    WebSocket     bool     `json:"websocket"     toml:"websocket"`         // Enable WebSocket
-	    WSPath        string   `json:"ws_path"       toml:"ws_path"`           // WebSocket endpoint path
-	    MCP           bool     `json:"mcp"           toml:"mcp"`               // Enable MCP over HTTP+SSE
-	    MCPPath       string   `json:"mcp_path"      toml:"mcp_path"`          // MCP endpoint path
+	    Enabled        bool     `json:"enabled"       toml:"enabled"`             // Enable HTTP server (default: false; shipped config template enables it)
+	    Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: ":8081"; SECURITY: keep 127.0.0.1 unless exposing intentionally)
+	    UseTLS         bool     `json:"use_tls"       toml:"use_tls"`             // Enable HTTPS (server ALWAYS uses TLS; field is accepted for compat — see comment)
+	    AutoTLSCert    bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`       // Auto-generate self-signed cert (server auto-generates whenever cert files are missing)
+	    TLSCertFile    string   `json:"tls_cert_file" toml:"tls_cert_file"`       // TLS certificate file path
+	    TLSKeyFile     string   `json:"tls_key_file"  toml:"tls_key_file"`        // TLS key file path
+	    TLSMinVersion  string   `json:"tls_min_version" toml:"tls_min_version"`   // Minimum TLS version
+	    RequireAuth    bool     `json:"require_auth"  toml:"require_auth"`        // Require API key auth
+	    APIKeys        []string `json:"api_keys"      toml:"api_keys"`            // Valid API keys
+	    REST           bool     `json:"rest"          toml:"rest"`                // Enable REST API
+	    WebSocket      bool     `json:"websocket"     toml:"websocket"`           // Enable WebSocket
+	    WSPath         string   `json:"ws_path"       toml:"ws_path"`             // WebSocket endpoint path
+	    MCP            bool     `json:"mcp"           toml:"mcp"`                 // Enable MCP over HTTP+SSE
+	    MCPPath        string   `json:"mcp_path"      toml:"mcp_path"`            // MCP endpoint path
+	    RateLimitRPM   int      `json:"rate_limit_rpm"  toml:"rate_limit_rpm"`    // Per-IP request rate limit (0 = default 120 req/min)
+	    RateLimitBurst int      `json:"rate_limit_burst" toml:"rate_limit_burst"` // Per-IP burst size (0 = default 30)
 	}
 
 <a name="HooksConfig"></a>
@@ -1148,11 +2315,19 @@ LLMConfig holds LLM configuration including budget, broker, and metrics.
 
 	type LLMConfig struct {
 	    Budget          BudgetConfig             `json:"budget"           toml:"budget"`
+	    ModelsDir       string                   `json:"models_dir"       toml:"models_dir"` // default ~/.meept/models
 	    Broker          LLMBrokerConfig          `json:"broker"           toml:"broker"`
 	    AdaptiveTimeout LLMAdaptiveTimeoutConfig `json:"adaptive_timeout" toml:"adaptive_timeout"`
 	    ContextFirewall LLMContextFirewallConfig `json:"context_firewall" toml:"context_firewall"`
-	    Metrics         LLMMetricsConfig         `json:"metrics"          toml:"metrics"`
-	    Cache           LLMSimpleFeatureConfig   `json:"cache"            toml:"cache"`
+	    QuotaRetry      QuotaRetryConfig         `json:"quota_retry"      toml:"quota_retry"`
+	    // FailurePolicy configures the long-horizon retry schedule for
+	    // provider failures (llm-resilience-forest tree 02 leaf 02, D8).
+	    FailurePolicy FailurePolicyConfig `json:"failure_policy"    toml:"failure_policy"`
+	    // ContextDiscovery configures provider context-length discovery
+	    // (llm-resilience-forest tree 05 leaf 01). Default OFF.
+	    ContextDiscovery ContextDiscoveryConfig `json:"context_discovery" toml:"context_discovery"`
+	    Metrics          LLMMetricsConfig       `json:"metrics"           toml:"metrics"`
+	    Cache            LLMSimpleFeatureConfig `json:"cache"             toml:"cache"`
 	}
 
 <a name="LLMContextFirewallConfig"></a>
@@ -1264,6 +2439,52 @@ LSPServerConfig configures a single LSP server.
 	    Languages []string `json:"languages" toml:"languages"`
 	}
 
+<a name="LearningCaptureConfig"></a>
+## type LearningCaptureConfig
+
+LearningCaptureConfig holds settings for passive research capture.
+
+	type LearningCaptureConfig struct {
+	    Enabled         bool     `json:"enabled"             toml:"enabled"`
+	    IncludeTools    []string `json:"include_tools"       toml:"include_tools"`
+	    MinQualityScore float64  `json:"min_quality_score"   toml:"min_quality_score"`
+	}
+
+<a name="LearningConfig"></a>
+## type LearningConfig
+
+LearningConfig holds LoRA learning pipeline settings.
+
+	type LearningConfig struct {
+	    Enabled     bool                    `json:"enabled"       toml:"enabled"`
+	    DataDir     string                  `json:"data_dir"      toml:"data_dir"`
+	    AdaptersDir string                  `json:"adapters_dir"  toml:"adapters_dir"`
+	    Capture     LearningCaptureConfig   `json:"capture"       toml:"capture"`
+	    Training    LearningTrainingConfig  `json:"training"      toml:"training"`
+	    Retention   LearningRetentionConfig `json:"retention"    toml:"retention"`
+	}
+
+<a name="LearningRetentionConfig"></a>
+## type LearningRetentionConfig
+
+LearningRetentionConfig holds dataset retention settings.
+
+	type LearningRetentionConfig struct {
+	    MaxDatasetSizeMB int `json:"max_dataset_size_mb" toml:"max_dataset_size_mb"`
+	    KeepVersions     int `json:"keep_versions"       toml:"keep_versions"`
+	}
+
+<a name="LearningTrainingConfig"></a>
+## type LearningTrainingConfig
+
+LearningTrainingConfig holds settings for LoRA training.
+
+	type LearningTrainingConfig struct {
+	    DefaultModel       string `json:"default_model"          toml:"default_model"`
+	    AutoTrainThreshold int    `json:"auto_train_threshold"   toml:"auto_train_threshold"`
+	    ManualOnly         bool   `json:"manual_only"            toml:"manual_only"`
+	}
+
 <a name="MCPConfig"></a>
 ## type MCPConfig
 
@@ -1296,6 +2517,30 @@ LoadMCPConfig loads MCP server configuration from a JSON5 file. If the file does
 	func LoadMCPConfigDefault() (*MCPServersConfig, error)
 
 LoadMCPConfigDefault loads MCP config from the default location \(\~/.meept/mcp\_servers.json5\).
+
+<a name="MediaConfig"></a>
+## type MediaConfig
+
+MediaConfig holds output settings for generate\_image / generate\_video. Models themselves live in models.json5 \(same provider/id \+ capabilities as LLMs\).
+
+	type MediaConfig struct {
+	    OutputDir      string `json:"output_dir"      toml:"output_dir"`
+	    TimeoutSeconds int    `json:"timeout_seconds" toml:"timeout_seconds"`
+	}
+
+<a name="DefaultMediaConfig"></a>
+### func DefaultMediaConfig
+
+	func DefaultMediaConfig() MediaConfig
+
+DefaultMediaConfig returns media output defaults.
+
+<a name="EffectiveMediaConfig"></a>
+### func EffectiveMediaConfig
+
+	func EffectiveMediaConfig(cfg MediaConfig) MediaConfig
+
+EffectiveMediaConfig fills empty output fields from defaults.
 
 <a name="MemoryBackend"></a>
 ## type MemoryBackend
@@ -1359,11 +2604,16 @@ MemoryConfig holds memory subsystem settings.
 	    Expiration MemoryExpirationConfig `json:"expiration" toml:"expiration"`
 	    // Versioning holds versioned memory settings
 	    Versioning MemoryVersioningConfig `json:"versioning" toml:"versioning"`
+	    // Distill holds memory distillation settings (lessons/procedures).
+	    Distill MemoryDistillConfig `json:"distill" toml:"distill"`
 	    // ProjectOverrides allows per-project character limit overrides
 	    ProjectOverrides map[string]MemoryLimitsConfig `json:"project_overrides" toml:"project_overrides"`
 	    // Epistemic holds epistemic memory settings (ambient extraction,
 	    // auto-trust weight, review prompts). See EpistemicConfig.
 	    Epistemic EpistemicConfig `json:"epistemic" toml:"epistemic"`
+	    // Usefulness holds memory usefulness voting settings. See
+	    // MemoryUsefulnessConfig.
+	    Usefulness MemoryUsefulnessConfig `json:"usefulness" toml:"usefulness"`
 	}
 
 <a name="MemoryConfig.GetLimitsForProject"></a>
@@ -1372,6 +2622,23 @@ MemoryConfig holds memory subsystem settings.
 	func (c *MemoryConfig) GetLimitsForProject(projectPath string) MemoryLimitsConfig
 
 GetLimitsForProject returns the character limits for a specific project path. If project\-specific overrides exist, they are returned; otherwise defaults are used.
+
+<a name="MemoryDistillConfig"></a>
+## type MemoryDistillConfig
+
+MemoryDistillConfig gates lessons/procedures distillation.
+
+	type MemoryDistillConfig struct {
+	    // Enabled turns on lesson/procedure distillation. Default false
+	    // (opt-in until validated).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // SimilarityThreshold is the dedup threshold: distilled candidates
+	    // matching an existing memory above this are suppressed. Default 0.85.
+	    SimilarityThreshold float64 `json:"similarity_threshold" toml:"similarity_threshold"`
+	    // MinRelevance is the minimum query/intent similarity for a procedure
+	    // to be injected into context. Default 0.6.
+	    MinRelevance float64 `json:"min_relevance" toml:"min_relevance"`
+	}
 
 <a name="MemoryExpirationConfig"></a>
 ## type MemoryExpirationConfig
@@ -1416,6 +2683,28 @@ MemorySecurityConfig holds memory security settings.
 	    LogBlocked bool `json:"log_blocked" toml:"log_blocked"`
 	}
 
+<a name="MemoryUsefulnessConfig"></a>
+## type MemoryUsefulnessConfig
+
+MemoryUsefulnessConfig holds memory usefulness voting settings driving consolidation eviction ordering \(loop\-economics leaf 14\).
+
+	type MemoryUsefulnessConfig struct {
+	    // Enabled turns on usefulness-scored eviction in consolidation.
+	    // Default false (opt-in until validated).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // FloorPct is the bottom fraction of memories (by usefulness) evicted
+	    // before any age-based rule. Default 0.05.
+	    FloorPct float64 `json:"floor_pct" toml:"floor_pct"`
+	    // Base is the baseline score for an unvoted, unused memory. Default 0.5.
+	    Base float64 `json:"base" toml:"base"`
+	    // Wv is the per-unit net-vote weight. Default 0.08.
+	    Wv  float64 `json:"wv" toml:"wv"`
+	    // Wa is the access-count weight applied via log1p(accesses). Default 0.05.
+	    Wa  float64 `json:"wa" toml:"wa"`
+	    // Ws is the per-day age penalty. Default 0.005.
+	    Ws  float64 `json:"ws" toml:"ws"`
+	}
+
 <a name="MemoryVersioningConfig"></a>
 ## type MemoryVersioningConfig
 
@@ -1438,22 +2727,72 @@ MemvidConfig holds memvid service settings.
 	    Timeout  int    `json:"timeout_seconds" toml:"timeout_seconds"`
 	}
 
+<a name="MergeResult"></a>
+## type MergeResult
+
+MergeResult holds the outcome of a Merge operation.
+
+	type MergeResult struct {
+	    FilesApplied []string `json:"files_applied"`
+	    FilesSkipped []string `json:"files_skipped"`
+	    Errors       []error  `json:"errors,omitempty"`
+	    CommitHash   string   `json:"commit_hash"`
+	}
+
+<a name="Merger"></a>
+## type Merger
+
+Merger handles config file merging from shared and per\-node overrides.
+
+	type Merger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewMerger"></a>
+### func NewMerger
+
+	func NewMerger(baseDir, checkoutDir, nodeID string, l logger) *Merger
+
+NewMerger creates a new Merger.
+
+<a name="Merger.FileWouldChange"></a>
+### func \(\*Merger\) FileWouldChange
+
+	func (m *Merger) FileWouldChange(path string) (bool, error)
+
+ApplyConfigFile is exposed so callers like the CLI can check if a file would change before triggering a full merge.
+
+<a name="Merger.Merge"></a>
+### func \(\*Merger\) Merge
+
+	func (m *Merger) Merge(commitHash string) (*MergeResult, error)
+
+Merge applies shared \+ per\-node configs, returning applied/skipped/errored files.
+
 <a name="Model"></a>
 ## type Model
 
 Model represents a model configuration.
 
 	type Model struct {
-	    Name             string   `json:"name"`
-	    Capabilities     []string `json:"capabilities"`
-	    InputCost        float64  `json:"input_cost"`
-	    OutputCost       float64  `json:"output_cost"`
-	    ContextLimit     int      `json:"context_limit"`
-	    MaxOutput        int      `json:"max_output"`
-	    Temperature      float64  `json:"temperature"`
-	    TopP             float64  `json:"top_p,omitempty"`
-	    FrequencyPenalty float64  `json:"frequency_penalty,omitempty"`
-	    PresencePenalty  float64  `json:"presence_penalty,omitempty"`
+	    Name             string         `json:"name"`
+	    Capabilities     []string       `json:"capabilities"`
+	    InputCost        float64        `json:"input_cost"`
+	    OutputCost       float64        `json:"output_cost"`
+	    ContextLimit     int            `json:"context_limit"`
+	    MaxOutput        int            `json:"max_output"`
+	    Temperature      float64        `json:"temperature"`
+	    TopP             float64        `json:"top_p,omitempty"`
+	    FrequencyPenalty float64        `json:"frequency_penalty,omitempty"`
+	    PresencePenalty  float64        `json:"presence_penalty,omitempty"`
+	    API              string         `json:"api,omitempty"`
+	    Workflow         string         `json:"workflow,omitempty"`
+	    GenerationURL    string         `json:"generation_url,omitempty"`
+	    BodyTemplate     map[string]any `json:"body_template,omitempty"`
+	    ResponseURLPath  string         `json:"response_url_json_path,omitempty"`
+	    ResponseB64Path  string         `json:"response_b64_json_path,omitempty"`
+	    ImageApp         string         `json:"image_app,omitempty"`
+	    VideoApp         string         `json:"video_app,omitempty"`
 	}
 
 <a name="ModelParams"></a>
@@ -1490,6 +2829,9 @@ ModelsConfig represents the models.json5 configuration structure.
 	    SmallModel        string              `json:"small_model"`
 	    ClassifierModel   string              `json:"classifier_model"` // Model for intent classification (empty = use model)
 	    SummarizerModel   string              `json:"summarizer_model"` // Model for session summarization (empty = use model)
+	    VisionModel       string              `json:"vision_model"`
+	    ImageModel        string              `json:"image_model"`
+	    VideoModel        string              `json:"video_model"`
 	    DisabledProviders []string            `json:"disabled_providers"`
 	    DefaultTimeout    int                 `json:"default_timeout"` // Default timeout in seconds
 	    Providers         map[string]Provider `json:"providers"`
@@ -1521,6 +2863,21 @@ MultiAgentConfig holds multi\-agent orchestration settings.
 	    ClassifierModel    string `json:"classifier_model"     toml:"classifier_model"` // Model for intent classification (defaults to small_model)
 	    MaxMemoryRefs      int    `json:"max_memory_refs"      toml:"max_memory_refs"`
 	    ContextSearchLimit int    `json:"context_search_limit" toml:"context_search_limit"`
+	}
+
+<a name="MultiUserConfig"></a>
+## type MultiUserConfig
+
+MultiUserConfig configures opt\-in multi\-user authentication for the HTTP transport \(\[multiuser\]\).
+
+Disabled by default: when Enabled is false, the daemon never constructs an auth.Store and the legacy flat transport.http.api\_keys path behaves identically to before multi\-user support existed.
+
+	type MultiUserConfig struct {
+	    // Enabled toggles multi-user key validation. Default false.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // UsersFile is the path to the JSON5 users store. Tilde (~) paths are
+	    // expanded at load time. Default: ~/.meept/users.json5.
+	    UsersFile string `json:"users_file" toml:"users_file"`
 	}
 
 <a name="NativeConfig"></a>
@@ -1578,12 +2935,22 @@ OAuthProviderEntry holds per\-provider OAuth overrides.
 OrchestratorConfig holds hierarchical orchestrator settings.
 
 	type OrchestratorConfig struct {
-	    MaxPlanSteps        int  `json:"max_plan_steps"        toml:"max_plan_steps"`
-	    MaxResearchSteps    int  `json:"max_research_steps"    toml:"max_research_steps"`
-	    PlannerTimeout      int  `json:"planner_timeout"       toml:"planner_timeout"`
-	    TokenBudgetAlert    int  `json:"token_budget_alert"    toml:"token_budget_alert"`
-	    MaxHandoffSteps     int  `json:"max_handoff_steps"     toml:"max_handoff_steps"`
-	    HandoffUseAmendment bool `json:"handoff_use_amendment" toml:"handoff_use_amendment"`
+	    MaxPlanSteps                int     `json:"max_plan_steps"                toml:"max_plan_steps"`
+	    MaxResearchSteps            int     `json:"max_research_steps"            toml:"max_research_steps"`
+	    PlannerTimeout              int     `json:"planner_timeout"               toml:"planner_timeout"`
+	    TokenBudgetAlert            int     `json:"token_budget_alert"            toml:"token_budget_alert"`
+	    MaxHandoffSteps             int     `json:"max_handoff_steps"             toml:"max_handoff_steps"`
+	    HandoffUseAmendment         bool    `json:"handoff_use_amendment"         toml:"handoff_use_amendment"`
+	    AmbiguityThreshold          float64 `json:"ambiguity_threshold"           toml:"ambiguity_threshold"`           // dispatcher: blocks routing when analyzer ambiguity >= this
+	    InterviewAmbiguityThreshold float64 `json:"interview_ambiguity_threshold" toml:"interview_ambiguity_threshold"` // planner: conducts interview for plan-mode when >= this
+	    MaxStepsPerPhase            int     `json:"max_steps_per_phase"           toml:"max_steps_per_phase"`           // Thread C+F: per-phase step cap
+	    MaxPhases                   int     `json:"max_phases"                    toml:"max_phases"`                    // Thread C+F: phase count soft cap
+	    // ClassifierFailFast disables classifier alias rotation: when true,
+	    // the intent analyzer fails the turn with the primary classifier's
+	    // error instead of rotating to weaker alias members. Default false —
+	    // production keeps rotation; exists to make classifier failures
+	    // honest during testing/iteration.
+	    ClassifierFailFast bool `json:"classifier_fail_fast" toml:"classifier_fail_fast"`
 	}
 
 <a name="PTYConfig"></a>
@@ -1600,6 +2967,27 @@ PTYConfig holds pseudo\-terminal streaming settings.
 	    TLSEnabled      bool   `json:"tls_enabled"      toml:"tls_enabled"`
 	}
 
+<a name="PacingConfig"></a>
+## type PacingConfig
+
+PacingConfig configures adaptive pacing below a provider's effective rate\-limit ceiling \(DECISIONS.md D15\). Default on \(default flipped from the original opt\-in after the ticket\-reservation gap fix\); leaf 05 owns the AdaptivePacer that consumes it.
+
+	type PacingConfig struct {
+	    // Enabled turns adaptive pacing on. Default true. Set false to
+	    // restore the unpaced pass-through (a disabled — or nil — pacer
+	    // never waits).
+	    Enabled bool `json:"enabled"      toml:"enabled"`
+	    // Target429PerHour is the tolerated throttle-429 rate per provider per
+	    // hour; a higher observed rate holds the pacing gap at its floor
+	    // (leaf 05: "tolerate at most N throttle 429/hour/provider"). Default 1.
+	    Target429PerHour int `json:"target_429_per_hour" toml:"target_429_per_hour"` // default 1
+	    // MinInterval is the shortest gap between outbound requests to one
+	    // provider. Default 1s.
+	    MinInterval time.Duration `json:"min_interval" toml:"min_interval"`
+	    // MaxInterval is the ceiling on the learned pacing gap. Default 30s.
+	    MaxInterval time.Duration `json:"max_interval" toml:"max_interval"`
+	}
+
 <a name="ParakeetConfig"></a>
 ## type ParakeetConfig
 
@@ -1609,6 +2997,45 @@ ParakeetConfig holds parakeet.cpp engine settings.
 	    BinPath   string `json:"bin_path"   toml:"bin_path"`
 	    ModelPath string `json:"model_path" toml:"model_path"`
 	}
+
+<a name="PeerSyncConfig"></a>
+## type PeerSyncConfig
+
+PeerSyncConfig holds configuration for peer\-to\-peer backup synchronization. This is separate from SyncConfig \(memory sync/hydration\) in schema.go.
+
+	type PeerSyncConfig struct {
+	    // Enabled turns on synchronous pull from backup repo
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Peers lists known peer node IDs to sync with
+	    Peers []string `json:"peers" toml:"peers"`
+	    // PullSchedule is the interval between automatic pull cycles (0 = disabled)
+	    PullSchedule time.Duration `json:"pull_schedule" toml:"pull_schedule"`
+	    // MaxMergeMinutes is the maximum time allowed for a merge operation (default 10m)
+	    MaxMergeMinutes int `json:"max_merge_minutes" toml:"max_merge_minutes"`
+	    // RepoURL is the git repo URL for backup synchronization (inherited from backup.repo_url)
+	    RepoURL string `json:"repo_url" toml:"repo_url"`
+	}
+
+<a name="DefaultPeerSyncConfig"></a>
+### func DefaultPeerSyncConfig
+
+	func DefaultPeerSyncConfig() PeerSyncConfig
+
+DefaultPeerSyncConfig returns sensible defaults.
+
+<a name="PeerSyncConfig.IsValidated"></a>
+### func \(\*PeerSyncConfig\) IsValidated
+
+	func (c *PeerSyncConfig) IsValidated() bool
+
+IsValidated reports whether c is enabled and fully configured.
+
+<a name="PeerSyncConfig.Validate"></a>
+### func \(\*PeerSyncConfig\) Validate
+
+	func (c *PeerSyncConfig) Validate() error
+
+Validate checks that PeerSyncConfig is valid when enabled.
 
 <a name="PersonalityConfig"></a>
 ## type PersonalityConfig
@@ -1654,7 +3081,22 @@ PlansConfig holds configuration for the plan system.
 	    Storage      PlansStorageConfig      `json:"storage"       toml:"storage"`
 	    Approval     PlansApprovalConfig     `json:"approval"      toml:"approval"`
 	    Confirmation PlansConfirmationConfig `json:"confirmation"  toml:"confirmation"`
+	
+	    // ParallelPhases enables frontier-based phase dispatch: multiple
+	    // plan phases run concurrently when their Produces/Consumes
+	    // dependencies allow. Default false = strict serial phases
+	    // (legacy behavior). Meaningful parallelism requires plans whose
+	    // phases declare Produces/Consumes artifacts. See
+	    // docs/workflows/agent-orchestration.md (phase frontier section).
+	    ParallelPhases bool `json:"parallel_phases" toml:"parallel_phases"`
 	}
+
+<a name="PlansConfig.Validate"></a>
+### func \(\*PlansConfig\) Validate
+
+	func (c *PlansConfig) Validate() error
+
+Validate validates the PlansConfig.
 
 <a name="PlansConfirmationConfig"></a>
 ## type PlansConfirmationConfig
@@ -1749,6 +3191,20 @@ GetPreset returns a specific preset by name.
 
 ListPresets returns all available preset names.
 
+<a name="ProjectRecentConfig"></a>
+## type ProjectRecentConfig
+
+ProjectRecentConfig controls the retention policy for recent project paths. Recents are stored in the project\_recents table and pruned periodically via a scheduled daemon job \(SchedulePruneJob\).
+
+	type ProjectRecentConfig struct {
+	    // MaxEntries caps the number of recent paths retained (default 50).
+	    // Older entries beyond this cap are removed first.
+	    MaxEntries int `json:"max_entries" toml:"max_entries"`
+	    // TTLDays removes entries whose last_used_at predates now-TTLDays
+	    // (default 30). Set to 0 to disable TTL pruning.
+	    TTLDays int `json:"ttl_days" toml:"ttl_days"`
+	}
+
 <a name="ProjectsConfig"></a>
 ## type ProjectsConfig
 
@@ -1833,7 +3289,67 @@ QueueConfig holds job queue settings.
 	type QueueConfig struct {
 	    DBPath     string `json:"db_path"     toml:"db_path"`
 	    MaxRetries int    `json:"max_retries" toml:"max_retries"`
+	
+	    // InteractiveWindow is the D11/Q1 recency window for the session
+	    // interactivity signal: a session counts as interactive if it received
+	    // a user message within this window (or holds the foreground flag).
+	    // A duration string ("5m") rather than time.Duration on purpose: the
+	    // JSON5 loader rewrites bare duration tokens to nanosecond integers,
+	    // which cannot unmarshal into a string field — and rejecting the whole
+	    // config over this knob would be worse than falling back to the Q1
+	    // default in the getter.
+	    InteractiveWindow string `json:"interactive_window" toml:"interactive_window"`
 	}
+
+<a name="QuotaRetryConfig"></a>
+## type QuotaRetryConfig
+
+QuotaRetryConfig configures quota\-reset resilience: detection of provider quota/usage\-limit errors, bounded waits for the reset window, and deferral polling. See the quota\-reset\-resilience plan \(docs/plans/\).
+
+Zero\-value semantics: because Load/LoadJSON5Config unmarshal user config ONTO DefaultConfig\(\), an unset section inherits these defaults from DefaultConfig\(\). For a zero\-value struct used directly \(e.g. a Resolver built without the daemon config object\), call Normalize to apply enabled\-with\-defaults. Defaults: enabled, 24h max wait, 1h default estimate, 10m defer re\-check interval.
+
+	type QuotaRetryConfig struct {
+	    // Enabled turns quota error detection/retry on. Default true.
+	    Enabled bool `json:"enabled"             toml:"enabled"`
+	    // MaxWait is the upper bound on any quota wait/block/defer. When the
+	    // computed reset horizon exceeds MaxWait, callers soft-stop instead of
+	    // waiting. Default 24h.
+	    MaxWait time.Duration `json:"max_wait"            toml:"max_wait"`
+	    // DefaultEstimate is assumed to remain until reset when the provider
+	    // does not disclose a reset time. Default 1h.
+	    DefaultEstimate time.Duration `json:"default_estimate"    toml:"default_estimate"`
+	    // DeferCheckInterval is the re-check cadence for deferred tasks.
+	    // Default 10m.
+	    DeferCheckInterval time.Duration `json:"defer_check_interval" toml:"defer_check_interval"`
+	}
+
+<a name="QuotaRetryConfig.GetDefaultEstimate"></a>
+### func \(\*QuotaRetryConfig\) GetDefaultEstimate
+
+	func (q *QuotaRetryConfig) GetDefaultEstimate() time.Duration
+
+GetDefaultEstimate returns DefaultEstimate. See GetEnabled.
+
+<a name="QuotaRetryConfig.GetDeferCheckInterval"></a>
+### func \(\*QuotaRetryConfig\) GetDeferCheckInterval
+
+	func (q *QuotaRetryConfig) GetDeferCheckInterval() time.Duration
+
+GetDeferCheckInterval returns DeferCheckInterval. See GetEnabled.
+
+<a name="QuotaRetryConfig.GetEnabled"></a>
+### func \(\*QuotaRetryConfig\) GetEnabled
+
+	func (q *QuotaRetryConfig) GetEnabled() bool
+
+GetEnabled returns Enabled. Part of the getter surface llm.ConfigFromSchema reads via its parameter interface \(kept interface\-based to avoid an internal/llm \-\> internal/config import cycle\).
+
+<a name="QuotaRetryConfig.GetMaxWait"></a>
+### func \(\*QuotaRetryConfig\) GetMaxWait
+
+	func (q *QuotaRetryConfig) GetMaxWait() time.Duration
+
+GetMaxWait returns MaxWait. See GetEnabled.
 
 <a name="RPCTransportConfig"></a>
 ## type RPCTransportConfig
@@ -1843,6 +3359,13 @@ RPCTransportConfig configures the Unix socket RPC transport.
 	type RPCTransportConfig struct {
 	    Enabled    bool   `json:"enabled"     toml:"enabled"`     // Enable Unix socket RPC (default: true)
 	    SocketPath string `json:"socket_path" toml:"socket_path"` // Unix socket path (default: "~/.meept/meept.sock")
+	    // AllowedUIDs restricts Unix-socket RPC connections to these
+	    // kernel-verified peer UIDs. Empty (default) disables enforcement —
+	    // log-only mode. The daemon logs each connection's OS user.
+	    AllowedUIDs []int `json:"allowed_uids" toml:"allowed_uids"`
+	    // PeerCredLog controls per-connection Debug logging of the peer UID
+	    // (default: true).
+	    PeerCredLog bool `json:"peer_cred_log" toml:"peer_cred_log"`
 	}
 
 <a name="ReasoningGlobalConfig"></a>
@@ -1864,6 +3387,91 @@ RecordingConfig holds audio recording settings for STT.
 	    SampleRate  int    `json:"sample_rate"  toml:"sample_rate"`
 	    Channels    int    `json:"channels"     toml:"channels"`
 	    Format      string `json:"format"       toml:"format"`
+	}
+
+<a name="ReflectionCollectorConfig"></a>
+## type ReflectionCollectorConfig
+
+ReflectionCollectorConfig configures Turbo Thread E immediate self\-reflection. Distinct from AgentReflectionConfig \(which controls auto\-fix lint/test retry loops\). This controls per\-turn lesson extraction and the .meept/improvements.md proposal queue.
+
+	type ReflectionCollectorConfig struct {
+	    Enabled              bool    `json:"enabled"                        toml:"enabled"`
+	    AutoQueue            bool    `json:"auto_queue"                     toml:"auto_queue"`
+	    AutoSkillUnder       string  `json:"auto_skill_under"               toml:"auto_skill_under"`
+	    SkillProposalsOnly   bool    `json:"skill_proposals_only"           toml:"skill_proposals_only"`
+	    AutoApplyAll         bool    `json:"auto_apply_all"                 toml:"auto_apply_all"`
+	    InactivityMinutes    int     `json:"inactivity_minutes"             toml:"inactivity_minutes"`
+	    TimerIntervalMinutes int     `json:"timer_interval_minutes"         toml:"timer_interval_minutes"`
+	    TurnConfidenceMin    float64 `json:"turn_confidence_min"            toml:"turn_confidence_min"`
+	    SessionConfidenceMin float64 `json:"session_confidence_min"         toml:"session_confidence_min"`
+	    MaxSessionProposals  int     `json:"max_session_proposals"          toml:"max_session_proposals"`
+	}
+
+<a name="ReloadFunc"></a>
+## type ReloadFunc
+
+ReloadFunc is called when a config file changes and needs to be reloaded. The commitHash identifies the git commit that introduced the change. Hooks are responsible for re\-reading the file from disk if they need the new contents; the registry does not parse configs \(they may be any format: JSON5, TOML, etc.\) and therefore cannot hand the hook parsed old/new pairs.
+
+	type ReloadFunc func(commitHash string) error
+
+<a name="ReloadRegistry"></a>
+## type ReloadRegistry
+
+ReloadRegistry manages reload callbacks for config file changes.
+
+	type ReloadRegistry struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewReloadRegistry"></a>
+### func NewReloadRegistry
+
+	func NewReloadRegistry() *ReloadRegistry
+
+NewReloadRegistry creates an empty registry.
+
+<a name="ReloadRegistry.Len"></a>
+### func \(\*ReloadRegistry\) Len
+
+	func (r *ReloadRegistry) Len(path string) int
+
+Len returns the number of hooks registered for a path.
+
+<a name="ReloadRegistry.Register"></a>
+### func \(\*ReloadRegistry\) Register
+
+	func (r *ReloadRegistry) Register(path string, fn ReloadFunc)
+
+Register adds a reload hook for a config file path or name.
+
+<a name="ReloadRegistry.RegisteredHooks"></a>
+### func \(\*ReloadRegistry\) RegisteredHooks
+
+	func (r *ReloadRegistry) RegisteredHooks() []string
+
+RegisteredHooks returns a list of registered hook paths.
+
+<a name="ReloadRegistry.Trigger"></a>
+### func \(\*ReloadRegistry\) Trigger
+
+	func (r *ReloadRegistry) Trigger(path string, commitHash string)
+
+Trigger calls all hooks registered for the given path. Errors from individual hooks are logged but don't stop subsequent hooks. The commitHash is forwarded to each hook so it can log or correlate the change with the git commit that introduced it.
+
+<a name="ResolverConfig"></a>
+## type ResolverConfig
+
+ResolverConfig configures sandboxed\-backend selection for [runtime](<https://pkg.go.dev/runtime/>). It mirrors runtime.ResolverConfig \(config does not import runtime; mapping happens in internal/daemon/components.go per existing convention\).
+
+	Order: "auto" (docker > bwrap > local), "bwrap", "docker", or "local".
+	RequireSandbox: when true and no qualifying backend is available,
+	startup REFUSES command execution (fail closed) instead of degrading
+	to unsandboxed local exec.
+	
+
+	type ResolverConfig struct {
+	    Order          string `json:"sandbox_backend_order" toml:"sandbox_backend_order"`
+	    RequireSandbox bool   `json:"require_sandbox"       toml:"require_sandbox"`
 	}
 
 <a name="ReviewConfig"></a>
@@ -1896,6 +3504,37 @@ RuntimeConfig holds configuration for execution backends \(local, Docker\).
 	    DefaultBackend string `json:"default_backend" toml:"default_backend"`
 	    // Docker holds Docker-specific configuration.
 	    Docker DockerRuntimeConfig `json:"docker" toml:"docker"`
+	    // EnvPolicy controls how child process environments are built
+	    // (allowlist vs inherit). Normalized by NormalizeRuntimeDefaults.
+	    EnvPolicy EnvPolicyConfig `json:"env_policy" toml:"env_policy"`
+	    // Sandbox controls sandboxed-backend selection and fail-closed
+	    // semantics. See ResolverConfig.
+	    Sandbox ResolverConfig `json:"sandbox" toml:"sandbox"`
+	    // Bwrap holds bubblewrap backend settings used when the sandbox
+	    // resolver selects the bwrap backend.
+	    Bwrap BwrapRuntimeConfig `json:"bwrap" toml:"bwrap"`
+	}
+
+<a name="SSRFConfig"></a>
+## type SSRFConfig
+
+SSRFConfig configures the centralized SSRF guard applied to outbound HTTP clients \(web\_fetch, web\_search\). Enabled by default: URLs are restricted to http/https, resolved IPs are denied against private, loopback, link\-local, and cloud\-metadata CIDRs unless explicitly allowed, and every redirect hop is re\-validated.
+
+	type SSRFConfig struct {
+	    // Enabled toggles the centralized SSRF guard. Default true. When
+	    // false the tools fall back to the legacy built-in checks and a
+	    // startup warning is logged.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // AllowedHosts bypass IP checks via dot-delimited suffix match
+	    // (e.g., "api.github.com").
+	    AllowedHosts []string `json:"allowed_hosts" toml:"allowed_hosts"`
+	    // AllowedCIDRs exempt IPs from the blocklist (e.g., "10.0.0.0/8"
+	    // for corporate networks).
+	    AllowedCIDRs []string `json:"allowed_cidrs" toml:"allowed_cidrs"`
+	    // BlockedCIDRs replaces the default blocklist when non-empty.
+	    BlockedCIDRs []string `json:"blocked_cidrs" toml:"blocked_cidrs"`
+	    // MaxRedirects caps redirect hops. Default 5.
+	    MaxRedirects int `json:"max_redirects" toml:"max_redirects"`
 	}
 
 <a name="STTConfig"></a>
@@ -1953,6 +3592,40 @@ SchedulerConfig holds scheduler settings.
 	    Timezone string `json:"timezone" toml:"timezone"`
 	}
 
+<a name="SecretSources"></a>
+## type SecretSources
+
+SecretSources is the secret\-name \-\> source map. An alias of the broker package's Source type keeps the two layers in lockstep.
+
+	type SecretSources map[string]secrets.Source
+
+<a name="SecretsConfig"></a>
+## type SecretsConfig
+
+SecretsConfig holds declared secrets loaded into the daemon's secret broker at startup. Children receive only MEEPT\_SECRET:\<name\> placeholders; real values stay in broker memory \(see internal/secrets\).
+
+	type SecretsConfig struct {
+	    // Sources maps secret name -> where its value is loaded from.
+	    // Declared as an alias of internal/secrets.Source so config and broker
+	    // share one definition.
+	    Sources SecretSources `json:"sources" toml:"sources"`
+	
+	    // Proxy configures the egress proxy that resolves placeholders in
+	    // outgoing requests (behavior owned by leaf 04; declared here so the
+	    // knob exists).
+	    Proxy SecretsProxyConfig `json:"proxy" toml:"proxy"`
+	}
+
+<a name="SecretsProxyConfig"></a>
+## type SecretsProxyConfig
+
+SecretsProxyConfig holds egress\-proxy settings. Enabled defaults to false; leaf 04 implements behavior against this shape.
+
+	type SecretsProxyConfig struct {
+	    Enabled bool   `json:"enabled" toml:"enabled"`
+	    Listen  string `json:"listen"  toml:"listen"` // default "127.0.0.1:0" (ephemeral) when enabled
+	}
+
 <a name="SecurityConfig"></a>
 ## type SecurityConfig
 
@@ -1992,7 +3665,25 @@ SecurityConfig holds security settings.
 	    // Path fencing for agent sandboxing
 	    FenceEnabled   bool     `json:"fence_enabled"    toml:"fence_enabled"`
 	    FenceAllowRead []string `json:"fence_allow_read" toml:"fence_allow_read"`
+	
+	    // SSRF guard for outbound web tool fetches (web_fetch, web_search)
+	    SSRF SSRFConfig `json:"ssrf" toml:"ssrf"`
+	
+	    // Declarative shell command permission table ([security.shell_permissions]).
+	    // Prefix-keyed allow/ask/deny policy evaluated before tirith scanning.
+	    ShellPermissions ShellPermissionsConfig `json:"shell_permissions" toml:"shell_permissions"`
+	
+	    // Egress policy for the secrets proxy ([security.egress]): ordered
+	    // host-suffix/CIDR allow/ask/deny rules consulted before secret injection.
+	    Egress EgressConfig `json:"egress" toml:"egress"`
 	}
+
+<a name="SecurityConfig.Validate"></a>
+### func \(\*SecurityConfig\) Validate
+
+	func (c *SecurityConfig) Validate() error
+
+Validate validates the SecurityConfig.
 
 <a name="SelfImproveConfig"></a>
 ## type SelfImproveConfig
@@ -2046,6 +3737,15 @@ SessionConfig holds session persistence and branching settings.
 	    // ThreadsEnabled controls whether the thread feature is available.
 	    // Default true (threads replace branches).
 	    ThreadsEnabled bool `json:"threads_enabled" toml:"threads_enabled"`
+	
+	    // SQLiteBusyTimeoutMs is the busy timeout (in milliseconds) for the SQLite
+	    // session store's _busy_timeout PRAGMA. Default 5000.
+	    SQLiteBusyTimeoutMs int `json:"sqlite_busy_timeout_ms" toml:"sqlite_busy_timeout_ms"`
+	
+	    // SummaryPromptTruncationLimit is the maximum character length of the user
+	    // prompt sent to the LLM during session summarization. Prompts exceeding
+	    // this limit are truncated. Default 8000.
+	    SummaryPromptTruncationLimit int `json:"summary_prompt_truncation_limit" toml:"summary_prompt_truncation_limit"`
 	}
 
 <a name="ShadowAdaptersConfig"></a>
@@ -2062,6 +3762,15 @@ ShadowAdaptersConfig configures adapter management.
 	    AdapterDir     string           `json:"adapter_dir"     toml:"adapter_dir"`
 	    LoRA           ShadowLoRAConfig `json:"lora"            toml:"lora"`
 	    DPO            ShadowDPOConfig  `json:"dpo"             toml:"dpo"`
+	
+	    // HotSwapEnabled controls whether activated adapters are hot-swapped into
+	    // the serving LLM client via the Ollama activator + agent-loop callback.
+	    // When false, ActivateAdapter only flips the DB flag. Default true.
+	    HotSwapEnabled bool `json:"hot_swap_enabled" toml:"hot_swap_enabled"`
+	
+	    // EvalThreshold is the minimum eval score a TrainingRun must achieve
+	    // before its adapter can be activated. 0.0 disables the gate. Default 0.7.
+	    EvalThreshold float64 `json:"eval_threshold" toml:"eval_threshold"`
 	}
 
 <a name="ShadowConfig"></a>
@@ -2196,6 +3905,20 @@ ShadowTeacherConfig configures the teacher model.
 	    RequestsPerMinute int     `json:"requests_per_minute" toml:"requests_per_minute"`
 	}
 
+<a name="ShellPermissionsConfig"></a>
+## type ShellPermissionsConfig
+
+ShellPermissionsConfig configures the declarative shell permission table.
+
+	type ShellPermissionsConfig struct {
+	    // Preset selects a shipped rule set: "workspace" (default), "readonly",
+	    // or "danger" (empty). Use "" only with a custom rules map.
+	    Preset string `json:"preset" toml:"preset"`
+	    // Rules overrides/extends the preset. Keys are command prefixes
+	    // (e.g. "git push", "rm -rf"); values are "allow", "ask", or "deny".
+	    Rules map[string]string `json:"rules" toml:"rules"`
+	}
+
 <a name="SkillsConfig"></a>
 ## type SkillsConfig
 
@@ -2210,6 +3933,8 @@ SkillsConfig holds skills settings.
 	    HermesSkillsDir       string              `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
 	    ValidatePrerequisites bool                `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
 	    Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings
+	    Wiki                  SkillsWikiConfig    `json:"wiki"                    toml:"wiki"`                   // Wiki knowledge store (raw/consolidated evidence base)
+	    State                 SkillsStateConfig   `json:"state"                   toml:"state"`                  // SKILL.state execution mode settings
 	}
 
 <a name="SkillsEvolverConfig"></a>
@@ -2224,8 +3949,30 @@ SkillsEvolverConfig configures the skill evolver — the scheduled process that 
 	    MinEffectiveness           float64       `json:"min_effectiveness"              toml:"min_effectiveness"`            // Prune threshold; default 0.2
 	    PatternPromotionConfidence float64       `json:"pattern_promotion_confidence"   toml:"pattern_promotion_confidence"` // Default 0.7
 	    PatternPromotionUseCount   int           `json:"pattern_promotion_use_count"    toml:"pattern_promotion_use_count"`  // Default 5
+	    MinProposalConfidence      float64       `json:"min_proposal_confidence"        toml:"min_proposal_confidence"`      // Default 0.7; reflection proposals below this confidence are dropped before reaching the verifier
 	    AutoApply                  bool          `json:"auto_apply"                     toml:"auto_apply"`                   // Default false (requires plan approval)
 	    RunOnStart                 bool          `json:"run_on_start"                   toml:"run_on_start"`                 // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
+	    PlanDir                    string        `json:"plan_dir"                       toml:"plan_dir"`                     // Evolver plan sink; default "" -> ~/.meept/plans/evolver (user-scoped, machine-originated plans)
+	}
+
+<a name="SkillsStateConfig"></a>
+## type SkillsStateConfig
+
+SkillsStateConfig configures SKILL.state execution mode — a per\-skill persistent state layer \(arXiv:2608.26263\) routed through the skill\-state runtime instead of the conversation loop. Opt\-in by config.
+
+	type SkillsStateConfig struct {
+	    Enabled       bool `json:"enabled"         toml:"enabled"`         // default false
+	    MaxStateChars int  `json:"max_state_chars" toml:"max_state_chars"` // prompt budget for the state JSON block; default 2000
+	}
+
+<a name="SkillsWikiConfig"></a>
+## type SkillsWikiConfig
+
+SkillsWikiConfig configures the wiki knowledge store \(arXiv:2608.27454\). The store is inert until wired into the daemon's learning pipeline and evolver; enabled=true alone changes no runtime behavior.
+
+	type SkillsWikiConfig struct {
+	    Enabled bool   `json:"enabled" toml:"enabled"` // default true
+	    Dir     string `json:"dir"     toml:"dir"`     // default "~/.meept/wiki"
 	}
 
 <a name="SyncConfig"></a>
@@ -2246,6 +3993,22 @@ SyncConfig holds sync timing and behavior settings.
 	    RetryOnFailure bool `json:"retry_on_failure" toml:"retry_on_failure"`
 	    // MaxRetries is the max retry attempts for failed operations
 	    MaxRetries int `json:"max_retries" toml:"max_retries"`
+	}
+
+<a name="SyncStatus"></a>
+## type SyncStatus
+
+SyncStatus carries snapshot data about sync state.
+
+	type SyncStatus struct {
+	    Enabled           bool   `json:"enabled"`
+	    RepoURL           string `json:"repo_url"`
+	    PullRate          string `json:"pull_rate"`
+	    NodeID            string `json:"node_id"`
+	    LastCommit        string `json:"last_commit"`
+	    LastAppliedCommit string `json:"last_applied_commit,omitempty"`
+	    Checkout          string `json:"checkout"`
+	    Dirty             bool   `json:"dirty"`
 	}
 
 <a name="TTSBehaviorConfig"></a>
@@ -2428,6 +4191,32 @@ ToolingConfig holds tool call serialization sidecar settings. Used for delegatin
 	    LogUnknownTools bool `json:"log_unknown_tools" toml:"log_unknown_tools"`
 	}
 
+<a name="TranscriptConfig"></a>
+## type TranscriptConfig
+
+TranscriptConfig configures the transcript\_fetch tool \(\[transcript\]\). Disabled by default: the tool shells out to an external Python dependency \(youtube\-transcript\-api\), so it is opt\-in like \[browser\]. When enabled=false the transcript\_fetch tool is absent from the registry entirely.
+
+	type TranscriptConfig struct {
+	    // Enabled toggles the transcript_fetch tool. Default false: enabling
+	    // requires the youtube-transcript-api Python package on the host.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // PythonPath overrides the interpreter used for the subprocess. Default
+	    // "python3".
+	    PythonPath string `json:"python_path" toml:"python_path"`
+	    // ModuleName is the Python module the subprocess imports. Default
+	    // "youtube-transcript-api".
+	    ModuleName string `json:"module_name" toml:"module_name"`
+	    // TimeoutSeconds bounds the subprocess run. Default 60.
+	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	}
+
+<a name="DefaultTranscriptConfig"></a>
+### func DefaultTranscriptConfig
+
+	func DefaultTranscriptConfig() TranscriptConfig
+
+DefaultTranscriptConfig returns transcript ingest defaults.
+
 <a name="TransportConfig"></a>
 ## type TransportConfig
 
@@ -2467,6 +4256,22 @@ ValidationConfig holds task completion validation settings.
 	    SkipValidationAgents []string `json:"skip_validation_agents" toml:"skip_validation_agents"`
 	    // MaxValidationLoops is the maximum validation loops before escalation
 	    MaxValidationLoops int `json:"max_validation_loops" toml:"max_validation_loops"`
+	}
+
+<a name="VerificationDefaults"></a>
+## type VerificationDefaults
+
+VerificationDefaults holds daemon\-level verification defaults.
+
+	type VerificationDefaults struct {
+	    // Enabled controls whether verification is on by default.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // DefaultModel is the default model for verification. Empty = use agent's model.
+	    DefaultModel string `json:"default_model" toml:"default_model"`
+	    // MaxFixLoops is the default maximum fix-reverify cycles.
+	    MaxFixLoops int `json:"max_fix_loops" toml:"max_fix_loops"`
+	    // AutoTriggerThreshold is the number of consecutive failures before auto-triggering verification.
+	    AutoTriggerThreshold int `json:"auto_trigger_threshold" toml:"auto_trigger_threshold"`
 	}
 
 <a name="WatchdogConfig"></a>

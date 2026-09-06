@@ -4,6 +4,10 @@
 
 	import "github.com/caimlas/meept/internal/security"
 
+Package security: declarative shell command permission tables.
+
+The permission table provides prefix\-keyed allow/ask/deny policy that is evaluated BEFORE tirith pattern scanning. Tirith detects dangerous PATTERNS; the table expresses operator POLICY \("git push always asks; rm \-rf always denies"\). A table match short\-circuits; an "allow" still runs tirith as defense\-in\-depth.
+
 Package security provides security\-related functionality for meept.
 
 Package security provides security\-related functionality for meept.
@@ -18,7 +22,6 @@ Package security provides the security engine with SQLite\-backed decision makin
 - [func CountRules\(\) int](<#CountRules>)
 - [func ExtractToolOutput\(text, toolName string\) \(string, bool\)](<#ExtractToolOutput>)
 - [func ExtractUserInput\(text string\) \(string, bool\)](<#ExtractUserInput>)
-- [func InsecureSkipVerify\(\) \*tls.Config](<#InsecureSkipVerify>)
 - [func IsWithinBoundary\(fullText, target string\) bool](<#IsWithinBoundary>)
 - [func ServerTLSConfig\(cfg TLSConfig\) \(\*tls.Config, error\)](<#ServerTLSConfig>)
 - [func ToolOutputStartTag\(name string\) string](<#ToolOutputStartTag>)
@@ -38,6 +41,9 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(a \*AuditLog\) LogDecision\(action, toolName string, detailsJSON string, riskLevel RiskLevel, decision, reason, ruleSource string, overrideID \*int64, conversationID \*string\) error](<#AuditLog.LogDecision>)
   - [func \(a \*AuditLog\) PurgeOldEntries\(olderThan time.Duration\) \(int64, error\)](<#AuditLog.PurgeOldEntries>)
   - [func \(a \*AuditLog\) QueryHistory\(filters QueryFilters\) \(\[\]AuditEntry, error\)](<#AuditLog.QueryHistory>)
+- [type BashInjectionFinding](<#BashInjectionFinding>)
+  - [func CheckBashInjections\(command string\) \[\]BashInjectionFinding](<#CheckBashInjections>)
+- [type BashInjectionPattern](<#BashInjectionPattern>)
 - [type ChatMessage](<#ChatMessage>)
 - [type CommandPattern](<#CommandPattern>)
 - [type Decision](<#Decision>)
@@ -53,12 +59,15 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(e \*Engine\) RecordOverride\(action, pattern, decision, reason, conversationID string, maxUses, expiresDays int\) \(int64, error\)](<#Engine.RecordOverride>)
   - [func \(e \*Engine\) RemovePreExecChecker\(agentID string\)](<#Engine.RemovePreExecChecker>)
   - [func \(e \*Engine\) SetFenceChecker\(fc \*FenceChecker\)](<#Engine.SetFenceChecker>)
+  - [func \(e \*Engine\) SetPermissionTable\(pt \*PermissionTable\)](<#Engine.SetPermissionTable>)
   - [func \(e \*Engine\) SetPreExecChecker\(agentID string, checker PreExecChecker\)](<#Engine.SetPreExecChecker>)
 - [type FenceChecker](<#FenceChecker>)
   - [func NewFenceChecker\(cfg FenceConfig, logger \*slog.Logger\) \*FenceChecker](<#NewFenceChecker>)
   - [func \(fc \*FenceChecker\) CheckCommand\(cmd string, workDir string\) error](<#FenceChecker.CheckCommand>)
   - [func \(fc \*FenceChecker\) CheckPath\(path string, op string\) error](<#FenceChecker.CheckPath>)
   - [func \(fc \*FenceChecker\) IsNoFence\(\) bool](<#FenceChecker.IsNoFence>)
+  - [func \(fc \*FenceChecker\) SetNoFence\(enabled bool\)](<#FenceChecker.SetNoFence>)
+  - [func \(fc \*FenceChecker\) SetRootPath\(root string\) error](<#FenceChecker.SetRootPath>)
   - [func \(fc \*FenceChecker\) Valid\(\) bool](<#FenceChecker.Valid>)
 - [type FenceConfig](<#FenceConfig>)
 - [type FinancialPattern](<#FinancialPattern>)
@@ -102,6 +111,10 @@ Package security provides the security engine with SQLite\-backed decision makin
 - [type OutputScanResult](<#OutputScanResult>)
 - [type Override](<#Override>)
 - [type PathRule](<#PathRule>)
+- [type PermissionTable](<#PermissionTable>)
+  - [func BuildPermissionTable\(preset string, rules map\[string\]ShellRule\) \(\*PermissionTable, error\)](<#BuildPermissionTable>)
+  - [func NewPermissionTable\(rules map\[string\]ShellRule\) \*PermissionTable](<#NewPermissionTable>)
+  - [func \(p \*PermissionTable\) Evaluate\(command string\) \(decision, matchedPrefix string, ok bool\)](<#PermissionTable.Evaluate>)
 - [type PreExecChecker](<#PreExecChecker>)
 - [type PreExecDecision](<#PreExecDecision>)
 - [type PromptGuard](<#PromptGuard>)
@@ -116,6 +129,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(pg \*PromptGuard\) WrapUserInput\(text string\) string](<#PromptGuard.WrapUserInput>)
 - [type QueryFilters](<#QueryFilters>)
 - [type RiskLevel](<#RiskLevel>)
+  - [func MaxBashInjectionRisk\(findings \[\]BashInjectionFinding\) RiskLevel](<#MaxBashInjectionRisk>)
   - [func \(i RiskLevel\) String\(\) string](<#RiskLevel.String>)
 - [type SanitizationResult](<#SanitizationResult>)
 - [type SecretEntry](<#SecretEntry>)
@@ -127,6 +141,11 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(s \*SecretObfuscator\) LoadFromConfig\(path string\) error](<#SecretObfuscator.LoadFromConfig>)
   - [func \(s \*SecretObfuscator\) Obfuscate\(text string\) string](<#SecretObfuscator.Obfuscate>)
   - [func \(s \*SecretObfuscator\) ObfuscateMessages\(messages \[\]any\) \[\]any](<#SecretObfuscator.ObfuscateMessages>)
+- [type SecretRule](<#SecretRule>)
+- [type SecretScanner](<#SecretScanner>)
+  - [func NewSecretScanner\(\) \*SecretScanner](<#NewSecretScanner>)
+  - [func \(s \*SecretScanner\) Scan\(text string\) \[\]string](<#SecretScanner.Scan>)
+  - [func \(s \*SecretScanner\) ScanAndReport\(text string\) string](<#SecretScanner.ScanAndReport>)
 - [type SecurityStats](<#SecurityStats>)
 - [type SeedCommandPattern](<#SeedCommandPattern>)
 - [type SeedData](<#SeedData>)
@@ -134,6 +153,7 @@ Package security provides the security engine with SQLite\-backed decision makin
 - [type SeedFinancialPattern](<#SeedFinancialPattern>)
 - [type SeedPathRule](<#SeedPathRule>)
 - [type SeedToolRule](<#SeedToolRule>)
+- [type ShellRule](<#ShellRule>)
 - [type StrictnessLevel](<#StrictnessLevel>)
   - [func ParseStrictnessLevel\(s string\) StrictnessLevel](<#ParseStrictnessLevel>)
   - [func \(s StrictnessLevel\) String\(\) string](<#StrictnessLevel.String>)
@@ -214,6 +234,22 @@ Package security provides the security engine with SQLite\-backed decision makin
 	    DefaultReminderInterval = 15
 	)
 
+<a name="ShellActionAllow"></a>Shell rule actions.
+
+	const (
+	    ShellActionAllow = "allow"
+	    ShellActionAsk   = "ask"
+	    ShellActionDeny  = "deny"
+	)
+
+<a name="PresetWorkspace"></a>Preset names for \[security.shell\_permissions\].
+
+	const (
+	    PresetWorkspace = "workspace" // default
+	    PresetReadonly  = "readonly"
+	    PresetDanger    = "danger"
+	)
+
 <a name="SafetyReminder"></a>SafetyReminder is the text injected periodically in long conversations.
 
 	const SafetyReminder = `[SYSTEM REMINDER] You are an autonomous agent operating under strict safety ` +
@@ -227,7 +263,7 @@ Package security provides the security engine with SQLite\-backed decision makin
 
 	func CheckTirithAvailable(ctx context.Context, binary string) bool
 
-CheckTirithAvailable checks whether the tirith binary is reachable on PATH. SEC\-2 FIX: Now caches per binary path instead of using a single package\-level sync.Once.
+CheckTirithAvailable checks whether the tirith binary is reachable on PATH. SEC\-2 FIX: Now caches per binary path instead of using a single package\-level sync.Once. SEC\-7 FIX: Uses singleflight to deduplicate concurrent checks for the same binary, preventing N goroutines from spawning exec.CommandContext simultaneously.
 
 <a name="ClientTLSConfig"></a>
 ## func ClientTLSConfig
@@ -256,13 +292,6 @@ ExtractToolOutput extracts the content from tool output boundaries.
 	func ExtractUserInput(text string) (string, bool)
 
 ExtractUserInput extracts the content from user input boundaries.
-
-<a name="InsecureSkipVerify"></a>
-## func InsecureSkipVerify
-
-	func InsecureSkipVerify() *tls.Config
-
-InsecureSkipVerify creates a TLS config that skips certificate verification. WARNING: This should only be used for testing/development.
 
 <a name="IsWithinBoundary"></a>
 ## func IsWithinBoundary
@@ -418,6 +447,35 @@ PurgeOldEntries deletes audit entries older than the specified duration.
 
 QueryHistory retrieves audit entries matching the given filters.
 
+<a name="BashInjectionFinding"></a>
+## type BashInjectionFinding
+
+BashInjectionFinding is a single detection result from CheckBashInjections.
+
+	type BashInjectionFinding struct {
+	    Rule    string
+	    Risk    RiskLevel
+	    Message string
+	}
+
+<a name="CheckBashInjections"></a>
+### func CheckBashInjections
+
+	func CheckBashInjections(command string) []BashInjectionFinding
+
+CheckBashInjections scans a shell command for bash injection techniques and returns a finding for every pattern that matches. An empty result means the command matched none of the known injection patterns.
+
+<a name="BashInjectionPattern"></a>
+## type BashInjectionPattern
+
+BashInjectionPattern pairs a compiled regex with a human\-readable name and the risk level assigned when the pattern matches a shell command.
+
+	type BashInjectionPattern struct {
+	    Pattern *regexp.Regexp
+	    Name    string
+	    Risk    RiskLevel
+	}
+
 <a name="ChatMessage"></a>
 ## type ChatMessage
 
@@ -547,6 +605,13 @@ RemovePreExecChecker unregisters the PreExecChecker for the given agent ID. An e
 
 SetFenceChecker sets the fence checker for path boundary enforcement. Pass nil to disable fencing for this session. The typed\-nil guard prevents accidental interface\-nil assignment.
 
+<a name="Engine.SetPermissionTable"></a>
+### func \(\*Engine\) SetPermissionTable
+
+	func (e *Engine) SetPermissionTable(pt *PermissionTable)
+
+SetPermissionTable installs the declarative shell permission table. Pass nil to disable. The typed\-nil guard prevents accidental interface\-nil assignment \(table is a pointer type\).
+
 <a name="Engine.SetPreExecChecker"></a>
 ### func \(\*Engine\) SetPreExecChecker
 
@@ -560,6 +625,8 @@ IMPORTANT: The checker's Check method is invoked while Engine.mu is held as an R
 ## type FenceChecker
 
 FenceChecker validates paths against fence boundaries.
+
+A single FenceChecker is shared by every tool in the process, so its configuration may be updated per\-session \(SetRootPath / SetNoFence\). All reads take an RLock and operate on a snapshot of the config; writes take the full lock \(mutexio rule\).
 
 	type FenceChecker struct {
 	    // contains filtered or unexported fields
@@ -577,7 +644,9 @@ NewFenceChecker creates a new fence checker.
 
 	func (fc *FenceChecker) CheckCommand(cmd string, workDir string) error
 
-CheckCommand validates a shell command working directory.
+CheckCommand validates a shell command and its working directory. It checks both the working directory and any explicit file path arguments in the command to prevent access to files outside the fence boundary.
+
+C\-03 FIX: Instead of substring\-matching a hardcoded list of sensitive paths, we tokenize the command and validate each path\-like token against CheckPath. This catches absolute paths and parent\-traversal sequences in any command, not just a fixed set of file\-access utilities.
 
 <a name="FenceChecker.CheckPath"></a>
 ### func \(\*FenceChecker\) CheckPath
@@ -592,6 +661,20 @@ CheckPath validates a path against the fence. op is "read", "write", or "exec". 
 	func (fc *FenceChecker) IsNoFence() bool
 
 IsNoFence returns true if fencing is disabled.
+
+<a name="FenceChecker.SetNoFence"></a>
+### func \(\*FenceChecker\) SetNoFence
+
+	func (fc *FenceChecker) SetNoFence(enabled bool)
+
+SetNoFence toggles the per\-session no\-fence override \(\-\-nofence\).
+
+<a name="FenceChecker.SetRootPath"></a>
+### func \(\*FenceChecker\) SetRootPath
+
+	func (fc *FenceChecker) SetRootPath(root string) error
+
+SetRootPath updates the sandbox root for this session. It validates the candidate root before applying it; on validation failure the previous configuration is left untouched and the error is returned.
 
 <a name="FenceChecker.Valid"></a>
 ### func \(\*FenceChecker\) Valid
@@ -962,6 +1045,54 @@ PathRule defines a rule for filesystem path access.
 	    Enabled     bool      `json:"enabled"`
 	}
 
+<a name="PermissionTable"></a>
+## type PermissionTable
+
+PermissionTable evaluates shell commands against sorted prefix rules. It is immutable after construction and safe for concurrent use; Evaluate performs no I/O and holds no locks \(mutexio\-friendly\).
+
+	type PermissionTable struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="BuildPermissionTable"></a>
+### func BuildPermissionTable
+
+	func BuildPermissionTable(preset string, rules map[string]ShellRule) (*PermissionTable, error)
+
+BuildPermissionTable constructs a PermissionTable from a named preset plus optional user rules that override/extend the preset. Unknown presets and malformed actions return errors \(fail\-closed at config load time\).
+
+Presets:
+
+- workspace \(default\): denies destructive prefixes; asks for sudo, git push, docker system prune, chmod 777, curl|sh, bash \-c, sh \-c.
+- readonly: ask\-by\-default \(catch\-all\) except the workspace deny list plus git commit and npm publish which deny.
+- danger: empty — every command falls through to existing evaluation.
+
+<a name="NewPermissionTable"></a>
+### func NewPermissionTable
+
+	func NewPermissionTable(rules map[string]ShellRule) *PermissionTable
+
+NewPermissionTable builds a table from prefix \-\> rule. Entries with invalid or empty actions are silently dropped \(use BuildPermissionTable for strict validation\). Rules are ordered most\-specific\-first so longer prefixes win; the "\*" catch\-all always evaluates last.
+
+<a name="PermissionTable.Evaluate"></a>
+### func \(\*PermissionTable\) Evaluate
+
+	func (p *PermissionTable) Evaluate(command string) (decision, matchedPrefix string, ok bool)
+
+Evaluate checks command against the table.
+
+Returns the decision \("allow"|"ask"|"deny"\), the matched prefix \(raw form\), and ok=false when no rule matches \(caller falls through to existing path\).
+
+Matching is token\-based and case\-insensitive:
+
+- longest prefix wins \(catch\-all "\*" evaluated last\);
+- word boundaries are enforced \("rm \-rf" does not match "rm \-rfx"\);
+- a single\-token base command also matches same\-family extensions \("mkfs" matches "mkfs.ext4"\) but NOT arbitrary continuations;
+- a final token ending with '=' is a value\-carrying prefix \("dd if=" matches "dd if=/dev/zero"\);
+- '|' in a prefix separates segments that must appear in order \("curl | sh" matches "curl http://x | sh"\).
+
+No regex, no I/O.
+
 <a name="PreExecChecker"></a>
 ## type PreExecChecker
 
@@ -1053,14 +1184,14 @@ WrapSkillOutput wraps output from a skill execution in boundary markers. It uses
 
 	func (pg *PromptGuard) WrapToolOutput(toolName, output string) string
 
-WrapToolOutput wraps output from a tool in tool\-output boundary markers.
+WrapToolOutput wraps output from a tool in tool\-output boundary markers. It neutralizes embedded boundary markers in the output to prevent prompt injection attacks that attempt to prematurely close the boundary.
 
 <a name="PromptGuard.WrapUserInput"></a>
 ### func \(\*PromptGuard\) WrapUserInput
 
 	func (pg *PromptGuard) WrapUserInput(text string) string
 
-WrapUserInput wraps text in user\-input boundary markers.
+WrapUserInput wraps text in user\-input boundary markers. It neutralizes embedded boundary markers in the input to prevent prompt injection attacks that attempt to prematurely close the boundary.
 
 <a name="QueryFilters"></a>
 ## type QueryFilters
@@ -1090,6 +1221,13 @@ RiskLevel represents the severity of an action.
 	    RiskHigh                      // HIGH
 	    RiskCritical                  // CRITICAL
 	)
+
+<a name="MaxBashInjectionRisk"></a>
+### func MaxBashInjectionRisk
+
+	func MaxBashInjectionRisk(findings []BashInjectionFinding) RiskLevel
+
+MaxBashInjectionRisk returns the highest risk level among the findings, or RiskSafe when there are no findings. Callers use this to raise a command's effective risk when an injection technique is detected.
 
 <a name="RiskLevel.String"></a>
 ### func \(RiskLevel\) String
@@ -1185,6 +1323,46 @@ Obfuscate replaces all secrets in the text with placeholders or replacement stri
 
 ObfuscateMessages obfuscates secrets in a slice of ChatMessage\-like objects. The input is \[\]any where each element is a map\[string\]any with a "content" field, or a struct with a Content field. Returns a new slice with obfuscated content.
 
+<a name="SecretRule"></a>
+## type SecretRule
+
+SecretRule defines a named regex pattern for detecting a specific secret type.
+
+	type SecretRule struct {
+	    Name    string
+	    Pattern *regexp.Regexp
+	}
+
+<a name="SecretScanner"></a>
+## type SecretScanner
+
+SecretScanner detects unknown secrets in text using regex pattern rules.
+
+	type SecretScanner struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSecretScanner"></a>
+### func NewSecretScanner
+
+	func NewSecretScanner() *SecretScanner
+
+NewSecretScanner creates a scanner loaded with default secret detection rules.
+
+<a name="SecretScanner.Scan"></a>
+### func \(\*SecretScanner\) Scan
+
+	func (s *SecretScanner) Scan(text string) []string
+
+Scan returns the names of all rules that match the given text.
+
+<a name="SecretScanner.ScanAndReport"></a>
+### func \(\*SecretScanner\) ScanAndReport
+
+	func (s *SecretScanner) ScanAndReport(text string) string
+
+ScanAndReport returns a human\-readable warning if any secrets are detected, or an empty string if the text is clean.
+
 <a name="SecurityStats"></a>
 ## type SecurityStats
 
@@ -1268,6 +1446,15 @@ SeedToolRule defines a pre\-populated tool rule.
 	    Description          string
 	    RequiresConfirmation bool
 	    Immutable            bool
+	}
+
+<a name="ShellRule"></a>
+## type ShellRule
+
+ShellRule is a single declarative shell permission entry.
+
+	type ShellRule struct {
+	    Action string // "allow" | "ask" | "deny"
 	}
 
 <a name="StrictnessLevel"></a>

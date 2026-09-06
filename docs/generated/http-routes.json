@@ -2530,13 +2530,6 @@
     "method": "GET",
     "path": "v",
     "handler": "",
-    "file": "internal/tools/leaf01check/transcript_fetch.go",
-    "line": 224
-  },
-  {
-    "method": "GET",
-    "path": "v",
-    "handler": "",
     "file": "internal/tools/builtin/transcript_fetch.go",
     "line": 224
   }

@@ -23,6 +23,18 @@ Package agent provides the agent loop and related components.
 
 Package agent provides HTTP hook support for external integrations.
 
+Package agent — loop\_messages.go implements turn\-start injection of inter\-agent messages \(loop\-economics leaf 10\). The daemon wires a MessageDrainer \(backed by the employee message store\); before each turn's system prompt is built, unread queued messages are drained \(queued→delivered, exactly once\) and prepended as an anchored block "\[message from X\]" with message IDs so replies can target them.
+
+The drain is deliberately destructive: because DrainInbox transitions drained rows out of the queued set, a second build of the prompt will not re\-inject them. Delivery is at\-most\-once per recipient turn.
+
+Package agent — loop\_rewake.go implements the subscriber half of the hook.async\_rewake contract. Publishers \(HTTPHook, FileWatcherHook\) emit a hook.async\_rewake bus signal after a successful async hook; the AgentLoop that armed its consumer receives the signal and wakes itself: the payload is injected into the conversation as a system note at the top of the next reasoning iteration \(reasoningCycle\), so the model sees the completed\-hook event and can react — a real in\-process wake.
+
+Session scoping: a signal with a session\_id is delivered only by the loop whose current conversation matches it. A signal with an empty session\_id \(e.g. FileWatcherHook, whose watcher is bound to the daemon loop rather than any one conversation\) is treated as a broadcast and delivered by every loop with an armed consumer.
+
+Lifecycle: the consumer is armed lazily on the first turn \(RunOnce path\) via sync.Once, and torn down in Close\(\). When no bus is wired, nothing is armed and published signals remain observable to external subscribers only.
+
+Package agent provides the agent loop implementation.
+
 Package agent provides the reasoning\-effort natural\-language parser.
 
 This file implements ParseReasoningDirective per spec §7 of the LLM Reasoning Effort design. It scans user input for directives that adjust the per\-request reasoning/thinking tier \(e.g. "use high reasoning", "\[/reasoning xhigh\]", "think hard", "use 8000 thinking tokens"\) and returns a ReasoningDirective describing the parsed configuration.
@@ -35,33 +47,71 @@ Package agent provides the agent loop and related components.
 
 - Constants
 - Variables
+- [func ApplyEscalation\(h \*VerificationAutoTrigger, mod \*TurnModification\) bool](<#ApplyEscalation>)
+- [func AssembleOrdered\(sections \[\]PromptSection\) \(prompt string, stablePrefixHash string\)](<#AssembleOrdered>)
 - [func BuildPlannerPromptHint\(registry \*AgentRegistry\) string](<#BuildPlannerPromptHint>)
 - [func BuildRevisionContext\(result \*ReviewResult, spec \*TaskSpec\) string](<#BuildRevisionContext>)
 - [func BuildSystemPrompt\(cfg PromptConfig, tools \[\]ToolDescription, memoryContext string\) string](<#BuildSystemPrompt>)
 - [func BuildSystemPromptWithOverride\(override string, tools \[\]ToolDescription\) string](<#BuildSystemPromptWithOverride>)
 - [func BusTopic\(eventType AgentEventType\) string](<#BusTopic>)
+- [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
 - [func DefaultCoworkerAwareness\(\) string](<#DefaultCoworkerAwareness>)
 - [func ExecutorAgentIDs\(\) \[\]string](<#ExecutorAgentIDs>)
 - [func ExtractJSON\(s string\) string](<#ExtractJSON>)
+- [func FinalSentinelContent\(\) string](<#FinalSentinelContent>)
+- [func FormatDuration\(d time.Duration\) string](<#FormatDuration>)
 - [func FormatExampleArgs\(args map\[string\]any\) string](<#FormatExampleArgs>)
+- [func GenerateProposalID\(\) string](<#GenerateProposalID>)
+- [func GetRetryAfter\(err error\) time.Duration](<#GetRetryAfter>)
 - [func GetThresholdForIntent\(intentType string\) float64](<#GetThresholdForIntent>)
+- [func HashToolCall\(tool string, argsJSON string\) string](<#HashToolCall>)
+- [func IsAlwaysProposeOnly\(target string\) bool](<#IsAlwaysProposeOnly>)
+- [func IsRetryable\(err error\) bool](<#IsRetryable>)
+- [func IsSafeTargetPath\(target string\) bool](<#IsSafeTargetPath>)
 - [func IsValidIntentType\(s string\) bool](<#IsValidIntentType>)
+- [func Key\(agentID, providerKey string\) string](<#Key>)
+- [func LoadJSONLTraces\(store \*InMemoryTraceStore, path string\) error](<#LoadJSONLTraces>)
 - [func PairTopic\(sessionID string\) string](<#PairTopic>)
+- [func ParseVerdict\(output string\) \(Verdict, \[\]CheckResult\)](<#ParseVerdict>)
 - [func PresetPrompt\(presetName string, taskDescription string\) \(string, error\)](<#PresetPrompt>)
 - [func RecoverPendingFollowUps\(db \*sql.DB, msgBus \*bus.MessageBus, logger \*slog.Logger\)](<#RecoverPendingFollowUps>)
+- [func RenderSpawnContext\(sc SpawnContext\) string](<#RenderSpawnContext>)
 - [func ResultsToChatMessages\(results \[\]\*ExecutionResult\) \[\]llm.ChatMessage](<#ResultsToChatMessages>)
+- [func ResumedTurnFromContext\(ctx context.Context\) bool](<#ResumedTurnFromContext>)
+- [func Retryable\(err error, retryable bool, retryAfter time.Duration, reason string\) error](<#Retryable>)
+- [func RoundTo\(f float64, n int\) float64](<#RoundTo>)
+- [func RunWithRetry\[T any\]\(ctx context.Context, config BackoffConfig, fn func\(\) \(T, error\)\) \(T, error\)](<#RunWithRetry>)
 - [func SecurityKeywords\(\) \[\]string](<#SecurityKeywords>)
 - [func SerializeError\(toolName string, err error\) map\[string\]any](<#SerializeError>)
+- [func SetDefaultBackoffOverride\(cfg BackoffConfig\)](<#SetDefaultBackoffOverride>)
+- [func SetFailurePolicyDefaults\(cfg llm.FailurePolicyConfig\)](<#SetFailurePolicyDefaults>)
+- [func SetPerOperationBackoffOverride\(key string, cfg BackoffConfig\)](<#SetPerOperationBackoffOverride>)
+- [func SetPerOperationBackoffOverrideForTest\(key string, cfg BackoffConfig\)](<#SetPerOperationBackoffOverrideForTest>)
 - [func ShouldTerminate\(results \[\]\*ExecutionResult\) bool](<#ShouldTerminate>)
 - [func ShouldUseLLMResult\(intent \*Intent\) bool](<#ShouldUseLLMResult>)
+- [func StatusBar\(s TurnStatus\) string](<#StatusBar>)
 - [func StoreSpecInTask\(t \*task.Task, spec \*TaskSpec\)](<#StoreSpecInTask>)
 - [func StripReport\(response string\) string](<#StripReport>)
 - [func TeamMessageTopic\(sessionID string\) string](<#TeamMessageTopic>)
 - [func TeamResultTopic\(sessionID string\) string](<#TeamResultTopic>)
 - [func TeamStatusTopic\(sessionID string\) string](<#TeamStatusTopic>)
+- [func ThrottleParkAttemptFromContext\(ctx context.Context\) int](<#ThrottleParkAttemptFromContext>)
+- [func VerifyFromToolResults\(results \[\]tools.ToolResult\) bool](<#VerifyFromToolResults>)
+- [func WithResumedTurn\(ctx context.Context\) context.Context](<#WithResumedTurn>)
+- [func WithRetryBudget\(ctx context.Context, budget \*RetryBudget\) context.Context](<#WithRetryBudget>)
+- [func WithThrottleParkAttempt\(ctx context.Context, attempt int\) context.Context](<#WithThrottleParkAttempt>)
 - [type AbortData](<#AbortData>)
 - [type ActionType](<#ActionType>)
+- [type AdaptiveParallelismLimiter](<#AdaptiveParallelismLimiter>)
+  - [func NewAdaptiveParallelismLimiter\(baseParallelism int\) \*AdaptiveParallelismLimiter](<#NewAdaptiveParallelismLimiter>)
+  - [func \(l \*AdaptiveParallelismLimiter\) Acquire\(ctx context.Context, profile ToolConcurrencyProfile\) error](<#AdaptiveParallelismLimiter.Acquire>)
+  - [func \(l \*AdaptiveParallelismLimiter\) AdjustLimits\(metrics ExecutionMetrics\)](<#AdaptiveParallelismLimiter.AdjustLimits>)
+  - [func \(l \*AdaptiveParallelismLimiter\) Limit\(profile ToolConcurrencyProfile\) int](<#AdaptiveParallelismLimiter.Limit>)
+  - [func \(l \*AdaptiveParallelismLimiter\) ProfileForTool\(toolName string\) ToolConcurrencyProfile](<#AdaptiveParallelismLimiter.ProfileForTool>)
+  - [func \(l \*AdaptiveParallelismLimiter\) Release\(profile ToolConcurrencyProfile\)](<#AdaptiveParallelismLimiter.Release>)
+  - [func \(l \*AdaptiveParallelismLimiter\) Resize\(limits map\[ToolConcurrencyProfile\]int\)](<#AdaptiveParallelismLimiter.Resize>)
+  - [func \(l \*AdaptiveParallelismLimiter\) SetLogger\(logger \*slog.Logger\)](<#AdaptiveParallelismLimiter.SetLogger>)
 - [type AfterProviderResponseData](<#AfterProviderResponseData>)
 - [type AfterToolCallHook](<#AfterToolCallHook>)
 - [type AgentCapabilities](<#AgentCapabilities>)
@@ -76,51 +126,94 @@ Package agent provides the agent loop and related components.
 - [type AgentEvent](<#AgentEvent>)
 - [type AgentEventData](<#AgentEventData>)
 - [type AgentEventType](<#AgentEventType>)
+- [type AgentIDSource](<#AgentIDSource>)
 - [type AgentLifecyclePayload](<#AgentLifecyclePayload>)
 - [type AgentLoop](<#AgentLoop>)
-  - [func NewAgentLoop\(opts ...LoopOption\) \*AgentLoop](<#NewAgentLoop>)
+  - [func NewAgentLoop\(sessionID string, workingDir string, opts ...LoopOption\) \*AgentLoop](<#NewAgentLoop>)
+  - [func \(l \*AgentLoop\) AdvanceBudgetPhase\(newPhaseID string\) error](<#AgentLoop.AdvanceBudgetPhase>)
   - [func \(l \*AgentLoop\) ClearConversation\(id string\)](<#AgentLoop.ClearConversation>)
   - [func \(l \*AgentLoop\) ClearModelOverride\(\)](<#AgentLoop.ClearModelOverride>)
   - [func \(l \*AgentLoop\) ClearReasoningOverride\(\)](<#AgentLoop.ClearReasoningOverride>)
+  - [func \(l \*AgentLoop\) Close\(\)](<#AgentLoop.Close>)
   - [func \(l \*AgentLoop\) CompressionPipeline\(\) \*compress.Pipeline](<#AgentLoop.CompressionPipeline>)
+  - [func \(l \*AgentLoop\) ConfigSnapshot\(\) \[\]LoopOption](<#AgentLoop.ConfigSnapshot>)
   - [func \(l \*AgentLoop\) ContextInjector\(\) \*ContextInjector](<#AgentLoop.ContextInjector>)
   - [func \(l \*AgentLoop\) CurrentReasoningEffort\(\) string](<#AgentLoop.CurrentReasoningEffort>)
+  - [func \(l \*AgentLoop\) ExecuteSkillToolCalls\(ctx context.Context, toolCalls \[\]llm.ToolCall\) \[\]\*ExecutionResult](<#AgentLoop.ExecuteSkillToolCalls>)
   - [func \(l \*AgentLoop\) FireHTTPHooks\(ctx context.Context, event string, data map\[string\]interface\{\}\)](<#AgentLoop.FireHTTPHooks>)
   - [func \(l \*AgentLoop\) FirewallStats\(\) map\[string\]any](<#AgentLoop.FirewallStats>)
+  - [func \(l \*AgentLoop\) GetBudgetStatus\(\) \*BudgetStatus](<#AgentLoop.GetBudgetStatus>)
   - [func \(l \*AgentLoop\) GetConfig\(\) AgentConfig](<#AgentLoop.GetConfig>)
   - [func \(l \*AgentLoop\) GetConversation\(id string\) \*Conversation](<#AgentLoop.GetConversation>)
+  - [func \(l \*AgentLoop\) GetDetectionContext\(\) \*DetectionContext](<#AgentLoop.GetDetectionContext>)
   - [func \(l \*AgentLoop\) GetModelOverride\(\) string](<#AgentLoop.GetModelOverride>)
+  - [func \(l \*AgentLoop\) GetProjectID\(\) string](<#AgentLoop.GetProjectID>)
+  - [func \(l \*AgentLoop\) GetSessionID\(\) string](<#AgentLoop.GetSessionID>)
+  - [func \(l \*AgentLoop\) GetState\(\) AgentState](<#AgentLoop.GetState>)
+  - [func \(l \*AgentLoop\) GetStateHistory\(\) \[\]StateTransition](<#AgentLoop.GetStateHistory>)
+  - [func \(l \*AgentLoop\) GetStateSnapshot\(\) AgentStateSnapshot](<#AgentLoop.GetStateSnapshot>)
+  - [func \(l \*AgentLoop\) GetWorkerID\(\) int](<#AgentLoop.GetWorkerID>)
+  - [func \(l \*AgentLoop\) GetWorkingDir\(\) string](<#AgentLoop.GetWorkingDir>)
   - [func \(l \*AgentLoop\) HandleMessage\(ctx context.Context, message string\) \(string, error\)](<#AgentLoop.HandleMessage>)
   - [func \(l \*AgentLoop\) HookRegistry\(\) \*HookRegistry](<#AgentLoop.HookRegistry>)
+  - [func \(l \*AgentLoop\) IsActive\(\) bool](<#AgentLoop.IsActive>)
+  - [func \(l \*AgentLoop\) IsAgentActive\(\) bool](<#AgentLoop.IsAgentActive>)
+  - [func \(l \*AgentLoop\) IsModelOverridePersistent\(\) bool](<#AgentLoop.IsModelOverridePersistent>)
+  - [func \(l \*AgentLoop\) LastStablePrefixHash\(\) string](<#AgentLoop.LastStablePrefixHash>)
+  - [func \(l \*AgentLoop\) RetryMetricsSnapshot\(\) RetryMetricsSnapshot](<#AgentLoop.RetryMetricsSnapshot>)
   - [func \(l \*AgentLoop\) Run\(ctx context.Context, messages \<\-chan \*AgentMessage, responses chan\<\- \*AgentResponse\) error](<#AgentLoop.Run>)
   - [func \(l \*AgentLoop\) RunOnce\(ctx context.Context, userMessage, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnce>)
   - [func \(l \*AgentLoop\) RunOnceWithParts\(ctx context.Context, userMessage string, parts \[\]llm.ContentPart, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnceWithParts>)
   - [func \(l \*AgentLoop\) RunWithSkill\(ctx context.Context, skill \*skills.Skill, input string, conversationID string\) \(string, error\)](<#AgentLoop.RunWithSkill>)
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
+  - [func \(l \*AgentLoop\) SessionConversation\(id string\) \*Conversation](<#AgentLoop.SessionConversation>)
+  - [func \(l \*AgentLoop\) SetActive\(v bool\)](<#AgentLoop.SetActive>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
+  - [func \(l \*AgentLoop\) SetBudgetConfig\(total int, opts BudgetHierarchyOptions\)](<#AgentLoop.SetBudgetConfig>)
   - [func \(l \*AgentLoop\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentLoop.SetCapabilityIndex>)
+  - [func \(l \*AgentLoop\) SetClock\(now func\(\) time.Time\)](<#AgentLoop.SetClock>)
   - [func \(l \*AgentLoop\) SetCompactionConfig\(cfg config.CompactionConfig\)](<#AgentLoop.SetCompactionConfig>)
   - [func \(l \*AgentLoop\) SetCompressionPipeline\(pipeline \*compress.Pipeline\)](<#AgentLoop.SetCompressionPipeline>)
   - [func \(l \*AgentLoop\) SetConfig\(config AgentConfig\)](<#AgentLoop.SetConfig>)
   - [func \(l \*AgentLoop\) SetContextFirewallConfig\(fw config.LLMContextFirewallConfig\)](<#AgentLoop.SetContextFirewallConfig>)
   - [func \(l \*AgentLoop\) SetContextInjector\(injector \*ContextInjector\)](<#AgentLoop.SetContextInjector>)
+  - [func \(l \*AgentLoop\) SetDetectionContext\(dc \*DetectionContext\)](<#AgentLoop.SetDetectionContext>)
   - [func \(l \*AgentLoop\) SetEpistemicHook\(hook \*EpistemicHook\)](<#AgentLoop.SetEpistemicHook>)
   - [func \(l \*AgentLoop\) SetFileWatcher\(fw \*FileWatcherHook\)](<#AgentLoop.SetFileWatcher>)
   - [func \(l \*AgentLoop\) SetHTTPHooks\(executor \*HookBatchExecutor\)](<#AgentLoop.SetHTTPHooks>)
+  - [func \(l \*AgentLoop\) SetIsolatedChild\(isolated bool\)](<#AgentLoop.SetIsolatedChild>)
   - [func \(l \*AgentLoop\) SetMCPServerLister\(lister func\(\) \[\]MCPServerInfo\)](<#AgentLoop.SetMCPServerLister>)
   - [func \(l \*AgentLoop\) SetMemvidClient\(client \*memvid.Client\)](<#AgentLoop.SetMemvidClient>)
+  - [func \(l \*AgentLoop\) SetMessageDrainer\(d MessageDrainer\)](<#AgentLoop.SetMessageDrainer>)
   - [func \(l \*AgentLoop\) SetModelOverride\(modelRef string\)](<#AgentLoop.SetModelOverride>)
   - [func \(l \*AgentLoop\) SetNotificationPublisher\(publisher NotificationPublisher\)](<#AgentLoop.SetNotificationPublisher>)
+  - [func \(l \*AgentLoop\) SetParallelismConfig\(baseParallelism int, profiles map\[string\]int\)](<#AgentLoop.SetParallelismConfig>)
+  - [func \(l \*AgentLoop\) SetPersistentModelOverride\(modelRef string\)](<#AgentLoop.SetPersistentModelOverride>)
   - [func \(l \*AgentLoop\) SetPrefetchCallback\(callback func\(query string, maxItems int\)\)](<#AgentLoop.SetPrefetchCallback>)
+  - [func \(l \*AgentLoop\) SetProjectID\(pid string\)](<#AgentLoop.SetProjectID>)
   - [func \(l \*AgentLoop\) SetReasoningForNextTurn\(effort string\)](<#AgentLoop.SetReasoningForNextTurn>)
   - [func \(l \*AgentLoop\) SetReasoningOverride\(rc \*llm.ReasoningConfig\)](<#AgentLoop.SetReasoningOverride>)
   - [func \(l \*AgentLoop\) SetRepoMapGenerator\(gen \*repomap.RepoMapGenerator\)](<#AgentLoop.SetRepoMapGenerator>)
   - [func \(l \*AgentLoop\) SetResponseAnalyzer\(ra \*metrics.ResponseAnalyzer\)](<#AgentLoop.SetResponseAnalyzer>)
+  - [func \(l \*AgentLoop\) SetRetryMetrics\(m \*RetryMetrics\)](<#AgentLoop.SetRetryMetrics>)
+  - [func \(l \*AgentLoop\) SetSchemaModeConfig\(cfg config.AgentToolsConfig\)](<#AgentLoop.SetSchemaModeConfig>)
+  - [func \(l \*AgentLoop\) SetSessionAttached\(attached bool\)](<#AgentLoop.SetSessionAttached>)
+  - [func \(l \*AgentLoop\) SetSessionRefresher\(r \*session.SessionRefresher\)](<#AgentLoop.SetSessionRefresher>)
   - [func \(l \*AgentLoop\) SetSessionStore\(store any, sessionCfg any\)](<#AgentLoop.SetSessionStore>)
   - [func \(l \*AgentLoop\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#AgentLoop.SetSkillLoader>)
+  - [func \(l \*AgentLoop\) SetStatePersister\(p AgentStatePersister\)](<#AgentLoop.SetStatePersister>)
   - [func \(l \*AgentLoop\) SetTaskCollector\(tc \*metrics.TaskCollector\)](<#AgentLoop.SetTaskCollector>)
   - [func \(l \*AgentLoop\) SetTaskStore\(store \*task.Store\)](<#AgentLoop.SetTaskStore>)
+  - [func \(l \*AgentLoop\) SetThrottleParker\(h \*ChatHandler, parker \*TurnParker\)](<#AgentLoop.SetThrottleParker>)
+  - [func \(l \*AgentLoop\) SetTurnParker\(parker \*TurnParker\)](<#AgentLoop.SetTurnParker>)
   - [func \(l \*AgentLoop\) SetUploadStore\(store llm.UploadStore\)](<#AgentLoop.SetUploadStore>)
+  - [func \(l \*AgentLoop\) SetWorkerID\(wid int\)](<#AgentLoop.SetWorkerID>)
+  - [func \(l \*AgentLoop\) SetWorkingDir\(path string\)](<#AgentLoop.SetWorkingDir>)
+  - [func \(l \*AgentLoop\) SkillStateRuntime\(\) \*SkillStateRuntime](<#AgentLoop.SkillStateRuntime>)
+  - [func \(l \*AgentLoop\) SpawnVerifier\(ctx context.Context, prompt string, modelRef string\) \(string, error\)](<#AgentLoop.SpawnVerifier>)
+  - [func \(l \*AgentLoop\) Stop\(\)](<#AgentLoop.Stop>)
+  - [func \(l \*AgentLoop\) ThrottleMaxWait\(\) time.Duration](<#AgentLoop.ThrottleMaxWait>)
+  - [func \(l \*AgentLoop\) TurnParker\(\) \*TurnParker](<#AgentLoop.TurnParker>)
 - [type AgentMemoryConfig](<#AgentMemoryConfig>)
 - [type AgentMessage](<#AgentMessage>)
 - [type AgentRegistry](<#AgentRegistry>)
@@ -130,22 +223,30 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) DB\(\) \*sql.DB](<#AgentRegistry.DB>)
   - [func \(r \*AgentRegistry\) Get\(id string\) \(\*AgentLoop, error\)](<#AgentRegistry.Get>)
   - [func \(r \*AgentRegistry\) GetActiveQueue\(conversationID string\) \(queue \*MessageQueue, generation uint64\)](<#AgentRegistry.GetActiveQueue>)
-  - [func \(r \*AgentRegistry\) GetByRole\(role AgentRole\) \(\[\]\*AgentLoop, error\)](<#AgentRegistry.GetByRole>)
+  - [func \(r \*AgentRegistry\) GetActiveQueueLoop\(conversationID string\) \*AgentLoop](<#AgentRegistry.GetActiveQueueLoop>)
+  - [func \(r \*AgentRegistry\) GetByRole\(role AgentRole\) \[\]\*AgentLoop](<#AgentRegistry.GetByRole>)
   - [func \(r \*AgentRegistry\) GetDispatcher\(\) \(\*AgentLoop, error\)](<#AgentRegistry.GetDispatcher>)
-  - [func \(r \*AgentRegistry\) GetExecutors\(\) \(\[\]\*AgentLoop, error\)](<#AgentRegistry.GetExecutors>)
+  - [func \(r \*AgentRegistry\) GetExecutors\(\) \[\]\*AgentLoop](<#AgentRegistry.GetExecutors>)
+  - [func \(r \*AgentRegistry\) GetForTask\(agentID, taskID string\) \(\*AgentLoop, error\)](<#AgentRegistry.GetForTask>)
+  - [func \(r \*AgentRegistry\) GetModelConfig\(agentID string\) \(\*llm.ModelConfig, error\)](<#AgentRegistry.GetModelConfig>)
   - [func \(r \*AgentRegistry\) GetQueueWithVersion\(conversationID string, expectedGen uint64\) \(\*MessageQueue, error\)](<#AgentRegistry.GetQueueWithVersion>)
   - [func \(r \*AgentRegistry\) GetSpec\(id string\) \(\*AgentSpec, bool\)](<#AgentRegistry.GetSpec>)
   - [func \(r \*AgentRegistry\) GlobalRules\(\) string](<#AgentRegistry.GlobalRules>)
   - [func \(r \*AgentRegistry\) ListSpecs\(\) \[\]\*AgentSpec](<#AgentRegistry.ListSpecs>)
   - [func \(r \*AgentRegistry\) MemvidClient\(\) \*memvid.Client](<#AgentRegistry.MemvidClient>)
-  - [func \(r \*AgentRegistry\) RegisterActiveQueue\(conversationID string, q \*MessageQueue\) uint64](<#AgentRegistry.RegisterActiveQueue>)
+  - [func \(r \*AgentRegistry\) RegisterActiveQueue\(conversationID string, q \*MessageQueue, loop \*AgentLoop\) uint64](<#AgentRegistry.RegisterActiveQueue>)
   - [func \(r \*AgentRegistry\) RegisterSpec\(spec \*AgentSpec\) error](<#AgentRegistry.RegisterSpec>)
+  - [func \(r \*AgentRegistry\) ReleaseTaskLoops\(taskID string\)](<#AgentRegistry.ReleaseTaskLoops>)
   - [func \(r \*AgentRegistry\) RunAgent\(ctx context.Context, agentID, message, conversationID string\) \(string, error\)](<#AgentRegistry.RunAgent>)
   - [func \(r \*AgentRegistry\) SetCapabilitiesMap\(capMap \*CapabilitiesMap\)](<#AgentRegistry.SetCapabilitiesMap>)
   - [func \(r \*AgentRegistry\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentRegistry.SetCapabilityIndex>)
   - [func \(r \*AgentRegistry\) SetGlobalRules\(rules string\)](<#AgentRegistry.SetGlobalRules>)
+  - [func \(r \*AgentRegistry\) SetLearningPipeline\(lp LearningPipeline\)](<#AgentRegistry.SetLearningPipeline>)
+  - [func \(r \*AgentRegistry\) SetSchemaModeConfig\(cfg config.AgentToolsConfig\)](<#AgentRegistry.SetSchemaModeConfig>)
   - [func \(r \*AgentRegistry\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#AgentRegistry.SetSkillLoader>)
   - [func \(r \*AgentRegistry\) SetTTSRManager\(mgr \*TTSRManager\)](<#AgentRegistry.SetTTSRManager>)
+  - [func \(r \*AgentRegistry\) SetTraceWriter\(tw TraceWriter\)](<#AgentRegistry.SetTraceWriter>)
+  - [func \(r \*AgentRegistry\) SetUsageTracker\(ut lifecycleUsageTracker\)](<#AgentRegistry.SetUsageTracker>)
   - [func \(r \*AgentRegistry\) Stats\(\) map\[string\]int](<#AgentRegistry.Stats>)
   - [func \(r \*AgentRegistry\) UnregisterActiveQueue\(conversationID string\)](<#AgentRegistry.UnregisterActiveQueue>)
   - [func \(r \*AgentRegistry\) UnregisterSpec\(id string\)](<#AgentRegistry.UnregisterSpec>)
@@ -159,13 +260,31 @@ Package agent provides the agent loop and related components.
 - [type AgentRole](<#AgentRole>)
 - [type AgentSpec](<#AgentSpec>)
   - [func \(s \*AgentSpec\) AllTools\(\) \[\]string](<#AgentSpec.AllTools>)
+  - [func \(s \*AgentSpec\) EffectiveEnhancerModel\(\) string](<#AgentSpec.EffectiveEnhancerModel>)
   - [func \(s \*AgentSpec\) GetSkillForTrigger\(keyword string\) string](<#AgentSpec.GetSkillForTrigger>)
   - [func \(s \*AgentSpec\) HasSkill\(skillName string\) bool](<#AgentSpec.HasSkill>)
   - [func \(s \*AgentSpec\) HasTool\(tool string\) bool](<#AgentSpec.HasTool>)
 - [type AgentStartData](<#AgentStartData>)
+- [type AgentState](<#AgentState>)
+  - [func \(s AgentState\) IsActive\(\) bool](<#AgentState.IsActive>)
+  - [func \(s AgentState\) IsTerminal\(\) bool](<#AgentState.IsTerminal>)
+  - [func \(s AgentState\) String\(\) string](<#AgentState.String>)
+- [type AgentStateMachine](<#AgentStateMachine>)
+  - [func NewAgentStateMachine\(logger \*slog.Logger\) \*AgentStateMachine](<#NewAgentStateMachine>)
+  - [func \(m \*AgentStateMachine\) CurrentState\(\) AgentState](<#AgentStateMachine.CurrentState>)
+  - [func \(m \*AgentStateMachine\) History\(\) \[\]StateTransition](<#AgentStateMachine.History>)
+  - [func \(m \*AgentStateMachine\) IsActive\(\) bool](<#AgentStateMachine.IsActive>)
+  - [func \(m \*AgentStateMachine\) IsTerminal\(\) bool](<#AgentStateMachine.IsTerminal>)
+  - [func \(m \*AgentStateMachine\) OnTransition\(listener StateTransitionListener\)](<#AgentStateMachine.OnTransition>)
+  - [func \(m \*AgentStateMachine\) SafeTransition\(to AgentState, reason string, metadata map\[string\]any\)](<#AgentStateMachine.SafeTransition>)
+  - [func \(m \*AgentStateMachine\) Transition\(to AgentState, reason string, metadata map\[string\]any\) error](<#AgentStateMachine.Transition>)
+- [type AgentStatePersister](<#AgentStatePersister>)
+- [type AgentStateSnapshot](<#AgentStateSnapshot>)
 - [type AggregatedTaskReport](<#AggregatedTaskReport>)
 - [type AmbientExtractorInterface](<#AmbientExtractorInterface>)
 - [type AmendmentSubmitter](<#AmendmentSubmitter>)
+- [type AnalyzeResult](<#AnalyzeResult>)
+- [type Artifact](<#Artifact>)
 - [type ArtifactManager](<#ArtifactManager>)
   - [func NewArtifactManager\(logger \*slog.Logger\) \*ArtifactManager](<#NewArtifactManager>)
   - [func \(am \*ArtifactManager\) BuildAgentReferences\(taskDesc, workingDir string\) string](<#ArtifactManager.BuildAgentReferences>)
@@ -185,12 +304,78 @@ Package agent provides the agent loop and related components.
   - [func \(am \*ArtifactManager\) LoadAgentsContext\(filePath string\) string](<#ArtifactManager.LoadAgentsContext>)
   - [func \(am \*ArtifactManager\) ScanDirectory\(dir string\) \(\*artifactcontext.Artifacts, error\)](<#ArtifactManager.ScanDirectory>)
   - [func \(am \*ArtifactManager\) WithProjectRoot\(root string\) \*ArtifactManager](<#ArtifactManager.WithProjectRoot>)
+- [type ArtifactRef](<#ArtifactRef>)
+- [type AtomicTurnLogger](<#AtomicTurnLogger>)
+  - [func NewAtomicTurnLogger\(basePath string\) \(\*AtomicTurnLogger, error\)](<#NewAtomicTurnLogger>)
+  - [func \(l \*AtomicTurnLogger\) LastSequence\(\) int](<#AtomicTurnLogger.LastSequence>)
+  - [func \(l \*AtomicTurnLogger\) ListSnapshots\(\) \(\[\]TurnSnapshot, error\)](<#AtomicTurnLogger.ListSnapshots>)
+  - [func \(l \*AtomicTurnLogger\) NextSequence\(\) int](<#AtomicTurnLogger.NextSequence>)
+  - [func \(l \*AtomicTurnLogger\) PruneSnapshots\(keepLast int\) \(int, error\)](<#AtomicTurnLogger.PruneSnapshots>)
+  - [func \(l \*AtomicTurnLogger\) ReadSnapshot\(turnID string\) \(\*TurnSnapshot, error\)](<#AtomicTurnLogger.ReadSnapshot>)
+  - [func \(l \*AtomicTurnLogger\) WriteSnapshot\(snap TurnSnapshot\) error](<#AtomicTurnLogger.WriteSnapshot>)
 - [type Attempt](<#Attempt>)
   - [func \(a \*Attempt\) Satisfied\(\) bool](<#Attempt.Satisfied>)
+- [type Backoff](<#Backoff>)
+  - [func NewBackoff\(config BackoffConfig\) \*Backoff](<#NewBackoff>)
+  - [func \(b \*Backoff\) NextDelay\(\) \(delay time.Duration, ok bool\)](<#Backoff.NextDelay>)
+  - [func \(b \*Backoff\) Reset\(\)](<#Backoff.Reset>)
+  - [func \(b \*Backoff\) Sleep\(ctx context.Context\) bool](<#Backoff.Sleep>)
+  - [func \(b \*Backoff\) WithLogger\(l \*slog.Logger\) \*Backoff](<#Backoff.WithLogger>)
+- [type BackoffConfig](<#BackoffConfig>)
+  - [func AggressiveBackoffConfig\(\) BackoffConfig](<#AggressiveBackoffConfig>)
+  - [func ConservativeBackoffConfig\(\) BackoffConfig](<#ConservativeBackoffConfig>)
+  - [func DefaultBackoffConfig\(\) BackoffConfig](<#DefaultBackoffConfig>)
+  - [func HTTPHookBackoffConfig\(count int\) BackoffConfig](<#HTTPHookBackoffConfig>)
+  - [func LLMBackoffConfig\(\) BackoffConfig](<#LLMBackoffConfig>)
+  - [func ToolBackoffConfig\(\) BackoffConfig](<#ToolBackoffConfig>)
 - [type BeforeProviderPayloadData](<#BeforeProviderPayloadData>)
 - [type BeforeProviderRequestData](<#BeforeProviderRequestData>)
 - [type BeforeToolCallHook](<#BeforeToolCallHook>)
 - [type BlockResult](<#BlockResult>)
+- [type BudgetAllocation](<#BudgetAllocation>)
+  - [func NewBudgetAllocation\(id string, level BudgetLevel, totalBudget int\) \*BudgetAllocation](<#NewBudgetAllocation>)
+  - [func \(a \*BudgetAllocation\) AddChild\(child \*BudgetAllocation\)](<#BudgetAllocation.AddChild>)
+  - [func \(a \*BudgetAllocation\) Allocate\(tokens int\) bool](<#BudgetAllocation.Allocate>)
+  - [func \(a \*BudgetAllocation\) AllocateFromReserved\(tokens int\) bool](<#BudgetAllocation.AllocateFromReserved>)
+  - [func \(a \*BudgetAllocation\) Available\(\) int](<#BudgetAllocation.Available>)
+  - [func \(a \*BudgetAllocation\) AvailableWithReserved\(\) int](<#BudgetAllocation.AvailableWithReserved>)
+  - [func \(a \*BudgetAllocation\) GetChild\(id string\) \*BudgetAllocation](<#BudgetAllocation.GetChild>)
+  - [func \(a \*BudgetAllocation\) GetChildren\(\) \[\]\*BudgetAllocation](<#BudgetAllocation.GetChildren>)
+  - [func \(a \*BudgetAllocation\) IsExhausted\(\) bool](<#BudgetAllocation.IsExhausted>)
+  - [func \(a \*BudgetAllocation\) IsWarningZone\(\) bool](<#BudgetAllocation.IsWarningZone>)
+  - [func \(a \*BudgetAllocation\) OnExhausted\(cb func\(\*BudgetAllocation\)\)](<#BudgetAllocation.OnExhausted>)
+  - [func \(a \*BudgetAllocation\) OnLowBudget\(cb func\(\*BudgetAllocation\)\)](<#BudgetAllocation.OnLowBudget>)
+  - [func \(a \*BudgetAllocation\) Release\(tokens int\)](<#BudgetAllocation.Release>)
+  - [func \(a \*BudgetAllocation\) UsageRatio\(\) float64](<#BudgetAllocation.UsageRatio>)
+  - [func \(a \*BudgetAllocation\) Used\(\) int](<#BudgetAllocation.Used>)
+  - [func \(a \*BudgetAllocation\) WithBorrowing\(enabled bool\) \*BudgetAllocation](<#BudgetAllocation.WithBorrowing>)
+  - [func \(a \*BudgetAllocation\) WithCarryover\(enabled bool\) \*BudgetAllocation](<#BudgetAllocation.WithCarryover>)
+  - [func \(a \*BudgetAllocation\) WithName\(name string\) \*BudgetAllocation](<#BudgetAllocation.WithName>)
+  - [func \(a \*BudgetAllocation\) WithReserved\(reserved int\) \*BudgetAllocation](<#BudgetAllocation.WithReserved>)
+  - [func \(a \*BudgetAllocation\) WithWarningThreshold\(ratio float64\) \*BudgetAllocation](<#BudgetAllocation.WithWarningThreshold>)
+- [type BudgetHierarchy](<#BudgetHierarchy>)
+  - [func NewBudgetHierarchy\(taskBudget int, phases \[\]string, phaseBudgets \[\]int\) \*BudgetHierarchy](<#NewBudgetHierarchy>)
+  - [func NewBudgetHierarchyWithConfig\(taskBudget int, phases \[\]string, phaseBudgets \[\]int, opts BudgetHierarchyOptions\) \*BudgetHierarchy](<#NewBudgetHierarchyWithConfig>)
+  - [func \(h \*BudgetHierarchy\) AdvancePhase\(newPhaseID string\) error](<#BudgetHierarchy.AdvancePhase>)
+  - [func \(h \*BudgetHierarchy\) AdvancePhaseFrom\(fromPhaseID, newPhaseID string\) error](<#BudgetHierarchy.AdvancePhaseFrom>)
+  - [func \(h \*BudgetHierarchy\) BorrowForPhase\(phaseID string, tokens int\) bool](<#BudgetHierarchy.BorrowForPhase>)
+  - [func \(h \*BudgetHierarchy\) CarryoverUnused\(fromPhaseID, toPhaseID string\) error](<#BudgetHierarchy.CarryoverUnused>)
+  - [func \(h \*BudgetHierarchy\) GetStatus\(\) BudgetStatus](<#BudgetHierarchy.GetStatus>)
+  - [func \(h \*BudgetHierarchy\) GetTurnBudget\(\) int](<#BudgetHierarchy.GetTurnBudget>)
+  - [func \(h \*BudgetHierarchy\) RecordUsage\(tokens int, phaseID string\)](<#BudgetHierarchy.RecordUsage>)
+  - [func \(h \*BudgetHierarchy\) SelectPhaseBudget\(phaseID string\) error](<#BudgetHierarchy.SelectPhaseBudget>)
+  - [func \(h \*BudgetHierarchy\) TurnBudgetFor\(phaseID string\) int](<#BudgetHierarchy.TurnBudgetFor>)
+- [type BudgetHierarchyOptions](<#BudgetHierarchyOptions>)
+- [type BudgetLevel](<#BudgetLevel>)
+  - [func \(l BudgetLevel\) String\(\) string](<#BudgetLevel.String>)
+- [type BudgetResumeWatcher](<#BudgetResumeWatcher>)
+  - [func NewBudgetResumeWatcher\(budget \*llm.Budget, logger \*slog.Logger, resumeFunc func\(ctx context.Context, turn ParkedTurn\)\) \*BudgetResumeWatcher](<#NewBudgetResumeWatcher>)
+  - [func \(w \*BudgetResumeWatcher\) Park\(turn ParkedTurn\) bool](<#BudgetResumeWatcher.Park>)
+  - [func \(w \*BudgetResumeWatcher\) Pending\(\) int](<#BudgetResumeWatcher.Pending>)
+  - [func \(w \*BudgetResumeWatcher\) Start\(ctx context.Context\)](<#BudgetResumeWatcher.Start>)
+  - [func \(w \*BudgetResumeWatcher\) Stop\(\)](<#BudgetResumeWatcher.Stop>)
+- [type BudgetStatus](<#BudgetStatus>)
+- [type BudgetSummary](<#BudgetSummary>)
 - [type BusPairSessionState](<#BusPairSessionState>)
 - [type BusPairSessionStateSnapshot](<#BusPairSessionStateSnapshot>)
 - [type CacheConfig](<#CacheConfig>)
@@ -232,24 +417,37 @@ Package agent provides the agent loop and related components.
   - [func \(d \*ChatDelegation\) ToTaskPayload\(\) \*TaskPayload](<#ChatDelegation.ToTaskPayload>)
 - [type ChatHandler](<#ChatHandler>)
   - [func NewChatHandler\(loop \*AgentLoop, dispatcher \*Dispatcher, msgBus \*bus.MessageBus, logger \*slog.Logger\) \*ChatHandler](<#NewChatHandler>)
+  - [func \(h \*ChatHandler\) ClearConversation\(conversationID string\)](<#ChatHandler.ClearConversation>)
   - [func \(h \*ChatHandler\) FormatAsyncTaskAck\(result \*DispatchResult\) string](<#ChatHandler.FormatAsyncTaskAck>)
   - [func \(h \*ChatHandler\) FormatEnhancedAsyncTaskAck\(result \*DispatchResult, steps \[\]TaskStepSummary, estimatedMinutes int, planRef string\) string](<#ChatHandler.FormatEnhancedAsyncTaskAck>)
   - [func \(h \*ChatHandler\) GetWorkerCount\(\) int](<#ChatHandler.GetWorkerCount>)
   - [func \(h \*ChatHandler\) GetWorkers\(\) \[\]\*Worker](<#ChatHandler.GetWorkers>)
+  - [func \(h \*ChatHandler\) LookupLoop\(conversationID string\) \*AgentLoop](<#ChatHandler.LookupLoop>)
   - [func \(h \*ChatHandler\) Name\(\) string](<#ChatHandler.Name>)
+  - [func \(h \*ChatHandler\) QuotaResumeWatcher\(\) \*QuotaResumeWatcher](<#ChatHandler.QuotaResumeWatcher>)
+  - [func \(h \*ChatHandler\) SetAgentLoopManager\(m \*Manager\)](<#ChatHandler.SetAgentLoopManager>)
   - [func \(h \*ChatHandler\) SetBudget\(budget \*llm.Budget\)](<#ChatHandler.SetBudget>)
   - [func \(h \*ChatHandler\) SetCollaborationEngine\(engine \*CollaborationEngine\)](<#ChatHandler.SetCollaborationEngine>)
+  - [func \(h \*ChatHandler\) SetEffectsResumeHook\(fn EffectsResumeHook\)](<#ChatHandler.SetEffectsResumeHook>)
+  - [func \(h \*ChatHandler\) SetFenceController\(fc FenceController\)](<#ChatHandler.SetFenceController>)
+  - [func \(h \*ChatHandler\) SetMessageSaver\(s SessionMessageSaver\)](<#ChatHandler.SetMessageSaver>)
   - [func \(h \*ChatHandler\) SetMetricsStore\(store \*metrics.Store\)](<#ChatHandler.SetMetricsStore>)
   - [func \(h \*ChatHandler\) SetNotificationPublisher\(p NotificationPublisher\)](<#ChatHandler.SetNotificationPublisher>)
+  - [func \(h \*ChatHandler\) SetQuotaResumeConfig\(maxWait time.Duration\)](<#ChatHandler.SetQuotaResumeConfig>)
+  - [func \(h \*ChatHandler\) SetSessionStore\(s SessionStoreReader\)](<#ChatHandler.SetSessionStore>)
   - [func \(h \*ChatHandler\) SetStepStore\(store \*task.StepStore\)](<#ChatHandler.SetStepStore>)
   - [func \(h \*ChatHandler\) SetSyncMode\(enabled bool\)](<#ChatHandler.SetSyncMode>)
   - [func \(h \*ChatHandler\) SetTaskStore\(store \*task.Store\)](<#ChatHandler.SetTaskStore>)
+  - [func \(h \*ChatHandler\) SetThrottleParker\(parker \*TurnParker\)](<#ChatHandler.SetThrottleParker>)
   - [func \(h \*ChatHandler\) Start\(ctx context.Context\) error](<#ChatHandler.Start>)
   - [func \(h \*ChatHandler\) Stop\(ctx context.Context\) error](<#ChatHandler.Stop>)
 - [type ChatMessageReceivedData](<#ChatMessageReceivedData>)
 - [type ChatRequest](<#ChatRequest>)
 - [type ChatResponse](<#ChatResponse>)
+- [type CheckResult](<#CheckResult>)
 - [type Checkpoint](<#Checkpoint>)
+  - [func SnapshotForTurn\(runID, agentID string, depth int, currentTurn, limit int, toolCalls \[\]TurnRecord, messages \[\]LLMMessage, output string\) \*Checkpoint](<#SnapshotForTurn>)
+- [type ClassifyFunc](<#ClassifyFunc>)
 - [type CollaborationEngine](<#CollaborationEngine>)
   - [func NewCollaborationEngine\(deps CollaborationEngineDeps\) \*CollaborationEngine](<#NewCollaborationEngine>)
   - [func \(e \*CollaborationEngine\) ActiveSessionCount\(\) int](<#CollaborationEngine.ActiveSessionCount>)
@@ -280,6 +478,7 @@ Package agent provides the agent loop and related components.
   - [func \(s \*CollaborationSession\) MarkFailed\(\)](<#CollaborationSession.MarkFailed>)
   - [func \(s \*CollaborationSession\) TotalTokensUsed\(\) int64](<#CollaborationSession.TotalTokensUsed>)
   - [func \(s \*CollaborationSession\) TurnCount\(\) int](<#CollaborationSession.TurnCount>)
+- [type CompactTurn](<#CompactTurn>)
 - [type CompactionAgentConfig](<#CompactionAgentConfig>)
 - [type CompletionStatus](<#CompletionStatus>)
 - [type CompressionReport](<#CompressionReport>)
@@ -289,6 +488,8 @@ Package agent provides the agent loop and related components.
   - [func \(c \*ContextInjector\) GetActiveInstructions\(\) \[\]\*preferences.UserInstruction](<#ContextInjector.GetActiveInstructions>)
   - [func \(c \*ContextInjector\) HasActiveInstructions\(\) bool](<#ContextInjector.HasActiveInstructions>)
   - [func \(c \*ContextInjector\) HasLearnedPatterns\(ctx context.Context\) bool](<#ContextInjector.HasLearnedPatterns>)
+  - [func \(c \*ContextInjector\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#ContextInjector.SetSkillLoader>)
+- [type ContextIsolation](<#ContextIsolation>)
 - [type ContextTransform](<#ContextTransform>)
 - [type Conversation](<#Conversation>)
   - [func NewConversation\(opts ...ConversationOption\) \*Conversation](<#NewConversation>)
@@ -320,9 +521,13 @@ Package agent provides the agent loop and related components.
   - [func \(c \*Conversation\) HasMemorySnapshot\(\) bool](<#Conversation.HasMemorySnapshot>)
   - [func \(c \*Conversation\) InjectContext\(ctxStr string\)](<#Conversation.InjectContext>)
   - [func \(c \*Conversation\) InjectContextBounded\(ctxStr string, maxTokens int\)](<#Conversation.InjectContextBounded>)
+  - [func \(c \*Conversation\) IsActive\(\) bool](<#Conversation.IsActive>)
   - [func \(c \*Conversation\) IsAnchorMessage\(content string\) bool](<#Conversation.IsAnchorMessage>)
   - [func \(c \*Conversation\) LastMessage\(\) \*llm.ChatMessage](<#Conversation.LastMessage>)
+  - [func \(c \*Conversation\) LastUserMessage\(\) string](<#Conversation.LastUserMessage>)
   - [func \(c \*Conversation\) Len\(\) int](<#Conversation.Len>)
+  - [func \(c \*Conversation\) MarkActive\(\)](<#Conversation.MarkActive>)
+  - [func \(c \*Conversation\) MarkInactive\(\)](<#Conversation.MarkInactive>)
   - [func \(c \*Conversation\) PrefixChanged\(\) bool](<#Conversation.PrefixChanged>)
   - [func \(c \*Conversation\) RemoveCompactedMessages\(indices \[\]int\) int](<#Conversation.RemoveCompactedMessages>)
   - [func \(c \*Conversation\) RemoveLast\(\) \*llm.ChatMessage](<#Conversation.RemoveLast>)
@@ -348,8 +553,27 @@ Package agent provides the agent loop and related components.
   - [func \(s \*ConversationStore\) Size\(\) int](<#ConversationStore.Size>)
 - [type ConversationStoreOption](<#ConversationStoreOption>)
   - [func WithPersistence\(fn PersistenceFunc\) ConversationStoreOption](<#WithPersistence>)
+  - [func WithStoreLogger\(logger \*slog.Logger\) ConversationStoreOption](<#WithStoreLogger>)
+- [type CountTracesTool](<#CountTracesTool>)
+  - [func NewCountTracesTool\(store TraceStoreReader\) \*CountTracesTool](<#NewCountTracesTool>)
+  - [func \(t \*CountTracesTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#CountTracesTool.Invoke>)
+- [type Decision](<#Decision>)
+- [type DependencyInferrer](<#DependencyInferrer>)
+  - [func NewDependencyInferrer\(reg ToolRegistry, logger \*slog.Logger\) \*DependencyInferrer](<#NewDependencyInferrer>)
+  - [func \(r \*DependencyInferrer\) InferDependencies\(calls \[\]llm.ToolCall\) \*ToolDependencyGraph](<#DependencyInferrer.InferDependencies>)
+- [type DepthToolRegistry](<#DepthToolRegistry>)
+  - [func NewDepthToolRegistry\(maxDepth int, leafTools \[\]tools.Tool, gatedTools \[\]depthGate\) \*DepthToolRegistry](<#NewDepthToolRegistry>)
+  - [func \(dtr \*DepthToolRegistry\) DefinitionsAtDepth\(depth int\) \[\]llm.ToolDefinition](<#DepthToolRegistry.DefinitionsAtDepth>)
+  - [func \(dtr \*DepthToolRegistry\) GetTool\(depth int, name string\) tools.Tool](<#DepthToolRegistry.GetTool>)
+  - [func \(dtr \*DepthToolRegistry\) HasDefinition\(depth int, name string\) bool](<#DepthToolRegistry.HasDefinition>)
+  - [func \(dtr \*DepthToolRegistry\) HasTool\(depth int, name string\) bool](<#DepthToolRegistry.HasTool>)
+  - [func \(dtr \*DepthToolRegistry\) ListAllGated\(\) \[\]depthGate](<#DepthToolRegistry.ListAllGated>)
+  - [func \(dtr \*DepthToolRegistry\) ListAllLeaves\(\) \[\]tools.Tool](<#DepthToolRegistry.ListAllLeaves>)
+  - [func \(dtr \*DepthToolRegistry\) MaxDepth\(\) int](<#DepthToolRegistry.MaxDepth>)
+  - [func \(dtr \*DepthToolRegistry\) ToolsAtDepth\(depth int\) \[\]tools.Tool](<#DepthToolRegistry.ToolsAtDepth>)
 - [type DetectionConfig](<#DetectionConfig>)
   - [func DefaultDetectionConfig\(\) DetectionConfig](<#DefaultDetectionConfig>)
+- [type DetectionContext](<#DetectionContext>)
 - [type DifferentialDriver](<#DifferentialDriver>)
   - [func NewDifferentialDriver\(deps DifferentialDriverDeps\) \*DifferentialDriver](<#NewDifferentialDriver>)
   - [func \(d \*DifferentialDriver\) CanInitiate\(agentID string, reason string\) bool](<#DifferentialDriver.CanInitiate>)
@@ -360,7 +584,7 @@ Package agent provides the agent loop and related components.
 - [type DispatchResult](<#DispatchResult>)
 - [type Dispatcher](<#Dispatcher>)
   - [func NewDispatcher\(cfg DispatcherConfig\) \*Dispatcher](<#NewDispatcher>)
-  - [func \(d \*Dispatcher\) ClassifyAndRoute\(ctx context.Context, input, sessionID string, parts \[\]llm.ContentPart\) \(\*DispatchResult, error\)](<#Dispatcher.ClassifyAndRoute>)
+  - [func \(d \*Dispatcher\) ClassifyAndRoute\(ctx context.Context, input, sessionID string, parts \[\]llm.ContentPart, agentOverride string\) \(\*DispatchResult, error\)](<#Dispatcher.ClassifyAndRoute>)
   - [func \(d \*Dispatcher\) FollowUpActiveAgent\(ctx context.Context, conversationID, content, source string\) error](<#Dispatcher.FollowUpActiveAgent>)
   - [func \(d \*Dispatcher\) GetActiveTasks\(ctx context.Context\) \(\[\]\*task.Task, error\)](<#Dispatcher.GetActiveTasks>)
   - [func \(d \*Dispatcher\) GetCapabilityMatcher\(\) \*CapabilityMatcher](<#Dispatcher.GetCapabilityMatcher>)
@@ -375,22 +599,28 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) RecordDispatch\(sessionID, handlerCase, inputSummary string, result \*DispatchResult, hasParts bool, dispatchErr error\)](<#Dispatcher.RecordDispatch>)
   - [func \(d \*Dispatcher\) ResumeAfterClarification\(ctx context.Context, originalInput, userResponse, sessionID string\) \(\*DispatchResult, error\)](<#Dispatcher.ResumeAfterClarification>)
   - [func \(d \*Dispatcher\) RouteToAgent\(ctx context.Context, result \*DispatchResult, conversationID string\) \(string, error\)](<#Dispatcher.RouteToAgent>)
+  - [func \(d \*Dispatcher\) SetAgentLoopManager\(m \*Manager\)](<#Dispatcher.SetAgentLoopManager>)
   - [func \(d \*Dispatcher\) SetCapabilityMatcher\(matcher \*CapabilityMatcher\)](<#Dispatcher.SetCapabilityMatcher>)
+  - [func \(d \*Dispatcher\) SetFenceController\(fc FenceController\)](<#Dispatcher.SetFenceController>)
   - [func \(d \*Dispatcher\) SetInstructionParser\(parser \*InstructionParser\)](<#Dispatcher.SetInstructionParser>)
   - [func \(d \*Dispatcher\) SetInstructionStore\(store \*preferences.Store\)](<#Dispatcher.SetInstructionStore>)
   - [func \(d \*Dispatcher\) SetMetricsStore\(store \*metrics.Store\)](<#Dispatcher.SetMetricsStore>)
+  - [func \(d \*Dispatcher\) SetSessionStore\(s SessionStoreReader\)](<#Dispatcher.SetSessionStore>)
   - [func \(d \*Dispatcher\) SetThreadRouter\(tr \*ThreadRouter\)](<#Dispatcher.SetThreadRouter>)
+  - [func \(d \*Dispatcher\) SetToolRegistry\(reg \*DepthToolRegistry\)](<#Dispatcher.SetToolRegistry>)
   - [func \(d \*Dispatcher\) ShouldDispatchAsync\(result \*DispatchResult\) bool](<#Dispatcher.ShouldDispatchAsync>)
   - [func \(d \*Dispatcher\) ShouldRouteToCollaborate\(result \*DispatchResult\) bool](<#Dispatcher.ShouldRouteToCollaborate>)
   - [func \(d \*Dispatcher\) ShouldRouteToPair\(result \*DispatchResult\) bool](<#Dispatcher.ShouldRouteToPair>)
   - [func \(d \*Dispatcher\) SteerActiveAgent\(ctx context.Context, conversationID, content, source string\) error](<#Dispatcher.SteerActiveAgent>)
   - [func \(d \*Dispatcher\) Stop\(\)](<#Dispatcher.Stop>)
   - [func \(d \*Dispatcher\) SubmitAmendment\(ctx context.Context, taskID string, amendmentType task.AmendmentType, content string, metadata map\[string\]any\) \(\*task.AmendmentRequest, error\)](<#Dispatcher.SubmitAmendment>)
+  - [func \(d \*Dispatcher\) ToolRegistry\(\) \*DepthToolRegistry](<#Dispatcher.ToolRegistry>)
   - [func \(d \*Dispatcher\) ValidateRouting\(taskID, originalIntent, routedAgent string\) \*RoutingValidation](<#Dispatcher.ValidateRouting>)
 - [type DispatcherConfig](<#DispatcherConfig>)
 - [type DispatcherStats](<#DispatcherStats>)
 - [type DrainMode](<#DrainMode>)
   - [func ParseDrainMode\(s string\) DrainMode](<#ParseDrainMode>)
+- [type EffectsResumeHook](<#EffectsResumeHook>)
 - [type EmbeddingClient](<#EmbeddingClient>)
 - [type EpistemicHook](<#EpistemicHook>)
   - [func NewEpistemicHook\(cfg EpistemicHookConfig\) \*EpistemicHook](<#NewEpistemicHook>)
@@ -406,8 +636,11 @@ Package agent provides the agent loop and related components.
   - [func \(b \*ErrorBuilder\) PermissionDeniedError\(resource, reason string\) \*ToolExecutionError](<#ErrorBuilder.PermissionDeniedError>)
   - [func \(b \*ErrorBuilder\) TimeoutError\(action string, timeoutSeconds int\) \*ToolExecutionError](<#ErrorBuilder.TimeoutError>)
 - [type ErrorPayload](<#ErrorPayload>)
+- [type ErrorSeverity](<#ErrorSeverity>)
 - [type EscalationConfig](<#EscalationConfig>)
   - [func DefaultEscalationConfig\(\) EscalationConfig](<#DefaultEscalationConfig>)
+- [type EscalationDecision](<#EscalationDecision>)
+  - [func DecideEscalation\(spec \*AgentSpec, resolver ModelResolver\) EscalationDecision](<#DecideEscalation>)
 - [type EscalationLevel](<#EscalationLevel>)
 - [type EscalationManager](<#EscalationManager>)
   - [func NewEscalationManager\(cfg EscalationManagerConfig\) \*EscalationManager](<#NewEscalationManager>)
@@ -427,6 +660,8 @@ Package agent provides the agent loop and related components.
   - [func \(e \*EventEmitter\) OnAsync\(eventType AgentEventType, name string, listener EventListener\)](<#EventEmitter.OnAsync>)
   - [func \(e \*EventEmitter\) WaitForIdle\(ctx context.Context\) error](<#EventEmitter.WaitForIdle>)
 - [type EventListener](<#EventListener>)
+- [type EventPublisher](<#EventPublisher>)
+- [type ExecutionMetrics](<#ExecutionMetrics>)
 - [type ExecutionResult](<#ExecutionResult>)
   - [func \(r \*ExecutionResult\) ToChatMessage\(\) llm.ChatMessage](<#ExecutionResult.ToChatMessage>)
   - [func \(r \*ExecutionResult\) ToCompressedJSON\(maxTokens int\) string](<#ExecutionResult.ToCompressedJSON>)
@@ -436,15 +671,27 @@ Package agent provides the agent loop and related components.
   - [func \(e \*Executor\) Execute\(ctx context.Context, toolCall llm.ToolCall\) \*ExecutionResult](<#Executor.Execute>)
   - [func \(e \*Executor\) ExecuteAll\(ctx context.Context, toolCalls \[\]llm.ToolCall\) \[\]\*ExecutionResult](<#Executor.ExecuteAll>)
   - [func \(e \*Executor\) ExecuteSequential\(ctx context.Context, toolCalls \[\]llm.ToolCall\) \[\]\*ExecutionResult](<#Executor.ExecuteSequential>)
+  - [func \(e \*Executor\) SetAgentID\(id string\)](<#Executor.SetAgentID>)
+  - [func \(e \*Executor\) SetConversationID\(id string\)](<#Executor.SetConversationID>)
+  - [func \(e \*Executor\) SetParallelismConfig\(baseParallelism int, profiles map\[string\]int\)](<#Executor.SetParallelismConfig>)
   - [func \(e \*Executor\) SetRegistry\(registry ToolRegistry\)](<#Executor.SetRegistry>)
+  - [func \(e \*Executor\) SetRetryMetrics\(m \*RetryMetrics\)](<#Executor.SetRetryMetrics>)
 - [type ExecutorOption](<#ExecutorOption>)
   - [func WithExecutorAgentID\(id string\) ExecutorOption](<#WithExecutorAgentID>)
   - [func WithExecutorBus\(msgBus \*bus.MessageBus\) ExecutorOption](<#WithExecutorBus>)
   - [func WithExecutorCache\(cache \*ResultCache\) ExecutorOption](<#WithExecutorCache>)
+  - [func WithExecutorInferrer\(inferrer \*DependencyInferrer\) ExecutorOption](<#WithExecutorInferrer>)
   - [func WithExecutorLogger\(logger \*slog.Logger\) ExecutorOption](<#WithExecutorLogger>)
+  - [func WithExecutorParallelismLimiter\(limiter \*AdaptiveParallelismLimiter\) ExecutorOption](<#WithExecutorParallelismLimiter>)
+  - [func WithExecutorRetryMetrics\(m \*RetryMetrics\) ExecutorOption](<#WithExecutorRetryMetrics>)
   - [func WithParallelism\(n int\) ExecutorOption](<#WithParallelism>)
 - [type FailureContext](<#FailureContext>)
+- [type FailureMode](<#FailureMode>)
+  - [func \(fm FailureMode\) SeverityAsIssueSeverity\(\) string](<#FailureMode.SeverityAsIssueSeverity>)
 - [type FallbackEntry](<#FallbackEntry>)
+- [type FeedbackPipeline](<#FeedbackPipeline>)
+- [type FenceController](<#FenceController>)
+- [type FileChange](<#FileChange>)
 - [type FileWatcherHook](<#FileWatcherHook>)
   - [func NewFileWatcherHook\(pattern string, debounce time.Duration, ignore \[\]string, logger \*slog.Logger\) \*FileWatcherHook](<#NewFileWatcherHook>)
   - [func \(f \*FileWatcherHook\) IsRunning\(\) bool](<#FileWatcherHook.IsRunning>)
@@ -458,6 +705,27 @@ Package agent provides the agent loop and related components.
   - [func \(r \*FilteredToolRegistry\) GetDefinitions\(\) \[\]llm.ToolDefinition](<#FilteredToolRegistry.GetDefinitions>)
   - [func \(r \*FilteredToolRegistry\) List\(\) \[\]tools.Tool](<#FilteredToolRegistry.List>)
 - [type FixAttempt](<#FixAttempt>)
+- [type GatedToolRegistry](<#GatedToolRegistry>)
+  - [func NewGatedToolRegistry\(maxDepth int, leafTools \[\]tools.Tool, gatedTools \[\]depthGate\) \*GatedToolRegistry](<#NewGatedToolRegistry>)
+  - [func NewGatedToolRegistryWithDescriptors\(maxDepth int, descriptors \[\]ToolDescriptor, leafNames \[\]string\) \*GatedToolRegistry](<#NewGatedToolRegistryWithDescriptors>)
+  - [func \(g \*GatedToolRegistry\) GetAvailableTools\(depth int, agentState string\) \[\]ToolDescriptor](<#GatedToolRegistry.GetAvailableTools>)
+  - [func \(g \*GatedToolRegistry\) IsAvailable\(depth int, toolName string, agentState string\) bool](<#GatedToolRegistry.IsAvailable>)
+  - [func \(g \*GatedToolRegistry\) RecordUse\(toolName string\)](<#GatedToolRegistry.RecordUse>)
+  - [func \(g \*GatedToolRegistry\) UsageCount\(toolName string\) int](<#GatedToolRegistry.UsageCount>)
+- [type GetDatasetOverviewTool](<#GetDatasetOverviewTool>)
+  - [func NewGetDatasetOverviewTool\(store TraceStoreReader\) \*GetDatasetOverviewTool](<#NewGetDatasetOverviewTool>)
+  - [func \(t \*GetDatasetOverviewTool\) Category\(\) string](<#GetDatasetOverviewTool.Category>)
+  - [func \(t \*GetDatasetOverviewTool\) Description\(\) string](<#GetDatasetOverviewTool.Description>)
+  - [func \(t \*GetDatasetOverviewTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#GetDatasetOverviewTool.Invoke>)
+  - [func \(t \*GetDatasetOverviewTool\) Name\(\) string](<#GetDatasetOverviewTool.Name>)
+  - [func \(t \*GetDatasetOverviewTool\) Parameters\(\) llm.FunctionParameters](<#GetDatasetOverviewTool.Parameters>)
+- [type GuardConfig](<#GuardConfig>)
+  - [func DefaultGuardConfig\(\) GuardConfig](<#DefaultGuardConfig>)
+  - [func \(c GuardConfig\) Normalized\(\) GuardConfig](<#GuardConfig.Normalized>)
+- [type GuardTrackResult](<#GuardTrackResult>)
+- [type HTTPError](<#HTTPError>)
+  - [func \(e \*HTTPError\) Error\(\) string](<#HTTPError.Error>)
+  - [func \(e \*HTTPError\) IsRetryable\(\) bool](<#HTTPError.IsRetryable>)
 - [type HTTPHook](<#HTTPHook>)
   - [func NewHTTPHook\(config HTTPHookConfig, allowedURLs \[\]string, logger \*slog.Logger\) \(\*HTTPHook, error\)](<#NewHTTPHook>)
   - [func \(h \*HTTPHook\) Execute\(ctx context.Context, payload any\) error](<#HTTPHook.Execute>)
@@ -490,6 +758,7 @@ Package agent provides the agent loop and related components.
 - [type HookRegistration](<#HookRegistration>)
 - [type HookRegistry](<#HookRegistry>)
   - [func NewHookRegistry\(logger \*slog.Logger\) \*HookRegistry](<#NewHookRegistry>)
+  - [func \(r \*HookRegistry\) ClearFreshTurnOverrides\(ctx context.Context\)](<#HookRegistry.ClearFreshTurnOverrides>)
   - [func \(r \*HookRegistry\) RegisterAfterToolCall\(name string, priority HookPriority, hook AfterToolCallHook\)](<#HookRegistry.RegisterAfterToolCall>)
   - [func \(r \*HookRegistry\) RegisterBeforeToolCall\(name string, priority HookPriority, hook BeforeToolCallHook\)](<#HookRegistry.RegisterBeforeToolCall>)
   - [func \(r \*HookRegistry\) RegisterPrepareNextTurn\(name string, priority HookPriority, hook PrepareNextTurnHook\)](<#HookRegistry.RegisterPrepareNextTurn>)
@@ -505,6 +774,17 @@ Package agent provides the agent loop and related components.
   - [func \(r \*HookRegistry\) RunShouldStopAfterTurn\(ctx context.Context, state TurnState\) StopDecision](<#HookRegistry.RunShouldStopAfterTurn>)
   - [func \(r \*HookRegistry\) RunTransformContext\(ctx context.Context, messages \[\]llm.ChatMessage, toolDefs \[\]llm.ToolDefinition\) ContextTransform](<#HookRegistry.RunTransformContext>)
   - [func \(r \*HookRegistry\) Unregister\(name string\)](<#HookRegistry.Unregister>)
+- [type InMemoryTraceStore](<#InMemoryTraceStore>)
+  - [func NewInMemoryTraceStore\(\) \*InMemoryTraceStore](<#NewInMemoryTraceStore>)
+  - [func \(s \*InMemoryTraceStore\) AddTraceSpan\(traceID string, span spanViewData\)](<#InMemoryTraceStore.AddTraceSpan>)
+  - [func \(s \*InMemoryTraceStore\) GetSpansForTrace\(traceID string\) \(\[\]string, error\)](<#InMemoryTraceStore.GetSpansForTrace>)
+  - [func \(s \*InMemoryTraceStore\) ListSpans\(spanIDs \[\]string\) \(\[\]spanViewData, error\)](<#InMemoryTraceStore.ListSpans>)
+  - [func \(s \*InMemoryTraceStore\) ListTraceIDs\(\) \(\[\]string, error\)](<#InMemoryTraceStore.ListTraceIDs>)
+- [type IncomingAgentMessage](<#IncomingAgentMessage>)
+- [type InlineFeedbackTrigger](<#InlineFeedbackTrigger>)
+  - [func NewInlineFeedbackTrigger\(interval int, pipeline FeedbackPipeline, classifyFn ClassifyFunc\) \*InlineFeedbackTrigger](<#NewInlineFeedbackTrigger>)
+  - [func \(t \*InlineFeedbackTrigger\) PrepareNextTurn\(ctx context.Context, state TurnState\) TurnModification](<#InlineFeedbackTrigger.PrepareNextTurn>)
+  - [func \(t \*InlineFeedbackTrigger\) SetActiveSkill\(name string\)](<#InlineFeedbackTrigger.SetActiveSkill>)
 - [type InstructionHandler](<#InstructionHandler>)
   - [func NewInstructionHandler\(store \*preferences.Store, msgBus \*bus.MessageBus, parser \*InstructionParser, verifier \*preferences.InstructionVerifier, logger \*slog.Logger\) \*InstructionHandler](<#NewInstructionHandler>)
   - [func \(h \*InstructionHandler\) Start\(ctx context.Context\)](<#InstructionHandler.Start>)
@@ -521,8 +801,10 @@ Package agent provides the agent loop and related components.
   - [func \(i \*Intent\) MarshalJSON\(\) \(\[\]byte, error\)](<#Intent.MarshalJSON>)
 - [type IntentAnalyzer](<#IntentAnalyzer>)
   - [func NewIntentAnalyzer\(client \*llm.Client, logger \*slog.Logger\) \*IntentAnalyzer](<#NewIntentAnalyzer>)
-  - [func \(ia \*IntentAnalyzer\) AnalyzeTrueIntent\(ctx context.Context, input string\) \(\*TrueIntentAnalysis, error\)](<#IntentAnalyzer.AnalyzeTrueIntent>)
+  - [func \(ia \*IntentAnalyzer\) AnalyzeTrueIntent\(ctx context.Context, input string, sessionContext \*SessionContextDigest\) \(\*TrueIntentAnalysis, error\)](<#IntentAnalyzer.AnalyzeTrueIntent>)
+  - [func \(ia \*IntentAnalyzer\) ResolvedModel\(\) string](<#IntentAnalyzer.ResolvedModel>)
   - [func \(ia \*IntentAnalyzer\) WithAmbiguityThreshold\(threshold float64\) \*IntentAnalyzer](<#IntentAnalyzer.WithAmbiguityThreshold>)
+- [type IntentAnalyzerConfig](<#IntentAnalyzerConfig>)
 - [type IntentCategory](<#IntentCategory>)
 - [type IntentClassifier](<#IntentClassifier>)
 - [type IntentEntry](<#IntentEntry>)
@@ -533,6 +815,7 @@ Package agent provides the agent loop and related components.
   - [func \(t IntentType\) RequiresPlanning\(\) bool](<#IntentType.RequiresPlanning>)
   - [func \(t IntentType\) ShouldCreateTask\(\) bool](<#IntentType.ShouldCreateTask>)
   - [func \(t IntentType\) ShouldDispatchAsync\(requiresPlanning bool\) bool](<#IntentType.ShouldDispatchAsync>)
+  - [func \(t IntentType\) SuggestedMode\(\) string](<#IntentType.SuggestedMode>)
 - [type JudgmentResult](<#JudgmentResult>)
 - [type KeywordClassifier](<#KeywordClassifier>)
   - [func \(c \*KeywordClassifier\) Classify\(ctx context.Context, input string, memCtx \*MemoryContext\) \(\*Intent, error\)](<#KeywordClassifier.Classify>)
@@ -542,13 +825,16 @@ Package agent provides the agent loop and related components.
   - [func \(c \*LLMClassifier\) Classify\(ctx context.Context, input string, memCtx \*MemoryContext\) \(\*Intent, error\)](<#LLMClassifier.Classify>)
   - [func \(c \*LLMClassifier\) ClassifyMulti\(ctx context.Context, input string, ctxMemory \[\]memory.MemoryResult\) \[\]\*Intent](<#LLMClassifier.ClassifyMulti>)
   - [func \(c \*LLMClassifier\) MarkUnavailable\(\)](<#LLMClassifier.MarkUnavailable>)
+  - [func \(c \*LLMClassifier\) ResolvedModel\(\) string](<#LLMClassifier.ResolvedModel>)
   - [func \(c \*LLMClassifier\) UnmarkUnavailable\(\)](<#LLMClassifier.UnmarkUnavailable>)
 - [type LLMClassifierConfig](<#LLMClassifierConfig>)
+- [type LLMMessage](<#LLMMessage>)
 - [type LearnedPattern](<#LearnedPattern>)
 - [type LearningPipeline](<#LearningPipeline>)
 - [type LifecycleOutcome](<#LifecycleOutcome>)
 - [type Logger](<#Logger>)
 - [type LoopOption](<#LoopOption>)
+  - [func WithAdapterRouter\(ar \*llm.AdapterRouter\) LoopOption](<#WithAdapterRouter>)
   - [func WithAgentConfig\(config AgentConfig\) LoopOption](<#WithAgentConfig>)
   - [func WithAgentID\(id string\) LoopOption](<#WithAgentID>)
   - [func WithAgentReasoning\(rc \*llm.AgentReasoningConfig\) LoopOption](<#WithAgentReasoning>)
@@ -557,12 +843,20 @@ Package agent provides the agent loop and related components.
   - [func WithArtifactManager\(am \*ArtifactManager\) LoopOption](<#WithArtifactManager>)
   - [func WithCapabilityIndex\(ci \*skills.CapabilityIndex\) LoopOption](<#WithCapabilityIndex>)
   - [func WithCompressionPipeline\(pipeline \*compress.Pipeline\) LoopOption](<#WithCompressionPipeline>)
+  - [func WithContextInjectorFunc\(injector \*ContextInjector\) LoopOption](<#WithContextInjectorFunc>)
+  - [func WithDetectionContext\(dc \*DetectionContext\) LoopOption](<#WithDetectionContext>)
+  - [func WithEpistemicHook\(hook \*EpistemicHook\) LoopOption](<#WithEpistemicHook>)
   - [func WithEventEmitter\(em \*EventEmitter\) LoopOption](<#WithEventEmitter>)
+  - [func WithFileWatcher\(fw \*FileWatcherHook\) LoopOption](<#WithFileWatcher>)
   - [func WithGlobalRules\(rules string\) LoopOption](<#WithGlobalRules>)
+  - [func WithHTTPHooks\(executor \*HookBatchExecutor\) LoopOption](<#WithHTTPHooks>)
   - [func WithHallucinationDetector\(hd \*HallucinationDetector\) LoopOption](<#WithHallucinationDetector>)
   - [func WithHookRegistry\(hr \*HookRegistry\) LoopOption](<#WithHookRegistry>)
+  - [func WithInteractiveTurns\(interactive bool\) LoopOption](<#WithInteractiveTurns>)
+  - [func WithIsolatedChild\(isolated bool\) LoopOption](<#WithIsolatedChild>)
   - [func WithLLMChatter\(chatter llm.Chatter\) LoopOption](<#WithLLMChatter>)
   - [func WithLLMClient\(client \*llm.Client\) LoopOption](<#WithLLMClient>)
+  - [func WithLearningCapture\(lc \*learning.CaptureRecorder\) LoopOption](<#WithLearningCapture>)
   - [func WithLearningPipeline\(lp LearningPipeline\) LoopOption](<#WithLearningPipeline>)
   - [func WithLoopLogger\(logger \*slog.Logger\) LoopOption](<#WithLoopLogger>)
   - [func WithMCPServerLister\(lister func\(\) \[\]MCPServerInfo\) LoopOption](<#WithMCPServerLister>)
@@ -574,27 +868,50 @@ Package agent provides the agent loop and related components.
   - [func WithNotificationPublisher\(publisher NotificationPublisher\) LoopOption](<#WithNotificationPublisher>)
   - [func WithPrefetchCallback\(callback func\(query string, maxItems int\)\) LoopOption](<#WithPrefetchCallback>)
   - [func WithProgressEnabled\(enabled bool\) LoopOption](<#WithProgressEnabled>)
+  - [func WithProjectID\(pid string\) LoopOption](<#WithProjectID>)
+  - [func WithQuotaTracker\(tracker \*QuotaEpisodeTracker\) LoopOption](<#WithQuotaTracker>)
+  - [func WithReflectionCollector\(rc \*ReflectionCollector\) LoopOption](<#WithReflectionCollector>)
   - [func WithRepoMapGenerator\(gen \*repomap.RepoMapGenerator\) LoopOption](<#WithRepoMapGenerator>)
   - [func WithResolver\(resolver \*llm.Resolver\) LoopOption](<#WithResolver>)
   - [func WithResponseAnalyzer\(ra \*metrics.ResponseAnalyzer\) LoopOption](<#WithResponseAnalyzer>)
   - [func WithResultCache\(cache \*ResultCache\) LoopOption](<#WithResultCache>)
   - [func WithSecurityChecker\(checker \*security.PermissionChecker\) LoopOption](<#WithSecurityChecker>)
   - [func WithSecurityOrchestrator\(orch \*intsecurity.Orchestrator\) LoopOption](<#WithSecurityOrchestrator>)
+  - [func WithSessionAttached\(attached bool\) LoopOption](<#WithSessionAttached>)
+  - [func WithSessionID\(sessionID string\) LoopOption](<#WithSessionID>)
+  - [func WithSessionRefresher\(r \*session.SessionRefresher\) LoopOption](<#WithSessionRefresher>)
   - [func WithShadowManager\(mgr \*shadow.Manager\) LoopOption](<#WithShadowManager>)
   - [func WithSharedConversationStore\(store \*ConversationStore\) LoopOption](<#WithSharedConversationStore>)
   - [func WithSkillLoader\(loader \*skills.LazySkillLoader\) LoopOption](<#WithSkillLoader>)
+  - [func WithSkillStateRuntime\(r \*SkillStateRuntime\) LoopOption](<#WithSkillStateRuntime>)
+  - [func WithSpeakRouter\(router \*SpeakRouter\) LoopOption](<#WithSpeakRouter>)
   - [func WithTTSRManager\(mgr \*TTSRManager\) LoopOption](<#WithTTSRManager>)
   - [func WithTaskCollector\(tc \*metrics.TaskCollector\) LoopOption](<#WithTaskCollector>)
   - [func WithTaskStore\(store \*task.Store\) LoopOption](<#WithTaskStore>)
   - [func WithToolRegistry\(registry ToolRegistry\) LoopOption](<#WithToolRegistry>)
+  - [func WithTraceWriter\(tw TraceWriter\) LoopOption](<#WithTraceWriter>)
+  - [func WithUploadStore\(store llm.UploadStore\) LoopOption](<#WithUploadStore>)
   - [func WithUsageTracker\(ut lifecycleUsageTracker\) LoopOption](<#WithUsageTracker>)
   - [func WithWatchdog\(w \*Watchdog\) LoopOption](<#WithWatchdog>)
+  - [func WithWorkerID\(wid int\) LoopOption](<#WithWorkerID>)
+  - [func WithWorkingDir\(dir string\) LoopOption](<#WithWorkingDir>)
 - [type MCPServerInfo](<#MCPServerInfo>)
+- [type Manager](<#Manager>)
+  - [func NewManager\(cfg ManagerConfig\) \*Manager](<#NewManager>)
+  - [func \(m \*Manager\) Get\(sessionID string\) \(\*AgentLoop, bool\)](<#Manager.Get>)
+  - [func \(m \*Manager\) GetOrCreate\(sessionID string, workingDir string, opts ...LoopOption\) \(\*AgentLoop, error\)](<#Manager.GetOrCreate>)
+  - [func \(m \*Manager\) GetOrCreateWired\(sessionID, workingDir string, template \*AgentLoop\) \(\*AgentLoop, error\)](<#Manager.GetOrCreateWired>)
+  - [func \(m \*Manager\) List\(\) map\[string\]\*AgentLoop](<#Manager.List>)
+  - [func \(m \*Manager\) LoopsForTask\(taskID string\) \[\]\*AgentLoop](<#Manager.LoopsForTask>)
+  - [func \(m \*Manager\) Remove\(sessionID string\)](<#Manager.Remove>)
+  - [func \(m \*Manager\) ResolveProjectPath\(ctx context.Context, projectID string\) string](<#Manager.ResolveProjectPath>)
+- [type ManagerConfig](<#ManagerConfig>)
 - [type MatchResult](<#MatchResult>)
 - [type MemberStatus](<#MemberStatus>)
 - [type MemoryContext](<#MemoryContext>)
 - [type MemoryRecallMode](<#MemoryRecallMode>)
 - [type MessageClassification](<#MessageClassification>)
+- [type MessageDrainer](<#MessageDrainer>)
 - [type MessageEndData](<#MessageEndData>)
 - [type MessageImportance](<#MessageImportance>)
 - [type MessageQueue](<#MessageQueue>)
@@ -625,24 +942,40 @@ Package agent provides the agent loop and related components.
   - [func NewMockToolWithParams\(name, description string, params llm.FunctionParameters, fn func\(ctx context.Context, args map\[string\]any\) \(any, error\)\) \*MockTool](<#NewMockToolWithParams>)
   - [func \(t \*MockTool\) Description\(\) string](<#MockTool.Description>)
   - [func \(t \*MockTool\) Execute\(ctx context.Context, args map\[string\]any\) \(any, error\)](<#MockTool.Execute>)
+  - [func \(t \*MockTool\) IsConcurrencySafe\(map\[string\]any\) bool](<#MockTool.IsConcurrencySafe>)
+  - [func \(t \*MockTool\) IsReadOnly\(map\[string\]any\) bool](<#MockTool.IsReadOnly>)
   - [func \(t \*MockTool\) Name\(\) string](<#MockTool.Name>)
   - [func \(t \*MockTool\) Parameters\(\) llm.FunctionParameters](<#MockTool.Parameters>)
+- [type ModelOverrideFreshTurnHook](<#ModelOverrideFreshTurnHook>)
 - [type ModelReassignmentDirective](<#ModelReassignmentDirective>)
 - [type ModelReassignmentParser](<#ModelReassignmentParser>)
   - [func NewModelReassignmentParser\(\) \*ModelReassignmentParser](<#NewModelReassignmentParser>)
   - [func \(p \*ModelReassignmentParser\) Parse\(input string\) \*ParseResult](<#ModelReassignmentParser.Parse>)
   - [func \(p \*ModelReassignmentParser\) ResolveModelReferences\(refs \[\]string, resolver \*llm.Resolver\) \[\]\*llm.ModelConfig](<#ModelReassignmentParser.ResolveModelReferences>)
   - [func \(p \*ModelReassignmentParser\) ResolveScope\(scope string\) \(IntentType, bool\)](<#ModelReassignmentParser.ResolveScope>)
+- [type ModelResolver](<#ModelResolver>)
 - [type ModelSelectData](<#ModelSelectData>)
 - [type MultiIntent](<#MultiIntent>)
   - [func \(m \*MultiIntent\) DetectCompound\(\) bool](<#MultiIntent.DetectCompound>)
+- [type NoProgressLadder](<#NoProgressLadder>)
+  - [func NewNoProgressLadder\(\) \*NoProgressLadder](<#NewNoProgressLadder>)
+  - [func \(l \*NoProgressLadder\) ConsecutiveVetoes\(\) int](<#NoProgressLadder.ConsecutiveVetoes>)
+  - [func \(l \*NoProgressLadder\) Reset\(\)](<#NoProgressLadder.Reset>)
+  - [func \(l \*NoProgressLadder\) Track\(tool string, argsJSON string, warnAt, vetoAt int\) GuardTrackResult](<#NoProgressLadder.Track>)
 - [type NotificationPublisher](<#NotificationPublisher>)
+- [type NotifyPayload](<#NotifyPayload>)
+- [type OTLPSpan](<#OTLPSpan>)
 - [type Orchestrator](<#Orchestrator>)
   - [func NewOrchestrator\(deps OrchestratorDeps\) \*Orchestrator](<#NewOrchestrator>)
   - [func \(o \*Orchestrator\) GenerateRepoMap\(ctx context.Context, chatFiles, mentionedIdentifiers \[\]string\) \(\*repomap.RenderedMap, error\)](<#Orchestrator.GenerateRepoMap>)
+  - [func \(o \*Orchestrator\) HandoffPropagator\(\) func\(ctx context.Context, completedStep \*task.TaskStep\) error](<#Orchestrator.HandoffPropagator>)
   - [func \(o \*Orchestrator\) Name\(\) string](<#Orchestrator.Name>)
+  - [func \(o \*Orchestrator\) PhaseWorktree\(taskID, phaseName string\) string](<#Orchestrator.PhaseWorktree>)
   - [func \(o \*Orchestrator\) PlanManager\(\) \*plan.PlanManager](<#Orchestrator.PlanManager>)
   - [func \(o \*Orchestrator\) ReflectionEngine\(\) \*ReflectionEngine](<#Orchestrator.ReflectionEngine>)
+  - [func \(o \*Orchestrator\) SetParallelPhases\(enabled bool\)](<#Orchestrator.SetParallelPhases>)
+  - [func \(o \*Orchestrator\) SetPhaseTransitionHook\(fn func\(taskID, fromPhase, toPhase string\)\)](<#Orchestrator.SetPhaseTransitionHook>)
+  - [func \(o \*Orchestrator\) SetPhaseWorktreeProvisioner\(fn func\(ctx context.Context, taskID, phaseID, phaseName string\) \(string, error\)\)](<#Orchestrator.SetPhaseWorktreeProvisioner>)
   - [func \(o \*Orchestrator\) SetPlanManager\(pm \*plan.PlanManager\)](<#Orchestrator.SetPlanManager>)
   - [func \(o \*Orchestrator\) SetReflectionEngine\(reflection \*ReflectionEngine\)](<#Orchestrator.SetReflectionEngine>)
   - [func \(o \*Orchestrator\) SetRepoMapGenerator\(gen \*repomap.RepoMapGenerator\)](<#Orchestrator.SetRepoMapGenerator>)
@@ -705,13 +1038,26 @@ Package agent provides the agent loop and related components.
 - [type PairStartRequest](<#PairStartRequest>)
 - [type PairTurn](<#PairTurn>)
 - [type PairVerdict](<#PairVerdict>)
+- [type ParallelExecutionError](<#ParallelExecutionError>)
+  - [func AggregateErrors\(results \[\]\*ExecutionResult\) \[\]\*ParallelExecutionError](<#AggregateErrors>)
+  - [func \(e \*ParallelExecutionError\) Error\(\) string](<#ParallelExecutionError.Error>)
 - [type ParallelTeamDriver](<#ParallelTeamDriver>)
   - [func NewParallelTeamDriver\(deps ParallelTeamDriverDeps\) \*ParallelTeamDriver](<#NewParallelTeamDriver>)
   - [func \(d \*ParallelTeamDriver\) CanInitiate\(\_ string, reason string\) bool](<#ParallelTeamDriver.CanInitiate>)
   - [func \(d \*ParallelTeamDriver\) Name\(\) string](<#ParallelTeamDriver.Name>)
   - [func \(d \*ParallelTeamDriver\) Run\(ctx context.Context, sess \*CollaborationSession\) \(\*CollaborationResult, error\)](<#ParallelTeamDriver.Run>)
 - [type ParallelTeamDriverDeps](<#ParallelTeamDriverDeps>)
+- [type ParkKind](<#ParkKind>)
+- [type ParkPersistence](<#ParkPersistence>)
+- [type ParkTurnEvent](<#ParkTurnEvent>)
+- [type ParkWaitInfo](<#ParkWaitInfo>)
+- [type ParkedTurn](<#ParkedTurn>)
+- [type ParkedTurnRecord](<#ParkedTurnRecord>)
 - [type ParseResult](<#ParseResult>)
+- [type PerDepthSemaphore](<#PerDepthSemaphore>)
+  - [func NewPerDepthSemaphore\(limits map\[int\]int\) \*PerDepthSemaphore](<#NewPerDepthSemaphore>)
+  - [func \(p \*PerDepthSemaphore\) Acquire\(depth int\) error](<#PerDepthSemaphore.Acquire>)
+  - [func \(p \*PerDepthSemaphore\) Release\(depth int\)](<#PerDepthSemaphore.Release>)
 - [type PersistenceFunc](<#PersistenceFunc>)
 - [type PlaceholderToolRegistry](<#PlaceholderToolRegistry>)
   - [func NewPlaceholderToolRegistry\(\) \*PlaceholderToolRegistry](<#NewPlaceholderToolRegistry>)
@@ -719,6 +1065,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*PlaceholderToolRegistry\) GetDefinitions\(\) \[\]llm.ToolDefinition](<#PlaceholderToolRegistry.GetDefinitions>)
   - [func \(r \*PlaceholderToolRegistry\) List\(\) \[\]tools.Tool](<#PlaceholderToolRegistry.List>)
   - [func \(r \*PlaceholderToolRegistry\) Register\(tool tools.Tool\)](<#PlaceholderToolRegistry.Register>)
+- [type PlanPhaseSpec](<#PlanPhaseSpec>)
 - [type PlanRequest](<#PlanRequest>)
 - [type PlannerThresholds](<#PlannerThresholds>)
   - [func NewDefaultThresholds\(\) \*PlannerThresholds](<#NewDefaultThresholds>)
@@ -730,14 +1077,18 @@ Package agent provides the agent loop and related components.
   - [func NewPromptBuilder\(\) \*PromptBuilder](<#NewPromptBuilder>)
   - [func NewPromptBuilderFromConfig\(cfg PromptConfig\) \*PromptBuilder](<#NewPromptBuilderFromConfig>)
   - [func \(b \*PromptBuilder\) AddSection\(title, content string\) \*PromptBuilder](<#PromptBuilder.AddSection>)
+  - [func \(b \*PromptBuilder\) AddSectionWithStability\(title, content string, stable bool\) \*PromptBuilder](<#PromptBuilder.AddSectionWithStability>)
   - [func \(b \*PromptBuilder\) AddTool\(tool ToolDescription\) \*PromptBuilder](<#PromptBuilder.AddTool>)
   - [func \(b \*PromptBuilder\) AddUserPreference\(key, value string\) \*PromptBuilder](<#PromptBuilder.AddUserPreference>)
   - [func \(b \*PromptBuilder\) Build\(\) string](<#PromptBuilder.Build>)
+  - [func \(b \*PromptBuilder\) BuildSystemPrompt\(\) \(prompt string, stablePrefixHash string\)](<#PromptBuilder.BuildSystemPrompt>)
+  - [func \(b \*PromptBuilder\) BuildSystemPromptOrdered\(cacheStablePrefix bool\) \(prompt string, stablePrefixHash string\)](<#PromptBuilder.BuildSystemPromptOrdered>)
   - [func \(b \*PromptBuilder\) WithAgentsContext\(content string\) \*PromptBuilder](<#PromptBuilder.WithAgentsContext>)
   - [func \(b \*PromptBuilder\) WithConstitution\(constitution string\) \*PromptBuilder](<#PromptBuilder.WithConstitution>)
   - [func \(b \*PromptBuilder\) WithCoworkerAwareness\(awareness string\) \*PromptBuilder](<#PromptBuilder.WithCoworkerAwareness>)
   - [func \(b \*PromptBuilder\) WithMemoryContext\(context string\) \*PromptBuilder](<#PromptBuilder.WithMemoryContext>)
   - [func \(b \*PromptBuilder\) WithPersonality\(personality string\) \*PromptBuilder](<#PromptBuilder.WithPersonality>)
+  - [func \(b \*PromptBuilder\) WithProjectInfo\(name, path, branch, language string, dirty bool\) \*PromptBuilder](<#PromptBuilder.WithProjectInfo>)
   - [func \(b \*PromptBuilder\) WithPurpose\(purpose string\) \*PromptBuilder](<#PromptBuilder.WithPurpose>)
   - [func \(b \*PromptBuilder\) WithRestrictions\(restrictions string\) \*PromptBuilder](<#PromptBuilder.WithRestrictions>)
   - [func \(b \*PromptBuilder\) WithSessionTemplates\(templateContext string\) \*PromptBuilder](<#PromptBuilder.WithSessionTemplates>)
@@ -745,6 +1096,16 @@ Package agent provides the agent loop and related components.
   - [func \(b \*PromptBuilder\) WithUserPreferences\(prefs map\[string\]string\) \*PromptBuilder](<#PromptBuilder.WithUserPreferences>)
 - [type PromptConfig](<#PromptConfig>)
   - [func DefaultPromptConfig\(\) PromptConfig](<#DefaultPromptConfig>)
+- [type PromptSection](<#PromptSection>)
+- [type ProposalQueueExternal](<#ProposalQueueExternal>)
+  - [func NewExternalProposalQueue\(path string\) \*ProposalQueueExternal](<#NewExternalProposalQueue>)
+  - [func \(q \*ProposalQueueExternal\) Append\(p ReflectionProposal\) error](<#ProposalQueueExternal.Append>)
+  - [func \(q \*ProposalQueueExternal\) ListPending\(\) \(\[\]ReflectionProposal, error\)](<#ProposalQueueExternal.ListPending>)
+  - [func \(q \*ProposalQueueExternal\) MarkApplied\(id string\) error](<#ProposalQueueExternal.MarkApplied>)
+  - [func \(q \*ProposalQueueExternal\) MarkSkipped\(id string\) error](<#ProposalQueueExternal.MarkSkipped>)
+- [type QueryTracesTool](<#QueryTracesTool>)
+  - [func NewQueryTracesTool\(store TraceStoreReader\) \*QueryTracesTool](<#NewQueryTracesTool>)
+  - [func \(t \*QueryTracesTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#QueryTracesTool.Invoke>)
 - [type QueueConfig](<#QueueConfig>)
   - [func DefaultQueueConfig\(\) QueueConfig](<#DefaultQueueConfig>)
 - [type QueueEntry](<#QueueEntry>)
@@ -767,6 +1128,37 @@ Package agent provides the agent loop and related components.
 - [type QueueType](<#QueueType>)
 - [type QueueUpdateData](<#QueueUpdateData>)
 - [type QueuedMessage](<#QueuedMessage>)
+- [type QuotaBlockStatus](<#QuotaBlockStatus>)
+- [type QuotaEpisode](<#QuotaEpisode>)
+- [type QuotaEpisodeTracker](<#QuotaEpisodeTracker>)
+  - [func NewQuotaEpisodeTracker\(logger \*slog.Logger\) \*QuotaEpisodeTracker](<#NewQuotaEpisodeTracker>)
+  - [func \(t \*QuotaEpisodeTracker\) ActiveEpisodes\(\) \[\]\*QuotaEpisode](<#QuotaEpisodeTracker.ActiveEpisodes>)
+  - [func \(t \*QuotaEpisodeTracker\) BlockedByEscalation\(agentID, providerKey string\)](<#QuotaEpisodeTracker.BlockedByEscalation>)
+  - [func \(t \*QuotaEpisodeTracker\) BlockedUntil\(agentID, providerKey string\) time.Time](<#QuotaEpisodeTracker.BlockedUntil>)
+  - [func \(t \*QuotaEpisodeTracker\) Clear\(agentID, providerKey string\)](<#QuotaEpisodeTracker.Clear>)
+  - [func \(t \*QuotaEpisodeTracker\) Enter\(agentID, providerKey, modelID string, unblockAt time.Time, taskID string\)](<#QuotaEpisodeTracker.Enter>)
+  - [func \(t \*QuotaEpisodeTracker\) SetClock\(fn func\(\) time.Time\)](<#QuotaEpisodeTracker.SetClock>)
+  - [func \(t \*QuotaEpisodeTracker\) SetPublisher\(p func\(topic string, msg any\)\)](<#QuotaEpisodeTracker.SetPublisher>)
+  - [func \(t \*QuotaEpisodeTracker\) SetStateSetter\(fn func\(agentID string, state AgentState, reason string\)\)](<#QuotaEpisodeTracker.SetStateSetter>)
+  - [func \(t \*QuotaEpisodeTracker\) Stop\(\)](<#QuotaEpisodeTracker.Stop>)
+- [type QuotaEvent](<#QuotaEvent>)
+- [type QuotaParkedTurn](<#QuotaParkedTurn>)
+- [type QuotaResumeWatcher](<#QuotaResumeWatcher>)
+  - [func NewQuotaResumeWatcher\(logger \*slog.Logger, resumeFunc func\(ctx context.Context, turn QuotaParkedTurn\), maxWait time.Duration\) \*QuotaResumeWatcher](<#NewQuotaResumeWatcher>)
+  - [func \(w \*QuotaResumeWatcher\) Park\(turn QuotaParkedTurn\) bool](<#QuotaResumeWatcher.Park>)
+  - [func \(w \*QuotaResumeWatcher\) Pending\(\) int](<#QuotaResumeWatcher.Pending>)
+  - [func \(w \*QuotaResumeWatcher\) SetParkEventBus\(b parkEventBus\)](<#QuotaResumeWatcher.SetParkEventBus>)
+  - [func \(w \*QuotaResumeWatcher\) SetParkPersistence\(store ParkPersistence\)](<#QuotaResumeWatcher.SetParkPersistence>)
+  - [func \(w \*QuotaResumeWatcher\) SetPollInterval\(d time.Duration\)](<#QuotaResumeWatcher.SetPollInterval>)
+  - [func \(w \*QuotaResumeWatcher\) Start\(ctx context.Context\)](<#QuotaResumeWatcher.Start>)
+  - [func \(w \*QuotaResumeWatcher\) Stop\(\)](<#QuotaResumeWatcher.Stop>)
+- [type RLMAnalyzer](<#RLMAnalyzer>)
+  - [func NewRLMAnalyzer\(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient \*llm.Client, logger \*slog.Logger\) \*RLMAnalyzer](<#NewRLMAnalyzer>)
+  - [func NewRLMAnalyzerFromTraceStore\(cfg RLMAnalyzerConfig, store \*memory.TraceStore, llmClient \*llm.Client, logger \*slog.Logger\) \*RLMAnalyzer](<#NewRLMAnalyzerFromTraceStore>)
+  - [func NewTestRLMAnalyzer\(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient \*llm.Client\) \*RLMAnalyzer](<#NewTestRLMAnalyzer>)
+  - [func \(a \*RLMAnalyzer\) Analyze\(ctx context.Context, prompt string\) \(\*AnalyzeResult, error\)](<#RLMAnalyzer.Analyze>)
+- [type RLMAnalyzerConfig](<#RLMAnalyzerConfig>)
+  - [func DefaultRLMConfig\(\) RLMAnalyzerConfig](<#DefaultRLMConfig>)
 - [type RalphLoop](<#RalphLoop>)
   - [func NewRalphLoop\(config RalphLoopConfig, orchestrator \*Orchestrator, taskStore \*task.Store, stepStore \*task.StepStore, planManager \*plan.PlanManager, bus \*bus.MessageBus, logger \*slog.Logger\) \*RalphLoop](<#NewRalphLoop>)
   - [func \(rl \*RalphLoop\) CheckCompletion\(ctx context.Context, taskID string, result json.RawMessage\) \(bool, \[\]string, bool\)](<#RalphLoop.CheckCompletion>)
@@ -775,11 +1167,26 @@ Package agent provides the agent loop and related components.
   - [func \(rl \*RalphLoop\) PlanManager\(\) \*plan.PlanManager](<#RalphLoop.PlanManager>)
   - [func \(rl \*RalphLoop\) Reset\(taskID string\)](<#RalphLoop.Reset>)
   - [func \(rl \*RalphLoop\) SetPlanManager\(pm \*plan.PlanManager\)](<#RalphLoop.SetPlanManager>)
+  - [func \(rl \*RalphLoop\) TaskIsTerminal\(taskID string\) bool](<#RalphLoop.TaskIsTerminal>)
   - [func \(rl \*RalphLoop\) TriggerReplan\(ctx context.Context, taskID string, previousEvidence \[\]string\) error](<#RalphLoop.TriggerReplan>)
 - [type RalphLoopConfig](<#RalphLoopConfig>)
   - [func DefaultRalphLoopConfig\(\) RalphLoopConfig](<#DefaultRalphLoopConfig>)
 - [type ReasoningDirective](<#ReasoningDirective>)
   - [func ParseReasoningDirective\(text string\) \(\*ReasoningDirective, error\)](<#ParseReasoningDirective>)
+- [type ReasoningWatchdog](<#ReasoningWatchdog>)
+  - [func NewReasoningWatchdog\(\) \*ReasoningWatchdog](<#NewReasoningWatchdog>)
+  - [func \(w \*ReasoningWatchdog\) Breach\(tokenCap, streakTurns int\) bool](<#ReasoningWatchdog.Breach>)
+  - [func \(w \*ReasoningWatchdog\) RecordTurn\(hasText, hasToolCalls bool, reasoningTokens int\)](<#ReasoningWatchdog.RecordTurn>)
+  - [func \(w \*ReasoningWatchdog\) Reset\(\)](<#ReasoningWatchdog.Reset>)
+  - [func \(w \*ReasoningWatchdog\) Streak\(\) int](<#ReasoningWatchdog.Streak>)
+- [type RecoveryConfig](<#RecoveryConfig>)
+  - [func DefaultRecoveryConfig\(\) RecoveryConfig](<#DefaultRecoveryConfig>)
+- [type RecoveryState](<#RecoveryState>)
+- [type ReflectionCollector](<#ReflectionCollector>)
+  - [func NewReflectionCollector\(cfg config.ReflectionCollectorConfig, classifier classifierClient, classifierModel string, templateReg \*plannerTemplateLoader, queuePath string, logger \*slog.Logger\) \*ReflectionCollector](<#NewReflectionCollector>)
+  - [func \(rc \*ReflectionCollector\) DrainPendingProposals\(\) \(\[\]ReflectionProposal, error\)](<#ReflectionCollector.DrainPendingProposals>)
+  - [func \(rc \*ReflectionCollector\) ReflectInactiveSessions\(ctx context.Context\)](<#ReflectionCollector.ReflectInactiveSessions>)
+  - [func \(rc \*ReflectionCollector\) ReflectTurn\(ctx context.Context, traj ReflectionTrajectory\) error](<#ReflectionCollector.ReflectTurn>)
 - [type ReflectionConfig](<#ReflectionConfig>)
   - [func DefaultReflectionConfig\(\) ReflectionConfig](<#DefaultReflectionConfig>)
 - [type ReflectionEngine](<#ReflectionEngine>)
@@ -787,8 +1194,13 @@ Package agent provides the agent loop and related components.
   - [func NewReflectionEngineWithConfig\(logger \*slog.Logger, linter \*lint.Registry, testRunner \*lint.TestRunner, llmClient llm.Chatter, config ReflectionConfig\) \*ReflectionEngine](<#NewReflectionEngineWithConfig>)
   - [func \(re \*ReflectionEngine\) RunReflection\(ctx context.Context, editedFiles \[\]string\) \(\*ReflectionResult, error\)](<#ReflectionEngine.RunReflection>)
   - [func \(re \*ReflectionEngine\) SetEditAvailability\(avail bool\)](<#ReflectionEngine.SetEditAvailability>)
+- [type ReflectionProposal](<#ReflectionProposal>)
 - [type ReflectionResult](<#ReflectionResult>)
+- [type ReflectionTrajectory](<#ReflectionTrajectory>)
+  - [func \(t ReflectionTrajectory\) JSON\(\) \(\[\]byte, error\)](<#ReflectionTrajectory.JSON>)
+- [type ReflectionTrajectoryStep](<#ReflectionTrajectoryStep>)
 - [type RegistryConfig](<#RegistryConfig>)
+- [type ReplyFuncSetter](<#ReplyFuncSetter>)
 - [type ReportCapture](<#ReportCapture>)
 - [type ReportRouter](<#ReportRouter>)
   - [func NewReportRouter\(cfg ReportRouterConfig\) \*ReportRouter](<#NewReportRouter>)
@@ -806,6 +1218,27 @@ Package agent provides the agent loop and related components.
   - [func \(c \*ResultCache\) Stats\(\) map\[string\]any](<#ResultCache.Stats>)
   - [func \(c \*ResultCache\) Stop\(\)](<#ResultCache.Stop>)
 - [type ResultPayload](<#ResultPayload>)
+- [type ResumeResult](<#ResumeResult>)
+- [type RetryBudget](<#RetryBudget>)
+  - [func GetRetryBudget\(ctx context.Context\) \*RetryBudget](<#GetRetryBudget>)
+  - [func NewRetryBudget\(max int\) \*RetryBudget](<#NewRetryBudget>)
+  - [func \(b \*RetryBudget\) Remaining\(\) int](<#RetryBudget.Remaining>)
+  - [func \(b \*RetryBudget\) Reset\(\)](<#RetryBudget.Reset>)
+  - [func \(b \*RetryBudget\) TryUse\(operation string\) bool](<#RetryBudget.TryUse>)
+  - [func \(b \*RetryBudget\) Used\(\) int](<#RetryBudget.Used>)
+  - [func \(b \*RetryBudget\) UsedBy\(operation string\) int](<#RetryBudget.UsedBy>)
+- [type RetryMetrics](<#RetryMetrics>)
+  - [func NewRetryMetrics\(\) \*RetryMetrics](<#NewRetryMetrics>)
+  - [func \(m \*RetryMetrics\) RecordRetry\(opType string, err error, delay time.Duration\)](<#RetryMetrics.RecordRetry>)
+  - [func \(m \*RetryMetrics\) Snapshot\(\) RetryMetricsSnapshot](<#RetryMetrics.Snapshot>)
+- [type RetryMetricsSnapshot](<#RetryMetricsSnapshot>)
+- [type RetryRecovery](<#RetryRecovery>)
+  - [func NewRetryRecovery\(cfg RecoveryConfig\) \*RetryRecovery](<#NewRetryRecovery>)
+  - [func \(r \*RetryRecovery\) ExecuteWithRetry\(ctx context.Context, toolName string, fn func\(\) \(any, error\)\) \(result any, retryErr error\)](<#RetryRecovery.ExecuteWithRetry>)
+  - [func \(r \*RetryRecovery\) GetRecoveryState\(\) RecoveryState](<#RetryRecovery.GetRecoveryState>)
+  - [func \(r \*RetryRecovery\) Reset\(\)](<#RetryRecovery.Reset>)
+  - [func \(r \*RetryRecovery\) ShouldRetry\(err error\) bool](<#RetryRecovery.ShouldRetry>)
+- [type RetryableError](<#RetryableError>)
 - [type ReviewManager](<#ReviewManager>)
   - [func NewReviewManager\(cfg ReviewManagerConfig\) \*ReviewManager](<#NewReviewManager>)
   - [func \(rm \*ReviewManager\) GetPolicy\(\) \*ReviewPolicy](<#ReviewManager.GetPolicy>)
@@ -825,6 +1258,12 @@ Package agent provides the agent loop and related components.
   - [func \(p \*ReviewPolicy\) ShouldAutoApprove\(step \*task.TaskStep\) bool](<#ReviewPolicy.ShouldAutoApprove>)
 - [type ReviewResult](<#ReviewResult>)
 - [type ReviewStatus](<#ReviewStatus>)
+- [type RewakePayload](<#RewakePayload>)
+- [type RosterGate](<#RosterGate>)
+  - [func NewRosterGate\(cfg RosterGateConfig\) \*RosterGate](<#NewRosterGate>)
+  - [func \(g \*RosterGate\) Evaluate\(ctx context.Context, workdir string, turnHadMutatingTool bool\) \(passed bool, output string, skipped bool, err error\)](<#RosterGate.Evaluate>)
+  - [func \(g \*RosterGate\) SetBackend\(b runtime.ExecutionBackend\)](<#RosterGate.SetBackend>)
+- [type RosterGateConfig](<#RosterGateConfig>)
 - [type RouteAction](<#RouteAction>)
   - [func DetermineRouteAction\(report \*AgentReport\) RouteAction](<#DetermineRouteAction>)
   - [func \(a RouteAction\) String\(\) string](<#RouteAction.String>)
@@ -836,7 +1275,46 @@ Package agent provides the agent loop and related components.
   - [func \(rt \*RoutingTable\) ReviewerFor\(intent string\) string](<#RoutingTable.ReviewerFor>)
   - [func \(rt \*RoutingTable\) SetRoute\(intent, actorID, reviewerID string\)](<#RoutingTable.SetRoute>)
 - [type RoutingValidation](<#RoutingValidation>)
+- [type RunRecoverer](<#RunRecoverer>)
+  - [func NewRunRecoverer\(basePath string, checkpointInterval int\) \(\*RunRecoverer, error\)](<#NewRunRecoverer>)
+  - [func \(r \*RunRecoverer\) CleanupAllCompleted\(\) \(int, error\)](<#RunRecoverer.CleanupAllCompleted>)
+  - [func \(r \*RunRecoverer\) CleanupBefore\(cutoff time.Time\) \(int, error\)](<#RunRecoverer.CleanupBefore>)
+  - [func \(r \*RunRecoverer\) CleanupCompleted\(runIDs ...string\) \(int, error\)](<#RunRecoverer.CleanupCompleted>)
+  - [func \(r \*RunRecoverer\) GetCheckpointInterval\(\) int](<#RunRecoverer.GetCheckpointInterval>)
+  - [func \(r \*RunRecoverer\) IncompleteRunCount\(\) \(int, error\)](<#RunRecoverer.IncompleteRunCount>)
+  - [func \(r \*RunRecoverer\) IsComplete\(runID string\) bool](<#RunRecoverer.IsComplete>)
+  - [func \(r \*RunRecoverer\) ListCompletedRuns\(\) \(\[\]string, error\)](<#RunRecoverer.ListCompletedRuns>)
+  - [func \(r \*RunRecoverer\) ListIncompleteRuns\(\) \(\[\]string, error\)](<#RunRecoverer.ListIncompleteRuns>)
+  - [func \(r \*RunRecoverer\) MarkComplete\(runID string\) error](<#RunRecoverer.MarkComplete>)
+  - [func \(r \*RunRecoverer\) ReadCheckpoint\(runID string\) \(\*Checkpoint, error\)](<#RunRecoverer.ReadCheckpoint>)
+  - [func \(r \*RunRecoverer\) Resume\(incompleteRunID string\) \(\*ResumeResult, error\)](<#RunRecoverer.Resume>)
+  - [func \(r \*RunRecoverer\) ResumeFromLatest\(\) \(\*ResumeResult, string, error\)](<#RunRecoverer.ResumeFromLatest>)
+  - [func \(r \*RunRecoverer\) SetCheckpointInterval\(interval int\)](<#RunRecoverer.SetCheckpointInterval>)
+  - [func \(r \*RunRecoverer\) ShouldCheckpoint\(turn int\) bool](<#RunRecoverer.ShouldCheckpoint>)
+  - [func \(r \*RunRecoverer\) WriteCheckpoint\(cp \*Checkpoint\) error](<#RunRecoverer.WriteCheckpoint>)
+- [type SQLiteParkStore](<#SQLiteParkStore>)
+  - [func NewSQLiteParkStore\(dbPath string, logger \*slog.Logger\) \(\*SQLiteParkStore, error\)](<#NewSQLiteParkStore>)
+  - [func \(s \*SQLiteParkStore\) Close\(\) error](<#SQLiteParkStore.Close>)
+  - [func \(s \*SQLiteParkStore\) Delete\(ctx context.Context, kind ParkKind, persistenceKey string\) error](<#SQLiteParkStore.Delete>)
+  - [func \(s \*SQLiteParkStore\) Load\(ctx context.Context, kind ParkKind, now time.Time\) \(\[\]ParkedTurnRecord, \[\]string, error\)](<#SQLiteParkStore.Load>)
+  - [func \(s \*SQLiteParkStore\) Save\(ctx context.Context, kind ParkKind, persistenceKey string, rec ParkedTurnRecord\) error](<#SQLiteParkStore.Save>)
+- [type SQLiteStatePersister](<#SQLiteStatePersister>)
+  - [func NewSQLiteStatePersister\(db \*sql.DB\) \(\*SQLiteStatePersister, error\)](<#NewSQLiteStatePersister>)
+  - [func \(p \*SQLiteStatePersister\) Delete\(ctx context.Context, agentID string\) error](<#SQLiteStatePersister.Delete>)
+  - [func \(p \*SQLiteStatePersister\) Load\(ctx context.Context, agentID string\) \(\*AgentStateSnapshot, error\)](<#SQLiteStatePersister.Load>)
+  - [func \(p \*SQLiteStatePersister\) Save\(ctx context.Context, agentID string, snapshot AgentStateSnapshot\) error](<#SQLiteStatePersister.Save>)
 - [type SavePointData](<#SavePointData>)
+- [type SearchRollback](<#SearchRollback>)
+  - [func NewSearchRollback\(window int\) \*SearchRollback](<#NewSearchRollback>)
+  - [func \(r \*SearchRollback\) Observe\(hash string\)](<#SearchRollback.Observe>)
+  - [func \(r \*SearchRollback\) Reset\(\)](<#SearchRollback.Reset>)
+  - [func \(r \*SearchRollback\) ShouldRollback\(hash string\) bool](<#SearchRollback.ShouldRollback>)
+- [type SearchSpanTool](<#SearchSpanTool>)
+  - [func NewSearchSpanTool\(store TraceStoreReader\) \*SearchSpanTool](<#NewSearchSpanTool>)
+  - [func \(t \*SearchSpanTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#SearchSpanTool.Invoke>)
+- [type SearchTraceTool](<#SearchTraceTool>)
+  - [func NewSearchTraceTool\(store TraceStoreReader\) \*SearchTraceTool](<#NewSearchTraceTool>)
+  - [func \(t \*SearchTraceTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#SearchTraceTool.Invoke>)
 - [type SecretObfuscationHook](<#SecretObfuscationHook>)
   - [func NewSecretObfuscationHook\(obfuscator \*intsecurity.SecretObfuscator, logger \*slog.Logger\) \*SecretObfuscationHook](<#NewSecretObfuscationHook>)
   - [func \(h \*SecretObfuscationHook\) TransformContext\(\_ context.Context, messages \[\]llm.ChatMessage, toolDefs \[\]llm.ToolDefinition\) ContextTransform](<#SecretObfuscationHook.TransformContext>)
@@ -857,16 +1335,20 @@ Package agent provides the agent loop and related components.
 - [type SessionCompactData](<#SessionCompactData>)
 - [type SessionConfig](<#SessionConfig>)
   - [func DefaultSessionConfig\(\) SessionConfig](<#DefaultSessionConfig>)
+- [type SessionContextDigest](<#SessionContextDigest>)
+  - [func \(s \*SessionContextDigest\) IsEmpty\(\) bool](<#SessionContextDigest.IsEmpty>)
 - [type SessionEndData](<#SessionEndData>)
 - [type SessionEndHook](<#SessionEndHook>)
 - [type SessionLifecyclePayload](<#SessionLifecyclePayload>)
 - [type SessionLifecycleResult](<#SessionLifecycleResult>)
 - [type SessionLifecycleState](<#SessionLifecycleState>)
+- [type SessionMessageSaver](<#SessionMessageSaver>)
 - [type SessionMetrics](<#SessionMetrics>)
 - [type SessionStartData](<#SessionStartData>)
 - [type SessionStartHook](<#SessionStartHook>)
 - [type SessionState](<#SessionState>)
   - [func \(s SessionState\) IsTerminal\(\) bool](<#SessionState.IsTerminal>)
+- [type SessionStoreReader](<#SessionStoreReader>)
 - [type SessionTracker](<#SessionTracker>)
   - [func NewSessionTracker\(maxAge time.Duration\) \*SessionTracker](<#NewSessionTracker>)
   - [func NewSessionTrackerWithConfig\(cfg SessionTrackerConfig\) \*SessionTracker](<#NewSessionTrackerWithConfig>)
@@ -886,13 +1368,41 @@ Package agent provides the agent loop and related components.
 - [type SessionTreeData](<#SessionTreeData>)
 - [type SettledData](<#SettledData>)
 - [type ShouldStopAfterTurnHook](<#ShouldStopAfterTurnHook>)
+- [type SkillEntryView](<#SkillEntryView>)
+- [type SkillStateConfig](<#SkillStateConfig>)
+- [type SkillStateRuntime](<#SkillStateRuntime>)
+  - [func NewSkillStateRuntime\(loop \*AgentLoop, cfg SkillStateConfig, logger \*slog.Logger\) \*SkillStateRuntime](<#NewSkillStateRuntime>)
+  - [func \(r \*SkillStateRuntime\) Run\(ctx context.Context, skill \*skills.Skill, input, conversationID string\) \(string, error\)](<#SkillStateRuntime.Run>)
+  - [func \(r \*SkillStateRuntime\) WithStateTraceWriter\(tw TraceWriter\) \*SkillStateRuntime](<#SkillStateRuntime.WithStateTraceWriter>)
+  - [func \(r \*SkillStateRuntime\) WithToolRunner\(runner stateToolRunner\) \*SkillStateRuntime](<#SkillStateRuntime.WithToolRunner>)
 - [type SnowflakeEmbedClient](<#SnowflakeEmbedClient>)
   - [func NewSnowflakeEmbedClient\(apiKey string\) \*SnowflakeEmbedClient](<#NewSnowflakeEmbedClient>)
   - [func \(c \*SnowflakeEmbedClient\) Dimension\(\) int](<#SnowflakeEmbedClient.Dimension>)
   - [func \(c \*SnowflakeEmbedClient\) Embed\(ctx context.Context, text string\) \(\[\]float64, error\)](<#SnowflakeEmbedClient.Embed>)
   - [func \(c \*SnowflakeEmbedClient\) EmbedBatch\(ctx context.Context, texts \[\]string\) \(\[\]\[\]float64, error\)](<#SnowflakeEmbedClient.EmbedBatch>)
+- [type SpawnContext](<#SpawnContext>)
+  - [func BuildSpawnContext\(iso ContextIsolation, brief string, artifacts \[\]ArtifactRef, memoryIDs \[\]string, parent \[\]llm.ChatMessage\) SpawnContext](<#BuildSpawnContext>)
+- [type SpeakKind](<#SpeakKind>)
+  - [func ClassifyRun\(sessionAttached, isolatedChild bool\) SpeakKind](<#ClassifyRun>)
+  - [func \(k SpeakKind\) String\(\) string](<#SpeakKind.String>)
+- [type SpeakPublisher](<#SpeakPublisher>)
+  - [func BusSpeakPublisher\(b \*bus.MessageBus, source string\) SpeakPublisher](<#BusSpeakPublisher>)
+- [type SpeakRouter](<#SpeakRouter>)
+  - [func NewSpeakRouter\(pub SpeakPublisher\) \*SpeakRouter](<#NewSpeakRouter>)
+  - [func \(r \*SpeakRouter\) Deliver\(ctx context.Context, kind SpeakKind, text, sessionID, conversationID string\) error](<#SpeakRouter.Deliver>)
+  - [func \(r \*SpeakRouter\) DeliverIsolatedNotify\(ctx context.Context, text, sessionID, conversationID string\) error](<#SpeakRouter.DeliverIsolatedNotify>)
+  - [func \(r \*SpeakRouter\) ReplyCarrier\(sessionAttached, isolatedChild bool, sessionID, conversationID string\) func\(text string\) error](<#SpeakRouter.ReplyCarrier>)
+  - [func \(r \*SpeakRouter\) SetPublisher\(fn SpeakPublisher\)](<#SpeakRouter.SetPublisher>)
+- [type StateField](<#StateField>)
+  - [func DefaultStateSchema\(\) \[\]StateField](<#DefaultStateSchema>)
+- [type StateTransition](<#StateTransition>)
+- [type StateTransitionListener](<#StateTransitionListener>)
 - [type StatusPayload](<#StatusPayload>)
 - [type StepCriterion](<#StepCriterion>)
+- [type StepHandoff](<#StepHandoff>)
+  - [func \(h \*StepHandoff\) Failed\(\) bool](<#StepHandoff.Failed>)
+  - [func \(h \*StepHandoff\) RenderMarkdown\(\) string](<#StepHandoff.RenderMarkdown>)
+  - [func \(h \*StepHandoff\) Truncate\(\)](<#StepHandoff.Truncate>)
 - [type StepJobPayload](<#StepJobPayload>)
 - [type StopDecision](<#StopDecision>)
 - [type StrategicPlanner](<#StrategicPlanner>)
@@ -902,8 +1412,13 @@ Package agent provides the agent loop and related components.
   - [func \(sp \*StrategicPlanner\) Plan\(ctx context.Context, req PlanRequest\) error](<#StrategicPlanner.Plan>)
   - [func \(sp \*StrategicPlanner\) RejectPlan\(ctx context.Context, taskID string, reason string\) error](<#StrategicPlanner.RejectPlan>)
   - [func \(sp \*StrategicPlanner\) ReplanFailedTask\(ctx context.Context, taskID, failureReason string\) error](<#StrategicPlanner.ReplanFailedTask>)
+  - [func \(sp \*StrategicPlanner\) SetPlanPhaseSink\(fn func\(taskID string, phases \[\]PlanPhaseSpec\)\)](<#StrategicPlanner.SetPlanPhaseSink>)
 - [type StrategicPlannerConfig](<#StrategicPlannerConfig>)
+- [type SubagentExecution](<#SubagentExecution>)
 - [type SubtaskAssignment](<#SubtaskAssignment>)
+- [type SynthesizeTracesTool](<#SynthesizeTracesTool>)
+  - [func NewSynthesizeTracesTool\(store TraceStoreReader, llmClient \*llm.Client\) \*SynthesizeTracesTool](<#NewSynthesizeTracesTool>)
+  - [func \(t \*SynthesizeTracesTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#SynthesizeTracesTool.Invoke>)
 - [type SynthesizedProgressEvent](<#SynthesizedProgressEvent>)
 - [type TTSRManager](<#TTSRManager>)
   - [func NewTTSRManager\(logger \*slog.Logger\) \*TTSRManager](<#NewTTSRManager>)
@@ -923,6 +1438,9 @@ Package agent provides the agent loop and related components.
   - [func \(ts \*TacticalScheduler\) OnJobCompleted\(ctx context.Context, jobID string, result json.RawMessage\) error](<#TacticalScheduler.OnJobCompleted>)
   - [func \(ts \*TacticalScheduler\) OnJobFailed\(ctx context.Context, jobID, jobErr string\) error](<#TacticalScheduler.OnJobFailed>)
   - [func \(ts \*TacticalScheduler\) ScheduleReadySteps\(ctx context.Context, taskID string\) error](<#TacticalScheduler.ScheduleReadySteps>)
+  - [func \(ts \*TacticalScheduler\) SelectAgentForHint\(toolHint string\) string](<#TacticalScheduler.SelectAgentForHint>)
+  - [func \(ts \*TacticalScheduler\) SetHandoffPropagator\(fn func\(ctx context.Context, completedStep \*task.TaskStep\) error\)](<#TacticalScheduler.SetHandoffPropagator>)
+  - [func \(ts \*TacticalScheduler\) SetSessionStore\(store sessionStoreReader\)](<#TacticalScheduler.SetSessionStore>)
 - [type TacticalSchedulerConfig](<#TacticalSchedulerConfig>)
 - [type TaintBeforeToolCall](<#TaintBeforeToolCall>)
   - [func NewTaintBeforeToolCall\(tracker \*taint.ExtendedTracker, logger \*slog.Logger, config TaintHookConfig\) \*TaintBeforeToolCall](<#NewTaintBeforeToolCall>)
@@ -974,6 +1492,14 @@ Package agent provides the agent loop and related components.
 - [type TeamSessionState](<#TeamSessionState>)
 - [type TeamStartRequest](<#TeamStartRequest>)
 - [type TeamStatus](<#TeamStatus>)
+- [type TelemetryEmitter](<#TelemetryEmitter>)
+  - [func NewTelemetryEmitter\(runID string\) \*TelemetryEmitter](<#NewTelemetryEmitter>)
+  - [func \(te \*TelemetryEmitter\) EmitAgentSpan\(name, agentID, content string, depth int\) error](<#TelemetryEmitter.EmitAgentSpan>)
+  - [func \(te \*TelemetryEmitter\) EmitLLMSpan\(name, model, prompt string, completion string, promptTokens, completionTokens int\) error](<#TelemetryEmitter.EmitLLMSpan>)
+  - [func \(te \*TelemetryEmitter\) EmitSpan\(span OTLPSpan\) error](<#TelemetryEmitter.EmitSpan>)
+  - [func \(te \*TelemetryEmitter\) EmitToolSpan\(name, toolName, input, output string, durationMs int64\) error](<#TelemetryEmitter.EmitToolSpan>)
+  - [func \(te \*TelemetryEmitter\) IsEnabled\(\) bool](<#TelemetryEmitter.IsEnabled>)
+  - [func \(te \*TelemetryEmitter\) Path\(\) string](<#TelemetryEmitter.Path>)
 - [type ThinkingLevelSelectData](<#ThinkingLevelSelectData>)
 - [type ThreadRoutable](<#ThreadRoutable>)
 - [type ThreadRouter](<#ThreadRouter>)
@@ -986,9 +1512,19 @@ Package agent provides the agent loop and related components.
 - [type ThreadRouterOption](<#ThreadRouterOption>)
   - [func WithThreadRouterLogger\(l \*slog.Logger\) ThreadRouterOption](<#WithThreadRouterLogger>)
   - [func WithThreadRouterSessionStore\(store ThreadRoutable\) ThreadRouterOption](<#WithThreadRouterSessionStore>)
+- [type ToolConcurrencyProfile](<#ToolConcurrencyProfile>)
+  - [func \(p ToolConcurrencyProfile\) String\(\) string](<#ToolConcurrencyProfile.String>)
 - [type ToolDefinitionInfo](<#ToolDefinitionInfo>)
+- [type ToolDependencyGraph](<#ToolDependencyGraph>)
+  - [func NewToolDependencyGraph\(\) \*ToolDependencyGraph](<#NewToolDependencyGraph>)
+  - [func \(g \*ToolDependencyGraph\) AddCall\(call llm.ToolCall\)](<#ToolDependencyGraph.AddCall>)
+  - [func \(g \*ToolDependencyGraph\) AddDependency\(from, to string\)](<#ToolDependencyGraph.AddDependency>)
+  - [func \(g \*ToolDependencyGraph\) Dependents\(id string\) \[\]string](<#ToolDependencyGraph.Dependents>)
+  - [func \(g \*ToolDependencyGraph\) GetDependencies\(id string\) \[\]string](<#ToolDependencyGraph.GetDependencies>)
+  - [func \(g \*ToolDependencyGraph\) IndependentGroups\(\) \[\]\[\]llm.ToolCall](<#ToolDependencyGraph.IndependentGroups>)
 - [type ToolDescription](<#ToolDescription>)
   - [func ToolsFromDefinitions\(definitions \[\]ToolDefinitionInfo\) \[\]ToolDescription](<#ToolsFromDefinitions>)
+- [type ToolDescriptor](<#ToolDescriptor>)
 - [type ToolErrorCode](<#ToolErrorCode>)
 - [type ToolExecutionEndData](<#ToolExecutionEndData>)
 - [type ToolExecutionError](<#ToolExecutionError>)
@@ -999,10 +1535,14 @@ Package agent provides the agent loop and related components.
   - [func \(e \*ToolExecutionError\) ToJSON\(\) map\[string\]any](<#ToolExecutionError.ToJSON>)
 - [type ToolExecutionStartData](<#ToolExecutionStartData>)
 - [type ToolExecutionUpdateData](<#ToolExecutionUpdateData>)
+- [type ToolHighlight](<#ToolHighlight>)
 - [type ToolParameter](<#ToolParameter>)
 - [type ToolParameterInfo](<#ToolParameterInfo>)
 - [type ToolRegistry](<#ToolRegistry>)
   - [func FilterToolsForSkill\(registry ToolRegistry, allowedTools \[\]string\) ToolRegistry](<#FilterToolsForSkill>)
+- [type ToolRetryBreaker](<#ToolRetryBreaker>)
+  - [func NewToolRetryBreaker\(\) \*ToolRetryBreaker](<#NewToolRetryBreaker>)
+  - [func \(b \*ToolRetryBreaker\) Observe\(name string, args map\[string\]any, failed bool\) bool](<#ToolRetryBreaker.Observe>)
 - [type TopicDetector](<#TopicDetector>)
   - [func NewTopicDetector\(opts ...TopicDetectorOption\) \*TopicDetector](<#NewTopicDetector>)
   - [func \(td \*TopicDetector\) Detect\(input string\) string](<#TopicDetector.Detect>)
@@ -1011,6 +1551,15 @@ Package agent provides the agent loop and related components.
   - [func WithDefaultTopic\(topic string\) TopicDetectorOption](<#WithDefaultTopic>)
   - [func WithLogger\(l \*slog.Logger\) TopicDetectorOption](<#WithLogger>)
   - [func WithTopicKeywords\(topic string, keywords \[\]string\) TopicDetectorOption](<#WithTopicKeywords>)
+- [type TraceQueryTool](<#TraceQueryTool>)
+  - [func AllTraceTools\(store TraceStoreReader, llmClient \*llm.Client\) \[\]TraceQueryTool](<#AllTraceTools>)
+- [type TraceRecordPayload](<#TraceRecordPayload>)
+- [type TraceStepPayload](<#TraceStepPayload>)
+- [type TraceStoreReader](<#TraceStoreReader>)
+- [type TraceWriter](<#TraceWriter>)
+  - [func NewTraceStoreWriter\(persist func\(payload TraceRecordPayload\) \(string, error\)\) TraceWriter](<#NewTraceStoreWriter>)
+- [type TraceWriterFunc](<#TraceWriterFunc>)
+  - [func \(f TraceWriterFunc\) WriteTrace\(rec \*traceRecordMirror\) \(string, error\)](<#TraceWriterFunc.WriteTrace>)
 - [type TrackerSessionState](<#TrackerSessionState>)
 - [type Trajectory](<#Trajectory>)
 - [type TrajectoryOutcome](<#TrajectoryOutcome>)
@@ -1018,6 +1567,7 @@ Package agent provides the agent loop and related components.
 - [type TransformContextHook](<#TransformContextHook>)
 - [type TrueIntentAnalysis](<#TrueIntentAnalysis>)
   - [func \(a \*TrueIntentAnalysis\) IsAmbiguous\(threshold float64\) bool](<#TrueIntentAnalysis.IsAmbiguous>)
+- [type Turn](<#Turn>)
 - [type TurnAction](<#TurnAction>)
 - [type TurnBudgetTracker](<#TurnBudgetTracker>)
   - [func NewTurnBudgetTracker\(totalBudget, tokensPerTurn, maxTurns int\) \*TurnBudgetTracker](<#NewTurnBudgetTracker>)
@@ -1027,6 +1577,9 @@ Package agent provides the agent loop and related components.
   - [func \(t \*TurnBudgetTracker\) IsWrapUpRequested\(\) bool](<#TurnBudgetTracker.IsWrapUpRequested>)
   - [func \(t \*TurnBudgetTracker\) RecordUsage\(tokensUsed int\)](<#TurnBudgetTracker.RecordUsage>)
   - [func \(t \*TurnBudgetTracker\) RemainingBudget\(\) int](<#TurnBudgetTracker.RemainingBudget>)
+- [type TurnCompactor](<#TurnCompactor>)
+  - [func NewTurnCompactor\(\) \*TurnCompactor](<#NewTurnCompactor>)
+  - [func \(tc \*TurnCompactor\) CompactTurns\(turns \[\]Turn\) \[\]CompactTurn](<#TurnCompactor.CompactTurns>)
 - [type TurnEndData](<#TurnEndData>)
 - [type TurnEntry](<#TurnEntry>)
 - [type TurnManager](<#TurnManager>)
@@ -1044,8 +1597,27 @@ Package agent provides the agent loop and related components.
   - [func \(tm \*TurnManager\) TurnTimeout\(\) time.Duration](<#TurnManager.TurnTimeout>)
   - [func \(tm \*TurnManager\) Yield\(\) error](<#TurnManager.Yield>)
 - [type TurnModification](<#TurnModification>)
+- [type TurnParker](<#TurnParker>)
+  - [func NewTurnParker\(logger \*slog.Logger, resume func\(context.Context, ParkedTurnRecord\), maxWait time.Duration\) \*TurnParker](<#NewTurnParker>)
+  - [func \(p \*TurnParker\) EmitParkEvent\(rec ParkedTurnRecord, modelID, providerID string\)](<#TurnParker.EmitParkEvent>)
+  - [func \(p \*TurnParker\) EmitResumeEvent\(rec ParkedTurnRecord, trueParkAt time.Time\)](<#TurnParker.EmitResumeEvent>)
+  - [func \(p \*TurnParker\) Next\(class llm.FailureClass\) \(time.Time, bool\)](<#TurnParker.Next>)
+  - [func \(p \*TurnParker\) Park\(turn ParkedTurnRecord\) bool](<#TurnParker.Park>)
+  - [func \(p \*TurnParker\) Pending\(\) int](<#TurnParker.Pending>)
+  - [func \(p \*TurnParker\) SetParkEventBus\(b parkEventBus\)](<#TurnParker.SetParkEventBus>)
+  - [func \(p \*TurnParker\) SetParkKey\(keyFn func\(rec ParkedTurnRecord\) string\)](<#TurnParker.SetParkKey>)
+  - [func \(p \*TurnParker\) SetParkPersistence\(store ParkPersistence, kind ParkKind\)](<#TurnParker.SetParkPersistence>)
+  - [func \(p \*TurnParker\) SetPollInterval\(d time.Duration\)](<#TurnParker.SetPollInterval>)
+  - [func \(p \*TurnParker\) SetResumeFunc\(resume func\(context.Context, ParkedTurnRecord\)\)](<#TurnParker.SetResumeFunc>)
+  - [func \(p \*TurnParker\) Start\(ctx context.Context\)](<#TurnParker.Start>)
+  - [func \(p \*TurnParker\) Stop\(\)](<#TurnParker.Stop>)
+  - [func \(p \*TurnParker\) WaitInfo\(\) \[\]ParkWaitInfo](<#TurnParker.WaitInfo>)
+- [type TurnRecord](<#TurnRecord>)
+- [type TurnSnapshot](<#TurnSnapshot>)
+- [type TurnSnapshotFile](<#TurnSnapshotFile>)
 - [type TurnStartData](<#TurnStartData>)
 - [type TurnState](<#TurnState>)
+- [type TurnStatus](<#TurnStatus>)
 - [type ValidateCheckpointResult](<#ValidateCheckpointResult>)
 - [type ValidationPolicy](<#ValidationPolicy>)
   - [func DefaultValidationPolicy\(\) \*ValidationPolicy](<#DefaultValidationPolicy>)
@@ -1055,6 +1627,35 @@ Package agent provides the agent loop and related components.
 - [type VerbosityLevel](<#VerbosityLevel>)
   - [func ParseVerbosityLevel\(s string\) VerbosityLevel](<#ParseVerbosityLevel>)
   - [func \(v VerbosityLevel\) String\(\) string](<#VerbosityLevel.String>)
+- [type Verdict](<#Verdict>)
+  - [func \(v Verdict\) String\(\) string](<#Verdict.String>)
+- [type VerificationAutoTrigger](<#VerificationAutoTrigger>)
+  - [func NewVerificationAutoTrigger\(tracker \*VerificationTracker, config VerificationConfig\) \*VerificationAutoTrigger](<#NewVerificationAutoTrigger>)
+  - [func \(h \*VerificationAutoTrigger\) ClearModelOverride\(ctx context.Context\)](<#VerificationAutoTrigger.ClearModelOverride>)
+  - [func \(h \*VerificationAutoTrigger\) PrepareNextTurn\(ctx context.Context, state TurnState\) TurnModification](<#VerificationAutoTrigger.PrepareNextTurn>)
+  - [func \(h \*VerificationAutoTrigger\) SetAgentIDSource\(source AgentIDSource\)](<#VerificationAutoTrigger.SetAgentIDSource>)
+  - [func \(h \*VerificationAutoTrigger\) SetAgentSpec\(spec \*AgentSpec\)](<#VerificationAutoTrigger.SetAgentSpec>)
+  - [func \(h \*VerificationAutoTrigger\) SetClearOverride\(clear func\(\)\)](<#VerificationAutoTrigger.SetClearOverride>)
+  - [func \(h \*VerificationAutoTrigger\) SetEventPublisher\(publish EventPublisher\)](<#VerificationAutoTrigger.SetEventPublisher>)
+  - [func \(h \*VerificationAutoTrigger\) SetOverrideApplier\(applier func\(modelRef string\)\)](<#VerificationAutoTrigger.SetOverrideApplier>)
+  - [func \(h \*VerificationAutoTrigger\) SetResolver\(resolver ModelResolver\)](<#VerificationAutoTrigger.SetResolver>)
+  - [func \(h \*VerificationAutoTrigger\) SetSpawner\(s VerifierSpawner\)](<#VerificationAutoTrigger.SetSpawner>)
+- [type VerificationConfig](<#VerificationConfig>)
+  - [func DefaultVerificationConfig\(\) VerificationConfig](<#DefaultVerificationConfig>)
+  - [func \(v VerificationConfig\) EffectiveModel\(agentModel string\) string](<#VerificationConfig.EffectiveModel>)
+- [type VerificationTracker](<#VerificationTracker>)
+  - [func NewVerificationTracker\(threshold int\) \*VerificationTracker](<#NewVerificationTracker>)
+  - [func \(t \*VerificationTracker\) RecordToolCall\(toolName string, filePath string\)](<#VerificationTracker.RecordToolCall>)
+  - [func \(t \*VerificationTracker\) Reset\(\)](<#VerificationTracker.Reset>)
+  - [func \(t \*VerificationTracker\) ShouldTrigger\(\) bool](<#VerificationTracker.ShouldTrigger>)
+  - [func \(t \*VerificationTracker\) Snapshot\(\) \[\]string](<#VerificationTracker.Snapshot>)
+- [type VerifierSpawner](<#VerifierSpawner>)
+- [type ViewSpansTool](<#ViewSpansTool>)
+  - [func NewViewSpansTool\(store TraceStoreReader\) \*ViewSpansTool](<#NewViewSpansTool>)
+  - [func \(t \*ViewSpansTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#ViewSpansTool.Invoke>)
+- [type ViewTraceTool](<#ViewTraceTool>)
+  - [func NewViewTraceTool\(store TraceStoreReader\) \*ViewTraceTool](<#NewViewTraceTool>)
+  - [func \(t \*ViewTraceTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#ViewTraceTool.Invoke>)
 - [type Watchdog](<#Watchdog>)
   - [func NewWatchdog\(cfg config.WatchdogConfig, logger \*slog.Logger\) \*Watchdog](<#NewWatchdog>)
   - [func \(w \*Watchdog\) ActiveWorkerCount\(\) int](<#Watchdog.ActiveWorkerCount>)
@@ -1072,6 +1673,8 @@ Package agent provides the agent loop and related components.
 - [type Worker](<#Worker>)
 - [type WorkerStage](<#WorkerStage>)
 - [type WorkerState](<#WorkerState>)
+- [type WorkingDirSetter](<#WorkingDirSetter>)
+- [type WorkspaceCheckpoint](<#WorkspaceCheckpoint>)
 - [type WorkspaceConfig](<#WorkspaceConfig>)
   - [func DefaultWorkspaceConfig\(\) WorkspaceConfig](<#DefaultWorkspaceConfig>)
 - [type WorkspaceManager](<#WorkspaceManager>)
@@ -1080,10 +1683,10 @@ Package agent provides the agent loop and related components.
   - [func \(w \*WorkspaceManager\) Cleanup\(taskID string\) error](<#WorkspaceManager.Cleanup>)
   - [func \(w \*WorkspaceManager\) Commit\(ctx context.Context, taskID, message string, paths \[\]string\) error](<#WorkspaceManager.Commit>)
   - [func \(w \*WorkspaceManager\) Create\(ctx context.Context, taskID, description string\) \(string, error\)](<#WorkspaceManager.Create>)
-  - [func \(w \*WorkspaceManager\) CreateCheckpoint\(ctx context.Context, taskID, label string\) \(\*Checkpoint, error\)](<#WorkspaceManager.CreateCheckpoint>)
+  - [func \(w \*WorkspaceManager\) CreateCheckpoint\(ctx context.Context, taskID, label string\) \(\*WorkspaceCheckpoint, error\)](<#WorkspaceManager.CreateCheckpoint>)
   - [func \(w \*WorkspaceManager\) DeleteCheckpoint\(ctx context.Context, taskID, label string\) error](<#WorkspaceManager.DeleteCheckpoint>)
   - [func \(w \*WorkspaceManager\) GetPath\(taskID string\) string](<#WorkspaceManager.GetPath>)
-  - [func \(w \*WorkspaceManager\) ListCheckpoints\(ctx context.Context, taskID string\) \(\[\]Checkpoint, error\)](<#WorkspaceManager.ListCheckpoints>)
+  - [func \(w \*WorkspaceManager\) ListCheckpoints\(ctx context.Context, taskID string\) \(\[\]WorkspaceCheckpoint, error\)](<#WorkspaceManager.ListCheckpoints>)
   - [func \(w \*WorkspaceManager\) Log\(ctx context.Context, taskID string, maxEntries int\) \(string, error\)](<#WorkspaceManager.Log>)
   - [func \(w \*WorkspaceManager\) RestoreCheckpoint\(ctx context.Context, taskID, label string\) error](<#WorkspaceManager.RestoreCheckpoint>)
   - [func \(w \*WorkspaceManager\) Status\(ctx context.Context, taskID string\) \(string, error\)](<#WorkspaceManager.Status>)
@@ -1106,6 +1709,7 @@ Package agent provides the agent loop and related components.
 	    ToolPlatformStatus   = "platform_status"
 	    ToolPlatformAgents   = "platform_agents"
 	    ToolPlatformTools    = "platform_tools"
+	    ToolRequestHandoff   = "request_handoff"
 	    ToolWebSearch        = "web_search"
 	    ToolWebFetch         = "web_fetch"
 	    ToolCodeRead         = "code_read"
@@ -1176,6 +1780,21 @@ Package agent provides the agent loop and related components.
 	    DefaultMaxMessages = 200
 	    // DefaultContextLimit is the default context token limit for truncation.
 	    DefaultContextLimit = 100000
+	    // DefaultConversationStoreSize is the default LRU capacity for the shared
+	    // ConversationStore. Increased from 100 to 1000 so a busy daemon with many
+	    // concurrent sessions does not evict active conversations.
+	    DefaultConversationStoreSize = 1000
+	)
+
+<a name="DefaultNoProgressWarnAt"></a>Defaults for GuardConfig zero values.
+
+	const (
+	    DefaultNoProgressWarnAt     = 3
+	    DefaultNoProgressVetoAt     = 5
+	    DefaultGracefulAfterVetoes  = 3
+	    DefaultRollbackWindow       = 10
+	    DefaultReasoningTokenCap    = 16384
+	    DefaultReasoningStreakTurns = 3
 	)
 
 <a name="KeywordRefactor"></a>Action keyword constants used in routing tables, review policies, and capability builders. These represent keyword\-level triggers, distinct from IntentType values.
@@ -1229,6 +1848,15 @@ Package agent provides the agent loop and related components.
 	    TopicPairError = "pair.error"
 	)
 
+<a name="ReasonQuotaWait"></a>Park lifecycle reason strings \(leaf contract\): parked on a provider wait \(reason follows the class — "quota\_wait" | "throttle\_wait"\), resumed into the loop, or abandoned past MaxWait.
+
+	const (
+	    ReasonQuotaWait       = "quota_wait"       // park (class=quota)
+	    ReasonThrottleWait    = "throttle_wait"    // park (class=throttle)
+	    ReasonThrottleResumed = "throttle_resumed" // resume (class=throttle)
+	    ReasonThrottleGiveUp  = "throttle_give_up" // give-up past MaxWait
+	)
+
 <a name="DefaultConstitution"></a>Default prompt sections \(used as fallbacks\).
 
 	const (
@@ -1258,6 +1886,14 @@ Package agent provides the agent loop and related components.
 	    ReportStatusNeedsInput = "needs_input"
 	)
 
+<a name="CheckpointVersion"></a>
+
+	const CheckpointVersion = 1
+
+<a name="DefaultEnhancerModelAlias"></a>DefaultEnhancerModelAlias is the model alias used when EnhancerModel is empty.
+
+	const DefaultEnhancerModelAlias = "small"
+
 <a name="DefaultPairMaxRounds"></a>
 
 	const (
@@ -1265,7 +1901,15 @@ Package agent provides the agent loop and related components.
 	    DefaultPairMaxRounds = 3
 	)
 
-<a name="HookAsyncRewakeTopic"></a>HookAsyncRewakeTopic is the bus topic used when an async hook with AsyncRewake=true finishes successfully. Subscribers \(typically the agent loop\) can wake up and react to the completion.
+<a name="DefaultQuotaResumePollInterval"></a>DefaultQuotaResumePollInterval is the re\-check cadence for parked turns. Mirrors config llm.quota\_retry.defer\_check\_interval's 10m default; the field is exported on the watcher for tests and config wiring. It is an alias of the TurnParker default \(parked\_turn.go\) — one source of truth.
+
+	const DefaultQuotaResumePollInterval = DefaultTurnParkerPollInterval
+
+<a name="DefaultTurnParkerPollInterval"></a>DefaultTurnParkerPollInterval is the re\-check cadence for parked turn records. It is the canonical source for DefaultQuotaResumePollInterval \(quota\_resume.go\), which remains the exported quota\-facing alias.
+
+	const DefaultTurnParkerPollInterval = 10 * time.Minute
+
+<a name="HookAsyncRewakeTopic"></a>HookAsyncRewakeTopic is the bus topic used when an async hook with AsyncRewake=true finishes successfully. The AgentLoop subscribes to this topic \(armed at turn entry\) and injects a wake into the matching conversation so it can react to the completion on its next reasoning iteration.
 
 	const HookAsyncRewakeTopic = "hook.async_rewake"
 
@@ -1290,6 +1934,18 @@ Package agent provides the agent loop and related components.
 	    SourceChatHandler = "chat-handler"
 	)
 
+<a name="SpeakTopicNotify"></a>SpeakTopicNotify is the bus topic carrying detached\-run notifications. The WS bridge forwards it as the generic "event" type — NEVER as chat\_message \(AGENTS.md invariant: only chat\_message/chat.response produce type chat\_message\).
+
+	const SpeakTopicNotify = "employee.notify"
+
+<a name="TopicAgentModelEscalated"></a>TopicAgentModelEscalated is published on the bus when a fix\-loop turn is switched to the escalation model. WS classification: agent\_progress — NEVER chat\_message \(AGENTS.md invariant; internal/comm/http/server.go transformBusEventToWS\). Payload keys \(exact\): \{agent\_id, from\_model, to\_model, reason, fix\_loops\}.
+
+	const TopicAgentModelEscalated = "agent.model_escalated"
+
+<a name="TurnSnapshotVersion"></a>
+
+	const TurnSnapshotVersion = 1
+
 ## Variables
 
 <a name="ErrMaxIterationsReached"></a>Error types for the agent loop.
@@ -1302,6 +1958,11 @@ Package agent provides the agent loop and related components.
 	    ErrConvergenceDetected         = errors.New("agent responses converged without progress")
 	    ErrConversationBudgetExhausted = errors.New("conversation token budget exhausted")
 	    ErrNoSkill                     = errors.New("skill is nil")
+	    // ErrAgentBlocked is returned by attemptStateRecovery when the state
+	    // machine is in StateBlocked and requires external action (approval or
+	    // rate-limit lift). It wraps the triggering error so callers retain the
+	    // original context.
+	    ErrAgentBlocked = errors.New("agent blocked awaiting external action")
 	)
 
 <a name="ErrQueueClosed"></a>Queue\-specific error types.
@@ -1335,6 +1996,8 @@ Package agent provides the agent loop and related components.
 	    ToolPlatformStatus,
 	    ToolPlatformAgents,
 	    ToolPlatformTools,
+	    ToolRequestHandoff,
+	    "project_info",
 	    "delegate_task",
 	}
 
@@ -1346,9 +2009,21 @@ Package agent provides the agent loop and related components.
 
 	var ErrDepthExceeded = &CollaborationError{Code: ErrCodeDepthExceeded, Message: "maximum collaboration nesting depth exceeded"}
 
+<a name="ErrIsolatedSpeak"></a>ErrIsolatedSpeak is the sentinel wrapped by every refusal to let an isolated child speak to the user. Match with errors.Is.
+
+	var ErrIsolatedSpeak = errors.New("isolated speak denied")
+
 <a name="ErrNoExecutionSlot"></a>ErrNoExecutionSlot is returned when the semaphore blocks a step from executing.
 
 	var ErrNoExecutionSlot = errors.New("no available execution slot")
+
+<a name="ErrRetryBudgetExhausted"></a>ErrRetryBudgetExhausted indicates no retries remain.
+
+	var ErrRetryBudgetExhausted = errors.New("retry budget exhausted")
+
+<a name="ErrTemplateNotFound"></a>render loads the named template \(e.g., "planner/decompose.md"\) from the first tier that contains it, strips YAML frontmatter, and executes it as a text/template against data. If no tier has the file and a fallback is registered, the fallback is used. Returns an error if neither. ErrTemplateNotFound is returned by render when no tier contains the named template file AND no fallback is registered. Callers can use errors.Is to distinguish "missing" from "malformed template" \(parse/execute errors\).
+
+	var ErrTemplateNotFound = errors.New("planner template not found and no fallback registered")
 
 <a name="SteeringHeuristicTable"></a>SteeringHeuristicTable defines which intent types should interrupt \(steer\) vs wait for a natural stopping point \(follow\-up\) when an agent loop is already running for the conversation.
 
@@ -1399,6 +2074,7 @@ Package agent provides the agent loop and related components.
 	    ToolPlatformStatus: "platform_read",
 	    ToolPlatformAgents: "platform_read",
 	    ToolPlatformTools:  "platform_read",
+	    "project_info":     "platform_read",
 	
 	    "task_create": "task_write",
 	    "task_get":    "task_read",
@@ -1407,6 +2083,8 @@ Package agent provides the agent loop and related components.
 	
 	    "delegate_task":   "agent_delegate",
 	    ToolRequestReview: "agent_delegate",
+	
+	    "reply_to_user": "send_message",
 	
 	    "ast_parse":   ToolCodeRead,
 	    "ast_symbols": ToolCodeRead,
@@ -1419,12 +2097,34 @@ Package agent provides the agent loop and related components.
 	    "lsp_diagnostics":       ToolCodeRead,
 	}
 
+<a name="ApplyEscalation"></a>
+## func ApplyEscalation
+
+	func ApplyEscalation(h *VerificationAutoTrigger, mod *TurnModification) bool
+
+ApplyEscalation consumes h.pendingEscalation \(leaf 03's consumption seam\) and prepares the escalated fix iteration. It mutates the CALLER'S TurnModification in place \(master Contract 4 signature\) so the escalation turn keeps handleFail's full message shape \(verifier findings included\) while the override and observability fire exactly once:
+
+- Pending decision nil → returns false, mod untouched \(idempotent no\-op\).
+- Sets mod.ModelOverride = decision.ModelRef \(the EXISTING TurnModification field — no struct extension\) and mod.Modified = true.
+- Arms the loop override PERSISTENTLY \(R1\): the overrideApplier seam invokes AgentLoop.SetPersistentModelOverride, giving the escalated model the FULL max\_fix\_loops budget — one\-shot \(SetModelOverride\) would grant exactly one turn. The persistent override is cleared on FRESH\-TURN DETECTION: the next turn that arrives WITHOUT a pending escalation \(see ClearEscalation\). Escalation is per\-fix\-loop, never sticky across turns \(master Contract 4, audit R1\).
+- Emits bus topic TopicAgentModelEscalated with payload \{agent\_id, from\_model, to\_model, reason, fix\_loops\} \(bus reason is "fix\_loops\_exhausted"; the routing\-log reason is "escalation"\).
+- Routing\-log reason "escalation" is recorded RESOLVER\-side: Resolver.ResolveEscalationRef persists the RoutingDecision when a RoutingLogger is attached \(mirroring ResolveRef's "explicit" recording\), so the decision row exists even if application is skipped. No second logging seam is introduced here.
+
+Clears h.pendingEscalation on success — consumed exactly once; a second call is a no\-op. Cites D3: hook placement keeps loop.go unmodified except at the wiring site.
+
+<a name="AssembleOrdered"></a>
+## func AssembleOrdered
+
+	func AssembleOrdered(sections []PromptSection) (prompt string, stablePrefixHash string)
+
+AssembleOrdered assembles a system prompt with all stable sections first \(preserving their given relative order\), followed by all unstable sections \(also preserving their given relative order\). Sections with an empty Body are skipped. The returned stablePrefixHash is the hex\-encoded sha256 over the exact bytes of the concatenated stable prefix; an empty stable set yields sha256\(""\). This gives provider prompt caches a byte\-identical prefix to hit on every turn, and callers a cheap drift signal.
+
 <a name="BuildPlannerPromptHint"></a>
 ## func BuildPlannerPromptHint
 
 	func BuildPlannerPromptHint(registry *AgentRegistry) string
 
-BuildPlannerPromptHint generates the "Available tool hints" section of the planner prompt from the agent registry, replacing the hardcoded list in plannerPromptTemplate \(strategic.go:85\-91\). The hint lists each enabled executor agent \(excluding the planner itself\) with its description or purpose truncated to 80 characters.
+BuildPlannerPromptHint generates the "Available tool hints" section of the planner prompt from the agent registry, replacing the hardcoded list that previously lived in the plannerPromptTemplate const. The hint lists each enabled executor agent \(excluding the planner itself\) with its description or purpose truncated to 80 characters.
 
 Returns an empty string if registry is nil, so the caller can omit the section entirely when no registry is available.
 
@@ -1455,6 +2155,13 @@ BuildSystemPromptWithOverride builds a prompt but uses an override if provided. 
 	func BusTopic(eventType AgentEventType) string
 
 BusTopic returns the bus topic for a given agent event type. Convention: "agent.event.\<type\>"
+
+<a name="ClearPerOperationBackoffOverrideForTest"></a>
+## func ClearPerOperationBackoffOverrideForTest
+
+	func ClearPerOperationBackoffOverrideForTest(key string)
+
+ClearPerOperationBackoffOverrideForTest removes the per\-operation backoff override under the given key.
 
 <a name="CosineSimilarity"></a>
 ## func CosineSimilarity
@@ -1494,12 +2201,40 @@ Returns empty string if no valid JSON object is found.
 
 Note: This function only looks for JSON objects \(starting with '\{'\). A bare JSON array like '\[1,2,3\]' will not be matched; this matches the behavior of the legacy extractJSON function and is intentional since the strategic planner always emits object\-shaped JSON.
 
+<a name="FinalSentinelContent"></a>
+## func FinalSentinelContent
+
+	func FinalSentinelContent() string
+
+FinalSentinelContent returns the filename component used as the final\-run sentinel.
+
+<a name="FormatDuration"></a>
+## func FormatDuration
+
+	func FormatDuration(d time.Duration) string
+
+FormatDuration returns a human\-readable duration string.
+
 <a name="FormatExampleArgs"></a>
 ## func FormatExampleArgs
 
 	func FormatExampleArgs(args map[string]any) string
 
 FormatExampleArgs formats example arguments for display in error messages
+
+<a name="GenerateProposalID"></a>
+## func GenerateProposalID
+
+	func GenerateProposalID() string
+
+GenerateProposalID returns a random hex\-encoded proposal ID. Exposed so cross\-package callers \(RememberTool, CLI improvements commands\) can pre\-assign an ID before calling ProposalQueueExternal.Append, allowing them to reference the proposal ID after queuing without parsing the file back. The internal proposalQueue.Append would assign an ID itself if handed an empty one, but since it takes ReflectionProposal by value, the assignment is not visible to the caller. Pre\-generating via this helper closes that gap without changing the internal Append signature.
+
+<a name="GetRetryAfter"></a>
+## func GetRetryAfter
+
+	func GetRetryAfter(err error) time.Duration
+
+GetRetryAfter extracts a retry\-after hint from an error if available. Returns 0 when there is no hint.
 
 <a name="GetThresholdForIntent"></a>
 ## func GetThresholdForIntent
@@ -1508,6 +2243,34 @@ FormatExampleArgs formats example arguments for display in error messages
 
 
 
+<a name="HashToolCall"></a>
+## func HashToolCall
+
+	func HashToolCall(tool string, argsJSON string) string
+
+HashToolCall returns a normalized hash of tool name \+ arguments JSON. JSON args are canonicalized \(keys sorted, whitespace collapsed\) so that reordered or differently\-spaced but semantically identical calls hash equal. Non\-JSON args fall back to whitespace\-collapsed raw comparison.
+
+<a name="IsAlwaysProposeOnly"></a>
+## func IsAlwaysProposeOnly
+
+	func IsAlwaysProposeOnly(target string) bool
+
+IsAlwaysProposeOnly is an exported wrapper around isAlwaysProposeOnly for external callers \(CLI, HTTP handlers\).
+
+<a name="IsRetryable"></a>
+## func IsRetryable
+
+	func IsRetryable(err error) bool
+
+IsRetryable returns true if the error is retryable. It first checks the RetryableError interface, then delegates to errcls.IsRetryable for network/HTTP/rate\-limit classification, and finally falls back to string matching for common transient error messages.
+
+<a name="IsSafeTargetPath"></a>
+## func IsSafeTargetPath
+
+	func IsSafeTargetPath(target string) bool
+
+IsSafeTargetPath is the exported wrapper around isSafeTargetPath for external callers \(TUI, HTTP handlers\).
+
 <a name="IsValidIntentType"></a>
 ## func IsValidIntentType
 
@@ -1515,12 +2278,33 @@ FormatExampleArgs formats example arguments for display in error messages
 
 IsValid checks if a string is a valid intent type.
 
+<a name="Key"></a>
+## func Key
+
+	func Key(agentID, providerKey string) string
+
+Key returns the map key for an episode.
+
+<a name="LoadJSONLTraces"></a>
+## func LoadJSONLTraces
+
+	func LoadJSONLTraces(store *InMemoryTraceStore, path string) error
+
+LoadJSONLTraces reads spans from a JSONL file and adds them to the store. Each line is expected to be a JSON object with at minimum a "span\_id" field. Optional fields: "trace\_id" \(defaults to "unknown"\), "span\_name", "service", "model", "input\_tokens", "output\_tokens", "has\_error".
+
 <a name="PairTopic"></a>
 ## func PairTopic
 
 	func PairTopic(sessionID string) string
 
 PairTopic returns the turn topic for a specific pair session.
+
+<a name="ParseVerdict"></a>
+## func ParseVerdict
+
+	func ParseVerdict(output string) (Verdict, []CheckResult)
+
+ParseVerdict extracts the verdict and individual check results from verifier output. It returns VerdictUnknown if no valid VERDICT line is found.
 
 <a name="PresetPrompt"></a>
 ## func PresetPrompt
@@ -1538,12 +2322,49 @@ RecoverPendingFollowUps loads all conversations that have persisted follow\-up m
 
 This is called once on daemon startup so that any TUI clients listening for agent.queue.followup.restored events are notified that history is available.
 
+<a name="RenderSpawnContext"></a>
+## func RenderSpawnContext
+
+	func RenderSpawnContext(sc SpawnContext) string
+
+RenderSpawnContext renders a SpawnContext as the brief block prepended to a child's input message. Transcript content is never rendered; the brief is a structured summary, not a conversation dump.
+
 <a name="ResultsToChatMessages"></a>
 ## func ResultsToChatMessages
 
 	func ResultsToChatMessages(results []*ExecutionResult) []llm.ChatMessage
 
 ResultsToChatMessages converts execution results to chat messages.
+
+<a name="ResumedTurnFromContext"></a>
+## func ResumedTurnFromContext
+
+	func ResumedTurnFromContext(ctx context.Context) bool
+
+ResumedTurnFromContext reports whether ctx marks a resumed parked turn. False for fresh turns and nil contexts.
+
+<a name="Retryable"></a>
+## func Retryable
+
+	func Retryable(err error, retryable bool, retryAfter time.Duration, reason string) error
+
+Retryable wraps an error as retryable with the given metadata. Returns nil if err is nil \(nil guard\).
+
+<a name="RoundTo"></a>
+## func RoundTo
+
+	func RoundTo(f float64, n int) float64
+
+RoundTo returns f rounded to n decimal places.
+
+<a name="RunWithRetry"></a>
+## func RunWithRetry
+
+	func RunWithRetry[T any](ctx context.Context, config BackoffConfig, fn func() (T, error)) (T, error)
+
+RunWithRetry executes a function with exponential backoff retry. It retries when the function returns a retryable error, using the configured backoff between attempts. Non\-retryable errors are returned immediately without waiting. If a retry budget is attached to the context, it is checked before each retry attempt.
+
+The function is called at least once. Retries happen only on retryable errors. If the context is cancelled during a wait, RunWithRetry returns ctx.Err\(\).
 
 <a name="SecurityKeywords"></a>
 ## func SecurityKeywords
@@ -1559,6 +2380,34 @@ SecurityKeywords returns the list of keywords that trigger pair\-session routing
 
 SerializeError converts a ToolExecutionError or standard error to a JSON map
 
+<a name="SetDefaultBackoffOverride"></a>
+## func SetDefaultBackoffOverride
+
+	func SetDefaultBackoffOverride(cfg BackoffConfig)
+
+SetDefaultBackoffOverride installs config\-driven backoff defaults. When non\-nil, LLMBackoffConfig\(\) and DefaultBackoffConfig\(\) merge the override over their hardcoded presets \(override fields with non\-zero values win\). Pass a zero\-value BackoffConfig or call clearDefaultBackoffOverride to reset. Safe for concurrent use.
+
+<a name="SetFailurePolicyDefaults"></a>
+## func SetFailurePolicyDefaults
+
+	func SetFailurePolicyDefaults(cfg llm.FailurePolicyConfig)
+
+SetFailurePolicyDefaults installs the process\-wide llm.failure\_policy values used to compose BackoffPlans for throttle parking \(tree 03 leaf 02\). Safe for concurrent use; re\-installing replaces the previous values.
+
+<a name="SetPerOperationBackoffOverride"></a>
+## func SetPerOperationBackoffOverride
+
+	func SetPerOperationBackoffOverride(key string, cfg BackoffConfig)
+
+SetPerOperationBackoffOverride installs a config\-driven backoff override for a specific operation category. Preset functions \(LLMBackoffConfig, ToolBackoffConfig, HTTPHookBackoffConfig, and tool\-profile lookups via getRetryConfigForTool\) consult this map first; the global override applies as a fallback. Safe for concurrent use.
+
+<a name="SetPerOperationBackoffOverrideForTest"></a>
+## func SetPerOperationBackoffOverrideForTest
+
+	func SetPerOperationBackoffOverrideForTest(key string, cfg BackoffConfig)
+
+SetPerOperationBackoffOverrideForTest installs a per\-operation backoff override under the given key \(e.g. "http", "llm"\).
+
 <a name="ShouldTerminate"></a>
 ## func ShouldTerminate
 
@@ -1572,6 +2421,18 @@ ShouldTerminate checks if ALL results in the batch indicate termination. Returns
 	func ShouldUseLLMResult(intent *Intent) bool
 
 
+
+<a name="StatusBar"></a>
+## func StatusBar
+
+	func StatusBar(s TurnStatus) string
+
+StatusBar renders the deterministic agent status block \(contract C8\):
+
+	[status] turn=3 tools=5 isolation=artifact_only speak=notify gate=passed
+	
+
+Deterministic, code\-maintained, and compact: lowercase labels, fixed field order, no timestamps, no model names, no message text, no model prose. Missing or invalid fields fail closed to "unknown" \("n/a" for a gate that did not run\); the bar never invents success. Errors cannot occur — the function is total over TurnStatus.
 
 <a name="StoreSpecInTask"></a>
 ## func StoreSpecInTask
@@ -1608,6 +2469,43 @@ TeamResultTopic returns the per\-session partial results aggregation topic.
 
 TeamStatusPattern is the per\-session shared task board topic.
 
+<a name="ThrottleParkAttemptFromContext"></a>
+## func ThrottleParkAttemptFromContext
+
+	func ThrottleParkAttemptFromContext(ctx context.Context) int
+
+ThrottleParkAttemptFromContext returns the previous park generation's attempt count, or 0 for a fresh turn.
+
+<a name="VerifyFromToolResults"></a>
+## func VerifyFromToolResults
+
+	func VerifyFromToolResults(results []tools.ToolResult) bool
+
+VerifyFromToolResults decides task success from STRUCTURED tool data only \(book ch1 "Verify" input\-isolation principle\): exit codes, success flags, and error fields. It never reads assistant\-generated prose, so a model claiming "tests passed" cannot fabricate a pass.
+
+results must be non\-empty; empty input fails closed.
+
+<a name="WithResumedTurn"></a>
+## func WithResumedTurn
+
+	func WithResumedTurn(ctx context.Context) context.Context
+
+WithResumedTurn marks ctx as a RESUMED parked turn \(throttle and quota resume paths; fresh turns use a plain context\).
+
+<a name="WithRetryBudget"></a>
+## func WithRetryBudget
+
+	func WithRetryBudget(ctx context.Context, budget *RetryBudget) context.Context
+
+WithRetryBudget attaches a retry budget to a context.
+
+<a name="WithThrottleParkAttempt"></a>
+## func WithThrottleParkAttempt
+
+	func WithThrottleParkAttempt(ctx context.Context, attempt int) context.Context
+
+WithThrottleParkAttempt returns a ctx carrying the previous park generation's attempt count \(resume path only; zero\-value ctx = fresh turn\).
+
 <a name="AbortData"></a>
 ## type AbortData
 
@@ -1637,6 +2535,77 @@ ActionType defines the action requested in a task message.
 	    // ActionCancel requests task cancellation.
 	    ActionCancel ActionType = "cancel"
 	)
+
+<a name="AdaptiveParallelismLimiter"></a>
+## type AdaptiveParallelismLimiter
+
+AdaptiveParallelismLimiter limits concurrency per ToolConcurrencyProfile. Each profile has its own semaphore channel; tools within the same profile share that profile's slot pool.
+
+	type AdaptiveParallelismLimiter struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewAdaptiveParallelismLimiter"></a>
+### func NewAdaptiveParallelismLimiter
+
+	func NewAdaptiveParallelismLimiter(baseParallelism int) *AdaptiveParallelismLimiter
+
+NewAdaptiveParallelismLimiter creates a limiter where baseParallelism is the IO\-bound slot limit. CPU\-bound gets max\(1, baseParallelism/2\); stateful and exclusive each get 1.
+
+<a name="AdaptiveParallelismLimiter.Acquire"></a>
+### func \(\*AdaptiveParallelismLimiter\) Acquire
+
+	func (l *AdaptiveParallelismLimiter) Acquire(ctx context.Context, profile ToolConcurrencyProfile) error
+
+Acquire blocks until a slot for the given profile is available or ctx is cancelled.
+
+<a name="AdaptiveParallelismLimiter.AdjustLimits"></a>
+### func \(\*AdaptiveParallelismLimiter\) AdjustLimits
+
+	func (l *AdaptiveParallelismLimiter) AdjustLimits(metrics ExecutionMetrics)
+
+AdjustLimits tunes the IO\-bound and CPU\-bound concurrency limits based on runtime execution metrics. The adjustment replaces the semaphore channel pointer under the write lock so that the change only affects NEW Acquire calls; goroutines already holding slots on the old channel are unaffected. Old channels are garbage\-collected once all holders drain.
+
+Rules:
+
+- High error rate \(\> 0.5\): reduce ioBoundLimit and cpuBoundLimit by 1 \(floor 1\).
+- Healthy system \(error rate \< 0.05 AND avg latency \< 500ms\): increase ioBoundLimit by 1 \(cap at maxAdaptiveLimit\).
+- ProfileStateful and ProfileExclusive are never adjusted \(always limit 1\).
+
+<a name="AdaptiveParallelismLimiter.Limit"></a>
+### func \(\*AdaptiveParallelismLimiter\) Limit
+
+	func (l *AdaptiveParallelismLimiter) Limit(profile ToolConcurrencyProfile) int
+
+Limit returns the concurrency limit for the given profile.
+
+<a name="AdaptiveParallelismLimiter.ProfileForTool"></a>
+### func \(\*AdaptiveParallelismLimiter\) ProfileForTool
+
+	func (l *AdaptiveParallelismLimiter) ProfileForTool(toolName string) ToolConcurrencyProfile
+
+ProfileForTool returns the concurrency profile for the given tool name. Unknown tools default to ProfileIOBound.
+
+<a name="AdaptiveParallelismLimiter.Release"></a>
+### func \(\*AdaptiveParallelismLimiter\) Release
+
+	func (l *AdaptiveParallelismLimiter) Release(profile ToolConcurrencyProfile)
+
+Release frees a slot for the given profile. It is non\-blocking; calling Release without a matching Acquire is a programming error.
+
+<a name="AdaptiveParallelismLimiter.Resize"></a>
+### func \(\*AdaptiveParallelismLimiter\) Resize
+
+	func (l *AdaptiveParallelismLimiter) Resize(limits map[ToolConcurrencyProfile]int)
+
+Resize adjusts per\-profile concurrency limits in bulk. Only profiles present in the limits map are changed; omitted profiles keep their current limits. The semaphore channels are rebuilt under lock so that only NEW Acquire calls are affected; goroutines already holding slots on old channels are unaffected. Values are clamped to \[1, maxAdaptiveLimit\].
+
+<a name="AdaptiveParallelismLimiter.SetLogger"></a>
+### func \(\*AdaptiveParallelismLimiter\) SetLogger
+
+	func (l *AdaptiveParallelismLimiter) SetLogger(logger *slog.Logger)
+
+SetLogger sets the logger used for recording limit adjustments. Nil is ignored per the CLAUDE.md setter\-nil\-guard convention.
 
 <a name="AfterProviderResponseData"></a>
 ## type AfterProviderResponseData
@@ -1735,6 +2704,10 @@ AgentConfig holds configuration for the agent loop.
 	    // ModelContextLimit overrides the model's ContextLimit for the compressor.
 	    // When zero, model.ContextLimit is used.
 	    ModelContextLimit int
+	    // Guards configures the loop-safety guards (leaf 07): no-progress
+	    // ladder, duplicate-search rollback, reasoning watchdog. Zero values
+	    // normalize to ship-on defaults via GuardConfig.Normalized().
+	    Guards GuardConfig
 	    // HierarchicalSummarization enables recursive re-summarization where
 	    // summaries that exceed SummaryLevelThreshold tokens are themselves
 	    // summarized at the next level up to MaxSummaryLevel.
@@ -1751,6 +2724,12 @@ AgentConfig holds configuration for the agent loop.
 	    // Valid values: "drop", "summarize", "restart". Default: "restart".
 	    // Threaded into ContextFirewallConfig at firewall construction time.
 	    OverflowStrategy string
+	    // StablePrefixDisabled opts out of stable-first system prompt assembly,
+	    // the [agent] cache_stable_prefix=false equivalent (loop-economics leaf
+	    // 01). The zero value keeps the feature ENABLED (default true): stable
+	    // sections are hoisted before volatile ones via AssembleOrdered and
+	    // LastStablePrefixHash() is updated on every build.
+	    StablePrefixDisabled bool
 	}
 
 <a name="DefaultAgentConfig"></a>
@@ -1899,6 +2878,13 @@ AgentEventType identifies the type of agent lifecycle event.
 	    AgentEventChatClientDisconnected AgentEventType = "chat_client_disconnected"
 	)
 
+<a name="AgentIDSource"></a>
+## type AgentIDSource
+
+AgentIDSource extracts the agent id for observability payloads. The loop is the natural source, but the hook must not import it, so the wiring site passes a closure over AgentLoop.agentID \(SetAgentIDSource\).
+
+	type AgentIDSource func() string
+
 <a name="AgentLifecyclePayload"></a>
 ## type AgentLifecyclePayload
 
@@ -1922,9 +2908,18 @@ AgentLoop orchestrates LLM reasoning interleaved with tool execution.
 <a name="NewAgentLoop"></a>
 ### func NewAgentLoop
 
-	func NewAgentLoop(opts ...LoopOption) *AgentLoop
+	func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *AgentLoop
 
-NewAgentLoop creates a new agent loop.
+NewAgentLoop creates a new agent loop with explicit session context. sessionID identifies the session this loop belongs to. workingDir is the project directory for agent execution. May be empty at construction for two\-phase initialization \(registry creates loops with empty workingDir, then calls SetWorkingDir when the session binds to a project\); callers that know the directory up\-front should pass it.
+
+<a name="AgentLoop.AdvanceBudgetPhase"></a>
+### func \(\*AgentLoop\) AdvanceBudgetPhase
+
+	func (l *AgentLoop) AdvanceBudgetPhase(newPhaseID string) error
+
+AdvanceBudgetPhase transitions the budget hierarchy to a new phase, carrying over unused budget if the current phase allows it. Returns nil \(no\-op\) if the hierarchy is not initialized.
+
+TODO: call from orchestrator\_phases.go startNextPhase\(\) when phase transitions occur, so the budget hierarchy tracks plan\-driven phase changes.
 
 <a name="AgentLoop.ClearConversation"></a>
 ### func \(\*AgentLoop\) ClearConversation
@@ -1938,7 +2933,7 @@ ClearConversation removes a conversation.
 
 	func (l *AgentLoop) ClearModelOverride()
 
-ClearModelOverride clears the model override after it has been applied.
+ClearModelOverride clears the model override after it has been applied. Also resets the persistent flag so subsequent SetModelOverride calls behave as one\-shot by default.
 
 <a name="AgentLoop.ClearReasoningOverride"></a>
 ### func \(\*AgentLoop\) ClearReasoningOverride
@@ -1947,12 +2942,28 @@ ClearModelOverride clears the model override after it has been applied.
 
 ClearReasoningOverride removes any per\-turn reasoning override. Called after the turn completes so the next turn is unaffected. Thread\-safe.
 
+<a name="AgentLoop.Close"></a>
+### func \(\*AgentLoop\) Close
+
+	func (l *AgentLoop) Close()
+
+Close releases resources held by this loop before eviction or shutdown. It waits for background goroutines \(reflection, learning, epistemic hooks\) to finish, then marks the loop as inactive. Safe to call multiple times \(idempotent\). Does NOT close shared resources \(LLM client, tool registry, security\) — those are owned by the daemon and shared via ConfigSnapshot.
+
 <a name="AgentLoop.CompressionPipeline"></a>
 ### func \(\*AgentLoop\) CompressionPipeline
 
 	func (l *AgentLoop) CompressionPipeline() *compress.Pipeline
 
 CompressionPipeline returns the compression pipeline, or nil if not set.
+
+<a name="AgentLoop.ConfigSnapshot"></a>
+### func \(\*AgentLoop\) ConfigSnapshot
+
+	func (l *AgentLoop) ConfigSnapshot() []LoopOption
+
+ConfigSnapshot returns a slice of LoopOptions that capture this loop's current configuration \(LLM client, tool registry, skills, hooks, etc.\). Applying these options to a fresh AgentLoop reproduces this loop's wired dependencies \(excluding session\-specific fields like sessionID, workingDir, projectID\).
+
+Used by Manager.GetOrCreateWired to spin up per\-session loops that inherit the singleton daemon loop's configuration.
 
 <a name="AgentLoop.ContextInjector"></a>
 ### func \(\*AgentLoop\) ContextInjector
@@ -1968,6 +2979,13 @@ ContextInjector returns the wired context injector, or nil if not set.
 
 CurrentReasoningEffort returns the effective reasoning effort tier for the next turn, walking the precedence chain: per\-turn override → dispatcher\-suggested next\-turn effort → agent\-configured default. Returns ReasoningMedium when no agent config is set.
 
+<a name="AgentLoop.ExecuteSkillToolCalls"></a>
+### func \(\*AgentLoop\) ExecuteSkillToolCalls
+
+	func (l *AgentLoop) ExecuteSkillToolCalls(ctx context.Context, toolCalls []llm.ToolCall) []*ExecutionResult
+
+ExecuteSkillToolCalls is the exported tool\-execution seam for the skill state runtime: leaf 05 wires it via SkillStateRuntime.WithToolRunner so state\-mode tool calls share the loop's executor pipeline \(memory gating, conversation\-ID propagation, working\-directory injection\) instead of building a second Executor. Pure pass\-through to the unexported executeToolCalls.
+
 <a name="AgentLoop.FireHTTPHooks"></a>
 ### func \(\*AgentLoop\) FireHTTPHooks
 
@@ -1981,6 +2999,13 @@ FireHTTPHooks is an exported helper that agent code calls to signal HTTP hook ev
 	func (l *AgentLoop) FirewallStats() map[string]any
 
 FirewallStats returns a map snapshot of the context firewall counters. Returns nil if the context firewall is not enabled on this agent loop.
+
+<a name="AgentLoop.GetBudgetStatus"></a>
+### func \(\*AgentLoop\) GetBudgetStatus
+
+	func (l *AgentLoop) GetBudgetStatus() *BudgetStatus
+
+GetBudgetStatus returns the hierarchical budget status snapshot, or nil if the hierarchy is not initialized.
 
 <a name="AgentLoop.GetConfig"></a>
 ### func \(\*AgentLoop\) GetConfig
@@ -1996,12 +3021,68 @@ GetConfig returns the current configuration.
 
 GetConversation returns a conversation by ID.
 
+<a name="AgentLoop.GetDetectionContext"></a>
+### func \(\*AgentLoop\) GetDetectionContext
+
+	func (l *AgentLoop) GetDetectionContext() *DetectionContext
+
+GetDetectionContext returns the detection context, or nil if not set. Safe to call concurrently.
+
 <a name="AgentLoop.GetModelOverride"></a>
 ### func \(\*AgentLoop\) GetModelOverride
 
 	func (l *AgentLoop) GetModelOverride() string
 
 GetModelOverride returns the current model override \(thread\-safe\).
+
+<a name="AgentLoop.GetProjectID"></a>
+### func \(\*AgentLoop\) GetProjectID
+
+	func (l *AgentLoop) GetProjectID() string
+
+GetProjectID returns the bound project identifier \(empty string if unset\). Safe to call concurrently.
+
+<a name="AgentLoop.GetSessionID"></a>
+### func \(\*AgentLoop\) GetSessionID
+
+	func (l *AgentLoop) GetSessionID() string
+
+GetSessionID returns the session identifier this loop belongs to. Safe to call concurrently.
+
+<a name="AgentLoop.GetState"></a>
+### func \(\*AgentLoop\) GetState
+
+	func (l *AgentLoop) GetState() AgentState
+
+GetState returns the current agent state.
+
+<a name="AgentLoop.GetStateHistory"></a>
+### func \(\*AgentLoop\) GetStateHistory
+
+	func (l *AgentLoop) GetStateHistory() []StateTransition
+
+GetStateHistory returns recent state transitions.
+
+<a name="AgentLoop.GetStateSnapshot"></a>
+### func \(\*AgentLoop\) GetStateSnapshot
+
+	func (l *AgentLoop) GetStateSnapshot() AgentStateSnapshot
+
+GetStateSnapshot returns a full snapshot of agent state.
+
+<a name="AgentLoop.GetWorkerID"></a>
+### func \(\*AgentLoop\) GetWorkerID
+
+	func (l *AgentLoop) GetWorkerID() int
+
+GetWorkerID returns the worker slot identifier \(zero if unset\). Safe to call concurrently.
+
+<a name="AgentLoop.GetWorkingDir"></a>
+### func \(\*AgentLoop\) GetWorkingDir
+
+	func (l *AgentLoop) GetWorkingDir() string
+
+GetWorkingDir returns the current working directory. Safe to call concurrently. Returns "" for a nil receiver.
 
 <a name="AgentLoop.HandleMessage"></a>
 ### func \(\*AgentLoop\) HandleMessage
@@ -2016,6 +3097,41 @@ HandleMessage processes a single message without conversation context.
 	func (l *AgentLoop) HookRegistry() *HookRegistry
 
 HookRegistry returns the agent loop's hook registry. Returns nil if the hook registry was not wired via WithHookRegistry.
+
+<a name="AgentLoop.IsActive"></a>
+### func \(\*AgentLoop\) IsActive
+
+	func (l *AgentLoop) IsActive() bool
+
+IsActive atomically returns whether this loop has pending work.
+
+<a name="AgentLoop.IsAgentActive"></a>
+### func \(\*AgentLoop\) IsAgentActive
+
+	func (l *AgentLoop) IsAgentActive() bool
+
+IsAgentActive returns true if the agent is actively processing.
+
+<a name="AgentLoop.IsModelOverridePersistent"></a>
+### func \(\*AgentLoop\) IsModelOverridePersistent
+
+	func (l *AgentLoop) IsModelOverridePersistent() bool
+
+IsModelOverridePersistent returns true if the current override was set via SetPersistentModelOverride and should NOT auto\-clear after one cycle. Thread\-safe.
+
+<a name="AgentLoop.LastStablePrefixHash"></a>
+### func \(\*AgentLoop\) LastStablePrefixHash
+
+	func (l *AgentLoop) LastStablePrefixHash() string
+
+LastStablePrefixHash returns the hex sha256 of the stable prefix of the most recently assembled system prompt. Empty before the first build. Intended for logging/metrics hooks that detect prompt\-cache drift \(loop\-economics leaf 01\).
+
+<a name="AgentLoop.RetryMetricsSnapshot"></a>
+### func \(\*AgentLoop\) RetryMetricsSnapshot
+
+	func (l *AgentLoop) RetryMetricsSnapshot() RetryMetricsSnapshot
+
+RetryMetricsSnapshot returns a point\-in\-time copy of retry metrics. Returns an empty snapshot if no collector is wired.
 
 <a name="AgentLoop.Run"></a>
 ### func \(\*AgentLoop\) Run
@@ -2052,6 +3168,20 @@ RunWithSkill executes a skill through the agent loop with the skill's constraint
 
 RunWithTask processes a task through the agent loop with memory context injection.
 
+<a name="AgentLoop.SessionConversation"></a>
+### func \(\*AgentLoop\) SessionConversation
+
+	func (l *AgentLoop) SessionConversation(id string) *Conversation
+
+SessionConversation returns the conversation for the given session/conversation ID, creating it on first access \(ConversationStore.Get auto\-vivifies: a miss allocates a new Conversation, inserts it into the LRU cache, and returns it, so the result is never nil for a non\-nil receiver\). Unlike GetConversation, which only reads existing entries, this is safe to use when the session conversation may not exist yet — e.g. recording a task\-path exchange into the session conversation before any direct\-path turn has run. Successive calls with the same ID return the same \*Conversation \(cache identity\).
+
+<a name="AgentLoop.SetActive"></a>
+### func \(\*AgentLoop\) SetActive
+
+	func (l *AgentLoop) SetActive(v bool)
+
+SetActive atomically sets the has\-pending\-work flag.
+
 <a name="AgentLoop.SetBranchManager"></a>
 ### func \(\*AgentLoop\) SetBranchManager
 
@@ -2059,12 +3189,26 @@ RunWithTask processes a task through the agent loop with memory context injectio
 
 SetBranchManager wires a branch manager for in\-memory cache coordination. Stub implementation: the branch manager reference is retained for future use.
 
+<a name="AgentLoop.SetBudgetConfig"></a>
+### func \(\*AgentLoop\) SetBudgetConfig
+
+	func (l *AgentLoop) SetBudgetConfig(total int, opts BudgetHierarchyOptions)
+
+SetBudgetConfig overrides the hierarchical budget totals. When total \> 0, the BudgetHierarchy is rebuilt with the new task budget and the provided options \(reserved ratio, warning thresholds, carryover/borrowing toggles\). opts is a BudgetHierarchyOptions struct; zero\-valued fields fall back to sensible defaults. Nil\-guarded per CLAUDE.md.
+
 <a name="AgentLoop.SetCapabilityIndex"></a>
 ### func \(\*AgentLoop\) SetCapabilityIndex
 
 	func (l *AgentLoop) SetCapabilityIndex(ci *skills.CapabilityIndex)
 
 SetCapabilityIndex sets the capability index for skill discovery. This allows wiring the index after the loop is created when skills are initialized in a specific order.
+
+<a name="AgentLoop.SetClock"></a>
+### func \(\*AgentLoop\) SetClock
+
+	func (l *AgentLoop) SetClock(now func() time.Time)
+
+SetClock injects the clock used for parking schedule decisions. Nil\-guarded per repo setter convention. Test seam; the daemon never sets it \(wall clock\).
 
 <a name="AgentLoop.SetCompactionConfig"></a>
 ### func \(\*AgentLoop\) SetCompactionConfig
@@ -2101,6 +3245,13 @@ SetContextFirewallConfig wires context firewall settings from the user\-facing c
 
 SetContextInjector wires the ContextInjector that enriches the system prompt with standing user instructions and learned patterns. Nil\-safe per CLAUDE.md setter convention. When non\-nil, BuildSystemPrompt is invoked from the system\-prompt builders to append an "\# Active Context" section after the existing content.
 
+<a name="AgentLoop.SetDetectionContext"></a>
+### func \(\*AgentLoop\) SetDetectionContext
+
+	func (l *AgentLoop) SetDetectionContext(dc *DetectionContext)
+
+SetDetectionContext wires the client\-side detection context \(CWD, detected project, CLI args\) captured at session creation. Nil\-safe per CLAUDE.md setter convention.
+
 <a name="AgentLoop.SetEpistemicHook"></a>
 ### func \(\*AgentLoop\) SetEpistemicHook
 
@@ -2122,6 +3273,13 @@ SetFileWatcher wire a file watcher for filesystem\-level hooks. Nil is safely ig
 
 SetHTTPHooks registers a HookBatchExecutor for outbound HTTP notifications. Nil\-safe per CLAUDE.md setter convention. When non\-nil, the executor's ExecuteAll is invoked for lifecycle events \(turn complete, session start/end, errors\).
 
+<a name="AgentLoop.SetIsolatedChild"></a>
+### func \(\*AgentLoop\) SetIsolatedChild
+
+	func (l *AgentLoop) SetIsolatedChild(isolated bool)
+
+SetIsolatedChild flips the isolated\-child bit after construction \(the dispatcher decides isolation at spawn time, which can be after the loop was built from a template\).
+
 <a name="AgentLoop.SetMCPServerLister"></a>
 ### func \(\*AgentLoop\) SetMCPServerLister
 
@@ -2136,12 +3294,19 @@ SetMCPServerLister wires a callback that returns current MCP server info. Used b
 
 SetMemvidClient sets the memvid client after construction. This allows wiring the client after the loop is created when dependencies are initialized in a specific order.
 
+<a name="AgentLoop.SetMessageDrainer"></a>
+### func \(\*AgentLoop\) SetMessageDrainer
+
+	func (l *AgentLoop) SetMessageDrainer(d MessageDrainer)
+
+SetMessageDrainer wires the inbox drain source. Nil disables injection \(the default for non\-employee agents and tests\).
+
 <a name="AgentLoop.SetModelOverride"></a>
 ### func \(\*AgentLoop\) SetModelOverride
 
 	func (l *AgentLoop) SetModelOverride(modelRef string)
 
-SetModelOverride sets the model override at runtime \(thread\-safe\).
+SetModelOverride sets the model override at runtime \(thread\-safe\). This is a one\-shot override: it auto\-clears after one reasoning cycle via the consumption site in reasoningCycle. Used by the dispatcher for user\-driven model reassignment.
 
 <a name="AgentLoop.SetNotificationPublisher"></a>
 ### func \(\*AgentLoop\) SetNotificationPublisher
@@ -2150,12 +3315,33 @@ SetModelOverride sets the model override at runtime \(thread\-safe\).
 
 SetNotificationEmitter sets the notification emitter for desktop notifications.
 
+<a name="AgentLoop.SetParallelismConfig"></a>
+### func \(\*AgentLoop\) SetParallelismConfig
+
+	func (l *AgentLoop) SetParallelismConfig(baseParallelism int, profiles map[string]int)
+
+SetParallelismConfig proxies parallelism settings to the executor's AdaptiveParallelismLimiter. Profiles map keys: "io\_bound", "cpu\_bound", "stateful", "exclusive". Nil\-guarded per CLAUDE.md.
+
+<a name="AgentLoop.SetPersistentModelOverride"></a>
+### func \(\*AgentLoop\) SetPersistentModelOverride
+
+	func (l *AgentLoop) SetPersistentModelOverride(modelRef string)
+
+SetPersistentModelOverride sets a model override that does NOT auto\-clear after one cycle. Used by shadow training hot\-swap so the baked adapter persists until ClearModelOverride is explicitly called. Thread\-safe.
+
 <a name="AgentLoop.SetPrefetchCallback"></a>
 ### func \(\*AgentLoop\) SetPrefetchCallback
 
 	func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int))
 
 SetPrefetchCallback sets the callback for prefetching memory context. This is used to wire the memory manager's QueuePrefetch method after construction.
+
+<a name="AgentLoop.SetProjectID"></a>
+### func \(\*AgentLoop\) SetProjectID
+
+	func (l *AgentLoop) SetProjectID(pid string)
+
+SetProjectID sets the bound project identifier for this loop's session. Safe to call concurrently.
 
 <a name="AgentLoop.SetReasoningForNextTurn"></a>
 ### func \(\*AgentLoop\) SetReasoningForNextTurn
@@ -2185,12 +3371,40 @@ SetRepoMapGenerator sets the repository map generator for context enrichment. Th
 
 SetResponseAnalyzer sets the response analyzer after agent loop creation. This is used when the metrics store \(from which the analyzer is created\) is created after the agent loop.
 
+<a name="AgentLoop.SetRetryMetrics"></a>
+### func \(\*AgentLoop\) SetRetryMetrics
+
+	func (l *AgentLoop) SetRetryMetrics(m *RetryMetrics)
+
+SetRetryMetrics sets the retry metrics collector after agent loop creation. It also propagates the collector to the executor if one is already attached. Nil\-guarded per CLAUDE.md setter convention.
+
+<a name="AgentLoop.SetSchemaModeConfig"></a>
+### func \(\*AgentLoop\) SetSchemaModeConfig
+
+	func (l *AgentLoop) SetSchemaModeConfig(cfg config.AgentToolsConfig)
+
+SetSchemaModeConfig supplies the \[agent.tools\] tool\-schema settings \(loop\-economics leaf 02\) used to resolve the registry's schema mode. Call it any time before or after the registry is attached; when a registry is present the mode is applied immediately, otherwise it is applied on attach \(or at loop\-construction time if the option ran first\).
+
+<a name="AgentLoop.SetSessionAttached"></a>
+### func \(\*AgentLoop\) SetSessionAttached
+
+	func (l *AgentLoop) SetSessionAttached(attached bool)
+
+SetSessionAttached flips the session\-attached bit after construction.
+
+<a name="AgentLoop.SetSessionRefresher"></a>
+### func \(\*AgentLoop\) SetSessionRefresher
+
+	func (l *AgentLoop) SetSessionRefresher(r *session.SessionRefresher)
+
+SetSessionRefresher sets the session refresher for periodic title updates. This allows wiring the refresher after the loop is created when dependencies are initialized in a specific order.
+
 <a name="AgentLoop.SetSessionStore"></a>
 ### func \(\*AgentLoop\) SetSessionStore
 
 	func (l *AgentLoop) SetSessionStore(store any, sessionCfg any)
 
-SetSessionStore wires a session store and config for persistence. Stub implementation: the session store reference is retained for future use.
+SetSessionStore wires a session store and config for persistence. When the store implements sessionMessageReader \(GetMessages\), it is additionally wired as the conversation\-history restore source and the restore limit is extracted from sessionCfg \(config.SessionConfig\).
 
 <a name="AgentLoop.SetSkillLoader"></a>
 ### func \(\*AgentLoop\) SetSkillLoader
@@ -2198,6 +3412,13 @@ SetSessionStore wires a session store and config for persistence. Stub implement
 	func (l *AgentLoop) SetSkillLoader(loader *skills.LazySkillLoader)
 
 SetSkillLoader sets the lazy skill loader for on\-demand loading. This allows wiring the loader after the loop is created when skills are initialized in a specific order.
+
+<a name="AgentLoop.SetStatePersister"></a>
+### func \(\*AgentLoop\) SetStatePersister
+
+	func (l *AgentLoop) SetStatePersister(p AgentStatePersister)
+
+SetStatePersister attaches a state persister for crash recovery \(Phase 5\). Nil\-guarded per CLAUDE.md setter convention.
 
 <a name="AgentLoop.SetTaskCollector"></a>
 ### func \(\*AgentLoop\) SetTaskCollector
@@ -2213,12 +3434,75 @@ SetTaskCollector sets the task collector after agent loop creation. This is used
 
 SetTaskStore sets the task store after construction. This allows wiring the store after the loop is created when dependencies are initialized in a specific order.
 
+<a name="AgentLoop.SetThrottleParker"></a>
+### func \(\*AgentLoop\) SetThrottleParker
+
+	func (l *AgentLoop) SetThrottleParker(h *ChatHandler, parker *TurnParker)
+
+SetThrottleParker wires a throttle\-resume parker onto the loop, sharing the SAME underlying TurnParker machinery as the quota watcher when the daemon passes the chat handler's generalized parker \(leaf 03 merges the queues\). The parker's resume callback is REPLACED with a class\-dispatching router: quota records delegate to the handler's existing quota resume path; throttle records re\-enter the loop via resumeThrottledTurn. Nil\-guarded; replaces any previously wired parker \(idempotent for repeated wiring\).
+
+<a name="AgentLoop.SetTurnParker"></a>
+### func \(\*AgentLoop\) SetTurnParker
+
+	func (l *AgentLoop) SetTurnParker(parker *TurnParker)
+
+SetTurnParker wires the class\-agnostic parker onto the loop \(daemon wiring \+ tests\). Nil\-guarded per repo setter convention: a nil parker is refused, keeping the pass\-through behavior. Thread\-safe under l.mu.
+
 <a name="AgentLoop.SetUploadStore"></a>
 ### func \(\*AgentLoop\) SetUploadStore
 
 	func (l *AgentLoop) SetUploadStore(store llm.UploadStore)
 
 SetUploadStore sets the upload store used to resolve image file references for the vision pre\-flight step. Nil is safely ignored.
+
+<a name="AgentLoop.SetWorkerID"></a>
+### func \(\*AgentLoop\) SetWorkerID
+
+	func (l *AgentLoop) SetWorkerID(wid int)
+
+SetWorkerID sets the worker slot identifier within the session pool. Safe to call concurrently.
+
+<a name="AgentLoop.SetWorkingDir"></a>
+### func \(\*AgentLoop\) SetWorkingDir
+
+	func (l *AgentLoop) SetWorkingDir(path string)
+
+SetWorkingDir updates the working directory for artifact scanning. Safe to call concurrently. Nil\-safe: a nil receiver is a no\-op.
+
+<a name="AgentLoop.SkillStateRuntime"></a>
+### func \(\*AgentLoop\) SkillStateRuntime
+
+	func (l *AgentLoop) SkillStateRuntime() *SkillStateRuntime
+
+SkillStateRuntime returns the configured SKILL.state\-mode runtime, or nil when state mode is not wired.
+
+<a name="AgentLoop.SpawnVerifier"></a>
+### func \(\*AgentLoop\) SpawnVerifier
+
+	func (l *AgentLoop) SpawnVerifier(ctx context.Context, prompt string, modelRef string) (string, error)
+
+SpawnVerifier implements VerifierSpawner. It creates a child AgentLoop with a restricted tool set and the adversarial verifier prompt, runs it, and returns the raw output.
+
+<a name="AgentLoop.Stop"></a>
+### func \(\*AgentLoop\) Stop
+
+	func (l *AgentLoop) Stop()
+
+Stop waits for all asynchronous goroutines spawned by RunOnce \(reflection, learning pipeline, skill outcome recording\) to complete before returning. Daemon shutdown MUST call this before closing the LLM client to avoid use\-after\-close panics from in\-flight reflection/classifier LLM calls.
+
+<a name="AgentLoop.ThrottleMaxWait"></a>
+### func \(\*AgentLoop\) ThrottleMaxWait
+
+	func (l *AgentLoop) ThrottleMaxWait() time.Duration
+
+ThrottleMaxWait reports the MaxWait the loop's parker applies for a throttled turn \(handler\-side pre\-checks and tests\). Zero when no parker is wired.
+
+<a name="AgentLoop.TurnParker"></a>
+### func \(\*AgentLoop\) TurnParker
+
+	func (l *AgentLoop) TurnParker() *TurnParker
+
+TurnParker exposes the wired parker \(nil when parking is disabled\).
 
 <a name="AgentMemoryConfig"></a>
 ## type AgentMemoryConfig
@@ -2287,7 +3571,7 @@ DB returns the SQLite connection used for queue persistence, or nil.
 
 	func (r *AgentRegistry) Get(id string) (*AgentLoop, error)
 
-Get returns an agent loop for the given spec ID, creating it if needed.
+Get returns the AgentLoop for the given agent, keyed by the synthetic "\_default" task ID. Preserved for non\-task callers \(CLI one\-shots, manual RPCs, dispatcher\). New callers should use GetForTask to get per\-task isolation.
 
 <a name="AgentRegistry.GetActiveQueue"></a>
 ### func \(\*AgentRegistry\) GetActiveQueue
@@ -2296,12 +3580,19 @@ Get returns an agent loop for the given spec ID, creating it if needed.
 
 GetActiveQueue returns the queue for a running conversation, or nil if not found. Also returns the generation number for version checking.
 
+<a name="AgentRegistry.GetActiveQueueLoop"></a>
+### func \(\*AgentRegistry\) GetActiveQueueLoop
+
+	func (r *AgentRegistry) GetActiveQueueLoop(conversationID string) *AgentLoop
+
+GetActiveQueueLoop returns the AgentLoop that owns the active queue for a conversation, or nil if no active queue exists or the entry has no loop.
+
 <a name="AgentRegistry.GetByRole"></a>
 ### func \(\*AgentRegistry\) GetByRole
 
-	func (r *AgentRegistry) GetByRole(role AgentRole) ([]*AgentLoop, error)
+	func (r *AgentRegistry) GetByRole(role AgentRole) []*AgentLoop
 
-GetByRole returns all agent loops with the given role.
+GetByRole returns all agent loops with the given role. Holds the read lock during all lookups to avoid TOCTOU races where a concurrent UnregisterSpec could remove a loop between the spec match and the Get call.
 
 <a name="AgentRegistry.GetDispatcher"></a>
 ### func \(\*AgentRegistry\) GetDispatcher
@@ -2313,9 +3604,28 @@ GetDispatcher returns the dispatcher agent loop.
 <a name="AgentRegistry.GetExecutors"></a>
 ### func \(\*AgentRegistry\) GetExecutors
 
-	func (r *AgentRegistry) GetExecutors() ([]*AgentLoop, error)
+	func (r *AgentRegistry) GetExecutors() []*AgentLoop
 
 GetExecutors returns all executor agent loops.
+
+<a name="AgentRegistry.GetForTask"></a>
+### func \(\*AgentRegistry\) GetForTask
+
+	func (r *AgentRegistry) GetForTask(agentID, taskID string) (*AgentLoop, error)
+
+GetForTask returns the AgentLoop for \(agentID, taskID\). Lazy\-creates:
+
+1. The task bucket for this agentID on first access
+2. The loop on first access for this \(agentID, taskID\)
+
+Empty taskID defaults to "\_default" \(matches the Get shim's namespace\). createLoop is pure struct construction \(no I/O — no disk reads, no network calls\), so holding the write lock through lazy\-create is safe per CLAUDE.md mutex\-scope rule.
+
+<a name="AgentRegistry.GetModelConfig"></a>
+### func \(\*AgentRegistry\) GetModelConfig
+
+	func (r *AgentRegistry) GetModelConfig(agentID string) (*llm.ModelConfig, error)
+
+GetModelConfig returns the model configuration for the given agent, or the resolver's default model when the agent has no explicit Model ref. Returns an error if the agent ID is unknown or if the resolver has no default and the agent has no Model. Exposed so the tactical orchestrator can size task steps against the executor's ContextLimit without reaching into registry internals.
 
 <a name="AgentRegistry.GetQueueWithVersion"></a>
 ### func \(\*AgentRegistry\) GetQueueWithVersion
@@ -2355,9 +3665,9 @@ MemvidClient returns the shared memvid client.
 <a name="AgentRegistry.RegisterActiveQueue"></a>
 ### func \(\*AgentRegistry\) RegisterActiveQueue
 
-	func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQueue) uint64
+	func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQueue, loop *AgentLoop) uint64
 
-RegisterActiveQueue associates a queue with a running conversation. Returns the generation number for this registration.
+RegisterActiveQueue associates a queue with a running conversation. The loop parameter is the AgentLoop that owns this queue; it may be nil in tests. Returns the generation number for this registration.
 
 <a name="AgentRegistry.RegisterSpec"></a>
 ### func \(\*AgentRegistry\) RegisterSpec
@@ -2366,12 +3676,21 @@ RegisterActiveQueue associates a queue with a running conversation. Returns the 
 
 RegisterSpec registers an agent specification.
 
+<a name="AgentRegistry.ReleaseTaskLoops"></a>
+### func \(\*AgentRegistry\) ReleaseTaskLoops
+
+	func (r *AgentRegistry) ReleaseTaskLoops(taskID string)
+
+ReleaseTaskLoops removes all loops for the given taskID across all agents. Called by the orchestrator on task completion to free memory and reset per\-task conversation state. Empty taskID is a no\-op \(never releases the "\_default" bucket via this path, preserving backward\-compat Get callers\).
+
 <a name="AgentRegistry.RunAgent"></a>
 ### func \(\*AgentRegistry\) RunAgent
 
 	func (r *AgentRegistry) RunAgent(ctx context.Context, agentID, message, conversationID string) (string, error)
 
-RunAgent runs a specific agent with a message and context.
+RunAgent sends a single message to an agent and returns its response.
+
+Context isolation \(leaf 10\): the message is treated as a structured brief — built by the caller through BuildSpawnContext — and starts a FRESH conversation keyed by conversationID. The child never inherits a parent conversation's transcript; cross\-agent context flows via explicit SpawnContext briefs \(report\-router handoffs, step AccumulatedContext\), not shared message lists.
 
 <a name="AgentRegistry.SetCapabilitiesMap"></a>
 ### func \(\*AgentRegistry\) SetCapabilitiesMap
@@ -2394,6 +3713,20 @@ SetCapabilityIndex sets the capability index for all agents. Invalidates existin
 
 SetGlobalRules sets the global rules content.
 
+<a name="AgentRegistry.SetLearningPipeline"></a>
+### func \(\*AgentRegistry\) SetLearningPipeline
+
+	func (r *AgentRegistry) SetLearningPipeline(lp LearningPipeline)
+
+SetLearningPipeline wires the learning pipeline \(Judge/Distill\) into every loop this registry creates. Nil is a no\-op.
+
+<a name="AgentRegistry.SetSchemaModeConfig"></a>
+### func \(\*AgentRegistry\) SetSchemaModeConfig
+
+	func (r *AgentRegistry) SetSchemaModeConfig(cfg config.AgentToolsConfig)
+
+SetSchemaModeConfig supplies the \[agent.tools\] tool\-schema settings \(chat\-dispatch\-ux leaf 04\) for task\-scoped loops created by this registry. The effective mode is pushed into the shared parent tool registry, so the setting covers every loop already served by the registry as well as every loop createLoop builds afterwards: FilteredToolRegistry delegates GetDefinitions to its parent, so parent\-level stubbing is exactly what task\-scoped loops observe. Resolution semantics mirror the primary loop's applySchemaModeLocked \(loop.go\): "" / anything\-but\-"full" resolves to indexed \(default\-on\), "full" restores legacy full\-schema payloads; an empty AlwaysFull falls back to config.DefaultAlwaysFullTools\(\). Safe for placeholder registries that do not implement SetSchemaMode \(guarded by an interface assertion — no panic\).
+
 <a name="AgentRegistry.SetSkillLoader"></a>
 ### func \(\*AgentRegistry\) SetSkillLoader
 
@@ -2407,6 +3740,20 @@ SetSkillLoader sets the lazy skill loader for all agents. Invalidates existing l
 	func (r *AgentRegistry) SetTTSRManager(mgr *TTSRManager)
 
 SetTTSRManager sets the TT\-SR stream rule manager for all agents. Invalidates existing loops so they get recreated with the new manager.
+
+<a name="AgentRegistry.SetTraceWriter"></a>
+### func \(\*AgentRegistry\) SetTraceWriter
+
+	func (r *AgentRegistry) SetTraceWriter(tw TraceWriter)
+
+SetTraceWriter wires the turn\-trace persistence hook into every loop this registry creates \(WikiSkill raw layer\). Nil is a no\-op.
+
+<a name="AgentRegistry.SetUsageTracker"></a>
+### func \(\*AgentRegistry\) SetUsageTracker
+
+	func (r *AgentRegistry) SetUsageTracker(ut lifecycleUsageTracker)
+
+SetUsageTracker wires the skill usage tracker into every loop this registry creates \(closed\-loop skill evolution\). Nil is a no\-op.
 
 <a name="AgentRegistry.Stats"></a>
 ### func \(\*AgentRegistry\) Stats
@@ -2557,6 +3904,13 @@ AgentSpec defines the specification for creating an agent.
 	    // or empty to use the default. If it matches a known alias, alias resolution with
 	    // automatic failover and cooldown rotation is used.
 	    Model string `json:"model,omitempty"`
+	    // EnhancerModel is the small/cheap model used to expand a brief into
+	    // generator-ready prose. Empty = alias "small".
+	    EnhancerModel string `json:"enhancer_model,omitempty"`
+	    // EscalationModel is the model (alias name or "provider/model" ref) used
+	    // for the next fix attempt when verification exhausts max_fix_loops.
+	    // Empty = escalation disabled; hook falls back to escalate-to-user.
+	    EscalationModel string `json:"escalation_model,omitempty" yaml:"escalation_model,omitempty"`
 	    // AdditionalTools are tools beyond the baseline that this agent has access to.
 	    AdditionalTools []string `json:"additional_tools,omitempty"`
 	    // Constraints are operational limits for this agent.
@@ -2567,6 +3921,13 @@ AgentSpec defines the specification for creating an agent.
 	    AvailableSkills []string `json:"available_skills,omitempty"`
 	    // SkillTriggers maps keywords to skill names for automatic invocation.
 	    SkillTriggers map[string]string `json:"skill_triggers,omitempty"`
+	    // Verification configures post-completion verification for this agent.
+	    Verification VerificationConfig `json:"verification" yaml:"verification"`
+	    // Gate configures the roster quality gate (from AGENT.md `gate:`) run
+	    // after turns that mutated the workspace. Nil = no gate. This is the
+	    // per-agent AGENT.md path, orthogonal to employees.defaults.gate.enabled
+	    // (the employee kill switch).
+	    Gate *RosterGateConfig `json:"gate,omitempty" yaml:"gate,omitempty"`
 	}
 
 <a name="AgentSpec.AllTools"></a>
@@ -2575,6 +3936,13 @@ AgentSpec defines the specification for creating an agent.
 	func (s *AgentSpec) AllTools() []string
 
 AllTools returns all tools available to this agent.
+
+<a name="AgentSpec.EffectiveEnhancerModel"></a>
+### func \(\*AgentSpec\) EffectiveEnhancerModel
+
+	func (s *AgentSpec) EffectiveEnhancerModel() string
+
+EffectiveEnhancerModel returns the enhancer model: the explicit override if set, otherwise the "small" alias \(resolves to small\_model\).
 
 <a name="AgentSpec.GetSkillForTrigger"></a>
 ### func \(\*AgentSpec\) GetSkillForTrigger
@@ -2606,6 +3974,182 @@ AgentStartData is emitted when the agent loop starts.
 	    AgentID   string `json:"agent_id"`
 	    AgentType string `json:"agent_type"`
 	    ModelRef  string `json:"model_ref"`
+	}
+
+<a name="AgentState"></a>
+## type AgentState
+
+AgentState represents the current state of an agent loop.
+
+	type AgentState uint8
+
+<a name="StateIdle"></a>
+
+	const (
+	    // StateIdle: Agent is waiting for input (initial state)
+	    StateIdle AgentState = iota
+	
+	    // StateReceivingInput: Agent is receiving user input
+	    StateReceivingInput
+	
+	    // StateClassifying: Dispatcher is classifying intent
+	    StateClassifying
+	
+	    // StateThinking: Agent is processing with LLM (before tool calls)
+	    StateThinking
+	
+	    // StateToolExecuting: Agent is executing tool calls
+	    StateToolExecuting
+	
+	    // StateToolWaiting: Agent is waiting for external tool result (e.g., HTTP, shell)
+	    StateToolWaiting
+	
+	    // StateProcessingResult: Agent is processing tool results
+	    StateProcessingResult
+	
+	    // StateGeneratingResponse: Agent is generating final response
+	    StateGeneratingResponse
+	
+	    // StateBlocked: Agent is blocked (awaiting approval, rate limited, etc.)
+	    StateBlocked
+	
+	    // StateError: Agent encountered an error
+	    StateError
+	
+	    // StateCompleted: Agent completed the task successfully
+	    StateCompleted
+	
+	    // StateCancelled: Agent was cancelled by user or system
+	    StateCancelled
+	
+	    // StateMaxIterations: Agent hit max iteration limit
+	    StateMaxIterations
+	
+	    // StateBudgetExhausted: Agent exhausted token budget
+	    StateBudgetExhausted
+	)
+
+<a name="StateQuotaWait"></a>AgentState constants for quota\-related states.
+
+	const (
+	    // StateQuotaWait indicates the agent is waiting for a provider quota to reset.
+	    StateQuotaWait AgentState = iota + 100 // offset to avoid collision with existing states
+	)
+
+<a name="AgentState.IsActive"></a>
+### func \(AgentState\) IsActive
+
+	func (s AgentState) IsActive() bool
+
+IsActive returns true if the state indicates active processing.
+
+<a name="AgentState.IsTerminal"></a>
+### func \(AgentState\) IsTerminal
+
+	func (s AgentState) IsTerminal() bool
+
+IsTerminal returns true if the state is a terminal state \(no further transitions except Reset\).
+
+<a name="AgentState.String"></a>
+### func \(AgentState\) String
+
+	func (s AgentState) String() string
+
+String returns a human\-readable name for the state.
+
+<a name="AgentStateMachine"></a>
+## type AgentStateMachine
+
+AgentStateMachine manages agent state transitions.
+
+	type AgentStateMachine struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewAgentStateMachine"></a>
+### func NewAgentStateMachine
+
+	func NewAgentStateMachine(logger *slog.Logger) *AgentStateMachine
+
+NewAgentStateMachine creates a new state machine.
+
+<a name="AgentStateMachine.CurrentState"></a>
+### func \(\*AgentStateMachine\) CurrentState
+
+	func (m *AgentStateMachine) CurrentState() AgentState
+
+CurrentState returns the current state.
+
+<a name="AgentStateMachine.History"></a>
+### func \(\*AgentStateMachine\) History
+
+	func (m *AgentStateMachine) History() []StateTransition
+
+History returns recent state transitions.
+
+<a name="AgentStateMachine.IsActive"></a>
+### func \(\*AgentStateMachine\) IsActive
+
+	func (m *AgentStateMachine) IsActive() bool
+
+IsActive returns true if the agent is actively processing.
+
+<a name="AgentStateMachine.IsTerminal"></a>
+### func \(\*AgentStateMachine\) IsTerminal
+
+	func (m *AgentStateMachine) IsTerminal() bool
+
+IsTerminal returns true if the current state is terminal.
+
+<a name="AgentStateMachine.OnTransition"></a>
+### func \(\*AgentStateMachine\) OnTransition
+
+	func (m *AgentStateMachine) OnTransition(listener StateTransitionListener)
+
+OnTransition registers a listener for state transitions.
+
+<a name="AgentStateMachine.SafeTransition"></a>
+### func \(\*AgentStateMachine\) SafeTransition
+
+	func (m *AgentStateMachine) SafeTransition(to AgentState, reason string, metadata map[string]any)
+
+SafeTransition performs a state transition but never panics. If the transition is invalid, it logs a warning instead of failing.
+
+<a name="AgentStateMachine.Transition"></a>
+### func \(\*AgentStateMachine\) Transition
+
+	func (m *AgentStateMachine) Transition(to AgentState, reason string, metadata map[string]any) error
+
+Transition performs a state transition with validation.
+
+<a name="AgentStatePersister"></a>
+## type AgentStatePersister
+
+AgentStatePersister persists agent state snapshots to durable storage for crash recovery and cross\-restart observability.
+
+	type AgentStatePersister interface {
+	    // Save persists the agent state snapshot. Must be idempotent on agentID.
+	    Save(ctx context.Context, agentID string, snapshot AgentStateSnapshot) error
+	    // Load retrieves the most recent persisted snapshot, or sql.ErrNoRows if none.
+	    Load(ctx context.Context, agentID string) (*AgentStateSnapshot, error)
+	    // Delete removes a persisted snapshot (e.g., on clean session close).
+	    Delete(ctx context.Context, agentID string) error
+	}
+
+<a name="AgentStateSnapshot"></a>
+## type AgentStateSnapshot
+
+AgentStateSnapshot is a serializable snapshot of agent state.
+
+	type AgentStateSnapshot struct {
+	    CurrentState   string            `json:"current_state"`
+	    IsTerminal     bool              `json:"is_terminal"`
+	    IsActive       bool              `json:"is_active"`
+	    ConversationID string            `json:"conversation_id"`
+	    AgentID        string            `json:"agent_id"`
+	    CurrentTurn    int               `json:"current_turn"`
+	    History        []StateTransition `json:"history,omitempty"`
+	    Timestamp      time.Time         `json:"timestamp"`
 	}
 
 <a name="AggregatedTaskReport"></a>
@@ -2645,6 +4189,23 @@ AmendmentSubmitter is the interface for submitting amendment requests. Implement
 	    Submit(ctx context.Context, req *task.AmendmentRequest) error
 	    Process(ctx context.Context, requestID string) (*task.AmendmentReply, error)
 	}
+
+<a name="AnalyzeResult"></a>
+## type AnalyzeResult
+
+AnalyzeResult is the output of a trace analysis run.
+
+	type AnalyzeResult struct {
+	    FailureModes []FailureMode `json:"failure_modes"`
+	    Report       string        `json:"report"`
+	}
+
+<a name="Artifact"></a>
+## type Artifact
+
+Artifact has moved to internal/plan/artifacts.go to avoid import cycles \(plan is lower\-level than agent\). This alias preserves existing call sites that reference agent.Artifact; it resolves to plan.Artifact at compile time.
+
+	type Artifact = plan.Artifact
 
 <a name="ArtifactManager"></a>
 ## type ArtifactManager
@@ -2783,6 +4344,78 @@ ScanDirectory scans a directory for Claude artifacts and caches the results.
 
 WithProjectRoot sets the project root directory for hierarchical AGENTS.md loading. This must be called before LoadAgentsContext to have effect.
 
+<a name="ArtifactRef"></a>
+## type ArtifactRef
+
+ArtifactRef points at a durable artifact produced by the parent \(file, report, rendered handoff markdown, ...\) that the child may consult instead of receiving the parent's raw conversation.
+
+	type ArtifactRef struct {
+	    Path   string
+	    SHA256 string
+	}
+
+<a name="AtomicTurnLogger"></a>
+## type AtomicTurnLogger
+
+AtomicTurnLogger writes and reads TurnSnapshots with atomic file operations \(write to temp, then rename\) for crash safety.
+
+	type AtomicTurnLogger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewAtomicTurnLogger"></a>
+### func NewAtomicTurnLogger
+
+	func NewAtomicTurnLogger(basePath string) (*AtomicTurnLogger, error)
+
+NewAtomicTurnLogger creates a logger that stores snapshots under basePath. Creates the directory if it does not exist.
+
+<a name="AtomicTurnLogger.LastSequence"></a>
+### func \(\*AtomicTurnLogger\) LastSequence
+
+	func (l *AtomicTurnLogger) LastSequence() int
+
+LastSequence returns the highest sequence number seen across all persisted snapshots. Returns 0 if no snapshots exist.
+
+<a name="AtomicTurnLogger.ListSnapshots"></a>
+### func \(\*AtomicTurnLogger\) ListSnapshots
+
+	func (l *AtomicTurnLogger) ListSnapshots() ([]TurnSnapshot, error)
+
+ListSnapshots returns all available turn snapshots sorted by sequence number.
+
+<a name="AtomicTurnLogger.NextSequence"></a>
+### func \(\*AtomicTurnLogger\) NextSequence
+
+	func (l *AtomicTurnLogger) NextSequence() int
+
+NextSequenceAtom increments the sequence counter and returns the next value.
+
+<a name="AtomicTurnLogger.PruneSnapshots"></a>
+### func \(\*AtomicTurnLogger\) PruneSnapshots
+
+	func (l *AtomicTurnLogger) PruneSnapshots(keepLast int) (int, error)
+
+PruneSnapshots keeps only the last N snapshots by sequence, deleting older ones from disk. Returns the number of snapshots deleted.
+
+<a name="AtomicTurnLogger.ReadSnapshot"></a>
+### func \(\*AtomicTurnLogger\) ReadSnapshot
+
+	func (l *AtomicTurnLogger) ReadSnapshot(turnID string) (*TurnSnapshot, error)
+
+ReadSnapshot reads a TurnSnapshot by turn ID.
+
+<a name="AtomicTurnLogger.WriteSnapshot"></a>
+### func \(\*AtomicTurnLogger\) WriteSnapshot
+
+	func (l *AtomicTurnLogger) WriteSnapshot(snap TurnSnapshot) error
+
+WriteSnapshot atomically writes a TurnSnapshot to disk.
+
+The file is written to a temporary path in the same directory and renamed into place so that any crash mid\-write leaves the previous \(or non\-existent\) snapshot untouched.
+
+File naming convention: \<turn\_id\>.json \(uses sequence when turn\_id is empty\).
+
 <a name="Attempt"></a>
 ## type Attempt
 
@@ -2817,6 +4450,111 @@ Attempt represents a single actor\-\>reviewer round within a pair session.
 	func (a *Attempt) Satisfied() bool
 
 Satisfied returns true if this attempt's review approved the work.
+
+<a name="Backoff"></a>
+## type Backoff
+
+Backoff implements exponential backoff with jitter.
+
+	type Backoff struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewBackoff"></a>
+### func NewBackoff
+
+	func NewBackoff(config BackoffConfig) *Backoff
+
+NewBackoff creates a new backoff instance with a deterministic\-seeded RNG. The logger defaults to slog.Default\(\); override with WithLogger.
+
+<a name="Backoff.NextDelay"></a>
+### func \(\*Backoff\) NextDelay
+
+	func (b *Backoff) NextDelay() (delay time.Duration, ok bool)
+
+NextDelay returns the next delay duration and whether more retries are allowed. The delay is exponential with jitter applied. Returns \(0, false\) when max attempts have been exhausted.
+
+<a name="Backoff.Reset"></a>
+### func \(\*Backoff\) Reset
+
+	func (b *Backoff) Reset()
+
+Reset resets the backoff to initial state \(zero attempts\).
+
+<a name="Backoff.Sleep"></a>
+### func \(\*Backoff\) Sleep
+
+	func (b *Backoff) Sleep(ctx context.Context) bool
+
+Sleep waits for the backoff delay or until context is cancelled. Returns true if the wait completed and another retry should proceed, false if context was cancelled or max attempts reached.
+
+<a name="Backoff.WithLogger"></a>
+### func \(\*Backoff\) WithLogger
+
+	func (b *Backoff) WithLogger(l *slog.Logger) *Backoff
+
+WithLogger sets the structured logger for backoff events. Returns the same Backoff pointer for chaining. If l is nil, the logger is left unchanged.
+
+<a name="BackoffConfig"></a>
+## type BackoffConfig
+
+BackoffConfig configures exponential backoff behavior.
+
+	type BackoffConfig struct {
+	    // BaseDelay is the initial delay before the first retry.
+	    BaseDelay time.Duration
+	    // MaxDelay caps the maximum delay between retries.
+	    MaxDelay time.Duration
+	    // Multiplier is the factor by which delay increases each attempt.
+	    Multiplier float64
+	    // Jitter is the randomness factor (0.0 to 1.0).
+	    // 0 = no jitter, 1 = full jitter (random between 0 and calculated delay)
+	    Jitter float64
+	    // MaxAttempts is the maximum number of retry attempts (0 = unlimited).
+	    MaxAttempts int
+	}
+
+<a name="AggressiveBackoffConfig"></a>
+### func AggressiveBackoffConfig
+
+	func AggressiveBackoffConfig() BackoffConfig
+
+AggressiveBackoffConfig returns a more aggressive backoff for time\-sensitive operations.
+
+<a name="ConservativeBackoffConfig"></a>
+### func ConservativeBackoffConfig
+
+	func ConservativeBackoffConfig() BackoffConfig
+
+ConservativeBackoffConfig returns a conservative backoff for non\-urgent operations.
+
+<a name="DefaultBackoffConfig"></a>
+### func DefaultBackoffConfig
+
+	func DefaultBackoffConfig() BackoffConfig
+
+DefaultBackoffConfig returns sensible defaults for general backoff. When a config\-driven override is installed via SetDefaultBackoffOverride, non\-zero fields from the override take precedence.
+
+<a name="HTTPHookBackoffConfig"></a>
+### func HTTPHookBackoffConfig
+
+	func HTTPHookBackoffConfig(count int) BackoffConfig
+
+HTTPHookBackoffConfig returns a backoff profile for HTTP hook requests. More aggressive than default to support the retry\_count pattern of HTTP hooks. Resolution order: per\-operation override for "http" → hardcoded preset.
+
+<a name="LLMBackoffConfig"></a>
+### func LLMBackoffConfig
+
+	func LLMBackoffConfig() BackoffConfig
+
+LLMBackoffConfig returns a backoff profile tuned for LLM API calls. Resolution order: per\-operation override for "llm" takes highest precedence, then global override, then hardcoded preset.
+
+<a name="ToolBackoffConfig"></a>
+### func ToolBackoffConfig
+
+	func ToolBackoffConfig() BackoffConfig
+
+ToolBackoffConfig returns a backoff profile tuned for tool execution.
 
 <a name="BeforeProviderPayloadData"></a>
 ## type BeforeProviderPayloadData
@@ -2858,6 +4596,365 @@ BlockResult is returned by BeforeToolCallHook.
 	type BlockResult struct {
 	    Block  bool
 	    Reason string // human-readable reason if blocked
+	}
+
+<a name="BudgetAllocation"></a>
+## type BudgetAllocation
+
+BudgetAllocation represents a token allocation at a specific level in the hierarchical budget system.
+
+	type BudgetAllocation struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewBudgetAllocation"></a>
+### func NewBudgetAllocation
+
+	func NewBudgetAllocation(id string, level BudgetLevel, totalBudget int) *BudgetAllocation
+
+NewBudgetAllocation creates a new budget allocation with sensible defaults.
+
+<a name="BudgetAllocation.AddChild"></a>
+### func \(\*BudgetAllocation\) AddChild
+
+	func (a *BudgetAllocation) AddChild(child *BudgetAllocation)
+
+AddChild adds a child allocation \(for hierarchical structure\).
+
+<a name="BudgetAllocation.Allocate"></a>
+### func \(\*BudgetAllocation\) Allocate
+
+	func (a *BudgetAllocation) Allocate(tokens int) bool
+
+Allocate consumes budget from the allocation. Returns true if successful, false if insufficient budget \(excluding reserved\). On success, fires onLowBudget when usage crosses the warning threshold and onExhausted when usage exhausts the available pool. Callbacks run outside the allocation mutex.
+
+<a name="BudgetAllocation.AllocateFromReserved"></a>
+### func \(\*BudgetAllocation\) AllocateFromReserved
+
+	func (a *BudgetAllocation) AllocateFromReserved(tokens int) bool
+
+AllocateFromReserved consumes from the reserved budget \(emergency use\).
+
+Deviation from plan: The plan's arithmetic \(\`reservedBudget \- \(usedBudget \- \(totalBudget \- reservedBudget\)\)\`\) produces nonsensical results when the normal allocation pool hasn't been fully consumed. Instead, this implementation treats the reserved pool as part of the total: it succeeds only if the resulting usedBudget does not exceed totalBudget. This means: after all normal budget is consumed, up to reservedBudget tokens of emergency allocation are accepted.
+
+Returns true if successful, false if tokens \<= 0 or if allocating would exceed totalBudget.
+
+<a name="BudgetAllocation.Available"></a>
+### func \(\*BudgetAllocation\) Available
+
+	func (a *BudgetAllocation) Available() int
+
+Available returns the available budget \(total \- used \- reserved\).
+
+<a name="BudgetAllocation.AvailableWithReserved"></a>
+### func \(\*BudgetAllocation\) AvailableWithReserved
+
+	func (a *BudgetAllocation) AvailableWithReserved() int
+
+AvailableWithReserved returns available budget including reserved tokens \(for emergency use\).
+
+<a name="BudgetAllocation.GetChild"></a>
+### func \(\*BudgetAllocation\) GetChild
+
+	func (a *BudgetAllocation) GetChild(id string) *BudgetAllocation
+
+GetChild returns a child allocation by ID, or nil if not found.
+
+<a name="BudgetAllocation.GetChildren"></a>
+### func \(\*BudgetAllocation\) GetChildren
+
+	func (a *BudgetAllocation) GetChildren() []*BudgetAllocation
+
+GetChildren returns a defensive copy of all child allocations.
+
+<a name="BudgetAllocation.IsExhausted"></a>
+### func \(\*BudgetAllocation\) IsExhausted
+
+	func (a *BudgetAllocation) IsExhausted() bool
+
+IsExhausted returns true if no budget is available \(excluding reserved\).
+
+<a name="BudgetAllocation.IsWarningZone"></a>
+### func \(\*BudgetAllocation\) IsWarningZone
+
+	func (a *BudgetAllocation) IsWarningZone() bool
+
+IsWarningZone returns true if usage has reached the warning threshold.
+
+<a name="BudgetAllocation.OnExhausted"></a>
+### func \(\*BudgetAllocation\) OnExhausted
+
+	func (a *BudgetAllocation) OnExhausted(cb func(*BudgetAllocation))
+
+OnExhausted registers a callback fired when the allocation becomes exhausted \(Available\(\) \<= 0\) during a successful Allocate. Invoked outside the allocation mutex.
+
+<a name="BudgetAllocation.OnLowBudget"></a>
+### func \(\*BudgetAllocation\) OnLowBudget
+
+	func (a *BudgetAllocation) OnLowBudget(cb func(*BudgetAllocation))
+
+OnLowBudget registers a callback fired when the allocation enters the warning zone \(usage \>= warningThreshold\) during a successful Allocate. The callback is invoked outside the allocation mutex to avoid re\-entrancy.
+
+<a name="BudgetAllocation.Release"></a>
+### func \(\*BudgetAllocation\) Release
+
+	func (a *BudgetAllocation) Release(tokens int)
+
+Release returns budget to the allocation \(e.g., on error recovery\). Clamps to usedBudget so it cannot go negative.
+
+<a name="BudgetAllocation.UsageRatio"></a>
+### func \(\*BudgetAllocation\) UsageRatio
+
+	func (a *BudgetAllocation) UsageRatio() float64
+
+UsageRatio returns the fraction of budget used \(0.0 to 1.0\+\). Returns 0 if totalBudget is 0.
+
+<a name="BudgetAllocation.Used"></a>
+### func \(\*BudgetAllocation\) Used
+
+	func (a *BudgetAllocation) Used() int
+
+Used returns the amount of budget used.
+
+<a name="BudgetAllocation.WithBorrowing"></a>
+### func \(\*BudgetAllocation\) WithBorrowing
+
+	func (a *BudgetAllocation) WithBorrowing(enabled bool) *BudgetAllocation
+
+WithBorrowing enables or disables borrowing from siblings.
+
+<a name="BudgetAllocation.WithCarryover"></a>
+### func \(\*BudgetAllocation\) WithCarryover
+
+	func (a *BudgetAllocation) WithCarryover(enabled bool) *BudgetAllocation
+
+WithCarryover enables or disables carryover of unused budget.
+
+<a name="BudgetAllocation.WithName"></a>
+### func \(\*BudgetAllocation\) WithName
+
+	func (a *BudgetAllocation) WithName(name string) *BudgetAllocation
+
+WithName sets a human\-readable name for the allocation.
+
+<a name="BudgetAllocation.WithReserved"></a>
+### func \(\*BudgetAllocation\) WithReserved
+
+	func (a *BudgetAllocation) WithReserved(reserved int) *BudgetAllocation
+
+WithReserved sets the reserved budget \(emergency reserve\).
+
+<a name="BudgetAllocation.WithWarningThreshold"></a>
+### func \(\*BudgetAllocation\) WithWarningThreshold
+
+	func (a *BudgetAllocation) WithWarningThreshold(ratio float64) *BudgetAllocation
+
+WithWarningThreshold sets the warning threshold ratio.
+
+<a name="BudgetHierarchy"></a>
+## type BudgetHierarchy
+
+BudgetHierarchy manages the budget hierarchy for a task, providing task\-level, phase\-level, and turn\-level budget tracking.
+
+phase\-frontier\-parallel leaf 03 \(Task\-3 survey fix\): phase selection was previously a single slot \(currentPhase string \+ turnBudget pointer\), so under parallel phases usage from phase B recorded against whichever phase was selected LAST. Selection is now map\-based: selectedPhases tracks every concurrently\-running phase and phaseTurnBudgets carries one turn budget per selected phase. With exactly one phase selected at a time \(serial mode\), behavior is identical to the legacy single\-slot implementation.
+
+	type BudgetHierarchy struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewBudgetHierarchy"></a>
+### func NewBudgetHierarchy
+
+	func NewBudgetHierarchy(taskBudget int, phases []string, phaseBudgets []int) *BudgetHierarchy
+
+NewBudgetHierarchy creates a new budget hierarchy.
+
+The task budget receives a 10% emergency reserve, a 0.7 warning threshold, and borrowing enabled. Each phase budget gets carryover enabled and a 0.8 warning threshold. Phases with a budget \<= 0 are auto\-distributed an equal share of the non\-reserved task budget.
+
+<a name="NewBudgetHierarchyWithConfig"></a>
+### func NewBudgetHierarchyWithConfig
+
+	func NewBudgetHierarchyWithConfig(taskBudget int, phases []string, phaseBudgets []int, opts BudgetHierarchyOptions) *BudgetHierarchy
+
+NewBudgetHierarchyWithConfig is like NewBudgetHierarchy but accepts configuration overrides for reserve ratio, warning thresholds, and carryover/borrowing behavior. Zero\-valued fields fall back to defaults.
+
+<a name="BudgetHierarchy.AdvancePhase"></a>
+### func \(\*BudgetHierarchy\) AdvancePhase
+
+	func (h *BudgetHierarchy) AdvancePhase(newPhaseID string) error
+
+AdvancePhase transitions the most recently engaged phase's budget allocation to a new phase, preserving the legacy serial semantics: carry over the from phase's unused budget, then select the new phase. It delegates to AdvancePhaseFrom with the resolved from phase \(the turn\-budget handle when set, else the single selected phase\). For explicit per\-phase transitions under parallel dispatch, call AdvancePhaseFrom directly.
+
+<a name="BudgetHierarchy.AdvancePhaseFrom"></a>
+### func \(\*BudgetHierarchy\) AdvancePhaseFrom
+
+	func (h *BudgetHierarchy) AdvancePhaseFrom(fromPhaseID, newPhaseID string) error
+
+AdvancePhaseFrom transitions ONE phase's budget allocation from fromPhaseID to newPhaseID \(leaf 03\): if carryover is enabled on the from phase, its unused budget is carried over to the new phase before selecting it. Carryover is per\-phase on the phase's OWN transition, not a global swap — other concurrently\-selected phases keep running untouched. An empty fromPhaseID selects the new phase without carryover \(fresh start\). Returns an error if either phase does not exist.
+
+<a name="BudgetHierarchy.BorrowForPhase"></a>
+### func \(\*BudgetHierarchy\) BorrowForPhase
+
+	func (h *BudgetHierarchy) BorrowForPhase(phaseID string, tokens int) bool
+
+BorrowForPhase attempts to borrow tokens from a sibling phase that has borrowing enabled and sufficient surplus. The sibling with the most surplus is preferred. Returns true if the borrow succeeded, false otherwise.
+
+<a name="BudgetHierarchy.CarryoverUnused"></a>
+### func \(\*BudgetHierarchy\) CarryoverUnused
+
+	func (h *BudgetHierarchy) CarryoverUnused(fromPhaseID, toPhaseID string) error
+
+CarryoverUnused moves unused budget from one phase to another. The source phase must have allowCarryover enabled. After carryover, the source phase's usedBudget is set equal to its totalBudget so it appears fully consumed for accounting purposes.
+
+<a name="BudgetHierarchy.GetStatus"></a>
+### func \(\*BudgetHierarchy\) GetStatus
+
+	func (h *BudgetHierarchy) GetStatus() BudgetStatus
+
+GetStatus returns a summary of budget status at all levels.
+
+<a name="BudgetHierarchy.GetTurnBudget"></a>
+### func \(\*BudgetHierarchy\) GetTurnBudget
+
+	func (h *BudgetHierarchy) GetTurnBudget() int
+
+GetTurnBudget returns the sum of available tokens across all selected phases' turn budgets \(leaf 03\). In serial mode exactly one turn budget is selected, so this equals the legacy single\-slot value; under parallel phases the caller sees the combined remaining turn capacity for the task. Returns 0 if no turn budget is selected.
+
+<a name="BudgetHierarchy.RecordUsage"></a>
+### func \(\*BudgetHierarchy\) RecordUsage
+
+	func (h *BudgetHierarchy) RecordUsage(tokens int, phaseID string)
+
+RecordUsage records token usage at all three levels of the hierarchy: turn, phase, and task. Each level has its own totalBudget pool, so the same tokens are independently tracked at each level — this is the correct semantic for hierarchical budgets \(a turn consumes from its turn allocation AND its parent phase AND the task\).
+
+leaf 03: phaseID routes the usage to the right phase's pools while phases run in parallel — passing a phaseID that is not selected still records the usage against that phase and the task root. The phaseID parameter exists because the previous single currentPhase slot misattributed usage from concurrently\-running phases to whichever phase was selected last.
+
+If the phase allocation fails because the phase is exhausted, and the phase has borrowing enabled, auto\-borrow from a sibling and retry.
+
+<a name="BudgetHierarchy.SelectPhaseBudget"></a>
+### func \(\*BudgetHierarchy\) SelectPhaseBudget
+
+	func (h *BudgetHierarchy) SelectPhaseBudget(phaseID string) error
+
+SelectPhaseBudget selects a phase and creates its per\-phase turn budget \(leaf 03, map\-based selection\). The turn budget is set to approximately 1/10 of the phase's available budget.
+
+Idempotent per phase: re\-selecting an already\-selected phase is a no\-op, preserving turn\-budget continuity while that phase keeps running \(a fresh budget would reset its usage and double\-add a child\). Under parallel phases several selections coexist; in serial mode exactly one phase is selected at a time, matching the legacy single\-slot behavior.
+
+<a name="BudgetHierarchy.TurnBudgetFor"></a>
+### func \(\*BudgetHierarchy\) TurnBudgetFor
+
+	func (h *BudgetHierarchy) TurnBudgetFor(phaseID string) int
+
+TurnBudgetFor returns the available tokens of one phase's turn budget, or 0 when the phase is not selected \(leaf 03, per\-phase accessor\).
+
+<a name="BudgetHierarchyOptions"></a>
+## type BudgetHierarchyOptions
+
+BudgetHierarchyOptions configures optional BudgetHierarchy behavior. All fields have sensible defaults when zero\-valued.
+
+	type BudgetHierarchyOptions struct {
+	    ReservedRatio     float64 // 0 = use default 0.1
+	    TaskWarningRatio  float64 // 0 = use default 0.7
+	    PhaseWarningRatio float64 // 0 = use default 0.8
+	    TurnWarningRatio  float64 // 0 = use default 0.9
+	    CarryoverEnabled  bool
+	    BorrowingEnabled  bool
+	}
+
+<a name="BudgetLevel"></a>
+## type BudgetLevel
+
+BudgetLevel represents the level in the budget hierarchy.
+
+	type BudgetLevel uint8
+
+<a name="BudgetLevelTask"></a>
+
+	const (
+	    // BudgetLevelTask is the top-level budget for an entire task.
+	    BudgetLevelTask BudgetLevel = iota
+	    // BudgetLevelPhase is the budget for a specific plan phase.
+	    BudgetLevelPhase
+	    // BudgetLevelTurn is the budget for a single iteration/turn.
+	    BudgetLevelTurn
+	)
+
+<a name="BudgetLevel.String"></a>
+### func \(BudgetLevel\) String
+
+	func (l BudgetLevel) String() string
+
+String returns a human\-readable name for the budget level.
+
+<a name="BudgetResumeWatcher"></a>
+## type BudgetResumeWatcher
+
+BudgetResumeWatcher parks chat turns interrupted by budget exhaustion and retries them once the budget window clears. It polls the budget on a fixed interval; when the budget is no longer exceeded, it drains the parked queue \(oldest first\) by invoking the resume callback supplied by the ChatHandler.
+
+The watcher is best\-effort: if the daemon shuts down while turns are parked, those turns are dropped \(logged at warn\). Turns are not persisted across restarts.
+
+	type BudgetResumeWatcher struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewBudgetResumeWatcher"></a>
+### func NewBudgetResumeWatcher
+
+	func NewBudgetResumeWatcher(budget *llm.Budget, logger *slog.Logger, resumeFunc func(ctx context.Context, turn ParkedTurn)) *BudgetResumeWatcher
+
+NewBudgetResumeWatcher creates a watcher. resumeFunc is invoked \(in a background goroutine\) for each parked turn once the budget clears; it is responsible for re\-running the turn and pushing the result to the session. A nil budget or nil resumeFunc disables auto\-resume \(Park becomes a no\-op\).
+
+<a name="BudgetResumeWatcher.Park"></a>
+### func \(\*BudgetResumeWatcher\) Park
+
+	func (w *BudgetResumeWatcher) Park(turn ParkedTurn) bool
+
+Park enqueues a turn for later retry. Returns false \(and does nothing\) if auto\-resume is not configured.
+
+<a name="BudgetResumeWatcher.Pending"></a>
+### func \(\*BudgetResumeWatcher\) Pending
+
+	func (w *BudgetResumeWatcher) Pending() int
+
+Pending returns the number of currently parked turns.
+
+<a name="BudgetResumeWatcher.Start"></a>
+### func \(\*BudgetResumeWatcher\) Start
+
+	func (w *BudgetResumeWatcher) Start(ctx context.Context)
+
+Start begins the background polling loop. Safe to call once; subsequent calls are no\-ops.
+
+<a name="BudgetResumeWatcher.Stop"></a>
+### func \(\*BudgetResumeWatcher\) Stop
+
+	func (w *BudgetResumeWatcher) Stop()
+
+Stop halts the polling loop and waits for it to exit. Parked turns that have not yet resumed are logged and dropped.
+
+<a name="BudgetStatus"></a>
+## type BudgetStatus
+
+BudgetStatus is an exported, JSON\-serializable overview of the entire budget hierarchy.
+
+	type BudgetStatus struct {
+	    Task   BudgetSummary            `json:"task"`
+	    Phases map[string]BudgetSummary `json:"phases"`
+	    Turn   BudgetSummary            `json:"turn,omitempty"`
+	}
+
+<a name="BudgetSummary"></a>
+## type BudgetSummary
+
+BudgetSummary is an exported, JSON\-serializable snapshot of a budget allocation's current state.
+
+	type BudgetSummary struct {
+	    Total       int     `json:"total"`
+	    Used        int     `json:"used"`
+	    Available   int     `json:"available"`
+	    UsageRatio  float64 `json:"usage_ratio"`
+	    IsExhausted bool    `json:"is_exhausted"`
+	    IsWarning   bool    `json:"is_warning"`
 	}
 
 <a name="BusPairSessionState"></a>
@@ -3225,6 +5322,13 @@ ChatHandler bridges the message bus to the AgentLoop. It subscribes to chat.requ
 
 NewChatHandler creates a new ChatHandler. The dispatcher parameter is optional; if nil, requests go directly to the loop.
 
+<a name="ChatHandler.ClearConversation"></a>
+### func \(\*ChatHandler\) ClearConversation
+
+	func (h *ChatHandler) ClearConversation(conversationID string)
+
+ClearConversation removes the in\-memory conversation cache for a session. Called by the /reset RPC handler after clearing persisted messages.
+
 <a name="ChatHandler.FormatAsyncTaskAck"></a>
 ### func \(\*ChatHandler\) FormatAsyncTaskAck
 
@@ -3253,6 +5357,13 @@ GetWorkerCount returns the number of active workers.
 
 GetWorkers returns a snapshot of active workers.
 
+<a name="ChatHandler.LookupLoop"></a>
+### func \(\*ChatHandler\) LookupLoop
+
+	func (h *ChatHandler) LookupLoop(conversationID string) *AgentLoop
+
+LookupLoop returns the AgentLoop responsible for a given conversation/session ID. It is the public accessor over sessionLoop for external callers \(HTTP server state queries, RPC handlers, etc.\). Returns nil if the handler has no loop available.
+
 <a name="ChatHandler.Name"></a>
 ### func \(\*ChatHandler\) Name
 
@@ -3260,12 +5371,26 @@ GetWorkers returns a snapshot of active workers.
 
 Name returns the component name for the registry.
 
+<a name="ChatHandler.QuotaResumeWatcher"></a>
+### func \(\*ChatHandler\) QuotaResumeWatcher
+
+	func (h *ChatHandler) QuotaResumeWatcher() *QuotaResumeWatcher
+
+QuotaResumeWatcher exposes the configured watcher so the daemon can Start it on its lifecycle. Returns nil when quota deferral is not wired.
+
+<a name="ChatHandler.SetAgentLoopManager"></a>
+### func \(\*ChatHandler\) SetAgentLoopManager
+
+	func (h *ChatHandler) SetAgentLoopManager(m *Manager)
+
+SetAgentLoopManager registers a per\-session AgentLoop manager. When set, direct\-mode chat requests route to a session\-scoped AgentLoop \(created via GetOrCreateWired from the singleton template\) if the session has a project path. Falls back to the singleton loop.
+
 <a name="ChatHandler.SetBudget"></a>
 ### func \(\*ChatHandler\) SetBudget
 
 	func (h *ChatHandler) SetBudget(budget *llm.Budget)
 
-SetBudget sets the token budget tracker for async dispatch pre\-checks. This prevents zombie tasks from being created when the budget is exceeded.
+SetBudget sets the token budget tracker for async dispatch pre\-checks and enables auto\-resume of turns interrupted by budget exhaustion. This prevents zombie tasks from being created when the budget is exceeded, and parks time\-windowed budget failures \(hourly/daily tokens or cost\) for automatic retry once the window clears.
 
 <a name="ChatHandler.SetCollaborationEngine"></a>
 ### func \(\*ChatHandler\) SetCollaborationEngine
@@ -3273,6 +5398,27 @@ SetBudget sets the token budget tracker for async dispatch pre\-checks. This pre
 	func (h *ChatHandler) SetCollaborationEngine(engine *CollaborationEngine)
 
 SetCollaborationEngine sets the collaboration engine for starting collaboration sessions.
+
+<a name="ChatHandler.SetEffectsResumeHook"></a>
+### func \(\*ChatHandler\) SetEffectsResumeHook
+
+	func (h *ChatHandler) SetEffectsResumeHook(fn EffectsResumeHook)
+
+SetEffectsResumeHook wires the reconciler. Nil\-guarded \(setter convention\); nil disables the hook.
+
+<a name="ChatHandler.SetFenceController"></a>
+### func \(\*ChatHandler\) SetFenceController
+
+	func (h *ChatHandler) SetFenceController(fc FenceController)
+
+SetFenceController wires the shared fence checker so session\-scoped loops get a correct sandbox root and \-\-nofence handling. Safe to call with nil.
+
+<a name="ChatHandler.SetMessageSaver"></a>
+### func \(\*ChatHandler\) SetMessageSaver
+
+	func (h *ChatHandler) SetMessageSaver(s SessionMessageSaver)
+
+SetMessageSaver wires the session message persistence callback. When set, ChatHandler persists user and assistant messages after each successful exchange so the Flutter GUI \(and any HTTP\-only client\) can reload conversation history.
 
 <a name="ChatHandler.SetMetricsStore"></a>
 ### func \(\*ChatHandler\) SetMetricsStore
@@ -3287,6 +5433,20 @@ SetMetricsStore sets the metrics store for duration estimates.
 	func (h *ChatHandler) SetNotificationPublisher(p NotificationPublisher)
 
 SetNotificationPublisher provides the ChatHandler with a notification publisher so it can emit task completion/failure events to the notification system.
+
+<a name="ChatHandler.SetQuotaResumeConfig"></a>
+### func \(\*ChatHandler\) SetQuotaResumeConfig
+
+	func (h *ChatHandler) SetQuotaResumeConfig(maxWait time.Duration)
+
+SetQuotaResumeConfig wires the quota deferral watcher \(quota\-reset\-resilience leaf 06\) from llm.quota\_retry settings. The watcher's resume callback is bound internally \(mirrors SetBudget\). maxWait \<= 0 falls back to the llm package default. Nil\-safe.
+
+<a name="ChatHandler.SetSessionStore"></a>
+### func \(\*ChatHandler\) SetSessionStore
+
+	func (h *ChatHandler) SetSessionStore(s SessionStoreReader)
+
+SetSessionStore registers a session store for project\-path lookup. Accepts any type with a Get\(id string\) \*session.Session method \(e.g. session.Store or the narrow SessionStoreReader\).
 
 <a name="ChatHandler.SetStepStore"></a>
 ### func \(\*ChatHandler\) SetStepStore
@@ -3308,6 +5468,13 @@ SetSyncMode enables or disables synchronous dispatch mode. When enabled, async\-
 	func (h *ChatHandler) SetTaskStore(store *task.Store)
 
 SetTaskStore sets the task store for looking up linked sessions.
+
+<a name="ChatHandler.SetThrottleParker"></a>
+### func \(\*ChatHandler\) SetThrottleParker
+
+	func (h *ChatHandler) SetThrottleParker(parker *TurnParker)
+
+SetThrottleParker wires the loop's throttle\-resume parker \(tree 03 leaf 02 Task 3\): the parker's resume callback routes by record class — throttle records re\-enter the loop via resumeThrottledTurn; quota records \(when a parker other than the handler's own quota watcher is shared\) delegate to the existing quota resume callback. Nil\-guarded.
 
 <a name="ChatHandler.Start"></a>
 ### func \(\*ChatHandler\) Start
@@ -3342,6 +5509,8 @@ ChatRequest is the expected payload for chat.request messages.
 	type ChatRequest struct {
 	    Message        string            `json:"message"`
 	    ConversationID string            `json:"conversation_id"`
+	    SessionID      string            `json:"session_id,omitempty"` // original session ID for persistence
+	    AgentID        string            `json:"agent_id,omitempty"`   // agent override from the client
 	    SourceClient   string            `json:"source_client,omitempty"`
 	    Parts          []llm.ContentPart `json:"parts,omitempty"`
 	}
@@ -3354,20 +5523,76 @@ ChatResponse is the payload for chat.response messages.
 	type ChatResponse struct {
 	    Reply          string `json:"reply"`
 	    ConversationID string `json:"conversation_id"`
+	    SessionID      string `json:"session_id,omitempty"` // original session ID for WS routing
 	    Error          string `json:"error,omitempty"`
+	    // Meta carries classification provenance for the reply (leaf 01 of
+	    // classifier-observability): which classifier served it, which model,
+	    // the analyzer's ambiguity score, and whether session context was used.
+	    // Populated only on the classified reply path (result.Intent != nil);
+	    // omitted entirely otherwise. Additive metadata — reply text unchanged.
+	    Meta map[string]string `json:"meta,omitempty"`
+	}
+
+<a name="CheckResult"></a>
+## type CheckResult
+
+CheckResult represents a single verification check performed by the verifier.
+
+	type CheckResult struct {
+	    // Name is the check identifier (from CHECK: line).
+	    Name string
+	    // Command is the command or action taken (from COMMAND: line).
+	    Command string
+	    // Output is the observed output or result (from OUTPUT: line).
+	    Output string
+	    // Passed indicates whether this individual check passed.
+	    Passed bool
 	}
 
 <a name="Checkpoint"></a>
 ## type Checkpoint
 
-Checkpoint represents a workspace checkpoint for rollback.
+Checkpoint captures the complete state of an agent run so it can be resumed after a crash, timeout, or manual cancellation.
+
+Modeled after HALO's turn\-compaction recovery: checkpoints are written periodically \(controlled by checkpointInterval\) and contain enough state to resume from the last completed turn.
 
 	type Checkpoint struct {
-	    TaskID    string    `json:"task_id"`
-	    Label     string    `json:"label"`
-	    GitRef    string    `json:"git_ref"`
+	    // RunID is the unique identifier for the agent run.
+	    RunID string `json:"run_id"`
+	    // AgentID identifies the employee / agent that owns this run.
+	    AgentID string `json:"agent_id"`
+	    // Depth is the recursion/subagent depth at the time of the checkpoint.
+	    Depth int `json:"depth,omitempty"`
+	    // TurnCounter tracks the current turn and the limit.
+	    TurnCounter struct {
+	        Current int `json:"current"`
+	        Limit   int `json:"limit"`
+	    }   `json:"turn_counter"`
+	    // ToolCalls captures all tool invocations in the current turn.
+	    ToolCalls []TurnRecord `json:"tool_calls"`
+	    // LLMMessages captures the LLM conversation history up to this point.
+	    LLMMessages []LLMMessage `json:"llm_messages"`
+	    // Outputs holds the final output text from the last completed turn.
+	    Outputs string `json:"outputs,omitempty"`
+	    // Timestamp records when the checkpoint was written.
 	    Timestamp time.Time `json:"timestamp"`
+	    // Metadata is an optional free-form map for extra context.
+	    Metadata map[string]string `json:"metadata,omitempty"`
 	}
+
+<a name="SnapshotForTurn"></a>
+### func SnapshotForTurn
+
+	func SnapshotForTurn(runID, agentID string, depth int, currentTurn, limit int, toolCalls []TurnRecord, messages []LLMMessage, output string) *Checkpoint
+
+SnapshotForTurn converts a set of turn records and LLM messages into a Checkpoint suitable for WriteCheckpoint.
+
+<a name="ClassifyFunc"></a>
+## type ClassifyFunc
+
+ClassifyFunc analyzes recent messages to determine if a skill improvement is warranted. It returns a structured result string or an error.
+
+	type ClassifyFunc func(ctx context.Context, prompt string, recentMessages []string) (string, error)
 
 <a name="CollaborationEngine"></a>
 ## type CollaborationEngine
@@ -3555,8 +5780,12 @@ CollaborationSession represents an active collaboration instance.
 	    TimeBudget   time.Duration
 	    TurnTimeout  time.Duration // max time per turn
 	    MaxTurns     int
-	    CreatedAt    time.Time
-	    UpdatedAt    time.Time
+	    // ContextIsolation governs what the pair participants' per-turn prompts
+	    // carry from prior turns. Default ArtifactOnly (brief + artifact digest);
+	    // SharedTranscript is the explicit opt-in that includes the turn log.
+	    Isolation ContextIsolation `json:"isolation,omitempty" yaml:"isolation,omitempty"`
+	    CreatedAt time.Time
+	    UpdatedAt time.Time
 	    // contains filtered or unexported fields
 	}
 
@@ -3637,6 +5866,21 @@ TotalTokensUsed sums TokensUsed across all turns \(thread\-safe\).
 
 TurnCount returns the number of completed turns.
 
+<a name="CompactTurn"></a>
+## type CompactTurn
+
+CompactTurn represents a compacted turn record. Merges tool\_call \+ tool\_response into single record for \~40% context reduction. Modeled after HALO's turn compaction pattern \(engine/main.py\).
+
+	type CompactTurn struct {
+	    Type       string         `json:"type"` // "tool", "thinking", "final"
+	    ToolName   string         `json:"tool_name,omitempty"`
+	    ToolInput  map[string]any `json:"tool_input,omitempty"`
+	    ToolOutput string         `json:"tool_output,omitempty"`
+	    Thinking   string         `json:"thinking,omitempty"` // collapsed thinking
+	    Content    string         `json:"content,omitempty"`
+	    TokenCount int            `json:"token_count"`
+	}
+
 <a name="CompactionAgentConfig"></a>
 ## type CompactionAgentConfig
 
@@ -3702,9 +5946,9 @@ NewContextInjector creates a new context injector.
 
 	func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) string
 
-BuildSystemPrompt builds a system prompt with both learned patterns and active user instructions injected.
+BuildSystemPrompt builds a system prompt with active user instructions and skills injected. The base prompt is used as the relevance query for skill filtering: skills whose name, description, tags, or examples match the task context in base are prioritized. If no relevance matches are found \(or the base is empty\), all cached skills are included as fallback.
 
-Per Phase 4 spec 4.2: \- Merges Learning patterns AND User Instructions \- Format: "\#\# Standing Instructions" \+ "\#\# Learned Patterns" \- Queries instructionStore.GetActive\(\) for active instructions
+Per Phase 4 spec 4.2 \+ turbo Thread E self\-reflection: \- Standing instructions from preferences.Store \- Active skills filtered by relevance to base \- Learned patterns section removed \(patterns deprecated; skills replace\)
 
 <a name="ContextInjector.GetActiveInstructions"></a>
 ### func \(\*ContextInjector\) GetActiveInstructions
@@ -3726,6 +5970,39 @@ HasActiveInstructions returns true if there are active user instructions.
 	func (c *ContextInjector) HasLearnedPatterns(ctx context.Context) bool
 
 HasLearnedPatterns returns true if there are learned patterns available.
+
+<a name="ContextInjector.SetSkillLoader"></a>
+### func \(\*ContextInjector\) SetSkillLoader
+
+	func (c *ContextInjector) SetSkillLoader(loader *skills.LazySkillLoader)
+
+SetSkillLoader wires the lazy skill loader for system\-prompt skill injection. Nil\-safe: passing nil is a no\-op.
+
+<a name="ContextIsolation"></a>
+## type ContextIsolation
+
+ContextIsolation controls what context a child agent \(handoff target, subagent, or collaboration participant\) receives when it is spawned.
+
+The default is ArtifactOnly: children get a structured brief plus artifact references, never the parent's raw message transcript. SharedTranscript is an explicit opt\-in for modes that genuinely need the full conversation \(none today\); BusMessage defers context delivery to the message bus.
+
+	type ContextIsolation string
+
+<a name="IsolationArtifactOnly"></a>
+
+	const (
+	    // IsolationArtifactOnly is the default isolation level. The child
+	    // receives Brief + Artifacts + MemoryIDs; Transcript is empty.
+	    IsolationArtifactOnly ContextIsolation = "artifact_only"
+	
+	    // IsolationSharedTranscript explicitly opts the child into receiving a
+	    // copy of the parent's message transcript. Use sparingly: the transcript
+	    // may contain full tool-result dumps and chain-of-thought.
+	    IsolationSharedTranscript ContextIsolation = "shared_transcript"
+	
+	    // IsolationBusMessage leaves the Transcript empty; the parent delivers
+	    // context to the child over the bus after spawn.
+	    IsolationBusMessage ContextIsolation = "bus_message"
+	)
 
 <a name="ContextTransform"></a>
 ## type ContextTransform
@@ -3953,6 +6230,13 @@ This is used for memory injection before LLM calls.
 
 InjectContextBounded inserts context with a token budget limit. This is used for memory injection to prevent memory from dominating the context. If the context exceeds the budget, it is truncated proportionally.
 
+<a name="Conversation.IsActive"></a>
+### func \(\*Conversation\) IsActive
+
+	func (c *Conversation) IsActive() bool
+
+IsActive reports whether the conversation has an in\-flight turn and is therefore protected from LRU eviction.
+
 <a name="Conversation.IsAnchorMessage"></a>
 ### func \(\*Conversation\) IsAnchorMessage
 
@@ -3967,12 +6251,33 @@ IsAnchorMessage checks if a message content is anchored.
 
 LastMessage returns the most recent message, or nil if empty.
 
+<a name="Conversation.LastUserMessage"></a>
+### func \(\*Conversation\) LastUserMessage
+
+	func (c *Conversation) LastUserMessage() string
+
+LastUserMessage returns the content of the most recent user\-role message, or empty string if none exists. Used by the learning capture pipeline to associate tool calls with the originating user intent.
+
 <a name="Conversation.Len"></a>
 ### func \(\*Conversation\) Len
 
 	func (c *Conversation) Len() int
 
 Len returns the number of messages \(excluding system prompt\).
+
+<a name="Conversation.MarkActive"></a>
+### func \(\*Conversation\) MarkActive
+
+	func (c *Conversation) MarkActive()
+
+MarkActive increments the in\-flight usage counter, protecting the conversation from LRU eviction while a RunOnce turn is executing. Each call must be paired with a MarkInactive \(typically via defer\).
+
+<a name="Conversation.MarkInactive"></a>
+### func \(\*Conversation\) MarkInactive
+
+	func (c *Conversation) MarkInactive()
+
+MarkInactive decrements the in\-flight usage counter.
 
 <a name="Conversation.PrefixChanged"></a>
 ### func \(\*Conversation\) PrefixChanged
@@ -4151,6 +6456,154 @@ ConversationStoreOption is a functional option for ConversationStore.
 
 WithPersistence sets the persistence callback.
 
+<a name="WithStoreLogger"></a>
+### func WithStoreLogger
+
+	func WithStoreLogger(logger *slog.Logger) ConversationStoreOption
+
+WithStoreLogger sets the logger for the ConversationStore.
+
+<a name="CountTracesTool"></a>
+## type CountTracesTool
+
+CountTracesTool returns a quick count of traces.
+
+	type CountTracesTool struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewCountTracesTool"></a>
+### func NewCountTracesTool
+
+	func NewCountTracesTool(store TraceStoreReader) *CountTracesTool
+
+NewCountTracesTool creates the count traces tool.
+
+<a name="CountTracesTool.Invoke"></a>
+### func \(\*CountTracesTool\) Invoke
+
+	func (t *CountTracesTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
+
+Invoke executes the tool.
+
+<a name="Decision"></a>
+## type Decision
+
+Decision captures a notable design or tooling choice the step made.
+
+	type Decision struct {
+	    Name      string `json:"name"`
+	    Rationale string `json:"rationale"`
+	}
+
+<a name="DependencyInferrer"></a>
+## type DependencyInferrer
+
+DependencyInferrer analyzes tool calls to infer data dependencies using heuristic rules. It populates a ToolDependencyGraph that can then be used for wave\-based parallel scheduling.
+
+	type DependencyInferrer struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewDependencyInferrer"></a>
+### func NewDependencyInferrer
+
+	func NewDependencyInferrer(reg ToolRegistry, logger *slog.Logger) *DependencyInferrer
+
+NewDependencyInferrer creates an inferrer with the given tool registry and logger. A nil logger defaults to slog.Default.
+
+<a name="DependencyInferrer.InferDependencies"></a>
+### func \(\*DependencyInferrer\) InferDependencies
+
+	func (r *DependencyInferrer) InferDependencies(calls []llm.ToolCall) *ToolDependencyGraph
+
+InferDependencies analyzes a list of tool calls and returns a populated dependency graph.
+
+Heuristic rules applied \(best\-effort, conservative — false dependencies only reduce parallelism, never correctness\):
+
+1. File path overlap: if call A writes a file and call B reads or writes the same path \(and A appears earlier in the list\), B depends on A.
+2. Shell command substitution: if a shell/bash command argument contains "$\(\<priorCallID...\)", it depends on that prior call.
+3. Explicit argument references: if any argument value stringified contains "$\<callID\>.result" or "\<callID\>.result", add dependency.
+4. Same\-resource writes: two write calls to the same path are ordered \(B depends on A\) to preserve intended sequencing.
+
+<a name="DepthToolRegistry"></a>
+## type DepthToolRegistry
+
+DepthToolRegistry provides structural tool gating by depth.
+
+Tools are registered per\-depth gate so that agents at the maximum depth simply don't have the spawn tool in their registry. This is the cleanest possible enforcement: an agent cannot spawn a child because it doesn't know spawning is possible.
+
+Leaf tools are available at all depths; depth\-gated tools \(such as the subagent spawn tool\) are visible only below the depth limit.
+
+	type DepthToolRegistry struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewDepthToolRegistry"></a>
+### func NewDepthToolRegistry
+
+	func NewDepthToolRegistry(maxDepth int, leafTools []tools.Tool, gatedTools []depthGate) *DepthToolRegistry
+
+NewDepthToolRegistry creates a registry with tools gated by depth.
+
+leafTools are available at all depths. gatedTools are only visible when depth \< their GatedDepth\(\) value, so they disappear once the agent reaches its depth limit.
+
+<a name="DepthToolRegistry.DefinitionsAtDepth"></a>
+### func \(\*DepthToolRegistry\) DefinitionsAtDepth
+
+	func (dtr *DepthToolRegistry) DefinitionsAtDepth(depth int) []llm.ToolDefinition
+
+DefinitionsAtDepth returns LLM tool definitions for the given depth.
+
+<a name="DepthToolRegistry.GetTool"></a>
+### func \(\*DepthToolRegistry\) GetTool
+
+	func (dtr *DepthToolRegistry) GetTool(depth int, name string) tools.Tool
+
+GetTool returns the tool with the given name at the given depth, or nil if the tool is not visible at that depth.
+
+<a name="DepthToolRegistry.HasDefinition"></a>
+### func \(\*DepthToolRegistry\) HasDefinition
+
+	func (dtr *DepthToolRegistry) HasDefinition(depth int, name string) bool
+
+HasDefinition reports whether a tool definition with the given name is visible at depth \(useful for checking function\-calling definitions\).
+
+<a name="DepthToolRegistry.HasTool"></a>
+### func \(\*DepthToolRegistry\) HasTool
+
+	func (dtr *DepthToolRegistry) HasTool(depth int, name string) bool
+
+HasTool reports whether a tool with the given name is visible at depth.
+
+<a name="DepthToolRegistry.ListAllGated"></a>
+### func \(\*DepthToolRegistry\) ListAllGated
+
+	func (dtr *DepthToolRegistry) ListAllGated() []depthGate
+
+ListAllGated returns all depth\-gated tools regardless of visibility.
+
+<a name="DepthToolRegistry.ListAllLeaves"></a>
+### func \(\*DepthToolRegistry\) ListAllLeaves
+
+	func (dtr *DepthToolRegistry) ListAllLeaves() []tools.Tool
+
+ListAllLeaves returns the registered leaf tools \(independent of depth\).
+
+<a name="DepthToolRegistry.MaxDepth"></a>
+### func \(\*DepthToolRegistry\) MaxDepth
+
+	func (dtr *DepthToolRegistry) MaxDepth() int
+
+MaxDepth returns the configured maximum depth.
+
+<a name="DepthToolRegistry.ToolsAtDepth"></a>
+### func \(\*DepthToolRegistry\) ToolsAtDepth
+
+	func (dtr *DepthToolRegistry) ToolsAtDepth(depth int) []tools.Tool
+
+ToolsAtDepth returns all tools visible to an agent at the given depth.
+
 <a name="DetectionConfig"></a>
 ## type DetectionConfig
 
@@ -4173,6 +6626,17 @@ DetectionConfig holds configuration for cycle and convergence detection.
 	func DefaultDetectionConfig() DetectionConfig
 
 DefaultDetectionConfig returns sensible detection defaults.
+
+<a name="DetectionContext"></a>
+## type DetectionContext
+
+DetectionContext captures client\-side context for session creation.
+
+	type DetectionContext struct {
+	    CWD               string   `json:"cwd,omitempty"`
+	    DetectedProjectID string   `json:"detected_project_id,omitempty"`
+	    CLIArgs           []string `json:"cli_args,omitempty"`
+	}
 
 <a name="DifferentialDriver"></a>
 ## type DifferentialDriver
@@ -4266,6 +6730,17 @@ DispatchResult is the result of dispatching a request.
 	    ClarificationReply string `json:"clarification_reply,omitempty"`
 	    // ClarificationNeeded indicates the directive needs user clarification
 	    ClarificationNeeded bool `json:"clarification_needed,omitempty"`
+	
+	    // Isolation records the context-isolation level this dispatch result was
+	    // spawned under. Always ArtifactOnly today; SharedTranscript would be an
+	    // explicit opt-in. Zero value means ArtifactOnly by fail-closed contract.
+	    Isolation ContextIsolation `json:"isolation,omitempty"`
+	    // Brief is the structured handoff brief produced via BuildSpawnContext
+	    // (report summary + artifact refs), replacing raw parent-transcript
+	    // propagation. Empty for fresh user-initiated dispatches.
+	    Brief string `json:"brief,omitempty"`
+	    // MemoryIDs are memory references attached to the handoff brief.
+	    MemoryIDs []string `json:"memory_ids,omitempty"`
 	    // Plan is the created plan if plan routing was triggered.
 	    Plan *plan.Plan `json:"plan,omitempty"`
 	    // ClassificationNotice is a user-facing notice about classification degradation
@@ -4287,6 +6762,11 @@ DispatchResult is the result of dispatching a request.
 	    // MinEffort / MaxEffort bounds gate whether the suggestion is actually
 	    // applied at the AgentLoop layer.
 	    SuggestedReasoningTier string `json:"-"`
+	
+	    // SuggestedMode is the complexity-routing mode from Thread D (direct/plan/
+	    // spec_plan/spec_pair). Forwarded to PlanRequest.Mode for the strategic
+	    // planner. Empty means no suggestion (planner uses its own heuristics).
+	    SuggestedMode string `json:"suggested_mode,omitempty"`
 	
 	    // ReasoningOverride carries the parsed user reasoning directive (if any)
 	    // so downstream code can forward it to the agent loop. When non-nil, it
@@ -4319,7 +6799,7 @@ NewDispatcher creates a new dispatcher.
 <a name="Dispatcher.ClassifyAndRoute"></a>
 ### func \(\*Dispatcher\) ClassifyAndRoute
 
-	func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart) (*DispatchResult, error)
+	func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart, agentOverride string) (*DispatchResult, error)
 
 ClassifyAndRoute is the main entry point for the dispatcher.
 
@@ -4423,12 +6903,26 @@ ResumeAfterClarification re\-classifies a user input that is a response to a pre
 
 RouteToAgent routes a dispatch result to the appropriate agent. If an active agent loop exists for this conversation, it injects the message into the queue \(steer or follow\-up\) based on the SteeringHeuristicTable. Otherwise, it runs the agent synchronously.
 
+<a name="Dispatcher.SetAgentLoopManager"></a>
+### func \(\*Dispatcher\) SetAgentLoopManager
+
+	func (d *Dispatcher) SetAgentLoopManager(m *Manager)
+
+SetAgentLoopManager wires the per\-session AgentLoop manager so that RouteToAgent can resolve a session\-scoped loop \(with the correct project working directory\) instead of always using the singleton registry agent. Nil is a no\-op.
+
 <a name="Dispatcher.SetCapabilityMatcher"></a>
 ### func \(\*Dispatcher\) SetCapabilityMatcher
 
 	func (d *Dispatcher) SetCapabilityMatcher(matcher *CapabilityMatcher)
 
 SetCapabilityMatcher sets the capability matcher for fast routing.
+
+<a name="Dispatcher.SetFenceController"></a>
+### func \(\*Dispatcher\) SetFenceController
+
+	func (d *Dispatcher) SetFenceController(fc FenceController)
+
+SetFenceController wires the shared fence checker so dispatched sessions bind their project path as the sandbox root and honor \-\-nofence.
 
 <a name="Dispatcher.SetInstructionParser"></a>
 ### func \(\*Dispatcher\) SetInstructionParser
@@ -4451,12 +6945,26 @@ SetInstructionStore wires the instruction store for intent\-based action attachm
 
 SetMetricsStore wires the metrics store for persistent dispatch logging.
 
+<a name="Dispatcher.SetSessionStore"></a>
+### func \(\*Dispatcher\) SetSessionStore
+
+	func (d *Dispatcher) SetSessionStore(s SessionStoreReader)
+
+SetSessionStore wires a session store for project\-path lookup in RouteToAgent. Nil is a no\-op.
+
 <a name="Dispatcher.SetThreadRouter"></a>
 ### func \(\*Dispatcher\) SetThreadRouter
 
 	func (d *Dispatcher) SetThreadRouter(tr *ThreadRouter)
 
 SetThreadRouter wires a ThreadRouter onto the dispatcher, enabling thread\-aware routing. Pass nil to disable thread routing \(legacy mode\). Nil guard at top of setter prevents typed\-nil interface panics per CLAUDE.md Setter methods rule.
+
+<a name="Dispatcher.SetToolRegistry"></a>
+### func \(\*Dispatcher\) SetToolRegistry
+
+	func (d *Dispatcher) SetToolRegistry(reg *DepthToolRegistry)
+
+SetToolRegistry wires a depth\-based tool registry for structural gating. At maxDepth the agent simply won't have spawn tools in its registry.
 
 <a name="Dispatcher.ShouldDispatchAsync"></a>
 ### func \(\*Dispatcher\) ShouldDispatchAsync
@@ -4495,7 +7003,7 @@ Stop gracefully shuts down background goroutines spawned by NewDispatcher \(curr
 
 Callers that construct a Dispatcher with an EmbeddingClient should defer Stop\(\) so the BuildIndex goroutine does not outlive the dispatcher in tests or short\-lived processes. Long\-lived daemons can rely on process exit, but wiring Stop into the daemon shutdown path is recommended.
 
-TODO: wire Stop\(\) into Components.Stop\(\) in internal/daemon/components.go for a fully clean shutdown. Today the dispatcher lives for the daemon lifetime so the leak is benign, but adding the call closes the gap.
+Stop cancels the semantic index BuildIndex goroutine and waits for it to finish. Called from Components.Stop\(\) during daemon shutdown.
 
 <a name="Dispatcher.SubmitAmendment"></a>
 ### func \(\*Dispatcher\) SubmitAmendment
@@ -4503,6 +7011,13 @@ TODO: wire Stop\(\) into Components.Stop\(\) in internal/daemon/components.go fo
 	func (d *Dispatcher) SubmitAmendment(ctx context.Context, taskID string, amendmentType task.AmendmentType, content string, metadata map[string]any) (*task.AmendmentRequest, error)
 
 SubmitAmendment submits an amendment request for a task.
+
+<a name="Dispatcher.ToolRegistry"></a>
+### func \(\*Dispatcher\) ToolRegistry
+
+	func (d *Dispatcher) ToolRegistry() *DepthToolRegistry
+
+ToolRegistry returns the depth\-based tool registry, or nil if not configured.
 
 <a name="Dispatcher.ValidateRouting"></a>
 ### func \(\*Dispatcher\) ValidateRouting
@@ -4517,24 +7032,52 @@ ValidateRouting compares the routed agent against expected.
 DispatcherConfig holds configuration for creating a Dispatcher.
 
 	type DispatcherConfig struct {
-	    Registry          *AgentRegistry
-	    MemvidClient      *memvid.Client
-	    MemoryMgr         *memory.Manager
-	    TaskStore         *task.Store
-	    TaskRegistry      *task.Registry
-	    AmendmentManager  *task.AmendmentManager
-	    SkillRegistry     *skills.Registry
-	    SkillExecutor     *skills.Executor
-	    TemplateRegistry  *templates.Registry
-	    Logger            *slog.Logger
-	    LLMClient         *llm.Client
-	    ClassifierClient  *llm.Client // Separate client for classification (nil = use LLMClient)
-	    ClassifierModel   string
+	    Registry         *AgentRegistry
+	    MemvidClient     *memvid.Client
+	    MemoryMgr        *memory.Manager
+	    TaskStore        *task.Store
+	    TaskRegistry     *task.Registry
+	    AmendmentManager *task.AmendmentManager
+	    SkillRegistry    *skills.Registry
+	    SkillExecutor    *skills.Executor
+	    TemplateRegistry *templates.Registry
+	    Logger           *slog.Logger
+	    LLMClient        *llm.Client
+	    ClassifierClient *llm.Client // Separate client for classification (nil = use LLMClient)
+	    ClassifierModel  string
+	    // ClassifierModelConfig is the resolved model configuration for the
+	    // classifier endpoint (from the resolver). When non-nil, classification
+	    // token caps are derived from its declared max_output.
+	    ClassifierModelConfig *llm.ModelConfig
+	    // Resolver enables alias failover for classification and intent analysis
+	    // (leaf 03 of classifier-reliability). When non-nil (and ClassifierClient
+	    // is set), failed Chat attempts rotate to the next candidate in the
+	    // ClassifierAlias chain and retry once. Nil = no failover. Ignored when
+	    // ClassifierClient is nil (main-LLMClient fallback path).
+	    Resolver *llm.Resolver
+	    // ClassifierAlias is the resolver alias name used with Resolver.
+	    // Empty defaults to "classifier" when Resolver is set.
+	    ClassifierAlias   string
 	    ClassifierTimeout time.Duration // Per-classification timeout; 0 = defaultClassifierTimeout (10s).
-	    CapabilityMatcher *CapabilityMatcher
-	    EmbeddingClient   EmbeddingClient
-	    SessionMaxAge     time.Duration
-	    PlanManager       *plan.PlanManager
+	    // ClassifierFailFast disables classifier alias rotation: when true, the
+	    // intent analyzer returns the primary classifier's error immediately
+	    // instead of rotating to weaker alias members. Default false —
+	    // production keeps rotation; for testing/iteration
+	    // (classifier-observability leaf 02).
+	    ClassifierFailFast bool
+	    CapabilityMatcher  *CapabilityMatcher
+	    EmbeddingClient    EmbeddingClient
+	    SessionMaxAge      time.Duration
+	    PlanManager        *plan.PlanManager
+	    // AmbiguityThreshold configures the IntentAnalyzer's gate for blocking
+	    // routing on high-ambiguity inputs. 0 means use the legacy const
+	    // (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
+	    AmbiguityThreshold float64
+	
+	    // ToolRegistry provides structural depth-based tool gating.
+	    // When non-nil, tools are gated so agents at maxDepth don't
+	    // see spawn capabilities ("make illegal states unrepresentable").
+	    ToolRegistry *DepthToolRegistry
 	}
 
 <a name="DispatcherStats"></a>
@@ -4572,6 +7115,13 @@ DrainMode controls how a follow\-up queue drains its messages.
 	func ParseDrainMode(s string) DrainMode
 
 ParseDrainMode converts a config string to DrainMode.
+
+<a name="EffectsResumeHook"></a>
+## type EffectsResumeHook
+
+EffectsResumeHook is the parked\-turn\-resume reconcile callback \(effects tree leaf 02\). Defined here so package agent does not import the daemon \(dependency direction: daemon \-\> agent, never inverted\).
+
+	type EffectsResumeHook func(ctx context.Context)
 
 <a name="EmbeddingClient"></a>
 ## type EmbeddingClient
@@ -4704,6 +7254,21 @@ ErrorPayload is the payload for "error" type messages.
 	    Recoverable bool `json:"recoverable"`
 	}
 
+<a name="ErrorSeverity"></a>
+## type ErrorSeverity
+
+ErrorSeverity classifies the severity of a parallel execution error.
+
+	type ErrorSeverity string
+
+<a name="ErrorSeverityCritical"></a>
+
+	const (
+	    ErrorSeverityCritical ErrorSeverity = "critical"
+	    ErrorSeverityWarning  ErrorSeverity = "warning"
+	    ErrorSeverityInfo     ErrorSeverity = "info"
+	)
+
 <a name="EscalationConfig"></a>
 ## type EscalationConfig
 
@@ -4724,6 +7289,24 @@ EscalationConfig holds configuration for the escalation manager.
 	func DefaultEscalationConfig() EscalationConfig
 
 DefaultEscalationConfig returns sensible defaults.
+
+<a name="EscalationDecision"></a>
+## type EscalationDecision
+
+EscalationDecision is what handleFail should do on loop exhaustion.
+
+	type EscalationDecision struct {
+	    Escalate bool
+	    ModelRef string
+	    Reason   string // "fix_loops_exhausted" | "no_escalation_model" | "resolution_failed"
+	}
+
+<a name="DecideEscalation"></a>
+### func DecideEscalation
+
+	func DecideEscalation(spec *AgentSpec, resolver ModelResolver) EscalationDecision
+
+DecideEscalation never errors; resolution failure degrades to Escalate=false with Reason "resolution\_failed".
 
 <a name="EscalationLevel"></a>
 ## type EscalationLevel
@@ -4878,6 +7461,25 @@ EventListener is a callback for typed agent events.
 
 	type EventListener func(ctx context.Context, event AgentEvent)
 
+<a name="EventPublisher"></a>
+## type EventPublisher
+
+EventPublisher publishes one bus event. Implemented at the loop wiring site as a closure over AgentLoop.bus \+ models.NewBusMessage, mirroring the established publish pattern in package agent \(e.g. AgentLoop.publishSteeringInjected\). The hook has no bus reference of its own, so observability travels through this seam; nil \(unset\) means the bus event is skipped — escalation still functions.
+
+	type EventPublisher func(topic string, payload map[string]any)
+
+<a name="ExecutionMetrics"></a>
+## type ExecutionMetrics
+
+ExecutionMetrics captures runtime statistics for adaptive parallelism tuning.
+
+	type ExecutionMetrics struct {
+	    AvgLatency       time.Duration `json:"avg_latency"`
+	    ErrorRate        float64       `json:"error_rate"`
+	    ActiveGoroutines int           `json:"active_goroutines"`
+	    Throughput       float64       `json:"throughput"`
+	}
+
 <a name="ExecutionResult"></a>
 ## type ExecutionResult
 
@@ -4895,6 +7497,10 @@ ExecutionResult represents the result of a tool execution.
 	    // When non-empty, downstream policy checks can apply stricter rules
 	    // (e.g., blocking the tainted value from reaching shell_exec).
 	    TaintLabel taint.TaintLabel `json:"taint_label,omitempty"`
+	    // CascadeFrom is the tool call ID that caused this failure (if cascading).
+	    CascadeFrom string `json:"cascade_from,omitempty"`
+	    // IsCascading is true when this failure is a downstream effect of an earlier failure.
+	    IsCascading bool `json:"is_cascading,omitempty"`
 	}
 
 <a name="ExecutionResult.ToChatMessage"></a>
@@ -4946,7 +7552,9 @@ Execute runs a single tool call with security checks.
 
 	func (e *Executor) ExecuteAll(ctx context.Context, toolCalls []llm.ToolCall) []*ExecutionResult
 
-ExecuteAll runs multiple tool calls, potentially in parallel.
+ExecuteAll runs multiple tool calls with dependency\-aware scheduling.
+
+Independent tool calls are executed in parallel within each wave \(group\); dependent calls are ordered across waves. The result slice preserves the original input order regardless of execution grouping, so callers that correlate results by index \(e.g., executeToolCalls\) continue to work correctly.
 
 <a name="Executor.ExecuteSequential"></a>
 ### func \(\*Executor\) ExecuteSequential
@@ -4955,12 +7563,40 @@ ExecuteAll runs multiple tool calls, potentially in parallel.
 
 ExecuteSequential runs tool calls sequentially \(no parallelism\).
 
+<a name="Executor.SetAgentID"></a>
+### func \(\*Executor\) SetAgentID
+
+	func (e *Executor) SetAgentID(id string)
+
+SetAgentID updates the agent/employee identifier used by this executor. The agentID is injected into the permission check details map so the PermissionChecker can route to the registered PreExecChecker \(employee constitution gate\). This is safe to call per\-invocation from the agent loop; the value is snapshotted under a read lock in checkPermission.
+
+<a name="Executor.SetConversationID"></a>
+### func \(\*Executor\) SetConversationID
+
+	func (e *Executor) SetConversationID(id string)
+
+SetConversationID updates the conversation/session identifier included in bus progress events so the WS filter can route them to the correct client. Safe to call per\-invocation from the agent loop.
+
+<a name="Executor.SetParallelismConfig"></a>
+### func \(\*Executor\) SetParallelismConfig
+
+	func (e *Executor) SetParallelismConfig(baseParallelism int, profiles map[string]int)
+
+SetParallelismConfig adjusts the adaptive parallelism limiter from config. baseParallelism sets the IO\-bound limit \(and derives CPU\-bound as base/2 when no explicit cpu\_bound profile is given\). Profiles map keys: "io\_bound", "cpu\_bound", "stateful", "exclusive". Nil\-guarded per CLAUDE.md.
+
 <a name="Executor.SetRegistry"></a>
 ### func \(\*Executor\) SetRegistry
 
 	func (e *Executor) SetRegistry(registry ToolRegistry)
 
 SetRegistry updates the tool registry used by this executor. This is used when the registry needs to be swapped \(e.g., for skill execution with filtered tools\). AGENT\-6 fix.
+
+<a name="Executor.SetRetryMetrics"></a>
+### func \(\*Executor\) SetRetryMetrics
+
+	func (e *Executor) SetRetryMetrics(m *RetryMetrics)
+
+SetRetryMetrics sets the retry metrics collector after executor construction. Nil\-guarded per CLAUDE.md setter convention.
 
 <a name="ExecutorOption"></a>
 ## type ExecutorOption
@@ -4990,12 +7626,33 @@ WithExecutorBus sets the message bus for streaming progress events.
 
 WithExecutorCache sets the result cache for the executor.
 
+<a name="WithExecutorInferrer"></a>
+### func WithExecutorInferrer
+
+	func WithExecutorInferrer(inferrer *DependencyInferrer) ExecutorOption
+
+WithExecutorInferrer sets the dependency inferrer for dependency\-aware parallel scheduling. If nil \(or not provided\), the executor lazily initializes one from the registry when ExecuteAll is first called.
+
 <a name="WithExecutorLogger"></a>
 ### func WithExecutorLogger
 
 	func WithExecutorLogger(logger *slog.Logger) ExecutorOption
 
 WithExecutorLogger sets the logger for the executor.
+
+<a name="WithExecutorParallelismLimiter"></a>
+### func WithExecutorParallelismLimiter
+
+	func WithExecutorParallelismLimiter(limiter *AdaptiveParallelismLimiter) ExecutorOption
+
+WithExecutorParallelismLimiter sets a custom adaptive parallelism limiter. If nil \(or not provided\), the executor initializes a default limiter with baseParallelism matching the parallelism setting.
+
+<a name="WithExecutorRetryMetrics"></a>
+### func WithExecutorRetryMetrics
+
+	func WithExecutorRetryMetrics(m *RetryMetrics) ExecutorOption
+
+WithExecutorRetryMetrics sets the retry metrics collector for the executor. If nil \(or not provided\), retry events are not recorded.
 
 <a name="WithParallelism"></a>
 ### func WithParallelism
@@ -5020,6 +7677,26 @@ FailureContext captures failure details for re\-planning.
 	    Timestamp    time.Time `json:"timestamp"`
 	}
 
+<a name="FailureMode"></a>
+## type FailureMode
+
+FailureMode represents a failure pattern found across traces.
+
+	type FailureMode struct {
+	    ID          string   `json:"id"`
+	    Description string   `json:"description"`
+	    TraceIDs    []string `json:"trace_ids"`
+	    Severity    string   `json:"severity"` // critical, high, medium, low
+	    Category    string   `json:"category"` // hallucination, redundant_args, refusal_loop, semantic
+	}
+
+<a name="FailureMode.SeverityAsIssueSeverity"></a>
+### func \(FailureMode\) SeverityAsIssueSeverity
+
+	func (fm FailureMode) SeverityAsIssueSeverity() string
+
+SeverityAsIssueSeverity maps the failure mode severity to IssueSeverity strings compatible with the selfimprove models.
+
 <a name="FallbackEntry"></a>
 ## type FallbackEntry
 
@@ -5031,6 +7708,36 @@ FallbackEntry captures details about a fallback routing decision.
 	    Method     string    `json:"method"`
 	    Confidence float64   `json:"confidence"`
 	    RoutedTo   string    `json:"routed_to"`
+	}
+
+<a name="FeedbackPipeline"></a>
+## type FeedbackPipeline
+
+FeedbackPipeline is the interface for submitting skill improvement proposals. It is satisfied by selfimprove.LearningPipeline.
+
+	type FeedbackPipeline interface {
+	    SubmitProposal(ctx context.Context, proposal selfimprove.SkillProposal) error
+	}
+
+<a name="FenceController"></a>
+## type FenceController
+
+FenceController is the narrow interface the ChatHandler needs from the daemon's shared FenceChecker to configure the sandbox per\-session.
+
+	type FenceController interface {
+	    SetRootPath(root string) error
+	    SetNoFence(enabled bool)
+	}
+
+<a name="FileChange"></a>
+## type FileChange
+
+FileChange describes a single file mutation declared by a step.
+
+	type FileChange struct {
+	    Path    string `json:"path"`
+	    Change  string `json:"change"` // created|modified|deleted
+	    Summary string `json:"summary"`
 	}
 
 <a name="FileWatcherHook"></a>
@@ -5053,7 +7760,9 @@ The Callback function receives a filesystem path; it is the callback's responsib
 	
 	    // AsyncRewake, when true (and Async must also be true), publishes a
 	    // hook.async_rewake bus signal after the async callback finishes so
-	    // the agent loop wakes up. Requires SetBus to have been called.
+	    // the agent loop can wake up and react. The loop's consumer treats the
+	    // typically-empty session_id as a broadcast to itself. Requires SetBus
+	    // to have been called.
 	    AsyncRewake bool `json:"async_rewake,omitempty"`
 	    // contains filtered or unexported fields
 	}
@@ -5148,6 +7857,198 @@ FixAttempt records a pending fix for later application by the agent loop
 	    Files   []string // files that the LLM response references
 	}
 
+<a name="GatedToolRegistry"></a>
+## type GatedToolRegistry
+
+GatedToolRegistry extends DepthToolRegistry with usage\-based and state\-based gating. Tools are filtered by three dimensions:
+
+- Depth: AvailableAtDepths gates which depths may use a tool
+- Usage: MaxUses limits total invocations
+- State: RequiresState gates tools by agent runtime state
+
+	type GatedToolRegistry struct {
+	    *DepthToolRegistry
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewGatedToolRegistry"></a>
+### func NewGatedToolRegistry
+
+	func NewGatedToolRegistry(maxDepth int, leafTools []tools.Tool, gatedTools []depthGate) *GatedToolRegistry
+
+NewGatedToolRegistry creates a gating registry. depthGate tools \(those implementing GatedDepth\(\)\) are still applied on top of the DepthToolRegistry layer.
+
+<a name="NewGatedToolRegistryWithDescriptors"></a>
+### func NewGatedToolRegistryWithDescriptors
+
+	func NewGatedToolRegistryWithDescriptors(maxDepth int, descriptors []ToolDescriptor, leafNames []string) *GatedToolRegistry
+
+NewGatedToolRegistryWithDescriptors creates a GatedToolRegistry where each tool is described by a ToolDescriptor giving precise gating per depth, usage count, and state requirement.
+
+"maxDepth" is still used for the clamp boundary; depthGate tools are derived from the gating descriptors rather than GatedDepth\(\).
+
+<a name="GatedToolRegistry.GetAvailableTools"></a>
+### func \(\*GatedToolRegistry\) GetAvailableTools
+
+	func (g *GatedToolRegistry) GetAvailableTools(depth int, agentState string) []ToolDescriptor
+
+GetAvailableTools returns all tools that are available at the given depth and state, filtered by MaxUses.
+
+<a name="GatedToolRegistry.IsAvailable"></a>
+### func \(\*GatedToolRegistry\) IsAvailable
+
+	func (g *GatedToolRegistry) IsAvailable(depth int, toolName string, agentState string) bool
+
+IsAvailable checks if a tool is available given the current depth and state, respecting MaxUses and RequiresState constraints.
+
+<a name="GatedToolRegistry.RecordUse"></a>
+### func \(\*GatedToolRegistry\) RecordUse
+
+	func (g *GatedToolRegistry) RecordUse(toolName string)
+
+RecordUse increments the invocation count for a tool.
+
+<a name="GatedToolRegistry.UsageCount"></a>
+### func \(\*GatedToolRegistry\) UsageCount
+
+	func (g *GatedToolRegistry) UsageCount(toolName string) int
+
+UsageCount returns the current invocation count for a tool.
+
+<a name="GetDatasetOverviewTool"></a>
+## type GetDatasetOverviewTool
+
+GetDatasetOverviewTool provides a summary of the entire trace dataset.
+
+	type GetDatasetOverviewTool struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewGetDatasetOverviewTool"></a>
+### func NewGetDatasetOverviewTool
+
+	func NewGetDatasetOverviewTool(store TraceStoreReader) *GetDatasetOverviewTool
+
+NewGetDatasetOverviewTool creates a dataset overview tool.
+
+<a name="GetDatasetOverviewTool.Category"></a>
+### func \(\*GetDatasetOverviewTool\) Category
+
+	func (t *GetDatasetOverviewTool) Category() string
+
+Category returns the tool category.
+
+<a name="GetDatasetOverviewTool.Description"></a>
+### func \(\*GetDatasetOverviewTool\) Description
+
+	func (t *GetDatasetOverviewTool) Description() string
+
+Description returns the tool description.
+
+<a name="GetDatasetOverviewTool.Invoke"></a>
+### func \(\*GetDatasetOverviewTool\) Invoke
+
+	func (t *GetDatasetOverviewTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
+
+Invoke executes the tool.
+
+<a name="GetDatasetOverviewTool.Name"></a>
+### func \(\*GetDatasetOverviewTool\) Name
+
+	func (t *GetDatasetOverviewTool) Name() string
+
+Name returns the tool name.
+
+<a name="GetDatasetOverviewTool.Parameters"></a>
+### func \(\*GetDatasetOverviewTool\) Parameters
+
+	func (t *GetDatasetOverviewTool) Parameters() llm.FunctionParameters
+
+Parameters returns the tool parameters.
+
+<a name="GuardConfig"></a>
+## type GuardConfig
+
+GuardConfig configures the loop guards. Zero values normalize to the defaults documented per\-field; use Normalized\(\) before reading.
+
+	type GuardConfig struct {
+	    // NoProgressWarnAt: consecutive identical normalized calls before a
+	    // system nudge is injected. Default 3.
+	    NoProgressWarnAt int `json:"no_progress_warn_at"`
+	    // NoProgressVetoAt: consecutive identical normalized calls before the
+	    // call is vetoed. Default 5.
+	    NoProgressVetoAt int `json:"no_progress_veto_at"`
+	    // GracefulAfterVetoes: consecutive vetoes after which the turn
+	    // terminates gracefully with a partial-results summary. Default 3.
+	    GracefulAfterVetoes int `json:"graceful_after_vetoes"`
+	    // DuplicateSearchRollback enables rollback of duplicate web_search
+	    // calls within the rollback window (ship-on default true).
+	    DuplicateSearchRollback bool `json:"duplicate_search_rollback"`
+	    // RollbackWindow is the ring size in turns for search-arg hashes.
+	    // Default 10.
+	    RollbackWindow int `json:"rollback_window"`
+	    // ReasoningTokenCap caps cumulative reasoning tokens within a streak.
+	    // Default 16384.
+	    ReasoningTokenCap int `json:"reasoning_token_cap"`
+	    // ReasoningStreakTurns is the number of consecutive reasoning-only
+	    // turns tolerated before breach. Default 3.
+	    ReasoningStreakTurns int `json:"reasoning_streak_turns"`
+	}
+
+<a name="DefaultGuardConfig"></a>
+### func DefaultGuardConfig
+
+	func DefaultGuardConfig() GuardConfig
+
+DefaultGuardConfig returns the ship\-on guard defaults \(user directive: every guard ships enabled; if one misfires we see it and fix it\).
+
+<a name="GuardConfig.Normalized"></a>
+### func \(GuardConfig\) Normalized
+
+	func (c GuardConfig) Normalized() GuardConfig
+
+Normalized returns cfg with zero\-values replaced by defaults. NOTE on DuplicateSearchRollback: because Go zero\-values a bool to false and the ship\-on default is true, an all\-zero GuardConfig is interpreted as "entirely unconfigured" and Normalized returns the ship\-on defaults. To explicitly DISABLE rollback, start from DefaultGuardConfig\(\) and set the flag false \(see TestGuards\_DuplicateSearchRollback\_DisabledFlag\).
+
+<a name="GuardTrackResult"></a>
+## type GuardTrackResult
+
+GuardTrackResult is the ladder outcome for a tracked tool call.
+
+	type GuardTrackResult string
+
+<a name="GuardOK"></a>
+
+	const (
+	    GuardOK   GuardTrackResult = "ok"
+	    GuardWarn GuardTrackResult = "warn"
+	    GuardVeto GuardTrackResult = "veto"
+	)
+
+<a name="HTTPError"></a>
+## type HTTPError
+
+HTTPError represents an HTTP error response with status code, body, and URL. It implements the IsRetryable\(\) bool method but does NOT satisfy the RetryableError interface \(no RetryAfter method\).
+
+	type HTTPError struct {
+	    StatusCode int
+	    Body       string
+	    URL        string
+	}
+
+<a name="HTTPError.Error"></a>
+### func \(\*HTTPError\) Error
+
+	func (e *HTTPError) Error() string
+
+
+
+<a name="HTTPError.IsRetryable"></a>
+### func \(\*HTTPError\) IsRetryable
+
+	func (e *HTTPError) IsRetryable() bool
+
+IsRetryable returns true if the HTTP status code warrants a retry.
+
 <a name="HTTPHook"></a>
 ## type HTTPHook
 
@@ -5220,7 +8121,7 @@ Wait blocks until all in\-flight async executions complete. This is primarily in
 
 HTTPHookConfig serializes hook configuration.
 
-RetryCount contract \(wire via the config.HTTPHookConfig.RetryCount \*int surface\): 0 = zero retries \(exactly one attempt\), \-1 = unlimited retries, n \> 0 = n retries. The absent\-key → default\-3 mapping lives in the daemon wiring \(internal/daemon/epistemic_wiring\.go\), which passes a concrete value; this type's plain int can never express "unset".
+RetryCount contract \(wire via the config.HTTPHookConfig.RetryCount \*int surface\): 0 = zero retries \(exactly one attempt\), \-1 = unlimited retries, n \> 0 = n retries. The absent\-key → default\-3 mapping lives in the daemon wiring \(internal/daemon/epistemic\_wiring.go\), which passes a concrete value; this type's plain int can never express "unset".
 
 	type HTTPHookConfig struct {
 	    URL        string            `json:"url"`
@@ -5237,7 +8138,8 @@ RetryCount contract \(wire via the config.HTTPHookConfig.RetryCount \*int surfac
 	
 	    // AsyncRewake, when true (and Async must also be true), publishes a
 	    // hook.async_rewake bus signal after the async execution completes
-	    // successfully so the agent loop can wake up and react. Requires
+	    // successfully. The AgentLoop subscribes to this topic (armed at turn
+	    // entry) and wakes the matching conversation. Requires
 	    // SetBus to have been called with a non-nil MessageBus.
 	    AsyncRewake bool `json:"async_rewake,omitempty"`
 	}
@@ -5455,6 +8357,13 @@ HookRegistry manages all agent hooks. Hooks are executed in priority order \(low
 
 NewHookRegistry creates a new HookRegistry.
 
+<a name="HookRegistry.ClearFreshTurnOverrides"></a>
+### func \(\*HookRegistry\) ClearFreshTurnOverrides
+
+	func (r *HookRegistry) ClearFreshTurnOverrides(ctx context.Context)
+
+ClearFreshTurnOverrides sweeps ClearModelOverride on every registered PrepareNextTurn hook that implements ModelOverrideFreshTurnHook \(tree 01 leaf 04, audit R1\). The loop calls this ONCE at the START of each turn — before RunSessionStart hooks and before RunPrepareNextTurn — so persistent model overrides armed by an escalation in a previous conversation are restored to the base model unless THIS turn re\-arms them. Clearing is the hook's own responsibility \(each hook no\-ops when it holds nothing\).
+
 <a name="HookRegistry.RegisterAfterToolCall"></a>
 ### func \(\*HookRegistry\) RegisterAfterToolCall
 
@@ -5560,6 +8469,93 @@ RunTransformContext runs all TransformContext hooks in priority order. Returns t
 
 Unregister removes all hooks with the given name.
 
+<a name="InMemoryTraceStore"></a>
+## type InMemoryTraceStore
+
+InMemoryTraceStore is a lightweight TraceStoreReader backed by in\-memory maps.
+
+	type InMemoryTraceStore struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewInMemoryTraceStore"></a>
+### func NewInMemoryTraceStore
+
+	func NewInMemoryTraceStore() *InMemoryTraceStore
+
+NewInMemoryTraceStore creates a new in\-memory trace store.
+
+<a name="InMemoryTraceStore.AddTraceSpan"></a>
+### func \(\*InMemoryTraceStore\) AddTraceSpan
+
+	func (s *InMemoryTraceStore) AddTraceSpan(traceID string, span spanViewData)
+
+AddTraceSpan adds a span and records its trace ID.
+
+<a name="InMemoryTraceStore.GetSpansForTrace"></a>
+### func \(\*InMemoryTraceStore\) GetSpansForTrace
+
+	func (s *InMemoryTraceStore) GetSpansForTrace(traceID string) ([]string, error)
+
+GetSpansForTrace returns all span IDs for a trace.
+
+<a name="InMemoryTraceStore.ListSpans"></a>
+### func \(\*InMemoryTraceStore\) ListSpans
+
+	func (s *InMemoryTraceStore) ListSpans(spanIDs []string) ([]spanViewData, error)
+
+ListSpans returns spans for a set of span IDs.
+
+<a name="InMemoryTraceStore.ListTraceIDs"></a>
+### func \(\*InMemoryTraceStore\) ListTraceIDs
+
+	func (s *InMemoryTraceStore) ListTraceIDs() ([]string, error)
+
+ListTraceIDs returns all trace IDs in the store.
+
+<a name="IncomingAgentMessage"></a>
+## type IncomingAgentMessage
+
+IncomingAgentMessage is one drained inter\-agent message. Mirrors the employee.AgentMessage shape without importing internal/employee \(cycle risk: employee → bot → … → tools/builtin → …\).
+
+	type IncomingAgentMessage struct {
+	    ID        string
+	    From      string
+	    To        string
+	    Body      string
+	    CreatedAt time.Time
+	}
+
+<a name="InlineFeedbackTrigger"></a>
+## type InlineFeedbackTrigger
+
+InlineFeedbackTrigger implements PrepareNextTurnHook. Every N messages it fires a non\-blocking classification goroutine that may submit a skill improvement proposal to the learning pipeline. PrepareNextTurn always returns a zero\-value TurnModification so the agent loop is never delayed.
+
+	type InlineFeedbackTrigger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewInlineFeedbackTrigger"></a>
+### func NewInlineFeedbackTrigger
+
+	func NewInlineFeedbackTrigger(interval int, pipeline FeedbackPipeline, classifyFn ClassifyFunc) *InlineFeedbackTrigger
+
+NewInlineFeedbackTrigger creates a trigger that fires every interval messages. If pipeline or classifyFn is nil the trigger is inert \(never fires\).
+
+<a name="InlineFeedbackTrigger.PrepareNextTurn"></a>
+### func \(\*InlineFeedbackTrigger\) PrepareNextTurn
+
+	func (t *InlineFeedbackTrigger) PrepareNextTurn(ctx context.Context, state TurnState) TurnModification
+
+PrepareNextTurn implements PrepareNextTurnHook. It increments the message counter and, when the interval is reached and a skill is active, launches a non\-blocking goroutine to classify and potentially submit a proposal. It always returns a zero\-value TurnModification.
+
+<a name="InlineFeedbackTrigger.SetActiveSkill"></a>
+### func \(\*InlineFeedbackTrigger\) SetActiveSkill
+
+	func (t *InlineFeedbackTrigger) SetActiveSkill(name string)
+
+SetActiveSkill sets the skill currently in use. Classification only fires when a skill is active.
+
 <a name="InstructionHandler"></a>
 ## type InstructionHandler
 
@@ -5626,7 +8622,6 @@ Stop gracefully shuts down the listener.
 InstructionParser extracts structured instructions from natural language input.
 
 	type InstructionParser struct {
-	    // contains filtered or unexported fields
 	}
 
 <a name="NewInstructionParser"></a>
@@ -5677,6 +8672,25 @@ Intent represents the classified intent of a user message.
 	    Summary string `json:"summary,omitempty"`
 	    // TrueAnalysis holds the IntentGate-style pre-classification analysis if available.
 	    TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
+	    // SuggestedMode is the synthesized planning mode (Thread D complexity routing).
+	    // Populated by suggestMode in ClassifyAndRoute. Empty means no suggestion.
+	    SuggestedMode string `json:"suggested_mode,omitempty"`
+	    // Method records which classifier produced this intent (e.g.
+	    // "capability_matcher", "llm", "keyword", "semantic",
+	    // "heuristic_fallback", "short_message_guard", "fallback",
+	    // "compound", "instruction_parser"). Empty when the intent did not
+	    // come from a classifier branch (e.g. clarification requests). Set at
+	    // each classify branch next to recordClassificationMethod and logged
+	    // in the "Dispatched request" line for regression tracking.
+	    Method string `json:"classification_method,omitempty"`
+	    // Model is the resolved "provider/model" of the classifier/analyzer
+	    // LLM that actually served this classification (provenance, leaf 01
+	    // of classifier-observability). Set only at LLM-served classify
+	    // branches, from the model the serving component resolved (including
+	    // any alias-failover rotation). Empty for deterministic branches
+	    // (keyword/heuristic/guard/etc.) and when all LLM candidates failed —
+	    // honest provenance: no model, no attribution.
+	    Model string `json:"model,omitempty"`
 	}
 
 <a name="Intent.MarshalJSON"></a>
@@ -5705,9 +8719,16 @@ NewIntentAnalyzer creates a new IntentAnalyzer with the given LLM client and log
 <a name="IntentAnalyzer.AnalyzeTrueIntent"></a>
 ### func \(\*IntentAnalyzer\) AnalyzeTrueIntent
 
-	func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string) (*TrueIntentAnalysis, error)
+	func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string, sessionContext *SessionContextDigest) (*TrueIntentAnalysis, error)
 
-AnalyzeTrueIntent performs a lightweight LLM\-based analysis of the user's true intent.
+AnalyzeTrueIntent performs a lightweight LLM\-based analysis of the user's true intent. sessionContext, when non\-nil and non\-empty, appends a compact \[Recent session activity\] block to the user message so pronouns and references \("the change", "it"\) can be resolved against recent work; a nil or empty digest keeps the prompt byte\-identical to the contextless form.
+
+<a name="IntentAnalyzer.ResolvedModel"></a>
+### func \(\*IntentAnalyzer\) ResolvedModel
+
+	func (ia *IntentAnalyzer) ResolvedModel() string
+
+ResolvedModel returns the resolved "provider/model" of the LLM that served the analyzer's calls \(provenance, leaf 01 of classifier\-observability\). It reflects the model the client is currently configured with, including any alias\-failover rotation performed by chatWithFailover. Empty when the serving model is unknown \(no model config, or a config without a provider id\) — consumers must treat empty as "no provenance", never fabricate one.
 
 <a name="IntentAnalyzer.WithAmbiguityThreshold"></a>
 ### func \(\*IntentAnalyzer\) WithAmbiguityThreshold
@@ -5715,6 +8736,32 @@ AnalyzeTrueIntent performs a lightweight LLM\-based analysis of the user's true 
 	func (ia *IntentAnalyzer) WithAmbiguityThreshold(threshold float64) *IntentAnalyzer
 
 WithAmbiguityThreshold sets a custom ambiguity threshold.
+
+<a name="IntentAnalyzerConfig"></a>
+## type IntentAnalyzerConfig
+
+IntentAnalyzerConfig carries optional construction parameters for newIntentAnalyzer. All fields are additive; zero values keep prior defaults.
+
+	type IntentAnalyzerConfig struct {
+	    // ModelConfig is the resolved model configuration for the analyzer's
+	    // endpoint. When non-nil, the per-call token cap is derived from its
+	    // declared max_output (see effectiveClassificationCap).
+	    ModelConfig *llm.ModelConfig
+	    // Resolver enables alias failover (leaf 03 of classifier-reliability).
+	    // When non-nil, a failed Chat attempt records an alias failure, rotates
+	    // to the next candidate via ResolveForAlias(aliasName), swaps the client
+	    // config, and retries once. Nil = no failover (unchanged behavior).
+	    Resolver *llm.Resolver
+	    // AliasName is the resolver alias used for failover (e.g. "classifier").
+	    // Required when Resolver != nil; ignored otherwise.
+	    AliasName string
+	    // FailFast disables alias rotation: when true, a failed primary attempt
+	    // returns the primary error immediately instead of rotating to weaker
+	    // alias members. Default false — production keeps rotation. Exists to
+	    // make classifier failures honest during testing/iteration
+	    // (classifier-observability leaf 02).
+	    FailFast bool
+	}
 
 <a name="IntentCategory"></a>
 ## type IntentCategory
@@ -5796,6 +8843,9 @@ IntentType represents a classified user intent.
 	    // Skill invocation
 	    IntentSkill IntentType = "skill"
 	
+	    // Codebase exploration (read-only search specialist)
+	    IntentExplore IntentType = "explore"
+	
 	    // Compound (multi-intent)
 	    IntentCompound IntentType = "compound"
 	
@@ -5814,6 +8864,11 @@ IntentType represents a classified user intent.
 	    IntentArchitect IntentType = "architect"
 	    IntentSkeptic   IntentType = "skeptic"
 	    IntentLibrarian IntentType = "librarian"
+	
+	    // Media work. Each routes to a specialist executor.
+	    IntentImageGen IntentType = "image_gen"
+	    IntentVideoGen IntentType = "video_gen"
+	    IntentImageID  IntentType = "image_id"
 	)
 
 <a name="IntentType.Category"></a>
@@ -5857,6 +8912,13 @@ ShouldCreateTask returns true if the intent should create a trackable task.
 	func (t IntentType) ShouldDispatchAsync(requiresPlanning bool) bool
 
 ShouldDispatchAsync returns true if the intent should be dispatched asynchronously.
+
+<a name="IntentType.SuggestedMode"></a>
+### func \(IntentType\) SuggestedMode
+
+	func (t IntentType) SuggestedMode() string
+
+SuggestedMode returns the default planning mode for this intent type. Modes: "direct" \(no LLM decomposition\), "plan" \(single\-phase LLM plan\), "spec\_plan" \(multi\-phase LLM plan with Produces/Consumes\), "spec\_pair" \(pair session\).
 
 <a name="JudgmentResult"></a>
 ## type JudgmentResult
@@ -5927,6 +8989,13 @@ ClassifyMulti detects multiple intents in a single input.
 
 MarkUnavailable explicitly sets the classifier as unavailable, preventing further classification attempts until the cooldown expires.
 
+<a name="LLMClassifier.ResolvedModel"></a>
+### func \(\*LLMClassifier\) ResolvedModel
+
+	func (c *LLMClassifier) ResolvedModel() string
+
+ResolvedModel returns the resolved "provider/model" of the LLM that served this classifier's calls \(provenance, leaf 01 of classifier\-observability\). It reflects the model the client is currently configured with, including any alias\-failover rotation. Empty when the serving model is unknown — consumers must treat empty as "no provenance", never fabricate one.
+
 <a name="LLMClassifier.UnmarkUnavailable"></a>
 ### func \(\*LLMClassifier\) UnmarkUnavailable
 
@@ -5944,6 +9013,29 @@ UnmarkUnavailable clears the unavailable flag, allowing immediate retries.
 	    Model   string
 	    Timeout time.Duration // When zero, defaultClassifierTimeout is used.
 	    Logger  Logger
+	    // ModelConfig is the resolved model configuration for the classifier
+	    // endpoint. When non-nil, the per-call token cap is derived from its
+	    // declared max_output (see effectiveClassificationCap). When nil, the
+	    // floor applies.
+	    ModelConfig *llm.ModelConfig
+	    // Resolver enables alias failover (leaf 03 of classifier-reliability).
+	    // When non-nil, a failed Chat attempt records an alias failure, rotates
+	    // to the next candidate via ResolveForAlias(aliasName), swaps the client
+	    // config, and retries once. Nil = no failover (unchanged behavior).
+	    Resolver *llm.Resolver
+	    // AliasName is the resolver alias used for failover (e.g. "classifier").
+	    // Required when Resolver != nil; ignored otherwise.
+	    AliasName string
+	}
+
+<a name="LLMMessage"></a>
+## type LLMMessage
+
+LLMMessage represents one message in the LLM exchange for a turn.
+
+	type LLMMessage struct {
+	    Role    string `json:"role"`
+	    Content string `json:"content"`
 	}
 
 <a name="LearnedPattern"></a>
@@ -6009,6 +9101,13 @@ LoopOption is a functional option for configuring an AgentLoop.
 
 	type LoopOption func(*AgentLoop)
 
+<a name="WithAdapterRouter"></a>
+### func WithAdapterRouter
+
+	func WithAdapterRouter(ar *llm.AdapterRouter) LoopOption
+
+WithAdapterRouter wires the LoRA adapter router so that domain\-specific adapters can be selected at inference time. Nil guard prevents typed\-nil panic.
+
 <a name="WithAgentConfig"></a>
 ### func WithAgentConfig
 
@@ -6065,6 +9164,27 @@ WithCapabilityIndex sets the capability index for skill discovery.
 
 WithCompressionPipeline sets the compression pipeline for prompt compression. This enables CCR\-based compression of tool results and messages.
 
+<a name="WithContextInjectorFunc"></a>
+### func WithContextInjectorFunc
+
+	func WithContextInjectorFunc(injector *ContextInjector) LoopOption
+
+WithContextInjectorFunc sets the context injector for system prompt enrichment.
+
+<a name="WithDetectionContext"></a>
+### func WithDetectionContext
+
+	func WithDetectionContext(dc *DetectionContext) LoopOption
+
+WithDetectionContext sets the client\-side detection context captured at session creation \(CWD, detected project, CLI args\). Nil\-safe.
+
+<a name="WithEpistemicHook"></a>
+### func WithEpistemicHook
+
+	func WithEpistemicHook(hook *EpistemicHook) LoopOption
+
+WithEpistemicHook sets the post\-turn ambient\-extraction hook.
+
 <a name="WithEventEmitter"></a>
 ### func WithEventEmitter
 
@@ -6072,12 +9192,26 @@ WithCompressionPipeline sets the compression pipeline for prompt compression. Th
 
 WithEventEmitter sets the event emitter for agent lifecycle events.
 
+<a name="WithFileWatcher"></a>
+### func WithFileWatcher
+
+	func WithFileWatcher(fw *FileWatcherHook) LoopOption
+
+WithFileWatcher sets the file watcher hook for filesystem\-level hooks.
+
 <a name="WithGlobalRules"></a>
 ### func WithGlobalRules
 
 	func WithGlobalRules(rules string) LoopOption
 
 WithGlobalRules sets the global rules content to inject into all prompts.
+
+<a name="WithHTTPHooks"></a>
+### func WithHTTPHooks
+
+	func WithHTTPHooks(executor *HookBatchExecutor) LoopOption
+
+WithHTTPHooks sets the hook batch executor for outbound HTTP notifications.
 
 <a name="WithHallucinationDetector"></a>
 ### func WithHallucinationDetector
@@ -6093,6 +9227,20 @@ WithHallucinationDetector sets the hallucination detector for LLM output validat
 
 WithHookRegistry sets the hook registry for transform and lifecycle hooks.
 
+<a name="WithInteractiveTurns"></a>
+### func WithInteractiveTurns
+
+	func WithInteractiveTurns(interactive bool) LoopOption
+
+WithInteractiveTurns marks this loop's chat turns INTERACTIVE for model\-slot acquisition \(tree 04 leaf 03, D11\): when the LLM client's concurrency gate is capped, this loop's llm.Chat calls acquire slots on the interactive lane, ahead of waiting background callers \(verifier children, registry specialists, goal loops\). Default is FALSE \(background\) — only the daemon's user\-facing chat loop opts in.
+
+<a name="WithIsolatedChild"></a>
+### func WithIsolatedChild
+
+	func WithIsolatedChild(isolated bool) LoopOption
+
+WithIsolatedChild marks the loop as an isolated child \(C4\): ClassifyRun forces SpeakParent so the child can never reach the user.
+
 <a name="WithLLMChatter"></a>
 ### func WithLLMChatter
 
@@ -6106,6 +9254,13 @@ WithLLMChatter sets the LLM chatter interface \(supports Client or ProviderManag
 	func WithLLMClient(client *llm.Client) LoopOption
 
 WithLLMClient sets the LLM client \(concrete type for backward compatibility\).
+
+<a name="WithLearningCapture"></a>
+### func WithLearningCapture
+
+	func WithLearningCapture(lc *learning.CaptureRecorder) LoopOption
+
+WithLearningCapture wires the LoRA research capture recorder so that tool calls are appended to the learning pipeline's raw captures log.
 
 <a name="WithLearningPipeline"></a>
 ### func WithLearningPipeline
@@ -6184,6 +9339,27 @@ WithPrefetchCallback sets the callback for prefetching memory context. This impl
 
 WithProgressEnabled enables or disables progress event publishing.
 
+<a name="WithProjectID"></a>
+### func WithProjectID
+
+	func WithProjectID(pid string) LoopOption
+
+WithProjectID sets the bound project identifier for the loop's session.
+
+<a name="WithQuotaTracker"></a>
+### func WithQuotaTracker
+
+	func WithQuotaTracker(tracker *QuotaEpisodeTracker) LoopOption
+
+WithQuotaTracker sets the quota episode tracker for this agent loop. When set, quota\-wait errors will be tracked and escalation events will be published to the bus.
+
+<a name="WithReflectionCollector"></a>
+### func WithReflectionCollector
+
+	func WithReflectionCollector(rc *ReflectionCollector) LoopOption
+
+WithReflectionCollector wires the immediate self\-reflection collector \(Turbo Thread E\). When set, the loop calls ReflectTurn after each successful turn. Nil guard prevents typed\-nil panic.
+
 <a name="WithRepoMapGenerator"></a>
 ### func WithRepoMapGenerator
 
@@ -6226,6 +9402,27 @@ WithSecurityChecker sets the security permission checker.
 
 WithSecurityOrchestrator sets the security orchestrator for input/output processing.
 
+<a name="WithSessionAttached"></a>
+### func WithSessionAttached
+
+	func WithSessionAttached(attached bool) LoopOption
+
+WithSessionAttached marks the loop as bound to a watching chat session. Default is TRUE \(legacy chat behavior\); pass false for detached runners \(employee goal rounds\) whose final text must be delivered as a notify.
+
+<a name="WithSessionID"></a>
+### func WithSessionID
+
+	func WithSessionID(sessionID string) LoopOption
+
+WithSessionID sets the session identifier.
+
+<a name="WithSessionRefresher"></a>
+### func WithSessionRefresher
+
+	func WithSessionRefresher(r *session.SessionRefresher) LoopOption
+
+WithSessionRefresher sets the session refresher for periodic title updates.
+
 <a name="WithShadowManager"></a>
 ### func WithShadowManager
 
@@ -6246,6 +9443,20 @@ WithSharedConversationStore sets a shared conversation store for cross\-agent ha
 	func WithSkillLoader(loader *skills.LazySkillLoader) LoopOption
 
 WithSkillLoader sets the lazy skill loader for on\-demand loading.
+
+<a name="WithSkillStateRuntime"></a>
+### func WithSkillStateRuntime
+
+	func WithSkillStateRuntime(r *SkillStateRuntime) LoopOption
+
+WithSkillStateRuntime sets the SKILL.state\-mode runtime \(WikiSkill state layer, arXiv:2608.26263\). When set, RunWithSkill routes skills that declare state: true to the runtime instead of the conversation loop. Nil guard prevents typed\-nil panic; disabled/unset ⇒ byte\-identical RunWithSkill behavior. Mirrors WithUsageTracker's shape \(mutex\-protected field \+ getter, because RunWithSkill reads it while other goroutines may configure the loop\).
+
+<a name="WithSpeakRouter"></a>
+### func WithSpeakRouter
+
+	func WithSpeakRouter(router *SpeakRouter) LoopOption
+
+WithSpeakRouter sets the harness speak router \(leaf 11\). When nil \(typed nil guard\) the loop keeps the legacy bubble\-only behavior: no routed delivery after the turn.
 
 <a name="WithTTSRManager"></a>
 ### func WithTTSRManager
@@ -6275,6 +9486,20 @@ WithTaskStore sets the task store for inherited memory fetching.
 
 WithToolRegistry sets the tool registry.
 
+<a name="WithTraceWriter"></a>
+### func WithTraceWriter
+
+	func WithTraceWriter(tw TraceWriter) LoopOption
+
+WithTraceWriter sets the loop's trace persistence hook. Every learning\-eligible turn \(success AND failure, when a conversation snapshot is available\) writes a trace through it. Nil guard covers both an untyped nil interface and a typed\-nil writer \(a nil \*T stored in the interface\), which would otherwise panic when called.
+
+<a name="WithUploadStore"></a>
+### func WithUploadStore
+
+	func WithUploadStore(store llm.UploadStore) LoopOption
+
+WithUploadStore sets the upload store for resolving image file references.
+
 <a name="WithUsageTracker"></a>
 ### func WithUsageTracker
 
@@ -6289,6 +9514,20 @@ WithUsageTracker sets the skill usage tracker for closed\-loop skill evolution. 
 
 WithWatchdog sets the watchdog for agent loop monitoring.
 
+<a name="WithWorkerID"></a>
+### func WithWorkerID
+
+	func WithWorkerID(wid int) LoopOption
+
+WithWorkerID sets the worker slot identifier within the session pool.
+
+<a name="WithWorkingDir"></a>
+### func WithWorkingDir
+
+	func WithWorkingDir(dir string) LoopOption
+
+WithWorkingDir sets the working directory for agent context.
+
 <a name="MCPServerInfo"></a>
 ## type MCPServerInfo
 
@@ -6298,6 +9537,83 @@ MCPServerInfo describes a connected MCP server for system prompt context.
 	    Name      string
 	    Connected bool
 	    ToolCount int
+	}
+
+<a name="Manager"></a>
+## type Manager
+
+Manager manages per\-session AgentLoop instances.
+
+	type Manager struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewManager"></a>
+### func NewManager
+
+	func NewManager(cfg ManagerConfig) *Manager
+
+NewManager creates a new AgentLoop manager.
+
+<a name="Manager.Get"></a>
+### func \(\*Manager\) Get
+
+	func (m *Manager) Get(sessionID string) (*AgentLoop, bool)
+
+Get returns existing loop without creating.
+
+<a name="Manager.GetOrCreate"></a>
+### func \(\*Manager\) GetOrCreate
+
+	func (m *Manager) GetOrCreate(sessionID string, workingDir string, opts ...LoopOption) (*AgentLoop, error)
+
+GetOrCreate returns existing loop or creates new one for session. workingDir is the project path for agent execution context.
+
+<a name="Manager.GetOrCreateWired"></a>
+### func \(\*Manager\) GetOrCreateWired
+
+	func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *AgentLoop) (*AgentLoop, error)
+
+GetOrCreateWired returns an existing loop for sessionID, or creates a new one whose configuration \(LLM client, tools, skills, hooks\) is mirrored from template. The template is typically the daemon's singleton AgentLoop.
+
+workingDir is the project directory for the new loop; it overrides any value on the template \(per\-session isolation\). All other config is copied via template.ConfigSnapshot\(\).
+
+<a name="Manager.List"></a>
+### func \(\*Manager\) List
+
+	func (m *Manager) List() map[string]*AgentLoop
+
+List returns all managed loops \(for debugging/monitoring\).
+
+<a name="Manager.LoopsForTask"></a>
+### func \(\*Manager\) LoopsForTask
+
+	func (m *Manager) LoopsForTask(taskID string) []*AgentLoop
+
+LoopsForTask returns all AgentLoops whose currentTaskID matches the given taskID. Used by the daemon's phase\-transition hook to advance budget hierarchies only on loops actually working on the transitioning task. Returns nil if no loops match. Safe for concurrent use.
+
+<a name="Manager.Remove"></a>
+### func \(\*Manager\) Remove
+
+	func (m *Manager) Remove(sessionID string)
+
+Remove deletes a loop from the manager.
+
+<a name="Manager.ResolveProjectPath"></a>
+### func \(\*Manager\) ResolveProjectPath
+
+	func (m *Manager) ResolveProjectPath(ctx context.Context, projectID string) string
+
+ResolveProjectPath looks up a project's LocalPath by its ID using the project manager wired into the Manager. Returns empty string if the project manager is nil, the project ID is empty, or the lookup fails. This is used to recover the working directory for legacy sessions that have a ProjectID but no ProjectPath \(pre\-fix sessions\).
+
+<a name="ManagerConfig"></a>
+## type ManagerConfig
+
+ManagerConfig holds configuration for the manager.
+
+	type ManagerConfig struct {
+	    SessionStore session.Store
+	    ProjectMgr   *project.ProjectManager
 	}
 
 <a name="MatchResult"></a>
@@ -6392,6 +9708,15 @@ MessageClassification classifies the semantic type of a message for importance\-
 	    // escalation triggers, etc.). Always retained.
 	    MessageAnchor
 	)
+
+<a name="MessageDrainer"></a>
+## type MessageDrainer
+
+MessageDrainer drains the calling agent's queued inbox.
+
+	type MessageDrainer interface {
+	    DrainInbox(to string, limit int) ([]IncomingAgentMessage, error)
+	}
 
 <a name="MessageEndData"></a>
 ## type MessageEndData
@@ -6641,6 +9966,20 @@ Description returns the tool's description.
 
 Execute runs the mock tool.
 
+<a name="MockTool.IsConcurrencySafe"></a>
+### func \(\*MockTool\) IsConcurrencySafe
+
+	func (t *MockTool) IsConcurrencySafe(map[string]any) bool
+
+IsConcurrencySafe returns false for mock tools by default.
+
+<a name="MockTool.IsReadOnly"></a>
+### func \(\*MockTool\) IsReadOnly
+
+	func (t *MockTool) IsReadOnly(map[string]any) bool
+
+IsReadOnly returns false for mock tools by default.
+
 <a name="MockTool.Name"></a>
 ### func \(\*MockTool\) Name
 
@@ -6654,6 +9993,15 @@ Name returns the tool's name.
 	func (t *MockTool) Parameters() llm.FunctionParameters
 
 Parameters returns the JSON Schema parameters for this tool.
+
+<a name="ModelOverrideFreshTurnHook"></a>
+## type ModelOverrideFreshTurnHook
+
+ModelOverrideFreshTurnHook marks a hook that arms model overrides which must NOT survive into an unrelated fresh turn \(tree 01 leaf 04, audit R1 — no sticky escalation across turns\). The hook registry sweeps every hook implementing this interface at the START of each turn, BEFORE RunSessionStart hooks and long before PrepareNextTurn hooks run, so a hook that escalated in the previous conversation either re\-arms its override this turn or the base model is restored.
+
+	type ModelOverrideFreshTurnHook interface {
+	    ClearModelOverride(ctx context.Context)
+	}
 
 <a name="ModelReassignmentDirective"></a>
 ## type ModelReassignmentDirective
@@ -6722,6 +10070,20 @@ ResolveModelReferences resolves model references to ModelConfig using the resolv
 
 ResolveScope resolves a scope keyword to an IntentType.
 
+<a name="ModelResolver"></a>
+## type ModelResolver
+
+ModelResolver resolves an alias name or "provider/model" ref to a usable model reference. Satisfied by \*llm.Resolver \(leaf 04\) and tests.
+
+	type ModelResolver interface {
+	    // ResolveEscalationRef returns a model ref string usable as a loop
+	    // model ref. Named ResolveEscalationRef (audit B2): *llm.Resolver
+	    // already has ResolveRef(ref string) *ModelConfig — a same-name /
+	    // different-signature method would not compile. Returns an error
+	    // when the ref names no alias/model.
+	    ResolveEscalationRef(ref string) (string, error)
+	}
+
 <a name="ModelSelectData"></a>
 ## type ModelSelectData
 
@@ -6753,6 +10115,43 @@ MultiIntent represents multiple detected intents in a single request.
 
 DetectCompound analyzes intents and determines if they're compound. Adds confidence and complexity guards \(Issues 0006, 0029\): \- Requires at least 2 intents with confidence \>= 0.5 \- Both must be non\-chat intents to qualify as compound
 
+<a name="NoProgressLadder"></a>
+## type NoProgressLadder
+
+NoProgressLadder tracks normalized hashes of recent tool calls and escalates through ok/warn/veto as identical calls repeat consecutively.
+
+	type NoProgressLadder struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewNoProgressLadder"></a>
+### func NewNoProgressLadder
+
+	func NewNoProgressLadder() *NoProgressLadder
+
+NewNoProgressLadder creates an empty ladder.
+
+<a name="NoProgressLadder.ConsecutiveVetoes"></a>
+### func \(\*NoProgressLadder\) ConsecutiveVetoes
+
+	func (l *NoProgressLadder) ConsecutiveVetoes() int
+
+ConsecutiveVetoes reports how many consecutive tracked calls have been vetoed. Any non\-vetoed distinct call resets the count.
+
+<a name="NoProgressLadder.Reset"></a>
+### func \(\*NoProgressLadder\) Reset
+
+	func (l *NoProgressLadder) Reset()
+
+Reset clears ladder state \(e.g. between turns\).
+
+<a name="NoProgressLadder.Track"></a>
+### func \(\*NoProgressLadder\) Track
+
+	func (l *NoProgressLadder) Track(tool string, argsJSON string, warnAt, vetoAt int) GuardTrackResult
+
+Track records a tool call \(name \+ args JSON\) and returns the ladder state after this call relative to warnAt/vetoAt thresholds.
+
 <a name="NotificationPublisher"></a>
 ## type NotificationPublisher
 
@@ -6763,6 +10162,33 @@ NotificationPublisher is an interface for publishing task and session notificati
 	    // PublishSessionNotification publishes a session-scoped notification
 	    // (e.g., waiting_human, bot_finished, requires_approval).
 	    PublishSessionNotification(sessionID, agentID string, notifType string, title, message string)
+	}
+
+<a name="NotifyPayload"></a>
+## type NotifyPayload
+
+NotifyPayload is the JSON body published on SpeakTopicNotify.
+
+	type NotifyPayload struct {
+	    SessionID      string `json:"session_id"`
+	    ConversationID string `json:"conversation_id"`
+	    Text           string `json:"text"`
+	}
+
+<a name="OTLPSpan"></a>
+## type OTLPSpan
+
+OTLPSpan represents a single telemetry span. Shape matches OpenInference for compatibility with HALO/Catalyst.
+
+	type OTLPSpan struct {
+	    TraceID    string            `json:"trace_id"`
+	    SpanID     string            `json:"span_id"`
+	    ParentID   string            `json:"parent_id,omitempty"`
+	    Name       string            `json:"name"`
+	    Kind       string            `json:"kind"` // "LLM", "TOOL", "AGENT"
+	    StartTime  time.Time         `json:"start_time"`
+	    EndTime    time.Time         `json:"end_time"`
+	    Attributes map[string]string `json:"attributes,omitempty"`
 	}
 
 <a name="Orchestrator"></a>
@@ -6788,12 +10214,26 @@ NewOrchestrator creates a new orchestrator.
 
 GenerateRepoMap creates a repository map for context enrichment. chatFiles are the files actively being discussed in the conversation. mentionedIdentifiers are identifiers \(functions, types, etc.\) from the conversation.
 
+<a name="Orchestrator.HandoffPropagator"></a>
+### func \(\*Orchestrator\) HandoffPropagator
+
+	func (o *Orchestrator) HandoffPropagator() func(ctx context.Context, completedStep *task.TaskStep) error
+
+HandoffPropagator returns the callback that the TacticalScheduler invokes on step completion. When non\-nil, it replaces the legacy 500\-char truncation path with structured handoff propagation. Exposed so the daemon can wire it via \`tactical.SetHandoffPropagator\(orchestrator.HandoffPropagator\(\)\)\`. Returns nil if the orchestrator was not constructed with the handoff dependencies \(templateReg, registry\) — callers should nil\-check.
+
 <a name="Orchestrator.Name"></a>
 ### func \(\*Orchestrator\) Name
 
 	func (o *Orchestrator) Name() string
 
 Name returns the component name.
+
+<a name="Orchestrator.PhaseWorktree"></a>
+### func \(\*Orchestrator\) PhaseWorktree
+
+	func (o *Orchestrator) PhaseWorktree(taskID, phaseName string) string
+
+PhaseWorktree returns the provisioned worktree path for a task's phase \(Contract D\), or "" when the phase has none \(serial mode, provisioner not wired, provisioning failed, or the provisioner decided no worktree was needed\). Exported: the daemon\-side job processor's resolveStepWorkingDir precedence \(WorktreePath \> ProjectPath \> session CWD \> ""\) is the consumption surface; leaf 04 wires it.
 
 <a name="Orchestrator.PlanManager"></a>
 ### func \(\*Orchestrator\) PlanManager
@@ -6808,6 +10248,27 @@ PlanManager returns the plan manager, if configured.
 	func (o *Orchestrator) ReflectionEngine() *ReflectionEngine
 
 ReflectionEngine returns the reflection engine, if configured.
+
+<a name="Orchestrator.SetParallelPhases"></a>
+### func \(\*Orchestrator\) SetParallelPhases
+
+	func (o *Orchestrator) SetParallelPhases(enabled bool)
+
+SetParallelPhases enables or disables frontier dispatch of plan phases \(plans.parallel\_phases\). Default false: serial next\-in\-list\-order behavior, byte\-identical to the pre\-frontier implementation. Plain\-bool setter — nil\-guard convention does not apply \(Contract B\).
+
+<a name="Orchestrator.SetPhaseTransitionHook"></a>
+### func \(\*Orchestrator\) SetPhaseTransitionHook
+
+	func (o *Orchestrator) SetPhaseTransitionHook(fn func(taskID, fromPhase, toPhase string))
+
+SetPhaseTransitionHook wires a callback invoked on plan phase transitions. Used by the daemon to advance budget hierarchies on active AgentLoops. Nil\-guarded per CLAUDE.md setter convention.
+
+<a name="Orchestrator.SetPhaseWorktreeProvisioner"></a>
+### func \(\*Orchestrator\) SetPhaseWorktreeProvisioner
+
+	func (o *Orchestrator) SetPhaseWorktreeProvisioner(fn func(ctx context.Context, taskID, phaseID, phaseName string) (string, error))
+
+SetPhaseWorktreeProvisioner wires the per\-phase worktree provisioning hook \(Contract D\): when parallelPhases is enabled, startPhase invokes it for each starting phase so concurrently\-active phases can execute in isolated worktrees. The returned path is cached per \(taskID, phaseName\) and served by PhaseWorktree. Nil\-guarded per CLAUDE.md setter convention; the provisioner may return \("", nil\) to signal "no worktree needed".
 
 <a name="Orchestrator.SetPlanManager"></a>
 ### func \(\*Orchestrator\) SetPlanManager
@@ -6860,6 +10321,12 @@ OrchestratorDeps holds dependencies for the orchestrator.
 	    Bus                 *bus.MessageBus
 	    Logger              *slog.Logger
 	    FenceChecker        *intsecurity.FenceChecker // path boundary enforcement
+	
+	    // Proactive chunking dependencies (Task 6 of Plan C+F).
+	    // When non-nil, these enable chunkToExecutorCapacity and phase-context isolation.
+	    Registry    *AgentRegistry         // agent registry for model config + LLM access
+	    TemplateReg *plannerTemplateLoader // template loader for split.md rendering
+	    StepStore   *task.StepStore        // step store for listing + replacing steps
 	}
 
 <a name="OverrideResult"></a>
@@ -7402,6 +10869,34 @@ PairVerdict represents the outcome of a reviewer's evaluation.
 	    PairVerdictNeedsMore PairVerdict = "needs_more"
 	)
 
+<a name="ParallelExecutionError"></a>
+## type ParallelExecutionError
+
+ParallelExecutionError aggregates errors from multiple tool calls in a parallel batch.
+
+	type ParallelExecutionError struct {
+	    ToolCallID    string        `json:"tool_call_id"`
+	    Message       string        `json:"error"`
+	    IsCascading   bool          `json:"is_cascading"`
+	    CascadeSource string        `json:"cascade_source"`
+	    RelatedErrors []string      `json:"related_errors"`
+	    Severity      ErrorSeverity `json:"severity"`
+	}
+
+<a name="AggregateErrors"></a>
+### func AggregateErrors
+
+	func AggregateErrors(results []*ExecutionResult) []*ParallelExecutionError
+
+AggregateErrors converts ExecutionResult failures into a ParallelExecutionError slice with severity heuristics for downstream observability. Cascading failures get Warning severity \(they are symptoms, not root causes\). Non\-cascading failures get Critical severity.
+
+<a name="ParallelExecutionError.Error"></a>
+### func \(\*ParallelExecutionError\) Error
+
+	func (e *ParallelExecutionError) Error() string
+
+Error returns the error string for the parallel execution error.
+
 <a name="ParallelTeamDriver"></a>
 ## type ParallelTeamDriver
 
@@ -7458,6 +10953,114 @@ ParallelTeamDriverDeps holds dependencies.
 	    Logger      *slog.Logger
 	}
 
+<a name="ParkKind"></a>
+## type ParkKind
+
+ParkKind scopes a parked record's turn type. Chat turns and goal\-loop episodes share the parked\_turns table but must never re\-arm into each other's routers: chat quota records decode via quotaTurnPayload through the QuotaResumeWatcher's adapted callback, episodes via goalTurnPayload through the daemon's goal\-loop resume router.
+
+	type ParkKind string
+
+<a name="ParkKindChat"></a>
+
+	const (
+	    // ParkKindChat is the chat-side parked turn (QuotaResumeWatcher /
+	    // throttle parks riding the handler's chat parker).
+	    ParkKindChat ParkKind = "chat"
+	    // ParkKindEpisode is the goal-loop parked episode (internal/employee).
+	    ParkKindEpisode ParkKind = "episode"
+	)
+
+<a name="ParkPersistence"></a>
+## type ParkPersistence
+
+ParkPersistence is the persistence seam for parked turns. Implemented by SQLiteParkStore; every method must be safe for concurrent use and must treat a cancelled context as a failed write \(the parker logs and continues — persistence is best\-effort for Park, authoritative for Delete\).
+
+The interface lives in package agent \(interface\-at\-consumer, the same pattern as parkEventBus\) so the parker never imports database/sql, and tests can substitute an in\-memory fake.
+
+	type ParkPersistence interface {
+	    // Save inserts (or replaces, on park_key collision) a parked record
+	    // with its ParkKind and dedup key. persistenceKey unique within the
+	    // kind; it is the identity the delete/re-arm paths resolve rows by.
+	    Save(ctx context.Context, kind ParkKind, persistenceKey string, rec ParkedTurnRecord) error
+	    // Delete removes a record on resume (or give-up). Deleting an
+	    // already-absent row is not an error (idempotent).
+	    Delete(ctx context.Context, kind ParkKind, persistenceKey string) error
+	    // Load returns all records of the given kind that have not yet
+	    // expired (resume_at > now) and REMOVES the expired ones (prune at
+	    // load). Records are ordered oldest-resume-first so re-arm drains in
+	    // the same order the memory queue would have.
+	    Load(ctx context.Context, kind ParkKind, now time.Time) ([]ParkedTurnRecord, []string, error)
+	}
+
+<a name="ParkTurnEvent"></a>
+## type ParkTurnEvent
+
+ParkTurnEvent is the bus payload for parked\-turn lifecycle events. It rides the EXISTING "agent.quota\_wait" topic — the episode tracker's topic — with a class\-carrying payload, per the leaf contract: zero new topics, so the WS "agent.quota" prefix match keeps classifying every park event as agent\_progress \(AGENTS.md WS classification invariant\). Fields mirror QuotaEvent \(quota\_episode.go\) where they overlap so the TUI/Flutter quota handlers consume both event shapes through one code path: agent\_id, to, reason, model\_id, provider\_id. The class key is the wire vocabulary of parkClassString \("quota"|"throttle"\); resume\_at is RFC3339; waited is a Go duration string \(a display\-input value, never formatted client\-side into wall\-clock claims\).
+
+	type ParkTurnEvent struct {
+	    AgentID string `json:"agent_id"`
+	    To      string `json:"to,omitempty"`
+	    Reason  string `json:"reason"`
+	    Class   string `json:"class,omitempty"`
+	    // UnblockAt is the wire key BOTH surfaces already read
+	    // (tui/app.go "unblock_at", flutter api_models.dart "unblock_at") —
+	    // H10 (bughunt 2026-09-03): the old `resume_at` key was invisible to
+	    // both, so the "throttle retry HH:MM" badge never rendered from a park
+	    // event. UnblockAt is the canonical field; ResumeAt (below) is kept as
+	    // a duplicate for any consumer of the original leaf-04 vocabulary.
+	    UnblockAt  string    `json:"unblock_at,omitempty"` // RFC3339
+	    ResumeAt   string    `json:"resume_at,omitempty"`  // RFC3339 (legacy alias)
+	    Waited     string    `json:"waited,omitempty"`     // Go duration string
+	    SessionID  string    `json:"session_id,omitempty"`
+	    ModelID    string    `json:"model_id,omitempty"`
+	    ProviderID string    `json:"provider_id,omitempty"`
+	    Timestamp  time.Time `json:"timestamp"`
+	}
+
+<a name="ParkWaitInfo"></a>
+## type ParkWaitInfo
+
+ParkWaitInfo is one failure class's parked\-turn summary for the status surfaces \(tree 03 leaf 04 Task 1\): Next is the earliest scheduled resume among that class's parked records and Pending is how many are parked.
+
+	type ParkWaitInfo struct {
+	    Class   llm.FailureClass
+	    Next    time.Time
+	    Pending int
+	}
+
+<a name="ParkedTurn"></a>
+## type ParkedTurn
+
+ParkedTurn captures a chat turn that was interrupted by budget exhaustion and is waiting for the budget window to clear before being retried.
+
+	type ParkedTurn struct {
+	    SessionID      string            // original session ID (for persistence + push)
+	    ConversationID string            // resolved conversation ID (for the agent loop)
+	    Message        string            // user message text
+	    Parts          []llm.ContentPart // multimodal parts, if any
+	    AgentID        string            // agent override, if any
+	    SourceClient   string            // originating client identifier
+	    ParkedAt       time.Time         // when the turn was parked
+	}
+
+<a name="ParkedTurnRecord"></a>
+## type ParkedTurnRecord
+
+ParkedTurnRecord is the class\-agnostic parked\-turn record \(frozen; SHARED\-CONVENTIONS §4.5 / master Contract 1\). NAME GUARD: the type is ParkedTurnRecord, NOT ParkedTurn — package agent already declares ParkedTurn in budget\_resume.go \(budget watcher\); a second ParkedTurn would be a duplicate\-type compile error.
+
+TurnPayload carries the class\-specific original request as JSON so the resume router \(tree 03 leaves 02/03\) can re\-run the turn without reconstructing history. For class=FailureQuota the encoding is the quota watcher's stored fields \(see quota\_resume.go quotaTurnPayload\); class=FailureThrottle's encoding is frozen by tree 03 leaf 02.
+
+	type ParkedTurnRecord struct {
+	    ConversationID string
+	    SessionID      string
+	    AgentID        string
+	    Class          llm.FailureClass // quota | throttle (server classes only)
+	    ResumeAt       time.Time
+	    Attempt        int
+	    MaxAttempts    int
+	    TurnPayload    json.RawMessage // class-specific original request
+	}
+
 <a name="ParseResult"></a>
 ## type ParseResult
 
@@ -7473,6 +11076,40 @@ ParseResult is the result of parsing a model reassignment instruction.
 	    // Ambiguities - list of ambiguities detected
 	    Ambiguities []string
 	}
+
+<a name="PerDepthSemaphore"></a>
+## type PerDepthSemaphore
+
+PerDepthSemaphore manages one semaphore per spawnable depth to prevent deadlock while bounding parallelism. Each depth has an independent channel so that releasing depth 2 never unblocks depth 1.
+
+Modeled after HALO's per\-depth semaphore pool \(subagent\_tool\_factory.py\).
+
+Single\-semaphore deadlock scenario: with N parents holding every depth\-N slot on a single shared semaphore, every depth\-\(N\+1\) grandchild blocks forever waiting for a slot its parent is holding. Per\-depth pools avoid this because a parent at depth\-N contends on semaphores\[N\] while its child at depth\-\(N\+1\) contends on semaphores\[N\+1\].
+
+	type PerDepthSemaphore struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewPerDepthSemaphore"></a>
+### func NewPerDepthSemaphore
+
+	func NewPerDepthSemaphore(limits map[int]int) *PerDepthSemaphore
+
+NewPerDepthSemaphore creates a semaphore pool. The map maps depth \-\> max concurrent acquires. Depths not listed default to 0 \(no spawning allowed\).
+
+<a name="PerDepthSemaphore.Acquire"></a>
+### func \(\*PerDepthSemaphore\) Acquire
+
+	func (p *PerDepthSemaphore) Acquire(depth int) error
+
+Acquire blocks until a slot is available at the given depth. Returns an error if the depth is not registered.
+
+<a name="PerDepthSemaphore.Release"></a>
+### func \(\*PerDepthSemaphore\) Release
+
+	func (p *PerDepthSemaphore) Release(depth int)
+
+Release returns a slot to the semaphore at the given depth. Double\-release is silently ignored.
 
 <a name="PersistenceFunc"></a>
 ## type PersistenceFunc
@@ -7525,6 +11162,20 @@ List returns all available tools.
 
 Register adds a tool to the registry.
 
+<a name="PlanPhaseSpec"></a>
+## type PlanPhaseSpec
+
+PlanPhaseSpec is a planner\-declared phase. Distinct from plan.PlanPhase \(the persisted record\) — this is the LLM's output shape before validation/persistence.
+
+	type PlanPhaseSpec struct {
+	    Name        string        `json:"name"`
+	    Description string        `json:"description"`
+	    Steps       []plannerStep `json:"steps"`
+	    Produces    []Artifact    `json:"produces"`
+	    Consumes    []Artifact    `json:"consumes"`
+	    DependsOn   []int         `json:"depends_on,omitempty"`
+	}
+
 <a name="PlanRequest"></a>
 ## type PlanRequest
 
@@ -7545,6 +11196,11 @@ PlanRequest is the input to the strategic planner.
 	
 	    // TrueAnalysis carries IntentGate-style pre-classification analysis.
 	    TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
+	
+	    // Mode is the complexity-routing mode from Thread D (direct/plan/spec_plan/
+	    // spec_pair). The strategic planner uses this to short-circuit planning for
+	    // "direct" mode or select the spec-plan template for "spec_plan".
+	    Mode string `json:"mode,omitempty"`
 	}
 
 <a name="PlannerThresholds"></a>
@@ -7650,7 +11306,14 @@ NewPromptBuilderFromConfig creates a PromptBuilder from a configuration.
 
 	func (b *PromptBuilder) AddSection(title, content string) *PromptBuilder
 
-AddSection adds a custom section to the prompt.
+AddSection adds a custom section to the prompt. Custom sections are classified as unstable \(volatile\) by BuildSystemPromptOrdered; use AddSectionWithStability for content that is byte\-invariant across turns.
+
+<a name="PromptBuilder.AddSectionWithStability"></a>
+### func \(\*PromptBuilder\) AddSectionWithStability
+
+	func (b *PromptBuilder) AddSectionWithStability(title, content string, stable bool) *PromptBuilder
+
+AddSectionWithStability adds a custom section with an explicit cache stability classification. stable=true marks content that does not vary per turn within a session \(e.g. baseline constants, global rules, project convention files\); such sections land in the cacheable stable prefix of BuildSystemPromptOrdered. stable=false matches AddSection behavior.
 
 <a name="PromptBuilder.AddTool"></a>
 ### func \(\*PromptBuilder\) AddTool
@@ -7672,6 +11335,20 @@ AddUserPreference adds a single user preference.
 	func (b *PromptBuilder) Build() string
 
 Build constructs the complete system prompt.
+
+<a name="PromptBuilder.BuildSystemPrompt"></a>
+### func \(\*PromptBuilder\) BuildSystemPrompt
+
+	func (b *PromptBuilder) BuildSystemPrompt() (prompt string, stablePrefixHash string)
+
+BuildSystemPrompt is the stable\-prefix convenience wrapper: equivalent to BuildSystemPromptOrdered\(true\).
+
+<a name="PromptBuilder.BuildSystemPromptOrdered"></a>
+### func \(\*PromptBuilder\) BuildSystemPromptOrdered
+
+	func (b *PromptBuilder) BuildSystemPromptOrdered(cacheStablePrefix bool) (prompt string, stablePrefixHash string)
+
+BuildSystemPromptOrdered assembles the system prompt via AssembleOrdered. When cacheStablePrefix is true \(the default path\), sections are reordered stable\-first and the sha256 of the stable prefix is returned. When false, the legacy call\-order Build\(\) output is returned byte\-for\-byte with the hash of that legacy prefix, so callers can detect ordering\-mode changes.
 
 <a name="PromptBuilder.WithAgentsContext"></a>
 ### func \(\*PromptBuilder\) WithAgentsContext
@@ -7707,6 +11384,13 @@ WithMemoryContext sets the memory context to inject with context fencing. Wraps 
 	func (b *PromptBuilder) WithPersonality(personality string) *PromptBuilder
 
 WithPersonality sets the personality traits.
+
+<a name="PromptBuilder.WithProjectInfo"></a>
+### func \(\*PromptBuilder\) WithProjectInfo
+
+	func (b *PromptBuilder) WithProjectInfo(name, path, branch, language string, dirty bool) *PromptBuilder
+
+WithProjectInfo sets the current project metadata section. The section is emitted as "\# Current Project" immediately after the prompt cache boundary \(before memory context\) so the agent always knows what project it is working in. dirty indicates whether the working tree has uncommitted changes; when false the "\(dirty\)" suffix is omitted. language is the detected primary language \(e.g. "go", "python"\); empty string is omitted.
 
 <a name="PromptBuilder.WithPurpose"></a>
 ### func \(\*PromptBuilder\) WithPurpose
@@ -7762,6 +11446,84 @@ PromptConfig holds configuration for building system prompts.
 
 DefaultPromptConfig returns a PromptConfig with default values.
 
+<a name="PromptSection"></a>
+## type PromptSection
+
+PromptSection is a named chunk of system prompt text tagged with its cache stability. Stable sections are byte\-invariant across turns within a session \(identity, rules, capabilities\); unstable sections vary per turn or per request \(memory context, tool lists, session context\).
+
+	type PromptSection struct {
+	    Name   string
+	    Stable bool
+	    Body   string
+	}
+
+<a name="ProposalQueueExternal"></a>
+## type ProposalQueueExternal
+
+ProposalQueueExternal is the exported wrapper around proposalQueue for cross\-package use \(CLI, HTTP handlers, RememberTool, TUI /remember\). It exposes only the operations external callers need while keeping the internal queue type sealed.
+
+	type ProposalQueueExternal struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewExternalProposalQueue"></a>
+### func NewExternalProposalQueue
+
+	func NewExternalProposalQueue(path string) *ProposalQueueExternal
+
+NewExternalProposalQueue creates an external wrapper around the queue at the given path. The path's parent directories are created on first Append.
+
+<a name="ProposalQueueExternal.Append"></a>
+### func \(\*ProposalQueueExternal\) Append
+
+	func (q *ProposalQueueExternal) Append(p ReflectionProposal) error
+
+Append writes a new proposal to the queue. ID, Status, and CreatedAt are filled in if zero \(same semantics as the internal queue\).
+
+<a name="ProposalQueueExternal.ListPending"></a>
+### func \(\*ProposalQueueExternal\) ListPending
+
+	func (q *ProposalQueueExternal) ListPending() ([]ReflectionProposal, error)
+
+ListPending returns all proposals with status "pending".
+
+<a name="ProposalQueueExternal.MarkApplied"></a>
+### func \(\*ProposalQueueExternal\) MarkApplied
+
+	func (q *ProposalQueueExternal) MarkApplied(id string) error
+
+MarkApplied marks the proposal with the given ID as applied.
+
+<a name="ProposalQueueExternal.MarkSkipped"></a>
+### func \(\*ProposalQueueExternal\) MarkSkipped
+
+	func (q *ProposalQueueExternal) MarkSkipped(id string) error
+
+MarkSkipped marks the proposal with the given ID as skipped.
+
+<a name="QueryTracesTool"></a>
+## type QueryTracesTool
+
+QueryTracesTool returns paginated summaries of trace data.
+
+	type QueryTracesTool struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewQueryTracesTool"></a>
+### func NewQueryTracesTool
+
+	func NewQueryTracesTool(store TraceStoreReader) *QueryTracesTool
+
+NewQueryTracesTool creates the query traces tool.
+
+<a name="QueryTracesTool.Invoke"></a>
+### func \(\*QueryTracesTool\) Invoke
+
+	func (t *QueryTracesTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
+
+Invoke executes the tool.
+
 <a name="QueueConfig"></a>
 ## type QueueConfig
 
@@ -7796,6 +11558,7 @@ QueueEntry wraps a MessageQueue with generation tracking.
 
 	type QueueEntry struct {
 	    Queue      *MessageQueue
+	    Loop       *AgentLoop // the loop that owns this queue (may be nil in tests)
 	    Generation uint64
 	}
 
@@ -7980,6 +11743,293 @@ QueuedMessage represents a single message enqueued for the agent loop.
 	    Source    string    `json:"source"`
 	}
 
+<a name="QuotaBlockStatus"></a>
+## type QuotaBlockStatus
+
+QuotaBlockStatus represents an active quota block on a provider credential.
+
+	type QuotaBlockStatus struct {
+	    AgentID        string
+	    ProviderKey    string
+	    ModelID        string
+	    CredentialKey  string
+	    UnblockAt      time.Time
+	    EscalationTier int // 0=new, 1=12h, 2=20h, 3=24h(blocked)
+	}
+
+<a name="QuotaEpisode"></a>
+## type QuotaEpisode
+
+QuotaEpisode tracks a single quota block episode for an agent\+provider combo.
+
+	type QuotaEpisode struct {
+	    AgentID       string
+	    ProviderKey   string
+	    ModelID       string
+	    CredentialKey string
+	    UnblockAt     time.Time
+	    StartedAt     time.Time
+	    TierFired     [3]bool // tier 0=12h, tier 1=20h, tier 2=24h
+	}
+
+<a name="QuotaEpisodeTracker"></a>
+## type QuotaEpisodeTracker
+
+QuotaEpisodeTracker manages quota episodes across agent\+provider combinations. It fires escalation events at 12h/20h/24h boundaries and transitions agent state from running \-\> quota\_wait \-\> blocked.
+
+Tier firing is driven by two paths:
+
+- Enter\(\): fires immediately\-overdue tiers synchronously.
+- a background reaper goroutine \(started in NewQuotaEpisodeTracker\) that sweeps episodes on every reaperInterval tick so escalation events fire even when no new quota errors re\-enter the tracker. At the 24h tier the reaper also marks the episode blocked \(BlockedByEscalation semantics\).
+
+Stop\(\) terminates the reaper and is safe for daemon\-lifetime trackers to never call \(the goroutine exits with the process\).
+
+	type QuotaEpisodeTracker struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewQuotaEpisodeTracker"></a>
+### func NewQuotaEpisodeTracker
+
+	func NewQuotaEpisodeTracker(logger *slog.Logger) *QuotaEpisodeTracker
+
+NewQuotaEpisodeTracker creates a tracker with default escalation thresholds and starts the background escalation reaper. The reaper sweeps active episodes on every tick and fires due escalation tiers \(including the 24h blocked transition\). Call Stop\(\) to terminate it \(no\-op if already stopped\).
+
+<a name="QuotaEpisodeTracker.ActiveEpisodes"></a>
+### func \(\*QuotaEpisodeTracker\) ActiveEpisodes
+
+	func (t *QuotaEpisodeTracker) ActiveEpisodes() []*QuotaEpisode
+
+ActiveEpisodes returns all non\-cleared episodes.
+
+<a name="QuotaEpisodeTracker.BlockedByEscalation"></a>
+### func \(\*QuotaEpisodeTracker\) BlockedByEscalation
+
+	func (t *QuotaEpisodeTracker) BlockedByEscalation(agentID, providerKey string)
+
+BlockedByEscalation marks an episode as blocked by the 24h timer. Called when the max wait soft\-stop is reached.
+
+<a name="QuotaEpisodeTracker.BlockedUntil"></a>
+### func \(\*QuotaEpisodeTracker\) BlockedUntil
+
+	func (t *QuotaEpisodeTracker) BlockedUntil(agentID, providerKey string) time.Time
+
+BlockedUntil returns when the agent\+provider combo unblocks, or zero if not blocked.
+
+<a name="QuotaEpisodeTracker.Clear"></a>
+### func \(\*QuotaEpisodeTracker\) Clear
+
+	func (t *QuotaEpisodeTracker) Clear(agentID, providerKey string)
+
+Clear ends the episode and emits a quota\_cleared event. Idempotent: clearing a non\-existent episode is a no\-op \(no event, no state transition\).
+
+<a name="QuotaEpisodeTracker.Enter"></a>
+### func \(\*QuotaEpisodeTracker\) Enter
+
+	func (t *QuotaEpisodeTracker) Enter(agentID, providerKey, modelID string, unblockAt time.Time, taskID string)
+
+Enter registers or extends an episode for agent\+provider. If an episode already exists with a later unblock time, it updates without re\-firing already\-fired escalation tiers. On a NEW episode it publishes the initial quota\_blocked event \(from="running", to="quota\_wait", escalation=""\) and transitions the agent state to StateQuotaWait.
+
+<a name="QuotaEpisodeTracker.SetClock"></a>
+### func \(\*QuotaEpisodeTracker\) SetClock
+
+	func (t *QuotaEpisodeTracker) SetClock(fn func() time.Time)
+
+SetClock injects a clock for tests.
+
+<a name="QuotaEpisodeTracker.SetPublisher"></a>
+### func \(\*QuotaEpisodeTracker\) SetPublisher
+
+	func (t *QuotaEpisodeTracker) SetPublisher(p func(topic string, msg any))
+
+SetPublisher injects a bus publisher for tests.
+
+<a name="QuotaEpisodeTracker.SetStateSetter"></a>
+### func \(\*QuotaEpisodeTracker\) SetStateSetter
+
+	func (t *QuotaEpisodeTracker) SetStateSetter(fn func(agentID string, state AgentState, reason string))
+
+SetStateSetter injects a callback that drives the agent state machine. The callback is nil\-guarded: a nil setter \(or nil tracker\) disables state propagation. Callers should wire this to the loop's state machine so quota episodes move the agent running \-\> quota\_wait \-\> blocked \-\> idle.
+
+<a name="QuotaEpisodeTracker.Stop"></a>
+### func \(\*QuotaEpisodeTracker\) Stop
+
+	func (t *QuotaEpisodeTracker) Stop()
+
+Stop terminates the reaper goroutine and waits for it to exit. Safe to call multiple times.
+
+<a name="QuotaEvent"></a>
+## type QuotaEvent
+
+QuotaEvent is the bus payload for quota lifecycle events.
+
+	type QuotaEvent struct {
+	    AgentID       string    `json:"agent_id"`
+	    TaskID        string    `json:"task_id,omitempty"`
+	    From          string    `json:"from"`
+	    To            string    `json:"to"`
+	    Reason        string    `json:"reason"`
+	    ProviderID    string    `json:"provider_id"`
+	    CredentialKey string    `json:"credential_key"`
+	    ModelID       string    `json:"model_id"`
+	    UnblockAt     string    `json:"unblock_at,omitempty"` // RFC3339
+	    Escalation    string    `json:"escalation,omitempty"` // "", "warn", "action_recommended", "blocked"
+	    FallbackModel string    `json:"fallback_model,omitempty"`
+	    Timestamp     time.Time `json:"timestamp"`
+	}
+
+<a name="QuotaParkedTurn"></a>
+## type QuotaParkedTurn
+
+QuotaParkedTurn captures a chat turn interrupted by a provider quota wall and is waiting for the quota window to lift before being retried. Mirrors ParkedTurn \(budget\_resume.go\) with quota\-specific resume metadata.
+
+Since tree 03 leaf 01 the scheduling machinery lives on the class\-agnostic TurnParker \(parked\_turn.go\); QuotaResumeWatcher is a thin delegating wrapper over one TurnParker, byte\-identical for class=FailureQuota.
+
+	type QuotaParkedTurn struct {
+	    SessionID      string            // original session ID (for persistence + push)
+	    ConversationID string            // resolved conversation ID (for the agent loop)
+	    Message        string            // user message text
+	    Parts          []llm.ContentPart // multimodal parts, if any
+	    AgentID        string            // agent override, if any
+	    SourceClient   string            // originating client identifier
+	    ProviderID     string            // provider that hit the quota
+	    CredentialKey  string            // credential fingerprint of the blocked pool
+	    UnblockAt      time.Time         // earliest time the quota window lifts
+	    ParkedAt       time.Time         // when the turn was parked
+	}
+
+<a name="QuotaResumeWatcher"></a>
+## type QuotaResumeWatcher
+
+QuotaResumeWatcher parks chat turns interrupted by provider quota errors and retries them once the quota window lifts. It polls on a fixed interval; when the earliest unblock time for parked turns has passed, it drains the queue \(oldest first\) by invoking the resume callback supplied by the ChatHandler \(quota\-reset\-resilience plan leaf 06: task deferral \+ auto\-resume\).
+
+MaxWait soft\-stop: turns whose remaining wait exceeds MaxWait are NOT parked \(the caller surfaces the error instead\), matching contract 7's "schedule requeue at min\(unblockAt, now\+MaxWait\)".
+
+The watcher is best\-effort in memory: when the daemon wires parked\-turn persistence \(SetParkPersistence → the inner TurnParker\), turns parked at shutdown survive in the store and auto\-resume on the next start. Without it, turns parked when the daemon shuts down are dropped \(logged at warn\) and are not persisted across restarts; quota blocks are in\-memory, so a restart re\-probes providers anyway.
+
+Since tree 03 leaf 01 this is a delegating wrapper over a TurnParker: the watcher refuses over\-MaxWait waits \(quota contract\) before the parker's generic min\(ResumeAt, now\+MaxWait\) soft\-stop can reschedule, and owns the quota\-facing log lines. Persistence: rides the inner TurnParker's ParkPersistence when wired \(chat kind\); none otherwise.
+
+	type QuotaResumeWatcher struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewQuotaResumeWatcher"></a>
+### func NewQuotaResumeWatcher
+
+	func NewQuotaResumeWatcher(logger *slog.Logger, resumeFunc func(ctx context.Context, turn QuotaParkedTurn), maxWait time.Duration) *QuotaResumeWatcher
+
+NewQuotaResumeWatcher creates a watcher. resumeFunc is invoked \(in a background goroutine\) for each parked turn once its unblock time passes; it is responsible for re\-running the turn and pushing the result to the session. A nil resumeFunc disables auto\-resume \(Park becomes a no\-op\). maxWait \<= 0 falls back to llm.DefaultQuotaMaxWait.
+
+<a name="QuotaResumeWatcher.Park"></a>
+### func \(\*QuotaResumeWatcher\) Park
+
+	func (w *QuotaResumeWatcher) Park(turn QuotaParkedTurn) bool
+
+Park enqueues a turn for later retry once the quota window lifts. Returns false \(and does nothing\) when:
+
+- auto\-resume is not configured, or
+- the wait exceeds MaxWait \(soft\-stop: caller surfaces the error\), or
+- the unblock time is unknown/zero \(cannot schedule a resume\).
+
+<a name="QuotaResumeWatcher.Pending"></a>
+### func \(\*QuotaResumeWatcher\) Pending
+
+	func (w *QuotaResumeWatcher) Pending() int
+
+Pending returns the number of currently parked turns.
+
+<a name="QuotaResumeWatcher.SetParkEventBus"></a>
+### func \(\*QuotaResumeWatcher\) SetParkEventBus
+
+	func (w *QuotaResumeWatcher) SetParkEventBus(b parkEventBus)
+
+SetParkEventBus forwards the park\-event bus to the inner TurnParker so handler\-side quota parks \(ChatHandler's leaf 06 deferral path\) emit the same ParkTurnEvent the loop's throttle parks emit — on the EXISTING agent.quota\_wait topic with reason "quota\_wait" \+ class "quota" \(tree 03 leaf 04 Task 1\). Nil\-guarded per repo setter convention: a nil bus or watcher is refused and parking stays silent \(the default\).
+
+<a name="QuotaResumeWatcher.SetParkPersistence"></a>
+### func \(\*QuotaResumeWatcher\) SetParkPersistence
+
+	func (w *QuotaResumeWatcher) SetParkPersistence(store ParkPersistence)
+
+SetParkPersistence forwards parked\-turn persistence to the inner TurnParker \(chat kind\), so quota\-parked chat turns survive daemon restarts and re\-arm on the next start. Nil\-guarded; wiring\-time setter — call before Start \(re\-arm happens in Start\).
+
+<a name="QuotaResumeWatcher.SetPollInterval"></a>
+### func \(\*QuotaResumeWatcher\) SetPollInterval
+
+	func (w *QuotaResumeWatcher) SetPollInterval(d time.Duration)
+
+SetPollInterval overrides the re\-check cadence \(config plumbing seam\). Must be called before Start.
+
+<a name="QuotaResumeWatcher.Start"></a>
+### func \(\*QuotaResumeWatcher\) Start
+
+	func (w *QuotaResumeWatcher) Start(ctx context.Context)
+
+Start begins the background polling loop. Safe to call once; subsequent calls are no\-ops.
+
+<a name="QuotaResumeWatcher.Stop"></a>
+### func \(\*QuotaResumeWatcher\) Stop
+
+	func (w *QuotaResumeWatcher) Stop()
+
+Stop halts the polling loop and waits for it to exit. Turns that have not yet resumed are logged and dropped.
+
+<a name="RLMAnalyzer"></a>
+## type RLMAnalyzer
+
+RLMAnalyzer analyzes execution traces using bounded recursive subagents. It implements structural depth gating \(no call\_subagent tool at max depth\) and per\-depth semaphore pooling to prevent resource exhaustion.
+
+	type RLMAnalyzer struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewRLMAnalyzer"></a>
+### func NewRLMAnalyzer
+
+	func NewRLMAnalyzer(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient *llm.Client, logger *slog.Logger) *RLMAnalyzer
+
+NewRLMAnalyzer creates an analyzer for the given trace store.
+
+<a name="NewRLMAnalyzerFromTraceStore"></a>
+### func NewRLMAnalyzerFromTraceStore
+
+	func NewRLMAnalyzerFromTraceStore(cfg RLMAnalyzerConfig, store *memory.TraceStore, llmClient *llm.Client, logger *slog.Logger) *RLMAnalyzer
+
+NewRLMAnalyzerFromTraceStore creates an analyzer using the Phase 1 TraceStore.
+
+<a name="NewTestRLMAnalyzer"></a>
+### func NewTestRLMAnalyzer
+
+	func NewTestRLMAnalyzer(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient *llm.Client) *RLMAnalyzer
+
+NewTestRLMAnalyzer creates an analyzer for use in tests.
+
+<a name="RLMAnalyzer.Analyze"></a>
+### func \(\*RLMAnalyzer\) Analyze
+
+	func (a *RLMAnalyzer) Analyze(ctx context.Context, prompt string) (*AnalyzeResult, error)
+
+Analyze runs the RLM over traces and returns failure modes. Implements structural depth gating \(no call\_subagent tool at max depth\).
+
+<a name="RLMAnalyzerConfig"></a>
+## type RLMAnalyzerConfig
+
+RLMAnalyzerConfig configures the trace analysis RLM. Modeled after HALO's RLM config \(main.py, subagent\_tool\_factory.py\).
+
+	type RLMAnalyzerConfig struct {
+	    MaximumDepth             int    `json:"maximum_depth"`              // default 2
+	    MaximumParallelSubagents int    `json:"maximum_parallel_subagents"` // default 4
+	    MaximumTurns             int    `json:"maximum_turns"`              // per agent
+	    Model                    string `json:"model"`                      // cheap model for analysis
+	    SynthesisModel           string `json:"synthesis_model"`            // model for multi-trace summarization
+	}
+
+<a name="DefaultRLMConfig"></a>
+### func DefaultRLMConfig
+
+	func DefaultRLMConfig() RLMAnalyzerConfig
+
+DefaultRLMConfig returns sensible defaults matching HALO's configuration.
+
 <a name="RalphLoop"></a>
 ## type RalphLoop
 
@@ -8037,6 +12087,13 @@ Reset clears iteration tracking for a task.
 	func (rl *RalphLoop) SetPlanManager(pm *plan.PlanManager)
 
 SetPlanManager sets the plan manager. This is called by the daemon after the PlanManager is created \(the plan system is initialized after agent components in NewComponents, so the value passed to NewRalphLoop is nil\).
+
+<a name="RalphLoop.TaskIsTerminal"></a>
+### func \(\*RalphLoop\) TaskIsTerminal
+
+	func (rl *RalphLoop) TaskIsTerminal(taskID string) bool
+
+TaskIsTerminal reports whether the named task is in a terminal state. Used by the orchestrator so ralph\-loop replanning cannot run after OnJobCompleted has already finished the task.
 
 <a name="RalphLoop.TriggerReplan"></a>
 ### func \(\*RalphLoop\) TriggerReplan
@@ -8108,6 +12165,130 @@ Ambiguous matches \("use reasoning" with no tier\) set Ambiguous=true and leave 
 
 Scope detection looks for "for this task" \(scope=task\), "for next turn" \(scope=next\-turn\); otherwise scope=session.
 
+<a name="ReasoningWatchdog"></a>
+## type ReasoningWatchdog
+
+ReasoningWatchdog counts consecutive assistant turns that produced reasoning tokens but neither visible text nor tool calls.
+
+	type ReasoningWatchdog struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewReasoningWatchdog"></a>
+### func NewReasoningWatchdog
+
+	func NewReasoningWatchdog() *ReasoningWatchdog
+
+NewReasoningWatchdog creates an idle watchdog.
+
+<a name="ReasoningWatchdog.Breach"></a>
+### func \(\*ReasoningWatchdog\) Breach
+
+	func (w *ReasoningWatchdog) Breach(tokenCap, streakTurns int) bool
+
+Breach reports whether the watchdog limits are exceeded: either the consecutive\-turn streak reached streakTurns, or cumulative reasoning tokens in the current streak reached tokenCap.
+
+<a name="ReasoningWatchdog.RecordTurn"></a>
+### func \(\*ReasoningWatchdog\) RecordTurn
+
+	func (w *ReasoningWatchdog) RecordTurn(hasText, hasToolCalls bool, reasoningTokens int)
+
+RecordTurn records one assistant turn outcome. hasText means non\-empty visible content; hasToolCalls means at least one tool call. Both reset the streak. reasoningTokens is the reasoning\-token count for this turn.
+
+<a name="ReasoningWatchdog.Reset"></a>
+### func \(\*ReasoningWatchdog\) Reset
+
+	func (w *ReasoningWatchdog) Reset()
+
+Reset clears watchdog state.
+
+<a name="ReasoningWatchdog.Streak"></a>
+### func \(\*ReasoningWatchdog\) Streak
+
+	func (w *ReasoningWatchdog) Streak() int
+
+Streak returns the current consecutive reasoning\-only turn count.
+
+<a name="RecoveryConfig"></a>
+## type RecoveryConfig
+
+RecoveryConfig controls how RetryRecovery classifies errors and decides whether to retry tool execution.
+
+	type RecoveryConfig struct {
+	    // MaxRetries is the maximum number of retry attempts (default 3).
+	    MaxRetries int
+	    // RetryDelay is the base delay before the first retry; subsequent
+	    // retries use exponential backoff (default 1s).
+	    RetryDelay time.Duration
+	    // RecoverableErrors are substrings that, when found in an error
+	    // message, mark the error as recoverable (retry with backoff).
+	    RecoverableErrors []string
+	    // NonRecoverableErrors are substrings that, when found, permanently
+	    // disable retry for that error.
+	    NonRecoverableErrors []string
+	}
+
+<a name="DefaultRecoveryConfig"></a>
+### func DefaultRecoveryConfig
+
+	func DefaultRecoveryConfig() RecoveryConfig
+
+DefaultRecoveryConfig returns a sensible default configuration.
+
+<a name="RecoveryState"></a>
+## type RecoveryState
+
+RecoveryState tracks the current progress and history of a recovery attempt.
+
+	type RecoveryState struct {
+	    CurrentRetry     int           `json:"current_retry"`
+	    LastError        string        `json:"last_error,omitempty"`
+	    LastErrorType    string        `json:"last_error_type,omitempty"`
+	    RecoveryAttempts int           `json:"recovery_attempts"`
+	    LastDelay        time.Duration `json:"last_delay,omitempty"`
+	    Completed        bool          `json:"completed"`
+	    Final            bool          `json:"final"`
+	}
+
+<a name="ReflectionCollector"></a>
+## type ReflectionCollector
+
+ReflectionCollector runs immediate self\-reflection after each agent turn, extracting 0\-1 operational lessons per turn and queuing them as proposals.
+
+	type ReflectionCollector struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewReflectionCollector"></a>
+### func NewReflectionCollector
+
+	func NewReflectionCollector(cfg config.ReflectionCollectorConfig, classifier classifierClient, classifierModel string, templateReg *plannerTemplateLoader, queuePath string, logger *slog.Logger) *ReflectionCollector
+
+NewReflectionCollector constructs a collector wired to the given classifier, template loader, and proposal queue path. logger MUST be non\-nil.
+
+<a name="ReflectionCollector.DrainPendingProposals"></a>
+### func \(\*ReflectionCollector\) DrainPendingProposals
+
+	func (rc *ReflectionCollector) DrainPendingProposals() ([]ReflectionProposal, error)
+
+DrainPendingProposals returns all pending reflection proposals and marks them consumed \(rewrites the queue file to remove pending entries; applied and skipped entries are preserved for audit\). Intended to be called by the skill evolver at the start of each cycle so that per\-turn reflections flow into skill refinement as an additional input stream alongside the learned pattern promotion in Pass B.
+
+Returns nil, nil when the collector is disabled or no queue is configured \(e.g., test constructs that bypass NewReflectionCollector\).
+
+<a name="ReflectionCollector.ReflectInactiveSessions"></a>
+### func \(\*ReflectionCollector\) ReflectInactiveSessions
+
+	func (rc *ReflectionCollector) ReflectInactiveSessions(ctx context.Context)
+
+ReflectInactiveSessions is the periodic\-timer entry point. For MVP it is a stub: deeper session\-level reflection requires SessionStore integration \(finding sessions inactive \>= InactivityMinutes and gathering their trajectories\). Logged at debug level so operators can see the timer firing.
+
+<a name="ReflectionCollector.ReflectTurn"></a>
+### func \(\*ReflectionCollector\) ReflectTurn
+
+	func (rc *ReflectionCollector) ReflectTurn(ctx context.Context, traj ReflectionTrajectory) error
+
+ReflectTurn runs per\-turn reflection. Builds a prompt from the trajectory, calls the classifier, validates confidence, and queues proposals.
+
 <a name="ReflectionConfig"></a>
 ## type ReflectionConfig
 
@@ -8165,6 +12346,23 @@ RunReflection executes a single\-pass reflection check after code edits. Note: T
 
 SetEditAvailability sets whether file edit is available
 
+<a name="ReflectionProposal"></a>
+## type ReflectionProposal
+
+ReflectionProposal represents a single proposed improvement surfaced by the reflection system \(or by a manual /remember invocation\).
+
+	type ReflectionProposal struct {
+	    ID            string    `json:"id"`
+	    Type          string    `json:"type"` // skill_create|skill_update|agent_prompt|project_instruction|prompt_component
+	    Target        string    `json:"target"`
+	    Change        string    `json:"change"`
+	    Justification string    `json:"justification"`
+	    Confidence    float64   `json:"confidence"`
+	    Source        string    `json:"source"` // turn:sessionID | session:sessionID | manual:/remember
+	    Status        string    `json:"status"` // pending|applied|skipped
+	    CreatedAt     time.Time `json:"created_at"`
+	}
+
 <a name="ReflectionResult"></a>
 ## type ReflectionResult
 
@@ -8178,6 +12376,42 @@ ReflectionResult holds the outcome of a reflection cycle
 	    FinalMessage string
 	    GaveUp       bool        // True if max reflections reached without fix
 	    PendingFix   *FixAttempt // Non-nil if a fix was generated but needs application by the agent loop
+	}
+
+<a name="ReflectionTrajectory"></a>
+## type ReflectionTrajectory
+
+ReflectionTrajectory captures the rich execution trace of a single agent turn for the immediate self\-reflection system. This is distinct from the legacy LearningPipeline Trajectory type \(loop.go\) which remains in use by the learning adapter; this richer type is consumed by ReflectionCollector to render reflection/turn.md.
+
+	type ReflectionTrajectory struct {
+	    UserInput     string                     `json:"user_input"`
+	    Steps         []ReflectionTrajectoryStep `json:"steps"`
+	    FinalResponse string                     `json:"final_response"`
+	    SessionID     string                     `json:"session_id"`
+	    AgentID       string                     `json:"agent_id"`
+	    Outcome       string                     `json:"outcome"` // success|partial|failure
+	    Duration      time.Duration              `json:"duration"`
+	}
+
+<a name="ReflectionTrajectory.JSON"></a>
+### func \(ReflectionTrajectory\) JSON
+
+	func (t ReflectionTrajectory) JSON() ([]byte, error)
+
+JSON serializes the trajectory to JSON for template injection.
+
+<a name="ReflectionTrajectoryStep"></a>
+## type ReflectionTrajectoryStep
+
+ReflectionTrajectoryStep describes one step in the reflection execution trace.
+
+	type ReflectionTrajectoryStep struct {
+	    Kind       string `json:"kind"` // assistant_message|tool_call|tool_result|error
+	    Content    string `json:"content"`
+	    ToolName   string `json:"tool_name,omitempty"`
+	    ToolResult string `json:"tool_result,omitempty"`
+	    ErrorCode  string `json:"error_code,omitempty"`
+	    RetryOf    string `json:"retry_of,omitempty"`
 	}
 
 <a name="RegistryConfig"></a>
@@ -8204,6 +12438,12 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // TT-SR stream rule enforcement (shared across all agent loops)
 	    TTSRManager *TTSRManager
 	
+	    // QuotaEpisodeTracker is the shared quota episode tracker (singleton).
+	    // When set, registry-built agent loops inherit it so quota episodes and
+	    // escalation events fire identically for specialist agents. Nil = quota
+	    // tracking disabled for registry loops.
+	    QuotaTracker *QuotaEpisodeTracker
+	
 	    // BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	    BundledAgentsPath string
 	
@@ -8223,9 +12463,26 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // When non-zero, these values override the code defaults.
 	    Queues config.AgentQueuesConfig
 	
+	    // Guards holds [agent.guards] loop-safety settings (leaf 07). Zero
+	    // values normalize to ship-on defaults at loop construction.
+	    Guards config.AgentGuardsConfig
+	
 	    // DB is an optional SQLite connection used for queue persistence.
 	    // When set, follow-up messages are persisted to the queued_followups table.
 	    DB  *sql.DB
+	
+	    // ConversationStoreSize is the LRU capacity of the shared ConversationStore.
+	    // When <= 0, DefaultConversationStoreSize is used.
+	    ConversationStoreSize int
+	}
+
+<a name="ReplyFuncSetter"></a>
+## type ReplyFuncSetter
+
+ReplyFuncSetter is implemented by tools that accept a per\-turn reply carrier \(e.g. builtin reply\_to\_user\). The agent loop injects a carrier closure into every registry tool implementing this interface at turn start, so the tool delivers through the loop's classified SpeakRouter without the tool package importing the router wiring. Satisfied structurally to avoid an import cycle \(builtin imports agent\).
+
+	type ReplyFuncSetter interface {
+	    SetReplyFunc(fn func(text string) error)
 	}
 
 <a name="ReportCapture"></a>
@@ -8387,6 +12644,188 @@ ResultPayload is the payload for "result" type messages.
 	
 	    // Error contains error details if status is "failed".
 	    Error string `json:"error,omitempty"`
+	}
+
+<a name="ResumeResult"></a>
+## type ResumeResult
+
+ResumeResult describes what happened when an incomplete run was resumed from a checkpoint.
+
+	type ResumeResult struct {
+	    // Restored is true when a checkpoint was successfully loaded.
+	    Restored bool `json:"restored"`
+	    // Checkpoint is the loaded checkpoint that was resumed from.
+	    Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
+	    // SkippedTurns is the number of turns that were already completed
+	    // before the crash/interruption and will be skipped during resume.
+	    SkippedTurns int `json:"skipped_turns"`
+	    // RunID is the ID of the run that was resumed.
+	    RunID string `json:"run_id"`
+	    // State is the restored agent state (caller-defined interface{}).
+	    State interface{} `json:"-"`
+	    // ResumedAt records when the resume operation occurred.
+	    ResumedAt time.Time `json:"resumed_at"`
+	    // Warning contains any non-fatal issues discovered during resume.
+	    Warning string `json:"warning,omitempty"`
+	}
+
+<a name="RetryBudget"></a>
+## type RetryBudget
+
+RetryBudget tracks how many retries remain for an operation chain.
+
+	type RetryBudget struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="GetRetryBudget"></a>
+### func GetRetryBudget
+
+	func GetRetryBudget(ctx context.Context) *RetryBudget
+
+GetRetryBudget extracts retry budget from context.
+
+<a name="NewRetryBudget"></a>
+### func NewRetryBudget
+
+	func NewRetryBudget(max int) *RetryBudget
+
+NewRetryBudget creates a new retry budget.
+
+<a name="RetryBudget.Remaining"></a>
+### func \(\*RetryBudget\) Remaining
+
+	func (b *RetryBudget) Remaining() int
+
+Remaining returns the number of retries left.
+
+<a name="RetryBudget.Reset"></a>
+### func \(\*RetryBudget\) Reset
+
+	func (b *RetryBudget) Reset()
+
+Reset restores the budget to full.
+
+<a name="RetryBudget.TryUse"></a>
+### func \(\*RetryBudget\) TryUse
+
+	func (b *RetryBudget) TryUse(operation string) bool
+
+TryUse attempts to use one retry for the given operation \(label\). Returns true if successful \(budget available\), false if exhausted.
+
+<a name="RetryBudget.Used"></a>
+### func \(\*RetryBudget\) Used
+
+	func (b *RetryBudget) Used() int
+
+Used returns the number of retries used.
+
+<a name="RetryBudget.UsedBy"></a>
+### func \(\*RetryBudget\) UsedBy
+
+	func (b *RetryBudget) UsedBy(operation string) int
+
+UsedBy returns how many retries a specific operation used.
+
+<a name="RetryMetrics"></a>
+## type RetryMetrics
+
+RetryMetrics tracks retry statistics broken down by operation type and error class. All methods are safe for concurrent use.
+
+	type RetryMetrics struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewRetryMetrics"></a>
+### func NewRetryMetrics
+
+	func NewRetryMetrics() *RetryMetrics
+
+NewRetryMetrics creates an empty RetryMetrics.
+
+<a name="RetryMetrics.RecordRetry"></a>
+### func \(\*RetryMetrics\) RecordRetry
+
+	func (m *RetryMetrics) RecordRetry(opType string, err error, delay time.Duration)
+
+RecordRetry records a single retry event. opType is "llm" / "tool" / "http". err is the error that triggered the retry. delay is the backoff delay that will be slept.
+
+<a name="RetryMetrics.Snapshot"></a>
+### func \(\*RetryMetrics\) Snapshot
+
+	func (m *RetryMetrics) Snapshot() RetryMetricsSnapshot
+
+Snapshot returns a copy of the current metrics suitable for serialization. The returned maps are fresh copies; mutating them does not affect internal state.
+
+<a name="RetryMetricsSnapshot"></a>
+## type RetryMetricsSnapshot
+
+RetryMetricsSnapshot is an immutable point\-in\-time copy of RetryMetrics. The maps are fresh copies so callers cannot mutate internal state.
+
+	type RetryMetricsSnapshot struct {
+	    TotalRetries    int64
+	    RetriesByType   map[string]int64
+	    RetriesByError  map[string]int64
+	    BackoffDuration time.Duration
+	}
+
+<a name="RetryRecovery"></a>
+## type RetryRecovery
+
+RetryRecovery provides HALO\-style retry logic with observable state for tool execution failures mid\-turn.
+
+	type RetryRecovery struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewRetryRecovery"></a>
+### func NewRetryRecovery
+
+	func NewRetryRecovery(cfg RecoveryConfig) *RetryRecovery
+
+NewRetryRecovery creates a RetryRecovery with the given config. If config is zero\-valued, DefaultRecoveryConfig\(\) is applied.
+
+<a name="RetryRecovery.ExecuteWithRetry"></a>
+### func \(\*RetryRecovery\) ExecuteWithRetry
+
+	func (r *RetryRecovery) ExecuteWithRetry(ctx context.Context, toolName string, fn func() (any, error)) (result any, retryErr error)
+
+ExecuteWithRetry runs fn with exponential\-backoff retry on recoverable errors. On max retries, returns the last error without retry. The result of the first successful invocation is returned.
+
+<a name="RetryRecovery.GetRecoveryState"></a>
+### func \(\*RetryRecovery\) GetRecoveryState
+
+	func (r *RetryRecovery) GetRecoveryState() RecoveryState
+
+GetRecoveryState returns a snapshot of the current recovery state.
+
+<a name="RetryRecovery.Reset"></a>
+### func \(\*RetryRecovery\) Reset
+
+	func (r *RetryRecovery) Reset()
+
+Reset clears the recovery state for a new tool invocation.
+
+<a name="RetryRecovery.ShouldRetry"></a>
+### func \(\*RetryRecovery\) ShouldRetry
+
+	func (r *RetryRecovery) ShouldRetry(err error) bool
+
+ShouldRetry determines whether the error indicates a recoverable condition that warrants retry. Authentication/authorization and invalid\-request errors are never retried. Rate\-limit and network errors are retried.
+
+<a name="RetryableError"></a>
+## type RetryableError
+
+RetryableError indicates an error that may be retried. Implementations provide a retry\-after hint and a retryable flag so callers can make informed decisions without type\-switching on concrete error types.
+
+	type RetryableError interface {
+	
+	    // RetryAfter returns the recommended wait time before retrying.
+	    // Returns 0 if no specific wait time is recommended.
+	    RetryAfter() time.Duration
+	    // IsRetryable returns true if this specific error instance should be retried.
+	    IsRetryable() bool
+	    // contains filtered or unexported methods
 	}
 
 <a name="ReviewManager"></a>
@@ -8578,6 +13017,76 @@ ReviewStatus represents the outcome of a review.
 	    ReviewNeedsInfo ReviewStatus = "needs_info"
 	)
 
+<a name="RewakePayload"></a>
+## type RewakePayload
+
+RewakePayload mirrors the payload published by HTTPHook and FileWatcherHook under HookAsyncRewakeTopic.
+
+	type RewakePayload struct {
+	    SessionID string `json:"session_id"`
+	    HookType  string `json:"hook_type"`
+	    HookName  string `json:"hook_name"`
+	    Path      string `json:"path,omitempty"`
+	    // Source classifies the publisher: "timer" (scheduler job
+	    // completion), "hook" (async hook callback), "user", or
+	    // "notify_reply". It is provenance metadata only — unknown or empty
+	    // values are injected identically and must never act as a filter.
+	    Source string `json:"source,omitempty"`
+	}
+
+<a name="RosterGate"></a>
+## type RosterGate
+
+RosterGate is the per\-conversation runtime wrapper around gate.RunGate. It holds the cross\-turn GateState needed for skip\-when\-unchanged and serializes gate execution within one loop. Construction via NewRosterGate; each AgentLoop owns its own instance.
+
+	type RosterGate struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewRosterGate"></a>
+### func NewRosterGate
+
+	func NewRosterGate(cfg RosterGateConfig) *RosterGate
+
+NewRosterGate builds a RosterGate from converted spec config. Returns nil when Command is empty \(no gate configured\) so callers can use the \`spec.Gate \!= nil\` fast path.
+
+<a name="RosterGate.Evaluate"></a>
+### func \(\*RosterGate\) Evaluate
+
+	func (g *RosterGate) Evaluate(ctx context.Context, workdir string, turnHadMutatingTool bool) (passed bool, output string, skipped bool, err error)
+
+Evaluate runs the roster gate after a completed turn.
+
+- No command configured =\> skipped, not applicable.
+- \!turnHadMutatingTool =\> skipped, read\-only turn.
+- Otherwise: RunGate runs cfg.Command in workdir \(the SESSION working directory — callers must pass the loop's session workdir, never the daemon CWD / os.Getwd\).
+
+The returned output is capped at 4KB \(rosterGateMaxOutput\) so the loop can feed a failure back into the next turn; gate output is never logged above debug. passed=false means the turn must not be reported as success; the caller decides how to surface the failure.
+
+<a name="RosterGate.SetBackend"></a>
+### func \(\*RosterGate\) SetBackend
+
+	func (g *RosterGate) SetBackend(b runtime.ExecutionBackend)
+
+SetBackend overrides the execution backend \(tests inject a stub\). When nil, RunGate falls back to a local backend.
+
+<a name="RosterGateConfig"></a>
+## type RosterGateConfig
+
+RosterGateConfig is the per\-agent roster quality gate carried on AgentSpec \(converted from agents.GateMetadata at registry time\). A nil \*RosterGate on the spec means no gate; a non\-nil config with an empty Command is equivalent to no gate \(Evaluate reports skipped/not\-applicable\).
+
+	type RosterGateConfig struct {
+	    // Command is the shell command run in the session workdir after a turn
+	    // that mutated the workspace. Empty = no gate.
+	    Command string `json:"command,omitempty" yaml:"command,omitempty"`
+	    // TimeoutSeconds kills the gate command after this many seconds.
+	    // Zero/negative = gate.DefaultGateTimeoutSeconds (300).
+	    TimeoutSeconds int `json:"timeout_seconds,omitempty" yaml:"timeout_seconds,omitempty"`
+	    // SkipWhenUnchanged skips re-running a previously FAILED gate when the
+	    // workspace (git status + HEAD) hash is unchanged since that failure.
+	    SkipWhenUnchanged bool `json:"skip_when_unchanged" yaml:"skip_when_unchanged"`
+	}
+
 <a name="RouteAction"></a>
 ## type RouteAction
 
@@ -8689,6 +13198,214 @@ RoutingValidation checks if a task was routed correctly.
 	    Feedback       string `json:"feedback,omitempty"`
 	}
 
+<a name="RunRecoverer"></a>
+## type RunRecoverer
+
+RunRecoverer manages periodic checkpoints for agent runs and provides crash\-recovery capabilities. It stores data under a base directory, creating one checkpoint file per incomplete run plus a sentinel for completed runs.
+
+	type RunRecoverer struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewRunRecoverer"></a>
+### func NewRunRecoverer
+
+	func NewRunRecoverer(basePath string, checkpointInterval int) (*RunRecoverer, error)
+
+NewRunRecoverer creates a recoverer that stores checkpoints under basePath. checkpointInterval controls how often checkpoints are written \(every N turns\). Set to 0 to disable automatic checkpointing \(manual writes only\).
+
+<a name="RunRecoverer.CleanupAllCompleted"></a>
+### func \(\*RunRecoverer\) CleanupAllCompleted
+
+	func (r *RunRecoverer) CleanupAllCompleted() (int, error)
+
+CleanupAllCompleted removes ALL completed run artifacts. Returns error and the number of files removed.
+
+<a name="RunRecoverer.CleanupBefore"></a>
+### func \(\*RunRecoverer\) CleanupBefore
+
+	func (r *RunRecoverer) CleanupBefore(cutoff time.Time) (int, error)
+
+CleanupBefore removes all incomplete checkpoints older than the given cutoff. Returns the number of files removed.
+
+<a name="RunRecoverer.CleanupCompleted"></a>
+### func \(\*RunRecoverer\) CleanupCompleted
+
+	func (r *RunRecoverer) CleanupCompleted(runIDs ...string) (int, error)
+
+CleanupCompleted removes completed run artifacts \(both .json and .done files\) for the given run IDs. Returns the number of files removed.
+
+<a name="RunRecoverer.GetCheckpointInterval"></a>
+### func \(\*RunRecoverer\) GetCheckpointInterval
+
+	func (r *RunRecoverer) GetCheckpointInterval() int
+
+GetCheckpointInterval returns the configured checkpoint interval.
+
+<a name="RunRecoverer.IncompleteRunCount"></a>
+### func \(\*RunRecoverer\) IncompleteRunCount
+
+	func (r *RunRecoverer) IncompleteRunCount() (int, error)
+
+IncompleteRunCount returns the number of incomplete \(not yet completed\) runs.
+
+<a name="RunRecoverer.IsComplete"></a>
+### func \(\*RunRecoverer\) IsComplete
+
+	func (r *RunRecoverer) IsComplete(runID string) bool
+
+IsComplete checks if a run has been marked complete.
+
+<a name="RunRecoverer.ListCompletedRuns"></a>
+### func \(\*RunRecoverer\) ListCompletedRuns
+
+	func (r *RunRecoverer) ListCompletedRuns() ([]string, error)
+
+ListCompletedRuns returns run IDs for runs that have been marked complete via MarkComplete \(they have .done sentinel files\).
+
+<a name="RunRecoverer.ListIncompleteRuns"></a>
+### func \(\*RunRecoverer\) ListIncompleteRuns
+
+	func (r *RunRecoverer) ListIncompleteRuns() ([]string, error)
+
+ListIncompleteRuns returns run IDs for runs that have an active checkpoint \(not yet marked complete via MarkComplete\).
+
+<a name="RunRecoverer.MarkComplete"></a>
+### func \(\*RunRecoverer\) MarkComplete
+
+	func (r *RunRecoverer) MarkComplete(runID string) error
+
+MarkComplete writes an empty sentinel file that marks a run as finished, distinguishing it from incomplete \(crashed\) runs. The previous checkpoint file is renamed to include ".done" suffix.
+
+<a name="RunRecoverer.ReadCheckpoint"></a>
+### func \(\*RunRecoverer\) ReadCheckpoint
+
+	func (r *RunRecoverer) ReadCheckpoint(runID string) (*Checkpoint, error)
+
+ReadCheckpoint loads a checkpoint by run ID.
+
+<a name="RunRecoverer.Resume"></a>
+### func \(\*RunRecoverer\) Resume
+
+	func (r *RunRecoverer) Resume(incompleteRunID string) (*ResumeResult, error)
+
+Resume loads the latest checkpoint for an incomplete run and returns a ResumeResult describing what was restored.
+
+<a name="RunRecoverer.ResumeFromLatest"></a>
+### func \(\*RunRecoverer\) ResumeFromLatest
+
+	func (r *RunRecoverer) ResumeFromLatest() (*ResumeResult, string, error)
+
+ResumeFromLatest resumes from the most recent checkpoint across all incomplete runs. Returns the result and the run ID that was resumed from.
+
+<a name="RunRecoverer.SetCheckpointInterval"></a>
+### func \(\*RunRecoverer\) SetCheckpointInterval
+
+	func (r *RunRecoverer) SetCheckpointInterval(interval int)
+
+SetCheckpointInterval updates the checkpoint interval.
+
+<a name="RunRecoverer.ShouldCheckpoint"></a>
+### func \(\*RunRecoverer\) ShouldCheckpoint
+
+	func (r *RunRecoverer) ShouldCheckpoint(turn int) bool
+
+ShouldCheckpoint returns true when a checkpoint should be written for the given turn number based on the recoverer's checkpointInterval.
+
+When checkpointInterval is 0 \(disabled\), this always returns false. Otherwise it returns true when turn \> 0 and turn % interval == 0.
+
+<a name="RunRecoverer.WriteCheckpoint"></a>
+### func \(\*RunRecoverer\) WriteCheckpoint
+
+	func (r *RunRecoverer) WriteCheckpoint(cp *Checkpoint) error
+
+WriteCheckpoint writes a checkpoint atomically to disk.
+
+The file is written to a temporary path and renamed into place so that any crash mid\-write leaves either the previous checkpoint or no checkpoint, but never a partially\-written one.
+
+Checkpoint files are named \<checkpointPrefix\>\<runID\>.json.
+
+<a name="SQLiteParkStore"></a>
+## type SQLiteParkStore
+
+SQLiteParkStore is the default ParkPersistence over the daemon's parks.db.
+
+	type SQLiteParkStore struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSQLiteParkStore"></a>
+### func NewSQLiteParkStore
+
+	func NewSQLiteParkStore(dbPath string, logger *slog.Logger) (*SQLiteParkStore, error)
+
+NewSQLiteParkStore opens \(and migrates\) the parked\-turn table on the database at dbPath. The DSN matches the session/queue stores: WAL journal \+ 5s busy timeout. modernc.org/sqlite honors only \`\_pragma=\`\-style DSN parameters \(the queue/task stores use the same form\), so \`\_journal\_mode=\`\-style keys would be silently ignored.
+
+<a name="SQLiteParkStore.Close"></a>
+### func \(\*SQLiteParkStore\) Close
+
+	func (s *SQLiteParkStore) Close() error
+
+Close releases the database handle.
+
+<a name="SQLiteParkStore.Delete"></a>
+### func \(\*SQLiteParkStore\) Delete
+
+	func (s *SQLiteParkStore) Delete(ctx context.Context, kind ParkKind, persistenceKey string) error
+
+Delete implements ParkStore. Idempotent: deleting an absent row affects 0 rows and is not an error \(resume may race a give\-up, or the row may already be gone from a prune\).
+
+<a name="SQLiteParkStore.Load"></a>
+### func \(\*SQLiteParkStore\) Load
+
+	func (s *SQLiteParkStore) Load(ctx context.Context, kind ParkKind, now time.Time) ([]ParkedTurnRecord, []string, error)
+
+Load implements ParkStore: one transaction reads the kind's rows, deletes expired ones, and returns the survivors oldest\-resume\-first with their park keys \(so the caller can delete them by identity on resume\). A transaction is required so a concurrent Load \(second parker sharing the file\) can never see a row both prune and re\-arm.
+
+<a name="SQLiteParkStore.Save"></a>
+### func \(\*SQLiteParkStore\) Save
+
+	func (s *SQLiteParkStore) Save(ctx context.Context, kind ParkKind, persistenceKey string, rec ParkedTurnRecord) error
+
+Save implements ParkStore.
+
+<a name="SQLiteStatePersister"></a>
+## type SQLiteStatePersister
+
+SQLiteStatePersister persists AgentStateSnapshot records to a SQLite table via an UPSERT on agent\_id. It uses a sync.Once to ensure the DDL runs at most once per instance.
+
+	type SQLiteStatePersister struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSQLiteStatePersister"></a>
+### func NewSQLiteStatePersister
+
+	func NewSQLiteStatePersister(db *sql.DB) (*SQLiteStatePersister, error)
+
+NewSQLiteStatePersister creates a new SQLiteStatePersister and runs the schema\-creation DDL immediately. Returns an error if db is nil or the DDL fails.
+
+<a name="SQLiteStatePersister.Delete"></a>
+### func \(\*SQLiteStatePersister\) Delete
+
+	func (p *SQLiteStatePersister) Delete(ctx context.Context, agentID string) error
+
+Delete removes a persisted snapshot for the given agentID.
+
+<a name="SQLiteStatePersister.Load"></a>
+### func \(\*SQLiteStatePersister\) Load
+
+	func (p *SQLiteStatePersister) Load(ctx context.Context, agentID string) (*AgentStateSnapshot, error)
+
+Load retrieves the most recent persisted snapshot for the given agentID. Returns sql.ErrNoRows \(not wrapped\) if no record exists.
+
+<a name="SQLiteStatePersister.Save"></a>
+### func \(\*SQLiteStatePersister\) Save
+
+	func (p *SQLiteStatePersister) Save(ctx context.Context, agentID string, snapshot AgentStateSnapshot) error
+
+Save marshals the snapshot to JSON and UPSERTs it keyed on agentID.
+
 <a name="SavePointData"></a>
 ## type SavePointData
 
@@ -8698,6 +13415,89 @@ SavePointData is emitted when a save point is created.
 	    Reason string         `json:"reason"`
 	    State  map[string]any `json:"state"`
 	}
+
+<a name="SearchRollback"></a>
+## type SearchRollback
+
+SearchRollback maintains a bounded ring of recent web\_search argument hashes to support free re\-sample on exact duplicates.
+
+	type SearchRollback struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSearchRollback"></a>
+### func NewSearchRollback
+
+	func NewSearchRollback(window int) *SearchRollback
+
+NewSearchRollback creates a rollback ring; a non\-positive window normalizes to the default of 10.
+
+<a name="SearchRollback.Observe"></a>
+### func \(\*SearchRollback\) Observe
+
+	func (r *SearchRollback) Observe(hash string)
+
+Observe records a completed web\_search call's arg hash. Observation is post\-execution only: ShouldRollback must be consulted BEFORE Observe for the current candidate so the first\-ever call never rolls back.
+
+<a name="SearchRollback.Reset"></a>
+### func \(\*SearchRollback\) Reset
+
+	func (r *SearchRollback) Reset()
+
+Reset clears the rollback ring \(e.g. between turns\). Mirrors NoProgressLadder.Reset: lock, empty the ring, clear the membership set.
+
+<a name="SearchRollback.ShouldRollback"></a>
+### func \(\*SearchRollback\) ShouldRollback
+
+	func (r *SearchRollback) ShouldRollback(hash string) bool
+
+ShouldRollback reports whether a pending web\_search with this arg hash was already executed within the observation window.
+
+<a name="SearchSpanTool"></a>
+## type SearchSpanTool
+
+SearchSpanTool runs a regex search inside a single span.
+
+	type SearchSpanTool struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSearchSpanTool"></a>
+### func NewSearchSpanTool
+
+	func NewSearchSpanTool(store TraceStoreReader) *SearchSpanTool
+
+NewSearchSpanTool creates the search span tool.
+
+<a name="SearchSpanTool.Invoke"></a>
+### func \(\*SearchSpanTool\) Invoke
+
+	func (t *SearchSpanTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
+
+Invoke executes the tool.
+
+<a name="SearchTraceTool"></a>
+## type SearchTraceTool
+
+SearchTraceTool runs a regex search across all spans of one trace.
+
+	type SearchTraceTool struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSearchTraceTool"></a>
+### func NewSearchTraceTool
+
+	func NewSearchTraceTool(store TraceStoreReader) *SearchTraceTool
+
+NewSearchTraceTool creates the search traces tool.
+
+<a name="SearchTraceTool.Invoke"></a>
+### func \(\*SearchTraceTool\) Invoke
+
+	func (t *SearchTraceTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
+
+Invoke executes the tool.
 
 <a name="SecretObfuscationHook"></a>
 ## type SecretObfuscationHook
@@ -8858,6 +13658,12 @@ SessionConfig holds creation\-time configuration.
 	    TurnTimeout time.Duration
 	    TokenBudget int64
 	    TimeBudget  time.Duration
+	    // SharedTranscript opts the pair participants into receiving the full
+	    // parent-conversation transcript in their per-turn prompts. It is an
+	    // explicit opt-in: the default (false) spawns participants under
+	    // artifact_only isolation, where prompts carry a structured brief plus
+	    // prior-turn artifact digests — never raw transcript dumps.
+	    SharedTranscript bool `json:"shared_transcript,omitempty" yaml:"shared_transcript,omitempty"`
 	}
 
 <a name="DefaultSessionConfig"></a>
@@ -8866,6 +13672,38 @@ SessionConfig holds creation\-time configuration.
 	func DefaultSessionConfig() SessionConfig
 
 DefaultSessionConfig returns sensible defaults.
+
+<a name="SessionContextDigest"></a>
+## type SessionContextDigest
+
+SessionContextDigest is a compact per\-session summary the dispatcher can hand to the intent analyzer so messages are judged with session state rather than in isolation.
+
+	type SessionContextDigest struct {
+	    // LastTaskName is the name of the session's most recently updated
+	    // task, capped at 200 characters.
+	    LastTaskName string
+	    // LastTaskState is the state of the most recent task (e.g. "completed").
+	    LastTaskState string
+	    // LastTaskAgent is the agent assigned to the most recent task.
+	    LastTaskAgent string
+	    // LastResultSummary is the first line (capped 400 chars) of the most
+	    // recent task's best terminal step result.
+	    LastResultSummary string
+	    // LastIntentType is the session's most recently recorded intent type.
+	    LastIntentType string
+	    // WorkingDirectory is the session's effective working directory,
+	    // resolved as WorktreePath > ProjectPath > DetectionContext.CWD
+	    // (mirroring resolveStepWorkingDir). Empty when the session is
+	    // unknown or carries no paths. Enrichment only: IsEmpty ignores it.
+	    WorkingDirectory string
+	}
+
+<a name="SessionContextDigest.IsEmpty"></a>
+### func \(\*SessionContextDigest\) IsEmpty
+
+	func (s *SessionContextDigest) IsEmpty() bool
+
+IsEmpty reports whether the digest carries no information. The caller treats an empty digest as "no session context" \(pre\-tree behavior\).
 
 <a name="SessionEndData"></a>
 ## type SessionEndData
@@ -8915,6 +13753,11 @@ SessionLifecycleResult is returned to OnSessionEnd hooks after RunOnce completes
 	    Success bool
 	    Error   error
 	    EndTime time.Time
+	    // UserMessage is the user input that started the turn (harness-eval
+	    // leaf 12: fact extraction runs on session close over the dialogue).
+	    UserMessage string
+	    // AssistantMessage is the final response text produced by the turn.
+	    AssistantMessage string
 	}
 
 <a name="SessionLifecycleState"></a>
@@ -8928,6 +13771,15 @@ SessionLifecycleState describes the state of a session at a lifecycle boundary.
 	    UserID    string
 	    StartTime time.Time
 	    Metadata  map[string]any
+	}
+
+<a name="SessionMessageSaver"></a>
+## type SessionMessageSaver
+
+SessionMessageSaver persists chat messages to the session store. Wired by the daemon to bridge ChatHandler → session.Store.SaveMessages.
+
+	type SessionMessageSaver interface {
+	    SaveMessages(sessionID string, messages []session.Message) error
 	}
 
 <a name="SessionMetrics"></a>
@@ -8988,6 +13840,20 @@ SessionState represents the lifecycle state of a collaboration session.
 	func (s SessionState) IsTerminal() bool
 
 IsTerminal returns true if the collaboration session is in a terminal state.
+
+<a name="SessionStoreReader"></a>
+## type SessionStoreReader
+
+SessionStoreReader is the narrow interface ChatHandler needs from a session store: looking up a session by ID to inspect its project path. Using a local interface avoids requiring tests to implement the full session.Store \(30\+ methods\).
+
+	type SessionStoreReader interface {
+	    Get(id string) *session.Session
+	    // GetByConversationID looks up a session by its conversation ID (not
+	    // the session's primary ID). Use this instead of Get when the caller
+	    // only has the conversation ID, as session IDs and conversation IDs
+	    // are distinct identifiers.
+	    GetByConversationID(conversationID string) *session.Session
+	}
 
 <a name="SessionTracker"></a>
 ## type SessionTracker
@@ -9137,6 +14003,64 @@ ShouldStopAfterTurnHook is called after each turn. Return true to force the loop
 	    ShouldStopAfterTurn(ctx context.Context, state TurnState) StopDecision
 	}
 
+<a name="SkillEntryView"></a>
+## type SkillEntryView
+
+SkillEntryView is the minimal skill metadata the domain\-agreement gate inspects. It decouples the gate from the full internal/skills index entry so tests can exercise it without building a CapabilityIndex.
+
+	type SkillEntryView struct {
+	    Name        string
+	    Tags        []string
+	    Description string
+	}
+
+<a name="SkillStateConfig"></a>
+## type SkillStateConfig
+
+SkillStateConfig bounds Σ rendering and the step loop.
+
+	type SkillStateConfig struct {
+	    MaxStateChars int // prompt budget for the Σ JSON block; default 2000
+	    MaxIterations int // step cap; default 25
+	}
+
+<a name="SkillStateRuntime"></a>
+## type SkillStateRuntime
+
+SkillStateRuntime executes a skill in SKILL.state mode.
+
+	type SkillStateRuntime struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSkillStateRuntime"></a>
+### func NewSkillStateRuntime
+
+	func NewSkillStateRuntime(loop *AgentLoop, cfg SkillStateConfig, logger *slog.Logger) *SkillStateRuntime
+
+NewSkillStateRuntime builds a runtime bound to loop. The LLM chatter is taken from the loop's client when available; the tool runner and trace writer are injected separately \(WithToolRunner / WithTraceWriterInjection, or direct field assignment by leaf 05 — all nil\-guarded at Run\).
+
+<a name="SkillStateRuntime.Run"></a>
+### func \(\*SkillStateRuntime\) Run
+
+	func (r *SkillStateRuntime) Run(ctx context.Context, skill *skills.Skill, input, conversationID string) (string, error)
+
+Run executes skill in state mode \(paper Algorithm 1\): per step build the prompt → chat → parse \(malformed ⇒ ONE corrective retry, then error\) → validate \+ merge Σ → execute tool or return answer. Terminates on an answer action, when MaxIterations steps are exhausted \(error naming the step count\), or when ctx is cancelled.
+
+<a name="SkillStateRuntime.WithStateTraceWriter"></a>
+### func \(\*SkillStateRuntime\) WithStateTraceWriter
+
+	func (r *SkillStateRuntime) WithStateTraceWriter(tw TraceWriter) *SkillStateRuntime
+
+WithStateTraceWriter injects the leaf\-01 trace writer \(nil\-safe\).
+
+<a name="SkillStateRuntime.WithToolRunner"></a>
+### func \(\*SkillStateRuntime\) WithToolRunner
+
+	func (r *SkillStateRuntime) WithToolRunner(runner stateToolRunner) *SkillStateRuntime
+
+WithToolRunner injects the tool execution seam.
+
 <a name="SnowflakeEmbedClient"></a>
 ## type SnowflakeEmbedClient
 
@@ -9174,6 +14098,196 @@ NewSnowflakeEmbedClient creates a new Snowflake embedding client.
 
 
 
+<a name="SpawnContext"></a>
+## type SpawnContext
+
+SpawnContext is the complete context handed to a child agent at spawn time. Transcript is populated ONLY when Isolation == IsolationSharedTranscript; for every other isolation level it must be empty \(fail closed\).
+
+	type SpawnContext struct {
+	    Isolation  ContextIsolation
+	    Brief      string
+	    Artifacts  []ArtifactRef
+	    MemoryIDs  []string
+	    Transcript []llm.ChatMessage // populated ONLY when Isolation == SharedTranscript
+	}
+
+<a name="BuildSpawnContext"></a>
+### func BuildSpawnContext
+
+	func BuildSpawnContext(iso ContextIsolation, brief string, artifacts []ArtifactRef, memoryIDs []string, parent []llm.ChatMessage) SpawnContext
+
+BuildSpawnContext constructs a SpawnContext for a child spawn under the requested isolation level. parent is the parent conversation's messages; it is copied into the child ONLY for IsolationSharedTranscript.
+
+Unknown isolation values fail closed to IsolationArtifactOnly with a one\-time warning rather than falling back to a transcript copy.
+
+<a name="SpeakKind"></a>
+## type SpeakKind
+
+SpeakKind classifies how an agent run's final text should be delivered \(leaf 11: harness\-routed speak, Q11=A\). The model always ends a turn the same way; the HARNESS decides bubble vs notify vs parent report.
+
+	type SpeakKind int
+
+<a name="SpeakSession"></a>
+
+	const (
+	    // SpeakSession marks a session-attached run: the existing chat bubble
+	    // path (RunOnce's return value delivered by the chat transport) already
+	    // surfaces the text, so Deliver is a no-op in production for this kind.
+	    SpeakSession SpeakKind = iota
+	    // SpeakNotify marks a session-detached run (e.g. an employee goal
+	    // round): there is no watching chat, so the final text is pushed as a
+	    // notification on the employee.notify bus topic.
+	    SpeakNotify
+	    // SpeakParent marks an isolated child run: it MUST NOT notify or bubble.
+	    // Only a parent-facing report is written (never a user surface).
+	    SpeakParent
+	)
+
+<a name="ClassifyRun"></a>
+### func ClassifyRun
+
+	func ClassifyRun(sessionAttached, isolatedChild bool) SpeakKind
+
+ClassifyRun resolves the SpeakKind for a run from its harness attachment bits. Matrix \(C3/C4\):
+
+	sessionAttached  isolatedChild  kind
+	true             false          SpeakSession  (chat bubble path)
+	true             true           SpeakParent   (C4 trumps: fail-closed)
+	false            true           SpeakParent   (isolated child)
+	false            false          SpeakNotify   (detached, not isolated)
+	
+
+C4 is fail\-closed: an isolated child can never reach the user, even when the attachment bits are contradictory \(attached \+ isolated\).
+
+<a name="SpeakKind.String"></a>
+### func \(SpeakKind\) String
+
+	func (k SpeakKind) String() string
+
+String returns a human\-readable name for the kind \(used in logs\).
+
+<a name="SpeakPublisher"></a>
+## type SpeakPublisher
+
+SpeakPublisher is the injection seam SpeakRouter routes through. Tests inject a fake that records \(kind, sessionID, conversationID, text\); production injects BusSpeakPublisher. kind lets a single publisher route per\-kind \(e.g. publish employee.notify only for SpeakNotify\).
+
+	type SpeakPublisher func(kind SpeakKind, text, sessionID, conversationID string) error
+
+<a name="BusSpeakPublisher"></a>
+### func BusSpeakPublisher
+
+	func BusSpeakPublisher(b *bus.MessageBus, source string) SpeakPublisher
+
+BusSpeakPublisher adapts a MessageBus into a SpeakPublisher. Routing:
+
+- SpeakSession: no\-op nil — the chat bubble path \(RunOnce's return value\) already delivers attached text; publishing here would duplicate every bubble as a second chat\_message.
+- SpeakNotify: publishes SpeakTopicNotify with session\_id, conversation\_id, text. The WS bridge forwards this topic as the generic "event" type, never chat\_message.
+- SpeakParent: debug\-logged no\-op — parent reports have no user surface \(C4\); a dedicated parent\-report channel lands later.
+
+A nil bus yields a no\-op publisher \(safe for tests and disabled builds\).
+
+<a name="SpeakRouter"></a>
+## type SpeakRouter
+
+SpeakRouter routes a run's final text to the right delivery surface. The bus publisher is injected \(C3\) so the router never touches the bus directly and stays trivially fake\-able. A nil publisher is safe: Deliver logs and returns nil \(no\-op\) rather than panicking.
+
+	type SpeakRouter struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSpeakRouter"></a>
+### func NewSpeakRouter
+
+	func NewSpeakRouter(pub SpeakPublisher) *SpeakRouter
+
+NewSpeakRouter builds a router over the given publisher. A nil publisher is allowed \(typed\-nil interface guard pattern\): Deliver degrades to a debug\-logged no\-op.
+
+<a name="SpeakRouter.Deliver"></a>
+### func \(\*SpeakRouter\) Deliver
+
+	func (r *SpeakRouter) Deliver(ctx context.Context, kind SpeakKind, text, sessionID, conversationID string) error
+
+Deliver sends text according to kind \(C3 contract\):
+
+- Empty/whitespace text is a no\-op returning nil \(a detached run with nothing to say must not notify\).
+- SpeakNotify for an isolated child is silently dropped with a debug log and nil error: an isolated child MUST NOT notify \(C4\).
+- SpeakSession is routed to the publisher unchanged — in production the bus publisher no\-ops this kind because the chat bubble path \(the RunOnce return value\) is unchanged; the publisher seam keeps the router testable.
+- SpeakParent is routed to the publisher, which writes the parent report only \(never a user surface\).
+
+Errors from the publisher are returned wrapped; callers treat delivery as best\-effort \(log, do not fail the turn\).
+
+<a name="SpeakRouter.DeliverIsolatedNotify"></a>
+### func \(\*SpeakRouter\) DeliverIsolatedNotify
+
+	func (r *SpeakRouter) DeliverIsolatedNotify(ctx context.Context, text, sessionID, conversationID string) error
+
+DeliverIsolatedNotify silently drops a SpeakNotify delivery for an isolated child \(C4\). Split from Deliver so the drop site is explicit and documented rather than inferred from kind\+flags at the call site.
+
+<a name="SpeakRouter.ReplyCarrier"></a>
+### func \(\*SpeakRouter\) ReplyCarrier
+
+	func (r *SpeakRouter) ReplyCarrier(sessionAttached, isolatedChild bool, sessionID, conversationID string) func(text string) error
+
+ReplyCarrier returns the closure the loop injects into ReplyFuncSetter tools at turn start. The carrier classifies the CURRENT run from the captured attachment bits and routes through the router:
+
+- attached, not isolated: no\-op success — the bubble path already delivers mid\-turn text to a watching chat session.
+- detached, not isolated: Deliver\(SpeakNotify\) — the real mid\-turn notify seam for employee goal rounds.
+- isolated child: error "isolated child cannot speak to user" \(C4\).
+
+Called on the tool\-execution goroutine; router/publisher safety is their own concern \(both are concurrency\-safe or nil\-guarded\).
+
+<a name="SpeakRouter.SetPublisher"></a>
+### func \(\*SpeakRouter\) SetPublisher
+
+	func (r *SpeakRouter) SetPublisher(fn SpeakPublisher)
+
+SetPublisher replaces the injected publisher. Typed\-nil guard: a nil fn is ignored so a wiring order bug cannot silently strip a live publisher.
+
+<a name="StateField"></a>
+## type StateField
+
+StateField describes one Σ key. v1 ships exactly the default coding schema \(arXiv:2608.26263 §3.1: one schema per domain, authored once in code\).
+
+	type StateField struct {
+	    Name string // files_touched | tests_run | errors | next_step
+	    Type string // "array" | "string"
+	    Desc string
+	}
+
+<a name="DefaultStateSchema"></a>
+### func DefaultStateSchema
+
+	func DefaultStateSchema() []StateField
+
+DefaultStateSchema returns the default coding\-task Σ schema: files\_touched\(array\), tests\_run\(array\), errors\(string\), next\_step\(string\).
+
+<a name="StateTransition"></a>
+## type StateTransition
+
+StateTransition represents a state change event.
+
+	type StateTransition struct {
+	    // From is the previous state.
+	    From AgentState `json:"from"`
+	    // To is the new state.
+	    To  AgentState `json:"to"`
+	    // Reason is the reason for the transition (e.g., "tool_call_received", "error_occurred")
+	    Reason string `json:"reason"`
+	    // Metadata is optional key-value data associated with the transition.
+	    Metadata map[string]any `json:"metadata,omitempty"`
+	    // Timestamp is when the transition occurred.
+	    Timestamp time.Time `json:"timestamp"`
+	    // TurnID is the current turn/iteration number.
+	    TurnID int `json:"turn_id,omitempty"`
+	}
+
+<a name="StateTransitionListener"></a>
+## type StateTransitionListener
+
+StateTransitionListener is a callback for state transitions.
+
+	type StateTransitionListener func(transition StateTransition)
+
 <a name="StatusPayload"></a>
 ## type StatusPayload
 
@@ -9202,6 +14316,44 @@ StepCriterion defines what a single step must accomplish to be accepted.
 	    Required           bool   `json:"required"`
 	}
 
+<a name="StepHandoff"></a>
+## type StepHandoff
+
+StepHandoff is the structured handoff document produced after a step completes. Replaces the legacy 500\-char truncation in propagateContextToNextStepsLegacy.
+
+	type StepHandoff struct {
+	    StepID          string          `json:"step_id"`
+	    StepDescription string          `json:"step_description"`
+	    Summary         string          `json:"summary"`
+	    FilesModified   []FileChange    `json:"files_modified"`
+	    Decisions       []Decision      `json:"decisions"`
+	    Artifacts       []plan.Artifact `json:"artifacts"`
+	    FollowUpHints   []string        `json:"follow_up_hints"`
+	    ToolHighlights  []ToolHighlight `json:"tool_highlights"`
+	    ErrorCode       string          `json:"error_code,omitempty"`
+	}
+
+<a name="StepHandoff.Failed"></a>
+### func \(\*StepHandoff\) Failed
+
+	func (h *StepHandoff) Failed() bool
+
+Failed returns true if the step reported an error.
+
+<a name="StepHandoff.RenderMarkdown"></a>
+### func \(\*StepHandoff\) RenderMarkdown
+
+	func (h *StepHandoff) RenderMarkdown() string
+
+RenderMarkdown renders the handoff as markdown for injection into dependent steps' AccumulatedContext.
+
+<a name="StepHandoff.Truncate"></a>
+### func \(\*StepHandoff\) Truncate
+
+	func (h *StepHandoff) Truncate()
+
+Truncate enforces per\-field length limits to keep the handoff compact. Paths are preserved full length; summaries capped at 200 chars; descriptions at 300.
+
 <a name="StepJobPayload"></a>
 ## type StepJobPayload
 
@@ -9215,6 +14367,10 @@ StepJobPayload is the payload stored in a queue job for a task step.
 	    MemoryRefs           []string `json:"memory_refs,omitempty"`
 	    AccumulatedContext   string   `json:"accumulated_context,omitempty"`
 	    ValidationRetryCount int      `json:"validation_retry_count,omitempty"`
+	    // SessionID is the originating session (audit R4): recoverable only via
+	    // Task.LinkedSessions at schedule time, it rides the payload so the
+	    // interactive stamp is evaluable and auditable on the job itself.
+	    SessionID string `json:"session_id,omitempty"`
 	}
 
 <a name="StopDecision"></a>
@@ -9280,6 +14436,13 @@ RejectPlan cancels a plan that was awaiting approval. It sets the task to StateR
 
 ReplanFailedTask re\-plans a failed task into smaller steps for retry. This is called by the EscalationManager when a task fails and needs to be broken down into more manageable pieces.
 
+<a name="StrategicPlanner.SetPlanPhaseSink"></a>
+### func \(\*StrategicPlanner\) SetPlanPhaseSink
+
+	func (sp *StrategicPlanner) SetPlanPhaseSink(fn func(taskID string, phases []PlanPhaseSpec))
+
+SetPlanPhaseSink registers a callback invoked after multi\-phase plan generation. The callback receives the planner's phase declarations for persistence \(e.g., writing to plan.Store\). Nil\-guarded per CLAUDE.md.
+
 <a name="StrategicPlannerConfig"></a>
 ## type StrategicPlannerConfig
 
@@ -9304,8 +14467,42 @@ StrategicPlannerConfig holds configuration for the strategic planner.
 	    // PairInputMinChars is the threshold above which code/debug requests
 	    // are routed to pair sessions. Defaults to 200.
 	    PairInputMinChars int
+	    // InterviewAmbiguity overrides the hardcoded threshold (default 0.6).
+	    // 0 means use the default.
+	    InterviewAmbiguity float64
 	    // MetricsStore, when non-nil, receives planner outcome metrics.
 	    MetricsStore *metrics.Store
+	    // TemplateLoader, if non-nil, supplies markdown-overridable planner
+	    // prompts. If nil, the planner constructs a default loader.
+	    TemplateLoader *plannerTemplateLoader
+	    // MaxPhases caps the number of phases the multi-phase planner may
+	    // produce. Defaults to 12 when <= 0.
+	    MaxPhases int
+	    // MaxStepsPerPhase caps the number of steps per phase in multi-phase
+	    // planning. Defaults to 8 when <= 0.
+	    MaxStepsPerPhase int
+	    // PlanPhaseSink, when non-nil, receives the planner's phase declarations
+	    // for persistence (e.g., writing to plan.Store). Called after a
+	    // successful planMultiPhase decomposition.
+	    PlanPhaseSink func(taskID string, phases []PlanPhaseSpec)
+	}
+
+<a name="SubagentExecution"></a>
+## type SubagentExecution
+
+SubagentExecution records execution metadata for a subagent invocation.
+
+	type SubagentExecution struct {
+	    // AgentID is the unique ID of this subagent.
+	    AgentID string `json:"agent_id"`
+	    // ParentID is the agent ID that spawned this subagent, or empty for root.
+	    ParentID string `json:"parent_id,omitempty"`
+	    // Depth is the spawn depth (0 = root).
+	    Depth int `json:"depth"`
+	    // TurnsUsed is the number of tool+LLM turns consumed.
+	    TurnsUsed int `json:"turns_used"`
+	    // ToolCallsMade is the total number of tool calls issued.
+	    ToolCallsMade int `json:"tool_calls_made"`
 	}
 
 <a name="SubtaskAssignment"></a>
@@ -9318,6 +14515,29 @@ SubtaskAssignment holds a subtask assignment for a team member.
 	    Subtask  string
 	    Priority string
 	}
+
+<a name="SynthesizeTracesTool"></a>
+## type SynthesizeTracesTool
+
+SynthesizeTracesTool uses the LLM to summarize patterns across multiple traces.
+
+	type SynthesizeTracesTool struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSynthesizeTracesTool"></a>
+### func NewSynthesizeTracesTool
+
+	func NewSynthesizeTracesTool(store TraceStoreReader, llmClient *llm.Client) *SynthesizeTracesTool
+
+NewSynthesizeTracesTool creates the synthesis tool.
+
+<a name="SynthesizeTracesTool.Invoke"></a>
+### func \(\*SynthesizeTracesTool\) Invoke
+
+	func (t *SynthesizeTracesTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
+
+Invoke executes the synthesis tool.
 
 <a name="SynthesizedProgressEvent"></a>
 ## type SynthesizedProgressEvent
@@ -9471,6 +14691,27 @@ OnJobFailed handles a failed job by updating the step and potentially marking th
 	func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID string) error
 
 ScheduleReadySteps finds ready steps for a task and enqueues them as jobs. Steps that cannot be scheduled due to semaphore limits remain in "ready" state and will be retried on the next scheduling cycle.
+
+<a name="TacticalScheduler.SelectAgentForHint"></a>
+### func \(\*TacticalScheduler\) SelectAgentForHint
+
+	func (ts *TacticalScheduler) SelectAgentForHint(toolHint string) string
+
+SelectAgentForHint exports selectAgent so the tactical orchestrator \(and other callers outside the agent package\) can pick an executor agent ID for a tool hint without constructing a full TaskStep.
+
+<a name="TacticalScheduler.SetHandoffPropagator"></a>
+### func \(\*TacticalScheduler\) SetHandoffPropagator
+
+	func (ts *TacticalScheduler) SetHandoffPropagator(fn func(ctx context.Context, completedStep *task.TaskStep) error)
+
+SetHandoffPropagator installs a callback that replaces the legacy 500\-char truncation propagation. nil is ignored \(leaves the legacy path active\).
+
+<a name="TacticalScheduler.SetSessionStore"></a>
+### func \(\*TacticalScheduler\) SetSessionStore
+
+	func (ts *TacticalScheduler) SetSessionStore(store sessionStoreReader)
+
+SetSessionStore installs the session lookup used for the interactive stamp. nil is ignored \(leaves session\-less stamping active\).
 
 <a name="TacticalSchedulerConfig"></a>
 ## type TacticalSchedulerConfig
@@ -9994,6 +15235,64 @@ TeamStatus holds the overall team state and per\-member results.
 	    MemberResults map[string]*TeamMemberResult `json:"member_results"`
 	}
 
+<a name="TelemetryEmitter"></a>
+## type TelemetryEmitter
+
+TelemetryEmitter writes OTLP\-style spans to a JSONL file. Enabled when HALO\_TELEMETRY\_PATH env var is set. Modeled after HALO's telemetry emission \(main.py:217\-232\).
+
+	type TelemetryEmitter struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTelemetryEmitter"></a>
+### func NewTelemetryEmitter
+
+	func NewTelemetryEmitter(runID string) *TelemetryEmitter
+
+NewTelemetryEmitter creates an emitter for the given run ID. Checks HALO\_TELEMETRY\_PATH env var; if unset, returns disabled emitter.
+
+<a name="TelemetryEmitter.EmitAgentSpan"></a>
+### func \(\*TelemetryEmitter\) EmitAgentSpan
+
+	func (te *TelemetryEmitter) EmitAgentSpan(name, agentID, content string, depth int) error
+
+EmitAgentSpan is a convenience helper for emitting agent activity spans.
+
+<a name="TelemetryEmitter.EmitLLMSpan"></a>
+### func \(\*TelemetryEmitter\) EmitLLMSpan
+
+	func (te *TelemetryEmitter) EmitLLMSpan(name, model, prompt string, completion string, promptTokens, completionTokens int) error
+
+EmitLLMSpan is a convenience helper for emitting LLM call spans.
+
+<a name="TelemetryEmitter.EmitSpan"></a>
+### func \(\*TelemetryEmitter\) EmitSpan
+
+	func (te *TelemetryEmitter) EmitSpan(span OTLPSpan) error
+
+EmitSpan writes a single span to the telemetry JSONL file. Thread\-safe via mutex; appends one JSON line per span.
+
+<a name="TelemetryEmitter.EmitToolSpan"></a>
+### func \(\*TelemetryEmitter\) EmitToolSpan
+
+	func (te *TelemetryEmitter) EmitToolSpan(name, toolName, input, output string, durationMs int64) error
+
+EmitToolSpan is a convenience helper for emitting tool call spans.
+
+<a name="TelemetryEmitter.IsEnabled"></a>
+### func \(\*TelemetryEmitter\) IsEnabled
+
+	func (te *TelemetryEmitter) IsEnabled() bool
+
+IsEnabled returns true if telemetry is active.
+
+<a name="TelemetryEmitter.Path"></a>
+### func \(\*TelemetryEmitter\) Path
+
+	func (te *TelemetryEmitter) Path() string
+
+Path returns the telemetry file path \(empty if disabled\).
+
 <a name="ThinkingLevelSelectData"></a>
 ## type ThinkingLevelSelectData
 
@@ -10011,6 +15310,7 @@ ThreadRoutable is the minimal interface the ThreadRouter needs from a session st
 
 	type ThreadRoutable interface {
 	    Get(id string) *session.Session
+	    GetByConversationID(conversationID string) *session.Session
 	    GetActiveThread(ctx context.Context, sessionID string) (*session.Thread, error)
 	    ListThreadsBySession(ctx context.Context, sessionID string) ([]*session.Thread, error)
 	}
@@ -10087,6 +15387,33 @@ WithThreadRouterLogger sets the logger.
 
 WithThreadRouterSessionStore sets the session store.
 
+<a name="ToolConcurrencyProfile"></a>
+## type ToolConcurrencyProfile
+
+ToolConcurrencyProfile categorizes tools by their resource profile to drive adaptive parallelism \(Phase 3 of parallel\-tool\-execution plan\).
+
+	type ToolConcurrencyProfile uint8
+
+<a name="ProfileIOBound"></a>
+
+	const (
+	    // ProfileIOBound: network, file I/O. High parallelism safe.
+	    ProfileIOBound ToolConcurrencyProfile = iota
+	    // ProfileCPUBound: AST parsing, code analysis. Limited parallelism.
+	    ProfileCPUBound
+	    // ProfileStateful: shell sessions, DB connections. Sequential per resource.
+	    ProfileStateful
+	    // ProfileExclusive: git commit, global mutations. One at a time.
+	    ProfileExclusive
+	)
+
+<a name="ToolConcurrencyProfile.String"></a>
+### func \(ToolConcurrencyProfile\) String
+
+	func (p ToolConcurrencyProfile) String() string
+
+String returns the human\-readable name of the profile.
+
 <a name="ToolDefinitionInfo"></a>
 ## type ToolDefinitionInfo
 
@@ -10097,6 +15424,69 @@ ToolDefinitionInfo holds information about a tool for prompt building. This is s
 	    Description string
 	    Parameters  []ToolParameterInfo
 	}
+
+<a name="ToolDependencyGraph"></a>
+## type ToolDependencyGraph
+
+ToolDependencyGraph represents dependencies between tool calls.
+
+Nodes are tool calls keyed by their ID. Edges express "depends\-on" relationships: an edge from A to B means A depends on B \(B must execute before A\). IndependentGroups uses Kahn's algorithm to produce wave\-based topological groups for parallel scheduling.
+
+	type ToolDependencyGraph struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewToolDependencyGraph"></a>
+### func NewToolDependencyGraph
+
+	func NewToolDependencyGraph() *ToolDependencyGraph
+
+NewToolDependencyGraph creates an empty dependency graph.
+
+<a name="ToolDependencyGraph.AddCall"></a>
+### func \(\*ToolDependencyGraph\) AddCall
+
+	func (g *ToolDependencyGraph) AddCall(call llm.ToolCall)
+
+AddCall adds a tool call to the graph. Calls with duplicate IDs overwrite the previous node definition \(last\-wins\) to mirror map semantics, though callers should generally use unique IDs.
+
+<a name="ToolDependencyGraph.AddDependency"></a>
+### func \(\*ToolDependencyGraph\) AddDependency
+
+	func (g *ToolDependencyGraph) AddDependency(from, to string)
+
+AddDependency records that 'from' depends on 'to' — 'to' must execute before 'from'. Duplicate edges are silently ignored. Self\-edges are rejected \(a call never depends on itself\).
+
+<a name="ToolDependencyGraph.Dependents"></a>
+### func \(\*ToolDependencyGraph\) Dependents
+
+	func (g *ToolDependencyGraph) Dependents(id string) []string
+
+Dependents returns the IDs that depend on 'id' \(reverse lookup of edges\). Returns nil for unknown IDs or when nothing depends on 'id'.
+
+<a name="ToolDependencyGraph.GetDependencies"></a>
+### func \(\*ToolDependencyGraph\) GetDependencies
+
+	func (g *ToolDependencyGraph) GetDependencies(id string) []string
+
+GetDependencies returns the IDs that 'id' depends on \(must execute before 'id'\). Returns nil for unknown IDs.
+
+<a name="ToolDependencyGraph.IndependentGroups"></a>
+### func \(\*ToolDependencyGraph\) IndependentGroups
+
+	func (g *ToolDependencyGraph) IndependentGroups() [][]llm.ToolCall
+
+IndependentGroups returns groups of tool calls that can execute in parallel.
+
+Groups are computed using Kahn's algorithm, wave\-by\-wave:
+
+- Group 0 contains all nodes with no dependencies \(in\-degree 0\).
+- After "removing" group 0, group 1 contains nodes whose dependencies are all in earlier groups.
+- This continues until all nodes are consumed.
+
+All calls within a single group can run in parallel. Group N depends on groups 0..N\-1 completing first.
+
+If a cycle is detected \(nodes remain but none have in\-degree 0\), the remaining nodes are returned as a final fallback group and a warning is logged. This prevents infinite loops while still surfacing the problematic cycle for diagnosis.
 
 <a name="ToolDescription"></a>
 ## type ToolDescription
@@ -10115,6 +15505,26 @@ ToolDescription describes a tool for the system prompt.
 	func ToolsFromDefinitions(definitions []ToolDefinitionInfo) []ToolDescription
 
 ToolsFromDefinitions converts LLM tool definitions to ToolDescriptions. This bridges the gap between llm.ToolDefinition and the prompt builder.
+
+<a name="ToolDescriptor"></a>
+## type ToolDescriptor
+
+ToolDescriptor describes a tool with gating constraints across multiple dimensions: depth, invocation count, and runtime state.
+
+	type ToolDescriptor struct {
+	    Name        string
+	    Description string
+	    InputSchema llm.FunctionParameters
+	    // AvailableAtDepths lists the depths at which this tool is
+	    // available. If nil or empty, the tool is available at all depths.
+	    AvailableAtDepths []int
+	    // MaxUses limits total invocations across the agent run.
+	    // Zero means unlimited.
+	    MaxUses int
+	    // RequiresState, if non-empty, specifies the agent state
+	    // in which the tool becomes available. Empty means "any state".
+	    RequiresState string
+	}
 
 <a name="ToolErrorCode"></a>
 ## type ToolErrorCode
@@ -10227,6 +15637,16 @@ ToolExecutionUpdateData is emitted during tool execution progress.
 	    Detail     string `json:"detail"`
 	}
 
+<a name="ToolHighlight"></a>
+## type ToolHighlight
+
+ToolHighlight summarizes a notable tool invocation from the step.
+
+	type ToolHighlight struct {
+	    Tool    string `json:"tool"`
+	    Summary string `json:"summary"`
+	}
+
 <a name="ToolParameter"></a>
 ## type ToolParameter
 
@@ -10280,6 +15700,35 @@ The production \[tools.Registry\] satisfies this interface; see \[tools.Registry
 	func FilterToolsForSkill(registry ToolRegistry, allowedTools []string) ToolRegistry
 
 FilterToolsForSkill creates a filtered tool registry based on a skill's allowed\-tools. This is used when executing skills that have restricted tool access.
+
+<a name="ToolRetryBreaker"></a>
+## type ToolRetryBreaker
+
+ToolRetryBreaker is a circuit breaker for identical repeated tool failures \(harness\-eval leaf 05, book ch1 "Correct" layer\).
+
+Key = tool name \+ canonical JSON of args \(sorted keys\). Identical consecutive failures increment the counter; a success resets it. At WarnAt consecutive failures the breaker logs once per key; at VetoAt Observe returns veto=true so the caller skips the retry and injects a system note instead of burning iterations.
+
+The zero value is usable: WarnAt\<=0 becomes 3, VetoAt becomes 5. Thread\-safe: tool calls may run concurrently.
+
+	type ToolRetryBreaker struct {
+	    WarnAt int
+	    VetoAt int
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewToolRetryBreaker"></a>
+### func NewToolRetryBreaker
+
+	func NewToolRetryBreaker() *ToolRetryBreaker
+
+NewToolRetryBreaker returns a breaker with default thresholds \(warn 3, veto 5\).
+
+<a name="ToolRetryBreaker.Observe"></a>
+### func \(\*ToolRetryBreaker\) Observe
+
+	func (b *ToolRetryBreaker) Observe(name string, args map[string]any, failed bool) bool
+
+Observe records one tool outcome. failed=true increments the key's consecutive\-failure counter and returns veto=true once it reaches VetoAt \(a one\-time warn logs at WarnAt\). failed=false resets the key.
 
 <a name="TopicDetector"></a>
 ## type TopicDetector
@@ -10351,6 +15800,92 @@ WithLogger sets the logger used for debug\-level topic scoring output.
 	func WithTopicKeywords(topic string, keywords []string) TopicDetectorOption
 
 WithTopicKeywords adds keywords for the given topic.
+
+<a name="TraceQueryTool"></a>
+## type TraceQueryTool
+
+TraceQueryTool is the interface that trace query tools implement.
+
+	type TraceQueryTool interface {
+	    Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
+	}
+
+<a name="AllTraceTools"></a>
+### func AllTraceTools
+
+	func AllTraceTools(store TraceStoreReader, llmClient *llm.Client) []TraceQueryTool
+
+AllTraceTools returns all trace tools for registration in a tool registry.
+
+<a name="TraceRecordPayload"></a>
+## type TraceRecordPayload
+
+NewTraceWriterFunc is the exported constructor for daemon wiring: pass a function that persists a trace\-record\-shaped map or struct. Because traceRecordMirror is unexported, external packages adapt through TraceRecordPayload: build one from your store\-side record fields and the adapter converts it.
+
+	type TraceRecordPayload struct {
+	    ID             string
+	    SessionID      string
+	    Domain         string
+	    Outcome        string
+	    Error          string
+	    InjectedSkills []string
+	    Steps          []TraceStepPayload
+	    Summary        string
+	    CreatedAt      time.Time
+	}
+
+<a name="TraceStepPayload"></a>
+## type TraceStepPayload
+
+TraceStepPayload is the exported step shape for TraceRecordPayload.
+
+	type TraceStepPayload struct {
+	    Action  string
+	    Input   string
+	    Output  string
+	    Success bool
+	}
+
+<a name="TraceStoreReader"></a>
+## type TraceStoreReader
+
+TraceStoreReader abstracts trace store operations for the RLM analyzer. This interface allows the analyzer to work with any trace store implementation \(Phase 1 sidecar index or in\-memory mocks\).
+
+	type TraceStoreReader interface {
+	    ListTraceIDs() ([]string, error)
+	    GetSpansForTrace(traceID string) ([]string, error)
+	    ListSpans(spanIDs []string) ([]spanViewData, error)
+	}
+
+<a name="TraceWriter"></a>
+## type TraceWriter
+
+TraceWriter is the narrow persistence hook the loop uses to persist turn traces. Implemented by \*selfimprove.TraceStore \(wired in leaf 05 via selfimprove.NewTraceStore\) — the agent package itself never imports selfimprove.
+
+	type TraceWriter interface {
+	    WriteTrace(rec *traceRecordMirror) (string, error)
+	}
+
+<a name="NewTraceStoreWriter"></a>
+### func NewTraceStoreWriter
+
+	func NewTraceStoreWriter(persist func(payload TraceRecordPayload) (string, error)) TraceWriter
+
+NewTraceStoreWriter builds a TraceWriter from a caller\-supplied persist function that accepts the exported payload shape. The daemon passes a closure over \*selfimprove.TraceStore, converting payload → store record — no cross\-package import of the unexported mirror types.
+
+<a name="TraceWriterFunc"></a>
+## type TraceWriterFunc
+
+TraceWriterFunc adapts a plain write function into a TraceWriter. The function receives the record with ID and CreatedAt already populated by the adapter; it performs the actual persistence \(the daemon wires this to \*selfimprove.TraceStore.Write without either package importing the other\).
+
+	type TraceWriterFunc func(rec *traceRecordMirror) (string, error)
+
+<a name="TraceWriterFunc.WriteTrace"></a>
+### func \(TraceWriterFunc\) WriteTrace
+
+	func (f TraceWriterFunc) WriteTrace(rec *traceRecordMirror) (string, error)
+
+WriteTrace implements TraceWriter: it fills in the record ID \(pkg/id, the store rejects empty IDs\) and CreatedAt when unset, then delegates.
 
 <a name="TrackerSessionState"></a>
 ## type TrackerSessionState
@@ -10425,6 +15960,7 @@ TrueIntentAnalysis represents a deep analysis of the user's actual intent.
 	    Category           string   `json:"category"`
 	    SuggestedQuestions []string `json:"suggested_questions"`
 	    Confidence         float64  `json:"confidence"`
+	    SuggestedMode      string   `json:"suggested_mode,omitempty"`
 	}
 
 <a name="TrueIntentAnalysis.IsAmbiguous"></a>
@@ -10433,6 +15969,19 @@ TrueIntentAnalysis represents a deep analysis of the user's actual intent.
 	func (a *TrueIntentAnalysis) IsAmbiguous(threshold float64) bool
 
 IsAmbiguous returns true if the ambiguity score meets or exceeds the threshold.
+
+<a name="Turn"></a>
+## type Turn
+
+Turn represents a single agent turn during RLM analysis.
+
+	type Turn struct {
+	    Type       string
+	    ToolName   string
+	    ToolInput  map[string]any
+	    Content    string
+	    TokenCount int
+	}
 
 <a name="TurnAction"></a>
 ## type TurnAction
@@ -10507,6 +16056,29 @@ RecordUsage records token usage for the current turn.
 	func (t *TurnBudgetTracker) RemainingBudget() int
 
 RemainingBudget returns tokens remaining in the budget.
+
+<a name="TurnCompactor"></a>
+## type TurnCompactor
+
+TurnCompactor compacts agent turns for efficient context window usage.
+
+	type TurnCompactor struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTurnCompactor"></a>
+### func NewTurnCompactor
+
+	func NewTurnCompactor() *TurnCompactor
+
+NewTurnCompactor creates a compactor with sensible defaults.
+
+<a name="TurnCompactor.CompactTurns"></a>
+### func \(\*TurnCompactor\) CompactTurns
+
+	func (tc *TurnCompactor) CompactTurns(turns []Turn) []CompactTurn
+
+CompactTurns merges consecutive tool\_call \+ tool\_response pairs and collapses redundant thinking turns. Returns \~40% reduction in context size for typical RLM runs.
 
 <a name="TurnEndData"></a>
 ## type TurnEndData
@@ -10651,6 +16223,163 @@ TurnModification requests changes to the next turn.
 	    Reason        string
 	}
 
+<a name="TurnParker"></a>
+## type TurnParker
+
+TurnParker parks ParkedTurnRecords and retries them once their resume time passes. It polls on a fixed interval; when the earliest resume time among parked records has passed, it drains the queue \(oldest first, sequentially — a slow resume delays later resumes rather than reordering them\) by invoking the resume callback.
+
+MaxWait soft\-stop: records whose remaining wait exceeds MaxWait are parked anyway but scheduled at now\+MaxWait \(min\(ResumeAt, now\+MaxWait\)\). Consumers that must refuse instead of rescheduling \(chat quota\) check the wait before calling Park.
+
+A panicking resume callback is recovered, logged, and its record dropped — the watcher keeps serving later records. The parker is best\-effort in memory: with persistence wired, records parked when Stop runs survive in the store and re\-arm on the next Start \(Stop only logs the count\); without persistence they are dropped \(logged at warn\).
+
+	type TurnParker struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTurnParker"></a>
+### func NewTurnParker
+
+	func NewTurnParker(logger *slog.Logger, resume func(context.Context, ParkedTurnRecord), maxWait time.Duration) *TurnParker
+
+NewTurnParker creates a parker. resume is invoked \(in a background goroutine\) for each parked record once its resume time passes; it is responsible for re\-running the turn and routing the result. A nil resume disables auto\-resume \(Park becomes a no\-op\). maxWait \<= 0 falls back to llm.DefaultQuotaMaxWait.
+
+<a name="TurnParker.EmitParkEvent"></a>
+### func \(\*TurnParker\) EmitParkEvent
+
+	func (p *TurnParker) EmitParkEvent(rec ParkedTurnRecord, modelID, providerID string)
+
+EmitParkEvent is the exported park\-event hook for park sites outside the agent package \(the employee goal\-loop parker shares this TurnParker; leaf 04 wires its emission through the same agent.quota\_wait topic, D9\). modelID/providerID may be empty when the park site has no model context.
+
+<a name="TurnParker.EmitResumeEvent"></a>
+### func \(\*TurnParker\) EmitResumeEvent
+
+	func (p *TurnParker) EmitResumeEvent(rec ParkedTurnRecord, trueParkAt time.Time)
+
+EmitResumeEvent is the exported resume\-event hook, symmetric to EmitParkEvent: call it from external resume sites right before the turn re\-enters its loop. trueParkAt may be zero when the caller has no park timestamp \(Waited then measures from the scheduled ResumeAt — see emitResumeEvent for the D\-M3 accuracy note\).
+
+<a name="TurnParker.Next"></a>
+### func \(\*TurnParker\) Next
+
+	func (p *TurnParker) Next(class llm.FailureClass) (time.Time, bool)
+
+Next returns the earliest resume time among parked records of the given failure class \(leaf 04's per\-class surface\), and whether any exist.
+
+<a name="TurnParker.Park"></a>
+### func \(\*TurnParker\) Park
+
+	func (p *TurnParker) Park(turn ParkedTurnRecord) bool
+
+Park enqueues a record for later retry once its resume time passes. Returns false \(and does nothing\) when:
+
+- auto\-resume is not configured, or
+- the resume time is unknown/zero \(cannot schedule\), or
+- the resume time has already passed \(already due; caller should retry directly\).
+
+A record whose wait exceeds MaxWait is soft\-stopped rather than refused: it is parked, scheduled at now\+MaxWait \(min\(ResumeAt, now\+MaxWait\), SHARED\-CONVENTIONS §4.5\), and Park returns true. Consumers that must refuse over\-MaxWait waits \(chat quota\) pre\-check before delegating.
+
+<a name="TurnParker.Pending"></a>
+### func \(\*TurnParker\) Pending
+
+	func (p *TurnParker) Pending() int
+
+Pending returns the number of currently parked records.
+
+<a name="TurnParker.SetParkEventBus"></a>
+### func \(\*TurnParker\) SetParkEventBus
+
+	func (p *TurnParker) SetParkEventBus(b parkEventBus)
+
+SetParkEventBus installs the bus park/resume/give\-up events publish to on the EXISTING agent.quota\_wait topic \(leaf 04 Task 1\). Nil disables publishing \(the default; parking stays silent\). Daemon wiring calls this once at construction, before Start, so no lock is needed afterwards \(same regime as pollInterval/maxWait\).
+
+<a name="TurnParker.SetParkKey"></a>
+### func \(\*TurnParker\) SetParkKey
+
+	func (p *TurnParker) SetParkKey(keyFn func(rec ParkedTurnRecord) string)
+
+SetParkKey installs a per\-record persistence\-key override \(episode wiring: the H4 employee\+phase\+trigger identity derived from goalTurnPayload\). Nil disables the override \(chat\-side default keys\). Wiring\-time setter, like SetParkPersistence.
+
+<a name="TurnParker.SetParkPersistence"></a>
+### func \(\*TurnParker\) SetParkPersistence
+
+	func (p *TurnParker) SetParkPersistence(store ParkPersistence, kind ParkKind)
+
+SetParkPersistence wires durable parked\-turn storage \(park\_store\_sqlite.go\) and the ParkKind scoping its rows. Nil store restores memory\-only behaviour. Like SetParkEventBus this is a wiring\-time setter: call it once, before Start \(re\-arm happens in Start\), so no lock is needed afterwards.
+
+<a name="TurnParker.SetPollInterval"></a>
+### func \(\*TurnParker\) SetPollInterval
+
+	func (p *TurnParker) SetPollInterval(d time.Duration)
+
+SetPollInterval overrides the re\-check cadence \(config plumbing seam\). Must be called before Start.
+
+<a name="TurnParker.SetResumeFunc"></a>
+### func \(\*TurnParker\) SetResumeFunc
+
+	func (p *TurnParker) SetResumeFunc(resume func(context.Context, ParkedTurnRecord))
+
+SetResumeFunc swaps the resume callback. Only intended for wiring setups that build a parker before the resume router exists \(tree 03 leaf 02: the loop\-installed class dispatcher replaces the constructor callback\). Safe before Start; after Start it takes effect from the next drainDue pass.
+
+<a name="TurnParker.Start"></a>
+### func \(\*TurnParker\) Start
+
+	func (p *TurnParker) Start(ctx context.Context)
+
+Start begins the background polling loop. Safe to call once; subsequent calls are no\-ops. With persistence wired \(SetParkPersistence\), the first Start also re\-arms records persisted by the previous run: survivors are queued, expired rows are pruned by the store, and already\-due records drain immediately.
+
+<a name="TurnParker.Stop"></a>
+### func \(\*TurnParker\) Stop
+
+	func (p *TurnParker) Stop()
+
+Stop halts the polling loop and waits for it to exit. Records that have not yet resumed stay in the persistence store \(if wired\) and re\-arm on the next Start; without persistence they are logged and dropped.
+
+<a name="TurnParker.WaitInfo"></a>
+### func \(\*TurnParker\) WaitInfo
+
+	func (p *TurnParker) WaitInfo() []ParkWaitInfo
+
+WaitInfo returns one ParkWaitInfo per failure class that currently has parked records, sorted by Next \(earliest resume first\) so surfaces render deterministically. An empty/nil parker returns nil. Collected under the parker mutex; callers operate on the returned slice after release \(mutexio convention\). Mirrors Next/Pending \(leaf 01\) — this is the ONE query the TUI/GUI quota\_wait labels consume.
+
+<a name="TurnRecord"></a>
+## type TurnRecord
+
+TurnRecord represents a single tool invocation in a turn snapshot.
+
+	type TurnRecord struct {
+	    Name       string         `json:"name"`
+	    Input      map[string]any `json:"input,omitempty"`
+	    Output     string         `json:"output,omitempty"`
+	    Success    bool           `json:"success"`
+	    DurationMs int            `json:"duration_ms,omitempty"`
+	}
+
+<a name="TurnSnapshot"></a>
+## type TurnSnapshot
+
+TurnSnapshot is an atomic record of one agent turn: tool calls, LLM messages, and outputs. Written atomically for crash recovery and post\-hoc analysis.
+
+Modeled after HALO's turn compaction pattern \(engine/main.py\).
+
+	type TurnSnapshot struct {
+	    Sequence    int               `json:"sequence"`
+	    TurnID      string            `json:"turn_id"`
+	    ToolCalls   []TurnRecord      `json:"tool_calls"`
+	    LLMMessages []LLMMessage      `json:"llm_messages"`
+	    Output      string            `json:"output"`
+	    Timestamp   time.Time         `json:"timestamp"`
+	    Metadata    map[string]string `json:"metadata,omitempty"`
+	}
+
+<a name="TurnSnapshotFile"></a>
+## type TurnSnapshotFile
+
+TurnSnapshotFile is the on\-disk JSON wrapper for a TurnSnapshot plus version header.
+
+	type TurnSnapshotFile struct {
+	    Version  int          `json:"version"`
+	    Snapshot TurnSnapshot `json:"snapshot"`
+	}
+
 <a name="TurnStartData"></a>
 ## type TurnStartData
 
@@ -10675,6 +16404,38 @@ TurnState provides read\-only access to the current turn state.
 	    ModelRef       string
 	    TotalTokens    int
 	    LastResponse   string
+	}
+
+<a name="TurnStatus"></a>
+## type TurnStatus
+
+TurnStatus is the machine\-maintained snapshot rendered into the per\-turn \[status\] prompt block \(harness\-eval leaf 13, contract C8\). It is populated by the loop from state it already holds; it never carries model prose, message text, model names, or timestamps.
+
+	type TurnStatus struct {
+	    // TurnIndex is the loop's turn index at prompt-assembly time (the count
+	    // of turns already completed for this loop). Expected non-negative; the
+	    // renderer does not clamp.
+	    TurnIndex int
+	    // ToolsThisTurn is the count of tool definitions exposed to the model
+	    // this turn (post skill filtering). Expected non-negative.
+	    ToolsThisTurn int
+	    // Isolation is the child-context isolation mode. Empty (or any value
+	    // that is not a known ContextIsolation constant) renders as "unknown".
+	    Isolation ContextIsolation
+	    // Speak is the run's delivery kind. Zero (SpeakSession) is ambiguous
+	    // with "not set", so it renders as "session" only when SessionAttached
+	    // corroborates it; otherwise it fails closed to "unknown".
+	    Speak SpeakKind
+	    // SessionAttached marks the run as bound to a watching chat session.
+	    SessionAttached bool
+	    // IsolatedChild marks the run as an isolated child (C4): it can never
+	    // reach the user, so the bar always renders speak=parent for it.
+	    IsolatedChild bool
+	    // GateState is the roster gate's result on THIS turn: "skipped",
+	    // "passed", "failed", or "" when the gate did not run this turn
+	    // (renders "n/a"). Any other value renders "unknown" — the bar never
+	    // invents success.
+	    GateState string
 	}
 
 <a name="ValidateCheckpointResult"></a>
@@ -10778,6 +16539,241 @@ ParseVerbosityLevel converts a string to a VerbosityLevel. Returns VerbosityNorm
 	func (v VerbosityLevel) String() string
 
 String returns a human\-readable name for the verbosity level.
+
+<a name="Verdict"></a>
+## type Verdict
+
+Verdict represents the outcome of an adversarial verification check.
+
+	type Verdict int
+
+<a name="VerdictPass"></a>
+
+	const (
+	    // VerdictPass indicates all checks passed.
+	    VerdictPass Verdict = iota
+	    // VerdictFail indicates one or more critical checks failed.
+	    VerdictFail
+	    // VerdictPartial indicates the implementation mostly works but has issues.
+	    VerdictPartial
+	    // VerdictUnknown indicates no valid verdict was found in the output.
+	    VerdictUnknown
+	)
+
+<a name="Verdict.String"></a>
+### func \(Verdict\) String
+
+	func (v Verdict) String() string
+
+String returns the human\-readable verdict name.
+
+<a name="VerificationAutoTrigger"></a>
+## type VerificationAutoTrigger
+
+VerificationAutoTrigger is a PrepareNextTurnHook that injects a verification nudge message when the tracked file\-modifying tool call count reaches the configured threshold. When a VerifierSpawner is available, it also spawns an independent adversarial verifier and handles FAIL verdicts with a fix loop.
+
+	type VerificationAutoTrigger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewVerificationAutoTrigger"></a>
+### func NewVerificationAutoTrigger
+
+	func NewVerificationAutoTrigger(tracker *VerificationTracker, config VerificationConfig) *VerificationAutoTrigger
+
+NewVerificationAutoTrigger wires a tracker and verification config into a hook ready for registration with the HookRegistry.
+
+<a name="VerificationAutoTrigger.ClearModelOverride"></a>
+### func \(\*VerificationAutoTrigger\) ClearModelOverride
+
+	func (h *VerificationAutoTrigger) ClearModelOverride(ctx context.Context)
+
+ClearModelOverride implements ModelOverrideFreshTurnHook \(leaf 04, R1\): a persistent override armed by ApplyEscalation is cleared when a turn arrives WITHOUT a pending escalation and verification passed — the fresh turn must run on the BASE model again \(no sticky escalation across turns\). Swept by HookRegistry.ClearFreshTurnOverrides at the start of every turn; clearing is idempotent.
+
+<a name="VerificationAutoTrigger.PrepareNextTurn"></a>
+### func \(\*VerificationAutoTrigger\) PrepareNextTurn
+
+	func (h *VerificationAutoTrigger) PrepareNextTurn(ctx context.Context, state TurnState) TurnModification
+
+PrepareNextTurn implements PrepareNextTurnHook. It returns a nudge message when verification is enabled, auto\-trigger is on, and the threshold is met. When a spawner is available, it also runs the verifier and handles FAIL.
+
+<a name="VerificationAutoTrigger.SetAgentIDSource"></a>
+### func \(\*VerificationAutoTrigger\) SetAgentIDSource
+
+	func (h *VerificationAutoTrigger) SetAgentIDSource(source AgentIDSource)
+
+SetAgentIDSource attaches the agent\-id source used in bus payloads. Nil/typed\-nil is a no\-op per repo setter rules.
+
+<a name="VerificationAutoTrigger.SetAgentSpec"></a>
+### func \(\*VerificationAutoTrigger\) SetAgentSpec
+
+	func (h *VerificationAutoTrigger) SetAgentSpec(spec *AgentSpec)
+
+SetAgentSpec attaches the owning AgentSpec so the hook can consult EscalationModel at fix\-loop exhaustion. Nil \(or typed\-nil\) input is a no\-op per repo setter rules.
+
+<a name="VerificationAutoTrigger.SetClearOverride"></a>
+### func \(\*VerificationAutoTrigger\) SetClearOverride
+
+	func (h *VerificationAutoTrigger) SetClearOverride(clear func())
+
+SetClearOverride attaches the loop seam that clears the model override \(AgentLoop.ClearModelOverride\) on fresh\-turn detection. Nil/typed\-nil is a no\-op per repo setter rules.
+
+<a name="VerificationAutoTrigger.SetEventPublisher"></a>
+### func \(\*VerificationAutoTrigger\) SetEventPublisher
+
+	func (h *VerificationAutoTrigger) SetEventPublisher(publish EventPublisher)
+
+SetEventPublisher attaches the bus publisher used for TopicAgentModelEscalated events. Nil/typed\-nil is a no\-op per repo setter rules; without a publisher the escalation still applies, just without the bus event.
+
+<a name="VerificationAutoTrigger.SetOverrideApplier"></a>
+### func \(\*VerificationAutoTrigger\) SetOverrideApplier
+
+	func (h *VerificationAutoTrigger) SetOverrideApplier(applier func(modelRef string))
+
+SetOverrideApplier attaches the loop seam that arms the PERSISTENT model override \(AgentLoop.SetPersistentModelOverride\) when an escalation applies \(R1\). Nil/typed\-nil is a no\-op per repo setter rules.
+
+<a name="VerificationAutoTrigger.SetResolver"></a>
+### func \(\*VerificationAutoTrigger\) SetResolver
+
+	func (h *VerificationAutoTrigger) SetResolver(resolver ModelResolver)
+
+SetResolver attaches the model resolver used to resolve the escalation target. Nil \(or a typed\-nil carrier\) is a no\-op per repo setter rules; without a resolver the escalation decision degrades to the legacy user\-escalation path.
+
+<a name="VerificationAutoTrigger.SetSpawner"></a>
+### func \(\*VerificationAutoTrigger\) SetSpawner
+
+	func (h *VerificationAutoTrigger) SetSpawner(s VerifierSpawner)
+
+SetSpawner sets the verifier spawner for full adversarial verification. When nil, the hook operates in nudge\-only mode.
+
+<a name="VerificationConfig"></a>
+## type VerificationConfig
+
+VerificationConfig configures post\-completion verification for an agent.
+
+	type VerificationConfig struct {
+	    // Enabled controls whether verification runs after this agent completes.
+	    Enabled bool `json:"enabled" yaml:"enabled"`
+	    // Model overrides the model used for verification. Empty = use agent's model.
+	    Model string `json:"model" yaml:"model"`
+	    // AutoTrigger controls whether verification triggers automatically on completion.
+	    AutoTrigger bool `json:"auto_trigger" yaml:"auto_trigger"`
+	    // MaxFixLoops is the maximum number of fix-reverify cycles.
+	    MaxFixLoops int `json:"max_fix_loops" yaml:"max_fix_loops"`
+	}
+
+<a name="DefaultVerificationConfig"></a>
+### func DefaultVerificationConfig
+
+	func DefaultVerificationConfig() VerificationConfig
+
+DefaultVerificationConfig returns sensible verification defaults.
+
+<a name="VerificationConfig.EffectiveModel"></a>
+### func \(VerificationConfig\) EffectiveModel
+
+	func (v VerificationConfig) EffectiveModel(agentModel string) string
+
+EffectiveModel returns the verification model to use: the explicit override if set, otherwise the agent's own model.
+
+<a name="VerificationTracker"></a>
+## type VerificationTracker
+
+VerificationTracker counts file\-modifying tool calls and tracks which files were changed so the verification auto\-trigger hook can nudge the agent to self\-verify before reporting completion.
+
+	type VerificationTracker struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewVerificationTracker"></a>
+### func NewVerificationTracker
+
+	func NewVerificationTracker(threshold int) *VerificationTracker
+
+NewVerificationTracker creates a tracker that fires after threshold file\-modifying tool calls. Thresholds below 1 default to 3.
+
+<a name="VerificationTracker.RecordToolCall"></a>
+### func \(\*VerificationTracker\) RecordToolCall
+
+	func (t *VerificationTracker) RecordToolCall(toolName string, filePath string)
+
+RecordToolCall increments the edit counter when toolName is a file\-modifying tool. filePath is recorded when non\-empty.
+
+<a name="VerificationTracker.Reset"></a>
+### func \(\*VerificationTracker\) Reset
+
+	func (t *VerificationTracker) Reset()
+
+Reset clears all tracked state without returning the file list.
+
+<a name="VerificationTracker.ShouldTrigger"></a>
+### func \(\*VerificationTracker\) ShouldTrigger
+
+	func (t *VerificationTracker) ShouldTrigger() bool
+
+ShouldTrigger reports whether the edit count has reached the threshold.
+
+<a name="VerificationTracker.Snapshot"></a>
+### func \(\*VerificationTracker\) Snapshot
+
+	func (t *VerificationTracker) Snapshot() []string
+
+Snapshot returns the list of changed files and resets the counter and file list so the next trigger cycle starts fresh.
+
+<a name="VerifierSpawner"></a>
+## type VerifierSpawner
+
+VerifierSpawner is the interface the hook needs to spawn an independent verifier subagent. AgentLoop implements this.
+
+	type VerifierSpawner interface {
+	    SpawnVerifier(ctx context.Context, prompt string, modelRef string) (string, error)
+	}
+
+<a name="ViewSpansTool"></a>
+## type ViewSpansTool
+
+ViewSpansTool reads specific spans by ID with surgical \(16KB\) truncation.
+
+	type ViewSpansTool struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewViewSpansTool"></a>
+### func NewViewSpansTool
+
+	func NewViewSpansTool(store TraceStoreReader) *ViewSpansTool
+
+NewViewSpansTool creates the view spans tool.
+
+<a name="ViewSpansTool.Invoke"></a>
+### func \(\*ViewSpansTool\) Invoke
+
+	func (t *ViewSpansTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
+
+Invoke executes the tool.
+
+<a name="ViewTraceTool"></a>
+## type ViewTraceTool
+
+ViewTraceTool returns all spans of one trace with attribute truncation.
+
+	type ViewTraceTool struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewViewTraceTool"></a>
+### func NewViewTraceTool
+
+	func NewViewTraceTool(store TraceStoreReader) *ViewTraceTool
+
+NewViewTraceTool creates the view trace tool.
+
+<a name="ViewTraceTool.Invoke"></a>
+### func \(\*ViewTraceTool\) Invoke
+
+	func (t *ViewTraceTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
+
+Invoke executes the tool.
 
 <a name="Watchdog"></a>
 ## type Watchdog
@@ -10904,6 +16900,7 @@ Worker represents an active agent processing a request.
 	type Worker struct {
 	    ID             string    `json:"id"`
 	    ConversationID string    `json:"conversation_id"`
+	    SessionID      string    `json:"session_id,omitempty"` // original session ID for WS routing
 	    RequestID      string    `json:"request_id"`
 	    State          string    `json:"state"` // "processing", "executing_tool", "completed", "error"
 	    StartTime      time.Time `json:"start_time"`
@@ -10942,6 +16939,27 @@ WorkerState tracks the state of a single monitored worker/agent.
 	    Stage         WorkerStage
 	    IsStuck       bool
 	    CancelFunc    context.CancelFunc
+	}
+
+<a name="WorkingDirSetter"></a>
+## type WorkingDirSetter
+
+WorkingDirSetter is implemented by tools that accept a session\-scoped working directory resolver \(e.g. ProjectInfoTool\). The agent layer uses this interface to avoid importing the builtin package \(which imports agent\).
+
+	type WorkingDirSetter interface {
+	    SetWorkingDirFunc(fn func() string)
+	}
+
+<a name="WorkspaceCheckpoint"></a>
+## type WorkspaceCheckpoint
+
+WorkspaceCheckpoint represents a workspace checkpoint for rollback.
+
+	type WorkspaceCheckpoint struct {
+	    TaskID    string    `json:"task_id"`
+	    Label     string    `json:"label"`
+	    GitRef    string    `json:"git_ref"`
+	    Timestamp time.Time `json:"timestamp"`
 	}
 
 <a name="WorkspaceConfig"></a>
@@ -11008,7 +17026,7 @@ Create creates a new workspace directory and initializes it as a git repo.
 <a name="WorkspaceManager.CreateCheckpoint"></a>
 ### func \(\*WorkspaceManager\) CreateCheckpoint
 
-	func (w *WorkspaceManager) CreateCheckpoint(ctx context.Context, taskID, label string) (*Checkpoint, error)
+	func (w *WorkspaceManager) CreateCheckpoint(ctx context.Context, taskID, label string) (*WorkspaceCheckpoint, error)
 
 CreateCheckpoint creates a checkpoint in the workspace using git tags. The tag format is: checkpoint\-\{taskID\}\-\{label\}\-\{timestamp\}
 
@@ -11029,7 +17047,7 @@ GetPath returns the workspace path for a task, or empty string if not found.
 <a name="WorkspaceManager.ListCheckpoints"></a>
 ### func \(\*WorkspaceManager\) ListCheckpoints
 
-	func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) ([]Checkpoint, error)
+	func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) ([]WorkspaceCheckpoint, error)
 
 ListCheckpoints returns all checkpoints for a task. AGENT\-17 FIX: Tag parsing extracts timestamp from the end \(last numeric segment after the final dash\) and joins everything between taskID and timestamp as the label, correctly handling labels containing dashes \(e.g. "fix\-a\-bug\-1712345678"\).
 
