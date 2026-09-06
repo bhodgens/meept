@@ -67,35 +67,35 @@
     "path": "Content-Type",
     "handler": "",
     "file": "internal/tools/builtin/web_fetch.go",
-    "line": 263
+    "line": 264
   },
   {
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
     "file": "internal/tools/builtin/web_fetch.go",
-    "line": 448
+    "line": 474
   },
   {
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1268
+    "line": 1284
   },
   {
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1379
+    "line": 1395
   },
   {
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/sigv4.go",
-    "line": 72
+    "line": 77
   },
   {
     "method": "GET",
@@ -2048,7 +2048,7 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/codex.go",
-    "line": 526
+    "line": 532
   },
   {
     "method": "GET",
@@ -2062,14 +2062,14 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1276
+    "line": 1292
   },
   {
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 2063
+    "line": 2079
   },
   {
     "method": "GET",
@@ -2251,21 +2251,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6509
+    "line": 6750
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6520
+    "line": 6761
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6501
+    "line": 6742
   },
   {
     "method": "GET",
@@ -2412,14 +2412,14 @@
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1015
+    "line": 1053
   },
   {
     "method": "GET",
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1152
+    "line": 1190
   },
   {
     "method": "GET",
@@ -2525,5 +2525,19 @@
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
     "line": 3839
+  },
+  {
+    "method": "GET",
+    "path": "v",
+    "handler": "",
+    "file": "internal/tools/leaf01check/transcript_fetch.go",
+    "line": 224
+  },
+  {
+    "method": "GET",
+    "path": "v",
+    "handler": "",
+    "file": "internal/tools/builtin/transcript_fetch.go",
+    "line": 224
   }
 ]

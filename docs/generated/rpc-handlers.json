@@ -33,13 +33,13 @@
     "topic": "bus.publish",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 561
+    "line": 573
   },
   {
     "topic": "bus.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 582
+    "line": 594
   },
   {
     "topic": "bus.subscribe",
@@ -243,7 +243,7 @@
     "topic": "daemon.status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 550
+    "line": 562
   },
   {
     "topic": "daemon.stop",
@@ -306,10 +306,22 @@
     "line": 97
   },
   {
+    "topic": "effects.list",
+    "handler": "h.handleList",
+    "file": "internal/rpc/effects.go",
+    "line": 33
+  },
+  {
+    "topic": "effects.reconcile",
+    "handler": "h.handleReconcile",
+    "file": "internal/rpc/effects.go",
+    "line": 34
+  },
+  {
     "topic": "firewall.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 553
+    "line": 565
   },
   {
     "topic": "instruction.add",
@@ -357,7 +369,7 @@
     "topic": "memory.findCanonical",
     "handler": "h.handleFindCanonical",
     "file": "internal/rpc/epistemic.go",
-    "line": 46
+    "line": 47
   },
   {
     "topic": "memory.listAutoClaims",
@@ -366,10 +378,16 @@
     "line": 43
   },
   {
+    "topic": "memory.listExpired",
+    "handler": "h.handleListExpiredClaims",
+    "file": "internal/rpc/epistemic.go",
+    "line": 44
+  },
+  {
     "topic": "memory.listPendingReviews",
     "handler": "h.handleListPendingReviews",
     "file": "internal/rpc/epistemic.go",
-    "line": 45
+    "line": 46
   },
   {
     "topic": "memory.markResolved",
@@ -393,7 +411,7 @@
     "topic": "memory.purgeAutoClaims",
     "handler": "h.handlePurgeAutoClaims",
     "file": "internal/rpc/epistemic.go",
-    "line": 44
+    "line": 45
   },
   {
     "topic": "memory.query",
@@ -441,7 +459,7 @@
     "topic": "memory.reviewQueue",
     "handler": "h.handleReviewQueue",
     "file": "internal/rpc/epistemic.go",
-    "line": 47
+    "line": 48
   },
   {
     "topic": "memory.vector.search",
@@ -519,7 +537,7 @@
     "topic": "ping",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 464
+    "line": 470
   },
   {
     "topic": "plan.approve",
@@ -1227,7 +1245,7 @@
     "topic": "status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 549
+    "line": 561
   },
   {
     "topic": "status",
@@ -1251,7 +1269,7 @@
     "topic": "task.amend.submit",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 587
+    "line": 599
   },
   {
     "topic": "task.cancel",
