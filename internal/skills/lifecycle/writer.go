@@ -163,6 +163,14 @@ func (w *Writer) resolveSkillPath(name string) (string, bool) {
 	return skillPath, true
 }
 
+// SkillPath returns the tier-resolved path to the named skill's SKILL.md,
+// falling back to the Writer's own root when the skill exists in no tier.
+// Exported for tooling that needs to report the concrete path after a write
+// (e.g. the skills_create builtin tool) without duplicating layout rules.
+func (w *Writer) SkillPath(name string) string {
+	return w.skillPath(name)
+}
+
 // skillPath returns the tier-resolved path to the named skill's SKILL.md,
 // falling back to the Writer's own root when the skill exists in no tier.
 // Package-internal consumers (including the evolver's post-write re-parse)
