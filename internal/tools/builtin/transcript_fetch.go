@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,8 +31,16 @@ const (
 	// TranscriptMaxOutputLength caps the returned transcript text (100k chars),
 	// matching web_fetch's output cap discipline.
 	TranscriptMaxOutputLength = 100000
+	// DefaultTranscriptFallbackOutputDir is the fallback root for relative
+	// output_path values when TranscriptConfig.FallbackOutputDir is empty.
+	DefaultTranscriptFallbackOutputDir = "~/.meept/media"
+	// TranscriptPreviewChars bounds the in-result head preview when the
+	// full transcript went to a file (pointer line may push past it).
+	TranscriptPreviewChars = 1000
 	// transcriptTruncationSuffix is appended when the transcript is truncated.
 	transcriptTruncationSuffix = "...[truncated]"
+	// transcriptFilePointerSuffix names the file carrying the full text.
+	transcriptFilePointerSuffix = "\n...[full transcript at %s]"
 )
 
 // transcriptRunnerFunc is the injectable subprocess command runner. It
@@ -47,6 +57,10 @@ type TranscriptConfig struct {
 	ModuleName string
 	// TimeoutSeconds bounds the subprocess run. Defaults to 60 when <= 0.
 	TimeoutSeconds int
+	// FallbackOutputDir is the root relative output_path values join when
+	// the session context carries no working directory. Defaults to
+	// "~/.meept/media" when empty; "~" expands at resolve time.
+	FallbackOutputDir string
 }
 
 // TranscriptFetchTool fetches YouTube video transcripts via the
@@ -58,10 +72,11 @@ type TranscriptConfig struct {
 // apply.
 type TranscriptFetchTool struct {
 	tools.ToolDefaults
-	pythonPath     string
-	moduleName     string
-	timeoutSeconds int
-	logger         *slog.Logger
+	pythonPath        string
+	moduleName        string
+	timeoutSeconds    int
+	fallbackOutputDir string
+	logger            *slog.Logger
 	// runner executes the Python subprocess; defaults to
 	// execCommandContextRunner (exec.CommandContext). Injectable for tests.
 	runner transcriptRunnerFunc
@@ -79,15 +94,19 @@ func NewTranscriptFetchTool(cfg TranscriptConfig, logger *slog.Logger) *Transcri
 	if cfg.TimeoutSeconds <= 0 {
 		cfg.TimeoutSeconds = DefaultTranscriptTimeoutSeconds
 	}
+	if cfg.FallbackOutputDir == "" {
+		cfg.FallbackOutputDir = DefaultTranscriptFallbackOutputDir
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &TranscriptFetchTool{
-		pythonPath:     cfg.PythonPath,
-		moduleName:     cfg.ModuleName,
-		timeoutSeconds: cfg.TimeoutSeconds,
-		logger:         logger,
-		runner:         execCommandContextRunner,
+		pythonPath:        cfg.PythonPath,
+		moduleName:        cfg.ModuleName,
+		timeoutSeconds:    cfg.TimeoutSeconds,
+		fallbackOutputDir: cfg.FallbackOutputDir,
+		logger:            logger,
+		runner:            execCommandContextRunner,
 	}
 }
 
@@ -132,6 +151,10 @@ func (t *TranscriptFetchTool) Parameters() llm.FunctionParameters {
 				Type:        schemaTypeInteger,
 				Description: "Maximum characters of transcript text to return for this page (excluding any truncation suffix), capped at 100000. Defaults to 100000. Use with offset to paginate long transcripts; the response carries total_chars and offset for computing the next page.",
 			},
+			"output_path": {
+				Type:        schemaTypeString,
+				Description: "Optional file path to write the full formatted transcript to. Relative paths resolve against the session working directory (falling back to the configured output root outside a workspace); parent directories are created automatically. The response carries the resolved path plus a bounded preview, or the normal paginated window when offset/max_chars is used.",
+			},
 		},
 		Required: []string{"url"},
 	}
@@ -151,6 +174,7 @@ type transcriptParams struct {
 	Language   string `json:"language"`
 	Offset     int    `json:"offset"`
 	MaxChars   int    `json:"max_chars"`
+	OutputPath string `json:"output_path"`
 }
 
 // Execute fetches the transcript for the requested video and returns
@@ -181,6 +205,20 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 	text, err := t.fetchTranscriptText(ctx, videoID, p.Language, p.Timestamps)
 	if err != nil {
 		return nil, err
+	}
+	// File-backed output: write the FULL formatted text to disk before
+	// any pagination slicing, so the file is byte-identical to the text
+	// the caller paginates. Write failure is a hard error — no silent
+	// fallback to in-result-only behavior.
+	outPath := ""
+	if p.OutputPath != "" {
+		outPath, err = t.resolveOutputPath(ctx, p.OutputPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeTranscriptFile(outPath, text); err != nil {
+			return nil, err
+		}
 	}
 	// Pagination slices the FORMATTED text (timestamps included), so
 	// offsets stay consistent with the text the caller received. Total
@@ -223,6 +261,17 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 		page += transcriptTruncationSuffix
 	}
 	truncated := clipped
+	// Bounded preview: when the full text went to a file AND it fit
+	// entirely inside one page, swap the in-result body for a head
+	// preview plus a pointer to the file. The conversation never carries
+	// the bulk; the agent pages the rest via file_read.
+	if outPath != "" && !clipped && totalChars <= maxChars {
+		preview := text
+		if len(preview) > TranscriptPreviewChars {
+			preview = preview[:TranscriptPreviewChars]
+		}
+		page = preview + fmt.Sprintf(transcriptFilePointerSuffix, outPath)
+	}
 
 	t.logger.Debug("fetched youtube transcript",
 		"video_id", videoID,
@@ -230,14 +279,68 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 		"timestamps", p.Timestamps,
 		"chars", len(page))
 
-	return map[string]any{
+	result := map[string]any{
 		"video_id":    videoID,
 		"content":     page,
 		"truncated":   truncated,
 		"timestamps":  p.Timestamps,
 		"offset":      offset,
 		"total_chars": totalChars,
-	}, nil
+	}
+	// Contract: "path" appears only when output_path was given.
+	if outPath != "" {
+		result["path"] = outPath
+	}
+	return result, nil
+}
+
+// resolveOutputPath resolves a raw output_path against the session
+// working directory (tools.WorkingDirFromContext), falling back to the
+// tool's configured fallback root when no working dir is present. "~"
+// expands to the user's home directory. Empty input resolves to ""
+// (no file). No os.Getwd anywhere: the daemon carries the working dir
+// through the context (AGENTS.md).
+func (t *TranscriptFetchTool) resolveOutputPath(ctx context.Context, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	p := raw
+	if strings.HasPrefix(p, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("transcript_fetch: cannot expand %q: home directory unknown", raw)
+		}
+		p = filepath.Join(home, p[1:])
+	}
+	if !filepath.IsAbs(p) {
+		if wd := tools.WorkingDirFromContext(ctx); wd != "" {
+			p = filepath.Join(wd, p)
+		} else if t.fallbackOutputDir != "" {
+			root := t.fallbackOutputDir
+			if strings.HasPrefix(root, "~") {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return "", fmt.Errorf("transcript_fetch: cannot resolve fallback output dir: %w", err)
+				}
+				root = filepath.Join(home, root[1:])
+			}
+			p = filepath.Join(root, p)
+		}
+	}
+	return p, nil
+}
+
+// writeTranscriptFile creates the parent directory (0o755) and writes
+// text (0o644). Errors are wrapped with the path for actionable reports.
+func writeTranscriptFile(path, text string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("transcript_fetch: creating output directory for %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return fmt.Errorf("transcript_fetch: writing transcript to %s: %w", path, err)
+	}
+	return nil
 }
 
 // errNotYouTubeURL is returned when the input is neither a recognized
