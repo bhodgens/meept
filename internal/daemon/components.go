@@ -38,6 +38,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/debug"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
@@ -137,6 +138,18 @@ type Components struct {
 	// legacy drop-at-shutdown behaviour. Owned here so stopComponents
 	// closes the handle after the parkers have stopped.
 	ParkStore *agent.SQLiteParkStore
+
+	// EffectsLedger is the external-effect idempotency ledger
+	// (effects.SQLiteLedger over <data_dir>/effects.db). Nil when the
+	// ledger failed to open — every wired tool then falls back to its
+	// legacy unclaimed path via its nil checks (same degradation posture
+	// as ParkStore). Owned here so stopComponents closes the handle after
+	// the tools and reconciler have stopped.
+	EffectsLedger effects.Ledger
+	// EffectsReconciler re-drives claimed/receipted effects on startup and
+	// parked-turn resume. Nil when the ledger is nil (no ledger, no
+	// reconcile — nothing pending can exist).
+	EffectsReconciler *EffectsReconciler
 
 	// Multi-agent orchestration components
 	Queue         queue.Queue
@@ -1488,6 +1501,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.PushService = services.NewPushServiceWithChannels(msgBus, pushRegistry,
 		logger.With("component", "push-service"))
 
+	// Effects ledger wiring (effects tree leaf 02): when the ledger opened
+	// successfully, push delivery claims its effect key first so duplicate
+	// pushes are idempotent no-ops. PushService's nil check keeps the
+	// legacy path when the ledger is degraded/absent.
+	c.PushService.SetEffectsLedger(c.EffectsLedger)
+
+	// Backup push ledger wiring: same degradation posture — when the
+	// ledger is nil the backup scheduler keeps its legacy unclaimed push.
+	bkpkg.SetEffectsLedger(c.EffectsLedger)
+
 	// Quota notifier (quota-reset-resilience): subscribes to agent.quota_wait
 	// and auto-starts its event pump — no explicit Start call needed. Nil
 	// push service is guarded internally (events still consumed, delivery
@@ -1855,6 +1878,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			"error", parkStoreErr)
 	} else {
 		c.ParkStore = parkStore
+	}
+
+	// External-effect idempotency ledger (effects tree leaf 02): durable
+	// record of irreversible external effects over a dedicated effects.db.
+	// Deliberately NOT the park/session store handles — same rationale as
+	// parks.db. Best-effort like the park store: a failed open logs a
+	// warning and every wired tool keeps its legacy unclaimed path (the
+	// exact pre-effects behaviour).
+	effectsDB := filepath.Join(cfg.Daemon.DataDir, "effects.db")
+	effectsLedger, effectsLedgerErr := effects.NewSQLiteLedger(effectsDB, logger.With("component", "effects-ledger"))
+	if effectsLedgerErr != nil {
+		logger.Warn("Failed to create effects ledger — external effects will NOT be idempotency-claimed",
+			"error", effectsLedgerErr)
+	} else {
+		c.EffectsLedger = effectsLedger
+		c.EffectsReconciler = NewEffectsReconciler(effectsLedger, logger.With("component", "effects-reconciler"))
 	}
 
 	// Create session handler with summarizer if LLM is available
@@ -4677,6 +4716,20 @@ func (c *Components) stopComponents(ctx context.Context) error {
 			c.Logger.Info("Park store closed")
 		}
 		c.ParkStore = nil
+	}
+
+	// Close the effects ledger AFTER the tools and reconciler have stopped
+	// (mirrors the park-store ordering). Rows stay on disk: pending effects
+	// re-surface on the next boot's startup reconcile — keep, never drop.
+	if c.EffectsLedger != nil {
+		if err := c.EffectsLedger.Close(); err != nil {
+			c.Logger.Error("Failed to close effects ledger", "error", err)
+			lastErr = err
+		} else {
+			c.Logger.Info("Effects ledger closed")
+		}
+		c.EffectsLedger = nil
+		c.EffectsReconciler = nil
 	}
 
 	if c.StatusHandler != nil {

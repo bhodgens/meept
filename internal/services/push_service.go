@@ -3,10 +3,12 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
@@ -40,6 +42,9 @@ type PushService struct {
 	bus      *bus.MessageBus
 	channels *ChannelRegistry
 	logger   *slog.Logger
+	// effects is the external-effect idempotency ledger. Nil (tests,
+	// feature off) means Push runs its legacy unclaimed path.
+	effects effects.Ledger
 }
 
 // PushRequest describes a push notification to send.
@@ -137,11 +142,72 @@ func (s *PushService) PushToChannels(ctx context.Context, req *PushRequest) (*Pu
 // PushServiceOption configures a PushService.
 type PushServiceOption func(*PushService)
 
+// SetEffectsLedger wires the external-effect ledger. When nil (tests,
+// ledger disabled), Push keeps its legacy behavior exactly — no claiming.
+func (s *PushService) SetEffectsLedger(l effects.Ledger) {
+	if l != nil {
+		s.effects = l
+	}
+}
+
+// pushEffectsKey derives the pinned effect key for a push. Fixed order
+// (leaf 02 Contract): tool name, marshaled session list, source, type,
+// content. Content participates because two pushes with identical
+// body/source/sessions ARE the same user-visible effect; sha256 handles
+// length, so nothing is truncated.
+func pushEffectsKey(req *PushRequest) (string, error) {
+	sessions := req.SessionIDs
+	if sessions == nil {
+		sessions = []string{}
+	}
+	sessionsJSON, err := json.Marshal(sessions)
+	if err != nil {
+		return "", fmt.Errorf("push effect key: marshal sessions: %w", err)
+	}
+	return effects.EffectKey("push.notify", string(sessionsJSON), req.Source, string(req.Type), req.Content), nil
+}
+
+// publishToSessions performs the actual bus delivery: one publish on
+// "push.<session>" per requested session plus the fan-out event on
+// "push.notify". Returns the delivered count. Extracted verbatim from the
+// legacy Push body so the ledger-claiming path and the nil-ledger path
+// run identical delivery code.
+func (s *PushService) publishToSessions(ctx context.Context, req *PushRequest, msgID string, payloadBytes []byte) (PushResult, error) {
+	busMsg := &models.BusMessage{
+		ID:      msgID,
+		Type:    models.MessageTypeEvent,
+		Topic:   "push.notify",
+		Source:  "svc.push",
+		Payload: payloadBytes,
+	}
+
+	var result PushResult
+
+	for _, sessID := range req.SessionIDs {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		s.logPush(sessID, req)
+		s.bus.Publish("push."+sessID, busMsg)
+		result.Delivered++
+	}
+
+	return result, nil
+}
+
 // Push sends a push notification to the requested session(s).
 //
 // The message is published on the internal message bus on a per-session
 // topic so that all subscribers (TUI, menubar, HTTP clients, adapter
 // services) can react.
+//
+// When an effects ledger is wired, the delivery is wrapped in the
+// pinned protocol (Claim -> execute -> RecordReceipt -> Complete): a
+// duplicate Push with identical inputs returns the prior receipt as an
+// idempotent no-op without re-publishing. Push declares
+// ProviderIdempotent=false — re-delivery would double-render in
+// TUI/Telegram — so reconcile surfaces its stuck records, never
+// auto-retries them.
 func (s *PushService) Push(ctx context.Context, req *PushRequest) (*PushResult, error) {
 	if req == nil {
 		return nil, wrapError("push", "Push", ErrInvalidInput)
@@ -181,25 +247,87 @@ func (s *PushService) Push(ctx context.Context, req *PushRequest) (*PushResult, 
 		return nil, wrapError("push", "Push", err)
 	}
 
-	busMsg := &models.BusMessage{
-		ID:      msgID,
-		Type:    models.MessageTypeEvent,
-		Topic:   "push.notify",
-		Source:  "svc.push",
-		Payload: payloadBytes,
-	}
-
-	var result PushResult
-
-	for _, sessID := range req.SessionIDs {
-		if err := ctx.Err(); err != nil {
-			return &result, err
+	// Nil ledger (tests, feature off): legacy path, byte-for-byte behavior.
+	if s.effects == nil {
+		result, pubErr := s.publishToSessions(ctx, req, msgID, payloadBytes)
+		if pubErr != nil {
+			return &result, pubErr
 		}
-		s.logPush(sessID, req)
-		s.bus.Publish("push."+sessID, busMsg)
-		result.Delivered++
+		s.logPushResult(msgID, req, result)
+		return &result, nil
 	}
 
+	// Ledger-claiming path: Claim -> publish -> RecordReceipt -> Complete.
+	// Payload is the request identity the reconciler needs to surface (or,
+	// for future provider-idempotent tools, rebuild) the effect.
+	reqPayload, err := json.Marshal(map[string]any{
+		"session_ids": req.SessionIDs,
+		"source":      req.Source,
+		"type":        req.Type,
+		"priority":    req.Priority,
+		"content":     req.Content,
+	})
+	if err != nil {
+		return nil, wrapError("push", "Push", fmt.Errorf("marshal effect payload: %w", err))
+	}
+
+	key, err := pushEffectsKey(req)
+	if err != nil {
+		return nil, wrapError("push", "Push", err)
+	}
+
+	receipt, reused, err := effects.Run(ctx, s.effects, key, effects.EffectMeta{
+		Tool:               "push.notify",
+		ProviderIdempotent: false,
+		Payload:            reqPayload,
+	}, func(ctx context.Context) (json.RawMessage, error) {
+		result, pubErr := s.publishToSessions(ctx, req, msgID, payloadBytes)
+		if pubErr != nil {
+			return nil, pubErr
+		}
+		return json.Marshal(map[string]any{
+			"push_id":   msgID,
+			"delivered": result.Delivered,
+			"sessions":  req.SessionIDs,
+		})
+	})
+	if err != nil {
+		return nil, wrapError("push", "Push", fmt.Errorf("effects: %w", err))
+	}
+	if reused {
+		// Completed prior: idempotent no-op. Parse the prior receipt so the
+		// duplicate caller is indistinguishable in success semantics from
+		// the first; do NOT publish again.
+		var prior struct {
+			Delivered int `json:"delivered"`
+		}
+		if err := json.Unmarshal(receipt, &prior); err != nil {
+			return nil, wrapError("push", "Push", fmt.Errorf("parse prior push receipt: %w", err))
+		}
+		s.logger.Debug("push already delivered (effects ledger no-op)",
+			"key", key,
+			"delivered", prior.Delivered,
+		)
+		return &PushResult{Delivered: prior.Delivered}, nil
+	}
+
+	// This caller executed the effect: write the completion marker.
+	if err := s.effects.Complete(ctx, key); err != nil {
+		return nil, wrapError("push", "Push", fmt.Errorf("effects complete %s: %w", key, err))
+	}
+
+	var receiptOut struct {
+		Delivered int `json:"delivered"`
+	}
+	if err := json.Unmarshal(receipt, &receiptOut); err != nil {
+		return nil, wrapError("push", "Push", fmt.Errorf("parse push receipt: %w", err))
+	}
+	result := PushResult{Delivered: receiptOut.Delivered}
+	s.logPushResult(msgID, req, result)
+	return &result, nil
+}
+
+func (s *PushService) logPushResult(msgID string, req *PushRequest, result PushResult) {
 	s.logger.Debug("push delivered",
 		"id", msgID,
 		"delivered", result.Delivered,
@@ -207,7 +335,6 @@ func (s *PushService) Push(ctx context.Context, req *PushRequest) (*PushResult, 
 		"type", req.Type,
 		"priority", req.Priority,
 	)
-	return &result, nil
 }
 
 func (s *PushService) logPush(sessID string, req *PushRequest) {

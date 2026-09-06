@@ -94,6 +94,12 @@ type ChatHandler struct {
 	// for completion instead of returning immediately (Issue 0022).
 	syncMode bool
 
+	// effectsResumeHook is the parked-turn-resume reconcile callback
+	// (effects tree leaf 02). Wired by the daemon via SetEffectsResumeHook;
+	// nil disables the hook. Defined as a local func type so package agent
+	// never imports the daemon.
+	effectsResumeHook EffectsResumeHook
+
 	// Worker tracking
 	workers   map[string]*Worker
 	workersMu sync.RWMutex
@@ -117,6 +123,37 @@ func (h *ChatHandler) SetFenceController(fc FenceController) {
 		return
 	}
 	h.fenceController = fc
+}
+
+// EffectsResumeHook is the parked-turn-resume reconcile callback (effects
+// tree leaf 02). Defined here so package agent does not import the daemon
+// (dependency direction: daemon -> agent, never inverted).
+type EffectsResumeHook func(ctx context.Context)
+
+// SetEffectsResumeHook wires the reconciler. Nil-guarded (setter
+// convention); nil disables the hook.
+func (h *ChatHandler) SetEffectsResumeHook(fn EffectsResumeHook) {
+	if h == nil || fn == nil {
+		return
+	}
+	h.effectsResumeHook = fn
+}
+
+// runEffectsResumeHook invokes the best-effort resume reconcile hook with a
+// 15s bound. A panicking hook is recovered and logged: resume MUST proceed
+// regardless of reconcile health (best-effort by contract).
+func (h *ChatHandler) runEffectsResumeHook(ctx context.Context) {
+	if h.effectsResumeHook == nil {
+		return
+	}
+	rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	defer func() {
+		if rec := recover(); rec != nil {
+			h.logger.Error("effects resume hook panicked", "panic", rec)
+		}
+	}()
+	h.effectsResumeHook(rctx)
 }
 
 // Worker represents an active agent processing a request.
@@ -1646,6 +1683,7 @@ func (h *ChatHandler) QuotaResumeWatcher() *QuotaResumeWatcher {
 // resumeQuotaParkedTurn re-runs a turn that was parked due to a provider
 // quota wall. Called by the QuotaResumeWatcher once the quota window lifts.
 func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParkedTurn) {
+	h.runEffectsResumeHook(ctx) // best-effort reconcile; logs its own errors
 	h.logger.Info("resuming parked turn after quota reset",
 		"session_id", turn.SessionID,
 		"conversation_id", turn.ConversationID,
@@ -1883,6 +1921,7 @@ func (h *ChatHandler) ClearConversation(conversationID string) {
 // resumeParkedTurn re-runs a turn that was parked due to budget exhaustion.
 // Called by the BudgetResumeWatcher once the budget window clears.
 func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
+	h.runEffectsResumeHook(ctx) // best-effort reconcile; logs its own errors
 	h.logger.Info("resuming parked turn after budget clearance",
 		"session_id", turn.SessionID,
 		"conversation_id", turn.ConversationID,

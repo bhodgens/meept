@@ -1,6 +1,8 @@
 package backup
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/effects"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -157,6 +160,168 @@ func GitAddCommitPush(repo *git.Repository, files []string, message string) erro
 	}
 
 	return gitPushWithRetry(repo)
+}
+
+// SetEffectsLedgerFunc is the process-wide effects-ledger injection point
+// for the backup package. The GitBackupScheduler holds no long-lived
+// ledger handle; instead the daemon wiring calls SetEffectsLedger at
+// startup and every GitAddCommitPushWithLedger call routes through it.
+// Nil (default) keeps the legacy unclaimed behavior.
+var effectsLedgerFunc func() effects.Ledger
+
+// SetEffectsLedger wires the external-effect ledger used by
+// GitAddCommitPushWithLedger. Nil-guarded per the setter convention: a
+// nil argument is ignored so wiring code can pass a possibly-nil ledger
+// from degraded startup paths.
+func SetEffectsLedger(l effects.Ledger) {
+	if l != nil {
+		effectsLedgerFunc = func() effects.Ledger { return l }
+	}
+}
+
+// GitAddCommitPushWithLedger adds files, commits, and pushes — claiming
+// the push through the effects ledger when one is wired (via
+// SetEffectsLedger). Returns pushed=false when a completed prior made the
+// push an idempotent no-op. Falls back to plain GitAddCommitPush when no
+// ledger is wired.
+//
+// Seam note (leaf 02 Task 2): the ledger wraps ONLY the push, not the
+// add/commit prefix. Re-running the full flow after a crash would see a
+// clean tree and skip the push, so the effect key — derived from the
+// remote path + the freshly committed head SHA, never wall time — must be
+// claimed around the irreversible external call itself.
+func GitAddCommitPushWithLedger(repo *git.Repository, ledger effects.Ledger, files []string, message string, remotePath string) (bool, error) {
+	if ledger == nil && effectsLedgerFunc != nil {
+		ledger = effectsLedgerFunc()
+	}
+	if ledger == nil {
+		return true, GitAddCommitPush(repo, files, message)
+	}
+
+	// add + commit first (local, reversible — no claim needed), then claim
+	// around the push. The effect key needs the commit SHA, so the commit
+	// must exist before claiming.
+	if err := gitAddAndCommit(repo, files, message); err != nil {
+		return false, err
+	}
+
+	head, err := repo.Head()
+	if err != nil {
+		return false, Wrap("git_effects_head", err)
+	}
+	headSHA := head.Hash().String()
+	key := effects.EffectKey("backup.git_push", remotePath, headSHA)
+
+	receipt, reused, err := effects.Run(context.Background(), ledger, key, effects.EffectMeta{
+		Tool:               "backup.git_push",
+		ProviderIdempotent: true,
+		Payload:            mustEffectJSON(map[string]any{"remote": remotePath, "head": headSHA}),
+	}, func(ctx context.Context) (json.RawMessage, error) {
+		// AlreadyUpToDate (the remote already has this commit) IS
+		// provider-side idempotency: check BEFORE pushing so the receipt
+		// records the pre-push state.
+		alreadyUpToDate, listErr := remoteRefIsUpToDate(repo, headSHA)
+		if listErr != nil {
+			return nil, listErr
+		}
+		if !alreadyUpToDate {
+			if pushErr := gitPushWithRetry(repo); pushErr != nil {
+				return nil, pushErr
+			}
+			// Verify the remote accepted the ref before recording the receipt.
+			landed, verifyErr := remoteRefIsUpToDate(repo, headSHA)
+			if verifyErr != nil {
+				return nil, verifyErr
+			}
+			if !landed {
+				return nil, fmt.Errorf("backup push: remote %s did not accept %s", remotePath, headSHA)
+			}
+		}
+		return mustEffectJSON(map[string]any{
+			"head":               headSHA,
+			"remote":             remotePath,
+			"already_up_to_date": alreadyUpToDate,
+		}), nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("backup push effects: %w", err)
+	}
+	if reused {
+		slog.Debug("backup push already completed", "key", key)
+		return false, nil
+	}
+	if err := ledger.Complete(context.Background(), key); err != nil {
+		return false, fmt.Errorf("backup push effects complete %s: %w", key, err)
+	}
+	_ = receipt
+	return true, nil
+}
+
+// gitAddAndCommit is GitAddCommitPush minus the push: add the files, then
+// commit when the tree is dirty.
+func gitAddAndCommit(repo *git.Repository, files []string, message string) error {
+	w, err := repo.Worktree()
+	if err != nil {
+		return Wrap("git_commit_worktree", err)
+	}
+
+	for _, f := range files {
+		_, err := w.Add(f)
+		if err != nil {
+			slog.Debug("backup: failed to add file to git (may already be staged)",
+				"file", f, "error", err)
+		}
+	}
+
+	status, _ := w.Status()
+	if status.IsClean() {
+		slog.Debug("backup: git working tree is clean, nothing to commit")
+		return nil
+	}
+
+	_, err = w.Commit(message, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "meept-backup",
+			Email: "backup@meept.local",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		return Wrap("git_commit", err)
+	}
+	return nil
+}
+
+// remoteRefIsUpToDate reports whether the remote tracking ref for the
+// default branch already points at headSHA — i.e. the push landed (or was
+// never needed). This is the "verify" half of the pinned protocol.
+func remoteRefIsUpToDate(repo *git.Repository, headSHA string) (bool, error) {
+	remote, err := repo.Remote("origin")
+	if err != nil {
+		return false, Wrap("git_effects_remote", err)
+	}
+	refs, err := remote.List(&git.ListOptions{})
+	if err != nil {
+		return false, Wrap("git_effects_remote_list", err)
+	}
+	for _, ref := range refs {
+		if ref.Name().IsBranch() && ref.Hash().String() == headSHA {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// mustEffectJSON marshals v for receipts/payloads; every value is
+// caller-constructed (strings + bools), so an error is a programming bug.
+// It still propagates the error rather than ignoring it.
+func mustEffectJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		slog.Error("backup: effects json marshal failed", "error", err)
+		return json.RawMessage(`{}`)
+	}
+	return b
 }
 
 func gitPushWithRetry(repo *git.Repository) error {

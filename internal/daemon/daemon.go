@@ -795,6 +795,23 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Plan RPC handlers registered")
 	}
 
+	// Effects startup reconcile (effects tree leaf 02): re-drive effects
+	// left claimed/receipted by a previous crash before any new work runs.
+	// Synchronous with a 30s bound; best-effort — errors are logged inside
+	// the reconciler, never fatal.
+	if components != nil && components.EffectsReconciler != nil {
+		rctx, rcancel := context.WithTimeout(context.Background(), effectsStartupTimeout)
+		runEffectsStartupReconcile(rctx, components.EffectsReconciler, logger.With("component", "effects-reconciler"))
+		rcancel()
+
+		// Parked-turn resume hook: every resumed turn re-drives pending
+		// effects (best-effort, 15s-bounded inside the agent hook).
+		if components.ChatHandler != nil {
+			components.ChatHandler.SetEffectsResumeHook(
+				effectsResumeHook(components.EffectsReconciler, logger.With("component", "effects-reconciler")))
+		}
+	}
+
 	// Create service registry with dependencies
 	uploadCfg := fullCfg.Daemon.Uploads
 	uploadDataDir := filepath.Join(cfg.StateDir, "uploads")
