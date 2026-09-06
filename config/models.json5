@@ -2,7 +2,7 @@
   // Default model for general use (provider/model-id format)
   // Local-first: LFM2.5-8B-A1B GGUF on the local llama.cpp runtime (no cloud
   // tokens for e2e/everyday runs). Cloud models stay available via aliases.
-  "model": "local/lfm-8b-f16",
+  "model": "local/lfm-8b-mlx-4bit",
 
   // Fast/cheap model for classification, summarization
   // Use "classifier" or "summarizer" aliases for automatic fallback
@@ -27,7 +27,7 @@
     "classifier": {
       "models": [
         "local-mlx/lfm-combined-sft", // Primary: fine-tuned LFM2.5 intent classifier (platform-intrinsic; change only for explicit A/B testing)
-        "local/lfm-8b-f16",           // Fallback 1: LFM2.5-8B-A1B-GGUF-F16
+        "local/lfm-8b-mlx-4bit",           // Fallback 1: LFM2.5-8B-A1B MLX 4-bit
         "local/lfm-1.2b-q8",          // Fallback 2: fast, best-effort
         "zai/glm-4.5-air",            // Fallback 3: remote API
         "ollama/llama3.2"             // Fallback 4: local Ollama
@@ -38,7 +38,7 @@
     "summarizer": {
       "models": [
         "local/lfm-1.2b-q8",   // Primary: fast local model
-        "local/lfm-8b-f16",    // Fallback 1: LFM2.5-8B-A1B-GGUF-F16
+        "local/lfm-8b-mlx-4bit",    // Fallback 1: LFM2.5-8B-A1B MLX 4-bit
         "zai/glm-4.5-air",     // Fallback 2: remote API
         "ollama/llama3.2"      // Fallback 3: local Ollama
       ],
@@ -48,7 +48,7 @@
     "small": {
       "models": [
         "local/lfm-1.2b-q8",
-        "local/lfm-8b-f16",
+        "local/lfm-8b-mlx-4bit",
         "zai/glm-4.5-air",
         "ollama/llama3.2"
       ],
@@ -141,15 +141,15 @@
     "local": {
       "api": "openai",
       "options": {
-        "baseURL": "http://127.0.0.1:8080/v1"
+        "baseURL": "http://127.0.0.1:8082/v1"
       },
       "lifecycle": {
-        "runtime": "llama-cpp",
-        "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-F16.gguf",
+        "runtime": "mlx",
+        "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
         "auto_start": true,
         "auto_stop_on_exit": true,
-        "pid_file": "~/.meept/run/llama.pid",
-        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1"],
+        "pid_file": "~/.meept/run/mlx-general.pid",
+        "spawn_command": ["mlx_lm", "server", "--model", "${MODEL_PATH}", "--port", "8082"],
         "spawn_timeout_seconds": 180,
         "health_check": {
           "endpoint": "/health",
@@ -165,12 +165,12 @@
         }
       },
       "models": {
-        "lfm-8b-f16": {
-          // llama-server reports the model ID as the path passed via --model.
+        "lfm-8b-mlx-4bit": {
+          // mlx_lm.server reports the model ID as the path passed via --model.
           // The "name" must match this ID so the daemon doesn't try to look
           // up a different model name on HuggingFace.
-          "name": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-F16.gguf",
-          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-F16.gguf",
+          "name": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
           "capabilities": ["completion", "code", "reasoning"],
           "input_cost": 0.0,
           "output_cost": 0.0,
