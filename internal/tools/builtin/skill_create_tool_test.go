@@ -143,12 +143,19 @@ func TestSkillCreate_AssembledContent_ParsesWithSkillsParser(t *testing.T) {
 	}
 }
 
-// newTestWriter returns a lifecycle.Writer rooted at a fresh temp dir, the
-// minimum setup (read writer_test.go): NewWriter accepts a nil logger and
-// resolves new-skill paths to <dir>/<name>/SKILL.md via its default resolver.
+// newTestWriter returns a lifecycle.Writer rooted at a fresh temp dir,
+// fully isolated from the host's real skill tiers: the writer's default
+// tier resolver discovers $HOME-derived tiers (os.UserHomeDir), so a test
+// that only temp-dirs the writer root can silently resolve (and write!)
+// skills in the REAL ~/.meept/skills once a name collides there — a
+// self-poisoning fixture. Pointing HOME at the temp dir before the
+// writer's first operation keeps discovery (and therefore tier
+// resolution) inside the sandbox. Mirrors the writer_test.go
+// fixture-environment pattern.
 func newTestWriter(t *testing.T) (*lifecycle.Writer, string) {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
 	return lifecycle.NewWriter(dir, nil), dir
 }
 
