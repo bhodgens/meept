@@ -124,11 +124,11 @@ func (s *TaskSummarizer) SummarizeTaskTitle(ctx context.Context, messages []Chat
 		return TaskTitleResult{Title: "Task title generation unavailable"}, nil
 	}
 	prompt := fmt.Sprintf(taskTitlePrompt, maxLen, conversationText)
-	resp, err := s.chatter.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: prompt}})
+	resp, err := s.chatter.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: prompt}}, DisableThinking())
 	if err != nil {
 		return TaskTitleResult{}, fmt.Errorf("task title generation failed: %w", err)
 	}
-	title := extractTitle(resp.Content, maxLen)
+	title := extractTitle(stripThinking(resp.Content), maxLen)
 	tokensUsed := s.tokenizer.CountTokens(prompt) + s.tokenizer.CountTokens(resp.Content)
 	return TaskTitleResult{
 		Title:      title,
@@ -144,11 +144,11 @@ func (s *TaskSummarizer) SummarizeSession(ctx context.Context, messages []ChatMe
 		return SessionSummaryResult{Summary: "Empty session"}, nil
 	}
 	prompt := fmt.Sprintf(sessionSummaryPrompt, conversationText)
-	resp, err := s.chatter.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: prompt}})
+	resp, err := s.chatter.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: prompt}}, DisableThinking())
 	if err != nil {
 		return SessionSummaryResult{}, fmt.Errorf("session summarization failed: %w", err)
 	}
-	summary := strings.TrimSpace(resp.Content)
+	summary := strings.TrimSpace(stripThinking(resp.Content))
 	tokensUsed := s.tokenizer.CountTokens(prompt) + s.tokenizer.CountTokens(resp.Content)
 	return SessionSummaryResult{
 		Summary:    summary,
@@ -163,11 +163,11 @@ func (s *TaskSummarizer) SummarizeHandoff(ctx context.Context, messages []ChatMe
 		return HandoffResult{Summary: "No context to hand off"}, nil
 	}
 	prompt := fmt.Sprintf(handoffSummaryPrompt, conversationText)
-	resp, err := s.chatter.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: prompt}})
+	resp, err := s.chatter.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: prompt}}, DisableThinking())
 	if err != nil {
 		return HandoffResult{}, fmt.Errorf("handoff summarization failed: %w", err)
 	}
-	summary := strings.TrimSpace(resp.Content)
+	summary := strings.TrimSpace(stripThinking(resp.Content))
 	sections := parseHandoffSections(summary)
 	tokensUsed := s.tokenizer.CountTokens(prompt) + s.tokenizer.CountTokens(resp.Content)
 	return HandoffResult{
@@ -242,4 +242,33 @@ func parseHandoffSections(summary string) map[string]string {
 		sections[name] = strings.TrimSpace(summary[start:end])
 	}
 	return sections
+}
+
+// thinkBlockRe matches inline <think>...</think> reasoning blocks
+// (case-insensitive, across newlines). Some thinking models inline their
+// chain-of-thought into the assistant content even when asked not to.
+var thinkBlockRe = regexp.MustCompile(`(?is)<think>.*?</think>`)
+
+// unclosedThinkRe matches a leading <think> block whose closing tag never
+// arrives (e.g. a truncated/stop-sequence-ended response): everything from
+// the opening tag to end-of-string.
+var unclosedThinkRe = regexp.MustCompile(`(?is)^\s*<think>.*$`)
+
+// reasoningContentLineRe matches a leading "reasoning_content": "..." text
+// fragment some servers inline at the top of the content when the reasoning
+// channel is misconfigured.
+var reasoningContentLineRe = regexp.MustCompile(`(?is)^\s*"?reasoning_content"?\s*:\s*"(?:[^"\\]|\\.)*"\s*`)
+
+// stripThinking removes leaked chain-of-thought from model output so
+// summaries never carry reasoning text. Handles: any number of closed
+// <think>...</think> blocks anywhere in the string, a leading unclosed
+// <think> block, and a leading reasoning_content fragment. The result is
+// trimmed. Chain-of-thought arriving in Response.Reasoning never reaches
+// here — the client parses that into a separate field, which
+// summarization ignores.
+func stripThinking(content string) string {
+	out := thinkBlockRe.ReplaceAllString(content, "")
+	out = unclosedThinkRe.ReplaceAllString(out, "")
+	out = reasoningContentLineRe.ReplaceAllString(out, "")
+	return strings.TrimSpace(out)
 }

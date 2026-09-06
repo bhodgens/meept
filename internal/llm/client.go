@@ -994,6 +994,22 @@ func WithReasoning(rc *ReasoningConfig) ChatOption {
 	}
 }
 
+// DisableThinking returns a ChatOption that explicitly disables
+// reasoning/thinking for the request. It is the shared seam for small,
+// fixed-prompt machine-parsed calls (intent classification,
+// session/task summarization): a thinking model would otherwise burn
+// the output budget on chain-of-thought and leak reasoning into the
+// parsed result. The config is translated per-vendor by
+// applyOpenAICompatReasoning / applyAnthropicReasoning (e.g.
+// chat_template_kwargs.enable_thinking=false for llama.cpp-style
+// servers). The wire field remains subject to capability gating
+// (shouldSendReasoning), so pair with output-side stripping
+// (stripThinking) for defense in depth.
+func DisableThinking() ChatOption {
+	noThinking := false
+	return WithReasoning(&ReasoningConfig{Enabled: &noThinking})
+}
+
 // gbnfWarnOnce deduplicates the incomplete-grammar warning across calls
 // (warn once per process/session, not per request).
 var gbnfWarnOnce sync.Map // map[string]struct{}
