@@ -70,10 +70,14 @@ Trees 1-3 (gaps #1, #2, #4) + tree 4 (#3, full frontier):
    progress can no longer exceed 100%.
 5. **Agnes credential**: models.json5 now reads ${AGNRES_API_KEY} —
    the shell exports AGNRES_ (no second E); AGNES_ is commented out in
-   .bashrc. 401s are gone; Agnes free tier then hit HTTP 429 mid-run
-   (quota parking deferred jobs correctly). Live synthetic still
-   incomplete: rerun after quota reset. The 8B fallback planner could
-   not emit valid phase JSON (3-phase plans fell back to single-phase).
+   .bashrc. 401s are gone. Live synthetic COMPLETED end-to-end
+   (task-...0001: plan → approve → 7 steps executed → reviewed → done;
+   alpha.txt written and verified, state completed 7/7). Two
+   environmental limits remain: Agnes free tier 429 rate limits under
+   parallel load (quota parking deferred jobs correctly — by design),
+   and Agnes intermittently returns HTTP 400 "missing field content"
+   on handoff continuation messages. The local/lfm-8b-q4 planner could
+   not emit valid phase JSON — not suitable as multi-phase planner.
 6. Pre-existing (not this program): full-repo mutexio failure in
    internal/agent/intent_session_rules_test.go:83; enforcement.go's four
    grandfathered `_ = autoPause(...)` sites.
