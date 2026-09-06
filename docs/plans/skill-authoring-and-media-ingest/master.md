@@ -329,11 +329,11 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-transcript-fetch-tool | PENDING | 0 | |
-| 02-skill-create-tool | PENDING | 0 | |
-| 03-skill-patch-tool | PENDING | 0 | |
-| 04-linked-assets | PENDING | 0 | |
-| 05-wiring-and-agents | PENDING | 0 | |
+| 01-transcript-fetch-tool | COMPLETE (2026-09-06) | 1 | 9132a820. Deviations approved: `Execute(map[string]any)` per real Tool interface; `python3 -c` JSON-lines script per leaf Notes; map result payload. 13 tests. |
+| 02-skill-create-tool | COMPLETE (2026-09-06) | 1 | 471712d6. Deviations approved: real-writer duplicate semantics (SHA dedup under different name) replaces the spec sketch's wrong premise; exported `Writer.SkillPath`; `_ = ctx` fixed in review. 12 tests. |
+| 03-skill-patch-tool | COMPLETE (2026-09-06) | 1 | 3a4d19a0. Deviations approved: `new_string` optional (contract self-contradiction); path from `skill.Path`. Disk-splice replace mode per leaf Notes. 13 cases. |
+| 04-linked-assets | COMPLETE (2026-09-06) | 1 | 449642f4. Deviations approved: scanTier/loadSkillFile live in source_file.go (doc's file list stale); new tests in separate files. Registry passthrough needed no change (verified). |
+| 05-wiring-and-agents | COMPLETE (2026-09-06) | 1 | 3dd8eec9. Deviations approved: `[transcript]` top-level config (no `Tools` struct exists); ordering resolved to the tools block (SkillWriter live at NewComponents:1183, registerBuiltinTools at :2237 — test-proven). Foreign hunk PlansConfig.ParallelPhases (sibling session) rode schema.go, named in commit. AGENTS.md: no changes needed (verified). |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
