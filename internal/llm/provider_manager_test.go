@@ -550,6 +550,10 @@ func TestProviderManager_SkipsUnhealthyProviders(t *testing.T) {
 	}
 }
 
+// TestProviderManager_RecordsDollarCost verifies the per-provider health
+// ledger (TotalCost) still accumulates after the double-count fix: budget
+// COST is owned by the client layer; the PM's recordSuccess keeps its own
+// telemetry ledger only.
 func TestProviderManager_RecordsDollarCost(t *testing.T) {
 	budget := NewBudget(BudgetConfig{
 		DailyCostLimit: 100.0,
@@ -580,9 +584,13 @@ func TestProviderManager_RecordsDollarCost(t *testing.T) {
 	entry := pm.GetPrimaryProvider()
 	pm.recordSuccess(entry, resp, 100*time.Millisecond)
 
-	status := budget.GetStatus()
 	expectedCost := 10000*3.0/1_000_000 + 5000*15.0/1_000_000 // $0.03 + $0.075 = $0.105
-	if math.Abs(status.DailyCostUsed-expectedCost) > 0.0001 {
-		t.Errorf("expected daily cost used %.6f, got %.6f", expectedCost, status.DailyCostUsed)
+	if math.Abs(entry.Health.TotalCost-expectedCost) > 0.0001 {
+		t.Errorf("expected provider TotalCost %.6f, got %.6f", expectedCost, entry.Health.TotalCost)
+	}
+	// Budget must NOT have been billed by the PM (client layer owns cost).
+	if status := budget.GetStatus(); status.DailyCostUsed > 0.0001 {
+		t.Errorf("budget DailyCostUsed = %.6f, want 0 (PM must not double-record; client owns budget cost)",
+			status.DailyCostUsed)
 	}
 }

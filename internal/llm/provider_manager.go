@@ -872,21 +872,20 @@ func (pm *ProviderManager) recordSuccess(entry *ProviderEntry, resp *Response, l
 		h.AvgLatencyMs = h.AvgLatencyMs*0.9 + latencyMs*0.1
 	}
 
-	// Track usage
+	// Track usage in the per-provider health ledger (telemetry surface).
 	h.TotalTokens += int64(resp.Usage.TotalTokens)
 	cost := float64(resp.Usage.PromptTokens) * entry.Config.CostPerMillionInput / 1_000_000
 	cost += float64(resp.Usage.CompletionTokens) * entry.Config.CostPerMillionOutput / 1_000_000
 	h.TotalCost += cost
 
-	// Track dollar cost in budget for enforcement
-	if pm.config.Budget != nil {
-		pm.config.Budget.RecordCost(CostRecord{
-			Timestamp:        time.Now(),
-			CostUSD:          cost,
-			PromptTokens:     resp.Usage.PromptTokens,
-			CompletionTokens: resp.Usage.CompletionTokens,
-		})
-	}
+	// Budget cost is NOT recorded here (bughunt 2026-09-05 double-count
+	// fix): every underlying client (client.go, codex.go, anthropic.go)
+	// already RecordCosts the same request through the budget handle that
+	// createChatterFor threads via WithBudget/WithCodexBudget/
+	// WithAnthropicBudget. Recording here too billed every PM-routed
+	// request twice against budget enforcement. Cost ownership contract:
+	// the CLIENT layer owns budget cost records; the PM owns only its
+	// per-provider health ledger above.
 
 	// Track recent success timestamp (for sliding window recovery)
 	h.appendSuccessTimestamp()
