@@ -367,9 +367,20 @@ EOF
 
 # Models: reuse the repo's env-configured defaults (make install copies this
 # template into ~/.meept; our sandboxed HOME makes that the temp dir).
+# Local runtime ports (mlx classifier :8081, mlx general :8082) collide with
+# the USER'S live runtimes, so remap them into an ephemeral range like the
+# HTTP port. ${MODEL_PATH} and both baseURLs are rewritten to match.
 if [ -f "$REPO_ROOT/config/models.json5" ]; then
   cp "$REPO_ROOT/config/models.json5" "$HOME_DIR/.meept/models.json5"
-  log "  copied config/models.json5 -> $HOME_DIR/.meept/models.json5"
+  MLX_CLASS_PORT=$((HTTP_PORT + 1))
+  MLX_GEN_PORT=$((HTTP_PORT + 2))
+  sed -i '' \
+    -e "s/127\.0\.0\.1:8081/127.0.0.1:${MLX_CLASS_PORT}/g" \
+    -e "s/127\.0\.0\.1:8082/127.0.0.1:${MLX_GEN_PORT}/g" \
+    -e "s/\"--port\", \"8081\"/\"--port\", \"${MLX_CLASS_PORT}\"/" \
+    -e "s/\"--port\", \"8082\"/\"--port\", \"${MLX_GEN_PORT}\"/" \
+    "$HOME_DIR/.meept/models.json5"
+  log "  copied config/models.json5 -> $HOME_DIR/.meept/models.json5 (mlx ports -> ${MLX_CLASS_PORT}/${MLX_GEN_PORT})"
 else
   warn "config/models.json5 not found in repo; turns will SKIP unless a provider is configured"
 fi
