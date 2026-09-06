@@ -51,6 +51,12 @@ type Store struct {
 	// can wait for them to finish before closing the DB (S6-14).
 	notifyWG sync.WaitGroup
 
+	// loopWG tracks the flushLoop/aggregationLoop goroutines so Close
+	// can join them before returning (bughunt 2026-09-05: Close's
+	// closeOnce work ran concurrently with a still-live flushLoop under
+	// -race stress — the loops were never joined).
+	loopWG sync.WaitGroup
+
 	// Subscriber management for real-time updates
 	subMu       sync.RWMutex
 	subscribers map[chan *LiveMetricsSnapshot]struct{}
@@ -143,10 +149,18 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 	}
 
 	// Start background flush goroutine
-	go store.flushLoop()
+	store.loopWG.Add(1)
+	go func() {
+		defer store.loopWG.Done()
+		store.flushLoop()
+	}()
 
 	// Start hourly aggregation goroutine
-	go store.aggregationLoop()
+	store.loopWG.Add(1)
+	go func() {
+		defer store.loopWG.Done()
+		store.aggregationLoop()
+	}()
 
 	return store, nil
 }
@@ -821,6 +835,12 @@ func (s *Store) Close() error {
 	var dbErr error
 	s.closeOnce.Do(func() {
 		close(s.stopChan)
+		// Join the background loops BEFORE the final flush so Close's
+		// own work can never run concurrently with a live flushLoop /
+		// aggregationLoop (bughunt 2026-09-05: unjoined loops raced the
+		// deferred closeOnce path under -race stress). After stopChan
+		// closes both loops do at most one final flush and exit.
+		s.loopWG.Wait()
 		// Final flush
 		s.flush()
 		// Wait for any in-flight notifySubscribers goroutines spawned

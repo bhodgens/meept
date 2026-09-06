@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // sqlite driver registration
@@ -196,6 +197,15 @@ func readLastWake(dataDir string) (time.Time, error) {
 	return parsed.UTC(), nil
 }
 
+// lastWakeWriteMu serializes last-wake writers process-wide. All writers
+// share ONE temp filename (last_wake.json.tmp); concurrent writeLastWake
+// calls interleave their WriteFile offsets on the shared path and rename
+// torn/misplaced files away from each other (observed under -race stress:
+// "rename: no such file or directory" + a torn final file that later
+// failed json parse with "invalid character '9' after top-level value").
+// bughunt 2026-09-05.
+var lastWakeWriteMu sync.Mutex
+
 // writeLastWake persists the last wake time atomically.
 func writeLastWake(dataDir string, wake time.Time) error {
 	if dataDir == "" {
@@ -208,7 +218,15 @@ func writeLastWake(dataDir string, wake time.Time) error {
 	}
 	path := filepath.Join(dataDir, lastWakeFileName)
 	tempFile := path + ".tmp"
-	if err := os.WriteFile(tempFile, data, 0o600); err != nil {
+	// The mutex covers write+rename as ONE unit: the rename must observe
+	// this writer's tmp content before another writer truncates it.
+	// The WriteFile inside the critical section is deliberate — splitting
+	// the lock would reintroduce the torn-rename race this mutex exists
+	// to prevent (bughunt 2026-09-05). Single file write, no lock-held
+	// latency concern; suppress the mutexio scope rule with this note.
+	lastWakeWriteMu.Lock()
+	defer lastWakeWriteMu.Unlock()                              //nolint:mutexio // write+rename must be one atomic unit on the shared tmp path
+	if err := os.WriteFile(tempFile, data, 0o600); err != nil { //nolint:mutexio // exclusive tmp-write under lock IS the fix: parallel writers here tore the shared tmp file (bughunt 2026-09-05)
 		return fmt.Errorf("failed to write last wake temp file: %w", err)
 	}
 	if err := os.Rename(tempFile, path); err != nil {
