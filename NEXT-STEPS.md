@@ -1,47 +1,83 @@
-# NEXT-STEPS — bughunt waves 2026-09-03/04: decisions executed
+# NEXT-STEPS — Grok-Bot Blueprint Gap Implementation
 
-Full reports: `.hermes/audits/meept-week-2026-09-03.md` and
-`.hermes/audits/meept-week-2026-09-04.md`.
-All prior-wave CRITICALs/HIGHs are fixed. Product decisions from the 09-04
-review are now implemented and committed (see below). This file tracks only
-what remains open.
+Date: 2026-09-06. Source: X article "How to Master Graph and Loop
+Engineering using Grok Bot" (@Av1dlive,
+https://x.com/i/article/2092573868011745281) + gap analysis from session
+2026-09-05. All four plan trees COMPLETE; full `go test ./internal/...`
+green (90 packages, exit 0) at cb7d3e36.
 
-## Decision outcomes (implemented this wave)
+## What landed (this program, 16 commits)
 
-- **retry_count** → `*int` config field: omitted=3, 0=zero retries, -1=unlimited.
-  Commits 366f0f94. BONUS FIX: the field had no toml tag — TOML configs could
-  never bind it (go-toml matches by tag); JSON5-only in practice until now.
-- **Attempt-tagged streaming deltas** (option B) + **codex 429 typing** → 5dd63c70.
-- **Pacing**: slot reservation (ticket-style), default ON, and endpoint-timeout
-  turns PARK with the resolver's lazy-clear probe as the single reconnecting
-  agent (no spurious reconnect storms) → fda25177.
-- **json5 durations**: tokenizer pass replaces line-based hack; compact JSON5,
-  arrays, quoted-then-bare same-line all handled → 161f9ba8.
-- **Quota surfaces**: daemon-local timestamps by default (opt-in client-local),
-  `reason` parsed/displayed on TUI+Flutter, copyWith clear semantics fixed
-  (stale badges gone) → f0cd5331.
-- **Quick fixes**: rollback spin cap (3/turn), guard-state reset per turn,
-  resume Waited accuracy, memory consolidation nil-order → 421959a9.
-- **Capability matcher**: stays gated OFF (`agents.capability_match_enabled`,
-  7943f945); evaluation tracked in GitHub issue #31 (remove vs encoder-router).
+Trees 1-3 (gaps #1, #2, #4) + tree 4 (#3, full frontier):
 
-## Still open
+1. **Tamper-evident audit chain** — b19d6ca7, 6224b28c, 271b613c.
+   internal/auditlog: canonical JSON, SHA-256 hash chain, VerifyChain,
+   SQLite append-only store; audit findings + gate results chain into it
+   (sanitized, output_sha256 never raw); AnchorJob JSONL digests;
+   `agents.audit.verify` RPC; `meept agents audit --verify`.
+2. **External-effect idempotency ledger** — cbe4cce3, 2961ad32, eb50b9a2.
+   internal/effects: atomic Claim (INSERT PK conflict), receipts,
+   completion markers, ReconcilePending, deterministic EffectKey; push
+   notification + backup git push wired; startup + parked-turn-resume
+   reconcile (auto-retry only provider-idempotent effects);
+   effects.list/effects.reconcile RPC (direct handlers, no bus proxy);
+   `meept effects list|reconcile`.
+3. **Claim temporal validity** — 08d41590, dd72e8d7, dd78783b, b03af1a0.
+   Claim gains ObservedAt/ValidFrom/ValidTo/Rev (metadata-keyed,
+   zero-value backward compatible); supersede stamps rev+1 /
+   valid_to in place; expired claims hard-excluded from canonical
+   selection + detection; ListExpiredClaims; retain_claim params +
+   list_expired_claims tool + `meept memory expired`.
+4. **Phase frontier parallel dispatch** — 764f8c3c, 3dac0963, 637cdeb9,
+   7c6c8a44, cb7d3e36. Pure computePhaseFrontier; startPhase extraction;
+   advancePhasesFrontier (CAS single-flight, race-proven); per-phase
+   worktree provisioner + PhaseWorktree accessor; parallel-aware budget
+   hierarchy (per-phase maps); `plans.parallel_phases` opt-in (default
+   FALSE — serial preserved); daemon wiring + worktree consumption;
+   wiring test proves flag flips dispatch behavior.
 
-1. **Unpushed**: ~55 local commits ahead of upstream. Pending the -race gate.
-2. **-race full suite**: targeted -race runs pass (guards/parkers/streaming);
-   whole-suite race run never executed on this tree. Run before push.
-3. **M3/M4** (llm rotation ignores NonRetryable; ChatWithProgress missing
-   auth-arm): untouched — internal/llm had heavy sibling traffic; small PR
-   when the llm zone is quiet.
-4. **A-M deltas contract**: consumer migration — the loop's TTSR streaming
-   consumer (loop.go ~4668) still uses the plain callback (attempt-0-only
-   under rotation; no duplication, but no rotation-resume either). Migrate to
-   ChatWithDeltaCallbackWithAttempt when convenient.
-5. **Site/docs tweaks unreviewed**: meept.dev/index.html,
-   docs/feature-comparison-matrix.md, docs/features.md — sibling edits in the
-   working tree, not audited by any wave.
-6. **Minor**: SetPerOperationBackoffOverride has no exported clear (test
-   shims exist; production API asymmetry). gomarkdoc regen for agent.md when
-   available. `cmd/probe-skillkey-tmp/` + `scripts/` strays: owner deletes.
+## Notable fixes found during review (landed with the work)
 
-## Product decisions — none open. All resolved and implemented.
+- modernc.org/sqlite ignores `_journal_mode`-style DSN keys — functional
+  stores already use `_pragma=`; effects store sets WAL via PRAGMA +
+  SetMaxOpenConns(1). **The park store has the same latent issue**
+  (candidate follow-up).
+- Superseded claims are unreachable via GetByID (pre-existing is_current
+  filter) — tests load via GetVersionHistory.
+- startPhase re-entrancy guard originally missed started-not-yet-
+  scheduled steps (still StepPending) — a stamped ConversationID now
+  also counts as started (observed double-start B->C->C->D, fixed).
+- Duplicate-send push test raced non-blocking bus fan-out; wait now
+  covers both session topics.
+
+## Open follow-ups
+
+1. **memory.listExpired RPC handler** (claim-validity OPEN-QUESTIONS Q4):
+   one-file follow-up in internal/rpc/epistemic.go. Until it lands,
+   `meept memory expired` round-trips to the daemon and gets
+   method-not-found; the in-process tool works today.
+2. **Production worktree provisioner**: leaf 04 wires flag + consumption
+   only; a real provisioner (git worktree factory per active phase) is
+   the remaining piece to make parallel phases write-isolated. Until
+   then, run parallel phases only on plans without file-write conflicts.
+3. **Park store DSN** (above) + Abandon-reason persistence (effects
+   schema has no reason column; documented in code).
+4. **Scratch files** (rm denied by shell approval during session — delete
+   manually): ~/git/meet (typo'd repo path), meept internal/auditlog_tmp/,
+   meept internal/agent/tmpdbg_test.go, meept cmd/skillparse_main.go
+   (parallel session's stray; breaks repo-wide `go build ./...`).
+5. Pre-existing (not this program): full-repo mutexio failure in
+   internal/agent/intent_session_rules_test.go:83; enforcement.go's four
+   grandfathered `_ = autoPause(...)` sites.
+
+## How to use
+
+- Audit chain: automatic; verify with `meept agents audit --verify`.
+- Effects: automatic for push + backup push; inspect with
+  `meept effects list`; stuck non-idempotent effects need an explicit
+  `--complete` or `--abandon --reason <r>`.
+- Claim validity: set valid_to when retaining claims; review with
+  `meept memory expired` (needs follow-up #1) or the agent tool.
+- Parallel phases: set `plans.parallel_phases: true` in meept.json5;
+  only meaningful for plans whose phases declare Produces/Consumes.
+  See docs/workflows/agent-orchestration.md.
