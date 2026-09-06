@@ -55,6 +55,18 @@ type Orchestrator struct {
 	// hierarchies and emit observability events. See startNextPhase.
 	onPhaseTransition func(taskID, fromPhase, toPhase string)
 
+	// phaseWorktreeProvisioner is the per-phase worktree provisioning hook
+	// (Contract D): invoked from startPhase when parallelPhases is true so
+	// concurrently-active phases sharing a project each get an isolated
+	// worktree. Wired by the daemon (leaf 04); nil by default.
+	phaseWorktreeProvisioner func(ctx context.Context, taskID, phaseID, phaseName string) (string, error)
+
+	// phaseWorktrees caches provisioned worktree paths per phase
+	// (Contract D): key taskID+"\x00"+phaseName -> path. sync.Map — no
+	// mutex is held across the provisioner call (mutexio). Consumed via
+	// PhaseWorktree by the daemon's resolveStepWorkingDir (leaf 04).
+	phaseWorktrees sync.Map
+
 	// parallelPhases enables frontier dispatch: on phase completion, all
 	// ready phases start together (advancePhasesFrontier) instead of the
 	// serial next-in-list-order startNextPhase. Zero value false — serial
@@ -104,6 +116,37 @@ func (o *Orchestrator) SetPhaseTransitionHook(fn func(taskID, fromPhase, toPhase
 	if fn != nil {
 		o.onPhaseTransition = fn
 	}
+}
+
+// SetPhaseWorktreeProvisioner wires the per-phase worktree provisioning hook
+// (Contract D): when parallelPhases is enabled, startPhase invokes it for
+// each starting phase so concurrently-active phases can execute in isolated
+// worktrees. The returned path is cached per (taskID, phaseName) and served
+// by PhaseWorktree. Nil-guarded per CLAUDE.md setter convention; the
+// provisioner may return ("", nil) to signal "no worktree needed".
+func (o *Orchestrator) SetPhaseWorktreeProvisioner(
+	fn func(ctx context.Context, taskID, phaseID, phaseName string) (string, error)) {
+	if fn != nil {
+		o.phaseWorktreeProvisioner = fn
+	}
+}
+
+// PhaseWorktree returns the provisioned worktree path for a task's phase
+// (Contract D), or "" when the phase has none (serial mode, provisioner not
+// wired, provisioning failed, or the provisioner decided no worktree was
+// needed). Exported: the daemon-side job processor's resolveStepWorkingDir
+// precedence (WorktreePath > ProjectPath > session CWD > "") is the
+// consumption surface; leaf 04 wires it.
+func (o *Orchestrator) PhaseWorktree(taskID, phaseName string) string {
+	v, ok := o.phaseWorktrees.Load(taskID + "\x00" + phaseName)
+	if !ok {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return s
 }
 
 // SetParallelPhases enables or disables frontier dispatch of plan phases

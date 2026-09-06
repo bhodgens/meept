@@ -43,7 +43,7 @@ func TestAgentLoop_BudgetHierarchy_RecordUsage(t *testing.T) {
 	loop := NewAgentLoop("test-budget-record", "/tmp/test")
 
 	// Record usage directly on the hierarchy.
-	loop.budgetHierarchy.RecordUsage(500)
+	loop.budgetHierarchy.RecordUsage(500, "default")
 
 	status := loop.GetBudgetStatus()
 	if status == nil {

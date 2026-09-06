@@ -82,12 +82,17 @@ func (o *Orchestrator) startPhase(ctx context.Context, taskID string, p *plan.Pl
 	if err != nil {
 		return fmt.Errorf("get steps by phase: %w", err)
 	}
-	// Re-entrancy guard: any step past StepPending means the phase already
-	// started (stamping again would be a no-op anyway). Uses the shared
-	// task state constants rather than reimplementing state checks.
+	// Re-entrancy guard: a phase is already started when every step is
+	// either past StepPending OR carries a stamped conversationID (the
+	// observable of a prior startPhase). The stamp check matters under
+	// frontier dispatch: a started-but-not-yet-scheduled step remains
+	// StepPending, so the state check alone let a LATER advance re-start
+	// an already-running phase (re-stamp + re-hook) — leaf 03's Contract E
+	// verification caught exactly that. Uses the shared task state
+	// constants rather than reimplementing state checks.
 	allPastPending := true
 	for _, step := range steps {
-		if step.State == task.StepPending {
+		if step.State == task.StepPending && step.ConversationID == "" {
 			allPastPending = false
 			break
 		}
@@ -97,6 +102,45 @@ func (o *Orchestrator) startPhase(ctx context.Context, taskID string, p *plan.Pl
 			"task_id", taskID, "phase", p.Name)
 		return nil
 	}
+
+	// Provision a per-phase worktree (Contract D). Skip conditions, ALL
+	// documented here:
+	//   - flag off (serial mode): the provisioner is never invoked — behavior
+	//     identical to today.
+	//   - provisioner not wired (nil): silently skipped, no log spam.
+	//   - provisioner error: Warn and continue WITHOUT isolation — a
+	//     provisioning failure never fails the phase start.
+	//   - provisioner returns ("", nil): the provisioner decided no worktree is
+	//     needed (e.g. a plan that performs no file writes) — nothing cached.
+	// The whole invocation is panic-safe (same wrapper as onPhaseTransition
+	// below): a provisioner panic degrades to "no worktree", logged at Warn.
+	// Position: after the checkPhaseReady gate above and after the re-entrancy
+	// guard (so a skipped double-start re-provisions nothing), before the
+	// step-stamping loop.
+	if o.parallelPhases && o.phaseWorktreeProvisioner != nil {
+		provisioner := o.phaseWorktreeProvisioner
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					o.logger.Warn("phase worktree provisioning failed; phase continues without isolation",
+						"task_id", taskID, "phase", p.Name,
+						"error", fmt.Sprintf("panic: %v", r))
+				}
+			}()
+			wt, err := provisioner(ctx, taskID, p.ID, p.Name)
+			switch {
+			case err != nil:
+				o.logger.Warn("phase worktree provisioning failed; phase continues without isolation",
+					"task_id", taskID, "phase", p.Name, "error", err)
+			case wt == "":
+				// Provisioner decided no worktree is needed (e.g. plan
+				// performs no file writes) — nothing to cache.
+			default:
+				o.phaseWorktrees.Store(taskID+"\x00"+p.Name, wt)
+			}
+		}()
+	}
+
 	for _, step := range steps {
 		step.ConversationID = fmt.Sprintf("phase-%s-%s", p.ID, step.ID)
 		step.AccumulatedContext = startupCtx

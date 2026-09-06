@@ -3809,8 +3809,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		// Record usage in hierarchical budget tracker (additive; runs in parallel).
+		// "default" is the loop's single phase; per-phase routing IDs
+		// (leaf 03) only apply when the hierarchy is driven by the
+		// orchestrator's plan phases.
 		if l.budgetHierarchy != nil {
-			l.budgetHierarchy.RecordUsage(response.Usage.TotalTokens)
+			l.budgetHierarchy.RecordUsage(response.Usage.TotalTokens, "default")
 		}
 
 		// Publish token usage event

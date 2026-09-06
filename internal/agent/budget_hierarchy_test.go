@@ -50,7 +50,7 @@ func TestBudgetAllocation_WarningZone(t *testing.T) {
 		t.Fatal("Allocate(750) should succeed")
 	}
 	if !a.IsWarningZone() {
-		t.Error("expected IsWarningZone==true at 75%% usage with 0.7 threshold")
+		t.Error("expected IsWarningZone==true at 75% usage with 0.7 threshold")
 	}
 }
 
@@ -119,7 +119,7 @@ func TestBudgetHierarchy_RecordUsage(t *testing.T) {
 	}
 
 	usedBefore := h.turnBudget.Used()
-	h.RecordUsage(100)
+	h.RecordUsage(100, "phase1")
 	usedAfter := h.turnBudget.Used()
 
 	if usedAfter != usedBefore+100 {
@@ -151,7 +151,7 @@ func TestBudgetHierarchy_GetStatus(t *testing.T) {
 		t.Errorf("expected phase1 total=5000, got %d", phase1.Total)
 	}
 
-	// Turn-level checks
+	// Turn-level checks: the selected phase's turn budget must surface.
 	if status.Turn.Total <= 0 {
 		t.Error("turn budget should be positive in status after SelectPhaseBudget")
 	}
@@ -261,7 +261,7 @@ func TestBudgetHierarchy_RecordUsage_Propagates(t *testing.T) {
 		t.Fatalf("SelectPhaseBudget failed: %v", err)
 	}
 
-	h.RecordUsage(500)
+	h.RecordUsage(500, "p1")
 
 	// Turn level should show 500 used.
 	if got := h.turnBudget.Used(); got != 500 {
@@ -311,7 +311,7 @@ func TestBudgetHierarchy_PhaseExhaustionTriggers(t *testing.T) {
 
 	// Exhaust p1 by recording all available budget. p1 has 1000 total, no
 	// reserved, so Available = 1000.
-	h.RecordUsage(1000)
+	h.RecordUsage(1000, "p1")
 
 	p1 := h.phaseBudgets["p1"]
 	if !p1.IsExhausted() {
@@ -370,7 +370,7 @@ func TestBudgetHierarchy_AutoBorrowOnExhaustion(t *testing.T) {
 	}
 
 	// p1 has 1000 total. Record 600 usage (under limit).
-	h.RecordUsage(600)
+	h.RecordUsage(600, "p1")
 	p1 := h.phaseBudgets["p1"]
 	if got := p1.Used(); got != 600 {
 		t.Errorf("after 600 usage, p1 used = %d, want 600", got)
@@ -378,7 +378,7 @@ func TestBudgetHierarchy_AutoBorrowOnExhaustion(t *testing.T) {
 
 	// Record 500 more. p1 only has 400 available. Auto-borrow should kick in
 	// (borrowing 500 from p2 which has 5000), then the phase allocation succeeds.
-	h.RecordUsage(500)
+	h.RecordUsage(500, "p1")
 	if got := p1.Used(); got != 1100 {
 		t.Errorf("after auto-borrow + 500 more, p1 used = %d, want 1100", got)
 	}
@@ -392,6 +392,10 @@ func TestBudgetHierarchy_AutoBorrowOnExhaustion(t *testing.T) {
 
 // TestBudgetHierarchy_AdvancePhase verifies that AdvancePhase carries over
 // unused budget and selects the new phase.
+//
+// phase-frontier-parallel leaf 03: with map-based phase selection
+// (TestBudgetHierarchy_ParallelPhaseSelection), the per-phase turn budget
+// lives in phaseTurnBudgets; GetTurnBudget() sums across selected phases.
 func TestBudgetHierarchy_AdvancePhase(t *testing.T) {
 	h := NewBudgetHierarchy(10000, []string{"p1", "p2"}, []int{5000, 5000})
 	if err := h.SelectPhaseBudget("p1"); err != nil {
@@ -399,7 +403,7 @@ func TestBudgetHierarchy_AdvancePhase(t *testing.T) {
 	}
 
 	// Use 3000 of p1's 5000 budget via RecordUsage.
-	h.RecordUsage(3000)
+	h.RecordUsage(3000, "p1")
 
 	// p1 should have 2000 available.
 	p1 := h.phaseBudgets["p1"]
@@ -423,9 +427,12 @@ func TestBudgetHierarchy_AdvancePhase(t *testing.T) {
 		t.Errorf("p1 used = %d, want %d (fully consumed)", got, p1.totalBudget)
 	}
 
-	// currentPhase should now be p2.
-	if h.currentPhase != "p2" {
-		t.Errorf("currentPhase = %q, want \"p2\"", h.currentPhase)
+	// p2 should be the only selected phase after the advance.
+	h.mu.RLock()
+	selected := len(h.selectedPhases)
+	h.mu.RUnlock()
+	if selected != 1 {
+		t.Errorf("selected phase count = %d; want 1 after serial AdvancePhase", selected)
 	}
 
 	// Turn budget should be positive (p2 now has 7000, turn = 700).
@@ -479,19 +486,22 @@ func TestNewBudgetHierarchyWithConfig_AppliesOptions(t *testing.T) {
 	if err := h.SelectPhaseBudget("p1"); err != nil {
 		t.Fatalf("SelectPhaseBudget failed: %v", err)
 	}
-	if h.turnBudget.warningThreshold != 0.85 {
-		t.Errorf("turn warningThreshold = %v, want 0.85", h.turnBudget.warningThreshold)
+	h.mu.RLock()
+	turn := h.phaseTurnBudgets["p1"]
+	h.mu.RUnlock()
+	if turn == nil {
+		t.Fatal("per-phase turn budget missing after SelectPhaseBudget")
+	}
+	if turn.warningThreshold != 0.85 {
+		t.Errorf("turn warningThreshold = %v, want 0.85", turn.warningThreshold)
 	}
 }
 
 // TestNewBudgetHierarchyWithConfig_ZeroDefaults verifies that a zero-valued
 // BudgetHierarchyOptions produces the same result as NewBudgetHierarchy:
-// 10% reserve, 0.7 task warning, 0.8 phase warning, 0.9 turn warning,
-// carryover=false (zero bool), borrowing=false (zero bool).
-// But the defaults from NewBudgetHierarchy have carryover=true and
-// borrowing=true — those are the original hardcoded values. The zero-valued
-// struct gives false for bools (Go zero value), so we only check the
-// numeric defaults here.
+// 10% reserve, 0.7 task warning, 0.8 phase warning, 0.9 turn warning.
+// The zero-valued struct gives false for bools (Go zero value), so we only
+// check the numeric defaults here.
 func TestNewBudgetHierarchyWithConfig_ZeroDefaults(t *testing.T) {
 	// Zero-valued options: numeric fields default to the same values
 	// as NewBudgetHierarchy.
@@ -517,8 +527,14 @@ func TestNewBudgetHierarchyWithConfig_ZeroDefaults(t *testing.T) {
 	if err := h.SelectPhaseBudget("p1"); err != nil {
 		t.Fatalf("SelectPhaseBudget failed: %v", err)
 	}
-	if h.turnBudget.warningThreshold != defaultTurnWarningRatio {
-		t.Errorf("turn warningThreshold = %v, want %v (default)", h.turnBudget.warningThreshold, defaultTurnWarningRatio)
+	h.mu.RLock()
+	turn := h.phaseTurnBudgets["p1"]
+	h.mu.RUnlock()
+	if turn == nil {
+		t.Fatal("per-phase turn budget missing after SelectPhaseBudget")
+	}
+	if turn.warningThreshold != defaultTurnWarningRatio {
+		t.Errorf("turn warningThreshold = %v, want %v (default)", turn.warningThreshold, defaultTurnWarningRatio)
 	}
 
 	// Verify parity with NewBudgetHierarchy for numeric fields.
@@ -535,5 +551,230 @@ func TestNewBudgetHierarchyWithConfig_ZeroDefaults(t *testing.T) {
 	if p2Legacy.warningThreshold != p1.warningThreshold {
 		t.Errorf("phase warning mismatch: legacy=%v, withConfig=%v",
 			p2Legacy.warningThreshold, p1.warningThreshold)
+	}
+}
+
+// TestBudgetHierarchy_ParallelPhaseSelection is the leaf-03 parallel table:
+// two phases selected simultaneously, usage recorded with each phaseID,
+// per-phase pools and the task root attributed independently, and carryover
+// applied per-phase on its own transition — not a global swap.
+func TestBudgetHierarchy_ParallelPhaseSelection(t *testing.T) {
+	t.Run("independent usage attribution", func(t *testing.T) {
+		h := NewBudgetHierarchy(20000, []string{"p1", "p2"}, []int{5000, 5000})
+		if err := h.SelectPhaseBudget("p1"); err != nil {
+			t.Fatalf("SelectPhaseBudget(p1): %v", err)
+		}
+		if err := h.SelectPhaseBudget("p2"); err != nil {
+			t.Fatalf("SelectPhaseBudget(p2): %v", err)
+		}
+
+		// Usage routed with each phase's own ID must land in ITS pool.
+		h.RecordUsage(400, "p1")
+		h.RecordUsage(600, "p2")
+
+		if got := h.phaseBudgets["p1"].Used(); got != 400 {
+			t.Errorf("p1 used = %d; want 400", got)
+		}
+		if got := h.phaseBudgets["p2"].Used(); got != 600 {
+			t.Errorf("p2 used = %d; want 600", got)
+		}
+
+		// Task root is attributed the SUM of all phase usage.
+		if got := h.taskBudget.Used(); got != 1000 {
+			t.Errorf("task used = %d; want 1000", got)
+		}
+
+		// Per-phase turn budgets are independent: p1's turn is
+		// 5000/10 = 500 (400 consumed -> 100 left), p2's is
+		// 500 (600 consumed -> turn Allocate fails, still 500 available).
+		if got := h.TurnBudgetFor("p1"); got != 100 {
+			t.Errorf("p1 turn budget = %d; want 100", got)
+		}
+		if got := h.TurnBudgetFor("p2"); got != 500 {
+			t.Errorf("p2 turn budget = %d; want 500 (over-budget turn consumes fail)", got)
+		}
+
+		// Selecting p2 must NOT have disturbed p1's selection (the old
+		// single-slot bug: usage from p2 would have recorded against p1).
+		h.mu.RLock()
+		sel1, sel2 := h.selectedPhases["p1"], h.selectedPhases["p2"]
+		h.mu.RUnlock()
+		if !sel1 || !sel2 {
+			t.Errorf("selectedPhases p1=%v p2=%v; want both true", sel1, sel2)
+		}
+	})
+
+	t.Run("carryover per phase on its own transition", func(t *testing.T) {
+		h := NewBudgetHierarchy(20000, []string{"p1", "p2", "p3"}, []int{5000, 5000, 5000})
+		if err := h.SelectPhaseBudget("p1"); err != nil {
+			t.Fatalf("SelectPhaseBudget(p1): %v", err)
+		}
+		if err := h.SelectPhaseBudget("p2"); err != nil {
+			t.Fatalf("SelectPhaseBudget(p2): %v", err)
+		}
+
+		// Phase p1 burns 4000 of 5000; p2 stays fresh.
+		h.RecordUsage(4000, "p1")
+
+		// p1 finishes and advances to p3 — carryover must apply ONLY to
+		// p1's transition; p2's selection and pools are untouched.
+		if err := h.AdvancePhaseFrom("p1", "p3"); err != nil {
+			t.Fatalf("AdvancePhaseFrom(p1, p3): %v", err)
+		}
+
+		// p1's 1000 unused carried into p3.
+		if got := h.phaseBudgets["p3"].totalBudget; got != 6000 {
+			t.Errorf("p3 totalBudget = %d; want 6000 (5000 + p1 carryover 1000)", got)
+		}
+		if got := h.phaseBudgets["p1"].usedBudget; got != h.phaseBudgets["p1"].totalBudget {
+			t.Errorf("p1 used = %d; want %d (fully consumed after carryover)",
+				got, h.phaseBudgets["p1"].totalBudget)
+		}
+
+		// p2 keeps running untouched with its own turn budget intact.
+		if got := h.phaseBudgets["p2"].Used(); got != 0 {
+			t.Errorf("p2 used = %d; want 0 (parallel phase untouched by p1's advance)", got)
+		}
+		if got := h.TurnBudgetFor("p2"); got != 500 {
+			t.Errorf("p2 turn budget = %d; want 500", got)
+		}
+		// p1 left the selected set; p2 and p3 remain.
+		h.mu.RLock()
+		p1Selected, p2Selected, p3Selected := h.selectedPhases["p1"], h.selectedPhases["p2"], h.selectedPhases["p3"]
+		h.mu.RUnlock()
+		if p1Selected {
+			t.Error("p1 still selected after its own AdvancePhase; want deselected")
+		}
+		if !p2Selected || !p3Selected {
+			t.Errorf("selectedPhases p2=%v p3=%v; want both true", p2Selected, p3Selected)
+		}
+	})
+}
+
+// TestBudgetHierarchy_SerialEquivalence is the leaf-03 serial table: with
+// exactly one phase selected at a time, map-based selection reproduces the
+// legacy single-slot behavior exactly — same allocations, same usage
+// attribution, same turn-budget arithmetic.
+func TestBudgetHierarchy_SerialEquivalence(t *testing.T) {
+	// mirror is a faithful model of the legacy single-slot implementation,
+	// advanced by the same operations the hierarchy receives.
+	type mirror struct {
+		turnUsed  int
+		turnTotal int
+	}
+
+	tests := []struct {
+		name  string
+		run   func(t *testing.T, h *BudgetHierarchy, m *mirror)
+		check func(t *testing.T, h *BudgetHierarchy, m *mirror)
+	}{
+		{
+			name: "select then usage matches single-slot semantics",
+			run: func(t *testing.T, h *BudgetHierarchy, m *mirror) {
+				if err := h.SelectPhaseBudget("p1"); err != nil {
+					t.Fatalf("SelectPhaseBudget(p1): %v", err)
+				}
+				m.turnTotal = h.phaseBudgets["p1"].Available() / 10 // 500
+				h.RecordUsage(300, "p1")
+				m.turnUsed += 300
+			},
+			check: func(t *testing.T, h *BudgetHierarchy, m *mirror) {
+				if got := h.turnBudget.Used(); got != m.turnUsed {
+					t.Errorf("turn used = %d; want %d", got, m.turnUsed)
+				}
+				if got := h.turnBudget.totalBudget; got != m.turnTotal {
+					t.Errorf("turn total = %d; want %d", got, m.turnTotal)
+				}
+				if got := h.phaseBudgets["p1"].Used(); got != 300 {
+					t.Errorf("p1 used = %d; want 300", got)
+				}
+				if got := h.taskBudget.Used(); got != 300 {
+					t.Errorf("task used = %d; want 300", got)
+				}
+			},
+		},
+		{
+			name: "idempotent reselect preserves turn-budget continuity",
+			run: func(t *testing.T, h *BudgetHierarchy, m *mirror) {
+				if err := h.SelectPhaseBudget("p1"); err != nil {
+					t.Fatalf("SelectPhaseBudget(p1): %v", err)
+				}
+				m.turnTotal = h.phaseBudgets["p1"].Available() / 10 // 500
+				h.RecordUsage(200, "p1")
+				m.turnUsed += 200
+				// Re-selecting the running phase must NOT mint a fresh
+				// turn budget (that would reset its usage and double-add
+				// a child to the phase).
+				if err := h.SelectPhaseBudget("p1"); err != nil {
+					t.Fatalf("re-SelectPhaseBudget(p1): %v", err)
+				}
+			},
+			check: func(t *testing.T, h *BudgetHierarchy, m *mirror) {
+				if got := h.turnBudget.Used(); got != m.turnUsed {
+					t.Errorf("turn used after reselect = %d; want %d (continuity preserved)", got, m.turnUsed)
+				}
+				if got := h.turnBudget.totalBudget; got != m.turnTotal {
+					t.Errorf("turn total after reselect = %d; want %d", got, m.turnTotal)
+				}
+				// Exactly one turn child on the phase despite two selects.
+				children := h.phaseBudgets["p1"].GetChildren()
+				if len(children) != 1 {
+					t.Errorf("p1 children = %d; want 1 (idempotent select)", len(children))
+				}
+			},
+		},
+		{
+			name: "advance with carryover then usage matches legacy",
+			run: func(t *testing.T, h *BudgetHierarchy, m *mirror) {
+				if err := h.SelectPhaseBudget("p1"); err != nil {
+					t.Fatalf("SelectPhaseBudget(p1): %v", err)
+				}
+				h.RecordUsage(3000, "p1")
+				if err := h.AdvancePhase("p2"); err != nil {
+					t.Fatalf("AdvancePhase(p2): %v", err)
+				}
+				// Legacy: p1's 2000 unused carries to p2; p2's new turn
+				// is (5000+2000)/10 = 700 and usage records against p2.
+				h.RecordUsage(400, "p2")
+				m.turnUsed += 400
+				m.turnTotal = 7000 / 10
+			},
+			check: func(t *testing.T, h *BudgetHierarchy, m *mirror) {
+				if got := h.phaseBudgets["p2"].totalBudget; got != 7000 {
+					t.Errorf("p2 total = %d; want 7000 after carryover", got)
+				}
+				if got := h.phaseBudgets["p1"].usedBudget; got != h.phaseBudgets["p1"].totalBudget {
+					t.Errorf("p1 used = %d; want fully consumed (%d)", got, h.phaseBudgets["p1"].totalBudget)
+				}
+				if got := h.turnBudget.Used(); got != m.turnUsed {
+					t.Errorf("turn used = %d; want %d", got, m.turnUsed)
+				}
+				if got := h.turnBudget.totalBudget; got != m.turnTotal {
+					t.Errorf("turn total = %d; want %d", got, m.turnTotal)
+				}
+				if got := h.GetTurnBudget(); got != m.turnTotal-m.turnUsed {
+					t.Errorf("GetTurnBudget = %d; want %d", got, m.turnTotal-m.turnUsed)
+				}
+				if got := h.taskBudget.Used(); got != 3400 {
+					t.Errorf("task used = %d; want 3400", got)
+				}
+				// Exactly one phase stays selected in serial mode.
+				h.mu.RLock()
+				n := len(h.selectedPhases)
+				h.mu.RUnlock()
+				if n != 1 {
+					t.Errorf("selected phases = %d; want 1 in serial mode", n)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewBudgetHierarchy(10000, []string{"p1", "p2"}, []int{5000, 5000})
+			m := &mirror{}
+			tt.run(t, h, m)
+			tt.check(t, h, m)
+		})
 	}
 }

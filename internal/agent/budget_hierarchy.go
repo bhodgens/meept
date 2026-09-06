@@ -298,13 +298,29 @@ type BudgetStatus struct {
 
 // BudgetHierarchy manages the budget hierarchy for a task, providing
 // task-level, phase-level, and turn-level budget tracking.
+//
+// phase-frontier-parallel leaf 03 (Task-3 survey fix): phase selection was
+// previously a single slot (currentPhase string + turnBudget pointer), so
+// under parallel phases usage from phase B recorded against whichever phase
+// was selected LAST. Selection is now map-based: selectedPhases tracks every
+// concurrently-running phase and phaseTurnBudgets carries one turn budget per
+// selected phase. With exactly one phase selected at a time (serial mode),
+// behavior is identical to the legacy single-slot implementation.
 type BudgetHierarchy struct {
 	mu           sync.RWMutex
 	taskBudget   *BudgetAllocation
 	phaseBudgets map[string]*BudgetAllocation
-	turnBudget   *BudgetAllocation
-	currentPhase string // ID of the currently-selected phase
+	turnBudget   *BudgetAllocation // legacy-compatible handle on the most recently selected phase's turn budget
 	logger       *slog.Logger
+
+	// selectedPhases holds every currently-selected phase (leaf 03): the
+	// serial path keeps exactly one entry; the parallel frontier path can
+	// hold several. RecordUsage routes via its phaseID parameter.
+	selectedPhases map[string]bool
+
+	// phaseTurnBudgets carries one turn budget per selected phase (leaf
+	// 03), preserving turn-budget continuity while multiple phases run.
+	phaseTurnBudgets map[string]*BudgetAllocation
 
 	// turnWarningThreshold is applied to turn budgets created by
 	// SelectPhaseBudget and AdvancePhase. Defaults to 0.9 when zero.
@@ -391,6 +407,8 @@ func NewBudgetHierarchyWithConfig(taskBudget int, phases []string, phaseBudgets 
 func newBudgetHierarchyWithOpts(taskBudget int, phases []string, phaseBudgets []int, opts BudgetHierarchyOptions) *BudgetHierarchy {
 	h := &BudgetHierarchy{
 		phaseBudgets:         make(map[string]*BudgetAllocation),
+		selectedPhases:       make(map[string]bool),
+		phaseTurnBudgets:     make(map[string]*BudgetAllocation),
 		logger:               slog.Default(),
 		turnWarningThreshold: opts.effectiveTurnWarningRatio(),
 	}
@@ -457,9 +475,15 @@ func newBudgetHierarchyWithOpts(taskBudget int, phases []string, phaseBudgets []
 	return h
 }
 
-// SelectPhaseBudget sets the active phase budget and creates a turn budget
-// under it. The turn budget is set to approximately 1/10 of the phase's
-// available budget.
+// SelectPhaseBudget selects a phase and creates its per-phase turn budget
+// (leaf 03, map-based selection). The turn budget is set to approximately
+// 1/10 of the phase's available budget.
+//
+// Idempotent per phase: re-selecting an already-selected phase is a no-op,
+// preserving turn-budget continuity while that phase keeps running (a fresh
+// budget would reset its usage and double-add a child). Under parallel
+// phases several selections coexist; in serial mode exactly one phase is
+// selected at a time, matching the legacy single-slot behavior.
 func (h *BudgetHierarchy) SelectPhaseBudget(phaseID string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -468,68 +492,92 @@ func (h *BudgetHierarchy) SelectPhaseBudget(phaseID string) error {
 	if !ok {
 		return fmt.Errorf("phase %s not found", phaseID)
 	}
+	if h.selectedPhases[phaseID] {
+		return nil // already selected: keep its turn budget untouched
+	}
 
 	// Create turn budget under phase (estimate ~10 turns per phase)
-	turnBudget := phase.Available() / 10
-	h.turnBudget = NewBudgetAllocation("turn", BudgetLevelTurn, turnBudget).
+	turnBudget := NewBudgetAllocation("turn", BudgetLevelTurn, phase.Available()/10).
 		WithWarningThreshold(h.turnWarningThreshold)
-	phase.AddChild(h.turnBudget)
-	h.currentPhase = phaseID
+	phase.AddChild(turnBudget)
+	h.phaseTurnBudgets[phaseID] = turnBudget
+	h.selectedPhases[phaseID] = true
+	// Legacy-compatible handle: the most recently selected phase's turn
+	// budget (equal to the sole entry in serial mode).
+	h.turnBudget = turnBudget
 
 	return nil
 }
 
-// GetTurnBudget returns the current turn budget's available tokens.
+// GetTurnBudget returns the sum of available tokens across all selected
+// phases' turn budgets (leaf 03). In serial mode exactly one turn budget is
+// selected, so this equals the legacy single-slot value; under parallel
+// phases the caller sees the combined remaining turn capacity for the task.
 // Returns 0 if no turn budget is selected.
 func (h *BudgetHierarchy) GetTurnBudget() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	if h.turnBudget == nil {
+	total := 0
+	for _, tb := range h.phaseTurnBudgets {
+		total += tb.Available()
+	}
+	return total
+}
+
+// TurnBudgetFor returns the available tokens of one phase's turn budget, or
+// 0 when the phase is not selected (leaf 03, per-phase accessor).
+func (h *BudgetHierarchy) TurnBudgetFor(phaseID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	tb, ok := h.phaseTurnBudgets[phaseID]
+	if !ok {
 		return 0
 	}
-	return h.turnBudget.Available()
+	return tb.Available()
 }
 
 // RecordUsage records token usage at all three levels of the hierarchy:
-// turn, the currently-selected phase, and the task root. Each level has its
-// own totalBudget pool, so the same tokens are independently tracked at each
-// level — this is the correct semantic for hierarchical budgets (a turn
-// consumes from its turn allocation AND its parent phase AND the task).
+// turn, phase, and task. Each level has its own totalBudget pool, so the
+// same tokens are independently tracked at each level — this is the correct
+// semantic for hierarchical budgets (a turn consumes from its turn
+// allocation AND its parent phase AND the task).
+//
+// leaf 03: phaseID routes the usage to the right phase's pools while phases
+// run in parallel — passing a phaseID that is not selected still records the
+// usage against that phase and the task root. The phaseID parameter exists
+// because the previous single currentPhase slot misattributed usage from
+// concurrently-running phases to whichever phase was selected last.
 //
 // If the phase allocation fails because the phase is exhausted, and the phase
 // has borrowing enabled, auto-borrow from a sibling and retry.
-func (h *BudgetHierarchy) RecordUsage(tokens int) {
+func (h *BudgetHierarchy) RecordUsage(tokens int, phaseID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// 1. Record at turn level.
-	if h.turnBudget != nil {
-		h.turnBudget.Allocate(tokens)
-
-		if h.turnBudget.IsExhausted() {
+	// 1. Record at turn level for the usage's own phase.
+	if tb, ok := h.phaseTurnBudgets[phaseID]; ok {
+		tb.Allocate(tokens)
+		if tb.IsExhausted() {
 			if h.logger != nil {
 				h.logger.Warn("turn budget exhausted",
-					"level", h.turnBudget.level.String(),
-					"used", h.turnBudget.Used(),
-					"total", h.turnBudget.totalBudget)
+					"level", tb.level.String(),
+					"used", tb.Used(),
+					"total", tb.totalBudget)
 			}
 		}
 	}
 
 	// 2. Record at phase level.
-	if h.currentPhase != "" {
-		phase, ok := h.phaseBudgets[h.currentPhase]
-		if ok {
-			if !phase.Allocate(tokens) && phase.allowBorrowing {
-				// Phase exhausted and borrowing enabled — auto-borrow and retry.
-				if h.borrowForPhaseLocked(h.currentPhase, tokens) {
-					if h.logger != nil {
-						h.logger.Info("auto-borrow succeeded for phase",
-							"phase", h.currentPhase,
-							"tokens", tokens)
-					}
-					phase.Allocate(tokens)
+	if phase, ok := h.phaseBudgets[phaseID]; ok {
+		if !phase.Allocate(tokens) && phase.allowBorrowing {
+			// Phase exhausted and borrowing enabled — auto-borrow and retry.
+			if h.borrowForPhaseLocked(phaseID, tokens) {
+				if h.logger != nil {
+					h.logger.Info("auto-borrow succeeded for phase",
+						"phase", phaseID,
+						"tokens", tokens)
 				}
+				phase.Allocate(tokens)
 			}
 		}
 	}
@@ -540,21 +588,59 @@ func (h *BudgetHierarchy) RecordUsage(tokens int) {
 	}
 }
 
-// AdvancePhase transitions from the current phase to a new phase. If
-// carryover is enabled on the current phase, unused budget is carried over to
-// the new phase before selecting it. Returns an error if the new phase does
-// not exist or if carryover fails.
+// AdvancePhase transitions the most recently engaged phase's budget
+// allocation to a new phase, preserving the legacy serial semantics: carry
+// over the from phase's unused budget, then select the new phase. It
+// delegates to AdvancePhaseFrom with the resolved from phase (the
+// turn-budget handle when set, else the single selected phase). For explicit
+// per-phase transitions under parallel dispatch, call AdvancePhaseFrom
+// directly.
 func (h *BudgetHierarchy) AdvancePhase(newPhaseID string) error {
+	h.mu.Lock()
+	fromPhaseID := ""
+	for id := range h.selectedPhases {
+		if h.turnBudget != nil && h.phaseTurnBudgets[id] == h.turnBudget {
+			fromPhaseID = id
+			break
+		}
+	}
+	if fromPhaseID == "" && len(h.selectedPhases) == 1 {
+		// The most recent handle is gone (already advanced); fall back to
+		// the single selected phase.
+		for id := range h.selectedPhases {
+			fromPhaseID = id
+		}
+	}
+	h.mu.Unlock()
+	return h.AdvancePhaseFrom(fromPhaseID, newPhaseID)
+}
+
+// AdvancePhaseFrom transitions ONE phase's budget allocation from fromPhaseID
+// to newPhaseID (leaf 03): if carryover is enabled on the from phase, its
+// unused budget is carried over to the new phase before selecting it.
+// Carryover is per-phase on the phase's OWN transition, not a global swap —
+// other concurrently-selected phases keep running untouched. An empty
+// fromPhaseID selects the new phase without carryover (fresh start). Returns
+// an error if either phase does not exist.
+func (h *BudgetHierarchy) AdvancePhaseFrom(fromPhaseID, newPhaseID string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Carry over unused budget from current phase if applicable.
-	if h.currentPhase != "" && h.currentPhase != newPhaseID {
-		fromPhase, ok := h.phaseBudgets[h.currentPhase]
-		if ok && fromPhase.allowCarryover {
-			if _, ok := h.phaseBudgets[newPhaseID]; !ok {
-				return fmt.Errorf("destination phase %s not found", newPhaseID)
-			}
+	// Validate the destination up front so carryover never fires for a
+	// doomed transition.
+	if _, ok := h.phaseBudgets[newPhaseID]; !ok {
+		return fmt.Errorf("destination phase %s not found", newPhaseID)
+	}
+	if fromPhaseID != "" {
+		if _, ok := h.phaseBudgets[fromPhaseID]; !ok {
+			return fmt.Errorf("source phase %s not found", fromPhaseID)
+		}
+	}
+
+	// Carry over unused budget from the from phase if applicable.
+	if fromPhaseID != "" && fromPhaseID != newPhaseID {
+		fromPhase := h.phaseBudgets[fromPhaseID]
+		if fromPhase.allowCarryover {
 			unused := fromPhase.Available()
 			if unused > 0 {
 				toPhase := h.phaseBudgets[newPhaseID]
@@ -568,7 +654,7 @@ func (h *BudgetHierarchy) AdvancePhase(newPhaseID string) error {
 
 				if h.logger != nil {
 					h.logger.Info("budget carryover on phase advance",
-						"from", h.currentPhase,
+						"from", fromPhaseID,
 						"to", newPhaseID,
 						"amount", unused)
 				}
@@ -577,15 +663,21 @@ func (h *BudgetHierarchy) AdvancePhase(newPhaseID string) error {
 	}
 
 	// Select the new phase (inline to avoid re-locking since we hold h.mu).
-	phase, ok := h.phaseBudgets[newPhaseID]
-	if !ok {
-		return fmt.Errorf("phase %s not found", newPhaseID)
-	}
-	turnBudget := phase.Available() / 10
-	h.turnBudget = NewBudgetAllocation("turn", BudgetLevelTurn, turnBudget).
+	phase := h.phaseBudgets[newPhaseID]
+	// Deselect the from phase and drop its turn budget; the new phase gets
+	// a fresh one. Other selected phases (parallel mode) are untouched.
+	turnBudget := NewBudgetAllocation("turn", BudgetLevelTurn, phase.Available()/10).
 		WithWarningThreshold(h.turnWarningThreshold)
-	phase.AddChild(h.turnBudget)
-	h.currentPhase = newPhaseID
+	phase.AddChild(turnBudget)
+	h.phaseTurnBudgets[newPhaseID] = turnBudget
+	h.selectedPhases[newPhaseID] = true
+	if fromPhaseID != "" && fromPhaseID != newPhaseID {
+		delete(h.selectedPhases, fromPhaseID)
+		delete(h.phaseTurnBudgets, fromPhaseID)
+	}
+	// Legacy-compatible handle: the most recently selected phase's turn
+	// budget (equal to the sole entry in serial mode).
+	h.turnBudget = turnBudget
 
 	return nil
 }
@@ -604,9 +696,18 @@ func (h *BudgetHierarchy) GetStatus() BudgetStatus {
 		status.Phases[id] = h.budgetToStatus(phase)
 	}
 
-	if h.turnBudget != nil {
-		status.Turn = h.budgetToStatus(h.turnBudget)
+	// leaf 03: Turn aggregates across selected phases' turn budgets so the
+	// status reflects every concurrently-running phase, not just the
+	// latest. Serial mode has exactly one entry, matching legacy behavior;
+	// nothing selected yields the zero summary (Turn omitted downstream).
+	sum := BudgetAllocation{id: "turn", level: BudgetLevelTurn}
+	for _, tb := range h.phaseTurnBudgets {
+		tb.mu.RLock()
+		sum.totalBudget += tb.totalBudget
+		sum.usedBudget += tb.usedBudget
+		tb.mu.RUnlock()
 	}
+	status.Turn = h.budgetToStatus(&sum)
 
 	return status
 }
