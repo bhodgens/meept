@@ -304,12 +304,13 @@
       "command": ["cua-driver", "mcp"],
     },
 
-    // obscura: local-build headless browser engine (rust, apache-2.0) with
-    // built-in anti-detect, ~30 browser_* tools over stdio mcp. binary is
-    // the local release build (0.1.0-dev, 2026-09-05) at an absolute path —
-    // absolute because obscura is not on a standard path for the daemon's
-    // launch environment. supports geo-vantaged reads via OBSCURA_GEO_LOCATION
-    // ("lat,lon") + OBSCURA_TIMEZONE + OBSCURA_PROXY env passthrough.
+    // obscura: headless browser engine (rust, apache-2.0) with built-in
+    // anti-detect, ~30 browser_* tools over stdio mcp. looked up on PATH
+    // (install: `cargo install --path <obscura-checkout>/crates/obscura` or
+    // copy target/release/obscura into ~/.local/bin). binary on this
+    // machine: 0.1.0-dev (2026-09-05). supports geo-vantaged reads via
+    // OBSCURA_GEO_LOCATION ("lat,lon") + OBSCURA_TIMEZONE + OBSCURA_PROXY
+    // env passthrough.
     // upstream: https://github.com/h4ckf0r0day/obscura
     {
       "name": "obscura",
@@ -317,7 +318,7 @@
       "category": "browser",
       "description": "obscura headless browser MCP: navigate/snapshot/markdown/evaluate/forms/cookies; anti-detect; geo+tz+proxy shim",
       "type": "stdio",
-      "command": ["/Users/caimlas/git/obscura/target/release/obscura", "mcp"],
+      "command": ["obscura", "mcp"],
     },
 
     // excel: higher-capability xlsx manipulation fallback (pivot tables,

@@ -113,7 +113,7 @@ See the bundled `computer-use` skill (`config/skills/computer-use/SKILL.md`) for
 
 ### Obscura Browser Integration
 
-`obscura` (open source, [h4ckf0r0day/obscura](https://github.com/h4ckf0r0day/obscura), Apache 2.0) is a headless browser engine written in Rust and built for AI agents and web scraping. It runs real JavaScript via embedded V8, speaks the Chrome DevTools Protocol, and acts as a lightweight drop-in alternative to headless Chrome (~30 MB RSS per instance vs ~200 MB, per the project). It ships in the MCP default catalog (`config/mcp_servers.json5`) as `obscura`, **enabled by default** when the built binary exists at the catalog's absolute path.
+`obscura` (open source, [h4ckf0r0day/obscura](https://github.com/h4ckf0r0day/obscura), Apache 2.0) is a headless browser engine written in Rust and built for AI agents and web scraping. It runs real JavaScript via embedded V8, speaks the Chrome DevTools Protocol, and acts as a lightweight drop-in alternative to headless Chrome (~30 MB RSS per instance vs ~200 MB, per the project). It ships in the MCP default catalog (`config/mcp_servers.json5`) as `obscura`, **enabled by default**, resolved via PATH like the other native-binary entries (`cua-driver`, `npx`, `uvx`).
 
 The MCP server (`obscura mcp`, stdio) exposes a live browser session as a `browser_*` tool family: `browser_navigate`, `browser_snapshot`, `browser_markdown`, `browser_links`, `browser_click`, `browser_fill`, `browser_type`, `browser_evaluate`, `browser_screenshot`, `browser_pdf`, tabs, and cookies. Tools operate on the current page; navigate first, then read or act.
 
@@ -134,7 +134,7 @@ Verify with `obscura --version`.
 2. TUI: press `ctl-x o` (mcp menu), select `obscura`, press `e`.
 3. Menubar app: settings → tools tab, toggle the switch.
 
-The shipped catalog entry points at the meept-local build path (`/Users/caimlas/git/obscura/target/release/obscura`) and ships `enabled: true`; if the binary is absent the launch fails per-server without affecting the rest of the catalog. Geo-vantaged reads (map-pack style checks "as a searcher in city X") combine Obscura's `OBSCURA_GEO_LOCATION` (`lat,lon`), `OBSCURA_TIMEZONE`, and `OBSCURA_PROXY` env passthrough — declared in the entry's `env` block or exported before daemon start.
+The catalog entry launches `obscura mcp` — a PATH lookup, same pattern as `cua-driver`. Install the binary anywhere on the daemon's PATH (e.g. `cargo install --path <obscura-checkout>/crates/obscura`, or copy `target/release/obscura` into `~/.local/bin`); if it is absent the launch fails per-server without affecting the rest of the catalog. Geo-vantaged reads (map-pack style checks "as a searcher in city X") combine Obscura's `OBSCURA_GEO_LOCATION` (`lat,lon`), `OBSCURA_TIMEZONE`, and `OBSCURA_PROXY` env passthrough — declared in the entry's `env` block or exported before daemon start.
 
 Tools register under the server-name prefix — `obscura.browser_navigate`, `obscura.browser_snapshot`, etc. (see [MCP default catalog](tool-routing.md#mcp-default-catalog) for how namespacing works).
 

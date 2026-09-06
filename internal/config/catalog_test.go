@@ -48,8 +48,8 @@ func TestCatalogCuaDriverEntry(t *testing.T) {
 
 // TestCatalogObscuraEntry verifies the shipped catalog parses and the
 // obscura entry is present exactly once, enabled by default, and launches
-// the local release build at its absolute path ("... obscura", "mcp") over
-// stdio in the browser category.
+// "obscura mcp" (PATH lookup, matching the cua-driver native-binary
+// pattern) over stdio in the browser category.
 func TestCatalogObscuraEntry(t *testing.T) {
 	cfg, err := LoadMCPConfig("../../config/mcp_servers.json5")
 	if err != nil {
@@ -74,9 +74,9 @@ func TestCatalogObscuraEntry(t *testing.T) {
 	if !found.IsEnabled() {
 		t.Error("obscura must ship enabled: true")
 	}
-	wantCmd := []string{"/Users/caimlas/git/obscura/target/release/obscura", "mcp"}
+	wantCmd := []string{"obscura", "mcp"}
 	if got := found.Command; len(got) != 2 || got[0] != wantCmd[0] || got[1] != wantCmd[1] {
-		t.Errorf("command = %v, want %v", got, wantCmd)
+		t.Errorf("command = %v, want %v (bare binary name: PATH lookup, not an absolute build path)", got, wantCmd)
 	}
 	if found.Type != "" && found.Type != "stdio" {
 		t.Errorf("type = %q, want stdio (or empty for default)", found.Type)
