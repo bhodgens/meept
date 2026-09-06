@@ -185,6 +185,7 @@ Analytics:
 	rootCmd.AddCommand(newBackupCmd())
 	rootCmd.AddCommand(newSyncCmd())
 	rootCmd.AddCommand(newChangesCmd())
+	rootCmd.AddCommand(newEffectsCmd())
 	rootCmd.AddCommand(newRoutingCmd())
 	rootCmd.AddCommand(newMigrateCmd())
 	rootCmd.AddCommand(newLearningCmd())

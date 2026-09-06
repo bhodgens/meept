@@ -98,6 +98,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Employee** | `internal/employee` (constitution, goal, goal_loop, enforcement, authority, manager) |
 | **Audit Chain** | `internal/auditlog` (canonical JSON, hash chain, store, anchoring, verification) |
 | **Session** | `internal/session` (store, store_sqlite, threads, messages) |
+| **Effects** | `internal/effects` (external-effect idempotency ledger) |
 | **Services** | `internal/services` (chat, session, terminal, push, reflection) |
 | **Project** | `internal/project` (manager, init_deep, detection) |
 | **TUI** | `internal/tui` (app, commands, components, handlers, modals, models) |

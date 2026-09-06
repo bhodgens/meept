@@ -795,6 +795,17 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Plan RPC handlers registered")
 	}
 
+	// Effects RPC handlers (effects tree leaf 03): direct
+	// RegisterHandler closures over the ledger — never a bus proxy.
+	// When the ledger failed to open, register nothing: the CLI then
+	// gets "method not found" and prints an effects-ledger-unavailable
+	// hint.
+	if rpcServer != nil && components != nil && components.EffectsLedger != nil {
+		effectsRPCHandler := rpc.NewEffectsRPCHandler(components.EffectsLedger)
+		effectsRPCHandler.RegisterEffectsMethods(rpcServer)
+		logger.Info("Effects RPC handlers registered")
+	}
+
 	// Effects startup reconcile (effects tree leaf 02): re-drive effects
 	// left claimed/receipted by a previous crash before any new work runs.
 	// Synchronous with a 30s bound; best-effort — errors are logged inside
