@@ -13,3 +13,18 @@ contract must be applied to master.md (and the affected leaves) first.
 | Q4 | **In-house canonicalization vs RFC 8785 (JCS) library.** The pinned design chooses a small in-house canonical JSON (sorted keys, no whitespace, Go number formatting). This deviates from JCS number formatting (ES6 `Number::toString`) and means third-party verifiers cannot reproduce hashes without porting the exact algorithm. | **Accept the deviation (pinned).** Hashes only need self-consistency within meept; adding a JCS dependency (e.g. github.com/cyberphone/json-canonicalization) is a one-line swap in `canonicalFloat`/`appendCanonical` later if cross-tool verification becomes a requirement. The deviation is documented in canonical.go's package comment. | Swapping to JCS later invalidates all stored hashes (one-time `rechain` migration would be needed). Deciding NOW avoids that migration. |
 | Q5 | **Shared DB vs separate file for the chain.** Leaf 02 puts the chain in the SAME SQLite database as findings when `sharedDB` is used, and in a sibling `audit_chain.db` file otherwise. Should the chain always live in its own file (simpler backup/exfil story, one-file off-host copy)? | **Keep the dual path as planned** (matches how findings already work in wiring.go), but keep `audit_chain.db` stable as the standalone name so anchor tooling can find it. Revisit single-file if ops complains. | Switching to always-separate later = one wiring.go change + docs; no contract change. |
 | Q6 | **Anchor export cadence.** Default 1 hour (leaf 03). Too chatty for laptops, too slow for incident forensics? | **Keep 1h**; expose `audit.anchor_interval` in config later if a real need appears. The config key is NOT in scope (YAGNI). | None now; a config read in NewAnchorJob later is a 5-line change. |
+
+## Do NOT commit independently
+
+This file is reference documentation inside the tamper-evident-audit-log plan
+tree, not a dispatchable implementation leaf. It is committed together with
+the tree's master.md as one unit — never as its own commit.
+
+## Self-Verification Checklist
+
+- [ ] This document is reference documentation, not a dispatchable
+      implementation leaf — no code changes, no file edits, no test runs
+      belong to it.
+- [ ] Every open question carries Q / Rec / Impact, and the resolved
+      questions point at the contract or leaf that closed them.
+- [ ] Nothing here contradicts the pinned contracts in master.md.

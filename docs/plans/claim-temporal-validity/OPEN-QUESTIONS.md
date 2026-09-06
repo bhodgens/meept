@@ -103,3 +103,18 @@ or metadata keys).
   gomarkdoc output via `make docs-generate` → `mage -d magefiles docsGenerate`
   (package map magefiles/docs.go:51). Leaf 03 regenerates, never hand-edits.
   (Closed.)
+
+## Do NOT commit independently
+
+This file is reference documentation inside the claim-temporal-validity plan
+tree, not a dispatchable implementation leaf. It is committed together with
+the tree's master.md as one unit — never as its own commit.
+
+## Self-Verification Checklist
+
+- [ ] This document is reference documentation, not a dispatchable
+      implementation leaf — no code changes, no file edits, no test runs
+      belong to it.
+- [ ] Every open question carries Q / Rec / Impact, and resolved questions
+      point at the contract or leaf that closed them.
+- [ ] Nothing here contradicts the pinned contracts in master.md.

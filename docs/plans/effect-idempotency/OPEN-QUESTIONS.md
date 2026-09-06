@@ -116,3 +116,18 @@ payloads (keys live in config/providers, per repo convention). If a
 multi-user hardening pass happens, revisit column-level treatment.
 
 **Impact:** docs wording (leaf 03); no code.
+
+## Do NOT commit independently
+
+This file is reference documentation inside the effect-idempotency plan
+tree, not a dispatchable implementation leaf. It is committed together with
+the tree's master.md as one unit — never as its own commit.
+
+## Self-Verification Checklist
+
+- [ ] This document is reference documentation, not a dispatchable
+      implementation leaf — no code changes, no file edits, no test runs
+      belong to it.
+- [ ] Every open question carries Q / Rec / Impact, and resolved questions
+      (R1-R4) point at the contract or leaf that closed them.
+- [ ] Nothing here contradicts the pinned contracts in master.md.
