@@ -484,6 +484,19 @@ func (c *SDKClient) CancelTask(taskID string) error {
 	return err
 }
 
+// ApproveTask resumes a task paused at the approval gate via
+// StrategicPlanner.ApprovePlan (persist pending steps + schedule).
+func (c *SDKClient) ApproveTask(taskID string) error {
+	_, err := c.callAPI("task.approve", map[string]string{"task_id": taskID})
+	return err
+}
+
+// RejectTask cancels a task awaiting approval.
+func (c *SDKClient) RejectTask(taskID, reason string) error {
+	_, err := c.callAPI("task.reject", map[string]string{"task_id": taskID, "reason": reason})
+	return err
+}
+
 func (c *SDKClient) LinkTaskSession(taskID, sessionID string) error {
 	_, err := c.callAPI("task.link", map[string]string{
 		"task_id":    taskID,

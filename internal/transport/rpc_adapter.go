@@ -99,8 +99,12 @@ func (a *rpcAdapter) ListTasksExtended() (*types.TaskExtendedListResponse, error
 func (a *rpcAdapter) ListTaskSteps(taskID string) (*types.TaskStepsResponse, error) {
 	return a.client.ListTaskSteps(taskID)
 }
-func (a *rpcAdapter) DeleteTask(taskID string) error { return a.client.DeleteTask(taskID) }
-func (a *rpcAdapter) CancelTask(taskID string) error { return a.client.CancelTask(taskID) }
+func (a *rpcAdapter) DeleteTask(taskID string) error  { return a.client.DeleteTask(taskID) }
+func (a *rpcAdapter) CancelTask(taskID string) error  { return a.client.CancelTask(taskID) }
+func (a *rpcAdapter) ApproveTask(taskID string) error { return a.client.ApproveTask(taskID) }
+func (a *rpcAdapter) RejectTask(taskID, reason string) error {
+	return a.client.RejectTask(taskID, reason)
+}
 func (a *rpcAdapter) LinkTaskSession(taskID, sessionID string) error {
 	return a.client.LinkTaskSession(taskID, sessionID)
 }

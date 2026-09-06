@@ -1475,6 +1475,17 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		})
 		logger.Info("Orchestrator phase-transition hook wired")
 
+		// Task approval RPC (wiring-gap fix): StrategicPlanner.ApprovePlan
+		// persisted pending steps and scheduled them, but was only callable
+		// in-process — tasks that hit the approval gate (>= 5 planned steps)
+		// were stuck in awaiting_approval forever. Expose it to CLI/TUI/HTTP.
+		if rpcServer != nil {
+			approvalHandler := rpc.NewTaskApprovalHandler(
+				components.Orchestrator.Strategic().ApprovePlan)
+			approvalHandler.RegisterTaskApprovalMethods(rpcServer)
+			logger.Info("Task approval RPC handlers registered")
+		}
+
 		// Wire parallel phase dispatch from config (phase-frontier-parallel
 		// Contract C): plans.parallel_phases (default false = strict serial
 		// phases) enables frontier-based phase starts. MUST run before the

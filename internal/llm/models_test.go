@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,6 +17,39 @@ func TestTokenUsage_CacheFields(t *testing.T) {
 	}
 	if u.CachedTokens != 800 {
 		t.Errorf("CachedTokens = %d, want 800", u.CachedTokens)
+	}
+}
+
+// TestTokenUsage_NewFieldsJSON verifies the tokscale-ingest ReasoningTokens
+// and CacheCreationTokens fields round-trip through JSON and serialize with
+// the contracted keys. Zero values omit (omitempty) — semantics: 0 means
+// "provider did not report", not "zero occurred".
+func TestTokenUsage_NewFieldsJSON(t *testing.T) {
+	u := TokenUsage{
+		PromptTokens:        10,
+		CompletionTokens:    5,
+		TotalTokens:         15,
+		ReasoningTokens:     3,
+		CacheCreationTokens: 7,
+	}
+	b, err := json.Marshal(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back TokenUsage
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.ReasoningTokens != 3 {
+		t.Fatalf("ReasoningTokens = %d, want 3", back.ReasoningTokens)
+	}
+	if back.CacheCreationTokens != 7 {
+		t.Fatalf("CacheCreationTokens = %d, want 7", back.CacheCreationTokens)
+	}
+	// Zero fields omit from JSON (omitempty) — semantic: not reported.
+	if !strings.Contains(string(b), `"reasoning_tokens":3`) ||
+		!strings.Contains(string(b), `"cache_creation_tokens":7`) {
+		t.Fatalf("expected new keys in %s", b)
 	}
 }
 

@@ -803,6 +803,21 @@ func (c *RPCClient) CancelTask(taskID string) error {
 	return err
 }
 
+// ApproveTask resumes a task paused at the approval gate via
+// StrategicPlanner.ApprovePlan (persist pending steps + schedule).
+func (c *RPCClient) ApproveTask(taskID string) error {
+	params := map[string]string{"task_id": taskID}
+	_, err := c.Call("task.approve", params)
+	return err
+}
+
+// RejectTask cancels a task awaiting approval.
+func (c *RPCClient) RejectTask(taskID, reason string) error {
+	params := map[string]string{"task_id": taskID, "reason": reason}
+	_, err := c.Call("task.reject", params)
+	return err
+}
+
 // LinkTaskSession links a session to a task.
 func (c *RPCClient) LinkTaskSession(taskID, sessionID string) error {
 	params := map[string]string{

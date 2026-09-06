@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -221,4 +222,44 @@ func strconvFormatInt(sec int64) string {
 		digits[i] = '-'
 	}
 	return string(digits[i:])
+}
+
+// TestCodexChat_UsageStoreCarriesSessionID verifies the Codex path stamps
+// chatOptions.sessionID into the llm_calls row (tokscale ingest leaf 01).
+func TestCodexChat_UsageStoreCarriesSessionID(t *testing.T) {
+	respBody := `{
+		"id": "resp_1", "object": "response", "status": "completed",
+		"output": [{"type": "message", "role": "assistant",
+			"content": [{"type": "output_text", "text": "hi"}]}],
+		"usage": {"input_tokens": 100, "output_tokens": 50,
+			"input_tokens_details": {"cached_tokens": 10}}
+	}`
+	srv, _ := newCodexTestServer(t, codexResponder{status: http.StatusOK, body: respBody})
+
+	store, dbPath := newUsageTestStoreAtPath(t, filepath.Join(t.TempDir(), "metrics.db"))
+	db := openLLMCallsSidecar(t, dbPath)
+	client := newCodexClientForTest(t, srv.URL,
+		WithCodexTokenResolver(&stubTokenResolver{token: makeJWT(t, "")}, "openai-codex"))
+	client.SetUsageStore(store)
+
+	_, err := client.Chat(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hello"}},
+		WithAgentScope("coder"), WithTaskScope("task-1", "sess-codex"))
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	var rows []struct {
+		SessionID string `db:"session_id"`
+	}
+	pollUntil(t, func() bool {
+		return db.Select(&rows, `SELECT session_id FROM llm_calls`) == nil &&
+			len(rows) == 1
+	})
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 llm_calls row, got %d", len(rows))
+	}
+	if rows[0].SessionID != "sess-codex" {
+		t.Errorf("SessionID = %q, want sess-codex", rows[0].SessionID)
+	}
 }

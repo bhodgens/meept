@@ -672,7 +672,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		}
 
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
-		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, resp.Usage, false, "", 0)
+		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", 0)
 
 		return resp, nil
 	}
@@ -685,7 +685,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, TokenUsage{}, true, allFailed.Message, 0)
+	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, allFailed.Message, 0)
 	return nil, allFailed
 }
 
@@ -894,7 +894,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		reportProgress(ProgressStageDone, fmt.Sprintf("Complete: %d tokens", resp.Usage.TotalTokens))
 
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
-		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, resp.Usage, false, "", 0)
+		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", 0)
 
 		return resp, nil
 	}
@@ -904,7 +904,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, TokenUsage{}, true, allFailed.Message, 0)
+	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, allFailed.Message, 0)
 	return nil, allFailed
 }
 
@@ -1474,23 +1474,27 @@ var ErrEmptyResponse = &ClientError{Message: "empty content"}
 // recordUsageStore appends one completed LLM call to the app-level metrics
 // store (metrics.db llm_calls ledger + model_performance rollup). No-op when
 // no usage store is attached. Storage errors are logged, never fatal.
-func (c *Client) recordUsageStore(providerID, modelID, agentID string, usage TokenUsage, isErr bool, errMsg string, latencyMs int64) {
+// sessionID is the raw chatOptions.sessionID ("" when unknown) — it is
+// stamped even on error rows.
+func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string, usage TokenUsage, isErr bool, errMsg string, latencyMs int64) {
 	if c.usageStore == nil {
 		return
 	}
 	//nolint:gosec // goroutine outlives request context
 	go func() {
 		c.usageStore.RecordLLMCall(appmetrics.LLMCallRecord{
-			Timestamp:    time.Now(),
-			Provider:     providerID,
-			ModelID:      modelID,
-			AgentID:      agentID,
-			TokensSent:   usage.PromptTokens,
-			TokensRecv:   usage.CompletionTokens,
-			TokensCached: usage.CachedTokens,
-			IsError:      isErr,
-			ErrorMessage: errMsg,
-			LatencyMs:    latencyMs,
+			Timestamp:       time.Now(),
+			Provider:        providerID,
+			ModelID:         modelID,
+			AgentID:         agentID,
+			SessionID:       sessionID,
+			TokensSent:      usage.PromptTokens,
+			TokensRecv:      usage.CompletionTokens,
+			TokensCached:    usage.CachedTokens,
+			ReasoningTokens: usage.ReasoningTokens,
+			IsError:         isErr,
+			ErrorMessage:    errMsg,
+			LatencyMs:       latencyMs,
 		})
 	}()
 }
@@ -1537,6 +1541,7 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 			CompletionTokens: chatResp.Usage.CompletionTokens,
 			TotalTokens:      chatResp.Usage.TotalTokens,
 			CachedTokens:     chatResp.Usage.PromptTokensDetails.CachedTokens,
+			ReasoningTokens:  chatResp.Usage.CompletionTokensDetails.ReasoningTokens,
 		},
 		Model:        model,
 		FinishReason: choice.FinishReason,
@@ -1659,7 +1664,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 
 			// Per-provider/per-agent token accounting (metrics.db llm_calls).
 			if resp != nil {
-				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, resp.Usage, false, "", 0)
+				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", 0)
 			}
 			return resp, nil
 		}
@@ -1756,7 +1761,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		Message: fmt.Sprintf("streaming failed after %d attempts", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, TokenUsage{}, true, streamFailed.Message, 0)
+	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, streamFailed.Message, 0)
 	return nil, streamFailed
 }
 
@@ -1972,6 +1977,9 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 				PromptTokensDetails struct {
 					CachedTokens int `json:"cached_tokens"`
 				} `json:"prompt_tokens_details"`
+				CompletionTokensDetails struct {
+					ReasoningTokens int `json:"reasoning_tokens"`
+				} `json:"completion_tokens_details"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
@@ -1986,6 +1994,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 				CompletionTokens: chunk.Usage.CompletionTokens,
 				TotalTokens:      chunk.Usage.TotalTokens,
 				CachedTokens:     chunk.Usage.PromptTokensDetails.CachedTokens,
+				ReasoningTokens:  chunk.Usage.CompletionTokensDetails.ReasoningTokens,
 			}
 		}
 		if len(chunk.Choices) == 0 {

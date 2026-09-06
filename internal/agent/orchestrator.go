@@ -278,6 +278,13 @@ func (o *Orchestrator) PlanManager() *plan.PlanManager {
 	return o.planManager
 }
 
+// Strategic returns the strategic planner, if configured. Used by the
+// daemon to expose the task approval gate (StrategicPlanner.ApprovePlan)
+// over RPC.
+func (o *Orchestrator) Strategic() *StrategicPlanner {
+	return o.strategic
+}
+
 // SetReflectionEngine sets the reflection engine for auto-fix loop.
 // This is called by the daemon after the ReflectionEngine is created.
 func (o *Orchestrator) SetReflectionEngine(reflection *ReflectionEngine) {

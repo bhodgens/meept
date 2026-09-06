@@ -665,6 +665,19 @@ func (c *httpClient) CancelTask(taskID string) error {
 	return err
 }
 
+// ApproveTask resumes a task paused at the approval gate via
+// StrategicPlanner.ApprovePlan (persist pending steps + schedule).
+func (c *httpClient) ApproveTask(taskID string) error {
+	_, err := c.callAPI(context.Background(), "task.approve", map[string]string{"task_id": taskID})
+	return err
+}
+
+// RejectTask cancels a task awaiting approval.
+func (c *httpClient) RejectTask(taskID, reason string) error {
+	_, err := c.callAPI(context.Background(), "task.reject", map[string]string{"task_id": taskID, "reason": reason})
+	return err
+}
+
 // LinkTaskSession links a session to a task.
 func (c *httpClient) LinkTaskSession(taskID, sessionID string) error {
 	_, err := c.callAPI(context.Background(), "task.link", map[string]string{"task_id": taskID, "session_id": sessionID})

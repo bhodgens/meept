@@ -27,9 +27,65 @@ Examples:
 	cmd.AddCommand(newTaskCreateCmd())
 	cmd.AddCommand(newTaskGetCmd())
 	cmd.AddCommand(newTaskDeleteCmd())
+	cmd.AddCommand(newTaskApproveCmd())
+	cmd.AddCommand(newTaskRejectCmd())
 	cmd.AddCommand(newTaskLinkCmd())
 	cmd.AddCommand(newTaskUnlinkCmd())
 
+	return cmd
+}
+
+// newTaskApproveCmd resumes a task paused at the approval gate: it persists
+// the pending steps and schedules them (StrategicPlanner.ApprovePlan).
+func newTaskApproveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "approve <task-id>",
+		Short: "approve a plan awaiting approval (persist + schedule its steps)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			taskID := args[0]
+
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			if err := client.ApproveTask(taskID); err != nil {
+				return fmt.Errorf("failed to approve task: %w", err)
+			}
+
+			fmt.Printf("Approved task: %s\n", taskID)
+			return nil
+		},
+	}
+}
+
+// newTaskRejectCmd cancels a task awaiting approval.
+func newTaskRejectCmd() *cobra.Command {
+	var reason string
+	cmd := &cobra.Command{
+		Use:   "reject <task-id>",
+		Short: "reject (cancel) a task awaiting approval",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			taskID := args[0]
+
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			if err := client.RejectTask(taskID, reason); err != nil {
+				return fmt.Errorf("failed to reject task: %w", err)
+			}
+
+			fmt.Printf("Rejected task: %s\n", taskID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&reason, "reason", "", "why the plan is rejected")
 	return cmd
 }
 

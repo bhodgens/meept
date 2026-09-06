@@ -166,10 +166,12 @@ func (tc *ToolCall) ParsedArguments() (map[string]any, error) {
 
 // TokenUsage represents token usage counters returned by the API.
 type TokenUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-	CachedTokens     int `json:"cached_tokens,omitempty"`
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	CachedTokens        int `json:"cached_tokens,omitempty"`
+	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
 }
 
 // Response represents a parsed response from the LLM API.
@@ -551,6 +553,12 @@ type ChatResponse struct {
 		PromptTokensDetails struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details"`
+		// CompletionTokensDetails carries OpenAI o-series reasoning output
+		// counts. Absent from most providers' payloads; decodes to 0 there
+		// ("not reported").
+		CompletionTokensDetails struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage"`
 }
 

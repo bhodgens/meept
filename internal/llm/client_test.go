@@ -44,6 +44,9 @@ func TestClientChat(t *testing.T) {
 				PromptTokensDetails struct {
 					CachedTokens int `json:"cached_tokens"`
 				} `json:"prompt_tokens_details"`
+				CompletionTokensDetails struct {
+					ReasoningTokens int `json:"reasoning_tokens"`
+				} `json:"completion_tokens_details"`
 			}{
 				PromptTokens:     10,
 				CompletionTokens: 5,
@@ -290,6 +293,9 @@ func TestClientWithBudget(t *testing.T) {
 				PromptTokensDetails struct {
 					CachedTokens int `json:"cached_tokens"`
 				} `json:"prompt_tokens_details"`
+				CompletionTokensDetails struct {
+					ReasoningTokens int `json:"reasoning_tokens"`
+				} `json:"completion_tokens_details"`
 			}{
 				PromptTokens:     10,
 				CompletionTokens: 5,
@@ -477,6 +483,9 @@ func TestClientConcurrencyLimit(t *testing.T) {
 				PromptTokensDetails struct {
 					CachedTokens int `json:"cached_tokens"`
 				} `json:"prompt_tokens_details"`
+				CompletionTokensDetails struct {
+					ReasoningTokens int `json:"reasoning_tokens"`
+				} `json:"completion_tokens_details"`
 			}{
 				PromptTokens:     10,
 				CompletionTokens: 5,
