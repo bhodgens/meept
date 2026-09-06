@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
 )
 
@@ -264,5 +265,126 @@ func TestSessionContextDigest_Build(t *testing.T) {
 			}
 			tc.check(t, got)
 		})
+	}
+}
+
+// digestTestSessionStore is a minimal SessionStoreReader for working
+// directory resolution tests, keyed by conversation ID.
+type digestTestSessionStore struct {
+	sessions map[string]*session.Session
+}
+
+func (s *digestTestSessionStore) Get(id string) *session.Session {
+	return s.sessions[id]
+}
+
+func (s *digestTestSessionStore) GetByConversationID(conversationID string) *session.Session {
+	for _, sess := range s.sessions {
+		if sess.ConversationID == conversationID {
+			return sess
+		}
+	}
+	return nil
+}
+
+// Leaf 03 Task 1: WorkingDirectory resolution precedence
+// WorktreePath > ProjectPath > DetectionContext.CWD, nil-guarded on both
+// the store and DetectionContext; unknown session and nil store yield "".
+func TestSessionContextDigest_WorkingDirectory(t *testing.T) {
+	seed := func(t *testing.T, d *Dispatcher, convID string, sess *session.Session) {
+		t.Helper()
+		sess.ConversationID = convID
+		d.SetSessionStore(&digestTestSessionStore{sessions: map[string]*session.Session{convID: sess}})
+	}
+
+	tests := []struct {
+		name   string
+		sess   *session.Session // nil: store set but lookup misses
+		noSess bool             // leave d.sessionStore nil entirely
+		want   string
+	}{
+		{
+			name: "worktree path wins over project path and cwd",
+			sess: &session.Session{
+				WorktreePath: "/repo/wt",
+				ProjectPath:  "/repo/proj",
+				DetectionContext: &session.DetectionContext{
+					CWD: "/repo/cwd",
+				},
+			},
+			want: "/repo/wt",
+		},
+		{
+			name: "project path wins over cwd",
+			sess: &session.Session{
+				ProjectPath: "/repo/proj",
+				DetectionContext: &session.DetectionContext{
+					CWD: "/repo/cwd",
+				},
+			},
+			want: "/repo/proj",
+		},
+		{
+			name: "detection context cwd used when others empty",
+			sess: &session.Session{
+				DetectionContext: &session.DetectionContext{
+					CWD: "/repo/cwd",
+				},
+			},
+			want: "/repo/cwd",
+		},
+		{
+			name: "no fields set yields empty working directory",
+			sess: &session.Session{},
+			want: "",
+		},
+		{
+			name: "nil detection context with no paths yields empty",
+			sess: &session.Session{
+				DetectionContext: nil,
+			},
+			want: "",
+		},
+		{
+			name: "unknown session yields empty working directory",
+			sess: nil,
+			want: "",
+		},
+		{
+			name:   "nil sessionStore yields empty without panic",
+			noSess: true,
+			want:   "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d, _ := newDigestTestDispatcher(t)
+			if !tc.noSess {
+				if tc.sess == nil {
+					// Store wired, but no session matches the lookup key.
+					d.SetSessionStore(&digestTestSessionStore{sessions: map[string]*session.Session{}})
+				} else {
+					seed(t, d, "sess-wd", tc.sess)
+				}
+			}
+
+			got := d.buildSessionContextDigest("sess-wd")
+			if got == nil {
+				t.Fatal("buildSessionContextDigest returned nil")
+			}
+			if got.WorkingDirectory != tc.want {
+				t.Errorf("WorkingDirectory = %q, want %q", got.WorkingDirectory, tc.want)
+			}
+		})
+	}
+}
+
+// Leaf 03 Task 1: IsEmpty ignores WorkingDirectory — cwd is enrichment,
+// not activity, so a cwd-only digest must still count as empty.
+func TestSessionContextDigest_IsEmpty_IgnoresWorkingDirectory(t *testing.T) {
+	cwdOnly := SessionContextDigest{WorkingDirectory: "/repo/cwd"}
+	if !cwdOnly.IsEmpty() {
+		t.Errorf("cwd-only digest IsEmpty() = false, want true (WorkingDirectory is not activity)")
 	}
 }

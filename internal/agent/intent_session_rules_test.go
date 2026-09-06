@@ -275,3 +275,46 @@ func TestDispatcher_ResumeAfterClarification_BuildsSessionDigest(t *testing.T) {
 	}
 	requireSessionRules(t, msgs[0].Content)
 }
+
+// Leaf 03 Task 2: buildActivityBlock appends "Working directory: <path>"
+// exactly when WorkingDirectory is set; the line is absent otherwise, with
+// no dangling newline. buildAnalysisMessages is called directly because the
+// block formatting (not the transport) is under test.
+func TestIntentAnalyzer_ActivityBlock_WorkingDirectory(t *testing.T) {
+	ia := &IntentAnalyzer{}
+	const input = "create a file here"
+
+	// (a) WorkingDirectory set: line appended after the existing block.
+	digest := &SessionContextDigest{
+		LastTaskName:     "Fix the login bug",
+		WorkingDirectory: "/tmp/x",
+	}
+	msgs := ia.buildAnalysisMessages(input, digest)
+	want := input +
+		"\n\n[Recent session activity]\n" +
+		"Last task: Fix the login bug\n" +
+		"Working directory: /tmp/x"
+	if msgs[1].Content != want {
+		t.Errorf("user message with WorkingDirectory:\n got: %q\nwant: %q", msgs[1].Content, want)
+	}
+
+	// (b) WorkingDirectory empty: line absent, no dangling newline.
+	digest = &SessionContextDigest{
+		LastTaskName:      "Fix the login bug",
+		LastResultSummary: "Fixed it.",
+	}
+	msgs = ia.buildAnalysisMessages(input, digest)
+	want = input +
+		"\n\n[Recent session activity]\n" +
+		"Last task: Fix the login bug\n" +
+		"Result summary: Fixed it."
+	if msgs[1].Content != want {
+		t.Errorf("user message without WorkingDirectory:\n got: %q\nwant: %q", msgs[1].Content, want)
+	}
+	if strings.Contains(msgs[1].Content, "Working directory") {
+		t.Errorf("user message contains working directory line despite empty WorkingDirectory: %q", msgs[1].Content)
+	}
+	if strings.HasSuffix(msgs[1].Content, "\n") {
+		t.Errorf("user message ends with dangling newline: %q", msgs[1].Content)
+	}
+}

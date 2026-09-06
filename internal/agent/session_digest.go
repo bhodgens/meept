@@ -16,6 +16,11 @@ type SessionContextDigest struct {
 	LastResultSummary string
 	// LastIntentType is the session's most recently recorded intent type.
 	LastIntentType string
+	// WorkingDirectory is the session's effective working directory,
+	// resolved as WorktreePath > ProjectPath > DetectionContext.CWD
+	// (mirroring resolveStepWorkingDir). Empty when the session is
+	// unknown or carries no paths. Enrichment only: IsEmpty ignores it.
+	WorkingDirectory string
 }
 
 // IsEmpty reports whether the digest carries no information. The caller
@@ -68,6 +73,23 @@ func (d *Dispatcher) buildSessionContextDigest(sessionID string) *SessionContext
 	if d.sessionTracker != nil {
 		if lastIntent := d.sessionTracker.GetLastIntent(sessionID); lastIntent != nil {
 			digest.LastIntentType = lastIntent.Type
+		}
+	}
+
+	// WorkingDirectory: resolve from the session store (leaf 03) with the
+	// same precedence as resolveStepWorkingDir so the analyzer sees the
+	// directory the step jobs will actually use. Enrichment only — any
+	// failure or miss degrades to empty; IsEmpty ignores this field.
+	if d.sessionStore != nil {
+		if sess := d.sessionStore.GetByConversationID(sessionID); sess != nil {
+			switch {
+			case sess.WorktreePath != "":
+				digest.WorkingDirectory = sess.WorktreePath
+			case sess.ProjectPath != "":
+				digest.WorkingDirectory = sess.ProjectPath
+			case sess.DetectionContext != nil && sess.DetectionContext.CWD != "":
+				digest.WorkingDirectory = sess.DetectionContext.CWD
+			}
 		}
 	}
 
