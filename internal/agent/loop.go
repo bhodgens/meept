@@ -3224,6 +3224,46 @@ func (l *AgentLoop) recordSkillOutcomes(names []string, judgment *JudgmentResult
 	}
 }
 
+// effectiveResultBudget computes the per-result token budget for one tool
+// result: the decayed dynamic budget, lifted to the tool's declared floor
+// (tools.ResultSizer) when the tool declares one and the registry lookup
+// succeeds, capped at ToolResultMaxTokens so a declaration can never exceed
+// the global ceiling. A nil tool (or a tool that does not implement
+// ResultSizer) leaves the dynamic budget untouched.
+//
+// Cap placement note: ToolResultMaxTokens lives here in internal/agent; the
+// tools package MUST NOT import agent (import cycle), so GetMaxResultTokens
+// returns the RAW declared value and this helper does the capping.
+func effectiveResultBudget(dynamic int, tool tools.Tool) int {
+	if tool == nil {
+		return dynamic
+	}
+	floor := tools.GetMaxResultTokens(tool)
+	if floor > dynamic {
+		return min(floor, ToolResultMaxTokens)
+	}
+	return dynamic
+}
+
+// toolForName resolves a tool by name through the registry, tolerating a nil
+// registry (returns nil). It exists at file scope because reasoningCycle
+// declares a local `tools []llm.ToolDefinition` that shadows the tools
+// package name.
+func toolForName(registry ToolRegistry, name string) tools.Tool {
+	if registry == nil || name == "" {
+		return nil
+	}
+	return registry.Get(name)
+}
+
+// resultBudgetFor combines toolForName + effectiveResultBudget: the
+// per-result budget for the tool at position i (dynamic budget lifted to the
+// declared floor, capped at the ceiling). Also at file scope for the same
+// package-shadowing reason.
+func resultBudgetFor(registry ToolRegistry, dynamic int, name string) int {
+	return effectiveResultBudget(dynamic, toolForName(registry, name))
+}
+
 // Token budget constants for context management
 const (
 	// IterationTokenBudget is the maximum tokens to send per LLM iteration
@@ -4051,6 +4091,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					// minimum readable result size
 					600)
 			}
+			// Per-result declared floor consultation (tool-result-budget leaf
+			// 01): tools implementing tools.ResultSizer declare a minimum
+			// token budget; the loop lifts the per-result budget to that
+			// floor, capped at ToolResultMaxTokens. One budget value flows
+			// to BOTH the compression pipeline and ToCompressedJSON so they
+			// always agree.
 			// Apply compression to tool results if enabled
 			if l.compressionPipeline != nil {
 				for i, result := range results {
@@ -4059,6 +4105,16 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					var output string
 					if i < len(response.ToolCalls) {
 						toolName = response.ToolCalls[i].Function.Name
+					}
+					// Per-result floor: the pipeline DESTRUCTIVELY rewrites
+					// result.Result, so it must run at the same lifted
+					// budget ToCompressedJSON will use — otherwise a
+					// ResultSizer-declared tool's digest is LLM-compressed
+					// to the decayed dynamic budget before the floor ever
+					// applies (tool-result-budget leaf 01 review fix).
+					pipelineBudget := dynamicToolBudget
+					if i < len(response.ToolCalls) {
+						pipelineBudget = resultBudgetFor(l.registry, dynamicToolBudget, toolName)
 					}
 					// Extract output from Result field (could be string or map)
 					if s, ok := result.Result.(string); ok {
@@ -4069,7 +4125,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 						}
 					}
 					if output != "" && len(output) > 500 {
-						compressedResult, err := l.compressionPipeline.CompressToolResult(ctx, toolName, output, dynamicToolBudget)
+						compressedResult, err := l.compressionPipeline.CompressToolResult(ctx, toolName, output, pipelineBudget)
 						if err == nil {
 							result.Result = compressedResult
 						} else {
@@ -4081,7 +4137,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Add tool results to conversation with security boundary markers.
 			// Each result corresponds positionally to response.ToolCalls[i].
 			for i, result := range results {
-				output := result.ToCompressedJSON(dynamicToolBudget)
+				// Per-result budget: the decayed dynamic budget lifted to the
+				// tool's declared floor (registry lookup; nil/unknown tool ->
+				// unchanged). resultBudgetFor is a file-scope helper because
+				// the local `tools` slice in this function shadows the tools
+				// package; the pipeline call above runs at the unlifted
+				// dynamic budget and this ToCompressedJSON budget is >= it,
+				// so a floor-declared tool's result is never re-clipped here.
+				var budget int
+				if i < len(response.ToolCalls) {
+					budget = resultBudgetFor(l.registry, dynamicToolBudget, response.ToolCalls[i].Function.Name)
+				} else {
+					budget = dynamicToolBudget
+				}
+				output := result.ToCompressedJSON(budget)
 				toolName := "unknown"
 				if i < len(response.ToolCalls) {
 					toolName = response.ToolCalls[i].Function.Name

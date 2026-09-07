@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -524,37 +525,102 @@ func truncateWithMarker(s string, maxLen int) string {
 	return s[:keepStart] + marker + s[len(s)-keepEnd:]
 }
 
-// compressMapResult compresses a map result by truncating long string values.
+// compressMapResult compresses a map result deterministically while
+// preserving metadata integrity:
+//
+//   - Primary selection: the first present string value among "content",
+//     "output", "result"; otherwise the longest string value (ties broken by
+//     the lexicographically first key). No string values -> primary is ""
+//     and every key is copied whole (copy-all path).
+//   - Keys are processed in sorted ascending order, with the primary last,
+//     so output is reproducible run to run (Go map iteration is randomized).
+//   - Non-primary keys are copied WHOLE and counted against maxChars. If the
+//     non-primary keys alone exceed maxChars, they are all kept anyway and
+//     _truncated is set (metadata integrity outranks the budget).
+//   - The primary truncates with the existing marker mechanics when the
+//     remaining budget is smaller than its length; it is copied whole when
+//     it fits.
+//   - _truncated is set exactly when anything (primary or metadata overflow)
+//     was clipped relative to the input.
 func compressMapResult(m map[string]any, maxChars int) map[string]any {
 	compressed := make(map[string]any)
 	totalChars := 0
+	primaryClipped := false
 
-	for k, v := range m {
-		if totalChars >= maxChars {
-			compressed["_truncated"] = true
+	// --- Primary selection -----------------------------------------------
+	// First present string value among the well-known content keys; else the
+	// longest string value (ties -> lexicographically first key — a total
+	// order, so map iteration randomness cannot affect the choice).
+	primary := ""
+	primaryKey := ""
+	primarySet := false
+	for _, key := range []string{"content", "output", "result"} {
+		if v, ok := m[key].(string); ok {
+			primary = v
+			primaryKey = key
+			primarySet = true
 			break
 		}
-
-		switch val := v.(type) {
-		case string:
-			remaining := maxChars - totalChars
-			if len(val) > remaining {
-				if looksLikeCode(val) {
-					compressed[k] = compressCodeResult(val, remaining)
-				} else {
-					compressed[k] = truncateWithMarker(val, remaining)
-				}
-				totalChars = maxChars
-			} else {
-				compressed[k] = val
-				totalChars += len(val)
+	}
+	if !primarySet {
+		for k, v := range m {
+			s, ok := v.(string)
+			if !ok {
+				continue
 			}
+			if !primarySet || len(s) > len(primary) || (len(s) == len(primary) && k < primaryKey) {
+				primary = s
+				primaryKey = k
+				primarySet = true
+			}
+		}
+	}
+
+	// --- Deterministic pass: sorted non-primary keys, then primary --------
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		if k != primaryKey {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+
+	metadataOverflow := false
+	for _, k := range keys {
+		switch val := m[k].(type) {
+		case string:
+			compressed[k] = val
+			totalChars += len(val)
 		default:
-			compressed[k] = v
-			if data, err := json.Marshal(v); err == nil {
+			compressed[k] = m[k]
+			if data, err := json.Marshal(m[k]); err == nil {
 				totalChars += len(data)
 			}
 		}
+	}
+	if totalChars > maxChars {
+		// Metadata integrity outranks the budget: every non-primary key is
+		// kept whole; only flag the overflow.
+		metadataOverflow = true
+	}
+
+	// --- Primary last ------------------------------------------------------
+	if primarySet {
+		remaining := maxChars - totalChars
+		if len(primary) > remaining {
+			if looksLikeCode(primary) {
+				compressed[primaryKey] = compressCodeResult(primary, remaining)
+			} else {
+				compressed[primaryKey] = truncateWithMarker(primary, remaining)
+			}
+			primaryClipped = true
+		} else {
+			compressed[primaryKey] = primary
+		}
+	}
+
+	if primaryClipped || metadataOverflow {
+		compressed["_truncated"] = true
 	}
 
 	return compressed
