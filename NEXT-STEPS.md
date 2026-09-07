@@ -1,95 +1,50 @@
-# NEXT-STEPS — Grok-Bot Blueprint Gap Implementation
+# NEXT-STEPS — plan-compiler live validation (updated 2026-09-07, run 3)
 
-Date: 2026-09-06. Source: X article "How to Master Graph and Loop
-Engineering using Grok Bot" (@Av1dlive,
-https://x.com/i/article/2092573868011745281) + gap analysis from session
-2026-09-05. All four plan trees COMPLETE; full `go test ./internal/...`
-green (90 packages, exit 0) at cb7d3e36.
+## Status: revision loop VERIFIED live; two residual bugs filed below
 
-## What landed (this program, 16 commits)
+Run 3 (task-20260907193218.799477000-0001) with both fixes deployed:
 
-Trees 1-3 (gaps #1, #2, #4) + tree 4 (#3, full frontier):
+- Rejection now STICKS: transitions log shows `reviewing → rejected` with no
+  bounce-back (commit 00551f63 verified).
+- Revision chains SCHEDULE: `-1001-*` revision steps went pending → ready →
+  scheduled → approved through PromoteReadySteps' rejected-dep exception
+  (commit 2ac27b1f verified).
+- No stranded rows: 30 approved, 1 completed, 1 failed across 32 steps —
+  every rejection spawned a revision that ran and finished.
 
-1. **Tamper-evident audit chain** — b19d6ca7, 6224b28c, 271b613c.
-   internal/auditlog: canonical JSON, SHA-256 hash chain, VerifyChain,
-   SQLite append-only store; audit findings + gate results chain into it
-   (sanitized, output_sha256 never raw); AnchorJob JSONL digests;
-   `agents.audit.verify` RPC; `meept agents audit --verify`.
-2. **External-effect idempotency ledger** — cbe4cce3, 2961ad32, eb50b9a2.
-   internal/effects: atomic Claim (INSERT PK conflict), receipts,
-   completion markers, ReconcilePending, deterministic EffectKey; push
-   notification + backup git push wired; startup + parked-turn-resume
-   reconcile (auto-retry only provider-idempotent effects);
-   effects.list/effects.reconcile RPC (direct handlers, no bus proxy);
-   `meept effects list|reconcile`.
-3. **Claim temporal validity** — 08d41590, dd72e8d7, dd78783b, b03af1a0.
-   Claim gains ObservedAt/ValidFrom/ValidTo/Rev (metadata-keyed,
-   zero-value backward compatible); supersede stamps rev+1 /
-   valid_to in place; expired claims hard-excluded from canonical
-   selection + detection; ListExpiredClaims; retain_claim params +
-   list_expired_claims tool + `meept memory expired`.
-4. **Phase frontier parallel dispatch** — 764f8c3c, 3dac0963, 637cdeb9,
-   7c6c8a44, cb7d3e36. Pure computePhaseFrontier; startPhase extraction;
-   advancePhasesFrontier (CAS single-flight, race-proven); per-phase
-   worktree provisioner + PhaseWorktree accessor; parallel-aware budget
-   hierarchy (per-phase maps); `plans.parallel_phases` opt-in (default
-   FALSE — serial preserved); daemon wiring + worktree consumption;
-   wiring test proves flag flips dispatch behavior.
+## Residual bug A — task finalizes `failed` despite all steps resolving
 
-## Notable fixes found during review (landed with the work)
+"Task finalized ... status=failed" fired while 30/32 approved + 1 completed
++ 1 failed (that one failed step's revision ran and was APPROVED). The
+finalization sweep (tactical.go ~:1420) sees `hasFailures`/failed rows but
+does not consult the revision chain — AreAllCompleted (step.go:892) already
+encodes "rejected resolves via successful revision", but the failed-step
+analog ("failed resolves when its approved revision exists") is missing, and
+the failed row from BEFORE a revision was created is never revisited.
+Observed: state=failed, progress 200% (2/1 jobs) — counter drift too.
 
-- modernc.org/sqlite ignores `_journal_mode`-style DSN keys — functional
-  stores already use `_pragma=`; effects store sets WAL via PRAGMA +
-  SetMaxOpenConns(1). **The park store has the same latent issue**
-  (candidate follow-up).
-- Superseded claims are unreachable via GetByID (pre-existing is_current
-  filter) — tests load via GetVersionHistory.
-- startPhase re-entrancy guard originally missed started-not-yet-
-  scheduled steps (still StepPending) — a stamped ConversationID now
-  also counts as started (observed double-start B->C->C->D, fixed).
-- Duplicate-send push test raced non-blocking bus fan-out; wait now
-  covers both session topics.
+## Residual bug B — Agnes HTTP 400 "missing field content" (upstream)
 
-## Open follow-ups
+Every run loses 1-2 steps to Agnes's intermittent 400
+`messages[2]: missing field 'content' at line 1 column 15182` on handoff
+continuations. Upstream (models.json5 agnes/agnes-2.5-flash); workaround =
+paid tier / stronger planner model, already documented.
 
-1. **~~memory.listExpired RPC handler~~ DONE** (35d043a9): direct handler
-   over Manager.ListExpiredClaims; `meept memory expired` works end to
-   end; connectivity graphs regenerated.
-2. **~~Production worktree provisioner~~ DONE** (256e620a): with
-   `plans.parallel_phases: true`, concurrently active phases get
-   isolated `git worktree` checkouts of the active project under
-   `<state_dir>/phase-worktrees/<task>-<phase>`; idempotent per phase,
-   degrades to no-worktree for non-git projects (phase runs shared).
-3. **~~Park store DSN + Abandon reason~~ DONE** (eb3e6230): park store
-   moved to the `_pragma=` DSN form (WAL + busy timeout actually
-   applied now); effects ledger DSN aligned; abandon reasons persist.
-4. **~~Approval-gate wiring + progress over-count~~ DONE** (286e2dda):
-   task.approve/task.reject RPC + `meept task approve|reject` close the
-   awaiting_approval loop (live-verified: approve → executing →
-   steps scheduled); Plan() resets Completed/FailedJobs on re-plan so
-   progress can no longer exceed 100%.
-5. **Agnes credential**: models.json5 now reads ${AGNRES_API_KEY} —
-   the shell exports AGNRES_ (no second E); AGNES_ is commented out in
-   .bashrc. 401s are gone. Live synthetic COMPLETED end-to-end
-   (task-...0001: plan → approve → 7 steps executed → reviewed → done;
-   alpha.txt written and verified, state completed 7/7). Two
-   environmental limits remain: Agnes free tier 429 rate limits under
-   parallel load (quota parking deferred jobs correctly — by design),
-   and Agnes intermittently returns HTTP 400 "missing field content"
-   on handoff continuation messages. The local/lfm-8b-q4 planner could
-   not emit valid phase JSON — not suitable as multi-phase planner.
-6. Pre-existing (not this program): full-repo mutexio failure in
-   internal/agent/intent_session_rules_test.go:83; enforcement.go's four
-   grandfathered `_ = autoPause(...)` sites.
+## Remaining observability note
 
-## How to use
+Steps executed by the `chat` agent ignored the sealed plan's phase work and
+answered "ask me to do something specific" (agent=chat per job log). The
+planner model never produced the actual haiku. Likely the same Agnes-400
+degradation, but worth a dedicated look at step→agent routing for sealed
+plans (should follow tool_hint, not default to chat).
 
-- Audit chain: automatic; verify with `meept agents audit --verify`.
-- Effects: automatic for push + backup push; inspect with
-  `meept effects list`; stuck non-idempotent effects need an explicit
-  `--complete` or `--abandon --reason <r>`.
-- Claim validity: set valid_to when retaining claims; review with
-  `meept memory expired` (needs follow-up #1) or the agent tool.
-- Parallel phases: set `plans.parallel_phases: true` in meept.json5;
-  only meaningful for plans whose phases declare Produces/Consumes.
-  See docs/workflows/agent-orchestration.md.
+## Fixes deployed this session (both committed)
+
+1. 00551f63 — review rejection persists rejected state (one-write); no
+   revisions for execution-failed steps.
+2. 2ac27b1f — PromoteReadySteps lets revision steps pass rejected deps.
+
+## Cleanup
+
+- /tmp/draft/*.md scratch files can be deleted.
+
