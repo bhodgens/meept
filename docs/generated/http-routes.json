@@ -81,14 +81,14 @@
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1284
+    "line": 1323
   },
   {
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1395
+    "line": 1434
   },
   {
     "method": "GET",
@@ -2048,7 +2048,7 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/codex.go",
-    "line": 532
+    "line": 585
   },
   {
     "method": "GET",
@@ -2062,28 +2062,28 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1292
+    "line": 1331
   },
   {
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 2079
+    "line": 2173
   },
   {
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/anthropic.go",
-    "line": 1220
+    "line": 1278
   },
   {
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/anthropic.go",
-    "line": 1395
+    "line": 1453
   },
   {
     "method": "GET",
@@ -2251,21 +2251,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6750
+    "line": 6797
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6761
+    "line": 6808
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6742
+    "line": 6789
   },
   {
     "method": "GET",
@@ -2412,14 +2412,14 @@
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1053
+    "line": 1065
   },
   {
     "method": "GET",
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1190
+    "line": 1202
   },
   {
     "method": "GET",
@@ -2531,6 +2531,6 @@
     "path": "v",
     "handler": "",
     "file": "internal/tools/builtin/transcript_fetch.go",
-    "line": 224
+    "line": 592
   }
 ]

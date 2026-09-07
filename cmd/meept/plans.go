@@ -23,6 +23,14 @@ func newPlansCmd() *cobra.Command {
 	cmd.AddCommand(newPlansRejectCmd())
 	cmd.AddCommand(newPlansConfirmCmd())
 
+	// Brainstorm draft lifecycle (plan-compiler leaf 04). `show`/`edit`
+	// collide with the plan-lifecycle subcommands above, so the draft
+	// commands carry the -draft suffix.
+	cmd.AddCommand(newPlansDraftCmd())
+	cmd.AddCommand(newPlansShowDraftCmd())
+	cmd.AddCommand(newPlansEditDraftCmd())
+	cmd.AddCommand(newPlansSealCmd())
+
 	return cmd
 }
 

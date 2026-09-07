@@ -399,6 +399,12 @@ type PlansConfig struct {
 	// phases declare Produces/Consumes artifacts. See
 	// docs/workflows/agent-orchestration.md (phase frontier section).
 	ParallelPhases bool `json:"parallel_phases" toml:"parallel_phases"`
+
+	// Draft→seal→compile planning pipeline (default false;
+	// legacy JSON spec_plan path used when false). See
+	// docs/workflows/agent-orchestration.md (plan compiler pipeline
+	// section).
+	PlanCompilerEnabled bool `json:"plan_compiler_enabled" toml:"plan_compiler_enabled"`
 }
 
 // Validate validates the PlansConfig.

@@ -1494,6 +1494,34 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Orchestrator parallel phases configured",
 			"enabled", fullCfg.Plans.ParallelPhases)
 
+		// Plan compiler pipeline (plan-compiler leaf 04): when enabled,
+		// register the draft/seal RPC handlers and flip the strategic
+		// planner into brainstorm-draft mode (the draft IS the interview).
+		// The task.interview path stays for the legacy JSON pipeline. Must
+		// run before orchestrator Start, like every other pre-Start flag.
+		if fullCfg.Plans.PlanCompilerEnabled && components.Orchestrator.Strategic() != nil {
+			sp := components.Orchestrator.Strategic()
+			sp.SetPlanCompilerEnabled(true)
+			treeRoot := filepath.Join(cfg.StateDir, "plan-trees")
+			if fullCfg.Daemon.DataDir != "" {
+				treeRoot = filepath.Join(fullCfg.Daemon.DataDir, "plan-trees")
+			}
+			if sealHandler, sealErr := wirePlanSealHandler(
+				sp, planManagerInst, treeRoot, logger.With("component", "plan-seal"),
+			); sealErr != nil {
+				logger.Error("Plan compiler pipeline wiring failed", "error", sealErr)
+			} else if rpcServer != nil {
+				sealHandler.RegisterPlanSealMethods(rpcServer)
+				logger.Info("Plan compiler pipeline enabled")
+			} else {
+				// Flag on but no RPC surface: the pipeline stays usable
+				// in-process; handlers simply are not exposed.
+				logger.Warn("Plan compiler pipeline enabled without RPC server; plan.seal/plan.draft not exposed")
+			}
+		} else if fullCfg.Plans.PlanCompilerEnabled {
+			logger.Warn("plans.plan_compiler_enabled set but strategic planner unavailable; pipeline disabled")
+		}
+
 		// Production per-phase worktree provisioner (phase-frontier
 		// follow-up): concurrently active phases get isolated `git
 		// worktree` checkouts of the active project. Failures degrade to

@@ -393,6 +393,16 @@ Keep this ordering if you refactor daemon startup.
 `skills.state.enabled` and `skills.evolver.enabled` default false. Flipping
 these defaults is a product decision, not a code cleanup.
 
+### Plan compiler pipeline is opt-in
+
+`plans.plan_compiler_enabled` (default false) gates the brainstorm
+draft→seal→compile planning pipeline. When false, the legacy JSON
+`spec_plan` path is byte-identical — no code may assume the draft store
+(`task.Metadata["plan_draft"]`) exists. When true, the draft IS the
+interview: the one-shot `task.interview` path stays only for the legacy
+pipeline. `plan.seal` and `plan.draft` are RPC-only, never a bus topic.
+See docs/workflows/agent-orchestration.md ("Plan compiler pipeline").
+
 ## Coding Practices
 
 ### Predictable ID Prevention

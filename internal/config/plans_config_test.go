@@ -91,6 +91,86 @@ func TestPlansConfig_ParallelPhasesTOMLKey(t *testing.T) {
 	}
 }
 
+// TestPlansConfig_PlanCompilerEnabledDefault verifies the default: the
+// plan-compiler pipeline is opt-in (plan-compiler Contract C). Absent key
+// means PlanCompilerEnabled == false and the legacy JSON spec_plan path
+// stays byte-identical.
+func TestPlansConfig_PlanCompilerEnabledDefault(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Plans.PlanCompilerEnabled {
+		t.Error("plans.plan_compiler_enabled default = true, want false (opt-in)")
+	}
+	if err := cfg.Plans.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+// TestPlansConfig_PlanCompilerEnabledTOMLKey pins the exact TOML key
+// plans.plan_compiler_enabled: absent key decodes false, key present decodes
+// true, and a round trip preserves the value.
+func TestPlansConfig_PlanCompilerEnabledTOMLKey(t *testing.T) {
+	type doc struct {
+		Plans PlansConfig `toml:"plans"`
+	}
+
+	// Absent key -> false.
+	var absent doc
+	if err := toml.Unmarshal([]byte("[plans]\nmode = \"always\"\n"), &absent); err != nil {
+		t.Fatalf("toml.Unmarshal absent: %v", err)
+	}
+	if absent.Plans.PlanCompilerEnabled {
+		t.Error("absent plan_compiler_enabled key decoded true, want false")
+	}
+
+	// Key present -> true.
+	var present doc
+	if err := toml.Unmarshal([]byte("[plans]\nmode = \"always\"\nplan_compiler_enabled = true\n"), &present); err != nil {
+		t.Fatalf("toml.Unmarshal present: %v", err)
+	}
+	if !present.Plans.PlanCompilerEnabled {
+		t.Error("plan_compiler_enabled = true decoded false, want true")
+	}
+
+	// Round trip preserves the value and the key name.
+	data, err := toml.Marshal(present)
+	if err != nil {
+		t.Fatalf("toml.Marshal: %v", err)
+	}
+	var out doc
+	if err := toml.Unmarshal(data, &out); err != nil {
+		t.Fatalf("toml.Unmarshal round trip: %v", err)
+	}
+	if !out.Plans.PlanCompilerEnabled {
+		t.Errorf("round trip lost plan_compiler_enabled; marshaled:\n%s", data)
+	}
+}
+
+// TestPlansConfig_PlanCompilerEnabledJSONKey pins the exact JSON key
+// plans.plan_compiler_enabled (meept.json5 load path).
+func TestPlansConfig_PlanCompilerEnabledJSONKey(t *testing.T) {
+	// Absent key -> false.
+	var absent struct {
+		Plans PlansConfig `json:"plans"`
+	}
+	if err := json.Unmarshal([]byte(`{"plans":{"mode":"always"}}`), &absent); err != nil {
+		t.Fatalf("json.Unmarshal absent: %v", err)
+	}
+	if absent.Plans.PlanCompilerEnabled {
+		t.Error("absent plan_compiler_enabled key decoded true, want false")
+	}
+
+	// Key present -> true.
+	var present struct {
+		Plans PlansConfig `json:"plans"`
+	}
+	if err := json.Unmarshal([]byte(`{"plans":{"mode":"always","plan_compiler_enabled":true}}`), &present); err != nil {
+		t.Fatalf("json.Unmarshal present: %v", err)
+	}
+	if !present.Plans.PlanCompilerEnabled {
+		t.Error("plan_compiler_enabled = true decoded false, want true")
+	}
+}
+
 // TestPlansConfig_ParallelPhasesJSONKey pins the exact JSON key
 // plans.parallel_phases (meept.json5 load path).
 func TestPlansConfig_ParallelPhasesJSONKey(t *testing.T) {

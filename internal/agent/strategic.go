@@ -106,6 +106,11 @@ type StrategicPlanner struct {
 	maxPhases             int
 	maxStepsPerPhase      int
 	planPhaseSink         func(taskID string, phases []PlanPhaseSpec)
+	planCompilerEnabled   bool
+	// interviewProbe, when non-nil, is invoked immediately before
+	// ConductInterview. Test seam only — lets the interview-gate test
+	// observe the call without an LLM.
+	interviewProbe func()
 }
 
 // StrategicPlannerConfig holds configuration for the strategic planner.
@@ -395,6 +400,24 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	case "direct":
 		steps = sp.createFallbackSteps(req, parentMemoryRefs)
 	case "plan":
+		// Plan compiler pipeline (plan-compiler leaf 04): when enabled the
+		// brainstorm draft IS the interview — seed the scaffold from the
+		// request and return without ConductInterview or LLM decomposition.
+		// The draft awaits plan.seal. Flag off ⇒ the legacy interview path
+		// below runs byte-identical.
+		if sp.planCompilerFlag() {
+			if seedErr := sp.seedDraftFromRequest(req.TaskID, req.Input); seedErr != nil {
+				sp.logger.Error("Failed to seed plan draft", "task_id", req.TaskID, "error", seedErr)
+				return seedErr
+			}
+			sp.logger.Info("Plan compiler pipeline: brainstorm draft seeded",
+				"task_id", req.TaskID,
+			)
+			return nil
+		}
+		if sp.interviewProbe != nil {
+			sp.interviewProbe()
+		}
 		if sp.shouldInterview(req, mode) && sp.registry != nil {
 			pctx, interviewErr := sp.ConductInterview(ctx, req)
 			if interviewErr == nil && pctx != nil && !pctx.InterviewCompleted {
@@ -707,40 +730,7 @@ func (sp *StrategicPlanner) planMultiPhase(ctx context.Context, req PlanRequest)
 		"mode":    "spec_plan",
 	})
 
-	// Flatten phases into TaskSteps. Each step gets Phase = phase.Name.
-	// Inter-phase dependencies: first step of phase N+1 depends on last
-	// step of phase N (unless the step already has explicit deps).
-	var steps []*task.TaskStep
-	var prevPhaseLastStepID string
-	for phaseIdx, phase := range parsed.Phases {
-		var stepIDsInPhase []string
-		for stepIdx, ps := range phase.Steps {
-			// Cap per-phase steps.
-			if sp.maxStepsPerPhase > 0 && len(stepIDsInPhase) >= sp.maxStepsPerPhase {
-				break
-			}
-			seq := phaseIdx*1000 + stepIdx // stable sequence across phases
-			step := task.NewTaskStep(req.TaskID, ps.Description, seq)
-			step.ToolHint = ps.ToolHint
-			step.Phase = phase.Name
-			// Within-phase dependencies (0-indexed → step IDs).
-			for _, depIdx := range ps.DependsOn {
-				if depIdx >= 0 && depIdx < len(stepIDsInPhase) {
-					step.DependsOn = append(step.DependsOn, stepIDsInPhase[depIdx])
-				}
-			}
-			// Inter-phase dependency: first step of phase N+1 depends on
-			// last step of phase N (unless this is phase 0 or already has deps).
-			if stepIdx == 0 && prevPhaseLastStepID != "" && len(step.DependsOn) == 0 {
-				step.DependsOn = append(step.DependsOn, prevPhaseLastStepID)
-			}
-			steps = append(steps, step)
-			stepIDsInPhase = append(stepIDsInPhase, step.ID)
-		}
-		if len(stepIDsInPhase) > 0 {
-			prevPhaseLastStepID = stepIDsInPhase[len(stepIDsInPhase)-1]
-		}
-	}
+	steps := FlattenPlanPhasesToSteps(req.TaskID, parsed.Phases)
 
 	if len(steps) == 0 {
 		return nil, fmt.Errorf("planner produced no executable steps")
@@ -772,6 +762,22 @@ func (sp *StrategicPlanner) SetPlanPhaseSink(fn func(taskID string, phases []Pla
 		return
 	}
 	sp.planPhaseSink = fn
+}
+
+// SetInterviewProbe installs the interview observation seam (tests only).
+func (sp *StrategicPlanner) SetInterviewProbe(fn func()) {
+	if sp == nil {
+		return
+	}
+	sp.interviewProbe = fn
+}
+
+// SetRegistry replaces the agent registry after construction (tests only).
+func (sp *StrategicPlanner) SetRegistry(reg *AgentRegistry) {
+	if sp == nil {
+		return
+	}
+	sp.registry = reg
 }
 
 // buildContextSection produces the verified-context block used in planner

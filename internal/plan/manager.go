@@ -695,6 +695,32 @@ func (m *PlanManager) RegisterTaskPlan(taskID, planID string) {
 	m.taskPlanMap[taskID] = planID
 }
 
+// EnsureTaskPlan returns the plan already registered for taskID, or creates
+// a minimal container plan (plan-compiler leaf 04): the seal path persists
+// phase declarations through CreatePhase, which requires a parent plan row.
+// Idempotent per task. The returned plan carries the compiled title.
+func (m *PlanManager) EnsureTaskPlan(ctx context.Context, taskID, title string) (*Plan, error) {
+	m.mu.RLock()
+	planID, ok := m.taskPlanMap[taskID]
+	m.mu.RUnlock()
+	if ok {
+		if p, err := m.store.GetPlan(ctx, planID); err == nil && p != nil {
+			return p, nil
+		}
+		// Registered plan vanished from the store (test store reset):
+		// fall through and create a fresh container.
+		m.mu.Lock()
+		delete(m.taskPlanMap, taskID)
+		m.mu.Unlock()
+	}
+	created, err := m.CreatePlan(ctx, title, "", "", "", "")
+	if err != nil {
+		return nil, fmt.Errorf("create seal container plan: %w", err)
+	}
+	m.RegisterTaskPlan(taskID, created.ID)
+	return created, nil
+}
+
 // RestoreMappings rebuilds phaseTaskMap and taskPlanMap from the persistent
 // store. This should be called on daemon startup to recover plan-task
 // associations for executing plans that survived a restart.

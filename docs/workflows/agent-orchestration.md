@@ -243,6 +243,80 @@ max_revision_cycles = 3
 
 These intents follow the same routing pipeline as the originals: dispatcher classification → memory search → agent discovery → delegation → execution → report routing. The `librarian` and `skeptic` agents additionally consume edges from the epistemic memory graph (see [Multi-Agent System — Epistemic Memory Integration](../concepts/multi-agent.md#epistemic-memory-integration)).
 
+## Plan Compiler Pipeline (plans.plan_compiler_enabled)
+
+An alternative to the LLM-generated strict-JSON `spec_plan` path: a
+human-in-the-loop **brainstorm draft** in plan-dialect v1 markdown that a
+deterministic Go compiler turns into `[]plan.PlanPhaseSpec`. Opt-in via
+config (default **false**); when false the legacy JSON path is
+byte-identical.
+
+- Normative dialect spec: `docs/workflows/plan-dialect.md`
+- Agent-facing template: `config/prompts/planner/plan_draft.md`
+- Compiler: `plan.CompileSealed` (`internal/plan/compiler.go`)
+- Tree emission: `plan.EmitTree` / `plan.ShouldEmitTree` (`internal/plan/treeemit.go`)
+
+### Draft lifecycle
+
+1. A task routed to `mode: plan` with the flag on seeds a **draft
+   scaffold** on `task.Metadata["plan_draft"]` (Goal + Open Questions
+   derived from the request; no LLM). The one-shot interview
+   (`ConductInterview`/`task.interview`) is skipped — the draft IS the
+   interview. The task stays `planning` awaiting a seal.
+2. The user and planner agent iterate through normal conversation turns;
+   each turn replaces the draft through `plan.draft` (get/save). Saves
+   increment `version` and are refused once the task leaves `planning`.
+3. `meept plans seal <task-id>` seals: the draft's exact bytes are hashed
+   (sha256, recorded in `SealedHash`), compiled (zero LLM), persisted, and
+   the task transitions to `executing`.
+
+### Seal result: problems vs sealed
+
+Compile problems (unknown artifact, unresolved Open Questions, consume
+before produce, …) come back as a `problems` **result** — not an RPC
+error. The draft stays a draft and the problem list feeds the next
+brainstorm round. There is no LLM retry. `plan.CompileSealed` returns all
+problems in one pass.
+
+### Flat vs tree
+
+`plan.ShouldEmitTree` gates emission: total steps ≤ 6 and every phase
+within per-leaf sizing → **flat** steps (existing orchestrator path);
+otherwise the compiler output is also rendered as a hierarchical tree
+(`master.md` + numbered leaves, per the hierarchical-planning shape) under
+`<data_dir>/plan-trees/<task-id>/`. In both modes the flat phases persist
+through the existing `PlanManager.CreatePhase` path and the orchestrator
+executes them. In tree mode each persisted phase records its tree-leaf
+path — the integration point for a future leaf-agent dispatcher (NOT
+wired in this tree; leaf dispatch through employee/delegation is
+follow-up work).
+
+### RPC + CLI surface
+
+- `plan.seal {task_id}` — seal → compile → persist → execute. Reply:
+  `{status:"sealed", hash, mode}` or `{status:"problems", problems}`.
+- `plan.draft {task_id, markdown?}` — save (markdown present, returns
+  `{status:"saved", version}`) or get (`{status:"draft", markdown,
+  version}`).
+- RPC only — never a bus topic.
+- CLI (on the `meept plans` tree): `draft <task-id>` (status),
+  `show-draft <task-id>` (print markdown), `edit-draft <task-id> [file|-]`
+  (replace from file/stdin), `seal <task-id>` (prints sealed hash + mode,
+  or the problem list, exit 2). `show`/`edit` names belong to the
+  plan-lifecycle subcommands, so the draft commands carry the `-draft`
+  suffix.
+
+### Wiring
+
+`internal/daemon/daemon.go` registers the pipeline beside the
+`SetParallelPhases` site (before orchestrator Start) when
+`plans.plan_compiler_enabled` is true: closures over `StrategicPlanner`
+adapt it to the `rpc.PlanSealHandler` injected-func seams (`DraftSource`,
+`Compile`, `Persist`, `Execute`) in `internal/daemon/plan_seal_wiring.go`.
+`SealPlan` mirrors `ApprovePlan`'s tail: persist steps → generate spec →
+`executing` → promote ready → `orchestrator.schedule`. The compile phase
+cap reuses the planner's existing `MaxPhases` config — no second knob.
+
 ## Ralph Loop: Automatic Verification and Replanning
 
 Ralph Loop provides self-correcting task execution by verifying completion evidence and triggering automatic replanning when verification fails.

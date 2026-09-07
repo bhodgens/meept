@@ -564,6 +564,12 @@
     "line": 46
   },
   {
+    "topic": "plan.draft",
+    "handler": "h.handleDraft",
+    "file": "internal/rpc/plan_seal.go",
+    "line": 85
+  },
+  {
     "topic": "plan.get",
     "handler": "h.handleGet",
     "file": "internal/rpc/plan.go",
@@ -598,6 +604,12 @@
     "handler": "h.handleRevise",
     "file": "internal/rpc/plan.go",
     "line": 52
+  },
+  {
+    "topic": "plan.seal",
+    "handler": "h.handleSeal",
+    "file": "internal/rpc/plan_seal.go",
+    "line": 84
   },
   {
     "topic": "project.detect",
@@ -1272,6 +1284,12 @@
     "line": 599
   },
   {
+    "topic": "task.approve",
+    "handler": "h.handleApprove",
+    "file": "internal/rpc/task_approval.go",
+    "line": 32
+  },
+  {
     "topic": "task.cancel",
     "handler": "p.makeProxy(\"task.cancel\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
@@ -1312,6 +1330,12 @@
     "handler": "p.makeProxy(\"task.list_extended\", \"task.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
     "line": 129
+  },
+  {
+    "topic": "task.reject",
+    "handler": "h.handleReject",
+    "file": "internal/rpc/task_approval.go",
+    "line": 33
   },
   {
     "topic": "task.steps",
