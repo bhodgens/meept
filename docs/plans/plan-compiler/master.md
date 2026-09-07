@@ -1,4 +1,4 @@
-# master.md — Plan Compiler: Brainstorm Dialect → Sealed Plan → Deterministic PlanPhaseSpec
+# master.md — Plan Compiler: Brainstorm Dialect → Sealed Plan → Deterministic PlanPhase Spec — TREE COMPLETE (4/4 leaves)
 
 ## Meta
 
@@ -310,7 +310,7 @@ site + task.approve RPC pattern (internal/rpc/task_approval.go) INLINED.
 | 01-dialect-spec.md | COMPLETE | 1 | Committed 64682470; judgment calls: same-phase step refs allowed (persisted intra-phase), cycle class documented unreachable-but-implemented |
 | 02-compiler.md | COMPLETE | 1 | Committed 21355d8c; all-problems collection verified, table-driven validation, race-clean |
 | 03-tree-emission.md | COMPLETE | 1 | Committed 1cef6e58; landed before 02's types — verified green post-wave; deviations accepted (bare section headings for exact-line check, sizing disambiguation, budget-beats-cap) |
-| 04-seal-wiring.md | PENDING | 0 | |
+| 04-seal-wiring.md | COMPLETE | 1 | Committed 978af22e; CLI names draft/show-draft/edit-draft/seal (plans.go owned show/edit); ordinals conversion verified; interview gate flag-guarded |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
