@@ -294,6 +294,20 @@ type Dispatcher struct {
 	fenceController FenceController
 }
 
+// mediaURLPattern matches YouTube URL forms and bare 11-char video IDs
+// embedded in a message. It mirrors transcript_fetch's parseVideoID
+// acceptance set (hostnames + path shapes), so anything this guard
+// routes to the analyst is something transcript_fetch can ingest.
+var mediaURLPattern = regexp.MustCompile(`(?i)(?:youtube\.com/(?:watch\?v=|shorts/|embed/|live/)|youtu\.be/)[A-Za-z0-9_-]{11}|(?:^|\s)[A-Za-z0-9_-]{11}(?:\s|$)`)
+
+// detectMediaURL reports the media URL (or bare video ID) carried by a
+// user message, or "" when none is present. Only YouTube is detected —
+// the deterministic routing exists specifically because transcript_fetch
+// is the ingest tool for these targets.
+func detectMediaURL(input string) string {
+	return mediaURLPattern.FindString(input)
+}
+
 // IntentClassifier is an interface for classifying intents.
 type IntentClassifier interface {
 	Classify(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error)
@@ -883,6 +897,26 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			AgentType:  config.AgentIDChat,
 			Summary:    extractSummary(input),
 			Method:     "short_message_guard",
+		}, nil
+	}
+
+	// Media-URL guard: a message carrying a YouTube URL (or a bare video
+	// ID) is a media-ingest request regardless of how a small model reads
+	// the surrounding words — "summarize this video" is analysis, not
+	// code. Deterministic structural signal, checked before the LLM
+	// classifier for the same reason as the short-message guard above:
+	// the analyst agent holds the transcript_fetch grant, and the coder
+	// (the LLM's habitual choice for anything tool-shaped) does not.
+	if mediaTarget := detectMediaURL(input); mediaTarget != "" {
+		d.recordClassificationMethod("media_url_guard")
+		d.recordAgent(config.AgentIDAnalyst)
+		d.recordIntentType(string(IntentAnalyze))
+		return &Intent{
+			Type:       string(IntentAnalyze),
+			Confidence: 0.9,
+			AgentType:  config.AgentIDAnalyst,
+			Summary:    extractSummary(input),
+			Method:     "media_url_guard",
 		}, nil
 	}
 
