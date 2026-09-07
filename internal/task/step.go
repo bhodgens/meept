@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	sid "github.com/caimlas/meept/pkg/id"
@@ -127,6 +128,14 @@ func (s StepState) IsTerminal() bool {
 // Used for task completion checks where rejected steps need revisions.
 func (s StepState) IsSuccessfullyTerminal() bool {
 	return s == StepCompleted || s == StepApproved
+}
+
+// IsRevisionStep reports whether the step ID was created by CreateRevision
+// (which stamps "-rev-<n>-" into the ID). Revision steps depend on their
+// rejected original and are the only steps allowed to wait on a rejected
+// dependency during promotion.
+func IsRevisionStep(id string) bool {
+	return strings.Contains(id, "-rev-")
 }
 
 // TaskStep represents a single step within a task's execution plan.
@@ -732,10 +741,21 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 		// Check if all dependencies are successfully completed.
 		// Use IsSuccessfullyTerminal (Completed/Approved only) so that
 		// failed, skipped, or rejected deps block promotion.
+		//
+		// Revision exception (2026-09-07): a revision step depends on its
+		// rejected original BY DESIGN (CreateRevision appends original.ID).
+		// AreAllCompleted already treats a rejected step as resolved once a
+		// successful revision exists, so promotion must too — otherwise the
+		// revision waits on a dep that IsSuccessfullyTerminal never accepts
+		// and the revision chain is unschedulable. Failed deps still block
+		// everything, including revisions.
 		allDepsCompleted := true
 		for _, depID := range step.DependsOn {
 			depState, ok := stateMap[depID]
 			if !ok || !depState.IsSuccessfullyTerminal() {
+				if IsRevisionStep(step.ID) && ok && depState == StepRejected {
+					continue // revision may proceed past its rejected original
+				}
 				allDepsCompleted = false
 				break
 			}
