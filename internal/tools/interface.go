@@ -179,6 +179,33 @@ func GetCategory(t Tool) string {
 	return "general"
 }
 
+// ResultSizer is an optional interface tools implement to declare a minimum
+// token budget for their results. The agent loop never compresses a declared
+// tool's result below this floor regardless of the dynamic budget. Note that
+// the tools package does NOT cap the declared value here: the global ceiling
+// (ToolResultMaxTokens) lives in internal/agent and importing agent from
+// tools would be an import cycle, so the agent loop caps the floor at the
+// ceiling at the consumption site.
+type ResultSizer interface {
+	// MaxResultTokens returns the minimum token budget this tool's results
+	// should get before compression. Non-positive values are ignored.
+	MaxResultTokens() int
+}
+
+// GetMaxResultTokens returns the tool's declared result-token floor, or 0
+// when the tool does not implement ResultSizer or declares a non-positive
+// floor. The returned value is the RAW declaration: the agent loop caps it
+// at ToolResultMaxTokens (kept in internal/agent to avoid an import cycle).
+func GetMaxResultTokens(t Tool) int {
+	if s, ok := t.(ResultSizer); ok {
+		floor := s.MaxResultTokens()
+		if floor > 0 {
+			return floor
+		}
+	}
+	return 0
+}
+
 // PTYTool is a tool that supports interactive PTY sessions for real-time
 // streaming (e.g. gdb, ipython, long-running servers).
 type PTYTool interface {

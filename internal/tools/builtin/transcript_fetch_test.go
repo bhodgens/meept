@@ -1153,3 +1153,15 @@ func TestTranscriptFetch_OutputPath_RelativeUsesFallbackDir(t *testing.T) {
 		t.Errorf("file not written to fallback root: %v", rerr)
 	}
 }
+
+func TestTranscriptFetch_ResultSizer(t *testing.T) {
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+
+	if TranscriptResultTokens != 1400 {
+		t.Errorf("TranscriptResultTokens = %d, want 1400", TranscriptResultTokens)
+	}
+	if got := tool.MaxResultTokens(); got != 1400 {
+		t.Errorf("MaxResultTokens() = %d, want 1400", got)
+	}
+	var _ tools.ResultSizer = tool
+}

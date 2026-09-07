@@ -31,6 +31,13 @@ const (
 	// TranscriptMaxOutputLength caps the returned transcript text (100k chars),
 	// matching web_fetch's output cap discipline.
 	TranscriptMaxOutputLength = 100000
+	// TranscriptResultTokens is the declared minimum token budget for this
+	// tool's results (via tools.ResultSizer). The agent loop never compresses
+	// a transcript_fetch result below this floor regardless of the decaying
+	// dynamic budget, so the tool's path pointer metadata and head preview
+	// survive even a late-turn, budget-exhausted tool call. The loop caps
+	// this at the global ToolResultMaxTokens ceiling (3000).
+	TranscriptResultTokens = 1400
 	// DefaultTranscriptFallbackOutputDir is the fallback root for relative
 	// output_path values when TranscriptConfig.FallbackOutputDir is empty.
 	DefaultTranscriptFallbackOutputDir = "~/.meept/media"
@@ -212,6 +219,10 @@ func (t *TranscriptFetchTool) IsReadOnly(map[string]any) bool { return true }
 // IsConcurrencySafe reports that transcript fetches are safe for
 // concurrent execution.
 func (t *TranscriptFetchTool) IsConcurrencySafe(map[string]any) bool { return true }
+
+// MaxResultTokens declares this tool's minimum result-token budget
+// (tools.ResultSizer). See TranscriptResultTokens.
+func (t *TranscriptFetchTool) MaxResultTokens() int { return TranscriptResultTokens }
 
 // transcriptParams is the typed arg struct for Execute.
 type transcriptParams struct {
