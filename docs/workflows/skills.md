@@ -357,7 +357,9 @@ The shipped `learn-from-video` skill (`config/skills/learn-from-video/`)
 composes the chain end to end: `transcript_fetch` fetches a YouTube
 transcript with `output_path` set so the full text lands on disk (tool
 results are bounded; the conversation never carries the bulk), the model
-pages the file with `file_read` (~400-line slices via offset/limit),
+pages the file with `file_read` (~2k-char slices via offset/limit —
+small enough that a whole slice survives even at the tool-result
+budget floor),
 taking structured notes per slice — steps, decision rules, tool/API
 names, numbers, and the WHY — then distills the generalizable procedure
 from those notes, and `skills_create`/`skills_patch` persist it — with a

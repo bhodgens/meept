@@ -200,6 +200,11 @@ so the full ingest → synthesis → persist chain works there — see
 are capped (~9k chars), so large transcripts can never reach the model whole
 — pass `output_path` and page the file with `file_read` instead.
 
+Tool results are never compressed below a tool's declared floor —
+`transcript_fetch` declares 1400 tokens (~4200 chars), so a digest or
+preview arrives whole; non-content metadata keys (`path`, `offset`,
+`total_chars`, `chunk_count`) always survive compression intact.
+
 - **Path resolution order:** relative paths resolve against the session
   working dir (`tools.WorkingDirFromContext`); when the context carries no
   working dir, they fall back to the configured fallback root

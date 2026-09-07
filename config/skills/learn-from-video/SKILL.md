@@ -18,11 +18,13 @@ captured as a durable skill — not just summarized.
    asking. For learn workflows add `output_path=<path>` (relative
    paths land in the session working dir) so the full transcript is
    written to disk and the tool returns only a bounded preview.
-2. Read the transcript file with `file_read` in ~400-line slices
-   (offset/limit). After each slice, write structured notes: steps,
-   decision rules, tool/API names, numbers, and the WHY. Keep notes
-   short enough to hold the whole video's notes in mind at synthesis
-   (~2-4k chars).
+2. Read the transcript file with `file_read` in ~2k-char slices
+   (about 50 lines; use offset/limit). Keep each request under ~2k
+   chars so a whole slice survives even when the agent's tool-result
+   budget is at its floor. After each slice, write structured notes:
+   steps, decision rules, tool/API names, numbers, and the WHY. Keep
+   notes short enough to hold the whole video's notes in mind at
+   synthesis (~2-4k chars).
 2.5. If the user asks to "describe the shape" / summarize the video
    rather than learn it, call `transcript_fetch` with `summarize=true`
    instead and work from the digest; page the file only for verbatim
