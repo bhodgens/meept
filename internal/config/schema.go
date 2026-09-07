@@ -1439,6 +1439,11 @@ func DefaultAlwaysFullTools() []string {
 		"shell", "file_read", "file_edit", "file_write",
 		"memory_search", "memory_store", "web_fetch", "websearch",
 		"platform_status", "tool_view",
+		// transcript_fetch: 5 params with distinct types (url/timestamps/
+		// language/offset/max_chars) — the indexed one-liner gives the
+		// model no parameter schema, and models then call it with empty
+		// args ("no URL specified"). Live-smoke finding, 2026-09-07.
+		"transcript_fetch",
 	}
 }
 
