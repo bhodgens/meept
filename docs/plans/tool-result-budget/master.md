@@ -185,8 +185,8 @@ per leaf with explicit paths; integration gate after leaf 02.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-result-floor-and-map-keys | PENDING | 0 | |
-| 02-skill-page-size-and-docs | PENDING | 0 | |
+| 01-result-floor-and-map-keys | COMPLETE (2026-09-06) | 1 | dd688f0a (tools pkg: ResultSizer + GetMaxResultTokens + transcript 1400) + c2ea0ace (agent pkg: helper, loop wiring, compressMapResult rewrite, 13 tests — committed by sibling session from the shared working tree; verified identical work). Review fix applied: compression-pipeline call lifted to the per-result floor too (it destructively rewrites Result; the floor never reached it otherwise). Deviations approved: JSON marshal sorts keys so the spec's order assertion was replaced with tight-budget byte-identical determinism + all-keys-present assertions; 200-char wrapper reserve corrected test math. |
+| 02-skill-page-size-and-docs | COMPLETE (2026-09-06) | 1 | 5983587c. ~2k-char slices + floor rationale in the skill; floor/metadata sentence in both workflow docs; catalog test green. |
 
 ## Integration Test Plan
 
