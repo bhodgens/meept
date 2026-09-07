@@ -12,6 +12,17 @@ Run 3 (task-20260907193218.799477000-0001) with both fixes deployed:
 - No stranded rows: 30 approved, 1 completed, 1 failed across 32 steps —
   every rejection spawned a revision that ran and finished.
 
+## Run 4 (2026-09-07 20:22) — counters verified fixed
+
+task-20260907202216.088999000-0001 (commit 02e952f9 deployed):
+- Finalized with truthful counters: 6 total / 5 completed / 1 failed,
+  83% progress. The 200%-drift bug is gone (RecountJobs + atomic
+  increments working).
+- The single failure was an Agnes 429 quota step — correct honest
+  completion, no counter lies.
+
+## Residual bugs (both still open)
+
 ## Residual bug A — task finalizes `failed` despite all steps resolving
 
 "Task finalized ... status=failed" fired while 30/32 approved + 1 completed
