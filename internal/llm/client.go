@@ -2088,8 +2088,19 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		})
 	}
 
+	// MLX-served LFM2.5 models emit tool calls in their native marker
+	// syntax (<|tool_call_start|>[fn(...)]<|tool_call_end|>) as plain
+	// content deltas — mlx_lm server has no tool-call extractor (llama.cpp
+	// does). The non-streaming Chat path recovers these via
+	// parseLFMToolCalls before the empty-content check; the streaming path
+	// needs the same recovery, or a markers-only reply reaches the agent
+	// loop as unexecutable text and the turn dies on the empty-content
+	// streak ("stopped after extended thinking").
+	content, lfmCalls := parseLFMToolCalls(accumulated.String())
+	toolCalls = append(toolCalls, lfmCalls...)
+
 	result := &Response{
-		Content:      accumulated.String(),
+		Content:      content,
 		ToolCalls:    toolCalls,
 		Usage:        usage,
 		Model:        modelID,
