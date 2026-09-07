@@ -257,6 +257,12 @@ var ToolActionMap = map[string]string{
 	// Network operations
 	ToolWebSearch: "network_request",
 	ToolWebFetch:  "network_request",
+	// transcript_fetch (skill-authoring-and-media-ingest leaf 01):
+	// observation-only YouTube transcript fetch; seeds as LOW
+	// network_request in the security engine (seed_rules.go). Without
+	// this mapping the tool name itself becomes the action and the
+	// engine's lookup fails ("Unknown action"), blocking the tool.
+	"transcript_fetch": "network_request",
 
 	// Memory operations
 	ToolMemorySearch:     "memory_read",

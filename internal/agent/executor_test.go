@@ -509,13 +509,14 @@ func TestResultsToChatMessages(t *testing.T) {
 func TestToolActionMap(t *testing.T) {
 	// Verify the action map contains expected mappings
 	expectedMappings := map[string]string{
-		"shell":          "shell_execute",
-		"file_read":      "file_read",
-		"file_write":     "file_write",
-		"file_delete":    "file_delete",
-		"list_directory": "file_read",
-		"web_search":     "network_request",
-		"web_fetch":      "network_request",
+		"shell":            "shell_execute",
+		"file_read":        "file_read",
+		"file_write":       "file_write",
+		"file_delete":      "file_delete",
+		"list_directory":   "file_read",
+		"web_search":       "network_request",
+		"web_fetch":        "network_request",
+		"transcript_fetch": "network_request",
 	}
 
 	for tool, expectedAction := range expectedMappings {
