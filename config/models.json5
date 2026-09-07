@@ -26,11 +26,11 @@
   "model_aliases": {
     "classifier": {
       "models": [
-        "local-mlx/lfm-combined-sft", // Primary: fine-tuned LFM2.5 intent classifier (platform-intrinsic; change only for explicit A/B testing)
-        "local/lfm-8b-mlx-4bit",           // Fallback 1: LFM2.5-8B-A1B MLX 4-bit
-        "local/lfm-1.2b-q8",          // Fallback 2: fast, best-effort
-        "zai/glm-4.5-air",            // Fallback 3: remote API
-        "ollama/llama3.2"             // Fallback 4: local Ollama
+        "local/lfm-8b-mlx-4bit",      // Primary: 86.8% corpus accuracy (2026-09-06 A/B — strongest general classifier on every category but chat)
+        "local-mlx/lfm-combined-sft", // A/B alternate: SFT specialist (287ms; schedule/chat/coding strong, platform/search/report/review 0%)
+        "local/lfm-1.2b-q8",          // Fallback: fast, best-effort
+        "zai/glm-4.5-air",            // Fallback: remote API
+        "ollama/llama3.2"             // Fallback: local Ollama
       ],
       "timeout": 10,
       "max_fails": 2
