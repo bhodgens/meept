@@ -511,8 +511,17 @@ type AgentLoop struct {
 	reasonWatch  *ReasoningWatchdog
 	// reasonWatchStreakBreach tracks whether the current reasoning-only
 	// streak already breached once (nudge issued); a second breach
-	// terminates the turn gracefully.
+	// triggers the disable-thinking rescue turn, and a breach after the
+	// rescue terminates the turn gracefully.
 	reasonWatchStreakBreach bool
+	// reasonWatchRescued marks that the disable-thinking rescue turn was
+	// already attempted for this streak; the watchdog terminates instead
+	// of rescuing twice.
+	reasonWatchRescued bool
+	// reasonWatchRescueNext makes the NEXT LLM call in this cycle run with
+	// thinking disabled (appends llm.DisableThinking after the agent's
+	// reasoning opts, so it wins), consumed and cleared on use.
+	reasonWatchRescueNext bool
 
 	// Conversation management
 	conversations *ConversationStore
@@ -3338,6 +3347,8 @@ func (l *AgentLoop) resetTurnGuards() {
 	}
 	l.mu.Lock()
 	l.reasonWatchStreakBreach = false
+	l.reasonWatchRescued = false
+	l.reasonWatchRescueNext = false
 	l.mu.Unlock()
 }
 
@@ -3573,6 +3584,17 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		// Build chat options with resolved inference parameters from agent spec
 		chatOpts := l.resolveInferenceParams()
+		// Reasoning-watchdog rescue: when the previous turn(s) produced
+		// only reasoning_content, run this call with thinking disabled —
+		// appended after the agent's reasoning opts so it wins (single
+		// reasoning pointer, last apply wins). Consumed on use.
+		l.mu.Lock()
+		rescueNext := l.reasonWatchRescueNext
+		l.reasonWatchRescueNext = false
+		l.mu.Unlock()
+		if rescueNext {
+			chatOpts = append(chatOpts, llm.DisableThinking())
+		}
 		// In warning zone, don't send tools so the LLM produces a final text response
 		if len(tools) > 0 && !inWarningZone {
 			chatOpts = append(chatOpts, llm.WithTools(tools))
@@ -4243,8 +4265,35 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				l.reasonWatchStreakBreach = true
 				l.mu.Unlock()
 				if breached {
-					// Second breach: terminate gracefully.
-					l.logger.Warn("Reasoning-only streak breached twice, terminating gracefully",
+					// Second breach: one disable-thinking rescue turn
+					// before terminating. Reasoning-only replies are the
+					// signature failure of thinking-mode local models
+					// (LFM2.5 on mlx_lm): thinking is ON by default in
+					// their templates, and the entire reply lands in
+					// reasoning_content with nothing visible. Retrying
+					// the same call re-fails; disabling thinking for the
+					// next call forces visible output or a tool call.
+					// If the rescue also breaches, terminate — the model
+					// genuinely cannot answer.
+					l.mu.Lock()
+					rescued := l.reasonWatchRescued
+					l.reasonWatchRescued = true
+					// streakBreach stays true: a reasoning-only reply from
+					// the rescue turn is an immediate breach of the new
+					// streak, and rescued=true makes that terminate.
+					l.mu.Unlock()
+					if !rescued {
+						l.logger.Warn("Reasoning-only streak breached twice, retrying with thinking disabled",
+							"iteration", iteration,
+							"conversation", conversationID,
+						)
+						conv.AddAssistantMessage("[reasoning-only turn]")
+						conv.AddUserMessage("[system: you have produced thinking but no visible output twice. respond NOW with either your answer as visible text or a tool call. do not think silently.]")
+						l.reasonWatchRescueNext = true
+						iteration++
+						continue
+					}
+					l.logger.Warn("Reasoning-only streak breached after disable-thinking rescue, terminating gracefully",
 						"iteration", iteration,
 						"conversation", conversationID,
 					)

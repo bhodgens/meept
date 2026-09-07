@@ -368,9 +368,8 @@ func TestGuards_ReasoningWatchdog_Integration(t *testing.T) {
 		reasoningOnly(1),
 		reasoningOnly(2),
 		reasoningOnly(3), // streak hits 3 -> nudge
-		reasoningOnly(4),
-		reasoningOnly(5),
-		reasoningOnly(6), // second breach -> graceful termination
+		reasoningOnly(4), // second breach -> disable-thinking RESCUE turn
+		&llm.Response{Content: "recovered after rescue"}, // rescue succeeds
 		&llm.Response{Content: "unreachable"},
 	)
 
@@ -388,11 +387,12 @@ func TestGuards_ReasoningWatchdog_Integration(t *testing.T) {
 	)
 
 	response, err := loop.RunOnce(context.Background(), "think about it", "conv-guards-watchdog")
-	require.NoError(t, err, "second breach terminates gracefully, not with an error")
-	assert.Contains(t, response, "extended thinking", "expected watchdog graceful wrap-up message")
+	require.NoError(t, err, "rescue succeeds, no error")
+	assert.Contains(t, response, "recovered after rescue", "rescue turn's visible content becomes the reply")
 	// Streak reaches 3 at iteration 3 -> first breach nudge. Iteration 4 is
-	// the second breach -> graceful termination.
-	assert.Equal(t, 4, chatter.callCount, "terminate on second breach (iteration 4)")
+	// the second breach -> disable-thinking rescue (iteration 5) -> visible
+	// content ends the loop.
+	assert.Equal(t, 5, chatter.callCount, "rescue turn runs after second breach")
 
 	conv := loop.conversations.Get("conv-guards-watchdog")
 	require.NotNil(t, conv)
@@ -403,6 +403,46 @@ func TestGuards_ReasoningWatchdog_Integration(t *testing.T) {
 		}
 	}
 	assert.True(t, foundNudge, "expected watchdog forcing nudge in conversation")
+}
+
+// TestGuards_ReasoningWatchdog_RescueFails_Terminates pins the bound: when
+// the disable-thinking rescue ALSO produces a reasoning-only reply, the
+// watchdog terminates gracefully instead of rescuing forever.
+func TestGuards_ReasoningWatchdog_RescueFails_Terminates(t *testing.T) {
+	reasoningOnly := func(id int) *llm.Response {
+		return &llm.Response{
+			Content:      "",
+			Reasoning:    strings.Repeat("deliberating ", 400),
+			FinishReason: "stop",
+			Usage:        llm.TokenUsage{TotalTokens: 50},
+		}
+	}
+	chatter := newMockChatter(
+		reasoningOnly(1),
+		reasoningOnly(2),
+		reasoningOnly(3), // first breach -> nudge
+		reasoningOnly(4), // second breach -> rescue turn
+		reasoningOnly(5), // rescue also reasoning-only -> terminate
+		&llm.Response{Content: "unreachable"},
+	)
+
+	registry := NewPlaceholderToolRegistry()
+	secChecker := security.NewPermissionChecker(security.Config{})
+	loop := NewAgentLoop("test-session", "/tmp",
+		WithLLMChatter(chatter),
+		WithToolRegistry(registry),
+		WithSecurityChecker(secChecker),
+		WithMessageBus(bus.New(nil, slogDiscardLogger())),
+		WithAgentConfig(AgentConfig{
+			MaxIterations: 10,
+			Guards:        DefaultGuardConfig(),
+		}),
+	)
+
+	response, err := loop.RunOnce(context.Background(), "think about it", "conv-guards-rescue-fail")
+	require.NoError(t, err, "rescue failure terminates gracefully, not with an error")
+	assert.Contains(t, response, "extended thinking", "expected watchdog graceful wrap-up after failed rescue")
+	assert.Equal(t, 5, chatter.callCount, "no calls after the failed rescue (call 5 was the rescue)")
 }
 
 // ---------------------------------------------------------------------------
