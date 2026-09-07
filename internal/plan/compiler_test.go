@@ -2,6 +2,7 @@ package plan
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"errors"
 	"strings"
@@ -37,7 +38,25 @@ func TestCompileSealed_OpenQuestionsBlock(t *testing.T) {
 // ---- Task 2: table-driven validation tests ----
 
 // validDoc is a minimal well-formed sealed draft used as the base for
-// table-case mutations.
+// table-case mutations. Line map (1-based):
+//
+//	1  # Plan: T
+//	5  - task_id: t-1
+//	6  - version: 1
+//	7  - status: sealed
+//	8  - updated: 2026-09-06
+//	10 ## Goal
+//	14 ## Decisions
+//	18 ## Open Questions
+//	20 ## Phases
+//	22 ### Phase 1: Alpha
+//	28 - `alpha-art` (file) produce
+//	34 1. Build alpha [code]
+//	35 2. Check alpha [debug] (needs: Phase1.S1)
+//	37 ### Phase 2: Beta
+//	43 - `beta-art` (interface) produce
+//	47 - `alpha-art` (file) consume
+//	51 1. Wire beta [code] (needs: alpha-art)
 const validDoc = `# Plan: T
 
 ## Meta
@@ -91,9 +110,20 @@ Wire beta onto alpha.
 1. Wire beta [code] (needs: alpha-art)
 `
 
+// validDocWithAlphaTest is validDoc plus a second phase-1 artifact that
+// nothing consumes — used to exercise the W3 warning.
+var validDocWithAlphaTest = strings.Replace(validDoc,
+	"- `alpha-art` (file) — the alpha artifact\n\n**Consumes:** none",
+	"- `alpha-art` (file) — the alpha artifact\n- `alpha-test` (test_suite) — the alpha tests\n\n**Consumes:** none", 1)
+
 func compileProblems(t *testing.T, md string) []CompileProblem {
 	t.Helper()
-	_, err := CompileSealed(md, 8)
+	return compileProblemsMax(t, md, 8)
+}
+
+func compileProblemsMax(t *testing.T, md string, maxPhases int) []CompileProblem {
+	t.Helper()
+	_, err := CompileSealed(md, maxPhases)
 	var ce *CompileError
 	if !errors.As(err, &ce) {
 		t.Fatalf("expected *CompileError, got %v", err)
@@ -122,6 +152,16 @@ func countProblems(probs []CompileProblem, substr string) int {
 	return n
 }
 
+func warningsContaining(cp *CompiledPlan, substr string) int {
+	n := 0
+	for _, w := range cp.Warnings {
+		if strings.Contains(w, substr) {
+			n++
+		}
+	}
+	return n
+}
+
 func TestCompileSealed_ValidBaseline(t *testing.T) {
 	cp, err := CompileSealed(validDoc, 8)
 	if err != nil {
@@ -130,16 +170,32 @@ func TestCompileSealed_ValidBaseline(t *testing.T) {
 	if len(cp.Phases) != 2 {
 		t.Fatalf("expected 2 phases, got %d", len(cp.Phases))
 	}
-	if len(cp.Warnings) != 0 {
-		t.Fatalf("expected no warnings on a fully explicit doc, got %+v", cp.Warnings)
+	// Phase 2 consumes without an explicit Depends on line → W1 (spec'd).
+	if warningsContaining(cp, "depends_on inferred") != 1 {
+		t.Fatalf("expected exactly one W1 warning, got %+v", cp.Warnings)
+	}
+	// Derived Required: alpha-art consumed by later phase 2 → true;
+	// beta-art consumed by nobody → false.
+	if !cp.Phases[0].Produces[0].Required {
+		t.Fatal("alpha-art must be Required (consumed by later phase)")
+	}
+	if cp.Phases[1].Produces[0].Required {
+		t.Fatal("beta-art must not be Required")
+	}
+	// Phase 1 has no deps; step 2 depends on step 1.
+	if len(cp.Phases[0].DependsOn) != 0 {
+		t.Fatalf("expected no deps for phase 1, got %+v", cp.Phases[0].DependsOn)
+	}
+	if got := cp.Phases[0].Steps[1].DependsOn; len(got) != 1 || got[0] != 1 {
+		t.Fatalf("expected step 2 DependsOn [1], got %+v", got)
+	}
+	// Descriptions carry the phase intent prose.
+	if cp.Phases[0].Description != "Build the alpha foundation." {
+		t.Fatalf("unexpected phase 1 description %q", cp.Phases[0].Description)
 	}
 }
 
 func TestCompileSealed_ValidationTable(t *testing.T) {
-	art := func(name, kind string) string {
-		return "- `" + name + "` (" + kind + ") — desc"
-	}
-
 	tests := []struct {
 		name     string
 		doc      string
@@ -148,18 +204,25 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 	}{
 		{
 			name:     "unknown artifact kind",
-			doc:      strings.Replace(validDoc, art("alpha-art", "file"), art("alpha-art", "table"), 1),
-			contains: `unknown kind "table"`,
+			doc:      strings.Replace(validDoc, "- `alpha-art` (file) — the alpha artifact", "- `alpha-art` (table) — the alpha artifact", 1),
+			contains: `artifact "alpha-art" has unknown kind "table" (must be one of file, interface, schema, decision, test_suite)`,
+			line:     28,
 		},
 		{
-			name:     "duplicate artifact",
-			doc:      strings.Replace(validDoc, art("beta-art", "interface")+"\n\n**Consumes:**\n\n- `alpha-art` (file) — the alpha artifact", art("alpha-art", "file")+" — dup", 1),
-			contains: "duplicate artifact name",
+			name: "duplicate artifact",
+			doc: strings.Replace(validDoc,
+				"- `beta-art` (interface) — the beta artifact",
+				"- `alpha-art` (file) — the alpha artifact", 1),
+			contains: `duplicate artifact name "alpha-art" (already produced by phase "Alpha")`,
+			line:     43,
 		},
 		{
-			name:     "consume before produce",
-			doc:      strings.Replace(validDoc, "- `alpha-art` (file) — the alpha artifact\n\n**Consumes:** none", "- `x` (file) — d\n\n**Consumes:**\n\n- `alpha-art` (file) — the alpha artifact", 1),
-			contains: "produced by a later phase",
+			name: "consume before produce",
+			doc: strings.Replace(validDoc,
+				"- `alpha-art` (file) — the alpha artifact\n\n**Consumes:** none",
+				"- `alpha-art` (file) — kept local\n\n**Consumes:**\n\n- `beta-art` (interface) — the beta artifact", 1),
+			contains: `phase "Alpha" consumes "beta-art", which is produced by a later phase ("Beta"): consumes must reference artifacts from earlier phases`,
+			line:     32,
 		},
 		{
 			name:     "self consume",
@@ -168,28 +231,32 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 		},
 		{
 			name:     "unknown consume",
-			doc:      strings.Replace(validDoc, art("alpha-art", "file")+" — the alpha artifact", art("alpha-art", "file")+" — the alpha artifact", 1) + "### Phase 3: Gamma\n\nG.\n\n**Produces:**\n\n- `gamma-art` (file) — g\n\n**Consumes:**\n\n- `no-such-thing` (file) — ghost\n\n**Steps:**\n\n1. Do [code]\n",
-			contains: "unknown artifact",
+			doc:      validDoc + "### Phase 3: Gamma\n\nG.\n\n**Produces:**\n\n- `gamma-art` (file) — g\n\n**Consumes:**\n\n- `no-such-thing` (file) — ghost\n\n**Steps:**\n\n1. Do [code]\n",
+			contains: `unknown artifact "no-such-thing" consumed by phase "Gamma": no phase in this plan produces it`,
+			line:     62,
 		},
 		{
 			name:     "unknown tool hint",
 			doc:      strings.Replace(validDoc, "2. Check alpha [debug]", "2. Check alpha [test]", 1),
-			contains: "unknown tool_hint",
+			contains: `step 2 of phase "Alpha" has unknown tool_hint "test"`,
+			line:     35,
 		},
 		{
 			name:     "over max phases",
 			doc:      validDoc,
-			contains: "maximum is 1",
+			contains: "plan declares 2 phases; maximum is 1",
 		},
 		{
 			name:     "empty phase no steps",
 			doc:      strings.Replace(validDoc, "1. Wire beta [code] (needs: alpha-art)\n", "", 1),
-			contains: "declares no steps",
+			contains: `phase "Beta" declares no steps`,
+			line:     37,
 		},
 		{
 			name:     "malformed meta line",
 			doc:      strings.Replace(validDoc, "- updated: 2026-09-06", "updated: 2026-09-06", 1),
-			contains: `expected "- <key>: <value>"`,
+			contains: `expected "- <key>: <value>", got "updated: 2026-09-06"`,
+			line:     8,
 		},
 		{
 			name:     "missing meta key",
@@ -199,7 +266,8 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 		{
 			name:     "bad version",
 			doc:      strings.Replace(validDoc, "- version: 1", "- version: 2", 1),
-			contains: "unsupported dialect version",
+			contains: `unsupported dialect version: got "2"`,
+			line:     6,
 		},
 		{
 			name:     "bad status",
@@ -225,71 +293,74 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 			name:     "phase numbering gap",
 			doc:      strings.Replace(validDoc, "### Phase 2: Beta", "### Phase 3: Beta", 1),
 			contains: "phase numbering must be consecutive from 1 (expected Phase 2, got Phase 3)",
+			line:     37,
 		},
 		{
 			name:     "phase heading with state suffix",
 			doc:      strings.Replace(validDoc, "### Phase 1: Alpha", "### Phase 1: Alpha [pending]", 1),
-			contains: `expected phase heading`,
+			contains: `expected phase heading "### Phase N: <name>", got "### Phase 1: Alpha [pending]"`,
 		},
 		{
 			name:     "malformed artifact bullet",
-			doc:      strings.Replace(validDoc, art("alpha-art", "file")+" — the alpha artifact", "- alpha art (file) — the alpha artifact", 1),
-			contains: "kebab-case",
+			doc:      strings.Replace(validDoc, "- `alpha-art` (file) — the alpha artifact", "- User_Schema (file) — the alpha artifact", 1),
+			contains: `artifact name "User_Schema" is not kebab-case`,
+			line:     28,
 		},
 		{
 			name:     "missing produces block",
 			doc:      strings.Replace(validDoc, "**Produces:**\n\n- `beta-art` (interface) — the beta artifact\n\n**Consumes:**", "**Consumes:**", 1),
-			contains: "declares no Produces block",
+			contains: `phase "Beta" declares no Produces block`,
 		},
 		{
 			name:     "step numbering gap",
 			doc:      strings.Replace(validDoc, "2. Check alpha [debug]", "3. Check alpha [debug]", 1),
 			contains: "must start at 1 and increase by 1 (expected step 2, got step 3)",
+			line:     35,
 		},
 		{
 			name:     "malformed step line",
 			doc:      strings.Replace(validDoc, "1. Build alpha [code]", "1 Build alpha [code]", 1),
-			contains: `expected "<n>. <description> [tool_hint] (needs: <refs>)"`,
+			contains: `expected "<n>. <description> [tool_hint] (needs: <refs>)", got "1 Build alpha [code]"`,
 		},
 		{
 			name:     "unknown needs ref",
 			doc:      strings.Replace(validDoc, "(needs: Phase1.S1)", "(needs: ghost-artifact)", 1),
-			contains: "has a needs reference",
+			contains: `has a needs reference "ghost-artifact" that matches no artifact name or step`,
 		},
 		{
 			name:     "step ref to missing step",
-			doc:      strings.Replace(validDoc, "(needs: Phase1.S1)", "(needs: Phase1.S9)", 1),
-			contains: "but phase 1 has no step 9",
+			doc:      strings.Replace(validDoc, "1. Wire beta [code] (needs: alpha-art)", "1. Wire beta [code] (needs: Phase1.S9)", 1),
+			contains: `references "Phase1.S9", but phase 1 has no step 9`,
 		},
 		{
 			name:     "step ref to later phase",
 			doc:      strings.Replace(validDoc, "(needs: alpha-art)", "(needs: Phase3.S1)", 1),
-			contains: "a later phase",
+			contains: `references "Phase3.S1" from phase 3, a later phase`,
 		},
 		{
 			name:     "step ref to later same-phase step",
 			doc:      strings.Replace(validDoc, "1. Build alpha [code]", "1. Build alpha [code] (needs: Phase1.S2)", 1),
-			contains: "a later step in the same phase",
+			contains: `references "Phase1.S2", a later step in the same phase`,
 		},
 		{
 			name:     "needs artifact from same phase",
 			doc:      strings.Replace(validDoc, "1. Wire beta [code] (needs: alpha-art)", "1. Wire beta [code] (needs: beta-art)", 1),
-			contains: "produced by the same phase",
+			contains: `references artifact "beta-art", which is produced by the same phase`,
 		},
 		{
 			name:     "malformed depends on line",
 			doc:      strings.Replace(validDoc, "**Consumes:**\n\n- `alpha-art` (file) — the alpha artifact", "**Depends on:** phase one\n\n**Consumes:**\n\n- `alpha-art` (file) — the alpha artifact", 1),
-			contains: `expected "**Depends on:** Phases`,
+			contains: `expected "**Depends on:** Phases <n>[, <n>]...", got "**Depends on:** phase one"`,
 		},
 		{
 			name:     "depends on nonexistent phase",
 			doc:      strings.Replace(validDoc, "**Consumes:**\n\n- `alpha-art` (file) — the alpha artifact", "**Depends on:** Phases 9\n\n**Consumes:**\n\n- `alpha-art` (file) — the alpha artifact", 1),
-			contains: "cites nonexistent phase 9",
+			contains: `cites nonexistent phase 9 in "Depends on"`,
 		},
 		{
 			name:     "depends on forward phase",
 			doc:      strings.Replace(validDoc, "**Consumes:** none", "**Depends on:** Phases 2\n\n**Consumes:** none", 1),
-			contains: "only earlier phases may be cited",
+			contains: `cites phase 2 in "Depends on", but only earlier phases may be cited`,
 		},
 	}
 
@@ -306,16 +377,6 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 			}
 		})
 	}
-}
-
-func compileProblemsMax(t *testing.T, md string, maxPhases int) []CompileProblem {
-	t.Helper()
-	_, err := CompileSealed(md, maxPhases)
-	var ce *CompileError
-	if !errors.As(err, &ce) {
-		t.Fatalf("expected *CompileError, got %v", err)
-	}
-	return ce.Problems
 }
 
 // All-problems-at-once: a doc with several independent classes must
@@ -336,7 +397,7 @@ func TestCompileSealed_CollectsAllProblems(t *testing.T) {
 	}
 }
 
-// ---- Task 3: inference, explicit deps, cycle, hash ----
+// ---- Task 3: inference, explicit deps, warnings ----
 
 func TestCompileSealed_Infer(t *testing.T) {
 	cp, err := CompileSealed(validDoc, 8)
@@ -344,26 +405,17 @@ func TestCompileSealed_Infer(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 	// Phase 2 omits "**Depends on:**" and consumes alpha-art (phase 1)
-	// → DependsOn {1} + W1 warning.
+	// → DependsOn {1} + W1 warning. DependsOn carries the producer's
+	// phase ordinal (dialect doc section 8.2 walkthrough).
 	if len(cp.Phases[1].DependsOn) != 1 || cp.Phases[1].DependsOn[0] != 1 {
 		t.Fatalf("expected DependsOn [1], got %+v", cp.Phases[1].DependsOn)
 	}
-	found := false
-	for _, w := range cp.Warnings {
-		if strings.Contains(w, "depends_on inferred for phase") {
-			found = true
-		}
-	}
-	if !found {
+	if warningsContaining(cp, `depends_on inferred for phase "Beta"`) != 1 {
 		t.Fatalf("expected W1 inference warning, got %+v", cp.Warnings)
-	}
-	// Phase 1 has no deps.
-	if len(cp.Phases[0].DependsOn) != 0 {
-		t.Fatalf("expected no deps for phase 1, got %+v", cp.Phases[0].DependsOn)
 	}
 }
 
-func TestCompileSealed_InferExplicitDeps(t *testing.T) {
+func TestCompileSealed_ExplicitDeps(t *testing.T) {
 	md := strings.Replace(validDoc,
 		"**Consumes:**\n\n- `alpha-art` (file) — the alpha artifact",
 		"**Depends on:** Phases 1\n\n**Consumes:**\n\n- `alpha-art` (file) — the alpha artifact", 1)
@@ -375,53 +427,54 @@ func TestCompileSealed_InferExplicitDeps(t *testing.T) {
 		t.Fatalf("expected explicit DependsOn [1], got %+v", cp.Phases[1].DependsOn)
 	}
 	// W2: explicit set fully implied by consumes → duplicate warning.
-	found := false
-	for _, w := range cp.Warnings {
-		if strings.Contains(w, "duplicates dependencies already implied") {
-			found = true
-		}
-	}
-	if !found {
+	if warningsContaining(cp, "duplicates dependencies already implied") != 1 {
 		t.Fatalf("expected W2 duplicate warning, got %+v", cp.Warnings)
 	}
-	// W3: needs names an artifact absent from Consumes.
-	md2 := strings.Replace(validDoc,
+	if warningsContaining(cp, "depends_on inferred") != 0 {
+		t.Fatalf("explicit deps must not also warn W1, got %+v", cp.Warnings)
+	}
+}
+
+func TestCompileSealed_NeedsWarningW3(t *testing.T) {
+	// Beta's step needs alpha-test (produced by phase 1) but alpha-test
+	// is not in Beta's Consumes block → W3 warning, no hard error.
+	md := strings.Replace(validDocWithAlphaTest,
 		"1. Wire beta [code] (needs: alpha-art)",
-		"1. Wire beta [code] (needs: alpha-art, Phase1.S2)", 1)
-	cp2, err := CompileSealed(md2, 8)
+		"1. Wire beta [code] (needs: alpha-test)", 1)
+	cp, err := CompileSealed(md, 8)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	// Earlier-phase step ref implies a phase dependency on 1 as well.
-	if len(cp2.Phases[1].DependsOn) != 1 || cp2.Phases[1].DependsOn[0] != 1 {
-		t.Fatalf("expected inferred [1] from earlier-phase step ref, got %+v", cp2.Phases[1].DependsOn)
+	if got := warningsContaining(cp, `references artifact "alpha-test" in needs, but it does not appear in the phase's Consumes block`); got != 1 {
+		t.Fatalf("expected exactly one W3 warning, got %d: %+v", got, cp.Warnings)
 	}
-	found3 := false
-	for _, w := range cp2.Warnings {
-		if strings.Contains(w, "does not appear in the phase's Consumes block") {
-			found3 = true
-		}
+	// The needs-referenced artifact also implies the phase dependency.
+	if len(cp.Phases[1].DependsOn) != 1 || cp.Phases[1].DependsOn[0] != 1 {
+		t.Fatalf("expected inferred [1], got %+v", cp.Phases[1].DependsOn)
 	}
-	if !found3 {
-		t.Fatalf("expected W3 warning, got %+v", cp2.Warnings)
+}
+
+func TestCompileSealed_EarlierPhaseStepRefImpliesDep(t *testing.T) {
+	md := strings.Replace(validDoc,
+		"1. Wire beta [code] (needs: alpha-art)",
+		"1. Wire beta [code] (needs: alpha-art, Phase1.S2)", 1)
+	cp, err := CompileSealed(md, 8)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
 	}
-	// Step-level depends_on from same-phase prior step ref.
-	if got := cp.Phases[0].Steps[1].DependsOn; len(got) != 1 || got[0] != 1 {
-		t.Fatalf("expected step 2 DependsOn [1], got %+v", got)
+	if len(cp.Phases[1].DependsOn) != 1 || cp.Phases[1].DependsOn[0] != 1 {
+		t.Fatalf("expected inferred [1] from earlier-phase step ref, got %+v", cp.Phases[1].DependsOn)
 	}
 }
 
 // compileCycleCheck is the white-box cycle detector (class 5 is
 // unreachable through CompileSealed in v1 — every validated edge points
-// backward — so it is exercised directly).
+// backward — so it is exercised directly, per the dialect doc section 7
+// note).
 func TestCompileSealed_CycleDetector(t *testing.T) {
 	names := []string{"A", "B", "C"}
-	// C depends on B, B depends on A, A depends on C.
-	edges := [][]int{
-		{2}, // A's dependents: C (index 2)
-		{0}, // B's dependents: A (index 0)
-		{1}, // C's dependents: B (index 1)
-	}
+	// A's dependents: C; B's dependents: A; C's dependents: B.
+	edges := [][]int{{2}, {0}, {1}}
 	cycle := compileCycleCheck(3, edges, names)
 	if cycle == "" {
 		t.Fatal("expected cycle detection, got none")
@@ -437,26 +490,143 @@ func TestCompileSealed_CycleDetector(t *testing.T) {
 }
 
 func TestCompileSealed_Hash(t *testing.T) {
-	// sha256("# Plan: hash me") precomputed via shasum -a 256.
-	const input = "# Plan: hash me"
-	const want = "d20393fb3a1a6e1a53a01aadc846f1bf611837b2ddb9dec05e7fc5acd8d6d10f"
-	cp, err := CompileSealed(input, 8)
-	if err == nil {
-		// A bare title isn't a valid doc, but Hash must still be set on
-		// success paths only; expect an error here.
-		t.Fatalf("expected error for invalid doc, got %+v", cp)
-	}
-	// Hash of a valid doc equals sha256 of the exact input bytes.
-	cp2, err := CompileSealed(validDoc, 8)
+	cp, err := CompileSealed(validDoc, 8)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	sum := sha256.Sum256([]byte(validDoc))
-	got := hex.EncodeToString(sum[:])
-	if cp2.Hash != got {
-		t.Fatalf("hash mismatch: %s != %s", cp2.Hash, got)
+	want := hex.EncodeToString(sum[:])
+	if cp.Hash != want {
+		t.Fatalf("hash mismatch: %s != %s", cp.Hash, want)
 	}
-	if got != want {
-		t.Fatalf("sanity: sha256 implementation drift? %s", got)
+	// Pinned literal: sha256 of validDoc computed independently via
+	// shasum -a 256 on the same bytes.
+	const wantLiteral = "b6103616bcad4b65b5420b11ed85397ad9c081acb89f4f03b72a695f8dd4f81d"
+	if wantLiteral != want {
+		t.Fatalf("sanity literal drift: %s != %s", wantLiteral, want)
+	}
+}
+
+func TestCompileSealed_ErrorRendering(t *testing.T) {
+	md := strings.Replace(validDoc, "- version: 1", "- version: 2", 1)
+	_, err := CompileSealed(md, 8)
+	var ce *CompileError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *CompileError, got %v", err)
+	}
+	if got := ce.Error(); got != "plan compile failed: 1 problems" {
+		t.Fatalf("unexpected Error() %q", got)
+	}
+}
+
+// ---- Task 4: golden round-trip vs the dialect doc's section-8 examples ----
+//
+// The examples are embedded verbatim (go:embed) from
+// docs/workflows/plan-dialect.md section 8 at extraction time; the test
+// asserts the spec'd compile behavior for each.
+
+//go:embed testdata/dialect-8.1-minimal.md
+var goldenMinimal string
+
+//go:embed testdata/dialect-8.2-parallel.md
+var goldenParallel string
+
+//go:embed testdata/dialect-8.3-errors.md
+var goldenErrors string
+
+func TestCompileSealed_GoldenMinimal(t *testing.T) {
+	cp, err := CompileSealed(goldenMinimal, 8)
+	if err != nil {
+		t.Fatalf("8.1 must compile: %v", err)
+	}
+	if len(cp.Phases) != 2 {
+		t.Fatalf("expected 2 phases, got %d", len(cp.Phases))
+	}
+	// Walk-through: avatar-store consumed by later phase 2 → Required.
+	if !cp.Phases[0].Produces[0].Required {
+		t.Fatal("avatar-store must be Required")
+	}
+	if cp.Phases[1].Produces[0].Required {
+		t.Fatal("avatar-upload-endpoint must not be Required")
+	}
+	// Phase 2 DependsOn inferred from the consume (W1) → [1].
+	if got := cp.Phases[1].DependsOn; len(got) != 1 || got[0] != 1 {
+		t.Fatalf("expected DependsOn [1], got %+v", got)
+	}
+	if warningsContaining(cp, `depends_on inferred for phase "Upload endpoint"`) != 1 {
+		t.Fatalf("expected W1 warning, got %+v", cp.Warnings)
+	}
+	// Phase1.S1 prior same-phase step ref → step 2 depends on step 1.
+	if got := cp.Phases[0].Steps[1].DependsOn; len(got) != 1 || got[0] != 1 {
+		t.Fatalf("expected step DependsOn [1], got %+v", got)
+	}
+	// Tool hints kept verbatim.
+	if cp.Phases[0].Steps[1].ToolHint != "code" {
+		t.Fatalf("unexpected hint %q", cp.Phases[0].Steps[1].ToolHint)
+	}
+}
+
+func TestCompileSealed_GoldenParallel(t *testing.T) {
+	cp, err := CompileSealed(goldenParallel, 8)
+	if err != nil {
+		t.Fatalf("8.2 must compile: %v", err)
+	}
+	if len(cp.Phases) != 3 {
+		t.Fatalf("expected 3 phases, got %d", len(cp.Phases))
+	}
+	// Walk-through: phases 2 and 3 both depend only on phase 1 → the
+	// frontier can run them in parallel. DependsOn sets are {1} (the
+	// producer's ordinal).
+	for i, want := range []struct {
+		phase int
+		deps  []int
+	}{{1, []int{1}}, {2, []int{1}}} {
+		got := cp.Phases[want.phase].DependsOn
+		if len(got) != len(want.deps) || got[0] != want.deps[0] {
+			t.Fatalf("phase %d: expected DependsOn %v, got %+v", want.phase, want.deps, got)
+		}
+		_ = i
+	}
+	if warningsContaining(cp, "depends_on inferred") != 2 {
+		t.Fatalf("expected two W1 warnings, got %+v", cp.Warnings)
+	}
+	// config-schema consumed by two later phases → Required.
+	if !cp.Phases[0].Produces[0].Required {
+		t.Fatal("config-schema must be Required")
+	}
+	// Phase2.S3 demonstrates an earlier-phase step ref: it implies the
+	// phase-1 dependency and leaves phases 2 and 3 uncoupled.
+	if got := cp.Phases[1].DependsOn; len(got) != 1 || got[0] != 1 {
+		t.Fatalf("phase 2 expected [1], got %+v", got)
+	}
+	if got := cp.Phases[2].DependsOn; len(got) != 1 || got[0] != 1 {
+		t.Fatalf("phase 3 expected [1], got %+v", got)
+	}
+}
+
+func TestCompileSealed_GoldenErrors(t *testing.T) {
+	_, err := CompileSealed(goldenErrors, 8)
+	var ce *CompileError
+	if !errors.As(err, &ce) {
+		t.Fatalf("8.3 must fail compile, got %v", err)
+	}
+	if got := ce.Error(); got != "plan compile failed: 2 problems" {
+		t.Fatalf("expected exactly 2 problems, got %q: %+v", got, ce.Problems)
+	}
+	// Spec output, verbatim (lines are exact per the dialect doc):
+	//   line 18: Open Questions must be empty to seal (1 unresolved)
+	//   line 49: unknown artifact "payment-gateway" consumed by phase
+	//            "Render CSV": no phase in this plan produces it
+	want := []CompileProblem{
+		{Line: 18, Message: "Open Questions must be empty to seal (1 unresolved)"},
+		{Line: 49, Message: `unknown artifact "payment-gateway" consumed by phase "Render CSV": no phase in this plan produces it`},
+	}
+	if len(ce.Problems) != len(want) {
+		t.Fatalf("problem count %d != %d: %+v", len(ce.Problems), len(want), ce.Problems)
+	}
+	for i, w := range want {
+		if ce.Problems[i] != w {
+			t.Fatalf("problem %d:\n got %+v\nwant %+v", i, ce.Problems[i], w)
+		}
 	}
 }

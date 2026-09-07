@@ -23,7 +23,7 @@ func CompileSealed(markdown string, maxPhases int) (*CompiledPlan, error) {
 	var problems []CompileProblem
 
 	doc := scanDraft(lines, &problems)
-	checkEnvelope(doc, &problems)
+	checkEnvelope(doc, maxPhases, &problems)
 	checkPhaseStructure(doc, &problems)
 	checkArtifacts(doc, &problems)
 	checkDependsOnLines(doc, &problems)
@@ -478,7 +478,7 @@ func isValidDialectKind(kind string) bool {
 // checkEnvelope validates document-level rules: required/duplicate
 // sections, Meta keys, version, status, the Open-Questions seal gate,
 // phase presence, and the maxPhases cap.
-func checkEnvelope(doc *draftDoc, problems *[]CompileProblem) {
+func checkEnvelope(doc *draftDoc, maxPhases int, problems *[]CompileProblem) {
 	add := func(line int, msg string) {
 		*problems = append(*problems, CompileProblem{Line: line, Message: msg})
 	}
@@ -521,6 +521,9 @@ func checkEnvelope(doc *draftDoc, problems *[]CompileProblem) {
 
 	if doc.phasesLine != 0 && len(doc.phases) == 0 {
 		add(doc.phasesLine, noPhasesMsg)
+	}
+	if maxPhases > 0 && len(doc.phases) > maxPhases {
+		add(doc.phasesLine, fmt.Sprintf(overMaxMsg, len(doc.phases), maxPhases))
 	}
 }
 
@@ -667,6 +670,45 @@ func checkSteps(doc *draftDoc, problems *[]CompileProblem) {
 			}
 
 			for _, ref := range st.needs {
+				// Artifact-name references are resolved first: a
+				// PhaseN.S# token can never be a producer name, and a
+				// kebab token can never be a step ref, so classification
+				// by token shape is deterministic.
+				if !reStepRef.MatchString(ref) && reKebabName.MatchString(ref) {
+					prodOrd, ok := producerOf[ref]
+					if !ok {
+						*problems = append(*problems, CompileProblem{
+							Line:    st.line,
+							Message: fmt.Sprintf(needsMsgUnknown, st.number, p.name, ref),
+						})
+						continue
+					}
+					switch {
+					case prodOrd == p.ordinal:
+						*problems = append(*problems, CompileProblem{
+							Line:    st.line,
+							Message: fmt.Sprintf(needsMsgSamePhase, st.number, p.name, ref),
+						})
+					case prodOrd > p.ordinal:
+						// Later-phase artifact refs violate the same
+						// earlier-phase rule as consumes (class 20's rule).
+						*problems = append(*problems, CompileProblem{
+							Line:    st.line,
+							Message: fmt.Sprintf(consumeMsgEarly, p.name, ref, phaseNameOf(doc, prodOrd)),
+						})
+					default:
+						if !phaseConsumes(p, ref) {
+							// W3 warning, parked as a pseudo-problem for
+							// assemble() to move into Warnings.
+							*problems = append(*problems, CompileProblem{
+								Line:    st.line,
+								Message: fmt.Sprintf(warnNeedsNot, st.number, p.name, ref),
+							})
+						}
+					}
+					continue
+				}
+
 				if m := reStepRef.FindStringSubmatch(ref); m != nil {
 					targetOrd, err := strconv.Atoi(m[1])
 					if err != nil {
@@ -718,43 +760,12 @@ func checkSteps(doc *draftDoc, problems *[]CompileProblem) {
 					continue
 				}
 
-				// Artifact-name reference.
-				if !reKebabName.MatchString(ref) {
-					*problems = append(*problems, CompileProblem{
-						Line:    st.line,
-						Message: fmt.Sprintf(needsMsgUnknown, st.number, p.name, ref),
-					})
-					continue
-				}
-				prodOrd, ok := producerOf[ref]
-				if !ok {
-					*problems = append(*problems, CompileProblem{
-						Line:    st.line,
-						Message: fmt.Sprintf(needsMsgUnknown, st.number, p.name, ref),
-					})
-					continue
-				}
-				switch {
-				case prodOrd == p.ordinal:
-					*problems = append(*problems, CompileProblem{
-						Line:    st.line,
-						Message: fmt.Sprintf(needsMsgSamePhase, st.number, p.name, ref),
-					})
-				case prodOrd > p.ordinal:
-					// Later-phase artifact refs violate the same
-					// earlier-phase rule as consumes (class 20's rule).
-					*problems = append(*problems, CompileProblem{
-						Line:    st.line,
-						Message: fmt.Sprintf(consumeMsgEarly, p.name, ref, phaseNameOf(doc, prodOrd)),
-					})
-				default:
-					if !phaseConsumes(p, ref) {
-						*problems = append(*problems, CompileProblem{ // warning stored below
-							Line:    st.line,
-							Message: fmt.Sprintf(warnNeedsNot, st.number, p.name, ref),
-						})
-					}
-				}
+				// Neither a kebab artifact name nor a valid step ref:
+				// unknown reference (class 27).
+				*problems = append(*problems, CompileProblem{
+					Line:    st.line,
+					Message: fmt.Sprintf(needsMsgUnknown, st.number, p.name, ref),
+				})
 			}
 		}
 	}
