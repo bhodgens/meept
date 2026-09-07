@@ -511,25 +511,39 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		}
 
 	case ReviewRejected:
-		// Mark as rejected
-		if err := rm.stepStore.SetState(step.ID, task.StepRejected); err != nil {
-			return nil, fmt.Errorf("failed to set rejected state: %w", err)
+		// Execution-error gate: the step is already failed (terminal).
+		// A revision depending on a failed step can never be promoted
+		// (IsSuccessfullyTerminal blocks on failed deps), so revising is
+		// pointless — keep the failure and record the feedback only.
+		if step.State == task.StepFailed {
+			rm.logger.Warn("Step rejected after execution error; not creating revision",
+				"step_id", step.ID,
+			)
+			if err := rm.stepStore.SetResult(step.ID, result.Feedback); err != nil {
+				rm.logger.Error("Failed to set failure feedback", "error", err)
+				outErr = fmt.Errorf("failed to set failure feedback: %w", err)
+			}
+			break
+		}
+
+		// Reject + bump revision count in ONE full-row write. The previous
+		// two-step sequence (SetState(rejected) then Update(step) with the
+		// stale in-memory state) wrote "reviewing" back over "rejected" and
+		// left the revision step depending on a permanently non-terminal
+		// original — revisions never scheduled (2026-09-06 live-run finding).
+		step.IncrementRevision()
+		step.State = task.StepRejected
+		if err := rm.stepStore.Update(step); err != nil {
+			// AGENT-23 FIX: Return the error so callers that manage the
+			// scheduling lifecycle (e.g. TacticalScheduler) can observe
+			// revision-count failures and surface them to the operator.
+			return nil, fmt.Errorf("failed to persist rejected state: %w", err)
 		}
 		if err := rm.stepStore.SetResult(step.ID, result.Feedback); err != nil {
 			rm.logger.Error("Failed to set rejection feedback", "error", err)
 			outErr = fmt.Errorf("failed to set rejection feedback: %w", err)
 		}
 		rm.logger.Info("Step rejected", "step_id", step.ID, "issues", result.Issues)
-
-		// Increment original step's revision count BEFORE creating revision
-		// This fixes the bug where revision count tracking was always 0
-		step.IncrementRevision()
-		if err := rm.stepStore.Update(step); err != nil {
-			// AGENT-23 FIX: Return the error so callers that manage the
-			// scheduling lifecycle (e.g. TacticalScheduler) can observe
-			// revision-count failures and surface them to the operator.
-			return nil, fmt.Errorf("failed to increment revision count: %w", err)
-		}
 
 		// Create revision step with feedback context
 		revisionContext := BuildRevisionContext(result, spec)
