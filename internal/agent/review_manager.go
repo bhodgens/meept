@@ -558,13 +558,13 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 			)
 			revisions = append(revisions, revision)
 
-			// Update task TotalJobs to include the new revision step
+			// Update task TotalJobs to include the new revision step.
+			// Atomic increment (A-08 pattern): the previous Get→mutate→Update
+			// sequence lost increments when a concurrent step completion
+			// wrote back a stale counter snapshot.
 			if rm.taskStore != nil {
-				if t, err := rm.taskStore.GetByID(step.TaskID); err == nil && t != nil {
-					t.IncrementJobs()
-					if err := rm.taskStore.Update(t); err != nil {
-						rm.logger.Error("Failed to update task TotalJobs for revision", "error", err)
-					}
+				if err := rm.taskStore.IncrementTotalJobs(step.TaskID); err != nil {
+					rm.logger.Error("Failed to update task TotalJobs for revision", "error", err)
 				}
 			}
 		}

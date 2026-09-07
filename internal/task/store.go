@@ -273,6 +273,62 @@ func (s *Store) IncrementCompletedJobs(taskID string) (int, error) {
 	return count, nil
 }
 
+// IncrementTotalJobs atomically increments total_jobs for the given task
+// (used when a revision step is created). A-08 pattern: avoids the
+// read-modify-write race where a concurrent step completion's Update(t)
+// writes back a stale snapshot and erases the increment.
+func (s *Store) IncrementTotalJobs(taskID string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		`UPDATE tasks SET total_jobs = total_jobs + 1, updated_at = ? WHERE id = ?`,
+		now, taskID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to increment total_jobs: %w", err)
+	}
+	return nil
+}
+
+// IncrementFailedJobs atomically increments failed_jobs for the given task,
+// matching the IncrementCompletedJobs pattern.
+func (s *Store) IncrementFailedJobs(taskID string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		`UPDATE tasks SET failed_jobs = failed_jobs + 1, updated_at = ? WHERE id = ?`,
+		now, taskID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to increment failed_jobs: %w", err)
+	}
+	return nil
+}
+
+// RecountJobs recomputes total/completed/failed job counters from the task's
+// actual step rows. Called on task finalization so counters always reflect
+// reality regardless of races during execution (2026-09-07: task finalized
+// "2/1 completed, 200%" after revision churn moved counters off truth).
+func (s *Store) RecountJobs(taskID string) (total, completed, failed int, err error) {
+	err = s.db.QueryRow(`
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN state IN ('completed','approved') THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0)
+		FROM task_steps WHERE task_id = ?`, taskID,
+	).Scan(&total, &completed, &failed)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to recount jobs for %s: %w", taskID, err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = s.db.Exec(
+		`UPDATE tasks SET total_jobs = ?, completed_jobs = ?, failed_jobs = ?, updated_at = ? WHERE id = ?`,
+		total, completed, failed, now, taskID,
+	)
+	if err != nil {
+		return total, completed, failed, fmt.Errorf("failed to persist recounted jobs for %s: %w", taskID, err)
+	}
+	return total, completed, failed, nil
+}
+
 // AddTokenUsage atomically adds delta to token_usage for the given task.
 func (s *Store) AddTokenUsage(taskID string, delta int) error {
 	now := time.Now().UTC().Format(time.RFC3339)

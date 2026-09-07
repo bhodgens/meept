@@ -1060,6 +1060,15 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 
 		// Honest completion (2026-09-04 finding F2): any failed step fails
 		// the task. The step error text becomes the user-visible result.
+		// Counters are recounted from step rows first so completion events
+		// carry true totals even after revision churn raced the counters
+		// (2026-09-07: task finalized "2/1 completed, 200%").
+		if _, _, _, recountErr := ts.taskStore.RecountJobs(step.TaskID); recountErr != nil {
+			ts.logger.Error("Failed to recount jobs", "task_id", step.TaskID, "error", recountErr)
+		}
+		if rt, rerr := ts.taskStore.GetByID(step.TaskID); rerr == nil && rt != nil {
+			t = rt
+		}
 		failedSteps, ferr := ts.failedStepsForTask(step.TaskID)
 		if ferr != nil {
 			ts.logger.Error("Failed to list failed steps", "task_id", step.TaskID, "error", ferr)
@@ -1383,15 +1392,11 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 		ts.logger.Error("Failed to set step state to failed", "step_id", step.ID, "error", err)
 	}
 
-	// Update parent task's failed jobs counter
-	t, err := ts.taskStore.GetByID(step.TaskID)
-	if err != nil || t == nil {
-		ts.logger.Error("Failed to get parent task", "task_id", step.TaskID, "error", err)
-		return nil
-	}
-	t.FailJob()
-	if err := ts.taskStore.Update(t); err != nil {
-		ts.logger.Error("Failed to update task after job failure", "error", err)
+	// Update parent task's failed jobs counter (atomic, A-08 pattern — the
+	// previous Get→FailJob→Update RMW wrote back stale counters under
+	// parallel completions).
+	if err := ts.taskStore.IncrementFailedJobs(step.TaskID); err != nil {
+		ts.logger.Error("Failed to update task after job failure", "task_id", step.TaskID, "error", err)
 	}
 
 	// Trigger escalation for failed step if escalation manager is configured.
@@ -1438,7 +1443,18 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 	}
 
 	if !hasLiveSteps {
-		// No more work can be done, mark task as failed
+		// No more work can be done, mark task as failed. Counters are
+		// recounted from the step rows first so the payload reflects
+		// reality (revision churn previously left stale snapshots here).
+		_, _, _, recountErr := ts.taskStore.RecountJobs(step.TaskID)
+		if recountErr != nil {
+			ts.logger.Error("Failed to recount jobs", "task_id", step.TaskID, "error", recountErr)
+		}
+		t, terr := ts.taskStore.GetByID(step.TaskID)
+		if terr != nil || t == nil {
+			ts.logger.Error("Failed to reload task for finalization", "task_id", step.TaskID, "error", terr)
+			return nil
+		}
 		t.SetState(task.StateFailed)
 		if err := ts.taskStore.Update(t); err != nil {
 			ts.logger.Error("Failed to set task failed", "error", err)
@@ -1472,11 +1488,18 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 			nextStepDesc = readySteps[0].Description
 		}
 
+		// Reload counters atomically incremented above so progress events
+		// don't carry stale snapshots.
+		progressTask, perr := ts.taskStore.GetByID(step.TaskID)
+		if perr != nil || progressTask == nil {
+			ts.logger.Error("Failed to reload task for progress", "task_id", step.TaskID, "error", perr)
+			return nil
+		}
 		ts.publishEvent("task.progress", map[string]any{
 			KeyTaskID:        step.TaskID,
-			"failed_jobs":    t.FailedJobs,
-			KeyCompletedJobs: t.CompletedJobs,
-			KeyTotalJobs:     t.TotalJobs,
+			"failed_jobs":    progressTask.FailedJobs,
+			KeyCompletedJobs: progressTask.CompletedJobs,
+			KeyTotalJobs:     progressTask.TotalJobs,
 			"current_step":   nextStepDesc,
 			KeyChatVisible:   true,
 		})
