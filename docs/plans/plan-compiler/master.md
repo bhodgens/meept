@@ -308,8 +308,8 @@ site + task.approve RPC pattern (internal/rpc/task_approval.go) INLINED.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 01-dialect-spec.md | COMPLETE | 1 | Committed 64682470; judgment calls: same-phase step refs allowed (persisted intra-phase), cycle class documented unreachable-but-implemented |
-| 02-compiler.md | PENDING | 0 | |
-| 03-tree-emission.md | PENDING | 0 | |
+| 02-compiler.md | COMPLETE | 1 | Committed 21355d8c; all-problems collection verified, table-driven validation, race-clean |
+| 03-tree-emission.md | COMPLETE | 1 | Committed 1cef6e58; landed before 02's types — verified green post-wave; deviations accepted (bare section headings for exact-line check, sizing disambiguation, budget-beats-cap) |
 | 04-seal-wiring.md | PENDING | 0 | |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
