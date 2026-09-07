@@ -1030,6 +1030,18 @@ selflock:
 analyzers: selflock
 
 # =============================================================================
+# Classifier Benchmark
+# =============================================================================
+
+# Model-vs-model classification benchmark on the labeled corpus.
+#   make classifier-test MODELS="--model-a /path/A --model-b /path/B" BASE_URL=http://127.0.0.1:18081
+.PHONY: classifier-test
+classifier-test:
+	@mkdir -p $(BIN_DIR)
+	@go build -o $(BIN_DIR)/meept-classifier-test ./cmd/meept-classifier-test
+	@./$(BIN_DIR)/meept-classifier-test $(MODELS) --base-url $(BASE_URL) --name classifier-eval-$(shell date +%Y%m%d-%H%M)
+
+# =============================================================================
 # Comparison Prep
 # =============================================================================
 
