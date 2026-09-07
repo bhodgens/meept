@@ -653,23 +653,37 @@ except ImportError:
     sys.exit(2)
 vid = sys.argv[1]
 langs = sys.argv[2:]
+
+def _segments(rows):
+    out = []
+    for s in rows:
+        if isinstance(s, dict):
+            out.append({"text": s.get("text", ""), "start": s.get("start", 0.0)})
+        else:
+            out.append({"text": getattr(s, "text", ""), "start": getattr(s, "start", 0.0)})
+    return out
+
 try:
+    # youtube-transcript-api >= 1.0: instance methods
+    # (list/fetch_transcript); the pre-1.0 static calls were removed.
+    api = YouTubeTranscriptApi()
     if langs:
-        fetched = YouTubeTranscriptApi.list(vid)
         try:
-            t = fetched.find_transcript(langs)
+            tl = api.list(vid)
+            data = tl.find_transcript(langs).fetch()
+        except SystemExit:
+            raise
         except Exception:
             raise SystemExit(3)
     else:
-        t = YouTubeTranscriptApi.get_transcript(vid)
-    data = t.fetch()
+        data = api.fetch(vid)
 except SystemExit:
     raise
 except Exception as e:
     sys.stderr.write(type(e).__name__ + ": " + str(e) + "\n")
     sys.exit(1)
-for seg in data:
-    sys.stdout.write(json.dumps({"text": seg.get("text", ""), "start": seg.get("start", 0.0)}) + "\n")
+for seg in _segments(data):
+    sys.stdout.write(json.dumps(seg) + "\n")
 `
 
 // Sentinel stderr markers emitted by transcriptFetchScript (and their
