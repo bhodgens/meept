@@ -32,8 +32,12 @@ func TestConfigLoads(t *testing.T) {
 	if !ok {
 		t.Fatal("classifier alias not found")
 	}
-	if len(classifierAlias.Models) == 0 || classifierAlias.Models[0] != "local-mlx/lfm-combined-sft" {
-		t.Errorf("classifier alias primary = %q, want local-mlx/lfm-combined-sft", classifierAlias.Models[0])
+	// Classifier alias: lfm-8b-mlx primary per the 2026-09-06 A/B
+	// (86.8% vs 54.4% corpus accuracy — combined-sft stays registered
+	// as the A/B alternate), falling back to combined-sft, then the
+	// fast 1.2b.
+	if len(classifierAlias.Models) == 0 || classifierAlias.Models[0] != "local/lfm-8b-mlx-4bit" {
+		t.Errorf("classifier alias primary = %q, want local/lfm-8b-mlx-4bit", classifierAlias.Models[0])
 	}
 
 	// Verify coder alias uses glm-5.2
