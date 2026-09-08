@@ -139,6 +139,24 @@ ITERATION-LOG.md, results/). Every subagent brief is assembled from files at
 dispatch time — never from session memory. Session compaction mid-campaign
 costs a re-read, nothing else.
 
+## 429 / Rate-Limit Policy
+
+A subagent paused or delayed by provider rate limits (429 / quota wait) is
+NOT abandoned and its work is NOT re-dispatched. Protocol:
+
+1. On a 429 signal for a dispatched subagent, the orchestrator MARKS the
+   iteration state in `ITERATION-LOG.md` (row appended: iteration number,
+   stage, `WAITING-429`) and WAITS — re-polling the delegation result rather
+   than spawning a replacement agent.
+2. When the agent returns, resume the normal protocol at the review step
+   (step 3). Its report, whatever the wall-clock delay, is treated as valid.
+3. Never kill, supersede, or duplicate a 429-delayed agent. Re-dispatching
+   wastes the tokens the original agent already spent and risks divergent
+   results between two agents that ran the same brief.
+4. This applies identically to TEST and FIX subagents. The daemon's own
+   quota-parking (agent.quota_wait) already models this behavior; the
+   campaign follows the same policy at the orchestration layer.
+
 Subagent pairing per user directive: one TEST agent + one FIX agent per
 iteration, with orchestrator (me) reviewing between them. FIX agent is skipped
 only when the iteration is a pure measurement with zero issues.
