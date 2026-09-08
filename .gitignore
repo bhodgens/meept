@@ -101,6 +101,8 @@ results/
 # docs/plans/classifier-iteration — iteration reports + summaries).
 !tools/classifier-eval/results/
 !tools/classifier-eval/results/**
+# Hermes-transcript replay corpus: verbatim private chat text, never tracked
+tools/classifier-eval/replay-corpus.local.json5
 
 # Skill-evolution cycle output (regenerable daemon artifacts, churn every cycle)
 docs/plans/skill-evolution-*.md

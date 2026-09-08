@@ -1,0 +1,36 @@
+{
+ "silver_n": 48,
+ "stageA": {
+  "routes": 11,
+  "correct": 8,
+  "precision": 0.727
+ },
+ "stageB": {
+  "routes": 4,
+  "correct": 4,
+  "precision": 1.0
+ },
+ "stageC_chain": 33,
+ "expected_system_accuracy": 0.8468,
+ "tau": 0.147,
+ "misses": [
+  [
+   "A",
+   "implement the plan using subagents",
+   "code",
+   "plan"
+  ],
+  [
+   "A",
+   "create a skill-tailored resume for this posting (1-page) bas",
+   "code",
+   "platform"
+  ],
+  [
+   "A",
+   "implement the plan",
+   "code",
+   "plan"
+  ]
+ ]
+}
