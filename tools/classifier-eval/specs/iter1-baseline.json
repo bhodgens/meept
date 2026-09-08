@@ -1,0 +1,5 @@
+{
+  "name": "iter1-knn5-unanimity-0.70",
+  "embedder": {"url": "http://127.0.0.1:8090/v1", "model": "qwen3-embedding", "instruction": ""},
+  "head": {"type": "knn_unanimity", "k": 5, "floor": 0.70}
+}

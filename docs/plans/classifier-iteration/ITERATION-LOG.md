@@ -6,4 +6,5 @@ accuracy when forced (no abstain), OOD-R=OOD abstain rate, L=p50 latency.
 
 | # | Permutation (embedder / head / threshold) | Corpus | C | P | A | F1 | OOD-R | L(ms) | Wrong | Fix applied | Verdict |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 0 | qwen3-0.6B-4bit EOS / kNN k=5 unanimity / floor 0.70 (pre-campaign baseline, LOO) | 136 | 14.7% | 100% | — | — | untested | ~300 | 0 | self-match exclusion (f272771c) | baseline |
+| 0 | qwen3-0.6B-4bit EOS / kNN k=5 unanimity / floor 0.70 (pre-campaign baseline, LOO) | 136 | 14.7% | 100% | — | — | untested | ~300 | 0 | self-match exclusion (f272771c) | baseline — CORRECTED at iter 1: 14.7% not reproducible (see results/iter-1/report.md); honest 5-fold value is C 3.7% |
+| 1 | qwen3-0.6B-4bit EOS / kNN k=5 unanimity / floor 0.70 — 5-fold cross, seed 42 | 136 | 3.7% | 100% | 100% | 0.056 | n/a (no OOD cases yet) | ~8/embed cached | 0 | harness built (tools/classifier-eval); iter-0 reconciled | E2E 87.29% ≈ chain-only 86.8%; coverage structurally capped (top-1-NN agreement 43%) |
