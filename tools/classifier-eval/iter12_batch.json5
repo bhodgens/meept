@@ -1,0 +1,15 @@
+{
+  "cases": [
+    { "id": "h12-debug-001", "input": "the compiler rejects the type cast", "expected_intent": "debug", "expected_agent": "debugger", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-debug-002", "input": "fix this loop index that skips elements", "expected_intent": "debug", "expected_agent": "debugger", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-debug-003", "input": "the POST endpoint responds with 500", "expected_intent": "debug", "expected_agent": "debugger", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-debug-004", "input": "debug the mutex contention in the pool", "expected_intent": "debug", "expected_agent": "debugger", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-debug-005", "input": "fix the flag parsing that breaks on dashes", "expected_intent": "debug", "expected_agent": "debugger", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-plan-001", "input": "design the notification pipeline architecture", "expected_intent": "plan", "expected_agent": "planner", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-plan-002", "input": "plan how to break the task into steps", "expected_intent": "plan", "expected_agent": "planner", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-analyze-001", "input": "analyze the root causes of the latency spike", "expected_intent": "analyze", "expected_agent": "analyst", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-report-001", "input": "generate a status report for the sprint", "expected_intent": "report", "expected_agent": "chat", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-review-001", "input": "check the code quality of this patch", "expected_intent": "review", "expected_agent": "reviewer", "added_in": "iteration-12", "source": "synthetic" },
+    { "id": "h12-code-001", "input": "refactor the service to use constructor injection", "expected_intent": "code", "expected_agent": "coder", "added_in": "iteration-12", "source": "synthetic" }
+  ],
+}
