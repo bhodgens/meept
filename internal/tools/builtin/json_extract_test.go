@@ -319,6 +319,68 @@ func TestCheckRequired(t *testing.T) {
 	}
 }
 
+func TestJSONExtract_StripsUndeclaredSchemaEcho(t *testing.T) {
+	// Regression (live smoke, 2026-09-07): the extractor echoed the
+	// schema's "required" keyword as an output field.
+	fake := &fakeChatter{content: `{"title":"Attention Is All You Need","year":2017,"required":["title"],"type":"object"}`}
+	tool := NewJSONExtractTool(fake, time.Second)
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"schema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"title": map[string]any{"type": "string"},
+				"year":  map[string]any{"type": "integer"},
+			},
+			"required": []any{"title"},
+		},
+		schemaPropText: "Attention Is All You Need appeared in 2017.",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	tr := res.(*tools.ToolResult)
+	m := tr.Result.(map[string]any)
+	record := m["record"].(map[string]any)
+	if _, present := record["required"]; present {
+		t.Errorf("schema keyword 'required' leaked into record: %#v", record)
+	}
+	if _, present := record["type"]; present {
+		t.Errorf("schema keyword 'type' leaked into record: %#v", record)
+	}
+	if record["title"] != "Attention Is All You Need" || record["year"] != float64(2017) {
+		t.Errorf("declared fields damaged: %#v", record)
+	}
+	// The emitted JSON document must match the conformed record too.
+	doc := m["json"].(string)
+	if strings.Contains(doc, `"required"`) {
+		t.Errorf("json document still contains undeclared key: %s", doc)
+	}
+}
+
+func TestConformToSchema(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			"a": map[string]any{"type": "string"},
+			"b": map[string]any{"type": "integer"},
+		},
+	}
+	record := map[string]any{"a": "x", "b": 1.0, "required": []any{"a"}, "extra": true}
+	got := conformToSchema(record, schema)
+	if len(got) != 2 {
+		t.Fatalf("conformed record = %#v, want 2 keys", got)
+	}
+	// No properties key: record passes through untouched.
+	passthrough := conformToSchema(record, map[string]any{})
+	if len(passthrough) != 4 {
+		t.Errorf("no-schema passthrough damaged record: %#v", passthrough)
+	}
+	// Nil properties map (malformed schema): passthrough.
+	malformed := conformToSchema(record, map[string]any{"properties": "junk"})
+	if len(malformed) != 4 {
+		t.Errorf("malformed schema passthrough damaged record: %#v", malformed)
+	}
+}
+
 func TestJSONExtract_SetChatterNilSafe(t *testing.T) {
 	tool := NewJSONExtractTool(nil, time.Second)
 	tool.SetChatter(nil) // must not panic, must not change state

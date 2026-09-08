@@ -19,6 +19,7 @@ const toolJSONExtract = "json_extract"
 const jsonExtractSystemPrompt = `You are a strict JSON extraction engine. ` +
 	`Extract data from the input text according to the schema given by the user. ` +
 	`Output ONLY one JSON object conforming to the schema. ` +
+	`Output only the properties the schema declares — never echo schema keywords such as required, type, or items. ` +
 	`No prose, no markdown fences, no explanation. ` +
 	`Use null for fields not present in the text. Never invent values.`
 
@@ -160,6 +161,10 @@ func (t *JSONExtractTool) Execute(ctx context.Context, args map[string]any) (any
 	if err := json.Unmarshal([]byte(raw), &record); err != nil {
 		return nil, fmt.Errorf("json_extract: model output is not valid JSON: %w (output: %.200s)", err, raw)
 	}
+	// Conform the record to the schema BEFORE validation: small extractors
+	// sometimes echo schema keywords (required/type/items) as fields, and
+	// null-valued required fields mean "not found", not "violation".
+	record = conformToSchema(record, schema)
 	if t.validate {
 		if missing := checkRequired(record, schema); len(missing) > 0 {
 			return nil, fmt.Errorf("json_extract: extracted record missing required fields %v", missing)
@@ -299,6 +304,30 @@ func parseSchemaJSON(s string) (map[string]any, error) {
 		return nil, fmt.Errorf("json_extract: schema is not valid JSON: %w", err)
 	}
 	return parsed, nil
+}
+
+// conformToSchema shapes the model's record to the declared schema by
+// dropping top-level fields the schema does not declare. Small extractors
+// sometimes echo schema keywords ("required", "type", "items") as fields —
+// the grammar guarantees parseable JSON, not conformance. Null values are
+// left in place (null means "not found", a legitimate record); nested
+// values are untouched. Best-effort, never errors.
+func conformToSchema(record map[string]any, schema map[string]any) map[string]any {
+	propsRaw, ok := schema["properties"]
+	if !ok {
+		return record
+	}
+	props, ok := propsRaw.(map[string]any)
+	if !ok || len(props) == 0 {
+		return record
+	}
+	out := make(map[string]any, len(props))
+	for name, value := range record {
+		if _, declared := props[name]; declared {
+			out[name] = value
+		}
+	}
+	return out
 }
 
 // checkRequired verifies required fields are present and non-null in the
