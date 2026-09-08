@@ -27,7 +27,8 @@
       { input: "create a Dockerfile for the service", expected_intent: "code", expected_agent: "coder" },
       { input: "write integration tests for the auth flow", expected_intent: "code", expected_agent: "coder" },
       { input: "implement file upload with S3", expected_intent: "code", expected_agent: "coder" },
-      { input: "create a scheduled job for cleanup", expected_intent: "code", expected_agent: "coder" },
+      { input: "write a cron-style background worker for log rotation", expected_intent: "code", expected_agent: "coder" },
+      { input: "create a queue consumer for email dispatch", expected_intent: "code", expected_agent: "coder" },
     ],
     debugging: [
       { input: "why is this test failing?", expected_intent: "debug", expected_agent: "debugger" },
@@ -156,11 +157,13 @@
       { input: "summarize what was done today", expected_intent: "report", expected_agent: "chat" },
       { input: "generate a status report", expected_intent: "report", expected_agent: "chat" },
       { input: "show me the metrics dashboard", expected_intent: "report", expected_agent: "chat" },
+      { input: "recap the work completed this sprint", expected_intent: "report", expected_agent: "chat" },
     ],
     recall: [
       { input: "what did we discuss yesterday?", expected_intent: "recall", expected_agent: "chat" },
       { input: "remember when we fixed that bug?", expected_intent: "recall", expected_agent: "chat" },
       { input: "show me the conversation from last week", expected_intent: "recall", expected_agent: "chat" },
+      { input: "what did I tell you about the deployment config?", expected_intent: "recall", expected_agent: "chat" },
     ],
   },
 }
