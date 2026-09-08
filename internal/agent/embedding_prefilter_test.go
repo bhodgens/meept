@@ -38,6 +38,13 @@ func basisVec(i int) []float64 {
 	return v
 }
 
+// nearAxis0 returns a query vector at cos ≈ 0.995 to axis 0 — near enough
+// to vote with axis-0 examples, far enough (below selfMatchCutoff) to not
+// be treated as a self-match.
+func nearAxis0() []float64 {
+	return []float64{0.99, 0.1, 0, 0}
+}
+
 func exampleSet() []map[string]any {
 	// 5 code examples on axis 0, 5 chat on axis 1 — exactly k=5 per
 	// intent, so a perfect axis query votes, and anything off-axis dies
@@ -78,7 +85,7 @@ func knnPrefilter(t *testing.T, emb PrefilterEmbedder, examples []map[string]any
 // unanimity floor as confidence.
 func TestPrefilter_KNNUnanimousDirectRoute(t *testing.T) {
 	emb := embedFunc(func(_ context.Context, _ string) ([]float64, error) {
-		return basisVec(0), nil
+		return nearAxis0(), nil
 	})
 	p := knnPrefilter(t, emb, exampleSet(), nil)
 
@@ -179,7 +186,7 @@ func TestPrefilter_KNNSmallIndexCannotVote(t *testing.T) {
 		{"intent": "code", "agent": "coder", "vector": basisVec(0)},
 	}
 	emb := embedFunc(func(_ context.Context, _ string) ([]float64, error) {
-		return basisVec(0), nil
+		return nearAxis0(), nil
 	})
 	p := knnPrefilter(t, emb, ex, nil)
 
@@ -207,7 +214,7 @@ func TestPrefilter_EmptyInputSkipsEmbedCall(t *testing.T) {
 	calls := 0
 	emb := embedFunc(func(_ context.Context, _ string) ([]float64, error) {
 		calls++
-		return basisVec(0), nil
+		return nearAxis0(), nil
 	})
 	p := knnPrefilter(t, emb, exampleSet(), nil)
 
@@ -307,7 +314,7 @@ func TestPrefilter_ReloadPicksUpNewStore(t *testing.T) {
 		{"intent": "old", "agent": "chat", "vector": basisVec(0)},
 	})
 	emb := embedFunc(func(_ context.Context, _ string) ([]float64, error) {
-		return basisVec(0), nil
+		return nearAxis0(), nil
 	})
 	p := NewEmbeddingPrefilter(emb, config.ClassifierPrefilterConfig{
 		Enabled: true, CentroidsPath: path, Dimension: 4,

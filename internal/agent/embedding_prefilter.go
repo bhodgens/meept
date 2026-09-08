@@ -224,6 +224,14 @@ type kNNVote struct {
 	Margin     float64 // winner-floor minus best losing neighbor score
 }
 
+// selfMatchCutoff: neighbors at or above this cosine are exact/near-exact
+// duplicates of the query itself (e.g. verbatim corpus repeats). They occupy
+// a vote slot while carrying no independent class evidence, so they are
+// excluded from the vote. Without this, verbatim repeats abstain (self
+// crowds out a real neighbor) — the daemon behaves worse than the LOO
+// sweep predicts.
+const selfMatchCutoff = 0.999
+
 // vote runs the kNN unanimity scan on vec against the loaded index.
 // Caller holds p.mu (read). Returns ok=false when no unanimous vote.
 func (p *EmbeddingPrefilter) vote(vec []float64) (kNNVote, bool) {
@@ -234,6 +242,9 @@ func (p *EmbeddingPrefilter) vote(vec []float64) (kNNVote, bool) {
 	neighbors := make([]scored, 0, len(p.examples))
 	for i, e := range p.examples {
 		s := CosineSimilarity(vec, e.Vector)
+		if s >= selfMatchCutoff {
+			continue // self/near-self match: not evidence, skip
+		}
 		if s >= p.threshold {
 			neighbors = append(neighbors, scored{i, s})
 		}

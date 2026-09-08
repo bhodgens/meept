@@ -42,7 +42,7 @@ func TestDispatcher_PrefilterDirectRouteSkipsClassifierChain(t *testing.T) {
 	}
 
 	emb := embedFunc(func(_ context.Context, _ string) ([]float64, error) {
-		return []float64{1, 0, 0, 0}, nil // exactly the code examples
+		return []float64{0.99, 0.1, 0, 0}, nil // near the code examples, below selfMatchCutoff
 	})
 
 	logger := testLogger()
@@ -106,7 +106,7 @@ func TestDispatcher_PrefilterAssertOnlyNeverRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	emb := embedFunc(func(_ context.Context, _ string) ([]float64, error) {
-		return []float64{1, 0, 0, 0}, nil // unanimous code vote guaranteed
+		return []float64{0.99, 0.1, 0, 0}, nil // near-axis: unanimous vote, below selfMatchCutoff
 	})
 
 	d := NewDispatcher(DispatcherConfig{
