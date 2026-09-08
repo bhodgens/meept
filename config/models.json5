@@ -202,9 +202,6 @@
     // llama.cpp instance on port 8082 so the extraction specialist model
     // never evicts the main chat model on 8080. max_concurrency 1: the
     // extraction model is small; parallel calls queue instead of thrashing.
-    // MODEL FILE NOT SHIPPED: download LFM2-Extract GGUF (~1-2 GB) to the
-    // model_path before enabling, or clear extract_model to disable the
-    // tool's backend.
     "local-extract": {
       "api": "openai",
       "options": {
@@ -212,7 +209,7 @@
       },
       "lifecycle": {
         "runtime": "llama-cpp",
-        "model_path": "/Volumes/LLMs/LiquidAI/LFM2-Extract-1.6B-GGUF/LFM2-Extract-1.6B-F16.gguf",
+        "model_path": "/Volumes/LLMs/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-extract.pid",
@@ -234,8 +231,8 @@
       "models": {
         "lfm2-extract": {
           // llama-server reports the model ID as the path passed via --model.
-          "name": "/Volumes/LLMs/LiquidAI/LFM2-Extract-1.6B-GGUF/LFM2-Extract-1.6B-F16.gguf",
-          "path": "/Volumes/LLMs/LiquidAI/LFM2-Extract-1.6B-GGUF/LFM2-Extract-1.6B-F16.gguf",
+          "name": "/Volumes/LLMs/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
+          "path": "/Volumes/LLMs/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
           "capabilities": ["completion"],
           "input_cost": 0.0,
           "output_cost": 0.0,
