@@ -90,13 +90,17 @@ type ModelDef struct {
 
 // ProvidersConfig represents the full models.json5 configuration.
 type ProvidersConfig struct {
-	Model             string                     `json:"model"`
-	SmallModel        string                     `json:"small_model"`
-	ClassifierModel   string                     `json:"classifier_model"`
-	SummarizerModel   string                     `json:"summarizer_model"`
-	VisionModel       string                     `json:"vision_model"`
-	ImageModel        string                     `json:"image_model"`
-	VideoModel        string                     `json:"video_model"`
+	Model           string `json:"model"`
+	SmallModel      string `json:"small_model"`
+	ClassifierModel string `json:"classifier_model"`
+	SummarizerModel string `json:"summarizer_model"`
+	VisionModel     string `json:"vision_model"`
+	ImageModel      string `json:"image_model"`
+	VideoModel      string `json:"video_model"`
+	// ExtractModel is the models.json5 slot for the json_extract tool's
+	// dedicated extraction model (typically a local small LLM). Empty =
+	// json_extract reports not-configured.
+	ExtractModel      string                     `json:"extract_model"`
 	DisabledProviders []string                   `json:"disabled_providers"`
 	ModelAliases      map[string]ModelAliasEntry `json:"model_aliases"`
 	Providers         map[string]ProviderConfig  `json:"providers"`
@@ -227,6 +231,9 @@ func MergeProvidersConfig(base, overlay *ProvidersConfig) *ProvidersConfig {
 	}
 	if overlay.VideoModel != "" {
 		out.VideoModel = overlay.VideoModel
+	}
+	if overlay.ExtractModel != "" {
+		out.ExtractModel = overlay.ExtractModel
 	}
 	if overlay.DisabledProviders != nil {
 		out.DisabledProviders = append([]string(nil), overlay.DisabledProviders...)

@@ -331,6 +331,7 @@ list_directory          |     |  X   |       |     |        |     X     |   X   
 shell_execute           |     |  X   |  X    |     |        |     X     |   X   |      |     |   X
 web_fetch               |  X  |      |       |     |   X    |     X     |       |      |     |   X
 web_search              |  X  |      |       |     |   X    |           |       |      |     |   X
+json_extract            |     |      |       |     |        |     X     |       |      |     |
 schedule_create         |     |      |       |     |        |           |       |  X   |     |
 schedule_list           |     |      |       |     |        |           |       |  X   |     |
 schedule_delete         |     |      |       |     |        |           |       |  X   |     |

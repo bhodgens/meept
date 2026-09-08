@@ -864,6 +864,30 @@ Find the definition of a symbol at a given position.
 }
 ```
 
+### `json_extract`
+
+Extract a schema-shaped JSON record from raw text using the dedicated
+extraction model (`extract_model` slot in models.json5 — typically a local
+small LLM such as LFM2-Extract served by llama.cpp). The extraction turn is
+grammar-constrained when the endpoint declares `tool_constraint: llamacpp`
+and `[agent.tools].gbnf_constrained` is on, so output is always parseable
+JSON under that configuration.
+
+**Parameters:** `schema` (required, object or JSON string), `text` | `file_path`,
+`instructions`, `output_path`
+
+**Default:** no chat-model fallback. Empty `extract_model` makes the tool
+report `json_extract: extraction model not configured (set extract_model in
+models.json5 to a provider/model ref)`.
+
+**Notes:**
+- Input larger than 24 KB is truncated before the extraction turn.
+- Relative `file_path` / `output_path` resolve against the session working
+  directory (never the daemon CWD).
+- Results carry the source-text external taint label.
+- Requires the model file on disk; the `local-extract` provider in the
+  bundled models.json5 documents the expected path.
+
 ## Agent Tool Access
 
 Different agents have access to different tools based on their roles:

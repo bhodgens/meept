@@ -105,10 +105,14 @@ type Components struct {
 	// model; nil means summarize mode uses SummarizerClient (chain
 	// default) when enabled.
 	TranscriptSummarizerClient *llm.Client
-	LLMResolver                *llm.Resolver
-	ToolRegistry               *tools.Registry
-	SecurityChecker            *security.PermissionChecker
-	BudgetCleanupStop          chan struct{} // Stop channel for budget periodic cleanup
+	// ExtractClient is the dedicated client for the json_extract tool
+	// (extract_model slot in models.json5). Nil = json_extract reports
+	// not-configured; the tool never falls back to the chat model.
+	ExtractClient     *llm.Client
+	LLMResolver       *llm.Resolver
+	ToolRegistry      *tools.Registry
+	SecurityChecker   *security.PermissionChecker
+	BudgetCleanupStop chan struct{} // Stop channel for budget periodic cleanup
 	// EvolverPlanStore backs the evolver-DEDICATED PlanManager (plan sink).
 	// Owned by the evolver wiring, NOT the shared plan system: closed in
 	// stopComponents, never by the daemon's plan-store shutdown.
@@ -872,6 +876,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				logger.With("component", "transcript-summarizer-llm"),
 				budgetTracker,
 			)
+		}
+
+		// Dedicated extraction model for the json_extract tool. Built ONLY
+		// when extract_model names a model; nil leaves json_extract
+		// reporting not-configured (no silent chat-model fallback).
+		if c.ModelsConfig.ExtractModel != "" {
+			c.ExtractClient = createAuxiliaryLLMClientWithResolver(
+				c.ModelsConfig,
+				c.ModelsConfig.ExtractModel,
+				c.LLMResolver,
+				logger.With("component", "extract-llm"),
+				budgetTracker,
+			)
+			if c.ExtractClient != nil {
+				logger.Info("Extract LLM client initialized", "model", c.ModelsConfig.ExtractModel)
+			} else {
+				logger.Warn("Extract model unresolvable; json_extract disabled", "model", c.ModelsConfig.ExtractModel)
+			}
 		}
 	} else {
 		logger.Error("FATAL: No LLM configured - chat will not work",
@@ -2261,6 +2283,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		transcriptChatter = c.SummarizerClient
 	}
 	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore)
+
+	// json_extract (dedicated extraction model from the extract_model
+	// slot). Registered even when ExtractClient is nil: the tool's
+	// Execute reports the actionable config error instead of the model
+	// never seeing the tool. Wired here (not inside
+	// registerBuiltinTools) because the dedicated client lives on
+	// Components, outside that function's scope.
+	extractTool := builtin.NewJSONExtractTool(c.ExtractClient, 60*time.Second)
+	c.ToolRegistry.Register(extractTool)
+	if c.ExtractClient != nil {
+		logger.Info("json_extract tool registered", "model", c.ModelsConfig.ExtractModel)
+	} else {
+		logger.Info("json_extract tool registered (extraction model not configured)", "hint", "set extract_model in models.json5")
+	}
 
 	// Deterministic (cached-fetch) tool variant for meept-bench
 	// reproducibility (phase-2-3 P2.3): when enabled, web tools are

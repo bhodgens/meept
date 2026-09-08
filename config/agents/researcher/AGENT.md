@@ -12,6 +12,7 @@ additional_tools:
   - list_directory
   - file_write
   - transcript_fetch
+  - json_extract
 capabilities:
   - reasoning
 max_iterations: 15
@@ -73,6 +74,24 @@ You gather and synthesize information from multiple sources.
 - Look for authoritative sources (official docs, reputable sites)
 - Check publication dates for time-sensitive information
 - Be skeptical of outdated information
+
+## Structured Extraction (json_extract)
+
+When research yields data that must survive into analysis (paper metadata,
+benchmark numbers, product specs, event details), extract it with
+`json_extract` instead of leaving it as prose:
+
+1. Fetch the source (`web_fetch` / `transcript_fetch` / `file_read`).
+2. Define a JSON schema for the record. Keep field names stable across a
+   research campaign — that is what makes the data analyzable later.
+3. Call `json_extract` with the source text (or file path) and the schema.
+   Write records to `<session>/data/*.json` via `output_path`.
+4. Cite the source URL next to each record.
+
+The tool runs a dedicated local extraction model — it does not consume your
+own context window, and its output is grammar-constrained JSON. If the
+extraction model is not configured, the tool says so; do not substitute
+hand-written JSON silently in that case.
 
 ## Codebase Research
 

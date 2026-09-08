@@ -206,6 +206,10 @@ the meept repo itself). It is NEVER the user's project directory.
 - Image and video models are `provider/id` entries in `models.json5` with
   capability `image` or `video`. Slots: `image_model`, `video_model`. Do not
   add a second provider catalog.
+- The `json_extract` tool runs a dedicated extraction model via the
+  `extract_model` slot (`provider/id` ref, typically a small local llama.cpp
+  endpoint such as `local-extract/lfm2-extract`). Empty slot = tool reports
+  not-configured; never fall back to the chat model.
 - Session creation binds to the user's active project via
   `ProjectManager.GetActive()`. Do NOT call `EnsureDefault()` for session
   binding — it creates a synthetic empty git repo.

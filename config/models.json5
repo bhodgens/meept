@@ -18,6 +18,12 @@
   // NOTE: Vision models require MLX runtime - currently disabled
   "vision_model": "ollama/llama3.2",
 
+  // Dedicated extraction model for the json_extract tool. Empty = tool
+  // reports not-configured (never falls back to the chat model). Point
+  // this at an extraction-specialist small LLM (e.g. LFM2-Extract GGUF
+  // on the local-extract llama.cpp endpoint below).
+  "extract_model": "local-extract/lfm2-extract",
+
   // Image / video generation (same provider/id form as chat models)
   "image_model": "xai-oauth/grok-imagine-image-2.0",
   "video_model": "xai-oauth/grok-imagine-video",
@@ -188,6 +194,55 @@
           "context_limit": 8192,
           "max_output": 512,
           "temperature": 0.1
+        }
+      }
+    },
+
+    // Dedicated local extraction endpoint (json_extract tool). Second
+    // llama.cpp instance on port 8082 so the extraction specialist model
+    // never evicts the main chat model on 8080. max_concurrency 1: the
+    // extraction model is small; parallel calls queue instead of thrashing.
+    // MODEL FILE NOT SHIPPED: download LFM2-Extract GGUF (~1-2 GB) to the
+    // model_path before enabling, or clear extract_model to disable the
+    // tool's backend.
+    "local-extract": {
+      "api": "openai",
+      "options": {
+        "baseURL": "http://127.0.0.1:8082/v1"
+      },
+      "lifecycle": {
+        "runtime": "llama-cpp",
+        "model_path": "/Volumes/LLMs/LiquidAI/LFM2-Extract-1.6B-GGUF/LFM2-Extract-1.6B-F16.gguf",
+        "auto_start": true,
+        "auto_stop_on_exit": true,
+        "pid_file": "~/.meept/run/llama-extract.pid",
+        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8082", "--host", "127.0.0.1"],
+        "spawn_timeout_seconds": 120,
+        "health_check": {
+          "endpoint": "/health",
+          "interval_seconds": 10,
+          "timeout_seconds": 5,
+          "unhealthy_threshold": 12
+        },
+        "restart_policy": {
+          "enabled": true,
+          "max_attempts": 3,
+          "cooldown_seconds": 30,
+          "reset_after_seconds": 300
+        }
+      },
+      "models": {
+        "lfm2-extract": {
+          // llama-server reports the model ID as the path passed via --model.
+          "name": "/Volumes/LLMs/LiquidAI/LFM2-Extract-1.6B-GGUF/LFM2-Extract-1.6B-F16.gguf",
+          "path": "/Volumes/LLMs/LiquidAI/LFM2-Extract-1.6B-GGUF/LFM2-Extract-1.6B-F16.gguf",
+          "capabilities": ["completion"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 16384,
+          "max_output": 1024,
+          "temperature": 0.0,
+          "max_concurrency": 1
         }
       }
     },

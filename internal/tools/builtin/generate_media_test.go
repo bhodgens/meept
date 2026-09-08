@@ -271,6 +271,23 @@ func TestMergeProvidersConfig_KeepsBundledImageModel(t *testing.T) {
 	}
 }
 
+func TestMergeProvidersConfig_ExtractModelSlot(t *testing.T) {
+	base := &llm.ProvidersConfig{
+		ExtractModel: "local-extract/lfm2-extract",
+	}
+	user := &llm.ProvidersConfig{
+		ExtractModel: "local/lfm-1.2b-q8", // user override wins
+	}
+	got := llm.MergeProvidersConfig(base, user)
+	if got.ExtractModel != "local/lfm-1.2b-q8" {
+		t.Fatalf("user extract_model not applied: %q", got.ExtractModel)
+	}
+	got2 := llm.MergeProvidersConfig(base, &llm.ProvidersConfig{})
+	if got2.ExtractModel != "local-extract/lfm2-extract" {
+		t.Fatalf("bundled extract_model lost on empty overlay: %q", got2.ExtractModel)
+	}
+}
+
 func TestResolveGeneration_WalksAlias(t *testing.T) {
 	cfg := &llm.ProvidersConfig{
 		ModelAliases: map[string]llm.ModelAliasEntry{

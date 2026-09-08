@@ -357,6 +357,7 @@ type ModelsConfig struct {
 	VisionModel       string              `json:"vision_model"`
 	ImageModel        string              `json:"image_model"`
 	VideoModel        string              `json:"video_model"`
+	ExtractModel      string              `json:"extract_model"` // Model for json_extract extraction (empty = json_extract reports not-configured)
 	DisabledProviders []string            `json:"disabled_providers"`
 	DefaultTimeout    int                 `json:"default_timeout"` // Default timeout in seconds
 	Providers         map[string]Provider `json:"providers"`
