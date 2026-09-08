@@ -12,6 +12,24 @@ Run 3 (task-20260907193218.799477000-0001) with both fixes deployed:
 - No stranded rows: 30 approved, 1 completed, 1 failed across 32 steps —
   every rejection spawned a revision that ran and finished.
 
+## Run 5 (2026-09-07 22:29) — routing table deployed and VERIFIED
+
+task-20260908042924.854144000-0001 (commit 05e60e11 deployed):
+
+- **Routing fixed.** Both bash-hinted steps executed on `coder`, not chat:
+  "ASSIGN step scheduled ... agent_id=coder tool_hint=bash". Task
+  finalized **completed, 2/2, 100%** — first fully green seal run.
+- The coder persona actually called tools (file_write with the haiku). The
+  draft's absolute /tmp path was resolved relative to the session project
+  (wrote to git/meept/meept-frontier/), so the file landed in the repo
+  workdir, not /tmp — step 2 then correctly reported file-not-found.
+  Model quality issue (draft paths), not routing.
+- Residual (new, small): step 2 hit multi-turn budget (10 turns burned on
+  security-blocked /tmp reads) and the trivial-task heuristic approved its
+  "gave up" summary. Two refinements for later: allow_read_paths should
+  cover the session project's requested tmp targets or drafts should use
+  project-relative paths; heuristic review could flag turn-limit wrap-ups.
+
 ## Run 4 (2026-09-07 20:22) — counters verified fixed
 
 task-20260907202216.088999000-0001 (commit 02e952f9 deployed):
