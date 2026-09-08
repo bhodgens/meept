@@ -49,6 +49,7 @@ ALLOWLIST=(
   ".firecrawl/intentgate.json"
   ".firecrawl/oh-my-openagent-repo.md"
   ".firecrawl/oh-my-openagent.json"
+  "testdata/eval/classifier-adversarial-corpus.json5"
 )
 
 is_allowlisted() {

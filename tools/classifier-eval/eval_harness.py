@@ -72,7 +72,11 @@ def parse_json5(text: str) -> dict:
         strings.append(m.group(0)[1:-1])
         return f"\x00{len(strings)-1}\x00"
 
+    # Double-quoted strings: no escapes in the corpora, so [^"] suffices.
     text = re.sub(r'"[^"]*"', stash, text)
+    # Strip // line comments (adversarial corpus uses them).
+    text = re.sub(r"(?m)^\s*//.*$", "", text)
+    # Quote unquoted object keys.
     text = re.sub(r"(?<![:\w\x00'\"])([A-Za-z_][A-Za-z0-9_]*)\s*:", r'"\1":', text)
     text = re.sub(r",(\s*[}\]])", r"\1", text)
 
@@ -492,7 +496,9 @@ def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
     all_lat = list(emb.latency_ms)
     for f in range(NFOLDS):
         test_m = fold_of == f
-        train_m = ~test_m
+        train_m = ~test_m & ~is_ood  # OOD cases NEVER enter the index: the
+        # production gate has no OOD class to vote for; OOD must abstain via
+        # mixed neighborhoods / low similarity, not by voting label "OOD".
         train_idx = np.where(train_m)[0]
         # adversarial holdout: cases never leave their first-seen fold
         head = build_head(spec["head"], emb)
@@ -531,9 +537,9 @@ def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
             if c.ood:
                 ood_total += 1
                 r = per_fold[f][pos]
-                if r is not None and r[0] is None:
+                if r is None or r[0] is None:
                     ood_abstain += 1
-                elif r is not None and r[0] is not None:
+                else:
                     wrong += 1  # OOD routed = wrong-direct
                     fp[r[0]] = fp.get(r[0], 0) + 1
                 continue
