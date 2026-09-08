@@ -299,9 +299,13 @@ class CentroidGate(Gate):
 
     def fit(self, train_idx: np.ndarray, train_intents: list[str]):
         self.centroids = {}
+        # train_idx holds GLOBAL case indices. Use the module-level full
+        # view (_FULL_V, set by run_permutation) for exact row selection.
+        Vfull = globals().get("_FULL_V")
+        src = Vfull if Vfull is not None else ALLVEC
         for lab in sorted(set(train_intents)):
-            m = train_idx[[i for i, l in enumerate(train_intents) if l == lab]]
-            c = ALLVEC[m].mean(axis=0)
+            sel = [gi for gi, l in zip(train_idx, train_intents) if l == lab]
+            c = src[sel].mean(axis=0)
             c /= (np.linalg.norm(c) + 1e-12)
             self.centroids[lab] = c
 
@@ -328,7 +332,12 @@ class LogisticHead(Gate):
         self.tau, self.gap_tau, self.lr, self.epochs, self.l2 = tau, gap_tau, lr, epochs, l2
 
     def fit(self, train_idx: np.ndarray, train_intents: list[str]):
-        X = ALLVEC[train_idx]
+        # train_idx holds GLOBAL case indices. Use the module-level full
+        # view (_FULL_V, set by run_permutation) so the row set matches
+        # train_idx exactly regardless of the current ALLVEC slice.
+        Vfull = globals().get("_FULL_V")
+        src = Vfull if Vfull is not None else ALLVEC
+        X = src[train_idx]
         labs = sorted(set(train_intents))
         y = np.array([labs.index(l) for l in train_intents])
         n, d = X.shape
@@ -488,6 +497,8 @@ def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
     n = len(cases)
     is_ood = np.array([c.ood for c in cases])
     key_arr = np.array(keys)
+    # module-level full view for direct-fit use outside run_permutation
+    globals()["_FULL_V"] = V
 
     fold_of = np.array([folds[k] for k in keys])
     confusion = []  # (query case, predicted, score)
@@ -500,13 +511,15 @@ def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
         # production gate has no OOD class to vote for; OOD must abstain via
         # mixed neighborhoods / low similarity, not by voting label "OOD".
         train_idx = np.where(train_m)[0]
+        # NOTE for kNN heads the index is ALL cases in the train folds.
+        # ALLVEC must be set BEFORE fit(): fitted heads (centroid, logistic,
+        # prototype) index ALLVEC by train-mask positions.
+        ALLVEC = V[train_m]
         # adversarial holdout: cases never leave their first-seen fold
         head = build_head(spec["head"], emb)
         fit = getattr(head, "fit", None)
         if fit is not None:
             fit(train_idx, [intents[i] for i in train_idx])
-        # NOTE for kNN heads the index is ALL cases in the train folds
-        ALLVEC = V[train_m]
         results = []
         for qi in np.where(test_m)[0]:
             if is_ood[qi]:

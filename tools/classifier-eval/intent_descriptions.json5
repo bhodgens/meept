@@ -1,0 +1,14 @@
+{
+  "coding": "writing, modifying, or generating source code: implement functions, create APIs, add features, refactor, write tests or migrations",
+  "debugging": "diagnosing or fixing broken behavior: crashes, errors, failing tests, leaks, hangs, exceptions, investigate why something fails",
+  "analysis": "research, compare, evaluate options, best practices, study a topic, explain tradeoffs, summarize findings",
+  "search": "find external information: search the web or docs, look up references, locate libraries or articles",
+  "chat": "small talk, greetings, thanks, acknowledgments, or brief social replies with no task content",
+  "platform": "questions about the assistant itself: capabilities, available tools, agents, or how to use the system",
+  "git": "version control operations: commit, push, pull request, branch, merge, rebase, tag, diff, history",
+  "scheduling": "reminders, timers, calendar events, meetings, recurring tasks, time-based actions",
+  "planning": "design an approach or architecture, roadmap, migration strategy, break work into steps before building",
+  "review": "critique or assess provided work: code review, check an implementation for issues, quality feedback",
+  "reporting": "summarize what happened: progress reports, digests of activity, status overviews",
+  "recall": "remember or retrieve past conversation context: what we discussed, prior decisions, earlier work"
+}
