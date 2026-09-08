@@ -2513,6 +2513,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Classifier fail-fast (classifier-observability leaf 02):
 			// honest primary-classifier errors for testing when enabled.
 			ClassifierFailFast: cfg.Orchestrator.ClassifierFailFast,
+			// Stage-0 embedding prefilter (classifier-observability
+			// follow-up): direct-route confident inputs without the
+			// analyzer + router LLM calls.
+			PrefilterConfig: cfg.Orchestrator.Prefilter,
 		})
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 

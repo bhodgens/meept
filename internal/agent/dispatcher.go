@@ -241,6 +241,7 @@ type Dispatcher struct {
 	keywordClassifier *KeywordClassifier
 	capabilityMatcher *CapabilityMatcher
 	semanticIndex     *SemanticIndex
+	prefilter         *EmbeddingPrefilter
 	sessionTracker    *SessionTracker
 	stats             *DispatcherStats
 	router            *ReportRouter
@@ -350,7 +351,13 @@ type DispatcherConfig struct {
 	ClassifierFailFast bool
 	CapabilityMatcher  *CapabilityMatcher
 	EmbeddingClient    EmbeddingClient
-	SessionMaxAge      time.Duration
+	// PrefilterConfig enables the Stage-0 embedding prefilter
+	// (classifier-observability follow-up). When Enabled, the dispatcher
+	// constructs an EmbeddingPrefilter (OpenAI-compatible embeddings
+	// client + centroid store) that direct-routes confident inputs before
+	// the analyzer + router LLM calls.
+	PrefilterConfig config.ClassifierPrefilterConfig
+	SessionMaxAge   time.Duration
 	PlanManager        *plan.PlanManager
 	// AmbiguityThreshold configures the IntentAnalyzer's gate for blocking
 	// routing on high-ambiguity inputs. 0 means use the legacy const
@@ -438,6 +445,7 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	// Initialize semantic index if embedding client is provided
 	if cfg.EmbeddingClient != nil {
 		d.semanticIndex = NewSemanticIndex(cfg.EmbeddingClient)
+
 		// Tie the background BuildIndex goroutine to a cancellable context so
 		// Stop() can interrupt it at shutdown; track via WaitGroup so callers
 		// can confirm exit.
@@ -451,6 +459,24 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 				}
 			}
 		}()
+	}
+
+	// Initialize the Stage-0 embedding prefilter when configured
+	// (classifier-observability follow-up). Construction never blocks:
+	// centroid load is lazy and a missing store leaves the prefilter
+	// inert (Match returns nil → LLM chain runs as before).
+	if cfg.PrefilterConfig.Enabled && cfg.PrefilterConfig.BaseURL != "" {
+		embClient := NewOpenAIEmbedClient(
+			cfg.PrefilterConfig.BaseURL,
+			cfg.PrefilterConfig.Model,
+			defaultPrefilterTimeout,
+		)
+		d.prefilter = NewEmbeddingPrefilter(embClient, cfg.PrefilterConfig, cfg.Logger)
+		d.logger.Info("Stage-0 classifier prefilter enabled",
+			"base_url", cfg.PrefilterConfig.BaseURL,
+			"model", cfg.PrefilterConfig.Model,
+			"threshold", cfg.PrefilterConfig.Threshold,
+		)
 	}
 
 	// Initialize session tracker
@@ -688,6 +714,42 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// 3. Build memory context with session history
 	memCtx := d.buildMemoryContext(ctx, input, sessionID)
+
+	// 3.25. STAGE-0 embedding prefilter (classifier-observability
+	// follow-up): confident corpus-centroid match routes directly and
+	// skips the analyzer + router LLM calls entirely (~0.3s pre-agent
+	// path). Any miss or error falls through unchanged, so the prefilter
+	// can only skip work, never degrade routing. Compound-signal inputs
+	// and skill invocations stay excluded — multi-intent and /-commands
+	// need the full chain.
+	if d.prefilter != nil && !hasCompoundSignalWords(input) {
+		if pi := d.prefilter.Match(ctx, input); pi != nil {
+			pi.SuggestedMode = suggestMode(IntentType(pi.Type), pi.TrueAnalysis, input)
+			d.recordTotalDispatch()
+			d.recordClassificationMethod(pi.Method)
+			d.recordAgent(pi.AgentType)
+			d.recordIntentType(pi.Type)
+			d.sessionTracker.RecordIntent(sessionID, pi, pi.AgentType)
+			d.logger.Info("Dispatched request (prefilter direct route)",
+				"agent", pi.AgentType,
+				"intent_type", pi.Type,
+				"confidence", pi.Confidence,
+				"classification_method", pi.Method,
+				"memory_refs", len(pi.MemoryRefs),
+				"has_task", false,
+				"has_model_override", parseResult.Found,
+			)
+			return &DispatchResult{
+				AgentID:        pi.AgentType,
+				Intent:         pi,
+				MemoryContext:  memCtx.Results,
+				ModelDirective: parseResult.Directive,
+				OriginalInput:  input,
+				Parts:          parts,
+				SuggestedMode:  pi.SuggestedMode,
+			}, nil
+		}
+	}
 
 	// 3.5. IntentGate-style true intent analysis. The session digest is
 	// built BEFORE the call so the analyzer can resolve references against

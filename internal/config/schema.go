@@ -2318,6 +2318,47 @@ type OrchestratorConfig struct {
 	// production keeps rotation; exists to make classifier failures
 	// honest during testing/iteration.
 	ClassifierFailFast bool `json:"classifier_fail_fast" toml:"classifier_fail_fast"`
+	// Prefilter configures the Stage-0 embedding prefilter
+	// (classifier-observability follow-up): embed the input, cosine-match
+	// against labeled intent centroids, and route directly when confident
+	// — skipping the analyzer + router LLM calls entirely. Default
+	// disabled; when enabled but the centroids file is missing, the
+	// prefilter is inert and all traffic flows through the LLM path
+	// unchanged.
+	Prefilter ClassifierPrefilterConfig `json:"classifier_prefilter" toml:"classifier_prefilter"`
+}
+
+// ClassifierPrefilterConfig configures the Stage-0 embedding prefilter in
+// ClassifyAndRoute. The prefilter embeds the user input via an
+// OpenAI-compatible /v1/embeddings endpoint (served locally, e.g. the
+// Qwen3-Embedding weights under /Volumes/LLMs) and matches it against
+// per-intent centroids built from testdata/eval/classifier-test-corpus.json5
+// (scripts/build_prefilter_centroids.py). A cosine score at or above
+// Threshold routes directly — no analyzer, no router LLM call. Lower scores
+// fall through to the existing LLM classification chain unchanged, so a
+// downed embedding server or missing centroids never degrade routing.
+type ClassifierPrefilterConfig struct {
+	// Enabled turns on the Stage-0 prefilter. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// BaseURL is the OpenAI-compatible embeddings root, e.g.
+	// "http://127.0.0.1:8090/v1". Required when Enabled.
+	BaseURL string `json:"base_url" toml:"base_url"`
+	// Model is the model id sent in the embeddings request.
+	Model string `json:"model" toml:"model"`
+	// Dimension is the expected embedding size (Qwen3-Embedding-0.6B: 1024).
+	// 0 disables the dimension check.
+	Dimension int `json:"dimension" toml:"dimension"`
+	// Threshold is the minimum cosine similarity for a direct route.
+	// 0 uses the built-in default (0.90).
+	Threshold float64 `json:"threshold" toml:"threshold"`
+	// CentroidsPath is the centroid store produced by
+	// scripts/build_prefilter_centroids.py. Empty defaults to
+	// ~/.meept/classifier_prefilter_centroids.json.
+	CentroidsPath string `json:"centroids_path" toml:"centroids_path"`
+	// TimeoutSeconds bounds each embeddings call. 0 uses the built-in
+	// default (2s). The prefilter must never stall a turn: on timeout or
+	// error it returns no match and the LLM chain takes over.
+	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
 }
 
 // EvalConfig holds eval-harness settings (harness-eval leaf 15, contract:
@@ -2960,6 +3001,15 @@ func DefaultConfig() *Config {
 			MaxStepsPerPhase:            8,
 			MaxPhases:                   12,
 			ClassifierFailFast:          false, // production keeps rotation; fail-fast is a testing mode
+			Prefilter: ClassifierPrefilterConfig{
+				Enabled:   false,
+				BaseURL:   "",
+				Model:     "",
+				Dimension: 0,
+				Threshold: 0.90,
+				// CentroidsPath empty → ~/.meept/classifier_prefilter_centroids.json
+				TimeoutSeconds: 2,
+			},
 		},
 		Learning: LearningConfig{
 			Enabled:     true,

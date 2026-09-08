@@ -628,6 +628,20 @@
     "interview_ambiguity_threshold": 0.6,  // planner: conducts interview for plan-mode when >= this
     "max_steps_per_phase": 8,              // Thread C+F: per-phase step cap
     "max_phases": 12,                      // Thread C+F: phase count soft cap
+    // Stage-0 classifier prefilter (docs/workflows/classifier-prefilter.md):
+    // embedding cosine gate that direct-routes confident inputs before the
+    // analyzer + router LLM calls. Disabled by default; requires a local
+    // embeddings endpoint (scripts/embed_server.py) + centroids
+    // (scripts/build_prefilter_centroids.py).
+    "classifier_prefilter": {
+      "enabled": false,
+      "base_url": "http://127.0.0.1:8090/v1",
+      "model": "qwen3-embedding",
+      "dimension": 1024,
+      "threshold": 0.90,
+      "centroids_path": "",
+      "timeout_seconds": 2,
+    },
   },
 
   // Shadow training system (response shadowing for model improvement)
