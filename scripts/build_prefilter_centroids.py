@@ -34,15 +34,30 @@ DEFAULT_OUT = str(Path.home() / ".meept" / "classifier_prefilter_centroids.json"
 
 
 def parse_json5(text: str) -> dict:
-    """Minimal JSON5 subset parser for the corpus format: unquoted keys,
-    single-quoted strings, trailing commas. Uses hujson-free stdlib trick:
-    quote keys, single->double quotes, strip trailing commas."""
+    """Parser for the corpus format. The file is JSON5-flavored BUT also
+    contains raw apostrophes inside double-quoted strings ("what's"),
+    which is invalid in both JSON and JSON5. Regex normalization cannot
+    handle that, so strings are extracted FIRST, placeholders inserted,
+    and the remainder (unquoted keys, trailing commas) normalized before
+    json.loads. Extracted strings are restored verbatim afterwards."""
+    strings: list[str] = []
+
+    def stash(m: re.Match) -> str:
+        # m.group(0) is a double-quoted string possibly containing raw '.
+        strings.append(m.group(0)[1:-1])
+        return f"\x00{len(strings)-1}\x00"
+
+    # Double-quoted strings: no escapes in the corpus, so [^"] suffices.
+    text = re.sub(r'"[^"]*"', stash, text)
     # Quote unquoted object keys.
-    text = re.sub(r"(?<![:\w\"'])([A-Za-z_][A-Za-z0-9_]*)\s*:", r'"\1":', text)
-    # Single-quoted -> double-quoted strings (corpus has no escapes/quotes inside).
-    text = text.replace("'", '"')
+    text = re.sub(r"(?<![:\w\x00'\"])([A-Za-z_][A-Za-z0-9_]*)\s*:", r'"\1":', text)
     # Trailing commas.
     text = re.sub(r",(\s*[}\]])", r"\1", text)
+
+    def unstash(m: re.Match) -> str:
+        return json.dumps(strings[int(m.group(1))])
+
+    text = re.sub(r"\x00(\d+)\x00", unstash, text)
     return json.loads(text)
 
 

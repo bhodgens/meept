@@ -211,3 +211,54 @@ failure mode "no faster, never worse".
 Docs: docs/workflows/classifier-prefilter.md. Remaining for §5 leaf 3:
 honest (held-out) prefilter-vs-chain eval vs the §1 baselines
 (sft 54.4%, 8b 86.8%), then a τ decision from real numbers.
+
+---
+
+## 9. EVAL RESULTS 2026-09-07 — Stage-0 prefilter does NOT beat the 8B
+
+Method: embed_server.py (:8090, EOS-pooling) over the 136-case corpus;
+leave-one-out centroids (held-out honest); logistic head 5-fold
+stratified CV. Both variants tested: plain EOS pooling AND the official
+Qwen3-Embedding instruction-prefixed query format.
+
+| Classifier | Accuracy | Notes |
+|---|---|---|
+| combined-sft 1.2B (drifted prompt) | 54.4% | prior A/B (§1) |
+| nearest-centroid LOO, plain pooling | n/a | coverage-capped: max 21/136 direct even at τ=0.65 |
+| nearest-centroid LOO, instruction-prefixed | 96.4% when direct | but only 28/136 (20.6%) clear margin ≥ 0.05 — 1 miss |
+| logistic head over Qwen3, plain | 76.5% | recall 0%: review, recall |
+| logistic head over Qwen3, instr-prefixed | **80.1%** | weak: review 0/4, plan 2/5 |
+| lfm-8b-mlx (current primary) | **86.8%** | prior A/B (§1) |
+
+Key findings:
+
+1. **Margin quality is the blocker, not accuracy.** LOO centroid is 96%
+   correct WHEN it fires, but fires on only 20% of traffic — the
+   12-way cosine margin distribution is flat (median top1−top2 = 0.04;
+   τ=0.90 score margin as sketched in §5 routes ~nothing).
+2. **SetFit-style head beats the SFT but not the 8B** (80.1% vs 86.8%),
+   and it can't express "abstain" without a calibration pass.
+3. **Discourse intents are embedding-blind**: review 0/4, recall 0/3,
+   report 1/4 at 0.6B-4bit quality. These are exactly the categories
+   where the 8B's prompt reasoning wins.
+
+Verdict: at this embedder quality (Qwen3-Embedding-0.6B, 4-bit DWQ),
+Stage-0 as a STANDALONE router does not beat the LLM chain. The
+results do not justify flipping `classifier_prefilter.enabled` on for
+production routing today.
+
+What Stage-0 IS still good for, based on the same numbers:
+
+- **Assert-only mode**: run the prefilter, log agreement/disagreement
+  with the LLM chain, act on nothing. Zero-risk data collection to
+  decide if a bigger embedder (Qwen3-Embedding-4B/8B, FP16) clears
+  the bar. The centroid direct-route IS 96% precise when it fires —
+  a stronger embedder lifting coverage from 20% to ~60-70% at that
+  precision would flip the verdict.
+- **Fast-path candidate set** for short unambiguous traffic (chat,
+  schedule, code all ≥ 90% head recall).
+
+Next embedder to try (in order): Qwen3-Embedding-4B FP16 (same
+family, instruction format identical, /Volumes/LLMs has space),
+then a BGE/GTE-class model. Re-run this eval verbatim; the scripts
+support it as-is.

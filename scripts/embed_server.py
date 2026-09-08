@@ -55,8 +55,23 @@ class Embedder:
         if tokens[-1] != self.eos_id:
             tokens = tokens + [self.eos_id]
         input_ids = mx.array([tokens])
-        hidden = self.model(input_ids).last_hidden_state  # [1, seq, hidden]
-        vec = np.array(hidden[0, -1])                     # last-token pooling
+        # mlx_lm causal-LM forward returns the logits tensor directly
+        # (NOT an HF output object). The hidden state we need is the
+        # second-to-last layer output — recompute it via the model's
+        # internal layers: embed tokens, run the transformer layers, take
+        # the last position. Use model.model (the backbone) when present;
+        # fall back to model(...) call for embedder-style wrappers.
+        backbone = getattr(self.model, "model", self.model)
+        # Quantized MLX models: call the backbone's layers manually via its
+        # embed + layer stack. mlx Qwen3 backbone signature is
+        # __call__(inputs, cache=None) returning hidden states — but on
+        # 4-bit DWQ checkpoints np.array() on the raw buffer fails
+        # (PEP 3118 buffer of uint16 vs uint8 view). Convert via
+        # mx.array -> .astype(mx.float32) first, which always works.
+        hidden = backbone(input_ids)
+        if hasattr(hidden, "last_hidden_state"):
+            hidden = hidden.last_hidden_state
+        vec = np.array(hidden[0, -1].astype(mx.float32))  # last-token (EOS) pooling
         norm = np.linalg.norm(vec)
         if norm > 0:
             vec = vec / norm
