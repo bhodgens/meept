@@ -97,6 +97,10 @@ daemon.test
 *.db-shm
 *.db-wal
 results/
+# …except the classifier-eval campaign artifacts (evidence for
+# docs/plans/classifier-iteration — iteration reports + summaries).
+!tools/classifier-eval/results/
+!tools/classifier-eval/results/**
 
 # Skill-evolution cycle output (regenerable daemon artifacts, churn every cycle)
 docs/plans/skill-evolution-*.md
