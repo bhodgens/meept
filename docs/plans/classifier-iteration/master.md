@@ -28,6 +28,30 @@ Composite score (documented, stable across iterations):
 The squared precision and the explicit wrong-route penalty encode the user
 invariant. Fall-throughs cost nothing except missed coverage.
 
+**Headline metric: E2E (end-to-end simulated system accuracy).**
+`E2E = (gate-correct + 0.868 × abstained) / total` — uses the measured
+86.8% LLM-chain baseline for abstained cases. The campaign optimizes E2E,
+not gate coverage: a gate earns its latency only by raising system accuracy
+above the 86.8%-only baseline.
+
+**Pre-registered winner rule (M4):** max E2E subject to P ≥ 97% and
+OOD-R ≥ 95% on the final held-out set. No post-hoc metric changes.
+
+**Evaluation protocol: 5-fold gate evaluation** (not a single 70/30 split —
+recall has 3 cases). Rotate: 4 folds form the kNN/train index, 1 fold is
+queried; report the pooled result. Larger index folds better mimic
+production. Fixed fold assignment (seed 42) for the whole campaign.
+
+**Silver-label isolation:** chat-log replay cases with LLM-chain verdicts are
+NEVER mixed into headline P/C/A. Reported in a separate table; a hand-
+verified subset may be promoted to gold by explicit decision only.
+
+**Confusion-driven corpus growth:** each iteration harvests the gate's
+near-miss confusions (margin < 0.05 or dissenting-vote cases) as the primary
+source of new adversarial cases — more signal per authored case than blanket
+generation. Dedup guard: reject new cases with cosine > 0.95 to any existing
+case (same embedder).
+
 ## Test Corpus Policy
 
 Base corpus: `testdata/eval/classifier-test-corpus.json5` (136 cases, 12
@@ -67,7 +91,9 @@ the same corpus split):
 - **Head:** kNN k=5 unanimity | kNN k∈{3,4,6,8} | kNN majority k-1/k |
   centroid cosine | logistic head (SetFit-style, sklearn LogisticRegression
   over frozen embeddings) | logistic + calibrated threshold (per-class
-  quantile) | two-stage: kNN abstain → logistic rescue.
+  quantile) | two-stage: kNN abstain → logistic rescue | prototype+examples
+  hybrid (intent-description line as an extra index entry per intent — the
+  SemanticIndex buildIntentText pattern; cheap, targets sparse classes).
 - **Thresholds:** floor ∈ {0.50..0.90 step 0.05}; per-class floors.
 - **Pipeline order:** prefilter position, assert-only vs direct, prefilter →
   analyzer skip logic.
@@ -85,20 +111,33 @@ campaign tests whether each stage earns its latency.
 
 1. **Plan:** pick failure class(es) + component permutation; write hypothesis
    in the iteration log (one line: what we expect and why).
-2. **Dispatch TEST subagent** (`delegate_task`, leaf): builds/extends the
-   adversarial corpus cases, runs the eval harness offline (embeddings via
-   localhost:8090 or local model), produces the metrics table + misclassified
-   case list. Do NOT commit. Report numbers + failures verbatim.
-3. **Orchestrator review in-session:** verify subagent numbers by spot-checking
-   ≥3 cases myself (re-embed, re-score). Subagent numbers are self-reports.
-4. **Dispatch FIX subagent** (only if issues found): implements the fix (code,
-   config, corpus label corrections). Runs the full Go test suite + eval.
-   Do NOT commit. Report diff summary.
+2. **Measure** — embeddings cached on disk keyed by (model, text-hash);
+   nothing re-embeds. TWO measurement modes by token cost:
+   - **Mechanical sweep (no subagent):** pure permutation sweeps over cached
+     embeddings run in-session via execute_code. One sweep evaluates 5-10
+     permutations (embed once, score all heads/thresholds against the cache).
+   - **TEST subagent** (`delegate_task`, leaf): dispatched only for reasoning
+     work — authoring adversarial cases (from chat logs / confusion harvest),
+     analyzing misclassifications, or anything needing judgment. The brief
+     INLINES the corpus format + harness usage (no rediscovery). Output rule:
+     write `results/iter-N/report.md` + `predictions.json` to disk; return
+     ≤10 lines + the path. Never paste tables into chat.
+3. **Orchestrator review in-session:** spot-check ≥3 cases myself (re-embed,
+   re-score) before trusting any number. Subagent reports are self-reports.
+4. **Dispatch FIX subagent** (only if issues found): brief = report path +
+   one-line directive (≤3 files, run exact test commands, report pass/fail +
+   numbers only, write fix summary to `results/iter-N/fix.md`). Do NOT commit.
 5. **I verify the fix in-session** (read diff, run tests, re-run eval).
 6. **Commit** on `classifier-iteration` with message
-   `iter(N): <change> — SCORE=X.XX C=xx% P=xx% A=xx%`.
-7. **Update `ITERATION-LOG.md`** (append row: iteration, permutation, corpus
-   size, C/P/A/F1/OOD-R/latency, wrong-route count, fix applied, verdict).
+   `iter(N): <change> — E2E=xx.x% C=xx% P=xx% wrong=N`.
+7. **Update `ITERATION-LOG.md`** (append row). Full metrics live in the
+   iteration's report file; the log row + 4 headline numbers are all that
+   enters session context.
+
+**Compaction-proof rule:** all campaign state lives in files (master.md,
+ITERATION-LOG.md, results/). Every subagent brief is assembled from files at
+dispatch time — never from session memory. Session compaction mid-campaign
+costs a re-read, nothing else.
 
 Subagent pairing per user directive: one TEST agent + one FIX agent per
 iteration, with orchestrator (me) reviewing between them. FIX agent is skipped
@@ -114,8 +153,10 @@ only when the iteration is a pure measurement with zero issues.
 - Produces the metrics table + per-case predictions file
   (`results/iter-N-predictions.json`) for misclassification analysis.
 - Measures p50 latency (embed+decide).
-- NEVER mutates the main daemon config; runs entirely offline against the
-  embed server.
+- Computes E2E using the configurable chain baseline (default 0.868).
+- Embedding cache: `~/.meept/classifier-eval-cache/<model-hash>/<text-hash>.npy`
+  — no corpus text is ever embedded twice, and sweeps run without the server.
+- NEVER mutates the main daemon config; runs entirely offline.
 
 ## Milestones (not strict iteration boundaries)
 
@@ -124,8 +165,10 @@ only when the iteration is a pure measurement with zero issues.
 - M2 (iters 9-20): head permutations (logistic, calibrated, two-stage);
   per-class thresholds; corpus ~400; target: C ≥ 35% at P ≥ 97%.
 - M3 (iters 21-32): ModernBERT-base classifier trained (mlx-raclate), inserted
-  as Stage-0.5; ModernBERT raw embeddings as alternate Stage-0; corpus ~500;
-  target: C ≥ 50% at P ≥ 97%.
+  as Stage-0.5; ModernBERT raw embeddings as alternate Stage-0; corpus ~500.
+  Pre-registered entry bar: ModernBERT must beat M2's best E2E by ≥1pt to
+  justify its runtime slot (guards against shiny-model bias). Weights download
+  needs user approval — request at the M2/M3 boundary.
 - M4 (iters 33-40+): best-of permutations re-validated on fresh held-out
   real-traffic replays; daemon wiring of the winner behind config; final
   report comparing against 86.8% LLM-only baseline; recommend production
