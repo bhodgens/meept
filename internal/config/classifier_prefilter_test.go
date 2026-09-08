@@ -14,8 +14,13 @@ func TestDefaultConfig_ClassifierPrefilterDisabled(t *testing.T) {
 	if c.Orchestrator.Prefilter.Enabled {
 		t.Fatal("classifier_prefilter.enabled must default to false")
 	}
-	if c.Orchestrator.Prefilter.Threshold != 0.90 {
-		t.Errorf("prefilter threshold default = %v, want 0.90", c.Orchestrator.Prefilter.Threshold)
+	if c.Orchestrator.Prefilter.AssertOnly {
+		t.Error("assert_only must default to false")
+	}
+	// kNN neighbor floor (not a routing threshold): votes require k=5
+	// unanimous neighbors above this floor.
+	if c.Orchestrator.Prefilter.Threshold != 0.70 {
+		t.Errorf("prefilter threshold default = %v, want 0.70", c.Orchestrator.Prefilter.Threshold)
 	}
 	if c.Orchestrator.Prefilter.TimeoutSeconds != 2 {
 		t.Errorf("prefilter timeout default = %d, want 2", c.Orchestrator.Prefilter.TimeoutSeconds)

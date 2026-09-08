@@ -38,7 +38,10 @@ func TestMeeptTemplate_ClassifierPrefilterBlock(t *testing.T) {
 	if pf.Dimension != 1024 {
 		t.Errorf("template dimension = %d, want 1024", pf.Dimension)
 	}
-	if pf.Threshold != 0.90 {
-		t.Errorf("template threshold = %v, want 0.90", pf.Threshold)
+	if pf.Threshold != 0.70 {
+		t.Errorf("template threshold = %v, want 0.70 (kNN neighbor floor)", pf.Threshold)
+	}
+	if pf.AssertOnly {
+		t.Error("template ships assert_only enabled; must ship false")
 	}
 }

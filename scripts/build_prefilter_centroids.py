@@ -97,8 +97,13 @@ def main() -> int:
     ap.add_argument("--url", default=DEFAULT_URL)
     ap.add_argument("--model", default="qwen3-embedding")
     ap.add_argument("--out", default=DEFAULT_OUT)
+    ap.add_argument("--instruction", default="",
+                    help="Qwen3-Embedding task instruction prefixed to every "
+                         "query for embedding (official instruction-aware "
+                         "format; must be identical at serving time)")
     ap.add_argument("--sweep", action="store_true",
-                    help="report accuracy vs threshold and exit (no write)")
+                    help="report kNN-unanimity accuracy vs threshold and "
+                         "exit (no write)")
     args = ap.parse_args()
 
     cases = load_cases(args.corpus)
@@ -108,77 +113,81 @@ def main() -> int:
     vectors: list[list[float]] = []
     t0 = time.time()
     for i in range(0, len(cases), 32):
-        chunk = [c[0] for c in cases[i:i + 32]]
+        chunk = [args.instruction + c[0] if args.instruction else c[0]
+                 for c in cases[i:i + 32]]
         vectors.extend(embed_batch(args.url, chunk, args.model))
         print(f"  embedded {min(i + 32, len(cases))}/{len(cases)}")
     print(f"embedding took {time.time() - t0:.1f}s")
 
     dim = len(vectors[0])
 
-    # Per-intent centroid = mean of member vectors, re-normalized.
-    sums: dict[str, list[float]] = defaultdict(lambda: [0.0] * dim)
-    counts: dict[str, int] = defaultdict(int)
-    for (_, intent, _), vec in zip(cases, vectors):
-        acc = sums[intent]
-        for j, x in enumerate(vec):
-            acc[j] += x
-        counts[intent] += 1
-    centroids = {}
-    for intent, acc in sums.items():
-        norm = sum(x * x for x in acc) ** 0.5
-        centroids[intent] = [x / norm for x in acc] if norm else acc
-
     if args.sweep:
-        # Leave-one-out style eval: each case scored against centroids
-        # built from ALL cases (optimistic) — the honest number arrives
-        # with the in-daemon A/B; this sweep only picks tau.
-        print("\nthreshold sweep (self-inclusive centroids — upper bound):")
-        best = (0.0, 0.0)
-        for tau in [0.95, 0.92, 0.90, 0.88, 0.85, 0.82, 0.80, 0.75, 0.70]:
-            correct = direct = 0
-            for (text, intent, _), vec in zip(cases, vectors):
-                sims = {
-                    name: sum(a * b for a, b in zip(vec, cent))
-                    for name, cent in centroids.items()
-                }
-                top = max(sims, key=sims.get)
-                score = sims[top]
-                if score >= tau:
-                    direct += 1
-                    correct += top == intent
+        # Leave-one-out kNN unanimity: each case's 5 nearest neighbors
+        # EXCLUDING itself vote; unanimous agreement = direct route.
+        # This is the honest proxy for the Go prefilter's behavior.
+        import math
+        norms = [math.sqrt(sum(x * x for x in v)) or 1.0 for v in vectors]
+        unit = [[x / n for x in v] for v, n in zip(vectors, norms)]
+
+        def cos(a, b):
+            return sum(x * y for x, y in zip(a, b))
+
+        intents_of = [c[1] for c in cases]
+        K = 5
+        print(f"\nkNN-unanimity sweep (k={K}, leave-one-out — held-out):")
+        best = (0.0, 0.0, 0.0)
+        for tau in [0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50]:
+            direct = correct = 0
+            for j, ((text, intent, _), vec) in enumerate(zip(cases, unit)):
+                sims = sorted(
+                    ((cos(vec, unit[m]), intents_of[m]) for m in range(len(cases)) if m != j),
+                    key=lambda t: -t[0],
+                )
+                top = sims[:K]
+                if len(top) < K or any(s < tau for s, _ in top):
+                    continue  # neighbor below floor: no vote
+                winner = top[0][1]
+                if any(i != winner for _, i in top):
+                    continue  # dissenter: no vote
+                direct += 1
+                correct += winner == intent
             total = len(cases)
-            if direct:
-                acc = correct / direct
-                print(f"  tau={tau:.2f}  direct={direct}/{total} ({direct / total:.0%})  "
-                      f"accuracy_when_direct={correct}/{direct} ({acc:.1%})")
-            else:
-                print(f"  tau={tau:.2f}  direct=0/{total}")
-            coverage_acc = correct / total  # accuracy contribution over ALL traffic
-            if coverage_acc > best[1]:
-                best = (tau, coverage_acc)
-        print(f"\nrecommended tau (max overall correct-route coverage): {best[0]:.2f} "
-              f"({best[1]:.1%} of all traffic correctly direct-routed)")
+            acc = correct / direct if direct else 0.0
+            print(f"  tau={tau:.2f}  direct={direct}/{total} ({direct / total:.0%})  "
+                  f"accuracy_when_direct={correct}/{direct or 1} ({acc:.1%})")
+            coverage = correct / total
+            if direct and acc > best[0]:
+                best = (acc, coverage, tau)
+            elif direct and acc == best[0] and coverage > best[1]:
+                best = (acc, coverage, tau)
+        print(f"\nbest tau by precision: {best[2]:.2f} "
+              f"(precision {best[0]:.1%}, correct-route coverage {best[1]:.1%})")
         return 0
 
+    # kNN index: per-example vectors. The Go prefilter votes on the raw
+    # examples (unanimous top-k), so no averaging happens anywhere —
+    # multi-modal intents keep their distinct clusters.
     store = {
         "model": args.model,
         "dimension": dim,
         "built_at": datetime.now(timezone.utc).isoformat(),
         "corpus": str(Path(args.corpus).resolve()),
-        "centroids": [
+        "instruction": args.instruction,
+        "k": 5,
+        "examples": [
             {
                 "intent": intent,
-                "agent": next(a for t, i, a in cases if i == intent),
-                "count": counts[intent],
-                "vector": centroids[intent],
+                "agent": agent,
+                "text": text,
+                "vector": vec,
             }
-            for intent in sorted(counts)
+            for (text, intent, agent), vec in zip(cases, vectors)
         ],
     }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(store))
-    print(f"\nwrote {len(store['centroids'])} centroids (dim {dim}) -> {out}")
+    print(f"\nwrote {len(store['examples'])} example vectors (dim {dim}) -> {out}")
     print("daemon picks it up on next dispatcher Match (lazy load, no restart needed).")
     return 0
 

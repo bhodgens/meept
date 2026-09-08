@@ -716,14 +716,26 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	memCtx := d.buildMemoryContext(ctx, input, sessionID)
 
 	// 3.25. STAGE-0 embedding prefilter (classifier-observability
-	// follow-up): confident corpus-centroid match routes directly and
-	// skips the analyzer + router LLM calls entirely (~0.3s pre-agent
-	// path). Any miss or error falls through unchanged, so the prefilter
-	// can only skip work, never degrade routing. Compound-signal inputs
-	// and skill invocations stay excluded — multi-intent and /-commands
-	// need the full chain.
+	// follow-up): unanimous kNN vote over labeled example vectors routes
+	// directly and skips the analyzer + router LLM calls entirely
+	// (~0.3s pre-agent path). Any miss or error falls through unchanged,
+	// so the prefilter can only skip work, never degrade routing.
+	// Compound-signal inputs and skill invocations stay excluded —
+	// multi-intent and /-commands need the full chain.
+	//
+	// AssertOnly mode never routes: the verdict is logged (agreement data
+	// vs whatever the LLM chain classifies) and the chain always runs.
 	if d.prefilter != nil && !hasCompoundSignalWords(input) {
-		if pi := d.prefilter.Match(ctx, input); pi != nil {
+		pi := d.prefilter.Match(ctx, input)
+		if pi != nil && d.prefilter.assertOnly {
+			d.logger.Info("prefilter assert (not routing; assert_only)",
+				"asserted_intent", pi.Type,
+				"asserted_agent", pi.AgentType,
+				"confidence", pi.Confidence,
+			)
+			pi = nil
+		}
+		if pi != nil {
 			pi.SuggestedMode = suggestMode(IntentType(pi.Type), pi.TrueAnalysis, input)
 			d.recordTotalDispatch()
 			d.recordClassificationMethod(pi.Method)

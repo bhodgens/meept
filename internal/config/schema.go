@@ -2349,8 +2349,16 @@ type ClassifierPrefilterConfig struct {
 	// 0 disables the dimension check.
 	Dimension int `json:"dimension" toml:"dimension"`
 	// Threshold is the minimum cosine similarity for a direct route.
-	// 0 uses the built-in default (0.90).
+	// 0 uses the built-in default (0.70). In kNN mode this gates which
+	// neighbors may vote; the vote itself requires full unanimity.
 	Threshold float64 `json:"threshold" toml:"threshold"`
+	// AssertOnly turns the prefilter into a silent observer: Match still
+	// runs and logs its verdict (method/classification agreement data in
+	// the daemon log), but the dispatcher ALWAYS falls through to the LLM
+	// chain regardless of the verdict. Zero routing risk; the intended
+	// first production mode per HANDOFF-STAGE0.md §9 while real-traffic
+	// precision is being measured. Default false.
+	AssertOnly bool `json:"assert_only" toml:"assert_only"`
 	// CentroidsPath is the centroid store produced by
 	// scripts/build_prefilter_centroids.py. Empty defaults to
 	// ~/.meept/classifier_prefilter_centroids.json.
@@ -3002,11 +3010,12 @@ func DefaultConfig() *Config {
 			MaxPhases:                   12,
 			ClassifierFailFast:          false, // production keeps rotation; fail-fast is a testing mode
 			Prefilter: ClassifierPrefilterConfig{
-				Enabled:   false,
-				BaseURL:   "",
-				Model:     "",
-				Dimension: 0,
-				Threshold: 0.90,
+				Enabled:    false,
+				BaseURL:    "",
+				Model:      "",
+				Dimension:  0,
+				Threshold:  0.70,
+				AssertOnly: false,
 				// CentroidsPath empty → ~/.meept/classifier_prefilter_centroids.json
 				TimeoutSeconds: 2,
 			},

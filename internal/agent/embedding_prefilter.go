@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,22 +18,32 @@ import (
 )
 
 // EmbeddingPrefilter implements STAGE-0 of ClassifyAndRoute
-// (classifier-observability follow-up, HANDOFF.md §3): embed the raw input,
-// cosine-match against per-intent centroids built from the labeled corpus,
-// and return a direct-route Intent when the match is confident. On any miss
-// or error it returns nil and the existing analyzer + router LLM chain runs
-// unchanged — the prefilter can only skip work, never degrade routing.
+// (classifier-observability follow-up, HANDOFF-STAGE0.md §5/§9): embed the
+// raw input, kNN-match against labeled example vectors, and return a
+// direct-route Intent when the vote is unanimous. On any miss or error it
+// returns nil and the existing analyzer + router LLM chain runs unchanged —
+// the prefilter can only skip work, never degrade routing.
+//
+// User invariant (2026-09-07): a wrong answer with overstated confidence is
+// worse than a low-confidence correct one. Everything here is tuned for
+// precision-first: unanimous top-k vote, no vote → nil, any failure → nil.
+//
+// AssertOnly mode (config) inverts nothing in the gate — it only changes
+// what the CALLER does with the result. In assert mode the dispatcher logs
+// the prefilter verdict and runs the LLM chain anyway, accumulating
+// real-traffic agreement data with zero routing risk.
 type EmbeddingPrefilter struct {
-	embedder  PrefilterEmbedder
-	threshold float64
-	margin    float64
-	timeout   time.Duration
-	path      string
-	dimension int
-	logger    *slog.Logger
+	embedder   PrefilterEmbedder
+	threshold  float64
+	k          int
+	assertOnly bool
+	timeout    time.Duration
+	path       string
+	dimension  int
+	logger     *slog.Logger
 
 	mu        sync.RWMutex
-	centroids []prefilterCentroid
+	examples  []prefilterExample
 	storeDim  int
 	staleErr  string // last load error, logged once until it changes
 	loaded    bool
@@ -44,35 +55,47 @@ type PrefilterEmbedder interface {
 	Embed(ctx context.Context, text string) ([]float64, error)
 }
 
-// prefilterCentroid is one labeled intent centroid.
-type prefilterCentroid struct {
+// prefilterExample is one labeled example vector (kNN index entry).
+type prefilterExample struct {
 	Intent string    `json:"intent"`
 	Agent  string    `json:"agent"`
-	Count  int       `json:"count"`
+	Text   string    `json:"text,omitempty"`
 	Vector []float64 `json:"vector"`
 }
 
-// prefilterStore is the on-disk centroid file produced by
-// scripts/build_prefilter_centroids.py.
+// prefilterStore is the on-disk kNN index produced by
+// scripts/build_prefilter_centroids.py (which writes per-example vectors;
+// legacy centroid-only stores load too — each centroid then acts as one
+// pseudo-example).
 type prefilterStore struct {
-	Model    string              `json:"model"`
-	Dimension int               `json:"dimension"`
-	BuiltAt  string              `json:"built_at"`
-	Corpus   string              `json:"corpus"`
-	Centroids []prefilterCentroid `json:"centroids"`
+	Model     string             `json:"model"`
+	Dimension int                `json:"dimension"`
+	BuiltAt   string             `json:"built_at"`
+	Corpus    string             `json:"corpus"`
+	Examples  []prefilterExample `json:"examples"`
+	// Legacy centroid fields — read only when Examples is empty.
+	Centroids []prefilterExample `json:"centroids"`
 }
 
-// Default prefilter tuning. Threshold is overridable via config; margin is a
-// package constant to keep the config surface at the one knob the A/B sweep
-// tunes (HANDOFF.md §3: τ=0.90 default).
+// Default prefilter tuning. Threshold is overridable via config; k and
+// margin are package constants to keep the config surface at the one knob
+// the A/B sweep tunes.
 const (
-	DefaultPrefilterThreshold = 0.90
-	defaultPrefilterMargin    = 0.05
-	defaultPrefilterTimeout   = 2 * time.Second
-	prefilterMethod           = "embedding_prefilter"
+	// DefaultPrefilterThreshold is the minimum cosine for a neighbor to
+	// count toward the vote. Cosine-neighborhood floors are sharper than
+	// centroid scores (HANDOFF-STAGE0.md §9: flat margin distribution),
+	// so this gates membership, not the final decision.
+	DefaultPrefilterThreshold = 0.70
+	// defaultPrefilterK is the vote size: ALL k nearest examples must
+	// agree on one intent, else nil. Unanimity is the precision
+	// instrument — mixed neighborhoods are exactly the ambiguous inputs
+	// the LLM chain should see.
+	defaultPrefilterK = 5
+	defaultPrefilterTimeout = 2 * time.Second
+	prefilterMethod         = "embedding_prefilter"
 )
 
-// NewEmbeddingPrefilter builds the Stage-0 gate. Centroid load is lazy
+// NewEmbeddingPrefilter builds the Stage-0 gate. Index load is lazy
 // (first Match) so daemon startup never blocks on the store, and a missing
 // or corrupt store leaves the prefilter permanently inert rather than
 // failing turns.
@@ -93,22 +116,23 @@ func NewEmbeddingPrefilter(emb PrefilterEmbedder, cfg config.ClassifierPrefilter
 		path = config.MeeptPath("classifier_prefilter_centroids.json")
 	}
 	return &EmbeddingPrefilter{
-		embedder:  emb,
-		threshold: threshold,
-		margin:    defaultPrefilterMargin,
-		timeout:   timeout,
-		path:      path,
-		dimension: cfg.Dimension,
-		logger:    logger.With("component", "classifier_prefilter"),
+		embedder:   emb,
+		threshold:  threshold,
+		k:          defaultPrefilterK,
+		assertOnly: cfg.AssertOnly,
+		timeout:    timeout,
+		path:       path,
+		dimension:  cfg.Dimension,
+		logger:     logger.With("component", "classifier_prefilter"),
 	}
 }
 
-// loadCentroids reads and validates the centroid store if not yet loaded.
+// loadIndex reads and validates the example store if not yet loaded.
 // Safe to call on every Match: after the first successful load it is a
 // no-op; Reload forces a re-read (eval sweeps rewrite the store).
 // I/O happens OUTSIDE the lock (collect-then-operate): read + parse the
 // file first, then publish under the lock.
-func (p *EmbeddingPrefilter) loadCentroids(force bool) bool {
+func (p *EmbeddingPrefilter) loadIndex(force bool) bool {
 	p.mu.RLock()
 	loaded := p.loaded
 	p.mu.RUnlock()
@@ -120,16 +144,22 @@ func (p *EmbeddingPrefilter) loadCentroids(force bool) bool {
 	// file are benign — last writer wins with identical content.
 	data, err := os.ReadFile(p.path)
 	if err != nil {
-		p.failLoad("centroids store unreadable; prefilter inert", err.Error())
+		p.failLoad("prefilter index unreadable; prefilter inert", err.Error())
 		return false
 	}
 	var store prefilterStore
 	if err := json.Unmarshal(data, &store); err != nil {
-		p.failLoad("centroids store corrupt; prefilter inert", err.Error())
+		p.failLoad("prefilter index corrupt; prefilter inert", err.Error())
 		return false
 	}
-	if len(store.Centroids) == 0 || len(store.Centroids[0].Vector) == 0 {
-		p.failLoad("centroids store empty; prefilter inert", p.path)
+	examples := store.Examples
+	if len(examples) == 0 {
+		// Legacy centroid-only store: each centroid becomes one
+		// pseudo-example so old files keep working after upgrade.
+		examples = store.Centroids
+	}
+	if len(examples) == 0 || len(examples[0].Vector) == 0 {
+		p.failLoad("prefilter index empty; prefilter inert", p.path)
 		return false
 	}
 
@@ -138,18 +168,30 @@ func (p *EmbeddingPrefilter) loadCentroids(force bool) bool {
 	if p.loaded && !force {
 		return true // raced with a successful load; keep it
 	}
-	p.centroids = store.Centroids
+	p.examples = examples
 	p.storeDim = store.Dimension
 	p.staleErr = ""
 	p.loaded = true
 	p.logger.Info("classifier prefilter loaded",
 		"path", p.path,
-		"intents", len(p.centroids),
+		"examples", len(p.examples),
+		"intents", p.countIntentsLocked(),
 		"dimension", p.storeDim,
 		"model", store.Model,
 		"threshold", p.threshold,
+		"k", p.k,
 	)
 	return true
+}
+
+// countIntentsLocked counts distinct intents in the loaded index. Caller
+// holds p.mu.
+func (p *EmbeddingPrefilter) countIntentsLocked() int {
+	seen := make(map[string]struct{}, len(p.examples))
+	for _, e := range p.examples {
+		seen[e.Intent] = struct{}{}
+	}
+	return len(seen)
 }
 
 // failLoad records a load failure without holding the lock (log-once per
@@ -164,20 +206,95 @@ func (p *EmbeddingPrefilter) failLoad(msg, detail string) {
 	}
 }
 
-// Reload forces a re-read of the centroid store on the next Match. Used
-// after rebuilding centroids without a daemon restart.
+// Reload forces a re-read of the example store on the next Match. Used
+// after rebuilding the index without a daemon restart.
 func (p *EmbeddingPrefilter) Reload() {
 	p.mu.Lock()
 	p.loaded = false
 	p.mu.Unlock()
 }
 
-// Match embeds the input and returns a direct-route Intent when the best
-// centroid clears the threshold with the required margin over the runner-up.
-// nil means "no opinion" — caller falls through to the LLM chain.
+// kNNVote is the internal match result: winning intent (empty when no
+// unanimous vote), its unanimity confidence, and the margin over the best
+// non-winning neighbor score.
+type kNNVote struct {
+	Intent     string
+	Agent      string
+	Confidence float64 // min cosine among the k winners (unanimity floor)
+	Margin     float64 // winner-floor minus best losing neighbor score
+}
+
+// vote runs the kNN unanimity scan on vec against the loaded index.
+// Caller holds p.mu (read). Returns ok=false when no unanimous vote.
+func (p *EmbeddingPrefilter) vote(vec []float64) (kNNVote, bool) {
+	type scored struct {
+		idx   int
+		score float64
+	}
+	neighbors := make([]scored, 0, len(p.examples))
+	for i, e := range p.examples {
+		s := CosineSimilarity(vec, e.Vector)
+		if s >= p.threshold {
+			neighbors = append(neighbors, scored{i, s})
+		}
+	}
+	if len(neighbors) < p.k {
+		return kNNVote{}, false
+	}
+	sort.Slice(neighbors, func(a, b int) bool { return neighbors[a].score > neighbors[b].score })
+	neighbors = neighbors[:p.k]
+
+	first := p.examples[neighbors[0].idx].Intent
+	floor := neighbors[0].score
+	for _, nb := range neighbors {
+		if p.examples[nb.idx].Intent != first {
+			return kNNVote{}, false // any dissenter kills the vote
+		}
+		if nb.score < floor {
+			floor = nb.score
+		}
+	}
+	// Best score among examples OUTSIDE the winning k (for margin): the
+	// highest-scoring example whose intent disagrees with the vote.
+	// Agreeing outsiders don't threaten the vote.
+	topKSet := make(map[int]struct{}, p.k)
+	for _, nb := range neighbors {
+		topKSet[nb.idx] = struct{}{}
+	}
+	bestLosing := 0.0
+	for i, e := range p.examples {
+		if _, inTop := topKSet[i]; inTop {
+			continue
+		}
+		if e.Intent == first {
+			continue
+		}
+		s := CosineSimilarity(vec, e.Vector)
+		if s > bestLosing {
+			bestLosing = s
+		}
+	}
+	var agent string
+	for _, nb := range neighbors {
+		if e := p.examples[nb.idx]; e.Agent != "" {
+			agent = e.Agent
+			break
+		}
+	}
+	return kNNVote{
+		Intent:     first,
+		Agent:      agent,
+		Confidence: floor,
+		Margin:     floor - bestLosing,
+	}, true
+}
+
+// Match embeds the input and returns a direct-route Intent when the k
+// nearest examples vote unanimously for one intent. nil means "no opinion"
+// — caller falls through to the LLM chain.
 func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 	input = strings.TrimSpace(input)
-	if input == "" || !p.loadCentroids(false) {
+	if input == "" || !p.loadIndex(false) {
 		return nil
 	}
 
@@ -197,55 +314,39 @@ func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 			"got", len(vec), "want", p.dimension)
 		return nil
 	}
-	if p.storeDim > 0 && len(vec) != p.storeDim {
-		p.logger.Warn("prefilter embedding dimension differs from centroid store; rebuild centroids",
-			"embedding", len(vec), "store", p.storeDim)
-		return nil
-	}
 
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	best := -1
-	bestScore := 0.0
-	second := 0.0
-	scores := make([]float64, len(p.centroids))
-	for i, c := range p.centroids {
-		s := CosineSimilarity(vec, c.Vector)
-		scores[i] = s
-		if s > bestScore {
-			second = bestScore
-			bestScore = s
-			best = i
-		} else if s > second {
-			second = s
-		}
-	}
-	if best < 0 || bestScore < p.threshold || bestScore-second < p.margin {
-		p.logger.Debug("prefilter below threshold",
-			"best_score", bestScore,
-			"runner_up", second,
-			"threshold", p.threshold,
-			"margin", p.margin,
-		)
+	if p.storeDim > 0 && len(vec) != p.storeDim {
+		p.logger.Warn("prefilter embedding dimension differs from index; rebuild index",
+			"embedding", len(vec), "store", p.storeDim)
 		return nil
 	}
 
-	c := p.centroids[best]
-	confidence := bestScore
+	v, ok := p.vote(vec)
+	if !ok {
+		p.logger.Debug("prefilter no unanimous vote",
+			"k", p.k,
+			"threshold", p.threshold,
+		)
+		return nil
+	}
+	confidence := v.Confidence
 	if confidence > 1 {
 		confidence = 1
 	}
 	p.logger.Info("prefilter direct route",
-		"intent", c.Intent,
-		"agent", c.Agent,
-		"score", bestScore,
-		"runner_up", second,
+		"intent", v.Intent,
+		"agent", v.Agent,
+		"k", p.k,
+		"unanimity_floor", v.Confidence,
+		"margin", v.Margin,
 	)
 	return &Intent{
-		Type:       c.Intent,
+		Type:       v.Intent,
 		Confidence: confidence,
-		AgentType:  c.Agent,
+		AgentType:  v.Agent,
 		Summary:    extractSummary(input),
 		Method:     prefilterMethod,
 	}
