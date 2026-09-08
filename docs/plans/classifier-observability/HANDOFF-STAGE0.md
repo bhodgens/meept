@@ -163,3 +163,51 @@ regenerate from routed-turn outcomes, never hand-edit).
 4. Either way: re-run cmd/meept-classifier-test with -detailed after
    any model/data change; keep /tmp reports OUT of the repo (copy
    final numbers into docs/eval/).
+
+---
+
+## 8. MERGED UPDATE 2026-09-07 — Stage-0 leaves 1+2 are IMPLEMENTED
+
+A second session built §5's Stage-0 in full and validated the §5
+invariants against the §3 resume points. Status against the §5 tree:
+
+| §5 leaf | Status | Where |
+|---|---|---|
+| (1) centroid builder + table format + regenerate-from-corpus | DONE | scripts/build_prefilter_centroids.py (+ `--sweep` for τ) |
+| (2) Stage-0 gate in ClassifyAndRoute + config seam | DONE | internal/agent/embedding_prefilter.go; dispatcher.go step 3.25 |
+| (3) eval harness prefilter-vs-chain | PENDING | sweep is self-inclusive; honest split eval = next step |
+
+Deviations from the §5 sketch (all deliberate, all code-verified):
+
+- **Gate is absolute-score AND margin**, not margin-only. `score >= τ`
+  (default 0.90) AND `top1 − top2 >= 0.05`. Margin-only at 0.90 would
+  route ~nothing — real cosine gaps are 0.1–0.3, not 0.9. Margin guard
+  retained as the tie/ambiguity killer §5 asked for.
+- **Confidence = absolute score**, not margin. Margin (~0.1–0.3) would
+  read as LOW confidence to downstream consumers (planner interview
+  gating reads Intent.Confidence). `Method: "embedding_prefilter"`
+  (not `"embed"` — kept the existing classifier-observability naming).
+- **Config seam is a dedicated `ClassifierPrefilterConfig`**
+  (schema.go `orchestrator.classifier_prefilter`), NOT memory's
+  EmbeddingConfig (§3's schema.go:1234) — that struct carries
+  shard-path/LRU baggage for the memory vector store. The prefilter
+  speaks OpenAI /v1/embeddings directly. Default OFF; enabled but
+  base_url-empty constructs nothing; missing centroid store = inert.
+- **Embedding server included**: scripts/embed_server.py serves the DWQ
+  weights via mlx on :8090 (loaded in 2.3s live-verified on homebrew
+  python3.12, the interpreter that runs the :18081/:18082 mlx_lm
+  servers). EOS-pooling + L2 norm per the Qwen3-Embedding reference.
+- Batch centroid rebuild is lazy-loaded by the daemon (no restart
+  needed); `Reload()` exists for eval sweeps.
+- Extra guard vs §5: compound-signal inputs and `/`-commands never
+  reach Stage-0 (multi-intent was §5's own known risk).
+
+Tests: 13 unit tests (threshold, margin-tie, error/missing-store
+fall-through, reload, dispatcher wiring, disabled-path invariance, json5
+round-trip, template parse), -race clean, mutexio/selflock clean. All
+§5 invariants hold: same Intent struct out, downstream unchanged,
+failure mode "no faster, never worse".
+
+Docs: docs/workflows/classifier-prefilter.md. Remaining for §5 leaf 3:
+honest (held-out) prefilter-vs-chain eval vs the §1 baselines
+(sft 54.4%, 8b 86.8%), then a τ decision from real numbers.
