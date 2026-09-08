@@ -1508,40 +1508,18 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 	return nil
 }
 
-// selectAgent maps a step's ToolHint to the appropriate agent ID.
+// selectAgent maps a step's ToolHint to the executor agent via the shared
+// config routing table (internal/config/tool_hints.go). The table covers
+// every dialect-legal hint, roster intent hints, and historical aliases;
+// unresolved hints fall back to chat as before. Keeping the table in
+// config (not this switch) is what stops the compiler's validated hint set
+// and this router from drifting apart again (2026-09-07: bash/writer/
+// explore/researcher hints all fell through to the chat persona).
 func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
-	switch step.ToolHint {
-	case string(IntentCode), KeywordRefactor, config.AgentIDCoder:
-		return config.AgentIDCoder
-	case string(IntentDebug), KeywordFix:
-		return config.AgentIDDebugger
-	case string(IntentAnalyze):
-		return config.AgentIDAnalyst
-	case string(IntentResearch):
-		return config.AgentIDResearcher
-	case string(IntentGit), KeywordCommit:
-		return config.AgentIDCommitter
-	case string(IntentSchedule):
-		return config.AgentIDScheduler
-	case string(IntentPlan):
-		return config.AgentIDPlanner
-	case string(IntentWrite):
-		return config.AgentIDWriter
-	case string(IntentArchitect):
-		return config.AgentIDArchitect
-	case string(IntentSkeptic):
-		return config.AgentIDSkeptic
-	case string(IntentLibrarian):
-		return config.AgentIDLibrarian
-	case string(IntentImageGen):
-		return config.AgentIDImageGen
-	case string(IntentVideoGen):
-		return config.AgentIDVideoGen
-	case string(IntentImageID):
-		return config.AgentIDImageID
-	default:
-		return config.AgentIDChat
+	if agentID, ok := config.ToolHintAgent(step.ToolHint); ok {
+		return agentID
 	}
+	return config.AgentIDChat
 }
 
 // SelectAgentForHint exports selectAgent so the tactical orchestrator (and

@@ -31,10 +31,12 @@ func TestSelectAgent(t *testing.T) {
 		{"fix", "debugger"},
 		{"analyze", "analyst"},
 		{"research", "researcher"},
-		// Fetch-and-write tasks have no dedicated hint and fall through to
-		// chat; researcher is the agent that owns web_fetch+file_write
-		// together (GAP 2).
-		{"file_write", "chat"},
+		// Fetch-and-write tasks: file_write routes to coder (stateful
+		// executor with file tools). The old comment claimed chat via
+		// GAP-2 researcher ownership, but DB history shows file_write
+		// always executed as chat because the router had no case — the
+		// deflection bug this table fixes.
+		{"file_write", "coder"},
 		{"git", "committer"},
 		{"commit", "committer"},
 		{"schedule", "scheduler"},

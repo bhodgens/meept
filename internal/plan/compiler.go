@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/caimlas/meept/internal/config"
 )
 
 // CompileSealed parses a sealed plan-dialect v1 markdown document into
@@ -86,12 +88,10 @@ type StepSpec struct {
 	DependsOn   []int  `json:"depends_on,omitempty"`
 }
 
-// toolHints is the authoritative hint set (dialect doc section 4).
-var toolHints = map[string]bool{
-	"code": true, "refactor": true, "debug": true, "fix": true,
-	"analyze": true, "research": true, "git": true, "plan": true,
-	"chat": true, "bash": true,
-}
+// toolHints now lives in internal/config (DialectToolHints) as the single
+// source of truth shared with the tactical scheduler's hint→agent router.
+// The dialect-doc membership check delegates to config.IsDialectToolHint;
+// the §7 error message above stays verbatim per the spec-slave rule.
 
 // Regex grammar — line-precision per dialect doc section 2. Immutable,
 // mirroring parser.go's package-level regex style.
@@ -115,16 +115,18 @@ var (
 )
 
 const (
-	artifactMsgBadName  = "artifact name %q is not kebab-case (lowercase letters and digits joined by single hyphens)"
-	artifactMsgKind     = "artifact %q has unknown kind %q (must be one of file, interface, schema, decision, test_suite)"
-	artifactMsgShape    = "expected \"- `<name>` (<kind>) — <description>\", got %q"
-	consumeMsgUnknown   = "unknown artifact %q consumed by phase %q: no phase in this plan produces it"
-	consumeMsgEarly     = "phase %q consumes %q, which is produced by a later phase (%q): consumes must reference artifacts from earlier phases"
-	needsMsgUnknown     = "step %d of phase %q has a needs reference %q that matches no artifact name or step"
-	needsMsgNoStep      = "step %d of phase %q references %q, but phase %d has no step %d"
-	needsMsgLaterPhase  = "step %d of phase %q references %q from phase %d, a later phase: step references may only target earlier phases"
-	needsMsgLaterStep   = "step %d of phase %q references %q, a later step in the same phase: steps may only reference prior steps"
-	needsMsgSamePhase   = "step %d of phase %q references artifact %q, which is produced by the same phase: artifact references must target earlier phases"
+	artifactMsgBadName = "artifact name %q is not kebab-case (lowercase letters and digits joined by single hyphens)"
+	artifactMsgKind    = "artifact %q has unknown kind %q (must be one of file, interface, schema, decision, test_suite)"
+	artifactMsgShape   = "expected \"- `<name>` (<kind>) — <description>\", got %q"
+	consumeMsgUnknown  = "unknown artifact %q consumed by phase %q: no phase in this plan produces it"
+	consumeMsgEarly    = "phase %q consumes %q, which is produced by a later phase (%q): consumes must reference artifacts from earlier phases"
+	needsMsgUnknown    = "step %d of phase %q has a needs reference %q that matches no artifact name or step"
+	needsMsgNoStep     = "step %d of phase %q references %q, but phase %d has no step %d"
+	needsMsgLaterPhase = "step %d of phase %q references %q from phase %d, a later phase: step references may only target earlier phases"
+	needsMsgLaterStep  = "step %d of phase %q references %q, a later step in the same phase: steps may only reference prior steps"
+	needsMsgSamePhase  = "step %d of phase %q references artifact %q, which is produced by the same phase: artifact references must target earlier phases"
+	// hintMsg is the dialect-doc §7 error format string (kept verbatim; the
+	// spec-slave rule pins its wording).
 	hintMsg             = "step %d of phase %q has unknown tool_hint %q (must be one of code, refactor, debug, fix, analyze, research, git, plan, chat, bash)"
 	oqMsg               = "Open Questions must be empty to seal (%d unresolved)"
 	metaMissingMsg      = "Meta is missing required key: %s"
@@ -662,7 +664,7 @@ func checkSteps(doc *draftDoc, problems *[]CompileProblem) {
 			}
 			expected++
 
-			if st.hint != "" && !toolHints[st.hint] {
+			if st.hint != "" && !config.IsDialectToolHint(st.hint) {
 				*problems = append(*problems, CompileProblem{
 					Line:    st.line,
 					Message: fmt.Sprintf(hintMsg, st.number, p.name, st.hint),
