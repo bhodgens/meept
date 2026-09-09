@@ -17,12 +17,13 @@ const (
 	IntentStatus   IntentType = "status"
 
 	// Execution (async to orchestrator)
-	IntentCode     IntentType = "code"
-	IntentDebug    IntentType = "debug"
-	IntentReview   IntentType = "review"
-	IntentPlan     IntentType = "plan"
-	IntentGit      IntentType = "git"
-	IntentSchedule IntentType = "schedule"
+	IntentCode      IntentType = "code"
+	IntentDebug     IntentType = "debug"
+	IntentReview    IntentType = "review"
+	IntentPlan      IntentType = "plan"
+	IntentQuickPlan IntentType = "quickplan" // plan+clarify+execute autonomously (adjudication record: docs/plans/classifier-iteration)
+	IntentGit       IntentType = "git"
+	IntentSchedule  IntentType = "schedule"
 
 	// Analysis (inline)
 	IntentAnalyze  IntentType = "analyze"
@@ -84,7 +85,7 @@ func (t IntentType) Category() IntentCategory {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
 		IntentAnalyze, IntentSearch, IntentResearch, IntentClarify, IntentInstruction, IntentExplore:
 		return CategoryInline
-	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule, IntentPair, IntentCollaborate:
+	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentQuickPlan, IntentGit, IntentSchedule, IntentPair, IntentCollaborate:
 		return CategoryDefer
 	case IntentCompound:
 		return CategoryDefer
@@ -110,6 +111,8 @@ func (t IntentType) SuggestedMode() string {
 		return "direct"
 	case IntentCode, IntentDebug, IntentGit, IntentToolUse, IntentSecurity:
 		return "plan"
+	case IntentQuickPlan:
+		return "quick_plan"
 	case IntentCompound:
 		return "spec_pair"
 	case IntentPlan, IntentArchitect:
@@ -150,6 +153,8 @@ func (t IntentType) DefaultAgent() string {
 		return "skill"
 	case IntentCompound:
 		return "orchestrator"
+	case IntentQuickPlan:
+		return "orchestrator" // adjudication record: docs/plans/classifier-iteration
 	case IntentClarify:
 		return config.AgentIDChat
 	case IntentWrite:
@@ -174,7 +179,7 @@ func (t IntentType) DefaultAgent() string {
 // RequiresPlanning returns true if the intent benefits from orchestration.
 func (t IntentType) RequiresPlanning() bool {
 	switch t {
-	case IntentCode, IntentPlan, IntentCompound:
+	case IntentCode, IntentPlan, IntentCompound, IntentQuickPlan:
 		return true
 	default:
 		return false
@@ -184,7 +189,7 @@ func (t IntentType) RequiresPlanning() bool {
 // ShouldCreateTask returns true if the intent should create a trackable task.
 func (t IntentType) ShouldCreateTask() bool {
 	switch t {
-	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit, IntentCompound, IntentCollaborate, IntentArchitect:
+	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit, IntentCompound, IntentCollaborate, IntentArchitect, IntentQuickPlan:
 		return true
 	case IntentPair:
 		return false // pair sessions don't create step-based tasks
@@ -198,6 +203,11 @@ func (t IntentType) ShouldDispatchAsync(requiresPlanning bool) bool {
 	switch t {
 	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound, IntentPair, IntentCollaborate, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian, IntentImageGen, IntentVideoGen, IntentImageID:
 		return true
+	// Quickplan follows the code/plan precedent: plan+clarify+execute
+	// autonomously, dispatched to the orchestrator (adjudication record:
+	// docs/plans/classifier-iteration).
+	case IntentQuickPlan:
+		return requiresPlanning
 	case IntentSchedule:
 		// Only dispatch async for schedule if it requires planning
 		return requiresPlanning
@@ -210,7 +220,7 @@ func (t IntentType) ShouldDispatchAsync(requiresPlanning bool) bool {
 func IsValidIntentType(s string) bool {
 	switch IntentType(s) {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
-		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
+		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentQuickPlan, IntentGit,
 		IntentSchedule, IntentAnalyze, IntentSearch, IntentResearch,
 		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCollaborate, IntentCompound, IntentClarify,
 		IntentInstruction, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian, IntentExplore,
@@ -248,6 +258,11 @@ func (t IntentType) Keywords() []string {
 		// became its own intent (Plan 2). Pure planning requests still hit
 		// "plan" / "design" / "how should i".
 		return []string{string(IntentPlan), KeywordDesign, "how should i", "break down", "decompose"}
+	case IntentQuickPlan:
+		// Adjudication record: docs/plans/classifier-iteration. Trigger
+		// words are direct-execution phrasing; the classifier gates these
+		// with orchestration-cue evidence before routing (leaf 03).
+		return []string{string(IntentQuickPlan), "quick plan", "just do it", "without asking", "all of it", "work through the plan", "knock out", "carry out the plan", "finish the remaining"}
 	case IntentAnalyze, IntentSearch:
 		return []string{"research", string(IntentAnalyze), KeywordExplain, "search"}
 	case IntentResearch:

@@ -56,6 +56,10 @@ func (idx *SemanticIndex) BuildIndex(ctx context.Context) error {
 		IntentSecurity, IntentToolUse,
 		IntentPair, IntentCollaborate,
 		IntentSkill, IntentCompound, IntentClarify,
+		// Quickplan: adjudication record: docs/plans/classifier-iteration.
+		// Included so the semantic index recognizes quickplan phrasing;
+		// quickplan-vs-code/git gating happens downstream (leaf 02/03).
+		IntentQuickPlan,
 		// Plan 2: knowledge-work intents.
 		IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian,
 		IntentImageGen, IntentVideoGen, IntentImageID,

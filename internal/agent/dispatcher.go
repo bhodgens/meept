@@ -56,7 +56,11 @@ var SteeringHeuristicTable = map[IntentType]bool{
 	IntentPair:        false, // Pair tasks are not urgent
 	IntentCollaborate: false, // Collaboration tasks are not urgent
 	IntentCompound:    false, // Compound intents default to follow-up
-	IntentUnknown:     false,
+	// Quickplan is a plan-execution flow that runs without check-ins
+	// (adjudication record: docs/plans/classifier-iteration); mid-flow
+	// steering defaults to follow-up like compound.
+	IntentQuickPlan: false,
+	IntentUnknown:   false,
 }
 
 // shouldSteer determines if a message should interrupt the current flow.

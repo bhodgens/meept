@@ -53,6 +53,7 @@ func TestIntentDefaultAgent(t *testing.T) {
 		{IntentResearch, "researcher"},
 		{IntentSkill, "skill"},
 		{IntentCompound, "orchestrator"},
+		{IntentQuickPlan, "orchestrator"},
 		{IntentUnknown, "chat"},
 	}
 	for _, tt := range tests {
