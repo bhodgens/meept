@@ -5,12 +5,17 @@ import (
 	"strings"
 )
 
-// ModelSlots bundles the four slot fields from ProvidersConfig / models.json5.
+// ModelSlots bundles the five slot fields from ProvidersConfig /
+// models.json5.
 type ModelSlots struct {
 	Model           string
 	SmallModel      string
 	ClassifierModel string
 	SummarizerModel string
+	// ExtractModel is the json_extract tool's dedicated extraction model
+	// (extract_model slot). Included so its local runtime pre-warms at
+	// boot instead of failing on first tool call.
+	ExtractModel string
 }
 
 // AgentModelRef is a minimal view of an agent definition used by
@@ -82,6 +87,7 @@ func BuildModelsInUse(
 	add(slots.SmallModel)
 	add(slots.ClassifierModel)
 	add(slots.SummarizerModel)
+	add(slots.ExtractModel)
 
 	// 3. Alias expansion: every configured alias's full member list is
 	// included. Alias members are explicitly configured failover targets

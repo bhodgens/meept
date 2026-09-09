@@ -1068,6 +1068,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			SmallModel:      lifecycleCfg.SmallModel,
 			ClassifierModel: lifecycleCfg.ClassifierModel,
 			SummarizerModel: lifecycleCfg.SummarizerModel,
+			ExtractModel:    lifecycleCfg.ExtractModel,
 		}
 		inUse := llm.BuildModelsInUse(agentRefs, slots, lifecycleCfg.ModelAliases, lifecycleCfg.DisabledProviders)
 		if len(inUse) > 0 {
@@ -7742,7 +7743,21 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	// Defense in depth: a no-op turn (LLM failure previously surfaced as
 	// ("", nil)) must not be reported as a completed job — the planner
 	// would advance past a step that never did any work.
+	//
+	// H1 (daemon audit 2026-09-08): ("", nil) with err==nil is ALSO the
+	// loop's PARKED-TURN sentinel — a ThrottleBackoffError the loop parked
+	// on its TurnParker (StateQuotaWait, parkThrottledTurn) returns exactly
+	// that shape. Treating a parked turn as a hard failure failed the step,
+	// discarded the output, and left the parker to re-run the turn later —
+	// side effects re-executed hours after the step was marked failed
+	// (violates D9 "queue jobs PARK"). The parked case must ride the
+	// provider-wait path instead: return a quota-shaped error the worker's
+	// requeueOnProviderWait already honors (requeue at the parker's resume
+	// time, no retry consumed, no failure recorded, single completion).
 	if strings.TrimSpace(response) == "" {
+		if parkedErr := p.parkedTurnQuotaError(agentLoop, job); parkedErr != nil {
+			return nil, parkedErr
+		}
 		p.logger.Error("Agent execution produced empty response",
 			"job_id", job.ID,
 			"agent_id", job.AgentID,
@@ -7769,6 +7784,71 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 
 // Ensure AgentJobProcessor implements worker.JobProcessor
 var _ worker.JobProcessor = (*AgentJobProcessor)(nil)
+
+// parkedTurnRequeueFallbackDelay is the requeue gate used when the loop is
+// parked but its TurnParker exposes no schedulable resume time (nil parker,
+// empty queue, or a record already due). Short by design: the job comes
+// back, finds the turn still parked, and re-sentinels at the (then known)
+// resume time. Mirrors the worker's claim-poll cadence rather than the
+// quota-reset horizon — it bounds staleness, not the wait itself.
+const parkedTurnRequeueFallbackDelay = time.Minute
+
+// parkedTurnQuotaError converts a parked turn into the provider-wait error
+// the worker's requeue machinery already honors (H1, daemon audit
+// 2026-09-08). Called from Process when RunOnce returned ("", nil): that
+// shape is the loop's parked-turn sentinel — the loop hit a
+// ThrottleBackoffError, parked the turn on its TurnParker (StateQuotaWait /
+// "throttle_wait"), and will re-run it via RunOnceWithParts at the resume
+// time. Failing the job here would mark the step failed, discard the
+// eventual output, and still let the parker re-execute the turn later.
+//
+// The returned *llm.QuotaResetError is a SENTINEL, not a provider report:
+// internal/worker.requeueOnProviderWait reads ResetAt (the parker's
+// scheduled resume), requeues the job at that time WITHOUT consuming a
+// retry, and returns before any Complete/Fail — so the job can never
+// double-complete. internal/agent.tactical's isQuotaClassFailure also
+// classifies the rendered text quota-class ("quota limit exceeded"), so any
+// consumer that bypasses the worker's requeue still routes through the
+// existing quota-deferral machinery instead of failing the step. Give-up
+// semantics stay intact: when the resume time exceeds the worker's
+// failure-policy horizon (24h default) the requeue is refused and the
+// legacy fail path runs unchanged — with a message that names the park
+// instead of a bare empty-response error.
+//
+// Returns nil when the loop is NOT in StateQuotaWait: a genuinely empty
+// response keeps the existing hard-failure defense (planner must not
+// advance past a step that never did work).
+func (p *AgentJobProcessor) parkedTurnQuotaError(loop *agent.AgentLoop, job *queue.Job) error {
+	if loop == nil {
+		return nil
+	}
+	if loop.GetState() != agent.StateQuotaWait {
+		// Same predicate the loop itself uses to distinguish a parked
+		// ("", nil) from a real empty turn (loop.go turnParked check):
+		// state, not string shape, is the source of truth.
+		return nil
+	}
+	now := time.Now()
+	resetAt := now.Add(parkedTurnRequeueFallbackDelay)
+	if parker := loop.TurnParker(); parker != nil {
+		if at, ok := parker.Next(llm.FailureThrottle); ok && at.After(now) {
+			resetAt = at
+		}
+	}
+	return &llm.QuotaResetError{
+		ProviderID: "daemon",
+		ModelID:    "loop-parked-turn",
+		Code:       "parked_turn_requeued",
+		Message: fmt.Sprintf("agent turn parked on provider wait (job %s, agent %s); the loop's turn parker "+
+			"resumes it — job requeued at the parked resume time instead of failing",
+			job.ID, job.AgentID),
+		ResetAt: resetAt,
+		// Matches the daemon's default quota MaxWait posture; the worker
+		// compares ResetAt against ITS failure-policy horizon, so this
+		// field only bounds the sentinel's own rendering.
+		MaxWait: 24 * time.Hour,
+	}
+}
 
 // publishQuotaWait emits the job-level quota event (leaf 06) on the EXISTING
 // agent.quota_wait topic — the same topic the loop parkers use, so the WS
