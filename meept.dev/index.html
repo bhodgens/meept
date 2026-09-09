@@ -27,7 +27,7 @@ body::before {
   background-size: 40px 40px;
 }
 .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
-section { margin-bottom: 80px; opacity: 0; transform: translateY(24px); animation: fadeUp 0.6s ease forwards; }
+section { margin-bottom: 80px; scroll-margin-top: 72px; opacity: 0; transform: translateY(24px); animation: fadeUp 0.6s ease forwards; }
 section:nth-child(2) { animation-delay: 0.08s; }
 section:nth-child(3) { animation-delay: 0.16s; }
 section:nth-child(4) { animation-delay: 0.24s; }
@@ -264,12 +264,13 @@ body::after { content: ''; display: block; height: 56px; }
 
 <nav class="navbar">
   <div class="navbar-inner">
-    <a href="#" class="navbar-brand">meept.dev</a>
+    <a href="https://github.com/bhodgens/meept" class="navbar-brand">meept.dev</a>
     <ul class="navbar-links">
       <li><a href="#features">features</a></li>
       <li><a href="#compare">compare</a></li>
       <li><a href="#quickstart">quickstart</a></li>
       <li><a href="#demo">demo</a></li>
+      <li><a href="https://github.com/bhodgens/meept" target="_blank" rel="noopener">github &#x2197;</a></li>
       <li><a href="https://github.com/bhodgens/meept/tree/main/docs" target="_blank" rel="noopener">docs &#x2197;</a></li>
     </ul>
   </div>
@@ -309,7 +310,7 @@ body::after { content: ''; display: block; height: 56px; }
   </section>
 
   <!-- 02: FEATURES -->
-  <section>
+  <section id="features">
     <div class="section-label">FEATURES</div>
     <div class="features-grid">
 
@@ -365,7 +366,7 @@ body::after { content: ''; display: block; height: 56px; }
   </section>
 
   <!-- 03: COMPARISON -->
-  <section>
+  <section id="compare">
     <div class="section-label">COMPARISON</div>
     <div class="card section-full">
       <div class="cmp-legend">
@@ -718,7 +719,7 @@ body::after { content: ''; display: block; height: 56px; }
   </section>
 
   <!-- 04: QUICK START -->
-  <section>
+  <section id="quickstart">
     <div class="section-label">QUICK START</div>
     <div class="card section-full">
       <div class="quickstart-header">
@@ -748,7 +749,7 @@ body::after { content: ''; display: block; height: 56px; }
   </section>
 
   <!-- 05: DEMO -->
-  <section>
+  <section id="demo">
     <div class="section-label">DEMO</div>
     <div class="card section-full">
       <h2 style="font-family:var(--mono); font-size:18px; margin-bottom:20px; color: var(--orange);">See it in action</h2>
