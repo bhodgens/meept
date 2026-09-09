@@ -1,0 +1,51 @@
+{
+ "replay_n": 48,
+ "stageA": {
+  "routes": 6,
+  "correct": 4,
+  "precision": 0.667
+ },
+ "stageB": {
+  "routes": 5,
+  "correct": 2,
+  "precision": 0.4
+ },
+ "stageC_chain": 37,
+ "expected_system_accuracy": 0.7941,
+ "chain_only_baseline": 0.868,
+ "per_intent_expected": {
+  "analyze": {
+   "n": 3,
+   "expected_correct": 2.6
+  },
+  "code": {
+   "n": 4,
+   "expected_correct": 3.74
+  },
+  "debug": {
+   "n": 2,
+   "expected_correct": 1.74
+  },
+  "git": {
+   "n": 5,
+   "expected_correct": 4.6
+  },
+  "plan": {
+   "n": 3,
+   "expected_correct": 2.74
+  },
+  "platform": {
+   "n": 1,
+   "expected_correct": 0.87
+  },
+  "quickplan": {
+   "n": 20,
+   "expected_correct": 13.02
+  },
+  "review": {
+   "n": 10,
+   "expected_correct": 8.81
+  }
+ },
+ "tau": 0.143
+}
