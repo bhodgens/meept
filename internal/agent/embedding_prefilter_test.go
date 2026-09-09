@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 )
@@ -112,7 +113,7 @@ func TestPrefilter_KNNDissenterAbstains(t *testing.T) {
 	// code example is tilted to score 0.89 — it ranks FIRST but is alone
 	// against 4 chat examples. Top-5 = 1 code + 4 chat → dissent.
 	tiltedCode := []float64{0.9, 0.44, 0, 0}
-	ex := exampleSet() // 5 code on axis 0, 5 chat on axis 1
+	ex := exampleSet()      // 5 code on axis 0, 5 chat on axis 1
 	ex[0] = map[string]any{ // replace one pure-code with the tilted one
 		"intent": "code", "agent": "coder", "text": "tilted code ex",
 		"vector": tiltedCode,
@@ -340,4 +341,71 @@ type embedFunc func(ctx context.Context, text string) ([]float64, error)
 
 func (f embedFunc) Embed(ctx context.Context, text string) ([]float64, error) {
 	return f(ctx, text)
+}
+
+// TestPrefilter_MarginCountsNegativeDissenters pins the bestLosing init
+// fix: when every dissenting example scores BELOW zero, the margin must
+// be floor − (negative dissent score), not floor − 0. The old 0.0 init
+// reported margin ≈ floor even though a dissenter sat at −0.1.
+func TestPrefilter_MarginCountsNegativeDissenters(t *testing.T) {
+	// Index: 1 chat example on axis 0 (the winner), 1 code example on
+	// axis 1 (the dissenter). k=1 so the single chat neighbor votes.
+	ex := []map[string]any{
+		{"intent": "chat", "agent": "chat", "vector": basisVec(0)},
+		{"intent": "code", "agent": "coder", "vector": basisVec(1)},
+	}
+	query := []float64{0.99, -0.1, 0, 0} // cos ≈ +0.995 to axis 0, ≈ −0.1 to axis 1
+	emb := embedFunc(func(_ context.Context, _ string) ([]float64, error) {
+		return query, nil
+	})
+	p := knnPrefilter(t, emb, ex, nil)
+	p.k = 1
+
+	if intent := p.Match(context.Background(), "x"); intent == nil || intent.Type != "chat" {
+		t.Fatalf("got %+v, want chat vote", intent)
+	}
+
+	// Inspect the vote directly for the margin value.
+	p.mu.RLock()
+	v, ok := p.vote(query)
+	p.mu.RUnlock()
+	if !ok {
+		t.Fatal("vote lost between Match and direct call")
+	}
+	if v.Margin <= 1.0 {
+		t.Errorf("margin = %v, want > 1.0 (floor ≈ 0.995 minus dissenter ≈ −0.1); old 0.0 init gave ≈ floor", v.Margin)
+	}
+	if v.Confidence < 0.99 {
+		t.Errorf("confidence = %v, want ≈ 0.995 (unanimity floor)", v.Confidence)
+	}
+}
+
+// TestPrefilter_TimeoutNormalization mirrors NewEmbeddingPrefilter's
+// TimeoutSeconds contract: <=0 → defaultPrefilterTimeout, positive →
+// TimeoutSeconds seconds.
+func TestPrefilter_TimeoutNormalization(t *testing.T) {
+	cases := []struct {
+		name           string
+		timeoutSeconds int
+		want           time.Duration
+	}{
+		{"zero uses default", 0, defaultPrefilterTimeout},
+		{"negative uses default", -3, defaultPrefilterTimeout},
+		{"positive honored", 7, 7 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			emb := embedFunc(func(_ context.Context, _ string) ([]float64, error) {
+				return nearAxis0(), nil
+			})
+			p := NewEmbeddingPrefilter(emb, config.ClassifierPrefilterConfig{
+				Enabled:        true,
+				CentroidsPath:  filepath.Join(t.TempDir(), "knn.json"),
+				TimeoutSeconds: tc.timeoutSeconds,
+			}, testLogger())
+			if p.timeout != tc.want {
+				t.Errorf("timeout = %v, want %v", p.timeout, tc.want)
+			}
+		})
+	}
 }

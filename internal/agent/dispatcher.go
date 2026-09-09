@@ -295,18 +295,38 @@ type Dispatcher struct {
 	fenceController FenceController
 }
 
-// mediaURLPattern matches YouTube URL forms and bare 11-char video IDs
-// embedded in a message. It mirrors transcript_fetch's parseVideoID
-// acceptance set (hostnames + path shapes), so anything this guard
-// routes to the analyst is something transcript_fetch can ingest.
-var mediaURLPattern = regexp.MustCompile(`(?i)(?:youtube\.com/(?:watch\?v=|shorts/|embed/|live/)|youtu\.be/)[A-Za-z0-9_-]{11}|(?:^|\s)[A-Za-z0-9_-]{11}(?:\s|$)`)
+// mediaURLPattern matches YouTube URL forms (hostnames + path shapes).
+// It mirrors transcript_fetch's parseVideoID acceptance set, so anything
+// this guard routes to the analyst is something transcript_fetch can
+// ingest. URL forms are UNGATED — a literal URL is an unambiguous signal.
+var mediaURLPattern = regexp.MustCompile(`(?i)(?:youtube\.com/(?:watch\?v=|shorts/|embed/|live/)|youtu\.be/)[A-Za-z0-9_-]{11}`)
+
+// bareVideoIDPattern matches a bare 11-char video ID delimited by
+// whitespace or message boundaries.
+var bareVideoIDPattern = regexp.MustCompile(`(?:^|\s)[A-Za-z0-9_-]{11}(?:\s|$)`)
+
+// mediaContextPattern detects media co-occurrence for the bare-ID form.
+// An 11-char token alone is far too weak a signal (any 11-character word —
+// "development", "application", "handleClick" — matches), so the bare-ID
+// alternation only fires when the message also talks about media.
+var mediaContextPattern = regexp.MustCompile(`(?i)\b(?:video|videos|youtube|watch|transcript|transcripts|clip|clips|subtitle|subtitles|caption|captions|footage|recording|stream|vlog|shorts)\b`)
 
 // detectMediaURL reports the media URL (or bare video ID) carried by a
 // user message, or "" when none is present. Only YouTube is detected —
 // the deterministic routing exists specifically because transcript_fetch
 // is the ingest tool for these targets.
+//
+// URL forms match unconditionally; the bare 11-char-ID form additionally
+// requires media-context co-occurrence (H5) so ordinary prose carrying an
+// 11-char word is not hijacked to the analyst before the LLM chain runs.
 func detectMediaURL(input string) string {
-	return mediaURLPattern.FindString(input)
+	if m := mediaURLPattern.FindString(input); m != "" {
+		return m
+	}
+	if mediaContextPattern.MatchString(input) {
+		return strings.TrimSpace(bareVideoIDPattern.FindString(input))
+	}
+	return ""
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -358,7 +378,7 @@ type DispatcherConfig struct {
 	// the analyzer + router LLM calls.
 	PrefilterConfig config.ClassifierPrefilterConfig
 	SessionMaxAge   time.Duration
-	PlanManager        *plan.PlanManager
+	PlanManager     *plan.PlanManager
 	// AmbiguityThreshold configures the IntentAnalyzer's gate for blocking
 	// routing on high-ambiguity inputs. 0 means use the legacy const
 	// (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
@@ -466,16 +486,31 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	// centroid load is lazy and a missing store leaves the prefilter
 	// inert (Match returns nil → LLM chain runs as before).
 	if cfg.PrefilterConfig.Enabled && cfg.PrefilterConfig.BaseURL != "" {
+		// Normalize the embed-call timeout the same way NewEmbeddingPrefilter
+		// does (<=0 → defaultPrefilterTimeout) so both layers honor the
+		// configured PrefilterConfig.TimeoutSeconds (M15).
+		embTimeout := defaultPrefilterTimeout
+		if cfg.PrefilterConfig.TimeoutSeconds > 0 {
+			embTimeout = time.Duration(cfg.PrefilterConfig.TimeoutSeconds) * time.Second
+		}
 		embClient := NewOpenAIEmbedClient(
 			cfg.PrefilterConfig.BaseURL,
 			cfg.PrefilterConfig.Model,
-			defaultPrefilterTimeout,
+			embTimeout,
 		)
 		d.prefilter = NewEmbeddingPrefilter(embClient, cfg.PrefilterConfig, cfg.Logger)
 		d.logger.Info("Stage-0 classifier prefilter enabled",
 			"base_url", cfg.PrefilterConfig.BaseURL,
 			"model", cfg.PrefilterConfig.Model,
 			"threshold", cfg.PrefilterConfig.Threshold,
+			"timeout", embTimeout,
+		)
+	} else if cfg.PrefilterConfig.Enabled {
+		// Enabled without base_url would otherwise be silently ignored —
+		// surface the misconfiguration so operators see why Stage-0 is
+		// inert.
+		d.logger.Warn("prefilter enabled but base_url empty; Stage-0 prefilter disabled",
+			"centroids_path", cfg.PrefilterConfig.CentroidsPath,
 		)
 	}
 
@@ -725,10 +760,32 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	//
 	// AssertOnly mode never routes: the verdict is logged (agreement data
 	// vs whatever the LLM chain classifies) and the chain always runs.
-	if d.prefilter != nil && !hasCompoundSignalWords(input) {
+	if d.prefilter != nil && agentOverride == "" && !hasCompoundSignalWords(input) {
 		pi := d.prefilter.Match(ctx, input)
 		if pi != nil && d.prefilter.assertOnly {
 			d.logger.Info("prefilter assert (not routing; assert_only)",
+				"asserted_intent", pi.Type,
+				"asserted_agent", pi.AgentType,
+				"confidence", pi.Confidence,
+			)
+			pi = nil
+		}
+		// H6 safety gate: the direct route bypasses instruction parsing,
+		// multi-intent detection, agentOverride resolution, planning and
+		// task creation. Verdicts whose intent would create a task or
+		// dispatch async (code/debug/git/plan/write/…) must run through
+		// the full chain, so only INLINE intents (chat/status/etc.) are
+		// honored here; everything else falls through unchanged.
+		if pi != nil && IntentType(pi.Type).ShouldCreateTask() {
+			d.logger.Info("prefilter verdict suppressed (task-creating intent; full chain required)",
+				"asserted_intent", pi.Type,
+				"asserted_agent", pi.AgentType,
+				"confidence", pi.Confidence,
+			)
+			pi = nil
+		}
+		if pi != nil && IntentType(pi.Type).ShouldDispatchAsync(IntentType(pi.Type).RequiresPlanning()) {
+			d.logger.Info("prefilter verdict suppressed (async-dispatch intent; full chain required)",
 				"asserted_intent", pi.Type,
 				"asserted_agent", pi.AgentType,
 				"confidence", pi.Confidence,
@@ -831,7 +888,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 5.3. Client-specified agent override: if the client explicitly named an
 	// agent and it exists in the registry, use it instead of the classified
 	// intent's agent. Unknown agents fall back to normal classification.
-	if agentOverride != "" {
+	// Nil-registry guard: dispatchers built without a Registry must not
+	// panic on the override path.
+	if agentOverride != "" && d.registry != nil {
 		if _, ok := d.registry.GetSpec(agentOverride); ok {
 			d.logger.Info("Client agent override applied",
 				"override", agentOverride,

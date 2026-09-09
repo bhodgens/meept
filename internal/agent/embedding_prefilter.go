@@ -42,11 +42,11 @@ type EmbeddingPrefilter struct {
 	dimension  int
 	logger     *slog.Logger
 
-	mu        sync.RWMutex
-	examples  []prefilterExample
-	storeDim  int
-	staleErr  string // last load error, logged once until it changes
-	loaded    bool
+	mu       sync.RWMutex
+	examples []prefilterExample
+	storeDim int
+	staleErr string // last load error, logged once until it changes
+	loaded   bool
 }
 
 // PrefilterEmbedder produces one embedding vector per text. Satisfied by
@@ -90,7 +90,7 @@ const (
 	// agree on one intent, else nil. Unanimity is the precision
 	// instrument — mixed neighborhoods are exactly the ambiguous inputs
 	// the LLM chain should see.
-	defaultPrefilterK = 5
+	defaultPrefilterK       = 5
 	defaultPrefilterTimeout = 2 * time.Second
 	prefilterMethod         = "embedding_prefilter"
 )
@@ -272,7 +272,10 @@ func (p *EmbeddingPrefilter) vote(vec []float64) (kNNVote, bool) {
 	for _, nb := range neighbors {
 		topKSet[nb.idx] = struct{}{}
 	}
-	bestLosing := 0.0
+	// Initialize to -1: with no dissenters scored above floor, bestLosing
+	// must stay BELOW the winner floor so the margin isn't understated (a
+	// 0.0 init overstates the losing score when all dissenters are <0).
+	bestLosing := -1.0
 	for i, e := range p.examples {
 		if _, inTop := topKSet[i]; inTop {
 			continue
