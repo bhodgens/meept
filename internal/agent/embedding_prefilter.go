@@ -234,7 +234,7 @@ const selfMatchCutoff = 0.999
 
 // vote runs the kNN unanimity scan on vec against the loaded index.
 // Caller holds p.mu (read). Returns ok=false when no unanimous vote.
-func (p *EmbeddingPrefilter) vote(vec []float64) (kNNVote, bool) {
+func (p *EmbeddingPrefilter) vote(vec []float64, input string) (kNNVote, bool) {
 	type scored struct {
 		idx   int
 		score float64
@@ -256,6 +256,13 @@ func (p *EmbeddingPrefilter) vote(vec []float64) (kNNVote, bool) {
 	neighbors = neighbors[:p.k]
 
 	first := p.examples[neighbors[0].idx].Intent
+	// QuickPlan cue guard: quickplan-vs-code/git is not decidable from
+	// message text (session-state signal — adjudication record
+	// 2026-09-09). A quickplan vote without orchestration cues falls
+	// through to the LLM chain, which has conversation context.
+	if first == "quickplan" && !QuickPlanCuePattern.MatchString(input) {
+		return kNNVote{}, false
+	}
 	floor := neighbors[0].score
 	for _, nb := range neighbors {
 		if p.examples[nb.idx].Intent != first {
@@ -338,7 +345,7 @@ func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 		return nil
 	}
 
-	v, ok := p.vote(vec)
+	v, ok := p.vote(vec, input)
 	if !ok {
 		p.logger.Debug("prefilter no unanimous vote",
 			"k", p.k,

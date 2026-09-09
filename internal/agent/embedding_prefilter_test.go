@@ -367,7 +367,7 @@ func TestPrefilter_MarginCountsNegativeDissenters(t *testing.T) {
 
 	// Inspect the vote directly for the margin value.
 	p.mu.RLock()
-	v, ok := p.vote(query)
+	v, ok := p.vote(query, "x")
 	p.mu.RUnlock()
 	if !ok {
 		t.Fatal("vote lost between Match and direct call")

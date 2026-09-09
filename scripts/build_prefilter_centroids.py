@@ -49,6 +49,8 @@ def parse_json5(text: str) -> dict:
 
     # Double-quoted strings: no escapes in the corpus, so [^"] suffices.
     text = re.sub(r'"[^"]*"', stash, text)
+    # Strip // line comments (adversarial corpus uses them; iters 19+).
+    text = re.sub(r"(?m)^\s*//.*$", "", text)
     # Quote unquoted object keys.
     text = re.sub(r"(?<![:\w\x00'\"])([A-Za-z_][A-Za-z0-9_]*)\s*:", r'"\1":', text)
     # Trailing commas.
@@ -80,14 +82,26 @@ def embed_batch(url: str, texts: list[str], model: str) -> list[list[float]]:
 
 
 def load_cases(corpus_path: str) -> list[tuple[str, str, str]]:
-    """Returns (input, intent, agent) triples."""
+    """Returns (input, intent, agent) triples.
+
+    Two layouts supported:
+    - legacy categories: {categories: {intent: [{input, expected_intent}]}}
+    - adversarial cases: {cases: [{input, expected_intent | ood}]}
+      (classifier-iteration corpus, iters 2-20). OOD cases are skipped:
+      the prefilter index carries only real intents.
+    """
     raw = Path(corpus_path).read_text()
     data = parse_json5(raw)
     cases = []
-    for intent, entries in data["categories"].items():
+    for intent, entries in (data.get("categories") or {}).items():
         for e in entries:
-            agent = e.get("expected_agent", "")
-            cases.append((e["input"], e["expected_intent"], agent))
+            cases.append((e["input"], e.get("expected_intent", intent),
+                          e.get("expected_agent", "")))
+    for e in (data.get("cases") or []):
+        if e.get("ood") or not e.get("expected_intent"):
+            continue  # OOD / compound-abstain: not indexable
+        cases.append((e["input"], e["expected_intent"],
+                      e.get("expected_agent", "")))
     return cases
 
 
