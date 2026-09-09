@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"slices"
-	"strings"
 	"time"
 
 	sid "github.com/caimlas/meept/pkg/id"
@@ -130,12 +130,30 @@ func (s StepState) IsSuccessfullyTerminal() bool {
 	return s == StepCompleted || s == StepApproved
 }
 
+// revisionIDPattern matches the ID shape CreateRevision constructs:
+//
+//	step-<taskID>-rev-<n>-<hex>   (n = original.Sequence+1000+RevisionCount, n >= 1)
+//
+// The "-rev-<digits>-<token>" segment is anchored to the END of the ID. A
+// bare strings.Contains(id, "-rev-") was a false-positive machine: any task
+// whose ID merely contained "-rev-" (e.g. "task-rev-promo") made every one
+// of its steps look like revisions, unlocking the rejected-dep promotion
+// exception for normal steps.
+var revisionIDPattern = regexp.MustCompile(`^step-.*-rev-\d+-[0-9A-Za-z]+$`)
+
 // IsRevisionStep reports whether the step ID was created by CreateRevision
-// (which stamps "-rev-<n>-" into the ID). Revision steps depend on their
-// rejected original and are the only steps allowed to wait on a rejected
-// dependency during promotion.
+// (which stamps "-rev-<n>-<hex>" as the ID's trailing segment — see
+// revisionIDPattern). Revision steps depend on their rejected original and
+// are the only steps allowed to wait on that original during promotion.
+// Non-revision step IDs — including steps of tasks whose task ID itself
+// contains "-rev-" — do not match.
+//
+// Note the ID alone cannot name WHICH step a revision revises (it embeds the
+// task ID, not the original step ID). The own original is identified via the
+// DependsOn contract in PromoteReadySteps: CreateRevision appends
+// original.ID as the last dependency.
 func IsRevisionStep(id string) bool {
-	return strings.Contains(id, "-rev-")
+	return revisionIDPattern.MatchString(id)
 }
 
 // TaskStep represents a single step within a task's execution plan.
@@ -470,11 +488,11 @@ func (s *StepStore) Create(step *TaskStep) error {
 // Update updates an existing task step and records state transitions.
 //
 // A-09 FIX: The SELECT, UPDATE, and state-transition INSERT are wrapped in a
-// single deferred transaction (default isolation). Concurrency safety comes
-// from optimistic CAS guards: the UPDATE uses a `WHERE state = ?` clause and
-// RowsAffected is checked to detect concurrent transitions. This is
-// functionally equivalent to BEGIN IMMEDIATE serialization for state
-// transitions but avoids write-lock contention.
+// single deferred transaction (default isolation). The UPDATE matches by
+// `WHERE id = ?` (not a state CAS); concurrency safety comes from the
+// transaction serializing the current-state SELECT with the write, so a
+// concurrent transition between the read and the write is ordered by
+// SQLite's write locking rather than detected via RowsAffected.
 func (s *StepStore) Update(step *TaskStep) error {
 	ctx := context.Background()
 
@@ -749,12 +767,32 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 		// revision waits on a dep that IsSuccessfullyTerminal never accepts
 		// and the revision chain is unschedulable. Failed deps still block
 		// everything, including revisions.
+		//
+		// M5: the exception is scoped to the revision's OWN original.
+		// CreateRevision constructs "step-<taskID>-rev-<n>-<hex>" and
+		// appends original.ID as the LAST DependsOn entry, so (with the
+		// inherited parent deps in front) the last entry is the own
+		// original: a revision may proceed past a rejected dep ONLY when
+		// that dep is its own original. A revision blocked by a
+		// DIFFERENT, unrelated rejected step stays blocked (per the M5
+		// finding); AreAllCompleted likewise resolves only own-original
+		// rejections. Failed deps still block everything.
+		// KNOWN LIMITATION (reported): a rev-of-rev chain (rev2 of orig
+		// inherits deps [orig, rev1], both rejected) is blocked by orig —
+		// the current review pipeline is single-shot so this shape does
+		// not occur in-tree; if it ever does, M8 failure-finalization
+		// (not a hang) is the outcome.
 		allDepsCompleted := true
+		isRevision := IsRevisionStep(step.ID)
+		lastDep := ""
+		if isRevision && len(step.DependsOn) > 0 {
+			lastDep = step.DependsOn[len(step.DependsOn)-1]
+		}
 		for _, depID := range step.DependsOn {
 			depState, ok := stateMap[depID]
 			if !ok || !depState.IsSuccessfullyTerminal() {
-				if IsRevisionStep(step.ID) && ok && depState == StepRejected {
-					continue // revision may proceed past its rejected original
+				if isRevision && ok && depState == StepRejected && depID == lastDep {
+					continue // revision may proceed past its own rejected original
 				}
 				allDepsCompleted = false
 				break

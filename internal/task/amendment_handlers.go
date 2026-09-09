@@ -155,12 +155,11 @@ func (h *AmendmentHandlers) handleAddStep(ctx context.Context, req *AmendmentReq
 		}, nil
 	}
 
-	// Update task total jobs
-	task, err := h.registry.Get(ctx, req.TaskID)
-	if err == nil && task != nil {
-		task.TotalJobs++
-		_ = h.registry.Update(ctx, task)
-	}
+	// Update task total jobs. Atomic increment (H12): the previous
+	// Get→TotalJobs++→Update sequence wrote back the full snapshot —
+	// erasing concurrent counter increments and restoring a stale
+	// Metadata blob fetched above.
+	_ = h.registry.Store().IncrementTotalJobs(req.TaskID)
 
 	jsonMetadata, _ := json.Marshal(map[string]string{"step_id": step.ID})
 	return &AmendmentReply{

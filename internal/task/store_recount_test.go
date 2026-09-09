@@ -114,3 +114,106 @@ func TestStore_IncrementTotalJobs_And_FailedJobs(t *testing.T) {
 		t.Errorf("failed = %d, want 1", got.FailedJobs)
 	}
 }
+
+// TestStore_UpdateWithoutCounters_PreservesInterleavedIncrement is the H12
+// regression test: a handoff-style Get→modify→full-row-Update window erased
+// any atomic counter increment that landed concurrently between the Get and
+// the Update. The interleave is driven sequentially through the store API —
+// no goroutines, no flakiness: the sequence below IS the race.
+func TestStore_UpdateWithoutCounters_PreservesInterleavedIncrement(t *testing.T) {
+	store := newTestStore(t)
+
+	now := time.Now().UTC()
+	tk := &Task{
+		ID:          "task-h12",
+		Name:        "handoff rmw test",
+		Description: "counter preservation",
+		State:       StateExecuting,
+		TotalJobs:   2,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := store.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Handoff-style window: snapshot, then an interleaved atomic increment
+	// (as a concurrent completion would land), then the writer persists.
+	snapshot, err := store.GetByID("task-h12")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if _, err := store.IncrementCompletedJobs("task-h12"); err != nil {
+		t.Fatalf("IncrementCompletedJobs: %v", err)
+	}
+
+	// New shape (exactly as HandleHandoff now persists): the increment is
+	// atomic and the state write carries NO counters — so the interleaved
+	// increment survives.
+	snapshot.SetState(StateExecuting)
+	if err := store.UpdateWithoutCounters(snapshot); err != nil {
+		t.Fatalf("UpdateWithoutCounters: %v", err)
+	}
+	if err := store.IncrementTotalJobs("task-h12"); err != nil {
+		t.Fatalf("IncrementTotalJobs: %v", err)
+	}
+
+	got, err := store.GetByID("task-h12")
+	if err != nil {
+		t.Fatalf("GetByID after update: %v", err)
+	}
+	if got.TotalJobs != 3 {
+		t.Errorf("TotalJobs = %d, want 3 (atomic increment preserved)", got.TotalJobs)
+	}
+	if got.CompletedJobs != 1 {
+		t.Errorf("CompletedJobs = %d, want 1 (interleaved atomic increment NOT lost)", got.CompletedJobs)
+	}
+
+	// Control: the legacy full-row Update writes WHATEVER counter values
+	// the struct carries. Hand it a stale snapshot (CompletedJobs taken
+	// before the increment) and the row goes stale — this is exactly the
+	// mechanism that erased increments before H12.
+	stale := got
+	stale.CompletedJobs = 0 // simulate a snapshot predating the increment
+	if err := store.Update(stale); err != nil {
+		t.Fatalf("Update (control): %v", err)
+	}
+	ctrl, err := store.GetByID("task-h12")
+	if err != nil {
+		t.Fatalf("GetByID after control: %v", err)
+	}
+	if ctrl.CompletedJobs != 0 {
+		t.Errorf("control: CompletedJobs = %d, want 0 (full-row Update writes struct counters — expected control behavior)", ctrl.CompletedJobs)
+	}
+}
+
+// TestStore_SetPlanCounters pins the atomic counter-set primitive used by
+// the plan-generation paths (H12).
+func TestStore_SetPlanCounters(t *testing.T) {
+	store := newTestStore(t)
+
+	now := time.Now().UTC()
+	tk := &Task{
+		ID:          "task-plan-counters",
+		Name:        "plan counters",
+		Description: "atomic set",
+		State:       StateExecuting,
+		TotalJobs:   99,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := store.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := store.SetPlanCounters("task-plan-counters", 7, 0, 0); err != nil {
+		t.Fatalf("SetPlanCounters: %v", err)
+	}
+	got, err := store.GetByID("task-plan-counters")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.TotalJobs != 7 || got.CompletedJobs != 0 || got.FailedJobs != 0 {
+		t.Errorf("counters = %d/%d/%d, want 7/0/0", got.TotalJobs, got.CompletedJobs, got.FailedJobs)
+	}
+}

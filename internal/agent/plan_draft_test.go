@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -431,4 +432,61 @@ func asCompileError(err error, target **plan.CompileError) bool {
 		*target = ce
 	}
 	return ok
+}
+
+// TestFlattenPlanPhasesToSteps_CapsPerPhase is the H4 regression test: the
+// original extraction of FlattenPlanPhasesToSteps dropped the legacy
+// per-phase cap (caf61fb2 strategic.go:719), letting flagged-off phases run
+// every step. A 10-step phase with cap 8 must yield exactly 8 steps, and
+// inter-phase dependency chaining must stay intact.
+func TestFlattenPlanPhasesToSteps_CapsPerPhase(t *testing.T) {
+	mkPhases := func() []PlanPhaseSpec {
+		phase := PlanPhaseSpec{Name: "only"}
+		for i := 0; i < 10; i++ {
+			phase.Steps = append(phase.Steps, plannerStep{Description: fmt.Sprintf("step %d", i)})
+		}
+		return []PlanPhaseSpec{phase}
+	}
+
+	steps := FlattenPlanPhasesToSteps("task-cap", mkPhases(), 8)
+	if len(steps) != 8 {
+		t.Fatalf("capped phase yielded %d steps, want 8", len(steps))
+	}
+	for i, s := range steps {
+		if want := i; s.Sequence != want {
+			t.Errorf("steps[%d].Sequence = %d, want %d", i, s.Sequence, want)
+		}
+		if s.Phase != "only" {
+			t.Errorf("steps[%d].Phase = %q, want %q", i, s.Phase, "only")
+		}
+	}
+
+	// Uncapped (0 or negative): all 10 steps survive.
+	for _, cap := range []int{0, -1} {
+		uncapped := FlattenPlanPhasesToSteps("task-cap", mkPhases(), cap)
+		if len(uncapped) != 10 {
+			t.Errorf("cap %d yielded %d steps, want 10 (uncapped)", cap, len(uncapped))
+		}
+	}
+
+	// Cross-phase chaining: phase 2's first step depends on phase 1's last
+	// step even when phase 1 was truncated at the cap.
+	twoPhases := func() []PlanPhaseSpec {
+		p1 := PlanPhaseSpec{Name: "one"}
+		for i := 0; i < 10; i++ {
+			p1.Steps = append(p1.Steps, plannerStep{Description: fmt.Sprintf("a%d", i)})
+		}
+		p2 := PlanPhaseSpec{Name: "two"}
+		p2.Steps = append(p2.Steps, plannerStep{Description: "b0"})
+		return []PlanPhaseSpec{p1, p2}
+	}
+	chained := FlattenPlanPhasesToSteps("task-cap-chain", twoPhases(), 8)
+	if len(chained) != 9 {
+		t.Fatalf("two-phase plan yielded %d steps, want 9 (8 capped + 1)", len(chained))
+	}
+	lastPhaseOne := chained[7]
+	firstPhaseTwo := chained[8]
+	if len(firstPhaseTwo.DependsOn) != 1 || firstPhaseTwo.DependsOn[0] != lastPhaseOne.ID {
+		t.Errorf("first step of phase 2 deps = %v, want [%s]", firstPhaseTwo.DependsOn, lastPhaseOne.ID)
+	}
 }

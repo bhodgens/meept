@@ -480,9 +480,13 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 		}
 	}
 
-	// Select agent based on tool hint
-	agentID := ts.selectAgent(step)
-	step.AgentID = agentID
+	// Select agent based on tool hint. An explicitly assigned step.AgentID
+	// (pair-session actor/reviewer steps are stamped by the strategist)
+	// wins — the hint table is a fallback, not an override. (2026-09-08
+	// audit LOW: scheduleStep clobbered pair-session reviewer assignments
+	// because "review" has no hint-table entry and fell through to chat.)
+	ts.assignStepAgent(step)
+	agentID := step.AgentID
 
 	// Acquire semaphore slots (non-blocking)
 	if !ts.acquireSlots(agentID) {
@@ -620,10 +624,33 @@ func (ts *TacticalScheduler) clearQuotaDeferrals(stepID string) {
 // QuotaResetError.Error() embeds "resets_at=<RFC3339>" and the
 // daemon's quota-wait stamp embeds "until <RFC3339>". Returns the zero time
 // when no future reset time can be recovered.
+//
+// M1: the pattern is a three-alternative regex (resets_at= / rate-limited
+// until / JSON "resets_at"), so each match's timestamp lives in a different
+// capture group. Iterate m[1:] and take the first non-empty group — testing
+// only m[1] left the daemon stamp and JSON shapes dead (5h parks degraded to
+// +5min UnknownResetDelay polls and exhausted at ~50min).
+//
+// M1 follow-up: the capture classes ([^\s\",}]+) do not exclude '.', so the
+// daemon stamp's trailing sentence period is swallowed
+// ("...until 2026-09-09T09:23:31Z."), and RFC3339 parse fails on the extra
+// text. Trim trailing sentence punctuation before parsing (a fractional
+// second's '.' is interior, never trailing, so this is safe).
 func quotaResetAtFromMessage(errMsg string) time.Time {
 	var earliest time.Time
 	for _, m := range quotaResetPatterns.FindAllStringSubmatch(errMsg, -1) {
-		t, err := time.Parse(time.RFC3339, strings.TrimSpace(m[1]))
+		var raw string
+		for _, g := range m[1:] {
+			if g != "" {
+				raw = g
+				break
+			}
+		}
+		if raw == "" {
+			continue
+		}
+		raw = strings.TrimRight(strings.TrimSpace(raw), ".,;:!?)\"'")
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
 		if err != nil || !t.After(time.Now()) {
 			continue // unparseable or already past — no wait worth scheduling
 		}
@@ -1522,6 +1549,18 @@ func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 	return config.AgentIDChat
 }
 
+// assignStepAgent applies the schedule-time agent-assignment policy:
+// an explicitly assigned step.AgentID (pair-session actor/reviewer steps
+// are stamped by the strategist) wins; the tool-hint table is a fallback,
+// not an override. (2026-09-08 audit LOW: scheduleStep clobbered
+// pair-session reviewer assignments because "review" has no hint-table
+// entry and fell through to chat.)
+func (ts *TacticalScheduler) assignStepAgent(step *task.TaskStep) {
+	if step.AgentID == "" {
+		step.AgentID = ts.selectAgent(step)
+	}
+}
+
 // SelectAgentForHint exports selectAgent so the tactical orchestrator (and
 // other callers outside the agent package) can pick an executor agent ID for
 // a tool hint without constructing a full TaskStep.
@@ -1719,10 +1758,21 @@ func (ts *TacticalScheduler) runValidationGate(_ context.Context, taskID string)
 }
 
 // allStepsTerminalWithFailures reports whether every step for a task is in a
-// terminal state AND at least one of them failed. AreAllCompleted is
-// success-only (it returns false whenever any step is StepFailed), so this
+// terminal state AND the task carries a failure-shaped outcome. AreAllCompleted
+// is success-only (it returns false whenever any step is StepFailed), so this
 // check is what lets a task with failures reach finalization — it must
 // finalize as StateFailed instead of hanging in an active state forever.
+//
+// M8: "failure-shaped" covers TWO shapes —
+//   - ≥1 StepFailed step (the original check), and
+//   - ≥1 StepRejected step with no successful revision (AreAllCompleted
+//     refuses such tasks too, but before this extension nothing else
+//     finalized them: the task hung until RecoverStaleTasks force-marked
+//     daemon_shutdown).
+//
+// The successful-revision lookup mirrors AreAllCompleted's rule: a revision
+// (IsRevisionStep) that is successfully terminal and depends on the rejected
+// step resolves it.
 func (ts *TacticalScheduler) allStepsTerminalWithFailures(taskID string) (bool, error) {
 	steps, err := ts.stepStore.ListByTaskID(taskID)
 	if err != nil {
@@ -1732,6 +1782,12 @@ func (ts *TacticalScheduler) allStepsTerminalWithFailures(taskID string) (bool, 
 		return false, nil // Nothing to finalize here; AreAllCompleted already treats this as done.
 	}
 	hasFailed := false
+	rejectedWithoutRevision := make(map[string]bool)
+	for _, s := range steps {
+		if s.State == task.StepRejected {
+			rejectedWithoutRevision[s.ID] = false
+		}
+	}
 	for _, s := range steps {
 		if !s.State.IsTerminal() {
 			return false, nil
@@ -1739,8 +1795,24 @@ func (ts *TacticalScheduler) allStepsTerminalWithFailures(taskID string) (bool, 
 		if s.State == task.StepFailed {
 			hasFailed = true
 		}
+		// A successful revision resolves the rejected step it depends on.
+		if s.State.IsSuccessfullyTerminal() && task.IsRevisionStep(s.ID) && len(s.DependsOn) > 0 {
+			// CreateRevision appends the original's ID as the LAST dep.
+			origID := s.DependsOn[len(s.DependsOn)-1]
+			if _, ok := rejectedWithoutRevision[origID]; ok {
+				rejectedWithoutRevision[origID] = true
+			}
+		}
 	}
-	return hasFailed, nil
+	if hasFailed {
+		return true, nil
+	}
+	for _, unresolved := range rejectedWithoutRevision {
+		if !unresolved {
+			return true, nil // all terminal, but a rejection was never revised → failure-finalizable (M8)
+		}
+	}
+	return false, nil
 }
 
 // failedStepsForTask returns the failed steps for a task, ordered by sequence.
@@ -2033,9 +2105,11 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 
 		newStepID = newStep.ID
 
-		// 8. Update task's TotalJobs count
-		t.TotalJobs++
-		if err := ts.taskStore.Update(t); err != nil {
+		// 8. Update task's TotalJobs count. Atomic increment (H12): the
+		// full-row Update wrote back the whole snapshot fetched at step 2,
+		// erasing any counter increment that landed concurrently between
+		// the Get and this write (lost TotalJobs/completed counters).
+		if err := ts.taskStore.IncrementTotalJobs(req.TaskID); err != nil {
 			ts.logger.Error("Failed to update task TotalJobs after handoff",
 				KeyTaskID, req.TaskID,
 				"error", err,

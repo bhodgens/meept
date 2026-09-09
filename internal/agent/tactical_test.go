@@ -584,3 +584,84 @@ func TestTacticalScheduler_CompletesWhenValidatorAbsent(t *testing.T) {
 		t.Fatalf("task state = %s, want %s", got.State, task.StateCompleted)
 	}
 }
+
+// TestTacticalScheduler_RejectedWithoutRevisionFinalizes is the M8
+// regression test: a task whose steps are ALL terminal but that contains a
+// rejected step with no successful revision (and no failed step) used to be
+// unfinalizable — AreAllCompleted refuses it (success-only) and
+// allStepsTerminalWithFailures required a StepFailed — so it hung until
+// RecoverStaleTasks force-marked daemon_shutdown. The extended check must
+// treat this shape as failure-finalizable.
+func TestTacticalScheduler_RejectedWithoutRevisionFinalizes(t *testing.T) {
+	ts, _, cleanup := newTacticalTestSetup(t)
+	defer cleanup()
+
+	parentTask := task.NewTask("m8-rejected", "rejected without revision")
+	parentTask.SetState(task.StateExecuting)
+	if err := ts.taskStore.Create(parentTask); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Rejected step, never revised; a sibling completed step (both terminal).
+	rejected := task.NewTaskStep(parentTask.ID, "will be rejected", 0)
+	if err := ts.stepStore.Create(rejected); err != nil {
+		t.Fatalf("create rejected step: %v", err)
+	}
+	if err := ts.stepStore.SetState(rejected.ID, task.StepRejected); err != nil {
+		t.Fatalf("set rejected: %v", err)
+	}
+	done := task.NewTaskStep(parentTask.ID, "fine step", 1)
+	if err := ts.stepStore.Create(done); err != nil {
+		t.Fatalf("create completed step: %v", err)
+	}
+	if err := ts.stepStore.SetState(done.ID, task.StepCompleted); err != nil {
+		t.Fatalf("set completed: %v", err)
+	}
+
+	// Precondition: AreAllCompleted refuses this task (that's why it hung).
+	allDone, err := ts.stepStore.AreAllCompleted(parentTask.ID)
+	if err != nil {
+		t.Fatalf("AreAllCompleted: %v", err)
+	}
+	if allDone {
+		t.Fatal("AreAllCompleted = true, want false (task shape must not be success-finalizable)")
+	}
+
+	// The extended terminal-with-failures check must finalize it.
+	terminal, err := ts.allStepsTerminalWithFailures(parentTask.ID)
+	if err != nil {
+		t.Fatalf("allStepsTerminalWithFailures: %v", err)
+	}
+	if !terminal {
+		t.Fatal("allStepsTerminalWithFailures = false, want true (rejected-without-revision is failure-finalizable)")
+	}
+
+	// A successfully-revised rejection does NOT count as failure-shaped.
+	rev := task.NewTaskStep(parentTask.ID, "revision of rejected", 1000)
+	rev.ID = fmt.Sprintf("step-%s-rev-1001-abc123", parentTask.ID)
+	rev.DependsOn = []string{rejected.ID}
+	rev.State = task.StepCompleted
+	if err := ts.stepStore.Create(rev); err != nil {
+		t.Fatalf("create revision: %v", err)
+	}
+	terminal, err = ts.allStepsTerminalWithFailures(parentTask.ID)
+	if err != nil {
+		t.Fatalf("allStepsTerminalWithFailures (revised): %v", err)
+	}
+	if terminal {
+		t.Fatal("revised rejection still counts as failure-shaped, want false")
+	}
+
+	// Non-terminal steps still block finalization.
+	pending := task.NewTaskStep(parentTask.ID, "not done yet", 2)
+	if err := ts.stepStore.Create(pending); err != nil {
+		t.Fatalf("create pending step: %v", err)
+	}
+	terminal, err = ts.allStepsTerminalWithFailures(parentTask.ID)
+	if err != nil {
+		t.Fatalf("allStepsTerminalWithFailures (pending): %v", err)
+	}
+	if terminal {
+		t.Fatal("pending step did not block finalization, want false")
+	}
+}

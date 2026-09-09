@@ -500,11 +500,14 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	// count the SUPERSEDED plan generation. Keeping them produced progress
 	// > 100% (observed: 3 completed of 2 total, 150%) because the new
 	// generation starts from zero steps.
-	t.TotalJobs = len(steps)
-	t.CompletedJobs = 0
-	t.FailedJobs = 0
+	// H12: counter write is atomic (SetPlanCounters); the state change goes
+	// through UpdateWithoutCounters — the full-row Update would write the
+	// pre-Plan snapshot back over concurrent counter increments.
+	if err := sp.taskStore.SetPlanCounters(req.TaskID, len(steps), 0, 0); err != nil {
+		sp.logger.Error("Failed to set task counters after planning", "error", err)
+	}
 	t.SetState(task.StateExecuting)
-	if err := sp.taskStore.Update(t); err != nil {
+	if err := sp.taskStore.UpdateWithoutCounters(t); err != nil {
 		sp.logger.Error("Failed to update task after planning", "error", err)
 	}
 
@@ -559,9 +562,13 @@ func (sp *StrategicPlanner) handlePairSession(ctx context.Context, t *task.Task,
 		}
 	}
 
-	t.TotalJobs = len(pairSteps)
+	// H12: atomic counter set + counter-free state write (see the planning
+	// path above).
+	if err := sp.taskStore.SetPlanCounters(req.TaskID, len(pairSteps), 0, 0); err != nil {
+		sp.logger.Error("Failed to set task counters after pair planning", "error", err)
+	}
 	t.SetState(task.StateExecuting)
-	if err := sp.taskStore.Update(t); err != nil {
+	if err := sp.taskStore.UpdateWithoutCounters(t); err != nil {
 		sp.logger.Error("Failed to update task after pair planning", "error", err)
 	}
 
@@ -730,7 +737,7 @@ func (sp *StrategicPlanner) planMultiPhase(ctx context.Context, req PlanRequest)
 		"mode":    "spec_plan",
 	})
 
-	steps := FlattenPlanPhasesToSteps(req.TaskID, parsed.Phases)
+	steps := FlattenPlanPhasesToSteps(req.TaskID, parsed.Phases, sp.maxStepsPerPhase)
 
 	if len(steps) == 0 {
 		return nil, fmt.Errorf("planner produced no executable steps")
@@ -1285,11 +1292,14 @@ func (sp *StrategicPlanner) awaitUserApproval(ctx context.Context, t *task.Task,
 		return fmt.Errorf("failed to store pending steps: %w", err)
 	}
 
-	t.TotalJobs = len(steps)
-	t.CompletedJobs = 0
-	t.FailedJobs = 0
+	// H12: atomic counter set + counter-free state write — the full-row
+	// Update would erase concurrent counter increments with stale
+	// snapshot values.
+	if err := sp.taskStore.SetPlanCounters(req.TaskID, len(steps), 0, 0); err != nil {
+		sp.logger.Error("Failed to set task counters for approval gate", "error", err)
+	}
 	t.SetState(task.StateAwaitingApproval)
-	if err := sp.taskStore.Update(t); err != nil {
+	if err := sp.taskStore.UpdateWithoutCounters(t); err != nil {
 		sp.logger.Error("Failed to update task to awaiting_approval", "error", err)
 		return fmt.Errorf("failed to update task state: %w", err)
 	}

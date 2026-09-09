@@ -205,6 +205,23 @@ func (s *Store) GetByID(id string) (*Task, error) {
 	return task, nil
 }
 
+// SetPlanCounters atomically writes total/completed/failed job counters.
+// It is the counter-write half of a split write: plan-generation sites set
+// these counters to planned-step totals and must NOT round-trip a stale
+// full-row snapshot through Update (H12: an interleaved atomic increment
+// between the Get and the Update was erased by the snapshot write-back).
+func (s *Store) SetPlanCounters(taskID string, total, completed, failed int) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		`UPDATE tasks SET total_jobs = ?, completed_jobs = ?, failed_jobs = ?, updated_at = ? WHERE id = ?`,
+		total, completed, failed, now, taskID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set plan counters for %s: %w", taskID, err)
+	}
+	return nil
+}
+
 // Update updates an existing task.
 func (s *Store) Update(task *Task) error {
 	metadataJSON := "{}"
@@ -248,6 +265,55 @@ func (s *Store) Update(task *Task) error {
 	if err != nil {
 		s.logger.Error("Failed to update task", "id", task.ID, "error", err)
 		return fmt.Errorf("failed to update task: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateWithoutCounters persists task columns EXCEPT total/completed/failed
+// job counters, which are left untouched in the row. Use it instead of
+// Update whenever the in-memory snapshot may carry stale counter values
+// (H12: a full-row Update overwrites concurrent atomic increments —
+// IncrementTotalJobs/IncrementCompletedJobs/IncrementFailedJobs — with the
+// snapshot's numbers).
+func (s *Store) UpdateWithoutCounters(task *Task) error {
+	metadataJSON := "{}"
+	if len(task.Metadata) > 0 {
+		metadataJSON = string(task.Metadata)
+	}
+
+	memoryRefsJSON := encodeStringSlice(task.MemoryRefs)
+	createdMemoriesJSON := encodeStringSlice(task.CreatedMemories)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`
+		UPDATE tasks
+		SET name = ?, description = ?, project_dir = ?, workspace_dir = ?, state = ?,
+		    git_repo = ?, memvid_zone = ?, metadata = ?, updated_at = ?,
+		    memory_refs = ?, context_query = ?, inherited_from = ?,
+		    created_memories = ?, assigned_agent = ?, token_usage = ?
+		WHERE id = ?`,
+		task.Name,
+		nullableString(task.Description),
+		nullableString(task.ProjectDir),
+		nullableString(task.WorkspaceDir),
+		string(task.State),
+		nullableString(task.GitRepo),
+		nullableString(task.MemvidZone),
+		metadataJSON,
+		now,
+		nullableString(memoryRefsJSON),
+		nullableString(task.ContextQuery),
+		nullableString(task.InheritedFrom),
+		nullableString(createdMemoriesJSON),
+		nullableString(task.AssignedAgent),
+		task.TokenUsage,
+		task.ID,
+	)
+
+	if err != nil {
+		s.logger.Error("Failed to update task (without counters)", "id", task.ID, "error", err)
+		return fmt.Errorf("failed to update task without counters: %w", err)
 	}
 
 	return nil
@@ -307,24 +373,34 @@ func (s *Store) IncrementFailedJobs(taskID string) error {
 // actual step rows. Called on task finalization so counters always reflect
 // reality regardless of races during execution (2026-09-07: task finalized
 // "2/1 completed, 200%" after revision churn moved counters off truth).
+//
+// M4: the recount is a SINGLE UPDATE whose SET values are scalar subqueries
+// over task_steps. The previous shape (SELECT the counts, then UPDATE with
+// the read-back values as two autocommit statements) had a window in which a
+// concurrent SetState(failed)+IncrementFailedJobs could be overwritten by the
+// stale counts (double-count) — or the increment lost entirely. The
+// subquery form computes and writes atomically; the follow-up SELECT only
+// reads back the persisted values for the return signature (all in-tree
+// callers discard them).
 func (s *Store) RecountJobs(taskID string) (total, completed, failed int, err error) {
-	err = s.db.QueryRow(`
-		SELECT
-			COUNT(*),
-			COALESCE(SUM(CASE WHEN state IN ('completed','approved') THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0)
-		FROM task_steps WHERE task_id = ?`, taskID,
-	).Scan(&total, &completed, &failed)
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = s.db.Exec(`
+		UPDATE tasks SET
+			total_jobs     = (SELECT COUNT(*) FROM task_steps WHERE task_id = tasks.id),
+			completed_jobs = (SELECT COALESCE(SUM(CASE WHEN state IN ('completed','approved') THEN 1 ELSE 0 END), 0) FROM task_steps WHERE task_id = tasks.id),
+			failed_jobs    = (SELECT COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) FROM task_steps WHERE task_id = tasks.id),
+			updated_at     = ?
+		WHERE id = ?`,
+		now, taskID,
+	)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to recount jobs for %s: %w", taskID, err)
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = s.db.Exec(
-		`UPDATE tasks SET total_jobs = ?, completed_jobs = ?, failed_jobs = ?, updated_at = ? WHERE id = ?`,
-		total, completed, failed, now, taskID,
-	)
+	err = s.db.QueryRow(
+		`SELECT total_jobs, completed_jobs, failed_jobs FROM tasks WHERE id = ?`, taskID,
+	).Scan(&total, &completed, &failed)
 	if err != nil {
-		return total, completed, failed, fmt.Errorf("failed to persist recounted jobs for %s: %w", taskID, err)
+		return 0, 0, 0, fmt.Errorf("failed to read recounted jobs for %s: %w", taskID, err)
 	}
 	return total, completed, failed, nil
 }

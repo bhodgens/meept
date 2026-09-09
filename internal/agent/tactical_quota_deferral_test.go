@@ -285,6 +285,36 @@ func TestQuotaResetAtFromMessage(t *testing.T) {
 	}
 }
 
+// TestQuotaResetAtFromMessage_AllShapes is the M1 regression table: the
+// recovery regex has three alternatives whose timestamps land in different
+// capture groups, so the parser must take the first non-empty group per
+// match (m[1] alone left the daemon stamp and the JSON shape dead — 5h
+// quota parks degraded to +5min polls and exhausted at ~50min).
+func TestQuotaResetAtFromMessage_AllShapes(t *testing.T) {
+	reset := time.Now().UTC().Add(5 * time.Hour).Truncate(time.Second)
+	stamp := reset.Format(time.RFC3339)
+	cases := []struct {
+		name string
+		msg  string
+	}{
+		{"quota_reset_error", "quota limit exceeded: provider=p model=m code=usage_limit_reached resets_at=" + stamp},
+		{"daemon_stamp", "quota wait: p/m is rate-limited until " + stamp + ". your request is saved and will need a re-ask once the limit resets."},
+		{"daemon_wrapped", "agent execution failed: quota limit exceeded: provider=p model=m code=usage_limit_reached resets_at=" + stamp + " (quota wait: p/m is rate-limited until " + stamp + ". your request is saved and will need a re-ask once the limit resets.)"},
+		{"json_resets_at", `bus error payload: {"error":"quota","resets_at":"` + stamp + `"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := quotaResetAtFromMessage(tc.msg)
+			if got.IsZero() {
+				t.Fatalf("no reset time recovered from %q", tc.msg)
+			}
+			if diff := got.Sub(reset); diff > time.Second || diff < -time.Second {
+				t.Errorf("recovered reset = %v, want ~%v", got, reset)
+			}
+		})
+	}
+}
+
 func TestIsQuotaClassFailure(t *testing.T) {
 	reset := time.Now().UTC().Add(time.Hour)
 	cases := []struct {

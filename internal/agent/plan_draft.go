@@ -237,14 +237,24 @@ func firstLineAsTitle(request string) string {
 // Each step gets Phase = phase.Name; inter-phase dependencies: the first
 // step of phase N+1 depends on the last step of phase N (unless the step
 // already has explicit deps). maxStepsPerPhase <= 0 disables the per-phase
-// cap. Extracted verbatim from planMultiPhase (plan-compiler leaf 04) so
-// the seal path flattens identically to the LLM spec_plan path.
-func FlattenPlanPhasesToSteps(taskID string, phases []PlanPhaseSpec) []*task.TaskStep {
+// cap. Extracted from planMultiPhase (plan-compiler leaf 04) so the seal
+// path flattens identically to the LLM spec_plan path.
+//
+// H4 regression guard: the original extraction dropped the legacy per-phase
+// cap that caf61fb2 enforced inline (`len(stepIDsInPhase) >= cap → break`),
+// letting un-flagged phases exceed the cap and break byte-identical legacy
+// behavior. The cap parameter is threaded explicitly; callers pass
+// sp.maxStepsPerPhase (or sp.MaxStepsPerPhase()).
+func FlattenPlanPhasesToSteps(taskID string, phases []PlanPhaseSpec, maxStepsPerPhase int) []*task.TaskStep {
 	var steps []*task.TaskStep
 	var prevPhaseLastStepID string
 	for phaseIdx, phase := range phases {
 		var stepIDsInPhase []string
 		for stepIdx, ps := range phase.Steps {
+			// Cap per-phase steps (legacy caf61fb2 invariant).
+			if maxStepsPerPhase > 0 && len(stepIDsInPhase) >= maxStepsPerPhase {
+				break
+			}
 			seq := phaseIdx*1000 + stepIdx // stable sequence across phases
 			step := task.NewTaskStep(taskID, ps.Description, seq)
 			step.ToolHint = ps.ToolHint
@@ -298,6 +308,18 @@ func (sp *StrategicPlanner) MaxStepsPerPhase() int {
 func PhaseSpecsFromPlan(in []plan.PhaseSpec) []PlanPhaseSpec {
 	out := make([]PlanPhaseSpec, 0, len(in))
 	for _, p := range in {
+		// Phase-level DependsOn: the compiler writes 1-based ordinals
+		// (same dialect as step refs), but PlanPhaseSpec.DependsOn is
+		// 0-indexed — decrement with a >=1 guard, mirroring the step-dep
+		// conversion below/above. (2026-09-08 audit M11: ordinals passed
+		// through unchanged violated the plan-compiler OPEN-QUESTIONS
+		// errata "must subtract 1".)
+		phaseDeps := make([]int, 0, len(p.DependsOn))
+		for _, d := range p.DependsOn {
+			if d >= 1 {
+				phaseDeps = append(phaseDeps, d-1)
+			}
+		}
 		steps := make([]plannerStep, 0, len(p.Steps))
 		for _, s := range p.Steps {
 			deps := make([]int, 0, len(s.DependsOn))
@@ -318,7 +340,7 @@ func PhaseSpecsFromPlan(in []plan.PhaseSpec) []PlanPhaseSpec {
 			Steps:       steps,
 			Produces:    p.Produces,
 			Consumes:    p.Consumes,
-			DependsOn:   p.DependsOn,
+			DependsOn:   phaseDeps,
 		})
 	}
 	return out
@@ -368,7 +390,9 @@ func (sp *StrategicPlanner) SealPlan(ctx context.Context, taskID string, phases 
 	}
 
 	// Flatten phases into executable steps (same shape as spec_plan).
-	steps := FlattenPlanPhasesToSteps(taskID, phases)
+	// H4: pass the planner's per-phase cap (0 = uncapped) so the seal path
+	// enforces the same legacy invariant as the LLM spec_plan path.
+	steps := FlattenPlanPhasesToSteps(taskID, phases, sp.MaxStepsPerPhase())
 	if len(steps) == 0 {
 		return fmt.Errorf("sealed plan produced no executable steps")
 	}
@@ -403,11 +427,14 @@ func (sp *StrategicPlanner) SealPlan(ctx context.Context, taskID string, phases 
 		})
 	}
 
-	t.TotalJobs = len(steps)
-	t.CompletedJobs = 0
-	t.FailedJobs = 0
+	// H12: atomic counter set + counter-free state write — the full-row
+	// Update would write stale snapshot counters over concurrent increments
+	// (and re-erase the metadata the re-read above deliberately refreshed).
+	if err := sp.taskStore.SetPlanCounters(taskID, len(steps), 0, 0); err != nil {
+		sp.logger.Error("Failed to set task counters after seal", "error", err)
+	}
 	t.SetState(task.StateExecuting)
-	if err := sp.taskStore.Update(t); err != nil {
+	if err := sp.taskStore.UpdateWithoutCounters(t); err != nil {
 		sp.logger.Error("Failed to update task after seal", "error", err)
 		return fmt.Errorf("failed to update task: %w", err)
 	}
