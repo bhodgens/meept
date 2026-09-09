@@ -23,3 +23,41 @@ accuracy when forced (no abstain), OOD-R=OOD abstain rate, L=p50 latency.
 | 14 | fine-tuned ModernBERT Stage-0.5 (tau 0.70-0.90): training divergent | 275 | 35.6% | 97.8% | 97.8% | 0.524 | 100% | ~90/embed (MPS) | 2 | none (measurement) | STAGE-0.5 ADDED 0 ROUTES: loss flat at ln(12), confidence uniform 1/12, forced acc = chance — fine-tune did not train (MPS fused-kernel or lr/step-dose suspect). Parked: CPU + frozen-backbone variants vs closing M3 early |
 | 15 | RESEARCH-DRIVEN RETRAIN: head-lr 1e-3 (was 2e-5, 50x underdose), CPU, quantile tau | 274 | 56.4% | 95.0% | 95.0% | 0.640 | 100% | ~90/embed CPU | 7 | technique fix: split head/backbone lr + quantile calibration | STAGE-0.5 WORKS: rescue adds +10-21pts coverage at 90-92% rescue precision; best E2E 91.45% (q=0.40) — 0.23pt under the 91.78% entry bar; iter-16: margin-gated rescue or corpus wave 4 |
 | 16 | 3-STAGE CASCADE (user arch): A centroid / B ModernBERT probe / C lfm-8b chain @0.868 | 274 | 100% | 92.8% | 92.8% | 0.690 | 100% | ~90/embed CPU | 18 | arch: chain folded in as stage C, aggregate E2E objective | CLEARS BAR: E2E 92.80% (q=0.50) vs 91.78% bar — +6.0 over chain-only; A 97.8% P, B 90.4% P; ~half chain load removed; P>=97% reinterpretation parked with user (a/b/c options in report) |
+| 17 | Hermes-transcript silver validation (48 cases, untracked corpus) | 275 | 100% | — | — | — | — | ~90/embed CPU | — | harvester + silver harness (validate_silver.py) | REAL-TRAFFIC GAP: expected system acc 84.7% vs 92.8% synthetic; misses = plan-execution + doc-writing shapes absent from gold; no daemon wiring until silver acc > 86.8% w/ margin |
+| 18 | wave 4: +39 plan-execution/docs/compound cases (subagent-authored, dedup 0 rej) | 314 | 100% | — | — | — | — | ~0 (cached) | — | corpus: taxonomy expansion | silver E2E flat (84.4% vs 84.7%, noise); plan/code execution boundary is now THE ambiguity — 1 miss became a correct abstain, 1 became a confident plan-route; silver-label adjudication recommended before more anchors |
+
+## CORRECTION (2026-09-08 audit) — iter-16 verdict withdrawn
+
+**Row 16's "CLEARS BAR" is wrong and is superseded; the row is retained
+as history.** `iter16_cascade3.py:141` scored Stage C with a seeded
+random draw (`np.random.random() < 0.868`, seed 42) instead of the
+campaign's deterministic expected-credit convention (eval_harness.py:579).
+The draw realized 98/109 = 89.9% on chain-destined cases (~+1σ luck
+over the true 86.8%) — that luck alone manufactured the headline.
+
+Deterministic recompute from the committed per-stage counts
+(results/iter-16/summary-20260908-142037.json; E2E is an exact linear
+function of them):
+
+- q=0.30: (87+23+0.868×136)/274 = **91.52%** — below bar
+- q=0.40: (87+34+0.868×124)/274 = **91.28%** — below bar
+- q=0.50: (87+47+0.868×109)/274 = **91.44%** — **FAILS the
+  pre-registered 91.78% M3 entry bar**
+
+**M3 verdict: NOT MET.** Full analysis:
+`results/iter-16-corrected/report.md`; the script is fixed in place.
+
+**Independent real-traffic confirmation (iter-17/m4-silver, ecbe086a):**
+the same-cascade silver replay of 48 verbatim Hermes messages measured
+expected system accuracy **84.7%** — below the synthetic claim AND below
+the 86.8% chain-only floor. The two findings agree: the synthetic 92.8%
+was partly measurement artifact (this correction) and does not transfer
+to real traffic (m4-silver's taxonomy/corpus-mix gap).
+
+Also recorded this audit (details in master.md): (1) the shipped Go gate
+is k=5-unanimity/floor-0.70 — the head the campaign measured FAILING
+(P 90.9-91.7%) — while the champion is centroid/floor-0.60/margin-0.030;
+M4 wiring requires REPLACING the shipped head, not flagging it.
+(2) iters 14-16 skip OOD before Stage B, so the pre-registered
+OOD-R ≥ 95% leg is UNEVALUATED for the cascade configs — an unmet gate,
+not a satisfied one.

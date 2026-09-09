@@ -155,6 +155,56 @@
 { "id": "h12-review-001", "input": "check the code quality of this patch", "expected_intent": "review", "expected_agent": "reviewer", "added_in": "iteration-12", "source": "synthetic" },
 { "id": "h12-code-001", "input": "refactor the service to use constructor injection", "expected_intent": "code", "expected_agent": "coder", "added_in": "iteration-12", "source": "synthetic" },
 
+    // ---- iteration 18: harvest wave 4 - real-world task shapes (hermes transcripts) ----
+    // Gap measured on 48 real messages (84.7% vs 92.8% synthetic): plan-execution and
+    // document-writing misses. Labeling conventions for this wave:
+    //   plan-execution of an EXISTING plan = code (executing is coding work, not plan);
+    //   doc-writing producing a tracked repo artifact = code, chat-bound prose = report;
+    //   multi-part: dominant execution verb wins; truly balanced = compound abstain (ood).
+    // ---- plan-execution (existing plan -> code, NOT plan) ----
+    { id: "h18-planexec-001", input: "implement the plan using subagents", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "executing an existing plan is coding work" },
+    { id: "h18-planexec-002", input: "execute the remaining tasks from plan.md", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-planexec-003", input: "dispatch the next wave of the tree", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-planexec-004", input: "continue with leaf 3", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "explicit plan-tree leaf reference = execution verb, not bare continue/chat" },
+    { id: "h18-planexec-005", input: "implement all tasks from the master plan", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-planexec-006", input: "run the deferred items from the handoff", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-planexec-007", input: "resume the interrupted implementation", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-planexec-008", input: "work through the TODO list in NEXT-STEPS.md", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-planexec-009", input: "the quota outage paused us mid-tree yesterday, leaves 4 through 9 are still open, so pick it back up and implement the rest of the plan with subagents", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "long input, execution intent appears late" },
+    { id: "h18-planexec-010", input: "kick off the next batch of tasks from the approved tree", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    // ---- document-writing (tracked repo artifact = code; chat-bound prose = report) ----
+    { id: "h18-docwrite-001", input: "write sections 4-6 of the report to report.md", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "writes a tracked repo artifact -> code, not report" },
+    { id: "h18-docwrite-002", input: "draft the README for this module", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-docwrite-003", input: "update the design doc with the new architecture", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "doc artifact edit, not designing an approach (contrast bound-003)" },
+    { id: "h18-docwrite-004", input: "write a migration guide for users", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "docs/ artifact in the repo" },
+    { id: "h18-docwrite-005", input: "add usage examples to the docs", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-docwrite-006", input: "document the new API surface", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-docwrite-007", input: "write the onboarding guide to docs/onboarding.md", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-docwrite-008", input: "rewrite the setup section of the tutorial so it matches the new install steps", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-docwrite-009", input: "draft the release notes", expected_intent: "report", expected_agent: "chat", added_in: "iteration-18", source: "hermes-inspired", note: "chat-bound prose, no repo file target; matches changelog->report precedent (h10-report-003)" },
+    { id: "h18-docwrite-010", input: "before tomorrow's review I need something to paste in the channel, so write up a summary of what changed this sprint", expected_intent: "report", expected_agent: "chat", added_in: "iteration-18", source: "hermes-inspired", note: "conversational summary, long input, intent late" },
+    // ---- multi-part orchestration (dominant execution verb wins; balanced = abstain) ----
+    { id: "h18-comp-001", input: "commit, then review the daemon for bugs and fix them", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "dominant verb = repo-wide daemon repair sweep (code); ancillary commit does not flip it" },
+    { id: "h18-comp-002", input: "audit the repo and fix everything you find", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "broad fix-everything sweep is coding work, not a targeted defect debug" },
+    { id: "h18-comp-003", input: "sweep the codebase for lint issues and correct them", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-comp-004", input: "go through the audit findings and work out how to sequence the remediation", expected_intent: "plan", expected_agent: "planner", added_in: "iteration-18", source: "hermes-inspired", note: "dominant verb = sequencing the approach = planning" },
+    { id: "h18-comp-005", input: "read the incident postmortem and draft a prevention plan for the recurring failure modes", expected_intent: "plan", expected_agent: "planner", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-comp-006", input: "review the PR and merge it if it looks good", expected_intent: "", ood: true, added_in: "iteration-18", source: "hermes-inspired", note: "balanced review+git compound: correct behavior is abstain" },
+    { id: "h18-comp-007", input: "analyze the latency regression and then optimize the hot path", expected_intent: "", ood: true, added_in: "iteration-18", source: "hermes-inspired", note: "balanced analyze+code compound: abstain" },
+    { id: "h18-comp-008", input: "plan the migration and execute phase one", expected_intent: "", ood: true, added_in: "iteration-18", source: "hermes-inspired", note: "balanced plan+code compound: abstain" },
+    { id: "h18-comp-009", input: "summarize the crash logs and then patch the root cause", expected_intent: "", ood: true, added_in: "iteration-18", source: "hermes-inspired", note: "balanced report+debug compound: abstain" },
+    // ---- config/ops-flavored code (wiring/registration work = code) ----
+    { id: "h18-cfgops-001", input: "add the projects section to the default config template", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-cfgops-002", input: "register the new tool in the dispatcher's action map", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-cfgops-003", input: "wire the cache into the session store", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-cfgops-004", input: "add a retention knob to the metrics config", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-cfgops-005", input: "hook the retry policy into the scheduler dispatch path", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-cfgops-006", input: "enable the feature flag in the staging config", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "config edit, not a rollout-strategy plan (contrast h10-plan-003)" },
+    { id: "h18-cfgops-007", input: "expose the health endpoint in the service manifest", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-cfgops-008", input: "extend the default preset list with a night-shift profile", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+    { id: "h18-cfgops-009", input: "standup agreed we ship it dark this week, so wire the new summarizer into the worker pool behind a config flag before Friday", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "long conversational input, wiring intent mid-message" },
+    { id: "h18-cfgops-010", input: "point the fallback endpoint at the new relay in the runtime settings", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
+
     // ---- failure class 8: long inputs, intent appears late ----
     { id: "long-001", input: "I have been digging through this codebase since Tuesday, tried everything the team suggested, re-read the docs twice, and I still cannot figure out for the life of me why the websocket connection drops exactly every five minutes, so please debug it", expected_intent: "debug", expected_agent: "debugger", added_in: "iteration-2", source: "synthetic" },
     { id: "long-002", input: "we have three services, a message bus, two databases, and a cron layer; the team is six engineers across two time zones; releases happen Thursdays; given all that context I want you to write a runbook for incident response", expected_intent: "code", expected_agent: "coder", added_in: "iteration-2", source: "synthetic" },
