@@ -827,7 +827,14 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		digest := d.buildSessionContextDigest(sessionID)
 		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, input, digest)
 		if err == nil && analysis != nil {
-			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) {
+			// Ambiguity short-circuit (session-continuity A5): when the
+			// session carries context (digest non-empty), a terse or
+			// reference-heavy input is plausibly a legitimate follow-up —
+			// clarification-looping it discards the context the analyzer
+			// just resolved references against. Let history-aware
+			// classification stand; only genuinely context-less inputs
+			// (empty digest) get the clarification prompt.
+			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) && digest.IsEmpty() {
 				return d.buildClarificationResult(input, analysis, sessionID)
 			}
 			// Store analysis for downstream use (e.g. planner interview mode)
@@ -1457,7 +1464,12 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 		digest := d.buildSessionContextDigest(sessionID)
 		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, combinedInput, digest)
 		if err == nil && analysis != nil {
-			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) {
+			// A5 gate (mirrors ClassifyAndRoute 3.5): with session context
+			// present, an ambiguous re-analysis of the user's answer should
+			// proceed with history-aware classification rather than loop
+			// another clarification prompt. Empty digest = context-less
+			// session; keep the follow-up prompt there.
+			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) && digest.IsEmpty() {
 				d.logger.Info("Still ambiguous after clarification, asking follow-up",
 					"ambiguity", analysis.Ambiguity,
 				)

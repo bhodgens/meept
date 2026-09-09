@@ -89,6 +89,29 @@ func (cs *captureServer) lastMessages(t *testing.T) []llm.ChatMessage {
 	return req.Messages
 }
 
+// analyzerMessages decodes the messages array from the FIRST captured
+// request — the intent-analyzer call. With the A5 ambiguity gate (2026-09-09)
+// a context-bearing session no longer stops at the clarification prompt, so
+// the classifier's own LLM call may be the LAST captured body; tests that
+// assert on the analyzer's wire shape must target the analyzer's request,
+// not whichever request happens to be last.
+func (cs *captureServer) analyzerMessages(t *testing.T) []llm.ChatMessage {
+	t.Helper()
+	cs.mu.Lock()
+	if len(cs.bodies) == 0 {
+		cs.mu.Unlock()
+		t.Fatal("no chat requests captured")
+	}
+	// Collect under lock; decode outside (mutexio: no Unmarshal under lock).
+	body := cs.bodies[0]
+	cs.mu.Unlock()
+	var req capturedChatRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("decode captured request: %v", err)
+	}
+	return req.Messages
+}
+
 // newDigestCaptureDispatcher builds a dispatcher wired to a real task
 // registry (for buildSessionContextDigest) and a real llm.Client pointed at
 // the capture server, mirroring the NewDispatcher classifier-client wiring.
@@ -188,11 +211,22 @@ func TestDispatcher_ClassifyAndRoute_BuildsSessionDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
-	if result == nil || !result.ClarificationNeeded {
-		t.Fatalf("expected clarification gate result, got %+v", result)
+	// A5 ambiguity gate: with session context present (non-empty digest),
+	// an ambiguous analysis must NOT clarification-gate — history-aware
+	// classification stands. (Pre-2026-09-09 this result was a
+	// clarification; the gate now requires an EMPTY digest.)
+	if result == nil {
+		t.Fatal("nil result")
+	}
+	if result.ClarificationNeeded {
+		t.Fatalf("context-bearing session clarification-gated an ambiguous input; A5 gate missing")
 	}
 
-	msgs := cs.lastMessages(t)
+	// The analyzer call still happened with the digest: the captured
+	// intent-analyzer user message must carry the activity block. Target
+	// the analyzer's request (first captured), not the latest — with the
+	// A5 gate the dispatcher now proceeds to the classifier's own call.
+	msgs := cs.analyzerMessages(t)
 	if len(msgs) != 2 {
 		t.Fatalf("captured %d messages, want 2", len(msgs))
 	}
@@ -258,11 +292,23 @@ func TestDispatcher_ResumeAfterClarification_BuildsSessionDigest(t *testing.T) {
 		Summary:    "Fix the login bug",
 	}, config.AgentIDChat)
 
-	if _, err := d.ResumeAfterClarification(context.Background(), "Fix the login bug", "the one you just finished", "sess-wire2"); err != nil {
+	result, err := d.ResumeAfterClarification(context.Background(), "Fix the login bug", "the one you just finished", "sess-wire2")
+	if err != nil {
 		t.Fatalf("ResumeAfterClarification: %v", err)
 	}
+	// A5 gate (site 2): with session context present, an ambiguous
+	// re-analysis must NOT ask a follow-up clarification — it proceeds
+	// with history-aware routing. (Pre-2026-09-09 this clarified again.)
+	if result != nil && result.ClarificationNeeded {
+		t.Fatalf("context-bearing session re-clarified; A5 gate missing at ResumeAfterClarification")
+	}
 
-	msgs := cs.lastMessages(t)
+	// The re-analysis call still happened with the digest: the captured
+	// intent-analyzer user message must start with the combined
+	// original+clarification input and carry the activity block. Target
+	// the analyzer's request (first captured) — post-gate, downstream
+	// classification may add its own LLM call.
+	msgs := cs.analyzerMessages(t)
 	if len(msgs) != 2 {
 		t.Fatalf("captured %d messages, want 2", len(msgs))
 	}
