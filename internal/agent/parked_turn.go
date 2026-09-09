@@ -114,8 +114,8 @@ type TurnParker struct {
 	// at wiring time like the fields above.
 	parkKeyOverride func(rec ParkedTurnRecord) string
 
-	mu         sync.Mutex
-	parked     []ParkedTurnRecord
+	mu     sync.Mutex
+	parked []ParkedTurnRecord
 	// parkKeys parallel-parks persistence keys (index-aligned while the
 	// record is queued; "" for records parked without persistence).
 	parkKeys   []string

@@ -519,8 +519,9 @@ type AgentLoop struct {
 	// of rescuing twice.
 	reasonWatchRescued bool
 	// reasonWatchRescueNext makes the NEXT LLM call in this cycle run with
-	// thinking disabled (appends llm.DisableThinking after the agent's
-	// reasoning opts, so it wins), consumed and cleared on use.
+	// thinking disabled (appends llm.DisableThinking AFTER the agent's
+	// reasoning opts in reasoningCycle so it wins the single reasoning
+	// pointer — last apply wins; H3 fix), consumed and cleared on use.
 	reasonWatchRescueNext bool
 
 	// Conversation management
@@ -705,6 +706,19 @@ type AgentLoop struct {
 	// Budget scope tracking for per-task/per-session token and cost limits
 	currentTaskID    string
 	currentSessionID string
+
+	// turnAccountingSessionID is the per-turn ACCOUNTING scope for
+	// interactive turns (H2, bughunt 2026-09-08): RunOnceWithParts snapshots
+	// the turn's conversation id here so chatWithFailoverRaw's WithTaskScope
+	// option (budget per-session tracking + metrics.db llm_calls.session_id)
+	// still attributes tokens to the conversation. Unlike currentSessionID —
+	// which cbf0b775 briefly repurposed to carry the conversation id — this
+	// field is consumed ONLY by the token-accounting consumer in
+	// chatWithFailoverRaw, so session-identity readers (parkThrottledTurn,
+	// session designation, title refresh, executor conversation routing)
+	// keep their pre-cbf0b775 semantics: currentSessionID stays empty on
+	// interactive turns (AUDIT FIX H11). Guarded by l.mu.
+	turnAccountingSessionID string
 
 	// Metrics collection for analytics
 	taskCollector    *metrics.TaskCollector
@@ -2193,16 +2207,23 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	defer l.clearThrottleTurnContext()
 
 	// Scope this turn's LLM calls to the conversation for per-session token
-	// accounting (metrics.db llm_calls.session_id). currentSessionID is only
-	// populated on the task path (setTaskScope); interactive turns carry the
-	// conversation id as a parameter, so snapshot and restore it here.
+	// accounting (metrics.db llm_calls.session_id, budget per-session
+	// tracking). H2 (bughunt 2026-09-08): the conversation id is snapshotted
+	// into the DEDICATED accounting field — NOT currentSessionID. Stamping
+	// currentSessionID (cbf0b775) leaked the conv-* id into session-identity
+	// readers (parkThrottledTurn's ParkedTurnRecord.SessionID, session
+	// designation, title refresh, executor conversation routing), so park
+	// events carried conv-* ids and the WS session filter dropped them for
+	// interactive turns (H11 regression). currentSessionID keeps its
+	// pre-cbf0b775 semantics: set only on the task path (RunWithTask), empty
+	// on interactive turns.
 	l.mu.Lock()
-	prevSessionID := l.currentSessionID
-	l.currentSessionID = conversationID
+	prevAccountingSessionID := l.turnAccountingSessionID
+	l.turnAccountingSessionID = conversationID
 	l.mu.Unlock()
 	defer func() {
 		l.mu.Lock()
-		l.currentSessionID = prevSessionID
+		l.turnAccountingSessionID = prevAccountingSessionID
 		l.mu.Unlock()
 	}()
 
@@ -2811,6 +2832,10 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 
 	// Truncate if needed
 	conv.Truncate()
+
+	// D-H3 (latent hardening, bughunt 2026-09-08): skill runs must not
+	// inherit guard state from the preceding interactive/task turn.
+	l.resetTurnGuards()
 
 	// Run reasoning cycle with skill constraints
 	response, err := l.reasoningCycle(ctx, conv, conversationID)
@@ -3584,17 +3609,6 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		// Build chat options with resolved inference parameters from agent spec
 		chatOpts := l.resolveInferenceParams()
-		// Reasoning-watchdog rescue: when the previous turn(s) produced
-		// only reasoning_content, run this call with thinking disabled —
-		// appended after the agent's reasoning opts so it wins (single
-		// reasoning pointer, last apply wins). Consumed on use.
-		l.mu.Lock()
-		rescueNext := l.reasonWatchRescueNext
-		l.reasonWatchRescueNext = false
-		l.mu.Unlock()
-		if rescueNext {
-			chatOpts = append(chatOpts, llm.DisableThinking())
-		}
 		// In warning zone, don't send tools so the LLM produces a final text response
 		if len(tools) > 0 && !inWarningZone {
 			chatOpts = append(chatOpts, llm.WithTools(tools))
@@ -3701,6 +3715,22 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 		if reasoningCfg != nil {
 			chatOpts = append(chatOpts, llm.WithReasoning(reasoningCfg))
+		}
+
+		// Reasoning-watchdog rescue (H3, bughunt 2026-09-08): consume the
+		// rescue flag AFTER the reasoning-config block and append
+		// DisableThinking here. WithReasoning and DisableThinking both write
+		// the single chatOptions.reasoning pointer — last apply wins — so
+		// appending BEFORE WithReasoning (the old position) let a
+		// reasoning-configured agent re-enable thinking and re-fail the
+		// rescue every time. Consumed on use; a rescue that still yields a
+		// reasoning-only reply terminates via the reasonWatchRescued latch.
+		l.mu.Lock()
+		rescueNext := l.reasonWatchRescueNext
+		l.reasonWatchRescueNext = false
+		l.mu.Unlock()
+		if rescueNext {
+			chatOpts = append(chatOpts, llm.DisableThinking())
 		}
 
 		// Stream assistant text deltas to subscribed clients while the
@@ -4018,8 +4048,13 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				}
 			}
 
-			// Plan 4.2: Check for permission denied errors and set requires_approval designation
+			// Plan 4.2: Check for permission denied errors and set requires_approval designation.
+			// C1 defense (bughunt 2026-09-08): nil slots (defensive shape —
+			// positional integrity is enforced by the executor) are skipped.
 			for _, result := range results {
+				if result == nil {
+					continue
+				}
 				if !result.Success && strings.Contains(result.Error, "permission denied") {
 					l.safeTransition(StateBlocked, "permission_denied", map[string]any{
 						"tool":      result.ToolCallID,
@@ -4159,13 +4194,33 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Add tool results to conversation with security boundary markers.
 			// Each result corresponds positionally to response.ToolCalls[i].
 			for i, result := range results {
+				// C1 defense (bughunt 2026-09-08): a nil slot must not
+				// panic the loop, but skipping it entirely would break
+				// assistant-tool_calls/tool-result pairing (a dangling
+				// tool_call_id gets HTTP-400-rejected by strict providers
+				// on the next iteration). Synthesize a skipped-error
+				// result for response.ToolCalls[i] by position instead.
+				if result == nil {
+					var orphanID string
+					if i < len(response.ToolCalls) {
+						orphanID = response.ToolCalls[i].ID
+					} else {
+						orphanID = fmt.Sprintf("unknown-tool-call-%d", i)
+					}
+					result = &ExecutionResult{
+						ToolCallID: orphanID,
+						Success:    false,
+						Error:      "skipped: no execution result was produced for this tool call",
+					}
+				}
 				// Per-result budget: the decayed dynamic budget lifted to the
 				// tool's declared floor (registry lookup; nil/unknown tool ->
 				// unchanged). resultBudgetFor is a file-scope helper because
 				// the local `tools` slice in this function shadows the tools
-				// package; the pipeline call above runs at the unlifted
-				// dynamic budget and this ToCompressedJSON budget is >= it,
-				// so a floor-declared tool's result is never re-clipped here.
+				// package; the compression pipeline call above ALREADY runs
+				// at the same lifted pipelineBudget, and this ToCompressedJSON
+				// budget is computed identically, so both consumers always
+				// agree (tool-result-budget leaf 01).
 				var budget int
 				if i < len(response.ToolCalls) {
 					budget = resultBudgetFor(l.registry, dynamicToolBudget, response.ToolCalls[i].Function.Name)
@@ -4290,7 +4345,6 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 						conv.AddAssistantMessage("[reasoning-only turn]")
 						conv.AddUserMessage("[system: you have produced thinking but no visible output twice. respond NOW with either your answer as visible text or a tool call. do not think silently.]")
 						l.reasonWatchRescueNext = true
-						iteration++
 						continue
 					}
 					l.logger.Warn("Reasoning-only streak breached after disable-thinking rescue, terminating gracefully",
@@ -4773,10 +4827,17 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	llmBackoff := NewBackoff(llmCfg)
 	ctx = attachLLMBudget(ctx, maxAttempts)
 
-	// Prepend WithTaskScope option if scope is set
+	// Prepend WithTaskScope option if scope is set. H2 (bughunt 2026-09-08):
+	// the ACCOUNTING session id comes from the dedicated per-turn field
+	// (set by RunOnceWithParts for interactive turns, RunWithTask for task
+	// turns) so conversation-scoped token attribution keeps working.
+	// currentSessionID is deliberately NOT consulted here: it is a
+	// session-identity field (task path only) whose value must not leak into
+	// accounting nor vice versa (AUDIT FIX H11 — park records must never
+	// carry conv-* ids for interactive turns).
 	l.mu.RLock()
 	taskID := l.currentTaskID
-	sessionID := l.currentSessionID
+	sessionID := l.turnAccountingSessionID
 	agentID := l.agentID
 	l.mu.RUnlock()
 	if taskID != "" || sessionID != "" {
@@ -5317,11 +5378,21 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		}
 	}
 
-	// Set budget scope tracking for this task
+	// Set budget scope tracking for this task. H2 (bughunt 2026-09-08): the
+	// accounting consumer (chatWithFailoverRaw) reads ONLY the dedicated
+	// turnAccountingSessionID field, so the task path populates it alongside
+	// the session-identity field. RunOnceWithParts does the same for
+	// interactive turns; currentSessionID remains the session-identity
+	// source for designation/title-refresh readers only.
 	l.mu.Lock()
 	l.currentTaskID = t.ID
 	l.currentSessionID = conversationID
+	l.turnAccountingSessionID = conversationID
 	l.mu.Unlock()
+
+	// D-H3 (latent hardening, bughunt 2026-09-08): task runs must not
+	// inherit guard state from the preceding interactive/skill turn.
+	l.resetTurnGuards()
 	defer func() {
 		// Cleanup budget tracking entries for completed task
 		l.mu.Lock()
@@ -5329,6 +5400,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		sessionID := l.currentSessionID
 		l.currentTaskID = ""
 		l.currentSessionID = ""
+		l.turnAccountingSessionID = ""
 		l.mu.Unlock()
 
 		if l.llmClient != nil && l.llmClient.Budget() != nil {
@@ -6161,8 +6233,14 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 	}
 
 	// Propagate the current conversation/session ID so bus progress events
-	// carry it for WS filter routing.
-	l.executor.SetConversationID(l.currentSessionID)
+	// carry it for WS filter routing. Read under the loop mutex (H2 hardening:
+	// the field is written on the task path and by WithSessionID on other
+	// goroutines). Empty on interactive turns by design — conv-* ids must
+	// not leak into session-scoped WS routing (AUDIT FIX H11).
+	l.mu.RLock()
+	accountingSession := l.currentSessionID
+	l.mu.RUnlock()
+	l.executor.SetConversationID(accountingSession)
 
 	if l.config.Memory.RecallMode != RecallModeDisabled {
 		return l.executor.ExecuteAll(ctx, toolCalls)
@@ -6670,7 +6748,10 @@ func (l *AgentLoop) publishTurnEndEvent(ctx context.Context, conversationID stri
 	// Increment turn counter and trigger periodic title refresh
 	l.turnCounter++
 	const titleRefreshInterval = 5 // Refresh title every 5 turns
-	if l.sessionRefresher != nil && l.turnCounter%titleRefreshInterval == 0 && l.currentSessionID != "" {
+	l.mu.RLock()
+	identitySession := l.currentSessionID
+	l.mu.RUnlock()
+	if l.sessionRefresher != nil && l.turnCounter%titleRefreshInterval == 0 && identitySession != "" {
 		go l.triggerTitleRefresh(ctx, conversationID)
 	}
 
@@ -7529,18 +7610,24 @@ func (l *AgentLoop) recordTaskMetrics(t *task.Task, modelID string, success bool
 // When the designation changes to waiting_human, a notification is published
 // to alert the user that the session needs their input.
 func (l *AgentLoop) updateSessionDesignation(status session.DesignationStatus, reason, priority string) {
-	if l.sessionStore == nil || l.currentSessionID == "" {
+	// H2 hardening: snapshot the session-identity id under the loop mutex;
+	// the task path writes it concurrently. Empty on interactive turns —
+	// designation updates are session-bound and must never carry conv-* ids.
+	l.mu.RLock()
+	sessionID := l.currentSessionID
+	l.mu.RUnlock()
+	if l.sessionStore == nil || sessionID == "" {
 		return
 	}
-	if err := l.sessionStore.UpdateDesignation(l.currentSessionID, status, reason, priority); err != nil {
+	if err := l.sessionStore.UpdateDesignation(sessionID, status, reason, priority); err != nil {
 		l.logger.Warn("failed to update session designation",
-			"session_id", l.currentSessionID, "status", status, "error", err)
+			"session_id", sessionID, "status", status, "error", err)
 	}
 
 	// Publish notification when session enters "waiting_human" state (Plan 4.3).
 	if status == session.DesignationWaitingHuman && l.notificationPublisher != nil {
 		l.notificationPublisher.PublishSessionNotification(
-			l.currentSessionID, l.agentID, "info",
+			sessionID, l.agentID, "info",
 			"Awaiting Your Response", reason,
 		)
 	}
@@ -7548,25 +7635,37 @@ func (l *AgentLoop) updateSessionDesignation(status session.DesignationStatus, r
 
 // clearSessionDesignation clears the session's designation (Plan 4.2).
 func (l *AgentLoop) clearSessionDesignation() {
-	if l.sessionStore == nil || l.currentSessionID == "" {
+	// H2 hardening: mutex-guarded snapshot, same rationale as
+	// updateSessionDesignation.
+	l.mu.RLock()
+	sessionID := l.currentSessionID
+	l.mu.RUnlock()
+	if l.sessionStore == nil || sessionID == "" {
 		return
 	}
-	if err := l.sessionStore.ClearDesignation(l.currentSessionID); err != nil {
+	if err := l.sessionStore.ClearDesignation(sessionID); err != nil {
 		l.logger.Warn("failed to clear session designation",
-			"session_id", l.currentSessionID, "error", err)
+			"session_id", sessionID, "error", err)
 	}
 }
 
 // triggerTitleRefresh triggers a session title refresh via the bus.
 // Runs in a goroutine to avoid blocking the agent loop.
 func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID string) {
-	if l.sessionRefresher == nil || l.currentSessionID == "" {
+	// H2 hardening: mutex-guarded snapshot; empty on interactive turns so a
+	// refresh is never requested for (nor an event published with) a conv-*
+	// id (AUDIT FIX H11 — 'session not found' warns).
+	l.mu.RLock()
+	sessionID := l.currentSessionID
+	turnCount := l.turnCounter
+	l.mu.RUnlock()
+	if l.sessionRefresher == nil || sessionID == "" {
 		return
 	}
 
 	l.logger.Debug("Triggering periodic session title refresh",
-		"session_id", l.currentSessionID,
-		"turn_count", l.turnCounter,
+		"session_id", sessionID,
+		"turn_count", turnCount,
 	)
 
 	// Build refresh request with keywords from conversation
@@ -7591,8 +7690,8 @@ func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID stri
 	}
 
 	req := session.RefreshRequest{
-		SessionID: l.currentSessionID,
-		TurnCount: l.turnCounter,
+		SessionID: sessionID,
+		TurnCount: turnCount,
 		Keywords:  keywords,
 	}
 
@@ -7600,7 +7699,7 @@ func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID stri
 	result, err := l.sessionRefresher.Refresh(ctx, req)
 	if err != nil {
 		l.logger.Warn("Periodic title refresh failed",
-			"session_id", l.currentSessionID,
+			"session_id", sessionID,
 			"error", err,
 		)
 		return
@@ -7609,7 +7708,7 @@ func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID stri
 	// Publish event for GUI updates
 	if l.bus != nil {
 		payload, mErr := json.Marshal(map[string]any{
-			"session_id":  l.currentSessionID,
+			"session_id":  sessionID,
 			"name":        result.Name,
 			"description": result.Description,
 		})
@@ -7628,7 +7727,7 @@ func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID stri
 	}
 
 	l.logger.Info("Periodic session title refreshed",
-		"session_id", l.currentSessionID,
+		"session_id", sessionID,
 		"name", result.Name,
 		"description", result.Description,
 	)

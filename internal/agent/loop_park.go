@@ -255,7 +255,11 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 	}
 
 	// Capture the original dispatch for the resume path (Task 3). Session
-	// identity is read under the loop mutex.
+	// identity is read under the loop mutex. H2 (bughunt 2026-09-08): the
+	// task path (RunWithTask) is the only writer of currentSessionID —
+	// interactive turns leave it empty again (the cbf0b775 accounting
+	// repurpose moved to the dedicated turnAccountingSessionID field), so
+	// the AUDIT FIX H11 contract below holds unconditionally.
 	l.mu.RLock()
 	sessionID := l.currentSessionID
 	l.mu.RUnlock()

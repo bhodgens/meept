@@ -141,11 +141,11 @@ func TestTurnParkerPersistence_ReArmAfterRestart(t *testing.T) {
 		p1.SetParkPersistence(store, ParkKindChat)
 		p1.Start(ctx)
 		if !p1.Park(ParkedTurnRecord{
-			SessionID:    "s-restart",
-			Class:        llm.FailureQuota,
-			ResumeAt:     resumeAt,
-			MaxAttempts:  3,
-			TurnPayload:  []byte(`{"message":"hi"}`),
+			SessionID:   "s-restart",
+			Class:       llm.FailureQuota,
+			ResumeAt:    resumeAt,
+			MaxAttempts: 3,
+			TurnPayload: []byte(`{"message":"hi"}`),
 		}) {
 			t.Fatal("expected park to succeed")
 		}
@@ -201,9 +201,9 @@ func TestTurnParkerPersistence_ExpiredPrunedAtLoad(t *testing.T) {
 
 	// Seed rows directly: one expired, one live.
 	expired := ParkedTurnRecord{
-		SessionID:  "s-expired",
-		Class:      llm.FailureQuota,
-		ResumeAt:   time.Now().Add(-time.Hour),
+		SessionID:   "s-expired",
+		Class:       llm.FailureQuota,
+		ResumeAt:    time.Now().Add(-time.Hour),
 		TurnPayload: []byte(`{"message":"old"}`),
 	}
 	live := ParkedTurnRecord{
