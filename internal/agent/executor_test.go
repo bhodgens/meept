@@ -12,6 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
 
@@ -517,6 +518,7 @@ func TestToolActionMap(t *testing.T) {
 		"web_search":       "network_request",
 		"web_fetch":        "network_request",
 		"transcript_fetch": "network_request",
+		"json_extract":     "network_request",
 	}
 
 	for tool, expectedAction := range expectedMappings {
@@ -528,6 +530,47 @@ func TestToolActionMap(t *testing.T) {
 		if action != expectedAction {
 			t.Errorf("tool %s: expected action=%s, got %s", tool, expectedAction, action)
 		}
+	}
+}
+
+// TestToCompressedJSON_RetainsSmallFields: compressing an oversized result
+// must carry the small bookkeeping fields (Evidence, Terminate, CascadeFrom,
+// IsCascading) into the compressed shape. Dropping them lost cascade/finality
+// bookkeeping exactly when results were large enough to matter.
+func TestToCompressedJSON_RetainsSmallFields(t *testing.T) {
+	result := &ExecutionResult{
+		ToolCallID:  "call_42",
+		Success:     false,
+		Result:      strings.Repeat("r", 100000), // far over any budget
+		Error:       "boom",
+		Evidence:    []models.Evidence{models.NewEvidence("file_exists", "/tmp/x", "ok", "file_read")},
+		Terminate:   true,
+		CascadeFrom: "call_41",
+		IsCascading: true,
+		TaintLabel:  taint.TaintExternal,
+	}
+
+	out := result.ToCompressedJSON(1000) // tiny budget: forces compression
+	if !strings.Contains(out, `"tool_call_id":"call_42"`) {
+		t.Errorf("tool_call_id lost: %.200s", out)
+	}
+	if !strings.Contains(out, `"terminate":true`) {
+		t.Errorf("terminate lost during compression: %.200s", out)
+	}
+	if !strings.Contains(out, `"cascade_from":"call_41"`) {
+		t.Errorf("cascade_from lost during compression: %.200s", out)
+	}
+	if !strings.Contains(out, `"is_cascading":true`) {
+		t.Errorf("is_cascading lost during compression: %.200s", out)
+	}
+	if !strings.Contains(out, `"evidence":[`) {
+		t.Errorf("evidence lost during compression: %.200s", out)
+	}
+	if !strings.Contains(out, `"taint_label":"external"`) {
+		t.Errorf("taint_label lost during compression: %.200s", out)
+	}
+	if len(out) >= 100000 {
+		t.Errorf("output not compressed (len=%d)", len(out))
 	}
 }
 

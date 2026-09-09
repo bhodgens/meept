@@ -253,6 +253,18 @@ var ToolActionMap = map[string]string{
 	ToolFileWrite:     ToolFileWrite,
 	ToolFileDelete:    ToolFileDelete,
 	ToolListDirectory: ToolFileRead,
+	// Read-only search/discovery: same SAFE file_read class as
+	// list_directory above. Both tools are granted in agent configs
+	// (file_grep x4, file_find x3) but were hard-denied at runtime
+	// before these entries (bughunt H7 class).
+	"file_grep": ToolFileRead,
+	"file_find": ToolFileRead,
+	// Precise file patching: MEDIUM file_write class (it modifies files,
+	// like WriteFileTool, but does not create/replace them wholesale).
+	"file_edit": ToolFileWrite,
+	// remember appends improvement notes to a local markdown queue file
+	// (.meept/improvements.md): a plain local file write, MEDIUM.
+	"remember": ToolFileWrite,
 
 	// Network operations
 	ToolWebSearch: "network_request",
@@ -263,12 +275,35 @@ var ToolActionMap = map[string]string{
 	// this mapping the tool name itself becomes the action and the
 	// engine's lookup fails ("Unknown action"), blocking the tool.
 	"transcript_fetch": "network_request",
+	// json_extract (bughunt H7, same class as transcript_fetch above):
+	// runs a dedicated local extraction model over HTTP (optionally
+	// reading an input file first). The HTTP round-trip is the security-
+	// relevant surface, so it maps to network_request (RiskLow in
+	// BuiltinRules + seed_rules.go). Without this entry the fallback
+	// action "json_extract" has no BuiltinRules rule and every call is
+	// denied with "Unknown action" despite being registered and granted.
+	"json_extract": "network_request",
 
 	// Memory operations
 	ToolMemorySearch:     "memory_read",
 	ToolMemoryGetContext: "memory_read",
 	ToolMemoryStore:      "memory_write",
 	ToolMemoryDelete:     "memory_write",
+	// Memory claim-curation family (granted to librarian/verifier-style
+	// agents): writes mutate claim state, reads only query it. Same
+	// read/write split as the core memory tools above (bughunt H7 class:
+	// all were "Unknown action"-denied before these entries).
+	"retain":            "memory_write",
+	"recall":            "memory_read",
+	"reflect":           "memory_write",
+	"retain_claim":      "memory_write",
+	"retain_decision":   "memory_write",
+	"retain_prediction": "memory_write",
+	"mark_superseded":   "memory_write",
+	"mark_resolved":     "memory_write",
+	"record_review":     "memory_write",
+	"reject_claim":      "memory_write",
+	"promote_claim":     "memory_write",
 
 	// Platform introspection (read-only, safe)
 	ToolPlatformStatus: "platform_read",
@@ -282,6 +317,14 @@ var ToolActionMap = map[string]string{
 	"task_list":   "task_read",
 	"task_update": "task_write",
 
+	// Scheduled jobs (scheduler agent grants schedule_*): reads vs
+	// writes follow the task_read/task_write split (bughunt H7 class —
+	// previously "Unknown action"-denied for the scheduler).
+	"schedule_create": "task_write",
+	"schedule_list":   "task_read",
+	"schedule_get":    "task_read",
+	"schedule_delete": "task_write",
+
 	// Agent delegation
 	"delegate_task":   "agent_delegate",
 	ToolRequestReview: "agent_delegate",
@@ -289,18 +332,75 @@ var ToolActionMap = map[string]string{
 	// Speak router (leaf 11): mid-turn user replies ride the messaging
 	// surface — bus publish on employee.notify, no side effects beyond it.
 	"reply_to_user": "send_message",
+	// ask surfaces a question to the user and waits for their reply;
+	// request_handoff is a pure bus publish (spec.go BaselineTools
+	// comment). Both are messaging-surface, no filesystem/network side
+	// effects (bughunt H7 class: previously "Unknown action"-denied —
+	// ask is granted to the chat agent, request_handoff is baseline).
+	"ask":             "send_message",
+	"request_handoff": "send_message",
 
-	// Code intelligence - AST (read-only, safe)
-	"ast_parse":   ToolCodeRead,
-	"ast_symbols": ToolCodeRead,
-	"ast_query":   ToolCodeRead,
+	// PDF reading is a local file read at heart (URL inputs pass the
+	// same SSRF guard as web_fetch and land in the same result shape).
+	// Granted by the analyst agent; previously hard-denied (H7 class).
+	"pdf_read": ToolFileRead,
 
-	// Code intelligence - LSP (read-only, requires server)
-	"lsp_goto_definition":   ToolCodeRead,
-	"lsp_find_references":   ToolCodeRead,
-	"lsp_hover":             ToolCodeRead,
-	"lsp_workspace_symbols": ToolCodeRead,
-	"lsp_diagnostics":       ToolCodeRead,
+	// Skill authoring: agent-authored instruction files (granted to
+	// doc-keeper). skill_execute is the closest existing action family.
+	// NOTE: the DB-engine seed (internal/security/seed_rules.go) rates
+	// these HIGH self-modification with confirmation; BuiltinRules has
+	// no HIGH skill action, so the operative gate here is skill_execute
+	// MEDIUM. f1d15b6d claimed no entry was needed — true only for the
+	// DB engine, not for the production pkg/security checker.
+	"skills_create": "skill_execute",
+	"skills_patch":  "skill_execute",
+
+	// Code intelligence - AST (read-only source analysis) and LSP
+	// (read-only, requires server). The original entries pointed at
+	// action "code_read", which has NO BuiltinRules rule — a dead
+	// mapping that denied every call anyway (found by
+	// TestToolActionMapEntriesAreKnownActions). Remapped to file_read:
+	// these tools read source, they never write.
+	"ast_parse":             ToolFileRead,
+	"ast_symbols":           ToolFileRead,
+	"ast_query":             ToolFileRead,
+	"lsp_goto_definition":   ToolFileRead,
+	"lsp_find_references":   ToolFileRead,
+	"lsp_hover":             ToolFileRead,
+	"lsp_workspace_symbols": ToolFileRead,
+	"lsp_diagnostics":       ToolFileRead,
+
+	// Remaining registered builtins (found by the completeness test
+	// enumerating builtin constructors — every entry below was a latent
+	// "Unknown action" denial of the H7 class):
+	"memory_retain":        "memory_write",
+	"memory_recall":        "memory_read",
+	"memory_reflect":       "memory_write",
+	"list_expired_claims":  "memory_read",
+	"purge_auto_claims":    "memory_write", // purges auto-generated claims only
+	"entity_create":        "memory_write", // knowledge graph = memory store
+	"entity_link":          "memory_write",
+	"entity_query":         "memory_read",
+	"graph_stats":          "memory_read",
+	"compute_pagerank":     "memory_read",
+	"detect_communities":   "memory_read",
+	"community_siblings":   "memory_read",
+	"resolve":              "task_write", // resolves a pending change
+	"spreadsheet_write":    "file_write",
+	"git_validate":         "file_read",     // read-only validation
+	"git_split":            "shell_execute", // runs git via subprocess; risk elevation applies
+	"template_invoke":      "skill_execute", // executes a stored template
+	"template_clear":       "task_write",    // discards pending template state
+	"mcp_servers":          "platform_read", // read-only MCP introspection
+	"workspace_yield":      "platform_read", // cooperative pacing, no side effects
+	"send_agent_message":   "send_message",  // bus publish to a teammate
+	"inbox":                "platform_read", // reads the agent's message queue
+	"team_status":          "platform_read",
+	"team_message":         "send_message",
+	"team_assign":          "task_write",
+	"team_result":          "task_write",
+	"platform_team_create": "task_write",
+	"team_preset_create":   "task_write",
 }
 
 // WorkingDirSetter is implemented by tools that accept a session-scoped
@@ -487,6 +587,12 @@ func (r *ExecutionResult) ToCompressedJSON(maxTokens int) string {
 		Error:      r.Error,
 		Cached:     r.Cached,
 		TaintLabel: r.TaintLabel,
+		// Small fields ride along: dropping them lost cascade/finality
+		// bookkeeping on large (compressed) results.
+		Evidence:    r.Evidence,
+		Terminate:   r.Terminate,
+		CascadeFrom: r.CascadeFrom,
+		IsCascading: r.IsCascading,
 	}
 
 	// Handle the result based on type
@@ -540,18 +646,33 @@ func truncateWithMarker(s string, maxLen int) string {
 //     and every key is copied whole (copy-all path).
 //   - Keys are processed in sorted ascending order, with the primary last,
 //     so output is reproducible run to run (Go map iteration is randomized).
-//   - Non-primary keys are copied WHOLE and counted against maxChars. If the
-//     non-primary keys alone exceed maxChars, they are all kept anyway and
-//     _truncated is set (metadata integrity outranks the budget).
+//   - Non-primary STRING values larger than metadataKeyMaxChars are clipped
+//     with the same truncation marker the primary uses. Small metadata
+//     (paths, offsets, counts) stays whole. Without the cap, two large
+//     secondary blobs (e.g. content 300KB + raw 250KB) would both ship past
+//     ToolResultMaxTokens because only the primary was ever truncated.
+//     2KB keeps every realistic metadata value (transcript paths, page
+//     offsets, even sizeable error strings) whole while bounding worst-case
+//     metadata to a few KB per key — the marker preserves truncation
+//     visibility so consumers can detect the clip.
+//   - Non-primary keys are counted against maxChars. If the non-primary keys
+//     alone exceed maxChars, they are all kept anyway and _truncated is set
+//     (metadata integrity outranks the budget).
 //   - The primary truncates with the existing marker mechanics when the
 //     remaining budget is smaller than its length; it is copied whole when
 //     it fits.
-//   - _truncated is set exactly when anything (primary or metadata overflow)
-//     was clipped relative to the input.
+//   - _truncated is set exactly when anything (primary, metadata overflow,
+//     or a metadata clip) was modified relative to the input.
+//
+// metadataKeyMaxChars caps the byte length of any single non-primary string
+// value in a compressed map result (2KB). See compressMapResult.
+const metadataKeyMaxChars = 2048
+
 func compressMapResult(m map[string]any, maxChars int) map[string]any {
 	compressed := make(map[string]any)
 	totalChars := 0
 	primaryClipped := false
+	metadataClipped := false
 
 	// --- Primary selection -----------------------------------------------
 	// First present string value among the well-known content keys; else the
@@ -595,8 +716,14 @@ func compressMapResult(m map[string]any, maxChars int) map[string]any {
 	for _, k := range keys {
 		switch val := m[k].(type) {
 		case string:
-			compressed[k] = val
-			totalChars += len(val)
+			if len(val) > metadataKeyMaxChars {
+				compressed[k] = truncateWithMarker(val, metadataKeyMaxChars)
+				totalChars += len(compressed[k].(string))
+				metadataClipped = true
+			} else {
+				compressed[k] = val
+				totalChars += len(val)
+			}
 		default:
 			compressed[k] = m[k]
 			if data, err := json.Marshal(m[k]); err == nil {
@@ -606,7 +733,8 @@ func compressMapResult(m map[string]any, maxChars int) map[string]any {
 	}
 	if totalChars > maxChars {
 		// Metadata integrity outranks the budget: every non-primary key is
-		// kept whole; only flag the overflow.
+		// kept (large strings clipped to metadataKeyMaxChars, small values
+		// whole); only flag the overflow.
 		metadataOverflow = true
 	}
 
@@ -625,7 +753,7 @@ func compressMapResult(m map[string]any, maxChars int) map[string]any {
 		}
 	}
 
-	if primaryClipped || metadataOverflow {
+	if primaryClipped || metadataOverflow || metadataClipped {
 		compressed["_truncated"] = true
 	}
 

@@ -241,3 +241,96 @@ func TestCompressMapResult_PrimaryFits(t *testing.T) {
 		t.Errorf("content len = %d, want 500 (whole)", len(got))
 	}
 }
+
+// TestCompressMapResult_TwoLargeBlobsBounded: the M2-compress regression —
+// content 300KB (primary) + raw 250KB (secondary). Before the per-key
+// metadata cap only the primary truncated and the 250KB blob shipped whole
+// past ToolResultMaxTokens. Now both carry truncation markers and the total
+// output is bounded well under the input size.
+func TestCompressMapResult_TwoLargeBlobsBounded(t *testing.T) {
+	const contentSize = 300_000
+	const rawSize = 250_000
+	content := strings.Repeat("c", contentSize) // primary: well-known content key
+	raw := strings.Repeat("R", rawSize)         // secondary blob
+	m := map[string]any{
+		"content": content,
+		"raw":     raw,
+		"path":    "/tmp/two-blobs.json",
+	}
+
+	// A generous budget that a whole-map copy would blow (300K + 250K >> 50K)
+	// but a properly-capped pass must respect.
+	out := compressMapResult(m, 50_000)
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// Both blobs must be clipped: bounded output with headroom for the
+	// 2KB-capped secondary + marker text + wrapper.
+	if len(data) >= contentSize+rawSize {
+		t.Fatalf("output (%d bytes) is not bounded below input (%d)", len(data), contentSize+rawSize)
+	}
+	if len(data) > 60_000 {
+		t.Errorf("output (%d bytes) exceeds expected cap headroom (~60K)", len(data))
+	}
+
+	primary := out["content"].(string)
+	if len(primary) >= contentSize {
+		t.Errorf("primary content not truncated (len=%d)", len(primary))
+	}
+	if !strings.Contains(primary, "truncated") {
+		t.Errorf("primary content missing truncation marker")
+	}
+
+	secondary := out["raw"].(string)
+	if len(secondary) >= rawSize {
+		t.Errorf("secondary raw blob not truncated (len=%d)", len(secondary))
+	}
+	if len(secondary) > metadataKeyMaxChars+200 { // 200: marker + headroom
+		t.Errorf("secondary raw blob not clipped to metadata cap (len=%d, cap=%d)", len(secondary), metadataKeyMaxChars)
+	}
+	if !strings.Contains(secondary, "truncated") {
+		t.Errorf("secondary raw blob missing truncation marker")
+	}
+
+	if out["_truncated"] != true {
+		t.Errorf("_truncated missing or false")
+	}
+
+	// Small metadata stays whole.
+	if got := out["path"].(string); got != "/tmp/two-blobs.json" {
+		t.Errorf("small metadata path modified: %q", got)
+	}
+}
+
+// TestCompressMapResult_MetadataClippedFlags: a single secondary string over
+// metadataKeyMaxChars clips even under a generous budget, sets _truncated,
+// and leaves small metadata and the primary untouched.
+func TestCompressMapResult_MetadataClippedFlags(t *testing.T) {
+	big := strings.Repeat("b", metadataKeyMaxChars*4) // 8KB secondary
+	m := map[string]any{
+		"content": strings.Repeat("c", 1000),
+		"big":     big,
+		"small":   "fine",
+	}
+	out := compressMapResult(m, 100_000) // generous: only the cap clips
+
+	if out["_truncated"] != true {
+		t.Errorf("_truncated missing despite metadata clip: %v", out["_truncated"])
+	}
+	secondary := out["big"].(string)
+	if len(secondary) >= len(big) {
+		t.Errorf("big secondary not clipped (len=%d)", len(secondary))
+	}
+	if !strings.Contains(secondary, "truncated") {
+		t.Errorf("big secondary missing truncation marker")
+	}
+	if got := out["small"].(string); got != "fine" {
+		t.Errorf("small metadata not whole: %q", got)
+	}
+	// Primary untouched: 1000-char content under the cap budget.
+	if got := out["content"].(string); len(got) != 1000 {
+		t.Errorf("primary content modified (len=%d, want 1000)", len(got))
+	}
+}
