@@ -64,8 +64,13 @@ var toolHintAgent = map[string]string{
 	"chat":     AgentIDChat,
 	"bash":     AgentIDCoder, // shell execution → coder (stateful, shell tools)
 
-	// Roster hints (config/agents/*) seen in the wild.
+	// Roster hints (config/agents/*) seen in the wild. "write" is the
+	// IntentWrite hint value: the legacy selectAgent switch
+	// (internal/agent/tactical.go:1489 at caf61fb2) mapped it to the
+	// writer, and 05e60e11 fixed exactly this deflection — dropping it
+	// from this table regressed write intents back to chat.
 	"writer":     AgentIDWriter,
+	"write":      AgentIDWriter,
 	"explore":    AgentIDExplore,
 	"architect":  AgentIDArchitect,
 	"skeptic":    AgentIDSkeptic,

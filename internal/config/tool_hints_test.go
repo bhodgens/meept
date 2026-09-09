@@ -32,7 +32,7 @@ func TestToolHintAgent_ExecutorNotChat(t *testing.T) {
 	executionHints := []string{
 		"code", "refactor", "debug", "fix", "analyze", "research",
 		"git", "plan", "bash", "shell", "file_write", "file-write",
-		"writer", "explore", "researcher", "analyst", "librarian",
+		"writer", "write", "explore", "researcher", "analyst", "librarian",
 		"architect", "skeptic", "coder", "debugger", "committer", "planner",
 		"image_gen", "video_gen", "image_id",
 	}
@@ -59,6 +59,7 @@ func TestToolHintAgent_RegressionSet(t *testing.T) {
 		"bash":       AgentIDCoder,
 		"shell":      AgentIDCoder,
 		"writer":     AgentIDWriter,
+		"write":      AgentIDWriter, // IntentWrite — 05e60e11 fixed this deflection; must never regress to chat
 		"explore":    AgentIDExplore,
 		"researcher": AgentIDResearcher,
 		"analyst":    AgentIDAnalyst,
@@ -73,6 +74,58 @@ func TestToolHintAgent_RegressionSet(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("hint %q routes to %q, want %q", hint, got, want)
+		}
+	}
+}
+
+// TestToolHintAgent_LegacyIntentSwitchParity: every intent constant that the
+// pre-refactor selectAgent switch (internal/agent/tactical.go:1489 at
+// caf61fb2) mapped to a NON-chat agent must still route — identically — in
+// the shared table. This is the M16 audit: the switch and the map must never
+// drift apart again. The table may cover MORE (aliases, dialect hints), but
+// it must never cover LESS than the legacy switch, and where both exist the
+// target agent must agree.
+func TestToolHintAgent_LegacyIntentSwitchParity(t *testing.T) {
+	// (intent-hint, legacy target) pairs, transcribed from the caf61fb2
+	// switch. Only non-chat cases; default→chat is the caller's fallback.
+	legacy := map[string]string{
+		"code":       AgentIDCoder,      // IntentCode
+		"refactor":   AgentIDCoder,      // KeywordRefactor
+		"coder":      AgentIDCoder,      // config.AgentIDCoder roster hint
+		"debug":      AgentIDDebugger,   // IntentDebug
+		"fix":        AgentIDDebugger,   // KeywordFix
+		"debugger":   AgentIDDebugger,   // roster hint
+		"analyze":    AgentIDAnalyst,    // IntentAnalyze
+		"analyst":    AgentIDAnalyst,    // roster hint
+		"research":   AgentIDResearcher, // IntentResearch
+		"researcher": AgentIDResearcher, // roster hint
+		"git":        AgentIDCommitter,  // IntentGit
+		"commit":     AgentIDCommitter,  // KeywordCommit
+		"committer":  AgentIDCommitter,  // roster hint
+		"schedule":   AgentIDScheduler,  // IntentSchedule
+		"scheduler":  AgentIDScheduler,  // roster hint
+		"plan":       AgentIDPlanner,    // IntentPlan
+		"planner":    AgentIDPlanner,    // roster hint
+		"write":      AgentIDWriter,     // IntentWrite
+		"writer":     AgentIDWriter,     // roster hint
+		"architect":  AgentIDArchitect,  // IntentArchitect
+		"skeptic":    AgentIDSkeptic,    // IntentSkeptic
+		"librarian":  AgentIDLibrarian,  // IntentLibrarian
+		"image_gen":  AgentIDImageGen,   // IntentImageGen
+		"image-gen":  AgentIDImageGen,
+		"video_gen":  AgentIDVideoGen, // IntentVideoGen
+		"video-gen":  AgentIDVideoGen,
+		"image_id":   AgentIDImageID, // IntentImageID
+		"image-id":   AgentIDImageID,
+	}
+	for hint, want := range legacy {
+		got, ok := ToolHintAgent(hint)
+		if !ok {
+			t.Errorf("legacy switch case %q→%q has NO route in the shared table", hint, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("legacy switch case %q routed to %q, table says %q — drift", hint, want, got)
 		}
 	}
 }
