@@ -110,3 +110,5 @@ docs/plans/skill-evolution-*.md
 tools/classifier-eval/SILVER-ADJUDICATION-SHEET.md
 tools/classifier-eval/silver_adjudication_rows.json
 tools/classifier-eval/silver_adjudication_data.json
+# gold-promoted replay corpus (verbatim transcript text, adjudicated)
+tools/classifier-eval/replay-gold.local.json5
