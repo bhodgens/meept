@@ -11,9 +11,17 @@ package daemon
 // (mirror of ApprovePlan's tail), tree files via direct file write of the
 // emitted tree under <data_dir>/plan-trees/<task-id>/. No new persistence
 // formats.
+//
+// H8 (daemon audit 2026-09-08): persisted phase names stay CLEAN — the
+// per-leaf path annotation used to ride the name ("Phase [tree leaf: 01-x.md]")
+// and broke every orchestrator name-join (steps carry the clean phase name,
+// so startPhase found zero steps / startNextPhase never matched). The leaf
+// mapping now lives out-of-band in a sidecar JSON next to the emitted tree
+// (<plan-trees>/<task-id>/phase_leaves.json, map phase-index→leaf-path).
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -25,36 +33,56 @@ import (
 	"github.com/caimlas/meept/internal/rpc"
 )
 
-// sealPipelineState carries the compiled phases from the Compile seam to the
-// Execute seam (Execute's signature is taskID-only, mirroring ApproveFunc).
-// plan.seal is a synchronous single-caller CLI action; the mutex keeps the
-// seams race-clean regardless.
+// phaseLeafSidecarName is the sidecar file (under the task's plan-trees dir)
+// carrying the phase-index→leaf-path map for tree-mode seals. Out-of-band by
+// design: PlanPhase has no free-text metadata field, and annotating the
+// persisted phase name broke the orchestrator's name-joins (H8).
+const phaseLeafSidecarName = "phase_leaves.json"
+
+// sealPipelineState carries the compiled phases from the Persist seam to the
+// Execute seam. Both seams run inside the synchronous plan.seal call, but
+// they are distinct closures, so the staging is the handoff between them
+// (Execute's signature is taskID-only, mirroring ApproveFunc).
+//
+// M13 (daemon audit 2026-09-08): staging is keyed by taskID. A single
+// shared slot used to cross-assign compiled phases between concurrent
+// seals — seal B's Compile overwrote the slot while seal A was between
+// Persist and Execute, and A executed B's phases. plan.seal calls are
+// serialized per CLI, but nothing guarantees it across future callers
+// (RPC surface), so the map closes the race; the mutex keeps it race-clean.
 type sealPipelineState struct {
 	mu     sync.Mutex
-	phases []agent.PlanPhaseSpec
+	phases map[string][]agent.PlanPhaseSpec
 }
 
-// take returns and clears the compiled phases.
-func (s *sealPipelineState) take() []agent.PlanPhaseSpec {
+// take returns and clears the compiled phases staged for taskID.
+func (s *sealPipelineState) take(taskID string) []agent.PlanPhaseSpec {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p := s.phases
-	s.phases = nil
+	if s.phases == nil {
+		return nil
+	}
+	p := s.phases[taskID]
+	delete(s.phases, taskID)
 	return p
 }
 
-// store remembers the compiled phases.
-func (s *sealPipelineState) store(p []agent.PlanPhaseSpec) {
+// store remembers the compiled phases for taskID.
+func (s *sealPipelineState) store(taskID string, p []agent.PlanPhaseSpec) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.phases = p
+	if s.phases == nil {
+		s.phases = make(map[string][]agent.PlanPhaseSpec)
+	}
+	s.phases[taskID] = p
 }
 
 // adaptCompileSealed wraps plan.CompileSealed into the handler's Compile
 // seam. Returns the compiler-native []plan.PhaseSpec (the handler's
 // gate/emitter helpers consume that shape) plus hash/warnings/problems;
-// compiled phases are staged for the Execute seam.
-func adaptCompileSealed(state *sealPipelineState) func(markdown string, maxPhases int) (any, string, []string, []rpc.CompileProblemView, error) {
+// compiled phase specs are staged for the Execute seam by adaptPersistPhases
+// (which owns the taskID — the Compile seam does not).
+func adaptCompileSealed() func(markdown string, maxPhases int) (any, string, []string, []rpc.CompileProblemView, error) {
 	return func(markdown string, maxPhases int) (any, string, []string, []rpc.CompileProblemView, error) {
 		cp, err := plan.CompileSealed(markdown, maxPhases)
 		if err != nil {
@@ -68,19 +96,18 @@ func adaptCompileSealed(state *sealPipelineState) func(markdown string, maxPhase
 			}
 			return nil, "", nil, nil, err
 		}
-		state.store(agent.PhaseSpecsFromPlan(cp.Phases))
 		return cp.Phases, cp.Hash, cp.Warnings, nil, nil
 	}
 }
 
 // adaptPersistPhases persists compiled phases via the plan store (the same
-// CreatePhase call the planPhaseSink uses) and writes the emitted tree (tree
-// mode) under the plan-trees root. Flat phases persist in both modes — the
-// orchestrator executes phases; the tree is the human/leaf-agent artifact
-// whose per-leaf paths ride the persisted phase name for the future
-// leaf-dispatch tree (integration point documented in
-// docs/workflows/agent-orchestration.md).
-func adaptPersistPhases(planMgr *plan.PlanManager, treeRoot string, logger *slog.Logger) func(taskID string, phases any, tree *plan.EmittedTree) error {
+// CreatePhase call the planPhaseSink uses), writes the emitted tree (tree
+// mode) under the plan-trees root, and stages the agent-shaped phase specs
+// for the Execute seam under the task's ID (M13). Flat phases persist in
+// both modes — the orchestrator executes phases; the tree is the
+// human/leaf-agent artifact. Phase names persist CLEAN (H8): the leaf
+// mapping rides the sidecar JSON, never the name.
+func adaptPersistPhases(state *sealPipelineState, planMgr *plan.PlanManager, treeRoot string, logger *slog.Logger) func(taskID string, phases any, tree *plan.EmittedTree) error {
 	return func(taskID string, phases any, tree *plan.EmittedTree) error {
 		if planMgr == nil {
 			return fmt.Errorf("plan store not available")
@@ -103,15 +130,6 @@ func adaptPersistPhases(planMgr *plan.PlanManager, treeRoot string, logger *slog
 			phaseRecord := plan.NewPlanPhase(container.ID, p.Name, i, len(p.Steps))
 			phaseRecord.Produces = p.Produces
 			phaseRecord.Consumes = p.Consumes
-			if tree != nil {
-				// Tree-mode integration point: the phase records its leaf
-				// file path (PlanPhase has no free-text field; the path
-				// annotation rides the name) for the leaf-dispatch layer
-				// (follow-up tree; NOT wired here).
-				if path := treeLeafPathForPhase(tree, i); path != "" {
-					phaseRecord.Name = fmt.Sprintf("%s [tree leaf: %s]", p.Name, path)
-				}
-			}
 			if err := planMgr.CreatePhase(ctx, phaseRecord); err != nil {
 				logger.Error("plan-seal persist: CreatePhase failed",
 					"task_id", taskID, "phase", p.Name, "error", err)
@@ -124,19 +142,28 @@ func adaptPersistPhases(planMgr *plan.PlanManager, treeRoot string, logger *slog
 			if err := writeEmittedTree(dir, tree); err != nil {
 				return fmt.Errorf("failed to write plan tree: %w", err)
 			}
+			// Sidecar: phase-index → first leaf path. Written after the
+			// tree so a reader never sees the map before the leaves exist.
+			if err := writePhaseLeafSidecar(dir, tree, specs); err != nil {
+				return fmt.Errorf("failed to write phase-leaf sidecar: %w", err)
+			}
 			logger.Info("Plan tree emitted",
 				"task_id", taskID, "dir", dir, "leaves", len(tree.Leaves))
 		}
+
+		// Stage for Execute under THIS task's ID (M13): concurrent seals
+		// can no longer cross-assign compiled phases.
+		state.store(taskID, agent.PhaseSpecsFromPlan(specs))
 		return nil
 	}
 }
 
 // adaptExecute seals through StrategicPlanner.SealPlan: the ApprovePlan
 // mirror (persist steps → spec → executing → promote → schedule). The
-// compiled phases come from the staged pipeline state.
+// compiled phases come from the task-keyed pipeline state.
 func adaptExecute(sp *agent.StrategicPlanner, state *sealPipelineState) func(taskID string) error {
 	return func(taskID string) error {
-		phases := state.take()
+		phases := state.take(taskID)
 		if len(phases) == 0 {
 			return fmt.Errorf("no compiled phases staged for task %s", taskID)
 		}
@@ -161,8 +188,8 @@ func wirePlanSealHandler(sp *agent.StrategicPlanner, planMgr *plan.PlanManager, 
 	state := &sealPipelineState{}
 	handler := rpc.NewPlanSealHandler(
 		planSealDraftSource(sp),
-		adaptCompileSealed(state),
-		adaptPersistPhases(planMgr, treeRoot, logger),
+		adaptCompileSealed(),
+		adaptPersistPhases(state, planMgr, treeRoot, logger),
 		adaptExecute(sp, state),
 		sp.MaxPhases(),
 	)
@@ -219,16 +246,104 @@ func writeEmittedTree(dir string, tree *plan.EmittedTree) error {
 	return nil
 }
 
-// treeLeafPathForPhase picks the emitted leaf corresponding to a phase index
-// (leaves are ordered; each phase's first leaf carries its work items).
-func treeLeafPathForPhase(tree *plan.EmittedTree, phaseIdx int) string {
-	if tree == nil || len(tree.Leaves) == 0 {
+// treeLeavesPerPhase returns, for each phase index, how many emitted leaves
+// it owns. EmittedTree.Leaves carry no phase ownership (the emitter's
+// emitLeaf.phaseIdx is unexported and dropped from the public shape), but
+// the partition is deterministic from the phase specs: a phase with n steps
+// fits ⌈n/maxLeaves⌉ leaves capped at maxLeaves (and character-budget
+// splits never REDUCE that count below 1 for a non-empty phase). Phases
+// with zero steps emit no leaf. Mirrors plan.partitionPhases faithfully —
+// pinned by TestPhaseLeafCounts_MatchesEmitterPartition.
+func treeLeavesPerPhase(specs []plan.PhaseSpec, maxLeaves int) []int {
+	if maxLeaves <= 0 {
+		maxLeaves = 3
+	}
+	counts := make([]int, len(specs))
+	for i, p := range specs {
+		n := len(p.Steps)
+		if n == 0 {
+			continue
+		}
+		perLeaf := n
+		if n > maxLeaves {
+			perLeaf = (n + maxLeaves - 1) / maxLeaves
+		}
+		counts[i] = (n + perLeaf - 1) / perLeaf
+		if counts[i] > maxLeaves {
+			counts[i] = maxLeaves
+		}
+	}
+	return counts
+}
+
+// treeLeafPathForPhase picks the emitted leaf that carries a phase's work
+// items — its FIRST leaf (M12: the old global-index aliasing mapped phase 1
+// onto phase 0's second leaf once a phase split into multiple leaves, so
+// later phases could resolve to the wrong document outright).
+//
+// Leaves are ordered by phase (the emitter walks phases in order and never
+// interleaves), so the per-phase leaf counts reconstruct the leaf→phase
+// boundaries without phase ownership on EmittedTree itself.
+func treeLeafPathForPhase(tree *plan.EmittedTree, specs []plan.PhaseSpec, phaseIdx int) string {
+	if tree == nil || len(tree.Leaves) == 0 || phaseIdx < 0 || phaseIdx >= len(specs) {
 		return ""
 	}
-	if phaseIdx < len(tree.Leaves) {
-		return tree.Leaves[phaseIdx].Path
+	counts := treeLeavesPerPhase(specs, 0)
+	offset := 0
+	for i := 0; i < phaseIdx; i++ {
+		offset += counts[i]
 	}
-	return tree.Leaves[len(tree.Leaves)-1].Path
+	if offset >= len(tree.Leaves) {
+		return ""
+	}
+	return tree.Leaves[offset].Path
+}
+
+// writePhaseLeafSidecar persists the phase-index→leaf-path map next to the
+// emitted tree (H8: out-of-band carriage of the leaf mapping; the persisted
+// phase records keep clean names). Layout: {"0": "01-extract.md", ...}.
+func writePhaseLeafSidecar(dir string, tree *plan.EmittedTree, specs []plan.PhaseSpec) error {
+	sidecar := make(map[string]string, len(specs))
+	counts := treeLeavesPerPhase(specs, 0)
+	offset := 0
+	for i := range specs {
+		if counts[i] == 0 {
+			continue
+		}
+		if offset < len(tree.Leaves) {
+			sidecar[fmt.Sprintf("%d", i)] = tree.Leaves[offset].Path
+		}
+		offset += counts[i]
+	}
+	raw, err := json.MarshalIndent(sidecar, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal phase-leaf sidecar: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create plan tree dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, phaseLeafSidecarName), raw, 0o644); err != nil {
+		return fmt.Errorf("write phase-leaf sidecar: %w", err)
+	}
+	return nil
+}
+
+// readPhaseLeafSidecar loads a task's phase-index→leaf-path map from its
+// plan-trees dir. Returns nil (not an error) when absent — flat-mode seals
+// write no sidecar, and older tree-mode seals predate it.
+func readPhaseLeafSidecar(treeRoot, taskID string) (map[string]string, error) {
+	raw, err := os.ReadFile(filepath.Join(treeRoot, taskID, phaseLeafSidecarName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read phase-leaf sidecar: %w", err)
+	}
+	var sidecar map[string]string
+	if err := json.Unmarshal(raw, &sidecar); err != nil {
+		return nil, fmt.Errorf("decode phase-leaf sidecar: %w", err)
+	}
+	return sidecar, nil
 }
 
 // asCompileError is a local errors.As helper (daemon package has no other
