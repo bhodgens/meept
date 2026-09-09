@@ -11,9 +11,17 @@ Protocol per docs/plans/classifier-iteration/master.md:
   - Metrics: coverage C, precision P, forced accuracy A, macro-F1, OOD
     abstain rate, p50 latency, wrong-route count, composite SCORE, and
     headline E2E = (gate-correct + 0.868 * abstained) / total.
-  - Adversarial cases: first-seen fold in TEST (holdout), recorded in the
-    fold-assignment cache; they NEVER enter the train index before M4
-    promotion decisions.
+  - Adversarial cases: first-seen fold is their TEST fold (holdout),
+    recorded in the fold-assignment cache; later corpus growth rotates
+    OTHER cases around them, and a case only ever becomes TRAIN data
+    implicitly once newer folds form around it — no case is re-split
+    after first assignment. CORRECTED 2026-09-08: an earlier revision
+    claimed cases "NEVER enter the train index before M4 promotion";
+    that overstated the protocol. First-seen folds are TEST for THAT
+    sweep; across the campaign later-added cases still train on
+    earlier-added ones, and non-OOD first-seen cases never re-test.
+    The absolute protection is the fold CACHE (stable per case), not a
+    global train/test wall.
   - OOD cases: gold OOD must abstain; wrong-direct-routes are penalized.
 
 Usage:
@@ -56,6 +64,16 @@ RESULTS = Path(__file__).resolve().parent / "results"
 FOLD_CACHE = Path(__file__).resolve().parent / "fold-assignment.json"
 SEED = 42
 NFOLDS = 5
+# PROVENANCE (M17, 2026-09-08 audit): measured for lfm-8b-mlx on the OLD
+# 136-case base corpus only (pre-iter-2). It is applied unadjusted to the
+# grown corpus (274 cases, 12+ intents, heavy adversarial mix) in every E2E
+# since — the chain has NOT been re-measured on it. Stale-baseline risk:
+# the adversarial corpus is dominated by boundary/OOD-shaped cases where
+# chain accuracy plausibly differs from the 136-case mix, so absolute E2E
+# values inherit an unverified number (deltas between configs on the same
+# corpus remain internally comparable). Re-measurement requires a live
+# chain run over the current corpus — documented in
+# results/iter-16-corrected/report.md, deliberately NOT faked.
 CHAIN_BASELINE = 0.868  # measured LLM-chain accuracy for abstained cases
 
 

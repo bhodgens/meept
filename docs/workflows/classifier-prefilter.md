@@ -114,19 +114,31 @@ mismatch and logs to rebuild. Legacy centroid-format stores still load
 
 ## Measured numbers (0.6B-4bit embedder, 136-case corpus, LOO)
 
-| k | vote | precision when routing | coverage |
-|---|---|---|---|
-| 5 | unanimity | 100% | 14.7% |
-| 5 | 4-of-5 | 91% | 49% |
-| 4 | 4-of-4 | 92% | 24% |
-| 4 | 3-of-4 | 88% | 60% |
-| 3 | 3-of-3 | 87% | 35% |
-| 3 | 2-of-3 | 81% | 71% |
+**The table that stood here (k=5 unanimity 14.7% C, 4-of-5 49%, 4-of-4
+24%, 3-of-4 60%, etc.) is NOT reproducible** — iter-1 of the
+classifier campaign proved every column 2-10× optimistic against both
+the sweep code and the harness 5-fold protocol (the 14.7% turned out to
+match a warm-index k=4 self-included variant; see
+`tools/classifier-eval/results/iter-1/report.md` §"Iter-0
+reconciliation").
 
-(Floors 0.60–0.80 change nothing — 5th-neighbor cosine median is 0.88.)
-The Go gate ships k=5 unanimity: it only ever routes on perfect evidence.
-Looser vote sizes are config-free constants today; changing them is a
-one-line edit pending assert-mode traffic data.
+Use the honest, held-out numbers instead (harness 5-fold cross, seed 42,
+same corpus — `results/iter-1/report.md`):
+
+| protocol | C | P |
+|---|---|---|
+| kNN k=5 unanimity, floor 0.70 | 3.7% | 100% |
+| kNN k=5 unanimity, floor 0.80 | 2.9% | 100% |
+
+The floor sweep showed the gate only earns its latency at high floors
+(looser floors drop P below the chain baseline's value). For the head
+that actually wins, see the campaign: centroid-margin
+(docs/plans/classifier-iteration/, iters 4-9).
+
+The Go gate still ships k=5 unanimity (floor
+`DefaultPrefilterThreshold = 0.70`): it only ever routes on perfect
+evidence, and the campaign's champion (centroid-margin head) is NOT what
+is wired today — see master.md §"M4 Wiring Constraint".
 
 ## Observability
 

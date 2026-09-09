@@ -34,8 +34,74 @@ invariant. Fall-throughs cost nothing except missed coverage.
 not gate coverage: a gate earns its latency only by raising system accuracy
 above the 86.8%-only baseline.
 
+**STALENESS NOTE (2026-09-08 audit, M17):** the 0.868 was measured on the
+ORIGINAL 136-case base corpus and is applied unadjusted to the grown
+corpus in every E2E since; the chain has NOT been re-measured on the
+current corpus (that needs a live chain run — deliberately not faked).
+Absolute E2E values inherit this unverified constant; comparisons BETWEEN
+configs on the same corpus stay internally valid. See the CHAIN_BASELINE
+comment in tools/classifier-eval/eval_harness.py.
+
 **Pre-registered winner rule (M4):** max E2E subject to P ≥ 97% and
 OOD-R ≥ 95% on the final held-out set. No post-hoc metric changes.
+
+## Current Status (2026-09-08 audit — CORRECTED)
+
+**Iter-16's "E2E 92.8% clears the M3 bar" verdict is WITHDRAWN.** The
+original run scored Stage C with a seeded random draw
+(`np.random.random() < 0.868`, seed 42) instead of the campaign's
+deterministic expected-credit convention; the draw realized 89.9% on 109
+chain cases (~+1σ luck). Deterministic recompute from the committed
+per-stage counts (results/iter-16/summary-20260908-142037.json):
+
+- q=0.50 champion: **E2E 91.44% = (87 + 47 + 0.868×109)/274 — FAILS the
+  pre-registered 91.78% M3 entry bar** (q=0.30: 91.52%, q=0.40: 91.28%
+  — all fail).
+- Full analysis: `tools/classifier-eval/results/iter-16-corrected/report.md`.
+- The script is fixed (`iter16_cascade3.py` now uses deterministic
+  expected credit); the original results and report are retained as-is.
+- Independent real-traffic confirmation: iter-17/m4-silver
+  (ecbe086a) measured expected system accuracy **84.7%** on 48 verbatim
+  Hermes messages — below the synthetic claim and below chain-only
+  86.8%. Both audits agree the synthetic 92.8% does not transfer and
+  was partly a measurement artifact.
+- **M3 status: NOT MET / remains open.** No config advances to M4
+  daemon wiring on this evidence. Ladders that could change this: live
+  chain re-measurement on the current corpus (0.868 is stale — see
+  CHAIN_BASELINE note above), corpus/taxonomy expansion per m4-silver,
+  then a deterministic re-run.
+
+## M4 Wiring Constraint (2026-09-08 audit, H9-docs)
+
+**The shipped Go gate is NOT the campaign's champion head, and it is the
+head the campaign measured FAILING.** Shipped
+(`internal/agent/embedding_prefilter.go`, read-only for this audit):
+k=5 UNANIMITY kNN, floor 0.70. Campaign champion
+(iter16_cascade3.py, iter-12/14 reports): CENTROID cosine, floor 0.60 +
+margin 0.030 — C 34-36% at P 97.8-100%. The harness measured the
+shipped unanimity head at P 90.9-91.7% (iter-12 report row: C 9.6%, P
+91.7%) — precision-bar failing and coverage-starved (iter-1: top-1-NN
+intent agreement is only 43%, k=5-unanimous neighborhoods ~5%).
+
+**Consequence:** M4 daemon wiring REQUIRES REPLACING the shipped
+kNN-unanimity head with the centroid-margin head (+ possibly the
+Stage-0.5 cascade: ModernBERT probe rescue → chain). The shipped gate is
+the algorithm the campaign measured as failing. Wiring the CURRENT gate
+behind a config flag would ship a measured failure. Implementing the Go
+centroid head is an OWNER DECISION and is deliberately NOT done here.
+
+## OOD-R Gate: UNMET in iters 14-16 (pre-registered gap)
+
+master.md requires OOD-R ≥ 95% as part of the M4 winner rule, but
+iter-14/15/16 scripts skip OOD cases before Stage B/C
+(`if is_ood[qi]: continue` — they exit via Stage-A's low-similarity
+abstain path only, unmeasured per-stage). NO iteration 14-16 result
+carries a measured per-stage OOD-R, so the OOD-R ≥ 95% leg of the
+winner rule is **UNEVALUATED, not satisfied** — an unmet pre-registered
+gate. Closing it: run OOD cases through Stage A AND B offline (cached
+qwen3 + ModernBERT embeddings make this a pure re-scoring exercise) and
+report per-stage OOD-R (e.g. iter16b), or re-run the harness, which
+does score OOD. Until then any M4 claim is incomplete on this leg.
 
 **Evaluation protocol: 5-fold gate evaluation** (not a single 70/30 split —
 recall has 3 cases). Rotate: 4 folds form the kNN/train index, 1 fold is

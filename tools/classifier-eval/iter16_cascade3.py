@@ -135,19 +135,24 @@ def cascade(q_b, margin_gate):
                 b_n += 1
                 b_ok += ok
                 continue
-            # Stage C: LLM chain — modeled at measured 86.8%
+            # Stage C: LLM chain — DETERMINISTIC expected credit at the
+            # measured chain accuracy (campaign convention: eval_harness.py's
+            # E2E formula credits every abstained case CHAIN_BASELINE).
+            # CORRECTION 2026-09-08: the original run drew
+            # ok = np.random.random() < CHAIN_ACC (seed 42) — 109 Bernoulli
+            # draws realized 89.9% (~+1σ luck) instead of 86.8%, which alone
+            # manufactured E2E 92.8% and a false "clears bar" verdict.
+            # See results/iter-16-corrected/report.md.
             c_n += 1
             routed += 1  # chain always answers
-            ok = np.random.random() < CHAIN_ACC  # per-case expected credit
-            correct += ok
+            correct += CHAIN_ACC
     E2E_ = (correct + CHAIN_ACC * (total - routed)) / total
     return {"C": routed / total, "P": correct / routed if routed else 0,
             "wrong": routed - correct, "E2E": E2E_,
             "stageA": (a_n, a_ok), "stageB": (b_n, b_ok), "stageC": c_n}
 
 
-np.random.seed(42)
-print("=== 3-stage cascade: A centroid / B probe / C lfm-8b chain (0.868) ===", file=sys.stderr)
+print("=== 3-stage cascade (deterministic expected credit): A centroid / B probe / C lfm-8b chain (0.868) ===", file=sys.stderr)
 rows = []
 for q_b in (0.30, 0.40, 0.50):
     r = cascade(q_b, margin_gate=False)
