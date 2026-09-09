@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -199,11 +200,12 @@ func TestJSONExtract_FilePathInput(t *testing.T) {
 	}
 	fake := &fakeChatter{content: `{"title":"F"}`}
 	tool := NewJSONExtractTool(fake, time.Second)
-	_, err := tool.Execute(context.Background(), map[string]any{
+	// H11: file reads are wd-scoped, so the ctx carries the wd.
+	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
+	if _, err := tool.Execute(ctx, map[string]any{
 		"schema":           map[string]any{"type": "object"},
 		schemaPropFilePath: path,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if !strings.Contains(fake.gotMsgs[1].Content, "content for extraction") {
@@ -390,5 +392,216 @@ func TestJSONExtract_SetChatterNilSafe(t *testing.T) {
 	tool.SetChatter(&fakeChatter{content: "{}"})
 	if tool.chatter == nil {
 		t.Error("non-nil SetChatter should wire the client")
+	}
+}
+
+// --- H11 fence tests (write + read confined to the session working dir) ---
+
+func TestJSONExtract_OutputPathEscapeDenied(t *testing.T) {
+	dir := t.TempDir()
+	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
+	fake := &fakeChatter{content: `{}`}
+	tool := NewJSONExtractTool(fake, time.Second)
+
+	for _, raw := range []string{"../../x.json", "/tmp/meept-escape/x.json", "~/outside.json"} {
+		_, err := tool.Execute(ctx, map[string]any{
+			"schema":             map[string]any{"type": "object"},
+			schemaPropText:       "text",
+			schemaPropOutputPath: raw,
+		})
+		if err == nil {
+			t.Errorf("output_path %q: expected rejection, got nil error", raw)
+			continue
+		}
+		if !strings.Contains(err.Error(), "outside the allowed directories") {
+			t.Errorf("output_path %q: error = %v, want containment message", raw, err)
+		}
+	}
+	// Nothing was written outside the workspace.
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "x.json")); err == nil {
+		t.Error("escape wrote a file outside the working dir")
+	}
+}
+
+func TestJSONExtract_FilePathOutsideWorkdirDenied(t *testing.T) {
+	dir := t.TempDir()
+	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
+	fake := &fakeChatter{content: `{}`}
+	tool := NewJSONExtractTool(fake, time.Second)
+
+	cases := []struct{ label, path string }{
+		{"absolute /etc/passwd", "/etc/passwd"},
+		{"tilde home file", "~/.ssh/id_rsa"},
+		{"relative escape", "../../etc/passwd"},
+	}
+	for _, tc := range cases {
+		_, err := tool.Execute(ctx, map[string]any{
+			"schema":           map[string]any{"type": "object"},
+			schemaPropFilePath: tc.path,
+		})
+		if err == nil {
+			t.Errorf("%s: expected rejection, got nil error", tc.label)
+			continue
+		}
+		if !strings.Contains(err.Error(), "outside the allowed directories") {
+			t.Errorf("%s: error = %v, want containment message", tc.label, err)
+		}
+	}
+}
+
+func TestJSONExtract_NoWorkdir_RejectsPaths(t *testing.T) {
+	fake := &fakeChatter{content: `{}`}
+	tool := NewJSONExtractTool(fake, time.Second)
+	// No working dir in ctx: file reads and writes with paths are
+	// rejected instead of silently resolving against the process cwd.
+	if _, err := tool.Execute(context.Background(), map[string]any{
+		"schema":           map[string]any{"type": "object"},
+		schemaPropFilePath: "notes.txt",
+	}); err == nil || !strings.Contains(err.Error(), "no session working dir") {
+		t.Errorf("file_path without wd: error = %v, want no-session-working-dir message", err)
+	}
+	if _, err := tool.Execute(context.Background(), map[string]any{
+		"schema":             map[string]any{"type": "object"},
+		schemaPropText:       "text",
+		schemaPropOutputPath: "out.json",
+	}); err == nil || !strings.Contains(err.Error(), "no session working dir") {
+		t.Errorf("output_path without wd: error = %v, want no-session-working-dir message", err)
+	}
+}
+
+func TestJSONExtract_FilePathInsideWorkdirAllowed(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("fenced read"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
+	fake := &fakeChatter{content: `{}`}
+	tool := NewJSONExtractTool(fake, time.Second)
+	// Absolute path inside wd AND relative path both work.
+	if _, err := tool.Execute(ctx, map[string]any{
+		"schema":           map[string]any{"type": "object"},
+		schemaPropFilePath: filepath.Join(dir, "notes.txt"),
+	}); err != nil {
+		t.Errorf("absolute inside-wd read rejected: %v", err)
+	}
+	if _, err := tool.Execute(ctx, map[string]any{
+		"schema":           map[string]any{"type": "object"},
+		schemaPropFilePath: "notes.txt",
+	}); err != nil {
+		t.Errorf("relative read rejected: %v", err)
+	}
+}
+
+// --- M20 conform ordering tests ---
+
+func TestConformToSchema_PreservesRequiredKeyMissingFromProperties(t *testing.T) {
+	// M20: required:[a,b] with properties:{a} must NOT drop a
+	// model-produced b — conform ran first and checkRequired would
+	// then fail with an unfixable "missing required b".
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"a": map[string]any{"type": "string"},
+		},
+		"required": []any{"a", "b"},
+	}
+	record := map[string]any{"a": "x", "b": 1.0}
+	got := conformToSchema(record, schema)
+	if got["b"] != 1.0 {
+		t.Fatalf("required-listed key dropped by conform: %#v", got)
+	}
+	// And end-to-end: Execute must succeed rather than error.
+	fake := &fakeChatter{content: `{"a":"x","b":7}`}
+	tool := NewJSONExtractTool(fake, time.Second)
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"schema":       map[string]any{"type": "object", "properties": map[string]any{"a": map[string]any{}}, "required": []any{"a", "b"}},
+		schemaPropText: "text",
+	})
+	if err != nil {
+		t.Fatalf("required-key-preserved flow failed: %v", err)
+	}
+	m := res.(*tools.ToolResult).Result.(map[string]any)
+	if m["record"].(map[string]any)["b"] != float64(7) {
+		t.Errorf("record lost required key b: %#v", m["record"])
+	}
+}
+
+func TestConformToSchema_AdditionalPropertiesTrueKeepsExtras(t *testing.T) {
+	schema := map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"a": map[string]any{"type": "string"}},
+		"additionalProperties": true,
+	}
+	record := map[string]any{"a": "x", "extra": true}
+	got := conformToSchema(record, schema)
+	if got["extra"] != true {
+		t.Fatalf("additionalProperties:true stripped extras: %#v", got)
+	}
+	// Explicit false still strips.
+	schema["additionalProperties"] = false
+	if got := conformToSchema(record, schema); len(got) != 1 {
+		t.Fatalf("additionalProperties:false kept extras: %#v", got)
+	}
+	// A sub-schema value for extras is also treated as permissive
+	// (best-effort shaping, not a validator).
+	schema["additionalProperties"] = map[string]any{"type": "string"}
+	if got := conformToSchema(record, schema); got["extra"] != true {
+		t.Fatalf("additionalProperties sub-schema stripped extras: %#v", got)
+	}
+}
+
+// --- LOW-utf8 truncation tests ---
+
+func TestTruncateUTF8_TrimsToRuneBoundary(t *testing.T) {
+	// "héllo" — é is 2 bytes, so index 2 is mid-rune when cut at 3.
+	s := "héllo"
+	got := truncateUTF8(s, 3)
+	if got != "hé" {
+		t.Errorf("truncateUTF8(%q, 3) = %q, want %q", s, got, "hé")
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("truncated string is not valid UTF-8: %q", got)
+	}
+	// Cut exactly at a rune start: unchanged prefix.
+	if got := truncateUTF8(s, 2); got != "h" {
+		t.Errorf("truncateUTF8(%q, 2) = %q, want %q (cut lands mid-rune, backs off to byte 0)", s, got, "h")
+	}
+	// Cut at 1 = also mid-rune (é spans bytes 1-2), backs off to "h".
+	if got := truncateUTF8(s, 1); got != "h" {
+		t.Errorf("truncateUTF8(%q, 1) = %q, want %q", s, got, "h")
+	}
+	// ASCII: pure byte cut.
+	if got := truncateUTF8("abcdef", 3); got != "abc" {
+		t.Errorf("ascii cut = %q, want abc", got)
+	}
+	// Multibyte at every boundary stays valid.
+	long := strings.Repeat("日", 100) // 3 bytes each
+	for i := 0; i <= len(long); i++ {
+		if got := truncateUTF8(long, i); !utf8.ValidString(got) {
+			t.Fatalf("truncateUTF8(multibyte, %d) produced invalid UTF-8: %q", i, got)
+		}
+	}
+}
+
+func TestJSONExtract_LongInputTruncatedOnRuneBoundary(t *testing.T) {
+	fake := &fakeChatter{content: `{}`}
+	tool := NewJSONExtractTool(fake, time.Second)
+	// Pad ASCII then put a 3-byte char so the cut lands mid-rune.
+	big := strings.Repeat("a", maxExtractInputBytes-1) + "日本語テキスト"
+	if _, err := tool.Execute(context.Background(), map[string]any{
+		"schema":       map[string]any{"type": "object"},
+		schemaPropText: big,
+	}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	userTurn := ""
+	for _, m := range fake.gotMsgs {
+		if m.Role == llm.RoleUser {
+			userTurn = m.Content
+		}
+	}
+	// The text must be truncated and never carry an invalid sequence.
+	if !utf8.ValidString(userTurn) {
+		t.Error("truncated prompt is not valid UTF-8 (rune split mid-sequence)")
 	}
 }

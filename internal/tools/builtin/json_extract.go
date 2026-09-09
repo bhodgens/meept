@@ -137,7 +137,7 @@ func (t *JSONExtractTool) Execute(ctx context.Context, args map[string]any) (any
 		return nil, fmt.Errorf("json_extract: no input text (pass text or file_path)")
 	}
 	if len(text) > maxExtractInputBytes {
-		text = text[:maxExtractInputBytes]
+		text = truncateUTF8(text, maxExtractInputBytes)
 	}
 
 	messages := []llm.ChatMessage{
@@ -219,6 +219,9 @@ func (t *JSONExtractTool) buildUserTurn(schema map[string]any, args map[string]a
 // resolveText returns the input text: the text argument, or the contents of
 // file_path resolved against the session working dir (no os.Getwd anywhere:
 // the daemon carries the working dir through the context, AGENTS.md).
+// SECURITY (H11-read): the file_path must resolve INSIDE the session
+// working dir — absolute paths outside it (and "~" expansion, which points
+// at the home dir, not the workspace) are rejected instead of read.
 func (t *JSONExtractTool) resolveText(ctx context.Context, args map[string]any) (string, error) {
 	if text := stringArg(args, schemaPropText); text != "" {
 		return text, nil
@@ -227,18 +230,16 @@ func (t *JSONExtractTool) resolveText(ctx context.Context, args map[string]any) 
 	if rawPath == "" {
 		return "", nil
 	}
-	p := rawPath
-	if strings.HasPrefix(p, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("json_extract: cannot expand %q: home directory unknown", rawPath)
-		}
-		p = filepath.Join(home, p[1:])
+	wd := tools.WorkingDirFromContext(ctx)
+	if wd == "" {
+		return "", fmt.Errorf("json_extract: file_path %q rejected: no session working dir; pass text directly", rawPath)
 	}
-	if !filepath.IsAbs(p) {
-		if wd := tools.WorkingDirFromContext(ctx); wd != "" {
-			p = filepath.Join(wd, p)
-		}
+	p, err := resolveToolPath(ctx, rawPath)
+	if err != nil {
+		return "", fmt.Errorf("json_extract: %w", err)
+	}
+	if err := containPath(p, wd); err != nil {
+		return "", fmt.Errorf("json_extract: file_path %q rejected: %w (file reads are confined to the session working dir)", rawPath, err)
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -249,19 +250,20 @@ func (t *JSONExtractTool) resolveText(ctx context.Context, args map[string]any) 
 
 // writeOutput writes the JSON document, resolving relative paths against the
 // session working dir with the same rules as resolveText.
+// SECURITY (H11-write): output_path is fenced to the session working dir;
+// escapes (e.g. "../../x.json" or absolute paths outside the workspace)
+// are rejected before MkdirAll touches the filesystem.
 func (t *JSONExtractTool) writeOutput(ctx context.Context, rawPath, doc string) (string, error) {
-	p := rawPath
-	if strings.HasPrefix(p, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("json_extract: cannot expand %q: home directory unknown", rawPath)
-		}
-		p = filepath.Join(home, p[1:])
+	wd := tools.WorkingDirFromContext(ctx)
+	if wd == "" {
+		return "", fmt.Errorf("json_extract: output_path %q rejected: no session working dir", rawPath)
 	}
-	if !filepath.IsAbs(p) {
-		if wd := tools.WorkingDirFromContext(ctx); wd != "" {
-			p = filepath.Join(wd, p)
-		}
+	p, err := resolveToolPath(ctx, rawPath)
+	if err != nil {
+		return "", fmt.Errorf("json_extract: %w", err)
+	}
+	if err := containPath(p, wd); err != nil {
+		return "", fmt.Errorf("json_extract: output_path %q rejected: %w (writes are confined to the session working dir)", rawPath, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", fmt.Errorf("json_extract: create output dir: %w", err)
@@ -269,11 +271,7 @@ func (t *JSONExtractTool) writeOutput(ctx context.Context, rawPath, doc string) 
 	if err := os.WriteFile(p, []byte(doc+"\n"), 0o644); err != nil {
 		return "", fmt.Errorf("json_extract: write %s: %w", p, err)
 	}
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		return p, nil
-	}
-	return abs, nil
+	return p, nil
 }
 
 // extractSchemaArg pulls and normalizes the schema argument. A JSON-encoded
@@ -312,6 +310,12 @@ func parseSchemaJSON(s string) (map[string]any, error) {
 // the grammar guarantees parseable JSON, not conformance. Null values are
 // left in place (null means "not found", a legitimate record); nested
 // values are untouched. Best-effort, never errors.
+//
+// Ordering contract (M20): keys listed in schema "required" count as
+// declared even when "properties" omits them — otherwise conform would
+// drop a model-produced required field and checkRequired would then fail
+// with "missing required b", an error the model cannot fix by any output.
+// When the schema sets "additionalProperties": true, extra keys are kept.
 func conformToSchema(record map[string]any, schema map[string]any) map[string]any {
 	propsRaw, ok := schema["properties"]
 	if !ok {
@@ -321,9 +325,37 @@ func conformToSchema(record map[string]any, schema map[string]any) map[string]an
 	if !ok || len(props) == 0 {
 		return record
 	}
-	out := make(map[string]any, len(props))
+	// Required-listed names are treated as declared even without a
+	// properties entry (M20).
+	declared := make(map[string]bool, len(props)+4)
+	for name := range props {
+		declared[name] = true
+	}
+	if reqList, ok := schema["required"].([]any); ok {
+		for _, r := range reqList {
+			if name, ok := r.(string); ok && name != "" {
+				declared[name] = true
+			}
+		}
+	}
+	// additionalProperties: true (or a non-false schema value) permits
+	// extras — don't strip them.
+	allowExtra := false
+	switch ap := schema["additionalProperties"].(type) {
+	case bool:
+		allowExtra = ap
+	case map[string]any:
+		// A sub-schema for extras: keep extra keys (the sub-schema is
+		// not enforced — best-effort shaping, never a validator).
+		allowExtra = true
+	}
+	out := make(map[string]any, len(record))
 	for name, value := range record {
-		if _, declared := props[name]; declared {
+		if declared[name] {
+			out[name] = value
+			continue
+		}
+		if allowExtra {
 			out[name] = value
 		}
 	}

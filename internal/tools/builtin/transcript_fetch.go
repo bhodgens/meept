@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
 )
 
@@ -63,6 +64,29 @@ const (
 	// transcriptSummarizeDigestChars caps the final digest returned in
 	// the result content (~4k chars keeps the conversation small).
 	transcriptSummarizeDigestChars = 4000
+
+	// transcriptSummarizeTimeoutScale scales the configured subprocess
+	// timeout into the deadline for summarize mode (LOW-timeout): the
+	// single timeoutSeconds value is sized for ONE python fetch, but a
+	// summarize run performs 1 fetch + (windows map calls + 1 reduce
+	// call) sequential LLM turns. The deadline is therefore
+	// timeoutSeconds × (windowCount + 1), capped at
+	// transcriptSummarizeMaxTimeout to keep a pathological video from
+	// pinning the tool forever; the plain-fetch path keeps the raw
+	// timeout. windowCount comes from splitIntoWindows on the fetched
+	// text — but the ctx deadline must be fixed BEFORE fetching (the
+	// fetch itself needs budget). We estimate windows from
+	// maxTextChars ≈ TranscriptMaxOutputLength (the fetch output is
+	// capped there anyway), i.e. the WORST-CASE window count, and rely
+	// on the cap for short transcripts. Estimate:
+	// ceil(maxChars / windowChars) where maxChars is the pagination
+	// cap (100k) and windowChars is transcriptSummarizeWindowChars.
+	transcriptSummarizeMaxWindows = (TranscriptMaxOutputLength + transcriptSummarizeWindowChars - 1) / transcriptSummarizeWindowChars
+	// transcriptSummarizeMaxTimeout bounds the scaled deadline (10 min).
+	transcriptSummarizeMaxTimeout = 10 * time.Minute
+	// transcriptSummarizeMaxCalls is the worst-case sequential LLM turn
+	// count for summarize mode: windows map calls + 1 reduce + 1 fetch.
+	transcriptSummarizeMaxCalls = transcriptSummarizeMaxWindows + 1
 
 	// transcriptSummarizeMapSystem is the MAP-stage system prompt
 	// (contract text; do not paraphrase).
@@ -213,12 +237,22 @@ func (t *TranscriptFetchTool) Parameters() llm.FunctionParameters {
 	}
 }
 
-// IsReadOnly reports that fetching transcripts never mutates state.
-func (t *TranscriptFetchTool) IsReadOnly(map[string]any) bool { return true }
+// IsReadOnly reports that fetching transcripts never mutates state —
+// EXCEPT when output_path is present (M7): that call writes a file to
+// disk, mirroring json_extract's IsReadOnly behavior.
+func (t *TranscriptFetchTool) IsReadOnly(in map[string]any) bool {
+	if _, ok := in["output_path"]; ok {
+		return false
+	}
+	return true
+}
 
-// IsConcurrencySafe reports that transcript fetches are safe for
-// concurrent execution.
-func (t *TranscriptFetchTool) IsConcurrencySafe(map[string]any) bool { return true }
+// IsConcurrencySafe mirrors IsReadOnly: write-backed calls are still
+// safe to run concurrently (independent paths), but the flag follows
+// the mutating shape for consistency.
+func (t *TranscriptFetchTool) IsConcurrencySafe(in map[string]any) bool {
+	return t.IsReadOnly(in)
+}
 
 // MaxResultTokens declares this tool's minimum result-token budget
 // (tools.ResultSizer). See TranscriptResultTokens.
@@ -258,7 +292,20 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(t.timeoutSeconds)*time.Second)
+	// Deadline (LOW-timeout): the configured timeoutSeconds is sized for
+	// ONE python fetch. Summarize mode runs 1 fetch + (windows + 1)
+	// sequential LLM turns, so its deadline scales the timeout by the
+	// worst-case call count (see transcriptSummarizeMaxCalls) with a
+	// hard cap; the plain-fetch path keeps the raw timeout.
+	deadline := time.Duration(t.timeoutSeconds) * time.Second
+	if p.Summarize && t.summarizer != nil {
+		scaled := deadline * time.Duration(transcriptSummarizeMaxCalls)
+		if scaled > transcriptSummarizeMaxTimeout {
+			scaled = transcriptSummarizeMaxTimeout
+		}
+		deadline = scaled
+	}
+	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
 	text, err := t.fetchTranscriptText(ctx, videoID, p.Language, p.Timestamps)
@@ -310,7 +357,12 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 		if outPath != "" {
 			result["path"] = outPath
 		}
-		return result, nil
+		// M8-taint: the transcript (and its digest) is external YouTube
+		// content; label the envelope so downstream policy can treat it as
+		// untrusted-derived data (same discipline as json_extract).
+		tr := tools.NewSuccessResult(result)
+		tr.TaintLabel = taint.TaintExternal
+		return tr, nil
 	}
 	// Pagination slices the FORMATTED text (timestamps included), so
 	// offsets stay consistent with the text the caller received. Total
@@ -360,7 +412,9 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 	if outPath != "" && !clipped && totalChars <= maxChars {
 		preview := text
 		if len(preview) > TranscriptPreviewChars {
-			preview = preview[:TranscriptPreviewChars]
+			// LOW-utf8: trim to the last valid rune boundary so a
+			// multibyte character is never split mid-sequence.
+			preview = truncateUTF8(preview, TranscriptPreviewChars)
 		}
 		page = preview + fmt.Sprintf(transcriptFilePointerSuffix, outPath)
 	}
@@ -383,7 +437,10 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 	if outPath != "" {
 		result["path"] = outPath
 	}
-	return result, nil
+	// M8-taint: external YouTube content on the pagination path too.
+	tr := tools.NewSuccessResult(result)
+	tr.TaintLabel = taint.TaintExternal
+	return tr, nil
 }
 
 // summarizeText runs the sequential map-reduce over text through the
@@ -446,11 +503,12 @@ func (t *TranscriptFetchTool) summarizeText(ctx context.Context, text string) (s
 
 // capSummarizeDigest trims the digest and caps it at
 // transcriptSummarizeDigestChars, appending the truncation suffix when
-// content was cut.
+// content was cut. LOW-utf8: the cap trims to the last valid rune
+// boundary so a multibyte character is never split mid-sequence.
 func capSummarizeDigest(digest string) string {
 	digest = strings.TrimSpace(digest)
 	if len(digest) > transcriptSummarizeDigestChars {
-		digest = digest[:transcriptSummarizeDigestChars] + transcriptTruncationSuffix
+		digest = truncateUTF8(digest, transcriptSummarizeDigestChars) + transcriptTruncationSuffix
 	}
 	return digest
 }
@@ -515,11 +573,19 @@ func splitIntoWindows(text string) []string {
 // expands to the user's home directory. Empty input resolves to ""
 // (no file). No os.Getwd anywhere: the daemon carries the working dir
 // through the context (AGENTS.md).
+// SECURITY (H11): the resolved path is fenced to the union of the
+// session working dir and the configured fallbackOutputDir — escapes
+// ("../..", absolute paths outside both roots) are rejected with an
+// actionable error before any file is touched. "~"-expanded paths are
+// only accepted when they land inside a fence root (e.g. the fallback
+// dir's own "~" expansion); a bare "~/..." outside them is rejected.
 func (t *TranscriptFetchTool) resolveOutputPath(ctx context.Context, raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
 	}
+	fallback := t.expandedFallbackDir()
+	wd := tools.WorkingDirFromContext(ctx)
 	p := raw
 	if strings.HasPrefix(p, "~") {
 		home, err := os.UserHomeDir()
@@ -529,21 +595,39 @@ func (t *TranscriptFetchTool) resolveOutputPath(ctx context.Context, raw string)
 		p = filepath.Join(home, p[1:])
 	}
 	if !filepath.IsAbs(p) {
-		if wd := tools.WorkingDirFromContext(ctx); wd != "" {
+		if wd != "" {
 			p = filepath.Join(wd, p)
-		} else if t.fallbackOutputDir != "" {
-			root := t.fallbackOutputDir
-			if strings.HasPrefix(root, "~") {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return "", fmt.Errorf("transcript_fetch: cannot resolve fallback output dir: %w", err)
-				}
-				root = filepath.Join(home, root[1:])
-			}
-			p = filepath.Join(root, p)
+		} else if fallback != "" {
+			p = filepath.Join(fallback, p)
 		}
 	}
-	return p, nil
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", fmt.Errorf("transcript_fetch: resolve output path %q: %w", raw, err)
+	}
+	abs = filepath.Clean(abs)
+	// SECURITY (H11): fence the resolved path to wd ∪ fallback root.
+	if err := containPath(abs, wd, fallback); err != nil {
+		return "", fmt.Errorf("transcript_fetch: output_path %q rejected: %w (writes are confined to the session working dir and the configured output root)", raw, err)
+	}
+	return abs, nil
+}
+
+// expandedFallbackDir returns the fallback output root with "~"
+// expanded; empty config yields "" (no second root).
+func (t *TranscriptFetchTool) expandedFallbackDir() string {
+	root := t.fallbackOutputDir
+	if root == "" {
+		return ""
+	}
+	if strings.HasPrefix(root, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		root = filepath.Join(home, root[1:])
+	}
+	return root
 }
 
 // writeTranscriptFile creates the parent directory (0o755) and writes

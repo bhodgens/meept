@@ -332,6 +332,166 @@ func TestExtractGeminiInline(t *testing.T) {
 	}
 }
 
+// --- H10: artifact download vs SSRF (BaseURL exemption) ---
+
+// mediaDownloadFixture spins an httptest server that serves a POST
+// generation endpoint returning an artifact URL and a GET route serving
+// the artifact bytes. It returns the mediaClient (no SSRF allowance)
+// and the server URL.
+func mediaDownloadFixture(t *testing.T, artifactURL string) (*mediaClient, string) {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/gen", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"url": artifactURL})
+	})
+	mux.HandleFunc("/artifact", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fakepng"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := newMediaClient(nil, t.TempDir(), 5*time.Second)
+	return c, srv.URL
+}
+
+func TestMediaDownload_SameBaseURLLoopbackAllowed(t *testing.T) {
+	// H10 core regression: a local backend (loopback BaseURL) serving
+	// its own artifact URL must download — previously checkURL blocked
+	// every loopback address and killed local ComfyUI generations at
+	// the final /view step.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/artifact", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fakepng"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := newMediaClient(nil, t.TempDir(), 5*time.Second)
+	mc := &llm.ModelConfig{BaseURL: srv.URL}
+	body, err := c.download(context.Background(), srv.URL+"/artifact", mc)
+	if err != nil {
+		t.Fatalf("download from own BaseURL host blocked: %v", err)
+	}
+	if string(body) != "fakepng" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestMediaDownload_DifferentLoopbackStillBlocked(t *testing.T) {
+	// A DIFFERENT loopback address (not the configured BaseURL) stays
+	// blocked — the exemption is host:port-exact.
+	c, _ := mediaDownloadFixture(t, "")
+	mc := &llm.ModelConfig{BaseURL: "http://127.0.0.1:8188"}
+	if _, err := c.download(context.Background(), "http://127.0.0.1:9999/secret", mc); err == nil {
+		t.Fatal("expected a non-BaseURL loopback download to stay blocked")
+	} else if !strings.Contains(err.Error(), "download blocked") {
+		t.Errorf("error = %v, want 'download blocked'", err)
+	}
+}
+
+func TestMediaDownload_PublicURLAllowed(t *testing.T) {
+	// Non-loopback public URLs keep working: policy (checkURL) passes
+	// them through, so the failure must be a connection error — never
+	// "download blocked". 203.0.113.1 is TEST-NET-3 (RFC 5737): not
+	// loopback/private/link-local, guaranteed unroutable, so the
+	// request fails fast client-side without touching the internet.
+	c := newMediaClient(nil, t.TempDir(), 300*time.Millisecond)
+	mc := &llm.ModelConfig{BaseURL: "http://127.0.0.1:8188"}
+	_, err := c.download(context.Background(), "http://203.0.113.1/x", mc)
+	if err == nil {
+		t.Fatal("expected a connection error (policy allowed, TEST-NET is unroutable)")
+	}
+	if strings.Contains(err.Error(), "download blocked") {
+		t.Errorf("public-IP policy path must not block: %v", err)
+	}
+}
+
+func TestSameHostPort(t *testing.T) {
+	cases := []struct {
+		raw, base string
+		want      bool
+	}{
+		{"http://127.0.0.1:8188/view?filename=a.png", "http://127.0.0.1:8188", true},
+		{"https://127.0.0.1:8188/view", "http://127.0.0.1:8188", true}, // scheme-insensitive
+		{"http://LOCALHOST:8188/v", "http://localhost:8188", true},     // case-insensitive
+		{"http://127.0.0.1:9999/v", "http://127.0.0.1:8188", false},    // different port
+		{"http://10.0.0.5/v", "http://127.0.0.1:8188", false},
+		{"", "http://127.0.0.1:8188", false},
+		{"http://127.0.0.1:8188/v", "", false},
+		{"::not a url::", "http://127.0.0.1:8188", false},
+	}
+	for _, tc := range cases {
+		if got := sameHostPort(tc.raw, tc.base); got != tc.want {
+			t.Errorf("sameHostPort(%q, %q) = %v, want %v", tc.raw, tc.base, got, tc.want)
+		}
+	}
+}
+
+func TestGenerateImage_ComfyRelativeArtifactDownloads(t *testing.T) {
+	// End-to-end ComfyUI shape: /history returns a RELATIVE /view URL
+	// that runComfy prefixes with the (loopback) BaseURL; the resulting
+	// download must pass the SSRF gate via the BaseURL exemption.
+	mediaServed := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/prompt", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"prompt_id": "p1"})
+	})
+	mux.HandleFunc("/history/p1", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"p1": map[string]any{
+				"outputs": map[string]any{
+					"9": map[string]any{
+						"images": []any{map[string]any{"filename": "fox.png", "subfolder": "", "type": "output"}},
+					},
+				},
+			},
+		})
+	})
+	mux.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
+		mediaServed = true
+		_, _ = w.Write([]byte("\x89PNG"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	wf := filepath.Join(t.TempDir(), "w.json")
+	workflow := map[string]any{
+		"6": map[string]any{"class_type": "CLIPTextEncode", "inputs": map[string]any{"text": ""}},
+	}
+	wfRaw, _ := json.Marshal(workflow)
+	if err := os.WriteFile(wf, wfRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &llm.ProvidersConfig{
+		ImageModel: "local/flux",
+		Providers: map[string]llm.ProviderConfig{
+			"local": {
+				API:     "comfyui",
+				Options: llm.ProviderOptionsConfig{BaseURL: srv.URL},
+				Models: map[string]llm.ModelDef{
+					"flux": {Name: "flux", Capabilities: []string{llm.CapImageGen}, Workflow: wf},
+				},
+			},
+		},
+	}
+	tool := NewGenerateImageTool(llm.NewResolver(cfg, nil), t.TempDir(), 5*time.Second)
+	raw, err := tool.Execute(context.Background(), map[string]any{
+		"prompt": strings.Repeat("word ", 20), // >= 15 words: skips prompt enhancement
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !mediaServed {
+		t.Fatal("artifact download from the ComfyUI BaseURL never happened")
+	}
+	tr := raw.(*tools.ToolResult)
+	result := tr.Result.(map[string]any)
+	data, err := os.ReadFile(result["path"].(string))
+	if err != nil || string(data) != "\x89PNG" {
+		t.Fatalf("saved bytes = %q, err=%v", data, err)
+	}
+}
+
 func TestResolveGeneration_UsesSlotAndAlias(t *testing.T) {
 	cfg := &llm.ProvidersConfig{
 		ImageModel: "image",

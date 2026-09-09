@@ -10,8 +10,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
 )
 
@@ -54,9 +56,9 @@ func TestTranscriptFetch_Execute_FakeRunner(t *testing.T) {
 		}
 	}
 
-	m, ok := res.(map[string]any)
+	m, ok := resultMapOK(res)
 	if !ok {
-		t.Fatalf("result type = %T, want map[string]any", res)
+		t.Fatalf("result type = %T, want success ToolResult with map", res)
 	}
 	if got := m["content"]; got != "hello\nworld" {
 		t.Errorf("content = %q, want %q", got, "hello\nworld")
@@ -81,7 +83,7 @@ func TestTranscriptFetch_Execute_Timestamps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	want := "[00:00] hello\n[01:05] world\n[01:01:11] late" // 3671.5s -> HH:MM:SS per spec
 	if got := m["content"]; got != want {
 		t.Errorf("content = %q, want %q", got, want)
@@ -190,7 +192,7 @@ func TestTranscriptFetch_Execute_LanguageFallbackRetry(t *testing.T) {
 	if len(callArgs[1]) != 3 {
 		t.Errorf("retry args = %v, want no language restriction", callArgs[1])
 	}
-	if got := res.(map[string]any)["content"]; got != "default" {
+	if got := resultMap(t, res)["content"]; got != "default" {
 		t.Errorf("content = %q, want %q", got, "default")
 	}
 }
@@ -260,7 +262,7 @@ func TestTranscriptFetch_Execute_Truncation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	content := m["content"].(string)
 	if !strings.HasSuffix(content, "...[truncated]") {
 		t.Errorf("content does not end with truncation suffix: %q", content[len(content)-40:])
@@ -299,9 +301,9 @@ func TestTranscriptFetch_Execute_Pagination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m, ok := res.(map[string]any)
+	m, ok := resultMapOK(res)
 	if !ok {
-		t.Fatalf("result type = %T, want map[string]any", res)
+		t.Fatalf("result type = %T, want success ToolResult with map", res)
 	}
 	// Chars 100-150 of the formatted text; the page was clipped at its
 	// end, so the truncation suffix is appended after the 50 chars.
@@ -345,7 +347,7 @@ func TestTranscriptFetch_Execute_OffsetBeyondTotal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	if got := m["content"]; got != "" {
 		t.Errorf("content = %q, want empty", got)
 	}
@@ -381,7 +383,7 @@ func TestTranscriptFetch_Execute_NoFalseTruncationUnderCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	if m["truncated"] != false {
 		t.Error("truncated flag = true, want false for a sub-cap transcript")
 	}
@@ -419,11 +421,12 @@ type transcriptFakeChatter struct {
 	resp      *llm.Response
 	err       error
 	errOnCall map[int]error // 1-based call index -> error override
+	// delay, when > 0, sleeps in Chat so tests can exercise deadlines.
+	delay time.Duration
 }
 
 func (f *transcriptFakeChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, messages...)
 	for _, m := range messages {
 		if m.Role == llm.RoleUser {
@@ -431,7 +434,17 @@ func (f *transcriptFakeChatter) Chat(ctx context.Context, messages []llm.ChatMes
 		}
 	}
 	idx := len(f.contents)
-	if e, ok := f.errOnCall[idx]; ok && e != nil {
+	e, hasErr := f.errOnCall[idx]
+	delay := f.delay
+	f.mu.Unlock()
+	if delay > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	if hasErr && e != nil {
 		return nil, e
 	}
 	if f.err != nil {
@@ -492,7 +505,7 @@ func TestTranscriptFetch_Summarize_ShortText_SingleReduce(t *testing.T) {
 	if got := len(ch.contents); got != 1 {
 		t.Fatalf("chat calls = %d, want 1 (reduce only, map skipped)", got)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	if m["content"] != "reduced-digest" {
 		t.Errorf("content = %v, want reduced-digest", m["content"])
 	}
@@ -544,7 +557,7 @@ func TestTranscriptFetch_Summarize_LongText_MapReduce(t *testing.T) {
 			t.Errorf("reduce input missing map-summary-%d", i)
 		}
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	if m["content"] != "reduced-digest" {
 		t.Errorf("content = %v, want reduced-digest", m["content"])
 	}
@@ -595,7 +608,7 @@ func TestTranscriptFetch_Summarize_DigestCapped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	content := m["content"].(string)
 	if len(content) > 4000+len(transcriptTruncationSuffix) {
 		t.Fatalf("content len = %d, want capped at 4000 + suffix", len(content))
@@ -685,8 +698,9 @@ func TestTranscriptFetch_Summarize_WithOutputPath(t *testing.T) {
 	out := filepath.Join(dir, "tr.txt")
 	ch := &transcriptFakeChatter{resp: &llm.Response{Content: "reduced-digest"}}
 	tool := summarizeChatterFor(t, 100, ch)
+	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
 
-	res, err := tool.Execute(context.Background(), map[string]any{
+	res, err := tool.Execute(ctx, map[string]any{
 		"url":         "DWoJZs6TuVs",
 		"summarize":   true,
 		"output_path": out,
@@ -706,7 +720,7 @@ func TestTranscriptFetch_Summarize_WithOutputPath(t *testing.T) {
 	if strings.Contains(string(data), "reduced-digest") {
 		t.Errorf("file carries the digest, want the full transcript")
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	if m["content"] != "reduced-digest" {
 		t.Errorf("content = %v, want reduced-digest", m["content"])
 	}
@@ -732,7 +746,7 @@ func TestTranscriptFetch_Summarize_NoOutputPath_NoPathKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	if m["content"] != "reduced-digest" {
 		t.Errorf("content = %v, want reduced-digest", m["content"])
 	}
@@ -754,7 +768,7 @@ func TestTranscriptFetch_Summarize_False_NoChatCalls(t *testing.T) {
 	if got := len(ch.calls); got != 0 {
 		t.Fatalf("chat calls = %d, want 0 when summarize is absent", got)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	content := m["content"].(string)
 	if !strings.HasPrefix(content, "w00000") {
 		t.Errorf("content = %q, want the verbatim transcript", content)
@@ -946,11 +960,9 @@ func newTranscriptTestTool(t *testing.T) *TranscriptFetchTool {
 }
 
 func TestTranscriptFetch_ResolveOutputPath(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("UserHomeDir: %v", err)
-	}
-	abs := filepath.Join(t.TempDir(), "out.txt")
+	// H11: resolution is fenced to wd ∪ fallbackOutputDir. Absolute
+	// paths are only accepted when inside one of those roots, and a
+	// bare "~/..." (home, outside both roots) is now REJECTED.
 	wd := t.TempDir()
 	fallbackRoot := filepath.Join(t.TempDir(), "fallback")
 	fallbackWant := filepath.Join(fallbackRoot, "sub", "tr.txt")
@@ -964,32 +976,48 @@ func TestTranscriptFetch_ResolveOutputPath(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name:    "absolute passes through",
-			raw:     abs,
-			want:    abs,
+			name:    "absolute inside wd passes through",
+			raw:     filepath.Join(wd, "out.txt"),
+			withWD:  true,
+			want:    filepath.Join(wd, "out.txt"),
 			wantErr: false,
 		},
 		{
-			name:   "relative joins working dir",
-			raw:    "sub/tr.txt",
-			withWD: true,
-			want:   filepath.Join(wd, "sub", "tr.txt"),
+			name:     "absolute inside fallback root passes through",
+			raw:      filepath.Join(fallbackRoot, "direct.txt"),
+			fallback: fallbackRoot,
+			want:     filepath.Join(fallbackRoot, "direct.txt"),
+			wantErr:  false,
+		},
+		{
+			name:    "relative joins working dir",
+			raw:     "sub/tr.txt",
+			withWD:  true,
+			want:    filepath.Join(wd, "sub", "tr.txt"),
+			wantErr: false,
 		},
 		{
 			name:     "relative without working dir joins fallback root",
 			raw:      "sub/tr.txt",
 			fallback: fallbackRoot,
 			want:     fallbackWant,
+			wantErr:  false,
 		},
 		{
-			name: "tilde expands to home",
-			raw:  "~/meept-tr-test/x.txt",
-			want: filepath.Join(home, "meept-tr-test", "x.txt"),
+			name:    "tilde outside any root rejected",
+			raw:     "~/meept-tr-test/x.txt",
+			wantErr: true,
 		},
 		{
-			name: "empty raw resolves to nothing",
-			raw:  "",
-			want: "",
+			name:    "absolute outside all roots rejected",
+			raw:     "/tmp/meept-cannot-write-here/x.txt",
+			wantErr: true,
+		},
+		{
+			name:    "empty raw resolves to nothing",
+			raw:     "",
+			want:    "",
+			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
@@ -1014,17 +1042,20 @@ func TestTranscriptFetch_OutputPath_Fits(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "nested", "deep", "tr.txt")
 	tool := newTranscriptTestTool(t)
+	// H11: absolute output paths are accepted only inside a fence root,
+	// so the session wd carries dir.
+	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
 
-	res, err := tool.Execute(context.Background(), map[string]any{
+	res, err := tool.Execute(ctx, map[string]any{
 		"url":         "DWoJZs6TuVs",
 		"output_path": out,
 	})
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m, ok := res.(map[string]any)
+	m, ok := resultMapOK(res)
 	if !ok {
-		t.Fatalf("result type = %T, want map[string]any", res)
+		t.Fatalf("result type = %T, want success ToolResult with map", res)
 	}
 
 	full := "hello\nworld"
@@ -1064,8 +1095,9 @@ func TestTranscriptFetch_OutputPath_Paginated(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "tr.txt")
 	tool := newTranscriptTestTool(t)
+	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
 
-	res, err := tool.Execute(context.Background(), map[string]any{
+	res, err := tool.Execute(ctx, map[string]any{
 		"url":         "DWoJZs6TuVs",
 		"output_path": out,
 		"offset":      0,
@@ -1074,7 +1106,7 @@ func TestTranscriptFetch_OutputPath_Paginated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 
 	// Pagination window keeps today's exact semantics (suffix included).
 	if got := m["content"]; got != "hello"+transcriptTruncationSuffix {
@@ -1124,7 +1156,7 @@ func TestTranscriptFetch_OutputPath_Empty_NoPathKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	if _, has := m["path"]; has {
 		t.Error("result must not carry a \"path\" key when output_path is absent")
 	}
@@ -1145,7 +1177,7 @@ func TestTranscriptFetch_OutputPath_RelativeUsesFallbackDir(t *testing.T) {
 		t.Fatalf("Execute unexpected error: %v", err)
 	}
 	want := filepath.Join(fallback, "gen", "tr.txt")
-	m := res.(map[string]any)
+	m := resultMap(t, res)
 	if got := m["path"]; got != want {
 		t.Errorf("path = %v, want %v", got, want)
 	}
@@ -1164,4 +1196,255 @@ func TestTranscriptFetch_ResultSizer(t *testing.T) {
 		t.Errorf("MaxResultTokens() = %d, want 1400", got)
 	}
 	var _ tools.ResultSizer = tool
+}
+
+// resultMap unwraps a success *tools.ToolResult into its map payload,
+// failing the test when the shape is wrong. Transcript_fetch returns
+// ToolResult envelopes (M8-taint) rather than bare maps.
+func resultMap(t *testing.T, res any) map[string]any {
+	t.Helper()
+	tr, ok := res.(*tools.ToolResult)
+	if !ok || !tr.Success {
+		t.Fatalf("result = %#v, want success *tools.ToolResult", res)
+	}
+	m, ok := tr.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result payload = %T, want map[string]any", tr.Result)
+	}
+	return m
+}
+
+// resultMapOK is the two-value variant of resultMap for explicit-ok sites.
+func resultMapOK(res any) (map[string]any, bool) {
+	tr, ok := res.(*tools.ToolResult)
+	if !ok || !tr.Success {
+		return nil, false
+	}
+	m, ok := tr.Result.(map[string]any)
+	return m, ok
+}
+
+// --- M7: IsReadOnly reflects output_path ---
+
+func TestTranscriptFetch_IsReadOnly_Branches(t *testing.T) {
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	if !tool.IsReadOnly(map[string]any{"url": "x"}) {
+		t.Error("plain fetch must be read-only")
+	}
+	if tool.IsReadOnly(map[string]any{"url": "x", "output_path": "tr.txt"}) {
+		t.Error("output_path call must NOT be read-only (M7)")
+	}
+	if tool.IsConcurrencySafe(map[string]any{"url": "x", "output_path": "tr.txt"}) {
+		t.Error("concurrency-safe flag should follow IsReadOnly on write calls")
+	}
+	if !tool.IsConcurrencySafe(map[string]any{"url": "x"}) {
+		t.Error("plain fetch should stay concurrency-safe")
+	}
+}
+
+// --- M8-taint: envelope labeled on both paths ---
+
+func TestTranscriptFetch_TaintLabel_BothPaths(t *testing.T) {
+	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
+		return []byte("{\"text\": \"hello\", \"start\": 0.0}\n"), nil, nil
+	}
+
+	// Pagination (verbatim) path.
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	tool.SetTranscriptRunner(runner)
+	res, err := tool.Execute(context.Background(), map[string]any{"url": "DWoJZs6TuVs"})
+	if err != nil {
+		t.Fatalf("verbatim Execute: %v", err)
+	}
+	tr, ok := res.(*tools.ToolResult)
+	if !ok {
+		t.Fatalf("verbatim result type = %T, want *tools.ToolResult", res)
+	}
+	if tr.TaintLabel != taint.TaintExternal {
+		t.Errorf("verbatim TaintLabel = %q, want %q", tr.TaintLabel, taint.TaintExternal)
+	}
+
+	// Summarize path.
+	ch := &transcriptFakeChatter{resp: &llm.Response{Content: "digest"}}
+	tool2 := summarizeChatterFor(t, 100, ch)
+	res2, err := tool2.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"summarize": true,
+	})
+	if err != nil {
+		t.Fatalf("summarize Execute: %v", err)
+	}
+	tr2 := res2.(*tools.ToolResult)
+	if tr2.TaintLabel != taint.TaintExternal {
+		t.Errorf("summarize TaintLabel = %q, want %q", tr2.TaintLabel, taint.TaintExternal)
+	}
+}
+
+// --- H11: output_path fence (wd ∪ fallback root) ---
+
+func TestTranscriptFetch_OutputPath_EscapeDenied(t *testing.T) {
+	tool := newTranscriptTestTool(t)
+	wd := t.TempDir()
+	ctx := tools.ContextWithWorkingDir(context.Background(), wd)
+
+	for _, raw := range []string{"../../escape.txt", "/tmp/meept-tr-escape/x.txt", "~/outside.txt"} {
+		_, err := tool.Execute(ctx, map[string]any{
+			"url":         "DWoJZs6TuVs",
+			"output_path": raw,
+		})
+		if err == nil {
+			t.Errorf("output_path %q: expected rejection, got nil error", raw)
+			continue
+		}
+		if !strings.Contains(err.Error(), "outside the allowed directories") {
+			t.Errorf("output_path %q: error = %v, want containment message", raw, err)
+		}
+	}
+}
+
+func TestTranscriptFetch_OutputPath_FallbackRootAllowed(t *testing.T) {
+	fallback := t.TempDir()
+	tool := newTranscriptTestTool(t)
+	tool.fallbackOutputDir = fallback
+	// Absolute inside the fallback root and relative (which resolves to
+	// the fallback root when no wd is in ctx) both write.
+	abs := filepath.Join(fallback, "abs.txt")
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":         "DWoJZs6TuVs",
+		"output_path": abs,
+	})
+	if err != nil {
+		t.Fatalf("absolute inside fallback root rejected: %v", err)
+	}
+	if _, serr := os.Stat(abs); serr != nil {
+		t.Errorf("file not written: %v", serr)
+	}
+
+	res2, err := tool.Execute(context.Background(), map[string]any{
+		"url":         "DWoJZs6TuVs",
+		"output_path": "rel.txt",
+	})
+	if err != nil {
+		t.Fatalf("relative into fallback root rejected: %v", err)
+	}
+	want := filepath.Join(fallback, "rel.txt")
+	if got := resultMap(t, res2)["path"]; got != want {
+		t.Errorf("path = %v, want %v", got, want)
+	}
+	if _, serr := os.Stat(want); serr != nil {
+		t.Errorf("file not written: %v", serr)
+	}
+	_ = res
+}
+
+func TestTranscriptFetch_OutputPath_RelativeInsideWorkdir(t *testing.T) {
+	wd := t.TempDir()
+	tool := newTranscriptTestTool(t)
+	ctx := tools.ContextWithWorkingDir(context.Background(), wd)
+
+	res, err := tool.Execute(ctx, map[string]any{
+		"url":         "DWoJZs6TuVs",
+		"output_path": "sub/dir/tr.txt",
+	})
+	if err != nil {
+		t.Fatalf("legit relative output_path rejected: %v", err)
+	}
+	want := filepath.Join(wd, "sub", "dir", "tr.txt")
+	if got := resultMap(t, res)["path"]; got != want {
+		t.Errorf("path = %v, want %v", got, want)
+	}
+	if _, serr := os.Stat(want); serr != nil {
+		t.Errorf("file not written: %v", serr)
+	}
+}
+
+// --- LOW-utf8: multibyte boundary safety ---
+
+func TestTranscriptFetch_PreviewTruncation_UTF8Boundary(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "tr.txt")
+	// Transcript of multibyte runes, longer than the 1000-char preview:
+	// each line is "[00:00] " + 10 runes of 3 bytes + "\n" = 39 bytes.
+	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
+		var b strings.Builder
+		for i := 0; i < 50; i++ {
+			fmt.Fprintf(&b, `{"text": %q, "start": 0.0}`+"\n", strings.Repeat("日", 10))
+		}
+		return []byte(b.String()), nil, nil
+	}
+	tool := NewTranscriptFetchTool(TranscriptConfig{}, nil)
+	tool.SetTranscriptRunner(runner)
+	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
+
+	res, err := tool.Execute(ctx, map[string]any{
+		"url":         "DWoJZs6TuVs",
+		"output_path": out,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	content := resultMap(t, res)["content"].(string)
+	// The preview portion (before the pointer suffix) must be valid
+	// UTF-8 — a byte-slice cut would split the 3-byte rune at the
+	// 1000-char boundary and produce an invalid sequence.
+	preview := strings.TrimSuffix(content, fmt.Sprintf(transcriptFilePointerSuffix, out))
+	if !utf8.ValidString(preview) {
+		t.Error("preview split a multibyte rune at the truncation boundary")
+	}
+	if !strings.Contains(content, "...[full transcript at ") {
+		t.Error("expected the file pointer suffix in content")
+	}
+}
+
+func TestTruncateUTF8_HelperOnMultibyteDigest(t *testing.T) {
+	// capSummarizeDigest cuts at 4000 bytes; with 3-byte runes the cut
+	// lands mid-rune unless trimmed to the boundary.
+	digest := strings.Repeat("日", 2000) // 6000 bytes
+	got := capSummarizeDigest(digest)
+	want := strings.Repeat("日", 1333) + transcriptTruncationSuffix // 3999 bytes + suffix
+	if got != want {
+		t.Errorf("capSummarizeDigest cut mid-rune: len=%d, want rune-aligned cut", len(got))
+	}
+	if !utf8.ValidString(strings.TrimSuffix(got, transcriptTruncationSuffix)) {
+		t.Error("digest body is not valid UTF-8")
+	}
+}
+
+// --- LOW-timeout: summarize deadline is scaled ---
+
+func TestTranscriptFetch_Summarize_DeadlineScaled(t *testing.T) {
+	// Constants must reflect the worst-case call count math: the fetch
+	// output is capped at 100k chars and windows are 12k, so the
+	// worst case is 9 windows + 1 reduce + 1 fetch = 11 timeouts,
+	// capped at 10 minutes.
+	wantCalls := (TranscriptMaxOutputLength+transcriptSummarizeWindowChars-1)/transcriptSummarizeWindowChars + 1
+	if transcriptSummarizeMaxCalls != wantCalls {
+		t.Errorf("transcriptSummarizeMaxCalls = %d, want %d", transcriptSummarizeMaxCalls, wantCalls)
+	}
+	if transcriptSummarizeMaxTimeout != 10*time.Minute {
+		t.Errorf("transcriptSummarizeMaxTimeout = %v, want 10m", transcriptSummarizeMaxTimeout)
+	}
+	// Behavior: a multi-window summarize must NOT hit the single-fetch
+	// 1-second timeout (the old bug killed window 2+).
+	ch := &transcriptFakeChatter{resp: &llm.Response{Content: "digest"}}
+	tool := summarizeChatterFor(t, 6000, ch) // ~36k chars -> multiple windows
+	each := 150 * time.Millisecond
+	tool.timeoutSeconds = 1 // far too small for 5+ sequential turns at raw timeout
+	// Simulate slow LLM turns: each takes 150ms; with the raw 1s
+	// deadline the 3rd+ map call would exceed it. With the scaled
+	// deadline (1s × 11 = 11s) all calls complete.
+	ch.delay = each
+	res, err := tool.Execute(context.Background(), map[string]any{
+		"url":       "DWoJZs6TuVs",
+		"summarize": true,
+	})
+	if err != nil {
+		t.Fatalf("summarize with scaled deadline failed: %v", err)
+	}
+	if got := len(ch.contents); got <= 2 {
+		t.Fatalf("chat calls = %d, want multi-window (>2)", got)
+	}
+	if m := resultMap(t, res); m["content"] != "digest" {
+		t.Errorf("content = %v, want digest", m["content"])
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,7 +92,7 @@ func (c *mediaClient) Generate(ctx context.Context, req mediaRequest) (any, erro
 	if err != nil {
 		return nil, err
 	}
-	path, err := c.save(ctx, req, art)
+	path, err := c.save(ctx, req, art, mc)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +143,7 @@ func (c *mediaClient) dispatch(ctx context.Context, req mediaRequest, mc *llm.Mo
 	}
 }
 
-func (c *mediaClient) save(ctx context.Context, req mediaRequest, art *mediaArtifact) (string, error) {
+func (c *mediaClient) save(ctx context.Context, req mediaRequest, art *mediaArtifact, mc *llm.ModelConfig) (string, error) {
 	data := art.Bytes
 	if len(data) == 0 && art.Base64 != "" {
 		decoded, err := base64.StdEncoding.DecodeString(art.Base64)
@@ -152,7 +153,7 @@ func (c *mediaClient) save(ctx context.Context, req mediaRequest, art *mediaArti
 		data = decoded
 	}
 	if len(data) == 0 && art.URL != "" {
-		body, err := c.download(ctx, art.URL)
+		body, err := c.download(ctx, art.URL, mc)
 		if err != nil {
 			return "", err
 		}
@@ -179,9 +180,21 @@ func (c *mediaClient) save(ctx context.Context, req mediaRequest, art *mediaArti
 	return abs, nil
 }
 
-func (c *mediaClient) download(ctx context.Context, rawURL string) ([]byte, error) {
-	if err := checkURL(rawURL); err != nil {
-		return nil, fmt.Errorf("download blocked: %w", err)
+// download fetches artifact bytes from rawURL. SSRF policy (H10): the
+// legacy checkURL blocklist applies to everything, EXCEPT URLs whose
+// host:port match the generation model's own configured BaseURL. A local
+// generation backend (e.g. ComfyUI at http://127.0.0.1:8188) serves its
+// artifacts from itself — generation succeeds through /prompt + /history
+// but the final /view download was blocked as loopback, killing every
+// local generation. The BaseURL is owner-trusted config (models.json5),
+// so its host:port is an explicit escape hatch, same spirit as
+// pdf_read/web_fetch's central-guard allowances. Everything else —
+// including any OTHER loopback address — stays blocked.
+func (c *mediaClient) download(ctx context.Context, rawURL string, mc *llm.ModelConfig) ([]byte, error) {
+	if !sameHostPort(rawURL, mc.BaseURL) {
+		if err := checkURL(rawURL); err != nil {
+			return nil, fmt.Errorf("download blocked: %w", err)
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -198,6 +211,25 @@ func (c *mediaClient) download(ctx context.Context, rawURL string) ([]byte, erro
 		return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
 	return readLimited(resp.Body, maxMediaBytes)
+}
+
+// sameHostPort reports whether raw and base parse to the same
+// host:port (scheme-insensitive on purpose: an http BaseURL answering
+// an https artifact URL still names the same backend). Empty or
+// unparseable inputs never match, so the exemption is fail-closed.
+func sameHostPort(raw, base string) bool {
+	if raw == "" || base == "" {
+		return false
+	}
+	ru, err := url.Parse(raw)
+	if err != nil || ru.Host == "" {
+		return false
+	}
+	bu, err := url.Parse(base)
+	if err != nil || bu.Host == "" {
+		return false
+	}
+	return strings.EqualFold(ru.Host, bu.Host)
 }
 
 func (c *mediaClient) doJSON(ctx context.Context, method, rawURL string, headers map[string]string, body any) (map[string]any, int, error) {
