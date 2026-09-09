@@ -106,3 +106,7 @@ tools/classifier-eval/replay-corpus.local.json5
 
 # Skill-evolution cycle output (regenerable daemon artifacts, churn every cycle)
 docs/plans/skill-evolution-*.md
+# silver adjudication working sheet (contains verbatim transcript text)
+tools/classifier-eval/SILVER-ADJUDICATION-SHEET.md
+tools/classifier-eval/silver_adjudication_rows.json
+tools/classifier-eval/silver_adjudication_data.json
