@@ -1780,8 +1780,10 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 // D4: Extracted to enable retry with resume capability.
 // retryState tracks state from prior attempts (accumulated content, tool calls, usage).
 // If retryState.isResume is true, the request includes Last-Event-ID header for resume.
-// NOTE: resp.Body is closed before the function returns (line 1270). Callers only access
-// resp.StatusCode and must not read resp.Body.
+// NOTE: resp.Body is closed before the function returns (the non-200 path
+// near :1851, the ctx-cancel path near :1947, the read-error path near :2027,
+// and the normal exit at :2061). Callers only access resp.StatusCode and must
+// not read resp.Body.
 // Returns HTTP status code as int so callers don't manage *http.Response lifecycle.
 // cfg must be captured under lock by the caller.
 // priority marks an interactive turn for slot-gate priority (tree 04 leaf 03).
@@ -2098,6 +2100,20 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	// streak ("stopped after extended thinking").
 	content, lfmCalls := parseLFMToolCalls(accumulated.String())
 	toolCalls = append(toolCalls, lfmCalls...)
+
+	// A stream cut off mid-marker leaves an unclosed <|tool_call_start|> in
+	// the accumulated text: parseLFMToolCalls can't recover it (no end
+	// marker) and the raw marker text stays in content. Don't strip it
+	// silently — log so the truncated tool call is diagnosable.
+	// Guard FIRST: LastIndex returns -1 on marker-free content, and the
+	// slice expression below would panic on content[-1:] if evaluated first.
+	if idx := strings.LastIndex(content, "<|tool_call_start|>"); idx >= 0 {
+		rest := content[idx:]
+		if !strings.Contains(rest, "<|tool_call_end|>") {
+			c.logger.Warn("LFM tool-call marker truncated at stream cutoff; raw marker text kept in content",
+				"model", modelID, "remainder", rest)
+		}
+	}
 
 	result := &Response{
 		Content:      content,
