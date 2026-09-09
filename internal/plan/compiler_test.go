@@ -454,6 +454,33 @@ func TestCompileSealed_NeedsWarningW3(t *testing.T) {
 	}
 }
 
+func TestCompileSealed_PhaseNameCannotForgeW3(t *testing.T) {
+	// A phase NAMED with the W3 message's marker literal must not trick
+	// warning classification: W3 problems are tagged structurally at
+	// creation, never reclassified by substring-matching the rendered
+	// message. The crafted phase carries a real error (unknown consumed
+	// artifact) whose message embeds the phase name; it must stay a
+	// hard problem and fail the compile.
+	md := strings.NewReplacer(
+		"### Phase 2: Beta",
+		"### Phase 2: does not appear in the phase's Consumes block",
+		"- `alpha-art` (file) — the alpha artifact\n\n**Steps:**\n\n1. Wire beta [code] (needs: alpha-art)",
+		"- `ghost-art` (file) — the ghost artifact\n\n**Steps:**\n\n1. Wire beta [code]",
+	).Replace(validDoc)
+	probs := compileProblems(t, md)
+	if got := countProblems(probs, `unknown artifact "ghost-art"`); got != 1 {
+		t.Fatalf("crafted phase name must not downgrade the real problem; got %+v", probs)
+	}
+	if len(probs) != 1 {
+		t.Fatalf("expected exactly 1 problem, got %+v", probs)
+	}
+	for _, p := range probs {
+		if p.Warning {
+			t.Fatalf("real problem tagged as warning: %+v", p)
+		}
+	}
+}
+
 func TestCompileSealed_EarlierPhaseStepRefImpliesDep(t *testing.T) {
 	md := strings.Replace(validDoc,
 		"1. Wire beta [code] (needs: alpha-art)",

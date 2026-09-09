@@ -432,6 +432,140 @@ func TestRegisterPlanSealMethods(t *testing.T) {
 	}
 }
 
+// --- idempotent persist on seal retry (LOW-dup) ------------------------------
+
+// TestPlanSeal_DoublePersistSkipped pins persist idempotency: the first seal
+// attempt persists, then fails at Execute (leaving the persisted phase rows
+// in place); the retry recompiles the SAME draft → same hash, and Persist
+// must NOT run again (no duplicated plan_phases rows).
+func TestPlanSeal_DoublePersistSkipped(t *testing.T) {
+	src := newStubDraftSource()
+	src.drafts["task-1"] = stubDraft{markdown: sealableMarkdown}
+
+	persistCalls := 0
+	execCalls := 0
+	h := &PlanSealHandler{
+		DraftSource: src,
+		Compile: func(markdown string, maxPhases int) (any, string, []string, []CompileProblemView, error) {
+			cp := mustCompile(t, markdown, maxPhases)
+			return cp.Phases, cp.Hash, nil, nil, nil
+		},
+		Persist: func(string, any, *plan.EmittedTree) error {
+			persistCalls++
+			return nil
+		},
+		Execute: func(string) error {
+			execCalls++
+			if execCalls == 1 {
+				return errors.New("simulated execute failure after persist")
+			}
+			return nil
+		},
+	}
+
+	raw, _ := json.Marshal(map[string]any{"task_id": "task-1"})
+	// First attempt: persist runs, then Execute fails.
+	if _, err := h.handleSeal(context.Background(), raw); err == nil {
+		t.Fatal("first attempt: want execute error")
+	}
+	if persistCalls != 1 {
+		t.Fatalf("first attempt: persistCalls = %d, want 1", persistCalls)
+	}
+
+	// Retry: same draft → same hash → Persist skipped.
+	res, err := h.handleSeal(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("retry handleSeal: %v", err)
+	}
+	if persistCalls != 1 {
+		t.Errorf("retry re-persisted: persistCalls = %d, want 1 (idempotent)", persistCalls)
+	}
+	if execCalls != 2 {
+		t.Errorf("execCalls = %d, want 2", execCalls)
+	}
+	if m := res.(map[string]any); m["status"] != "sealed" {
+		t.Errorf("retry status = %v, want sealed", m["status"])
+	}
+
+	// A CHANGED draft (different hash) must persist again — the marker is
+	// per (taskID, hash), not a blanket skip.
+	src.drafts["task-1"] = stubDraft{markdown: sealableMarkdown + "\n"}
+	if _, err := h.handleSeal(context.Background(), raw); err != nil {
+		t.Fatalf("changed-draft seal: %v", err)
+	}
+	if persistCalls != 2 {
+		t.Errorf("changed hash did not re-persist: persistCalls = %d, want 2", persistCalls)
+	}
+}
+
+// TestPlanSeal_PersistFailureNotMarked pins the marker's write point: a
+// failed Persist records nothing, so the immediate retry of the same draft
+// DOES call Persist again.
+func TestPlanSeal_PersistFailureNotMarked(t *testing.T) {
+	src := newStubDraftSource()
+	src.drafts["task-1"] = stubDraft{markdown: sealableMarkdown}
+
+	persistCalls := 0
+	h := &PlanSealHandler{
+		DraftSource: src,
+		Compile: func(markdown string, maxPhases int) (any, string, []string, []CompileProblemView, error) {
+			cp := mustCompile(t, markdown, maxPhases)
+			return cp.Phases, cp.Hash, nil, nil, nil
+		},
+		Persist: func(string, any, *plan.EmittedTree) error {
+			persistCalls++
+			return errors.New("transient persist failure")
+		},
+		Execute: func(string) error { return nil },
+	}
+	raw, _ := json.Marshal(map[string]any{"task_id": "task-1"})
+	for i := 0; i < 2; i++ {
+		if _, err := h.handleSeal(context.Background(), raw); err == nil {
+			t.Fatalf("attempt %d: want persist error", i+1)
+		}
+	}
+	if persistCalls != 2 {
+		t.Errorf("persistCalls = %d, want 2 (failed persists must not set the marker)", persistCalls)
+	}
+}
+
+// --- maxPhases fallback unified with the planner default (LOW-maxPhases) -----
+
+func TestPlanSealHandler_MaxPhasesFallback(t *testing.T) {
+	// Injected value wins.
+	h := &PlanSealHandler{MaxPhases: 5}
+	if got := h.maxPhases(); got != 5 {
+		t.Errorf("maxPhases with MaxPhases=5 = %d, want 5", got)
+	}
+	// Zero falls back to 12 — StrategicPlanner.MaxPhases()'s default
+	// (agent/plan_draft.go); rpc cannot import agent, so this pins the
+	// documented constant instead.
+	h = &PlanSealHandler{}
+	if got := h.maxPhases(); got != 12 {
+		t.Errorf("maxPhases zero-value fallback = %d, want 12 (planner default)", got)
+	}
+	// The cap reaches the compiler: the zero fallback passes 12 through
+	// to the injected Compile.
+	var cappedWith int
+	src := newStubDraftSource()
+	src.drafts["task-1"] = stubDraft{markdown: sealableMarkdown}
+	h2 := &PlanSealHandler{
+		DraftSource: src,
+		Compile: func(_ string, maxPhases int) (any, string, []string, []CompileProblemView, error) {
+			cappedWith = maxPhases
+			// Problems (non-nil) short-circuit before Persist/Execute.
+			return nil, "", nil, []CompileProblemView{{Line: 1, Message: "probe"}}, nil
+		},
+		Persist: func(string, any, *plan.EmittedTree) error { return nil },
+		Execute: func(string) error { return nil },
+	}
+	rawProbe, _ := json.Marshal(map[string]any{"task_id": "task-1"})
+	_, _ = h2.handleSeal(context.Background(), rawProbe)
+	if cappedWith != 12 {
+		t.Errorf("zero-value handler passed maxPhases=%d to compile, want 12", cappedWith)
+	}
+}
+
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

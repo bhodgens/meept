@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/caimlas/meept/internal/plan"
 )
@@ -60,10 +61,18 @@ type PlanSealHandler struct {
 	SaveDraft func(taskID, markdown string) error
 	// GetDraft fetches draft markdown + version (plan.draft get).
 	GetDraft func(taskID string) (markdown string, version int, ok bool)
-	// MaxPhases is the compile phase cap. Wired from the strategic planner's
-	// existing MaxPlanSteps config sibling (default 10) — reused, not a new
-	// knob.
+	// MaxPhases is the compile phase cap. Wired from StrategicPlanner's
+	// MaxPhases() in daemon wiring — the planner's own multi-phase cap
+	// (default 12), reused, not a new knob. The zero-value fallback in
+	// maxPhases() mirrors that same default.
 	MaxPhases int
+	// persistedHashes is the seal-attempt marker (taskID → compile hash
+	// already handed to Persist). A seal retry after a failed SealDraft
+	// or Execute re-enters handleSeal with the same compiled plan; the
+	// marker makes the persist idempotent so plan_phases rows are not
+	// duplicated. Guarded by persistedMu; lazily initialized.
+	persistedHashes map[string]string
+	persistedMu     sync.Mutex
 }
 
 // NewPlanSealHandler creates a handler with the core seal-path injection.
@@ -169,9 +178,17 @@ func (h *PlanSealHandler) handleSeal(ctx context.Context, params json.RawMessage
 		mode = "tree"
 	}
 
-	if err := h.Persist(req.TaskID, phases, tree); err != nil {
+	// Persist is idempotent per (taskID, hash): a retry after SealDraft or
+	// Execute failed re-enters with the same compiled plan and must not
+	// duplicate the plan_phases rows written by the first attempt. A
+	// different hash means the draft changed between attempts, so persist
+	// reruns with the new phases.
+	if h.alreadyPersisted(req.TaskID, hash) {
+		// Seal-attempt marker hit: skip re-persisting identical phases.
+	} else if err := h.Persist(req.TaskID, phases, tree); err != nil {
 		return nil, fmt.Errorf("failed to persist plan: %w", err)
 	}
+	h.markPersisted(req.TaskID, hash)
 
 	// Seal (stamp the hash) only after persistence succeeded, then execute.
 	if err := h.DraftSource.SealDraft(req.TaskID, hash); err != nil {
@@ -238,13 +255,35 @@ func (h *PlanSealHandler) handleDraft(ctx context.Context, params json.RawMessag
 	}, nil
 }
 
-// maxPhases resolves the cap: injected value when positive, else the
-// strategic planner's default (MaxPlanSteps default 10).
+// alreadyPersisted reports whether this handler already handed Persist a
+// compile of `hash` for taskID (the seal-attempt marker). The marker lives
+// on the handler: the daemon keeps one PlanSealHandler for the process
+// lifetime, so it survives across seal retries within a daemon run.
+func (h *PlanSealHandler) alreadyPersisted(taskID, hash string) bool {
+	h.persistedMu.Lock()
+	defer h.persistedMu.Unlock()
+	return h.persistedHashes != nil && h.persistedHashes[taskID] == hash
+}
+
+// markPersisted records that Persist completed for (taskID, hash).
+func (h *PlanSealHandler) markPersisted(taskID, hash string) {
+	h.persistedMu.Lock()
+	defer h.persistedMu.Unlock()
+	if h.persistedHashes == nil {
+		h.persistedHashes = make(map[string]string)
+	}
+	h.persistedHashes[taskID] = hash
+}
+
+// maxPhases resolves the cap: injected value when positive, else 12 — the
+// StrategicPlanner.MaxPhases() default (agent/plan_draft.go), which daemon
+// wiring passes here explicitly. This fallback only covers a zero value and
+// must match that source of truth; rpc cannot import agent (cycle).
 func (h *PlanSealHandler) maxPhases() int {
 	if h.MaxPhases > 0 {
 		return h.MaxPhases
 	}
-	return 10
+	return 12
 }
 
 // specCount counts phases in the compiled shape; 0 for foreign shapes.

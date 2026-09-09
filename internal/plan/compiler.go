@@ -47,10 +47,14 @@ func CompileSealed(markdown string, maxPhases int) (*CompiledPlan, error) {
 }
 
 // CompileProblem is one compile finding: a 1-based input line (0 for
-// document-level problems) and a human-readable message.
+// document-level problems) and a human-readable message. Warning marks
+// findings that downgrade to plan warnings rather than seal blockers —
+// classification is structural (set at creation), never inferred from the
+// rendered message text (which user-controlled phase names can imitate).
 type CompileProblem struct {
 	Line    int
 	Message string
+	Warning bool // true ⇒ moved into CompiledPlan.Warnings instead of failing the compile
 }
 
 // CompileError aggregates every problem found in one compile pass.
@@ -195,7 +199,6 @@ type draftDoc struct {
 	dupLine    int
 	meta       []ParsedMetaKV // key/value with source lines tracked separately
 	metaLines  map[string]int
-	metaBad    []CompileProblem
 	goal       []string
 	oqHeading  int // line of "## Open Questions" (0 when absent)
 	oqCount    int // non-blank lines in the section
@@ -515,7 +518,6 @@ func checkEnvelope(doc *draftDoc, maxPhases int, problems *[]CompileProblem) {
 			add(s, fmt.Sprintf(statusMsg, val))
 		}
 	}
-	*problems = append(*problems, doc.metaBad...)
 
 	if doc.oqHeading != 0 && doc.oqCount > 0 {
 		add(doc.oqHeading, fmt.Sprintf(oqMsg, doc.oqCount))
@@ -700,11 +702,12 @@ func checkSteps(doc *draftDoc, problems *[]CompileProblem) {
 						})
 					default:
 						if !phaseConsumes(p, ref) {
-							// W3 warning, parked as a pseudo-problem for
-							// assemble() to move into Warnings.
+							// W3 warning, tagged structurally at creation
+							// for assemble() to move into Warnings.
 							*problems = append(*problems, CompileProblem{
 								Line:    st.line,
 								Message: fmt.Sprintf(warnNeedsNot, st.number, p.name, ref),
+								Warning: true,
 							})
 						}
 					}
@@ -804,12 +807,11 @@ func assemble(doc *draftDoc, warnings *[]string, problems *[]CompileProblem) *Co
 		}
 	}
 
-	// W3 warnings were parked as pseudo-problems by checkSteps; move them.
+	// W3 warnings were tagged structurally by checkSteps; move them.
 	var w3 []CompileProblem
 	kept := (*problems)[:0]
 	for _, pr := range *problems {
-		// W3 messages start with "step N of phase" and mention "does not appear in the phase's Consumes block".
-		if strings.Contains(pr.Message, "does not appear in the phase's Consumes block") {
+		if pr.Warning {
 			w3 = append(w3, pr)
 			continue
 		}

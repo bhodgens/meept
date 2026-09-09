@@ -699,25 +699,31 @@ func (m *PlanManager) RegisterTaskPlan(taskID, planID string) {
 // a minimal container plan (plan-compiler leaf 04): the seal path persists
 // phase declarations through CreatePhase, which requires a parent plan row.
 // Idempotent per task. The returned plan carries the compiled title.
+//
+// The check-and-create runs under ONE write lock: an earlier version took a
+// read lock, checked, unlocked, then created + registered — two concurrent
+// seals for the same task could both miss and create duplicate container
+// plans (the first orphaned). CreatePlan does not touch m.mu (its store and
+// bus calls are lock-free), so the write lock safely spans the whole
+// check-create-register sequence.
 func (m *PlanManager) EnsureTaskPlan(ctx context.Context, taskID, title string) (*Plan, error) {
-	m.mu.RLock()
-	planID, ok := m.taskPlanMap[taskID]
-	m.mu.RUnlock()
-	if ok {
-		if p, err := m.store.GetPlan(ctx, planID); err == nil && p != nil {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if planID, ok := m.taskPlanMap[taskID]; ok {
+		p, err := m.store.GetPlan(ctx, planID)
+		if err == nil && p != nil {
 			return p, nil
 		}
 		// Registered plan vanished from the store (test store reset):
 		// fall through and create a fresh container.
-		m.mu.Lock()
 		delete(m.taskPlanMap, taskID)
-		m.mu.Unlock()
 	}
 	created, err := m.CreatePlan(ctx, title, "", "", "", "")
 	if err != nil {
 		return nil, fmt.Errorf("create seal container plan: %w", err)
 	}
-	m.RegisterTaskPlan(taskID, created.ID)
+	m.taskPlanMap[taskID] = created.ID
 	return created, nil
 }
 

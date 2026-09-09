@@ -341,3 +341,73 @@ func TestEmitTree_RejectsEmptyInput(t *testing.T) {
 	_, err = EmitTree(&CompiledPlan{}, TreeEmitOptions{})
 	require.Error(t, err)
 }
+
+// --- leafDependencies: in-phase chaining (M14) -------------------------------
+
+func TestEmitTree_SplitPhaseLeavesChainInOrder(t *testing.T) {
+	// A 4-step phase with MaxLeavesPerPhase=3 splits into 2 leaves
+	// (perLeaf=2 ⇒ [2,2]). The leaves share one concurrency group (no
+	// consumes edges anywhere in the plan) but must NOT claim
+	// independence: leaf 2 depends on leaf 1 — in the Child Document
+	// Index, the leaf's own Dependencies line, and the Dispatch Protocol.
+	phase := PhaseSpec{
+		Name:        "solo",
+		Description: "One phase split across leaves.",
+		Steps: []StepSpec{
+			{Description: "step one."}, {Description: "step two."},
+			{Description: "step three."}, {Description: "step four."},
+		},
+	}
+	tree, err := EmitTree(&CompiledPlan{Phases: []PhaseSpec{phase}},
+		TreeEmitOptions{MaxLeavesPerPhase: 3})
+	require.NoError(t, err)
+	require.Len(t, tree.Leaves, 2)
+
+	leaf01, leaf02 := tree.Leaves[0].Path, tree.Leaves[1].Path
+
+	// Child Document Index: leaf 1 none, leaf 2 → leaf 1.
+	require.Contains(t, tree.Root, "| 1 | "+leaf01+" | leaf | none |")
+	require.Contains(t, tree.Root, "| 2 | "+leaf02+" | leaf | "+leaf01+" |")
+
+	// The leaf document itself names its in-phase predecessor.
+	require.Contains(t, tree.Leaves[1].Content, "**Dependencies:** "+leaf01+"\n")
+	require.Contains(t, tree.Leaves[0].Content, "**Dependencies:** none\n")
+
+	// The Dispatch Protocol no longer tells leaves within a group they
+	// are independent; the chaining rule is spelled out.
+	proto := extractSection(tree.Root, "## Dispatch Protocol")
+	require.NotContains(t, proto, "independent — dispatch them together")
+	require.Contains(t, proto, leaf01)
+}
+
+func TestEmitTree_SplitPhaseKeepsArtifactEdges(t *testing.T) {
+	// Phase consume consumes phase produce's artifact AND splits into two
+	// leaves: leaf 2 of consume chains to leaf 1 of consume (in-phase
+	// rule) and still names produce's leaf (artifact rule) — chaining
+	// adds edges, never drops consumes-derived ones.
+	produce := PhaseSpec{
+		Name:        "produce",
+		Description: "Producer phase.",
+		Produces:    []Artifact{{Name: "art", Kind: "file", Description: "the artifact"}},
+		Steps:       []StepSpec{{Description: "make the artifact."}},
+	}
+	consume := PhaseSpec{
+		Name:        "consume",
+		Description: "Consumer phase split across leaves.",
+		Consumes:    []Artifact{{Name: "art", Kind: "file", Description: "the artifact"}},
+		Steps: []StepSpec{
+			{Description: "step one."}, {Description: "step two."},
+			{Description: "step three."}, {Description: "step four."},
+		},
+	}
+	tree, err := EmitTree(&CompiledPlan{Phases: []PhaseSpec{produce, consume}},
+		TreeEmitOptions{MaxLeavesPerPhase: 3})
+	require.NoError(t, err)
+	require.Len(t, tree.Leaves, 3) // produce → [1], consume → [2,1]
+
+	leafP1, leafC1, leafC2 := tree.Leaves[0].Path, tree.Leaves[1].Path, tree.Leaves[2].Path
+	// leafC2's dependencies name BOTH its in-phase predecessor (first)
+	// and the artifact producer.
+	require.Contains(t, tree.Root, "| 3 | "+leafC2+" | leaf | "+leafC1+", "+leafP1+" |")
+	require.Contains(t, tree.Leaves[2].Content, "**Dependencies:** "+leafC1+", "+leafP1+"\n")
+}

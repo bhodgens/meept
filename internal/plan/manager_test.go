@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/caimlas/meept/internal/config"
@@ -454,5 +455,100 @@ func TestResolvePlanDir(t *testing.T) {
 	// Result should contain the expanded TMPDIR, not the literal string.
 	if got == "$TMPDIR/plans" {
 		t.Error("resolvePlanDir should expand env vars in external_path")
+	}
+}
+
+// TestEnsureTaskPlan_ConcurrentSinglePlan pins the check-and-create
+// atomicity: two goroutines racing EnsureTaskPlan for the same task must
+// converge on ONE container plan (an earlier RLock-check → unlock → create
+// → register shape let both miss and orphaned the first plan).
+func TestEnsureTaskPlan_ConcurrentSinglePlan(t *testing.T) {
+	mgr := setupTestManager(t)
+	ctx := context.Background()
+
+	const goroutines = 8
+	results := make([]*Plan, goroutines)
+	errs := make([]error, goroutines)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // maximize contention
+			p, err := mgr.EnsureTaskPlan(ctx, "task-race", "Sealed plan")
+			results[i], errs[i] = p, err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: EnsureTaskPlan: %v", i, err)
+		}
+	}
+	first := results[0].ID
+	for i, p := range results[1:] {
+		if p.ID != first {
+			t.Errorf("goroutine %d got plan %s, want single container %s", i+1, p.ID, first)
+		}
+	}
+
+	// The mapping points at that one plan.
+	mgr.mu.RLock()
+	mapped := mgr.taskPlanMap["task-race"]
+	mgr.mu.RUnlock()
+	if mapped != first {
+		t.Errorf("taskPlanMap = %q, want %q", mapped, first)
+	}
+
+	// Exactly one plan row exists in the store for the container title
+	// (the fresh manager holds only EnsureTaskPlan's draft-state plan).
+	plans, err := mgr.store.ListPlansByState(ctx, StateDraft, 100)
+	if err != nil {
+		t.Fatalf("ListPlansByState: %v", err)
+	}
+	n := 0
+	for _, p := range plans {
+		if p.Title == "Sealed plan" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("store holds %d container plans titled %q, want 1", n, "Sealed plan")
+	}
+}
+
+// TestEnsureTaskPlan_IdempotentSequential covers the non-racing repeat path:
+// a second call for the same task returns the same plan, and a stale mapping
+// (plan vanished from the store) is replaced rather than returned.
+func TestEnsureTaskPlan_IdempotentSequential(t *testing.T) {
+	mgr := setupTestManager(t)
+	ctx := context.Background()
+
+	first, err := mgr.EnsureTaskPlan(ctx, "task-seq", "Sealed plan")
+	if err != nil {
+		t.Fatalf("first EnsureTaskPlan: %v", err)
+	}
+	second, err := mgr.EnsureTaskPlan(ctx, "task-seq", "Sealed plan")
+	if err != nil {
+		t.Fatalf("second EnsureTaskPlan: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Errorf("sequential calls returned %s then %s, want same plan", first.ID, second.ID)
+	}
+
+	// Stale mapping: point the task at a nonexistent plan, expect a fresh
+	// container that no longer matches the dead ID.
+	mgr.mu.Lock()
+	mgr.taskPlanMap["task-seq"] = "plan-gone"
+	mgr.mu.Unlock()
+	third, err := mgr.EnsureTaskPlan(ctx, "task-seq", "Sealed plan")
+	if err != nil {
+		t.Fatalf("stale-mapping EnsureTaskPlan: %v", err)
+	}
+	if third.ID == "plan-gone" {
+		t.Error("stale mapping returned a plan that no longer exists in the store")
 	}
 }

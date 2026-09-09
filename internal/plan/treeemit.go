@@ -298,11 +298,20 @@ func concurrencyGroups(cp *CompiledPlan) []int {
 	return group
 }
 
-// leafDependencies computes, per leaf, the ordered unique dependency paths:
-// every artifact the leaf's phase consumes must come from an earlier leaf —
-// either inside the same leaf (intra-leaf, no edge) or from a producing
-// leaf declared in Dependencies. Artifacts no leaf produces create no edge
-// (matches the frontier's declared-but-never-produced policy).
+// leafDependencies computes, per leaf, the ordered unique dependency paths.
+// Two edge sources feed it:
+//
+//  1. Artifact edges: every artifact the leaf's phase consumes must come
+//     from an earlier leaf — either inside the same leaf (intra-leaf, no
+//     edge) or from a producing leaf declared in Dependencies. Artifacts
+//     no leaf produces create no edge (matches the frontier's
+//     declared-but-never-produced policy).
+//  2. In-phase chaining: when one phase splits across several leaves,
+//     each leaf depends on the leaf before it in emission order. Without
+//     this, split-phase leaves share a concurrency group with no
+//     ordering edge and their agents would run concurrently inside one
+//     phase. Artifact-derived edges are preserved — chaining only adds
+//     the missing predecessor edge, never drops a consumes edge.
 func leafDependencies(cp *CompiledPlan, leaves []emitLeaf) [][]string {
 	produceLeaf := make(map[string]int)
 	for li := range leaves {
@@ -318,6 +327,14 @@ func leafDependencies(cp *CompiledPlan, leaves []emitLeaf) [][]string {
 		phase := &cp.Phases[leaves[li].phaseIdx]
 		seen := make(map[string]bool)
 		var paths []string
+		// In-phase predecessor: leaves are emitted in partition order,
+		// so leaf k chains to leaf k-1 when both belong to the same
+		// phase. The seen set keeps the dedup if a consumes edge also
+		// names this predecessor (and orders the predecessor first).
+		if li > 0 && leaves[li-1].phaseIdx == leaves[li].phaseIdx {
+			seen[leaves[li-1].Path] = true
+			paths = append(paths, leaves[li-1].Path)
+		}
 		for _, a := range phase.Consumes {
 			src, ok := produceLeaf[a.Name]
 			if !ok || src == li || seen[leaves[src].Path] {
@@ -504,7 +521,7 @@ func rootChildIndex(leaves []emitLeaf, deps [][]string, est []string, groups []i
 func rootDispatchProtocol(cp *CompiledPlan, leaves []emitLeaf, groups []int) string {
 	var b strings.Builder
 	b.WriteString("## Dispatch Protocol\n\n")
-	b.WriteString("Dispatch leaves in concurrency-group order (group 1 first). Leaves within a group are independent — dispatch them together. Every dispatch includes: \"Do NOT commit. Do NOT run git add.\" The orchestrator handles all git operations after review. Leaf agents explore read-only outside their declared Files.\n\n")
+	b.WriteString("Dispatch leaves in concurrency-group order (group 1 first). Within a group, dispatch leaves whose Dependencies column is \"none\" together; any leaf listing dependencies must start only after those leaves complete. (A phase split across several leaves chains its leaves in emission order — leaf 2 of the phase depends on leaf 1 — so split-phase leaves dispatch one at a time.) Every dispatch includes: \"Do NOT commit. Do NOT run git add.\" The orchestrator handles all git operations after review. Leaf agents explore read-only outside their declared Files.\n\n")
 	for g := 1; g <= maxGroup(groups); g++ {
 		fmt.Fprintf(&b, "### Group %d\n\n", g)
 		for i := range leaves {
