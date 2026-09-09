@@ -312,7 +312,12 @@ func (c *LLMClassifier) chatWithFailover(ctx context.Context, messages []llm.Cha
 	resp, err := attempt()
 	if err == nil {
 		if c.resolver != nil && c.aliasName != "" {
-			c.resolver.RecordAliasSuccess(c.aliasName)
+			// Identity-attributed success clear (bughunt 2026-09-08 item
+			// 14): modelConfig identifies the model that served this
+			// attempt (nil = unresolvable → alias-wide clear), so a
+			// straggler success cannot erase another model's earned
+			// cooldown/block.
+			c.resolver.RecordAliasSuccessModel(c.aliasName, c.modelConfig)
 		}
 		return resp, nil
 	}
@@ -342,7 +347,10 @@ func (c *LLMClassifier) chatWithFailover(ctx context.Context, messages []llm.Cha
 
 	resp, err = attempt()
 	if err == nil {
-		c.resolver.RecordAliasSuccess(c.aliasName)
+		// Post-rotation success: modelConfig was swapped to the serving
+		// candidate above, so the clear is identity-attributed (bughunt
+		// 2026-09-08 item 14). Nil modelConfig degrades to alias-wide.
+		c.resolver.RecordAliasSuccessModel(c.aliasName, c.modelConfig)
 	}
 	return resp, err
 }

@@ -987,25 +987,77 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 	)
 }
 
-// RecordAliasSuccess records a success, resetting failure counter and
-// lazily deleting EXPIRED quota block entries for this alias (both the
-// per-entry and per-credential maps) plus EXPIRED endpoint-level timeout
-// blocks (tree 02 leaf 04 — same single lazy-clearing pattern; no second
-// mechanism) to bound map growth. Unexpired blocks are left in place — a
-// success on one model says nothing about another model's (or credential
-// pool's) quota window.
+// RecordAliasSuccess records an alias-wide success, resetting the failure
+// counter and cooldown, and lazily deleting EXPIRED quota block entries for
+// this alias (both the per-entry and per-credential maps) plus EXPIRED
+// endpoint-level timeout blocks (tree 02 leaf 04 — same single
+// lazy-clearing pattern; no second mechanism) to bound map growth.
+// Unexpired blocks are left in place — a success on one model says nothing
+// about another model's (or credential pool's) quota window.
+//
+// Callers that know WHICH model served the successful request must prefer
+// RecordAliasSuccessModel (bughunt 2026-09-08 item 14): this alias-wide
+// form releases an armed alias-level timeout block and resets the
+// consecutive-failure streak without model identity, so a straggler success
+// on model A can release a block that only model B's failures earned.
+// It remains the correct entry point for callers that genuinely cannot
+// attribute the success to a model (e.g. loop.go's stream path, where the
+// serving config may be nil).
 func (r *Resolver) RecordAliasSuccess(aliasName string) {
+	r.recordAliasSuccessInner(aliasName, nil)
+}
+
+// RecordAliasSuccessModel records a success ATTRIBUTED to a specific model
+// and clears only what that model's own failure state earned (bughunt
+// 2026-09-08 item 14, identity parity with RecordAliasFailure / issue #30).
+// Invariants preserved (AGENTS.md quota-resilience section):
+//   - lazy clear still requires expiry+success: only block entries whose
+//     deadline has passed are deleted, and only when the serving model
+//     reports success — an unexpired block is never lifted by any success;
+//   - quota never reaches RecordAliasFailure (that guard is upstream and
+//     unchanged here);
+//   - ErrAllModelsQuotaBlocked / ErrAllEndpointsBlocked are untouched.
+//
+// The consecutive-failure streak, alias cooldown, and armed alias-level
+// timeout block are cleared only when model matches the identity that most
+// recently failed (FailedProviderID/FailedModelID). A success from a
+// DIFFERENT model must not erase another model's earned cooldown/block.
+// A nil model, or an unknown identity when no failure is recorded,
+// degrades to the alias-wide clear (nothing to misattribute).
+//
+// The expired quota/endpoint block sweeps are run unconditionally regardless
+// of identity: they only ever delete EXPIRED entries, so they never release
+// an active block early — they exist to bound map growth and must not depend
+// on which model happened to succeed.
+func (r *Resolver) RecordAliasSuccessModel(aliasName string, model *ModelConfig) {
+	r.recordAliasSuccessInner(aliasName, model)
+}
+
+// recordAliasSuccessInner is the shared implementation: model==nil is the
+// alias-wide clear (legacy callers without identity), model!=nil is the
+// identity-gated clear. Callers must hold no expectations about r.mu —
+// it is taken here.
+func (r *Resolver) recordAliasSuccessInner(aliasName string, model *ModelConfig) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	health := r.getOrCreateHealth(aliasName)
-	health.ConsecutiveFails = 0
-	health.CooldownUntil = time.Time{} // Reset cooldown
-	// A success ends any consistent-failure streak and releases an armed
-	// alias-level explicit-timeout block (tree 02 leaf 04).
-	health.TimeoutStreak = 0
-	health.TimeoutBlocks = 0
-	health.TimeoutBlockUntil = time.Time{}
+
+	// Identity gate (issue #30 parity): reset the streak and release the
+	// earned cooldown / armed alias-level timeout block ONLY when the
+	// succeeding model matches the identity that most recently failed.
+	// model==nil keeps the alias-wide clear for callers without identity.
+	if model == nil ||
+		(health.FailedProviderID == "" && health.FailedModelID == "") ||
+		(model.ProviderID == health.FailedProviderID && model.ModelID == health.FailedModelID) {
+		health.ConsecutiveFails = 0
+		health.CooldownUntil = time.Time{} // Reset cooldown
+		// A success ends any consistent-failure streak and releases an armed
+		// alias-level explicit-timeout block (tree 02 leaf 04).
+		health.TimeoutStreak = 0
+		health.TimeoutBlocks = 0
+		health.TimeoutBlockUntil = time.Time{}
+	}
 
 	now := r.clock()
 	for key, blockedUntil := range health.entryBlocks {
@@ -1120,6 +1172,22 @@ func (r *Resolver) HasHealthyModels(aliasName string) bool {
 
 // RotateToNextModel forces rotation to the next model in an alias and resets failure counters.
 // Returns the new model config after rotation.
+//
+// Lock discipline: the entire rotation runs under the single Resolver.mu
+// regime, so cursor mutation is atomic — no torn reads between the index
+// check and the write (stress-verified by
+// TestResolver_RotateToNextModel_ConcurrentStress under -race).
+//
+// Concurrent-session design limitation: the rotation cursor
+// (AliasHealth.CurrentIndex) is PER-ALIAS, not per-session or per-caller.
+// Two concurrent sessions resolving the same alias share one cursor, so a
+// rotation issued by session A moves the next resolve for every other
+// un-pinned session on that alias. This is accepted, documented behavior —
+// rotation is best-effort failover, and callers must treat the returned
+// model as "a healthy candidate now", not "a stable model across calls".
+// Callers that need a stable model use sticky pins
+// (BalancedStickyRequests + a callerKey to ResolveForAlias), which pin
+// per-caller and are released by model identity on rotation.
 func (r *Resolver) RotateToNextModel(aliasName string) (*ModelConfig, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

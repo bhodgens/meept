@@ -263,7 +263,12 @@ func (ia *IntentAnalyzer) chatWithFailover(ctx context.Context, messages []llm.C
 	resp, err := attempt()
 	if err == nil {
 		if ia.resolver != nil && ia.aliasName != "" {
-			ia.resolver.RecordAliasSuccess(ia.aliasName)
+			// Identity-attributed success clear (bughunt 2026-09-08 item
+			// 14): modelConfig identifies the model that served this
+			// attempt (nil = unresolvable → alias-wide clear), so a
+			// straggler success cannot erase another model's earned
+			// cooldown/block.
+			ia.resolver.RecordAliasSuccessModel(ia.aliasName, ia.modelConfig)
 		}
 		return resp, nil
 	}
@@ -303,7 +308,10 @@ func (ia *IntentAnalyzer) chatWithFailover(ctx context.Context, messages []llm.C
 
 	resp, err = attempt()
 	if err == nil {
-		ia.resolver.RecordAliasSuccess(ia.aliasName)
+		// Post-rotation success: modelConfig was swapped to the serving
+		// candidate above, so the clear is identity-attributed (bughunt
+		// 2026-09-08 item 14). Nil modelConfig degrades to alias-wide.
+		ia.resolver.RecordAliasSuccessModel(ia.aliasName, ia.modelConfig)
 	}
 	return resp, err
 }
