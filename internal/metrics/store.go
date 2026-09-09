@@ -27,6 +27,13 @@ const (
 	// DefaultRetentionDays is how long to keep raw metrics data.
 	DefaultRetentionDays = 30
 
+	// ModelPerformanceRetentionDays is how long to keep hour-bucketed
+	// model_performance rollup rows. Longer than DefaultRetentionDays
+	// because rollups are compact (one row per model×provider×agent×hour)
+	// and serve as the legacy aggregation surface; llm_calls remains
+	// fully exempt (tokscale ingest, Contract D).
+	ModelPerformanceRetentionDays = 90
+
 	// DefaultBatchSize is the number of metrics to batch before writing.
 	DefaultBatchSize = 100
 
@@ -471,7 +478,9 @@ func (s *Store) flush() {
 		}
 		// Format timestamp as SQLite DATETIME (without timezone offset)
 		// to ensure strftime() functions work correctly in aggregations.
-		ts := m.timestamp.Format("2006-01-02 15:04:05")
+		// UTC keeps the stored text comparable with datetime('now') (UTC)
+		// and with the UTC bounds GetHistoricalMetrics binds.
+		ts := m.timestamp.UTC().Format("2006-01-02 15:04:05")
 		if _, err := stmt.Exec(ts, m.name, m.value, tagsJSON); err != nil {
 			s.logger.Warn("Failed to insert metric row", "error", err)
 		}
@@ -552,6 +561,20 @@ func (s *Store) aggregateHourly() {
 				s.logger.Warn("failed to prune retention table", "table", table, "error", err)
 			}
 		}
+
+		// model_performance is an hour-bucketed rollup (one row per
+		// model×provider×agent×hour) that would otherwise grow forever.
+		// It gets its own, longer window than the raw audit tables.
+		// period_start is RFC3339 TEXT ('...T..Z'), so the cutoff must be
+		// built in the same representation — comparing against
+		// datetime('now')'s space-format text would misorder same-day
+		// rows (' '(0x20) < 'T'(0x54)).
+		rollupCutoff := fmt.Sprintf("-%d days", ModelPerformanceRetentionDays)
+		if _, err := s.db.Exec(
+			"DELETE FROM model_performance WHERE period_start < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+			rollupCutoff); err != nil {
+			s.logger.Warn("failed to prune model_performance rollup", "error", err)
+		}
 	}
 }
 
@@ -588,9 +611,14 @@ func (s *Store) RecordEvent(eventType, severity, message string, context map[str
 		ctxJSON = string(data)
 	}
 
+	// Format explicitly as SQLite DATETIME text (UTC): binding time.Time
+	// directly makes modernc.org/sqlite write Go's String() format
+	// ("2006-01-02 12:34:56.789 +0000 UTC m=+…"), which strftime() and
+	// datetime() comparisons cannot parse — the same malformed-timestamp
+	// class the metrics_live purge in aggregateHourly cleans up.
 	_, err := s.db.Exec(
 		"INSERT INTO events (timestamp, event_type, severity, message, context) VALUES (?, ?, ?, ?, ?)",
-		time.Now(), eventType, severity, message, ctxJSON,
+		time.Now().UTC().Format("2006-01-02 15:04:05"), eventType, severity, message, ctxJSON,
 	)
 	if err != nil {
 		s.logger.Error("failed to record event", "error", err, "event_type", eventType)
@@ -734,11 +762,17 @@ type LLMUsageRow struct {
 // provider+agent pair. from/to bound the window (both required).
 func (s *Store) QueryLLMCallUsage(from, to time.Time, groupByAgent bool) ([]LLMUsageRow, error) {
 	groupExpr := "provider"
-	if groupByAgent {
+	agentExpr := "agent_id"
+	if !groupByAgent {
+		// Under GROUP BY provider a bare agent_id would return an
+		// arbitrary group member's value; the contract for per-provider
+		// mode is agent_id = "".
+		agentExpr = "'' AS agent_id"
+	} else {
 		groupExpr = "provider, agent_id"
 	}
-	// groupExpr is built from a fixed constant above, never user input.
-	query := fmt.Sprintf(`SELECT provider, agent_id, COUNT(*) AS calls,
+	// groupExpr/agentExpr are built from fixed constants above, never user input.
+	query := fmt.Sprintf(`SELECT provider, %s, COUNT(*) AS calls,
 			SUM(error) AS errors,
 			SUM(tokens_sent) AS tokens_sent,
 			SUM(tokens_received) AS tokens_received,
@@ -747,7 +781,7 @@ func (s *Store) QueryLLMCallUsage(from, to time.Time, groupByAgent bool) ([]LLMU
 		FROM llm_calls
 		WHERE timestamp >= ? AND timestamp <= ?
 		GROUP BY %s
-		ORDER BY tokens_sent DESC`, groupExpr) //nolint:gosec // constant expression
+		ORDER BY tokens_sent DESC`, agentExpr, groupExpr) //nolint:gosec // constant expression
 	var rows []LLMUsageRow
 	err := s.db.Select(&rows, query,
 		from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
@@ -1000,7 +1034,15 @@ func (s *Store) GetHistoricalMetrics(ctx context.Context, from, to time.Time, re
 		`
 	}
 
-	rows, err := s.db.QueryxContext(ctx, query, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	// metrics_live.timestamp / metrics_hourly.hour are stored as SQLite
+	// DATETIME text ("2006-01-02 15:04:05", UTC — see flush() and
+	// aggregateHourly's strftime). BETWEEN on TEXT columns is a
+	// byte-wise comparison, so binding RFC3339 ("...T00:00:00Z")
+	// silently drops same-day rows: ' '(0x20) sorts before 'T'(0x54),
+	// making every stored timestamp of the from-bound's day compare
+	// LESS than the RFC3339 bound. Bind the stored representation.
+	rows, err := s.db.QueryxContext(ctx, query,
+		from.UTC().Format("2006-01-02 15:04:05"), to.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
 		return nil, err
 	}
