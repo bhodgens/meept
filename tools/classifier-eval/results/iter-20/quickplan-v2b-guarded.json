@@ -1,0 +1,43 @@
+{
+ "replay_n": 48,
+ "stageA": {
+  "routes": 7,
+  "correct": 5,
+  "precision": 0.714
+ },
+ "stageB": {
+  "routes": 12,
+  "correct": 10,
+  "precision": 0.833
+ },
+ "stageC_chain": 29,
+ "expected_system_accuracy": 0.8369,
+ "tau": 0.152,
+ "misses": [
+  [
+   "B",
+   "c48490ff5fe936e7",
+   "quickplan",
+   "code"
+  ],
+  [
+   "B",
+   "f84f600e9c39b326",
+   "quickplan",
+   "code"
+  ],
+  [
+   "A",
+   "0054b8eb113a5ee4",
+   "quickplan",
+   "platform"
+  ],
+  [
+   "A",
+   "d8ef399b90b87cfe",
+   "quickplan",
+   "git"
+  ]
+ ],
+ "note": "input text replaced with case_key (sha256[:16]) in history (20260917 decision 1b)"
+}

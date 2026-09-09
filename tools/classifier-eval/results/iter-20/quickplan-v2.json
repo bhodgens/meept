@@ -1,0 +1,103 @@
+{
+ "replay_n": 48,
+ "stageA": {
+  "routes": 7,
+  "correct": 5,
+  "precision": 0.714
+ },
+ "stageB": {
+  "routes": 29,
+  "correct": 17,
+  "precision": 0.586
+ },
+ "stageC_chain": 12,
+ "expected_system_accuracy": 0.6753,
+ "tau": 0.183,
+ "misses": [
+  [
+   "B",
+   "244c105b409b844e",
+   "review",
+   "quickplan"
+  ],
+  [
+   "B",
+   "494ae95043250d2d",
+   "review",
+   "quickplan"
+  ],
+  [
+   "B",
+   "494ae95043250d2d",
+   "review",
+   "quickplan"
+  ],
+  [
+   "B",
+   "409e40662372375d",
+   "review",
+   "quickplan"
+  ],
+  [
+   "B",
+   "06c740de8ad9c00f",
+   "debug",
+   "quickplan"
+  ],
+  [
+   "B",
+   "75b30be008dd2244",
+   "review",
+   "quickplan"
+  ],
+  [
+   "B",
+   "3175df92b90a218a",
+   "plan",
+   "quickplan"
+  ],
+  [
+   "B",
+   "e01f9eb84de07372",
+   "git",
+   "quickplan"
+  ],
+  [
+   "A",
+   "0054b8eb113a5ee4",
+   "quickplan",
+   "platform"
+  ],
+  [
+   "B",
+   "a30d3257cbdd4e8a",
+   "review",
+   "quickplan"
+  ],
+  [
+   "A",
+   "d8ef399b90b87cfe",
+   "quickplan",
+   "git"
+  ],
+  [
+   "B",
+   "ed28c850578eeefb",
+   "debug",
+   "quickplan"
+  ],
+  [
+   "B",
+   "058c146926c7002a",
+   "review",
+   "quickplan"
+  ],
+  [
+   "B",
+   "125b9386f7bfdb54",
+   "analyze",
+   "quickplan"
+  ]
+ ],
+ "note": "input text replaced with case_key (sha256[:16]) in history (20260917 decision 1b)"
+}
