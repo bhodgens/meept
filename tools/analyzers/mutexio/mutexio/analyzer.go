@@ -227,8 +227,17 @@ func checkBody(pass *analysis.Pass, body *ast.BlockStmt, nolintLines map[string]
 		// call after the closure (classic false positive: table-driven
 		// tests where the hook closure locks and a later t.Run gets
 		// flagged).
-		if fl, ok := n.(*ast.FuncLit); ok {
-			_ = fl
+		//
+		// KNOWN GAP (documented by testdata clean fixture
+		// closure_unlock.go): a DIRECT mu.Unlock() inside a closure is
+		// also skipped here, so `mu.Lock(); f(func(){ mu.Unlock() })`
+		// leaves the enclosing Lock unmatched — the held-past-body check
+		// never fires for it. Emitted deliberately: treating
+		// FuncLit-contained unlocks as "escapes scope" would regress the
+		// 6cee7f9c fix (deferred closures release at the literal's end,
+		// not the enclosing body's), and AGENTS.md's IIFE
+		// collect-then-operate pattern depends on that boundary.
+		if _, ok := n.(*ast.FuncLit); ok {
 			return false
 		}
 		ce, ok := n.(*ast.CallExpr)
