@@ -56,3 +56,20 @@ was measured against a 12-class taxonomy that couldn't even express
 - results/iter-19/quickplan-cascade.json (full per-intent table)
 - testdata corpus: +24 tracked quickplan anchors (dedup vs replay-gold
   verbatim text: the anchors are synthetic paraphrases, not copies)
+
+## CORRECTIONS 2026-09-10 (audit L13)
+
+- **Corpus counts in the Date line above are off by one** ("Corpus 314
+  → 338"; also "314→338→370" as carried in the iter-20 report and
+  `820c016f`). Recounted through the committed loader
+  (`eval_harness.py load_cases`) from the tracked corpus at the
+  relevant commits: **313 → 337 → 369** (313 at `c5e3bcf0` verified;
+  337 = 313 + the +24 iter-19 anchors; 369 = 337 + the +32 iter-20
+  anchors, all recomputed via `load_cases` at HEAD). Both base (139)
+  and adversarial files recount exactly. Deltas +24/+32 stand as
+  originally reported — only the running totals were off by one.
+- **Sibling correction, same wave** (q1-q4-response.md): the Q1 table
+  labeled the current policy "tau 0.147" — that is the old iter-17
+  quantile; the v2c/current policy tau is **0.152**
+  (`results/iter-20/policy-sweep.json` top row). The 0.147 label is
+  superseded, original row preserved.

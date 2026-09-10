@@ -12,7 +12,7 @@ Go side can validate dimension drift and the provenance is auditable.
 
 Run (server must be up):
     python3 scripts/build_prefilter_centroids.py \
-        --corpus testdata/eval/classifier-test-corpus.json5 \
+        --corpus testdata/eval/classifier-adversarial-corpus.json5 \
         --url http://127.0.0.1:8090/v1
 
 Sweep mode (accuracy vs threshold table, all cases embedded once):
@@ -28,7 +28,15 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_CORPUS = "testdata/eval/classifier-test-corpus.json5"
+# The prefilter's runtime index must be built from the same corpus the
+# eval numbers were measured on: the eval harness (tools/classifier-eval/
+# eval_harness.py) trains on base + adversarial, where classifier-
+# adversarial-corpus.json5 is the tracked cases-layout corpus (iters 2-20,
+# includes the quickplan class + OOD abstentions). The base-only corpus
+# predates the quickplan class entirely — an index built from it would
+# carry a 12-class label space the eval never validated. (CORRECTION
+# 2026-09-10, audit M7: default was previously classifier-test-corpus.)
+DEFAULT_CORPUS = "testdata/eval/classifier-adversarial-corpus.json5"
 DEFAULT_URL = "http://127.0.0.1:8090/v1"
 DEFAULT_OUT = str(Path.home() / ".meept" / "classifier_prefilter_centroids.json")
 
