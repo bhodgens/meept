@@ -535,6 +535,19 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 	if metricsStore != nil && components != nil && components.Dispatcher != nil {
 		components.Dispatcher.SetMetricsStore(metricsStore)
+
+		// Salted input hashing for dispatch_log (classifier-observability
+		// S4): the daemon owns the per-install salt and injects a closure
+		// over metrics.HashInput; the dispatcher stays crypto-agnostic.
+		// A load failure degrades to no hasher => input_hash "" (rows keep
+		// recording, just without the hash) rather than blocking startup.
+		if saltID, salt, saltErr := metrics.LoadOrCreateSalt(cfg.StateDir); saltErr != nil {
+			logger.Warn("failed to load classifier salt; dispatch input_hash disabled", "error", saltErr)
+		} else {
+			components.Dispatcher.SetInputHasher(func(message string) string {
+				return metrics.HashInput(saltID, salt, message)
+			})
+		}
 	}
 
 	// Per-provider/per-agent token accounting (metrics.db llm_calls):

@@ -1501,6 +1501,8 @@ func modeToLabel(mode string) string {
 		return "executing directly"
 	case "plan":
 		return "planned"
+	case "quick_plan":
+		return "quick plan"
 	case "spec_plan":
 		return "spec-planned (multi-phase)"
 	case "spec_pair":

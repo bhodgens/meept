@@ -395,6 +395,53 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_agent_ts ON llm_calls(agent_id, timesta
 	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_llm_calls_session_ts ON llm_calls(session_id, timestamp DESC)"); err != nil {
 		return fmt.Errorf("failed to create idx_llm_calls_session_ts: %w", err)
 	}
+
+	// dispatch_log outcome-loop columns (classifier-observability S1):
+	// salted input hash replaces raw input_summary, plus classifier model
+	// provenance, Door-1 kNN margin, per-session turn number, and outcome
+	// capture. Same tolerate-duplicate-column pattern as llm_calls above.
+	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN input_hash TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add dispatch_log.input_hash: %w", err)
+		}
+	}
+	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN model TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add dispatch_log.model: %w", err)
+		}
+	}
+	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN margin REAL"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add dispatch_log.margin: %w", err)
+		}
+	}
+	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN turn_no INTEGER NOT NULL DEFAULT 0"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add dispatch_log.turn_no: %w", err)
+		}
+	}
+	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN outcome TEXT NOT NULL DEFAULT 'pending'"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add dispatch_log.outcome: %w", err)
+		}
+	}
+	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN corrected_agent TEXT NOT NULL DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add dispatch_log.corrected_agent: %w", err)
+		}
+	}
+
+	// The dispatch_log hash/outcome indexes must be created AFTER the
+	// columns exist (same ordering rule as idx_llm_calls_session_ts above):
+	// on a pre-migration database the CREATE TABLE script above runs against
+	// the old schema, so an index on input_hash/outcome inside that script
+	// would fail the entire store open before the ALTERs added the columns.
+	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_dispatch_log_hash ON dispatch_log(input_hash)"); err != nil {
+		return fmt.Errorf("failed to create idx_dispatch_log_hash: %w", err)
+	}
+	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_dispatch_log_outcome ON dispatch_log(outcome)"); err != nil {
+		return fmt.Errorf("failed to create idx_dispatch_log_outcome: %w", err)
+	}
 	return nil
 }
 
@@ -850,6 +897,20 @@ type DispatchEntry struct {
 	HasParts         bool    `json:"has_parts" db:"-"`
 	HasPartsInt      int     `json:"-" db:"has_parts"`
 	Error            string  `json:"error" db:"error"`
+
+	// Outcome-loop columns (classifier-observability S1). InputHash is the
+	// salted digest that replaced raw input_summary (privacy: the summary is
+	// still produced for log lines but is no longer persisted). Model is the
+	// classifier LLM provenance ("" for deterministic doors). Margin is the
+	// Door-1 kNN margin; NULL when the dispatch did not come from Door 1.
+	// Outcome/corrected_agent are written by the capture layer; rows start
+	// 'pending'.
+	InputHash      string   `json:"input_hash" db:"input_hash"`
+	Model          string   `json:"model" db:"model"`
+	Margin         *float64 `json:"margin,omitempty" db:"margin"`
+	TurnNo         int      `json:"turn_no" db:"turn_no"`
+	Outcome        string   `json:"outcome" db:"outcome"`
+	CorrectedAgent string   `json:"corrected_agent,omitempty" db:"corrected_agent"`
 }
 
 // RecordDispatch inserts a dispatch routing decision into the audit log.
@@ -861,15 +922,31 @@ func (s *Store) RecordDispatch(entry DispatchEntry) {
 	_, err := s.db.Exec(
 		`INSERT INTO dispatch_log
 			(session_id, input_summary, intent_type, agent_id, confidence,
-			 classifier_method, handler_case, task_id, has_parts, error)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 classifier_method, handler_case, task_id, has_parts, error,
+			 input_hash, model, margin, turn_no, outcome, corrected_agent)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.SessionID, entry.InputSummary, entry.IntentType, entry.AgentID,
 		entry.Confidence, entry.ClassifierMethod, entry.HandlerCase,
 		entry.TaskID, hasParts, entry.Error,
+		entry.InputHash, entry.Model, entry.Margin, entry.TurnNo,
+		entry.Outcome, entry.CorrectedAgent,
 	)
 	if err != nil {
 		s.logger.Error("failed to record dispatch", "error", err, "session", entry.SessionID)
 	}
+}
+
+// CountDispatchRows returns the number of dispatch_log rows recorded for a
+// session. Used by the dispatcher to assign per-session turn numbers
+// (turn_no = count + 1); the count is index-backed (idx_dispatch_log_session)
+// and session rows are bounded by the 30-day retention purge.
+func (s *Store) CountDispatchRows(sessionID string) int {
+	var count int
+	if err := s.db.Get(&count, `SELECT COUNT(*) FROM dispatch_log WHERE session_id = ?`, sessionID); err != nil {
+		s.logger.Error("failed to count dispatch rows", "error", err, "session", sessionID)
+		return 0
+	}
+	return count
 }
 
 // QueryDispatchLog returns recent dispatch entries, most recent first.
@@ -881,7 +958,8 @@ func (s *Store) QueryDispatchLog(limit int) ([]DispatchEntry, error) {
 	var entries []DispatchEntry
 	err := s.db.Select(&entries,
 		`SELECT session_id, input_summary, intent_type, agent_id, confidence,
-		        classifier_method, handler_case, task_id, has_parts, error
+		        classifier_method, handler_case, task_id, has_parts, error,
+		        input_hash, model, margin, turn_no, outcome, corrected_agent
 		 FROM dispatch_log ORDER BY id DESC LIMIT ?`,
 		limit,
 	)
@@ -903,7 +981,8 @@ func (s *Store) QueryDispatchLogBySession(sessionID string, limit int) ([]Dispat
 	var entries []DispatchEntry
 	err := s.db.Select(&entries,
 		`SELECT session_id, input_summary, intent_type, agent_id, confidence,
-		        classifier_method, handler_case, task_id, has_parts, error
+		        classifier_method, handler_case, task_id, has_parts, error,
+		        input_hash, model, margin, turn_no, outcome, corrected_agent
 		 FROM dispatch_log
 		 WHERE session_id = ?
 		 ORDER BY id DESC

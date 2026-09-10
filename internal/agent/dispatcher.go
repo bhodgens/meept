@@ -29,6 +29,14 @@ import (
 // anaphoraForRegex matches "do the same for X" patterns for anaphora resolution.
 var anaphoraForRegex = regexp.MustCompile(`do the same for (.+)`)
 
+// secretShape matches obvious API-key/token shapes in error text so they can
+// be scrubbed before persisting (classifier-observability S4): sk- prefixed
+// keys, api_key/api-key/apikey, bearer tokens, and generic tokens followed
+// by 8+ non-space chars. \s* after the keyword is a deliberate deviation
+// from the leaf's literal `[^\s]{8,}` so the spec's own test case ("Bearer
+// abc123def456...") matches despite the space between keyword and secret.
+var secretShape = regexp.MustCompile(`(?i)(sk-|api[_-]?key|bearer|token)\s*[^\s]{8,}`)
+
 // SteeringHeuristicTable defines which intent types should interrupt (steer)
 // vs wait for a natural stopping point (follow-up) when an agent loop is
 // already running for the conversation.
@@ -279,6 +287,13 @@ type Dispatcher struct {
 	modelParser       *ModelReassignmentParser
 	planManager       *plan.PlanManager
 	metricsStore      *metrics.Store
+
+	// inputHasher, when non-nil, derives the salted input_hash persisted in
+	// dispatch_log (classifier-observability S4). The dispatcher stays
+	// crypto-agnostic: the daemon owns the salt and injects a closure over
+	// metrics.HashInput via SetInputHasher. Nil => InputHash "" (the
+	// multi-user-disabled path stays untouched).
+	inputHasher func(message string) string
 
 	// toolRegistry provides structural tool gating by depth.
 	// When non-nil, the dispatcher uses it to gate depth-sensitive
@@ -670,7 +685,9 @@ func (d *Dispatcher) SetInstructionParser(parser *InstructionParser) {
 // for downstream consumers.
 func suggestReasoningForIntent(intentType string) string {
 	switch IntentType(intentType) {
-	case IntentPlan:
+	case IntentPlan, IntentQuickPlan:
+		// quickplan is autonomous plan-execution: same depth bar as plan
+		// (bughunt 2026-09-10 L2).
 		return llm.ReasoningXHigh
 	case IntentDebug, IntentResearch, IntentAnalyze:
 		return llm.ReasoningHigh
@@ -1208,10 +1225,16 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				"confidence", match.Confidence,
 			)
 			intent := &Intent{
-				Type:       string(match.IntentType),
-				Confidence: match.Confidence,
-				AgentType:  match.IntentType.DefaultAgent(),
-				Summary:    extractSummary(input),
+				Type:      string(match.IntentType),
+				// RequiresPlanning mirrors the method's rule (bughunt
+				// 2026-09-10 C1): quickplan matches need the struct
+				// field set or the handler's async gate never opens and
+				// the created task is orphaned. Other types are
+				// unaffected — the method verdict is preserved.
+				Confidence:      match.Confidence,
+				AgentType:       match.IntentType.DefaultAgent(),
+				RequiresPlanning: match.IntentType.RequiresPlanning(),
+				Summary:         extractSummary(input),
 			}
 			d.recordClassificationMethod("semantic")
 			intent.Method = "semantic"
@@ -1245,8 +1268,14 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		Type:       string(IntentQuickPlan),
 		Confidence: 0.3,
 		AgentType:  "orchestrator",
-		Summary:    "Could not determine intent; planning and executing with clarification as needed",
-		Method:     "fallback",
+		// RequiresPlanning opens the async-dispatch gate (bughunt
+		// 2026-09-10 C1): ShouldDispatchAsync reads this struct field for
+		// quickplan, so without it the handler routes quickplan fallbacks
+		// to a chat loop and orphans the created task. Mirrors the
+		// keyword producers' RequiresPlanning: p.planning pattern.
+		RequiresPlanning: true,
+		Summary:          "Could not determine intent; planning and executing with clarification as needed",
+		Method:           "fallback",
 	}, nil
 
 }
@@ -1544,7 +1573,14 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 			// proceed with history-aware classification rather than loop
 			// another clarification prompt. Empty digest = context-less
 			// session; keep the follow-up prompt there.
-			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) && digest.IsEmpty() {
+			//
+			// Emptiness ignores the clarify marker (bughunt 2026-09-10 M2):
+			// buildClarificationResult records the clarify intent BEFORE this
+			// digest is rebuilt, so plain IsEmpty() is always false here and
+			// the follow-up branch could never re-fire. Only REAL context
+			// (task fields, non-clarify intents) should suppress the
+			// follow-up question.
+			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) && digest.IsEmptyIgnoringClarify() {
 				d.logger.Info("Still ambiguous after clarification, asking follow-up",
 					"ambiguity", analysis.Ambiguity,
 				)
@@ -3027,6 +3063,17 @@ func (d *Dispatcher) SetMetricsStore(store *metrics.Store) {
 	}
 }
 
+// SetInputHasher wires the salted input-hash function used to fill
+// dispatch_log.input_hash (classifier-observability S4). The daemon loads
+// the per-install salt and injects a closure over metrics.HashInput; the
+// dispatcher itself performs no crypto or file I/O. A nil hasher (including
+// a typed-nil func) disables hashing: InputHash is persisted as "".
+func (d *Dispatcher) SetInputHasher(fn func(message string) string) {
+	if fn != nil {
+		d.inputHasher = fn
+	}
+}
+
 // SetToolRegistry wires a depth-based tool registry for structural gating.
 // At maxDepth the agent simply won't have spawn tools in its registry.
 func (d *Dispatcher) SetToolRegistry(reg *DepthToolRegistry) {
@@ -3082,6 +3129,15 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 	errStr := ""
 	if dispatchErr != nil {
 		errStr = dispatchErr.Error()
+		// Privacy scrub (classifier-observability S4): LLM/transport
+		// errors can embed URL fragments, model names, or request
+		// fragments. Drop anything matching an obvious key/token shape
+		// entirely, and cap the remainder at 200 chars.
+		if secretShape.MatchString(strings.ToLower(errStr)) {
+			errStr = "scrubbed"
+		} else {
+			errStr = truncateString(errStr, 200)
+		}
 	}
 
 	d.logger.Debug("routing decision",
@@ -3097,9 +3153,35 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 	)
 
 	if d.metricsStore != nil {
+		// Privacy: the raw input summary is used only for the log line --
+		// it must NOT reach the DB. inputHash of the full raw input
+		// replaces it as the join/dedup key (classifier-observability S4).
+		// The hasher is daemon-injected; nil => "" preserves the
+		// multi-user-disabled (unwired) path invariant. The hash covers
+		// result.OriginalInput (the full raw input, set by the main
+		// routing paths) when present, falling back to the passed input
+		// summary on paths that don't populate it.
+		inputHash := ""
+		if d.inputHasher != nil {
+			hashInput := inputSummary
+			if result != nil && result.OriginalInput != "" {
+				hashInput = result.OriginalInput
+			}
+			inputHash = d.inputHasher(hashInput)
+		}
+		model := ""
+		if result != nil && result.Intent != nil {
+			// Honest provenance: empty for deterministic doors and when
+			// all LLM candidates failed.
+			model = result.Intent.Model
+		}
+		// Turn number: one past the current session row count, so the
+		// first dispatch of a session is turn 1. The COUNT is index-backed
+		// and session rows are bounded by 30-day retention.
+		turnNo := d.metricsStore.CountDispatchRows(sessionID) + 1
 		d.metricsStore.RecordDispatch(metrics.DispatchEntry{
 			SessionID:        sessionID,
-			InputSummary:     inputSummary,
+			InputSummary:     "",
 			IntentType:       intentType,
 			AgentID:          agentID,
 			Confidence:       confidence,
@@ -3108,6 +3190,10 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 			TaskID:           taskID,
 			HasParts:         hasParts,
 			Error:            errStr,
+			InputHash:        inputHash,
+			Model:            model,
+			TurnNo:           turnNo,
+			Outcome:          "pending",
 		})
 	}
 }
