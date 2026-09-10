@@ -78,6 +78,14 @@ Worked examples:
 - "add pagination to the API" → **code** (one concrete artifact to
   change)
 
+**"Help me…" phrasing.** Messages that open with "help me" ("help me
+organize this data", "help me understand why X fails") signal compound
+or complex work: the request implies investigation plus action, not a
+single known operation. Treat "help me" as a quickplan signal — the
+orchestrator chunks the work and executes. If the help request is
+purely informational ("help me understand X" with no artifact), it
+routes to analyze instead.
+
 ## The three-way boundary that matters most
 
 **"Look at X"** resolves by what happens after the look:
