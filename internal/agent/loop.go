@@ -5016,9 +5016,14 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				}
 			}
 
-			// Success - record it and return
+			// Success - record it and return. Identity-gated (bughunt
+			// 2026-09-10 L5): servedModel is provably non-nil here — every
+			// path reaching this line resolved successfully this iteration
+			// (assignment at :4942 under the same alias guard), so pass it
+			// and let the resolver gate the clear on the failing identity.
+			// The alias-wide fallback only applies when identity is unknown.
 			if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-				l.resolver.RecordAliasSuccess(l.modelRef)
+				l.resolver.RecordAliasSuccessModel(l.modelRef, servedModel)
 			}
 			// A successful call means the provider's quota window recovered:
 			// end any active quota episode (idempotent no-op when none).

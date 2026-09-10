@@ -1001,8 +1001,10 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 // consecutive-failure streak without model identity, so a straggler success
 // on model A can release a block that only model B's failures earned.
 // It remains the correct entry point for callers that genuinely cannot
-// attribute the success to a model (e.g. loop.go's stream path, where the
-// serving config may be nil).
+// attribute the success to a model. As of the 2026-09-10 wave there are no
+// such callers left in the tree (loop.go's success path now passes
+// servedModel); the alias-wide form is retained as the documented fallback
+// and for future callers without identity.
 func (r *Resolver) RecordAliasSuccess(aliasName string) {
 	r.recordAliasSuccessInner(aliasName, nil)
 }
