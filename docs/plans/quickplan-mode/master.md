@@ -243,7 +243,7 @@ For each concurrency group, in dependency order:
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 01-intent-type.md | COMPLETE | 1 | 4870fc98 — all 5 switches + SemanticIndex + SteeringHeuristic + ShouldDispatchAsync; LLM-whitelist tables deliberately excluded (leaf 02 scope) |
-| 02-dispatcher-routing.md | PENDING | 0 | |
+| 02-dispatcher-routing.md | COMPLETE | 1 | d3ace332 — mode plumbing + clarify-resume (PendingMode) + fallback swap + session context; also fixed 2 latent bugs (gate never recorded pending state; analyzer coerced quickplan to 'other'); 13 new tests |
 | 03-prefilter-index.md | COMPLETE | 1 | 50208cf6 — cue regex verbatim, vote() guard, centroid builder fixed for iter-19/20 corpus (// comments + cases: layout) |
 | 04-docs.md | PENDING | 0 | |
 
