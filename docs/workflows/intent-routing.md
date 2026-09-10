@@ -7,18 +7,26 @@ matches.
 
 ## The routing pipeline
 
+The pipeline is three doors, cheapest first. Each message falls to the
+next door only when the current one declines; Door 3 always responds.
+Full component detail, resource costs, and the observability story:
+`docs/workflows/classification-architecture.md`.
+
 ```
 your message
   │
   ├─ short/simple guard ──────► chat (greetings, "2", single words)
   │
-  ├─ Stage-0 embedding gate ──► direct route if unanimous confident match
+  ├─ DOOR 1: embedding gate ──► direct route on confident match
+  │  (qwen3 embed + 13-centroid store + margin logic; ~0.1s, free)
   │
-  ├─ LLM classifier chain ────► intent + agent + planning mode
+  ├─ DOOR 2: LLM chain ───────► intent + agent + planning mode
+  │  (LFM2.5-8B + intent analyzer; ~1-2s; ~87% lab / ~84% live;
+  │   ~13% misrouted but recovered downstream, never lost)
   │
   ├─ heuristic fallback ──────► intent from keyword tables
   │
-  └─ final fall-through ──────► quickplan (clarify → plan → execute)
+  └─ DOOR 3: quickplan ───────► clarify (if ambiguous) → plan → execute
 ```
 
 **Nothing is ever dropped.** Every path terminates in an agent that
