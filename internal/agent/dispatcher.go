@@ -216,6 +216,14 @@ type DispatchResult struct {
 	// planner. Empty means no suggestion (planner uses its own heuristics).
 	SuggestedMode string `json:"suggested_mode,omitempty"`
 
+	// ExecutorModelRef is the "provider/model-id" ref of the executor model
+	// resolved for this dispatch (allotment tree leaf 02). Sourced from the
+	// first resolved model of a user model directive when present; raw
+	// directive references are carried verbatim (the provider downstream
+	// re-resolves through the LLM resolver, which is authoritative).
+	// Forwarded to PlanRequest.ExecutorModelRef. Empty = no directive.
+	ExecutorModelRef string `json:"executor_model_ref,omitempty"`
+
 	// ReasoningOverride carries the parsed user reasoning directive (if any)
 	// so downstream code can forward it to the agent loop. When non-nil, it
 	// takes precedence over SuggestedReasoningTier per spec §7.5. Tagged
@@ -226,6 +234,25 @@ type DispatchResult struct {
 	// Instruction is the parsed instruction when user provides automation request.
 	// Only populated when intent type is IntentInstruction.
 	Instruction *preferences.ParsedInstruction `json:"-"`
+}
+
+// executorModelRefFromDirective extracts the "provider/model-id" ref of the
+// executor model from a parsed model directive (allotment tree leaf 02):
+// the first resolver-resolved model when available, else the first raw
+// reference verbatim (the downstream provider re-resolves through the LLM
+// resolver, which is authoritative). Empty when no directive/models.
+func executorModelRefFromDirective(directive *ModelReassignmentDirective) string {
+	if directive == nil {
+		return ""
+	}
+	if len(directive.ResolvedModels) > 0 {
+		mc := directive.ResolvedModels[0]
+		return fmt.Sprintf("%s/%s", mc.ProviderID, mc.ModelID)
+	}
+	if len(directive.ModelReferences) > 0 {
+		return directive.ModelReferences[0]
+	}
+	return ""
 }
 
 // Dispatcher handles intake classification and routing of requests.
@@ -930,14 +957,15 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// 7. Determine routing
 	result := &DispatchResult{
-		Task:           createdTask,
-		AgentID:        intent.AgentType,
-		Intent:         intent,
-		MemoryContext:  memCtx.Results,
-		ModelDirective: parseResult.Directive,
-		OriginalInput:  input,
-		Parts:          parts,
-		SuggestedMode:  intent.SuggestedMode,
+		Task:             createdTask,
+		AgentID:          intent.AgentType,
+		Intent:           intent,
+		MemoryContext:    memCtx.Results,
+		ModelDirective:   parseResult.Directive,
+		OriginalInput:    input,
+		Parts:            parts,
+		SuggestedMode:    intent.SuggestedMode,
+		ExecutorModelRef: executorModelRefFromDirective(parseResult.Directive),
 	}
 
 	// Attach model override to task metadata if task was created

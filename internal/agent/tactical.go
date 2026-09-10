@@ -126,6 +126,15 @@ type TacticalScheduler struct {
 	// truncation path.
 	handoffPropagator func(ctx context.Context, completedStep *task.TaskStep) error
 
+	// contextWindowProvider resolves the executor model's context window
+	// per agent ID (allotment tree leaf 02). Set via SetContextWindowProvider.
+	// Nil = unknown windows everywhere: allotment batching never engages.
+	contextWindowProvider func(agentID string) int
+
+	// allotmentCfg holds the allotment math parameters, defaulted in
+	// NewTacticalScheduler to DefaultAllotmentConfig().
+	allotmentCfg AllotmentConfig
+
 	// sessionStore resolves Task.LinkedSessions → *session.Session for the
 	// interactive stamp (tree 04 leaf 02, D11). Narrow interface so tests
 	// don't implement the full session.Store. Nil = no session context; all
@@ -253,6 +262,24 @@ func (ts *TacticalScheduler) SetHandoffPropagator(fn func(ctx context.Context, c
 	}
 }
 
+// SetContextWindowProvider installs the executor model's context-window
+// lookup (allotment tree leaf 02). nil is ignored (allotment batching stays
+// disabled; legacy scheduling behavior), mirroring SetHandoffPropagator.
+func (ts *TacticalScheduler) SetContextWindowProvider(fn func(agentID string) int) {
+	if fn != nil {
+		ts.contextWindowProvider = fn
+	}
+}
+
+// contextWindowFor resolves the executor model's context window for an
+// agent ID. A nil provider yields 0 (unknown window = legacy behavior).
+func (ts *TacticalScheduler) contextWindowFor(agentID string) int {
+	if ts.contextWindowProvider == nil {
+		return 0
+	}
+	return ts.contextWindowProvider(agentID)
+}
+
 // AmendmentSubmitter is the interface for submitting amendment requests.
 // Implemented by *task.AmendmentManager.
 type AmendmentSubmitter interface {
@@ -283,6 +310,17 @@ type TacticalSchedulerConfig struct {
 	// policy (10 deferrals, 6h total). A policy with MaxDeferrals<=0 or
 	// MaxTotalDeferral<=0 disables deferral entirely (legacy behavior).
 	QuotaDeferral *QuotaDeferralPolicy
+
+	// ContextWindowProvider resolves the executor model's context window
+	// (tokens) for an agent ID; 0 = unknown. Wired by the daemon from the
+	// LLM resolver. When nil (or the window is unknown), scheduling behaves
+	// byte-identically to the pre-allotment legacy path (allotment tree
+	// leaf 02).
+	ContextWindowProvider func(agentID string) int
+
+	// AllotmentCfg controls the allotment math. Zero value is defaulted to
+	// DefaultAllotmentConfig() in NewTacticalScheduler.
+	AllotmentCfg AllotmentConfig
 }
 
 // NewTacticalScheduler creates a new tactical scheduler.
@@ -311,6 +349,13 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 	quotaDeferralPolicy := DefaultQuotaDeferralPolicy()
 	if cfg.QuotaDeferral != nil {
 		quotaDeferralPolicy = *cfg.QuotaDeferral
+	}
+
+	// Allotment config (allotment tree leaf 02): zero value means the pinned
+	// defaults. A non-zero UsableRatio is treated as an explicit override.
+	allotmentCfg := cfg.AllotmentCfg
+	if allotmentCfg.UsableRatio == 0 {
+		allotmentCfg = DefaultAllotmentConfig()
 	}
 
 	// Initialize semaphores
@@ -346,6 +391,8 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		maxHandoffSteps:        cfg.MaxHandoffSteps,
 		handoffUseAmendment:    cfg.HandoffUseAmendment,
 		amendmentMgr:           cfg.AmendmentManager,
+		contextWindowProvider:  cfg.ContextWindowProvider,
+		allotmentCfg:           allotmentCfg,
 	}
 }
 
@@ -372,6 +419,32 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		"task_id", taskID,
 		"count", len(readySteps),
 	)
+
+	// Allotment batching (allotment tree leaf 02): when the executor
+	// model's context window is known, split the phase's ready wave into
+	// allotment-sized batches. Batches beyond the first are rewritten in
+	// place as continuation steps ([continuation k/N] prefix, DependsOn
+	// chained to the previous batch's last step). scheduleStep's
+	// dependency gate (deps must be terminal) then holds each continuation
+	// batch until the previous batch drains. With a nil provider or an
+	// unknown window the allotment is 0 and this whole block is skipped:
+	// legacy behavior is byte-identical.
+	if agentID := allotmentAgentID(readySteps); agentID != "" {
+		allot := AllotmentTokens(ts.contextWindowFor(agentID), ts.allotmentCfg)
+		if allot > 0 {
+			batches := SplitStepsByAllotment(readySteps, allot, ts.allotmentCfg)
+			if len(batches) > 1 {
+				flattenWithContinuations(batches, ts.allotmentCfg)
+				if err := ts.persistContinuations(taskID, readySteps); err != nil {
+					ts.logger.Error("Failed to persist continuation steps",
+						"task_id", taskID,
+						"error", err,
+					)
+					return err
+				}
+			}
+		}
+	}
 
 	scheduledCount := 0
 	semaphoreBlockedCount := 0
@@ -434,6 +507,91 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		KeyTokenUsage:     0, // No token data available at scheduling time
 	})
 
+	return nil
+}
+
+// allotmentAgentID picks the agent whose context window sizes the batch
+// split: the first step's explicit AgentID, else the hint-table selection
+// from the first step (all steps in a ready wave share a phase's executor
+// in practice). Empty when no signal is available (then no window is
+// resolvable and batching is skipped).
+func allotmentAgentID(steps []*task.TaskStep) string {
+	for _, step := range steps {
+		if step.AgentID != "" {
+			return step.AgentID
+		}
+	}
+	if len(steps) > 0 && steps[0].ToolHint != "" {
+		if ts := steps[0]; ts != nil {
+			// No scheduler receiver here by design: this helper must stay
+			// side-effect free, so it only reports whether a hint exists.
+			return hintAgentFallback(ts.ToolHint)
+		}
+	}
+	return ""
+}
+
+// hintAgentFallback maps a tool hint to its default agent without touching
+// a scheduler instance (selectAgent needs a receiver and may log).
+func hintAgentFallback(toolHint string) string {
+	switch toolHint {
+	case "code", "git", "debug":
+		return config.AgentIDCoder
+	case "analysis", "research":
+		return config.AgentIDAnalyst
+	case "documentation", "planning":
+		return config.AgentIDPlanner
+	case "review":
+		return config.AgentIDCoder
+	default:
+		return config.AgentIDChat
+	}
+}
+
+// flattenWithContinuations rewrites a batched ready wave in place: batch 0
+// keeps its original descriptions; batch k (1-indexed) gets its
+// descriptions wrapped with ContinuationDescription(desc, k, N) where
+// N = len(batches) (the full batch count; a wave of 3 batches yields
+// [continuation 1/3]..[continuation 3/3] markers), and each step
+// DependsOn the previous batch's last step ID. The input slice order is
+// preserved so the caller's scheduling loop walks the same steps;
+// Sequence numbers stay untouched (the wave was already contiguously
+// numbered, and rewritings do not reorder it).
+func flattenWithContinuations(batches [][]*task.TaskStep, cfg AllotmentConfig) {
+	n := len(batches)
+	if n < 2 {
+		return // nothing beyond batch 0: no continuations to add
+	}
+	for k := 1; k < len(batches); k++ {
+		prev := batches[k-1]
+		if len(prev) == 0 {
+			continue
+		}
+		prevLast := prev[len(prev)-1]
+		for _, step := range batches[k] {
+			step.Description = ContinuationDescription(step.Description, k, n)
+			// Replace any prior dependency set with the chain edge: the
+			// step's own original deps were already satisfied (it was
+			// ready), so its only outstanding gate is the previous batch.
+			step.DependsOn = []string{prevLast.ID}
+		}
+	}
+}
+
+// persistContinuations rewrites the ready wave's continuation markers
+// (description + DependsOn edits made by flattenWithContinuations) back to
+// the step store so the scheduled jobs and later scheduling cycles read the
+// same chained shape.
+func (ts *TacticalScheduler) persistContinuations(taskID string, steps []*task.TaskStep) error {
+	store := ts.stepStore
+	if store == nil {
+		return fmt.Errorf("step store unavailable for continuation persistence (task %s)", taskID)
+	}
+	for _, step := range steps {
+		if err := store.Update(step); err != nil {
+			return fmt.Errorf("failed to persist continuation step %s: %w", step.ID, err)
+		}
+	}
 	return nil
 }
 

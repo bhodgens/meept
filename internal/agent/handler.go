@@ -1075,12 +1075,13 @@ func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.Con
 // publishPlanRequest sends a plan request to the orchestrator via the bus.
 func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID string) {
 	req := PlanRequest{
-		TaskID:       result.Task.ID,
-		SessionID:    sessionID,
-		Input:        result.Task.Description,
-		Intent:       result.Intent.Type,
-		Mode:         result.SuggestedMode,
-		TrueAnalysis: result.Intent.TrueAnalysis,
+		TaskID:           result.Task.ID,
+		SessionID:        sessionID,
+		Input:            result.Task.Description,
+		Intent:           result.Intent.Type,
+		Mode:             result.SuggestedMode,
+		TrueAnalysis:     result.Intent.TrueAnalysis,
+		ExecutorModelRef: result.ExecutorModelRef,
 	}
 
 	// Session execution context (quickplan-mode leaf 02 / master Contract

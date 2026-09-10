@@ -2713,6 +2713,38 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Interactive stamp origin lookup (tree 04 leaf 02, D11).
 			tacticalScheduler.SetSessionStore(c.SessionStore)
 
+			// Context-window provider (allotment tree leaf 02): resolves an
+			// executor agent's model to its configured context limit so
+			// ScheduleReadySteps can split oversized ready waves into
+			// allotment-sized continuation batches. agentID -> model ref
+			// mirrors the registry's model selection (explicit spec.Model
+			// wins, then the default model ref); resolution to a number is
+			// the resolver's ResolveRef -> ModelConfig.ContextLimit. Fully
+			// nil-safe: unknown ref / resolver absent / window unknown all
+			// yield 0 = legacy (non-batched) scheduling.
+			tacticalScheduler.SetContextWindowProvider(func(agentID string) int {
+				resolver := c.LLMResolver
+				if resolver == nil {
+					return 0
+				}
+				ref := ""
+				if c.AgentRegistry != nil {
+					if spec, ok := c.AgentRegistry.GetSpec(agentID); ok {
+						ref = spec.Model
+					}
+				}
+				if ref == "" && c.ModelsConfig != nil {
+					ref = c.ModelsConfig.Model // default model ref fallback
+				}
+				if ref == "" {
+					return 0
+				}
+				if mc := resolver.ResolveRef(ref); mc != nil {
+					return mc.ContextLimit
+				}
+				return 0
+			})
+
 			// Create bus pair orchestrator for channel-based agent pairing (Option C)
 			busPairOrchestrator := agent.NewPairOrchestrator(agent.PairOrchestratorDeps{
 				Registry: c.AgentRegistry,

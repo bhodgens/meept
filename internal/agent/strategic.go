@@ -57,6 +57,16 @@ type PlanRequest struct {
 	// quickplan waves in the conversation. Empty for other modes and when
 	// the session carries no such evidence.
 	SessionContext string `json:"session_context,omitempty"`
+
+	// ExecutorModelRef is the executor model reference ("provider/model-id",
+	// e.g. "local/lfm-8b-mlx-4bit") resolved for this dispatch (allotment
+	// tree leaf 02). It rides the plan request so the plan can carry the
+	// executor model identity downstream, where the tactical scheduler's
+	// ContextWindowProvider resolves the ref to a concrete context window.
+	// Resolution to a number happens in the provider, never here. Empty =
+	// no explicit model directive; the daemon's default-model fallback
+	// applies at resolution time.
+	ExecutorModelRef string `json:"executor_model_ref,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.
