@@ -52,6 +52,32 @@ findings without applying changes; dedicated read-only reviewer agents
 (code-reviewer, debug-reviewer, analyst-reviewer) audit executor work
 as verification gates.
 
+## QuickPlan
+
+Quickplan is a work order, not a question: the orchestrator **plans the
+work, asks you up-front clarification questions only if the request is
+ambiguous, then executes autonomously to completion.** After the
+clarification step there are no approval pauses — you get the finished
+result.
+
+**The cue rule.** A quickplan classification requires **orchestration
+evidence** in the message: subagents, task lists, waves/leaves,
+`plan.md` references, correction clauses ("...and correct them as you
+find them"), or multi-step sequences ("in order", "one at a time",
+"then"). Without that evidence, the message falls to the LLM
+classification chain. Rationale: quickplan-vs-code is a **session-state
+judgment** the orchestrator makes at execution time using active-plan
+and task context — not something message text alone can decide.
+
+Worked examples:
+
+- "review the daemon for bugs and correct them as you find them" →
+  **quickplan** (correction clause: autonomous multi-site execution)
+- "review the json files for completeness" → **review** (verdict only,
+  findings come back to you, nothing modified)
+- "add pagination to the API" → **code** (one concrete artifact to
+  change)
+
 ## The three-way boundary that matters most
 
 **"Look at X"** resolves by what happens after the look:

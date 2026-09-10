@@ -112,6 +112,20 @@ corpus path, and build time; the Go side refuses to match on dimension
 mismatch and logs to rebuild. Legacy centroid-format stores still load
 (each centroid = one pseudo-example).
 
+## The QuickPlan class and the orchestration cue
+
+The `quickplan` class exists in the centroid index (the adversarial
+corpus labels it; rebuild the store with
+`python3 scripts/build_prefilter_centroids.py --corpus testdata/eval/classifier-adversarial-corpus.json5`).
+A quickplan direct-route vote is additionally gated by the orchestration
+cue (`internal/agent/quickplan_cue.go`, `QuickPlanCuePattern`): the
+input must show orchestration evidence — subagents, task lists,
+waves/leaves, `plan.md` references, correction clauses, multi-step
+sequences. Without a cue match, a quickplan vote falls through to the
+LLM chain: quickplan-vs-code is a session-state judgment the
+orchestrator makes at execution time (see the "QuickPlan" section of
+`docs/workflows/intent-routing.md`).
+
 ## Measured numbers (0.6B-4bit embedder, 136-case corpus, LOO)
 
 **The table that stood here (k=5 unanimity 14.7% C, 4-of-5 49%, 4-of-4
@@ -138,7 +152,8 @@ that actually wins, see the campaign: centroid-margin
 The Go gate still ships k=5 unanimity (floor
 `DefaultPrefilterThreshold = 0.70`): it only ever routes on perfect
 evidence, and the campaign's champion (centroid-margin head) is NOT what
-is wired today — see master.md §"M4 Wiring Constraint".
+is wired today — it remains the tracked M4 wiring candidate (see
+master.md §"M4 Wiring Constraint").
 
 ## Observability
 
