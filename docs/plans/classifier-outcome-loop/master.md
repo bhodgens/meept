@@ -213,7 +213,7 @@ commit: `feat(observability): harvest pipeline + dashboards (L4)`.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-persist-privacy.md | PENDING | 0 | |
+| 01-persist-privacy.md | COMPLETE | 1 | 1a68a9b5 — schema delta + salted hash + raw text removal + error scrub; 9 metrics tests + privacy tests; one informational fmt.Errorf note (non-blocking) |
 | 02-margin-capture.md | PENDING | 0 | |
 | 03-outcome-capture.md | PENDING | 0 | |
 | 04-harvest-dashboards.md | PENDING | 0 | |
