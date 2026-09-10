@@ -1083,6 +1083,14 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 		TrueAnalysis: result.Intent.TrueAnalysis,
 	}
 
+	// Session execution context (quickplan-mode leaf 02 / master Contract
+	// 6): quick_plan dispatches carry the session's active plan, open
+	// tracked tasks, and prior quickplan waves so the orchestrator can
+	// make the quickplan-vs-code/git call at execution time.
+	if req.Mode == "quick_plan" && h.dispatcher != nil {
+		req.SessionContext = h.dispatcher.BuildSessionExecutionContext(context.Background(), sessionID)
+	}
+
 	if result.Intent.Type == string(IntentCompound) {
 		req.IsCompound = true
 		if result.Task != nil && result.Task.Metadata != nil {

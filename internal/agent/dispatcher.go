@@ -1208,16 +1208,16 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		return d.applyContextWeighting(heuristic, memCtx, input), nil
 	}
 
-	// Step 5: Final fallback to Chat for clarification
-	d.recordFallback(input, "all_classifiers_failed", 0.0, config.AgentIDChat)
+	// Step 5: Final fallback — quickplan: clarify-if-needed, plan, execute
+	d.recordFallback(input, "all_classifiers_failed", 0.0, "orchestrator")
 	d.recordClassificationMethod("fallback")
-	d.recordAgent(config.AgentIDChat)
-	d.recordIntentType(string(IntentChat))
+	d.recordAgent("orchestrator")
+	d.recordIntentType(string(IntentQuickPlan))
 	return &Intent{
-		Type:       string(IntentChat),
+		Type:       string(IntentQuickPlan),
 		Confidence: 0.3,
-		AgentType:  config.AgentIDChat,
-		Summary:    "Could not determine intent, clarifying with user",
+		AgentType:  "orchestrator",
+		Summary:    "Could not determine intent; planning and executing with clarification as needed",
 		Method:     "fallback",
 	}, nil
 
@@ -1225,10 +1225,11 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 
 // validModes is the set of accepted SuggestedMode values.
 var validModes = map[string]struct{}{
-	"direct":    {},
-	"plan":      {},
-	"spec_plan": {},
-	"spec_pair": {},
+	"direct":     {},
+	"plan":       {},
+	"quick_plan": {},
+	"spec_plan":  {},
+	"spec_pair":  {},
 }
 
 // validateMode returns the mode if valid, empty string otherwise.
@@ -1250,6 +1251,12 @@ func validateMode(s string) string {
 //  4. Short-input downgrade: if input < 50 chars, mode is "direct"
 //     (unless analysis explicitly overrode to spec_plan)
 func suggestMode(intentType IntentType, analysis *TrueIntentAnalysis, input string) string {
+	// quickplan never short-input downgrades: the explicit execution
+	// phrasing IS the signal.
+	if intentType == IntentQuickPlan {
+		return "quick_plan" // explicit execution phrasing IS the signal;
+		// never short-input downgraded
+	}
 	if intentType == IntentCompound {
 		return "spec_pair"
 	}
@@ -1389,6 +1396,16 @@ func (d *Dispatcher) buildClarificationResult(input string, analysis *TrueIntent
 		questions = []string{"Could you provide more details about what you'd like to do?"}
 	}
 
+	// PendingMode seeding (quickplan-mode leaf 02): when the caller's
+	// intent type resolves to quickplan, record "quick_plan" so the
+	// post-clarification resume re-enters execution in quickplan mode
+	// instead of re-classifying from scratch. Empty for all other
+	// intents — the ambiguity gate is unchanged for them.
+	pendingMode := ""
+	if IntentType(analysis.Category) == IntentQuickPlan {
+		pendingMode = string(IntentQuickPlan.SuggestedMode())
+	}
+
 	// Build a single clarifying message
 	var sb strings.Builder
 	sb.WriteString("I'm not quite sure what you're asking for. ")
@@ -1401,17 +1418,27 @@ func (d *Dispatcher) buildClarificationResult(input string, analysis *TrueIntent
 	}
 
 	intent := &Intent{
-		Type:         string(IntentClarify),
-		Confidence:   analysis.Confidence,
-		AgentType:    config.AgentIDChat,
-		Summary:      extractSummary(input),
-		TrueAnalysis: analysis,
+		Type:          string(IntentClarify),
+		Confidence:    analysis.Confidence,
+		AgentType:     config.AgentIDChat,
+		Summary:       extractSummary(input),
+		TrueAnalysis:  analysis,
+		SuggestedMode: pendingMode,
 	}
 
 	// Record for analytics
 	d.recordClassificationMethod("intent_analyzer")
 	d.recordAgent(config.AgentIDChat)
 	d.recordIntentType(string(IntentClarify))
+
+	// Record the pending clarification (quickplan-mode leaf 02): the
+	// ambiguity gate must leave the clarify intent as the session's last
+	// intent so the user's answer re-enters via ResumeAfterClarification
+	// with PendingMode preserved — mirroring the model-directive
+	// clarification path in ClassifyAndRoute step 2.
+	if d.sessionTracker != nil {
+		d.sessionTracker.RecordIntent(sessionID, intent, intent.AgentType)
+	}
 
 	d.logger.Info("Requesting clarification",
 		"ambiguity", analysis.Ambiguity,
@@ -1432,6 +1459,12 @@ type pendingClarification struct {
 	OriginalInput string              `json:"original_input"`
 	Analysis      *TrueIntentAnalysis `json:"analysis"`
 	SessionID     string              `json:"session_id"`
+	// PendingMode is the SuggestedMode the pre-clarification dispatch had
+	// synthesized ("" for legacy/clarify flows). When the pending intent
+	// was quickplan this is "quick_plan", and the resumed dispatch must
+	// carry it so the clarification answer completes the plan instead of
+	// downgrading to plain chat.
+	PendingMode string `json:"pending_mode,omitempty"`
 }
 
 // maxCombinedClarificationLen caps the combined input to prevent
@@ -1444,6 +1477,16 @@ const maxCombinedClarificationLen = 32_000
 // it asks follow-up questions. Otherwise, it routes normally.
 func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput, userResponse, sessionID string) (*DispatchResult, error) {
 	combinedInput := originalInput + "\n\nUser clarification: " + userResponse
+
+	// Pending mode (quickplan-mode leaf 02): when the clarification was
+	// seeded with PendingMode="quick_plan", the resumed dispatch must
+	// carry SuggestedMode="quick_plan" — the clarification answer
+	// completes the plan; it never downgrades to plain chat. Read BEFORE
+	// any clearPendingClarification call below.
+	pendingMode := ""
+	if pending := d.getPendingClarification(sessionID); pending != nil {
+		pendingMode = pending.PendingMode
+	}
 
 	// Guard against unbounded growth from repeated clarification retries.
 	if len(combinedInput) > maxCombinedClarificationLen {
@@ -1503,6 +1546,15 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 			intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
 			intent.TrueAnalysis = analysis
 
+			// Preserve the pre-clarification mode (quickplan-mode leaf
+			// 02): a pending quickplan clarification resumes in
+			// quick_plan mode so the post-clarification turn executes
+			// without a new approval gate. All other pending flows keep
+			// the previous behavior (no mode synthesized here).
+			if pendingMode == "quick_plan" {
+				intent.SuggestedMode = "quick_plan"
+			}
+
 			// Check for plan routing.
 			if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
 				return d.routeToPlan(ctx, combinedInput, intent, sessionID)
@@ -1520,6 +1572,7 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 				Intent:        intent,
 				MemoryContext: memCtx.Results,
 				OriginalInput: combinedInput,
+				SuggestedMode: intent.SuggestedMode,
 			}
 
 			d.logger.Info("Clarification resolved, routed normally",
@@ -1540,7 +1593,16 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 	// the clarification flow — multimodal attachments only attach to the
 	// original user turn.
 	d.clearPendingClarification(sessionID)
-	return d.ClassifyAndRoute(ctx, combinedInput, sessionID, nil, "")
+	result, err := d.ClassifyAndRoute(ctx, combinedInput, sessionID, nil, "")
+	// Pending-mode preservation (quickplan-mode leaf 02): the analyzer-less
+	// fallback must not downgrade a pending quickplan clarification either.
+	if err == nil && result != nil && pendingMode == "quick_plan" {
+		result.SuggestedMode = "quick_plan"
+		if result.Intent != nil {
+			result.Intent.SuggestedMode = "quick_plan"
+		}
+	}
+	return result, err
 }
 
 // isPendingClarification checks if the previous intent for a session was a
@@ -1572,10 +1634,14 @@ func (d *Dispatcher) getPendingClarification(sessionID string) *pendingClarifica
 	}
 	// Reconstruct the original input from the intent summary (best-effort).
 	// TrueAnalysis may be nil for model directive clarifications.
+	// PendingMode rides on the clarify intent's SuggestedMode: the
+	// ambiguity gate seeds it there so the resumed dispatch can restore
+	// the pre-clarification mode (quick_plan) after the user answers.
 	return &pendingClarification{
 		OriginalInput: lastIntent.Summary,
 		Analysis:      lastIntent.TrueAnalysis,
 		SessionID:     sessionID,
+		PendingMode:   lastIntent.SuggestedMode,
 	}
 }
 

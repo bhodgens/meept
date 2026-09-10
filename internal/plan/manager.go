@@ -70,6 +70,13 @@ func (m *PlanManager) GetPlan(ctx context.Context, planID string) (*Plan, error)
 	return m.store.GetPlan(ctx, planID)
 }
 
+// GetPlansForSession returns the plans linked to a session (read-through
+// to the store). Used by the dispatcher's quickplan Session execution
+// context block (quickplan-mode leaf 02).
+func (m *PlanManager) GetPlansForSession(ctx context.Context, sessionID string) ([]*Plan, error) {
+	return m.store.GetPlansForSession(ctx, sessionID)
+}
+
 // CreatePlan creates a new plan, stores it, writes the initial plan.md, and
 // publishes a plan.created event.
 func (m *PlanManager) CreatePlan(ctx context.Context, title, description, projectID, projectPath, sessionID string) (*Plan, error) {

@@ -339,6 +339,9 @@ func (ia *IntentAnalyzer) parseAnalysis(content string) (*TrueIntentAnalysis, er
 	validCategories := map[string]bool{
 		"research": true, "implementation": true, "investigation": true,
 		"fix": true, "clarification": true, "other": true,
+		// quickplan-mode leaf 01: quickplan is the 13th intent class; the
+		// ambiguity gate checks it to seed PendingMode on clarifications.
+		string(IntentQuickPlan): true,
 	}
 	if !validCategories[analysis.Category] {
 		analysis.Category = "other"

@@ -1435,6 +1435,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		components.Orchestrator.SetPlanManager(planManagerInst)
 	}
 
+	// Wire PlanManager into the Dispatcher for the quickplan Session
+	// execution context block (quickplan-mode leaf 02). Same ordering
+	// constraint as the orchestrator: the dispatcher is constructed
+	// before the plan system exists.
+	if components != nil && components.Dispatcher != nil && planManagerInst != nil {
+		components.Dispatcher.SetPlanManager(planManagerInst)
+	}
+
 	// Wire PlanManager into RalphLoop. The RalphLoop is created in
 	// NewComponents before the plan system is initialized, so its
 	// planManager field is nil at construction time.

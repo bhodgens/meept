@@ -50,6 +50,13 @@ type PlanRequest struct {
 	// spec_pair). The strategic planner uses this to short-circuit planning for
 	// "direct" mode or select the spec-plan template for "spec_plan".
 	Mode string `json:"mode,omitempty"`
+
+	// SessionContext carries the pre-rendered "Session execution context"
+	// block for quick_plan mode (quickplan-mode leaf 02 / master Contract
+	// 6): active plan (ID/title/state), open tracked tasks, and prior
+	// quickplan waves in the conversation. Empty for other modes and when
+	// the session carries no such evidence.
+	SessionContext string `json:"session_context,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.
@@ -84,6 +91,16 @@ type plannerPhaseOutput struct {
 }
 
 const interviewAmbiguityThreshold = 0.6
+
+// quickPlanUpgradeInstruction is appended to the quickplan planner prompt
+// alongside the Session execution context block (quickplan-mode leaf 02 /
+// master Contract 6). One-way: session evidence upgrades to quickplan;
+// absence never downgrades an explicit quickplan.
+const quickPlanUpgradeInstruction = `If the session shows an active plan or open tracked tasks, treat ` +
+	`code/git-classified requests as continuations of that flow (quickplan ` +
+	`execution) rather than fresh single-intent work. One-way: session ` +
+	`evidence upgrades to quickplan; absence never downgrades an explicit ` +
+	`quickplan.`
 
 // StrategicPlanner decomposes tasks into steps using an LLM planner agent.
 type StrategicPlanner struct {
@@ -399,6 +416,16 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		}
 	case "direct":
 		steps = sp.createFallbackSteps(req, parentMemoryRefs)
+	case "quick_plan":
+		// quickplan-mode leaf 02 / master Contract 2: clarify-if-needed
+		// already happened upstream (dispatcher ambiguity gate); plan
+		// without an interview and execute without an approval pause.
+		steps, err = sp.planSinglePhase(ctx, req)
+		if err != nil {
+			sp.logger.Warn("Quickplan single-phase plan failed, using fallback steps",
+				"task_id", req.TaskID, "error", err)
+			steps = sp.createFallbackSteps(req, parentMemoryRefs)
+		}
 	case "plan":
 		// Plan compiler pipeline (plan-compiler leaf 04): when enabled the
 		// brainstorm draft IS the interview — seed the scaffold from the
@@ -893,6 +920,14 @@ func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest
 		return nil, fmt.Errorf("render decompose template: %w", renderErr)
 	}
 
+	// Session execution context (quickplan-mode leaf 02 / master Contract
+	// 6): active plan + tracked tasks + prior waves, pre-rendered by the
+	// dispatcher, plus the one-way upgrade instruction. Quickplan only —
+	// other modes keep byte-identical prompts.
+	if req.SessionContext != "" {
+		prompt += "\n\n" + req.SessionContext + "\n" + quickPlanUpgradeInstruction
+	}
+
 	// When a registry is available, append dynamic agent availability hints
 	// so the planner LLM knows which specialist agents are actually enabled.
 	if sp.registry != nil {
@@ -1261,6 +1296,15 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 // before execution. Triggers on either an un-approved completed interview OR a
 // plan whose step count exceeds the configured complexity threshold.
 func (sp *StrategicPlanner) requiresApproval(req PlanRequest, steps []*task.TaskStep) bool {
+	// Quickplan executes to completion with no approval pause
+	// (quickplan-mode leaf 02 / master Contract 2). An interview-approved
+	// planning context still blocks when the user has not approved.
+	if req.Mode == "quick_plan" {
+		if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted && !req.PlanningCtx.UserApproved {
+			return true
+		}
+		return false
+	}
 	// Interview-completed but not yet user-approved.
 	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted && !req.PlanningCtx.UserApproved {
 		return true
