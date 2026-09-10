@@ -1,12 +1,15 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/task"
 )
 
 // ambiguityTestServer returns an intent analyzer backed by an LLM stub
@@ -53,40 +56,65 @@ func mustJSON(t *testing.T, v any) string {
 
 // Session-continuity A5 (bughunt 2026-09-08 item 14 / debt 3): the
 // ambiguity short-circuit must fire ONLY for context-less sessions.
-// These tests pin the gate at the unit level: the decision expression is
-// `IsAmbiguous && digest.IsEmpty()`. The full ClassifyAndRoute path needs
-// an LLM-stubbed dispatcher with stores, covered by the dispatcher suites;
-// here we pin the two decision branches directly against the digest
-// semantics the gate relies on.
+//
+// Bughunt 2026-09-10 L12: these tests originally pinned a LOCAL copy of
+// the decision expression (`IsAmbiguous && digest.IsEmpty()`), so a
+// regression in the real gate could not fail them. They now exercise the
+// real gates — ClassifyAndRoute 3.5 and ResumeAfterClarification — against
+// a stubbed analyzer, pinning both decision branches:
+//
+//   - ambiguous + empty digest → clarification (follow-up question)
+//   - ambiguous + context (non-empty digest) → proceed to classification
+
+// TestAmbiguityGate_EmptyDigestClarifies drives the REAL ClassifyAndRoute
+// gate: a context-less session whose analyzer verdict is ambiguous must
+// clarification-gate (legacy behavior byte-identical for the empty-digest
+// path — the pre-tree behavior these tests were written to protect).
 func TestAmbiguityGate_EmptyDigestClarifies(t *testing.T) {
-	d := NewDispatcher(DispatcherConfig{})
+	d := NewDispatcher(DispatcherConfig{Logger: testLogger()})
 	d.intentAnalyzer = ambiguityTestServer(t, 0.95)
-	// No stores wired → buildSessionContextDigest returns the empty digest.
+
+	// No stores wired → the built digest is empty; assert that
+	// precondition against the digest the gate itself will build.
 	digest := d.buildSessionContextDigest("session-empty")
 	if !digest.IsEmpty() {
 		t.Fatalf("digest should be empty with no stores; got %+v", digest)
 	}
-	analysis := &TrueIntentAnalysis{Ambiguity: 0.95}
-	// The decision rule, exactly as ClassifyAndRoute 3.5 evaluates it:
-	shouldClarify := analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) && digest.IsEmpty()
-	if !shouldClarify {
-		t.Errorf("context-less + ambiguous: shouldClarify = false, want true (legacy behavior must be byte-identical)")
+
+	res, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "session-empty", nil, "")
+	if err != nil {
+		t.Fatalf("ClassifyAndRoute: %v", err)
+	}
+	if res == nil || !res.ClarificationNeeded {
+		t.Fatalf("context-less + ambiguous: ClassifyAndRoute did not clarification-gate; got %+v", res)
+	}
+	if res.Intent == nil || res.Intent.Type != string(IntentClarify) {
+		t.Fatalf("gate result intent = %+v, want clarify", res.Intent)
 	}
 }
 
+// TestAmbiguityGate_SessionContextSuppressesClarification drives the REAL
+// ClassifyAndRoute gate from the other side: a session with real context
+// (tracked task + step result) must NOT clarification-gate an ambiguous
+// input — history-aware classification proceeds.
 func TestAmbiguityGate_SessionContextSuppressesClarification(t *testing.T) {
-	digest := &SessionContextDigest{
-		LastTaskName:   "implement parser",
-		LastTaskState:  "executing",
-		LastIntentType: "code",
-	}
+	cs := newCaptureServer(t, `{"goal":"clarify follow-up","ambiguity":0.95,"scope":"narrow","category":"clarification","suggested_questions":["Which change do you mean?"],"confidence":0.9}`)
+	d := newDigestCaptureDispatcher(t, cs)
+
+	seedDigestTask(t, d, "task-gate", "implement parser", "session-ctx",
+		task.StateCompleted, time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC), "coder")
+	seedDigestStep(t, d.taskRegistry, "task-gate", 0, task.StepCompleted, "Implemented the fix.")
+
+	digest := d.buildSessionContextDigest("session-ctx")
 	if digest.IsEmpty() {
 		t.Fatal("fixture digest should be non-empty")
 	}
-	analysis := &TrueIntentAnalysis{Ambiguity: 0.95}
-	threshold := defaultAmbiguityThreshold
-	shouldClarify := analysis.IsAmbiguous(threshold) && digest.IsEmpty()
-	if shouldClarify {
-		t.Errorf("context-bearing session: shouldClarify = true; A5 gate (digest.IsEmpty() condition) missing from the decision")
+
+	res, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "session-ctx", nil, "")
+	if err != nil {
+		t.Fatalf("ClassifyAndRoute: %v", err)
+	}
+	if res != nil && res.ClarificationNeeded {
+		t.Fatalf("context-bearing session clarification-gated an ambiguous input; A5 gate (digest.IsEmpty() condition) missing from the real decision")
 	}
 }

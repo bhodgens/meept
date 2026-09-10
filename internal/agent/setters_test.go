@@ -49,6 +49,10 @@ func TestAllSetters_NilSafe(t *testing.T) {
 
 		// Dispatcher setters (internal/agent/dispatcher.go)
 		{"Dispatcher.SetCapabilityMatcher", func() { dispatcher.SetCapabilityMatcher((*CapabilityMatcher)(nil)) }},
+		// Dispatcher.SetPlanManager lives in session_digest.go; the nil
+		// guard leaves the quickplan session-context Active-plan section
+		// unwired instead of panicking (bughunt 2026-09-10 L4).
+		{"Dispatcher.SetPlanManager", func() { dispatcher.SetPlanManager((*plan.PlanManager)(nil)) }},
 
 		// MessageQueue setters (internal/agent/queue.go)
 		{"MessageQueue.SetPersister", func() { queue.SetPersister(nil) }},

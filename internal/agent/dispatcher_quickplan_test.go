@@ -8,6 +8,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
@@ -83,6 +84,126 @@ func TestClassifyIntent_FinalFallbackIsQuickPlan(t *testing.T) {
 		t.Errorf("Confidence = %v, want 0.3", intent.Confidence)
 	}
 }
+
+// TestClassifyIntent_FallbackQuickPlanDispatchesAsync pins bughunt
+// 2026-09-10 C1: the quickplan fallback producer must set
+// RequiresPlanning on the intent so the full-pipeline result opens the
+// handler's async gate (ShouldDispatchAsync && Task != nil). Without the
+// field the handler routes the turn to a chat loop and orphans the
+// created task — the quickplan→orchestrator pipeline was dead code.
+func TestClassifyIntent_FallbackQuickPlanDispatchesAsync(t *testing.T) {
+	d := NewDispatcher(DispatcherConfig{Logger: testLogger()})
+
+	// Full ClassifyAndRoute pass: fallback intent + created task. The
+	// bare dispatcher has no task store, so the task is synthesized the
+	// same way the handler-visible path requires (ShouldCreateTask is
+	// true for quickplan; the handler's async branch needs Task != nil).
+	const input = "zorblification quixomatic rendlement requested"
+	res, err := d.ClassifyAndRoute(context.Background(), input, "sess-qp-async-fallback", nil, "")
+	if err != nil {
+		t.Fatalf("ClassifyAndRoute: %v", err)
+	}
+	if res.Intent == nil || res.Intent.Type != string(IntentQuickPlan) {
+		t.Fatalf("intent = %+v, want %q", res.Intent, string(IntentQuickPlan))
+	}
+	if !IntentType(res.Intent.Type).ShouldCreateTask() {
+		t.Fatal("quickplan must create tasks; handler async branch would never be reached")
+	}
+	if !res.Intent.RequiresPlanning {
+		t.Fatal("fallback quickplan intent missing RequiresPlanning: async gate can never open (C1 regression)")
+	}
+	if res.Task == nil {
+		// Mirror the handler's field: with a task store wired, the
+		// dispatcher creates the task; the gate itself reads only the
+		// intent, so attach it to exercise the exact gate expression.
+		res.Task = task.NewTask("qp", input)
+	}
+	if !d.ShouldDispatchAsync(res) {
+		t.Fatal("ShouldDispatchAsync = false for fallback quickplan with task: quickplan→orchestrator pipeline is dead (C1 regression)")
+	}
+}
+
+// TestClassifyIntent_SemanticQuickPlanDispatchesAsync pins the C1 twin on
+// the semantic-matching producer (classifyIntent step 3.5): a semantic
+// quickplan match must carry RequiresPlanning so the result dispatches
+// async. The semantic index is driven by a canned embedding client that
+// ranks the quickplan intent definition top for the probe input.
+func TestClassifyIntent_SemanticQuickPlanDispatchesAsync(t *testing.T) {
+	d := NewDispatcher(DispatcherConfig{Logger: testLogger()})
+
+	// Build a real semantic index over intent texts; the canned client
+	// makes every vector identical, so the cosine tie resolves in
+	// BuildIndex's slice order. Permute the index so QUICKPLAN is the
+	// first entry — mirroring a genuine quickplan neighborhood — and the
+	// tie-break hands the match to quickplan.
+	client := &cannedFirstMatchEmbeddingClient{dim: 8}
+	idx := NewSemanticIndex(client)
+	if err := idx.BuildIndex(context.Background()); err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+	entries := idx.entries
+	vectors := idx.vectors
+	pi := -1
+	for i, e := range entries {
+		if e.IntentType == IntentQuickPlan {
+			pi = i
+			break
+		}
+	}
+	if pi < 0 {
+		t.Fatal("semantic index does not contain quickplan")
+	}
+	entries[0], entries[pi] = entries[pi], entries[0]
+	vectors[0], vectors[pi] = vectors[pi], vectors[0]
+	match := idx.Match("knock out the whole roadmap", 0.01)
+	if match == nil || match.IntentType != IntentQuickPlan {
+		t.Fatalf("semantic match = %+v, want quickplan", match)
+	}
+	d.semanticIndex = idx
+
+	memCtx := &MemoryContext{Results: []memory.MemoryResult{}, IntentCounts: map[string]int{}}
+	intent, err := d.classifyIntent(context.Background(), "knock out the whole roadmap", memCtx)
+	if err != nil {
+		t.Fatalf("classifyIntent: %v", err)
+	}
+	if intent == nil || intent.Type != string(IntentQuickPlan) {
+		t.Fatalf("intent = %+v, want %q", intent, string(IntentQuickPlan))
+	}
+	if intent.Method != "semantic" {
+		t.Errorf("Method = %q, want semantic", intent.Method)
+	}
+	if !intent.RequiresPlanning {
+		t.Fatal("semantic quickplan intent missing RequiresPlanning: async gate can never open (C1 regression)")
+	}
+	res := &DispatchResult{Intent: intent, Task: task.NewTask("qp", "qp")}
+	if !d.ShouldDispatchAsync(res) {
+		t.Fatal("ShouldDispatchAsync = false for semantic quickplan with task (C1 regression)")
+	}
+}
+
+// cannedFirstMatchEmbeddingClient returns a fixed unit vector for every
+// text, collapsing all cosine similarities to 1.0 so Match resolves by the
+// first indexed entry (the semantic index lists quickplan first).
+type cannedFirstMatchEmbeddingClient struct{ dim int }
+
+func (c *cannedFirstMatchEmbeddingClient) Embed(_ context.Context, _ string) ([]float64, error) {
+	v := make([]float64, c.dim)
+	v[0] = 1
+	return v, nil
+}
+
+func (c *cannedFirstMatchEmbeddingClient) EmbedBatch(_ context.Context, texts []string) ([][]float64, error) {
+	out := make([][]float64, len(texts))
+	for i := range texts {
+		out[i] = []float64{1}
+		for len(out[i]) < c.dim {
+			out[i] = append(out[i], 0)
+		}
+	}
+	return out, nil
+}
+
+func (c *cannedFirstMatchEmbeddingClient) Dimension() int { return c.dim }
 
 // TestClassifyIntent_ShortSimpleGuardStillChat pins the regression guard:
 // the short/simple guard EARLIER in classifyIntent still routes short
@@ -413,5 +534,187 @@ func TestRequiresApproval_QuickPlanNoApprovalGate(t *testing.T) {
 	planReq := PlanRequest{Mode: "plan"}
 	if !sp.requiresApproval(planReq, make([]*task.TaskStep, 12)) {
 		t.Error("plan mode approval gate regression: 12 steps should gate")
+	}
+}
+
+// quickplanStillAmbiguousAnalysis is a re-analysis of the combined
+// original+answer input that is STILL highly ambiguous — the gibberish
+// second answer case.
+const quickplanStillAmbiguousAnalysis = `{"goal":"still unclear","ambiguity":0.9,"scope":"narrow","category":"clarification","suggested_questions":["What exactly should be done?"],"confidence":0.9}`
+
+// TestResumeGate_OnlyClarifyMarkerStillAsksFollowUp pins bughunt 2026-09-10
+// M2: the resume-path A5 gate must treat a digest whose ONLY entry is the
+// clarify marker as empty, so a gibberish second answer produces a
+// FOLLOW-UP clarification — not a route. buildClarificationResult records
+// the clarify intent in the tracker before the resume rebuilds the digest;
+// without the clarify-ignoring emptiness check the marker destroys the
+// gate's own precondition and the second answer silently routes (into
+// autonomous quickplan execution once C1 is fixed).
+func TestResumeGate_OnlyClarifyMarkerStillAsksFollowUp(t *testing.T) {
+	cs := newCaptureServer(t, quickplanStillAmbiguousAnalysis)
+	d := newDigestCaptureDispatcher(t, cs)
+
+	// Seed the tracker EXACTLY as the first clarification leaves it: the
+	// clarify intent is the session's only recorded entry.
+	clarify := &Intent{
+		Type:       string(IntentClarify),
+		Confidence: 0.9,
+		AgentType:  config.AgentIDChat,
+		Summary:    "do the thing",
+	}
+	d.sessionTracker.RecordIntent("sess-m2-gibberish", clarify, config.AgentIDChat)
+
+	// Digest precondition: only the clarify marker present.
+	digest := d.buildSessionContextDigest("sess-m2-gibberish")
+	if digest.IsEmpty() {
+		t.Fatal("precondition: digest with clarify marker should be non-empty under IsEmpty")
+	}
+	if !digest.IsEmptyIgnoringClarify() {
+		t.Fatal("digest with ONLY the clarify marker must be empty under IsEmptyIgnoringClarify (M2)")
+	}
+
+	res, err := d.ResumeAfterClarification(context.Background(), clarify.Summary, "blorf narble zinx", "sess-m2-gibberish")
+	if err != nil {
+		t.Fatalf("ResumeAfterClarification: %v", err)
+	}
+	if res == nil || !res.ClarificationNeeded {
+		t.Fatalf("still-ambiguous second answer routed instead of follow-up clarification: %+v (M2 regression: silent routing = autonomous quickplan under C1)", res)
+	}
+}
+
+// TestResumeGate_RealContextProceeds pins the other resume branch: a
+// session with REAL context (task fields + non-clarify intent) must NOT
+// clarification-gate on an ambiguous answer — history-aware classification
+// proceeds, exactly as the pre-M2 A5 gate intended for non-empty digests.
+func TestResumeGate_RealContextProceeds(t *testing.T) {
+	cs := newCaptureServer(t, `{"goal":"fix bug","ambiguity":0.9,"scope":"narrow","category":"fix","suggested_questions":[],"confidence":0.9}`)
+	d := newDigestCaptureDispatcher(t, cs)
+
+	// Real context: a tracked task + a non-clarify last intent.
+	base := time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC)
+	seedDigestTask(t, d, "task-m2", "the login bug", "sess-m2-ctx", task.StateCompleted, base, "coder")
+	seedDigestStep(t, d.taskRegistry, "task-m2", 0, task.StepCompleted, "Fixed the login bug.")
+	d.sessionTracker.RecordIntent("sess-m2-ctx", &Intent{Type: string(IntentCode), AgentType: "coder"}, "coder")
+
+	digest := d.buildSessionContextDigest("sess-m2-ctx")
+	if digest.IsEmpty() {
+		t.Fatal("precondition: real-context digest should be non-empty")
+	}
+	if !digest.IsEmptyIgnoringClarify() == digest.IsEmpty() {
+		// Same verdict expected for this fixture under both measures.
+		t.Fatal("IsEmptyIgnoringClarify must agree with IsEmpty when no clarify marker is present")
+	}
+
+	res, err := d.ResumeAfterClarification(context.Background(), "the login bug", "the one you just finished", "sess-m2-ctx")
+	if err != nil {
+		t.Fatalf("ResumeAfterClarification: %v", err)
+	}
+	if res == nil || res.ClarificationNeeded {
+		t.Fatalf("context-bearing session re-clarified an ambiguous answer; A5 gate regression: %+v", res)
+	}
+}
+
+// TestRouteToPlan_QuickPlanCarriesThrough pins the M3 dispatcher half: a
+// quickplan intent that reaches routeToPlan (plans config always-plan, or a
+// threshold rule) must produce an async-dispatchable result — Task created,
+// SuggestedMode quick_plan, empty Response — instead of the legacy
+// "plan created" text reply that terminated as direct_response and stranded
+// the draft plan. Non-quickplan intents keep the text response.
+func TestRouteToPlan_QuickPlanCarriesThrough(t *testing.T) {
+	d := newDigestCaptureDispatcher(t, newCaptureServer(t, `{}`))
+	if d.planManager == nil {
+		logger := digestTestLogger()
+		store, err := plan.NewSQLiteStore(t.TempDir()+"/plans.db", logger)
+		if err != nil {
+			t.Fatalf("plan store: %v", err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		d.SetPlanManager(plan.NewPlanManager(store, nil, config.PlansConfig{}, nil, logger))
+	}
+	ctx := context.Background()
+
+	// Quickplan intent: task + mode + no text response.
+	qp := &Intent{
+		Type:             string(IntentQuickPlan),
+		Confidence:       0.8,
+		AgentType:        "orchestrator",
+		Summary:          "carry out the migration plan",
+		RequiresPlanning: true,
+	}
+	res, err := d.routeToPlan(ctx, "carry out the migration plan without check-ins", qp, "sess-m3-qp")
+	if err != nil {
+		t.Fatalf("routeToPlan(quickplan): %v", err)
+	}
+	if res == nil || res.Task == nil {
+		t.Fatalf("quickplan routeToPlan produced no Task; async gate can never open: %+v", res)
+	}
+	if res.Response != "" {
+		t.Errorf("quickplan routeToPlan set Response %q; handler treats non-empty as direct_response (M3)", res.Response)
+	}
+	if res.SuggestedMode != string(IntentQuickPlan.SuggestedMode()) {
+		t.Errorf("SuggestedMode = %q, want %q", res.SuggestedMode, IntentQuickPlan.SuggestedMode())
+	}
+	if res.Intent == nil || res.Intent.Type != string(IntentQuickPlan) {
+		t.Errorf("intent not carried through: %+v", res.Intent)
+	}
+
+	// Non-quickplan intent: legacy text response, no task.
+	planIntent := &Intent{Type: string(IntentPlan), Confidence: 0.8, AgentType: config.AgentIDPlanner, Summary: "plan the refactor"}
+	res2, err := d.routeToPlan(ctx, "plan the refactor", planIntent, "sess-m3-plan")
+	if err != nil {
+		t.Fatalf("routeToPlan(plan): %v", err)
+	}
+	if res2.Response == "" {
+		t.Error("non-quickplan routeToPlan lost the legacy plan-created response")
+	}
+	if res2.Task != nil {
+		t.Error("non-quickplan routeToPlan created a task; legacy behavior is text-only")
+	}
+}
+
+// TestPendingClarification_OriginalInputLossless pins the M4 fix: a clarify
+// intent recorded with OriginalInput resumes from the FULL original input,
+// not the 100-char Summary; a legacy record without OriginalInput falls
+// back to the Summary.
+func TestPendingClarification_OriginalInputLossless(t *testing.T) {
+	d := newDigestCaptureDispatcher(t, newCaptureServer(t, `{}`))
+	if d.sessionTracker == nil {
+		t.Fatal("dispatcher has no session tracker")
+	}
+
+	full := "Fix the parser bug where deeply nested JSON5 objects containing unicode escapes like \\u00e9 in long key names blow the stack. It reproduces on the config loader path."
+	if len(full) <= 100 {
+		t.Fatalf("fixture must exceed the 100-char summary cap; got %d", len(full))
+	}
+
+	// New-style record: OriginalInput set.
+	d.sessionTracker.RecordIntent("sess-m4-full", &Intent{
+		Type:          string(IntentClarify),
+		Confidence:    1.0,
+		AgentType:     config.AgentIDChat,
+		Summary:       extractSummary(full),
+		OriginalInput: full,
+	}, config.AgentIDChat)
+	pending := d.getPendingClarification("sess-m4-full")
+	if pending == nil {
+		t.Fatal("pending clarification not found")
+	}
+	if pending.OriginalInput != full {
+		t.Errorf("resume input truncated to summary (M4 regression):\n got: %q\nwant: %q", pending.OriginalInput, full)
+	}
+
+	// Legacy record: no OriginalInput -> Summary fallback.
+	d.sessionTracker.RecordIntent("sess-m4-legacy", &Intent{
+		Type:       string(IntentClarify),
+		Confidence: 1.0,
+		AgentType:  config.AgentIDChat,
+		Summary:    extractSummary(full),
+	}, config.AgentIDChat)
+	pending2 := d.getPendingClarification("sess-m4-legacy")
+	if pending2 == nil {
+		t.Fatal("legacy pending clarification not found")
+	}
+	if pending2.OriginalInput != extractSummary(full) {
+		t.Errorf("legacy fallback should use Summary:\n got: %q\nwant: %q", pending2.OriginalInput, extractSummary(full))
 	}
 }

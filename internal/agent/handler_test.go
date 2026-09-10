@@ -393,6 +393,22 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_NoSteps(t *testing.T) {
 	}
 }
 
+// TestModeToLabel_QuickPlan pins bughunt 2026-09-10 L1: approval-free
+// quickplan ACKs must display "mode: quick plan" (lowercase per the UI
+// convention), not fall through to the generic "planned" default.
+func TestModeToLabel_QuickPlan(t *testing.T) {
+	if got := modeToLabel("quick_plan"); got != "quick plan" {
+		t.Errorf("modeToLabel(quick_plan) = %q, want %q", got, "quick plan")
+	}
+	// The other explicit labels are unchanged.
+	if got := modeToLabel("plan"); got != "planned" {
+		t.Errorf("modeToLabel(plan) = %q, want %q", got, "planned")
+	}
+	if got := modeToLabel("direct"); got != "executing directly" {
+		t.Errorf("modeToLabel(direct) = %q, want %q", got, "executing directly")
+	}
+}
+
 func TestChatHandler_FormatEnhancedAsyncTaskAck_Truncation(t *testing.T) {
 	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 

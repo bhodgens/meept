@@ -260,7 +260,7 @@ func (p *EmbeddingPrefilter) vote(vec []float64, input string) (kNNVote, bool) {
 	// message text (session-state signal — adjudication record
 	// 2026-09-09). A quickplan vote without orchestration cues falls
 	// through to the LLM chain, which has conversation context.
-	if first == "quickplan" && !QuickPlanCuePattern.MatchString(input) {
+	if first == string(IntentQuickPlan) && !QuickPlanCuePattern.MatchString(input) {
 		return kNNVote{}, false
 	}
 	floor := neighbors[0].score

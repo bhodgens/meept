@@ -434,6 +434,16 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		if err != nil {
 			sp.logger.Warn("Quickplan single-phase plan failed, using fallback steps",
 				"task_id", req.TaskID, "error", err)
+			// Failure/replan outcome capture (classifier-outcome-loop leaf
+			// 03, Signal B): the LLM plan degraded to fallback steps, so the
+			// dispatch that routed this task is a failure-replan outcome.
+			// Nil-guarded: no store, no write.
+			if sp.metricsStore != nil {
+				if markErr := sp.metricsStore.MarkTaskFailedReplan(req.TaskID); markErr != nil {
+					sp.logger.Warn("failed to mark failed_replan outcome",
+						"task_id", req.TaskID, "error", markErr)
+				}
+			}
 			steps = sp.createFallbackSteps(req, parentMemoryRefs)
 		}
 	case "plan":
@@ -635,6 +645,17 @@ func (sp *StrategicPlanner) handlePairSession(ctx context.Context, t *task.Task,
 // the pre-Thread-D heuristics during rollout. Once all callers populate
 // Mode, this becomes dead code.
 func (sp *StrategicPlanner) inferLegacyMode(req PlanRequest) string {
+	// quickplan-mode leaf 02 / audit M3 (2026-09-10 bughunt): a quickplan
+	// request that reaches the planner without an explicit Mode (legacy
+	// producers, test callers, or any future path that skips Thread D mode
+	// synthesis) must still plan as quick_plan — clarify-if-needed already
+	// happened upstream and execution runs without an approval pause
+	// (Contract 2). Without this case the quickplan intent fell through to
+	// the input-length heuristic below and the preserved mode was silently
+	// lost at the strategic layer.
+	if IntentType(req.Intent) == IntentQuickPlan {
+		return "quick_plan"
+	}
 	// Compound intents always used pair sessions pre-Thread-D. Both the
 	// IsCompound flag (set by handler.publishPlanRequest) and the raw
 	// intent string (set by legacy/test callers) trigger spec_pair, matching
@@ -806,6 +827,18 @@ func (sp *StrategicPlanner) SetPlanPhaseSink(fn func(taskID string, phases []Pla
 		return
 	}
 	sp.planPhaseSink = fn
+}
+
+// SetMetricsStore installs (or replaces) the metrics store used for
+// failure/replan outcome capture (classifier-outcome-loop leaf 03, Signal B
+// at the quickplan-fallback site). The planner also accepts a store via
+// StrategicPlannerConfig.MetricsStore; this setter covers the daemon wiring
+// order where the store is created after NewComponents. nil is ignored per
+// the CLAUDE.md setter convention.
+func (sp *StrategicPlanner) SetMetricsStore(store *metrics.Store) {
+	if store != nil {
+		sp.metricsStore = store
+	}
 }
 
 // SetInterviewProbe installs the interview observation seam (tests only).

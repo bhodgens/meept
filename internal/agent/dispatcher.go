@@ -37,6 +37,12 @@ var anaphoraForRegex = regexp.MustCompile(`do the same for (.+)`)
 // abc123def456...") matches despite the space between keyword and secret.
 var secretShape = regexp.MustCompile(`(?i)(sk-|api[_-]?key|bearer|token)\s*[^\s]{8,}`)
 
+// reRouteWindow bounds the re-route detector (classifier-outcome-loop leaf 03,
+// Signal A; design.md S2): a classified dispatch is marked 'corrected' only
+// when the same session lands on a DIFFERENT agent within this many turns.
+// Agent switches further apart are not treated as corrections.
+const reRouteWindow = 3
+
 // SteeringHeuristicTable defines which intent types should interrupt (steer)
 // vs wait for a natural stopping point (follow-up) when an agent loop is
 // already running for the conversation.
@@ -102,6 +108,11 @@ type Intent struct {
 	RequiresPlanning bool `json:"requires_planning"`
 	// Summary is a brief description of the intent.
 	Summary string `json:"summary,omitempty"`
+	// OriginalInput preserves the full untruncated input this intent was
+	// classified from (bughunt 2026-09-10 M4). Set on clarify intents so
+	// ResumeAfterClarification can re-analyze the user's actual request
+	// instead of the first-100-chars Summary. Empty for all other intents.
+	OriginalInput string `json:"original_input,omitempty"`
 	// TrueAnalysis holds the IntentGate-style pre-classification analysis if available.
 	TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
 	// SuggestedMode is the synthesized planning mode (Thread D complexity routing).
@@ -776,11 +787,12 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		// Build intent for session tracking (so follow-up inputs are
 		// recognized as clarification responses)
 		intent := &Intent{
-			Type:         string(IntentClarify),
-			Confidence:   1.0,
-			AgentType:    config.AgentIDChat,
-			Summary:      extractSummary(input),
-			TrueAnalysis: nil, // Model directive clarification, not intent analysis
+			Type:          string(IntentClarify),
+			Confidence:    1.0,
+			AgentType:     config.AgentIDChat,
+			Summary:       extractSummary(input),
+			OriginalInput: input, // full input for lossless resume (M4)
+			TrueAnalysis:  nil,   // Model directive clarification, not intent analysis
 		}
 		// Record intent for pending clarification detection
 		if d.sessionTracker != nil {
@@ -1225,16 +1237,16 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				"confidence", match.Confidence,
 			)
 			intent := &Intent{
-				Type:      string(match.IntentType),
+				Type: string(match.IntentType),
 				// RequiresPlanning mirrors the method's rule (bughunt
 				// 2026-09-10 C1): quickplan matches need the struct
 				// field set or the handler's async gate never opens and
 				// the created task is orphaned. Other types are
 				// unaffected — the method verdict is preserved.
-				Confidence:      match.Confidence,
-				AgentType:       match.IntentType.DefaultAgent(),
+				Confidence:       match.Confidence,
+				AgentType:        match.IntentType.DefaultAgent(),
 				RequiresPlanning: match.IntentType.RequiresPlanning(),
-				Summary:         extractSummary(input),
+				Summary:          extractSummary(input),
 			}
 			d.recordClassificationMethod("semantic")
 			intent.Method = "semantic"
@@ -1435,6 +1447,25 @@ func (d *Dispatcher) routeToPlan(ctx context.Context, input string, intent *Inte
 		"session", sessionID,
 	)
 
+	// Quickplan carry-through (bughunt 2026-09-10 M3): a quickplan intent
+	// routed here (plans config always-plan, or threshold) must keep
+	// executing, not strand the draft behind a "plan created" text reply.
+	// Create the task and leave Response empty so the handler's
+	// async_dispatch gate (ShouldDispatchAsync && Task != nil) publishes
+	// orchestrator.plan with SuggestedMode quick_plan; RequiresPlanning on
+	// the intent makes that gate reachable. Non-quickplan intents keep the
+	// legacy text response.
+	if IntentType(intent.Type) == IntentQuickPlan {
+		created := d.createTask(ctx, input, intent, sessionID, intent.AgentType)
+		return &DispatchResult{
+			AgentID:       config.AgentIDPlanner,
+			Task:          created,
+			Intent:        intent,
+			Plan:          p,
+			SuggestedMode: string(IntentQuickPlan.SuggestedMode()),
+		}, nil
+	}
+
 	return &DispatchResult{
 		AgentID:  config.AgentIDPlanner,
 		Intent:   intent,
@@ -1479,6 +1510,7 @@ func (d *Dispatcher) buildClarificationResult(input string, analysis *TrueIntent
 		Confidence:    analysis.Confidence,
 		AgentType:     config.AgentIDChat,
 		Summary:       extractSummary(input),
+		OriginalInput: input, // full input for lossless resume (M4)
 		TrueAnalysis:  analysis,
 		SuggestedMode: pendingMode,
 	}
@@ -1696,13 +1728,19 @@ func (d *Dispatcher) getPendingClarification(sessionID string) *pendingClarifica
 	if lastIntent == nil || lastIntent.Type != string(IntentClarify) {
 		return nil
 	}
-	// Reconstruct the original input from the intent summary (best-effort).
-	// TrueAnalysis may be nil for model directive clarifications.
-	// PendingMode rides on the clarify intent's SuggestedMode: the
-	// ambiguity gate seeds it there so the resumed dispatch can restore
-	// the pre-clarification mode (quick_plan) after the user answers.
+	// Reconstruct the original input: prefer the full untruncated input
+	// carried on the clarify intent (bughunt 2026-09-10 M4); fall back to
+	// the summary for pre-existing in-memory records that predate the
+	// OriginalInput field. PendingMode rides on the clarify intent's
+	// SuggestedMode: the ambiguity gate seeds it there so the resumed
+	// dispatch can restore the pre-clarification mode (quick_plan) after
+	// the user answers.
+	original := lastIntent.OriginalInput
+	if original == "" {
+		original = lastIntent.Summary
+	}
 	return &pendingClarification{
-		OriginalInput: lastIntent.Summary,
+		OriginalInput: original,
 		Analysis:      lastIntent.TrueAnalysis,
 		SessionID:     sessionID,
 		PendingMode:   lastIntent.SuggestedMode,
@@ -3195,6 +3233,26 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 			TurnNo:           turnNo,
 			Outcome:          "pending",
 		})
+
+		// Re-route detector (classifier-outcome-loop leaf 03, Signal A):
+		// resolve the prior pending row for this session now that the
+		// current dispatch's final agent is known. A same-agent follow-up
+		// resolves the prior row 'ok'; a different-agent dispatch within
+		// reRouteWindow turns marks it 'corrected' (design.md S2 proxy for
+		// "user re-asked"). Non-classified current dispatches pass an empty
+		// agentID so they can resolve the prior row to 'ok' only -- their
+		// agent comparison is meaningless. fire-and-forget: outcome capture
+		// must never fail the dispatch path.
+		resolveAgentID := agentID
+		if classifierMethod == "" {
+			resolveAgentID = ""
+		}
+		if resolveErr := d.metricsStore.ResolvePendingOutcome(
+			sessionID, turnNo, resolveAgentID, reRouteWindow,
+		); resolveErr != nil {
+			d.logger.Warn("failed to resolve pending dispatch outcome",
+				"session", sessionID, "turn", turnNo, "error", resolveErr)
+		}
 	}
 }
 

@@ -151,12 +151,13 @@ const intentAnalysisSystemPrompt = `You are an intent analysis assistant. Analyz
 - goal (string): What the user actually wants
 - ambiguity (number 0.0-1.0): How ambiguous the request is (1.0 = very ambiguous)
 - scope (string): One of "narrow", "medium", "broad"
-- category (string): One of "research", "implementation", "investigation", "fix", "clarification", "other"
+- category (string): One of "research", "implementation", "investigation", "fix", "quickplan", "clarification", "other"
 - suggested_questions (array of strings): If ambiguity >= 0.6, list clarifying questions to ask the user; otherwise empty array
 - confidence (number 0.0-1.0): Your confidence in this analysis
-- suggested_mode (string): One of "direct", "plan", "spec_plan", "spec_pair"
+- suggested_mode (string): One of "direct", "plan", "quick_plan", "spec_plan", "spec_pair"
   - "direct" for trivial/lookup questions
   - "plan" for single-component work
+  - "quick_plan" for "just do it" execution of work without check-ins (clarify only if truly blocked)
   - "spec_plan" for multi-file or multi-phase work
   - "spec_pair" for compound requests
 

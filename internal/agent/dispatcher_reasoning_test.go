@@ -22,6 +22,9 @@ func TestSuggestReasoningForIntent(t *testing.T) {
 	}{
 		// Spec §7.5 table
 		{"plan → xhigh", string(IntentPlan), llm.ReasoningXHigh},
+		// quickplan is autonomous plan-execution: same tier as plan
+		// (bughunt 2026-09-10 L2).
+		{"quickplan → xhigh", string(IntentQuickPlan), llm.ReasoningXHigh},
 		{"debug → high", string(IntentDebug), llm.ReasoningHigh},
 		{"research → high", string(IntentResearch), llm.ReasoningHigh},
 		{"analyze → high", string(IntentAnalyze), llm.ReasoningHigh},

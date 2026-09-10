@@ -162,7 +162,7 @@
     //   doc-writing producing a tracked repo artifact = code, chat-bound prose = report;
     //   multi-part: dominant execution verb wins; truly balanced = compound abstain (ood).
     // ---- plan-execution (existing plan -> code, NOT plan) ----
-    { id: "h18-planexec-001", input: "implement the plan using subagents", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "executing an existing plan is coding work" },
+    { id: "h18-planexec-001", input: "implement the plan using subagents", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "iteration-18", source: "hermes-inspired", note: "re-labeled per adjudication record rule #3 (tools/classifier-eval/results/adjudication-record.md): execution WITH orchestration hints (subagents) = quickplan, matching the adjudicated replay gold for this verbatim text; iter-18's plan-execution=code convention covers bare execution verbs only" },
     { id: "h18-planexec-002", input: "execute the remaining tasks from plan.md", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
     { id: "h18-planexec-003", input: "dispatch the next wave of the tree", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
     { id: "h18-planexec-004", input: "continue with leaf 3", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "explicit plan-tree leaf reference = execution verb, not bare continue/chat" },

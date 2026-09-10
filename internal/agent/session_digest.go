@@ -42,6 +42,24 @@ func (s *SessionContextDigest) IsEmpty() bool {
 			s.LastIntentType == "")
 }
 
+// IsEmptyIgnoringClarify reports whether the digest carries no information
+// EXCEPT a trailing clarify marker. buildClarificationResult records the
+// clarify intent in the session tracker, so a session whose only history is
+// a pending clarification produces a digest whose LastIntentType is "clarify"
+// — making IsEmpty false even though no real context exists. The
+// clarification-resume gate (ResumeAfterClarification A5) uses this variant
+// so "still ambiguous after clarification" can re-fire a follow-up question
+// for exactly the context-less sessions clarification exists for
+// (bughunt 2026-09-10 M2). The ClassifyAndRoute gate keeps plain IsEmpty.
+func (s *SessionContextDigest) IsEmptyIgnoringClarify() bool {
+	return s == nil ||
+		(s.LastTaskName == "" &&
+			s.LastTaskState == "" &&
+			s.LastTaskAgent == "" &&
+			s.LastResultSummary == "" &&
+			(s.LastIntentType == "" || s.LastIntentType == string(IntentClarify)))
+}
+
 // Caps for digest fields, per master contract SG1.
 const (
 	digestTaskNameCap = 200

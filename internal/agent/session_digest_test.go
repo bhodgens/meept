@@ -90,6 +90,44 @@ func TestSessionContextDigest_IsEmpty(t *testing.T) {
 	}
 }
 
+// Task 1b (bughunt 2026-09-10 M2): IsEmptyIgnoringClarify treats the
+// clarify marker as absent, so a digest whose ONLY entry is a pending
+// clarification still reads as context-less. Any other populated field
+// keeps the digest non-empty.
+func TestSessionContextDigest_IsEmptyIgnoringClarify(t *testing.T) {
+	var nilDigest *SessionContextDigest
+	if !nilDigest.IsEmptyIgnoringClarify() {
+		t.Errorf("nil digest IsEmptyIgnoringClarify() = false, want true")
+	}
+
+	var zero SessionContextDigest
+	if !zero.IsEmptyIgnoringClarify() {
+		t.Errorf("zero-value digest IsEmptyIgnoringClarify() = false, want true")
+	}
+
+	clarifyOnly := SessionContextDigest{LastIntentType: string(IntentClarify)}
+	if !clarifyOnly.IsEmptyIgnoringClarify() {
+		t.Errorf("clarify-only digest IsEmptyIgnoringClarify() = false, want true (M2)")
+	}
+	if clarifyOnly.IsEmpty() {
+		t.Errorf("clarify-only digest IsEmpty() = true, want false (marker must still count for the ClassifyAndRoute gate)")
+	}
+
+	// Any other populated field must keep the digest non-empty.
+	others := []SessionContextDigest{
+		{LastIntentType: "code"},
+		{LastIntentType: string(IntentClarify), LastTaskName: "fix the parser"},
+		{LastIntentType: string(IntentClarify), LastTaskState: "executing"},
+		{LastIntentType: string(IntentClarify), LastTaskAgent: "coder"},
+		{LastIntentType: string(IntentClarify), LastResultSummary: "Fixed."},
+	}
+	for _, d := range others {
+		if d.IsEmptyIgnoringClarify() {
+			t.Errorf("digest %+v IsEmptyIgnoringClarify() = true, want false", d)
+		}
+	}
+}
+
 // Task 2: buildSessionContextDigest population rules.
 func TestSessionContextDigest_Build(t *testing.T) {
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
