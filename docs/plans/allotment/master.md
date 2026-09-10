@@ -207,7 +207,7 @@ For each concurrency group, in dependency order:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-allotment-math.md | PENDING | 0 | |
+| 01-allotment-math.md | COMPLETE | 1 | a4c1744e — all 6 functions, 6/6 test funcs (11 checks), signatures verified vs Contract 1 |
 | 02-tactical-wiring.md | PENDING | 0 | |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
