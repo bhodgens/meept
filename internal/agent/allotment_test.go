@@ -103,6 +103,111 @@ func TestSplitStepsByAllotment(t *testing.T) {
 	})
 }
 
+// TestSplitStepsByAllotment_Boundaries pins the batch-splitting edge cases
+// the audit called out as unpinned (2026-09-10 audit M10). Table-driven:
+// each case builds its steps and asserts the full batch shape.
+func TestSplitStepsByAllotment_Boundaries(t *testing.T) {
+	mk := func(desc string) *task.TaskStep { return task.NewTaskStep("t1", desc, 0) }
+	cfg := DefaultAllotmentConfig() // MinStepTokens 512, MaxBatchSteps 0
+
+	t.Run("MaxBatchSteps caps steps per batch", func(t *testing.T) {
+		capped := cfg
+		capped.MaxBatchSteps = 2
+		batches := SplitStepsByAllotment(mkN("t1", 5, 512), 4096, capped)
+		// 5 x 512-token steps fit 4-per-batch token-wise, but the count cap
+		// forces 2/2/1. Order preserved, nothing dropped.
+		if len(batches) != 3 || len(batches[0]) != 2 || len(batches[1]) != 2 || len(batches[2]) != 1 {
+			t.Fatalf("want 2/2/1 batches, got %v", batchLens(batches))
+		}
+	})
+
+	t.Run("MaxBatchSteps 0 means no count cap", func(t *testing.T) {
+		batches := SplitStepsByAllotment(mkN("t1", 5, 512), 4096, cfg)
+		if len(batches) != 1 || len(batches[0]) != 5 {
+			t.Fatalf("want single 5-step batch, got %v", batchLens(batches))
+		}
+	})
+
+	t.Run("exact fit stays (used+cost == allotment)", func(t *testing.T) {
+		// 3 x 512 == 1536 exactly: the boundary fill must NOT flush at
+		// equality — only used+cost > allotment does.
+		batches := SplitStepsByAllotment(mkN("t1", 3, 512), 1536, cfg)
+		if len(batches) != 1 || len(batches[0]) != 3 {
+			t.Fatalf("exact-fit wave split: want 1 batch of 3, got %v", batchLens(batches))
+		}
+		// And the next step overflows: 4th step opens batch 2.
+		batches = SplitStepsByAllotment(mkN("t1", 4, 512), 1536, cfg)
+		if len(batches) != 2 || len(batches[0]) != 3 || len(batches[1]) != 1 {
+			t.Fatalf("one-over wave split: want 3/1, got %v", batchLens(batches))
+		}
+	})
+
+	t.Run("allotment below MinStepTokens: every step oversize", func(t *testing.T) {
+		// Allotment 256 < MinStepTokens 512: every 512-token step exceeds
+		// the allotment, and each must land in its OWN batch (greedy fill
+		// must not stack two oversize steps into one 256-token batch).
+		batches := SplitStepsByAllotment(mkN("t1", 3, 512), 256, cfg)
+		if len(batches) != 3 {
+			t.Fatalf("want 3 solo batches, got %v", batchLens(batches))
+		}
+		for i, b := range batches {
+			if len(b) != 1 {
+				t.Errorf("batch %d holds %d steps, want 1 (no oversize stacking)", i, len(b))
+			}
+		}
+	})
+
+	t.Run("negative allotment single batch", func(t *testing.T) {
+		batches := SplitStepsByAllotment(mkN("t1", 3, 512), -100, cfg)
+		if len(batches) != 1 || len(batches[0]) != 3 {
+			t.Fatalf("want 1 batch of 3, got %v", batchLens(batches))
+		}
+	})
+
+	t.Run("MinStepTokens 0 zero-cost degenerate", func(t *testing.T) {
+		// MinStepTokens 0: short descriptions cost ~0 tokens, so a huge
+		// allotment never flushes — everything rides one batch. The loop
+		// must still terminate and preserve order.
+		zero := cfg
+		zero.MinStepTokens = 0
+		steps := []*task.TaskStep{mk("one"), mk("two"), mk("three")}
+		batches := SplitStepsByAllotment(steps, 4096, zero)
+		if len(batches) != 1 || len(batches[0]) != 3 {
+			t.Fatalf("want 1 batch of 3, got %v", batchLens(batches))
+		}
+		for i, want := range []string{"one", "two", "three"} {
+			if got := batches[0][i].Description; got != want {
+				t.Errorf("order: batch[0][%d] = %q, want %q", i, got, want)
+			}
+		}
+		// And with a zero allotment too (both knobs at zero).
+		batches = SplitStepsByAllotment(steps, 0, zero)
+		if len(batches) != 1 || len(batches[0]) != 3 {
+			t.Fatalf("zero allotment want 1 batch of 3, got %v", batchLens(batches))
+		}
+	})
+}
+
+// mkN builds n steps of an exact token cost: desc repeated so
+// len(desc)/CharsPerToken == tokens (4 chars/token at defaults, no floor
+// impact when tokens >= MinStepTokens).
+func mkN(taskID string, n, tokens int) []*task.TaskStep {
+	desc := strings.Repeat("a", tokens*4)
+	out := make([]*task.TaskStep, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, task.NewTaskStep(taskID, desc, i))
+	}
+	return out
+}
+
+func batchLens(batches [][]*task.TaskStep) []int {
+	lens := make([]int, len(batches))
+	for i, b := range batches {
+		lens[i] = len(b)
+	}
+	return lens
+}
+
 func TestContinuationDescription(t *testing.T) {
 	got := ContinuationDescription("do the thing", 2, 3)
 	want := "[continuation 2/3] do the thing"

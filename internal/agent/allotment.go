@@ -35,6 +35,30 @@ func DefaultAllotmentConfig() AllotmentConfig {
 	}
 }
 
+// applyAllotmentDefaults returns cfg with zero fields replaced by the pinned
+// defaults, field by field, so a partial override (only one knob set) keeps
+// its explicit values instead of reverting the whole config
+// (2026-09-10 audit L7). UsableRatio keeps its zero-means-default contract;
+// non-positive CharsPerToken / MinStepTokens default like 0 since both math
+// paths already guard them.
+func applyAllotmentDefaults(cfg AllotmentConfig) AllotmentConfig {
+	d := DefaultAllotmentConfig()
+	if cfg.UsableRatio == 0 {
+		cfg.UsableRatio = d.UsableRatio
+	}
+	if cfg.ReserveTokens == 0 {
+		cfg.ReserveTokens = d.ReserveTokens
+	}
+	if cfg.CharsPerToken <= 0 {
+		cfg.CharsPerToken = d.CharsPerToken
+	}
+	if cfg.MinStepTokens <= 0 {
+		cfg.MinStepTokens = d.MinStepTokens
+	}
+	// MaxBatchSteps: 0 is a meaningful value ("no count cap"), never defaulted.
+	return cfg
+}
+
 // EstimateStepTokens estimates the token cost of a step description as
 // ceil(len(desc)/CharsPerToken), floored at MinStepTokens.
 func EstimateStepTokens(desc string, cfg AllotmentConfig) int {
@@ -98,7 +122,15 @@ func SplitStepsByAllotment(steps []*task.TaskStep, allotmentTokens int, cfg Allo
 	return batches
 }
 
+// continuationMarker is the prefix stamped onto continuation-batch step
+// descriptions (see ContinuationDescription). Shared with
+// flattenWithContinuations (internal/agent/tactical.go), which skips
+// re-prefixing steps that already carry it, so a blocked continuation step
+// that re-appears in a later scheduling wave keeps a single marker instead
+// of stacking one per wave (2026-09-10 audit H1).
+const continuationMarker = "[continuation "
+
 // ContinuationDescription prefixes desc with a [continuation k/N] marker.
 func ContinuationDescription(desc string, k, n int) string {
-	return fmt.Sprintf("[continuation %d/%d] %s", k, n, desc)
+	return fmt.Sprintf("%s%d/%d] %s", continuationMarker, k, n, desc)
 }

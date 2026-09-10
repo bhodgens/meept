@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/task"
 )
 
@@ -235,4 +236,208 @@ func TestPlanRequest_CarriesExecutorModelRef(t *testing.T) {
 	if strings.Contains(string(empty), "executor_model_ref") {
 		t.Errorf("empty ExecutorModelRef should be omitted, got %s", empty)
 	}
+}
+
+// TestFlattenWithContinuations_NoStackOnPreMarked pins the H1 fix: a step
+// whose description already carries a [continuation k/N] marker (a blocked
+// continuation step re-appearing in a later scheduling wave) passes through
+// flattenWithContinuations with its description UNCHANGED — no second
+// marker stacked in front of the first. DependsOn is still re-chained to
+// the current wave's previous batch (the old edge is wave-local and stale).
+func TestFlattenWithContinuations_NoStackOnPreMarked(t *testing.T) {
+	preMarked := "aaa…"
+	marked := ContinuationDescription(preMarked, 1, 2)
+	fresh := "bbb…"
+
+	batches := [][]*task.TaskStep{
+		{task.NewTaskStep("t1", "head", 0)},
+		{
+			task.NewTaskStep("t1", marked, 1),
+			task.NewTaskStep("t1", fresh, 2),
+		},
+	}
+	flattenWithContinuations(batches, DefaultAllotmentConfig())
+
+	if got := batches[1][0].Description; got != marked {
+		t.Errorf("pre-marked description rewritten: got %q, want %q (unchanged)", got, marked)
+	}
+	if strings.Count(batches[1][0].Description, continuationMarker) != 1 {
+		t.Errorf("pre-marked step carries %d markers, want exactly 1: %q",
+			strings.Count(batches[1][0].Description, continuationMarker),
+			batches[1][0].Description)
+	}
+	if got := batches[1][1].Description; got != ContinuationDescription(fresh, 1, 2) {
+		t.Errorf("fresh step not prefixed: got %q", got)
+	}
+	// The chain edge is refreshed even for the untouched description.
+	wantDep := batches[0][0].ID
+	if len(batches[1][0].DependsOn) != 1 || batches[1][0].DependsOn[0] != wantDep {
+		t.Errorf("pre-marked step DependsOn = %v, want [%s]", batches[1][0].DependsOn, wantDep)
+	}
+}
+
+// TestHintAgentFallback_MatchesConfigTable pins the M8 fix: the fallback is
+// a pure delegate of the authoritative config table, diverging only on the
+// documented terminal default (chat for unrouted hints, matching
+// selectAgent). Every mapped hint must agree with config.ToolHintAgent.
+func TestHintAgentFallback_MatchesConfigTable(t *testing.T) {
+	hints := []string{
+		// Hints the audit called out as diverging from the table.
+		"debug", "git", "research", "review",
+		// Coverage sanity across the rest of the dialect + aliases.
+		"code", "refactor", "fix", "analyze", "plan", "chat", "bash",
+		"writer", "explore", "researcher", "committer",
+		// Unrouted hint: terminal default.
+		"review", "documentation", "planning", "quickplan", "",
+	}
+	seen := map[string]bool{}
+	for _, hint := range hints {
+		if seen[hint] {
+			continue // table-driven over a literal slice; skip dup entries
+		}
+		seen[hint] = true
+		want, ok := config.ToolHintAgent(hint)
+		got := hintAgentFallback(hint)
+		if ok && got != want {
+			t.Errorf("hintAgentFallback(%q) = %q, config table says %q", hint, got, want)
+		}
+		if !ok && got != config.AgentIDChat {
+			t.Errorf("hintAgentFallback(%q) = %q, want chat terminal default", hint, got)
+		}
+	}
+	// Spot-pin the exact audit deltas so a future table edit that reopens
+	// them is caught here.
+	if got := hintAgentFallback("debug"); got != config.AgentIDDebugger {
+		t.Errorf("debug = %q, want debugger (audit M8: was coder)", got)
+	}
+	if got := hintAgentFallback("git"); got != config.AgentIDCommitter {
+		t.Errorf("git = %q, want committer (audit M8: was coder)", got)
+	}
+	if got := hintAgentFallback("research"); got != config.AgentIDResearcher {
+		t.Errorf("research = %q, want researcher (audit M8: was analyst)", got)
+	}
+}
+
+// TestAllotmentAgentID pins agent selection for allotment sizing: explicit
+// AgentID wins, a HETEROGENEOUS explicit wave is skipped entirely ("" ->
+// legacy single-batch path, audit M9 — sizing a mixed wave by one agent's
+// window can overflow a smaller sibling), and the hint path routes through
+// the config table with chat as terminal default.
+func TestAllotmentAgentID(t *testing.T) {
+	step := func(agentID, hint string) *task.TaskStep {
+		s := task.NewTaskStep("t1", "do a thing", 0)
+		s.AgentID = agentID
+		s.ToolHint = hint
+		return s
+	}
+
+	t.Run("empty and nil waves", func(t *testing.T) {
+		if got := allotmentAgentID(nil); got != "" {
+			t.Errorf("nil wave = %q, want empty", got)
+		}
+		if got := allotmentAgentID([]*task.TaskStep{}); got != "" {
+			t.Errorf("empty wave = %q, want empty", got)
+		}
+		if got := allotmentAgentID([]*task.TaskStep{nil}); got != "" {
+			t.Errorf("nil step = %q, want empty (audit L6)", got)
+		}
+	})
+
+	t.Run("explicit homogeneous wins", func(t *testing.T) {
+		got := allotmentAgentID([]*task.TaskStep{step("coder", ""), step("coder", "")})
+		if got != "coder" {
+			t.Errorf("got %q, want coder", got)
+		}
+	})
+
+	t.Run("heterogeneous explicit skipped (audit M9)", func(t *testing.T) {
+		got := allotmentAgentID([]*task.TaskStep{step("coder", ""), step("reviewer", "")})
+		if got != "" {
+			t.Errorf("mixed explicit wave = %q, want empty (legacy no-batching path)", got)
+		}
+	})
+
+	t.Run("hint fallback via config table", func(t *testing.T) {
+		got := allotmentAgentID([]*task.TaskStep{step("", "code")})
+		if got != config.AgentIDCoder {
+			t.Errorf("code hint = %q, want coder", got)
+		}
+		got = allotmentAgentID([]*task.TaskStep{step("", "debug")})
+		if got != config.AgentIDDebugger {
+			t.Errorf("debug hint = %q, want debugger (audit M8)", got)
+		}
+		got = allotmentAgentID([]*task.TaskStep{step("", "review")})
+		if got != config.AgentIDChat {
+			t.Errorf("unrouted review hint = %q, want chat terminal default", got)
+		}
+		got = allotmentAgentID([]*task.TaskStep{step("", "")})
+		if got != "" {
+			t.Errorf("no signal = %q, want empty", got)
+		}
+	})
+
+	t.Run("explicit agent beats hint", func(t *testing.T) {
+		got := allotmentAgentID([]*task.TaskStep{step("planner", "code")})
+		if got != "planner" {
+			t.Errorf("got %q, want explicit planner to win", got)
+		}
+	})
+}
+
+// TestApplyAllotmentDefaults pins the L7 fix: partial overrides keep their
+// explicit fields and default ONLY the zero fields.
+func TestApplyAllotmentDefaults(t *testing.T) {
+	t.Run("zero config = all defaults", func(t *testing.T) {
+		got := applyAllotmentDefaults(AllotmentConfig{})
+		if got != DefaultAllotmentConfig() {
+			t.Errorf("zero config = %+v, want %+v", got, DefaultAllotmentConfig())
+		}
+	})
+
+	t.Run("single-field overrides preserved (audit L7)", func(t *testing.T) {
+		cases := []AllotmentConfig{
+			{UsableRatio: 0.5},
+			{ReserveTokens: 100},
+			{CharsPerToken: 2},
+			{MinStepTokens: 64},
+			{MaxBatchSteps: 3},
+		}
+		for _, in := range cases {
+			got := applyAllotmentDefaults(in)
+			if in.UsableRatio != 0 && got.UsableRatio != in.UsableRatio {
+				t.Errorf("UsableRatio %.2f reverted to %.2f", in.UsableRatio, got.UsableRatio)
+			}
+			if in.ReserveTokens != 0 && got.ReserveTokens != in.ReserveTokens {
+				t.Errorf("ReserveTokens %d reverted to %d", in.ReserveTokens, got.ReserveTokens)
+			}
+			if in.CharsPerToken != 0 && got.CharsPerToken != in.CharsPerToken {
+				t.Errorf("CharsPerToken %v reverted to %v", in.CharsPerToken, got.CharsPerToken)
+			}
+			if in.MinStepTokens != 0 && got.MinStepTokens != in.MinStepTokens {
+				t.Errorf("MinStepTokens %d reverted to %d", in.MinStepTokens, got.MinStepTokens)
+			}
+			if in.MaxBatchSteps != 0 && got.MaxBatchSteps != in.MaxBatchSteps {
+				t.Errorf("MaxBatchSteps %d reverted to %d", in.MaxBatchSteps, got.MaxBatchSteps)
+			}
+		}
+	})
+
+	t.Run("full override untouched", func(t *testing.T) {
+		in := AllotmentConfig{UsableRatio: 0.9, ReserveTokens: 1, CharsPerToken: 1, MinStepTokens: 1, MaxBatchSteps: 7}
+		if got := applyAllotmentDefaults(in); got != in {
+			t.Errorf("full override mutated: got %+v, want %+v", got, in)
+		}
+	})
+
+	t.Run("scheduler defaulting via NewTacticalScheduler", func(t *testing.T) {
+		ts := NewTacticalScheduler(TacticalSchedulerConfig{
+			Logger:       slogDiscardLogger(),
+			AllotmentCfg: AllotmentConfig{UsableRatio: 0.5},
+		})
+		want := DefaultAllotmentConfig()
+		want.UsableRatio = 0.5
+		if ts.allotmentCfg != want {
+			t.Errorf("partial override = %+v, want %+v", ts.allotmentCfg, want)
+		}
+	})
 }

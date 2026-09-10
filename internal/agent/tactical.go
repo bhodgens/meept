@@ -17,6 +17,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/errcls"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
@@ -141,6 +142,12 @@ type TacticalScheduler struct {
 	// jobs then stamp Interactive=false by construction (R4 (c)).
 	sessions sessionStoreReader
 
+	// metricsStore, when non-nil, receives failure/replan outcome capture:
+	// OnJobFailed's Escalate path marks the task's pending dispatch_log rows
+	// 'failed_replan' (classifier-outcome-loop leaf 03, Signal B). Nil = no
+	// capture; every no-metrics invariant is preserved.
+	metricsStore *metrics.Store
+
 	// stepStoreReadHook, when set, is consulted before every
 	// stepStore.GetByID/GetByJobID read. Returning a non-nil override
 	// short-circuits the real read — the test seam that reproduces the
@@ -161,6 +168,15 @@ type sessionStoreReader interface {
 func (ts *TacticalScheduler) SetSessionStore(store sessionStoreReader) {
 	if store != nil {
 		ts.sessions = store
+	}
+}
+
+// SetMetricsStore installs the metrics store used for failure/replan outcome
+// capture (classifier-outcome-loop leaf 03, Signal B). nil is ignored: with
+// no store the scheduler behaves exactly as before (no dispatch_log writes).
+func (ts *TacticalScheduler) SetMetricsStore(store *metrics.Store) {
+	if store != nil {
+		ts.metricsStore = store
 	}
 }
 
@@ -351,12 +367,14 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		quotaDeferralPolicy = *cfg.QuotaDeferral
 	}
 
-	// Allotment config (allotment tree leaf 02): zero value means the pinned
-	// defaults. A non-zero UsableRatio is treated as an explicit override.
-	allotmentCfg := cfg.AllotmentCfg
-	if allotmentCfg.UsableRatio == 0 {
-		allotmentCfg = DefaultAllotmentConfig()
-	}
+	// Allotment config (allotment tree leaf 02). Field-by-field defaulting
+	// (audit L7): a partial override — e.g. only UsableRatio set — keeps its
+	// set values and defaults ONLY the zero fields, instead of reverting
+	// every other knob when any single field is non-zero. Note UsableRatio
+	// has no zero sentinel: UsableRatio==0 means "default 0.75"; an explicit
+	// 0 is not expressible (and would zero every allotment anyway, which
+	// AllotmentTokens/SplitStepsByAllotment treat as "no batching").
+	allotmentCfg := applyAllotmentDefaults(cfg.AllotmentCfg)
 
 	// Initialize semaphores
 	globalSemaphore := make(chan struct{}, maxConcurrentJobs)
@@ -511,41 +529,61 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 }
 
 // allotmentAgentID picks the agent whose context window sizes the batch
-// split: the first step's explicit AgentID, else the hint-table selection
-// from the first step (all steps in a ready wave share a phase's executor
-// in practice). Empty when no signal is available (then no window is
-// resolvable and batching is skipped).
+// split. An explicit step.AgentID wins over the hint-table selection; the
+// hint fallback consults config.ToolHintAgent so this helper cannot drift
+// from the authoritative table (2026-09-10 audit M8). Empty when no signal
+// is available (then no window is resolvable and batching is skipped).
+//
+// Heterogeneous waves (2026-09-10 audit M9): assignStepAgent documents that
+// explicit AgentIDs may differ within a wave (pair actor/reviewer steps).
+// Sizing such a wave by one agent's window can overflow a smaller-window
+// sibling, so a mixed wave returns "" and takes the legacy single-batch
+// path (no flattening) — a conservative, deterministic degradation.
+// Per-agent split batching is deliberately out of scope here.
 func allotmentAgentID(steps []*task.TaskStep) string {
+	// Empty/nil wave guard first (audit L6): it must precede any steps[0]
+	// dereference or it is dead. The only production caller pre-checks
+	// len==0, but this helper is package-reachable and must not panic.
+	if len(steps) == 0 || steps[0] == nil {
+		return ""
+	}
+	first := steps[0]
+	agentID := ""
 	for _, step := range steps {
+		if step == nil {
+			continue
+		}
 		if step.AgentID != "" {
-			return step.AgentID
+			if agentID == "" {
+				agentID = step.AgentID
+			} else if step.AgentID != agentID {
+				return "" // mixed explicit agents: skip allotment batching
+			}
 		}
 	}
-	if len(steps) > 0 && steps[0].ToolHint != "" {
-		if ts := steps[0]; ts != nil {
-			// No scheduler receiver here by design: this helper must stay
-			// side-effect free, so it only reports whether a hint exists.
-			return hintAgentFallback(ts.ToolHint)
+	if agentID != "" {
+		return agentID
+	}
+	if first != nil && first.ToolHint != "" {
+		// Side-effect-free table lookup mirroring selectAgent's terminal
+		// default: fall back to chat only when the hint has no route.
+		if agentID, ok := config.ToolHintAgent(first.ToolHint); ok {
+			return agentID
 		}
+		return config.AgentIDChat
 	}
 	return ""
 }
 
 // hintAgentFallback maps a tool hint to its default agent without touching
-// a scheduler instance (selectAgent needs a receiver and may log).
+// a scheduler instance. It defers to the authoritative config table
+// (config/tool_hints.go); chat is the terminal default for hints with no
+// entry, matching selectAgent (2026-09-10 audit M8).
 func hintAgentFallback(toolHint string) string {
-	switch toolHint {
-	case "code", "git", "debug":
-		return config.AgentIDCoder
-	case "analysis", "research":
-		return config.AgentIDAnalyst
-	case "documentation", "planning":
-		return config.AgentIDPlanner
-	case "review":
-		return config.AgentIDCoder
-	default:
-		return config.AgentIDChat
+	if agentID, ok := config.ToolHintAgent(toolHint); ok {
+		return agentID
 	}
+	return config.AgentIDChat
 }
 
 // flattenWithContinuations rewrites a batched ready wave in place: batch 0
@@ -557,6 +595,13 @@ func hintAgentFallback(toolHint string) string {
 // preserved so the caller's scheduling loop walks the same steps;
 // Sequence numbers stay untouched (the wave was already contiguously
 // numbered, and rewritings do not reorder it).
+//
+// A step whose description already carries the continuationMarker is not
+// re-prefixed: the dep gate lives in scheduleStep, not GetReadySteps, so a
+// blocked continuation step re-appears in later scheduling waves and would
+// otherwise stack one marker per re-batch (2026-09-10 audit H1). Its
+// DependsOn is still re-chained — the previous batch's last step ID is
+// wave-local, so the edge must point at THIS wave's predecessor.
 func flattenWithContinuations(batches [][]*task.TaskStep, cfg AllotmentConfig) {
 	n := len(batches)
 	if n < 2 {
@@ -569,7 +614,9 @@ func flattenWithContinuations(batches [][]*task.TaskStep, cfg AllotmentConfig) {
 		}
 		prevLast := prev[len(prev)-1]
 		for _, step := range batches[k] {
-			step.Description = ContinuationDescription(step.Description, k, n)
+			if !strings.Contains(step.Description, continuationMarker) {
+				step.Description = ContinuationDescription(step.Description, k, n)
+			}
 			// Replace any prior dependency set with the chain edge: the
 			// step's own original deps were already satisfied (it was
 			// ready), so its only outstanding gate is the previous batch.
@@ -1601,6 +1648,17 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 				"step_id", step.ID,
 				"error", escalErr,
 			)
+		}
+
+		// Failure/replan outcome capture (classifier-outcome-loop leaf 03,
+		// Signal B): the task was handed to the escalation manager for
+		// re-planning, so the dispatch that routed it is a failure-replan
+		// outcome. Nil-guarded: no store, no write.
+		if ts.metricsStore != nil {
+			if markErr := ts.metricsStore.MarkTaskFailedReplan(step.TaskID); markErr != nil {
+				ts.logger.Warn("failed to mark failed_replan outcome",
+					"task_id", step.TaskID, "error", markErr)
+			}
 		}
 	}
 
