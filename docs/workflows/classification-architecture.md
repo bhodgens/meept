@@ -134,5 +134,15 @@ via the `dispatcher.stats` RPC:
 - periodic centroid rebuild from the accumulated log (the build script
   already accepts any corpus file)
 
+**The two brains must agree (tfidf-veto).** Door 1 routes only when a
+second, cheap classifier — a character n-gram TF-IDF logistic, no
+embedder call — agrees with the centroid's pick. Disagreement falls to
+the LLM chain. Measured on the gold replay: 87.35% system accuracy vs
+84.56% without the veto, above even the chain-only floor (86.8%).
+Cost when adopted: ~726 KB model file, ~0.4ms per message, no new
+service. Status: **queued for implementation** (after the allotment
+and observability trees; tracked in the campaign work list). Not
+shipped yet.
+
 Until then, accuracy improvement runs through the offline campaign
 loop: harvest → adjudicate → rebuild → measure.
