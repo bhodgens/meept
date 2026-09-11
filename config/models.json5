@@ -181,7 +181,14 @@
           "input_cost": 0.0,
           "output_cost": 0.0,
           "context_limit": 16384,
-          "max_output": 2048,
+          // max_output 4096 (was 2048): the 8B's reasoning + tool-call XML
+          // routinely exceeded 2048 tokens; truncated replies arrived as
+          // empty content (burning the loop's nudge ladder) or as tool-call
+          // blocks cut mid-JSON that the LFM recovery parser cannot
+          // reassemble (e2e run 6, 2026-09-10: T1 completed with zero tools
+          // executed). 4096 halves the truncation incidence within the
+          // 16384 context.
+          "max_output": 4096,
           "temperature": 0.7,
           "max_concurrency": 2
         },
