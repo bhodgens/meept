@@ -156,6 +156,39 @@ func TestIsWorkStatusRecall_WorkNounRequired(t *testing.T) {
 	}
 }
 
+// Run-10 (2026-09-11 YJ7oSn): the 8B scored the same T3 phrasing
+// intent=git @0.9 — a git verdict with no git verb is not credible; the
+// recall arbitration extends to it. The verb check is what keeps real git
+// requests ("commit the changes", "merge the branch") routable to the
+// committer even when they also contain work-status nouns.
+func TestInputContainsGitVerb(t *testing.T) {
+	no := []string{
+		"did the change get made? where is the file?",
+		"was the file created?",
+		"what files did you make for me?",
+		"create a file named hello.txt",
+		"",
+	}
+	for _, in := range no {
+		if inputContainsGitVerb(in) {
+			t.Errorf("inputContainsGitVerb(%q) = true, want false", in)
+		}
+	}
+	yes := []string{
+		"commit the changes",
+		"push to origin",
+		"merge the branch",
+		"rebase onto main",
+		"checkout the feature branch",
+		"stash my work",
+	}
+	for _, in := range yes {
+		if !inputContainsGitVerb(in) {
+			t.Errorf("inputContainsGitVerb(%q) = false, want true", in)
+		}
+	}
+}
+
 // Run-8 (2026-09-10): the 8B scored the SAME T1 phrasing intent=schedule
 // @0.8 with zero time references. A schedule verdict without time signals
 // is not credible; the arbitration extends to it.

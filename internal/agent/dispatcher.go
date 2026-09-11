@@ -1269,7 +1269,8 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				d.recordClassificationMethod("platform_action_arbitration")
 				intent = nil
 			} else if (intent.Type == string(IntentPlatform) ||
-				(intent.Type == string(IntentSchedule) && !hasTimeSignal(input))) &&
+				(intent.Type == string(IntentSchedule) && !hasTimeSignal(input)) ||
+				(intent.Type == string(IntentGit) && !inputContainsGitVerb(input))) &&
 				(isSecondPersonWorkRecall(input) || isWorkStatusRecall(input)) {
 				// Platform-vs-recall arbitration (e2e run 5, 2026-09-10):
 				// "what files did you make for me?" scored platform @0.9 →
@@ -3967,6 +3968,26 @@ func hasTimeSignal(input string) bool {
 // timeMeridiemRe matches "3am", "7:30 pm", "9 AM" — digit-prefixed
 // meridiem with a word boundary.
 var timeMeridiemRe = regexp.MustCompile(`\b[0-9]{1,2}(:[0-9]{2})?\s*(am|pm)\b`)
+
+// inputContainsGitVerb reports whether the input carries an explicit git
+// action verb (commit, push, pull, merge, branch, rebase, revert, checkout,
+// stash, cherry-pick). Used by the platform/recall arbitration (e2e run 10,
+// 2026-09-11 YJ7oSn): the 8B scored "did the change get made? where is the
+// file?" intent=git @0.9 — a git verdict on a work-status question with no
+// git verb is the same credibility failure as the platform/schedule
+// costumes, and the committer runs contextless.
+func inputContainsGitVerb(input string) bool {
+	lower := strings.ToLower(input)
+	for _, kw := range []string{
+		"commit", "push", "pull", "merge", "branch",
+		"rebase", "revert", "checkout", "stash", "cherry-pick",
+	} {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
 
 // isWorkStatusRecall reports whether the input is a yes/no WORK-STATUS
 // question ("did the change get made?", "was the file created?", "is it
