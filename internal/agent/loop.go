@@ -204,6 +204,16 @@ func (cd *cycleDetector) detectCycle() bool {
 	return true
 }
 
+// Reset clears recorded tool-call history. Same within-turn semantic as
+// convergenceDetector.Reset (e2e run 3, 2026-09-10): stale signatures from
+// a previous turn on a persistent loop must not veto this turn's first
+// legitimate repeated tool calls. Cleared by resetTurnGuards.
+func (cd *cycleDetector) Reset() {
+	cd.mu.Lock()
+	cd.history = cd.history[:0]
+	cd.mu.Unlock()
+}
+
 // convergenceDetector tracks LLM responses to detect stagnation.
 type convergenceDetector struct {
 	mu       sync.Mutex
@@ -301,6 +311,18 @@ func (cd *convergenceDetector) detectConvergence() bool {
 	}
 
 	return true
+}
+
+// Reset clears recorded response history. E2E run 3 (2026-09-10): the
+// detector lived on the session-persistent chat loop, so entries from
+// previous turns/tasks carried into the next turn and an unrelated fresh
+// response tripped "count=3" convergence at iteration=1 — aborting T2's
+// quickplan handoff and cascading into the replan storm. Convergence is a
+// within-turn semantic; resetTurnGuards now clears it per turn.
+func (cd *convergenceDetector) Reset() {
+	cd.mu.Lock()
+	cd.history = cd.history[:0]
+	cd.mu.Unlock()
 }
 
 // hashArgs creates a hash of tool arguments for comparison.
@@ -3373,6 +3395,11 @@ func flushDeferredToolResults(conv *Conversation, toolCalls []llm.ToolCall, resu
 // state from turn N must not veto or nudge turn N+1's first tool calls.
 // Every pointer is nil-guarded; the streak-breach flag is cleared under mu
 // like its writer in reasoningCycle.
+// E2E run 3 (2026-09-10): cycleDetector and convergenceDetector were missing
+// here — their histories persisted across turns on the session-persistent
+// chat loop, and T2's quickplan handoff aborted with "Convergence detected
+// ... count=3" at iteration=1 because two stale entries from earlier turns
+// pre-filled the window. Detection is a within-turn semantic; both reset.
 func (l *AgentLoop) resetTurnGuards() {
 	if l.noProgress != nil {
 		l.noProgress.Reset()
@@ -3382,6 +3409,12 @@ func (l *AgentLoop) resetTurnGuards() {
 	}
 	if l.reasonWatch != nil {
 		l.reasonWatch.Reset()
+	}
+	if l.cycleDetector != nil {
+		l.cycleDetector.Reset()
+	}
+	if l.convergenceDetector != nil {
+		l.convergenceDetector.Reset()
 	}
 	l.mu.Lock()
 	l.reasonWatchStreakBreach = false

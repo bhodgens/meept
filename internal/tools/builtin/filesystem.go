@@ -477,7 +477,6 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 	appendMode, _ := args["append"].(bool)
 
 	// Headless benchmark clients need durable writes: staged writes live in
-	// Headless benchmark clients need durable writes: staged writes live in
 	// the in-memory registry pending a resolve-tool accept that never comes
 	// in non-interactive runs, so the file never lands and evaluators see
 	// "no evidence". Opt out via {"direct": true} (meept-bench leaf 02
@@ -487,6 +486,10 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 	// step "completed" with a file-exists claim that was never true.
 	// coerceToolBool tolerates the quoted-boolean shape.
 	direct := coerceToolBool(args["direct"])
+
+	if rawPath == "" {
+		return nil, fmt.Errorf("no path specified")
+	}
 
 	// Defensively strip any accidental hashline prefixes from content.
 	content = stripHashlinePrefixes(content)
