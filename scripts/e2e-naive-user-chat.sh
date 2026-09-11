@@ -433,11 +433,15 @@ wait_for_runtime() {
   return 1
 }
 
-# Extract the remapped MLX ports from the sandboxed models config.
-MLX_CLASS_PORT=$(grep -o '127\.0\.0\.1:[0-9]*' "$HOME_DIR/.meept/models.json5" \
-  | sed 's/127\.0\.0\.1://' | sort -u | head -1)
-MLX_GEN_PORT=$(grep -o '127\.0\.0\.1:[0-9]*' "$HOME_DIR/.meept/models.json5" \
-  | sed 's/127\.0\.0\.1://' | sort -u | tail -1)
+# Extract the remapped MLX ports from the sandboxed models config. The
+# arithmetic used to GENERATE them is the only reliable source: the config
+# also carries unrelated 127.0.0.1 literals (e.g. comfyui :8188), so
+# grep+sort -u picked the lexicographically-largest port string and the
+# "general runtime healthy" wait polled the wrong port — a healthy 8B
+# runtime was reported unhealthy and the transcript started cold (e2e run 1,
+# 2026-09-10: "general runtime on :8188 not healthy").
+MLX_CLASS_PORT=$((HTTP_PORT + 1))
+MLX_GEN_PORT=$((HTTP_PORT + 2))
 if [ -n "$MLX_CLASS_PORT" ]; then
   wait_for_runtime "$MLX_CLASS_PORT" "classifier" || true
 fi
