@@ -444,6 +444,31 @@ func (t *WriteFileTool) lspNotifyWrite(ctx context.Context, resolved, content st
 	return result.String()
 }
 
+// coerceToolBool coerces a tool-argument value to a boolean, tolerating the
+// stringified-boolean shapes small models emit ("true", "True", "TRUE",
+// "1"). JSON booleans pass through; JSON numbers use the C convention
+// (non-zero = true); anything else is false. Used for opt-in flags like
+// file_write's "direct" where a false negative (silently staging a write
+// the caller asked to land) is far worse than a false positive.
+func coerceToolBool(v any) bool {
+	switch val := v.(type) {
+	case bool:
+		return val
+	case string:
+		switch strings.ToLower(strings.TrimSpace(val)) {
+		case "true", "1", "yes", "on":
+			return true
+		}
+		return false
+	case float64:
+		return val != 0
+	case int:
+		return val != 0
+	default:
+		return false
+	}
+}
+
 // executeWrite is the shared core logic for Execute and ExecuteStreaming.
 // progress may be nil; all progress calls are guarded.
 func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, progress func(tools.ProgressUpdate)) (any, error) {
@@ -452,15 +477,16 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 	appendMode, _ := args["append"].(bool)
 
 	// Headless benchmark clients need durable writes: staged writes live in
+	// Headless benchmark clients need durable writes: staged writes live in
 	// the in-memory registry pending a resolve-tool accept that never comes
 	// in non-interactive runs, so the file never lands and evaluators see
 	// "no evidence". Opt out via {"direct": true} (meept-bench leaf 02
 	// finding) — the caller explicitly accepts immediate disk I/O.
-	direct, _ := args["direct"].(bool)
-
-	if rawPath == "" {
-		return nil, fmt.Errorf("no path specified")
-	}
+	// e2e run-3 (2026-09-10): the model emitted direct as the STRING "True";
+	// the strict bool assertion failed, the write silently staged, and the
+	// step "completed" with a file-exists claim that was never true.
+	// coerceToolBool tolerates the quoted-boolean shape.
+	direct := coerceToolBool(args["direct"])
 
 	// Defensively strip any accidental hashline prefixes from content.
 	content = stripHashlinePrefixes(content)

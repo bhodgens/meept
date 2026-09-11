@@ -323,6 +323,38 @@ func (o *Orchestrator) runSubscription(ctx context.Context, sub *bus.Subscriber,
 }
 
 func (o *Orchestrator) handlePlanRequest(ctx context.Context, msg *models.BusMessage) {
+	// orchestrator.replan carries the Ralph loop's replan envelope
+	// {"task_id","iteration","context"} — NOT a PlanRequest. Unmarshaling it
+	// as PlanRequest left every field empty (Input="" → fallback step with
+	// empty description → chat agent deflects → replan of the replan, ×11 in
+	// e2e run 3 until every socket timed out). Route it to the structured
+	// re-plan entry point, which rebuilds input from the task's own history.
+	if msg.Topic == "orchestrator.replan" {
+		var replan struct {
+			TaskID    string `json:"task_id"`
+			Iteration int    `json:"iteration"`
+			Context   string `json:"context"`
+		}
+		if err := json.Unmarshal(msg.Payload, &replan); err != nil || replan.TaskID == "" {
+			o.logger.Error("Failed to parse replan envelope",
+				"error", err,
+				"payload_len", len(msg.Payload),
+			)
+			return
+		}
+		o.logger.Info("Received replan request",
+			"task_id", replan.TaskID,
+			"iteration", replan.Iteration,
+		)
+		if err := o.strategic.ReplanFailedTask(ctx, replan.TaskID, replan.Context); err != nil {
+			o.logger.Error("Re-planning failed",
+				"task_id", replan.TaskID,
+				"error", err,
+			)
+		}
+		return
+	}
+
 	var req PlanRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		o.logger.Error("Failed to parse plan request", "error", err)
