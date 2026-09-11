@@ -100,9 +100,17 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 	rl.mu.Unlock()
 
 	if iteration >= rl.config.MaxIterations {
-		rl.logger.Warn("Max Ralph loop iterations reached, marking complete",
+		// Cap reached (e2e run 3/8, 2026-09-11): the previous contract
+		// returned (true, nil, false) — "complete" — so the orchestrator
+		// reset the counter via TaskOutcome and the NEXT evidence failure
+		// replanned from iteration 1 again (MiKsNh daemon.log: 3→1→2→1).
+		// At the cap the task must terminalize as FAILED instead; the
+		// orchestrator's TaskOutcome-gated Reset then never fires and the
+		// counter stays armed.
+		rl.logger.Warn("Max Ralph loop iterations reached, failing task",
 			"task_id", taskID, "iterations", iteration)
-		return true, nil, false
+		rl.failTaskAtCap(taskID, "max ralph loop iterations reached without sufficient evidence")
+		return false, nil, false
 	}
 
 	// Parse result to extract completion evidence
