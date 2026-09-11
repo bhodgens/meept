@@ -1252,8 +1252,17 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			// send the verb to an executor agent. Log the override so
 			// classifier-observability can measure how often the 8B makes
 			// this mistake.
-			if intent.Type == string(IntentPlatform) && hasLeadingImperativeVerb(input) {
-				d.logger.Info("Platform verdict overridden by imperative execution phrasing",
+			//
+			// Schedule-extension (e2e run 8, 2026-09-10): the same 8B also
+			// scored the identical phrasing intent=schedule @0.8 — run-8
+			// variant of the same mistake. A schedule verdict demands TIME
+			// signals ("tomorrow", "at 5pm", "remind me", "timer"); an
+			// imperative with none is not a schedule request. Both
+			// non-executable verdicts share one arbitration.
+			if (intent.Type == string(IntentPlatform) || (intent.Type == string(IntentSchedule) && !hasTimeSignal(input))) &&
+				hasLeadingImperativeVerb(input) {
+				d.logger.Info("Classifier verdict overridden by imperative execution phrasing",
+					"verdict", intent.Type,
 					"llm_confidence", intent.Confidence,
 					"input_len", len(input),
 				)
@@ -3923,6 +3932,35 @@ func isSecondPersonWorkRecall(input string) bool {
 	}
 	return false
 }
+
+// hasTimeSignal reports whether the input contains explicit scheduling
+// vocabulary — the minimal credibility bar for a schedule intent verdict.
+// e2e run 8 (2026-09-10): the 8B scored "create a file named hello.txt …"
+// as schedule @0.8 with zero time references; a schedule classification
+// without any of these signals is a classifier mistake.
+func hasTimeSignal(input string) bool {
+	lower := strings.ToLower(input)
+	for _, signal := range []string{
+		"remind", "reminder", "alarm", "timer", "tomorrow", "today at",
+		"next week", "next month", "every day", "daily", "weekly",
+		" at ", "schedule", "calendar", "cron", "in minutes", "in hours",
+		"o'clock", "oclock", "monday", "tuesday", "wednesday",
+		"thursday", "friday", "saturday", "sunday", "later", "deadline",
+	} {
+		if strings.Contains(lower, signal) {
+			return true
+		}
+	}
+	// "am"/"pm" need a digit prefix and word boundary: "name" contains "am".
+	if timeMeridiemRe.MatchString(lower) {
+		return true
+	}
+	return false
+}
+
+// timeMeridiemRe matches "3am", "7:30 pm", "9 AM" — digit-prefixed
+// meridiem with a word boundary.
+var timeMeridiemRe = regexp.MustCompile(`\b[0-9]{1,2}(:[0-9]{2})?\s*(am|pm)\b`)
 
 // heuristicFallback provides targeted keyword-based routing when all other
 // classifiers fail (Issue 0036). Rules are ordered by specificity and

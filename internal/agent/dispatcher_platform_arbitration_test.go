@@ -113,3 +113,31 @@ func TestIsSecondPersonWorkRecall(t *testing.T) {
 		})
 	}
 }
+
+// Run-8 (2026-09-10): the 8B scored the SAME T1 phrasing intent=schedule
+// @0.8 with zero time references. A schedule verdict without time signals
+// is not credible; the arbitration extends to it.
+func TestHasTimeSignal(t *testing.T) {
+	yes := []string{
+		"remind me to call mom tomorrow",
+		"set a timer for 5 minutes",
+		"schedule a meeting at 3pm",
+		"create a file next week",
+		"alarm for 7 am",
+	}
+	no := []string{
+		"create a file named hello.txt in the current directory containing the word hello, then tell me the full path",
+		"fix the login bug",
+		"what files did you make for me?",
+	}
+	for _, s := range yes {
+		if !hasTimeSignal(s) {
+			t.Errorf("hasTimeSignal(%q) = false, want true", s)
+		}
+	}
+	for _, s := range no {
+		if hasTimeSignal(s) {
+			t.Errorf("hasTimeSignal(%q) = true, want false", s)
+		}
+	}
+}
