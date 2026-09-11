@@ -134,27 +134,21 @@ via the `dispatcher.stats` RPC:
 - periodic centroid rebuild from the accumulated log (the build script
   already accepts any corpus file)
 
-**The two brains must agree (tfidf-veto).** Door 1 routes only when a
-second, cheap classifier — a character n-gram TF-IDF logistic, no
-embedder call — agrees with the centroid's pick. Disagreement falls to
-the LLM chain. Measured on the gold replay: 87.35% system accuracy vs
-84.56% without the veto, above even the chain-only floor (86.8%).
-**[CORRECTION 2026-09-10]** that 87.35% is not a validated win: it
-decomposes to 2 routes out of 48 replay cases (2/2 correct) plus 46 ×
-0.868 chain credit — 95.8% of the score is the chain constant, and the
-+0.55pt margin over the floor is one flipped route (1/2 routes would
-score 85.27%). The route count was undisclosed in the original claim and
-no results artifact was committed (`4cf71b07` adds only the script).
-Full recompute and verdict: `tools/classifier-eval/results/alt-methods-correction.md`.
-Cost when adopted: ~726 KB model file, ~0.4ms per message, no new
-service. Status: **queued for implementation** (after the allotment
-and observability trees; tracked in the campaign work list) — **and
-unproven: the 87.35% is not evidence of a beat over the chain floor;
-re-validate with a committed artifact before building on it**. Not
-shipped yet.
-
-Until then, accuracy improvement runs through the offline campaign
-loop: harvest → adjudicate → rebuild → measure.
+**The two brains must agree (tfidf-veto). — SHIPPED with unvalidated
+numbers** Door 1 routes only when a second, cheap classifier — a
+character n-gram TF-IDF logistic, no embedder call — agrees with the
+centroid's pick. Disagreement falls to the LLM chain. The gold replay
+claimed 87.35% (vs 84.56% without the veto), but that decomposes to
+**2 routes out of 48** plus chain credit — a 2-case effective sample
+that cannot distinguish a perfect router from a coin-flip (see
+`tools/classifier-eval/results/alt-methods-correction.md`). Cost when
+adopted: ~2 MB model file, ~0.4ms per message, no new service.
+Status: **code SHIPPED** (`internal/agent/tfidf_veto.go` +
+`scripts/build_tfidf_veto.py`; missing model file = veto disabled =
+legacy behavior), **effect UNVALIDATED** — re-validate on a larger
+harvested corpus before trusting it. Until then, accuracy improvement
+runs through the offline campaign loop: harvest → adjudicate →
+rebuild → measure (now with live outcome capture feeding it).
 
 ## Harvest loop (classifier-outcome-loop leaf 04)
 

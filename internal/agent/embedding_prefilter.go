@@ -49,6 +49,11 @@ type EmbeddingPrefilter struct {
 	// not lock-protected (same wiring-order contract as SetPublisher).
 	verdictObserver func(PrefilterVerdict)
 
+	// veto is the tfidf agreement checker (outcome-loop follow-up,
+	// acceptance-passing). Nil = disabled: Door 1 routes on the kNN vote
+	// alone, exactly as before.
+	veto *tfidfVeto
+
 	mu       sync.RWMutex
 	examples []prefilterExample
 	storeDim int
@@ -122,6 +127,21 @@ func NewEmbeddingPrefilter(emb PrefilterEmbedder, cfg config.ClassifierPrefilter
 	if path == "" {
 		path = config.MeeptPath("classifier_prefilter_centroids.json")
 	}
+	// tfidf-veto model (acceptance-passing Door-1 precision upgrade,
+	// tools/classifier-eval/results/m4-gold-acceptance.md). Missing file
+	// disables the veto silently — Door 1 then routes on the kNN vote
+	// alone, exactly as before this feature existed.
+	veto, vetoErr := loadTfidfVeto(config.MeeptPath("prefilter_tfidf_veto.json"))
+	if vetoErr != nil {
+		logger.Warn("tfidf veto model unreadable; veto disabled", "error", vetoErr)
+		veto = nil
+	}
+	if veto != nil {
+		logger.Info("tfidf veto enabled",
+			"train_docs", veto.trainDocs,
+			"train_accuracy", veto.trainAcc,
+			"built_at", veto.builtAt)
+	}
 	return &EmbeddingPrefilter{
 		embedder:   emb,
 		threshold:  threshold,
@@ -131,6 +151,7 @@ func NewEmbeddingPrefilter(emb PrefilterEmbedder, cfg config.ClassifierPrefilter
 		path:       path,
 		dimension:  cfg.Dimension,
 		logger:     logger.With("component", "classifier_prefilter"),
+		veto:       veto,
 	}
 }
 
@@ -430,6 +451,20 @@ func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 	confidence := v.Confidence
 	if confidence > 1 {
 		confidence = 1
+	}
+	// tfidf-veto agreement check (acceptance-passing Door-1 precision
+	// upgrade): when the veto model disagrees with the kNN winner, the
+	// classification falls through to the LLM chain. Disabled veto or
+	// disabled model = agreement assumed (legacy behavior).
+	if !p.veto.agrees(input, v.Intent) {
+		p.logger.Info("prefilter veto disagreement; falling through to LLM chain",
+			"knn_intent", v.Intent)
+		p.emitVerdict(PrefilterVerdict{
+			AssertedIntent: v.Intent,
+			Suppressed:     true, // veto suppression: distinguish from abstain
+			Margin:         v.Margin,
+		})
+		return nil
 	}
 	p.logger.Info("prefilter direct route",
 		"intent", v.Intent,
