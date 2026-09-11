@@ -497,6 +497,21 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		if err := rm.stepStore.SetState(step.ID, task.StepApproved); err != nil {
 			return nil, fmt.Errorf("failed to set approved state: %w", err)
 		}
+		// Reviewer approval IS validation when no evidence-backed validator
+		// ran (e2e run 13, 2026-09-11): the completion gate (tactical.go)
+		// blocks any successfully-terminal step with Validated=false, so a
+		// step the reviewer APPROVED left the task stuck in
+		// "task validation incomplete" until the sync wait timed out — the
+		// reply never carried the artifact path. An approval (heuristic or
+		// full) is the platform's judgment that the step is done; reflect
+		// it on the record so approval means completion.
+		if !step.Validated {
+			step.Validated = true
+			step.ValidationError = ""
+			if err := rm.stepStore.Update(step); err != nil {
+				rm.logger.Warn("failed to persist validation-on-approval", "step_id", step.ID, "error", err)
+			}
+		}
 		rm.logger.Info("Step approved", "step_id", step.ID, "feedback", result.Feedback)
 
 		// Promote dependent steps
