@@ -1947,6 +1947,16 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 			executorOpts = append(executorOpts, WithExecutorCache(loop.cache))
 			loop.logger.Debug("Wired result cache to executor")
 		}
+		// Claim-vs-evidence validation (e2e run 7 rkl3Th): the executor's
+		// tool.execution.complete events are the channel that carries
+		// TOOL-issued Evidence (paths, hashes, exit codes) to the daemon's
+		// step validation gate. WithExecutorBus existed but was applied
+		// nowhere, so the executor's bus stayed nil and no evidence event
+		// ever shipped — the gate starved. Wire the loop's bus into the
+		// executor so evidence flows whenever the loop itself has one.
+		if loop.bus != nil {
+			executorOpts = append(executorOpts, WithExecutorBus(loop.bus))
+		}
 		loop.executor = NewExecutor(
 			loop.registry,
 			loop.security,
@@ -6666,14 +6676,28 @@ func (l *AgentLoop) buildSessionContextSection() string {
 		// verification step even though the write succeeded. One explicit
 		// rule steers verification reads to relative paths.
 		fmt.Fprintf(&b, "Use paths relative to the working directory for file tools; never invent absolute paths.\n")
+		// Run oCbPZZ: when a Client CWD is also present, the model has
+		// written to the CLIENT's directory instead of the working
+		// directory. The working directory is authoritative for file
+		// tools; the client cwd is provenance metadata only. State that
+		// explicitly, after the rule, so the last-read path instruction
+		// is the authoritative one.
+		fmt.Fprintf(&b, "All file tools operate inside the working directory above.\n")
 	}
-	if dc != nil {
+	if dc != nil && wd == "" {
+		// Client CWD is only surfaced when there is no working directory
+		// (provenance/diagnostic value). When both exist, printing it
+		// invites the model to write files to the client's shell
+		// directory instead of the session working directory (e2e run
+		// oCbPZZ, 2026-09-11).
 		if dc.CWD != "" {
 			fmt.Fprintf(&b, "Client CWD: %s\n", dc.CWD)
 		}
 		if dc.DetectedProjectID != "" {
 			fmt.Fprintf(&b, "Detected project: %s\n", dc.DetectedProjectID)
 		}
+	} else if dc != nil && dc.DetectedProjectID != "" {
+		fmt.Fprintf(&b, "Detected project: %s\n", dc.DetectedProjectID)
 	}
 	return b.String()
 }

@@ -33,3 +33,38 @@ func TestSessionContextSection_EmptyWithoutWorkingDir(t *testing.T) {
 		t.Errorf("no session/project/cwd set; want empty section, got:\n%s", section)
 	}
 }
+
+// Run oCbPZZ (2026-09-11): when both a working directory and a client CWD
+// exist, the session context must NOT print the client CWD — the model
+// wrote hello.txt into the client's shell directory instead of the session
+// project dir. The working directory is the only directory file tools
+// should see.
+func TestSessionContextSection_ClientCWDSuppressedWhenWorkingDirSet(t *testing.T) {
+	l := &AgentLoop{
+		workingDir: "/tmp/wd/project",
+		detectionContext: &DetectionContext{
+			CWD: "/tmp/wd",
+		},
+	}
+	section := l.buildSessionContextSection()
+	if !strings.Contains(section, "Working directory: /tmp/wd/project") {
+		t.Errorf("working directory missing:\n%s", section)
+	}
+	if strings.Contains(section, "Client CWD") {
+		t.Errorf("client CWD leaked into prompt with working dir set:\n%s", section)
+	}
+	if !strings.Contains(section, "All file tools operate inside the working directory") {
+		t.Errorf("authoritative-directory statement missing:\n%s", section)
+	}
+}
+
+// Without a working directory, Client CWD keeps its diagnostic value.
+func TestSessionContextSection_ClientCWDKeptWithoutWorkingDir(t *testing.T) {
+	l := &AgentLoop{
+		detectionContext: &DetectionContext{CWD: "/tmp/wd"},
+	}
+	section := l.buildSessionContextSection()
+	if !strings.Contains(section, "Client CWD: /tmp/wd") {
+		t.Errorf("client CWD missing with no working dir:\n%s", section)
+	}
+}
