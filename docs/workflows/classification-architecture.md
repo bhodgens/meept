@@ -155,3 +155,40 @@ shipped yet.
 
 Until then, accuracy improvement runs through the offline campaign
 loop: harvest → adjudicate → rebuild → measure.
+
+## Harvest loop (classifier-outcome-loop leaf 04)
+
+`tools/classifier-eval/harvest_outcomes.py` turns the persisted
+outcome signals (dispatch_log: `outcome`, `corrected_agent`, `margin`,
+`input_hash`) into corpus work. It opens metrics.db READ-ONLY
+(`file:...?mode=ro`) — the only write path is `--apply-views`, which
+creates the idempotent accuracy views (`v_door_accuracy`,
+`v_correction_rate`, `v_margin_hist`, `v_fallback_trend`); run it
+against a COPY unless you accept view objects in the live store.
+
+Cadence: nightly is the intent, but meept does not self-schedule —
+launchd/cron wiring is the operator's choice. Typical run:
+
+    python3 tools/classifier-eval/harvest_outcomes.py \
+        --db ~/.meept/metrics.db            # read-only
+    # review the sheet, then apply views on a copy:
+    python3 tools/classifier-eval/harvest_outcomes.py \
+        --db /tmp/metrics-copy.db --apply-views
+
+Outputs land in `tools/classifier-eval/harvest-YYYYMMDD/`
+(`--out` overrides): `candidates.json` (corrected/failed_replan rows,
+hashes only — safe to track), `nearmiss.json` (Door-1 margins in the
+band, default 0.025–0.035, routed + abstained), `views.sql`, and
+`sheet.local.md` — the user-message text recovered from
+`~/.hermes/sessions/session_*.json` by session id + nearest timestamp.
+The directory is gitignored BEFORE any text is written: verbatim
+message text never enters git (design.md S4); only hash-bearing files
+are trackable.
+
+Accepted candidates flow into the corpus with provenance
+`added_in: "harvest-YYYYMMDD"`, `source: "live-session"`, then pass
+the dedup guard (cosine > 0.95 against the existing corpus ⇒ reject,
+the `iter7_harvest.py` pattern) before
+`scripts/build_prefilter_centroids.py` rebuilds the Door-1 index.
+`--dry-run` prints counts plus a hash-only candidate preview and
+writes nothing; exit 0 always (measurement-tool convention).
