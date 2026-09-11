@@ -522,9 +522,15 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 		})
 	}
 
-	// Preview/accept workflow: when a pending changes registry is wired, stage
-	// the write instead of touching disk (mirrors FileEditTool staging).
-	if t.pendingChangesRegistry != nil && !direct {
+	// Preview/accept workflow: when a pending changes registry is wired,
+	// stage the write instead of touching disk (mirrors FileEditTool
+	// staging) — UNLESS the caller asked for direct I/O or the execution
+	// context is AUTONOMOUS. An autonomous run (job-driven step job) has
+	// no later interactive turn to resolve the pending change, so staging
+	// there is a silent no-op: the step completes, the file never exists,
+	// and the model papers over the gap with fabricated file evidence
+	// (e2e run 8, 2026-09-11).
+	if t.pendingChangesRegistry != nil && !direct && !tools.AutonomousFromContext(ctx) {
 		var original []byte
 		if data, readErr := os.ReadFile(resolved); readErr == nil {
 			original = data

@@ -820,6 +820,14 @@ type AgentLoop struct {
 	// isolatedChild marks this loop as an isolated child (C4): it can
 	// never speak to the user. Guarded by mu. Default false.
 	isolatedChild bool
+	// autonomous marks this loop as AUTONOMOUS execution (job-driven,
+	// headless): no human can follow up with an interactive resolve/accept
+	// turn, so staging tools (file_write, file_edit) write directly when
+	// executing on this loop's context instead of staging a pending change
+	// nothing would ever accept (e2e run 8, 2026-09-11: file_write
+	// direct:"False" staged into the registry, the step completed, and the
+	// file never landed on disk). Guarded by mu. Default false.
+	autonomous bool
 	// interactiveTurns marks this loop's chat turns INTERACTIVE for
 	// model-slot acquisition (tree 04 leaf 03, D11): when model
 	// concurrency is capped, the loop's llm.Chat calls jump ahead of
@@ -1284,6 +1292,16 @@ func (l *AgentLoop) SetIsolatedChild(isolated bool) {
 func (l *AgentLoop) SetSessionAttached(attached bool) {
 	l.mu.Lock()
 	l.sessionAttached = attached
+	l.mu.Unlock()
+}
+
+// SetAutonomous marks the loop for AUTONOMOUS (job-driven, headless)
+// execution. Staging tools consult the marker via the execution context
+// (executeToolCalls injects it) and write directly instead of staging a
+// pending change that no later turn can accept. Guarded by mu.
+func (l *AgentLoop) SetAutonomous(autonomous bool) {
+	l.mu.Lock()
+	l.autonomous = autonomous
 	l.mu.Unlock()
 }
 
@@ -6269,6 +6287,15 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 	// need per-session project info (e.g. project_info) can read it without
 	// shared mutable state on the tool registry.
 	ctx = tools.ContextWithWorkingDir(ctx, l.GetWorkingDir())
+
+	// Autonomous-execution marker: job-driven headless runs (step jobs)
+	// cannot be followed by an interactive resolve/accept turn, so staging
+	// tools bypass the preview workflow on this context (e2e run 8:
+	// file_write staged instead of writing, the step completed, and the
+	// file never existed on disk).
+	if l.autonomous {
+		ctx = tools.ContextWithAutonomous(ctx)
+	}
 
 	if l.executor == nil {
 		// No executor configured - return errors for all tool calls

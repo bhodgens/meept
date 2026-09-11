@@ -7698,6 +7698,19 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		return nil, fmt.Errorf("no agent loop available")
 	}
 
+	// Autonomous marker for step jobs (e2e run 8, 2026-09-11): a step job
+	// runs headless — no human sees its intermediate state and no later
+	// interactive turn belongs to this task — so the preview/accept
+	// workflow can never complete. Mark the loop autonomous so staging
+	// tools (file_write, file_edit) write directly instead of staging a
+	// pending change that silently expires unaccepted (run 8: the write
+	// staged, the step reported success with fabricated file evidence, and
+	// the artifact never existed). Session-attached chat loops stay
+	// interactive — SetAutonomous is only reached on this job path.
+	if isStepJob {
+		agentLoop.SetAutonomous(true)
+	}
+
 	// Build prompt and conversation ID with context
 	var prompt, conversationID string
 	if isStepJob {

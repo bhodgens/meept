@@ -381,8 +381,12 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 	// Build output content
 	output := strings.Join(result, "\n")
 
-	// Check if preview/accept workflow is enabled
-	if t.pendingChangesRegistry != nil {
+	// Check if preview/accept workflow is enabled. Skipped on AUTONOMOUS
+	// execution contexts (job-driven step jobs): a staged edit there can
+	// never be resolved — no interactive follow-up exists — so it is a
+	// silent no-op while the step reports success (e2e run 8, 2026-09-11,
+	// same failure shape as file_write).
+	if t.pendingChangesRegistry != nil && !tools.AutonomousFromContext(ctx) {
 		// Create pending change instead of applying directly
 		originalContent := string(content)
 
