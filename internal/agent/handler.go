@@ -1101,9 +1101,17 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 	// Session execution context (quickplan-mode leaf 02 / master Contract
 	// 6): quick_plan dispatches carry the session's active plan, open
 	// tracked tasks, and prior quickplan waves so the orchestrator can
-	// make the quickplan-vs-code/git call at execution time.
+	// make the quickplan-vs-code/git call at execution time. Composed via
+	// BuildPlanSessionContext, which ALSO appends the session digest block
+	// (prior task state + best result) — e2e run 7 (2026-09-11) T3: the
+	// fallback-heuristic quickplan route planned "Ask user for the file
+	// path…" for "did the change get made? where is the file?" because the
+	// planner saw open-task TITLES but never T1's completed result. The
+	// digest block gives the planner the prior artifact so the plan answers
+	// from evidence instead of interrogating the user. The current turn's
+	// own placeholder task is excluded so the digest describes prior work.
 	if req.Mode == "quick_plan" && h.dispatcher != nil {
-		req.SessionContext = h.dispatcher.BuildSessionExecutionContext(context.Background(), sessionID)
+		req.SessionContext = h.dispatcher.BuildPlanSessionContext(context.Background(), sessionID, result.Task.ID)
 	}
 
 	if result.Intent.Type == string(IntentCompound) {

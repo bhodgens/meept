@@ -274,6 +274,31 @@ func (d *Dispatcher) BuildSessionExecutionContext(ctx context.Context, sessionID
 	return d.buildSessionExecutionContext(ctx, sessionID)
 }
 
+// BuildPlanSessionContext is BuildSessionExecutionContext composed with the
+// session digest block (BuildSessionContextBlock) for plan requests. The
+// execution-context block carries open task TITLES; the digest block adds
+// the most recent PRIOR task's state and best terminal step result — the
+// evidence a "did the change get made?" plan needs to answer from session
+// history instead of planning an interrogation of the user (e2e run 7,
+// 2026-09-11 T3). excludeTaskID is the current turn's own placeholder task,
+// created by ClassifyAndRoute before this call; digestContextEnabled gates
+// the digest half so MEEPT_DISABLE_DIGEST_CONTEXT=1 opts BOTH injections
+// out together.
+func (d *Dispatcher) BuildPlanSessionContext(ctx context.Context, sessionID, excludeTaskID string) string {
+	execCtx := d.buildSessionExecutionContext(ctx, sessionID)
+	if !d.digestContextEnabled() {
+		return execCtx
+	}
+	digest := d.buildSessionContextDigestExcluding(sessionID, excludeTaskID)
+	if digest.IsEmpty() {
+		return execCtx
+	}
+	if execCtx == "" {
+		return BuildSessionContextBlock(digest)
+	}
+	return execCtx + "\n" + BuildSessionContextBlock(digest)
+}
+
 // SetPlanManager wires the plan manager after construction. The daemon
 // creates the dispatcher before the plan system is initialized (same
 // ordering constraint as Orchestrator.SetPlanManager); nil is a no-op and

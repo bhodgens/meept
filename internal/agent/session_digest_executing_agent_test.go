@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -153,5 +154,43 @@ func TestBuildSessionContextBlock_Render(t *testing.T) {
 	}
 	if BuildSessionContextBlock(&SessionContextDigest{}) != "" {
 		t.Fatal("empty digest must render as empty string")
+	}
+}
+
+// Run-7 T3 pin: the quickplan route must carry the digest block into the
+// plan request's session context, so the PLANNER sees T1's completed result
+// and stops writing "Ask user for the file path" steps for status
+// questions about prior work.
+func TestBuildPlanSessionContext_ComposesDigestIntoExecutionContext(t *testing.T) {
+	d, reg := newDigestTestDispatcher(t)
+
+	now := time.Now().UTC()
+	// Open task OLDER than T1: it exercises the execution-context block
+	// (open titles) while T1 stays the most recent non-excluded task the
+	// digest half must surface.
+	seedDigestTask(t, d, "task-open", "unrelated open work", "sess-plan",
+		task.StateExecuting, now.Add(-10*time.Minute), "coder")
+	seedDigestTask(t, d, "task-t1", "create hello.txt", "sess-plan",
+		task.StateCompleted, now.Add(-5*time.Minute), "coder")
+	seedDigestStep(t, reg, "task-t1", 2, task.StepApproved,
+		"/var/p/hello.txt contains hello")
+
+	// Current turn's placeholder must be excluded from the digest half.
+	got := d.BuildPlanSessionContext(context.Background(), "sess-plan", "task-cur")
+	if !strings.Contains(got, "hello.txt contains hello") {
+		t.Fatalf("plan session context missing prior task result; got:\n%s", got)
+	}
+	if !strings.Contains(got, "## Session execution context") {
+		t.Fatalf("plan session context lost the execution-context block; got:\n%s", got)
+	}
+	if !strings.Contains(got, "## Session context") {
+		t.Fatalf("plan session context lost the digest block header; got:\n%s", got)
+	}
+
+	// Context-less session: digest empty, exec-context empty → empty overall
+	// (no empty header block for the planner).
+	fresh := d.BuildPlanSessionContext(context.Background(), "sess-none", "")
+	if fresh != "" {
+		t.Fatalf("context-less session must produce empty plan session context; got:\n%s", fresh)
 	}
 }
