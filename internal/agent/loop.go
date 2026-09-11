@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -558,6 +559,16 @@ type AgentLoop struct {
 	// reasoning opts in reasoningCycle so it wins the single reasoning
 	// pointer — last apply wins; H3 fix), consumed and cleared on use.
 	reasonWatchRescueNext bool
+
+	// Turn tool ledger (anti-hallucination contract, e2e run 7 rkl3Th):
+	// per-turn count of tools the model ACTUALLY emitted for execution.
+	// The model narrating "Created file X" with zero tool calls is the
+	// pure-hallucination failure mode; the ledger lets the final-text
+	// return path detect execution-action claims that no execution backs.
+	// Guard-state semantics: reset per turn in resetTurnGuards, guarded
+	// by mu. Records ATTEMPTS (emission ≠ success) — conservative: it can
+	// only undercount the model's tool use, never fabricate a mismatch.
+	turnToolCalls map[string]int // tool name -> emission count this turn
 
 	// Conversation management
 	conversations *ConversationStore
@@ -2917,6 +2928,92 @@ func outcomeFromErr(err error) string {
 	return "success"
 }
 
+// executionVerbRe matches any execution-action verb as a whole word.
+var executionVerbRe = regexp.MustCompile(
+	`\b(created|wrote|modified|updated|deleted|generated|saved|edited|changed)\b`)
+
+// claimBoundarySuffixes are the tokens that may legitimately precede an
+// execution verb at a clause start: line/JSON-string starts, list markers,
+// and first-person subjects ("i", "i've", "we").
+var claimBoundarySuffixes = []string{
+	"", "[", "(", `"`, "'", ":", ",", ".", "-", "*", "•",
+	"i", "i've", "i have", "ive", "we", "the agent",
+}
+
+// passiveFollowers mark passive-voice continuations — "created by the
+// build" describes, it does not claim.
+var passiveFollowers = map[string]bool{
+	"by": true, "from": true, "with": true, "and": true,
+	"when": true, "while": true, "during": true, "in": true,
+}
+
+// fileOperationToolNames are the tools whose EXECUTION would legitimately
+// back a file side-effect claim. When any of these ran this turn, a file
+// claim is presumed backed at the loop layer (execution-vs-outcome is the
+// validator layer's job — internal/validator checks the artifact itself).
+var fileOperationToolNames = []string{
+	"file_write", "file_edit", "file_delete", "resolve", "shell",
+}
+
+// turnExecutedFileTools reports whether any file-operation tool was
+// emitted for execution during the current turn (per the turn tool
+// ledger). False also when only non-file tools ran — their executions
+// cannot back a file claim.
+func (l *AgentLoop) turnExecutedFileTools() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	for _, name := range fileOperationToolNames {
+		if l.turnToolCalls[name] > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// unbackedSideEffectClaims reports whether text claims COMPLETED file
+// side-effects ("Created file hello.txt", "I've updated the config") —
+// the exact narration shape the quantized LFM2.5 hallucinated in e2e run
+// 7 (rkl3Th): a polished JSON report with fabricated file_exists evidence
+// and zero tool executions. Clause-anchored matching keeps hypotheticals
+// ("I will create…"), past participles ("the file created by the previous
+// step"), and read-back reports out. Used by the reasoningCycle
+// final-text anti-hallucination guard together with turnExecutedFileTools.
+func (l *AgentLoop) unbackedSideEffectClaims(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	for _, loc := range executionVerbRe.FindAllStringIndex(lower, -1) {
+		// Clause-start check: the token immediately before the verb must
+		// be a boundary (JSON punctuation, list marker, line start) or a
+		// first-person subject. Mid-clause verbs ("the file created by…")
+		// are descriptions, not claims.
+		before := strings.TrimRight(lower[:loc[0]], " ")
+		bounded := false
+		for _, suf := range claimBoundarySuffixes {
+			if strings.HasSuffix(before, suf) {
+				bounded = true
+				break
+			}
+		}
+		if !bounded {
+			continue
+		}
+		// Passive-voice check: "created by/from/with…" is attribution.
+		after := strings.TrimSpace(lower[loc[1]:])
+		first := after
+		if sp := strings.IndexAny(after, " 	\n"); sp >= 0 {
+			first = after[:sp]
+		}
+		first = strings.Trim(first, ",.;:!?)\"'")
+		if passiveFollowers[first] {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // Stop waits for all asynchronous goroutines spawned by RunOnce (reflection,
 // learning pipeline, skill outcome recording) to complete before returning.
 // Daemon shutdown MUST call this before closing the LLM client to avoid
@@ -3438,6 +3535,9 @@ func (l *AgentLoop) resetTurnGuards() {
 	l.reasonWatchStreakBreach = false
 	l.reasonWatchRescued = false
 	l.reasonWatchRescueNext = false
+	// Anti-hallucination contract: a fresh turn starts with an empty
+	// tool-emission ledger.
+	l.turnToolCalls = nil
 	l.mu.Unlock()
 }
 
@@ -4088,6 +4188,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				toolNames.WriteString(tc.Function.Name)
 			}
 
+			// Anti-hallucination ledger: record which tools this turn
+			// actually attempted, so the final-text return path can
+			// contrast execution-action claims ("Created file X") against
+			// real executions.
+			l.mu.Lock()
+			if l.turnToolCalls == nil {
+				l.turnToolCalls = make(map[string]int)
+			}
+			for _, tc := range response.ToolCalls {
+				l.turnToolCalls[tc.Function.Name]++
+			}
+			l.mu.Unlock()
+
 			// Publish progress: executing tools
 			l.publishProgress(conversationID, iteration, "executing", toolNames.String(), totalTokens)
 
@@ -4588,6 +4701,35 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		l.safeTransition(StateGeneratingResponse, "generating_response", map[string]any{"iteration": iteration})
+
+		// Anti-hallucination contract (e2e run 7 rkl3Th): the model's FINAL
+		// text claims file side-effects but this turn emitted ZERO file-tool
+		// calls — the quantized model narrated success it never produced
+		// (the step "completed" with a fabricated report; hello.txt never
+		// existed). Don't fail the turn: nudge ONCE with an explicit
+		// tool-use instruction so the model either executes for real or
+		// retracts. After the nudge, return the text (possibly annotated) —
+		// repeated nudges against a model that cannot emit tool calls would
+		// burn the iteration budget against a documented capability ceiling.
+		if l.unbackedSideEffectClaims(response.Content) && !l.turnExecutedFileTools() {
+			if iteration < l.config.MaxIterations {
+				l.logger.Warn("Unbacked file side-effect claims with zero tool executions, nudging for real tool use",
+					"iteration", iteration,
+					"conversation", conversationID,
+				)
+				conv.AddAssistantMessage(response.Content)
+				conv.AddUserMessage("[system: Your response claims you created or modified files, but this turn executed no tools — those claims are unverified. Do NOT describe file operations: use the file_write tool to actually perform them, or state plainly that the work is not done. Reports must only cite evidence from real tool executions.]")
+				l.publishIteration(conversationID, iteration)
+				continue
+			}
+			// No iteration budget left: return the text annotated so
+			// downstream consumers (step reports, digests) can tell an
+			// unverified claim from a real result. The hallucinated
+			// success must not read as ground truth.
+			l.logger.Warn("Unbacked file side-effect claims with zero tool executions; no iteration budget to nudge, annotating response",
+				"conversation", conversationID)
+			return "[unverified: no tools were executed this turn] " + response.Content, nil
+		}
 		return response.Content, nil
 	}
 
