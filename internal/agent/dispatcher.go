@@ -1258,6 +1258,25 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				)
 				d.recordClassificationMethod("platform_action_arbitration")
 				intent = nil
+			} else if intent.Type == string(IntentPlatform) && isSecondPersonWorkRecall(input) {
+				// Platform-vs-recall arbitration (e2e run 5, 2026-09-10):
+				// "what files did you make for me?" scored platform @0.9 →
+				// roster dump. A question about the ASSISTANT'S OWN past
+				// actions is recall/report material; route it to chat with
+				// the recall flavor so the session context answers it.
+				d.logger.Info("Platform verdict overridden by second-person work recall",
+					"llm_confidence", intent.Confidence,
+					"input_len", len(input),
+				)
+				d.recordClassificationMethod("platform_recall_arbitration")
+				return &Intent{
+					Type:       string(IntentRecall),
+					Confidence: 0.85,
+					AgentType:  config.AgentIDChat,
+					Summary:    extractSummary(input),
+					Method:     "platform_recall_arbitration",
+					Model:      d.llmClassifier.ResolvedModel(),
+				}, nil
 			} else if ShouldUseLLMResult(intent) {
 				d.logger.Debug("LLM classifier succeeded",
 					"intent", intent.Type,
@@ -3765,8 +3784,8 @@ func hasCompoundSignalWords(input string) bool {
 // imperative execution verb ("create a file…", "write a function…",
 // "make it beep…", "fix the parser…"). Used by the platform-vs-action
 // arbitration: a platform introspection verdict on an imperative sentence
-// is a classifier mistake — introspection asks ("what can you do",
-// "what tools"), imperatives instruct. Only leading position counts, so
+// is a classifier mistake — introspection asks ("what can you do"),
+// imperatives instruct. Only leading position counts, so
 // "what can you do to create a file?" still classifies as platform.
 func hasLeadingImperativeVerb(input string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(input))
@@ -3793,6 +3812,53 @@ func hasLeadingImperativeVerb(input string) bool {
 			return true
 		default:
 			return false
+		}
+	}
+	return false
+}
+
+// isSecondPersonWorkRecall reports whether the input asks what the
+// ASSISTANT did ("what files did you make for me?", "what did you
+// create?"). Used by the platform-vs-recall arbitration (e2e run 5,
+// 2026-09-10): the 8B classifier scored that phrasing as platform @0.9 and
+// the platform branch dumped the agent roster. "Did YOU make/create/write
+// X" is a question about the assistant's own past actions — recall or
+// report material — never a platform-introspection question. Leading-
+// position like hasLeadingImperativeVerb so third-person or hypothetical
+// work questions ("what files should I make?") keep their classified route.
+func isSecondPersonWorkRecall(input string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(input))
+	if trimmed == "" {
+		return false
+	}
+	fields := strings.Fields(trimmed)
+	for i, f := range fields {
+		f = strings.Trim(f, ",.!?:;\"'")
+		switch f {
+		case "did", "have", "what", "which", "where":
+			// Scan a small window after the wh/did word for
+			// "you" + past-tense work verb.
+			for j := i + 1; j < len(fields) && j <= i+2; j++ {
+				nxt := strings.Trim(fields[j], ",.!?:;\"'")
+				if nxt != "you" && !(nxt == "u" && j == i+1) {
+					if j == i+1 {
+						break // "you" must directly follow
+					}
+					continue
+				}
+				// Found "you": the next word decides.
+				if j+1 < len(fields) {
+					verb := strings.Trim(fields[j+1], ",.!?:;\"'")
+					switch verb {
+					case "make", "made", "create", "created", "write", "wrote",
+						"build", "built", "fix", "fixed", "generate", "generated",
+						"do", "did", "produce", "update", "change", "modify",
+						"put", "save", "saved", "leave", "store", "place":
+						return true
+					}
+				}
+				break
+			}
 		}
 	}
 	return false

@@ -82,3 +82,34 @@ func TestPlatformArbitration_KeywordClassifierCatchesCreateFile(t *testing.T) {
 		t.Fatal("sanity: substring check broken")
 	}
 }
+
+// Run-5 T4 (2026-09-10): "what files did you make for me?" scored
+// platform @0.9 → roster dump. A second-person past-tense work question is
+// recall about the assistant's OWN actions, not platform introspection.
+func TestIsSecondPersonWorkRecall(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "run-5 T4 exact", input: "what files did you make for me?", want: true},
+		{name: "did you create", input: "did you create the file?", want: true},
+		{name: "what did you write", input: "what did you write?", want: true},
+		{name: "have you fixed", input: "have you fixed the bug yet", want: true},
+		{name: "where did you put it", input: "where did you put the file", want: true},
+		// Not recall:
+		{name: "introspection", input: "what can you do?", want: false},
+		{name: "hypothetical", input: "what files should I make?", want: false},
+		{name: "third person", input: "what files did the team make?", want: false},
+		{name: "greeting", input: "hello", want: false},
+		{name: "empty", input: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSecondPersonWorkRecall(tt.input); got != tt.want {
+				t.Errorf("isSecondPersonWorkRecall(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

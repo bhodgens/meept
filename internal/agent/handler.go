@@ -1836,12 +1836,16 @@ func (h *ChatHandler) waitForTaskCompletion(ctx context.Context, taskID string) 
 	// ~120s socket read (internal/rpc/proxy.go). The previous 10-minute cap
 	// could never fire in time: e2e run 3 (2026-09-10) T2 replan-looped and
 	// T3/T4 held their sync replies until the socket read timed out and the
-	// daemon was killed mid-task. A task that cannot finish in 90s still
+	// daemon was killed mid-task. A task that cannot finish in time still
 	// runs to completion asynchronously — only the reply is bounded.
-	// syncWaitCeiling is a test seam; zero means the 90s production default.
+	// 110s (was 90s, e2e run 5 2026-09-10): a healthy 4-step task on the
+	// local 8B model took ~112s; the 90s bound returned "still running"
+	// while the task finished 22s later, failing A4's reply-content check.
+	// 110s still leaves 10s of margin under the CLI's 120s socket read.
+	// syncWaitCeiling is a test seam; zero means the 110s production default.
 	syncTaskWaitTimeout := h.syncWaitCeiling
 	if syncTaskWaitTimeout <= 0 {
-		syncTaskWaitTimeout = 90 * time.Second
+		syncTaskWaitTimeout = 110 * time.Second
 	}
 
 	ticker := time.NewTicker(2 * time.Second)
