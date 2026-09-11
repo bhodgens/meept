@@ -909,5 +909,47 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	if len(result) < 3 {
 		return false
 	}
+	// Claim-without-action guard (e2e run 7, 2026-09-10): the coder returned
+	// a structured report asserting file_exists evidence WITHOUT calling any
+	// tool (iterations=1, zero tool executions) and this heuristic
+	// auto-approved it — a hallucinated completion. An execution step whose
+	// report claims artifacts but which shows no tool activity is not
+	// verifiable; route it to the full reviewer instead of waving it
+	// through. Memory/analysis hints legitimately produce reports without
+	// tools, so scope the suspicion to artifact claims only.
+	if step.ToolHint != "" && !reviewHintIsConversational(step.ToolHint) && len(step.Evidence) == 0 {
+		if claimsArtifacts(result) {
+			rm.logger.Warn("Heuristic review: artifact claims with no tool evidence; refusing auto-approve",
+				"step_id", step.ID,
+				"tool_hint", step.ToolHint,
+			)
+			return false
+		}
+	}
 	return true
+}
+
+// reviewHintIsConversational reports whether a tool hint denotes work whose
+// product IS the report (no artifact claims expected).
+func reviewHintIsConversational(hint string) bool {
+	switch strings.ToLower(strings.TrimSpace(hint)) {
+	case "chat", "report", "recall", "research", "analyze", "analyst", "plan":
+		return true
+	}
+	return false
+}
+
+// claimsArtifacts reports whether a result string asserts file/artifact
+// creation or existence — the shape the run-7 hallucinated report used.
+func claimsArtifacts(result string) bool {
+	lower := strings.ToLower(result)
+	for _, marker := range []string{
+		"file_exists", "created file", "wrote file", "file written",
+		"created hello", "\"created ", "created the file", "wrote the file",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
