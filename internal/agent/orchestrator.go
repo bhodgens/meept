@@ -447,8 +447,18 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 
 		if o.ralphLoop != nil {
 			if o.ralphLoop.TaskIsTerminal(taskID) {
-				o.ralphLoop.Reset(taskID)
-				o.artifacts = newArtifactStore()
+				// E2E run 3 (2026-09-10): resetting the replan counter on
+				// EVERY task-completed event let a mid-flight batch of steps
+				// zero it repeatedly (daemon.log shows iteration=1 three
+				// times for one task) — the MaxIterations cap never held.
+				// Only reset when the task truly achieved its goal; capped
+				// tasks keep their counter so TriggerReplan's cap fires and
+				// terminalizes the task instead of re-enqueueing forever.
+				isComplete, _ := o.ralphLoop.TaskOutcome(taskID)
+				if isComplete {
+					o.ralphLoop.Reset(taskID)
+					o.artifacts = newArtifactStore()
+				}
 			} else {
 				isComplete, evidence, needsReplan := o.ralphLoop.CheckCompletion(ctx, taskID, event.Result)
 				if needsReplan && !isComplete {

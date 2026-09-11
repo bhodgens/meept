@@ -51,6 +51,11 @@ type ChatHandler struct {
 	metricsStore *metrics.Store  // Optional: metrics store for duration estimates
 	stepStore    *task.StepStore // Optional: step store for fetching step summaries
 	taskStore    *task.Store     // Optional: task store for looking up linked sessions
+	// syncWaitCeiling overrides waitForTaskCompletion's 90s sync-reply bound
+	// (test seam; 0 = production default). Must stay well below the CLI's
+	// ~120s socket read so a stuck task surfaces a degraded reply instead of
+	// an i/o timeout (e2e run 3, 2026-09-10).
+	syncWaitCeiling time.Duration
 
 	// NotificationPublisher for desktop/notification-system events (Plan 4.3).
 	// When nil, task completion events still flow via the message bus.
@@ -1827,17 +1832,34 @@ func (h *ChatHandler) waitForTaskCompletion(ctx context.Context, taskID string) 
 		return ""
 	}
 
+	// syncTaskWaitTimeout bounds the synchronous reply below the CLI's
+	// ~120s socket read (internal/rpc/proxy.go). The previous 10-minute cap
+	// could never fire in time: e2e run 3 (2026-09-10) T2 replan-looped and
+	// T3/T4 held their sync replies until the socket read timed out and the
+	// daemon was killed mid-task. A task that cannot finish in 90s still
+	// runs to completion asynchronously — only the reply is bounded.
+	// syncWaitCeiling is a test seam; zero means the 90s production default.
+	syncTaskWaitTimeout := h.syncWaitCeiling
+	if syncTaskWaitTimeout <= 0 {
+		syncTaskWaitTimeout = 90 * time.Second
+	}
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	done := time.After(10 * time.Minute) // overall timeout
+	done := time.After(syncTaskWaitTimeout)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ""
 		case <-done:
+			// Degraded still-running reply (e2e run 3, 2026-09-10): an
+			// empty string would render as a blank turn — the honest answer
+			// is that the task is still executing and its result will land
+			// via task-completed push. Bounded well below the CLI's ~120s
+			// socket read so the turn always delivers.
 			h.logger.Warn("Task wait timeout exceeded", "task_id", taskID)
-			return ""
+			return fmt.Sprintf("Task %s is still running; results will arrive when it completes.", taskID)
 		case <-ticker.C:
 			t, err := h.taskStore.GetByID(taskID)
 			if err != nil {

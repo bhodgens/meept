@@ -217,10 +217,26 @@ func (rl *RalphLoop) validateChecklists(taskID string) (bool, int, int, []string
 }
 
 // TriggerReplan creates a new planning step for incomplete tasks.
+// E2E run 3 (2026-09-10): an eager Reset(taskID) on task-completed events
+// kept zeroing the iteration counter mid-flight (log shows iteration=1
+// three separate times for one task), so the MaxIterations cap never held
+// and the task replan-looped until the CLI's 120s socket read died. The cap
+// is now enforced HERE — at the single point that increments the counter —
+// so once iterations reaches MaxIterations the task is marked failed and
+// no further replan request is published.
 func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousEvidence []string) error {
 	rl.mu.Lock()
-	rl.iterations[taskID]++
-	iteration := rl.iterations[taskID]
+	iteration := rl.iterations[taskID] + 1
+	if iteration > rl.config.MaxIterations {
+		rl.mu.Unlock()
+		rl.logger.Warn("Replan cap reached, failing task instead of re-enqueueing",
+			"task_id", taskID,
+			"iterations", rl.iterations[taskID],
+			"max_iterations", rl.config.MaxIterations)
+		rl.failTaskAtCap(taskID, "replan iteration cap reached")
+		return nil
+	}
+	rl.iterations[taskID] = iteration
 	rl.mu.Unlock()
 
 	_, err := rl.taskStore.GetByID(taskID)
@@ -239,14 +255,19 @@ func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousE
 	}
 	replanContext += "\nPlease revise the approach to ensure verifiable completion."
 
-	// Publish replan request to bus
+	// Publish replan request to bus. Nil-guarded (e2e-fix loop 2026-09-11):
+	// TriggerReplan is invoked from orchestrator event handlers, and a
+	// RalphLoop constructed without a bus (unit harnesses, degraded wiring)
+	// must not SIGSEGV the handler goroutine.
 	replanMsg := &models.BusMessage{
 		Source:  "ralph_loop",
 		Topic:   "orchestrator.replan",
 		Payload: json.RawMessage(fmt.Sprintf(`{"task_id": "%s", "iteration": %d, "context": %q}`, taskID, iteration, replanContext)),
 	}
 
-	if n := rl.bus.Publish("orchestrator.replan", replanMsg); n == 0 {
+	if rl.bus == nil {
+		rl.logger.Warn("Replan request not published: no bus wired", "task_id", taskID)
+	} else if n := rl.bus.Publish("orchestrator.replan", replanMsg); n == 0 {
 		rl.logger.Warn("Replan request published but no subscribers", "task_id", taskID)
 	}
 
@@ -269,6 +290,24 @@ func (rl *RalphLoop) TaskIsTerminal(taskID string) bool {
 	return err == nil && t != nil && t.State.IsTerminal()
 }
 
+// TaskOutcome reports whether a terminal task completed successfully
+// (vs failed/cancelled/rejected). Used by the orchestrator's
+// job-completed handler to distinguish "goal achieved — reset the replan
+// counter" from "capped-out — keep the counter so the cap stays armed"
+// (e2e run 3, 2026-09-10: the eager Reset let the counter restart from
+// zero mid-task and the replan loop never terminated). A non-terminal or
+// unknown task reports (false, false).
+func (rl *RalphLoop) TaskOutcome(taskID string) (completed bool, terminal bool) {
+	if rl == nil || rl.taskStore == nil || taskID == "" {
+		return false, false
+	}
+	t, err := rl.taskStore.GetByID(taskID)
+	if err != nil || t == nil || !t.State.IsTerminal() {
+		return false, false
+	}
+	return t.State == task.StateCompleted, true
+}
+
 // GetIterationCount returns the current iteration count for a task.
 func (rl *RalphLoop) GetIterationCount(taskID string) int {
 	rl.mu.Lock()
@@ -281,6 +320,42 @@ func (rl *RalphLoop) Reset(taskID string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	delete(rl.iterations, taskID)
+}
+
+// failTaskAtCap marks a task failed after TriggerReplan hit MaxIterations
+// without sufficient evidence. Every failure path is best-effort: a store
+// error or absent bus must not panic the orchestrator's event handler —
+// the Warn above is the durable record. Without the terminal state the
+// sync chat reply (waitForTaskCompletion) would hold its full 10-minute
+// wait against the CLI's ~120s socket read (e2e run 3 T2/T3/T4).
+func (rl *RalphLoop) failTaskAtCap(taskID, reason string) {
+	t, err := rl.taskStore.GetByID(taskID)
+	if err != nil || t == nil {
+		return
+	}
+	t.State = task.StateFailed
+	if err := rl.taskStore.Update(t); err != nil {
+		rl.logger.Warn("Failed to mark task failed at replan cap",
+			"task_id", taskID, "error", err)
+		return
+	}
+	if rl.bus == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"task_id": taskID,
+		"reason":  reason,
+		"source":  "ralph_loop",
+	})
+	if err != nil {
+		return
+	}
+	msg := &models.BusMessage{
+		Source:  "ralph_loop",
+		Topic:   "task.failed",
+		Payload: payload,
+	}
+	rl.bus.Publish("task.failed", msg)
 }
 
 // Cleanup removes iteration entries that haven't been touched within maxAge
