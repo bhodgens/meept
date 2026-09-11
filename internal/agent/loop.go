@@ -6710,6 +6710,13 @@ func (l *AgentLoop) buildSessionContextSection() string {
 	} else if dc != nil && dc.DetectedProjectID != "" {
 		fmt.Fprintf(&b, "Detected project: %s\n", dc.DetectedProjectID)
 	}
+	// Context-usage rule (e2e A5, gh #37): state how to USE this context,
+	// generically — when the user asks about past work, answer from it with
+	// specifics instead of replying minimally or re-asking for details it
+	// already contains.
+	if sessID != "" || projID != "" || wd != "" {
+		b.WriteString("When the user asks about work done in this session (status, results, files, changes), answer specifically from the context above rather than replying generically or asking for details recorded here.\n")
+	}
 	return b.String()
 }
 

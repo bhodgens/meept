@@ -34,6 +34,17 @@ func TestSessionContextSection_EmptyWithoutWorkingDir(t *testing.T) {
 	}
 }
 
+// Context-usage rule (e2e A5, gh #37): the system-prompt session context
+// must tell the model to answer session-work questions FROM the context —
+// a standing rule, present whenever any session context exists.
+func TestSessionContextSection_CarriesContextUsageRule(t *testing.T) {
+	l := &AgentLoop{workingDir: "/tmp/project-x"}
+	section := l.buildSessionContextSection()
+	if !strings.Contains(section, "answer specifically from the context above") {
+		t.Errorf("session context missing the usage rule:\n%s", section)
+	}
+}
+
 // Run oCbPZZ (2026-09-11): when both a working directory and a client CWD
 // exist, the session context must NOT print the client CWD — the model
 // wrote hello.txt into the client's shell directory instead of the session

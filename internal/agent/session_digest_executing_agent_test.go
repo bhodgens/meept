@@ -149,6 +149,18 @@ func TestBuildSessionContextBlock_Render(t *testing.T) {
 		}
 	}
 
+	// Context-usage rule (e2e A5, gh #37): the block must instruct the
+	// model to ANSWER FROM the context for questions about prior work —
+	// with specifics — instead of treating it as passive background.
+	for _, want := range []string{
+		"asks about, refers to, or follows up on this work",
+		"name the specific files, paths, and results",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("block missing usage rule %q; got:\n%s", want, block)
+		}
+	}
+
 	if BuildSessionContextBlock(nil) != "" {
 		t.Fatal("nil digest must render as empty string")
 	}

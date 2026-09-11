@@ -2696,12 +2696,22 @@ func (d *Dispatcher) digestContextEnabled() bool {
 // the intent classifier saw, now visible to the agent that answers. Bounded
 // (name 200 / summary 400 chars at digest build time) so it cannot bloat the
 // prompt. Returns "" for a nil/empty digest.
+//
+// Context-aware usage rule (e2e A5, gh #37): the block carries a one-line
+// instruction telling the model to ANSWER FROM this context whenever the
+// user asks about prior work — not merely to be aware of it. Small local
+// models treat passive context as background and reply "ok" to status
+// questions even when the answer is stated in the block. The rule is
+// generic: it covers status questions, artifact references, follow-ups,
+// and corrections — any input that concerns this prior work — not one
+// scripted phrasing.
 func BuildSessionContextBlock(digest *SessionContextDigest) string {
 	if digest.IsEmpty() {
 		return ""
 	}
 	var sb strings.Builder
 	sb.WriteString("## Session context (most recent work in this conversation)\n\n")
+	sb.WriteString("If the user's message asks about, refers to, or follows up on this work, answer from the context below — name the specific files, paths, and results it records — instead of asking for information already present here.\n\n")
 	if digest.LastTaskName != "" {
 		state := digest.LastTaskState
 		if state == "" {
