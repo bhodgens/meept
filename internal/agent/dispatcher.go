@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -2641,9 +2642,68 @@ func (d *Dispatcher) buildContextMessage(result *DispatchResult, conversationID 
 	if content == "" {
 		content = result.Intent.Summary
 	}
+
+	// Executing-agent session context (e2e run 5, 2026-09-10 T3): the
+	// classifier already sees the session digest via AnalyzeTrueIntent, but
+	// the EXECUTING agent's prompt did not — so "did the change get made?"
+	// misrouted to git (committer) and the committer answered "I don't have
+	// any evidence that a change was made" with no session context. Inject
+	// a compact digest block of the session's most recent PRIOR task here,
+	// excluding the current turn's own just-created placeholder (result.Task
+	// is the task ClassifyAndRoute created for THIS message seconds ago; the
+	// digest must describe the earlier work the user is asking about).
+	if d.digestContextEnabled() {
+		excludeID := ""
+		if result.Task != nil {
+			excludeID = result.Task.ID
+		}
+		digest := d.buildSessionContextDigestExcluding(conversationID, excludeID)
+		if !digest.IsEmpty() {
+			parts = append(parts, BuildSessionContextBlock(digest))
+		}
+	}
+
 	parts = append(parts, content)
 
 	return strings.Join(parts, "")
+}
+
+// digestContextEnabled reports whether the executing-agent digest context
+// block is enabled. Default on; set MEEPT_DISABLE_DIGEST_CONTEXT=1 to opt
+// out for A/B comparison of reply quality.
+func (d *Dispatcher) digestContextEnabled() bool {
+	return os.Getenv("MEEPT_DISABLE_DIGEST_CONTEXT") != "1"
+}
+
+// BuildSessionContextBlock renders a SessionContextDigest as a compact
+// markdown block for an executing agent's prompt — the same session facts
+// the intent classifier saw, now visible to the agent that answers. Bounded
+// (name 200 / summary 400 chars at digest build time) so it cannot bloat the
+// prompt. Returns "" for a nil/empty digest.
+func BuildSessionContextBlock(digest *SessionContextDigest) string {
+	if digest.IsEmpty() {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Session context (most recent work in this conversation)\n\n")
+	if digest.LastTaskName != "" {
+		state := digest.LastTaskState
+		if state == "" {
+			state = "unknown"
+		}
+		fmt.Fprintf(&sb, "- Prior task: %q — status: %s", digest.LastTaskName, state)
+		if digest.LastTaskAgent != "" {
+			fmt.Fprintf(&sb, " (agent: %s)", digest.LastTaskAgent)
+		}
+		sb.WriteString("\n")
+	}
+	if digest.LastResultSummary != "" {
+		fmt.Fprintf(&sb, "- Prior result: %s\n", digest.LastResultSummary)
+	}
+	if digest.WorkingDirectory != "" {
+		fmt.Fprintf(&sb, "- Working directory: %s\n", digest.WorkingDirectory)
+	}
+	return sb.String()
 }
 
 // buildAccumulatedContext creates context from a previous agent's report for the next agent.

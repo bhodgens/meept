@@ -71,6 +71,21 @@ const (
 // error degrades that field to empty (Debug log) and never propagates. An
 // empty sessionID yields the empty digest.
 func (d *Dispatcher) buildSessionContextDigest(sessionID string) *SessionContextDigest {
+	return d.buildSessionContextDigestExcluding(sessionID, "")
+}
+
+// buildSessionContextDigestExcluding is buildSessionContextDigest with one
+// refinement: tasks whose ID matches excludeTaskID are skipped when picking
+// the "most recent" task. The executing-agent context block (see
+// BuildSessionContextBlock) is built AFTER ClassifyAndRoute has already
+// created the CURRENT turn's own task — always the newest row for the
+// session, and always state=pending with no steps. Without the exclusion
+// the digest would describe the question instead of the prior work the
+// question refers to (e2e run 5, 2026-09-10 T3: "did the change get made?"
+// must surface T1's completed artifact, not T3's own fresh placeholder).
+// Classification-side callers (AnalyzeTrueIntent) have no current task yet
+// and pass "" — unchanged behavior.
+func (d *Dispatcher) buildSessionContextDigestExcluding(sessionID, excludeTaskID string) *SessionContextDigest {
 	digest := &SessionContextDigest{}
 	if sessionID == "" {
 		return digest
@@ -83,15 +98,19 @@ func (d *Dispatcher) buildSessionContextDigest(sessionID string) *SessionContext
 				"session_id", sessionID,
 				"error", err,
 			)
-		} else if len(tasks) > 0 {
-			// GetTasksForSession is ordered by updated_at DESC, so
-			// tasks[0] is the most recently updated task.
-			lastTask := tasks[0]
-			if lastTask != nil {
+		} else {
+			// GetTasksForSession is ordered by updated_at DESC, so the
+			// first non-excluded entry is the most recently updated task
+			// that is not the current turn's own placeholder.
+			for _, lastTask := range tasks {
+				if lastTask == nil || lastTask.ID == excludeTaskID {
+					continue
+				}
 				digest.LastTaskName = truncateString(lastTask.Name, digestTaskNameCap)
 				digest.LastTaskState = string(lastTask.State)
 				digest.LastTaskAgent = lastTask.AssignedAgent
 				d.populateDigestStepResult(digest, lastTask.ID, sessionID)
+				break
 			}
 		}
 	}
