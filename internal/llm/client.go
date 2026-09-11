@@ -2115,6 +2115,18 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		}
 	}
 
+	// Same guard for the Anthropic-style <function_calls> shape: a stream
+	// cut off before </function_calls> leaves the raw opening tag in
+	// content. parseLFMToolCalls already recovered any calls it could from
+	// the truncated body above — if the tag STILL sits in content, the
+	// truncated body held nothing recoverable (e.g. cut off before the
+	// first '{'). Log it; don't strip silently.
+	if idx := strings.LastIndex(content, "<function_calls>"); idx >= 0 &&
+		!strings.Contains(content[idx:], "</function_calls>") {
+		c.logger.Warn("LFM <function_calls> block truncated at stream cutoff; raw text kept in content",
+			"model", modelID, "remainder", content[idx:])
+	}
+
 	result := &Response{
 		Content:      content,
 		ToolCalls:    toolCalls,
