@@ -299,6 +299,26 @@ func (d *Dispatcher) BuildPlanSessionContext(ctx context.Context, sessionID, exc
 	return execCtx + "\n" + BuildSessionContextBlock(digest)
 }
 
+// PlanDigestContext is the digest-only half of BuildPlanSessionContext: the
+// session digest block WITHOUT the quickplan execution-context block. Used
+// for plan requests in NON-quickplan modes (direct/plan/spec_plan) — e2e
+// run 8 (2026-09-11) T3 classified git @0.9 and dispatched through
+// createFallbackSteps, whose step prompt is req.Input verbatim; without
+// this, a "did the change get made?" git dispatch executes with no session
+// context at all. Returns "" for context-less sessions (no empty header
+// block in the step prompt). Gated by the same MEEPT_DISABLE_DIGEST_CONTEXT
+// flag as every other digest injection.
+func (d *Dispatcher) PlanDigestContext(sessionID, excludeTaskID string) string {
+	if !d.digestContextEnabled() {
+		return ""
+	}
+	digest := d.buildSessionContextDigestExcluding(sessionID, excludeTaskID)
+	if digest.IsEmpty() {
+		return ""
+	}
+	return BuildSessionContextBlock(digest)
+}
+
 // SetPlanManager wires the plan manager after construction. The daemon
 // creates the dispatcher before the plan system is initialized (same
 // ordering constraint as Orchestrator.SetPlanManager); nil is a no-op and

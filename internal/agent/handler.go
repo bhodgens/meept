@@ -1110,8 +1110,24 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 	// digest block gives the planner the prior artifact so the plan answers
 	// from evidence instead of interrogating the user. The current turn's
 	// own placeholder task is excluded so the digest describes prior work.
-	if req.Mode == "quick_plan" && h.dispatcher != nil {
-		req.SessionContext = h.dispatcher.BuildPlanSessionContext(context.Background(), sessionID, result.Task.ID)
+	//
+	// Run-8 follow-up (2026-09-11): the SAME question also classifies as
+	// git @0.9 on a healthy classifier run. git dispatches async through
+	// the same orchestrator pipeline but in "direct" mode, whose
+	// createFallbackSteps uses req.Input verbatim — no planner LLM — so the
+	// quick_plan-gated injection never ran and the committer executed the
+	// bare question with no session context ("I need more information …
+	// file path / commit hash / directory structure"). The digest is now
+	// attached for EVERY plan request, not just quick_plan: it is bounded,
+	// evidence-shaped, and the one session-facts channel that reaches
+	// step-job prompts. The quick_plan branch keeps its extra
+	// execution-context block; other modes get the digest alone.
+	if h.dispatcher != nil {
+		if req.Mode == "quick_plan" {
+			req.SessionContext = h.dispatcher.BuildPlanSessionContext(context.Background(), sessionID, result.Task.ID)
+		} else {
+			req.SessionContext = h.dispatcher.PlanDigestContext(sessionID, result.Task.ID)
+		}
 	}
 
 	if result.Intent.Type == string(IntentCompound) {

@@ -520,6 +520,28 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		steps = sp.createFallbackSteps(req, parentMemoryRefs)
 	}
 
+	// Plan-session context must reach the EXECUTING step, not only the
+	// planner prompt (e2e run 8, 2026-09-11 T3): "did the change get made?"
+	// classified git @0.9 and dispatched mode=direct, whose
+	// createFallbackSteps step description is req.Input verbatim — the
+	// committer loop received the bare question with no session facts and
+	// answered with an interrogation ("file path? commit hash? directory
+	// structure?"). Direct-mode tasks never see the planner LLM, and even
+	// planner-built steps execute in fresh loops whose prompt is the step
+	// description (daemon components.go step-job path), so the session
+	// digest block rides on the step description itself. The idempotence
+	// check guards against double-injection through replan paths.
+	if req.SessionContext != "" && len(steps) > 0 && steps[0] != nil {
+		if !strings.Contains(steps[0].Description, "## Session context") {
+			steps[0].Description = req.SessionContext + "\n\n## Your Task\n\n" + steps[0].Description
+			sp.logger.Info("Session context attached to first step",
+				"task_id", req.TaskID,
+				"step_id", steps[0].ID,
+				"mode", mode,
+			)
+		}
+	}
+
 	// Inject parent MemoryRefs to first step (if any exist and steps were created)
 	if len(steps) > 0 && len(parentMemoryRefs) > 0 {
 		for _, ref := range parentMemoryRefs {
@@ -978,16 +1000,14 @@ func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest
 	// Session execution context (quickplan-mode leaf 02 / master Contract
 	// 6): active plan + tracked tasks + prior waves, pre-rendered by the
 	// dispatcher, plus the one-way upgrade instruction. Quickplan only —
-	// other modes keep byte-identical prompts.
+	// other modes keep byte-identical prompts. The quickplan upgrade
+	// instruction is quickplan-only; non-quickplan modes that carry the
+	// bare digest block (PlanDigestContext, run-8 follow-up) must NOT get
+	// an upgrade nudge — their mode was already decided.
 	if req.SessionContext != "" {
-		prompt += "\n\n" + req.SessionContext + "\n" + quickPlanUpgradeInstruction
-	}
-
-	// When a registry is available, append dynamic agent availability hints
-	// so the planner LLM knows which specialist agents are actually enabled.
-	if sp.registry != nil {
-		if hintSection := BuildPlannerPromptHint(sp.registry); hintSection != "" {
-			prompt += "\n\n## Dynamic Agent Availability\n" + hintSection
+		prompt += "\n\n" + req.SessionContext
+		if req.Mode == "quick_plan" {
+			prompt += "\n" + quickPlanUpgradeInstruction
 		}
 	}
 
