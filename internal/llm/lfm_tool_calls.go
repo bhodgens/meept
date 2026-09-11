@@ -45,14 +45,21 @@ var lfmFuncCall = regexp.MustCompile(`(?s)^\[([A-Za-z_][A-Za-z0-9_]*)\((.*)\)\]$
 // newlines.
 var lfmFunctionCallsBlock = regexp.MustCompile(`(?is)<function_calls>\s*(?:<invocation>\s*)?(.*?)</function_calls>`)
 
-// parseLFMToolCalls scans content for LFM2.5 tool calls in either shape and
-// converts each to a ToolCall. Matched blocks are stripped from the returned
-// content. When neither shape is present the content is returned unchanged
-// with nil calls.
+// parseLFMToolCalls scans content for LFM2.5 tool calls in any known shape
+// and converts each to a ToolCall. Matched blocks are stripped from the
+// returned content. When no shape is present the content is returned
+// unchanged with nil calls.
 //
 // Shape 1 — native markers: <|tool_call_start|>[fn(k=v, ...)]<|tool_call_end|>
 // Shape 2 — Anthropic-style XML prose (quantized-model template bleed):
 // <function_calls>[<invocation>]JSON-array-of-call-objects</function_calls>.
+// Shape 3 — markdown json-fence bleed (e2e run 7, 2026-09-10): the call
+// ships as a fenced JSON object in plain content —
+//
+//	```json
+//	{"name":"file_write","args":{"path":"hello.txt","content":"hello"}}
+//	```
+//
 // The XML shape carries calls as JSON objects {id,name,arguments}; real
 // quantized output is often malformed, so parsing is deliberately tolerant:
 // trailing commas, doubled bracket blocks, leading prose, and unclosed
@@ -67,7 +74,143 @@ var lfmFunctionCallsBlock = regexp.MustCompile(`(?is)<function_calls>\s*(?:<invo
 func parseLFMToolCalls(content string) (string, []ToolCall) {
 	content, markerCalls := parseLFMMarkerCalls(content)
 	content, xmlCalls := parseLFMXMLCalls(content)
-	return content, append(markerCalls, xmlCalls...)
+	content, fenceCalls := parseLFMFenceCalls(content)
+	return content, append(append(markerCalls, xmlCalls...), fenceCalls...)
+}
+
+// lfmJSONFence matches a fenced JSON block whose body plausibly carries
+// tool-call fields. The fence info string may carry a language tag (json)
+// or none; the body is parsed and vetted structurally afterwards, so the
+// regex only needs to find the fence boundaries, not validate the content.
+// (Backticks are plain characters inside a double-quoted Go string, so the
+// pattern is written quoted rather than raw.)
+var lfmJSONFence = regexp.MustCompile("(?s)```[^\\n`]*\\n(.*?)```")
+
+// parseLFMFenceCalls is the markdown json-fence half of parseLFMToolCalls;
+// see there for the contract. A fence body counts as a leaked tool call
+// only when it parses as a JSON object carrying a plausible tool-call
+// shape — a "name"/"function" string plus "args"/"arguments"/"parameters"
+// map, or (OpenAI function-call shape) a "function" object with name +
+// arguments. Plain fenced code (shell snippets, JSON payloads without a
+// call shape) is left untouched: the guarantee is that a fence is stripped
+// ONLY when a call is minted from it, mirroring the marker/XML halves.
+func parseLFMFenceCalls(content string) (string, []ToolCall) {
+	matches := lfmJSONFence.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return content, nil
+	}
+
+	var calls []ToolCall
+	var remainder strings.Builder
+	last := 0
+	for _, m := range matches {
+		body := content[m[2]:m[3]]
+		mined := parseLFMFenceBody(body)
+		if len(mined) == 0 {
+			continue // not a tool-call fence; keep the text
+		}
+		remainder.WriteString(content[last:m[0]])
+		// Re-mint with the running call index: two IDENTICAL fence bodies
+		// in one reply must not share an ID (the executor keys result slots
+		// by ToolCall.ID — duplicate IDs collapse pairing). Mirrors the
+		// index-prefixed minting guarantee in lfmToolCallID.
+		mined[0].ID = lfmToolCallID(len(calls), "fence:"+body)
+		calls = append(calls, mined...)
+		last = m[1]
+	}
+	remainder.WriteString(content[last:])
+	if len(calls) > 0 {
+		slog.Default().Warn("lfm tool-call recovered from markdown json-fence shape (model template bleed)",
+			"calls", len(calls))
+		return strings.TrimSpace(remainder.String()), calls
+	}
+	return content, nil
+}
+
+// parseLFMFenceBody mines ToolCalls out of one fence body. Accepted shapes:
+//
+//	{"name":"file_write","args":{...}}          (direct)
+//	{"name":"file_write","arguments":{...}}     (direct, long key)
+//	{"function":{"name":"file_write","arguments":"{\"path\":...}"}}  (OpenAI wire shape)
+//
+// arguments may be an object OR a JSON-encoded string (the OpenAI wire
+// format stringifies it). Anything else returns nil so prose/code fences
+// survive untouched.
+func parseLFMFenceBody(body string) []ToolCall {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &obj); err != nil {
+		return nil
+	}
+
+	name := ""
+	var argsRaw json.RawMessage
+	// OpenAI function-call shape: {"function":{"name":...,"arguments":...}}
+	if fn, ok := obj["function"]; ok {
+		var fnObj struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		if err := json.Unmarshal(fn, &fnObj); err == nil && fnObj.Name != "" {
+			name = fnObj.Name
+			argsRaw = fnObj.Arguments
+		}
+	}
+	// Direct shape: {"name":...,"args"|"arguments"|"parameters":...}
+	if name == "" {
+		var nameStr string
+		if raw, ok := obj["name"]; ok {
+			if err := json.Unmarshal(raw, &nameStr); err != nil || nameStr == "" {
+				return nil
+			}
+		} else if raw, ok := obj["tool"]; ok {
+			if err := json.Unmarshal(raw, &nameStr); err != nil || nameStr == "" {
+				return nil
+			}
+		} else {
+			return nil
+		}
+		name = nameStr
+		for _, key := range []string{"args", "arguments", "parameters"} {
+			if raw, ok := obj[key]; ok {
+				argsRaw = raw
+				break
+			}
+		}
+	}
+
+	args := normalizeLFMFenceArgs(argsRaw)
+	raw, _ := json.Marshal(args)
+	return []ToolCall{{
+		ID:   lfmToolCallID(0, "fence:"+body),
+		Type: "function",
+		Function: ToolCallFunction{
+			Name:      name,
+			Arguments: string(raw),
+		},
+	}}
+}
+
+// normalizeLFMFenceArgs coerces a fence call's arguments payload into a
+// map[string]any. The payload may be a JSON object or a JSON-encoded
+// STRING of an object (OpenAI wire format); absent/malformed degrades to
+// an empty map — name+args-empty is strictly more recoverable than
+// dropping the call, mirroring normalizeLFMXMLArgs.
+func normalizeLFMFenceArgs(raw json.RawMessage) map[string]any {
+	out := make(map[string]any)
+	if len(raw) == 0 {
+		return out
+	}
+	if err := json.Unmarshal(raw, &out); err == nil {
+		return out
+	}
+	// Stringified-JSON shape: "{\"path\":\"hello.txt\"}"
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		if err := json.Unmarshal([]byte(s), &out); err == nil {
+			return out
+		}
+	}
+	return make(map[string]any)
 }
 
 // parseLFMMarkerCalls is the <|tool_call_start|>/<|tool_call_end|> half of
