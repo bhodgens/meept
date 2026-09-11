@@ -80,6 +80,14 @@ SOURCE_CLIENT="meept-bench-e2e"
 # ---------------------------------------------------------------------------
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/meept-e2e.XXXXXX")"
+# macOS TMPDIR ends with a slash, so mktemp's template produces a
+# double-slash path ("/var/.../T//meept-e2e.X"). Path strings derived from
+# $WORK (allowed_paths globs, HOME, project dir) then carry "//" mid-path,
+# while the daemon's permission matcher stores Clean-ed single-slash globs —
+# run 4 (2026-09-10): relative writes Abs()-ed against the daemon's PWD kept
+# the "//" form and every file_write was denied ("Path does not match any
+# allowed path pattern"). Normalize WORK once; everything derives from it.
+WORK="$(cd "$WORK" && pwd)"
 # macOS TMPDIR is /var/folders/... but the kernel resolves tools' paths
 # through /private/var/folders/...; permission patterns must cover both
 # forms or file_write gets "access denied" on the /private prefix.

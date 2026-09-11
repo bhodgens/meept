@@ -1197,11 +1197,17 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	} else {
 		result := e.checkPermission(toolName, args)
 		if !result.Allowed {
+			// Include the path (and args) in the deny log: an opaque deny
+			// reason cost a full e2e debugging run (2026-09-10) because the
+			// checked path form (relative Abs-ed against daemon PWD) was
+			// invisible next to the reason string.
 			e.logger.Info("Tool blocked by security",
 				"agent", e.agentID,
 				"tool", toolName,
 				"reason", result.Reason,
 				"risk", result.EffectiveRisk.String(),
+				"path", args["path"],
+				"args_summary", summarizeArgs(args),
 			)
 			return &ExecutionResult{
 				ToolCallID: toolCall.ID,
