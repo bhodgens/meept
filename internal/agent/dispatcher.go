@@ -1192,7 +1192,17 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		}, nil
 	}
 
-	// Step 1: Try capability matcher first (fast, no LLM)
+	// Platform-vs-action arbitration (e2e run 2, 2026-09-10): the 8B
+	// classifier scored "create a file named hello.txt …" as intent=platform
+	// @0.9, and the platform branch answers with the static agent-roster
+	// dump — an execution request "completed" without executing anything
+	// (A2 roster-dump failure). An IMPERATIVE cannot be an introspection
+	// question: introspection ASKS about the platform ("what can you do"),
+	// it never INSTRUCTS ("create", "write", "make", "fix", "add"). When the
+	// LLM says platform but the input carries an imperative execution verb,
+	// skip the platform short-circuit and let the chain continue — the LLM
+	// result is not consumed, so the capability matcher / keyword /
+	// heuristic routes route the verb to an executor agent.
 	if d.capabilityMatcher != nil {
 		result := d.capabilityMatcher.Match(input)
 		if result != nil && result.Confidence >= 0.7 {
@@ -1227,7 +1237,28 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 	if d.llmClassifier != nil {
 		intent, err := d.llmClassifier.Classify(ctx, input, memCtx)
 		if err == nil && intent != nil {
-			if ShouldUseLLMResult(intent) {
+			// Platform-vs-action arbitration (e2e run 2, 2026-09-10): the
+			// 8B classifier scored "create a file named hello.txt …" as
+			// intent=platform @0.9, and a platform verdict short-circuits
+			// to the static agent-roster dump — an execution request
+			// "completed" without executing anything (A2 roster failure).
+			// An IMPERATIVE cannot be an introspection question:
+			// introspection ASKS about the platform ("what can you do"),
+			// it never INSTRUCTS ("create a file", "write", "make",
+			// "fix"). When the LLM says platform but the input opens with
+			// an imperative execution verb, discard the platform verdict
+			// and let the chain continue — the keyword/heuristic routes
+			// send the verb to an executor agent. Log the override so
+			// classifier-observability can measure how often the 8B makes
+			// this mistake.
+			if intent.Type == string(IntentPlatform) && hasLeadingImperativeVerb(input) {
+				d.logger.Info("Platform verdict overridden by imperative execution phrasing",
+					"llm_confidence", intent.Confidence,
+					"input_len", len(input),
+				)
+				d.recordClassificationMethod("platform_action_arbitration")
+				intent = nil
+			} else if ShouldUseLLMResult(intent) {
 				d.logger.Debug("LLM classifier succeeded",
 					"intent", intent.Type,
 					"confidence", intent.Confidence,
@@ -1241,12 +1272,13 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				// any failover rotation. Empty when unknown — honest.
 				intent.Model = d.llmClassifier.ResolvedModel()
 				return d.applyContextWeighting(intent, memCtx, input), nil
+			} else {
+				d.logger.Debug("LLM classifier result below threshold",
+					"intent", intent.Type,
+					"confidence", intent.Confidence,
+					"threshold", GetThresholdForIntent(intent.Type),
+				)
 			}
-			d.logger.Debug("LLM classifier result below threshold",
-				"intent", intent.Type,
-				"confidence", intent.Confidence,
-				"threshold", GetThresholdForIntent(intent.Type),
-			)
 		} else if err != nil {
 			kind := llm.ClassifyClassificationFailure(err)
 			d.logger.Warn("LLM classifier failed, trying keyword",
@@ -3727,6 +3759,43 @@ func hasCompoundSignalWords(input string) bool {
 	// Short single words need word-boundary matching to avoid false positives
 	// inside compound words (e.g. "next" in "packet", "first" in "aircraft").
 	return compoundSignalRegex.MatchString(lower)
+}
+
+// hasLeadingImperativeVerb reports whether the input OPENS with an
+// imperative execution verb ("create a file…", "write a function…",
+// "make it beep…", "fix the parser…"). Used by the platform-vs-action
+// arbitration: a platform introspection verdict on an imperative sentence
+// is a classifier mistake — introspection asks ("what can you do",
+// "what tools"), imperatives instruct. Only leading position counts, so
+// "what can you do to create a file?" still classifies as platform.
+func hasLeadingImperativeVerb(input string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(input))
+	if trimmed == "" {
+		return false
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return false
+	}
+	// Treat leading polite/clarifying lead-ins ("please create…",
+	// "hey, create…") as still imperative.
+	for _, f := range fields {
+		switch f {
+		case "please", "hey", "ok", "okay", "now", "first", "then", ",":
+			continue
+		}
+		switch strings.Trim(f, ",.!?:;") {
+		case "create", "write", "make", "fix", "add", "build", "implement",
+			"delete", "remove", "update", "refactor", "generate", "run",
+			"code", "commit", "push", "merge", "rebase", "deploy",
+			"install", "configure", "set", "rename", "move", "copy",
+			"open", "close", "start", "stop", "restart":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // heuristicFallback provides targeted keyword-based routing when all other

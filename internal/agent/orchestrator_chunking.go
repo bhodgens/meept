@@ -12,13 +12,24 @@ import (
 )
 
 // executorBudget returns 40% of the model's context limit — the
-// per-step token budget for chunking decisions.
+// upper bound on a single step's prompt + tool output. When the model
+// declares no usable context limit, the fallback must stay larger than the
+// largest toolOutputBudget below, or every code step looks oversized
+// (previously the 12000 default lost to a single 8000-token tool budget
+// plus prompt, splitting every code step on small-context models).
 func executorBudget(modelCfg *llm.ModelConfig) int {
 	if modelCfg == nil || modelCfg.ContextLimit <= 0 {
 		return 12000 // safe default
 	}
 	return int(float64(modelCfg.ContextLimit) * 0.40)
 }
+
+// minExecutorBudget floors executorBudget so the fixed tool-output
+// estimates can never exceed the budget by themselves. Without this floor,
+// a 16k-context model (budget 6553) saw budget < toolOutputBudget("code") =
+// 8000 for ANY step — even "say hello" — and chunking split every code
+// step into an LLM-planned sub-chain (e2e run 2, 2026-09-10).
+const minExecutorBudget = 10000
 
 // toolOutputBudget returns an estimated upper bound on tool output size
 // per tool-hint class. Used by estimateStepTokens.
@@ -55,6 +66,15 @@ func estimateStepTokens(step *task.TaskStep, modelCfg *llm.ModelConfig) int {
 //
 // Invoked from handlePlanRequest after StrategicPlanner.Plan produces steps
 // so oversized steps are split before tactical scheduling kicks in.
+//
+// Scheduling-state guard (e2e run 2, 2026-09-10): only steps still in
+// StatePending are split. Plan publishes orchestrator.schedule (step →
+// scheduled, job enqueued) BEFORE this pass runs, and ReplaceWithSubSteps
+// DELETES the original step row — splitting a scheduled step orphans its
+// live job, the completion event then finds no step ("step not found"),
+// the result is discarded, and the task hangs in executing until the
+// user-facing sync wait times out. Steps already scheduled/ready are real
+// work in flight; they are never rewritten here.
 func (o *Orchestrator) chunkToExecutorCapacity(ctx context.Context, taskID string) error {
 	if o.tactical == nil || o.registry == nil || o.stepStore == nil || o.templateReg == nil {
 		o.logger.Debug("chunkToExecutorCapacity skipped: dependencies not wired",
@@ -77,12 +97,24 @@ func (o *Orchestrator) chunkToExecutorCapacity(ctx context.Context, taskID strin
 			o.logger.Warn("Per-task split cap reached", "task_id", taskID, "cap", maxSplitsPerTask)
 			return nil
 		}
+		// Only pending steps are chunk candidates. Anything already handed
+		// to tactical scheduling carries a live job reference.
+		if step.State != task.StepPending {
+			o.logger.Debug("Chunking skipped non-pending step",
+				"step_id", step.ID,
+				"state", string(step.State),
+			)
+			continue
+		}
 		executorID := o.tactical.SelectAgentForHint(step.ToolHint)
 		modelCfg, err := o.registry.GetModelConfig(executorID)
 		if err != nil {
 			continue // fall back to ContextFirewall at runtime
 		}
 		budget := executorBudget(modelCfg)
+		if budget < minExecutorBudget {
+			budget = minExecutorBudget
+		}
 		cost := estimateStepTokens(step, modelCfg)
 		if cost > budget {
 			subSteps, splitErr := o.splitStep(ctx, step, budget, modelCfg)
