@@ -17,6 +17,7 @@ capabilities:
 max_iterations: 15
 timeout_seconds: 600
 max_tokens_per_turn: 4096
+max_conversation_tokens: 400000
 max_memory_refs: 20
 temperature: 0.3
 prompt_components:
