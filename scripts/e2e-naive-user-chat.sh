@@ -68,6 +68,37 @@ elif [ $# -gt 0 ]; then
   exit 2
 fi
 
+# ---------------------------------------------------------------------------
+# Concurrency guard (e2e 2026-09-11): two simultaneous runs each spawn their
+# own scratch daemon + MLX runtimes; the runtimes contend for the GPU, alias
+# rotation kicks in, and BOTH verdicts are poisoned (observed twice: runs
+# r6VGk4/akWFTB and CUu7rg/r6VGk4 racing produced socket timeouts, wrong-
+# model replies, and 14/2 vs 15/1 drift on identical code). A lockfile makes
+# the second invocation fail fast instead. Stale-lock detection: if the
+# recorded pid is gone, the lock is reclaimed.
+LOCK_DIR="${TMPDIR:-/tmp}/meept-e2e.lock"
+if mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo $$ >"$LOCK_DIR/pid"
+  E2E_LOCK_HELD=1
+else
+  LOCK_PID="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+  if [ -n "$LOCK_PID" ] && ! kill -0 "$LOCK_PID" 2>/dev/null; then
+    log0() { printf '%s\n' "$*"; }
+    log0 "WARN: stale e2e lock (pid $LOCK_PID gone); reclaiming"
+    rm -rf "$LOCK_DIR"
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+      echo $$ >"$LOCK_DIR/pid"
+      E2E_LOCK_HELD=1
+    else
+      log0 "FATAL: another e2e run is active (lock $LOCK_DIR); concurrent runs poison both verdicts — wait and retry"
+      exit 3
+    fi
+  else
+    echo "FATAL: another e2e run is active (pid ${LOCK_PID:-?}, lock $LOCK_DIR); concurrent runs poison both verdicts — wait and retry" >&2
+    exit 3
+  fi
+fi
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TURN_TIMEOUT="${MEEPT_E2E_TURN_TIMEOUT:-300}"
 SOCKET_WAIT_SECONDS=30
@@ -130,6 +161,9 @@ kill_daemon() {
 cleanup() {
   local rc=$?
   kill_daemon
+  if [ "${E2E_LOCK_HELD:-0}" = "1" ]; then
+    rm -rf "${TMPDIR:-/tmp}/meept-e2e.lock"
+  fi
   if [ "$KEEP" = "1" ]; then
     log ""
     log "--keep: scratch workdir left in place: $WORK"
