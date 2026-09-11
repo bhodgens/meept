@@ -98,6 +98,17 @@ var toolHintAgent = map[string]string{
 	"shell":      AgentIDCoder,
 	"file_write": AgentIDCoder,
 	"file-write": AgentIDCoder,
+
+	// Compound/orchestration hints. Before these entries, a spec_pair or
+	// compound step that reached tactical scheduling with ToolHint set to
+	// the intent string fell through selectAgent's default to the chat
+	// agent — a conversationalist with no tool grants — which deflected
+	// and the compound request "completed" with zero work (e2e T1,
+	// 2026-09-10). These hints describe EXECUTION work, so they route to
+	// executor personas like every other entry here.
+	"compound":     AgentIDCoder, // compound steps are execution work → coder
+	"orchestrator": AgentIDCoder,
+	"spec_pair":    AgentIDCoder,
 }
 
 // ToolHintAgent returns the executor agent for a tool hint. Second return

@@ -2666,12 +2666,30 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			stepStore := c.TaskRegistry.StepStore()
 			orchTaskStore := c.TaskRegistry.Store()
 
+			// Pair manager for the strategic planner's spec_pair flow. The
+			// collab engine below builds its own collabPairMgr later in this
+			// block, but strategic pair sessions (compound intent →
+			// spec_pair mode) need one wired HERE — without it
+			// planPairSession returns "pair manager not configured", which
+			// used to silently degrade compound requests to a chat-default
+			// fallback step (e2e T1 misroute, 2026-09-10). A dedicated
+			// instance is correct: sessions are keyed by task and this
+			// manager only sees orchestrator-created pair sessions.
+			strategicPairMgr := agent.NewPairManager(agent.PairManagerConfig{
+				Registry:  c.AgentRegistry,
+				TaskStore: orchTaskStore,
+				StepStore: stepStore,
+				Bus:       msgBus,
+				Logger:    logger.With("component", "strategic-pair-manager"),
+			})
+
 			strategicPlanner := agent.NewStrategicPlanner(agent.StrategicPlannerConfig{
 				Registry:           c.AgentRegistry,
 				TaskStore:          orchTaskStore,
 				StepStore:          stepStore,
 				Bus:                msgBus,
 				Logger:             logger.With("component", "strategic"),
+				PairManager:        strategicPairMgr,
 				MaxPlanSteps:       cfg.Orchestrator.MaxPlanSteps,
 				PlannerTimeout:     time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
 				InterviewAmbiguity: cfg.Orchestrator.InterviewAmbiguityThreshold,

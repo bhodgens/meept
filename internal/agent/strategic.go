@@ -416,9 +416,21 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		// and the task.planned event carries pair_session: true. For these
 		// reasons it short-circuits the shared tail below.
 		if _, pairErr := sp.handlePairSession(ctx, t, req, parentMemoryRefs); pairErr != nil {
-			sp.logger.Error("Pair-session handling failed, falling back to direct", "error", pairErr)
-			steps = sp.createFallbackSteps(req, parentMemoryRefs)
-			// Fall through to shared tail with fallback steps.
+			// e2e T1 (2026-09-10): the old code fell through to
+			// createFallbackSteps here, whose single step carried
+			// ToolHint="compound" — a hint with no toolHintAgent entry, so
+			// selectAgent defaulted it to the chat agent, which deflected
+			// without tools and the whole compound request "completed" with
+			// zero work. A compound request that can't build its pair
+			// session is an infrastructure failure: fail the task loudly
+			// (the user sees the error) rather than completing with a
+			// deflection. createFallbackSteps is STILL correct for direct
+			// mode — only the spec_pair degradation is removed.
+			sp.logger.Error("Pair-session handling failed; failing compound task",
+				"task_id", req.TaskID,
+				"error", pairErr,
+			)
+			return fmt.Errorf("compound task %s failed to create pair session: %w", req.TaskID, pairErr)
 		} else {
 			// Pair-session path already persisted steps, updated task, and
 			// published task.planned + orchestrator.schedule. Return now.

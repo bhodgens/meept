@@ -1947,7 +1947,16 @@ func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiInt
 	// Create a parent task to track the compound request.
 	// Compound tasks are always assigned to the orchestrator (matches
 	// the AgentID on the returned DispatchResult).
-	parentTask := d.createTask(ctx, multi.Summary, &Intent{
+	//
+	// The description is the FULL user input, not multi.Summary: the task
+	// description is what flows to the strategic planner (PlanRequest.Input)
+	// and into every fallback/pair step prompt. extractSummary truncates to
+	// ~100 chars, which cut off the second clause of compound requests
+	// ("...then tell me the full path" vanished — e2e T1 2026-09-10), so
+	// executors never saw the whole request. OriginalInput below already
+	// carries the full input on the DispatchResult; the persisted task must
+	// match it.
+	parentTask := d.createTask(ctx, input, &Intent{
 		Type:    string(IntentCompound),
 		Summary: multi.Summary,
 	}, sessionID, "orchestrator")
@@ -2023,6 +2032,18 @@ func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiInt
 // classifyMultiIntent runs classification to detect all potential intents.
 // Adds complexity heuristics (Issue 0029): short messages without compound
 // signal words are skipped to avoid false positive compound detection.
+//
+// LLM arbitration (e2e T1, 2026-09-10): when exactly one detected intent is
+// actionable work (code/debug/git/...) and the rest are conversational
+// tag-alongs (chat/report/...), the request is a single action with a
+// trailing acknowledgment ask — "create hello.txt, then tell me the path".
+// The multi-intent classifier routinely emits chat as a second intent for
+// these, which flipped compound on and hi-jacked a straightforward single
+// task into a pair session that previously degraded to a contextless chat
+// deflection. The collapse fires only for the work-plus-report shape
+// (actionable == 1 && chatLike >= 1); genuine multi-work requests
+// (code+debug) stay compound, and "then tell me X" report-backs are exactly
+// what the chatLike arm absorbs.
 func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memCtx *MemoryContext) *MultiIntent {
 	// Early exit: short messages without compound signal words should not
 	// be considered compound tasks (Issue 0029).
@@ -2056,8 +2077,50 @@ func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memC
 	}
 	multi.DetectCompound()
 
+	// LLM arbitration: multi-intent says compound, single-intent says one
+	// actionable intent — trust single-intent for work-plus-report
+	// patterns. Only flips compound→single; never single→compound.
+	if multi.IsCompound {
+		actionable := 0
+		chatLike := 0
+		var nonChatIntent *Intent
+		for _, intent := range multi.Intents {
+			if intent.Confidence < compoundIntentConfidenceFloor {
+				continue
+			}
+			switch intent.Type {
+			case string(IntentChat), string(IntentPlatform), string(IntentRecall),
+				string(IntentReport), string(IntentSearch), string(IntentAnalyze):
+				chatLike++
+			default:
+				actionable++
+				if nonChatIntent == nil || intent.Confidence > nonChatIntent.Confidence {
+					nonChatIntent = intent
+				}
+			}
+		}
+		// Exactly one actionable + at least one conversational tag-along
+		// ⇒ collapse to the actionable intent. Deliberately NOT applied
+		// when actionable >= 2 (a code+debug request is genuinely compound)
+		// or when actionable == 0 (not a work request at all).
+		if actionable == 1 && chatLike >= 1 && nonChatIntent != nil {
+			d.logger.Info("Compound arbitration: work-plus-report request routed as single intent",
+				"actionable_intent", nonChatIntent.Type,
+				"chat_like_count", chatLike,
+				"input_len", len(input),
+			)
+			multi.IsCompound = false
+			multi.CompoundType = ""
+		}
+	}
+
 	return multi
 }
+
+// compoundIntentConfidenceFloor is the minimum confidence an intent from the
+// multi-intent classifier must carry to participate in compound arbitration
+// counting. Mirrors DetectCompound's own strong-intent filter.
+const compoundIntentConfidenceFloor = 0.5
 
 // RouteToAgent routes a dispatch result to the appropriate agent.
 // If an active agent loop exists for this conversation, it injects

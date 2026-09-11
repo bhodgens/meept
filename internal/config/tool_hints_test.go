@@ -35,6 +35,9 @@ func TestToolHintAgent_ExecutorNotChat(t *testing.T) {
 		"writer", "write", "explore", "researcher", "analyst", "librarian",
 		"architect", "skeptic", "coder", "debugger", "committer", "planner",
 		"image_gen", "video_gen", "image_id",
+		// e2e T1 (2026-09-10): compound/spec_pair steps reached scheduling
+		// with the intent string as the hint and fell through to chat.
+		"compound", "orchestrator", "spec_pair",
 	}
 	for _, hint := range executionHints {
 		agentID, ok := ToolHintAgent(hint)
