@@ -1473,6 +1473,22 @@ func (ts *TacticalScheduler) handleReviewResult(ctx context.Context, step *task.
 		if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
 			ts.logger.Error("Failed to set step to completed", "error", err)
 		}
+		// Forced completion implies validation-on-record (e2e run 10,
+		// aPh6Yq): a needs_info verdict with no revisions force-completes
+		// the step, but leaving Validated=false permanently blocks the
+		// task-level completion gate ("step completed but not validated")
+		// — the task never finishes and every sync wait times out. The
+		// review DID run and the platform decided the task proceeds; the
+		// reviewer's feedback is already preserved in the step result via
+		// ReviewManager's needs_info SetResult. Mirrors the approved-path
+		// validation-on-approval in ReviewManager.HandleReviewResult.
+		if !step.Validated {
+			step.Validated = true
+			step.ValidationError = ""
+			if err := ts.stepStore.Update(step); err != nil {
+				ts.logger.Warn("failed to persist validation-on-needs-info", "step_id", step.ID, "error", err)
+			}
+		}
 	}
 
 	// If revisions were created, use proper promotion flow to respect dependencies.
