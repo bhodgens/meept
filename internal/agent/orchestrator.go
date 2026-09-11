@@ -280,9 +280,17 @@ func (o *Orchestrator) PlanManager() *plan.PlanManager {
 
 // Strategic returns the strategic planner, if configured. Used by the
 // daemon to expose the task approval gate (StrategicPlanner.ApprovePlan)
-// over RPC.
+// over RPC, and to wire the metrics store for failure/replan outcome
+// capture (classifier-outcome-loop leaf 03).
 func (o *Orchestrator) Strategic() *StrategicPlanner {
 	return o.strategic
+}
+
+// Tactical returns the tactical scheduler, if configured. Used by the
+// daemon to wire the metrics store for failure/replan outcome capture
+// (classifier-outcome-loop leaf 03, Signal B at the Escalate site).
+func (o *Orchestrator) Tactical() *TacticalScheduler {
+	return o.tactical
 }
 
 // SetReflectionEngine sets the reflection engine for auto-fix loop.

@@ -536,6 +536,19 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if metricsStore != nil && components != nil && components.Dispatcher != nil {
 		components.Dispatcher.SetMetricsStore(metricsStore)
 
+		// Failure/replan outcome capture (classifier-outcome-loop leaf 03,
+		// Signal B): the orchestrator's tactical/strategic layers mark the
+		// dispatch rows of re-planned tasks 'failed_replan' at the Escalate
+		// and quickplan-fallback sites. Both setters are nil-guarded.
+		if components.Orchestrator != nil {
+			if ts := components.Orchestrator.Tactical(); ts != nil {
+				ts.SetMetricsStore(metricsStore)
+			}
+			if sp := components.Orchestrator.Strategic(); sp != nil {
+				sp.SetMetricsStore(metricsStore)
+			}
+		}
+
 		// Salted input hashing for dispatch_log (classifier-observability
 		// S4): the daemon owns the per-install salt and injects a closure
 		// over metrics.HashInput; the dispatcher stays crypto-agnostic.

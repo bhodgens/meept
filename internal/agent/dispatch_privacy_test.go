@@ -90,14 +90,23 @@ func TestRecordDispatch_HashesModelTurnNoSummaryEmpty(t *testing.T) {
 		t.Errorf("second turn_no = %d, want 2", second.TurnNo)
 	}
 
-	// Outcome defaults to pending; corrected_agent empty.
-	for i, e := range entries {
-		if e.Outcome != "pending" {
-			t.Errorf("row %d outcome = %q, want pending", i, e.Outcome)
-		}
-		if e.CorrectedAgent != "" {
-			t.Errorf("row %d corrected_agent = %q, want empty", i, e.CorrectedAgent)
-		}
+	// Outcome capture (classifier-outcome-loop leaf 03, Signal A): the last
+	// row stays 'pending' with empty corrected_agent. The earlier
+	// debugger->generalist switch between two classified rows one turn
+	// apart resolves row 1 to 'corrected' (corrected_agent = the agent that
+	// displaced it). Was "both pending" under leaf 01; Signal A changed the
+	// contract for all but the newest row.
+	if second.Outcome != "pending" {
+		t.Errorf("second outcome = %q, want pending (newest row unresolved)", second.Outcome)
+	}
+	if second.CorrectedAgent != "" {
+		t.Errorf("second corrected_agent = %q, want empty", second.CorrectedAgent)
+	}
+	if first.Outcome != "corrected" {
+		t.Errorf("first outcome = %q, want corrected (debugger->generalist switch)", first.Outcome)
+	}
+	if first.CorrectedAgent != "generalist" {
+		t.Errorf("first corrected_agent = %q, want generalist", first.CorrectedAgent)
 	}
 }
 

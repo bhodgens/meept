@@ -253,6 +253,15 @@ type DispatchResult struct {
 	// Instruction is the parsed instruction when user provides automation request.
 	// Only populated when intent type is IntentInstruction.
 	Instruction *preferences.ParsedInstruction `json:"-"`
+
+	// PrefilterVerdict carries the Door-1 kNN verdict (with margin) that
+	// produced this result, when the embedding prefilter ran for this
+	// dispatch (classifier-outcome-loop leaf 02). Present for routed AND
+	// abstained Door-1 dispatches — an abstain yields a nil Intent but a
+	// non-nil verdict, which is how the margin survives to recordDispatch.
+	// nil for every other classification door. Tagged json:"-" (operational
+	// metadata, not user-facing serialization).
+	PrefilterVerdict *PrefilterVerdict `json:"-"`
 }
 
 // executorModelRefFromDirective extracts the "provider/model-id" ref of the
@@ -305,6 +314,16 @@ type Dispatcher struct {
 	// metrics.HashInput via SetInputHasher. Nil => InputHash "" (the
 	// multi-user-disabled path stays untouched).
 	inputHasher func(message string) string
+
+	// Door-1 prefilter verdict capture (classifier-outcome-loop leaf 02).
+	// stashVerdict stores the verdict emitted by the LAST prefilter Match
+	// call; takeStashedPrefilterVerdict pops it for recordDispatch. The
+	// prefilter block in ClassifyAndRoute runs synchronously before
+	// recordDispatch on the same goroutine — the mutex is belt-and-braces
+	// for tests (the public RecordDispatch path), not for concurrency.
+	prefilterMu     sync.Mutex
+	stashVerdict    PrefilterVerdict
+	stashHasVerdict bool
 
 	// toolRegistry provides structural tool gating by depth.
 	// When non-nil, the dispatcher uses it to gate depth-sensitive
@@ -556,6 +575,12 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 			embTimeout,
 		)
 		d.prefilter = NewEmbeddingPrefilter(embClient, cfg.PrefilterConfig, cfg.Logger)
+		// Door-1 verdict capture (classifier-outcome-loop leaf 02): one
+		// observer, registered once at construction (SetMetricsStore
+		// precedent), stashes the last verdict for recordDispatch. The
+		// prefilter block runs synchronously before recordDispatch, so
+		// the stash is always THIS dispatch's verdict when read.
+		d.prefilter.SetVerdictObserver(d.stashPrefilterVerdict)
 		d.logger.Info("Stage-0 classifier prefilter enabled",
 			"base_url", cfg.PrefilterConfig.BaseURL,
 			"model", cfg.PrefilterConfig.Model,
@@ -822,12 +847,41 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// vs whatever the LLM chain classifies) and the chain always runs.
 	if d.prefilter != nil && agentOverride == "" && !hasCompoundSignalWords(input) {
 		pi := d.prefilter.Match(ctx, input)
+		// Door-1 verdict capture (classifier-outcome-loop leaf 02): Match
+		// stashed its verdict synchronously above. PEEK it (do not
+		// consume): recordDispatch — invoked by the handler after this
+		// call returns — is the single consume point that persists the
+		// margin. The closure below re-stashes the (marked) verdict when
+		// a gate suppresses the route, so the marked verdict is what
+		// recordDispatch later takes.
+		pfVerdict := d.peekStashedPrefilterVerdict()
+		// markSuppressed records that a ROUTED vote was held back by a
+		// dispatcher gate: Suppressed=true and Routed=false (the vote did
+		// not route), keeping the margin for the near-miss harvest. The
+		// cue-guard case arrives already Suppressed from Match.
+		markSuppressed := func() {
+			if pfVerdict != nil {
+				pfVerdict.Suppressed = true
+				pfVerdict.Routed = false
+				d.stashPrefilterVerdict(*pfVerdict)
+			}
+		}
+		// pfMargin guards log lines when no verdict was stashed (a test
+		// replaced the prefilter without an observer).
+		pfMargin := func() float64 {
+			if pfVerdict != nil {
+				return pfVerdict.Margin
+			}
+			return 0
+		}
 		if pi != nil && d.prefilter.assertOnly {
 			d.logger.Info("prefilter assert (not routing; assert_only)",
 				"asserted_intent", pi.Type,
 				"asserted_agent", pi.AgentType,
 				"confidence", pi.Confidence,
+				"margin", pfMargin(),
 			)
+			markSuppressed()
 			pi = nil
 		}
 		// H6 safety gate: the direct route bypasses instruction parsing,
@@ -841,7 +895,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				"asserted_intent", pi.Type,
 				"asserted_agent", pi.AgentType,
 				"confidence", pi.Confidence,
+				"margin", pfMargin(),
 			)
+			markSuppressed()
 			pi = nil
 		}
 		if pi != nil && IntentType(pi.Type).ShouldDispatchAsync(IntentType(pi.Type).RequiresPlanning()) {
@@ -849,7 +905,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				"asserted_intent", pi.Type,
 				"asserted_agent", pi.AgentType,
 				"confidence", pi.Confidence,
+				"margin", pfMargin(),
 			)
+			markSuppressed()
 			pi = nil
 		}
 		if pi != nil {
@@ -864,19 +922,32 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				"intent_type", pi.Type,
 				"confidence", pi.Confidence,
 				"classification_method", pi.Method,
+				"margin", pfMargin(),
+				"asserted", pi.Type,
 				"memory_refs", len(pi.MemoryRefs),
 				"has_task", false,
 				"has_model_override", parseResult.Found,
 			)
 			return &DispatchResult{
-				AgentID:        pi.AgentType,
-				Intent:         pi,
-				MemoryContext:  memCtx.Results,
-				ModelDirective: parseResult.Directive,
-				OriginalInput:  input,
-				Parts:          parts,
-				SuggestedMode:  pi.SuggestedMode,
+				AgentID:          pi.AgentType,
+				Intent:           pi,
+				MemoryContext:    memCtx.Results,
+				ModelDirective:   parseResult.Directive,
+				OriginalInput:    input,
+				Parts:            parts,
+				SuggestedMode:    pi.SuggestedMode,
+				PrefilterVerdict: pfVerdict,
 			}, nil
+		}
+		if pfVerdict != nil && !pfVerdict.Suppressed {
+			// Abstained with a real vote nearby (the margin this leaf
+			// exists to keep): mirror it at dispatcher level with session
+			// context — Match's own debug line carries no session.
+			d.logger.Debug("prefilter abstain (full chain)",
+				"session", sessionID,
+				"margin", pfVerdict.Margin,
+				"asserted", pfVerdict.AssertedIntent,
+			)
 		}
 	}
 
@@ -3112,6 +3183,53 @@ func (d *Dispatcher) SetInputHasher(fn func(message string) string) {
 	}
 }
 
+// stashPrefilterVerdict is the prefilter's Door-1 verdict observer
+// (classifier-outcome-loop leaf 02): it captures the last emitted verdict
+// so recordDispatch can persist the kNN margin even when the vote was
+// suppressed or abstained. The prefilter block in ClassifyAndRoute runs
+// synchronously before recordDispatch on the same goroutine — no
+// goroutine hop between Match and the persist site — so the stash always
+// holds THIS dispatch's verdict when read; the mutex guards only the
+// (test-exercised) public RecordDispatch path.
+func (d *Dispatcher) stashPrefilterVerdict(v PrefilterVerdict) {
+	d.prefilterMu.Lock()
+	d.stashVerdict = v
+	d.stashHasVerdict = true
+	d.prefilterMu.Unlock()
+}
+
+// takeStashedPrefilterVerdict pops the stashed Door-1 verdict: non-nil
+// when the embedding prefilter observed (this) dispatch, nil otherwise.
+// Always takes — a verdict is consumed exactly once, at the persist site
+// (recordDispatch), so a dispatch that never ran the prefilter cannot
+// inherit a stale one.
+func (d *Dispatcher) takeStashedPrefilterVerdict() *PrefilterVerdict {
+	d.prefilterMu.Lock()
+	defer d.prefilterMu.Unlock()
+	if !d.stashHasVerdict {
+		return nil
+	}
+	v := d.stashVerdict
+	d.stashVerdict = PrefilterVerdict{}
+	d.stashHasVerdict = false
+	return &v
+}
+
+// peekStashedPrefilterVerdict reads the stashed Door-1 verdict WITHOUT
+// consuming it — used by the ClassifyAndRoute prefilter block for gate
+// marking and result transport. The stash is only ever consumed at the
+// persist site (recordDispatch), which runs synchronously after the block
+// returns.
+func (d *Dispatcher) peekStashedPrefilterVerdict() *PrefilterVerdict {
+	d.prefilterMu.Lock()
+	defer d.prefilterMu.Unlock()
+	if !d.stashHasVerdict {
+		return nil
+	}
+	v := d.stashVerdict
+	return &v
+}
+
 // SetToolRegistry wires a depth-based tool registry for structural gating.
 // At maxDepth the agent simply won't have spawn tools in its registry.
 func (d *Dispatcher) SetToolRegistry(reg *DepthToolRegistry) {
@@ -3213,6 +3331,16 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 			// all LLM candidates failed.
 			model = result.Intent.Model
 		}
+		// Door-1 margin (classifier-outcome-loop leaf 02): populated when
+		// the embedding prefilter observed this dispatch — routed,
+		// suppressed, OR abstained. nil (SQL NULL) when the dispatch came
+		// from any other door, preserving the leaf-01 column contract.
+		// The verdict is consumed here exactly once.
+		var pfMargin *float64
+		if v := d.takeStashedPrefilterVerdict(); v != nil {
+			m := v.Margin
+			pfMargin = &m
+		}
 		// Turn number: one past the current session row count, so the
 		// first dispatch of a session is turn 1. The COUNT is index-backed
 		// and session rows are bounded by 30-day retention.
@@ -3230,6 +3358,7 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 			Error:            errStr,
 			InputHash:        inputHash,
 			Model:            model,
+			Margin:           pfMargin,
 			TurnNo:           turnNo,
 			Outcome:          "pending",
 		})

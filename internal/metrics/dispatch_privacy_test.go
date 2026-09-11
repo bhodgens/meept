@@ -102,24 +102,24 @@ func TestRecordDispatch_RoundTripWithNewColumns(t *testing.T) {
 
 	margin := 0.42
 	s.RecordDispatch(DispatchEntry{
-		SessionID:      "conv-rt",
-		InputSummary:   "should not be persisted",
-		IntentType:     "code",
-		AgentID:        "coder",
+		SessionID:        "conv-rt",
+		InputSummary:     "should not be persisted",
+		IntentType:       "code",
+		AgentID:          "coder",
 		Confidence:       0.9,
 		ClassifierMethod: "llm",
-		HandlerCase:    "route_to_agent",
-		InputHash:      "abc123def4567890",
-		Model:          "provider/model-1",
-		Margin:         &margin,
-		TurnNo:         1,
-		Outcome:        "pending",
+		HandlerCase:      "route_to_agent",
+		InputHash:        "abc123def4567890",
+		Model:            "provider/model-1",
+		Margin:           &margin,
+		TurnNo:           1,
+		Outcome:          "pending",
 	})
 	s.RecordDispatch(DispatchEntry{
-		SessionID: "conv-rt",
+		SessionID:  "conv-rt",
 		IntentType: "general",
-		AgentID:   "generalist",
-		TurnNo:    2,
+		AgentID:    "generalist",
+		TurnNo:     2,
 	})
 
 	results, err := s.QueryDispatchLog(10)

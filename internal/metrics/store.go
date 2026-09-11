@@ -921,11 +921,11 @@ func (s *Store) RecordDispatch(entry DispatchEntry) {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO dispatch_log
-			(session_id, input_summary, intent_type, agent_id, confidence,
+			(session_id, intent_type, agent_id, confidence,
 			 classifier_method, handler_case, task_id, has_parts, error,
 			 input_hash, model, margin, turn_no, outcome, corrected_agent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.SessionID, entry.InputSummary, entry.IntentType, entry.AgentID,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.SessionID, entry.IntentType, entry.AgentID,
 		entry.Confidence, entry.ClassifierMethod, entry.HandlerCase,
 		entry.TaskID, hasParts, entry.Error,
 		entry.InputHash, entry.Model, entry.Margin, entry.TurnNo,
@@ -947,6 +947,75 @@ func (s *Store) CountDispatchRows(sessionID string) int {
 		return 0
 	}
 	return count
+}
+
+// ResolvePendingOutcome implements the re-route detector (classifier-outcome-loop
+// leaf 03, Signal A). It resolves the most recent pending dispatch_log row for
+// the session that came from a real classifier (classifier_method != ” and
+// turn_no < turnNo):
+//
+//   - agentID != row.agent_id AND (turnNo - row.turn_no) <= window
+//     -> outcome='corrected', corrected_agent=agentID (user likely re-asked;
+//     the agent switch within the window is the proxy signal)
+//   - otherwise -> outcome='ok'
+//
+// Exactly one prior row is resolved per dispatch -- the latest one. Older
+// pending rows remain pending by design; the nightly harvest treats stale
+// pending as excluded-from-denominator. An empty agentID (non-classified
+// current dispatch: agent comparison is meaningless) can resolve the prior row
+// to 'ok' only -- it never marks 'corrected'. No prior row is a no-op.
+func (s *Store) ResolvePendingOutcome(sessionID string, turnNo int, agentID string, window int) error {
+	var row struct {
+		ID      int    `db:"id"`
+		AgentID string `db:"agent_id"`
+		TurnNo  int    `db:"turn_no"`
+	}
+	err := s.db.Get(&row,
+		`SELECT id, agent_id, turn_no FROM dispatch_log
+		 WHERE session_id = ? AND outcome = 'pending'
+		   AND classifier_method != '' AND turn_no < ?
+		 ORDER BY id DESC LIMIT 1`,
+		sessionID, turnNo,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil // no prior pending classified row: no-op
+		}
+		return fmt.Errorf("failed to find pending dispatch outcome for session %s: %w", sessionID, err)
+	}
+
+	if agentID != "" && row.AgentID != agentID && (turnNo-row.TurnNo) <= window {
+		if _, err := s.db.Exec(
+			`UPDATE dispatch_log SET outcome = 'corrected', corrected_agent = ? WHERE id = ?`,
+			agentID, row.ID,
+		); err != nil {
+			return fmt.Errorf("failed to mark corrected dispatch outcome (session %s): %w", sessionID, err)
+		}
+		return nil
+	}
+
+	if _, err := s.db.Exec(
+		`UPDATE dispatch_log SET outcome = 'ok' WHERE id = ?`,
+		row.ID,
+	); err != nil {
+		return fmt.Errorf("failed to mark ok dispatch outcome (session %s): %w", sessionID, err)
+	}
+	return nil
+}
+
+// MarkTaskFailedReplan flips the pending dispatch_log rows for a task to
+// 'failed_replan' (classifier-outcome-loop leaf 03, Signal B). Called from the
+// two failure/replan sites: tactical step-failure escalation and the strategic
+// planner's fallback-steps degradation. Only pending rows are affected; rows
+// already resolved by Signal A stay as-is.
+func (s *Store) MarkTaskFailedReplan(taskID string) error {
+	if _, err := s.db.Exec(
+		`UPDATE dispatch_log SET outcome = 'failed_replan' WHERE task_id = ? AND outcome = 'pending'`,
+		taskID,
+	); err != nil {
+		return fmt.Errorf("failed to mark failed_replan for task %s: %w", taskID, err)
+	}
+	return nil
 }
 
 // QueryDispatchLog returns recent dispatch entries, most recent first.
