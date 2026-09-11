@@ -21,14 +21,14 @@ import (
 // (classifier-observability follow-up, HANDOFF-STAGE0.md §5/§9): embed the
 // raw input, kNN-match against labeled example vectors, and return a
 // direct-route Intent when the vote is unanimous. On any miss or error it
-// returns nil and the existing analyzer + router LLM chain runs unchanged —
+// returns nil and the existing analyzer + router LLM chain runs unchanged --
 // the prefilter can only skip work, never degrade routing.
 //
 // User invariant (2026-09-07): a wrong answer with overstated confidence is
 // worse than a low-confidence correct one. Everything here is tuned for
-// precision-first: unanimous top-k vote, no vote → nil, any failure → nil.
+// precision-first: unanimous top-k vote, no vote -> nil, any failure -> nil.
 //
-// AssertOnly mode (config) inverts nothing in the gate — it only changes
+// AssertOnly mode (config) inverts nothing in the gate -- it only changes
 // what the CALLER does with the result. In assert mode the dispatcher logs
 // the prefilter verdict and runs the LLM chain anyway, accumulating
 // real-traffic agreement data with zero routing risk.
@@ -41,6 +41,13 @@ type EmbeddingPrefilter struct {
 	path       string
 	dimension  int
 	logger     *slog.Logger
+
+	// verdictObserver, when non-nil, receives every Match verdict (routed,
+	// abstain, suppressed, empty index) for Door-1 margin capture
+	// (classifier-outcome-loop leaf 02). Register once via
+	// SetVerdictObserver during construction, before Match runs;
+	// not lock-protected (same wiring-order contract as SetPublisher).
+	verdictObserver func(PrefilterVerdict)
 
 	mu       sync.RWMutex
 	examples []prefilterExample
@@ -65,7 +72,7 @@ type prefilterExample struct {
 
 // prefilterStore is the on-disk kNN index produced by
 // scripts/build_prefilter_centroids.py (which writes per-example vectors;
-// legacy centroid-only stores load too — each centroid then acts as one
+// legacy centroid-only stores load too -- each centroid then acts as one
 // pseudo-example).
 type prefilterStore struct {
 	Model     string             `json:"model"`
@@ -73,7 +80,7 @@ type prefilterStore struct {
 	BuiltAt   string             `json:"built_at"`
 	Corpus    string             `json:"corpus"`
 	Examples  []prefilterExample `json:"examples"`
-	// Legacy centroid fields — read only when Examples is empty.
+	// Legacy centroid fields -- read only when Examples is empty.
 	Centroids []prefilterExample `json:"centroids"`
 }
 
@@ -88,7 +95,7 @@ const (
 	DefaultPrefilterThreshold = 0.70
 	// defaultPrefilterK is the vote size: ALL k nearest examples must
 	// agree on one intent, else nil. Unanimity is the precision
-	// instrument — mixed neighborhoods are exactly the ambiguous inputs
+	// instrument -- mixed neighborhoods are exactly the ambiguous inputs
 	// the LLM chain should see.
 	defaultPrefilterK       = 5
 	defaultPrefilterTimeout = 2 * time.Second
@@ -141,7 +148,7 @@ func (p *EmbeddingPrefilter) loadIndex(force bool) bool {
 	}
 
 	// File I/O under no lock (mutexio rule). Concurrent loads of the same
-	// file are benign — last writer wins with identical content.
+	// file are benign -- last writer wins with identical content.
 	data, err := os.ReadFile(p.path)
 	if err != nil {
 		p.failLoad("prefilter index unreadable; prefilter inert", err.Error())
@@ -222,13 +229,49 @@ type kNNVote struct {
 	Agent      string
 	Confidence float64 // min cosine among the k winners (unanimity floor)
 	Margin     float64 // winner-floor minus best losing neighbor score
+	// Suppressed marks a vote rejected by the QuickPlan cue guard (vs an
+	// ordinary abstain). Only ever set on the guard's failure return, so
+	// Match can observe the suppression without re-running the guard.
+	Suppressed bool
+}
+
+// PrefilterVerdict is the Door-1 outcome of one Match call, forwarded to
+// the dispatcher so the kNN margin survives on routed, suppressed, AND
+// abstained dispatches (classifier-outcome-loop leaf 02; design.md S3(b)
+// -- abstentions discard the vote today, exactly the rows the near-miss
+// harvest needs). Value type: the observer callback stays allocation-light.
+type PrefilterVerdict struct {
+	Routed         bool
+	AssertedIntent string  // winning intent; "" when index empty
+	Confidence     float64 // winning similarity (unanimity floor)
+	Margin         float64 // kNNVote margin (top1 - top2)
+	Suppressed     bool    // H6 gate or quickplan cue-guard suppression
+}
+
+// SetVerdictObserver wires the Door-1 verdict consumer. Nil-guarded
+// (project invariant, cf. SetPublisher): a nil fn -- including a typed-nil
+// func -- is ignored so a wiring-order bug cannot strip a live observer.
+// Not lock-protected: register once during construction, before Match runs.
+func (p *EmbeddingPrefilter) SetVerdictObserver(fn func(PrefilterVerdict)) {
+	if fn != nil {
+		p.verdictObserver = fn
+	}
+}
+
+// emitVerdict invokes the observer when one is wired. Called synchronously
+// on every Match return path; observer panics are NOT caught (the observer
+// is in-process and trusted).
+func (p *EmbeddingPrefilter) emitVerdict(v PrefilterVerdict) {
+	if p.verdictObserver != nil {
+		p.verdictObserver(v)
+	}
 }
 
 // selfMatchCutoff: neighbors at or above this cosine are exact/near-exact
 // duplicates of the query itself (e.g. verbatim corpus repeats). They occupy
 // a vote slot while carrying no independent class evidence, so they are
 // excluded from the vote. Without this, verbatim repeats abstain (self
-// crowds out a real neighbor) — the daemon behaves worse than the LOO
+// crowds out a real neighbor) -- the daemon behaves worse than the LOO
 // sweep predicts.
 const selfMatchCutoff = 0.999
 
@@ -256,17 +299,31 @@ func (p *EmbeddingPrefilter) vote(vec []float64, input string) (kNNVote, bool) {
 	neighbors = neighbors[:p.k]
 
 	first := p.examples[neighbors[0].idx].Intent
+	// topGap is the rank-1 vs rank-2 score gap -- the best margin available
+	// on a FAILED vote (leaf 02: abstained rows keep an informative margin
+	// for the near-miss harvest). neighbors is sorted desc, and the guard
+	// requires k >= 2 for neighbors[1] to exist; with k == 1 there is no
+	// rank-2 and the gap stays 0.
+	topGap := 0.0
+	if len(neighbors) > 1 {
+		topGap = neighbors[0].score - neighbors[1].score
+	}
 	// QuickPlan cue guard: quickplan-vs-code/git is not decidable from
-	// message text (session-state signal — adjudication record
+	// message text (session-state signal -- adjudication record
 	// 2026-09-09). A quickplan vote without orchestration cues falls
 	// through to the LLM chain, which has conversation context.
+	// Suppressed (not abstained) so the observer can distinguish the two;
+	// the guard logic itself is unchanged -- only observed.
 	if first == string(IntentQuickPlan) && !QuickPlanCuePattern.MatchString(input) {
-		return kNNVote{}, false
+		return kNNVote{Intent: first, Margin: topGap, Suppressed: true}, false
 	}
 	floor := neighbors[0].score
 	for _, nb := range neighbors {
 		if p.examples[nb.idx].Intent != first {
-			return kNNVote{}, false // any dissenter kills the vote
+			// Any dissenter kills the vote -- but the top-1/top-2 gap is
+			// exactly the near-miss signal the outcome loop harvests, so
+			// carry it out on the failed vote instead of discarding it.
+			return kNNVote{Intent: first, Margin: topGap}, false
 		}
 		if nb.score < floor {
 			floor = nb.score
@@ -312,10 +369,13 @@ func (p *EmbeddingPrefilter) vote(vec []float64, input string) (kNNVote, bool) {
 
 // Match embeds the input and returns a direct-route Intent when the k
 // nearest examples vote unanimously for one intent. nil means "no opinion"
-// — caller falls through to the LLM chain.
+// -- caller falls through to the LLM chain.
 func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 	input = strings.TrimSpace(input)
 	if input == "" || !p.loadIndex(false) {
+		// Empty index (or blank input): nothing to assert, nothing to
+		// score -- AssertedIntent "" and zero margin (leaf 02).
+		p.emitVerdict(PrefilterVerdict{AssertedIntent: ""})
 		return nil
 	}
 
@@ -325,14 +385,17 @@ func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 	if err != nil {
 		// Absorb the ctx error when the caller is already cancelling.
 		if ctx.Err() != nil {
+			p.emitVerdict(PrefilterVerdict{AssertedIntent: ""})
 			return nil
 		}
 		p.logger.Warn("prefilter embed failed; falling through to LLM chain", "error", err)
+		p.emitVerdict(PrefilterVerdict{AssertedIntent: ""})
 		return nil
 	}
 	if p.dimension > 0 && len(vec) != p.dimension {
 		p.logger.Warn("prefilter dimension mismatch; falling through",
 			"got", len(vec), "want", p.dimension)
+		p.emitVerdict(PrefilterVerdict{AssertedIntent: ""})
 		return nil
 	}
 
@@ -342,6 +405,7 @@ func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 	if p.storeDim > 0 && len(vec) != p.storeDim {
 		p.logger.Warn("prefilter embedding dimension differs from index; rebuild index",
 			"embedding", len(vec), "store", p.storeDim)
+		p.emitVerdict(PrefilterVerdict{AssertedIntent: ""})
 		return nil
 	}
 
@@ -350,7 +414,17 @@ func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 		p.logger.Debug("prefilter no unanimous vote",
 			"k", p.k,
 			"threshold", p.threshold,
+			"margin", v.Margin,
 		)
+		// Abstain (or cue-guard suppression): the margin is exactly what
+		// this path used to discard -- forward it either way (leaf 02).
+		// kNNVote is zero-valued here whenever no vote was even attempted
+		// (sparse neighborhood), so Margin is 0 rather than garbage.
+		p.emitVerdict(PrefilterVerdict{
+			AssertedIntent: v.Intent,
+			Suppressed:     v.Suppressed,
+			Margin:         v.Margin,
+		})
 		return nil
 	}
 	confidence := v.Confidence
@@ -364,6 +438,12 @@ func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 		"unanimity_floor", v.Confidence,
 		"margin", v.Margin,
 	)
+	p.emitVerdict(PrefilterVerdict{
+		Routed:         true,
+		AssertedIntent: v.Intent,
+		Confidence:     confidence,
+		Margin:         v.Margin,
+	})
 	return &Intent{
 		Type:       v.Intent,
 		Confidence: confidence,
