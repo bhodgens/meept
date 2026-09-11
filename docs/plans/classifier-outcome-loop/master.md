@@ -216,7 +216,7 @@ commit: `feat(observability): harvest pipeline + dashboards (L4)`.
 | 01-persist-privacy.md | COMPLETE | 1 | 1a68a9b5 — schema delta + salted hash + raw text removal + error scrub; 9 metrics tests + privacy tests; one informational fmt.Errorf note (non-blocking) |
 | 02-margin-capture.md | COMPLETE | 1 | 5b2b32e4 — PrefilterVerdict observer on all Match paths; abstain margin preserved (the point); 5 tests |
 | 03-outcome-capture.md | COMPLETE | 1 | c5e018f3 — ResolvePendingOutcome + MarkTaskFailedReplan; Signal A in recordDispatch; Signal B at Escalate + quickplan fallback; 6+ store cases |
-| 04-harvest-dashboards.md | PENDING | 0 | |
+| 04-harvest-dashboards.md | COMPLETE | 1 | 440de6ca — harvest_outcomes.py read-only + gitignored text join + 4 idempotent views; verified graceful zero-state on pre-L1 daemon DB; docs section added |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
