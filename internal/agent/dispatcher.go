@@ -1268,13 +1268,18 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				)
 				d.recordClassificationMethod("platform_action_arbitration")
 				intent = nil
-			} else if intent.Type == string(IntentPlatform) &&
+			} else if (intent.Type == string(IntentPlatform) ||
+				(intent.Type == string(IntentSchedule) && !hasTimeSignal(input))) &&
 				(isSecondPersonWorkRecall(input) || isWorkStatusRecall(input)) {
 				// Platform-vs-recall arbitration (e2e run 5, 2026-09-10):
 				// "what files did you make for me?" scored platform @0.9 →
 				// roster dump. A question about the ASSISTANT'S OWN past
 				// actions is recall/report material; route it to chat with
 				// the recall flavor so the session context answers it.
+				// Schedule extension (e2e run 9, 2026-09-10): "did the
+				// change get made? where is the file?" scored schedule on
+				// the 1.2B SFT — a time-signal-free schedule verdict on a
+				// work-status question is the same credibility failure.
 				d.logger.Info("Platform verdict overridden by second-person work recall",
 					"llm_confidence", intent.Confidence,
 					"input_len", len(input),
