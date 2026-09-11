@@ -237,6 +237,19 @@ func (cd *convergenceDetector) recordResponse(content string, hasTools bool) boo
 
 	// Normalize and hash content
 	normalized := normalizeContent(content)
+
+	// Blank content is NOT convergence: a degenerating model (reasoning-only
+	// replies, cold runtime, tight max_tokens) hashes every blank reply to
+	// the same empty string, so three blank turns tripped this detector
+	// instantly and aborted the turn before the blank-content nudge ladder
+	// (loop.go empty-response handling) could do its job — the guard that
+	// exists to catch "same text, no progress" was eating the turn on
+	// "no text at all" (e2e T2 2026-09-10). Blank turns belong to the
+	// nudge ladder and the reasoning watchdog; don't record them here.
+	if normalized == "" {
+		return false
+	}
+
 	contentHash := hashString(normalized)
 
 	sig := responseSignature{
