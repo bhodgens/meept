@@ -6660,6 +6660,12 @@ func (l *AgentLoop) buildSessionContextSection() string {
 	}
 	if wd != "" {
 		fmt.Fprintf(&b, "Working directory: %s\n", wd)
+		// Path hygiene (e2e run 11, 2026-09-11 0hqmgO): with the working
+		// directory stated, a model that still invents an absolute path
+		// ("file_read /hello.txt") gets security-blocked and fails its own
+		// verification step even though the write succeeded. One explicit
+		// rule steers verification reads to relative paths.
+		fmt.Fprintf(&b, "Use paths relative to the working directory for file tools; never invent absolute paths.\n")
 	}
 	if dc != nil {
 		if dc.CWD != "" {

@@ -987,17 +987,39 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 
 	// NEW: Extract evidence from result before validation
 	var execResult struct {
-		Success  bool              `json:"success"`
-		Result   any               `json:"result,omitempty"`
-		Error    string            `json:"error,omitempty"`
+		Success bool   `json:"success"`
+		Result  any    `json:"result,omitempty"`
+		Error   string `json:"error,omitempty"`
+		// Evidence is the legacy typed-evidence envelope (tool executors
+		// that return models.Evidence arrays directly).
 		Evidence []models.Evidence `json:"evidence,omitempty"`
+		// ToolEvidence is the tool-issued evidence projection from the
+		// daemon job processor (e2e run 7 rkl3Th): collected from
+		// tool.execution.complete bus events, so it reflects what tools
+		// ACTUALLY did rather than what the model narrates. Unlike the
+		// narrated "evidence" array in a report, this cannot be
+		// hallucinated without a real execution behind it.
+		ToolEvidence []models.Evidence `json:"tool_evidence,omitempty"`
+		// Claims are the parsed report's accomplished entries — the
+		// model's narration, checked against ToolEvidence below.
+		Claims []string `json:"claims,omitempty"`
 	}
 	if err := json.Unmarshal(result, &execResult); err != nil {
 		ts.logger.Debug("Failed to parse execution result", "step_id", step.ID, "error", err)
 	}
 
-	// Update step with evidence before validation
-	if len(execResult.Evidence) > 0 {
+	// Update step with evidence before validation. Tool-issued evidence
+	// wins over the legacy envelope when both are present.
+	if len(execResult.ToolEvidence) > 0 {
+		step.Evidence = execResult.ToolEvidence
+		if err := ts.stepStore.Update(step); err != nil {
+			ts.logger.Error("Failed to persist tool evidence", "step_id", step.ID, "error", err)
+		}
+		ts.logger.Info("Extracted tool-issued evidence from execution result",
+			"step_id", step.ID,
+			"evidence_count", len(execResult.ToolEvidence),
+		)
+	} else if len(execResult.Evidence) > 0 {
 		step.Evidence = execResult.Evidence
 		// Persist evidence to step store
 		if err := ts.stepStore.Update(step); err != nil {
@@ -1007,6 +1029,29 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			"step_id", step.ID,
 			"evidence_count", len(execResult.Evidence),
 		)
+	}
+
+	// Claim-vs-evidence contract (e2e run 7 rkl3Th): the step claims file
+	// side-effects ("Created file hello.txt") but carries NO tool-issued
+	// evidence — the narration is unverified; mark it rather than let a
+	// fabricated report ride forward as ground truth. Complements the
+	// loop-layer anti-hallucination nudge (which retried the turn): this
+	// is the record-level backstop for whatever still arrives.
+	if len(execResult.Claims) > 0 && len(step.Evidence) == 0 && ts.claimsFileSideEffects(execResult.Claims) {
+		step.Validated = false
+		step.ValidationError = "file side-effect claims without tool-issued evidence (unverified narration)"
+		if err := ts.stepStore.Update(step); err != nil {
+			ts.logger.Warn("failed to persist unverified step", "step_id", step.ID, "error", err)
+		}
+		ts.logger.Warn("Step claims file side-effects with no tool evidence; marking unverified",
+			"step_id", step.ID,
+			"claims", len(execResult.Claims),
+		)
+		// Do NOT fail the step (the work may genuinely be done by
+		// non-file tools or already-present artifacts); mark it so
+		// downstream consumers can tell unverified narration from a
+		// validated result, and let the normal completion flow proceed.
+		return nil
 	}
 
 	// NEW: Validation gate - validate evidence before proceeding
@@ -2466,4 +2511,27 @@ func agentIDToToolHint(agentID string) string {
 	default:
 		return "chat"
 	}
+}
+
+// fileSideEffectClaimRe matches completed-action narration against file
+// artifacts in report claim strings ("Created file hello.txt", "Updated
+// the config"). Mirrors the loop-layer unbackedSideEffectClaims
+// vocabulary (loop.go) at the step-record level: the gate needs to know
+// the CLAIM is about a file side-effect, not merely that text mentions a
+// past-tense verb.
+var fileSideEffectClaimRe = regexp.MustCompile(
+	`(?i)\b(created|wrote|modified|updated|deleted|generated|saved|edited)\b[^.\n]{0,80}?\b(file|\.txt|\.md|\.go|\.json|\.yaml|\.yml|\.py|\.sh|\.js|\.ts|config|script|document)\b`)
+
+// claimsFileSideEffects reports whether any claim string narrates a
+// completed file side-effect. Used by handleJobComplete's claim-vs-
+// evidence contract: claims of this shape without tool-issued evidence
+// mark the step unverified rather than letting fabricated narration read
+// as ground truth.
+func (ts *TacticalScheduler) claimsFileSideEffects(claims []string) bool {
+	for _, c := range claims {
+		if fileSideEffectClaimRe.MatchString(c) {
+			return true
+		}
+	}
+	return false
 }

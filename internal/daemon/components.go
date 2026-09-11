@@ -73,6 +73,7 @@ import (
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/tools/mcp"
+	"github.com/caimlas/meept/internal/validator"
 	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/internal/workspace"
 	"github.com/caimlas/meept/pkg/id"
@@ -175,6 +176,10 @@ type Components struct {
 	JobProcessor  worker.JobProcessor
 	Orchestrator  *agent.Orchestrator
 	ReviewManager *agent.ReviewManager
+	// ValidatorManager backs the TacticalScheduler's step validation gate
+	// (claim-vs-evidence, e2e run 7 rkl3Th). Nil before Initialize wires
+	// it; constructed with the standard tool-hint table.
+	ValidatorManager *validator.ValidatorManager
 
 	// AgentLoopManager provides per-session AgentLoop instances for
 	// session-scoped dispatch. Constructed at startup; nil if worker pool
@@ -2715,6 +2720,27 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			})
 			logger.Info("Escalation manager initialized")
 
+			// Claim-vs-evidence validation (e2e run 7, 2026-09-11 rkl3Th):
+			// the TacticalScheduler's ValidateStep gate has existed since
+			// its introduction but was never WIRED — ValidatorManager was
+			// constructed nowhere in the daemon, so fabricated evidence in
+			// step results passed silently. A step-scoped filesystem
+			// validator constrained to the session's project root turns the
+			// gate on: any file_exists/file_hash evidence in a code-hinted
+			// step must resolve on disk. Bounded: paths outside the project
+			// are REJECTED as evidence, not followed.
+			// The manager's tool-hint table (code/file_write/file_read →
+			// filesystem validator, shell → shell validator, …) comes from
+			// validator.NewValidatorManager; the filesystem validator
+			// checks evidence subjects against the REAL filesystem, so a
+			// fabricated file_exists (run 7) fails the gate unless the
+			// artifact exists. Relative evidence paths resolve against the
+			// validator process working directory — scratch-daemon runs
+			// set this to the project dir, so step-relative paths check
+			// the right tree.
+			c.ValidatorManager = validator.NewValidatorManagerWithLogger(
+				logger.With("component", "step-validator"))
+
 			tacticalScheduler := agent.NewTacticalScheduler(agent.TacticalSchedulerConfig{
 				StepStore:           stepStore,
 				TaskStore:           orchTaskStore,
@@ -2724,6 +2750,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				Logger:              logger.With("component", "tactical"),
 				ReviewManager:       reviewManager,
 				EscalationManager:   c.EscalationManager,
+				ValidatorManager:    c.ValidatorManager,
 				MaxHandoffSteps:     cfg.Orchestrator.MaxHandoffSteps,
 				HandoffUseAmendment: cfg.Orchestrator.HandoffUseAmendment,
 				AmendmentManager:    c.AmendmentMgr,
@@ -7471,6 +7498,16 @@ type AgentJobProcessor struct {
 	// event so the user hears the real cause. Nil (the default for processors
 	// built without WithBus) keeps publishing silent.
 	bus *bus.MessageBus
+	// toolEvidence captures TOOL-issued evidence from tool.execution.complete
+	// bus events, keyed by conversation ID (claim-vs-evidence validation,
+	// e2e run 7 rkl3Th): the step-job result can then carry a tool_evidence
+	// envelope the tactical validation gate can ACTUALLY check against the
+	// filesystem — the model's narrated report was never evidence.
+	toolEvidence *toolEvidenceCollector
+	// evidenceSub is the tool.execution.complete subscription opened by
+	// WithBus; kept on the processor so the subscription goroutine has a
+	// stable owner. Nil when no bus was provided.
+	evidenceSub *bus.Subscriber
 }
 
 // NewAgentJobProcessor creates a new agent job processor.
@@ -7507,7 +7544,82 @@ func (p *AgentJobProcessor) WithTaskStore(ts *task.Store) *AgentJobProcessor {
 // silent — processors built without a bus must stay fully functional.
 func (p *AgentJobProcessor) WithBus(b *bus.MessageBus) *AgentJobProcessor {
 	p.bus = b
+	// Claim-vs-evidence validation (run 7): subscribe to the executor's
+	// tool-completion events and collect tool-issued Evidence per
+	// conversation. The collector drains per step job in Process.
+	if p.toolEvidence == nil {
+		p.toolEvidence = newToolEvidenceCollector()
+	}
+	if p.evidenceSub == nil {
+		sub := b.Subscribe("agent-job-processor-evidence", "tool.execution.complete")
+		p.evidenceSub = sub
+		p.toolEvidence.wg.Add(1)
+		go func() {
+			defer p.toolEvidence.wg.Done()
+			for msg := range sub.Channel {
+				p.toolEvidence.absorb(msg.Payload)
+			}
+		}()
+	}
 	return p
+}
+
+// evidenceSub is the tool.execution.complete subscription opened by
+// WithBus; kept on the processor for unsubscribe symmetry.
+// (Declared separately so the zero-value processor stays usable without
+// a bus — every use is nil-guarded.)
+
+// toolEvidenceCollector accumulates tool-issued evidence payloads per
+// conversation ID. absorb() is best-effort: malformed payloads are
+// dropped, never fatal. Drained by the daemon job processor at step-job
+// completion time. Not safe for concurrent drain — Process calls drain
+// on its own worker goroutine while absorb() runs on the subscription
+// goroutine, so a mutex guards the map.
+type toolEvidenceCollector struct {
+	mu     sync.Mutex
+	byConv map[string][]map[string]any
+	wg     sync.WaitGroup
+}
+
+func newToolEvidenceCollector() *toolEvidenceCollector {
+	return &toolEvidenceCollector{byConv: make(map[string][]map[string]any)}
+}
+
+// absorb parses one tool.execution.complete payload and files any
+// evidence entries under the payload's conversation_id.
+func (c *toolEvidenceCollector) absorb(payload json.RawMessage) {
+	var ev struct {
+		ConversationID string            `json:"conversation_id"`
+		ToolName       string            `json:"tool_name"`
+		Success        bool              `json:"success"`
+		Evidence       []models.Evidence `json:"evidence"`
+	}
+	if err := json.Unmarshal(payload, &ev); err != nil || ev.ConversationID == "" || !ev.Success {
+		return
+	}
+	if len(ev.Evidence) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, e := range ev.Evidence {
+		c.byConv[ev.ConversationID] = append(c.byConv[ev.ConversationID], map[string]any{
+			"type":    string(e.Type),
+			"subject": e.Subject,
+			"value":   e.Value,
+			"source":  e.Source,
+			"tool":    ev.ToolName,
+		})
+	}
+}
+
+// drain takes (and clears) the evidence collected for one conversation.
+func (c *toolEvidenceCollector) drain(conversationID string) []map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	got := c.byConv[conversationID]
+	delete(c.byConv, conversationID)
+	return got
 }
 
 // WithOrchestrator sets the orchestrator reference used for per-phase
@@ -7836,6 +7948,28 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		// response counts as evidence (ralph_loop.go checks Evidence).
 		"success":  true,
 		"evidence": []string{fmt.Sprintf("job %s completed by agent %s: %s", job.ID, job.AgentID, truncateEvidence(response))},
+	}
+	// Claim-vs-evidence validation (e2e run 7 rkl3Th): project the
+	// TOOL-issued evidence collected from tool.execution.complete events
+	// into the step-job result. The tactical validation gate reads
+	// tool_evidence (not the model's narrated evidence array, which run 7
+	// proved can be fabricated wholesale) and checks every
+	// file_exists/file_hash entry against the real filesystem. A
+	// successful file-tool turn yields entries; the run-7 hallucination
+	// (zero tool calls) yields none — exactly the contrast the gate needs.
+	if isStepJob && p.toolEvidence != nil {
+		if tev := p.toolEvidence.drain(conversationID); len(tev) > 0 {
+			result["tool_evidence"] = tev
+		}
+		// Parsed REPORT claims (the model's own accomplished/evidence
+		// narration), for the gate's claim-vs-evidence contrast. Parse
+		// failure leaves claims empty — narration without a parseable
+		// report is just prose, not structured claims.
+		if report := agent.ExtractReport(response); report != nil {
+			claims := make([]string, 0, len(report.Accomplished))
+			claims = append(claims, report.Accomplished...)
+			result["claims"] = claims
+		}
 	}
 	if isStepJob {
 		result["step_id"] = stepPayload.StepID

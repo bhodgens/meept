@@ -1734,6 +1734,25 @@ func (e *Executor) publishToolComplete(toolCallID, toolName string, result *Exec
 		payload[KeyConversationID] = e.conversationID
 	}
 
+	// Evidence envelope (claim-vs-evidence validation, e2e run 7 rkl3Th):
+	// carry the tool-issued Evidence verbatim so downstream consumers (the
+	// daemon job processor's tool_evidence projection) can distinguish
+	// TOOL-issued evidence from model-narrated claims. Without this the
+	// only channel a report had was prose, and a hallucinated
+	// file_exists array was indistinguishable from real evidence.
+	if len(result.Evidence) > 0 {
+		evidence := make([]map[string]any, 0, len(result.Evidence))
+		for _, ev := range result.Evidence {
+			evidence = append(evidence, map[string]any{
+				"type":    ev.Type,
+				"subject": ev.Subject,
+				"value":   ev.Value,
+				"source":  ev.Source,
+			})
+		}
+		payload["evidence"] = evidence
+	}
+
 	// Extract edited files from file_edit tool results.
 	// The result summary format is: "Applied N edit(s) to /path/to/file (X lines -> Y lines)"
 	// For pending changes: "Created pending change ... for /path/to/file ..."
