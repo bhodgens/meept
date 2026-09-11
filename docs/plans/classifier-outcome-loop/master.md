@@ -251,3 +251,14 @@ Table, Integration Test Plan. Verified before first dispatch.
 - L4 python runs under /opt/homebrew/bin/python3.14 (sklearn
   available); harvest stays READ-ONLY on metrics.db; the local-only
   text-join output must be gitignored (verbatim text never enters git).
+
+
+## Post-completion note (2026-09-10)
+
+The tfidf-veto Door-1 upgrade (PROMOTED by the acceptance run, see
+tools/classifier-eval/results/m4-gold-acceptance.md) was implemented on
+top of this tree's L1-L3 infrastructure: commit 10fe6d6d ships
+internal/agent/tfidf_veto.go + scripts/build_tfidf_veto.py. The effect
+is UNVALIDATED at the replay's sample size (2 routes) — the outcome
+loop this tree built is the instrument that will validate it on live
+traffic.
