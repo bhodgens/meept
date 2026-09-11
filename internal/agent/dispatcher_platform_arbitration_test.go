@@ -114,6 +114,48 @@ func TestIsSecondPersonWorkRecall(t *testing.T) {
 	}
 }
 
+// Run-7 T3 (2026-09-11, rkl3Th): "did the change get made? where is the
+// file?" scored platform @0.9 → introspection → catalog fallback reply; A5
+// continuity failed even though the session digest carried T1's artifact.
+// A yes/no WORK-STATUS question (no "you" required — the user asks about
+// the work, not the assistant) is recall, never platform introspection.
+func TestIsWorkStatusRecall(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "run-7 T3 exact", input: "did the change get made? where is the file?", want: true},
+		{name: "did the file get created", input: "did the file get created?", want: true},
+		{name: "was the change made", input: "was the change made?", want: true},
+		{name: "is the task done", input: "is the task done?", want: true},
+		{name: "did it work", input: "did it work?", want: true},
+		{name: "are the files there", input: "are the files there", want: true},
+		{name: "has the edit landed", input: "has the edit landed", want: true},
+		// Not work-status:
+		{name: "bare is it", input: "is it?", want: false},
+		{name: "introspection", input: "is the platform up?", want: false},
+		{name: "imperative", input: "create a file named hello.txt", want: false},
+		{name: "greeting", input: "hello", want: false},
+		{name: "empty", input: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isWorkStatusRecall(tt.input); got != tt.want {
+				t.Errorf("isWorkStatusRecall(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// "is the platform up?" must stay FALSE (introspection) while "is the task
+// done?" is TRUE (recall) — the work-noun window is what separates them.
+func TestIsWorkStatusRecall_WorkNounRequired(t *testing.T) {
+	if isWorkStatusRecall("is the platform up") {
+		t.Error("platform introspection matched as work-status recall")
+	}
+}
+
 // Run-8 (2026-09-10): the 8B scored the SAME T1 phrasing intent=schedule
 // @0.8 with zero time references. A schedule verdict without time signals
 // is not credible; the arbitration extends to it.

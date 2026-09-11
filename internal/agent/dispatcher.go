@@ -1268,7 +1268,8 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				)
 				d.recordClassificationMethod("platform_action_arbitration")
 				intent = nil
-			} else if intent.Type == string(IntentPlatform) && isSecondPersonWorkRecall(input) {
+			} else if intent.Type == string(IntentPlatform) &&
+				(isSecondPersonWorkRecall(input) || isWorkStatusRecall(input)) {
 				// Platform-vs-recall arbitration (e2e run 5, 2026-09-10):
 				// "what files did you make for me?" scored platform @0.9 →
 				// roster dump. A question about the ASSISTANT'S OWN past
@@ -3961,6 +3962,45 @@ func hasTimeSignal(input string) bool {
 // timeMeridiemRe matches "3am", "7:30 pm", "9 AM" — digit-prefixed
 // meridiem with a word boundary.
 var timeMeridiemRe = regexp.MustCompile(`\b[0-9]{1,2}(:[0-9]{2})?\s*(am|pm)\b`)
+
+// isWorkStatusRecall reports whether the input is a yes/no WORK-STATUS
+// question ("did the change get made?", "was the file created?", "is it
+// done?"). Used by the platform-vs-recall arbitration next to
+// isSecondPersonWorkRecall (e2e run 7, 2026-09-11 rkl3Th): "did the change
+// get made? where is the file?" scored platform @0.9 → introspection —
+// the chat agent answered with the agent-catalog fallback text and the A5
+// continuity assertion failed, even though the digest carried the answer.
+// Unlike the second-person matcher, no "you" is required: the user speaks
+// of the WORK ("the change", "the file"), not the assistant. Verbs accept
+// both agent-side (make/create/write) and patient-side (get made/be
+// created/be done) forms. Negative markers (not, n't) deliberately fall
+// through — "did you not make it?" is a reproach, not a status poll.
+func isWorkStatusRecall(input string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(input))
+	if trimmed == "" {
+		return false
+	}
+	fields := strings.Fields(trimmed)
+	for i, f := range fields {
+		f = strings.Trim(f, ",.!?:;\"'")
+		switch f {
+		case "did", "was", "were", "is", "are", "has", "have":
+			// The work noun must follow the predicate within 3 words and
+			// NOT sit in the predicate's own position — "is it?" is a bare
+			// pronoun echo, not a work-status question.
+			for j := i + 1; j < len(fields) && j <= i+3; j++ {
+				w := strings.Trim(fields[j], ",.!?:;\"'")
+				switch w {
+				case "change", "changes", "file", "files", "edit", "edits",
+					"task", "tasks", "work", "that", "this", "they",
+					"those", "thing", "things", "stuff", "job", "update":
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
 
 // heuristicFallback provides targeted keyword-based routing when all other
 // classifiers fail (Issue 0036). Rules are ordered by specificity and
