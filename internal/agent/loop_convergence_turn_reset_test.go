@@ -139,3 +139,40 @@ func TestChatHandler_WaitForTaskCompletion_CompletesBeforeCeiling(t *testing.T) 
 		t.Fatalf("reply = %q, want the seeded step result", reply)
 	}
 }
+
+// Pins e2e run 5 (2026-09-11) A4/T1: at the ceiling the task may not be
+// terminal yet, but an APPROVED step can already hold the user's answer —
+// the wait must return that result instead of the generic still-running
+// stub. Run 5 shipped the stub 22s before the task finalized while step 2
+// held the file path the user asked for.
+func TestChatHandler_WaitForTaskCompletion_CeilingReturnsBestStepResult(t *testing.T) {
+	h := newTestChatHandlerWithStores(t)
+	h.syncWaitCeiling = 200 * time.Millisecond
+
+	tk := task.NewTask("slow bookkeeping", "best-step-at-ceiling pin")
+	// StateExecuting: never terminal during the test.
+	tk.State = task.StateExecuting
+	if err := h.taskStore.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	step := task.NewTaskStep(tk.ID, "create hello.txt", 2)
+	step.State = task.StepApproved
+	step.Result = "/var/.../project/hello.txt contains hello"
+	if err := h.stepStore.Create(step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	// An earlier needs-info step must NOT win (bestStepResult prefers the
+	// highest completed/approved sequence).
+	early := task.NewTaskStep(tk.ID, "write file", 0)
+	early.State = task.StepCompleted
+	early.Result = "Insufficient evidence to confirm completion."
+	if err := h.stepStore.Create(early); err != nil {
+		t.Fatalf("create early step: %v", err)
+	}
+
+	reply := h.waitForTaskCompletion(context.Background(), tk.ID)
+	if reply != "/var/.../project/hello.txt contains hello" {
+		t.Fatalf("reply = %q, want the approved step's result at ceiling", reply)
+	}
+}

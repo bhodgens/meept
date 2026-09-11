@@ -958,6 +958,15 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	} else {
 		response.Reply = reply
 	}
+	// Single reply choke point (e2e run 5, 2026-09-11 A2/t4): the platform
+	// introspection fast path (Dispatcher.RouteToAgent →
+	// handlePlatformIntrospection) returns the agent-roster catalog without
+	// an LLM turn, so the RunOnce applyReplyGuard seam never ran and the
+	// roster shipped to the user. Guard here — the LAST writer before
+	// persistence/push — so every reply path (direct, routed, sync-wait,
+	// platform fast path) is covered. sanitizeCatalogReply passes genuine
+	// prose through unchanged.
+	response.Reply = applyReplyGuard(response.Reply)
 
 	// Classification provenance (leaf 01 of classifier-observability):
 	// attach metadata describing how this reply was classified — method,
@@ -1857,12 +1866,22 @@ func (h *ChatHandler) waitForTaskCompletion(ctx context.Context, taskID string) 
 		case <-ctx.Done():
 			return ""
 		case <-done:
-			// Degraded still-running reply (e2e run 3, 2026-09-10): an
-			// empty string would render as a blank turn — the honest answer
-			// is that the task is still executing and its result will land
-			// via task-completed push. Bounded well below the CLI's ~120s
-			// socket read so the turn always delivers.
+			// Degraded still-running reply (e2e run 5, 2026-09-11): return
+			// the best APPROVED/completed step result when one exists — at
+			// ceiling time the task may have already produced the user's
+			// answer in a finished step while later bookkeeping steps
+			// (review, "return final confirmation") still run. Run 5's T1
+			// shipped the generic stub 22s before the task finalized even
+			// though step 2 held the file path the user asked for. Bounded
+			// well below the CLI's ~120s socket read either way.
 			h.logger.Warn("Task wait timeout exceeded", "task_id", taskID)
+			if h.stepStore != nil {
+				if steps, err := h.stepStore.ListByTaskID(taskID); err == nil {
+					if result := bestStepResult(steps); result != "" {
+						return result
+					}
+				}
+			}
 			return fmt.Sprintf("Task %s is still running; results will arrive when it completes.", taskID)
 		case <-ticker.C:
 			t, err := h.taskStore.GetByID(taskID)
