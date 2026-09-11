@@ -6462,13 +6462,24 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 		return results
 	}
 
-	// Propagate the current conversation/session ID so bus progress events
-	// carry it for WS filter routing. Read under the loop mutex (H2 hardening:
+	// Propagate the current conversation/session ID so bus progress and
+	// tool-evidence events carry it for WS filter routing and for the
+	// daemon's per-conversation toolEvidenceCollector (claim-vs-evidence
+	// gate, e2e run 9 brx2FG). Read under the loop mutex (H2 hardening:
 	// the field is written on the task path and by WithSessionID on other
-	// goroutines). Empty on interactive turns by design — conv-* ids must
-	// not leak into session-scoped WS routing (AUDIT FIX H11).
+	// goroutines). currentSessionID is empty on INTERACTIVE turns by
+	// design — conv-* ids must not leak into session-scoped WS routing
+	// (AUDIT FIX H11) — but turnAccountingSessionID carries the step
+	// conversation id on BOTH paths (set by RunOnceWithParts for
+	// interactive turns AND RunWithTask for task runs), so prefer it and
+	// fall back only when empty. Without this, step-job evidence events
+	// shipped with an empty conversation_id and the collector rejected
+	// them — the validation gate starved even with real tool executions.
 	l.mu.RLock()
-	accountingSession := l.currentSessionID
+	accountingSession := l.turnAccountingSessionID
+	if accountingSession == "" {
+		accountingSession = l.currentSessionID
+	}
 	l.mu.RUnlock()
 	l.executor.SetConversationID(accountingSession)
 

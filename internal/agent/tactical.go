@@ -1130,6 +1130,15 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			}
 			return validationErr // Don't proceed to completion
 		}
+		// PERSIST the verdict (e2e run 9 brx2FG): Validated was set only on
+		// the in-memory struct, so the task-level completion check — which
+		// re-reads steps via stepStore.ListByTaskID — always saw
+		// validated=false and blocked completion ("step completed but not
+		// validated"), cascading reply timeouts on every sync-dispatch
+		// step task. Persist Validated=true/ValidationError="" here.
+		if err := ts.stepStore.Update(step); err != nil {
+			ts.logger.Error("Failed to persist step validation verdict", "step_id", step.ID, "error", err)
+		}
 		step.Validated = true
 		step.ValidationError = ""
 	}
