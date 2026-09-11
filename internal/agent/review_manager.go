@@ -198,6 +198,18 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 			if err := rm.stepStore.SetState(step.ID, task.StepApproved); err != nil {
 				rm.logger.Error("Failed to set step to approved", "error", err)
 			}
+			// Mark the step validated (e2e run ppJVWS, 2026-09-11): the
+			// heuristic check IS a validation (non-empty, meaningful
+			// result). The task-completion gate blocks successfully-
+			// terminal steps with Validated=false when a validatorManager
+			// is wired, so an approved-but-unvalidated step hangs the
+			// task forever. Persist the flag alongside the approval.
+			step.Validated = true
+			step.ValidationError = ""
+			if err := rm.stepStore.Update(step); err != nil {
+				rm.logger.Warn("Failed to persist validated flag after heuristic approval",
+					"step_id", step.ID, "error", err)
+			}
 			return &ReviewResult{
 				Status:     ReviewApproved,
 				Feedback:   "Auto-approved (heuristic check: trivial task, non-empty result)",
