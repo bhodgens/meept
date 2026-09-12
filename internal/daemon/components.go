@@ -136,6 +136,7 @@ type Components struct {
 	SecurityOrchestrator      *intsecurity.Orchestrator
 	FenceChecker              *intsecurity.FenceChecker
 	AgentLoop                 *agent.AgentLoop
+	Soul                      *agent.SoulProvider
 	ChatHandler               *agent.ChatHandler
 	StatusHandler             *StatusHandler
 	SessionStore              session.Store
@@ -1482,6 +1483,27 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 	}
 	c.AgentLoop = agent.NewAgentLoop("daemon", "", agentOpts...)
+	// Wire the user-authored persona (SOUL.md). Startup policy:
+	//   - missing file  → seed the shipped default, proceed
+	//   - invalid file  → refuse component creation (daemon start fails)
+	// Runtime policy lives in SoulProvider: invalid edits keep the last
+	// accepted copy and log; the watcher follows the components ctx so
+	// daemon shutdown also stops the watcher.
+	soulPath := agent.SoulPath()
+	seeded, err := agent.SeedSoulIfMissing(soulPath)
+	if err != nil {
+		return nil, fmt.Errorf("soul seed: %w", err)
+	}
+	if seeded {
+		logger.Info("soul.md seeded with shipped default", "path", soulPath)
+	}
+	soul, err := agent.NewSoulProvider(soulPath, logger.With("component", "soul"))
+	if err != nil {
+		return nil, fmt.Errorf("%w (fix or delete %s to restore the shipped default)", err, soulPath)
+	}
+	c.Soul = soul
+	c.AgentLoop.SetSoulProvider(soul)
+	// Context firewall / schema-mode / compaction wiring continues below.
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 	// Wire tool-schema mode (leaf 02): [agent.tools].schema_mode resolves
@@ -3690,6 +3712,16 @@ func (c *Components) Start(ctx context.Context) error {
 			}
 		}
 	}()
+
+	// Start soul watcher (SOUL.md hot reload). First so a persona change
+	// during startup races nothing; the watcher is context-bound (no Stop
+	// method — the deferred c.cancel() reaps it on rollback/shutdown).
+	if c.Soul != nil {
+		if err := c.Soul.StartWatching(ctx); err != nil {
+			return fmt.Errorf("start soul watcher: %w", err)
+		}
+		startedHandlers = append(startedHandlers, "soul")
+	}
 
 	// Start chat handler
 	if err := c.ChatHandler.Start(ctx); err != nil {

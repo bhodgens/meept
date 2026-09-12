@@ -193,6 +193,7 @@ Analytics:
 	rootCmd.AddCommand(newUsersCmd())
 	rootCmd.AddCommand(newKeysCmd())
 	rootCmd.AddCommand(newEvalCmd())
+	rootCmd.AddCommand(newSoulCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "\nError: %v\n\n", err)

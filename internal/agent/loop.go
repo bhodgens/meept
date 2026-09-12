@@ -584,6 +584,12 @@ type AgentLoop struct {
 	// Prompt building
 	promptBuilder *PromptBuilder
 
+	// soul is the optional user-authored persona provider (SOUL.md). When
+	// set, effectivePersonality() returns the live soul text, which all
+	// system-prompt build sites read into PromptConfig.Personality. The
+	// provider owns reload policy; the loop only reads.
+	soul *SoulProvider
+
 	// lastStablePrefixHash is the sha256 (hex) of the stable prefix of the
 	// most recently assembled system prompt (loop-economics leaf 01).
 	// Protected by mu; read via LastStablePrefixHash().
@@ -1176,6 +1182,37 @@ func WithAgentConfig(config AgentConfig) LoopOption {
 	return func(l *AgentLoop) {
 		l.config = config
 	}
+}
+
+// SetSoulProvider attaches the user-authored persona provider (SOUL.md).
+// Once set, every system-prompt build site reads the live soul text in the
+// Personality slot. Pass nil to detach (falls back to config.Personality).
+// The provider's reload hook is wired here so hot reloads are visible to
+// subsequent builds without loop restart.
+func (l *AgentLoop) SetSoulProvider(sp *SoulProvider) {
+	l.mu.Lock()
+	l.soul = sp
+	hook := func(text string) {
+		l.logger.Debug("soul reloaded; next prompt build uses new persona",
+			"session_id", l.sessionID, "bytes", len(text))
+	}
+	l.mu.Unlock()
+	if sp != nil {
+		sp.SetReloadHook(hook)
+	}
+}
+
+// effectivePersonality returns the personality text for prompt building:
+// the live soul text when a soul provider is attached, else the static
+// AgentConfig.Personality. All PromptConfig sites must go through this.
+func (l *AgentLoop) effectivePersonality() string {
+	l.mu.RLock()
+	sp := l.soul
+	l.mu.RUnlock()
+	if sp != nil {
+		return sp.Current()
+	}
+	return l.config.Personality
 }
 
 // WithMemvidClient sets the memvid client for memory injection.
@@ -1969,7 +2006,7 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 		Constitution: loop.config.Constitution,
 		Restrictions: loop.config.Restrictions,
 		Purpose:      loop.config.Purpose,
-		Personality:  loop.config.Personality,
+		Personality:  loop.effectivePersonality(),
 	})
 
 	// Initialize verification tracker when verification is enabled for this
@@ -5854,7 +5891,7 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 		Constitution: l.config.Constitution,
 		Restrictions: l.config.Restrictions,
 		Purpose:      l.config.Purpose,
-		Personality:  l.config.Personality,
+		Personality:  l.effectivePersonality(),
 	})
 
 	// Add baseline capabilities and platform introspection guidelines
@@ -6554,7 +6591,7 @@ func (l *AgentLoop) buildSystemPrompt() string {
 		Constitution: l.config.Constitution,
 		Restrictions: l.config.Restrictions,
 		Purpose:      l.config.Purpose,
-		Personality:  l.config.Personality,
+		Personality:  l.effectivePersonality(),
 	})
 
 	// Add baseline capabilities and platform introspection guidelines
@@ -6618,7 +6655,7 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 		Constitution: l.config.Constitution,
 		Restrictions: l.config.Restrictions,
 		Purpose:      l.config.Purpose,
-		Personality:  l.config.Personality,
+		Personality:  l.effectivePersonality(),
 	})
 
 	// Add baseline capabilities and platform introspection guidelines
