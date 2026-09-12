@@ -54,11 +54,16 @@ const (
 
 // RuntimeConfig holds validated runtime configuration.
 type RuntimeConfig struct {
-	Type               RuntimeType
-	ModelPath          string            // Backward-compat: first declared path (or legacy path)
-	ModelPaths         map[string]string // modelKey -> path, used for spawn-command variable expansion. For legacy single-model configs the key is "default".
-	ModelKeys          []string          // authoritative provider model IDs; used for the in-use gate and per-model logger naming. Populated by RegisterConfig from the provider's models map; falls back to ModelPaths keys when the caller does not supply real model IDs.
-	EndpointKey        string
+	Type        RuntimeType
+	ModelPath   string            // Backward-compat: first declared path (or legacy path)
+	ModelPaths  map[string]string // modelKey -> path, used for spawn-command variable expansion. For legacy single-model configs the key is "default".
+	ModelKeys   []string          // authoritative provider model IDs; used for the in-use gate and per-model logger naming. Populated by RegisterConfig from the provider's models map; falls back to ModelPaths keys when the caller does not supply real model IDs.
+	EndpointKey string
+	// BaseURL is the endpoint base URL the caller resolved for this runtime
+	// (RegisterConfig takes it from the provider options). It is the address
+	// the duplicate-spawn pre-check probes before spawning. Empty when the
+	// caller has no base URL (CLI construction paths): the probe is skipped.
+	BaseURL            string
 	PIDFile            string
 	AutoStart          bool
 	AutoStop           bool

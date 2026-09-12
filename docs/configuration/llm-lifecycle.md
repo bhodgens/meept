@@ -38,7 +38,7 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
 | `model_path` | string | see note | Path to a single model file (supports `~` expansion). Required unless `model_paths` is set |
 | `model_paths` | object | see note | Map of `modelKey` → model path, for multi-model servers sharing one subprocess. Required unless `model_path` is set |
 | `auto_start` | bool | no | Auto-start on platform startup (default: false) |
-| `auto_stop_on_exit` | bool | no | Stop on platform shutdown (default: true) |
+| `auto_stop_on_exit` | bool | no | Stop on platform shutdown (absent/false leaves the runtime running; the shipped config sets `true` for the local runtimes) |
 | `pid_file` | string | yes | Path to PID file for process tracking |
 | `spawn_command` | array | yes | Command and arguments to spawn the runtime |
 | `spawn_timeout_seconds` | int | no | Timeout waiting for runtime to become healthy (default: 60) |
@@ -118,13 +118,51 @@ If no provider is specified, `local` is used by default.
    - The validated config is registered against an **endpoint key** of the form `<runtime>:<host>:<port>`. Multiple providers on the same endpoint key merge into a single shared subprocess (first spawn command wins; later providers contribute their model paths).
    - At least one of the provider's models must be in the platform-wide **in-use set** (referenced by an enabled agent, a model slot, or a model alias). Endpoints with no in-use models are skipped with a debug log.
 
-2. **Health Monitoring**: A background health checker per endpoint polls the runtime's HTTP endpoint every N seconds. Health transitions fan out to every per-model log on the endpoint. If `restart_policy.enabled` is true, unhealthy transitions trigger an auto-restart (see [Auto-Restart Policy](#auto-restart-policy)).
+2. **Health Monitoring**: A background health checker per endpoint polls the runtime's HTTP endpoint every N seconds. A 200 response alone is not enough: the checker also requires the process the platform spawned to be alive, so a foreign process that holds the endpoint port cannot make a dead runtime read as healthy. Health transitions fan out to every per-model log on the endpoint. If `restart_policy.enabled` is true, unhealthy transitions trigger an auto-restart (see [Auto-Restart Policy](#auto-restart-policy)).
 
 3. **Per-Model Logging**: A structured JSON-line log is written per model at `~/.meept/logs/runtimes/<providerID>-<modelKey>.log`. Events: `register`, `spawn_attempt`, `spawn_success`, `spawn_failure`, `health_transition`, `restart_attempt`, `restart_success`, `restart_failed`, `stop`. Raw subprocess output goes to `~/.meept/logs/runtimes/<host>-<port>.process.log` with `out:`/`err:` line prefixes. Files rotate at 10 MB with one `.1` backup.
 
 4. **PID File Management**: The runtime PID is stored in a file for cross-restart tracking. Stale PID files (from crashes) are automatically cleaned up on next startup. The `pid_file` of the first provider to register an endpoint wins; subsequent providers' `pid_file` values are ignored (debug log if they differ).
 
 5. **Graceful Shutdown**: On platform exit, each endpoint (not each provider) receives a single SIGTERM, then SIGKILL if it doesn't exit within the timeout. Health checkers are stopped and per-model/per-process log files are closed.
+
+## Duplicate-Spawn Guard
+
+Before spawning, the runtime manager probes the endpoint address (`host:port`
+from the provider's `options.baseURL`) when the `spawn_command` declares that
+port. If something already accepts connections there, the spawn is refused with
+an error naming the port and no PID file is written.
+
+This is a hard failure rather than a warning because the child cannot bind, and
+some runtimes do not exit when binding fails. `mlx_lm server` keeps running with
+the model loaded and no socket (its loader thread is non-daemon), and the health
+check cannot see the failure because the process that already holds the port
+answers `/health`. The result is a runtime that reports healthy while serving
+nothing and holding the model in memory.
+
+A spawn command that never declares the endpoint port (a wrapper that binds
+elsewhere, or a test harness) is never refused on that port's account.
+
+## Orphaned Runtimes
+
+A local runtime is a direct child of the process that spawned it, in its own
+process group. Platforms without a parent-death signal (macOS) cannot stop a
+child when the parent dies hard — SIGKILL, a panic, session teardown — so the
+runtime is re-parented to init and keeps running, with the model loaded and the
+endpoint port held. The ownership rule below keeps later boots from stopping it
+(a PID file carrying another instance's token is adopted as *observed, not
+owned*), so the sweep is what reaps it.
+
+At boot, before starting its own runtimes, the platform sweeps those leftovers:
+for every endpoint with `auto_stop_on_exit: true`, a process whose parent is init
+(`ppid == 1`) and whose command line is exactly that endpoint's `spawn_command`
+is stopped (SIGTERM to the process group, then SIGKILL after a short grace
+period) and its PID file is removed. Endpoints with `auto_stop_on_exit: false`
+are left alone: that setting asks the runtime to outlive the platform.
+
+`meept doctor` reports the same leftovers as its `orphan-children` check, and
+`--fix` sends them SIGTERM. Windows is not supported by the sweep (no `ps`): the
+scan produces no candidates there, so nothing is killed.
 
 ## Troubleshooting
 
@@ -139,6 +177,19 @@ If no provider is specified, `local` is used by default.
 1. Verify the health endpoint is accessible: `curl http://localhost:8080/health`
 2. Check that the runtime process is still running: `meept runtime status`
 3. Review runtime logs for crashes
+
+### "refusing to spawn ... already has a listener"
+
+Another process holds the endpoint port the `spawn_command` declares. Find it:
+
+```bash
+lsof -nP -iTCP:8080 -sTCP:LISTEN
+```
+
+Stop that process, or move this runtime to a free port — change both
+`options.baseURL` and the `--port` argument in `spawn_command`. If the holder is
+a runtime left over from an earlier crash, the next platform start reaps it
+automatically (see [Orphaned Runtimes](#orphaned-runtimes)).
 
 ### PID file errors
 

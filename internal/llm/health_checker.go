@@ -25,6 +25,10 @@ type HealthChecker struct {
 	stopped        bool
 	onHealthChange HealthChangeCallback
 	logger         *slog.Logger
+	// procAlive reports whether the process this checker was created for is
+	// still running. nil = the checker is not bound to a spawn (standalone CLI
+	// health waits): only the endpoint is then consulted.
+	procAlive func() bool
 }
 
 // NewHealthChecker creates a new health checker.
@@ -59,6 +63,18 @@ func (h *HealthChecker) run(ctx context.Context) {
 	}
 }
 
+// SetProcessAliveProbe binds the checker to the process the endpoint belongs
+// to. Without a probe, a foreign listener on the endpoint port answers /health
+// with 200 and the runtime is reported healthy forever, even when the child we
+// spawned died at bind time. With a probe, a dead child is unhealthy no matter
+// what the endpoint says.
+func (h *HealthChecker) SetProcessAliveProbe(fn func() bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.procAlive = fn
+}
+
+// checkOnce performs one health check.
 func (h *HealthChecker) checkOnce() {
 	h.mu.RLock()
 	wasHealthy := h.healthy
@@ -83,8 +99,25 @@ func (h *HealthChecker) checkOnce() {
 		_ = resp.Body.Close()
 	}
 
+	// Snapshot the process probe under the read lock and run it OUTSIDE the
+	// lock: the probe takes the RuntimeProcess mutex, so calling it under h.mu
+	// would invert the lock order.
+	h.mu.RLock()
+	probe := h.procAlive
+	h.mu.RUnlock()
+	procDead := probe != nil && !probe()
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if procDead {
+		h.unhealthyCount++
+		if h.unhealthyCount >= h.config.HealthThreshold {
+			h.healthy = false
+		}
+		h.notifyTransition(wasHealthy)
+		return
+	}
 
 	if err != nil {
 		h.unhealthyCount++

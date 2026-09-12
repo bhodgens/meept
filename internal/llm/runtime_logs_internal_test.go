@@ -402,7 +402,10 @@ func TestRuntimeManager_SharedSpawn_PerModelFanOut(t *testing.T) {
 		PIDFile:         pidFile,
 		AutoStart:       true,
 		AutoStop:        true,
-		SpawnCommand:    []string{"sleep", "0.1"},
+		// Must outlive the test: the health check now requires the spawned
+		// process to be alive, so a "sleep 0.1" fake reads unhealthy and
+		// StartAll fails before the log fan-out under test can happen.
+		SpawnCommand:    []string{"sleep", "30"},
 		SpawnTimeout:    2 * time.Second,
 		HealthEndpoint:  "/health",
 		HealthInterval:  100 * time.Millisecond,
@@ -418,7 +421,7 @@ func TestRuntimeManager_SharedSpawn_PerModelFanOut(t *testing.T) {
 		PIDFile:         pidFile,
 		AutoStart:       true,
 		AutoStop:        true,
-		SpawnCommand:    []string{"sleep", "0.1"},
+		SpawnCommand:    []string{"sleep", "30"},
 		SpawnTimeout:    2 * time.Second,
 		HealthEndpoint:  "/health",
 		HealthInterval:  100 * time.Millisecond,

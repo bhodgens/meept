@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -249,5 +251,132 @@ func TestRuntimeProcess_ConcurrentStart(t *testing.T) {
 
 	if err := p.Stop(stopCtx); err != nil {
 		t.Fatalf("unexpected error stopping: %v", err)
+	}
+}
+
+// TestRuntimeProcess_Start_RefusesWhenEndpointHasListener pins the
+// duplicate-spawn guard. A child that cannot bind is not harmless: mlx_lm keeps
+// running with the model loaded and no socket, and the health check cannot see
+// the failure because the foreign listener answers /health. When the spawn
+// command declares the endpoint port, Start must refuse.
+func TestRuntimeProcess_Start_RefusesWhenEndpointHasListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to occupy a port for the test: %v", err)
+	}
+	defer func() {
+		if cerr := ln.Close(); cerr != nil {
+			t.Logf("listener close: %v", cerr)
+		}
+	}()
+	addr := ln.Addr().String()
+	_, port, splitErr := net.SplitHostPort(addr)
+	if splitErr != nil {
+		t.Fatalf("split listener address %q: %v", addr, splitErr)
+	}
+
+	pidFile := filepath.Join(createTempPIDDir(t), "duplicate.pid")
+	cfg := &llm.RuntimeConfig{
+		BaseURL:      "http://" + addr + "/v1",
+		SpawnCommand: []string{"mlx_lm", "server", "--model", "/m/x", "--port", port},
+		PIDFile:      pidFile,
+	}
+	p := llm.NewRuntimeProcess(cfg)
+
+	startErr := p.Start(context.Background(), io.Discard, io.Discard)
+	if startErr == nil {
+		t.Fatal("expected Start to refuse an endpoint that already has a listener")
+	}
+	if !strings.Contains(startErr.Error(), "already has a listener") {
+		t.Errorf("unexpected error text: %v", startErr)
+	}
+	if p.IsRunning() {
+		t.Error("no process may run after a refused spawn")
+	}
+	if _, statErr := os.Stat(pidFile); statErr == nil {
+		t.Error("a refused spawn must not write a pid file")
+	}
+}
+
+// TestRuntimeProcess_Start_IgnoresPortNotBoundBySpawnCommand pins the scoping
+// of the guard: the check belongs to the process that binds the port. A spawn
+// command that never declares the endpoint port (a fake runtime in a test
+// harness, or a wrapper that binds elsewhere) must not be refused for it.
+func TestRuntimeProcess_Start_IgnoresPortNotBoundBySpawnCommand(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to occupy a port for the test: %v", err)
+	}
+	defer func() {
+		if cerr := ln.Close(); cerr != nil {
+			t.Logf("listener close: %v", cerr)
+		}
+	}()
+
+	pidFile := filepath.Join(createTempPIDDir(t), "notbound.pid")
+	cfg := &llm.RuntimeConfig{
+		BaseURL:      "http://" + ln.Addr().String() + "/v1",
+		SpawnCommand: []string{"sleep", "300"},
+		PIDFile:      pidFile,
+	}
+	p := llm.NewRuntimeProcess(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := p.Start(ctx, io.Discard, io.Discard); err != nil {
+		t.Fatalf("a spawn command that does not bind the port must not be refused: %v", err)
+	}
+	defer func() {
+		if stopErr := p.Stop(ctx); stopErr != nil {
+			t.Logf("stop: %v", stopErr)
+		}
+	}()
+
+	if p.PID() == 0 {
+		t.Error("expected a running pid after the spawn")
+	}
+}
+
+// TestRuntimeProcess_Start_SpawnsWhenEndpointFree is the control for the guard:
+// a free endpoint with a port-declaring spawn command must spawn normally.
+func TestRuntimeProcess_Start_SpawnsWhenEndpointFree(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to reserve a port for the test: %v", err)
+	}
+	addr := ln.Addr().String()
+	if cerr := ln.Close(); cerr != nil {
+		t.Fatalf("failed to release the reserved port: %v", cerr)
+	}
+	_, port, splitErr := net.SplitHostPort(addr)
+	if splitErr != nil {
+		t.Fatalf("split reserved address %q: %v", addr, splitErr)
+	}
+
+	pidFile := filepath.Join(createTempPIDDir(t), "free.pid")
+	cfg := &llm.RuntimeConfig{
+		BaseURL: "http://" + addr + "/v1",
+		// The port token makes the pre-check apply; /bin/sh ignores the extra
+		// arguments after the command string.
+		SpawnCommand: []string{"/bin/sh", "-c", "sleep 300", "--port", port},
+		PIDFile:      pidFile,
+	}
+	p := llm.NewRuntimeProcess(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := p.Start(ctx, io.Discard, io.Discard); err != nil {
+		t.Fatalf("unexpected refusal on a free endpoint: %v", err)
+	}
+	defer func() {
+		if stopErr := p.Stop(ctx); stopErr != nil {
+			t.Logf("stop: %v", stopErr)
+		}
+	}()
+
+	if p.PID() == 0 {
+		t.Error("expected a running pid after a successful spawn")
 	}
 }

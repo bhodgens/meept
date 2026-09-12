@@ -158,7 +158,8 @@ Checks performed:
 
 - remove a stale pidfile (points at a dead process)
 - remove a stale socket file (file exists but no listener)
-- SIGTERM orphaned `MEEPT_DAEMON_CHILD=1` processes (ppid==1)
+- SIGTERM orphaned runtime processes (a configured runtime whose parent is init,
+  `ppid == 1`)
 
 ### status --json health block
 
@@ -177,7 +178,21 @@ jobs, drains running jobs up to the timeout, closes listeners and exits.
 
 ### Orphan sweep on startup
 
-Children spawned by the platform carry `MEEPT_DAEMON_CHILD=1`. On boot, the
-platform reaps tagged processes whose parent is init and whose recorded start
-predates the current start: SIGTERM first, then SIGKILL after 3 seconds.
-Windows is not supported by this sweep (documented gap).
+A local LLM runtime is a direct child of the platform process, in its own
+process group. When the platform dies hard (SIGKILL, panic, session teardown)
+the runtime is re-parented to init and keeps running with its model loaded and
+the endpoint port held — macOS has no parent-death signal, and the ownership
+rule refuses to let a later boot stop a runtime another instance spawned.
+
+On boot, before starting its own runtimes, the platform reaps those leftovers:
+for every endpoint configured with `auto_stop_on_exit: true`, a process whose
+parent is init (`ppid == 1`) and whose command line matches that endpoint's
+`spawn_command` is SIGTERMed, then SIGKILLed after 2 seconds. Endpoints with
+`auto_stop_on_exit: false` are left alone. Windows is not supported by this
+sweep (no `ps`), so the scan finds no candidates there.
+
+Check the platform log for `orphan sweep` lines to see what was reaped:
+
+```bash
+grep "orphan sweep" ~/.meept/logs/*.log
+```

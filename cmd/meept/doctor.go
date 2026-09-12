@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/spf13/cobra"
 )
@@ -128,7 +129,7 @@ func runDoctor(fix, installMissing bool) error {
 	checks = append(checks, checkConfigReadable())
 	checks = append(checks, checkDiskFreeDoctor(stateDirPath))
 
-	orphanPIDs := findOrphanChildren()
+	orphanPIDs := findOrphanRuntimePIDs()
 	if len(orphanPIDs) > 0 {
 		checks = append(checks, doctorCheck{
 			name:    "orphan-children",
@@ -327,30 +328,39 @@ func checkDiskFreeDoctor(dir string) doctorCheck {
 	return doctorCheck{name: "disk-free", ok: true, detail: human + " free"}
 }
 
-// findOrphanChildren scans ps for MEEPT_DAEMON_CHILD-tagged processes that
-// were re-parented to init (ppid==1). Client-side conservative variant:
-// any tagged proc whose parent is init is treated as a candidate.
-func findOrphanChildren() []int {
-	out, err := exec.Command("ps", "-axo", "pid=,ppid=,command=").Output()
+// findOrphanRuntimePIDs returns the pids of local-LLM runtime processes left
+// behind by a meept process that no longer exists: the parent is init (ppid==1)
+// and the command line is exactly one of the configured spawn commands whose
+// endpoint asks for auto_stop_on_exit. Report-only — the caller (--fix) decides
+// whether to signal them.
+//
+// This replaced a scan for a MEEPT_DAEMON_CHILD environment tag: ps never
+// printed that tag on macOS, so the old check could not report anything on this
+// platform no matter what the daemon spawned.
+func findOrphanRuntimePIDs() []int {
+	providers, err := llm.LoadProvidersConfigDefault()
 	if err != nil {
 		return nil
 	}
-	var pids []int
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
+	var cfgs []*llm.RuntimeConfig
+	for _, provider := range providers.Providers {
+		if provider.Lifecycle == nil || !llm.IsLoopbackBaseURL(provider.Options.BaseURL) {
 			continue
 		}
-		ppid, err := strconv.Atoi(fields[1])
-		if err != nil || ppid != 1 {
+		rtCfg, normErr := llm.ValidateAndNormalize(*provider.Lifecycle)
+		if normErr != nil {
 			continue
 		}
-		cmd := strings.Join(fields[2:], " ")
-		if strings.Contains(cmd, "MEEPT_DAEMON_CHILD=1") {
-			if pid, err := strconv.Atoi(fields[0]); err == nil {
-				pids = append(pids, pid)
-			}
-		}
+		rtCfg.EndpointKey = llm.ComputeEndpointKey(string(rtCfg.Type), provider.Options.BaseURL)
+		cfgs = append(cfgs, rtCfg)
+	}
+	orphans, err := llm.OrphanRuntimesFromConfigs(cfgs)
+	if err != nil {
+		return nil
+	}
+	pids := make([]int, 0, len(orphans))
+	for _, o := range orphans {
+		pids = append(pids, o.PID)
 	}
 	return pids
 }

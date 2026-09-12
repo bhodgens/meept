@@ -183,3 +183,53 @@ func TestHealthChecker_Concurrent_Safety(t *testing.T) {
 	wg.Wait()
 	hc.Stop()
 }
+
+// assertEventuallyHealthy polls the checker until it reports healthy.
+func assertEventuallyHealthy(t *testing.T, hc *llm.HealthChecker, what string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if hc.IsHealthy() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("never became healthy: %s", what)
+}
+
+// TestHealthChecker_DeadProcessIsUnhealthy pins the ownership rule for the
+// health check: a 200 from the endpoint is not enough. A foreign listener on
+// the same port answers /health for a child that died at bind time, so a dead
+// process must read unhealthy no matter what the endpoint returns.
+func TestHealthChecker_DeadProcessIsUnhealthy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	config := makeValidConfig(t)
+	config.HealthInterval = 20 * time.Millisecond
+	config.HealthThreshold = 1
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Control: the same endpoint with a live process does become healthy.
+	live := llm.NewHealthChecker(&config, srv.URL)
+	live.SetProcessAliveProbe(func() bool { return true })
+	live.Start(ctx)
+	defer live.Stop()
+	assertEventuallyHealthy(t, live, "live process behind a 200 endpoint")
+
+	// Subject: endpoint still answers 200, the process probe says dead.
+	dead := llm.NewHealthChecker(&config, srv.URL)
+	dead.SetProcessAliveProbe(func() bool { return false })
+	dead.Start(ctx)
+	defer dead.Stop()
+
+	// Several intervals must pass without the checker flipping to healthy.
+	time.Sleep(150 * time.Millisecond)
+	if dead.IsHealthy() {
+		t.Error("a 200 endpoint with a dead process must not read as healthy")
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -51,7 +52,17 @@ type RuntimeManager struct {
 	metrics          MetricsRecorder
 	inUseModels      map[string]struct{}
 	shutdown         bool
+	// sweepSignal sends a signal to a runtime pid during the startup orphan
+	// sweep. Production sends to the process group; tests inject a recorder so
+	// the sweep never signals a real pid.
+	sweepSignal runtimeSignaler
+	// sweepLister lists the process table for the orphan sweep. Tests inject a
+	// fake so no real process table is read.
+	sweepLister RuntimeProcLister
 }
+
+// runtimeSignaler delivers a signal to a runtime process id.
+type runtimeSignaler func(pid int, sig syscall.Signal) error
 
 // NewRuntimeManager creates a new manager.
 func NewRuntimeManager(logger *slog.Logger) *RuntimeManager {
@@ -64,6 +75,8 @@ func NewRuntimeManager(logger *slog.Logger) *RuntimeManager {
 		providerEndpoint: make(map[string]string),
 		modelLoggers:     make(map[string]map[string]*ModelLogger),
 		logger:           logger,
+		sweepSignal:      killProcessGroupPID,
+		sweepLister:      ListRuntimeProcesses,
 	}
 }
 
@@ -105,6 +118,9 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 		endpointKey = ComputeEndpointKey(string(cfg.Type), baseURL)
 		cfg.EndpointKey = endpointKey
 	}
+	// Remember the resolved base URL: the duplicate-spawn pre-check in
+	// RuntimeProcess.Start probes this address before spawning.
+	cfg.BaseURL = baseURL
 
 	// Resolve the authoritative model-key list. Prefer cfg.ModelKeys (set by
 	// the daemon from the provider's models map). Fall back to ModelPaths keys
@@ -162,6 +178,9 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 		// First registration for this endpoint: create process + health checker.
 		proc := NewRuntimeProcess(cfg)
 		hc := NewHealthChecker(cfg, baseURL)
+		// Bind the checker to the spawned process: an endpoint answered by a
+		// foreign listener must not read as healthy for a dead child.
+		hc.SetProcessAliveProbe(proc.IsRunning)
 		ep = &endpointProcess{
 			cfg:       cfg,
 			proc:      proc,

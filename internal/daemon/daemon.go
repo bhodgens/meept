@@ -923,6 +923,17 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Upload service wired to agent loop for vision pre-flight")
 	}
 
+	// Prompt project tier follows the daemon's active project at runtime:
+	// project.set (published by the RPC handler after a project is marked
+	// active) re-resolves <active project>/.meept/prompts without a restart.
+	// The user/system/bundled tiers stay fixed at construction. See
+	// internal/daemon/prompt_dirs.go.
+	if svcRegistry.Prompt != nil {
+		wireProjectPromptTier(msgBus, svcRegistry.Prompt,
+			func() string { return resolveProjectPromptDir(components) },
+			logger.With("component", "prompt-project-tier"))
+	}
+
 	// Eval handler: one instance whose DiskStore backs both the eval.* RPC
 	// handlers (below) and the HTTP /api/v1/eval/* routes (HTTP wiring).
 	// Home dir is resolved here and injected; eval never calls
@@ -1612,6 +1623,17 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	return d, nil
 }
 
+// httpTransportAddr returns the configured HTTP transport address, or "" when
+// no full config is loaded. The boot log used to print a hard-coded ":8081",
+// which misreported every non-default configuration and sent operators
+// chasing a port collision on an address the server never bound.
+func httpTransportAddr(fullCfg *config.Config) string {
+	if fullCfg == nil {
+		return ""
+	}
+	return fullCfg.Transport.HTTP.Addr
+}
+
 // Run starts the daemon and blocks until shutdown.
 func (d *Daemon) Run(ctx context.Context) error {
 	d.logger.Info("daemon: starting", "pid", os.Getpid())
@@ -1631,9 +1653,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 
-	// Orphan sweep: reap MEEPT_DAEMON_CHILD processes left over from a
-	// previous crashed daemon (ppid==1, start marker predates this start).
-	d.StartupOrphanSweep()
+	// Orphan sweep runs later, just before StartAll: it reads endpoint configs
+	// off the runtime manager, which components own.
 
 	// Write PID file
 	if err := d.writePIDFile(); err != nil {
@@ -1668,6 +1689,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// D6: Derive a cancellable context from the parent so the goroutine
 	// can be stopped on shutdown/reload instead of running indefinitely.
 	if d.components != nil && d.components.ContainerManager != nil {
+		// Orphan sweep: reap runtime processes a previous, hard-killed daemon
+		// left behind. It must run BEFORE this boot spawns its own runtimes —
+		// the leftover holds the endpoint port, and the duplicate-spawn
+		// pre-check in internal/llm would otherwise refuse the spawn.
+		d.StartupOrphanSweep()
 		llmCtx, cancelLlm := context.WithCancel(ctx)
 		go func() {
 			defer cancelLlm() // Ensure cleanup on exit
@@ -1760,7 +1786,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 				d.logger.Error("HTTP server error", "error", err)
 			}
 		}()
-		d.logger.Info("HTTP server starting", "addr", ":8081")
+		d.logger.Info("HTTP server starting", "addr", httpTransportAddr(d.fullConfig))
 	}
 
 	d.status.Store(models.StatusRunning)

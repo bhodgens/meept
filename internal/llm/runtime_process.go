@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,6 +120,75 @@ func (p *RuntimeProcess) AlreadyRunning() bool {
 	return p.isProcessRunning(entry.PID)
 }
 
+// endpointProbeTimeout bounds the pre-spawn duplicate check. A local listener
+// answers or refuses in microseconds; the timeout only protects against a
+// firewall that drops packets.
+const endpointProbeTimeout = 300 * time.Millisecond
+
+// endpointAddr returns the host:port this runtime is expected to serve, derived
+// from the base URL the manager resolved. Empty means "unknown" (CLI paths):
+// the duplicate-spawn pre-check is then skipped.
+func (p *RuntimeProcess) endpointAddr() string {
+	if p.config == nil || p.config.BaseURL == "" {
+		return ""
+	}
+	host, port := hostPortFromBaseURL(p.config.BaseURL)
+	if host == "" || port == "" {
+		return ""
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// endpointProbeTarget returns the address the duplicate-spawn pre-check must
+// probe, and whether the check applies at all. It applies only when both are
+// known: the endpoint address (from the resolved base URL) and that the spawn
+// command itself declares the endpoint port. A command that never mentions the
+// port is not the thing that binds it, so refusing there would be wrong.
+func (p *RuntimeProcess) endpointProbeTarget() (string, bool) {
+	addr := p.endpointAddr()
+	if addr == "" {
+		return "", false
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		return "", false
+	}
+	if p.config == nil || !spawnCommandBindsPort(p.config.SpawnCommand, port) {
+		return "", false
+	}
+	return addr, true
+}
+
+// spawnCommandBindsPort reports whether the spawn command declares the given
+// port as a standalone argument (e.g. "--port", "8082") or an assignment
+// ("--port=8082", "ROUTER_PORT=8082"). Matching whole tokens keeps paths and
+// hosts that merely contain the digits from counting.
+func spawnCommandBindsPort(spawn []string, port string) bool {
+	if port == "" {
+		return false
+	}
+	for _, token := range spawn {
+		if token == port || strings.HasSuffix(token, "="+port) {
+			return true
+		}
+	}
+	return false
+}
+
+// endpointInUse reports whether another process already accepts TCP
+// connections on addr. Only a completed dial counts as "in use"; a refused or
+// timed-out dial means the address looks free, so the caller may spawn.
+func endpointInUse(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, endpointProbeTimeout)
+	if err != nil {
+		return false
+	}
+	if cerr := conn.Close(); cerr != nil {
+		slog.Debug("endpoint probe: close", "addr", addr, "error", cerr)
+	}
+	return true
+}
+
 // Start spawns the runtime process. stdout and stderr are used for the
 // subprocess's output streams; nil falls back to os.Stdout/os.Stderr.
 //
@@ -138,6 +208,14 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	// Duplicate-spawn pre-check. The probe runs BEFORE p.mu is taken (network
+	// I/O under the mutex breaks the mutex-scope rule) and only when the spawn
+	// command declares the endpoint port (see endpointProbeTarget). An endpoint
+	// owned by another meept instance still looks busy here; that case is
+	// handled by the PID-file adoption branch below, which returns before the
+	// refusal.
+	probeAddr, probeApplies := p.endpointProbeTarget()
+	endpointBusy := probeApplies && endpointInUse(probeAddr)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// Check if already running via PID file
@@ -179,6 +257,19 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 
 	name := p.config.SpawnCommand[0]
 	args := p.config.SpawnCommand[1:]
+
+	// Refuse to spawn into an endpoint port this spawn command declares but
+	// another process already serves. The child would fail to bind; for
+	// script-based runtimes (mlx_lm) the process then survives as a loaded
+	// model with no socket, and the periodic health check cannot see the
+	// failure because the foreign listener answers it. Failing loudly here is
+	// the only way an operator learns the port is taken.
+	if endpointBusy {
+		return fmt.Errorf("refusing to spawn %s: endpoint %s already has a listener "+
+			"(a runtime from an earlier run, a hand-started server, or another "+
+			"service on that port); stop that process or move this runtime to a "+
+			"free port", name, probeAddr)
+	}
 
 	// Detach the runtime process from the caller's context. Callers pass
 	// request-scoped contexts (e.g. the daemon's StartAll goroutine whose
@@ -349,10 +440,18 @@ func killProcessGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 	if cmd == nil || cmd.Process == nil {
 		return fmt.Errorf("no process")
 	}
-	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	return killProcessGroupPID(cmd.Process.Pid, sig)
+}
+
+// killProcessGroupPID sends a signal to the process group led by pid. It falls
+// back to signalling the leader alone when the group cannot be resolved (e.g.
+// the process is not a group leader any more). Used by Stop() and by the
+// startup orphan sweep, which signals runtimes it did not spawn.
+func killProcessGroupPID(pid int, sig syscall.Signal) error {
+	pgid, err := syscall.Getpgid(pid)
 	if err != nil {
 		// Fallback: kill leader only
-		return cmd.Process.Signal(sig)
+		return syscall.Kill(pid, sig)
 	}
 	return syscall.Kill(-pgid, sig)
 }
