@@ -263,6 +263,15 @@ type DispatchResult struct {
 	// nil for every other classification door. Tagged json:"-" (operational
 	// metadata, not user-facing serialization).
 	PrefilterVerdict *PrefilterVerdict `json:"-"`
+
+	// AgentOverrideApplied records that the client explicitly named this
+	// agent (chat.request agent_id → dispatcher agentOverride) and the
+	// override was applied at step 5.3. RouteToAgent reads this to skip
+	// intent-Type shortcuts (e.g. the platform-introspection canned dump)
+	// that would otherwise swallow the turn before the overridden agent
+	// runs (researcher-extract e2e, 2026-09-12). Tagged json:"-" —
+	// operational metadata.
+	AgentOverrideApplied bool `json:"-"`
 }
 
 // executorModelRefFromDirective extracts the "provider/model-id" ref of the
@@ -808,6 +817,12 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 1. Parse model reassignment directive (if user specified model preferences)
 	parseResult := d.modelParser.Parse(input)
 
+	// agentOverrideApplied tracks whether step 5.3 applied a client agent
+	// override. RouteToAgent reads the flag on DispatchResult so that
+	// intent-Type shortcuts (platform introspection) don't swallow
+	// explicitly-overridden turns (researcher-extract e2e, 2026-09-12).
+	agentOverrideApplied := false
+
 	// 2. Handle clarification if needed
 	if parseResult.Found && parseResult.Directive.ClarificationNeeded {
 		// Build intent for session tracking (so follow-up inputs are
@@ -1037,6 +1052,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				"session", sessionID,
 			)
 			intent.AgentType = agentOverride
+			agentOverrideApplied = true
 		} else {
 			d.logger.Warn("Client agent override ignored: agent not found in registry",
 				"override", agentOverride,
@@ -1067,6 +1083,8 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		Parts:            parts,
 		SuggestedMode:    intent.SuggestedMode,
 		ExecutorModelRef: executorModelRefFromDirective(parseResult.Directive),
+
+		AgentOverrideApplied: agentOverrideApplied,
 	}
 
 	// Attach model override to task metadata if task was created
@@ -2226,8 +2244,15 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		return "", fmt.Errorf("no agent registry configured")
 	}
 
-	// Handle platform introspection directly without LLM
-	if result.Intent.Type == string(IntentPlatform) {
+	// Handle platform introspection directly without LLM — but only when
+	// no client agent override demanded a specific executor. An override
+	// rewrites result.AgentType (dispatcher.go:1039) while the classified
+	// intent.Type may still be "platform": the researchers-extract e2e
+	// (2026-09-12) showed the 8B classifier labeling "use the json_extract
+	// tool ..." as IntentPlatform, and this shortcut then swallowed the
+	// turn into the canned capabilities dump before the overridden agent
+	// ever ran. An explicit override is a task for THAT agent.
+	if result.Intent.Type == string(IntentPlatform) && !result.AgentOverrideApplied {
 		return d.handlePlatformIntrospection(ctx, result.Intent.Summary)
 	}
 
