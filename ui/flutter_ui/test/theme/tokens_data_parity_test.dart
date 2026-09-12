@@ -30,8 +30,10 @@ void main() {
         break;
       }
     }
-    assert(raw != null,
-        'theme/tokens.json5 not found relative to test cwd — run from repo');
+    assert(
+      raw != null,
+      'theme/tokens.json5 not found relative to test cwd — run from repo',
+    );
 
     var stripped = raw!.replaceAll(RegExp(r'//[^\n]*'), '');
     stripped = stripped.replaceAll(RegExp(r',(\s*[}\]])'), r'1');
@@ -46,8 +48,11 @@ void main() {
     for (final entry in canonical.entries) {
       final variant = entry.key;
       final roles = entry.value as Map<String, dynamic>;
-      expect(kTokensData[variant], isNotNull,
-          reason: 'variant $variant missing from tokens_data.dart');
+      expect(
+        kTokensData[variant],
+        isNotNull,
+        reason: 'variant $variant missing from tokens_data.dart',
+      );
       for (final role in roles.keys) {
         expect(
           kTokensData[variant]![role],
@@ -55,8 +60,11 @@ void main() {
           reason: '$variant.$role diverged from tokens.json5',
         );
       }
-      expect(kTokensData[variant]!.keys.toSet(), roles.keys.toSet(),
-          reason: '$variant has a different role set than tokens.json5');
+      expect(
+        kTokensData[variant]!.keys.toSet(),
+        roles.keys.toSet(),
+        reason: '$variant has a different role set than tokens.json5',
+      );
     }
   });
 }

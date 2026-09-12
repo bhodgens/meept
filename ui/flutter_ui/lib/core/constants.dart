@@ -87,7 +87,8 @@ abstract class AppConstants {
   /// exposes no client-callable user-management path, so both awareness
   /// surfaces point at the same CLI tree as their single capability source.
   /// Keep byte-identical with the TUI users-modal hints (leaf 05 parity).
-  static const String defaultCliGuidance = 'meept users add <name> · '
+  static const String defaultCliGuidance =
+      'meept users add <name> · '
       'meept users keys add <user-id> · meept users keys revoke <key-id>';
 }
 

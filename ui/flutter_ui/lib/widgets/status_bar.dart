@@ -63,9 +63,7 @@ class StatusBar extends ConsumerWidget {
     final acp = ref.watch(acpStatusProvider).valueOrNull;
     if (acp != null && acp.enabled && acp.liveCount > 0) {
       spans.add(_separator());
-      spans.add(
-        TextSpan(text: 'acp:${acp.liveCount}', style: _lightStyle),
-      );
+      spans.add(TextSpan(text: 'acp:${acp.liveCount}', style: _lightStyle));
     }
 
     return _bar(

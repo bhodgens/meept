@@ -14,7 +14,7 @@ import 'package:meept_ui/services/websocket_service.dart';
 /// canned error. Records the call count so retry can be observed.
 class _PromptsStubClient extends SdkApiClient {
   _PromptsStubClient({this.summaries = const [], this.error})
-      : super(host: 'localhost', port: 8081);
+    : super(host: 'localhost', port: 8081);
 
   List<Map<String, dynamic>> summaries;
   Object? error;
@@ -44,17 +44,13 @@ Map<String, dynamic> _summary({
   String name = 'planner/decompose.md',
   String tier = 'bundled',
   String sourcePath = 'config/prompts/planner/decompose.md',
-}) =>
-    {'name': name, 'tier': tier, 'source_path': sourcePath};
+}) => {'name': name, 'tier': tier, 'source_path': sourcePath};
 
 Widget _buildTestApp(SdkApiClient client) {
   final router = GoRouter(
     initialLocation: '/tools/prompts',
     routes: [
-      GoRoute(
-        path: '/tools/prompts',
-        builder: (_, __) => const PromptPanel(),
-      ),
+      GoRoute(path: '/tools/prompts', builder: (_, __) => const PromptPanel()),
       GoRoute(
         path: '/',
         builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
@@ -93,8 +89,9 @@ void main() {
     expect(find.text('failed to load prompts'), findsNothing);
   });
 
-  testWidgets('503: actionable error is visible and retry re-requests',
-      (tester) async {
+  testWidgets('503: actionable error is visible and retry re-requests', (
+    tester,
+  ) async {
     final client = _PromptsStubClient(
       error: SdkApiException(
         message: 'prompt service not available',
@@ -122,10 +119,7 @@ void main() {
 
   testWidgets('404: route-missing guidance is visible', (tester) async {
     final client = _PromptsStubClient(
-      error: SdkApiException(
-        message: 'Server error: 404',
-        statusCode: 404,
-      ),
+      error: SdkApiException(message: 'Server error: 404', statusCode: 404),
     );
     await tester.pumpWidget(_buildTestApp(client));
     await _settle(tester);
@@ -135,11 +129,13 @@ void main() {
     expect(find.text('retry'), findsOneWidget);
   });
 
-  testWidgets('malformed response shape is surfaced, not silent',
-      (tester) async {
+  testWidgets('malformed response shape is surfaced, not silent', (
+    tester,
+  ) async {
     final client = _PromptsStubClient(
       error: SdkApiException(
-        message: 'malformed prompts response: missing "prompts" key '
+        message:
+            'malformed prompts response: missing "prompts" key '
             '(got keys [])',
         statusCode: 0,
       ),
@@ -162,8 +158,10 @@ void main() {
       find.text('bundled and project prompts will appear here'),
       findsOneWidget,
     );
-    expect(find.textContaining('could not see its prompts directory'),
-        findsOneWidget);
+    expect(
+      find.textContaining('could not see its prompts directory'),
+      findsOneWidget,
+    );
     expect(find.text('retry'), findsOneWidget);
   });
 }

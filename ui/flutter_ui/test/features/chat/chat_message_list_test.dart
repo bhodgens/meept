@@ -20,8 +20,11 @@ class _StubSdkClient extends SdkApiClient {
   _StubSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<List<Map<String, dynamic>>> getMessages(String id,
-      {int offset = 0, int limit = 1000}) async => [];
+  Future<List<Map<String, dynamic>>> getMessages(
+    String id, {
+    int offset = 0,
+    int limit = 1000,
+  }) async => [];
 
   @override
   Future<Map<String, dynamic>> sendChatMessage({
@@ -72,25 +75,48 @@ class _StubWebSocket extends WebSocketService {
 
 class _StubTtsNotifier extends StateNotifier<TtsState> implements TtsNotifier {
   _StubTtsNotifier() : super(TtsState.idle);
-  @override Future<bool> initialize() async => true;
-  @override Future<void> speak(String text) async {}
-  @override Future<void> stop() async {}
-  @override Future<void> setVolume(double volume) async {}
-  @override Future<void> setSpeed(double speed) async {}
-  @override Future<void> setPitch(double pitch) async {}
-  @override Future<void> setVoice(String voiceName) async {}
-  @override Future<List<Map<String, dynamic>>> getVoices() async => [];
-  @override Future<void> setEnabled(bool value) async {}
-  @override Future<void> setBehaviorSettings({required bool interrupt, required bool queue, int? maxQueueSize}) async {}
-  @override Future<void> toggleTts() async {}
-  @override bool get enabled => false;
-  @override bool get isAvailable => false;
-  @override bool get isSpeaking => false;
+  @override
+  Future<bool> initialize() async => true;
+  @override
+  Future<void> speak(String text) async {}
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> setVolume(double volume) async {}
+  @override
+  Future<void> setSpeed(double speed) async {}
+  @override
+  Future<void> setPitch(double pitch) async {}
+  @override
+  Future<void> setVoice(String voiceName) async {}
+  @override
+  Future<List<Map<String, dynamic>>> getVoices() async => [];
+  @override
+  Future<void> setEnabled(bool value) async {}
+  @override
+  Future<void> setBehaviorSettings({
+    required bool interrupt,
+    required bool queue,
+    int? maxQueueSize,
+  }) async {}
+  @override
+  Future<void> toggleTts() async {}
+  @override
+  bool get enabled => false;
+  @override
+  bool get isAvailable => false;
+  @override
+  bool get isSpeaking => false;
   double get volume => 1.0;
 }
 
 class _TestChatNotifier extends ChatNotifier {
-  _TestChatNotifier({required super.sdkClient, required super.websocket, required super.ttsNotifier, required super.sessionId});
+  _TestChatNotifier({
+    required super.sdkClient,
+    required super.websocket,
+    required super.ttsNotifier,
+    required super.sessionId,
+  });
 
   @override
   Future<void> loadMessages() async {
@@ -104,10 +130,7 @@ class _InitialChatState extends ConsumerStatefulWidget {
   final Widget child;
   final ChatState initialState;
 
-  const _InitialChatState({
-    required this.child,
-    required this.initialState,
-  });
+  const _InitialChatState({required this.child, required this.initialState});
 
   @override
   ConsumerState<_InitialChatState> createState() => _InitialChatStateState();
@@ -120,7 +143,8 @@ class _InitialChatStateState extends ConsumerState<_InitialChatState> {
     // Set initial state immediately (before first frame)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        ref.read(chatProvider("test-session").notifier).state = widget.initialState;
+        ref.read(chatProvider("test-session").notifier).state =
+            widget.initialState;
       }
     });
   }
@@ -149,10 +173,7 @@ Widget _buildTestApp({
     child: MaterialApp(
       theme: ThemeData.dark(),
       home: Scaffold(
-        body: _InitialChatState(
-          initialState: initialChatState,
-          child: child,
-        ),
+        body: _InitialChatState(initialState: initialChatState, child: child),
       ),
     ),
   );
@@ -178,10 +199,12 @@ final fixtureMessages = <ChatMessage>[
 void main() {
   group('ChatMessageList', () {
     testWidgets('displays placeholder when no messages', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: const ChatState(),
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: const ChatState(),
+        ),
+      );
 
       await tester.pumpAndSettle();
 
@@ -194,10 +217,12 @@ void main() {
     });
 
     testWidgets('displays messages from chatProvider', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(messages: fixtureMessages),
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: ChatState(messages: fixtureMessages),
+        ),
+      );
 
       await tester.pumpAndSettle();
 
@@ -205,158 +230,151 @@ void main() {
     });
 
     testWidgets('each bubble shows message content', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(messages: fixtureMessages),
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: ChatState(messages: fixtureMessages),
+        ),
+      );
 
       await tester.pumpAndSettle();
 
-      expect(
-        find.textContaining('hello', skipOffstage: false),
-        findsOneWidget,
-      );
+      expect(find.textContaining('hello', skipOffstage: false), findsOneWidget);
       expect(
         find.textContaining('hi there', skipOffstage: false),
         findsOneWidget,
       );
     });
 
-    testWidgets('shows loading indicator when isLoading is true',
-        (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(
-          messages: fixtureMessages,
-          isLoading: true,
+    testWidgets('shows loading indicator when isLoading is true', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: ChatState(
+            messages: fixtureMessages,
+            isLoading: true,
+          ),
         ),
-      ));
+      );
 
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(
-        find.text('thinking...', skipOffstage: false),
-        findsOneWidget,
-      );
-      expect(
-        find.byType(CircularProgressIndicator),
-        findsOneWidget,
-      );
+      expect(find.text('thinking...', skipOffstage: false), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
 
     testWidgets('shows error banner when error is present', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(
-          messages: fixtureMessages,
-          error: 'connection failed',
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: ChatState(
+            messages: fixtureMessages,
+            error: 'connection failed',
+          ),
         ),
-      ));
+      );
 
       await tester.pumpAndSettle();
 
-      expect(
-        find.byIcon(Icons.error_outline),
-        findsOneWidget,
-      );
+      expect(find.byIcon(Icons.error_outline), findsOneWidget);
       expect(
         find.text('connection failed', skipOffstage: false),
         findsOneWidget,
       );
     });
 
-    testWidgets('does not show placeholder when messages exist',
-        (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(messages: fixtureMessages),
-      ));
+    testWidgets('does not show placeholder when messages exist', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: ChatState(messages: fixtureMessages),
+        ),
+      );
 
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('no messages yet', skipOffstage: false),
-        findsNothing,
-      );
+      expect(find.text('no messages yet', skipOffstage: false), findsNothing);
     });
 
-    testWidgets('shows loading indicator when isAgentProcessing is true',
-        (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(
-          messages: fixtureMessages,
-          isLoading: false,
-          isAgentProcessing: true,
+    testWidgets('shows loading indicator when isAgentProcessing is true', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: ChatState(
+            messages: fixtureMessages,
+            isLoading: false,
+            isAgentProcessing: true,
+          ),
         ),
-      ));
+      );
 
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(
-        find.text('thinking...', skipOffstage: false),
-        findsOneWidget,
-      );
-      expect(
-        find.byType(CircularProgressIndicator),
-        findsOneWidget,
-      );
+      expect(find.text('thinking...', skipOffstage: false), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
 
-    testWidgets('does not show loading indicator when neither flag is true',
-        (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(messages: fixtureMessages),
-      ));
+    testWidgets('does not show loading indicator when neither flag is true', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: ChatState(messages: fixtureMessages),
+        ),
+      );
 
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('thinking...', skipOffstage: false),
-        findsNothing,
-      );
+      expect(find.text('thinking...', skipOffstage: false), findsNothing);
     });
 
-    testWidgets('pending scroll target clears after rendering',
-        (tester) async {
+    testWidgets('pending scroll target clears after rendering', (tester) async {
       late ProviderContainer container;
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          chatProvider("test-session").overrideWith(
-            (ref) => _TestChatNotifier(
-              sdkClient: _StubSdkClient(),
-              websocket: _StubWebSocket(),
-              ttsNotifier: _StubTtsNotifier(),
-              sessionId: "test-session",
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            chatProvider("test-session").overrideWith(
+              (ref) => _TestChatNotifier(
+                sdkClient: _StubSdkClient(),
+                websocket: _StubWebSocket(),
+                ttsNotifier: _StubTtsNotifier(),
+                sessionId: "test-session",
+              ),
+            ),
+          ],
+          child: MaterialApp(
+            theme: ThemeData.dark(),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) {
+                  container = ProviderScope.containerOf(context);
+                  return const ChatMessageList(sessionId: 'test-session');
+                },
+              ),
             ),
           ),
-        ],
-        child: MaterialApp(
-          theme: ThemeData.dark(),
-          home: Scaffold(
-            body: Builder(builder: (context) {
-              container = ProviderScope.containerOf(context);
-              return const ChatMessageList(sessionId: 'test-session');
-            }),
-          ),
         ),
-      ));
+      );
 
       // Set the pending scroll target AFTER the widget tree has built so we
       // don't violate the "no provider modification during build" rule.
       await tester.pump();
       container
-          .read(pendingScrollMessageProvider('test-session').notifier)
-          .state = '2';
+              .read(pendingScrollMessageProvider('test-session').notifier)
+              .state =
+          '2';
 
       // The stub chat notifier emits an empty state, so the target message
       // is not present.  The pending value must remain set.
       await tester.pumpAndSettle();
-      expect(
-        container.read(pendingScrollMessageProvider('test-session')),
-        '2',
-      );
+      expect(container.read(pendingScrollMessageProvider('test-session')), '2');
     });
 
     testWidgets('scroll-to-bottom button hidden at bottom, shown when '
@@ -371,14 +389,16 @@ void main() {
           timestamp: DateTime.utc(2024, 1, 1).add(Duration(minutes: i)),
         ),
       );
-      await tester.pumpWidget(_buildTestApp(
-        child: const SizedBox(
-          width: 600,
-          height: 500,
-          child: ChatMessageList(sessionId: 'test-session'),
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const SizedBox(
+            width: 600,
+            height: 500,
+            child: ChatMessageList(sessionId: 'test-session'),
+          ),
+          initialChatState: ChatState(messages: many),
         ),
-        initialChatState: ChatState(messages: many),
-      ));
+      );
       await tester.pumpAndSettle();
 
       // At bottom: button hidden.
@@ -399,17 +419,16 @@ void main() {
 
   group('MessagePlaceholder', () {
     testWidgets('renders chat bubble icon', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        child: MaterialApp(
-          theme: ThemeData.dark(),
-          home: const Scaffold(body: MessagePlaceholder()),
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: ThemeData.dark(),
+            home: const Scaffold(body: MessagePlaceholder()),
+          ),
         ),
-      ));
-
-      expect(
-        find.byIcon(Icons.chat_bubble_outline),
-        findsOneWidget,
       );
+
+      expect(find.byIcon(Icons.chat_bubble_outline), findsOneWidget);
     });
   });
 }

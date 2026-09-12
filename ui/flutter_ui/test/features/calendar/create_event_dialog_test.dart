@@ -38,15 +38,14 @@ Widget _buildTestApp() {
       sdkClientProvider.overrideWith((_) => _StubSdkClient()),
       websocketProvider.overrideWith((_) => _StubWebSocket()),
     ],
-    child: const MaterialApp(
-      home: Scaffold(body: CalendarPanel()),
-    ),
+    child: const MaterialApp(home: Scaffold(body: CalendarPanel())),
   );
 }
 
 void main() {
-  testWidgets('create event dialog exposes start and end pickers',
-      (tester) async {
+  testWidgets('create event dialog exposes start and end pickers', (
+    tester,
+  ) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pump(); // allow CalendarPanel initState + getCalendarToday
     await tester.pump(const Duration(milliseconds: 100));

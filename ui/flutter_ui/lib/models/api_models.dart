@@ -138,20 +138,26 @@ class CalendarEvent {
 class AgentQuotaPayload {
   /// Agent id (copied from the top-level agent_id).
   final String agentId;
+
   /// Transition target: "quota_wait", "blocked", or "running".
   final String to;
+
   /// Park lifecycle reason (I-M8): "quota_wait" | "throttle_wait" |
   /// "throttle_resumed" | "throttle_give_up"; null when the backend sent
   /// none (legacy events). A give-up renders the give-up badge instead of
   /// a wait label.
   final String? reason;
+
   /// Optional RFC3339 unblock time with the DAEMON's UTC offset embedded
   /// (producers Format(time.RFC3339)). Null when clearing.
   final String? unblockAt;
+
   /// Escalation tier label ("warn", "action_recommended", "blocked", "").
   final String? escalation;
+
   /// Fallback model name suggested by the backend.
   final String? fallbackModel;
+
   /// Parked-turn class (tree 03 leaf 04): "quota" | "throttle"; null when
   /// the backend sent none (legacy events, tier refreshes, clears).
   final String? waitClass;
@@ -171,8 +177,8 @@ class AgentQuotaPayload {
     // "resume_at" (ParkTurnEvent.ResumeAt); quota-episode events use
     // "unblock_at" (QuotaEvent.UnblockAt). Read BOTH so the agents-tab
     // wait label renders for every parked-turn class.
-    final unblockAt = (json['unblock_at'] as String?) ??
-        (json['resume_at'] as String?);
+    final unblockAt =
+        (json['unblock_at'] as String?) ?? (json['resume_at'] as String?);
     return AgentQuotaPayload(
       agentId: json['agent_id'] as String? ?? '',
       to: json['to'] as String? ?? '',

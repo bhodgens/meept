@@ -153,8 +153,11 @@ class _UsersPanelState extends ConsumerState<UsersPanel> {
                   visualDensity: VisualDensity.compact,
                   iconSize: 14,
                   tooltip: 'refresh',
-                  icon: Icon(Icons.refresh,
-                      size: 14, color: CyberpunkColors.orangePrimary),
+                  icon: Icon(
+                    Icons.refresh,
+                    size: 14,
+                    color: CyberpunkColors.orangePrimary,
+                  ),
                   onPressed: _load,
                 ),
               ],

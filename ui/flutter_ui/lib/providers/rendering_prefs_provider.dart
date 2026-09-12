@@ -21,6 +21,7 @@ class RenderingPrefs {
   final bool markdown;
   final bool wordWrap;
   final bool autoResume;
+
   /// M9 timezone convention: when false (the default) agent quota HH:MM
   /// timestamps render the DAEMON's wall-clock (the offset embedded in the
   /// wire RFC3339); when true they render in the device zone. Mirrors the
@@ -68,8 +69,8 @@ class RenderingPrefsNotifier extends StateNotifier<RenderingPrefs> {
         // "daemon"). Anything but an explicit "local" keeps the default.
         useDeviceTimeForQuota:
             rendering is Map && rendering['time_display'] is String
-                ? rendering['time_display'] as String == 'local'
-                : false,
+            ? rendering['time_display'] as String == 'local'
+            : false,
       );
     } catch (_) {
       // Offline / unreachable — defaults already set.

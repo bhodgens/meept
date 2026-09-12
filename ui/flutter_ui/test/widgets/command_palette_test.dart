@@ -5,14 +5,16 @@ import 'package:meept_ui/widgets/command_palette.dart';
 
 void main() {
   testWidgets('shows all 9 items with labels', (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: CommandPalette(
-          items: CommandPalette.defaultItems,
-          onSelected: (_) {},
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CommandPalette(
+            items: CommandPalette.defaultItems,
+            onSelected: (_) {},
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
     expect(find.text('chat'), findsOneWidget);
     expect(find.text('sessions'), findsOneWidget);
@@ -23,14 +25,16 @@ void main() {
 
   testWidgets('arrow down moves selection; enter activates', (tester) async {
     CommandPaletteItem? selected;
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: CommandPalette(
-          items: CommandPalette.defaultItems,
-          onSelected: (item) => selected = item,
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CommandPalette(
+            items: CommandPalette.defaultItems,
+            onSelected: (item) => selected = item,
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
@@ -42,14 +46,16 @@ void main() {
 
   testWidgets('click activates the tapped item', (tester) async {
     CommandPaletteItem? selected;
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: CommandPalette(
-          items: CommandPalette.defaultItems,
-          onSelected: (item) => selected = item,
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CommandPalette(
+            items: CommandPalette.defaultItems,
+            onSelected: (item) => selected = item,
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
     await tester.tap(find.text('tasks'));
     await tester.pump();
@@ -57,14 +63,13 @@ void main() {
   });
 
   testWidgets('empty items does not crash on key events', (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: CommandPalette(
-          items: const [],
-          onSelected: (_) {},
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CommandPalette(items: const [], onSelected: (_) {}),
         ),
       ),
-    ));
+    );
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -72,25 +77,28 @@ void main() {
     // No exception thrown — test passes if we reach here.
   });
 
-  testWidgets('shrinking items list clamps selection without crashing',
-      (tester) async {
+  testWidgets('shrinking items list clamps selection without crashing', (
+    tester,
+  ) async {
     CommandPaletteItem? selected;
     late StateSetter setStateOuter;
     List<CommandPaletteItem> items = CommandPalette.defaultItems;
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: StatefulBuilder(
-          builder: (context, setState) {
-            setStateOuter = setState;
-            return CommandPalette(
-              items: items,
-              onSelected: (item) => selected = item,
-            );
-          },
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              setStateOuter = setState;
+              return CommandPalette(
+                items: items,
+                onSelected: (item) => selected = item,
+              );
+            },
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
     // Move selection down a few times to reach index 5.
     for (int i = 0; i < 5; i++) {
@@ -110,14 +118,16 @@ void main() {
 
   group('type-to-filter', () {
     testWidgets('typing narrows the visible items', (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: CommandPalette(
-            items: CommandPalette.defaultItems,
-            onSelected: (_) {},
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CommandPalette(
+              items: CommandPalette.defaultItems,
+              onSelected: (_) {},
+            ),
           ),
         ),
-      ));
+      );
       await tester.pump();
 
       await tester.enterText(find.byType(TextField), 'session');
@@ -131,14 +141,16 @@ void main() {
     });
 
     testWidgets('filter matches description text too', (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: CommandPalette(
-            items: CommandPalette.defaultItems,
-            onSelected: (_) {},
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CommandPalette(
+              items: CommandPalette.defaultItems,
+              onSelected: (_) {},
+            ),
           ),
         ),
-      ));
+      );
       await tester.pump();
 
       // "employees" only appears in the agents item's description.
@@ -151,14 +163,16 @@ void main() {
 
     testWidgets('enter activates the filtered selection', (tester) async {
       CommandPaletteItem? selected;
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: CommandPalette(
-            items: CommandPalette.defaultItems,
-            onSelected: (item) => selected = item,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CommandPalette(
+              items: CommandPalette.defaultItems,
+              onSelected: (item) => selected = item,
+            ),
           ),
         ),
-      ));
+      );
       await tester.pump();
 
       await tester.enterText(find.byType(TextField), 'new');
@@ -169,17 +183,20 @@ void main() {
       expect(selected?.label, 'new session');
     });
 
-    testWidgets('no-match query shows empty list without crashing',
-        (tester) async {
+    testWidgets('no-match query shows empty list without crashing', (
+      tester,
+    ) async {
       CommandPaletteItem? selected;
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: CommandPalette(
-            items: CommandPalette.defaultItems,
-            onSelected: (item) => selected = item,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CommandPalette(
+              items: CommandPalette.defaultItems,
+              onSelected: (item) => selected = item,
+            ),
           ),
         ),
-      ));
+      );
       await tester.pump();
 
       await tester.enterText(find.byType(TextField), 'zzzz');
@@ -193,14 +210,16 @@ void main() {
     });
 
     testWidgets('clearing the filter restores all items', (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: CommandPalette(
-            items: CommandPalette.defaultItems,
-            onSelected: (_) {},
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CommandPalette(
+              items: CommandPalette.defaultItems,
+              onSelected: (_) {},
+            ),
           ),
         ),
-      ));
+      );
       await tester.pump();
 
       await tester.enterText(find.byType(TextField), 'plans');

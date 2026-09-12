@@ -16,8 +16,11 @@ class _StubSdkClient extends SdkApiClient {
   _StubSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<List<Map<String, dynamic>>> getMessages(String id,
-      {int offset = 0, int limit = 1000}) async => [];
+  Future<List<Map<String, dynamic>>> getMessages(
+    String id, {
+    int offset = 0,
+    int limit = 1000,
+  }) async => [];
 
   @override
   Future<Map<String, dynamic>> sendChatMessage({
@@ -89,8 +92,11 @@ class _StubTtsNotifier extends StateNotifier<TtsState> implements TtsNotifier {
   @override
   Future<void> setEnabled(bool value) async {}
   @override
-  Future<void> setBehaviorSettings(
-      {required bool interrupt, required bool queue, int? maxQueueSize}) async {}
+  Future<void> setBehaviorSettings({
+    required bool interrupt,
+    required bool queue,
+    int? maxQueueSize,
+  }) async {}
   @override
   Future<void> toggleTts() async {}
   @override
@@ -124,10 +130,7 @@ class _InitialChatState extends ConsumerStatefulWidget {
   final Widget child;
   final ChatState initialState;
 
-  const _InitialChatState({
-    required this.child,
-    required this.initialState,
-  });
+  const _InitialChatState({required this.child, required this.initialState});
 
   @override
   ConsumerState<_InitialChatState> createState() => _InitialChatStateState();
@@ -139,7 +142,8 @@ class _InitialChatStateState extends ConsumerState<_InitialChatState> {
     super.didChangeDependencies();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        ref.read(chatProvider("test-session").notifier).state = widget.initialState;
+        ref.read(chatProvider("test-session").notifier).state =
+            widget.initialState;
       }
     });
   }
@@ -166,10 +170,7 @@ Widget _buildTestApp({
     child: MaterialApp(
       theme: ThemeData.dark(),
       home: Scaffold(
-        body: _InitialChatState(
-          initialState: initialChatState,
-          child: child,
-        ),
+        body: _InitialChatState(initialState: initialChatState, child: child),
       ),
     ),
   );
@@ -178,62 +179,65 @@ Widget _buildTestApp({
 void main() {
   group('session swap loading state (Gap 6)', () {
     testWidgets(
-        'loading indicator is visible when messages empty and isLoading is '
-        'true (session swap window)', (tester) async {
-      // This test reproduces the exact state shape that ChatNotifier sets
-      // during loadMessages when switching sessions:
-      //   state = ChatState(messages: [], isLoading: true)
-      //
-      // Before the fix: ChatMessageList renders MessagePlaceholder ("no
-      // messages yet") because it checks messages.isEmpty without checking
-      // isLoading, making the session swap look like an empty session.
-      //
-      // After the fix: a loading spinner is shown instead, distinguishing
-      // the transient loading window from a genuinely empty session.
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: const ChatState(
-          messages: [],
-          isLoading: true,
-        ),
-      ));
-      // Use pump (not pumpAndSettle) because the loading spinner animates
-      // indefinitely, which would block pumpAndSettle forever.
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+      'loading indicator is visible when messages empty and isLoading is '
+      'true (session swap window)',
+      (tester) async {
+        // This test reproduces the exact state shape that ChatNotifier sets
+        // during loadMessages when switching sessions:
+        //   state = ChatState(messages: [], isLoading: true)
+        //
+        // Before the fix: ChatMessageList renders MessagePlaceholder ("no
+        // messages yet") because it checks messages.isEmpty without checking
+        // isLoading, making the session swap look like an empty session.
+        //
+        // After the fix: a loading spinner is shown instead, distinguishing
+        // the transient loading window from a genuinely empty session.
+        await tester.pumpWidget(
+          _buildTestApp(
+            child: const ChatMessageList(sessionId: 'test-session'),
+            initialChatState: const ChatState(messages: [], isLoading: true),
+          ),
+        );
+        // Use pump (not pumpAndSettle) because the loading spinner animates
+        // indefinitely, which would block pumpAndSettle forever.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
 
-      // EXPECTATION (after fix): a loading indicator is visible.
-      expect(
-        find.byType(CircularProgressIndicator),
-        findsWidgets,
-        reason: 'During a session swap, ChatNotifier sets messages: [], '
-            'isLoading: true. The UI should show a loading spinner, not the '
-            '"no messages yet" placeholder.',
-      );
-      // The "no messages yet" placeholder must NOT appear during loading.
-      expect(
-        find.text('no messages yet', skipOffstage: false),
-        findsNothing,
-        reason: 'The empty-session placeholder must not render while '
-            'isLoading is true and messages are being fetched.',
-      );
-      expect(
-        find.text('start the conversation', skipOffstage: false),
-        findsNothing,
-      );
-    });
+        // EXPECTATION (after fix): a loading indicator is visible.
+        expect(
+          find.byType(CircularProgressIndicator),
+          findsWidgets,
+          reason:
+              'During a session swap, ChatNotifier sets messages: [], '
+              'isLoading: true. The UI should show a loading spinner, not the '
+              '"no messages yet" placeholder.',
+        );
+        // The "no messages yet" placeholder must NOT appear during loading.
+        expect(
+          find.text('no messages yet', skipOffstage: false),
+          findsNothing,
+          reason:
+              'The empty-session placeholder must not render while '
+              'isLoading is true and messages are being fetched.',
+        );
+        expect(
+          find.text('start the conversation', skipOffstage: false),
+          findsNothing,
+        );
+      },
+    );
 
-    testWidgets(
-        'placeholder appears when messages empty and not loading', (tester) async {
+    testWidgets('placeholder appears when messages empty and not loading', (
+      tester,
+    ) async {
       // Guards against the fix accidentally showing the spinner on
       // genuinely empty sessions.
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: const ChatState(
-          messages: [],
-          isLoading: false,
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: const ChatState(messages: [], isLoading: false),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('no messages yet', skipOffstage: false), findsOneWidget);
@@ -241,19 +245,21 @@ void main() {
     });
 
     testWidgets('messages render normally when loaded', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(
-          messages: [
-            ChatMessage(
-              id: '1',
-              role: 'user',
-              content: 'hello world',
-              timestamp: DateTime.utc(2024, 1, 1),
-            ),
-          ],
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatMessageList(sessionId: 'test-session'),
+          initialChatState: ChatState(
+            messages: [
+              ChatMessage(
+                id: '1',
+                role: 'user',
+                content: 'hello world',
+                timestamp: DateTime.utc(2024, 1, 1),
+              ),
+            ],
+          ),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       expect(find.textContaining('hello world'), findsOneWidget);

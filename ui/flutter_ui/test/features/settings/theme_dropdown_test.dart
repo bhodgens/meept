@@ -36,9 +36,7 @@ void main() {
     await tester.pumpWidget(
       const ProviderScope(
         child: MaterialApp(
-          home: Scaffold(
-            body: SizedBox(width: 1100, child: SettingsPanel()),
-          ),
+          home: Scaffold(body: SizedBox(width: 1100, child: SettingsPanel())),
         ),
       ),
     );

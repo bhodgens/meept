@@ -90,10 +90,7 @@ void main() {
 
     test('copyWith creates new instance with updated values', () {
       const original = AgentState();
-      final updated = original.copyWith(
-        isLoading: true,
-        error: null,
-      );
+      final updated = original.copyWith(isLoading: true, error: null);
       expect(updated.agents, original.agents);
       expect(updated.isLoading, isTrue);
       expect(updated.error, isNull);
@@ -101,12 +98,9 @@ void main() {
 
     test('copyWith preserves unprovided fields', () {
       const original = AgentState(
-        agents: [Agent(
-          id: 'a1',
-          name: 'A1',
-          description: 'desc',
-          enabled: true,
-        )],
+        agents: [
+          Agent(id: 'a1', name: 'A1', description: 'desc', enabled: true),
+        ],
         isLoading: true,
         error: 'oops',
       );
@@ -173,7 +167,9 @@ void main() {
     });
 
     test('copyWith with null agents keeps old agents', () {
-      const agents = [Agent(id: 'x', name: 'X', description: '', enabled: true)];
+      const agents = [
+        Agent(id: 'x', name: 'X', description: '', enabled: true),
+      ];
       const state = AgentState(agents: agents);
       final copy = state.copyWith(agents: null);
       expect(copy.agents, agents);
@@ -256,18 +252,20 @@ void main() {
       expect(notifier.state.agents, isEmpty);
     });
 
-    test('loadAgents populates correctly when API returns agents with null id',
-        () async {
-      final client = _NullIdAgentSdkClient();
-      final notifier = AgentNotifier(sdkClient: client);
-      notifier.loadAgents();
-      await Future.delayed(const Duration(milliseconds: 100));
+    test(
+      'loadAgents populates correctly when API returns agents with null id',
+      () async {
+        final client = _NullIdAgentSdkClient();
+        final notifier = AgentNotifier(sdkClient: client);
+        notifier.loadAgents();
+        await Future.delayed(const Duration(milliseconds: 100));
 
-      // Agent.fromJson does json['id'] as String which throws on null,
-      // so the error should be set
-      expect(notifier.state.error, isNotNull);
-      expect(notifier.state.agents, isEmpty);
-    });
+        // Agent.fromJson does json['id'] as String which throws on null,
+        // so the error should be set
+        expect(notifier.state.error, isNotNull);
+        expect(notifier.state.agents, isEmpty);
+      },
+    );
   });
 
   group('Agent model parsing', () {

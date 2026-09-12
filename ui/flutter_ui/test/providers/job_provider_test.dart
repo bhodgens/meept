@@ -5,9 +5,10 @@ import 'package:meept_ui/services/websocket_service.dart';
 
 class _TestWebSocket extends WebSocketService {
   _TestWebSocket()
-      : _messageController =
-            StreamController<Map<String, dynamic>>.broadcast(sync: true),
-        super(host: 'localhost', port: 8081);
+    : _messageController = StreamController<Map<String, dynamic>>.broadcast(
+        sync: true,
+      ),
+      super(host: 'localhost', port: 8081);
 
   final StreamController<Map<String, dynamic>> _messageController;
   bool _connected = false;
@@ -35,7 +36,8 @@ class _TestWebSocket extends WebSocketService {
   @override
   bool get isConnected => _connected;
 
-  List<Map<String, dynamic>> get sentMessages => List.unmodifiable(_sentMessages);
+  List<Map<String, dynamic>> get sentMessages =>
+      List.unmodifiable(_sentMessages);
 
   void pushMessage(Map<String, dynamic> message) {
     _messageController.add(message);
@@ -79,10 +81,7 @@ void main() {
     });
 
     test('maps id field to jobId', () {
-      final json = {
-        'id': 'job-456',
-        'status': 'completed',
-      };
+      final json = {'id': 'job-456', 'status': 'completed'};
 
       final update = JobUpdate.fromJson(json);
 
@@ -99,12 +98,7 @@ void main() {
       // Expect a subscribe message for jobs channel
       expect(
         ws.sentMessages,
-        anyElement(
-          equals({
-            'type': 'subscribe',
-            'channel': 'jobs',
-          }),
-        ),
+        anyElement(equals({'type': 'subscribe', 'channel': 'jobs'})),
       );
     });
 

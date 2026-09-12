@@ -80,8 +80,10 @@ void main() {
     expect(find.text('chat scroll speed'), findsNWidgets(2)); // label + field
     expect(find.text('auto-copy on release'), findsOneWidget);
     expect(find.text('markdown rendering'), findsOneWidget);
-    expect(find.text('use device time for agent timestamps'),
-        findsOneWidget); // M9 rendering.time_display toggle
+    expect(
+      find.text('use device time for agent timestamps'),
+      findsOneWidget,
+    ); // M9 rendering.time_display toggle
     // Seeded int value lands in its field.
     expect(find.widgetWithText(TextField, '3'), findsOneWidget);
     // 5 bool toggles + the M9 time-display toggle.

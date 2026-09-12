@@ -15,28 +15,36 @@ void main() {
   });
 
   test('scaffoldBackgroundColor follows background role', () {
-    final midnight =
-        CyberpunkTheme.build(AppPalette.forName('midnight')).scaffoldBackgroundColor;
+    final midnight = CyberpunkTheme.build(
+      AppPalette.forName('midnight'),
+    ).scaffoldBackgroundColor;
     expect(midnight, const Color(0xFF1A1B26));
 
-    final cyber =
-        CyberpunkTheme.build(AppPalette.forName('cyberpunk')).scaffoldBackgroundColor;
+    final cyber = CyberpunkTheme.build(
+      AppPalette.forName('cyberpunk'),
+    ).scaffoldBackgroundColor;
     expect(cyber, const Color(0xFF000000));
   });
 
   test('darkTheme delegates to the active palette', () {
     // Default (cyberpunk) — no explicit setActive needed for a cold start.
-    expect(CyberpunkTheme.darkTheme.scaffoldBackgroundColor,
-        const Color(0xFF000000));
+    expect(
+      CyberpunkTheme.darkTheme.scaffoldBackgroundColor,
+      const Color(0xFF000000),
+    );
 
     // After activating midnight the legacy accessor follows along.
     final saved = AppPalette.forName('cyberpunk');
     CyberpunkColors.setActive(AppPalette.forName('midnight'));
-    expect(CyberpunkTheme.darkTheme.scaffoldBackgroundColor,
-        const Color(0xFF1A1B26));
+    expect(
+      CyberpunkTheme.darkTheme.scaffoldBackgroundColor,
+      const Color(0xFF1A1B26),
+    );
 
     CyberpunkColors.setActive(saved);
-    expect(CyberpunkTheme.darkTheme.scaffoldBackgroundColor,
-        const Color(0xFF000000));
+    expect(
+      CyberpunkTheme.darkTheme.scaffoldBackgroundColor,
+      const Color(0xFF000000),
+    );
   });
 }

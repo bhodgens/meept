@@ -23,8 +23,7 @@ void main() {
         ProviderScope(
           overrides: [
             agentProvider.overrideWith(
-              (ref) => AgentNotifier(
-                  sdkClient: _FakeSdkClient(agents: agents)),
+              (ref) => AgentNotifier(sdkClient: _FakeSdkClient(agents: agents)),
             ),
           ],
           child: const MaterialApp(home: Scaffold(body: AgentsTab())),
@@ -58,8 +57,7 @@ void main() {
         ProviderScope(
           overrides: [
             agentProvider.overrideWith(
-              (ref) => AgentNotifier(
-                  sdkClient: _FakeSdkClient(agents: agents)),
+              (ref) => AgentNotifier(sdkClient: _FakeSdkClient(agents: agents)),
             ),
           ],
           child: const MaterialApp(home: Scaffold(body: AgentsTab())),
@@ -82,11 +80,12 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
-      final narrowRects = [
-        for (final k in tileKeys) ...rectsForKey(k),
-      ];
-      expect(narrowRects, isNotEmpty,
-          reason: 'should find at least one narrow tile');
+      final narrowRects = [for (final k in tileKeys) ...rectsForKey(k)];
+      expect(
+        narrowRects,
+        isNotEmpty,
+        reason: 'should find at least one narrow tile',
+      );
       final narrowFirstRowY = narrowRects.first.top;
       final narrowCols = narrowRects
           .where((r) => (r.top - narrowFirstRowY).abs() < 1)
@@ -96,17 +95,22 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
-      final wideRects = [
-        for (final k in tileKeys) ...rectsForKey(k),
-      ];
-      expect(wideRects, isNotEmpty,
-          reason: 'should find at least one wide tile');
+      final wideRects = [for (final k in tileKeys) ...rectsForKey(k)];
+      expect(
+        wideRects,
+        isNotEmpty,
+        reason: 'should find at least one wide tile',
+      );
       final wideFirstRowY = wideRects.first.top;
-      final wideCols =
-          wideRects.where((r) => (r.top - wideFirstRowY).abs() < 1).length;
+      final wideCols = wideRects
+          .where((r) => (r.top - wideFirstRowY).abs() < 1)
+          .length;
 
-      expect(wideCols, greaterThan(narrowCols),
-          reason: 'wider window should show more tiles per row');
+      expect(
+        wideCols,
+        greaterThan(narrowCols),
+        reason: 'wider window should show more tiles per row',
+      );
     });
 
     testWidgets('selecting an agent shows its goals pane', (tester) async {
@@ -123,9 +127,7 @@ void main() {
         ProviderScope(
           overrides: [
             sdkClientProvider.overrideWith((ref) => fake),
-            agentProvider.overrideWith(
-              (ref) => AgentNotifier(sdkClient: fake),
-            ),
+            agentProvider.overrideWith((ref) => AgentNotifier(sdkClient: fake)),
           ],
           child: const MaterialApp(home: Scaffold(body: AgentsTab())),
         ),
@@ -156,16 +158,20 @@ class _FakeSdkClient implements SdkApiClient {
   @override
   Future<List<Map<String, dynamic>>> listAgents() async {
     return agents
-        .map((a) => <String, dynamic>{
-              'id': a.id,
-              'name': a.name,
-              'description': a.description,
-            })
+        .map(
+          (a) => <String, dynamic>{
+            'id': a.id,
+            'name': a.name,
+            'description': a.description,
+          },
+        )
         .toList();
   }
 
   @override
-  Future<List<Map<String, dynamic>>> listEmployeeGoals(String employeeId) async {
+  Future<List<Map<String, dynamic>>> listEmployeeGoals(
+    String employeeId,
+  ) async {
     if (employeeId == 'agent-0') {
       return [
         {

@@ -30,7 +30,8 @@ class _TestSdkClient extends SdkApiClient {
   final List<Task> _tasks;
   final List<Task> _created = [];
 
-  _TestSdkClient([this._tasks = const []]) : super(host: 'localhost', port: 65432);
+  _TestSdkClient([this._tasks = const []])
+    : super(host: 'localhost', port: 65432);
 
   List<Task> get createdTasks => _created;
 
@@ -110,11 +111,10 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(sdkClient: _SlowLoadSdkClient())),
+              (ref) => TaskNotifier(sdkClient: _SlowLoadSdkClient()),
+            ),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
 
@@ -129,11 +129,10 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(sdkClient: _TestSdkClient([]))),
+              (ref) => TaskNotifier(sdkClient: _TestSdkClient([])),
+            ),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -145,11 +144,10 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(sdkClient: _ThrowingSdkClient())),
+              (ref) => TaskNotifier(sdkClient: _ThrowingSdkClient()),
+            ),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -162,16 +160,15 @@ void main() {
           overrides: [
             taskProvider.overrideWith((ref) {
               final notifier = TaskNotifier(
-                sdkClient: _TestSdkClient(
-                  [_makeTask(), _makeTask(id: '2', title: 'Second Task')],
-                ),
+                sdkClient: _TestSdkClient([
+                  _makeTask(),
+                  _makeTask(id: '2', title: 'Second Task'),
+                ]),
               );
               return notifier;
             }),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -191,9 +188,7 @@ void main() {
               );
             }),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -202,17 +197,17 @@ void main() {
       expect(find.text('failed'), findsOneWidget);
     });
 
-    testWidgets('shows create task dialog when + button is pressed',
-        (tester) async {
+    testWidgets('shows create task dialog when + button is pressed', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(sdkClient: _TestSdkClient([]))),
+              (ref) => TaskNotifier(sdkClient: _TestSdkClient([])),
+            ),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -227,18 +222,16 @@ void main() {
       expect(find.byType(TextField), findsOneWidget);
     });
 
-    testWidgets('dialog creates task when create is tapped with text',
-        (tester) async {
+    testWidgets('dialog creates task when create is tapped with text', (
+      tester,
+    ) async {
       final client = _TestSdkClient();
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            taskProvider.overrideWith(
-                (ref) => TaskNotifier(sdkClient: client)),
+            taskProvider.overrideWith((ref) => TaskNotifier(sdkClient: client)),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -259,18 +252,14 @@ void main() {
       expect(client.createdTasks[0].title, 'New Test Task');
     });
 
-    testWidgets('dialog does not create task with empty title',
-        (tester) async {
+    testWidgets('dialog does not create task with empty title', (tester) async {
       final client = _TestSdkClient();
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            taskProvider.overrideWith(
-                (ref) => TaskNotifier(sdkClient: client)),
+            taskProvider.overrideWith((ref) => TaskNotifier(sdkClient: client)),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -293,11 +282,10 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(sdkClient: _TestSdkClient([]))),
+              (ref) => TaskNotifier(sdkClient: _TestSdkClient([])),
+            ),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -317,11 +305,10 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(sdkClient: _TestSdkClient([]))),
+              (ref) => TaskNotifier(sdkClient: _TestSdkClient([])),
+            ),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -333,18 +320,16 @@ void main() {
       expect(textField.autofocus, isTrue);
     });
 
-    testWidgets('creating a task appends it to the list after API succeeds',
-        (tester) async {
+    testWidgets('creating a task appends it to the list after API succeeds', (
+      tester,
+    ) async {
       final client = _TestSdkClient();
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            taskProvider.overrideWith(
-                (ref) => TaskNotifier(sdkClient: client)),
+            taskProvider.overrideWith((ref) => TaskNotifier(sdkClient: client)),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: TasksList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: TasksList())),
         ),
       );
       await tester.pumpAndSettle();

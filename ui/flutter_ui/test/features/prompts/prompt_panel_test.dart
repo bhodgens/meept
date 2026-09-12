@@ -10,7 +10,7 @@ import 'package:meept_ui/services/websocket_service.dart';
 /// Stub SdkApiClient that overrides the prompt methods.
 class _PromptsStubClient extends SdkApiClient {
   _PromptsStubClient(this._summaries, {this.detailOverride})
-      : super(host: 'localhost', port: 8081);
+    : super(host: 'localhost', port: 8081);
 
   final List<Map<String, dynamic>> _summaries;
   final Map<String, Map<String, dynamic>>? detailOverride;
@@ -44,8 +44,7 @@ class _PromptsStubClient extends SdkApiClient {
   }
 
   @override
-  Future<Map<String, dynamic>> putPromptRaw(
-      String path, String content) async {
+  Future<Map<String, dynamic>> putPromptRaw(String path, String content) async {
     putCallCount++;
     lastPutPath = path;
     lastPutContent = content;
@@ -85,18 +84,14 @@ Map<String, dynamic> _summary({
   String name = 'planner/decompose.md',
   String tier = 'bundled',
   String sourcePath = 'config/prompts/planner/decompose.md',
-}) =>
-    {'name': name, 'tier': tier, 'source_path': sourcePath};
+}) => {'name': name, 'tier': tier, 'source_path': sourcePath};
 
 Widget _buildTestApp(SdkApiClient client) {
   // Provide a GoRouter so `context.go('/')` in _closePanel works.
   final router = GoRouter(
     initialLocation: '/tools/prompts',
     routes: [
-      GoRoute(
-        path: '/tools/prompts',
-        builder: (_, __) => const PromptPanel(),
-      ),
+      GoRoute(path: '/tools/prompts', builder: (_, __) => const PromptPanel()),
       GoRoute(
         path: '/',
         builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
@@ -122,8 +117,9 @@ void main() {
 
     expect(find.text('no prompt templates found'), findsOneWidget);
     expect(
-        find.text('bundled and project prompts will appear here'),
-        findsOneWidget);
+      find.text('bundled and project prompts will appear here'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('renders prompt entries when present', (tester) async {
@@ -172,48 +168,49 @@ void main() {
   });
 
   testWidgets(
-      'delete override button only appears for user tier (detail view)',
-      (tester) async {
-    final client = _PromptsStubClient(
-      [
-        _summary(name: 'user/x.md', tier: 'user'),
-        _summary(name: 'bundled/y.md', tier: 'bundled'),
-      ],
-      detailOverride: {
-        'user/x.md': {
-          'name': 'user/x.md',
-          'tier': 'user',
-          'source_path': '/home/u/.meept/prompts/user/x.md',
-          'modified': '2026-06-27T10:00:00Z',
-          'content': 'override',
+    'delete override button only appears for user tier (detail view)',
+    (tester) async {
+      final client = _PromptsStubClient(
+        [
+          _summary(name: 'user/x.md', tier: 'user'),
+          _summary(name: 'bundled/y.md', tier: 'bundled'),
+        ],
+        detailOverride: {
+          'user/x.md': {
+            'name': 'user/x.md',
+            'tier': 'user',
+            'source_path': '/home/u/.meept/prompts/user/x.md',
+            'modified': '2026-06-27T10:00:00Z',
+            'content': 'override',
+          },
+          'bundled/y.md': {
+            'name': 'bundled/y.md',
+            'tier': 'bundled',
+            'source_path': 'config/prompts/bundled/y.md',
+            'modified': '2026-06-27T10:00:00Z',
+            'content': 'bundled',
+          },
         },
-        'bundled/y.md': {
-          'name': 'bundled/y.md',
-          'tier': 'bundled',
-          'source_path': 'config/prompts/bundled/y.md',
-          'modified': '2026-06-27T10:00:00Z',
-          'content': 'bundled',
-        },
-      },
-    );
-    await tester.pumpWidget(_buildTestApp(client));
-    await tester.pump(const Duration(milliseconds: 50));
-    await tester.pump(const Duration(milliseconds: 50));
+      );
+      await tester.pumpWidget(_buildTestApp(client));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(const Duration(milliseconds: 50));
 
-    // Open user-tier prompt — delete should be visible.
-    await tester.tap(find.text('user/x.md'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 200));
-    expect(find.text('delete override'), findsOneWidget);
+      // Open user-tier prompt — delete should be visible.
+      await tester.tap(find.text('user/x.md'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 200));
+      expect(find.text('delete override'), findsOneWidget);
 
-    // Back to list.
-    await tester.tap(find.byTooltip('back'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+      // Back to list.
+      await tester.tap(find.byTooltip('back'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 200));
 
-    // Open bundled-tier prompt — delete should NOT be visible.
-    await tester.tap(find.text('bundled/y.md'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 200));
-    expect(find.text('delete override'), findsNothing);
-  });
+      // Open bundled-tier prompt — delete should NOT be visible.
+      await tester.tap(find.text('bundled/y.md'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 200));
+      expect(find.text('delete override'), findsNothing);
+    },
+  );
 
   testWidgets('validate button calls validate endpoint', (tester) async {
     final client = _PromptsStubClient(
@@ -282,8 +279,9 @@ void main() {
     expect(find.textContaining('copied to user override'), findsOneWidget);
   });
 
-  testWidgets('delete override calls DELETE and pops back to list',
-      (tester) async {
+  testWidgets('delete override calls DELETE and pops back to list', (
+    tester,
+  ) async {
     final client = _PromptsStubClient(
       [_summary(name: 'user/x.md', tier: 'user')],
       detailOverride: {
@@ -337,9 +335,6 @@ class _PromptsErrorClient extends SdkApiClient {
 
   @override
   Future<List<Map<String, dynamic>>> listPromptsRaw() async {
-    throw SdkApiException(
-      message: 'daemon unreachable',
-      statusCode: 0,
-    );
+    throw SdkApiException(message: 'daemon unreachable', statusCode: 0);
   }
 }

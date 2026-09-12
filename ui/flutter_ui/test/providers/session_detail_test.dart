@@ -29,9 +29,9 @@ void main() {
   group('sessionDetailFamily', () {
     test('fetches once per id, returns cached on subsequent reads', () async {
       final client = _CountingSdkClient();
-      final container = ProviderContainer(overrides: [
-        sdkClientProvider.overrideWithValue(client),
-      ]);
+      final container = ProviderContainer(
+        overrides: [sdkClientProvider.overrideWithValue(client)],
+      );
       addTearDown(container.dispose);
 
       // First read kicks off the fetch — family is keyed by id.
@@ -58,9 +58,9 @@ void main() {
 
     test('prefetch (fire-and-forget read) warms the cache', () async {
       final client = _CountingSdkClient();
-      final container = ProviderContainer(overrides: [
-        sdkClientProvider.overrideWithValue(client),
-      ]);
+      final container = ProviderContainer(
+        overrides: [sdkClientProvider.overrideWithValue(client)],
+      );
       addTearDown(container.dispose);
 
       // Fire-and-forget read simulates the HomeScreen warm-on-connect call.
@@ -77,9 +77,9 @@ void main() {
 
     test('errors are surfaced rather than silently cached as null', () async {
       final client = _CountingSdkClient();
-      final container = ProviderContainer(overrides: [
-        sdkClientProvider.overrideWithValue(client),
-      ]);
+      final container = ProviderContainer(
+        overrides: [sdkClientProvider.overrideWithValue(client)],
+      );
       addTearDown(container.dispose);
 
       // Override the per-id fetch for a specific id by registering it first

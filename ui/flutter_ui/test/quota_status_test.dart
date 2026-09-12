@@ -14,8 +14,14 @@ void main() {
     test('returns resuming… for negative durations', () {
       // Dart normalises Duration(hours: -1) to positive, so construct
       // a truly negative duration via milliseconds.
-      expect(formatDuration(const Duration(milliseconds: -1)), equals('resuming…'));
-      expect(formatDuration(const Duration(hours: -1, minutes: -30)), equals('resuming…'));
+      expect(
+        formatDuration(const Duration(milliseconds: -1)),
+        equals('resuming…'),
+      );
+      expect(
+        formatDuration(const Duration(hours: -1, minutes: -30)),
+        equals('resuming…'),
+      );
       expect(formatDuration(const Duration(days: -1)), equals('resuming…'));
     });
 
@@ -26,7 +32,10 @@ void main() {
       );
       expect(formatDuration(const Duration(hours: 1)), equals('1h'));
       expect(formatDuration(const Duration(hours: 2)), equals('2h'));
-      expect(formatDuration(const Duration(hours: 5, minutes: 0)), equals('5h'));
+      expect(
+        formatDuration(const Duration(hours: 5, minutes: 0)),
+        equals('5h'),
+      );
       expect(
         formatDuration(const Duration(hours: 12, minutes: 30)),
         equals('12h 30m'),
@@ -56,10 +65,7 @@ void main() {
       // Exactly 1 hour
       expect(formatDuration(const Duration(hours: 1)), equals('1h'));
       // Just under 1 hour via seconds
-      expect(
-        formatDuration(const Duration(seconds: 3599)),
-        equals('59m'),
-      );
+      expect(formatDuration(const Duration(seconds: 3599)), equals('59m'));
     });
   });
 
@@ -211,10 +217,7 @@ void main() {
       expect(notifier.state.quotaEpisodes.containsKey('agent-3'), isTrue);
 
       // Clear it
-      notifier.handleQuotaEvent(
-        agentId: 'agent-3',
-        to: 'running',
-      );
+      notifier.handleQuotaEvent(agentId: 'agent-3', to: 'running');
       expect(notifier.state.quotaEpisodes.containsKey('agent-3'), isFalse);
     });
 
@@ -222,44 +225,47 @@ void main() {
       final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
       await notifier.loadAgents();
 
-      notifier.handleQuotaEvent(
-        agentId: 'agent-4',
-        to: 'unknown_state',
-      );
+      notifier.handleQuotaEvent(agentId: 'agent-4', to: 'unknown_state');
 
       expect(notifier.state.quotaEpisodes, isEmpty);
     });
 
-    test('to="" tier escalation updates existing episode unblock time', () async {
-      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
-      await notifier.loadAgents();
+    test(
+      'to="" tier escalation updates existing episode unblock time',
+      () async {
+        final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+        await notifier.loadAgents();
 
-      // Enter quota wait (escalation is "" on initial entry).
-      notifier.handleQuotaEvent(
-        agentId: 'agent-esc',
-        to: 'quota_wait',
-        unblockAt: '2026-08-31T12:00:00Z',
-      );
-      final before = DateTime.parse('2026-08-31T12:00:00Z')
-          .millisecondsSinceEpoch;
-      var ep = notifier.state.quotaEpisodes['agent-esc']!;
-      expect(ep.quotaWaitUntilEpoch, before);
-      expect(ep.quotaBlocked, isFalse);
+        // Enter quota wait (escalation is "" on initial entry).
+        notifier.handleQuotaEvent(
+          agentId: 'agent-esc',
+          to: 'quota_wait',
+          unblockAt: '2026-08-31T12:00:00Z',
+        );
+        final before = DateTime.parse(
+          '2026-08-31T12:00:00Z',
+        ).millisecondsSinceEpoch;
+        var ep = notifier.state.quotaEpisodes['agent-esc']!;
+        expect(ep.quotaWaitUntilEpoch, before);
+        expect(ep.quotaBlocked, isFalse);
 
-      // 12h warn tier fires with to == "" and an extended unblock time.
-      notifier.handleQuotaEvent(
-        agentId: 'agent-esc',
-        to: '',
-        unblockAt: '2026-08-31T13:30:00Z',
-        escalation: 'warn',
-      );
-      ep = notifier.state.quotaEpisodes['agent-esc']!;
-      expect(ep.quotaWaitUntilEpoch,
-          DateTime.parse('2026-08-31T13:30:00Z').millisecondsSinceEpoch);
-      // Episode persists — only the wait time/tier refreshed.
-      expect(ep.quotaBlocked, isFalse);
-      expect(ep.escalation, 'warn');
-    });
+        // 12h warn tier fires with to == "" and an extended unblock time.
+        notifier.handleQuotaEvent(
+          agentId: 'agent-esc',
+          to: '',
+          unblockAt: '2026-08-31T13:30:00Z',
+          escalation: 'warn',
+        );
+        ep = notifier.state.quotaEpisodes['agent-esc']!;
+        expect(
+          ep.quotaWaitUntilEpoch,
+          DateTime.parse('2026-08-31T13:30:00Z').millisecondsSinceEpoch,
+        );
+        // Episode persists — only the wait time/tier refreshed.
+        expect(ep.quotaBlocked, isFalse);
+        expect(ep.escalation, 'warn');
+      },
+    );
 
     test('to="" with no existing episode is a no-op', () async {
       final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
@@ -307,67 +313,71 @@ void main() {
       expect(ep!.reason, 'throttle_give_up');
 
       // Resume clears the episode entirely.
-      notifier.handleQuotaEvent(
-        agentId: 'agent-giveup',
-        to: 'running',
-      );
-      expect(notifier.state.quotaEpisodes.containsKey('agent-giveup'),
-          isFalse);
+      notifier.handleQuotaEvent(agentId: 'agent-giveup', to: 'running');
+      expect(notifier.state.quotaEpisodes.containsKey('agent-giveup'), isFalse);
     });
 
     // I-M8 stale-badge fix: a tier-refresh event that explicitly carries
     // empty-string fields must CLEAR them (sentinel copyWith), while
     // absent (null) fields stay untouched.
-    test('to="" with explicit empty fields clears them, absent preserves',
-        () async {
-      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
-      await notifier.loadAgents();
+    test(
+      'to="" with explicit empty fields clears them, absent preserves',
+      () async {
+        final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+        await notifier.loadAgents();
 
-      notifier.handleQuotaEvent(
-        agentId: 'agent-stale',
-        to: 'quota_wait',
-        unblockAt: '2026-08-31T12:00:00Z',
-        fallbackModel: 'glm-4.7',
-        waitClass: 'throttle',
-        reason: 'throttle_wait',
-      );
-      var ep = notifier.state.quotaEpisodes['agent-stale']!;
-      expect(ep.fallbackModel, 'glm-4.7');
-      expect(ep.waitClass, 'throttle');
-      expect(ep.reason, 'throttle_wait');
+        notifier.handleQuotaEvent(
+          agentId: 'agent-stale',
+          to: 'quota_wait',
+          unblockAt: '2026-08-31T12:00:00Z',
+          fallbackModel: 'glm-4.7',
+          waitClass: 'throttle',
+          reason: 'throttle_wait',
+        );
+        var ep = notifier.state.quotaEpisodes['agent-stale']!;
+        expect(ep.fallbackModel, 'glm-4.7');
+        expect(ep.waitClass, 'throttle');
+        expect(ep.reason, 'throttle_wait');
 
-      // Refresh event: escalation arrives; fallbackModel/waitClass/reason
-      // are ABSENT (null) → preserved.
-      notifier.handleQuotaEvent(
-        agentId: 'agent-stale',
-        to: '',
-        unblockAt: '2026-08-31T13:30:00Z',
-        escalation: 'warn',
-      );
-      ep = notifier.state.quotaEpisodes['agent-stale']!;
-      expect(ep.escalation, 'warn');
-      expect(ep.fallbackModel, 'glm-4.7',
-          reason: 'absent field must be preserved');
-      expect(ep.waitClass, 'throttle');
-      expect(ep.reason, 'throttle_wait');
+        // Refresh event: escalation arrives; fallbackModel/waitClass/reason
+        // are ABSENT (null) → preserved.
+        notifier.handleQuotaEvent(
+          agentId: 'agent-stale',
+          to: '',
+          unblockAt: '2026-08-31T13:30:00Z',
+          escalation: 'warn',
+        );
+        ep = notifier.state.quotaEpisodes['agent-stale']!;
+        expect(ep.escalation, 'warn');
+        expect(
+          ep.fallbackModel,
+          'glm-4.7',
+          reason: 'absent field must be preserved',
+        );
+        expect(ep.waitClass, 'throttle');
+        expect(ep.reason, 'throttle_wait');
 
-      // Now a refresh carrying an EXPLICIT empty reason/waitClass clears
-      // them — under the old copyWith this was impossible.
-      notifier.handleQuotaEvent(
-        agentId: 'agent-stale',
-        to: '',
-        unblockAt: '2026-08-31T13:30:00Z',
-        escalation: 'warn',
-        fallbackModel: '',
-        waitClass: '',
-        reason: '',
-      );
-      ep = notifier.state.quotaEpisodes['agent-stale']!;
-      expect(ep.fallbackModel, isNull,
-          reason: 'explicit empty must clear the stale value');
-      expect(ep.waitClass, isNull);
-      expect(ep.reason, isNull);
-    });
+        // Now a refresh carrying an EXPLICIT empty reason/waitClass clears
+        // them — under the old copyWith this was impossible.
+        notifier.handleQuotaEvent(
+          agentId: 'agent-stale',
+          to: '',
+          unblockAt: '2026-08-31T13:30:00Z',
+          escalation: 'warn',
+          fallbackModel: '',
+          waitClass: '',
+          reason: '',
+        );
+        ep = notifier.state.quotaEpisodes['agent-stale']!;
+        expect(
+          ep.fallbackModel,
+          isNull,
+          reason: 'explicit empty must clear the stale value',
+        );
+        expect(ep.waitClass, isNull);
+        expect(ep.reason, isNull);
+      },
+    );
 
     test('reason parses through handleQuotaEvent for park events', () async {
       final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
@@ -392,32 +402,37 @@ void main() {
       expect(notifier.state.quotaEpisodes['agent-r']!.reason, isNull);
     });
 
-    test('quota_wait stores escalation "" and later to="" warn stores "warn"', () async {
-      final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
-      await notifier.loadAgents();
+    test(
+      'quota_wait stores escalation "" and later to="" warn stores "warn"',
+      () async {
+        final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
+        await notifier.loadAgents();
 
-      // Initial entry: escalation is "" (absent) — stored as null.
-      notifier.handleQuotaEvent(
-        agentId: 'agent-tier',
-        to: 'quota_wait',
-        unblockAt: '2026-08-31T12:00:00Z',
-        escalation: '',
-      );
-      var ep = notifier.state.quotaEpisodes['agent-tier']!;
-      expect(ep.escalation, isNull);
+        // Initial entry: escalation is "" (absent) — stored as null.
+        notifier.handleQuotaEvent(
+          agentId: 'agent-tier',
+          to: 'quota_wait',
+          unblockAt: '2026-08-31T12:00:00Z',
+          escalation: '',
+        );
+        var ep = notifier.state.quotaEpisodes['agent-tier']!;
+        expect(ep.escalation, isNull);
 
-      // Later tier firing carries "warn".
-      notifier.handleQuotaEvent(
-        agentId: 'agent-tier',
-        to: '',
-        escalation: 'warn',
-      );
-      ep = notifier.state.quotaEpisodes['agent-tier']!;
-      expect(ep.escalation, 'warn');
-      // Unblock time kept from the original event (unblockAt was null here).
-      expect(ep.quotaWaitUntilEpoch,
-          DateTime.parse('2026-08-31T12:00:00Z').millisecondsSinceEpoch);
-    });
+        // Later tier firing carries "warn".
+        notifier.handleQuotaEvent(
+          agentId: 'agent-tier',
+          to: '',
+          escalation: 'warn',
+        );
+        ep = notifier.state.quotaEpisodes['agent-tier']!;
+        expect(ep.escalation, 'warn');
+        // Unblock time kept from the original event (unblockAt was null here).
+        expect(
+          ep.quotaWaitUntilEpoch,
+          DateTime.parse('2026-08-31T12:00:00Z').millisecondsSinceEpoch,
+        );
+      },
+    );
 
     test('clears existing episode for same agent on new event', () async {
       final notifier = AgentNotifier(sdkClient: _FakeSdkClient());
@@ -567,17 +582,21 @@ void main() {
     test('single hour and 45m', () {
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       expect(
-        quotaCountdownText(AgentQuotaState(
-          quotaBlocked: false,
-          quotaWaitUntilEpoch: nowMs + 60 * 60 * 1000,
-        )),
+        quotaCountdownText(
+          AgentQuotaState(
+            quotaBlocked: false,
+            quotaWaitUntilEpoch: nowMs + 60 * 60 * 1000,
+          ),
+        ),
         equals('quota resets in 1h'),
       );
       expect(
-        quotaCountdownText(AgentQuotaState(
-          quotaBlocked: false,
-          quotaWaitUntilEpoch: nowMs + 45 * 60 * 1000,
-        )),
+        quotaCountdownText(
+          AgentQuotaState(
+            quotaBlocked: false,
+            quotaWaitUntilEpoch: nowMs + 45 * 60 * 1000,
+          ),
+        ),
         equals('quota resets in 45m'),
       );
     });
@@ -662,8 +681,7 @@ void main() {
     test('past-due throttle wait stays absolute (no relative math)', () {
       final state = AgentQuotaState(
         quotaBlocked: false,
-        quotaWaitUntilEpoch:
-            epochOf(DateTime(2026, 9, 1, 9, 1)),
+        quotaWaitUntilEpoch: epochOf(DateTime(2026, 9, 1, 9, 1)),
         waitClass: 'throttle',
       );
       expect(
@@ -673,10 +691,7 @@ void main() {
     });
 
     test('blocked and no-wait states yield null', () {
-      expect(
-        quotaWaitLabel(const AgentQuotaState(quotaBlocked: true)),
-        isNull,
-      );
+      expect(quotaWaitLabel(const AgentQuotaState(quotaBlocked: true)), isNull);
       expect(
         quotaWaitLabel(const AgentQuotaState(quotaBlocked: false)),
         isNull,
@@ -724,31 +739,37 @@ void main() {
     // I-M8: wait reasons do not disturb the wait label.
     test('throttle_wait/throttle_resumed reasons keep wait labels', () {
       expect(
-        quotaWaitLabel(AgentQuotaState(
-          quotaBlocked: false,
-          quotaWaitUntilEpoch: epochOf(unblock),
-          waitClass: 'throttle',
-          reason: 'throttle_wait',
-        )),
+        quotaWaitLabel(
+          AgentQuotaState(
+            quotaBlocked: false,
+            quotaWaitUntilEpoch: epochOf(unblock),
+            waitClass: 'throttle',
+            reason: 'throttle_wait',
+          ),
+        ),
         equals('quota_wait · throttle retry 14:05'),
       );
       expect(
-        quotaWaitLabel(AgentQuotaState(
-          quotaBlocked: false,
-          quotaWaitUntilEpoch: epochOf(unblock),
-          waitClass: 'quota',
-          reason: 'quota_wait',
-        )),
+        quotaWaitLabel(
+          AgentQuotaState(
+            quotaBlocked: false,
+            quotaWaitUntilEpoch: epochOf(unblock),
+            waitClass: 'quota',
+            reason: 'quota_wait',
+          ),
+        ),
         equals('quota_wait · reset 14:05'),
       );
     });
 
     test('give-up label renders even with no wait time', () {
       expect(
-        quotaWaitLabel(const AgentQuotaState(
-          quotaBlocked: false,
-          reason: 'throttle_give_up',
-        )),
+        quotaWaitLabel(
+          const AgentQuotaState(
+            quotaBlocked: false,
+            reason: 'throttle_give_up',
+          ),
+        ),
         equals('throttle gave up · action required'),
       );
     });
@@ -763,8 +784,9 @@ void main() {
     // the same instant in all three encodings.
     final daemonWall = DateTime.parse('2026-09-02T14:05:00+02:00');
     // 2026-09-02T12:05:00Z.
-    final daemonEpoch = DateTime.parse('2026-09-02T12:05:00Z')
-        .millisecondsSinceEpoch;
+    final daemonEpoch = DateTime.parse(
+      '2026-09-02T12:05:00Z',
+    ).millisecondsSinceEpoch;
     const daemonOffsetMinutes = 120;
 
     int epochOf(DateTime t) => t.millisecondsSinceEpoch;
@@ -783,15 +805,17 @@ void main() {
       );
     });
 
-    test('UTC-encoded instant with a daemon offset renders daemon wall-clock',
-        () {
-      final state = AgentQuotaState(
-        quotaBlocked: false,
-        quotaWaitUntilEpoch: daemonEpoch,
-        quotaWaitUntilOffsetMinutes: daemonOffsetMinutes,
-      );
-      expect(quotaWaitLabel(state), equals('quota_wait · reset 14:05'));
-    });
+    test(
+      'UTC-encoded instant with a daemon offset renders daemon wall-clock',
+      () {
+        final state = AgentQuotaState(
+          quotaBlocked: false,
+          quotaWaitUntilEpoch: daemonEpoch,
+          quotaWaitUntilOffsetMinutes: daemonOffsetMinutes,
+        );
+        expect(quotaWaitLabel(state), equals('quota_wait · reset 14:05'));
+      },
+    );
 
     test('local toggle converts to the device zone', () {
       final state = AgentQuotaState(
@@ -799,9 +823,9 @@ void main() {
         quotaWaitUntilEpoch: daemonEpoch,
         quotaWaitUntilOffsetMinutes: daemonOffsetMinutes,
       );
-      final expected = DateTime.fromMillisecondsSinceEpoch(daemonEpoch)
-          .toIso8601String()
-          .substring(11, 16);
+      final expected = DateTime.fromMillisecondsSinceEpoch(
+        daemonEpoch,
+      ).toIso8601String().substring(11, 16);
       expect(
         quotaWaitLabel(state, useDeviceTime: true),
         equals('quota_wait · reset $expected'),
@@ -819,26 +843,27 @@ void main() {
       expect(fromDaemonWall, equals('quota_wait · reset $expected'));
     });
 
-    test('client in the daemon zone renders the same with toggle on or off',
-        () {
-      // When the device offset equals the daemon offset, both paths must
-      // agree (the offset-equality shortcut is only valid then).
-      final deviceOffsetMinutes =
-          DateTime.now().timeZoneOffset.inMinutes;
-      final state = AgentQuotaState(
-        quotaBlocked: false,
-        quotaWaitUntilEpoch: daemonEpoch,
-        quotaWaitUntilOffsetMinutes: deviceOffsetMinutes,
-      );
-      final deviceWall = DateTime.fromMillisecondsSinceEpoch(daemonEpoch)
-          .toIso8601String()
-          .substring(11, 16);
-      expect(quotaWaitLabel(state), equals('quota_wait · reset $deviceWall'));
-      expect(
-        quotaWaitLabel(state, useDeviceTime: true),
-        equals('quota_wait · reset $deviceWall'),
-      );
-    });
+    test(
+      'client in the daemon zone renders the same with toggle on or off',
+      () {
+        // When the device offset equals the daemon offset, both paths must
+        // agree (the offset-equality shortcut is only valid then).
+        final deviceOffsetMinutes = DateTime.now().timeZoneOffset.inMinutes;
+        final state = AgentQuotaState(
+          quotaBlocked: false,
+          quotaWaitUntilEpoch: daemonEpoch,
+          quotaWaitUntilOffsetMinutes: deviceOffsetMinutes,
+        );
+        final deviceWall = DateTime.fromMillisecondsSinceEpoch(
+          daemonEpoch,
+        ).toIso8601String().substring(11, 16);
+        expect(quotaWaitLabel(state), equals('quota_wait · reset $deviceWall'));
+        expect(
+          quotaWaitLabel(state, useDeviceTime: true),
+          equals('quota_wait · reset $deviceWall'),
+        );
+      },
+    );
 
     test('unknown offset falls back to device interpretation', () {
       // Pre-M9 events (epoch parsed without a captured offset) keep the
@@ -847,9 +872,9 @@ void main() {
         quotaBlocked: false,
         quotaWaitUntilEpoch: daemonEpoch,
       );
-      final deviceWall = DateTime.fromMillisecondsSinceEpoch(daemonEpoch)
-          .toIso8601String()
-          .substring(11, 16);
+      final deviceWall = DateTime.fromMillisecondsSinceEpoch(
+        daemonEpoch,
+      ).toIso8601String().substring(11, 16);
       expect(quotaWaitLabel(state), equals('quota_wait · reset $deviceWall'));
     });
 
@@ -931,12 +956,8 @@ void main() {
     });
 
     testWidgets('shows blocked badge on agent tile', (tester) async {
-      final quotaState = const AgentQuotaState(
-        quotaBlocked: true,
-      );
-      final agents = [
-        const Agent(id: 'agent-1', name: 'coder'),
-      ];
+      final quotaState = const AgentQuotaState(quotaBlocked: true);
+      final agents = [const Agent(id: 'agent-1', name: 'coder')];
 
       await tester.pumpWidget(
         ProviderScope(
@@ -961,9 +982,7 @@ void main() {
     });
 
     testWidgets('no quota badge when no quota state', (tester) async {
-      final agents = [
-        const Agent(id: 'agent-1', name: 'coder'),
-      ];
+      final agents = [const Agent(id: 'agent-1', name: 'coder')];
 
       await tester.pumpWidget(
         ProviderScope(
@@ -992,9 +1011,7 @@ void main() {
             .subtract(const Duration(hours: 1))
             .millisecondsSinceEpoch,
       );
-      final agents = [
-        const Agent(id: 'agent-1', name: 'coder'),
-      ];
+      final agents = [const Agent(id: 'agent-1', name: 'coder')];
 
       await tester.pumpWidget(
         ProviderScope(
@@ -1029,16 +1046,20 @@ class _FakeSdkClient implements SdkApiClient {
   @override
   Future<List<Map<String, dynamic>>> listAgents() async {
     return agents
-        .map((a) => <String, dynamic>{
-              'id': a.id,
-              'name': a.name,
-              'description': a.description,
-            })
+        .map(
+          (a) => <String, dynamic>{
+            'id': a.id,
+            'name': a.name,
+            'description': a.description,
+          },
+        )
         .toList();
   }
 
   @override
-  Future<List<Map<String, dynamic>>> listEmployeeGoals(String employeeId) async {
+  Future<List<Map<String, dynamic>>> listEmployeeGoals(
+    String employeeId,
+  ) async {
     return [];
   }
 

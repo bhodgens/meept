@@ -34,14 +34,12 @@ class _StubClient extends SdkApiClient {
   Future<List<Map<String, dynamic>>> listPlans({
     String? projectId,
     int limit = 50,
-  }) =>
-      Future.value([]);
+  }) => Future.value([]);
 }
 
 void main() {
   group('SessionsDetailPane sessionDetailFamily wiring', () {
-    testWidgets(
-        'when sessionId provided, pane consumes sessionDetailFamily '
+    testWidgets('when sessionId provided, pane consumes sessionDetailFamily '
         'and replaces fallback once cache resolves', (tester) async {
       final fallback = Session(
         id: 's1',
@@ -57,9 +55,7 @@ void main() {
 
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [
-            sdkClientProvider.overrideWithValue(client),
-          ],
+          overrides: [sdkClientProvider.overrideWithValue(client)],
           child: MaterialApp(
             home: Scaffold(
               body: Row(
@@ -86,8 +82,9 @@ void main() {
       expect(find.textContaining('fallback-title'), findsNothing);
     });
 
-    testWidgets('without sessionId, pane uses the passed session directly',
-        (tester) async {
+    testWidgets('without sessionId, pane uses the passed session directly', (
+      tester,
+    ) async {
       final session = Session(
         id: 's2',
         title: 'direct-session',
@@ -97,9 +94,7 @@ void main() {
 
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [
-            sdkClientProvider.overrideWithValue(client),
-          ],
+          overrides: [sdkClientProvider.overrideWithValue(client)],
           child: MaterialApp(
             home: Scaffold(
               body: Row(

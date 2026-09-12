@@ -58,7 +58,11 @@ class _EvalRunsPanelState extends ConsumerState<EvalRunsPanel> {
         children: [
           Row(
             children: [
-              Icon(Icons.analytics, size: 16, color: CyberpunkColors.orangePrimary),
+              Icon(
+                Icons.analytics,
+                size: 16,
+                color: CyberpunkColors.orangePrimary,
+              ),
               const SizedBox(width: 6),
               Text(
                 'eval runs',
@@ -83,10 +87,7 @@ class _EvalRunsPanelState extends ConsumerState<EvalRunsPanel> {
             const Center(child: CircularProgressIndicator())
           else if (_runs.isEmpty)
             const Center(
-              child: Text(
-                'no eval runs',
-                style: TextStyle(color: Colors.grey),
-              ),
+              child: Text('no eval runs', style: TextStyle(color: Colors.grey)),
             )
           else
             Expanded(

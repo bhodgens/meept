@@ -9,8 +9,10 @@ const _unset = Object();
 class AgentQuotaState {
   /// Whether the agent is currently blocked (tier 2 / 24h).
   final bool quotaBlocked;
+
   /// Epoch milliseconds when the quota unblocks (null means no wait).
   final int? quotaWaitUntilEpoch;
+
   /// The daemon's UTC offset (in minutes) embedded in the event's RFC3339
   /// unblock time (M9 timezone convention: producers Format(time.RFC3339),
   /// so the offset rides on the wire). Surfaces render the DAEMON's
@@ -19,19 +21,23 @@ class AgentQuotaState {
   /// unblock time was parsed alongside the epoch (defensive; the parser
   /// fills both from the same string).
   final int? quotaWaitUntilOffsetMinutes;
+
   /// Fallback model carrying work while the primary waits out its reset
   /// (event fallback_model; null when the backend sent none).
   final String? fallbackModel;
+
   /// Notify escalation tier from the latest quota event
   /// ("warn" | "action_recommended" | "blocked"). The backend sends ""
   /// on initial entry (to == quota_wait/blocked); tier firings arrive
   /// later as to == "" events. Null when never specified.
   final String? escalation;
+
   /// Parked-turn class from the tree 03 leaf 04 park event payload
   /// ("quota" | "throttle"; null on legacy events and tier refreshes).
   /// Selects the wait label: quota (or absent) → "quota_wait · reset
   /// HH:MM", throttle → "quota_wait · throttle retry HH:MM".
   final String? waitClass;
+
   /// Park lifecycle reason (I-M8): "quota_wait" | "throttle_wait" |
   /// "throttle_resumed" | "throttle_give_up"; null on legacy events. A
   /// give-up renders the give-up badge instead of a wait label.
@@ -77,16 +83,17 @@ class AgentQuotaState {
           : quotaWaitUntilEpoch as int?,
       quotaWaitUntilOffsetMinutes:
           identical(quotaWaitUntilOffsetMinutes, _unset)
-              ? this.quotaWaitUntilOffsetMinutes
-              : quotaWaitUntilOffsetMinutes as int?,
+          ? this.quotaWaitUntilOffsetMinutes
+          : quotaWaitUntilOffsetMinutes as int?,
       fallbackModel: identical(fallbackModel, _unset)
           ? this.fallbackModel
           : fallbackModel as String?,
       escalation: identical(escalation, _unset)
           ? this.escalation
           : escalation as String?,
-      waitClass:
-          identical(waitClass, _unset) ? this.waitClass : waitClass as String?,
+      waitClass: identical(waitClass, _unset)
+          ? this.waitClass
+          : waitClass as String?,
       reason: identical(reason, _unset) ? this.reason : reason as String?,
     );
   }
@@ -97,6 +104,7 @@ class AgentState {
   final List<Agent> agents;
   final bool isLoading;
   final String? error;
+
   /// Per-agent quota episode data keyed by agent id.
   final Map<String, AgentQuotaState> quotaEpisodes;
 
@@ -176,9 +184,7 @@ class AgentNotifier extends StateNotifier<AgentState> {
     final esc = (escalation == null || escalation.isEmpty) ? null : escalation;
     final cls = (waitClass == null || waitClass.isEmpty) ? null : waitClass;
     final rsn = (reason == null || reason.isEmpty) ? null : reason;
-    final episodes = Map<String, AgentQuotaState>.from(
-      state.quotaEpisodes,
-    );
+    final episodes = Map<String, AgentQuotaState>.from(state.quotaEpisodes);
     switch (to) {
       case 'quota_wait':
       case 'blocked':
@@ -188,8 +194,9 @@ class AgentNotifier extends StateNotifier<AgentState> {
           quotaBlocked: blocked,
           quotaWaitUntilEpoch: epoch,
           quotaWaitUntilOffsetMinutes: _parseQuotaOffsetMinutes(unblockAt),
-          fallbackModel:
-              (fallbackModel == null || fallbackModel.isEmpty) ? null : fallbackModel,
+          fallbackModel: (fallbackModel == null || fallbackModel.isEmpty)
+              ? null
+              : fallbackModel,
           escalation: esc,
           waitClass: cls,
           reason: rsn,

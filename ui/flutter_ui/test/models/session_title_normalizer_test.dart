@@ -83,10 +83,7 @@ void main() {
     });
 
     test('uses "Untitled" when both name and description are missing', () {
-      final json = {
-        'id': 'test-7',
-        'created_at': '2025-01-01T00:00:00Z',
-      };
+      final json = {'id': 'test-7', 'created_at': '2025-01-01T00:00:00Z'};
 
       final normalized = Session.fromJson(json);
 
@@ -123,7 +120,7 @@ void main() {
     test('handles "title" field as alternative to "name"', () {
       final json = {
         'id': 'test-10',
-        'title': 'backup-plan',  // Using 'title' instead of 'name'
+        'title': 'backup-plan', // Using 'title' instead of 'name'
         'description': 'system administration',
         'created_at': '2025-01-01T00:00:00Z',
       };
@@ -152,7 +149,7 @@ void main() {
       // Create session with meaningful LLM name
       final session = Session(
         id: 'regression-1',
-        title: 'debugging',  // LLM-generated
+        title: 'debugging', // LLM-generated
         description: 'coding: fixed null pointer',
         createdAt: DateTime(2025, 1, 1),
       );
@@ -162,12 +159,13 @@ void main() {
       expect(session.description, 'coding: fixed null pointer');
     });
 
-    testWidgets('status bar falls back to description for generic names',
-        (tester) async {
+    testWidgets('status bar falls back to description for generic names', (
+      tester,
+    ) async {
       // Simulate what comes from backend after normalizer
       final json = {
         'id': 'regression-2',
-        'name': 'default',  // Generic fallback from failed LLM call
+        'name': 'default', // Generic fallback from failed LLM call
         'description': 'exploring codebase structure',
         'created_at': '2025-01-01T00:00:00Z',
       };
@@ -178,8 +176,9 @@ void main() {
       expect(session.title, 'exploring codebase structure');
     });
 
-    testWidgets('sessions list displays correct titles after WebSocket update',
-        (tester) async {
+    testWidgets('sessions list displays correct titles after WebSocket update', (
+      tester,
+    ) async {
       // Initial session with generic name
       final initialJson = {
         'id': 'live-update-1',
@@ -194,7 +193,7 @@ void main() {
       // Simulate WebSocket event: session.title_updated with LLM-generated name
       final updatedJson = {
         'id': 'live-update-1',
-        'name': 'debugging',  // LLM now generated a name
+        'name': 'debugging', // LLM now generated a name
         'description': 'coding: fixed websocket bug',
         'created_at': '2025-01-01T00:00:00Z',
       };

@@ -74,8 +74,9 @@ String? quotaCountdownText(AgentQuotaState? state) {
   if (state == null || state.quotaBlocked) return null;
   final waitUntil = state.quotaWaitUntilEpoch;
   if (waitUntil == null) return null;
-  final remaining =
-      Duration(milliseconds: waitUntil - DateTime.now().millisecondsSinceEpoch);
+  final remaining = Duration(
+    milliseconds: waitUntil - DateTime.now().millisecondsSinceEpoch,
+  );
   if (remaining.inMilliseconds <= 0) {
     return 'resets soon';
   }
@@ -107,8 +108,10 @@ String? _quotaWaitHHmm(AgentQuotaState? state, bool useDeviceTime) {
 /// Null when there is no wait time (agents without a parked turn never
 /// build the badge) and the reason is not a give-up. Lowercase per
 /// AGENTS.md UI rule.
-String? quotaWaitLabel(AgentQuotaState? state,
-    {bool useDeviceTime = useDeviceTimeForQuota}) {
+String? quotaWaitLabel(
+  AgentQuotaState? state, {
+  bool useDeviceTime = useDeviceTimeForQuota,
+}) {
   if (state == null || state.quotaBlocked) return null;
   // I-M8: a throttle give-up is a failure surface, not a wait — the badge
   // must not imply the agent is still parked.
@@ -151,7 +154,9 @@ class QuotaStatusBadge extends StatelessWidget {
     final text = quotaWaitLabel(quotaState, useDeviceTime: useDeviceTime);
     if (text == null) return const SizedBox.shrink();
     final isGiveUp = quotaState.reason == 'throttle_give_up';
-    final tone = isGiveUp ? CyberpunkColors.redAlert : CyberpunkColors.yellowWarning;
+    final tone = isGiveUp
+        ? CyberpunkColors.redAlert
+        : CyberpunkColors.yellowWarning;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(
@@ -211,15 +216,21 @@ class _BlockedBadge extends StatelessWidget {
 /// [useDeviceTime] is on. A zone hint ("+02") is appended when rendering
 /// the daemon clock from a different client zone, mirroring the TUI
 /// detail line's "15:04 MST".
-List<String> quotaDetailLines(String? primaryModel, String? fallbackModel,
-    int? waitUntilEpoch,
-    {int? waitUntilOffsetMinutes,
-    bool useDeviceTime = useDeviceTimeForQuota}) {
+List<String> quotaDetailLines(
+  String? primaryModel,
+  String? fallbackModel,
+  int? waitUntilEpoch, {
+  int? waitUntilOffsetMinutes,
+  bool useDeviceTime = useDeviceTimeForQuota,
+}) {
   if (fallbackModel == null || fallbackModel.isEmpty) return const [];
   var until = 'unknown';
   if (waitUntilEpoch != null) {
-    until = _formatQuotaHHmm(waitUntilEpoch, waitUntilOffsetMinutes,
-        useDeviceTime || _isClientZoneOffset(waitUntilOffsetMinutes));
+    until = _formatQuotaHHmm(
+      waitUntilEpoch,
+      waitUntilOffsetMinutes,
+      useDeviceTime || _isClientZoneOffset(waitUntilOffsetMinutes),
+    );
     if (!useDeviceTime && !_isClientZoneOffset(waitUntilOffsetMinutes)) {
       until += ' ${_daemonZoneLabel(waitUntilOffsetMinutes)}';
     }
@@ -227,8 +238,5 @@ List<String> quotaDetailLines(String? primaryModel, String? fallbackModel,
   final primary = (primaryModel == null || primaryModel.isEmpty)
       ? 'unknown'
       : primaryModel;
-  return [
-    'primary: $primary (blocked until $until)',
-    'active: $fallbackModel',
-  ];
+  return ['primary: $primary (blocked until $until)', 'active: $fallbackModel'];
 }

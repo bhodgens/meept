@@ -21,7 +21,8 @@ class MockWebSocketService extends WebSocketService {
   bool get isConnected => false;
 
   @override
-  Stream<Map<String, dynamic>> subscribeToChat(String sessionId) => Stream.empty();
+  Stream<Map<String, dynamic>> subscribeToChat(String sessionId) =>
+      Stream.empty();
 
   @override
   Stream<Map<String, dynamic>> subscribeToJobs() => Stream.empty();
@@ -33,7 +34,8 @@ class MockWebSocketService extends WebSocketService {
   Stream<Map<String, dynamic>> subscribeToPlans() => Stream.empty();
 
   @override
-  Stream<Map<String, dynamic>> subscribeToAgentProgress(String sessionId) => Stream.empty();
+  Stream<Map<String, dynamic>> subscribeToAgentProgress(String sessionId) =>
+      Stream.empty();
 
   @override
   Stream<Map<String, dynamic>> subscribeToSessionTitles() => Stream.empty();

@@ -12,7 +12,11 @@ import 'package:meept_ui/services/sdk_client.dart';
 /// Minimal Dio adapter that always returns a canned response, so the real
 /// client's request/parse path runs without any network or TLS.
 class _FakeAdapter implements HttpClientAdapter {
-  _FakeAdapter(this.statusCode, this.body, {this.contentType = 'application/json'});
+  _FakeAdapter(
+    this.statusCode,
+    this.body, {
+    this.contentType = 'application/json',
+  });
 
   final int statusCode;
   final String body;
@@ -43,12 +47,16 @@ SdkApiClient _clientWith(
   String contentType = 'application/json',
 }) {
   final client = SdkApiClient(host: 'localhost', port: 8081);
-  client.dio.httpClientAdapter =
-      _FakeAdapter(status, body, contentType: contentType);
+  client.dio.httpClientAdapter = _FakeAdapter(
+    status,
+    body,
+    contentType: contentType,
+  );
   return client;
 }
 
-const _onePromptEnvelope = '{"prompts":[{"name":"planner/decompose.md",'
+const _onePromptEnvelope =
+    '{"prompts":[{"name":"planner/decompose.md",'
     '"tier":"bundled","source_path":"config/prompts/planner/decompose.md",'
     '"modified":"2026-08-30T15:32:01-06:00"}]}';
 
@@ -84,26 +92,27 @@ void main() {
     client.dispose();
   });
 
-  test('missing "prompts" key raises instead of returning a silent []',
-      () async {
-    final client = _clientWith(200, '{}');
-    await expectLater(
-      client.listPromptsRaw(),
-      throwsA(
-        isA<SdkApiException>()
-            .having((e) => e.message, 'message', contains('missing')),
-      ),
-    );
-    client.dispose();
-  });
+  test(
+    'missing "prompts" key raises instead of returning a silent []',
+    () async {
+      final client = _clientWith(200, '{}');
+      await expectLater(
+        client.listPromptsRaw(),
+        throwsA(
+          isA<SdkApiException>().having(
+            (e) => e.message,
+            'message',
+            contains('missing'),
+          ),
+        ),
+      );
+      client.dispose();
+    },
+  );
 
-  test('wrong-typed "prompts" value raises instead of being dropped',
-      () async {
+  test('wrong-typed "prompts" value raises instead of being dropped', () async {
     final client = _clientWith(200, '{"prompts":{"a":1}}');
-    await expectLater(
-      client.listPromptsRaw(),
-      throwsA(isA<SdkApiException>()),
-    );
+    await expectLater(client.listPromptsRaw(), throwsA(isA<SdkApiException>()));
     client.dispose();
   });
 
@@ -118,16 +127,22 @@ void main() {
       throwsA(
         isA<SdkApiException>()
             .having((e) => e.statusCode, 'statusCode', 503)
-            .having((e) => e.message, 'message',
-                contains('prompt service not available')),
+            .having(
+              (e) => e.message,
+              'message',
+              contains('prompt service not available'),
+            ),
       ),
     );
     client.dispose();
   });
 
   test('404 with a non-json body still surfaces as SdkApiException', () async {
-    final client = _clientWith(404, '404 page not found',
-        contentType: 'text/plain');
+    final client = _clientWith(
+      404,
+      '404 page not found',
+      contentType: 'text/plain',
+    );
 
     await expectLater(
       client.listPromptsRaw(),

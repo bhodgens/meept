@@ -19,9 +19,7 @@ class _StubSdkClient extends SdkApiClient {
   @override
   Future<List<Map<String, dynamic>>> listProjects() async {
     // Return deep copies so callers can't mutate our fixture.
-    return _projects
-        .map((p) => Map<String, dynamic>.from(p))
-        .toList();
+    return _projects.map((p) => Map<String, dynamic>.from(p)).toList();
   }
 
   @override
@@ -78,12 +76,7 @@ class _LocalModeSdkClient extends SdkApiClient {
   @override
   Future<List<Map<String, dynamic>>> listProjects() async {
     return [
-      {
-        'id': 'p1',
-        'name': 'local-proj',
-        'mode': 'local',
-        'status': 'active',
-      },
+      {'id': 'p1', 'name': 'local-proj', 'mode': 'local', 'status': 'active'},
     ];
   }
 
@@ -119,34 +112,32 @@ void main() {
   });
 
   group('CurrentProjectNotifier.refresh', () {
-    test('populates state from active git project with branch + dirty',
-        () async {
-      final container = ProviderContainer(
-        overrides: [
-          sdkClientProvider.overrideWithValue(_StubSdkClient()),
-        ],
-      );
-      addTearDown(container.dispose);
+    test(
+      'populates state from active git project with branch + dirty',
+      () async {
+        final container = ProviderContainer(
+          overrides: [sdkClientProvider.overrideWithValue(_StubSdkClient())],
+        );
+        addTearDown(container.dispose);
 
-      // Initial state is empty.
-      expect(container.read(currentProjectProvider).isActive, isFalse);
+        // Initial state is empty.
+        expect(container.read(currentProjectProvider).isActive, isFalse);
 
-      await container.read(currentProjectProvider.notifier).refresh();
+        await container.read(currentProjectProvider.notifier).refresh();
 
-      final state = container.read(currentProjectProvider);
-      expect(state.isActive, isTrue);
-      expect(state.id, 'p1');
-      expect(state.name, 'project-one');
-      expect(state.mode, 'git');
-      expect(state.branch, 'main');
-      expect(state.dirty, isTrue);
-    });
+        final state = container.read(currentProjectProvider);
+        expect(state.isActive, isTrue);
+        expect(state.id, 'p1');
+        expect(state.name, 'project-one');
+        expect(state.mode, 'git');
+        expect(state.branch, 'main');
+        expect(state.dirty, isTrue);
+      },
+    );
 
     test('resets to empty when no active project is returned', () async {
       final container = ProviderContainer(
-        overrides: [
-          sdkClientProvider.overrideWithValue(_NoActiveSdkClient()),
-        ],
+        overrides: [sdkClientProvider.overrideWithValue(_NoActiveSdkClient())],
       );
       addTearDown(container.dispose);
 
@@ -157,9 +148,7 @@ void main() {
 
     test('resets to empty on network failure', () async {
       final container = ProviderContainer(
-        overrides: [
-          sdkClientProvider.overrideWithValue(_FailingSdkClient()),
-        ],
+        overrides: [sdkClientProvider.overrideWithValue(_FailingSdkClient())],
       );
       addTearDown(container.dispose);
 
@@ -168,45 +157,49 @@ void main() {
       expect(container.read(currentProjectProvider).isActive, isFalse);
     });
 
-    test('degrades gracefully when getProjectStatus fails (best-effort)',
-        () async {
-      final container = ProviderContainer(
-        overrides: [
-          sdkClientProvider.overrideWithValue(_StatusFailsSdkClient()),
-        ],
-      );
-      addTearDown(container.dispose);
+    test(
+      'degrades gracefully when getProjectStatus fails (best-effort)',
+      () async {
+        final container = ProviderContainer(
+          overrides: [
+            sdkClientProvider.overrideWithValue(_StatusFailsSdkClient()),
+          ],
+        );
+        addTearDown(container.dispose);
 
-      await container.read(currentProjectProvider.notifier).refresh();
+        await container.read(currentProjectProvider.notifier).refresh();
 
-      // Project still resolves; branch/dirty fall back to defaults.
-      final state = container.read(currentProjectProvider);
-      expect(state.isActive, isTrue);
-      expect(state.id, 'p1');
-      expect(state.branch, isEmpty);
-      expect(state.dirty, isFalse);
-    });
+        // Project still resolves; branch/dirty fall back to defaults.
+        final state = container.read(currentProjectProvider);
+        expect(state.isActive, isTrue);
+        expect(state.id, 'p1');
+        expect(state.branch, isEmpty);
+        expect(state.dirty, isFalse);
+      },
+    );
 
-    test('local-mode project: no status fetch, branch/dirty stay empty',
-        () async {
-      final container = ProviderContainer(
-        overrides: [
-          sdkClientProvider.overrideWithValue(_LocalModeSdkClient()),
-        ],
-      );
-      addTearDown(container.dispose);
+    test(
+      'local-mode project: no status fetch, branch/dirty stay empty',
+      () async {
+        final container = ProviderContainer(
+          overrides: [
+            sdkClientProvider.overrideWithValue(_LocalModeSdkClient()),
+          ],
+        );
+        addTearDown(container.dispose);
 
-      await container.read(currentProjectProvider.notifier).refresh();
+        await container.read(currentProjectProvider.notifier).refresh();
 
-      // Project resolves with the typed-model defaults; no status call
-      // was made (would have failed the test via the stub above).
-      final state = container.read(currentProjectProvider);
-      expect(state.isActive, isTrue);
-      expect(state.id, 'p1');
-      expect(state.name, 'local-proj');
-      expect(state.mode, 'local');
-      expect(state.branch, isEmpty);
-      expect(state.dirty, isFalse);
-    });
+        // Project resolves with the typed-model defaults; no status call
+        // was made (would have failed the test via the stub above).
+        final state = container.read(currentProjectProvider);
+        expect(state.isActive, isTrue);
+        expect(state.id, 'p1');
+        expect(state.name, 'local-proj');
+        expect(state.mode, 'local');
+        expect(state.branch, isEmpty);
+        expect(state.dirty, isFalse);
+      },
+    );
   });
 }

@@ -73,32 +73,36 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
 
   void _initQuotaListener() {
     final ws = ref.read(websocketProvider);
-    ws.messageStream.where((m) {
-      final type = m['type'] as String?;
-      return type == 'agent_progress' && m['to'] != null;
-    }).listen((msg) {
-      // AgentProgress.fromJson is null-safe by design; a malformed payload
-      // must never crash the listener. Guard with try/catch anyway.
-      try {
-        final progress = AgentProgress.fromJson(msg);
-        final quota = progress.quota;
-        if (quota == null) return;
-        ref.read(agentProvider.notifier).handleQuotaEvent(
-          agentId: quota.agentId,
-          to: quota.to,
-          unblockAt: quota.unblockAt,
-          fallbackModel: quota.fallbackModel,
-          escalation: quota.escalation,
-          // Parked-turn class (leaf 04); null-safe for legacy events.
-          waitClass: quota.waitClass,
-          // Park lifecycle reason (I-M8: throttle_give_up etc.); null-safe
-          // for legacy events.
-          reason: quota.reason,
-        );
-      } catch (_) {
-        // malformed quota payload — ignore without crash
-      }
-    });
+    ws.messageStream
+        .where((m) {
+          final type = m['type'] as String?;
+          return type == 'agent_progress' && m['to'] != null;
+        })
+        .listen((msg) {
+          // AgentProgress.fromJson is null-safe by design; a malformed payload
+          // must never crash the listener. Guard with try/catch anyway.
+          try {
+            final progress = AgentProgress.fromJson(msg);
+            final quota = progress.quota;
+            if (quota == null) return;
+            ref
+                .read(agentProvider.notifier)
+                .handleQuotaEvent(
+                  agentId: quota.agentId,
+                  to: quota.to,
+                  unblockAt: quota.unblockAt,
+                  fallbackModel: quota.fallbackModel,
+                  escalation: quota.escalation,
+                  // Parked-turn class (leaf 04); null-safe for legacy events.
+                  waitClass: quota.waitClass,
+                  // Park lifecycle reason (I-M8: throttle_give_up etc.); null-safe
+                  // for legacy events.
+                  reason: quota.reason,
+                );
+          } catch (_) {
+            // malformed quota payload — ignore without crash
+          }
+        });
   }
 
   /// Handle keyboard navigation for the agents grid.
@@ -257,20 +261,17 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             child: Focus(
               onFocusChange: (hasFocus) {
                 if (hasFocus) {
-                  ref
-                      .read(keyboardFocusProvider.notifier)
-                      .setFocusedPane(0);
+                  ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);
                 }
               },
               onKeyEvent: _handleKey,
               child: GridView.builder(
-                gridDelegate:
-                    const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 225,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                      childAspectRatio: 0.87,
-                    ),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 225,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  childAspectRatio: 0.87,
+                ),
                 itemCount: agentState.agents.length,
                 itemBuilder: (context, index) {
                   final agent = agentState.agents[index];
@@ -299,8 +300,9 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     AgentQuotaState? quotaState,
   ) {
     // M9: honor the client-local time toggle (default off — daemon clock).
-    final useDeviceTime =
-        ref.watch(renderingPrefsProvider).useDeviceTimeForQuota;
+    final useDeviceTime = ref
+        .watch(renderingPrefsProvider)
+        .useDeviceTimeForQuota;
     return InkWell(
       key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
@@ -313,14 +315,14 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
           color: isKeyboardSelected
               ? CyberpunkColors.orangeDark.withValues(alpha: 0.3)
               : (isSelected
-                  ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
-                  : CyberpunkColors.black),
+                    ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
+                    : CyberpunkColors.black),
           border: Border.all(
             color: isKeyboardSelected
                 ? CyberpunkColors.orangeDark
                 : (isSelected
-                    ? CyberpunkColors.orangePrimary
-                    : CyberpunkColors.midGray),
+                      ? CyberpunkColors.orangePrimary
+                      : CyberpunkColors.midGray),
             width: isKeyboardSelected ? 3 : 1,
           ),
           borderRadius: BorderRadius.circular(8),
@@ -375,8 +377,9 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     // M9: quotaDetailLines renders the daemon-local HH:MM by default (the
     // offset captured from the wire RFC3339), device-local when the
     // settings toggle is on.
-    final useDeviceTime =
-        ref.watch(renderingPrefsProvider).useDeviceTimeForQuota;
+    final useDeviceTime = ref
+        .watch(renderingPrefsProvider)
+        .useDeviceTimeForQuota;
     final quotaState = ref.watch(agentProvider).quotaEpisodes[agent.id];
     final quotaBlocked = quotaState?.quotaBlocked ?? false;
     final quotaLines = quotaDetailLines(
@@ -453,7 +456,10 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                       : () async {
                           await ref
                               .read(sdkClientProvider)
-                              .rejectPlan(g.activePlanId, reason: 'rejected via gui');
+                              .rejectPlan(
+                                g.activePlanId,
+                                reason: 'rejected via gui',
+                              );
                           await _loadGoals(agent.id);
                         },
                 );
@@ -549,11 +555,7 @@ class _GoalCard extends StatelessWidget {
   final Future<void> Function()? onApprove;
   final Future<void> Function()? onReject;
 
-  const _GoalCard({
-    required this.goal,
-    this.onApprove,
-    this.onReject,
-  });
+  const _GoalCard({required this.goal, this.onApprove, this.onReject});
 
   Color get _healthColor {
     switch (goal.health) {
@@ -624,10 +626,7 @@ class _GoalCard extends StatelessWidget {
                     child: const Text('approve'),
                   ),
                 if (onReject != null)
-                  TextButton(
-                    onPressed: onReject,
-                    child: const Text('reject'),
-                  ),
+                  TextButton(onPressed: onReject, child: const Text('reject')),
               ],
             ),
         ],

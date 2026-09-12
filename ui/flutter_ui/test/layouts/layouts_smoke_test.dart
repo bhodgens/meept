@@ -16,16 +16,14 @@ import 'package:meept_ui/layouts/layout_5_grid_dashboard.dart';
 import 'package:meept_ui/theme/colors.dart';
 
 Widget _wrap(Widget child) => MaterialApp(
-      theme: ThemeData.dark(),
-      home: Material(
-        color: CyberpunkColors.black,
-        child: child,
-      ),
-    );
+  theme: ThemeData.dark(),
+  home: Material(color: CyberpunkColors.black, child: child),
+);
 
 void main() {
-  testWidgets('layout 1 (classic sidebar) renders without exceptions',
-      (tester) async {
+  testWidgets('layout 1 (classic sidebar) renders without exceptions', (
+    tester,
+  ) async {
     await tester.pumpWidget(_wrap(const Layout1ClassicSidebar()));
     await tester.pump();
     // Sidebar nav items render.
@@ -35,28 +33,32 @@ void main() {
     expect(find.text('type a message...'), findsOneWidget);
   });
 
-  testWidgets('layout 2 (bottom nav) renders without exceptions',
-      (tester) async {
+  testWidgets('layout 2 (bottom nav) renders without exceptions', (
+    tester,
+  ) async {
     await tester.pumpWidget(_wrap(const Layout2BottomNav()));
     await tester.pump();
   });
 
-  testWidgets('layout 3 (radial hub) renders without exceptions',
-      (tester) async {
+  testWidgets('layout 3 (radial hub) renders without exceptions', (
+    tester,
+  ) async {
     await tester.pumpWidget(_wrap(const Layout3RadialHub()));
     await tester.pump();
   });
 
-  testWidgets('layout 4 (top tabs + panels) renders without exceptions',
-      (tester) async {
+  testWidgets('layout 4 (top tabs + panels) renders without exceptions', (
+    tester,
+  ) async {
     await tester.pumpWidget(_wrap(const Layout4TopTabsPanels()));
     await tester.pump();
     // Tab labels render.
     expect(find.text('chat'), findsWidgets);
   });
 
-  testWidgets('layout 5 (grid dashboard) renders without exceptions',
-      (tester) async {
+  testWidgets('layout 5 (grid dashboard) renders without exceptions', (
+    tester,
+  ) async {
     await tester.pumpWidget(_wrap(const Layout5GridDashboard()));
     await tester.pump();
   });

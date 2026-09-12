@@ -30,14 +30,11 @@ Widget _wrap({required int tab}) {
   );
 }
 
-
 /// Finds text inside RichText spans (find.textContaining only sees
 /// plain [Text] widgets; StatusBar renders its parts as TextSpans).
 Finder findSpanText(String needle) => find.byWidgetPredicate(
-      (w) =>
-          w is RichText &&
-          w.text.toPlainText().contains(needle),
-    );
+  (w) => w is RichText && w.text.toPlainText().contains(needle),
+);
 
 void main() {
   testWidgets('renders verbosity + connection', (tester) async {
@@ -46,8 +43,9 @@ void main() {
     expect(findSpanText('verbosity'), findsOneWidget);
   });
 
-  testWidgets('renders transient status message when set, hides other parts',
-      (tester) async {
+  testWidgets('renders transient status message when set, hides other parts', (
+    tester,
+  ) async {
     final container = ProviderContainer(
       overrides: [
         verbosityProvider.overrideWith((ref) => VerbosityNotifier()),
@@ -71,8 +69,9 @@ void main() {
     expect(findSpanText('verbosity'), findsNothing);
   });
 
-  testWidgets('keybind hint shows sessions-specific text on sessions tab',
-      (tester) async {
+  testWidgets('keybind hint shows sessions-specific text on sessions tab', (
+    tester,
+  ) async {
     await tester.pumpWidget(_wrap(tab: 1));
     await tester.pump();
     // Two assertions guard against a session title like "archive-test"
@@ -81,8 +80,9 @@ void main() {
     expect(findSpanText('archive'), findsOneWidget);
   });
 
-  testWidgets('keybind hint shows chat-specific text on chat tab',
-      (tester) async {
+  testWidgets('keybind hint shows chat-specific text on chat tab', (
+    tester,
+  ) async {
     await tester.pumpWidget(_wrap(tab: 0));
     await tester.pump();
     expect(findSpanText('focus'), findsOneWidget);

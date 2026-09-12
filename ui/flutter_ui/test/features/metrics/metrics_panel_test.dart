@@ -161,8 +161,9 @@ void main() {
   });
 
   group('MetricsPanel degrades gracefully', () {
-    testWidgets('missing models/agents/totals still renders the tiles',
-        (tester) async {
+    testWidgets('missing models/agents/totals still renders the tiles', (
+      tester,
+    ) async {
       final client = _MetricsStubClient(_baseSnapshot());
       await _settle(tester, client);
 
@@ -188,8 +189,9 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('empty usage lists show empty messages, not blanks',
-        (tester) async {
+    testWidgets('empty usage lists show empty messages, not blanks', (
+      tester,
+    ) async {
       final client = _MetricsStubClient({
         ..._baseSnapshot(),
         'models': <Map<String, dynamic>>[],
@@ -262,8 +264,13 @@ void main() {
 
     test('ModelUsage.parseList skips malformed rows', () {
       final parsed = ModelUsage.parseList([
-        {'id': 'a/b', 'calls': 3, 'tokens_in': 1, 'tokens_out': 2,
-          'avg_latency_ms': 5},
+        {
+          'id': 'a/b',
+          'calls': 3,
+          'tokens_in': 1,
+          'tokens_out': 2,
+          'avg_latency_ms': 5,
+        },
         {'calls': 1}, // no id -> skipped
         'garbage', // not a map -> skipped
         {'id': 'c/d', 'calls': '7', 'avg_latency_ms': '9.5'},
@@ -279,8 +286,12 @@ void main() {
       expect(AgentUsage.parseList(null), isNull);
       expect(AgentUsage.parseList(<dynamic>[]), isEmpty);
       final parsed = AgentUsage.parseList([
-        {'id': 'chat', 'state': 'idle', 'tasks_completed': 4,
-          'tasks_failed': 0},
+        {
+          'id': 'chat',
+          'state': 'idle',
+          'tasks_completed': 4,
+          'tasks_failed': 0,
+        },
       ]);
       expect(parsed, hasLength(1));
       expect(parsed!.single.tasksCompleted, 4);

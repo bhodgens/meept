@@ -229,8 +229,9 @@ class WebSocketService {
           // instead of an opaque endless "connecting...".
           final diagnosis = await _diagnoseConnectFailure(_retryCount);
           _lastConnectError = diagnosis;
-          _lastConnectErrorTag =
-              diagnosis == null ? null : _tagOfFailure(diagnosis);
+          _lastConnectErrorTag = diagnosis == null
+              ? null
+              : _tagOfFailure(diagnosis);
 
           // Check if this is an HTTP 401 (unauthorized) error
           // Use toString() check for robustness across DioException, WebSocketException, etc.

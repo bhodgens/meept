@@ -63,9 +63,7 @@ PluginBase createPlugin() => _MeeptLintPlugin();
 class _MeeptLintPlugin extends PluginBase {
   @override
   List<LintRule> getLintRules(CustomLintConfigs configs) {
-    return [
-      const _EnumNameShadowingRule(),
-    ];
+    return [const _EnumNameShadowingRule()];
   }
 }
 
@@ -74,10 +72,10 @@ class _EnumNameShadowingRule extends DartLintRule {
 
   @override
   Metadata get metadata => const Metadata(
-        name: 'enum_name_shadowing',
-        message: 'Extension getter shadows a synthesized Enum property',
-        description: _description,
-      );
+    name: 'enum_name_shadowing',
+    message: 'Extension getter shadows a synthesized Enum property',
+    description: _description,
+  );
 
   static const _description = '''
 In Dart 2.15+, every `enum` declaration synthesizes a `String get name`
@@ -133,7 +131,8 @@ class _EnumNameShadowingCode extends LintCode {
       problemMessage:
           "Extension getter '$getterName' is shadowed by Dart's "
           "synthesized $shadowedBy and will never be invoked.",
-      correctionMessage: 'Rename the getter (e.g. `apiValue`, '
+      correctionMessage:
+          'Rename the getter (e.g. `apiValue`, '
           '`displayName`) so it does not collide with the synthesized '
           'enum property.',
     );

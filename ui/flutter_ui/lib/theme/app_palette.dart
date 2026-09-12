@@ -84,8 +84,8 @@ class AppPalette {
 
   /// All known palettes, keyed by variant name.
   static Map<String, AppPalette> get palettes => {
-        for (final name in kTokensData.keys) name: AppPalette.fromTokens(name),
-      };
+    for (final name in kTokensData.keys) name: AppPalette.fromTokens(name),
+  };
 
   /// Resolve a stored theme name; unknown names fall back to cyberpunk
   /// so a stale preference can never produce an invalid palette.

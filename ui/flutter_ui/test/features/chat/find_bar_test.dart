@@ -11,20 +11,16 @@ void main() {
     return c;
   }
 
-  testWidgets('FindBar renders query field, count, toggles, close',
-      (tester) async {
+  testWidgets('FindBar renders query field, count, toggles, close', (
+    tester,
+  ) async {
     final container = makeContainer();
     const sessionId = 's1';
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
         child: const MaterialApp(
-          home: Scaffold(
-            body: FindBar(
-              sessionId: sessionId,
-              matchCount: 3,
-            ),
-          ),
+          home: Scaffold(body: FindBar(sessionId: sessionId, matchCount: 3)),
         ),
       ),
     );
@@ -48,9 +44,7 @@ void main() {
       UncontrolledProviderScope(
         container: container,
         child: const MaterialApp(
-          home: Scaffold(
-            body: FindBar(sessionId: sessionId, matchCount: 0),
-          ),
+          home: Scaffold(body: FindBar(sessionId: sessionId, matchCount: 0)),
         ),
       ),
     );
@@ -62,17 +56,16 @@ void main() {
     expect(container.read(findQueryProvider(sessionId)), 'hello');
   });
 
-  testWidgets('Tapping case toggle flips case-sensitive provider',
-      (tester) async {
+  testWidgets('Tapping case toggle flips case-sensitive provider', (
+    tester,
+  ) async {
     final container = makeContainer();
     const sessionId = 's3';
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
         child: const MaterialApp(
-          home: Scaffold(
-            body: FindBar(sessionId: sessionId, matchCount: 0),
-          ),
+          home: Scaffold(body: FindBar(sessionId: sessionId, matchCount: 0)),
         ),
       ),
     );
@@ -91,9 +84,7 @@ void main() {
       UncontrolledProviderScope(
         container: container,
         child: const MaterialApp(
-          home: Scaffold(
-            body: FindBar(sessionId: sessionId, matchCount: 0),
-          ),
+          home: Scaffold(body: FindBar(sessionId: sessionId, matchCount: 0)),
         ),
       ),
     );
@@ -117,9 +108,7 @@ void main() {
       UncontrolledProviderScope(
         container: container,
         child: const MaterialApp(
-          home: Scaffold(
-            body: FindBar(sessionId: sessionId, matchCount: 5),
-          ),
+          home: Scaffold(body: FindBar(sessionId: sessionId, matchCount: 5)),
         ),
       ),
     );

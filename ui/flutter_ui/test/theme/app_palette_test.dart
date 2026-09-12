@@ -39,8 +39,11 @@ void main() {
     });
 
     test('palettes covers every variant in tokens data', () {
-      expect(AppPalette.palettes.keys.toSet(),
-          {'cyberpunk', 'midnight', 'solarized'});
+      expect(AppPalette.palettes.keys.toSet(), {
+        'cyberpunk',
+        'midnight',
+        'solarized',
+      });
     });
   });
 

@@ -50,20 +50,38 @@ class _StubWebSocket extends WebSocketService {
 
 class _StubTtsNotifier extends StateNotifier<TtsState> implements TtsNotifier {
   _StubTtsNotifier() : super(TtsState.idle);
-  @override Future<bool> initialize() async => true;
-  @override Future<void> speak(String text) async {}
-  @override Future<void> stop() async {}
-  @override Future<void> setVolume(double volume) async {}
-  @override Future<void> setSpeed(double speed) async {}
-  @override Future<void> setPitch(double pitch) async {}
-  @override Future<void> setVoice(String voiceName) async {}
-  @override Future<List<Map<String, dynamic>>> getVoices() async => [];
-  @override Future<void> setEnabled(bool value) async {}
-  @override Future<void> setBehaviorSettings({required bool interrupt, required bool queue, int? maxQueueSize}) async {}
-  @override Future<void> toggleTts() async {}
-  @override bool get enabled => false;
-  @override bool get isAvailable => false;
-  @override bool get isSpeaking => false;
+  @override
+  Future<bool> initialize() async => true;
+  @override
+  Future<void> speak(String text) async {}
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> setVolume(double volume) async {}
+  @override
+  Future<void> setSpeed(double speed) async {}
+  @override
+  Future<void> setPitch(double pitch) async {}
+  @override
+  Future<void> setVoice(String voiceName) async {}
+  @override
+  Future<List<Map<String, dynamic>>> getVoices() async => [];
+  @override
+  Future<void> setEnabled(bool value) async {}
+  @override
+  Future<void> setBehaviorSettings({
+    required bool interrupt,
+    required bool queue,
+    int? maxQueueSize,
+  }) async {}
+  @override
+  Future<void> toggleTts() async {}
+  @override
+  bool get enabled => false;
+  @override
+  bool get isAvailable => false;
+  @override
+  bool get isSpeaking => false;
   double get volume => 1.0;
 }
 
@@ -94,18 +112,12 @@ Widget _buildTestApp({
             error: agentsError,
           ),
       ),
-      activeAgentProvider.overrideWith(
-        (_) => activeAgent,
-      ),
-      sdkClientProvider.overrideWith(
-        (_) => _StubSdkClient(),
-      ),
+      activeAgentProvider.overrideWith((_) => activeAgent),
+      sdkClientProvider.overrideWith((_) => _StubSdkClient()),
     ],
     child: MaterialApp(
       theme: ThemeData.dark(),
-      home: Scaffold(
-        body: child,
-      ),
+      home: Scaffold(body: child),
     ),
   );
 }
@@ -121,17 +133,39 @@ Future<void> pumpBounded(WidgetTester tester, {int frames = 5}) async {
 
 void main() {
   const testAgents = [
-    Agent(id: 'coder', name: 'coder', description: '', prompt: '', enabled: true),
-    Agent(id: 'debugger', name: 'debugger', description: '', prompt: '', enabled: true),
-    Agent(id: 'planner', name: 'planner', description: '', prompt: '', enabled: true),
+    Agent(
+      id: 'coder',
+      name: 'coder',
+      description: '',
+      prompt: '',
+      enabled: true,
+    ),
+    Agent(
+      id: 'debugger',
+      name: 'debugger',
+      description: '',
+      prompt: '',
+      enabled: true,
+    ),
+    Agent(
+      id: 'planner',
+      name: 'planner',
+      description: '',
+      prompt: '',
+      enabled: true,
+    ),
   ];
 
   group('ChatInput - text field', () {
-    testWidgets('renders a TextField with terminal-style green text', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
+    testWidgets('renders a TextField with terminal-style green text', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+        ),
+      );
       await pumpBounded(tester);
 
       final textField = tester.widget<TextField>(find.byType(TextField));
@@ -143,10 +177,12 @@ void main() {
     });
 
     testWidgets('accepts typed text', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+        ),
+      );
       await pumpBounded(tester);
 
       await tester.enterText(find.byType(TextField), 'hello world');
@@ -157,10 +193,12 @@ void main() {
     });
 
     testWidgets('shift+enter inserts a newline', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+        ),
+      );
       await pumpBounded(tester);
 
       await tester.enterText(find.byType(TextField), 'hello');
@@ -179,23 +217,29 @@ void main() {
   });
 
   group('ChatInput - send button', () {
-    testWidgets('send button is present and shows send icon when idle', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-        activeAgent: testAgents[0],
-      ));
+    testWidgets('send button is present and shows send icon when idle', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+          activeAgent: testAgents[0],
+        ),
+      );
       await pumpBounded(tester);
 
       expect(find.byIcon(Icons.send), findsOneWidget);
     });
 
     testWidgets('tapping send clears the input field', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-        activeAgent: testAgents[0],
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+          activeAgent: testAgents[0],
+        ),
+      );
       await pumpBounded(tester);
 
       await tester.enterText(find.byType(TextField), 'test message');
@@ -209,7 +253,9 @@ void main() {
       expect(textField.controller!.text, '');
     });
 
-    testWidgets('send button shows spinner when chat is loading', (tester) async {
+    testWidgets('send button shows spinner when chat is loading', (
+      tester,
+    ) async {
       // Override chatProvider to start in loading state
       await tester.pumpWidget(
         ProviderScope(
@@ -225,16 +271,15 @@ void main() {
               )..state = const ChatState(isLoading: true),
             ),
             agentProvider.overrideWith(
-              (ref) => AgentNotifier(sdkClient: _StubSdkClient())
-                ..state = const AgentState(),
+              (ref) =>
+                  AgentNotifier(sdkClient: _StubSdkClient())
+                    ..state = const AgentState(),
             ),
             activeAgentProvider.overrideWith((_) => testAgents[0]),
             sdkClientProvider.overrideWith((_) => _StubSdkClient()),
           ],
           child: const MaterialApp(
-            home: Scaffold(
-              body: ChatInput(sessionId: 'test-session'),
-            ),
+            home: Scaffold(body: ChatInput(sessionId: 'test-session')),
           ),
         ),
       );
@@ -248,10 +293,12 @@ void main() {
 
   group('ChatInput - slash commands', () {
     testWidgets('typing slash shows autocomplete popup', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+        ),
+      );
       await pumpBounded(tester);
 
       await tester.enterText(find.byType(TextField), '/');
@@ -261,11 +308,15 @@ void main() {
       expect(find.byType(SlashAutocomplete), findsOneWidget);
     });
 
-    testWidgets('typing /h filters to commands starting with /h', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
+    testWidgets('typing /h filters to commands starting with /h', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+        ),
+      );
       await pumpBounded(tester);
 
       await tester.enterText(find.byType(TextField), '/h');
@@ -276,11 +327,15 @@ void main() {
       expect(find.text('/help'), findsWidgets);
     });
 
-    testWidgets('typing non-slash text does not show autocomplete', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
+    testWidgets('typing non-slash text does not show autocomplete', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+        ),
+      );
       await pumpBounded(tester);
 
       await tester.enterText(find.byType(TextField), 'hello');
@@ -290,10 +345,12 @@ void main() {
     });
 
     testWidgets('clearing text hides autocomplete', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+        ),
+      );
       await pumpBounded(tester);
 
       // Show autocomplete
@@ -310,10 +367,12 @@ void main() {
 
   group('ChatInput - focus', () {
     testWidgets('auto-focuses on first build', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+        ),
+      );
       await pumpBounded(tester);
 
       final textField = tester.widget<TextField>(find.byType(TextField));
@@ -321,10 +380,12 @@ void main() {
     });
 
     testWidgets('border color changes with focus state', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
+      await tester.pumpWidget(
+        _buildTestApp(
+          child: const ChatInput(sessionId: 'test-session'),
+          agents: testAgents,
+        ),
+      );
       await pumpBounded(tester);
 
       // The top border should be present (focused or unfocused)

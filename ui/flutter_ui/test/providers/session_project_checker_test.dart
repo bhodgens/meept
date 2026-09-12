@@ -18,43 +18,43 @@ class _StubSdkClient extends SdkApiClient {
   }) async => {'session_id': sessionId, 'path': path};
 }
 
-Session _unboundSession() => Session(
-      id: 's1',
-      title: 'unbound',
-      createdAt: DateTime(2025, 1, 1),
-    );
+Session _unboundSession() =>
+    Session(id: 's1', title: 'unbound', createdAt: DateTime(2025, 1, 1));
 
 void main() {
-  testWidgets('pick flow binds the chosen directory via project.set',
-      (tester) async {
+  testWidgets('pick flow binds the chosen directory via project.set', (
+    tester,
+  ) async {
     String? boundPath;
     var skipped = false;
 
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        sdkClientProvider.overrideWith((_) => _StubSdkClient()),
-      ],
-      child: MaterialApp(
-        home: Scaffold(
-          body: Consumer(builder: (context, ref, _) {
-            return ElevatedButton(
-              onPressed: () {
-                SessionProjectChecker.checkAndPrompt(
-                  context: context,
-                  ref: ref,
-                  session: _unboundSession(),
-                  onSkip: () => skipped = true,
-                  onProjectBound: (p) async {
-                    boundPath = p;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sdkClientProvider.overrideWith((_) => _StubSdkClient())],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Consumer(
+              builder: (context, ref, _) {
+                return ElevatedButton(
+                  onPressed: () {
+                    SessionProjectChecker.checkAndPrompt(
+                      context: context,
+                      ref: ref,
+                      session: _unboundSession(),
+                      onSkip: () => skipped = true,
+                      onProjectBound: (p) async {
+                        boundPath = p;
+                      },
+                    );
                   },
+                  child: const Text('activate'),
                 );
               },
-              child: const Text('activate'),
-            );
-          }),
+            ),
+          ),
         ),
       ),
-    ));
+    );
 
     await tester.tap(find.text('activate'));
     await tester.pumpAndSettle();
@@ -74,21 +74,20 @@ void main() {
     expect(boundPath, isNull);
   });
 
-  testWidgets('needsProjectPrompt respects each binding signal',
-      (tester) async {
+  testWidgets('needsProjectPrompt respects each binding signal', (
+    tester,
+  ) async {
     final base = _unboundSession();
     expect(SessionProjectChecker.needsProjectPrompt(base), isTrue);
 
     expect(
-      SessionProjectChecker.needsProjectPrompt(base.copyWith(
-        projectPath: '/tmp/p',
-      )),
+      SessionProjectChecker.needsProjectPrompt(
+        base.copyWith(projectPath: '/tmp/p'),
+      ),
       isFalse,
     );
     expect(
-      SessionProjectChecker.needsProjectPrompt(base.copyWith(
-        projectId: 'p1',
-      )),
+      SessionProjectChecker.needsProjectPrompt(base.copyWith(projectId: 'p1')),
       isFalse,
     );
   });

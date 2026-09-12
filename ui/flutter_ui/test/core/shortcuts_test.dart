@@ -14,21 +14,29 @@ Widget _host(LeaderKeyController controller, FocusNode focusNode) =>
     );
 
 void main() {
-  Future<void> pressWithCtrl(WidgetTester tester, LogicalKeyboardKey key) async {
+  Future<void> pressWithCtrl(
+    WidgetTester tester,
+    LogicalKeyboardKey key,
+  ) async {
     // The test framework's sendKeyDownEvent does not hold modifiers, so
     // simulate ctrl-down → key-down → ctrl-up manually.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft,
-        platform: 'linux');
+    await tester.sendKeyDownEvent(
+      LogicalKeyboardKey.controlLeft,
+      platform: 'linux',
+    );
     await tester.sendKeyDownEvent(key, platform: 'linux');
     await tester.sendKeyUpEvent(key, platform: 'linux');
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft,
-        platform: 'linux');
+    await tester.sendKeyUpEvent(
+      LogicalKeyboardKey.controlLeft,
+      platform: 'linux',
+    );
     await tester.pump();
   }
 
   testWidgets('ctrl+s fires onToggleSteer', (tester) async {
     var fired = false;
-    final controller = LeaderKeyController()..onToggleSteer = () => fired = true;
+    final controller = LeaderKeyController()
+      ..onToggleSteer = () => fired = true;
     final node = FocusNode();
     await tester.pumpWidget(_host(controller, node));
     await tester.pump();

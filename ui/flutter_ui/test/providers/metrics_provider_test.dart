@@ -20,9 +20,10 @@ class _FailingSdkClient extends SdkApiClient {
 
 class _TestWebSocket extends WebSocketService {
   _TestWebSocket()
-      : _messageController =
-            StreamController<Map<String, dynamic>>.broadcast(sync: true),
-        super(host: 'localhost', port: 8081);
+    : _messageController = StreamController<Map<String, dynamic>>.broadcast(
+        sync: true,
+      ),
+      super(host: 'localhost', port: 8081);
 
   final StreamController<Map<String, dynamic>> _messageController;
   bool _connected = false;
@@ -49,7 +50,8 @@ class _TestWebSocket extends WebSocketService {
   @override
   bool get isConnected => _connected;
 
-  List<Map<String, dynamic>> get sentMessages => List.unmodifiable(_sentMessages);
+  List<Map<String, dynamic>> get sentMessages =>
+      List.unmodifiable(_sentMessages);
 
   void pushMessage(Map<String, dynamic> message) {
     _messageController.add(message);
@@ -71,10 +73,7 @@ void main() {
       // Use an SDK client that throws (connection refused to port 12345)
       final client = _FailingSdkClient();
       final ws = _TestWebSocket();
-      final notifier = MetricsNotifier(
-        sdkClient: client,
-        websocket: ws,
-      );
+      final notifier = MetricsNotifier(sdkClient: client, websocket: ws);
 
       // Wait for async fetch to complete
       await Future.delayed(const Duration(milliseconds: 100));
@@ -118,9 +117,7 @@ void main() {
     });
 
     test('defaults to zero for missing fields', () {
-      final json = {
-        'timestamp': '2024-01-01T10:00:00Z',
-      };
+      final json = {'timestamp': '2024-01-01T10:00:00Z'};
 
       final snapshot = MetricsSnapshot.fromJson(json);
 

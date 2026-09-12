@@ -292,8 +292,7 @@ class _MetricsContent extends StatelessWidget {
           spacing: spacing,
           runSpacing: spacing,
           children: [
-            for (final tile in tiles)
-              SizedBox(width: tileWidth, child: tile),
+            for (final tile in tiles) SizedBox(width: tileWidth, child: tile),
           ],
         );
       },
@@ -313,7 +312,10 @@ class _MetricsContent extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _TotalTile(label: 'total calls', value: _formatCount(totals.calls)),
+              _TotalTile(
+                label: 'total calls',
+                value: _formatCount(totals.calls),
+              ),
               _TotalTile(
                 label: 'tokens in',
                 value: _formatCount(totals.tokensIn),
@@ -472,7 +474,9 @@ class _UsageTable extends StatelessWidget {
         style: CyberpunkTypography.bodySmall.copyWith(
           fontFamily: 'SourceCodePro',
           fontSize: 11,
-          color: header ? CyberpunkColors.orangePrimary : CyberpunkColors.lightGray,
+          color: header
+              ? CyberpunkColors.orangePrimary
+              : CyberpunkColors.lightGray,
           fontWeight: header ? FontWeight.w600 : FontWeight.normal,
         ),
       ),

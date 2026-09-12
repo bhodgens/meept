@@ -110,21 +110,24 @@ void main() {
       expect(notifier.state, VerbosityLevel.verbose);
     });
 
-    test('cycle swallows persist callback failure without reverting state', () async {
-      final notifier = VerbosityNotifier(
-        onPersist: (level) async {
-          throw Exception('rpc down');
-        },
-      );
-      addTearDown(notifier.dispose);
+    test(
+      'cycle swallows persist callback failure without reverting state',
+      () async {
+        final notifier = VerbosityNotifier(
+          onPersist: (level) async {
+            throw Exception('rpc down');
+          },
+        );
+        addTearDown(notifier.dispose);
 
-      notifier.cycle();
-      // State must remain at the new level despite the persist failure.
-      expect(notifier.state, VerbosityLevel.verbose);
+        notifier.cycle();
+        // State must remain at the new level despite the persist failure.
+        expect(notifier.state, VerbosityLevel.verbose);
 
-      // Give the fire-and-forget future a chance to reject.
-      await Future<void>.delayed(Duration.zero);
-      expect(notifier.state, VerbosityLevel.verbose);
-    });
+        // Give the fire-and-forget future a chance to reject.
+        await Future<void>.delayed(Duration.zero);
+        expect(notifier.state, VerbosityLevel.verbose);
+      },
+    );
   });
 }

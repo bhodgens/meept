@@ -71,7 +71,9 @@ class DaemonCertPinner {
         final pemContent = certFile.readAsStringSync();
         final derBytes = _pemToDer(pemContent);
         _cachedFingerprint = sha256.convert(derBytes).toString();
-        debugPrint('[cert] Fingerprint loaded from $certPath: $_cachedFingerprint');
+        debugPrint(
+          '[cert] Fingerprint loaded from $certPath: $_cachedFingerprint',
+        );
         return;
       } catch (e) {
         // Cert not found or unreadable (App Sandbox, permissions, etc.).

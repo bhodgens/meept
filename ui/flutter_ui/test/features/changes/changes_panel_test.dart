@@ -11,9 +11,9 @@ class _ChangesStubClient extends SdkApiClient {
   _ChangesStubClient({
     List<Map<String, dynamic>>? pending,
     List<Map<String, dynamic>>? journal,
-  })  : _pending = pending ?? [],
-        _journal = journal ?? [],
-        super(host: 'localhost', port: 8081);
+  }) : _pending = pending ?? [],
+       _journal = journal ?? [],
+       super(host: 'localhost', port: 8081);
 
   final List<Map<String, dynamic>> _pending;
   final List<Map<String, dynamic>> _journal;
@@ -116,12 +116,9 @@ Widget _buildTestApp(_ChangesStubClient client, {Session? session}) {
   return ProviderScope(
     overrides: [
       sdkClientProvider.overrideWith((_) => client),
-      if (session != null)
-        activeSessionProvider.overrideWith((_) => session),
+      if (session != null) activeSessionProvider.overrideWith((_) => session),
     ],
-    child: const MaterialApp(
-      home: Scaffold(body: ChangesPanel()),
-    ),
+    child: const MaterialApp(home: Scaffold(body: ChangesPanel())),
   );
 }
 
@@ -274,9 +271,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(client.revertedIds, isEmpty);
-    expect(
-      find.textContaining('pre-image exceeds size cap'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('pre-image exceeds size cap'), findsOneWidget);
   });
 }

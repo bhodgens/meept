@@ -65,8 +65,7 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
   /// callback fires only on an actual flip.
   bool _notifiedDirty = false;
 
-  bool get _isDirty =>
-      !_isLoading && _controller.text != _loadedContent;
+  bool get _isDirty => !_isLoading && _controller.text != _loadedContent;
 
   /// Publish the current dirty state to the parent, only when it changes.
   ///
@@ -362,11 +361,7 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.error_outline,
-            size: 14,
-            color: CyberpunkColors.redAlert,
-          ),
+          Icon(Icons.error_outline, size: 14, color: CyberpunkColors.redAlert),
           const SizedBox(width: 6),
           Expanded(
             child: Text(

@@ -9,60 +9,62 @@ import 'package:meept_ui/services/sdk_client.dart';
 import '../../mocks/mock_websocket_service.dart';
 
 void main() {
-  testWidgets('archived session renders with reduced opacity and sorts after active',
-      (tester) async {
-    final archived = Session(
-      id: 'arc1',
-      title: 'arc me',
-      createdAt: DateTime.now(),
-      lastActivity: DateTime.now(),
-      archived: true,
-    );
-    final active = Session(
-      id: 'act1',
-      title: 'active one',
-      createdAt: DateTime.now(),
-      lastActivity: DateTime.now(),
-    );
+  testWidgets(
+    'archived session renders with reduced opacity and sorts after active',
+    (tester) async {
+      final archived = Session(
+        id: 'arc1',
+        title: 'arc me',
+        createdAt: DateTime.now(),
+        lastActivity: DateTime.now(),
+        archived: true,
+      );
+      final active = Session(
+        id: 'act1',
+        title: 'active one',
+        createdAt: DateTime.now(),
+        lastActivity: DateTime.now(),
+      );
 
-    final client = _ArchiveTestClient([active, archived]);
-    final websocket = MockWebSocketService();
+      final client = _ArchiveTestClient([active, archived]);
+      final websocket = MockWebSocketService();
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          sessionProvider.overrideWith(
-              (ref) => SessionNotifier(sdkClient: client, websocket: websocket)),
-        ],
-        child: const MaterialApp(
-          home: Scaffold(body: SessionsList()),
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sessionProvider.overrideWith(
+              (ref) => SessionNotifier(sdkClient: client, websocket: websocket),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: SessionsList())),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    final archivedTile = find.byKey(const ValueKey('session-tile-arc1'));
-    expect(archivedTile, findsOneWidget);
+      final archivedTile = find.byKey(const ValueKey('session-tile-arc1'));
+      expect(archivedTile, findsOneWidget);
 
-    final activeTile = find.byKey(const ValueKey('session-tile-act1'));
-    expect(activeTile, findsOneWidget);
+      final activeTile = find.byKey(const ValueKey('session-tile-act1'));
+      expect(activeTile, findsOneWidget);
 
-    expect(
-      tester.getCenter(activeTile).dy,
-      lessThan(tester.getCenter(archivedTile).dy),
-    );
+      expect(
+        tester.getCenter(activeTile).dy,
+        lessThan(tester.getCenter(archivedTile).dy),
+      );
 
-    final opacityFinder = find.ancestor(
-      of: archivedTile,
-      matching: find.byType(Opacity),
-    );
-    expect(opacityFinder, findsOneWidget);
-    final opacity = tester.widget<Opacity>(opacityFinder).opacity;
-    expect(opacity, lessThan(1.0));
-  });
+      final opacityFinder = find.ancestor(
+        of: archivedTile,
+        matching: find.byType(Opacity),
+      );
+      expect(opacityFinder, findsOneWidget);
+      final opacity = tester.widget<Opacity>(opacityFinder).opacity;
+      expect(opacity, lessThan(1.0));
+    },
+  );
 
-  testWidgets('archive icon tap shows archive confirmation dialog',
-      (tester) async {
+  testWidgets('archive icon tap shows archive confirmation dialog', (
+    tester,
+  ) async {
     final session = Session(
       id: 'x1',
       title: 'target',
@@ -75,11 +77,10 @@ void main() {
       ProviderScope(
         overrides: [
           sessionProvider.overrideWith(
-              (ref) => SessionNotifier(sdkClient: client, websocket: websocket)),
+            (ref) => SessionNotifier(sdkClient: client, websocket: websocket),
+          ),
         ],
-        child: const MaterialApp(
-          home: Scaffold(body: SessionsList()),
-        ),
+        child: const MaterialApp(home: Scaffold(body: SessionsList())),
       ),
     );
     await tester.pumpAndSettle();
@@ -103,5 +104,8 @@ class _ArchiveTestClient extends SdkApiClient {
   }
 
   @override
-  Future<void> archiveSession(String sessionId, {required bool archived}) async {}
+  Future<void> archiveSession(
+    String sessionId, {
+    required bool archived,
+  }) async {}
 }

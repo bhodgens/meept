@@ -724,7 +724,9 @@ class SdkApiClient {
   }
 
   /// Employee goals: `GET /api/v1/agents/{id}/goals` → `{goals: [...]}`.
-  Future<List<Map<String, dynamic>>> listEmployeeGoals(String employeeId) async {
+  Future<List<Map<String, dynamic>>> listEmployeeGoals(
+    String employeeId,
+  ) async {
     try {
       final raw = await _get('/api/v1/agents/$employeeId/goals');
       final goalsRaw = raw['goals'] as List?;
@@ -1251,7 +1253,8 @@ class SdkApiClient {
     if (data is Map) {
       if (!data.containsKey('prompts')) {
         throw SdkApiException(
-          message: 'malformed prompts response: missing "prompts" key '
+          message:
+              'malformed prompts response: missing "prompts" key '
               '(got keys ${data.keys.toList()})',
           statusCode: 0,
         );
@@ -1261,14 +1264,16 @@ class SdkApiClient {
       list = data;
     } else {
       throw SdkApiException(
-        message: 'unexpected prompts response type ${data.runtimeType}; '
+        message:
+            'unexpected prompts response type ${data.runtimeType}; '
             'want an object with a "prompts" list',
         statusCode: 0,
       );
     }
     if (list is! List) {
       throw SdkApiException(
-        message: 'malformed prompts response: "prompts" is '
+        message:
+            'malformed prompts response: "prompts" is '
             '${list.runtimeType}; want a list',
         statusCode: 0,
       );
@@ -1669,7 +1674,8 @@ class SdkApiClient {
     final content = raw['content'];
     if (path is! String || content is! String) {
       throw SdkApiException(
-        message: 'malformed main config response: expected string "path" and '
+        message:
+            'malformed main config response: expected string "path" and '
             '"content" keys (got keys ${raw.keys.toList()})',
         statusCode: 0,
       );
@@ -1720,7 +1726,8 @@ class SdkApiClient {
   /// to meept.json5, preserving all other top-level keys. Atomic on the
   /// daemon side (tmp-then-rename).
   Future<Map<String, dynamic>> saveOrchestratorConfig(
-      Map<String, dynamic> oc) async {
+    Map<String, dynamic> oc,
+  ) async {
     return _put('/api/v1/config/orchestrator', body: oc);
   }
 
@@ -1840,7 +1847,10 @@ class SdkApiClient {
       if (query != null && query.isNotEmpty) {
         params['query'] = query;
       }
-      final raw = await _get('/api/v1/memory/facts', query: params.isNotEmpty ? params : null);
+      final raw = await _get(
+        '/api/v1/memory/facts',
+        query: params.isNotEmpty ? params : null,
+      );
       final factsRaw = raw['facts'] as List?;
       if (factsRaw == null) return [];
       return factsRaw

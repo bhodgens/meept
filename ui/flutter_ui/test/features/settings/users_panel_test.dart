@@ -48,7 +48,8 @@ Future<void> _pump(WidgetTester tester, _StubUsersClient client) async {
 /// A JSON5-ish main config: comments and a trailing comma are present on
 /// purpose, so the panel's decode is exercised the same way it was when the
 /// text arrived from the retired endpoint.
-String _mainConfig({required bool enabled}) => '''
+String _mainConfig({required bool enabled}) =>
+    '''
 {
   // daemon main config
   "log_level": "info",
@@ -84,9 +85,6 @@ void main() {
     await _pump(tester, client);
 
     expect(find.text('multi-user: unknown'), findsOneWidget);
-    expect(
-      find.textContaining('could not load daemon config'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('could not load daemon config'), findsOneWidget);
   });
 }

@@ -9,7 +9,9 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: const Scaffold(body: ErrorBanner(message: 'something went wrong')),
+          home: const Scaffold(
+            body: ErrorBanner(message: 'something went wrong'),
+          ),
         ),
       );
       await tester.pump();
@@ -20,20 +22,27 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'test error', onDismiss: () {})),
+          home: Scaffold(
+            body: ErrorBanner(message: 'test error', onDismiss: () {}),
+          ),
         ),
       );
       await tester.pump();
       expect(find.byIcon(Icons.error_outline), findsOneWidget);
     });
 
-    testWidgets('shows dismiss button when onDismiss is provided', (tester) async {
+    testWidgets('shows dismiss button when onDismiss is provided', (
+      tester,
+    ) async {
       var dismissed = false;
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
           home: Scaffold(
-            body: ErrorBanner(message: 'test error', onDismiss: () => dismissed = true),
+            body: ErrorBanner(
+              message: 'test error',
+              onDismiss: () => dismissed = true,
+            ),
           ),
         ),
       );
@@ -44,7 +53,9 @@ void main() {
       expect(dismissed, isTrue);
     });
 
-    testWidgets('does not show dismiss button when onDismiss is null', (tester) async {
+    testWidgets('does not show dismiss button when onDismiss is null', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
@@ -71,7 +82,8 @@ void main() {
     });
 
     testWidgets('truncates long messages', (tester) async {
-      const longMessage = 'This is a very long error message that should be truncated';
+      const longMessage =
+          'This is a very long error message that should be truncated';
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
@@ -116,7 +128,9 @@ void main() {
         ),
       );
       await tester.pump();
-      final iconButton = tester.widget<IconButton>(find.byType(IconButton).first);
+      final iconButton = tester.widget<IconButton>(
+        find.byType(IconButton).first,
+      );
       expect(iconButton.color, CyberpunkColors.redAlert);
     });
 

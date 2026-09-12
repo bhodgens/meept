@@ -43,29 +43,46 @@ class _ConnectedWebSocket extends MockWebSocketService {
 }
 
 ChatNotifier _notifier(SdkApiClient client) => ChatNotifier(
-      sdkClient: client,
-      websocket: _ConnectedWebSocket(),
-      ttsNotifier: _NoopTts(),
-      sessionId: 'test-session',
-    );
+  sdkClient: client,
+  websocket: _ConnectedWebSocket(),
+  ttsNotifier: _NoopTts(),
+  sessionId: 'test-session',
+);
 
 class _NoopTts extends StateNotifier<TtsState> implements TtsNotifier {
   _NoopTts() : super(TtsState.idle);
-  @override Future<bool> initialize() async => true;
-  @override Future<void> speak(String text) async {}
-  @override Future<void> stop() async {}
-  @override Future<void> setVolume(double volume) async {}
-  @override Future<void> setSpeed(double speed) async {}
-  @override Future<void> setPitch(double pitch) async {}
-  @override Future<void> setVoice(String voiceName) async {}
-  @override Future<List<Map<String, dynamic>>> getVoices() async => [];
-  @override Future<void> setEnabled(bool value) async {}
-  @override Future<void> setBehaviorSettings(
-      {required bool interrupt, required bool queue, int? maxQueueSize}) async {}
-  @override Future<void> toggleTts() async {}
-  @override bool get enabled => false;
-  @override bool get isAvailable => false;
-  @override bool get isSpeaking => false;
+  @override
+  Future<bool> initialize() async => true;
+  @override
+  Future<void> speak(String text) async {}
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> setVolume(double volume) async {}
+  @override
+  Future<void> setSpeed(double speed) async {}
+  @override
+  Future<void> setPitch(double pitch) async {}
+  @override
+  Future<void> setVoice(String voiceName) async {}
+  @override
+  Future<List<Map<String, dynamic>>> getVoices() async => [];
+  @override
+  Future<void> setEnabled(bool value) async {}
+  @override
+  Future<void> setBehaviorSettings({
+    required bool interrupt,
+    required bool queue,
+    int? maxQueueSize,
+  }) async {}
+  @override
+  Future<void> toggleTts() async {}
+  @override
+  bool get enabled => false;
+  @override
+  bool get isAvailable => false;
+  @override
+  bool get isSpeaking => false;
   double get volume => 1.0;
 }
 
@@ -80,7 +97,9 @@ void main() {
     expect(notifier.state.error, isNotNull);
     // The failed text stays in the user-visible history.
     expect(
-      notifier.state.messages.any((m) => m.role == 'user' && m.content == 'hello'),
+      notifier.state.messages.any(
+        (m) => m.role == 'user' && m.content == 'hello',
+      ),
       isTrue,
     );
 

@@ -16,8 +16,7 @@ void main() {
       expect(s.isProjectTier, isFalse);
       expect(s.sourcePath, '/home/u/.meept/prompts/planner/decompose.md');
       expect(s.modified, isNotNull);
-      expect(s.modified!.toUtc().toIso8601String(),
-          '2026-06-27T10:30:00.000Z');
+      expect(s.modified!.toUtc().toIso8601String(), '2026-06-27T10:30:00.000Z');
     });
 
     test('parses project tier', () {

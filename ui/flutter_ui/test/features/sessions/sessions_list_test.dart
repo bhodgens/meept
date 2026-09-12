@@ -85,75 +85,79 @@ void main() {
       expect(find.text('another session'), findsOneWidget);
     });
 
-    testWidgets('selects session on tap, verifies activeSessionProvider updated', (
-      tester,
-    ) async {
-      final session = Session(
-        id: '1',
-        title: 'Test Session',
-        createdAt: DateTime.now(),
-        // Bound project => _activateSession takes the no-dialog fast path.
-        projectPath: '/tmp/project',
-      );
+    testWidgets(
+      'selects session on tap, verifies activeSessionProvider updated',
+      (tester) async {
+        final session = Session(
+          id: '1',
+          title: 'Test Session',
+          createdAt: DateTime.now(),
+          // Bound project => _activateSession takes the no-dialog fast path.
+          projectPath: '/tmp/project',
+        );
 
-      // GoRouter so `context.go('/')` in _doActivateSession doesn't throw.
-      final router = GoRouter(
-        initialLocation: '/sessions',
-        routes: [
-          GoRoute(
-            path: '/sessions',
-            builder: (_, __) => const Scaffold(
-              body: SizedBox(height: 400, child: SessionsList()),
+        // GoRouter so `context.go('/')` in _doActivateSession doesn't throw.
+        final router = GoRouter(
+          initialLocation: '/sessions',
+          routes: [
+            GoRoute(
+              path: '/sessions',
+              builder: (_, __) => const Scaffold(
+                body: SizedBox(height: 400, child: SessionsList()),
+              ),
             ),
+            GoRoute(
+              path: '/',
+              builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
+            ),
+          ],
+        );
+
+        // Use a ProviderContainer so we can assert provider state after
+        // navigation replaces the list page.
+        final container = ProviderContainer(
+          overrides: [
+            sessionProvider.overrideWith((ref) {
+              return SessionNotifier(
+                sdkClient: _TestSdkClient([session]),
+                websocket: MockWebSocketService(),
+              );
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp.router(routerConfig: router),
           ),
-          GoRoute(
-            path: '/',
-            builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
-          ),
-        ],
-      );
+        );
 
-      // Use a ProviderContainer so we can assert provider state after
-      // navigation replaces the list page.
-      final container = ProviderContainer(
-        overrides: [
-          sessionProvider.overrideWith((ref) {
-            return SessionNotifier(sdkClient: _TestSdkClient([session]), websocket: MockWebSocketService());
-          }),
-        ],
-      );
-      addTearDown(container.dispose);
+        await tester.pumpAndSettle();
 
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp.router(routerConfig: router),
-        ),
-      );
+        // Initially no active session
+        expect(container.read(activeSessionProvider), isNull);
 
-      await tester.pumpAndSettle();
-
-      // Initially no active session
-      expect(container.read(activeSessionProvider), isNull);
-
-      // Tap on the session tile text to select it
-      await tester.tap(find.text('test session'));
-      // InkWell delays onTap when onDoubleTap is present; pump past the double-tap window
-      await tester.pump(const Duration(milliseconds: 350));
-      await tester.pump();
-
-      // The unbound-session project prompt appears; decline it so
-      // activation proceeds without binding a project.
-      if (find.byType(ProjectPromptDialog).evaluate().isNotEmpty) {
-        await tester.tap(find.text('No'));
+        // Tap on the session tile text to select it
+        await tester.tap(find.text('test session'));
+        // InkWell delays onTap when onDoubleTap is present; pump past the double-tap window
+        await tester.pump(const Duration(milliseconds: 350));
         await tester.pump();
-      }
-      await tester.pumpAndSettle();
 
-      // Activation sets the session and switches to the chat tab.
-      expect(container.read(activeSessionProvider)?.id, '1');
-      expect(container.read(tabActivationProvider), HomeTab.chat);
-    });
+        // The unbound-session project prompt appears; decline it so
+        // activation proceeds without binding a project.
+        if (find.byType(ProjectPromptDialog).evaluate().isNotEmpty) {
+          await tester.tap(find.text('No'));
+          await tester.pump();
+        }
+        await tester.pumpAndSettle();
+
+        // Activation sets the session and switches to the chat tab.
+        expect(container.read(activeSessionProvider)?.id, '1');
+        expect(container.read(tabActivationProvider), HomeTab.chat);
+      },
+    );
 
     testWidgets(
       'double-tap sets tabActivationProvider to chat and active session',
@@ -265,15 +269,18 @@ void main() {
       expect(container.read(tabActivationProvider), HomeTab.chat);
     });
 
-    testWidgets(
-        'quick-creates a session when + button is pressed '
+    testWidgets('quick-creates a session when + button is pressed '
         '(no dialog; titles auto-derive from first message)', (tester) async {
       // _createQuickSession navigates via context.go('/'), which requires
       // a GoRouter — same setup as the double-tap test.
       final container = ProviderContainer(
         overrides: [
           sessionProvider.overrideWith(
-              (ref) => SessionNotifier(sdkClient: _TestSdkClient([]), websocket: MockWebSocketService())),
+            (ref) => SessionNotifier(
+              sdkClient: _TestSdkClient([]),
+              websocket: MockWebSocketService(),
+            ),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -283,7 +290,9 @@ void main() {
         routes: [
           GoRoute(
             path: '/sessions',
-            builder: (_, __) => const Scaffold(body: SizedBox(width: 400, child: SessionsList())),
+            builder: (_, __) => const Scaffold(
+              body: SizedBox(width: 400, child: SessionsList()),
+            ),
           ),
           GoRoute(
             path: '/',

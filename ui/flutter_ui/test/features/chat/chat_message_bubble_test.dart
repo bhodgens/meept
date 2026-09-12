@@ -62,8 +62,9 @@ void main() {
       expect(find.text('Hello, world!'), findsOneWidget);
     });
 
-    testWidgets('renders assistant messages aligned to the left',
-        (tester) async {
+    testWidgets('renders assistant messages aligned to the left', (
+      tester,
+    ) async {
       final message = _assistantMessage();
       await tester.pumpWidget(_buildApp(ChatMessageBubble(message: message)));
       await tester.pump();
@@ -73,36 +74,41 @@ void main() {
     });
 
     testWidgets('user message uses orange border color', (tester) async {
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _userMessage()),
-      ));
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _userMessage())),
+      );
       await tester.pump();
 
       // ChatMessageBubble outer Align -> Container with BoxDecoration
-      final bubbleContainers = find.byWidgetPredicate(
-        (w) => w is Container && w.decoration is BoxDecoration,
-      ).evaluate();
+      final bubbleContainers = find
+          .byWidgetPredicate(
+            (w) => w is Container && w.decoration is BoxDecoration,
+          )
+          .evaluate();
       expect(bubbleContainers.isNotEmpty, isTrue);
     });
 
     testWidgets('assistant message uses gray border color', (tester) async {
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _assistantMessage()),
-      ));
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _assistantMessage())),
+      );
       await tester.pump();
 
-      final bubbleContainers = find.byWidgetPredicate(
-        (w) => w is Container && w.decoration is BoxDecoration,
-      ).evaluate();
+      final bubbleContainers = find
+          .byWidgetPredicate(
+            (w) => w is Container && w.decoration is BoxDecoration,
+          )
+          .evaluate();
       expect(bubbleContainers.isNotEmpty, isTrue);
     });
 
-    testWidgets('user and assistant messages have different colors',
-        (tester) async {
+    testWidgets('user and assistant messages have different colors', (
+      tester,
+    ) async {
       // Build user message
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _userMessage()),
-      ));
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _userMessage())),
+      );
       await tester.pump();
 
       final userWidgets = tester.renderObject(find.byType(ChatMessageBubble));
@@ -124,9 +130,7 @@ void main() {
     });
 
     testWidgets('shows timestamps in HH:MM format', (tester) async {
-      final message = _userMessage(
-        timestamp: DateTime(2024, 1, 1, 9, 5),
-      );
+      final message = _userMessage(timestamp: DateTime(2024, 1, 1, 9, 5));
       await tester.pumpWidget(_buildApp(ChatMessageBubble(message: message)));
       await tester.pump();
 
@@ -134,9 +138,7 @@ void main() {
     });
 
     testWidgets('shows timestamps for various times', (tester) async {
-      final message = _userMessage(
-        timestamp: DateTime(2024, 1, 1, 14, 7),
-      );
+      final message = _userMessage(timestamp: DateTime(2024, 1, 1, 14, 7));
       await tester.pumpWidget(_buildApp(ChatMessageBubble(message: message)));
       await tester.pump();
 
@@ -151,11 +153,10 @@ void main() {
       expect(find.text('I can help with that.'), findsOneWidget);
     });
 
-    testWidgets('renders bubble with tool calls without crashing',
-        (tester) async {
-      final message = _assistantMessage(
-        toolCalls: ['shell', 'file_edit'],
-      );
+    testWidgets('renders bubble with tool calls without crashing', (
+      tester,
+    ) async {
+      final message = _assistantMessage(toolCalls: ['shell', 'file_edit']);
       await tester.pumpWidget(_buildApp(ChatMessageBubble(message: message)));
       await tester.pump();
 
@@ -163,9 +164,9 @@ void main() {
     });
 
     testWidgets('user message uses right alignment', (tester) async {
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _userMessage()),
-      ));
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _userMessage())),
+      );
       await tester.pump();
 
       final allAligns = find.byType(Align).evaluate();
@@ -177,9 +178,9 @@ void main() {
     });
 
     testWidgets('message content text uses orangeGlow color', (tester) async {
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _userMessage()),
-      ));
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _userMessage())),
+      );
       await tester.pump();
 
       // Text widget exists
@@ -187,16 +188,18 @@ void main() {
     });
 
     testWidgets('user message border is orangePrimary', (tester) async {
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _userMessage()),
-      ));
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _userMessage())),
+      );
       await tester.pump();
 
       final container = tester.widget<Container>(
-        find.descendant(
-          of: find.byType(ChatMessageBubble),
-          matching: find.byType(Container),
-        ).first,
+        find
+            .descendant(
+              of: find.byType(ChatMessageBubble),
+              matching: find.byType(Container),
+            )
+            .first,
       );
       final decoration = container.decoration as BoxDecoration;
       final border = decoration.border as Border;
@@ -204,34 +207,39 @@ void main() {
     });
 
     testWidgets('assistant message border is lightGray', (tester) async {
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _assistantMessage()),
-      ));
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _assistantMessage())),
+      );
       await tester.pump();
 
       final container = tester.widget<Container>(
-        find.descendant(
-          of: find.byType(ChatMessageBubble),
-          matching: find.byType(Container),
-        ).first,
+        find
+            .descendant(
+              of: find.byType(ChatMessageBubble),
+              matching: find.byType(Container),
+            )
+            .first,
       );
       final decoration = container.decoration as BoxDecoration;
       final border = decoration.border as Border;
       expect(border.left.color, CyberpunkColors.lightGray);
     });
 
-    testWidgets('user message background uses orange glow with 60% alpha',
-        (tester) async {
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _userMessage()),
-      ));
+    testWidgets('user message background uses orange glow with 60% alpha', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _userMessage())),
+      );
       await tester.pump();
 
       final container = tester.widget<Container>(
-        find.descendant(
-          of: find.byType(ChatMessageBubble),
-          matching: find.byType(Container),
-        ).first,
+        find
+            .descendant(
+              of: find.byType(ChatMessageBubble),
+              matching: find.byType(Container),
+            )
+            .first,
       );
       final decoration = container.decoration as BoxDecoration;
       expect(
@@ -240,27 +248,30 @@ void main() {
       );
     });
 
-    testWidgets('assistant message background is midGray with 60% alpha', (tester) async {
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _assistantMessage()),
-      ));
+    testWidgets('assistant message background is midGray with 60% alpha', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _assistantMessage())),
+      );
       await tester.pump();
 
       final container = tester.widget<Container>(
-        find.descendant(
-          of: find.byType(ChatMessageBubble),
-          matching: find.byType(Container),
-        ).first,
+        find
+            .descendant(
+              of: find.byType(ChatMessageBubble),
+              matching: find.byType(Container),
+            )
+            .first,
       );
       final decoration = container.decoration as BoxDecoration;
       expect(decoration.color, CyberpunkColors.midGray.withValues(alpha: 0.6));
     });
 
-
     testWidgets('timestamp text is 10px', (tester) async {
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(message: _userMessage()),
-      ));
+      await tester.pumpWidget(
+        _buildApp(ChatMessageBubble(message: _userMessage())),
+      );
       await tester.pump();
 
       final textWidgets = find.byType(Text).evaluate();
@@ -273,15 +284,16 @@ void main() {
     });
 
     testWidgets('long content is displayed without overflow', (tester) async {
-      const longMessage = 'This is a very long message to ensure that '
+      const longMessage =
+          'This is a very long message to ensure that '
           'the bubble content renders correctly and does not cause '
           'overflow issues because the maxWidth is constrained '
           'to 70% of the screen width and wrap text naturally';
-      await tester.pumpWidget(_buildApp(
-        ChatMessageBubble(
-          message: _userMessage(content: longMessage),
+      await tester.pumpWidget(
+        _buildApp(
+          ChatMessageBubble(message: _userMessage(content: longMessage)),
         ),
-      ));
+      );
       await tester.pump();
 
       expect(find.text(longMessage), findsOneWidget);

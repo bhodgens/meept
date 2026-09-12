@@ -14,7 +14,9 @@ class _EmptyMemoriesSdkClient extends SdkApiClient {
   _EmptyMemoriesSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<List<Map<String, dynamic>>> getRecentMemoriesRaw({int limit = 10}) async {
+  Future<List<Map<String, dynamic>>> getRecentMemoriesRaw({
+    int limit = 10,
+  }) async {
     return [];
   }
 
@@ -45,15 +47,14 @@ Widget _buildTestApp() {
       sdkClientProvider.overrideWith((_) => _EmptyMemoriesSdkClient()),
       websocketProvider.overrideWith((_) => _StubWebSocket()),
     ],
-    child: const MaterialApp(
-      home: Scaffold(body: MemoryPanel()),
-    ),
+    child: const MaterialApp(home: Scaffold(body: MemoryPanel())),
   );
 }
 
 void main() {
-  testWidgets('renders placeholder when no memories and not searched',
-      (tester) async {
+  testWidgets('renders placeholder when no memories and not searched', (
+    tester,
+  ) async {
     await tester.pumpWidget(_buildTestApp());
     // Allow initState + getRecentMemoriesRaw to complete.
     await tester.pump(const Duration(milliseconds: 50));

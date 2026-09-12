@@ -85,9 +85,7 @@ Widget _buildTestApp(_ReflectionStubClient client) {
       sdkClientProvider.overrideWith((_) => client),
       websocketProvider.overrideWith((_) => _StubWebSocket()),
     ],
-    child: const MaterialApp(
-      home: Scaffold(body: ReflectionPanel()),
-    ),
+    child: const MaterialApp(home: Scaffold(body: ReflectionPanel())),
   );
 }
 
@@ -112,11 +110,10 @@ void main() {
     expect(find.text('improves code quality'), findsOneWidget);
   });
 
-  testWidgets('shows propose-only warning for CLAUDE.md target',
-      (tester) async {
-    final client = _ReflectionStubClient([
-      _proposal(target: 'CLAUDE.md'),
-    ]);
+  testWidgets('shows propose-only warning for CLAUDE.md target', (
+    tester,
+  ) async {
+    final client = _ReflectionStubClient([_proposal(target: 'CLAUDE.md')]);
     await tester.pumpWidget(_buildTestApp(client));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pump(const Duration(milliseconds: 50));
@@ -127,20 +124,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     // SnackBar should mention propose-only / manually
-    expect(
-      find.textContaining('propose-only'),
-      findsOneWidget,
-    );
-    expect(
-      find.textContaining('manually'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('propose-only'), findsOneWidget);
+    expect(find.textContaining('manually'), findsOneWidget);
   });
 
   testWidgets('applies proposal and refreshes list', (tester) async {
-    final client = _ReflectionStubClient([
-      _proposal(target: 'x.md', id: 'p1'),
-    ]);
+    final client = _ReflectionStubClient([_proposal(target: 'x.md', id: 'p1')]);
     await tester.pumpWidget(_buildTestApp(client));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pump(const Duration(milliseconds: 50));

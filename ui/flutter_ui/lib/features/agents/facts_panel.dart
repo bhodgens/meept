@@ -59,7 +59,11 @@ class _FactsPanelState extends ConsumerState<FactsPanel> {
         children: [
           Row(
             children: [
-              Icon(Icons.manage_accounts, size: 16, color: CyberpunkColors.orangePrimary),
+              Icon(
+                Icons.manage_accounts,
+                size: 16,
+                color: CyberpunkColors.orangePrimary,
+              ),
               const SizedBox(width: 6),
               Text(
                 'facts',
@@ -84,10 +88,7 @@ class _FactsPanelState extends ConsumerState<FactsPanel> {
             const Center(child: CircularProgressIndicator())
           else if (_facts.isEmpty)
             const Center(
-              child: Text(
-                'no facts',
-                style: TextStyle(color: Colors.grey),
-              ),
+              child: Text('no facts', style: TextStyle(color: Colors.grey)),
             )
           else
             Expanded(
@@ -136,7 +137,9 @@ class _FactsPanelState extends ConsumerState<FactsPanel> {
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         color: CyberpunkColors.black.withValues(alpha: 0.3),
-        border: Border.all(color: CyberpunkColors.midGray.withValues(alpha: 0.5)),
+        border: Border.all(
+          color: CyberpunkColors.midGray.withValues(alpha: 0.5),
+        ),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Row(
@@ -149,9 +152,9 @@ class _FactsPanelState extends ConsumerState<FactsPanel> {
             ),
             child: Text(
               fact.kind,
-            style: CyberpunkTypography.bodySmall.copyWith(
-              color: _kindColor(fact.kind),
-            ),
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: _kindColor(fact.kind),
+              ),
             ),
           ),
           const SizedBox(width: 8),
