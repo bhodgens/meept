@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -123,6 +124,15 @@ func (t *JSONExtractTool) IsConcurrencySafe(in map[string]any) bool {
 // Execute implements tools.Tool.
 func (t *JSONExtractTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	if t == nil || t.chatter == nil {
+		return nil, fmt.Errorf("json_extract: extraction model not configured (set extract_model in models.json5 to a provider/model ref)")
+	}
+	// Typed-nil guard (2026-09-10 panic, outcome-loop session): the daemon
+	// passes (*llm.Client)(nil) when extract_model resolves to nothing, and
+	// the interface holds the typed nil — the t.chatter == nil check above
+	// does NOT catch it, and Chat panicked dereferencing the nil receiver's
+	// mutex. reflect-based check catches interface-wrapped nil pointers.
+	if reflect.ValueOf(t.chatter).Kind() == reflect.Ptr &&
+		reflect.ValueOf(t.chatter).IsNil() {
 		return nil, fmt.Errorf("json_extract: extraction model not configured (set extract_model in models.json5 to a provider/model ref)")
 	}
 	schema, err := extractSchemaArg(args)
