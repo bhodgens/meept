@@ -311,6 +311,24 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
+	// Durable spawn record: written beside the PID file so the startup orphan
+	// sweep can still match this runtime after the config drifts (unmounted
+	// model volume, renamed provider) — exactly when a leak would otherwise be
+	// unreapable. Best-effort: a record failure must not fail the spawn.
+	if p.pidFile != "" {
+		recErr := WriteSpawnRecord(SpawnRecord{
+			EndpointKey: p.config.EndpointKey,
+			PIDFile:     p.pidFile,
+			Argv:        p.config.SpawnCommand,
+			AutoStop:    p.config.AutoStop,
+			PID:         p.pid,
+		})
+		if recErr != nil {
+			slog.Warn("spawn record: write failed; the orphan sweep will rely on the config",
+				"pid", p.pid, "pid_file", p.pidFile, "error", recErr)
+		}
+	}
+
 	// Start a goroutine to wait for the process to exit and prevent zombies.
 	// This is necessary because Setpgid=true creates a new process group,
 	// and without waiting, exited processes become defunct (zombies).
@@ -370,6 +388,16 @@ func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error
 	if p.cmd == nil || p.cmd.Process == nil {
 		// Try to recover from PID file
 		if entry, err := p.readPIDFile(); err == nil && entry.PID > 0 {
+			// An operator stop signals a process this instance never spawned, so
+			// the PID file is the only handle — and it outlives the process that
+			// wrote it. Verify the pid still runs this runtime before signalling
+			// it; a reused pid must never receive the operator's stop.
+			if asOperator {
+				if mismatch := p.identityMismatch(entry.PID); mismatch != nil {
+					p.mu.Unlock()
+					return mismatch
+				}
+			}
 			proc, err := os.FindProcess(entry.PID)
 			if err != nil {
 				p.mu.Unlock()
@@ -394,7 +422,7 @@ func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error
 	// ensures no grandchild survives the daemon's death.
 	if err := killProcessGroup(cmd, syscall.SIGTERM); err != nil {
 		// Already dead
-		os.Remove(p.pidFile)
+		p.clearPIDFileAndRecord()
 		return nil
 	}
 
@@ -411,11 +439,11 @@ func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error
 				// after ctx.Done cannot be surfaced to a caller that has
 				// already given up, and the returned nil IS the signal.
 				_ = killProcessGroup(cmd, syscall.SIGKILL)
-				os.Remove(p.pidFile) //nolint:errcheck // ctx already cancelled; nothing to report to
+				p.clearPIDFileAndRecord() // ctx already cancelled; nothing to report to
 				return nil
 			case <-ticker.C:
 				if !p.isProcessRunning(cmd.Process.Pid) {
-					os.Remove(p.pidFile) //nolint:errcheck // process already exited; stale file removal is best-effort
+					p.clearPIDFileAndRecord() // process already exited; stale file removal is best-effort
 					return nil
 				}
 			}
@@ -429,8 +457,56 @@ func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error
 	case <-waitDone:
 	}
 
-	os.Remove(p.pidFile) //nolint:errcheck // terminal cleanup; the runtime result is already decided
+	p.clearPIDFileAndRecord() // terminal cleanup; the runtime result is already decided
 	return nil
+}
+
+// clearPIDFileAndRecord removes the runtime's PID file and its durable spawn
+// record. Called where the process is known gone, or where the daemon has given
+// up waiting: leaving the record behind would make the orphan sweep chase a pid
+// that no longer exists.
+func (p *RuntimeProcess) clearPIDFileAndRecord() {
+	if p.pidFile == "" {
+		return
+	}
+	if err := os.Remove(p.pidFile); err != nil && !os.IsNotExist(err) {
+		slog.Debug("runtime pid file removal failed", "pid_file", p.pidFile, "error", err)
+	}
+	RemoveSpawnRecord(p.pidFile)
+}
+
+// identityMismatch reports an error when the process named by the runtime PID
+// file is not running the runtime that file was written for. The PID file
+// outlives the process that wrote it, so its pid can have been reused; an
+// operator stop (StopAsOperator) must not signal an unrelated process because of
+// it. Identity comes from the durable spawn record when one exists, otherwise
+// from the config's spawn command. nil means "cannot tell, nothing to compare".
+func (p *RuntimeProcess) identityMismatch(pid int) error {
+	var want []string
+	if p.config != nil {
+		want = p.config.SpawnCommand
+	}
+	if rec, err := ReadSpawnRecord(p.pidFile); err == nil && len(rec.Argv) > 0 {
+		want = rec.Argv
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	procs, err := ListRuntimeProcesses()
+	if err != nil {
+		return nil // cannot verify: do not block an explicit operator stop on a scan failure
+	}
+	for _, proc := range procs {
+		if proc.PID != pid {
+			continue
+		}
+		if !matchesSpawnCommand(proc.Command, want) {
+			return fmt.Errorf("pid %d runs %q, not this runtime's %q: refusing to signal it (the pid file may name a reused pid)",
+				pid, proc.Command, strings.Join(want, " "))
+		}
+		return nil
+	}
+	return nil // pid is not in the process table: nothing to signal anyway
 }
 
 // PID returns the process ID.

@@ -473,3 +473,124 @@ func TestRuntimeProcess_StopAsOperatorStopsRecordedPID(t *testing.T) {
 		t.Errorf("the stopped runtime's pid file must be removed, stat err = %v", statErr)
 	}
 }
+
+// TestRuntimeProcess_StartWritesAndStopRemovesSpawnRecord pins the durable
+// record's lifecycle. It is what lets the orphan sweep match a leftover after
+// the endpoint's config stops validating, and a record left behind would make
+// the sweep chase a pid that no longer exists.
+func TestRuntimeProcess_StartWritesAndStopRemovesSpawnRecord(t *testing.T) {
+	pidDir := createTempPIDDir(t)
+	if err := os.MkdirAll(pidDir, 0o700); err != nil {
+		t.Fatalf("create pid dir: %v", err)
+	}
+	pidFile := filepath.Join(pidDir, "record.pid")
+
+	cfg := &llm.RuntimeConfig{
+		EndpointKey:  "mlx:127.0.0.1:8081",
+		AutoStop:     true,
+		PIDFile:      pidFile,
+		SpawnCommand: []string{"sleep", "300"},
+	}
+	p := llm.NewRuntimeProcess(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := p.Start(ctx, io.Discard, io.Discard); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	rec, err := llm.ReadSpawnRecord(pidFile)
+	if err != nil {
+		t.Fatalf("spawn record missing after a successful start: %v", err)
+	}
+	if len(rec.Argv) != len(cfg.SpawnCommand) || rec.Argv[0] != cfg.SpawnCommand[0] {
+		t.Errorf("record argv = %v, want %v", rec.Argv, cfg.SpawnCommand)
+	}
+	if !rec.AutoStop {
+		t.Error("record must carry the endpoint's auto_stop setting")
+	}
+	if rec.PID != p.PID() {
+		t.Errorf("record pid = %d, want the spawned pid %d", rec.PID, p.PID())
+	}
+
+	if err := p.Stop(ctx); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if _, readErr := llm.ReadSpawnRecord(pidFile); readErr == nil {
+		t.Error("the spawn record must be removed together with the runtime")
+	}
+}
+
+// TestRuntimeProcess_StopAsOperator_RefusesReusedPID pins the identity guard on
+// the operator path: the PID file names a pid, but that pid runs something else
+// (the recorded runtime is gone and the pid was reused). StopAsOperator must
+// refuse instead of signalling an unrelated process.
+func TestRuntimeProcess_StopAsOperator_RefusesReusedPID(t *testing.T) {
+	launcher := exec.Command("/bin/sh", "-c", "nohup sleep 300 >/dev/null 2>&1 &")
+	launcher.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := launcher.Run(); err != nil {
+		t.Fatalf("launch victim: %v", err)
+	}
+
+	var pid int
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		procs, listErr := llm.ListRuntimeProcesses()
+		if listErr != nil {
+			t.Fatalf("ListRuntimeProcesses: %v", listErr)
+		}
+		for _, proc := range procs {
+			if proc.PPID == 1 && proc.Command == "sleep 300" {
+				pid = proc.PID
+				break
+			}
+		}
+		if pid != 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if pid == 0 {
+		t.Skip("no re-parented sleep observed in this environment")
+	}
+	t.Cleanup(func() {
+		if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil {
+			t.Logf("cleanup kill %d: %v", pid, killErr)
+		}
+	})
+
+	pidDir := createTempPIDDir(t)
+	if err := os.MkdirAll(pidDir, 0o700); err != nil {
+		t.Fatalf("create pid dir: %v", err)
+	}
+	pidFile := filepath.Join(pidDir, "reused.pid")
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf(`{"pid":%d,"token":"foreign"}`, pid)), 0o600); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+	// The durable record says this endpoint's runtime is a model server; the pid
+	// named by the pid file is not it.
+	if err := llm.WriteSpawnRecord(llm.SpawnRecord{
+		EndpointKey: "mlx:127.0.0.1:8081",
+		PIDFile:     pidFile,
+		Argv:        []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"},
+		AutoStop:    true,
+		PID:         pid,
+	}); err != nil {
+		t.Fatalf("write spawn record: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	p := llm.NewRuntimeProcess(&llm.RuntimeConfig{PIDFile: pidFile})
+	stopErr := p.StopAsOperator(ctx)
+	if stopErr == nil {
+		t.Fatal("StopAsOperator must refuse a pid that does not run the recorded runtime")
+	}
+	if !strings.Contains(stopErr.Error(), "refusing to signal it") {
+		t.Errorf("unexpected error text: %v", stopErr)
+	}
+	if aliveErr := syscall.Kill(pid, 0); aliveErr != nil {
+		t.Errorf("the unrelated process %d must be untouched, kill(0) err = %v", pid, aliveErr)
+	}
+}

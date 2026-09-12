@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,13 +100,15 @@ func ReadSpawnRecord(pidFile string) (SpawnRecord, error) {
 }
 
 // RemoveSpawnRecord deletes the record written beside pidFile. Best-effort: a
-// missing file is not an error, and there is no logger in this package-level
-// helper to report failures to.
+// missing file is not an error, and any other failure is only diagnostic —
+// callers are cleanup paths that must not start failing because of it.
 func RemoveSpawnRecord(pidFile string) {
 	if pidFile == "" {
 		return
 	}
-	_ = os.Remove(SpawnRecordPath(pidFile))
+	if err := os.Remove(SpawnRecordPath(pidFile)); err != nil && !os.IsNotExist(err) {
+		slog.Debug("spawn record: remove", "pid_file", pidFile, "error", err)
+	}
 }
 
 // ScanSpawnRecords returns every parseable record in dir (glob *.cmd). An
