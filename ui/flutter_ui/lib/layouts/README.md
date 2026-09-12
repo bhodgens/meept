@@ -100,7 +100,7 @@ Traditional top tabs with collapsible tool panels on both sides.
 **Structure:**
 - Top: Logo + horizontal tab bar
 - Left: Collapsible tools panel (search, memory, prompts)
-- Right: Collapsible project panel (branches, terminal)
+- Right: Collapsible project panel (branches)
 - Center: Main content area
 
 **Best for:** Power users who want quick access to tools without navigation.
@@ -112,7 +112,7 @@ Traditional top tabs with collapsible tool panels on both sides.
 | [Tools]   |                      | [Proj]|
 |  search   |                      |branch |
 |  memory   |   Main Content       |       |
-|  prompts  |                      |terminal|
+|  prompts  |                      |       |
 |           |                      |       |
 +-----------+----------------------+-------+
 |  [Status Bar]                          |

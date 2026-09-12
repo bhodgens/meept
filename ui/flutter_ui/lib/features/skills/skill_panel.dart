@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../models/api_models.dart';
+import '../../widgets/tool_panel_shell.dart';
 
 /// SkillPanel displays available skills and allows skill execution.
 ///
@@ -43,18 +42,14 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
   // Execution result
   SkillExecuteResult? _executeResult;
 
-  late final FocusNode _keyboardFocusNode;
-
   @override
   void initState() {
     super.initState();
-    _keyboardFocusNode = FocusNode();
     _loadSkills();
   }
 
   @override
   void dispose() {
-    _keyboardFocusNode.dispose();
     for (final c in _textControllers.values) {
       c.dispose();
     }
@@ -168,10 +163,6 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
     });
   }
 
-  void _closePanel() {
-    context.go('/');
-  }
-
   Future<void> _executeSkill() async {
     if (_selectedSkill == null || _uiDescriptor == null) return;
 
@@ -261,104 +252,59 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _keyboardFocusNode,
-      onKeyEvent: (FocusNode node, KeyEvent event) {
-        if (event.logicalKey == LogicalKeyboardKey.escape) {
-          _closePanel();
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
-          border: Border(
-            top: BorderSide(
-              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-              width: 1,
-            ),
-          ),
-        ),
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: _isLoading
-                  ? Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            CyberpunkColors.orangePrimary,
-                          ),
-                        ),
-                      ),
-                    )
-                  : _error != null
-                  ? _buildErrorState()
-                  : _selectedSkill != null
-                  ? _buildSkillDetail()
-                  : _buildSkillList(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
+        color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
         border: Border(
-          bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
+          top: BorderSide(
+            color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+            width: 1,
+          ),
         ),
       ),
-      child: Row(
-        children: [
-          if (_selectedSkill != null) ...[
-            GestureDetector(
-              onTap: _goBack,
-              child: Icon(
-                Icons.arrow_back,
-                color: CyberpunkColors.orangePrimary,
-                size: 18,
+      child: ToolPanelShell(
+        title: _selectedSkill?.name ?? 'skills',
+        icon: Icons.auto_awesome,
+        actions: [
+          // Detail view: return to the skill list. The shell's own
+          // back control exits the panel from either view.
+          if (_selectedSkill != null)
+            TextButton(
+              onPressed: _goBack,
+              child: Text(
+                'all skills',
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.orangePrimary,
+                ),
               ),
             ),
-            const SizedBox(width: 8),
-          ],
-          Icon(
-            Icons.auto_awesome,
-            color: CyberpunkColors.orangePrimary,
-            size: 18,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            _selectedSkill?.name ?? 'skills',
-            style: CyberpunkTypography.label.copyWith(
-              color: CyberpunkColors.orangePrimary,
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.close, size: 18),
-            onPressed: _closePanel,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            tooltip: 'close',
-          ),
           if (_selectedSkill == null)
-            GestureDetector(
-              onTap: _loadSkills,
-              child: Icon(
-                Icons.refresh,
-                color: CyberpunkColors.orangePrimary,
-                size: 16,
-              ),
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 16),
+              onPressed: _loadSkills,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              tooltip: 'refresh',
             ),
         ],
+        child: _isLoading
+            ? Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      CyberpunkColors.orangePrimary,
+                    ),
+                  ),
+                ),
+              )
+            : _error != null
+            ? _buildErrorState()
+            : _selectedSkill != null
+            ? _buildSkillDetail()
+            : _buildSkillList(),
       ),
     );
   }

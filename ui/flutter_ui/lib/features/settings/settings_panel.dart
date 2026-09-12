@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../services/sdk_client.dart';
 import '../../services/storage_service.dart';
 import '../../theme/app_palette.dart';
@@ -15,6 +14,7 @@ import 'orchestrator_config_editor.dart';
 import 'client_prefs_editor.dart';
 import 'users_panel.dart';
 import '../../widgets/error_banner.dart';
+import '../../widgets/tool_panel_shell.dart';
 
 /// Form field names used throughout the settings panel.
 class SettingsFields {
@@ -296,131 +296,90 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     // ink splashes; a bare colored Container triggers framework assertions.
     return Material(
       color: CyberpunkColors.darkGray,
-      child: Column(
-        children: [
-          _buildHeader(),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                _buildConnectionSection(storage),
-                const ClientPrefsEditor(),
-                const OrchestratorConfigEditor(),
-                const UsersPanel(),
-                if (_error != null)
-                  ErrorBanner(message: _error!, onDismiss: _loadConfig),
-                _buildEditor(),
-              ],
+      child: ToolPanelShell(
+        title: 'settings',
+        icon: Icons.settings,
+        actions: [
+          if (_isSaving)
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  CyberpunkColors.orangePrimary,
+                ),
+              ),
             ),
-          ),
         ],
+        header: _buildConfigBar(),
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            _buildConnectionSection(storage),
+            const ClientPrefsEditor(),
+            const OrchestratorConfigEditor(),
+            const UsersPanel(),
+            if (_error != null)
+              ErrorBanner(message: _error!, onDismiss: _loadConfig),
+            _buildEditor(),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: CyberpunkColors.midGray)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              GestureDetector(
-                onTap: () => context.go('/'),
-                child: Icon(
-                  Icons.arrow_back,
-                  color: CyberpunkColors.orangePrimary,
-                  size: 18,
+  /// Config-category chips plus the save control. Rendered by
+  /// [ToolPanelShell] under the shared header row.
+  Widget _buildConfigBar() {
+    return Row(
+      children: [
+        ..._configLabels.entries.map((entry) {
+          final isSelected = _selectedConfig == entry.key;
+          return Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: ChoiceChip(
+              label: Text(
+                entry.value.toLowerCase(),
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  fontFamily: 'SourceCodePro',
+                  fontSize: 10,
                 ),
               ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.settings,
-                color: CyberpunkColors.orangePrimary,
-                size: 18,
+              selected: isSelected,
+              selectedColor: CyberpunkColors.orangeDark,
+              backgroundColor: CyberpunkColors.midGray.withValues(alpha: 0.2),
+              labelStyle: TextStyle(
+                color: isSelected
+                    ? CyberpunkColors.orangeBright
+                    : CyberpunkColors.lightGray,
               ),
-              const SizedBox(width: 8),
-              Text(
-                'settings',
-                style: CyberpunkTypography.label.copyWith(
-                  color: CyberpunkColors.orangePrimary,
-                ),
-              ),
-              const Spacer(),
-              if (_isSaving)
-                SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      CyberpunkColors.orangePrimary,
-                    ),
-                  ),
-                ),
-            ],
+              onSelected: (selected) {
+                if (selected && _selectedConfig != entry.key) {
+                  if (_hasChanges) {
+                    _showDiscardDialog(entry.key);
+                  } else {
+                    setState(() => _selectedConfig = entry.key);
+                    _loadConfig();
+                  }
+                }
+              },
+            ),
+          );
+        }),
+        const Spacer(),
+        if (_hasChanges)
+          ElevatedButton.icon(
+            onPressed: _saveConfig,
+            icon: const Icon(Icons.save, size: 16),
+            label: const Text('save'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: CyberpunkColors.greenSuccess,
+              foregroundColor: CyberpunkColors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              ..._configLabels.entries.map((entry) {
-                final isSelected = _selectedConfig == entry.key;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: ChoiceChip(
-                    label: Text(
-                      entry.value.toLowerCase(),
-                      style: CyberpunkTypography.bodySmall.copyWith(
-                        fontFamily: 'SourceCodePro',
-                        fontSize: 10,
-                      ),
-                    ),
-                    selected: isSelected,
-                    selectedColor: CyberpunkColors.orangeDark,
-                    backgroundColor: CyberpunkColors.midGray.withValues(
-                      alpha: 0.2,
-                    ),
-                    labelStyle: TextStyle(
-                      color: isSelected
-                          ? CyberpunkColors.orangeBright
-                          : CyberpunkColors.lightGray,
-                    ),
-                    onSelected: (selected) {
-                      if (selected && _selectedConfig != entry.key) {
-                        if (_hasChanges) {
-                          _showDiscardDialog(entry.key);
-                        } else {
-                          setState(() => _selectedConfig = entry.key);
-                          _loadConfig();
-                        }
-                      }
-                    },
-                  ),
-                );
-              }),
-              const Spacer(),
-              if (_hasChanges)
-                ElevatedButton.icon(
-                  onPressed: _saveConfig,
-                  icon: const Icon(Icons.save, size: 16),
-                  label: const Text('save'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: CyberpunkColors.greenSuccess,
-                    foregroundColor: CyberpunkColors.black,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
+      ],
     );
   }
 

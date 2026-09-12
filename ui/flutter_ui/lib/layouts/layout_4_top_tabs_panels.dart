@@ -277,7 +277,6 @@ class _RightPanel extends StatelessWidget {
           Divider(color: CyberpunkColors.midGray),
           const _PanelHeader('quick access'),
           const _ToolItem(Icons.call_split, 'branches'),
-          const _ToolItem(Icons.terminal, 'terminal'),
         ],
       ),
     );

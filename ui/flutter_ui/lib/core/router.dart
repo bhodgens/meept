@@ -12,7 +12,6 @@ import '../features/memory/memory_panel.dart';
 import '../features/reflection/reflection_panel.dart';
 import '../features/changes/changes_panel.dart';
 import '../features/prompts/prompt_panel.dart';
-import '../features/terminal/terminal_panel.dart';
 import '../features/calendar/calendar_panel.dart';
 import '../features/metrics/metrics_panel.dart';
 import '../theme/colors.dart';
@@ -33,6 +32,8 @@ import '../providers/preferences_provider.dart';
 ///   /tools/reflection -> ReflectionPanel
 ///   /tools/changes    -> ChangesPanel
 ///   /tools/prompts    -> PromptPanel
+///   /tools/calendar   -> CalendarPanel
+///   /tools/metrics    -> MetricsPanel
 final GoRouter router = GoRouter(
   initialLocation: '/',
   debugLogDiagnostics: true,
@@ -134,13 +135,6 @@ final GoRouter router = GoRouter(
       name: 'toolsPrompts',
       builder: (context, state) {
         return const PromptPanel();
-      },
-    ),
-    GoRoute(
-      path: '/tools/terminal',
-      name: 'toolsTerminal',
-      builder: (context, state) {
-        return const TerminalPanel();
       },
     ),
     GoRoute(
@@ -352,9 +346,6 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the prompt-editor tool panel (replace current entry).
   void goToolPrompts() => go('/tools/prompts');
-
-  /// Navigate to the terminal tool panel (replace current entry).
-  void goToolTerminal() => go('/tools/terminal');
 
   /// Navigate to the calendar tool panel (replace current entry).
   void goToolCalendar() => go('/tools/calendar');

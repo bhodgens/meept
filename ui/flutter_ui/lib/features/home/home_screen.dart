@@ -16,7 +16,7 @@ import '../../providers/session_detail.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
 import 'tab_content.dart';
-import 'tools_dropdown.dart' show HamburgerMenu;
+import 'tools_dropdown.dart' show HamburgerMenu, openToolFromMenu;
 
 /// Dialog showing connection details (host, port, cert, uptime, version).
 class _ConnectionDetailsDialog extends ConsumerWidget {
@@ -421,44 +421,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  /// Navigate to a tool panel via go_router if it has a registered route.
-  void _navigateTool(String toolName) {
-    switch (toolName) {
-      case 'search':
-        context.goToolSearch();
-      case 'skills':
-        context.goToolSkills();
-      case 'memory':
-        context.goToolMemory();
-      case 'reflection':
-        context.goToolReflection();
-      case 'changes':
-        context.goToolChanges();
-      case 'prompts':
-        context.goToolPrompts();
-      case 'settings':
-        context.goSettings();
-      // Other tools (files, terminal, calendar, metrics) don't have
-      // dedicated routes yet — they stay on the chat tab with the
-      // activeTool provider handling the panel switch.
-    }
-  }
-
-  /// Returns true if [toolName] has a dedicated full-screen route.
-  bool _hasRoute(String toolName) {
-    const routedTools = {
-      'search',
-      'branches',
-      'skills',
-      'memory',
-      'reflection',
-      'changes',
-      'prompts',
-      'settings',
-    };
-    return routedTools.contains(toolName);
-  }
-
   /// Open the command palette modal. Replaces the former leader-key
   /// two-stage input. Items mirror the TUI modal.go command list.
   void _showCommandPalette() {
@@ -657,11 +619,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   children: [
                     HamburgerMenu(
                       onToolSelected: (route) {
-                        if (_hasRoute(route)) {
-                          // Full-screen route — don't set activeTool
-                          // to avoid orphaned state (bug F7).
-                          _navigateTool(route);
-                        } else {
+                        if (!openToolFromMenu(context, route)) {
+                          // No route for this tool: fall back to the
+                          // embedded chat-tab tool slot.
                           ref.read(activeToolProvider.notifier).state = route;
                           if (_selectedTab != HomeTab.chat) {
                             setState(() => _selectedTab = HomeTab.chat);

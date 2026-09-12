@@ -54,6 +54,21 @@ Keyboard navigation:
 
 Typing filters the list case-insensitively against item labels.
 
+### Tool panels
+
+Every tool panel opens through the router (`/tools/<name>`, and `/settings` for the settings screen) and renders inside the shared chrome in `ui/flutter_ui/lib/widgets/tool_panel_shell.dart`, so one control set works identically in every panel:
+
+| control | action |
+|---------|--------|
+| back arrow (tooltip `back (esc)`) | leave the panel, return to chat |
+| `esc` | same as the back arrow |
+
+`exitToolPanel` clears `activeToolProvider` first, then pops a pushed detail page or returns to `/`. Key events reach the primary focus first, so an inner `esc` consumer (the find bar, the command palette, a modal) keeps priority and the panel stays open.
+
+The hamburger menu offers `memory`, `changes`, `calendar`, `metrics`, `prompts`, and `settings`. `ui/flutter_ui/lib/features/home/tools_dropdown.dart` maps each name to its route (`toolRoutePaths` / `toolRouteFor`) and both home layouts open menu picks through the same `openToolFromMenu` helper, which is what keeps the exit behaviour identical between the top-tabs and sidebar layouts.
+
+The terminal tool is not part of the GUI: there is no `/tools/terminal` route, no menu entry, no sidebar case, and no layout-4 quick-access item. The daemon-side PTY service and its HTTP endpoints are unchanged, so the TUI terminal surface still works.
+
 ### Verbosity
 
 Cycles through three levels (`ui/flutter_ui/lib/providers/verbosity_provider.dart`):

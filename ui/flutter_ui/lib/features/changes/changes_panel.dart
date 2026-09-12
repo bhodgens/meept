@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../providers/providers.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../widgets/error_banner.dart';
+import '../../widgets/tool_panel_shell.dart';
 import 'changes_models.dart';
 
 /// Changes panel — human review surface for staged file diffs.
@@ -40,20 +39,12 @@ class _ChangesPanelState extends ConsumerState<ChangesPanel> {
   bool _loadingJournal = true;
   String? _pendingError;
   String? _journalError;
-  late final FocusNode _keyboardFocusNode;
 
   @override
   void initState() {
     super.initState();
-    _keyboardFocusNode = FocusNode();
     _loadPending();
     _loadJournal();
-  }
-
-  @override
-  void dispose() {
-    _keyboardFocusNode.dispose();
-    super.dispose();
   }
 
   /// Session scope for pending changes; null when nothing is selected.
@@ -183,87 +174,16 @@ class _ChangesPanelState extends ConsumerState<ChangesPanel> {
     );
   }
 
-  void _closePanel() {
-    context.go('/');
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _keyboardFocusNode,
-      onKeyEvent: (FocusNode node, KeyEvent event) {
-        if (event.logicalKey == LogicalKeyboardKey.escape) {
-          _closePanel();
-        }
-        return KeyEventResult.ignored;
-      },
+    return Container(
+      color: CyberpunkColors.black,
       child: DefaultTabController(
         length: 2,
-        child: Container(
-          color: CyberpunkColors.black,
-          child: Column(
-            children: [
-              _buildHeader(),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _buildPendingTab(),
-                    _buildJournalTab(),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              GestureDetector(
-                onTap: _closePanel,
-                child: Icon(
-                  Icons.arrow_back,
-                  color: CyberpunkColors.orangePrimary,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.compare_arrows,
-                color: CyberpunkColors.orangePrimary,
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'changes',
-                style: CyberpunkTypography.label.copyWith(
-                  color: CyberpunkColors.orangePrimary,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.close, size: 18),
-                onPressed: _closePanel,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                tooltip: 'close',
-              ),
-            ],
-          ),
-          TabBar(
+        child: ToolPanelShell(
+          title: 'changes',
+          icon: Icons.compare_arrows,
+          header: TabBar(
             labelColor: CyberpunkColors.orangePrimary,
             unselectedLabelColor: CyberpunkColors.midGray,
             indicatorColor: CyberpunkColors.orangePrimary,
@@ -273,7 +193,8 @@ class _ChangesPanelState extends ConsumerState<ChangesPanel> {
               Tab(text: 'journal'),
             ],
           ),
-        ],
+          child: TabBarView(children: [_buildPendingTab(), _buildJournalTab()]),
+        ),
       ),
     );
   }
@@ -477,10 +398,7 @@ class _ChangesPanelState extends ConsumerState<ChangesPanel> {
             onPressed: () => _revert(entry),
             style: TextButton.styleFrom(
               foregroundColor: CyberpunkColors.yellowWarning,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 4,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             ),
             child: const Text('revert'),
           ),

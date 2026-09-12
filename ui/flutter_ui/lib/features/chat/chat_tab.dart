@@ -7,7 +7,6 @@ import '../memory/memory_panel.dart';
 import '../settings/settings_panel.dart';
 import '../calendar/calendar_panel.dart';
 import '../metrics/metrics_panel.dart';
-import '../terminal/terminal_panel.dart';
 import '../skills/skill_panel.dart';
 import '../projects/branches_panel.dart';
 import '../search/search_panel.dart';
@@ -68,8 +67,6 @@ class _ChatTabState extends ConsumerState<ChatTab> {
         return const CalendarPanel();
       case 'metrics':
         return const MetricsPanel();
-      case 'terminal':
-        return const TerminalPanel();
       case 'skills':
         return const SkillPanel();
       case 'branches':

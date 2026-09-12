@@ -72,7 +72,7 @@ import '../../models/api_models.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/session_detail.dart';
 import '../chat/chat_tab.dart';
-import 'tools_dropdown.dart' show HamburgerMenu;
+import 'tools_dropdown.dart' show HamburgerMenu, openToolFromMenu;
 import 'session_info_overlay.dart';
 
 /// Home tab enum for sidebar layout
@@ -689,30 +689,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                 children: [
                   // Hamburger menu
                   HamburgerMenu(
-                    onToolSelected: (route) {
-                      switch (route) {
-                        case 'memory':
-                          context.goToolMemory();
-                        case 'changes':
-                          context.goToolChanges();
-                        case 'prompts':
-                          context.goToolPrompts();
-                        case 'settings':
-                          context.goSettings();
-                        case 'terminal':
-                          context.goToolTerminal();
-                        case 'calendar':
-                          context.goToolCalendar();
-                        case 'metrics':
-                          context.goToolMetrics();
-                        case 'search':
-                          context.goToolSearch();
-                        case 'branches':
-                          context.goToolBranches();
-                        default:
-                          break;
-                      }
-                    },
+                    onToolSelected: (route) => openToolFromMenu(context, route),
                   ),
                   const SizedBox(width: 8),
                   // ASCII-style meept logo

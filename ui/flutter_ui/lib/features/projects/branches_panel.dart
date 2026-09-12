@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../models/api_models.dart';
 import '../../services/sdk_client.dart';
 import '../../providers/providers.dart';
+import '../../widgets/tool_panel_shell.dart';
 
 /// BranchesPanel displays git branches for the current project.
 ///
@@ -25,20 +24,12 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
   String? _error;
 
   late final SdkApiClient _sdkClient;
-  late final FocusNode _keyboardFocusNode;
 
   @override
   void initState() {
     super.initState();
     _sdkClient = ref.read(sdkClientProvider);
-    _keyboardFocusNode = FocusNode();
     _loadBranches();
-  }
-
-  @override
-  void dispose() {
-    _keyboardFocusNode.dispose();
-    super.dispose();
   }
 
   Future<void> _loadBranches() async {
@@ -82,10 +73,6 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
         });
       }
     }
-  }
-
-  void _closePanel() {
-    context.go('/');
   }
 
   Future<void> _checkoutBranch(String branchName) async {
@@ -169,82 +156,39 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _keyboardFocusNode,
-      onKeyEvent: (FocusNode node, KeyEvent event) {
-        if (event.logicalKey == LogicalKeyboardKey.escape) {
-          _closePanel();
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Container(
-        color: CyberpunkColors.darkGray,
-        child: Column(
-          children: [
-            // Header
+    return Container(
+      color: CyberpunkColors.darkGray,
+      child: ToolPanelShell(
+        title: 'branches',
+        icon: Icons.call_split,
+        actions: [
+          if (_currentBranch != null)
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-                    width: 1,
-                  ),
+                border: Border.all(
+                  color: CyberpunkColors.orangePrimary,
+                  width: 1,
+                ),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                _currentBranch!,
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.orangeBright,
                 ),
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.call_split,
-                    color: CyberpunkColors.orangeBright,
-                    size: 24,
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'branches',
-                    style: CyberpunkTypography.headlineSmall.copyWith(
-                      color: CyberpunkColors.orangePrimary,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (_currentBranch != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: CyberpunkColors.orangePrimary,
-                          width: 1,
-                        ),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        _currentBranch!,
-                        style: CyberpunkTypography.bodySmall.copyWith(
-                          color: CyberpunkColors.orangeBright,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
             ),
-
-            // Content
-            Expanded(
-              child: _isLoading
-                  ? Center(
-                      child: CircularProgressIndicator(
-                        color: CyberpunkColors.orangePrimary,
-                      ),
-                    )
-                  : _error != null
-                  ? _buildError()
-                  : _buildBranchList(),
-            ),
-          ],
-        ),
+        ],
+        child: _isLoading
+            ? Center(
+                child: CircularProgressIndicator(
+                  color: CyberpunkColors.orangePrimary,
+                ),
+              )
+            : _error != null
+            ? _buildError()
+            : _buildBranchList(),
       ),
     );
   }

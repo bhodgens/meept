@@ -1,14 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../models/api_models.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../widgets/error_banner.dart';
+import '../../widgets/tool_panel_shell.dart';
 
 /// Memory panel - search and browse episodic and task memories
 class MemoryPanel extends ConsumerStatefulWidget {
@@ -25,22 +24,15 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
   bool _hasSearched = false;
   String? _error;
   Timer? _debounceTimer;
-  late final FocusNode _keyboardFocusNode;
-
-  void _closePanel() {
-    context.go('/');
-  }
 
   @override
   void initState() {
     super.initState();
-    _keyboardFocusNode = FocusNode();
     _loadRecentMemories();
   }
 
   @override
   void dispose() {
-    _keyboardFocusNode.dispose();
     _queryController.dispose();
     _debounceTimer?.cancel();
     super.dispose();
@@ -115,27 +107,32 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _keyboardFocusNode,
-      onKeyEvent: (FocusNode node, KeyEvent event) {
-        if (event.logicalKey == LogicalKeyboardKey.escape) {
-          _closePanel();
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
-          border: Border(
-            top: BorderSide(
-              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-              width: 1,
-            ),
+    return Container(
+      decoration: BoxDecoration(
+        color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
+        border: Border(
+          top: BorderSide(
+            color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+            width: 1,
           ),
         ),
+      ),
+      child: ToolPanelShell(
+        title: 'memory',
+        icon: Icons.memory,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, size: 16),
+            onPressed: _loadRecentMemories,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            tooltip: 'refresh',
+          ),
+        ],
+        header: _buildSearchField(),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildHeader(),
             if (_error != null)
               ErrorBanner(message: _error!, onDismiss: _loadRecentMemories),
             Expanded(
@@ -192,83 +189,26 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
     );
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
-        ),
+  Widget _buildSearchField() {
+    return TextField(
+      controller: _queryController,
+      onChanged: _onQueryChanged,
+      style: CyberpunkTypography.bodySmall.copyWith(
+        fontFamily: 'SourceCodePro',
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              GestureDetector(
-                onTap: _closePanel,
-                child: Icon(
-                  Icons.arrow_back,
-                  color: CyberpunkColors.orangePrimary,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.memory,
-                color: CyberpunkColors.orangePrimary,
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'memory',
-                style: CyberpunkTypography.label.copyWith(
-                  color: CyberpunkColors.orangePrimary,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.close, size: 18),
-                onPressed: _closePanel,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                tooltip: 'close',
-              ),
-              IconButton(
-                icon: const Icon(Icons.refresh, size: 16),
-                onPressed: _loadRecentMemories,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                tooltip: 'refresh',
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _queryController,
-            onChanged: _onQueryChanged,
-            style: CyberpunkTypography.bodySmall.copyWith(
-              fontFamily: 'SourceCodePro',
-            ),
-            decoration: InputDecoration(
-              hintText: 'search memories...',
-              hintStyle: CyberpunkTypography.bodySmall.copyWith(
-                color: CyberpunkColors.midGray,
-              ),
-              prefixIcon: const Icon(Icons.search, size: 18),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: CyberpunkColors.midGray),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
-              filled: true,
-              fillColor: CyberpunkColors.black,
-            ),
-          ),
-        ],
+      decoration: InputDecoration(
+        hintText: 'search memories...',
+        hintStyle: CyberpunkTypography.bodySmall.copyWith(
+          color: CyberpunkColors.midGray,
+        ),
+        prefixIcon: const Icon(Icons.search, size: 18),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: CyberpunkColors.midGray),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        filled: true,
+        fillColor: CyberpunkColors.black,
       ),
     );
   }

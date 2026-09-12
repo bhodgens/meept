@@ -1,6 +1,43 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+
+/// Full-screen route for every tool that the hamburger menu can open.
+///
+/// The menu, [HomeScreen] and [SidebarHomeScreen] all resolve a tool
+/// name through [toolRouteFor]. Routing every menu pick is what makes
+/// the shared tool-panel back control (and esc) always return to chat:
+/// the panel replaces `/`, so `exitToolPanel` can go straight back.
+const Map<String, String> toolRoutePaths = {
+  'search': '/tools/search',
+  'branches': '/tools/branches',
+  'skills': '/tools/skills',
+  'memory': '/tools/memory',
+  'reflection': '/tools/reflection',
+  'changes': '/tools/changes',
+  'prompts': '/tools/prompts',
+  'settings': '/settings',
+  'calendar': '/tools/calendar',
+  'metrics': '/tools/metrics',
+};
+
+/// Route path for [toolName], or null when the tool has no route and
+/// must fall back to the embedded chat-tab tool slot.
+String? toolRouteFor(String toolName) => toolRoutePaths[toolName];
+
+/// Open [toolName] as a full-screen route.
+///
+/// Returns false when the tool has no route, so the caller can fall back
+/// to the embedded chat-tab tool slot. Both home layouts (the top-tabs
+/// [HomeScreen] and [SidebarHomeScreen]) route their menu picks through
+/// this one helper, which is what keeps the exit behaviour identical.
+bool openToolFromMenu(BuildContext context, String toolName) {
+  final path = toolRouteFor(toolName);
+  if (path == null) return false;
+  context.go(path);
+  return true;
+}
 
 /// Hamburger menu button for the top-left toolbar.
 /// Shows known tools only (no skills section at bottom).
@@ -10,6 +47,19 @@ class HamburgerMenu extends StatefulWidget {
 
   const HamburgerMenu({super.key, this.onToolSelected});
 
+  // Hardcoded tool panels that have implementations
+  static const _knownTools = {
+    'memory': Icons.memory,
+    'changes': Icons.compare_arrows,
+    'calendar': Icons.calendar_today,
+    'metrics': Icons.insights,
+    'prompts': Icons.edit_note,
+    'settings': Icons.settings,
+  };
+
+  /// Tool names offered by the menu, in display order.
+  static List<String> get knownToolNames => _knownTools.keys.toList();
+
   @override
   State<HamburgerMenu> createState() => _HamburgerMenuState();
 }
@@ -17,17 +67,6 @@ class HamburgerMenu extends StatefulWidget {
 class _HamburgerMenuState extends State<HamburgerMenu> {
   OverlayEntry? _overlayEntry;
   bool _isOpen = false;
-
-  // Hardcoded tool panels that have implementations
-  static const _knownTools = {
-    'memory': Icons.memory,
-    'changes': Icons.compare_arrows,
-    'terminal': Icons.terminal,
-    'calendar': Icons.calendar_today,
-    'metrics': Icons.insights,
-    'prompts': Icons.edit_note,
-    'settings': Icons.settings,
-  };
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +121,7 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
       Divider(height: 1, color: CyberpunkColors.midGray),
     ];
 
-    for (final entry in _knownTools.entries) {
+    for (final entry in HamburgerMenu._knownTools.entries) {
       entries.add(
         InkWell(
           onTap: () {

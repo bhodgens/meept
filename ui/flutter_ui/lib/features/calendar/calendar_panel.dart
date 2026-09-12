@@ -6,6 +6,7 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../widgets/error_banner.dart';
+import '../../widgets/tool_panel_shell.dart';
 
 /// Calendar panel - displays upcoming events and allows creating new ones
 class CalendarPanel extends ConsumerStatefulWidget {
@@ -101,40 +102,10 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
   Widget build(BuildContext context) {
     return Container(
       color: CyberpunkColors.darkGray,
-      child: Column(
-        children: [
-          _buildHeader(),
-          if (_error != null)
-            ErrorBanner(message: _error!, onDismiss: _loadEvents),
-          Expanded(child: _buildEventList()),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.calendar_today,
-            color: CyberpunkColors.orangePrimary,
-            size: 18,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            'calendar',
-            style: CyberpunkTypography.label.copyWith(
-              color: CyberpunkColors.orangePrimary,
-            ),
-          ),
-          const Spacer(),
+      child: ToolPanelShell(
+        title: 'calendar',
+        icon: Icons.calendar_today,
+        actions: [
           IconButton(
             icon: const Icon(Icons.add, size: 18),
             onPressed: _showCreateEventDialog,
@@ -146,6 +117,14 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
             tooltip: 'refresh',
           ),
         ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_error != null)
+              ErrorBanner(message: _error!, onDismiss: _loadEvents),
+            Expanded(child: _buildEventList()),
+          ],
+        ),
       ),
     );
   }

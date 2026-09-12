@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
+import '../../widgets/tool_panel_shell.dart';
 import 'reflection_models.dart';
 
 /// Reflection panel — displays self-reflection proposals from the daemon
@@ -24,19 +23,11 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
   List<ReflectionProposal> _proposals = [];
   bool _isLoading = true;
   String? _error;
-  late final FocusNode _keyboardFocusNode;
 
   @override
   void initState() {
     super.initState();
-    _keyboardFocusNode = FocusNode();
     _loadProposals();
-  }
-
-  @override
-  void dispose() {
-    _keyboardFocusNode.dispose();
-    super.dispose();
   }
 
   Future<void> _loadProposals() async {
@@ -65,10 +56,6 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
         });
       }
     }
-  }
-
-  void _closePanel() {
-    context.go('/');
   }
 
   IconData _typeIcon(String type) {
@@ -180,92 +167,46 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _keyboardFocusNode,
-      onKeyEvent: (FocusNode node, KeyEvent event) {
-        if (event.logicalKey == LogicalKeyboardKey.escape) {
-          _closePanel();
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
-          border: Border(
-            top: BorderSide(
-              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-              width: 1,
-            ),
-          ),
-        ),
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: _isLoading
-                  ? Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            CyberpunkColors.orangePrimary,
-                          ),
-                        ),
-                      ),
-                    )
-                  : _error != null
-                  ? _buildErrorState()
-                  : _proposals.isEmpty
-                  ? _buildEmptyState()
-                  : _buildProposalList(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
+        color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
         border: Border(
-          bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
+          top: BorderSide(
+            color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+            width: 1,
+          ),
         ),
       ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.psychology,
-            color: CyberpunkColors.orangePrimary,
-            size: 18,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            'reflection proposals',
-            style: CyberpunkTypography.label.copyWith(
-              color: CyberpunkColors.orangePrimary,
-            ),
-          ),
-          const Spacer(),
+      child: ToolPanelShell(
+        title: 'reflection proposals',
+        icon: Icons.psychology,
+        actions: [
           IconButton(
-            icon: const Icon(Icons.close, size: 18),
-            onPressed: _closePanel,
+            icon: const Icon(Icons.refresh, size: 16),
+            onPressed: _loadProposals,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
-            tooltip: 'close',
-          ),
-          GestureDetector(
-            onTap: _loadProposals,
-            child: Icon(
-              Icons.refresh,
-              color: CyberpunkColors.orangePrimary,
-              size: 16,
-            ),
+            tooltip: 'refresh',
           ),
         ],
+        child: _isLoading
+            ? Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      CyberpunkColors.orangePrimary,
+                    ),
+                  ),
+                ),
+              )
+            : _error != null
+            ? _buildErrorState()
+            : _proposals.isEmpty
+            ? _buildEmptyState()
+            : _buildProposalList(),
       ),
     );
   }
