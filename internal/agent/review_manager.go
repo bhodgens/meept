@@ -942,8 +942,9 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	// thinking" text as the step result. Neither is evidence of work —
 	// both are the loop GIVING UP. A canned no-tool termination must not
 	// ride the trivial-task heuristic to auto-approval.
-	if !reviewHintIsConversational(step.ToolHint) && step.TokenUsage > 0 &&
-		len(step.Evidence) == 0 && strings.Contains(result, "stopped after extended thinking") {
+	if !reviewHintIsConversational(step.ToolHint) &&
+		strings.Contains(result, "stopped after extended thinking") &&
+		!hasMeaningfulEvidence(step.Evidence) {
 		rm.logger.Warn("Heuristic review: reasoning-only termination with no tool evidence; refusing auto-approve",
 			"step_id", step.ID,
 			"tool_hint", step.ToolHint,
@@ -989,6 +990,24 @@ func claimsArtifacts(result string) bool {
 		"created hello", "\"created ", "created the file", "wrote the file",
 	} {
 		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasMeaningfulEvidence reports whether the step's Evidence slice carries
+// at least one entry a tool actually produced (non-zero Type, Subject, or
+// Value). A zero-value Evidence is a decode artifact: the step-job result
+// envelope encodes `evidence` as a []string of prose, and unmarshaling a
+// string into models.Evidence leaves a zero struct IN the slice (Go keeps
+// the element with an UnmarshalTypeError but continues decoding). The
+// failed-smoke step (task-20260911211112.532862000-0002) carried exactly
+// one such zero entry, defeating the len(evidence)==0 check. Structurally
+// empty evidence is not evidence.
+func hasMeaningfulEvidence(evs []models.Evidence) bool {
+	for _, e := range evs {
+		if e.Type != "" || e.Subject != "" || e.Value != "" {
 			return true
 		}
 	}
