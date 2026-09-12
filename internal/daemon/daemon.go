@@ -1134,7 +1134,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if fullCfg.Transport.HTTP.Enabled {
 		if configService != nil && daemonControl != nil {
 			httpCfg := http.DefaultServerConfig()
-			httpCfg.Addr = fullCfg.Transport.HTTP.Addr
+			httpCfg.Addr = fullCfg.Transport.HTTP.ListenAddr()
 			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
 			httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
 			httpCfg.TLSCertFile = fullCfg.Transport.HTTP.TLSCertFile
@@ -1626,12 +1626,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 // httpTransportAddr returns the configured HTTP transport address, or "" when
 // no full config is loaded. The boot log used to print a hard-coded ":8081",
 // which misreported every non-default configuration and sent operators
-// chasing a port collision on an address the server never bound.
+// chasing a port collision on an address the server never bound. Resolution
+// goes through ListenAddr so the `transport.http.port` alias is honored here
+// too (a config with only `port` previously logged the Addr default).
 func httpTransportAddr(fullCfg *config.Config) string {
 	if fullCfg == nil {
 		return ""
 	}
-	return fullCfg.Transport.HTTP.Addr
+	return fullCfg.Transport.HTTP.ListenAddr()
 }
 
 // Run starts the daemon and blocks until shutdown.

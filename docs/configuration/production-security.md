@@ -104,6 +104,39 @@ Note: the installer never rewrites `addr`. An existing `~/.meept/meept.json5`
 keeps whatever address it already has, so a user upgrading from an older build
 must change `addr` by hand if they want the loopback binding.
 
+### `transport.http.port`
+
+`transport.http.port` is a convenience alias for the port half of
+`transport.http.addr`: set it when you want the default loopback host without
+spelling out `"127.0.0.1"`.
+
+```json5
+{
+  transport: {
+    http: {
+      "enabled": true,
+      "port": 18095,   // binds 127.0.0.1:18095
+    },
+  },
+}
+```
+
+Precedence, in order:
+
+1. `addr` when set — it wins even when `port` is also present, and it may name
+   a different host or a host-less bind (`":8081"`).
+2. `port` when `addr` is unset — binds `127.0.0.1:<port>`.
+3. Neither set — the HTTP server binds its own loopback default,
+   `127.0.0.1:8081`.
+
+The alias exists because `port` was previously an undeclared config key: JSON5
+and TOML decoding dropped it without an error or warning, the daemon bound the
+`addr` default instead, and a resulting collision with another local service on
+the same port went unnoticed for days. If a port you configured appears to be
+ignored, check `transport.http.addr` first — a stale `addr` silently overrides
+`port`. Removing the `addr` line (or setting it to `""`) hands the address back
+to `port`.
+
 Note: the server ALWAYS terminates TLS — there is no plaintext HTTP mode.
 `use_tls` / `auto_tls_cert` are accepted for config compatibility: whenever
 the configured cert/key files are missing, a self-signed certificate is

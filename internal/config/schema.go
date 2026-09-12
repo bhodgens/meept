@@ -697,8 +697,20 @@ type RPCTransportConfig struct {
 
 // HTTPTransportConfig configures the HTTP REST transport.
 type HTTPTransportConfig struct {
-	Enabled        bool     `json:"enabled"       toml:"enabled"`             // Enable HTTP server (default: false; shipped config template enables it)
-	Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: "127.0.0.1:8081" — loopback only; never widen this unless you intend to expose the daemon, see docs/reference/http-api-security.md)
+	Enabled bool   `json:"enabled"       toml:"enabled"` // Enable HTTP server (default: false; shipped config template enables it)
+	Addr    string `json:"addr"          toml:"addr"`    // Listen address (default: "127.0.0.1:8081" — loopback only; never widen this unless you intend to expose the daemon, see docs/reference/http-api-security.md). Resolve the effective address via ListenAddr, never read this directly.
+	// Port is a convenience alias for the port half of Addr: set it (e.g. 18095)
+	// when you want the default loopback host without spelling out
+	// "127.0.0.1". Addr wins when both are set, and when neither is set the
+	// HTTP server binds its own loopback default (127.0.0.1:8081).
+	//
+	// Why this alias exists: `transport.http.port` used to be a key this
+	// struct never declared, so JSON5/TOML decoding dropped it silently. A
+	// config carrying only `port` bound the Addr default instead, and the
+	// resulting collision with another local service on the same port went
+	// unnoticed for days — no error, no warning, the daemon simply listened
+	// somewhere else. Every consumer reads ListenAddr() so that can't recur.
+	Port           int      `json:"port"          toml:"port"`                // Listen port alias; ignored when addr is set
 	UseTLS         bool     `json:"use_tls"       toml:"use_tls"`             // Enable HTTPS (server ALWAYS uses TLS; field is accepted for compat — see comment)
 	AutoTLSCert    bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`       // Auto-generate self-signed cert (server auto-generates whenever cert files are missing)
 	TLSCertFile    string   `json:"tls_cert_file" toml:"tls_cert_file"`       // TLS certificate file path
@@ -713,6 +725,26 @@ type HTTPTransportConfig struct {
 	MCPPath        string   `json:"mcp_path"      toml:"mcp_path"`            // MCP endpoint path
 	RateLimitRPM   int      `json:"rate_limit_rpm"  toml:"rate_limit_rpm"`    // Per-IP request rate limit (0 = default 120 req/min)
 	RateLimitBurst int      `json:"rate_limit_burst" toml:"rate_limit_burst"` // Per-IP burst size (0 = default 30)
+}
+
+// ListenAddr returns the address the HTTP listener should bind.
+//
+// Precedence: Addr when set (it carries the full host:port, including
+// host-less forms such as ":8081"), else "127.0.0.1:<Port>" when Port is set,
+// else "" — callers then fall through to the binding default in
+// internal/comm/http (NewServer: "127.0.0.1:8081").
+//
+// Every consumer of the config's HTTP address MUST resolve it through this
+// method rather than reading Addr directly, so the `port` alias cannot be
+// silently dropped again (see the Port field doc for the incident).
+func (c HTTPTransportConfig) ListenAddr() string {
+	if c.Addr != "" {
+		return c.Addr
+	}
+	if c.Port > 0 {
+		return fmt.Sprintf("127.0.0.1:%d", c.Port)
+	}
+	return c.Addr
 }
 
 // MultiUserConfig configures opt-in multi-user authentication for the HTTP
@@ -2557,8 +2589,15 @@ func DefaultConfig() *Config {
 				PeerCredLog: true,
 			},
 			HTTP: HTTPTransportConfig{
-				Enabled:     false,
-				Addr:        "127.0.0.1:8081",
+				Enabled: false,
+				// Addr intentionally left empty: the empty value is what lets
+				// `transport.http.port` take effect through ListenAddr(), and
+				// the HTTP server supplies the identical loopback default
+				// (127.0.0.1:8081) when both are unset. Seeding it here would
+				// silently shadow `port` on every config that omits `addr` —
+				// exactly the incident the port alias exists to prevent.
+				// Shipped configs (config/meept.json5, gui-connect-setup) set
+				// `addr` explicitly.
 				RequireAuth: true,
 				TLSCertFile: "~/.meept/certs/tls.crt",
 				TLSKeyFile:  "~/.meept/certs/tls.key",

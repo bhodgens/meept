@@ -329,8 +329,15 @@ func TestDefaultConfigTransport(t *testing.T) {
 	if cfg.Transport.HTTP.Enabled {
 		t.Error("HTTP transport should be disabled by default")
 	}
-	if cfg.Transport.HTTP.Addr != "127.0.0.1:8081" {
-		t.Errorf("expected HTTP addr 127.0.0.1:8081, got %s", cfg.Transport.HTTP.Addr)
+	// Addr is deliberately NOT seeded in DefaultConfig: the HTTP server
+	// supplies the same loopback default (127.0.0.1:8081 — NewServer in
+	// internal/comm/http), and an empty Addr is what lets
+	// `transport.http.port` take effect through ListenAddr.
+	if cfg.Transport.HTTP.Addr != "" {
+		t.Errorf("expected HTTP addr to default to empty (server default applies), got %s", cfg.Transport.HTTP.Addr)
+	}
+	if got := cfg.Transport.HTTP.ListenAddr(); got != "" {
+		t.Errorf("expected default ListenAddr() to be empty, got %s", got)
 	}
 	if !cfg.Transport.HTTP.RequireAuth {
 		t.Error("HTTP RequireAuth should be true by default")
@@ -340,6 +347,129 @@ func TestDefaultConfigTransport(t *testing.T) {
 	}
 	if cfg.Transport.HTTP.TLSKeyFile == "" {
 		t.Error("HTTP TLSKeyFile should not be empty by default")
+	}
+}
+
+// TestHTTPTransportListenAddr pins the precedence of the `port` convenience
+// alias over the raw Addr field. Before Port existed, `transport.http.port`
+// was an undeclared key and JSON5/TOML decoding dropped it silently; every
+// consumer resolving through ListenAddr is what keeps it visible now.
+func TestHTTPTransportListenAddr(t *testing.T) {
+	tests := []struct {
+		name string
+		addr string
+		port int
+		want string
+	}{
+		{name: "addr set wins over port", addr: "127.0.0.1:9999", port: 18095, want: "127.0.0.1:9999"},
+		{name: "host-less addr wins over port", addr: ":9000", port: 18095, want: ":9000"},
+		{name: "addr only", addr: ":8081", port: 0, want: ":8081"},
+		{name: "port only resolves to loopback", addr: "", port: 18095, want: "127.0.0.1:18095"},
+		{name: "neither set stays empty for the server default", addr: "", port: 0, want: ""},
+		{name: "negative port ignored", addr: "", port: -1, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := HTTPTransportConfig{Addr: tt.addr, Port: tt.port}
+			if got := cfg.ListenAddr(); got != tt.want {
+				t.Errorf("HTTPTransportConfig{Addr: %q, Port: %d}.ListenAddr() = %q, want %q",
+					tt.addr, tt.port, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestLoadJSON5ConfigHTTPPortAlias loads the exact config shape that was
+// silently ignored during the port-collision incident: transport.http with
+// only a `port` key.
+func TestLoadJSON5ConfigHTTPPortAlias(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "meept.json5")
+	content := `{
+	  "transport": {
+	    "http": {
+	      "enabled": true,
+	      "port": 18095,
+	    },
+	  },
+	}`
+	//nolint:gosec // test directory/file
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadJSON5Config(configPath)
+	if err != nil {
+		t.Fatalf("LoadJSON5Config failed: %v", err)
+	}
+
+	if cfg.Transport.HTTP.Port != 18095 {
+		t.Errorf("Port = %d, want 18095 (the key must not be silently dropped)", cfg.Transport.HTTP.Port)
+	}
+	if got := cfg.Transport.HTTP.ListenAddr(); got != "127.0.0.1:18095" {
+		t.Errorf("ListenAddr() = %q, want 127.0.0.1:18095", got)
+	}
+}
+
+// TestLoadJSON5ConfigHTTPAddrBeatsPort asserts the documented precedence
+// survives a real config load: `addr` wins when both keys are present.
+func TestLoadJSON5ConfigHTTPAddrBeatsPort(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "meept.json5")
+	content := `{
+	  "transport": {
+	    "http": {
+	      "enabled": true,
+	      "addr": "127.0.0.1:9999",
+	      "port": 18095,
+	    },
+	  },
+	}`
+	//nolint:gosec // test directory/file
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadJSON5Config(configPath)
+	if err != nil {
+		t.Fatalf("LoadJSON5Config failed: %v", err)
+	}
+	if got := cfg.Transport.HTTP.ListenAddr(); got != "127.0.0.1:9999" {
+		t.Errorf("ListenAddr() = %q, want 127.0.0.1:9999 (addr must win over port)", got)
+	}
+}
+
+// TestLoadDefaultHTTPPortAlias exercises the daemon's real load path
+// (LoadDefault -> $MEEPT_HOME/meept.json5) with the incident's config shape:
+// transport.http declaring only `port`. This is the end-to-end guard that the
+// key reaches the HTTP listener address instead of being dropped.
+func TestLoadDefaultHTTPPortAlias(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvMeeptHome, home)
+
+	content := `{
+	  "transport": {
+	    "http": {
+	      "enabled": true,
+	      "port": 18095,
+	    },
+	  },
+	}`
+	//nolint:gosec // test directory/file
+	if err := os.WriteFile(filepath.Join(home, "meept.json5"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault failed: %v", err)
+	}
+	if cfg.Transport.HTTP.Port != 18095 {
+		t.Errorf("Port = %d, want 18095", cfg.Transport.HTTP.Port)
+	}
+	if got := cfg.Transport.HTTP.ListenAddr(); got != "127.0.0.1:18095" {
+		t.Errorf("ListenAddr() = %q, want 127.0.0.1:18095", got)
 	}
 }
 
