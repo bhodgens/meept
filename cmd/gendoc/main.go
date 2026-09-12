@@ -46,7 +46,12 @@ type TemplateData struct {
 }
 
 func main() {
-	outputDir := flag.String("output", "docs/reference/generated/", "Output directory for generated docs")
+	// Default output is its own directory: `make docs-generate` (gomarkdoc via
+	// magefiles/docs.go) owns docs/reference/generated, and the two generators
+	// share five filenames (agent, config, llm, memory, security). Writing both
+	// into one directory meant whichever ran last silently replaced the other's
+	// page, which is how generated reference pages went stale.
+	outputDir := flag.String("output", "docs/reference/sections/", "Output directory for generated docs")
 	pkgPath := flag.String("pkg", "github.com/caimlas/meept/internal/config", "Go package to parse")
 	flag.Parse()
 
