@@ -24,8 +24,57 @@ func DefaultDevAPIKey() string {
 }
 
 // devKeyFileName is the name of the per-installation dev key file, stored
-// under the user's ~/.meept directory.
+// under the meept home directory ($MEEPT_HOME, else ~/.meept).
 const devKeyFileName = "dev_key"
+
+// EnvMeeptHome mirrors internal/config.EnvMeeptHome. It is duplicated here
+// because pkg/ must not import internal/. Keep the value in sync.
+const EnvMeeptHome = "MEEPT_HOME"
+
+// DefaultHomeRel mirrors internal/config.DefaultHomeRel. Duplicated for the
+// same layering reason as EnvMeeptHome.
+const DefaultHomeRel = ".meept"
+
+// devKeyDir resolves the directory that holds the per-installation dev key.
+//
+// The rule MUST stay in sync with internal/config.MeeptHome() (internal is
+// off-limits from pkg/, so it is duplicated here deliberately):
+//
+//  1. $MEEPT_HOME when set (non-empty); a leading ~ is expanded.
+//  2. otherwise $HOME/.meept.
+//  3. if HOME cannot be resolved, ".meept" relative to the process CWD
+//     (matching internal/config.MeeptHome(), which treats CWD as the data
+//     root rather than failing).
+//
+// If this drifts from internal/config.MeeptHome(), an installer-generated
+// key written under one home will not match the daemon/CLI reading the other,
+// producing a hard HTTP 418 auth failure.
+func devKeyDir() string {
+	if override := os.Getenv(EnvMeeptHome); override != "" {
+		return expandHomeTilde(override)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return DefaultHomeRel
+	}
+	return filepath.Join(home, DefaultHomeRel)
+}
+
+// expandHomeTilde resolves a leading ~ (or ~/) to the user's home directory,
+// mirroring internal/config.expandTilde.
+func expandHomeTilde(path string) string {
+	if path != "~" && !(len(path) >= 2 && path[0] == '~' && path[1] == '/') {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
+}
 
 // devKeyOnce ensures devKeyCached is computed exactly once.
 //
@@ -45,9 +94,11 @@ var devKeyCached string
 // DevAPIKey returns the per-installation development API key.
 //
 // Resolution order:
-//  1. If ~/.meept/dev_key exists, its (trimmed) contents are returned.
-//  2. Otherwise, a 32-byte random hex key is generated and written to
-//     ~/.meept/dev_key with 0600 permissions, then returned.
+//  1. If the meept home's dev_key file exists ($MEEPT_HOME/dev_key when
+//     MEEPT_HOME is set, else ~/.meept/dev_key), its (trimmed) contents are
+//     returned.
+//  2. Otherwise, a 32-byte random hex key is generated and written to that
+//     path with 0600 permissions, then returned.
 //  3. On any error in steps 1-2 (e.g., permission denied, read-only HOME),
 //     a per-process ephemeral random key is generated and a warning is logged.
 //     This key will NOT match between independently-started daemon and CLI
@@ -74,14 +125,7 @@ func DevAPIKey() string {
 // any caller-held mutex — the sync.Once primitive handles the locking
 // internally with a brief critical section that does not span this call.
 func loadOrGenerateDevKey() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		slog.Warn("dev key: cannot resolve home directory; using ephemeral random key",
-			"error", err)
-		return ephemeralKey()
-	}
-
-	keyPath := filepath.Join(homeDir, ".meept", devKeyFileName)
+	keyPath := filepath.Join(devKeyDir(), devKeyFileName)
 
 	// Step 1: try to read an existing key file.
 	if data, err := os.ReadFile(keyPath); err == nil {
