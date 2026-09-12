@@ -155,6 +155,8 @@ func (h *ProjectHandler) handleRegister(ctx context.Context, params json.RawMess
 		return nil, fmt.Errorf("register project: %w", err)
 	}
 
+	h.publishProjectChanged("", p.LocalPath)
+
 	return p, nil
 }
 
@@ -178,6 +180,9 @@ func (h *ProjectHandler) handleUnregister(ctx context.Context, params json.RawMe
 	if err := pm.Unregister(ctx, req.ID); err != nil {
 		return nil, fmt.Errorf("unregister project: %w", err)
 	}
+
+	// Removing a project can change which project is active.
+	h.publishProjectChanged("", "")
 
 	return map[string]string{
 		RPCKeyStatus: "unregistered",
@@ -269,17 +274,7 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 		h.logger.Warn("project.set: TouchRecent failed", "error", err, "path", p.LocalPath)
 	}
 
-	// Publish a lifecycle event so AgentLoop subscribers (workingDir sync)
-	// can react to project changes.
-	if h.msgBus != nil {
-		busMsg, err := models.NewBusMessage("project.set", "rpc.project.set", map[string]string{
-			"session_id": req.SessionID,
-			"path":       p.LocalPath,
-		})
-		if err == nil {
-			h.msgBus.Publish("project.set", busMsg)
-		}
-	}
+	h.publishProjectChanged(req.SessionID, p.LocalPath)
 
 	return map[string]any{
 		RPCKeyStatus: "bound",
@@ -287,6 +282,25 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 		"project_id": p.ID,
 		"path":       p.LocalPath,
 	}, nil
+}
+
+// publishProjectChanged emits the project.set lifecycle event so subscribers
+// whose state follows the active project (agent working directories, the
+// prompt service's project tier) re-read it. Registering or unregistering a
+// project can also change which project is active, so those handlers publish
+// too, with an empty session and path: subscribers read the active project
+// themselves and ignore the payload. Safe to call with no bus wired.
+func (h *ProjectHandler) publishProjectChanged(sessionID, path string) {
+	if h.msgBus == nil {
+		return
+	}
+	busMsg, err := models.NewBusMessage("project.set", "rpc.project.set", map[string]string{
+		"session_id": sessionID,
+		"path":       path,
+	})
+	if err == nil {
+		h.msgBus.Publish("project.set", busMsg)
+	}
 }
 
 // handleSync handles project.sync RPC calls.

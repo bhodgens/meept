@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -43,8 +44,20 @@ type PromptDetail struct {
 // PromptService wraps the 4-tier prompts hierarchy for HTTP/RPC access.
 // It mirrors the discovery order used by agent.plannerTemplateLoader so CLI,
 // TUI, and HTTP surfaces agree with runtime resolution.
+//
+// The user/system/bundled tiers are immutable once constructed (they never
+// change at runtime), while the project tier follows the daemon's active
+// project: SetProjectDir swaps it and every List/Get observes the new value.
 type PromptService struct {
-	tiers []tierSpec
+	// fixed holds the runtime-immutable tiers (user, system, bundled),
+	// resolved and de-duplicated at construction. Read-only after
+	// construction, so it needs no locking.
+	fixed []tierSpec
+
+	// mu guards projectDir. Only the project tier can change at runtime,
+	// so it is the only mutable state in this struct.
+	mu         sync.RWMutex
+	projectDir string
 }
 
 type tierSpec struct {
@@ -84,14 +97,15 @@ func NewPromptServiceFromDirs(d PromptDirs) *PromptService {
 //  3. systemDir  (~/.config/meept/prompts)
 //  4. bundledDir (shipped config/prompts, resolved by the daemon)
 func NewPromptService(projectDir, userDir, systemDir, bundledDir string) *PromptService {
-	return &PromptService{
-		tiers: resolveTiers([]tierSpec{
-			{TierProject, projectDir},
+	s := &PromptService{
+		fixed: resolveTiers([]tierSpec{
 			{TierUser, userDir},
 			{TierSystem, systemDir},
 			{TierBundled, bundledDir},
 		}),
 	}
+	s.projectDir = projectDir
+	return s
 }
 
 // NewDefaultPromptService constructs a PromptService whose user tier honors
@@ -109,6 +123,54 @@ func NewDefaultPromptService() *PromptService {
 		system = filepath.Join(home, ".config", "meept", "prompts")
 	}
 	return NewPromptService("", config.MeeptPath("prompts"), system, "")
+}
+
+// SetProjectDir updates the project template tier at runtime so prompt
+// discovery follows the daemon's active project without a restart. Passing ""
+// removes the project tier entirely (no active project).
+//
+// It is safe to call concurrently with List/Get/Put: projectDir is guarded by
+// a mutex and the lock is never held across filesystem I/O. The
+// user/system/bundled tiers are fixed at construction and are unaffected.
+func (s *PromptService) SetProjectDir(dir string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.projectDir = dir
+	s.mu.Unlock()
+}
+
+// ProjectDir returns the project tier directory currently in effect ("" when
+// no project is active).
+func (s *PromptService) ProjectDir() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.projectDir
+}
+
+// tiersSnapshot returns the effective tier list for a single call: the current
+// project tier (highest priority) followed by the immutable user/system/
+// bundled tiers, applying the same empty-dir and duplicate-dir handling as
+// construction. Callers resolve it once per operation so a concurrent
+// SetProjectDir cannot produce a mixed view within one List/Get.
+//
+// The project directory is read under the mutex and the lock released before
+// any path work, so no I/O ever happens while holding it.
+func (s *PromptService) tiersSnapshot() []tierSpec {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	proj := s.projectDir
+	s.mu.RUnlock()
+	all := make([]tierSpec, 0, len(s.fixed)+1)
+	all = append(all, tierSpec{label: TierProject, dir: proj})
+	all = append(all, s.fixed...)
+	return resolveTiers(all)
 }
 
 // resolveTiers drops empty directories and de-duplicates directories that
@@ -180,7 +242,7 @@ func absOrClean(p string) string {
 // The user tier is located by label, not by index: resolveTiers drops empty
 // and duplicate directories, so its position in the tier list is not fixed.
 func (s *PromptService) UserOverridePath(name string) string {
-	dir := dirForTier(s.tiers, TierUser)
+	dir := dirForTier(s.fixed, TierUser)
 	if dir == "" {
 		return name
 	}
@@ -192,7 +254,7 @@ func (s *PromptService) UserOverridePath(name string) string {
 // slashes (e.g. "planner/interview.md") so they are URL-safe and portable.
 func (s *PromptService) List() ([]PromptEntry, error) {
 	seen := make(map[string]PromptEntry)
-	for _, tier := range s.tiers {
+	for _, tier := range s.tiersSnapshot() {
 		files, err := walkMarkdown(tier.dir)
 		if err != nil {
 			// Missing tier directories are normal (e.g., no user overrides).
@@ -229,7 +291,7 @@ func (s *PromptService) List() ([]PromptEntry, error) {
 // rendering).
 func (s *PromptService) Get(name string) (PromptDetail, error) {
 	name = normalizeName(name)
-	for _, tier := range s.tiers {
+	for _, tier := range s.tiersSnapshot() {
 		full := filepath.Join(tier.dir, name)
 		body, err := os.ReadFile(full)
 		if err != nil {
@@ -266,7 +328,7 @@ func (s *PromptService) Put(name, content string) error {
 	if err := ValidateTemplate(content); err != nil {
 		return fmt.Errorf("template validation failed: %w", err)
 	}
-	if dirForTier(s.tiers, TierUser) == "" {
+	if dirForTier(s.fixed, TierUser) == "" {
 		return fmt.Errorf("no user prompt tier configured; cannot store override")
 	}
 	dest := s.UserOverridePath(name)
