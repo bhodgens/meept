@@ -47,19 +47,25 @@ Package agent provides the agent loop and related components.
 
 - Constants
 - Variables
+- [func AllotmentTokens\(contextLimit int, cfg AllotmentConfig\) int](<#AllotmentTokens>)
 - [func ApplyEscalation\(h \*VerificationAutoTrigger, mod \*TurnModification\) bool](<#ApplyEscalation>)
 - [func AssembleOrdered\(sections \[\]PromptSection\) \(prompt string, stablePrefixHash string\)](<#AssembleOrdered>)
 - [func BuildPlannerPromptHint\(registry \*AgentRegistry\) string](<#BuildPlannerPromptHint>)
 - [func BuildRevisionContext\(result \*ReviewResult, spec \*TaskSpec\) string](<#BuildRevisionContext>)
+- [func BuildSessionContextBlock\(digest \*SessionContextDigest\) string](<#BuildSessionContextBlock>)
 - [func BuildSystemPrompt\(cfg PromptConfig, tools \[\]ToolDescription, memoryContext string\) string](<#BuildSystemPrompt>)
 - [func BuildSystemPromptWithOverride\(override string, tools \[\]ToolDescription\) string](<#BuildSystemPromptWithOverride>)
 - [func BusTopic\(eventType AgentEventType\) string](<#BusTopic>)
 - [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
+- [func ContinuationDescription\(desc string, k, n int\) string](<#ContinuationDescription>)
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
 - [func DefaultCoworkerAwareness\(\) string](<#DefaultCoworkerAwareness>)
+- [func DefaultSoulMD\(\) string](<#DefaultSoulMD>)
+- [func EstimateStepTokens\(desc string, cfg AllotmentConfig\) int](<#EstimateStepTokens>)
 - [func ExecutorAgentIDs\(\) \[\]string](<#ExecutorAgentIDs>)
 - [func ExtractJSON\(s string\) string](<#ExtractJSON>)
 - [func FinalSentinelContent\(\) string](<#FinalSentinelContent>)
+- [func FlattenPlanPhasesToSteps\(taskID string, phases \[\]PlanPhaseSpec, maxStepsPerPhase int\) \[\]\*task.TaskStep](<#FlattenPlanPhasesToSteps>)
 - [func FormatDuration\(d time.Duration\) string](<#FormatDuration>)
 - [func FormatExampleArgs\(args map\[string\]any\) string](<#FormatExampleArgs>)
 - [func GenerateProposalID\(\) string](<#GenerateProposalID>)
@@ -72,8 +78,10 @@ Package agent provides the agent loop and related components.
 - [func IsValidIntentType\(s string\) bool](<#IsValidIntentType>)
 - [func Key\(agentID, providerKey string\) string](<#Key>)
 - [func LoadJSONLTraces\(store \*InMemoryTraceStore, path string\) error](<#LoadJSONLTraces>)
+- [func LoadSoul\(path string\) \(string, error\)](<#LoadSoul>)
 - [func PairTopic\(sessionID string\) string](<#PairTopic>)
 - [func ParseVerdict\(output string\) \(Verdict, \[\]CheckResult\)](<#ParseVerdict>)
+- [func PhaseSpecsToPlan\(in \[\]PlanPhaseSpec\) \*plan.CompiledPlan](<#PhaseSpecsToPlan>)
 - [func PresetPrompt\(presetName string, taskDescription string\) \(string, error\)](<#PresetPrompt>)
 - [func RecoverPendingFollowUps\(db \*sql.DB, msgBus \*bus.MessageBus, logger \*slog.Logger\)](<#RecoverPendingFollowUps>)
 - [func RenderSpawnContext\(sc SpawnContext\) string](<#RenderSpawnContext>)
@@ -83,6 +91,7 @@ Package agent provides the agent loop and related components.
 - [func RoundTo\(f float64, n int\) float64](<#RoundTo>)
 - [func RunWithRetry\[T any\]\(ctx context.Context, config BackoffConfig, fn func\(\) \(T, error\)\) \(T, error\)](<#RunWithRetry>)
 - [func SecurityKeywords\(\) \[\]string](<#SecurityKeywords>)
+- [func SeedSoulIfMissing\(path string\) \(bool, error\)](<#SeedSoulIfMissing>)
 - [func SerializeError\(toolName string, err error\) map\[string\]any](<#SerializeError>)
 - [func SetDefaultBackoffOverride\(cfg BackoffConfig\)](<#SetDefaultBackoffOverride>)
 - [func SetFailurePolicyDefaults\(cfg llm.FailurePolicyConfig\)](<#SetFailurePolicyDefaults>)
@@ -90,6 +99,8 @@ Package agent provides the agent loop and related components.
 - [func SetPerOperationBackoffOverrideForTest\(key string, cfg BackoffConfig\)](<#SetPerOperationBackoffOverrideForTest>)
 - [func ShouldTerminate\(results \[\]\*ExecutionResult\) bool](<#ShouldTerminate>)
 - [func ShouldUseLLMResult\(intent \*Intent\) bool](<#ShouldUseLLMResult>)
+- [func SoulPath\(\) string](<#SoulPath>)
+- [func SplitStepsByAllotment\(steps \[\]\*task.TaskStep, allotmentTokens int, cfg AllotmentConfig\) \[\]\[\]\*task.TaskStep](<#SplitStepsByAllotment>)
 - [func StatusBar\(s TurnStatus\) string](<#StatusBar>)
 - [func StoreSpecInTask\(t \*task.Task, spec \*TaskSpec\)](<#StoreSpecInTask>)
 - [func StripReport\(response string\) string](<#StripReport>)
@@ -97,6 +108,7 @@ Package agent provides the agent loop and related components.
 - [func TeamResultTopic\(sessionID string\) string](<#TeamResultTopic>)
 - [func TeamStatusTopic\(sessionID string\) string](<#TeamStatusTopic>)
 - [func ThrottleParkAttemptFromContext\(ctx context.Context\) int](<#ThrottleParkAttemptFromContext>)
+- [func ValidateSoul\(content \[\]byte\) error](<#ValidateSoul>)
 - [func VerifyFromToolResults\(results \[\]tools.ToolResult\) bool](<#VerifyFromToolResults>)
 - [func WithResumedTurn\(ctx context.Context\) context.Context](<#WithResumedTurn>)
 - [func WithRetryBudget\(ctx context.Context, budget \*RetryBudget\) context.Context](<#WithRetryBudget>)
@@ -168,6 +180,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
   - [func \(l \*AgentLoop\) SessionConversation\(id string\) \*Conversation](<#AgentLoop.SessionConversation>)
   - [func \(l \*AgentLoop\) SetActive\(v bool\)](<#AgentLoop.SetActive>)
+  - [func \(l \*AgentLoop\) SetAutonomous\(autonomous bool\)](<#AgentLoop.SetAutonomous>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
   - [func \(l \*AgentLoop\) SetBudgetConfig\(total int, opts BudgetHierarchyOptions\)](<#AgentLoop.SetBudgetConfig>)
   - [func \(l \*AgentLoop\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentLoop.SetCapabilityIndex>)
@@ -201,6 +214,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetSessionRefresher\(r \*session.SessionRefresher\)](<#AgentLoop.SetSessionRefresher>)
   - [func \(l \*AgentLoop\) SetSessionStore\(store any, sessionCfg any\)](<#AgentLoop.SetSessionStore>)
   - [func \(l \*AgentLoop\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#AgentLoop.SetSkillLoader>)
+  - [func \(l \*AgentLoop\) SetSoulProvider\(sp \*SoulProvider\)](<#AgentLoop.SetSoulProvider>)
   - [func \(l \*AgentLoop\) SetStatePersister\(p AgentStatePersister\)](<#AgentLoop.SetStatePersister>)
   - [func \(l \*AgentLoop\) SetTaskCollector\(tc \*metrics.TaskCollector\)](<#AgentLoop.SetTaskCollector>)
   - [func \(l \*AgentLoop\) SetTaskStore\(store \*task.Store\)](<#AgentLoop.SetTaskStore>)
@@ -281,6 +295,8 @@ Package agent provides the agent loop and related components.
 - [type AgentStatePersister](<#AgentStatePersister>)
 - [type AgentStateSnapshot](<#AgentStateSnapshot>)
 - [type AggregatedTaskReport](<#AggregatedTaskReport>)
+- [type AllotmentConfig](<#AllotmentConfig>)
+  - [func DefaultAllotmentConfig\(\) AllotmentConfig](<#DefaultAllotmentConfig>)
 - [type AmbientExtractorInterface](<#AmbientExtractorInterface>)
 - [type AmendmentSubmitter](<#AmendmentSubmitter>)
 - [type AnalyzeResult](<#AnalyzeResult>)
@@ -584,6 +600,8 @@ Package agent provides the agent loop and related components.
 - [type DispatchResult](<#DispatchResult>)
 - [type Dispatcher](<#Dispatcher>)
   - [func NewDispatcher\(cfg DispatcherConfig\) \*Dispatcher](<#NewDispatcher>)
+  - [func \(d \*Dispatcher\) BuildPlanSessionContext\(ctx context.Context, sessionID, excludeTaskID string\) string](<#Dispatcher.BuildPlanSessionContext>)
+  - [func \(d \*Dispatcher\) BuildSessionExecutionContext\(ctx context.Context, sessionID string\) string](<#Dispatcher.BuildSessionExecutionContext>)
   - [func \(d \*Dispatcher\) ClassifyAndRoute\(ctx context.Context, input, sessionID string, parts \[\]llm.ContentPart, agentOverride string\) \(\*DispatchResult, error\)](<#Dispatcher.ClassifyAndRoute>)
   - [func \(d \*Dispatcher\) FollowUpActiveAgent\(ctx context.Context, conversationID, content, source string\) error](<#Dispatcher.FollowUpActiveAgent>)
   - [func \(d \*Dispatcher\) GetActiveTasks\(ctx context.Context\) \(\[\]\*task.Task, error\)](<#Dispatcher.GetActiveTasks>)
@@ -595,6 +613,7 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) GetSkillRegistry\(\) \*skills.Registry](<#Dispatcher.GetSkillRegistry>)
   - [func \(d \*Dispatcher\) GetStats\(\) DispatcherStats](<#Dispatcher.GetStats>)
   - [func \(d \*Dispatcher\) GetTask\(ctx context.Context, taskID string\) \(\*task.Task, error\)](<#Dispatcher.GetTask>)
+  - [func \(d \*Dispatcher\) PlanDigestContext\(sessionID, excludeTaskID string\) string](<#Dispatcher.PlanDigestContext>)
   - [func \(d \*Dispatcher\) ProcessAmendment\(ctx context.Context, requestID string\) \(\*task.AmendmentReply, error\)](<#Dispatcher.ProcessAmendment>)
   - [func \(d \*Dispatcher\) RecordDispatch\(sessionID, handlerCase, inputSummary string, result \*DispatchResult, hasParts bool, dispatchErr error\)](<#Dispatcher.RecordDispatch>)
   - [func \(d \*Dispatcher\) ResumeAfterClarification\(ctx context.Context, originalInput, userResponse, sessionID string\) \(\*DispatchResult, error\)](<#Dispatcher.ResumeAfterClarification>)
@@ -602,9 +621,11 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) SetAgentLoopManager\(m \*Manager\)](<#Dispatcher.SetAgentLoopManager>)
   - [func \(d \*Dispatcher\) SetCapabilityMatcher\(matcher \*CapabilityMatcher\)](<#Dispatcher.SetCapabilityMatcher>)
   - [func \(d \*Dispatcher\) SetFenceController\(fc FenceController\)](<#Dispatcher.SetFenceController>)
+  - [func \(d \*Dispatcher\) SetInputHasher\(fn func\(message string\) string\)](<#Dispatcher.SetInputHasher>)
   - [func \(d \*Dispatcher\) SetInstructionParser\(parser \*InstructionParser\)](<#Dispatcher.SetInstructionParser>)
   - [func \(d \*Dispatcher\) SetInstructionStore\(store \*preferences.Store\)](<#Dispatcher.SetInstructionStore>)
   - [func \(d \*Dispatcher\) SetMetricsStore\(store \*metrics.Store\)](<#Dispatcher.SetMetricsStore>)
+  - [func \(d \*Dispatcher\) SetPlanManager\(pm \*plan.PlanManager\)](<#Dispatcher.SetPlanManager>)
   - [func \(d \*Dispatcher\) SetSessionStore\(s SessionStoreReader\)](<#Dispatcher.SetSessionStore>)
   - [func \(d \*Dispatcher\) SetThreadRouter\(tr \*ThreadRouter\)](<#Dispatcher.SetThreadRouter>)
   - [func \(d \*Dispatcher\) SetToolRegistry\(reg \*DepthToolRegistry\)](<#Dispatcher.SetToolRegistry>)
@@ -622,6 +643,11 @@ Package agent provides the agent loop and related components.
   - [func ParseDrainMode\(s string\) DrainMode](<#ParseDrainMode>)
 - [type EffectsResumeHook](<#EffectsResumeHook>)
 - [type EmbeddingClient](<#EmbeddingClient>)
+- [type EmbeddingPrefilter](<#EmbeddingPrefilter>)
+  - [func NewEmbeddingPrefilter\(emb PrefilterEmbedder, cfg config.ClassifierPrefilterConfig, logger \*slog.Logger\) \*EmbeddingPrefilter](<#NewEmbeddingPrefilter>)
+  - [func \(p \*EmbeddingPrefilter\) Match\(ctx context.Context, input string\) \*Intent](<#EmbeddingPrefilter.Match>)
+  - [func \(p \*EmbeddingPrefilter\) Reload\(\)](<#EmbeddingPrefilter.Reload>)
+  - [func \(p \*EmbeddingPrefilter\) SetVerdictObserver\(fn func\(PrefilterVerdict\)\)](<#EmbeddingPrefilter.SetVerdictObserver>)
 - [type EpistemicHook](<#EpistemicHook>)
   - [func NewEpistemicHook\(cfg EpistemicHookConfig\) \*EpistemicHook](<#NewEpistemicHook>)
   - [func \(h \*EpistemicHook\) AfterTurn\(ctx context.Context, intent string, messages \[\]string\) \(\[\]string, error\)](<#EpistemicHook.AfterTurn>)
@@ -981,6 +1007,8 @@ Package agent provides the agent loop and related components.
   - [func \(o \*Orchestrator\) SetRepoMapGenerator\(gen \*repomap.RepoMapGenerator\)](<#Orchestrator.SetRepoMapGenerator>)
   - [func \(o \*Orchestrator\) Start\(ctx context.Context\) error](<#Orchestrator.Start>)
   - [func \(o \*Orchestrator\) Stop\(ctx context.Context\) error](<#Orchestrator.Stop>)
+  - [func \(o \*Orchestrator\) Strategic\(\) \*StrategicPlanner](<#Orchestrator.Strategic>)
+  - [func \(o \*Orchestrator\) Tactical\(\) \*TacticalScheduler](<#Orchestrator.Tactical>)
 - [type OrchestratorDeps](<#OrchestratorDeps>)
 - [type OverrideResult](<#OverrideResult>)
 - [type PPConversation](<#PPConversation>)
@@ -1065,10 +1093,14 @@ Package agent provides the agent loop and related components.
   - [func \(r \*PlaceholderToolRegistry\) GetDefinitions\(\) \[\]llm.ToolDefinition](<#PlaceholderToolRegistry.GetDefinitions>)
   - [func \(r \*PlaceholderToolRegistry\) List\(\) \[\]tools.Tool](<#PlaceholderToolRegistry.List>)
   - [func \(r \*PlaceholderToolRegistry\) Register\(tool tools.Tool\)](<#PlaceholderToolRegistry.Register>)
+- [type PlanDraft](<#PlanDraft>)
 - [type PlanPhaseSpec](<#PlanPhaseSpec>)
+  - [func PhaseSpecsFromPlan\(in \[\]plan.PhaseSpec\) \[\]PlanPhaseSpec](<#PhaseSpecsFromPlan>)
 - [type PlanRequest](<#PlanRequest>)
 - [type PlannerThresholds](<#PlannerThresholds>)
   - [func NewDefaultThresholds\(\) \*PlannerThresholds](<#NewDefaultThresholds>)
+- [type PrefilterEmbedder](<#PrefilterEmbedder>)
+- [type PrefilterVerdict](<#PrefilterVerdict>)
 - [type PrepareNextTurnHook](<#PrepareNextTurnHook>)
 - [type ProgressSynthesizer](<#ProgressSynthesizer>)
   - [func NewProgressSynthesizer\(b \*bus.MessageBus, client \*llm.Client, logger \*slog.Logger\) \*ProgressSynthesizer](<#NewProgressSynthesizer>)
@@ -1129,6 +1161,8 @@ Package agent provides the agent loop and related components.
 - [type QueueUpdateData](<#QueueUpdateData>)
 - [type QueuedMessage](<#QueuedMessage>)
 - [type QuotaBlockStatus](<#QuotaBlockStatus>)
+- [type QuotaDeferralPolicy](<#QuotaDeferralPolicy>)
+  - [func DefaultQuotaDeferralPolicy\(\) QuotaDeferralPolicy](<#DefaultQuotaDeferralPolicy>)
 - [type QuotaEpisode](<#QuotaEpisode>)
 - [type QuotaEpisodeTracker](<#QuotaEpisodeTracker>)
   - [func NewQuotaEpisodeTracker\(logger \*slog.Logger\) \*QuotaEpisodeTracker](<#NewQuotaEpisodeTracker>)
@@ -1168,6 +1202,7 @@ Package agent provides the agent loop and related components.
   - [func \(rl \*RalphLoop\) Reset\(taskID string\)](<#RalphLoop.Reset>)
   - [func \(rl \*RalphLoop\) SetPlanManager\(pm \*plan.PlanManager\)](<#RalphLoop.SetPlanManager>)
   - [func \(rl \*RalphLoop\) TaskIsTerminal\(taskID string\) bool](<#RalphLoop.TaskIsTerminal>)
+  - [func \(rl \*RalphLoop\) TaskOutcome\(taskID string\) \(completed bool, terminal bool\)](<#RalphLoop.TaskOutcome>)
   - [func \(rl \*RalphLoop\) TriggerReplan\(ctx context.Context, taskID string, previousEvidence \[\]string\) error](<#RalphLoop.TriggerReplan>)
 - [type RalphLoopConfig](<#RalphLoopConfig>)
   - [func DefaultRalphLoopConfig\(\) RalphLoopConfig](<#DefaultRalphLoopConfig>)
@@ -1337,6 +1372,7 @@ Package agent provides the agent loop and related components.
   - [func DefaultSessionConfig\(\) SessionConfig](<#DefaultSessionConfig>)
 - [type SessionContextDigest](<#SessionContextDigest>)
   - [func \(s \*SessionContextDigest\) IsEmpty\(\) bool](<#SessionContextDigest.IsEmpty>)
+  - [func \(s \*SessionContextDigest\) IsEmptyIgnoringClarify\(\) bool](<#SessionContextDigest.IsEmptyIgnoringClarify>)
 - [type SessionEndData](<#SessionEndData>)
 - [type SessionEndHook](<#SessionEndHook>)
 - [type SessionLifecyclePayload](<#SessionLifecyclePayload>)
@@ -1380,6 +1416,13 @@ Package agent provides the agent loop and related components.
   - [func \(c \*SnowflakeEmbedClient\) Dimension\(\) int](<#SnowflakeEmbedClient.Dimension>)
   - [func \(c \*SnowflakeEmbedClient\) Embed\(ctx context.Context, text string\) \(\[\]float64, error\)](<#SnowflakeEmbedClient.Embed>)
   - [func \(c \*SnowflakeEmbedClient\) EmbedBatch\(ctx context.Context, texts \[\]string\) \(\[\]\[\]float64, error\)](<#SnowflakeEmbedClient.EmbedBatch>)
+- [type SoulProvider](<#SoulProvider>)
+  - [func NewSoulProvider\(path string, logger \*slog.Logger\) \(\*SoulProvider, error\)](<#NewSoulProvider>)
+  - [func NewSoulProviderFromText\(text string\) \*SoulProvider](<#NewSoulProviderFromText>)
+  - [func \(s \*SoulProvider\) Current\(\) string](<#SoulProvider.Current>)
+  - [func \(s \*SoulProvider\) SetReloadHook\(fn func\(text string\)\)](<#SoulProvider.SetReloadHook>)
+  - [func \(s \*SoulProvider\) StartWatching\(ctx context.Context\) error](<#SoulProvider.StartWatching>)
+  - [func \(s \*SoulProvider\) Status\(\) \(path, sha string, reloaded time.Time, watching bool, watchErr error\)](<#SoulProvider.Status>)
 - [type SpawnContext](<#SpawnContext>)
   - [func BuildSpawnContext\(iso ContextIsolation, brief string, artifacts \[\]ArtifactRef, memoryIDs \[\]string, parent \[\]llm.ChatMessage\) SpawnContext](<#BuildSpawnContext>)
 - [type SpeakKind](<#SpeakKind>)
@@ -1409,10 +1452,20 @@ Package agent provides the agent loop and related components.
   - [func NewStrategicPlanner\(cfg StrategicPlannerConfig\) \*StrategicPlanner](<#NewStrategicPlanner>)
   - [func \(sp \*StrategicPlanner\) ApprovePlan\(ctx context.Context, taskID string\) error](<#StrategicPlanner.ApprovePlan>)
   - [func \(sp \*StrategicPlanner\) ConductInterview\(ctx context.Context, req PlanRequest\) \(\*plan.PlanningContext, error\)](<#StrategicPlanner.ConductInterview>)
+  - [func \(sp \*StrategicPlanner\) DraftFor\(taskID string\) \(\*PlanDraft, bool\)](<#StrategicPlanner.DraftFor>)
+  - [func \(sp \*StrategicPlanner\) MaxPhases\(\) int](<#StrategicPlanner.MaxPhases>)
+  - [func \(sp \*StrategicPlanner\) MaxStepsPerPhase\(\) int](<#StrategicPlanner.MaxStepsPerPhase>)
   - [func \(sp \*StrategicPlanner\) Plan\(ctx context.Context, req PlanRequest\) error](<#StrategicPlanner.Plan>)
   - [func \(sp \*StrategicPlanner\) RejectPlan\(ctx context.Context, taskID string, reason string\) error](<#StrategicPlanner.RejectPlan>)
   - [func \(sp \*StrategicPlanner\) ReplanFailedTask\(ctx context.Context, taskID, failureReason string\) error](<#StrategicPlanner.ReplanFailedTask>)
+  - [func \(sp \*StrategicPlanner\) SaveDraft\(taskID, markdown string\) error](<#StrategicPlanner.SaveDraft>)
+  - [func \(sp \*StrategicPlanner\) SealDraft\(taskID, hash string\) error](<#StrategicPlanner.SealDraft>)
+  - [func \(sp \*StrategicPlanner\) SealPlan\(ctx context.Context, taskID string, phases \[\]PlanPhaseSpec, persistPhases func\(taskID string, phases \[\]PlanPhaseSpec\) error\) error](<#StrategicPlanner.SealPlan>)
+  - [func \(sp \*StrategicPlanner\) SetInterviewProbe\(fn func\(\)\)](<#StrategicPlanner.SetInterviewProbe>)
+  - [func \(sp \*StrategicPlanner\) SetMetricsStore\(store \*metrics.Store\)](<#StrategicPlanner.SetMetricsStore>)
+  - [func \(sp \*StrategicPlanner\) SetPlanCompilerEnabled\(enabled bool\)](<#StrategicPlanner.SetPlanCompilerEnabled>)
   - [func \(sp \*StrategicPlanner\) SetPlanPhaseSink\(fn func\(taskID string, phases \[\]PlanPhaseSpec\)\)](<#StrategicPlanner.SetPlanPhaseSink>)
+  - [func \(sp \*StrategicPlanner\) SetRegistry\(reg \*AgentRegistry\)](<#StrategicPlanner.SetRegistry>)
 - [type StrategicPlannerConfig](<#StrategicPlannerConfig>)
 - [type SubagentExecution](<#SubagentExecution>)
 - [type SubtaskAssignment](<#SubtaskAssignment>)
@@ -1439,7 +1492,9 @@ Package agent provides the agent loop and related components.
   - [func \(ts \*TacticalScheduler\) OnJobFailed\(ctx context.Context, jobID, jobErr string\) error](<#TacticalScheduler.OnJobFailed>)
   - [func \(ts \*TacticalScheduler\) ScheduleReadySteps\(ctx context.Context, taskID string\) error](<#TacticalScheduler.ScheduleReadySteps>)
   - [func \(ts \*TacticalScheduler\) SelectAgentForHint\(toolHint string\) string](<#TacticalScheduler.SelectAgentForHint>)
+  - [func \(ts \*TacticalScheduler\) SetContextWindowProvider\(fn func\(agentID string\) int\)](<#TacticalScheduler.SetContextWindowProvider>)
   - [func \(ts \*TacticalScheduler\) SetHandoffPropagator\(fn func\(ctx context.Context, completedStep \*task.TaskStep\) error\)](<#TacticalScheduler.SetHandoffPropagator>)
+  - [func \(ts \*TacticalScheduler\) SetMetricsStore\(store \*metrics.Store\)](<#TacticalScheduler.SetMetricsStore>)
   - [func \(ts \*TacticalScheduler\) SetSessionStore\(store sessionStoreReader\)](<#TacticalScheduler.SetSessionStore>)
 - [type TacticalSchedulerConfig](<#TacticalSchedulerConfig>)
 - [type TaintBeforeToolCall](<#TaintBeforeToolCall>)
@@ -1901,6 +1956,16 @@ Package agent provides the agent loop and related components.
 	    DefaultPairMaxRounds = 3
 	)
 
+<a name="DefaultPrefilterThreshold"></a>Default prefilter tuning. Threshold is overridable via config; k and margin are package constants to keep the config surface at the one knob the A/B sweep tunes.
+
+	const (
+	    // DefaultPrefilterThreshold is the minimum cosine for a neighbor to
+	    // count toward the vote. Cosine-neighborhood floors are sharper than
+	    // centroid scores (HANDOFF-STAGE0.md §9: flat margin distribution),
+	    // so this gates membership, not the final decision.
+	    DefaultPrefilterThreshold = 0.70
+	)
+
 <a name="DefaultQuotaResumePollInterval"></a>DefaultQuotaResumePollInterval is the re\-check cadence for parked turns. Mirrors config llm.quota\_retry.defer\_check\_interval's 10m default; the field is exported on the watcher for tests and config wiring. It is an alias of the TurnParker default \(parked\_turn.go\) — one source of truth.
 
 	const DefaultQuotaResumePollInterval = DefaultTurnParkerPollInterval
@@ -1927,6 +1992,14 @@ Package agent provides the agent loop and related components.
 <a name="MaxSkillContextTokens"></a>buildSkillContextSection creates the skill context section for the system prompt. MaxSkillContextTokens is the approximate token budget for injected skill bodies. Skills can be large markdown files; this prevents system prompt bloat.
 
 	const MaxSkillContextTokens = 4000
+
+<a name="MaxSoulBytes"></a>MaxSoulBytes caps the accepted soul file size. An oversize file is treated as invalid \(likely a pasted blob, not a persona\).
+
+	const MaxSoulBytes = 64 * 1024
+
+<a name="SoulFileName"></a>SoulFileName is the soul file's name inside the meept home directory.
+
+	const SoulFileName = "SOUL.md"
 
 <a name="SourceChatHandler"></a>Source identifiers for event attribution.
 
@@ -2025,6 +2098,21 @@ Package agent provides the agent loop and related components.
 
 	var ErrTemplateNotFound = errors.New("planner template not found and no fallback registered")
 
+<a name="QuickPlanCuePattern"></a>QuickPlanCuePattern detects orchestration evidence in a user message.
+
+WHY: quickplan\-vs\-code/git is not decidable from message text alone \(adjudicated campaign finding, iter\-20; adjudication record 2026\-09\-09\) \- "do it all" phrasing is shared by both classes. The cue requires explicit orchestration evidence \(subagents, task lists, waves, "as you go", etc.\) before a quickplan direct route fires from the embedding prefilter. Deriving quickplan from session state happens at the orchestrator \(leaf 02\), not here.
+
+Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optional\).
+
+	var QuickPlanCuePattern = regexp.MustCompile(`(?i)\b(subagents?|tasks? \d|` +
+	    `task list|waves?|leaves?|leaf \d|plan\.md|handoff|checklist|in order|` +
+	    `one at a time|sealed plan|tracking table|as you (find|go)|, then\b|` +
+	    `and correct them|and fix them|without (asking|stopping)|no check-?ins?|` +
+	    `just (do|make|apply)|make it happen|to completion|finish the remaining|` +
+	    `carry on with the plan|execute (the|what)|implement (the|all) plan|` +
+	    `implement tasks?|work (through|items)|knock out|carry out|` +
+	    `complete the outstanding)\b`)
+
 <a name="SteeringHeuristicTable"></a>SteeringHeuristicTable defines which intent types should interrupt \(steer\) vs wait for a natural stopping point \(follow\-up\) when an agent loop is already running for the conversation.
 
 	var SteeringHeuristicTable = map[IntentType]bool{
@@ -2050,7 +2138,9 @@ Package agent provides the agent loop and related components.
 	    IntentPair:        false,
 	    IntentCollaborate: false,
 	    IntentCompound:    false,
-	    IntentUnknown:     false,
+	
+	    IntentQuickPlan: false,
+	    IntentUnknown:   false,
 	}
 
 <a name="ToolActionMap"></a>ToolActionMap maps tool names to permission action categories.
@@ -2063,13 +2153,36 @@ Package agent provides the agent loop and related components.
 	    ToolFileDelete:    ToolFileDelete,
 	    ToolListDirectory: ToolFileRead,
 	
+	    "file_grep": ToolFileRead,
+	    "file_find": ToolFileRead,
+	
+	    "file_edit": ToolFileWrite,
+	
+	    "remember": ToolFileWrite,
+	
 	    ToolWebSearch: "network_request",
 	    ToolWebFetch:  "network_request",
+	
+	    "transcript_fetch": "network_request",
+	
+	    "json_extract": "network_request",
 	
 	    ToolMemorySearch:     "memory_read",
 	    ToolMemoryGetContext: "memory_read",
 	    ToolMemoryStore:      "memory_write",
 	    ToolMemoryDelete:     "memory_write",
+	
+	    "retain":            "memory_write",
+	    "recall":            "memory_read",
+	    "reflect":           "memory_write",
+	    "retain_claim":      "memory_write",
+	    "retain_decision":   "memory_write",
+	    "retain_prediction": "memory_write",
+	    "mark_superseded":   "memory_write",
+	    "mark_resolved":     "memory_write",
+	    "record_review":     "memory_write",
+	    "reject_claim":      "memory_write",
+	    "promote_claim":     "memory_write",
 	
 	    ToolPlatformStatus: "platform_read",
 	    ToolPlatformAgents: "platform_read",
@@ -2081,21 +2194,69 @@ Package agent provides the agent loop and related components.
 	    "task_list":   "task_read",
 	    "task_update": "task_write",
 	
+	    "schedule_create": "task_write",
+	    "schedule_list":   "task_read",
+	    "schedule_get":    "task_read",
+	    "schedule_delete": "task_write",
+	
 	    "delegate_task":   "agent_delegate",
 	    ToolRequestReview: "agent_delegate",
 	
 	    "reply_to_user": "send_message",
 	
-	    "ast_parse":   ToolCodeRead,
-	    "ast_symbols": ToolCodeRead,
-	    "ast_query":   ToolCodeRead,
+	    "ask":             "send_message",
+	    "request_handoff": "send_message",
 	
-	    "lsp_goto_definition":   ToolCodeRead,
-	    "lsp_find_references":   ToolCodeRead,
-	    "lsp_hover":             ToolCodeRead,
-	    "lsp_workspace_symbols": ToolCodeRead,
-	    "lsp_diagnostics":       ToolCodeRead,
+	    "pdf_read": ToolFileRead,
+	
+	    "skills_create": "skill_execute",
+	    "skills_patch":  "skill_execute",
+	
+	    "ast_parse":             ToolFileRead,
+	    "ast_symbols":           ToolFileRead,
+	    "ast_query":             ToolFileRead,
+	    "lsp_goto_definition":   ToolFileRead,
+	    "lsp_find_references":   ToolFileRead,
+	    "lsp_hover":             ToolFileRead,
+	    "lsp_workspace_symbols": ToolFileRead,
+	    "lsp_diagnostics":       ToolFileRead,
+	
+	    "memory_retain":        "memory_write",
+	    "memory_recall":        "memory_read",
+	    "memory_reflect":       "memory_write",
+	    "list_expired_claims":  "memory_read",
+	    "purge_auto_claims":    "memory_write",
+	    "entity_create":        "memory_write",
+	    "entity_link":          "memory_write",
+	    "entity_query":         "memory_read",
+	    "graph_stats":          "memory_read",
+	    "compute_pagerank":     "memory_read",
+	    "detect_communities":   "memory_read",
+	    "community_siblings":   "memory_read",
+	    "resolve":              "task_write",
+	    "spreadsheet_write":    "file_write",
+	    "git_validate":         "file_read",
+	    "git_split":            "shell_execute",
+	    "template_invoke":      "skill_execute",
+	    "template_clear":       "task_write",
+	    "mcp_servers":          "platform_read",
+	    "workspace_yield":      "platform_read",
+	    "send_agent_message":   "send_message",
+	    "inbox":                "platform_read",
+	    "team_status":          "platform_read",
+	    "team_message":         "send_message",
+	    "team_assign":          "task_write",
+	    "team_result":          "task_write",
+	    "platform_team_create": "task_write",
+	    "team_preset_create":   "task_write",
 	}
+
+<a name="AllotmentTokens"></a>
+## func AllotmentTokens
+
+	func AllotmentTokens(contextLimit int, cfg AllotmentConfig) int
+
+AllotmentTokens converts a context window limit into a work budget: \(contextLimit \- ReserveTokens\) \* UsableRatio, floored at 0. Returns 0 when contextLimit \<= 0 \(unknown window\).
 
 <a name="ApplyEscalation"></a>
 ## func ApplyEscalation
@@ -2135,6 +2296,15 @@ Returns an empty string if registry is nil, so the caller can omit the section e
 
 BuildRevisionContext constructs the AccumulatedContext string for a revision step. It combines the reviewer's feedback and issue list with the original spec's acceptance criteria, giving the coder agent full context of what went wrong and what "done" looks like.
 
+<a name="BuildSessionContextBlock"></a>
+## func BuildSessionContextBlock
+
+	func BuildSessionContextBlock(digest *SessionContextDigest) string
+
+BuildSessionContextBlock renders a SessionContextDigest as a compact markdown block for an executing agent's prompt — the same session facts the intent classifier saw, now visible to the agent that answers. Bounded \(name 200 / summary 400 chars at digest build time\) so it cannot bloat the prompt. Returns "" for a nil/empty digest.
+
+Context\-aware usage rule \(e2e A5, gh \#37\): the block carries a one\-line instruction telling the model to ANSWER FROM this context whenever the user asks about prior work — not merely to be aware of it. Small local models treat passive context as background and reply "ok" to status questions even when the answer is stated in the block. The rule is generic: it covers status questions, artifact references, follow\-ups, and corrections — any input that concerns this prior work — not one scripted phrasing.
+
 <a name="BuildSystemPrompt"></a>
 ## func BuildSystemPrompt
 
@@ -2163,6 +2333,13 @@ BusTopic returns the bus topic for a given agent event type. Convention: "agent.
 
 ClearPerOperationBackoffOverrideForTest removes the per\-operation backoff override under the given key.
 
+<a name="ContinuationDescription"></a>
+## func ContinuationDescription
+
+	func ContinuationDescription(desc string, k, n int) string
+
+ContinuationDescription prefixes desc with a \[continuation k/N\] marker.
+
 <a name="CosineSimilarity"></a>
 ## func CosineSimilarity
 
@@ -2176,6 +2353,20 @@ CosineSimilarity computes cosine similarity between two vectors.
 	func DefaultCoworkerAwareness() string
 
 DefaultCoworkerAwareness returns the standard coworker awareness prompt.
+
+<a name="DefaultSoulMD"></a>
+## func DefaultSoulMD
+
+	func DefaultSoulMD() string
+
+DefaultSoulMD returns the shipped default soul text.
+
+<a name="EstimateStepTokens"></a>
+## func EstimateStepTokens
+
+	func EstimateStepTokens(desc string, cfg AllotmentConfig) int
+
+EstimateStepTokens estimates the token cost of a step description as ceil\(len\(desc\)/CharsPerToken\), floored at MinStepTokens.
 
 <a name="ExecutorAgentIDs"></a>
 ## func ExecutorAgentIDs
@@ -2207,6 +2398,15 @@ Note: This function only looks for JSON objects \(starting with '\{'\). A bare J
 	func FinalSentinelContent() string
 
 FinalSentinelContent returns the filename component used as the final\-run sentinel.
+
+<a name="FlattenPlanPhasesToSteps"></a>
+## func FlattenPlanPhasesToSteps
+
+	func FlattenPlanPhasesToSteps(taskID string, phases []PlanPhaseSpec, maxStepsPerPhase int) []*task.TaskStep
+
+FlattenPlanPhasesToSteps converts phase specs into executable TaskSteps. Each step gets Phase = phase.Name; inter\-phase dependencies: the first step of phase N\+1 depends on the last step of phase N \(unless the step already has explicit deps\). maxStepsPerPhase \<= 0 disables the per\-phase cap. Extracted from planMultiPhase \(plan\-compiler leaf 04\) so the seal path flattens identically to the LLM spec\_plan path.
+
+H4 regression guard: the original extraction dropped the legacy per\-phase cap that caf61fb2 enforced inline \(\`len\(stepIDsInPhase\) \>= cap → break\`\), letting un\-flagged phases exceed the cap and break byte\-identical legacy behavior. The cap parameter is threaded explicitly; callers pass sp.maxStepsPerPhase \(or sp.MaxStepsPerPhase\(\)\).
 
 <a name="FormatDuration"></a>
 ## func FormatDuration
@@ -2292,6 +2492,13 @@ Key returns the map key for an episode.
 
 LoadJSONLTraces reads spans from a JSONL file and adds them to the store. Each line is expected to be a JSON object with at minimum a "span\_id" field. Optional fields: "trace\_id" \(defaults to "unknown"\), "span\_name", "service", "model", "input\_tokens", "output\_tokens", "has\_error".
 
+<a name="LoadSoul"></a>
+## func LoadSoul
+
+	func LoadSoul(path string) (string, error)
+
+LoadSoul reads and validates the soul file at path. It is the startup gate: an invalid file refuses the daemon.
+
 <a name="PairTopic"></a>
 ## func PairTopic
 
@@ -2305,6 +2512,13 @@ PairTopic returns the turn topic for a specific pair session.
 	func ParseVerdict(output string) (Verdict, []CheckResult)
 
 ParseVerdict extracts the verdict and individual check results from verifier output. It returns VerdictUnknown if no valid VERDICT line is found.
+
+<a name="PhaseSpecsToPlan"></a>
+## func PhaseSpecsToPlan
+
+	func PhaseSpecsToPlan(in []PlanPhaseSpec) *plan.CompiledPlan
+
+PhaseSpecsToPlan converts agent phase specs back into the pure compiler/emitter shape for the flat\-vs\-tree gate.
 
 <a name="PresetPrompt"></a>
 ## func PresetPrompt
@@ -2373,6 +2587,13 @@ The function is called at least once. Retries happen only on retryable errors. I
 
 SecurityKeywords returns the list of keywords that trigger pair\-session routing for code/debug intents. This centralizes the list hardcoded at strategic.go:689\-697 so it can be reused and kept in sync.
 
+<a name="SeedSoulIfMissing"></a>
+## func SeedSoulIfMissing
+
+	func SeedSoulIfMissing(path string) (bool, error)
+
+SeedSoulIfMissing writes the shipped default soul to path when the file does not exist. An existing file is never touched. Returns true when a seed write happened.
+
 <a name="SerializeError"></a>
 ## func SerializeError
 
@@ -2421,6 +2642,20 @@ ShouldTerminate checks if ALL results in the batch indicate termination. Returns
 	func ShouldUseLLMResult(intent *Intent) bool
 
 
+
+<a name="SoulPath"></a>
+## func SoulPath
+
+	func SoulPath() string
+
+SoulPath returns the resolved soul file path \(honors MEEPT\_HOME\).
+
+<a name="SplitStepsByAllotment"></a>
+## func SplitStepsByAllotment
+
+	func SplitStepsByAllotment(steps []*task.TaskStep, allotmentTokens int, cfg AllotmentConfig) [][]*task.TaskStep
+
+SplitStepsByAllotment greedily partitions ordered steps into batches whose estimated token totals fit within allotmentTokens. An oversize step \(its own estimate exceeds the allotment\) gets its own batch. MaxBatchSteps \> 0 additionally caps steps per batch. allotmentTokens \<= 0 returns a single batch containing every step.
 
 <a name="StatusBar"></a>
 ## func StatusBar
@@ -2475,6 +2710,13 @@ TeamStatusPattern is the per\-session shared task board topic.
 	func ThrottleParkAttemptFromContext(ctx context.Context) int
 
 ThrottleParkAttemptFromContext returns the previous park generation's attempt count, or 0 for a fresh turn.
+
+<a name="ValidateSoul"></a>
+## func ValidateSoul
+
+	func ValidateSoul(content []byte) error
+
+ValidateSoul checks the mechanical validity of soul file content. It returns a nil error for valid content and a named reason otherwise. Empty content is invalid everywhere: at startup it is almost certainly a save\-in\-progress accident, and at runtime an empty persona is never what the user meant.
 
 <a name="VerifyFromToolResults"></a>
 ## func VerifyFromToolResults
@@ -3182,6 +3424,13 @@ SessionConversation returns the conversation for the given session/conversation 
 
 SetActive atomically sets the has\-pending\-work flag.
 
+<a name="AgentLoop.SetAutonomous"></a>
+### func \(\*AgentLoop\) SetAutonomous
+
+	func (l *AgentLoop) SetAutonomous(autonomous bool)
+
+SetAutonomous marks the loop for AUTONOMOUS \(job\-driven, headless\) execution. Staging tools consult the marker via the execution context \(executeToolCalls injects it\) and write directly instead of staging a pending change that no later turn can accept. Guarded by mu.
+
 <a name="AgentLoop.SetBranchManager"></a>
 ### func \(\*AgentLoop\) SetBranchManager
 
@@ -3412,6 +3661,13 @@ SetSessionStore wires a session store and config for persistence. When the store
 	func (l *AgentLoop) SetSkillLoader(loader *skills.LazySkillLoader)
 
 SetSkillLoader sets the lazy skill loader for on\-demand loading. This allows wiring the loader after the loop is created when skills are initialized in a specific order.
+
+<a name="AgentLoop.SetSoulProvider"></a>
+### func \(\*AgentLoop\) SetSoulProvider
+
+	func (l *AgentLoop) SetSoulProvider(sp *SoulProvider)
+
+SetSoulProvider attaches the user\-authored persona provider \(SOUL.md\). Once set, every system\-prompt build site reads the live soul text in the Personality slot. Pass nil to detach \(falls back to config.Personality\). The provider's reload hook is wired here so hot reloads are visible to subsequent builds without loop restart.
 
 <a name="AgentLoop.SetStatePersister"></a>
 ### func \(\*AgentLoop\) SetStatePersister
@@ -4169,6 +4425,33 @@ AggregatedTaskReport represents the final report for a completed task.
 	    // ExecutionTime is the total execution time
 	    ExecutionTime string `json:"execution_time"`
 	}
+
+<a name="AllotmentConfig"></a>
+## type AllotmentConfig
+
+AllotmentConfig controls how a model's context window is converted into work allotments and how steps are partitioned into batches.
+
+	type AllotmentConfig struct {
+	    // UsableRatio is the fraction of the (post-reserve) context window
+	    // usable for step input. Default 0.75.
+	    UsableRatio float64
+	    // ReserveTokens covers system prompt + tool definitions. Default 4096.
+	    ReserveTokens int
+	    // CharsPerToken is the character-to-token estimate ratio. Default 4.
+	    CharsPerToken float64
+	    // MinStepTokens is the floor for any single step's token estimate.
+	    // Default 512.
+	    MinStepTokens int
+	    // MaxBatchSteps caps steps per batch; 0 means no count cap.
+	    MaxBatchSteps int
+	}
+
+<a name="DefaultAllotmentConfig"></a>
+### func DefaultAllotmentConfig
+
+	func DefaultAllotmentConfig() AllotmentConfig
+
+DefaultAllotmentConfig returns the pinned default configuration.
 
 <a name="AmbientExtractorInterface"></a>
 ## type AmbientExtractorInterface
@@ -6768,6 +7051,14 @@ DispatchResult is the result of dispatching a request.
 	    // planner. Empty means no suggestion (planner uses its own heuristics).
 	    SuggestedMode string `json:"suggested_mode,omitempty"`
 	
+	    // ExecutorModelRef is the "provider/model-id" ref of the executor model
+	    // resolved for this dispatch (allotment tree leaf 02). Sourced from the
+	    // first resolved model of a user model directive when present; raw
+	    // directive references are carried verbatim (the provider downstream
+	    // re-resolves through the LLM resolver, which is authoritative).
+	    // Forwarded to PlanRequest.ExecutorModelRef. Empty = no directive.
+	    ExecutorModelRef string `json:"executor_model_ref,omitempty"`
+	
 	    // ReasoningOverride carries the parsed user reasoning directive (if any)
 	    // so downstream code can forward it to the agent loop. When non-nil, it
 	    // takes precedence over SuggestedReasoningTier per spec §7.5. Tagged
@@ -6778,6 +7069,15 @@ DispatchResult is the result of dispatching a request.
 	    // Instruction is the parsed instruction when user provides automation request.
 	    // Only populated when intent type is IntentInstruction.
 	    Instruction *preferences.ParsedInstruction `json:"-"`
+	
+	    // PrefilterVerdict carries the Door-1 kNN verdict (with margin) that
+	    // produced this result, when the embedding prefilter ran for this
+	    // dispatch (classifier-outcome-loop leaf 02). Present for routed AND
+	    // abstained Door-1 dispatches — an abstain yields a nil Intent but a
+	    // non-nil verdict, which is how the margin survives to recordDispatch.
+	    // nil for every other classification door. Tagged json:"-" (operational
+	    // metadata, not user-facing serialization).
+	    PrefilterVerdict *PrefilterVerdict `json:"-"`
 	}
 
 <a name="Dispatcher"></a>
@@ -6795,6 +7095,20 @@ Dispatcher handles intake classification and routing of requests.
 	func NewDispatcher(cfg DispatcherConfig) *Dispatcher
 
 NewDispatcher creates a new dispatcher.
+
+<a name="Dispatcher.BuildPlanSessionContext"></a>
+### func \(\*Dispatcher\) BuildPlanSessionContext
+
+	func (d *Dispatcher) BuildPlanSessionContext(ctx context.Context, sessionID, excludeTaskID string) string
+
+BuildPlanSessionContext is BuildSessionExecutionContext composed with the session digest block \(BuildSessionContextBlock\) for plan requests. The execution\-context block carries open task TITLES; the digest block adds the most recent PRIOR task's state and best terminal step result — the evidence a "did the change get made?" plan needs to answer from session history instead of planning an interrogation of the user \(e2e run 7, 2026\-09\-11 T3\). excludeTaskID is the current turn's own placeholder task, created by ClassifyAndRoute before this call; digestContextEnabled gates the digest half so MEEPT\_DISABLE\_DIGEST\_CONTEXT=1 opts BOTH injections out together.
+
+<a name="Dispatcher.BuildSessionExecutionContext"></a>
+### func \(\*Dispatcher\) BuildSessionExecutionContext
+
+	func (d *Dispatcher) BuildSessionExecutionContext(ctx context.Context, sessionID string) string
+
+BuildSessionExecutionContext is the exported wrapper used by the chat handler to attach the Session execution context block to quick\_plan plan requests \(quickplan\-mode leaf 02\).
 
 <a name="Dispatcher.ClassifyAndRoute"></a>
 ### func \(\*Dispatcher\) ClassifyAndRoute
@@ -6875,6 +7189,13 @@ GetStats returns a copy of dispatcher statistics.
 
 GetTask returns a task by ID.
 
+<a name="Dispatcher.PlanDigestContext"></a>
+### func \(\*Dispatcher\) PlanDigestContext
+
+	func (d *Dispatcher) PlanDigestContext(sessionID, excludeTaskID string) string
+
+PlanDigestContext is the digest\-only half of BuildPlanSessionContext: the session digest block WITHOUT the quickplan execution\-context block. Used for plan requests in NON\-quickplan modes \(direct/plan/spec\_plan\) — e2e run 8 \(2026\-09\-11\) T3 classified git @0.9 and dispatched through createFallbackSteps, whose step prompt is req.Input verbatim; without this, a "did the change get made?" git dispatch executes with no session context at all. Returns "" for context\-less sessions \(no empty header block in the step prompt\). Gated by the same MEEPT\_DISABLE\_DIGEST\_CONTEXT flag as every other digest injection.
+
 <a name="Dispatcher.ProcessAmendment"></a>
 ### func \(\*Dispatcher\) ProcessAmendment
 
@@ -6924,6 +7245,13 @@ SetCapabilityMatcher sets the capability matcher for fast routing.
 
 SetFenceController wires the shared fence checker so dispatched sessions bind their project path as the sandbox root and honor \-\-nofence.
 
+<a name="Dispatcher.SetInputHasher"></a>
+### func \(\*Dispatcher\) SetInputHasher
+
+	func (d *Dispatcher) SetInputHasher(fn func(message string) string)
+
+SetInputHasher wires the salted input\-hash function used to fill dispatch\_log.input\_hash \(classifier\-observability S4\). The daemon loads the per\-install salt and injects a closure over metrics.HashInput; the dispatcher itself performs no crypto or file I/O. A nil hasher \(including a typed\-nil func\) disables hashing: InputHash is persisted as "".
+
 <a name="Dispatcher.SetInstructionParser"></a>
 ### func \(\*Dispatcher\) SetInstructionParser
 
@@ -6944,6 +7272,13 @@ SetInstructionStore wires the instruction store for intent\-based action attachm
 	func (d *Dispatcher) SetMetricsStore(store *metrics.Store)
 
 SetMetricsStore wires the metrics store for persistent dispatch logging.
+
+<a name="Dispatcher.SetPlanManager"></a>
+### func \(\*Dispatcher\) SetPlanManager
+
+	func (d *Dispatcher) SetPlanManager(pm *plan.PlanManager)
+
+SetPlanManager wires the plan manager after construction. The daemon creates the dispatcher before the plan system is initialized \(same ordering constraint as Orchestrator.SetPlanManager\); nil is a no\-op and leaves the quickplan session\-context block without its Active plan section.
 
 <a name="Dispatcher.SetSessionStore"></a>
 ### func \(\*Dispatcher\) SetSessionStore
@@ -7067,8 +7402,14 @@ DispatcherConfig holds configuration for creating a Dispatcher.
 	    ClassifierFailFast bool
 	    CapabilityMatcher  *CapabilityMatcher
 	    EmbeddingClient    EmbeddingClient
-	    SessionMaxAge      time.Duration
-	    PlanManager        *plan.PlanManager
+	    // PrefilterConfig enables the Stage-0 embedding prefilter
+	    // (classifier-observability follow-up). When Enabled, the dispatcher
+	    // constructs an EmbeddingPrefilter (OpenAI-compatible embeddings
+	    // client + centroid store) that direct-routes confident inputs before
+	    // the analyzer + router LLM calls.
+	    PrefilterConfig config.ClassifierPrefilterConfig
+	    SessionMaxAge   time.Duration
+	    PlanManager     *plan.PlanManager
 	    // AmbiguityThreshold configures the IntentAnalyzer's gate for blocking
 	    // routing on high-ambiguity inputs. 0 means use the legacy const
 	    // (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
@@ -7133,6 +7474,47 @@ EmbeddingClient generates vector embeddings for text.
 	    EmbedBatch(ctx context.Context, texts []string) ([][]float64, error)
 	    Dimension() int
 	}
+
+<a name="EmbeddingPrefilter"></a>
+## type EmbeddingPrefilter
+
+EmbeddingPrefilter implements STAGE\-0 of ClassifyAndRoute \(classifier\-observability follow\-up, HANDOFF\-STAGE0.md §5/§9\): embed the raw input, kNN\-match against labeled example vectors, and return a direct\-route Intent when the vote is unanimous. On any miss or error it returns nil and the existing analyzer \+ router LLM chain runs unchanged \-\- the prefilter can only skip work, never degrade routing.
+
+User invariant \(2026\-09\-07\): a wrong answer with overstated confidence is worse than a low\-confidence correct one. Everything here is tuned for precision\-first: unanimous top\-k vote, no vote \-\> nil, any failure \-\> nil.
+
+AssertOnly mode \(config\) inverts nothing in the gate \-\- it only changes what the CALLER does with the result. In assert mode the dispatcher logs the prefilter verdict and runs the LLM chain anyway, accumulating real\-traffic agreement data with zero routing risk.
+
+	type EmbeddingPrefilter struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewEmbeddingPrefilter"></a>
+### func NewEmbeddingPrefilter
+
+	func NewEmbeddingPrefilter(emb PrefilterEmbedder, cfg config.ClassifierPrefilterConfig, logger *slog.Logger) *EmbeddingPrefilter
+
+NewEmbeddingPrefilter builds the Stage\-0 gate. Index load is lazy \(first Match\) so daemon startup never blocks on the store, and a missing or corrupt store leaves the prefilter permanently inert rather than failing turns.
+
+<a name="EmbeddingPrefilter.Match"></a>
+### func \(\*EmbeddingPrefilter\) Match
+
+	func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent
+
+Match embeds the input and returns a direct\-route Intent when the k nearest examples vote unanimously for one intent. nil means "no opinion" \-\- caller falls through to the LLM chain.
+
+<a name="EmbeddingPrefilter.Reload"></a>
+### func \(\*EmbeddingPrefilter\) Reload
+
+	func (p *EmbeddingPrefilter) Reload()
+
+Reload forces a re\-read of the example store on the next Match. Used after rebuilding the index without a daemon restart.
+
+<a name="EmbeddingPrefilter.SetVerdictObserver"></a>
+### func \(\*EmbeddingPrefilter\) SetVerdictObserver
+
+	func (p *EmbeddingPrefilter) SetVerdictObserver(fn func(PrefilterVerdict))
+
+SetVerdictObserver wires the Door\-1 verdict consumer. Nil\-guarded \(project invariant, cf. SetPublisher\): a nil fn \-\- including a typed\-nil func \-\- is ignored so a wiring\-order bug cannot strip a live observer. Not lock\-protected: register once during construction, before Match runs.
 
 <a name="EpistemicHook"></a>
 ## type EpistemicHook
@@ -8670,6 +9052,11 @@ Intent represents the classified intent of a user message.
 	    RequiresPlanning bool `json:"requires_planning"`
 	    // Summary is a brief description of the intent.
 	    Summary string `json:"summary,omitempty"`
+	    // OriginalInput preserves the full untruncated input this intent was
+	    // classified from (bughunt 2026-09-10 M4). Set on clarify intents so
+	    // ResumeAfterClarification can re-analyze the user's actual request
+	    // instead of the first-100-chars Summary. Empty for all other intents.
+	    OriginalInput string `json:"original_input,omitempty"`
 	    // TrueAnalysis holds the IntentGate-style pre-classification analysis if available.
 	    TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
 	    // SuggestedMode is the synthesized planning mode (Thread D complexity routing).
@@ -8818,12 +9205,13 @@ IntentType represents a classified user intent.
 	    IntentStatus   IntentType = "status"
 	
 	    // Execution (async to orchestrator)
-	    IntentCode     IntentType = "code"
-	    IntentDebug    IntentType = "debug"
-	    IntentReview   IntentType = "review"
-	    IntentPlan     IntentType = "plan"
-	    IntentGit      IntentType = "git"
-	    IntentSchedule IntentType = "schedule"
+	    IntentCode      IntentType = "code"
+	    IntentDebug     IntentType = "debug"
+	    IntentReview    IntentType = "review"
+	    IntentPlan      IntentType = "plan"
+	    IntentQuickPlan IntentType = "quickplan" // plan+clarify+execute autonomously (adjudication record: docs/plans/classifier-iteration)
+	    IntentGit       IntentType = "git"
+	    IntentSchedule  IntentType = "schedule"
 	
 	    // Analysis (inline)
 	    IntentAnalyze  IntentType = "analyze"
@@ -10305,6 +10693,20 @@ Start subscribes to orchestrator bus topics and begins processing.
 
 Stop gracefully stops the orchestrator.
 
+<a name="Orchestrator.Strategic"></a>
+### func \(\*Orchestrator\) Strategic
+
+	func (o *Orchestrator) Strategic() *StrategicPlanner
+
+Strategic returns the strategic planner, if configured. Used by the daemon to expose the task approval gate \(StrategicPlanner.ApprovePlan\) over RPC, and to wire the metrics store for failure/replan outcome capture \(classifier\-outcome\-loop leaf 03\).
+
+<a name="Orchestrator.Tactical"></a>
+### func \(\*Orchestrator\) Tactical
+
+	func (o *Orchestrator) Tactical() *TacticalScheduler
+
+Tactical returns the tactical scheduler, if configured. Used by the daemon to wire the metrics store for failure/replan outcome capture \(classifier\-outcome\-loop leaf 03, Signal B at the Escalate site\).
+
 <a name="OrchestratorDeps"></a>
 ## type OrchestratorDeps
 
@@ -11162,6 +11564,18 @@ List returns all available tools.
 
 Register adds a tool to the registry.
 
+<a name="PlanDraft"></a>
+## type PlanDraft
+
+PlanDraft is the brainstorm draft carried on a task's metadata while the user and planner agent iterate in plan\-dialect v1 markdown. Sealing records the sealed document's sha256 hex in SealedHash; the draft bytes themselves are the immutable compile input.
+
+	type PlanDraft struct {
+	    Markdown   string    `json:"markdown"`
+	    Version    int       `json:"version"`
+	    UpdatedAt  time.Time `json:"updated_at"`
+	    SealedHash string    `json:"sealed_hash,omitempty"`
+	}
+
 <a name="PlanPhaseSpec"></a>
 ## type PlanPhaseSpec
 
@@ -11175,6 +11589,13 @@ PlanPhaseSpec is a planner\-declared phase. Distinct from plan.PlanPhase \(the p
 	    Consumes    []Artifact    `json:"consumes"`
 	    DependsOn   []int         `json:"depends_on,omitempty"`
 	}
+
+<a name="PhaseSpecsFromPlan"></a>
+### func PhaseSpecsFromPlan
+
+	func PhaseSpecsFromPlan(in []plan.PhaseSpec) []PlanPhaseSpec
+
+PhaseSpecsFromPlan converts compiler output \(\[\]plan.PhaseSpec\) into agent phase specs \(field\-parity map pinned by leaf 02's round\-trip test\). Exported for the daemon's seal wiring — plannerStep is unexported, so the conversion must live in this package. NOTE the depends\_on semantics shift: the compiler writes 1\-based step numbers \(PhaseN.S\<\#\> refs\); the LLM plannerStep contract is 0\-indexed — decrement here so FlattenPlanPhasesTo Steps resolves the same edges for both producers.
 
 <a name="PlanRequest"></a>
 ## type PlanRequest
@@ -11201,6 +11622,23 @@ PlanRequest is the input to the strategic planner.
 	    // spec_pair). The strategic planner uses this to short-circuit planning for
 	    // "direct" mode or select the spec-plan template for "spec_plan".
 	    Mode string `json:"mode,omitempty"`
+	
+	    // SessionContext carries the pre-rendered "Session execution context"
+	    // block for quick_plan mode (quickplan-mode leaf 02 / master Contract
+	    // 6): active plan (ID/title/state), open tracked tasks, and prior
+	    // quickplan waves in the conversation. Empty for other modes and when
+	    // the session carries no such evidence.
+	    SessionContext string `json:"session_context,omitempty"`
+	
+	    // ExecutorModelRef is the executor model reference ("provider/model-id",
+	    // e.g. "local/lfm-8b-mlx-4bit") resolved for this dispatch (allotment
+	    // tree leaf 02). It rides the plan request so the plan can carry the
+	    // executor model identity downstream, where the tactical scheduler's
+	    // ContextWindowProvider resolves the ref to a concrete context window.
+	    // Resolution to a number happens in the provider, never here. Empty =
+	    // no explicit model directive; the daemon's default-model fallback
+	    // applies at resolution time.
+	    ExecutorModelRef string `json:"executor_model_ref,omitempty"`
 	}
 
 <a name="PlannerThresholds"></a>
@@ -11245,6 +11683,28 @@ PlannerThresholds centralizes all tunable StrategicPlanner parameters that were 
 	func NewDefaultThresholds() *PlannerThresholds
 
 NewDefaultThresholds returns thresholds matching current hardcoded defaults.
+
+<a name="PrefilterEmbedder"></a>
+## type PrefilterEmbedder
+
+PrefilterEmbedder produces one embedding vector per text. Satisfied by openAIEmbedClient \(below\); tests inject deterministic fakes.
+
+	type PrefilterEmbedder interface {
+	    Embed(ctx context.Context, text string) ([]float64, error)
+	}
+
+<a name="PrefilterVerdict"></a>
+## type PrefilterVerdict
+
+PrefilterVerdict is the Door\-1 outcome of one Match call, forwarded to the dispatcher so the kNN margin survives on routed, suppressed, AND abstained dispatches \(classifier\-outcome\-loop leaf 02; design.md S3\(b\) \-\- abstentions discard the vote today, exactly the rows the near\-miss harvest needs\). Value type: the observer callback stays allocation\-light.
+
+	type PrefilterVerdict struct {
+	    Routed         bool
+	    AssertedIntent string  // winning intent; "" when index empty
+	    Confidence     float64 // winning similarity (unanimity floor)
+	    Margin         float64 // kNNVote margin (top1 - top2)
+	    Suppressed     bool    // H6 gate or quickplan cue-guard suppression
+	}
 
 <a name="PrepareNextTurnHook"></a>
 ## type PrepareNextTurnHook
@@ -11757,6 +12217,29 @@ QuotaBlockStatus represents an active quota block on a provider credential.
 	    EscalationTier int // 0=new, 1=12h, 2=20h, 3=24h(blocked)
 	}
 
+<a name="QuotaDeferralPolicy"></a>
+## type QuotaDeferralPolicy
+
+QuotaDeferralPolicy configures quota\-aware job deferral in TacticalScheduler.OnJobFailed. A policy with MaxDeferrals\<=0 or MaxTotalDeferral\<=0 disables deferral \(legacy failure behavior\).
+
+	type QuotaDeferralPolicy struct {
+	    // MaxDeferrals caps how many times one step may be quota-deferred.
+	    MaxDeferrals int
+	    // MaxTotalDeferral caps the wall-clock span from the step's first
+	    // deferral; a reset scheduled past the span fails the step instead.
+	    MaxTotalDeferral time.Duration
+	    // UnknownResetDelay is the requeue delay when the quota reset time is
+	    // unknown (ErrAllModelsQuotaBlocked carries no schedule).
+	    UnknownResetDelay time.Duration
+	}
+
+<a name="DefaultQuotaDeferralPolicy"></a>
+### func DefaultQuotaDeferralPolicy
+
+	func DefaultQuotaDeferralPolicy() QuotaDeferralPolicy
+
+DefaultQuotaDeferralPolicy bounds quota\-aware job deferral: a quota\-classified job failure re\-queues the job instead of failing it, at most MaxDeferrals times and within MaxTotalDeferral of the FIRST deferral; past either bound the job fails with a "quota\-deferred exhausted" error. Defaults follow the quota\-resilience max\-wait shape \(10 attempts, 6h\) — an agnes 5h quota park fits inside one deferral window.
+
 <a name="QuotaEpisode"></a>
 ## type QuotaEpisode
 
@@ -12095,12 +12578,19 @@ SetPlanManager sets the plan manager. This is called by the daemon after the Pla
 
 TaskIsTerminal reports whether the named task is in a terminal state. Used by the orchestrator so ralph\-loop replanning cannot run after OnJobCompleted has already finished the task.
 
+<a name="RalphLoop.TaskOutcome"></a>
+### func \(\*RalphLoop\) TaskOutcome
+
+	func (rl *RalphLoop) TaskOutcome(taskID string) (completed bool, terminal bool)
+
+TaskOutcome reports whether a terminal task completed successfully \(vs failed/cancelled/rejected\). Used by the orchestrator's job\-completed handler to distinguish "goal achieved — reset the replan counter" from "capped\-out — keep the counter so the cap stays armed" \(e2e run 3, 2026\-09\-10: the eager Reset let the counter restart from zero mid\-task and the replan loop never terminated\). A non\-terminal or unknown task reports \(false, false\).
+
 <a name="RalphLoop.TriggerReplan"></a>
 ### func \(\*RalphLoop\) TriggerReplan
 
 	func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousEvidence []string) error
 
-TriggerReplan creates a new planning step for incomplete tasks.
+TriggerReplan creates a new planning step for incomplete tasks. E2E run 3 \(2026\-09\-10\): an eager Reset\(taskID\) on task\-completed events kept zeroing the iteration counter mid\-flight \(log shows iteration=1 three separate times for one task\), so the MaxIterations cap never held and the task replan\-looped until the CLI's 120s socket read died. The cap is now enforced HERE — at the single point that increments the counter — so once iterations reaches MaxIterations the task is marked failed and no further replan request is published.
 
 <a name="RalphLoopConfig"></a>
 ## type RalphLoopConfig
@@ -13705,6 +14195,13 @@ SessionContextDigest is a compact per\-session summary the dispatcher can hand t
 
 IsEmpty reports whether the digest carries no information. The caller treats an empty digest as "no session context" \(pre\-tree behavior\).
 
+<a name="SessionContextDigest.IsEmptyIgnoringClarify"></a>
+### func \(\*SessionContextDigest\) IsEmptyIgnoringClarify
+
+	func (s *SessionContextDigest) IsEmptyIgnoringClarify() bool
+
+IsEmptyIgnoringClarify reports whether the digest carries no information EXCEPT a trailing clarify marker. buildClarificationResult records the clarify intent in the session tracker, so a session whose only history is a pending clarification produces a digest whose LastIntentType is "clarify" — making IsEmpty false even though no real context exists. The clarification\-resume gate \(ResumeAfterClarification A5\) uses this variant so "still ambiguous after clarification" can re\-fire a follow\-up question for exactly the context\-less sessions clarification exists for \(bughunt 2026\-09\-10 M2\). The ClassifyAndRoute gate keeps plain IsEmpty.
+
 <a name="SessionEndData"></a>
 ## type SessionEndData
 
@@ -14098,6 +14595,60 @@ NewSnowflakeEmbedClient creates a new Snowflake embedding client.
 
 
 
+<a name="SoulProvider"></a>
+## type SoulProvider
+
+SoulProvider owns the accepted soul text. It is safe for concurrent use: prompt builders read via Current\(\); the watcher goroutine writes via reload paths under the same mutex. A nil \*SoulProvider is valid and serves empty text, so wiring can be unconditional.
+
+	type SoulProvider struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSoulProvider"></a>
+### func NewSoulProvider
+
+	func NewSoulProvider(path string, logger *slog.Logger) (*SoulProvider, error)
+
+NewSoulProvider loads the soul file at path and returns a provider holding the accepted text. The caller decides startup policy:
+
+- Daemon start: SeedSoulIfMissing first, then NewSoulProvider; a non\-nil error refuses the start.
+- Tests/CLI: construct directly; CLI surfaces the error.
+
+<a name="NewSoulProviderFromText"></a>
+### func NewSoulProviderFromText
+
+	func NewSoulProviderFromText(text string) *SoulProvider
+
+NewSoulProviderFromText builds a provider from in\-memory text \(tests, override paths\). No file is read.
+
+<a name="SoulProvider.Current"></a>
+### func \(\*SoulProvider\) Current
+
+	func (s *SoulProvider) Current() string
+
+Current returns the accepted soul text.
+
+<a name="SoulProvider.SetReloadHook"></a>
+### func \(\*SoulProvider\) SetReloadHook
+
+	func (s *SoulProvider) SetReloadHook(fn func(text string))
+
+SetReloadHook registers a callback fired after each accepted reload \(and never for the constructor\-loaded initial text\). Must be called before StartWatching.
+
+<a name="SoulProvider.StartWatching"></a>
+### func \(\*SoulProvider\) StartWatching
+
+	func (s *SoulProvider) StartWatching(ctx context.Context) error
+
+StartWatching begins the fsnotify loop for the soul file. It watches the parent directory too: editors \(vim, VS Code\) save via write\-temp\-then\- rename, which surfaces as RENAME/CREATE on the directory rather than a WRITE on the original inode. Blocking; run in a goroutine. The context cancels the loop \(daemon shutdown\).
+
+<a name="SoulProvider.Status"></a>
+### func \(\*SoulProvider\) Status
+
+	func (s *SoulProvider) Status() (path, sha string, reloaded time.Time, watching bool, watchErr error)
+
+Status returns diagnostics for \`meept soul show\`.
+
 <a name="SpawnContext"></a>
 ## type SpawnContext
 
@@ -14415,6 +14966,27 @@ ConductInterview determines whether an interview is needed for the given plan re
 
 Returns a PlanningContext that may or may not have InterviewCompleted set to true. If the interview is incomplete, the caller should present the questions to the user and re\-invoke ConductInterview once answers are collected.
 
+<a name="StrategicPlanner.DraftFor"></a>
+### func \(\*StrategicPlanner\) DraftFor
+
+	func (sp *StrategicPlanner) DraftFor(taskID string) (*PlanDraft, bool)
+
+DraftFor returns the task's current draft \(ok=false when none exists\). Reads through the task store so drafts survive process restarts exactly like every other piece of task metadata.
+
+<a name="StrategicPlanner.MaxPhases"></a>
+### func \(\*StrategicPlanner\) MaxPhases
+
+	func (sp *StrategicPlanner) MaxPhases() int
+
+MaxPhases returns the compile phase cap for the seal path — the strategic planner's own multi\-phase cap \(MaxPhases config; default 12\), reused per master.md leaf\-04 Notes rather than adding a second knob.
+
+<a name="StrategicPlanner.MaxStepsPerPhase"></a>
+### func \(\*StrategicPlanner\) MaxStepsPerPhase
+
+	func (sp *StrategicPlanner) MaxStepsPerPhase() int
+
+MaxStepsPerPhase returns the per\-phase step cap \(0 = uncapped\).
+
 <a name="StrategicPlanner.Plan"></a>
 ### func \(\*StrategicPlanner\) Plan
 
@@ -14436,12 +15008,61 @@ RejectPlan cancels a plan that was awaiting approval. It sets the task to StateR
 
 ReplanFailedTask re\-plans a failed task into smaller steps for retry. This is called by the EscalationManager when a task fails and needs to be broken down into more manageable pieces.
 
+<a name="StrategicPlanner.SaveDraft"></a>
+### func \(\*StrategicPlanner\) SaveDraft
+
+	func (sp *StrategicPlanner) SaveDraft(taskID, markdown string) error
+
+SaveDraft stores \(or replaces\) the task's brainstorm draft. Version is incremented per save and updated\_at stamped. Refuses tasks that are not in the planning state — drafts belong to the brainstorm phase only.
+
+<a name="StrategicPlanner.SealDraft"></a>
+### func \(\*StrategicPlanner\) SealDraft
+
+	func (sp *StrategicPlanner) SealDraft(taskID, hash string) error
+
+SealDraft stamps the sealed document's hash on the draft \(sealing is a state change, not an edit\). Errors when no draft exists.
+
+<a name="StrategicPlanner.SealPlan"></a>
+### func \(\*StrategicPlanner\) SealPlan
+
+	func (sp *StrategicPlanner) SealPlan(ctx context.Context, taskID string, phases []PlanPhaseSpec, persistPhases func(taskID string, phases []PlanPhaseSpec) error) error
+
+SealPlan runs the full seal pipeline for a brainstorm task, mirroring ApprovePlan's tail with the compiled phases in place of pending steps: flatten → persist steps → generate spec → executing → promote ready → task.planned \+ orchestrator.schedule. PersistPhases \(the compiled phase declarations\) runs before the task state change; failures there abort the seal with the task still in planning.
+
+<a name="StrategicPlanner.SetInterviewProbe"></a>
+### func \(\*StrategicPlanner\) SetInterviewProbe
+
+	func (sp *StrategicPlanner) SetInterviewProbe(fn func())
+
+SetInterviewProbe installs the interview observation seam \(tests only\).
+
+<a name="StrategicPlanner.SetMetricsStore"></a>
+### func \(\*StrategicPlanner\) SetMetricsStore
+
+	func (sp *StrategicPlanner) SetMetricsStore(store *metrics.Store)
+
+SetMetricsStore installs \(or replaces\) the metrics store used for failure/replan outcome capture \(classifier\-outcome\-loop leaf 03, Signal B at the quickplan\-fallback site\). The planner also accepts a store via StrategicPlannerConfig.MetricsStore; this setter covers the daemon wiring order where the store is created after NewComponents. nil is ignored per the CLAUDE.md setter convention.
+
+<a name="StrategicPlanner.SetPlanCompilerEnabled"></a>
+### func \(\*StrategicPlanner\) SetPlanCompilerEnabled
+
+	func (sp *StrategicPlanner) SetPlanCompilerEnabled(enabled bool)
+
+SetPlanCompilerEnabled toggles the draft/seal/compile pipeline on the planner. Nil\-guarded per the repo's setter convention; also wired from daemon.go next to the SetParallelPhases site.
+
 <a name="StrategicPlanner.SetPlanPhaseSink"></a>
 ### func \(\*StrategicPlanner\) SetPlanPhaseSink
 
 	func (sp *StrategicPlanner) SetPlanPhaseSink(fn func(taskID string, phases []PlanPhaseSpec))
 
 SetPlanPhaseSink registers a callback invoked after multi\-phase plan generation. The callback receives the planner's phase declarations for persistence \(e.g., writing to plan.Store\). Nil\-guarded per CLAUDE.md.
+
+<a name="StrategicPlanner.SetRegistry"></a>
+### func \(\*StrategicPlanner\) SetRegistry
+
+	func (sp *StrategicPlanner) SetRegistry(reg *AgentRegistry)
+
+SetRegistry replaces the agent registry after construction \(tests only\).
 
 <a name="StrategicPlannerConfig"></a>
 ## type StrategicPlannerConfig
@@ -14699,12 +15320,26 @@ ScheduleReadySteps finds ready steps for a task and enqueues them as jobs. Steps
 
 SelectAgentForHint exports selectAgent so the tactical orchestrator \(and other callers outside the agent package\) can pick an executor agent ID for a tool hint without constructing a full TaskStep.
 
+<a name="TacticalScheduler.SetContextWindowProvider"></a>
+### func \(\*TacticalScheduler\) SetContextWindowProvider
+
+	func (ts *TacticalScheduler) SetContextWindowProvider(fn func(agentID string) int)
+
+SetContextWindowProvider installs the executor model's context\-window lookup \(allotment tree leaf 02\). nil is ignored \(allotment batching stays disabled; legacy scheduling behavior\), mirroring SetHandoffPropagator.
+
 <a name="TacticalScheduler.SetHandoffPropagator"></a>
 ### func \(\*TacticalScheduler\) SetHandoffPropagator
 
 	func (ts *TacticalScheduler) SetHandoffPropagator(fn func(ctx context.Context, completedStep *task.TaskStep) error)
 
 SetHandoffPropagator installs a callback that replaces the legacy 500\-char truncation propagation. nil is ignored \(leaves the legacy path active\).
+
+<a name="TacticalScheduler.SetMetricsStore"></a>
+### func \(\*TacticalScheduler\) SetMetricsStore
+
+	func (ts *TacticalScheduler) SetMetricsStore(store *metrics.Store)
+
+SetMetricsStore installs the metrics store used for failure/replan outcome capture \(classifier\-outcome\-loop leaf 03, Signal B\). nil is ignored: with no store the scheduler behaves exactly as before \(no dispatch\_log writes\).
 
 <a name="TacticalScheduler.SetSessionStore"></a>
 ### func \(\*TacticalScheduler\) SetSessionStore
@@ -14735,6 +15370,22 @@ TacticalSchedulerConfig holds configuration for the tactical scheduler.
 	    MaxHandoffSteps        int                // Max handoff steps per task (0 = unlimited, default: 5)
 	    HandoffUseAmendment    bool               // Route handoffs through amendment system (default: true)
 	    AmendmentManager       AmendmentSubmitter // Optional: enables amendment-based step creation
+	
+	    // QuotaDeferral, when non-nil, overrides the default quota-deferral
+	    // policy (10 deferrals, 6h total). A policy with MaxDeferrals<=0 or
+	    // MaxTotalDeferral<=0 disables deferral entirely (legacy behavior).
+	    QuotaDeferral *QuotaDeferralPolicy
+	
+	    // ContextWindowProvider resolves the executor model's context window
+	    // (tokens) for an agent ID; 0 = unknown. Wired by the daemon from the
+	    // LLM resolver. When nil (or the window is unknown), scheduling behaves
+	    // byte-identically to the pre-allotment legacy path (allotment tree
+	    // leaf 02).
+	    ContextWindowProvider func(agentID string) int
+	
+	    // AllotmentCfg controls the allotment math. Zero value is defaulted to
+	    // DefaultAllotmentConfig() in NewTacticalScheduler.
+	    AllotmentCfg AllotmentConfig
 	}
 
 <a name="TaintBeforeToolCall"></a>

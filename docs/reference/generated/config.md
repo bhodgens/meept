@@ -6,6 +6,12 @@
 
 Package config provides configuration loading and validation for meept.
 
+Package config: central home\-directory resolution for meept.
+
+Package config: read/write helpers for the main daemon config file \(meept.json5\).
+
+The main config path is resolved through MeeptHome\(\)/MeeptPath\(\) — never os.Getwd or a hardcoded \~/.meept — so the MEEPT\_HOME override applies.
+
 Package config provides configuration loading and validation for meept.
 
 Package config provides configuration loading and validation for meept.
@@ -18,8 +24,12 @@ Package config provides configuration loading and validation for meept.
 - [func DefaultAlwaysFullTools\(\) \[\]string](<#DefaultAlwaysFullTools>)
 - [func EnsureDataDir\(cfg \*Config\) error](<#EnsureDataDir>)
 - [func ExpandEnvVars\(s string\) \(string, error\)](<#ExpandEnvVars>)
+- [func IsDialectToolHint\(hint string\) bool](<#IsDialectToolHint>)
 - [func LoadJSON5\(path string, v any\) error](<#LoadJSON5>)
 - [func LoadJSON5WithDefault\(path string, v any\) error](<#LoadJSON5WithDefault>)
+- [func MainConfigPath\(\) string](<#MainConfigPath>)
+- [func MeeptHome\(\) string](<#MeeptHome>)
+- [func MeeptPath\(elem ...string\) string](<#MeeptPath>)
 - [func NormalizeAgentGuardsDefaults\(g \*AgentGuardsConfig\)](<#NormalizeAgentGuardsDefaults>)
 - [func NormalizeContextDiscoveryDefaults\(c \*ContextDiscoveryConfig\)](<#NormalizeContextDiscoveryDefaults>)
 - [func NormalizeEvolverDefaults\(e \*SkillsEvolverConfig\) error](<#NormalizeEvolverDefaults>)
@@ -27,10 +37,14 @@ Package config provides configuration loading and validation for meept.
 - [func NormalizeQuotaRetryDefaults\(q \*QuotaRetryConfig\)](<#NormalizeQuotaRetryDefaults>)
 - [func NormalizeRuntimeDefaults\(rc \*RuntimeConfig\)](<#NormalizeRuntimeDefaults>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
+- [func ReadMainConfig\(\) \(string, bool, error\)](<#ReadMainConfig>)
 - [func SaveACPAgents\(path string, cfg \*ACPAgentsConfig\) error](<#SaveACPAgents>)
 - [func SaveMCPConfig\(path string, cfg \*MCPServersConfig\) error](<#SaveMCPConfig>)
 - [func StripJSON5Comments\(s string\) string](<#StripJSON5Comments>)
+- [func ToolHintAgent\(hint string\) \(string, bool\)](<#ToolHintAgent>)
 - [func UnmarshalJSON5\(data \[\]byte, v any\) error](<#UnmarshalJSON5>)
+- [func ValidateMainConfigJSON5\(content string\) error](<#ValidateMainConfigJSON5>)
+- [func WriteMainConfigAtomic\(content string\) \(string, error\)](<#WriteMainConfigAtomic>)
 - [type ACPAgentEntry](<#ACPAgentEntry>)
 - [type ACPAgentsConfig](<#ACPAgentsConfig>)
   - [func LoadACPAgents\(path string\) \(\*ACPAgentsConfig, error\)](<#LoadACPAgents>)
@@ -72,6 +86,7 @@ Package config provides configuration loading and validation for meept.
 - [type BwrapRuntimeConfig](<#BwrapRuntimeConfig>)
 - [type CacheConfig](<#CacheConfig>)
 - [type CalendarConfig](<#CalendarConfig>)
+- [type ClassifierPrefilterConfig](<#ClassifierPrefilterConfig>)
 - [type ClusterConfig](<#ClusterConfig>)
   - [func DefaultClusterConfig\(\) ClusterConfig](<#DefaultClusterConfig>)
 - [type ClusterDispatchConfig](<#ClusterDispatchConfig>)
@@ -391,6 +406,10 @@ Package config provides configuration loading and validation for meept.
 	    DefaultCfgReasoningStreakTurns = 3
 	)
 
+<a name="AgentIDExplore"></a>AgentIDExplore is the read\-only codebase search specialist \(config/agents/explore, discovered via AGENT.md\).
+
+	const AgentIDExplore = "explore"
+
 <a name="DefaultContextDiscoveryInterval"></a>Defaults for llm.context\_discovery \(tree 05 leaf 01\).
 
 	const (
@@ -400,6 +419,14 @@ Package config provides configuration loading and validation for meept.
 <a name="DefaultEvolverPlanDir"></a>DefaultEvolverPlanDir is the user\-scoped sink where machine\-originated \(evolver\) plans land. Machine plans must never depend on the daemon's arbitrary CWD, and must never pollute a repo's docs/plans \(which is reserved for human\-authored plans\).
 
 	const DefaultEvolverPlanDir = "~/.meept/plans/evolver"
+
+<a name="DefaultHomeRel"></a>DefaultHomeRel is the home\-relative default directory.
+
+	const DefaultHomeRel = ".meept"
+
+<a name="EnvMeeptHome"></a>EnvMeeptHome is the environment variable that overrides the meept home directory. When set \(non\-empty after expansion\), every meept component — daemon, CLI, TUI, config loaders — resolves the home directory to it. When unset, the default is $HOME/.meept.
+
+	const EnvMeeptHome = "MEEPT_HOME"
 
 ## Variables
 
@@ -421,6 +448,13 @@ Package config provides configuration loading and validation for meept.
 
 	var DefaultEnvDenyGlobs = []string{"*KEY*", "*TOKEN*", "*SECRET*", "*PASSWORD*", "*CREDENTIAL*"}
 
+<a name="DialectToolHints"></a>DialectToolHints is the plan\-dialect v1 legal hint set, in the order the dialect spec \(docs/workflows/plan\-dialect.md §4/§7\) lists them. The compiler validates against this slice; the error message stays verbatim per the spec\-slave rule.
+
+	var DialectToolHints = []string{
+	    "code", "refactor", "debug", "fix", "analyze",
+	    "research", "git", "plan", "chat", "bash",
+	}
+
 <a name="ErrBackupInvalid"></a>ErrBackupInvalid is returned when BackupConfig validation fails.
 
 	var ErrBackupInvalid = fmt.Errorf("backup config is invalid")
@@ -428,6 +462,10 @@ Package config provides configuration loading and validation for meept.
 <a name="ErrConfigSyncInvalid"></a>
 
 	var ErrConfigSyncInvalid = fmt.Errorf("config sync config is invalid")
+
+<a name="ErrMainConfigNotWritable"></a>ErrMainConfigNotWritable is returned by WriteMainConfigAtomic when the existing main config file exists but is not writable by the current user. Callers map it to an HTTP 403 rather than a 500.
+
+	var ErrMainConfigNotWritable = errors.New("main config file is not writable")
 
 <a name="ErrPushNoCheckout"></a>ErrPushNoCheckout is returned when PushLocalChanges is invoked on a ConfigSyncer whose underlying GitCheckout is nil \(e.g. cluster disabled or sync not yet started\). We avoid reusing ErrRepoUnreachable here so callers can distinguish "never configured" from "transient network failure"; both ultimately wrap ErrRepoUnreachable for operator\-facing messages via errors.Is.
 
@@ -469,6 +507,13 @@ EnsureDataDir creates the data directory if it doesn't exist.
 
 ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\). Implements recursion depth limiting to detect cyclic env var references. Returns ErrEnvVarCycle when a cycle is detected.
 
+<a name="IsDialectToolHint"></a>
+## func IsDialectToolHint
+
+	func IsDialectToolHint(hint string) bool
+
+IsDialectToolHint reports whether hint is legal in a plan\-dialect draft.
+
 <a name="LoadJSON5"></a>
 ## func LoadJSON5
 
@@ -482,6 +527,29 @@ LoadJSON5 reads a JSON5 file, expands environment variables, standardizes to JSO
 	func LoadJSON5WithDefault(path string, v any) error
 
 LoadJSON5WithDefault loads JSON5 from path, or returns default if not found.
+
+<a name="MainConfigPath"></a>
+## func MainConfigPath
+
+	func MainConfigPath() string
+
+MainConfigPath returns the absolute path of the main daemon config file: \<meept home\>/meept.json5 \(MEEPT\_HOME\-aware\).
+
+<a name="MeeptHome"></a>
+## func MeeptHome
+
+	func MeeptHome() string
+
+MeeptHome returns the meept home directory: $MEEPT\_HOME when set, else $HOME/.meept. This is THE single resolution point — consumers must call this instead of joining ".meept" \(or "\~/.meept"\) themselves, so an override applies consistently across daemon, CLI, TUI, and tooling.
+
+Falls back to ".meept" relative to CWD only if HOME is unset \(a pathological environment; meept treats CWD as the data root rather than failing\).
+
+<a name="MeeptPath"></a>
+## func MeeptPath
+
+	func MeeptPath(elem ...string) string
+
+MeeptPath joins elem onto MeeptHome\(\).
 
 <a name="NormalizeAgentGuardsDefaults"></a>
 ## func NormalizeAgentGuardsDefaults
@@ -532,6 +600,13 @@ NormalizeRuntimeDefaults fills safe defaults for [runtime](<https://pkg.go.dev/r
 
 ParseLogLevel converts a string log level to slog.Level.
 
+<a name="ReadMainConfig"></a>
+## func ReadMainConfig
+
+	func ReadMainConfig() (string, bool, error)
+
+ReadMainConfig returns the raw JSON5 text of the main config file and whether the file may be overwritten. A missing file yields \("", \<parent directory writable\>, nil\) so a caller can still create it.
+
 <a name="SaveACPAgents"></a>
 ## func SaveACPAgents
 
@@ -553,12 +628,35 @@ SaveMCPConfig writes the MCP server configuration atomically. Writes to path\+".
 
 StripJSON5Comments converts JSON5 to strict JSON, handling comments, trailing commas, and unquoted keys. It delegates to hujson.Standardize for full JSON5 spec compliance.
 
+<a name="ToolHintAgent"></a>
+## func ToolHintAgent
+
+	func ToolHintAgent(hint string) (string, bool)
+
+ToolHintAgent returns the executor agent for a tool hint. Second return is false when the hint has no route \(caller decides its fallback\). Lookup is case\-insensitive and trims whitespace.
+
 <a name="UnmarshalJSON5"></a>
 ## func UnmarshalJSON5
 
 	func UnmarshalJSON5(data []byte, v any) error
 
 UnmarshalJSON5 parses JSON5\-formatted bytes into a struct. Unlike LoadJSON5, this does NOT expand environment variables. It also handles Go duration string values \(e.g. "30s"\) in JSON.
+
+<a name="ValidateMainConfigJSON5"></a>
+## func ValidateMainConfigJSON5
+
+	func ValidateMainConfigJSON5(content string) error
+
+ValidateMainConfigJSON5 parses content as JSON5 and returns an error when it is not valid. hujson accepts comments \(// and /\* \*/\) and trailing commas but requires quoted keys — matching the daemon's own json5 loader.
+
+<a name="WriteMainConfigAtomic"></a>
+## func WriteMainConfigAtomic
+
+	func WriteMainConfigAtomic(content string) (string, error)
+
+WriteMainConfigAtomic validates content, copies the previous file to \<path\>.bak \(when one exists\), and replaces the file atomically via a temp file \+ rename in the same directory. The existing file mode is preserved; a newly created file is written 0600.
+
+It returns the absolute path written. ErrMainConfigNotWritable is returned \(wrapped\) when the existing file is not writable.
 
 <a name="ACPAgentEntry"></a>
 ## type ACPAgentEntry
@@ -1193,6 +1291,49 @@ CalendarConfig holds Google Calendar integration settings. OAuth credentials are
 	    ReminderAdvanceMinutes int `json:"reminder_advance_minutes" toml:"reminder_advance_minutes"`
 	}
 
+<a name="ClassifierPrefilterConfig"></a>
+## type ClassifierPrefilterConfig
+
+ClassifierPrefilterConfig configures the Stage\-0 embedding prefilter in ClassifyAndRoute. The prefilter embeds the user input via an OpenAI\-compatible /v1/embeddings endpoint \(served locally, e.g. the Qwen3\-Embedding weights under /Volumes/LLMs\) and matches it against per\-intent centroids built from testdata/eval/classifier\-test\-corpus.json5 \(scripts/build\_prefilter\_centroids.py\). A cosine score at or above Threshold routes directly — no analyzer, no router LLM call. Lower scores fall through to the existing LLM classification chain unchanged, so a downed embedding server or missing centroids never degrade routing.
+
+	type ClassifierPrefilterConfig struct {
+	    // Enabled turns on the Stage-0 prefilter. Default false.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // BaseURL is the OpenAI-compatible embeddings root, e.g.
+	    // "http://127.0.0.1:8090/v1". Required when Enabled.
+	    BaseURL string `json:"base_url" toml:"base_url"`
+	    // Model is the model id sent in the embeddings request.
+	    Model string `json:"model" toml:"model"`
+	    // Dimension is the expected embedding size (Qwen3-Embedding-0.6B: 1024).
+	    // 0 disables the dimension check.
+	    Dimension int `json:"dimension" toml:"dimension"`
+	    // Threshold is the minimum cosine similarity for a direct route.
+	    // 0 uses the built-in default (0.70). In kNN mode this gates which
+	    // neighbors may vote; the vote itself requires full unanimity.
+	    Threshold float64 `json:"threshold" toml:"threshold"`
+	    // AssertOnly turns the prefilter into a silent observer: Match still
+	    // runs and logs its verdict (method/classification agreement data in
+	    // the daemon log), but the dispatcher ALWAYS falls through to the LLM
+	    // chain regardless of the verdict. Zero routing risk; the intended
+	    // first production mode per HANDOFF-STAGE0.md §9 while real-traffic
+	    // precision is being measured. Default false.
+	    AssertOnly bool `json:"assert_only" toml:"assert_only"`
+	    // CentroidsPath is the centroid store produced by
+	    // scripts/build_prefilter_centroids.py. Empty defaults to
+	    // ~/.meept/classifier_prefilter_centroids.json.
+	    CentroidsPath string `json:"centroids_path" toml:"centroids_path"`
+	    // TimeoutSeconds bounds each embeddings call. 0 uses the built-in
+	    // default (2s). The prefilter must never stall a turn: on timeout or
+	    // error it returns no match and the LLM chain takes over.
+	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	    // VetoPath is the tfidf-veto model produced by
+	    // scripts/build_tfidf_veto.py. When set and loadable, Door-1 routes
+	    // require the veto model's top intent to agree with the kNN winner;
+	    // disagreement falls through to the LLM chain. Empty disables the
+	    // veto (Door 1 routes on the kNN vote alone — legacy behavior).
+	    VetoPath string `json:"veto_path" toml:"veto_path"`
+	}
+
 <a name="ClusterConfig"></a>
 ## type ClusterConfig
 
@@ -1433,7 +1574,7 @@ Load loads configuration from the specified TOML file. Environment variables in 
 
 	func LoadDefault() (*Config, error)
 
-LoadDefault loads configuration from the default location. Prefers JSON5, falls back to TOML for backward compatibility.
+LoadDefault loads configuration from the default location. Prefers JSON5, falls back to TOML for backward compatibility. The location is MeeptHome\(\) \(MEEPT\_HOME override or \~/.meept\).
 
 <a name="LoadJSON5Config"></a>
 ### func LoadJSON5Config
@@ -2233,7 +2374,7 @@ HTTPTransportConfig configures the HTTP REST transport.
 
 	type HTTPTransportConfig struct {
 	    Enabled        bool     `json:"enabled"       toml:"enabled"`             // Enable HTTP server (default: false; shipped config template enables it)
-	    Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: ":8081"; SECURITY: keep 127.0.0.1 unless exposing intentionally)
+	    Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: "127.0.0.1:8081" — loopback only; never widen this unless you intend to expose the daemon, see docs/reference/http-api-security.md)
 	    UseTLS         bool     `json:"use_tls"       toml:"use_tls"`             // Enable HTTPS (server ALWAYS uses TLS; field is accepted for compat — see comment)
 	    AutoTLSCert    bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`       // Auto-generate self-signed cert (server auto-generates whenever cert files are missing)
 	    TLSCertFile    string   `json:"tls_cert_file" toml:"tls_cert_file"`       // TLS certificate file path
@@ -2516,7 +2657,7 @@ LoadMCPConfig loads MCP server configuration from a JSON5 file. If the file does
 
 	func LoadMCPConfigDefault() (*MCPServersConfig, error)
 
-LoadMCPConfigDefault loads MCP config from the default location \(\~/.meept/mcp\_servers.json5\).
+LoadMCPConfigDefault loads MCP config from the default location \($MEEPT\_HOME/mcp\_servers.json5, default \~/.meept/mcp\_servers.json5\).
 
 <a name="MediaConfig"></a>
 ## type MediaConfig
@@ -2832,6 +2973,7 @@ ModelsConfig represents the models.json5 configuration structure.
 	    VisionModel       string              `json:"vision_model"`
 	    ImageModel        string              `json:"image_model"`
 	    VideoModel        string              `json:"video_model"`
+	    ExtractModel      string              `json:"extract_model"` // Model for json_extract extraction (empty = json_extract reports not-configured)
 	    DisabledProviders []string            `json:"disabled_providers"`
 	    DefaultTimeout    int                 `json:"default_timeout"` // Default timeout in seconds
 	    Providers         map[string]Provider `json:"providers"`
@@ -2849,7 +2991,7 @@ LoadModelsConfig loads models configuration from a JSON5 file.
 
 	func LoadModelsConfigDefault() (*ModelsConfig, error)
 
-LoadModelsConfigDefault loads models config from the default location. Priority: user config \(\~/.meept/models.json5\) \> project config \(config/models.json5\)
+LoadModelsConfigDefault loads models config from the default location. Priority: user config \($MEEPT\_HOME/models.json5, default \~/.meept\) \> project config \(config/models.json5\)
 
 <a name="MultiAgentConfig"></a>
 ## type MultiAgentConfig
@@ -2951,6 +3093,14 @@ OrchestratorConfig holds hierarchical orchestrator settings.
 	    // production keeps rotation; exists to make classifier failures
 	    // honest during testing/iteration.
 	    ClassifierFailFast bool `json:"classifier_fail_fast" toml:"classifier_fail_fast"`
+	    // Prefilter configures the Stage-0 embedding prefilter
+	    // (classifier-observability follow-up): embed the input, cosine-match
+	    // against labeled intent centroids, and route directly when confident
+	    // — skipping the analyzer + router LLM calls entirely. Default
+	    // disabled; when enabled but the centroids file is missing, the
+	    // prefilter is inert and all traffic flows through the LLM path
+	    // unchanged.
+	    Prefilter ClassifierPrefilterConfig `json:"classifier_prefilter" toml:"classifier_prefilter"`
 	}
 
 <a name="PTYConfig"></a>
@@ -3089,6 +3239,12 @@ PlansConfig holds configuration for the plan system.
 	    // phases declare Produces/Consumes artifacts. See
 	    // docs/workflows/agent-orchestration.md (phase frontier section).
 	    ParallelPhases bool `json:"parallel_phases" toml:"parallel_phases"`
+	
+	    // Draft→seal→compile planning pipeline (default false;
+	    // legacy JSON spec_plan path used when false). See
+	    // docs/workflows/agent-orchestration.md (plan compiler pipeline
+	    // section).
+	    PlanCompilerEnabled bool `json:"plan_compiler_enabled" toml:"plan_compiler_enabled"`
 	}
 
 <a name="PlansConfig.Validate"></a>
@@ -4208,6 +4364,19 @@ TranscriptConfig configures the transcript\_fetch tool \(\[transcript\]\). Disab
 	    ModuleName string `json:"module_name" toml:"module_name"`
 	    // TimeoutSeconds bounds the subprocess run. Default 60.
 	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	    // FallbackOutputDir is the directory relative output_path values
+	    // join when the session context carries no working directory (the
+	    // tool is called outside a workspace). Mirrors MediaConfig.OutputDir
+	    // resolution; default "~/.meept/media" when empty.
+	    FallbackOutputDir string `json:"fallback_output_dir" toml:"fallback_output_dir"`
+	    // SummarizeEnabled opts in to transcript_fetch's summarize mode at
+	    // the config level. The tool itself does not read this field —
+	    // registration gating is daemon wiring (leaf 04). Default false.
+	    SummarizeEnabled bool `json:"summarize_enabled" toml:"summarize_enabled"`
+	    // SummarizeModel names the summarizer model to use. Default "":
+	    // daemon-side resolution (summarizer_model -> small_model) decides
+	    // the concrete client (leaf 04), not the tool.
+	    SummarizeModel string `json:"summarize_model" toml:"summarize_model"`
 	}
 
 <a name="DefaultTranscriptConfig"></a>

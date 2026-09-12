@@ -11,9 +11,12 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 ## Index
 
 - Constants
+- [func AutonomousFromContext\(ctx context.Context\) bool](<#AutonomousFromContext>)
 - [func CanonicalName\(tool Tool\) string](<#CanonicalName>)
+- [func ContextWithAutonomous\(ctx context.Context\) context.Context](<#ContextWithAutonomous>)
 - [func ContextWithWorkingDir\(ctx context.Context, dir string\) context.Context](<#ContextWithWorkingDir>)
 - [func GetCategory\(t Tool\) string](<#GetCategory>)
+- [func GetMaxResultTokens\(t Tool\) int](<#GetMaxResultTokens>)
 - [func WorkingDirFromContext\(ctx context.Context\) string](<#WorkingDirFromContext>)
 - [type Categorizer](<#Categorizer>)
 - [type CategoryTools](<#CategoryTools>)
@@ -40,6 +43,7 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
   - [func \(r \*Registry\) ToLLMDefinitions\(\) \[\]llm.ToolDefinition](<#Registry.ToLLMDefinitions>)
   - [func \(r \*Registry\) ToolsByCategory\(\) map\[string\]\[\]string](<#Registry.ToolsByCategory>)
   - [func \(r \*Registry\) Unregister\(name string\) error](<#Registry.Unregister>)
+- [type ResultSizer](<#ResultSizer>)
 - [type SchemaMode](<#SchemaMode>)
 - [type StreamingTool](<#StreamingTool>)
 - [type TerminatingTool](<#TerminatingTool>)
@@ -112,6 +116,13 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 	    SchemaPropCapabilities   = "capabilities"
 	)
 
+<a name="AutonomousFromContext"></a>
+## func AutonomousFromContext
+
+	func AutonomousFromContext(ctx context.Context) bool
+
+AutonomousFromContext reports whether ctx was marked autonomous via ContextWithAutonomous. Absent marker = interactive: staging applies.
+
 <a name="CanonicalName"></a>
 ## func CanonicalName
 
@@ -120,6 +131,13 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 CanonicalName returns the canonical registration name for a tool. The canonical name is the value returned by Tool.Name\(\), normalized to lowercase with surrounding whitespace trimmed. This is the single source of truth for how tool names appear in constitution tool references \(tools\_allowed / tools\_forbidden\) and in the tool registry's lookup key.
 
 C3: This function exists so that constitution tool references can be validated against canonical names at load time. Callers should use this function when comparing user\-provided or constitution\-declared tool names to the registry — never compare raw strings directly.
+
+<a name="ContextWithAutonomous"></a>
+## func ContextWithAutonomous
+
+	func ContextWithAutonomous(ctx context.Context) context.Context
+
+ContextWithAutonomous marks the context as AUTONOMOUS execution: a job\-driven, headless run where no human and no later interactive turn can follow up. Staging tools \(file\_write, file\_edit\) consult this to bypass the preview/accept workflow — a staged change in an autonomous run is a silent no\-op \(e2e run 8, 2026\-09\-11: file\_write direct:"False" staged into the pending\-changes registry, nothing ever resolved it, the step "completed", and the file never existed on disk\).
 
 <a name="ContextWithWorkingDir"></a>
 ## func ContextWithWorkingDir
@@ -134,6 +152,13 @@ ContextWithWorkingDir returns a new context with the working directory injected.
 	func GetCategory(t Tool) string
 
 GetCategory returns the tool's category, or "general" if it doesn't implement Categorizer.
+
+<a name="GetMaxResultTokens"></a>
+## func GetMaxResultTokens
+
+	func GetMaxResultTokens(t Tool) int
+
+GetMaxResultTokens returns the tool's declared result\-token floor, or 0 when the tool does not implement ResultSizer or declares a non\-positive floor. The returned value is the RAW declaration: the agent loop caps it at ToolResultMaxTokens \(kept in internal/agent to avoid an import cycle\).
 
 <a name="WorkingDirFromContext"></a>
 ## func WorkingDirFromContext
@@ -396,6 +421,17 @@ ToolsByCategory returns all registered tools grouped by their category. Tools th
 	func (r *Registry) Unregister(name string) error
 
 Unregister removes a tool from the registry. Returns an error if the tool is not found.
+
+<a name="ResultSizer"></a>
+## type ResultSizer
+
+ResultSizer is an optional interface tools implement to declare a minimum token budget for their results. The agent loop never compresses a declared tool's result below this floor regardless of the dynamic budget. Note that the tools package does NOT cap the declared value here: the global ceiling \(ToolResultMaxTokens\) lives in internal/agent and importing agent from tools would be an import cycle, so the agent loop caps the floor at the ceiling at the consumption site.
+
+	type ResultSizer interface {
+	    // MaxResultTokens returns the minimum token budget this tool's results
+	    // should get before compression. Non-positive values are ignored.
+	    MaxResultTokens() int
+	}
 
 <a name="SchemaMode"></a>
 ## type SchemaMode
