@@ -71,6 +71,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func PriorityOf\(opts \[\]ChatOption\) bool](<#PriorityOf>)
 - [func Ptr\[T any\]\(v T\) \*T](<#Ptr>)
 - [func QuotaCredentialKey\(providerID string, cfg \*ModelConfig\) string](<#QuotaCredentialKey>)
+- [func ReapRuntimeProcesses\(targets \[\]OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log \*slog.Logger\) \[\]int](<#ReapRuntimeProcesses>)
 - [func ResolveBudget\(rc \*ReasoningConfig, agent \*AgentReasoningConfig, modelDefault \*ReasoningConfig, globalBudgets map\[string\]int\) \*int](<#ResolveBudget>)
 - [func RunModelPicker\(config ModelPickerConfig\) \(\*ProviderDef, \*ModelCatalogEntry, error\)](<#RunModelPicker>)
 - [func SchemaModeValid\(s string\) bool](<#SchemaModeValid>)
@@ -413,6 +414,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type OrphanRuntime](<#OrphanRuntime>)
   - [func FindOrphanRuntimes\(cfgs \[\]\*RuntimeConfig, list RuntimeProcLister\) \(\[\]OrphanRuntime, error\)](<#FindOrphanRuntimes>)
   - [func OrphanRuntimesFromConfigs\(cfgs \[\]\*RuntimeConfig\) \(\[\]OrphanRuntime, error\)](<#OrphanRuntimesFromConfigs>)
+  - [func ReapOrphanRuntimesFromConfigs\(cfgs \[\]\*RuntimeConfig, waitAfterTerm time.Duration, log \*slog.Logger\) \(\[\]OrphanRuntime, \[\]int\)](<#ReapOrphanRuntimesFromConfigs>)
 - [type PacingConfig](<#PacingConfig>)
 - [type ParameterProperty](<#ParameterProperty>)
 - [type PolicyVerdict](<#PolicyVerdict>)
@@ -608,6 +610,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(p \*RuntimeProcess\) StalePIDRemoval\(\)](<#RuntimeProcess.StalePIDRemoval>)
   - [func \(p \*RuntimeProcess\) Start\(ctx context.Context, stdout, stderr io.Writer\) error](<#RuntimeProcess.Start>)
   - [func \(p \*RuntimeProcess\) Stop\(ctx context.Context\) error](<#RuntimeProcess.Stop>)
+  - [func \(p \*RuntimeProcess\) StopAsOperator\(ctx context.Context\) error](<#RuntimeProcess.StopAsOperator>)
 - [type RuntimeStatus](<#RuntimeStatus>)
 - [type RuntimeType](<#RuntimeType>)
   - [func ParseRuntimeType\(s string\) \(RuntimeType, error\)](<#ParseRuntimeType>)
@@ -948,6 +951,10 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 <a name="ErrEmptyResponse"></a>ErrEmptyResponse is returned when the model replies with an empty body. It is a sentinel so callers \(e.g. ClassifyClassificationFailure\) can identify the failure kind without string matching.
 
 	var ErrEmptyResponse = &ClientError{Message: "empty content"}
+
+<a name="ErrRuntimeNotOwned"></a>ErrRuntimeNotOwned reports that Stop refused to stop a runtime this instance did not spawn: the PID file names a runtime another meept process owns, which this instance may have adopted as observed\-not\-owned. Operator surfaces that deliberately stop it anyway \(the \`meept runtime stop\` CLI\) must use StopAsOperator instead of ignoring this error — reporting "stopped" while the process keeps running and holding the endpoint port is a false success.
+
+	var ErrRuntimeNotOwned = errors.New("runtime not owned by this instance")
 
 <a name="GBNFConstrained"></a>GBNFConstrained is the global kill\-switch for grammar\-constrained tool calling \(\[agent.tools\] gbnf\_constrained\). Default FALSE: no grammar is attached anywhere until explicitly enabled. Set via SetGBNFConstrained at daemon wiring time.
 
@@ -1478,6 +1485,15 @@ QuotaCredentialKey returns a stable identity for a provider credential:
 	OAuth provider  -> providerID + ":oauth:" + OAuthProvider
 	nothing identifiable -> providerID + ":default"
 	
+
+<a name="ReapRuntimeProcesses"></a>
+## func ReapRuntimeProcesses
+
+	func ReapRuntimeProcesses(targets []OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log *slog.Logger) []int
+
+ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each process group, a grace period, then SIGKILL for those still alive. The table is re\-read before escalating, so a pid whose entry changed is never signalled \(pid reuse\) and a pid that already exited is not signalled again. Returns the pids confirmed gone — a caller may only treat those as stopped.
+
+list and signal are seams: nil means the real ps scan and the real process\-group kill, which is what the daemon and the CLI both use.
 
 <a name="ResolveBudget"></a>
 ## func ResolveBudget
@@ -3746,6 +3762,8 @@ SetProcessAliveProbe binds the checker to the process the endpoint belongs to. W
 
 Start begins periodic health checks in a background goroutine.
 
+Calling Start again after Stop re\-arms the checker: a closed stop channel would make run return at once, freezing the verdict forever. That freeze is worse than a missed check — a restarted runtime's WaitForHealthy would either fail against a stale "unhealthy" \(and Stop would then kill the restart it was waiting for\) or succeed immediately against a stale "healthy" before the process had bound. Re\-arming clears the failure count and drops the verdict to unhealthy until a real check succeeds.
+
 <a name="HealthChecker.Stop"></a>
 ### func \(\*HealthChecker\) Stop
 
@@ -4640,7 +4658,7 @@ OrphanRuntime is one runtime process left behind by a meept process that no long
 
 	func FindOrphanRuntimes(cfgs []*RuntimeConfig, list RuntimeProcLister) ([]OrphanRuntime, error)
 
-FindOrphanRuntimes returns runtime processes that a dead meept process left behind. Report\-only: the caller decides whether to signal them.
+FindOrphanRuntimes returns runtime processes that a dead meept process left behind. Report\-only: the caller decides whether to signal them. A pid matched by more than one endpoint config is reported once.
 
 <a name="OrphanRuntimesFromConfigs"></a>
 ### func OrphanRuntimesFromConfigs
@@ -4648,6 +4666,13 @@ FindOrphanRuntimes returns runtime processes that a dead meept process left behi
 	func OrphanRuntimesFromConfigs(cfgs []*RuntimeConfig) ([]OrphanRuntime, error)
 
 OrphanRuntimesFromConfigs reports leftover runtime processes for a set of runtime configs \(used by \`meept doctor\`, which has no RuntimeManager\).
+
+<a name="ReapOrphanRuntimesFromConfigs"></a>
+### func ReapOrphanRuntimesFromConfigs
+
+	func ReapOrphanRuntimesFromConfigs(cfgs []*RuntimeConfig, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int)
+
+ReapOrphanRuntimesFromConfigs finds and reaps leftovers for the given configs with the real process scan and process\-group signals. It returns the orphans it considered and the pids confirmed gone — callers must report the confirmed count, never the candidate count.
 
 <a name="PacingConfig"></a>
 ## type PacingConfig
@@ -6335,7 +6360,7 @@ StopProvider stops a specific provider's runtime \(and the shared subprocess\).
 
 	func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration) []int
 
-SweepOrphanRuntimes stops every runtime a previous meept generation left behind: SIGTERM to the process group, then SIGKILL after waitAfterTerm, then the endpoint PID file is removed when it still names the reaped pid. Returns the reaped pids \(nil when nothing matched\). It never returns an error: a failed sweep must not block daemon start.
+SweepOrphanRuntimes stops every runtime a previous meept generation left behind: endpoint configs whose auto\_stop\_on\_exit is true, a process whose parent is init, and a command line equal to the endpoint's spawn command. An endpoint with a live recorded owner is skipped. Returns the pids confirmed gone \(nil when nothing matched\). It never returns an error: a failed sweep must not block daemon start.
 
 <a name="RuntimeProcInfo"></a>
 ## type RuntimeProcInfo
@@ -6423,7 +6448,16 @@ Adoption semantics \(docs/bugs\-and\-gaps.md "Runtime adoption ownership race"\)
 
 	func (p *RuntimeProcess) Stop(ctx context.Context) error
 
-Stop gracefully terminates the runtime process. Non\-owners are refused: a RuntimeProcess that neither spawned nor owned\-adopted the runtime \(e.g. the LLM stack constructed inside a short\-lived CLI or eval subprocess, or an instance that adopted a foreign instance's runtime as observed\-not\-owned\) must not kill the daemon's healthy llama\-server through the shared PID file.
+Stop gracefully terminates the runtime process. Non\-owners are refused with ErrRuntimeNotOwned: a RuntimeProcess that neither spawned nor owned\-adopted the runtime \(e.g. the LLM stack constructed inside a short\-lived CLI or eval subprocess, or an instance that adopted a foreign instance's runtime as observed\-not\-owned\) must not kill the daemon's healthy llama\-server through the shared PID file.
+
+<a name="RuntimeProcess.StopAsOperator"></a>
+### func \(\*RuntimeProcess\) StopAsOperator
+
+	func (p *RuntimeProcess) StopAsOperator(ctx context.Context) error
+
+StopAsOperator stops the runtime recorded in this process's PID file even when this instance did not spawn it. Use it only for an explicit operator request: the error message on the refusal path tells the operator the runtime is owned by another meept process, and the automatic LLM\-stack paths \(StopAll, health restart\) must keep using Stop so a short\-lived CLI or eval process can never take down the daemon's runtime.
+
+Stays a no\-op when there is nothing to stop \(no live process behind the PID file\), matching Stop.
 
 <a name="RuntimeStatus"></a>
 ## type RuntimeStatus

@@ -172,6 +172,7 @@ Package config provides configuration loading and validation for meept.
   - [func \(g \*GitCheckout\) Repo\(\) \*git.Repository](<#GitCheckout.Repo>)
 - [type HTTPHookConfig](<#HTTPHookConfig>)
 - [type HTTPTransportConfig](<#HTTPTransportConfig>)
+  - [func \(c HTTPTransportConfig\) ListenAddr\(\) string](<#HTTPTransportConfig.ListenAddr>)
 - [type HooksConfig](<#HooksConfig>)
 - [type InstructionConfig](<#InstructionConfig>)
 - [type IsolationConfig](<#IsolationConfig>)
@@ -2373,8 +2374,20 @@ HTTPHookConfig mirrors agent.HTTPHookConfig for JSON\-based config loading. On d
 HTTPTransportConfig configures the HTTP REST transport.
 
 	type HTTPTransportConfig struct {
-	    Enabled        bool     `json:"enabled"       toml:"enabled"`             // Enable HTTP server (default: false; shipped config template enables it)
-	    Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: "127.0.0.1:8081" — loopback only; never widen this unless you intend to expose the daemon, see docs/reference/http-api-security.md)
+	    Enabled bool   `json:"enabled"       toml:"enabled"` // Enable HTTP server (default: false; shipped config template enables it)
+	    Addr    string `json:"addr"          toml:"addr"`    // Listen address (default: "127.0.0.1:8081" — loopback only; never widen this unless you intend to expose the daemon, see docs/reference/http-api-security.md). Resolve the effective address via ListenAddr, never read this directly.
+	    // Port is a convenience alias for the port half of Addr: set it (e.g. 18095)
+	    // when you want the default loopback host without spelling out
+	    // "127.0.0.1". Addr wins when both are set, and when neither is set the
+	    // HTTP server binds its own loopback default (127.0.0.1:8081).
+	    //
+	    // Why this alias exists: `transport.http.port` used to be a key this
+	    // struct never declared, so JSON5/TOML decoding dropped it silently. A
+	    // config carrying only `port` bound the Addr default instead, and the
+	    // resulting collision with another local service on the same port went
+	    // unnoticed for days — no error, no warning, the daemon simply listened
+	    // somewhere else. Every consumer reads ListenAddr() so that can't recur.
+	    Port           int      `json:"port"          toml:"port"`                // Listen port alias; ignored when addr is set
 	    UseTLS         bool     `json:"use_tls"       toml:"use_tls"`             // Enable HTTPS (server ALWAYS uses TLS; field is accepted for compat — see comment)
 	    AutoTLSCert    bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`       // Auto-generate self-signed cert (server auto-generates whenever cert files are missing)
 	    TLSCertFile    string   `json:"tls_cert_file" toml:"tls_cert_file"`       // TLS certificate file path
@@ -2390,6 +2403,17 @@ HTTPTransportConfig configures the HTTP REST transport.
 	    RateLimitRPM   int      `json:"rate_limit_rpm"  toml:"rate_limit_rpm"`    // Per-IP request rate limit (0 = default 120 req/min)
 	    RateLimitBurst int      `json:"rate_limit_burst" toml:"rate_limit_burst"` // Per-IP burst size (0 = default 30)
 	}
+
+<a name="HTTPTransportConfig.ListenAddr"></a>
+### func \(HTTPTransportConfig\) ListenAddr
+
+	func (c HTTPTransportConfig) ListenAddr() string
+
+ListenAddr returns the address the HTTP listener should bind.
+
+Precedence: Addr when set \(it carries the full host:port, including host\-less forms such as ":8081"\), else "127.0.0.1:\<Port\>" when Port is set, else "" — callers then fall through to the binding default in internal/comm/http \(NewServer: "127.0.0.1:8081"\).
+
+Every consumer of the config's HTTP address MUST resolve it through this method rather than reading Addr directly, so the \`port\` alias cannot be silently dropped again \(see the Port field doc for the incident\).
 
 <a name="HooksConfig"></a>
 ## type HooksConfig
