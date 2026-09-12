@@ -658,6 +658,14 @@ or TODO.
   platforms, not `Cmd+V` on mac), session/agent/tab semantics (e.g., archive vs
   delete), and tab affordances. Document surface-specific deviations explicitly
   with a justification.
+- **TUI tables are sized on both axes.** `bubbles/table` owns a viewport that
+  starts at width 0, and a width-0 viewport renders no lines: a table given only
+  `SetHeight` draws its header over an empty body while cursor navigation still
+  works. Size every table through `internal/tui/tableutil.Size` and write rows
+  through `tableutil.SetRows`, which normalizes each row to the current column
+  count (a row longer than the column list panics inside `bubbles/table`). A
+  column change clears the rows first (`SetColumns` re-renders them) and
+  repopulates from cache afterwards. See `docs/workflows/tui.md`.
 
 ## Flutter Multi-Platform (Web + Desktop)
 
