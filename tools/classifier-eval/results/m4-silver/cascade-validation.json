@@ -1,24 +1,24 @@
 {
  "silver_n": 48,
  "stageA": {
-  "routes": 11,
-  "correct": 8,
-  "precision": 0.727
+  "routes": 9,
+  "correct": 7,
+  "precision": 0.778
  },
  "stageB": {
-  "routes": 4,
+  "routes": 5,
   "correct": 4,
-  "precision": 1.0
+  "precision": 0.8
  },
- "stageC_chain": 33,
- "expected_system_accuracy": 0.8468,
- "tau": 0.147,
+ "stageC_chain": 34,
+ "expected_system_accuracy": 0.844,
+ "tau": 0.152,
  "misses": [
   [
-   "A",
-   "implement the plan using subagents",
-   "code",
-   "plan"
+   "B",
+   "commit, omit the .env but include an env.sample with comment",
+   "git",
+   "code"
   ],
   [
    "A",

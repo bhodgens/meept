@@ -1,0 +1,12 @@
+{
+  "n": 48,
+  "policy": "double-confidence",
+  "a_routes": 7,
+  "a_correct": 5,
+  "b_routes": 0,
+  "b_correct": 0,
+  "chain": 41,
+  "system_accuracy": 0.8456,
+  "acceptance_threshold": 0.868,
+  "verdict": "FAIL"
+}
