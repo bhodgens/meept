@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/tui/tableutil"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
@@ -77,15 +78,19 @@ func (m *QueueModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 
-	// Update table dimensions
-	tableHeight := max(
-		// Account for stats panel, detail panel and padding
-		height-16, 5)
-	m.table.SetHeight(tableHeight)
+	// Account for stats panel, detail panel and padding.
+	tableHeight := max(height-16, 5)
+
+	// Both axes must be set: the table viewport starts at width 0, and a
+	// zero-width viewport renders no rows (header only, blank body).
+	tableutil.Size(&m.table, width, tableHeight)
 
 	// Update column widths based on available space
 	remaining := width - 54 // ID(20) + type(12) + priority(10) + state(12)
 	taskWidth := max(remaining, 10)
+	// SetColumns re-renders the installed rows, so clear them before the column
+	// list can change; the repopulate below restores them.
+	m.table.SetRows([]table.Row{})
 	m.table.SetColumns([]table.Column{
 		{Title: "id", Width: 20},
 		{Title: "type", Width: 12},
@@ -93,6 +98,11 @@ func (m *QueueModel) SetSize(width, height int) {
 		{Title: ColState, Width: 12},
 		{Title: "task", Width: taskWidth},
 	})
+
+	// Repopulate rows from cached data so a resize does not blank the table.
+	if len(m.jobs) > 0 {
+		m.updateTable()
+	}
 }
 
 // QueueUpdateMsg carries the queue data update.
@@ -265,7 +275,7 @@ func (m *QueueModel) updateTable() {
 			types.TruncateString(taskID, 20),
 		}
 	}
-	m.table.SetRows(rows)
+	tableutil.SetRows(&m.table, rows)
 }
 
 // View renders the queue view.

@@ -15,6 +15,8 @@ The platform exposes RPC + HTTP; the TUI is the primary interactive client for t
 - **Chat view** (`internal/tui/models/chat.go`): message rendering, input textarea, in-session find via `ctrl+f` (Spec A). Find bar supports case-sensitive (`alt+c`), regex (`alt+r`), prev/next (`shift+enter`/`enter`), and ANSI highlighting.
 - **Sessions view** (`internal/tui/models/sessions.go`): list sessions, switch, delete. Press `f` to open global search.
 - **Search view** (`internal/tui/models/search.go`): debounced semantic search (250ms) across all scopes. Scope cycling via `tab`, navigate via `up`/`down`/`j`/`k`, open via `enter`, close via `esc`.
+- **Tasks view** (`internal/tui/models/tasks.go`): three modes cycled with `tab` — tasks, scheduled jobs, lineage (`t` toggles lineage). Each mode has its own column set; switching modes reinstalls the columns and re-renders the cached rows together. Rows are only ever written for the mode that is displayed, so a fetch that lands after a mode switch is ignored.
+- **Table rendering** (`internal/tui/models/*.go`, `internal/tui/agents_panel.go`): every table is sized on both axes through `internal/tui/tableutil.Size` and its rows written through `tableutil.SetRows`. Two failures come from skipping that: a table given only a height keeps a zero-width viewport and renders a header over an empty body, and a row with more cells than the column list panics (`index out of range`) inside `bubbles/table`. Changing columns must clear the rows first (`SetColumns` re-renders them) and repopulate from cache afterwards, or every terminal resize blanks the table.
 - **RPC client** (`internal/tui/rpc.go`): calls `search.semantic` and other RPC methods on the platform.
 
 ## Configuration

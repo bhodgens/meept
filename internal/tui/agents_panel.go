@@ -27,6 +27,8 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/caimlas/meept/internal/tui/tableutil"
 )
 
 // agentsSubView identifies which sub-view of the agents panel is active.
@@ -203,12 +205,21 @@ func (p *AgentsPanel) SetSize(width, height int) {
 	p.width = width
 	p.height = height
 	tableHeight := max(height-12, 5)
-	p.table.SetHeight(tableHeight)
+
+	// Both axes must be set: the table viewport starts at width 0, and a
+	// zero-width viewport renders no rows (header only, blank body).
+	tableutil.Size(&p.table, width, tableHeight)
 	p.resizeColumns()
+
+	// Repopulate rows from cached data so a resize does not blank the table.
+	if len(p.agents) > 0 {
+		p.updateAgentsTable()
+	}
 }
 
 func (p *AgentsPanel) resizeColumns() {
-	// Clear rows before resizing columns to prevent row/column mismatch panic.
+	// SetColumns re-renders the installed rows, so clear them before the column
+	// list changes; SetSize repopulates from the cached agents.
 	p.table.SetRows([]table.Row{})
 
 	if p.width < 30 {
@@ -750,7 +761,7 @@ func (p *AgentsPanel) updateAgentsTable() {
 			formatTimeAgoTime(a.LastInvocation),
 		}
 	}
-	p.table.SetRows(rows)
+	tableutil.SetRows(&p.table, rows)
 	// Preserve the cursor across rebuilds. quota events and countdown ticks
 	// rebuild rows frequently; an unconditional GotoTop would yank the
 	// user's selection back to the first row each time.

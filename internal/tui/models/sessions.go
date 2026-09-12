@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/tui/tableutil"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
@@ -119,15 +120,12 @@ func (m *SessionsModel) SetSize(width, height int) {
 	m.height = height
 
 	tableHeight := max(height-10, 5)
-	m.table.SetHeight(tableHeight)
 
-	// Set table viewport width to match the rendered table container's
-	// inner width (tableWidth minus border frame). Without this, the
-	// viewport width stays at 0 and View() returns "" — the table
-	// appears blank even though rows are populated and navigation works.
+	// Both axes must be set: the table viewport starts at width 0, and a
+	// zero-width viewport renders no rows (header only, blank body).
 	detailWidth := max(width/3, 30)
 	tableWidth := width - detailWidth - 4
-	m.table.SetWidth(tableWidth - 2) // -2 for rounded border frame
+	tableutil.Size(&m.table, tableWidth, tableHeight)
 
 	m.setSessionsColumns()
 }
@@ -395,7 +393,7 @@ func (m *SessionsModel) updateSessionsTable() {
 		rows[i] = table.Row{titleCell, createdCell, activityCell}
 	}
 
-	m.table.SetRows(rows)
+	tableutil.SetRows(&m.table, rows)
 	if len(rows) > 0 {
 		m.table.GotoTop()
 	}

@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/tui/tableutil"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
@@ -111,15 +112,25 @@ func (m *PlansModel) SetSize(width, height int) {
 	m.height = height
 
 	tableHeight := max(height-12, 5)
-	m.table.SetHeight(tableHeight)
+
+	// Both axes must be set: the table viewport starts at width 0, and a
+	// zero-width viewport renders no rows (header only, blank body).
+	tableutil.Size(&m.table, width, tableHeight)
 
 	m.setPlansColumns()
+
+	// Repopulate rows from cached data so a resize does not blank the table.
+	if len(m.plans) > 0 {
+		m.updatePlansTable()
+	}
 }
 
 func (m *PlansModel) setPlansColumns() {
-	// Clear rows before changing columns to prevent panic from row/column mismatch
+	// SetColumns re-renders the installed rows, so clear them before the column
+	// list changes; SetSize repopulates from the cached plans.
 	m.table.SetRows([]table.Row{})
 
+	// Plan view columns: Title | State | Phases | Steps | Progress | Updated
 	available := m.width - 10 // borders/padding
 	titleW := available * 26 / 100
 	stateW := 10
@@ -370,7 +381,7 @@ func (m *PlansModel) updatePlansTable() {
 			updated,
 		}
 	}
-	m.table.SetRows(rows)
+	tableutil.SetRows(&m.table, rows)
 	if len(rows) > 0 {
 		m.table.GotoTop()
 	}

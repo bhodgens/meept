@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/tui/tableutil"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
@@ -107,10 +108,15 @@ func NewTasksModel(rpc TasksRPCClient) *TasksModel {
 	}
 }
 
-// SetViewMode switches between jobs and tasks view.
+// SetViewMode switches the table between jobs, tasks, and lineage view.
+// It installs the matching column set and re-renders the cached rows.
 func (m *TasksModel) SetViewMode(mode TaskViewMode) {
 	m.viewMode = mode
 	m.loading = true
+	// Columns and rows must move together: leaving the other mode's columns
+	// installed makes the table render the wrong headers and panics when the
+	// new rows are longer than the column list.
+	m.reflowTable()
 }
 
 // SetFilter sets the task filter.
@@ -197,22 +203,45 @@ func (m *TasksModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 
-	// Update table dimensions
-	tableHeight := max(
-		// Account for detail panel and padding
-		height-12, 5)
-	m.table.SetHeight(tableHeight)
+	// Account for detail panel and padding.
+	tableHeight := max(height-12, 5)
 
-	// Update column widths based on view mode
-	if m.viewMode == ViewModeTasks {
-		m.setTasksColumns()
-	} else {
-		m.setJobsColumns()
+	// Width must be set as well as height: the table's viewport starts at
+	// width 0, and a zero-width viewport renders no rows at all (header
+	// only, blank body) even when the table holds rows.
+	tableutil.Size(&m.table, width, tableHeight)
+
+	m.reflowTable()
+}
+
+// reflowTable installs the column set for the current view mode and re-renders
+// the cached rows, keeping the selection index where it was. Swapping columns
+// clears the table's rows (bubbles/table re-renders them inside SetColumns),
+// which also discards the cursor, so the index is carried across by hand.
+func (m *TasksModel) reflowTable() {
+	cursor := m.table.Cursor()
+
+	m.applyViewColumns()
+	m.refreshTable()
+
+	if cursor > 0 {
+		m.table.SetCursor(cursor) // clamps to the new row count
 	}
 }
 
+// applyViewColumns installs the column set that matches the current view mode.
+func (m *TasksModel) applyViewColumns() {
+	if m.viewMode == ViewModeJobs {
+		m.setJobsColumns()
+		return
+	}
+	m.setTasksColumns()
+}
+
 func (m *TasksModel) setJobsColumns() {
-	// Clear rows before changing columns to prevent panic from row/column mismatch
+	// SetColumns re-renders the rows that are already installed, so rows must
+	// be cleared first: the previous view mode's rows are longer than the new
+	// column list and panic inside bubbles/table. The caller repopulates.
 	m.table.SetRows([]table.Row{})
 
 	colWidth := max((m.width-20)/4, 10)
@@ -225,7 +254,9 @@ func (m *TasksModel) setJobsColumns() {
 }
 
 func (m *TasksModel) setTasksColumns() {
-	// Clear rows before changing columns to prevent panic from row/column mismatch
+	// SetColumns re-renders the rows that are already installed, so rows must
+	// be cleared first: the previous view mode's rows are longer than the new
+	// column list and panic inside bubbles/table. The caller repopulates.
 	m.table.SetRows([]table.Row{})
 
 	// Task view columns: Name | State | Agent | Steps | Progress | Memory | Updated
@@ -251,6 +282,35 @@ func (m *TasksModel) setTasksColumns() {
 		{Title: "memory", Width: memoryW},
 		{Title: "updated", Width: updatedW},
 	})
+}
+
+// refreshTable renders the rows that belong to the current view mode.
+//
+// Rows are always re-derived here rather than written by whichever message
+// arrived: update events for one view mode arrive while another mode is
+// displayed (a late tasks fetch after switching to jobs), and a row must never
+// be written against the other mode's columns.
+func (m *TasksModel) refreshTable() {
+	if m.viewMode == ViewModeJobs {
+		m.updateTable()
+		return
+	}
+	m.updateTasksTable()
+}
+
+// restoreCursor keeps the selection on the same row index across table
+// rebuilds, clamped to the new row count. Resizes and refreshes rebuild rows on
+// every window event, so an unconditional GotoTop would pull the user's
+// selection back to the first row each time.
+func (m *TasksModel) restoreCursor(rowCount int) {
+	if rowCount == 0 {
+		return
+	}
+	if cur := m.table.Cursor(); cur >= 0 && cur < rowCount {
+		m.table.SetCursor(cur)
+		return
+	}
+	m.table.GotoTop()
 }
 
 // JobsUpdateMsg carries the jobs update.
@@ -300,7 +360,9 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		m.err = nil
 		m.jobs = msg.Jobs
-		m.updateTable()
+		if m.viewMode == ViewModeJobs {
+			m.updateTable()
+		}
 		return nil
 
 	case TasksUpdateMsg:
@@ -312,7 +374,12 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 		m.err = nil
 		m.tasks = msg.Tasks
 		m.buildTaskTree(msg.Tasks)
-		m.updateTasksTable()
+		// A tasks fetch can still be in flight when the user switches to the
+		// jobs view. Writing task rows while the 4 jobs columns are installed
+		// makes the table index past its column slice and panic.
+		if m.viewMode != ViewModeJobs {
+			m.updateTasksTable()
+		}
 		return nil
 
 	case tea.KeyPressMsg:
@@ -348,31 +415,23 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 			// Cycle view mode: tasks -> jobs -> lineage -> tasks
 			switch m.viewMode {
 			case ViewModeTasks:
-				m.viewMode = ViewModeJobs
-				m.setJobsColumns()
-				m.loading = true
+				m.SetViewMode(ViewModeJobs)
 				return m.fetchJobs
 			case ViewModeJobs:
-				m.viewMode = ViewModeLineage
-				m.loading = true
+				m.SetViewMode(ViewModeLineage)
 				return m.fetchTasks
 			default: // ViewModeLineage
-				m.viewMode = ViewModeTasks
-				m.setTasksColumns()
-				m.loading = true
+				m.SetViewMode(ViewModeTasks)
 				return m.fetchTasks
 			}
 
 		case "t":
 			// Quick toggle lineage view
 			if m.viewMode == ViewModeLineage {
-				m.viewMode = ViewModeTasks
-				m.setTasksColumns()
-				m.loading = true
+				m.SetViewMode(ViewModeTasks)
 				return m.fetchTasks
 			}
-			m.viewMode = ViewModeLineage
-			m.loading = true
+			m.SetViewMode(ViewModeLineage)
 			return m.fetchTasks
 
 		case "f":
@@ -499,10 +558,8 @@ func (m *TasksModel) updateTable() {
 			status,
 		}
 	}
-	m.table.SetRows(rows)
-	if len(rows) > 0 {
-		m.table.GotoTop()
-	}
+	tableutil.SetRows(&m.table, rows)
+	m.restoreCursor(len(rows))
 }
 
 func (m *TasksModel) filterTasks() []types.TaskExtended {
@@ -627,10 +684,8 @@ func (m *TasksModel) updateTasksTable() {
 			updated,
 		}
 	}
-	m.table.SetRows(rows)
-	if len(rows) > 0 {
-		m.table.GotoTop()
-	}
+	tableutil.SetRows(&m.table, rows)
+	m.restoreCursor(len(rows))
 }
 
 func (m *TasksModel) getStateIcon(state string) string {

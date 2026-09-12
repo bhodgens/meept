@@ -2248,8 +2248,12 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return a, tea.Batch(sessionCmd, clearCmd)
 			}
 			if task := a.fuzzyFinder.GetSelectedTask(); task != nil {
-				// Switch to tasks view and select the task
+				// Switch to tasks view and select the task. The tasks model
+				// keeps the view mode it was left in, so force the tasks mode:
+				// otherwise this lands on the jobs table and the picked task is
+				// not in the list at all.
 				a.currentView = ViewTasks
+				a.tasks.SetViewMode(models.ViewModeTasks)
 				a.tasks.SetFilter(models.FilterAll)
 				cmd := a.initCurrentView()
 				return a, cmd
