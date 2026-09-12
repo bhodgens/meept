@@ -8,6 +8,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/caimlas/meept/internal/config"
 )
 
 // PromptTier labels the discovery tier a template was found in.
@@ -50,46 +52,139 @@ type tierSpec struct {
 	dir   string
 }
 
+// PromptDirs holds the resolved directories for the four prompt tiers.
+//
+// The daemon resolves every path before constructing the service: the bundled
+// directory from the shipped repo/executable layout (never the process CWD),
+// the user directory from config.MeeptPath("prompts") (which honors
+// $MEEPT_HOME), the system directory from the XDG-style user config dir, and
+// the project directory from the active project. An empty field means the
+// tier is absent and is dropped.
+type PromptDirs struct {
+	Project string // active project's .meept/prompts
+	User    string // $MEEPT_HOME/prompts
+	System  string // ~/.config/meept/prompts
+	Bundled string // shipped config/prompts, daemon-resolved
+}
+
+// NewPromptServiceFromDirs constructs a PromptService from daemon-resolved
+// tier directories. Prefer this over NewPromptService at daemon wiring sites
+// so prompt discovery never depends on the process working directory.
+func NewPromptServiceFromDirs(d PromptDirs) *PromptService {
+	return NewPromptService(d.Project, d.User, d.System, d.Bundled)
+}
+
 // NewPromptService constructs a PromptService using the standard 4-tier
-// hierarchy. Overrides must be non-empty strings.
+// hierarchy. Empty directories are dropped and directories that resolve to
+// the same path are de-duplicated (see resolveTiers).
 //
 // Tier order (highest priority first):
-//  1. projectDir (.meept/prompts relative to CWD)
-//  2. userDir    (~/.meept/prompts)
+//  1. projectDir (the active project's .meept/prompts)
+//  2. userDir    ($MEEPT_HOME/prompts, default ~/.meept/prompts)
 //  3. systemDir  (~/.config/meept/prompts)
-//  4. bundledDir (config/prompts)
+//  4. bundledDir (shipped config/prompts, resolved by the daemon)
 func NewPromptService(projectDir, userDir, systemDir, bundledDir string) *PromptService {
 	return &PromptService{
-		tiers: []tierSpec{
+		tiers: resolveTiers([]tierSpec{
 			{TierProject, projectDir},
 			{TierUser, userDir},
 			{TierSystem, systemDir},
 			{TierBundled, bundledDir},
-		},
+		}),
 	}
 }
 
-// NewDefaultPromptService constructs a PromptService with the standard paths
-// resolved from the user home directory. The bundledDir defaults to
-// "config/prompts" relative to CWD (matching the daemon convention).
+// NewDefaultPromptService constructs a PromptService whose user tier honors
+// $MEEPT_HOME (config.MeeptPath("prompts")) and whose system tier is the
+// XDG-style ~/.config/meept/prompts.
+//
+// The project and bundled tiers are left empty: only the daemon can resolve
+// the shipped bundled directory (repo/executable layout) and the active
+// project's directory. Daemon wiring should pass both through
+// NewPromptServiceFromDirs; this constructor is the fallback for callers with
+// no daemon context and never reads the process CWD.
 func NewDefaultPromptService() *PromptService {
-	home, _ := os.UserHomeDir()
-	return NewPromptService(
-		".meept/prompts",
-		filepath.Join(home, ".meept", "prompts"),
-		filepath.Join(home, ".config", "meept", "prompts"),
-		"config/prompts",
-	)
+	system := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		system = filepath.Join(home, ".config", "meept", "prompts")
+	}
+	return NewPromptService("", config.MeeptPath("prompts"), system, "")
+}
+
+// resolveTiers drops empty directories and de-duplicates directories that
+// resolve to the same absolute path.
+//
+// Empty dirs are dropped so filepath.Join("", name) can never silently read
+// from the process CWD. Collisions matter for labels: when the project tier
+// and user tier resolve to the same directory (which happens when the project
+// dir is derived from a CWD that is the meept home), a file there is a user
+// override and must be labelled "user", not "project". Other duplicate tiers
+// keep the highest-priority (first) occurrence.
+func resolveTiers(in []tierSpec) []tierSpec {
+	userDir := dirForTier(in, TierUser)
+	userAbs := ""
+	if strings.TrimSpace(userDir) != "" {
+		userAbs = absOrClean(userDir)
+	}
+
+	out := make([]tierSpec, 0, len(in))
+	for _, t := range in {
+		if strings.TrimSpace(t.dir) == "" {
+			continue
+		}
+		abs := absOrClean(t.dir)
+		// A "project" tier that is really the user directory is a user tier:
+		// keep the truthful label instead of shadowing it.
+		if t.label == TierProject && userAbs != "" && abs == userAbs {
+			continue
+		}
+		dup := false
+		for _, existing := range out {
+			if absOrClean(existing.dir) == abs {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue
+		}
+		out = append(out, tierSpec{label: t.label, dir: t.dir})
+	}
+	return out
+}
+
+// dirForTier returns the directory configured for the given tier label, or ""
+// when that tier is absent.
+func dirForTier(tiers []tierSpec, label PromptTier) string {
+	for _, t := range tiers {
+		if t.label == label {
+			return t.dir
+		}
+	}
+	return ""
+}
+
+// absOrClean returns the absolute, cleaned form of p for path comparison.
+// Falls back to filepath.Clean when the absolute path cannot be computed.
+func absOrClean(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return filepath.Clean(p)
 }
 
 // UserOverridePath returns the path in the user-home tier where an override
 // for the given template name should be written. This is used by edit/PUT
 // handlers so users edit an override rather than a bundled file.
+//
+// The user tier is located by label, not by index: resolveTiers drops empty
+// and duplicate directories, so its position in the tier list is not fixed.
 func (s *PromptService) UserOverridePath(name string) string {
-	if len(s.tiers) < 2 {
+	dir := dirForTier(s.tiers, TierUser)
+	if dir == "" {
 		return name
 	}
-	return filepath.Join(s.tiers[1].dir, name)
+	return filepath.Join(dir, name)
 }
 
 // List walks every tier and returns one entry per unique template name,
@@ -170,6 +265,9 @@ func (s *PromptService) Put(name, content string) error {
 	}
 	if err := ValidateTemplate(content); err != nil {
 		return fmt.Errorf("template validation failed: %w", err)
+	}
+	if dirForTier(s.tiers, TierUser) == "" {
+		return fmt.Errorf("no user prompt tier configured; cannot store override")
 	}
 	dest := s.UserOverridePath(name)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {

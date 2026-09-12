@@ -235,6 +235,109 @@ func TestNormalizeName(t *testing.T) {
 	}
 }
 
+func TestPromptService_ExplicitDirsIgnoreCWD(t *testing.T) {
+	// The daemon's CWD is never the user's project. With explicit dirs, a CWD
+	// that has no prompts directory must not affect discovery (the bug that
+	// made an installed daemon return an empty prompt list).
+	t.Chdir(t.TempDir())
+
+	tmp := t.TempDir()
+	bundled := filepath.Join(tmp, "bundled")
+	user := filepath.Join(tmp, "user")
+	mustWriteFile(t, filepath.Join(bundled, "planner", "decompose.md"), "BUNDLED {{.X}}")
+	mustWriteFile(t, filepath.Join(user, "planner", "interview.md"), "USER {{.X}}")
+
+	// A project dir that does not exist (the old default was CWD-relative).
+	svc := NewPromptService(filepath.Join(tmp, "missing-project"), user, filepath.Join(tmp, "system"), bundled)
+	entries, err := svc.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d: %+v", len(entries), entries)
+	}
+	tiers := map[string]PromptTier{}
+	for _, e := range entries {
+		tiers[e.Name] = e.Tier
+	}
+	if tiers["planner/decompose.md"] != TierBundled {
+		t.Errorf("decompose tier = %s, want bundled", tiers["planner/decompose.md"])
+	}
+	if tiers["planner/interview.md"] != TierUser {
+		t.Errorf("interview tier = %s, want user", tiers["planner/interview.md"])
+	}
+}
+
+func TestPromptService_EqualUserAndProjectDirs(t *testing.T) {
+	shared := t.TempDir()
+	mustWriteFile(t, filepath.Join(shared, "planner", "decompose.md"), "USER BODY {{.X}}")
+
+	// project dir == user dir (the CWD==home collision): the entry must be
+	// labelled "user", not "project".
+	svc := NewPromptService(shared, shared, filepath.Join(t.TempDir(), "system"), filepath.Join(t.TempDir(), "bundled"))
+	entries, err := svc.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d: %+v", len(entries), entries)
+	}
+	if entries[0].Tier != TierUser {
+		t.Errorf("tier = %s, want user when project and user dirs are equal", entries[0].Tier)
+	}
+	detail, err := svc.Get("planner/decompose.md")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if detail.Tier != TierUser {
+		t.Errorf("Get tier = %s, want user", detail.Tier)
+	}
+}
+
+func TestPromptService_EmptyDirsDoNotReadCWD(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	// A CWD-relative prompts tree that must never be discovered once a tier
+	// directory is empty.
+	mustWriteFile(t, filepath.Join(cwd, ".meept", "prompts", "planner", "leak.md"), "LEAK")
+
+	svc := NewPromptService("", "", "", "")
+	entries, err := svc.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected no entries, got %+v", entries)
+	}
+	if _, err := svc.Get("planner/leak.md"); err == nil {
+		t.Error("Get resolved an empty tier against the process CWD")
+	}
+}
+
+func TestNewDefaultPromptService_HonorsMeeptHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MEEPT_HOME", home)
+	mustWriteFile(t, filepath.Join(home, "prompts", "planner", "decompose.md"), "USER {{.X}}")
+
+	svc := NewDefaultPromptService()
+	entries, err := svc.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found bool
+	for _, e := range entries {
+		if e.Name == "planner/decompose.md" {
+			found = true
+			if e.Tier != TierUser {
+				t.Errorf("tier = %s, want user", e.Tier)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("user-tier prompt under $MEEPT_HOME not discovered: %+v", entries)
+	}
+}
+
 // mustWriteFile creates directories and writes a file, failing the test on error.
 func mustWriteFile(t *testing.T, path, content string) {
 	t.Helper()

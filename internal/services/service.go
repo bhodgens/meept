@@ -92,6 +92,9 @@ type Config struct {
 	UploadsTypes        []string
 	EmployeeManager     EmployeeManager
 	ReflectionQueuePath string
+	// PromptDirs optionally supplies daemon-resolved prompt tier directories.
+	// When zero, NewDefaultPromptService (home-relative, no CWD) is used.
+	PromptDirs PromptDirs
 }
 
 // NewRegistry creates all services with their dependencies.
@@ -217,9 +220,16 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	// (defaults to ".meept/improvements.md" when empty).
 	reg.Reflection = NewReflectionService(cfg.ReflectionQueuePath)
 
-	// PromptService is always available — it reads from the standard 4-tier
-	// prompts hierarchy on disk and has no external dependencies.
-	reg.Prompt = NewDefaultPromptService()
+	// PromptService is always available — it reads from the 4-tier prompts
+	// hierarchy on disk and has no external dependencies. The daemon resolves
+	// the tier directories (bundled from the shipped layout, user from
+	// $MEEPT_HOME, project from the active project) and passes them through
+	// cfg.PromptDirs so discovery never depends on the process CWD.
+	if cfg.PromptDirs != (PromptDirs{}) {
+		reg.Prompt = NewPromptServiceFromDirs(cfg.PromptDirs)
+	} else {
+		reg.Prompt = NewDefaultPromptService()
+	}
 
 	return reg, nil
 }

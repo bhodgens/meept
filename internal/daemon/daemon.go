@@ -902,6 +902,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		UploadsMaxMB:     uploadCfg.MaxSizeMB,
 		UploadsTypes:     uploadCfg.AllowedTypes,
 		EmployeeManager:  nilSafeEmployeeManagerAdapter(components),
+		PromptDirs:       resolvePromptDirs(components),
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
@@ -1263,7 +1264,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				SubscribeMetrics() (<-chan *metrics.LiveMetricsSnapshot, func())
 			}
 			if metricsStore != nil {
-				metricsService = &metricsStoreWrapper{store: metricsStore}
+				wrapper := &metricsStoreWrapper{store: metricsStore}
+				metricsService = wrapper
+				// Wire the same wrapper as the live-metrics usage provider so
+				// GET /api/v1/metrics/live reads model/agent usage from the
+				// daemon's actual metrics store (honoring --state-dir) rather
+				// than falling back to a read-only <meept home>/metrics.db
+				// handle. No-op when the metrics store is disabled (nil).
+				httpOpts = append(httpOpts, http.WithMetricsUsageProvider(wrapper))
 			}
 			httpSrv = http.NewServer(httpCfg, configService, daemonControl, metricsService, svcRegistry, logger, httpOpts...)
 			// Wire firewall stats getter for HTTP endpoint
@@ -2224,6 +2232,11 @@ type metricsStoreWrapper struct {
 	store *metrics.Store
 }
 
+// metricsStoreWrapper must also satisfy the live-metrics usage provider so the
+// daemon can hand the same instance to http.WithMetricsUsageProvider. Compile
+// time proof: if the signature drifts, the build fails here.
+var _ http.ModelAgentUsageProvider = (*metricsStoreWrapper)(nil)
+
 func (w *metricsStoreWrapper) GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error) {
 	return w.store.GetLiveMetrics()
 }
@@ -2234,6 +2247,25 @@ func (w *metricsStoreWrapper) GetHistoricalMetrics(ctx context.Context, from, to
 
 func (w *metricsStoreWrapper) SubscribeMetrics() (_ <-chan *metrics.LiveMetricsSnapshot, _ func()) {
 	return w.store.SubscribeMetrics()
+}
+
+// ModelUsageSince reports model usage over [since, now) from the daemon's
+// metrics store. Nil-guarded so the wrapper degrades to an empty result rather
+// than panicking when no store is attached.
+func (w *metricsStoreWrapper) ModelUsageSince(ctx context.Context, since time.Time) ([]metrics.ModelUsage, error) {
+	if w == nil || w.store == nil {
+		return []metrics.ModelUsage{}, nil
+	}
+	return w.store.ModelUsageSince(ctx, since)
+}
+
+// AgentUsageSince reports agent usage over [since, now) from the daemon's
+// metrics store. Nil-guarded like ModelUsageSince.
+func (w *metricsStoreWrapper) AgentUsageSince(ctx context.Context, since time.Time) ([]metrics.AgentUsage, error) {
+	if w == nil || w.store == nil {
+		return []metrics.AgentUsage{}, nil
+	}
+	return w.store.AgentUsageSince(ctx, since)
 }
 
 // runtimeMetricsAdapter adapts metrics.Store to implement llm.MetricsRecorder.
