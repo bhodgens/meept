@@ -4,9 +4,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestMatchesSpawnCommand(t *testing.T) {
@@ -218,4 +220,60 @@ func TestSweepOrphanRuntimes_LeavesUnrelatedPIDFile(t *testing.T) {
 	if _, err := os.Stat(pidFile); err != nil {
 		t.Errorf("pid file naming another pid must survive the sweep: %v", err)
 	}
+}
+
+// TestFindOrphanRuntimes_RealReparentedProcess drives the real ps scan against a
+// real process: a program whose parent exits immediately is re-parented to init,
+// which is exactly the shape a runtime left behind by a dead daemon has. The
+// reap decision for that shape is covered by the fake-lister tests above.
+func TestFindOrphanRuntimes_RealReparentedProcess(t *testing.T) {
+	// nohup execs its target in place, so the surviving process command line is
+	// exactly "sleep 300" and the shell that launched it is gone.
+	launcher := exec.Command("/bin/sh", "-c", "nohup sleep 300 >/dev/null 2>&1 &")
+	if err := launcher.Run(); err != nil {
+		t.Fatalf("launch re-parented process: %v", err)
+	}
+
+	var pid int
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		procs, err := ListRuntimeProcesses()
+		if err != nil {
+			t.Fatalf("ListRuntimeProcesses: %v", err)
+		}
+		for _, p := range procs {
+			if p.PPID == 1 && matchesSpawnCommand(p.Command, []string{"sleep", "300"}) {
+				pid = p.PID
+				break
+			}
+		}
+		if pid != 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if pid == 0 {
+		t.Skip("no re-parented process observed in this environment")
+	}
+	defer func() {
+		if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil {
+			t.Logf("cleanup kill %d: %v", pid, killErr)
+		}
+	}()
+
+	cfg := &RuntimeConfig{
+		EndpointKey:  "test:127.0.0.1:1",
+		AutoStop:     true,
+		SpawnCommand: []string{"sleep", "300"},
+	}
+	orphans, err := FindOrphanRuntimes([]*RuntimeConfig{cfg}, ListRuntimeProcesses)
+	if err != nil {
+		t.Fatalf("FindOrphanRuntimes: %v", err)
+	}
+	for _, o := range orphans {
+		if o.PID == pid {
+			return
+		}
+	}
+	t.Errorf("re-parented process %d (sleep 300) was not reported as an orphan: %+v", pid, orphans)
 }
