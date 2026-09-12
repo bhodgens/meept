@@ -1228,17 +1228,55 @@ class SdkApiClient {
   /// Returns the raw `prompts` array from `GET /api/v1/prompts`.
   ///
   /// Each entry should be passed to `PromptSummary.fromJson`.
+  ///
+  /// The documented body is `{"prompts": [...]}`. A wrong-shape body (missing
+  /// key, wrong value type, or a response that is neither that object nor a
+  /// bare array) is raised as an [SdkApiException] instead of being coerced to
+  /// an empty list: a silent `[]` is indistinguishable from "no templates",
+  /// which is precisely how a broken daemon hides behind an empty panel.
   Future<List<Map<String, dynamic>>> listPromptsRaw() async {
+    final Response<dynamic> response;
     try {
-      final raw = await _get('/api/v1/prompts');
-      final promptsRaw = raw['prompts'] as List? ?? [];
-      return promptsRaw
-          .whereType<Map>()
-          .map((p) => Map<String, dynamic>.from(p))
-          .toList();
+      response = await _dio.get('/api/v1/prompts');
     } on DioException catch (e) {
       throw _handleError(e);
     }
+    return _decodePromptsEnvelope(response.data);
+  }
+
+  /// Decodes the `GET /api/v1/prompts` body, accepting the documented
+  /// `{"prompts": [...]}` envelope and, defensively, a bare top-level array.
+  static List<Map<String, dynamic>> _decodePromptsEnvelope(Object? data) {
+    final Object? list;
+    if (data is Map) {
+      if (!data.containsKey('prompts')) {
+        throw SdkApiException(
+          message: 'malformed prompts response: missing "prompts" key '
+              '(got keys ${data.keys.toList()})',
+          statusCode: 0,
+        );
+      }
+      list = data['prompts'];
+    } else if (data is List) {
+      list = data;
+    } else {
+      throw SdkApiException(
+        message: 'unexpected prompts response type ${data.runtimeType}; '
+            'want an object with a "prompts" list',
+        statusCode: 0,
+      );
+    }
+    if (list is! List) {
+      throw SdkApiException(
+        message: 'malformed prompts response: "prompts" is '
+            '${list.runtimeType}; want a list',
+        statusCode: 0,
+      );
+    }
+    return list
+        .whereType<Map>()
+        .map((p) => Map<String, dynamic>.from(p))
+        .toList();
   }
 
   /// Returns the raw template JSON (with `content`) from

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
+import '../../services/sdk_client.dart';
 import 'prompt_models.dart';
 
 /// Prompt-editor panel — lists discoverable prompt templates from the
@@ -66,11 +67,39 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = e.toString();
+          _error = _describeLoadError(e);
           _isLoading = false;
         });
       }
     }
+  }
+
+  /// Maps a load failure to a lowercase, actionable sentence. The HTTP status
+  /// decides the guidance so "loads nothing" becomes "shows why":
+  /// 401/418 = api key, 404 = route missing (older daemon), 503 = service not
+  /// registered, otherwise whatever the transport reported (e.g. unreachable).
+  String _describeLoadError(Object error) {
+    if (error is SdkApiException) {
+      switch (error.statusCode) {
+        case 401:
+          return 'unauthorized (http 401) - set a valid api key in settings';
+        case 418:
+          return 'invalid api key (http 418) - check the api key in settings';
+        case 404:
+          return 'prompts endpoint not found (http 404) - this daemon build '
+              'may predate the prompts api; update and restart the daemon';
+        case 503:
+          return 'prompt service unavailable (http 503) - the daemon is '
+              'running but did not register its prompt service; restart the '
+              'daemon, then retry';
+        default:
+          if (error.statusCode > 0) {
+            return 'daemon error (http ${error.statusCode}): ${error.message}';
+          }
+          return error.message;
+      }
+    }
+    return error.toString();
   }
 
   void _closePanel() {
@@ -237,6 +266,28 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
             'bundled and project prompts will appear here',
             style: CyberpunkTypography.bodySmall.copyWith(
               color: CyberpunkColors.midGray,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              'an empty result means the daemon could not see its prompts '
+              'directory (config/prompts or ~/.meept/prompts).',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.orangeDark,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextButton(
+            onPressed: _loadPrompts,
+            child: Text(
+              'retry',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.orangePrimary,
+              ),
             ),
           ),
         ],
