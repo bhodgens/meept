@@ -54,11 +54,37 @@ done
 #    exact content being committed. Errors here always fail the hook: they
 #    belong to code being committed right now (or conflict with foreign WIP,
 #    which needs human attention either way).
-if ! OUTPUT=$(go build $STAGED_PKGS 2>&1); then
+# magefiles/*.go carry `//go:build mage` and declare no func main (mage emits
+# it), so neither a plain build ("build constraints exclude all Go files") nor
+# a tagged one ("function main is undeclared") can succeed there. `go vet
+# -tags mage` type-checks the same source without needing an entry point. No
+# other package in the module uses the mage tag.
+BUILD_FAILED=""
+BUILD_PKGS="$STAGED_PKGS"
+if printf '%s\n' "$STAGED_PKGS" | grep -qx "./magefiles"; then
+  if ! PKG_OUTPUT=$(go vet -tags mage ./magefiles 2>&1); then
+    BUILD_FAILED="${BUILD_FAILED}./magefiles (go vet -tags mage)
+${PKG_OUTPUT}
+"
+  fi
+  BUILD_PKGS=$(printf '%s\n' "$STAGED_PKGS" | grep -vx "./magefiles" || true)
+fi
+
+# Build each remaining staged package on its own with -o /dev/null. A plain
+# `go build` writes an executable for a `package main` (littering the tree, or
+# colliding with a same-named directory such as magefiles), and -o accepts
+# only one package plus one output path, so the loop is the portable form.
+for pkg in $BUILD_PKGS; do
+  if ! PKG_OUTPUT=$(go build -o /dev/null "$pkg" 2>&1); then
+    BUILD_FAILED="${BUILD_FAILED}${pkg}
+${PKG_OUTPUT}
+"
+  fi
+done
+if [ -n "$BUILD_FAILED" ]; then
   echo -e "${RED}❌ go build failed (staged packages):${NC}"
   echo ""
-  echo "$OUTPUT"
-  echo ""
+  echo "$BUILD_FAILED"
   exit 1
 fi
 
