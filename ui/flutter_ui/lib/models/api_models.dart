@@ -750,6 +750,159 @@ class MetricsSnapshot with _$MetricsSnapshot {
   }
 }
 
+// ===== Metrics Usage Models (GET /api/v1/metrics/live) =====
+//
+// The live endpoint also reports per-model and per-agent usage under the
+// top-level keys `models`, `agents`, and `totals`. Those keys are optional:
+// an older daemon (or the degraded 503 path) omits them entirely. The
+// classes below parse defensively so a missing or malformed section
+// degrades to a note instead of crashing the whole panel.
+
+/// Tolerant JSON number reader: returns 0 for null, wrong types, or a
+/// non-numeric string. Never throws, so a single bad row cannot blank the
+/// metrics panel.
+int _metricIntOrZero(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? 0;
+  return 0;
+}
+
+/// Tolerant JSON double reader; see [_metricIntOrZero].
+double _metricDoubleOrZero(Object? value) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value) ?? 0;
+  return 0;
+}
+
+/// Tolerant JSON string reader: returns '' for null or non-string values.
+String _metricStringOrEmpty(Object? value) {
+  if (value is String) return value;
+  if (value == null) return '';
+  return value.toString();
+}
+
+/// Copy [value] into a `Map<String, dynamic>` when it really is a map.
+/// Returns null for null / non-map values (the caller treats that as
+/// "section absent"). String keys are copied; non-string keys are dropped.
+Map<String, dynamic>? _metricStringMap(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) {
+    final out = <String, dynamic>{};
+    for (final entry in value.entries) {
+      final key = entry.key;
+      if (key is String) out[key] = entry.value;
+    }
+    return out;
+  }
+  return null;
+}
+
+/// One row of the `models` array: per-model call and token usage.
+class ModelUsage {
+  final String id;
+  final int calls;
+  final int tokensIn;
+  final int tokensOut;
+  final double avgLatencyMs;
+
+  const ModelUsage({
+    required this.id,
+    this.calls = 0,
+    this.tokensIn = 0,
+    this.tokensOut = 0,
+    this.avgLatencyMs = 0,
+  });
+
+  factory ModelUsage.fromJson(Map<String, dynamic> json) => ModelUsage(
+    id: _metricStringOrEmpty(json['id']),
+    calls: _metricIntOrZero(json['calls']),
+    tokensIn: _metricIntOrZero(json['tokens_in']),
+    tokensOut: _metricIntOrZero(json['tokens_out']),
+    avgLatencyMs: _metricDoubleOrZero(json['avg_latency_ms']),
+  );
+
+  /// Parse the `models` array.
+  ///
+  /// Returns null when [raw] is absent or not a list (older daemon /
+  /// degraded payload) so the panel can show a "not reported" note;
+  /// returns an empty list when the key is present but empty. Rows with no
+  /// usable id are skipped so one malformed entry cannot blank the table.
+  static List<ModelUsage>? parseList(Object? raw) {
+    if (raw is! List) return null;
+    final out = <ModelUsage>[];
+    for (final item in raw) {
+      final map = _metricStringMap(item);
+      if (map == null) continue;
+      final usage = ModelUsage.fromJson(map);
+      if (usage.id.isEmpty) continue;
+      out.add(usage);
+    }
+    return out;
+  }
+}
+
+/// One row of the `agents` array: per-agent state and task counts.
+class AgentUsage {
+  final String id;
+  final String state;
+  final int tasksCompleted;
+  final int tasksFailed;
+
+  const AgentUsage({
+    required this.id,
+    this.state = '',
+    this.tasksCompleted = 0,
+    this.tasksFailed = 0,
+  });
+
+  factory AgentUsage.fromJson(Map<String, dynamic> json) => AgentUsage(
+    id: _metricStringOrEmpty(json['id']),
+    state: _metricStringOrEmpty(json['state']),
+    tasksCompleted: _metricIntOrZero(json['tasks_completed']),
+    tasksFailed: _metricIntOrZero(json['tasks_failed']),
+  );
+
+  /// Parse the `agents` array; same absent/empty semantics as
+  /// [ModelUsage.parseList].
+  static List<AgentUsage>? parseList(Object? raw) {
+    if (raw is! List) return null;
+    final out = <AgentUsage>[];
+    for (final item in raw) {
+      final map = _metricStringMap(item);
+      if (map == null) continue;
+      final usage = AgentUsage.fromJson(map);
+      if (usage.id.isEmpty) continue;
+      out.add(usage);
+    }
+    return out;
+  }
+}
+
+/// The `totals` object: aggregate call and token counts across all models.
+class MetricsTotals {
+  final int calls;
+  final int tokensIn;
+  final int tokensOut;
+
+  const MetricsTotals({this.calls = 0, this.tokensIn = 0, this.tokensOut = 0});
+
+  factory MetricsTotals.fromJson(Map<String, dynamic> json) => MetricsTotals(
+    calls: _metricIntOrZero(json['calls']),
+    tokensIn: _metricIntOrZero(json['tokens_in']),
+    tokensOut: _metricIntOrZero(json['tokens_out']),
+  );
+
+  /// Parse the `totals` object. Returns null when absent / not a map;
+  /// returns a zeroed instance when present but empty.
+  static MetricsTotals? parse(Object? raw) {
+    final map = _metricStringMap(raw);
+    if (map == null) return null;
+    return MetricsTotals.fromJson(map);
+  }
+}
+
 // ===== Plan Models =====
 
 @freezed

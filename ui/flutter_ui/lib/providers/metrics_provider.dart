@@ -8,23 +8,58 @@ import '../services/websocket_service.dart';
 
 const _unset = Object();
 
-/// Metrics state for the live metrics panel
+/// Metrics state for the live metrics panel.
+///
+/// The `models`, `agents`, and `totals` sections are nullable so the panel
+/// can tell "the daemon did not report this" (null -> short lowercase note)
+/// apart from "the daemon reported nothing" (empty list -> empty message).
 class MetricsState {
   final MetricsSnapshot? current;
   final bool isLoading;
   final String? error;
+  final List<ModelUsage>? modelUsage;
+  final List<AgentUsage>? agentUsage;
+  final MetricsTotals? totals;
 
-  const MetricsState({this.current, this.isLoading = false, this.error});
+  /// Wall-clock time of the last successful payload, used for the panel's
+  /// 'updated <time>' stamp. Null until the first successful fetch.
+  final DateTime? receivedAt;
+
+  const MetricsState({
+    this.current,
+    this.isLoading = false,
+    this.error,
+    this.modelUsage,
+    this.agentUsage,
+    this.totals,
+    this.receivedAt,
+  });
 
   MetricsState copyWith({
     MetricsSnapshot? current,
     bool? isLoading,
     Object? error = _unset,
+    Object? modelUsage = _unset,
+    Object? agentUsage = _unset,
+    Object? totals = _unset,
+    DateTime? receivedAt,
   }) {
     return MetricsState(
       current: current ?? this.current,
       isLoading: isLoading ?? this.isLoading,
-      error: identical(error, _unset) ? this.error : error as String?,
+      error: identical(error, _unset)
+          ? this.error
+          : (error is String ? error : null),
+      modelUsage: identical(modelUsage, _unset)
+          ? this.modelUsage
+          : (modelUsage is List<ModelUsage> ? modelUsage : null),
+      agentUsage: identical(agentUsage, _unset)
+          ? this.agentUsage
+          : (agentUsage is List<AgentUsage> ? agentUsage : null),
+      totals: identical(totals, _unset)
+          ? this.totals
+          : (totals is MetricsTotals ? totals : null),
+      receivedAt: receivedAt ?? this.receivedAt,
     );
   }
 }
@@ -80,24 +115,35 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
     });
   }
 
+  /// Build a fresh state from one payload.
+  ///
+  /// Every optional section is parsed with absent-aware helpers; a missing
+  /// or malformed `models` / `agents` / `totals` leaves that state field
+  /// null rather than throwing, so the existing tiles keep rendering.
+  MetricsState _stateFromPayload(Map<String, dynamic> data) {
+    return MetricsState(
+      current: MetricsSnapshot.fromJson(data),
+      modelUsage: ModelUsage.parseList(data['models']),
+      agentUsage: AgentUsage.parseList(data['agents']),
+      totals: MetricsTotals.parse(data['totals']),
+      receivedAt: DateTime.now(),
+      isLoading: false,
+      error: null,
+    );
+  }
+
   Future<void> _fetchMetrics() async {
     try {
       _checkMounted();
       final data = await sdkClient.getLiveMetrics();
       if (_disposed) return;
-      // Try to parse as MetricsSnapshot from the raw response
-      // The backend /metrics/live returns a map with metric fields
       final snapshotData = Map<String, dynamic>.from(data);
       if (_disposed) return;
-      state = state.copyWith(
-        current: MetricsSnapshot.fromJson(snapshotData),
-        isLoading: false,
-        error: null,
-      );
+      state = _stateFromPayload(snapshotData);
     } catch (e) {
       if (_disposed) return;
       state = state.copyWith(
-        error: 'Failed to load metrics: ${e.toString()}',
+        error: 'failed to load metrics: ${e.toString()}',
         isLoading: false,
       );
     }
@@ -111,13 +157,10 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
       // The websocket subscription filters for type == 'metrics_update'
       // and the message is already flattened by WebSocketService
       try {
-        state = state.copyWith(
-          current: MetricsSnapshot.fromJson(msg),
-          error: null,
-        );
+        state = _stateFromPayload(msg);
       } catch (e) {
         state = state.copyWith(
-          error: 'Failed to parse metrics: ${e.toString()}',
+          error: 'failed to parse metrics: ${e.toString()}',
         );
       }
     });
