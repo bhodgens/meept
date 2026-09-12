@@ -24,7 +24,7 @@
     },
     "http": {
       "enabled": true,
-      "addr": ":8081",
+      "addr": "127.0.0.1:8081", // loopback only; the GUI endpoint must equal this
       // TLS is always enabled. Self-signed cert auto-generated on first run.
       // To use custom certificates, set tls_cert_file and tls_key_file.
       "tls_cert_file": "~/.meept/tls/cert.pem",

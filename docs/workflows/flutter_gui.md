@@ -8,6 +8,22 @@ The Flutter desktop UI (`ui/flutter_ui/`) is the graphical counterpart to the te
 
 Power users want a keyboard-driven terminal experience; everyone else wants a pointer-friendly window. Maintaining two clients is only sustainable when feature parity is explicit, so neither surface silently regresses.
 
+## Connection
+
+The GUI talks to the daemon over HTTP + WebSocket and verifies the daemon
+certificate by SHA-256 fingerprint pinning. The GUI endpoint must equal
+`transport.http.addr` in `~/.meept/meept.json5`, including host and port: the
+shipped template binds `127.0.0.1:8081`, and the GUI defaults to
+`localhost:8081` (see `scripts/gui-daemon-connect.py`). If they differ, the GUI
+sits in "connecting..." forever and no request reaches the daemon.
+
+Authentication uses the per-installation dev key when
+`transport.http.api_keys` is empty. The key is stored at `$MEEPT_HOME/dev_key`
+(`$MEEPT_HOME` defaults to `~/.meept`) and honors the same `MEEPT_HOME`
+override as the daemon, so set `MEEPT_HOME` consistently for both processes. A
+mismatched home makes the GUI send one key while the daemon expects another,
+which surfaces as a hard HTTP 418.
+
 ## Surfaces
 
 ### Status bar

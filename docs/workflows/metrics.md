@@ -265,6 +265,31 @@ the metrics store and collector are created during platform component initializa
 3. `Collector.RegisterEventListeners(emitter)` wires typed agent events
 4. `TaskCollector` is created via `NewTaskCollector(dbPath, logger)` for async task outcome recording
 5. the http server's `MetricsService` interface delegates to the store
+6. the same `*metrics.Store` is wired as the live-metrics usage provider via
+   `http.WithMetricsUsageProvider`, so `GET /api/v1/metrics/live` reads model
+   and agent usage from the daemon's actual store (honoring `--state-dir`)
+   instead of a read-only `<meept home>/metrics.db` handle
+
+### model/agent usage extension
+
+`GET /api/v1/metrics/live` extends the `LiveMetricsSnapshot` with `models`,
+`agents`, and `totals` keys built from the store's usage queries
+(`internal/metrics/usage.go`):
+
+- `models`: per provider/model aggregates from the `llm_calls` ledger over the
+  last 24 hours (`ModelUsageSince`)
+- `agents`: task outcome totals and last known state from
+  `agent_task_outcomes` / `agent_states` (`AgentUsageSince`)
+- `totals`: sums of the model rows
+
+The usage source is resolved in this order: an explicitly wired provider
+(`WithMetricsUsageProvider`), then the `MetricsService` when it implements the
+provider interface, then a read-only `<meept home>/metrics.db` handle (open
+with `PRAGMA query_only`). The daemon wires the first option whenever its
+metrics store exists, so a custom `--state-dir` reports its own usage. When the
+metrics store is disabled, the provider is not wired and the endpoint degrades
+to the read-only fallback; usage failures degrade to empty arrays plus a
+warning, never an error response.
 
 ## testing
 

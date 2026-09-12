@@ -73,7 +73,7 @@ All HTTP communication uses TLS by default. The platform auto-generates a self-s
   transport: {
     http: {
       "enabled": true,
-      "addr": ":8081",
+      "addr": "127.0.0.1:8081",  // loopback only; the GUI endpoint must equal this
       "use_tls": true,           // Enable HTTPS
       "auto_tls_cert": true,     // Auto-generate self-signed cert
       "tls_cert_file": "~/.meept/tls/cert.pem",
@@ -89,6 +89,20 @@ All HTTP communication uses TLS by default. The platform auto-generates a self-s
 ```
 
 Certificate files are created with `0600` permissions. Key material uses ECDSA P-256 (no RSA).
+
+### Listen address and the GUI endpoint
+
+The shipped `config/meept.json5` template binds `transport.http.addr` to
+`127.0.0.1:8081` (loopback only). The Flutter GUI and the cert pinner assume
+loopback, so the endpoint configured in the GUI (and in
+`~/.meept/client.json5` `connection.address`) must equal `transport.http.addr`
+exactly, including host and port. Binding `:8081` instead of
+`127.0.0.1:8081` exposes the daemon on every interface; do that only if you
+intend to expose it and have put authentication and TLS in front of it.
+
+Note: the installer never rewrites `addr`. An existing `~/.meept/meept.json5`
+keeps whatever address it already has, so a user upgrading from an older build
+must change `addr` by hand if they want the loopback binding.
 
 Note: the server ALWAYS terminates TLS — there is no plaintext HTTP mode.
 `use_tls` / `auto_tls_cert` are accepted for config compatibility: whenever
@@ -151,6 +165,17 @@ API tokens are validated using constant-time comparison (`crypto/subtle.Constant
 - Accepts tokens via `Authorization: Bearer <key>` header
 - WebSocket connections also accept `?token=<key>` query parameter (for browser clients that cannot set headers)
 - Returns `401` with JSON `{"error": "missing authorization"}` or `{"error": "unauthorized"}`
+
+### Per-installation dev key
+
+When `transport.http.api_keys` is empty, the daemon and every local client use
+a per-installation key generated on first run and stored at
+`$MEEPT_HOME/dev_key` (`$MEEPT_HOME` defaults to `~/.meept`; permissions
+`0600`). The path honors the same `$MEEPT_HOME` override as the rest of the
+platform, so the daemon, CLI, and Flutter GUI all resolve the same file when
+the override is set. Set `MEEPT_HOME` consistently for every process; if one
+side reads `~/.meept/dev_key` and the other reads `$MEEPT_HOME/dev_key`, the
+mismatch surfaces as a hard HTTP 418 auth failure.
 
 ### CLI Token Management
 
