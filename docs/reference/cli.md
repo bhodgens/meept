@@ -164,6 +164,20 @@ meept selfimprove full-cycle
 meept selfimprove status
 ```
 
+### `meept soul` - Persona File Inspection
+
+Inspect `~/.meept/SOUL.md`, the user-authored persona. The daemon seeds the
+shipped default when the file is missing, refuses to start when it is
+invalid, and hot-reloads valid edits within ~1 second (invalid edits keep
+the last accepted copy and log an error).
+
+```bash
+meept soul show   # content + sha256 + size (warns when invalid)
+meept soul path   # resolved path (honors MEEPT_HOME)
+```
+
+See `docs/reference/cli/soul.md` for full semantics.
+
 ### `meept config` - Configuration Management
 
 Interactive configuration editor and get/set operations. This replaces the old `meept models` command.

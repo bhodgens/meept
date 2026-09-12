@@ -42,6 +42,10 @@ agent-tui ./bin/meept chat      # TUI testing
 ./bin/meept config              # Interactive editor
 ./bin/meept config get <key>    # Get value
 ./bin/meept config set <key> <v> # Set value
+
+# Soul (user-authored persona, ~/.meept/SOUL.md)
+./bin/meept soul show           # Current content + sha256 + size
+./bin/meept soul path           # Resolved path (honors MEEPT_HOME)
 make config-bootstrap           # Copy missing config templates into $MEEPT_HOME
 make dev-key                    # Provision $MEEPT_HOME/dev_key (0600), shared with the GUI
 make gui-connect-setup          # Make an installed home GUI-ready (transport.http + dev key)
