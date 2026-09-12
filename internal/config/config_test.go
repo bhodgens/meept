@@ -329,8 +329,8 @@ func TestDefaultConfigTransport(t *testing.T) {
 	if cfg.Transport.HTTP.Enabled {
 		t.Error("HTTP transport should be disabled by default")
 	}
-	if cfg.Transport.HTTP.Addr != ":8081" {
-		t.Errorf("expected HTTP addr :8081, got %s", cfg.Transport.HTTP.Addr)
+	if cfg.Transport.HTTP.Addr != "127.0.0.1:8081" {
+		t.Errorf("expected HTTP addr 127.0.0.1:8081, got %s", cfg.Transport.HTTP.Addr)
 	}
 	if !cfg.Transport.HTTP.RequireAuth {
 		t.Error("HTTP RequireAuth should be true by default")

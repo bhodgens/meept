@@ -698,7 +698,7 @@ type RPCTransportConfig struct {
 // HTTPTransportConfig configures the HTTP REST transport.
 type HTTPTransportConfig struct {
 	Enabled        bool     `json:"enabled"       toml:"enabled"`             // Enable HTTP server (default: false; shipped config template enables it)
-	Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: ":8081"; SECURITY: keep 127.0.0.1 unless exposing intentionally)
+	Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: "127.0.0.1:8081" — loopback only; never widen this unless you intend to expose the daemon, see docs/reference/http-api-security.md)
 	UseTLS         bool     `json:"use_tls"       toml:"use_tls"`             // Enable HTTPS (server ALWAYS uses TLS; field is accepted for compat — see comment)
 	AutoTLSCert    bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`       // Auto-generate self-signed cert (server auto-generates whenever cert files are missing)
 	TLSCertFile    string   `json:"tls_cert_file" toml:"tls_cert_file"`       // TLS certificate file path
@@ -2558,7 +2558,7 @@ func DefaultConfig() *Config {
 			},
 			HTTP: HTTPTransportConfig{
 				Enabled:     false,
-				Addr:        ":8081",
+				Addr:        "127.0.0.1:8081",
 				RequireAuth: true,
 				TLSCertFile: "~/.meept/certs/tls.crt",
 				TLSKeyFile:  "~/.meept/certs/tls.key",
