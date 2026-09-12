@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -319,17 +320,42 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	return nil
 }
 
+// ErrRuntimeNotOwned reports that Stop refused to stop a runtime this instance
+// did not spawn: the PID file names a runtime another meept process owns, which
+// this instance may have adopted as observed-not-owned. Operator surfaces that
+// deliberately stop it anyway (the `meept runtime stop` CLI) must use
+// StopAsOperator instead of ignoring this error — reporting "stopped" while the
+// process keeps running and holding the endpoint port is a false success.
+var ErrRuntimeNotOwned = errors.New("runtime not owned by this instance")
+
 // Stop gracefully terminates the runtime process.
-// Non-owners are refused: a RuntimeProcess that neither spawned nor
-// owned-adopted the runtime (e.g. the LLM stack constructed inside a
+// Non-owners are refused with ErrRuntimeNotOwned: a RuntimeProcess that neither
+// spawned nor owned-adopted the runtime (e.g. the LLM stack constructed inside a
 // short-lived CLI or eval subprocess, or an instance that adopted a foreign
-// instance's runtime as observed-not-owned) must not kill the daemon's
-// healthy llama-server through the shared PID file.
+// instance's runtime as observed-not-owned) must not kill the daemon's healthy
+// llama-server through the shared PID file.
 func (p *RuntimeProcess) Stop(ctx context.Context) error {
+	return p.stopProcess(ctx, false)
+}
+
+// StopAsOperator stops the runtime recorded in this process's PID file even when
+// this instance did not spawn it. Use it only for an explicit operator request:
+// the error message on the refusal path tells the operator the runtime is owned
+// by another meept process, and the automatic LLM-stack paths (StopAll, health
+// restart) must keep using Stop so a short-lived CLI or eval process can never
+// take down the daemon's runtime.
+//
+// Stays a no-op when there is nothing to stop (no live process behind the PID
+// file), matching Stop.
+func (p *RuntimeProcess) StopAsOperator(ctx context.Context) error {
+	return p.stopProcess(ctx, true)
+}
+
+func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error {
 	p.mu.Lock()
-	if !p.spawnedByUs {
+	if !asOperator && !p.spawnedByUs {
 		p.mu.Unlock()
-		return nil // Not ours to stop — another instance owns this runtime.
+		return ErrRuntimeNotOwned
 	}
 	if p.cmd == nil || p.cmd.Process == nil {
 		// Try to recover from PID file

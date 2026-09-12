@@ -43,11 +43,28 @@ func NewHealthChecker(cfg *RuntimeConfig, baseURL string) *HealthChecker {
 }
 
 // Start begins periodic health checks in a background goroutine.
+//
+// Calling Start again after Stop re-arms the checker: a closed stop channel
+// would make run return at once, freezing the verdict forever. That freeze is
+// worse than a missed check — a restarted runtime's WaitForHealthy would either
+// fail against a stale "unhealthy" (and Stop would then kill the restart it was
+// waiting for) or succeed immediately against a stale "healthy" before the
+// process had bound. Re-arming clears the failure count and drops the verdict to
+// unhealthy until a real check succeeds.
 func (h *HealthChecker) Start(ctx context.Context) {
-	go h.run(ctx)
+	h.mu.Lock()
+	if h.stopped {
+		h.stopCh = make(chan struct{})
+		h.stopped = false
+		h.unhealthyCount = 0
+		h.healthy = false
+	}
+	stopCh := h.stopCh
+	h.mu.Unlock()
+	go h.run(ctx, stopCh)
 }
 
-func (h *HealthChecker) run(ctx context.Context) {
+func (h *HealthChecker) run(ctx context.Context, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(h.config.HealthInterval)
 	defer ticker.Stop()
 
@@ -55,7 +72,7 @@ func (h *HealthChecker) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-h.stopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			h.checkOnce()

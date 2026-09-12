@@ -233,3 +233,42 @@ func TestHealthChecker_DeadProcessIsUnhealthy(t *testing.T) {
 		t.Error("a 200 endpoint with a dead process must not read as healthy")
 	}
 }
+
+// TestHealthChecker_RearmsAfterStop pins the restart contract. The manager stops
+// the checker when a runtime stops and starts it again when the runtime is
+// restarted (StopProvider then StartProvider, or an auto-restart). A checker
+// that stayed dead after Stop would freeze its last verdict forever: the
+// restarted runtime's health wait would either fail against a stale
+// "unhealthy" (and Stop would then kill the fresh process) or succeed before it
+// had bound.
+func TestHealthChecker_RearmsAfterStop(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	config := makeValidConfig(t)
+	config.HealthInterval = 20 * time.Millisecond
+	config.HealthThreshold = 1
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hc := llm.NewHealthChecker(&config, srv.URL)
+	hc.Start(ctx)
+	assertEventuallyHealthy(t, hc, "live endpoint before the restart")
+
+	// Simulate a runtime restart: stop the checker, take the endpoint away,
+	// start the checker again.
+	hc.Stop()
+	srv.Close()
+	hc.Start(ctx)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !hc.IsHealthy() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Error("checker kept its stale healthy verdict after Stop/Start: it never re-armed")
+}

@@ -3,11 +3,15 @@ package llm_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -378,5 +382,94 @@ func TestRuntimeProcess_Start_SpawnsWhenEndpointFree(t *testing.T) {
 
 	if p.PID() == 0 {
 		t.Error("expected a running pid after a successful spawn")
+	}
+}
+
+// TestRuntimeProcess_Stop_RefusesNonOwned pins the ownership contract: Stop must
+// tell the caller it stopped nothing when the runtime belongs to another meept
+// process. Returning nil there (the old behaviour) made every stop surface —
+// RPC, GUI, CLI — report success while the process kept the model and the port.
+func TestRuntimeProcess_Stop_RefusesNonOwned(t *testing.T) {
+	pidDir := createTempPIDDir(t)
+	if err := os.MkdirAll(pidDir, 0o700); err != nil {
+		t.Fatalf("create pid dir: %v", err)
+	}
+	pidFile := filepath.Join(pidDir, "foreign.pid")
+	// Any live pid is enough: Stop must refuse before it inspects the process.
+	entry := fmt.Sprintf(`{"pid":%d,"token":"foreign"}`, os.Getpid())
+	if err := os.WriteFile(pidFile, []byte(entry), 0o600); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	p := llm.NewRuntimeProcess(&llm.RuntimeConfig{PIDFile: pidFile})
+	stopErr := p.Stop(context.Background())
+	if !errors.Is(stopErr, llm.ErrRuntimeNotOwned) {
+		t.Fatalf("Stop error = %v, want ErrRuntimeNotOwned", stopErr)
+	}
+	if _, statErr := os.Stat(pidFile); statErr != nil {
+		t.Errorf("a refused stop must leave the pid file alone: %v", statErr)
+	}
+}
+
+// TestRuntimeProcess_StopAsOperatorStopsRecordedPID pins the operator override:
+// an explicit stop must actually stop the process the PID file names and clear
+// the file. The victim is launched in its own process group and re-parented to
+// init, so the process-group kill can only reach it.
+func TestRuntimeProcess_StopAsOperatorStopsRecordedPID(t *testing.T) {
+	launcher := exec.Command("/bin/sh", "-c", "nohup sleep 300 >/dev/null 2>&1 &")
+	launcher.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := launcher.Run(); err != nil {
+		t.Fatalf("launch victim: %v", err)
+	}
+
+	var pid int
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		procs, listErr := llm.ListRuntimeProcesses()
+		if listErr != nil {
+			t.Fatalf("ListRuntimeProcesses: %v", listErr)
+		}
+		for _, proc := range procs {
+			if proc.PPID == 1 && proc.Command == "sleep 300" {
+				pid = proc.PID
+				break
+			}
+		}
+		if pid != 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if pid == 0 {
+		t.Skip("no re-parented sleep observed in this environment")
+	}
+	t.Cleanup(func() {
+		if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil {
+			t.Logf("cleanup kill %d: %v", pid, killErr)
+		}
+	})
+
+	pidDir := createTempPIDDir(t)
+	if err := os.MkdirAll(pidDir, 0o700); err != nil {
+		t.Fatalf("create pid dir: %v", err)
+	}
+	pidFile := filepath.Join(pidDir, "operator.pid")
+	entry := fmt.Sprintf(`{"pid":%d,"token":"foreign"}`, pid)
+	if err := os.WriteFile(pidFile, []byte(entry), 0o600); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	p := llm.NewRuntimeProcess(&llm.RuntimeConfig{PIDFile: pidFile})
+	if err := p.StopAsOperator(ctx); err != nil {
+		t.Fatalf("StopAsOperator: %v", err)
+	}
+	if aliveErr := syscall.Kill(pid, 0); aliveErr == nil {
+		t.Errorf("pid %d must be gone after StopAsOperator", pid)
+	}
+	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
+		t.Errorf("the stopped runtime's pid file must be removed, stat err = %v", statErr)
 	}
 }

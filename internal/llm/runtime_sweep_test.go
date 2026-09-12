@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -110,11 +111,27 @@ func TestFindOrphanRuntimes(t *testing.T) {
 	if _, ok := byPID[900]; !ok {
 		t.Errorf("expected pid 900 (mlx leftover) to be reported, got %+v", got)
 	}
-	if _, ok := byPID[902]; !ok {
-		t.Errorf("expected pid 902 (llama leftover) to be reported, got %+v", got)
-	}
 	if o, ok := byPID[902]; ok && o.EndpointKey != "llama-cpp:127.0.0.1:8080" {
 		t.Errorf("pid 902 reported for endpoint %q", o.EndpointKey)
+	}
+}
+
+func TestFindOrphanRuntimes_DedupesPidMatchedByTwoConfigs(t *testing.T) {
+	spawn := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
+	cmd := "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"
+	cfgs := []*RuntimeConfig{
+		{EndpointKey: "mlx:127.0.0.1:8081", AutoStop: true, SpawnCommand: spawn},
+		{EndpointKey: "mlx:127.0.0.1:8081", AutoStop: true, SpawnCommand: spawn},
+	}
+	lister := func() ([]RuntimeProcInfo, error) {
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: cmd}}, nil
+	}
+	got, err := FindOrphanRuntimes(cfgs, lister)
+	if err != nil {
+		t.Fatalf("FindOrphanRuntimes: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("a pid matched by two configs must be reported once, got %+v", got)
 	}
 }
 
@@ -132,10 +149,63 @@ func TestFindOrphanRuntimes_SkipsWhenScanFails(t *testing.T) {
 	}
 }
 
-func TestSweepOrphanRuntimes_SignalsGroupAndClearsPIDFile(t *testing.T) {
+func TestReapRuntimeProcesses_ConfirmsOnlyGonePids(t *testing.T) {
+	const cmd = "mlx_lm server --model /m/x --port 8081"
+	killed := false
+	lister := func() ([]RuntimeProcInfo, error) {
+		if killed {
+			return nil, nil
+		}
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: cmd}}, nil
+	}
+	var signals []syscall.Signal
+	signal := func(_ int, sig syscall.Signal) error {
+		signals = append(signals, sig)
+		if sig == syscall.SIGKILL {
+			killed = true
+		}
+		return nil
+	}
+
+	got := ReapRuntimeProcesses([]OrphanRuntime{{PID: 900, Command: cmd}}, 0, lister, signal, nil)
+	if len(got) != 1 || got[0] != 900 {
+		t.Fatalf("confirmed = %v, want [900]", got)
+	}
+	if len(signals) != 2 || signals[0] != syscall.SIGTERM || signals[1] != syscall.SIGKILL {
+		t.Errorf("signals = %v, want SIGTERM then SIGKILL", signals)
+	}
+}
+
+func TestReapRuntimeProcesses_SkipsEntryThatChangedBeforeKill(t *testing.T) {
+	const cmd = "mlx_lm server --model /m/x --port 8081"
+	lister := func() ([]RuntimeProcInfo, error) {
+		// First post-SIGTERM scan: the pid now belongs to a different process
+		// (reused). The reap must not escalate to SIGKILL.
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: "/usr/bin/otherd"}}, nil
+	}
+	var signals []syscall.Signal
+	signal := func(_ int, sig syscall.Signal) error {
+		signals = append(signals, sig)
+		return nil
+	}
+
+	got := ReapRuntimeProcesses([]OrphanRuntime{{PID: 900, Command: cmd}}, 0, lister, signal, nil)
+	if len(got) != 0 {
+		t.Errorf("a changed pid entry must not be confirmed as reaped, got %v", got)
+	}
+	for _, sig := range signals {
+		if sig == syscall.SIGKILL {
+			t.Error("SIGKILL must not be sent to a pid whose entry changed")
+		}
+	}
+}
+
+func TestSweepOrphanRuntimes_ReapsConfirmedOrphanAndClearsPIDFile(t *testing.T) {
 	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	pidFile := filepath.Join(t.TempDir(), "runtime.pid")
+	// The endpoint's PID file names the leftover: corroboration that this is
+	// the runtime meept recorded for the endpoint.
 	if err := os.WriteFile(pidFile, []byte(`{"pid":900,"token":"deadbeef"}`), 0o600); err != nil {
 		t.Fatalf("write pid file: %v", err)
 	}
@@ -150,12 +220,13 @@ func TestSweepOrphanRuntimes_SignalsGroupAndClearsPIDFile(t *testing.T) {
 		t.Fatalf("RegisterConfig: %v", err)
 	}
 
+	const cmd = "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"
+	killed := false
 	mgr.sweepLister = func() ([]RuntimeProcInfo, error) {
-		return []RuntimeProcInfo{{
-			PID:     900,
-			PPID:    1,
-			Command: "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081",
-		}}, nil
+		if killed {
+			return nil, nil
+		}
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: cmd}}, nil
 	}
 
 	type signal struct {
@@ -165,6 +236,9 @@ func TestSweepOrphanRuntimes_SignalsGroupAndClearsPIDFile(t *testing.T) {
 	var sent []signal
 	mgr.sweepSignal = func(pid int, sig syscall.Signal) error {
 		sent = append(sent, signal{pid: pid, sig: sig})
+		if sig == syscall.SIGKILL {
+			killed = true
+		}
 		return nil
 	}
 
@@ -186,13 +260,14 @@ func TestSweepOrphanRuntimes_SignalsGroupAndClearsPIDFile(t *testing.T) {
 	}
 }
 
-func TestSweepOrphanRuntimes_LeavesUnrelatedPIDFile(t *testing.T) {
+func TestSweepOrphanRuntimes_LeavesEndpointWithLiveOwnerAlone(t *testing.T) {
 	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	pidFile := filepath.Join(t.TempDir(), "runtime.pid")
-	// The pid file names a DIFFERENT process than the one the sweep found: it
-	// must survive (its owner may still be starting).
-	if err := os.WriteFile(pidFile, []byte(`{"pid":1234,"token":"other"}`), 0o600); err != nil {
+	// The endpoint's PID file names a DIFFERENT, live process: a live owner
+	// vetoes the kill, even though a leftover matches the spawn command.
+	owner := fmt.Sprintf(`{"pid":%d,"token":"other"}`, os.Getpid())
+	if err := os.WriteFile(pidFile, []byte(owner), 0o600); err != nil {
 		t.Fatalf("write pid file: %v", err)
 	}
 
@@ -212,13 +287,20 @@ func TestSweepOrphanRuntimes_LeavesUnrelatedPIDFile(t *testing.T) {
 			Command: "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081",
 		}}, nil
 	}
-	mgr.sweepSignal = func(int, syscall.Signal) error { return nil }
+	signalled := 0
+	mgr.sweepSignal = func(int, syscall.Signal) error {
+		signalled++
+		return nil
+	}
 
-	if got := mgr.SweepOrphanRuntimes(0); len(got) != 1 {
-		t.Fatalf("reaped = %v, want one pid", got)
+	if got := mgr.SweepOrphanRuntimes(0); len(got) != 0 {
+		t.Fatalf("a live owner must veto the reap, got %v", got)
+	}
+	if signalled != 0 {
+		t.Errorf("no signal may reach an endpoint with a live owner, got %d", signalled)
 	}
 	if _, err := os.Stat(pidFile); err != nil {
-		t.Errorf("pid file naming another pid must survive the sweep: %v", err)
+		t.Errorf("the live owner's pid file must survive: %v", err)
 	}
 }
 

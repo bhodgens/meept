@@ -130,9 +130,12 @@ func TestRuntimeProcess_AdoptForeignToken_ObservedNotOwned(t *testing.T) {
 		t.Error("adopted process should report running")
 	}
 
-	// Stop must refuse: no error, and the process survives.
-	if err := p.Stop(ctx); err != nil {
-		t.Fatalf("Stop on observed runtime should be a silent no-op, got: %v", err)
+	// Stop must refuse with the ownership sentinel: nothing is stopped, and the
+	// process plus the foreign pidfile survive. The sentinel replaced a silent
+	// nil return — a nil return let every stop surface (RPC, GUI, CLI) report
+	// "stopped" while the runtime kept the model and the endpoint port.
+	if err := p.Stop(ctx); err != ErrRuntimeNotOwned {
+		t.Fatalf("Stop on observed runtime = %v, want ErrRuntimeNotOwned", err)
 	}
 	if !testPidAlive(victim.Process.Pid) {
 		t.Fatal("foreign-token Stop killed the observed process — ownership race is back")
@@ -180,8 +183,8 @@ func TestRuntimeProcess_AdoptForeignToken_ManagerReusePath(t *testing.T) {
 	if pB.spawnedByUs {
 		t.Error("instance B must adopt instance A's runtime as observed-not-owned")
 	}
-	if err := pB.Stop(ctx); err != nil {
-		t.Fatalf("instance B stop: %v", err)
+	if err := pB.Stop(ctx); err != ErrRuntimeNotOwned {
+		t.Fatalf("instance B stop = %v, want ErrRuntimeNotOwned (B must not kill A's runtime)", err)
 	}
 	if !testPidAlive(spawnedPid) {
 		t.Fatal("instance B's Stop killed instance A's runtime — the exact production bug")
@@ -306,8 +309,8 @@ func TestRuntimeProcess_LegacyPidfile_ObservedNotOwned(t *testing.T) {
 		t.Errorf("expected adopted pid %d, got %d", victim.Process.Pid, p.PID())
 	}
 
-	if err := p.Stop(ctx); err != nil {
-		t.Fatalf("Stop on legacy-adopted runtime should be a silent no-op, got: %v", err)
+	if err := p.Stop(ctx); err != ErrRuntimeNotOwned {
+		t.Fatalf("Stop on legacy-adopted runtime = %v, want ErrRuntimeNotOwned", err)
 	}
 	if !testPidAlive(victim.Process.Pid) {
 		t.Fatal("legacy-adoption Stop killed the observed process")

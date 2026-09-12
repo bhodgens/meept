@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -336,6 +337,7 @@ func (m *RuntimeManager) StartAll(ctx context.Context) error {
 	}
 	m.mu.Unlock()
 
+	var startErrs []error
 	for _, item := range items {
 		m.logger.Info("Starting runtime", "endpoint_key", item.endpointKey)
 		m.logToEndpoint(item.endpointKey, "spawn_attempt")
@@ -381,7 +383,11 @@ func (m *RuntimeManager) StartAll(ctx context.Context) error {
 		if err := item.proc.Start(ctx, stdout, stderr); err != nil {
 			m.logToEndpoint(item.endpointKey, "spawn_failure", slog.String("error", err.Error()))
 			m.recordSpawn(item.endpointKey, time.Since(start), false)
-			return fmt.Errorf("failed to start runtime %s: %w", item.endpointKey, err)
+			// Keep going: one refused or broken endpoint (a port a foreign
+			// process holds, a missing binary) must not stop every later
+			// endpoint from starting. The failures are joined into the return.
+			startErrs = append(startErrs, fmt.Errorf("failed to start runtime %s: %w", item.endpointKey, err))
+			continue
 		}
 		m.recordSpawn(item.endpointKey, time.Since(start), true)
 		m.logToEndpoint(item.endpointKey, "spawn_success", slog.Int("pid", item.proc.PID()))
@@ -398,13 +404,14 @@ func (m *RuntimeManager) StartAll(ctx context.Context) error {
 					"endpoint_key", item.endpointKey, "error", stopErr)
 			}
 			m.logger.Error("Runtime did not become healthy", "endpoint_key", item.endpointKey, "error", err)
-			return fmt.Errorf("runtime %s did not become healthy: %w", item.endpointKey, err)
+			startErrs = append(startErrs, fmt.Errorf("runtime %s did not become healthy: %w", item.endpointKey, err))
+			continue
 		}
 
 		m.logger.Info("Runtime started and healthy", "endpoint_key", item.endpointKey)
 	}
 
-	return nil
+	return errors.Join(startErrs...)
 }
 
 // StopAll stops all running runtimes that have auto_stop_on_exit=true.
@@ -439,7 +446,15 @@ func (m *RuntimeManager) StopAll(ctx context.Context) error {
 		}
 		m.logger.Info("Stopping runtime", "endpoint_key", item.endpointKey)
 		if err := item.proc.Stop(ctx); err != nil {
-			m.logger.Error("Failed to stop runtime", "endpoint_key", item.endpointKey, "error", err)
+			if errors.Is(err, ErrRuntimeNotOwned) {
+				// Expected for a runtime another meept process owns (adopted
+				// observed-not-owned): not ours to stop, and not a failure at
+				// shutdown. Genuine leftovers are reaped by the startup sweep.
+				m.logger.Debug("Runtime is owned by another instance; not stopped",
+					"endpoint_key", item.endpointKey)
+			} else {
+				m.logger.Error("Failed to stop runtime", "endpoint_key", item.endpointKey, "error", err)
+			}
 		}
 		m.logToEndpoint(item.endpointKey, "stop")
 	}

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,11 +31,22 @@ import (
 // runtimes, because it holds the endpoint port and the duplicate-spawn
 // pre-check would otherwise refuse the spawn.
 //
-// Only endpoints with auto_stop_on_exit=true are swept: a runtime the user
-// configured to outlive the daemon is left alone.
+// Two guards keep the sweep from killing something it should not:
+//   - only endpoints with auto_stop_on_exit=true are swept: a runtime the user
+//     configured to outlive the daemon is left alone;
+//   - a live owner recorded for the endpoint (its PID file names a different,
+//     running process) vetoes the kill, so a user-managed server with the same
+//     command line survives.
+//
+// The reap itself re-reads the process table between SIGTERM and SIGKILL: a pid
+// whose entry changed (reused pid) is never signalled, and a pid is only
+// reported as reaped once it is verifiably gone.
 //
 // Windows has no ps: the scan fails, the sweep skips, nothing is killed
 // (documented platform gap, same posture as the rest of the lifecycle code).
+
+// reapKillTimeout bounds the wait for a SIGKILLed pid to disappear.
+const reapKillTimeout = 2 * time.Second
 
 // OrphanRuntime is one runtime process left behind by a meept process that no
 // longer exists.
@@ -85,13 +97,15 @@ func ListRuntimeProcesses() ([]RuntimeProcInfo, error) {
 }
 
 // FindOrphanRuntimes returns runtime processes that a dead meept process left
-// behind. Report-only: the caller decides whether to signal them.
+// behind. Report-only: the caller decides whether to signal them. A pid matched
+// by more than one endpoint config is reported once.
 func FindOrphanRuntimes(cfgs []*RuntimeConfig, list RuntimeProcLister) ([]OrphanRuntime, error) {
 	procs, err := list()
 	if err != nil {
 		return nil, err
 	}
 	var orphans []OrphanRuntime
+	seen := make(map[int]struct{})
 	for _, cfg := range cfgs {
 		if !sweepableEndpoint(cfg) {
 			continue
@@ -100,6 +114,10 @@ func FindOrphanRuntimes(cfgs []*RuntimeConfig, list RuntimeProcLister) ([]Orphan
 			if p.PPID != 1 || !matchesSpawnCommand(p.Command, cfg.SpawnCommand) {
 				continue
 			}
+			if _, dup := seen[p.PID]; dup {
+				continue
+			}
+			seen[p.PID] = struct{}{}
 			orphans = append(orphans, OrphanRuntime{
 				EndpointKey: cfg.EndpointKey,
 				PID:         p.PID,
@@ -116,6 +134,127 @@ func OrphanRuntimesFromConfigs(cfgs []*RuntimeConfig) ([]OrphanRuntime, error) {
 	return FindOrphanRuntimes(cfgs, ListRuntimeProcesses)
 }
 
+// ReapOrphanRuntimesFromConfigs finds and reaps leftovers for the given configs
+// with the real process scan and process-group signals. It returns the orphans
+// it considered and the pids confirmed gone — callers must report the confirmed
+// count, never the candidate count.
+func ReapOrphanRuntimesFromConfigs(cfgs []*RuntimeConfig, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int) {
+	orphans, err := OrphanRuntimesFromConfigs(cfgs)
+	if err != nil {
+		if log != nil {
+			log.Debug("orphan sweep: process scan unavailable", "error", err)
+		}
+		return nil, nil
+	}
+	return orphans, ReapRuntimeProcesses(orphans, waitAfterTerm, nil, nil, log)
+}
+
+// ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each
+// process group, a grace period, then SIGKILL for those still alive. The table
+// is re-read before escalating, so a pid whose entry changed is never signalled
+// (pid reuse) and a pid that already exited is not signalled again. Returns the
+// pids confirmed gone — a caller may only treat those as stopped.
+//
+// list and signal are seams: nil means the real ps scan and the real
+// process-group kill, which is what the daemon and the CLI both use.
+func ReapRuntimeProcesses(targets []OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log *slog.Logger) []int {
+	if len(targets) == 0 {
+		return nil
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+	if list == nil {
+		list = ListRuntimeProcesses
+	}
+	send := func(pid int, sig syscall.Signal) error {
+		if signal != nil {
+			return signal(pid, sig)
+		}
+		return killProcessGroupPID(pid, sig)
+	}
+
+	for _, t := range targets {
+		log.Warn("orphan sweep: stopping runtime left behind by a previous meept process",
+			"endpoint_key", t.EndpointKey, "pid", t.PID, "command", t.Command)
+		if sigErr := send(t.PID, syscall.SIGTERM); sigErr != nil {
+			log.Debug("orphan sweep: SIGTERM failed", "pid", t.PID, "error", sigErr)
+		}
+	}
+	if waitAfterTerm > 0 {
+		time.Sleep(waitAfterTerm)
+	}
+
+	live, scanErr := scanByPID(list)
+	if scanErr != nil {
+		log.Debug("orphan sweep: post-SIGTERM scan unavailable; not escalating", "error", scanErr)
+		return nil
+	}
+
+	var confirmed []int
+	for _, t := range targets {
+		info, stillThere := live[t.PID]
+		if !stillThere {
+			confirmed = append(confirmed, t.PID) // gone on SIGTERM (or already gone)
+			continue
+		}
+		if info.PPID != 1 || info.Command != t.Command {
+			log.Debug("orphan sweep: pid entry changed before SIGKILL; leaving it alone", "pid", t.PID)
+			continue
+		}
+		if sigErr := send(t.PID, syscall.SIGKILL); sigErr != nil {
+			log.Debug("orphan sweep: SIGKILL failed", "pid", t.PID, "error", sigErr)
+		}
+		if waitForPIDGone(t.PID, list, reapKillTimeout) {
+			confirmed = append(confirmed, t.PID)
+			continue
+		}
+		log.Warn("orphan sweep: process survived SIGKILL; keeping its pid file", "pid", t.PID)
+	}
+	return confirmed
+}
+
+// scanByPID indexes a process-table scan by pid.
+func scanByPID(list RuntimeProcLister) (map[int]RuntimeProcInfo, error) {
+	procs, err := list()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int]RuntimeProcInfo, len(procs))
+	for _, p := range procs {
+		out[p.PID] = p
+	}
+	return out, nil
+}
+
+// waitForPIDGone polls the process table until pid disappears or the timeout
+// elapses. It reads the same view the sweep matched against, so the confirmed
+// verdict can never disagree with the detection.
+func waitForPIDGone(pid int, list RuntimeProcLister, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		live, err := scanByPID(list)
+		if err == nil {
+			if _, stillThere := live[pid]; !stillThere {
+				return true
+			}
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// processAlive reports whether a pid exists (signal 0 succeeds). Used for
+// processes this instance does not own, so it must never signal beyond 0.
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	return syscall.Kill(pid, 0) == nil
+}
+
 // OrphanRuntimes reports leftover runtime processes for this manager's
 // endpoints without signalling anything.
 func (m *RuntimeManager) OrphanRuntimes() ([]OrphanRuntime, error) {
@@ -123,40 +262,52 @@ func (m *RuntimeManager) OrphanRuntimes() ([]OrphanRuntime, error) {
 }
 
 // SweepOrphanRuntimes stops every runtime a previous meept generation left
-// behind: SIGTERM to the process group, then SIGKILL after waitAfterTerm, then
-// the endpoint PID file is removed when it still names the reaped pid. Returns
-// the reaped pids (nil when nothing matched). It never returns an error: a
-// failed sweep must not block daemon start.
+// behind: endpoint configs whose auto_stop_on_exit is true, a process whose
+// parent is init, and a command line equal to the endpoint's spawn command. An
+// endpoint with a live recorded owner is skipped. Returns the pids confirmed
+// gone (nil when nothing matched). It never returns an error: a failed sweep
+// must not block daemon start.
 func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration) []int {
 	orphans, err := FindOrphanRuntimes(m.sweepCandidates(), m.listRuntimeProcesses())
 	if err != nil {
 		m.logger.Warn("orphan sweep: process scan unavailable; skipping", "error", err)
 		return nil
 	}
-	if len(orphans) == 0 {
-		return nil
-	}
+
+	targets := make([]OrphanRuntime, 0, len(orphans))
+	endpointOf := make(map[int]string, len(orphans))
 	for _, o := range orphans {
-		m.logger.Warn("orphan sweep: stopping runtime left behind by a previous meept process",
-			"endpoint_key", o.EndpointKey, "pid", o.PID, "command", o.Command)
-		if sigErr := m.signalRuntime(o.PID, syscall.SIGTERM); sigErr != nil {
-			m.logger.Debug("orphan sweep: SIGTERM failed", "pid", o.PID, "error", sigErr)
+		if m.hasLiveOwner(o.EndpointKey, o.PID) {
+			m.logger.Warn("orphan sweep: leaving process alone — the endpoint records a different live owner",
+				"endpoint_key", o.EndpointKey, "pid", o.PID)
+			continue
 		}
+		targets = append(targets, o)
+		endpointOf[o.PID] = o.EndpointKey
 	}
-	if waitAfterTerm > 0 {
-		time.Sleep(waitAfterTerm)
+
+	confirmed := ReapRuntimeProcesses(targets, waitAfterTerm, m.listRuntimeProcesses(), m.signalRuntime, m.logger)
+	for _, pid := range confirmed {
+		m.removePIDFileForPid(endpointOf[pid], pid)
 	}
-	reaped := make([]int, 0, len(orphans))
-	for _, o := range orphans {
-		// SIGKILL is unconditional: a SIGTERM-resistant runtime (blocked in a
-		// Metal call, no signal handler) would otherwise keep the port.
-		if sigErr := m.signalRuntime(o.PID, syscall.SIGKILL); sigErr != nil {
-			m.logger.Debug("orphan sweep: SIGKILL failed", "pid", o.PID, "error", sigErr)
-		}
-		reaped = append(reaped, o.PID)
-		m.removePIDFileForPid(o.EndpointKey, o.PID)
+	return confirmed
+}
+
+// hasLiveOwner reports whether the endpoint's PID file names a live process
+// other than pid. That process is a live owner: the leftover we matched is not
+// this endpoint's recorded runtime, so the sweep must not signal it.
+func (m *RuntimeManager) hasLiveOwner(endpointKey string, pid int) bool {
+	m.mu.Lock()
+	ep, ok := m.endpoints[endpointKey]
+	m.mu.Unlock()
+	if !ok || ep.cfg == nil || ep.cfg.PIDFile == "" {
+		return false
 	}
-	return reaped
+	filePID, err := ParsePIDFile(ep.cfg.PIDFile)
+	if err != nil || filePID == pid {
+		return false
+	}
+	return processAlive(filePID)
 }
 
 // sweepCandidates snapshots the endpoint configs the sweep may reap. The
