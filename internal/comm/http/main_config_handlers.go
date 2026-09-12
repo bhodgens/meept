@@ -10,27 +10,50 @@ import (
 	configCli "github.com/caimlas/meept/internal/config"
 )
 
+// mainConfigPayload is the single read result for the main daemon config
+// (meept.json5): the absolute path, the raw JSON5 text, and whether the file
+// may be overwritten. Every read endpoint serializes this one value, so there
+// is exactly one implementation of the read.
+type mainConfigPayload struct {
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Writable bool   `json:"writable"`
+}
+
+// readMainConfigPayload is THE read path for the main daemon config. It
+// resolves the path through config.MainConfigPath() (MEEPT_HOME-aware, never
+// os.Getwd) and returns content plus writability; a missing file yields
+// Content "" with Writable reflecting the parent directory.
+func readMainConfigPayload() (mainConfigPayload, error) {
+	content, writable, err := configCli.ReadMainConfig()
+	if err != nil {
+		return mainConfigPayload{Path: configCli.MainConfigPath()}, err
+	}
+	return mainConfigPayload{
+		Path:     configCli.MainConfigPath(),
+		Content:  content,
+		Writable: writable,
+	}, nil
+}
+
 // handleGetMainConfig handles GET /api/v1/config/main.
 //
 // Returns the absolute path, the raw JSON5 text, and whether the file may be
 // overwritten. A missing file yields content "" and writable reflecting the
-// parent directory.
+// parent directory. This is the canonical way to read the main config; there
+// is no second read implementation.
 func (s *Server) handleGetMainConfig(w http.ResponseWriter, _ *http.Request) {
 	if s.configService == nil {
 		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
 		return
 	}
 
-	content, writable, err := configCli.ReadMainConfig()
+	payload, err := readMainConfigPayload()
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.writeJSON(w, http.StatusOK, map[string]any{
-		"path":     configCli.MainConfigPath(),
-		"content":  content,
-		"writable": writable,
-	})
+	s.writeJSON(w, http.StatusOK, payload)
 }
 
 // handleSaveMainConfig handles POST /api/v1/config/main.

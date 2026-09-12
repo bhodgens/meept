@@ -857,8 +857,11 @@ gui-web-run:
 		echo "       Or enable HTTP in ~/.meept/meept.json5:"; \
 		echo ""; \
 		echo "       transport: {"; \
-		echo "         http: { enabled: true, addr: \":8081\" }"; \
+		echo "         http: { enabled: true, addr: \"127.0.0.1:8081\" }"; \
 		echo "       }"; \
+		echo ""; \
+		echo "       Loopback only (127.0.0.1, not \":8081\"). The GUI"; \
+		echo "       endpoint must equal transport.http.addr exactly."; \
 		echo ""; \
 		echo "  Continuing anyway..."; \
 		echo ""; \

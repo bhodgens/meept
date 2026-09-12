@@ -255,6 +255,8 @@ The platform will log a **security warning** at startup if you're using the defa
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/api/v1/config/main` | Get main daemon config (`meept.json5`): `{path, content, writable}` |
+| POST | `/api/v1/config/main` | Save main daemon config (loopback clients only) |
 | GET | `/api/v1/config/client` | Get client config |
 | POST | `/api/v1/config/client` | Save client config |
 | GET | `/api/v1/config/models` | Get models config |

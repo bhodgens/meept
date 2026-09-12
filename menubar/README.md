@@ -156,19 +156,31 @@ create-dmg \
 
 ## Configuration
 
-The menubar app communicates with the Meept daemon via HTTP REST API on `localhost:8081`.
+The menubar app communicates with the Meept daemon over HTTPS on loopback
+(`https://localhost:8081` by default). The daemon binds loopback only.
 
 ### Daemon Configuration
 
-Ensure the daemon is configured to start the HTTP server for the menubar app:
+Ensure the daemon's HTTP transport is enabled in `~/.meept/meept.json5`. The
+config format is JSON5, not TOML:
 
-```toml
-# In ~/.meept/meept.toml
-
-[web]
-enabled = true
-addr = ":8081"  # Menubar API port
+```json5
+// In ~/.meept/meept.json5
+transport: {
+  http: {
+    enabled: true,
+    addr: "127.0.0.1:8081", // loopback only; the GUI endpoint must equal this
+  },
+}
 ```
+
+The shipped template binds `127.0.0.1:8081`. The endpoint the menubar app (and
+the Flutter GUI) connects to must equal `transport.http.addr` exactly —
+including host and port — or the app sits in "connecting..." forever. Binding
+`:8081` instead of `127.0.0.1:8081` exposes the daemon on every interface; do
+that only if you intend to expose it and have authentication and TLS in front
+of it. The server always terminates TLS (a self-signed certificate is
+generated on first run).
 
 ### launchd Integration
 
@@ -187,6 +199,8 @@ launchctl load ~/Library/LaunchAgents/com.caimlas.meept-daemon.plist
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| GET | `/api/v1/config/main` | Get the main daemon config (`meept.json5`): `{path, content, writable}` |
+| POST | `/api/v1/config/main` | Save the main config (loopback clients only) |
 | GET | `/api/v1/config/client` | Get client.json5 content |
 | POST | `/api/v1/config/client` | Save client.json5 |
 | GET | `/api/v1/config/models` | Get models.json5 content |
@@ -195,6 +209,11 @@ launchctl load ~/Library/LaunchAgents/com.caimlas.meept-daemon.plist
 | GET | `/api/v1/config/agents/:id` | Get agent config |
 | POST | `/api/v1/config/agents/:id` | Save agent config |
 | DELETE | `/api/v1/config/agents/:id` | Remove agent |
+
+`GET /api/v1/config/memory` was removed. It was a second read of the same
+file through a `$HOME`-hardcoded path, so under a `MEEPT_HOME` override it
+could return a different file than the canonical route. Use
+`GET /api/v1/config/main`, which returns `{path, content, writable}`.
 
 ### Daemon Endpoints
 

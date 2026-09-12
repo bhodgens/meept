@@ -4079,25 +4079,8 @@ func parseSessionListQuery(r *http.Request) sessionFilterOptions {
 	return opts
 }
 
-// handleGetMemoryConfig handles GET /api/v1/config/memory.
-// It returns the raw meept.json5 content (JSON5 passthrough) so clients
-// such as the menubar app or web UI can render the memory/epistemic
-// configuration editor. The caller is responsible for standardizing the
-// JSON5 via POST /api/v1/config/normalize before parsing.
-func (s *Server) handleGetMemoryConfig(w http.ResponseWriter, _ *http.Request) {
-	if s.configService == nil {
-		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
-		return
-	}
-
-	content, err := s.configService.LoadMeeptConfig()
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]string{"content": content})
-}
+// handleGetMemoryConfig was retired to the main-config read path; see
+// main_config_handlers.go for the deprecated /api/v1/config/memory alias.
 
 // handleGetOrchestratorConfig handles GET /api/v1/config/orchestrator.
 // Returns the orchestrator block of meept.json5 as structured JSON. Thresholds

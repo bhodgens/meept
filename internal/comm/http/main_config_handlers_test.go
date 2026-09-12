@@ -239,6 +239,25 @@ func TestMainConfig_NoConfigServiceReturns503(t *testing.T) {
 	}
 }
 
+// TestMainConfig_LegacyMemoryRouteRemoved guards the duplicate-endpoint
+// cleanup: GET /api/v1/config/memory was a second read of meept.json5
+// (historically through a hardcoded $HOME/.meept path, so it could disagree
+// with the MEEPT_HOME-aware canonical route). The GUI has migrated to
+// /config/main and the route is retired, so it must no longer answer.
+// Reintroducing a second read endpoint should fail here.
+func TestMainConfig_LegacyMemoryRouteRemoved(t *testing.T) {
+	t.Setenv("MEEPT_HOME", t.TempDir())
+
+	_, mux := newMainConfigTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/memory", http.NoBody)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/v1/config/memory status = %d, want 404 (route retired)", w.Code)
+	}
+}
+
 func TestIsLoopbackRequest(t *testing.T) {
 	cases := []struct {
 		remote string
