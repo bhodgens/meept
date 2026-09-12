@@ -578,8 +578,26 @@ type ResponseMessage struct {
 	Content   json.RawMessage `json:"content"`
 	ToolCalls []RawToolCall   `json:"tool_calls,omitempty"`
 	// ReasoningContent captures chain-of-thought text from OpenAI-compat
-	// providers that surface it as a sibling field to `content`.
+	// providers that surface it as a sibling field to `content`
+	// (DeepSeek/o1 convention).
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// Reasoning is the same thing under the name mlx_lm server uses.
+	// Verified BY TEST against mlx_lm 0.31.3 (LFM2.5-8B-A1B-MLX-4bit): the
+	// ENTIRE assistant reply lands in `reasoning` while `content` stays
+	// absent, and the server ignores enable_thinking / chat_template_kwargs
+	// / reasoning_format. Without this alias every mlx_lm reply reads as an
+	// empty response and the loop burns its nudge ladder to exhaustion
+	// (2026-09-11 researcher-path failure).
+	Reasoning string `json:"reasoning,omitempty"`
+}
+
+// ReasoningText returns whichever reasoning field the provider populated.
+// OpenAI-compat vendors use reasoning_content; mlx_lm uses reasoning.
+func (m *ResponseMessage) ReasoningText() string {
+	if m.ReasoningContent != "" {
+		return m.ReasoningContent
+	}
+	return m.Reasoning
 }
 
 // ContentString extracts the text content from the Content field,

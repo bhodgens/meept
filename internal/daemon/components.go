@@ -5202,15 +5202,16 @@ func (c *Components) stopComponents(ctx context.Context) error {
 }
 
 // loadModelsConfigWithPath loads models config and returns the path it was loaded from.
-// Priority: user config (~/.meept/models.json5) > project config (config/models.json5)
+// Priority: user config ($MEEPT_HOME/models.json5, default ~/.meept/models.json5)
+// > project config (config/models.json5)
 func loadModelsConfigWithPath(logger *slog.Logger) (*config.ModelsConfig, string, error) {
-	// Try user home directory first (FIX #0001 - user config takes precedence)
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	homePath := filepath.Join(homeDir, ".meept", "models.json5")
+	// Honor MEEPT_HOME (config.MeeptPath is THE resolution point, AGENTS.md).
+	// Previously this used os.UserHomeDir() directly, so an isolated rig
+	// launched with MEEPT_HOME still read the operator's real
+	// ~/.meept/models.json5 — the daemon honored MEEPT_HOME for certs,
+	// sockets and logs but silently leaked into the user's model config
+	// (found 2026-09-12 while standing up a clean researcher-path rig).
+	homePath := config.MeeptPath("models.json5")
 	if _, err := os.Stat(homePath); err == nil {
 		logger.Debug("Found models config", "path", homePath)
 		cfg, err := config.LoadModelsConfig(homePath)

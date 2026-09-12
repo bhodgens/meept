@@ -67,6 +67,11 @@ const evidenceSection = `## Evidence Requirements
 
 You must substantiate every claim with verifiable evidence. Without evidence, task validation will fail.
 
+Tool calls are how work happens: if a task needs a file read, written, run,
+or extracted, call the tool. The evidence below documents work that tools
+already performed — it never replaces making the tool call. Do not return
+requested data as prose when a tool exists that produces it.
+
 **Claims**: Explicit statements of what was accomplished.
 - "Created file config.json at /Users/caimlas/.meept/config.json"
 - "Modified the StartServer function in server.go"
@@ -76,7 +81,8 @@ You must substantiate every claim with verifiable evidence. Without evidence, ta
 - For shell commands: exit code, relevant output excerpts
 - For API calls: response body or HTTP status code
 
-**Evidence format** (include in your final response):
+**Evidence format** (include in your final response, after your tool calls
+have returned):
 
 {
   "claims": ["Created config.json at /Users/caimlas/.meept/config.json"],
@@ -6626,12 +6632,19 @@ func (l *AgentLoop) buildSystemPrompt() string {
 func (l *AgentLoop) buildValidationAnchorInstructions() string {
 	return `## Validation & Escalation Instructions
 
+**Tool use comes first.** If the task requires reading, writing, running, or
+extracting anything, you MUST call the appropriate tool. A tool call is the
+only way work happens in this system — describing work, or returning data in
+prose, does not perform it. Do not answer "extract this into JSON" with a
+JSON blob in prose: call the tool that does the extraction.
+
 **Before reporting completion**, you must verify:
 1. All described work in the task has been completed
 2. Evidence (file hashes, exit codes, command output) supports your claims
 3. No error indicators remain in the output
 
-**Evidence format** (include in your final response):
+**Evidence format** (include in your final response, AFTER any tool calls have
+returned — this summarizes work already done, it is not a substitute for it):
 ` + "```" + `json
 {
   "claims": ["description of what was done"],

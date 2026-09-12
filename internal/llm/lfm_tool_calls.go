@@ -75,7 +75,103 @@ func parseLFMToolCalls(content string) (string, []ToolCall) {
 	content, markerCalls := parseLFMMarkerCalls(content)
 	content, xmlCalls := parseLFMXMLCalls(content)
 	content, fenceCalls := parseLFMFenceCalls(content)
-	return content, append(append(markerCalls, xmlCalls...), fenceCalls...)
+	content, bareCalls := parseLFMBareJSONCalls(content)
+	return content, append(append(append(markerCalls, xmlCalls...), fenceCalls...), bareCalls...)
+}
+
+// parseLFMBareJSONCalls mines tool calls that ship as a BARE JSON object in
+// prose with no fence, marker, or XML wrapper — the shape LFM2.5-8B-A1B
+// (MLX 4-bit) actually produces. Verified BY TEST 2026-09-12: asked to call
+// json_extract, the model answered
+//
+//	\boxed{
+//	  "name": "json_extract",
+//	  "arguments": {"text": "..."}
+//	}
+//
+// i.e. the call is correct and complete, but wrapped in a LaTeX box rather
+// than any syntax the three earlier shapes recognize, so the turn ran with
+// zero tool executions and the step auto-approved a prose answer. This half
+// closes that gap.
+//
+// Safety: an object is minted as a call only when it carries a call shape
+// (name/tool/function string + args/arguments/parameters payload) — the same
+// structural test parseLFMFenceBody applies. A plain JSON answer (the
+// extracted record itself, an evidence envelope) has no such key and is left
+// untouched, so genuine data payloads survive verbatim.
+func parseLFMBareJSONCalls(content string) (string, []ToolCall) {
+	if !strings.Contains(content, "{") {
+		return content, nil
+	}
+	// Markdown-fence spans are the fence half's territory: it deliberately
+	// leaves an array body untouched (only single objects are mined there),
+	// so re-mining inside a fence here would overturn that contract.
+	type span struct{ lo, hi int }
+	var fences []span
+	for _, m := range lfmJSONFence.FindAllStringSubmatchIndex(content, -1) {
+		fences = append(fences, span{m[0], m[1]})
+	}
+	inFence := func(pos int) bool {
+		for _, f := range fences {
+			if pos >= f.lo && pos < f.hi {
+				return true
+			}
+		}
+		return false
+	}
+	// An object that is an ELEMENT of a JSON array is likewise not a call
+	// shape (same rule the fence half documents).
+	inArray := func(pos int) bool {
+		j := pos - 1
+		for j >= 0 && (content[j] == ' ' || content[j] == '	' || content[j] == '\n' || content[j] == '\r') {
+			j--
+		}
+		return j >= 0 && (content[j] == '[' || content[j] == ',')
+	}
+
+	var calls []ToolCall
+	var kept strings.Builder
+	i := 0
+	for i < len(content) {
+		rel := strings.IndexByte(content[i:], '{')
+		if rel < 0 {
+			break
+		}
+		start := i + rel
+		end := findJSONObjectEnd(content[start:])
+		if end < 0 {
+			break // truncated tail object; keep the remainder verbatim
+		}
+		if inFence(start) || inArray(start) {
+			kept.WriteString(content[i : start+1])
+			i = start + 1
+			continue
+		}
+		obj := content[start : start+end+1]
+		mined := parseLFMFenceBody(obj)
+		if len(mined) == 0 {
+			// Not a call shape: keep this byte and look for the next '{'.
+			kept.WriteString(content[i : start+1])
+			i = start + 1
+			continue
+		}
+		kept.WriteString(content[i:start])
+		mined[0].ID = lfmToolCallID(len(calls), "bare:"+obj)
+		calls = append(calls, mined...)
+		i = start + end + 1
+	}
+	kept.WriteString(content[i:])
+	if len(calls) == 0 {
+		return content, nil
+	}
+	slog.Default().Warn("lfm tool-call recovered from bare JSON object in prose (model template bleed)",
+		"calls", len(calls))
+	// Drop a LaTeX \boxed{ } / \fbox{ } wrapper left dangling around the
+	// stripped call so the remainder reads as prose, not stray syntax.
+	out := strings.TrimSpace(kept.String())
+	out = strings.ReplaceAll(out, `\boxed{`, "")
+	out = strings.ReplaceAll(out, `\fbox{`, "")
+	return strings.TrimSpace(out), calls
 }
 
 // lfmJSONFence matches a fenced JSON block whose body plausibly carries

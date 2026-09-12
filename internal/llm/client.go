@@ -1509,6 +1509,7 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 	msg := choice.Message
 
 	content := msg.ContentString()
+	reasoning := msg.ReasoningText()
 
 	// MLX-served LFM2.5 models emit tool calls in their native marker syntax
 	// (<|tool_call_start|>[fn(...)]<|tool_call_end|>) as plain content —
@@ -1517,6 +1518,17 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 	// markers-only with empty plain content.
 	var lfmCalls []ToolCall
 	content, lfmCalls = parseLFMToolCalls(content)
+
+	// mlx_lm shape: when the model is still in thinking mode every byte of
+	// the reply — including any native tool-call markers — lands in
+	// `reasoning` with `content` absent. Recover markers from there too,
+	// otherwise a markers-only mlx reply reads as an empty response and the
+	// loop nudges forever instead of executing the call (2026-09-11).
+	if len(lfmCalls) == 0 && reasoning != "" {
+		var fromReasoning []ToolCall
+		_, fromReasoning = parseLFMToolCalls(reasoning)
+		lfmCalls = append(lfmCalls, fromReasoning...)
+	}
 
 	// Empty content with no tool calls is the "model said nothing" failure.
 	// Surface the sentinel so ClassifyClassificationFailure sees
@@ -1556,7 +1568,7 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 		},
 		Model:        model,
 		FinishReason: choice.FinishReason,
-		Reasoning:    msg.ReasoningContent,
+		Reasoning:    msg.ReasoningText(),
 	}, nil
 }
 
@@ -1970,6 +1982,10 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 				Delta struct {
 					Content          string `json:"content"`
 					ReasoningContent string `json:"reasoning_content,omitempty"`
+					// Reasoning: mlx_lm's field name for the same
+					// chain-of-thought stream (verified BY TEST,
+					// 2026-09-11); see ResponseMessage.Reasoning.
+					Reasoning string `json:"reasoning,omitempty"`
 					Role             string `json:"role"`
 					ToolCalls        []struct {
 						Index    int    `json:"index"`
@@ -2014,9 +2030,15 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 			continue
 		}
 
-		// Accumulate reasoning_content (DeepSeek/o1 emit this during streaming)
-		if chunk.Choices[0].Delta.ReasoningContent != "" {
-			reasoningBuilder.WriteString(chunk.Choices[0].Delta.ReasoningContent)
+		// Accumulate reasoning (DeepSeek/o1 emit reasoning_content; mlx_lm
+		// emits the same content under the name `reasoning` — verified BY
+		// TEST 2026-09-11).
+		if d := chunk.Choices[0].Delta; d.ReasoningContent != "" || d.Reasoning != "" {
+			if d.ReasoningContent != "" {
+				reasoningBuilder.WriteString(d.ReasoningContent)
+			} else {
+				reasoningBuilder.WriteString(d.Reasoning)
+			}
 		}
 
 		// Handle content delta
@@ -2100,6 +2122,19 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	// streak ("stopped after extended thinking").
 	content, lfmCalls := parseLFMToolCalls(accumulated.String())
 	toolCalls = append(toolCalls, lfmCalls...)
+
+	// mlx_lm shape: while the model is still in thinking mode the entire
+	// reply — markers included — arrives as reasoning deltas with no
+	// content deltas at all. Recover markers from the reasoning text too,
+	// otherwise the turn reads as empty content and dies on the nudge
+	// ladder (verified BY TEST against mlx_lm 0.31.3, 2026-09-11).
+	if len(lfmCalls) == 0 && reasoningBuilder.Len() > 0 {
+		if _, fromReasoning := parseLFMToolCalls(reasoningBuilder.String()); len(fromReasoning) > 0 {
+			toolCalls = append(toolCalls, fromReasoning...)
+			c.logger.Info("recovered LFM tool calls from the reasoning field (mlx_lm shape)",
+				"model", modelID, "calls", len(fromReasoning))
+		}
+	}
 
 	// A stream cut off mid-marker leaves an unclosed <|tool_call_start|> in
 	// the accumulated text: parseLFMToolCalls can't recover it (no end
