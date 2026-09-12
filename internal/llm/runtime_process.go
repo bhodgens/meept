@@ -452,12 +452,7 @@ func (p *RuntimeProcess) StalePIDRemoval() {
 }
 
 func (p *RuntimeProcess) isProcessRunning(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil
+	return processAlive(pid)
 }
 
 // killProcessGroup sends a signal to the process group of cmd.
@@ -469,13 +464,15 @@ func killProcessGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 	return killProcessGroupPID(cmd.Process.Pid, sig)
 }
 
-// killProcessGroupPID sends a signal to the process group led by pid. It falls
-// back to signalling the leader alone when the group cannot be resolved (e.g.
-// the process is not a group leader any more). Used by Stop() and by the
-// startup orphan sweep, which signals runtimes it did not spawn.
+// killProcessGroupPID sends a signal to the process group led by pid, but only
+// when pid actually leads that group. A target that is not its own group leader
+// (a hand-started server whose shell is gone, a process in a shared group) is
+// signalled alone: killing the group would reach processes that are not ours.
+// The daemon's own runtimes are spawned with Setpgid, so they are leaders and
+// keep the group behaviour (no grandchild outlives the runtime).
 func killProcessGroupPID(pid int, sig syscall.Signal) error {
 	pgid, err := syscall.Getpgid(pid)
-	if err != nil {
+	if err != nil || pgid != pid {
 		// Fallback: kill leader only
 		return syscall.Kill(pid, sig)
 	}

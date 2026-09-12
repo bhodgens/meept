@@ -150,10 +150,12 @@ func ReapOrphanRuntimesFromConfigs(cfgs []*RuntimeConfig, waitAfterTerm time.Dur
 }
 
 // ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each
-// process group, a grace period, then SIGKILL for those still alive. The table
-// is re-read before escalating, so a pid whose entry changed is never signalled
-// (pid reuse) and a pid that already exited is not signalled again. Returns the
-// pids confirmed gone — a caller may only treat those as stopped.
+// process group, a grace period, then SIGKILL for those still alive. The process
+// table is re-read BEFORE any signal (a pid whose entry changed since detection
+// is dropped, never signalled) and again before the SIGKILL escalation, and a
+// pid is reported only once it is verifiably gone. Returns the pids confirmed
+// gone — a caller may only treat those as stopped. Duplicate targets collapse to
+// one signal and one entry.
 //
 // list and signal are seams: nil means the real ps scan and the real
 // process-group kill, which is what the daemon and the CLI both use.
@@ -174,7 +176,33 @@ func ReapRuntimeProcesses(targets []OrphanRuntime, waitAfterTerm time.Duration, 
 		return killProcessGroupPID(pid, sig)
 	}
 
+	// Validate before signalling: the targets come from an earlier scan, and a
+	// pid whose entry changed in that window (reused pid, process replaced)
+	// must not receive a signal.
+	live, scanErr := scanByPID(list)
+	if scanErr != nil {
+		log.Debug("orphan sweep: process scan unavailable; skipping", "error", scanErr)
+		return nil
+	}
+	seen := make(map[int]struct{}, len(targets))
+	valid := make([]OrphanRuntime, 0, len(targets))
 	for _, t := range targets {
+		if _, dup := seen[t.PID]; dup {
+			continue
+		}
+		seen[t.PID] = struct{}{}
+		info, ok := live[t.PID]
+		if !ok || info.PPID != 1 || info.Command != t.Command {
+			log.Debug("orphan sweep: pid entry changed since detection; skipping", "pid", t.PID)
+			continue
+		}
+		valid = append(valid, t)
+	}
+	if len(valid) == 0 {
+		return nil
+	}
+
+	for _, t := range valid {
 		log.Warn("orphan sweep: stopping runtime left behind by a previous meept process",
 			"endpoint_key", t.EndpointKey, "pid", t.PID, "command", t.Command)
 		if sigErr := send(t.PID, syscall.SIGTERM); sigErr != nil {
@@ -185,15 +213,15 @@ func ReapRuntimeProcesses(targets []OrphanRuntime, waitAfterTerm time.Duration, 
 		time.Sleep(waitAfterTerm)
 	}
 
-	live, scanErr := scanByPID(list)
+	liveNow, scanErr := scanByPID(list)
 	if scanErr != nil {
 		log.Debug("orphan sweep: post-SIGTERM scan unavailable; not escalating", "error", scanErr)
 		return nil
 	}
 
 	var confirmed []int
-	for _, t := range targets {
-		info, stillThere := live[t.PID]
+	for _, t := range valid {
+		info, stillThere := liveNow[t.PID]
 		if !stillThere {
 			confirmed = append(confirmed, t.PID) // gone on SIGTERM (or already gone)
 			continue
@@ -268,7 +296,8 @@ func (m *RuntimeManager) OrphanRuntimes() ([]OrphanRuntime, error) {
 // gone (nil when nothing matched). It never returns an error: a failed sweep
 // must not block daemon start.
 func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration) []int {
-	orphans, err := FindOrphanRuntimes(m.sweepCandidates(), m.listRuntimeProcesses())
+	candidates := m.sweepCandidates()
+	orphans, err := FindOrphanRuntimes(candidates, m.listRuntimeProcesses())
 	if err != nil {
 		m.logger.Warn("orphan sweep: process scan unavailable; skipping", "error", err)
 		return nil
@@ -277,8 +306,8 @@ func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration) []int 
 	targets := make([]OrphanRuntime, 0, len(orphans))
 	endpointOf := make(map[int]string, len(orphans))
 	for _, o := range orphans {
-		if m.hasLiveOwner(o.EndpointKey, o.PID) {
-			m.logger.Warn("orphan sweep: leaving process alone — the endpoint records a different live owner",
+		if m.hasLiveOwnerAmong(candidates, o.Command, o.PID) {
+			m.logger.Warn("orphan sweep: leaving process alone — an endpoint with this command records a different live owner",
 				"endpoint_key", o.EndpointKey, "pid", o.PID)
 			continue
 		}
@@ -293,21 +322,29 @@ func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration) []int 
 	return confirmed
 }
 
-// hasLiveOwner reports whether the endpoint's PID file names a live process
-// other than pid. That process is a live owner: the leftover we matched is not
-// this endpoint's recorded runtime, so the sweep must not signal it.
-func (m *RuntimeManager) hasLiveOwner(endpointKey string, pid int) bool {
-	m.mu.Lock()
-	ep, ok := m.endpoints[endpointKey]
-	m.mu.Unlock()
-	if !ok || ep.cfg == nil || ep.cfg.PIDFile == "" {
-		return false
+// hasLiveOwnerAmong reports whether any candidate endpoint whose spawn command
+// matches command records a live owner other than pid. That owner is a live
+// process meept did not leave behind, so the matched process must not be
+// signalled.
+//
+// The check spans every matching candidate, not just the endpoint the scan
+// attributed the pid to: two providers can share one spawn command line with
+// different PID files (endpoint keys do not normalize localhost against
+// 127.0.0.1), so attribution is ambiguous and any recorded live owner vetoes.
+func (m *RuntimeManager) hasLiveOwnerAmong(cfgs []*RuntimeConfig, command string, pid int) bool {
+	for _, cfg := range cfgs {
+		if cfg == nil || cfg.PIDFile == "" || !matchesSpawnCommand(command, cfg.SpawnCommand) {
+			continue
+		}
+		filePID, err := ParsePIDFile(cfg.PIDFile)
+		if err != nil || filePID == pid {
+			continue
+		}
+		if processAlive(filePID) {
+			return true
+		}
 	}
-	filePID, err := ParsePIDFile(ep.cfg.PIDFile)
-	if err != nil || filePID == pid {
-		return false
-	}
-	return processAlive(filePID)
+	return false
 }
 
 // sweepCandidates snapshots the endpoint configs the sweep may reap. The

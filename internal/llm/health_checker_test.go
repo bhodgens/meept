@@ -234,6 +234,42 @@ func TestHealthChecker_DeadProcessIsUnhealthy(t *testing.T) {
 	}
 }
 
+// TestHealthChecker_SurvivesCallerContextCancel pins where the run's lifetime
+// comes from. Every caller passes a short-lived context — the daemon cancels its
+// boot context the moment StartAll returns, the HTTP start path passes
+// r.Context(), RPC a connection-scoped context — so a run bound to it ends
+// seconds after it starts and the endpoint is never checked again. The run
+// detaches from cancellation; only Stop ends it.
+func TestHealthChecker_SurvivesCallerContextCancel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	config := makeValidConfig(t)
+	config.HealthInterval = 20 * time.Millisecond
+	config.HealthThreshold = 1
+
+	hc := llm.NewHealthChecker(&config, srv.URL)
+	startCtx, cancelStart := context.WithCancel(context.Background())
+	hc.Start(startCtx)
+	defer hc.Stop()
+	assertEventuallyHealthy(t, hc, "live endpoint before the caller's context died")
+
+	// The caller's context dies (boot finished / the HTTP response was written).
+	cancelStart()
+
+	// The endpoint goes away: a checker that is still running must notice.
+	srv.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !hc.IsHealthy() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Error("checker stopped when the caller's context was cancelled: health monitoring is dead")
+}
+
 // TestHealthChecker_RearmsAfterStop pins the restart contract. The manager stops
 // the checker when a runtime stops and starts it again when the runtime is
 // restarted (StopProvider then StartProvider, or an auto-restart). A checker

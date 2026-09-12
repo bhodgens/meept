@@ -22,7 +22,7 @@ type HealthChecker struct {
 	unhealthyCount int
 	mu             sync.RWMutex
 	stopCh         chan struct{}
-	stopped        bool
+	running        bool
 	onHealthChange HealthChangeCallback
 	logger         *slog.Logger
 	// procAlive reports whether the process this checker was created for is
@@ -44,27 +44,43 @@ func NewHealthChecker(cfg *RuntimeConfig, baseURL string) *HealthChecker {
 
 // Start begins periodic health checks in a background goroutine.
 //
-// Calling Start again after Stop re-arms the checker: a closed stop channel
-// would make run return at once, freezing the verdict forever. That freeze is
-// worse than a missed check — a restarted runtime's WaitForHealthy would either
-// fail against a stale "unhealthy" (and Stop would then kill the restart it was
-// waiting for) or succeed immediately against a stale "healthy" before the
-// process had bound. Re-arming clears the failure count and drops the verdict to
-// unhealthy until a real check succeeds.
+// The run belongs to the ENDPOINT, not to the caller's context. Every caller
+// passes a short-lived context — the daemon cancels its boot context the moment
+// StartAll returns (`defer cancelLlm`), the HTTP start path passes
+// `r.Context()`, and RPC passes a connection-scoped context — so binding the
+// run to it silently ended health monitoring seconds after boot. The run
+// detaches from cancellation the same way RuntimeProcess.Start detaches the
+// child; only Stop ends it (and StopAll calls Stop for every endpoint).
+//
+// Start is also the re-arm path. The manager stops the checker when a runtime
+// stops and starts it again when the runtime restarts, and a run can end on its
+// own (an older caller's context died). Any checker that is not running is
+// armed fresh — verdict reset to unhealthy, failure count cleared — because
+// serving the previous verdict would either fail a healthy restart (and Stop
+// would then kill the process it just restarted) or report a runtime healthy
+// before its socket exists.
 func (h *HealthChecker) Start(ctx context.Context) {
 	h.mu.Lock()
-	if h.stopped {
-		h.stopCh = make(chan struct{})
-		h.stopped = false
-		h.unhealthyCount = 0
-		h.healthy = false
+	if h.running {
+		h.mu.Unlock()
+		return
 	}
+	h.stopCh = make(chan struct{})
+	h.running = true
+	h.unhealthyCount = 0
+	h.healthy = false
 	stopCh := h.stopCh
 	h.mu.Unlock()
-	go h.run(ctx, stopCh)
+	go h.run(context.WithoutCancel(ctx), stopCh)
 }
 
 func (h *HealthChecker) run(ctx context.Context, stopCh <-chan struct{}) {
+	defer func() {
+		h.mu.Lock()
+		h.running = false
+		h.mu.Unlock()
+	}()
+
 	ticker := time.NewTicker(h.config.HealthInterval)
 	defer ticker.Stop()
 
@@ -172,14 +188,16 @@ func (h *HealthChecker) notifyTransition(wasHealthy bool) {
 	}
 }
 
-// Stop stops the health checker.
+// Stop stops the health checker. Idempotent, and safe against the run goroutine
+// exiting on its own: it only closes the channel of the run that is active.
 func (h *HealthChecker) Stop() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if !h.stopped {
+	if h.running && h.stopCh != nil {
 		close(h.stopCh)
-		h.stopped = true
+		h.stopCh = nil
+		h.running = false
 	}
 }
 
