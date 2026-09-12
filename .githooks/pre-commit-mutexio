@@ -78,6 +78,12 @@ echo "$staged_go_files" | while IFS= read -r f; do
     dirname "$f"
 done | sort -u | head -n 10 | while IFS= read -r dir; do
     [ -z "$dir" ] && continue
+    # Skip a package the default build tags exclude (magefiles is
+    # //go:build mage): the analyzer reports "matched no packages" for it and
+    # would block an otherwise clean commit. There is nothing to analyze.
+    if ! go list "./${dir}" >/dev/null 2>&1; then
+        continue
+    fi
     echo "./${dir}/..."
 done > /tmp/mutexio-pkgs.$$
 

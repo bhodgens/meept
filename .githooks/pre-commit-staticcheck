@@ -64,6 +64,17 @@ PACKAGES=$(echo "$STAGED_GO_FILES" \
   | sort -u \
   | sed 's|^|./|')
 
+# Drop packages the default build tags exclude (magefiles is //go:build mage):
+# staticcheck cannot load them and reports the exclusion itself as a finding.
+FILTERED_PACKAGES=""
+for pkg in $PACKAGES; do
+  if go list "$pkg" >/dev/null 2>&1; then
+    FILTERED_PACKAGES="${FILTERED_PACKAGES}${pkg}
+"
+  fi
+done
+PACKAGES="$FILTERED_PACKAGES"
+
 if [ -z "$PACKAGES" ]; then
   echo -e "${GREEN}✅ No packages to check${NC}"
   exit 0

@@ -54,6 +54,13 @@ for pkg in $PACKAGES; do
     continue
   fi
 
+  # Skip a package the default build tags exclude (magefiles is
+  # //go:build mage): go vet cannot load it and reports the exclusion itself
+  # ("build constraints exclude all Go files") as a vet failure.
+  if ! go list "$pkg" >/dev/null 2>&1; then
+    continue
+  fi
+
   # Run vet and capture output
   if vet_result=$(go vet "$pkg" 2>&1); then
     continue

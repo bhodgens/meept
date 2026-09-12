@@ -64,6 +64,12 @@ while IFS= read -r pkg; do
   if [ ! -d "$pkg" ]; then
     continue
   fi
+  # Skip a package the default build tags exclude (magefiles is
+  # //go:build mage): staticcheck cannot load it and reports the exclusion
+  # itself ("build constraints exclude all Go files") as a finding.
+  if ! go list "./${pkg}" >/dev/null 2>&1; then
+    continue
+  fi
   OUTPUT=$(staticcheck -checks=U1000 -tags=test "./${pkg}/" 2>&1) || EXIT_CODE=1
   if [ -n "$OUTPUT" ]; then
     VIOLATIONS="${VIOLATIONS}${OUTPUT}
