@@ -204,6 +204,14 @@ type Server struct {
 	changesRegistry *builtin.PendingChangesRegistry
 	changesResolve  *builtin.ResolveTool
 	changesJournal  *builtin.Journal
+
+	// metricsUsage optionally supplies the model/agent usage extension for
+	// GET /api/v1/metrics/live (set via WithMetricsUsageProvider). When nil
+	// the handler falls back to the MetricsService and then to a read-only
+	// <meept home>/metrics.db handle.
+	metricsUsage ModelAgentUsageProvider
+	usageDBMu    sync.Mutex
+	usageDB      *metrics.ReadOnlyStore
 }
 
 // AgentInfo describes an agent for listing.
@@ -914,6 +922,19 @@ func WithChangesAPI(registry *builtin.PendingChangesRegistry, resolveTool *built
 	}
 }
 
+// WithMetricsUsageProvider wires the model/agent usage source used by
+// GET /api/v1/metrics/live. When unset (or nil) the server falls back to the
+// MetricsService when it implements ModelAgentUsageProvider, then to a
+// read-only <meept home>/metrics.db handle. Nil-guarded per the setter
+// convention.
+func WithMetricsUsageProvider(p ModelAgentUsageProvider) ServerOption {
+	return func(s *Server) {
+		if p != nil {
+			s.metricsUsage = p
+		}
+	}
+}
+
 // SetDispatchSubmitter sets the dispatch submitter at runtime. Nil-guarded
 // per CLAUDE.md setter convention.
 func (s *Server) SetDispatchSubmitter(ds DispatchSubmitter) {
@@ -1197,6 +1218,10 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
 	mux.HandleFunc("GET /api/v1/metrics/rate-limits", s.handleRateLimitSummary)
 	mux.HandleFunc("GET /api/v1/cluster/metrics", s.handleClusterMetrics)
+
+	// Main daemon config (meept.json5): read + loopback-only write
+	mux.HandleFunc("GET /api/v1/config/main", s.handleGetMainConfig)
+	mux.HandleFunc("POST /api/v1/config/main", s.handleSaveMainConfig)
 
 	// Runtime management endpoints
 	mux.HandleFunc("GET /api/v1/runtime/status", s.handleRuntimeStatus)
@@ -2033,7 +2058,7 @@ func (s *Server) handleLiveMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, liveMetrics)
+	s.writeJSON(w, http.StatusOK, s.buildLiveMetricsResponse(r.Context(), liveMetrics))
 }
 
 // handleHistoricalMetrics handles GET /api/v1/metrics/historical.
