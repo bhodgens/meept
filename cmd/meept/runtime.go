@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -182,7 +181,7 @@ func runRuntimeStatusFormatted(ctx context.Context, provider, format string) err
 	inUseModels := computeInUseModels(cfg, pc, provider)
 	wouldStart := len(inUseModels) > 0 && pc.Lifecycle.AutoStart
 
-	data, err := os.ReadFile(pidFile)
+	pid, err := readPID(pidFile)
 	if os.IsNotExist(err) {
 		if format == "json" {
 			return jsonOutput(map[string]any{
@@ -200,11 +199,6 @@ func runRuntimeStatusFormatted(ctx context.Context, provider, format string) err
 	}
 	if err != nil {
 		return fmt.Errorf("failed to read PID file: %w", err)
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return fmt.Errorf("invalid PID in file: %w", err)
 	}
 
 	running := checkProcessAlive(pid)
@@ -327,14 +321,21 @@ func runRuntimeStart(ctx context.Context, provider string, wait bool) error {
 		return fmt.Errorf("invalid lifecycle config: %w", err)
 	}
 
+	// Resolve the provider's base URL onto the runtime config. The runtime
+	// process probes rtCfg.BaseURL before spawning to refuse a duplicate
+	// spawn onto an occupied endpoint port (see RuntimeProcess.Start); an
+	// empty BaseURL silently skips that pre-check.
+	rtCfg.BaseURL = pc.Options.BaseURL
+
 	pidFile := rtCfg.PIDFile
 
-	// Check if already running
-	if data, err := os.ReadFile(pidFile); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-			if checkProcessAlive(pid) {
-				return fmt.Errorf("runtime %s is already running (PID: %d)", provider, pid)
-			}
+	// Check if already running. The pidfile is JSON ({"pid":N,"token":"..."}),
+	// so parse it through llm.ParsePIDFile rather than a bare int parse: a
+	// failed Atoi here previously misread every live pidfile as stale,
+	// removed it, and spawned a duplicate onto the occupied port.
+	if pid, err := readPID(pidFile); err == nil {
+		if checkProcessAlive(pid) {
+			return fmt.Errorf("runtime %s is already running (PID: %d)", provider, pid)
 		}
 		// Stale PID file
 		os.Remove(pidFile)
@@ -377,8 +378,10 @@ func runRuntimeStop(ctx context.Context, provider string) error {
 
 	pidFile := pidFileFromConfig(pc.Lifecycle)
 
-	// Check if running
-	data, err := os.ReadFile(pidFile)
+	// Check if running. JSON pidfile: parse via llm.ParsePIDFile, never Atoi
+	// (a bare int parse fails on the JSON format and the documented stop
+	// command would then be unable to stop anything).
+	pid, err := readPID(pidFile)
 	if os.IsNotExist(err) {
 		fmt.Printf("Runtime %s: not running (no PID file)\n", provider)
 		return nil
@@ -387,28 +390,31 @@ func runRuntimeStop(ctx context.Context, provider string) error {
 		return fmt.Errorf("failed to read PID file: %w", err)
 	}
 
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return fmt.Errorf("invalid PID in file: %w", err)
-	}
-
 	if !checkProcessAlive(pid) {
 		fmt.Printf("Runtime %s: not running (process dead, PID: %d)\n", provider, pid)
 		os.Remove(pidFile)
 		return nil
 	}
 
-	// Create a minimal RuntimeConfig so RuntimeProcess can stop via Stop()
+	// StopAsOperator, not Stop: this CLI process never spawned the runtime
+	// (the daemon did), so Stop would refuse with ErrRuntimeNotOwned and the
+	// documented command could never stop anything. An explicit operator
+	// request is exactly the StopAsOperator case.
 	runtimeProc := llm.NewRuntimeProcess(runtimePIDConfig(pc, pidFile))
-	if err := runtimeProc.Stop(ctx); err != nil {
-		// The error from Stop() is usually about the process not responding,
-		// but it still tried to stop it. Consider it stopped if the process is dead.
-		if pid, rerr := readPID(pidFile); rerr == nil && checkProcessAlive(pid) {
-			return fmt.Errorf("failed to stop runtime (process %d still running): %w", pid, err)
+	stopErr := runtimeProc.StopAsOperator(ctx)
+
+	// Report truthfully: claim "stopped" only once the pid is verifiably
+	// gone. A SIGTERM that was accepted but did not take the process down
+	// (unhandled signal, stuck in a syscall, wrong pid file) must surface as
+	// an error naming the pid, never as a false success.
+	if checkProcessAlive(pid) {
+		if stopErr != nil {
+			return fmt.Errorf("failed to stop runtime %s: process %d is still running: %w", provider, pid, stopErr)
 		}
+		return fmt.Errorf("failed to stop runtime %s: process %d is still running", provider, pid)
 	}
 
-	fmt.Printf("Runtime %s stopped\n", provider)
+	fmt.Printf("Runtime %s stopped (PID: %d)\n", provider, pid)
 	return nil
 }
 

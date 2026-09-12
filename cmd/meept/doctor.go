@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -129,7 +130,10 @@ func runDoctor(fix, installMissing bool) error {
 	checks = append(checks, checkConfigReadable())
 	checks = append(checks, checkDiskFreeDoctor(stateDirPath))
 
-	orphanPIDs := findOrphanRuntimePIDs()
+	// Build the sweep config list once: the report path and the --fix reaper
+	// share it, so they can never disagree about what counts as an orphan.
+	orphanCfgs := runtimeConfigsForSweep()
+	orphanPIDs := findOrphanRuntimePIDs(orphanCfgs)
 	if len(orphanPIDs) > 0 {
 		checks = append(checks, doctorCheck{
 			name:    "orphan-children",
@@ -202,19 +206,20 @@ func runDoctor(fix, installMissing bool) error {
 					c.ok = true
 				}
 			case "orphan-children":
-				killed := 0
-				for _, pid := range orphanPIDs {
-					p, err := os.FindProcess(pid)
-					if err != nil {
-						continue
-					}
-					if err := p.Signal(syscall.SIGTERM); err != nil {
-						continue
-					}
-					killed++
+				// Reap through the shared sweep configs. The reaper re-scans
+				// the process table, SIGTERMs then SIGKILLs, and returns only
+				// the pids CONFIRMED gone — a SIGTERM sent is not a kill, so
+				// the check is repaired only when every candidate is confirmed
+				// dead. Survivors keep ok=false and say how many.
+				candidates, confirmed := llm.ReapOrphanRuntimesFromConfigs(orphanCfgs, 2*time.Second, slog.Default())
+				if len(confirmed) == len(candidates) {
+					c.detail += fmt.Sprintf(" [stopped %d/%d orphans]", len(confirmed), len(candidates))
+					c.ok = true
+				} else {
+					c.detail += fmt.Sprintf(" [stopped %d/%d orphans; %d survived]",
+						len(confirmed), len(candidates), len(candidates)-len(confirmed))
+					c.ok = false
 				}
-				c.detail += fmt.Sprintf(" [sigterm sent to %d]", killed)
-				c.ok = true
 			}
 		}
 	}
@@ -328,16 +333,16 @@ func checkDiskFreeDoctor(dir string) doctorCheck {
 	return doctorCheck{name: "disk-free", ok: true, detail: human + " free"}
 }
 
-// findOrphanRuntimePIDs returns the pids of local-LLM runtime processes left
-// behind by a meept process that no longer exists: the parent is init (ppid==1)
-// and the command line is exactly one of the configured spawn commands whose
-// endpoint asks for auto_stop_on_exit. Report-only — the caller (--fix) decides
-// whether to signal them.
+// runtimeConfigsForSweep builds the runtime configs the orphan scan matches
+// against: every provider with a lifecycle whose base URL is loopback,
+// normalized and tagged with its endpoint key. Built ONCE per doctor run and
+// shared by the report path and the --fix reaper, so the two can never
+// disagree about which endpoints count.
 //
-// This replaced a scan for a MEEPT_DAEMON_CHILD environment tag: ps never
-// printed that tag on macOS, so the old check could not report anything on this
-// platform no matter what the daemon spawned.
-func findOrphanRuntimePIDs() []int {
+// The detection replaced a scan for a MEEPT_DAEMON_CHILD environment tag: ps
+// never printed that tag on macOS, so the old check could not report anything
+// on this platform no matter what the daemon spawned.
+func runtimeConfigsForSweep() []*llm.RuntimeConfig {
 	providers, err := llm.LoadProvidersConfigDefault()
 	if err != nil {
 		return nil
@@ -354,6 +359,15 @@ func findOrphanRuntimePIDs() []int {
 		rtCfg.EndpointKey = llm.ComputeEndpointKey(string(rtCfg.Type), provider.Options.BaseURL)
 		cfgs = append(cfgs, rtCfg)
 	}
+	return cfgs
+}
+
+// findOrphanRuntimePIDs returns the pids of local-LLM runtime processes left
+// behind by a meept process that no longer exists: the parent is init (ppid==1)
+// and the command line is exactly one of the configured spawn commands whose
+// endpoint asks for auto_stop_on_exit. Report-only — the caller (--fix) reaps
+// through the SAME config list with llm.ReapOrphanRuntimesFromConfigs.
+func findOrphanRuntimePIDs(cfgs []*llm.RuntimeConfig) []int {
 	orphans, err := llm.OrphanRuntimesFromConfigs(cfgs)
 	if err != nil {
 		return nil
