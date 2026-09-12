@@ -42,6 +42,10 @@ agent-tui ./bin/meept chat      # TUI testing
 ./bin/meept config              # Interactive editor
 ./bin/meept config get <key>    # Get value
 ./bin/meept config set <key> <v> # Set value
+make config-bootstrap           # Copy missing config templates into $MEEPT_HOME
+make dev-key                    # Provision $MEEPT_HOME/dev_key (0600), shared with the GUI
+make gui-connect-setup          # Make an installed home GUI-ready (transport.http + dev key)
+make gui-connect-check          # Static self-check of the installed GUI connect path
 
 # Agents (AI Employees) — not the dispatcher roster in config/agents/
 ./bin/meept agents list                 # List employees
@@ -678,6 +682,9 @@ Audit scripts in `scripts/`:
 | `audit-dart-enum-name-shadow.py` | Flags Dart extensions shadowing Enum.name/index |
 | `audit-utf8-byte-arithmetic.py` | Flags hand-rolled ASCII case-conversion corrupting UTF-8 |
 | `gen-connectivity-graph.py` | Generates bus/RPC/HTTP/WS topology (`make graphs`) |
+| `ensure-dev-key.sh` | Provision the per-installation dev API key (`$MEEPT_HOME/dev_key`, 0600) |
+| `gui-daemon-connect.py` | Reconcile the installed daemon config with the GUI connect path (`ensure-config` / `endpoint` / `check` / `probe`) |
+| `verify-gui-connect.sh` | Prove a fresh install's GUI reaches the daemon (config, key, TLS pin, WS upgrade) |
 | `research-harness-lit.py` | Verifies harness-technique catalog evidence and markdown freshness (`make research-harness-check`) |
 
 All analyzers and audit scripts run via `make lint-ci`.
