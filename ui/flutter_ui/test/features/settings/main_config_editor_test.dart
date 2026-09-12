@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:meept_ui/features/settings/main_config_editor.dart';
 import 'package:meept_ui/features/settings/settings_panel.dart';
 import 'package:meept_ui/providers/providers.dart';
+import 'package:meept_ui/providers/tool_exit_guard.dart';
 import 'package:meept_ui/services/sdk_client.dart';
 import 'package:meept_ui/services/storage_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -64,9 +65,7 @@ Future<void> _pump(WidgetTester tester, _StubMainConfigClient client) async {
     ProviderScope(
       overrides: [sdkClientProvider.overrideWithValue(client)],
       child: const MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(child: MainConfigEditor()),
-        ),
+        home: Scaffold(body: SingleChildScrollView(child: MainConfigEditor())),
       ),
     ),
   );
@@ -90,9 +89,7 @@ Future<void> _pumpPanel(
     ProviderScope(
       overrides: [sdkClientProvider.overrideWithValue(client)],
       child: const MaterialApp(
-        home: Scaffold(
-          body: SizedBox(width: 1100, child: SettingsPanel()),
-        ),
+        home: Scaffold(body: SizedBox(width: 1100, child: SettingsPanel())),
       ),
     ),
   );
@@ -130,9 +127,8 @@ GoRouter _settingsRouter() => GoRouter(
     ),
     GoRoute(
       path: '/settings',
-      builder: (_, __) => const Scaffold(
-        body: SizedBox(width: 1100, child: SettingsPanel()),
-      ),
+      builder: (_, __) =>
+          const Scaffold(body: SizedBox(width: 1100, child: SettingsPanel())),
     ),
   ],
 );
@@ -328,8 +324,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(client.loadCount, 2);
-    expect(find.widgetWithText(TextField, '{"from_daemon": true}'),
-        findsOneWidget);
+    expect(
+      find.widgetWithText(TextField, '{"from_daemon": true}'),
+      findsOneWidget,
+    );
     expect(find.byKey(mainConfigDirtyKey), findsNothing);
   });
 
@@ -345,9 +343,7 @@ void main() {
       ProviderScope(
         overrides: [sdkClientProvider.overrideWithValue(client)],
         child: const MaterialApp(
-          home: Scaffold(
-            body: SizedBox(width: 1100, child: SettingsPanel()),
-          ),
+          home: Scaffold(body: SizedBox(width: 1100, child: SettingsPanel())),
         ),
       ),
     );
@@ -362,9 +358,7 @@ void main() {
 
     // The editor sits at the bottom of the panel's lazy ListView; scroll
     // until it is built.
-    for (var i = 0;
-        i < 8 && !tester.any(find.byType(MainConfigEditor));
-        i++) {
+    for (var i = 0; i < 8 && !tester.any(find.byType(MainConfigEditor)); i++) {
       await tester.drag(find.byType(ListView), const Offset(0, -400));
       await tester.pumpAndSettle();
     }
@@ -383,10 +377,7 @@ void main() {
 
       // Type into the main config editor. SettingsPanel._hasChanges never
       // sees this -- the editor reports it through onDirtyChanged.
-      await tester.enterText(
-        find.byKey(mainConfigTextKey),
-        '{"edited": true}',
-      );
+      await tester.enterText(find.byKey(mainConfigTextKey), '{"edited": true}');
       await tester.pump();
       expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
 
@@ -422,10 +413,7 @@ void main() {
       await _pumpPanel(tester, client);
       await _openMainEditor(tester);
 
-      await tester.enterText(
-        find.byKey(mainConfigTextKey),
-        '{"edited": true}',
-      );
+      await tester.enterText(find.byKey(mainConfigTextKey), '{"edited": true}');
       await tester.pump();
 
       await tester.tap(find.text('client.json5'));
@@ -475,10 +463,7 @@ void main() {
       await _pumpPanelOnRouter(tester, client);
       await _openMainEditor(tester);
 
-      await tester.enterText(
-        find.byKey(mainConfigTextKey),
-        '{"edited": true}',
-      );
+      await tester.enterText(find.byKey(mainConfigTextKey), '{"edited": true}');
       await tester.pump();
       expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
 
@@ -512,10 +497,7 @@ void main() {
       await _pumpPanelOnRouter(tester, client);
       await _openMainEditor(tester);
 
-      await tester.enterText(
-        find.byKey(mainConfigTextKey),
-        '{"edited": true}',
-      );
+      await tester.enterText(find.byKey(mainConfigTextKey), '{"edited": true}');
       await tester.pump();
 
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -537,17 +519,12 @@ void main() {
       );
     });
 
-    testWidgets('choosing to discard on exit leaves the panel', (
-      tester,
-    ) async {
+    testWidgets('choosing to discard on exit leaves the panel', (tester) async {
       final client = _StubMainConfigClient(_file());
       await _pumpPanelOnRouter(tester, client);
       await _openMainEditor(tester);
 
-      await tester.enterText(
-        find.byKey(mainConfigTextKey),
-        '{"edited": true}',
-      );
+      await tester.enterText(find.byKey(mainConfigTextKey), '{"edited": true}');
       await tester.pump();
 
       await tester.tap(_backControl());
@@ -592,5 +569,76 @@ void main() {
         findsOneWidget,
       );
     });
+  });
+
+  // The panel publishes its guard in the shared registry, so the paths that
+  // never touch ToolPanelShell (the hamburger menu's tool switch, a home tab
+  // switch) ask the same question the shared back control asks.
+  group('shared exit guard registration', () {
+    testWidgets(
+      'registers while mounted, refuses a switch while dirty, releases on '
+      'dispose',
+      (tester) async {
+        final client = _StubMainConfigClient(_file());
+        final container = ProviderContainer(
+          overrides: [sdkClientProvider.overrideWithValue(client)],
+        );
+        tester.view.physicalSize = const Size(1200, 1600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const MaterialApp(
+              home: Scaffold(
+                body: SizedBox(width: 1100, child: SettingsPanel()),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final registry = container.read(toolExitGuardProvider);
+        expect(registry.guard, isNotNull);
+
+        // Nothing unsaved: the registered guard allows a switch straight
+        // away, with no dialog. Calling it directly (not requestExit) keeps
+        // the registration for the dirty case below.
+        expect(await registry.guard!(), isTrue);
+        expect(find.byType(AlertDialog), findsNothing);
+
+        // With unsaved edits the same guard warns, and cancelling refuses
+        // the switch. A refusal keeps the registration, so the next path to
+        // ask still gets an answer.
+        await _scrollTo(tester, find.byKey(settingsConfigTextKey));
+        await tester.enterText(
+          find.byKey(settingsConfigTextKey),
+          '{"client": "edited"}',
+        );
+        await tester.pump();
+
+        final pending = registry.requestExit();
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(
+          find.textContaining('unsaved changes in client.json5'),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('cancel'));
+        await tester.pumpAndSettle();
+
+        expect(await pending, isFalse);
+        expect(registry.guard, isNotNull);
+
+        // Unmounting the panel releases the registration: a gone panel
+        // cannot veto a later switch.
+        await tester.pumpWidget(const SizedBox());
+        expect(registry.guard, isNull);
+
+        container.dispose();
+      },
+    );
   });
 }

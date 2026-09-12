@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../providers/tool_exit_guard.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 
@@ -26,17 +28,45 @@ const Map<String, String> toolRoutePaths = {
 /// must fall back to the embedded chat-tab tool slot.
 String? toolRouteFor(String toolName) => toolRoutePaths[toolName];
 
+/// What a hamburger-menu pick did.
+enum ToolMenuOutcome {
+  /// The tool opened as its full-screen route.
+  routed,
+
+  /// The open panel's exit guard refused the pick, so nothing at all was
+  /// replaced: the panel and its unsaved state are still there.
+  refused,
+
+  /// The tool has no route; the caller falls back to the embedded chat-tab
+  /// tool slot.
+  noRoute,
+}
+
 /// Open [toolName] as a full-screen route.
 ///
-/// Returns false when the tool has no route, so the caller can fall back
-/// to the embedded chat-tab tool slot. Both home layouts (the top-tabs
-/// [HomeScreen] and [SidebarHomeScreen]) route their menu picks through
-/// this one helper, which is what keeps the exit behaviour identical.
-bool openToolFromMenu(BuildContext context, String toolName) {
+/// Returns [ToolMenuOutcome.noRoute] when the tool has no route, so the caller
+/// can fall back to the embedded chat-tab tool slot. Both home layouts (the
+/// top-tabs [HomeScreen] and [SidebarHomeScreen]) route their menu picks
+/// through this one helper, which is what keeps the exit behaviour identical.
+///
+/// The guard of the panel that is currently open is asked first: a menu pick
+/// replaces a tool panel exactly like the shared back control does, so a pick
+/// that would drop unsaved edits has to warn first. Asking before the route
+/// lookup also covers [ToolMenuOutcome.noRoute], where the caller would
+/// otherwise swap the embedded panel and lose the edits anyway.
+Future<ToolMenuOutcome> openToolFromMenu(
+  BuildContext context,
+  WidgetRef ref,
+  String toolName,
+) async {
+  if (!await ref.read(toolExitGuardProvider).requestExit()) {
+    return ToolMenuOutcome.refused;
+  }
+  if (!context.mounted) return ToolMenuOutcome.refused;
   final path = toolRouteFor(toolName);
-  if (path == null) return false;
+  if (path == null) return ToolMenuOutcome.noRoute;
   context.go(path);
-  return true;
+  return ToolMenuOutcome.routed;
 }
 
 /// Hamburger menu button for the top-left toolbar.

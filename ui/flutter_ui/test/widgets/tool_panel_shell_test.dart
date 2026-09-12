@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:meept_ui/features/chat/find_bar.dart';
 import 'package:meept_ui/features/chat/find_state.dart';
+import 'package:meept_ui/features/settings/discard_edits_dialog.dart';
 import 'package:meept_ui/widgets/command_palette.dart';
 import 'package:meept_ui/widgets/tool_panel_shell.dart';
 
@@ -273,6 +274,172 @@ void main() {
       expect(find.text('chat home marker'), findsNothing);
 
       answer.complete(true);
+      await tester.pumpAndSettle();
+
+      expect(find.text('chat home marker'), findsOneWidget);
+    });
+  });
+
+  group('in-flight exit latch', () {
+    // The guard is asynchronous (it usually opens a confirmation dialog), so
+    // a repeated press while the first request is still pending used to ask
+    // it again and stack a second dialog over the panel. One press, one
+    // request.
+
+    testWidgets('a second back press while the guard is deciding is ignored', (
+      tester,
+    ) async {
+      var asked = 0;
+      final answer = Completer<bool>();
+      await _pumpPanel(
+        tester,
+        ToolPanelShell(
+          title: 'probe',
+          exitGuard: () {
+            asked++;
+            return answer.future;
+          },
+          child: const SizedBox(),
+        ),
+      );
+
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pump();
+
+      expect(asked, 1);
+      expect(find.text('probe'), findsOneWidget);
+
+      answer.complete(true);
+      await tester.pumpAndSettle();
+
+      expect(asked, 1);
+      expect(find.text('chat home marker'), findsOneWidget);
+    });
+
+    testWidgets('a second esc while the guard is deciding is ignored', (
+      tester,
+    ) async {
+      var asked = 0;
+      final answer = Completer<bool>();
+      await _pumpPanel(
+        tester,
+        ToolPanelShell(
+          title: 'probe',
+          exitGuard: () {
+            asked++;
+            return answer.future;
+          },
+          child: const SizedBox(),
+        ),
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+
+      expect(asked, 1);
+      expect(find.text('probe'), findsOneWidget);
+
+      answer.complete(false);
+      await tester.pumpAndSettle();
+
+      expect(asked, 1);
+      expect(find.text('probe'), findsOneWidget);
+      expect(find.text('chat home marker'), findsNothing);
+    });
+
+    testWidgets('two rapid back presses stack one confirmation dialog', (
+      tester,
+    ) async {
+      var asked = 0;
+      late BuildContext panelContext;
+      await _pumpPanel(
+        tester,
+        ToolPanelShell(
+          title: 'probe',
+          // Slow guard: the confirmation opens a moment after the press, so
+          // the second press arrives while the first request is still in
+          // flight - the window where two dialogs used to stack.
+          exitGuard: () async {
+            asked++;
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+            if (!panelContext.mounted) return false;
+            return showDiscardEditsDialog(
+              panelContext,
+              message:
+                  'you have unsaved changes in probe.json5. '
+                  'leaving the panel discards them.',
+              confirmLabel: 'discard and exit',
+            );
+          },
+          child: Builder(
+            builder: (context) {
+              panelContext = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pump(const Duration(milliseconds: 10));
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // One press, one request, one dialog.
+      expect(asked, 1);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.textContaining('unsaved changes in probe.json5'),
+        findsOneWidget,
+      );
+
+      // Cancelling keeps the panel, and the latch is free for the next try.
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('probe'), findsOneWidget);
+      expect(find.text('chat home marker'), findsNothing);
+    });
+
+    testWidgets('a refusal releases the latch for the next press', (
+      tester,
+    ) async {
+      var asked = 0;
+      final answers = <Completer<bool>>[];
+      await _pumpPanel(
+        tester,
+        ToolPanelShell(
+          title: 'probe',
+          exitGuard: () {
+            asked++;
+            final answer = Completer<bool>();
+            answers.add(answer);
+            return answer.future;
+          },
+          child: const SizedBox(),
+        ),
+      );
+
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pump();
+      answers.last.complete(false);
+      await tester.pumpAndSettle();
+
+      expect(asked, 1);
+      expect(find.text('probe'), findsOneWidget);
+
+      // The refusal released the latch: a later press starts a new request
+      // and the allowed answer leaves the panel.
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pump();
+      expect(asked, 2);
+
+      answers.last.complete(true);
       await tester.pumpAndSettle();
 
       expect(find.text('chat home marker'), findsOneWidget);

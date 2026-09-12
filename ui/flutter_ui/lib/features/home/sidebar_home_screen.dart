@@ -71,6 +71,7 @@ import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/session_detail.dart';
+import '../../providers/tool_exit_guard.dart';
 import '../chat/chat_tab.dart';
 import 'tools_dropdown.dart' show HamburgerMenu, openToolFromMenu;
 import 'session_info_overlay.dart';
@@ -167,7 +168,13 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
     }
   }
 
-  void _onLeaderNavigate(String path) {
+  /// Handle leader key navigation via go_router, after the open panel's exit
+  /// guard allows leaving it. A sidebar-hint or palette navigation replaces
+  /// the embedded tool panel exactly like a menu pick does.
+  Future<void> _onLeaderNavigate(String path) async {
+    final allowed = await ref.read(toolExitGuardProvider).requestExit();
+    if (!allowed) return;
+    if (!mounted) return;
     context.go(path);
   }
 
@@ -689,7 +696,12 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                 children: [
                   // Hamburger menu
                   HamburgerMenu(
-                    onToolSelected: (route) => openToolFromMenu(context, route),
+                    // Sidebar has no fallback slot: every menu tool has a
+                    // route, and openToolFromMenu asks the open panel's exit
+                    // guard before it replaces anything.
+                    onToolSelected: (tool) async {
+                      await openToolFromMenu(context, ref, tool);
+                    },
                   ),
                   const SizedBox(width: 8),
                   // ASCII-style meept logo

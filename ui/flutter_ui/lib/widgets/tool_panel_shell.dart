@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../providers/providers.dart';
+import '../providers/tool_exit_guard.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
 
@@ -43,8 +44,10 @@ void exitToolPanel(BuildContext context, WidgetRef ref) {
 /// the first handler that returns `handled`.
 ///
 /// A panel that holds unsaved work passes [exitGuard] so both exit
-/// affordances ask before dropping it.
-class ToolPanelShell extends ConsumerWidget {
+/// affordances ask before dropping it. One press runs one request: while a
+/// request is being decided the shell ignores further presses, so the
+/// guard's confirmation cannot be stacked on itself.
+class ToolPanelShell extends ConsumerStatefulWidget {
   /// Panel name shown in the header, lowercase.
   final String title;
 
@@ -88,14 +91,27 @@ class ToolPanelShell extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ToolPanelShell> createState() => _ToolPanelShellState();
+}
+
+class _ToolPanelShellState extends ConsumerState<ToolPanelShell> {
+  /// Latch for the exit request that is currently in flight.
+  ///
+  /// The guard is asynchronous - it usually opens a confirmation dialog - so
+  /// a second press of the back control or esc before the first answer
+  /// arrives would ask it again and stack a second dialog over the panel.
+  /// While this is set, further exit requests are ignored.
+  bool _exitPending = false;
+
+  @override
+  Widget build(BuildContext context) {
     return Focus(
       // Autofocus so ESC reaches this node without a click first.
       autofocus: true,
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent &&
             event.logicalKey == LogicalKeyboardKey.escape) {
-          _requestExit(context, ref);
+          _requestExit();
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -103,31 +119,51 @@ class ToolPanelShell extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildHeader(context, ref),
-          Expanded(child: child),
+          _buildHeader(context),
+          Expanded(child: widget.child),
         ],
       ),
     );
   }
 
-  /// Ask [exitGuard], then leave the panel only when it allows the exit.
+  /// Ask the panel's guard, then leave the panel only when it allows the
+  /// exit.
   ///
   /// The esc handler cannot wait for the answer, so the exit is driven from
   /// the guard's future instead of the key event; the key event is still
   /// reported as handled either way.
-  Future<void> _requestExit(BuildContext context, WidgetRef ref) async {
-    final guard = exitGuard;
-    if (guard != null) {
+  Future<void> _requestExit() async {
+    if (_exitPending) return;
+    // The panel's own guard wins; a panel that only registered in the shared
+    // provider (and passed no guard here) is still honoured, so neither
+    // affordance can bypass unsaved state.
+    final guard = widget.exitGuard ?? ref.read(toolExitGuardProvider).guard;
+    if (guard == null) {
+      exitToolPanel(context, ref);
+      return;
+    }
+    _exitPending = true;
+    try {
       final allowed = await guard();
       if (!allowed) return;
       // The panel can be closed from elsewhere (a menu pick, another route)
       // while the guard's confirmation is open.
-      if (!context.mounted) return;
+      if (!mounted) return;
+      // The exit was allowed, so drop the shared registration: the route
+      // change below must not consult the same guard again and ask a second
+      // time. A guard this shell did not take from the registry is not the
+      // registered one, so [ToolExitGuardRegistry.release] leaves that
+      // registration alone.
+      ref.read(toolExitGuardProvider).release(guard);
+      exitToolPanel(context, ref);
+    } finally {
+      // Released on every outcome (refused, allowed and exited, or disposed
+      // mid-await), so the next press starts a fresh request.
+      _exitPending = false;
     }
-    exitToolPanel(context, ref);
   }
 
-  Widget _buildHeader(BuildContext context, WidgetRef ref) {
+  Widget _buildHeader(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         border: Border(
@@ -145,28 +181,32 @@ class ToolPanelShell extends ConsumerWidget {
                   icon: const Icon(Icons.arrow_back, size: 18),
                   color: CyberpunkColors.orangePrimary,
                   tooltip: 'back (esc)',
-                  onPressed: () => _requestExit(context, ref),
+                  onPressed: () => _requestExit(),
                 ),
-                if (icon != null) ...[
+                if (widget.icon != null) ...[
                   const SizedBox(width: 4),
-                  Icon(icon, color: CyberpunkColors.orangePrimary, size: 18),
+                  Icon(
+                    widget.icon,
+                    color: CyberpunkColors.orangePrimary,
+                    size: 18,
+                  ),
                 ],
                 const SizedBox(width: 8),
                 Text(
-                  title.toLowerCase(),
+                  widget.title.toLowerCase(),
                   style: CyberpunkTypography.label.copyWith(
                     color: CyberpunkColors.orangePrimary,
                   ),
                 ),
                 const Spacer(),
-                ...actions,
+                ...widget.actions,
               ],
             ),
           ),
-          if (header != null)
+          if (widget.header != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-              child: header!,
+              child: widget.header!,
             ),
         ],
       ),

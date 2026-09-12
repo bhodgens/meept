@@ -9,6 +9,7 @@ import '../../theme/palette_provider.dart';
 import '../../theme/typography.dart';
 import '../../core/constants.dart';
 import '../../providers/providers.dart';
+import '../../providers/tool_exit_guard.dart';
 import 'settings_inputs.dart';
 import 'orchestrator_config_editor.dart';
 import 'client_prefs_editor.dart';
@@ -76,6 +77,19 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   late final SdkApiClient _client;
   late final TextEditingController _configController;
 
+  /// The one closure this panel hands out as its exit veto.
+  ///
+  /// Stored once so the registration can prove it still owns the shared
+  /// registration when it is released: [ToolExitGuardRegistry.release] only
+  /// clears the guard it was given.
+  late final ToolExitGuard _exitGuard = _guardExit;
+
+  /// Where this panel registered. Held here so dispose can release without
+  /// touching `ref` once the element is gone.
+  late final ToolExitGuardRegistry _exitGuardRegistry = ref.read(
+    toolExitGuardProvider,
+  );
+
   final Map<String, String> _configLabels = {
     'client': 'client.json5',
     'models': 'models.json5',
@@ -90,12 +104,20 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     super.initState();
     _client = ref.read(sdkClientProvider);
     _configController = TextEditingController(text: _configContent);
+    // Publish the guard for every path that can leave this panel: the
+    // hamburger menu's tool switch and a home tab switch consult the shared
+    // registry, the way the shared back control and esc consult it through
+    // ToolPanelShell.
+    _exitGuardRegistry.register(_exitGuard);
     _loadApiKey();
     _loadConfig();
   }
 
   @override
   void dispose() {
+    // Only this panel's own registration is dropped, so a guard a newer
+    // panel registered stays in place.
+    _exitGuardRegistry.release(_exitGuard);
     _configController.dispose();
     super.dispose();
   }
@@ -314,10 +336,11 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       child: ToolPanelShell(
         title: 'settings',
         icon: Icons.settings,
-        // The shared back control and esc both ask this before leaving, so
-        // unsaved meept.json5 (or client/models/menubar) edits are never
-        // dropped silently.
-        exitGuard: _guardExit,
+        // The shared back control and esc both ask this before leaving (the
+        // shell asks the same closure the registry holds), so unsaved
+        // meept.json5 (or client/models/menubar) edits are never dropped
+        // silently.
+        exitGuard: _exitGuard,
         actions: [
           if (_isSaving)
             SizedBox(
@@ -477,8 +500,9 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     await _loadConfig();
   }
 
-  /// Exit guard handed to [ToolPanelShell], which asks it before the shared
-  /// back control or esc leaves the panel.
+  /// Exit guard handed to [ToolPanelShell] (and registered in
+  /// [toolExitGuardProvider]), which every exit path asks before it leaves
+  /// the panel.
   ///
   /// Nothing pending exits immediately - one future tick, no dialog. With
   /// unsaved edits the user must confirm the loss; cancelling returns false,

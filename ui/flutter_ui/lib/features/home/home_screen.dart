@@ -15,8 +15,10 @@ import '../../providers/providers.dart';
 import '../../providers/session_detail.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
+import '../../providers/tool_exit_guard.dart';
 import 'tab_content.dart';
-import 'tools_dropdown.dart' show HamburgerMenu, openToolFromMenu;
+import 'tools_dropdown.dart'
+    show HamburgerMenu, ToolMenuOutcome, openToolFromMenu;
 
 /// Dialog showing connection details (host, port, cert, uptime, version).
 class _ConnectionDetailsDialog extends ConsumerWidget {
@@ -231,7 +233,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ref.read(focusInputRequestProvider.notifier).state = true;
     };
     _leaderController.onFind = () {
-      context.goToolSearch();
+      unawaited(_navigateGuarded(context.goToolSearch));
     };
     _leaderController.onInSessionFind = () {
       if (_selectedTab != HomeTab.chat) {
@@ -244,11 +246,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController.onGlobalSearch = () {
       // Single `f` key shortcut fires only when on the sessions tab.
       if (_selectedTab == HomeTab.sessions) {
-        context.goToolSearch();
+        unawaited(_navigateGuarded(context.goToolSearch));
       }
     };
     _leaderController.onBranches = () {
-      context.goToolBranches();
+      unawaited(_navigateGuarded(context.goToolBranches));
     };
     _leaderController.onShowCommandPalette = _showCommandPalette;
     _leaderController.onCycleVerbosity = _cycleVerbosity;
@@ -262,7 +264,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     };
     // TUI Ctrl+P opens the fuzzy finder over sessions/tasks; the Flutter
     // equivalent is the search tool panel.
-    _leaderController.onFuzzyFinder = () => context.goToolSearch();
+    _leaderController.onFuzzyFinder = () =>
+        unawaited(_navigateGuarded(context.goToolSearch));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_onConnectionChanged(ref.read(connectionStateProvider)));
       // Apply the router-forced initial tab if present.
@@ -279,18 +282,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.dispose();
   }
 
-  /// Handle leader key tab selection — switch to the tab locally and
-  /// update the router so the URL stays in sync.
+  /// Handle leader key tab selection (and palette picks) by switching the
+  /// tab through the guarded path: the tab bar, the shortcut and the palette
+  /// all drop an embedded tool panel the same way, so all three ask the open
+  /// panel's exit guard first.
   void _onLeaderTabSelected(int index) {
     if (index >= 0 && index < HomeTab.values.length) {
-      setState(() => _selectedTab = HomeTab.values[index]);
-      context.go(_tabRoutes[index]);
+      unawaited(_requestTabSwitch(HomeTab.values[index]));
     }
   }
 
-  /// Handle leader key navigation via go_router.
+  /// Handle leader key navigation via go_router, after the open panel's exit
+  /// guard allows leaving it.
   void _onLeaderNavigate(String path) {
-    context.go(path);
+    unawaited(_navigateGuarded(() => context.go(path)));
+  }
+
+  /// Switch to [next], asking the open panel's exit guard first.
+  ///
+  /// A tab switch replaces the chat tab, and with it any embedded tool panel,
+  /// so it drops unsaved edits exactly like leaving the panel does. A refused
+  /// switch changes nothing: the tab, the route and the panel's text all stay
+  /// where they were.
+  Future<void> _requestTabSwitch(HomeTab next) async {
+    if (next != _selectedTab) {
+      final allowed = await ref.read(toolExitGuardProvider).requestExit();
+      if (!allowed) return;
+      if (!mounted) return;
+      setState(() => _selectedTab = next);
+      _syncTabRoute(next);
+      return;
+    }
+    // Re-selecting the active tab keeps its old behaviour: sync the route
+    // and refresh the active-project indicator. Nothing is replaced, so
+    // nothing needs guarding.
+    _syncTabRoute(next);
+  }
+
+  /// Run [navigate] - a route change that replaces the open tool panel - only
+  /// when the open panel's exit guard allows leaving it.
+  Future<void> _navigateGuarded(VoidCallback navigate) async {
+    final allowed = await ref.read(toolExitGuardProvider).requestExit();
+    if (!allowed) return;
+    if (!mounted) return;
+    navigate();
+  }
+
+  /// Point the router at [next]'s route and refresh the active-project
+  /// indicator, as every tab switch has always done (TUI parity: a project
+  /// change made on the projects panel reaches the status bar without a
+  /// reconnect).
+  void _syncTabRoute(HomeTab next) {
+    context.go(_tabRoutes[next.index]);
+    ref.read(currentProjectProvider.notifier).refresh();
   }
 
   /// Refresh all data providers from the daemon.
@@ -578,14 +622,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
 
     // Child widgets request tab switches via tabActivationProvider.
-    // Apply the switch and clear the request back to null.
+    // Consume the request either way (a refused switch must not linger and
+    // fire again) and route it through the guarded switch, so a child cannot
+    // drop an open tool panel silently either.
     ref.listen<HomeTab?>(tabActivationProvider, (prev, next) {
-      if (next != null && next != _selectedTab) {
-        setState(() => _selectedTab = next);
-      }
-      if (next != null) {
-        ref.read(tabActivationProvider.notifier).state = null;
-      }
+      if (next == null) return;
+      ref.read(tabActivationProvider.notifier).state = null;
+      unawaited(_requestTabSwitch(next));
     });
 
     return AppShortcuts(
@@ -599,14 +642,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               OrangeVoidTabBar(
                 tabs: _tabLabels,
                 selectedIndex: _selectedTab.index,
-                onTabSelected: (index) {
-                  setState(() => _selectedTab = HomeTab.values[index]);
-                  context.go(_tabRoutes[index]);
-                  // Refresh active-project indicator on tab switch so a
-                  // project change made on the projects panel propagates
-                  // to the status bar without a reconnect (TUI parity).
-                  ref.read(currentProjectProvider.notifier).refresh();
-                },
+                onTabSelected: (index) =>
+                    unawaited(_requestTabSwitch(HomeTab.values[index])),
               ),
               // Toolbar with hamburger menu (left) + connection indicator (right)
               Container(
@@ -618,14 +655,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 child: Row(
                   children: [
                     HamburgerMenu(
-                      onToolSelected: (route) {
-                        if (!openToolFromMenu(context, route)) {
-                          // No route for this tool: fall back to the
-                          // embedded chat-tab tool slot.
-                          ref.read(activeToolProvider.notifier).state = route;
-                          if (_selectedTab != HomeTab.chat) {
-                            setState(() => _selectedTab = HomeTab.chat);
-                          }
+                      onToolSelected: (tool) async {
+                        final outcome = await openToolFromMenu(
+                          context,
+                          ref,
+                          tool,
+                        );
+                        // routed: the shared helper already left the panel.
+                        // refused: the open panel's exit guard vetoed the
+                        // pick, so nothing changes at all.
+                        // noRoute: fall back to the embedded chat-tab slot.
+                        if (outcome != ToolMenuOutcome.noRoute || !mounted) {
+                          return;
+                        }
+                        ref.read(activeToolProvider.notifier).state = tool;
+                        if (_selectedTab != HomeTab.chat) {
+                          setState(() => _selectedTab = HomeTab.chat);
                         }
                       },
                     ),
