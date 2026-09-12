@@ -12,6 +12,7 @@ import '../../providers/providers.dart';
 import 'settings_inputs.dart';
 import 'orchestrator_config_editor.dart';
 import 'client_prefs_editor.dart';
+import 'main_config_editor.dart';
 import 'users_panel.dart';
 import '../../widgets/error_banner.dart';
 import '../../widgets/tool_panel_shell.dart';
@@ -67,7 +68,9 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     'client': 'client.json5',
     'models': 'models.json5',
     'menubar': 'menubar.json5',
-    'memory': 'meept.json5 (read-only)',
+    // The daemon's main config. Editable via GET/POST /api/v1/config/main
+    // when the GUI runs on the same host as the daemon (loopback writes).
+    'main': 'meept.json5',
   };
 
   @override
@@ -117,6 +120,10 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   }
 
   Future<void> _loadConfig() async {
+    // The main config editor owns its own fetch: GET /api/v1/config/main
+    // returns the file path and writable flag alongside the text, and a
+    // save must surface the daemon's json5/loopback error verbatim.
+    if (_selectedConfig == 'main') return;
     setState(() {
       _isLoading = true;
       _error = null;
@@ -130,10 +137,6 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
           content = await _client.getModelsConfig();
         case 'menubar':
           content = await _client.getMenubarConfig();
-        case 'memory':
-          // Main daemon config — read-only in the GUI. Structured edits
-          // go through the orchestrator editor or `meept config set`.
-          content = await _client.getMemoryConfig();
         default:
           content = '';
       }
@@ -455,6 +458,12 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   }
 
   Widget _buildEditor() {
+    if (_selectedConfig == 'main') {
+      // Whole-file JSON5 editor for meept.json5 — read + write via
+      // GET/POST /api/v1/config/main, with dirty tracking, revert and a
+      // reload that warns before discarding unsaved edits.
+      return const MainConfigEditor();
+    }
     if (_isLoading) {
       return Center(
         child: SizedBox(
@@ -499,7 +508,6 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
-                readOnly: _selectedConfig == 'memory',
                 onChanged: (value) {
                   if (_programmaticUpdate) return;
                   setState(() {

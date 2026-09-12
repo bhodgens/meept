@@ -1654,6 +1654,45 @@ class SdkApiClient {
     await _patch('/api/v1/config/client', body: patch);
   }
 
+  /// GET /api/v1/config/main -- the daemon's main config file (meept.json5).
+  ///
+  /// Returns the absolute [MainConfigFile.path], the raw JSON5
+  /// [MainConfigFile.content], and [MainConfigFile.writable] (whether the
+  /// daemon may overwrite the file). A body missing the string `path` or
+  /// `content` keys is raised as an [SdkApiException] instead of being
+  /// coerced to empty values: a silent empty config is indistinguishable
+  /// from a daemon that returned the wrong shape, and the editor would then
+  /// happily overwrite the real file with nothing.
+  Future<MainConfigFile> getMainConfig() async {
+    final raw = await _get('/api/v1/config/main');
+    final path = raw['path'];
+    final content = raw['content'];
+    if (path is! String || content is! String) {
+      throw SdkApiException(
+        message: 'malformed main config response: expected string "path" and '
+            '"content" keys (got keys ${raw.keys.toList()})',
+        statusCode: 0,
+      );
+    }
+    return MainConfigFile(
+      path: path,
+      content: content,
+      writable: raw['writable'] == true,
+    );
+  }
+
+  /// POST /api/v1/config/main -- write the raw JSON5 text back to the
+  /// daemon's main config file (meept.json5).
+  ///
+  /// The daemon validates the text as JSON5 before touching the file, and
+  /// accepts writes from loopback clients only. A 400 (parse failure), 403
+  /// (not loopback / file not writable) or 503 (no config service) surfaces
+  /// as an [SdkApiException] whose [SdkApiException.message] is the daemon's
+  /// own error text and whose `statusCode` preserves the HTTP status.
+  Future<void> saveMainConfig(String content) async {
+    await _post('/api/v1/config/main', body: {'content': content});
+  }
+
   Future<String> getModelsConfig() async {
     final raw = await _get('/api/v1/config/models');
     return raw['content'] as String? ?? '';
@@ -1821,6 +1860,26 @@ class SdkApiClient {
       throw _handleError(e);
     }
   }
+}
+
+/// The daemon's main config file (meept.json5) as returned by
+/// GET /api/v1/config/main.
+class MainConfigFile {
+  const MainConfigFile({
+    required this.path,
+    required this.content,
+    required this.writable,
+  });
+
+  /// Absolute path of the file on the daemon host.
+  final String path;
+
+  /// Raw JSON5 text (verbatim), or `''` when the file does not exist yet.
+  final String content;
+
+  /// Whether the daemon may overwrite the file. `false` means the editor
+  /// renders read-only.
+  final bool writable;
 }
 
 /// Exception thrown by [SdkApiClient].
