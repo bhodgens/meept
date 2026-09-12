@@ -72,16 +72,19 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func Ptr\[T any\]\(v T\) \*T](<#Ptr>)
 - [func QuotaCredentialKey\(providerID string, cfg \*ModelConfig\) string](<#QuotaCredentialKey>)
 - [func ReapRuntimeProcesses\(targets \[\]OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log \*slog.Logger\) \[\]int](<#ReapRuntimeProcesses>)
+- [func RemoveSpawnRecord\(pidFile string\)](<#RemoveSpawnRecord>)
 - [func ResolveBudget\(rc \*ReasoningConfig, agent \*AgentReasoningConfig, modelDefault \*ReasoningConfig, globalBudgets map\[string\]int\) \*int](<#ResolveBudget>)
 - [func RunModelPicker\(config ModelPickerConfig\) \(\*ProviderDef, \*ModelCatalogEntry, error\)](<#RunModelPicker>)
 - [func SchemaModeValid\(s string\) bool](<#SchemaModeValid>)
 - [func SetCatalogContextWindow\(providerID, modelID string, contextWindow int\) bool](<#SetCatalogContextWindow>)
 - [func SetGBNFConstrained\(on bool\)](<#SetGBNFConstrained>)
+- [func SpawnRecordPath\(pidFile string\) string](<#SpawnRecordPath>)
 - [func StripPromptCacheBoundary\(s string\) string](<#StripPromptCacheBoundary>)
 - [func SupportedRuntimes\(\) \[\]string](<#SupportedRuntimes>)
 - [func ToolConstraintForRuntime\(rt RuntimeType\) string](<#ToolConstraintForRuntime>)
 - [func ToolConstraintSupported\(mode string\) bool](<#ToolConstraintSupported>)
 - [func UserMessage\(err error\) string](<#UserMessage>)
+- [func WriteSpawnRecord\(rec SpawnRecord\) error](<#WriteSpawnRecord>)
 - [type APIError](<#APIError>)
   - [func \(e \*APIError\) Error\(\) string](<#APIError.Error>)
   - [func \(e \*APIError\) UserMessage\(\) string](<#APIError.UserMessage>)
@@ -413,8 +416,11 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type NonRetryableError](<#NonRetryableError>)
 - [type OrphanRuntime](<#OrphanRuntime>)
   - [func FindOrphanRuntimes\(cfgs \[\]\*RuntimeConfig, list RuntimeProcLister\) \(\[\]OrphanRuntime, error\)](<#FindOrphanRuntimes>)
+  - [func FindOrphanRuntimesWithRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, list RuntimeProcLister\) \(\[\]OrphanRuntime, error\)](<#FindOrphanRuntimesWithRecords>)
   - [func OrphanRuntimesFromConfigs\(cfgs \[\]\*RuntimeConfig\) \(\[\]OrphanRuntime, error\)](<#OrphanRuntimesFromConfigs>)
+  - [func OrphanRuntimesFromConfigsAndRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord\) \(\[\]OrphanRuntime, error\)](<#OrphanRuntimesFromConfigsAndRecords>)
   - [func ReapOrphanRuntimesFromConfigs\(cfgs \[\]\*RuntimeConfig, waitAfterTerm time.Duration, log \*slog.Logger\) \(\[\]OrphanRuntime, \[\]int\)](<#ReapOrphanRuntimesFromConfigs>)
+  - [func ReapOrphanRuntimesFromConfigsAndRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, waitAfterTerm time.Duration, log \*slog.Logger\) \(\[\]OrphanRuntime, \[\]int\)](<#ReapOrphanRuntimesFromConfigsAndRecords>)
 - [type PacingConfig](<#PacingConfig>)
 - [type ParameterProperty](<#ParameterProperty>)
 - [type PolicyVerdict](<#PolicyVerdict>)
@@ -581,6 +587,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type RuntimeConfig](<#RuntimeConfig>)
   - [func ValidateAndNormalize\(cfg RuntimeLifecycleConfig\) \(\*RuntimeConfig, error\)](<#ValidateAndNormalize>)
 - [type RuntimeLifecycleConfig](<#RuntimeLifecycleConfig>)
+  - [func \(c RuntimeLifecycleConfig\) AutoStopOnExitOrDefault\(\) bool](<#RuntimeLifecycleConfig.AutoStopOnExitOrDefault>)
 - [type RuntimeManager](<#RuntimeManager>)
   - [func NewRuntimeManager\(logger \*slog.Logger\) \*RuntimeManager](<#NewRuntimeManager>)
   - [func \(m \*RuntimeManager\) EndpointBaseURL\(providerID string\) \(string, bool\)](<#RuntimeManager.EndpointBaseURL>)
@@ -598,7 +605,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*RuntimeManager\) StatusForProvider\(providerID string\) \(RuntimeStatus, bool\)](<#RuntimeManager.StatusForProvider>)
   - [func \(m \*RuntimeManager\) StopAll\(ctx context.Context\) error](<#RuntimeManager.StopAll>)
   - [func \(m \*RuntimeManager\) StopProvider\(ctx context.Context, providerID string\) error](<#RuntimeManager.StopProvider>)
-  - [func \(m \*RuntimeManager\) SweepOrphanRuntimes\(waitAfterTerm time.Duration\) \[\]int](<#RuntimeManager.SweepOrphanRuntimes>)
+  - [func \(m \*RuntimeManager\) SweepOrphanRuntimes\(waitAfterTerm time.Duration, records \[\]SpawnRecord\) \[\]int](<#RuntimeManager.SweepOrphanRuntimes>)
 - [type RuntimeProcInfo](<#RuntimeProcInfo>)
   - [func ListRuntimeProcesses\(\) \(\[\]RuntimeProcInfo, error\)](<#ListRuntimeProcesses>)
 - [type RuntimeProcLister](<#RuntimeProcLister>)
@@ -618,6 +625,9 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(rt RuntimeType\) String\(\) string](<#RuntimeType.String>)
 - [type SessionSummaryResult](<#SessionSummaryResult>)
 - [type SkillRequirements](<#SkillRequirements>)
+- [type SpawnRecord](<#SpawnRecord>)
+  - [func ReadSpawnRecord\(pidFile string\) \(SpawnRecord, error\)](<#ReadSpawnRecord>)
+  - [func ScanSpawnRecords\(dir string\) \(\[\]SpawnRecord, error\)](<#ScanSpawnRecords>)
 - [type Status](<#Status>)
 - [type StreamAbortedError](<#StreamAbortedError>)
   - [func \(e \*StreamAbortedError\) Error\(\) string](<#StreamAbortedError.Error>)
@@ -1491,9 +1501,16 @@ QuotaCredentialKey returns a stable identity for a provider credential:
 
 	func ReapRuntimeProcesses(targets []OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log *slog.Logger) []int
 
-ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each process group, a grace period, then SIGKILL for those still alive. The table is re\-read before escalating, so a pid whose entry changed is never signalled \(pid reuse\) and a pid that already exited is not signalled again. Returns the pids confirmed gone — a caller may only treat those as stopped.
+ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each process group, a grace period, then SIGKILL for those still alive. The process table is re\-read BEFORE any signal \(a pid whose entry changed since detection is dropped, never signalled\) and again before the SIGKILL escalation, and a pid is reported only once it is verifiably gone. Returns the pids confirmed gone — a caller may only treat those as stopped. Duplicate targets collapse to one signal and one entry.
 
 list and signal are seams: nil means the real ps scan and the real process\-group kill, which is what the daemon and the CLI both use.
+
+<a name="RemoveSpawnRecord"></a>
+## func RemoveSpawnRecord
+
+	func RemoveSpawnRecord(pidFile string)
+
+RemoveSpawnRecord deletes the record written beside pidFile. Best\-effort: a missing file is not an error, and there is no logger in this package\-level helper to report failures to.
 
 <a name="ResolveBudget"></a>
 ## func ResolveBudget
@@ -1540,6 +1557,13 @@ SetCatalogContextWindow updates one entry's ContextWindow. The slice is copied a
 
 SetGBNFConstrained sets the global gbnf\_constrained switch.
 
+<a name="SpawnRecordPath"></a>
+## func SpawnRecordPath
+
+	func SpawnRecordPath(pidFile string) string
+
+SpawnRecordPath returns the durable record path for a runtime PID file: the PID file path with the record suffix appended.
+
 <a name="StripPromptCacheBoundary"></a>
 ## func StripPromptCacheBoundary
 
@@ -1574,6 +1598,13 @@ ToolConstraintSupported reports whether a mode string is a recognized constraint
 	func UserMessage(err error) string
 
 UserMessage returns a human\-readable error message from any LLM error type. It unwraps the error chain and tries each known type.
+
+<a name="WriteSpawnRecord"></a>
+## func WriteSpawnRecord
+
+	func WriteSpawnRecord(rec SpawnRecord) error
+
+WriteSpawnRecord atomically writes rec beside its PID file \(temp file \+ rename, mode 0o600\), creating the directory when needed. The write is atomic so a concurrent reader never observes a torn record, mirroring the PID\-file writer in runtime\_process.go.
 
 <a name="APIError"></a>
 ## type APIError
@@ -3762,14 +3793,16 @@ SetProcessAliveProbe binds the checker to the process the endpoint belongs to. W
 
 Start begins periodic health checks in a background goroutine.
 
-Calling Start again after Stop re\-arms the checker: a closed stop channel would make run return at once, freezing the verdict forever. That freeze is worse than a missed check — a restarted runtime's WaitForHealthy would either fail against a stale "unhealthy" \(and Stop would then kill the restart it was waiting for\) or succeed immediately against a stale "healthy" before the process had bound. Re\-arming clears the failure count and drops the verdict to unhealthy until a real check succeeds.
+The run belongs to the ENDPOINT, not to the caller's context. Every caller passes a short\-lived context — the daemon cancels its boot context the moment StartAll returns \(\`defer cancelLlm\`\), the HTTP start path passes \`r.Context\(\)\`, and RPC passes a connection\-scoped context — so binding the run to it silently ended health monitoring seconds after boot. The run detaches from cancellation the same way RuntimeProcess.Start detaches the child; only Stop ends it \(and StopAll calls Stop for every endpoint\).
+
+Start is also the re\-arm path. The manager stops the checker when a runtime stops and starts it again when the runtime restarts, and a run can end on its own \(an older caller's context died\). Any checker that is not running is armed fresh — verdict reset to unhealthy, failure count cleared — because serving the previous verdict would either fail a healthy restart \(and Stop would then kill the process it just restarted\) or report a runtime healthy before its socket exists.
 
 <a name="HealthChecker.Stop"></a>
 ### func \(\*HealthChecker\) Stop
 
 	func (h *HealthChecker) Stop()
 
-Stop stops the health checker.
+Stop stops the health checker. Idempotent, and safe against the run goroutine exiting on its own: it only closes the channel of the run that is active.
 
 <a name="HealthChecker.WaitForHealthy"></a>
 ### func \(\*HealthChecker\) WaitForHealthy
@@ -4658,7 +4691,18 @@ OrphanRuntime is one runtime process left behind by a meept process that no long
 
 	func FindOrphanRuntimes(cfgs []*RuntimeConfig, list RuntimeProcLister) ([]OrphanRuntime, error)
 
-FindOrphanRuntimes returns runtime processes that a dead meept process left behind. Report\-only: the caller decides whether to signal them. A pid matched by more than one endpoint config is reported once.
+FindOrphanRuntimes returns runtime processes that a dead meept process left behind, matched against endpoint configs only. Report\-only: the caller decides whether to signal them. A pid matched by more than one endpoint config is reported once.
+
+Records exist so detection survives config drift; callers that can reach the durable records \(the daemon and \`meept doctor\`\) should use FindOrphanRuntimesWithRecords instead. This wrapper stays for the callers and tests that match on configs alone.
+
+<a name="FindOrphanRuntimesWithRecords"></a>
+### func FindOrphanRuntimesWithRecords
+
+	func FindOrphanRuntimesWithRecords(cfgs []*RuntimeConfig, records []SpawnRecord, list RuntimeProcLister) ([]OrphanRuntime, error)
+
+FindOrphanRuntimesWithRecords returns leftover runtime processes matched against BOTH the endpoint configs and the durable spawn records. A process is an orphan when its parent is init \(ppid==1, so the meept process that spawned it is gone\) and its command line is exactly a sweepable config's spawn command or a sweepable record's argv. A pid matched by both a config and a record \(or by two of either\) is reported once, with the config's endpoint key when a config matched first.
+
+Records make detection independent of the current config: an endpoint whose model volume is unmounted or whose provider was renamed no longer validates, so no config reaches this scan, but its recorded spawn command still matches the leftover it left behind.
 
 <a name="OrphanRuntimesFromConfigs"></a>
 ### func OrphanRuntimesFromConfigs
@@ -4667,12 +4711,26 @@ FindOrphanRuntimes returns runtime processes that a dead meept process left behi
 
 OrphanRuntimesFromConfigs reports leftover runtime processes for a set of runtime configs \(used by \`meept doctor\`, which has no RuntimeManager\).
 
+<a name="OrphanRuntimesFromConfigsAndRecords"></a>
+### func OrphanRuntimesFromConfigsAndRecords
+
+	func OrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnRecord) ([]OrphanRuntime, error)
+
+OrphanRuntimesFromConfigsAndRecords reports leftover runtime processes for a set of runtime configs AND durable spawn records with the real process scan. Records let \`meept doctor\` still see a leftover whose endpoint config no longer validates \(unmounted model volume, renamed provider\).
+
 <a name="ReapOrphanRuntimesFromConfigs"></a>
 ### func ReapOrphanRuntimesFromConfigs
 
 	func ReapOrphanRuntimesFromConfigs(cfgs []*RuntimeConfig, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int)
 
 ReapOrphanRuntimesFromConfigs finds and reaps leftovers for the given configs with the real process scan and process\-group signals. It returns the orphans it considered and the pids confirmed gone — callers must report the confirmed count, never the candidate count.
+
+<a name="ReapOrphanRuntimesFromConfigsAndRecords"></a>
+### func ReapOrphanRuntimesFromConfigsAndRecords
+
+	func ReapOrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnRecord, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int)
+
+ReapOrphanRuntimesFromConfigsAndRecords finds and reaps leftovers for the given configs and durable spawn records with the real process scan and process\-group signals. Records are the config\-independent source, so a leftover survives neither a drifted config nor an invalid one. It returns the orphans it considered and the pids confirmed gone — callers must report the confirmed count, never the candidate count.
 
 <a name="PacingConfig"></a>
 ## type PacingConfig
@@ -4995,7 +5053,7 @@ IsAutoStart returns whether the runtime should auto\-start.
 
 	func (p ProviderConfig) IsAutoStopOnExit() bool
 
-IsAutoStopOnExit returns whether the runtime should auto\-stop on daemon shutdown.
+IsAutoStopOnExit returns whether the runtime should auto\-stop on daemon shutdown. An absent auto\_stop\_on\_exit key defaults to true \(see RuntimeLifecycleConfig.AutoStopOnExitOrDefault\); only an explicit false opts out. A provider with no lifecycle block manages no runtime, so it reports false.
 
 <a name="ProviderConfig.PIDDir"></a>
 ### func \(ProviderConfig\) PIDDir
@@ -6220,17 +6278,32 @@ ValidateAndNormalize validates the config and expands paths. Supports both legac
 RuntimeLifecycleConfig holds configuration for local LLM runtime management.
 
 	type RuntimeLifecycleConfig struct {
-	    Runtime        string              `json:"runtime"`           // "llama-cpp" or "mlx"
-	    ModelPath      string              `json:"model_path"`        // Legacy single-model path
-	    ModelPaths     map[string]string   `json:"model_paths"`       // Multi-model map: modelKey -> path
-	    AutoStart      bool                `json:"auto_start"`        // Auto-start on daemon startup
-	    AutoStopOnExit bool                `json:"auto_stop_on_exit"` // Stop on daemon shutdown
-	    PIDFile        string              `json:"pid_file"`          // Path to PID file
-	    SpawnCommand   []string            `json:"spawn_command"`     // Command and args to spawn runtime
+	    Runtime    string            `json:"runtime"`     // "llama-cpp" or "mlx"
+	    ModelPath  string            `json:"model_path"`  // Legacy single-model path
+	    ModelPaths map[string]string `json:"model_paths"` // Multi-model map: modelKey -> path
+	    AutoStart  bool              `json:"auto_start"`  // Auto-start on daemon startup
+	    // AutoStopOnExit controls whether the platform stops this runtime when it
+	    // shuts down. It is a pointer so an ABSENT key can be told apart from an
+	    // explicit `false`: absent (nil) means true via AutoStopOnExitOrDefault,
+	    // and only an explicit `false` opts out. As a plain bool an absent key
+	    // decoded to false, so an endpoint that omits the key was neither stopped
+	    // by the shutdown path nor reaped by the boot-time orphan sweep — it kept
+	    // its model loaded and its port held after a clean shutdown and after a
+	    // crash alike.
+	    AutoStopOnExit *bool               `json:"auto_stop_on_exit,omitempty"` // Stop on daemon shutdown; absent means true
+	    PIDFile        string              `json:"pid_file"`                    // Path to PID file
+	    SpawnCommand   []string            `json:"spawn_command"`               // Command and args to spawn runtime
 	    SpawnTimeout   int                 `json:"spawn_timeout_seconds"`
 	    HealthCheck    HealthCheckConfig   `json:"health_check"`
 	    RestartPolicy  RestartPolicyConfig `json:"restart_policy"`
 	}
+
+<a name="RuntimeLifecycleConfig.AutoStopOnExitOrDefault"></a>
+### func \(RuntimeLifecycleConfig\) AutoStopOnExitOrDefault
+
+	func (c RuntimeLifecycleConfig) AutoStopOnExitOrDefault() bool
+
+AutoStopOnExitOrDefault reports whether the platform should stop this runtime when it shuts down. An absent key \(nil pointer\) defaults to true: a managed runtime holds a model and a port, so silence must not mean "leave it running". Only an explicit \`false\` opts out.
 
 <a name="RuntimeManager"></a>
 ## type RuntimeManager
@@ -6358,9 +6431,9 @@ StopProvider stops a specific provider's runtime \(and the shared subprocess\).
 <a name="RuntimeManager.SweepOrphanRuntimes"></a>
 ### func \(\*RuntimeManager\) SweepOrphanRuntimes
 
-	func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration) []int
+	func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration, records []SpawnRecord) []int
 
-SweepOrphanRuntimes stops every runtime a previous meept generation left behind: endpoint configs whose auto\_stop\_on\_exit is true, a process whose parent is init, and a command line equal to the endpoint's spawn command. An endpoint with a live recorded owner is skipped. Returns the pids confirmed gone \(nil when nothing matched\). It never returns an error: a failed sweep must not block daemon start.
+SweepOrphanRuntimes stops every runtime a previous meept generation left behind: endpoint configs whose auto\_stop\_on\_exit is true, a process whose parent is init, and a command line equal to the endpoint's spawn command — or, for an endpoint whose current config no longer validates, to a durable spawn record's argv \(records are the config\-independent source\). An endpoint with a live recorded owner is skipped. Returns the pids confirmed gone \(nil when nothing matched\). It never returns an error: a failed sweep must not block daemon start.
 
 <a name="RuntimeProcInfo"></a>
 ## type RuntimeProcInfo
@@ -6530,6 +6603,33 @@ SkillRequirements defines the capability requirements for a skill.
 	    Name     string
 	    Requires []string
 	}
+
+<a name="SpawnRecord"></a>
+## type SpawnRecord
+
+SpawnRecord is the durable record of one runtime spawn: the expanded spawn command, written beside the PID file, so the orphan sweep can still match a leftover after the config drifts \(unmounted model volume, renamed provider\) — exactly when a leak is otherwise unreapable.
+
+	type SpawnRecord struct {
+	    EndpointKey string   `json:"endpoint_key,omitempty"`
+	    PIDFile     string   `json:"pid_file"`
+	    Argv        []string `json:"argv"`
+	    AutoStop    bool     `json:"auto_stop"`
+	    PID         int      `json:"pid"`
+	}
+
+<a name="ReadSpawnRecord"></a>
+### func ReadSpawnRecord
+
+	func ReadSpawnRecord(pidFile string) (SpawnRecord, error)
+
+ReadSpawnRecord reads and parses the record written beside pidFile.
+
+<a name="ScanSpawnRecords"></a>
+### func ScanSpawnRecords
+
+	func ScanSpawnRecords(dir string) ([]SpawnRecord, error)
+
+ScanSpawnRecords returns every parseable record in dir \(glob \*.cmd\). An unreadable or invalid entry is skipped so one corrupt file cannot hide the rest of the records, and a missing dir yields no records and no error — a scan failure must never abort the sweep.
 
 <a name="Status"></a>
 ## type Status

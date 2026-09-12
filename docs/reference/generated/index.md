@@ -6,12 +6,12 @@ This directory contains documentation auto-generated from Go source code using [
 
 | Package | Description |
 |---------|-------------|
-| [skills](skills.md) | github.com/caimlas/meept/internal/skills |
-| [config](config.md) | github.com/caimlas/meept/internal/config |
-| [bus](bus.md) | github.com/caimlas/meept/internal/bus |
-| [scheduler](scheduler.md) | github.com/caimlas/meept/internal/scheduler |
 | [agent](agent.md) | github.com/caimlas/meept/internal/agent |
-| [security](security.md) | github.com/caimlas/meept/internal/security |
+| [bus](bus.md) | github.com/caimlas/meept/internal/bus |
+| [config](config.md) | github.com/caimlas/meept/internal/config |
 | [llm](llm.md) | github.com/caimlas/meept/internal/llm |
 | [memory](memory.md) | github.com/caimlas/meept/internal/memory |
+| [scheduler](scheduler.md) | github.com/caimlas/meept/internal/scheduler |
+| [security](security.md) | github.com/caimlas/meept/internal/security |
+| [skills](skills.md) | github.com/caimlas/meept/internal/skills |
 | [tools](tools.md) | github.com/caimlas/meept/internal/tools |
