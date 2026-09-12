@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"net/url"
+	"slices"
 	"testing"
 )
 
@@ -10,11 +12,12 @@ func TestConfigLoads(t *testing.T) {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Verify root-level model references (2026-09-06 MLX platform design:
-	// general default is the local MLX 4-bit model; classifier primary is
-	// the fine-tuned combined-sft on the local-mlx runtime).
-	if cfg.Model != "local/lfm-8b-mlx-4bit" {
-		t.Errorf("model = %q, want local/lfm-8b-mlx-4bit", cfg.Model)
+	// Verify root-level model references (2026-09-12: the general default
+	// moved from the mlx_lm endpoint to the same LFM2.5-8B weights on
+	// llama.cpp, which is the runtime that extracts tool calls; the MLX
+	// entry stays registered as the classifier alternate).
+	if cfg.Model != "local-gguf/lfm-8b-gguf" {
+		t.Errorf("model = %q, want local-gguf/lfm-8b-gguf", cfg.Model)
 	}
 	if cfg.SmallModel != "local/lfm-1.2b-q8" {
 		t.Errorf("small_model = %q, want local/lfm-1.2b-q8", cfg.SmallModel)
@@ -32,12 +35,16 @@ func TestConfigLoads(t *testing.T) {
 	if !ok {
 		t.Fatal("classifier alias not found")
 	}
-	// Classifier alias: lfm-8b-mlx primary per the 2026-09-06 A/B
-	// (86.8% vs 54.4% corpus accuracy — combined-sft stays registered
-	// as the A/B alternate), falling back to combined-sft, then the
-	// fast 1.2b.
-	if len(classifierAlias.Models) == 0 || classifierAlias.Models[0] != "local/lfm-8b-mlx-4bit" {
-		t.Errorf("classifier alias primary = %q, want local/lfm-8b-mlx-4bit", classifierAlias.Models[0])
+	// Classifier alias: the llama.cpp LFM2.5-8B primary (it is the general
+	// driver too, so the classifier runs on the endpoint that can call
+	// tools), then the same weights on mlx_lm — the 2026-09-06 A/B winner
+	// (86.8% vs 54.4% corpus accuracy) — then combined-sft, then the fast
+	// 1.2b.
+	if len(classifierAlias.Models) == 0 || classifierAlias.Models[0] != "local-gguf/lfm-8b-gguf" {
+		t.Errorf("classifier alias primary = %q, want local-gguf/lfm-8b-gguf", classifierAlias.Models[0])
+	}
+	if len(classifierAlias.Models) < 2 || classifierAlias.Models[1] != "local/lfm-8b-mlx-4bit" {
+		t.Errorf("classifier alias alternate = %v, want local/lfm-8b-mlx-4bit at [1]", classifierAlias.Models)
 	}
 
 	// Verify coder alias uses glm-5.2
@@ -70,6 +77,52 @@ func TestConfigLoads(t *testing.T) {
 		t.Errorf("lfm-8b-mlx-4bit context_limit = %d, want 16384", lfm8b.ContextLimit)
 	}
 
+	// Verify the general driver is the llama.cpp endpoint, and that it can
+	// actually call tools: --jinja is what makes llama-server render the
+	// model's chat template (tool list included). Without it the daemon
+	// boots a driver that answers in prose and never calls a tool.
+	ggufProvider, ok := cfg.Providers["local-gguf"]
+	if !ok {
+		t.Fatal("local-gguf provider not found")
+	}
+	if ggufProvider.Options.BaseURL != "http://127.0.0.1:8080/v1" {
+		t.Errorf("local-gguf baseURL = %q, want http://127.0.0.1:8080/v1", ggufProvider.Options.BaseURL)
+	}
+	if ggufProvider.Lifecycle == nil {
+		t.Fatal("local-gguf lifecycle not configured")
+	}
+	if !slices.Contains(ggufProvider.Lifecycle.SpawnCommand, "--jinja") {
+		t.Errorf("local-gguf spawn_command = %v, want --jinja (without it llama-server cannot emit tool calls)",
+			ggufProvider.Lifecycle.SpawnCommand)
+	}
+	ggufModel, ok := ggufProvider.Models["lfm-8b-gguf"]
+	if !ok {
+		t.Fatal("lfm-8b-gguf model not found in local-gguf provider")
+	}
+	if !slices.Contains(ggufModel.Capabilities, "tool_use") {
+		t.Errorf("lfm-8b-gguf capabilities = %v, want tool_use", ggufModel.Capabilities)
+	}
+
+	// Port guard. Two loopback endpoints sharing one port makes the daemon
+	// adopt a foreign listener as its own runtime (2026-09-12: the MLX
+	// endpoint claimed :8082, the prompt-router sidecar's port, so the
+	// driver answered with the router's canned JSON). 8082 is reserved for
+	// that sidecar and is not a provider port.
+	seenPort := map[string]string{}
+	for name, p := range cfg.Providers {
+		port := loopbackPort(p.Options.BaseURL)
+		if port == "" {
+			continue
+		}
+		if port == "8082" {
+			t.Errorf("provider %s uses :8082, reserved for the prompt-router sidecar", name)
+		}
+		if prev, dup := seenPort[port]; dup {
+			t.Errorf("providers %s and %s both use loopback port %s", prev, name, port)
+		}
+		seenPort[port] = name
+	}
+
 	// Verify lfm-1.2b-q8 model (primary small model)
 	lfm12b, ok := localProvider.Models["lfm-1.2b-q8"]
 	if !ok {
@@ -91,4 +144,18 @@ func TestConfigLoads(t *testing.T) {
 	if glm52.Name != "glm-5.2" {
 		t.Errorf("glm-5.2 name = %q, want glm-5.2", glm52.Name)
 	}
+}
+
+// loopbackPort returns the port of a loopback baseURL, or "" when the URL is
+// remote or has no port. Remote providers may share :443 without conflict, so
+// only loopback endpoints are compared by the port guard in TestConfigLoads.
+func loopbackPort(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	if u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" {
+		return ""
+	}
+	return u.Port()
 }

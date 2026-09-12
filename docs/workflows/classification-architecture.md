@@ -70,7 +70,7 @@ by Door 1 hardware failure.
 
 | component | what | resource |
 |---|---|---|
-| classifier LLM | LFM2.5-8B (models.json5 `local/lfm-8b-mlx-4bit`) | ~5 GB RAM, ~1-2s |
+| classifier LLM | LFM2.5-8B (models.json5 `local-gguf/lfm-8b-gguf`) | ~5 GB RAM, ~1-2s |
 | intent analyzer | `internal/agent/intent_analyzer.go` — category whitelist, compound splitting | compiled in |
 
 Failure behavior: LLM errors, quota, alias exhaustion → falls through
@@ -83,6 +83,34 @@ to Door 3. Never blocks the user on a provider outage.
 | ambiguity gate | `dispatcher.go` clarify-first; answers resume in quickplan mode |
 | orchestrator | strategic planner → tactical scheduler → phase/step plans |
 | executor agents | coder/debugger/etc. loops, verification gates on |
+
+## Local runtime selection (LFM2.5-8B)
+
+Two providers serve the same LFM2.5-8B-A1B weights. Only the llama.cpp one
+can call tools, so it is the default (`model:` in models.json5).
+
+| provider | runtime | port | tool calls |
+|---|---|---|---|
+| `local-gguf/lfm-8b-gguf` | llama-server, GGUF Q4_K_M, `--jinja` | 8080 | yes — `finish_reason: "tool_calls"` |
+| `local/lfm-8b-mlx-4bit` | mlx_lm server, MLX 4-bit | 8083 | no — prose JSON or reasoning-only |
+
+The difference is the runtime, not the model or the chat template. Measured
+2026-09-12 with one identical request (the `json_extract` tool plus a short
+text): llama-server answered `finish_reason=tool_calls` with a structured
+call in 55 tokens, while mlx_lm returned either a bare
+`\boxed{"name":...,"arguments":...}` object in prose or the whole reply in a
+`reasoning` field with `content` absent. The model knows the tools exist in
+both cases — its own `chat_template.jinja` injects `List of tools:` into the
+system prompt — so the template is not at fault.
+
+`--jinja` is required on the llama-server entry: without it the template does
+not render the tool list and the model emits no call at all.
+
+Port layout for the local endpoints: 8080 llama.cpp general driver,
+8081 mlx combined-sft, 8082 the prompt-router sidecar (reserved — not a
+provider port), 8083 mlx general, 8084 llama.cpp extractor.
+`internal/llm/providers_config_test.go` fails the build if two providers
+claim one loopback port, or if any provider claims 8082.
 
 ## Observability: what is logged today
 

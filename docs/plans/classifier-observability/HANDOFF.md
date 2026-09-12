@@ -89,8 +89,9 @@
 
 | Role | Model | Runtime |
 |---|---|---|
-| General default | `local/lfm-8b-mlx-4bit` | mlx_lm :8082 |
-| Classifier primary | `local/lfm-8b-mlx-4bit` (86.8% A/B) | mlx_lm :8082 (shared) |
+| General default | `local-gguf/lfm-8b-gguf` | llama.cpp :8080 (`--jinja`) |
+| Classifier primary | `local-gguf/lfm-8b-gguf` | llama.cpp :8080 (shared) |
+| Classifier alternate | `local/lfm-8b-mlx-4bit` (86.8% A/B) | mlx_lm :8083 |
 | Classifier A/B alternate | `local-mlx/lfm-combined-sft` (54.4%) | mlx_lm :8081 |
 | Embedding (new, unused yet) | `Qwen3-Embedding-0.6B-4bit-DWQ` @ /Volumes/LLMs | TBD |
 
@@ -134,7 +135,9 @@ Latency: analyzer (0.3–28s) + router (15s timeout) serialize before the agent 
 
 ## 4. Immediate State
 
-- classifier alias primary: local/lfm-8b-mlx-4bit (86.8% A/B, 2026-09-06)
+- classifier alias primary: local-gguf/lfm-8b-gguf (llama.cpp :8080, 2026-09-12
+  driver switch — mlx_lm cannot emit tool calls); the mlx_lm 8B entry stays as
+  the classifier alternate (86.8% A/B, 2026-09-06)
 - combined-sft: demoted to A/B alternate slot (54.4%, platform/search/report/review 0%)
 - Qwen3-Embedding weights: downloaded, NOT yet wired into config/code
 - e2e: `make e2e-chat` (A5 `?`-heuristic decision still parked)

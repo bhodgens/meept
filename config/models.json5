@@ -2,7 +2,14 @@
   // Default model for general use (provider/model-id format)
   // Local-first: LFM2.5-8B-A1B GGUF on the local llama.cpp runtime (no cloud
   // tokens for e2e/everyday runs). Cloud models stay available via aliases.
-  "model": "local/lfm-8b-mlx-4bit",
+  //
+  // 2026-09-12: this pointed at local/lfm-8b-mlx-4bit (mlx_lm) while the
+  // comment above already said "GGUF on the local llama.cpp runtime" — the
+  // value never matched the stated intent. mlx_lm cannot emit tool calls
+  // (measured: prose/boxed JSON or reasoning-only, never tool_calls), while
+  // llama-server --jinja returns structured tool_calls for the same task.
+  // See docs/workflows/classification-architecture.md.
+  "model": "local-gguf/lfm-8b-gguf",
 
   // Fast/cheap model for classification, summarization
   // Use "classifier" or "summarizer" aliases for automatic fallback
@@ -32,7 +39,8 @@
   "model_aliases": {
     "classifier": {
       "models": [
-        "local/lfm-8b-mlx-4bit",      // Primary: 86.8% corpus accuracy (2026-09-06 A/B — strongest general classifier on every category but chat)
+        "local-gguf/lfm-8b-gguf",     // Primary: same 8B weights as the MLX entry, but on llama.cpp — the runtime that returns structured tool_calls (2026-09-12)
+        "local/lfm-8b-mlx-4bit",      // Alternate: same weights on mlx_lm (86.8% corpus accuracy 2026-09-06); no tool-call extraction
         "local-mlx/lfm-combined-sft", // A/B alternate: SFT specialist (287ms; schedule/chat/coding strong, platform/search/report/review 0%)
         "local/lfm-1.2b-q8",          // Fallback: fast, best-effort
         "zai/glm-4.5-air",            // Fallback: remote API
@@ -147,7 +155,12 @@
     "local": {
       "api": "openai",
       "options": {
-        "baseURL": "http://127.0.0.1:8082/v1"
+        // :8083 — the MLX general endpoint, per the layout documented on the
+        // local-extract provider below. This was :8082, which is the
+        // prompt-router sidecar's port: two services claimed the same port,
+        // so the daemon adopted the router as its "own" runtime and the
+        // driver answered with canned classifier JSON (2026-09-12).
+        "baseURL": "http://127.0.0.1:8083/v1"
       },
       "lifecycle": {
         "runtime": "mlx",
@@ -155,7 +168,7 @@
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/mlx-general.pid",
-        "spawn_command": ["mlx_lm", "server", "--model", "${MODEL_PATH}", "--port", "8082"],
+        "spawn_command": ["mlx_lm", "server", "--model", "${MODEL_PATH}", "--port", "8083"],
         "spawn_timeout_seconds": 180,
         "health_check": {
           "endpoint": "/health",
@@ -249,6 +262,61 @@
           "max_output": 1024,
           "temperature": 0.0,
           "max_concurrency": 1
+        }
+      }
+    },
+
+    // Main local chat driver: LFM2.5-8B-A1B on llama.cpp (GGUF). Third
+    // llama.cpp instance, on port 8080 — the "main chat model (8080)" the
+    // local-extract comment above refers to. Same weights as the `local`
+    // MLX entry, but llama-server extracts tool calls server-side
+    // (--jinja + the LFM2.5 tool-call parser) and mlx_lm does not:
+    // measured 2026-09-12, this endpoint answers finish_reason=tool_calls
+    // with a structured json_extract call where mlx_lm returns either
+    // prose \boxed{} JSON or a reasoning-only reply.
+    //
+    // --jinja is REQUIRED. Without it the model's chat template never
+    // renders the tool list and the model cannot emit a call at all.
+    "local-gguf": {
+      "api": "openai",
+      "options": {
+        "baseURL": "http://127.0.0.1:8080/v1"
+      },
+      "lifecycle": {
+        "runtime": "llama-cpp",
+        "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
+        "auto_start": true,
+        "auto_stop_on_exit": true,
+        "pid_file": "~/.meept/run/llama-general.pid",
+        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1", "--jinja", "--ctx-size", "16384"],
+        "spawn_timeout_seconds": 180,
+        "health_check": {
+          "endpoint": "/health",
+          "interval_seconds": 10,
+          "timeout_seconds": 5,
+          "unhealthy_threshold": 18
+        },
+        "restart_policy": {
+          "enabled": true,
+          "max_attempts": 3,
+          "cooldown_seconds": 30,
+          "reset_after_seconds": 300
+        }
+      },
+      "models": {
+        "lfm-8b-gguf": {
+          // llama-server answers to the GGUF basename it loaded (verified:
+          // GET /v1/models on :8080 reports "LFM2.5-8B-A1B-Q4_K_M.gguf"
+          // for this --model path).
+          "name": "LFM2.5-8B-A1B-Q4_K_M.gguf",
+          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
+          "capabilities": ["completion", "code", "reasoning", "tool_use"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 16384,
+          "max_output": 4096,
+          "temperature": 0.7,
+          "max_concurrency": 2
         }
       }
     },

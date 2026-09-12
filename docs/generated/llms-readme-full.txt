@@ -2,7 +2,7 @@
 
 This document is a complete flattening of all Meept documentation into a single text file, designed to be fed to LLMs as context. It covers installation, architecture, configuration, workflows, and API reference.
 
-Generated: 2026-09-12T07:28:09Z
+Generated: 2026-09-12T22:22:27Z
 Source: https://github.com/caimlas/meept
 
 ---
@@ -143,7 +143,6 @@ Source: https://github.com/caimlas/meept
   - scheduler
   - security
   - skills
-  - config
   - tools
   - Git Hooks Reference
   - Meept HTTP API - Complete Reference
@@ -12141,7 +12140,7 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
 | `model_path` | string | see note | Path to a single model file (supports `~` expansion). Required unless `model_paths` is set |
 | `model_paths` | object | see note | Map of `modelKey` → model path, for multi-model servers sharing one subprocess. Required unless `model_path` is set |
 | `auto_start` | bool | no | Auto-start on platform startup (default: false) |
-| `auto_stop_on_exit` | bool | no | Stop on platform shutdown (absent/false leaves the runtime running; the shipped config sets `true` for the local runtimes) |
+| `auto_stop_on_exit` | bool | no | Stop on platform shutdown (default: true). Absent or `true` means the runtime is stopped by the shutdown path and reaped by the boot-time orphan sweep; only an explicit `false` leaves it running |
 | `pid_file` | string | yes | Path to PID file for process tracking |
 | `spawn_command` | array | yes | Command and arguments to spawn the runtime |
 | `spawn_timeout_seconds` | int | no | Timeout waiting for runtime to become healthy (default: 60) |
@@ -12227,7 +12226,7 @@ If no provider is specified, `local` is used by default.
 
 4. **PID File Management**: The runtime PID is stored in a file for cross-restart tracking. Stale PID files (from crashes) are automatically cleaned up on next startup. The `pid_file` of the first provider to register an endpoint wins; subsequent providers' `pid_file` values are ignored (debug log if they differ).
 
-5. **Graceful Shutdown**: On platform exit, each endpoint (not each provider) receives a single SIGTERM, then SIGKILL if it doesn't exit within the timeout. Health checkers are stopped and per-model/per-process log files are closed.
+5. **Graceful Shutdown**: On platform exit, each endpoint (not each provider) whose config does not set `auto_stop_on_exit: false` receives a single SIGTERM, then SIGKILL if it doesn't exit within the timeout. Health checkers are stopped and per-model/per-process log files are closed.
 
 ## Duplicate-Spawn Guard
 
@@ -12257,11 +12256,14 @@ endpoint port held. The ownership rule below keeps later boots from stopping it
 owned*), so the sweep is what reaps it.
 
 At boot, before starting its own runtimes, the platform sweeps those leftovers:
-for every endpoint with `auto_stop_on_exit: true`, a process whose parent is init
-(`ppid == 1`) and whose command line is exactly that endpoint's `spawn_command`
-is stopped (SIGTERM to the process group, then SIGKILL after a short grace
-period) and its PID file is removed. Endpoints with `auto_stop_on_exit: false`
-are left alone: that setting asks the runtime to outlive the platform.
+for every endpoint whose `auto_stop_on_exit` is `true` or absent, a process
+whose parent is init (`ppid == 1`) and whose command line is exactly that
+endpoint's `spawn_command` is stopped (SIGTERM to the process group, then
+SIGKILL after a short grace period) and its PID file is removed. Only
+`auto_stop_on_exit: false` is left alone: that setting asks the runtime to
+outlive the platform. The shutdown path (`StopAll`) and this boot-time sweep
+read the same flag, so an endpoint that omits the key is stopped with the
+platform and reaped as an orphan when the platform died hard.
 
 `meept doctor` reports the same leftovers as its `orphan-children` check, and
 `--fix` sends them SIGTERM. Windows is not supported by the sweep (no `ps`): the
@@ -16956,7 +16958,7 @@ by Door 1 hardware failure.
 
 | component | what | resource |
 |---|---|---|
-| classifier LLM | LFM2.5-8B (models.json5 `local/lfm-8b-mlx-4bit`) | ~5 GB RAM, ~1-2s |
+| classifier LLM | LFM2.5-8B (models.json5 `local-gguf/lfm-8b-gguf`) | ~5 GB RAM, ~1-2s |
 | intent analyzer | `internal/agent/intent_analyzer.go` — category whitelist, compound splitting | compiled in |
 
 Failure behavior: LLM errors, quota, alias exhaustion → falls through
@@ -16969,6 +16971,34 @@ to Door 3. Never blocks the user on a provider outage.
 | ambiguity gate | `dispatcher.go` clarify-first; answers resume in quickplan mode |
 | orchestrator | strategic planner → tactical scheduler → phase/step plans |
 | executor agents | coder/debugger/etc. loops, verification gates on |
+
+## Local runtime selection (LFM2.5-8B)
+
+Two providers serve the same LFM2.5-8B-A1B weights. Only the llama.cpp one
+can call tools, so it is the default (`model:` in models.json5).
+
+| provider | runtime | port | tool calls |
+|---|---|---|---|
+| `local-gguf/lfm-8b-gguf` | llama-server, GGUF Q4_K_M, `--jinja` | 8080 | yes — `finish_reason: "tool_calls"` |
+| `local/lfm-8b-mlx-4bit` | mlx_lm server, MLX 4-bit | 8083 | no — prose JSON or reasoning-only |
+
+The difference is the runtime, not the model or the chat template. Measured
+2026-09-12 with one identical request (the `json_extract` tool plus a short
+text): llama-server answered `finish_reason=tool_calls` with a structured
+call in 55 tokens, while mlx_lm returned either a bare
+`\boxed{"name":...,"arguments":...}` object in prose or the whole reply in a
+`reasoning` field with `content` absent. The model knows the tools exist in
+both cases — its own `chat_template.jinja` injects `List of tools:` into the
+system prompt — so the template is not at fault.
+
+`--jinja` is required on the llama-server entry: without it the template does
+not render the tool list and the model emits no call at all.
+
+Port layout for the local endpoints: 8080 llama.cpp general driver,
+8081 mlx combined-sft, 8082 the prompt-router sidecar (reserved — not a
+provider port), 8083 mlx general, 8084 llama.cpp extractor.
+`internal/llm/providers_config_test.go` fails the build if two providers
+claim one loopback port, or if any provider claims 8082.
 
 ## Observability: what is logged today
 
@@ -19983,6 +20013,35 @@ The layout switch takes effect immediately without restarting the app (the route
 - `ui/flutter_ui/lib/features/home/session_info_overlay.dart` — Session info overlay dialog
 - `ui/flutter_ui/lib/core/router.dart` — `_LayoutShell` selects layout based on config
 - `ui/flutter_ui/lib/providers/preferences_provider.dart` — `GuiLayoutNotifier` for config management
+
+## Formatting
+
+Dart code under `ui/flutter_ui/` is formatted with `dart format` and kept that
+way. Two make targets cover it:
+
+| command | what it does |
+|---------|--------------|
+| `make fmt-gui` | formats the tree in place (`dart format ui/flutter_ui`) |
+| `make fmt-check-gui` | check only; exits non-zero when any Dart file needs formatting |
+
+`make fmt-check-gui` is part of `make lint-ci`, so the CI-shaped gate fails on
+unformatted Dart. It also runs at commit time: the pre-commit hook
+`.githooks/pre-commit-dart-format` (step 17 of `.githooks/pre-commit`) checks
+only the Dart files staged in the commit and blocks the commit when one is
+unformatted, so an unrelated unformatted file elsewhere does not stop you.
+
+Both targets resolve the dart binary the same way: `dart` on PATH first, then
+the dart bundled with the Flutter SDK
+(`flutter/bin/cache/dart-sdk/bin/dart`). Override with `DART=/path/to/dart` on
+the make command line. When no dart is found the check fails with a clear error
+instead of passing silently.
+
+Run `make fmt-gui` before staging Dart changes.
+
+The tree is briefly red while this is adopted: a one-time reformat of the
+existing unformatted files is being applied in a separate change, so until it
+lands `make fmt-check-gui` and `make lint-ci` fail on those files. After it
+lands the tree is clean and both gates stay green.
 
 ## Edge cases
 
@@ -52235,15 +52294,15 @@ This directory contains documentation auto-generated from Go source code using [
 
 | Package | Description |
 |---------|-------------|
-| [config](config.md) | github.com/caimlas/meept/internal/config |
+| [agent](agent.md) | github.com/caimlas/meept/internal/agent |
 | [bus](bus.md) | github.com/caimlas/meept/internal/bus |
-| [security](security.md) | github.com/caimlas/meept/internal/security |
+| [config](config.md) | github.com/caimlas/meept/internal/config |
+| [llm](llm.md) | github.com/caimlas/meept/internal/llm |
 | [memory](memory.md) | github.com/caimlas/meept/internal/memory |
 | [scheduler](scheduler.md) | github.com/caimlas/meept/internal/scheduler |
-| [agent](agent.md) | github.com/caimlas/meept/internal/agent |
-| [llm](llm.md) | github.com/caimlas/meept/internal/llm |
-| [tools](tools.md) | github.com/caimlas/meept/internal/tools |
+| [security](security.md) | github.com/caimlas/meept/internal/security |
 | [skills](skills.md) | github.com/caimlas/meept/internal/skills |
+| [tools](tools.md) | github.com/caimlas/meept/internal/tools |
 
 ---
 
@@ -52324,16 +52383,19 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func Ptr\[T any\]\(v T\) \*T](<#Ptr>)
 - [func QuotaCredentialKey\(providerID string, cfg \*ModelConfig\) string](<#QuotaCredentialKey>)
 - [func ReapRuntimeProcesses\(targets \[\]OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log \*slog.Logger\) \[\]int](<#ReapRuntimeProcesses>)
+- [func RemoveSpawnRecord\(pidFile string\)](<#RemoveSpawnRecord>)
 - [func ResolveBudget\(rc \*ReasoningConfig, agent \*AgentReasoningConfig, modelDefault \*ReasoningConfig, globalBudgets map\[string\]int\) \*int](<#ResolveBudget>)
 - [func RunModelPicker\(config ModelPickerConfig\) \(\*ProviderDef, \*ModelCatalogEntry, error\)](<#RunModelPicker>)
 - [func SchemaModeValid\(s string\) bool](<#SchemaModeValid>)
 - [func SetCatalogContextWindow\(providerID, modelID string, contextWindow int\) bool](<#SetCatalogContextWindow>)
 - [func SetGBNFConstrained\(on bool\)](<#SetGBNFConstrained>)
+- [func SpawnRecordPath\(pidFile string\) string](<#SpawnRecordPath>)
 - [func StripPromptCacheBoundary\(s string\) string](<#StripPromptCacheBoundary>)
 - [func SupportedRuntimes\(\) \[\]string](<#SupportedRuntimes>)
 - [func ToolConstraintForRuntime\(rt RuntimeType\) string](<#ToolConstraintForRuntime>)
 - [func ToolConstraintSupported\(mode string\) bool](<#ToolConstraintSupported>)
 - [func UserMessage\(err error\) string](<#UserMessage>)
+- [func WriteSpawnRecord\(rec SpawnRecord\) error](<#WriteSpawnRecord>)
 - [type APIError](<#APIError>)
   - [func \(e \*APIError\) Error\(\) string](<#APIError.Error>)
   - [func \(e \*APIError\) UserMessage\(\) string](<#APIError.UserMessage>)
@@ -52665,8 +52727,11 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type NonRetryableError](<#NonRetryableError>)
 - [type OrphanRuntime](<#OrphanRuntime>)
   - [func FindOrphanRuntimes\(cfgs \[\]\*RuntimeConfig, list RuntimeProcLister\) \(\[\]OrphanRuntime, error\)](<#FindOrphanRuntimes>)
+  - [func FindOrphanRuntimesWithRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, list RuntimeProcLister\) \(\[\]OrphanRuntime, error\)](<#FindOrphanRuntimesWithRecords>)
   - [func OrphanRuntimesFromConfigs\(cfgs \[\]\*RuntimeConfig\) \(\[\]OrphanRuntime, error\)](<#OrphanRuntimesFromConfigs>)
+  - [func OrphanRuntimesFromConfigsAndRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord\) \(\[\]OrphanRuntime, error\)](<#OrphanRuntimesFromConfigsAndRecords>)
   - [func ReapOrphanRuntimesFromConfigs\(cfgs \[\]\*RuntimeConfig, waitAfterTerm time.Duration, log \*slog.Logger\) \(\[\]OrphanRuntime, \[\]int\)](<#ReapOrphanRuntimesFromConfigs>)
+  - [func ReapOrphanRuntimesFromConfigsAndRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, waitAfterTerm time.Duration, log \*slog.Logger\) \(\[\]OrphanRuntime, \[\]int\)](<#ReapOrphanRuntimesFromConfigsAndRecords>)
 - [type PacingConfig](<#PacingConfig>)
 - [type ParameterProperty](<#ParameterProperty>)
 - [type PolicyVerdict](<#PolicyVerdict>)
@@ -52833,6 +52898,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type RuntimeConfig](<#RuntimeConfig>)
   - [func ValidateAndNormalize\(cfg RuntimeLifecycleConfig\) \(\*RuntimeConfig, error\)](<#ValidateAndNormalize>)
 - [type RuntimeLifecycleConfig](<#RuntimeLifecycleConfig>)
+  - [func \(c RuntimeLifecycleConfig\) AutoStopOnExitOrDefault\(\) bool](<#RuntimeLifecycleConfig.AutoStopOnExitOrDefault>)
 - [type RuntimeManager](<#RuntimeManager>)
   - [func NewRuntimeManager\(logger \*slog.Logger\) \*RuntimeManager](<#NewRuntimeManager>)
   - [func \(m \*RuntimeManager\) EndpointBaseURL\(providerID string\) \(string, bool\)](<#RuntimeManager.EndpointBaseURL>)
@@ -52850,7 +52916,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*RuntimeManager\) StatusForProvider\(providerID string\) \(RuntimeStatus, bool\)](<#RuntimeManager.StatusForProvider>)
   - [func \(m \*RuntimeManager\) StopAll\(ctx context.Context\) error](<#RuntimeManager.StopAll>)
   - [func \(m \*RuntimeManager\) StopProvider\(ctx context.Context, providerID string\) error](<#RuntimeManager.StopProvider>)
-  - [func \(m \*RuntimeManager\) SweepOrphanRuntimes\(waitAfterTerm time.Duration\) \[\]int](<#RuntimeManager.SweepOrphanRuntimes>)
+  - [func \(m \*RuntimeManager\) SweepOrphanRuntimes\(waitAfterTerm time.Duration, records \[\]SpawnRecord\) \[\]int](<#RuntimeManager.SweepOrphanRuntimes>)
 - [type RuntimeProcInfo](<#RuntimeProcInfo>)
   - [func ListRuntimeProcesses\(\) \(\[\]RuntimeProcInfo, error\)](<#ListRuntimeProcesses>)
 - [type RuntimeProcLister](<#RuntimeProcLister>)
@@ -52870,6 +52936,9 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(rt RuntimeType\) String\(\) string](<#RuntimeType.String>)
 - [type SessionSummaryResult](<#SessionSummaryResult>)
 - [type SkillRequirements](<#SkillRequirements>)
+- [type SpawnRecord](<#SpawnRecord>)
+  - [func ReadSpawnRecord\(pidFile string\) \(SpawnRecord, error\)](<#ReadSpawnRecord>)
+  - [func ScanSpawnRecords\(dir string\) \(\[\]SpawnRecord, error\)](<#ScanSpawnRecords>)
 - [type Status](<#Status>)
 - [type StreamAbortedError](<#StreamAbortedError>)
   - [func \(e \*StreamAbortedError\) Error\(\) string](<#StreamAbortedError.Error>)
@@ -53743,9 +53812,16 @@ QuotaCredentialKey returns a stable identity for a provider credential:
 
 	func ReapRuntimeProcesses(targets []OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log *slog.Logger) []int
 
-ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each process group, a grace period, then SIGKILL for those still alive. The table is re\-read before escalating, so a pid whose entry changed is never signalled \(pid reuse\) and a pid that already exited is not signalled again. Returns the pids confirmed gone — a caller may only treat those as stopped.
+ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each process group, a grace period, then SIGKILL for those still alive. The process table is re\-read BEFORE any signal \(a pid whose entry changed since detection is dropped, never signalled\) and again before the SIGKILL escalation, and a pid is reported only once it is verifiably gone. Returns the pids confirmed gone — a caller may only treat those as stopped. Duplicate targets collapse to one signal and one entry.
 
 list and signal are seams: nil means the real ps scan and the real process\-group kill, which is what the daemon and the CLI both use.
+
+<a name="RemoveSpawnRecord"></a>
+## func RemoveSpawnRecord
+
+	func RemoveSpawnRecord(pidFile string)
+
+RemoveSpawnRecord deletes the record written beside pidFile. Best\-effort: a missing file is not an error, and there is no logger in this package\-level helper to report failures to.
 
 <a name="ResolveBudget"></a>
 ## func ResolveBudget
@@ -53792,6 +53868,13 @@ SetCatalogContextWindow updates one entry's ContextWindow. The slice is copied a
 
 SetGBNFConstrained sets the global gbnf\_constrained switch.
 
+<a name="SpawnRecordPath"></a>
+## func SpawnRecordPath
+
+	func SpawnRecordPath(pidFile string) string
+
+SpawnRecordPath returns the durable record path for a runtime PID file: the PID file path with the record suffix appended.
+
 <a name="StripPromptCacheBoundary"></a>
 ## func StripPromptCacheBoundary
 
@@ -53826,6 +53909,13 @@ ToolConstraintSupported reports whether a mode string is a recognized constraint
 	func UserMessage(err error) string
 
 UserMessage returns a human\-readable error message from any LLM error type. It unwraps the error chain and tries each known type.
+
+<a name="WriteSpawnRecord"></a>
+## func WriteSpawnRecord
+
+	func WriteSpawnRecord(rec SpawnRecord) error
+
+WriteSpawnRecord atomically writes rec beside its PID file \(temp file \+ rename, mode 0o600\), creating the directory when needed. The write is atomic so a concurrent reader never observes a torn record, mirroring the PID\-file writer in runtime\_process.go.
 
 <a name="APIError"></a>
 ## type APIError
@@ -56014,14 +56104,16 @@ SetProcessAliveProbe binds the checker to the process the endpoint belongs to. W
 
 Start begins periodic health checks in a background goroutine.
 
-Calling Start again after Stop re\-arms the checker: a closed stop channel would make run return at once, freezing the verdict forever. That freeze is worse than a missed check — a restarted runtime's WaitForHealthy would either fail against a stale "unhealthy" \(and Stop would then kill the restart it was waiting for\) or succeed immediately against a stale "healthy" before the process had bound. Re\-arming clears the failure count and drops the verdict to unhealthy until a real check succeeds.
+The run belongs to the ENDPOINT, not to the caller's context. Every caller passes a short\-lived context — the daemon cancels its boot context the moment StartAll returns \(\`defer cancelLlm\`\), the HTTP start path passes \`r.Context\(\)\`, and RPC passes a connection\-scoped context — so binding the run to it silently ended health monitoring seconds after boot. The run detaches from cancellation the same way RuntimeProcess.Start detaches the child; only Stop ends it \(and StopAll calls Stop for every endpoint\).
+
+Start is also the re\-arm path. The manager stops the checker when a runtime stops and starts it again when the runtime restarts, and a run can end on its own \(an older caller's context died\). Any checker that is not running is armed fresh — verdict reset to unhealthy, failure count cleared — because serving the previous verdict would either fail a healthy restart \(and Stop would then kill the process it just restarted\) or report a runtime healthy before its socket exists.
 
 <a name="HealthChecker.Stop"></a>
 ### func \(\*HealthChecker\) Stop
 
 	func (h *HealthChecker) Stop()
 
-Stop stops the health checker.
+Stop stops the health checker. Idempotent, and safe against the run goroutine exiting on its own: it only closes the channel of the run that is active.
 
 <a name="HealthChecker.WaitForHealthy"></a>
 ### func \(\*HealthChecker\) WaitForHealthy
@@ -56910,7 +57002,18 @@ OrphanRuntime is one runtime process left behind by a meept process that no long
 
 	func FindOrphanRuntimes(cfgs []*RuntimeConfig, list RuntimeProcLister) ([]OrphanRuntime, error)
 
-FindOrphanRuntimes returns runtime processes that a dead meept process left behind. Report\-only: the caller decides whether to signal them. A pid matched by more than one endpoint config is reported once.
+FindOrphanRuntimes returns runtime processes that a dead meept process left behind, matched against endpoint configs only. Report\-only: the caller decides whether to signal them. A pid matched by more than one endpoint config is reported once.
+
+Records exist so detection survives config drift; callers that can reach the durable records \(the daemon and \`meept doctor\`\) should use FindOrphanRuntimesWithRecords instead. This wrapper stays for the callers and tests that match on configs alone.
+
+<a name="FindOrphanRuntimesWithRecords"></a>
+### func FindOrphanRuntimesWithRecords
+
+	func FindOrphanRuntimesWithRecords(cfgs []*RuntimeConfig, records []SpawnRecord, list RuntimeProcLister) ([]OrphanRuntime, error)
+
+FindOrphanRuntimesWithRecords returns leftover runtime processes matched against BOTH the endpoint configs and the durable spawn records. A process is an orphan when its parent is init \(ppid==1, so the meept process that spawned it is gone\) and its command line is exactly a sweepable config's spawn command or a sweepable record's argv. A pid matched by both a config and a record \(or by two of either\) is reported once, with the config's endpoint key when a config matched first.
+
+Records make detection independent of the current config: an endpoint whose model volume is unmounted or whose provider was renamed no longer validates, so no config reaches this scan, but its recorded spawn command still matches the leftover it left behind.
 
 <a name="OrphanRuntimesFromConfigs"></a>
 ### func OrphanRuntimesFromConfigs
@@ -56919,12 +57022,26 @@ FindOrphanRuntimes returns runtime processes that a dead meept process left behi
 
 OrphanRuntimesFromConfigs reports leftover runtime processes for a set of runtime configs \(used by \`meept doctor\`, which has no RuntimeManager\).
 
+<a name="OrphanRuntimesFromConfigsAndRecords"></a>
+### func OrphanRuntimesFromConfigsAndRecords
+
+	func OrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnRecord) ([]OrphanRuntime, error)
+
+OrphanRuntimesFromConfigsAndRecords reports leftover runtime processes for a set of runtime configs AND durable spawn records with the real process scan. Records let \`meept doctor\` still see a leftover whose endpoint config no longer validates \(unmounted model volume, renamed provider\).
+
 <a name="ReapOrphanRuntimesFromConfigs"></a>
 ### func ReapOrphanRuntimesFromConfigs
 
 	func ReapOrphanRuntimesFromConfigs(cfgs []*RuntimeConfig, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int)
 
 ReapOrphanRuntimesFromConfigs finds and reaps leftovers for the given configs with the real process scan and process\-group signals. It returns the orphans it considered and the pids confirmed gone — callers must report the confirmed count, never the candidate count.
+
+<a name="ReapOrphanRuntimesFromConfigsAndRecords"></a>
+### func ReapOrphanRuntimesFromConfigsAndRecords
+
+	func ReapOrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnRecord, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int)
+
+ReapOrphanRuntimesFromConfigsAndRecords finds and reaps leftovers for the given configs and durable spawn records with the real process scan and process\-group signals. Records are the config\-independent source, so a leftover survives neither a drifted config nor an invalid one. It returns the orphans it considered and the pids confirmed gone — callers must report the confirmed count, never the candidate count.
 
 <a name="PacingConfig"></a>
 ## type PacingConfig
@@ -57247,7 +57364,7 @@ IsAutoStart returns whether the runtime should auto\-start.
 
 	func (p ProviderConfig) IsAutoStopOnExit() bool
 
-IsAutoStopOnExit returns whether the runtime should auto\-stop on daemon shutdown.
+IsAutoStopOnExit returns whether the runtime should auto\-stop on daemon shutdown. An absent auto\_stop\_on\_exit key defaults to true \(see RuntimeLifecycleConfig.AutoStopOnExitOrDefault\); only an explicit false opts out. A provider with no lifecycle block manages no runtime, so it reports false.
 
 <a name="ProviderConfig.PIDDir"></a>
 ### func \(ProviderConfig\) PIDDir
@@ -58472,17 +58589,32 @@ ValidateAndNormalize validates the config and expands paths. Supports both legac
 RuntimeLifecycleConfig holds configuration for local LLM runtime management.
 
 	type RuntimeLifecycleConfig struct {
-	    Runtime        string              `json:"runtime"`           // "llama-cpp" or "mlx"
-	    ModelPath      string              `json:"model_path"`        // Legacy single-model path
-	    ModelPaths     map[string]string   `json:"model_paths"`       // Multi-model map: modelKey -> path
-	    AutoStart      bool                `json:"auto_start"`        // Auto-start on daemon startup
-	    AutoStopOnExit bool                `json:"auto_stop_on_exit"` // Stop on daemon shutdown
-	    PIDFile        string              `json:"pid_file"`          // Path to PID file
-	    SpawnCommand   []string            `json:"spawn_command"`     // Command and args to spawn runtime
+	    Runtime    string            `json:"runtime"`     // "llama-cpp" or "mlx"
+	    ModelPath  string            `json:"model_path"`  // Legacy single-model path
+	    ModelPaths map[string]string `json:"model_paths"` // Multi-model map: modelKey -> path
+	    AutoStart  bool              `json:"auto_start"`  // Auto-start on daemon startup
+	    // AutoStopOnExit controls whether the platform stops this runtime when it
+	    // shuts down. It is a pointer so an ABSENT key can be told apart from an
+	    // explicit `false`: absent (nil) means true via AutoStopOnExitOrDefault,
+	    // and only an explicit `false` opts out. As a plain bool an absent key
+	    // decoded to false, so an endpoint that omits the key was neither stopped
+	    // by the shutdown path nor reaped by the boot-time orphan sweep — it kept
+	    // its model loaded and its port held after a clean shutdown and after a
+	    // crash alike.
+	    AutoStopOnExit *bool               `json:"auto_stop_on_exit,omitempty"` // Stop on daemon shutdown; absent means true
+	    PIDFile        string              `json:"pid_file"`                    // Path to PID file
+	    SpawnCommand   []string            `json:"spawn_command"`               // Command and args to spawn runtime
 	    SpawnTimeout   int                 `json:"spawn_timeout_seconds"`
 	    HealthCheck    HealthCheckConfig   `json:"health_check"`
 	    RestartPolicy  RestartPolicyConfig `json:"restart_policy"`
 	}
+
+<a name="RuntimeLifecycleConfig.AutoStopOnExitOrDefault"></a>
+### func \(RuntimeLifecycleConfig\) AutoStopOnExitOrDefault
+
+	func (c RuntimeLifecycleConfig) AutoStopOnExitOrDefault() bool
+
+AutoStopOnExitOrDefault reports whether the platform should stop this runtime when it shuts down. An absent key \(nil pointer\) defaults to true: a managed runtime holds a model and a port, so silence must not mean "leave it running". Only an explicit \`false\` opts out.
 
 <a name="RuntimeManager"></a>
 ## type RuntimeManager
@@ -58610,9 +58742,9 @@ StopProvider stops a specific provider's runtime \(and the shared subprocess\).
 <a name="RuntimeManager.SweepOrphanRuntimes"></a>
 ### func \(\*RuntimeManager\) SweepOrphanRuntimes
 
-	func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration) []int
+	func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration, records []SpawnRecord) []int
 
-SweepOrphanRuntimes stops every runtime a previous meept generation left behind: endpoint configs whose auto\_stop\_on\_exit is true, a process whose parent is init, and a command line equal to the endpoint's spawn command. An endpoint with a live recorded owner is skipped. Returns the pids confirmed gone \(nil when nothing matched\). It never returns an error: a failed sweep must not block daemon start.
+SweepOrphanRuntimes stops every runtime a previous meept generation left behind: endpoint configs whose auto\_stop\_on\_exit is true, a process whose parent is init, and a command line equal to the endpoint's spawn command — or, for an endpoint whose current config no longer validates, to a durable spawn record's argv \(records are the config\-independent source\). An endpoint with a live recorded owner is skipped. Returns the pids confirmed gone \(nil when nothing matched\). It never returns an error: a failed sweep must not block daemon start.
 
 <a name="RuntimeProcInfo"></a>
 ## type RuntimeProcInfo
@@ -58782,6 +58914,33 @@ SkillRequirements defines the capability requirements for a skill.
 	    Name     string
 	    Requires []string
 	}
+
+<a name="SpawnRecord"></a>
+## type SpawnRecord
+
+SpawnRecord is the durable record of one runtime spawn: the expanded spawn command, written beside the PID file, so the orphan sweep can still match a leftover after the config drifts \(unmounted model volume, renamed provider\) — exactly when a leak is otherwise unreapable.
+
+	type SpawnRecord struct {
+	    EndpointKey string   `json:"endpoint_key,omitempty"`
+	    PIDFile     string   `json:"pid_file"`
+	    Argv        []string `json:"argv"`
+	    AutoStop    bool     `json:"auto_stop"`
+	    PID         int      `json:"pid"`
+	}
+
+<a name="ReadSpawnRecord"></a>
+### func ReadSpawnRecord
+
+	func ReadSpawnRecord(pidFile string) (SpawnRecord, error)
+
+ReadSpawnRecord reads and parses the record written beside pidFile.
+
+<a name="ScanSpawnRecords"></a>
+### func ScanSpawnRecords
+
+	func ScanSpawnRecords(dir string) ([]SpawnRecord, error)
+
+ScanSpawnRecords returns every parseable record in dir \(glob \*.cmd\). An unreadable or invalid entry is skipped so one corrupt file cannot hide the rest of the records, and a missing dir yields no records and no error — a scan failure must never abort the sweep.
 
 <a name="Status"></a>
 ## type Status
@@ -67965,2361 +68124,6 @@ ToolDef represents a tool discovered from an MCP server during skill execution.
 	    // ServerName is the name of the MCP server that provides this tool.
 	    ServerName string
 	}
-
-Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)
-
----
-
-## config
-
-> Source: `reference/generated/test.md`
-
-<!-- Code generated by gomarkdoc. DO NOT EDIT -->
-
-
-```go
-import "github.com/caimlas/meept/internal/config"
-```
-
-Package config provides configuration loading and validation for meept.
-
-Package config provides configuration loading and validation for meept.
-
-Package config provides configuration loading and validation for meept.
-
-## Index
-
-- [Constants](<#constants>)
-- [func EnsureDataDir\(cfg \*Config\) error](<#EnsureDataDir>)
-- [func ExpandEnvVars\(s string\) string](<#ExpandEnvVars>)
-- [func FilterEnabledAgents\(agents map\[string\]\*AgentDefinition\) map\[string\]\*AgentDefinition](<#FilterEnabledAgents>)
-- [func LoadAgentDefinitions\(configDirs \[\]string\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitions>)
-- [func LoadAgentDefinitionsDefault\(cfg \*AgentsConfig\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitionsDefault>)
-- [func LoadAgentDefinitionsDefaultWithJSON5\(cfg \*AgentsConfig\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitionsDefaultWithJSON5>)
-- [func LoadAgentDefinitionsJSON5\(path string\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitionsJSON5>)
-- [func LoadJSON5\(path string, v any\) error](<#LoadJSON5>)
-- [func LoadJSON5WithDefault\(path string, v any\) error](<#LoadJSON5WithDefault>)
-- [func MergeAgentDefaults\(agent \*AgentDefinition\)](<#MergeAgentDefaults>)
-- [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
-- [func StripJSON5Comments\(s string\) string](<#StripJSON5Comments>)
-- [func UnmarshalJSON5\(data \[\]byte, v any\) error](<#UnmarshalJSON5>)
-- [func ValidateAgentDefinition\(agent \*AgentDefinition\) error](<#ValidateAgentDefinition>)
-- [type AIInfraConfig](<#AIInfraConfig>)
-- [type ASTConfig](<#ASTConfig>)
-- [type AgentCompactionConfig](<#AgentCompactionConfig>)
-- [type AgentConfig](<#AgentConfig>)
-- [type AgentConstraintsConfig](<#AgentConstraintsConfig>)
-  - [func \(c AgentConstraintsConfig\) ToTimeout\(\) time.Duration](<#AgentConstraintsConfig.ToTimeout>)
-- [type AgentDefinition](<#AgentDefinition>)
-  - [func GetAgentsByRole\(agents map\[string\]\*AgentDefinition, role string\) \[\]\*AgentDefinition](<#GetAgentsByRole>)
-- [type AgentDefinitionJSON5](<#AgentDefinitionJSON5>)
-- [type AgentQueuesConfig](<#AgentQueuesConfig>)
-- [type AgentsConfig](<#AgentsConfig>)
-- [type AgentsFileJSON5](<#AgentsFileJSON5>)
-- [type BotsConfig](<#BotsConfig>)
-- [type BudgetConfig](<#BudgetConfig>)
-- [type CacheConfig](<#CacheConfig>)
-- [type CalendarConfig](<#CalendarConfig>)
-- [type ClusterConfig](<#ClusterConfig>)
-  - [func DefaultClusterConfig\(\) ClusterConfig](<#DefaultClusterConfig>)
-- [type ClusterGitConfig](<#ClusterGitConfig>)
-- [type ClusterGossipConfig](<#ClusterGossipConfig>)
-- [type ClusterNetworkConfig](<#ClusterNetworkConfig>)
-- [type ClusterQueueConfig](<#ClusterQueueConfig>)
-- [type ClusterSecurityConfig](<#ClusterSecurityConfig>)
-- [type CodeIntelConfig](<#CodeIntelConfig>)
-- [type CompactionConfig](<#CompactionConfig>)
-- [type Config](<#Config>)
-  - [func DefaultConfig\(\) \*Config](<#DefaultConfig>)
-  - [func Load\(path string\) \(\*Config, error\)](<#Load>)
-  - [func LoadDefault\(\) \(\*Config, error\)](<#LoadDefault>)
-  - [func LoadJSON5Config\(path string\) \(\*Config, error\)](<#LoadJSON5Config>)
-  - [func \(c \*Config\) ShutdownTimeout\(\) time.Duration](<#Config.ShutdownTimeout>)
-- [type DaemonConfig](<#DaemonConfig>)
-- [type DetectionConfig](<#DetectionConfig>)
-- [type DistillationConfig](<#DistillationConfig>)
-- [type DistributedMemoryConfig](<#DistributedMemoryConfig>)
-- [type EmbeddingConfig](<#EmbeddingConfig>)
-- [type EpisodicConfig](<#EpisodicConfig>)
-- [type ErrorsConfig](<#ErrorsConfig>)
-- [type HTTPTransportConfig](<#HTTPTransportConfig>)
-- [type IsolationConfig](<#IsolationConfig>)
-- [type LLMAdaptiveTimeoutConfig](<#LLMAdaptiveTimeoutConfig>)
-- [type LLMBrokerConfig](<#LLMBrokerConfig>)
-- [type LLMConfig](<#LLMConfig>)
-- [type LLMContextFirewallConfig](<#LLMContextFirewallConfig>)
-- [type LLMMetricsConfig](<#LLMMetricsConfig>)
-- [type LLMSimpleFeatureConfig](<#LLMSimpleFeatureConfig>)
-- [type LSPConfig](<#LSPConfig>)
-- [type LSPServerConfig](<#LSPServerConfig>)
-- [type MCPConfig](<#MCPConfig>)
-- [type MCPServersConfig](<#MCPServersConfig>)
-  - [func LoadMCPConfig\(path string\) \(\*MCPServersConfig, error\)](<#LoadMCPConfig>)
-  - [func LoadMCPConfigDefault\(\) \(\*MCPServersConfig, error\)](<#LoadMCPConfigDefault>)
-- [type MemoryBackend](<#MemoryBackend>)
-- [type MemoryCachingConfig](<#MemoryCachingConfig>)
-- [type MemoryCategoryLimit](<#MemoryCategoryLimit>)
-- [type MemoryConfig](<#MemoryConfig>)
-  - [func \(c \*MemoryConfig\) GetLimitsForProject\(projectPath string\) MemoryLimitsConfig](<#MemoryConfig.GetLimitsForProject>)
-- [type MemoryExpirationConfig](<#MemoryExpirationConfig>)
-- [type MemoryLimitsConfig](<#MemoryLimitsConfig>)
-- [type MemorySecurityConfig](<#MemorySecurityConfig>)
-- [type MemoryVersioningConfig](<#MemoryVersioningConfig>)
-- [type MemvidConfig](<#MemvidConfig>)
-- [type Model](<#Model>)
-- [type ModelParams](<#ModelParams>)
-- [type ModelPreset](<#ModelPreset>)
-- [type ModelsConfig](<#ModelsConfig>)
-  - [func LoadModelsConfig\(path string\) \(\*ModelsConfig, error\)](<#LoadModelsConfig>)
-  - [func LoadModelsConfigDefault\(\) \(\*ModelsConfig, error\)](<#LoadModelsConfigDefault>)
-- [type MultiAgentConfig](<#MultiAgentConfig>)
-- [type NativeConfig](<#NativeConfig>)
-- [type OAuthConfig](<#OAuthConfig>)
-- [type OAuthProviderEntry](<#OAuthProviderEntry>)
-- [type OrchestratorConfig](<#OrchestratorConfig>)
-- [type ParakeetConfig](<#ParakeetConfig>)
-- [type PersonalityConfig](<#PersonalityConfig>)
-- [type PlansApprovalConfig](<#PlansApprovalConfig>)
-- [type PlansConfig](<#PlansConfig>)
-- [type PlansConfirmationConfig](<#PlansConfirmationConfig>)
-- [type PlansStorageConfig](<#PlansStorageConfig>)
-- [type PlansThresholdConfig](<#PlansThresholdConfig>)
-- [type PluginsConfig](<#PluginsConfig>)
-- [type PresetConfig](<#PresetConfig>)
-  - [func DefaultPresetsConfig\(\) \*PresetConfig](<#DefaultPresetsConfig>)
-  - [func LoadPresetsConfig\(path string\) \(\*PresetConfig, error\)](<#LoadPresetsConfig>)
-  - [func LoadPresetsConfigDefault\(\) \(\*PresetConfig, error\)](<#LoadPresetsConfigDefault>)
-  - [func \(p \*PresetConfig\) ApplyPreset\(model \*Model, presetName string\) error](<#PresetConfig.ApplyPreset>)
-  - [func \(p \*PresetConfig\) GetPreset\(name string\) \(\*ModelPreset, error\)](<#PresetConfig.GetPreset>)
-  - [func \(p \*PresetConfig\) ListPresets\(\) \[\]string](<#PresetConfig.ListPresets>)
-- [type ProjectsConfig](<#ProjectsConfig>)
-- [type Provider](<#Provider>)
-- [type ProviderOptions](<#ProviderOptions>)
-- [type QAgentConfig](<#QAgentConfig>)
-- [type QueueConfig](<#QueueConfig>)
-- [type RPCTransportConfig](<#RPCTransportConfig>)
-- [type RecordingConfig](<#RecordingConfig>)
-- [type ReviewConfig](<#ReviewConfig>)
-- [type STTConfig](<#STTConfig>)
-- [type SafetyConfig](<#SafetyConfig>)
-- [type SandboxConfig](<#SandboxConfig>)
-- [type SchedulerConfig](<#SchedulerConfig>)
-- [type SecurityConfig](<#SecurityConfig>)
-- [type SelfImproveConfig](<#SelfImproveConfig>)
-- [type SessionConfig](<#SessionConfig>)
-- [type ShadowAdaptersConfig](<#ShadowAdaptersConfig>)
-- [type ShadowConfig](<#ShadowConfig>)
-- [type ShadowDPOConfig](<#ShadowDPOConfig>)
-- [type ShadowExamplesConfig](<#ShadowExamplesConfig>)
-- [type ShadowExportConfig](<#ShadowExportConfig>)
-- [type ShadowHeuristicWeightsConfig](<#ShadowHeuristicWeightsConfig>)
-- [type ShadowLoRAConfig](<#ShadowLoRAConfig>)
-- [type ShadowQualityConfig](<#ShadowQualityConfig>)
-- [type ShadowShadowingConfig](<#ShadowShadowingConfig>)
-- [type ShadowTeacherConfig](<#ShadowTeacherConfig>)
-- [type SkillsConfig](<#SkillsConfig>)
-- [type SyncConfig](<#SyncConfig>)
-- [type TaskMemoryConfig](<#TaskMemoryConfig>)
-- [type TelegramConfig](<#TelegramConfig>)
-- [type ToolingConfig](<#ToolingConfig>)
-- [type TransportConfig](<#TransportConfig>)
-- [type ValidationConfig](<#ValidationConfig>)
-- [type WatchdogConfig](<#WatchdogConfig>)
-- [type WebConfig](<#WebConfig>)
-- [type WhisperConfig](<#WhisperConfig>)
-- [type WorkersConfig](<#WorkersConfig>)
-- [type WorkspaceConfig](<#WorkspaceConfig>)
-
-
-## Constants
-
-<a name="AgentIDDispatcher"></a>Agent ID constants used throughout the codebase as identifiers.
-
-```go
-const (
-    AgentIDDispatcher = "dispatcher"
-    AgentIDCoder      = "coder"
-    AgentIDDebugger   = "debugger"
-    AgentIDPlanner    = "planner"
-    AgentIDAnalyst    = "analyst"
-    AgentIDCommitter  = "committer"
-    AgentIDScheduler  = "scheduler"
-    AgentIDChat       = "chat"
-)
-```
-
-<a name="AgentRoleDispatcher"></a>Agent role constants used for role validation and assignment.
-
-```go
-const (
-    AgentRoleDispatcher     = "dispatcher"
-    AgentRoleExecutor       = "executor"
-    AgentRoleConversational = "conversational"
-    AgentRoleReviewer       = "reviewer"
-)
-```
-
-<a name="PresetDevelopment"></a>Preset name constants used throughout the codebase.
-
-```go
-const (
-    PresetDevelopment = "development"
-    PresetDebugging   = "debugging"
-    PresetPlanning    = "planning"
-    PresetCreative    = "creative"
-    PresetResearch    = "research"
-)
-```
-
-<a name="EnsureDataDir"></a>
-## func EnsureDataDir
-
-```go
-func EnsureDataDir(cfg *Config) error
-```
-
-EnsureDataDir creates the data directory if it doesn't exist.
-
-<a name="ExpandEnvVars"></a>
-## func ExpandEnvVars
-
-```go
-func ExpandEnvVars(s string) string
-```
-
-ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\).
-
-<a name="FilterEnabledAgents"></a>
-## func FilterEnabledAgents
-
-```go
-func FilterEnabledAgents(agents map[string]*AgentDefinition) map[string]*AgentDefinition
-```
-
-FilterEnabledAgents returns only enabled agent definitions.
-
-<a name="LoadAgentDefinitions"></a>
-## func LoadAgentDefinitions
-
-```go
-func LoadAgentDefinitions(configDirs []string) (map[string]*AgentDefinition, error)
-```
-
-LoadAgentDefinitions loads all agent definitions from the configured directories. Later directories in the list override earlier ones \(for the same agent ID\).
-
-<a name="LoadAgentDefinitionsDefault"></a>
-## func LoadAgentDefinitionsDefault
-
-```go
-func LoadAgentDefinitionsDefault(cfg *AgentsConfig) (map[string]*AgentDefinition, error)
-```
-
-LoadAgentDefinitionsDefault loads agents from default locations. Prefers JSON5 single file, falls back to TOML directory format.
-
-<a name="LoadAgentDefinitionsDefaultWithJSON5"></a>
-## func LoadAgentDefinitionsDefaultWithJSON5
-
-```go
-func LoadAgentDefinitionsDefaultWithJSON5(cfg *AgentsConfig) (map[string]*AgentDefinition, error)
-```
-
-LoadAgentDefinitionsDefaultWithJSON5 tries JSON5 first, then TOML.
-
-<a name="LoadAgentDefinitionsJSON5"></a>
-## func LoadAgentDefinitionsJSON5
-
-```go
-func LoadAgentDefinitionsJSON5(path string) (map[string]*AgentDefinition, error)
-```
-
-LoadAgentDefinitionsJSON5 loads all agent definitions from a JSON5 file.
-
-<a name="LoadJSON5"></a>
-## func LoadJSON5
-
-```go
-func LoadJSON5(path string, v any) error
-```
-
-LoadJSON5 reads a JSON5 file, expands environment variables, standardizes to JSON, and unmarshals into v.
-
-<a name="LoadJSON5WithDefault"></a>
-## func LoadJSON5WithDefault
-
-```go
-func LoadJSON5WithDefault(path string, v any) error
-```
-
-LoadJSON5WithDefault loads JSON5 from path, or returns default if not found.
-
-<a name="MergeAgentDefaults"></a>
-## func MergeAgentDefaults
-
-```go
-func MergeAgentDefaults(agent *AgentDefinition)
-```
-
-MergeAgentDefaults applies default values to an agent definition.
-
-<a name="ParseLogLevel"></a>
-## func ParseLogLevel
-
-```go
-func ParseLogLevel(level string) slog.Level
-```
-
-ParseLogLevel converts a string log level to slog.Level.
-
-<a name="StripJSON5Comments"></a>
-## func StripJSON5Comments
-
-```go
-func StripJSON5Comments(s string) string
-```
-
-StripJSON5Comments converts JSON5 to strict JSON, handling comments, trailing commas, and unquoted keys. It delegates to hujson.Standardize for full JSON5 spec compliance.
-
-<a name="UnmarshalJSON5"></a>
-## func UnmarshalJSON5
-
-```go
-func UnmarshalJSON5(data []byte, v any) error
-```
-
-UnmarshalJSON5 parses JSON5\-formatted bytes into a struct. Unlike LoadJSON5, this does NOT expand environment variables. It also handles Go\-style duration literals \(e.g. 30s, 2m\) and Go duration string values \(e.g. "30s"\) in JSON.
-
-<a name="ValidateAgentDefinition"></a>
-## func ValidateAgentDefinition
-
-```go
-func ValidateAgentDefinition(agent *AgentDefinition) error
-```
-
-ValidateAgentDefinition validates an agent definition.
-
-<a name="AIInfraConfig"></a>
-## type AIInfraConfig
-
-AIInfraConfig holds AI infrastructure settings for self\-improvement.
-
-```go
-type AIInfraConfig struct {
-    Enabled         bool    `json:"enabled"          toml:"enabled"`
-    BaseURL         string  `json:"base_url"         toml:"base_url"`
-    APIKeyEnv       string  `json:"api_key_env"      toml:"api_key_env"`
-    AnalysisModel   string  `json:"analysis_model"   toml:"analysis_model"`
-    GenerationModel string  `json:"generation_model" toml:"generation_model"`
-    ReviewModel     string  `json:"review_model"     toml:"review_model"`
-    TimeoutSeconds  float64 `json:"timeout_seconds"  toml:"timeout_seconds"`
-    MaxRetries      int     `json:"max_retries"      toml:"max_retries"`
-}
-```
-
-<a name="ASTConfig"></a>
-## type ASTConfig
-
-ASTConfig holds AST parsing settings.
-
-```go
-type ASTConfig struct {
-    // CacheEnabled enables parse result caching
-    CacheEnabled bool `json:"cache_enabled" toml:"cache_enabled"`
-    // CacheMaxSize is the maximum number of cached parse results
-    CacheMaxSize int `json:"cache_max_size" toml:"cache_max_size"`
-    // CacheTTLMinutes is how long cached results remain valid
-    CacheTTLMinutes int `json:"cache_ttl_minutes" toml:"cache_ttl_minutes"`
-}
-```
-
-<a name="AgentCompactionConfig"></a>
-## type AgentCompactionConfig
-
-AgentCompactionConfig holds context compaction settings for the agent.
-
-```go
-type AgentCompactionConfig struct {
-    Enabled           bool   `json:"enabled"            toml:"enabled"`
-    ReserveTokens     int    `json:"reserve_tokens"      toml:"reserve_tokens"`
-    KeepRecentTokens  int    `json:"keep_recent_tokens"  toml:"keep_recent_tokens"`
-    MaxResponseTokens int    `json:"max_response_tokens" toml:"max_response_tokens"`
-    SummaryFormat     string `json:"summary_format"      toml:"summary_format"`
-    TrackFileOps      bool   `json:"track_file_ops"       toml:"track_file_ops"`
-    TimeoutSeconds    int    `json:"timeout_seconds"      toml:"timeout_seconds"`
-}
-```
-
-<a name="AgentConfig"></a>
-## type AgentConfig
-
-AgentConfig holds agent loop settings.
-
-```go
-type AgentConfig struct {
-    // ProgressEnabled turns on streaming progress updates
-    ProgressEnabled bool `json:"progress_enabled" toml:"progress_enabled"`
-    // ProgressIntervalSeconds is the minimum interval between progress events
-    ProgressIntervalSeconds int `json:"progress_interval_seconds" toml:"progress_interval_seconds"`
-    // Cache holds tool result caching settings
-    Cache CacheConfig `json:"cache" toml:"cache"`
-    // Errors holds error handling settings
-    Errors ErrorsConfig `json:"errors" toml:"errors"`
-    // Review holds code review settings
-    Review ReviewConfig `json:"review" toml:"review"`
-    // Validation holds task completion validation settings
-    Validation ValidationConfig `json:"validation" toml:"validation"`
-    // Watchdog holds agent monitoring settings
-    Watchdog WatchdogConfig `json:"watchdog" toml:"watchdog"`
-    // Queues holds steering and follow-up message queue settings
-    Queues AgentQueuesConfig `json:"queues" toml:"queues"`
-    // Compaction holds context compaction settings
-    Compaction AgentCompactionConfig `json:"compaction" toml:"compaction"`
-}
-```
-
-<a name="AgentConstraintsConfig"></a>
-## type AgentConstraintsConfig
-
-AgentConstraintsConfig holds agent operational constraints.
-
-```go
-type AgentConstraintsConfig struct {
-    MaxIterations    int `json:"max_iterations"      toml:"max_iterations"`
-    TimeoutSeconds   int `json:"timeout_seconds"     toml:"timeout_seconds"`
-    MaxTokensPerTurn int `json:"max_tokens_per_turn" toml:"max_tokens_per_turn"`
-    MaxMemoryRefs    int `json:"max_memory_refs"     toml:"max_memory_refs"`
-}
-```
-
-<a name="AgentConstraintsConfig.ToTimeout"></a>
-### func \(AgentConstraintsConfig\) ToTimeout
-
-```go
-func (c AgentConstraintsConfig) ToTimeout() time.Duration
-```
-
-ToTimeout converts TimeoutSeconds to time.Duration.
-
-<a name="AgentDefinition"></a>
-## type AgentDefinition
-
-AgentDefinition represents an agent definition from a TOML or JSON5 file.
-
-```go
-type AgentDefinition struct {
-    ID          string `json:"id"           toml:"id"`
-    Name        string `json:"name"         toml:"name"`
-    Role        string `json:"role"         toml:"role"` // "dispatcher", "executor", "conversational", "reviewer"
-    Description string `json:"description"  toml:"description"`
-    Model       string `json:"model"        toml:"model"`
-    Enabled     bool   `json:"enabled"      toml:"enabled"`
-    CanDelegate bool   `json:"can_delegate" toml:"can_delegate"`
-
-    // Tools and capabilities
-    AdditionalTools []string `json:"additional_tools" toml:"additional_tools"`
-    Capabilities    []string `json:"capabilities"     toml:"capabilities"`
-
-    // Prompt composition
-    PromptComponents []string `json:"prompt_components" toml:"prompt_components"`
-
-    // Constraints
-    Constraints AgentConstraintsConfig `json:"constraints" toml:"constraints"`
-}
-```
-
-<a name="GetAgentsByRole"></a>
-### func GetAgentsByRole
-
-```go
-func GetAgentsByRole(agents map[string]*AgentDefinition, role string) []*AgentDefinition
-```
-
-GetAgentsByRole returns agents with a specific role.
-
-<a name="AgentDefinitionJSON5"></a>
-## type AgentDefinitionJSON5
-
-AgentDefinitionJSON5 represents an agent in the new JSON5 format.
-
-```go
-type AgentDefinitionJSON5 struct {
-    ID               string                 `json:"id"`
-    Name             string                 `json:"name"`
-    Role             string                 `json:"role"`
-    Description      string                 `json:"description"`
-    Model            string                 `json:"model"`
-    Enabled          bool                   `json:"enabled"`
-    CanDelegate      bool                   `json:"can_delegate"`
-    AdditionalTools  []string               `json:"additional_tools"`
-    Capabilities     []string               `json:"capabilities"`
-    PromptComponents []string               `json:"prompt_components"`
-    Constraints      AgentConstraintsConfig `json:"constraints"`
-}
-```
-
-<a name="AgentQueuesConfig"></a>
-## type AgentQueuesConfig
-
-AgentQueuesConfig holds steering and follow\-up message queue settings.
-
-```go
-type AgentQueuesConfig struct {
-    // Enabled controls whether the steering/follow-up queue feature is active.
-    // When false, agent loops are created without message queues and all
-    // messages go through the standard synchronous path.
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // SteeringDrain controls how the steering queue drains.
-    // Always "one" -- only one steering message is valid at a time.
-    SteeringDrain string `json:"steering_drain" toml:"steering_drain"`
-    // FollowUpDrain controls how the follow-up queue drains.
-    // "one" returns a single message, "all" returns all pending.
-    FollowUpDrain string `json:"followup_drain" toml:"followup_drain"`
-    // MaxSteering is the maximum number of steering messages allowed.
-    // Low value -- they're urgent and should interrupt immediately.
-    MaxSteering int `json:"max_steering" toml:"max_steering"`
-    // MaxFollowUp is the maximum number of follow-up messages allowed.
-    MaxFollowUp int `json:"max_followup" toml:"max_followup"`
-    // PersistFollowUp enables hybrid persistence (write-behind to SQLite).
-    PersistFollowUp bool `json:"persist_followup" toml:"persist_followup"`
-    // FlushDelayMs is the write-behind flush delay in milliseconds.
-    // When PersistFollowUp is true, messages are batched in memory and
-    // flushed to disk after this delay or on daemon shutdown.
-    FlushDelayMs int `json:"flush_delay_ms" toml:"flush_delay_ms"`
-}
-```
-
-<a name="AgentsConfig"></a>
-## type AgentsConfig
-
-AgentsConfig holds agent configuration settings.
-
-```go
-type AgentsConfig struct {
-    // Enabled enables the multi-agent system with TOML-based agent definitions.
-    Enabled bool `json:"enabled" toml:"enabled"`
-
-    // ConfigDirs are directories to search for agent definition TOML files.
-    // Searched in order; later directories override earlier ones.
-    ConfigDirs []string `json:"config_dirs" toml:"config_dirs"`
-
-    // PromptsDir is the base directory for prompt components.
-    PromptsDir string `json:"prompts_dir" toml:"prompts_dir"`
-
-    // DefaultModel is the fallback model for agents that don't specify one.
-    DefaultModel string `json:"default_model" toml:"default_model"`
-
-    // DispatcherID is the agent ID that handles intake/routing.
-    DispatcherID string `json:"dispatcher_id" toml:"dispatcher_id"`
-}
-```
-
-<a name="AgentsFileJSON5"></a>
-## type AgentsFileJSON5
-
-AgentsFileJSON5 is the root of the agents.json5 file.
-
-```go
-type AgentsFileJSON5 struct {
-    Agents []AgentDefinitionJSON5 `json:"agents"`
-}
-```
-
-<a name="BotsConfig"></a>
-## type BotsConfig
-
-BotsConfig holds configuration for the persistent bot framework.
-
-```go
-type BotsConfig struct {
-    Enabled                     bool   `json:"enabled" toml:"enabled"`
-    DataDir                     string `json:"data_dir" toml:"data_dir"`
-    MaxConcurrentBots           int    `json:"max_concurrent_bots" toml:"max_concurrent_bots"`
-    DefaultDailyBudgetCents     int    `json:"default_daily_budget_cents" toml:"default_daily_budget_cents"`
-    AutoPauseOnConsecutiveFails int    `json:"auto_pause_on_consecutive_failures" toml:"auto_pause_on_consecutive_failures"`
-    WebhookEnabled              bool   `json:"webhook_enabled" toml:"webhook_enabled"`
-}
-```
-
-<a name="BudgetConfig"></a>
-## type BudgetConfig
-
-BudgetConfig holds token budget settings.
-
-```go
-type BudgetConfig struct {
-    HourlyTokenLimit     int     `json:"hourly_token_limit"  toml:"hourly_token_limit"`
-    DailyTokenLimit      int     `json:"daily_token_limit"   toml:"daily_token_limit"`
-    DailyCostLimit       float64 `json:"daily_cost_limit"    toml:"daily_cost_limit"`
-    HourlyCostLimit      float64 `json:"hourly_cost_limit"   toml:"hourly_cost_limit"`
-    RateLimitRPM         int     `json:"rate_limit_rpm"      toml:"rate_limit_rpm"`
-    Aggressiveness       float64 `json:"aggressiveness"      toml:"aggressiveness"`
-    PerTaskTokenLimit    int     `json:"per_task_token_limit" toml:"per_task_token_limit"`
-    PerSessionTokenLimit int     `json:"per_session_token_limit" toml:"per_session_token_limit"`
-}
-```
-
-<a name="CacheConfig"></a>
-## type CacheConfig
-
-CacheConfig holds settings for tool result caching.
-
-```go
-type CacheConfig struct {
-    // Enabled turns on tool result caching
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // MaxEntries is the maximum number of cached results
-    MaxEntries int `json:"max_entries" toml:"max_entries"`
-    // DefaultTTLSeconds is the default time-to-live for cache entries
-    DefaultTTLSeconds int `json:"default_ttl_seconds" toml:"default_ttl_seconds"`
-    // CleanupFreqSeconds is how often to cleanup expired entries
-    CleanupFreqSeconds int `json:"cleanup_freq_seconds" toml:"cleanup_freq_seconds"`
-    // EnabledTools is a list of tool names to cache (empty = all tools)
-    EnabledTools []string `json:"enabled_tools" toml:"enabled_tools"`
-}
-```
-
-<a name="CalendarConfig"></a>
-## type CalendarConfig
-
-CalendarConfig holds Google Calendar integration settings. OAuth credentials are managed via the shared OAuth device\-code flow \(see 'meept config oauth connect google\-calendar'\).
-
-```go
-type CalendarConfig struct {
-    // Enabled turns on Google Calendar integration
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // ClientID is the Google OAuth2 client ID (supports ${ENV_VAR} expansion)
-    ClientID string `json:"client_id" toml:"client_id"`
-    // ClientSecret is the Google OAuth2 client secret (supports ${ENV_VAR} expansion)
-    ClientSecret string `json:"client_secret" toml:"client_secret"`
-    // CalendarID is the Google Calendar ID (default: "primary")
-    CalendarID string `json:"calendar_id" toml:"calendar_id"`
-    // ReminderEnabled turns on the reminder watcher for upcoming events
-    ReminderEnabled bool `json:"reminder_enabled" toml:"reminder_enabled"`
-    // ReminderCheckInterval is how often to check for upcoming events (default: 5m)
-    ReminderCheckInterval string `json:"reminder_check_interval" toml:"reminder_check_interval"`
-    // ReminderAdvanceMinutes triggers reminders this many minutes before an event
-    ReminderAdvanceMinutes int `json:"reminder_advance_minutes" toml:"reminder_advance_minutes"`
-}
-```
-
-<a name="ClusterConfig"></a>
-## type ClusterConfig
-
-ClusterConfig holds distributed cluster settings.
-
-```go
-type ClusterConfig struct {
-    Enabled     bool                  `json:"enabled" toml:"enabled"`
-    ClusterID   string                `json:"cluster_id" toml:"cluster_id"`
-    ClusterName string                `json:"cluster_name" toml:"cluster_name"`
-    NodeID      string                `json:"node_id" toml:"node_id"`
-    NodeName    string                `json:"node_name" toml:"node_name"`
-    Network     ClusterNetworkConfig  `json:"network" toml:"network"`
-    Gossip      ClusterGossipConfig   `json:"gossip" toml:"gossip"`
-    Queue       ClusterQueueConfig    `json:"queue" toml:"queue"`
-    Git         ClusterGitConfig      `json:"git" toml:"git"`
-    Security    ClusterSecurityConfig `json:"security" toml:"security"`
-}
-```
-
-<a name="DefaultClusterConfig"></a>
-### func DefaultClusterConfig
-
-```go
-func DefaultClusterConfig() ClusterConfig
-```
-
-DefaultClusterConfig returns default cluster configuration.
-
-<a name="ClusterGitConfig"></a>
-## type ClusterGitConfig
-
-ClusterGitConfig holds git sync settings.
-
-```go
-type ClusterGitConfig struct {
-    SyncInterval    time.Duration `json:"sync_interval" toml:"sync_interval"`
-    HeartbeatCommit bool          `json:"heartbeat_commit" toml:"heartbeat_commit"`
-    RemoteURL       string        `json:"remote_url" toml:"remote_url"`
-}
-```
-
-<a name="ClusterGossipConfig"></a>
-## type ClusterGossipConfig
-
-ClusterGossipConfig holds gossip protocol settings.
-
-```go
-type ClusterGossipConfig struct {
-    HeartbeatInterval time.Duration `json:"heartbeat_interval" toml:"heartbeat_interval"`
-    PeerTimeout       time.Duration `json:"peer_timeout" toml:"peer_timeout"`
-    EventRetention    time.Duration `json:"event_retention" toml:"event_retention"`
-    MaxRetryAttempts  int           `json:"max_retry_attempts" toml:"max_retry_attempts"`
-}
-```
-
-<a name="ClusterNetworkConfig"></a>
-## type ClusterNetworkConfig
-
-ClusterNetworkConfig holds WireGuard network settings.
-
-```go
-type ClusterNetworkConfig struct {
-    WireGuardSubnet string `json:"wireguard_subnet" toml:"wireguard_subnet"`
-    WireGuardPort   int    `json:"wireguard_port" toml:"wireguard_port"`
-    Interface       string `json:"interface" toml:"interface"`
-}
-```
-
-<a name="ClusterQueueConfig"></a>
-## type ClusterQueueConfig
-
-ClusterQueueConfig holds cluster queue settings.
-
-```go
-type ClusterQueueConfig struct {
-    DefaultClaimTimeout     time.Duration `json:"default_claim_timeout" toml:"default_claim_timeout"`
-    NodeReachabilityTimeout time.Duration `json:"node_reachability_timeout" toml:"node_reachability_timeout"`
-    FullPayloadReplication  bool          `json:"full_payload_replication" toml:"full_payload_replication"`
-}
-```
-
-<a name="ClusterSecurityConfig"></a>
-## type ClusterSecurityConfig
-
-ClusterSecurityConfig holds cluster security settings.
-
-```go
-type ClusterSecurityConfig struct {
-    RequireNodeSignatures  bool `json:"require_node_signatures" toml:"require_node_signatures"`
-    Ed25519KeyRotationDays int  `json:"ed25519_key_rotation_days" toml:"ed25519_key_rotation_days"`
-}
-```
-
-<a name="CodeIntelConfig"></a>
-## type CodeIntelConfig
-
-CodeIntelConfig holds code intelligence settings \(AST/LSP\).
-
-```go
-type CodeIntelConfig struct {
-    // Enabled turns on code intelligence features
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // AST holds AST parsing settings
-    AST ASTConfig `json:"ast" toml:"ast"`
-    // LSP holds LSP client settings
-    LSP LSPConfig `json:"lsp" toml:"lsp"`
-}
-```
-
-<a name="CompactionConfig"></a>
-## type CompactionConfig
-
-CompactionConfig configures LLM\-based context compaction.
-
-```go
-type CompactionConfig struct {
-    Enabled           bool    `json:"enabled"            toml:"enabled"`
-    Model             string  `json:"model"              toml:"model"`
-    ReserveTokens     int     `json:"reserve_tokens"     toml:"reserve_tokens"`
-    KeepRecentTokens  int     `json:"keep_recent_tokens" toml:"keep_recent_tokens"`
-    MaxResponseTokens int     `json:"max_response_tokens" toml:"max_response_tokens"`
-    SummaryFormat     string  `json:"summary_format"     toml:"summary_format"`
-    TriggerRatio      float64 `json:"trigger_ratio"      toml:"trigger_ratio"`
-    IterativeUpdates  bool    `json:"iterative_updates"  toml:"iterative_updates"`
-    TrackFileOps      bool    `json:"track_file_ops"     toml:"track_file_ops"`
-    TimeoutSeconds    int     `json:"timeout_seconds"    toml:"timeout_seconds"`
-}
-```
-
-<a name="Config"></a>
-## type Config
-
-Config is the root configuration structure loaded from meept.toml.
-
-```go
-type Config struct {
-    Daemon            DaemonConfig            `json:"daemon"             toml:"daemon"`
-    Transport         TransportConfig         `json:"transport"          toml:"transport"`
-    LLM               LLMConfig               `json:"llm"                toml:"llm"`
-    Memory            MemoryConfig            `json:"memory"             toml:"memory"`
-    Memvid            MemvidConfig            `json:"memvid"             toml:"memvid"`
-    MultiAgent        MultiAgentConfig        `json:"multiagent"         toml:"multiagent"`
-    Agents            AgentsConfig            `json:"agents"             toml:"agents"`
-    Agent             AgentConfig             `json:"agent"              toml:"agent"`
-    Security          SecurityConfig          `json:"security"           toml:"security"`
-    Scheduler         SchedulerConfig         `json:"scheduler"          toml:"scheduler"`
-    Queue             QueueConfig             `json:"queue"              toml:"queue"`
-    Workers           WorkersConfig           `json:"workers"            toml:"workers"`
-    Isolation         IsolationConfig         `json:"isolation"          toml:"isolation"`
-    Telegram          TelegramConfig          `json:"telegram"           toml:"telegram"`
-    Web               WebConfig               `json:"web"                toml:"web"`
-    MCP               MCPConfig               `json:"mcp"                toml:"mcp"`
-    Plugins           PluginsConfig           `json:"plugins"            toml:"plugins"`
-    Workspace         WorkspaceConfig         `json:"workspace"          toml:"workspace"`
-    Skills            SkillsConfig            `json:"skills"             toml:"skills"`
-    SelfImprove       SelfImproveConfig       `json:"selfimprove"        toml:"selfimprove"`
-    Orchestrator      OrchestratorConfig      `json:"orchestrator"       toml:"orchestrator"`
-    Shadow            ShadowConfig            `json:"shadow"             toml:"shadow"`
-    DistributedMemory DistributedMemoryConfig `json:"distributed_memory" toml:"distributed_memory"`
-    QAgent            QAgentConfig            `json:"q_agent"            toml:"q_agent"`
-    CodeIntel         CodeIntelConfig         `json:"code_intel"         toml:"code_intel"`
-    Calendar          CalendarConfig          `json:"calendar"           toml:"calendar"`
-    Tooling           ToolingConfig           `json:"tooling"            toml:"tooling"`
-    Compaction        CompactionConfig        `json:"compaction"         toml:"compaction"`
-    Session           SessionConfig           `json:"session"            toml:"session"`
-    Cluster           ClusterConfig           `json:"cluster"             toml:"cluster"`
-    Bots              BotsConfig              `json:"bots"                toml:"bots"`
-    Plans             PlansConfig             `json:"plans"               toml:"plans"`
-    Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
-    STT               STTConfig               `json:"stt"                 toml:"stt"`
-    OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
-}
-```
-
-<a name="DefaultConfig"></a>
-### func DefaultConfig
-
-```go
-func DefaultConfig() *Config
-```
-
-DefaultConfig returns a configuration with sensible defaults.
-
-<a name="Load"></a>
-### func Load
-
-```go
-func Load(path string) (*Config, error)
-```
-
-Load loads configuration from the specified TOML file. Environment variables in the form $\{VAR\_NAME\} or $VAR\_NAME are expanded. Tilde \(\~\) paths are expanded to the user's home directory.
-
-<a name="LoadDefault"></a>
-### func LoadDefault
-
-```go
-func LoadDefault() (*Config, error)
-```
-
-LoadDefault loads configuration from the default location. Prefers JSON5, falls back to TOML for backward compatibility.
-
-<a name="LoadJSON5Config"></a>
-### func LoadJSON5Config
-
-```go
-func LoadJSON5Config(path string) (*Config, error)
-```
-
-LoadJSON5Config loads configuration from a JSON5 file.
-
-<a name="Config.ShutdownTimeout"></a>
-### func \(\*Config\) ShutdownTimeout
-
-```go
-func (c *Config) ShutdownTimeout() time.Duration
-```
-
-ShutdownTimeout returns the default shutdown timeout.
-
-<a name="DaemonConfig"></a>
-## type DaemonConfig
-
-DaemonConfig holds daemon\-specific settings.
-
-```go
-type DaemonConfig struct {
-    SocketPath string `json:"socket_path" toml:"socket_path"`
-    PIDFile    string `json:"pid_file"    toml:"pid_file"`
-    LogLevel   string `json:"log_level"   toml:"log_level"`
-    DataDir    string `json:"data_dir"    toml:"data_dir"`
-}
-```
-
-<a name="DetectionConfig"></a>
-## type DetectionConfig
-
-DetectionConfig holds detection settings for self\-improvement.
-
-```go
-type DetectionConfig struct {
-    ScanPytest           bool     `json:"scan_pytest"           toml:"scan_pytest"`
-    ScanRuntimeLogs      bool     `json:"scan_runtime_logs"     toml:"scan_runtime_logs"`
-    ScanTypeCheck        bool     `json:"scan_type_check"       toml:"scan_type_check"`
-    ScanLint             bool     `json:"scan_lint"             toml:"scan_lint"`
-    LogFile              string   `json:"log_file"              toml:"log_file"`
-    LogLookbackHours     int      `json:"log_lookback_hours"    toml:"log_lookback_hours"`
-    PytestArgs           []string `json:"pytest_args"           toml:"pytest_args"`
-    MypyArgs             []string `json:"mypy_args"             toml:"mypy_args"`
-    RuffArgs             []string `json:"ruff_args"             toml:"ruff_args"`
-    CodeErrorPatterns    []string `json:"code_error_patterns"   toml:"code_error_patterns"`
-    MaxCodeIssuesPerFile int      `json:"max_code_issues_per_file" toml:"max_code_issues_per_file"`
-    DeduplicateTODOs     bool     `json:"deduplicate_todos"     toml:"deduplicate_todos"`
-}
-```
-
-<a name="DistillationConfig"></a>
-## type DistillationConfig
-
-DistillationConfig controls which memories get promoted to shared storage.
-
-```go
-type DistillationConfig struct {
-    // PageRankThreshold promotes memories with PageRank above this value
-    PageRankThreshold float64 `json:"pagerank_threshold" toml:"pagerank_threshold"`
-    // HubConnectivityThreshold promotes memories with degree >= this
-    HubConnectivityThreshold int `json:"hub_connectivity_threshold" toml:"hub_connectivity_threshold"`
-    // PromoteTaskCompletions always promotes task completion summaries
-    PromoteTaskCompletions bool `json:"promote_task_completions" toml:"promote_task_completions"`
-    // CrossAgentReferencesMin promotes memories referenced by >= N other agents
-    CrossAgentReferencesMin int `json:"cross_agent_references_min" toml:"cross_agent_references_min"`
-    // MinMemoryAgeMinutes requires memories to be at least this old
-    MinMemoryAgeMinutes int `json:"min_memory_age_minutes" toml:"min_memory_age_minutes"`
-}
-```
-
-<a name="DistributedMemoryConfig"></a>
-## type DistributedMemoryConfig
-
-DistributedMemoryConfig holds settings for 2\-tier distributed memory sync.
-
-```go
-type DistributedMemoryConfig struct {
-    // Enabled turns on distributed memory synchronization
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // Mode is "local" (default, no sync) or "distributed" (sync with memvid)
-    Mode string `json:"mode" toml:"mode"`
-    // Sync configures synchronization behavior
-    Sync SyncConfig `json:"sync" toml:"sync"`
-    // Distillation configures which memories to promote
-    Distillation DistillationConfig `json:"distillation" toml:"distillation"`
-}
-```
-
-<a name="EmbeddingConfig"></a>
-## type EmbeddingConfig
-
-EmbeddingConfig holds vector embedding settings for semantic memory search.
-
-```go
-type EmbeddingConfig struct {
-    Enabled       bool     `json:"enabled"         toml:"enabled"`
-    Provider      string   `json:"provider"        toml:"provider"` // "openai" or "ollama"
-    APIKey        string   `json:"api_key"         toml:"api_key"`
-    BaseURL       string   `json:"base_url"        toml:"base_url"`
-    Model         string   `json:"model"           toml:"model"`
-    Dimension     int      `json:"dimension"       toml:"dimension"`
-    ShardBasePath string   `json:"shard_base_path" toml:"shard_base_path"` // Directory for shard files
-    MaxRAMShards  int      `json:"max_ram_shards"  toml:"max_ram_shards"`  // LRU cache size
-    ShardTypes    []string `json:"shard_types"     toml:"shard_types"`     // Enabled shard types
-}
-```
-
-<a name="EpisodicConfig"></a>
-## type EpisodicConfig
-
-EpisodicConfig holds episodic memory settings.
-
-```go
-type EpisodicConfig struct {
-    Enabled         bool `json:"enabled"           toml:"enabled"`
-    MaxContextItems int  `json:"max_context_items" toml:"max_context_items"`
-}
-```
-
-<a name="ErrorsConfig"></a>
-## type ErrorsConfig
-
-ErrorsConfig holds error handling settings.
-
-```go
-type ErrorsConfig struct {
-    // DetailedErrors enables detailed error messages
-    DetailedErrors bool `json:"detailed_errors" toml:"detailed_errors"`
-    // IncludeExamples adds usage examples to error messages
-    IncludeExamples bool `json:"include_examples" toml:"include_examples"`
-    // MaxSuggestionLength limits the length of error suggestions
-    MaxSuggestionLength int `json:"max_suggestion_length" toml:"max_suggestion_length"`
-}
-```
-
-<a name="HTTPTransportConfig"></a>
-## type HTTPTransportConfig
-
-HTTPTransportConfig configures the HTTP REST transport.
-
-```go
-type HTTPTransportConfig struct {
-    Enabled       bool     `json:"enabled"       toml:"enabled"`           // Enable HTTP server (default: false)
-    Addr          string   `json:"addr"          toml:"addr"`              // Listen address (default: ":8081")
-    UseTLS        bool     `json:"use_tls"       toml:"use_tls"`           // Enable HTTPS
-    AutoTLSCert   bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`     // Auto-generate self-signed cert
-    TLSCertFile   string   `json:"tls_cert_file" toml:"tls_cert_file"`     // TLS certificate file path
-    TLSKeyFile    string   `json:"tls_key_file"  toml:"tls_key_file"`      // TLS key file path
-    TLSMinVersion string   `json:"tls_min_version" toml:"tls_min_version"` // Minimum TLS version
-    RequireAuth   bool     `json:"require_auth"  toml:"require_auth"`      // Require API key auth
-    APIKeys       []string `json:"api_keys"      toml:"api_keys"`          // Valid API keys
-    REST          bool     `json:"rest"          toml:"rest"`              // Enable REST API
-    WebSocket     bool     `json:"websocket"     toml:"websocket"`         // Enable WebSocket
-    WSPath        string   `json:"ws_path"       toml:"ws_path"`           // WebSocket endpoint path
-    MCP           bool     `json:"mcp"           toml:"mcp"`               // Enable MCP over HTTP+SSE
-    MCPPath       string   `json:"mcp_path"      toml:"mcp_path"`          // MCP endpoint path
-}
-```
-
-<a name="IsolationConfig"></a>
-## type IsolationConfig
-
-IsolationConfig holds task isolation settings.
-
-```go
-type IsolationConfig struct {
-    BaseDir     string `json:"base_dir"      toml:"base_dir"`
-    AutoGitInit bool   `json:"auto_git_init" toml:"auto_git_init"`
-    AutoTest    bool   `json:"auto_test"     toml:"auto_test"`
-}
-```
-
-<a name="LLMAdaptiveTimeoutConfig"></a>
-## type LLMAdaptiveTimeoutConfig
-
-LLMAdaptiveTimeoutConfig configures adaptive timeout calculation.
-
-```go
-type LLMAdaptiveTimeoutConfig struct {
-    Enabled                bool    `json:"enabled"                   toml:"enabled"`                   // default true
-    StddevMultiplier       float64 `json:"stddev_multiplier"         toml:"stddev_multiplier"`         // default 3.0
-    StddevTokenRateTimeout bool    `json:"stddev_token_rate_timeout" toml:"stddev_token_rate_timeout"` // default true
-    MinTimeoutSeconds      int     `json:"min_timeout_seconds"       toml:"min_timeout_seconds"`       // default 10
-    MaxTimeoutSeconds      int     `json:"max_timeout_seconds"       toml:"max_timeout_seconds"`       // default 300
-    WarmupRequests         int     `json:"warmup_requests"           toml:"warmup_requests"`           // default 20
-    WindowHours            int     `json:"window_hours"              toml:"window_hours"`              // default 24
-}
-```
-
-<a name="LLMBrokerConfig"></a>
-## type LLMBrokerConfig
-
-LLMBrokerConfig configures the model broker.
-
-```go
-type LLMBrokerConfig struct {
-    MaxErrorRate    float64 `json:"max_error_rate"     toml:"max_error_rate"`     // default 0.10
-    MaxP95LatencyMS float64 `json:"max_p95_latency_ms" toml:"max_p95_latency_ms"` // default 30000
-    FallbackEnabled bool    `json:"fallback_enabled"   toml:"fallback_enabled"`   // default true
-}
-```
-
-<a name="LLMConfig"></a>
-## type LLMConfig
-
-LLMConfig holds LLM configuration including budget, broker, and metrics.
-
-```go
-type LLMConfig struct {
-    Budget          BudgetConfig             `json:"budget"           toml:"budget"`
-    Broker          LLMBrokerConfig          `json:"broker"           toml:"broker"`
-    AdaptiveTimeout LLMAdaptiveTimeoutConfig `json:"adaptive_timeout" toml:"adaptive_timeout"`
-    ContextFirewall LLMContextFirewallConfig `json:"context_firewall" toml:"context_firewall"`
-    Metrics         LLMMetricsConfig         `json:"metrics"          toml:"metrics"`
-    Cache           LLMSimpleFeatureConfig   `json:"cache"            toml:"cache"`
-}
-```
-
-<a name="LLMContextFirewallConfig"></a>
-## type LLMContextFirewallConfig
-
-LLMContextFirewallConfig configures context budget management.
-
-```go
-type LLMContextFirewallConfig struct {
-    Enabled                    bool    `json:"enabled"                       toml:"enabled"`                       // default true
-    SummarizeHistory           bool    `json:"summarize_history"             toml:"summarize_history"`             // default true
-    SmallModelContextThreshold int     `json:"small_model_context_threshold" toml:"small_model_context_threshold"` // default 32768
-    IterationBudgetRatio       float64 `json:"iteration_budget_ratio"        toml:"iteration_budget_ratio"`        // default 0.30
-    ConversationBudgetRatio    float64 `json:"conversation_budget_ratio"     toml:"conversation_budget_ratio"`     // default 0.50
-    ChunkLargeInputs           bool    `json:"chunk_large_inputs"            toml:"chunk_large_inputs"`            // default true
-    ChunkThresholdRatio        float64 `json:"chunk_threshold_ratio"         toml:"chunk_threshold_ratio"`         // default 0.25
-    // WrapUpThreshold is the "soft" limit (0.0-1.0) where wrap-up suggestions are injected
-    WrapUpThreshold float64 `json:"wrap_up_threshold" toml:"wrap_up_threshold"` // default 0.50
-    // HardLimit is the "hard" limit (0.0-1.0) where context is dropped and reattempted
-    HardLimit float64 `json:"hard_limit" toml:"hard_limit"` // default 0.80
-    // DropContextOnHardLimit enables context dropping when hard limit is hit
-    DropContextOnHardLimit bool `json:"drop_context_on_hard_limit" toml:"drop_context_on_hard_limit"` // default true
-    // ProactiveCompression enables the multi-stage ContextCompressor inside the
-    // firewall. When true, the compressor runs before the legacy
-    // chunk/summarize/drop pipeline.
-    ProactiveCompression bool `json:"proactive_compression" toml:"proactive_compression"` // default false
-    // ModelContextLimit overrides the model's ContextLimit for the compressor.
-    // When zero, model.ContextLimit is used.
-    ModelContextLimit int `json:"model_context_limit" toml:"model_context_limit"`
-    // HierarchicalSummarization enables recursive re-summarization where
-    // summaries that exceed SummaryLevelThreshold tokens are themselves
-    // summarized at the next level up to MaxSummaryLevel.
-    HierarchicalSummarization bool `json:"hierarchical_summarization" toml:"hierarchical_summarization"`
-    // MaxSummaryLevel is the maximum recursion depth for hierarchical
-    // summarization (default 3).
-    MaxSummaryLevel int `json:"max_summary_level" toml:"max_summary_level"`
-    // SummaryLevelThreshold is the token count at which a summary is
-    // re-summarized at the next level (default 500).
-    SummaryLevelThreshold int `json:"summary_level_threshold" toml:"summary_level_threshold"`
-}
-```
-
-<a name="LLMMetricsConfig"></a>
-## type LLMMetricsConfig
-
-LLMMetricsConfig configures HTTP\-level metrics collection.
-
-```go
-type LLMMetricsConfig struct {
-    Enabled             bool   `json:"enabled"               toml:"enabled"`               // default true
-    DBPath              string `json:"db_path"               toml:"db_path"`               // default "~/.meept/metrics.db"
-    RetentionDays       int    `json:"retention_days"        toml:"retention_days"`        // default 7
-    StatsRefreshMinutes int    `json:"stats_refresh_minutes" toml:"stats_refresh_minutes"` // default 5
-}
-```
-
-<a name="LLMSimpleFeatureConfig"></a>
-## type LLMSimpleFeatureConfig
-
-LLMSimpleFeatureConfig configures a simple feature with enabled flag and optional settings.
-
-```go
-type LLMSimpleFeatureConfig struct {
-    Enabled       bool   `json:"enabled"         toml:"enabled"`
-    L1MaxEntries  int    `json:"l1_max_entries"  toml:"l1_max_entries"`
-    L2Enabled     bool   `json:"l2_enabled"      toml:"l2_enabled"`
-    L2DBPath      string `json:"l2_db_path"      toml:"l2_db_path"`
-    DefaultTTLMin int    `json:"default_ttl_min" toml:"default_ttl_min"`
-}
-```
-
-<a name="LSPConfig"></a>
-## type LSPConfig
-
-LSPConfig holds LSP client settings.
-
-```go
-type LSPConfig struct {
-    // Enabled turns on LSP client features
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // Servers maps language IDs to server configurations
-    Servers map[string]LSPServerConfig `json:"servers" toml:"servers"`
-    // AutoStartServers starts LSP servers on demand
-    AutoStartServers bool `json:"auto_start_servers" toml:"auto_start_servers"`
-    // ConnectionTimeoutSeconds is the timeout for connecting to LSP servers
-    ConnectionTimeoutSeconds int `json:"connection_timeout_seconds" toml:"connection_timeout_seconds"`
-    // DiagnosticsTimeoutSeconds is the timeout for LSP diagnostics on write
-    DiagnosticsTimeout int `json:"diagnostics_timeout" toml:"diagnostics_timeout"`
-    // FormatOnWrite enables formatting on write
-    FormatOnWrite bool `json:"format_on_write" toml:"format_on_write"`
-    // DiagnosticsOnWrite enables diagnostics on write
-    DiagnosticsOnWrite bool `json:"diagnostics_on_write" toml:"diagnostics_on_write"`
-}
-```
-
-<a name="LSPServerConfig"></a>
-## type LSPServerConfig
-
-LSPServerConfig configures a single LSP server.
-
-```go
-type LSPServerConfig struct {
-    // Command is the command to start the server
-    Command string `json:"command" toml:"command"`
-    // Args are command line arguments
-    Args []string `json:"args" toml:"args"`
-    // Transport is "stdio" or "tcp"
-    Transport string `json:"transport" toml:"transport"`
-    // Host is the TCP host (for tcp transport)
-    Host string `json:"host" toml:"host"`
-    // Port is the TCP port (for tcp transport)
-    Port int `json:"port" toml:"port"`
-    // Languages are the language IDs this server handles
-    Languages []string `json:"languages" toml:"languages"`
-}
-```
-
-<a name="MCPConfig"></a>
-## type MCPConfig
-
-MCPConfig holds MCP settings.
-
-```go
-type MCPConfig struct {
-    Enabled    bool   `json:"enabled"     toml:"enabled"`
-    ConfigFile string `json:"config_file" toml:"config_file"`
-}
-```
-
-<a name="MCPServersConfig"></a>
-## type MCPServersConfig
-
-MCPServersConfig represents the mcp\_servers.json5 configuration structure.
-
-```go
-type MCPServersConfig struct {
-    Servers []mcp.ServerConfig `json:"servers"`
-}
-```
-
-<a name="LoadMCPConfig"></a>
-### func LoadMCPConfig
-
-```go
-func LoadMCPConfig(path string) (*MCPServersConfig, error)
-```
-
-LoadMCPConfig loads MCP server configuration from a JSON5 file. If the file doesn't exist, returns an empty config \(not an error\).
-
-<a name="LoadMCPConfigDefault"></a>
-### func LoadMCPConfigDefault
-
-```go
-func LoadMCPConfigDefault() (*MCPServersConfig, error)
-```
-
-LoadMCPConfigDefault loads MCP config from the default location \(\~/.meept/mcp\_servers.json5\).
-
-<a name="MemoryBackend"></a>
-## type MemoryBackend
-
-MemoryBackend defines the storage backend for memory.
-
-```go
-type MemoryBackend string
-```
-
-<a name="MemoryBackendMemvid"></a>
-
-```go
-const (
-    // MemoryBackendMemvid uses the memvid service as the primary backend.
-    MemoryBackendMemvid MemoryBackend = "memvid"
-    // MemoryBackendSQLite uses local SQLite as the backend.
-    MemoryBackendSQLite MemoryBackend = "sqlite"
-)
-```
-
-<a name="MemoryCachingConfig"></a>
-## type MemoryCachingConfig
-
-MemoryCachingConfig holds memory prefix caching settings \(Hermes pattern\).
-
-```go
-type MemoryCachingConfig struct {
-    // Enabled turns on frozen snapshot prefix caching
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // RefreshOnSessionEnd refreshes the snapshot at session end
-    RefreshOnSessionEnd bool `json:"refresh_on_session_end" toml:"refresh_on_session_end"`
-}
-```
-
-<a name="MemoryCategoryLimit"></a>
-## type MemoryCategoryLimit
-
-MemoryCategoryLimit holds character limit settings for a memory category.
-
-```go
-type MemoryCategoryLimit struct {
-    Enabled        bool `json:"enabled"         toml:"enabled"`
-    CharacterLimit int  `json:"character_limit" toml:"character_limit"`
-}
-```
-
-<a name="MemoryConfig"></a>
-## type MemoryConfig
-
-MemoryConfig holds memory subsystem settings.
-
-```go
-type MemoryConfig struct {
-    // Backend specifies the storage backend: "memvid" (default) or "sqlite"
-    Backend                    MemoryBackend     `json:"backend"                      toml:"backend"`
-    DataDir                    string            `json:"data_dir"                     toml:"data_dir"`
-    ConsolidationIntervalHours int               `json:"consolidation_interval_hours" toml:"consolidation_interval_hours"`
-    Episodic                   EpisodicConfig    `json:"episodic"                     toml:"episodic"`
-    Task                       TaskMemoryConfig  `json:"task"                         toml:"task"`
-    Personality                PersonalityConfig `json:"personality"                  toml:"personality"`
-    Embeddings                 EmbeddingConfig   `json:"embeddings"                   toml:"embeddings"`
-    // Security holds memory security settings
-    Security MemorySecurityConfig `json:"security" toml:"security"`
-    // Caching holds memory prefix caching settings
-    Caching MemoryCachingConfig `json:"caching" toml:"caching"`
-    // Limits holds character limit settings for memory categories
-    Limits MemoryLimitsConfig `json:"limits" toml:"limits"`
-    // Expiration holds memory expiration settings
-    Expiration MemoryExpirationConfig `json:"expiration" toml:"expiration"`
-    // Versioning holds versioned memory settings
-    Versioning MemoryVersioningConfig `json:"versioning" toml:"versioning"`
-    // ProjectOverrides allows per-project character limit overrides
-    ProjectOverrides map[string]MemoryLimitsConfig `json:"project_overrides" toml:"project_overrides"`
-}
-```
-
-<a name="MemoryConfig.GetLimitsForProject"></a>
-### func \(\*MemoryConfig\) GetLimitsForProject
-
-```go
-func (c *MemoryConfig) GetLimitsForProject(projectPath string) MemoryLimitsConfig
-```
-
-GetLimitsForProject returns the character limits for a specific project path. If project\-specific overrides exist, they are returned; otherwise defaults are used.
-
-<a name="MemoryExpirationConfig"></a>
-## type MemoryExpirationConfig
-
-MemoryExpirationConfig holds memory expiration settings.
-
-```go
-type MemoryExpirationConfig struct {
-    // Enabled turns on access-based expiration
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // AccessExpirationDays is the number of days without access before expiration (0 = disabled)
-    AccessExpirationDays int `json:"access_expiration_days" toml:"access_expiration_days"`
-    // SummarizeBeforeDelete creates a summary before deleting expired memories
-    SummarizeBeforeDelete bool `json:"summarize_before_delete" toml:"summarize_before_delete"`
-    // SummaryCategory is the category for summary memories
-    SummaryCategory string `json:"summary_category" toml:"summary_category"`
-}
-```
-
-<a name="MemoryLimitsConfig"></a>
-## type MemoryLimitsConfig
-
-MemoryLimitsConfig holds character limit settings for different memory categories.
-
-```go
-type MemoryLimitsConfig struct {
-    Episodic     MemoryCategoryLimit `json:"episodic"      toml:"episodic"`
-    TaskCode     MemoryCategoryLimit `json:"task_code"     toml:"task_code"`
-    TaskGeneral  MemoryCategoryLimit `json:"task_general"  toml:"task_general"`
-    TaskCommands MemoryCategoryLimit `json:"task_commands" toml:"task_commands"`
-    Personality  MemoryCategoryLimit `json:"personality"   toml:"personality"`
-}
-```
-
-<a name="MemorySecurityConfig"></a>
-## type MemorySecurityConfig
-
-MemorySecurityConfig holds memory security settings.
-
-```go
-type MemorySecurityConfig struct {
-    // Enabled turns on security scanning for memory operations
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // FailClosed blocks memory operations when scanner is unavailable (default: true)
-    FailClosed bool `json:"fail_closed" toml:"fail_closed"`
-    // LogBlocked logs blocked memory store attempts
-    LogBlocked bool `json:"log_blocked" toml:"log_blocked"`
-}
-```
-
-<a name="MemoryVersioningConfig"></a>
-## type MemoryVersioningConfig
-
-MemoryVersioningConfig holds versioned memory settings.
-
-```go
-type MemoryVersioningConfig struct {
-    Enabled     bool `json:"enabled"      toml:"enabled"`
-    MaxVersions int  `json:"max_versions" toml:"max_versions"`
-}
-```
-
-<a name="MemvidConfig"></a>
-## type MemvidConfig
-
-MemvidConfig holds memvid service settings.
-
-```go
-type MemvidConfig struct {
-    Enabled  bool   `json:"enabled"         toml:"enabled"`
-    Endpoint string `json:"endpoint"        toml:"endpoint"`
-    DataDir  string `json:"data_dir"        toml:"data_dir"`
-    Timeout  int    `json:"timeout_seconds" toml:"timeout_seconds"`
-}
-```
-
-<a name="Model"></a>
-## type Model
-
-Model represents a model configuration.
-
-```go
-type Model struct {
-    Name             string   `json:"name"`
-    Capabilities     []string `json:"capabilities"`
-    InputCost        float64  `json:"input_cost"`
-    OutputCost       float64  `json:"output_cost"`
-    ContextLimit     int      `json:"context_limit"`
-    MaxOutput        int      `json:"max_output"`
-    Temperature      float64  `json:"temperature"`
-    TopP             float64  `json:"top_p,omitempty"`
-    FrequencyPenalty float64  `json:"frequency_penalty,omitempty"`
-    PresencePenalty  float64  `json:"presence_penalty,omitempty"`
-}
-```
-
-<a name="ModelParams"></a>
-## type ModelParams
-
-ModelParams holds model generation parameters.
-
-```go
-type ModelParams struct {
-    Temperature      float64 `json:"temperature,omitempty"`
-    TopP             float64 `json:"top_p,omitempty"`
-    FrequencyPenalty float64 `json:"frequency_penalty,omitempty"`
-    PresencePenalty  float64 `json:"presence_penalty,omitempty"`
-    MaxTokens        int     `json:"max_tokens,omitempty"`
-}
-```
-
-<a name="ModelPreset"></a>
-## type ModelPreset
-
-ModelPreset represents a model preset with parameters.
-
-```go
-type ModelPreset struct {
-    Label       string      `json:"label"`
-    Description string      `json:"description"`
-    Params      ModelParams `json:"params"`
-}
-```
-
-<a name="ModelsConfig"></a>
-## type ModelsConfig
-
-ModelsConfig represents the models.json5 configuration structure.
-
-```go
-type ModelsConfig struct {
-    Model             string              `json:"model"`
-    SmallModel        string              `json:"small_model"`
-    ClassifierModel   string              `json:"classifier_model"` // Model for intent classification (empty = use model)
-    SummarizerModel   string              `json:"summarizer_model"` // Model for session summarization (empty = use model)
-    DisabledProviders []string            `json:"disabled_providers"`
-    DefaultTimeout    int                 `json:"default_timeout"` // Default timeout in seconds
-    Providers         map[string]Provider `json:"providers"`
-}
-```
-
-<a name="LoadModelsConfig"></a>
-### func LoadModelsConfig
-
-```go
-func LoadModelsConfig(path string) (*ModelsConfig, error)
-```
-
-LoadModelsConfig loads models configuration from a JSON5 file.
-
-<a name="LoadModelsConfigDefault"></a>
-### func LoadModelsConfigDefault
-
-```go
-func LoadModelsConfigDefault() (*ModelsConfig, error)
-```
-
-LoadModelsConfigDefault loads models config from the default location. Priority: user config \(\~/.meept/models.json5\) \> project config \(config/models.json5\)
-
-<a name="MultiAgentConfig"></a>
-## type MultiAgentConfig
-
-MultiAgentConfig holds multi\-agent orchestration settings.
-
-```go
-type MultiAgentConfig struct {
-    Enabled            bool   `json:"enabled"              toml:"enabled"`
-    DispatcherModel    string `json:"dispatcher_model"     toml:"dispatcher_model"`
-    DefaultModel       string `json:"default_model"        toml:"default_model"`
-    ClassifierModel    string `json:"classifier_model"     toml:"classifier_model"` // Model for intent classification (defaults to small_model)
-    MaxMemoryRefs      int    `json:"max_memory_refs"      toml:"max_memory_refs"`
-    ContextSearchLimit int    `json:"context_search_limit" toml:"context_search_limit"`
-}
-```
-
-<a name="NativeConfig"></a>
-## type NativeConfig
-
-NativeConfig holds native \(OS\-level\) speech recognition settings.
-
-```go
-type NativeConfig struct {
-}
-```
-
-<a name="OAuthConfig"></a>
-## type OAuthConfig
-
-OAuthConfig holds configuration for the OAuth token management system.
-
-```go
-type OAuthConfig struct {
-    Enabled         bool                          `json:"enabled"          toml:"enabled"`
-    RefreshInterval string                        `json:"refresh_interval" toml:"refresh_interval"`
-    RefreshMargin   string                        `json:"refresh_margin"   toml:"refresh_margin"`
-    EncryptionKey   string                        `json:"encryption_key"   toml:"encryption_key"`
-    TokenDir        string                        `json:"token_dir"        toml:"token_dir"`
-    Providers       map[string]OAuthProviderEntry `json:"providers"       toml:"providers"`
-}
-```
-
-<a name="OAuthProviderEntry"></a>
-## type OAuthProviderEntry
-
-OAuthProviderEntry holds per\-provider OAuth overrides.
-
-```go
-type OAuthProviderEntry struct {
-    ClientID     string `json:"client_id"     toml:"client_id"`
-    ClientSecret string `json:"client_secret" toml:"client_secret"`
-}
-```
-
-<a name="OrchestratorConfig"></a>
-## type OrchestratorConfig
-
-OrchestratorConfig holds hierarchical orchestrator settings.
-
-```go
-type OrchestratorConfig struct {
-    MaxPlanSteps        int  `json:"max_plan_steps"        toml:"max_plan_steps"`
-    MaxResearchSteps    int  `json:"max_research_steps"    toml:"max_research_steps"`
-    PlannerTimeout      int  `json:"planner_timeout"       toml:"planner_timeout"`
-    TokenBudgetAlert    int  `json:"token_budget_alert"    toml:"token_budget_alert"`
-    MaxHandoffSteps     int  `json:"max_handoff_steps"     toml:"max_handoff_steps"`
-    HandoffUseAmendment bool `json:"handoff_use_amendment" toml:"handoff_use_amendment"`
-}
-```
-
-<a name="ParakeetConfig"></a>
-## type ParakeetConfig
-
-ParakeetConfig holds parakeet.cpp engine settings.
-
-```go
-type ParakeetConfig struct {
-    BinPath   string `json:"bin_path"   toml:"bin_path"`
-    ModelPath string `json:"model_path" toml:"model_path"`
-}
-```
-
-<a name="PersonalityConfig"></a>
-## type PersonalityConfig
-
-PersonalityConfig holds personality memory settings.
-
-```go
-type PersonalityConfig struct {
-    Enabled                     bool `json:"enabled"                       toml:"enabled"`
-    UpdateIntervalConversations int  `json:"update_interval_conversations" toml:"update_interval_conversations"`
-}
-```
-
-<a name="PlansApprovalConfig"></a>
-## type PlansApprovalConfig
-
-PlansApprovalConfig holds plan approval workflow settings.
-
-```go
-type PlansApprovalConfig struct {
-    RequireApproval bool `json:"require_approval" toml:"require_approval"`
-    AllowRevision   bool `json:"allow_revision"   toml:"allow_revision"`
-    MaxRevisions    int  `json:"max_revisions"    toml:"max_revisions"`
-}
-```
-
-<a name="PlansConfig"></a>
-## type PlansConfig
-
-PlansConfig holds configuration for the plan system.
-
-```go
-type PlansConfig struct {
-    Mode         string                  `json:"mode"          toml:"mode"`
-    Threshold    PlansThresholdConfig    `json:"threshold"     toml:"threshold"`
-    Storage      PlansStorageConfig      `json:"storage"       toml:"storage"`
-    Approval     PlansApprovalConfig     `json:"approval"      toml:"approval"`
-    Confirmation PlansConfirmationConfig `json:"confirmation"  toml:"confirmation"`
-}
-```
-
-<a name="PlansConfirmationConfig"></a>
-## type PlansConfirmationConfig
-
-PlansConfirmationConfig holds plan confirmation settings.
-
-```go
-type PlansConfirmationConfig struct {
-    RequireSignoff bool `json:"require_signoff" toml:"require_signoff"`
-}
-```
-
-<a name="PlansStorageConfig"></a>
-## type PlansStorageConfig
-
-PlansStorageConfig holds plan file storage settings.
-
-```go
-type PlansStorageConfig struct {
-    DefaultPath      string `json:"default_path"       toml:"default_path"`
-    FilenameTemplate string `json:"filename_template"  toml:"filename_template"`
-    ExternalPath     string `json:"external_path"      toml:"external_path"`
-}
-```
-
-<a name="PlansThresholdConfig"></a>
-## type PlansThresholdConfig
-
-PlansThresholdConfig holds threshold\-based plan triggering settings.
-
-```go
-type PlansThresholdConfig struct {
-    MinSteps           int      `json:"min_steps"            toml:"min_steps"`
-    ComplexityKeywords []string `json:"complexity_keywords"  toml:"complexity_keywords"`
-    AlwaysPlanIntents  []string `json:"always_plan_intents"  toml:"always_plan_intents"`
-}
-```
-
-<a name="PluginsConfig"></a>
-## type PluginsConfig
-
-PluginsConfig holds plugin settings.
-
-```go
-type PluginsConfig struct {
-    Enabled   bool   `json:"enabled"   toml:"enabled"`
-    Directory string `json:"directory" toml:"directory"`
-}
-```
-
-<a name="PresetConfig"></a>
-## type PresetConfig
-
-PresetConfig represents the presets configuration.
-
-```go
-type PresetConfig struct {
-    Presets map[string]*ModelPreset `json:"presets"`
-    Default string                  `json:"default"`
-}
-```
-
-<a name="DefaultPresetsConfig"></a>
-### func DefaultPresetsConfig
-
-```go
-func DefaultPresetsConfig() *PresetConfig
-```
-
-DefaultPresetsConfig returns the default preset configuration.
-
-<a name="LoadPresetsConfig"></a>
-### func LoadPresetsConfig
-
-```go
-func LoadPresetsConfig(path string) (*PresetConfig, error)
-```
-
-LoadPresetsConfig loads model presets from a JSON5 file.
-
-<a name="LoadPresetsConfigDefault"></a>
-### func LoadPresetsConfigDefault
-
-```go
-func LoadPresetsConfigDefault() (*PresetConfig, error)
-```
-
-LoadPresetsConfigDefault loads presets from default locations.
-
-<a name="PresetConfig.ApplyPreset"></a>
-### func \(\*PresetConfig\) ApplyPreset
-
-```go
-func (p *PresetConfig) ApplyPreset(model *Model, presetName string) error
-```
-
-ApplyPreset applies a preset to a model configuration.
-
-<a name="PresetConfig.GetPreset"></a>
-### func \(\*PresetConfig\) GetPreset
-
-```go
-func (p *PresetConfig) GetPreset(name string) (*ModelPreset, error)
-```
-
-GetPreset returns a specific preset by name.
-
-<a name="PresetConfig.ListPresets"></a>
-### func \(\*PresetConfig\) ListPresets
-
-```go
-func (p *PresetConfig) ListPresets() []string
-```
-
-ListPresets returns all available preset names.
-
-<a name="ProjectsConfig"></a>
-## type ProjectsConfig
-
-ProjectsConfig holds configuration for the project system.
-
-```go
-type ProjectsConfig struct {
-    Enabled                    bool   `json:"enabled"                        toml:"enabled"`
-    BaseDir                    string `json:"base_dir"                       toml:"base_dir"`
-    DefaultBranch              string `json:"default_branch"                 toml:"default_branch"`
-    WorktreePerPlan            string `json:"worktree_per_plan"              toml:"worktree_per_plan"`
-    WorktreeIsolationThreshold int    `json:"worktree_isolation_threshold"   toml:"worktree_isolation_threshold"`
-    AutoDetect                 bool   `json:"auto_detect"                    toml:"auto_detect"`
-    MaxWorktreesPerProject     int    `json:"max_worktrees_per_project"      toml:"max_worktrees_per_project"`
-    CleanupOrphanedWorktrees   bool   `json:"cleanup_orphaned_worktrees"     toml:"cleanup_orphaned_worktrees"`
-    FenceEnabled               bool   `json:"fence_enabled"                  toml:"fence_enabled"`
-    AllowReadSystemPaths       bool   `json:"allow_read_system_paths"        toml:"allow_read_system_paths"`
-    AutoSyncOnAttach           bool   `json:"auto_sync_on_attach"            toml:"auto_sync_on_attach"`
-}
-```
-
-<a name="Provider"></a>
-## type Provider
-
-Provider represents a provider configuration in models.json5.
-
-```go
-type Provider struct {
-    API     string           `json:"api"`
-    Options ProviderOptions  `json:"options"`
-    Models  map[string]Model `json:"models"`
-}
-```
-
-<a name="ProviderOptions"></a>
-## type ProviderOptions
-
-ProviderOptions holds provider\-specific options.
-
-```go
-type ProviderOptions struct {
-    BaseURL string `json:"baseURL"`
-    APIKey  string `json:"apiKey"` //nolint:gosec // field name, not a secret
-    Timeout int    `json:"timeout"`
-    NoAuth  bool   `json:"noAuth"` // FIX #0004 - true for providers that don't require API key (e.g., local LLMs)
-}
-```
-
-<a name="QAgentConfig"></a>
-## type QAgentConfig
-
-QAgentConfig holds configuration for the Q Agent \(meta\-agent for agent creation and optimization\).
-
-```go
-type QAgentConfig struct {
-    // Enabled turns on Q Agent analysis and recommendations
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // SessionIdleTriggerHours is the idle time before a session is considered complete for analysis
-    SessionIdleTriggerHours int `json:"session_idle_trigger_hours" toml:"session_idle_trigger_hours"`
-    // AnalysisTimeoutMinutes is the maximum duration for analysis runs
-    AnalysisTimeoutMinutes int `json:"analysis_timeout_minutes" toml:"analysis_timeout_minutes"`
-    // MinSessionsForPattern is the minimum sessions required to detect a pattern
-    MinSessionsForPattern int `json:"min_sessions_for_pattern" toml:"min_sessions_for_pattern"`
-    // MinConfidenceScore is the minimum confidence score for recommendations
-    MinConfidenceScore float64 `json:"min_confidence_score" toml:"min_confidence_score"`
-    // HighErrorRateThreshold is the error rate threshold for flagging issues
-    HighErrorRateThreshold float64 `json:"high_error_rate_threshold" toml:"high_error_rate_threshold"`
-    // HighRejectionRateThreshold is the rejection rate threshold for flagging issues
-    HighRejectionRateThreshold float64 `json:"high_rejection_rate_threshold" toml:"high_rejection_rate_threshold"`
-    // DurationVarianceThreshold is the duration variance threshold for detecting misconfigurations
-    DurationVarianceThreshold float64 `json:"duration_variance_threshold" toml:"duration_variance_threshold"`
-    // NotifyChat enables notifications via chat
-    NotifyChat bool `json:"notify_chat" toml:"notify_chat"`
-    // NotifyCLI enables notifications via CLI
-    NotifyCLI bool `json:"notify_cli" toml:"notify_cli"`
-    // NotifyMenuBar enables notifications via menu bar
-    NotifyMenuBar bool `json:"notify_menu_bar" toml:"notify_menu_bar"`
-    // AnalysisDir is the directory for cached analysis results
-    AnalysisDir string `json:"analysis_dir" toml:"analysis_dir"`
-    // OutcomesLog is the path for the outcomes log file
-    OutcomesLog string `json:"outcomes_log" toml:"outcomes_log"`
-}
-```
-
-<a name="QueueConfig"></a>
-## type QueueConfig
-
-QueueConfig holds job queue settings.
-
-```go
-type QueueConfig struct {
-    DBPath     string `json:"db_path"     toml:"db_path"`
-    MaxRetries int    `json:"max_retries" toml:"max_retries"`
-}
-```
-
-<a name="RPCTransportConfig"></a>
-## type RPCTransportConfig
-
-RPCTransportConfig configures the Unix socket RPC transport.
-
-```go
-type RPCTransportConfig struct {
-    Enabled    bool   `json:"enabled"     toml:"enabled"`     // Enable Unix socket RPC (default: true)
-    SocketPath string `json:"socket_path" toml:"socket_path"` // Unix socket path (default: "~/.meept/meept.sock")
-}
-```
-
-<a name="RecordingConfig"></a>
-## type RecordingConfig
-
-RecordingConfig holds audio recording settings for STT.
-
-```go
-type RecordingConfig struct {
-    RecorderBin string `json:"recorder_bin" toml:"recorder_bin"`
-    SampleRate  int    `json:"sample_rate"  toml:"sample_rate"`
-    Channels    int    `json:"channels"     toml:"channels"`
-    Format      string `json:"format"       toml:"format"`
-}
-```
-
-<a name="ReviewConfig"></a>
-## type ReviewConfig
-
-ReviewConfig holds code review settings for the multi\-agent system.
-
-```go
-type ReviewConfig struct {
-    // Enabled turns on automatic code review
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // RequireReview lists intent types that require review
-    RequireReview []string `json:"require_review" toml:"require_review"`
-    // SkipReview lists intent types that skip review
-    SkipReview []string `json:"skip_review" toml:"skip_review"`
-    // ReviewerMapping maps agent IDs to reviewer agent IDs
-    ReviewerMapping map[string]string `json:"reviewer_mapping" toml:"reviewer_mapping"`
-    // MaxRevisionCycles is the maximum revision cycles before auto-approval
-    MaxRevisionCycles int `json:"max_revision_cycles" toml:"max_revision_cycles"`
-    // AutoApprovePatterns lists glob patterns that are auto-approved
-    AutoApprovePatterns []string `json:"auto_approve_patterns" toml:"auto_approve_patterns"`
-}
-```
-
-<a name="STTConfig"></a>
-## type STTConfig
-
-STTConfig holds configuration for speech\-to\-text transcription.
-
-```go
-type STTConfig struct {
-    Enabled   bool            `json:"enabled"       toml:"enabled"`
-    Engine    string          `json:"engine"        toml:"engine"`
-    Language  string          `json:"language"      toml:"language"`
-    AutoSend  bool            `json:"auto_send"     toml:"auto_send"`
-    Whisper   WhisperConfig   `json:"whisper"       toml:"whisper"`
-    Parakeet  ParakeetConfig  `json:"parakeet"      toml:"parakeet"`
-    Native    NativeConfig    `json:"native"        toml:"native"`
-    Recording RecordingConfig `json:"recording"     toml:"recording"`
-}
-```
-
-<a name="SafetyConfig"></a>
-## type SafetyConfig
-
-SafetyConfig holds safety settings for self\-improvement.
-
-```go
-type SafetyConfig struct {
-    RequireHumanApproval   bool     `json:"require_human_approval"    toml:"require_human_approval"`
-    MaxFilesPerFix         int      `json:"max_files_per_fix"         toml:"max_files_per_fix"`
-    MaxLinesChangedPerFix  int      `json:"max_lines_changed_per_fix" toml:"max_lines_changed_per_fix"`
-    BlockedPaths           []string `json:"blocked_paths"             toml:"blocked_paths"`
-    AllowedRiskLevels      []string `json:"allowed_risk_levels"       toml:"allowed_risk_levels"`
-    BlockCriticalRisk      bool     `json:"block_critical_risk"       toml:"block_critical_risk"`
-    RequireTestsPass       bool     `json:"require_tests_pass"        toml:"require_tests_pass"`
-    MinConfidenceThreshold float64  `json:"min_confidence_threshold"  toml:"min_confidence_threshold"`
-}
-```
-
-<a name="SandboxConfig"></a>
-## type SandboxConfig
-
-SandboxConfig holds sandbox settings for self\-improvement.
-
-```go
-type SandboxConfig struct {
-    WorktreeDir        string  `json:"worktree_dir"         toml:"worktree_dir"`
-    CleanupOnSuccess   bool    `json:"cleanup_on_success"   toml:"cleanup_on_success"`
-    CleanupOnFailure   bool    `json:"cleanup_on_failure"   toml:"cleanup_on_failure"`
-    MaxWorktrees       int     `json:"max_worktrees"        toml:"max_worktrees"`
-    TestTimeoutSeconds float64 `json:"test_timeout_seconds" toml:"test_timeout_seconds"`
-}
-```
-
-<a name="SchedulerConfig"></a>
-## type SchedulerConfig
-
-SchedulerConfig holds scheduler settings.
-
-```go
-type SchedulerConfig struct {
-    Enabled  bool   `json:"enabled"  toml:"enabled"`
-    Timezone string `json:"timezone" toml:"timezone"`
-}
-```
-
-<a name="SecurityConfig"></a>
-## type SecurityConfig
-
-SecurityConfig holds security settings.
-
-```go
-type SecurityConfig struct {
-    SanitizeInputs              bool     `json:"sanitize_inputs"               toml:"sanitize_inputs"`
-    SanitizeStrictness          string   `json:"sanitize_strictness"           toml:"sanitize_strictness"` // "permissive", "standard", "strict"
-    LLMFilterExternal           bool     `json:"llm_filter_external"           toml:"llm_filter_external"`
-    RequireConfirmationHigh     bool     `json:"require_confirmation_high"     toml:"require_confirmation_high"`
-    RequireConfirmationCritical bool     `json:"require_confirmation_critical" toml:"require_confirmation_critical"`
-    BlockFinancial              bool     `json:"block_financial"               toml:"block_financial"`
-    AllowedPaths                []string `json:"allowed_paths"                 toml:"allowed_paths"`
-    BlockedPaths                []string `json:"blocked_paths"                 toml:"blocked_paths"`
-
-    // Output monitoring
-    MonitorOutput bool `json:"monitor_output" toml:"monitor_output"` // Enable credential detection in LLM output
-    RedactOutput  bool `json:"redact_output"  toml:"redact_output"`  // Automatically redact detected credentials
-
-    // Shell command security
-    ScanShellCommands bool   `json:"scan_shell_commands" toml:"scan_shell_commands"` // Enable Tirith command scanning
-    TirithBinary      string `json:"tirith_binary"       toml:"tirith_binary"`       // Path to tirith binary
-
-    // Audit logging
-    EnableAuditLog bool   `json:"enable_audit_log" toml:"enable_audit_log"` // Enable security audit logging
-    AuditDBPath    string `json:"audit_db_path"    toml:"audit_db_path"`    // Path to audit log database
-
-    // Override matching behavior
-    // When true, uses strict glob/exact matching for permission overrides.
-    // When false (default), uses lenient three-strategy cascade (substring, glob, trimmed substring).
-    // Changing this will affect existing overrides - migrate with caution.
-    StrictOverrideMatching bool `json:"strict_override_matching" toml:"strict_override_matching"`
-}
-```
-
-<a name="SelfImproveConfig"></a>
-## type SelfImproveConfig
-
-SelfImproveConfig holds self\-improvement settings.
-
-```go
-type SelfImproveConfig struct {
-    Enabled               bool            `json:"enabled"                  toml:"enabled"`
-    DataDir               string          `json:"data_dir"                 toml:"data_dir"`
-    MaxIterationsPerCycle int             `json:"max_iterations_per_cycle" toml:"max_iterations_per_cycle"`
-    MaxFixesPerCycle      int             `json:"max_fixes_per_cycle"      toml:"max_fixes_per_cycle"`
-    AutoRunIntervalHours  int             `json:"auto_run_interval_hours"  toml:"auto_run_interval_hours"`
-    AIInfra               AIInfraConfig   `json:"ai_infra"                 toml:"ai_infra"`
-    Sandbox               SandboxConfig   `json:"sandbox"                  toml:"sandbox"`
-    Safety                SafetyConfig    `json:"safety"                   toml:"safety"`
-    Detection             DetectionConfig `json:"detection"                toml:"detection"`
-}
-```
-
-<a name="SessionConfig"></a>
-## type SessionConfig
-
-SessionConfig holds session persistence and branching settings.
-
-```go
-type SessionConfig struct {
-    // Persistence enables session restore from SQLite on startup.
-    Persistence bool `json:"persistence" toml:"persistence"`
-    // Branching enables conversation branching.
-    Branching bool `json:"branching" toml:"branching"`
-    // BranchSummaryThreshold is the minimum abandoned messages before summarization.
-    BranchSummaryThreshold int `json:"branch_summary_threshold" toml:"branch_summary_threshold"`
-    // RestoreMessageLimit is the maximum messages to restore (0 = all).
-    RestoreMessageLimit int `json:"restore_message_limit" toml:"restore_message_limit"`
-    // MaxBranches limits the number of branches per session.
-    MaxBranches int `json:"max_branches" toml:"max_branches"`
-    // AutoFork enables automatic forking on context overflow.
-    AutoFork bool `json:"auto_fork" toml:"auto_fork"`
-    // Compaction enables automatic context compaction.
-    Compaction bool `json:"compaction" toml:"compaction"`
-    // CompactionThreshold is the token count that triggers compaction.
-    CompactionThreshold int `json:"compaction_threshold" toml:"compaction_threshold"`
-    // CompactionTargetRatio is the target context ratio after compaction.
-    CompactionTargetRatio float64 `json:"compaction_target_ratio" toml:"compaction_target_ratio"`
-}
-```
-
-<a name="ShadowAdaptersConfig"></a>
-## type ShadowAdaptersConfig
-
-ShadowAdaptersConfig configures adapter management.
-
-```go
-type ShadowAdaptersConfig struct {
-    Enabled        bool             `json:"enabled"         toml:"enabled"`
-    OllamaEndpoint string           `json:"ollama_endpoint" toml:"ollama_endpoint"`
-    AutoTrain      bool             `json:"auto_train"      toml:"auto_train"`
-    TrainThreshold int              `json:"train_threshold" toml:"train_threshold"`
-    TrainSchedule  string           `json:"train_schedule"  toml:"train_schedule"`
-    AdapterDir     string           `json:"adapter_dir"     toml:"adapter_dir"`
-    LoRA           ShadowLoRAConfig `json:"lora"            toml:"lora"`
-    DPO            ShadowDPOConfig  `json:"dpo"             toml:"dpo"`
-}
-```
-
-<a name="ShadowConfig"></a>
-## type ShadowConfig
-
-ShadowConfig holds shadow training settings.
-
-```go
-type ShadowConfig struct {
-    Enabled   bool                  `json:"enabled"   toml:"enabled"`
-    DataDir   string                `json:"data_dir"  toml:"data_dir"`
-    Shadowing ShadowShadowingConfig `json:"shadowing" toml:"shadowing"`
-    Teacher   ShadowTeacherConfig   `json:"teacher"   toml:"teacher"`
-    Quality   ShadowQualityConfig   `json:"quality"   toml:"quality"`
-    Examples  ShadowExamplesConfig  `json:"examples"  toml:"examples"`
-    Export    ShadowExportConfig    `json:"export"    toml:"export"`
-    Adapters  ShadowAdaptersConfig  `json:"adapters"  toml:"adapters"`
-}
-```
-
-<a name="ShadowDPOConfig"></a>
-## type ShadowDPOConfig
-
-ShadowDPOConfig configures DPO training parameters.
-
-```go
-type ShadowDPOConfig struct {
-    Beta     float64 `json:"beta"      toml:"beta"`
-    LossType string  `json:"loss_type" toml:"loss_type"`
-}
-```
-
-<a name="ShadowExamplesConfig"></a>
-## type ShadowExamplesConfig
-
-ShadowExamplesConfig configures few\-shot example management.
-
-```go
-type ShadowExamplesConfig struct {
-    Enabled          bool    `json:"enabled"            toml:"enabled"`
-    MaxPerCategory   int     `json:"max_per_category"   toml:"max_per_category"`
-    MinQuality       float64 `json:"min_quality"        toml:"min_quality"`
-    DefaultCount     int     `json:"default_count"      toml:"default_count"`
-    MaxCount         int     `json:"max_count"          toml:"max_count"`
-    SimilarityWeight float64 `json:"similarity_weight"  toml:"similarity_weight"`
-    RecencyWeight    float64 `json:"recency_weight"     toml:"recency_weight"`
-    QualityWeight    float64 `json:"quality_weight"     toml:"quality_weight"`
-    MaxContextTokens int     `json:"max_context_tokens" toml:"max_context_tokens"`
-}
-```
-
-<a name="ShadowExportConfig"></a>
-## type ShadowExportConfig
-
-ShadowExportConfig configures training data export.
-
-```go
-type ShadowExportConfig struct {
-    OutputDir                string   `json:"output_dir"                 toml:"output_dir"`
-    Formats                  []string `json:"formats"                    toml:"formats"`
-    MinRecords               int      `json:"min_records"                toml:"min_records"`
-    IncludeLowQuality        bool     `json:"include_low_quality"        toml:"include_low_quality"`
-    Deduplicate              bool     `json:"deduplicate"                toml:"deduplicate"`
-    DedupSimilarityThreshold float64  `json:"dedup_similarity_threshold" toml:"dedup_similarity_threshold"`
-}
-```
-
-<a name="ShadowHeuristicWeightsConfig"></a>
-## type ShadowHeuristicWeightsConfig
-
-ShadowHeuristicWeightsConfig defines scoring dimension weights.
-
-```go
-type ShadowHeuristicWeightsConfig struct {
-    Relevance    float64 `json:"relevance"    toml:"relevance"`
-    Completeness float64 `json:"completeness" toml:"completeness"`
-    Correctness  float64 `json:"correctness"  toml:"correctness"`
-    Style        float64 `json:"style"        toml:"style"`
-}
-```
-
-<a name="ShadowLoRAConfig"></a>
-## type ShadowLoRAConfig
-
-ShadowLoRAConfig configures LoRA training parameters.
-
-```go
-type ShadowLoRAConfig struct {
-    Rank                 int      `json:"rank"                  toml:"rank"`
-    Alpha                int      `json:"alpha"                 toml:"alpha"`
-    Dropout              float64  `json:"dropout"               toml:"dropout"`
-    TargetModules        []string `json:"target_modules"        toml:"target_modules"`
-    LearningRate         float64  `json:"learning_rate"         toml:"learning_rate"`
-    Epochs               int      `json:"epochs"                toml:"epochs"`
-    BatchSize            int      `json:"batch_size"            toml:"batch_size"`
-    GradientAccumulation int      `json:"gradient_accumulation" toml:"gradient_accumulation"`
-    WarmupRatio          float64  `json:"warmup_ratio"          toml:"warmup_ratio"`
-    MaxGradNorm          float64  `json:"max_grad_norm"         toml:"max_grad_norm"`
-}
-```
-
-<a name="ShadowQualityConfig"></a>
-## type ShadowQualityConfig
-
-ShadowQualityConfig configures quality scoring.
-
-```go
-type ShadowQualityConfig struct {
-    Method               string                       `json:"method"                 toml:"method"`
-    HighQualityThreshold float64                      `json:"high_quality_threshold" toml:"high_quality_threshold"`
-    TrainableThreshold   float64                      `json:"trainable_threshold"    toml:"trainable_threshold"`
-    PreferenceMargin     float64                      `json:"preference_margin"      toml:"preference_margin"`
-    HeuristicWeights     ShadowHeuristicWeightsConfig `json:"heuristic_weights"      toml:"heuristic_weights"`
-    EvalPromptTemplate   string                       `json:"eval_prompt_template"   toml:"eval_prompt_template"`
-}
-```
-
-<a name="ShadowShadowingConfig"></a>
-## type ShadowShadowingConfig
-
-ShadowShadowingConfig controls when and how responses are shadowed.
-
-```go
-type ShadowShadowingConfig struct {
-    Mode          string   `json:"mode"           toml:"mode"`
-    MinComplexity string   `json:"min_complexity" toml:"min_complexity"`
-    Domains       []string `json:"domains"        toml:"domains"`
-    TaskTypes     []string `json:"task_types"     toml:"task_types"`
-    SampleRate    float64  `json:"sample_rate"    toml:"sample_rate"`
-    QueueSize     int      `json:"queue_size"     toml:"queue_size"`
-    WorkerCount   int      `json:"worker_count"   toml:"worker_count"`
-}
-```
-
-<a name="ShadowTeacherConfig"></a>
-## type ShadowTeacherConfig
-
-ShadowTeacherConfig configures the teacher model.
-
-```go
-type ShadowTeacherConfig struct {
-    Model             string  `json:"model"               toml:"model"`
-    FallbackModel     string  `json:"fallback_model"      toml:"fallback_model"`
-    Temperature       float64 `json:"temperature"         toml:"temperature"`
-    MaxTokens         int     `json:"max_tokens"          toml:"max_tokens"`
-    TimeoutSeconds    int     `json:"timeout_seconds"     toml:"timeout_seconds"`
-    MaxDailyQueries   int     `json:"max_daily_queries"   toml:"max_daily_queries"`
-    MaxDailyCost      float64 `json:"max_daily_cost"      toml:"max_daily_cost"`
-    RequestsPerMinute int     `json:"requests_per_minute" toml:"requests_per_minute"`
-}
-```
-
-<a name="SkillsConfig"></a>
-## type SkillsConfig
-
-SkillsConfig holds skills settings.
-
-```go
-type SkillsConfig struct {
-    Enabled     bool     `json:"enabled"           toml:"enabled"`
-    SearchPaths []string `json:"search_paths"      toml:"search_paths"`      // Additional skill directories beyond defaults
-    AutoReload  bool     `json:"auto_reload"       toml:"auto_reload"`       // Watch for skill file changes
-    CacheSize   int      `json:"max_cached_skills" toml:"max_cached_skills"` // Max skills to cache in lazy loader (default: 50)
-}
-```
-
-<a name="SyncConfig"></a>
-## type SyncConfig
-
-SyncConfig holds sync timing and behavior settings.
-
-```go
-type SyncConfig struct {
-    // HydrateOnClaim fetches relevant memories when a job is claimed
-    HydrateOnClaim bool `json:"hydrate_on_claim" toml:"hydrate_on_claim"`
-    // HydrationLimit is max memories to fetch during hydration
-    HydrationLimit int `json:"hydration_limit" toml:"hydration_limit"`
-    // DistillOnComplete promotes memories when a job completes
-    DistillOnComplete bool `json:"distill_on_complete" toml:"distill_on_complete"`
-    // PeriodicDistillIntervalMinutes runs distillation on a timer (0 = disabled)
-    PeriodicDistillIntervalMinutes int `json:"periodic_distill_interval_minutes" toml:"periodic_distill_interval_minutes"`
-    // RetryOnFailure queues failed sync operations for retry
-    RetryOnFailure bool `json:"retry_on_failure" toml:"retry_on_failure"`
-    // MaxRetries is the max retry attempts for failed operations
-    MaxRetries int `json:"max_retries" toml:"max_retries"`
-}
-```
-
-<a name="TaskMemoryConfig"></a>
-## type TaskMemoryConfig
-
-TaskMemoryConfig holds task memory settings.
-
-```go
-type TaskMemoryConfig struct {
-    Enabled bool     `json:"enabled" toml:"enabled"`
-    Domains []string `json:"domains" toml:"domains"`
-}
-```
-
-<a name="TelegramConfig"></a>
-## type TelegramConfig
-
-TelegramConfig holds Telegram bot settings.
-
-```go
-type TelegramConfig struct {
-    Enabled      bool    `json:"enabled"       toml:"enabled"`
-    Token        string  `json:"token"         toml:"token"`
-    CreatorID    int64   `json:"creator_id"    toml:"creator_id"`
-    AllowedUsers []int64 `json:"allowed_users" toml:"allowed_users"` // Telegram user IDs allowed to interact (empty = all)
-    AllowedChats []int64 `json:"allowed_chats" toml:"allowed_chats"` // Telegram chat IDs allowed (empty = all)
-    PollTimeout  int     `json:"poll_timeout"  toml:"poll_timeout"`  // Long polling timeout in seconds
-}
-```
-
-<a name="ToolingConfig"></a>
-## type ToolingConfig
-
-ToolingConfig holds tool call serialization sidecar settings. Used for delegating tool call JSON encoding/decoding to a dedicated agent or service.
-
-```go
-type ToolingConfig struct {
-    // Enabled turns on the tooling sidecar (default: false)
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // Mode is "service" (in-process) or "agent" (sidecar agent)
-    Mode string `json:"mode" toml:"mode"`
-    // AgentID is the agent ID to use when mode is "agent"
-    AgentID string `json:"agent_id" toml:"agent_id"`
-    // Model is the model override for the tooling agent (empty = default)
-    Model string `json:"model" toml:"model"`
-    // CacheEnabled enables caching of serialized tool calls
-    CacheEnabled bool `json:"cache_enabled" toml:"cache_enabled"`
-    // CacheMaxSize is the maximum number of cached serializations
-    CacheMaxSize int `json:"cache_max_size" toml:"cache_max_size"`
-    // CacheTTLMinutes is how long cached results remain valid
-    CacheTTLMinutes int `json:"cache_ttl_minutes" toml:"cache_ttl_minutes"`
-    // IncludeSchema includes JSON schema in tool call metadata
-    IncludeSchema bool `json:"include_schema" toml:"include_schema"`
-    // ValidateOnSerialize validates tool calls against schema before serialization
-    ValidateOnSerialize bool `json:"validate_on_serialize" toml:"validate_on_serialize"`
-    // LogUnknownTools logs warnings for unrecognized tool types
-    LogUnknownTools bool `json:"log_unknown_tools" toml:"log_unknown_tools"`
-}
-```
-
-<a name="TransportConfig"></a>
-## type TransportConfig
-
-TransportConfig controls which transports the daemon exposes. Clients can connect via either transport based on preference/availability.
-
-```go
-type TransportConfig struct {
-    RPC  RPCTransportConfig  `json:"rpc"  toml:"rpc"`
-    HTTP HTTPTransportConfig `json:"http" toml:"http"`
-}
-```
-
-<a name="ValidationConfig"></a>
-## type ValidationConfig
-
-ValidationConfig holds task completion validation settings.
-
-```go
-type ValidationConfig struct {
-    // Enabled turns on task completion validation
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // RequireValidation lists tool hints that require validation
-    RequireValidation []string `json:"require_validation" toml:"require_validation"`
-    // SkipValidation lists tool hints that skip validation
-    SkipValidation []string `json:"skip_validation" toml:"skip_validation"`
-    // SkipValidationAgents lists agents that skip validation
-    SkipValidationAgents []string `json:"skip_validation_agents" toml:"skip_validation_agents"`
-    // MaxValidationLoops is the maximum validation loops before escalation
-    MaxValidationLoops int `json:"max_validation_loops" toml:"max_validation_loops"`
-}
-```
-
-<a name="WatchdogConfig"></a>
-## type WatchdogConfig
-
-WatchdogConfig holds agent monitoring and timeout settings.
-
-```go
-type WatchdogConfig struct {
-    // Enabled turns on watchdog monitoring
-    Enabled bool `json:"enabled" toml:"enabled"`
-    // TimeoutMinutes is the timeout in minutes before aborting (default: 10)
-    TimeoutMinutes int `json:"timeout_minutes" toml:"timeout_minutes"`
-    // HeartbeatIntervalSec is the heartbeat interval in seconds (default: 30)
-    HeartbeatIntervalSec int `json:"heartbeat_interval_sec" toml:"heartbeat_interval_sec"`
-    // MaxIterations is the maximum iterations before aborting (default: 50)
-    MaxIterations int `json:"max_iterations" toml:"max_iterations"`
-    // StuckIterationCount is iterations without progress before flagged as stuck (default: 5)
-    StuckIterationCount int `json:"stuck_iteration_count" toml:"stuck_iteration_count"`
-}
-```
-
-<a name="WebConfig"></a>
-## type WebConfig
-
-WebConfig holds web API settings.
-
-```go
-type WebConfig struct {
-    Enabled   bool   `json:"enabled"    toml:"enabled"`
-    Host      string `json:"host"       toml:"host"`
-    Port      int    `json:"port"       toml:"port"`
-    SecretKey string `json:"secret_key" toml:"secret_key"`
-}
-```
-
-<a name="WhisperConfig"></a>
-## type WhisperConfig
-
-WhisperConfig holds whisper.cpp engine settings.
-
-```go
-type WhisperConfig struct {
-    BinPath   string `json:"bin_path"   toml:"bin_path"`
-    ModelPath string `json:"model_path" toml:"model_path"`
-    Threads   int    `json:"threads"    toml:"threads"`
-}
-```
-
-<a name="WorkersConfig"></a>
-## type WorkersConfig
-
-WorkersConfig holds worker pool settings.
-
-```go
-type WorkersConfig struct {
-    PoolSize           int      `json:"pool_size"            toml:"pool_size"`
-    IdleTimeoutSeconds int      `json:"idle_timeout_seconds" toml:"idle_timeout_seconds"`
-    DefaultCaps        []string `json:"default_caps"         toml:"default_caps"`
-}
-```
-
-<a name="WorkspaceConfig"></a>
-## type WorkspaceConfig
-
-WorkspaceConfig holds workspace settings.
-
-```go
-type WorkspaceConfig struct {
-    Enabled          bool   `json:"enabled"           toml:"enabled"`
-    BaseDir          string `json:"base_dir"          toml:"base_dir"`
-    AutoCommit       bool   `json:"auto_commit"       toml:"auto_commit"`
-    CommitOnPlan     bool   `json:"commit_on_plan"    toml:"commit_on_plan"`
-    CommitOnStep     bool   `json:"commit_on_step"    toml:"commit_on_step"`
-    CleanupCompleted bool   `json:"cleanup_completed" toml:"cleanup_completed"`
-}
-```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)
 
