@@ -33,7 +33,7 @@ chmod +x .githooks/*
 
 ### pre-commit (Main Hook)
 
-Entry point that runs all checks sequentially (11 total):
+Entry point that runs all checks sequentially (17 total):
 
 | # | Hook | Purpose |
 |---|------|---------|
@@ -48,6 +48,7 @@ Entry point that runs all checks sequentially (11 total):
 | 9 | pre-commit-sqlite-pragmas | SQLite WAL + busy_timeout required |
 | 10 | pre-commit-channel-nilafterclose | Use sync.Once (not close+nil) |
 | 11 | pre-commit-feature-docs | Documentation updates |
+| 17 | pre-commit-dart-format | Staged Dart files are dart-format clean |
 
 ---
 
@@ -320,6 +321,23 @@ export AIDER_MODEL=glm-5.2
 | `internal/selfimprove/` | `docs/workflows/self-improvement.md` |
 | `internal/project/` | `docs/workflows/project-context.md` |
 | `internal/daemon/` | `docs/concepts/architecture.md` |
+
+---
+
+### pre-commit-dart-format
+
+Blocks commits that stage unformatted Dart files under `ui/flutter_ui/`.
+
+**Triggers on:** Staged `ui/flutter_ui/**/*.dart` files (added, copied, modified, renamed)
+
+**Checks:**
+- Runs `dart format --output=none --set-exit-if-changed` on the staged Dart files only; files outside `ui/flutter_ui/` are ignored
+- Lists every file that needs formatting and points at `make fmt-gui`
+- Skips cleanly (exit 0, explicit message) when nothing Dart is staged or when dart is not installed
+
+**Requires:** dart (on PATH, or the dart bundled with the Flutter SDK)
+
+**See:** `make fmt-check-gui`, `make fmt-gui`, docs/workflows/flutter_gui.md
 
 ---
 

@@ -1,0 +1,107 @@
+#!/opt/homebrew/bin/bash
+# pre-commit-dart-format — block commits that stage unformatted Dart files.
+#
+# The Flutter tree (ui/flutter_ui) is kept dart-format clean. `make lint-ci`
+# enforces this repo-wide via the fmt-check-gui target; this hook enforces it
+# on STAGED files only, so a commit cannot introduce unformatted Dart while an
+# unrelated unformatted file elsewhere in the tree does not block you.
+#
+# What is checked: files staged for this commit matching
+# ui/flutter_ui/**/*.dart (added, copied, modified, renamed).
+#
+# Skips cleanly (exit 0, explicit message) when either:
+#   - no Dart file under ui/flutter_ui is staged, or
+#   - dart cannot be found (no dart on PATH, no Flutter SDK bundled dart).
+#
+# Usage:
+#   .githooks/pre-commit-dart-format            # staged files (hook mode)
+#   .githooks/pre-commit-dart-format <file...>  # check specific files
+#
+# Install: called from .githooks/pre-commit (step 17). Requires bash >= 4
+# (/opt/homebrew/bin/bash, same as the other sub-hooks).
+
+set -e
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+DART_ROOT="ui/flutter_ui"
+
+# Resolve the dart binary: PATH first, then the dart bundled with Flutter
+# (flutter/bin/cache/dart-sdk/bin/dart). Mirrors the Makefile DART variable.
+DART_BIN=""
+if command -v dart >/dev/null 2>&1; then
+  DART_BIN="$(command -v dart)"
+fi
+if [ -z "$DART_BIN" ] && command -v flutter >/dev/null 2>&1; then
+  FLUTTER_BIN="$(command -v flutter)"
+  RP="$(readlink -f "$FLUTTER_BIN" 2>/dev/null || echo "$FLUTTER_BIN")"
+  FLUTTER_ROOT="$(cd "$(dirname "$RP")/.." 2>/dev/null && pwd || true)"
+  CAND="$FLUTTER_ROOT/bin/cache/dart-sdk/bin/dart"
+  [ -x "$CAND" ] && DART_BIN="$CAND"
+fi
+
+# Collect candidate files: explicit args win, otherwise staged Dart files.
+if [ "$#" -gt 0 ]; then
+  MODE="explicit"
+  FILES=$(printf '%s\n' "$@")
+else
+  MODE="staged"
+  FILES=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null \
+            | grep -E "^${DART_ROOT}/.*\.dart$" || true)
+fi
+
+# Drop blank lines and paths that no longer exist on disk.
+FILE_ARR=()
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  [ -f "$f" ] || continue
+  FILE_ARR+=("$f")
+done <<< "$FILES"
+
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}  Dart formatting check (${DART_ROOT})${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+if [ "${#FILE_ARR[@]}" -eq 0 ]; then
+  if [ "$MODE" = "staged" ]; then
+    echo -e "${GREEN}PASS: no staged Dart files under ${DART_ROOT} — nothing to check.${NC}"
+  else
+    echo -e "${GREEN}PASS: no existing Dart files given to check.${NC}"
+  fi
+  exit 0
+fi
+
+if [ -z "$DART_BIN" ]; then
+  echo -e "${YELLOW}SKIP: dart not found (nothing on PATH, no Flutter SDK dart).${NC}"
+  echo -e "${YELLOW}Install Flutter or add dart to PATH to enable this check.${NC}"
+  exit 0
+fi
+
+echo "Checking ${#FILE_ARR[@]} file(s):"
+for f in "${FILE_ARR[@]}"; do
+  echo "  $f"
+done
+echo ""
+
+# Capture the formatter output; it lists each file that would change.
+set +e
+OUT="$("$DART_BIN" format --output=none --set-exit-if-changed "${FILE_ARR[@]}" 2>&1)"
+STATUS=$?
+set -e
+
+if [ "$STATUS" -ne 0 ]; then
+  echo -e "${RED}FAIL: Dart file(s) are not formatted:${NC}"
+  echo "$OUT" | sed 's/^/  /'
+  echo ""
+  echo -e "${YELLOW}Run 'make fmt-gui' (or: dart format ${DART_ROOT}), then re-stage and commit.${NC}"
+  echo -e "${YELLOW}To fix only the files above: dart format ${FILE_ARR[*]}${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}PASS: all ${#FILE_ARR[@]} Dart file(s) checked are formatted.${NC}"
+exit 0

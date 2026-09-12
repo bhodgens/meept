@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -53,6 +53,8 @@ help:
 	@echo "  gui-web-run      Run Flutter web dev server with hot reload (Chrome)"
 	@echo "  webui            Alias for gui-web-run - run Flutter web dev server (Chrome)"
 	@echo "  gui-dev-server   Run Flutter web dev server (web-server backend)"
+	@echo "  fmt-gui          Format the Flutter/Dart tree (dart format)"
+	@echo "  fmt-check-gui    Verify the Flutter/Dart tree is formatted (CI + pre-commit)"
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 	@echo ""
@@ -464,14 +466,50 @@ gosec:
 # lint-ci runs all checks expected to pass in CI. Use this as the canonical
 # "is this branch shippable?" target. Includes project-specific analyzers
 # (mutexio for I/O-under-mutex, predid for predictable IDs) plus the audit
-# scripts that catch UTF-8 corruption bugs and Dart enum-shadowing.
-lint-ci: lint analyzers audit-scripts
+# scripts that catch UTF-8 corruption bugs and Dart enum-shadowing, and
+# fmt-check-gui for Dart formatting in the Flutter tree.
+lint-ci: lint analyzers audit-scripts fmt-check-gui
 	@echo "All CI lint checks passed."
 
 fmt:
 	@echo "Formatting code..."
 	go fmt ./...
 	@echo "Done"
+
+# Dart binary for the Flutter formatting targets. Overridable:
+#   make fmt-check-gui DART=/path/to/dart
+# Resolution order: `dart` on PATH, then the dart bundled with the Flutter
+# SDK (flutter/bin/cache/dart-sdk/bin/dart). Empty when neither is found;
+# fmt-check-gui treats that as a hard error, never a silent pass.
+DART ?= $(shell command -v dart 2>/dev/null || { \
+	fb=$$(command -v flutter 2>/dev/null); \
+	[ -n "$$fb" ] || exit 0; \
+	rp=$$(readlink -f "$$fb" 2>/dev/null || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$$fb" 2>/dev/null || echo "$$fb"); \
+	root=$$(cd "$$(dirname "$$rp")/.." 2>/dev/null && pwd); \
+	cand="$$root/bin/cache/dart-sdk/bin/dart"; \
+	[ -x "$$cand" ] && echo "$$cand"; \
+	true; })
+
+# fmt-gui formats the Flutter (Dart) tree in place. Run it before staging
+# Dart changes; see docs/workflows/flutter_gui.md.
+fmt-gui:
+	@test -n "$(DART)" || { echo "Error: dart not found. Install Flutter or add dart to PATH, then retry."; exit 1; }
+	@echo "Formatting Flutter tree ($(FLUTTER_UI_DIR)) with $(DART)..."
+	@$(DART) format $(FLUTTER_UI_DIR)
+	@echo "Done. dart format applied to $(FLUTTER_UI_DIR); stage the result and re-commit."
+
+# fmt-check-gui is the check-only variant used by `make lint-ci` and the
+# pre-commit hook. Exits non-zero when any Dart file needs formatting.
+fmt-check-gui:
+	@test -n "$(DART)" || { echo "Error: dart not found. Install Flutter or add dart to PATH, then run 'make fmt-gui'."; exit 1; }
+	@echo "Checking Dart formatting in $(FLUTTER_UI_DIR)..."
+	@$(DART) format --output=none --set-exit-if-changed $(FLUTTER_UI_DIR) || { \
+		echo ""; \
+		echo "FAIL: Dart files in $(FLUTTER_UI_DIR) are not formatted."; \
+		echo "Run 'make fmt-gui' to format them, then stage the changes."; \
+		exit 1; \
+	}
+	@echo "Dart formatting clean."
 
 vet:
 	@echo "Running go vet..."

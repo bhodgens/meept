@@ -177,6 +177,35 @@ The layout switch takes effect immediately without restarting the app (the route
 - `ui/flutter_ui/lib/core/router.dart` — `_LayoutShell` selects layout based on config
 - `ui/flutter_ui/lib/providers/preferences_provider.dart` — `GuiLayoutNotifier` for config management
 
+## Formatting
+
+Dart code under `ui/flutter_ui/` is formatted with `dart format` and kept that
+way. Two make targets cover it:
+
+| command | what it does |
+|---------|--------------|
+| `make fmt-gui` | formats the tree in place (`dart format ui/flutter_ui`) |
+| `make fmt-check-gui` | check only; exits non-zero when any Dart file needs formatting |
+
+`make fmt-check-gui` is part of `make lint-ci`, so the CI-shaped gate fails on
+unformatted Dart. It also runs at commit time: the pre-commit hook
+`.githooks/pre-commit-dart-format` (step 17 of `.githooks/pre-commit`) checks
+only the Dart files staged in the commit and blocks the commit when one is
+unformatted, so an unrelated unformatted file elsewhere does not stop you.
+
+Both targets resolve the dart binary the same way: `dart` on PATH first, then
+the dart bundled with the Flutter SDK
+(`flutter/bin/cache/dart-sdk/bin/dart`). Override with `DART=/path/to/dart` on
+the make command line. When no dart is found the check fails with a clear error
+instead of passing silently.
+
+Run `make fmt-gui` before staging Dart changes.
+
+The tree is briefly red while this is adopted: a one-time reformat of the
+existing unformatted files is being applied in a separate change, so until it
+lands `make fmt-check-gui` and `make lint-ci` fail on those files. After it
+lands the tree is clean and both gates stay green.
+
 ## Edge cases
 
 - **Grey transcript on session swap:** `ChatMessageList` previously showed "no messages yet" during the brief window between selecting a new session and the messages RPC resolving. The empty-state now checks `chatState.isLoading` before rendering the placeholder, so a loading session never shows a stale empty message.
