@@ -415,6 +415,49 @@ interview: the one-shot `task.interview` path stays only for the legacy
 pipeline. `plan.seal` and `plan.draft` are RPC-only, never a bus topic.
 See docs/workflows/agent-orchestration.md ("Plan compiler pipeline").
 
+### Local runtime lifecycle: spawn guards and orphan reaping
+
+Local LLM runtimes (`internal/llm`) are long-lived children of the daemon. Each
+rule below was added after a real leak; changing any of them requires a
+replacement mechanism, not just a deletion:
+
+- **No spawn into a served endpoint.** `RuntimeProcess.Start` probes the
+  endpoint address when `spawn_command` declares that port and refuses when
+  something already listens there. Keep the refusal: `mlx_lm server` does not
+  exit after a failed bind — it stays alive with the model loaded and no socket
+  while the foreign listener answers its `/health`, so the spawn "succeeds" as a
+  healthy-looking runtime that serves nothing. The check applies only to a spawn
+  command that declares the port, so wrappers and test harnesses are unaffected.
+- **Health requires a live process, and the run outlives its caller.**
+  `HealthChecker.SetProcessAliveProbe` binds each endpoint's checker to its own
+  `RuntimeProcess`; a dead child is unhealthy whatever the endpoint returns. The
+  check run detaches from the caller's context and re-arms whenever no run is
+  active: every caller passes a short-lived context (the daemon cancels its boot
+  context when `StartAll` returns), so binding the run to it silently ended
+  health monitoring seconds after boot.
+- **Ownership forbids killing; the sweep permits it.**
+  `RuntimeProcess.Stop` never stops a runtime whose PID file carries another
+  instance's token (adopted observed-not-owned — that guard is what keeps a CLI
+  or eval process from killing the daemon's server) and returns
+  `ErrRuntimeNotOwned`, so no surface reports a stop that did not happen.
+  `StopAsOperator` is the explicit operator override used by
+  `meept runtime stop`, and it verifies the pid's identity before signalling.
+  The startup sweep (`RuntimeManager.SweepOrphanRuntimes`, driven by
+  `Daemon.StartupOrphanSweep`) is the only path that reaps a leftover, and only
+  when all hold: `ppid == 1` (spawner gone), the command line matches the
+  endpoint's `spawn_command` or its durable spawn record, the endpoint is
+  sweepable under `auto_stop_on_exit` (absent means true), and no live recorded
+  owner vetoes it. Every pid is re-validated against the process table
+  immediately before it is signalled. Do not widen the sweep to untagged or
+  unrelated processes.
+- **Sweep before spawn.** `StartupOrphanSweep` runs after components exist and
+  before `ContainerManager.StartAll`. Moving it later makes the duplicate-spawn
+  guard refuse the spawn of the endpoint the sweep has not freed yet.
+
+macOS has no parent-death signal, so a runtime cannot be made to die with the
+daemon. The boot sweep plus the spawn guard is the whole defense. Windows has no
+`ps`, so it gets no sweep (documented gap).
+
 ## Coding Practices
 
 ### Predictable ID Prevention
