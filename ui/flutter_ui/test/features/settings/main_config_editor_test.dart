@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:meept_ui/features/settings/main_config_editor.dart';
 import 'package:meept_ui/features/settings/settings_panel.dart';
 import 'package:meept_ui/providers/providers.dart';
@@ -107,6 +109,55 @@ Future<void> _openMainEditor(WidgetTester tester) async {
     await tester.pumpAndSettle();
   }
 }
+
+/// Scrolls the panel's lazy ListView until [finder] is built.
+Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
+  for (var i = 0; i < 8 && !tester.any(finder); i++) {
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+  }
+}
+
+/// The settings panel on the real route shape: `/settings` renders the panel
+/// and `/` is the chat home, so the shared back control's exit is observable
+/// the way a user sees it.
+GoRouter _settingsRouter() => GoRouter(
+  initialLocation: '/settings',
+  routes: [
+    GoRoute(
+      path: '/',
+      builder: (_, __) => const Scaffold(body: Text('chat home marker')),
+    ),
+    GoRoute(
+      path: '/settings',
+      builder: (_, __) => const Scaffold(
+        body: SizedBox(width: 1100, child: SettingsPanel()),
+      ),
+    ),
+  ],
+);
+
+/// Pumps the panel on the router, so the shell's back control / esc have
+/// somewhere to exit to.
+Future<void> _pumpPanelOnRouter(
+  WidgetTester tester,
+  _StubMainConfigClient client,
+) async {
+  tester.view.physicalSize = const Size(1200, 1600);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [sdkClientProvider.overrideWithValue(client)],
+      child: MaterialApp.router(routerConfig: _settingsRouter()),
+    ),
+  );
+  await tester.pumpAndSettle();
+  expect(find.text('chat home marker'), findsNothing);
+}
+
+/// The shared back control from ToolPanelShell.
+Finder _backControl() => find.byTooltip('back (esc)');
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -399,5 +450,147 @@ void main() {
 
     expect(find.byType(AlertDialog), findsNothing);
     expect(find.text('// client.json5'), findsOneWidget);
+  });
+
+  // The panel hands the shell an exit guard, so the shared back control and
+  // esc cannot drop unsaved config edits the way they used to (the chip guard
+  // only covered chip switches).
+  group('exit guard for the shared back control', () {
+    testWidgets('back with nothing unsaved exits without a warning', (
+      tester,
+    ) async {
+      final client = _StubMainConfigClient(_file());
+      await _pumpPanelOnRouter(tester, client);
+
+      await tester.tap(_backControl());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('chat home marker'), findsOneWidget);
+    });
+
+    testWidgets('back with unsaved meept.json5 edits warns, and cancel '
+        'keeps the edits and the panel', (tester) async {
+      final client = _StubMainConfigClient(_file());
+      await _pumpPanelOnRouter(tester, client);
+      await _openMainEditor(tester);
+
+      await tester.enterText(
+        find.byKey(mainConfigTextKey),
+        '{"edited": true}',
+      );
+      await tester.pump();
+      expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
+
+      await tester.tap(_backControl());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.textContaining('unsaved changes in meept.json5'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+
+      // Nothing was torn down: the panel, the editor and the edits are all
+      // still there, and we never left the settings route.
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('chat home marker'), findsNothing);
+      expect(find.byType(MainConfigEditor), findsOneWidget);
+      expect(
+        find.widgetWithText(TextField, '{"edited": true}'),
+        findsOneWidget,
+      );
+      expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
+    });
+
+    testWidgets('esc with unsaved meept.json5 edits warns, and cancel keeps '
+        'the panel', (tester) async {
+      final client = _StubMainConfigClient(_file());
+      await _pumpPanelOnRouter(tester, client);
+      await _openMainEditor(tester);
+
+      await tester.enterText(
+        find.byKey(mainConfigTextKey),
+        '{"edited": true}',
+      );
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.textContaining('unsaved changes in meept.json5'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('chat home marker'), findsNothing);
+      expect(
+        find.widgetWithText(TextField, '{"edited": true}'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('choosing to discard on exit leaves the panel', (
+      tester,
+    ) async {
+      final client = _StubMainConfigClient(_file());
+      await _pumpPanelOnRouter(tester, client);
+      await _openMainEditor(tester);
+
+      await tester.enterText(
+        find.byKey(mainConfigTextKey),
+        '{"edited": true}',
+      );
+      await tester.pump();
+
+      await tester.tap(_backControl());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('discard and exit'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('chat home marker'), findsOneWidget);
+      expect(find.byType(SettingsPanel), findsNothing);
+    });
+
+    testWidgets('unsaved edits in the generic config editor also guard the '
+        'exit', (tester) async {
+      // The settings panel's _hasChanges tracks client/models/menubar; those
+      // edits are as losable on exit as meept.json5 ones, so one predicate
+      // guards both.
+      final client = _StubMainConfigClient(_file());
+      await _pumpPanelOnRouter(tester, client);
+      await _scrollTo(tester, find.byKey(settingsConfigTextKey));
+      expect(find.byKey(settingsConfigTextKey), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(settingsConfigTextKey),
+        '{"client": "edited"}',
+      );
+      await tester.pump();
+
+      await tester.tap(_backControl());
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('unsaved changes in client.json5'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('chat home marker'), findsNothing);
+      expect(
+        find.widgetWithText(TextField, '{"client": "edited"}'),
+        findsOneWidget,
+      );
+    });
   });
 }

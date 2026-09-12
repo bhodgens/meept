@@ -5,6 +5,7 @@ import '../../providers/providers.dart';
 import '../../services/sdk_client.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import 'discard_edits_dialog.dart';
 
 // Widget keys, exposed so tests can target each control without leaning on
 // button-order or color. The settings-panel tests import these.
@@ -178,32 +179,16 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
 
   Future<void> _reload() async {
     if (_isDirty) {
-      final proceed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: CyberpunkColors.darkGray,
-          title: const Text(
-            'discard unsaved edits?',
-            style: CyberpunkTypography.bodyMedium,
-          ),
-          content: const Text(
+      // One shared dialog with the panel's chip switch and its exit guard;
+      // only the message and the confirm label differ per action.
+      final proceed = await showDiscardEditsDialog(
+        context,
+        message:
             'reloading fetches meept.json5 from the daemon again and '
             'discards the edits you have not saved.',
-            style: CyberpunkTypography.bodySmall,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('discard and reload'),
-            ),
-          ],
-        ),
+        confirmLabel: 'discard and reload',
       );
-      if (proceed != true) return;
+      if (!proceed) return;
     }
     await _load();
   }

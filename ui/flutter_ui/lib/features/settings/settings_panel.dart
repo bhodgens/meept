@@ -13,9 +13,15 @@ import 'settings_inputs.dart';
 import 'orchestrator_config_editor.dart';
 import 'client_prefs_editor.dart';
 import 'main_config_editor.dart';
+import 'discard_edits_dialog.dart';
 import 'users_panel.dart';
 import '../../widgets/error_banner.dart';
 import '../../widgets/tool_panel_shell.dart';
+
+/// Widget key for the generic (client/models/menubar) config text field,
+/// exposed so tests can target it without leaning on hint text or widget
+/// order. Mirrors main_config_editor.dart's key constants.
+const Key settingsConfigTextKey = ValueKey('settings-config-text');
 
 /// Form field names used throughout the settings panel.
 class SettingsFields {
@@ -308,6 +314,10 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       child: ToolPanelShell(
         title: 'settings',
         icon: Icons.settings,
+        // The shared back control and esc both ask this before leaving, so
+        // unsaved meept.json5 (or client/models/menubar) edits are never
+        // dropped silently.
+        exitGuard: _guardExit,
         actions: [
           if (_isSaving)
             SizedBox(
@@ -365,15 +375,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
               ),
               onSelected: (selected) {
                 if (selected && _selectedConfig != entry.key) {
-                  // Either editor can hold unsaved edits: the generic one
-                  // through _hasChanges, meept.json5 through the child
-                  // editor's reported state. Warn before dropping either.
-                  if (_hasChanges || _mainConfigDirty) {
-                    _showDiscardDialog(entry.key);
-                  } else {
-                    setState(() => _selectedConfig = entry.key);
-                    _loadConfig();
-                  }
+                  _switchConfig(entry.key);
                 }
               },
             ),
@@ -439,41 +441,56 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     setState(() => _mainConfigDirty = dirty);
   }
 
-  void _showDiscardDialog(String newConfig) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: CyberpunkColors.darkGray,
-        title: const Text(
-          'discard changes?',
-          style: CyberpunkTypography.bodyMedium,
-        ),
-        content: Text(
-          'you have unsaved changes in ${_configLabels[_selectedConfig]}. discard?',
-          style: CyberpunkTypography.bodySmall,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // Reset both dirty sources: the discarded edits are gone, and
-              // the editor that held them is either switched away from (and
-              // disposed) or reloaded from the daemon.
-              setState(() {
-                _selectedConfig = newConfig;
-                _hasChanges = false;
-                _mainConfigDirty = false;
-              });
-              _loadConfig();
-            },
-            child: const Text('discard'),
-          ),
-        ],
-      ),
+  /// True while the panel holds config text that would be lost by switching
+  /// the visible file or by leaving the panel.
+  ///
+  /// Either editor can hold unsaved edits: the generic one through
+  /// [_hasChanges], meept.json5 through the child editor's reported state.
+  /// One predicate covers both so the chip switch and the exit guard cannot
+  /// drift apart.
+  bool get _hasUnsavedConfigEdits => _hasChanges || _mainConfigDirty;
+
+  /// Switch the visible config file, warning first when either editor holds
+  /// unsaved edits.
+  Future<void> _switchConfig(String newConfig) async {
+    if (_hasUnsavedConfigEdits) {
+      final discard = await showDiscardEditsDialog(
+        context,
+        message:
+            'you have unsaved changes in ${_configLabels[_selectedConfig]}. '
+            'discard?',
+      );
+      // Cancel (or any other dismissal) keeps the current file and its
+      // edits exactly as they are.
+      if (!discard || !mounted) return;
+      // Reset both dirty sources: the discarded edits are gone, and the
+      // editor that held them is about to be switched away from.
+      setState(() {
+        _selectedConfig = newConfig;
+        _hasChanges = false;
+        _mainConfigDirty = false;
+      });
+      await _loadConfig();
+      return;
+    }
+    setState(() => _selectedConfig = newConfig);
+    await _loadConfig();
+  }
+
+  /// Exit guard handed to [ToolPanelShell], which asks it before the shared
+  /// back control or esc leaves the panel.
+  ///
+  /// Nothing pending exits immediately - one future tick, no dialog. With
+  /// unsaved edits the user must confirm the loss; cancelling returns false,
+  /// so the shell leaves the panel (and the editor state behind it) mounted.
+  Future<bool> _guardExit() async {
+    if (!_hasUnsavedConfigEdits) return true;
+    return showDiscardEditsDialog(
+      context,
+      message:
+          'you have unsaved changes in ${_configLabels[_selectedConfig]}. '
+          'leaving the panel discards them.',
+      confirmLabel: 'discard and exit',
     );
   }
 
@@ -522,6 +539,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                 border: Border.all(color: CyberpunkColors.midGray),
               ),
               child: TextField(
+                key: settingsConfigTextKey,
                 style: CyberpunkTypography.bodySmall.copyWith(
                   fontFamily: 'SourceCodePro',
                   height: 1.4,

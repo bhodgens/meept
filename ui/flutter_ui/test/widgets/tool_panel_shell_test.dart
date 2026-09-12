@@ -6,6 +6,12 @@
 // key events reach the primary focus first, so an inner handler (the find
 // bar's FocusNode, a modal's own focus scope) wins and the shell must not
 // fire its own exit.
+//
+// Also pins the exit-guard contract: a panel can veto both affordances
+// (the settings panel uses it to protect unsaved config edits), and a
+// refusal leaves the panel and its state mounted.
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -128,6 +134,149 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(find.text('chat home marker'), findsOneWidget);
+  });
+
+  group('exit guard', () {
+    // A guard is the panel's veto over both exit affordances. It exists
+    // because a PopScope cannot intercept a go_router exit: the full-screen
+    // path pops with NavigatorState.pop (not maybePop) and the embedded path
+    // replaces the route with `go`.
+
+    testWidgets('back asks the guard, and a refusal keeps the panel open', (
+      tester,
+    ) async {
+      var asked = 0;
+      await _pumpPanel(
+        tester,
+        ToolPanelShell(
+          title: 'probe',
+          exitGuard: () async {
+            asked++;
+            return false;
+          },
+          child: const SizedBox(),
+        ),
+      );
+
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pumpAndSettle();
+
+      expect(asked, 1);
+      expect(find.text('chat home marker'), findsNothing);
+      expect(find.text('probe'), findsOneWidget);
+    });
+
+    testWidgets('esc asks the guard, and a refusal keeps the panel open', (
+      tester,
+    ) async {
+      var asked = 0;
+      await _pumpPanel(
+        tester,
+        ToolPanelShell(
+          title: 'probe',
+          exitGuard: () async {
+            asked++;
+            return false;
+          },
+          child: const SizedBox(),
+        ),
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      // The key event is still consumed (no fall-through to another esc
+      // consumer), but the panel stays.
+      expect(asked, 1);
+      expect(find.text('chat home marker'), findsNothing);
+      expect(find.text('probe'), findsOneWidget);
+    });
+
+    testWidgets('back exits when the guard allows it', (tester) async {
+      var asked = 0;
+      await _pumpPanel(
+        tester,
+        ToolPanelShell(
+          title: 'probe',
+          exitGuard: () async {
+            asked++;
+            return true;
+          },
+          child: const SizedBox(),
+        ),
+      );
+
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pumpAndSettle();
+
+      expect(asked, 1);
+      expect(find.text('chat home marker'), findsOneWidget);
+    });
+
+    testWidgets('esc exits when the guard allows it', (tester) async {
+      var asked = 0;
+      await _pumpPanel(
+        tester,
+        ToolPanelShell(
+          title: 'probe',
+          exitGuard: () async {
+            asked++;
+            return true;
+          },
+          child: const SizedBox(),
+        ),
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      expect(asked, 1);
+      expect(find.text('chat home marker'), findsOneWidget);
+    });
+
+    testWidgets('no guard exits both ways, exactly as before', (tester) async {
+      await _pumpPanel(
+        tester,
+        const ToolPanelShell(title: 'probe', child: SizedBox()),
+      );
+
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pumpAndSettle();
+      expect(find.text('chat home marker'), findsOneWidget);
+
+      await _pumpPanel(
+        tester,
+        const ToolPanelShell(title: 'probe', child: SizedBox()),
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('chat home marker'), findsOneWidget);
+    });
+
+    testWidgets('the panel stays until the guard answers', (tester) async {
+      final answer = Completer<bool>();
+      await _pumpPanel(
+        tester,
+        ToolPanelShell(
+          title: 'probe',
+          exitGuard: () => answer.future,
+          child: const SizedBox(),
+        ),
+      );
+
+      await tester.tap(find.byTooltip('back (esc)'));
+      await tester.pump();
+
+      // The guard is still deciding: nothing has been torn down yet.
+      expect(find.text('probe'), findsOneWidget);
+      expect(find.text('chat home marker'), findsNothing);
+
+      answer.complete(true);
+      await tester.pumpAndSettle();
+
+      expect(find.text('chat home marker'), findsOneWidget);
+    });
   });
 
   group('esc priority for other esc consumers', () {

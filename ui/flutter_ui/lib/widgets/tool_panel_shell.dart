@@ -41,6 +41,9 @@ void exitToolPanel(BuildContext context, WidgetRef ref) {
 /// handles ESC itself (the find bar, the command palette) keeps
 /// priority: key events reach the primary focus first and stop at
 /// the first handler that returns `handled`.
+///
+/// A panel that holds unsaved work passes [exitGuard] so both exit
+/// affordances ask before dropping it.
 class ToolPanelShell extends ConsumerWidget {
   /// Panel name shown in the header, lowercase.
   final String title;
@@ -56,6 +59,21 @@ class ToolPanelShell extends ConsumerWidget {
   /// field, a tab bar, or a filter row).
   final Widget? header;
 
+  /// Optional asynchronous veto, asked before the shell leaves the panel.
+  ///
+  /// Both the back control and the esc handler call this first and exit only
+  /// when it resolves `true`; `false` leaves the panel mounted with all of
+  /// its state intact. `null` (the default) exits immediately, exactly as it
+  /// did before the guard existed, so panels with nothing to lose need no
+  /// change.
+  ///
+  /// This veto cannot live on the route as a `PopScope`: go_router leaves a
+  /// tool panel through [NavigatorState.pop] rather than `maybePop`, and the
+  /// embedded path replaces the route with `go`. Neither consults a
+  /// route-level veto, so it has to sit on the one control every panel
+  /// shares.
+  final Future<bool> Function()? exitGuard;
+
   /// Panel body.
   final Widget child;
 
@@ -66,6 +84,7 @@ class ToolPanelShell extends ConsumerWidget {
     this.icon,
     this.actions = const <Widget>[],
     this.header,
+    this.exitGuard,
   });
 
   @override
@@ -76,7 +95,7 @@ class ToolPanelShell extends ConsumerWidget {
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent &&
             event.logicalKey == LogicalKeyboardKey.escape) {
-          exitToolPanel(context, ref);
+          _requestExit(context, ref);
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -89,6 +108,23 @@ class ToolPanelShell extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// Ask [exitGuard], then leave the panel only when it allows the exit.
+  ///
+  /// The esc handler cannot wait for the answer, so the exit is driven from
+  /// the guard's future instead of the key event; the key event is still
+  /// reported as handled either way.
+  Future<void> _requestExit(BuildContext context, WidgetRef ref) async {
+    final guard = exitGuard;
+    if (guard != null) {
+      final allowed = await guard();
+      if (!allowed) return;
+      // The panel can be closed from elsewhere (a menu pick, another route)
+      // while the guard's confirmation is open.
+      if (!context.mounted) return;
+    }
+    exitToolPanel(context, ref);
   }
 
   Widget _buildHeader(BuildContext context, WidgetRef ref) {
@@ -109,7 +145,7 @@ class ToolPanelShell extends ConsumerWidget {
                   icon: const Icon(Icons.arrow_back, size: 18),
                   color: CyberpunkColors.orangePrimary,
                   tooltip: 'back (esc)',
-                  onPressed: () => exitToolPanel(context, ref),
+                  onPressed: () => _requestExit(context, ref),
                 ),
                 if (icon != null) ...[
                   const SizedBox(width: 4),
