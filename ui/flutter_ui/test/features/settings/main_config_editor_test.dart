@@ -43,9 +43,6 @@ class _StubMainConfigClient extends SdkApiClient {
   Future<String> getClientConfig() async => '{}';
 
   @override
-  Future<String> getMemoryConfig() async => '{}';
-
-  @override
   Future<Map<String, dynamic>> getOrchestratorConfig() async => {};
 }
 
@@ -76,6 +73,40 @@ Future<void> _pump(WidgetTester tester, _StubMainConfigClient client) async {
 
 ElevatedButton _saveButton(WidgetTester tester) =>
     tester.widget<ElevatedButton>(find.byKey(mainConfigSaveKey));
+
+/// Pumps the whole SettingsPanel, which owns the config-file chip row.
+/// The viewport is wide and tall enough to render the editors without a
+/// RenderFlex overflow.
+Future<void> _pumpPanel(
+  WidgetTester tester,
+  _StubMainConfigClient client,
+) async {
+  tester.view.physicalSize = const Size(1200, 1600);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [sdkClientProvider.overrideWithValue(client)],
+      child: const MaterialApp(
+        home: Scaffold(
+          body: SizedBox(width: 1100, child: SettingsPanel()),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// Selects the meept.json5 chip and scrolls the lazy ListView until the
+/// embedded editor is built.
+Future<void> _openMainEditor(WidgetTester tester) async {
+  await tester.tap(find.text('meept.json5'));
+  await tester.pumpAndSettle();
+  for (var i = 0; i < 8 && !tester.any(find.byType(MainConfigEditor)); i++) {
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -290,5 +321,83 @@ void main() {
     expect(find.byType(MainConfigEditor), findsOneWidget);
     expect(find.text(_path), findsOneWidget);
     expect(find.widgetWithText(TextField, _content), findsOneWidget);
+  });
+
+  testWidgets(
+    'switching chips with unsaved meept.json5 edits warns, and cancel keeps them',
+    (tester) async {
+      final client = _StubMainConfigClient(_file());
+      await _pumpPanel(tester, client);
+      await _openMainEditor(tester);
+
+      // Type into the main config editor. SettingsPanel._hasChanges never
+      // sees this -- the editor reports it through onDirtyChanged.
+      await tester.enterText(
+        find.byKey(mainConfigTextKey),
+        '{"edited": true}',
+      );
+      await tester.pump();
+      expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
+
+      await tester.tap(find.text('client.json5'));
+      await tester.pumpAndSettle();
+
+      // The warning names the file whose edits would be lost.
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.textContaining('unsaved changes in meept.json5'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+
+      // Cancel is a no-op: still on meept.json5, edits intact.
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(MainConfigEditor), findsOneWidget);
+      expect(
+        find.widgetWithText(TextField, '{"edited": true}'),
+        findsOneWidget,
+      );
+      expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
+      expect(find.text('// client.json5'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'discarding the unsaved meept.json5 edits switches to the chosen chip',
+    (tester) async {
+      final client = _StubMainConfigClient(_file());
+      await _pumpPanel(tester, client);
+      await _openMainEditor(tester);
+
+      await tester.enterText(
+        find.byKey(mainConfigTextKey),
+        '{"edited": true}',
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('client.json5'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('discard'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MainConfigEditor), findsNothing);
+      expect(find.text('// client.json5'), findsOneWidget);
+    },
+  );
+
+  testWidgets('switching chips with no unsaved edits does not warn', (
+    tester,
+  ) async {
+    final client = _StubMainConfigClient(_file());
+    await _pumpPanel(tester, client);
+    await _openMainEditor(tester);
+
+    await tester.tap(find.text('client.json5'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.text('// client.json5'), findsOneWidget);
   });
 }

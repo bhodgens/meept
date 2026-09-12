@@ -57,6 +57,12 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   bool _hasChanges = false;
   bool _programmaticUpdate = false;
 
+  /// Unsaved meept.json5 edits, reported by [MainConfigEditor] through its
+  /// `onDirtyChanged` callback. The panel's own [_hasChanges] only tracks
+  /// the generic (client/models/menubar) editor, so the chip guard must
+  /// consult this too.
+  bool _mainConfigDirty = false;
+
   bool _apiKeyObscured = true;
   String? _apiKeyStatus;
   bool _isUsingDefaultKey = false;
@@ -359,7 +365,10 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
               ),
               onSelected: (selected) {
                 if (selected && _selectedConfig != entry.key) {
-                  if (_hasChanges) {
+                  // Either editor can hold unsaved edits: the generic one
+                  // through _hasChanges, meept.json5 through the child
+                  // editor's reported state. Warn before dropping either.
+                  if (_hasChanges || _mainConfigDirty) {
                     _showDiscardDialog(entry.key);
                   } else {
                     setState(() => _selectedConfig = entry.key);
@@ -423,6 +432,13 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     );
   }
 
+  /// Mirror the main-config editor's dirty state so [_buildConfigBar] can
+  /// warn before a chip switch discards unsaved meept.json5 edits.
+  void _onMainConfigDirtyChanged(bool dirty) {
+    if (!mounted || dirty == _mainConfigDirty) return;
+    setState(() => _mainConfigDirty = dirty);
+  }
+
   void _showDiscardDialog(String newConfig) {
     showDialog(
       context: context,
@@ -444,9 +460,13 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
+              // Reset both dirty sources: the discarded edits are gone, and
+              // the editor that held them is either switched away from (and
+              // disposed) or reloaded from the daemon.
               setState(() {
                 _selectedConfig = newConfig;
                 _hasChanges = false;
+                _mainConfigDirty = false;
               });
               _loadConfig();
             },
@@ -461,8 +481,9 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     if (_selectedConfig == 'main') {
       // Whole-file JSON5 editor for meept.json5 — read + write via
       // GET/POST /api/v1/config/main, with dirty tracking, revert and a
-      // reload that warns before discarding unsaved edits.
-      return const MainConfigEditor();
+      // reload that warns before discarding unsaved edits. It reports its
+      // dirty state up so the chip guard can see it.
+      return MainConfigEditor(onDirtyChanged: _onMainConfigDirtyChanged);
     }
     if (_isLoading) {
       return Center(

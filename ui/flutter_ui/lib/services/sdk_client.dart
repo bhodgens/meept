@@ -1711,15 +1711,6 @@ class SdkApiClient {
     await _post('/api/v1/config/menubar', body: {'content': content});
   }
 
-  /// GET /api/v1/config/memory — the main daemon config (meept.json5).
-  /// Read-only: the daemon exposes no save endpoint for the whole file.
-  /// Structured edits go through [setClientConfig] (client block) or
-  /// [getOrchestratorConfig]/[saveOrchestratorConfig].
-  Future<String> getMemoryConfig() async {
-    final raw = await _get('/api/v1/config/memory');
-    return raw['content'] as String? ?? '';
-  }
-
   /// GET /api/v1/config/orchestrator — typed orchestrator settings.
   Future<Map<String, dynamic>> getOrchestratorConfig() async {
     return _get('/api/v1/config/orchestrator');

@@ -29,7 +29,17 @@ const Key mainConfigReadOnlyNoteKey = ValueKey('main-config-readonly-note');
 /// takes effect only after the daemon restarts, and the success notice says
 /// so.
 class MainConfigEditor extends ConsumerStatefulWidget {
-  const MainConfigEditor({super.key});
+  const MainConfigEditor({super.key, this.onDirtyChanged});
+
+  /// Reports this editor's unsaved-changes state to its parent.
+  ///
+  /// Called with `true` the first time the editor text diverges from the
+  /// loaded/saved content, and with `false` once it is saved, reverted or
+  /// reloaded. The settings panel owns the config-file chip row, so it must
+  /// observe this state to warn before switching files: the panel's own
+  /// `_hasChanges` flag only tracks the generic (client/models/menubar)
+  /// editor and cannot see meept.json5 edits.
+  final ValueChanged<bool>? onDirtyChanged;
 
   @override
   ConsumerState<MainConfigEditor> createState() => _MainConfigEditorState();
@@ -50,8 +60,25 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
   String? _error;
   String? _notice;
 
+  /// The last value handed to [MainConfigEditor.onDirtyChanged], so the
+  /// callback fires only on an actual flip.
+  bool _notifiedDirty = false;
+
   bool get _isDirty =>
       !_isLoading && _controller.text != _loadedContent;
+
+  /// Publish the current dirty state to the parent, only when it changes.
+  ///
+  /// Called after every mutation of the editor text or of [_loadedContent],
+  /// never from `initState` or `build`, so the parent's `setState` is never
+  /// re-entered in the middle of a build.
+  void _syncDirty() {
+    if (!mounted) return;
+    final dirty = _isDirty;
+    if (dirty == _notifiedDirty) return;
+    _notifiedDirty = dirty;
+    widget.onDirtyChanged?.call(dirty);
+  }
 
   @override
   void initState() {
@@ -81,12 +108,14 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
         _controller.text = file.content;
         _isLoading = false;
       });
+      _syncDirty();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
         _isLoading = false;
       });
+      _syncDirty();
     }
   }
 
@@ -107,6 +136,7 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
             'saved to ${_file?.path ?? 'the main config file'}. '
             'restart the daemon to load the change.';
       });
+      _syncDirty();
     } on SdkApiException catch (e) {
       // Keep the editor text untouched on every failure path: the user's
       // edits are the only copy of their work.
@@ -126,12 +156,14 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
           _error = 'save failed: ${e.message}';
         }
       });
+      _syncDirty();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isSaving = false;
         _error = 'save failed: $e';
       });
+      _syncDirty();
     }
   }
 
@@ -141,6 +173,7 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
       _error = null;
       _notice = null;
     });
+    _syncDirty();
   }
 
   Future<void> _reload() async {
@@ -438,6 +471,8 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
             // Rebuild so the dirty indicator and save-enabled state track
             // the text. Clear a stale save notice on the next edit.
             setState(() => _notice = null);
+            // The chip guard in the parent panel depends on this.
+            _syncDirty();
           },
           decoration: _decoration,
         ),

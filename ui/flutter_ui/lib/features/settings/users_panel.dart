@@ -16,7 +16,7 @@ import '../../theme/typography.dart';
 /// capability set. v1 capability set = awareness only:
 ///
 /// - reports whether multi-user auth is enabled, read live from the daemon
-///   config (`multiuser.enabled`, fetched via GET /api/v1/config/memory)
+///   config (`multiuser.enabled`, fetched via GET /api/v1/config/main)
 /// - points every management action at the `meept users` CLI on the daemon
 ///   host — the daemon exposes no client-callable user-management path yet
 ///   (no /api/v1/users routes; even the filesystem surface is directories
@@ -59,9 +59,13 @@ class _UsersPanelState extends ConsumerState<UsersPanel> {
 
   Future<void> _load() async {
     try {
-      final raw = await _client.getMemoryConfig();
+      // One endpoint for the daemon's main config: GET /api/v1/config/main
+      // (path + content + writable). The older duplicate memory-config route
+      // is retired; this panel only needs the raw JSON5 text, which is
+      // [MainConfigFile.content].
+      final file = await _client.getMainConfig();
       if (!mounted) return;
-      final cfg = _decodeJson5ish(raw);
+      final cfg = _decodeJson5ish(file.content);
       final mu = cfg['multiuser'];
       setState(() {
         _isLoading = false;
