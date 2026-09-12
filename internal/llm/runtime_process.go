@@ -209,6 +209,16 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	// Serialize the whole probe + adopt + spawn + PID-file-write sequence with
+	// the endpoint start lock, so a second meept process cannot slip a spawn
+	// into the window between the probe and the new PID file. The lock is
+	// released on return and is not held across the health wait.
+	unlockStart, lockErr := acquireStartLock(p.pidFile)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlockStart()
+
 	// Duplicate-spawn pre-check. The probe runs BEFORE p.mu is taken (network
 	// I/O under the mutex breaks the mutex-scope rule) and only when the spawn
 	// command declares the endpoint port (see endpointProbeTarget). An endpoint

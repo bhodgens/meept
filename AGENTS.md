@@ -109,7 +109,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Effects** | `internal/effects` (external-effect idempotency ledger) |
 | **Services** | `internal/services` (chat, session, terminal, push, reflection) |
 | **Project** | `internal/project` (manager, init_deep, detection) |
-| **TUI** | `internal/tui` (app, commands, components, handlers, modals, models) |
+| **TUI** | `internal/tui` (app, commands, components, handlers, modals, models, tableutil) |
 | **GUI** | `ui/flutter_ui` (Flutter web + desktop) |
 | **Scheduling** | `internal/scheduler`, `internal/queue`, `internal/worker` |
 | **Skills** | `internal/skills`, `internal/selfimprove` |

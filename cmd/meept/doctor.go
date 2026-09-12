@@ -130,10 +130,14 @@ func runDoctor(fix, installMissing bool) error {
 	checks = append(checks, checkConfigReadable())
 	checks = append(checks, checkDiskFreeDoctor(stateDirPath))
 
-	// Build the sweep config list once: the report path and the --fix reaper
-	// share it, so they can never disagree about what counts as an orphan.
+	// Build the sweep inputs once: the report path and the --fix reaper share
+	// them, so they can never disagree about what counts as an orphan. Configs
+	// cover endpoints that still validate; the durable records cover endpoints
+	// whose config no longer does (unmounted model volume, renamed provider),
+	// which is exactly the leak a config-only scan would miss.
 	orphanCfgs := runtimeConfigsForSweep()
-	orphanPIDs := findOrphanRuntimePIDs(orphanCfgs)
+	orphanRecords := orphanSpawnRecords()
+	orphanPIDs := findOrphanRuntimePIDs(orphanCfgs, orphanRecords)
 	if len(orphanPIDs) > 0 {
 		checks = append(checks, doctorCheck{
 			name:    "orphan-children",
@@ -206,12 +210,12 @@ func runDoctor(fix, installMissing bool) error {
 					c.ok = true
 				}
 			case "orphan-children":
-				// Reap through the shared sweep configs. The reaper re-scans
-				// the process table, SIGTERMs then SIGKILLs, and returns only
-				// the pids CONFIRMED gone — a SIGTERM sent is not a kill, so
-				// the check is repaired only when every candidate is confirmed
-				// dead. Survivors keep ok=false and say how many.
-				candidates, confirmed := llm.ReapOrphanRuntimesFromConfigs(orphanCfgs, 2*time.Second, slog.Default())
+				// Reap through the shared sweep inputs (configs + records). The
+				// reaper re-scans the process table, SIGTERMs then SIGKILLs, and
+				// returns only the pids CONFIRMED gone — a SIGTERM sent is not a
+				// kill, so the check is repaired only when every candidate is
+				// confirmed dead. Survivors keep ok=false and say how many.
+				candidates, confirmed := llm.ReapOrphanRuntimesFromConfigsAndRecords(orphanCfgs, orphanRecords, 2*time.Second, slog.Default())
 				if len(confirmed) == len(candidates) {
 					c.detail += fmt.Sprintf(" [stopped %d/%d orphans]", len(confirmed), len(candidates))
 					c.ok = true
@@ -362,13 +366,30 @@ func runtimeConfigsForSweep() []*llm.RuntimeConfig {
 	return cfgs
 }
 
+// orphanSpawnRecords loads the durable spawn records the orphan scan matches
+// against. A runtime writes its record beside its PID file under the run dir
+// (config.MeeptPath("run")), and the record survives config drift: an endpoint
+// whose model volume is unmounted or whose provider was renamed no longer
+// validates, so runtimeConfigsForSweep skips it — but its leftover runtime still
+// holds the endpoint port, and its record is the only remaining proof that meept
+// spawned it with auto_stop_on_exit. A missing run dir or a corrupt record
+// yields no records, never an abort.
+func orphanSpawnRecords() []llm.SpawnRecord {
+	records, err := llm.ScanSpawnRecords(config.MeeptPath("run"))
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
 // findOrphanRuntimePIDs returns the pids of local-LLM runtime processes left
 // behind by a meept process that no longer exists: the parent is init (ppid==1)
-// and the command line is exactly one of the configured spawn commands whose
-// endpoint asks for auto_stop_on_exit. Report-only — the caller (--fix) reaps
-// through the SAME config list with llm.ReapOrphanRuntimesFromConfigs.
-func findOrphanRuntimePIDs(cfgs []*llm.RuntimeConfig) []int {
-	orphans, err := llm.OrphanRuntimesFromConfigs(cfgs)
+// and the command line is exactly one of the sweepable endpoint spawn commands
+// or a sweepable durable spawn record's argv. Report-only — the caller (--fix)
+// reaps through the SAME inputs with
+// llm.ReapOrphanRuntimesFromConfigsAndRecords.
+func findOrphanRuntimePIDs(cfgs []*llm.RuntimeConfig, records []llm.SpawnRecord) []int {
+	orphans, err := llm.OrphanRuntimesFromConfigsAndRecords(cfgs, records)
 	if err != nil {
 		return nil
 	}

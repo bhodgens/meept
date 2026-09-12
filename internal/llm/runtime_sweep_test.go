@@ -242,7 +242,7 @@ func TestSweepOrphanRuntimes_ReapsConfirmedOrphanAndClearsPIDFile(t *testing.T) 
 		return nil
 	}
 
-	reaped := mgr.SweepOrphanRuntimes(0)
+	reaped := mgr.SweepOrphanRuntimes(0, nil)
 	if len(reaped) != 1 || reaped[0] != 900 {
 		t.Fatalf("reaped = %v, want [900]", reaped)
 	}
@@ -293,7 +293,7 @@ func TestSweepOrphanRuntimes_LeavesEndpointWithLiveOwnerAlone(t *testing.T) {
 		return nil
 	}
 
-	if got := mgr.SweepOrphanRuntimes(0); len(got) != 0 {
+	if got := mgr.SweepOrphanRuntimes(0, nil); len(got) != 0 {
 		t.Fatalf("a live owner must veto the reap, got %v", got)
 	}
 	if signalled != 0 {
@@ -358,4 +358,150 @@ func TestFindOrphanRuntimes_RealReparentedProcess(t *testing.T) {
 		}
 	}
 	t.Errorf("re-parented process %d (sleep 300) was not reported as an orphan: %+v", pid, orphans)
+}
+
+// --- durable spawn records ---
+
+// TestFindOrphanRuntimesWithRecords_MatchesRecordWithoutConfig is the finding
+// this whole mechanism exists for: no endpoint config reaches the scan (its
+// model volume is gone, its provider renamed), so only the durable record can
+// identify the leftover.
+func TestFindOrphanRuntimesWithRecords_MatchesRecordWithoutConfig(t *testing.T) {
+	argv := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
+	cmd := "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"
+	records := []SpawnRecord{{
+		EndpointKey: "mlx:127.0.0.1:8081",
+		PIDFile:     "/tmp/mlx.pid",
+		Argv:        argv,
+		AutoStop:    true,
+		PID:         900,
+	}}
+	lister := func() ([]RuntimeProcInfo, error) {
+		return []RuntimeProcInfo{
+			{PID: 900, PPID: 1, Command: cmd},               // leftover of a dead daemon
+			{PID: 901, PPID: 4242, Command: cmd},            // parent alive: owned, keep
+			{PID: 903, PPID: 1, Command: "/usr/sbin/cupsd"}, // not ours
+		}, nil
+	}
+
+	got, err := FindOrphanRuntimesWithRecords(nil, records, lister)
+	if err != nil {
+		t.Fatalf("FindOrphanRuntimesWithRecords: %v", err)
+	}
+	if len(got) != 1 || got[0].PID != 900 {
+		t.Fatalf("expected only pid 900 from a record-only match, got %+v", got)
+	}
+	if got[0].EndpointKey != "mlx:127.0.0.1:8081" {
+		t.Errorf("endpoint key = %q, want the record's key", got[0].EndpointKey)
+	}
+}
+
+func TestFindOrphanRuntimesWithRecords_SkipsRecordWithAutoStopFalse(t *testing.T) {
+	argv := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
+	cmd := "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"
+	records := []SpawnRecord{{PIDFile: "/tmp/mlx.pid", Argv: argv, AutoStop: false, PID: 900}}
+	lister := func() ([]RuntimeProcInfo, error) {
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: cmd}}, nil
+	}
+
+	got, err := FindOrphanRuntimesWithRecords(nil, records, lister)
+	if err != nil {
+		t.Fatalf("FindOrphanRuntimesWithRecords: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a record with auto_stop=false must not be reaped, got %+v", got)
+	}
+}
+
+func TestFindOrphanRuntimesWithRecords_DedupesPidMatchedByConfigAndRecord(t *testing.T) {
+	spawn := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
+	cmd := "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"
+	cfgs := []*RuntimeConfig{{EndpointKey: "mlx:127.0.0.1:8081", AutoStop: true, SpawnCommand: spawn}}
+	records := []SpawnRecord{{
+		EndpointKey: "mlx:127.0.0.1:8081",
+		PIDFile:     "/tmp/mlx.pid",
+		Argv:        spawn,
+		AutoStop:    true,
+		PID:         900,
+	}}
+	lister := func() ([]RuntimeProcInfo, error) {
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: cmd}}, nil
+	}
+
+	got, err := FindOrphanRuntimesWithRecords(cfgs, records, lister)
+	if err != nil {
+		t.Fatalf("FindOrphanRuntimesWithRecords: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("a pid matched by a config and a record must be reported once, got %+v", got)
+	}
+}
+
+// TestSweepOrphanRuntimes_ReapsRecordOnlyLeftover proves the leftover is reaped
+// end to end with no config registered: the record alone drives the sweep.
+func TestSweepOrphanRuntimes_ReapsRecordOnlyLeftover(t *testing.T) {
+	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	records := []SpawnRecord{{
+		EndpointKey: "mlx:127.0.0.1:8081",
+		PIDFile:     filepath.Join(t.TempDir(), "runtime.pid"),
+		Argv:        []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"},
+		AutoStop:    true,
+		PID:         900,
+	}}
+	const cmd = "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"
+	killed := false
+	mgr.sweepLister = func() ([]RuntimeProcInfo, error) {
+		if killed {
+			return nil, nil
+		}
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: cmd}}, nil
+	}
+	var signals []syscall.Signal
+	mgr.sweepSignal = func(_ int, sig syscall.Signal) error {
+		signals = append(signals, sig)
+		if sig == syscall.SIGKILL {
+			killed = true
+		}
+		return nil
+	}
+
+	reaped := mgr.SweepOrphanRuntimes(0, records)
+	if len(reaped) != 1 || reaped[0] != 900 {
+		t.Fatalf("reaped = %v, want [900]", reaped)
+	}
+	if len(signals) != 2 || signals[0] != syscall.SIGTERM || signals[1] != syscall.SIGKILL {
+		t.Errorf("signals = %v, want SIGTERM then SIGKILL", signals)
+	}
+}
+
+func TestSweepOrphanRuntimes_LeavesRecordWithAutoStopFalseAlone(t *testing.T) {
+	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	records := []SpawnRecord{{
+		EndpointKey: "mlx:127.0.0.1:8081",
+		PIDFile:     filepath.Join(t.TempDir(), "runtime.pid"),
+		Argv:        []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"},
+		AutoStop:    false,
+		PID:         900,
+	}}
+	mgr.sweepLister = func() ([]RuntimeProcInfo, error) {
+		return []RuntimeProcInfo{{
+			PID:     900,
+			PPID:    1,
+			Command: "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081",
+		}}, nil
+	}
+	signalled := 0
+	mgr.sweepSignal = func(int, syscall.Signal) error {
+		signalled++
+		return nil
+	}
+
+	if got := mgr.SweepOrphanRuntimes(0, records); len(got) != 0 {
+		t.Fatalf("a record with auto_stop=false must not be reaped, got %v", got)
+	}
+	if signalled != 0 {
+		t.Errorf("no signal may reach an auto_stop=false runtime, got %d", signalled)
+	}
 }

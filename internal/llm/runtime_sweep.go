@@ -97,15 +97,48 @@ func ListRuntimeProcesses() ([]RuntimeProcInfo, error) {
 }
 
 // FindOrphanRuntimes returns runtime processes that a dead meept process left
-// behind. Report-only: the caller decides whether to signal them. A pid matched
-// by more than one endpoint config is reported once.
+// behind, matched against endpoint configs only. Report-only: the caller decides
+// whether to signal them. A pid matched by more than one endpoint config is
+// reported once.
+//
+// Records exist so detection survives config drift; callers that can reach the
+// durable records (the daemon and `meept doctor`) should use
+// FindOrphanRuntimesWithRecords instead. This wrapper stays for the callers and
+// tests that match on configs alone.
 func FindOrphanRuntimes(cfgs []*RuntimeConfig, list RuntimeProcLister) ([]OrphanRuntime, error) {
+	return FindOrphanRuntimesWithRecords(cfgs, nil, list)
+}
+
+// FindOrphanRuntimesWithRecords returns leftover runtime processes matched
+// against BOTH the endpoint configs and the durable spawn records. A process is
+// an orphan when its parent is init (ppid==1, so the meept process that spawned
+// it is gone) and its command line is exactly a sweepable config's spawn command
+// or a sweepable record's argv. A pid matched by both a config and a record (or
+// by two of either) is reported once, with the config's endpoint key when a
+// config matched first.
+//
+// Records make detection independent of the current config: an endpoint whose
+// model volume is unmounted or whose provider was renamed no longer validates,
+// so no config reaches this scan, but its recorded spawn command still matches
+// the leftover it left behind.
+func FindOrphanRuntimesWithRecords(cfgs []*RuntimeConfig, records []SpawnRecord, list RuntimeProcLister) ([]OrphanRuntime, error) {
 	procs, err := list()
 	if err != nil {
 		return nil, err
 	}
 	var orphans []OrphanRuntime
 	seen := make(map[int]struct{})
+	add := func(endpointKey string, p RuntimeProcInfo) {
+		if _, dup := seen[p.PID]; dup {
+			return
+		}
+		seen[p.PID] = struct{}{}
+		orphans = append(orphans, OrphanRuntime{
+			EndpointKey: endpointKey,
+			PID:         p.PID,
+			Command:     p.Command,
+		})
+	}
 	for _, cfg := range cfgs {
 		if !sweepableEndpoint(cfg) {
 			continue
@@ -114,15 +147,18 @@ func FindOrphanRuntimes(cfgs []*RuntimeConfig, list RuntimeProcLister) ([]Orphan
 			if p.PPID != 1 || !matchesSpawnCommand(p.Command, cfg.SpawnCommand) {
 				continue
 			}
-			if _, dup := seen[p.PID]; dup {
+			add(cfg.EndpointKey, p)
+		}
+	}
+	for _, rec := range records {
+		if !sweepableRecord(rec) {
+			continue
+		}
+		for _, p := range procs {
+			if p.PPID != 1 || !matchesSpawnCommand(p.Command, rec.Argv) {
 				continue
 			}
-			seen[p.PID] = struct{}{}
-			orphans = append(orphans, OrphanRuntime{
-				EndpointKey: cfg.EndpointKey,
-				PID:         p.PID,
-				Command:     p.Command,
-			})
+			add(rec.EndpointKey, p)
 		}
 	}
 	return orphans, nil
@@ -131,7 +167,15 @@ func FindOrphanRuntimes(cfgs []*RuntimeConfig, list RuntimeProcLister) ([]Orphan
 // OrphanRuntimesFromConfigs reports leftover runtime processes for a set of
 // runtime configs (used by `meept doctor`, which has no RuntimeManager).
 func OrphanRuntimesFromConfigs(cfgs []*RuntimeConfig) ([]OrphanRuntime, error) {
-	return FindOrphanRuntimes(cfgs, ListRuntimeProcesses)
+	return OrphanRuntimesFromConfigsAndRecords(cfgs, nil)
+}
+
+// OrphanRuntimesFromConfigsAndRecords reports leftover runtime processes for a
+// set of runtime configs AND durable spawn records with the real process scan.
+// Records let `meept doctor` still see a leftover whose endpoint config no
+// longer validates (unmounted model volume, renamed provider).
+func OrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnRecord) ([]OrphanRuntime, error) {
+	return FindOrphanRuntimesWithRecords(cfgs, records, ListRuntimeProcesses)
 }
 
 // ReapOrphanRuntimesFromConfigs finds and reaps leftovers for the given configs
@@ -139,7 +183,17 @@ func OrphanRuntimesFromConfigs(cfgs []*RuntimeConfig) ([]OrphanRuntime, error) {
 // it considered and the pids confirmed gone — callers must report the confirmed
 // count, never the candidate count.
 func ReapOrphanRuntimesFromConfigs(cfgs []*RuntimeConfig, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int) {
-	orphans, err := OrphanRuntimesFromConfigs(cfgs)
+	return ReapOrphanRuntimesFromConfigsAndRecords(cfgs, nil, waitAfterTerm, log)
+}
+
+// ReapOrphanRuntimesFromConfigsAndRecords finds and reaps leftovers for the
+// given configs and durable spawn records with the real process scan and
+// process-group signals. Records are the config-independent source, so a
+// leftover survives neither a drifted config nor an invalid one. It returns the
+// orphans it considered and the pids confirmed gone — callers must report the
+// confirmed count, never the candidate count.
+func ReapOrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnRecord, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int) {
+	orphans, err := OrphanRuntimesFromConfigsAndRecords(cfgs, records)
 	if err != nil {
 		if log != nil {
 			log.Debug("orphan sweep: process scan unavailable", "error", err)
@@ -291,13 +345,15 @@ func (m *RuntimeManager) OrphanRuntimes() ([]OrphanRuntime, error) {
 
 // SweepOrphanRuntimes stops every runtime a previous meept generation left
 // behind: endpoint configs whose auto_stop_on_exit is true, a process whose
-// parent is init, and a command line equal to the endpoint's spawn command. An
-// endpoint with a live recorded owner is skipped. Returns the pids confirmed
-// gone (nil when nothing matched). It never returns an error: a failed sweep
-// must not block daemon start.
-func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration) []int {
+// parent is init, and a command line equal to the endpoint's spawn command — or,
+// for an endpoint whose current config no longer validates, to a durable spawn
+// record's argv (records are the config-independent source). An endpoint with a
+// live recorded owner is skipped. Returns the pids confirmed gone (nil when
+// nothing matched). It never returns an error: a failed sweep must not block
+// daemon start.
+func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration, records []SpawnRecord) []int {
 	candidates := m.sweepCandidates()
-	orphans, err := FindOrphanRuntimes(candidates, m.listRuntimeProcesses())
+	orphans, err := FindOrphanRuntimesWithRecords(candidates, records, m.listRuntimeProcesses())
 	if err != nil {
 		m.logger.Warn("orphan sweep: process scan unavailable; skipping", "error", err)
 		return nil
@@ -366,6 +422,15 @@ func (m *RuntimeManager) sweepCandidates() []*RuntimeConfig {
 // a spawn command to match the process table against.
 func sweepableEndpoint(cfg *RuntimeConfig) bool {
 	return cfg != nil && cfg.AutoStop && len(cfg.SpawnCommand) > 0
+}
+
+// sweepableRecord reports whether a record may drive a reap, applying the same
+// rule as sweepableEndpoint: the recorded runtime asked to stop with the daemon
+// (auto_stop_on_exit=true) and carries an argv to match the process table
+// against. A record with AutoStop=false is a runtime the user configured to
+// outlive the daemon and must be left alone.
+func sweepableRecord(rec SpawnRecord) bool {
+	return rec.AutoStop && len(rec.Argv) > 0
 }
 
 // signalRuntime sends sig to a runtime pid (process group when resolvable).

@@ -9,12 +9,22 @@
 // (foreign instance token => observed, not owned), so no later boot would ever
 // reap them either.
 //
+// Two sources feed the match, and the durable spawn records are the
+// config-independent one. A runtime writes a SpawnRecord beside its PID file at
+// spawn time; the record carries the expanded spawn command, so a leftover is
+// still identifiable after the endpoint's config drifts — an unmounted model
+// volume or a renamed provider makes the config fail ValidateAndNormalize, it is
+// never registered, and a config-only sweep would never see the leftover. The
+// daemon therefore scans the run dir (config.MeeptPath("run")) for records and
+// passes them alongside the registered endpoint configs.
+//
 // This sweep closes that hole before the daemon starts its own runtimes: every
-// configured endpoint with auto_stop_on_exit=true is matched against the
+// sweepable endpoint config and every sweepable record is matched against the
 // process table, and a match whose parent is init (ppid==1, so the spawning
 // meept process is gone) is stopped. Detection and signalling live in
 // internal/llm (RuntimeManager.SweepOrphanRuntimes) because the endpoint
-// configs and the PID-file format live there; this file is the daemon hook.
+// configs, the records, and the PID-file format live there; this file is the
+// daemon hook.
 //
 // Ordering requirement: AFTER components are constructed (the runtime manager
 // owns the endpoint configs) and BEFORE StartAll (the leftover process holds
@@ -23,7 +33,12 @@
 // killed.
 package daemon
 
-import "time"
+import (
+	"time"
+
+	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
+)
 
 // orphanTermGrace bounds the SIGTERM grace period before a leftover runtime is
 // SIGKILLed: long enough for llama-server / mlx_lm to exit cleanly, short
@@ -37,7 +52,20 @@ func (d *Daemon) StartupOrphanSweep() {
 	if d.components == nil || d.components.ContainerManager == nil {
 		return
 	}
-	reaped := d.components.ContainerManager.SweepOrphanRuntimes(orphanTermGrace)
+
+	// Durable spawn records: the config-independent source. A record survives a
+	// config that no longer validates (unmounted model volume, renamed
+	// provider), which is exactly when a leftover would otherwise be
+	// unreapable. A scan failure is a debug note, never fatal: the sweep still
+	// runs on the registered configs.
+	records, err := llm.ScanSpawnRecords(config.MeeptPath("run"))
+	if err != nil {
+		d.logger.Debug("daemon: spawn-record scan unavailable", "error", err)
+		records = nil
+	}
+	d.logger.Debug("daemon: orphan sweep considering spawn records", "records", len(records))
+
+	reaped := d.components.ContainerManager.SweepOrphanRuntimes(orphanTermGrace, records)
 	if len(reaped) > 0 {
 		d.logger.Warn("daemon: reaped orphaned runtime processes", "pids", reaped)
 		return

@@ -91,7 +91,7 @@ func (h *HealthChecker) run(ctx context.Context, stopCh <-chan struct{}) {
 		case <-stopCh:
 			return
 		case <-ticker.C:
-			h.checkOnce()
+			h.checkOnce(stopCh)
 		}
 	}
 }
@@ -107,8 +107,12 @@ func (h *HealthChecker) SetProcessAliveProbe(fn func() bool) {
 	h.procAlive = fn
 }
 
-// checkOnce performs one health check.
-func (h *HealthChecker) checkOnce() {
+// checkOnce performs one health check for the run identified by gen (its stop
+// channel). A check that began before Stop or before a re-arm must not write its
+// verdict into the current generation: the process it measured may already be
+// gone, and a late "healthy" from the previous generation is exactly the
+// false-healthy report the process probe exists to prevent.
+func (h *HealthChecker) checkOnce(gen <-chan struct{}) {
 	h.mu.RLock()
 	wasHealthy := h.healthy
 	h.mu.RUnlock()
@@ -142,6 +146,11 @@ func (h *HealthChecker) checkOnce() {
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	// Generation guard: see checkOnce's doc comment.
+	if h.stopCh != gen {
+		return
+	}
 
 	if procDead {
 		h.unhealthyCount++
