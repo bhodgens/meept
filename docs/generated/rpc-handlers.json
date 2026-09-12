@@ -567,7 +567,7 @@
     "topic": "plan.draft",
     "handler": "h.handleDraft",
     "file": "internal/rpc/plan_seal.go",
-    "line": 85
+    "line": 94
   },
   {
     "topic": "plan.get",
@@ -609,7 +609,7 @@
     "topic": "plan.seal",
     "handler": "h.handleSeal",
     "file": "internal/rpc/plan_seal.go",
-    "line": 84
+    "line": 93
   },
   {
     "topic": "project.detect",
