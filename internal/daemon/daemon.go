@@ -1364,13 +1364,31 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("HTTP server created", "addr", httpCfg.Addr, "tls", "mandatory")
 			logger.Info("TLS always enabled for HTTP server", "cert", httpCfg.TLSCertFile)
 			if httpCfg.RequireAuth {
-				logger.Info("Authentication required for HTTP server", "api_keys_configured", len(httpCfg.APIKeys))
+				// HTTPTransportConfig.APIKeys is empty in the shipped config:
+				// http.NewServer then substitutes the per-installation key at
+				// $MEEPT_HOME/dev_key (pkg/constants DevAPIKey). Say so instead
+				// of printing "api_keys_configured=0", which reads like auth is
+				// off and sends people chasing a key-mismatch bug.
+				if len(httpCfg.APIKeys) > 0 {
+					logger.Info("Authentication required for HTTP server",
+						"api_keys_configured", len(httpCfg.APIKeys))
+				} else {
+					logger.Info("Authentication required for HTTP server — using the per-installation dev key",
+						"key_file", config.MeeptPath("dev_key"))
+				}
 			} else {
 				logger.Warn("Authentication disabled for HTTP server - no API key required")
 			}
 		}
 	} else {
-		logger.Info("HTTP transport disabled")
+		// A disabled HTTP transport means there is no listener at all, so a
+		// client that keeps reconnecting (the Flutter GUI's "connecting...")
+		// produces ZERO per-connection log lines here — the request never
+		// reaches the daemon. Name the fix explicitly instead of leaving a
+		// bare "disabled" line.
+		logger.Info("HTTP transport disabled — no REST/WebSocket listener; HTTP clients (Flutter GUI, MCP) cannot connect",
+			"hint", "set transport.http.enabled=true in your meept.json5",
+			"default_config", config.MeeptPath("meept.json5"))
 	}
 
 	// Create compression CCR store and pipeline (if compression is enabled in config)

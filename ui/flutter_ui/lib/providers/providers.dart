@@ -85,12 +85,26 @@ final resolveActiveProjectProvider = FutureProvider<Project?>((ref) async {
 // Connection state - using simple boolean for compatibility
 final connectionStateProvider = StateProvider<bool>((ref) => false);
 
+// Last connection-failure diagnosis tag (e.g. 'auth 418', 'no daemon',
+// 'tls cert'). Set by ConnectionMonitor from WebSocketService.lastConnectErrorTag
+// so the status line can explain why the client is stuck reconnecting instead
+// of showing a bare "connecting..." forever.
+final connectionErrorProvider = StateProvider<String?>((ref) => null);
+
+// Full connection-failure diagnosis (actionable sentence). Not rendered by the
+// status bar; surfaced for the connection-details dialog.
+final connectionErrorDetailProvider = StateProvider<String?>((ref) => null);
+
 // Connection status text - derived from connection state with "connecting..." support
 final connectionStatusProvider = StateProvider<String>((ref) {
   final connected = ref.watch(connectionStateProvider);
   final isConnecting = ref.watch(isConnectingProvider);
-  if (isConnecting) return 'connecting...';
-  return connected ? 'connected' : 'disconnected';
+  final errorTag = ref.watch(connectionErrorProvider);
+  if (isConnecting) {
+    return errorTag == null ? 'connecting...' : 'connecting... ($errorTag)';
+  }
+  if (connected) return 'connected';
+  return errorTag == null ? 'disconnected' : 'disconnected ($errorTag)';
 });
 
 // Connection status color provider
@@ -343,6 +357,14 @@ class ConnectionMonitor {
       final currentValue = _container.read(isConnectingProvider.notifier).state;
       if (newValue != currentValue) {
         _container.read(isConnectingProvider.notifier).state = newValue;
+      }
+      // Publish the latest failure diagnosis so the status line shows *why*
+      // the client keeps retrying (e.g. "connecting... (auth 418)").
+      final tag = _websocket.lastConnectErrorTag;
+      if (_container.read(connectionErrorProvider) != tag) {
+        _container.read(connectionErrorProvider.notifier).state = tag;
+        _container.read(connectionErrorDetailProvider.notifier).state =
+            _websocket.lastConnectError;
       }
     });
   }

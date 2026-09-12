@@ -48,6 +48,12 @@ class WebSocketService {
   Timer? _pingTimer;
   StreamSubscription? _wsSubscription;
 
+  /// Diagnosis of the most recent failed connection attempt (long form).
+  String? _lastConnectError;
+
+  /// Short tag for the status line, e.g. 'auth 418', 'no daemon', 'tls cert'.
+  String? _lastConnectErrorTag;
+
   /// Completer for the current connection's stream-done signal.
   ///
   /// When `_cleanupChannel` is called from external paths (pause, pong
@@ -161,6 +167,17 @@ class WebSocketService {
   /// Whether currently attempting to connect or reconnect.
   bool get isConnecting => _isConnecting;
 
+  /// Actionable reason the last connection attempt failed, or null when the
+  /// last attempt succeeded (or no diagnosis could be made).
+  ///
+  /// A raw dart:io WebSocket failure hides the HTTP status behind
+  /// "was not upgraded to websocket", so this carries the diagnosis produced
+  /// by [_diagnoseConnectFailure] (auth 401/418, TLS pin, no listener).
+  String? get lastConnectError => _lastConnectError;
+
+  /// Short form of [lastConnectError] suitable for a status line.
+  String? get lastConnectErrorTag => _lastConnectErrorTag;
+
   /// Connect to WebSocket.
   ///
   /// Uses a manual reconnect loop with exponential backoff (1 s base,
@@ -174,7 +191,7 @@ class WebSocketService {
     _isConnecting = true;
 
     // Capture path for the connection loop.
-    final wsPath = path ?? '/ws';
+    final wsPath = path ?? AppConstants.defaultWsPath;
 
     // Kick off the manual reconnect loop.  _connectWithRetry runs
     // asynchronously and handles its own retry scheduling.
@@ -206,12 +223,23 @@ class WebSocketService {
         } catch (e) {
           if (_disposed || _wasExplicitlyDisconnected) return;
 
+          // dart:io hides the HTTP status of a failed upgrade ("was not
+          // upgraded to websocket"), so ask the daemon why with an
+          // authenticated REST probe and surface an actionable message
+          // instead of an opaque endless "connecting...".
+          final diagnosis = await _diagnoseConnectFailure(_retryCount);
+          _lastConnectError = diagnosis;
+          _lastConnectErrorTag =
+              diagnosis == null ? null : _tagOfFailure(diagnosis);
+
           // Check if this is an HTTP 401 (unauthorized) error
           // Use toString() check for robustness across DioException, WebSocketException, etc.
           final errorStr = e.toString();
           final is401 =
               errorStr.contains('401') || errorStr.contains('Unauthorized');
-          if (is401) {
+          if (diagnosis != null) {
+            _errorSubject.addSafe(diagnosis);
+          } else if (is401) {
             _errorSubject.addSafe(
               'Authentication failed (401). Configure API key in Settings.',
             );
@@ -376,6 +404,8 @@ class WebSocketService {
       if (!isConnected) {
         _isConnecting =
             false; // Stop showing "connecting..." once we're connected
+        _lastConnectError = null;
+        _lastConnectErrorTag = null;
         _connectedAt = DateTime.now();
         _connectionSubject.add(true);
         _startPingTimer();
@@ -670,6 +700,72 @@ class WebSocketService {
         (io.X509Certificate cert, String host, int port) =>
             DaemonCertPinner.validateCert(cert, host);
     return client;
+  }
+
+  /// Ask the daemon why the WebSocket upgrade failed.
+  ///
+  /// Re-issues an authenticated REST request with the same host/port/key and
+  /// TLS pinning the WebSocket path uses, then maps the outcome to a
+  /// user-facing diagnosis:
+  ///   401 -> missing API key, 418 -> daemon rejected the key,
+  ///   socket error -> nothing listening / transport.http disabled,
+  ///   handshake error -> certificate pin mismatch.
+  /// Returns null when the probe cannot tell (REST disabled, other status).
+  Future<String?> _diagnoseConnectFailure(int retryCount) async {
+    // The reconnect loop backs off to 30 s and the diagnosis is identical each
+    // time, so probe the first few attempts and then only occasionally.
+    if (retryCount > 3 && retryCount % 5 != 0) return _lastConnectError;
+
+    final client = _createHttpClient();
+    try {
+      final request = await client
+          .getUrl(Uri.parse('https://$_host:$_port/api/v1/config/client'))
+          .timeout(AppConstants.connectionTimeout);
+      if (_apiKey != null && _apiKey!.isNotEmpty) {
+        request.headers.set(
+          io.HttpHeaders.authorizationHeader,
+          'Bearer ${_apiKey!}',
+        );
+      }
+      final response = await request.close().timeout(
+        AppConstants.connectionTimeout,
+      );
+      final status = response.statusCode;
+      await response.drain<void>();
+      switch (status) {
+        case 401:
+          return 'auth: no API key configured — add one in Settings';
+        case 418:
+          return 'auth: daemon rejected this API key (HTTP 418) — it does not '
+              'match ~/.meept/dev_key; rebuild with `make build-gui` or paste '
+              'the key in Settings';
+        case 404:
+          return 'http: REST API disabled — set transport.http.rest=true in '
+              '~/.meept/meept.json5';
+      }
+      return null;
+    } on io.HandshakeException {
+      return 'tls: certificate rejected (does not match ~/.meept/tls/cert.pem)';
+    } on io.SocketException catch (e) {
+      return 'net: no daemon listening at $_host:$_port '
+          '(${e.osError?.message ?? e.message}) — check transport.http.enabled '
+          'in ~/.meept/meept.json5';
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Short status-line tag for a [lastConnectError] message.
+  static String _tagOfFailure(String message) {
+    if (message.startsWith('auth')) {
+      return message.contains('418') ? 'auth 418' : 'auth 401';
+    }
+    if (message.startsWith('net')) return 'no daemon';
+    if (message.startsWith('tls')) return 'tls cert';
+    if (message.startsWith('http')) return 'no REST';
+    return 'error';
   }
 }
 

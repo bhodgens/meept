@@ -5,9 +5,26 @@ abstract class AppConstants {
   // Version (keep in sync with pubspec.yaml)
   static const String appVersion = '1.0.0';
 
-  // API Configuration
-  static const String defaultApiHost = 'localhost';
-  static const int defaultApiPort = 8081;
+  // API Configuration.
+  //
+  // The daemon endpoint is compiled in at build time: `make build-gui` passes
+  // MEEPT_API_HOST / MEEPT_API_PORT / MEEPT_WS_PATH, derived from the installed
+  // $MEEPT_HOME/meept.json5 transport.http settings (scripts/gui-daemon-connect.py).
+  // The client cannot discover the daemon's bind address at runtime, so these
+  // defaults only apply to a from-source `flutter run` — the shipped app
+  // carries the installed endpoint. Defaults match the shipped config template.
+  static const String defaultApiHost = String.fromEnvironment(
+    'MEEPT_API_HOST',
+    defaultValue: 'localhost',
+  );
+  static const int defaultApiPort = int.fromEnvironment(
+    'MEEPT_API_PORT',
+    defaultValue: 8081,
+  );
+  static const String defaultWsPath = String.fromEnvironment(
+    'MEEPT_WS_PATH',
+    defaultValue: '/ws',
+  );
   static const String apiVersion = 'v1';
 
   // Connection

@@ -46,23 +46,41 @@ class DaemonCertPinner {
     final homeDir = Platform.environment['HOME'];
     if (homeDir == null) return;
 
-    final certPath = '$homeDir/.meept/tls/cert.pem';
-    try {
-      final certFile = File(certPath);
-      if (!certFile.existsSync()) {
-        debugPrint('[cert] Cert file not found: $certPath');
+    // The daemon writes its self-signed cert to one of two layouts, depending
+    // on the config shape:
+    //   transport.http.tls_cert_file — "~/.meept/tls/cert.pem" in the shipped
+    //   template; internal/config DefaultConfig uses "~/.meept/certs/tls.crt"
+    //   (schema.go HTTPTransportConfig defaults).
+    // Try both under $MEEPT_HOME (when set: internal/config/home.go) and the
+    // real $HOME, so pinning stays enforced for either layout instead of
+    // silently degrading to localhost-only trust.
+    final meeptHome = Platform.environment['MEEPT_HOME'];
+    final candidates = <String>[
+      if (meeptHome != null && meeptHome.isNotEmpty) ...<String>[
+        '$meeptHome/tls/cert.pem',
+        '$meeptHome/certs/tls.crt',
+      ],
+      '$homeDir/.meept/tls/cert.pem',
+      '$homeDir/.meept/certs/tls.crt',
+    ];
+
+    for (final certPath in candidates) {
+      try {
+        final certFile = File(certPath);
+        if (!certFile.existsSync()) continue;
+        final pemContent = certFile.readAsStringSync();
+        final derBytes = _pemToDer(pemContent);
+        _cachedFingerprint = sha256.convert(derBytes).toString();
+        debugPrint('[cert] Fingerprint loaded from $certPath: $_cachedFingerprint');
         return;
+      } catch (e) {
+        // Cert not found or unreadable (App Sandbox, permissions, etc.).
+        // Leaves fingerprint null — validateCert will fall back to
+        // localhost-only trust.
+        debugPrint('[cert] Failed to load fingerprint from $certPath: $e');
       }
-      final pemContent = certFile.readAsStringSync();
-      final derBytes = _pemToDer(pemContent);
-      _cachedFingerprint = sha256.convert(derBytes).toString();
-      debugPrint('[cert] Fingerprint loaded: $_cachedFingerprint');
-    } catch (e) {
-      // Cert not found or unreadable (App Sandbox, permissions, etc.).
-      // Leaves fingerprint null — validateCert will fall back to
-      // localhost-only trust.
-      debugPrint('[cert] Failed to load fingerprint: $e');
     }
+    debugPrint('[cert] No daemon cert found (tried ${candidates.join(", ")})');
   }
 
   /// Extract DER bytes from a PEM-encoded certificate string.

@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -80,7 +80,7 @@ help:
 	@echo "  docs-build       Build static docs site (includes llms-readme-full.txt)"
 	@echo "  docs-generate    Generate reference docs from Go source"
 
-MEEPT_HOME := $(HOME)/.meept
+MEEPT_HOME ?= $(HOME)/.meept
 BIN_DIR := bin
 DAEMON := $(BIN_DIR)/meept-daemon
 CLI := $(BIN_DIR)/meept
@@ -124,15 +124,28 @@ else
   GUI_PLATFORM := windows
 endif
 
-# Dev API key for Flutter release builds.
-# The daemon generates a per-installation key at ~/.meept/dev_key.
-# We inject it at build time via --dart-define so the Flutter app can
-# authenticate with the daemon out of the box. If the file doesn't exist,
-# we fall back to the legacy constant in pkg/constants/api_key.go.
-MEEPT_DEV_API_KEY := $(shell cat $(HOME)/.meept/dev_key 2>/dev/null || echo "meept_dev_default_key_CHANGE_ME")
+# Dev API key for the Flutter release build.
+# The daemon authenticates HTTP/WebSocket clients with the per-installation key
+# at $MEEPT_HOME/dev_key (pkg/constants/api_key.go DevAPIKey). The GUI must
+# embed the SAME key: with a missing or guessable key every WebSocket handshake
+# is rejected with HTTP 418 and the client retries forever showing
+# "connecting...". scripts/ensure-dev-key.sh creates the key file if absent
+# (exactly what the daemon does on first run) and NEVER substitutes a public
+# default — internal/comm/http/server.go refuses to start with those.
+# Recursive (not :=) so the key is resolved at recipe time, after the file
+# exists, instead of being frozen when make parses the file.
+MEEPT_DEV_API_KEY = $(shell MEEPT_HOME=$(MEEPT_HOME) bash scripts/ensure-dev-key.sh 2>/dev/null)
 # GUI layout from client.json5 (web can't read the file at runtime)
-MEEPT_GUI_LAYOUT := $(shell grep -o '"layout"[[:space:]]*:[[:space:]]*"[^"]*"' $(HOME)/.meept/client.json5 2>/dev/null | head -1 | sed 's/.*"\([^"]*\)"$$/\1/')
-FLUTTER_DART_DEFINES := --dart-define=MEEPT_DEV_API_KEY=$(MEEPT_DEV_API_KEY) --dart-define=MEEPT_GUI_LAYOUT=$(MEEPT_GUI_LAYOUT)
+MEEPT_GUI_LAYOUT := $(shell grep -o '"layout"[[:space:]]*:[[:space:]]*"[^"]*"' $(MEEPT_HOME)/client.json5 2>/dev/null | head -1 | sed 's/.*"\([^"]*\)"$$/\1/')
+# Daemon endpoint the GUI must dial. The Flutter client connects to a fixed
+# https://<host>:<port><ws_path> (ui/flutter_ui/lib/core/constants.dart) and
+# cannot discover the daemon's transport.http.addr, so the installed endpoint
+# is compiled in here. scripts/gui-daemon-connect.py reads
+# $MEEPT_HOME/meept.json5 and defaults to localhost:8081/ws.
+MEEPT_API_HOST = $(shell MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint --field host 2>/dev/null || echo localhost)
+MEEPT_API_PORT = $(shell MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint --field port 2>/dev/null || echo 8081)
+MEEPT_WS_PATH = $(shell MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint --field ws_path 2>/dev/null || echo /ws)
+FLUTTER_DART_DEFINES = --dart-define=MEEPT_DEV_API_KEY=$(MEEPT_DEV_API_KEY) --dart-define=MEEPT_GUI_LAYOUT=$(MEEPT_GUI_LAYOUT) --dart-define=MEEPT_API_HOST=$(MEEPT_API_HOST) --dart-define=MEEPT_API_PORT=$(MEEPT_API_PORT) --dart-define=MEEPT_WS_PATH=$(MEEPT_WS_PATH)
 # =============================================================================
 # Setup
 # =============================================================================
@@ -155,6 +168,57 @@ setup:
 		echo "Created $(MEEPT_HOME)/meept.json5"; \
 	fi
 	@echo "Setup complete."
+
+# config-bootstrap: populate $MEEPT_HOME with the shipped config templates.
+# Copy-if-absent — never clobbers an existing (possibly user-edited) config.
+# Used by `install` and `gui-connect-setup`.
+config-bootstrap:
+	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
+	@echo "Copying config templates (if not present)..."
+	@for f in $(CONFIG_FILES); do \
+		if [ ! -f $$f ]; then \
+			src="config/$$(basename $$f)"; \
+			if [ -f $$src ]; then \
+				cp $$src $$f; \
+				echo "  created $$f"; \
+			else \
+				echo "  template $$src not found (skipping $$f)"; \
+			fi; \
+		else \
+			echo "  skipping $$f (already exists)"; \
+		fi; \
+	done
+
+# dev-key: provision the per-installation API key the daemon accepts
+# ($MEEPT_HOME/dev_key, 0600). Idempotent; `build-gui` embeds this key in the
+# Flutter bundle so the GUI authenticates out of the box.
+dev-key:
+	@MEEPT_HOME=$(MEEPT_HOME) bash scripts/ensure-dev-key.sh >/dev/null
+	@chmod 600 $(MEEPT_HOME)/dev_key 2>/dev/null || true
+	@echo "    dev key: $(MEEPT_HOME)/dev_key"
+
+# gui-connect-setup: make an installed meept home work with the Flutter GUI.
+# The GUI dials a fixed https://host:port/ws endpoint with API-key auth, so the
+# daemon must have transport.http enabled with REST + WebSocket. This target
+# (a) bootstraps the config templates, (b) turns those keys on in an existing
+# config — idempotent, backup kept, addr/TLS/require_auth/api_keys untouched —
+# (c) provisions the shared dev key, and (d) prints the endpoint the GUI build
+# will embed plus a PASS/FAIL self-check. First prerequisite of `make install`.
+gui-connect-setup: config-bootstrap
+	@echo "==> Configuring the daemon for the Flutter GUI (transport.http + dev key)..."
+	@MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py ensure-config
+	@MEEPT_HOME=$(MEEPT_HOME) bash scripts/ensure-dev-key.sh >/dev/null
+	@chmod 600 $(MEEPT_HOME)/dev_key 2>/dev/null || true
+	@echo "    dev key:  $(MEEPT_HOME)/dev_key (GUI builds embed this key)"
+	@echo "    endpoint: $$(MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint)"
+	@MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py check || \
+		echo "    ^ resolve the FAIL lines above or the GUI cannot connect"
+	@echo "    NOTE: restart the daemon (meept-daemon -f / launchd) to load the transport change."
+
+# gui-connect-check: static self-check of the installed GUI connect path.
+gui-connect-check:
+	@MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py check
+
 
 hooks:
 	@echo "Installing git hooks (core.hooksPath -> .githooks)..."
@@ -201,7 +265,11 @@ build-release: GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 build-release: build-all
 	@echo "Release build with version $(VERSION)"
 
-install: build menubar-app build-gui
+# `gui-connect-setup` runs FIRST: it makes the installed config GUI-ready and
+# provisions the dev key, so the GUI built by `build`/`build-gui` below embeds
+# the key and endpoint the daemon actually serves (see the FLUTTER_DART_DEFINES
+# block near the top of this file).
+install: gui-connect-setup build menubar-app build-gui
 	@echo "Installing binaries to GOPATH/bin..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
 	go install $(GO_BUILD_FLAGS) ./cmd/meept
@@ -224,22 +292,7 @@ install: build menubar-app build-gui
 	@touch ~/Applications/MeeptMenuBar.app/.metadata_never_index
 	@rm -rf $(MENUBAR_DIR)/.build
 	@echo "Installed: ~/Applications/MeeptMenuBar.app"
-	@echo "Installing config files..."
-	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
-	@echo "Copying config templates (if not present)..."
-	@for f in $(CONFIG_FILES); do \
-		if [ ! -f $$f ]; then \
-			src="config/$$(basename $$f)"; \
-			if [ -f $$src ]; then \
-				cp $$src $$f; \
-				echo "  created $$f"; \
-			else \
-				echo "  template $$src not found (skipping $$f)"; \
-			fi; \
-		else \
-			echo "  skipping $$f (already exists)"; \
-		fi; \
-	done
+	@$(MAKE) config-bootstrap
 	@echo "Copying agent definitions..."
 	@if [ -d config/agents ]; then \
 		cp -r config/agents/* $(MEEPT_HOME)/agents/ 2>/dev/null || true; \
@@ -252,7 +305,10 @@ install: build menubar-app build-gui
 	fi
 	@echo ""
 	@$(MAKE) sync-config
-	@echo "Install complete. Edit $(MEEPT_HOME)/meept.json5 to configure."
+	@echo "Install complete. Config: $(MEEPT_HOME)/meept.json5"
+	@echo "  GUI endpoint: $$(MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint)"
+	@echo "  GUI key:      embedded from $(MEEPT_HOME)/dev_key at build time"
+	@echo "  Restart the daemon to load the transport settings, then launch the GUI."
 
 # sync-config: merge shipped config/{skills,agents,prompts} into the meept
 # home ($MEEPT_HOME, default ~/.meept) with no-clobber semantics
@@ -723,7 +779,7 @@ endif
 gui-clean:
 	rm -rf $(FLUTTER_UI_DIR)/build
 
-build-gui: gui-deps
+build-gui: gui-deps dev-key
 	@mkdir -p $(BIN_DIR)
 	@echo "Building meept-gui for $(GUI_PLATFORM)..."
 	cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release $(FLUTTER_DART_DEFINES)
