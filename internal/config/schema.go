@@ -2367,6 +2367,12 @@ type ClassifierPrefilterConfig struct {
 	// default (2s). The prefilter must never stall a turn: on timeout or
 	// error it returns no match and the LLM chain takes over.
 	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	// VetoPath is the tfidf-veto model produced by
+	// scripts/build_tfidf_veto.py. When set and loadable, Door-1 routes
+	// require the veto model's top intent to agree with the kNN winner;
+	// disagreement falls through to the LLM chain. Empty disables the
+	// veto (Door 1 routes on the kNN vote alone — legacy behavior).
+	VetoPath string `json:"veto_path" toml:"veto_path"`
 }
 
 // EvalConfig holds eval-harness settings (harness-eval leaf 15, contract:

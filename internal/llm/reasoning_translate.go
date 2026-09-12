@@ -68,6 +68,15 @@ func applyOpenAICompatReasoning(body map[string]any, cfg *ModelConfig, rc *Reaso
 	// TestApplyOpenAICompatReasoning_LMStudio). The default passthrough
 	// branch would silently drop the enable_thinking toggle for
 	// reasoning-capable local models.
+	//
+	// Disable gap (2026-09-10, outcome-loop L3 dispatch): llama-server
+	// IGNORES enable_thinking=false and chat_template_kwargs for LFM2.5
+	// (verified BY TEST against :8080 — 58 reasoning_content chunks with
+	// the toggle set). llama-server DOES honor reasoning_format:"none",
+	// which moves the reasoning into content inside <think> tags; the
+	// agent loop strips those via the task_summarizer regexes. Send both
+	// wire forms when disabling: Qwen-style servers take the toggle,
+	// llama.cpp servers take reasoning_format.
 	case ProviderIDOllama, ProviderIDLMStudio, "qwen", "local", "gala-mlx", "gala-llama":
 		// Qwen3 / Qwq / llama.cpp / vLLM: boolean enable_thinking +
 		// thinking_budget. Qwen3 uses the same field name; llama.cpp-style
@@ -75,6 +84,11 @@ func applyOpenAICompatReasoning(body map[string]any, cfg *ModelConfig, rc *Reaso
 		enable := rc.ResolveEnabled()
 		body["enable_thinking"] = enable // qwen native
 		body["chat_template_kwargs"] = map[string]any{"enable_thinking": enable}
+		if !enable {
+			// llama.cpp ignores the toggles above for LFM/Qwen3 templates;
+			// reasoning_format:"none" is the wire form it actually honors.
+			body["reasoning_format"] = "none"
+		}
 		if budget := ResolveBudget(rc, nil, nil, globalBudgets); budget != nil {
 			body["thinking_budget"] = *budget
 		}

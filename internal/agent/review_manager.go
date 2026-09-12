@@ -936,6 +936,20 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	if len(result) < 3 {
 		return false
 	}
+	// Reasoning-only guard (2026-09-10, outcome-loop L3 session): the
+	// reasoning-watchdog writes "[reasoning-only turn]" assistant markers
+	// and its terminate path returns the canned "I stopped after extended
+	// thinking" text as the step result. Neither is evidence of work —
+	// both are the loop GIVING UP. A canned no-tool termination must not
+	// ride the trivial-task heuristic to auto-approval.
+	if !reviewHintIsConversational(step.ToolHint) && step.TokenUsage > 0 &&
+		len(step.Evidence) == 0 && strings.Contains(result, "stopped after extended thinking") {
+		rm.logger.Warn("Heuristic review: reasoning-only termination with no tool evidence; refusing auto-approve",
+			"step_id", step.ID,
+			"tool_hint", step.ToolHint,
+		)
+		return false
+	}
 	// Claim-without-action guard (e2e run 7, 2026-09-10): the coder returned
 	// a structured report asserting file_exists evidence WITHOUT calling any
 	// tool (iterations=1, zero tool executions) and this heuristic

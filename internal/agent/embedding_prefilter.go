@@ -128,19 +128,23 @@ func NewEmbeddingPrefilter(emb PrefilterEmbedder, cfg config.ClassifierPrefilter
 		path = config.MeeptPath("classifier_prefilter_centroids.json")
 	}
 	// tfidf-veto model (acceptance-passing Door-1 precision upgrade,
-	// tools/classifier-eval/results/m4-gold-acceptance.md). Missing file
-	// disables the veto silently — Door 1 then routes on the kNN vote
-	// alone, exactly as before this feature existed.
-	veto, vetoErr := loadTfidfVeto(config.MeeptPath("prefilter_tfidf_veto.json"))
-	if vetoErr != nil {
-		logger.Warn("tfidf veto model unreadable; veto disabled", "error", vetoErr)
-		veto = nil
-	}
-	if veto != nil {
-		logger.Info("tfidf veto enabled",
-			"train_docs", veto.trainDocs,
-			"train_accuracy", veto.trainAcc,
-			"built_at", veto.builtAt)
+	// tools/classifier-eval/results/m4-gold-acceptance.md). Loaded ONLY
+	// when cfg.VetoPath is set — an empty path disables the veto so Door
+	// 1 routes on the kNN vote alone (legacy behavior, and unit tests
+	// stay decoupled from whatever model sits in ~/.meept).
+	vetoPath := cfg.VetoPath
+	var veto *tfidfVeto
+	if vetoPath != "" {
+		v, vetoErr := loadTfidfVeto(vetoPath)
+		if vetoErr != nil {
+			logger.Warn("tfidf veto model unreadable; veto disabled", "error", vetoErr)
+		} else {
+			veto = v
+			logger.Info("tfidf veto enabled",
+				"train_docs", veto.trainDocs,
+				"train_accuracy", veto.trainAcc,
+				"built_at", veto.builtAt)
+		}
 	}
 	return &EmbeddingPrefilter{
 		embedder:   emb,
