@@ -16,16 +16,32 @@ import (
 
 // RuntimeLifecycleConfig holds configuration for local LLM runtime management.
 type RuntimeLifecycleConfig struct {
-	Runtime        string              `json:"runtime"`           // "llama-cpp" or "mlx"
-	ModelPath      string              `json:"model_path"`        // Legacy single-model path
-	ModelPaths     map[string]string   `json:"model_paths"`       // Multi-model map: modelKey -> path
-	AutoStart      bool                `json:"auto_start"`        // Auto-start on daemon startup
-	AutoStopOnExit bool                `json:"auto_stop_on_exit"` // Stop on daemon shutdown
-	PIDFile        string              `json:"pid_file"`          // Path to PID file
-	SpawnCommand   []string            `json:"spawn_command"`     // Command and args to spawn runtime
+	Runtime    string            `json:"runtime"`     // "llama-cpp" or "mlx"
+	ModelPath  string            `json:"model_path"`  // Legacy single-model path
+	ModelPaths map[string]string `json:"model_paths"` // Multi-model map: modelKey -> path
+	AutoStart  bool              `json:"auto_start"`  // Auto-start on daemon startup
+	// AutoStopOnExit controls whether the platform stops this runtime when it
+	// shuts down. It is a pointer so an ABSENT key can be told apart from an
+	// explicit `false`: absent (nil) means true via AutoStopOnExitOrDefault,
+	// and only an explicit `false` opts out. As a plain bool an absent key
+	// decoded to false, so an endpoint that omits the key was neither stopped
+	// by the shutdown path nor reaped by the boot-time orphan sweep — it kept
+	// its model loaded and its port held after a clean shutdown and after a
+	// crash alike.
+	AutoStopOnExit *bool               `json:"auto_stop_on_exit,omitempty"` // Stop on daemon shutdown; absent means true
+	PIDFile        string              `json:"pid_file"`                    // Path to PID file
+	SpawnCommand   []string            `json:"spawn_command"`               // Command and args to spawn runtime
 	SpawnTimeout   int                 `json:"spawn_timeout_seconds"`
 	HealthCheck    HealthCheckConfig   `json:"health_check"`
 	RestartPolicy  RestartPolicyConfig `json:"restart_policy"`
+}
+
+// AutoStopOnExitOrDefault reports whether the platform should stop this
+// runtime when it shuts down. An absent key (nil pointer) defaults to true:
+// a managed runtime holds a model and a port, so silence must not mean "leave
+// it running". Only an explicit `false` opts out.
+func (c RuntimeLifecycleConfig) AutoStopOnExitOrDefault() bool {
+	return c.AutoStopOnExit == nil || *c.AutoStopOnExit
 }
 
 // HealthCheckConfig holds health check configuration.
@@ -181,7 +197,7 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 		ModelPaths:         modelPaths,
 		PIDFile:            pidFile,
 		AutoStart:          cfg.AutoStart,
-		AutoStop:           cfg.AutoStopOnExit,
+		AutoStop:           cfg.AutoStopOnExitOrDefault(),
 		SpawnCommand:       spawnCmd,
 		SpawnTimeout:       spawnTimeout,
 		HealthEndpoint:     cfg.HealthCheck.Endpoint,
@@ -410,12 +426,16 @@ func (p ProviderConfig) IsAutoStart() bool {
 	return p.Lifecycle.AutoStart
 }
 
-// IsAutoStopOnExit returns whether the runtime should auto-stop on daemon shutdown.
+// IsAutoStopOnExit returns whether the runtime should auto-stop on daemon
+// shutdown. An absent auto_stop_on_exit key defaults to true (see
+// RuntimeLifecycleConfig.AutoStopOnExitOrDefault); only an explicit false
+// opts out. A provider with no lifecycle block manages no runtime, so it
+// reports false.
 func (p ProviderConfig) IsAutoStopOnExit() bool {
 	if p.Lifecycle == nil {
 		return false
 	}
-	return p.Lifecycle.AutoStopOnExit
+	return p.Lifecycle.AutoStopOnExitOrDefault()
 }
 
 // String returns a human-readable representation of the runtime type.

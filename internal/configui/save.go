@@ -242,6 +242,21 @@ func setStructField(target any, path string, value string) error {
 					return fmt.Errorf("invalid bool %q: %w", value, err)
 				}
 				fv.SetBool(b)
+			case reflect.Ptr:
+				// Optional scalar, e.g. the *bool "absent means default"
+				// convention (auto_stop_on_exit): allocate and set so an
+				// explicit true/false round-trips instead of being rejected
+				// as unsupported.
+				if fv.Type().Elem().Kind() != reflect.Bool {
+					return fmt.Errorf("unsupported type %s for field %s", fv.Kind(), fieldName)
+				}
+				b, err := strconv.ParseBool(value)
+				if err != nil {
+					return fmt.Errorf("invalid bool %q: %w", value, err)
+				}
+				ptr := reflect.New(fv.Type().Elem())
+				ptr.Elem().SetBool(b)
+				fv.Set(ptr)
 			case reflect.Int, reflect.Int64:
 				// Special-case time.Duration: parse human-readable string (e.g. "1h30m")
 				if fv.Type().Name() == "Duration" {

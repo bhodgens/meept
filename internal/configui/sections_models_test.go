@@ -1,6 +1,8 @@
 package configui
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -160,4 +162,143 @@ func fieldKeys(fields []Field) []string {
 		keys = append(keys, f.Key())
 	}
 	return keys
+}
+
+// findField returns the field with the given key, or nil.
+func findField(fields []Field, key string) Field {
+	for _, f := range fields {
+		if f.Key() == key {
+			return f
+		}
+	}
+	return nil
+}
+
+// TestLifecycleAutoStopOnExitToggleDefaultsTrue verifies the config editor
+// shows the effective value: an absent or null auto_stop_on_exit key means
+// true, and only an explicit false shows up as off.
+func TestLifecycleAutoStopOnExitToggleDefaultsTrue(t *testing.T) {
+	cases := []struct {
+		name string
+		ptr  *bool
+		want string
+	}{
+		{"absent key", nil, "true"},
+		{"explicit true", new(true), "true"},
+		{"explicit false", new(false), "false"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			providers := map[string]llm.ProviderConfig{
+				"local": {
+					API: "openai",
+					Lifecycle: &llm.RuntimeLifecycleConfig{
+						Runtime:        "llama-cpp",
+						AutoStopOnExit: tc.ptr,
+					},
+				},
+			}
+			items := buildProviderItems(providers)
+			if len(items) != 1 {
+				t.Fatalf("expected 1 provider item, got %d", len(items))
+			}
+			f := findField(items[0].Fields, "lifecycle.auto_stop_on_exit")
+			if f == nil {
+				t.Fatalf("expected lifecycle.auto_stop_on_exit field; field keys: %v", fieldKeys(items[0].Fields))
+			}
+			if got := f.Get(); got != tc.want {
+				t.Errorf("auto stop on exit toggle = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSaveModelsConfigDrilldownAutoStopOnExitRoundTrip verifies an explicit
+// toggle value survives a save: the *bool is written explicitly (never dropped
+// to an absent key) and an explicit false still opts out of the shutdown path.
+func TestSaveModelsConfigDrilldownAutoStopOnExitRoundTrip(t *testing.T) {
+	cases := []struct {
+		name    string
+		initial *bool
+		set     string
+		want    bool
+	}{
+		{"toggle off from absent key", nil, "false", false},
+		{"toggle on from explicit false", new(false), "true", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := dir + "/models.json5"
+
+			origLoader := loadProvidersConfig
+			origPath := ConfigFilePath
+			t.Cleanup(func() {
+				loadProvidersConfig = origLoader
+				ConfigFilePath = origPath
+			})
+
+			provider := llm.ProviderConfig{
+				API: "openai",
+				Lifecycle: &llm.RuntimeLifecycleConfig{
+					Runtime:        "llama-cpp",
+					AutoStopOnExit: tc.initial,
+				},
+			}
+			loadProvidersConfig = func() (*llm.ProvidersConfig, error) {
+				return &llm.ProvidersConfig{
+					Providers: map[string]llm.ProviderConfig{"local": provider},
+				}, nil
+			}
+			ConfigFilePath = func(name string) string { return path }
+
+			items := buildProviderItems(map[string]llm.ProviderConfig{"local": provider})
+			if len(items) != 1 {
+				t.Fatalf("expected 1 provider item, got %d", len(items))
+			}
+			toggle, ok := findField(items[0].Fields, "lifecycle.auto_stop_on_exit").(*ToggleField)
+			if !ok {
+				t.Fatalf("expected a ToggleField for lifecycle.auto_stop_on_exit; field keys: %v", fieldKeys(items[0].Fields))
+			}
+			if err := toggle.Set(tc.set); err != nil {
+				t.Fatalf("set auto stop on exit: %v", err)
+			}
+
+			sm := NewDrilldownSectionModel(
+				"models > providers > local", "models", "models.json5",
+				"providers.local",
+				items[0].Fields,
+			)
+			if err := saveModelsConfig(sm); err != nil {
+				t.Fatalf("saveModelsConfig: %v", err)
+			}
+
+			// The value must be written explicitly, not dropped to an absent key.
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read saved models.json5: %v", err)
+			}
+			if !strings.Contains(string(raw), `"auto_stop_on_exit": `+tc.set) {
+				t.Errorf("saved config does not carry an explicit auto_stop_on_exit=%s: %s", tc.set, raw)
+			}
+
+			cfg, err := llm.LoadProvidersConfig(path)
+			if err != nil {
+				t.Fatalf("reload: %v", err)
+			}
+			saved, ok := cfg.Providers["local"]
+			if !ok {
+				t.Fatal("provider 'local' missing after save")
+			}
+			if saved.Lifecycle == nil {
+				t.Fatal("lifecycle block missing after save")
+			}
+			if saved.Lifecycle.AutoStopOnExit == nil {
+				t.Fatal("auto_stop_on_exit written as absent; an explicit value must round-trip")
+			}
+			if got := saved.IsAutoStopOnExit(); got != tc.want {
+				t.Errorf("IsAutoStopOnExit() after save = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

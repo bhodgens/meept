@@ -73,7 +73,10 @@ func lifecycleFields(lc llm.RuntimeLifecycleConfig) []Field {
 	return []Field{
 		NewSelectField("lifecycle.runtime", "runtime", lc.Runtime, []string{"llama-cpp", "mlx"}),
 		NewToggleField("lifecycle.auto_start", "auto start", lc.AutoStart),
-		NewToggleField("lifecycle.auto_stop_on_exit", "auto stop on exit", lc.AutoStopOnExit),
+		// Display the effective value: an absent auto_stop_on_exit key means
+		// true. Saving without touching the toggle leaves the key absent; a
+		// toggle writes an explicit true/false (save.go setStructField).
+		NewToggleField("lifecycle.auto_stop_on_exit", "auto stop on exit", lc.AutoStopOnExitOrDefault()),
 		NewTextField("lifecycle.model_path", "model path (legacy)", lc.ModelPath),
 		NewTextField("lifecycle.model_paths", "model paths (json)", modelPathsJSON),
 		NewTextField("lifecycle.spawn_command", "spawn command", spawnCmd),

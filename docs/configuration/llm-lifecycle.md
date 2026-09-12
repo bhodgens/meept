@@ -38,7 +38,7 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
 | `model_path` | string | see note | Path to a single model file (supports `~` expansion). Required unless `model_paths` is set |
 | `model_paths` | object | see note | Map of `modelKey` → model path, for multi-model servers sharing one subprocess. Required unless `model_path` is set |
 | `auto_start` | bool | no | Auto-start on platform startup (default: false) |
-| `auto_stop_on_exit` | bool | no | Stop on platform shutdown (absent/false leaves the runtime running; the shipped config sets `true` for the local runtimes) |
+| `auto_stop_on_exit` | bool | no | Stop on platform shutdown (default: true). Absent or `true` means the runtime is stopped by the shutdown path and reaped by the boot-time orphan sweep; only an explicit `false` leaves it running |
 | `pid_file` | string | yes | Path to PID file for process tracking |
 | `spawn_command` | array | yes | Command and arguments to spawn the runtime |
 | `spawn_timeout_seconds` | int | no | Timeout waiting for runtime to become healthy (default: 60) |
@@ -124,7 +124,7 @@ If no provider is specified, `local` is used by default.
 
 4. **PID File Management**: The runtime PID is stored in a file for cross-restart tracking. Stale PID files (from crashes) are automatically cleaned up on next startup. The `pid_file` of the first provider to register an endpoint wins; subsequent providers' `pid_file` values are ignored (debug log if they differ).
 
-5. **Graceful Shutdown**: On platform exit, each endpoint (not each provider) receives a single SIGTERM, then SIGKILL if it doesn't exit within the timeout. Health checkers are stopped and per-model/per-process log files are closed.
+5. **Graceful Shutdown**: On platform exit, each endpoint (not each provider) whose config does not set `auto_stop_on_exit: false` receives a single SIGTERM, then SIGKILL if it doesn't exit within the timeout. Health checkers are stopped and per-model/per-process log files are closed.
 
 ## Duplicate-Spawn Guard
 
@@ -154,11 +154,14 @@ endpoint port held. The ownership rule below keeps later boots from stopping it
 owned*), so the sweep is what reaps it.
 
 At boot, before starting its own runtimes, the platform sweeps those leftovers:
-for every endpoint with `auto_stop_on_exit: true`, a process whose parent is init
-(`ppid == 1`) and whose command line is exactly that endpoint's `spawn_command`
-is stopped (SIGTERM to the process group, then SIGKILL after a short grace
-period) and its PID file is removed. Endpoints with `auto_stop_on_exit: false`
-are left alone: that setting asks the runtime to outlive the platform.
+for every endpoint whose `auto_stop_on_exit` is `true` or absent, a process
+whose parent is init (`ppid == 1`) and whose command line is exactly that
+endpoint's `spawn_command` is stopped (SIGTERM to the process group, then
+SIGKILL after a short grace period) and its PID file is removed. Only
+`auto_stop_on_exit: false` is left alone: that setting asks the runtime to
+outlive the platform. The shutdown path (`StopAll`) and this boot-time sweep
+read the same flag, so an endpoint that omits the key is stopped with the
+platform and reaped as an orphan when the platform died hard.
 
 `meept doctor` reports the same leftovers as its `orphan-children` check, and
 `--fix` sends them SIGTERM. Windows is not supported by the sweep (no `ps`): the

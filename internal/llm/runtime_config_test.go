@@ -1,6 +1,7 @@
 package llm_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,7 @@ func TestValidateAndNormalize_ValidConfig(t *testing.T) {
 		Runtime:        "llama-cpp",
 		ModelPath:      modelPath,
 		AutoStart:      true,
-		AutoStopOnExit: true,
+		AutoStopOnExit: new(true),
 		PIDFile:        filepath.Join(pidDir, "llama.pid"),
 		SpawnCommand:   []string{"./llama-server", "--model", "$MODEL_PATH", "--port", "8080"},
 		SpawnTimeout:   30,
@@ -341,5 +342,97 @@ func TestComputeEndpointKey(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("ComputeEndpointKey(%q, %q) = %q, want %q", tc.runtime, tc.baseURL, got, tc.want)
 		}
+	}
+}
+
+// TestRuntimeLifecycleConfig_AutoStopOnExitOrDefault pins the absent-means-true
+// default. A managed runtime holds a model and a port, so only an explicit
+// false opts out of being stopped with the platform.
+func TestRuntimeLifecycleConfig_AutoStopOnExitOrDefault(t *testing.T) {
+	cases := []struct {
+		name string
+		ptr  *bool
+		want bool
+	}{
+		{"absent key", nil, true},
+		{"explicit true", new(true), true},
+		{"explicit false", new(false), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := llm.RuntimeLifecycleConfig{AutoStopOnExit: tc.ptr}
+			if got := cfg.AutoStopOnExitOrDefault(); got != tc.want {
+				t.Errorf("AutoStopOnExitOrDefault() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAutoStopOnExitJSON5Decode drives the real JSON5 loader (the path
+// models.json5 takes through LoadProvidersConfig) and asserts both the decoded
+// provider helper and the normalized RuntimeConfig the shutdown path (StopAll)
+// and the boot-time orphan sweep read: an absent key yields AutoStop=true, an
+// explicit false keeps opting out.
+func TestAutoStopOnExitJSON5Decode(t *testing.T) {
+	modelPath := createTempModelFile(t)
+	pidPath := filepath.Join(t.TempDir(), "pid", "llama.pid")
+
+	cases := []struct {
+		name     string
+		keyLine  string
+		wantStop bool
+	}{
+		{"absent key defaults to true", "", true},
+		{"explicit true", `"auto_stop_on_exit": true,`, true},
+		{"explicit false opts out", `"auto_stop_on_exit": false,`, false},
+		{"explicit null behaves as absent", `"auto_stop_on_exit": null,`, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "models.json5")
+			content := fmt.Sprintf(`{
+  "providers": {
+    "local": {
+      "api": "openai",
+      "options": { "baseURL": "http://127.0.0.1:8080/v1" },
+      "lifecycle": {
+        "runtime": "llama-cpp",
+        "model_path": %q,
+        "pid_file": %q,
+        "spawn_command": ["llama-server", "-m", %q, "--port", "8080"],
+        %s
+      },
+    },
+  },
+}
+`, modelPath, pidPath, modelPath, tc.keyLine)
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("write models.json5: %v", err)
+			}
+
+			cfg, err := llm.LoadProvidersConfig(path)
+			if err != nil {
+				t.Fatalf("LoadProvidersConfig: %v", err)
+			}
+			provider, ok := cfg.Providers["local"]
+			if !ok {
+				t.Fatal("provider 'local' missing after decode")
+			}
+			if provider.Lifecycle == nil {
+				t.Fatal("lifecycle block missing after decode")
+			}
+			if got := provider.IsAutoStopOnExit(); got != tc.wantStop {
+				t.Errorf("IsAutoStopOnExit() = %v, want %v", got, tc.wantStop)
+			}
+
+			runtimeCfg, err := llm.ValidateAndNormalize(*provider.Lifecycle)
+			if err != nil {
+				t.Fatalf("ValidateAndNormalize: %v", err)
+			}
+			if runtimeCfg.AutoStop != tc.wantStop {
+				t.Errorf("normalized AutoStop = %v, want %v", runtimeCfg.AutoStop, tc.wantStop)
+			}
+		})
 	}
 }
