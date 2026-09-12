@@ -1476,6 +1476,12 @@ func DefaultAlwaysFullTools() []string {
 		// model no parameter schema, and models then call it with empty
 		// args ("no URL specified"). Live-smoke finding, 2026-09-07.
 		"transcript_fetch",
+		// json_extract: the extraction consumer is typically a small model
+		// that will not pay a tool_view round-trip before calling the tool;
+		// without the full schema the researcher answered "partial" instead
+		// of calling it (live smoke, 2026-09-12). 5-param nested-object
+		// schema; only agents with the tool (researcher today) see it.
+		"json_extract",
 	}
 }
 

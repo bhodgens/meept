@@ -62,6 +62,7 @@ func TestDefaultAlwaysFullTools(t *testing.T) {
 		"memory_search", "memory_store", "web_fetch", "websearch",
 		"platform_status", "tool_view",
 		"transcript_fetch",
+		"json_extract",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("DefaultAlwaysFullTools() len = %d, want %d (%v)", len(got), len(want), got)
