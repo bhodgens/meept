@@ -1,1 +1,0 @@
-- [code-](patterns/code-.md): Successful approach for code
