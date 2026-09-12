@@ -699,8 +699,6 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                           context.goToolPrompts();
                         case 'settings':
                           context.goSettings();
-                        case 'files':
-                          context.goToolFiles();
                         case 'terminal':
                           context.goToolTerminal();
                         case 'calendar':

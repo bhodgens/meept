@@ -12,7 +12,6 @@ import '../features/memory/memory_panel.dart';
 import '../features/reflection/reflection_panel.dart';
 import '../features/changes/changes_panel.dart';
 import '../features/prompts/prompt_panel.dart';
-import '../features/files/files_panel.dart';
 import '../features/terminal/terminal_panel.dart';
 import '../features/calendar/calendar_panel.dart';
 import '../features/metrics/metrics_panel.dart';
@@ -135,13 +134,6 @@ final GoRouter router = GoRouter(
       name: 'toolsPrompts',
       builder: (context, state) {
         return const PromptPanel();
-      },
-    ),
-    GoRoute(
-      path: '/tools/files',
-      name: 'toolsFiles',
-      builder: (context, state) {
-        return const FilesPanel();
       },
     ),
     GoRoute(
@@ -360,9 +352,6 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the prompt-editor tool panel (replace current entry).
   void goToolPrompts() => go('/tools/prompts');
-
-  /// Navigate to the files tool panel (replace current entry).
-  void goToolFiles() => go('/tools/files');
 
   /// Navigate to the terminal tool panel (replace current entry).
   void goToolTerminal() => go('/tools/terminal');

@@ -5,12 +5,6 @@ part 'api_models.g.dart';
 
 // ===== UI-Only Panel Models =====
 
-/// Simple file entry for the files panel.
-class FileEntry {
-  final String path;
-  FileEntry({required this.path});
-}
-
 /// Memory search result model matching backend MemoryResult structure.
 class MemoryResultModel {
   final String id;

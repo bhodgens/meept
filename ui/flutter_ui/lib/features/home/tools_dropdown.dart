@@ -22,7 +22,6 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
   static const _knownTools = {
     'memory': Icons.memory,
     'changes': Icons.compare_arrows,
-    'files': Icons.folder,
     'terminal': Icons.terminal,
     'calendar': Icons.calendar_today,
     'metrics': Icons.insights,

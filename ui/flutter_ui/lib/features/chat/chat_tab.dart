@@ -5,7 +5,6 @@ import '../../providers/providers.dart';
 import 'chat_view.dart';
 import '../memory/memory_panel.dart';
 import '../settings/settings_panel.dart';
-import '../files/files_panel.dart';
 import '../calendar/calendar_panel.dart';
 import '../metrics/metrics_panel.dart';
 import '../terminal/terminal_panel.dart';
@@ -65,8 +64,6 @@ class _ChatTabState extends ConsumerState<ChatTab> {
         return const MemoryPanel();
       case 'settings':
         return const SettingsPanel();
-      case 'files':
-        return const FilesPanel();
       case 'calendar':
         return const CalendarPanel();
       case 'metrics':
