@@ -35,6 +35,28 @@ classifier cannot determine intent, quickplan clarifies what you need
 (up-front questions only), plans the work, and executes it
 autonomously — no approval pauses after that point.
 
+### The emittable lane list has one source of truth
+
+The LLM classifier can only emit lanes it is told about. That list lives in
+ONE place — `classifierLanes` in `internal/agent/llm_classifier.go` — and it
+drives all four consumers: the classifier system prompt, the per-lane
+description list in the user prompt, the `isValidIntent` gate, and the
+lane-to-agent mapping (`agentMapping`, falling back to each lane's
+`IntentType.DefaultAgent`).
+
+The list used to be duplicated as a literal in three of those places, and
+they drifted. `quickplan` had a dispatcher route, an agent mapping and 58
+gold evaluation cases while being absent from every list, so the LLM
+classifier could never emit it; `research` was missing from the
+`isValidIntent` gate, which made the research lane unreachable from the
+classifier entirely. Adding a lane to `classifierLanes` is now the whole
+change.
+
+Guards, in `internal/agent/classifier_lanes_test.go` — the build fails when
+the lists drift again: every lane used by the gold corpora is emittable,
+every corpus `expected_agent` equals `agentForIntent`, every advertised lane
+has a description and a route, and the user prompt lists every lane.
+
 ## Intent decision table
 
 Answer one question: **"what do I want to exist when this is done?"**

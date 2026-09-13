@@ -89,6 +89,13 @@ func localModelKey(name string) string {
 }
 
 // llamaSpawnCommand builds the llama-server spawn args for one model entry.
+//
+// --jinja is required for tool calls: without it llama-server does not render
+// the model's chat template, so the tool list never reaches the prompt and the
+// model cannot emit a call (measured 2026-09-12 on LFM2.5-8B-A1B: --jinja
+// returned finish_reason=tool_calls, the same model without it answered in
+// prose). The configured providers carry the flag in models.json5; this path
+// serves models discovered on disk, so it must set it too.
 func llamaSpawnCommand(modelKey, modelPath string) []string {
 	sum := sha256.Sum256([]byte(modelKey))
 	tag := hex.EncodeToString(sum[:])[:8]
@@ -96,5 +103,6 @@ func llamaSpawnCommand(modelKey, modelPath string) []string {
 		"llama-server",
 		"--model", modelPath,
 		"--alias", "meept-" + tag,
+		"--jinja",
 	}
 }

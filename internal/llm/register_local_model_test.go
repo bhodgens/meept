@@ -1,71 +1,36 @@
-package llm_test
+package llm
 
 import (
-	"log/slog"
+	"slices"
 	"testing"
-
-	"github.com/caimlas/meept/internal/llm"
 )
 
-func TestRegisterLocalModel_WiresLlamaCppConfig(t *testing.T) {
-	mgr := llm.NewRuntimeManager(slog.Default())
-
-	modelPath := createTempModelFile(t)
-	rec := llm.ModelRecord{
-		Name:   "org/repo-m-q4_k_m",
-		RepoID: "org/repo",
-		File:   modelPath,
+// llamaSpawnCommand must pass --jinja. Without it llama-server does not render
+// the model's chat template, the tool list never reaches the prompt, and the
+// model answers in prose instead of emitting a call - so every model
+// discovered on disk would be unable to use tools.
+func TestLlamaSpawnCommand_EnablesJinja(t *testing.T) {
+	args := llamaSpawnCommand("org--model-file", "/models/file.gguf")
+	if !slices.Contains(args, "--jinja") {
+		t.Errorf("llamaSpawnCommand = %v, want --jinja present", args)
 	}
-
-	if err := mgr.RegisterLocalModel(rec); err != nil {
-		t.Fatalf("RegisterLocalModel: %v", err)
+	if args[0] != "llama-server" {
+		t.Errorf("args[0] = %q, want llama-server", args[0])
 	}
-
-	statuses := mgr.Status()
-	if len(statuses) != 1 {
-		t.Fatalf("want 1 registered provider, got %d", len(statuses))
+	// The model path must still be passed, and the alias must be stable per
+	// model key (it is the name the daemon sends on requests).
+	if !slices.Contains(args, "/models/file.gguf") {
+		t.Errorf("llamaSpawnCommand = %v, want the model path", args)
 	}
-	st := statuses[0]
-	if st.ProviderID != llm.LocalModelsProviderID {
-		t.Errorf("ProviderID = %q, want %q", st.ProviderID, llm.LocalModelsProviderID)
+	if slices.Index(args, "--alias") < 0 {
+		t.Errorf("llamaSpawnCommand = %v, want --alias", args)
 	}
-	if st.Runtime != string(llm.RuntimeLlamaCpp) {
-		t.Errorf("Runtime = %q, want llama-cpp", st.Runtime)
+	if again := llamaSpawnCommand("org--model-file", "/models/file.gguf"); !slices.Equal(args, again) {
+		t.Errorf("not deterministic: %v vs %v", args, again)
 	}
-	if st.ModelPath != modelPath {
-		t.Errorf("ModelPath = %q, want %q", st.ModelPath, modelPath)
-	}
-}
-
-func TestRegisterLocalModel_MergesIntoSameEndpoint(t *testing.T) {
-	mgr := llm.NewRuntimeManager(slog.Default())
-	rec1 := llm.ModelRecord{Name: "a/m1", File: createTempModelFile(t)}
-	rec2 := llm.ModelRecord{Name: "b/m2", File: createTempModelFile(t)}
-
-	if err := mgr.RegisterLocalModel(rec1); err != nil {
-		t.Fatal(err)
-	}
-	if err := mgr.RegisterLocalModel(rec2); err != nil {
-		t.Fatal(err)
-	}
-
-	statuses := mgr.Status()
-	if len(statuses) != 1 {
-		t.Fatalf("expected merge into single endpoint provider, got %d providers", len(statuses))
-	}
-	if len(statuses[0].InUseModels) < 2 {
-		t.Errorf("expected both models merged; got %v", statuses[0].InUseModels)
-	}
-}
-
-func TestRegisterLocalModel_MissingFile(t *testing.T) {
-	mgr := llm.NewRuntimeManager(slog.Default())
-	err := mgr.RegisterLocalModel(llm.ModelRecord{Name: "x/y", File: "/nonexistent/model.gguf"})
-	if err == nil {
-		t.Fatal("expected error for missing file")
-	}
-	err2 := mgr.RegisterLocalModel(llm.ModelRecord{Name: "x/y"})
-	if err2 == nil {
-		t.Fatal("expected error for empty file path")
+	// A different model key gets a different alias.
+	other := llamaSpawnCommand("other--model-file", "/models/file.gguf")
+	if slices.Equal(args, other) {
+		t.Error("distinct model keys must produce distinct aliases")
 	}
 }

@@ -11,6 +11,7 @@ additional_tools:
   - file_delete
   - list_directory
   - shell_execute
+  - json_extract
 capabilities:
   - code
   - reasoning

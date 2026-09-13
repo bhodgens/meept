@@ -9,6 +9,7 @@ additional_tools:
   - web_fetch
   - web_search
   - transcript_fetch
+  - json_extract
   - skills_create
   - skills_patch
 max_iterations: 10

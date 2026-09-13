@@ -32,6 +32,86 @@ const (
 	defaultUnavailableCooldown = 60 * time.Second
 )
 
+// classifierLanes is the single source of truth for the intents the LLM
+// classifier may emit. It drives the classifier prompts, the validity gate
+// (isValidIntent), and - through agentMapping and IntentType.DefaultAgent -
+// the agent each lane routes to.
+//
+// Why one list: the lane list was duplicated as a hard-coded string in the
+// classifier prompt, again in the multi-intent prompt, and AGAIN in the
+// isValidIntent gate. They drifted. IntentQuickPlan shipped with a dispatcher
+// route, an agent mapping, and 58 gold evaluation cases, but was absent from
+// all three lists - so the LLM could never emit it and every "just do it"
+// prompt landed on a wrong lane (2026-09-12: a tool-invocation prompt
+// classified as platform at 0.9). IntentResearch and IntentToolUse were
+// missing from the gate for the same reason, which made the research lane
+// unreachable from the LLM classifier entirely.
+//
+// Order is deliberate: specific lanes first, the conversational catch-all
+// last, so the model reads the meaningful options before "chat".
+var classifierLanes = []IntentType{
+	IntentGit,
+	IntentSchedule,
+	IntentCode,
+	IntentDebug,
+	IntentReview,
+	IntentPlan,
+	IntentQuickPlan,
+	IntentPlatform,
+	IntentReport,
+	IntentRecall,
+	IntentAnalyze,
+	IntentSearch,
+	IntentResearch,
+	IntentExplore,
+	IntentToolUse,
+	IntentSecurity,
+	IntentStatus,
+	IntentWrite,
+	IntentArchitect,
+	IntentSkeptic,
+	IntentLibrarian,
+	IntentImageGen,
+	IntentVideoGen,
+	IntentImageID,
+	IntentInstruction,
+	IntentClarify,
+	IntentChat,
+}
+
+// classifierLaneSet is the membership set for isValidIntent, derived from
+// classifierLanes so the two can never disagree.
+var classifierLaneSet = func() map[string]bool {
+	set := make(map[string]bool, len(classifierLanes))
+	for _, lane := range classifierLanes {
+		set[string(lane)] = true
+	}
+	return set
+}()
+
+// laneList renders classifierLanes as the "a, b, c" list embedded in the
+// classifier prompts.
+func laneList() string {
+	names := make([]string, 0, len(classifierLanes))
+	for _, lane := range classifierLanes {
+		names = append(names, string(lane))
+	}
+	return strings.Join(names, ", ")
+}
+
+// agentForIntent maps a lane to its agent. Lanes without an explicit
+// agentMapping entry fall back to the lane's own DefaultAgent, so adding a
+// lane to classifierLanes is enough to give it a route.
+func agentForIntent(intent string) string {
+	if agent, ok := agentMapping[intent]; ok && agent != "" {
+		return agent
+	}
+	if agent := IntentType(intent).DefaultAgent(); agent != "" {
+		return agent
+	}
+	return config.AgentIDChat
+}
+
 var intentThresholds = map[string]float64{
 	string(IntentGit):      0.85,
 	string(IntentSchedule): 0.80,
@@ -261,7 +341,7 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 
 	classificationPrompt := c.buildClassificationPrompt(input)
 	messages := []llm.ChatMessage{
-		{Role: llm.RoleSystem, Content: "You are an intent classifier for an AI agent system. Classify user inputs into one of these intents: git, schedule, code, debug, review, plan, platform, report, recall, analyze, search, chat. Return ONLY valid JSON with fields: intent (lowercase), confidence (0.0-1.0), and optional reasoning."},
+		{Role: llm.RoleSystem, Content: "You are an intent classifier for an AI agent system. Classify user inputs into one of these intents: " + laneList() + ". Return ONLY valid JSON with fields: intent (lowercase), confidence (0.0-1.0), and optional reasoning."},
 		{Role: llm.RoleUser, Content: classificationPrompt},
 	}
 
@@ -378,7 +458,7 @@ func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemo
 A request may contain multiple independent tasks joined by "and", "also", "then", "but", "while", etc.
 
 For EACH detected intent, output:
-- intent: one of [git, schedule, code, debug, review, plan, platform, report, recall, analyze, search, chat]
+- intent: one of [%s]
 - confidence: 0.0-1.0
 - summary: brief description
 
@@ -387,7 +467,7 @@ User input: %s
 Return ONLY valid JSON array: [{"intent": "debug", "confidence": 0.8, "summary": "..."}]
 
 If only one intent is present, return a single-element array.
-If no intents detected, return empty array [].`, input)
+If no intents detected, return empty array [].`, laneList(), input)
 
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: "You are a multi-intent detector for an AI agent system. Identify ALL distinct intents in user requests."},
@@ -440,10 +520,7 @@ If no intents detected, return empty array [].`, input)
 		if !isValidIntent(intent) {
 			continue
 		}
-		agentType := agentMapping[intent]
-		if agentType == "" {
-			agentType = string(IntentChat)
-		}
+		agentType := agentForIntent(intent)
 		requiresPlanning := intent == string(IntentPlan)
 		intents = append(intents, &Intent{
 			Type:             intent,
@@ -478,8 +555,8 @@ func (c *LLMClassifier) buildClassificationPrompt(input string) string {
 	sb.WriteString(input)
 	sb.WriteString("\n\n")
 	sb.WriteString("Available intents:\n")
-	intents := []string{string(IntentGit), string(IntentSchedule), string(IntentCode), string(IntentDebug), string(IntentReview), string(IntentPlan), string(IntentPlatform), string(IntentReport), string(IntentRecall), string(IntentAnalyze), string(IntentSearch), string(IntentChat)}
-	for _, intent := range intents {
+	for _, lane := range classifierLanes {
+		intent := string(lane)
 		sb.WriteString("- ")
 		sb.WriteString(intent)
 		sb.WriteString(": ")
@@ -492,18 +569,38 @@ func (c *LLMClassifier) buildClassificationPrompt(input string) string {
 
 func (c *LLMClassifier) getIntentDescription(intent string) string {
 	descriptions := map[string]string{
-		string(IntentGit):      "Git operations (commit, push, pull, merge, branch)",
-		string(IntentSchedule): "Scheduling, reminders, timers, future tasks",
-		string(IntentCode):     "Code writing, implementation, refactoring",
-		string(IntentDebug):    "Bug fixing, debugging, error handling",
-		string(IntentReview):   "Code review, PR review",
-		string(IntentPlan):     "Planning, architecture, design",
-		string(IntentPlatform): "Questions about agent capabilities, tools",
-		string(IntentReport):   "Status reports, summaries of work done",
-		string(IntentRecall):   "Memory recall, remembering past conversations",
-		string(IntentAnalyze):  "Research, analysis, explanations",
-		string(IntentSearch):   "Web search, finding information",
-		string(IntentChat):     "General conversation, greetings, help",
+		string(IntentGit):       "Git operations (commit, push, pull, merge, branch)",
+		string(IntentSchedule):  "Scheduling, reminders, timers, future tasks",
+		string(IntentCode):      "Code writing, implementation, refactoring",
+		string(IntentDebug):     "Bug fixing, debugging, error handling",
+		string(IntentReview):    "Code review, PR review, assessing existing work",
+		string(IntentPlan):      "Planning, architecture, design",
+		string(IntentQuickPlan): "Do the work now, end to end, without check-ins",
+		// platform is QUESTIONS ABOUT the platform, not the act of using a
+		// tool. The old wording ("Questions about agent capabilities, tools")
+		// matched "call the <tool> tool" prompts and sent them here
+		// (2026-09-12: an explicit json_extract request classified as
+		// platform at 0.95).
+		string(IntentPlatform):    "Questions about the platform itself: which agents exist, what the system can do, how it works",
+		string(IntentToolUse):     "Run one specific named tool now with explicit arguments",
+		string(IntentReport):      "Status reports, summaries of work done",
+		string(IntentRecall):      "Memory recall, remembering past conversations",
+		string(IntentAnalyze):     "Analysis, explanations, tradeoffs, comparisons",
+		string(IntentSearch):      "Web search, finding information",
+		string(IntentResearch):    "Research a topic: gather sources and extract structured data from them",
+		string(IntentExplore):     "Read-only exploration of an existing codebase",
+		string(IntentSecurity):    "Security review, secrets, permissions, vulnerability work",
+		string(IntentStatus):      "Status inquiries about running work",
+		string(IntentWrite):       "Writing prose: docs, README, release notes",
+		string(IntentArchitect):   "System architecture decisions and designs",
+		string(IntentSkeptic):     "Adversarial review: find what is wrong with a claim or design",
+		string(IntentLibrarian):   "Organize or curate knowledge and references",
+		string(IntentImageGen):    "Generate an image",
+		string(IntentVideoGen):    "Generate a video",
+		string(IntentImageID):     "Identify or describe the contents of an image",
+		string(IntentInstruction): "Standing instructions: 'always', 'every day at', 'remember to'",
+		string(IntentClarify):     "The request cannot be acted on until the user answers a question",
+		string(IntentChat):        "General conversation, greetings, help",
 	}
 	if desc, ok := descriptions[intent]; ok {
 		return desc
@@ -535,10 +632,7 @@ func (c *LLMClassifier) parseResponse(content, originalInput string) (*Intent, e
 		return nil, fmt.Errorf("invalid intent: %s", resp.Intent)
 	}
 
-	agentType := agentMapping[resp.Intent]
-	if agentType == "" {
-		agentType = string(IntentChat)
-	}
+	agentType := agentForIntent(resp.Intent)
 
 	requiresPlanning := resp.Intent == string(IntentPlan)
 
@@ -611,21 +705,7 @@ func extractJSONFromLLM(s string) string {
 }
 
 func isValidIntent(intent string) bool {
-	validIntents := map[string]bool{
-		string(IntentGit):      true,
-		string(IntentSchedule): true,
-		string(IntentCode):     true,
-		string(IntentDebug):    true,
-		string(IntentReview):   true,
-		string(IntentPlan):     true,
-		string(IntentPlatform): true,
-		string(IntentReport):   true,
-		string(IntentRecall):   true,
-		string(IntentAnalyze):  true,
-		string(IntentSearch):   true,
-		string(IntentChat):     true,
-	}
-	return validIntents[intent]
+	return classifierLaneSet[intent]
 }
 
 func clampConfidence(conf float64) float64 {
