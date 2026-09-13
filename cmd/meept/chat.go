@@ -206,10 +206,25 @@ func getOrCreateOneshotSession(client transport.Client) (string, error) {
 		}
 	}
 
-	// Create oneshot_responses session if not found
-	createResult, err := client.Call("session.create", map[string]string{
+	// Create oneshot_responses session if not found. Send the client's CWD as
+	// detection_context.cwd: without it the session has no project and no
+	// directory, so every filesystem tool fails with tools.ErrNoWorkingDir
+	// ("no working directory for this session"). The CLI runs in the user's
+	// shell, so os.Getwd() is correct here (AGENTS.md: only the daemon must
+	// never use its own CWD).
+	oneshotParams := map[string]any{
 		"name": "oneshot_responses",
-	})
+	}
+	oneshotCWD := chatCwd
+	if oneshotCWD == "" {
+		if wd, wdErr := os.Getwd(); wdErr == nil {
+			oneshotCWD = wd
+		}
+	}
+	if oneshotCWD != "" {
+		oneshotParams["detection_context"] = map[string]any{"cwd": oneshotCWD}
+	}
+	createResult, err := client.Call("session.create", oneshotParams)
 	if err != nil {
 		return "", fmt.Errorf("failed to create oneshot session: %w", err)
 	}
@@ -265,6 +280,19 @@ func resolveProjectByName(client transport.Client, name string) (projectID, proj
 func createFlaggedSession(client transport.Client, name, projectID, projectPath string, noFence bool) (string, error) {
 	createParams := map[string]any{
 		"name": name,
+	}
+	// The client's CWD becomes the session's detection-context directory, the
+	// last session-bound source in the working-directory precedence
+	// (worktree > project > detection CWD). Without it a session with no
+	// project runs pathless and every filesystem tool fails.
+	sessionCWD := chatCwd
+	if sessionCWD == "" {
+		if wd, wdErr := os.Getwd(); wdErr == nil {
+			sessionCWD = wd
+		}
+	}
+	if sessionCWD != "" {
+		createParams["detection_context"] = map[string]any{"cwd": sessionCWD}
 	}
 	if projectID != "" {
 		createParams["project_id"] = projectID

@@ -127,7 +127,7 @@ func newSessionCreateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "create <name>",
-		Short: "Create a new session",
+		Short: "Create a new chat session",
 		Long:  "Create a new chat session with the given name.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -139,9 +139,27 @@ func newSessionCreateCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			params := map[string]string{
+			// The session's detection-context CWD is the client-side directory
+			// used by the working-directory precedence (worktree > project >
+			// detection CWD) and it is what makes a project-less session able
+			// to run filesystem tools at all. Default to the shell's CWD, since
+			// this command runs in the user's shell (AGENTS.md allows os.Getwd
+			// for clients, never for the daemon).
+			// --cwd is the root command's persistent flag (rootCwd), the same
+			// one `meept chat` honors; do not redeclare it locally or it
+			// shadows the root's.
+			sessionCWD := rootCwd
+			if sessionCWD == "" {
+				if wd, wdErr := os.Getwd(); wdErr == nil {
+					sessionCWD = wd
+				}
+			}
+			params := map[string]any{
 				"name":        name,
 				"description": description,
+			}
+			if sessionCWD != "" {
+				params["detection_context"] = map[string]any{"cwd": sessionCWD}
 			}
 
 			rawResult, err := client.Call("session.create", params)
@@ -171,7 +189,11 @@ func newSessionCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&description, "description", "d", "", "Session description")
+	// No `-d` shorthand: the root command already binds `-d` to --state-dir,
+	// and cobra panics when a local shorthand collides with an inherited one
+	// ("unable to redefine 'd' shorthand in \"create\" flagset"), which made
+	// every invocation of this command fail before it ran.
+	cmd.Flags().StringVar(&description, "description", "", "Session description")
 
 	return cmd
 }
