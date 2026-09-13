@@ -2132,9 +2132,15 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 		loop.logger.Debug("ContextFirewall enabled for agent loop")
 	}
 
-	// Initialize multi-turn budget tracker
-	// Default: 100,000 tokens total, 30,000 per turn, max 10 turns
-	loop.budgetTracker = NewTurnBudgetTracker(100000, 30000, 10)
+	// Multi-turn budget tracker is OPT-IN, like the hierarchical budget: it
+	// stays nil here and is created by SetBudgetConfig when
+	// llm.budget.enabled is true and a positive total is configured.
+	//
+	// It used to be constructed unconditionally with a hardcoded 100000 total
+	// / 30000 per turn / 10 turns, so every loop entered its warning zone,
+	// suppressed tools and pushed a wrap-up instruction whatever the config
+	// said. Budgets are off by default, so this default is gone. Both readers
+	// nil-check (see reasoningCycle and the usage recorder).
 
 	// Initialize retry metrics collector and wire to executor.
 	loop.retryMetrics = NewRetryMetrics()
@@ -7654,6 +7660,15 @@ func (l *AgentLoop) SetBudgetConfig(total int, opts BudgetHierarchyOptions) {
 		if l.logger != nil {
 			l.logger.Warn("SetBudgetConfig: failed to select default phase", "error", err)
 		}
+	}
+	// The multi-turn tracker is part of the same opt-in budget: create it here
+	// (never in the constructor) so a loop without a configured budget has
+	// neither a hierarchy nor a wrap-up nudge. The per-turn and max-turn split
+	// is derived from the configured total because meept.json5 carries one
+	// number; a quarter of the task budget per turn across ten turns keeps the
+	// wrap-up roughly one turn before the phase budget would run out.
+	if l.budgetTracker == nil {
+		l.budgetTracker = NewTurnBudgetTracker(total, total/4, 10)
 	}
 }
 

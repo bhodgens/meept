@@ -630,7 +630,8 @@ func TestCodexSSEBudgetRecordingOnStream(t *testing.T) {
 		"usage": map[string]any{"input_tokens": 100, "output_tokens": 50},
 	})
 	srv, _ := codexTestServerWithResponder(t, http.StatusOK, "text/event-stream", codexSSEBody(events))
-	budget := NewBudgetFromDefaults(slog.New(slog.DiscardHandler))
+	// No budget limits: usage recording is what this test asserts.
+	budget := NewBudget(BudgetConfig{}, slog.New(slog.DiscardHandler))
 	client := newCodexClientForTest(t, srv.URL, WithCodexBudget(budget))
 	if _, err := client.ChatWithDeltaCallback(context.Background(),
 		[]ChatMessage{{Role: RoleUser, Content: "x"}},

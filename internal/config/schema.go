@@ -1083,7 +1083,19 @@ type LLMMetricsConfig struct {
 }
 
 // BudgetConfig holds token budget settings.
+//
+// meept.json5 is the SINGLE source of truth for budget values. No Go code
+// invents a non-zero limit: DefaultConfig() is the all-zero, disabled posture,
+// and a zero field always means "unlimited" for that limit (never a default
+// cap).
+//
+// Enabled is the ONE global budget switch. When false (the default) NO budget
+// is enforced anywhere: not the hourly/daily/per-task/per-session token and
+// cost limits, not the RPM rate limit, and not the hierarchical
+// task/phase/turn budget (which additionally requires a positive
+// agent.budget.total). When true, the configured limits apply.
 type BudgetConfig struct {
+	Enabled              bool    `json:"enabled"              toml:"enabled"`
 	HourlyTokenLimit     int     `json:"hourly_token_limit"   toml:"hourly_token_limit"`
 	DailyTokenLimit      int     `json:"daily_token_limit"    toml:"daily_token_limit"`
 	DailyCostLimit       float64 `json:"daily_cost_limit"     toml:"daily_cost_limit"`
@@ -1409,7 +1421,9 @@ type AgentConfig struct {
 	Retry AgentRetryConfig `json:"retry" toml:"retry"`
 	// StateTracking configures the agent state machine observability hooks.
 	StateTracking AgentStateTrackingConfig `json:"state_tracking" toml:"state_tracking"`
-	// Budget configures hierarchical task/phase/turn token budgets.
+	// Budget configures hierarchical task/phase/turn token budgets. It is
+	// subordinate to the single global switch llm.budget.enabled: the
+	// hierarchy is wired only when that switch is true AND Total > 0.
 	Budget AgentBudgetConfig `json:"budget" toml:"budget"`
 	// ParallelToolExec configures dependency-aware parallel tool execution.
 	ParallelToolExec AgentParallelToolConfig `json:"parallel_tool_execution" toml:"parallel_tool_execution"`
@@ -1562,18 +1576,23 @@ type AgentStateTrackingConfig struct {
 
 // AgentBudgetConfig configures hierarchical task/phase/turn token budgets.
 //
-// Disabled by default: no hierarchical budget is wired unless Enabled is true
-// AND Total is positive. Budgets are an opt-in safety rail, not a default
-// operating limit.
+// There is ONE global budget switch, llm.budget.enabled, and this section has
+// no enable flag of its own (an earlier agent.budget.enabled was removed to
+// avoid two independent switches). The hierarchy is wired only when the global
+// switch is true AND Total is positive; otherwise the AgentLoop keeps a nil
+// hierarchy. An absent/zero Total means "unlimited" - never a default cap.
 type AgentBudgetConfig struct {
-	Enabled           bool                    `json:"enabled"           toml:"enabled"`         // wire the hierarchical budget (default: false)
-	Total             int                     `json:"total"              toml:"total"`          // Total task budget in tokens
+	Total             int                     `json:"total"              toml:"total"`          // Total task budget in tokens (0 = no cap)
 	ReservedRatio     float64                 `json:"reserved_ratio"     toml:"reserved_ratio"` // Emergency reserve fraction (0.0-1.0)
 	Phases            AgentBudgetPhasesConfig `json:"phases"             toml:"phases"`
 	WarningThresholds AgentBudgetThresholds   `json:"warning_thresholds" toml:"warning_thresholds"`
 }
 
 // AgentBudgetPhasesConfig configures phase-level budget allocation behavior.
+//
+// Subordinate: it only refines how an already-enabled hierarchy (global switch
+// on + positive agent.budget.total) distributes budget. Enabled cannot turn a
+// budget on by itself.
 type AgentBudgetPhasesConfig struct {
 	Enabled      bool `json:"enabled"       toml:"enabled"`
 	AutoAllocate bool `json:"auto_allocate" toml:"auto_allocate"` // Auto-distribute if not specified
@@ -2625,17 +2644,22 @@ func DefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			ModelsDir: "~/.meept/models",
+			// Budget: NO budget. Enabled=false and every limit 0 means
+			// "unlimited" everywhere - a zero limit is unlimited, never a
+			// default cap. Budget VALUES live only in meept.json5 (the SSOT);
+			// Go never invents one.
 			Budget: BudgetConfig{
-				HourlyTokenLimit:     0,   // 0 = disabled; suggested: 200000 (input-only) or 350000 (total)
-				DailyTokenLimit:      0,   // 0 = disabled; suggested: 1000000
-				DailyCostLimit:       0.0, // 0 = disabled; suggested: 10.0 for paid providers only
-				HourlyCostLimit:      0.0, // 0 = disabled; suggested: 2.0 for paid providers only
-				RateLimitRPM:         30,
+				Enabled:              false,
+				HourlyTokenLimit:     0,
+				DailyTokenLimit:      0,
+				DailyCostLimit:       0.0,
+				HourlyCostLimit:      0.0,
+				RateLimitRPM:         0, // 0 = unlimited
 				Aggressiveness:       0.5,
-				PerTaskTokenLimit:    0,   // 0 = disabled; suggested: 50000
-				PerSessionTokenLimit: 0,   // 0 = disabled; suggested: 100000
-				PerTaskCostLimit:     0.0, // 0 = disabled
-				PerSessionCostLimit:  0.0, // 0 = disabled
+				PerTaskTokenLimit:    0,
+				PerSessionTokenLimit: 0,
+				PerTaskCostLimit:     0.0,
+				PerSessionCostLimit:  0.0,
 			},
 			Broker: LLMBrokerConfig{
 				MaxErrorRate:    0.10,
@@ -2873,10 +2897,10 @@ func DefaultConfig() *Config {
 				EmitEvents: true,
 			},
 			Budget: AgentBudgetConfig{
-				// DISABLED by default (2026-09-13): budgets are an opt-in
-				// safety rail. Set enabled: true and a positive total to turn
-				// the hierarchical task/phase/turn budget on.
-				Enabled:       false,
+				// NO budget by default: Total 0 means the hierarchy is never
+				// wired. The single global switch is llm.budget.enabled - set
+				// it true AND give a positive total to turn the hierarchical
+				// task/phase/turn budget on.
 				Total:         0,
 				ReservedRatio: 0.1, // 10% emergency reserve
 				Phases: AgentBudgetPhasesConfig{

@@ -483,14 +483,15 @@ func TestCodexChatWithProgress(t *testing.T) {
 
 func TestCodexChatBudgetRecording(t *testing.T) {
 	srv, _ := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":100,"output_tokens":50}}`})
-	budget := NewBudgetFromDefaults(slog.New(slog.DiscardHandler))
+	// No budget limits here: this test asserts usage recording, not
+	// enforcement (budget values come from config, never a Go default).
+	budget := NewBudget(BudgetConfig{}, slog.New(slog.DiscardHandler))
 	client := newCodexClientForTest(t, srv.URL, WithCodexBudget(budget))
 	if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "x"}}); err != nil {
 		t.Fatalf("Chat: %v", err)
 	}
 	status := budget.GetStatus()
-	// NewBudgetFromDefaults hourly limit 500000; after one request hourly
-	// used should reflect 150 tokens.
+	// After one request hourly used should reflect 150 tokens.
 	if status.HourlyUsed != 150 {
 		t.Errorf("HourlyUsed = %v, want 150", status.HourlyUsed)
 	}

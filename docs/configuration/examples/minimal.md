@@ -14,6 +14,7 @@ log_level = "INFO"
 data_dir = "~/.meept"
 
 [llm.budget]
+enabled = true                    # global budget switch (default false)
 hourly_token_limit = 100000
 daily_token_limit = 1000000
 rate_limit_rpm = 30

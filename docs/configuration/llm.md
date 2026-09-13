@@ -257,20 +257,23 @@ cooldowns: cooldown duration always comes from the alias `timeout` base
 
 For comprehensive budget documentation, see [Token Budgets Configuration](token-budgets.md).
 
+Budgets are **off unless enabled**: `meept.json5` is the single source of truth for budget values, and `llm.budget.enabled` is the one global switch. When it is `false` (the default) nothing is enforced - not the LLM limits, not the rate limit, not the hierarchical task budget (`agent.budget`). Defaults are the disabled posture (every limit `0` = unlimited).
+
 Quick reference (`~/.meept/meept.json5`):
 
 ```json5
 {
   "llm": {
     "budget": {
-      "hourly_token_limit": 100000,      // Tokens per sliding hour
-      "daily_token_limit": 1000000,      // Tokens per UTC day
-      "daily_cost_limit": 10.0,          // Max USD per day
-      "hourly_cost_limit": 2.0,          // Max USD per hour
-      "rate_limit_rpm": 30,              // Max requests per minute
+      "enabled": true,                   // THE global switch (default false)
+      "hourly_token_limit": 100000,      // Tokens per sliding hour (0 = unlimited)
+      "daily_token_limit": 1000000,      // Tokens per UTC day (0 = unlimited)
+      "daily_cost_limit": 10.0,          // Max USD per day (0 = no limit)
+      "hourly_cost_limit": 2.0,          // Max USD per hour (0 = no limit)
+      "rate_limit_rpm": 30,              // Max requests per minute (0 = unlimited)
       "aggressiveness": 0.5,             // 0.0-1.0 usage factor
-      "per_task_token_limit": 50000,     // Cap per single task
-      "per_session_token_limit": 100000, // Cap per session
+      "per_task_token_limit": 50000,     // Cap per single task (0 = no cap)
+      "per_session_token_limit": 100000, // Cap per session (0 = no cap)
     }
   }
 }
@@ -280,20 +283,21 @@ Quick reference (`~/.meept/meept.json5`):
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `hourly_token_limit` | Maximum tokens in sliding 1-hour window | 100000 |
-| `daily_token_limit` | Maximum tokens per UTC day | 1000000 |
-| `daily_cost_limit` | Maximum USD cost per UTC day | 10.0 |
-| `hourly_cost_limit` | Maximum USD cost per sliding hour | 2.0 |
-| `rate_limit_rpm` | Maximum requests per minute | 30 |
-| `aggressiveness` | Budget usage factor (0.0-1.0) | 0.5 |
-| `per_task_token_limit` | Token cap per individual task | 50000 |
-| `per_session_token_limit` | Token cap per conversation session | 100000 |
+| `enabled` | THE global budget switch. `false` = no budget enforced anywhere. | `false` |
+| `hourly_token_limit` | Maximum tokens in sliding 1-hour window | `0` (unlimited) |
+| `daily_token_limit` | Maximum tokens per UTC day | `0` (unlimited) |
+| `daily_cost_limit` | Maximum USD cost per UTC day | `0` (unlimited) |
+| `hourly_cost_limit` | Maximum USD cost per sliding hour | `0` (unlimited) |
+| `rate_limit_rpm` | Maximum requests per minute | `0` (unlimited) |
+| `aggressiveness` | Budget usage factor (0.0-1.0) | `0.5` |
+| `per_task_token_limit` | Token cap per individual task | `0` (no cap) |
+| `per_session_token_limit` | Token cap per conversation session | `0` (no cap) |
 
-**Note:** Setting any limit to `0` disables that specific limit. When all limits are `0`, budget enforcement is completely disabled.
+**Note:** budgets are enforced only when `enabled` is `true`. While it is `false`, limits load but are inert. With `enabled: true`, a limit of `0` still means unlimited for that specific limit. The hierarchical `agent.budget` requires `llm.budget.enabled` **and** a positive `agent.budget.total`.
 
 ### Token Budget Enforcement
 
-The budget system:
+With the switch on, the budget system:
 - Tracks token usage across all providers and models
 - Enforces hourly and daily token limits
 - Enforces hourly and daily dollar cost limits (requires model pricing)

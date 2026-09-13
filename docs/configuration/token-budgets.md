@@ -2,6 +2,16 @@
 
 Token budgets control LLM API consumption by enforcing configurable limits on token usage and cost. The system prevents runaway spending, rate limit violations, and ensures predictable operational costs.
 
+## Single source of truth, and one global switch
+
+`meept.json5` (at `$MEEPT_HOME/meept.json5`, default `~/.meept/meept.json5`) is the **single source of truth** for budget values:
+
+- No Go code defines a non-zero budget default. `config.DefaultConfig()` is the all-zero, `enabled: false` posture, and any value absent from the config means **unlimited** - never a default cap.
+- `llm.budget.enabled` is the **one global switch**. While it is `false` (the default), **no budget is enforced anywhere**: not the hourly/daily/per-task/per-session token and cost limits, not the RPM rate limit, and not the hierarchical task/phase/turn budget (`agent.budget`).
+- When it is `true`, the configured limits apply.
+
+**Back-compatibility:** a config with no `llm.budget` section, or with limits but no `enabled` key, behaves exactly like `enabled: false` - the values still load, but nothing is enforced until you opt in.
+
 ## What Are Token Budgets
 
 Token budgets are limits that constrain how many tokens or how much money the LLM subsystem can spend within specified time windows. Budgets are enforced **before every LLM API call** via `CheckBudget()` in `internal/llm/client.go`. If a budget limit would be exceeded, the call is blocked and returns a `BudgetExceededError`.
@@ -16,12 +26,16 @@ Token budgets are limits that constrain how many tokens or how much money the LL
 
 ## Configuration Options
 
-All budget settings are in `~/.meept/meept.json5` under `llm.budget`:
+All budget settings are in `~/.meept/meept.json5` under `llm.budget`. Every limit defaults to `0` (unlimited) and the global switch defaults to `false` (no budget). To enforce anything you must opt in with `"enabled": true`:
 
 ```json5
 {
   "llm": {
     "budget": {
+      // THE global switch. false = no budget is enforced anywhere. The
+      // example values below are inert until this is true.
+      "enabled": true,
+
       // Token limits (sliding window)
       "hourly_token_limit": 100000,      // Max tokens in sliding 1-hour window (0 = unlimited)
       "daily_token_limit": 1000000,      // Max tokens per UTC day (0 = unlimited)
@@ -46,18 +60,43 @@ All budget settings are in `~/.meept/meept.json5` under `llm.budget`:
 
 ### Field Descriptions
 
+Defaults are the **disabled** posture: `enabled: false` and every limit `0` (unlimited).
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `hourly_token_limit` | int | 100000 | Maximum tokens allowed in any sliding 1-hour window. Set to `0` to disable. |
-| `daily_token_limit` | int | 1000000 | Maximum tokens allowed per UTC day (resets at midnight UTC). Set to `0` to disable. |
-| `daily_cost_limit` | float | 10.0 | Maximum USD cost per UTC day. Requires model pricing in `models.json5`. Set to `0` to disable. |
-| `hourly_cost_limit` | float | 2.0 | Maximum USD cost in any sliding 1-hour window. Set to `0` to disable. |
-| `rate_limit_rpm` | int | 30 | Maximum requests per minute. When exceeded, requests block and wait (not rejected). |
-| `aggressiveness` | float | 0.5 | Multiplier applied to all limits (see formula below). Range: 0.0-1.0. |
-| `per_task_token_limit` | int | 50000 | Maximum tokens a single task can consume. Prevents one task from exhausting the budget. |
-| `per_session_token_limit` | int | 100000 | Maximum tokens a single conversation session can consume. |
-| `per_task_cost_limit` | float | 5.0 | Maximum USD cost a single task can incur. Prevents expensive tasks from exhausting the budget. |
-| `per_session_cost_limit` | float | 10.0 | Maximum USD cost a single conversation session can incur. |
+| `enabled` | bool | **false** | THE global budget switch. When false, no budget is enforced anywhere (these limits, the RPM rate limit, and `agent.budget`). Set true to apply the configured limits. |
+| `hourly_token_limit` | int | 0 | Maximum tokens allowed in any sliding 1-hour window. `0` = unlimited. |
+| `daily_token_limit` | int | 0 | Maximum tokens allowed per UTC day (resets at midnight UTC). `0` = unlimited. |
+| `daily_cost_limit` | float | 0 | Maximum USD cost per UTC day. Requires model pricing in `models.json5`. `0` = no limit. |
+| `hourly_cost_limit` | float | 0 | Maximum USD cost in any sliding 1-hour window. `0` = no limit. |
+| `rate_limit_rpm` | int | 0 | Maximum requests per minute. When exceeded, requests block and wait (not rejected). `0` = unlimited. |
+| `aggressiveness` | float | 0.5 | Multiplier applied to all limits (see formula below). Range: 0.0-1.0. Not a limit itself. |
+| `per_task_token_limit` | int | 0 | Maximum tokens a single task can consume. Prevents one task from exhausting the budget. |
+| `per_session_token_limit` | int | 0 | Maximum tokens a single conversation session can consume. |
+| `per_task_cost_limit` | float | 0 | Maximum USD cost a single task can incur. Prevents expensive tasks from exhausting the budget. |
+| `per_session_cost_limit` | float | 0 | Maximum USD cost a single conversation session can incur. |
+
+### The Hierarchical Task Budget
+
+`agent.budget` (the task/phase/turn token hierarchy) is **subordinate to the same single switch**. It is wired only when `llm.budget.enabled` is `true` **and** `agent.budget.total` is positive:
+
+```json5
+{
+  "llm": {
+    "budget": { "enabled": true }        // the global switch
+  },
+  "agent": {
+    "budget": {
+      "total": 200000,                   // positive total required; 0 = no cap
+      "reserved_ratio": 0.1,
+      "phases": { "enabled": true, "auto_allocate": true, "carryover": true, "borrowing": true }
+    }
+  }
+}
+```
+
+There is deliberately **no `agent.budget.enabled` flag** - an earlier one was removed so that exactly one switch governs budgets. With the switch off (or `total: 0`) the AgentLoop keeps no hierarchy at all: turns are never parked, warned, or cut off by a token allocation. `agent.budget.phases.enabled` only refines how an already-enabled hierarchy distributes budget; it cannot turn a budget on.
+
 
 ### Per-Task vs. Per-Session Budgets
 
@@ -109,6 +148,7 @@ For local development with Ollama or other free local models:
 {
   "llm": {
     "budget": {
+      "enabled": true,
       "hourly_token_limit": 50000,
       "daily_token_limit": 500000,
       "rate_limit_rpm": 60,
@@ -129,6 +169,7 @@ For general use with paid providers (OpenAI, Anthropic, OpenRouter):
 {
   "llm": {
     "budget": {
+      "enabled": true,
       "hourly_token_limit": 100000,
       "daily_token_limit": 1000000,
       "daily_cost_limit": 10.0,
@@ -150,6 +191,7 @@ For production environments or shared infrastructure:
 {
   "llm": {
     "budget": {
+      "enabled": true,
       "hourly_token_limit": 30000,
       "daily_token_limit": 200000,
       "daily_cost_limit": 5.0,
@@ -258,21 +300,30 @@ $ curl -H "Authorization: Bearer YOUR_API_KEY" \
 
 ## Behavior Details
 
-### Zero Means "Unconfigured"
+### The Switch Off Means "Unlimited"
 
-When **all** budget limits are `0`, the budget system allows all requests without tracking:
+With `enabled: false` (the default), every limit is inert and the budget system allows all requests without enforcement, even if limits are set:
 
 ```json5
 {
-  "hourly_token_limit": 0,
-  "daily_token_limit": 0,
-  "daily_cost_limit": 0,
-  "hourly_cost_limit": 0
+  "enabled": false,                  // <-- nothing below is enforced
+  "hourly_token_limit": 100000,
+  "daily_cost_limit": 10.0
 }
 // Result: All requests allowed, no budget enforcement
 ```
 
-**Partial zeros work correctly:** If only `hourly_token_limit` is set and others are `0`, only the hourly limit is enforced.
+With `enabled: true`, a limit of `0` still means **unlimited** for that specific limit - a zero is never a cap:
+
+```json5
+{
+  "enabled": true,
+  "hourly_token_limit": 0,           // unlimited
+  "daily_token_limit": 1000000       // enforced
+}
+// Result: only the daily limit is enforced
+```
+
 
 ### Daily Reset at Midnight UTC
 
@@ -381,7 +432,7 @@ meept per-session cost budget reached: $12.00 / $10.00 used
 
 ### Budget Seems Wrong After Config Change
 
-Budget config is **dynamic** - changes take effect immediately without restart. However:
+Budget config is read when the daemon builds the LLM tracker and the agent loop, and the `meept.json5` config-sync hook logs *"meept.json5 changed on disk; daemon restart required for full effect"* - **restart the daemon** after changing `llm.budget` or `agent.budget`. Then check:
 
 - The `aggressiveness` factor applies to all limits - remember that effective limits are 75% of configured when `aggressiveness: 0.5`
 - Daily reset happens at UTC midnight, not local time
@@ -391,19 +442,29 @@ Budget config is **dynamic** - changes take effect immediately without restart. 
 
 If budgets are configured but not being enforced:
 
-1. Check that at least one limit is non-zero (all zeros = disabled)
-2. Verify model pricing is configured for cost limits
-3. Check startup logs for "LLM client initialized" showing budget values
+1. Check that `llm.budget.enabled` is `true` - while it is false (the default) nothing is enforced, whatever the limits say
+2. Check that at least one limit is non-zero (a zero limit is unlimited)
+3. Verify model pricing is configured for cost limits
+4. For the hierarchical task budget, check that `agent.budget.total` is positive - it is wired only when this switch is on and the total is positive
+5. Check startup logs for "Agent budget disabled" / "Agent budget config applied"
 
 ### Runaway Agent Loop Protection
 
-The combination of `per_task_token_limit` + `daily_cost_limit` provides strong protection against runaway agents:
+Combining `per_task_token_limit` with `daily_cost_limit` protects against runaway agents. Remember to enable the switch:
 
 ```json5
 {
-  "per_task_token_limit": 50000,     // Single task can't go wild
-  "daily_cost_limit": 10.0,          // Total daily spend capped
-  "hourly_cost_limit": 2.0,          // Per-hour spend also capped
+  "llm": {
+    "budget": {
+      "enabled": true,                // required - nothing is enforced without it
+      "per_task_token_limit": 50000,  // Single task can't go wild
+      "daily_cost_limit": 10.0,       // Total daily spend capped
+      "hourly_cost_limit": 2.0,       // Per-hour spend also capped
+    }
+  },
+  "agent": {
+    "budget": { "total": 200000 }     // Optional: hierarchical task/phase/turn cap
+  }
 }
 ```
 
@@ -417,8 +478,10 @@ The combination of `per_task_token_limit` + `daily_cost_limit` provides strong p
 
 For developers interested in the budget implementation:
 
-- Core logic: `internal/llm/budget.go`
+- Core logic: `internal/llm/budget.go` (`Budget`, `CheckBudget`, `WaitForRateLimit`)
 - Error types: `internal/llm/errors.go` (`BudgetExceededError`, `NonRetryableError`)
-- Config schema: `internal/config/schema.go` (`BudgetConfig`)
-- Daemon wiring: `internal/daemon/components.go`
+- Config schema: `internal/config/schema.go` (`BudgetConfig.Enabled` is the single global switch; `AgentBudgetConfig` has no switch of its own)
+- Single config-to-enforcement seam: `internal/daemon/daemon.go` `llmBudgetConfigFromConfig()` (LLM limits + rate limit) and `agentBudgetEnabled()` (hierarchical budget)
+- Daemon construction: `internal/daemon/components.go` (builds the tracker from that seam)
 - Enforcement: `internal/llm/client.go` (`CheckBudget()` called before each API call)
+- Tests: `internal/config/budget_ssot_test.go`, `internal/llm/budget_ssot_test.go`, `internal/daemon/budget_ssot_test.go`, `internal/agent/budget_ssot_test.go`

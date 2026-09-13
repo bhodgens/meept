@@ -81,6 +81,10 @@ type BudgetConfig struct {
 }
 
 // NewBudget creates a new token budget tracker.
+//
+// This is the enforcement side of the budget contract: budget VALUES come from
+// meept.json5 and nowhere else. A zero field means "unlimited" for that limit,
+// so an all-zero config (the disabled posture) enforces nothing.
 func NewBudget(cfg BudgetConfig, logger *slog.Logger) *Budget {
 	if logger == nil {
 		logger = slog.Default()
@@ -117,16 +121,6 @@ func NewBudget(cfg BudgetConfig, logger *slog.Logger) *Budget {
 		sessionCosts:        make(map[string]float64),
 		logger:              logger,
 	}
-}
-
-// NewBudgetFromDefaults creates a budget with default settings.
-func NewBudgetFromDefaults(logger *slog.Logger) *Budget {
-	return NewBudget(BudgetConfig{
-		HourlyLimit:    500000,
-		DailyLimit:     5000000,
-		RateLimitRPM:   0, // unlimited
-		Aggressiveness: 0.5,
-	}, logger)
 }
 
 // dayOrdinal returns an ordinal day number for a given time.

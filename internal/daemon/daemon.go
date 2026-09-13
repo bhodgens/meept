@@ -47,6 +47,45 @@ import (
 	"github.com/caimlas/meept/pkg/security"
 )
 
+// llmBudgetConfigFromConfig maps the meept.json5 llm.budget section onto the
+// LLM budget tracker's config. This is the SINGLE place budget values cross
+// from config into the enforcement layer.
+//
+// The global switch is llm.budget.enabled. When it is false the returned
+// config is all-zero, which the llm.Budget tracker treats as "unlimited": no
+// hourly/daily/per-task/per-session token or cost limit and no RPM rate limit.
+// A zero limit always means unlimited; a value absent from the config never
+// becomes a cap.
+func llmBudgetConfigFromConfig(bc config.BudgetConfig) llm.BudgetConfig {
+	if !bc.Enabled {
+		return llm.BudgetConfig{}
+	}
+	return llm.BudgetConfig{
+		HourlyLimit:         bc.HourlyTokenLimit,
+		DailyLimit:          bc.DailyTokenLimit,
+		DailyCostLimit:      bc.DailyCostLimit,
+		HourlyCostLimit:     bc.HourlyCostLimit,
+		RateLimitRPM:        bc.RateLimitRPM,
+		Aggressiveness:      bc.Aggressiveness,
+		PerTaskBudget:       bc.PerTaskTokenLimit,
+		PerSessionBudget:    bc.PerSessionTokenLimit,
+		PerTaskCostLimit:    bc.PerTaskCostLimit,
+		PerSessionCostLimit: bc.PerSessionCostLimit,
+	}
+}
+
+// agentBudgetEnabled reports whether the hierarchical task/phase/turn budget
+// should be wired. It is governed by the SAME single global switch as every
+// other budget (llm.budget.enabled) plus a positive total; agent.budget has no
+// enable flag of its own. A zero/absent total means "unlimited" - the
+// hierarchy is never constructed.
+func agentBudgetEnabled(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return cfg.LLM.Budget.Enabled && cfg.Agent.Budget.Total > 0
+}
+
 // Daemon manages the meept daemon lifecycle.
 //
 //nolint:revive // stutter with package name is intentional for API clarity
@@ -647,11 +686,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	}
 
-	// Apply budget config if enabled. The hierarchical budget is off unless
-	// agent.budget.enabled is true AND Total > 0: budgets are an opt-in safety
-	// rail, so a default install has no token budget to trip over. When off,
-	// the AgentLoop keeps a nil budgetHierarchy (every reader nil-checks).
-	if components.AgentLoop != nil && fullCfg.Agent.Budget.Enabled && fullCfg.Agent.Budget.Total > 0 {
+	// Apply the hierarchical budget only when the single global switch
+	// (llm.budget.enabled) is on AND a positive total is configured; budgets
+	// are opt-in, so a default install has no token budget to trip over. When
+	// off, the AgentLoop keeps a nil budgetHierarchy (every reader nil-checks).
+	if components.AgentLoop != nil && agentBudgetEnabled(fullCfg) {
 		opts := agent.BudgetHierarchyOptions{
 			ReservedRatio:     fullCfg.Agent.Budget.ReservedRatio,
 			TaskWarningRatio:  fullCfg.Agent.Budget.WarningThresholds.Task,
@@ -666,7 +705,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			"reserved_ratio", fullCfg.Agent.Budget.ReservedRatio)
 	} else if components.AgentLoop != nil {
 		logger.Info("Agent budget disabled",
-			"enabled", fullCfg.Agent.Budget.Enabled,
+			"global_enabled", fullCfg.LLM.Budget.Enabled,
 			"total", fullCfg.Agent.Budget.Total)
 	}
 

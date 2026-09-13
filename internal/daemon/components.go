@@ -613,19 +613,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	llmCfg := createLLMConfig(c.ModelsConfig, logger)
 	var budgetTracker *llm.Budget
 	if llmCfg != nil {
-		// Create budget tracker from config
-		budgetTracker = llm.NewBudget(llm.BudgetConfig{
-			HourlyLimit:         cfg.LLM.Budget.HourlyTokenLimit,
-			DailyLimit:          cfg.LLM.Budget.DailyTokenLimit,
-			DailyCostLimit:      cfg.LLM.Budget.DailyCostLimit,
-			HourlyCostLimit:     cfg.LLM.Budget.HourlyCostLimit,
-			RateLimitRPM:        cfg.LLM.Budget.RateLimitRPM,
-			Aggressiveness:      cfg.LLM.Budget.Aggressiveness,
-			PerTaskBudget:       cfg.LLM.Budget.PerTaskTokenLimit,
-			PerSessionBudget:    cfg.LLM.Budget.PerSessionTokenLimit,
-			PerTaskCostLimit:    cfg.LLM.Budget.PerTaskCostLimit,
-			PerSessionCostLimit: cfg.LLM.Budget.PerSessionCostLimit,
-		}, logger.With("component", "budget"))
+		// Create budget tracker from config. llmBudgetConfigFromConfig applies the
+		// single global switch (llm.budget.enabled) and is the only place budget
+		// values cross from meept.json5 into enforcement: switch off -> zero
+		// config -> the tracker is unlimited.
+		budgetTracker = llm.NewBudget(llmBudgetConfigFromConfig(cfg.LLM.Budget), logger.With("component", "budget"))
 
 		// Start periodic cleanup of stale task/session entries (TTL=24h, run hourly)
 		c.BudgetCleanupStop = budgetTracker.StartPeriodicCleanup(24*time.Hour, 1*time.Hour)
