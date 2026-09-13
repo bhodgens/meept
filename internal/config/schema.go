@@ -1561,7 +1561,12 @@ type AgentStateTrackingConfig struct {
 }
 
 // AgentBudgetConfig configures hierarchical task/phase/turn token budgets.
+//
+// Disabled by default: no hierarchical budget is wired unless Enabled is true
+// AND Total is positive. Budgets are an opt-in safety rail, not a default
+// operating limit.
 type AgentBudgetConfig struct {
+	Enabled           bool                    `json:"enabled"           toml:"enabled"`         // wire the hierarchical budget (default: false)
 	Total             int                     `json:"total"              toml:"total"`          // Total task budget in tokens
 	ReservedRatio     float64                 `json:"reserved_ratio"     toml:"reserved_ratio"` // Emergency reserve fraction (0.0-1.0)
 	Phases            AgentBudgetPhasesConfig `json:"phases"             toml:"phases"`
@@ -2868,10 +2873,14 @@ func DefaultConfig() *Config {
 				EmitEvents: true,
 			},
 			Budget: AgentBudgetConfig{
-				Total:         200000, // 200K tokens default task budget
-				ReservedRatio: 0.1,    // 10% emergency reserve
+				// DISABLED by default (2026-09-13): budgets are an opt-in
+				// safety rail. Set enabled: true and a positive total to turn
+				// the hierarchical task/phase/turn budget on.
+				Enabled:       false,
+				Total:         0,
+				ReservedRatio: 0.1, // 10% emergency reserve
 				Phases: AgentBudgetPhasesConfig{
-					Enabled:      true,
+					Enabled:      false,
 					AutoAllocate: true,
 					Carryover:    true,
 					Borrowing:    true,

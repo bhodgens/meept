@@ -647,10 +647,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	}
 
-	// Apply budget config if set. When Total > 0, the AgentLoop's
-	// BudgetHierarchy is rebuilt with the configured task budget,
-	// emergency reserve ratio, warning thresholds, and carryover/borrowing.
-	if components.AgentLoop != nil && fullCfg.Agent.Budget.Total > 0 {
+	// Apply budget config if enabled. The hierarchical budget is off unless
+	// agent.budget.enabled is true AND Total > 0: budgets are an opt-in safety
+	// rail, so a default install has no token budget to trip over. When off,
+	// the AgentLoop keeps a nil budgetHierarchy (every reader nil-checks).
+	if components.AgentLoop != nil && fullCfg.Agent.Budget.Enabled && fullCfg.Agent.Budget.Total > 0 {
 		opts := agent.BudgetHierarchyOptions{
 			ReservedRatio:     fullCfg.Agent.Budget.ReservedRatio,
 			TaskWarningRatio:  fullCfg.Agent.Budget.WarningThresholds.Task,
@@ -663,6 +664,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Agent budget config applied",
 			"total", fullCfg.Agent.Budget.Total,
 			"reserved_ratio", fullCfg.Agent.Budget.ReservedRatio)
+	} else if components.AgentLoop != nil {
+		logger.Info("Agent budget disabled",
+			"enabled", fullCfg.Agent.Budget.Enabled,
+			"total", fullCfg.Agent.Budget.Total)
 	}
 
 	// Apply parallel tool execution config if enabled.

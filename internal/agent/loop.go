@@ -2142,15 +2142,15 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 		loop.executor.SetRetryMetrics(loop.retryMetrics)
 	}
 
-	// Initialize hierarchical budget tracker (additive; old tracker still drives wrap-up).
-	loop.budgetHierarchy = NewBudgetHierarchy(
-		100000, // task total
-		[]string{"default"},
-		[]int{90000},
-	)
-	if err := loop.budgetHierarchy.SelectPhaseBudget("default"); err != nil {
-		loop.logger.Warn("failed to select default phase budget", "error", err)
-	}
+	// Hierarchical budget tracker is OPT-IN: budgetHierarchy stays nil here and
+	// is only constructed by SetBudgetConfig, which the daemon calls when
+	// agent.budget.enabled is true and a positive total is configured.
+	//
+	// It used to be constructed unconditionally with a hardcoded 100000 task
+	// budget and a 90000 phase budget, so every loop (including registry-created
+	// specialists) had an enforcing budget no matter what the config said - a
+	// fresh install was budget-limited by default. The nil case is safe:
+	// every reader nil-checks (see RecordUsage, BudgetStatus, AdvancePhase).
 
 	return loop
 }

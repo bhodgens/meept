@@ -50,20 +50,22 @@
 
   // LLM configuration (models moved to models.json5)
   "llm": {
-    // Token budget - prevents runaway costs and rate limit violations
+    // Token budget - OPT-IN, DISABLED by default. Every limit below is 0,
+    // which means unlimited (no nagging, no parking, no refusals). Set a
+    // positive value only when you want a real spending or rate rail.
     // All limits use aggressiveness factor: effective_limit = base * (0.5 + 0.5 * aggressiveness)
     // At aggressiveness=0.5 (default), you can use 75% of configured limits
     "budget": {
-      "hourly_token_limit": 100000,      // Tokens per sliding hour (0 = unlimited)
-      "daily_token_limit": 1000000,      // Tokens per UTC day (0 = unlimited)
-      "daily_cost_limit": 10.0,          // Max USD per UTC day (0 = no cost limit)
-      "hourly_cost_limit": 2.0,          // Max USD per sliding hour (0 = no limit)
-      "rate_limit_rpm": 30,              // Max requests per minute (0 = unlimited)
+      "hourly_token_limit": 0,           // Tokens per sliding hour (0 = unlimited)
+      "daily_token_limit": 0,            // Tokens per UTC day (0 = unlimited)
+      "daily_cost_limit": 0.0,           // Max USD per UTC day (0 = no cost limit)
+      "hourly_cost_limit": 0.0,          // Max USD per sliding hour (0 = no limit)
+      "rate_limit_rpm": 0,               // Max requests per minute (0 = unlimited)
       "aggressiveness": 0.5,             // 0.0-1.0: conservative to aggressive
-      "per_task_token_limit": 50000,     // Max tokens per single task (0 = no cap)
-      "per_session_token_limit": 100000, // Max tokens per session (0 = no cap)
-      "per_task_cost_limit": 5.0,        // Max USD per single task (0 = no cap)
-      "per_session_cost_limit": 10.0,    // Max USD per single session (0 = no cap)
+      "per_task_token_limit": 0,         // Max tokens per single task (0 = no cap)
+      "per_session_token_limit": 0,      // Max tokens per session (0 = no cap)
+      "per_task_cost_limit": 0.0,        // Max USD per single task (0 = no cap)
+      "per_session_cost_limit": 0.0,     // Max USD per single session (0 = no cap)
     },
     // Model broker - circuit breaker and fallback
     "broker": {
@@ -353,12 +355,16 @@
       "persist": false,                // Enable SQLite persistence (Phase 5)
       "emit_events": true,             // Publish bus events on state transitions
     },
-    // Hierarchical task/phase/turn token budgets
+    // Hierarchical task/phase/turn token budgets - OPT-IN, DISABLED by default.
+    // A default install has no task budget: turns are not parked, warned, or
+    // cut off by a token allocation. Set "enabled": true and a positive
+    // "total" to turn it on (the daemon wires it only when both are set).
     "budget": {
-      "total": 200000,                 // Total task budget in tokens
+      "enabled": false,
+      "total": 0,                      // Total task budget in tokens (0 = no cap)
       "reserved_ratio": 0.1,           // Emergency reserve fraction (0.0-1.0)
       "phases": {
-        "enabled": true,
+        "enabled": false,
         "auto_allocate": true,         // Auto-distribute budget across phases
         "carryover": true,             // Unused phase budget carries to next phase
         "borrowing": true,             // Allow phases to borrow from reserve

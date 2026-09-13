@@ -4,43 +4,54 @@ import (
 	"testing"
 )
 
-// TestAgentLoop_BudgetHierarchyInitialized verifies that NewAgentLoop
-// initializes the budgetHierarchy field and that GetBudgetStatus returns a
-// non-nil snapshot with the expected task-level total.
-func TestAgentLoop_BudgetHierarchyInitialized(t *testing.T) {
+// TestAgentLoop_BudgetHierarchyDisabledByDefault verifies that NewAgentLoop
+// does NOT wire a hierarchical budget. Budgets are opt-in: a default install
+// must have no task/phase/turn allocation that can warn, park, or cut a turn
+// off. The nil hierarchy is the supported state.
+func TestAgentLoop_BudgetHierarchyDisabledByDefault(t *testing.T) {
 	loop := NewAgentLoop("test-budget-init", "/tmp/test")
 	if loop == nil {
 		t.Fatal("NewAgentLoop returned nil")
 	}
 
-	status := loop.GetBudgetStatus()
-	if status == nil {
-		t.Fatal("GetBudgetStatus() returned nil; expected non-nil status")
+	if loop.budgetHierarchy != nil {
+		t.Fatal("NewAgentLoop wired a budget hierarchy; budgets must be opt-in (see agent.budget.enabled)")
 	}
 
+	if status := loop.GetBudgetStatus(); status != nil {
+		t.Errorf("GetBudgetStatus() = %+v, want nil when no budget is configured", status)
+	}
+}
+
+// TestAgentLoop_BudgetHierarchyEnabledByConfig verifies that SetBudgetConfig is
+// what turns the hierarchy on. The daemon calls it only when
+// agent.budget.enabled is true AND a positive total is configured.
+func TestAgentLoop_BudgetHierarchyEnabledByConfig(t *testing.T) {
+	loop := NewAgentLoop("test-budget-config", "/tmp/test")
+	loop.SetBudgetConfig(100000, BudgetHierarchyOptions{})
+
+	status := loop.GetBudgetStatus()
+	if status == nil {
+		t.Fatal("GetBudgetStatus() returned nil after SetBudgetConfig")
+	}
 	if status.Task.Total != 100000 {
 		t.Errorf("task total = %d, want 100000", status.Task.Total)
 	}
 
-	// Verify the "default" phase exists.
-	phase, ok := status.Phases["default"]
-	if !ok {
-		t.Fatal("expected 'default' phase in budget status")
-	}
-	if phase.Total != 90000 {
-		t.Errorf("default phase total = %d, want 90000", phase.Total)
-	}
-
-	// Turn budget should have been created by SelectPhaseBudget("default").
+	// Turn budget is created by the phase selection SetBudgetConfig performs.
 	if status.Turn.Total <= 0 {
 		t.Errorf("turn budget total = %d, expected > 0", status.Turn.Total)
 	}
 }
 
 // TestAgentLoop_BudgetHierarchy_RecordUsage verifies that recording usage
-// through the hierarchy is reflected in GetBudgetStatus().
+// through a CONFIGURED hierarchy is reflected in GetBudgetStatus().
 func TestAgentLoop_BudgetHierarchy_RecordUsage(t *testing.T) {
 	loop := NewAgentLoop("test-budget-record", "/tmp/test")
+	loop.SetBudgetConfig(100000, BudgetHierarchyOptions{})
+	if loop.budgetHierarchy == nil {
+		t.Fatal("budget hierarchy not wired by SetBudgetConfig")
+	}
 
 	// Record usage directly on the hierarchy.
 	loop.budgetHierarchy.RecordUsage(500, "default")
