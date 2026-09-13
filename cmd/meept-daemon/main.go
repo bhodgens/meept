@@ -159,13 +159,24 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return configError{err: err}
 	}
 
+	// Log level (defect: daemon.log_level was inert). AGENTS.md: the level is
+	// the log_level field in meept.json5, NOT an env var. Resolve it — the
+	// --debug flag wins when set — then install it as the process default so
+	// slog.Debug call sites and every component logger that falls back to
+	// slog.Default() honour it, not just the logger daemon.New builds.
+	levelName := appCfg.Daemon.LogLevel
+	if debug {
+		levelName = "debug"
+	}
+	_, logLevel := installDaemonLogger(os.Stderr, levelName)
+
 	// Build daemon config from app config
 	daemonCfg := &daemon.Config{
 		SocketPath:                  appCfg.Daemon.SocketPath,
 		PIDFile:                     appCfg.Daemon.PIDFile,
 		StateDir:                    appCfg.Daemon.DataDir,
 		ShutdownTimeout:             appCfg.ShutdownTimeout(),
-		LogLevel:                    config.ParseLogLevel(appCfg.Daemon.LogLevel),
+		LogLevel:                    logLevel,
 		FullConfig:                  appCfg,
 		AllowedPaths:                appCfg.Security.AllowedPaths,
 		BlockedPaths:                appCfg.Security.BlockedPaths,
@@ -188,9 +199,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		daemonCfg.SocketPath = socketPath
 	}
 
-	if debug {
-		daemonCfg.LogLevel = slog.LevelDebug
-	}
+	// --debug is already folded into logLevel above (it wins over the config
+	// field); the daemon config carries that same resolved level.
 
 	// Ensure data directory exists
 	if err := config.EnsureDataDir(appCfg); err != nil {

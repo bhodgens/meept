@@ -3378,18 +3378,37 @@ func DefaultConfig() *Config {
 }
 
 // ParseLogLevel converts a string log level to slog.Level.
+//
+// The name is matched case-insensitively with surrounding whitespace ignored:
+// meept.json5 in the wild carries both the lowercase documented forms
+// ("debug", "info", "warn", "error" — see docs/configuration/config-sync.md)
+// and the uppercase forms the config editor writes ("DEBUG"), and a
+// case-sensitive match silently resolved every lowercase value to INFO —
+// which made daemon.log_level look inert. Unrecognised values fall back to
+// info; callers that want to warn about them use ParseLogLevelValue.
 func ParseLogLevel(level string) slog.Level {
-	switch level {
-	case "DEBUG":
-		return slog.LevelDebug
-	case "INFO":
-		return slog.LevelInfo
-	case "WARN", "WARNING":
-		return slog.LevelWarn
-	case "ERROR":
-		return slog.LevelError
+	lvl, _ := ParseLogLevelValue(level)
+	return lvl
+}
+
+// ParseLogLevelValue converts a configured log level name to an slog.Level and
+// reports whether the name was recognised. Names are matched
+// case-insensitively (surrounding whitespace ignored). The empty name means
+// "unset" and resolves to info without being reported as unrecognised;
+// anything else unrecognised resolves to info with ok=false so the caller can
+// emit exactly one startup warning naming the offending value.
+func ParseLogLevelValue(level string) (slog.Level, bool) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return slog.LevelDebug, true
+	case "", "info":
+		return slog.LevelInfo, true
+	case "warn", "warning":
+		return slog.LevelWarn, true
+	case "error":
+		return slog.LevelError, true
 	default:
-		return slog.LevelInfo
+		return slog.LevelInfo, false
 	}
 }
 
