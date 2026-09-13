@@ -138,3 +138,66 @@ func TestClassifyAndRoute_ScheduleCreatesNoOrphanTask(t *testing.T) {
 		t.Fatalf("schedule dispatch created task %q that no handler branch consumes (orphan)", res.Task.ID)
 	}
 }
+
+// TestResumeAfterClarification_ScheduleCreatesNoOrphanTask pins the SECOND
+// task-creation site. ResumeAfterClarification (reached from ClassifyAndRoute
+// when a clarification is pending) created its task on shouldCreateTask alone,
+// so an ambiguous question answered with a schedule intent still wrote an
+// orphaned row — the same shape the C-0 wave closed on the primary route.
+func TestResumeAfterClarification_ScheduleCreatesNoOrphanTask(t *testing.T) {
+	logger := digestTestLogger()
+	reg, err := task.NewRegistry(filepath.Join(t.TempDir(), "tasks.db"), bus.New(nil, nil), logger)
+	if err != nil {
+		t.Fatalf("task registry: %v", err)
+	}
+	t.Cleanup(func() { _ = reg.Close() })
+
+	d := NewDispatcher(DispatcherConfig{
+		Registry:         NewAgentRegistry(RegistryConfig{Logger: logger}),
+		TaskStore:        reg.Store(),
+		TaskRegistry:     reg,
+		ClassifierClient: newScheduleAwareClassifierServer(t),
+		Logger:           logger,
+	})
+	// Unambiguous analyzer verdict so the resume proceeds to classification
+	// instead of asking another follow-up question.
+	d.intentAnalyzer = ambiguityTestServer(t, 0.1)
+
+	const sessionID = "sess-orphan-resume"
+	// Seed the pending clarification exactly as the ambiguity gate leaves it.
+	clarify := &Intent{
+		Type:       string(IntentClarify),
+		Confidence: 0.9,
+		Summary:    "remind me about the deployment",
+	}
+	d.sessionTracker.RecordIntent(sessionID, clarify, "")
+
+	// The answer carries an explicit time signal, so the schedule verdict is
+	// never recall-arbitrated and the classifier decides.
+	res, err := d.ResumeAfterClarification(context.Background(),
+		"remind me about the deployment",
+		"next week on Friday before the release window opens",
+		sessionID)
+	if err != nil {
+		t.Fatalf("ResumeAfterClarification: %v", err)
+	}
+	if res == nil || res.Intent == nil {
+		t.Fatal("nil result or intent")
+	}
+	if res.Intent.Type != string(IntentSchedule) {
+		t.Fatalf("intent = %q (method %q), want schedule", res.Intent.Type, res.Intent.Method)
+	}
+	if d.ShouldDispatchAsync(res) {
+		t.Fatal("precondition: a schedule verdict must not dispatch async")
+	}
+	if res.Task != nil {
+		t.Fatalf("resume created task %q that no handler branch consumes (orphan)", res.Task.ID)
+	}
+	rows, err := reg.Store().List(nil, 100)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("resume wrote %d task row(s) for a synchronous schedule intent (orphan)", len(rows))
+	}
+}

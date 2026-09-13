@@ -109,6 +109,16 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 		Success  bool     `json:"success,omitempty"`
 		Result   string   `json:"result,omitempty"`
 		Evidence []string `json:"evidence,omitempty"`
+		// ToolEvidence is the independently observed proof the tools
+		// emitted, projected by the daemon under the SEPARATE key
+		// "tool_evidence" (internal/daemon/components.go). The "evidence"
+		// key above is the daemon's own job-completion stamp, whose text is
+		// the model's own narration — the very claim under review. The cap
+		// gate must prefer ToolEvidence; reading only Evidence made
+		// hasIndependentRalphEvidence unconditionally false for daemon step
+		// jobs, so a capped task failed even when the final attempt carried
+		// real tool-issued proof.
+		ToolEvidence []models.Evidence `json:"tool_evidence,omitempty"`
 	}
 	if err := json.Unmarshal(result, &resultData); err != nil {
 		rl.logger.Warn("Failed to parse task result", "task_id", taskID, "error", err)
@@ -147,9 +157,10 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 	}
 
 	if iteration >= rl.config.MaxIterations {
-		if evidenceSufficient && hasIndependentRalphEvidence(resultData.Evidence) {
-			// The final granted attempt DID produce verifiable evidence:
-			// report completion instead of discarding the result (F5).
+		if evidenceSufficient && hasIndependentCapEvidence(resultData.ToolEvidence, resultData.Evidence) {
+			// The final granted attempt DID produce independently
+			// observed, verifiable evidence: report completion instead of
+			// discarding the result (F5).
 			rl.logger.Info("Max Ralph loop iterations reached but the final attempt produced sufficient evidence; completing",
 				"task_id", taskID, "iterations", iteration)
 			return true, resultData.Evidence, false
@@ -204,6 +215,21 @@ func (rl *RalphLoop) validateEvidence(taskDescription string, evidence []string)
 	return false
 }
 
+// hasIndependentCapEvidence reports whether the FINAL attempt at the replan cap
+// carries independently observed proof. It prefers the tool-issued evidence
+// (ToolEvidence, decoded from the daemon's sibling "tool_evidence" key) because
+// that is the only per-entry proof a tool actually produced — every entry has a
+// non-zero Type/Subject/Value (hasMeaningfulEvidence). The string slice
+// (Evidence) is the daemon's synthetic job-completion stamp for step jobs, so
+// on its own it can never clear the cap; the string heuristic remains only as a
+// fallback for non-daemon producers that put real proof in that array.
+func hasIndependentCapEvidence(toolEvidence []models.Evidence, evidence []string) bool {
+	if hasMeaningfulEvidence(toolEvidence) {
+		return true
+	}
+	return hasIndependentRalphEvidence(evidence)
+}
+
 // hasIndependentRalphEvidence reports whether the evidence list carries at
 // least one entry that is NOT the daemon's own job-completion stamp. That
 // stamp — internal/daemon/components.go emits
@@ -215,16 +241,25 @@ func (rl *RalphLoop) validateEvidence(taskDescription string, evidence []string)
 // repeated attempts have NOT produced verifiable work, so a completion
 // granted on the synthetic stamp alone resets the counter (via the
 // orchestrator's TaskOutcome) on the model's say-so. Non-cap passes are
-// unaffected — this guard applies only to the cap decision.
+// unaffected — this guard applies only to the cap decision (see
+// hasIndependentCapEvidence for the daemon path, which prefers tool_evidence).
+//
+// Matching is case-INSENSITIVE and requires only the frame, not a non-empty job
+// id: the stamp's identity comes from the "job … completed by agent …" shape,
+// so "Job 42 completed by agent coder: …" and "job  completed by agent coder:
+// …" (empty id) are the same synthetic narration and must not be read as
+// independent. The earlier `idx > 0` / case-sensitive prefix let both evade the
+// filter and grant the cap.
 func hasIndependentRalphEvidence(evidence []string) bool {
 	for _, ev := range evidence {
 		trimmed := strings.TrimSpace(ev)
-		if !strings.HasPrefix(trimmed, "job ") {
+		lower := strings.ToLower(trimmed)
+		if !strings.HasPrefix(lower, "job ") {
 			return true
 		}
-		rest := trimmed[len("job "):]
-		// The stamp's marker must sit after a non-empty job id.
-		if idx := strings.Index(rest, " completed by agent "); idx > 0 {
+		// The stamp's marker must sit anywhere after the "job " prefix; an
+		// empty id slot still leaves the frame intact.
+		if strings.Contains(lower[len("job "):], " completed by agent ") {
 			continue // synthetic stamp: the model's narration, not proof
 		}
 		return true

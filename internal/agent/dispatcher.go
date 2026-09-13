@@ -1298,10 +1298,33 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			// a genuine imperative that is not a work-status question
 			// ("create a file named hello.txt") still falls through to
 			// the imperative override below.
+			// The recall matchers are POSITION-INDEPENDENT (isWorkStatusRecall
+			// scans every field for a status predicate plus a nearby work
+			// noun), so evaluated against the whole input they also fire on
+			// an imperative work request whose status clause sits in the
+			// tail ("implement the endpoint and check that the response is
+			// this format" reads as a work-status question because "is …
+			// this" appears after the " and "). So when — and ONLY when — the
+			// input opens with an execution imperative we narrow the match to
+			// the leading clause. Every other input keeps its WHOLE-INPUT
+			// match, because a genuine recall question frequently puts a
+			// conversational separator in front of the status phrase
+			// ("hey, did the change get made?", "ok, what files did you
+			// create?", "check the log at /tmp/x,y.log, did the change get
+			// made?"). Narrowing unconditionally — the wave-2 regression —
+			// reversed the arbitration for exactly those inputs: any
+			// separator before the status phrase killed the recall match and
+			// let the untrusted platform/git/schedule verdict survive (the
+			// F40/run-10 contextless-committer failure and the run-5 A2
+			// roster failure the guard exists to close).
+			recall := isWorkStatusRecall(input) || isSecondPersonWorkRecall(input)
+			if recall && hasLeadingImperativeVerb(input) {
+				recall = isWorkStatusRecall(leadingRecallClause(input)) ||
+					isSecondPersonWorkRecall(leadingRecallClause(input))
+			}
 			if (intent.Type == string(IntentPlatform) ||
 				(intent.Type == string(IntentSchedule) && !hasTimeSignal(input)) ||
-				(intent.Type == string(IntentGit) && !inputContainsGitVerb(input))) &&
-				(isSecondPersonWorkRecall(leadingRecallClause(input)) || isWorkStatusRecall(leadingRecallClause(input))) {
+				(intent.Type == string(IntentGit) && !inputContainsGitVerb(input))) && recall {
 				// Platform-vs-recall arbitration (e2e run 5, 2026-09-10):
 				// "what files did you make for me?" scored platform @0.9 →
 				// roster dump. A question about the ASSISTANT'S OWN past
@@ -1850,9 +1873,13 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 				return d.routeToPlan(ctx, combinedInput, intent, sessionID)
 			}
 
-			// Create task if needed.
+			// Create task if needed (for trackable work). Same shared gate
+			// as the primary route: a task is created only when dispatch
+			// actually consumes it, so an ambiguous question answered with a
+			// schedule intent does not leave a task row no handler branch
+			// reads (the orphan the C-0 wave closed on the primary route).
 			var createdTask *task.Task
-			if d.shouldCreateTask(intent) && d.taskStore != nil {
+			if d.shouldCreateTask(intent) && d.taskStore != nil && d.dispatchConsumesTask(intent) {
 				createdTask = d.createTask(ctx, combinedInput, intent, sessionID, intent.AgentType)
 			}
 
@@ -1969,18 +1996,25 @@ func (d *Dispatcher) shouldCreateTask(intent *Intent) bool {
 }
 
 // dispatchConsumesTask reports whether the created task will actually be
-// consumed downstream. The handler reads Result.Task in exactly three
-// branches: the pair route, the collaborate route, and the async-dispatch
-// branch (gated on ShouldDispatchAsync). A task created for a synchronous
-// intent is never read — the row is orphaned the moment it is written
-// (IntentSchedule: ShouldCreateTask()=true, ShouldDispatchAsync()=false).
-// Gate creation on this, not on shouldCreateTask alone.
+// consumed downstream. The only branches that read Result.Task are the
+// async-dispatch branch (handler.go: ShouldDispatchAsync(result) &&
+// result.Task != nil), the collaboration route (startCollaborationSession,
+// which falls back to the conversation ID when Task is nil), and the
+// compound/plan path. A task created for a synchronous intent is never read —
+// the row is orphaned the moment it is written (IntentSchedule:
+// ShouldCreateTask()=true, ShouldDispatchAsync()=false). Gate creation on
+// this, not on shouldCreateTask alone.
+//
+// No pair/collaborate special case: both intents are in ShouldDispatchAsync's
+// unconditional true case, and IntentPair never reaches task creation anyway
+// (IntentPair.ShouldCreateTask()==false and RequiresPlanning()==false), so the
+// plain async rule below already answers true for each. An earlier revision
+// carried explicit arms for both; they were dead — deleting them leaves this
+// predicate's value identical for every intent — and their stated premise
+// (that the pair route reads Result.Task) was wrong: the pair route uses only
+// AgentID and Intent.Summary.
 func (d *Dispatcher) dispatchConsumesTask(intent *Intent) bool {
-	it := IntentType(intent.Type)
-	if it == IntentPair || it == IntentCollaborate {
-		return true
-	}
-	return it.ShouldDispatchAsync(intent.RequiresPlanning)
+	return IntentType(intent.Type).ShouldDispatchAsync(intent.RequiresPlanning)
 }
 
 // createTask creates a new task for the request. The agentID is the agent
@@ -2070,18 +2104,30 @@ func (m *MultiIntent) DetectCompound() bool {
 	return true
 }
 
-// laneForcesSequentialCompound reports whether a lane forces its compound
-// request into SEQUENTIAL execution: each of these owns a
-// planning/clarification phase the other lanes must follow, so the compound
-// splits phase-first. It is deliberately keyed on the LANE SET, not on
-// Intent.RequiresPlanning: that flag answers a different question ("does this
-// lane dispatch asynchronously?"), it is true for `code` (the C-0 async-gate
-// rule), and keying CompoundType off it flipped an independent code+* pair
-// from parallel to sequential the moment the LLM classifier started deriving
-// the flag from IntentType.RequiresPlanning() (bughunt 2026-09-12 wave,
-// regression of the C-0 fix). The set matches what the keyword producer has
-// always declared via its planning column (plan/architect/collaborate) plus
-// the campaign's planning lanes (quickplan/compound).
+// laneForcesSequentialCompound reports whether a lane would force its compound
+// request into SEQUENTIAL execution if anything consumed CompoundType. It is
+// deliberately keyed on the LANE SET, not on Intent.RequiresPlanning: that flag
+// answers a different question ("does this lane dispatch asynchronously?"), it
+// is true for `code` (the C-0 async-gate rule), and keying CompoundType off it
+// flipped an independent code+* pair from parallel to sequential the moment the
+// LLM classifier started deriving the flag from IntentType.RequiresPlanning()
+// (bughunt 2026-09-12 wave). The set matches what the keyword producer has
+// always declared via its planning column (plan/architect/collaborate) plus the
+// campaign's planning lanes (quickplan/compound).
+//
+// The value this fixes is currently INERT: CompoundType is written to the
+// MultiIntent, logged, and copied into the parent task's metadata JSON, but
+// nothing branches on it — handler.go reads meta["compound_type"] into a
+// PlanRequest field that no subscriber decodes, and strategic.go gates the
+// compound plan on IsCompound / Intent==compound only. So neither the wave-1
+// "regression" nor this set changes any behaviour today; the set is kept as the
+// corrected intent record, not because a consumer reads it.
+//
+// IntentCompound is a dead member of the set: DetectCompound runs over the
+// per-fragment intents produced by the keyword classifier and the LLM
+// multi-intent classifier, and classifierLanes — the single source of truth for
+// what the LLM may emit — never lists "compound". No producer emits a compound
+// fragment, so the case cannot match.
 func laneForcesSequentialCompound(t IntentType) bool {
 	switch t {
 	case IntentPlan, IntentArchitect, IntentCollaborate, IntentQuickPlan, IntentCompound:
@@ -4116,30 +4162,33 @@ func inputContainsGitVerb(input string) bool {
 	return gitVerbRe.MatchString(strings.ToLower(input))
 }
 
-// leadingRecallClause returns the input up to its first clause boundary
-// (comma, semicolon, " and ", " then ", " but "). The recall matchers are
-// position-independent — isWorkStatusRecall scans every field for a status
-// predicate plus a nearby work noun — so evaluated against the WHOLE input
-// they also fire on an imperative work request whose status clause sits in
-// the tail ("implement the endpoint and check that the response is this
-// format" reads as a work-status question because "is … this" appears after
-// the " and "). Because the F41 reorder put the recall branch before the
-// imperative branch, that tail match swallowed the work request into chat
-// recall. Judging the LEADING clause only keeps F41's own case ("update me:
-// did the file get created?" — no clause boundary, so the whole string) and
-// lets a genuine imperative fall through to the imperative override.
+// leadingClauseSepRe matches the first clause boundary: a comma, semicolon,
+// period, question mark, exclamation mark, or the conjunction phrases
+// " and " / " then " / " but " (case-insensitively). It is matched against the
+// ORIGINAL input so FindStringIndex returns a byte offset INTO that input.
+// The previous implementation lowercased the input, found the separator index
+// in the LOWERED bytes, and sliced the ORIGINAL — which panics whenever
+// strings.ToLower changes byte length ("Ⱥ" U+023A lowers to 3-byte "ⱥ" U+2C65:
+// input[:120] against a 106-byte string) and returns broken UTF-8 when it
+// shortens ("K" U+212A lowers to 1-byte "k": "K\xe2"). Never map lowered-byte
+// indices onto the original.
+var leadingClauseSepRe = regexp.MustCompile(`(?i),|;|\.|\?|!| and | then | but `)
+
+// leadingRecallClause returns the input up to its first clause boundary. The
+// recall matchers are position-independent — isWorkStatusRecall scans every
+// field for a status predicate plus a nearby work noun — so evaluated against
+// the WHOLE input they also fire on an imperative work request whose status
+// clause sits in the tail ("implement the endpoint and check that the response
+// is this format" reads as a work-status question because "is … this" appears
+// after the " and "). Judging the LEADING clause only keeps F41's own case
+// ("update me: did the file get created?" — no clause boundary, so the whole
+// string) and lets a genuine imperative fall through to the imperative
+// override.
 func leadingRecallClause(input string) string {
-	lower := strings.ToLower(input)
-	cut := -1
-	for _, sep := range []string{",", ";", " and ", " then ", " but "} {
-		if i := strings.Index(lower, sep); i >= 0 && (cut < 0 || i < cut) {
-			cut = i
-		}
+	if loc := leadingClauseSepRe.FindStringIndex(input); loc != nil {
+		return input[:loc[0]]
 	}
-	if cut < 0 {
-		return input
-	}
-	return input[:cut]
+	return input
 }
 
 // isWorkStatusRecall reports whether the input is a yes/no WORK-STATUS

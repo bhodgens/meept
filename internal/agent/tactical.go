@@ -1528,6 +1528,14 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 				// the step carried tool-issued evidence, yet no verdict
 				// was ever recorded. Shared with the interval gate via
 				// stepValidationResidual so the two cannot drift.
+				//
+				// No production path writes this residual shape today: every
+				// path that finds a validator for a step records a verdict or
+				// a ValidationError, and the no-flow paths leave Evidence
+				// empty. The arm is therefore defense-in-depth, kept armed so
+				// a future terminalizer cannot silently skip validation; its
+				// rule is pinned directly by
+				// TestTacticalScheduler_ValidationResidualRule.
 				if ts.stepValidationResidual(s) {
 					validationErrors = append(validationErrors,
 						fmt.Sprintf("step %s completed but not validated", s.ID))

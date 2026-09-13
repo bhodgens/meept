@@ -21,6 +21,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // newRalphCapFixture builds a RalphLoop over a temp task+step store with a
@@ -292,10 +293,14 @@ func TestRalphLoop_CapIgnoresSyntheticJobEvidence(t *testing.T) {
 	}
 }
 
-// TestRalphLoop_CapCompletesOnIndependentEvidenceAlone is the other
-// direction: the synthetic filter must not turn the cap into a blanket
-// failure. A final attempt that also carries independent (non-stamp)
-// evidence still completes.
+// TestRalphLoop_CapCompletesOnIndependentEvidenceAlone covers the NON-daemon
+// fallback: a producer that puts real, independent proof in the string
+// `evidence` array (not the daemon's synthetic stamp) still completes at the
+// cap. NOTE: this test does NOT discriminate the production cap gate — it
+// passes with hasIndependentCapEvidence replaced by a bare `true` — because the
+// daemon emits its synthetic stamp in `evidence` and its real proof under the
+// sibling `tool_evidence` key. The discriminating daemon-shape pin is
+// TestRalphLoop_CapCompletesOnToolEvidence.
 func TestRalphLoop_CapCompletesOnIndependentEvidenceAlone(t *testing.T) {
 	rl, _, taskStore, _ := newRalphCapFixture(t)
 
@@ -329,5 +334,77 @@ func TestRalphLoop_CapCompletesOnIndependentEvidenceAlone(t *testing.T) {
 	}
 	if got.State.IsTerminal() {
 		t.Fatalf("task state = %q, want non-terminal (independent evidence must still complete)", got.State)
+	}
+}
+
+// TestRalphLoop_CapCompletesOnToolEvidence is the discriminating pin for the
+// wave-2 defect: the daemon's step-job result carries the model's own narration
+// under "evidence" and the RECORDED tool proof under the sibling "tool_evidence"
+// key (internal/daemon/components.go), which ralph_loop.go never decoded. So
+// hasIndependentRalphEvidence was unconditionally false for daemon step jobs and
+// the cap failed genuinely-finished attempts. The final attempt here has ONLY
+// the synthetic stamp in "evidence" — the tool-issued proof is the sole
+// independent record, and it must clear the cap.
+func TestRalphLoop_CapCompletesOnToolEvidence(t *testing.T) {
+	rl, _, taskStore, _ := newRalphCapFixture(t)
+
+	tk := task.NewTask("cap-tool-evidence", "write answer file")
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	driveToReplanCap(t, rl, tk.ID)
+
+	// Daemon-shaped result: "evidence" carries only the synthetic stamp; the
+	// real proof lives under "tool_evidence".
+	result, _ := json.Marshal(map[string]any{
+		"success":  true,
+		"result":   "wrote the answer file",
+		"evidence": []string{syntheticJobEvidence("wrote the answer file to disk")},
+		"tool_evidence": []models.Evidence{
+			{Type: models.EvidenceFileExists, Subject: "/tmp/answer.txt", Value: "present"},
+		},
+	})
+	isComplete, _, needsReplan := rl.CheckCompletion(context.Background(), tk.ID, result)
+	if !isComplete {
+		t.Fatal("isComplete = false, want true: the final attempt carried tool-issued evidence (tool_evidence), the only independently observed proof")
+	}
+	if needsReplan {
+		t.Fatal("needsReplan = true, want false at the cap with tool evidence")
+	}
+	got, err := taskStore.GetByID(tk.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.State.IsTerminal() {
+		t.Fatalf("task state = %q, want non-terminal (a capped task with real tool evidence must complete)", got.State)
+	}
+}
+
+// TestRalphLoop_IndependentEvidenceHeuristic pins the string-filter rule itself,
+// including the two evasions the earlier version admitted: the prefix match was
+// case-sensitive ("Job 42 …" read as independent) and the marker search used
+// `idx > 0`, so a stamp with an EMPTY job id ("job  completed by agent …") read
+// as independent. Both are the same synthetic narration and must not clear the
+// cap. A "job "-prefixed line that is not the stamp frame is still real text.
+func TestRalphLoop_IndependentEvidenceHeuristic(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ev   string
+		want bool
+	}{
+		{"plain independent evidence", "answer file written to /tmp/answer.txt", true},
+		{"synthetic stamp", syntheticJobEvidence("wrote the answer file"), false},
+		{"empty job id stamp", "job  completed by agent coder: wrote the answer file", false},
+		{"capitalised stamp", "Job 42 completed by agent coder: wrote the answer file", false},
+		{"job-prefixed non-stamp", "job 42 failed to run", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasIndependentRalphEvidence([]string{tc.ev}); got != tc.want {
+				t.Errorf("hasIndependentRalphEvidence(%q) = %v, want %v", tc.ev, got, tc.want)
+			}
+		})
+	}
+	if hasIndependentRalphEvidence(nil) {
+		t.Error("hasIndependentRalphEvidence(nil) = true, want false")
 	}
 }

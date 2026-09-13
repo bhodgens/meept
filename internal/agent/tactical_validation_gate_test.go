@@ -541,11 +541,17 @@ func TestTacticalScheduler_RetryPassClearsStaleValidationError(t *testing.T) {
 	}
 }
 
-// TestTacticalScheduler_ValidationResidualBlocksTask pins the residual safety
-// net (task gate): a successfully-terminal step with a validator available for
-// its tool hint and tool-issued evidence on record, but no verdict ever
-// recorded, must FAIL the task. Without this pin the net could be deleted
-// silently — grep found no other test that can fail on its removal.
+// TestTacticalScheduler_ValidationResidualBlocksTask documents the residual
+// safety net (task gate) end-to-end: a successfully-terminal step carrying a
+// validator for its tool hint and tool-issued evidence but no verdict at all
+// fails the task. This is a DEFENSE-IN-DEPTH arm, not production coverage —
+// the residual state it hand-builds has no production writer today (every
+// production path that finds a validator either records a verdict or records a
+// ValidationError, and the no-flow paths leave evidence empty), so the row is
+// constructed here rather than driven through the scheduler. It is kept as the
+// end-to-end record that the arm is ARMED and blocks; the arm's actual rule is
+// pinned by TestTacticalScheduler_ValidationResidualRule, which fails if the
+// helper's decision changes.
 func TestTacticalScheduler_ValidationResidualBlocksTask(t *testing.T) {
 	ts, _, msgBus, cleanup := newGateTestScheduler(t, func(cfg *TacticalSchedulerConfig) {
 		cfg.ValidatorManager = validator.NewValidatorManager()
@@ -751,5 +757,73 @@ func TestHeuristicReview_ApprovalWithoutEvidenceNotValidated(t *testing.T) {
 	}
 	if persisted.Validated {
 		t.Error("persisted validated = true, want false (an approval with no evidence verifies nothing)")
+	}
+}
+
+// TestTacticalScheduler_ValidationResidualRule pins the DECISION RULE of
+// stepValidationResidual directly, one clause at a time, so the rule cannot
+// change without a red test. The task-gate arm it feeds is a defense-in-depth
+// net whose residual state has no production writer today (see
+// TestTacticalScheduler_ValidationResidualBlocksTask), so the end-to-end test
+// alone cannot catch a change to the predicate — this table can, and it also
+// records WHY each condition is load-bearing.
+func TestTacticalScheduler_ValidationResidualRule(t *testing.T) {
+	ts, _, _, cleanup := newGateTestScheduler(t, func(cfg *TacticalSchedulerConfig) {
+		cfg.ValidatorManager = validator.NewValidatorManager()
+	})
+	defer cleanup()
+
+	// Precondition: the shape the rule is built around — a hint a validator
+	// exists for, and evidence a tool actually produced.
+	withValidator := "file_write"
+	if !ts.validatorManager.HasValidator(withValidator) {
+		t.Fatalf("precondition: no validator registered for hint %q", withValidator)
+	}
+	realEvidence := []models.Evidence{{Type: models.EvidenceShellOutput, Subject: "echo ok", Value: "ok"}}
+
+	// residual is the one blocking shape; every other case mutates exactly one
+	// clause of it, so a rule that drops any clause changes at least one row.
+	base := func() *task.TaskStep {
+		return &task.TaskStep{
+			ID:       "step-rule",
+			TaskID:   "task-rule",
+			ToolHint: withValidator,
+			State:    task.StepCompleted,
+			Result:   "artifact produced",
+			Evidence: realEvidence,
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		mut  func(s *task.TaskStep)
+		want bool
+	}{
+		{"residual: validator + evidence + no verdict", func(*task.TaskStep) {}, true},
+		{"only the residual shape blocks", func(*task.TaskStep) {}, true},
+		{"not successfully terminal", func(s *task.TaskStep) { s.State = task.StepFailed }, false},
+		{"still scheduled", func(s *task.TaskStep) { s.State = task.StepScheduled }, false},
+		{"already validated", func(s *task.TaskStep) { s.Validated = true }, false},
+		{"explicit validation error", func(s *task.TaskStep) { s.ValidationError = "claim without evidence" }, false},
+		{"no validator for the hint", func(s *task.TaskStep) { s.ToolHint = "unregistered_hint" }, false},
+		{"empty tool hint", func(s *task.TaskStep) { s.ToolHint = "" }, false},
+		{"no evidence", func(s *task.TaskStep) { s.Evidence = nil }, false},
+		{"zero-value evidence decode artifact", func(s *task.TaskStep) {
+			s.Evidence = []models.Evidence{{}}
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			step := base()
+			tc.mut(step)
+			if got := ts.stepValidationResidual(step); got != tc.want {
+				t.Fatalf("stepValidationResidual = %v, want %v (state=%q validated=%v err=%q hint=%q ev=%d)",
+					got, tc.want, step.State, step.Validated, step.ValidationError, step.ToolHint, len(step.Evidence))
+			}
+		})
+	}
+
+	// nil step must not panic the gate.
+	if ts.stepValidationResidual(nil) {
+		t.Error("stepValidationResidual(nil) = true, want false")
 	}
 }
