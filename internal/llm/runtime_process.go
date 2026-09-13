@@ -264,7 +264,6 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 		// Stale PID file
 		os.Remove(p.pidFile)
 	}
-	p.spawnedByUs = true
 
 	// Validate spawn command
 	if len(p.config.SpawnCommand) == 0 {
@@ -372,6 +371,15 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
+	// Apply the ownership flag ONLY now that a real, live child of ours exists
+	// and its PID file is on disk. Setting it earlier (before the "no spawn
+	// command" error and the duplicate-spawn refusal) left a REFUSED spawn
+	// owning the endpoint: spawnedByUs=true with cmd==nil is exactly the state
+	// that makes the next Stop take the PID-file recovery branch, so a daemon
+	// that refused to spawn onto an occupied port would claim kill rights on
+	// whatever later serves that endpoint.
+	p.spawnedByUs = true
+
 	// Durable spawn record: written beside the PID file so the startup orphan
 	// sweep can still match this runtime after the config drifts (unmounted
 	// model volume, renamed provider) — exactly when a leak would otherwise be
@@ -393,14 +401,24 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	// Start a goroutine to wait for the process to exit and prevent zombies.
 	// This is necessary because Setpgid=true creates a new process group,
 	// and without waiting, exited processes become defunct (zombies).
+	waitCmd := p.cmd
+	waitPID := p.pid
 	p.waitDone = make(chan error, 1)
 	go func() {
-		err := p.cmd.Wait() //nolint:mutexio // Wait runs BEFORE Lock; no I/O under mutex
+		err := waitCmd.Wait() //nolint:mutexio // Wait runs BEFORE Lock; no I/O under mutex
 		p.waitDone <- err
 		p.mu.Lock()
-		p.pid = 0
-		p.cmd = nil
+		// Only clear the shared handle when it still refers to THIS child: a
+		// health-driven restart may already have spawned a fresh command.
+		if p.cmd == waitCmd {
+			p.pid = 0
+			p.cmd = nil
+		}
 		p.mu.Unlock()
+		// The runtime exited on its own: leave no stale PID file/record behind
+		// for a later Stop's recovery branch to misread (audit finding F97). A
+		// restart that already rewrote them for a new pid is untouched.
+		p.clearStalePIDFilesForPid(waitPID)
 		// The supervisor is gone (it exits when its runtime exits, and the
 		// kernel closes the pipe on a hard death), so the parent-death pipe
 		// has no reader left to release with.
@@ -451,29 +469,66 @@ func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error
 		return ErrRuntimeNotOwned
 	}
 	if p.cmd == nil || p.cmd.Process == nil {
-		// Try to recover from PID file
-		if entry, err := p.readPIDFile(); err == nil && entry.PID > 0 {
-			// An operator stop signals a process this instance never spawned, so
-			// the PID file is the only handle — and it outlives the process that
-			// wrote it. Verify the pid still runs this runtime before signalling
-			// it; a reused pid must never receive the operator's stop.
-			if asOperator {
-				if mismatch := p.identityMismatch(entry.PID); mismatch != nil {
-					p.mu.Unlock()
-					return mismatch
-				}
-			}
-			proc, err := os.FindProcess(entry.PID)
-			if err != nil {
-				p.mu.Unlock()
-				return nil
-			}
-			p.cmd = &exec.Cmd{}
-			p.cmd.Process = proc
-		} else {
+		// Recover the handle from the PID file. The file is per-endpoint in the
+		// shared run dir and OUTLIVES the process that wrote it, so it is only a
+		// safe handle when it names something we can verify is OUR runtime.
+		entry, err := p.readPIDFile()
+		if err != nil || entry.PID <= 0 {
 			p.mu.Unlock()
 			return nil // Not running
 		}
+		// A pid file carrying a FOREIGN instance token was written by another
+		// meept process (a second daemon, `meept runtime start`, an eval harness
+		// sharing the run dir). The automatic paths — StopAll at daemon shutdown,
+		// the health-driven restart — must not signal it: that is exactly the
+		// cross-instance kill the ownership guard exists to prevent. An explicit
+		// operator stop is the ONE caller allowed to address a foreign instance's
+		// runtime (that is what `meept runtime stop` does), and it is still
+		// identity-checked below.
+		if entry.Token != "" && entry.Token != p.instanceToken && !asOperator {
+			p.mu.Unlock()
+			return ErrRuntimeNotOwned
+		}
+		// Identity check for EVERY caller, automatic (Stop/StopAll) and operator
+		// alike — the automatic path used to signal whatever pid the file named
+		// (audit finding F12). The pid may have been reused since our child died.
+		status, verifyErr := p.classifyRecoveredPID(entry.PID)
+		switch status {
+		case recoveredPIDAbsent:
+			// The pid is not in the process table (or the scan is unavailable):
+			// nothing to signal. Drop the stale file so the next Start spawns
+			// fresh instead of adopting a dead pid.
+			p.mu.Unlock()
+			p.clearPIDFileAndRecord()
+			return nil
+		case recoveredPIDForeign:
+			p.mu.Unlock()
+			if asOperator {
+				return verifyErr
+			}
+			slog.Warn("runtime stop: refusing to signal a pid that is not this runtime",
+				"pid", entry.PID, "pid_file", p.pidFile, "error", verifyErr)
+			return ErrRuntimeNotOwned
+		case recoveredPIDUnverifiable:
+			// Fail closed (audit finding F16): with neither a durable spawn
+			// record nor a configured spawn command there is nothing to compare,
+			// so signalling would be a blind kill. Leave the file for a caller
+			// that can supply an identity.
+			p.mu.Unlock()
+			if asOperator {
+				return verifyErr
+			}
+			slog.Warn("runtime stop: refusing to signal a pid with no verifiable identity",
+				"pid", entry.PID, "pid_file", p.pidFile, "error", verifyErr)
+			return ErrRuntimeNotOwned
+		}
+		proc, err := os.FindProcess(entry.PID)
+		if err != nil {
+			p.mu.Unlock()
+			return nil
+		}
+		p.cmd = &exec.Cmd{}
+		p.cmd.Process = proc
 	}
 
 	// Snapshot the fields we need after releasing the lock.
@@ -540,38 +595,74 @@ func (p *RuntimeProcess) clearPIDFileAndRecord() {
 	RemoveSpawnRecord(p.pidFile)
 }
 
-// identityMismatch reports an error when the process named by the runtime PID
-// file is not running the runtime that file was written for. The PID file
-// outlives the process that wrote it, so its pid can have been reused; an
-// operator stop (StopAsOperator) must not signal an unrelated process because of
-// it. Identity comes from the durable spawn record when one exists, otherwise
-// from the config's spawn command. nil means "cannot tell, nothing to compare".
-func (p *RuntimeProcess) identityMismatch(pid int) error {
-	var want []string
-	if p.config != nil {
-		want = p.config.SpawnCommand
-	}
-	if rec, err := ReadSpawnRecord(p.pidFile); err == nil && len(rec.Argv) > 0 {
-		want = rec.Argv
-	}
-	if len(want) == 0 {
-		return nil
-	}
+// recoveredPIDStatus classifies the process named by a runtime PID file when
+// this instance holds no live handle on it (p.cmd == nil). The PID file outlives
+// the process that wrote it, so its pid can have been reused or the file can
+// have been rewritten by another instance.
+type recoveredPIDStatus int
+
+const (
+	// recoveredPIDVerified: the pid is in the process table and runs this
+	// runtime's command line — safe to signal.
+	recoveredPIDVerified recoveredPIDStatus = iota
+	// recoveredPIDAbsent: the pid is not in the process table (or the scan
+	// failed): nothing to signal.
+	recoveredPIDAbsent
+	// recoveredPIDForeign: the pid is in the process table but runs a different
+	// command line (a reused pid): must not be signalled.
+	recoveredPIDForeign
+	// recoveredPIDUnverifiable: no durable spawn record and no configured spawn
+	// command, so identity cannot be compared: fail closed.
+	recoveredPIDUnverifiable
+)
+
+// classifyRecoveredPID decides whether the pid named by the runtime PID file may
+// be signalled. Identity comes from the durable spawn record when one exists,
+// otherwise from the config's spawn command; when NEITHER is available it fails
+// CLOSED (recoveredPIDUnverifiable) rather than signalling a pid it cannot
+// identify — a pid file from a build older than the durable records, or whose
+// record write failed, is exactly the stale-handle case the guard exists for.
+//
+// A process-table scan failure is treated as recoveredPIDAbsent (nothing to
+// signal) so a transient `ps` failure can never escalate into a blind kill.
+func (p *RuntimeProcess) classifyRecoveredPID(pid int) (recoveredPIDStatus, error) {
 	procs, err := ListRuntimeProcesses()
 	if err != nil {
-		return nil // cannot verify: do not block an explicit operator stop on a scan failure
+		return recoveredPIDAbsent, nil
 	}
-	for _, proc := range procs {
-		if proc.PID != pid {
-			continue
+	var found *RuntimeProcInfo
+	for i := range procs {
+		if procs[i].PID == pid {
+			found = &procs[i]
+			break
 		}
-		if !matchesSpawnCommand(proc.Command, want) {
-			return fmt.Errorf("pid %d runs %q, not this runtime's %q: refusing to signal it (the pid file may name a reused pid)",
-				pid, proc.Command, strings.Join(want, " "))
-		}
-		return nil
 	}
-	return nil // pid is not in the process table: nothing to signal anyway
+	if found == nil {
+		return recoveredPIDAbsent, nil // not in the process table: nothing to signal
+	}
+	want := p.identityWanted()
+	if len(want) == 0 {
+		return recoveredPIDUnverifiable, fmt.Errorf("cannot verify pid %d identity: no durable spawn record and no configured spawn command, refusing to signal it", pid)
+	}
+	if !matchesSpawnCommand(found.Command, want) {
+		return recoveredPIDForeign, fmt.Errorf("pid %d runs %q, not this runtime's %q: refusing to signal it (the pid file may name a reused pid)",
+			pid, found.Command, strings.Join(want, " "))
+	}
+	return recoveredPIDVerified, nil
+}
+
+// identityWanted returns the command line this instance expects the runtime to
+// be running: the durable spawn record's argv when one exists (it records the
+// exact spawn even after the config drifts), otherwise the configured spawn
+// command. Empty means identity cannot be established.
+func (p *RuntimeProcess) identityWanted() []string {
+	if rec, err := ReadSpawnRecord(p.pidFile); err == nil && len(rec.Argv) > 0 {
+		return rec.Argv
+	}
+	if p.config != nil {
+		return p.config.SpawnCommand
+	}
+	return nil
 }
 
 // PID returns the process ID.
@@ -592,14 +683,25 @@ func (p *RuntimeProcess) IsRunning() bool {
 	return p.isProcessRunning(pid)
 }
 
-// StalePIDRemoval cleans up a stale PID file for a given runtime config.
-// This is useful when the daemon restarts and discovers orphaned PID files.
-func (p *RuntimeProcess) StalePIDRemoval() {
-	if entry, err := p.readPIDFile(); err == nil && entry.PID > 0 {
-		if !p.isProcessRunning(entry.PID) {
-			os.Remove(p.pidFile)
-		}
+// clearStalePIDFilesForPid removes the runtime's PID file and its durable spawn
+// record, but ONLY when the PID file still names pid — the process that just
+// exited. A health-driven restart may already have rewritten both for a fresh
+// runtime (a different pid), and removing them then would orphan the new
+// runtime's handle. Called from the wait goroutine's exit path so a runtime
+// that exits unexpectedly leaves no stale handle for a later Stop's
+// PID-file recovery branch to misread (audit finding F97: the helper meant to
+// express this cleanup, StalePIDRemoval, had no production caller).
+func (p *RuntimeProcess) clearStalePIDFilesForPid(pid int) {
+	if p.pidFile == "" || pid <= 0 {
+		return
 	}
+	if entry, err := p.readPIDFile(); err != nil || entry.PID != pid {
+		return
+	}
+	if rmErr := os.Remove(p.pidFile); rmErr != nil && !os.IsNotExist(rmErr) {
+		slog.Debug("runtime pid file removal failed", "pid_file", p.pidFile, "error", rmErr)
+	}
+	RemoveSpawnRecord(p.pidFile)
 }
 
 func (p *RuntimeProcess) isProcessRunning(pid int) bool {

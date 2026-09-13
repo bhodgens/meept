@@ -139,13 +139,37 @@ func parseLFMBareJSONCalls(content string) (string, []ToolCall) {
 		return false
 	}
 	// An object that is an ELEMENT of a JSON array is likewise not a call
-	// shape (same rule the fence half documents).
+	// shape (same rule the fence half documents). This scans the ACTUAL bracket
+	// nesting before pos — a preceding comma is NOT evidence of an array:
+	// commas are ordinary prose punctuation ("here is the config, {...}"), and
+	// treating "after a comma" as "inside an array" silently dropped a bare
+	// call that followed one (audit finding F76). Only an object whose
+	// immediately enclosing bracket is an open '[' is skipped.
 	inArray := func(pos int) bool {
-		j := pos - 1
-		for j >= 0 && (content[j] == ' ' || content[j] == '	' || content[j] == '\n' || content[j] == '\r') {
-			j--
+		var stack []byte
+		inStr := false
+		var quote byte
+		for i := 0; i < pos; i++ {
+			ch := content[i]
+			switch {
+			case inStr && ch == '\\':
+				i++ // skip the escaped byte inside a string
+			case inStr:
+				if ch == quote {
+					inStr = false
+				}
+			case ch == '"' || ch == '\'':
+				inStr = true
+				quote = ch
+			case ch == '[' || ch == '{':
+				stack = append(stack, ch)
+			case ch == ']' || ch == '}':
+				if len(stack) > 0 {
+					stack = stack[:len(stack)-1]
+				}
+			}
 		}
-		return j >= 0 && (content[j] == '[' || content[j] == ',')
+		return len(stack) > 0 && stack[len(stack)-1] == '['
 	}
 
 	var calls []ToolCall
@@ -186,10 +210,25 @@ func parseLFMBareJSONCalls(content string) (string, []ToolCall) {
 	slog.Default().Warn("lfm tool-call recovered from bare JSON object in prose (model template bleed)",
 		"calls", len(calls))
 	// Drop a LaTeX \boxed{ } / \fbox{ } wrapper left dangling around the
-	// stripped call so the remainder reads as prose, not stray syntax.
+	// stripped call so the remainder reads as prose, not stray syntax. Two
+	// spellings occur: the documented `\boxed{\n {...}\n}` shape consumes the
+	// box's `{` WITH the mined object, leaving the bare token `\boxed`; the
+	// double-braced `\boxed{ {...} }` leaves the token and a stray '}'. Both are
+	// stripped here, but only when a box token is actually present, so ordinary
+	// prose ending in '}' is never touched (audit finding F77).
 	out := strings.TrimSpace(kept.String())
-	out = strings.ReplaceAll(out, `\boxed{`, "")
-	out = strings.ReplaceAll(out, `\fbox{`, "")
+	if strings.Contains(out, `\boxed`) || strings.Contains(out, `\fbox`) {
+		out = strings.ReplaceAll(out, `\boxed{`, "")
+		out = strings.ReplaceAll(out, `\fbox{`, "")
+		out = strings.TrimSpace(out)
+		out = strings.TrimSpace(strings.TrimSuffix(out, `\boxed`))
+		out = strings.TrimSpace(strings.TrimSuffix(out, `\fbox`))
+		// A wrapper whose opening brace was consumed with the mined object
+		// leaves the box's orphaned closing brace.
+		if strings.HasSuffix(out, "}") {
+			out = strings.TrimSpace(strings.TrimSuffix(out, "}"))
+		}
+	}
 	return strings.TrimSpace(out), calls
 }
 

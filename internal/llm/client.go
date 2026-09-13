@@ -2024,8 +2024,8 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 					// chain-of-thought stream (verified BY TEST,
 					// 2026-09-11); see ResponseMessage.Reasoning.
 					Reasoning string `json:"reasoning,omitempty"`
-					Role             string `json:"role"`
-					ToolCalls        []struct {
+					Role      string `json:"role"`
+					ToolCalls []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Type     string `json:"type"`

@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -362,5 +363,150 @@ func TestRuntimeProcess_StalePidFile_RemovedAndFreshSpawnOwned(t *testing.T) {
 	}
 	if entry.PID != p.PID() || entry.Token != p.instanceToken {
 		t.Errorf("pidfile after fresh spawn = %+v, want pid=%d our token", entry, p.PID())
+	}
+}
+
+// --- audit findings F12 / F16 / F56 pins ---
+
+// TestRuntimeProcess_Stop_AutomaticRefusesForeignToken pins audit finding F12:
+// the AUTOMATIC path (Stop/StopAll, health restart) must not signal a PID file
+// another meept instance wrote. Simulated by a spawnedByUs process whose child
+// is gone (cmd==nil) and whose PID file was rewritten with a FOREIGN token.
+func TestRuntimeProcess_Stop_AutomaticRefusesForeignToken(t *testing.T) {
+	victim := startTestSleep(t, "300")
+	pidFile := filepath.Join(t.TempDir(), "foreign-token.pid")
+	writeTestPidFile(t, pidFile, pidfileEntry{PID: victim.Process.Pid, Token: "0000another-instance"})
+
+	p := &RuntimeProcess{
+		config:        &RuntimeConfig{SpawnCommand: []string{"sleep", "300"}, PIDFile: pidFile},
+		pidFile:       pidFile,
+		instanceToken: "0000our-instance",
+		spawnedByUs:   true, // we own the endpoint, but the file now names another instance's runtime
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := p.Stop(ctx); err != ErrRuntimeNotOwned {
+		t.Fatalf("automatic Stop on a foreign-token PID file = %v, want ErrRuntimeNotOwned", err)
+	}
+	if !testPidAlive(victim.Process.Pid) {
+		t.Fatal("the foreign instance's runtime was signalled by an automatic Stop (F12)")
+	}
+}
+
+// TestRuntimeProcess_Stop_AutomaticRefusesReusedPID pins the identity check on
+// the automatic path (F12): our own token is in the PID file, but the pid now
+// runs an unrelated command (ours died and the pid was reused). Stop must not
+// signal it.
+func TestRuntimeProcess_Stop_AutomaticRefusesReusedPID(t *testing.T) {
+	victim := startTestSleep(t, "300") // runs "sleep 300", not the configured runtime
+	pidFile := filepath.Join(t.TempDir(), "reused.pid")
+	p := &RuntimeProcess{
+		config:        &RuntimeConfig{SpawnCommand: []string{"mlx_lm", "server", "--port", "8081"}, PIDFile: pidFile},
+		pidFile:       pidFile,
+		instanceToken: "0000our-instance",
+		spawnedByUs:   true,
+	}
+	writeTestPidFile(t, pidFile, pidfileEntry{PID: victim.Process.Pid, Token: p.instanceToken})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.Stop(ctx); err == nil {
+		t.Fatal("automatic Stop must refuse a pid that does not run this runtime (F12)")
+	}
+	if !testPidAlive(victim.Process.Pid) {
+		t.Fatal("an unrelated reused pid was signalled by an automatic Stop (F12)")
+	}
+}
+
+// TestRuntimeProcess_Stop_AutomaticAbsentPidClearsStaleFile pins the "not in the
+// process table => nothing to signal, clear the stale file" rule (F12).
+func TestRuntimeProcess_Stop_AutomaticAbsentPidClearsStaleFile(t *testing.T) {
+	dead := exec.Command("true")
+	if err := dead.Start(); err != nil {
+		t.Fatalf("spawn true: %v", err)
+	}
+	deadPid := dead.Process.Pid
+	_, _ = dead.Process.Wait()
+	if testPidAlive(deadPid) {
+		t.Skip("dead pid still reported alive; environment reaped oddly")
+	}
+
+	pidFile := filepath.Join(t.TempDir(), "stale.pid")
+	p := &RuntimeProcess{
+		config:        &RuntimeConfig{SpawnCommand: []string{"sleep", "300"}, PIDFile: pidFile},
+		pidFile:       pidFile,
+		instanceToken: "0000our-instance",
+		spawnedByUs:   true,
+	}
+	writeTestPidFile(t, pidFile, pidfileEntry{PID: deadPid, Token: p.instanceToken})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.Stop(ctx); err != nil {
+		t.Fatalf("Stop with an absent pid = %v, want nil", err)
+	}
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Errorf("the stale pid file must be removed, stat err = %v", err)
+	}
+}
+
+// TestRuntimeProcess_Stop_FailsClosedWithoutIdentity pins audit finding F16's
+// fail-closed rule: a recovered pid that cannot be identified (no durable
+// record, no configured spawn command) must not be signalled.
+func TestRuntimeProcess_Stop_FailsClosedWithoutIdentity(t *testing.T) {
+	victim := startTestSleep(t, "300")
+	pidFile := filepath.Join(t.TempDir(), "noid.pid")
+	writeTestPidFile(t, pidFile, pidfileEntry{PID: victim.Process.Pid, Token: "0000our-instance"})
+
+	p := &RuntimeProcess{
+		config:        &RuntimeConfig{PIDFile: pidFile}, // no SpawnCommand, no record
+		pidFile:       pidFile,
+		instanceToken: "0000our-instance",
+		spawnedByUs:   true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.Stop(ctx); err == nil {
+		t.Fatal("Stop must fail closed when identity cannot be established (F16)")
+	}
+	if !testPidAlive(victim.Process.Pid) {
+		t.Fatal("a pid with no verifiable identity was signalled (F16)")
+	}
+}
+
+// TestRuntimeProcess_RefusedSpawnDoesNotClaimOwnership pins audit finding F56:
+// spawnedByUs is set only AFTER a real spawn + PID-file write, so a REFUSED
+// spawn leaves the instance a non-owner and Stop refuses.
+func TestRuntimeProcess_RefusedSpawnDoesNotClaimOwnership(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() {
+		if cerr := ln.Close(); cerr != nil {
+			t.Logf("listener close: %v", cerr)
+		}
+	}()
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("split: %v", err)
+	}
+
+	pidFile := filepath.Join(t.TempDir(), "refused.pid")
+	cfg := &RuntimeConfig{
+		BaseURL:      "http://" + ln.Addr().String() + "/v1",
+		SpawnCommand: []string{"mlx_lm", "server", "--model", "/m/x", "--port", port},
+		PIDFile:      pidFile,
+	}
+	p := NewRuntimeProcess(cfg)
+	if startErr := p.Start(context.Background(), io.Discard, io.Discard); startErr == nil {
+		t.Fatal("expected the duplicate-spawn refusal")
+	}
+	if p.spawnedByUs {
+		t.Error("a refused spawn must not set spawnedByUs (it would claim kill rights on the endpoint) (F56)")
+	}
+	if stopErr := p.Stop(context.Background()); stopErr != ErrRuntimeNotOwned {
+		t.Errorf("Stop after a refused spawn = %v, want ErrRuntimeNotOwned (F56)", stopErr)
 	}
 }

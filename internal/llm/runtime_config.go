@@ -142,10 +142,10 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 		if v == "" {
 			continue
 		}
-		modelPaths[k] = pathutil.ExpandPath(v)
+		modelPaths[k] = pathutil.ExpandMeeptPath(v)
 	}
 	if len(modelPaths) == 0 && cfg.ModelPath != "" {
-		modelPaths["default"] = pathutil.ExpandPath(cfg.ModelPath)
+		modelPaths["default"] = pathutil.ExpandMeeptPath(cfg.ModelPath)
 	}
 	if len(modelPaths) == 0 {
 		return nil, fmt.Errorf("no model_path or model_paths configured")
@@ -166,8 +166,11 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 	sort.Strings(sortedKeys)
 	firstPath := modelPaths[sortedKeys[0]]
 
-	// Expand PID file path
-	pidFile := pathutil.ExpandPath(cfg.PIDFile)
+	// Expand PID file path. ExpandMeeptPath (not ExpandPath) so the shipped
+	// "~/.meept/run/..." default is redirected under MEEPT_HOME: the pid file,
+	// its durable spawn record (written beside it) and the daemon's run-dir
+	// sweep scan must all resolve to ONE directory in a rig.
+	pidFile := pathutil.ExpandMeeptPath(cfg.PIDFile)
 	if err := os.MkdirAll(filepath.Dir(pidFile), 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create PID directory: %w", err)
 	}
@@ -354,7 +357,7 @@ func (p ProviderConfig) ExpandModelPath() string {
 	if p.Lifecycle == nil {
 		return ""
 	}
-	return pathutil.ExpandPath(p.Lifecycle.ModelPath)
+	return pathutil.ExpandMeeptPath(p.Lifecycle.ModelPath)
 }
 
 // ValidateModelExists checks if the model file exists for this provider's lifecycle config.
@@ -362,7 +365,7 @@ func (p ProviderConfig) ValidateModelExists() error {
 	if p.Lifecycle == nil {
 		return nil
 	}
-	modelPath := pathutil.ExpandPath(p.Lifecycle.ModelPath)
+	modelPath := pathutil.ExpandMeeptPath(p.Lifecycle.ModelPath)
 	if _, err := os.Stat(modelPath); err != nil {
 		return fmt.Errorf("model file not found: %s: %w", modelPath, err)
 	}
@@ -375,7 +378,7 @@ func (p ProviderConfig) ExpandSpawnCommand() ([]string, error) {
 		return nil, nil
 	}
 
-	modelPath := pathutil.ExpandPath(p.Lifecycle.ModelPath)
+	modelPath := pathutil.ExpandMeeptPath(p.Lifecycle.ModelPath)
 	cmds := make([]string, len(p.Lifecycle.SpawnCommand))
 	for i, part := range p.Lifecycle.SpawnCommand {
 		cmds[i] = os.Expand(part, func(key string) string {
@@ -393,7 +396,7 @@ func (p ProviderConfig) PIDDir() string {
 	if p.Lifecycle == nil || p.Lifecycle.PIDFile == "" {
 		return ""
 	}
-	return filepath.Dir(pathutil.ExpandPath(p.Lifecycle.PIDFile))
+	return filepath.Dir(pathutil.ExpandMeeptPath(p.Lifecycle.PIDFile))
 }
 
 // DefaultSpawnTimeout returns the spawn timeout, defaulting to 60s.
@@ -511,7 +514,7 @@ func (rt RuntimeType) IsValid() bool {
 
 // FormatPIDFilePath validates and returns an absolute PID file path.
 func FormatPIDFilePath(pidFile string) (string, error) {
-	expanded := pathutil.ExpandPath(pidFile)
+	expanded := pathutil.ExpandMeeptPath(pidFile)
 	if !filepath.IsAbs(expanded) {
 		return "", fmt.Errorf("PID file path must be absolute: %s", pidFile)
 	}

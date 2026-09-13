@@ -436,3 +436,32 @@ func TestAutoStopOnExitJSON5Decode(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateAndNormalize_PIDFileHonorsMeeptHome pins audit finding F15 for the
+// writer side: with MEEPT_HOME set, the shipped "~/.meept/run/..." pid_file
+// resolves under $MEEPT_HOME, so the pid file and its durable spawn record land
+// in the same directory the daemon sweep scans (config.MeeptPath("run")).
+func TestValidateAndNormalize_PIDFileHonorsMeeptHome(t *testing.T) {
+	modelPath := createTempModelFile(t)
+	home := t.TempDir()
+	t.Setenv("MEEPT_HOME", home)
+
+	cfg := llm.RuntimeLifecycleConfig{
+		Runtime:      "llama-cpp",
+		ModelPath:    modelPath,
+		PIDFile:      "~/.meept/run/llama-general.pid",
+		SpawnCommand: []string{"llama-server", "-m", "$MODEL_PATH"},
+	}
+	rt, err := llm.ValidateAndNormalize(cfg)
+	if err != nil {
+		t.Fatalf("ValidateAndNormalize: %v", err)
+	}
+	wantDir := filepath.Join(home, "run")
+	if got := filepath.Dir(rt.PIDFile); got != wantDir {
+		t.Errorf("pid file dir = %q, want %q (MEEPT_HOME-aware)", got, wantDir)
+	}
+	// The record is written beside the pid file, so record dir == pid dir.
+	if got := filepath.Dir(llm.SpawnRecordPath(rt.PIDFile)); got != wantDir {
+		t.Errorf("record dir = %q, want %q", got, wantDir)
+	}
+}

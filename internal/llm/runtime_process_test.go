@@ -462,7 +462,13 @@ func TestRuntimeProcess_StopAsOperatorStopsRecordedPID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	p := llm.NewRuntimeProcess(&llm.RuntimeConfig{PIDFile: pidFile})
+	// The config carries the runtime's spawn command so StopAsOperator can
+	// verify the pid still runs this runtime before signalling it (audit
+	// finding F16: a command-less config made the identity check inert).
+	p := llm.NewRuntimeProcess(&llm.RuntimeConfig{
+		PIDFile:      pidFile,
+		SpawnCommand: []string{"sleep", "300"},
+	})
 	if err := p.StopAsOperator(ctx); err != nil {
 		t.Fatalf("StopAsOperator: %v", err)
 	}
@@ -471,6 +477,46 @@ func TestRuntimeProcess_StopAsOperatorStopsRecordedPID(t *testing.T) {
 	}
 	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
 		t.Errorf("the stopped runtime's pid file must be removed, stat err = %v", statErr)
+	}
+}
+
+// TestRuntimeProcess_StopAsOperator_FailsClosedWithoutIdentity pins audit
+// finding F16's fail-closed rule at the operator surface: with neither a
+// durable spawn record nor a configured spawn command, identity cannot be
+// verified, so StopAsOperator must refuse instead of signalling a pid a stale
+// pidfile names.
+func TestRuntimeProcess_StopAsOperator_FailsClosedWithoutIdentity(t *testing.T) {
+	victim := exec.Command("sleep", "300")
+	victim.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := victim.Start(); err != nil {
+		t.Fatalf("start victim: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = victim.Process.Kill()
+		_, _ = victim.Process.Wait()
+	})
+
+	pidDir := createTempPIDDir(t)
+	if err := os.MkdirAll(pidDir, 0o700); err != nil {
+		t.Fatalf("create pid dir: %v", err)
+	}
+	pidFile := filepath.Join(pidDir, "noid.pid")
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf(`{"pid":%d,"token":"foreign"}`, victim.Process.Pid)), 0o600); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	p := llm.NewRuntimeProcess(&llm.RuntimeConfig{PIDFile: pidFile}) // no SpawnCommand, no record
+	err := p.StopAsOperator(ctx)
+	if err == nil {
+		t.Fatal("StopAsOperator must fail closed when identity cannot be verified (F16)")
+	}
+	if !strings.Contains(err.Error(), "cannot verify") {
+		t.Errorf("unexpected error text: %v", err)
+	}
+	if aliveErr := syscall.Kill(victim.Process.Pid, 0); aliveErr != nil {
+		t.Errorf("the unverifiable pid must be untouched, kill(0) err = %v", aliveErr)
 	}
 }
 
@@ -518,6 +564,44 @@ func TestRuntimeProcess_StartWritesAndStopRemovesSpawnRecord(t *testing.T) {
 	}
 	if _, readErr := llm.ReadSpawnRecord(pidFile); readErr == nil {
 		t.Error("the spawn record must be removed together with the runtime")
+	}
+}
+
+// TestRuntimeProcess_ExitPathClearsStalePIDFileAndRecord pins audit finding F97:
+// a runtime that exits on its own leaves no stale PID file/record behind for a
+// later Stop's recovery branch to misread (StalePIDRemoval was dead code before
+// this; the cleanup now runs on the wait goroutine's exit path).
+func TestRuntimeProcess_ExitPathClearsStalePIDFileAndRecord(t *testing.T) {
+	pidFile := filepath.Join(createTempPIDDir(t), "exit.pid")
+	cfg := &llm.RuntimeConfig{
+		EndpointKey:  "llama-cpp:127.0.0.1:8099",
+		AutoStop:     true,
+		PIDFile:      pidFile,
+		SpawnCommand: []string{"sleep", "1"},
+	}
+	p := llm.NewRuntimeProcess(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := p.Start(ctx, io.Discard, io.Discard); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := llm.ReadSpawnRecord(pidFile); err != nil {
+		t.Fatalf("record must exist after start: %v", err)
+	}
+
+	// The runtime exits on its own; the exit path must remove the stale handle.
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(pidFile); os.IsNotExist(err) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Fatalf("an exited runtime must leave no stale pid file (F97), stat err = %v", err)
+	}
+	if _, err := llm.ReadSpawnRecord(pidFile); err == nil {
+		t.Error("an exited runtime must leave no stale spawn record (F97)")
 	}
 }
 

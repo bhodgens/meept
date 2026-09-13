@@ -75,11 +75,7 @@ func (h *HealthChecker) Start(ctx context.Context) {
 }
 
 func (h *HealthChecker) run(ctx context.Context, stopCh <-chan struct{}) {
-	defer func() {
-		h.mu.Lock()
-		h.running = false
-		h.mu.Unlock()
-	}()
+	defer h.finishRun(stopCh)
 
 	ticker := time.NewTicker(h.config.HealthInterval)
 	defer ticker.Stop()
@@ -93,6 +89,20 @@ func (h *HealthChecker) run(ctx context.Context, stopCh <-chan struct{}) {
 		case <-ticker.C:
 			h.checkOnce(stopCh)
 		}
+	}
+}
+
+// finishRun is a run goroutine's exit path. It clears the running flag ONLY
+// when the run it belongs to is still the active one — the generation guard,
+// mirroring checkOnce. A SUPERSEDED goroutine (Stop→Start re-armed a new run
+// before this one noticed) must not clear the active run's flag: doing so makes
+// Stop a no-op for that run (so it can never be stopped, StopAll included) and
+// lets further Starts arm concurrent, unstoppable runs (audit finding F60).
+func (h *HealthChecker) finishRun(stopCh <-chan struct{}) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.stopCh == stopCh {
+		h.running = false
 	}
 }
 
@@ -198,16 +208,28 @@ func (h *HealthChecker) notifyTransition(wasHealthy bool) {
 }
 
 // Stop stops the health checker. Idempotent, and safe against the run goroutine
-// exiting on its own: it only closes the channel of the run that is active.
+// exiting on its own: it closes the channel of the run this checker believes is
+// active.
+//
+// It gates on the CHANNEL, not on the running flag: a superseded goroutine can
+// never leave a newer run's channel here (finishRun's generation guard), so
+// whatever h.stopCh names is either the live run or an already-exited one, and
+// closing it is safe either way — no run ever closes its own channel. Gating on
+// the flag instead (the old behaviour) made Stop a no-op for a run whose flag a
+// stale goroutine had cleared, leaving it live and unstoppable (finding F60).
 func (h *HealthChecker) Stop() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if h.running && h.stopCh != nil {
-		close(h.stopCh)
-		h.stopCh = nil
-		h.running = false
+	if h.stopCh == nil {
+		return
 	}
+	close(h.stopCh) //nolint:channil // nil is the idempotence sentinel; all mutation under h.mu
+	// The nil above is deliberate: Stop is idempotent, every stopCh mutation
+	// happens under h.mu, and no sender selects on a nil channel (Start
+	// installs a fresh one).
+	h.stopCh = nil
+	h.running = false
 }
 
 // OnHealthChange sets a callback invoked on health state transitions.

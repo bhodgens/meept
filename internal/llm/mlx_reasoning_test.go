@@ -45,20 +45,22 @@ func TestParseResponse_ReadsMlxReasoningField(t *testing.T) {
 	}
 	client := NewClient(&ModelConfig{ModelID: "mlx-test"})
 
-	// Content is empty and there are no tool calls, so parseResponse still
-	// returns ErrEmptyResponse — but the reasoning must be visible on the
-	// struct so callers can distinguish "said nothing" from "thought only".
+	// The whole reply lives in `reasoning` with `content` absent and no tool
+	// call recovered, so parseResponse must PROMOTE the reasoning text to
+	// Content instead of returning ErrEmptyResponse (audit finding F59). Before
+	// the fix this returned ErrEmptyResponse, so every mlx prose turn was read
+	// as an empty response and the loop burned its nudge ladder.
 	resp, err := client.parseResponse(&chatResp)
-	if err == nil {
-		if resp.Reasoning != "thinking hard about the answer" {
-			t.Errorf("resp.Reasoning = %q, want the mlx reasoning text", resp.Reasoning)
-		}
-		return
+	if err != nil {
+		t.Fatalf("parseResponse: %v (mlx prose must be promoted, not error)", err)
 	}
-	if err != ErrEmptyResponse {
-		t.Fatalf("parseResponse error = %v, want ErrEmptyResponse", err)
+	if resp.Content != "thinking hard about the answer" {
+		t.Errorf("resp.Content = %q, want the mlx reasoning text promoted", resp.Content)
 	}
-	// The alias must at least be readable from the message so the loop's
+	if resp.Reasoning != "thinking hard about the answer" {
+		t.Errorf("resp.Reasoning = %q, want the mlx reasoning text", resp.Reasoning)
+	}
+	// The alias must also stay readable from the message so the loop's
 	// reasoning watchdog sees the tokens instead of treating the turn as
 	// blank.
 	if got := chatResp.Choices[0].Message.ReasoningText(); got == "" {
@@ -95,5 +97,24 @@ func TestParseResponse_RecoversToolCallsFromMlxReasoning(t *testing.T) {
 	}
 	if got := resp.ToolCalls[0].Function.Name; got != "file_write" {
 		t.Errorf("recovered tool name = %q, want file_write", got)
+	}
+}
+
+// TestParseResponse_StillEmptyWhenNoContentAndNoReasoning pins that the F59
+// promotion is narrow: a genuinely empty reply (no content, no reasoning, no
+// tool calls) still surfaces ErrEmptyResponse.
+func TestParseResponse_StillEmptyWhenNoContentAndNoReasoning(t *testing.T) {
+	raw := `{
+		"model": "mlx-test",
+		"choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant"}}],
+		"usage": {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1}
+	}`
+	var chatResp ChatResponse
+	if err := json.Unmarshal([]byte(raw), &chatResp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	client := NewClient(&ModelConfig{ModelID: "mlx-test"})
+	if _, err := client.parseResponse(&chatResp); err != ErrEmptyResponse {
+		t.Fatalf("parseResponse on a truly empty reply = %v, want ErrEmptyResponse", err)
 	}
 }

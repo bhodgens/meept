@@ -23,6 +23,12 @@ func newRuntimeCmd() *cobra.Command {
 		Short: "Manage local LLM runtime processes",
 		Long: `Manage local LLM runtime processes (llama.cpp, MLX).
 
+A runtime started here belongs to the OPERATOR, not the daemon: the daemon
+adopts it observed-not-owned and its durable spawn record is written with
+auto_stop=false, so the daemon's boot orphan sweep leaves it running. The same
+promise for a daemon-managed runtime comes from lifecycle.auto_stop_on_exit:
+false in the provider config.
+
 Examples:
   meept runtime status          # Show runtime status for default provider
   meept runtime status local    # Show runtime status for specific provider
@@ -142,8 +148,12 @@ func loadRuntimeConfig(provider string) (*llm.ProvidersConfig, *llm.ProviderConf
 }
 
 // pidFileFromConfig resolves the expanded PID file path from lifecycle config.
+// ExpandMeeptPath (not ExpandPath) so the shipped "~/.meept/run/..." default is
+// redirected under MEEPT_HOME: the CLI must resolve the SAME pid file the
+// daemon writes and the sweep scans, or an isolated rig reports a runtime as not
+// running while the daemon serves it.
 func pidFileFromConfig(lc *llm.RuntimeLifecycleConfig) string {
-	return pathutil.ExpandPath(lc.PIDFile)
+	return pathutil.ExpandMeeptPath(lc.PIDFile)
 }
 
 // checkProcessAlive checks if a PID is alive via signal 0.
@@ -327,6 +337,15 @@ func runRuntimeStart(ctx context.Context, provider string, wait bool) error {
 	// empty BaseURL silently skips that pre-check.
 	rtCfg.BaseURL = pc.Options.BaseURL
 
+	// An out-of-daemon operator start is NOT a daemon-managed child: the daemon
+	// never spawned it and will adopt it observed-not-owned on its next boot. Its
+	// durable spawn record must therefore say auto_stop=false — the same opt-out
+	// an explicit auto_stop_on_exit:false produces — so the daemon's boot orphan
+	// sweep does not reap the runtime the operator deliberately started (audit
+	// finding F58). Superseded by nothing else: the daemon's own managed spawns
+	// are unaffected.
+	rtCfg.AutoStop = false
+
 	pidFile := rtCfg.PIDFile
 
 	// Check if already running. The pidfile is JSON ({"pid":N,"token":"..."}),
@@ -352,6 +371,12 @@ func runRuntimeStart(ctx context.Context, provider string, wait bool) error {
 	if wait {
 		baseURL := pc.Options.BaseURL
 		hc := llm.NewHealthChecker(rtCfg, baseURL)
+		// Require the spawned process to be alive, not just a 200 from the
+		// endpoint: a foreign listener on the port (or a child that died at bind
+		// time) answers /health while meept's runtime serves nothing, so a bare
+		// 200 would report the CLI's dead child as healthy (audit finding F79).
+		// Mirrors the manager's wiring (runtime_manager.go).
+		hc.SetProcessAliveProbe(runtimeProc.IsRunning)
 		hc.Start(ctx)
 		defer hc.Stop()
 
@@ -400,7 +425,22 @@ func runRuntimeStop(ctx context.Context, provider string) error {
 	// (the daemon did), so Stop would refuse with ErrRuntimeNotOwned and the
 	// documented command could never stop anything. An explicit operator
 	// request is exactly the StopAsOperator case.
-	runtimeProc := llm.NewRuntimeProcess(runtimePIDConfig(pc, pidFile))
+	//
+	// Build the stop's config WITH the runtime's spawn command: the operator
+	// stop verifies the pid still runs this runtime before signalling it, and a
+	// command-less config left it nothing to compare (audit finding F16). Prefer
+	// the fully normalized config (same ${MODEL_PATH...} expansion the runtime
+	// actually runs); fall back to the minimal config when normalization fails
+	// (e.g. the model volume is gone) — either way identityMismatch has a
+	// command to compare, or it fails CLOSED rather than signalling blindly.
+	rtCfg, normErr := llm.ValidateAndNormalize(*pc.Lifecycle)
+	if normErr != nil {
+		rtCfg = runtimePIDConfig(pc, pidFile)
+	} else {
+		rtCfg.PIDFile = pidFile
+		rtCfg.BaseURL = pc.Options.BaseURL
+	}
+	runtimeProc := llm.NewRuntimeProcess(rtCfg)
 	stopErr := runtimeProc.StopAsOperator(ctx)
 
 	// Report truthfully: claim "stopped" only once the pid is verifiably
@@ -430,12 +470,21 @@ func runRuntimeRestart(ctx context.Context, provider string) error {
 	return runRuntimeStart(ctx, provider, true)
 }
 
-// runtimePIDConfig builds a minimal RuntimeConfig from a provider,
-// suitable for Stop() calls without needing full validation (no model check).
+// runtimePIDConfig builds a minimal RuntimeConfig from a provider, suitable for
+// Stop() calls without needing full validation (no model check).
+//
+// The provider's spawn command is carried through so the operator stop can
+// VERIFY IDENTITY before signalling: a minimal config with no spawn command
+// left identityMismatch nothing to compare, so `meept runtime stop` would
+// signal whatever pid a stale pidfile named (audit finding F16). The command is
+// best-effort expanded ($MODEL_PATH/<env>) and is only used for the identity
+// comparison, never to spawn.
 func runtimePIDConfig(pc *llm.ProviderConfig, pidFile string) *llm.RuntimeConfig {
-	return &llm.RuntimeConfig{
-		PIDFile: pidFile,
+	cfg := &llm.RuntimeConfig{PIDFile: pidFile}
+	if spawn, err := pc.ExpandSpawnCommand(); err == nil {
+		cfg.SpawnCommand = spawn
 	}
+	return cfg
 }
 
 // loadAgentRefsCLI loads default agent definitions and converts them to the

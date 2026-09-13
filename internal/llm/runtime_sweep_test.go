@@ -505,3 +505,250 @@ func TestSweepOrphanRuntimes_LeavesRecordWithAutoStopFalseAlone(t *testing.T) {
 		t.Errorf("no signal may reach an auto_stop=false runtime, got %d", signalled)
 	}
 }
+
+// --- audit findings F57 / F58 / F61 pins ---
+
+// TestSweepOrphanRuntimes_RemovesSpawnRecordOnReap pins audit finding F57: the
+// reap removes the durable spawn record too, so records do not accumulate and a
+// stale one cannot later outvote an explicit auto_stop_on_exit:false.
+func TestSweepOrphanRuntimes_RemovesSpawnRecordOnReap(t *testing.T) {
+	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	pidFile := filepath.Join(t.TempDir(), "runtime.pid")
+	if err := os.WriteFile(pidFile, []byte(`{"pid":900,"token":"deadbeef"}`), 0o600); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+	if err := WriteSpawnRecord(SpawnRecord{
+		EndpointKey: "mlx:127.0.0.1:8081",
+		PIDFile:     pidFile,
+		Argv:        []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"},
+		AutoStop:    true,
+		PID:         900,
+	}); err != nil {
+		t.Fatalf("write spawn record: %v", err)
+	}
+
+	cfg := &RuntimeConfig{
+		EndpointKey:  "mlx:127.0.0.1:8081",
+		AutoStop:     true,
+		PIDFile:      pidFile,
+		SpawnCommand: []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"},
+	}
+	if err := mgr.RegisterConfig("local-mlx", cfg, "http://127.0.0.1:8081/v1"); err != nil {
+		t.Fatalf("RegisterConfig: %v", err)
+	}
+
+	killed := false
+	mgr.sweepLister = func() ([]RuntimeProcInfo, error) {
+		if killed {
+			return nil, nil
+		}
+		return []RuntimeProcInfo{{
+			PID:     900,
+			PPID:    1,
+			Command: "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081",
+		}}, nil
+	}
+	mgr.sweepSignal = func(_ int, sig syscall.Signal) error {
+		if sig == syscall.SIGKILL {
+			killed = true
+		}
+		return nil
+	}
+
+	if reaped := mgr.SweepOrphanRuntimes(0, nil); len(reaped) != 1 || reaped[0] != 900 {
+		t.Fatalf("reaped = %v, want [900]", reaped)
+	}
+	if _, err := os.Stat(SpawnRecordPath(pidFile)); !os.IsNotExist(err) {
+		t.Errorf("the reaped runtime's spawn record must be removed, stat err = %v (F57)", err)
+	}
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Errorf("the reaped runtime's pid file must be removed, stat err = %v", err)
+	}
+}
+
+// TestFindOrphanRuntimesWithRecords_ConfigAutoStopFalseOutvotesStaleRecord pins
+// audit finding F57: a STALE record with AutoStop=true must not reap a leftover
+// when the endpoint's CURRENT config says auto_stop_on_exit=false.
+func TestFindOrphanRuntimesWithRecords_ConfigAutoStopFalseOutvotesStaleRecord(t *testing.T) {
+	argv := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
+	cmd := "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"
+	pidFile := "/tmp/mlx-optout.pid"
+	cfgs := []*RuntimeConfig{{EndpointKey: "mlx:127.0.0.1:8081", AutoStop: false, PIDFile: pidFile, SpawnCommand: argv}}
+	records := []SpawnRecord{{EndpointKey: "mlx:127.0.0.1:8081", PIDFile: pidFile, Argv: argv, AutoStop: true, PID: 900}}
+	lister := func() ([]RuntimeProcInfo, error) {
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: cmd}}, nil
+	}
+
+	got, err := FindOrphanRuntimesWithRecords(cfgs, records, lister)
+	if err != nil {
+		t.Fatalf("FindOrphanRuntimesWithRecords: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a stale record must not outvote config auto_stop_on_exit=false, got %+v (F57)", got)
+	}
+}
+
+// TestFindOrphanRuntimesWithRecords_OperatorRecordSparesConfigMatch pins audit
+// finding F58: a record with AutoStop=false (an out-of-daemon `meept runtime
+// start`, whose record the CLI writes with AutoStop=false) spares the SAME
+// endpoint from the config match too — the boot sweep must not reap a runtime
+// the operator deliberately started.
+func TestFindOrphanRuntimesWithRecords_OperatorRecordSparesConfigMatch(t *testing.T) {
+	argv := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
+	cmd := "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"
+	pidFile := "/tmp/mlx-operator.pid"
+	cfgs := []*RuntimeConfig{{EndpointKey: "mlx:127.0.0.1:8081", AutoStop: true, PIDFile: pidFile, SpawnCommand: argv}}
+	records := []SpawnRecord{{EndpointKey: "mlx:127.0.0.1:8081", PIDFile: pidFile, Argv: argv, AutoStop: false, PID: 900}}
+	lister := func() ([]RuntimeProcInfo, error) {
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: cmd}}, nil
+	}
+
+	got, err := FindOrphanRuntimesWithRecords(cfgs, records, lister)
+	if err != nil {
+		t.Fatalf("FindOrphanRuntimesWithRecords: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("an operator-started runtime (record auto_stop=false) must survive the config match, got %+v (F58)", got)
+	}
+}
+
+// TestSweepOrphanRuntimes_LeavesOperatorStartedRuntimeAlone is the end-to-end
+// form of F58: the operator's `meept runtime start` runtime (ppid==1, argv
+// match, config auto_stop=true, record auto_stop=false) is not reaped.
+func TestSweepOrphanRuntimes_LeavesOperatorStartedRuntimeAlone(t *testing.T) {
+	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	argv := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
+	pidFile := filepath.Join(t.TempDir(), "runtime.pid")
+	cfg := &RuntimeConfig{EndpointKey: "mlx:127.0.0.1:8081", AutoStop: true, PIDFile: pidFile, SpawnCommand: argv}
+	if err := mgr.RegisterConfig("local-mlx", cfg, "http://127.0.0.1:8081/v1"); err != nil {
+		t.Fatalf("RegisterConfig: %v", err)
+	}
+	records := []SpawnRecord{{EndpointKey: "mlx:127.0.0.1:8081", PIDFile: pidFile, Argv: argv, AutoStop: false, PID: 900}}
+
+	mgr.sweepLister = func() ([]RuntimeProcInfo, error) {
+		return []RuntimeProcInfo{{PID: 900, PPID: 1, Command: "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"}}, nil
+	}
+	signalled := 0
+	mgr.sweepSignal = func(int, syscall.Signal) error {
+		signalled++
+		return nil
+	}
+
+	if got := mgr.SweepOrphanRuntimes(0, records); len(got) != 0 {
+		t.Fatalf("an operator-started runtime must not be reaped, got %v (F58)", got)
+	}
+	if signalled != 0 {
+		t.Errorf("no signal may reach an operator-started runtime, got %d (F58)", signalled)
+	}
+}
+
+// TestFilterLiveOwned_DropsTargetWithLiveOwner pins audit finding F61: the
+// doctor reap path and the daemon sweep share ONE live-owner predicate, so
+// `meept doctor --fix` cannot signal a pid an endpoint records a different live
+// owner for.
+func TestFilterLiveOwned_DropsTargetWithLiveOwner(t *testing.T) {
+	command := "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --model /m/x --port 8081"
+	argv := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
+
+	// The endpoint's PID file names a DIFFERENT, live owner (this test process).
+	ownerFile := filepath.Join(t.TempDir(), "owner.pid")
+	if err := os.WriteFile(ownerFile, []byte(fmt.Sprintf(`{"pid":%d,"token":"other"}`, os.Getpid())), 0o600); err != nil {
+		t.Fatalf("write owner pid file: %v", err)
+	}
+	cfgs := []*RuntimeConfig{{EndpointKey: "mlx:127.0.0.1:8081", AutoStop: true, PIDFile: ownerFile, SpawnCommand: argv}}
+
+	if RuntimeHasLiveOwner(cfgs, command, 900) != true {
+		t.Fatal("RuntimeHasLiveOwner must report the recorded live owner (F61)")
+	}
+	dropped := FilterLiveOwned(cfgs, []OrphanRuntime{{EndpointKey: "mlx:127.0.0.1:8081", PID: 900, Command: command}})
+	if len(dropped) != 0 {
+		t.Fatalf("FilterLiveOwned must drop a target with a recorded live owner, kept %+v (F61)", dropped)
+	}
+
+	// Control: no live owner recorded -> the target survives the filter.
+	emptyFile := filepath.Join(t.TempDir(), "empty.pid")
+	cfgs2 := []*RuntimeConfig{{EndpointKey: "mlx:127.0.0.1:8081", AutoStop: true, PIDFile: emptyFile, SpawnCommand: argv}}
+	if RuntimeHasLiveOwner(cfgs2, command, 900) {
+		t.Fatal("RuntimeHasLiveOwner must be false when no live owner is recorded")
+	}
+	kept := FilterLiveOwned(cfgs2, []OrphanRuntime{{EndpointKey: "mlx:127.0.0.1:8081", PID: 900, Command: command}})
+	if len(kept) != 1 {
+		t.Fatalf("FilterLiveOwned must keep a target with no live owner, got %+v", kept)
+	}
+}
+
+// containsPID reports whether list names pid.
+func containsPID(list []OrphanRuntime, pid int) bool {
+	for _, o := range list {
+		if o.PID == pid {
+			return true
+		}
+	}
+	return false
+}
+
+// TestOrphanRuntimesFromConfigsAndRecords_AppliesLiveOwnerVeto is the WIRING
+// form of the F61 pin: the doctor entry point (OrphanRuntimesFromConfigsAndRecords,
+// used by BOTH the report path and --fix) must drop a matched leftover when an
+// endpoint config records a different live owner for it — exactly what the
+// daemon's sweep does. Uses a real re-parented process; skips when the
+// environment does not produce one.
+func TestOrphanRuntimesFromConfigsAndRecords_AppliesLiveOwnerVeto(t *testing.T) {
+	launcher := exec.Command("/bin/sh", "-c", "nohup sleep 300 >/dev/null 2>&1 &")
+	if err := launcher.Run(); err != nil {
+		t.Fatalf("launch re-parented process: %v", err)
+	}
+
+	var pid int
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		procs, err := ListRuntimeProcesses()
+		if err != nil {
+			t.Fatalf("ListRuntimeProcesses: %v", err)
+		}
+		for _, p := range procs {
+			if p.PPID == 1 && matchesSpawnCommand(p.Command, []string{"sleep", "300"}) {
+				pid = p.PID
+				break
+			}
+		}
+		if pid != 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if pid == 0 {
+		t.Skip("no re-parented process observed in this environment")
+	}
+	defer func() {
+		if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil {
+			t.Logf("cleanup kill %d: %v", pid, killErr)
+		}
+	}()
+
+	// The endpoint's PID file names a DIFFERENT, live owner (this process), so
+	// the leftover must be vetoed.
+	ownerFile := filepath.Join(t.TempDir(), "owner.pid")
+	if err := os.WriteFile(ownerFile, []byte(fmt.Sprintf(`{"pid":%d,"token":"other"}`, os.Getpid())), 0o600); err != nil {
+		t.Fatalf("write owner pid file: %v", err)
+	}
+	cfgs := []*RuntimeConfig{{EndpointKey: "t:127.0.0.1:1", AutoStop: true, PIDFile: ownerFile, SpawnCommand: []string{"sleep", "300"}}}
+
+	raw, err := FindOrphanRuntimesWithRecords(cfgs, nil, ListRuntimeProcesses)
+	if err != nil {
+		t.Fatalf("FindOrphanRuntimesWithRecords: %v", err)
+	}
+	if !containsPID(raw, pid) {
+		t.Fatalf("test precondition: expected the re-parented process %d in the raw detection: %+v", pid, raw)
+	}
+
+	got, err := OrphanRuntimesFromConfigsAndRecords(cfgs, nil)
+	if err != nil {
+		t.Fatalf("OrphanRuntimesFromConfigsAndRecords: %v", err)
+	}
+	if containsPID(got, pid) {
+		t.Fatalf("the doctor entry point must apply the live-owner veto, reported %+v (F61)", got)
+	}
+}
