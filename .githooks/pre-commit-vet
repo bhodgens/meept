@@ -53,22 +53,48 @@ VET_OUTPUT=""
 # guard (`if ! go list "$pkg" >/dev/null 2>&1; then continue`) skipped both
 # cases silently, which is how //go:build mage magefiles/*.go became invisible
 # to vet/staticcheck/U1000/mutexio/selflock (audit F24).
+#
+# STDOUT IS THE ONLY ERROR CHANNEL. `{{.Error}}` is printed by `go list` on
+# STDOUT, so the old `2>&1` folded unrelated stderr progress into the error
+# string: on a COLD module cache a perfectly HEALTHY package produced
+#   "go: downloading github.com/go-git/go-git/v5 v5.19.2 ..."
+# which matched no known reason, fell through to `broken`, and hard-failed the
+# commit on any machine with an empty GOMODCACHE. stderr is now captured
+# separately and consulted ONLY when `go list` itself exits non-zero and wrote
+# nothing to stdout (e.g. "errors parsing go.mod"). No stderr text can ever be
+# mistaken for a package error again.
 # Prints exactly one of:
 #   ok
 #   excluded|<reason>       default tags exclude every file (magefiles)
 #   nested-module|<reason>  separate Go module, not part of this one
 #   missing|<reason>        path no longer exists in the working tree
+#   nofiles|<reason>        no (non-test) Go files to analyze -> SKIP, not a
+#                           load failure (e.g. only _test.go or _-prefixed files)
 #   broken|<reason>         any other load failure (conflicting package
-#                           clause, syntax error, unresolved import, ...)
+#                           clause, malformed go.mod, ...)
 go_list_state() {
-  local pat="$1" err
-  err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 | tr '\n' ' ' | sed 's/ *$//')"
+  local pat="$1" err rc detail
+  rc=0
+  # stdout only: the {{.Error}} diagnostic, never `go list`'s stderr chatter.
+  # `|| rc=$?` keeps `set -e` from aborting the hook on an rc!=0 `go list`.
+  err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>/dev/null)" || rc=$?
+  err="$(printf '%s\n' "$err" | tr '\n' ' ' | sed 's/ *$//')"
   if [ -z "$err" ]; then
-    printf 'ok'
+    if [ "$rc" -eq 0 ]; then
+      printf 'ok'
+      return 0
+    fi
+    # rc != 0 with nothing on stdout: `go list` failed before it could report a
+    # per-package error. That is a load failure, not a pass — capture the stderr
+    # reason for the operator with one extra (warm) call.
+    detail="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 >/dev/null | tr '\n' ' ' | sed 's/ *$//')"
+    [ -z "$detail" ] && detail="go list exited $rc with no diagnostic"
+    printf 'broken|%s' "$detail"
     return 0
   fi
   case "$err" in
     *"build constraints exclude all Go files"*) printf 'excluded|%s' "$err" ;;
+    *"no Go files in"*|*"no non-test Go files in"*) printf 'nofiles|%s' "$err" ;;
     *"does not contain package"*)                printf 'nested-module|%s' "$err" ;;
     *"directory not found"*|*"path does not exist"*) printf 'missing|%s' "$err" ;;
     *)                                           printf 'broken|%s' "$err" ;;
@@ -108,7 +134,7 @@ for pkg in $PACKAGES; do
         echo -e "${YELLOW}  -> no build tag known for $pkg; not analyzed${NC}"
       fi
       continue ;;
-    nested-module*|missing*)
+    nested-module*|missing*|nofiles*)
       echo -e "${YELLOW}SKIP(${STATE%%|*}) $pkg: ${STATE#*|}${NC}"
       continue ;;
     *)

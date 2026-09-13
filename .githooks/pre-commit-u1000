@@ -66,16 +66,31 @@ done <<< "$STAGED_GO_FILES"
 # printed "no unused code violations" for packages it never analyzed; that is
 # how //go:build mage magefiles/*.go became invisible (audit F24).
 # Prints one of: ok | excluded|<reason> | nested-module|<reason> |
-#                missing|<reason> | broken|<reason>
+#                missing|<reason> | nofiles|<reason> | broken|<reason>
 go_list_state() {
-  local pat="$1" err
-  err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 | tr '\n' ' ' | sed 's/ *$//')"
+  local pat="$1" err rc detail
+  rc=0
+  # STDOUT IS THE ONLY ERROR CHANNEL: `{{.Error}}` prints on stdout, so the old
+  # `2>&1` folded `go list`'s stderr progress ("go: downloading ..." on a cold
+  # GOMODCACHE) into the error string, matched no known reason, and hard-failed
+  # healthy commits. stderr is consulted only when `go list` exits non-zero with
+  # an empty stdout (e.g. "errors parsing go.mod").
+  # `|| rc=$?` keeps `set -e` from aborting the hook on an rc!=0 `go list`.
+  err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>/dev/null)" || rc=$?
+  err="$(printf '%s\n' "$err" | tr '\n' ' ' | sed 's/ *$//')"
   if [ -z "$err" ]; then
-    printf 'ok'
+    if [ "$rc" -eq 0 ]; then
+      printf 'ok'
+      return 0
+    fi
+    detail="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 >/dev/null | tr '\n' ' ' | sed 's/ *$//')"
+    [ -z "$detail" ] && detail="go list exited $rc with no diagnostic"
+    printf 'broken|%s' "$detail"
     return 0
   fi
   case "$err" in
     *"build constraints exclude all Go files"*) printf 'excluded|%s' "$err" ;;
+    *"no Go files in"*|*"no non-test Go files in"*) printf 'nofiles|%s' "$err" ;;
     *"does not contain package"*)                printf 'nested-module|%s' "$err" ;;
     *"directory not found"*|*"path does not exist"*) printf 'missing|%s' "$err" ;;
     *)                                           printf 'broken|%s' "$err" ;;
@@ -104,7 +119,7 @@ while IFS= read -r pkg; do
       echo -e "${YELLOW}SKIP(tag-gated) $pkg: ${STATE#*|}${NC}"
       echo -e "${YELLOW}  -> analyzing with -tags=test,mage, not dropping it${NC}"
       TAGS="test,mage" ;;
-    nested-module*|missing*)
+    nested-module*|missing*|nofiles*)
       echo -e "${YELLOW}SKIP(${STATE%%|*}) $pkg: ${STATE#*|}${NC}"
       continue ;;
     *)

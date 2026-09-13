@@ -67,17 +67,32 @@ if [ -z "$staged_go_files" ]; then
     exit 0
 fi
 
-# Classify a package pattern with `go list -e`: prints ok | excluded|<reason> |
-# nested-module|<reason> | missing|<reason> | broken|<reason>.
+# Classify a package pattern with `go list -e` so a package that FAILS TO LOAD
+# is never skipped as if the build tags excluded it. STDOUT IS THE ONLY ERROR
+# CHANNEL: `{{.Error}}` prints on stdout, so the old `2>&1` folded `go list`'s
+# stderr progress ("go: downloading ..." on a cold GOMODCACHE) into the error
+# string, matched no known reason, and hard-failed healthy commits. stderr is
+# now used only when `go list` exits non-zero with an empty stdout.
+# Prints ok | excluded|<reason> | nested-module|<reason> | missing|<reason> |
+#        nofiles|<reason> | broken|<reason>.
 go_list_state() {
-    local pat="$1" err
-    err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 | tr '\n' ' ' | sed 's/ *$//')"
+    local pat="$1" err rc detail
+    rc=0
+    err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>/dev/null)" || rc=$?
+    err="$(printf '%s\n' "$err" | tr '\n' ' ' | sed 's/ *$//')"
     if [ -z "$err" ]; then
-        printf 'ok'
+        if [ "$rc" -eq 0 ]; then
+            printf 'ok'
+            return 0
+        fi
+        detail="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 >/dev/null | tr '\n' ' ' | sed 's/ *$//')"
+        [ -z "$detail" ] && detail="go list exited $rc with no diagnostic"
+        printf 'broken|%s' "$detail"
         return 0
     fi
     case "$err" in
         *"build constraints exclude all Go files"*) printf 'excluded|%s' "$err" ;;
+        *"no Go files in"*|*"no non-test Go files in"*) printf 'nofiles|%s' "$err" ;;
         *"does not contain package"*)                printf 'nested-module|%s' "$err" ;;
         *"directory not found"*|*"path does not exist"*) printf 'missing|%s' "$err" ;;
         *)                                           printf 'broken|%s' "$err" ;;
@@ -115,7 +130,7 @@ while IFS= read -r dir; do
             printf '%s\n' "mutexio: SKIP(tag-gated) ./${dir}: ${state#*|}" >&2
             printf '%s\n' "mutexio:   not analyzed (this analyzer cannot load tagged packages); pre-commit-build runs 'go vet -tags mage ./magefiles' instead" >&2
             ;;
-        nested-module*|missing*)
+        nested-module*|missing*|nofiles*)
             printf '%s\n' "mutexio: SKIP(${state%%|*}) ./${dir}: ${state#*|}" >&2
             ;;
         *)

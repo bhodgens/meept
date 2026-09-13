@@ -43,6 +43,48 @@ STAGED_PKGS=$(printf '%s\n' "$STAGED_GO_FILES" | xargs -I{} dirname {} | sort -u
 # instead of merely hidden by .gitignore (audit F25).
 STATUS_BEFORE="$(git status --porcelain --untracked-files=all 2>/dev/null || true)"
 
+# Root-level entries (untracked AND gitignored). Required because the F25
+# artifact class — a built /meept, /meept-daemon, /meept-lite — is GITIGNORED,
+# so a plain `git status` never lists it, while the old `^\?\? [^/]+$` filter
+# could not see a root-level DIRECTORY either: `--untracked-files=all` expands
+# directories into per-file `?? dir/file` entries, none of which is a bare root
+# name. That is why the assertion was simultaneously blind to the very artifact
+# it existed for (b) and hostile to any unrelated root file that appeared in
+# the window, e.g. coverage.out from the documented
+# `go test -coverprofile=coverage.out` (a).
+# `--untracked-files=normal` collapses a directory to `name/`, and
+# `--ignored=matching` collapses ignored directories the same way, so this
+# stays a cheap tree walk (~70ms here) instead of stat-ing every ignored file.
+root_entries() {
+  git status --porcelain --untracked-files=normal --ignored=matching 2>/dev/null \
+    | grep -E '^(\?\?|!!) ' \
+    | sed -e 's/^.. //' -e 's|/.*$||' \
+    | sort -u
+}
+
+# Size+mtime of the root-level binaries a build can write. A stale /meept-daemon
+# already sitting in the tree (this repo has them) is invisible to a
+# new-entry comparison even though a bare `go build` CLOBBERING it is the same
+# accident — and `git status` reports nothing at all for an ignored file that
+# changed. Only these known names are fingerprinted, so no other session's file
+# can make this fire. mtime granularity is one second: a rebuild of identical
+# source yields an identical size, so this catches the real case (a bare
+# `go build` of a package tree takes longer than a second) but not a same-second
+# rebuild, which no realistic Go build in this repo produces.
+root_artifact_state() {
+  local n
+  for n in meept meept-daemon meept-lite llmdoc; do
+    [ -e "$n" ] || continue
+    printf '%s %s %s\n' "$n" "$(wc -c <"$n" | tr -d ' ')" "$(date -r "$n" +%s 2>/dev/null || echo 0)"
+  done
+  for n in *.test; do
+    [ -e "$n" ] || continue
+    printf '%s %s %s\n' "$n" "$(wc -c <"$n" | tr -d ' ')" "$(date -r "$n" +%s 2>/dev/null || echo 0)"
+  done
+}
+ROOT_BEFORE="$(root_entries)"
+ARTIFACT_BEFORE="$(root_artifact_state)"
+
 echo "Staged packages:"
 printf '  %s\n' $STAGED_PKGS
 echo ""
@@ -170,29 +212,60 @@ fi
 
 # Nothing above may write into the working tree: an executable lands in the
 # CWD (the repo root) when a bare `go build` names exactly one `package main`
-# — the F25 artifact class, hidden from `git status` by .gitignore. Only NEW
-# root-level untracked entries fail the hook; deeper untracked paths are
-# reported but never block, because a sibling session may legitimately create
-# them mid-run.
+# — the F25 artifact class, hidden from `git status` by .gitignore.
+#
+# Fail only for names a BUILD can create: the root-level binaries .gitignore
+# hides (/meept, /meept-daemon, /meept-lite, /llmdoc) and `go test -c` outputs.
+# Every other new root-level entry is another session's file — coverage.out from
+# the documented `go test -coverprofile=coverage.out`, a scratch note — and is
+# reported without blocking. Deeper untracked paths never block either.
 STATUS_AFTER="$(git status --porcelain --untracked-files=all 2>/dev/null || true)"
+ROOT_AFTER="$(root_entries)"
+ARTIFACT_AFTER="$(root_artifact_state)"
 NEW_UNTRACKED="$(printf '%s\n' "$STATUS_BEFORE" | grep '^??' | sort || true)"
 NEW_UNTRACKED_AFTER="$(printf '%s\n' "$STATUS_AFTER" | grep '^??' | sort || true)"
-NEW_ROOT_BEFORE="$(printf '%s\n' "$NEW_UNTRACKED" | grep -E '^\?\? [^/]+$' | sort || true)"
-NEW_ROOT_AFTER="$(printf '%s\n' "$NEW_UNTRACKED_AFTER" | grep -E '^\?\? [^/]+$' | sort || true)"
-if [ "$NEW_ROOT_BEFORE" != "$NEW_ROOT_AFTER" ]; then
-  echo -e "${RED}❌ go build wrote new file(s) into the repo root:${NC}"
+NEW_ROOT="$(comm -13 <(printf '%s\n' "$ROOT_BEFORE") <(printf '%s\n' "$ROOT_AFTER") || true)"
+# A known artifact that existed before and now differs (size or mtime) was
+# written by this build just as surely as a new one: F25 twice over.
+CHANGED_ARTIFACTS="$(comm -13 <(printf '%s\n' "$ARTIFACT_BEFORE") <(printf '%s\n' "$ARTIFACT_AFTER") | awk '{print $1}' || true)"
+NEW_ROOT="$(printf '%s\n%s\n' "$NEW_ROOT" "$CHANGED_ARTIFACTS" | grep -v '^$' | sort -u || true)"
+BLOCKED=""
+OTHER=""
+while IFS= read -r name; do
+  [ -z "$name" ] && continue
+  case "$name" in
+    meept|meept-daemon|meept-lite|llmdoc|*.test)
+      BLOCKED="${BLOCKED}${name}
+" ;;
+    *)
+      OTHER="${OTHER}${name}
+" ;;
+  esac
+done <<EOF
+$NEW_ROOT
+EOF
+if [ -n "$BLOCKED" ]; then
+  echo -e "${RED}❌ go build wrote new build artifact(s) into the repo root:${NC}"
   echo ""
-  comm -13 <(printf '%s\n' "$NEW_ROOT_BEFORE") <(printf '%s\n' "$NEW_ROOT_AFTER") | sed 's/^/  /'
+  printf '%s' "$BLOCKED" | sed 's/^/  /'
   echo ""
   echo -e "${YELLOW}Build into /dev/null or a temp dir (never the repo root).${NC}"
   echo -e "${YELLOW}If another session created those files during this run, re-run the commit.${NC}"
   echo ""
   exit 1
 fi
-if [ "$NEW_UNTRACKED" != "$NEW_UNTRACKED_AFTER" ]; then
-  echo -e "${YELLOW}note: untracked path(s) appeared under the tree while building (not root-level, not blocking):${NC}"
-  comm -13 <(printf '%s\n' "$NEW_UNTRACKED") <(printf '%s\n' "$NEW_UNTRACKED_AFTER") | sed 's/^/  /'
+if [ -n "$OTHER" ]; then
+  echo -e "${YELLOW}note: other new root-level path(s) appeared while building (not build artifacts — not blocking):${NC}"
+  printf '%s' "$OTHER" | sed 's/^/  /'
   echo ""
+fi
+if [ "$NEW_UNTRACKED" != "$NEW_UNTRACKED_AFTER" ]; then
+  NESTED_NEW="$(comm -13 <(printf '%s\n' "$NEW_UNTRACKED") <(printf '%s\n' "$NEW_UNTRACKED_AFTER") | grep '/' || true)"
+  if [ -n "$NESTED_NEW" ]; then
+    echo -e "${YELLOW}note: untracked path(s) appeared under the tree while building (not root-level, not blocking):${NC}"
+    printf '%s\n' "$NESTED_NEW" | sed 's/^/  /'
+    echo ""
+  fi
 fi
 
 echo -e "${GREEN}✅ go build passed — staged packages + clean downstream importers compile${NC}"

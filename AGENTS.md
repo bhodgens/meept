@@ -84,6 +84,16 @@ make docs-check           # Verify those pages are fresh (local check only)
 # Git hooks (bash >= 3.2; sub-hooks run under whatever `bash` is on PATH, so the
 # suite also executes on the Linux CI runner)
 make hooks                # core.hooksPath -> .githooks (17 pre-commit checks)
+# Package-classification rule for those hooks: a staged package's state comes
+# from `go list -e` STDOUT only. {{.Error}} prints there, while stderr carries
+# progress noise ("go: downloading ..." on a cold GOMODCACHE) that must never be
+# read as a load failure — folding stderr in (2>&1) blocked healthy commits on
+# any machine with an empty module cache. go list exiting non-zero with an empty
+# stdout is `broken` (fail closed; stderr is captured separately for the reason).
+# A directory with no (non-test) Go files reports `nofiles` — a SKIP, not a
+# failure. pre-commit-build's root-artifact check fails only for names a build
+# can create (meept, meept-daemon, meept-lite, llmdoc, *.test, including a stale
+# binary it clobbers); any other new root-level path is reported, never blocking.
 
 # Static analyzers
 make analyzers            # mutexio + predid

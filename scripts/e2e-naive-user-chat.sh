@@ -16,11 +16,15 @@
 #     HOME is sandboxed to the temp dir for both daemon and CLI, so no code
 #     path can touch the user's ~/.meept or the running daemon.
 #   - Copies config/models.json5 from the repo when present so real
-#     providers can answer (env-provided API keys are honored). EVERY
-#     loopback endpoint in the copy is remapped to a freshly probed free
-#     port (driver, MLX classifier/general, local-extract, ...) and the run
-#     fails loudly if any 127.0.0.1:<port> literal survives, so the scratch
-#     daemon can never reach the user's live runtimes.
+#     providers can answer (env-provided API keys are honored). The local
+#     endpoints of every provider that SPAWNS a runtime (driver, MLX
+#     classifier/general, local-extract, ...) are remapped to freshly probed
+#     free ports, the remap is re-probed immediately before the daemon is
+#     spawned, and the run fails loudly if any literal in a spawning provider
+#     survives — so the scratch daemon can never reach the user's live
+#     runtimes. Endpoints of providers it does NOT spawn (ollama
+#     localhost:11434, comfyui 127.0.0.1:8188) are left exactly as written:
+#     remapping those would hand the daemon a dead port.
 #   - Boots a scratch daemon (daemon cwd = $WORK, deliberately DIFFERENT from
 #     the project dir, so A4 genuinely exercises the leaf-03 session
 #     ProjectPath cwd resolution rather than the daemon-cwd fallback).
@@ -450,8 +454,8 @@ EOF
 # Models: reuse the repo's env-configured defaults (make install copies this
 # template into ~/.meept; our sandboxed HOME makes that the temp dir).
 #
-# EVERY loopback endpoint in the copied template is remapped to a freshly
-# probed free port before the sandbox daemon starts, and the remap is DERIVED
+# The local endpoints of providers that SPAWN a runtime are remapped to freshly
+# probed free ports before the sandbox daemon starts, and the remap is DERIVED
 # from the copied config instead of from a hardcoded port list. 20d02738 moved
 # the driver to 8080 (config/models.json5 "local-gguf"), the MLX general
 # runtime to 8083 and local-extract to 8084, so the old 8081/8082-only sed left
@@ -460,9 +464,20 @@ EOF
 # polled HTTP_PORT+2, which nothing binds (audit F68). ${MODEL_PATH} is left
 # alone: it names weights, not an endpoint.
 PORT_MAP_FILE_READY=0
-if [ -f "$REPO_ROOT/config/models.json5" ]; then
+
+# Rewrite the copied models config so the scratch daemon can reach ONLY runtimes
+# it spawns itself. Two properties matter:
+#   * only providers that actually SPAWN are remapped — a remapped endpoint for a
+#     provider the sandbox never starts is a DEAD port: `localhost:11434` (ollama)
+#     and `127.0.0.1:8188` (comfyui) are external services the daemon DIALS, not
+#     runtimes it launches, so rewriting them silently broke those providers;
+#   * the host spelling is preserved — normalizing `0.0.0.0:`/`[::1]:` to
+#     127.0.0.1: changes BIND semantics, not merely the port.
+# Points the scratch daemon at the user's live runtimes share with the old
+# hardcoded sed: neither may come back.
+remap_models_config() {
   cp "$REPO_ROOT/config/models.json5" "$HOME_DIR/.meept/models.json5"
-  if python3 - "$HOME_DIR/.meept/models.json5" "$HTTP_PORT" >"$PORT_MAP_FILE" <<'PY'
+  python3 - "$HOME_DIR/.meept/models.json5" "$HTTP_PORT" >"$PORT_MAP_FILE" <<'PY'
 import re, socket, sys
 
 path, http_port = sys.argv[1], int(sys.argv[2])
@@ -472,23 +487,114 @@ except OSError as exc:
     print("ERROR: cannot read %s: %s" % (path, exc), file=sys.stderr)
     sys.exit(2)
 
-# Collect every LOCAL endpoint literal in the template: 127.0.0.1 / localhost /
-# 0.0.0.0 / [::1] with a port (baseURL, health checks) and
-# `"--port", "<port>"` spawn args. Anything else (a remote host) is left alone:
-# it is not the user's live local runtime.
-LOCALPORT = re.compile(r'(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):(\d+)')
-SPAWNPORT = re.compile(r'"--port"\s*,\s*"(\d+)"')
+# Host spelling is CAPTURED, never rewritten: `0.0.0.0:<p>` is a bind address
+# and `[::1]:<p>` is IPv6 — collapsing either to 127.0.0.1 changes what the
+# spawned runtime binds.
+LOCALPORT = re.compile(
+    r'(?P<host>127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):(?P<port>\d+)')
+# `"--port", "8081"` (JSON5 string) and `"--port", 8081` (bare number) are both
+# valid; the quoted-only pattern silently missed the bare form, leaving a live
+# spawn port unmapped (and the survivor check below blind to it).
+SPAWNPORT = re.compile(r'("--port"\s*,\s*)(?:"(?P<quoted>\d+)"|(?P<bare>\d+))')
+
+
+def _skip_string(s, i):
+    """Index just past the string starting at s[i] == '"'."""
+    i += 1
+    while i < len(s):
+        c = s[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == '"':
+            return i + 1
+        i += 1
+    return i
+
+
+def object_spans(s):
+    """(start, end, parents) for every {...} object.
+
+    The config is JSON5 (comments, trailing commas, unquoted-ish keys), so json
+    cannot parse it; a brace count must skip braces inside strings and comments
+    or it mis-slices the provider objects.
+    """
+    stack, spans, i, n = [], [], 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == '"':
+            i = _skip_string(s, i)
+            continue
+        if s.startswith("//", i):
+            j = s.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if s.startswith("/*", i):
+            j = s.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if c == "{":
+            stack.append(i)
+        elif c == "}":
+            if stack:
+                start = stack.pop()
+                spans.append((start, i + 1, tuple(stack)))
+        i += 1
+    return spans
+
+
+spans = object_spans(text)
+prov_key = re.search(r'"providers"\s*:\s*\{', text)
+provider_members = []
+if prov_key:
+    prov_start = prov_key.end() - 1
+    prov_parents = next((parents for s, e, parents in spans if s == prov_start), None)
+    if prov_parents is not None:
+        want = prov_parents + (prov_start,)
+        provider_members = sorted(
+            (s, e) for s, e, parents in spans if parents == want)
+
+# `spawn_command` is the marker for "this provider is a runtime the daemon
+# launches". Providers without one (ollama, comfyui) talk to a service that is
+# already running under the user's control; leaving them alone is the point.
+spawning = [span for span in provider_members
+            if "spawn_command" in text[span[0]:span[1]]]
+spawning_set = set(spawning)
+if not spawning:
+    print("ERROR: no provider with a spawn_command in %s; the sandbox cannot "
+          "tell which local endpoints are runtimes it spawns itself" % path,
+          file=sys.stderr)
+    sys.exit(2)
+
+
+def block_ports(block):
+    ports = []
+    for m in LOCALPORT.finditer(block):
+        p = int(m.group("port"))
+        if p not in ports:
+            ports.append(p)
+    for m in SPAWNPORT.finditer(block):
+        p = int(m.group("quoted") or m.group("bare"))
+        if p not in ports:
+            ports.append(p)
+    return ports
+
 
 old_ports = []
-for rx in (LOCALPORT, SPAWNPORT):
-    for m in rx.finditer(text):
-        p = int(m.group(1))
-        if p > 0 and p not in old_ports:
+for span in spawning:
+    for p in block_ports(text[span[0]:span[1]]):
+        if p not in old_ports:
             old_ports.append(p)
 
+# `p >= 0`, consistently: port 0 means "pick any free port" (llama-server
+# `--port 0`), so it is a real spawn port the sandbox must replace with a
+# concrete one. Filtering 0 out HERE while the survivor checks below still
+# rejected it was how a config carrying `"--port", "0"` or `127.0.0.1:0` made
+# this script refuse to run: "spawn --port value(s) survived the remap: 0".
 if not old_ports:
-    print("ERROR: no local 127.0.0.1:<port> endpoint found in %s; the sandbox "
-          "would inherit whatever the template resolves to" % path, file=sys.stderr)
+    print("ERROR: no local <host>:<port> endpoint found in a spawning provider "
+          "of %s; the sandbox would inherit whatever the template resolves to"
+          % path, file=sys.stderr)
     sys.exit(2)
 
 used = set(old_ports) | {http_port}
@@ -502,43 +608,85 @@ def free_port():
             p = s.getsockname()[1]
         finally:
             s.close()
-        if p not in used:
+        if p not in used and p != 0:
             used.add(p)
             return p
 
 
 mapping = {p: free_port() for p in old_ports}
 
-new = text
-for old, newp in mapping.items():
-    # Normalize any local spelling to 127.0.0.1:<remapped port>.
-    new = LOCALPORT.sub(
-        lambda m, o=old, n=newp: "127.0.0.1:%d" % n if int(m.group(1)) == o else m.group(0),
-        new,
-    )
-    new = re.sub(r'("--port"\s*,\s*)"%d"' % old, r'\g<1>"%d"' % newp, new)
 
-# Fail loudly if any local literal survived the rewrite: the scratch daemon
-# must never reach the user's live runtime endpoints.
-remapped = {str(v) for v in mapping.values()}
-survivors = sorted({m.group(1) for m in LOCALPORT.finditer(new)} - remapped)
+def rewrite_block(block):
+    def sub_local(m):
+        newp = mapping.get(int(m.group("port")))
+        if newp is None:
+            return m.group(0)
+        return "%s:%d" % (m.group("host"), newp)  # host spelling preserved
+
+    def sub_spawn(m):
+        newp = mapping.get(int(m.group("quoted") or m.group("bare")))
+        if newp is None:
+            return m.group(0)
+        quote = '"' if m.group("quoted") else ""
+        return "%s%s%d%s" % (m.group(1), quote, newp, quote)
+
+    return SPAWNPORT.sub(sub_spawn, LOCALPORT.sub(sub_local, block))
+
+
+# Rebuild the file block by block so ONLY the spawning providers change: every
+# other byte of the template (ollama 11434, comfyui 8188, remote hosts) is
+# preserved exactly.
+out, last, rewritten = [], 0, []
+for start, end in provider_members:
+    block = text[start:end]
+    out.append(text[last:start])
+    if (start, end) in spawning_set:
+        block = rewrite_block(block)
+        rewritten.append(block)
+    out.append(block)
+    last = end
+out.append(text[last:])
+new = "".join(out)
+
+# Fail loudly if any local literal inside a SPAWNING provider survived the
+# rewrite: the scratch daemon must never reach the user's live runtime
+# endpoints. Scoped to those blocks — the deliberately preserved external
+# endpoints (ollama/comfyui) are not survivors, they are policy.
+remapped = set(mapping.values())
+survivors = set()
+for block in rewritten:
+    for m in LOCALPORT.finditer(block):
+        if int(m.group("port")) not in remapped:
+            survivors.add("%s:%s" % (m.group("host"), m.group("port")))
+    for m in SPAWNPORT.finditer(block):
+        p = m.group("quoted") or m.group("bare")
+        if int(p) not in remapped:
+            survivors.add("--port %s" % p)
 if survivors:
-    print("ERROR: loopback endpoint(s) survived the remap: %s"
-          % ", ".join("127.0.0.1:" + s for s in survivors), file=sys.stderr)
+    print("ERROR: local endpoint(s) in a spawning provider survived the remap: "
+          "%s" % ", ".join(sorted(survivors)), file=sys.stderr)
     sys.exit(2)
-leftover = sorted({m.group(1) for m in SPAWNPORT.finditer(new)} - remapped)
-if leftover:
-    print("ERROR: spawn --port value(s) survived the remap: %s"
-          % ", ".join(leftover), file=sys.stderr)
-    sys.exit(2)
+
+preserved = set()
+for start, end in provider_members:
+    if (start, end) in spawning_set:
+        continue
+    for m in LOCALPORT.finditer(text[start:end]):
+        preserved.add("%s:%s" % (m.group("host"), m.group("port")))
+if preserved:
+    print("note: kept as-is (provider does not spawn): %s"
+          % ", ".join(sorted(preserved)), file=sys.stderr)
 
 open(path, "w", encoding="utf-8").write(new)
 for old in old_ports:
     print("%d %d" % (old, mapping[old]))
 PY
-  then
+}
+
+if [ -f "$REPO_ROOT/config/models.json5" ]; then
+  if remap_models_config; then
     PORT_MAP_FILE_READY=1
-    log "  copied config/models.json5 -> $HOME_DIR/.meept/models.json5 (all loopback endpoints remapped to free ports)"
+    log "  copied config/models.json5 -> $HOME_DIR/.meept/models.json5 (ports of SPAWNING providers remapped to free ports)"
     while IFS= read -r line; do
       [ -z "$line" ] && continue
       log "    :${line% *} -> :${line#* }"
@@ -558,6 +706,41 @@ map_port() { # $1=port in config/models.json5 -> remapped port (empty if absent)
   awk -v want="$1" '$1 == want { print $2; exit }' "$PORT_MAP_FILE" 2>/dev/null || true
 }
 
+# The free-port probe in remap_models_config is a TOCTOU by construction: it
+# binds :0, reads the port number and closes the socket, while the daemon is
+# spawned ~80 lines later — anything may take that port in between and the
+# sandbox would then either fail to bind or (worse) collide with a runtime the
+# user just started. Re-probe every mapped port here, immediately before the
+# spawn; the socket is held only for the microseconds of the check, so the
+# remaining window is "between this check and the exec", and a collision is
+# handled by remapping again from the pristine template.
+mapped_ports_free() {
+  [ "$PORT_MAP_FILE_READY" = "1" ] || return 0
+  python3 - "$PORT_MAP_FILE" <<'PY'
+import socket, sys
+
+try:
+    rows = [line.split() for line in open(sys.argv[1], encoding="utf-8")
+            if line.strip()]
+except OSError:
+    sys.exit(0)
+busy = []
+for row in rows:
+    if len(row) != 2 or not row[1].isdigit():
+        continue
+    s = socket.socket()
+    try:
+        s.bind(("127.0.0.1", int(row[1])))
+    except OSError:
+        busy.append(row[1])
+    finally:
+        s.close()
+if busy:
+    print("busy: %s" % ", ".join(busy), file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 # Agent definitions: make install copies config/agents/* into
 # ~/.meept/agents/; the daemon's discovery tier expects them there. Without
 # them the registry is empty and every dispatch dies with
@@ -570,6 +753,25 @@ fi
 if [ -d "$REPO_ROOT/config/prompts" ]; then
   mkdir -p "$HOME_DIR/.meept/prompts"
   cp -R "$REPO_ROOT/config/prompts/." "$HOME_DIR/.meept/prompts/" 2>/dev/null || true
+fi
+
+# 3b. Re-probe the remapped ports now, immediately before the spawn (the probe
+# that produced them ran ~80 lines ago — see mapped_ports_free). On collision,
+# remap again from the pristine template and re-probe once; a second collision
+# is fatal rather than a silently broken sandbox.
+if [ "$PORT_MAP_FILE_READY" = "1" ]; then
+  if ! mapped_ports_free; then
+    warn "a remapped sandbox port was taken while the config was being written — re-probing from the template"
+    if remap_models_config && mapped_ports_free; then
+      log "  re-probed models config ports:"
+      while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        log "    :${line% *} -> :${line#* }"
+      done <"$PORT_MAP_FILE"
+    else
+      die "could not reserve free ports for the sandbox runtimes (see above) — refusing to start the daemon on a port another process now owns"
+    fi
+  fi
 fi
 
 # 4. Boot the scratch daemon with cwd=$WORK (deliberately NOT the project
