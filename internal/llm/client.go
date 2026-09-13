@@ -1437,7 +1437,22 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 		return nil, &ClientError{Message: "failed to parse response", Cause: err}
 	}
 
-	parsedResp, err := c.parseResponse(&chatResp)
+	// A response can only carry a real tool call when the request offered
+	// tools. Without tools, a JSON object in the reply is the model's ANSWER,
+	// not a call: mining it destroyed the intent analyzer's JSON reply and the
+	// classifier stage failed with "intent analysis: empty content"
+	// (fresh-rig run 5, 2026-09-12). So the ambiguous bare-JSON half is gated
+	// on the request actually carrying tools.
+	hasTools := false
+	if rawTools, ok := payload["tools"]; ok && rawTools != nil {
+		if list, isList := rawTools.([]any); isList {
+			hasTools = len(list) > 0
+		} else {
+			hasTools = true
+		}
+	}
+
+	parsedResp, err := c.parseResponseWithTools(&chatResp, hasTools)
 
 	// Update metrics with actual token counts if available
 	if c.metricsStore != nil && parsedResp != nil {
@@ -1499,8 +1514,20 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 	}()
 }
 
-// parseResponse converts a raw ChatResponse to a Response.
+// parseResponse converts a raw ChatResponse to a Response. It recovers tool
+// calls from every recognized shape, including the ambiguous bare-JSON one;
+// callers that know whether tools were offered should use parseResponseWithTools.
 func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
+	return c.parseResponseWithTools(chatResp, true)
+}
+
+// parseResponseWithTools is parseResponse with the ambiguous bare-JSON call
+// recovery gated on hasTools, which reports whether the REQUEST offered tools.
+// Without tools offered, a JSON object in the reply is the model's ANSWER and
+// must pass through untouched: mining one out of the intent analyzer's reply
+// stripped it to empty content and the classifier stage failed with
+// "intent analysis: empty content" (fresh-rig run 5, 2026-09-12).
+func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool) (*Response, error) {
 	if len(chatResp.Choices) == 0 {
 		return nil, ErrEmptyResponse
 	}
@@ -1517,17 +1544,28 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 	// structured calls before the empty-content check, since a reply can be
 	// markers-only with empty plain content.
 	var lfmCalls []ToolCall
-	content, lfmCalls = parseLFMToolCalls(content)
+	content, lfmCalls = parseLFMToolCallsWithBare(content, hasTools)
 
 	// mlx_lm shape: when the model is still in thinking mode every byte of
 	// the reply — including any native tool-call markers — lands in
 	// `reasoning` with `content` absent. Recover markers from there too,
 	// otherwise a markers-only mlx reply reads as an empty response and the
 	// loop nudges forever instead of executing the call (2026-09-11).
+	reasoningRest := reasoning
 	if len(lfmCalls) == 0 && reasoning != "" {
 		var fromReasoning []ToolCall
-		_, fromReasoning = parseLFMToolCalls(reasoning)
+		reasoningRest, fromReasoning = parseLFMToolCallsWithBare(reasoning, hasTools)
 		lfmCalls = append(lfmCalls, fromReasoning...)
+	}
+
+	// mlx_lm PROSE answers have the same shape as the tool-call case: the whole
+	// reply is in `reasoning`, `content` is empty, and no call was recovered.
+	// Promote the reasoning text to Content so the turn is not read as an empty
+	// response — the exact failure the reasoning alias was added to fix, which
+	// the alias-only change left open on every non-tool turn (audit finding
+	// F59). A recovered call still wins: its reply is the call, not prose.
+	if content == "" && len(msg.ToolCalls) == 0 && len(lfmCalls) == 0 && reasoning != "" {
+		content = strings.TrimSpace(reasoningRest)
 	}
 
 	// Empty content with no tool calls is the "model said nothing" failure.

@@ -75,3 +75,104 @@ func TestParseLFMToolCalls_BareCallBetweenProse(t *testing.T) {
 		t.Errorf("surrounding prose should survive, got %q", rest)
 	}
 }
+
+// TestParseLFMToolCalls_BareCallAfterComma pins audit finding F76: the miner
+// used to treat "the previous non-space byte is a comma" as "inside a JSON
+// array", so a call object that follows a comma in ordinary prose was silently
+// dropped. A comma is not evidence of an array; only real bracket nesting is.
+func TestParseLFMToolCalls_BareCallAfterComma(t *testing.T) {
+	content := "Here is the config, {\"name\": \"json_extract\", \"arguments\": {\"text\": \"abc\"}}"
+	rest, calls := parseLFMToolCalls(content)
+	if len(calls) != 1 {
+		t.Fatalf("a bare call preceded by a comma must be mined, recovered %d calls (F76)", len(calls))
+	}
+	if calls[0].Function.Name != "json_extract" {
+		t.Errorf("name = %q, want json_extract", calls[0].Function.Name)
+	}
+	if strings.Contains(rest, "json_extract") {
+		t.Errorf("the call must be stripped from the remainder, got %q", rest)
+	}
+}
+
+// TestParseLFMToolCalls_TwoCallsSeparatedByComma covers the same hole with two
+// call objects in one reply: the second follows a comma, not an array.
+func TestParseLFMToolCalls_TwoCallsSeparatedByComma(t *testing.T) {
+	content := `{"name":"file_write","args":{"path":"a.txt"}}, {"name":"json_extract","arguments":{"text":"b"}}`
+	_, calls := parseLFMToolCalls(content)
+	if len(calls) != 2 {
+		t.Fatalf("comma-separated call objects must both be mined, recovered %d (F76)", len(calls))
+	}
+}
+
+// TestParseLFMToolCalls_ArrayElementStillSkipped is the guard the F76 fix must
+// NOT weaken: an object that really is an element of a JSON array stays
+// un-mined (that shape is the fence/XML halves' territory).
+func TestParseLFMToolCalls_ArrayElementStillSkipped(t *testing.T) {
+	content := `[{"name": "json_extract", "arguments": {"text": "abc"}}]`
+	_, calls := parseLFMToolCalls(content)
+	if len(calls) != 0 {
+		t.Fatalf("an object inside a JSON array must not be mined as a bare call, got %+v", calls)
+	}
+}
+
+// TestParseLFMToolCalls_BoxedWrapperLeavesNoStrayToken pins audit finding F77:
+// the documented `\boxed{\n {...}\n}` shape consumes the box's '{' with the
+// mined object, so the remainder is the bare token `\boxed` — it (and the
+// double-braced variant's stray '}') must not survive into the reply content.
+func TestParseLFMToolCalls_BoxedWrapperLeavesNoStrayToken(t *testing.T) {
+	content := "\\boxed{\n  \"name\": \"json_extract\",\n  \"arguments\": {\"text\": \"x\"}\n}"
+	rest, calls := parseLFMToolCalls(content)
+	if len(calls) != 1 {
+		t.Fatalf("recovered %d calls, want 1", len(calls))
+	}
+	if rest != "" {
+		t.Errorf("remainder = %q, want empty (the \\boxed token must be stripped, F77)", rest)
+	}
+
+	content2 := "\\boxed{ {\"name\": \"json_extract\", \"arguments\": {\"text\": \"y\"}} }"
+	rest2, calls2 := parseLFMToolCalls(content2)
+	if len(calls2) != 1 {
+		t.Fatalf("double-brace: recovered %d calls, want 1", len(calls2))
+	}
+	if rest2 != "" {
+		t.Errorf("double-brace remainder = %q, want empty (F77)", rest2)
+	}
+}
+
+// A tool-less request must pass a call-shaped JSON object through untouched.
+// The intent analyzer asks for analysis JSON ({"goal": ..., "category": ...});
+// mining a call-like object out of that reply stripped it to empty content and
+// the classifier stage failed with "intent analysis: empty content"
+// (fresh-rig run 5, 2026-09-12). Without tools offered, there is no legitimate
+// tool call to recover.
+func TestParseLFMBareJSON_NotMinedWithoutTools(t *testing.T) {
+	answer := `{"name": "get_intent", "arguments": {"input": "do some research"}}`
+	content, calls := parseLFMToolCallsWithBare(answer, false)
+	if len(calls) != 0 {
+		t.Fatalf("recovered %d calls from a tool-less reply, want 0", len(calls))
+	}
+	if content != answer {
+		t.Errorf("content was modified:\n got %q\nwant %q", content, answer)
+	}
+
+	// The same reply WITH tools offered is a call, and is still recoverable.
+	_, withTools := parseLFMToolCallsWithBare(answer, true)
+	if len(withTools) != 1 {
+		t.Fatalf("recovered %d calls with tools offered, want 1", len(withTools))
+	}
+	if withTools[0].Function.Name != "get_intent" {
+		t.Errorf("recovered call name = %q, want get_intent", withTools[0].Function.Name)
+	}
+}
+
+// Unambiguous marker syntax is recovered either way: it cannot be prose.
+func TestParseLFMMarkers_RecoveredWithoutTools(t *testing.T) {
+	reply := `<|tool_call_start|>[json_extract(text="x")]<|tool_call_end|>`
+	content, calls := parseLFMToolCallsWithBare(reply, false)
+	if len(calls) != 1 {
+		t.Fatalf("recovered %d marker calls without tools, want 1 (markers are unambiguous)", len(calls))
+	}
+	if strings.TrimSpace(content) != "" {
+		t.Errorf("content = %q, want the marker text stripped", content)
+	}
+}

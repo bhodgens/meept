@@ -72,10 +72,29 @@ var lfmFunctionCallsBlock = regexp.MustCompile(`(?is)<function_calls>\s*(?:<invo
 // wire marshaller omits tool_call_id when empty — empty IDs on a multi-call
 // reply collapse the executor's idToIdx map and break pairing.
 func parseLFMToolCalls(content string) (string, []ToolCall) {
+	return parseLFMToolCallsWithBare(content, true)
+}
+
+// parseLFMToolCallsWithBare is parseLFMToolCalls with the bare-JSON half made
+// optional. allowBare must be TRUE only when the request actually offered
+// tools.
+//
+// Why the switch exists: the bare-JSON half is the one ambiguous shape. Marker
+// (<|tool_call_start|>), XML (<function_calls>) and fenced syntax are
+// unambiguous tool-call language, but a JSON object in prose can equally be
+// the model's ANSWER. Mining it on a tool-less request destroyed a real reply:
+// the intent analyzer asked for analysis JSON, the reply carried a call-like
+// object, the miner stripped it, and the classifier stage failed with
+// "intent analysis: empty content" (fresh-rig run 5, 2026-09-12). A request
+// with no tools cannot have a legitimate tool call, so the half is skipped.
+func parseLFMToolCallsWithBare(content string, allowBare bool) (string, []ToolCall) {
 	content, markerCalls := parseLFMMarkerCalls(content)
 	content, xmlCalls := parseLFMXMLCalls(content)
 	content, fenceCalls := parseLFMFenceCalls(content)
-	content, bareCalls := parseLFMBareJSONCalls(content)
+	var bareCalls []ToolCall
+	if allowBare {
+		content, bareCalls = parseLFMBareJSONCalls(content)
+	}
 	return content, append(append(append(markerCalls, xmlCalls...), fenceCalls...), bareCalls...)
 }
 
