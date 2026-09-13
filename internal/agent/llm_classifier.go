@@ -664,7 +664,15 @@ If no intents detected, return empty array [].`, laneList(), input)
 			continue
 		}
 		agentType := agentForIntent(intent)
-		requiresPlanning := intent == string(IntentPlan)
+		// Derive the flag from the lane's own rule, never a plan-only
+		// equality. The handler's async gate (handler.go:770 ->
+		// ShouldDispatchAsync -> Intent.RequiresPlanning) reads this
+		// field, and every other producer (fallback, semantic, keyword)
+		// sets it from IntentType.RequiresPlanning(). When only plan set
+		// it, an LLM-classified quickplan carried false, the gate stayed
+		// shut, and the lane 691d83f6 made emittable dead-ended
+		// (bughunt 2026-09-12 C-0).
+		requiresPlanning := IntentType(intent).RequiresPlanning()
 		intents = append(intents, &Intent{
 			Type:             intent,
 			Confidence:       clampConfidence(r.Confidence),
@@ -777,7 +785,11 @@ func (c *LLMClassifier) parseResponse(content, originalInput string) (*Intent, e
 
 	agentType := agentForIntent(resp.Intent)
 
-	requiresPlanning := resp.Intent == string(IntentPlan)
+	// Same lane-derived rule as ClassifyMulti (bughunt 2026-09-12 C-0):
+	// the async gate reads RequiresPlanning, so an LLM-emitted quickplan
+	// must carry the value IntentType.RequiresPlanning() gives it or the
+	// quickplan -> orchestrator pipeline is dead code for this producer.
+	requiresPlanning := IntentType(resp.Intent).RequiresPlanning()
 
 	return &Intent{
 		Type:             resp.Intent,

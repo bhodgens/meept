@@ -199,10 +199,14 @@ func TestLLMClassifier_ValidIntentParsing(t *testing.T) {
 			content: `{"intent":"code","confidence":0.85}`,
 			input:   "write a function",
 			want: &Intent{
-				Type:             "code",
-				Confidence:       0.85,
-				AgentType:        "coder",
-				RequiresPlanning: false,
+				Type:       "code",
+				Confidence: 0.85,
+				AgentType:  "coder",
+				// RequiresPlanning is derived from the lane
+				// (IntentType.RequiresPlanning -> true for code), so this
+				// producer now agrees with the semantic/keyword producers
+				// (bughunt 2026-09-12 C-0). It used to be plan-only.
+				RequiresPlanning: true,
 			},
 		},
 		{

@@ -1277,16 +1277,18 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			// signals ("tomorrow", "at 5pm", "remind me", "timer"); an
 			// imperative with none is not a schedule request. Both
 			// non-executable verdicts share one arbitration.
-			if (intent.Type == string(IntentPlatform) || (intent.Type == string(IntentSchedule) && !hasTimeSignal(input))) &&
-				hasLeadingImperativeVerb(input) {
-				d.logger.Info("Classifier verdict overridden by imperative execution phrasing",
-					"verdict", intent.Type,
-					"llm_confidence", intent.Confidence,
-					"input_len", len(input),
-				)
-				d.recordClassificationMethod("platform_action_arbitration")
-				intent = nil
-			} else if (intent.Type == string(IntentPlatform) ||
+			// Branch ORDER is load-bearing (bughunt 2026-09-12 F41): a
+			// status/recall question OUTRANKS an imperative-looking first
+			// token. "update me: did the file get created?" satisfies
+			// BOTH matchers (hasLeadingImperativeVerb on "update",
+			// isWorkStatusRecall on "did … file"), and while the
+			// imperative branch was tested first it fired, cleared the
+			// intent, and the session-aware recall route added by
+			// 16f1f8a2/c6e6f336 never ran. The recall matchers run FIRST;
+			// a genuine imperative that is not a work-status question
+			// ("create a file named hello.txt") still falls through to
+			// the imperative override below.
+			if (intent.Type == string(IntentPlatform) ||
 				(intent.Type == string(IntentSchedule) && !hasTimeSignal(input)) ||
 				(intent.Type == string(IntentGit) && !inputContainsGitVerb(input))) &&
 				(isSecondPersonWorkRecall(input) || isWorkStatusRecall(input)) {
@@ -1304,14 +1306,39 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 					"input_len", len(input),
 				)
 				d.recordClassificationMethod("platform_recall_arbitration")
-				return &Intent{
+				// Shared recording tail (bughunt 2026-09-12 F95): every
+				// sibling return path records the agent + intent so
+				// by_agent/by_intent count this arbitration; without it
+				// the recall override was invisible to the
+				// classifier-observability counters the wave added for
+				// exactly this path.
+				d.recordAgent(config.AgentIDChat)
+				d.recordIntentType(string(IntentRecall))
+				// Confidence 0.85 is a DOCUMENTED constant, not the
+				// discarded verdict's number: this path REPLACES an
+				// untrusted platform/schedule/git costume (the 8B scored
+				// it 0.9+) with the inline recall route, which is answered
+				// from session context and is not threshold-gated.
+				// Reusing the over-stated verdict value would launder the
+				// misclassification into the confidence.
+				recall := &Intent{
 					Type:       string(IntentRecall),
 					Confidence: 0.85,
 					AgentType:  config.AgentIDChat,
 					Summary:    extractSummary(input),
 					Method:     "platform_recall_arbitration",
 					Model:      d.llmClassifier.ResolvedModel(),
-				}, nil
+				}
+				return d.applyContextWeighting(recall, memCtx, input), nil
+			} else if (intent.Type == string(IntentPlatform) || (intent.Type == string(IntentSchedule) && !hasTimeSignal(input))) &&
+				hasLeadingImperativeVerb(input) {
+				d.logger.Info("Classifier verdict overridden by imperative execution phrasing",
+					"verdict", intent.Type,
+					"llm_confidence", intent.Confidence,
+					"input_len", len(input),
+				)
+				d.recordClassificationMethod("platform_action_arbitration")
+				intent = nil
 			} else if ShouldUseLLMResult(intent) {
 				d.logger.Debug("LLM classifier succeeded",
 					"intent", intent.Type,
@@ -2174,9 +2201,17 @@ func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memC
 			if intent.Confidence < compoundIntentConfidenceFloor {
 				continue
 			}
+			// Only genuinely CONVERSATIONAL tag-alongs may be absorbed:
+			// chat / platform / recall. Search and analyze are WORK lanes
+			// (they route to the analyst — intent.go:136-137), so
+			// counting them as chat-like let "search the web for X and
+			// write it to notes.md" collapse to the write half and
+			// silently drop the search; Report is likewise a second
+			// deliverable, not conversation (bughunt 2026-09-12 F42).
+			// DetectCompound already excluded only chat/platform
+			// (:2000), so admitting work lanes here undid that verdict.
 			switch intent.Type {
-			case string(IntentChat), string(IntentPlatform), string(IntentRecall),
-				string(IntentReport), string(IntentSearch), string(IntentAnalyze):
+			case string(IntentChat), string(IntentPlatform), string(IntentRecall):
 				chatLike++
 			default:
 				actionable++
@@ -4011,17 +4046,19 @@ var timeMeridiemRe = regexp.MustCompile(`\b[0-9]{1,2}(:[0-9]{2})?\s*(am|pm)\b`)
 // file?" intent=git @0.9 — a git verdict on a work-status question with no
 // git verb is the same credibility failure as the platform/schedule
 // costumes, and the committer runs contextless.
+// gitVerbRe matches a git action verb as a WHOLE WORD, inflections
+// included ("merge" but not "emergency"/"emerged"; "commit" and
+// "committed" but not "commitment"). Word boundaries are load-bearing:
+// plain substring matching made "did the emergency change get made?"
+// contain "merge", so the guard below wrongly kept an untrusted git
+// verdict alive and the committer ran contextless (bughunt 2026-09-12
+// F40). This file already word-bounds the meridiem the same way
+// (timeMeridiemRe).
+var gitVerbRe = regexp.MustCompile(
+	`\b(?:commit|push|pull|merge|branch|rebase|revert|checkout|stash|cherry-pick)(?:s|es|ed|d|ing|ted|ting)?\b`)
+
 func inputContainsGitVerb(input string) bool {
-	lower := strings.ToLower(input)
-	for _, kw := range []string{
-		"commit", "push", "pull", "merge", "branch",
-		"rebase", "revert", "checkout", "stash", "cherry-pick",
-	} {
-		if strings.Contains(lower, kw) {
-			return true
-		}
-	}
-	return false
+	return gitVerbRe.MatchString(strings.ToLower(input))
 }
 
 // isWorkStatusRecall reports whether the input is a yes/no WORK-STATUS
