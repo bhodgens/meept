@@ -11,12 +11,16 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 ## Index
 
 - Constants
+- Variables
 - [func AutonomousFromContext\(ctx context.Context\) bool](<#AutonomousFromContext>)
 - [func CanonicalName\(tool Tool\) string](<#CanonicalName>)
 - [func ContextWithAutonomous\(ctx context.Context\) context.Context](<#ContextWithAutonomous>)
 - [func ContextWithWorkingDir\(ctx context.Context, dir string\) context.Context](<#ContextWithWorkingDir>)
 - [func GetCategory\(t Tool\) string](<#GetCategory>)
 - [func GetMaxResultTokens\(t Tool\) int](<#GetMaxResultTokens>)
+- [func IsNoWorkingDir\(err error\) bool](<#IsNoWorkingDir>)
+- [func NoPathError\(tool string\) error](<#NoPathError>)
+- [func NoWorkingDirError\(tool string\) error](<#NoWorkingDirError>)
 - [func WorkingDirFromContext\(ctx context.Context\) string](<#WorkingDirFromContext>)
 - [type Categorizer](<#Categorizer>)
 - [type CategoryTools](<#CategoryTools>)
@@ -116,6 +120,18 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 	    SchemaPropCapabilities   = "capabilities"
 	)
 
+## Variables
+
+<a name="ErrNoPath"></a>ErrNoPath is the sentinel error for a filesystem call that requires an explicit path argument and received none, on a tool that does NOT fall back to the session working directory \(read\_file, write\_file, delete\_file, file\_edit\). The session may well have a working directory; the caller simply omitted the argument.
+
+	var ErrNoPath = errors.New("no path specified; pass an explicit path")
+
+<a name="ErrNoWorkingDir"></a>ErrNoWorkingDir is the sentinel error for a filesystem call that needed a path, got no explicit path argument, and had no session working directory to default to. Callers detect it with errors.Is / IsNoWorkingDir.
+
+Before this existed the tools returned the bare "no path specified", which told the model nothing about WHY the call could not proceed: it retried the identical call and the cycle guard killed the turn \(fresh\-rig daemon11, 2026\-09\-13 — the daemon served turns whose session had no project and no client CWD, so every relative\-path tool failed\). The message now names the missing context and the one action that unblocks the call.
+
+	var ErrNoWorkingDir = errors.New("no working directory for this session; pass an explicit path")
+
 <a name="AutonomousFromContext"></a>
 ## func AutonomousFromContext
 
@@ -159,6 +175,27 @@ GetCategory returns the tool's category, or "general" if it doesn't implement Ca
 	func GetMaxResultTokens(t Tool) int
 
 GetMaxResultTokens returns the tool's declared result\-token floor, or 0 when the tool does not implement ResultSizer or declares a non\-positive floor. The returned value is the RAW declaration: the agent loop caps it at ToolResultMaxTokens \(kept in internal/agent to avoid an import cycle\).
+
+<a name="IsNoWorkingDir"></a>
+## func IsNoWorkingDir
+
+	func IsNoWorkingDir(err error) bool
+
+IsNoWorkingDir reports whether err is, or wraps, ErrNoWorkingDir. This is the detection surface for callers that want to surface a "bind a working directory" hint \(or a distinct user\-language message\) instead of a generic tool failure.
+
+<a name="NoPathError"></a>
+## func NoPathError
+
+	func NoPathError(tool string) error
+
+NoPathError reports that tool requires an explicit path argument and got none. The returned error wraps ErrNoPath \(%w\).
+
+<a name="NoWorkingDirError"></a>
+## func NoWorkingDirError
+
+	func NoWorkingDirError(tool string) error
+
+NoWorkingDirError reports that tool needed a path, had no path argument, and the session has no working directory to default to. The returned error wraps ErrNoWorkingDir \(%w\), so callers can detect it with IsNoWorkingDir / errors.Is.
 
 <a name="WorkingDirFromContext"></a>
 ## func WorkingDirFromContext

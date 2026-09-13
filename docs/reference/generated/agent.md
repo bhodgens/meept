@@ -57,6 +57,7 @@ Package agent provides the agent loop and related components.
 - [func BuildSystemPrompt\(cfg PromptConfig, tools \[\]ToolDescription, memoryContext string\) string](<#BuildSystemPrompt>)
 - [func BuildSystemPromptWithOverride\(override string, tools \[\]ToolDescription\) string](<#BuildSystemPromptWithOverride>)
 - [func BusTopic\(eventType AgentEventType\) string](<#BusTopic>)
+- [func CanonicalToolName\(name string\) string](<#CanonicalToolName>)
 - [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
 - [func ContinuationDescription\(desc string, k, n int\) string](<#ContinuationDescription>)
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
@@ -112,8 +113,10 @@ Package agent provides the agent loop and related components.
 - [func TeamResultTopic\(sessionID string\) string](<#TeamResultTopic>)
 - [func TeamStatusTopic\(sessionID string\) string](<#TeamStatusTopic>)
 - [func ThrottleParkAttemptFromContext\(ctx context.Context\) int](<#ThrottleParkAttemptFromContext>)
+- [func ToolsWithoutProperties\(reg ToolRegistry\) \[\]string](<#ToolsWithoutProperties>)
 - [func ValidateSoul\(content \[\]byte\) error](<#ValidateSoul>)
 - [func VerifyFromToolResults\(results \[\]tools.ToolResult\) bool](<#VerifyFromToolResults>)
+- [func WarnToolsWithoutProperties\(reg ToolRegistry, logger \*slog.Logger\) \[\]string](<#WarnToolsWithoutProperties>)
 - [func WithResumedTurn\(ctx context.Context\) context.Context](<#WithResumedTurn>)
 - [func WithRetryBudget\(ctx context.Context, budget \*RetryBudget\) context.Context](<#WithRetryBudget>)
 - [func WithThrottleParkAttempt\(ctx context.Context, attempt int\) context.Context](<#WithThrottleParkAttempt>)
@@ -281,8 +284,10 @@ Package agent provides the agent loop and related components.
   - [func \(s \*AgentSpec\) AllTools\(\) \[\]string](<#AgentSpec.AllTools>)
   - [func \(s \*AgentSpec\) EffectiveEnhancerModel\(\) string](<#AgentSpec.EffectiveEnhancerModel>)
   - [func \(s \*AgentSpec\) GetSkillForTrigger\(keyword string\) string](<#AgentSpec.GetSkillForTrigger>)
+  - [func \(s \*AgentSpec\) GrantedToolNames\(\) \[\]string](<#AgentSpec.GrantedToolNames>)
   - [func \(s \*AgentSpec\) HasSkill\(skillName string\) bool](<#AgentSpec.HasSkill>)
   - [func \(s \*AgentSpec\) HasTool\(tool string\) bool](<#AgentSpec.HasTool>)
+  - [func \(s \*AgentSpec\) ScopedToolNames\(limit int\) \[\]string](<#AgentSpec.ScopedToolNames>)
 - [type AgentStartData](<#AgentStartData>)
 - [type AgentState](<#AgentState>)
   - [func \(s AgentState\) IsActive\(\) bool](<#AgentState.IsActive>)
@@ -446,9 +451,11 @@ Package agent provides the agent loop and related components.
   - [func \(h \*ChatHandler\) LookupLoop\(conversationID string\) \*AgentLoop](<#ChatHandler.LookupLoop>)
   - [func \(h \*ChatHandler\) Name\(\) string](<#ChatHandler.Name>)
   - [func \(h \*ChatHandler\) QuotaResumeWatcher\(\) \*QuotaResumeWatcher](<#ChatHandler.QuotaResumeWatcher>)
+  - [func \(h \*ChatHandler\) SetActiveProjectPathResolver\(fn func\(\) string\)](<#ChatHandler.SetActiveProjectPathResolver>)
   - [func \(h \*ChatHandler\) SetAgentLoopManager\(m \*Manager\)](<#ChatHandler.SetAgentLoopManager>)
   - [func \(h \*ChatHandler\) SetBudget\(budget \*llm.Budget\)](<#ChatHandler.SetBudget>)
   - [func \(h \*ChatHandler\) SetCollaborationEngine\(engine \*CollaborationEngine\)](<#ChatHandler.SetCollaborationEngine>)
+  - [func \(h \*ChatHandler\) SetDefaultWorkingDir\(dir string\)](<#ChatHandler.SetDefaultWorkingDir>)
   - [func \(h \*ChatHandler\) SetEffectsResumeHook\(fn EffectsResumeHook\)](<#ChatHandler.SetEffectsResumeHook>)
   - [func \(h \*ChatHandler\) SetFenceController\(fc FenceController\)](<#ChatHandler.SetFenceController>)
   - [func \(h \*ChatHandler\) SetMessageSaver\(s SessionMessageSaver\)](<#ChatHandler.SetMessageSaver>)
@@ -2340,6 +2347,13 @@ BuildSystemPromptWithOverride builds a prompt but uses an override if provided. 
 
 BusTopic returns the bus topic for a given agent event type. Convention: "agent.event.\<type\>"
 
+<a name="CanonicalToolName"></a>
+## func CanonicalToolName
+
+	func CanonicalToolName(name string) string
+
+CanonicalToolName returns the registered tool name for an agent grant. Unknown names pass through unchanged.
+
 <a name="ClearPerOperationBackoffOverrideForTest"></a>
 ## func ClearPerOperationBackoffOverrideForTest
 
@@ -2746,6 +2760,15 @@ TeamStatusPattern is the per\-session shared task board topic.
 
 ThrottleParkAttemptFromContext returns the previous park generation's attempt count, or 0 for a fresh turn.
 
+<a name="ToolsWithoutProperties"></a>
+## func ToolsWithoutProperties
+
+	func ToolsWithoutProperties(reg ToolRegistry) []string
+
+ToolsWithoutProperties returns the names \(sorted\) of tools whose declared parameter schema carries no properties \(FunctionParameters.Properties is empty\).
+
+Such a tool is a HAZARD for grammar\-constrained / forced tool calls: the tool\-call grammar builds the arguments object from the declared properties, so a property\-less tool emits \{"arguments":\{\}\} for every call \(measured 5/5\), and a model offered a zero\-argument decoy alongside the intended tool picked the decoy 10/10. This function only REPORTS; it never mutates or hides a tool \(flag, do not silently change\). Run it at daemon startup over the full registry, or in tests as a regression gate.
+
 <a name="ValidateSoul"></a>
 ## func ValidateSoul
 
@@ -2761,6 +2784,13 @@ ValidateSoul checks the mechanical validity of soul file content. It returns a n
 VerifyFromToolResults decides task success from STRUCTURED tool data only \(book ch1 "Verify" input\-isolation principle\): exit codes, success flags, and error fields. It never reads assistant\-generated prose, so a model claiming "tests passed" cannot fabricate a pass.
 
 results must be non\-empty; empty input fails closed.
+
+<a name="WarnToolsWithoutProperties"></a>
+## func WarnToolsWithoutProperties
+
+	func WarnToolsWithoutProperties(reg ToolRegistry, logger *slog.Logger) []string
+
+WarnToolsWithoutProperties logs a warning listing every property\-less tool in reg and returns the names. Nil\-safe on both arguments. See ToolsWithoutProperties for why this is a hazard.
 
 <a name="WithResumedTurn"></a>
 ## func WithResumedTurn
@@ -4252,7 +4282,7 @@ AgentSpec defines the specification for creating an agent.
 
 	func (s *AgentSpec) AllTools() []string
 
-AllTools returns all tools available to this agent.
+AllTools returns all tools available to this agent, as declared \(baseline \+ additional, in that order\). The declared names are NOT normalized to registry names — use GrantedToolNames for that.
 
 <a name="AgentSpec.EffectiveEnhancerModel"></a>
 ### func \(\*AgentSpec\) EffectiveEnhancerModel
@@ -4268,6 +4298,13 @@ EffectiveEnhancerModel returns the enhancer model: the explicit override if set,
 
 GetSkillForTrigger returns the skill name for a trigger keyword, or empty string if not found.
 
+<a name="AgentSpec.GrantedToolNames"></a>
+### func \(\*AgentSpec\) GrantedToolNames
+
+	func (s *AgentSpec) GrantedToolNames() []string
+
+GrantedToolNames returns the agent's declared tools \(baseline \+ additional\) normalized to registered registry names. It is the allow\-list the registry filters against, so a grant of \`shell\_execute\` resolves to the registered \`shell\` tool.
+
 <a name="AgentSpec.HasSkill"></a>
 ### func \(\*AgentSpec\) HasSkill
 
@@ -4281,6 +4318,18 @@ HasSkill checks if the agent spec includes a specific skill.
 	func (s *AgentSpec) HasTool(tool string) bool
 
 HasTool checks if the agent spec includes a tool \(baseline or additional\).
+
+<a name="AgentSpec.ScopedToolNames"></a>
+### func \(\*AgentSpec\) ScopedToolNames
+
+	func (s *AgentSpec) ScopedToolNames(limit int) []string
+
+ScopedToolNames returns the tool names offered to this agent under tool\-list scoping, capped at limit.
+
+- limit \<= 0: no cap — the full normalized grant set \(GrantedToolNames\), i.e. the existing behavior.
+- limit \> 0: at most \`limit\` names, ordered AdditionalTools first \(the task\-relevant tools the agent was granted for its job — these survive the cap\) then BaselineTools \(the always\-available platform/task tools\), de\-duplicated, with names normalized to registry names.
+
+The cap exists because a forced tool call must choose among few candidates: with a large candidate set a \`tool\_choice: "required"\` request produces spurious calls \(measured; see docs/reference/agent\-loop\-tools.md\).
 
 <a name="AgentStartData"></a>
 ## type AgentStartData
@@ -5722,6 +5771,13 @@ Name returns the component name for the registry.
 
 QuotaResumeWatcher exposes the configured watcher so the daemon can Start it on its lifecycle. Returns nil when quota deferral is not wired.
 
+<a name="ChatHandler.SetActiveProjectPathResolver"></a>
+### func \(\*ChatHandler\) SetActiveProjectPathResolver
+
+	func (h *ChatHandler) SetActiveProjectPathResolver(fn func() string)
+
+SetActiveProjectPathResolver wires the turn\-start fallback that returns the local path of the user's active project \("" when none is active\). Nil\-safe; the daemon wires this from ProjectManager.GetActive. Sessions are bound to the ACTIVE project, never to a synthesized default \(AGENTS.md\), so this fallback resolves an existing project or nothing.
+
 <a name="ChatHandler.SetAgentLoopManager"></a>
 ### func \(\*ChatHandler\) SetAgentLoopManager
 
@@ -5742,6 +5798,13 @@ SetBudget sets the token budget tracker for async dispatch pre\-checks and enabl
 	func (h *ChatHandler) SetCollaborationEngine(engine *CollaborationEngine)
 
 SetCollaborationEngine sets the collaboration engine for starting collaboration sessions.
+
+<a name="ChatHandler.SetDefaultWorkingDir"></a>
+### func \(\*ChatHandler\) SetDefaultWorkingDir
+
+	func (h *ChatHandler) SetDefaultWorkingDir(dir string)
+
+SetDefaultWorkingDir wires the daemon's configured default working directory. It is the LAST resort, used only for turns whose session and active project both resolve nothing. Empty string \(the default\) leaves such a turn unbound: filesystem tools then return tools.ErrNoWorkingDir instead of silently operating on the daemon's own directory.
 
 <a name="ChatHandler.SetEffectsResumeHook"></a>
 ### func \(\*ChatHandler\) SetEffectsResumeHook

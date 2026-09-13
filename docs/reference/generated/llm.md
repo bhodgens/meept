@@ -138,7 +138,6 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type BrokerStatus](<#BrokerStatus>)
 - [type Budget](<#Budget>)
   - [func NewBudget\(cfg BudgetConfig, logger \*slog.Logger\) \*Budget](<#NewBudget>)
-  - [func NewBudgetFromDefaults\(logger \*slog.Logger\) \*Budget](<#NewBudgetFromDefaults>)
   - [func \(b \*Budget\) CheckBudget\(\) BudgetCheckResult](<#Budget.CheckBudget>)
   - [func \(b \*Budget\) CheckBudgetWithScope\(taskID, sessionID string\) BudgetCheckResult](<#Budget.CheckBudgetWithScope>)
   - [func \(b \*Budget\) CleanupStaleEntries\(ttl time.Duration\)](<#Budget.CleanupStaleEntries>)
@@ -2126,12 +2125,7 @@ Budget tracks and enforces token consumption budgets.
 
 NewBudget creates a new token budget tracker.
 
-<a name="NewBudgetFromDefaults"></a>
-### func NewBudgetFromDefaults
-
-	func NewBudgetFromDefaults(logger *slog.Logger) *Budget
-
-NewBudgetFromDefaults creates a budget with default settings.
+This is the enforcement side of the budget contract: budget VALUES come from meept.json5 and nowhere else. A zero field means "unlimited" for that limit, so an all\-zero config \(the disabled posture\) enforces nothing.
 
 <a name="Budget.CheckBudget"></a>
 ### func \(\*Budget\) CheckBudget
