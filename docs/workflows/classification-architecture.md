@@ -214,3 +214,16 @@ the `iter7_harvest.py` pattern) before
 `scripts/build_prefilter_centroids.py` rebuilds the Door-1 index.
 `--dry-run` prints counts plus a hash-only candidate preview and
 writes nothing; exit 0 always (measurement-tool convention).
+
+## Router lanes come from the routing table (single source of truth)
+
+The prompt-router sidecar (`scripts/prompt_router_sidecar.py`, :8082) does
+not own its lane list; it resolves lanes once at startup, in this order:
+`ROUTER_LANES_FILE` (alias `ROUTER_LANES_JSON`) pointing at the JSON artifact
+`meept lanes --json` prints -- `{"lanes":[{"intent":...,"agent":...}],...}` --
+then the comma-separated legacy `ROUTER_LANES`, then the built-in 9-lane
+default. A missing or malformed artifact falls through, never crashes; the
+winner is logged once to stderr (`prompt-router lanes source=json count=27`).
+The prompt-router provider's `spawn_command` may set `ROUTER_LANES_FILE` so a
+spawned sidecar reads the table. Regenerate after any agent/intent frontmatter
+change: `./bin/meept lanes --json > /Users/caimlas/.meept/prompt_router_lanes.json`
