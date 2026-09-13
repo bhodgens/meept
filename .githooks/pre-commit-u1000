@@ -67,6 +67,14 @@ done <<< "$STAGED_GO_FILES"
 # how //go:build mage magefiles/*.go became invisible (audit F24).
 # Prints one of: ok | excluded|<reason> | nested-module|<reason> |
 #                missing|<reason> | nofiles|<reason> | broken|<reason>
+#
+# `ok` is NOT "the code compiles" and `broken` is NOT "the code is unparseable":
+# a SYNTAX ERROR or an UNRESOLVED IMPORT gives rc=0 with an EMPTY {{.Error}}, so
+# `go list` calls those packages `ok` and they surface from the staticcheck run
+# below. `broken` is the fail-closed verdict for `go list` exiting non-zero with
+# an empty stdout (stderr carries the reason), or for a {{.Error}} matching none
+# of the reasons above. `nofiles` (a directory holding only _-prefixed files) is
+# a deliberate loosening: the pre-68b2338c gate failed on it.
 go_list_state() {
   local pat="$1" err rc detail
   rc=0

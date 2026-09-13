@@ -69,9 +69,26 @@ VET_OUTPUT=""
 #   nested-module|<reason>  separate Go module, not part of this one
 #   missing|<reason>        path no longer exists in the working tree
 #   nofiles|<reason>        no (non-test) Go files to analyze -> SKIP, not a
-#                           load failure (e.g. only _test.go or _-prefixed files)
-#   broken|<reason>         any other load failure (conflicting package
-#                           clause, malformed go.mod, ...)
+#                           load failure (e.g. a directory holding only
+#                           _-prefixed files). DELIBERATE LOOSENING: the
+#                           pre-68b2338c gate classified this as `broken` and
+#                           hard-failed the commit — reproduced in /tmp, where a
+#                           staged pkg/nofiles/_x.go blocked this hook.
+#   broken|<reason>         the ONLY fail-closed verdict, and exactly this
+#                           classifier's own contract: `go list` exited non-zero
+#                           with an empty stdout (stderr is then consulted for
+#                           the reason — "errors parsing go.mod: go.mod:4:
+#                           usage: require module/path v1.2.3"), OR {{.Error}}
+#                           was non-empty and matched none of the reasons above
+#                           ("found packages a (a.go) and b (b.go)" — a
+#                           conflicting package clause).
+#
+# `ok` DOES NOT MEAN "this code compiles". `go list` reports a package with an
+# EMPTY {{.Error}} for a SYNTAX ERROR and for an UNRESOLVED IMPORT (both rc=0,
+# verified in /tmp), so those land in the `ok` column and are caught by the
+# `go vet` run below — never by this classifier. Do not "fix" that here: this
+# function answers "did the package load", and a package that loaded is
+# analyzable.
 go_list_state() {
   local pat="$1" err rc detail
   rc=0

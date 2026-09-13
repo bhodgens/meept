@@ -22,9 +22,12 @@
 #     free ports, the remap is re-probed immediately before the daemon is
 #     spawned, and the run fails loudly if any literal in a spawning provider
 #     survives — so the scratch daemon can never reach the user's live
-#     runtimes. Endpoints of providers it does NOT spawn (ollama
-#     localhost:11434, comfyui 127.0.0.1:8188) are left exactly as written:
-#     remapping those would hand the daemon a dead port.
+#     runtimes. "Spawns" is the spawn_command KEY (comments are stripped before
+#     the scan), and a spawn-bearing provider whose endpoint port cannot be
+#     pinned down at all (`--port "${PORT}"`, no local <host>:<port>) is FATAL
+#     rather than silently kept live. Endpoints of providers it does NOT spawn
+#     (ollama localhost:11434, comfyui 127.0.0.1:8188) are left exactly as
+#     written: remapping those would hand the daemon a dead port.
 #   - Boots a scratch daemon (daemon cwd = $WORK, deliberately DIFFERENT from
 #     the project dir, so A4 genuinely exercises the leaf-03 session
 #     ProjectPath cwd resolution rather than the daemon-cwd fallback).
@@ -466,13 +469,26 @@ EOF
 PORT_MAP_FILE_READY=0
 
 # Rewrite the copied models config so the scratch daemon can reach ONLY runtimes
-# it spawns itself. Two properties matter:
+# it spawns itself. Four properties matter:
 #   * only providers that actually SPAWN are remapped — a remapped endpoint for a
 #     provider the sandbox never starts is a DEAD port: `localhost:11434` (ollama)
 #     and `127.0.0.1:8188` (comfyui) are external services the daemon DIALS, not
 #     runtimes it launches, so rewriting them silently broke those providers;
+#   * "spawns" means the spawn_command KEY, not the word in a comment. Detection
+#     runs on a comment-blanked copy of the config, so a `// spawn_command: none`
+#     note (or any prose containing the token) inside an object can no longer
+#     flip that provider into the spawn set and remap its dial-only endpoint to a
+#     dead port;
 #   * the host spelling is preserved — normalizing `0.0.0.0:`/`[::1]:` to
-#     127.0.0.1: changes BIND semantics, not merely the port.
+#     127.0.0.1: changes BIND semantics, not merely the port;
+#   * an endpoint that cannot be remapped is FATAL. The patterns cover the forms
+#     the daemon itself accepts (spawnCommandBindsPort: `"--port", "8081"`,
+#     `--port=8081`, `ROUTER_PORT=8081`, `--listen-port 8088`) plus every
+#     loopback spelling (`127.0.0.1`, `localhost`, `0.0.0.0`, `[::1]`,
+#     `[::ffff:127.0.0.1]`, `host.docker.internal`) and the host-less `:8086`
+#     bind form. A spawn-bearing provider whose port is a variable
+#     (`--port "${PORT}"`) or is not recognisable at all stops the run (exit 2)
+#     instead of being silently kept pointed at the user's live runtime.
 # Points the scratch daemon at the user's live runtimes share with the old
 # hardcoded sed: neither may come back.
 remap_models_config() {
@@ -486,16 +502,6 @@ try:
 except OSError as exc:
     print("ERROR: cannot read %s: %s" % (path, exc), file=sys.stderr)
     sys.exit(2)
-
-# Host spelling is CAPTURED, never rewritten: `0.0.0.0:<p>` is a bind address
-# and `[::1]:<p>` is IPv6 — collapsing either to 127.0.0.1 changes what the
-# spawned runtime binds.
-LOCALPORT = re.compile(
-    r'(?P<host>127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):(?P<port>\d+)')
-# `"--port", "8081"` (JSON5 string) and `"--port", 8081` (bare number) are both
-# valid; the quoted-only pattern silently missed the bare form, leaving a live
-# spawn port unmapped (and the survivor check below blind to it).
-SPAWNPORT = re.compile(r'("--port"\s*,\s*)(?:"(?P<quoted>\d+)"|(?P<bare>\d+))')
 
 
 def _skip_string(s, i):
@@ -512,12 +518,49 @@ def _skip_string(s, i):
     return i
 
 
+def blank_comments(s):
+    """Same-length copy of s with every comment byte replaced by a space.
+
+    ALL scanning runs on this copy (offsets are preserved, so a match found here
+    maps 1:1 back onto the original text). A comment is documentation, not
+    config: a `// spawn_command: none` note inside a provider object must not
+    make this remapper believe the provider spawns a runtime — doing so flipped
+    comfyui into the spawn set, remapped its dial-only 8188 to a dead port with
+    no warning at all, and rewrote a port quoted in the comment. Strings are
+    skipped first so a `//` inside a URL stays inside its string.
+    """
+    out = list(s)
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == '"':
+            i = _skip_string(s, i)
+            continue
+        if s.startswith("//", i):
+            j = s.find("\n", i)
+            j = n if j < 0 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+            continue
+        if s.startswith("/*", i):
+            j = s.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+            continue
+        i += 1
+    return "".join(out)
+
+
 def object_spans(s):
     """(start, end, parents) for every {...} object.
 
-    The config is JSON5 (comments, trailing commas, unquoted-ish keys), so json
-    cannot parse it; a brace count must skip braces inside strings and comments
-    or it mis-slices the provider objects.
+    The config is JSON5 (comments, trailing commas, quoted keys), so json cannot
+    parse it; a brace count must skip braces inside strings or it mis-slices the
+    provider objects. s is the comment-blanked copy, so the comment branches
+    below are a no-op there.
     """
     stack, spans, i, n = [], [], 0, len(s)
     while i < n:
@@ -543,8 +586,9 @@ def object_spans(s):
     return spans
 
 
-spans = object_spans(text)
-prov_key = re.search(r'"providers"\s*:\s*\{', text)
+scan = blank_comments(text)
+spans = object_spans(scan)
+prov_key = re.search(r'"providers"\s*:\s*\{', scan)
 provider_members = []
 if prov_key:
     prov_start = prov_key.end() - 1
@@ -554,11 +598,92 @@ if prov_key:
         provider_members = sorted(
             (s, e) for s, e, parents in spans if parents == want)
 
-# `spawn_command` is the marker for "this provider is a runtime the daemon
-# launches". Providers without one (ollama, comfyui) talk to a service that is
-# already running under the user's control; leaving them alone is the point.
+
+def member_name(start):
+    """Provider key whose value object starts at `start`."""
+    names = re.findall(r'"([^"]+)"\s*:', text[:start])
+    return names[-1] if names else "?"
+
+
+# HOSTS: spellings that mean "this machine". Captured, never rewritten: 0.0.0.0
+# and the IPv6 forms change BIND semantics if collapsed to 127.0.0.1.
+HOSTS = (r'\[[0-9A-Fa-f:.]+\]'      # [::1], [::ffff:127.0.0.1]
+         r'|host\.docker\.internal'
+         r'|localhost'
+         r'|127\.0\.0\.1'
+         r'|0\.0\.0\.0')
+# `<host>:<port>` plus the host-less `:port` bind form (http://:8091/v1,
+# "addr": ":8091", --addr=:8091). The second/third alternatives are what keep a
+# REMOTE literal such as `https://api.example.com:8443` (colon preceded by a
+# word char) from being remapped as if it were local; the scheme form
+# (`http://:port`) is matched by the single-`/` lookbehind.
+LOCALPORT = re.compile(
+    r'(?P<host>' + HOSTS + r'|(?<=/)|(?<![\w.\-/])):(?P<port>\d{1,5})')
+
+# A port FLAG in a spawn command: `--port`, `--listen-port`, `--router_port`,
+# or the env-assignment spelling the daemon's own duplicate-spawn pre-check
+# accepts (spawnCommandBindsPort: token == port, or a token ending "=<port>").
+# `["\']?` tolerates the JSON5 string form (`"--port", "8081"`).
+PORTFLAG = (r'(?<![\w.\-])'
+            r'(?:--(?:[A-Za-z0-9_]+[-_])?port|[A-Z][A-Z0-9_]*PORT)'
+            r'["\']?\s*[=,\s]\s*')
+# `"--port", 8081` / `"--port", "8081"` / `--port=8081` / `ROUTER_PORT=8081`.
+SPAWNPORT = re.compile(PORTFLAG + r'(?:"(?P<port>\d{1,5})"|(?P<bare>\d{1,5}))')
+# The same flag with a value this script cannot resolve (`--port "${PORT}"`).
+SPAWNVAR = re.compile(
+    PORTFLAG + r'["\']?(?P<val>\$(?:\{[^}"\']*\}|\(|[A-Za-z_][A-Za-z0-9_]*))')
+
+
+def plausible_local(p, host):
+    """Is p a plausible local endpoint port? (host is the captured host or "".)
+
+    A host-qualified 0 is the documented "pick any free port" form. The
+    host-less `:port` branch additionally requires an unprivileged port, which
+    also stops a no-space JSON5 value like `"timeout_seconds":5` from reading
+    as an endpoint.
+    """
+    if p == 0:
+        return host != ""
+    return 1024 <= p <= 65535
+
+
+def plausible_spawn(p):
+    # 0 is a real spawn port (`llama-server --port 0` = any free port); below
+    # 1024 a spawned runtime cannot bind without privileges anyway.
+    return p == 0 or 1024 <= p <= 65535
+
+
+def match_port(m):
+    """(port, span) of the numeric group of a SPAWNPORT match."""
+    if m.group("port") is not None:
+        return int(m.group("port")), m.span("port")
+    return int(m.group("bare")), m.span("bare")
+
+
+def block_ports(sub):
+    """Local endpoint ports declared by one provider block (comment-stripped)."""
+    ports = []
+    for m in LOCALPORT.finditer(sub):
+        p = int(m.group("port"))
+        if not plausible_local(p, m.group("host") or ""):
+            continue
+        if p not in ports:
+            ports.append(p)
+    for m in SPAWNPORT.finditer(sub):
+        p, _ = match_port(m)
+        if not plausible_spawn(p):
+            continue
+        if p not in ports:
+            ports.append(p)
+    return ports
+
+
+# A `spawn_command` KEY (not the word in a comment) is the marker for "this
+# provider is a runtime the daemon launches". Providers without one (ollama,
+# comfyui) talk to a service that is already running under the user's control;
+# leaving them alone is the point.
 spawning = [span for span in provider_members
-            if "spawn_command" in text[span[0]:span[1]]]
+            if re.search(r'["\']?spawn_command["\']?\s*:', scan[span[0]:span[1]])]
 spawning_set = set(spawning)
 if not spawning:
     print("ERROR: no provider with a spawn_command in %s; the sandbox cannot "
@@ -566,23 +691,37 @@ if not spawning:
           file=sys.stderr)
     sys.exit(2)
 
-
-def block_ports(block):
-    ports = []
-    for m in LOCALPORT.finditer(block):
-        p = int(m.group("port"))
-        if p not in ports:
-            ports.append(p)
-    for m in SPAWNPORT.finditer(block):
-        p = int(m.group("quoted") or m.group("bare"))
-        if p not in ports:
-            ports.append(p)
-    return ports
-
+# Fail closed on a spawning provider whose endpoint this script cannot pin down.
+# Today's config is clean; a provider that spawns a runtime the sandbox would
+# inherit the endpoint of (a port the script cannot see, or one behind a
+# variable it cannot resolve) must stop the run instead of being silently kept.
+unresolved = []
+for span in spawning:
+    name = member_name(span[0])
+    block = scan[span[0]:span[1]]
+    m = SPAWNVAR.search(block)
+    if m:
+        unresolved.append("%s: %s is not a literal port this script can remap"
+                          % (name, m.group("val")))
+        continue
+    if not block_ports(block):
+        unresolved.append(
+            "%s: spawns a runtime but declares no local <host>:<port> the "
+            "sandbox can remap (unknown endpoint)" % name)
+if unresolved:
+    print("ERROR: refusing to run — a spawning provider's endpoint cannot be "
+          "remapped:", file=sys.stderr)
+    for u in unresolved:
+        print("  %s" % u, file=sys.stderr)
+    print("  fix: give the provider a literal local <host>:<port> endpoint "
+          "(options.baseURL / a --port flag) or extend the patterns in this "
+          "script; a sandbox that inherits an unknown live endpoint is worse "
+          "than no run", file=sys.stderr)
+    sys.exit(2)
 
 old_ports = []
 for span in spawning:
-    for p in block_ports(text[span[0]:span[1]]):
+    for p in block_ports(scan[span[0]:span[1]]):
         if p not in old_ports:
             old_ports.append(p)
 
@@ -616,21 +755,35 @@ def free_port():
 mapping = {p: free_port() for p in old_ports}
 
 
-def rewrite_block(block):
-    def sub_local(m):
-        newp = mapping.get(int(m.group("port")))
-        if newp is None:
-            return m.group(0)
-        return "%s:%d" % (m.group("host"), newp)  # host spelling preserved
+def rewrite_block(orig, sub, mapping):
+    """Rewrite mapped ports in orig, using sub (comment-blanked) to find them.
 
-    def sub_spawn(m):
-        newp = mapping.get(int(m.group("quoted") or m.group("bare")))
-        if newp is None:
-            return m.group(0)
-        quote = '"' if m.group("quoted") else ""
-        return "%s%s%d%s" % (m.group(1), quote, newp, quote)
-
-    return SPAWNPORT.sub(sub_spawn, LOCALPORT.sub(sub_local, block))
+    Only the matched NUMBER is replaced, so the host spelling, the quoting and
+    every comment byte inside the block are preserved exactly.
+    """
+    edits = []
+    for m in LOCALPORT.finditer(sub):
+        p = int(m.group("port"))
+        if not plausible_local(p, m.group("host") or ""):
+            continue
+        if p in mapping:
+            edits.append((m.start("port"), m.end("port"), str(mapping[p])))
+    for m in SPAWNPORT.finditer(sub):
+        p, span = match_port(m)
+        if not plausible_spawn(p):
+            continue
+        if p in mapping:
+            edits.append((span[0], span[1], str(mapping[p])))
+    edits.sort()
+    out, last = [], 0
+    for start, end, rep in edits:
+        if start < last:  # overlapping match from the other pattern
+            continue
+        out.append(orig[last:start])
+        out.append(rep)
+        last = end
+    out.append(orig[last:])
+    return "".join(out)
 
 
 # Rebuild the file block by block so ONLY the spawning providers change: every
@@ -641,8 +794,12 @@ for start, end in provider_members:
     block = text[start:end]
     out.append(text[last:start])
     if (start, end) in spawning_set:
-        block = rewrite_block(block)
-        rewritten.append(block)
+        block = rewrite_block(block, scan[start:end], mapping)
+        # The survivor check runs on the REWRITTEN block with its comments
+        # blanked: the original ports are gone from it, and a port mentioned in
+        # a comment was never a real endpoint (scanning the raw rewritten text
+        # reported every `:8082` in prose as a survivor).
+        rewritten.append((member_name(start), blank_comments(block)))
     out.append(block)
     last = end
 out.append(text[last:])
@@ -653,25 +810,32 @@ new = "".join(out)
 # endpoints. Scoped to those blocks — the deliberately preserved external
 # endpoints (ollama/comfyui) are not survivors, they are policy.
 remapped = set(mapping.values())
-survivors = set()
-for block in rewritten:
-    for m in LOCALPORT.finditer(block):
-        if int(m.group("port")) not in remapped:
-            survivors.add("%s:%s" % (m.group("host"), m.group("port")))
-    for m in SPAWNPORT.finditer(block):
-        p = m.group("quoted") or m.group("bare")
-        if int(p) not in remapped:
-            survivors.add("--port %s" % p)
+survivors = []
+for name, block_scan in rewritten:
+    for m in LOCALPORT.finditer(block_scan):
+        p = int(m.group("port"))
+        if not plausible_local(p, m.group("host") or ""):
+            continue
+        if p not in remapped:
+            survivors.append("%s: %s:%s" % (name, m.group("host"), m.group("port")))
+    for m in SPAWNPORT.finditer(block_scan):
+        p, _ = match_port(m)
+        if not plausible_spawn(p):
+            continue
+        if p not in remapped:
+            survivors.append("%s: --port %s" % (name, p))
 if survivors:
     print("ERROR: local endpoint(s) in a spawning provider survived the remap: "
-          "%s" % ", ".join(sorted(survivors)), file=sys.stderr)
+          "%s" % ", ".join(sorted(set(survivors))), file=sys.stderr)
     sys.exit(2)
 
 preserved = set()
 for start, end in provider_members:
     if (start, end) in spawning_set:
         continue
-    for m in LOCALPORT.finditer(text[start:end]):
+    for m in LOCALPORT.finditer(scan[start:end]):
+        if not plausible_local(int(m.group("port")), m.group("host") or ""):
+            continue
         preserved.add("%s:%s" % (m.group("host"), m.group("port")))
 if preserved:
     print("note: kept as-is (provider does not spawn): %s"
@@ -692,7 +856,7 @@ if [ -f "$REPO_ROOT/config/models.json5" ]; then
       log "    :${line% *} -> :${line#* }"
     done <"$PORT_MAP_FILE"
   else
-    die "port remap failed on the copied models config (see ERROR above) — refusing to run the sandbox daemon against the user's live runtime endpoints"
+    die "port remap failed on the copied models config (see ERROR above: a spawn-bearing provider's endpoint could not be pinned down, or a live literal survived) — refusing to run the sandbox daemon against the user's live runtime endpoints"
   fi
 else
   warn "config/models.json5 not found in repo; turns will SKIP unless a provider is configured"

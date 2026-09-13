@@ -67,20 +67,33 @@ root_entries() {
 # new-entry comparison even though a bare `go build` CLOBBERING it is the same
 # accident — and `git status` reports nothing at all for an ignored file that
 # changed. Only these known names are fingerprinted, so no other session's file
-# can make this fire. mtime granularity is one second: a rebuild of identical
-# source yields an identical size, so this catches the real case (a bare
-# `go build` of a package tree takes longer than a second) but not a same-second
-# rebuild, which no realistic Go build in this repo produces.
+# can make this fire.
+#
+# LIMITS, both reproduced in /tmp against this function:
+#   * a same-size, same-second clobber is NOT seen. mtime granularity is one
+#     second and a rebuild of identical source yields an identical size, so
+#     rewriting one of these binaries with the same byte count inside the same
+#     second leaves the snapshot byte-identical. This is a heuristic for the
+#     real case (a bare `go build` of a package tree takes longer than a
+#     second), not an exact change detector — the `-o /dev/null` builds above
+#     are what actually keep the tree clean;
+#   * the names are NOT emitted in the byte order the fixed-name list would give
+#     (`meept meept-daemon meept-lite llmdoc` is not sorted, and `*.test` is
+#     appended after it), while `comm -13` below requires sorted input. `sort`
+#     makes the comparison independent of the emission order (BSD comm
+#     diagnoses the disorder on stderr: "file 2 is not in sorted order").
 root_artifact_state() {
   local n
-  for n in meept meept-daemon meept-lite llmdoc; do
-    [ -e "$n" ] || continue
-    printf '%s %s %s\n' "$n" "$(wc -c <"$n" | tr -d ' ')" "$(date -r "$n" +%s 2>/dev/null || echo 0)"
-  done
-  for n in *.test; do
-    [ -e "$n" ] || continue
-    printf '%s %s %s\n' "$n" "$(wc -c <"$n" | tr -d ' ')" "$(date -r "$n" +%s 2>/dev/null || echo 0)"
-  done
+  {
+    for n in meept meept-daemon meept-lite llmdoc; do
+      [ -e "$n" ] || continue
+      printf '%s %s %s\n' "$n" "$(wc -c <"$n" | tr -d ' ')" "$(date -r "$n" +%s 2>/dev/null || echo 0)"
+    done
+    for n in *.test; do
+      [ -e "$n" ] || continue
+      printf '%s %s %s\n' "$n" "$(wc -c <"$n" | tr -d ' ')" "$(date -r "$n" +%s 2>/dev/null || echo 0)"
+    done
+  } | sort
 }
 ROOT_BEFORE="$(root_entries)"
 ARTIFACT_BEFORE="$(root_artifact_state)"
@@ -215,7 +228,12 @@ fi
 # — the F25 artifact class, hidden from `git status` by .gitignore.
 #
 # Fail only for names a BUILD can create: the root-level binaries .gitignore
-# hides (/meept, /meept-daemon, /meept-lite, /llmdoc) and `go test -c` outputs.
+# hides (/meept, /meept-daemon, /meept-lite, /llmdoc), `go test -c` outputs, and
+# any other root-level executable this module's own `package main` directories
+# can produce. That last class is why the old closed list was wrong: a bare
+# `go build ./cmd/gendoc` (no -o) writes /gendoc into the CWD, and cmd/gendoc,
+# cmd/artifact-demo and cmd/tmp-verify are NOT gitignored, so the old case
+# statement only warned about the very artifact this check exists for.
 # Every other new root-level entry is another session's file — coverage.out from
 # the documented `go test -coverprofile=coverage.out`, a scratch note — and is
 # reported without blocking. Deeper untracked paths never block either.
@@ -229,6 +247,24 @@ NEW_ROOT="$(comm -13 <(printf '%s\n' "$ROOT_BEFORE") <(printf '%s\n' "$ROOT_AFTE
 # written by this build just as surely as a new one: F25 twice over.
 CHANGED_ARTIFACTS="$(comm -13 <(printf '%s\n' "$ARTIFACT_BEFORE") <(printf '%s\n' "$ARTIFACT_AFTER") | awk '{print $1}' || true)"
 NEW_ROOT="$(printf '%s\n%s\n' "$NEW_ROOT" "$CHANGED_ARTIFACTS" | grep -v '^$' | sort -u || true)"
+
+# Names a bare `go build <pkg>` can drop into the repo root: the basename of
+# every `package main` directory in the module (cmd/gendoc -> ./gendoc,
+# tools/analyzers/selflock -> ./selflock). Derived rather than hardcoded, so a
+# new cmd/<name> is covered the day it lands. Only computed when a new root
+# entry actually needs classifying (the common case pays nothing); `</dev/null`
+# keeps a `go list` inside the read-from-heredoc loop from touching its stdin.
+BUILD_NAMES=""
+BUILD_NAMES_DONE=0
+build_artifact_names() {
+  [ "$BUILD_NAMES_DONE" = "1" ] && return 0
+  BUILD_NAMES_DONE=1
+  if command -v go >/dev/null 2>&1; then
+    BUILD_NAMES="$(go list -e -f '{{if eq .Name "main"}}{{.Dir}}{{end}}' ./... 2>/dev/null </dev/null \
+      | sed -e 's|.*/||' -e '/^$/d' | sort -u || true)"
+  fi
+}
+
 BLOCKED=""
 OTHER=""
 while IFS= read -r name; do
@@ -238,8 +274,15 @@ while IFS= read -r name; do
       BLOCKED="${BLOCKED}${name}
 " ;;
     *)
-      OTHER="${OTHER}${name}
-" ;;
+      build_artifact_names
+      if [ -n "$BUILD_NAMES" ] && printf '%s\n' "$BUILD_NAMES" | grep -Fxq "$name"; then
+        BLOCKED="${BLOCKED}${name}
+"
+      else
+        OTHER="${OTHER}${name}
+"
+      fi
+      ;;
   esac
 done <<EOF
 $NEW_ROOT
@@ -250,6 +293,7 @@ if [ -n "$BLOCKED" ]; then
   printf '%s' "$BLOCKED" | sed 's/^/  /'
   echo ""
   echo -e "${YELLOW}Build into /dev/null or a temp dir (never the repo root).${NC}"
+  echo -e "${YELLOW}A bare 'go build ./cmd/<dir>' writes ./<dir>; that is the class this blocks.${NC}"
   echo -e "${YELLOW}If another session created those files during this run, re-run the commit.${NC}"
   echo ""
   exit 1

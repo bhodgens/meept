@@ -74,9 +74,18 @@ PACKAGES=$(echo "$STAGED_GO_FILES" \
 #   nested-module|<reason>  separate Go module, not part of this one
 #   missing|<reason>        path no longer exists in the working tree
 #   nofiles|<reason>        no (non-test) Go files to analyze -> SKIP, not a
-#                           load failure
-#   broken|<reason>         any other load failure (conflicting package clause,
-#                           malformed go.mod, ...)
+#                           load failure (e.g. a directory holding only
+#                           _-prefixed files). DELIBERATE LOOSENING: the
+#                           pre-68b2338c gate classified this as `broken` and
+#                           exited 1 — reproduced in /tmp, where a staged
+#                           pkg/nofiles/_x.go failed this hook.
+#   broken|<reason>         the ONLY fail-closed verdict: `go list` exited
+#                           non-zero with an empty stdout (stderr carries the
+#                           reason), or {{.Error}} was non-empty and matched no
+#                           reason above (conflicting package clause, malformed
+#                           go.mod, ...). NEVER a syntax error or an unresolved
+#                           import: both give rc=0 with an EMPTY .Error, so they
+#                           are `ok` here and surface from staticcheck instead.
 go_list_state() {
   local pat="$1" err rc detail
   rc=0
