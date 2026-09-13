@@ -1,8 +1,23 @@
 # Wave-5 Confusion Analysis — where the 13-intent centroid leaks
 
-Corpus: 389 classified cases (358 gold + 31 base overlap dedup).
+Corpus: 389 classified cases, composition computed from the committed
+loader `H.load_cases()` (not hand-typed): base 139 + adversarial 250 =
+389; non-OOD 361 / OOD 28; 0 duplicate texts. (An earlier revision of
+this line said "358 gold + 31 base overlap dedup" — wrong: 358 was the
+pre-wave-5 total and there is no 31-case dedup block. Corrected
+2026-09-12.)
 Head: centroid margin 0.030 (champion). Analysis over ALL classified
 rows (not per-fold): 61 wrong routes total.
+
+> **IN-SAMPLE CAVEAT (F36).** Every case is scored with class centroids
+> that INCLUDE that case (line 24 of `wave5_confusion.py` builds each
+> class mean from all its cases; line 33 scores the same vectors), so
+> each case's own-class similarity is inflated and the wrong-route
+> margins are optimistic. This is NOT the campaign's per-fold protocol
+> (5-fold with the tracked fold cache) used for every other number, so
+> the "gate is at/near its optimum" conclusion below is UNVALIDATED
+> until the analysis is re-run per fold (score each case with its test
+> fold's centroids).
 
 ## Confusion structure (top pairs)
 
@@ -30,10 +45,13 @@ leak is the 6 wrong routes with margin >= 0.030:
 
 ## Implications
 
-1. **Margin 0.030 is doing its job.** Raising it further buys almost
-   nothing (the 6 leaks above it are few); lowering it imports ~55
-   additional wrong routes into direct-routing. The gate is at/near
-   its optimum for this corpus.
+1. **Margin 0.030 is doing its job (IN-SAMPLE claim — see caveat
+   above).** Raising it further buys almost nothing (the 6 leaks above
+   it are few); lowering it imports ~55 additional wrong routes into
+   direct-routing. The gate is at/near its optimum for this corpus —
+   but this rests on margins computed WITH each case inside its own
+   class centroid, so it is unvalidated for the no-change decision
+   until re-run per fold.
 2. **The residual confusion is semantic, not geometric.** code/
    quickplan/debug/analyze share vocabulary by nature ("fix", 
    "implement", "correct"). Centroid distance cannot separate intents
@@ -51,7 +69,9 @@ leak is the 6 wrong routes with margin >= 0.030:
 
 ## Action items
 
-- None for the gate. Margin stays 0.030.
+- None for the gate. Margin stays 0.030 (in-sample optimum claim, see
+  caveat above; a per-fold re-run is the precondition for treating this
+  as measured).
 - Priority stays with the outcome loop: real correction data will show
   which of the 55 gated near-misses the chain gets wrong — those
   become corpus anchors with evidence, replacing guesswork.

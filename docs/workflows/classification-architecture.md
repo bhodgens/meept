@@ -169,7 +169,13 @@ centroid's pick. Disagreement falls to the LLM chain. The gold replay
 claimed 87.35% (vs 84.56% without the veto), but that decomposes to
 **2 routes out of 48** plus chain credit — a 2-case effective sample
 that cannot distinguish a perfect router from a coin-flip (see
-`tools/classifier-eval/results/alt-methods-correction.md`). Cost when
+`tools/classifier-eval/results/alt-methods-correction.md`). The
+acceptance record carries this row as **UNVALIDATED, not PASS**: the
+only committed producer was a double-confidence-only script, and the
+run needs the untracked replay corpus plus a live :8090 embed server
+(`results/m4-gold-acceptance.md`, CORRECTIONS 1-2). The acceptance
+script now refuses PASS/FAIL when the routed sample is below its
+coverage floor (`MIN_ROUTED = 20`). Cost when
 adopted: ~2 MB model file, ~0.4ms per message, no new service.
 Status: **code SHIPPED** (`internal/agent/tfidf_veto.go` +
 `scripts/build_tfidf_veto.py`; missing model file = veto disabled =
@@ -203,17 +209,32 @@ hashes only — safe to track), `nearmiss.json` (Door-1 margins in the
 band, default 0.025–0.035, routed + abstained), `views.sql`, and
 `sheet.local.md` — the user-message text recovered from
 `~/.hermes/sessions/session_*.json` by session id + nearest timestamp.
-The directory is gitignored BEFORE any text is written: verbatim
-message text never enters git (design.md S4); only hash-bearing files
-are trackable.
+The harvest OUTPUT directory is gitignored BEFORE any text is written,
+so recovered text stays local; only hash-bearing files are trackable
+(design.md S4).
+
+**Corrected invariant (2026-09-12 audit wave).** An earlier revision of
+this section asserted "verbatim message text never enters git". That was
+false and is withdrawn: prompts harvested from live sessions and
+adjudicated into the committed
+`testdata/eval/classifier-adversarial-corpus.json5` ARE verbatim user
+messages, committed as text. They are labelled `source: "live-session"`
+(an earlier wave stamped several of them `"hermes-inspired"`, which
+understated real private traffic — those rows were relabelled). Treat
+the committed corpus as containing private traffic: do not publish it,
+and screen every addition.
 
 Accepted candidates flow into the corpus with provenance
-`added_in: "harvest-YYYYMMDD"`, `source: "live-session"`, then pass
-the dedup guard (cosine > 0.95 against the existing corpus ⇒ reject,
-the `iter7_harvest.py` pattern) before
-`scripts/build_prefilter_centroids.py` rebuilds the Door-1 index.
-`--dry-run` prints counts plus a hash-only candidate preview and
-writes nothing; exit 0 always (measurement-tool convention).
+`added_in: "harvest-YYYYMMDD"`, `source: "live-session"`, then pass TWO
+disjointness guards before `scripts/build_prefilter_centroids.py`
+rebuilds the Door-1 index: (1) cosine > 0.95 against the existing corpus
+⇒ reject (the `iter7_harvest.py` pattern); and (2) exact match or cosine
+> 0.95 against the adjudicated replay ruler (`replay-gold.local.json5`)
+⇒ reject, so a new corpus row cannot leak into the very ruler that
+scores the models (train-on-test guard; `eval_harness.replay_disjointness`,
+also enforced inside `m4_gold_acceptance.py` — it refuses to score a
+leaked case). `--dry-run` prints counts plus a hash-only candidate
+preview and writes nothing; exit 0 always (measurement-tool convention).
 
 ## Router lanes come from the routing table (single source of truth)
 

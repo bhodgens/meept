@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
-"""Wave-5 confusion analysis: what did the 10 wrong routes at m=0.030
-have in common, and which fix (corpus anchor vs gate change) fits each?
-Runs the same replay as iter7_sweep but prints the full confusion
-matrix over the NEW 13-intent corpus (358 cases)."""
+"""Wave-5 confusion analysis: what did the wrong routes at m=0.030 have in
+common, and which fix (corpus anchor vs gate change) fits each?
+Runs the same replay as iter7_sweep but prints the full confusion matrix
+over the current 13-intent corpus.
+
+IN-SAMPLE CAVEAT (F36): this analysis scores every case with class
+centroids that include that case (no fold split), so each case's own-class
+similarity is inflated and the wrong-route margins are optimistic. It is
+NOT the campaign's per-fold protocol (eval_harness.py 5-fold with the
+tracked fold-assignment.json) used for every other number, so the "the
+gate is at/near its optimum" conclusion it supports is unvalidated for
+the no-change decision until re-run per fold.
+"""
 import sys
 sys.path.insert(0, ".")
 import numpy as np
@@ -11,7 +20,12 @@ from collections import Counter, defaultdict
 
 cases_b, cases_a = H.load_cases()
 gold = cases_b + cases_a
-print(f"corpus: {len(gold)}")
+# Composition from the committed loader -- the campaign's only count
+# source (F35: 389 = 250 adversarial + 139 base, 0 duplicate texts).
+n_ood = sum(1 for c in cases_a if c.ood)
+print(f"corpus: {len(gold)} "
+      f"(base {len(cases_b)} + adversarial {len(cases_a)}; "
+      f"non-OOD {len(gold) - n_ood}, OOD {n_ood})")
 
 QS = {"url": "http://127.0.0.1:8090/v1", "model": "qwen3-embedding", "instruction": ""}
 emb = H.Embedder(QS["url"], QS["model"], "")

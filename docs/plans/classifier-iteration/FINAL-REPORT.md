@@ -11,17 +11,18 @@ Twenty measured iterations took the meept intent prefilter from an
 irreproducible 14.7%-coverage baseline to a validated three-door
 routing architecture, then produced two shipped features beyond the
 original scope (QuickPlan mode, capability-aware allotment) and one
-acceptance-passing wiring candidate (tfidf-veto centroid, 87.35% on
-the adjudicated gold replay).
+wiring candidate for which the acceptance run claimed 87.35% on the
+adjudicated gold replay — a verdict now recorded as UNVALIDATED (see
+CORRECTIONS).
 
 ## Headline numbers
 
 | metric | value |
 |---|---|
-| gold-replay acceptance | **87.35% PASS** (tfidf-veto policy; gate 86.8%) |
-| synthetic E2E (3-stage cascade, iter 16) | 92.8% (bar was 91.78%) |
+| gold-replay acceptance | **87.35% UNVALIDATED** (tfidf-veto policy; gate 86.8%) — see CORRECTIONS 1 |
+| synthetic E2E (3-stage cascade, iter 16) | 92.8% WITHDRAWN → 91.44% FAIL — see CORRECTIONS 2 |
 | chain-only baseline | 86.8% |
-| corpus | 139 base + 199 adversarial = 338 gold cases |
+| corpus | 139 base + 250 adversarial = 389 gold cases (361 non-OOD / 28 OOD) — see CORRECTIONS 3 |
 | adjudicated real-traffic replay | 48 cases, 6 normative taxonomy rules |
 | taxonomy | 13 intents (quickplan added at iter 19) |
 
@@ -31,16 +32,16 @@ the adjudicated gold replay).
   adversarial corpus, centroid-margin head adopted over k-NN
   unanimity; zero wrong routes at m=0.030.
 - **M2 (iters 10-20)**: harvest waves; ModernBERT raw REJECTED (6%
-  coverage); micro-guards REJECTED; 3-stage cascade CLEARS bar
-  (92.8%); P-constraint reinterpretation parked → resolved as
-  per-stage floors.
+  coverage); micro-guards REJECTED; 3-stage cascade 92.8% (later
+  withdrawn → 91.44% FAIL; see CORRECTIONS 2); P-constraint
+  reinterpretation parked → resolved as per-stage floors.
 - **M3 (iters 13-15)**: ModernBERT fine-tune diverged (50× head-lr
   underdose — researched, fixed, retrained to 91.45% E2E; under the
   91.78% bar; Stage-0.5 benched, not dead).
 - **M4**: Hermes-transcript silver harvest → user adjudication (48
   gold, 6 rules) → quickplan class → architecture ceiling finding →
   QuickPlan tree (4 leaves, SHIPPED) → e2e smokes → acceptance run
-  (tfidf-veto PASSES) → this report.
+  (tfidf-veto 87.35% UNVALIDATED — see CORRECTIONS 1) → this report.
 
 ## Key findings (the durable knowledge)
 
@@ -86,7 +87,7 @@ alt_methods_sweep.py, m4_gold_acceptance.py, adjudication workflow.
 | run | policy | result |
 |---|---|---|
 | 1 | double-confidence | 84.56% FAIL |
-| 2 | tfidf-veto | **87.35% PASS** |
+| 2 | tfidf-veto | **UNVALIDATED** (87.35% cannot be re-derived; see CORRECTIONS 1) |
 
 Record: tools/classifier-eval/results/m4-gold-acceptance.md
 
@@ -96,9 +97,11 @@ Record: tools/classifier-eval/results/m4-gold-acceptance.md
    + compliant): L1 persist+privacy (RAW input_summary removal —
    pre-existing gap) IN FLIGHT; L2 margin capture; L3 outcome capture;
    L4 harvest+dashboards.
-2. **tfidf-veto leaf**: PROMOTED by the acceptance run — the
-   acceptance-passing configuration must actually ship in the Go gate.
-   Blocked on outcome-loop L1 (disjoint files, could parallelize).
+2. **tfidf-veto leaf**: the acceptance run named it the candidate, but
+   its verdict is UNVALIDATED and its routed sample is 2 cases (see
+   CORRECTIONS 1/2) — re-measure on a larger harvested corpus before
+   wiring the Go gate. The shipped Go gate and the measured policy are
+   also still different programs (kNN unanimity vs centroid+veto).
 3. **Centroid-margin head wiring**: subsumed by the tfidf-veto leaf
    (the veto IS the margin head plus the agreement check).
 4. **Stage-0.5 revisit**: only after the outcome loop produces real
@@ -124,5 +127,72 @@ Record: tools/classifier-eval/results/m4-gold-acceptance.md
 - ModernBERT-base weights: /Volumes/LLMs/answerdotai/ (for the benched
   Stage-0.5)
 - All campaign artifacts git-tracked except untracked-by-design local
-  corpora (replay-gold, adjudication sheet) — verbatim text never
-  enters git
+  corpora (replay-gold, adjudication sheet). NOTE: the earlier claim
+  that "verbatim text never enters git" was **false** and is withdrawn
+  — see CORRECTIONS 4.
+
+## CORRECTIONS (2026-09-12 audit wave)
+
+Appended in the campaign's append-only style: the sections above are
+left as written; the entries below are the corrections of record.
+
+### 1. The 87.35% acceptance verdict is UNVALIDATED (was: PASS)
+
+No committed script produced the 87.35% row. The only committed
+acceptance artifact is `tools/classifier-eval/results/m4-gold-acceptance.json`
+= `{"policy":"double-confidence", "a_routes":7, "a_correct":5, "chain":41,
+"system_accuracy":0.8456, "verdict":"FAIL"}`, written by a script that
+implemented ONLY the double-confidence policy. The veto policy's only
+tool (`alt_methods_sweep.py`) prints to stdout, writes no artifact, and
+needs the UNTRACKED replay corpus plus a live embed server on :8090.
+The veto verdict is therefore recorded as UNVALIDATED in the acceptance
+record, in `internal/agent/tfidf_veto.go`, and in
+`docs/workflows/classification-architecture.md`. `m4_gold_acceptance.py`
+now runs both policies and writes a write-once per-policy artifact.
+
+### 2. The iter-16 92.8% "CLEARS BAR" is WITHDRAWN → 91.44% FAIL
+
+`tools/classifier-eval/results/iter-16-corrected/report.md:44-56`
+supersedes the iter-16 verdict: it records a deterministic recompute of
+**91.44% FAIL** — below the pre-registered 91.78% bar — and states the
+original "clears bar" claim is withdrawn. The headline tables above are
+corrected to point at this.
+
+> Note (2026-09-12): the deterministic formula PRINTED in
+> `iter-16-corrected/report.md` and in the ITERATION-LOG CORRECTION block
+> — `(87+47+0.868×109)/274` — evaluates to 83.44%, not the 91.44% it is
+> labelled with. The discrepancy is in the campaign record and is
+> reported upward, not silently re-derived here; the number cited above
+> is the report's own recorded value.
+
+### 3. The corpus row was wrong (338 → 389)
+
+Recomputed from the committed loader
+(`H.load_cases()`; command in the audit record):
+base 139 + adversarial 250 = **389** (non-OOD 361, OOD 28; 0 duplicate
+texts). The old "139 base + 199 adversarial = 338" row was two waves
+stale.
+
+### 4. "verbatim text never enters git" was false
+
+The gitignored harvest output directory and the untracked replay keep
+verbatim text local, but harvested rows adjudicated into the committed
+`testdata/eval/classifier-adversarial-corpus.json5` are byte-identical
+user messages from `~/.hermes/sessions`. Eight such rows
+(`h18-planexec-001`, `h20-002`, `h20-003`, `h20-004`, `h20-008`,
+`h20-013`, `h20-019`, `h20-020`) were committed with
+`source: "hermes-inspired"`; they are now labelled `source:
+"live-session"`. See `docs/workflows/classification-architecture.md`
+(harvest section) for the corrected invariant and the harvest-time
+overlap guard.
+
+### 5. Acceptance sensitivity (one route decides the verdict)
+
+At n=48 with 41 chain-destined cases credited at the hard-coded
+`CHAIN = 0.868`, the veto policy's 87.35% is `(2 + 46×0.868)/48`: two
+correct routes plus 95.8% chain credit. One flipped route gives
+`(1 + 47×0.868)/48 = 85.27%`, below the 86.8% gate. The acceptance
+script now enforces a coverage floor (`MIN_ROUTED = 20`) and reports
+`INSUFFICIENT_COVERAGE` instead of PASS/FAIL below it; the observed
+values (87.35 / 84.56) are unchanged.
+

@@ -162,7 +162,7 @@
     //   doc-writing producing a tracked repo artifact = code, chat-bound prose = report;
     //   multi-part: dominant execution verb wins; truly balanced = compound abstain (ood).
     // ---- plan-execution (existing plan -> code, NOT plan) ----
-    { id: "h18-planexec-001", input: "implement the plan using subagents", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "iteration-18", source: "hermes-inspired", note: "re-labeled per adjudication record rule #3 (tools/classifier-eval/results/adjudication-record.md): execution WITH orchestration hints (subagents) = quickplan, matching the adjudicated replay gold for this verbatim text; iter-18's plan-execution=code convention covers bare execution verbs only" },
+    { id: "h18-planexec-001", input: "implement the plan using subagents", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "iteration-18", source: "live-session", note: "re-labeled per adjudication record rule #3 (tools/classifier-eval/results/adjudication-record.md): execution WITH orchestration hints (subagents) = quickplan, matching the adjudicated replay gold for this verbatim text; iter-18's plan-execution=code convention covers bare execution verbs only" },
     { id: "h18-planexec-002", input: "execute the remaining tasks from plan.md", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
     { id: "h18-planexec-003", input: "dispatch the next wave of the tree", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired" },
     { id: "h18-planexec-004", input: "continue with leaf 3", expected_intent: "code", expected_agent: "coder", added_in: "iteration-18", source: "hermes-inspired", note: "explicit plan-tree leaf reference = execution verb, not bare continue/chat" },
@@ -266,25 +266,29 @@
     { id: "h20-qp-032", input: "why does the compiler reject the type cast?", expected_intent: "debug", expected_agent: "debugger", added_in: "iteration-20", source: "hermes-inspired" },
 
     // ---- harvest wave 5: novel prompt shapes from Hermes logs (dedup-guarded) ----
-    { id: "h20-002", input: "continue where you left off", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "hermes-inspired" },
-    { id: "h20-003", input: "did you finish the last task?", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "hermes-inspired" },
-    { id: "h20-004", input: "continue implementing with subagents", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "hermes-inspired" },
+    // Rows byte-identical to a live ~/.hermes/sessions user message carry
+    // source: "live-session". 2026-09-12 audit wave: h20-002/003/004/008/013/019/020
+    // and h18-planexec-001 were relabelled from "hermes-inspired", which understated
+    // real private traffic. Treat this corpus as private; do not publish it.
+    { id: "h20-002", input: "continue where you left off", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "live-session" },
+    { id: "h20-003", input: "did you finish the last task?", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "live-session" },
+    { id: "h20-004", input: "continue implementing with subagents", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "live-session" },
     { id: "h20-005", input: "keep going with the remaining items", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "hermes-inspired" },
     { id: "h20-006", input: "looks like there's still a problem - you made changes to config.json and it should've been done to config.jsonc", expected_intent: "debug", expected_agent: "debugger", added_in: "harvest-20260910", source: "hermes-inspired" },
     { id: "h20-007", input: "this used to work, but recent changes broke it", expected_intent: "debug", expected_agent: "debugger", added_in: "harvest-20260910", source: "hermes-inspired" },
-    { id: "h20-008", input: "the output report.md is not properly formatted markdown and is unreadable. fix it.", expected_intent: "debug", expected_agent: "debugger", added_in: "harvest-20260910", source: "hermes-inspired" },
+    { id: "h20-008", input: "the output report.md is not properly formatted markdown and is unreadable. fix it.", expected_intent: "debug", expected_agent: "debugger", added_in: "harvest-20260910", source: "live-session" },
     { id: "h20-009", input: "you missed several entries - all of the information should have been extracted for each file", expected_intent: "debug", expected_agent: "debugger", added_in: "harvest-20260910", source: "hermes-inspired" },
     { id: "h20-010", input: "1) fix the layout 2) fix the header 3) ssl should be default 4) check the certs", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "hermes-inspired" },
     { id: "h20-011", input: "1) yes we'll need additional accounts 2) what's the benefit of one vs the other? 3) unclear on the dashboard", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "hermes-inspired" },
     { id: "h20-012", input: "for problem 1, use the recommended fix. For 2, use a combination of options A and B. Also explain the test.", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "hermes-inspired" },
-    { id: "h20-013", input: "use more subagents", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "hermes-inspired" },
+    { id: "h20-013", input: "use more subagents", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "live-session" },
     { id: "h20-014", input: "use a default global fallback for all agents", expected_intent: "quickplan", expected_agent: "orchestrator", added_in: "harvest-20260910", source: "hermes-inspired" },
     { id: "h20-015", input: "create a resume tailored to this job posting and save it to 2026/: https://careers.example.com/jobs/5813", expected_intent: "code", expected_agent: "coder", added_in: "harvest-20260910", source: "hermes-inspired" },
     { id: "h20-016", input: "install and configure the tool by following the instructions here: https://raw.githubusercontent.com/example/readme.md", expected_intent: "code", expected_agent: "coder", added_in: "harvest-20260910", source: "hermes-inspired" },
     { id: "h20-017", input: "there is data under original-data, this data needs to be converted to csv format. for each file with multiple sheets, convert each sheet to a separate csv", expected_intent: "code", expected_agent: "coder", added_in: "harvest-20260910", source: "hermes-inspired" },
     { id: "h20-018", input: "the master data json is now too difficult to edit manually. we need an additional abstraction layer", expected_intent: "code", expected_agent: "coder", added_in: "harvest-20260910", source: "hermes-inspired" },
-    { id: "h20-019", input: "use the colors of the german flag for the site theme", expected_intent: "code", expected_agent: "coder", added_in: "harvest-20260910", source: "hermes-inspired" },
-    { id: "h20-020", input: "can we make the font used for technical skills smaller?", expected_intent: "code", expected_agent: "coder", added_in: "harvest-20260910", source: "hermes-inspired" },
+    { id: "h20-019", input: "use the colors of the german flag for the site theme", expected_intent: "code", expected_agent: "coder", added_in: "harvest-20260910", source: "live-session" },
+    { id: "h20-020", input: "can we make the font used for technical skills smaller?", expected_intent: "code", expected_agent: "coder", added_in: "harvest-20260910", source: "live-session" },
     { id: "h20-021", input: "the format doesn't match the others - check whether it uses the schema fully and correctly, including fonts", expected_intent: "review", expected_agent: "coder", added_in: "harvest-20260910", source: "hermes-inspired" },
     // ---- failure class 8: long inputs, intent appears late ----
     { id: "long-001", input: "I have been digging through this codebase since Tuesday, tried everything the team suggested, re-read the docs twice, and I still cannot figure out for the life of me why the websocket connection drops exactly every five minutes, so please debug it", expected_intent: "debug", expected_agent: "debugger", added_in: "iteration-2", source: "synthetic" },

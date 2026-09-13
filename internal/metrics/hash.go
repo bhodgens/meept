@@ -1,8 +1,9 @@
 // Salt management for dispatch_log input hashing (classifier-observability
 // design S4): a per-install random salt + salt id, generated once, stored
-// next to metrics.db with 0600 perms. The salt id is mixed into every
-// input_hash so cross-install dictionary attacks fail, and a future salt
-// rotation can stay compatible with historical rows via the id.
+// next to metrics.db with 0600 perms. The salt ID is mixed into every
+// input_hash (see HashInput) so cross-install dictionary attacks fail;
+// the 32 salt bytes are generated and rotated alongside the id but are
+// not currently read by the derivation.
 package metrics
 
 import (
@@ -30,17 +31,23 @@ const (
 	classifierSaltIDHexLen = 16
 )
 
-// HashInput derives the salted dispatch input hash persisted in
+// HashInput derives the dispatch input hash persisted in
 // dispatch_log.input_hash (design S4):
 //
 //	hex(SHA-256(saltID || 0x00 || message))[:16]
 //
-// saltID is the per-install 16-hex-char id from LoadOrCreateSalt; it keys
-// the hash so identical prompts across installs (or after a future salt
-// rotation) never collide. The salt bytes are part of the signature for
-// forward compatibility: a future keyed derivation changes only this
-// function, not its call sites. Storing the first 16 hex chars is
-// sufficient for dedup/join at campaign corpus sizes.
+// saltID is the per-install 16-hex-char id from LoadOrCreateSalt; it is
+// the ENTIRE hash key. The raw salt bytes are neither read nor mixed
+// here: identical prompts on the same install (or after rotating the
+// salt file without changing saltID) deliberately collide, which is
+// what cross-install dedup/join relies on. The 32 salt bytes are held
+// for a future keyed derivation — rotating them does NOT invalidate
+// historical hashes — and the `salt` parameter is accepted only so
+// every call site already holds the material a future versioned
+// derivation would need. Changing the derivation must version the hash
+// prefix (new saltID), never silently re-key existing rows. Storing the
+// first 16 hex chars is sufficient for dedup/join at campaign corpus
+// sizes.
 func HashInput(saltID string, salt []byte, message string) string {
 	h := sha256.New()
 	h.Write([]byte(saltID))

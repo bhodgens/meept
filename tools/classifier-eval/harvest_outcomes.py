@@ -67,9 +67,22 @@ WHERE outcome != 'pending' AND classifier_method != '' AND session_id != ''
 GROUP BY session_id;
 
 -- Door-1 margin histogram, CASE buckets 0.00-0.10 in 0.01 steps plus a
--- >=0.10 catch-all, split by verdict (routed / abstain / suppressed).
--- Verdict is reconstructed: margin IS NOT NULL marks a Door-1 observation;
--- classifier_method = 'embedding_prefilter' marks the routed subset.
+-- >=0.10 catch-all, split by verdict (routed / abstain).
+-- Verdict is RECONSTRUCTED from what the row stores: margin IS NOT NULL
+-- marks a Door-1 observation; classifier_method = 'embedding_prefilter'
+-- marks the routed subset; every other row with a margin is an abstain.
+-- There is deliberately NO 'suppressed' category. Suppression (tfidf-veto
+-- disagreement, quickplan cue guard, H6 gate) returns nil from the
+-- prefilter and the row is persisted with the chain's method and no
+-- verdict, so a suppressed row is indistinguishable from an ordinary
+-- abstain at the DB layer: internal/agent/embedding_prefilter.go:448-452
+-- and :466-471 emit PrefilterVerdict{Suppressed:true}, but
+-- internal/agent/dispatcher.go:3564-3589 persists only v.Margin -- the
+-- flag is dropped. A 'suppressed' bucket would be structurally empty, so
+-- it is not offered (F27). Making it real means persisting the verdict:
+-- add a prefilter_verdict column to dispatch_log and write it from the
+-- stashed PrefilterVerdict at dispatcher.go:3565-3589 (that write site is
+-- dispatcher.go, not internal/metrics).
 CREATE VIEW IF NOT EXISTS v_margin_hist AS
 SELECT
     CASE
@@ -88,8 +101,6 @@ SELECT
     CASE
         WHEN classifier_method = 'embedding_prefilter'
              AND intent_type != ''                    THEN 'routed'
-        WHEN classifier_method = 'embedding_prefilter'
-             AND intent_type = ''                     THEN 'suppressed'
         ELSE 'abstain'
     END                                               AS verdict,
     COUNT(*)                                          AS n
@@ -99,6 +110,13 @@ GROUP BY margin_bucket, verdict
 ORDER BY margin_bucket, verdict;
 
 -- Fallback traffic per day (routing miss rate over time).
+-- classifier_method = 'fallback' is written by exactly one production
+-- path: classifyIntent's Step-5 final fallback, whose Intent carries
+-- Method: "fallback" (internal/agent/dispatcher.go:1431-1448), flowing
+-- through DispatchResult.Intent.Method into recordDispatch (:3496, :3579).
+-- Sibling miss paths write distinct methods ("heuristic_fallback",
+-- "llm_empty_fallback_chat"), so this counts only the terminal
+-- all-classifiers-failed fallback -- it is not structurally empty.
 CREATE VIEW IF NOT EXISTS v_fallback_trend AS
 SELECT
     substr(timestamp, 1, 10)                          AS day,
@@ -161,11 +179,13 @@ def q_nearmiss(conn: sqlite3.Connection, since: str,
                         AND intent_type != '' THEN intent_type
                    ELSE ''
                END AS asserted_intent,
+               -- No 'suppressed' verdict here: the persisted row drops the
+               -- PrefilterVerdict.Suppressed flag, so a suppressed row is
+               -- indistinguishable from an abstain (see the v_margin_hist
+               -- comment in VIEWS_SQL).
                CASE
                    WHEN classifier_method = 'embedding_prefilter'
                         AND intent_type != '' THEN 'routed'
-                   WHEN classifier_method = 'embedding_prefilter'
-                        AND intent_type = '' THEN 'suppressed'
                    ELSE 'abstain'
                END AS verdict
         FROM dispatch_log

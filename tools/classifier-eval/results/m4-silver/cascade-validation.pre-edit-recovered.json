@@ -1,0 +1,37 @@
+{
+ "silver_n": 48,
+ "stageA": {
+  "routes": 11,
+  "correct": 8,
+  "precision": 0.727
+ },
+ "stageB": {
+  "routes": 4,
+  "correct": 4,
+  "precision": 1.0
+ },
+ "stageC_chain": 33,
+ "expected_system_accuracy": 0.8468,
+ "tau": 0.147,
+ "misses": [
+  [
+   "A",
+   "2c0434047ecad05e",
+   "code",
+   "plan"
+  ],
+  [
+   "A",
+   "0054b8eb113a5ee4",
+   "code",
+   "platform"
+  ],
+  [
+   "A",
+   "338cb3b2e9ffa8c4",
+   "code",
+   "plan"
+  ]
+ ],
+ "note": "input text replaced with case_key (sha256[:16]) in history (20260917 decision 1b)"
+}

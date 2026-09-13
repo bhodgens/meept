@@ -12,9 +12,18 @@ import (
 // logistic classifier trained on the gold corpus
 // (scripts/build_tfidf_veto.py). When both it and the centroid head
 // pick the same intent, Door 1 routes; disagreement falls to the LLM
-// chain. Measured on the adjudicated gold replay: 87.35% system
-// accuracy vs 84.56% without the veto — above the 86.8% chain-only
-// floor (tools/classifier-eval/results/m4-gold-acceptance.md).
+// chain.
+//
+// ACCEPTANCE STATUS: UNVALIDATED. The 87.35% system accuracy this type
+// is cited for (vs 84.56% without the veto) came from an uncommitted
+// stdout-only sweep; it decomposes to 2 routed cases out of 48, so
+// 95.8% of the score is chain credit at the hard-coded 0.868 floor and
+// the result is one Bernoulli draw (a single flipped route scores
+// 85.27%, below the 86.8% chain floor). That routed count is far below
+// the acceptance script's coverage floor, so no PASS verdict can be
+// reported for it. See tools/classifier-eval/results/m4-gold-acceptance.md
+// and alt-methods-correction.md; re-measure on a larger adjudicated
+// corpus before trusting the effect.
 //
 // Cost: ~0.4ms/message, ~2MB model, no network. Everything here is
 // stdlib — the training script is python (sklearn-equivalent math

@@ -19,6 +19,12 @@ Labels follow the adjudication rules (outcome-loop record):
   external-url-task -> code (artifact-producing work, source is a URL)
   data-conversion -> code
   style-preference -> code (tracked artifact adjustment)
+
+Kept rows are stamped source "live-session" (they are harvested verbatim
+from the user's Hermes transcripts). Two disjointness guards reject a
+candidate: cosine > 0.95 vs the existing gold corpus, and exact-match or
+cosine > 0.95 vs the adjudicated replay ruler (so the ruler stays
+disjoint from the corpus that fits the models).
 """
 import hashlib
 import json
@@ -76,9 +82,17 @@ CASES = [
     for i, (text, intent, agent) in enumerate(CASES, 1)
 ]
 
-# dedup guard: cosine vs existing gold via the embed server
+# dedup guards. Two disjointness checks run before a candidate is kept:
+#   1. vs the existing gold corpus (cosine > 0.95 => reject) -- the
+#      iter7_harvest.py pattern;
+#   2. vs the adjudicated replay ruler (exact match or cosine > 0.95 =>
+#      reject). Without (2) a harvested row silently becomes a training
+#      case for the very ruler that scores it (train-on-test, F20).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_harness as H
+
+REPLAY = Path(__file__).resolve().parent / "replay-gold.local.json5"
+SIM_THRESHOLD = 0.95
 
 cases_b, cases_a = H.load_cases()
 gold = cases_b + cases_a
@@ -88,25 +102,46 @@ emb.embed_keys([c.text for c in gold], gkeys)
 V = emb.vectors(gkeys)
 import numpy as np
 
+# ruler guard vectors (untracked replay; absent is fine -- check skipped)
+replay_texts, RV = [], None
+if REPLAY.exists():
+    replay_texts = [r["input"] for r in json.loads(
+        "[" + ",".join(re.findall(r"\{\s*\"input\".*?\}",
+                                  REPLAY.read_text(), re.S)) + "]")]
+    rkeys = [H.case_key(t) for t in replay_texts]
+    emb.embed_keys(replay_texts, rkeys)
+    RV = emb.vectors(rkeys)
+
 kept, rejected = [], []
 for cid, text, intent, agent in CASES:
     k = H.case_key(text)
     emb.embed_keys([text], [k])
     v = emb.vectors([k])[0]
-    sims = V @ v
-    max_sim = float(np.max(sims))
-    if max_sim > 0.95:
-        rejected.append((cid, text[:50], round(max_sim, 3)))
-    else:
-        kept.append({
-            "id": cid, "input": text, "expected_intent": intent,
-            "expected_agent": agent, "added_in": "harvest-20260910",
-            "source": "hermes-inspired",
-        })
+    max_sim = float(np.max(V @ v))
+    if max_sim > SIM_THRESHOLD:
+        rejected.append((cid, text[:50], round(max_sim, 3), "corpus-dedup"))
+        continue
+    if replay_texts:
+        if k in {H.case_key(t) for t in replay_texts}:
+            rejected.append((cid, text[:50], 1.0, "ruler-exact"))
+            continue
+        rmax = float(np.max(RV @ v))
+        if rmax > SIM_THRESHOLD:
+            rejected.append((cid, text[:50], round(rmax, 3), "ruler-similarity"))
+            continue
+    kept.append({
+        "id": cid, "input": text, "expected_intent": intent,
+        "expected_agent": agent, "added_in": "harvest-20260910",
+        # live-session: harvested verbatim from ~/.hermes/sessions (the
+        # only truthful provenance -- "hermes-inspired" understated real
+        # private traffic; see docs/workflows/classification-architecture.md).
+        "source": "live-session",
+    })
 
-print(f"kept: {len(kept)}  rejected by dedup guard: {len(rejected)}")
-for cid, t, s in rejected:
-    print(f"  REJECT {cid} cos={s} {t}")
+print(f"kept: {len(kept)}  rejected by dedup/ruler guard: {len(rejected)}"
+      f"  ruler cases: {len(replay_texts)}")
+for cid, t, s, why in rejected:
+    print(f"  REJECT {cid} cos={s} [{why}] {t}")
 
 if "--write" in sys.argv and kept:
     corpus = Path("/Users/caimlas/git/meept/testdata/eval/classifier-adversarial-corpus.json5")

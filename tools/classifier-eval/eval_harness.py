@@ -158,6 +158,68 @@ def case_key(text: str) -> str:
     return hashlib.sha256(text.strip().encode()).hexdigest()[:16]
 
 
+def replay_disjointness(replay_texts, corpus_cases, *,
+                        corpus_vectors=None, replay_vectors=None,
+                        sim_threshold: float = 0.95) -> list[dict]:
+    """Train-on-test guard for the acceptance ruler.
+
+    The models are fit on ``corpus_cases`` (base + adversarial); the ruler
+    is the adjudicated replay. Any replay case that also appears in the
+    fitting corpus leaks, so its score is memorisation, not measurement.
+
+    Exact match (case_key) is always checked and is a hard failure.
+    When both vector sets are supplied the cosine is also checked: a
+    replay case within ``sim_threshold`` of any corpus case is a leak.
+
+    Returns a list of leak records:
+      {"replay_index", "replay_text", "corpus_case_id", "reason",
+       "similarity"} -- empty list means the ruler is disjoint.
+    """
+    by_key: dict[str, list] = {}
+    for c in corpus_cases:
+        by_key.setdefault(case_key(c.text), []).append(c)
+    leaks: list[dict] = []
+    seen: set[tuple] = set()
+    for i, t in enumerate(replay_texts):
+        for c in by_key.get(case_key(t), ()):
+            if (i, c.case_id) in seen:
+                continue
+            seen.add((i, c.case_id))
+            leaks.append({"replay_index": i, "replay_text": t,
+                          "corpus_case_id": c.case_id,
+                          "reason": "exact", "similarity": 1.0})
+    if corpus_vectors is not None and replay_vectors is not None:
+        Cv = _as_unit(np.asarray(corpus_vectors, dtype=np.float32))
+        Rv = _as_unit(np.asarray(replay_vectors, dtype=np.float32))
+        sims = Rv @ Cv.T
+        for i in range(sims.shape[0]):
+            j = int(np.argmax(sims[i]))
+            s = float(sims[i, j])
+            if s > sim_threshold and (i, corpus_cases[j].case_id) not in seen:
+                seen.add((i, corpus_cases[j].case_id))
+                leaks.append({"replay_index": i, "replay_text": replay_texts[i],
+                              "corpus_case_id": corpus_cases[j].case_id,
+                              "reason": f"similarity>{sim_threshold:.2f}",
+                              "similarity": round(s, 4)})
+    return leaks
+
+
+def _as_unit(a):
+    """L2-normalise rows of a 2-D array (safe on zero rows)."""
+    n = np.linalg.norm(a, axis=1, keepdims=True)
+    return a / (n + 1e-12)
+
+
+def format_leaks(leaks: list[dict]) -> str:
+    lines = [f"{len(leaks)} corpus<->replay leak(s):"]
+    for lk in leaks:
+        lines.append(
+            f"  replay[{lk['replay_index']}] {lk['replay_text'][:60]!r} "
+            f"== corpus {lk['corpus_case_id']} ({lk['reason']}, "
+            f"sim={lk['similarity']})")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------- folds
 
 def assign_folds(cases: list[Case]) -> dict[str, int]:
@@ -596,8 +658,10 @@ def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
     ood_r = ood_abstain / ood_total if ood_total else 1.0
     e2e = (correct + CHAIN_BASELINE * (total_in - direct)) / total_in if total_in else 0.0
     score = C * P * P - 5 * (wrong / total_in if total_in else 0.0)
-    # latency p50 from cache-miss embeds (per-text); fall back to note
-    lat = float(np.percentile(all_lat, 50)) if all_lat else 0.0
+    # latency p50 from cache-miss embeds (per-text); None when the whole
+    # run was served from cache -- a p50 of 0.0 would read as "instant"
+    # rather than "no samples taken" (F89).
+    lat = float(np.percentile(all_lat, 50)) if all_lat else None
     return {
         "name": spec["name"], "total": total_in, "direct": direct,
         "correct": correct, "wrong": wrong, "C": C, "P": P, "A": A,
@@ -609,9 +673,10 @@ def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
 
 
 def fmt_row(m: dict) -> str:
+    p50 = "n/a" if m["p50_ms"] is None else f"{m['p50_ms']:.0f}ms"
     return (f"{m['name']:<38} C={m['C']:6.1%} P={m['P']:6.1%} A={m['A']:6.1%} "
             f"F1={m['F1']:.3f} OOD-R={m['OOD_R']:6.1%} wrong={m['wrong']:>2} "
-            f"E2E={m['E2E']:6.2%} SCORE={m['SCORE']:+.3f} p50={m['p50_ms']:.0f}ms")
+            f"E2E={m['E2E']:6.2%} SCORE={m['SCORE']:+.3f} p50={p50}")
 
 
 def main() -> int:
