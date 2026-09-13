@@ -1,4 +1,6 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 /// A panel's asynchronous veto over leaving that panel.
 ///
@@ -7,6 +9,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// (the hamburger menu, a tab switch). `false` means "keep the panel and
 /// its state", `true` means "the exit may proceed".
 typedef ToolExitGuard = Future<bool> Function();
+
+/// Route-level veto (`GoRoute.onExit`) for exits no panel control drives.
+///
+/// The browser Back button and the OS back gesture reach the router through
+/// [RouterDelegate.popRoute], not through the shared back control, so the
+/// shell's own guard never sees them. `GoRouterDelegate.popRoute` walks the
+/// exiting route's `onExit` after `maybePop` declines to handle the pop (a
+/// panel route is the only entry on the stack, so it always declines), which
+/// makes this the one place a system pop can be vetoed.
+///
+/// Reads the registry through the [ProviderScope] above [context] and asks it
+/// exactly like the shell does. Every panel route in
+/// `ui/flutter_ui/lib/core/router.dart` points its `onExit` here.
+Future<bool> guardRouteExit(BuildContext context, GoRouterState state) {
+  final container = ProviderScope.containerOf(context, listen: false);
+  return container.read(toolExitGuardProvider).requestExit();
+}
 
 /// The exit guard of the panel that is currently open, if it has unsaved
 /// state.

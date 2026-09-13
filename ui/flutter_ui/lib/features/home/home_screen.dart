@@ -298,25 +298,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     unawaited(_navigateGuarded(() => context.go(path)));
   }
 
+  /// Palette 'new session': switch to the sessions tab, then ask that list to
+  /// create a session.
+  ///
+  /// The request is armed only when the switch was allowed. A refused switch
+  /// leaves the open panel and its unsaved edits in place, and an armed
+  /// request left behind would create a session the next time the list mounts.
+  Future<void> _openNewSession() async {
+    final allowed = await _requestTabSwitch(HomeTab.sessions);
+    if (!allowed) return;
+    ref.read(createSessionRequestProvider.notifier).state = true;
+  }
+
   /// Switch to [next], asking the open panel's exit guard first.
   ///
   /// A tab switch replaces the chat tab, and with it any embedded tool panel,
   /// so it drops unsaved edits exactly like leaving the panel does. A refused
   /// switch changes nothing: the tab, the route and the panel's text all stay
-  /// where they were.
-  Future<void> _requestTabSwitch(HomeTab next) async {
+  /// where they were, and the answer returned here is what lets a caller keep
+  /// its own side effects (arming a session request) back too.
+  Future<bool> _requestTabSwitch(HomeTab next) async {
     if (next != _selectedTab) {
       final allowed = await ref.read(toolExitGuardProvider).requestExit();
-      if (!allowed) return;
-      if (!mounted) return;
+      if (!allowed) return false;
+      if (!mounted) return false;
       setState(() => _selectedTab = next);
       _syncTabRoute(next);
-      return;
+      return true;
     }
     // Re-selecting the active tab keeps its old behaviour: sync the route
     // and refresh the active-project indicator. Nothing is replaced, so
     // nothing needs guarding.
     _syncTabRoute(next);
+    return true;
   }
 
   /// Run [navigate] - a route change that replaces the open tool panel - only
@@ -518,8 +532,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _leaderController.onFind?.call();
         break;
       case 'new session':
-        _onLeaderTabSelected(HomeTab.sessions.index);
-        ref.read(createSessionRequestProvider.notifier).state = true;
+        unawaited(_openNewSession());
         break;
       case 'edit description':
         _showEditDescriptionDialog();

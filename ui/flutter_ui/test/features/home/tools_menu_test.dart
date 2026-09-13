@@ -15,6 +15,7 @@ import 'package:meept_ui/features/home/tools_dropdown.dart';
 import 'package:meept_ui/features/memory/memory_panel.dart';
 import 'package:meept_ui/features/metrics/metrics_panel.dart';
 import 'package:meept_ui/features/projects/branches_panel.dart';
+import 'package:meept_ui/features/prompts/prompt_panel.dart';
 import 'package:meept_ui/features/reflection/reflection_panel.dart';
 import 'package:meept_ui/features/search/search_panel.dart';
 import 'package:meept_ui/features/settings/settings_panel.dart';
@@ -79,6 +80,9 @@ class _StubSdkClient extends SdkApiClient {
 
   @override
   Future<List<Map<String, dynamic>>> getReflectionProposalsRaw() async => [];
+
+  @override
+  Future<List<Map<String, dynamic>>> listPromptsRaw() async => [];
 }
 
 /// Reports a live connection so the metrics notifier subscribes to WS
@@ -128,14 +132,17 @@ GoRouter _routedPanel(Widget panel) => GoRouter(
 );
 
 /// Menu tool name -> the panel widget that renders it.
-/// `prompts` is deliberately absent: prompt_panel.dart is owned by a
-/// separate change whose own test (prompt_panel_test.dart) pins its back
-/// control. Everything else the menu can open is covered here.
+///
+/// Every menu entry is here: the shared-chrome test walks this map, so a tool
+/// that stopped rendering the shell would fail it. `prompts` used to be
+/// absent (it built its own header and esc) and is now wrapped in the same
+/// shell as the rest.
 final Map<String, Widget Function()> _panelBuilders = {
   'memory': () => const MemoryPanel(),
   'changes': () => const ChangesPanel(),
   'calendar': () => const CalendarPanel(),
   'metrics': () => const MetricsPanel(),
+  'prompts': () => const PromptPanel(),
   'settings': () => const SettingsPanel(),
   'skills': () => const SkillPanel(),
   'branches': () => const BranchesPanel(),
@@ -202,8 +209,6 @@ void main() {
       useRoomyViewport(tester);
       for (final tool in HamburgerMenu.knownToolNames) {
         final builder = _panelBuilders[tool];
-        // prompts is intentionally not built here (see _panelBuilders doc).
-        if (tool == 'prompts') continue;
         expect(builder, isNotNull, reason: '$tool has no panel in this test');
         await tester.pumpWidget(_hostedPanel(builder!()));
         await tester.pump(const Duration(milliseconds: 50));
@@ -214,6 +219,30 @@ void main() {
         );
       }
     });
+
+    testWidgets(
+      'every panel route vetoes a system pop through the shared guard',
+      (tester) async {
+        // The browser Back button and the OS back gesture reach the router
+        // through RouterDelegate.popRoute, never through the shared back
+        // control, so the veto has to sit on the route (GoRoute.onExit) for
+        // every route a panel can be open on.
+        final panelRoutes = router.configuration.routes
+            .whereType<GoRoute>()
+            .where(
+              (route) =>
+                  route.path.startsWith('/tools/') || route.path == '/settings',
+            );
+        expect(panelRoutes, isNotEmpty);
+        for (final route in panelRoutes) {
+          expect(
+            route.onExit,
+            isNotNull,
+            reason: '${route.path} has no route-level exit veto',
+          );
+        }
+      },
+    );
 
     testWidgets('every menu entry resolves to a registered router path', (
       tester,

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:meept_ui/features/settings/main_config_editor.dart';
+import 'package:meept_ui/features/settings/orchestrator_config_editor.dart';
 import 'package:meept_ui/features/settings/settings_panel.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/providers/tool_exit_guard.dart';
@@ -155,6 +157,28 @@ Future<void> _pumpPanelOnRouter(
 /// The shared back control from ToolPanelShell.
 Finder _backControl() => find.byTooltip('back (esc)');
 
+/// One of the orchestrator block's numeric fields, found by its label so the
+/// test does not depend on widget order inside the panel's lazy list.
+Finder _orchestratorField(String label) => find.byWidgetPredicate(
+  (widget) => widget is TextField && widget.decoration?.labelText == label,
+);
+
+/// One of the connection form's persisted fields, found by its form name.
+Finder _connectionField(String name) => find.byWidgetPredicate(
+  (widget) => widget is FormBuilderTextField && widget.name == name,
+);
+
+/// Text currently rendered by a keyed field, read from its controller rather
+/// than matched against a possibly-ambiguous finder.
+String _textOf(WidgetTester tester, Key key) =>
+    tester.widget<TextField>(find.byKey(key)).controller!.text;
+
+/// Scrolls the panel's lazy ListView until the orchestrator editor is built.
+Future<void> _openOrchestratorEditor(WidgetTester tester) async {
+  await _scrollTo(tester, find.byType(OrchestratorConfigEditor));
+  expect(find.byType(OrchestratorConfigEditor), findsOneWidget);
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   // The panel-level test builds SettingsPanel, which reads connection
@@ -217,6 +241,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(client.lastSavedContent, '{"log_level": "debug"}');
+    // The file did not change underneath, so the staleness check does not
+    // interrupt an ordinary save.
+    expect(find.byType(AlertDialog), findsNothing);
     expect(find.byKey(mainConfigNoticeKey), findsOneWidget);
     expect(find.textContaining('restart the daemon'), findsOneWidget);
     expect(find.textContaining(_path), findsWidgets);
@@ -569,6 +596,122 @@ void main() {
         findsOneWidget,
       );
     });
+
+    // The orchestrator block is written to the same meept.json5 this panel
+    // guards, so back/esc must ask about it too: before this, only the
+    // whole-file editor and the generic editor were covered (F17).
+    testWidgets(
+      'back with unsaved orchestrator-block edits warns, and cancel keeps them',
+      (tester) async {
+        final client = _StubMainConfigClient(_file());
+        await _pumpPanelOnRouter(tester, client);
+        await _openOrchestratorEditor(tester);
+
+        await tester.enterText(_orchestratorField('max plan steps'), '40');
+        await tester.pump();
+
+        await tester.tap(_backControl());
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(
+          find.textContaining('unsaved changes in the orchestrator block'),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('cancel'));
+        await tester.pumpAndSettle();
+
+        // Cancelling keeps the panel, the editor and the typed value.
+        expect(find.text('chat home marker'), findsNothing);
+        expect(find.byType(OrchestratorConfigEditor), findsOneWidget);
+        expect(find.widgetWithText(TextField, '40'), findsOneWidget);
+      },
+    );
+
+    testWidgets('esc with unsaved orchestrator-block edits warns too', (
+      tester,
+    ) async {
+      final client = _StubMainConfigClient(_file());
+      await _pumpPanelOnRouter(tester, client);
+      await _openOrchestratorEditor(tester);
+
+      await tester.enterText(_orchestratorField('max plan steps'), '40');
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('unsaved changes in the orchestrator block'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('discard and exit'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('chat home marker'), findsOneWidget);
+      expect(find.byType(SettingsPanel), findsNothing);
+    });
+
+    // The connection form saves separately from the config files, but leaving
+    // the panel drops its unsaved values just the same.
+    testWidgets(
+      'back with unsaved connection-form edits warns, and cancel keeps them',
+      (tester) async {
+        final client = _StubMainConfigClient(_file());
+        await _pumpPanelOnRouter(tester, client);
+
+        await tester.enterText(_connectionField('daemon_host'), 'otherhost');
+        await tester.pump();
+
+        await tester.tap(_backControl());
+        await tester.pumpAndSettle();
+
+        expect(
+          find.textContaining('unsaved changes in the connection form'),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('cancel'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('chat home marker'), findsNothing);
+        expect(
+          tester
+              .widget<EditableText>(
+                find.descendant(
+                  of: _connectionField('daemon_host'),
+                  matching: find.byType(EditableText),
+                ),
+              )
+              .controller
+              .text,
+          'otherhost',
+        );
+      },
+    );
+
+    testWidgets('a saved connection form does not guard the exit', (
+      tester,
+    ) async {
+      final client = _StubMainConfigClient(_file());
+      await _pumpPanelOnRouter(tester, client);
+
+      await tester.enterText(_connectionField('daemon_host'), 'otherhost');
+      await tester.pump();
+
+      await tester.tap(find.text('save connection'));
+      await tester.pumpAndSettle();
+
+      // The form's values are the saved ones now: back exits without a
+      // warning.
+      await tester.tap(_backControl());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('chat home marker'), findsOneWidget);
+    });
   });
 
   // The panel publishes its guard in the shared registry, so the paths that
@@ -640,5 +783,102 @@ void main() {
         container.dispose();
       },
     );
+  });
+
+  // POST /api/v1/config/main rewrites the whole file, so the text captured at
+  // load time silently reverted a save made since: the sibling orchestrator
+  // editor writes the same file, and so does the CLI (F63). Every save now
+  // re-reads it and reconciles.
+  group('stale whole-file save', () {
+    // The daemon's copy of meept.json5 after another writer saved it.
+    const changed = MainConfigFile(
+      path: _path,
+      content: '{\n  "orchestrator": {"max_phases": 4},\n}',
+      writable: true,
+    );
+
+    Future<void> editThenChangeFileUnder(
+      WidgetTester tester,
+      _StubMainConfigClient client,
+    ) async {
+      await _pump(tester, client);
+      await tester.enterText(find.byKey(mainConfigTextKey), '{"mine": true}');
+      await tester.pump();
+      expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
+
+      // Another writer (the orchestrator block, the CLI) saves the same file.
+      client.file = changed;
+    }
+
+    testWidgets('a save whose file changed underneath asks before writing', (
+      tester,
+    ) async {
+      final client = _StubMainConfigClient(_file());
+      await editThenChangeFileUnder(tester, client);
+
+      await tester.tap(find.byKey(mainConfigSaveKey));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('config changed on disk'), findsOneWidget);
+      // Nothing was written while the choice is open.
+      expect(client.lastSavedContent, isNull);
+      expect(_textOf(tester, mainConfigTextKey), '{"mine": true}');
+    });
+
+    testWidgets('cancel on the conflict keeps the text and writes nothing', (
+      tester,
+    ) async {
+      final client = _StubMainConfigClient(_file());
+      await editThenChangeFileUnder(tester, client);
+
+      await tester.tap(find.byKey(mainConfigSaveKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+
+      expect(client.lastSavedContent, isNull);
+      expect(_textOf(tester, mainConfigTextKey), '{"mine": true}');
+      // Still dirty: the edited copy is the only copy of the work.
+      expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
+    });
+
+    testWidgets('overwrite writes the editor text on an explicit answer', (
+      tester,
+    ) async {
+      final client = _StubMainConfigClient(_file());
+      await editThenChangeFileUnder(tester, client);
+
+      await tester.tap(find.byKey(mainConfigSaveKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('overwrite'));
+      await tester.pumpAndSettle();
+
+      expect(client.lastSavedContent, '{"mine": true}');
+      expect(find.byKey(mainConfigNoticeKey), findsOneWidget);
+      expect(find.byKey(mainConfigDirtyKey), findsNothing);
+    });
+
+    testWidgets('reload takes the daemon copy and writes nothing', (
+      tester,
+    ) async {
+      final client = _StubMainConfigClient(_file());
+      await editThenChangeFileUnder(tester, client);
+
+      await tester.tap(find.byKey(mainConfigSaveKey));
+      await tester.pumpAndSettle();
+      // Scoped to the dialog: the editor header also has a 'reload' control.
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('reload'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(client.lastSavedContent, isNull);
+      expect(_textOf(tester, mainConfigTextKey), changed.content);
+      expect(find.byKey(mainConfigDirtyKey), findsNothing);
+    });
   });
 }

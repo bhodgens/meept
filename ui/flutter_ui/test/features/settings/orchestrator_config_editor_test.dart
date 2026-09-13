@@ -35,13 +35,19 @@ class _StubConfigClient extends SdkApiClient {
   }
 }
 
-Future<void> _pump(WidgetTester tester, _StubConfigClient client) async {
+Future<void> _pump(
+  WidgetTester tester,
+  _StubConfigClient client, {
+  ValueChanged<bool>? onDirtyChanged,
+}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [sdkClientProvider.overrideWithValue(client)],
-      child: const MaterialApp(
+      child: MaterialApp(
         home: Scaffold(
-          body: SingleChildScrollView(child: OrchestratorConfigEditor()),
+          body: SingleChildScrollView(
+            child: OrchestratorConfigEditor(onDirtyChanged: onDirtyChanged),
+          ),
         ),
       ),
     ),
@@ -108,5 +114,29 @@ void main() {
 
     expect(client.lastSaved, isNull);
     expect(find.textContaining('invalid numeric'), findsOneWidget);
+  });
+
+  // The settings panel owns the exit guard, and this block is written to the
+  // same meept.json5 that guard protects: without this callback a back/esc
+  // could drop the edits without asking (audit finding F17).
+  testWidgets('reports its dirty state to the parent, and clears it on save', (
+    tester,
+  ) async {
+    final client = _StubConfigClient();
+    final seen = <bool>[];
+    await _pump(tester, client, onDirtyChanged: seen.add);
+
+    // Loading the block is not an edit.
+    expect(seen, isEmpty);
+
+    await tester.enterText(find.widgetWithText(TextField, '25'), '40');
+    await tester.pump();
+    expect(seen, [true]);
+
+    // Saving publishes the clean state again, so the panel's guard stops
+    // asking about a block that is no longer unsaved.
+    await tester.tap(find.text('save'));
+    await tester.pumpAndSettle();
+    expect(seen, [true, false]);
   });
 }

@@ -29,6 +29,10 @@ const Key mainConfigReadOnlyNoteKey = ValueKey('main-config-readonly-note');
 /// The file is the daemon's own config, not the client's: a saved change
 /// takes effect only after the daemon restarts, and the success notice says
 /// so.
+///
+/// Because the write replaces the whole document, a save re-reads the file
+/// first and asks before it replaces a change made since load time (the
+/// orchestrator block in the same panel, or a CLI save).
 class MainConfigEditor extends ConsumerStatefulWidget {
   const MainConfigEditor({super.key, this.onDirtyChanged});
 
@@ -127,6 +131,14 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
       _notice = null;
     });
     try {
+      // POST /api/v1/config/main writes the whole document, so the text
+      // captured at load time would silently revert a save made since: the
+      // orchestrator block editor in this panel writes the same file, and so
+      // does the CLI. Re-read first and reconcile when the file moved.
+      if (!await _confirmFreshBeforeSave()) {
+        if (mounted) setState(() => _isSaving = false);
+        return;
+      }
       await _client.saveMainConfig(text);
       if (!mounted) return;
       setState(() {
@@ -164,6 +176,56 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
         _error = 'save failed: $e';
       });
       _syncDirty();
+    }
+  }
+
+  /// Confirm the file on disk is still the one this editor loaded before a
+  /// whole-file save overwrites it.
+  ///
+  /// Returns true when the write may proceed: the daemon's copy is unchanged,
+  /// the re-read failed (surfaced as an error rather than writing blind), or
+  /// the user chose to overwrite. A `reload` answer is applied here and
+  /// returns false, because the editor then holds the daemon's copy and there
+  /// is nothing left to save.
+  Future<bool> _confirmFreshBeforeSave() async {
+    final MainConfigFile latest;
+    try {
+      latest = await _client.getMainConfig();
+    } catch (e) {
+      if (!mounted) return false;
+      setState(() {
+        _error =
+            'save stopped: could not re-read '
+            '${_file?.path ?? 'the main config file'} first, so writing would '
+            'risk replacing a change made since ($e)';
+      });
+      return false;
+    }
+    if (!mounted) return false;
+    if (latest.content == _loadedContent) return true;
+
+    // Stop the save spinner while the user decides: the prompt sits over a
+    // header that must not keep animating, and nothing is being written yet.
+    setState(() => _isSaving = false);
+    final choice = await showStaleConfigDialog(context, path: latest.path);
+    if (!mounted) return false;
+    switch (choice) {
+      case StaleConfigChoice.overwrite:
+        setState(() => _isSaving = true);
+        return true;
+      case StaleConfigChoice.cancel:
+        return false;
+      case StaleConfigChoice.reload:
+        setState(() {
+          _file = latest;
+          _loadedContent = latest.content;
+          _controller.text = latest.content;
+          _notice =
+              'reloaded ${latest.path} from the daemon. your edited copy was '
+              'not saved.';
+        });
+        _syncDirty();
+        return false;
     }
   }
 

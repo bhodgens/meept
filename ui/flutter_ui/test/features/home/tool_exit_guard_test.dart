@@ -15,6 +15,7 @@
 // test/features/settings/main_config_editor_test.dart.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -205,6 +206,33 @@ Future<void> _disposeHomeApp(
 ) async {
   await tester.pumpWidget(const SizedBox());
   container.dispose();
+}
+
+/// Router for the system-pop harness: the panel route carries the same
+/// `onExit` veto the real panel routes do (core/router.dart).
+GoRouter _systemBackRouter() => GoRouter(
+  initialLocation: '/settings',
+  routes: [
+    GoRoute(
+      path: '/',
+      builder: (_, __) => const Scaffold(body: Text('chat home marker')),
+    ),
+    GoRoute(
+      path: '/settings',
+      builder: (_, __) => const Scaffold(body: Text('settings panel marker')),
+      onExit: guardRouteExit,
+    ),
+  ],
+);
+
+/// Opens the command palette (ctrl+X, the default modifier) and picks [label].
+Future<void> _pickPalette(WidgetTester tester, String label) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label));
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -468,6 +496,136 @@ void main() {
 
       // The registered guard is the newer one, and it still answers.
       expect(await container.read(toolExitGuardProvider).requestExit(), isTrue);
+    });
+  });
+
+  // The browser Back button and the OS back gesture never touch the shared
+  // back control: they reach the router through RouterDelegate.popRoute, and
+  // the panel routes veto there through GoRoute.onExit (F62).
+  group('system back', () {
+    testWidgets('an allowed pop leaves the route, an unsaved pop is vetoed', (
+      tester,
+    ) async {
+      final container = ProviderContainer(overrides: _stubs);
+      addTearDown(container.dispose);
+      final router = _systemBackRouter();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('settings panel marker'), findsOneWidget);
+      // Captured up front: the guard below runs from the router's async pop,
+      // where no test API may be called.
+      final panelContext = tester.element(find.text('settings panel marker'));
+
+      // Nothing unsaved: the veto allows the pop, which reports back to the
+      // platform as "not handled" so the platform performs the navigation.
+      expect(await router.routerDelegate.popRoute(), isFalse);
+
+      var asked = 0;
+      container.read(toolExitGuardProvider).register(() async {
+        asked++;
+        return showDiscardEditsDialog(
+          panelContext,
+          message:
+              'you have unsaved changes in probe.json5. '
+              'leaving the panel discards them.',
+          confirmLabel: 'discard and exit',
+        );
+      });
+
+      final pending = router.routerDelegate.popRoute();
+      await tester.pumpAndSettle();
+
+      expect(asked, 1);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.textContaining('unsaved changes in probe.json5'),
+        findsOneWidget,
+      );
+
+      // Cancel: the pop is refused, so the route (and the panel behind it)
+      // stay exactly where they are.
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+      expect(await pending, isTrue);
+      expect(find.text('settings panel marker'), findsOneWidget);
+
+      // Confirm: the veto lifts, the pop reports back to the platform, and
+      // the route change that follows must not ask a second time (the allow
+      // released the registration).
+      final confirmed = router.routerDelegate.popRoute();
+      await tester.pumpAndSettle();
+      expect(asked, 2);
+      await tester.tap(find.text('discard and exit'));
+      await tester.pumpAndSettle();
+      expect(await confirmed, isFalse);
+
+      router.go('/');
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(asked, 2);
+      expect(find.text('chat home marker'), findsOneWidget);
+    });
+  });
+
+  // A refused tab switch has to stop the caller's own side effects too: the
+  // palette's 'new session' used to arm a create request that survived the
+  // refusal and fired the next time the list mounted (F67).
+  group('a refused switch stops the caller side effects', () {
+    testWidgets('palette new-session arms its request only when allowed', (
+      tester,
+    ) async {
+      var asked = 0;
+      final container = await _pumpHomeApp(tester);
+      // Captured up front: the guard runs from a palette tap, and the element
+      // lookup must not happen while a test API is in flight.
+      final homeContext = tester.element(find.byType(HomeScreen));
+      container.read(toolExitGuardProvider).register(() async {
+        asked++;
+        return showDiscardEditsDialog(
+          homeContext,
+          message:
+              'you have unsaved changes in probe.json5. '
+              'leaving the panel discards them.',
+          confirmLabel: 'discard and exit',
+        );
+      });
+
+      // Nothing is armed before the pick.
+      expect(container.read(createSessionRequestProvider), isFalse);
+
+      await _pickPalette(tester, 'new session');
+
+      expect(asked, 1);
+      expect(
+        find.textContaining('unsaved changes in probe.json5'),
+        findsOneWidget,
+      );
+      // The refusal left the request unarmed and the tab where it was.
+      expect(container.read(createSessionRequestProvider), isFalse);
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(find.text('sessions route marker'), findsNothing);
+
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+
+      expect(container.read(createSessionRequestProvider), isFalse);
+      expect(find.byType(HomeScreen), findsOneWidget);
+
+      // The same pick, now confirmed, switches and arms the request.
+      await _pickPalette(tester, 'new session');
+      expect(asked, 2);
+      await tester.tap(find.text('discard and exit'));
+      await tester.pumpAndSettle();
+
+      expect(container.read(createSessionRequestProvider), isTrue);
+      expect(find.text('sessions route marker'), findsOneWidget);
+
+      await _disposeHomeApp(tester, container);
     });
   });
 }

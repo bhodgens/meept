@@ -70,6 +70,20 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   /// consult this too.
   bool _mainConfigDirty = false;
 
+  /// Unsaved orchestrator-block edits, reported by [OrchestratorConfigEditor]
+  /// through its `onDirtyChanged` callback. That block is written to the same
+  /// meept.json5 this panel guards, so a dirty orchestrator editor is a config
+  /// edit like any other and the exit guard must ask about it too.
+  bool _orchestratorDirty = false;
+
+  /// The connection form's field values as of the last load/save.
+  ///
+  /// The form's dirty state is derived by comparing the live form values
+  /// against this baseline rather than by latching `FormBuilder.onChanged`:
+  /// that callback also fires while the fields register and while the stored
+  /// api token is pre-filled, which are not user edits.
+  Map<String, dynamic>? _savedConnectionValues;
+
   bool _apiKeyObscured = true;
   String? _apiKeyStatus;
   bool _isUsingDefaultKey = false;
@@ -111,6 +125,13 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     _exitGuardRegistry.register(_exitGuard);
     _loadApiKey();
     _loadConfig();
+    // The connection form's fields come straight from storage, so its loaded
+    // state is only observable once the first frame has built it: capture the
+    // baseline there, and it is the 'save connection' button (not the form
+    // wiring) that moves it from then on.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _captureConnectionBaseline();
+    });
   }
 
   @override
@@ -226,6 +247,10 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       }
       if (modifierKey != null) await storage.setModifierKey(modifierKey);
 
+      // What was just persisted is the new baseline: the connection form is
+      // no longer holding unsaved edits.
+      _captureConnectionBaseline();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -338,8 +363,9 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
         icon: Icons.settings,
         // The shared back control and esc both ask this before leaving (the
         // shell asks the same closure the registry holds), so unsaved
-        // meept.json5 (or client/models/menubar) edits are never dropped
-        // silently.
+        // meept.json5 edits - from either of its two editors here - the
+        // client/models/menubar editor and the connection form are never
+        // dropped silently.
         exitGuard: _exitGuard,
         actions: [
           if (_isSaving)
@@ -360,7 +386,9 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
           children: [
             _buildConnectionSection(storage),
             const ClientPrefsEditor(),
-            const OrchestratorConfigEditor(),
+            OrchestratorConfigEditor(
+              onDirtyChanged: _onOrchestratorDirtyChanged,
+            ),
             const UsersPanel(),
             if (_error != null)
               ErrorBanner(message: _error!, onDismiss: _loadConfig),
@@ -464,19 +492,84 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     setState(() => _mainConfigDirty = dirty);
   }
 
-  /// True while the panel holds config text that would be lost by switching
-  /// the visible file or by leaving the panel.
-  ///
-  /// Either editor can hold unsaved edits: the generic one through
-  /// [_hasChanges], meept.json5 through the child editor's reported state.
-  /// One predicate covers both so the chip switch and the exit guard cannot
-  /// drift apart.
-  bool get _hasUnsavedConfigEdits => _hasChanges || _mainConfigDirty;
+  /// Mirror the orchestrator editor's dirty state the same way.
+  void _onOrchestratorDirtyChanged(bool dirty) {
+    if (!mounted || dirty == _orchestratorDirty) return;
+    setState(() => _orchestratorDirty = dirty);
+  }
 
-  /// Switch the visible config file, warning first when either editor holds
-  /// unsaved edits.
+  /// The connection fields the 'save connection' button persists.
+  ///
+  /// The speech-to-text section and the api-token field keep their own save
+  /// controls (and the token is stored independently of the config files), so
+  /// only these are part of the connection form's dirty state.
+  static const List<String> _connectionFieldNames = [
+    SettingsFields.daemonHost,
+    SettingsFields.daemonPort,
+    SettingsFields.theme,
+    SettingsFields.modifierKey,
+  ];
+
+  /// Remember the connection form's current values as the saved baseline.
+  ///
+  /// Called once the form exists (its `initialValue` comes straight from
+  /// storage) and again after every successful 'save connection'.
+  void _captureConnectionBaseline() {
+    final form = _formKey.currentState;
+    if (form == null) return;
+    _savedConnectionValues = {
+      for (final name in _connectionFieldNames) name: form.instantValue[name],
+    };
+  }
+
+  /// True while the connection form holds values that differ from the ones
+  /// last loaded or saved.
+  bool get _connectionDirty {
+    final form = _formKey.currentState;
+    final saved = _savedConnectionValues;
+    if (form == null || saved == null) return false;
+    for (final name in _connectionFieldNames) {
+      if (form.instantValue[name] != saved[name]) return true;
+    }
+    return false;
+  }
+
+  /// True while the visible config file holds edits a chip switch would
+  /// discard.
+  ///
+  /// Only the editors keyed to the selected chip are dropped by a switch: the
+  /// orchestrator block and the connection form live in the same panel and
+  /// stay mounted, so switching files cannot lose them.
+  bool get _hasUnsavedFileEdits => _hasChanges || _mainConfigDirty;
+
+  /// True while the panel holds edits that leaving it would drop.
+  ///
+  /// Every edit source counts: the generic file editor through [_hasChanges],
+  /// meept.json5 through its whole-file editor, the orchestrator block in the
+  /// same file, and the connection form. One predicate covers all of them so
+  /// the exit guard cannot drift from what the panel actually holds.
+  bool get _hasUnsavedConfigEdits =>
+      _hasUnsavedFileEdits || _orchestratorDirty || _connectionDirty;
+
+  /// What the exit warning names, so the user can tell which of the panel's
+  /// four edit sources is about to be lost (meept.json5 has two independent
+  /// editors here).
+  String get _unsavedEditsLabel {
+    final labels = <String>[
+      if (_hasChanges) _configLabels[_selectedConfig]!,
+      if (_mainConfigDirty) _configLabels['main']!,
+      if (_orchestratorDirty) 'the orchestrator block in meept.json5',
+      if (_connectionDirty) 'the connection form',
+    ];
+    return labels.isEmpty
+        ? _configLabels[_selectedConfig]!
+        : labels.join(' and ');
+  }
+
+  /// Switch the visible config file, warning first when the editors keyed to
+  /// the current chip hold unsaved edits.
   Future<void> _switchConfig(String newConfig) async {
-    if (_hasUnsavedConfigEdits) {
+    if (_hasUnsavedFileEdits) {
       final discard = await showDiscardEditsDialog(
         context,
         message:
@@ -512,7 +605,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     return showDiscardEditsDialog(
       context,
       message:
-          'you have unsaved changes in ${_configLabels[_selectedConfig]}. '
+          'you have unsaved changes in $_unsavedEditsLabel. '
           'leaving the panel discards them.',
       confirmLabel: 'discard and exit',
     );

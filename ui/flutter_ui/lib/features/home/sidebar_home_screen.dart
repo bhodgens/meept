@@ -119,10 +119,10 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
       ref.read(findBarVisibleProvider(sid).notifier).state = true;
     };
     _leaderController.onGlobalSearch = () {
-      context.goToolSearch();
+      unawaited(_navigateGuarded(context.goToolSearch));
     };
     _leaderController.onBranches = () {
-      context.goToolBranches();
+      unawaited(_navigateGuarded(context.goToolBranches));
     };
     _leaderController.onShowCommandPalette = _showCommandPalette;
     _leaderController.onCycleVerbosity = _cycleVerbosity;
@@ -172,10 +172,21 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   /// guard allows leaving it. A sidebar-hint or palette navigation replaces
   /// the embedded tool panel exactly like a menu pick does.
   Future<void> _onLeaderNavigate(String path) async {
+    await _navigateGuarded(() => context.go(path));
+  }
+
+  /// Run [navigate] - a route change that replaces the open tool panel - only
+  /// when the open panel's exit guard allows leaving it.
+  ///
+  /// Every navigation the sidebar starts goes through here (the leader keys,
+  /// the palette): the top-tabs layout guards the same callbacks, and a
+  /// refusal has to leave the route, the panel and its text untouched in both
+  /// layouts.
+  Future<void> _navigateGuarded(VoidCallback navigate) async {
     final allowed = await ref.read(toolExitGuardProvider).requestExit();
     if (!allowed) return;
     if (!mounted) return;
-    context.go(path);
+    navigate();
   }
 
   /// Refresh all data providers from the daemon.

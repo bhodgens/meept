@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +13,7 @@ import '../../providers/providers.dart';
 import '../../providers/session_project_provider.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
+import '../../providers/tool_exit_guard.dart';
 
 /// Sessions list widget - displays all sessions with selection
 class SessionsList extends ConsumerStatefulWidget {
@@ -93,6 +96,11 @@ class _SessionsListState extends ConsumerState<SessionsList> {
   ///
   /// Parity: mirrors the TUI's "always have a session" behaviour.
   Future<void> _createQuickSession() async {
+    // Leaving the sessions tab for chat replaces any tool panel embedded in
+    // the chat tab, so the switch asks the open panel's exit guard first -
+    // the same question the tab bar and the hamburger menu ask. A refusal
+    // changes nothing: no session is created and the route stays put.
+    if (!await _maySwitchToChat()) return;
     final notifier = ref.read(sessionProvider.notifier);
     final session = await notifier.createSession('new session');
     if (session == null) {
@@ -109,12 +117,21 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     if (mounted) context.go('/');
   }
 
+  /// Whether the chat tab may be entered.
+  ///
+  /// Between them, the session list's two switches to chat change providers,
+  /// the tab and the route; all of that is a tool panel's exit if one is open,
+  /// so the open panel's guard answers first (and releases its registration
+  /// when it allows the exit).
+  Future<bool> _maySwitchToChat() =>
+      ref.read(toolExitGuardProvider).requestExit();
+
   /// Activate [session] as the active session, prompting for project
   /// binding if the session has no project context.
-  void _activateSession(BuildContext context, Session session) {
+  Future<void> _activateSession(BuildContext context, Session session) async {
     if (!SessionProjectChecker.needsProjectPrompt(session)) {
       // Already bound — fast path.
-      _doActivateSession(session);
+      await _doActivateSession(session);
       return;
     }
 
@@ -123,19 +140,23 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       ref: ref,
       session: session,
       onSkip: () {
-        _doActivateSession(session);
+        unawaited(_doActivateSession(session));
       },
       onProjectBound: (cwd) async {
         // Project will be bound by the daemon on next RPC; for now
         // just activate the session and let the project context
         // resolve on the next refresh.
-        _doActivateSession(session);
+        await _doActivateSession(session);
       },
     );
   }
 
   /// Perform the actual session activation (navigate, clear messages).
-  void _doActivateSession(Session session) {
+  Future<void> _doActivateSession(Session session) async {
+    // Activation leaves the sessions tab for chat, dropping any tool panel
+    // embedded there, so the guard answers before anything changes.
+    if (!await _maySwitchToChat()) return;
+    if (!mounted) return;
     ref.read(activeSessionProvider.notifier).state = session;
     ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
     context.go('/');

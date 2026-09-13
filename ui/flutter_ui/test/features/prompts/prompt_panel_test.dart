@@ -109,6 +109,20 @@ Widget _buildTestApp(SdkApiClient client) {
 }
 
 void main() {
+  // The panel renders inside the shared chrome (ToolPanelShell) every other
+  // tool panel uses: one back control, one esc handler, no panel-local
+  // header. See tools_menu_test.dart for the same claim across the menu.
+  testWidgets('renders inside the shared tool-panel chrome', (tester) async {
+    final client = _PromptsStubClient([]);
+    await tester.pumpWidget(_buildTestApp(client));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byTooltip('back (esc)'), findsOneWidget);
+    expect(find.text('prompts'), findsOneWidget);
+    // The panel's own header (title, esc handler, close button) is gone.
+    expect(find.byTooltip('close'), findsNothing);
+  });
+
   testWidgets('renders placeholder when no prompts', (tester) async {
     final client = _PromptsStubClient([]);
     await tester.pumpWidget(_buildTestApp(client));

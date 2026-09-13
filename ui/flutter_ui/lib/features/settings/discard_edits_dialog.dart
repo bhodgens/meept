@@ -44,3 +44,60 @@ Future<bool> showDiscardEditsDialog(
   );
   return confirmed ?? false;
 }
+
+/// What the user chose when meept.json5 changed on disk under an editor.
+enum StaleConfigChoice {
+  /// Write the editor's text, replacing the change made elsewhere.
+  overwrite,
+
+  /// Drop the editor's text and take the copy the editor just re-read.
+  reload,
+
+  /// Keep the editor's text and write nothing.
+  cancel,
+}
+
+/// Ask before a whole-file save replaces a change another writer made.
+///
+/// `POST /api/v1/config/main` writes the whole document, so text captured at
+/// load time silently reverts a save made since (the orchestrator block in the
+/// same panel, the CLI, another window). The editor re-reads the file first
+/// and asks here when the two disagree; every dismissal resolves to
+/// [StaleConfigChoice.cancel], so nothing is written unless the user says so.
+Future<StaleConfigChoice> showStaleConfigDialog(
+  BuildContext context, {
+  required String path,
+}) async {
+  final choice = await showDialog<StaleConfigChoice>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: CyberpunkColors.darkGray,
+      title: const Text(
+        'config changed on disk',
+        style: CyberpunkTypography.bodyMedium,
+      ),
+      content: Text(
+        '$path changed after you loaded it (another editor in this panel or '
+        'the CLI saved it). saving now writes the copy you loaded and '
+        'replaces that change. reload to take the daemon\'s copy and discard '
+        'your edits, or overwrite to write yours anyway.',
+        style: CyberpunkTypography.bodySmall,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, StaleConfigChoice.cancel),
+          child: const Text('cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, StaleConfigChoice.reload),
+          child: const Text('reload'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, StaleConfigChoice.overwrite),
+          child: const Text('overwrite'),
+        ),
+      ],
+    ),
+  );
+  return choice ?? StaleConfigChoice.cancel;
+}

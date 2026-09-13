@@ -70,11 +70,13 @@ class ToolPanelShell extends ConsumerStatefulWidget {
   /// did before the guard existed, so panels with nothing to lose need no
   /// change.
   ///
-  /// This veto cannot live on the route as a `PopScope`: go_router leaves a
-  /// tool panel through [NavigatorState.pop] rather than `maybePop`, and the
-  /// embedded path replaces the route with `go`. Neither consults a
-  /// route-level veto, so it has to sit on the one control every panel
-  /// shares.
+  /// This veto carries every exit the shell drives, because it cannot rely on
+  /// a route-level `PopScope`: the embedded path (a tool rendered inside the
+  /// chat tab) lives on the same route, so no route veto can see it, and the
+  /// menu and tab paths ask the registry instead of the route. The panel
+  /// routes do carry `GoRoute.onExit` (see `guardRouteExit`) for the exits no
+  /// control drives - the browser Back button and the OS back gesture - but
+  /// that covers only the full-screen path.
   final Future<bool> Function()? exitGuard;
 
   /// Panel body.

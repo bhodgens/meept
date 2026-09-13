@@ -58,7 +58,15 @@ const _orchestratorFields = <_OrchestratorField>[
 /// block via PUT /api/v1/config/orchestrator (daemon merges it back
 /// atomically, preserving all other top-level keys).
 class OrchestratorConfigEditor extends ConsumerStatefulWidget {
-  const OrchestratorConfigEditor({super.key});
+  const OrchestratorConfigEditor({super.key, this.onDirtyChanged});
+
+  /// Reports this editor's unsaved-changes state to its parent.
+  ///
+  /// Mirrors `MainConfigEditor.onDirtyChanged`: this block is written to the
+  /// same `~/.meept/meept.json5` the settings panel guards, so the panel's
+  /// exit guard has to see it or the shared back control and esc drop the
+  /// edits without asking.
+  final ValueChanged<bool>? onDirtyChanged;
 
   @override
   ConsumerState<OrchestratorConfigEditor> createState() =>
@@ -76,6 +84,10 @@ class _OrchestratorConfigEditorState
   bool _hasChanges = false;
   String? _error;
   Map<String, dynamic> _original = {};
+
+  /// The last value handed to [OrchestratorConfigEditor.onDirtyChanged], so
+  /// the callback fires only on an actual flip.
+  bool _notifiedDirty = false;
 
   @override
   void initState() {
@@ -114,6 +126,7 @@ class _OrchestratorConfigEditorState
         _isLoading = false;
         _hasChanges = false;
       });
+      _syncDirty();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -126,6 +139,19 @@ class _OrchestratorConfigEditorState
 
   void _markChanged() {
     if (!_hasChanges) setState(() => _hasChanges = true);
+    _syncDirty();
+  }
+
+  /// Publish the current dirty state to the parent, only when it changes.
+  ///
+  /// Called after every mutation of [_hasChanges], never from `initState` or
+  /// `build`, so the parent's `setState` is never re-entered in the middle of
+  /// a build.
+  void _syncDirty() {
+    if (!mounted) return;
+    if (_hasChanges == _notifiedDirty) return;
+    _notifiedDirty = _hasChanges;
+    widget.onDirtyChanged?.call(_hasChanges);
   }
 
   Map<String, dynamic>? _buildPayload() {
@@ -168,6 +194,7 @@ class _OrchestratorConfigEditorState
         _hasChanges = false;
         _original = payload;
       });
+      _syncDirty();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('orchestrator config saved'),

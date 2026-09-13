@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../services/sdk_client.dart';
+import '../../widgets/tool_panel_shell.dart';
 import 'prompt_models.dart';
 
 /// Prompt-editor panel — lists discoverable prompt templates from the
@@ -27,19 +26,11 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
   List<PromptSummary> _prompts = [];
   bool _isLoading = true;
   String? _error;
-  late final FocusNode _keyboardFocusNode;
 
   @override
   void initState() {
     super.initState();
-    _keyboardFocusNode = FocusNode();
     _loadPrompts();
-  }
-
-  @override
-  void dispose() {
-    _keyboardFocusNode.dispose();
-    super.dispose();
   }
 
   Future<void> _loadPrompts() async {
@@ -102,10 +93,6 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
     return error.toString();
   }
 
-  void _closePanel() {
-    context.go('/');
-  }
-
   Future<void> _openDetail(PromptSummary summary) async {
     final detail = await Navigator.of(context).push<PromptDetail>(
       MaterialPageRoute<PromptDetail>(
@@ -121,88 +108,44 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _keyboardFocusNode,
-      onKeyEvent: (FocusNode node, KeyEvent event) {
-        if (event.logicalKey == LogicalKeyboardKey.escape) {
-          _closePanel();
-        }
-        return KeyEventResult.ignored;
-      },
+    // Renders inside the one shared chrome every tool panel uses
+    // (ToolPanelShell), so prompts gets the same back control and esc handler
+    // as the rest of the menu. The panel keeps no exit affordance of its own.
+    return ToolPanelShell(
+      title: 'prompts',
+      icon: Icons.edit_note,
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.refresh, size: 16),
+          color: CyberpunkColors.orangePrimary,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+          tooltip: 'reload prompts',
+          onPressed: _loadPrompts,
+        ),
+      ],
       child: Container(
         decoration: BoxDecoration(
           color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
-          border: Border(
-            top: BorderSide(
-              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-              width: 1,
-            ),
-          ),
         ),
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: _isLoading
-                  ? Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            CyberpunkColors.orangePrimary,
-                          ),
-                        ),
-                      ),
-                    )
-                  : _error != null
-                  ? _buildErrorState()
-                  : _prompts.isEmpty
-                  ? _buildEmptyState()
-                  : _buildPromptList(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.edit_note, color: CyberpunkColors.orangePrimary, size: 18),
-          const SizedBox(width: 8),
-          Text(
-            'prompt templates',
-            style: CyberpunkTypography.label.copyWith(
-              color: CyberpunkColors.orangePrimary,
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.close, size: 18),
-            onPressed: _closePanel,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            tooltip: 'close',
-          ),
-          GestureDetector(
-            onTap: _loadPrompts,
-            child: Icon(
-              Icons.refresh,
-              color: CyberpunkColors.orangePrimary,
-              size: 16,
-            ),
-          ),
-        ],
+        child: _isLoading
+            ? Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      CyberpunkColors.orangePrimary,
+                    ),
+                  ),
+                ),
+              )
+            : _error != null
+            ? _buildErrorState()
+            : _prompts.isEmpty
+            ? _buildEmptyState()
+            : _buildPromptList(),
       ),
     );
   }

@@ -17,6 +17,7 @@ import '../features/metrics/metrics_panel.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
 import '../providers/preferences_provider.dart';
+import '../providers/tool_exit_guard.dart';
 
 /// Global GoRouter instance, accessible via [routerProvider] or directly.
 ///
@@ -79,12 +80,17 @@ final GoRouter router = GoRouter(
     ),
 
     // --- Full-screen routes ---
+    // Every panel route vetoes a system pop (the browser Back button, the OS
+    // back gesture) through the same guard its own controls ask: those exits
+    // never reach the panel, so the route is the only place they can be
+    // stopped. See guardRouteExit.
     GoRoute(
       path: '/settings',
       name: 'settings',
       builder: (context, state) {
         return const SettingsPanel();
       },
+      onExit: guardRouteExit,
     ),
 
     // --- Tool sub-routes ---
@@ -94,6 +100,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         return const SearchPanel();
       },
+      onExit: guardRouteExit,
     ),
     GoRoute(
       path: '/tools/branches',
@@ -101,6 +108,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         return const BranchesPanel();
       },
+      onExit: guardRouteExit,
     ),
     GoRoute(
       path: '/tools/skills',
@@ -108,6 +116,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         return const SkillPanel();
       },
+      onExit: guardRouteExit,
     ),
     GoRoute(
       path: '/tools/memory',
@@ -115,6 +124,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         return const MemoryPanel();
       },
+      onExit: guardRouteExit,
     ),
     GoRoute(
       path: '/tools/reflection',
@@ -122,6 +132,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         return const ReflectionPanel();
       },
+      onExit: guardRouteExit,
     ),
     GoRoute(
       path: '/tools/changes',
@@ -129,6 +140,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         return const ChangesPanel();
       },
+      onExit: guardRouteExit,
     ),
     GoRoute(
       path: '/tools/prompts',
@@ -136,6 +148,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         return const PromptPanel();
       },
+      onExit: guardRouteExit,
     ),
     GoRoute(
       path: '/tools/calendar',
@@ -143,6 +156,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         return const CalendarPanel();
       },
+      onExit: guardRouteExit,
     ),
     GoRoute(
       path: '/tools/metrics',
@@ -150,6 +164,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         return const MetricsPanel();
       },
+      onExit: guardRouteExit,
     ),
   ],
 

@@ -18,9 +18,25 @@ import 'theme/palette_provider.dart';
 import 'core/constants.dart';
 import 'core/router.dart';
 import 'providers/providers.dart';
+import 'providers/tool_exit_guard.dart';
+
+/// The app's Riverpod container, set by [main] before `runApp` and published
+/// here so code that runs outside the widget tree can read the same providers
+/// the panels write to.
+///
+/// The desktop window-close listener has no `BuildContext`, and closing the
+/// window unmounts the open panel (and any unsaved config edits with it), so
+/// it has to reach [toolExitGuardProvider] where [ToolPanelShell] and the home
+/// layouts do.
+late final ProviderContainer appProviderContainer;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // One container for the whole app. Created here (rather than by
+  // ProviderScope) so [appProviderContainer] is available to the window-close
+  // listener below, which lives outside the widget tree.
+  appProviderContainer = ProviderContainer();
 
   // Catch unhandled async errors that escape Future chains (fire-and-forget
   // methods, timer callbacks, etc.). Without this, Dart prints the error but
@@ -51,7 +67,7 @@ void main() async {
     // Desktop-only: window management
     // Intercept the native close button so we can persist geometry
     await windowManager.setPreventClose(true);
-    windowManager.addListener(_WindowCloseHandler());
+    windowManager.addListener(WindowCloseHandler(appProviderContainer));
   }
 
   // Initialize certificate pinning (desktop only - web uses browser TLS)
@@ -69,15 +85,17 @@ void main() async {
         options.tracesSampleRate = 1.0;
       },
       appRunner: () => runApp(
-        const ProviderScope(
-          child: _ModifierKeyInitializer(child: CyberpunkApp()),
+        UncontrolledProviderScope(
+          container: appProviderContainer,
+          child: const _ModifierKeyInitializer(child: CyberpunkApp()),
         ),
       ),
     );
   } else {
     runApp(
-      const ProviderScope(
-        child: _ModifierKeyInitializer(child: CyberpunkApp()),
+      UncontrolledProviderScope(
+        container: appProviderContainer,
+        child: const _ModifierKeyInitializer(child: CyberpunkApp()),
       ),
     );
   }
@@ -115,14 +133,78 @@ class _ModifierKeyInitializerState
   Widget build(BuildContext context) => widget.child;
 }
 
-/// Listens for the native close event, saves window geometry, then
-/// allows the window to close.
-class _WindowCloseHandler extends WindowListener {
+/// The window-lifecycle calls the close path makes, behind one seam.
+///
+/// Injecting them is what lets a widget test drive [WindowCloseHandler]: the
+/// window_manager plugin and the geometry persistence both need a real
+/// platform window, so a test that exercised the veto would otherwise have to
+/// reach the plugin.
+class WindowCloseActions {
+  const WindowCloseActions({
+    required this.saveGeometry,
+    required this.keepOpen,
+    required this.close,
+  });
+
+  /// Persist window geometry before the window goes away.
+  final Future<void> Function() saveGeometry;
+
+  /// Keep the window open and re-arm the prevent-close latch, so the next
+  /// close request is intercepted too.
+  final Future<void> Function() keepOpen;
+
+  /// Let the window close and destroy it.
+  final Future<void> Function() close;
+
+  /// The real window-manager calls.
+  static final WindowCloseActions real = WindowCloseActions(
+    saveGeometry: WindowGeometryService.save,
+    keepOpen: () => windowManager.setPreventClose(true),
+    close: () async {
+      await windowManager.setPreventClose(false);
+      await windowManager.destroy();
+    },
+  );
+}
+
+/// Asks the open panel's exit guard before the window is allowed to close.
+///
+/// Closing the window unmounts every panel, so it drops unsaved config edits
+/// exactly like the shared back control does. A veto keeps the window - and
+/// the panel, and its edits - exactly as they were. With no guard registered
+/// (no panel holds unsaved state) the exit goes straight through, so the
+/// handler adds nothing to the ordinary close.
+class WindowCloseHandler extends WindowListener {
+  WindowCloseHandler(this.container, {WindowCloseActions? actions})
+    : actions = actions ?? WindowCloseActions.real;
+
+  /// The app's container, read for the guard the open panel registered.
+  final ProviderContainer container;
+
+  /// The window-manager calls, injectable for tests.
+  final WindowCloseActions actions;
+
   @override
-  void onWindowClose() async {
-    await WindowGeometryService.save();
-    await windowManager.setPreventClose(false);
-    await windowManager.destroy();
+  void onWindowClose() {
+    // The listener API gives no future back; handleCloseRequest is the
+    // awaitable half so a test can drive the same path.
+    unawaited(handleCloseRequest());
+  }
+
+  /// Ask the exit guard, then persist geometry and close the window.
+  ///
+  /// Returns when the request has been decided (and, when allowed, when the
+  /// window-manager calls are done), so a widget test can await the decision
+  /// the listener itself cannot wait for.
+  Future<void> handleCloseRequest() async {
+    final allowed = await container.read(toolExitGuardProvider).requestExit();
+    if (!allowed) {
+      await actions.keepOpen();
+      return;
+    }
+    // Geometry is persisted before the window goes away.
+    await actions.saveGeometry();
+    await actions.close();
   }
 }
 
