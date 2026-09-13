@@ -99,21 +99,42 @@ func parseLFMToolCallsWithBare(content string, allowBare bool) (string, []ToolCa
 }
 
 // arrayElementOffsets marks every byte offset in content at which a '{' opens an
-// object that is an ELEMENT of a JSON array: its immediately enclosing bracket
-// is an '[' and the content's brackets balance. Offsets are the ones a caller
+// object that is an ELEMENT of a JSON array. Offsets are the ones a caller
 // would pass to findJSONObjectEnd (the object's opening brace).
 //
-// The array verdict is deliberately conservative (audit finding F78): brackets
-// are tracked with quote awareness only INSIDE a bracket run, and a content
-// whose brackets do not balance yields NO element offsets at all. Prose is not
-// JSON — a contraction opens a string that never closes, an unmatched '[' never
-// ends — and either mistake used to flip the verdict, mining an object out of a
-// genuine array or silently dropping a real bare call.
+// Element-ness is decided PER OBJECT, by the object's own enclosing bracket —
+// never by the whole content's bracket balance (wave-3 finding): the
+// immediately enclosing bracket must be an '[' and either
+//   - that '[' closes after the object — a real array, or
+//   - that '[' never closes and the object holds an ARRAY ELEMENT POSITION in
+//     the run: it is the array's opening element (only whitespace between the
+//     '[' and the '{') or it directly follows a ','. A truncated array is not
+//     a call: a stream cutoff on a model's example array is indistinguishable
+//     from a cut-off real array, and a truncated response is a retry/decode
+//     problem, not a tool call.
+//
+// The whole-content veto this replaces was wrong in BOTH directions (audit
+// finding F78, re-armed by the veto): one unbalanced bracket anywhere — a
+// prose list opener, or an apostrophe quoted inside a LATER bracket run, since
+// quotes are tracked only inside a run and an unterminated quote hides every
+// later bracket — voided every offset for the whole content, so a genuine
+// array element that followed a balanced "[...]" was mined as a bare call and
+// stripped out of the model's answer.
 func arrayElementOffsets(content string) map[int]bool {
-	var stack []byte
+	// One scan records, for every '{', the bracket it opens directly inside
+	// (enclosing) and, for every bracket, the byte that closes it (closedBy).
+	// Quotes are tracked only INSIDE a bracket run: a prose contraction ("the
+	// user's request") outside any bracket otherwise opened a string that
+	// never closed and hid every later bracket (audit finding F78).
+	type bracket struct {
+		pos  int
+		kind byte
+	}
+	var stack []bracket
 	inStr := false
 	var quote byte
-	elem := make(map[int]bool)
+	enclosing := make(map[int]bracket) // '{' offset -> the bracket it sits in
+	closedBy := make(map[int]int)      // bracket offset -> its matching closer
 	for i := 0; i < len(content); i++ {
 		ch := content[i]
 		switch {
@@ -127,22 +148,74 @@ func arrayElementOffsets(content string) map[int]bool {
 			inStr = true
 			quote = ch
 		case ch == '[' || ch == '{':
-			if ch == '{' && len(stack) > 0 && stack[len(stack)-1] == '[' {
-				elem[i] = true
+			if ch == '{' && len(stack) > 0 {
+				enclosing[i] = stack[len(stack)-1]
 			}
-			stack = append(stack, ch)
+			stack = append(stack, bracket{i, ch})
 		case ch == ']' || ch == '}':
 			if len(stack) > 0 {
+				top := stack[len(stack)-1]
 				stack = stack[:len(stack)-1]
+				// Only a same-kind closer pairs the bracket: a prose-mixed
+				// closer ("[1) ... {x}") must not end a real '[' run early.
+				if (top.kind == '[' && ch == ']') || (top.kind == '{' && ch == '}') {
+					closedBy[top.pos] = i
+				}
 			}
 		}
 	}
-	if len(stack) != 0 {
-		// Unbalanced brackets: the prose brackets never closed, so no offset
-		// can be called an array element.
-		return nil
+
+	elem := make(map[int]bool)
+	for objPos, enc := range enclosing {
+		if enc.kind != '[' {
+			continue // nested inside an object, or in no bracket at all
+		}
+		end, closed := closedBy[enc.pos]
+		switch {
+		case closed && end > objPos:
+			elem[objPos] = true // the array closes after the object
+		case !closed:
+			// The array never closed (stream cutoff): treat the object as an
+			// element only when it sits in an element position inside it — the
+			// array's opening element, or right after a comma.
+			if followsBracketDirectly(content, enc.pos, objPos) || precededByComma(content, objPos) {
+				elem[objPos] = true
+			}
+		}
 	}
 	return elem
+}
+
+// followsBracketDirectly reports whether the '{' at obj is the first
+// non-whitespace byte after the bracket at open — i.e. the object is the array's
+// opening element.
+func followsBracketDirectly(content string, open, obj int) bool {
+	if obj <= open {
+		return false
+	}
+	for i := open + 1; i < obj; i++ {
+		switch content[i] {
+		case ' ', '	', '\n', '\r':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// precededByComma reports whether the nearest non-whitespace byte before the
+// object's opening brace is a ',' — the object continues a (possibly truncated)
+// comma-separated run inside its array.
+func precededByComma(content string, obj int) bool {
+	for i := obj - 1; i >= 0; i-- {
+		switch content[i] {
+		case ' ', '	', '\n', '\r':
+			continue
+		default:
+			return content[i] == ','
+		}
+	}
+	return false
 }
 
 // parseLFMBareJSONCalls mines tool calls that ship as a BARE JSON object in
@@ -193,18 +266,16 @@ func parseLFMBareJSONCalls(content string) (string, []ToolCall) {
 	// followed one (audit finding F76). Only an object whose immediately
 	// enclosing bracket is an open '[' is skipped.
 	//
-	// Two rules keep the array verdict honest (audit finding F78):
-	//   - quotes are tracked only INSIDE a bracket run. Prose contractions
-	//     ("the user's request") otherwise opened a string that never closed,
-	//     which hid every later bracket: the stack read empty, an object that
-	//     really was an array element was mined as a call, and the call was
-	//     stripped out of the model's answer.
-	//   - the WHOLE content's brackets must balance. An unbalanced prose '['
-	//     ("Steps: [1) read the file. {\"name\":...}") left a phantom array
-	//     open across every later object, so a real bare call was dropped.
-	// A truncated reply inside an array is the one case this now mines: no
-	// closing bracket arrived, so there is no array to be an element of — and
-	// the object is only minted when it carries a call shape anyway.
+	// The verdict is decided PER OBJECT by pairing (see arrayElementOffsets):
+	// quotes are tracked only INSIDE a bracket run — prose contractions
+	// ("the user's request") otherwise opened a string that never closed,
+	// which hid every later bracket and unmasked a genuine array element as a
+	// call — and one object's verdict never depends on any other object's
+	// bracket. A whole-content balance veto was wrong here: an unrelated prose
+	// '[' anywhere in the reply voided every offset, re-arming that bug (wave-3
+	// finding). A truncated array is not a call either: the object must close
+	// after the '[' or sit in an element position inside a never-closed array
+	// (opening element, or after a comma).
 	arrayElems := arrayElementOffsets(content)
 	inArray := func(pos int) bool { return arrayElems[pos] }
 

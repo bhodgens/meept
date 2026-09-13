@@ -8,6 +8,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/security"
 	"github.com/stretchr/testify/assert"
@@ -642,6 +643,85 @@ func TestGuards_PromotedReasoningIsReAskedForVisibleOutput(t *testing.T) {
 		}
 	}
 	assert.True(t, foundNudge, "expected the reasoning-only nudge in the conversation")
+}
+
+// TestGuards_PromotedReasoningOnly_ExhaustionDeliversText pins the wave-3
+// finding (group B, item 3): the "the text is never discarded" half of the
+// promoted-reasoning contract was honoured only by the reasoning watchdog's
+// terminate path. A turn whose promoted reasoning-only replies consumed the
+// whole iteration budget returned the generic wrap-up sentence instead, so the
+// only text the model produced was dropped. The exhaustion path now shares the
+// labelled-delivery helper with the watchdog.
+func TestGuards_PromotedReasoningOnly_ExhaustionDeliversText(t *testing.T) {
+	reasoning := strings.Repeat("deliberating ", 400)
+	promoted := func() *llm.Response {
+		return &llm.Response{
+			Content:           reasoning, // promoted chain-of-thought, not visible output
+			Reasoning:         reasoning,
+			ReasoningPromoted: true,
+			FinishReason:      "stop",
+			Usage:             llm.TokenUsage{TotalTokens: 50},
+		}
+	}
+	// MaxIterations 2: every iteration is a promoted reasoning-only reply, so
+	// the nudge ladder consumes the whole budget and the loop exhausts BEFORE
+	// the watchdog's streak breach (3) can terminate it.
+	chatter := newMockChatter(promoted(), promoted(), &llm.Response{Content: "unreachable"})
+	loop := NewAgentLoop("test-session", "/tmp",
+		WithLLMChatter(chatter),
+		WithMessageBus(bus.New(nil, slogDiscardLogger())),
+		WithAgentConfig(AgentConfig{
+			MaxIterations: 2,
+			Guards:        DefaultGuardConfig(),
+		}),
+	)
+
+	response, err := loop.RunOnce(context.Background(), "think about it", "conv-guards-promoted-exhaustion")
+	require.ErrorIs(t, err, ErrMaxIterationsReached, "the iteration budget must be the terminal cause")
+	assert.Contains(t, response, "reasoning-only output",
+		"the promoted chain-of-thought must be delivered LABELLED on the exhaustion path, not discarded (wave-3 item 3)")
+	assert.Contains(t, response, "deliberating",
+		"the only text the model produced must survive exhaustion")
+	assert.NotContains(t, response, "I encountered an error during processing",
+		"the generic error sentence must never replace the promoted text")
+	assert.Equal(t, 2, chatter.callCount, "the nudge ladder consumed exactly the iteration budget")
+}
+
+// TestGuards_PromotedReasoningOnly_TaskExhaustionDeliversText pins the task
+// (RunWithTask) half of the same contract: the generic "I encountered an error
+// during processing" sentence replaced whatever the loop returned, so the
+// labelled promoted text was dropped on the task path even after the
+// max-iterations path learned to carry it.
+func TestGuards_PromotedReasoningOnly_TaskExhaustionDeliversText(t *testing.T) {
+	reasoning := strings.Repeat("deliberating ", 400)
+	promoted := func() *llm.Response {
+		return &llm.Response{
+			Content:           reasoning,
+			Reasoning:         reasoning,
+			ReasoningPromoted: true,
+			FinishReason:      "stop",
+			Usage:             llm.TokenUsage{TotalTokens: 50},
+		}
+	}
+	chatter := newMockChatter(promoted(), promoted(), &llm.Response{Content: "unreachable"})
+	loop := NewAgentLoop("test-session", "/tmp",
+		WithLLMChatter(chatter),
+		WithMessageBus(bus.New(nil, slogDiscardLogger())),
+		WithAgentConfig(AgentConfig{
+			MaxIterations: 2,
+			Guards:        DefaultGuardConfig(),
+		}),
+	)
+
+	response, err := loop.RunWithTask(context.Background(), &task.Task{
+		ID:   "task-promoted-exhaustion",
+		Name: "think about it",
+	})
+	require.ErrorIs(t, err, ErrMaxIterationsReached)
+	assert.Contains(t, response, "reasoning-only output",
+		"the task path must deliver the promoted text labelled, not the generic sentence (wave-3 item 3)")
+	assert.NotContains(t, response, "I encountered an error during processing",
+		"the generic error sentence must never replace the loop's own wrap-up")
 }
 
 // ---------------------------------------------------------------------------

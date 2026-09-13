@@ -146,12 +146,18 @@ func TestParseLFMToolCalls_BoxedWrapperLeavesNoStrayToken(t *testing.T) {
 // array element was mined as a call and stripped out of the model's answer.
 func TestParseLFMToolCalls_ArrayElementAfterProseApostrophe(t *testing.T) {
 	content := "Sure — here's the plan.\n[{\"name\": \"json_extract\", \"arguments\": {\"text\": \"abc\"}}]"
-	rest, calls := parseLFMToolCalls(content)
+	_, calls := parseLFMToolCalls(content)
 	if len(calls) != 0 {
 		t.Fatalf("an array element behind a prose contraction must not be mined, got %+v (F78)", calls)
 	}
-	if rest != content {
-		t.Errorf("the array element was modified while not mined:\n got %q\nwant %q", rest, content)
+	// "rest == content" here is implied by parseLFMBareJSONCalls' len(calls)==0
+	// early return — it cannot fail. The assert that CAN fail is the helper's
+	// own verdict: the element must be marked, otherwise the skip is an
+	// accident of the return path rather than the array rule.
+	objStart := strings.Index(content, `{"name"`)
+	if !arrayElementOffsets(content)[objStart] {
+		t.Errorf("arrayElementOffsets must mark the array element at %d, got %v (F78)",
+			objStart, arrayElementOffsets(content))
 	}
 }
 
@@ -164,11 +170,19 @@ func TestParseLFMToolCalls_BareCallAfterUnbalancedProseBracket(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("a bare call after an unbalanced prose '[' must still be mined, recovered %d (F78)", len(calls))
 	}
-	if calls[0].Function.Name != "file_write" {
-		t.Errorf("name = %q, want file_write", calls[0].Function.Name)
+	// The call's name and its absence from the remainder are both implied by
+	// len(calls)==1, so asserting them proves nothing. These two asserts can
+	// fail: a mangled arguments payload, or a strip that eats the prose that
+	// surrounds the mined call.
+	var args map[string]any
+	if err := json.Unmarshal([]byte(calls[0].Function.Arguments), &args); err != nil {
+		t.Fatalf("arguments not JSON: %v", err)
 	}
-	if strings.Contains(rest, "file_write") {
-		t.Errorf("the call must be stripped from the remainder, got %q", rest)
+	if args["path"] != "a.txt" {
+		t.Errorf("args = %v, want the call's own path argument recovered intact", args)
+	}
+	if !strings.Contains(rest, "1) read the file") || !strings.Contains(rest, "Call:") {
+		t.Errorf("the prose around the mined call must survive, got %q", rest)
 	}
 }
 
@@ -183,11 +197,96 @@ func TestParseLFMToolCalls_BoxedWrapperKeepsFollowingJSONBrace(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("recovered %d calls, want 1", len(calls))
 	}
+	// The boxed-wrapper cleanup rewrites the REMAINDER only. Its asserts live
+	// on `rest` below; this one guards the other half of the seam — a mined
+	// call's arguments must never be reached by the display-text cleanup.
+	var args map[string]any
+	if err := json.Unmarshal([]byte(calls[0].Function.Arguments), &args); err != nil {
+		t.Fatalf("arguments not JSON: %v", err)
+	}
+	if args["text"] != "x" {
+		t.Errorf("boxed-wrapper cleanup altered the mined call's arguments: %v", args)
+	}
 	if !strings.Contains(rest, `{"title": "x", "year": 2017}`) {
 		t.Errorf("the JSON payload after the boxed call must keep its final brace, got %q (F79)", rest)
 	}
 	if strings.HasPrefix(rest, "}") {
 		t.Errorf("the box's orphan brace must not survive ahead of the payload, got %q (F79)", rest)
+	}
+}
+
+// TestParseLFMToolCalls_ArrayElementAfterUnbalancedTail pins the wave-3
+// finding (group B, item 1): the whole-content bracket veto ("an unbalanced
+// stack yields no array verdict") voided EVERY offset for the whole content,
+// so an unbalanced bracket anywhere — or an apostrophe quoted inside a LATER
+// bracket run (quotes are tracked only inside a run, and an unterminated quote
+// hides the closing bracket) — re-armed the F78 bug: a genuine array element
+// after a balanced "[...]" was mined as a bare call and stripped out of the
+// model's answer. Element-ness is decided by PAIRING: the object's own
+// enclosing '[' must close after it.
+func TestParseLFMToolCalls_ArrayElementAfterUnbalancedTail(t *testing.T) {
+	cases := []struct{ name, content string }{
+		{
+			"unbalanced bracket tail",
+			`[{"name":"file_write","arguments":{"path":"a.txt","content":"x"}}] Steps: [1, 2, 3`,
+		},
+		{
+			"apostrophe inside a later bracket run",
+			`[{"name":"file_write","arguments":{"path":"a.txt","content":"x"}}] note [it's here`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, calls := parseLFMToolCalls(tc.content)
+			if len(calls) != 0 {
+				t.Fatalf("a genuine array element was mined after an unbalanced tail: %d calls (%+v)",
+					len(calls), calls)
+			}
+			// The verdict must come from per-object pairing, not from the
+			// whole content happening to balance: assert the helper itself
+			// marks the element (this is the assert that fails at the
+			// whole-content-veto revision).
+			objStart := strings.Index(tc.content, `{"name"`)
+			if !arrayElementOffsets(tc.content)[objStart] {
+				t.Errorf("arrayElementOffsets must mark the element at %d (pairing, not whole-content balance)",
+					objStart)
+			}
+		})
+	}
+}
+
+// TestParseLFMToolCalls_TruncatedArrayNotMined pins the wave-3 finding (group
+// B, item 2): the truncation carve-out ("A truncated reply inside an array is
+// the one case this now mines") minted a call from a prose TEMPLATE — the same
+// text as a legitimate example array minus its closing ']' — so a stream cutoff
+// on an example array executed the example. A cutoff on an example array is
+// indistinguishable from a truncated real array, and a truncated response is a
+// decode/retry problem, not a tool call, so the element must stay un-mined.
+func TestParseLFMToolCalls_TruncatedArrayNotMined(t *testing.T) {
+	cases := []struct{ name, content, objMark string }{
+		{
+			"truncated example array (opening element)",
+			`For example, call it like so: [{"name":"json_extract","arguments":{"text":"x"}}`,
+			`{"name":"json_extract"`,
+		},
+		{
+			"truncated array, later element after a comma",
+			`[{"name":"file_write","args":{"path":"a"}},{"name":"json_extract","arguments":{"text":"b"}}`,
+			`{"name":"json_extract"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, calls := parseLFMToolCalls(tc.content)
+			if len(calls) != 0 {
+				t.Fatalf("a truncated array must not mint a call: recovered %d (%+v)", len(calls), calls)
+			}
+			objStart := strings.Index(tc.content, tc.objMark)
+			if !arrayElementOffsets(tc.content)[objStart] {
+				t.Errorf("the truncated array's element at %d must be marked as an element, not a call",
+					objStart)
+			}
+		})
 	}
 }
 
