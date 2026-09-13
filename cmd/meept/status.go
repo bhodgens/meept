@@ -146,18 +146,16 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) {
 
 	fmt.Println()
 
-	// Token usage
+	// Token usage. The percentage is taken against the CONFIGURED hourly
+	// limit (status.HourlyTokenLimit). A limit of 0 means the budget is
+	// disabled: print the used count with a "no limit" note and no percentage.
+	// The previous used+remaining form printed a bogus 100.0% whenever the
+	// limit was disabled, because the daemon reports remaining=0 while usage
+	// keeps counting up.
 	fmt.Printf("token budget\n")
 	fmt.Printf("------------\n")
-	tokensUsed := status.TokensUsed
-	tokensRemaining := status.TokensRemaining
-	totalTokens := tokensUsed + tokensRemaining
-	if totalTokens == 0 {
-		totalTokens = 100000
-	}
-
-	tokenPercent := float64(tokensUsed) / float64(totalTokens) * 100
-	fmt.Printf("  Used:       %d / %d (%.1f%%)\n", tokensUsed, totalTokens, tokenPercent)
+	tokenBudget := types.NewTokenBudget(status.TokensUsed, status.HourlyTokenLimit)
+	fmt.Printf("  Used:       %s\n", tokenBudget.Text())
 
 	// Budget usage
 	budgetUsed := status.BudgetUsed
@@ -200,6 +198,8 @@ func printStatusJSON(status *types.DaemonStatusResponse, pid int, client transpo
 		"model":                 status.Model,
 		"tokens_used":           status.TokensUsed,
 		"tokens_remaining":      status.TokensRemaining,
+		"hourly_token_limit":    status.HourlyTokenLimit,
+		"daily_token_limit":     status.DailyTokenLimit,
 		"budget_used":           status.BudgetUsed,
 		"budget_remaining":      status.BudgetRemaining,
 		"daily_cost_used":       status.DailyCostUsed,

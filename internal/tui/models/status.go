@@ -241,18 +241,17 @@ func (m *StatusModel) renderMetricsPanel(width int) string {
 
 	content := titleStyle.Render("token budget") + "\n\n"
 
-	// Token usage bar
-	tokensUsed := m.status.TokensUsed
-	tokensRemaining := m.status.TokensRemaining
-	totalTokens := tokensUsed + tokensRemaining
-	if totalTokens == 0 {
-		totalTokens = 100000 // Default
-	}
-
-	tokenPercent := float64(tokensUsed) / float64(totalTokens)
+	// Token usage. The bar and percentage are relative to the CONFIGURED
+	// hourly limit, never to used+remaining (the daemon reports remaining=0
+	// while usage counts up when the limit is disabled, which used to render a
+	// bogus 100% bar). A disabled limit shows the used count with a "no limit"
+	// note and no bar.
+	budget := types.NewTokenBudget(m.status.TokensUsed, m.status.HourlyTokenLimit)
 	content += labelStyle.Render("tokens used:") + "\n"
-	content += m.renderProgressBar(width-8, tokenPercent) + "\n"
-	content += fmt.Sprintf("%d / %d\n\n", tokensUsed, totalTokens)
+	if budget.Limited() {
+		content += m.renderProgressBar(width-8, budget.Ratio()) + "\n"
+	}
+	content += budget.Text() + "\n\n"
 
 	// Budget usage
 	budgetUsed := m.status.BudgetUsed

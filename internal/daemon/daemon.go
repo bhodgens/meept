@@ -327,6 +327,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 					bs := budget.GetStatus()
 					return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit, bs.PerTaskCost, bs.PerSessionCost, bs.PerTaskBudget, bs.PerSessionBudget
 				}
+				// Expose the configured token limits (0 = disabled) so status
+				// clients print usage against the limit instead of inferring a
+				// bogus 100% from used+remaining.
+				rpcServer.TokenLimitGetter = func() (int, int) {
+					bs := budget.GetStatus()
+					return bs.HourlyLimit, bs.DailyLimit
+				}
 			}
 		}
 	}

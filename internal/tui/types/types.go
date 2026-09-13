@@ -19,6 +19,8 @@ type DaemonStatusResponse struct {
 	BusSubscribers      int      `json:"bus_subscribers"`
 	TokensUsed          int      `json:"tokens_used"`
 	TokensRemaining     int      `json:"tokens_remaining"`
+	HourlyTokenLimit    int      `json:"hourly_token_limit"`
+	DailyTokenLimit     int      `json:"daily_token_limit"`
 	BudgetUsed          float64  `json:"budget_used"`
 	BudgetRemaining     float64  `json:"budget_remaining"`
 	DailyCostUsed       float64  `json:"daily_cost_used"`
@@ -135,6 +137,67 @@ func formatTimeUnit(value int, unit string) string {
 			unit+" ",
 		),
 	)
+}
+
+// TokenBudget is the display-ready view of a token budget line (the "token
+// budget" block in `meept daemon status`, the TUI status dashboard, and the
+// lite /usage surface).
+//
+// The percentage is always derived from the CONFIGURED limit. A limit of 0
+// (or an absent limit field) means the budget is disabled: the caller gets the
+// used count with a short "no limit" note and no percentage at all. Deriving
+// the total as used+remaining instead is what produced the historical bug
+// where a disabled limit printed "100.0%" because the daemon reports
+// remaining=0 while usage keeps counting.
+type TokenBudget struct {
+	// Used is the tokens consumed in the current window.
+	Used int
+	// Limit is the configured token cap for the window; <= 0 means disabled.
+	Limit int
+	// Percent is usage as a percentage of Limit; always 0 when Limit <= 0.
+	Percent float64
+}
+
+// NewTokenBudget builds a display view from a used count and the configured
+// limit. When limit <= 0 the budget is disabled and no percentage is computed.
+func NewTokenBudget(used, limit int) TokenBudget {
+	tb := TokenBudget{Used: used, Limit: limit}
+	if limit > 0 {
+		tb.Percent = float64(used) / float64(limit) * 100
+	}
+	return tb
+}
+
+// Limited reports whether a real token limit is configured.
+func (t TokenBudget) Limited() bool { return t.Limit > 0 }
+
+// Ratio returns the fraction of the limit consumed, clamped to [0, 1]. It is 0
+// for a disabled (unlimited) budget so progress bars never imply a cap.
+func (t TokenBudget) Ratio() float64 {
+	if !t.Limited() {
+		return 0
+	}
+	ratio := float64(t.Used) / float64(t.Limit)
+	if ratio < 0 {
+		return 0
+	}
+	if ratio > 1 {
+		return 1
+	}
+	return ratio
+}
+
+// Text renders the budget in one line:
+//
+//	limit configured:  "12345 / 50000 (24.7%)"
+//	limit disabled:    "12345 (no limit)"
+//
+// A disabled budget never contains a percent sign.
+func (t TokenBudget) Text() string {
+	if !t.Limited() {
+		return fmt.Sprintf("%d (no limit)", t.Used)
+	}
+	return fmt.Sprintf("%d / %d (%.1f%%)", t.Used, t.Limit, t.Percent)
 }
 
 // TruncateString truncates a string to the given length with ellipsis.

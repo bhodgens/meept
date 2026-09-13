@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/sharedclient"
+	"github.com/caimlas/meept/internal/tui/types"
 )
 
 // CommandHandler handles slash command execution.
@@ -234,8 +235,15 @@ func (h *CommandHandler) handleUsage(_ context.Context) {
 	h.addSectionHeader("token usage")
 	h.addScrollback(fmt.Sprintf("  model:            %s", resp.Model))
 	h.addScrollback(fmt.Sprintf("  default model:    %s", resp.DefaultModel))
-	h.addScrollback(fmt.Sprintf("  tokens used:      %d", resp.TokensUsed))
-	h.addScrollback(fmt.Sprintf("  tokens remaining: %d", resp.TokensRemaining))
+	// The percentage (when present) is relative to the CONFIGURED hourly
+	// limit. A disabled limit (0/absent) prints the used count with a "no
+	// limit" note and no percentage, and the always-zero "remaining" line is
+	// suppressed because it would imply a cap that does not exist.
+	budget := types.NewTokenBudget(resp.TokensUsed, resp.HourlyTokenLimit)
+	h.addScrollback(fmt.Sprintf("  tokens used:      %s", budget.Text()))
+	if budget.Limited() {
+		h.addScrollback(fmt.Sprintf("  tokens remaining: %d", resp.TokensRemaining))
+	}
 	h.addScrollback(fmt.Sprintf("  budget used:      %.2f", resp.BudgetUsed))
 	h.addScrollback(fmt.Sprintf("  budget remaining: %.2f", resp.BudgetRemaining))
 }

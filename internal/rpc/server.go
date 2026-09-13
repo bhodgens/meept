@@ -56,6 +56,14 @@ type Server struct {
 	// Used by the status handler to report actual token and cost usage (FIX #0031/#0035).
 	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64, perTaskCost float64, perSessionCost float64, perTaskBudget int, perSessionBudget int)
 
+	// TokenLimitGetter is an optional callback returning the configured
+	// hourly and daily TOKEN limits (0 = disabled/unlimited). When set, the
+	// limits are reported in the status response as "hourly_token_limit" and
+	// "daily_token_limit" so clients never have to infer a cap from
+	// used+remaining (which is 0 remaining while a disabled budget keeps
+	// counting usage, the source of the bogus 100% display).
+	TokenLimitGetter func() (hourlyLimit int, dailyLimit int)
+
 	// SecretsProxyStatusGetter is an optional callback returning the egress
 	// secrets-proxy status map {"enabled", "addr", "leak_attempts"}; nil or
 	// nil-result means the proxy is disabled/unwired and the "secrets_proxy"
@@ -492,6 +500,8 @@ func (s *Server) registerBuiltinHandlers() {
 			"default_model":      s.defaultModel,
 			"tokens_used":        0,
 			"tokens_remaining":   100000,
+			"hourly_token_limit": 0,
+			"daily_token_limit":  0,
 			"budget_used":        0.0,
 			"budget_remaining":   10.0,
 			"registered_methods": methods,
@@ -554,6 +564,16 @@ func (s *Server) registerBuiltinHandlers() {
 			result["per_session_cost"] = psc
 			result["per_task_budget"] = ptb
 			result["per_session_budget"] = psb
+		}
+
+		// Include the configured token limits when a getter is wired so
+		// clients print usage against the LIMIT instead of inferring a total
+		// from used+remaining (which reads 0 remaining, and therefore a bogus
+		// 100%, whenever the limit is disabled).
+		if s.TokenLimitGetter != nil {
+			hl, dl := s.TokenLimitGetter()
+			result["hourly_token_limit"] = hl
+			result["daily_token_limit"] = dl
 		}
 
 		return result, nil
