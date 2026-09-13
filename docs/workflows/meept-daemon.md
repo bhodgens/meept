@@ -71,10 +71,50 @@ rules in full.
 | Key | Where | Effect |
 |---|---|---|
 | `transport.rpc` / `transport.http` | `meept.json5` | which transports run |
-| `log_level` | `meept.json5` | log verbosity (not an env var) |
+| `log_level` | `meept.json5` | log verbosity, case-insensitive; invalid values warn and fall back to info |
+| `daemon.default_working_dir` | `meept.json5` | last-resort working directory for a chat or dispatched turn; empty means none |
 | `providers.<name>.lifecycle` | `models.json5` | how a local runtime is spawned and stopped |
+| `providers.<name>.options.tool_choice` | `models.json5` | `required` asks for a tool call on executor turns that carry tools |
 | `supervise` | `models.json5` per endpoint | `false` disables the parent-death supervisor |
 | `auto_stop_on_exit` | `models.json5` per endpoint | `false` leaves the runtime running after exit |
+
+## Turn working directory
+
+Every chat and dispatched turn resolves one working directory. Tools receive it
+through the tool context, never from the daemon's own process CWD.
+
+1. Session worktree path (a provisioned phase/session worktree)
+2. Session project path
+3. Session detection-context CWD (what `meept chat` sends as the client CWD)
+4. The user's ACTIVE project
+5. `daemon.default_working_dir` (empty by default)
+
+When all five are empty, the filesystem tools fail with
+`tools.ErrNoWorkingDir` ("no working directory for this session; pass an
+explicit path") and the daemon logs a WARN naming the source as `none`. It never
+synthesizes a project and never falls back to the daemon's own directory.
+
+Sessions are bound at creation to an explicit `project_id`, else the client CWD,
+else the active project. A session with none of those stays unbound and is
+logged at WARN.
+
+## Chat reply guard
+
+`internal/agent/reply_guard.go` replaces machine-shaped replies with a
+user-language fallback, because the reply is the user's only window into the
+daemon. Four rules, checked in this order:
+
+| Rule | Shape |
+|---|---|
+| `raw_platform_json` | a raw `platform_*` payload document |
+| `agents_header` | the agent roster's `## Available Agents` header |
+| `tools_totals_line` | a catalog line such as `*Total: 75 tools*` |
+| `tool_result_json` | pure JSON carrying a tool-result key (`memory_id`, `task_id`, `job_id`, `step_id`, `tool_result`, `tool_output`) |
+
+The roster and tool-result rules always fire; the other two have a prose escape
+hatch (a reply that is more than 40 percent running text passes through). Every
+replacement emits exactly one WARN naming the rule, the matched token, the
+agent, the intent, the session and conversation ids, and a bounded preview.
 
 ## Edge Cases
 

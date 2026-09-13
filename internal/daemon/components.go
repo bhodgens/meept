@@ -2560,6 +2560,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if c.SessionStore != nil {
 			c.Dispatcher.SetSessionStore(c.SessionStore)
 		}
+		// The dispatcher prepares the same kind of turn as the chat path, so
+		// it needs the same last-resort working directory: the user's ACTIVE
+		// project. Without it, an HTTP turn whose session carries no project
+		// and no detection-context CWD runs pathless and every filesystem
+		// tool fails with tools.ErrNoWorkingDir.
+		c.Dispatcher.SetActiveProjectPathResolver(activeProjectWorkingDir(c.ProjectManager))
+		// daemon.default_working_dir is the documented last resort, consulted
+		// only after the session chain and the active project both come up
+		// empty. Empty (the default) keeps the actionable ErrNoWorkingDir.
+		c.Dispatcher.SetDefaultWorkingDir(cfg.Daemon.DefaultWorkingDir)
 
 		// Register platform tools now that agent registry is available
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, msgBus, logger)
@@ -3044,6 +3054,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// the user's project).
 	if c.ChatHandler != nil {
 		c.ChatHandler.SetActiveProjectPathResolver(activeProjectWorkingDir(c.ProjectManager))
+		// daemon.default_working_dir: the last resort after the session chain
+		// and the active project, so the setter is no longer inert.
+		c.ChatHandler.SetDefaultWorkingDir(cfg.Daemon.DefaultWorkingDir)
 	}
 	// Wire the shared fence checker onto the ChatHandler so each session
 	// binds its working directory as the sandbox root and honors the

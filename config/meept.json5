@@ -7,6 +7,13 @@
     "pid_file": "~/.meept/meept.pid",
     "log_level": "INFO",
     "data_dir": "~/.meept",
+    // LAST-RESORT working directory for a chat or dispatched turn. It is
+    // consulted only after the session chain (worktree > project >
+    // detection-context CWD) and the user's ACTIVE project both come up empty,
+    // and it is never the daemon's own process cwd. Leave it empty (the
+    // default) and such a turn fails actionably, telling the model to pass an
+    // explicit path, instead of writing relative paths somewhere unintended.
+    "default_working_dir": "",
     "uploads": {
       "enabled": true,
       "max_size_mb": 20,

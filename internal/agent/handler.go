@@ -2231,13 +2231,13 @@ func (h *ChatHandler) effectiveWorkingDir(sess *session.Session) (string, string
 	}
 	if h.activeProjectPath != nil {
 		if dir := h.activeProjectPath(); dir != "" {
-			return dir, "active_project"
+			return dir, string(session.WorkingDirFromActiveProject)
 		}
 	}
 	if h.defaultWorkingDir != "" {
-		return h.defaultWorkingDir, "daemon_default"
+		return h.defaultWorkingDir, string(session.WorkingDirFromDefault)
 	}
-	return "", "none"
+	return "", string(session.WorkingDirFromNone)
 }
 
 // SetActiveProjectPathResolver wires the turn-start fallback that returns

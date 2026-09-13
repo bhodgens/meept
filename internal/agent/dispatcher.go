@@ -22,6 +22,7 @@ import (
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/preferences"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/templates"
@@ -376,6 +377,18 @@ type Dispatcher struct {
 	// sessionStore looks up session project paths for loopManager.
 	sessionStore SessionStoreReader
 
+	// activeProjectPath returns the local path of the user's ACTIVE project.
+	// It is the last-resort fallback for a dispatched turn whose session has
+	// no worktree, no bound project and no detection-context CWD: without it
+	// the loop runs with no working directory and every filesystem tool fails
+	// (tools.ErrNoWorkingDir). Optional; nil-safe.
+	activeProjectPath func() string
+
+	// defaultWorkingDir is the configured last resort
+	// (daemon.default_working_dir), consulted only after every session-bound
+	// source and the active project have come up empty. Empty means none.
+	defaultWorkingDir string
+
 	// fenceController configures the shared fence sandbox per-session
 	// (root = project path, plus --nofence override). Optional; nil-safe.
 	fenceController FenceController
@@ -670,10 +683,62 @@ func (d *Dispatcher) SetAgentLoopManager(m *Manager) {
 }
 
 // SetSessionStore wires a session store for project-path lookup in
-// RouteToAgent. Nil is a no-op.
+// SetSessionStore wires the session store used to resolve a dispatched
+// turn's working directory. Nil is a no-op.
 func (d *Dispatcher) SetSessionStore(s SessionStoreReader) {
 	if s != nil {
 		d.sessionStore = s
+	}
+}
+
+// SetActiveProjectPathResolver wires the resolver for the user's ACTIVE
+// project, the last-resort working directory for a dispatched turn whose
+// session has nothing bound. Nil is a no-op.
+func (d *Dispatcher) SetActiveProjectPathResolver(fn func() string) {
+	if d != nil && fn != nil {
+		d.activeProjectPath = fn
+	}
+}
+
+// resolveSessionWorkingDir returns the working directory for a dispatched
+// turn and the source it came from, using the ONE precedence documented in
+// AGENTS.md and implemented by session.ResolveWorkingDir:
+//
+//	WorktreePath > ProjectPath > DetectionContext.CWD
+//
+// Two fallbacks follow, in order, because the dispatch path reaches sessions
+// the chat path never sees (HTTP requests with a synthetic or project-less
+// session): the session's project ID resolved through the loop manager, then
+// the user's ACTIVE project. Neither invents a directory; when all of them
+// come up empty the caller gets ("", WorkingDirFromNone) and the tools fail
+// actionably instead of writing relative paths into the daemon's own CWD.
+func (d *Dispatcher) resolveSessionWorkingDir(sess *session.Session) (string, session.WorkingDirSource) {
+	dir, source := session.ResolveWorkingDir(sess)
+	if dir != "" {
+		return dir, source
+	}
+	if sess != nil && sess.ProjectID != "" && d.loopManager != nil {
+		if p := d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID); p != "" {
+			return p, session.WorkingDirFromProject
+		}
+	}
+	if d.activeProjectPath != nil {
+		if p := d.activeProjectPath(); p != "" {
+			return p, session.WorkingDirFromActiveProject
+		}
+	}
+	if d.defaultWorkingDir != "" {
+		return d.defaultWorkingDir, session.WorkingDirFromDefault
+	}
+	return "", session.WorkingDirFromNone
+}
+
+// SetDefaultWorkingDir wires the configured last-resort working directory
+// (daemon.default_working_dir). Empty is a no-op: "no last resort" is the
+// documented default. Nil-safe.
+func (d *Dispatcher) SetDefaultWorkingDir(dir string) {
+	if d != nil && dir != "" {
+		d.defaultWorkingDir = dir
 	}
 }
 
@@ -2396,14 +2461,17 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		// because the session store only knows session-level conversation IDs.
 		if d.sessionStore != nil && sessionConversationID != "" {
 			if sess := d.sessionStore.GetByConversationID(sessionConversationID); sess != nil {
-				projectPath := sess.ProjectPath
-				if projectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
-					projectPath = d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID)
-				}
+				projectPath, wdSource := d.resolveSessionWorkingDir(sess)
 				if projectPath != "" {
 					if qLoop := d.registry.GetActiveQueueLoop(conversationID); qLoop != nil {
 						qLoop.SetWorkingDir(projectPath)
 					}
+				} else {
+					d.logger.Warn("dispatched turn has no working directory",
+						"conversation_id", sessionConversationID,
+						"session_id", sess.ID,
+						"source", string(wdSource),
+					)
 				}
 			}
 		}
@@ -2663,15 +2731,28 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 			// Legacy session fallback: if ProjectPath is empty but
 			// ProjectID is set, look up LocalPath from the project
 			// manager (available via loop manager) before falling back.
-			if sess.ProjectPath == "" && sess.ProjectID != "" {
+			if sess.ProjectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
 				if path := d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID); path != "" {
 					sess.ProjectPath = path
 				}
 			}
-			if sess.ProjectPath != "" {
-				// Bind the shared fence sandbox to this session's project
-				// path and apply the per-session --nofence override.
-				d.configureFence(conversationID, sess.ProjectPath, sess.NoFence)
+			// The turn's working directory follows the ONE precedence
+			// (worktree > project > detection CWD) plus the active-project
+			// fallback, so a session with no project still runs in a real
+			// directory instead of failing every filesystem tool with
+			// tools.ErrNoWorkingDir.
+			workingDir, wdSource := d.resolveSessionWorkingDir(sess)
+			if workingDir == "" {
+				d.logger.Warn("dispatched turn has no working directory",
+					"conversation_id", conversationID,
+					"session_id", sess.ID,
+					"source", string(wdSource),
+				)
+			}
+			if workingDir != "" {
+				// Bind the shared fence sandbox to this turn's directory
+				// and apply the per-session --nofence override.
+				d.configureFence(conversationID, workingDir, sess.NoFence)
 				// Use the registry agent as the template so the session loop
 				// inherits LLM client, tools, skills, and hooks.
 				template, templateErr := d.registry.Get(agentID)
@@ -2679,11 +2760,16 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 					template, templateErr = d.registry.Get(config.AgentIDChat)
 				}
 				if templateErr == nil && template != nil {
-					loop, err := d.loopManager.GetOrCreateWired(conversationID, sess.ProjectPath, template)
+					loop, err := d.loopManager.GetOrCreateWired(conversationID, workingDir, template)
 					if err == nil {
 						// Wire session identity + project context (mirrors
 						// ChatHandler.sessionLoop; ConfigSnapshot excludes these).
 						loop.SetProjectID(sess.ProjectID)
+						// The directory may come from the detection context or
+						// the active project, not only ProjectPath, so set it
+						// explicitly: executeToolCalls injects GetWorkingDir()
+						// into every tool context.
+						loop.SetWorkingDir(workingDir)
 						if sess.DetectionContext != nil {
 							loop.SetDetectionContext(&DetectionContext{
 								CWD:               sess.DetectionContext.CWD,
@@ -2710,9 +2796,13 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 	// that is discarded when the session-scoped loop succeeds.
 	if d.sessionStore != nil && conversationID != "" {
 		if sess := d.sessionStore.GetByConversationID(conversationID); sess != nil {
-			projectPath := sess.ProjectPath
-			if projectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
-				projectPath = d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID)
+			projectPath, wdSource := d.resolveSessionWorkingDir(sess)
+			if projectPath == "" {
+				d.logger.Warn("dispatched turn has no working directory",
+					"conversation_id", conversationID,
+					"session_id", sess.ID,
+					"source", string(wdSource),
+				)
 			}
 			if projectPath != "" {
 				// Try to create a per-session loop to avoid the singleton race.
