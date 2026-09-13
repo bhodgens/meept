@@ -461,12 +461,14 @@ stops owned runtimes: `Daemon.Stop` calls `ContainerManager.StopAll(ctx)`
 behind - verified 2026-09-12, killing a scratch daemon took its `mlx_lm` and
 `llama-server` children down with it.
 
-A hard kill leaves them running. SIGKILL, `kill -9`, a crash, or a closed
-terminal that skips the signal path re-parents every runtime to init
-(ppid==1), and only `StartupOrphanSweep` reaps them - at the NEXT daemon
-boot. Until then the orphans hold their endpoint ports, and the
-served-endpoint guard refuses the next spawn of those endpoints. Cleanup
-after a hard kill, in order:
+A hard kill no longer leaks. Each runtime is spawned under a supervisor (the
+daemon binary in a hidden mode, `meept-daemon --supervise-parent <pid> -- <argv>`)
+that kills the runtime's process group - SIGTERM, then SIGKILL after 10s - once
+its parent disappears, and exits with the runtime. macOS has no parent-death
+signal, so the supervisor uses a parent-death pipe plus a 2s pid poll. The
+runtime keeps its original argv and pid: the sweep's command-line match and the
+pid-file ownership token still identify it, never the wrapper. Per-endpoint
+escape hatch: `supervise: false`. Cleanup after a hard kill, in order:
 
 1. `kill <daemon-pid>` first (graceful) and re-check; do not kill children of
    a live daemon, its restart policy respawns them.
@@ -474,15 +476,10 @@ after a hard kill, in order:
    `lsof -nP -iTCP:<port> -sTCP:LISTEN` to find what survived.
 3. Kill each leftover child explicitly and confirm the port is free.
 
-Children cannot detect their own orphanhood today. macOS has no parent-death
-signal, so a runtime is never notified when the daemon dies; the boot sweep
-plus the spawn guard is the whole defense. The in-code fix, when it is
-needed, is a supervisor process that spawns the runtime as its own child and
-exits - killing the child - when its parent disappears. The child keeps its
-original argv under that design, so the sweep's command-line matching and the
-pid-file ownership token are unaffected. Until then, terminate the daemon
-gracefully and verify the children are gone. Windows has no `ps`, so it gets
-no sweep (documented gap).
+The boot sweep (`StartupOrphanSweep`) remains the backstop: it reaps what
+self-termination cannot - a runtime whose supervisor was itself SIGKILLed, and
+anything left by an older build. Windows has no `ps`, so it gets no sweep
+(documented gap).
 
 ## Coding Practices
 

@@ -193,6 +193,11 @@ func endpointInUse(addr string) bool {
 // Start spawns the runtime process. stdout and stderr are used for the
 // subprocess's output streams; nil falls back to os.Stdout/os.Stderr.
 //
+// In the daemon the runtime is spawned under the supervisor process
+// (supervisor.go), so a hard-killed daemon cannot leave it orphaned; the
+// recorded PID is the runtime's in both paths (see the supervisor wiring
+// below). `supervise: false` or a non-daemon executable spawns directly.
+//
 // Adoption semantics (docs/bugs-and-gaps.md "Runtime adoption ownership
 // race"): if the PID file names a live process,
 //   - a pidfile carrying THIS instance's token (same-boot re-Start) is
@@ -290,24 +295,80 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	// governed by explicit Stop()/StopAll and the health checker instead —
 	// both of which SIGTERM/SIGKILL the process group on real shutdown.
 	spawnCtx := context.WithoutCancel(ctx)
-	p.cmd = exec.CommandContext(spawnCtx, name, args...)
-	p.cmd.Stdout = stdout
-	p.cmd.Stderr = stderr
-	p.cmd.Stdin = nil // Explicitly set stdin to nil to avoid blocking
-	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	if err := p.cmd.Start(); err != nil {
-		return fmt.Errorf("failed to spawn runtime: %w", err)
+	// Supervisor resolution. A runtime spawned by the daemon runs under the
+	// supervisor process (supervisor.go), which terminates it when the daemon
+	// dies hard - macOS has no parent-death signal, so nothing else would.
+	// Two conditions must both hold for the wrapped spawn:
+	//   - the endpoint did not opt out (`supervise: false`, default true);
+	//   - this executable carries the supervisor entry point, i.e. it is the
+	//     daemon binary. A CLI or eval process spawns directly: its own exit is
+	//     not the runtime's death.
+	// Otherwise the direct spawn below runs, byte-identically to before.
+	supervisorBin := ""
+	if p.config.Supervised() {
+		supervisorBin = supervisorBinary()
+		if supervisorBin == "" {
+			// Expected outside the daemon (the CLI, an eval harness): their own
+			// exit is not the runtime's death, so they spawn directly.
+			slog.Debug("runtime supervisor unavailable; spawning directly",
+				"endpoint_key", p.config.EndpointKey)
+		}
 	}
 
-	p.pid = p.cmd.Process.Pid
+	// deathPipe is the write end of the supervisor's parent-death pipe: this
+	// process holding it open is what tells the supervisor to keep supervising.
+	// It is closed when the supervisor exits, and by the kernel if this process
+	// dies hard - which is the whole mechanism.
+	var deathPipe *os.File
+	if supervisorBin != "" {
+		report, death, err := p.startSupervised(spawnCtx, stdout, stderr, supervisorBin)
+		if err != nil {
+			return err
+		}
+		deathPipe = death
+		// The reported pid is the RUNTIME's, not the wrapper's: the PID file,
+		// the sweep's command-line match and the ownership-token identity check
+		// must all keep naming the process that holds the model and the port.
+		pid, reportErr := readSupervisorReport(report)
+		if reportErr != nil {
+			// Never leave a wrapper behind: SIGTERM (not KILL) so the
+			// supervisor takes its runtime down with it. Closing the death
+			// pipe tells it the same thing.
+			closeFileQuietly(deathPipe)
+			if killErr := killProcessGroup(p.cmd, syscall.SIGTERM); killErr != nil {
+				slog.Debug("runtime: best-effort stop after a failed spawn report", "error", killErr)
+			}
+			return fmt.Errorf("failed to spawn runtime: %w", reportErr)
+		}
+		p.pid = pid
+	} else {
+		p.cmd = exec.CommandContext(spawnCtx, name, args...)
+		p.cmd.Stdout = stdout
+		p.cmd.Stderr = stderr
+		p.cmd.Stdin = nil // Explicitly set stdin to nil to avoid blocking
+		p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+		if err := p.cmd.Start(); err != nil {
+			return fmt.Errorf("failed to spawn runtime: %w", err)
+		}
+
+		p.pid = p.cmd.Process.Pid
+	}
 
 	// Write PID file (atomic; carries this instance's identity token).
+	// The recorded pid is the runtime's in both paths: under the supervisor the
+	// wrapper's pid is deliberately not recorded, so every consumer of this
+	// file (AlreadyRunning, StopAsOperator identity, `meept runtime status`,
+	// the orphan sweep's pid-file cleanup) still looks at the runtime.
 	if err := p.writePIDFile(pidfileEntry{PID: p.pid, Token: p.instanceToken}); err != nil {
-		// Best-effort kill: the spawn is being abandoned; a Kill error
-		// would only mask the writePIDFile cause (process is reaped by
-		// the wait goroutine regardless).
-		_ = p.cmd.Process.Kill()
+		// Best-effort stop: the spawn is being abandoned. SIGTERM rather
+		// than SIGKILL so a supervisor can take its runtime down with it;
+		// either way the wait goroutine reaps the wrapper.
+		closeFileQuietly(deathPipe)
+		if killErr := killProcessGroup(p.cmd, syscall.SIGTERM); killErr != nil {
+			slog.Debug("runtime: best-effort stop after a failed PID-file write", "error", killErr)
+		}
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
@@ -340,6 +401,10 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 		p.pid = 0
 		p.cmd = nil
 		p.mu.Unlock()
+		// The supervisor is gone (it exits when its runtime exits, and the
+		// kernel closes the pipe on a hard death), so the parent-death pipe
+		// has no reader left to release with.
+		closeFileQuietly(deathPipe)
 		if err != nil {
 			slog.Warn("runtime process wait returned error", "error", err)
 		}

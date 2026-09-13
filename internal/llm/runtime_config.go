@@ -28,12 +28,18 @@ type RuntimeLifecycleConfig struct {
 	// by the shutdown path nor reaped by the boot-time orphan sweep — it kept
 	// its model loaded and its port held after a clean shutdown and after a
 	// crash alike.
-	AutoStopOnExit *bool               `json:"auto_stop_on_exit,omitempty"` // Stop on daemon shutdown; absent means true
-	PIDFile        string              `json:"pid_file"`                    // Path to PID file
-	SpawnCommand   []string            `json:"spawn_command"`               // Command and args to spawn runtime
-	SpawnTimeout   int                 `json:"spawn_timeout_seconds"`
-	HealthCheck    HealthCheckConfig   `json:"health_check"`
-	RestartPolicy  RestartPolicyConfig `json:"restart_policy"`
+	AutoStopOnExit *bool `json:"auto_stop_on_exit,omitempty"` // Stop on daemon shutdown; absent means true
+	// Supervise controls whether the runtime is spawned under the supervisor
+	// process (see supervisor.go), which terminates it when the daemon dies
+	// hard. Like AutoStopOnExit it is a pointer so an ABSENT key can be told
+	// apart from an explicit `false`: absent (nil) means true via
+	// SuperviseOrDefault, and only an explicit `false` opts out.
+	Supervise     *bool               `json:"supervise,omitempty"` // Spawn under the supervisor; absent means true
+	PIDFile       string              `json:"pid_file"`            // Path to PID file
+	SpawnCommand  []string            `json:"spawn_command"`       // Command and args to spawn runtime
+	SpawnTimeout  int                 `json:"spawn_timeout_seconds"`
+	HealthCheck   HealthCheckConfig   `json:"health_check"`
+	RestartPolicy RestartPolicyConfig `json:"restart_policy"`
 }
 
 // AutoStopOnExitOrDefault reports whether the platform should stop this
@@ -42,6 +48,15 @@ type RuntimeLifecycleConfig struct {
 // it running". Only an explicit `false` opts out.
 func (c RuntimeLifecycleConfig) AutoStopOnExitOrDefault() bool {
 	return c.AutoStopOnExit == nil || *c.AutoStopOnExit
+}
+
+// SuperviseOrDefault reports whether this runtime should be spawned under the
+// supervisor process. An absent key (nil pointer) defaults to true: a runtime
+// whose daemon dies hard holds a model and a port until the next boot sweep, so
+// silence must not mean "leave it unsupervised". Only an explicit `false` opts
+// out (e.g. a hand-managed server the user wraps themselves).
+func (c RuntimeLifecycleConfig) SuperviseOrDefault() bool {
+	return c.Supervise == nil || *c.Supervise
 }
 
 // HealthCheckConfig holds health check configuration.
@@ -79,10 +94,16 @@ type RuntimeConfig struct {
 	// (RegisterConfig takes it from the provider options). It is the address
 	// the duplicate-spawn pre-check probes before spawning. Empty when the
 	// caller has no base URL (CLI construction paths): the probe is skipped.
-	BaseURL            string
-	PIDFile            string
-	AutoStart          bool
-	AutoStop           bool
+	BaseURL   string
+	PIDFile   string
+	AutoStart bool
+	AutoStop  bool
+	// Supervise runs this runtime under the supervisor process (supervisor.go)
+	// so a hard-killed daemon cannot leave it orphaned. It is a pointer so an
+	// ABSENT value (every literal-constructed config) defaults to supervised
+	// via Supervised(): silence must not mean "leave a runtime behind". Only an
+	// explicit false opts out.
+	Supervise          *bool
 	SpawnCommand       []string
 	SpawnTimeout       time.Duration
 	HealthEndpoint     string
@@ -191,6 +212,11 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 		restartResetAfter = time.Duration(cfg.RestartPolicy.ResetAfterSeconds) * time.Second
 	}
 
+	// Resolved supervisor decision: an absent `supervise` key means true (see
+	// SuperviseOrDefault), and the resolved value is stored as a pointer so a
+	// literal-constructed RuntimeConfig keeps the same absent-means-true rule.
+	supervise := cfg.SuperviseOrDefault()
+
 	return &RuntimeConfig{
 		Type:               rt,
 		ModelPath:          firstPath,
@@ -198,6 +224,7 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 		PIDFile:            pidFile,
 		AutoStart:          cfg.AutoStart,
 		AutoStop:           cfg.AutoStopOnExitOrDefault(),
+		Supervise:          &supervise,
 		SpawnCommand:       spawnCmd,
 		SpawnTimeout:       spawnTimeout,
 		HealthEndpoint:     cfg.HealthCheck.Endpoint,
@@ -293,6 +320,17 @@ func IsLoopbackBaseURL(baseURL string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// Supervised reports whether this runtime must be spawned under the supervisor
+// process. An absent value (nil, i.e. every literal-constructed config) means
+// true: only an explicit false opts out. A nil config manages no runtime and
+// reports false.
+func (c *RuntimeConfig) Supervised() bool {
+	if c == nil {
+		return false
+	}
+	return c.Supervise == nil || *c.Supervise
 }
 
 // SupportedRuntimes returns the list of supported runtime types.
@@ -436,6 +474,17 @@ func (p ProviderConfig) IsAutoStopOnExit() bool {
 		return false
 	}
 	return p.Lifecycle.AutoStopOnExitOrDefault()
+}
+
+// IsSupervised returns whether the runtime should be spawned under the
+// supervisor process. An absent `supervise` key defaults to true (see
+// RuntimeLifecycleConfig.SuperviseOrDefault); only an explicit false opts out.
+// A provider with no lifecycle block manages no runtime, so it reports false.
+func (p ProviderConfig) IsSupervised() bool {
+	if p.Lifecycle == nil {
+		return false
+	}
+	return p.Lifecycle.SuperviseOrDefault()
 }
 
 // String returns a human-readable representation of the runtime type.

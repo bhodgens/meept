@@ -30,6 +30,13 @@ var (
 )
 
 func main() {
+	// Supervisor mode: the daemon binary is re-executed as the supervisor of a
+	// spawned runtime (see supervisor_main.go). Handled before cobra so the
+	// runtime's argv after `--` is never parsed as daemon flags.
+	if code, handled := runSupervisorMode(os.Args[1:]); handled {
+		os.Exit(code)
+	}
+
 	rootCmd := &cobra.Command{
 		Use:   "meept-daemon",
 		Short: "Meept daemon server",

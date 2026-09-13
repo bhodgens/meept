@@ -16,6 +16,7 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
       "model_path": "~/models/lfm-code.Q8_0.gguf",
       "auto_start": true,
       "auto_stop_on_exit": true,
+      "supervise": true,
       "pid_file": "~/.meept/run/llama.pid",
       "spawn_command": ["llama-server", "-m", "${MODEL_PATH}", "--port", "8080"],
       "spawn_timeout_seconds": 60,
@@ -39,6 +40,7 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
 | `model_paths` | object | see note | Map of `modelKey` → model path, for multi-model servers sharing one subprocess. Required unless `model_path` is set |
 | `auto_start` | bool | no | Auto-start on platform startup (default: false) |
 | `auto_stop_on_exit` | bool | no | Stop on platform shutdown (default: true). Absent or `true` means the runtime is stopped by the shutdown path and reaped by the boot-time orphan sweep; only an explicit `false` leaves it running |
+| `supervise` | bool | no | Spawn the runtime under the supervisor process, which terminates it when the platform dies hard (default: true). Only an explicit `false` opts out — see [Orphaned Runtimes](#orphaned-runtimes) |
 | `pid_file` | string | yes | Path to PID file for process tracking |
 | `spawn_command` | array | yes | Command and arguments to spawn the runtime |
 | `spawn_timeout_seconds` | int | no | Timeout waiting for runtime to become healthy (default: 60) |
@@ -122,7 +124,7 @@ If no provider is specified, `local` is used by default.
 
 3. **Per-Model Logging**: A structured JSON-line log is written per model at `~/.meept/logs/runtimes/<providerID>-<modelKey>.log`. Events: `register`, `spawn_attempt`, `spawn_success`, `spawn_failure`, `health_transition`, `restart_attempt`, `restart_success`, `restart_failed`, `stop`. Raw subprocess output goes to `~/.meept/logs/runtimes/<host>-<port>.process.log` with `out:`/`err:` line prefixes. Files rotate at 10 MB with one `.1` backup.
 
-4. **PID File Management**: The runtime PID is stored in a file for cross-restart tracking. Stale PID files (from crashes) are automatically cleaned up on next startup. The `pid_file` of the first provider to register an endpoint wins; subsequent providers' `pid_file` values are ignored (debug log if they differ).
+4. **PID File Management**: The runtime PID is stored in a file for cross-restart tracking. Under the supervisor (see [Orphaned Runtimes](#orphaned-runtimes)) the recorded pid is still the **runtime's**, not the wrapper's, so `meept runtime status`, `meept runtime stop`, and the orphan sweep all address the process that holds the model and the port. Stale PID files (from crashes) are automatically cleaned up on next startup. The `pid_file` of the first provider to register an endpoint wins; subsequent providers' `pid_file` values are ignored (debug log if they differ).
 
 5. **Graceful Shutdown**: On platform exit, each endpoint (not each provider) whose config does not set `auto_stop_on_exit: false` receives a single SIGTERM, then SIGKILL if it doesn't exit within the timeout. Health checkers are stopped and per-model/per-process log files are closed.
 
@@ -145,15 +147,50 @@ elsewhere, or a test harness) is never refused on that port's account.
 
 ## Orphaned Runtimes
 
-A local runtime is a direct child of the process that spawned it, in its own
-process group. Platforms without a parent-death signal (macOS) cannot stop a
-child when the parent dies hard — SIGKILL, a panic, session teardown — so the
-runtime is re-parented to init and keeps running, with the model loaded and the
-endpoint port held. The ownership rule below keeps later boots from stopping it
-(a PID file carrying another instance's token is adopted as *observed, not
-owned*), so the sweep is what reaps it.
+**Self-termination is implemented.** A managed runtime is no longer a direct
+child of the platform: the platform re-executes its own binary in a hidden
+supervisor mode
 
-At boot, before starting its own runtimes, the platform sweeps those leftovers:
+```
+meept-daemon --supervise-parent <platform pid> -- <spawn_command>
+```
+
+which spawns the runtime with exactly the configured `spawn_command`, in its own
+process group, and supervises it:
+
+- the runtime's pid is reported back to the platform over a pipe, so the
+  `pid_file` names the **runtime** (never the wrapper) and the ownership token,
+  `meept runtime status`, and the operator stop all keep addressing the process
+  that holds the model and the port;
+- the supervisor watches the platform with a parent-death pipe and a 2-second
+  pid poll. When the platform disappears - including a hard kill (SIGKILL, a
+  panic, a closed terminal that skips the signal path) - it terminates the
+  runtime: SIGTERM to the runtime's process group, then SIGKILL if it has not
+  exited within 10 seconds;
+- it exits as soon as the runtime exits (or the platform dies), so no wrapper
+  process is left behind, and it never binds the endpoint port.
+
+Because the runtime keeps its own argv, the process table still shows the
+configured `spawn_command`: the boot sweep below keeps matching it, and to
+`lsof`/`pgrep` the runtime looks exactly as it did before.
+
+Supervision is on by default, per endpoint. Set `supervise: false` next to
+`auto_stop_on_exit` to spawn directly instead, with no wrapper process:
+
+```json5
+"lifecycle": {
+  "runtime": "llama-cpp",
+  "auto_stop_on_exit": true,   // stopped by the shutdown path
+  "supervise": false,          // and NOT wrapped in a supervisor
+  "spawn_command": ["llama-server", "-m", "${MODEL_PATH}", "--port", "8080"]
+}
+```
+
+Runtimes the CLI spawns (`meept runtime start`) are deliberately **not**
+supervised: that runtime is meant to outlive the CLI, so a supervisor bound to
+the CLI's lifetime would kill it.
+
+At boot, before starting its own runtimes, the platform still sweeps leftovers:
 for every endpoint whose `auto_stop_on_exit` is `true` or absent, a process
 whose parent is init (`ppid == 1`) and whose command line is exactly that
 endpoint's `spawn_command` is stopped (SIGTERM to the process group, then
@@ -161,7 +198,9 @@ SIGKILL after a short grace period) and its PID file is removed. Only
 `auto_stop_on_exit: false` is left alone: that setting asks the runtime to
 outlive the platform. The shutdown path (`StopAll`) and this boot-time sweep
 read the same flag, so an endpoint that omits the key is stopped with the
-platform and reaped as an orphan when the platform died hard.
+platform and reaped as an orphan when the platform died hard. The sweep now
+catches what self-termination cannot: a runtime whose supervisor was itself
+SIGKILLed, and runtimes left by a build older than this one.
 
 `meept doctor` reports the same leftovers as its `orphan-children` check, and
 `--fix` sends them SIGTERM. Windows is not supported by the sweep (no `ps`): the
