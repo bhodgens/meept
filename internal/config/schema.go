@@ -2179,11 +2179,16 @@ type WorkspaceConfig struct {
 
 // SkillsConfig holds skills settings.
 type SkillsConfig struct {
-	Enabled               bool                `json:"enabled"                 toml:"enabled"`
-	SearchPaths           []string            `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
-	AutoReload            bool                `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
-	CacheSize             int                 `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
-	AutoDiscoverHermes    bool                `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
+	Enabled            bool     `json:"enabled"                 toml:"enabled"`
+	SearchPaths        []string `json:"search_paths"            toml:"search_paths"`         // Additional skill directories beyond defaults
+	AutoReload         bool     `json:"auto_reload"             toml:"auto_reload"`          // Watch for skill file changes
+	CacheSize          int      `json:"max_cached_skills"       toml:"max_cached_skills"`    // Max skills to cache in lazy loader (default: 50)
+	AutoDiscoverHermes bool     `json:"auto_discover_hermes"    toml:"auto_discover_hermes"` // Auto-discover ~/.hermes/skills (default: true)
+	// ClaudeSkillsEnabled discovers ~/.claude/skills into agent turns.
+	// Default false: another tool's user-global skills must not be injected
+	// into meept agent turns. A name-only match pulled unrelated Claude skills
+	// into a coder turn (2026-09-12) and the agent abandoned its actual task.
+	ClaudeSkillsEnabled   bool                `json:"claude_skills_enabled"   toml:"claude_skills_enabled"`  // Discover ~/.claude/skills (default: false)
 	HermesSkillsDir       string              `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
 	ValidatePrerequisites bool                `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
 	Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings

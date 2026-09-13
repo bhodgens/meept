@@ -7249,9 +7249,17 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 		}
 	}
 
-	// Add ClaudeSource to discover skills from ~/.claude/skills/
-	// This is wired separately from file tiers since Claude uses a different skill format
-	discoveryOpts = append(discoveryOpts, skills.WithSources(skills.NewClaudeSource(logger)))
+	// Add ClaudeSource to discover skills from ~/.claude/skills/, but ONLY when
+	// explicitly enabled (skills.claude_skills_enabled, default false).
+	// Claude uses a different skill format, so it is wired separately from the
+	// file tiers rather than as a tier. Leaving it on by default injected
+	// unrelated Claude skills into agent turns on a name-only match.
+	if cfg.Skills.ClaudeSkillsEnabled {
+		discoveryOpts = append(discoveryOpts, skills.WithSources(skills.NewClaudeSource(logger)))
+		logger.Info("Claude skill discovery enabled", "path", "~/.claude/skills")
+	} else {
+		logger.Debug("Claude skill discovery disabled", "config_key", "skills.claude_skills_enabled")
+	}
 	logger.Info("Skills discovery tiers configured",
 		"total_tiers", len(baseTiers),
 		"hermes_enabled", hermesTierCount > 0,

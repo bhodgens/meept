@@ -99,6 +99,17 @@ func NewDiscovery(opts ...DiscoveryOption) *Discovery {
 	}
 
 	// If no sources were set by options, create the default set.
+	//
+	// The default set includes ~/.claude/skills because skill MANAGEMENT needs
+	// it: the evolver and the skill writer locate and archive Claude-format
+	// skills through this tier.
+	//
+	// Agent TURNS must not use this default. The daemon builds its turn-time
+	// discovery explicitly (WithTiers + an optional Claude source) and includes
+	// the Claude source only when skills.claude_skills_enabled is true, because
+	// a name-only match there injects unrelated instructions into a task turn
+	// (observed 2026-09-12: a coder turn matched Claude skills about Flutter UI
+	// and session titles and abandoned the actual task).
 	if len(d.sources) == 0 {
 		d.sources = []SkillSource{
 			NewFileSource(DefaultTiers(), d.logger),
