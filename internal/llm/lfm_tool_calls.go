@@ -98,6 +98,53 @@ func parseLFMToolCallsWithBare(content string, allowBare bool) (string, []ToolCa
 	return content, append(append(append(markerCalls, xmlCalls...), fenceCalls...), bareCalls...)
 }
 
+// arrayElementOffsets marks every byte offset in content at which a '{' opens an
+// object that is an ELEMENT of a JSON array: its immediately enclosing bracket
+// is an '[' and the content's brackets balance. Offsets are the ones a caller
+// would pass to findJSONObjectEnd (the object's opening brace).
+//
+// The array verdict is deliberately conservative (audit finding F78): brackets
+// are tracked with quote awareness only INSIDE a bracket run, and a content
+// whose brackets do not balance yields NO element offsets at all. Prose is not
+// JSON — a contraction opens a string that never closes, an unmatched '[' never
+// ends — and either mistake used to flip the verdict, mining an object out of a
+// genuine array or silently dropping a real bare call.
+func arrayElementOffsets(content string) map[int]bool {
+	var stack []byte
+	inStr := false
+	var quote byte
+	elem := make(map[int]bool)
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+		switch {
+		case inStr && ch == '\\':
+			i++ // skip the escaped byte inside a string
+		case inStr:
+			if ch == quote {
+				inStr = false
+			}
+		case (ch == '"' || ch == '\'') && len(stack) > 0:
+			inStr = true
+			quote = ch
+		case ch == '[' || ch == '{':
+			if ch == '{' && len(stack) > 0 && stack[len(stack)-1] == '[' {
+				elem[i] = true
+			}
+			stack = append(stack, ch)
+		case ch == ']' || ch == '}':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	if len(stack) != 0 {
+		// Unbalanced brackets: the prose brackets never closed, so no offset
+		// can be called an array element.
+		return nil
+	}
+	return elem
+}
+
 // parseLFMBareJSONCalls mines tool calls that ship as a BARE JSON object in
 // prose with no fence, marker, or XML wrapper — the shape LFM2.5-8B-A1B
 // (MLX 4-bit) actually produces. Verified BY TEST 2026-09-12: asked to call
@@ -140,37 +187,26 @@ func parseLFMBareJSONCalls(content string) (string, []ToolCall) {
 	}
 	// An object that is an ELEMENT of a JSON array is likewise not a call
 	// shape (same rule the fence half documents). This scans the ACTUAL bracket
-	// nesting before pos — a preceding comma is NOT evidence of an array:
-	// commas are ordinary prose punctuation ("here is the config, {...}"), and
-	// treating "after a comma" as "inside an array" silently dropped a bare
-	// call that followed one (audit finding F76). Only an object whose
-	// immediately enclosing bracket is an open '[' is skipped.
-	inArray := func(pos int) bool {
-		var stack []byte
-		inStr := false
-		var quote byte
-		for i := 0; i < pos; i++ {
-			ch := content[i]
-			switch {
-			case inStr && ch == '\\':
-				i++ // skip the escaped byte inside a string
-			case inStr:
-				if ch == quote {
-					inStr = false
-				}
-			case ch == '"' || ch == '\'':
-				inStr = true
-				quote = ch
-			case ch == '[' || ch == '{':
-				stack = append(stack, ch)
-			case ch == ']' || ch == '}':
-				if len(stack) > 0 {
-					stack = stack[:len(stack)-1]
-				}
-			}
-		}
-		return len(stack) > 0 && stack[len(stack)-1] == '['
-	}
+	// nesting — a preceding comma is NOT evidence of an array: commas are
+	// ordinary prose punctuation ("here is the config, {...}"), and treating
+	// "after a comma" as "inside an array" silently dropped a bare call that
+	// followed one (audit finding F76). Only an object whose immediately
+	// enclosing bracket is an open '[' is skipped.
+	//
+	// Two rules keep the array verdict honest (audit finding F78):
+	//   - quotes are tracked only INSIDE a bracket run. Prose contractions
+	//     ("the user's request") otherwise opened a string that never closed,
+	//     which hid every later bracket: the stack read empty, an object that
+	//     really was an array element was mined as a call, and the call was
+	//     stripped out of the model's answer.
+	//   - the WHOLE content's brackets must balance. An unbalanced prose '['
+	//     ("Steps: [1) read the file. {\"name\":...}") left a phantom array
+	//     open across every later object, so a real bare call was dropped.
+	// A truncated reply inside an array is the one case this now mines: no
+	// closing bracket arrived, so there is no array to be an element of — and
+	// the object is only minted when it carries a call shape anyway.
+	arrayElems := arrayElementOffsets(content)
+	inArray := func(pos int) bool { return arrayElems[pos] }
 
 	var calls []ToolCall
 	var kept strings.Builder
@@ -211,25 +247,43 @@ func parseLFMBareJSONCalls(content string) (string, []ToolCall) {
 		"calls", len(calls))
 	// Drop a LaTeX \boxed{ } / \fbox{ } wrapper left dangling around the
 	// stripped call so the remainder reads as prose, not stray syntax. Two
-	// spellings occur: the documented `\boxed{\n {...}\n}` shape consumes the
-	// box's `{` WITH the mined object, leaving the bare token `\boxed`; the
-	// double-braced `\boxed{ {...} }` leaves the token and a stray '}'. Both are
-	// stripped here, but only when a box token is actually present, so ordinary
-	// prose ending in '}' is never touched (audit finding F77).
+	// spellings occur:
+	//   - the double-braced `\boxed{ {...} }` leaves the token AND the box's
+	//     now-empty brace pair;
+	//   - the single-braced `\boxed{ {...} }` whose opening brace was consumed
+	//     WITH the mined object leaves only the bare token `\boxed`.
+	// Only those two shapes are stripped, and only when a box token is actually
+	// present, so ordinary prose ending in '}' is never touched (audit finding
+	// F77) — and a legitimate JSON payload AFTER a boxed block keeps its final
+	// '}' (audit finding F79: the brace strip used to fire on any remainder
+	// containing a box token, truncating `... {"year": 2017}` to `... {"year":
+	// 2017`).
 	out := strings.TrimSpace(kept.String())
 	if strings.Contains(out, `\boxed`) || strings.Contains(out, `\fbox`) {
+		out = stripEmptyBoxWrappers(out)
 		out = strings.ReplaceAll(out, `\boxed{`, "")
 		out = strings.ReplaceAll(out, `\fbox{`, "")
 		out = strings.TrimSpace(out)
+		// The bare token (its opening brace consumed by the mined object) is
+		// stripped only when it is the LAST non-space token.
 		out = strings.TrimSpace(strings.TrimSuffix(out, `\boxed`))
 		out = strings.TrimSpace(strings.TrimSuffix(out, `\fbox`))
-		// A wrapper whose opening brace was consumed with the mined object
-		// leaves the box's orphaned closing brace.
-		if strings.HasSuffix(out, "}") {
-			out = strings.TrimSpace(strings.TrimSuffix(out, "}"))
-		}
 	}
 	return strings.TrimSpace(out), calls
+}
+
+// boxEmptyWrapper matches a box token whose brace pair is now empty — only
+// whitespace between the token's '{' and its '}'. That is exactly the wrapper a
+// mined call leaves behind, and matching it in a regexp RE2 handles the
+// multi-line spelling (`\boxed{\n\n}`) the call's own newline padding leaves.
+var boxEmptyWrapper = regexp.MustCompile(`(?s)\\(?:boxed|fbox)\{\s*\}`)
+
+// stripEmptyBoxWrappers removes every empty box brace pair (`\boxed{ }`,
+// `\fbox{\n}`) from out. It replaces the old "strip a trailing '}' whenever a
+// box token appears anywhere" rule, which destroyed the final brace of a
+// legitimate JSON payload that followed a boxed block (audit finding F79).
+func stripEmptyBoxWrappers(out string) string {
+	return boxEmptyWrapper.ReplaceAllString(out, "")
 }
 
 // lfmJSONFence matches a fenced JSON block whose body plausibly carries

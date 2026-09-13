@@ -521,6 +521,130 @@ func TestGuards_DuplicateSearchRollback_SpinCap(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// D-F78/F80: the mlx reasoning promotion must not defeat the watchdog
+// ---------------------------------------------------------------------------
+
+// TestGuards_ReasoningWatchdog_PromotedReasoningOnly is the mlx-SHAPED form of
+// TestGuards_ReasoningWatchdog_Integration: the client promotes the whole mlx
+// chain-of-thought into Content (Response.ReasoningPromoted), so the reply has
+// non-empty content that is NOT model output. The watchdog must still count the
+// turn as reasoning-only — when Content alone decided "has text" it never fired,
+// so a thinking-only model rode to completion with its raw reasoning as the
+// user-visible answer, no nudge and no disable-thinking rescue (audit finding
+// F78/F80).
+func TestGuards_ReasoningWatchdog_PromotedReasoningOnly(t *testing.T) {
+	reasoning := strings.Repeat("deliberating ", 400) // ~1000 approx tokens
+	promoted := func() *llm.Response {
+		return &llm.Response{
+			Content:           reasoning, // promoted, not visible output
+			Reasoning:         reasoning,
+			ReasoningPromoted: true,
+			FinishReason:      "stop",
+			Usage:             llm.TokenUsage{TotalTokens: 50},
+		}
+	}
+	chatter := newMockChatter(
+		promoted(), // streak 1
+		promoted(), // streak 2
+		promoted(), // streak hits 3 -> nudge
+		promoted(), // second breach -> disable-thinking RESCUE turn
+		&llm.Response{Content: "recovered after rescue"}, // rescue succeeds
+		&llm.Response{Content: "unreachable"},
+	)
+
+	loop := NewAgentLoop("test-session", "/tmp",
+		WithLLMChatter(chatter),
+		WithMessageBus(bus.New(nil, slogDiscardLogger())),
+		WithAgentConfig(AgentConfig{
+			MaxIterations: 10,
+			Guards:        DefaultGuardConfig(),
+		}),
+	)
+
+	response, err := loop.RunOnce(context.Background(), "think about it", "conv-guards-promoted")
+	require.NoError(t, err)
+	assert.Contains(t, response, "recovered after rescue",
+		"the rescue turn's visible content must become the reply, not the promoted chain-of-thought")
+	assert.Equal(t, 5, chatter.callCount, "rescue turn runs after the second breach")
+}
+
+// TestGuards_ReasoningWatchdog_PromotedRescueFails_Terminates pins the bound for
+// the promoted shape: when the disable-thinking rescue ALSO replies with promoted
+// reasoning, the watchdog terminates gracefully instead of handing the raw
+// chain-of-thought back as an ordinary answer — and the only text the model
+// produced is still DELIVERED, clearly labelled, so a legitimate answer is not
+// thrown away (the "do not discard" half of finding F78/F80).
+func TestGuards_ReasoningWatchdog_PromotedRescueFails_Terminates(t *testing.T) {
+	reasoning := strings.Repeat("deliberating ", 400)
+	promoted := func() *llm.Response {
+		return &llm.Response{
+			Content:           reasoning,
+			Reasoning:         reasoning,
+			ReasoningPromoted: true,
+			FinishReason:      "stop",
+			Usage:             llm.TokenUsage{TotalTokens: 50},
+		}
+	}
+	chatter := newMockChatter(promoted(), promoted(), promoted(), promoted(), promoted(), &llm.Response{Content: "unreachable"})
+
+	loop := NewAgentLoop("test-session", "/tmp",
+		WithLLMChatter(chatter),
+		WithMessageBus(bus.New(nil, slogDiscardLogger())),
+		WithAgentConfig(AgentConfig{
+			MaxIterations: 10,
+			Guards:        DefaultGuardConfig(),
+		}),
+	)
+
+	response, err := loop.RunOnce(context.Background(), "think about it", "conv-guards-promoted-fail")
+	require.NoError(t, err, "rescue failure terminates gracefully, not with an error")
+	assert.Contains(t, response, "extended thinking", "expected the watchdog graceful wrap-up")
+	assert.Contains(t, response, "reasoning-only output",
+		"the model's only text must be delivered LABELLED, not discarded (F78)")
+	assert.NotEqual(t, strings.TrimSpace(reasoning), strings.TrimSpace(response),
+		"the raw chain-of-thought must never be the reply verbatim")
+	assert.Equal(t, 5, chatter.callCount, "no calls after the failed rescue (call 5 was the rescue)")
+}
+
+// TestGuards_PromotedReasoningIsReAskedForVisibleOutput pins the interaction
+// that makes the watchdog reachable at all: a promotion-marked reply must take
+// the nudge ladder, so the model gets an explicit chance to answer visibly and
+// the watchdog's streak can accumulate. Returning it straight away (the
+// regression) left the guard unfireable.
+func TestGuards_PromotedReasoningIsReAskedForVisibleOutput(t *testing.T) {
+	chatter := newMockChatter(
+		&llm.Response{
+			Content:           "thinking about the answer",
+			Reasoning:         "thinking about the answer",
+			ReasoningPromoted: true,
+			FinishReason:      "stop",
+			Usage:             llm.TokenUsage{TotalTokens: 5},
+		},
+		&llm.Response{Content: "the answer is 42", FinishReason: "stop", Usage: llm.TokenUsage{TotalTokens: 5}},
+	)
+	loop := NewAgentLoop("test-session", "/tmp",
+		WithLLMChatter(chatter),
+		WithMessageBus(bus.New(nil, slogDiscardLogger())),
+		WithAgentConfig(AgentConfig{MaxIterations: 5, Guards: DefaultGuardConfig()}),
+	)
+
+	response, err := loop.RunOnce(context.Background(), "answer me", "conv-guards-promoted-answer")
+	require.NoError(t, err)
+	assert.Equal(t, "the answer is 42", response, "the visible answer must win")
+	assert.Equal(t, 2, chatter.callCount, "the promoted reply must be re-asked once")
+
+	conv := loop.conversations.Get("conv-guards-promoted-answer")
+	require.NotNil(t, conv)
+	foundNudge := false
+	for _, m := range conv.GetMessages() {
+		if strings.Contains(m.Content, "arrived as thinking only") {
+			foundNudge = true
+		}
+	}
+	assert.True(t, foundNudge, "expected the reasoning-only nudge in the conversation")
+}
+
+// ---------------------------------------------------------------------------
 // D-H3 (bughunt 2026-09-04): guard reset between turns
 // ---------------------------------------------------------------------------
 

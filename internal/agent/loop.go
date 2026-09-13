@@ -4539,8 +4539,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Leaf 07 guard: reasoning-only watchdog. Track consecutive turns
 		// with reasoning tokens but no visible text and no tool calls.
 		if l.reasonWatch != nil {
+			// A promotion-marked response counts as NO visible text: the mlx
+			// client promoted the whole chain-of-thought into Content so the
+			// turn is not read as an empty response (finding F59), but that is
+			// a last-resort answer, not model output. Counting it as text made
+			// this watchdog unfireable, so a thinking-only model could ride to
+			// completion with its raw reasoning as the user-visible answer —
+			// no streak, no nudge, and no disable-thinking rescue ever firing
+			// (audit finding F78/F80). The promoted text is not discarded: the
+			// nudge ladder below re-asks the model for visible output, and the
+			// give-up path returns the promoted text LABELLED when nothing
+			// better ever arrives.
 			l.reasonWatch.RecordTurn(
-				strings.TrimSpace(response.Content) != "",
+				strings.TrimSpace(response.Content) != "" && !response.ReasoningPromoted,
 				response.HasToolCalls(),
 				len(strings.Fields(response.Reasoning)), // approx tokens; cheap proxy
 			)
@@ -4585,8 +4596,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 						"iteration":    iteration,
 						"conversation": conversationID,
 					})
-					return "I stopped after extended thinking without producing output. " +
-						"Here is what I have so far -- please provide more specific guidance if you'd like me to continue.", nil
+					msg := "I stopped after extended thinking without producing output. " +
+						"Here is what I have so far -- please provide more specific guidance if you'd like me to continue."
+					// The model DID produce text; it just never left its
+					// reasoning channel (mlx shape: the client promoted the
+					// chain-of-thought into Content). Deliver it LABELLED
+					// rather than throwing away the only text the model made:
+					// a legitimate answer is not discarded, and a
+					// chain-of-thought is still never passed off as an ordinary
+					// answer (audit finding F78/F80).
+					if response.ReasoningPromoted && strings.TrimSpace(response.Content) != "" {
+						msg += "\n\n[reasoning-only output — unverified, and the model never produced a visible answer:]\n" +
+							strings.TrimSpace(response.Content)
+					}
+					return msg, nil
 				}
 				// First breach: inject nudge forcing a textual/tool response.
 				l.logger.Warn("Reasoning-only streak breached, nudging for substantive response",
@@ -4661,18 +4684,37 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// the reasoning watchdog above exists to police — so it keeps the
 		// nudge ladder instead of terminating (see
 		// TestGuards_ReasoningWatchdog_Integration).
+		//
+		// A promotion-marked reply (mlx shape: Response.ReasoningPromoted, i.e.
+		// the client moved the whole chain-of-thought into Content) is handled
+		// as reasoning-only, not as text: `reasoningOnlyPromoted` below sends it
+		// through the SAME nudge ladder as blank content. That is deliberate
+		// twice over — the ladder is what gives the watchdog above its streak
+		// (and its disable-thinking rescue is the only thing that ever unsticks
+		// a model living in its reasoning channel), and the promoted text is
+		// not model output, so it must not ride to completion as the answer.
+		// It is not thrown away either: the watchdog's give-up path returns it
+		// LABELLED as reasoning-only output when no visible answer ever arrives
+		// (audit finding F78/F80).
 		contentBlank := strings.TrimSpace(response.Content) == ""
+		reasoningOnlyPromoted := !contentBlank && response.ReasoningPromoted && !response.HasToolCalls()
 		terminalBlankStop := contentBlank &&
 			response.FinishReason == "stop" &&
 			strings.TrimSpace(response.Reasoning) == ""
-		if contentBlank && !terminalBlankStop {
-			l.logger.Warn("LLM returned empty content, nudging for more information",
+		if (contentBlank && !terminalBlankStop) || reasoningOnlyPromoted {
+			l.logger.Warn("LLM returned no visible content, nudging for more information",
 				"iteration", iteration,
 				"conversation", conversationID,
+				"reasoning_promoted", reasoningOnlyPromoted,
 			)
 			// Add a nudge message and continue the loop
-			conv.AddAssistantMessage("[empty response - waiting for content]")
-			conv.AddUserMessage("[system: Your response was empty. Please provide a substantive answer or explanation. If you intended to use tools, include tool calls in your response.]")
+			if reasoningOnlyPromoted {
+				conv.AddAssistantMessage("[reasoning-only turn]")
+				conv.AddUserMessage("[system: your reply arrived as thinking only, with no visible answer. respond NOW with your answer as visible text or a tool call. do not think silently.]")
+			} else {
+				conv.AddAssistantMessage("[empty response - waiting for content]")
+				conv.AddUserMessage("[system: Your response was empty. Please provide a substantive answer or explanation. If you intended to use tools, include tool calls in your response.]")
+			}
 			continue
 		}
 

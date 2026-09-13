@@ -186,6 +186,16 @@ type Response struct {
 	// OpenAI o1-style reasoning, DeepSeek reasons). Empty when not
 	// surfaced by the provider.
 	Reasoning string `json:"reasoning,omitempty"`
+	// ReasoningPromoted marks Content as the reasoning text PROMOTED into
+	// the visible channel because the reply carried no content of its own
+	// (the mlx_lm shape: the whole reply lands in `reasoning` and `content`
+	// is absent, so the client promotes it rather than reporting an empty
+	// response — audit finding F59). It is a last-resort answer, NOT visible
+	// model output: the agent loop's reasoning-only watchdog must still
+	// recognize the turn as reasoning-only (audit finding F78/F80), otherwise
+	// a thinking-only model rides to completion with its raw chain-of-thought
+	// as the user-visible answer. Never set on the tool-call path.
+	ReasoningPromoted bool `json:"-"`
 }
 
 // HasToolCalls returns true if the response contains tool calls.

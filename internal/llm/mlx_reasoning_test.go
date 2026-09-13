@@ -66,6 +66,42 @@ func TestParseResponse_ReadsMlxReasoningField(t *testing.T) {
 	if got := chatResp.Choices[0].Message.ReasoningText(); got == "" {
 		t.Error("ReasoningText() returned empty for the mlx reasoning field")
 	}
+	// The promotion is MARKED (audit finding F78/F80): the agent loop must be
+	// able to tell this last-resort answer from visible model output, or its
+	// reasoning-only watchdog can never fire.
+	if !resp.ReasoningPromoted {
+		t.Error("resp.ReasoningPromoted = false, want true for a promoted reasoning reply")
+	}
+}
+
+// TestParseResponse_VisibleContentIsNotMarkedPromoted pins the boundary of the
+// promotion marker: a reply that carries real visible content (with or without
+// a reasoning channel) is NOT flagged, so the loop treats it as ordinary text.
+func TestParseResponse_VisibleContentIsNotMarkedPromoted(t *testing.T) {
+	raw := `{
+		"model": "mlx-test",
+		"choices": [{
+			"index": 0,
+			"finish_reason": "stop",
+			"message": {"role": "assistant", "content": "the answer is 42", "reasoning": "thinking about 42"}
+		}],
+		"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+	}`
+	var chatResp ChatResponse
+	if err := json.Unmarshal([]byte(raw), &chatResp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	client := NewClient(&ModelConfig{ModelID: "mlx-test"})
+	resp, err := client.parseResponse(&chatResp)
+	if err != nil {
+		t.Fatalf("parseResponse: %v", err)
+	}
+	if resp.Content != "the answer is 42" {
+		t.Errorf("resp.Content = %q, want the visible content", resp.Content)
+	}
+	if resp.ReasoningPromoted {
+		t.Error("a reply with visible content must not be marked promoted")
+	}
 }
 
 func TestParseResponse_RecoversToolCallsFromMlxReasoning(t *testing.T) {
@@ -97,6 +133,14 @@ func TestParseResponse_RecoversToolCallsFromMlxReasoning(t *testing.T) {
 	}
 	if got := resp.ToolCalls[0].Function.Name; got != "file_write" {
 		t.Errorf("recovered tool name = %q, want file_write", got)
+	}
+	// The tool-call path must NOT be marked as a promotion: the reply is the
+	// call, and the loop must keep treating it as a tool-call turn.
+	if resp.ReasoningPromoted {
+		t.Error("a recovered-tool-call reply must not be marked as a reasoning promotion")
+	}
+	if strings.TrimSpace(resp.Content) != "" {
+		t.Errorf("resp.Content = %q, want it to stay empty when a call was recovered", resp.Content)
 	}
 }
 

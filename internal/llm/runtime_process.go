@@ -52,6 +52,19 @@ type RuntimeProcess struct {
 	// waitDone receives the result of cmd.Wait() exactly once.
 	// Created in Start(); consumed by Stop() to avoid a double-Wait race.
 	waitDone chan error
+	// listProcesses is the process-table scan the recovered-pid identity check
+	// uses. Nil means the real `ps` scan; tests inject one — including a scan
+	// that FAILS, which must fail closed (audit finding F79) and is otherwise
+	// unreachable without breaking the host's process table.
+	listProcesses RuntimeProcLister
+}
+
+// runtimeProcesses runs the recovered-pid identity scan through its seam.
+func (p *RuntimeProcess) runtimeProcesses() ([]RuntimeProcInfo, error) {
+	if p.listProcesses != nil {
+		return p.listProcesses()
+	}
+	return ListRuntimeProcesses()
 }
 
 // pidfileEntry is the on-disk pidfile record. The current format is a JSON
@@ -495,12 +508,24 @@ func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error
 		status, verifyErr := p.classifyRecoveredPID(entry.PID)
 		switch status {
 		case recoveredPIDAbsent:
-			// The pid is not in the process table (or the scan is unavailable):
-			// nothing to signal. Drop the stale file so the next Start spawns
-			// fresh instead of adopting a dead pid.
+			// The pid is not in the process table (a scan that SUCCEEDED and
+			// did not list it): nothing to signal. Drop the stale file so the
+			// next Start spawns fresh instead of adopting a dead pid.
 			p.mu.Unlock()
 			p.clearPIDFileAndRecord()
 			return nil
+		case recoveredPIDScanFailed:
+			// Fail closed (audit finding F79): a failed scan proves nothing
+			// about the pid, and treating it as absent returned success while
+			// deleting the PID file AND the durable record — destroying the
+			// handles of a runtime that was still live and serving, so every
+			// later stop surface reported "not running". Keep every handle and
+			// surface the failure: only a successful scan may conclude
+			// "nothing to signal".
+			p.mu.Unlock()
+			slog.Warn("runtime stop: process scan unavailable; keeping the PID file and record",
+				"pid", entry.PID, "pid_file", p.pidFile, "error", verifyErr)
+			return verifyErr
 		case recoveredPIDForeign:
 			p.mu.Unlock()
 			if asOperator {
@@ -614,6 +639,12 @@ const (
 	// recoveredPIDUnverifiable: no durable spawn record and no configured spawn
 	// command, so identity cannot be compared: fail closed.
 	recoveredPIDUnverifiable
+	// recoveredPIDScanFailed: the process-table scan itself FAILED, so whether
+	// the pid is alive is unknown. Deliberately distinct from
+	// recoveredPIDAbsent — "absent" is a successful scan's conclusion (nothing
+	// to signal, so the stale handles may be cleared) while this verdict must
+	// never clear anything (audit finding F79).
+	recoveredPIDScanFailed
 )
 
 // classifyRecoveredPID decides whether the pid named by the runtime PID file may
@@ -623,12 +654,16 @@ const (
 // identify — a pid file from a build older than the durable records, or whose
 // record write failed, is exactly the stale-handle case the guard exists for.
 //
-// A process-table scan failure is treated as recoveredPIDAbsent (nothing to
-// signal) so a transient `ps` failure can never escalate into a blind kill.
+// A FAILED process-table scan is UNVERIFIABLE, never "absent" (audit finding
+// F79): the caller's absent branch returns success and deletes the PID file and
+// the durable record, so a transient `ps` failure used to strip the handles off
+// a runtime that was still live and serving — leaving `meept runtime stop`
+// reporting "not running" and the sweep able to match only by config. Only a
+// SCAN THAT SUCCEEDED may conclude there is nothing to signal.
 func (p *RuntimeProcess) classifyRecoveredPID(pid int) (recoveredPIDStatus, error) {
-	procs, err := ListRuntimeProcesses()
+	procs, err := p.runtimeProcesses()
 	if err != nil {
-		return recoveredPIDAbsent, nil
+		return recoveredPIDScanFailed, fmt.Errorf("cannot verify pid %d: process scan unavailable, keeping its handles: %w", pid, err)
 	}
 	var found *RuntimeProcInfo
 	for i := range procs {
@@ -691,10 +726,35 @@ func (p *RuntimeProcess) IsRunning() bool {
 // that exits unexpectedly leaves no stale handle for a later Stop's
 // PID-file recovery branch to misread (audit finding F97: the helper meant to
 // express this cleanup, StalePIDRemoval, had no production caller).
+//
+// Two guards keep this from destroying the handles of a runtime that is still
+// live (audit finding F78):
+//   - the pid must be verifiably gone. Under the supervisor the process this
+//     goroutine waited on is the WRAPPER while the recorded pid is the
+//     runtime's, so a wrapper killed hard (SIGKILL) with a runtime that keeps
+//     serving would otherwise delete the only handle a later stop has; the same
+//     applies to a runtime that outlives a grace window. With the file gone
+//     `meept runtime stop` reported "not running" for a live runtime holding
+//     the endpoint port.
+//   - compare + remove runs under the endpoint start lock, so a concurrent
+//     Start that just rewrote both files for a FRESH runtime cannot have them
+//     deleted: the pid comparison alone cannot tell "my child exited" from "the
+//     manager already restarted" in that window. A lock held by another process
+//     means a start is in flight — the starter owns those files now.
 func (p *RuntimeProcess) clearStalePIDFilesForPid(pid int) {
 	if p.pidFile == "" || pid <= 0 {
 		return
 	}
+	if processAlive(pid) {
+		return
+	}
+	unlock, locked := tryAcquireStartLock(p.pidFile)
+	if !locked {
+		slog.Debug("runtime exit path: start lock busy; keeping pid file and record",
+			"pid", pid, "pid_file", p.pidFile)
+		return
+	}
+	defer unlock()
 	if entry, err := p.readPIDFile(); err != nil || entry.PID != pid {
 		return
 	}

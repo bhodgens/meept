@@ -1564,8 +1564,17 @@ func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool) (
 	// response — the exact failure the reasoning alias was added to fix, which
 	// the alias-only change left open on every non-tool turn (audit finding
 	// F59). A recovered call still wins: its reply is the call, not prose.
+	//
+	// The promotion is MARKED rather than silent: the agent loop's reasoning-only
+	// watchdog has to recognize the turn as reasoning-only (no visible model
+	// output) even though Content is now non-empty, otherwise a thinking-only
+	// model rides to completion with its raw chain-of-thought as the answer
+	// (audit finding F78/F80). The tool-call path above is unaffected: this
+	// branch only runs when no call was recovered.
+	reasoningPromoted := false
 	if content == "" && len(msg.ToolCalls) == 0 && len(lfmCalls) == 0 && reasoning != "" {
 		content = strings.TrimSpace(reasoningRest)
+		reasoningPromoted = content != ""
 	}
 
 	// Empty content with no tool calls is the "model said nothing" failure.
@@ -1604,9 +1613,10 @@ func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool) (
 			CachedTokens:     chatResp.Usage.PromptTokensDetails.CachedTokens,
 			ReasoningTokens:  chatResp.Usage.CompletionTokensDetails.ReasoningTokens,
 		},
-		Model:        model,
-		FinishReason: choice.FinishReason,
-		Reasoning:    msg.ReasoningText(),
+		Model:             model,
+		FinishReason:      choice.FinishReason,
+		Reasoning:         msg.ReasoningText(),
+		ReasoningPromoted: reasoningPromoted,
 	}, nil
 }
 

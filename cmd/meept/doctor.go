@@ -201,6 +201,12 @@ func runDoctor(fix, installMissing bool) error {
 			switch c.name {
 			case "pidfile":
 				if err := os.Remove(pidFile); err == nil {
+					// Remove the durable spawn record beside it too: a stale
+					// `.cmd` record is what spares an endpoint from the boot
+					// sweep and blocks the daemon's own spawn (audit finding
+					// F78). Best-effort — normally none exists beside the
+					// daemon's pid file, so this is a no-op.
+					llm.RemoveSpawnRecord(pidFile)
 					c.detail += " [removed stale pidfile]"
 					c.ok = true
 				}

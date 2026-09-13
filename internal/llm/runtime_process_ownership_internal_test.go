@@ -14,6 +14,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -473,6 +474,175 @@ func TestRuntimeProcess_Stop_FailsClosedWithoutIdentity(t *testing.T) {
 	if !testPidAlive(victim.Process.Pid) {
 		t.Fatal("a pid with no verifiable identity was signalled (F16)")
 	}
+}
+
+// --- audit findings F79 (scan failure) / F78 (exit-path liveness) pins ---
+
+// TestRuntimeProcess_Stop_ScanFailureFailsClosed pins audit finding F79: a FAILED
+// process-table scan is an UNVERIFIABLE verdict that keeps the handles, never an
+// "absent" verdict. Classifying it as absent returned success from Stop and
+// deleted the PID file AND the durable record while the runtime was still live
+// and serving, so every later stop surface read no file and reported "not
+// running" for a runtime that still held the endpoint port.
+func TestRuntimeProcess_Stop_ScanFailureFailsClosed(t *testing.T) {
+	victim := startTestSleep(t, "300")
+	pidFile := filepath.Join(t.TempDir(), "scan-failed.pid")
+	writeTestPidFile(t, pidFile, pidfileEntry{PID: victim.Process.Pid, Token: "0000our-instance"})
+	if err := WriteSpawnRecord(SpawnRecord{
+		EndpointKey: "mlx:127.0.0.1:8081",
+		PIDFile:     pidFile,
+		Argv:        []string{"sleep", "300"},
+		AutoStop:    true,
+		PID:         victim.Process.Pid,
+	}); err != nil {
+		t.Fatalf("write spawn record: %v", err)
+	}
+
+	scanErr := errors.New(`ps scan failed: exec: "ps": executable file not found in $PATH`)
+	p := &RuntimeProcess{
+		config:        &RuntimeConfig{SpawnCommand: []string{"sleep", "300"}, PIDFile: pidFile},
+		pidFile:       pidFile,
+		instanceToken: "0000our-instance",
+		spawnedByUs:   true,
+		listProcesses: func() ([]RuntimeProcInfo, error) { return nil, scanErr },
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := p.StopAsOperator(ctx); err == nil {
+		t.Fatal("a failed process scan must not report success (F79)")
+	}
+	// The AUTOMATIC path must fail closed too: it is the shutdown path, where a
+	// false success is exactly what loses the runtime.
+	if err := p.Stop(ctx); err == nil {
+		t.Fatal("the automatic stop path must not report success on a failed scan (F79)")
+	}
+	if !testPidAlive(victim.Process.Pid) {
+		t.Fatal("a failed scan must never signal the pid (F79)")
+	}
+	if _, err := os.Stat(pidFile); err != nil {
+		t.Errorf("the PID file must survive a failed scan, stat err = %v (F79)", err)
+	}
+	if _, err := ReadSpawnRecord(pidFile); err != nil {
+		t.Errorf("the durable record must survive a failed scan: %v (F79)", err)
+	}
+
+	// A scan that SUCCEEDED and does not list the pid is still the absent
+	// verdict: the stale handles may go (the pre-existing F12 rule).
+	p.listProcesses = func() ([]RuntimeProcInfo, error) { return nil, nil }
+	if err := p.StopAsOperator(ctx); err != nil {
+		t.Fatalf("a successful scan that omits the pid must stay a no-op success, got %v", err)
+	}
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Errorf("a successful absent verdict must clear the stale PID file, stat err = %v", err)
+	}
+}
+
+// writeExitPathHandle writes the PID file + durable record pair the exit path
+// operates on, naming pid.
+func writeExitPathHandle(t *testing.T, pidFile string, pid int) {
+	t.Helper()
+	writeTestPidFile(t, pidFile, pidfileEntry{PID: pid, Token: "0000our-instance"})
+	if err := WriteSpawnRecord(SpawnRecord{
+		EndpointKey: "mlx:127.0.0.1:8081",
+		PIDFile:     pidFile,
+		Argv:        []string{"sleep", "300"},
+		AutoStop:    true,
+		PID:         pid,
+	}); err != nil {
+		t.Fatalf("write spawn record: %v", err)
+	}
+}
+
+// assertExitPathHandles checks whether the pid file + record pair is present.
+func assertExitPathHandles(t *testing.T, pidFile string, wantPresent bool, context string) {
+	t.Helper()
+	_, statErr := os.Stat(pidFile)
+	if wantPresent && statErr != nil {
+		t.Errorf("%s: the PID file must survive, stat err = %v", context, statErr)
+	}
+	if !wantPresent && !os.IsNotExist(statErr) {
+		t.Errorf("%s: the PID file must be gone, stat err = %v", context, statErr)
+	}
+	_, recErr := ReadSpawnRecord(pidFile)
+	if wantPresent && recErr != nil {
+		t.Errorf("%s: the durable record must survive: %v", context, recErr)
+	}
+	if !wantPresent && recErr == nil {
+		t.Errorf("%s: the durable record must be gone", context)
+	}
+}
+
+// TestClearStalePIDFilesForPid_KeepsHandlesOfLivePID pins audit finding F78: the
+// wait goroutine's exit path must not destroy the handles of a runtime that is
+// still alive. Under the supervisor the process that goroutine waited on is the
+// WRAPPER while the recorded pid is the runtime's, so a wrapper killed hard
+// (SIGKILL) — or a runtime outliving a grace window — used to delete the only
+// handle a later stop has: `meept runtime stop` then reported "not running" for
+// a live runtime still holding the endpoint port.
+func TestClearStalePIDFilesForPid_KeepsHandlesOfLivePID(t *testing.T) {
+	victim := startTestSleep(t, "300")
+	pidFile := filepath.Join(t.TempDir(), "exit-live.pid")
+	writeExitPathHandle(t, pidFile, victim.Process.Pid)
+
+	p := &RuntimeProcess{config: &RuntimeConfig{PIDFile: pidFile}, pidFile: pidFile, instanceToken: "0000our-instance"}
+	p.clearStalePIDFilesForPid(victim.Process.Pid)
+	assertExitPathHandles(t, pidFile, true, "a live pid must keep its handles (F78)")
+}
+
+// TestClearStalePIDFilesForPid_RemovesHandlesOfDeadPID is the other direction:
+// the F97 guarantee still holds — a runtime that really exited leaves no stale
+// handle behind.
+func TestClearStalePIDFilesForPid_RemovesHandlesOfDeadPID(t *testing.T) {
+	dead := exec.Command("true")
+	if err := dead.Start(); err != nil {
+		t.Fatalf("spawn true: %v", err)
+	}
+	deadPid := dead.Process.Pid
+	_, _ = dead.Process.Wait()
+	if processAlive(deadPid) {
+		t.Skip("dead pid still reported alive; environment reaped oddly")
+	}
+
+	pidFile := filepath.Join(t.TempDir(), "exit-dead.pid")
+	writeExitPathHandle(t, pidFile, deadPid)
+
+	p := &RuntimeProcess{config: &RuntimeConfig{PIDFile: pidFile}, pidFile: pidFile, instanceToken: "0000our-instance"}
+	p.clearStalePIDFilesForPid(deadPid)
+	assertExitPathHandles(t, pidFile, false, "a dead pid must leave no stale handle (F97)")
+}
+
+// TestClearStalePIDFilesForPid_SkipsWhileTheStartLockIsHeld pins the second half
+// of finding F78: compare + remove runs under the endpoint start lock, so a
+// concurrent Start that just rewrote both files for a FRESH runtime cannot have
+// them deleted by the exiting generation. With the lock held, the cleanup must
+// leave the files alone; once released, it proceeds.
+func TestClearStalePIDFilesForPid_SkipsWhileTheStartLockIsHeld(t *testing.T) {
+	dead := exec.Command("true")
+	if err := dead.Start(); err != nil {
+		t.Fatalf("spawn true: %v", err)
+	}
+	deadPid := dead.Process.Pid
+	_, _ = dead.Process.Wait()
+	if processAlive(deadPid) {
+		t.Skip("dead pid still reported alive; environment reaped oddly")
+	}
+
+	pidFile := filepath.Join(t.TempDir(), "exit-locked.pid")
+	writeExitPathHandle(t, pidFile, deadPid)
+
+	p := &RuntimeProcess{config: &RuntimeConfig{PIDFile: pidFile}, pidFile: pidFile, instanceToken: "0000our-instance"}
+
+	unlock, err := acquireStartLock(pidFile)
+	if err != nil {
+		t.Fatalf("acquire start lock: %v", err)
+	}
+	p.clearStalePIDFilesForPid(deadPid)
+	assertExitPathHandles(t, pidFile, true, "a start in flight owns the files; the cleanup must skip")
+	unlock()
+
+	p.clearStalePIDFilesForPid(deadPid)
+	assertExitPathHandles(t, pidFile, false, "with the lock free the cleanup removes the dead handles")
 }
 
 // TestRuntimeProcess_RefusedSpawnDoesNotClaimOwnership pins audit finding F56:

@@ -83,6 +83,43 @@ func acquireStartLock(pidFile string) (func(), error) {
 	}
 }
 
+// tryAcquireStartLock takes the endpoint start lock WITHOUT waiting: it succeeds
+// only when the lock is free (or stale and removable) and reports whether it
+// did. The cleanup paths use it because they must not block a waiter — a lock
+// held by another process means a Start is in flight and that starter owns the
+// endpoint's files, so the cleanup simply does nothing.
+func tryAcquireStartLock(pidFile string) (func(), bool) {
+	path := startLockPath(pidFile)
+	if path == "" {
+		return func() {}, true
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		slog.Debug("start lock: create lock directory", "path", path, "error", err)
+		return nil, false
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			if _, werr := f.WriteString(strconv.Itoa(os.Getpid())); werr != nil {
+				slog.Debug("start lock: write owner pid", "path", path, "error", werr)
+			}
+			return func() { releaseStartLock(f, path) }, true
+		}
+		if !os.IsExist(err) {
+			slog.Debug("start lock: create", "path", path, "error", err)
+			return nil, false
+		}
+		if attempt == 0 && staleStartLock(path) {
+			if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+				return nil, false
+			}
+			continue
+		}
+		return nil, false
+	}
+	return nil, false
+}
+
 // staleStartLock reports whether an existing lock file can be taken over: its
 // recorded owner is gone, its contents are unreadable, or it is older than
 // startLockStaleAfter (a start never legitimately holds it that long, because

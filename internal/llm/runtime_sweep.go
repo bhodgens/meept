@@ -195,6 +195,14 @@ func endpointSparedSet(cfgs []*RuntimeConfig, records []SpawnRecord) map[string]
 		if rec.AutoStop {
 			continue
 		}
+		// A record's auto_stop=false is the operator's CURRENT intent only
+		// while the runtime that record names is still alive. Once its pid is
+		// verifiably gone the record is a leftover of a finished out-of-daemon
+		// `meept runtime start`, and sparing the endpoint for it is permanent:
+		// nothing else removes the record (audit finding F78).
+		if recordSpawnPIDGone(rec) {
+			continue
+		}
 		if rec.PIDFile != "" {
 			spared[rec.PIDFile] = true
 		}
@@ -203,6 +211,46 @@ func endpointSparedSet(cfgs []*RuntimeConfig, records []SpawnRecord) map[string]
 		}
 	}
 	return spared
+}
+
+// recordSpawnPIDGone reports whether a durable record names a spawn pid that is
+// verifiably gone.
+//
+// The record's auto_stop=false marks a runtime the operator started out of the
+// daemon (`meept runtime start` writes it that way), and the boot sweep spares
+// its endpoint so it is never reaped (finding F58). That sparing used to be
+// unconditional and therefore PERMANENT: the runtime dies (SIGKILL, a reboot)
+// and nothing removes the record, so every later boot spared the endpoint. The
+// genuine leftover of an earlier generation then survived, held the endpoint
+// port, and the daemon's own spawn was refused by the duplicate-spawn pre-check
+// — leaving the install with no runtime at all (audit finding F78).
+//
+// A record with no recorded pid (PID == 0, written by a build older than the pid
+// field) cannot be judged, so it keeps its old meaning and still spares.
+func recordSpawnPIDGone(rec SpawnRecord) bool {
+	return rec.PID > 0 && !processAlive(rec.PID)
+}
+
+// PruneStaleOperatorRecords removes the durable records whose auto_stop=false
+// intent has expired: an operator-started runtime whose recorded pid is
+// verifiably gone (see recordSpawnPIDGone). Only sparing records are pruned —
+// an auto_stop=true record is sweepable MATCHING evidence even after the pid it
+// names has exited (a later leftover running the same command line is still
+// identified by it), and it never spares anything anyway. A record with no pid
+// file is dropped but unlinks nothing. Best-effort: a removal failure is
+// diagnostic only. Returns the surviving records.
+func PruneStaleOperatorRecords(records []SpawnRecord) []SpawnRecord {
+	var kept []SpawnRecord
+	for _, rec := range records {
+		if !rec.AutoStop && recordSpawnPIDGone(rec) {
+			RemoveSpawnRecord(rec.PIDFile)
+			slog.Debug("stale operator spawn record pruned",
+				"pid_file", rec.PIDFile, "record_pid", rec.PID)
+			continue
+		}
+		kept = append(kept, rec)
+	}
+	return kept
 }
 
 // endpointSpared reports whether pidFile or endpointKey is in the spared set.
@@ -224,14 +272,23 @@ func OrphanRuntimesFromConfigs(cfgs []*RuntimeConfig) ([]OrphanRuntime, error) {
 // Records let `meept doctor` still see a leftover whose endpoint config no
 // longer validates (unmounted model volume, renamed provider).
 func OrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnRecord) ([]OrphanRuntime, error) {
-	orphans, err := FindOrphanRuntimesWithRecords(cfgs, records, ListRuntimeProcesses)
+	return findOrphanRuntimesFiltered(cfgs, records, nil)
+}
+
+// findOrphanRuntimesFiltered is the shared detection body: find leftovers with
+// the given scan (nil = the real ps scan) and apply the SAME live-owner veto the
+// daemon's sweep applies, so the two surfaces cannot disagree about the same
+// process (audit finding F61): `meept doctor --fix` used to reap a pid the
+// daemon's boot sweep would have left alone because another endpoint records a
+// live owner for it.
+func findOrphanRuntimesFiltered(cfgs []*RuntimeConfig, records []SpawnRecord, list RuntimeProcLister) ([]OrphanRuntime, error) {
+	if list == nil {
+		list = ListRuntimeProcesses
+	}
+	orphans, err := FindOrphanRuntimesWithRecords(cfgs, records, list)
 	if err != nil {
 		return nil, err
 	}
-	// Apply the SAME live-owner veto the daemon's sweep applies, so the two
-	// surfaces cannot disagree about the same process (audit finding F61):
-	// `meept doctor --fix` used to reap a pid the daemon's boot sweep would have
-	// left alone because another endpoint records a live owner for it.
 	return FilterLiveOwned(cfgs, orphans), nil
 }
 
@@ -242,6 +299,22 @@ func OrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnR
 // scan attributed the pid to: two providers can share one spawn command line
 // with different PID files (endpoint keys do not normalize localhost against
 // 127.0.0.1), so attribution is ambiguous and any recorded live owner vetoes.
+//
+// SCOPE (audit finding F78, low): the veto deliberately includes endpoints whose
+// config says auto_stop_on_exit=false — the unmanaged, operator-owned endpoints.
+// That is the whole point of the predicate: an auto_stop=false endpoint IS the
+// "user-managed server with the same command line" this veto exists to protect,
+// and (because attribution of a shared command line is ambiguous) a live pid
+// file that is not the detected leftover is the only evidence available that the
+// process belongs to somebody who did not ask meept to reap it. Narrowing the
+// veto to auto_stop=true configs would make the sweep kill an operator-owned
+// server whenever a managed endpoint shares its command line — the F58/F61
+// failure mode, not a fix. The known cost is accepted: an unmanaged endpoint
+// can keep a managed endpoint's genuine leftover alive, and the sweep reports
+// that ("leaving process alone — an endpoint with this command records a
+// different live owner") so the operator can stop it. The record half of the
+// same rule is narrower on purpose: a record only spares when the pid it names
+// is still alive (see endpointSparedSet / recordSpawnPIDGone).
 //
 // Exported so the daemon's sweep (RuntimeManager.SweepOrphanRuntimes) and
 // `meept doctor --fix` share ONE predicate and cannot make different decisions
@@ -291,14 +364,78 @@ func ReapOrphanRuntimesFromConfigs(cfgs []*RuntimeConfig, waitAfterTerm time.Dur
 // orphans it considered and the pids confirmed gone — callers must report the
 // confirmed count, never the candidate count.
 func ReapOrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnRecord, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int) {
-	orphans, err := OrphanRuntimesFromConfigsAndRecords(cfgs, records)
+	return reapOrphanRuntimes(cfgs, records, waitAfterTerm, nil, nil, log)
+}
+
+// reapOrphanRuntimes is ReapOrphanRuntimesFromConfigsAndRecords with the
+// process-scan and signal seams exposed (nil = the real ps scan and the real
+// process-group signals), mirroring ReapRuntimeProcesses so the whole reap path
+// is testable without signalling a live runtime.
+func reapOrphanRuntimes(cfgs []*RuntimeConfig, records []SpawnRecord, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log *slog.Logger) ([]OrphanRuntime, []int) {
+	records = PruneStaleOperatorRecords(records)
+	orphans, err := findOrphanRuntimesFiltered(cfgs, records, list)
 	if err != nil {
 		if log != nil {
 			log.Debug("orphan sweep: process scan unavailable", "error", err)
 		}
 		return nil, nil
 	}
-	return orphans, ReapRuntimeProcesses(orphans, waitAfterTerm, nil, nil, log)
+	confirmed := ReapRuntimeProcesses(orphans, waitAfterTerm, list, signal, log)
+	// A reaped runtime must leave no handle behind: this path (the CLI reaper
+	// and `meept doctor --fix`) used to remove neither, so the pid file kept
+	// naming a dead pid and the durable record kept sparing its endpoint on
+	// every later boot (audit finding F78). The manager's own sweep does the
+	// same for its confirmed pids (removePIDFileForPid).
+	RemoveRuntimeHandlesForPids(cfgs, records, confirmed)
+	return orphans, confirmed
+}
+
+// RemoveRuntimeHandlesForPids removes the PID file and durable spawn record of
+// every handle that still names one of pids — the pids a reap CONFIRMED gone
+// (never a candidate). A config carries no pid, so the PID file itself is the
+// only link; a durable record carries the pid it spawned, which is the link
+// that survives config drift. Best-effort: a removal failure is diagnostic
+// only, and a handle naming a pid that is NOT in pids is left alone (a
+// concurrent Start may have rewritten it for a fresh runtime).
+func RemoveRuntimeHandlesForPids(cfgs []*RuntimeConfig, records []SpawnRecord, pids []int) {
+	if len(pids) == 0 {
+		return
+	}
+	gone := make(map[int]struct{}, len(pids))
+	for _, pid := range pids {
+		gone[pid] = struct{}{}
+	}
+	removed := make(map[string]struct{})
+	removeHandle := func(pidFile string) {
+		if pidFile == "" {
+			return
+		}
+		if _, dup := removed[pidFile]; dup {
+			return
+		}
+		removed[pidFile] = struct{}{}
+		if rmErr := os.Remove(pidFile); rmErr != nil && !os.IsNotExist(rmErr) {
+			slog.Debug("orphan reap: pid file removal failed", "pid_file", pidFile, "error", rmErr)
+		}
+		RemoveSpawnRecord(pidFile)
+	}
+	for _, rec := range records {
+		if _, ok := gone[rec.PID]; ok {
+			removeHandle(rec.PIDFile)
+		}
+	}
+	for _, cfg := range cfgs {
+		if cfg == nil || cfg.PIDFile == "" {
+			continue
+		}
+		filePID, parseErr := ParsePIDFile(cfg.PIDFile)
+		if parseErr != nil {
+			continue
+		}
+		if _, ok := gone[filePID]; ok {
+			removeHandle(cfg.PIDFile)
+		}
+	}
 }
 
 // ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each
@@ -450,6 +587,11 @@ func (m *RuntimeManager) OrphanRuntimes() ([]OrphanRuntime, error) {
 // nothing matched). It never returns an error: a failed sweep must not block
 // daemon start.
 func (m *RuntimeManager) SweepOrphanRuntimes(waitAfterTerm time.Duration, records []SpawnRecord) []int {
+	// Drop operator records whose runtime is gone BEFORE the match, so a
+	// finished `meept runtime start` can no longer spare its endpoint forever
+	// (audit finding F78); the spared set inside FindOrphanRuntimesWithRecords
+	// ignores such a record even for callers that do not prune.
+	records = PruneStaleOperatorRecords(records)
 	candidates := m.sweepCandidates()
 	orphans, err := FindOrphanRuntimesWithRecords(candidates, records, m.listRuntimeProcesses())
 	if err != nil {
@@ -489,6 +631,12 @@ func (m *RuntimeManager) hasLiveOwnerAmong(cfgs []*RuntimeConfig, command string
 // FindOrphanRuntimesWithRecords needs the auto_stop=false configs to build the
 // spared set (their current intent must override a stale record — audit finding
 // F57). The sweepability filter is applied inside FindOrphanRuntimesWithRecords.
+//
+// The auto_stop=false configs also reach the live-owner veto
+// (hasLiveOwnerAmong → RuntimeHasLiveOwner) from here, which is INTENTIONAL:
+// an operator-owned endpoint with the same command line is exactly what that
+// veto protects (audit finding F78, low — see the SCOPE note on
+// RuntimeHasLiveOwner for why the veto is not narrowed to managed endpoints).
 // The manager lock is not held across the scan or the signals.
 func (m *RuntimeManager) sweepCandidates() []*RuntimeConfig {
 	m.mu.Lock()
