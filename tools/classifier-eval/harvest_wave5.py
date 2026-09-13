@@ -102,12 +102,20 @@ emb.embed_keys([c.text for c in gold], gkeys)
 V = emb.vectors(gkeys)
 import numpy as np
 
-# ruler guard vectors (untracked replay; absent is fine -- check skipped)
-replay_texts, RV = [], None
+# ruler guard: use the SHARED disjointness guard (eval_harness), not an
+# inline reimplementation -- an inline copy silently drifts from the guard
+# that actually gates the acceptance run (review flagged it as unchecked).
+# The shared guard also raises EmptyRulerError / DegenerateVectorError on a
+# broken ruler instead of skipping the check.
+replay_texts, rcases, RV = [], [], None
 if REPLAY.exists():
-    replay_texts = [r["input"] for r in json.loads(
-        "[" + ",".join(re.findall(r"\{\s*\"input\".*?\}",
-                                  REPLAY.read_text(), re.S)) + "]")]
+    # committed ruler layout is { cases: [...] } (H.parse_json5, the shared
+    # parser -- the old key-order regex is gone). A bare list is tolerated.
+    _parsed = H.parse_json5(REPLAY.read_text())
+    _cases = _parsed.get("cases", []) if isinstance(_parsed, dict) else _parsed
+    replay_texts = [r["input"] for r in _cases]
+    rcases = [H.Case(t, "replay", "", False, "replay", "", f"replay#{i}")
+              for i, t in enumerate(replay_texts)]
     rkeys = [H.case_key(t) for t in replay_texts]
     emb.embed_keys(replay_texts, rkeys)
     RV = emb.vectors(rkeys)
@@ -121,13 +129,14 @@ for cid, text, intent, agent in CASES:
     if max_sim > SIM_THRESHOLD:
         rejected.append((cid, text[:50], round(max_sim, 3), "corpus-dedup"))
         continue
-    if replay_texts:
-        if k in {H.case_key(t) for t in replay_texts}:
-            rejected.append((cid, text[:50], 1.0, "ruler-exact"))
-            continue
-        rmax = float(np.max(RV @ v))
-        if rmax > SIM_THRESHOLD:
-            rejected.append((cid, text[:50], round(rmax, 3), "ruler-similarity"))
+    if rcases:
+        rleaks = H.replay_disjointness([text], rcases, corpus_vectors=RV,
+                                       replay_vectors=v[None],
+                                       sim_threshold=SIM_THRESHOLD)
+        if rleaks:
+            why = ("ruler-exact" if rleaks[0]["reason"] == "exact"
+                   else "ruler-similarity")
+            rejected.append((cid, text[:50], rleaks[0]["similarity"], why))
             continue
     kept.append({
         "id": cid, "input": text, "expected_intent": intent,

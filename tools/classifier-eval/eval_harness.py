@@ -80,26 +80,32 @@ CHAIN_BASELINE = 0.868  # measured LLM-chain accuracy for abstained cases
 # ---------------------------------------------------------------- corpus
 
 def parse_json5(text: str) -> dict:
-    """Parser for the corpus JSON5 flavor (raw apostrophes in strings,
-    unquoted keys, trailing commas). Same approach as
-    scripts/build_prefilter_centroids.py: stash double-quoted strings
-    verbatim, normalize the remainder, restore."""
+    """Parser for the corpus/ruler JSON5 flavor (raw apostrophes in
+    strings, escaped double quotes, unquoted keys, trailing commas). Same
+    approach as scripts/build_prefilter_centroids.py: stash double-quoted
+    strings verbatim, normalize the remainder, restore."""
     strings: list[str] = []
 
     def stash(m: re.Match) -> str:
-        strings.append(m.group(0)[1:-1])
+        # Keep the WHOLE quoted token (escapes intact) so the re-emitted
+        # string round-trips through json.loads unchanged. Stashing only the
+        # inner text and re-quoting with json.dumps would double-escape an
+        # already-escaped \" and silently change the value.
+        strings.append(m.group(0))
         return f"\x00{len(strings)-1}\x00"
 
-    # Double-quoted strings: no escapes in the corpora, so [^"] suffices.
-    text = re.sub(r'"[^"]*"', stash, text)
+    # Double-quoted strings, backslash-escapes included. The adjudicated
+    # ruler embeds \"...\" inside an input string; the corpora do not, so
+    # allowing escapes is strictly more permissive than [^\"].
+    text = re.sub(r'"(?:[^"\\]|\\.)*"', stash, text)
     # Strip // line comments (adversarial corpus uses them).
     text = re.sub(r"(?m)^\s*//.*$", "", text)
     # Quote unquoted object keys.
-    text = re.sub(r"(?<![:\w\x00'\"])([A-Za-z_][A-Za-z0-9_]*)\s*:", r'"\1":', text)
+    text = re.sub(r"(?<![:\\w\x00'\"])([A-Za-z_][A-Za-z0-9_]*)\s*:", r'"\1":', text)
     text = re.sub(r",(\s*[}\]])", r"\1", text)
 
     def unstash(m: re.Match) -> str:
-        return json.dumps(strings[int(m.group(1))])
+        return strings[int(m.group(1))]
 
     text = re.sub(r"\x00(\d+)\x00", unstash, text)
     return json.loads(text)
@@ -253,8 +259,14 @@ def replay_disjointness(replay_texts, corpus_cases, *,
         for i in range(sims.shape[0]):
             j = int(np.argmax(sims[i]))
             s = float(sims[i, j])
+            # PRIVACY: never store the replay TEXT here. These margins land
+            # in the caller's ``stats`` dict, which run_full copies into the
+            # written artifact's ``guard`` block -- and the ruler is
+            # untracked precisely because it is private transcript text.
+            # Store the row's case_key instead: it identifies the row for
+            # threshold-headroom debugging without carrying the text.
             margins.append((round(s, 4), i, corpus_cases[j].case_id,
-                            replay_texts[i]))
+                            case_key(replay_texts[i])))
             if s <= sim_threshold:
                 continue
             if case_key(replay_texts[i]) in allow:
@@ -311,8 +323,10 @@ def format_margins(stats: dict) -> str:
     lines = [f"  cosine check: {stats['rows_compared']} replay rows compared "
              f"vs {stats['corpus_n']} corpus rows at "
              f"sim_threshold={stats['sim_threshold']:.2f}"]
-    for s, i, cid, text in stats.get("top_margins", []):
-        lines.append(f"    max-sim {s:.4f} <- replay[{i}] {text[:50]!r} "
+    # ``key`` is the replay row's case_key, never its text: the ruler is
+    # private and these stats are copied into the written artifact.
+    for s, i, cid, key in stats.get("top_margins", []):
+        lines.append(f"    max-sim {s:.4f} <- replay[{i}] key={key} "
                      f"(nearest corpus {cid})")
     if stats.get("allowlisted_sims"):
         lines.append(f"  {stats['allowlisted_sims']} near-duplicate(s) inside "
@@ -508,7 +522,10 @@ class CentroidGate(Gate):
         for lab in sorted(set(train_intents)):
             sel = [gi for gi, l in zip(train_idx, train_intents) if l == lab]
             c = src[sel].mean(axis=0)
-            c /= (np.linalg.norm(c) + 1e-12)
+            # guarded normalisation: a zero-norm centroid (cancelling unit
+            # vectors) would otherwise be stored as an all-zero vector whose
+            # cosine is 0.0 and silently reads as "disjoint" (F20).
+            c = _as_unit(c[None])[0]
             self.centroids[lab] = c
 
     def decide(self, q, intents):

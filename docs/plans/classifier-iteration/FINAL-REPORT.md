@@ -193,7 +193,7 @@ hard-coded `CHAIN = 0.868`, the veto policy's 87.35% is
 `(2 + 46×0.868)/48`: two correct routes plus the chain's credit on 46 of
 48 cases — 95.83% of the CASES, 95.23% of the SCORE
 (`46×0.868 / (2 + 46×0.868)`; the two shares are not the same number).
-One flipped route gives `(1 + 47×0.868)/48 = 85.27%`, below the 86.8%
+One flipped route gives `(1 + 46×0.868)/48 = 85.27%`, below the 86.8%
 gate. The acceptance
 script now enforces a coverage floor (`MIN_ROUTED = 20`) and reports
 `INSUFFICIENT_COVERAGE` instead of PASS/FAIL below it; the observed

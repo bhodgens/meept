@@ -94,9 +94,11 @@ verdict exists for EITHER policy** — the 84.56% / 87.35% *values* are
 unchanged; only their PASS/FAIL framing is withdrawn, for both rows. The
 committed `m4-gold-acceptance.json` (`"verdict": "FAIL"`) predates the
 floor and is retained only as the historical record: it is not a current
-verdict for the double-confidence policy, and the sub-floor per-policy
-artifacts now carry `min_routed` / `coverage_floor` so a reader can see
-that from the payload alone.
+verdict for the double-confidence policy. The per-policy artifact the
+NEXT scoring run writes WILL carry `min_routed` / `coverage_floor` so a
+reader can see that from the payload alone — no such artifact is committed
+yet (the only committed artifact, `m4-gold-acceptance.json`, has neither
+field).
 
 **Case share vs score share (corrected 2026-09-13).** An earlier revision
 of this section said "95.8% chain credit". That conflated two shares:
@@ -126,28 +128,48 @@ splicing new corpus rows.
 ### 4. Guard hardening + payload evidence (2026-09-13 fix wave)
 
 Verified at HEAD before fixing, with read-only runs of the committed
-Python. A grep for `replay_disjointness` / `MIN_ROUTED` /
-`INSUFFICIENT_COVERAGE` found no test and no make/CI target, so reverting
-any of these guards broke nothing.
+Python. At the time of that review a grep for `replay_disjointness` /
+`MIN_ROUTED` / `INSUFFICIENT_COVERAGE` found no test and no make/CI target,
+so reverting any of these guards broke nothing. That gap is now CLOSED:
+`make classifier-eval-selftest` (Makefile) and the CI job in
+`.github/workflows/code-quality.yml` run
+`m4_gold_acceptance.py --self-test`, so reverting a guard turns the gate
+red.
 
 - **Self-test added (was: unpinned).**
   `python3 tools/classifier-eval/m4_gold_acceptance.py --self-test`
   (stdlib + numpy; no embed server, no replay corpus) now pins: the known
   leak is reported; an empty sample is not green; a zero-norm row and a
-  non-finite row are not green; the allowlist exempts similarity only; and
-  the floor boundary at 19 vs 20 routed cases.
+  non-finite row are not green; the allowlist exempts similarity only; the
+  floor boundary at 19 vs 20 routed cases; that the run's GUARD-1 refuses a
+  leaked ruler AND that `run_full` actually calls it (the call site is
+  asserted in source, so deleting the guard block fails the self-test); and
+  that the guard stats carry a replay `case_key`, never the ruler text.
 - **Empty-sample hole (was: reported green).** `check_overlap_only`
   returned 0 on a replay file that parsed to zero cases, printing
   `ruler disjoint: 0 replay cases vs 389 corpus cases`. It now returns a
   distinct exit 4 with a refusal message, and `replay_disjointness` raises
   `EmptyRulerError` on an empty ruler — an empty sample is never
-  "disjoint", and scoring it measures nothing.
+  "disjoint", and scoring it measures nothing. Exit 4 now means a
+  GENUINELY empty list: the ruler is parsed with the corpus JSON5 parser
+  (`eval_harness.parse_json5`, escape-aware), not a regex that required
+  `input` to be the first quoted key, so a ruler written in the repo's own
+  JSON5 style (unquoted keys, or `id` before `input`) parses instead of
+  faking an empty sample and latching exit 4.
 - **Zero-norm hole (was: silently disjoint).** `_as_unit` computed
   `0/(0+1e-12) = 0`, and the Embedder deliberately stored a zero vector
   when the server returned one, so such a row was never flagged.
   `_as_unit` now raises `DegenerateVectorError` on a zero or non-finite
   norm (naming the rows), the Embedder counts and warns on degenerate
   server rows, and the guard reports how many rows it actually compared.
+  The remaining `+1e-12` normalisations in the acceptance run's centroid
+  build (`m4_gold_acceptance.py`) and in `CentroidGate.fit`
+  (`eval_harness.py`) now go through `_as_unit`, and the harvest path
+  (`harvest_wave5.py`) calls the shared `replay_disjointness` guard instead
+  of its own inline copy — so no embedding degeneracy path is left
+  unchecked. Exit 5 is a HARD refusal with no allowlist override (a
+  degenerate row must be re-embedded, unlike a near-duplicate similarity
+  which `NEAR_DUP_ALLOWLIST` can exempt).
 - **Threshold headroom (sim 0.95).** The guard now prints the top-5 cosine
   margins (max similarity per replay row) beside the leak list, so a
   threshold sitting inside the near-duplicate band becomes visible before
@@ -155,20 +177,31 @@ any of these guards broke nothing.
   `case_key` -> recorded reason string) is the explicit escape hatch; it is
   EMPTY, an entry with no reason raises, and any entry added must be argued
   here — never granted silently.
-- **Self-evidencing payload.** Every written artifact now carries
-  `replay_sha256`, `replay_n`, `sim_threshold`, `leaks`, `min_routed`,
-  `coverage_floor` and the guard stats — the artifact can evidence its own
-  guard instead of asserting it.
+- **Self-evidencing payload (not yet committed).** The claim that a
+  COMMITTED artifact "now records its replay hash, replay count, threshold
+  and leak count" is unsupported by the repository:
+  `results/m4-gold-acceptance.json` carries none of those fields, and no
+  committed JSON contains `replay_sha256`. What is true: the payload the
+  NEXT scoring run writes WILL carry `replay_sha256`, `replay_n`,
+  `sim_threshold`, `leaks`, `min_routed`, `coverage_floor` and the guard
+  stats — so a run can evidence its own guard instead of asserting it. A
+  `guard` margin row stores the replay `case_key`, never the ruler text
+  (the ruler is untracked private transcript text).
 - **Rerun artifacts.** A re-run no longer drops an unignored `.rerun.json`
   into this tracked directory: `git check-ignore` reports everything under
   `tools/classifier-eval/results/` as NOT ignored (`.gitignore:103`
   re-includes it), so a re-run is written to
-  `<MEEPT_HOME>/classifier-eval-rerun/` under a timestamped name. The
-  canonical name stays write-once, and reruns no longer clobber each other.
-  If a tracked rerun location is preferred instead, the owner adds
-  `tools/classifier-eval/results/*.rerun*.json` to `.gitignore`.
+  `<MEEPT_HOME>/classifier-eval-rerun/` under a timestamped name — or to
+  the system temp dir when `MEEPT_HOME` itself points inside the repo, so
+  the rerun can never land in the tracked tree. The canonical name stays
+  write-once, and reruns no longer clobber each other. If a repo-local
+  rerun is preferred instead, the owner adds `classifier-eval-rerun/` to
+  `.gitignore` (the owner's call, not this script's).
 - **Exit codes** (also in the module docstring): 0 green, 2 leak,
   3 missing inputs (UNVALIDATED), 4 empty ruler, 5 degenerate embeddings.
+  Exit 4 fires only on a GENUINELY empty list (a JSON5-style ruler parses
+  now). Exit 5 has no allowlist override: a degenerate row must be
+  re-embedded, never waived.
 
 Reproduce:
 `python3 tools/classifier-eval/m4_gold_acceptance.py --self-test`

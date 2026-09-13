@@ -25,9 +25,15 @@ Two integrity guards run BEFORE any case is scored:
      when any leak is found (exit 2). It never silently drops the case,
      because dropping it would silently move the denominator.
      An EMPTY ruler is refused too (exit 4): an empty sample makes no
-     measurement and is never "disjoint". A supplied embedding row with a
+     measurement and is never "disjoint". "Empty" means a genuinely empty
+     LIST -- the ruler is parsed with the same JSON5 parser as the corpus,
+     so unquoted keys or a reordered ("id" before "input") ruler still
+     parses instead of faking empty. A supplied embedding row with a
      zero or non-finite norm is refused (exit 5): its cosine is 0.0 and
-     would silently read as disjoint (F20 zero-norm hole).
+     would silently read as disjoint (F20 zero-norm hole). Exit 5 is a
+     HARD refusal with no allowlist override -- a degenerate row must be
+     re-embedded, unlike a near-duplicate similarity which
+     NEAR_DUP_ALLOWLIST can exempt.
   2. coverage floor MIN_ROUTED (F19). With fewer than MIN_ROUTED routed
      cases the verdict is one or two Bernoulli draws against the hard-coded
      CHAIN constant, not a measurement, so the verdict is reported as
@@ -41,16 +47,20 @@ Each policy writes its OWN artifact:
 The historical, committed results/m4-gold-acceptance.json (the
 double-confidence FAIL record) is NEVER overwritten: result files are
 write-once (F34). A RE-run (canonical name already present) is written
-outside the repo under `<MEEPT_HOME>/classifier-eval-rerun/`, because the
-repo un-ignores `tools/classifier-eval/results/**` and would otherwise
+OUTSIDE the repo under `<MEEPT_HOME>/classifier-eval-rerun/` -- or the
+system temp dir when MEEPT_HOME itself points inside the repo -- because
+the repo un-ignores `tools/classifier-eval/results/**` and would otherwise
 leave an untracked artifact inside a tracked directory; the rerun name
 carries a timestamp so a re-run cannot clobber the previous re-run either.
 (If a tracked rerun location is wanted instead, the owner adds
-`tools/classifier-eval/results/*.rerun*.json` to `.gitignore`.)
+`classifier-eval-rerun/` to `.gitignore`.)
 
-Every written payload carries its own guard evidence -- replay_sha256,
-replay_n, sim_threshold, leaks, min_routed/coverage_floor -- so the
-artifact can evidence the guard that produced it instead of asserting it.
+Every payload THIS script writes carries its own guard evidence --
+replay_sha256, replay_n, sim_threshold, leaks, min_routed/coverage_floor --
+so the artifact can evidence the guard that produced it instead of
+asserting it. The committed results/m4-gold-acceptance.json predates these
+fields and does not carry them. A `guard` margin row stores the replay
+case_key, NEVER the replay text: the ruler is private transcript text.
 
 Prerequisites the committed record cannot carry: the UNTRACKED adjudicated
 replay (replay-gold.local.json5, gitignored) and a live embed server on
@@ -92,8 +102,31 @@ TOP_MARGINS = 5        # margins printed beside the leak list
 
 # Reruns go OUTSIDE the repo: nothing under tools/classifier-eval/results/
 # is gitignored, so a stray untracked artifact there is repo churn.
+REPO = HERE.parent.parent
 MEEPT_HOME = Path(os.environ.get("MEEPT_HOME") or (Path.home() / ".meept"))
-RERUN_DIR = MEEPT_HOME / "classifier-eval-rerun"
+
+
+def _rerun_dir() -> Path:
+    """Rerun location, guaranteed OUTSIDE the repo tree.
+
+    The default is ``<MEEPT_HOME>/classifier-eval-rerun``. But MEEPT_HOME
+    can itself point INSIDE the repo (a repo-local dev home), which would
+    drop the rerun back into the tracked tree; in that case fall back to
+    the system temp dir. (A repo-local rerun is acceptable only if the
+    owner adds ``classifier-eval-rerun/`` to ``.gitignore`` -- the owner's
+    call, not this script's.)
+    """
+    cand = MEEPT_HOME / "classifier-eval-rerun"
+    try:
+        inside = REPO == cand.resolve() or REPO in cand.resolve().parents
+    except OSError:
+        inside = False
+    if inside:
+        return Path(tempfile.gettempdir()) / "classifier-eval-rerun"
+    return cand
+
+
+RERUN_DIR = _rerun_dir()
 
 EXIT_LEAK = 2
 EXIT_UNVALIDATED = 3
@@ -120,12 +153,27 @@ ORCH = re.compile(
 
 def load_replay():
     """Return the adjudicated replay records, or None when the untracked
-    replay corpus is absent (gitignored by design)."""
+    replay corpus is absent (gitignored by design).
+
+    Parsed with the SAME JSON5 parser as the corpus (H.parse_json5), not a
+    key-order-sensitive regex. The old ``\\{\\s*"input"`` regex demanded
+    ``input`` be the FIRST key and every key quoted, so a ruler written in
+    the repo's own JSON5 style -- unquoted keys, or ``id`` before ``input``
+    -- parsed to ZERO cases and tripped the empty-ruler refusal (exit 4)
+    forever. Accepts the ``{ cases: [...] }`` layout the committed ruler
+    uses, a ``{ categories: {...} }`` layout, or a bare list.
+    """
     if not REPLAY.exists():
         return None
-    txt = REPLAY.read_text()
-    return json.loads("[" + ",".join(
-        re.findall(r"\{\s*\"input\".*?\}", txt, re.S)) + "]")
+    data = H.parse_json5(REPLAY.read_text())
+    if isinstance(data, dict):
+        if "cases" in data:
+            return list(data["cases"] or [])
+        if "input" in data:  # a single bare case object (one-line ruler)
+            return [data]
+        cats = data.get("categories") or {}
+        return [e for entries in cats.values() for e in entries]
+    return list(data)
 
 
 def replay_sha256() -> str | None:
@@ -206,6 +254,38 @@ def check_overlap_only() -> int:
     return 0
 
 
+def run_scoring_guard(s_texts, gold, *, corpus_vectors=None,
+                      replay_vectors=None):
+    """GUARD 1: corpus<->replay disjointness, BEFORE any scoring.
+
+    Shared by ``run_full`` and ``--self-test`` so the refusal path is
+    exercised by the self-test and cannot be ripped out of the run without
+    the self-test failing (the self-test also asserts run_full's source
+    actually calls this function). Returns ``(exit_code, guard_stats,
+    leaks)``; ``exit_code`` is None when the ruler is disjoint.
+    """
+    guard: dict = {}
+    try:
+        leaks = H.replay_disjointness(
+            s_texts, gold, corpus_vectors=corpus_vectors,
+            replay_vectors=replay_vectors, sim_threshold=SIM_THRESHOLD,
+            allowlist=NEAR_DUP_ALLOWLIST, stats=guard, top_n=TOP_MARGINS)
+    except H.DegenerateVectorError as e:
+        print(f"REFUSING to score: {e}", file=sys.stderr)
+        return EXIT_DEGENERATE, guard, None
+    except H.EmptyRulerError as e:
+        print(f"REFUSING to score: {e}", file=sys.stderr)
+        return EXIT_EMPTY_RULER, guard, None
+    if leaks:
+        print(H.format_leaks(leaks), file=sys.stderr)
+        print(H.format_margins(guard), file=sys.stderr)
+        print("REFUSING to score: the ruler is not disjoint from the "
+              "fitting corpus (train-on-test). Fix the corpus/replay "
+              "before re-running.", file=sys.stderr)
+        return EXIT_LEAK, guard, leaks
+    return None, guard, leaks
+
+
 def run_full(policies: set) -> int:
     # Input guards run BEFORE the heavy ML imports: an absent or EMPTY
     # ruler must be refused without requiring torch/transformers/:8090.
@@ -257,7 +337,16 @@ def run_full(policies: set) -> int:
     V = emb.vectors(gkeys)
     C = np.stack([V[[i for i in range(len(gold)) if intents[i] == l]].mean(axis=0)
                   for l in labs])
-    C /= (np.linalg.norm(C, axis=1, keepdims=True) + 1e-12)
+    # Guarded normalisation. ``C /= (norm + 1e-12)`` would turn a zero-norm
+    # centroid row (cancelling unit vectors) into an all-zero vector whose
+    # cosine is 0.0 and silently reads as "disjoint" -- the same F20 hole
+    # ``_as_unit`` closes for the leak guard. Fail loud instead.
+    try:
+        C = H._as_unit(C)
+    except H.DegenerateVectorError as e:
+        print(f"REFUSING to score: degenerate centroid row: {e}",
+              file=sys.stderr)
+        return EXIT_DEGENERATE
     yg = np.array([labs.index(c.intent) if not c.ood else -1 for c in gold])
 
     MB_G = np.stack(mb_embed([c.text for c in gold]))
@@ -286,26 +375,10 @@ def run_full(policies: set) -> int:
     MB_S = np.stack(mb_embed(s_texts))
 
     # --- GUARD 1: corpus<->replay disjointness, BEFORE scoring ---------
-    guard: dict = {}
-    try:
-        leaks = H.replay_disjointness(s_texts, gold,
-                                      corpus_vectors=V, replay_vectors=SV,
-                                      sim_threshold=SIM_THRESHOLD,
-                                      allowlist=NEAR_DUP_ALLOWLIST,
-                                      stats=guard, top_n=TOP_MARGINS)
-    except H.DegenerateVectorError as e:
-        print(f"REFUSING to score: {e}", file=sys.stderr)
-        return EXIT_DEGENERATE
-    except H.EmptyRulerError as e:
-        print(f"REFUSING to score: {e}", file=sys.stderr)
-        return EXIT_EMPTY_RULER
-    if leaks:
-        print(H.format_leaks(leaks), file=sys.stderr)
-        print(H.format_margins(guard), file=sys.stderr)
-        print("REFUSING to score: the ruler is not disjoint from the "
-              "fitting corpus (train-on-test). Fix the corpus/replay "
-              "before re-running.", file=sys.stderr)
-        return EXIT_LEAK
+    guard_rc, guard, leaks = run_scoring_guard(
+        s_texts, gold, corpus_vectors=V, replay_vectors=SV)
+    if guard_rc is not None:
+        return guard_rc
     # margins beside the (empty) leak list: the threshold headroom is the
     # earliest-warning signal that a corpus anchor or embedder upgrade is
     # about to turn a non-leak into a refusal.
@@ -546,6 +619,41 @@ def self_test() -> int:
           verdict_for(7, 5, 41, 48)[1] == "INSUFFICIENT_COVERAGE")
     check("committed tfidf-veto (2 routed) is sub-floor",
           verdict_for(2, 2, 46, 48)[1] == "INSUFFICIENT_COVERAGE")
+
+    # 6. GUARD-1 WIRING (F: deleting the guard block used to leave every
+    #    check green). The shared run guard refuses a leaked ruler, and
+    #    run_full's source actually calls it -- extracting the guard is
+    #    pointless if the call site can be deleted unnoticed.
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        guard_rc, _gstats, _gleaks = run_scoring_guard([known], gold)
+    check("run GUARD-1 refuses a leaked ruler (exit 2)",
+          guard_rc == EXIT_LEAK, f"-> exit {guard_rc}")
+    _body = Path(__file__).read_text().split("def run_full(")[1] \
+        .split("def self_test(")[0]
+    check("run_full wires run_scoring_guard",
+          "run_scoring_guard(" in _body, "-> GUARD-1 call site missing")
+
+    # 7. PRIVACY: the guard stats run_full copies into the artifact must not
+    #    carry ruler text -- a margin row is (sim, index, corpus_case_id,
+    #    replay_case_key), never the replay input.
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        _one = np.array([[1.0, 0, 0, 0]], dtype=np.float32)
+        _stats: dict = {}
+        H.replay_disjointness(["zsecret-guard-text-z"], gold[:1],
+                              corpus_vectors=_one, replay_vectors=_one,
+                              sim_threshold=0.95, stats=_stats)
+    _blob = json.dumps(_stats)
+    check("guard stats never contain ruler text",
+          "zsecret-guard-text-z" not in _blob,
+          f"-> {_stats.get('top_margins')}")
+    check("guard margin row carries the replay case_key",
+          isinstance(_stats.get("top_margins", [None])[0][3], str)
+          and _stats["top_margins"][0][3] == H.case_key("zsecret-guard-text-z"),
+          f"-> {_stats.get('top_margins')}")
 
     if failures:
         print(f"self-test FAILED: {len(failures)} check(s): {failures}",
