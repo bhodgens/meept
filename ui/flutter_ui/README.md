@@ -63,9 +63,14 @@ The shipped config binds HTTP on loopback only:
 - **ws**: `ws://127.0.0.1:8081/ws`
 
 The GUI host and port must equal `transport.http.addr`: the client cannot
-discover a different bind address, and the daemon accepts whole-file config
-writes (`POST /api/v1/config/main`, the meept.json5 editor in settings) from
-loopback clients only. A from-source `flutter run` with no dart-defines falls
-back to `localhost:8081`.
+discover a different bind address, and the daemon accepts `GET`/`POST
+/api/v1/config/main` (the meept.json5 editor in settings, and the read-only
+multi-user probe) from loopback clients only. The read is gated as well as the
+write because the response is the verbatim `meept.json5`, which carries
+`transport.http.api_keys`. A GUI that reaches the daemon from off-host
+therefore sees 403 on both — the multi-user row reports "could not load daemon
+config" — while a same-host GUI (the shipped web build and the desktop build
+both fall in this class) is unaffected. A from-source `flutter run` with no
+dart-defines falls back to `localhost:8081`.
 
 See `WEB_DEV.md` for the web-dev specifics.

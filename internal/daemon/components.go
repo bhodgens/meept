@@ -7549,6 +7549,15 @@ type AgentJobProcessor struct {
 	// WithBus; kept on the processor so the subscription goroutine has a
 	// stable owner. Nil when no bus was provided.
 	evidenceSub *bus.Subscriber
+	// turnContextObserver, when non-nil, is called with the EXACT context the
+	// queued job's turn is about to run under, immediately before the RunOnce
+	// call. Tests only; production never sets it. It exists because the
+	// autonomous-marker wiring (stepJobTurnContext -> Process -> RunOnce) was
+	// otherwise only pinned by a test that calls stepJobTurnContext in
+	// isolation: dropping the assignment anywhere between the marker and the
+	// loop left every test green. With this seam a pin sees what the loop
+	// actually receives (F14 follow-up).
+	turnContextObserver func(ctx context.Context)
 }
 
 // NewAgentJobProcessor creates a new agent job processor.
@@ -7945,6 +7954,12 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	}
 
 	// Execute
+	if p.turnContextObserver != nil {
+		// Test seam: observe the context the loop is about to receive. Placed
+		// HERE (not next to stepJobTurnContext) on purpose — the pin must fail
+		// if the marker assignment is moved below the RunOnce call.
+		p.turnContextObserver(ctx)
+	}
 	response, err := agentLoop.RunOnce(ctx, prompt, conversationID)
 	if err != nil {
 		// Job-level quota surfacing (leaf 06): the primary loop parks quota

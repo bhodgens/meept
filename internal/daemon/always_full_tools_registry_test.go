@@ -78,3 +78,57 @@ func TestDefaultAlwaysFullToolsAllRegistered(t *testing.T) {
 		}
 	}
 }
+
+// TestDefaultAlwaysFullToolsOnDefaultConfig states what a DEFAULT install
+// actually gets.
+//
+// The sibling pin (TestDefaultAlwaysFullToolsAllRegistered) enables
+// [transcript] and [multiagent] so every promise in the list is testable
+// against a registry that carries them — which means it says nothing about the
+// out-of-the-box registry a user runs. This test does: every entry in
+// DefaultAlwaysFullTools() must be registered under a default config EXCEPT
+// the ones whose registration is opt-in, and those are enumerated here so the
+// expectation is explicit. Any entry that is neither registered by default nor
+// listed as opt-in is a silent stub for real users (the F29 defect class).
+func TestDefaultAlwaysFullToolsOnDefaultConfig(t *testing.T) {
+	// Default config: [transcript] and [multiagent] both disabled.
+	cfg, _ := skillToolsTestConfig(t)
+	comps := newTranscriptWiringComponents(t, cfg)
+	if comps.ToolRegistry == nil {
+		t.Fatal("ToolRegistry nil")
+	}
+	registry := comps.ToolRegistry
+
+	// Opt-in-only names: registered only when a non-default section is on. A
+	// default install legitimately lacks these, and the always-full promise is
+	// vacuous until they register. Measured, not assumed — `json_extract` IS in
+	// the default registry (it is agent-scoped at dispatch, not registration).
+	optInOnly := map[string]string{
+		"transcript_fetch": "[transcript].enabled (false by default)",
+		"platform_status":  "[multiagent].enabled (false by default)",
+	}
+
+	var present, absent []string
+	for _, name := range config.DefaultAlwaysFullTools() {
+		if registry.Get(name) != nil {
+			present = append(present, name)
+			continue
+		}
+		absent = append(absent, name)
+	}
+	t.Logf("default install: always-full registered=%v absent=%v", present, absent)
+
+	for _, name := range absent {
+		why, ok := optInOnly[name]
+		if !ok {
+			t.Errorf("DefaultAlwaysFullTools lists %q, which a DEFAULT install does not register: it ships stubbed until an operator enables something. Either it belongs in the opt-in table above (with the gate) or its registration moved out of the default path", name)
+			continue
+		}
+		t.Logf("always-full %q absent by default, expected: %s", name, why)
+	}
+	for _, name := range present {
+		if why, ok := optInOnly[name]; ok {
+			t.Errorf("DefaultAlwaysFullTools lists %q as opt-in-only (%s), but a default install DOES register it: the table above is stale — either the gate moved or the note must go", name, why)
+		}
+	}
+}

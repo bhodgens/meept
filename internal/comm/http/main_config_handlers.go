@@ -45,11 +45,26 @@ func readMainConfigPayload() (mainConfigPayload, error) {
 //
 // Reads are accepted only from loopback clients, exactly like writes: the
 // payload is the verbatim meept.json5, which carries transport API keys (and
-// provider credentials), so a non-loopback — including a multi-user
-// non-owner — authenticated client must not be able to read every credential
-// in the file while it cannot even write it (audit 2026-09-12, F32). The
-// Flutter GUI and the menubar app read this endpoint from the same host, so
-// their reads stay loopback and are unaffected.
+// provider credentials). The write gate alone left every one of those secrets
+// readable — a non-loopback (including a multi-user non-owner) authenticated
+// client could GET what it was forbidden to POST. Gate the READ for what the
+// READ returns, not for what the write does (audit 2026-09-12, F32).
+//
+// Consumers on the daemon host (the Flutter GUI, whether shipped as web or
+// desktop, and any local tooling) read this endpoint over loopback and are
+// unaffected. A REMOTE client is NOT: `transport.http.addr` may bind a
+// non-loopback address, and a client whose connection arrives from off-host
+// gets 403 here — the same 403 its POST has always gotten, so the meept.json5
+// editor is (and was) unusable remotely, and the GUI's read-only multi-user
+// probe reports "could not load daemon config" instead of a mode. That is the
+// intended trade: the alternative is shipping every api_key to any
+// authenticated remote client. Do not weaken this gate for a remote GUI; the
+// payload IS the credential file.
+//
+// NOTE: the menubar app does NOT call this endpoint (it reads /config/client,
+// /config/models, /config/agents and /config/menubar only) — it is listed in
+// menubar/README.md's table because that table documents the daemon's config
+// surface, not the app's call set. Only same-host (loopback) clients use it.
 func (s *Server) handleGetMainConfig(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRequest(r) {
 		s.writeError(w, http.StatusForbidden, "config read is restricted to loopback clients")
@@ -73,7 +88,10 @@ func (s *Server) handleGetMainConfig(w http.ResponseWriter, r *http.Request) {
 // The submitted text is validated as JSON5 before anything is written; the
 // previous content is copied to <path>.bak and the new content replaces the
 // file atomically (temp file + rename) preserving the existing mode.
-// Writes are accepted only from loopback clients.
+//
+// Writes are accepted only from loopback clients — and so are reads, for the
+// same reason (see handleGetMainConfig): the file carries transport API keys,
+// so gating only the write left the whole credential set readable.
 func (s *Server) handleSaveMainConfig(w http.ResponseWriter, r *http.Request) {
 	if s.configService == nil {
 		s.writeError(w, http.StatusServiceUnavailable, "config service not available")

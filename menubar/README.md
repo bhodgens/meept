@@ -199,7 +199,7 @@ launchctl load ~/Library/LaunchAgents/com.caimlas.meept-daemon.plist
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/config/main` | Get the main daemon config (`meept.json5`): `{path, content, writable}` |
+| GET | `/api/v1/config/main` | Get the main daemon config (`meept.json5`): `{path, content, writable}` (loopback clients only) |
 | POST | `/api/v1/config/main` | Save the main config (loopback clients only) |
 | GET | `/api/v1/config/client` | Get client.json5 content |
 | POST | `/api/v1/config/client` | Save client.json5 |
@@ -214,6 +214,15 @@ launchctl load ~/Library/LaunchAgents/com.caimlas.meept-daemon.plist
 file through a `$HOME`-hardcoded path, so under a `MEEPT_HOME` override it
 could return a different file than the canonical route. Use
 `GET /api/v1/config/main`, which returns `{path, content, writable}`.
+
+`/api/v1/config/main` is loopback-only for **both** methods: its response is
+the verbatim `meept.json5`, which carries `transport.http.api_keys` and
+provider credentials, so gating only the write left the credential set
+readable. The menubar app itself does not call this endpoint — it reads
+`/config/client`, `/config/models`, `/config/agents` and `/config/menubar`
+(see `MeeptMenuBar/Services/ConfigService.swift`) and connects over loopback
+anyway. The row above documents the daemon's config surface; a remote GUI
+gets 403 on that read.
 
 ### Daemon Endpoints
 

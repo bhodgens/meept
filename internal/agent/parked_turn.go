@@ -56,6 +56,13 @@ const parkPersistTimeout = 5 * time.Second
 // ParkedTurn in budget_resume.go (budget watcher); a second ParkedTurn
 // would be a duplicate-type compile error.
 //
+// EXTENSION (bughunt 2026-09-12 wave, F14 follow-up): Autonomous is an
+// ADDITIVE field appended to the frozen shape — the freeze protects the
+// meaning and order of the existing fields, which are unchanged; the new
+// field is zero-value (false = interactive) for every record built before it
+// existed and for every non-autonomous turn. It is the carrier that lets a
+// park/resume keep a step job headless; see its own doc below.
+//
 // TurnPayload carries the class-specific original request as JSON so the
 // resume router (tree 03 leaves 02/03) can re-run the turn without
 // reconstructing history. For class=FailureQuota the encoding is the
@@ -70,6 +77,22 @@ type ParkedTurnRecord struct {
 	Attempt        int
 	MaxAttempts    int
 	TurnPayload    json.RawMessage // class-specific original request
+	// Autonomous records that the parked turn executed with the AUTONOMOUS
+	// marker on its context (tools.ContextWithAutonomous — daemon step jobs,
+	// stepJobTurnContext) so the RESUME can re-apply it. A resume callback runs
+	// on the parker's own context, which carries no turn markers: without this
+	// flag a parked-then-resumed step turn re-enters the loop interactive,
+	// file_write/file_edit STAGE a pending change no human can accept, the step
+	// reports success, and the file never exists (e2e run 8, 2026-09-11 —
+	// re-created by the F14 fix, which moved the marker off the loop but left
+	// the park/resume path dropping it).
+	//
+	// Class payloads carry the same bit (throttledTurnPayload.Autonomous)
+	// because the SQLite park store persists ONLY turn_payload: the payload
+	// copy is what survives a restart, this field is the in-process copy. A
+	// resume path re-applies the marker when EITHER is set (parkedAutonomous),
+	// so the two can never disagree in a way that matters.
+	Autonomous bool
 }
 
 // TurnParker parks ParkedTurnRecords and retries them once their resume

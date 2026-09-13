@@ -479,7 +479,7 @@ Returns counters for summarization failures, dropped messages, compaction events
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/config/main` | Get main daemon config (`meept.json5`): `{path, content, writable}` |
+| GET | `/api/v1/config/main` | Get main daemon config (`meept.json5`): `{path, content, writable}` (loopback clients only) |
 | POST | `/api/v1/config/main` | Save main daemon config (loopback clients only) |
 | GET | `/api/v1/config/client` | Get client config |
 | POST | `/api/v1/config/client` | Save client config (full replace) |
@@ -493,6 +493,18 @@ Returns counters for summarization failures, dropped messages, compaction events
 | GET | `/api/v1/config/agents/{id}` | Get agent config |
 | POST | `/api/v1/config/agents/{id}` | Save agent |
 | DELETE | `/api/v1/config/agents/{id}` | Delete agent |
+
+**Main config is loopback-only in BOTH directions.** `GET` and `POST
+/api/v1/config/main` are refused with 403 for any client whose connection does
+not arrive from a loopback address. The response is the verbatim
+`meept.json5`, which carries `transport.http.api_keys` and provider
+credentials: gating only the write left the whole credential set readable by
+any authenticated remote client, so the read is gated for what the read
+returns. Consequence: on an install whose `transport.http.addr` binds a
+non-loopback address, a remote GUI gets 403 on the read (the GUI's
+multi-user probe reports "could not load daemon config", and the meept.json5
+editor was already write-blocked remotely). Same-host clients — the GUI
+whether web or desktop, the CLI, and local tools — are unaffected.
 
 ### Agents
 

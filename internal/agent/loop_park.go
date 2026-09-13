@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/tools"
 )
 
 // throttledTurnPayload is the class=FailureThrottle TurnPayload encoding
@@ -41,6 +42,13 @@ type throttledTurnPayload struct {
 	ModelID        string            `json:"model_id,omitempty"`
 	SourceClient   string            `json:"source_client,omitempty"`
 	ParkedAt       time.Time         `json:"parked_at,omitempty"`
+	// Autonomous mirrors ParkedTurnRecord.Autonomous (F14 follow-up): the
+	// parked turn ran with the AUTONOMOUS marker, so the resume must re-apply
+	// it. It lives HERE, not only on the record, because the SQLite park store
+	// persists turn_payload byte-for-byte and nothing else of a non-column
+	// field — a step job parked before a daemon restart must still resume
+	// autonomously, or its file_write/file_edit stages again (e2e run 8).
+	Autonomous bool `json:"autonomous,omitempty"`
 }
 
 // throttleParkedTurn is the decoded form of a class=FailureThrottle record.
@@ -52,6 +60,7 @@ type throttleParkedTurn struct {
 	ModelID        string
 	SourceClient   string
 	ParkedAt       time.Time
+	Autonomous     bool
 	SessionID      string
 	AgentID        string
 	Attempt        int
@@ -68,6 +77,7 @@ func throttleTurnToRecord(turn throttleParkedTurn) (ParkedTurnRecord, error) {
 		ModelID:        turn.ModelID,
 		SourceClient:   turn.SourceClient,
 		ParkedAt:       turn.ParkedAt,
+		Autonomous:     turn.Autonomous,
 	})
 	if err != nil {
 		return ParkedTurnRecord{}, err
@@ -80,6 +90,7 @@ func throttleTurnToRecord(turn throttleParkedTurn) (ParkedTurnRecord, error) {
 		ResumeAt:       time.Time{}, // set by the caller from the plan
 		Attempt:        turn.Attempt,
 		TurnPayload:    raw,
+		Autonomous:     turn.Autonomous,
 	}, nil
 }
 
@@ -98,10 +109,21 @@ func recordToThrottleTurn(rec ParkedTurnRecord) (throttleParkedTurn, error) {
 		ModelID:        p.ModelID,
 		SourceClient:   p.SourceClient,
 		ParkedAt:       p.ParkedAt,
+		Autonomous:     p.Autonomous,
 		SessionID:      rec.SessionID,
 		AgentID:        rec.AgentID,
 		Attempt:        rec.Attempt,
 	}, nil
+}
+
+// parkedAutonomous reports whether a parked throttle turn ran with the
+// AUTONOMOUS marker and its RESUME must re-apply it (F14 follow-up). Both
+// carriers are honored: ParkedTurnRecord.Autonomous is the in-process copy,
+// turn.Autonomous is the class payload's copy — the ONLY part the SQLite park
+// store persists, so a record re-armed after a daemon restart carries the
+// marker solely there. Either set means autonomous; neither means interactive.
+func parkedAutonomous(rec ParkedTurnRecord, turn throttleParkedTurn) bool {
+	return rec.Autonomous || turn.Autonomous
 }
 
 // throttleParkAttemptKey carries the previous park generation's attempt
@@ -176,7 +198,11 @@ func (l *AgentLoop) clearThrottleTurnContext() {
 // the ParkedTurnRecord. Returns nil when no dispatch is stashed (task/skill
 // entry paths) or the encode fails — parking then proceeds without a payload
 // (the resume drops it; leaf 03 owns task-path payload routing).
-func (l *AgentLoop) captureThrottlePayload(conversationID, providerID, modelID string, parkedAt time.Time) json.RawMessage {
+//
+// ctx is the TURN's context: its AUTONOMOUS marker (daemon step jobs) is
+// recorded in the payload so the resumed turn re-enters autonomously. This is
+// the carrier that survives the SQLite park store.
+func (l *AgentLoop) captureThrottlePayload(ctx context.Context, conversationID, providerID, modelID string, parkedAt time.Time) json.RawMessage {
 	l.throttleMu.Lock()
 	stash := l.throttleTurnCtx
 	l.throttleMu.Unlock()
@@ -190,6 +216,7 @@ func (l *AgentLoop) captureThrottlePayload(conversationID, providerID, modelID s
 		ProviderID:     providerID,
 		ModelID:        modelID,
 		ParkedAt:       parkedAt,
+		Autonomous:     tools.AutonomousFromContext(ctx),
 	})
 	if err != nil {
 		l.logger.Warn("throttle park payload encode failed — parking without payload",
@@ -278,7 +305,7 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 		}
 		l.throttleMu.Unlock()
 	}
-	payload := l.captureThrottlePayload(conversationID, terr.ProviderID, terr.ModelID, now)
+	payload := l.captureThrottlePayload(ctx, conversationID, terr.ProviderID, terr.ModelID, now)
 
 	rec := ParkedTurnRecord{
 		ConversationID: conversationID,
@@ -288,6 +315,12 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 		ResumeAt:       resumeAt,
 		Attempt:        attempt,
 		TurnPayload:    payload,
+		// F14 follow-up: carry the turn's autonomy onto the record (and its
+		// payload copy) so the resume re-applies the marker. A step job's turn
+		// runs under tools.ContextWithAutonomous; without this the resume
+		// re-enters interactive and its file_write/file_edit stage a change
+		// nothing accepts (e2e run 8).
+		Autonomous: tools.AutonomousFromContext(ctx),
 	}
 	if !l.turnParker.Park(rec) {
 		l.logger.Warn("throttle park refused — surfacing the throttle error",
@@ -439,6 +472,16 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 	// also suppresses the user-message history re-add inside
 	// RunOnceWithParts — the parked attempt already added it.
 	resumeCtx := WithThrottleParkAttempt(WithResumedTurn(ctx), rec.Attempt+1)
+	// F14 follow-up: re-apply the AUTONOMOUS marker a parked step job's turn
+	// ran under. `ctx` here is the PARKER's context (no turn markers), so
+	// without this the resumed turn re-enters interactive, file_write/
+	// file_edit STAGE a pending change no human will accept, and the step
+	// still reports success (e2e run 8, 2026-09-11). EITHER carrier counts:
+	// rec.Autonomous is the in-process copy, the payload copy (turn.Autonomous)
+	// is what survives the SQLite park store's restart re-arm.
+	if parkedAutonomous(rec, turn) {
+		resumeCtx = tools.ContextWithAutonomous(resumeCtx)
+	}
 	_, err = l.RunOnceWithParts(resumeCtx, turn.Message, turn.Parts, turn.ConversationID)
 	if err != nil {
 		// A ThrottleBackoffError already re-parked inside the loop (grown
@@ -511,6 +554,27 @@ func (l *AgentLoop) TurnParker() *TurnParker {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.turnParker
+}
+
+// LoopAutonomousMarker reports whether the LOOP-level autonomous latch
+// (SetAutonomous / l.autonomous, loop.go) is set.
+//
+// It exists for the daemon's wiring pin: since F14 the production job path
+// (AgentJobProcessor.Process) marks the TURN's context, never the loop, and
+// that latch must stay false for every production path — it is a one-way
+// marker with no reset, so setting it on the process-wide interactive loop
+// silently disables the pending-change preview for every later chat turn.
+// Read-only; guarded by the loop mutex (SetAutonomous writes under it).
+//
+// SetAutonomous itself is retained as the escape hatch for a caller that
+// genuinely owns a headless-only loop; it is NOT part of the queued-job path.
+func (l *AgentLoop) LoopAutonomousMarker() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.autonomous
 }
 
 // SetClock injects the clock used for parking schedule decisions. Nil-guarded

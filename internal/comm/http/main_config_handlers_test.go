@@ -356,3 +356,98 @@ func TestIsLoopbackRequest(t *testing.T) {
 		t.Error("isLoopbackRequest(nil) = true, want false")
 	}
 }
+
+// --- doc-drift pin (F32 follow-up) ------------------------------------------
+
+// mainConfigDocFiles are the tables that document the main-config route. The
+// F32 fix gated the READ as well as the write, but left every one of these
+// saying "loopback clients only" on the POST row alone — and left the
+// handler's own comment claiming the menubar app reads the endpoint (no Swift
+// file references /api/v1/config/main; it calls /config/client, /config/models,
+// /config/agents, /config/menubar). Doc drift on a security gate is how the
+// gate gets "simplified" away later, so it is pinned here.
+var mainConfigDocFiles = []string{
+	"docs/reference/http-api.md",
+	"docs/reference/http-api-complete.md",
+	"menubar/README.md",
+}
+
+// mainConfigProseDocFiles state the rule in prose (they describe the GUI's
+// connect path) rather than a table row.
+var mainConfigProseDocFiles = []string{
+	"ui/flutter_ui/README.md",
+	"ui/flutter_ui/WEB_DEV.md",
+}
+
+func repoRootForDocsPin(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for i := 0; i < 8; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	t.Fatalf("repo root (go.mod) not found above %s", dir)
+	return ""
+}
+
+// mainConfigTableRow returns the markdown table row for method +
+// /api/v1/config/main ("" when absent).
+func mainConfigTableRow(body, method string) string {
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.Contains(line, "/api/v1/config/main") {
+			continue
+		}
+		if !strings.Contains(line, "| "+method+" |") {
+			continue
+		}
+		return line
+	}
+	return ""
+}
+
+func TestMainConfigDocsPinBothMethodsLoopbackOnly(t *testing.T) {
+	root := repoRootForDocsPin(t)
+
+	for _, rel := range mainConfigDocFiles {
+		b, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		body := string(b)
+		for _, method := range []string{"GET", "POST"} {
+			row := mainConfigTableRow(body, method)
+			if row == "" {
+				t.Errorf("%s: no %s /api/v1/config/main row found", rel, method)
+				continue
+			}
+			if !strings.Contains(strings.ToLower(row), "loopback") {
+				t.Errorf("%s: the %s /api/v1/config/main row does not say the route is loopback-only: %q", rel, method, strings.TrimSpace(row))
+			}
+		}
+	}
+
+	for _, rel := range mainConfigProseDocFiles {
+		b, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		// Collapse the line wraps so the assertion is about wording, not
+		// where the editor broke the line.
+		flat := strings.Join(strings.Fields(string(b)), " ")
+		if !strings.Contains(flat, "`GET`/`POST /api/v1/config/main`") {
+			t.Errorf("%s: does not document that GET and POST /api/v1/config/main are BOTH loopback-only (the GUI reads this endpoint for its multi-user probe)", rel)
+		}
+		if !strings.Contains(strings.ToLower(flat), "loopback clients only") {
+			t.Errorf("%s: does not state the loopback-clients-only restriction on the main config route", rel)
+		}
+	}
+}
