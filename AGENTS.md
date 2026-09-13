@@ -17,6 +17,9 @@ go build -o bin/meept ./cmd/meept
 make build              # Everything (daemon + CLI + gendoc + GUI + lite + graphs)
 make build-gui          # Flutter GUI only
 make menubar-install    # macOS MenuBar app
+make deps-llama-check   # Enforce the llama.cpp build floor (>= b9660, LFM2.5 tool-call
+                        # parser); wired into `make deps` and `make install`. `make
+                        # deps-llama` installs it into $MEEPT_HOME/deps/llama.cpp
 
 # Test
 #
@@ -91,12 +94,21 @@ make hooks                # core.hooksPath -> .githooks (17 pre-commit checks)
 # from `go list -e` STDOUT only. {{.Error}} prints there, while stderr carries
 # progress noise ("go: downloading ..." on a cold GOMODCACHE) that must never be
 # read as a load failure — folding stderr in (2>&1) blocked healthy commits on
-# any machine with an empty module cache. go list exiting non-zero with an empty
-# stdout is `broken` (fail closed; stderr is captured separately for the reason).
-# A directory with no (non-test) Go files reports `nofiles` — a SKIP, not a
-# failure. pre-commit-build's root-artifact check fails only for names a build
-# can create (meept, meept-daemon, meept-lite, llmdoc, *.test, including a stale
-# binary it clobbers); any other new root-level path is reported, never blocking.
+# any machine with an empty module cache. The classifier detects LOAD failures
+# and nothing else: `broken` is `go list` exiting non-zero with an empty stdout
+# (stderr is captured separately for the reason) or a non-empty {{.Error}} that
+# matches none of the exclusion reasons. A SYNTAX ERROR or an UNRESOLVED IMPORT
+# is NOT `broken`: both give rc=0 with an EMPTY .Error, so the package classifies
+# `ok` and surfaces as a go vet / staticcheck finding instead (go build, for
+# pre-commit-build). A directory with no (non-test) Go files reports `nofiles` —
+# a SKIP, not a failure; that is a deliberate loosening (the pre-68b2338c gate
+# failed there).
+# pre-commit-build's root-artifact check blocks a new root-level entry only when
+# a build can create it: the gitignored binaries (meept, meept-daemon, meept-lite,
+# llmdoc — including a stale one a build clobbers), `*.test`, or the basename of
+# any `package main` directory in the module (a bare `go build ./cmd/gendoc`
+# writes /gendoc), derived from `go list` rather than a fixed list. Any other new
+# root-level path is reported, never blocking.
 
 # Static analyzers
 make analyzers            # mutexio + predid

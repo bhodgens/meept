@@ -114,6 +114,10 @@ LLAMA_CPP_PREFIX ?= $(MEEPT_DEPS)/llama.cpp
 # legally answer in prose, which is the agent narration failure this floor
 # prevents. Enforced by `make deps-llama-check` (wired into deps + install).
 LLAMA_CPP_MIN_BUILD ?= 9660
+# Release date of the floor build; the fallback evidence for untagged dev
+# builds (a --depth 1 clone reports "build 1"), verified against the commit
+# date of a llama.cpp checkout at the prefix.
+LLAMA_CPP_MIN_DATE ?= 2026-06-15
 
 # Build flags
 GO_LDFLAGS := -s -w
@@ -275,6 +279,7 @@ deps-llama-check:
 	@MEEPT_DEPS="$(MEEPT_DEPS)" \
 	 LLAMA_CPP_PREFIX="$(LLAMA_CPP_PREFIX)" \
 	 LLAMA_CPP_MIN_BUILD="$(LLAMA_CPP_MIN_BUILD)" \
+	 LLAMA_CPP_MIN_DATE="$(LLAMA_CPP_MIN_DATE)" \
 	 bash scripts/install-llama-cpp.sh check
 
 # deps-llama: build/install llama.cpp into $(LLAMA_CPP_PREFIX) at
@@ -286,6 +291,7 @@ deps-llama:
 	@MEEPT_DEPS="$(MEEPT_DEPS)" \
 	 LLAMA_CPP_PREFIX="$(LLAMA_CPP_PREFIX)" \
 	 LLAMA_CPP_MIN_BUILD="$(LLAMA_CPP_MIN_BUILD)" \
+	 LLAMA_CPP_MIN_DATE="$(LLAMA_CPP_MIN_DATE)" \
 	 bash scripts/install-llama-cpp.sh install
 
 # =============================================================================

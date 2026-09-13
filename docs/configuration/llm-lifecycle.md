@@ -364,6 +364,27 @@ permission_mode = "permissive"
 }
 ```
 
+#### Version floor: llama.cpp build >= 9660 (LFM2.5 tool calls)
+
+meept requires **llama.cpp build >= 9660** (upstream release b9660, 2026-06-15). The
+LFM2.5 native tool-call parser landed June 2026 (PRs #21242/#24071/#24178/#24234, final
+fix #24667); older builds log `Chat format: Generic` and fall back to a generic JSON
+grammar whose root also allows a `response` branch, so a tool-forcing prompt can legally
+answer in prose instead of calling a tool. meept keeps its own build under the dependency
+prefix (`$MEEPT_HOME/deps/llama.cpp`, `MEEPT_DEPS`/`LLAMA_CPP_PREFIX` in the Makefile), and
+the daemon prepends the meept prefix bin dirs to PATH (`deps/llama.cpp/bin`, then
+`deps/llama.cpp/build/bin`), so it wins over Homebrew.
+
+```bash
+make deps-llama-check    # verify the resolved llama-server (exits 1 below the floor)
+make deps-llama          # build/install it into the prefix (skips if already current)
+```
+Restart the daemon afterwards so it re-reads PATH. `make deps` and `make install` both run
+the check; `MEEPT_LLAMA_SKIP_CHECK=1` opts out, `MEEPT_LLAMA_REQUIRE=1` also fails when no
+`llama-server` is found at all. Untagged `-dev` source builds (a `--depth 1` clone reports
+`build 1`) pass only when a checkout at the prefix has a commit date on/after the floor;
+`MEEPT_LLAMA_STRICT=1` refuses that evidence entirely.
+
 ### MLX (macOS)
 
 ```json5

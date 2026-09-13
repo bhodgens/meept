@@ -141,11 +141,18 @@ class DaemonController {
         }
     }
 
-    /// PATH for spawned processes: inherited PATH first, then guaranteed
-    /// dirs appended if absent. Keep in sync with internal/daemon/daemonpath.go
-    /// DaemonPath() (issue #32).
+    /// PATH for spawned processes: the meept dependency prefix first (so a
+    /// llama-server installed by `make deps-llama` beats a Homebrew build,
+    /// which predates llama.cpp's LFM2.5 tool-call parser), then the
+    /// inherited PATH, then guaranteed dirs appended if absent. Keep in sync
+    /// with internal/daemon/daemonpath.go DaemonPath() (issue #32).
     private static func daemonPATH() -> String {
         let home = NSHomeDirectory()
+        let meeptHome = ProcessInfo.processInfo.environment["MEEPT_HOME"] ?? "\(home)/.meept"
+        let prefixDirs = [
+            "\(meeptHome)/deps/llama.cpp/bin",
+            "\(meeptHome)/deps/llama.cpp/build/bin",
+        ]
         let guaranteedDirs = [
             "/opt/homebrew/bin",
             "/usr/local/bin",
@@ -160,6 +167,11 @@ class DaemonController {
 
         var seen = Set<String>()
         var dirs: [String] = []
+        for dir in prefixDirs where !dir.isEmpty {
+            if seen.insert(dir).inserted {
+                dirs.append(dir)
+            }
+        }
         let inherited = ProcessInfo.processInfo.environment["PATH"] ?? ""
         for dir in inherited.split(separator: ":").map(String.init) where !dir.isEmpty {
             if seen.insert(dir).inserted {
