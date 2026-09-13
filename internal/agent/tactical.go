@@ -121,6 +121,16 @@ type TacticalScheduler struct {
 	// quotaDeferralMu protects the two quota-deferral counters.
 	quotaDeferralMu sync.Mutex
 
+	// validationRetries counts validation-retry attempts per step ID.
+	// task.TaskStep.ValidationRetryCount has no DB column (StepStore.Update
+	// never writes validation_retry_count), so the value reloaded with
+	// every job completion is always 0: the validation-retry branch would
+	// re-queue forever and the exhaustion terminus (F51) was unreachable.
+	// Same in-memory bookkeeping pattern as the quota-deferral counters,
+	// and the effective count is max(in-memory, persisted field).
+	validationRetries map[string]int
+	validationRetryMu sync.Mutex
+
 	// handoffPropagator, when set, replaces propagateContextToNextStepsLegacy.
 	// Set by the daemon when the orchestrator is wired with handoff deps
 	// (templateReg + registry + LLM). Nil falls back to the legacy 500-char
@@ -908,6 +918,41 @@ func (ts *TacticalScheduler) quotaDeferralScheduled(stepID string, errMsg string
 	return resumeAt, true
 }
 
+// validationRetryCount returns the effective validation-retry count for a
+// step: the in-memory counter (authoritative; see the field comment) or the
+// persisted struct field, whichever is larger.
+func (ts *TacticalScheduler) validationRetryCount(step *task.TaskStep) int {
+	ts.validationRetryMu.Lock()
+	defer ts.validationRetryMu.Unlock()
+	if ts.validationRetries == nil {
+		ts.validationRetries = make(map[string]int)
+	}
+	n := ts.validationRetries[step.ID]
+	if step.ValidationRetryCount > n {
+		n = step.ValidationRetryCount
+	}
+	return n
+}
+
+// bumpValidationRetry records one consumed validation retry for the step.
+func (ts *TacticalScheduler) bumpValidationRetry(stepID string) int {
+	ts.validationRetryMu.Lock()
+	defer ts.validationRetryMu.Unlock()
+	if ts.validationRetries == nil {
+		ts.validationRetries = make(map[string]int)
+	}
+	ts.validationRetries[stepID]++
+	return ts.validationRetries[stepID]
+}
+
+// clearValidationRetries drops the retry counter for a step that reached a
+// validation verdict (pass or exhaustion).
+func (ts *TacticalScheduler) clearValidationRetries(stepID string) {
+	ts.validationRetryMu.Lock()
+	defer ts.validationRetryMu.Unlock()
+	delete(ts.validationRetries, stepID)
+}
+
 // recordQuotaDeferral persists the deferral counters for a step AFTER the
 // requeue has been accepted.
 func (ts *TacticalScheduler) recordQuotaDeferral(stepID string, now time.Time) int {
@@ -918,6 +963,30 @@ func (ts *TacticalScheduler) recordQuotaDeferral(stepID string, now time.Time) i
 		ts.quotaDeferralFirst[stepID] = now
 	}
 	return ts.quotaDeferrals[stepID]
+}
+
+// terminalizeStepCompleted marks a step completed for callers that reached a
+// successful execution outcome through a path that runs NO validation or
+// review flow (pair-managed, reviewer error, review disabled), and records
+// the explicit reason in the log.
+//
+// F3 (2026-09-12 bughunt): once the daemon wires a ValidatorManager, the old
+// task-level gate flagged every successfully-terminal step with
+// Validated=false, so these three paths — which never run a validation flow
+// — returned "task validation incomplete" and blocked finalization forever
+// (a reviewer ERROR alone was enough). The fix is the gate scoping chosen in
+// OnJobCompleted: a missing flag is not a failure signal, only an explicit
+// verdict (ValidationError) is. Validated stays FALSE here — nothing was
+// validated — and the in-memory state is assigned so a later full-row write
+// cannot serialize the pre-review state back over this one.
+func (ts *TacticalScheduler) terminalizeStepCompleted(step *task.TaskStep, reason string) {
+	step.State = task.StepCompleted
+	if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
+		ts.logger.Error("Failed to set step completed",
+			"step_id", step.ID, "reason", reason, "error", err)
+	}
+	ts.logger.Info("Step terminalized without a validation flow",
+		"step_id", step.ID, "reason", reason)
 }
 
 // OnJobCompleted handles a completed job by updating the step, promoting
@@ -956,10 +1025,12 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 				ts.logger.Error("Failed to set pair step result", "step_id", step.ID, "error", err)
 			}
 
-			// Mark step completed
-			if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
-				ts.logger.Error("Failed to set pair step completed", "step_id", step.ID, "error", err)
-			}
+			// Mark step completed. F3 (2026-09-12 bughunt): the
+			// pair-managed path hands the step straight back to the
+			// PairManager without any validation/review flow; the
+			// task-level gate no longer blocks a missing Validated flag
+			// (see the gate scoping in the finalize block).
+			ts.terminalizeStepCompleted(step, "pair-managed step handed back to PairManager")
 
 			// Run next pair round asynchronously
 			go ts.pairManager.RunRound(context.Background(), session.ID)
@@ -1003,6 +1074,10 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		// Claims are the parsed report's accomplished entries — the
 		// model's narration, checked against ToolEvidence below.
 		Claims []string `json:"claims,omitempty"`
+		// TokenUsage is the turn's token consumption, when the job
+		// envelope carries it (F75: the daemon does not emit it today, so
+		// the aggregation below is only live for producers that do).
+		TokenUsage int `json:"token_usage,omitempty"`
 	}
 	if err := json.Unmarshal(result, &execResult); err != nil {
 		ts.logger.Debug("Failed to parse execution result", "step_id", step.ID, "error", err)
@@ -1019,7 +1094,7 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			"step_id", step.ID,
 			"evidence_count", len(execResult.ToolEvidence),
 		)
-	} else if len(execResult.Evidence) > 0 {
+	} else if hasMeaningfulEvidence(execResult.Evidence) {
 		step.Evidence = execResult.Evidence
 		// Persist evidence to step store
 		if err := ts.stepStore.Update(step); err != nil {
@@ -1029,6 +1104,28 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			"step_id", step.ID,
 			"evidence_count", len(execResult.Evidence),
 		)
+	} else if len(execResult.Evidence) > 0 {
+		// F8 (2026-09-12 bughunt): the daemon's step-job envelope encodes
+		// `evidence` as a []string of prose (components.go buildStepResult),
+		// so decoding into []models.Evidence leaves a one-element slice
+		// holding a ZERO-VALUE Evidence (Go keeps the element and reports
+		// an UnmarshalTypeError). Persisting that artifact stored `[{}]` as
+		// the step's evidence and defeated every len(step.Evidence)==0
+		// guard downstream. Drop it instead of storing it.
+		ts.logger.Debug("Discarding zero-value evidence decode artifact",
+			"step_id", step.ID,
+			"entries", len(execResult.Evidence),
+		)
+	}
+
+	// Token usage: only a producer-supplied value is authoritative (the
+	// step-job envelope does not carry token_usage today — F75), so adopt
+	// it when present and the step has none of its own.
+	if execResult.TokenUsage > 0 && step.TokenUsage == 0 {
+		step.TokenUsage = execResult.TokenUsage
+		if err := ts.stepStore.Update(step); err != nil {
+			ts.logger.Warn("Failed to persist step token usage", "step_id", step.ID, "error", err)
+		}
 	}
 
 	// Claim-vs-evidence contract (e2e run 7 rkl3Th): the step claims file
@@ -1037,7 +1134,11 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	// fabricated report ride forward as ground truth. Complements the
 	// loop-layer anti-hallucination nudge (which retried the turn): this
 	// is the record-level backstop for whatever still arrives.
-	if len(execResult.Claims) > 0 && len(step.Evidence) == 0 && ts.claimsFileSideEffects(execResult.Claims) {
+	//
+	// F8: the predicate is the structural one — `len(step.Evidence) == 0`
+	// was never true for a daemon step job (zero-value decode artifact),
+	// so this whole branch was unreachable in production.
+	if len(execResult.Claims) > 0 && !hasMeaningfulEvidence(step.Evidence) && ts.claimsFileSideEffects(execResult.Claims) {
 		step.Validated = false
 		step.ValidationError = "file side-effect claims without tool-issued evidence (unverified narration)"
 		if err := ts.stepStore.Update(step); err != nil {
@@ -1051,7 +1152,13 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		// non-file tools or already-present artifacts); mark it so
 		// downstream consumers can tell unverified narration from a
 		// validated result, and let the normal completion flow proceed.
-		return nil
+		//
+		// F4/F50 (2026-09-12 bughunt): this used to `return nil` here,
+		// which skipped the step state transition, the step_completed
+		// publish, IncrementCompletedJobs, PromoteReadySteps and the whole
+		// task-finalization block — the step stayed non-terminal forever
+		// and the task never left executing. Fall through instead; the
+		// standing ValidationError is what the task-level gate acts on.
 	}
 
 	// NEW: Validation gate - validate evidence before proceeding
@@ -1074,11 +1181,18 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 				maxRetries = 1
 			}
 
-			if step.ValidationRetryCount < maxRetries {
+			// Effective retry count: the persisted field plus the in-memory
+			// counter (the persisted one is never written by the store —
+			// see validationRetries). Without the in-memory half the retry
+			// branch re-queued forever (the count reloaded as 0 every
+			// round), so the exhaustion terminus below was unreachable.
+			retryCount := ts.validationRetryCount(step)
+			if retryCount < maxRetries {
 				// Re-queue step for validation retry. The payload is rebuilt
 				// from the step (which carries the persisted SessionID) so
 				// the retry job re-stamps identically to the first schedule.
-				step.ValidationRetryCount++
+				step.ValidationRetryCount = retryCount + 1
+				ts.bumpValidationRetry(step.ID)
 				if err := ts.stepStore.Update(step); err != nil {
 					ts.logger.Warn("failed to persist step retry count", "step_id", step.ID, "error", err)
 				}
@@ -1119,43 +1233,84 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 				return nil // Don't proceed to completion; step will be retried
 			}
 
-			// Max retries exceeded - mark step as needs_info for human review
-			ts.logger.Warn("Validation max retries exceeded",
+			// Max retries exceeded (F51, 2026-09-12 bughunt): this branch
+			// promised a needs_info transition but set NO state, so the step
+			// stayed StepScheduled forever and the error returned here is
+			// only logged by orchestrator.handleJobCompleted — the task never
+			// finalized (the sync reply degraded to its ceiling text). There
+			// is no needs_info StepState, so terminalize as FAILED and fall
+			// through: the completion flow below finalizes the task as a
+			// failed task, which is honest and terminal.
+			ts.logger.Warn("Validation max retries exceeded; failing step",
 				"step_id", step.ID,
 				"retry_count", step.ValidationRetryCount,
 				"max_retries", maxRetries,
 			)
+			step.Validated = false
+			step.State = task.StepFailed
+			ts.clearValidationRetries(step.ID)
 			if err := ts.stepStore.Update(step); err != nil {
-				ts.logger.Warn("failed to persist step", "step_id", step.ID, "error", err)
+				ts.logger.Warn("failed to persist failed step after validation exhaustion",
+					"step_id", step.ID, "error", err)
 			}
-			return validationErr // Don't proceed to completion
+			if err := ts.stepStore.SetState(step.ID, task.StepFailed); err != nil {
+				ts.logger.Warn("failed to set step failed after validation exhaustion",
+					"step_id", step.ID, "error", err)
+			}
+		} else {
+			// Persist the verdict AFTER assigning it (F2/F7, 2026-09-12
+			// bughunt): stepStore.Update serializes step.Validated and
+			// validation_error by value at call time, so issuing it before
+			// the two assignments persisted validated=false plus the stale
+			// validation_error — b31c3f6e was a no-op and the task-level gate
+			// below blocked every validated step with "step completed but not
+			// validated". Assign first, then persist (the needs_info fix
+			// further down this file already had the order right).
+			//
+			// F10: a validator that ran over zero/zero-value evidence reports
+			// Valid ("no recognized evidence entry failed") without verifying
+			// anything, so a pass is only recorded when the step carries
+			// evidence a tool actually produced. With no meaningful evidence
+			// there is nothing to verify: leave Validated=false so the record
+			// cannot claim a verification that never happened.
+			if hasMeaningfulEvidence(step.Evidence) {
+				step.Validated = true
+				step.ValidationError = ""
+			}
+			ts.clearValidationRetries(step.ID)
+			if err := ts.stepStore.Update(step); err != nil {
+				ts.logger.Error("Failed to persist step validation verdict", "step_id", step.ID, "error", err)
+			}
 		}
-		// PERSIST the verdict (e2e run 9 brx2FG): Validated was set only on
-		// the in-memory struct, so the task-level completion check — which
-		// re-reads steps via stepStore.ListByTaskID — always saw
-		// validated=false and blocked completion ("step completed but not
-		// validated"), cascading reply timeouts on every sync-dispatch
-		// step task. Persist Validated=true/ValidationError="" here.
-		if err := ts.stepStore.Update(step); err != nil {
-			ts.logger.Error("Failed to persist step validation verdict", "step_id", step.ID, "error", err)
-		}
-		step.Validated = true
-		step.ValidationError = ""
 	}
 
-	// Publish step completed event with details
+	// Publish step completed event with details. The state is reported
+	// from the step when it is already terminal (the validation-exhaustion
+	// and claim-marked paths terminalize before this publish) so the event
+	// never claims "completed" for a failed step.
+	stepEventState := task.StepCompleted
+	if step.State.IsTerminal() {
+		stepEventState = step.State
+	}
 	ts.publishEvent("task.step_completed", map[string]any{
 		KeyTaskID:     step.TaskID,
 		KeyStepID:     step.ID,
 		"description": step.Description,
 		KeyAgentID:    step.AgentID,
 		"result":      truncateString(resultStr, 200),
-		"state":       string(task.StepCompleted),
+		"state":       string(stepEventState),
 		"duration":    time.Since(startTime).String(),
 	})
 
-	// Check if review is needed
-	if ts.reviewManager != nil && ts.reviewManager.GetPolicy().Enabled {
+	// Check if review is needed. A step already terminalized by the
+	// validation-exhaustion branch above must NOT be pushed through the
+	// review/completion terminalization (that would re-complete a failed
+	// step); the task-finalization bookkeeping below still runs and
+	// finalizes the task as failed.
+	if step.State.IsTerminal() {
+		ts.logger.Info("Step already terminal; skipping review terminalization",
+			"step_id", step.ID, "state", string(step.State))
+	} else if ts.reviewManager != nil && ts.reviewManager.GetPolicy().Enabled {
 		// Trigger review process
 		ts.logger.Debug("Triggering review for step", "step_id", step.ID)
 
@@ -1188,10 +1343,12 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		reviewResult, err := ts.reviewManager.ReviewStep(ctx, step, reviewSpec)
 		if err != nil {
 			ts.logger.Error("Review failed", "step_id", step.ID, "error", err)
-			// Continue without review - mark as completed
-			if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
-				ts.logger.Error("Failed to set step to completed after review failure", "error", err)
-			}
+			// Continue without review - mark as completed. F3
+			// (2026-09-12 bughunt): the reviewer crashing must not
+			// permanently block the task — the step executed
+			// successfully, so terminalize it and record that no
+			// validation/review flow ran.
+			ts.terminalizeStepCompleted(step, "reviewer error: "+err.Error())
 		} else {
 			// Handle review result
 			if err := ts.handleReviewResult(ctx, step, reviewResult); err != nil {
@@ -1199,10 +1356,10 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			}
 		}
 	} else {
-		// No review manager or review disabled - mark completed directly
-		if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
-			ts.logger.Error("Failed to set step state to completed", "step_id", step.ID, "error", err)
-		}
+		// No review manager or review disabled - mark completed directly.
+		// F3: this path runs no validation/review flow either; the gate
+		// below no longer treats a missing Validated flag as failure.
+		ts.terminalizeStepCompleted(step, "review disabled or no review manager")
 	}
 
 	// Propagate context to next ready steps (handoff if wired, legacy fallback otherwise)
@@ -1313,31 +1470,64 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	}
 
 	if allDone {
-		// NEW: Task-level validation before marking complete
+		// F6 (2026-09-12 bughunt): another path — the ralph replan cap, a
+		// cancellation, startup recovery — may have terminalized the task
+		// while this step was still in flight. Never flip a terminal
+		// task's state or emit a second task.completed: the orchestrator's
+		// TaskOutcome-gated ralph Reset keys off the terminal state, so a
+		// late step could otherwise resurrect a capped-failed task and
+		// disarm the cap ("3→1→2→1").
+		if t.State.IsTerminal() {
+			ts.logger.Info("Task already terminal; skipping finalization",
+				"task_id", step.TaskID, "state", string(t.State))
+			return nil
+		}
+
+		// Task-level validation before marking complete.
+		var validationBlock string
 		steps, err := ts.stepStore.ListByTaskID(step.TaskID)
 		if err != nil {
 			ts.logger.Error("Failed to list steps for task validation", "error", err)
 		} else {
 			var validationErrors []string
 			for _, s := range steps {
-				// Validated is only set when a validatorManager ran. With no
-				// validator, the flag stays false — do not block task
-				// completion (meept-bench: heuristic auto-approve left
-				// Validated=false and waitForTaskCompletion hung 600s).
-				if ts.validatorManager != nil && s.State.IsSuccessfullyTerminal() && !s.Validated {
+				// Only successfully-terminal steps participate: failed and
+				// rejected steps finalize the task as a failure below and
+				// their ValidationError is already the recorded reason.
+				if !s.State.IsSuccessfullyTerminal() {
+					continue
+				}
+				// F3 (2026-09-12 bughunt): a missing Validated flag is NOT
+				// a failure signal — three terminalization paths
+				// legitimately run no validation flow (pair-managed,
+				// reviewer error, review disabled), and Validated=false is
+				// also the honest record for a step whose validator had
+				// nothing meaningful to check (F10). Only an EXPLICIT
+				// verdict blocks, below. This arm is the residual safety
+				// net: a validator was available for the step's hint and
+				// the step carried tool-issued evidence, yet no verdict
+				// was ever recorded.
+				if ts.validatorManager != nil &&
+					ts.validatorManager.HasValidator(s.ToolHint) &&
+					hasMeaningfulEvidence(s.Evidence) &&
+					!s.Validated {
 					validationErrors = append(validationErrors,
 						fmt.Sprintf("step %s completed but not validated", s.ID))
 				}
+				// An explicit verdict on a successfully-terminal step is
+				// the unverified-narration marker (claim-vs-evidence
+				// backstop) or a validation failure that reached a success
+				// state: the task must not be reported as completed.
 				if s.ValidationError != "" {
 					validationErrors = append(validationErrors,
 						fmt.Sprintf("step %s has validation error: %s", s.ID, s.ValidationError))
 				}
 			}
 			if len(validationErrors) > 0 {
-				ts.logger.Error("Task validation incomplete - blocking completion",
+				validationBlock = strings.Join(validationErrors, ", ")
+				ts.logger.Error("Task validation incomplete - failing task",
 					"task_id", step.TaskID,
-					"errors", strings.Join(validationErrors, ", "))
-				return fmt.Errorf("task validation incomplete: %s", strings.Join(validationErrors, ", "))
+					"errors", validationBlock)
 			}
 		}
 
@@ -1359,7 +1549,14 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		if ferr != nil {
 			ts.logger.Error("Failed to list failed steps", "task_id", step.TaskID, "error", ferr)
 		}
-		taskFailed := len(failedSteps) > 0
+		// A validation block is a task failure: every step is terminal but
+		// the work is unverified, so the task cannot report success. This
+		// used to return an error, which orchestrator.handleJobCompleted
+		// only logs — the task sat in executing forever and the sync reply
+		// degraded to its ceiling text. Failing it durably is honest and
+		// terminal (and is the outcome the claim-vs-evidence backstop
+		// needs, now that the branch is reachable).
+		taskFailed := len(failedSteps) > 0 || validationBlock != ""
 		if taskFailed {
 			t.SetState(task.StateFailed)
 		} else {
@@ -1381,11 +1578,16 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 
 		// Honest completion payload: "status" tells subscribers whether the
 		// task actually succeeded, and a failed task's "result" carries the
-		// first failed step's error text instead of a success summary.
+		// failure reason instead of a success summary.
 		completionStatus := "completed"
 		if taskFailed {
 			completionStatus = "failed"
-			resultSummary = truncateString(firstLine(failedSteps[0].Result), 400)
+			switch {
+			case validationBlock != "":
+				resultSummary = truncateString(firstLine(validationBlock), 400)
+			case len(failedSteps) > 0:
+				resultSummary = truncateString(firstLine(failedSteps[0].Result), 400)
+			}
 		}
 
 		// Extract unique agents used
@@ -1473,18 +1675,23 @@ func (ts *TacticalScheduler) handleReviewResult(ctx context.Context, step *task.
 		if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
 			ts.logger.Error("Failed to set step to completed", "error", err)
 		}
-		// Forced completion implies validation-on-record (e2e run 10,
-		// aPh6Yq): a needs_info verdict with no revisions force-completes
-		// the step, but leaving Validated=false permanently blocks the
-		// task-level completion gate ("step completed but not validated")
-		// — the task never finishes and every sync wait times out. The
-		// review DID run and the platform decided the task proceeds; the
-		// reviewer's feedback is already preserved in the step result via
-		// ReviewManager's needs_info SetResult. Mirrors the approved-path
-		// validation-on-approval in ReviewManager.HandleReviewResult.
-		if !step.Validated {
+		// F72 (2026-09-12 bughunt): refresh before writing. The in-memory
+		// step is the pre-review copy (ReviewManager.HandleReviewResult
+		// reloads its OWN copy), so a full-row Update here reverts the
+		// StepCompleted state the SetState above just wrote — the same
+		// stale-state pattern as the approval paths.
+		if fresh, gerr := ts.stepStore.GetByID(step.ID); gerr == nil && fresh != nil {
+			step = fresh
+		}
+		// Forced completion records validation only when the review had
+		// tool-issued evidence to judge (e2e run 10 aPh6Yq added the
+		// stamp because Validated=false blocked the task gate). With no
+		// evidence nothing was validated, so the flag stays false; the
+		// task-level gate no longer strands such steps (it is scoped to
+		// steps whose hint has a validator AND that carry evidence). An
+		// existing unverified marker is never cleared.
+		if !step.Validated && hasMeaningfulEvidence(step.Evidence) {
 			step.Validated = true
-			step.ValidationError = ""
 			if err := ts.stepStore.Update(step); err != nil {
 				ts.logger.Warn("failed to persist validation-on-needs-info", "step_id", step.ID, "error", err)
 			}

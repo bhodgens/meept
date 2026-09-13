@@ -99,7 +99,61 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 	iteration := rl.iterations[taskID]
 	rl.mu.Unlock()
 
+	// Parse result to extract completion evidence BEFORE the cap check
+	// (F5, e2e run 3/8): the cap branch used to return first, so the last
+	// granted attempt's evidence was never evaluated and a task that
+	// finally succeeded on attempt MaxIterations+1 was terminalized
+	// StateFailed with the reason "without sufficient evidence" — a claim
+	// the code had not checked.
+	var resultData struct {
+		Success  bool     `json:"success,omitempty"`
+		Result   string   `json:"result,omitempty"`
+		Evidence []string `json:"evidence,omitempty"`
+	}
+	if err := json.Unmarshal(result, &resultData); err != nil {
+		rl.logger.Warn("Failed to parse task result", "task_id", taskID, "error", err)
+		if iteration >= rl.config.MaxIterations {
+			// Cap reached and the final attempt's result cannot be
+			// parsed: nothing verifies the work, so the task fails.
+			rl.logger.Warn("Max Ralph loop iterations reached with an unparseable final result, failing task",
+				"task_id", taskID, "iterations", iteration)
+			rl.failTaskAtCap(taskID, "max ralph loop iterations reached without sufficient evidence")
+			return false, nil, false
+		}
+		return false, nil, true // Needs replan due to parse failure
+	}
+
+	// Evaluate this attempt's evidence and checklists exactly once, so the
+	// cap decision below judges the attempt it is about to kill.
+	evidenceSufficient := true
+	if rl.config.EvidenceRequired && len(resultData.Evidence) == 0 {
+		rl.logger.Info("Task completed without evidence",
+			"task_id", taskID, "description", t.Description)
+		evidenceSufficient = false
+	}
+	if evidenceSufficient && !rl.validateEvidence(t.Description, resultData.Evidence) {
+		rl.logger.Info("Evidence insufficient",
+			"task_id", taskID, "evidence_count", len(resultData.Evidence))
+		evidenceSufficient = false
+	}
+	if evidenceSufficient && rl.config.ChecklistRequired {
+		allComplete, total, completed, incomplete := rl.validateChecklists(taskID)
+		if !allComplete && total > 0 {
+			rl.logger.Info("Checklist incomplete",
+				"task_id", taskID, "completed", completed, "total", total,
+				"incomplete_count", len(incomplete))
+			evidenceSufficient = false
+		}
+	}
+
 	if iteration >= rl.config.MaxIterations {
+		if evidenceSufficient {
+			// The final granted attempt DID produce verifiable evidence:
+			// report completion instead of discarding the result (F5).
+			rl.logger.Info("Max Ralph loop iterations reached but the final attempt produced sufficient evidence; completing",
+				"task_id", taskID, "iterations", iteration)
+			return true, resultData.Evidence, false
+		}
 		// Cap reached (e2e run 3/8, 2026-09-11): the previous contract
 		// returned (true, nil, false) — "complete" — so the orchestrator
 		// reset the counter via TaskOutcome and the NEXT evidence failure
@@ -113,40 +167,8 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 		return false, nil, false
 	}
 
-	// Parse result to extract completion evidence
-	var resultData struct {
-		Success  bool     `json:"success,omitempty"`
-		Result   string   `json:"result,omitempty"`
-		Evidence []string `json:"evidence,omitempty"`
-	}
-	if err := json.Unmarshal(result, &resultData); err != nil {
-		rl.logger.Warn("Failed to parse task result", "task_id", taskID, "error", err)
-		return false, nil, true // Needs replan due to parse failure
-	}
-
-	// Check for evidence if required
-	if rl.config.EvidenceRequired && len(resultData.Evidence) == 0 {
-		rl.logger.Info("Task completed without evidence, triggering replan",
-			"task_id", taskID, "description", t.Description)
-		return false, nil, true
-	}
-
-	// Verify evidence substantiates the task goal
-	if !rl.validateEvidence(t.Description, resultData.Evidence) {
-		rl.logger.Info("Evidence insufficient, triggering replan",
-			"task_id", taskID, "evidence_count", len(resultData.Evidence))
+	if !evidenceSufficient {
 		return false, resultData.Evidence, true
-	}
-
-	// Validate checklists if required
-	if rl.config.ChecklistRequired {
-		allComplete, total, completed, incomplete := rl.validateChecklists(taskID)
-		if !allComplete && total > 0 {
-			rl.logger.Info("Checklist incomplete, triggering replan",
-				"task_id", taskID, "completed", completed, "total", total,
-				"incomplete_count", len(incomplete))
-			return false, resultData.Evidence, true
-		}
 	}
 
 	return true, resultData.Evidence, false
@@ -341,6 +363,14 @@ func (rl *RalphLoop) failTaskAtCap(taskID, reason string) {
 	if err != nil || t == nil {
 		return
 	}
+	// F6: never re-terminalize. Another path — tactical's finalize block,
+	// cancellation, startup recovery — may already have put the task in a
+	// terminal state. Overwriting StateCompleted with StateFailed (or the
+	// reverse) would emit a second task event and hand the orchestrator's
+	// TaskOutcome a terminal task it then Resets, disarming the cap.
+	if t.State.IsTerminal() {
+		return
+	}
 	t.State = task.StateFailed
 	if err := rl.taskStore.Update(t); err != nil {
 		rl.logger.Warn("Failed to mark task failed at replan cap",
@@ -350,10 +380,32 @@ func (rl *RalphLoop) failTaskAtCap(taskID, reason string) {
 	if rl.bus == nil {
 		return
 	}
+	// The payload key set is the subscriber's (handler.ChatHandler
+	// handleTaskFailed decodes name/error/failed_jobs/completed_jobs/
+	// total_jobs/linked_sessions). The early keys (task_id/reason/source)
+	// are kept for existing consumers, but on their own they rendered the
+	// user-facing failure as "## task failed: \n**error:**" — empty name,
+	// empty error (F39).
+	failedJobs := 0
+	if rl.stepStore != nil {
+		if steps, serr := rl.stepStore.ListByTaskID(taskID); serr == nil {
+			for _, s := range steps {
+				if s.State == task.StepFailed {
+					failedJobs++
+				}
+			}
+		}
+	}
 	payload, err := json.Marshal(map[string]any{
-		"task_id": taskID,
-		"reason":  reason,
-		"source":  "ralph_loop",
+		"task_id":         taskID,
+		"name":            t.Name,
+		"error":           reason,
+		"reason":          reason,
+		"source":          "ralph_loop",
+		"failed_jobs":     failedJobs,
+		"completed_jobs":  t.CompletedJobs,
+		"total_jobs":      t.TotalJobs,
+		"linked_sessions": t.LinkedSessions,
 	})
 	if err != nil {
 		return

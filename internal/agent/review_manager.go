@@ -198,16 +198,25 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 			if err := rm.stepStore.SetState(step.ID, task.StepApproved); err != nil {
 				rm.logger.Error("Failed to set step to approved", "error", err)
 			}
-			// Mark the step validated (e2e run ppJVWS, 2026-09-11): the
-			// heuristic check IS a validation (non-empty, meaningful
-			// result). The task-completion gate blocks successfully-
-			// terminal steps with Validated=false when a validatorManager
-			// is wired, so an approved-but-unvalidated step hangs the
-			// task forever. Persist the flag alongside the approval.
-			step.Validated = true
-			step.ValidationError = ""
+			// F1 (2026-09-12 bughunt): SetState writes the DB only; the
+			// in-memory step still carries its pre-review state, and the
+			// full-row Update below writes `state = step.State`
+			// (internal/task/step.go) — reverting the approval to a
+			// non-terminal state so AreAllCompleted never fires. Assign
+			// the state before the Update (the 2026-09-06 fix shape the
+			// rejection path already uses).
+			step.State = task.StepApproved
+			// Mark the step validated only when there is tool-issued
+			// evidence for the approval to stand on (F11): a heuristic
+			// pass over a step with no evidence verifies nothing, so the
+			// record stays Validated=false rather than claiming a
+			// verification that never happened. An existing unverified
+			// marker is never cleared here.
+			if !step.Validated && hasMeaningfulEvidence(step.Evidence) {
+				step.Validated = true
+			}
 			if err := rm.stepStore.Update(step); err != nil {
-				rm.logger.Warn("Failed to persist validated flag after heuristic approval",
+				rm.logger.Warn("Failed to persist heuristic approval state",
 					"step_id", step.ID, "error", err)
 			}
 			return &ReviewResult{
@@ -509,20 +518,24 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		if err := rm.stepStore.SetState(step.ID, task.StepApproved); err != nil {
 			return nil, fmt.Errorf("failed to set approved state: %w", err)
 		}
-		// Reviewer approval IS validation when no evidence-backed validator
-		// ran (e2e run 13, 2026-09-11): the completion gate (tactical.go)
-		// blocks any successfully-terminal step with Validated=false, so a
-		// step the reviewer APPROVED left the task stuck in
-		// "task validation incomplete" until the sync wait timed out — the
-		// reply never carried the artifact path. An approval (heuristic or
-		// full) is the platform's judgment that the step is done; reflect
-		// it on the record so approval means completion.
-		if !step.Validated {
+		// F1 (2026-09-12 bughunt): SetState writes the DB only; the step
+		// was loaded while still 'reviewing' (SetState at ReviewStep), so
+		// the full-row Update below would serialize that stale state back
+		// over the approval — leaving the step non-terminal and the task
+		// unfinalizable. Assign the state FIRST (the 2026-09-06 fix shape
+		// the rejection path below already uses).
+		step.State = task.StepApproved
+		// Reviewer approval IS the platform's judgment that the step is
+		// done (e2e run 13, 2026-09-11) — but only stamp Validated when
+		// there is tool-issued evidence for it (F11). An approval with no
+		// evidence verifies nothing, so the record keeps Validated=false;
+		// a standing unverified marker (ValidationError) is never cleared
+		// by an approval.
+		if !step.Validated && hasMeaningfulEvidence(step.Evidence) {
 			step.Validated = true
-			step.ValidationError = ""
-			if err := rm.stepStore.Update(step); err != nil {
-				rm.logger.Warn("failed to persist validation-on-approval", "step_id", step.ID, "error", err)
-			}
+		}
+		if err := rm.stepStore.Update(step); err != nil {
+			rm.logger.Warn("failed to persist approval state", "step_id", step.ID, "error", err)
 		}
 		rm.logger.Info("Step approved", "step_id", step.ID, "feedback", result.Feedback)
 
@@ -959,7 +972,13 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	// verifiable; route it to the full reviewer instead of waving it
 	// through. Memory/analysis hints legitimately produce reports without
 	// tools, so scope the suspicion to artifact claims only.
-	if step.ToolHint != "" && !reviewHintIsConversational(step.ToolHint) && len(step.Evidence) == 0 {
+	//
+	// F9 (2026-09-12 bughunt): the predicate MUST be the structural one.
+	// The daemon's step-job envelope encodes `evidence` as a []string of
+	// prose, so decoding into []models.Evidence leaves a ONE-element slice
+	// holding a zero-value Evidence — len(step.Evidence) == 0 is therefore
+	// never true for a job-driven step and this refusal was unreachable.
+	if step.ToolHint != "" && !reviewHintIsConversational(step.ToolHint) && !hasMeaningfulEvidence(step.Evidence) {
 		if claimsArtifacts(result) {
 			rm.logger.Warn("Heuristic review: artifact claims with no tool evidence; refusing auto-approve",
 				"step_id", step.ID,
