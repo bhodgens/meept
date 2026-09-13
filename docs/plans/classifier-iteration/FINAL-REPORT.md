@@ -188,10 +188,13 @@ overlap guard.
 
 ### 5. Acceptance sensitivity (one route decides the verdict)
 
-At n=48 with 41 chain-destined cases credited at the hard-coded
-`CHAIN = 0.868`, the veto policy's 87.35% is `(2 + 46×0.868)/48`: two
-correct routes plus 95.8% chain credit. One flipped route gives
-`(1 + 47×0.868)/48 = 85.27%`, below the 86.8% gate. The acceptance
+At n=48 with 46 chain-destined cases (under the veto) credited at the
+hard-coded `CHAIN = 0.868`, the veto policy's 87.35% is
+`(2 + 46×0.868)/48`: two correct routes plus the chain's credit on 46 of
+48 cases — 95.83% of the CASES, 95.23% of the SCORE
+(`46×0.868 / (2 + 46×0.868)`; the two shares are not the same number).
+One flipped route gives `(1 + 47×0.868)/48 = 85.27%`, below the 86.8%
+gate. The acceptance
 script now enforces a coverage floor (`MIN_ROUTED = 20`) and reports
 `INSUFFICIENT_COVERAGE` instead of PASS/FAIL below it; the observed
 values (87.35 / 84.56) are unchanged.

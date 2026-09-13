@@ -7,8 +7,8 @@ Date: 2026-09-10. Acceptance gate (master.md): system accuracy > 86.8%
 
 | policy | A routes (correct) | chain | system acc | verdict |
 |---|---|---|---|---|
-| double-confidence (A margin; B prob>=0.7 + agreement) | 7 (5) | 41 | **84.56%** | FAIL |
-| **tfidf-veto (ALT-5): A routes only when tfidf concurs** | 2 (2) | 46 | **87.35%** | **UNVALIDATED** |
+| double-confidence (A margin; B prob>=0.7 + agreement) | 7 (5) | 41 | **84.56%** | FAIL → **WITHDRAWN — legacy, sub-floor (CORRECTIONS 1/4)** |
+| **tfidf-veto (ALT-5): A routes only when tfidf concurs** | 2 (2) | 46 | **87.35%** | **UNVALIDATED** — sub-floor (CORRECTIONS 1/2/4) |
 
 ## Interpretation
 
@@ -82,14 +82,29 @@ constant, so:
 | 1/2 routes correct + 46 chain | 85.27% — below the 86.8% gate |
 | 0 routes + 48 chain | 86.80% — equals the gate; strict `>` means FAIL |
 
-87.35% is therefore 2 correct routes plus 95.8% chain credit at an
+87.35% is therefore 2 correct routes plus 46/48 case credit at an
 unverified constant, not a measured win over 84.56%. Effective routed
-sample = 2 cases. `m4_gold_acceptance.py` now enforces a coverage floor
+sample = 2 cases. `m4_gold_acceptance.py` enforces a coverage floor
 `MIN_ROUTED = 20`: when fewer than 20 cases are routed it reports
-`verdict: "INSUFFICIENT_COVERAGE"` instead of PASS/FAIL. Both rows above
-are below that floor (7 and 2 routed respectively), so under the current
-rule neither is a claimable verdict — the 84.56% / 87.35% *values* are
-unchanged; only their PASS/FAIL framing is withdrawn.
+`verdict: "INSUFFICIENT_COVERAGE"` instead of PASS/FAIL (verified:
+`verdict_for(19,19,29,48) = INSUFFICIENT_COVERAGE`,
+`verdict_for(20,20,28,48) = PASS`). Both rows above are below that floor
+(7 and 2 routed respectively), so **on this 48-case ruler no PASS/FAIL
+verdict exists for EITHER policy** — the 84.56% / 87.35% *values* are
+unchanged; only their PASS/FAIL framing is withdrawn, for both rows. The
+committed `m4-gold-acceptance.json` (`"verdict": "FAIL"`) predates the
+floor and is retained only as the historical record: it is not a current
+verdict for the double-confidence policy, and the sub-floor per-policy
+artifacts now carry `min_routed` / `coverage_floor` so a reader can see
+that from the payload alone.
+
+**Case share vs score share (corrected 2026-09-13).** An earlier revision
+of this section said "95.8% chain credit". That conflated two shares:
+46 of 48 CASES are chain-destined (95.83%), but the chain's credit is
+46 × 0.868 = 39.93 of the 41.93 scored points = **95.23% of the score**
+(`46×0.868 / (2 + 46×0.868)`; the two correct routes contribute the rest).
+Both shares are high; they are not the same number and the verdict rests
+on the case count (46 cases), credited at the constant.
 
 ### 3. Corpus <-> replay disjointness guard (train-on-test)
 
@@ -107,3 +122,56 @@ it would move the denominator. Reproduce the guard:
 or the replay case) is a measurement-protocol decision, not a code fix.
 The harvest path (`harvest_wave5.py`) applies the same ruler guard when
 splicing new corpus rows.
+
+### 4. Guard hardening + payload evidence (2026-09-13 fix wave)
+
+Verified at HEAD before fixing, with read-only runs of the committed
+Python. A grep for `replay_disjointness` / `MIN_ROUTED` /
+`INSUFFICIENT_COVERAGE` found no test and no make/CI target, so reverting
+any of these guards broke nothing.
+
+- **Self-test added (was: unpinned).**
+  `python3 tools/classifier-eval/m4_gold_acceptance.py --self-test`
+  (stdlib + numpy; no embed server, no replay corpus) now pins: the known
+  leak is reported; an empty sample is not green; a zero-norm row and a
+  non-finite row are not green; the allowlist exempts similarity only; and
+  the floor boundary at 19 vs 20 routed cases.
+- **Empty-sample hole (was: reported green).** `check_overlap_only`
+  returned 0 on a replay file that parsed to zero cases, printing
+  `ruler disjoint: 0 replay cases vs 389 corpus cases`. It now returns a
+  distinct exit 4 with a refusal message, and `replay_disjointness` raises
+  `EmptyRulerError` on an empty ruler — an empty sample is never
+  "disjoint", and scoring it measures nothing.
+- **Zero-norm hole (was: silently disjoint).** `_as_unit` computed
+  `0/(0+1e-12) = 0`, and the Embedder deliberately stored a zero vector
+  when the server returned one, so such a row was never flagged.
+  `_as_unit` now raises `DegenerateVectorError` on a zero or non-finite
+  norm (naming the rows), the Embedder counts and warns on degenerate
+  server rows, and the guard reports how many rows it actually compared.
+- **Threshold headroom (sim 0.95).** The guard now prints the top-5 cosine
+  margins (max similarity per replay row) beside the leak list, so a
+  threshold sitting inside the near-duplicate band becomes visible before
+  it turns a non-leak into a hard exit-2. `NEAR_DUP_ALLOWLIST` (replay
+  `case_key` -> recorded reason string) is the explicit escape hatch; it is
+  EMPTY, an entry with no reason raises, and any entry added must be argued
+  here — never granted silently.
+- **Self-evidencing payload.** Every written artifact now carries
+  `replay_sha256`, `replay_n`, `sim_threshold`, `leaks`, `min_routed`,
+  `coverage_floor` and the guard stats — the artifact can evidence its own
+  guard instead of asserting it.
+- **Rerun artifacts.** A re-run no longer drops an unignored `.rerun.json`
+  into this tracked directory: `git check-ignore` reports everything under
+  `tools/classifier-eval/results/` as NOT ignored (`.gitignore:103`
+  re-includes it), so a re-run is written to
+  `<MEEPT_HOME>/classifier-eval-rerun/` under a timestamped name. The
+  canonical name stays write-once, and reruns no longer clobber each other.
+  If a tracked rerun location is preferred instead, the owner adds
+  `tools/classifier-eval/results/*.rerun*.json` to `.gitignore`.
+- **Exit codes** (also in the module docstring): 0 green, 2 leak,
+  3 missing inputs (UNVALIDATED), 4 empty ruler, 5 degenerate embeddings.
+
+Reproduce:
+`python3 tools/classifier-eval/m4_gold_acceptance.py --self-test`
+(no embed server, no replay corpus needed) and
+`python3 tools/classifier-eval/m4_gold_acceptance.py --check-overlap`
+(needs the untracked replay corpus).

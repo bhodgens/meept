@@ -43,6 +43,22 @@ E2E = (A_ok + B_ok + 0.868 × C_n) / 274
 | 0.40 | 89 (87) | 37 (34) | 124 | 89.60% | **(87+34+0.868×124)/274 = 91.28%** | FAIL |
 | 0.50 | 89 (87) | 52 (47) | 109 | 92.80% | **(87+47+0.868×109)/274 = 91.44%** | **FAIL** |
 
+> **NOTE (2026-09-13 fix wave): the three deterministic expressions do not
+> evaluate to their printed percentages.** As written: q=0.30
+> `(87+23+0.868×136)/274 = 83.23%` (printed 91.52%), q=0.40
+> `(87+34+0.868×124)/274 = 83.44%` (printed 91.28%), q=0.50
+> `(87+47+0.868×109)/274 = 83.44%` (printed 91.44%). The q=0.50 row was
+> flagged in FINAL-REPORT.md (CORRECTIONS 2 note, 2026-09-12); its
+> identically-evaluating sibling **q=0.40 (also 83.44%)** and the q=0.30
+> row are now flagged too. The probable cause is the denominator: the
+> per-stage counts account for 250 cases (routed 114/126/141 + chain
+> 136/124/109), not 274 (24 cases OOD/unscored), and `/250` reproduces the
+> printed q=0.50 value exactly (91.44%) while yielding 91.22% (q=0.30) and
+> 91.45% (q=0.40). Which denominator is intended is a campaign-record
+> decision, reported upward — the printed verdicts (FAIL / below the
+> 91.78% bar) are unaffected either way, since 83.2-83.4% and 91.2-91.5%
+> are both below the bar. See ITERATION-LOG.md CORRECTION (2026-09-13).
+
 (These also equal iter-15's two-stage E2E values at matching partitions —
 114/126/141 direct with 110/121/134 correct — an independent
 cross-check: iter-16's cascade at q is iter-15's pipeline plus the chain

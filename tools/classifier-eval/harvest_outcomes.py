@@ -111,9 +111,15 @@ ORDER BY margin_bucket, verdict;
 
 -- Fallback traffic per day (routing miss rate over time).
 -- classifier_method = 'fallback' is written by exactly one production
--- path: classifyIntent's Step-5 final fallback, whose Intent carries
--- Method: "fallback" (internal/agent/dispatcher.go:1431-1448), flowing
--- through DispatchResult.Intent.Method into recordDispatch (:3496, :3579).
+-- path: classifyIntent's Step-5 final fallback, whose returned Intent
+-- carries Method: "fallback" (internal/agent/dispatcher.go, the literal
+-- inside the block opened by the "// Step 5: Final fallback" comment;
+-- line numbers drift with every edit above them -- it was :1474 at HEAD
+-- ee1580a4 and :1484 during the 2026-09-13 fix wave, so anchor on the
+-- comment/literal, not on a line range). It flows through
+-- DispatchResult.Intent.Method into recordDispatch, where
+-- `classifierMethod = result.Intent.Method` reads it (previously cited
+-- here as :3496/:3579 -- both stale).
 -- Sibling miss paths write distinct methods ("heuristic_fallback",
 -- "llm_empty_fallback_chat"), so this counts only the terminal
 -- all-classifiers-failed fallback -- it is not structurally empty.

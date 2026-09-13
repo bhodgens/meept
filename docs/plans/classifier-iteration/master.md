@@ -57,6 +57,16 @@ per-stage counts (results/iter-16/summary-20260908-142037.json):
 - q=0.50 champion: **E2E 91.44% = (87 + 47 + 0.868×109)/274 — FAILS the
   pre-registered 91.78% M3 entry bar** (q=0.30: 91.52%, q=0.40: 91.28%
   — all fail).
+  - NOTE (2026-09-13): the three percentages printed above are the values
+    the 2026-09-08 correction RECORDED, but the expressions beside them do
+    not evaluate to them: as written they are 83.23% / 83.44% / 83.44%
+    (`/274`), and the per-stage counts account for 250 cases, not 274 (24
+    cases are OOD/unscored). The q=0.50 row was flagged in
+    `FINAL-REPORT.md` (CORRECTIONS 2); its identically-evaluating sibling
+    q=0.40 (also 83.44%) was not, and neither was q=0.30. The verdicts are
+    unaffected (all values stay below the 91.78% bar). See
+    `ITERATION-LOG.md` CORRECTION (2026-09-13) and
+    `tools/classifier-eval/results/iter-16-corrected/report.md`.
 - Full analysis: `tools/classifier-eval/results/iter-16-corrected/report.md`.
 - The script is fixed (`iter16_cascade3.py` now uses deterministic
   expected credit); the original results and report are retained as-is.
@@ -120,8 +130,12 @@ case (same embedder).
 
 ## Test Corpus Policy
 
-Base corpus: `testdata/eval/classifier-test-corpus.json5` (136 cases, 12
-intents). Every iteration N adds adversarial cases inspired by (a) meept chat
+Base corpus: `testdata/eval/classifier-test-corpus.json5` (**139 cases, 12
+intents** — CORRECTED 2026-09-13; the previously recorded "136 cases" was
+the pre-iter-2 size, superseded as the corpus grew. Verified:
+`python3 -c "import sys;sys.path.insert(0,'tools/classifier-eval');import eval_harness as H;b,a=H.load_cases();print(len(b),len(a))"`
+→ `139 250`, i.e. 139 base + 250 adversarial = 389 total). Every iteration N
+adds adversarial cases inspired by (a) meept chat
 logs in `~/.meept/home` session DBs and Hermes transcripts where readable, (b)
 the failure classes below. Adversarial cases accumulate into
 `testdata/eval/classifier-adversarial-corpus.json5` with per-case provenance

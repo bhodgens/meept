@@ -25,8 +25,8 @@ accuracy when forced (no abstain), OOD-R=OOD abstain rate, L=p50 latency.
 | 16 | 3-STAGE CASCADE (user arch): A centroid / B ModernBERT probe / C lfm-8b chain @0.868 | 274 | 100% | 92.8% | 92.8% | 0.690 | 100% | ~90/embed CPU | 18 | arch: chain folded in as stage C, aggregate E2E objective | **WITHDRAWN 2026-09-08 (see CORRECTION below); original claim:** CLEARS BAR: E2E 92.80% (q=0.50) vs 91.78% bar — +6.0 over chain-only; A 97.8% P, B 90.4% P; ~half chain load removed; P>=97% reinterpretation parked with user (a/b/c options in report) |
 | 17 | Hermes-transcript silver validation (48 cases, untracked corpus) | 275 | 100% | — | — | — | — | ~90/embed CPU | — | harvester + silver harness (validate_silver.py) | REAL-TRAFFIC GAP: expected system acc 84.7% vs 92.8% synthetic; misses = plan-execution + doc-writing shapes absent from gold; no daemon wiring until silver acc > 86.8% w/ margin |
 | 18 | wave 4: +39 plan-execution/docs/compound cases (subagent-authored, dedup 0 rej) | 314 | 100% | — | — | — | — | ~0 (cached) | — | corpus: taxonomy expansion | silver E2E flat (84.4% vs 84.7%, noise); plan/code execution boundary is now THE ambiguity — 1 miss became a correct abstain, 1 became a confident plan-route; silver-label adjudication recommended before more anchors |
-| 19 | quickplan 13th class: +24 anchors (4 adjudication rules); cascade re-measured on adjudicated gold replay | 338 | 100% | — | — | — | 100% | ~90/embed CPU | 5 | corpus: quickplan anchors; probe 13-way | FIRST REAL MEASUREMENT WITH quickplan: sys acc 79.4% (down from 84.7% 12-class — expected: quickplan anchors 20 vs code 35 dilute boundary); B's quickplan precision 0/3→code collisions; fix = anchor wave 2 + orchestration-cue features |
-| 20 | wave 2 +32 collision-shape anchors; cue-guard policy sweep (13 combos) | 370 | 100% | — | — | — | 100% | ~0 (cached) | 4 | guard: quickplan prediction requires orchestration cue or conf>=0.15 | PLATEAU 83.97% on replay; residual misses carry session-state signal (active plan/tasks) invisible to per-message classification — 100% first-stage accuracy unreachable by architecture; M4 wiring: A+B fast-path + orchestrator-resolved quickplan at execution time |
+| 19 | quickplan 13th class: +24 anchors (4 adjudication rules); cascade re-measured on adjudicated gold replay | 338 ⚠superseded→389 | 100% | — | — | — | 100% | ~90/embed CPU | 5 | corpus: quickplan anchors; probe 13-way | FIRST REAL MEASUREMENT WITH quickplan: sys acc 79.4% (down from 84.7% 12-class — expected: quickplan anchors 20 vs code 35 dilute boundary); B's quickplan precision 0/3→code collisions; fix = anchor wave 2 + orchestration-cue features |
+| 20 | wave 2 +32 collision-shape anchors; cue-guard policy sweep (13 combos) | 370 ⚠superseded→389 | 100% | — | — | — | 100% | ~0 (cached) | 4 | guard: quickplan prediction requires orchestration cue or conf>=0.15 | PLATEAU 83.97% on replay; residual misses carry session-state signal (active plan/tasks) invisible to per-message classification — 100% first-stage accuracy unreachable by architecture; M4 wiring: A+B fast-path + orchestrator-resolved quickplan at execution time |
 
 ## CORRECTION (2026-09-08 audit) — iter-16 verdict withdrawn
 
@@ -46,6 +46,24 @@ function of them):
 - q=0.50: (87+47+0.868×109)/274 = **91.44%** — **FAILS the
   pre-registered 91.78% M3 entry bar**
 
+> **NOTE (2026-09-13 fix wave): the three printed percentages do not equal
+> the expressions beside them.** Evaluated as written (verified by
+> arithmetic): `(87+23+0.868×136)/274 = 83.23%`,
+> `(87+34+0.868×124)/274 = 83.44%`, `(87+47+0.868×109)/274 = 83.44%`.
+> The earlier 2026-09-12 note in `FINAL-REPORT.md` (CORRECTIONS 2) flagged
+> only the q=0.50 row (83.44% vs the printed 91.44%); its
+> identically-evaluating **sibling q=0.40 (also 83.44% vs the printed
+> 91.28%)** was left unflagged, and the q=0.30 row (83.23% vs the printed
+> 91.52%) too. None of the three labels is reproduced by the printed
+> formula. The likely defect is the denominator: the per-stage counts
+> account for exactly 250 cases (A+B routed 114/126/141 plus chain
+> 136/124/109), not 274 (24 cases are OOD/unscored), and `/250` reproduces
+> the printed q=0.50 value exactly — 91.44% — while giving 91.22% (q=0.30)
+> and 91.45% (q=0.40), which still do not match their printed labels.
+> **The arithmetic defect is now flagged for all three rows; which
+> denominator is intended is a campaign-record decision reported upward,
+> not silently re-derived here.**
+
 **M3 verdict: NOT MET.** Full analysis:
 `results/iter-16-corrected/report.md`; the script is fixed in place.
 
@@ -63,3 +81,28 @@ M4 wiring requires REPLACING the shipped head, not flagging it.
 (2) iters 14-16 skip OOD before Stage B, so the pre-registered
 OOD-R ≥ 95% leg is UNEVALUATED for the cascade configs — an unmet gate,
 not a satisfied one.
+
+## CORRECTION (2026-09-13 fix wave) — superseded corpus totals
+
+Rows 19 and 20 carried corpus totals **338** and **370** with no marker;
+both cells now carry a `⚠superseded→389` marker (2026-09-13). Both values
+are ITERATION-TIME totals and are superseded by the committed corpus:
+
+- The committed loader reports base 139 + adversarial 250 = **389** cases
+  (non-OOD 361, OOD 28) — verified:
+  `python3 -c "import sys;sys.path.insert(0,'tools/classifier-eval');import eval_harness as H;b,a=H.load_cases();print(len(b),len(a),len(b)+len(a))"`
+  → `139 250 389`.
+- Row 19's 338 = row 18's 314 + 24 quickplan anchors; row 20's 370 = 338 +
+  32 collision-shape anchors. Both are internally consistent for their
+  iteration and were correct AS COMMITTED — the metrics on those rows were
+  measured on those corpora. This correction only marks the totals as
+  superseded; it does not restate the per-row metrics.
+- The `136 cases` base-corpus figure in master.md (Test Corpus Policy) is
+  likewise superseded by the loader's 139 and is corrected there.
+
+Also flagged in this wave (details in the iter-16 CORRECTION block above):
+all three iter-16 recompute rows print percentages that their own printed
+expressions do not evaluate to — q=0.30 = 83.23% (printed 91.52%),
+q=0.40 = 83.44% (printed 91.28%), q=0.50 = 83.44% (printed 91.44%). The
+2026-09-12 note flagged only the q=0.50 row; the sibling q=0.40 (identical
+value, 83.44%) is now flagged too, as is q=0.30.

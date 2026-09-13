@@ -236,6 +236,23 @@ also enforced inside `m4_gold_acceptance.py` — it refuses to score a
 leaked case). `--dry-run` prints counts plus a hash-only candidate
 preview and writes nothing; exit 0 always (measurement-tool convention).
 
+**Guard hardening (2026-09-13 fix wave).** The ruler guard now refuses
+three inputs it previously accepted silently: an EMPTY replay sample
+(exit 4 — an empty sample is never "disjoint", and scoring it measures
+nothing), a supplied embedding row with a zero or non-finite norm
+(`DegenerateVectorError`; `0/(0+1e-12)` had read as a 0.0 cosine, i.e.
+"disjoint", and the Embedder stores zero vectors when the server returns
+one), and it now reports how many rows it actually compared. It also
+prints the top-5 cosine margins (max similarity per replay row) beside
+the leak list: the `sim 0.95` threshold has thin headroom, so the
+near-miss band is surfaced before a new corpus anchor or embedder upgrade
+turns a non-leak into a hard exit-2, with a recorded, reason-bearing
+near-duplicate allowlist (`NEAR_DUP_ALLOWLIST`) as the explicit escape
+hatch. `m4_gold_acceptance.py --self-test` (stdlib + numpy, no embed
+server, no replay corpus) pins these behaviours and the `MIN_ROUTED = 20`
+coverage floor. Full record: `results/m4-gold-acceptance.md`
+CORRECTIONS 4.
+
 ## Router lanes come from the routing table (single source of truth)
 
 The prompt-router sidecar (`scripts/prompt_router_sidecar.py`, :8082) does

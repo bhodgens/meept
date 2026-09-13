@@ -25,8 +25,9 @@ decomposition:
 - **Route count: 2 of 48 cases (4.2% coverage) actually routed by the
   tfidf-veto Door 1.** This count was disclosed nowhere in the commit
   message or the doc.
-- The remaining **46 cases (95.8%) are pure chain credit** at the
-  constant 0.868 — whose staleness is already flagged in
+- The remaining **46 cases (95.83% of the cases; 95.23% of the score) are
+  pure chain credit** at the constant 0.868 — whose staleness is already
+  flagged in
   `eval_harness.py:67-77` (measured on the old 136-case base corpus,
   never re-measured).
 
@@ -48,7 +49,8 @@ vs 86.8% delta is one-route noise, not a measured win.
 ## Verdict
 
 The "BEATS the chain floor" claim is inflated: it is 2 correct routes
-plus 95.8% chain credit at an unverified constant, with the route count
+plus the chain's credit on 46 of 48 cases (95.83% of cases, 95.23% of the
+score) at an unverified constant, with the route count
 undisclosed and no committed artifact behind any of the numbers. The
 comparison itself is apples-to-apples (same 48 cases, same denominator),
 and the shipped code claims nothing (the doc marks tfidf-veto as

@@ -158,9 +158,22 @@ def case_key(text: str) -> str:
     return hashlib.sha256(text.strip().encode()).hexdigest()[:16]
 
 
+class EmptyRulerError(ValueError):
+    """The ruler sample is empty. No cases, no measurement -- and an empty
+    sample is never "disjoint" (guard hole F19/F20)."""
+
+
+class DegenerateVectorError(ValueError):
+    """An embedding row has a zero or non-finite L2 norm, so its cosine is
+    meaningless: 0/(0+1e-12) == 0.0 silently reads as "disjoint" (F20)."""
+
+
 def replay_disjointness(replay_texts, corpus_cases, *,
                         corpus_vectors=None, replay_vectors=None,
-                        sim_threshold: float = 0.95) -> list[dict]:
+                        sim_threshold: float = 0.95,
+                        allowlist: dict[str, str] | None = None,
+                        stats: dict | None = None,
+                        top_n: int = 5) -> list[dict]:
     """Train-on-test guard for the acceptance ruler.
 
     The models are fit on ``corpus_cases`` (base + adversarial); the ruler
@@ -171,10 +184,43 @@ def replay_disjointness(replay_texts, corpus_cases, *,
     When both vector sets are supplied the cosine is also checked: a
     replay case within ``sim_threshold`` of any corpus case is a leak.
 
+    Refuses an EMPTY replay sample (``EmptyRulerError``): an empty ruler
+    makes no measurement, so it can never be reported green. Refuses a
+    supplied vector row with a zero or non-finite norm
+    (``DegenerateVectorError``) instead of silently scoring it as disjoint.
+
+    ``allowlist`` maps a replay ``case_key`` to a RECORDED reason string.
+    Allowlisted rows are exempt from the SIMILARITY check only -- exact
+    byte-identity is always a leak. An entry with no reason raises.
+
+    ``stats`` (optional, filled in place) records what was ACTUALLY
+    checked: replay/corpus counts, rows compared, the vector-check flag,
+    leak counts, and the ``top_n`` highest max-similarities, so the caller
+    can print the threshold headroom beside the leak list.
+
     Returns a list of leak records:
       {"replay_index", "replay_text", "corpus_case_id", "reason",
        "similarity"} -- empty list means the ruler is disjoint.
     """
+    replay_texts = list(replay_texts)
+    if not replay_texts:
+        raise EmptyRulerError(
+            "empty ruler: 0 replay cases -- refusing the disjointness check "
+            "(an empty sample is never 'disjoint'; scoring it would measure "
+            "nothing)")
+    for k, v in (allowlist or {}).items():
+        if not (v or "").strip():
+            raise ValueError(
+                f"near-duplicate allowlist entry {k!r} needs a recorded "
+                f"reason string, never an unexplained exemption")
+    allow = allowlist or {}
+    info: dict = {
+        "replay_n": len(replay_texts), "corpus_n": len(corpus_cases),
+        "exact_leaks": 0, "sim_leaks": 0, "allowlisted_sims": 0,
+        "rows_compared": 0, "vectors_checked": False,
+        "sim_threshold": sim_threshold, "top_margins": [],
+        "allowlist": sorted(allow),
+    }
     by_key: dict[str, list] = {}
     for c in corpus_cases:
         by_key.setdefault(case_key(c.text), []).append(c)
@@ -188,26 +234,90 @@ def replay_disjointness(replay_texts, corpus_cases, *,
             leaks.append({"replay_index": i, "replay_text": t,
                           "corpus_case_id": c.case_id,
                           "reason": "exact", "similarity": 1.0})
+            info["exact_leaks"] += 1
     if corpus_vectors is not None and replay_vectors is not None:
         Cv = _as_unit(np.asarray(corpus_vectors, dtype=np.float32))
         Rv = _as_unit(np.asarray(replay_vectors, dtype=np.float32))
+        if Rv.shape[0] != len(replay_texts):
+            raise ValueError(
+                f"replay vector rows ({Rv.shape[0]}) != replay cases "
+                f"({len(replay_texts)})")
+        if Cv.shape[0] != len(corpus_cases):
+            raise ValueError(
+                f"corpus vector rows ({Cv.shape[0]}) != corpus cases "
+                f"({len(corpus_cases)})")
         sims = Rv @ Cv.T
+        info["vectors_checked"] = True
+        info["rows_compared"] = int(sims.shape[0])
+        margins: list[tuple] = []
         for i in range(sims.shape[0]):
             j = int(np.argmax(sims[i]))
             s = float(sims[i, j])
-            if s > sim_threshold and (i, corpus_cases[j].case_id) not in seen:
-                seen.add((i, corpus_cases[j].case_id))
-                leaks.append({"replay_index": i, "replay_text": replay_texts[i],
-                              "corpus_case_id": corpus_cases[j].case_id,
-                              "reason": f"similarity>{sim_threshold:.2f}",
-                              "similarity": round(s, 4)})
+            margins.append((round(s, 4), i, corpus_cases[j].case_id,
+                            replay_texts[i]))
+            if s <= sim_threshold:
+                continue
+            if case_key(replay_texts[i]) in allow:
+                info["allowlisted_sims"] += 1
+                continue
+            if (i, corpus_cases[j].case_id) in seen:
+                continue
+            seen.add((i, corpus_cases[j].case_id))
+            leaks.append({"replay_index": i, "replay_text": replay_texts[i],
+                          "corpus_case_id": corpus_cases[j].case_id,
+                          "reason": f"similarity>{sim_threshold:.2f}",
+                          "similarity": round(s, 4)})
+            info["sim_leaks"] += 1
+        margins.sort(key=lambda r: -r[0])
+        info["top_margins"] = margins[:top_n]
+    if stats is not None:
+        stats.clear()
+        stats.update(info)
     return leaks
 
 
 def _as_unit(a):
-    """L2-normalise rows of a 2-D array (safe on zero rows)."""
-    n = np.linalg.norm(a, axis=1, keepdims=True)
-    return a / (n + 1e-12)
+    """L2-normalise rows of a 2-D array.
+
+    Raises DegenerateVectorError when any row has a zero or non-finite norm:
+    ``a / (norm + 1e-12)`` would turn such a row into an all-zero vector
+    whose cosine against everything is 0.0 -- a row that silently looks
+    disjoint, so a byte-identical/zero-vector row would never be flagged
+    (F20 zero-norm hole).
+    """
+    a = np.asarray(a, dtype=np.float32)
+    if a.ndim != 2:
+        raise ValueError(f"expected a 2-D vector matrix, got shape {a.shape}")
+    n = np.linalg.norm(a, axis=1)
+    bad = ~np.isfinite(n) | (n <= 0.0)
+    if bad.any():
+        idx = np.nonzero(bad)[0][:10].tolist()
+        raise DegenerateVectorError(
+            f"{int(bad.sum())}/{a.shape[0]} embedding row(s) have a zero or "
+            f"non-finite L2 norm (rows {idx}); a zero vector's cosine is 0.0 "
+            f"and reads as disjoint. Re-embed the affected row(s).")
+    return a / n[:, None]
+
+
+def format_margins(stats: dict) -> str:
+    """Top-N cosine margins (max similarity per replay row) beside the leak
+    list, so the ``sim_threshold`` headroom is visible: a threshold whose
+    floor sits inside the near-duplicate band turns a non-leak into a hard
+    refusal on the next corpus anchor or embedder upgrade."""
+    if not stats.get("vectors_checked"):
+        return (f"  (cosine margins unavailable: no vectors supplied; "
+                f"exact-match check only, {stats.get('replay_n', 0)} replay "
+                f"cases vs {stats.get('corpus_n', 0)} corpus cases)")
+    lines = [f"  cosine check: {stats['rows_compared']} replay rows compared "
+             f"vs {stats['corpus_n']} corpus rows at "
+             f"sim_threshold={stats['sim_threshold']:.2f}"]
+    for s, i, cid, text in stats.get("top_margins", []):
+        lines.append(f"    max-sim {s:.4f} <- replay[{i}] {text[:50]!r} "
+                     f"(nearest corpus {cid})")
+    if stats.get("allowlisted_sims"):
+        lines.append(f"  {stats['allowlisted_sims']} near-duplicate(s) inside "
+                     f"the recorded allowlist")
+    return "\n".join(lines)
 
 
 def format_leaks(leaks: list[dict]) -> str:
@@ -263,6 +373,11 @@ class Embedder:
         self.mem: dict[str, np.ndarray] = {}
         self.embed_time = 0.0
         self.embed_calls = 0
+        # rows the server returned with a zero/non-finite norm. They are
+        # still stored (a cached zero must not crash an old run), but the
+        # count is surfaced so a guard can refuse them: a zero vector's
+        # cosine is 0.0 and reads as "disjoint" (F20).
+        self.degenerate_rows = 0
         # per-text latency samples (ms) for cache-miss embeds
         self.latency_ms: list[float] = []
 
@@ -302,8 +417,15 @@ class Embedder:
             for (k, _), item in zip(missing, out["data"]):
                 v = np.asarray(item["embedding"], dtype=np.float32)
                 n = float(np.linalg.norm(v))
-                if n > 0:
+                if n > 0 and np.isfinite(v).all():
                     v = v / n
+                else:
+                    # zero / non-finite row: stored for cache compatibility,
+                    # counted so the disjointness guard can refuse it.
+                    self.degenerate_rows += 1
+                    print(f"WARNING: embed server returned a degenerate "
+                          f"(zero/non-finite) vector for key {k}",
+                          file=sys.stderr)
                 np.save(self._cache_path(k), v)
                 self.mem[k] = v
         self.embed_time += time.perf_counter() - 0  # noop keeper for symmetry

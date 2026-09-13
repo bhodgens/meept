@@ -20,21 +20,37 @@ Two integrity guards run BEFORE any case is scored:
   1. corpus <-> replay disjointness (eval_harness.replay_disjointness).
      The models are fit on the committed corpus; the ruler is the
      adjudicated replay. A replay case that also sits in the fitting
-     corpus (exact case_key match, or cosine > 0.95 when the embed server
-     is up) is a train-on-test leak. The run REFUSES to score when any
-     leak is found (exit 2). It never silently drops the case, because
-     dropping it would silently move the denominator.
-  2. coverage floor MIN_ROUTED. With fewer than MIN_ROUTED routed cases
-     the verdict is one or two Bernoulli draws against the hard-coded
+     corpus (exact case_key match, or cosine > SIM_THRESHOLD when the
+     embed server is up) is a train-on-test leak. The run REFUSES to score
+     when any leak is found (exit 2). It never silently drops the case,
+     because dropping it would silently move the denominator.
+     An EMPTY ruler is refused too (exit 4): an empty sample makes no
+     measurement and is never "disjoint". A supplied embedding row with a
+     zero or non-finite norm is refused (exit 5): its cosine is 0.0 and
+     would silently read as disjoint (F20 zero-norm hole).
+  2. coverage floor MIN_ROUTED (F19). With fewer than MIN_ROUTED routed
+     cases the verdict is one or two Bernoulli draws against the hard-coded
      CHAIN constant, not a measurement, so the verdict is reported as
-     INSUFFICIENT_COVERAGE -- never PASS/FAIL.
+     INSUFFICIENT_COVERAGE -- never PASS/FAIL. For the committed 48-case
+     ruler this means NO PASS/FAIL exists for EITHER policy (7 and 2 routed
+     respectively, both < MIN_ROUTED).
 
 Each policy writes its OWN artifact:
       results/m4-gold-acceptance-double-confidence.json
       results/m4-gold-acceptance-tfidf-veto.json
 The historical, committed results/m4-gold-acceptance.json (the
 double-confidence FAIL record) is NEVER overwritten: result files are
-write-once (F34).
+write-once (F34). A RE-run (canonical name already present) is written
+outside the repo under `<MEEPT_HOME>/classifier-eval-rerun/`, because the
+repo un-ignores `tools/classifier-eval/results/**` and would otherwise
+leave an untracked artifact inside a tracked directory; the rerun name
+carries a timestamp so a re-run cannot clobber the previous re-run either.
+(If a tracked rerun location is wanted instead, the owner adds
+`tools/classifier-eval/results/*.rerun*.json` to `.gitignore`.)
+
+Every written payload carries its own guard evidence -- replay_sha256,
+replay_n, sim_threshold, leaks, min_routed/coverage_floor -- so the
+artifact can evidence the guard that produced it instead of asserting it.
 
 Prerequisites the committed record cannot carry: the UNTRACKED adjudicated
 replay (replay-gold.local.json5, gitignored) and a live embed server on
@@ -45,11 +61,19 @@ Usage:
   python3 m4_gold_acceptance.py                    # full run (needs :8090)
   python3 m4_gold_acceptance.py --policy all
   python3 m4_gold_acceptance.py --check-overlap    # guard only, no deps
+  python3 m4_gold_acceptance.py --self-test        # guard/floor self-test
+
+Exit codes: 0 green | 2 leak | 3 missing inputs (UNVALIDATED) |
+            4 empty ruler | 5 degenerate (zero/non-finite) embeddings.
 """
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -64,6 +88,27 @@ EMBED_URL = "http://127.0.0.1:8090/v1"
 CHAIN = 0.868          # hard-coded chain floor (eval_harness.CHAIN_BASELINE)
 MIN_ROUTED = 20        # coverage floor (F19): below this a verdict is noise
 SIM_THRESHOLD = 0.95   # corpus<->replay leak threshold (F20)
+TOP_MARGINS = 5        # margins printed beside the leak list
+
+# Reruns go OUTSIDE the repo: nothing under tools/classifier-eval/results/
+# is gitignored, so a stray untracked artifact there is repo churn.
+MEEPT_HOME = Path(os.environ.get("MEEPT_HOME") or (Path.home() / ".meept"))
+RERUN_DIR = MEEPT_HOME / "classifier-eval-rerun"
+
+EXIT_LEAK = 2
+EXIT_UNVALIDATED = 3
+EXIT_EMPTY_RULER = 4
+EXIT_DEGENERATE = 5
+
+# Recorded near-duplicate allowlist: replay case_key -> reason. An entry
+# exempts that replay row from the SIMILARITY check only (byte-identity is
+# always a leak). The 0.95 threshold has thin headroom -- the reviewer
+# measured the known leak at 1.000 with the next rows at 0.943/0.938/0.923
+# and six rows inside 0.90-0.95 -- so one more corpus anchor or an embedder
+# upgrade could turn a non-leak into a hard refusal with no escape hatch.
+# Any exemption added here MUST be argued in results/m4-gold-acceptance.md,
+# never granted silently. Empty by default.
+NEAR_DUP_ALLOWLIST: dict[str, str] = {}
 
 ORCH = re.compile(
     r"(?i)\b(subagents?|tasks? \d|task list|waves?|leaves?|leaf \d|plan\.md|"
@@ -83,6 +128,14 @@ def load_replay():
         re.findall(r"\{\s*\"input\".*?\}", txt, re.S)) + "]")
 
 
+def replay_sha256() -> str | None:
+    """sha256 of the replay file BYTES: the artifact must pin the exact
+    ruler revision it was measured against, not just cite a filename."""
+    if not REPLAY.exists():
+        return None
+    return hashlib.sha256(REPLAY.read_bytes()).hexdigest()
+
+
 def verdict_for(routed: int, routed_ok: int, nchain: int, n: int):
     """Score + verdict with the coverage floor. Never returns PASS/FAIL
     for a routed sample below MIN_ROUTED."""
@@ -93,11 +146,16 @@ def verdict_for(routed: int, routed_ok: int, nchain: int, n: int):
 
 
 def write_artifact(policy: str, payload: dict) -> Path:
+    """Write the per-policy acceptance artifact. Canonical name is
+    write-once (F34); a re-run goes to RERUN_DIR (outside the repo) under a
+    unique timestamped name, so it neither pollutes the tracked results
+    dir nor clobbers the previous re-run."""
+    RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"m4-gold-acceptance-{policy}.json"
     if out.exists():
-        # write-once: never clobber a committed result (F34). A re-run
-        # writes an adjacent .rerun file so the historical record stands.
-        out = RESULTS / f"m4-gold-acceptance-{policy}.rerun.json"
+        RERUN_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        out = RERUN_DIR / f"m4-gold-acceptance-{policy}.rerun-{stamp}.json"
     out.write_text(json.dumps(payload, indent=2) + "\n")
     return out
 
@@ -116,32 +174,58 @@ def check_overlap_only() -> int:
     if replay is None:
         print(f"replay corpus absent ({REPLAY.name}); cannot check "
               f"disjointness", file=sys.stderr)
-        return 3
+        return EXIT_UNVALIDATED
     texts = [r["input"] for r in replay]
-    leaks = H.replay_disjointness(texts, gold, sim_threshold=SIM_THRESHOLD)
+    if not texts:
+        print(f"REFUSING: replay corpus {REPLAY} parsed to 0 cases -- an "
+              f"empty ruler measures nothing and is never 'disjoint'. "
+              f"Populate the replay or fix the parser.", file=sys.stderr)
+        return EXIT_EMPTY_RULER
+    guard: dict = {}
+    try:
+        leaks = H.replay_disjointness(texts, gold, sim_threshold=SIM_THRESHOLD,
+                                      allowlist=NEAR_DUP_ALLOWLIST, stats=guard,
+                                      top_n=TOP_MARGINS)
+    except H.EmptyRulerError as e:
+        print(f"REFUSING: {e}", file=sys.stderr)
+        return EXIT_EMPTY_RULER
+    except H.DegenerateVectorError as e:
+        print(f"REFUSING: {e}", file=sys.stderr)
+        return EXIT_DEGENERATE
     if leaks:
         print(H.format_leaks(leaks))
+        print(H.format_margins(guard))
         print("REFUSING: the ruler is not disjoint from the fitting corpus "
               "(train-on-test). Remove the offending corpus row or replay "
               "case before scoring.", file=sys.stderr)
-        return 2
+        return EXIT_LEAK
     print(f"ruler disjoint: {len(texts)} replay cases vs "
           f"{len(gold)} corpus cases (exact-match + "
           f"sim>{SIM_THRESHOLD} when an embed server is supplied)")
+    print(H.format_margins(guard))
     return 0
 
 
 def run_full(policies: set) -> int:
+    # Input guards run BEFORE the heavy ML imports: an absent or EMPTY
+    # ruler must be refused without requiring torch/transformers/:8090.
+    replay = load_replay()
+    if replay is None:
+        unvalidated("all", f"untracked replay corpus missing ({REPLAY})")
+        return EXIT_UNVALIDATED
+    if not replay:
+        print(f"REFUSING: replay corpus {REPLAY} parsed to 0 cases -- an "
+              f"empty ruler measures nothing; no policy can be scored.",
+              file=sys.stderr)
+        return EXIT_EMPTY_RULER
+
     import numpy as np
     import torch
     from transformers import AutoModel, AutoTokenizer
 
-    replay = load_replay()
-    if replay is None:
-        unvalidated("all", f"untracked replay corpus missing ({REPLAY})")
-        return 3
     s_texts = [r["input"] for r in replay]
     s_true = [r["expected_intent"] for r in replay]
+    replay_sha = replay_sha256()
 
     torch.manual_seed(42)
     tok = AutoTokenizer.from_pretrained(MODEL_DIR)
@@ -202,15 +286,44 @@ def run_full(policies: set) -> int:
     MB_S = np.stack(mb_embed(s_texts))
 
     # --- GUARD 1: corpus<->replay disjointness, BEFORE scoring ---------
-    leaks = H.replay_disjointness(s_texts, gold,
-                                  corpus_vectors=V, replay_vectors=SV,
-                                  sim_threshold=SIM_THRESHOLD)
+    guard: dict = {}
+    try:
+        leaks = H.replay_disjointness(s_texts, gold,
+                                      corpus_vectors=V, replay_vectors=SV,
+                                      sim_threshold=SIM_THRESHOLD,
+                                      allowlist=NEAR_DUP_ALLOWLIST,
+                                      stats=guard, top_n=TOP_MARGINS)
+    except H.DegenerateVectorError as e:
+        print(f"REFUSING to score: {e}", file=sys.stderr)
+        return EXIT_DEGENERATE
+    except H.EmptyRulerError as e:
+        print(f"REFUSING to score: {e}", file=sys.stderr)
+        return EXIT_EMPTY_RULER
     if leaks:
         print(H.format_leaks(leaks), file=sys.stderr)
+        print(H.format_margins(guard), file=sys.stderr)
         print("REFUSING to score: the ruler is not disjoint from the "
               "fitting corpus (train-on-test). Fix the corpus/replay "
               "before re-running.", file=sys.stderr)
-        return 2
+        return EXIT_LEAK
+    # margins beside the (empty) leak list: the threshold headroom is the
+    # earliest-warning signal that a corpus anchor or embedder upgrade is
+    # about to turn a non-leak into a refusal.
+    print(H.format_margins(guard), file=sys.stderr)
+
+    # every written payload carries the guard evidence that produced it.
+    common = {
+        "policy": None,                        # set per policy below
+        "replay_n": len(s_texts),
+        "replay_sha256": replay_sha,
+        "sim_threshold": SIM_THRESHOLD,
+        "min_routed": MIN_ROUTED,
+        "coverage_floor": MIN_ROUTED,
+        "leaks": leaks,                        # [] on a scored run (exit 2 otherwise)
+        "guard": guard,
+        "near_dup_allowlist": sorted(NEAR_DUP_ALLOWLIST),
+        "chain_baseline": CHAIN,
+    }
 
     def centroid_routes(qv, text):
         sims = C @ qv
@@ -244,6 +357,7 @@ def run_full(policies: set) -> int:
                 "a_routes": a, "a_correct": aok,
                 "b_routes": b, "b_correct": bok, "chain": nchain,
                 "routed": a + b, "min_routed": MIN_ROUTED,
+                "coverage_floor": MIN_ROUTED,
                 "system_accuracy": round(acc, 4),
                 "acceptance_threshold": CHAIN, "verdict": verdict}
 
@@ -278,12 +392,14 @@ def run_full(policies: set) -> int:
         return {"n": len(s_texts), "n_scored": len(s_texts),
                 "a_routes": a, "a_correct": aok, "chain": nchain,
                 "routed": a, "min_routed": MIN_ROUTED,
+                "coverage_floor": MIN_ROUTED,
                 "system_accuracy": round(acc, 4),
                 "acceptance_threshold": CHAIN, "verdict": verdict}
 
     rc = 0
     if "double-confidence" in policies:
         payload = run_double_confidence()
+        payload.update(common, policy="double-confidence")
         path = write_artifact("double-confidence", payload)
         print(f"double-confidence: acc={payload['system_accuracy']:.4f} "
               f"verdict={payload['verdict']} routed={payload['routed']} "
@@ -291,13 +407,152 @@ def run_full(policies: set) -> int:
     if "tfidf-veto" in policies:
         payload = run_tfidf_veto()
         if payload is None:
-            rc = 3
+            rc = EXIT_UNVALIDATED
         else:
+            payload.update(common, policy="tfidf-veto")
             path = write_artifact("tfidf-veto", payload)
             print(f"tfidf-veto: acc={payload['system_accuracy']:.4f} "
                   f"verdict={payload['verdict']} routed={payload['routed']} "
                   f"(floor {MIN_ROUTED}) -> {path}")
     return rc
+
+
+def self_test() -> int:
+    """Self-test for the guards and the coverage floor. Pure-stdlib +
+    numpy; needs no embed server and no replay corpus. Pins:
+      - the known train-on-test leak IS reported (exact case_key);
+      - an EMPTY ruler is NOT green (EmptyRulerError + exit 4);
+      - a ZERO-NORM embedding row is NOT green (DegenerateVectorError);
+      - the recorded allowlist exempts similarity only, never byte-identity;
+      - the coverage floor boundary holds at 19 vs 20 routed cases.
+    """
+    import numpy as np
+
+    failures: list[str] = []
+
+    def check(name, cond, detail=""):
+        if cond:
+            print(f"  ok   {name}")
+        else:
+            failures.append(name)
+            print(f"  FAIL {name} {detail}")
+
+    cases_b, cases_a = H.load_cases()
+    gold = cases_b + cases_a
+    known = "implement the plan using subagents"
+
+    print("self-test: guards + coverage floor")
+
+    # 1. the known leak is reported.
+    leaks = H.replay_disjointness([known], gold)
+    check("known leak reported (exact)",
+          len(leaks) == 1 and leaks[0]["reason"] == "exact"
+          and leaks[0]["corpus_case_id"] == "h18-planexec-001",
+          f"-> {leaks}")
+
+    # 2. an empty ruler is not green.
+    empty_raised = False
+    try:
+        H.replay_disjointness([], gold)
+    except H.EmptyRulerError:
+        empty_raised = True
+    check("empty ruler raises EmptyRulerError", empty_raised)
+
+    d = Path(tempfile.mkdtemp())
+    p = d / "replay-gold.local.json5"
+    p.write_text("{ cases: [] }\n")
+    saved = REPLAY
+
+    def quiet_check(path):
+        """check_overlap_only prints; keep the self-test output readable."""
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            try:
+                globals()["REPLAY"] = path
+                return check_overlap_only()
+            finally:
+                globals()["REPLAY"] = saved
+
+    empty_code = quiet_check(p)
+    check("check_overlap_only refuses an empty sample",
+          empty_code == EXIT_EMPTY_RULER, f"-> exit {empty_code}")
+
+    # 2b. a non-empty clean ruler IS green (the guard is not trivially red).
+    q = d / "clean.json5"
+    q.write_text('{ "input": "xq7-unique-selftest-row-not-in-corpus", '
+                 '"expected_intent": "chat" }\n')
+    clean_code = quiet_check(q)
+    check("check_overlap_only green on a clean sample",
+          clean_code == 0, f"-> exit {clean_code}")
+
+    # 3. a zero-norm embedding row is not green.
+    V = np.ones((len(gold), 4), dtype=np.float32)
+    Z = np.zeros((1, 4), dtype=np.float32)
+    deg_raised = False
+    try:
+        H.replay_disjointness(["zzz selftest zero-norm"], gold,
+                              corpus_vectors=V, replay_vectors=Z)
+    except H.DegenerateVectorError:
+        deg_raised = True
+    check("zero-norm row raises DegenerateVectorError", deg_raised)
+
+    # 3b. a NON-FINITE row is not green either.
+    N = np.full((1, 4), np.inf, dtype=np.float32)
+    nonfin_raised = False
+    try:
+        H.replay_disjointness(["zzz selftest inf-norm"], gold,
+                              corpus_vectors=V, replay_vectors=N)
+    except H.DegenerateVectorError:
+        nonfin_raised = True
+    check("non-finite row raises DegenerateVectorError", nonfin_raised)
+
+    # 4. a cosine leak IS reported, and the allowlist exempts similarity
+    #    only (byte-identity stays a leak). "a" vs "b" differ in text but
+    #    share a vector, so the sim must fire and exact must not.
+    corpus_v = np.stack([np.array([1.0, 0, 0, 0], dtype=np.float32),
+                         np.array([0, 1.0, 0, 0], dtype=np.float32)])
+    replay_v = np.array([[1.0, 0, 0, 0]], dtype=np.float32)
+    mini = gold[:2]
+    sim_leaks = H.replay_disjointness(["selftest near-dup text"], mini,
+                                      corpus_vectors=corpus_v,
+                                      replay_vectors=replay_v,
+                                      sim_threshold=0.95)
+    check("similarity leak reported",
+          len(sim_leaks) == 1 and "similarity" in sim_leaks[0]["reason"],
+          f"-> {sim_leaks}")
+    allowed = H.replay_disjointness(
+        ["selftest near-dup text"], mini, corpus_vectors=corpus_v,
+        replay_vectors=replay_v, sim_threshold=0.95,
+        allowlist={H.case_key("selftest near-dup text"): "self-test reason"})
+    check("allowlist exempts similarity", allowed == [], f"-> {allowed}")
+    exact_still = H.replay_disjointness(
+        [mini[0].text], mini, corpus_vectors=corpus_v, replay_vectors=replay_v,
+        sim_threshold=0.95,
+        allowlist={H.case_key(mini[0].text): "self-test reason"})
+    check("allowlist does NOT exempt byte-identity",
+          any(lk["reason"] == "exact" for lk in exact_still), f"-> {exact_still}")
+
+    # 5. coverage floor boundary: 19 routed is INSUFFICIENT, 20 is a verdict.
+    acc19, v19 = verdict_for(19, 19, 29, 48)
+    acc20, v20 = verdict_for(20, 20, 28, 48)
+    check("19 routed -> INSUFFICIENT_COVERAGE",
+          v19 == "INSUFFICIENT_COVERAGE", f"-> {v19}")
+    check("20 routed -> PASS/FAIL (floor boundary)",
+          v20 in ("PASS", "FAIL"), f"-> {v20}")
+    # the committed 48-case numbers must be sub-floor for BOTH policies.
+    check("committed double-confidence (7 routed) is sub-floor",
+          verdict_for(7, 5, 41, 48)[1] == "INSUFFICIENT_COVERAGE")
+    check("committed tfidf-veto (2 routed) is sub-floor",
+          verdict_for(2, 2, 46, 48)[1] == "INSUFFICIENT_COVERAGE")
+
+    if failures:
+        print(f"self-test FAILED: {len(failures)} check(s): {failures}",
+              file=sys.stderr)
+        return 1
+    print("self-test PASSED")
+    return 0
 
 
 def main() -> int:
@@ -307,7 +562,13 @@ def main() -> int:
     ap.add_argument("--check-overlap", action="store_true",
                     help="run only the corpus<->replay disjointness guard "
                          "(no embed server needed)")
+    ap.add_argument("--self-test", action="store_true",
+                    help="run the guard + coverage-floor self-test "
+                         "(no embed server, no replay corpus needed)")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     if args.check_overlap:
         return check_overlap_only()
