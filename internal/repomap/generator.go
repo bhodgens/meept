@@ -7,11 +7,12 @@ package repomap
 import (
 	"context"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	meeptcfg "github.com/caimlas/meept/internal/config"
 )
 
 // RepoMapConfig holds all configuration for RepoMap generation.
@@ -101,6 +102,14 @@ func (f *BudgetFitter) Fit(ranked RankedTags, config FittingConfig, renderer Ren
 	return FitToBudget(ranked, config, renderer)
 }
 
+// defaultRepoMapCacheDir resolves the default on-disk cache directory for the
+// repository map. It routes through the shared config home resolution
+// (MEEPT_HOME env override, else ~/.meept) so an isolated rig never writes the
+// operator's home directory.
+func defaultRepoMapCacheDir() string {
+	return meeptcfg.MeeptPath("repomap_cache")
+}
+
 // NewRepoMapGenerator creates a new RepoMapGenerator with all components.
 func NewRepoMapGenerator(config RepoMapConfig, logger *slog.Logger, watchedFiles []string) (*RepoMapGenerator, error) {
 	if logger == nil {
@@ -112,22 +121,12 @@ func NewRepoMapGenerator(config RepoMapConfig, logger *slog.Logger, watchedFiles
 		config.MaxMapTokens = 1024
 	}
 	if config.CacheDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			homeDir = os.TempDir()
-		}
-		config.CacheDir = filepath.Join(homeDir, ".meept", "repomap_cache")
-	} else if strings.HasPrefix(config.CacheDir, "~") {
-		// Expand tilde in non-empty cache dir
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			homeDir = os.TempDir()
-		}
-		if config.CacheDir == "~" {
-			config.CacheDir = homeDir
-		} else if strings.HasPrefix(config.CacheDir, "~/") {
-			config.CacheDir = filepath.Join(homeDir, config.CacheDir[2:])
-		}
+		config.CacheDir = defaultRepoMapCacheDir()
+	} else {
+		// Expand a configured cache dir: a "~/.meept/..." default is
+		// redirected under MEEPT_HOME so an isolated rig never writes the
+		// operator's home directory; other "~" paths expand normally.
+		config.CacheDir = meeptcfg.ExpandMeeptPath(config.CacheDir)
 	}
 	if config.MapMulNoFiles == 0 {
 		config.MapMulNoFiles = 8.0

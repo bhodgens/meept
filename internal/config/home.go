@@ -7,6 +7,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // EnvMeeptHome is the environment variable that overrides the meept home
@@ -40,6 +41,40 @@ func MeeptHome() string {
 // MeeptPath joins elem onto MeeptHome().
 func MeeptPath(elem ...string) string {
 	return filepath.Join(append([]string{MeeptHome()}, elem...)...)
+}
+
+// ExpandMeeptPath resolves a config-supplied path while honoring MEEPT_HOME:
+// a leading "~/.meept" prefix (the shipped default for every meept path) is
+// redirected under MeeptHome(), so MEEPT_HOME="/x" turns
+// "~/.meept/repomap_cache" into "/x/repomap_cache". Any other "~" path
+// expands to the user's home directory, and a non-tilde path is returned
+// unchanged.
+//
+// Use this for paths that arrive from configuration. Use MeeptPath() when
+// building a meept path from scratch.
+func ExpandMeeptPath(path string) string {
+	meeptDefault := "~/" + DefaultHomeRel
+	if override := os.Getenv(EnvMeeptHome); override != "" {
+		override = expandTilde(override)
+		if path == meeptDefault {
+			return override
+		}
+		if strings.HasPrefix(path, meeptDefault+"/") {
+			return filepath.Join(override, path[len(meeptDefault)+1:])
+		}
+	}
+	if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+		return path
+	}
+	if hasTildePrefix(path) {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }
 
 // expandTilde resolves a leading ~ (or ~/) to the user's home directory so

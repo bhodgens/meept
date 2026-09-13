@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/version"
 )
@@ -31,12 +32,12 @@ func debugEnabled() bool {
 }
 
 func main() {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "."
-	}
-	defaultStateDir := filepath.Join(homeDir, ".meept")
-	defaultSocket := filepath.Join(defaultStateDir, "meept.sock")
+	// Defaults resolve through config.MeeptHome() so MEEPT_HOME applies to the
+	// RPC client: an isolated rig dials <MEEPT_HOME>/meept.sock, never the
+	// operator's ~/.meept/meept.sock. Explicit --socket / --state-dir flags
+	// still win because cobra binds them into socketPath / stateDir.
+	defaultStateDir := resolveDefaultStateDir()
+	defaultSocket := resolveDefaultSocketPath()
 
 	// We need to parse flags early to configure logging before command execution.
 	// Cobra's PersistentPreRunE runs after flag parsing but before the command.
@@ -250,13 +251,29 @@ func newHelpCmd(root *cobra.Command) *cobra.Command {
 	}
 }
 
+// resolveDefaultStateDir returns the default state directory used when the
+// --state-dir flag is not given: $MEEPT_HOME when set, else ~/.meept.
+// config.MeeptHome() is THE resolution point; an explicit --state-dir flag
+// still wins because cobra binds it into the stateDir global.
+func resolveDefaultStateDir() string {
+	return config.MeeptHome()
+}
+
+// resolveDefaultSocketPath returns the default unix RPC socket path, which
+// lives inside the resolved state directory: $MEEPT_HOME/meept.sock when the
+// env var is set, else ~/.meept/meept.sock. An explicit --socket flag wins.
+func resolveDefaultSocketPath() string {
+	return filepath.Join(resolveDefaultStateDir(), "meept.sock")
+}
+
 // getSocketPath returns the socket path, applying defaults if needed.
+// Precedence: explicit --socket flag (bound into socketPath by cobra), then
+// the MEEPT_HOME-aware default.
 func getSocketPath() string {
 	if socketPath != "" {
 		return socketPath
 	}
-	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".meept", "meept.sock")
+	return resolveDefaultSocketPath()
 }
 
 // getTransportConfig builds a transport.Config from the CLI flags.

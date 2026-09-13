@@ -1430,11 +1430,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Register secret obfuscation hook to protect secrets from LLM exposure.
 	secretObfuscator := intsecurity.NewSecretObfuscator()
-	if configDir, err := os.UserHomeDir(); err == nil {
-		secretsPath := filepath.Join(configDir, ".meept", "secrets.json5")
-		if err := secretObfuscator.LoadFromConfig(secretsPath); err != nil {
-			logger.Warn("failed to load secrets config", "path", secretsPath, "error", err)
-		}
+	// Resolve through config so MEEPT_HOME applies (isolated rigs never read
+	// the operator's ~/.meept/secrets.json5).
+	secretsPath := config.MeeptPath("secrets.json5")
+	if err := secretObfuscator.LoadFromConfig(secretsPath); err != nil {
+		logger.Warn("failed to load secrets config", "path", secretsPath, "error", err)
 	}
 	if secretHook := agent.NewSecretObfuscationHook(secretObfuscator, logger.With("hook", "secret-obfuscation")); secretHook != nil {
 		hookRegistry.RegisterTransformContext("secret-obfuscation", agent.HookPriorityCritical, secretHook)

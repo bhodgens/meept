@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/errcls"
 	"github.com/kardianos/service"
 )
@@ -73,10 +74,11 @@ func getHomeDirOrFallback() string {
 }
 
 func newLegacyController(logDir string) (*legacyController, error) {
-	home := getHomeDirOrFallback()
 	meeptDir := logDir
 	if meeptDir == "" {
-		meeptDir = filepath.Join(home, ".meept")
+		// Resolve through config so MEEPT_HOME applies: an isolated rig's
+		// PID/state directory must never be the operator's ~/.meept.
+		meeptDir = config.MeeptHome()
 	}
 	if err := os.MkdirAll(meeptDir, 0o755); err != nil { //nolint:gosec
 		return nil, err
@@ -254,10 +256,10 @@ func NewServiceManager(cfg *ServiceManagerConfig) (*ServiceManager, error) {
 	if err != nil {
 		daemonPath = "/usr/local/bin/meept-daemon"
 	}
-	home := getHomeDirOrFallback()
+	// Default log directory resolves through config so MEEPT_HOME applies.
 	logDir := cfg.LogDir
 	if logDir == "" {
-		logDir = filepath.Join(home, ".meept")
+		logDir = config.MeeptHome()
 	}
 	return &ServiceManager{
 		daemonPath: daemonPath,
@@ -307,6 +309,29 @@ func (m *ServiceManager) Install() error {
 	return svc.Start()
 }
 
+// plistValueEscaper escapes XML-significant characters in plist values.
+var plistValueEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+
+// plistEnvironmentVariables renders the launchd plist EnvironmentVariables
+// dictionary. PATH is always augmented (matches kardianos/service Install).
+// MEEPT_HOME is propagated when set so a launchd-installed daemon in an
+// isolated rig keeps resolving its own home instead of the operator's
+// ~/.meept. When MEEPT_HOME is unset the output is byte-identical to the
+// previous PATH-only dictionary.
+func plistEnvironmentVariables() string {
+	var b strings.Builder
+	b.WriteString("<dict><key>PATH</key><string>")
+	b.WriteString(plistValueEscaper.Replace(DaemonPath()))
+	b.WriteString("</string>")
+	if override := os.Getenv(config.EnvMeeptHome); override != "" {
+		b.WriteString("<key>MEEPT_HOME</key><string>")
+		b.WriteString(plistValueEscaper.Replace(override))
+		b.WriteString("</string>")
+	}
+	b.WriteString("</dict>")
+	return b.String()
+}
+
 // writePlistAndLoad creates a plist file and loads it via launchctl.
 func (m *ServiceManager) writePlistAndLoad(label string) {
 	home := getHomeDirOrFallback()
@@ -330,10 +355,10 @@ func (m *ServiceManager) writePlistAndLoad(label string) {
     <key>KeepAlive</key><true/>
     <key>WorkingDirectory</key><string>%s</string>
     <key>EnvironmentVariables</key>
-    <dict><key>PATH</key><string>%s</string></dict>
+    %s
 </dict>
 </plist>
-`, label, m.daemonPath, getHomeDirOrFallback(), DaemonPath())
+`, label, m.daemonPath, getHomeDirOrFallback(), plistEnvironmentVariables())
 
 	if err := os.WriteFile(plistPath, []byte(plist), 0o600); err != nil {
 		return
