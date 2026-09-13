@@ -145,24 +145,22 @@ func LoadProvidersConfig(path string) (*ProvidersConfig, error) {
 }
 
 // LoadProvidersConfigDefault loads providers config from the default locations.
-// Bundled config/models.json5 is the base. ~/.meept/models.json5 overlays it
-// (user slots, aliases, and models win). Missing image/video entries in the
-// user file still come from the bundled catalog.
+// Bundled config/models.json5 is the base. The user's models.json5 ($MEEPT_HOME
+// when set, else ~/.meept) overlays it (user slots, aliases, and models win).
+// Missing image/video entries in the user file still come from the bundled
+// catalog.
 func LoadProvidersConfigDefault() (*ProvidersConfig, error) {
 	bundled := loadFirstProvidersConfig(bundledModelsPaths())
-	homeDir, err := os.UserHomeDir()
 	var user *ProvidersConfig
-	if err == nil {
-		userPath := filepath.Join(homeDir, ".meept", "models.json5")
-		if _, statErr := os.Stat(userPath); statErr == nil {
-			user, err = LoadProvidersConfig(userPath)
-			if err != nil {
-				return nil, err
-			}
+	if userPath, ok := userModelsConfigPath(); ok {
+		var err error
+		user, err = LoadProvidersConfig(userPath)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if bundled == nil && user == nil {
-		return nil, fmt.Errorf("models.json5 not found in ~/.meept/ or config/")
+		return nil, fmt.Errorf("models.json5 not found in the meept home or config/")
 	}
 	if bundled == nil {
 		return user, nil
@@ -171,6 +169,39 @@ func LoadProvidersConfigDefault() (*ProvidersConfig, error) {
 		return bundled, nil
 	}
 	return MergeProvidersConfig(bundled, user), nil
+}
+
+// userModelsConfigPath resolves the user's models.json5, honoring MEEPT_HOME.
+// It mirrors config.MeeptHome's resolution locally because internal/llm cannot
+// import internal/config (cycle via tools/mcp).
+//
+// os.UserHomeDir().meept alone is wrong: a daemon started with
+// MEEPT_HOME=<dir> must read <dir>/models.json5. Without this, an isolated rig
+// still loaded the operator's providers and SPAWNED their runtimes - observed
+// 2026-09-12, a MEEPT_HOME=/tmp rig brought up the operator's prompt-router
+// sidecar and :8081 llama-server. That also mis-registers runtime endpoints,
+// so the rig's spawn guard and orphan sweep see the wrong endpoint set.
+//
+// Returns ("", false) when no user config exists (bundled config still loads).
+func userModelsConfigPath() (string, bool) {
+	home := strings.TrimSpace(os.Getenv("MEEPT_HOME"))
+	if strings.HasPrefix(home, "~/") {
+		if h, err := os.UserHomeDir(); err == nil {
+			home = filepath.Join(h, home[2:])
+		}
+	}
+	if home == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return "", false
+		}
+		home = filepath.Join(h, ".meept")
+	}
+	path := filepath.Join(home, "models.json5")
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	return path, true
 }
 
 func bundledModelsPaths() []string {
