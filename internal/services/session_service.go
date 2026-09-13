@@ -161,6 +161,30 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 		}
 	}
 
+	// Working-directory binding (always-have-a-working-dir, 2026-09-13):
+	// report the directory this session's turns will run in, and make the
+	// genuinely-unbound case visible in the daemon log. A session with no
+	// project and no client CWD has NO working directory, and every
+	// filesystem tool that needs a session dir then fails (previously with
+	// the bare "no path specified", which the model retried until the cycle
+	// guard aborted the turn). We do NOT synthesize a project (AGENTS.md: no
+	// EnsureDefault for session binding) and never use the daemon's own CWD,
+	// so the actionable outcome is a loud log line naming the two ways to
+	// bind a directory.
+	if dir, src := session.ResolveWorkingDir(sess); dir != "" {
+		s.logger.Info("session bound to working directory",
+			"session_id", sess.ID,
+			"working_dir", dir,
+			"source", string(src),
+		)
+	} else {
+		s.logger.Warn("session created with no working directory: no project and no client CWD; filesystem tools will require an explicit path until one is bound",
+			"session_id", sess.ID,
+			"has_project_manager", s.pm != nil,
+			"hint", "activate a project (project.set) or pass detection_context.cwd at session create",
+		)
+	}
+
 	return sess, nil
 }
 

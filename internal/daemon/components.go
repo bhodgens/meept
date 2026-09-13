@@ -3030,6 +3030,21 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.ChatHandler.SetSessionStore(c.SessionStore)
 		c.ChatHandler.SetMessageSaver(c.SessionStore)
 	}
+
+	// Turn-start working-directory binding (fresh-rig daemon11, 2026-09-13):
+	// a chat turn whose session had no project and no client CWD ran with no
+	// working directory at all, so every filesystem tool failed with the bare
+	// "no path specified" and the model retried until the cycle guard aborted
+	// the turn. ChatHandler now resolves WorktreePath > ProjectPath >
+	// DetectionContext.CWD at turn start and, for a session that resolves
+	// nothing, falls back to the user's ACTIVE project — the same source
+	// session creation binds to. It never synthesizes a default project
+	// (ProjectManager.EnsureDefault is not used for session binding) and never
+	// falls back to the daemon's own process CWD (AGENTS.md: Daemon CWD is NOT
+	// the user's project).
+	if c.ChatHandler != nil {
+		c.ChatHandler.SetActiveProjectPathResolver(activeProjectWorkingDir(c.ProjectManager))
+	}
 	// Wire the shared fence checker onto the ChatHandler so each session
 	// binds its working directory as the sandbox root and honors the
 	// per-session --nofence override. Without this, an enabled fence with
@@ -8590,4 +8605,37 @@ func truncateEvidence(s string) string {
 		return s
 	}
 	return string(r[:max]) + "…"
+}
+
+// projectActiveGetter is the narrow slice of project.ProjectManager needed to
+// resolve a fallback working directory for a chat turn.
+type projectActiveGetter interface {
+	GetActive(ctx context.Context) (*project.Project, error)
+}
+
+// activeProjectWorkingDir returns a nil-safe resolver for the local path of
+// the user's active project.
+//
+// It is the turn-start fallback for chat sessions that are not bound to any
+// project — the same source session creation binds to (AGENTS.md: "Session
+// creation binds to the user's active project via ProjectManager.GetActive").
+// The daemon binds an EXISTING active project or nothing: it never calls
+// EnsureDefault to synthesize a project, and it never falls back to its own
+// process CWD. An empty result means the turn genuinely has no working
+// directory, which filesystem tools report as tools.ErrNoWorkingDir so the
+// model can pass an explicit path instead of retrying blind.
+//
+// The GetActive read happens outside any lock and with a request-independent
+// context: it is a single indexed store read on the turn-start path only.
+func activeProjectWorkingDir(pm projectActiveGetter) func() string {
+	return func() string {
+		if pm == nil {
+			return ""
+		}
+		p, err := pm.GetActive(context.Background())
+		if err != nil || p == nil {
+			return ""
+		}
+		return p.LocalPath
+	}
 }

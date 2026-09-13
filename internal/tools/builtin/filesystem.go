@@ -128,7 +128,7 @@ func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any
 func (t *ReadFileTool) executeRead(ctx context.Context, args map[string]any, progress func(tools.ProgressUpdate)) (any, error) {
 	rawPath, _ := args[schemaPropPath].(string)
 	if rawPath == "" {
-		return nil, fmt.Errorf("no path specified")
+		return nil, tools.NoPathError("read_file")
 	}
 
 	resolved, err := resolvePathSecure(ctx, rawPath)
@@ -488,7 +488,7 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 	direct := coerceToolBool(args["direct"])
 
 	if rawPath == "" {
-		return nil, fmt.Errorf("no path specified")
+		return nil, tools.NoPathError("write_file")
 	}
 
 	// Defensively strip any accidental hashline prefixes from content.
@@ -703,7 +703,7 @@ func (t *DeleteFileTool) Parameters() llm.FunctionParameters {
 func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	rawPath, _ := args[schemaPropPath].(string)
 	if rawPath == "" {
-		return nil, fmt.Errorf("no path specified")
+		return nil, tools.NoPathError("delete_file")
 	}
 
 	resolved, err := resolvePathSecure(ctx, rawPath)
@@ -839,8 +839,9 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	rawPath, _ := args[schemaPropPath].(string)
 	if rawPath == "" {
 		// No explicit path: default to the session working directory
-		// injected by the agent loop. Empty context dir falls through to
-		// the "no path specified" error below (process cwd is almost never
+		// injected by the agent loop. An empty context dir means the turn
+		// has no working directory at all: fail with the actionable
+		// ErrNoWorkingDir (never the daemon's process cwd — nearly never
 		// the user's project).
 		rawPath = tools.WorkingDirFromContext(ctx)
 	}
@@ -851,7 +852,7 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	}
 
 	if rawPath == "" {
-		return nil, fmt.Errorf("no path specified")
+		return nil, tools.NoWorkingDirError("list_directory")
 	}
 
 	resolved, err := resolvePathSecure(ctx, rawPath)

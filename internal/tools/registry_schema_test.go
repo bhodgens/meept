@@ -39,15 +39,6 @@ func (t *schemaModeTool) IsConcurrencySafe(map[string]any) bool { return true }
 // Compile-time assertion that the fake implements Tool.
 var _ Tool = (*schemaModeTool)(nil)
 
-// emptyObjectSchema returns the exact stub parameter schema that indexed
-// mode must emit: an object with no properties and no required list.
-func emptyObjectSchema() llm.FunctionParameters {
-	return llm.FunctionParameters{
-		Type:       "object",
-		Properties: make(map[string]llm.ParameterProperty),
-	}
-}
-
 // findSchemaDef returns the definition for the named tool, failing the test
 // if it is absent.
 func findSchemaDef(t *testing.T, defs []llm.ToolDefinition, name string) llm.ToolDefinition {

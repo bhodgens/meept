@@ -182,6 +182,22 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   resolves WorktreePath > ProjectPath > session `DetectionContext.CWD`
   > "". Never fall back to the daemon's CWD (see also the os.Getwd
   rule above).
+- **Chat turns always resolve a working directory.** `session.ResolveWorkingDir`
+  (internal/session/working_dir.go) is the single precedence for the
+  session-bound sources — `WorktreePath > ProjectPath > DetectionContext.CWD`
+  — and the chat path binds it at turn start in `ChatHandler.sessionLoop`,
+  falling back to the user's ACTIVE project (`ProjectManager.GetActive`,
+  wired via `SetActiveProjectPathResolver`) and then to a configured
+  default (`SetDefaultWorkingDir`, unset today). Session creation binds
+  the explicit `project_id`, else the client CWD (resolved into a project
+  by `CreateOrResolve`), else the active project; an unbound session is
+  logged at Warn. Never synthesize a project (`EnsureDefault` is not for
+  session binding) and never use the daemon's own CWD. When nothing
+  resolves, the filesystem tools return `tools.ErrNoWorkingDir`
+  ("no working directory for this session; pass an explicit path") — a
+  detectable sentinel (`tools.IsNoWorkingDir`), never the bare
+  `no path specified` that made the model retry until the cycle guard
+  aborted the turn (fresh-rig daemon11, 2026-09-13).
 - **Machine-shaped output never becomes a reply.** `RunOnceWithParts`
   applies `applyReplyGuard` — raw `platform_*` tool dumps, agent
   rosters, and status JSON are replaced with user-language fallbacks.

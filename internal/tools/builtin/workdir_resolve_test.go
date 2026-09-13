@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,15 +52,23 @@ func TestListDirectoryDefaultsToContextWorkingDir(t *testing.T) {
 
 // TestListDirectoryEmptyContextStillFails: without a context working dir,
 // list_directory with no path must still error (process cwd is almost never
-// the user's project).
+// the user's project) — and the error must be the actionable
+// tools.ErrNoWorkingDir, not the bare "no path specified" that made the model
+// retry the identical call until the cycle guard aborted the turn.
 func TestListDirectoryEmptyContextStillFails(t *testing.T) {
 	tool := NewListDirectoryTool(nil)
 	res, err := tool.Execute(context.Background(), map[string]any{})
 	if err == nil {
 		t.Fatalf("expected error when no context working dir is set, got result: %+v", res)
 	}
-	if !strings.Contains(err.Error(), "no path specified") {
-		t.Fatalf("expected 'no path specified', got: %v", err)
+	if !errors.Is(err, tools.ErrNoWorkingDir) {
+		t.Errorf("expected tools.ErrNoWorkingDir, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no working directory for this session; pass an explicit path") {
+		t.Errorf("expected the actionable message, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "no path specified") {
+		t.Errorf("old bare wording still present: %v", err)
 	}
 }
 

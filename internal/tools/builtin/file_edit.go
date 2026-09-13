@@ -139,7 +139,7 @@ type editOp struct {
 func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	rawPath, _ := args[schemaPropPath].(string)
 	if rawPath == "" {
-		return nil, fmt.Errorf("no path specified")
+		return nil, tools.NoPathError("file_edit")
 	}
 
 	editsRaw, ok := args["edits"].([]any)

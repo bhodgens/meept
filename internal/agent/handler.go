@@ -76,6 +76,22 @@ type ChatHandler struct {
 	// SessionStoreReader for looking up session project paths.
 	sessionStore SessionStoreReader
 
+	// activeProjectPath returns the local path of the user's active project
+	// (or "" when none is active). Wired by the daemon from
+	// ProjectManager.GetActive. Turn-start fallback for sessions that are
+	// unbound: a fresh session binds to the ACTIVE project exactly like
+	// session creation does, and we never synthesize one
+	// (AGENTS.md: no EnsureDefault for session binding).
+	activeProjectPath func() string
+
+	// defaultWorkingDir is the daemon's configured default working
+	// directory, used only when neither the session nor the active project
+	// resolves one. Empty (the default) means such a turn genuinely has no
+	// working directory and filesystem tools fail with
+	// tools.ErrNoWorkingDir — never with the daemon's own process CWD
+	// (AGENTS.md: Daemon CWD is NOT the user's project).
+	defaultWorkingDir string
+
 	// FenceController is the per-session fence sandbox controller (optional).
 	// When set, sessionLoop updates the shared FenceChecker with the
 	// session's working directory (sandbox root) and no-fence override as
@@ -966,7 +982,12 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// persistence/push — so every reply path (direct, routed, sync-wait,
 	// platform fast path) is covered. sanitizeCatalogReply passes genuine
 	// prose through unchanged.
-	response.Reply = applyReplyGuard(response.Reply)
+	response.Reply = applyReplyGuardLogged(response.Reply, h.logger, replyGuardContext{
+		Agent:          replyGuardAgent(req.AgentID, result),
+		Intent:         replyGuardIntent(result),
+		SessionID:      req.SessionID,
+		ConversationID: conversationID,
+	})
 
 	// Classification provenance (leaf 01 of classifier-observability):
 	// attach metadata describing how this reply was classified — method,
@@ -2084,29 +2105,57 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 }
 
 // sessionLoop returns a per-session AgentLoop when a manager is wired
-// and the session has a project path; otherwise returns the singleton.
+// and the session resolves a working directory; otherwise returns the
+// singleton.
+//
+// Resolving the working directory here is the turn-start half of the
+// "always have a working directory" contract (fresh-rig daemon11,
+// 2026-09-13: a turn ran with no session working directory, so every
+// filesystem tool failed with the bare "no path specified" and the model
+// retried the identical call until the cycle guard aborted the turn).
+// Precedence is the repo-wide one (session.ResolveWorkingDir):
+//
+//	WorktreePath > ProjectPath > DetectionContext.CWD
+//
+// then, only when the session resolves nothing, the active project at
+// turn time and finally the daemon's configured default working dir.
+// The daemon's process CWD is never a source (AGENTS.md).
 func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
-	if h.loopManager == nil || h.sessionStore == nil {
+	if h.loopManager == nil {
 		return h.loop
 	}
-	sess := h.sessionStore.GetByConversationID(conversationID)
-	if sess == nil {
-		return h.loop
+	var sess *session.Session
+	if h.sessionStore != nil {
+		sess = h.sessionStore.GetByConversationID(conversationID)
+		if sess == nil {
+			// The Flutter client sends the session's primary ID in the
+			// conversation_id field; accept both lookups, mirroring the
+			// dual lookup in the daemon's resolveStepWorkingDir.
+			sess = h.sessionStore.Get(conversationID)
+		}
 	}
 	// Legacy session fallback: if ProjectPath is empty but ProjectID is set,
 	// look up the project's LocalPath from the project manager (available
 	// via the loop manager) before falling back to the singleton loop.
-	if sess.ProjectPath == "" && sess.ProjectID != "" {
+	if sess != nil && sess.ProjectPath == "" && sess.ProjectID != "" {
 		if path := h.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID); path != "" {
 			sess.ProjectPath = path
 		}
 	}
-	// Resolve the effective working path (worktree overrides project path).
-	workingPath := sess.ProjectPath
-	if sess.WorktreePath != "" {
-		workingPath = sess.WorktreePath
-	}
+	// Resolve the effective working path: worktree overrides project path,
+	// which overrides the client's detection CWD.
+	workingPath, wdSource := h.effectiveWorkingDir(sess)
 	if workingPath == "" {
+		// No working directory anywhere: the turn keeps the singleton loop
+		// (which has whatever dir the daemon was configured with) and every
+		// filesystem tool that needs a session dir will fail with the
+		// actionable tools.ErrNoWorkingDir. Log the cause loudly — this was
+		// silent before, and a silent unbound turn is a 20-tool failure
+		// cascade that looks like a model problem.
+		h.logger.Warn("chat turn has no working directory bound; filesystem tools will require an explicit path",
+			"conversation_id", conversationID,
+			"has_session", sess != nil,
+			"hint", "bind a project (project.set), start the client from the project directory, or activate a project")
 		return h.loop
 	}
 	// Configure the shared fence sandbox for this session: the sandbox root
@@ -2120,17 +2169,22 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 				"error", err,
 			)
 		}
-		h.fenceController.SetNoFence(sess.NoFence)
+		h.fenceController.SetNoFence(sess != nil && sess.NoFence)
 	}
 	// Create a session-scoped loop via the manager. This avoids mutating
 	// the shared singleton's workingDir (which races with concurrent
 	// sessions). If manager creation fails, fall back to the singleton
 	// with a warning.
+	h.logger.Debug("chat turn bound to a session working directory",
+		"conversation_id", conversationID,
+		"working_dir", workingPath,
+		"source", wdSource,
+	)
 	loop, err := h.loopManager.GetOrCreateWired(conversationID, workingPath, h.loop)
 	if err != nil {
 		h.logger.Warn("session-scoped loop creation failed; using singleton",
 			"session", conversationID,
-			"project", sess.ProjectPath,
+			"working_path", workingPath,
 			"error", err,
 		)
 		// Last resort: mutate the singleton. This is a known race under
@@ -2142,13 +2196,15 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	// prompt's "Session Context" section is populated. ConfigSnapshot
 	// deliberately excludes these per-session fields, so they must be set
 	// here on every lookup (idempotent for an already-cached loop).
-	loop.SetProjectID(sess.ProjectID)
-	if sess.DetectionContext != nil {
-		loop.SetDetectionContext(&DetectionContext{
-			CWD:               sess.DetectionContext.CWD,
-			DetectedProjectID: sess.DetectionContext.DetectedProjectID,
-			CLIArgs:           sess.DetectionContext.CLIArgs,
-		})
+	if sess != nil {
+		loop.SetProjectID(sess.ProjectID)
+		if sess.DetectionContext != nil {
+			loop.SetDetectionContext(&DetectionContext{
+				CWD:               sess.DetectionContext.CWD,
+				DetectedProjectID: sess.DetectionContext.DetectedProjectID,
+				CLIArgs:           sess.DetectionContext.CLIArgs,
+			})
+		}
 	}
 	// Note: project_info tool resolution is handled via context injection
 	// in AgentLoop.executeToolCalls (tools.ContextWithWorkingDir), not via
@@ -2156,6 +2212,56 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	// where multiple sessions sharing the same tool registry pointer would
 	// overwrite each other's working directory resolver.
 	return loop
+}
+
+// effectiveWorkingDir resolves the working directory for a chat turn and a
+// diagnostic label for where it came from. Order:
+//
+//  1. session.ResolveWorkingDir — WorktreePath > ProjectPath > DetectionContext.CWD
+//  2. the user's active project (activeProjectPath), a turn-time fallback
+//     for sessions created without a project
+//  3. the daemon's configured default working dir (defaultWorkingDir)
+//
+// Returns ("", "none") when nothing resolves; callers must fail actionably
+// rather than guessing a directory. The daemon's own process CWD is never
+// consulted (AGENTS.md: Daemon CWD is NOT the user's project).
+func (h *ChatHandler) effectiveWorkingDir(sess *session.Session) (string, string) {
+	if dir, src := session.ResolveWorkingDir(sess); dir != "" {
+		return dir, string(src)
+	}
+	if h.activeProjectPath != nil {
+		if dir := h.activeProjectPath(); dir != "" {
+			return dir, "active_project"
+		}
+	}
+	if h.defaultWorkingDir != "" {
+		return h.defaultWorkingDir, "daemon_default"
+	}
+	return "", "none"
+}
+
+// SetActiveProjectPathResolver wires the turn-start fallback that returns
+// the local path of the user's active project ("" when none is active).
+// Nil-safe; the daemon wires this from ProjectManager.GetActive. Sessions
+// are bound to the ACTIVE project, never to a synthesized default
+// (AGENTS.md), so this fallback resolves an existing project or nothing.
+func (h *ChatHandler) SetActiveProjectPathResolver(fn func() string) {
+	if h == nil {
+		return
+	}
+	h.activeProjectPath = fn
+}
+
+// SetDefaultWorkingDir wires the daemon's configured default working
+// directory. It is the LAST resort, used only for turns whose session and
+// active project both resolve nothing. Empty string (the default) leaves
+// such a turn unbound: filesystem tools then return tools.ErrNoWorkingDir
+// instead of silently operating on the daemon's own directory.
+func (h *ChatHandler) SetDefaultWorkingDir(dir string) {
+	if h == nil {
+		return
+	}
+	h.defaultWorkingDir = dir
 }
 
 // LookupLoop returns the AgentLoop responsible for a given conversation/session

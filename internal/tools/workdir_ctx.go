@@ -1,6 +1,10 @@
 package tools
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+)
 
 // workingDirCtxKey is the context key for the session-scoped working
 // directory injected by the agent loop before tool execution.
@@ -20,6 +24,53 @@ func WorkingDirFromContext(ctx context.Context) string {
 // project path without shared mutable state.
 func ContextWithWorkingDir(ctx context.Context, dir string) context.Context {
 	return context.WithValue(ctx, workingDirCtxKey{}, dir)
+}
+
+// ErrNoWorkingDir is the sentinel error for a filesystem call that needed a
+// path, got no explicit path argument, and had no session working directory
+// to default to. Callers detect it with errors.Is / IsNoWorkingDir.
+//
+// Before this existed the tools returned the bare "no path specified", which
+// told the model nothing about WHY the call could not proceed: it retried the
+// identical call and the cycle guard killed the turn (fresh-rig daemon11,
+// 2026-09-13 — the daemon served turns whose session had no project and no
+// client CWD, so every relative-path tool failed). The message now names the
+// missing context and the one action that unblocks the call.
+var ErrNoWorkingDir = errors.New("no working directory for this session; pass an explicit path")
+
+// ErrNoPath is the sentinel error for a filesystem call that requires an
+// explicit path argument and received none, on a tool that does NOT fall
+// back to the session working directory (read_file, write_file, delete_file,
+// file_edit). The session may well have a working directory; the caller
+// simply omitted the argument.
+var ErrNoPath = errors.New("no path specified; pass an explicit path")
+
+// NoWorkingDirError reports that tool needed a path, had no path argument,
+// and the session has no working directory to default to. The returned error
+// wraps ErrNoWorkingDir (%w), so callers can detect it with
+// IsNoWorkingDir / errors.Is.
+func NoWorkingDirError(tool string) error {
+	if tool == "" {
+		return ErrNoWorkingDir
+	}
+	return fmt.Errorf("%s: %w", tool, ErrNoWorkingDir)
+}
+
+// NoPathError reports that tool requires an explicit path argument and got
+// none. The returned error wraps ErrNoPath (%w).
+func NoPathError(tool string) error {
+	if tool == "" {
+		return ErrNoPath
+	}
+	return fmt.Errorf("%s: %w", tool, ErrNoPath)
+}
+
+// IsNoWorkingDir reports whether err is, or wraps, ErrNoWorkingDir. This is
+// the detection surface for callers that want to surface a "bind a working
+// directory" hint (or a distinct user-language message) instead of a generic
+// tool failure.
+func IsNoWorkingDir(err error) bool {
+	return errors.Is(err, ErrNoWorkingDir)
 }
 
 // autonomousCtxKey is the context key for the autonomous-execution flag.
