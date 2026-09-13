@@ -1,6 +1,10 @@
-#!/opt/homebrew/bin/bash
+#!/usr/bin/env bash
 # pre-commit-ascii — block commits introducing non-English (CJK/Hangul/etc.)
 # characters into tracked TEXT files.
+#
+# Interpreter: whatever `bash` resolves to on PATH (macOS 3.2/5, Linux 5);
+# the former hard-coded /opt/homebrew/bin/bash shebang made the CI
+# "Pre-commit Hooks" job abort before it reached the later steps (audit F100).
 #
 # Background (2026-09-04): CJK characters leaked into Go comments and plan
 # docs — invisible in some terminals and confusing in review. This hook

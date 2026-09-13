@@ -48,18 +48,76 @@ echo ""
 VET_FAILED=false
 VET_OUTPUT=""
 
+# Classify a package pattern with `go list -e` so this hook can never treat a
+# package that FAILS TO LOAD as if the default build tags excluded it. The old
+# guard (`if ! go list "$pkg" >/dev/null 2>&1; then continue`) skipped both
+# cases silently, which is how //go:build mage magefiles/*.go became invisible
+# to vet/staticcheck/U1000/mutexio/selflock (audit F24).
+# Prints exactly one of:
+#   ok
+#   excluded|<reason>       default tags exclude every file (magefiles)
+#   nested-module|<reason>  separate Go module, not part of this one
+#   missing|<reason>        path no longer exists in the working tree
+#   broken|<reason>         any other load failure (conflicting package
+#                           clause, syntax error, unresolved import, ...)
+go_list_state() {
+  local pat="$1" err
+  err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 | tr '\n' ' ' | sed 's/ *$//')"
+  if [ -z "$err" ]; then
+    printf 'ok'
+    return 0
+  fi
+  case "$err" in
+    *"build constraints exclude all Go files"*) printf 'excluded|%s' "$err" ;;
+    *"does not contain package"*)                printf 'nested-module|%s' "$err" ;;
+    *"directory not found"*|*"path does not exist"*) printf 'missing|%s' "$err" ;;
+    *)                                           printf 'broken|%s' "$err" ;;
+  esac
+}
+
+# The module's only tag-gated package is magefiles (//go:build mage); no other
+# package declares a build tag, so an `excluded` verdict maps to that tag.
+build_tags_for() {
+  case "$1" in
+    ./magefiles) printf 'mage' ;;
+    *)           printf '' ;;
+  esac
+}
+
 for pkg in $PACKAGES; do
   # Skip vendor and generated code
   if echo "$pkg" | grep -q "/vendor/\|/zz_generated\|\.pb\.go"; then
     continue
   fi
 
-  # Skip a package the default build tags exclude (magefiles is
-  # //go:build mage): go vet cannot load it and reports the exclusion itself
-  # ("build constraints exclude all Go files") as a vet failure.
-  if ! go list "$pkg" >/dev/null 2>&1; then
-    continue
-  fi
+  STATE="$(go_list_state "$pkg")"
+  case "$STATE" in
+    ok) ;;
+    excluded*)
+      # Real code the default tags hide: analyze it with the tag instead of
+      # dropping it, and always print the skip so it cannot look like a pass.
+      TAGS="$(build_tags_for "$pkg")"
+      echo -e "${YELLOW}SKIP(tag-gated) $pkg: ${STATE#*|}${NC}"
+      if [ -n "$TAGS" ]; then
+        echo -e "${YELLOW}  -> analyzing with -tags $TAGS${NC}"
+        if ! vet_result=$(go vet -tags "$TAGS" "$pkg" 2>&1); then
+          VET_FAILED=true
+          VET_OUTPUT="${VET_OUTPUT}${pkg} (go vet -tags $TAGS):\n${vet_result}\n\n"
+        fi
+      else
+        echo -e "${YELLOW}  -> no build tag known for $pkg; not analyzed${NC}"
+      fi
+      continue ;;
+    nested-module*|missing*)
+      echo -e "${YELLOW}SKIP(${STATE%%|*}) $pkg: ${STATE#*|}${NC}"
+      continue ;;
+    *)
+      # Anything else is a load failure, not an exclusion. Report it as a
+      # verdict instead of printing "go vet passed" for code never analyzed.
+      VET_FAILED=true
+      VET_OUTPUT="${VET_OUTPUT}${pkg} (could not load — NOT a build-tag exclusion):\n${STATE#*|}\n\n"
+      continue ;;
+  esac
 
   # Run vet and capture output
   if vet_result=$(go vet "$pkg" 2>&1); then

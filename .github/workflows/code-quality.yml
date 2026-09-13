@@ -20,10 +20,41 @@ jobs:
         with:
           go-version: '1.23'
 
+      # The sub-hooks begin with `#!/usr/bin/env bash`, so they execute under
+      # the runner's bash 5 (this used to fail at step [1/17] because
+      # pre-commit-build/pre-commit-ascii/pre-commit-dart-format hard-coded
+      # /opt/homebrew/bin/bash — audit F100).
+      #
+      # Scope: `git diff --cached` is EMPTY on a fresh checkout, so this job
+      # verifies that the suite starts and runs to completion, not that the
+      # pushed diff is clean. Diff-level enforcement is the local pre-commit
+      # hook (and the per-check jobs in ci.yml). Do not read a green run here
+      # as "the pushed files passed every hook".
       - name: Run pre-commit hooks
         run: |
           git config core.hooksPath .githooks
           .githooks/pre-commit
+
+      # Parses every hook and shell script with bash -n: a syntax error added
+      # to a hook fails here instead of surfacing on the next developer commit
+      # (or, worse, only in the hook that no longer parses but exits 0).
+      # Non-scripts (.githooks/README.md) and files without a bash shebang are
+      # skipped.
+      - name: Shell syntax check (.githooks, scripts)
+        run: |
+          fail=0
+          checked=0
+          for f in .githooks/* scripts/*.sh; do
+            [ -f "$f" ] || continue
+            head -1 "$f" | grep -qE '^#!/.*\bbash\b' || continue
+            checked=$((checked + 1))
+            if ! bash -n "$f"; then
+              echo "::error file=$f::bash -n failed"
+              fail=1
+            fi
+          done
+          echo "Parsed $checked shell script(s)."
+          [ "$fail" -eq 0 ] || exit 1
 
   analyzers:
     runs-on: ubuntu-latest

@@ -83,24 +83,67 @@ if [ -z "$filtered_files" ]; then
     exit 0
 fi
 
+# Classify a package pattern with `go list -e`: prints ok | excluded|<reason> |
+# nested-module|<reason> | missing|<reason> | broken|<reason>.
+go_list_state() {
+    local pat="$1" err
+    err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 | tr '\n' ' ' | sed 's/ *$//')"
+    if [ -z "$err" ]; then
+        printf 'ok'
+        return 0
+    fi
+    case "$err" in
+        *"build constraints exclude all Go files"*) printf 'excluded|%s' "$err" ;;
+        *"does not contain package"*)                printf 'nested-module|%s' "$err" ;;
+        *"directory not found"*|*"path does not exist"*) printf 'missing|%s' "$err" ;;
+        *)                                           printf 'broken|%s' "$err" ;;
+    esac
+}
+
 # Compute unique directory-level package patterns from the file list.
 # Cap at 10 packages for speed (matches pre-commit-mutexio).
+dirs_file=$(mktemp)
 pkgs_file=$(mktemp)
-trap 'rm -f "$pkgs_file" "$output_file"' EXIT
+broken_file=$(mktemp)
+trap 'rm -f "$pkgs_file" "$dirs_file" "$broken_file" "$output_file"' EXIT
 
 echo "$filtered_files" | while IFS= read -r f; do
     [ -z "$f" ] && continue
     dirname "$f"
-done | sort -u | head -n 10 | while IFS= read -r dir; do
+done | sort -u | head -n 10 > "$dirs_file"
+
+# Classify every staged package with `go list -e` so a package that FAILS TO
+# LOAD is never skipped as if the build tags excluded it, and so every skip is
+# printed. The old guard (`if ! go list "./${dir}" >/dev/null 2>&1; then
+# continue`) silently dropped both cases, which is how //go:build mage
+# magefiles/*.go became invisible to this analyzer (audit F24).
+while IFS= read -r dir; do
     [ -z "$dir" ] && continue
-    # Skip a package the default build tags exclude (magefiles is
-    # //go:build mage): the analyzer reports "matched no packages" for it and
-    # would block an otherwise clean commit. There is nothing to analyze.
-    if ! go list "./${dir}" >/dev/null 2>&1; then
-        continue
-    fi
-    echo "./${dir}/..."
-done > "$pkgs_file"
+    state="$(go_list_state "./${dir}")"
+    case "$state" in
+        ok)
+            echo "./${dir}/..."
+            ;;
+        excluded*)
+            printf '%s\n' "selflock: SKIP(tag-gated) ./${dir}: ${state#*|}" >&2
+            printf '%s\n' "selflock:   not analyzed (this analyzer cannot load tagged packages); pre-commit-build runs 'go vet -tags mage ./magefiles' instead" >&2
+            ;;
+        nested-module*|missing*)
+            printf '%s\n' "selflock: SKIP(${state%%|*}) ./${dir}: ${state#*|}" >&2
+            ;;
+        *)
+            printf '%s\n' "selflock: FAIL: ./${dir} could not be loaded (NOT a build-tag exclusion): ${state#*|}" >&2
+            printf 'broken\n' > "$broken_file"
+            ;;
+    esac
+done < "$dirs_file" > "$pkgs_file"
+
+# A package that fails to load is a verdict, not a skip: never report success
+# for code this analyzer did not see.
+if [ -s "$broken_file" ]; then
+    printf '%b%s%b\n' "$RED" "selflock: a staged package failed to load — see the FAIL line above; not reporting success." "$NC" >&2
+    exit 1
+fi
 
 num_pkgs=$(wc -l < "$pkgs_file" | tr -d ' ')
 if [ "$num_pkgs" -eq 0 ]; then

@@ -67,17 +67,28 @@ make gui-connect-check          # Static self-check of the installed GUI connect
 ./bin/meept projects list/add/remove/sync/status <name>
 
 # Connectivity graphs
-make graphs               # Regenerate bus/RPC/HTTP/WS topology
-make graphs-check         # Verify generated files are fresh (CI)
+make graphs               # Regenerate bus/RPC/HTTP/WS topology (writes docs/generated/*)
+# NOT a CI gate yet: `make graphs-check` is red until docs/generated/* is
+# regenerated, and the generator embeds absolute line offsets (audit F66).
+# Run `make graphs` after changing bus/RPC/HTTP/WS surfaces.
+make graphs-check         # Verify generated files are fresh (local check only)
 make research-harness      # verify harness catalog evidence + regenerate techniques md
 make research-harness-check # CI: fail if evidence missing or techniques md stale
 
-# Git hooks (bash >= 4 required on macOS; sub-hooks use /opt/homebrew/bin/bash)
-make hooks                # core.hooksPath -> .githooks (15 pre-commit checks)
+# Reference docs (magefiles/docs.go)
+make docs-generate        # Regenerate docs/reference/generated/* (needs mage + gomarkdoc)
+# docs-check is NOT a CI gate yet: docs/reference/generated/agent.md and llm.md
+# are stale at HEAD (audit F67), and CI would need mage + gomarkdoc installed.
+make docs-check           # Verify those pages are fresh (local check only)
+
+# Git hooks (bash >= 3.2; sub-hooks run under whatever `bash` is on PATH, so the
+# suite also executes on the Linux CI runner)
+make hooks                # core.hooksPath -> .githooks (17 pre-commit checks)
 
 # Static analyzers
 make analyzers            # mutexio + predid
-make lint-ci              # golangci-lint + analyzers + audit scripts
+make lint-ci              # golangci-lint + analyzers + audit scripts + fmt-check-gui
+                          # (fmt-check-gui hard-requires the Dart SDK / Flutter)
 ```
 
 See `cmd/meept/`, `cmd/meept-daemon/`, and `Makefile` for full command reference.

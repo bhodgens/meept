@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/bash
+#!/usr/bin/env bash
 # Pre-commit hook that runs staticcheck on staged Go packages.
 #
 # This hook catches real bugs and deprecation that go vet misses:
@@ -64,27 +64,64 @@ PACKAGES=$(echo "$STAGED_GO_FILES" \
   | sort -u \
   | sed 's|^|./|')
 
-# Drop packages the default build tags exclude (magefiles is //go:build mage):
-# staticcheck cannot load them and reports the exclusion itself as a finding.
-FILTERED_PACKAGES=""
-for pkg in $PACKAGES; do
-  if go list "$pkg" >/dev/null 2>&1; then
-    FILTERED_PACKAGES="${FILTERED_PACKAGES}${pkg}
-"
+# Classify each staged package with `go list -e` so a package that FAILS TO
+# LOAD is never mistaken for one the default build tags exclude. The old guard
+# (`go list "$pkg" >/dev/null 2>&1` as a filter) dropped both cases silently,
+# which is how //go:build mage magefiles/*.go became invisible to staticcheck
+# (audit F24). Prints exactly one of:
+#   ok
+#   excluded|<reason>       default tags exclude every file (magefiles)
+#   nested-module|<reason>  separate Go module, not part of this one
+#   missing|<reason>        path no longer exists in the working tree
+#   broken|<reason>         any other load failure (conflicting package clause,
+#                           syntax error, unresolved import, ...)
+go_list_state() {
+  local pat="$1" err
+  err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 | tr '\n' ' ' | sed 's/ *$//')"
+  if [ -z "$err" ]; then
+    printf 'ok'
+    return 0
   fi
-done
-PACKAGES="$FILTERED_PACKAGES"
+  case "$err" in
+    *"build constraints exclude all Go files"*) printf 'excluded|%s' "$err" ;;
+    *"does not contain package"*)                printf 'nested-module|%s' "$err" ;;
+    *"directory not found"*|*"path does not exist"*) printf 'missing|%s' "$err" ;;
+    *)                                           printf 'broken|%s' "$err" ;;
+  esac
+}
 
-if [ -z "$PACKAGES" ]; then
+# Only magefiles is tag-gated (//go:build mage); no other package in the module
+# declares a build tag, so an `excluded` verdict maps to that tag.
+MAGE_TAGS="mage"
+
+PACKAGES_UNTAGGED=""
+PACKAGES_TAGGED=""
+for pkg in $PACKAGES; do
+  STATE="$(go_list_state "$pkg")"
+  case "$STATE" in
+    ok)
+      PACKAGES_UNTAGGED="${PACKAGES_UNTAGGED}${pkg}
+" ;;
+    excluded*)
+      echo -e "${YELLOW}SKIP(tag-gated) $pkg: ${STATE#*|}"
+      echo -e "  -> analyzing with -tags $MAGE_TAGS, not dropping it${NC}"
+      PACKAGES_TAGGED="${PACKAGES_TAGGED}${pkg}
+" ;;
+    nested-module*|missing*)
+      echo -e "${YELLOW}SKIP(${STATE%%|*}) $pkg: ${STATE#*|}${NC}" ;;
+    *)
+      echo -e "${RED}❌ $pkg could not be loaded — NOT a build-tag exclusion:${NC}"
+      echo -e "${RED}   ${STATE#*|}${NC}"
+      exit 1 ;;
+  esac
+done
+
+if [ -z "$PACKAGES_UNTAGGED" ] && [ -z "$PACKAGES_TAGGED" ]; then
   echo -e "${GREEN}✅ No packages to check${NC}"
   exit 0
 fi
 
-echo "Checking packages:"
-echo "$PACKAGES" | sed 's/^/  /'
-echo ""
-
-# Run staticcheck on staged packages
+# Run staticcheck on staged packages.
 # Check set rationale (curated 2026-06-19):
 #   SA*              real bugs + deprecations (nil-ctx, shadowed err, ineffective break, etc.)
 #   U1000            unused symbols
@@ -94,19 +131,50 @@ echo ""
 #                     findings, low signal, would require project-wide doc rewrite.
 #   SA9003           empty branches (often intentional: deferred cleanup, ignored errors)
 #   S1039            unnecessary fmt.Sprintf (cosmetic, noisy)
-if OUTPUT=$("$STATICCHECK" -checks "SA*,U1000,S1008,S1009,S1021,S1034,-SA9003" $PACKAGES 2>&1); then
-  :
-else
-  RC=$?
-  echo -e "${RED}❌ staticcheck found issues:${NC}"
+STATICCHECK_CHECKS="SA*,U1000,S1008,S1009,S1021,S1034,-SA9003"
+
+# $1=label, $2=build tags ("" for none), $3=newline-separated package list.
+run_staticcheck() {
+  local label="$1" tags="$2" list="$3"
+  [ -z "$list" ] && return 0
+  local out rc
+  set --
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    set -- "$@" "$p"
+  done <<< "$list"
+  [ "$#" -eq 0 ] && return 0
+
+  echo "Checking $label packages:"
+  printf '  %s\n' "$@"
   echo ""
-  echo "$OUTPUT"
+
+  set +e
+  if [ -n "$tags" ]; then
+    out=$("$STATICCHECK" -checks "$STATICCHECK_CHECKS" -tags "$tags" "$@" 2>&1)
+  else
+    out=$("$STATICCHECK" -checks "$STATICCHECK_CHECKS" "$@" 2>&1)
+  fi
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
+    return 0
+  fi
+
+  echo -e "${RED}❌ staticcheck found issues ($label):${NC}"
+  echo ""
+  echo "$out"
   echo ""
   echo -e "${YELLOW}Fix these issues before committing.${NC}"
   echo -e "${BLUE}Suppress legitimate findings with //lint:ignore <check> <reason>${NC}"
   echo -e "${BLUE}or run '$STATICCHECK -show-ignored ./...' to inspect.${NC}"
   echo ""
-  exit "$RC"
+  return "$rc"
+}
+
+run_staticcheck "staged" "" "$PACKAGES_UNTAGGED" || exit $?
+if [ -n "$PACKAGES_TAGGED" ]; then
+  run_staticcheck "tag-gated (-tags $MAGE_TAGS)" "$MAGE_TAGS" "$PACKAGES_TAGGED" || exit $?
 fi
 
 echo -e "${GREEN}✅ staticcheck passed - no issues found${NC}"

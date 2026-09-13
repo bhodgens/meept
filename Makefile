@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -43,7 +43,7 @@ help:
 	@echo "  fmt              Format code"
 	@echo "  vet              Run go vet"
 	@echo "  graphs           Regenerate connectivity graphs (bus/RPC/HTTP/WS)"
-	@echo "  graphs-check     Verify connectivity graphs are up to date (CI)"
+	@echo "  graphs-check     Verify connectivity graphs are fresh (local only; not wired into CI — see Makefile:graphs-check)"
 	@echo "  compare-prep     Clone competitor repos into TMPDIR/meept-compare"
 	@echo "  mod-tidy         Tidy go modules"
 	@echo "  clean            Remove build artifacts"
@@ -81,6 +81,7 @@ help:
 	@echo "  docs-serve       Start local docs dev server"
 	@echo "  docs-build       Build static docs site (includes llms-readme-full.txt)"
 	@echo "  docs-generate    Generate reference docs from Go source"
+	@echo "  docs-check       Verify generated reference docs are fresh (needs mage + gomarkdoc)"
 
 MEEPT_HOME ?= $(HOME)/.meept
 BIN_DIR := bin
@@ -226,8 +227,9 @@ hooks:
 	@echo "Installing git hooks (core.hooksPath -> .githooks)..."
 	@git config core.hooksPath .githooks
 	@chmod +x .githooks/pre-commit .githooks/pre-commit-*
-	@echo "Installed 15 pre-commit checks via .githooks (see .githooks/pre-commit)."
-	@echo "Requires bash >= 4 on macOS (sub-hooks use /opt/homebrew/bin/bash)."
+	@echo "Installed 17 pre-commit checks via .githooks (see .githooks/pre-commit)."
+	@echo "Requires bash >= 3.2; sub-hooks run under whatever 'bash' resolves to"
+	@echo "on PATH, so the same suite executes on macOS and on a Linux runner."
 	@echo "Bypass with --no-verify."
 
 deps:
@@ -542,6 +544,16 @@ graphs:
 	@python3 scripts/gen-connectivity-graph.py
 	@echo "Connectivity graphs written to docs/generated/"
 
+# graphs-check verifies the generated connectivity artifacts are fresh.
+#
+# NOT WIRED INTO CI OR THE PRE-COMMIT CHAIN: on this tree `--check` is red
+# until docs/generated/* is regenerated, and the generator still embeds
+# absolute line offsets, so any edit above a publish/subscribe site invalidates
+# the artifact again (audit F66). Wire this into .github/workflows/ci.yml only
+# after both are true:
+#   1. `make graphs` has been run and its docs/generated/* changes committed;
+#   2. scripts/gen-connectivity-graph.py emits symbol identity instead of raw
+#      line numbers (so the check fails on topology drift, not on insertions).
 .PHONY: graphs-check
 graphs-check:
 	@python3 scripts/gen-connectivity-graph.py --check
@@ -685,6 +697,20 @@ docs-build: docs-deps
 docs-generate:
 	@echo "Generating reference docs from Go source..."
 	mage -d magefiles docsGenerate
+
+# docs-check verifies docs/reference/generated/* matches the current source
+# (magefiles/docs.go DocsCheck: "Returns an error if any file differs, suitable
+# for use in CI").
+#
+# NOT WIRED INTO CI YET: it is red on this tree (docs/reference/generated/
+# agent.md and llm.md are stale — audit F67) and it needs mage + gomarkdoc,
+# which the workflow would have to install first. Run it locally now; wire it
+# into .github/workflows/ci.yml after `make docs-generate` has been run and its
+# docs/reference/generated/* changes committed.
+.PHONY: docs-check
+docs-check:
+	@echo "Verifying generated reference docs are fresh..."
+	mage -d magefiles docsCheck
 
 # =============================================================================
 # Legacy Aliases (for backwards compatibility)

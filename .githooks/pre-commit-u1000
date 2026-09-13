@@ -37,6 +37,10 @@ fi
 
 # Derive unique package directories from staged Go file paths.
 # Each directory is a Go package; we pass them to staticcheck.
+# Membership is tested against EXACT lines (the "\n$PACKAGES\n" sandwich):
+# a substring test drops a parent package when a subdirectory package was seen
+# first (staging internal/llm/metrics/ before internal/llm/ silently skipped
+# internal/llm entirely — audit F69).
 PACKAGES=""
 while IFS= read -r file; do
   # Skip analyzer testdata fixtures: they intentionally contain
@@ -45,16 +49,43 @@ while IFS= read -r file; do
     */testdata/*) continue ;;
   esac
   dir=$(dirname "$file")
-  case "$PACKAGES" in
-    *"$dir"*) ;;  # already seen
+  case "
+$PACKAGES
+" in
+    *"
+$dir
+"*) ;;  # already seen (exact match)
     *) PACKAGES="${PACKAGES}${dir}
 " ;;
   esac
 done <<< "$STAGED_GO_FILES"
 
+# Classify a staged package with `go list -e` so a package that FAILS TO LOAD
+# is never mistaken for one the default build tags exclude. The old guard
+# (`if ! go list ...; then continue`) skipped both cases silently, so the hook
+# printed "no unused code violations" for packages it never analyzed; that is
+# how //go:build mage magefiles/*.go became invisible (audit F24).
+# Prints one of: ok | excluded|<reason> | nested-module|<reason> |
+#                missing|<reason> | broken|<reason>
+go_list_state() {
+  local pat="$1" err
+  err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 | tr '\n' ' ' | sed 's/ *$//')"
+  if [ -z "$err" ]; then
+    printf 'ok'
+    return 0
+  fi
+  case "$err" in
+    *"build constraints exclude all Go files"*) printf 'excluded|%s' "$err" ;;
+    *"does not contain package"*)                printf 'nested-module|%s' "$err" ;;
+    *"directory not found"*|*"path does not exist"*) printf 'missing|%s' "$err" ;;
+    *)                                           printf 'broken|%s' "$err" ;;
+  esac
+}
+
 # Run staticcheck U1000 on the staged packages.
-# -tags=test ensures test-only code is also analyzed.
-# -checks=U1000 restricts to the unused-code check.
+# -tags=test ensures test-only code is also analyzed. Tag-gated packages
+# (magefiles is //go:build mage) get their tag too, so they are analyzed
+# instead of dropped.
 VIOLATIONS=""
 EXIT_CODE=0
 
@@ -64,13 +95,28 @@ while IFS= read -r pkg; do
   if [ ! -d "$pkg" ]; then
     continue
   fi
-  # Skip a package the default build tags exclude (magefiles is
-  # //go:build mage): staticcheck cannot load it and reports the exclusion
-  # itself ("build constraints exclude all Go files") as a finding.
-  if ! go list "./${pkg}" >/dev/null 2>&1; then
-    continue
-  fi
-  OUTPUT=$(staticcheck -checks=U1000 -tags=test "./${pkg}/" 2>&1) || EXIT_CODE=1
+
+  STATE="$(go_list_state "./${pkg}")"
+  TAGS="test"
+  case "$STATE" in
+    ok) ;;
+    excluded*)
+      echo -e "${YELLOW}SKIP(tag-gated) $pkg: ${STATE#*|}${NC}"
+      echo -e "${YELLOW}  -> analyzing with -tags=test,mage, not dropping it${NC}"
+      TAGS="test,mage" ;;
+    nested-module*|missing*)
+      echo -e "${YELLOW}SKIP(${STATE%%|*}) $pkg: ${STATE#*|}${NC}"
+      continue ;;
+    *)
+      echo -e "${YELLOW}⚠️  U1000: $pkg could not be loaded (NOT a build-tag exclusion):${NC}"
+      echo -e "${YELLOW}   ${STATE#*|}${NC}"
+      VIOLATIONS="${VIOLATIONS}$pkg: package failed to load (not a build-tag exclusion): ${STATE#*|}
+"
+      EXIT_CODE=1
+      continue ;;
+  esac
+
+  OUTPUT=$(staticcheck -checks=U1000 -tags="$TAGS" "./${pkg}/" 2>&1) || EXIT_CODE=1
   if [ -n "$OUTPUT" ]; then
     VIOLATIONS="${VIOLATIONS}${OUTPUT}
 "

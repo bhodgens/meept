@@ -33,22 +33,33 @@ chmod +x .githooks/*
 
 ### pre-commit (Main Hook)
 
-Entry point that runs all checks sequentially (17 total):
+Entry point that runs all checks sequentially (17 total). The numbers below are
+the `[n/17]` labels `.githooks/pre-commit` prints:
 
 | # | Hook | Purpose |
 |---|------|---------|
-| 1 | pre-commit-deferred | Findings docs have resolution plans |
-| 2 | pre-commit-mutexio | No I/O under mutex (CLAUDE.md rule) |
-| 3 | pre-commit-u1000 | Unused code detection (staticcheck) |
-| 4 | pre-commit-vet | Common Go bugs (built-in) |
-| 5 | pre-commit-setters | Nil-safe setter methods |
-| 6 | pre-commit-gosec | Security vulnerabilities |
-| 7 | pre-commit-errors | Error handling anti-patterns |
-| 8 | pre-commit-predictable-ids | Use pkg/id.Generate (not time.Now().UnixNano()) |
-| 9 | pre-commit-sqlite-pragmas | SQLite WAL + busy_timeout required |
-| 10 | pre-commit-channel-nilafterclose | Use sync.Once (not close+nil) |
-| 11 | pre-commit-feature-docs | Documentation updates |
-| 17 | pre-commit-dart-format | Staged Dart files are dart-format clean |
+| 1 | pre-commit-build | Staged packages + clean downstream importers compile (no stray binaries) |
+| 2 | pre-commit-deferred | Findings docs have resolution plans |
+| 3 | pre-commit-mutexio | No I/O under mutex (CLAUDE.md rule) |
+| 4 | pre-commit-u1000 | Unused code detection (staticcheck) |
+| 5 | pre-commit-vet | Common Go bugs (built-in) |
+| 6 | pre-commit-setters | Nil-safe setter methods |
+| 7 | pre-commit-selflock | Self-deadlocking locks (AST analyzer) |
+| 8 | pre-commit-gosec | Security vulnerabilities |
+| 9 | pre-commit-errors | Error handling anti-patterns |
+| 10 | pre-commit-predictable-ids | Use pkg/id.Generate (not time.Now().UnixNano()) |
+| 11 | pre-commit-sqlite-pragmas | SQLite WAL + busy_timeout required |
+| 12 | pre-commit-channel-nilafterclose | Use sync.Once (not close+nil) |
+| 13 | pre-commit-concurrency | Concurrency annotations (informational — never blocks) |
+| 14 | pre-commit-mutation | Mutation-test coverage (report only — never blocks) |
+| 15 | pre-commit-feature-docs | Documentation updates |
+| 16 | pre-commit-ascii | No CJK/Hangul/fullwidth characters in staged text files |
+| 17 | pre-commit-dart-format | Staged Dart blob (index content) is dart-format clean |
+
+Steps 13 and 14 are reported but never block the commit. Steps 1-12 and 15-17 do.
+`pre-commit-staticcheck` is not in this list: it is standalone (run it directly,
+or via your editor) and additionally analyzes the tag-gated `magefiles` package
+with `-tags mage`.
 
 ---
 
@@ -331,9 +342,11 @@ Blocks commits that stage unformatted Dart files under `ui/flutter_ui/`.
 **Triggers on:** Staged `ui/flutter_ui/**/*.dart` files (added, copied, modified, renamed)
 
 **Checks:**
-- Runs `dart format --output=none --set-exit-if-changed` on the staged Dart files only; files outside `ui/flutter_ui/` are ignored
-- Lists every file that needs formatting and points at `make fmt-gui`
-- Skips cleanly (exit 0, explicit message) when nothing Dart is staged or when dart is not installed
+- Validates the staged **index blob** (`git show ":$f"` written to a temp file), i.e. exactly the bytes the commit will contain — formatting the working tree after staging no longer hides an unformatted commit
+- Runs `dart format --output=none --set-exit-if-changed` on that content only; files outside `ui/flutter_ui/` are ignored
+- Lists every staged path that needs formatting and points at `make fmt-gui`
+- With Dart files to check and no `dart` binary: **FAILS** (exit 1) instead of skipping — same policy as `make fmt-check-gui`, so the hook and `make lint-ci` cannot disagree about a tree neither can verify
+- Passes cleanly (exit 0, explicit message) only when nothing Dart is staged
 
 **Requires:** dart (on PATH, or the dart bundled with the Flutter SDK)
 
@@ -438,9 +451,15 @@ go install honnef.co/go/tools/cmd/staticcheck@latest
 
 ### Bash version issues
 
-**Cause:** Some hook features may require bash 4+
+**Cause:** A sub-hook needs a newer bash than the one `bash` resolves to on PATH
 
-**Solution:** The hooks are written to be compatible with bash 3.x (macOS default). If you encounter issues, ensure you're using bash 4+ or report the bug.
+**Solution:** The hooks are written to be compatible with bash 3.2 (macOS
+default), and the sub-hooks start with `#!/usr/bin/env bash` so the same files
+run on macOS and on the Linux CI runner. If `bash --version` says 3.2 and a
+hook still fails, that is a bug in the hook — report it rather than upgrading
+bash as a workaround (grading the interpreter was the old failure mode: a
+hard-coded `/opt/homebrew/bin/bash` shebang made the CI hook job unable to
+exec the suite at all).
 
 ---
 

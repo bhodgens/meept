@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/bash
+#!/usr/bin/env bash
 # pre-commit-dart-format — block commits that stage unformatted Dart files.
 #
 # The Flutter tree (ui/flutter_ui) is kept dart-format clean. `make lint-ci`
@@ -6,19 +6,28 @@
 # on STAGED files only, so a commit cannot introduce unformatted Dart while an
 # unrelated unformatted file elsewhere in the tree does not block you.
 #
-# What is checked: files staged for this commit matching
-# ui/flutter_ui/**/*.dart (added, copied, modified, renamed).
+# What is checked: the INDEX BLOB of every staged file matching
+# ui/flutter_ui/**/*.dart (added, copied, modified, renamed) — i.e. the exact
+# bytes that land in the commit. The working-tree copy is NOT what is checked:
+# formatting the working tree after staging used to make this hook pass while
+# the commit carried an unformatted blob (audit F26). The staged path list is
+# kept for messages.
 #
-# Skips cleanly (exit 0, explicit message) when either:
-#   - no Dart file under ui/flutter_ui is staged, or
-#   - dart cannot be found (no dart on PATH, no Flutter SDK bundled dart).
+# Policy when the Dart SDK is missing (audit F90 — this hook and
+# `make fmt-check-gui` now agree):
+#   * Dart files to check + no dart binary  -> FAIL (exit 1), never a silent
+#     pass. A machine that cannot run the formatter cannot certify the Flutter
+#     tree; `git commit --no-verify` is the explicit escape hatch.
+#   * Nothing to check -> PASS (exit 0), printed.
 #
 # Usage:
-#   .githooks/pre-commit-dart-format            # staged files (hook mode)
-#   .githooks/pre-commit-dart-format <file...>  # check specific files
+#   .githooks/pre-commit-dart-format            # staged blobs (hook mode)
+#   .githooks/pre-commit-dart-format <file...>  # check specific files on disk
 #
-# Install: called from .githooks/pre-commit (step 17). Requires bash >= 4
-# (/opt/homebrew/bin/bash, same as the other sub-hooks).
+# Install: called from .githooks/pre-commit (step 17). Needs bash >= 3.2; the
+# interpreter is whatever `bash` resolves to on PATH (macOS 3.2/5, Linux 5) —
+# the hard-coded /opt/homebrew/bin/bash shebang made the CI hook job unable to
+# exec this file on Linux (audit F100).
 
 set -e
 
@@ -54,12 +63,35 @@ else
             | grep -E "^${DART_ROOT}/.*\.dart$" || true)
 fi
 
-# Drop blank lines and paths that no longer exist on disk.
-FILE_ARR=()
+# Materialize the content to be checked into a temp dir, and keep the
+# corresponding staged/original path alongside it:
+#   paths/<n>  the path as the user knows it (for messages)
+#   blobs/<n>.dart  the content to format
+# In staged mode the content comes from the index (`git show ":$f"`), so the
+# check sees exactly what the commit will contain.
+TMP_DART="$(mktemp -d "${TMPDIR:-/tmp}/meept-dartfmt.XXXXXX")"
+trap 'rm -rf "$TMP_DART"' EXIT
+mkdir -p "$TMP_DART/paths" "$TMP_DART/blobs"
+
+N=0
 while IFS= read -r f; do
   [ -z "$f" ] && continue
-  [ -f "$f" ] || continue
-  FILE_ARR+=("$f")
+  if [ "$MODE" = "staged" ]; then
+    if ! git show ":$f" >"$TMP_DART/blob.tmp" 2>/dev/null; then
+      # Not in the index (e.g. a rename's old path) — fall back to disk.
+      if [ -f "$f" ]; then
+        cp "$f" "$TMP_DART/blob.tmp"
+      else
+        continue
+      fi
+    fi
+  else
+    [ -f "$f" ] || continue
+    cp "$f" "$TMP_DART/blob.tmp"
+  fi
+  N=$((N + 1))
+  printf '%s\n' "$f" >"$TMP_DART/paths/$N"
+  mv "$TMP_DART/blob.tmp" "$TMP_DART/blobs/$N.dart"
 done <<< "$FILES"
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -67,7 +99,7 @@ echo -e "${BLUE}  Dart formatting check (${DART_ROOT})${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-if [ "${#FILE_ARR[@]}" -eq 0 ]; then
+if [ "$N" -eq 0 ]; then
   if [ "$MODE" = "staged" ]; then
     echo -e "${GREEN}PASS: no staged Dart files under ${DART_ROOT} — nothing to check.${NC}"
   else
@@ -77,31 +109,62 @@ if [ "${#FILE_ARR[@]}" -eq 0 ]; then
 fi
 
 if [ -z "$DART_BIN" ]; then
-  echo -e "${YELLOW}SKIP: dart not found (nothing on PATH, no Flutter SDK dart).${NC}"
-  echo -e "${YELLOW}Install Flutter or add dart to PATH to enable this check.${NC}"
-  exit 0
-fi
-
-echo "Checking ${#FILE_ARR[@]} file(s):"
-for f in "${FILE_ARR[@]}"; do
-  echo "  $f"
-done
-echo ""
-
-# Capture the formatter output; it lists each file that would change.
-set +e
-OUT="$("$DART_BIN" format --output=none --set-exit-if-changed "${FILE_ARR[@]}" 2>&1)"
-STATUS=$?
-set -e
-
-if [ "$STATUS" -ne 0 ]; then
-  echo -e "${RED}FAIL: Dart file(s) are not formatted:${NC}"
-  echo "$OUT" | sed 's/^/  /'
-  echo ""
-  echo -e "${YELLOW}Run 'make fmt-gui' (or: dart format ${DART_ROOT}), then re-stage and commit.${NC}"
-  echo -e "${YELLOW}To fix only the files above: dart format ${FILE_ARR[*]}${NC}"
+  echo -e "${RED}FAIL: dart not found (nothing on PATH, no Flutter SDK dart).${NC}"
+  echo -e "${RED}      ${N} file(s) under ${DART_ROOT} need a formatting verdict.${NC}"
+  echo -e "${YELLOW}Policy: this hook and 'make fmt-check-gui' (in 'make lint-ci') both${NC}"
+  echo -e "${YELLOW}refuse to pass when the formatter is unavailable — an unverifiable${NC}"
+  echo -e "${YELLOW}tree is not a clean tree. Install Flutter or add dart to PATH,${NC}"
+  echo -e "${YELLOW}run 'make fmt-gui'/'make fmt-check-gui', then re-commit.${NC}"
+  echo -e "${YELLOW}(git commit --no-verify is the explicit escape hatch.)${NC}"
   exit 1
 fi
 
-echo -e "${GREEN}PASS: all ${#FILE_ARR[@]} Dart file(s) checked are formatted.${NC}"
+if [ "$MODE" = "staged" ]; then
+  echo "Checking ${N} staged file(s) from the INDEX (what gets committed):"
+else
+  echo "Checking ${N} file(s) on disk:"
+fi
+i=0
+while [ "$i" -lt "$N" ]; do
+  i=$((i + 1))
+  echo "  $(cat "$TMP_DART/paths/$i")"
+done
+echo ""
+
+# Format each blob and report the STAGED path (never the temp blob path).
+BAD=""
+BAD_DETAIL=""
+i=0
+while [ "$i" -lt "$N" ]; do
+  i=$((i + 1))
+  path="$(cat "$TMP_DART/paths/$i")"
+  blob="$TMP_DART/blobs/$i.dart"
+  set +e
+  OUT="$("$DART_BIN" format --output=none --set-exit-if-changed "$blob" 2>&1)"
+  STATUS=$?
+  set -e
+  if [ "$STATUS" -ne 0 ]; then
+    BAD="${BAD}${path}
+"
+    # Report the staged path, never the temp blob path.
+    BAD_DETAIL="${BAD_DETAIL}${path}:
+${OUT//$blob/$path}
+"
+  fi
+done
+
+if [ -n "$BAD" ]; then
+  if [ "$MODE" = "staged" ]; then
+    echo -e "${RED}FAIL: staged Dart file(s) are not formatted (index blob, not the working tree):${NC}"
+  else
+    echo -e "${RED}FAIL: Dart file(s) are not formatted:${NC}"
+  fi
+  printf '%s' "$BAD" | sed 's/^/  /'
+  echo ""
+  echo -e "${YELLOW}Run 'make fmt-gui' (or: dart format ${DART_ROOT}), then re-stage and commit.${NC}"
+  printf '%s' "$BAD_DETAIL" | sed 's/^/  /'
+  exit 1
+fi
+
+echo -e "${GREEN}PASS: all ${N} Dart file(s) checked are formatted.${NC}"
 exit 0

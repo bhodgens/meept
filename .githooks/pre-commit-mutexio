@@ -67,28 +67,70 @@ if [ -z "$staged_go_files" ]; then
     exit 0
 fi
 
+# Classify a package pattern with `go list -e`: prints ok | excluded|<reason> |
+# nested-module|<reason> | missing|<reason> | broken|<reason>.
+go_list_state() {
+    local pat="$1" err
+    err="$(go list -e -f '{{with .Error}}{{.Err}}{{end}}' "$pat" 2>&1 | tr '\n' ' ' | sed 's/ *$//')"
+    if [ -z "$err" ]; then
+        printf 'ok'
+        return 0
+    fi
+    case "$err" in
+        *"build constraints exclude all Go files"*) printf 'excluded|%s' "$err" ;;
+        *"does not contain package"*)                printf 'nested-module|%s' "$err" ;;
+        *"directory not found"*|*"path does not exist"*) printf 'missing|%s' "$err" ;;
+        *)                                           printf 'broken|%s' "$err" ;;
+    esac
+}
+
 # Compute the unique set of directory-level package patterns from the file
 # list. Each file looks like "internal/agent/loop.go" -> "./internal/agent/...".
 # Dedupe via sort -u (POSIX); cap at 10 packages for speed.
 # Uses pipe + sort + head instead of bash 4 associative arrays.
-pkgs=""
-count=0
+dirs_file=$(mktemp)
 echo "$staged_go_files" | while IFS= read -r f; do
     [ -z "$f" ] && continue
     dirname "$f"
-done | sort -u | head -n 10 | while IFS= read -r dir; do
-    [ -z "$dir" ] && continue
-    # Skip a package the default build tags exclude (magefiles is
-    # //go:build mage): the analyzer reports "matched no packages" for it and
-    # would block an otherwise clean commit. There is nothing to analyze.
-    if ! go list "./${dir}" >/dev/null 2>&1; then
-        continue
-    fi
-    echo "./${dir}/..."
-done > /tmp/mutexio-pkgs.$$
+done | sort -u | head -n 10 > "$dirs_file"
 
-pkgs_file=/tmp/mutexio-pkgs.$$
-trap 'rm -f "$pkgs_file"' EXIT
+# Classify every staged package with `go list -e` (see go_list_state below) so
+# a package that FAILS TO LOAD is never skipped as if the build tags excluded
+# it, and so every skip is printed. The old guard
+# (`if ! go list "./${dir}" >/dev/null 2>&1; then continue`) silently dropped
+# both cases — that is how //go:build mage magefiles/*.go, and any package with
+# a conflicting package clause, became invisible to this analyzer (audit F24).
+pkgs_file=$(mktemp)
+broken_file=$(mktemp)
+trap 'rm -f "$pkgs_file" "$dirs_file" "$broken_file"' EXIT
+
+while IFS= read -r dir; do
+    [ -z "$dir" ] && continue
+    state="$(go_list_state "./${dir}")"
+    case "$state" in
+        ok)
+            echo "./${dir}/..."
+            ;;
+        excluded*)
+            printf '%s\n' "mutexio: SKIP(tag-gated) ./${dir}: ${state#*|}" >&2
+            printf '%s\n' "mutexio:   not analyzed (this analyzer cannot load tagged packages); pre-commit-build runs 'go vet -tags mage ./magefiles' instead" >&2
+            ;;
+        nested-module*|missing*)
+            printf '%s\n' "mutexio: SKIP(${state%%|*}) ./${dir}: ${state#*|}" >&2
+            ;;
+        *)
+            printf '%s\n' "mutexio: FAIL: ./${dir} could not be loaded (NOT a build-tag exclusion): ${state#*|}" >&2
+            printf 'broken\n' > "$broken_file"
+            ;;
+    esac
+done < "$dirs_file" > "$pkgs_file"
+
+# A package that fails to load is a verdict, not a skip: refuse to report
+# success for code this analyzer never saw.
+if [ -s "$broken_file" ]; then
+    printf '%b%s%b\n' "$RED" "mutexio: a staged package failed to load — see the FAIL line above; not reporting success." "$NC" >&2
+    exit 1
+fi
 
 # Read the package patterns into a positional-args list.
 num_pkgs=$(wc -l < "$pkgs_file" | tr -d ' ')
@@ -109,7 +151,7 @@ done < "$pkgs_file"
 # Run the analyzer with a 60-second time budget. We use a background
 # process and a timeout guard so the hook doesn't hang indefinitely.
 output_file=$(mktemp)
-trap 'rm -f "$output_file" "$pkgs_file"' EXIT
+trap 'rm -f "$output_file" "$pkgs_file" "$dirs_file" "$broken_file"' EXIT
 
 # Start the analyzer in the background.
 go run ./tools/analyzers/mutexio/ "$@" > "$output_file" 2>&1 &

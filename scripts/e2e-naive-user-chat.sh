@@ -16,7 +16,11 @@
 #     HOME is sandboxed to the temp dir for both daemon and CLI, so no code
 #     path can touch the user's ~/.meept or the running daemon.
 #   - Copies config/models.json5 from the repo when present so real
-#     providers can answer (env-provided API keys are honored).
+#     providers can answer (env-provided API keys are honored). EVERY
+#     loopback endpoint in the copy is remapped to a freshly probed free
+#     port (driver, MLX classifier/general, local-extract, ...) and the run
+#     fails loudly if any 127.0.0.1:<port> literal survives, so the scratch
+#     daemon can never reach the user's live runtimes.
 #   - Boots a scratch daemon (daemon cwd = $WORK, deliberately DIFFERENT from
 #     the project dir, so A4 genuinely exercises the leaf-03 session
 #     ProjectPath cwd resolution rather than the daemon-cwd fallback).
@@ -68,37 +72,6 @@ elif [ $# -gt 0 ]; then
   exit 2
 fi
 
-# ---------------------------------------------------------------------------
-# Concurrency guard (e2e 2026-09-11): two simultaneous runs each spawn their
-# own scratch daemon + MLX runtimes; the runtimes contend for the GPU, alias
-# rotation kicks in, and BOTH verdicts are poisoned (observed twice: runs
-# r6VGk4/akWFTB and CUu7rg/r6VGk4 racing produced socket timeouts, wrong-
-# model replies, and 14/2 vs 15/1 drift on identical code). A lockfile makes
-# the second invocation fail fast instead. Stale-lock detection: if the
-# recorded pid is gone, the lock is reclaimed.
-LOCK_DIR="${TMPDIR:-/tmp}/meept-e2e.lock"
-if mkdir "$LOCK_DIR" 2>/dev/null; then
-  echo $$ >"$LOCK_DIR/pid"
-  E2E_LOCK_HELD=1
-else
-  LOCK_PID="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-  if [ -n "$LOCK_PID" ] && ! kill -0 "$LOCK_PID" 2>/dev/null; then
-    log0() { printf '%s\n' "$*"; }
-    log0 "WARN: stale e2e lock (pid $LOCK_PID gone); reclaiming"
-    rm -rf "$LOCK_DIR"
-    if mkdir "$LOCK_DIR" 2>/dev/null; then
-      echo $$ >"$LOCK_DIR/pid"
-      E2E_LOCK_HELD=1
-    else
-      log0 "FATAL: another e2e run is active (lock $LOCK_DIR); concurrent runs poison both verdicts — wait and retry"
-      exit 3
-    fi
-  else
-    echo "FATAL: another e2e run is active (pid ${LOCK_PID:-?}, lock $LOCK_DIR); concurrent runs poison both verdicts — wait and retry" >&2
-    exit 3
-  fi
-fi
-
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TURN_TIMEOUT="${MEEPT_E2E_TURN_TIMEOUT:-300}"
 SOCKET_WAIT_SECONDS=30
@@ -108,31 +81,19 @@ SOURCE_CLIENT="meept-bench-e2e"
 
 # ---------------------------------------------------------------------------
 # Workdir + cleanup (trap-based; fires on every exit path)
+#
+# The trap is installed BEFORE the lockfile is taken and before the workdir
+# exists. The lock used to be acquired ~96 lines earlier than the first trap,
+# so a SIGINT/SIGTERM (or any error) in that window leaked
+# ${TMPDIR}/meept-e2e.lock and every later run fail-fasted with exit 3 until
+# the lock was removed by hand (audit F94).
 # ---------------------------------------------------------------------------
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/meept-e2e.XXXXXX")"
-# macOS TMPDIR ends with a slash, so mktemp's template produces a
-# double-slash path ("/var/.../T//meept-e2e.X"). Path strings derived from
-# $WORK (allowed_paths globs, HOME, project dir) then carry "//" mid-path,
-# while the daemon's permission matcher stores Clean-ed single-slash globs —
-# run 4 (2026-09-10): relative writes Abs()-ed against the daemon's PWD kept
-# the "//" form and every file_write was denied ("Path does not match any
-# allowed path pattern"). Normalize WORK once; everything derives from it.
-WORK="$(cd "$WORK" && pwd)"
-# macOS TMPDIR is /var/folders/... but the kernel resolves tools' paths
-# through /private/var/folders/...; permission patterns must cover both
-# forms or file_write gets "access denied" on the /private prefix.
-WORK_RESOLVED="$(cd "$WORK" && pwd -P)"
-STATE="$WORK/state"
-HOME_DIR="$WORK/home"
-PROJECT_DIR="$WORK/project"
-SOCK="$STATE/meept.sock"
-DAEMON_LOG="$WORK/daemon.log"
-REPLIES="$WORK/replies"
-A5_OK=0   # set to 1 only when A5 PASSes on a provider-available T3 turn
-DAEMON_BIN="$WORK/bin/meept-daemon"
-CLI_BIN="$WORK/bin/meept"
+WORK=""
 DPID=""
+LOCK_DIR="${TMPDIR:-/tmp}/meept-e2e.lock"
+E2E_LOCK_HELD=0
+A5_OK=0   # set to 1 only when A5 PASSes on a provider-available T3 turn
 
 FAILURES=()
 SKIPS=()
@@ -162,19 +123,98 @@ cleanup() {
   local rc=$?
   kill_daemon
   if [ "${E2E_LOCK_HELD:-0}" = "1" ]; then
-    rm -rf "${TMPDIR:-/tmp}/meept-e2e.lock"
+    rm -rf "$LOCK_DIR"
   fi
-  if [ "$KEEP" = "1" ]; then
-    log ""
-    log "--keep: scratch workdir left in place: $WORK"
-  else
-    rm -rf "$WORK"
+  if [ -n "$WORK" ] && [ -d "$WORK" ]; then
+    if [ "$KEEP" = "1" ]; then
+      log ""
+      log "--keep: scratch workdir left in place: $WORK"
+    else
+      rm -rf "$WORK"
+    fi
   fi
   exit $rc
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# ---------------------------------------------------------------------------
+# Concurrency guard (e2e 2026-09-11): two simultaneous runs each spawn their
+# own scratch daemon + MLX runtimes; the runtimes contend for the GPU, alias
+# rotation kicks in, and BOTH verdicts are poisoned (observed twice: runs
+# r6VGk4/akWFTB and CUu7rg/r6VGk4 racing produced socket timeouts, wrong-
+# model replies, and 14/2 vs 15/1 drift on identical code). A lockfile makes
+# the second invocation fail fast instead.
+#
+# Stale-lock detection: the recorded pid must be alive AND its process start
+# time must still match, so a recycled pid cannot keep a dead lock alive
+# forever (audit F94). Locks written before the start time was recorded (only
+# a pid) are still honored while that pid lives.
+# ---------------------------------------------------------------------------
+
+proc_start_time() { # $1=pid -> normalized `ps -o lstart=` text ("" if gone)
+  ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//'
+}
+
+lock_holder_alive() { # $1=pid, $2=recorded start time ("" for a legacy lock)
+  [ -n "$1" ] || return 1
+  kill -0 "$1" 2>/dev/null || return 1
+  [ -z "$2" ] && return 0
+  [ "$(proc_start_time "$1")" = "$2" ]
+}
+
+acquire_lock() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    printf '%s %s\n' "$$" "$(proc_start_time $$)" >"$LOCK_DIR/pid"
+    E2E_LOCK_HELD=1
+    return 0
+  fi
+  local lock_pid="" lock_start=""
+  if [ -f "$LOCK_DIR/pid" ]; then
+    # Two variables only: `read` gives the LAST variable every remaining field,
+    # so a third variable would truncate the start time to its first word.
+    read -r lock_pid lock_start <"$LOCK_DIR/pid" || true
+  fi
+  if [ -n "$lock_pid" ] && ! lock_holder_alive "$lock_pid" "$lock_start"; then
+    echo "WARN: stale e2e lock (pid $lock_pid gone or recycled); reclaiming" >&2
+    rm -rf "$LOCK_DIR"
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+      printf '%s %s\n' "$$" "$(proc_start_time $$)" >"$LOCK_DIR/pid"
+      E2E_LOCK_HELD=1
+      return 0
+    fi
+  fi
+  echo "FATAL: another e2e run is active (pid ${lock_pid:-?}, lock $LOCK_DIR); concurrent runs poison both verdicts — wait and retry" >&2
+  return 3
+}
+
+if ! acquire_lock; then
+  exit 3
+fi
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/meept-e2e.XXXXXX")"
+# macOS TMPDIR ends with a slash, so mktemp's template produces a
+# double-slash path ("/var/.../T//meept-e2e.X"). Path strings derived from
+# $WORK (allowed_paths globs, HOME, project dir) then carry "//" mid-path,
+# while the daemon's permission matcher stores Clean-ed single-slash globs —
+# run 4 (2026-09-10): relative writes Abs()-ed against the daemon's PWD kept
+# the "//" form and every file_write was denied ("Path does not match any
+# allowed path pattern"). Normalize WORK once; everything derives from it.
+WORK="$(cd "$WORK" && pwd)"
+# macOS TMPDIR is /var/folders/... but the kernel resolves tools' paths
+# through /private/var/folders/...; permission patterns must cover both
+# forms or file_write gets "access denied" on the /private prefix.
+WORK_RESOLVED="$(cd "$WORK" && pwd -P)"
+STATE="$WORK/state"
+HOME_DIR="$WORK/home"
+PROJECT_DIR="$WORK/project"
+SOCK="$STATE/meept.sock"
+DAEMON_LOG="$WORK/daemon.log"
+REPLIES="$WORK/replies"
+DAEMON_BIN="$WORK/bin/meept-daemon"
+CLI_BIN="$WORK/bin/meept"
+PORT_MAP_FILE="$WORK/port-map.txt"
 
 note_result() { # $1=kind (PASS/FAIL/SKIP), $2=id, $3=detail
   printf '  [%-4s] %-8s %s\n' "$1" "$2" "$3"
@@ -409,23 +449,114 @@ EOF
 
 # Models: reuse the repo's env-configured defaults (make install copies this
 # template into ~/.meept; our sandboxed HOME makes that the temp dir).
-# Local runtime ports (mlx classifier :8081, mlx general :8082) collide with
-# the USER'S live runtimes, so remap them into an ephemeral range like the
-# HTTP port. ${MODEL_PATH} and both baseURLs are rewritten to match.
+#
+# EVERY loopback endpoint in the copied template is remapped to a freshly
+# probed free port before the sandbox daemon starts, and the remap is DERIVED
+# from the copied config instead of from a hardcoded port list. 20d02738 moved
+# the driver to 8080 (config/models.json5 "local-gguf"), the MLX general
+# runtime to 8083 and local-extract to 8084, so the old 8081/8082-only sed left
+# the scratch daemon pointing at the USER'S live runtimes (the exact shared-
+# runtime contamination the lockfile exists to prevent) and the health wait
+# polled HTTP_PORT+2, which nothing binds (audit F68). ${MODEL_PATH} is left
+# alone: it names weights, not an endpoint.
+PORT_MAP_FILE_READY=0
 if [ -f "$REPO_ROOT/config/models.json5" ]; then
   cp "$REPO_ROOT/config/models.json5" "$HOME_DIR/.meept/models.json5"
-  MLX_CLASS_PORT=$((HTTP_PORT + 1))
-  MLX_GEN_PORT=$((HTTP_PORT + 2))
-  sed -i '' \
-    -e "s/127\.0\.0\.1:8081/127.0.0.1:${MLX_CLASS_PORT}/g" \
-    -e "s/127\.0\.0\.1:8082/127.0.0.1:${MLX_GEN_PORT}/g" \
-    -e "s/\"--port\", \"8081\"/\"--port\", \"${MLX_CLASS_PORT}\"/" \
-    -e "s/\"--port\", \"8082\"/\"--port\", \"${MLX_GEN_PORT}\"/" \
-    "$HOME_DIR/.meept/models.json5"
-  log "  copied config/models.json5 -> $HOME_DIR/.meept/models.json5 (mlx ports -> ${MLX_CLASS_PORT}/${MLX_GEN_PORT})"
+  if python3 - "$HOME_DIR/.meept/models.json5" "$HTTP_PORT" >"$PORT_MAP_FILE" <<'PY'
+import re, socket, sys
+
+path, http_port = sys.argv[1], int(sys.argv[2])
+try:
+    text = open(path, encoding="utf-8").read()
+except OSError as exc:
+    print("ERROR: cannot read %s: %s" % (path, exc), file=sys.stderr)
+    sys.exit(2)
+
+# Collect every LOCAL endpoint literal in the template: 127.0.0.1 / localhost /
+# 0.0.0.0 / [::1] with a port (baseURL, health checks) and
+# `"--port", "<port>"` spawn args. Anything else (a remote host) is left alone:
+# it is not the user's live local runtime.
+LOCALPORT = re.compile(r'(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):(\d+)')
+SPAWNPORT = re.compile(r'"--port"\s*,\s*"(\d+)"')
+
+old_ports = []
+for rx in (LOCALPORT, SPAWNPORT):
+    for m in rx.finditer(text):
+        p = int(m.group(1))
+        if p > 0 and p not in old_ports:
+            old_ports.append(p)
+
+if not old_ports:
+    print("ERROR: no local 127.0.0.1:<port> endpoint found in %s; the sandbox "
+          "would inherit whatever the template resolves to" % path, file=sys.stderr)
+    sys.exit(2)
+
+used = set(old_ports) | {http_port}
+
+
+def free_port():
+    while True:
+        s = socket.socket()
+        try:
+            s.bind(("127.0.0.1", 0))
+            p = s.getsockname()[1]
+        finally:
+            s.close()
+        if p not in used:
+            used.add(p)
+            return p
+
+
+mapping = {p: free_port() for p in old_ports}
+
+new = text
+for old, newp in mapping.items():
+    # Normalize any local spelling to 127.0.0.1:<remapped port>.
+    new = LOCALPORT.sub(
+        lambda m, o=old, n=newp: "127.0.0.1:%d" % n if int(m.group(1)) == o else m.group(0),
+        new,
+    )
+    new = re.sub(r'("--port"\s*,\s*)"%d"' % old, r'\g<1>"%d"' % newp, new)
+
+# Fail loudly if any local literal survived the rewrite: the scratch daemon
+# must never reach the user's live runtime endpoints.
+remapped = {str(v) for v in mapping.values()}
+survivors = sorted({m.group(1) for m in LOCALPORT.finditer(new)} - remapped)
+if survivors:
+    print("ERROR: loopback endpoint(s) survived the remap: %s"
+          % ", ".join("127.0.0.1:" + s for s in survivors), file=sys.stderr)
+    sys.exit(2)
+leftover = sorted({m.group(1) for m in SPAWNPORT.finditer(new)} - remapped)
+if leftover:
+    print("ERROR: spawn --port value(s) survived the remap: %s"
+          % ", ".join(leftover), file=sys.stderr)
+    sys.exit(2)
+
+open(path, "w", encoding="utf-8").write(new)
+for old in old_ports:
+    print("%d %d" % (old, mapping[old]))
+PY
+  then
+    PORT_MAP_FILE_READY=1
+    log "  copied config/models.json5 -> $HOME_DIR/.meept/models.json5 (all loopback endpoints remapped to free ports)"
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      log "    :${line% *} -> :${line#* }"
+    done <"$PORT_MAP_FILE"
+  else
+    die "port remap failed on the copied models config (see ERROR above) — refusing to run the sandbox daemon against the user's live runtime endpoints"
+  fi
 else
   warn "config/models.json5 not found in repo; turns will SKIP unless a provider is configured"
 fi
+
+# Map a port from the SHIPPED template to the port the sandbox config uses.
+# The health waits below must poll the remapped ports the sandbox daemon will
+# spawn its own runtimes on — never an arithmetic guess like HTTP_PORT+2 (F68).
+map_port() { # $1=port in config/models.json5 -> remapped port (empty if absent)
+  [ "$PORT_MAP_FILE_READY" = "1" ] || return 0
+  awk -v want="$1" '$1 == want { print $2; exit }' "$PORT_MAP_FILE" 2>/dev/null || true
+}
 
 # Agent definitions: make install copies config/agents/* into
 # ~/.meept/agents/; the daemon's discovery tier expects them there. Without
@@ -475,20 +606,22 @@ wait_for_runtime() {
   return 1
 }
 
-# Extract the remapped MLX ports from the sandboxed models config. The
-# arithmetic used to GENERATE them is the only reliable source: the config
-# also carries unrelated 127.0.0.1 literals (e.g. comfyui :8188), so
-# grep+sort -u picked the lexicographically-largest port string and the
-# "general runtime healthy" wait polled the wrong port — a healthy 8B
-# runtime was reported unhealthy and the transcript started cold (e2e run 1,
-# 2026-09-10: "general runtime on :8188 not healthy").
-MLX_CLASS_PORT=$((HTTP_PORT + 1))
-MLX_GEN_PORT=$((HTTP_PORT + 2))
+# Poll the runtime ports from the SANDBOXED config, i.e. the remapped ports the
+# daemon will spawn its own runtimes on. Deriving them here (from the port map
+# written when the config was rewritten) replaces the old HTTP_PORT+1/+2
+# arithmetic, which after 20d02738 pointed the "general" wait at a port nothing
+# binds and paid a spurious 120s warning on every run (audit F68).
+MLX_CLASS_PORT="$(map_port 8081)"   # template's classifier runtime
+MLX_GEN_PORT="$(map_port 8083)"     # template's general (mlx) runtime
 if [ -n "$MLX_CLASS_PORT" ]; then
   wait_for_runtime "$MLX_CLASS_PORT" "classifier" || true
+else
+  log "  (no classifier runtime endpoint in the sandboxed models config; skipping its health wait)"
 fi
 if [ -n "$MLX_GEN_PORT" ] && [ "$MLX_GEN_PORT" != "$MLX_CLASS_PORT" ]; then
   wait_for_runtime "$MLX_GEN_PORT" "general" || true
+elif [ -z "$MLX_GEN_PORT" ]; then
+  log "  (no general runtime endpoint in the sandboxed models config; skipping its health wait)"
 fi
 
 # 5. Session + project wiring.

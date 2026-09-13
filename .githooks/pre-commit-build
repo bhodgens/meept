@@ -1,12 +1,16 @@
-#!/opt/homebrew/bin/bash
+#!/usr/bin/env bash
 # Pre-commit hook that runs `go build` on staged Go packages.
 #
 # Catches compile errors before they reach CI — particularly important for
 # catching in-progress feature work that breaks the rest of the tree (e.g.
 # new struct fields that other packages depend on). Sub-2s typically.
 #
-# Compatibility: written for /bin/bash 3.2 (macOS default). No mapfile,
-# no associative arrays — same constraint as pre-commit-mutexio.
+# Compatibility: needs bash >= 3.2; the interpreter is whatever `bash` resolves
+# to on PATH, so the same file runs on macOS (/bin/bash 3.2 or Homebrew bash 5)
+# and on a Linux runner (bash 5). No mapfile, no associative arrays — same
+# constraint as pre-commit-mutexio. The shebang used to be hard-coded to
+# /opt/homebrew/bin/bash, which made the CI "Pre-commit Hooks" job unable to
+# exec this hook at all on Linux (audit F100).
 #
 # Added 2026-06-19 per docs/20260618-checkreview.md recommendations.
 
@@ -33,6 +37,11 @@ fi
 
 # Package dirs with staged changes, as ./import paths (newline list).
 STAGED_PKGS=$(printf '%s\n' "$STAGED_GO_FILES" | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
+
+# Snapshot untracked paths before any build runs; compared against the same
+# list at the end so a build that writes an executable into the tree is caught
+# instead of merely hidden by .gitignore (audit F25).
+STATUS_BEFORE="$(git status --porcelain --untracked-files=all 2>/dev/null || true)"
 
 echo "Staged packages:"
 printf '  %s\n' $STAGED_PKGS
@@ -123,16 +132,33 @@ EOF
     echo "Downstream importers (clean):"
     printf '%s' "$DOWNSTREAM" | sed 's/^/  /'
     echo ""
-    if ! OUTPUT=$(go build $(printf '%s' "$DOWNSTREAM") 2>&1); then
+    # Build each importer on its own with -o /dev/null. A bare
+    # `go build <pkg>` writes the executable into the CURRENT DIRECTORY when the
+    # set is a single `package main` — an 86 MB ./meept-daemon in the repo root,
+    # invisible to `git status` because .gitignore hides it (audit F25). -o
+    # takes one package plus one output path, so the loop is the portable form.
+    DOWN_FAILED=""
+    while IFS= read -r pkg; do
+      [ -z "$pkg" ] && continue
+      if ! OUTPUT=$(go build -o /dev/null "$pkg" 2>&1); then
+        DOWN_FAILED="${DOWN_FAILED}${pkg}
+${OUTPUT}
+"
+      fi
+    done <<EOF
+$DOWNSTREAM
+EOF
+    if [ -n "$DOWN_FAILED" ]; then
       echo -e "${RED}❌ go build failed (downstream importers):${NC}"
       echo ""
-      echo "$OUTPUT"
+      echo "$DOWN_FAILED"
       echo ""
       exit 1
     fi
   fi
 else
   # Fallback: whole-tree build when module listing is unavailable.
+  # `go build ./...` writes no executables (Go discards multiple outputs).
   if ! OUTPUT=$(go build ./... 2>&1); then
     echo -e "${RED}❌ go build failed:${NC}"
     echo ""
@@ -140,6 +166,33 @@ else
     echo ""
     exit 1
   fi
+fi
+
+# Nothing above may write into the working tree: an executable lands in the
+# CWD (the repo root) when a bare `go build` names exactly one `package main`
+# — the F25 artifact class, hidden from `git status` by .gitignore. Only NEW
+# root-level untracked entries fail the hook; deeper untracked paths are
+# reported but never block, because a sibling session may legitimately create
+# them mid-run.
+STATUS_AFTER="$(git status --porcelain --untracked-files=all 2>/dev/null || true)"
+NEW_UNTRACKED="$(printf '%s\n' "$STATUS_BEFORE" | grep '^??' | sort || true)"
+NEW_UNTRACKED_AFTER="$(printf '%s\n' "$STATUS_AFTER" | grep '^??' | sort || true)"
+NEW_ROOT_BEFORE="$(printf '%s\n' "$NEW_UNTRACKED" | grep -E '^\?\? [^/]+$' | sort || true)"
+NEW_ROOT_AFTER="$(printf '%s\n' "$NEW_UNTRACKED_AFTER" | grep -E '^\?\? [^/]+$' | sort || true)"
+if [ "$NEW_ROOT_BEFORE" != "$NEW_ROOT_AFTER" ]; then
+  echo -e "${RED}❌ go build wrote new file(s) into the repo root:${NC}"
+  echo ""
+  comm -13 <(printf '%s\n' "$NEW_ROOT_BEFORE") <(printf '%s\n' "$NEW_ROOT_AFTER") | sed 's/^/  /'
+  echo ""
+  echo -e "${YELLOW}Build into /dev/null or a temp dir (never the repo root).${NC}"
+  echo -e "${YELLOW}If another session created those files during this run, re-run the commit.${NC}"
+  echo ""
+  exit 1
+fi
+if [ "$NEW_UNTRACKED" != "$NEW_UNTRACKED_AFTER" ]; then
+  echo -e "${YELLOW}note: untracked path(s) appeared under the tree while building (not root-level, not blocking):${NC}"
+  comm -13 <(printf '%s\n' "$NEW_UNTRACKED") <(printf '%s\n' "$NEW_UNTRACKED_AFTER") | sed 's/^/  /'
+  echo ""
 fi
 
 echo -e "${GREEN}✅ go build passed — staged packages + clean downstream importers compile${NC}"

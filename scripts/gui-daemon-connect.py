@@ -22,7 +22,10 @@ Subcommands
                   up; validates the result and rolls back if it is not
                   structurally sound JSON5.
   endpoint        Print the host/port/ws_path the GUI must use, derived from
-                  the daemon config (defaults localhost:8081 /ws).
+                  the daemon config with the daemon's own precedence —
+                  transport.http.addr, else the transport.http.port alias as
+                  127.0.0.1:<port>, else the shipped default localhost:8081
+                  (--json also reports port_source).
   check           Static PASS/FAIL/SKIP checks for the installed connect path.
   probe           Live client probe against a running daemon: TLS +
                   cert-pin check, /api/v1/health, WebSocket upgrade with the
@@ -461,13 +464,45 @@ def cert_path_from_http(http: dict) -> str:
 def effective_endpoint() -> dict:
     http = read_http_block()
     present = set(http.get("_present", []))
-    host, port = parse_addr(str(http.get("addr", "")))
+    # Precedence mirrors the daemon's internal/config
+    # HTTPTransportConfig.ListenAddr(): Addr when set, else "127.0.0.1:<Port>"
+    # when the `port` alias is set, else the shipped default. Resolving Addr
+    # only dropped the alias, so a port-only config (docs/configuration/
+    # production-security.md) had this tooling checking :8081 while the daemon
+    # bound the alias port (audit F30).
+    addr = str(http.get("addr", "") or "").strip()
+    port_source = "default"
+    port_alias_inert = False
+    if addr:
+        host, port = parse_addr(addr)
+        port_source = "addr"
+        alias = str(http.get("port", "") or "").strip()
+        try:
+            alias_port = int(alias) if alias else 0
+        except ValueError:
+            alias_port = 0
+        # The daemon ignores `port` whenever `addr` is set (ListenAddr), so a
+        # disagreeing alias is inert config the operator should know about.
+        if alias_port > 0 and alias_port != port:
+            port_alias_inert = True
+    else:
+        host, port = DEFAULT_HOST, DEFAULT_PORT
+        alias = str(http.get("port", "") or "").strip()
+        try:
+            alias_port = int(alias) if alias else 0
+        except ValueError:
+            alias_port = 0
+        if alias_port > 0:
+            port = alias_port
+            port_source = "port-alias"
     ws_path = str(http.get("ws_path") or DEFAULT_WS_PATH)
     if not ws_path.startswith("/"):
         ws_path = "/" + ws_path
     return {
         "host": host,
         "port": port,
+        "port_source": port_source,
+        "port_alias_inert": port_alias_inert,
         "ws_path": ws_path,
         "cert_file": cert_path_from_http(http),
         # Absent -> internal/config DefaultConfig values (enabled=false,
@@ -698,6 +733,25 @@ def cmd_check(args: argparse.Namespace) -> int:
         else:
             add("SKIP", "GUI host is loopback",
                 f"{ep['host']} — the bundled cert pinner only trusts localhost/127.0.0.1/::1")
+
+        # Which config key produced the port (mirrors the daemon's ListenAddr
+        # precedence: addr > port alias > shipped default). A port-only config
+        # used to be resolved as :8081 here while the daemon bound the alias —
+        # this line makes that class of divergence visible.
+        src = ep.get("port_source", "default")
+        if src == "addr":
+            detail = f"transport.http.addr = {ep['host']}:{ep['port']}"
+            if ep.get("port_alias_inert"):
+                add("SKIP", "endpoint source",
+                    detail + " (transport.http.port is set but inert while addr is set)")
+            else:
+                add("PASS", "endpoint source", detail)
+        elif src == "port-alias":
+            add("PASS", "endpoint source",
+                f"transport.http.port alias = 127.0.0.1:{ep['port']} (addr unset)")
+        else:
+            add("PASS", "endpoint source",
+                f"neither addr nor port set — shipped default {ep['host']}:{ep['port']}")
 
     key_file = meept_home() / "dev_key"
     if key_file.exists() and key_file.read_text().strip():
