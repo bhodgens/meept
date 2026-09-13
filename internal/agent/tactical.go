@@ -1138,9 +1138,11 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	// F8: the predicate is the structural one — `len(step.Evidence) == 0`
 	// was never true for a daemon step job (zero-value decode artifact),
 	// so this whole branch was unreachable in production.
+	claimMarked := false
 	if len(execResult.Claims) > 0 && !hasMeaningfulEvidence(step.Evidence) && ts.claimsFileSideEffects(execResult.Claims) {
 		step.Validated = false
 		step.ValidationError = "file side-effect claims without tool-issued evidence (unverified narration)"
+		claimMarked = true
 		if err := ts.stepStore.Update(step); err != nil {
 			ts.logger.Warn("failed to persist unverified step", "step_id", step.ID, "error", err)
 		}
@@ -1273,9 +1275,27 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			// evidence a tool actually produced. With no meaningful evidence
 			// there is nothing to verify: leave Validated=false so the record
 			// cannot claim a verification that never happened.
+			//
+			// A PASS clears a STALE validator verdict: the field is the
+			// validator's standing verdict, and this round's verdict is PASS.
+			// Leaving a retry round's stale failure text in place made the
+			// task gate's explicit-verdict arm fail the task with a reason
+			// the validator no longer supports (the write happened inside the
+			// evidence branch, so a vacuously-passing retry kept round 1's
+			// error). Validated stays gated on evidence; the error does not.
+			//
+			// The one thing a PASS must NOT erase is the unverified-narration
+			// marker the claim-vs-evidence backstop set EARLIER IN THIS SAME
+			// invocation: that backstop fires precisely when there is no
+			// tool-issued evidence, so the validator here is vacuous and its
+			// PASS says nothing about the claim. Clearing it would let a
+			// fabricated "Created file …" report ride forward as ground truth
+			// (claimMarked).
+			if !claimMarked {
+				step.ValidationError = ""
+			}
 			if hasMeaningfulEvidence(step.Evidence) {
 				step.Validated = true
-				step.ValidationError = ""
 			}
 			ts.clearValidationRetries(step.ID)
 			if err := ts.stepStore.Update(step); err != nil {
@@ -1506,11 +1526,9 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 				// verdict blocks, below. This arm is the residual safety
 				// net: a validator was available for the step's hint and
 				// the step carried tool-issued evidence, yet no verdict
-				// was ever recorded.
-				if ts.validatorManager != nil &&
-					ts.validatorManager.HasValidator(s.ToolHint) &&
-					hasMeaningfulEvidence(s.Evidence) &&
-					!s.Validated {
+				// was ever recorded. Shared with the interval gate via
+				// stepValidationResidual so the two cannot drift.
+				if ts.stepValidationResidual(s) {
 					validationErrors = append(validationErrors,
 						fmt.Sprintf("step %s completed but not validated", s.ID))
 				}
@@ -2217,6 +2235,33 @@ func (ts *TacticalScheduler) runValidationGateIfDue(ctx context.Context, taskID 
 	}
 }
 
+// stepValidationResidual reports whether a successfully-terminal step is a
+// validation RESIDUAL: a validator exists for its tool hint, the step carries
+// tool-issued evidence, yet no verdict was ever recorded (Validated=false and
+// no explicit ValidationError). It is the one honest-blocking shape — a step
+// with something to verify that was never verified.
+//
+// Both validation gates must use THIS predicate. The interval gate
+// (runValidationGate) keyed on the old broad rule
+// (`IsSuccessfullyTerminal() && !Validated`), which the 2026-09-12 wave made
+// dishonest: Validated=false is now the correct record for three
+// terminalization paths that legitimately run no validation flow
+// (pair-managed, reviewer error, review disabled) and for a validator with
+// nothing meaningful to check. The old predicate therefore warned on honest
+// steps every gate interval ("validation gate: N completed steps not
+// validated"). One shared helper keeps the two gates from drifting.
+func (ts *TacticalScheduler) stepValidationResidual(step *task.TaskStep) bool {
+	if step == nil || !step.State.IsSuccessfullyTerminal() {
+		return false
+	}
+	if step.Validated || step.ValidationError != "" {
+		return false
+	}
+	return ts.validatorManager != nil &&
+		ts.validatorManager.HasValidator(step.ToolHint) &&
+		hasMeaningfulEvidence(step.Evidence)
+}
+
 // runValidationGate checks all completed steps for a task are validated.
 // Returns error if any completed step lacks validation.
 func (ts *TacticalScheduler) runValidationGate(_ context.Context, taskID string) error {
@@ -2227,7 +2272,10 @@ func (ts *TacticalScheduler) runValidationGate(_ context.Context, taskID string)
 
 	var unvalidatedSteps []string
 	for _, step := range steps {
-		if step.State.IsSuccessfullyTerminal() && !step.Validated {
+		// Same residual rule as the task gate (stepValidationResidual): the
+		// old broad `!step.Validated` warned on honest no-validation-flow
+		// steps every interval.
+		if ts.stepValidationResidual(step) {
 			unvalidatedSteps = append(unvalidatedSteps, step.ID)
 		}
 		if step.ValidationError != "" {

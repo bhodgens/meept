@@ -47,26 +47,88 @@ func newClassifierJSONServer(t *testing.T, content string) *llm.Client {
 	return llm.NewClient(&llm.ModelConfig{BaseURL: srv.URL, ModelID: "capture"})
 }
 
+// laneDispatchExpectations is the INDEPENDENT per-lane table for the
+// single-intent producer: the RequiresPlanning flag each lane's intent must
+// carry, and the async-dispatch verdict that flag must yield. It is written
+// out by hand — NOT derived from IntentType.RequiresPlanning() — because the
+// old assertion compared the emitted intent against its own values
+// (want := lane.RequiresPlanning() then gotAsync == want), which is a
+// tautology for every lane whose RequiresPlanning() is false (24 of the 27
+// lanes: the flag is unobservable when it does not feed the async list). A
+// regression that dropped or inverted the flag for those lanes passed
+// silently. Every lane in classifierLanes MUST appear here.
+var laneDispatchExpectations = map[IntentType]struct {
+	requiresPlanning bool
+	async            bool
+}{
+	IntentGit:         {false, true},
+	IntentSchedule:    {false, false},
+	IntentCode:        {true, true},
+	IntentDebug:       {false, true},
+	IntentReview:      {false, false},
+	IntentPlan:        {true, true},
+	IntentQuickPlan:   {true, true},
+	IntentPlatform:    {false, false},
+	IntentReport:      {false, false},
+	IntentRecall:      {false, false},
+	IntentAnalyze:     {false, false},
+	IntentSearch:      {false, false},
+	IntentResearch:    {false, false},
+	IntentExplore:     {false, false},
+	IntentToolUse:     {false, false},
+	IntentSecurity:    {false, false},
+	IntentStatus:      {false, false},
+	IntentWrite:       {false, true},
+	IntentArchitect:   {false, true},
+	IntentSkeptic:     {false, true},
+	IntentLibrarian:   {false, true},
+	IntentImageGen:    {false, true},
+	IntentVideoGen:    {false, true},
+	IntentImageID:     {false, true},
+	IntentInstruction: {false, false},
+	IntentClarify:     {false, false},
+	IntentChat:        {false, false},
+}
+
 // TestLLMClassifier_ParseResponseAsyncGateMatchesLaneRule pins the single-
 // intent producer (parseResponse): for EVERY lane the classifier can emit,
-// the intent it produces must carry a RequiresPlanning such that
-// ShouldDispatchAsync agrees with the lane's own rule. Pre-fix only
-// IntentPlan set the flag, so quickplan yielded false and the gate shut.
+// the intent it produces must carry the RequiresPlanning flag the explicit
+// per-lane table declares, and that flag must yield the table's async verdict.
+// Pre-fix only IntentPlan set the flag, so quickplan yielded false and the
+// gate shut.
 func TestLLMClassifier_ParseResponseAsyncGateMatchesLaneRule(t *testing.T) {
 	c := &LLMClassifier{logger: testLogger()}
 	if len(classifierLanes) == 0 {
 		t.Fatal("classifierLanes is empty")
 	}
 	for _, lane := range classifierLanes {
+		exp, ok := laneDispatchExpectations[lane]
+		if !ok {
+			t.Errorf("lane %q has no entry in laneDispatchExpectations; the table must cover every emittable lane", lane)
+			continue
+		}
 		content := `{"intent":"` + string(lane) + `","confidence":0.9}`
 		got, err := c.parseResponse(content, "carry out the remaining work")
 		if err != nil {
 			t.Fatalf("parseResponse(%s): %v", lane, err)
 		}
-		want := IntentType(lane).ShouldDispatchAsync(IntentType(lane).RequiresPlanning())
-		if gotAsync := IntentType(got.Type).ShouldDispatchAsync(got.RequiresPlanning); gotAsync != want {
-			t.Errorf("lane %q: emitted RequiresPlanning=%v -> ShouldDispatchAsync=%v, want %v (lane rule)",
-				lane, got.RequiresPlanning, gotAsync, want)
+		if got.Type != string(lane) {
+			t.Fatalf("lane %q: parseResponse emitted %q", lane, got.Type)
+		}
+		if got.RequiresPlanning != exp.requiresPlanning {
+			t.Errorf("lane %q: emitted RequiresPlanning=%v, want %v (explicit lane table)",
+				lane, got.RequiresPlanning, exp.requiresPlanning)
+		}
+		if gotAsync := IntentType(got.Type).ShouldDispatchAsync(got.RequiresPlanning); gotAsync != exp.async {
+			t.Errorf("lane %q: emitted RequiresPlanning=%v -> ShouldDispatchAsync=%v, want %v",
+				lane, got.RequiresPlanning, gotAsync, exp.async)
+		}
+	}
+	// Every table entry must name a real lane, so the table cannot rot into a
+	// superset that hides a missing lane.
+	for lane := range laneDispatchExpectations {
+		if !isValidIntent(string(lane)) {
+			t.Errorf("laneDispatchExpectations names %q, which is not a valid lane", lane)
 		}
 	}
 	// The exact C-0 shape: an LLM quickplan must be async-dispatchable.

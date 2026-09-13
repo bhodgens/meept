@@ -484,6 +484,181 @@ func (alwaysFailValidator) Validate(_ context.Context, _ *task.TaskStep) validat
 	return validator.ValidationResult{Valid: false, Errors: []string{"evidence does not resolve on disk"}}
 }
 
+// TestTacticalScheduler_RetryPassClearsStaleValidationError pins the stale
+// validation error the wave introduced. On a validation retry the pass arm
+// cleared ValidationError INSIDE the evidence branch, so a retry that passes
+// over non-meaningful evidence kept round 1's failure text — and the task
+// gate's explicit-verdict arm then failed the task with a reason the
+// validator no longer supported. A PASS must clear the field unconditionally;
+// only Validated stays gated on evidence.
+func TestTacticalScheduler_RetryPassClearsStaleValidationError(t *testing.T) {
+	ts, _, _, cleanup := newGateTestScheduler(t, func(cfg *TacticalSchedulerConfig) {
+		cfg.ValidatorManager = validator.NewValidatorManager()
+	})
+	defer cleanup()
+
+	parent := newGateTestTask(t, ts, "stale-validation-error", 1)
+	step := newGateTestStep(t, ts, parent.ID, "job-stale-1", "file_write", "artifact produced")
+
+	// Round 1 failed validation; the row carries its verdict. Re-stamp the
+	// job id on the in-memory copy: SetJobID writes the DB only, so a plain
+	// Update would clear it.
+	step.JobID = "job-stale-1"
+	step.ValidationError = "validation failed: evidence does not resolve on disk"
+	if err := ts.stepStore.Update(step); err != nil {
+		t.Fatalf("seed validation error: %v", err)
+	}
+
+	// Round 2: no tool evidence, so the filesystem validator has nothing to
+	// check and returns a vacuous PASS (meaningful-evidence is false).
+	resultJSON, err := json.Marshal(map[string]any{"success": true, "result": "artifact produced"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.OnJobCompleted(t.Context(), "job-stale-1", resultJSON); err != nil {
+		t.Fatalf("OnJobCompleted: %v", err)
+	}
+
+	persisted, err := ts.stepStore.GetByID(step.ID)
+	if err != nil || persisted == nil {
+		t.Fatalf("re-read step: %v", err)
+	}
+	if persisted.ValidationError != "" {
+		t.Errorf("persisted validation_error = %q, want empty (a PASS clears the verdict, even over non-meaningful evidence)",
+			persisted.ValidationError)
+	}
+	if persisted.Validated {
+		t.Error("persisted validated = true, want false (nothing meaningful was verified)")
+	}
+
+	got, err := ts.taskStore.GetByID(parent.ID)
+	if err != nil || got == nil {
+		t.Fatalf("re-read task: %v", err)
+	}
+	if got.State != task.StateCompleted {
+		t.Fatalf("task state = %q, want %q (a stale verdict must not fail the task the validator passed)",
+			got.State, task.StateCompleted)
+	}
+}
+
+// TestTacticalScheduler_ValidationResidualBlocksTask pins the residual safety
+// net (task gate): a successfully-terminal step with a validator available for
+// its tool hint and tool-issued evidence on record, but no verdict ever
+// recorded, must FAIL the task. Without this pin the net could be deleted
+// silently — grep found no other test that can fail on its removal.
+func TestTacticalScheduler_ValidationResidualBlocksTask(t *testing.T) {
+	ts, _, msgBus, cleanup := newGateTestScheduler(t, func(cfg *TacticalSchedulerConfig) {
+		cfg.ValidatorManager = validator.NewValidatorManager()
+	})
+	defer cleanup()
+
+	completedSub := msgBus.Subscribe("residual-net-pin", "task.completed")
+	defer msgBus.Unsubscribe(completedSub)
+
+	parent := newGateTestTask(t, ts, "residual-net", 2)
+
+	// Step A: terminal, tool-issued evidence on record, no verdict (the
+	// residual shape).
+	stepA := newGateTestStep(t, ts, parent.ID, "", "file_write", "artifact already produced")
+	stepA.Evidence = []models.Evidence{{Type: models.EvidenceShellOutput, Subject: "echo ok", Value: "ok"}}
+	if err := ts.stepStore.Update(stepA); err != nil {
+		t.Fatalf("persist residual evidence: %v", err)
+	}
+	if err := ts.stepStore.SetState(stepA.ID, task.StepCompleted); err != nil {
+		t.Fatalf("complete residual step: %v", err)
+	}
+
+	// Step B: completes normally and drives finalization.
+	stepB := newGateTestStep(t, ts, parent.ID, "job-residual-1", "file_write", "artifact produced")
+	resultJSON, err := json.Marshal(map[string]any{
+		"success": true,
+		"result":  "artifact produced",
+		"tool_evidence": []map[string]any{
+			{"type": "shell_output", "subject": "echo ok", "value": "ok"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.OnJobCompleted(t.Context(), "job-residual-1", resultJSON); err != nil {
+		t.Fatalf("OnJobCompleted: %v", err)
+	}
+
+	persistedB, err := ts.stepStore.GetByID(stepB.ID)
+	if err != nil || persistedB == nil {
+		t.Fatalf("re-read step B: %v", err)
+	}
+	if !persistedB.Validated {
+		t.Fatal("precondition: step B must validate, so only the residual step can fail the task")
+	}
+
+	got, err := ts.taskStore.GetByID(parent.ID)
+	if err != nil || got == nil {
+		t.Fatalf("re-read task: %v", err)
+	}
+	if got.State != task.StateFailed {
+		t.Fatalf("task state = %q, want %q (a residual step with evidence and a validator but no verdict must block)",
+			got.State, task.StateFailed)
+	}
+
+	select {
+	case msg := <-completedSub.Channel:
+		var payload map[string]any
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal task.completed: %v", err)
+		}
+		if payload["status"] != "failed" {
+			t.Errorf("task.completed status = %v, want failed", payload["status"])
+		}
+		if res, _ := payload["result"].(string); !strings.Contains(res, "completed but not validated") {
+			t.Errorf("task.completed result = %q, want the residual-block reason", res)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for task.completed")
+	}
+}
+
+// TestTacticalScheduler_IntervalGateIgnoresHonestUnvalidatedSteps pins the
+// second validation gate. runValidationGate still keyed on the OLD broad rule
+// (IsSuccessfullyTerminal() && !Validated), which the wave made dishonest:
+// Validated=false is now the correct record for a step whose validator had
+// nothing to check, so the interval gate warned "N completed steps not
+// validated" about honest steps every interval. It must use the same residual
+// rule as the task gate.
+func TestTacticalScheduler_IntervalGateIgnoresHonestUnvalidatedSteps(t *testing.T) {
+	ts, _, _, cleanup := newGateTestScheduler(t, func(cfg *TacticalSchedulerConfig) {
+		cfg.ValidatorManager = validator.NewValidatorManager()
+	})
+	defer cleanup()
+
+	parent := newGateTestTask(t, ts, "interval-gate-honest", 1)
+
+	// Honest unvalidated: terminal, but nothing meaningful to verify.
+	honest := newGateTestStep(t, ts, parent.ID, "", "file_write", "nothing to verify")
+	if err := ts.stepStore.SetState(honest.ID, task.StepCompleted); err != nil {
+		t.Fatalf("complete honest step: %v", err)
+	}
+
+	if err := ts.runValidationGate(context.Background(), parent.ID); err != nil {
+		t.Fatalf("runValidationGate = %v, want nil (an honest unvalidated step must not warn)", err)
+	}
+
+	// The gate must still fire on a genuine residual.
+	residual := newGateTestStep(t, ts, parent.ID, "", "file_write", "artifact produced")
+	residual.Evidence = []models.Evidence{{Type: models.EvidenceShellOutput, Subject: "echo ok", Value: "ok"}}
+	if err := ts.stepStore.Update(residual); err != nil {
+		t.Fatalf("persist residual evidence: %v", err)
+	}
+	if err := ts.stepStore.SetState(residual.ID, task.StepCompleted); err != nil {
+		t.Fatalf("complete residual step: %v", err)
+	}
+	if err := ts.runValidationGate(context.Background(), parent.ID); err == nil {
+		t.Fatal("runValidationGate = nil, want an error naming the residual step")
+	} else if !strings.Contains(err.Error(), residual.ID) {
+		t.Errorf("runValidationGate error = %v, want it to name the residual step %s", err, residual.ID)
+	}
+}
+
 // TestReviewManager_ApprovalPersistsApprovedState pins F1 on the reviewer
 // approval path: SetState writes the DB only, and the step was loaded while
 // still 'reviewing', so the full-row Update must carry the approved state or

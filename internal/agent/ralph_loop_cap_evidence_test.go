@@ -243,3 +243,91 @@ func TestRalphLoop_FailAtCapPayloadMatchesSubscriber(t *testing.T) {
 		t.Fatal("timeout waiting for task.failed")
 	}
 }
+
+// syntheticJobEvidence is the daemon's own job-completion stamp
+// (internal/daemon/components.go): "job <id> completed by agent <x>:
+// <narration>". The narration is the MODEL'S OWN prose, so this entry can
+// satisfy validateEvidence without any independently observed proof.
+func syntheticJobEvidence(narration string) string {
+	return "job job-42 completed by agent coder: " + narration
+}
+
+// TestRalphLoop_CapIgnoresSyntheticJobEvidence pins the cap regression the
+// wave introduced. The F5 fix made the cap grant completion whenever the
+// final attempt's evidence was "sufficient", but the daemon synthesizes an
+// evidence entry from the model's own narration — so a capped task could be
+// reported complete on the model's say-so, the orchestrator reset the
+// counter, and the "cap stays armed" guarantee became conditional where it
+// was absolute. At the cap the synthetic stamp must not grant completion.
+func TestRalphLoop_CapIgnoresSyntheticJobEvidence(t *testing.T) {
+	rl, _, taskStore, _ := newRalphCapFixture(t)
+
+	tk := task.NewTask("cap-synthetic-only", "write answer file")
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	driveToReplanCap(t, rl, tk.ID)
+
+	// The only evidence is the daemon's synthetic stamp, whose narration
+	// happens to name the task's key terms — the exact shape that used to
+	// talk the capped task back to complete.
+	result, _ := json.Marshal(map[string]any{
+		"success":  true,
+		"result":   "wrote the answer file",
+		"evidence": []string{syntheticJobEvidence("wrote the answer file to disk")},
+	})
+	isComplete, _, needsReplan := rl.CheckCompletion(context.Background(), tk.ID, result)
+	if isComplete {
+		t.Fatal("isComplete = true on synthetic-only evidence: the model's own narration granted the cap")
+	}
+	if needsReplan {
+		t.Fatal("needsReplan = true at the cap, want false (the cap is terminal)")
+	}
+	got, err := taskStore.GetByID(tk.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.State != task.StateFailed {
+		t.Fatalf("task state = %q, want failed (the cap must stay armed)", got.State)
+	}
+}
+
+// TestRalphLoop_CapCompletesOnIndependentEvidenceAlone is the other
+// direction: the synthetic filter must not turn the cap into a blanket
+// failure. A final attempt that also carries independent (non-stamp)
+// evidence still completes.
+func TestRalphLoop_CapCompletesOnIndependentEvidenceAlone(t *testing.T) {
+	rl, _, taskStore, _ := newRalphCapFixture(t)
+
+	tk := task.NewTask("cap-synthetic-plus-real", "write answer file")
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	driveToReplanCap(t, rl, tk.ID)
+
+	result, _ := json.Marshal(map[string]any{
+		"success": true,
+		"result":  "wrote the answer file",
+		"evidence": []string{
+			syntheticJobEvidence("wrote the answer file to disk"),
+			"answer file written to /tmp/answer.txt",
+		},
+	})
+	isComplete, evidence, needsReplan := rl.CheckCompletion(context.Background(), tk.ID, result)
+	if !isComplete {
+		t.Fatal("isComplete = false, want true: an independent evidence entry accompanied the synthetic stamp")
+	}
+	if needsReplan {
+		t.Fatal("needsReplan = true, want false at the cap with sufficient evidence")
+	}
+	if len(evidence) == 0 {
+		t.Error("evidence = empty, want the final attempt's evidence")
+	}
+	got, err := taskStore.GetByID(tk.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.State.IsTerminal() {
+		t.Fatalf("task state = %q, want non-terminal (independent evidence must still complete)", got.State)
+	}
+}

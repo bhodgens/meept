@@ -147,7 +147,7 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 	}
 
 	if iteration >= rl.config.MaxIterations {
-		if evidenceSufficient {
+		if evidenceSufficient && hasIndependentRalphEvidence(resultData.Evidence) {
 			// The final granted attempt DID produce verifiable evidence:
 			// report completion instead of discarding the result (F5).
 			rl.logger.Info("Max Ralph loop iterations reached but the final attempt produced sufficient evidence; completing",
@@ -201,6 +201,34 @@ func (rl *RalphLoop) validateEvidence(taskDescription string, evidence []string)
 		}
 	}
 
+	return false
+}
+
+// hasIndependentRalphEvidence reports whether the evidence list carries at
+// least one entry that is NOT the daemon's own job-completion stamp. That
+// stamp — internal/daemon/components.go emits
+// "job <id> completed by agent <x>: <narration>" for every step job — embeds
+// the MODEL'S OWN narration, so validateEvidence can be satisfied by the
+// claim being checked rather than by independently observed proof. At the
+// replan cap that is the difference between the cap staying armed and the
+// model talking itself back to complete: the cap's whole point is that
+// repeated attempts have NOT produced verifiable work, so a completion
+// granted on the synthetic stamp alone resets the counter (via the
+// orchestrator's TaskOutcome) on the model's say-so. Non-cap passes are
+// unaffected — this guard applies only to the cap decision.
+func hasIndependentRalphEvidence(evidence []string) bool {
+	for _, ev := range evidence {
+		trimmed := strings.TrimSpace(ev)
+		if !strings.HasPrefix(trimmed, "job ") {
+			return true
+		}
+		rest := trimmed[len("job "):]
+		// The stamp's marker must sit after a non-empty job id.
+		if idx := strings.Index(rest, " completed by agent "); idx > 0 {
+			continue // synthetic stamp: the model's narration, not proof
+		}
+		return true
+	}
 	return false
 }
 

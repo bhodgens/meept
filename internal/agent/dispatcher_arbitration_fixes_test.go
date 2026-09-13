@@ -24,22 +24,26 @@ import (
 // whole words (inflections allowed), so ordinary English that merely
 // contains the letters is not mistaken for a git action.
 func TestInputContainsGitVerb_WordBoundaries(t *testing.T) {
-	// Negatives: the substrings that used to trip the guard.
+	// Negatives: ordinary English that merely contains the letters of a git
+	// verb. One-sided by construction — a positive case must never live in
+	// this table (the old table smuggled "did you merge the notes …" in and
+	// skipped it, so the table silently stopped testing anything about it).
 	for _, in := range []string{
 		"did the emergency change get made? where is the file?",
 		"what emerged from that session?",
 		"was the file created?",
-		"did you merge the notes into the summary", // "merge" IS a verb -> excluded below
+		"the commitment we made",
 	} {
-		if in == "did you merge the notes into the summary" {
-			continue // positive case, asserted separately
-		}
 		if inputContainsGitVerb(in) {
 			t.Errorf("inputContainsGitVerb(%q) = true, want false (substring false positive, F40)", in)
 		}
 	}
 	// Positives: real git verbs, including the exact run-10 work-status
 	// string that carries none, plus inflected forms the guard must keep.
+	// The vowel-dropping -ing forms ("merging", "rebasing") and the
+	// "uncommitted" prefix were the F40 fix's over-narrowing: the bare stem
+	// + "ing" suffix matched only the vowel-keeping shape, so these read as
+	// git-verb-free and a git recall verdict wrongly survived arbitration.
 	for _, in := range []string{
 		"commit the changes",
 		"push to origin",
@@ -49,6 +53,10 @@ func TestInputContainsGitVerb_WordBoundaries(t *testing.T) {
 		"stash my work",
 		"did the change get committed yet?",
 		"is the branch merged?",
+		"did you merge the notes into the summary",
+		"merging the branch",
+		"rebasing onto main",
+		"are there uncommitted changes in the tree?",
 	} {
 		if !inputContainsGitVerb(in) {
 			t.Errorf("inputContainsGitVerb(%q) = false, want true", in)
@@ -198,5 +206,51 @@ func TestClassifyMultiIntent_WorkPlusChatStillCollapses(t *testing.T) {
 	if multi.IsCompound {
 		t.Fatalf("code+chat should collapse to the single work intent; got compound. intents=%s",
 			intentsDebug(multi.Intents))
+	}
+}
+
+// TestRecallArbitration_StatusTailDoesNotSwallowImperative pins the
+// regression the F41 reorder introduced. The recall branch now runs BEFORE
+// the imperative branch, and the recall matchers are position-independent
+// (isWorkStatusRecall scans every field for a status predicate plus a nearby
+// work noun). So an IMPERATIVE work request whose status clause sits in the
+// tail satisfied the recall matcher and was arbitrated to chat recall — the
+// work was dropped. The recall matchers must judge the LEADING clause only.
+func TestRecallArbitration_StatusTailDoesNotSwallowImperative(t *testing.T) {
+	inputs := []string{
+		"implement the endpoint and check that the response is this format",
+		"refactor the module and let me know if there are changes to the API",
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			// Preconditions: the WHOLE input is a work-status question (the
+			// position-independent match the regression exploited) and opens
+			// with an imperative verb; the LEADING clause alone is neither.
+			if !isWorkStatusRecall(input) {
+				t.Fatalf("precondition: %q must read as a whole-input work-status question", input)
+			}
+			if !hasLeadingImperativeVerb(input) {
+				t.Fatalf("precondition: %q must open with an imperative verb", input)
+			}
+			leading := leadingRecallClause(input)
+			if isWorkStatusRecall(leading) || isSecondPersonWorkRecall(leading) {
+				t.Fatalf("precondition: the leading clause %q of %q must not be a recall question", leading, input)
+			}
+
+			d := NewDispatcher(DispatcherConfig{
+				Logger:           testLogger(),
+				ClassifierClient: newClassifierJSONServer(t, `{"intent":"platform","confidence":0.9}`),
+			})
+			intent, err := d.classifyIntent(context.Background(), input, &MemoryContext{IntentCounts: map[string]int{}})
+			if err != nil {
+				t.Fatalf("classifyIntent: %v", err)
+			}
+			if intent == nil {
+				t.Fatal("nil intent")
+			}
+			if intent.Type == string(IntentRecall) || intent.Method == "platform_recall_arbitration" {
+				t.Fatalf("imperative work request swallowed into chat recall: intent=%q method=%q", intent.Type, intent.Method)
+			}
+		})
 	}
 }
