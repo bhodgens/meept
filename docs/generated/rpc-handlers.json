@@ -33,13 +33,13 @@
     "topic": "bus.publish",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 573
+    "line": 593
   },
   {
     "topic": "bus.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 594
+    "line": 614
   },
   {
     "topic": "bus.subscribe",
@@ -243,7 +243,7 @@
     "topic": "daemon.status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 562
+    "line": 582
   },
   {
     "topic": "daemon.stop",
@@ -321,7 +321,7 @@
     "topic": "firewall.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 565
+    "line": 585
   },
   {
     "topic": "instruction.add",
@@ -537,7 +537,7 @@
     "topic": "ping",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 470
+    "line": 478
   },
   {
     "topic": "plan.approve",
@@ -1257,7 +1257,7 @@
     "topic": "status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 561
+    "line": 581
   },
   {
     "topic": "status",
@@ -1281,7 +1281,7 @@
     "topic": "task.amend.submit",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 599
+    "line": 619
   },
   {
     "topic": "task.approve",

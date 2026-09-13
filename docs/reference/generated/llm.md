@@ -72,15 +72,21 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func Ptr\[T any\]\(v T\) \*T](<#Ptr>)
 - [func QuotaCredentialKey\(providerID string, cfg \*ModelConfig\) string](<#QuotaCredentialKey>)
 - [func ReapRuntimeProcesses\(targets \[\]OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log \*slog.Logger\) \[\]int](<#ReapRuntimeProcesses>)
+- [func RemoveRuntimeHandlesForPids\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, pids \[\]int\)](<#RemoveRuntimeHandlesForPids>)
 - [func RemoveSpawnRecord\(pidFile string\)](<#RemoveSpawnRecord>)
 - [func ResolveBudget\(rc \*ReasoningConfig, agent \*AgentReasoningConfig, modelDefault \*ReasoningConfig, globalBudgets map\[string\]int\) \*int](<#ResolveBudget>)
 - [func RunModelPicker\(config ModelPickerConfig\) \(\*ProviderDef, \*ModelCatalogEntry, error\)](<#RunModelPicker>)
+- [func RunSupervisor\(opts SupervisorOptions\) int](<#RunSupervisor>)
+- [func RuntimeHasLiveOwner\(cfgs \[\]\*RuntimeConfig, command string, pid int\) bool](<#RuntimeHasLiveOwner>)
 - [func SchemaModeValid\(s string\) bool](<#SchemaModeValid>)
 - [func SetCatalogContextWindow\(providerID, modelID string, contextWindow int\) bool](<#SetCatalogContextWindow>)
 - [func SetGBNFConstrained\(on bool\)](<#SetGBNFConstrained>)
 - [func SpawnRecordPath\(pidFile string\) string](<#SpawnRecordPath>)
 - [func StripPromptCacheBoundary\(s string\) string](<#StripPromptCacheBoundary>)
+- [func SuperviseArgv\(parentPID, reportFD, deathFD int, spawn \[\]string\) \[\]string](<#SuperviseArgv>)
 - [func SupportedRuntimes\(\) \[\]string](<#SupportedRuntimes>)
+- [func ToolChoiceOf\(opts \[\]ChatOption\) string](<#ToolChoiceOf>)
+- [func ToolChoiceValid\(v string\) bool](<#ToolChoiceValid>)
 - [func ToolConstraintForRuntime\(rt RuntimeType\) string](<#ToolConstraintForRuntime>)
 - [func ToolConstraintSupported\(mode string\) bool](<#ToolConstraintSupported>)
 - [func UserMessage\(err error\) string](<#UserMessage>)
@@ -192,6 +198,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func WithStopSequences\(seqs \[\]string\) ChatOption](<#WithStopSequences>)
   - [func WithTaskScope\(taskID, sessionID string\) ChatOption](<#WithTaskScope>)
   - [func WithTemperature\(temp float64\) ChatOption](<#WithTemperature>)
+  - [func WithToolChoice\(value string\) ChatOption](<#WithToolChoice>)
   - [func WithTools\(tools \[\]ToolDefinition\) ChatOption](<#WithTools>)
   - [func WithTopP\(p float64\) ChatOption](<#WithTopP>)
 - [type ChatRequest](<#ChatRequest>)
@@ -415,6 +422,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(s \*ModelStore\) Pull\(ctx context.Context, repoID, quant string, progress func\(done, total int64\)\) \(\*ModelRecord, error\)](<#ModelStore.Pull>)
 - [type NonRetryableError](<#NonRetryableError>)
 - [type OrphanRuntime](<#OrphanRuntime>)
+  - [func FilterLiveOwned\(cfgs \[\]\*RuntimeConfig, orphans \[\]OrphanRuntime\) \[\]OrphanRuntime](<#FilterLiveOwned>)
   - [func FindOrphanRuntimes\(cfgs \[\]\*RuntimeConfig, list RuntimeProcLister\) \(\[\]OrphanRuntime, error\)](<#FindOrphanRuntimes>)
   - [func FindOrphanRuntimesWithRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, list RuntimeProcLister\) \(\[\]OrphanRuntime, error\)](<#FindOrphanRuntimesWithRecords>)
   - [func OrphanRuntimesFromConfigs\(cfgs \[\]\*RuntimeConfig\) \(\[\]OrphanRuntime, error\)](<#OrphanRuntimesFromConfigs>)
@@ -456,6 +464,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(p ProviderConfig\) HealthCheckTimeout\(\) time.Duration](<#ProviderConfig.HealthCheckTimeout>)
   - [func \(p ProviderConfig\) IsAutoStart\(\) bool](<#ProviderConfig.IsAutoStart>)
   - [func \(p ProviderConfig\) IsAutoStopOnExit\(\) bool](<#ProviderConfig.IsAutoStopOnExit>)
+  - [func \(p ProviderConfig\) IsSupervised\(\) bool](<#ProviderConfig.IsSupervised>)
   - [func \(p ProviderConfig\) PIDDir\(\) string](<#ProviderConfig.PIDDir>)
   - [func \(p ProviderConfig\) UnhealthyThreshold\(\) int](<#ProviderConfig.UnhealthyThreshold>)
   - [func \(p ProviderConfig\) ValidateModelExists\(\) error](<#ProviderConfig.ValidateModelExists>)
@@ -574,6 +583,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type ResponseCache](<#ResponseCache>)
 - [type ResponseMessage](<#ResponseMessage>)
   - [func \(m \*ResponseMessage\) ContentString\(\) string](<#ResponseMessage.ContentString>)
+  - [func \(m \*ResponseMessage\) ReasoningText\(\) string](<#ResponseMessage.ReasoningText>)
 - [type RestartPolicyConfig](<#RestartPolicyConfig>)
 - [type RetryStrategy](<#RetryStrategy>)
 - [type Role](<#Role>)
@@ -586,8 +596,10 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(rl \*RoutingLogger\) Record\(ctx context.Context, dec RoutingDecision\) error](<#RoutingLogger.Record>)
 - [type RuntimeConfig](<#RuntimeConfig>)
   - [func ValidateAndNormalize\(cfg RuntimeLifecycleConfig\) \(\*RuntimeConfig, error\)](<#ValidateAndNormalize>)
+  - [func \(c \*RuntimeConfig\) Supervised\(\) bool](<#RuntimeConfig.Supervised>)
 - [type RuntimeLifecycleConfig](<#RuntimeLifecycleConfig>)
   - [func \(c RuntimeLifecycleConfig\) AutoStopOnExitOrDefault\(\) bool](<#RuntimeLifecycleConfig.AutoStopOnExitOrDefault>)
+  - [func \(c RuntimeLifecycleConfig\) SuperviseOrDefault\(\) bool](<#RuntimeLifecycleConfig.SuperviseOrDefault>)
 - [type RuntimeManager](<#RuntimeManager>)
   - [func NewRuntimeManager\(logger \*slog.Logger\) \*RuntimeManager](<#NewRuntimeManager>)
   - [func \(m \*RuntimeManager\) EndpointBaseURL\(providerID string\) \(string, bool\)](<#RuntimeManager.EndpointBaseURL>)
@@ -614,7 +626,6 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(p \*RuntimeProcess\) AlreadyRunning\(\) bool](<#RuntimeProcess.AlreadyRunning>)
   - [func \(p \*RuntimeProcess\) IsRunning\(\) bool](<#RuntimeProcess.IsRunning>)
   - [func \(p \*RuntimeProcess\) PID\(\) int](<#RuntimeProcess.PID>)
-  - [func \(p \*RuntimeProcess\) StalePIDRemoval\(\)](<#RuntimeProcess.StalePIDRemoval>)
   - [func \(p \*RuntimeProcess\) Start\(ctx context.Context, stdout, stderr io.Writer\) error](<#RuntimeProcess.Start>)
   - [func \(p \*RuntimeProcess\) Stop\(ctx context.Context\) error](<#RuntimeProcess.Stop>)
   - [func \(p \*RuntimeProcess\) StopAsOperator\(ctx context.Context\) error](<#RuntimeProcess.StopAsOperator>)
@@ -626,6 +637,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type SessionSummaryResult](<#SessionSummaryResult>)
 - [type SkillRequirements](<#SkillRequirements>)
 - [type SpawnRecord](<#SpawnRecord>)
+  - [func PruneStaleOperatorRecords\(records \[\]SpawnRecord\) \[\]SpawnRecord](<#PruneStaleOperatorRecords>)
   - [func ReadSpawnRecord\(pidFile string\) \(SpawnRecord, error\)](<#ReadSpawnRecord>)
   - [func ScanSpawnRecords\(dir string\) \(\[\]SpawnRecord, error\)](<#ScanSpawnRecords>)
 - [type Status](<#Status>)
@@ -634,6 +646,8 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type StreamingChatter](<#StreamingChatter>)
   - [func AsStreamingChatter\(c Chatter\) \(StreamingChatter, bool\)](<#AsStreamingChatter>)
 - [type SummaryExtract](<#SummaryExtract>)
+- [type SupervisorOptions](<#SupervisorOptions>)
+  - [func ParseSupervisorArgs\(args \[\]string\) \(opts SupervisorOptions, requested bool, err error\)](<#ParseSupervisorArgs>)
 - [type SystemPromptBlock](<#SystemPromptBlock>)
   - [func BuildSystemPromptBlocks\(sections \[\]string\) \[\]SystemPromptBlock](<#BuildSystemPromptBlocks>)
 - [type TaskSummarizer](<#TaskSummarizer>)
@@ -780,6 +794,10 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 <a name="PromptCacheBoundary"></a>PromptCacheBoundary is a sentinel marker inserted into system prompt section lists to delineate static \(cacheable across sessions\) content from dynamic \(session\-specific\) content. Sections appearing before the boundary are classified as static; sections after it are classified as dynamic.
 
 	const PromptCacheBoundary = "__MEEPT_PROMPT_CACHE_BOUNDARY__"
+
+<a name="ToolChoiceRequired"></a>ToolChoiceRequired is the only tool\_choice value the request builder acts on today: force the model to emit a tool call instead of prose. It is the measured lever that fixed the llama.cpp/LFM2.5 narration failure \(tool\_choice auto 15/20, required 20/20 on the failing prompt\). Other values accepted in config are parsed for forward compatibility but are not sent — see resolveToolChoice in client.go.
+
+	const ToolChoiceRequired = "required"
 
 ## Variables
 
@@ -1505,12 +1523,19 @@ ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each process 
 
 list and signal are seams: nil means the real ps scan and the real process\-group kill, which is what the daemon and the CLI both use.
 
+<a name="RemoveRuntimeHandlesForPids"></a>
+## func RemoveRuntimeHandlesForPids
+
+	func RemoveRuntimeHandlesForPids(cfgs []*RuntimeConfig, records []SpawnRecord, pids []int)
+
+RemoveRuntimeHandlesForPids removes the PID file and durable spawn record of every handle that still names one of pids — the pids a reap CONFIRMED gone \(never a candidate\). A config carries no pid, so the PID file itself is the only link; a durable record carries the pid it spawned, which is the link that survives config drift. Best\-effort: a removal failure is diagnostic only, and a handle naming a pid that is NOT in pids is left alone \(a concurrent Start may have rewritten it for a fresh runtime\).
+
 <a name="RemoveSpawnRecord"></a>
 ## func RemoveSpawnRecord
 
 	func RemoveSpawnRecord(pidFile string)
 
-RemoveSpawnRecord deletes the record written beside pidFile. Best\-effort: a missing file is not an error, and there is no logger in this package\-level helper to report failures to.
+RemoveSpawnRecord deletes the record written beside pidFile. Best\-effort: a missing file is not an error, and any other failure is only diagnostic — callers are cleanup paths that must not start failing because of it.
 
 <a name="ResolveBudget"></a>
 ## func ResolveBudget
@@ -1535,6 +1560,24 @@ Returns nil when rc is nil/zero so callers can omit the budget from wire payload
 	func RunModelPicker(config ModelPickerConfig) (*ProviderDef, *ModelCatalogEntry, error)
 
 RunModelPicker runs the model picker TUI and returns the selected provider/model.
+
+<a name="RunSupervisor"></a>
+## func RunSupervisor
+
+	func RunSupervisor(opts SupervisorOptions) int
+
+RunSupervisor is the supervisor process: it spawns opts.Argv, reports the runtime pid, and exits when the runtime exits or when the watched parent disappears \(killing the runtime first\). The returned int is the process exit code: 0 for every normal end \(including a parent\-death termination, so a daemon's wait on the supervisor is not misread as a runtime failure\), and non\-zero only for a usage or spawn failure.
+
+<a name="RuntimeHasLiveOwner"></a>
+## func RuntimeHasLiveOwner
+
+	func RuntimeHasLiveOwner(cfgs []*RuntimeConfig, command string, pid int) bool
+
+RuntimeHasLiveOwner reports whether any endpoint config whose spawn command matches command records a live owner other than pid. Such an owner is a live process meept did not leave behind, so the matched process must not be signalled. The check spans EVERY matching config, not just the endpoint the scan attributed the pid to: two providers can share one spawn command line with different PID files \(endpoint keys do not normalize localhost against 127.0.0.1\), so attribution is ambiguous and any recorded live owner vetoes.
+
+SCOPE \(audit finding F78, low\): the veto deliberately includes endpoints whose config says auto\_stop\_on\_exit=false — the unmanaged, operator\-owned endpoints. That is the whole point of the predicate: an auto\_stop=false endpoint IS the "user\-managed server with the same command line" this veto exists to protect, and \(because attribution of a shared command line is ambiguous\) a live pid file that is not the detected leftover is the only evidence available that the process belongs to somebody who did not ask meept to reap it. Narrowing the veto to auto\_stop=true configs would make the sweep kill an operator\-owned server whenever a managed endpoint shares its command line — the F58/F61 failure mode, not a fix. The known cost is accepted: an unmanaged endpoint can keep a managed endpoint's genuine leftover alive, and the sweep reports that \("leaving process alone — an endpoint with this command records a different live owner"\) so the operator can stop it. The record half of the same rule is narrower on purpose: a record only spares when the pid it names is still alive \(see endpointSparedSet / recordSpawnPIDGone\).
+
+Exported so the daemon's sweep \(RuntimeManager.SweepOrphanRuntimes\) and \`meept doctor \-\-fix\` share ONE predicate and cannot make different decisions about the same process \(audit finding F61\).
 
 <a name="SchemaModeValid"></a>
 ## func SchemaModeValid
@@ -1571,12 +1614,33 @@ SpawnRecordPath returns the durable record path for a runtime PID file: the PID 
 
 StripPromptCacheBoundary removes the PromptCacheBoundary sentinel and any surrounding blank\-line separators from a system prompt string. This must be called before sending the prompt to any provider so the internal marker is never leaked to the API.
 
+<a name="SuperviseArgv"></a>
+## func SuperviseArgv
+
+	func SuperviseArgv(parentPID, reportFD, deathFD int, spawn []string) []string
+
+SuperviseArgv returns the supervisor's argument list for a runtime spawn: the runtime argv follows the \`\-\-\` terminator VERBATIM, so the supervisor passes it through unchanged and the process table still shows the runtime's own command line. reportFD and deathFD are the descriptors Start passes as ExtraFiles; 0 disables the corresponding channel.
+
 <a name="SupportedRuntimes"></a>
 ## func SupportedRuntimes
 
 	func SupportedRuntimes() []string
 
 SupportedRuntimes returns the list of supported runtime types.
+
+<a name="ToolChoiceOf"></a>
+## func ToolChoiceOf
+
+	func ToolChoiceOf(opts []ChatOption) string
+
+ToolChoiceOf reports the per\-turn tool\_choice requested through the option slice \("" when none was passed\). It is the inspection counterpart of WithToolChoice, for callers that stub the Chatter and assert on options.
+
+<a name="ToolChoiceValid"></a>
+## func ToolChoiceValid
+
+	func ToolChoiceValid(v string) bool
+
+ToolChoiceValid reports whether v is a recognized tool\_choice value. The empty string is valid and means "no tool\_choice field" \(the default\).
 
 <a name="ToolConstraintForRuntime"></a>
 ## func ToolConstraintForRuntime
@@ -2605,6 +2669,17 @@ WithTaskScope sets the task and session scope for budget tracking.
 	func WithTemperature(temp float64) ChatOption
 
 WithTemperature sets the temperature for the chat request.
+
+<a name="WithToolChoice"></a>
+### func WithToolChoice
+
+	func WithToolChoice(value string) ChatOption
+
+WithToolChoice marks THIS request as an action turn and sets the requested tool\_choice value. It is the per\-turn half of the forced\-tool\-call contract and the only signal the request builder has for turn type: the agent loop's intent/agent\-capability information is not visible at the request\-building layer \(internal/llm cannot import internal/agent — import cycle\), so the caller must mark action turns explicitly.
+
+Wiring the agent loop's intent \(action vs prose\) to this option is the follow\-up: see docs/reference/agent\-loop\-tools.md \("Forced tool calls"\). Until that lands, passing this option is the only way to send tool\_choice; with no option \(or a prose turn that passes none\) the payload is unchanged.
+
+Only ToolChoiceRequired is honored. An empty value is a no\-op \(prose\).
 
 <a name="WithTools"></a>
 ### func WithTools
@@ -3802,7 +3877,9 @@ Start is also the re\-arm path. The manager stops the checker when a runtime sto
 
 	func (h *HealthChecker) Stop()
 
-Stop stops the health checker. Idempotent, and safe against the run goroutine exiting on its own: it only closes the channel of the run that is active.
+Stop stops the health checker. Idempotent, and safe against the run goroutine exiting on its own: it closes the channel of the run this checker believes is active.
+
+It gates on the CHANNEL, not on the running flag: a superseded goroutine can never leave a newer run's channel here \(finishRun's generation guard\), so whatever h.stopCh names is either the live run or an already\-exited one, and closing it is safe either way — no run ever closes its own channel. Gating on the flag instead \(the old behaviour\) made Stop a no\-op for a run whose flag a stale goroutine had cleared, leaving it live and unstoppable \(finding F60\).
 
 <a name="HealthChecker.WaitForHealthy"></a>
 ### func \(\*HealthChecker\) WaitForHealthy
@@ -4344,6 +4421,16 @@ ModelConfig holds configuration for a specific LLM model endpoint.
 	    // global [agent.tools].schema_mode (default "indexed") via
 	    // Resolver.EffectiveSchemaMode.
 	    SchemaMode string
+	    // ToolChoice is the resolved tool_choice policy for this endpoint,
+	    // resolved per-model over provider from models.json5 `tool_choice`
+	    // (see internal/llm/providers.go). Empty (the default) means the
+	    // request builder never sends a tool_choice field. "required" opts the
+	    // model into forced tool calls: a request that carries tools AND whose
+	    // caller marked the turn as an action turn (llm.WithToolChoice) then
+	    // sends "tool_choice":"required". The action-turn gate is mandatory:
+	    // sending "required" on a prose turn produced spurious calls 5/5 in
+	    // the llama.cpp/LFM2.5 measurement (see docs/reference/agent-loop-tools.md).
+	    ToolChoice string
 	    // OAuthProvider identifies the OAuth provider (e.g. "github-models",
 	    // "google-oauth") whose token should be used in place of a static API
 	    // key. When non-empty, the LLM client resolves a fresh access token
@@ -4469,6 +4556,10 @@ ModelDef represents a model definition in the config.
 	    // model ("full"|"indexed", loop-economics leaf 02). Empty inherits
 	    // the provider setting. Unknown values are ignored at resolve time.
 	    SchemaMode string `json:"schema_mode,omitempty"`
+	    // ToolChoice overrides the provider-level tool_choice policy for this
+	    // model. Empty inherits the provider setting. See
+	    // ProviderOptionsConfig.ToolChoice.
+	    ToolChoice string `json:"tool_choice,omitempty"`
 	    // ExtraHeaders overrides/extends the provider-level extra HTTP headers
 	    // for this model (merged per key over the provider map). See
 	    // ProviderOptionsConfig.ExtraHeaders for the "${session_id}" sentinel.
@@ -4685,6 +4776,13 @@ OrphanRuntime is one runtime process left behind by a meept process that no long
 	    PID         int
 	    Command     string
 	}
+
+<a name="FilterLiveOwned"></a>
+### func FilterLiveOwned
+
+	func FilterLiveOwned(cfgs []*RuntimeConfig, orphans []OrphanRuntime) []OrphanRuntime
+
+FilterLiveOwned returns the orphans that are safe to reap: every target whose command line does not match an endpoint config recording a different live owner. Shared so \`meept doctor \-\-fix\` applies exactly the daemon's veto.
 
 <a name="FindOrphanRuntimes"></a>
 ### func FindOrphanRuntimes
@@ -5054,6 +5152,13 @@ IsAutoStart returns whether the runtime should auto\-start.
 	func (p ProviderConfig) IsAutoStopOnExit() bool
 
 IsAutoStopOnExit returns whether the runtime should auto\-stop on daemon shutdown. An absent auto\_stop\_on\_exit key defaults to true \(see RuntimeLifecycleConfig.AutoStopOnExitOrDefault\); only an explicit false opts out. A provider with no lifecycle block manages no runtime, so it reports false.
+
+<a name="ProviderConfig.IsSupervised"></a>
+### func \(ProviderConfig\) IsSupervised
+
+	func (p ProviderConfig) IsSupervised() bool
+
+IsSupervised returns whether the runtime should be spawned under the supervisor process. An absent \`supervise\` key defaults to true \(see RuntimeLifecycleConfig.SuperviseOrDefault\); only an explicit false opts out. A provider with no lifecycle block manages no runtime, so it reports false.
 
 <a name="ProviderConfig.PIDDir"></a>
 ### func \(ProviderConfig\) PIDDir
@@ -5426,6 +5531,13 @@ ProviderOptionsConfig holds provider\-specific options.
 	    // [agent.tools].schema_mode. Per-model schema_mode overrides this value.
 	    // Unknown values are ignored at resolve time (warn + fall through).
 	    SchemaMode string `json:"schema_mode,omitempty"`
+	    // ToolChoice is the provider-level default tool_choice policy sent on
+	    // requests that carry tools AND whose caller marked the turn as an
+	    // action turn (llm.WithToolChoice). Empty (default) = no tool_choice
+	    // field is ever sent, so nothing regresses. "required" opts the model
+	    // into forced tool calls. Per-model tool_choice overrides this value.
+	    // Unknown values are ignored at resolve time (warn + fall through).
+	    ToolChoice string `json:"tool_choice,omitempty"`
 	    // ExtraHeaders are additional HTTP headers sent with every request to
 	    // this provider (e.g. x-opencode-session for session affinity on the
 	    // OpenCode Zen/Go gateway). Per-model extra_headers merge over these
@@ -5516,7 +5628,7 @@ LoadProvidersConfig loads providers configuration from a JSON5 file.
 
 	func LoadProvidersConfigDefault() (*ProvidersConfig, error)
 
-LoadProvidersConfigDefault loads providers config from the default locations. Bundled config/models.json5 is the base. \~/.meept/models.json5 overlays it \(user slots, aliases, and models win\). Missing image/video entries in the user file still come from the bundled catalog.
+LoadProvidersConfigDefault loads providers config from the default locations. Bundled config/models.json5 is the base. The user's models.json5 \($MEEPT\_HOME when set, else \~/.meept\) overlays it \(user slots, aliases, and models win\). Missing image/video entries in the user file still come from the bundled catalog.
 
 <a name="MergeProvidersConfig"></a>
 ### func MergeProvidersConfig
@@ -6075,6 +6187,16 @@ Response represents a parsed response from the LLM API.
 	    // OpenAI o1-style reasoning, DeepSeek reasons). Empty when not
 	    // surfaced by the provider.
 	    Reasoning string `json:"reasoning,omitempty"`
+	    // ReasoningPromoted marks Content as the reasoning text PROMOTED into
+	    // the visible channel because the reply carried no content of its own
+	    // (the mlx_lm shape: the whole reply lands in `reasoning` and `content`
+	    // is absent, so the client promotes it rather than reporting an empty
+	    // response — audit finding F59). It is a last-resort answer, NOT visible
+	    // model output: the agent loop's reasoning-only watchdog must still
+	    // recognize the turn as reasoning-only (audit finding F78/F80), otherwise
+	    // a thinking-only model rides to completion with its raw chain-of-thought
+	    // as the user-visible answer. Never set on the tool-call path.
+	    ReasoningPromoted bool `json:"-"`
 	}
 
 <a name="Response.HasToolCalls"></a>
@@ -6116,8 +6238,17 @@ ResponseMessage represents the message in a response choice. Content may be a st
 	    Content   json.RawMessage `json:"content"`
 	    ToolCalls []RawToolCall   `json:"tool_calls,omitempty"`
 	    // ReasoningContent captures chain-of-thought text from OpenAI-compat
-	    // providers that surface it as a sibling field to `content`.
+	    // providers that surface it as a sibling field to `content`
+	    // (DeepSeek/o1 convention).
 	    ReasoningContent string `json:"reasoning_content,omitempty"`
+	    // Reasoning is the same thing under the name mlx_lm server uses.
+	    // Verified BY TEST against mlx_lm 0.31.3 (LFM2.5-8B-A1B-MLX-4bit): the
+	    // ENTIRE assistant reply lands in `reasoning` while `content` stays
+	    // absent, and the server ignores enable_thinking / chat_template_kwargs
+	    // / reasoning_format. Without this alias every mlx_lm reply reads as an
+	    // empty response and the loop burns its nudge ladder to exhaustion
+	    // (2026-09-11 researcher-path failure).
+	    Reasoning string `json:"reasoning,omitempty"`
 	}
 
 <a name="ResponseMessage.ContentString"></a>
@@ -6126,6 +6257,13 @@ ResponseMessage represents the message in a response choice. Content may be a st
 	func (m *ResponseMessage) ContentString() string
 
 ContentString extracts the text content from the Content field, handling both plain string and array\-of\-blocks formats.
+
+<a name="ResponseMessage.ReasoningText"></a>
+### func \(\*ResponseMessage\) ReasoningText
+
+	func (m *ResponseMessage) ReasoningText() string
+
+ReasoningText returns whichever reasoning field the provider populated. OpenAI\-compat vendors use reasoning\_content; mlx\_lm uses reasoning.
 
 <a name="RestartPolicyConfig"></a>
 ## type RestartPolicyConfig
@@ -6246,10 +6384,16 @@ RuntimeConfig holds validated runtime configuration.
 	    // (RegisterConfig takes it from the provider options). It is the address
 	    // the duplicate-spawn pre-check probes before spawning. Empty when the
 	    // caller has no base URL (CLI construction paths): the probe is skipped.
-	    BaseURL            string
-	    PIDFile            string
-	    AutoStart          bool
-	    AutoStop           bool
+	    BaseURL   string
+	    PIDFile   string
+	    AutoStart bool
+	    AutoStop  bool
+	    // Supervise runs this runtime under the supervisor process (supervisor.go)
+	    // so a hard-killed daemon cannot leave it orphaned. It is a pointer so an
+	    // ABSENT value (every literal-constructed config) defaults to supervised
+	    // via Supervised(): silence must not mean "leave a runtime behind". Only an
+	    // explicit false opts out.
+	    Supervise          *bool
 	    SpawnCommand       []string
 	    SpawnTimeout       time.Duration
 	    HealthEndpoint     string
@@ -6272,6 +6416,13 @@ RuntimeConfig holds validated runtime configuration.
 
 ValidateAndNormalize validates the config and expands paths. Supports both legacy \`model\_path\` \(single\) and \`model\_paths\` \(multi\-model\). When \`model\_paths\` is empty and \`model\_path\` is set, the latter is mirrored under the "default" key for a uniform downstream representation.
 
+<a name="RuntimeConfig.Supervised"></a>
+### func \(\*RuntimeConfig\) Supervised
+
+	func (c *RuntimeConfig) Supervised() bool
+
+Supervised reports whether this runtime must be spawned under the supervisor process. An absent value \(nil, i.e. every literal\-constructed config\) means true: only an explicit false opts out. A nil config manages no runtime and reports false.
+
 <a name="RuntimeLifecycleConfig"></a>
 ## type RuntimeLifecycleConfig
 
@@ -6290,12 +6441,18 @@ RuntimeLifecycleConfig holds configuration for local LLM runtime management.
 	    // by the shutdown path nor reaped by the boot-time orphan sweep — it kept
 	    // its model loaded and its port held after a clean shutdown and after a
 	    // crash alike.
-	    AutoStopOnExit *bool               `json:"auto_stop_on_exit,omitempty"` // Stop on daemon shutdown; absent means true
-	    PIDFile        string              `json:"pid_file"`                    // Path to PID file
-	    SpawnCommand   []string            `json:"spawn_command"`               // Command and args to spawn runtime
-	    SpawnTimeout   int                 `json:"spawn_timeout_seconds"`
-	    HealthCheck    HealthCheckConfig   `json:"health_check"`
-	    RestartPolicy  RestartPolicyConfig `json:"restart_policy"`
+	    AutoStopOnExit *bool `json:"auto_stop_on_exit,omitempty"` // Stop on daemon shutdown; absent means true
+	    // Supervise controls whether the runtime is spawned under the supervisor
+	    // process (see supervisor.go), which terminates it when the daemon dies
+	    // hard. Like AutoStopOnExit it is a pointer so an ABSENT key can be told
+	    // apart from an explicit `false`: absent (nil) means true via
+	    // SuperviseOrDefault, and only an explicit `false` opts out.
+	    Supervise     *bool               `json:"supervise,omitempty"` // Spawn under the supervisor; absent means true
+	    PIDFile       string              `json:"pid_file"`            // Path to PID file
+	    SpawnCommand  []string            `json:"spawn_command"`       // Command and args to spawn runtime
+	    SpawnTimeout  int                 `json:"spawn_timeout_seconds"`
+	    HealthCheck   HealthCheckConfig   `json:"health_check"`
+	    RestartPolicy RestartPolicyConfig `json:"restart_policy"`
 	}
 
 <a name="RuntimeLifecycleConfig.AutoStopOnExitOrDefault"></a>
@@ -6304,6 +6461,13 @@ RuntimeLifecycleConfig holds configuration for local LLM runtime management.
 	func (c RuntimeLifecycleConfig) AutoStopOnExitOrDefault() bool
 
 AutoStopOnExitOrDefault reports whether the platform should stop this runtime when it shuts down. An absent key \(nil pointer\) defaults to true: a managed runtime holds a model and a port, so silence must not mean "leave it running". Only an explicit \`false\` opts out.
+
+<a name="RuntimeLifecycleConfig.SuperviseOrDefault"></a>
+### func \(RuntimeLifecycleConfig\) SuperviseOrDefault
+
+	func (c RuntimeLifecycleConfig) SuperviseOrDefault() bool
+
+SuperviseOrDefault reports whether this runtime should be spawned under the supervisor process. An absent key \(nil pointer\) defaults to true: a runtime whose daemon dies hard holds a model and a port until the next boot sweep, so silence must not mean "leave it unsupervised". Only an explicit \`false\` opts out \(e.g. a hand\-managed server the user wraps themselves\).
 
 <a name="RuntimeManager"></a>
 ## type RuntimeManager
@@ -6497,19 +6661,14 @@ IsRunning checks if the process is still alive.
 
 PID returns the process ID.
 
-<a name="RuntimeProcess.StalePIDRemoval"></a>
-### func \(\*RuntimeProcess\) StalePIDRemoval
-
-	func (p *RuntimeProcess) StalePIDRemoval()
-
-StalePIDRemoval cleans up a stale PID file for a given runtime config. This is useful when the daemon restarts and discovers orphaned PID files.
-
 <a name="RuntimeProcess.Start"></a>
 ### func \(\*RuntimeProcess\) Start
 
 	func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) error
 
 Start spawns the runtime process. stdout and stderr are used for the subprocess's output streams; nil falls back to os.Stdout/os.Stderr.
+
+In the daemon the runtime is spawned under the supervisor process \(supervisor.go\), so a hard\-killed daemon cannot leave it orphaned; the recorded PID is the runtime's in both paths \(see the supervisor wiring below\). \`supervise: false\` or a non\-daemon executable spawns directly.
 
 Adoption semantics \(docs/bugs\-and\-gaps.md "Runtime adoption ownership race"\): if the PID file names a live process,
 
@@ -6617,6 +6776,13 @@ SpawnRecord is the durable record of one runtime spawn: the expanded spawn comma
 	    PID         int      `json:"pid"`
 	}
 
+<a name="PruneStaleOperatorRecords"></a>
+### func PruneStaleOperatorRecords
+
+	func PruneStaleOperatorRecords(records []SpawnRecord) []SpawnRecord
+
+PruneStaleOperatorRecords removes the durable records whose auto\_stop=false intent has expired: an operator\-started runtime whose recorded pid is verifiably gone \(see recordSpawnPIDGone\). Only sparing records are pruned — an auto\_stop=true record is sweepable MATCHING evidence even after the pid it names has exited \(a later leftover running the same command line is still identified by it\), and it never spares anything anyway. A record with no pid file is dropped but unlinks nothing. Best\-effort: a removal failure is diagnostic only. Returns the surviving records.
+
 <a name="ReadSpawnRecord"></a>
 ### func ReadSpawnRecord
 
@@ -6714,6 +6880,46 @@ SummaryExtract holds structured information extracted from a conversation during
 	    FileEdits           []string `json:"file_edits"`  // Files edited (compaction)
 	    ErrorsEncountered   []string `json:"errors"`      // Errors encountered (compaction)
 	}
+
+<a name="SupervisorOptions"></a>
+## type SupervisorOptions
+
+SupervisorOptions is one supervisor invocation. ParseSupervisorArgs fills it from a command line; tests may shorten the timings.
+
+	type SupervisorOptions struct {
+	    // ParentPID is the pid whose disappearance the supervisor watches. It must
+	    // be the supervisor's own parent (RuntimeProcess.Start passes os.Getpid()
+	    // of the spawning daemon).
+	    ParentPID int
+	    // PIDReportFD is the descriptor the runtime pid is reported on, or 0 to
+	    // skip reporting.
+	    PIDReportFD int
+	    // ParentDeathFD is the descriptor whose EOF means the spawning parent is
+	    // gone, or 0 to watch the pid alone. This is the reliable signal: a
+	    // pid-based check cannot tell a live parent from a dead one that has not
+	    // been reaped yet (signal 0 succeeds against a zombie, and Getppid still
+	    // names it), and the kernel closes the pipe the moment the parent dies.
+	    ParentDeathFD int
+	    // Argv is the runtime command line, verbatim.
+	    Argv []string
+	    // Log receives the supervisor's diagnostics. nil means slog.Default().
+	    Log *slog.Logger
+	    // PollInterval overrides the parent check interval. 0 means
+	    // supervisorPollInterval.
+	    PollInterval time.Duration
+	    // TermGrace overrides the SIGTERM grace period. 0 means
+	    // supervisorTermGrace.
+	    TermGrace time.Duration
+	}
+
+<a name="ParseSupervisorArgs"></a>
+### func ParseSupervisorArgs
+
+	func ParseSupervisorArgs(args []string) (opts SupervisorOptions, requested bool, err error)
+
+ParseSupervisorArgs parses a supervisor\-mode command line \(os.Args\[1:\]\). requested is false for every other invocation, so the daemon's main can call it before cobra parses anything and leave a normal daemon start untouched; the runtime argv after \`\-\-\` is never interpreted as daemon flags.
+
+requested is true with a non\-nil error when the flag is present but malformed: the caller must report the error, not fall back to a daemon start.
 
 <a name="SystemPromptBlock"></a>
 ## type SystemPromptBlock

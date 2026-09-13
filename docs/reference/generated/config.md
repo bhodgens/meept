@@ -24,6 +24,7 @@ Package config provides configuration loading and validation for meept.
 - [func DefaultAlwaysFullTools\(\) \[\]string](<#DefaultAlwaysFullTools>)
 - [func EnsureDataDir\(cfg \*Config\) error](<#EnsureDataDir>)
 - [func ExpandEnvVars\(s string\) \(string, error\)](<#ExpandEnvVars>)
+- [func ExpandMeeptPath\(path string\) string](<#ExpandMeeptPath>)
 - [func IsDialectToolHint\(hint string\) bool](<#IsDialectToolHint>)
 - [func LoadJSON5\(path string, v any\) error](<#LoadJSON5>)
 - [func LoadJSON5WithDefault\(path string, v any\) error](<#LoadJSON5WithDefault>)
@@ -37,6 +38,7 @@ Package config provides configuration loading and validation for meept.
 - [func NormalizeQuotaRetryDefaults\(q \*QuotaRetryConfig\)](<#NormalizeQuotaRetryDefaults>)
 - [func NormalizeRuntimeDefaults\(rc \*RuntimeConfig\)](<#NormalizeRuntimeDefaults>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
+- [func ParseLogLevelValue\(level string\) \(slog.Level, bool\)](<#ParseLogLevelValue>)
 - [func ReadMainConfig\(\) \(string, bool, error\)](<#ReadMainConfig>)
 - [func SaveACPAgents\(path string, cfg \*ACPAgentsConfig\) error](<#SaveACPAgents>)
 - [func SaveMCPConfig\(path string, cfg \*MCPServersConfig\) error](<#SaveMCPConfig>)
@@ -508,6 +510,15 @@ EnsureDataDir creates the data directory if it doesn't exist.
 
 ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\). Implements recursion depth limiting to detect cyclic env var references. Returns ErrEnvVarCycle when a cycle is detected.
 
+<a name="ExpandMeeptPath"></a>
+## func ExpandMeeptPath
+
+	func ExpandMeeptPath(path string) string
+
+ExpandMeeptPath resolves a config\-supplied path while honoring MEEPT\_HOME: a leading "\~/.meept" prefix \(the shipped default for every meept path\) is redirected under MeeptHome\(\), so MEEPT\_HOME="/x" turns "\~/.meept/repomap\_cache" into "/x/repomap\_cache". Any other "\~" path expands to the user's home directory, and a non\-tilde path is returned unchanged.
+
+Use this for paths that arrive from configuration. Use MeeptPath\(\) when building a meept path from scratch.
+
 <a name="IsDialectToolHint"></a>
 ## func IsDialectToolHint
 
@@ -600,6 +611,15 @@ NormalizeRuntimeDefaults fills safe defaults for [runtime](<https://pkg.go.dev/r
 	func ParseLogLevel(level string) slog.Level
 
 ParseLogLevel converts a string log level to slog.Level.
+
+The name is matched case\-insensitively with surrounding whitespace ignored: meept.json5 in the wild carries both the lowercase documented forms \("debug", "info", "warn", "error" — see docs/configuration/config\-sync.md\) and the uppercase forms the config editor writes \("DEBUG"\), and a case\-sensitive match silently resolved every lowercase value to INFO — which made daemon.log\_level look inert. Unrecognised values fall back to info; callers that want to warn about them use ParseLogLevelValue.
+
+<a name="ParseLogLevelValue"></a>
+## func ParseLogLevelValue
+
+	func ParseLogLevelValue(level string) (slog.Level, bool)
+
+ParseLogLevelValue converts a configured log level name to an slog.Level and reports whether the name was recognised. Names are matched case\-insensitively \(surrounding whitespace ignored\). The empty name means "unset" and resolves to info without being reported as unrecognised; anything else unrecognised resolves to info with ok=false so the caller can emit exactly one startup warning naming the offending value.
 
 <a name="ReadMainConfig"></a>
 ## func ReadMainConfig
@@ -785,8 +805,10 @@ AgentBackoffConfig holds per\-operation backoff parameters. BaseDelay/MaxDelay a
 
 AgentBudgetConfig configures hierarchical task/phase/turn token budgets.
 
+There is ONE global budget switch, llm.budget.enabled, and this section has no enable flag of its own \(an earlier agent.budget.enabled was removed to avoid two independent switches\). The hierarchy is wired only when the global switch is true AND Total is positive; otherwise the AgentLoop keeps a nil hierarchy. An absent/zero Total means "unlimited" \- never a default cap.
+
 	type AgentBudgetConfig struct {
-	    Total             int                     `json:"total"              toml:"total"`          // Total task budget in tokens
+	    Total             int                     `json:"total"              toml:"total"`          // Total task budget in tokens (0 = no cap)
 	    ReservedRatio     float64                 `json:"reserved_ratio"     toml:"reserved_ratio"` // Emergency reserve fraction (0.0-1.0)
 	    Phases            AgentBudgetPhasesConfig `json:"phases"             toml:"phases"`
 	    WarningThresholds AgentBudgetThresholds   `json:"warning_thresholds" toml:"warning_thresholds"`
@@ -796,6 +818,8 @@ AgentBudgetConfig configures hierarchical task/phase/turn token budgets.
 ## type AgentBudgetPhasesConfig
 
 AgentBudgetPhasesConfig configures phase\-level budget allocation behavior.
+
+Subordinate: it only refines how an already\-enabled hierarchy \(global switch on \+ positive agent.budget.total\) distributes budget. Enabled cannot turn a budget on by itself.
 
 	type AgentBudgetPhasesConfig struct {
 	    Enabled      bool `json:"enabled"       toml:"enabled"`
@@ -912,7 +936,9 @@ AgentConfig holds agent loop settings.
 	    Retry AgentRetryConfig `json:"retry" toml:"retry"`
 	    // StateTracking configures the agent state machine observability hooks.
 	    StateTracking AgentStateTrackingConfig `json:"state_tracking" toml:"state_tracking"`
-	    // Budget configures hierarchical task/phase/turn token budgets.
+	    // Budget configures hierarchical task/phase/turn token budgets. It is
+	    // subordinate to the single global switch llm.budget.enabled: the
+	    // hierarchy is wired only when that switch is true AND Total > 0.
 	    Budget AgentBudgetConfig `json:"budget" toml:"budget"`
 	    // ParallelToolExec configures dependency-aware parallel tool execution.
 	    ParallelToolExec AgentParallelToolConfig `json:"parallel_tool_execution" toml:"parallel_tool_execution"`
@@ -1225,7 +1251,12 @@ HeadlessEnabled returns the effective headless setting \(default true\).
 
 BudgetConfig holds token budget settings.
 
+meept.json5 is the SINGLE source of truth for budget values. No Go code invents a non\-zero limit: DefaultConfig\(\) is the all\-zero, disabled posture, and a zero field always means "unlimited" for that limit \(never a default cap\).
+
+Enabled is the ONE global budget switch. When false \(the default\) NO budget is enforced anywhere: not the hourly/daily/per\-task/per\-session token and cost limits, not the RPM rate limit, and not the hierarchical task/phase/turn budget \(which additionally requires a positive agent.budget.total\). When true, the configured limits apply.
+
 	type BudgetConfig struct {
+	    Enabled              bool    `json:"enabled"              toml:"enabled"`
 	    HourlyTokenLimit     int     `json:"hourly_token_limit"   toml:"hourly_token_limit"`
 	    DailyTokenLimit      int     `json:"daily_token_limit"    toml:"daily_token_limit"`
 	    DailyCostLimit       float64 `json:"daily_cost_limit"     toml:"daily_cost_limit"`
@@ -4105,11 +4136,16 @@ ShellPermissionsConfig configures the declarative shell permission table.
 SkillsConfig holds skills settings.
 
 	type SkillsConfig struct {
-	    Enabled               bool                `json:"enabled"                 toml:"enabled"`
-	    SearchPaths           []string            `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
-	    AutoReload            bool                `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
-	    CacheSize             int                 `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
-	    AutoDiscoverHermes    bool                `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
+	    Enabled            bool     `json:"enabled"                 toml:"enabled"`
+	    SearchPaths        []string `json:"search_paths"            toml:"search_paths"`         // Additional skill directories beyond defaults
+	    AutoReload         bool     `json:"auto_reload"             toml:"auto_reload"`          // Watch for skill file changes
+	    CacheSize          int      `json:"max_cached_skills"       toml:"max_cached_skills"`    // Max skills to cache in lazy loader (default: 50)
+	    AutoDiscoverHermes bool     `json:"auto_discover_hermes"    toml:"auto_discover_hermes"` // Auto-discover ~/.hermes/skills (default: true)
+	    // ClaudeSkillsEnabled discovers ~/.claude/skills into agent turns.
+	    // Default false: another tool's user-global skills must not be injected
+	    // into meept agent turns. A name-only match pulled unrelated Claude skills
+	    // into a coder turn (2026-09-12) and the agent abandoned its actual task.
+	    ClaudeSkillsEnabled   bool                `json:"claude_skills_enabled"   toml:"claude_skills_enabled"`  // Discover ~/.claude/skills (default: false)
 	    HermesSkillsDir       string              `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
 	    ValidatePrerequisites bool                `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
 	    Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings

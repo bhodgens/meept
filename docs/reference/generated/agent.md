@@ -50,6 +50,7 @@ Package agent provides the agent loop and related components.
 - [func AllotmentTokens\(contextLimit int, cfg AllotmentConfig\) int](<#AllotmentTokens>)
 - [func ApplyEscalation\(h \*VerificationAutoTrigger, mod \*TurnModification\) bool](<#ApplyEscalation>)
 - [func AssembleOrdered\(sections \[\]PromptSection\) \(prompt string, stablePrefixHash string\)](<#AssembleOrdered>)
+- [func BuildLaneAgentIndexFromDir\(dir string\) \(map\[string\]string, error\)](<#BuildLaneAgentIndexFromDir>)
 - [func BuildPlannerPromptHint\(registry \*AgentRegistry\) string](<#BuildPlannerPromptHint>)
 - [func BuildRevisionContext\(result \*ReviewResult, spec \*TaskSpec\) string](<#BuildRevisionContext>)
 - [func BuildSessionContextBlock\(digest \*SessionContextDigest\) string](<#BuildSessionContextBlock>)
@@ -59,6 +60,7 @@ Package agent provides the agent loop and related components.
 - [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
 - [func ContinuationDescription\(desc string, k, n int\) string](<#ContinuationDescription>)
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
+- [func CurrentLaneAgentIndex\(\) map\[string\]string](<#CurrentLaneAgentIndex>)
 - [func DefaultCoworkerAwareness\(\) string](<#DefaultCoworkerAwareness>)
 - [func DefaultSoulMD\(\) string](<#DefaultSoulMD>)
 - [func EstimateStepTokens\(desc string, cfg AllotmentConfig\) int](<#EstimateStepTokens>)
@@ -77,12 +79,14 @@ Package agent provides the agent loop and related components.
 - [func IsSafeTargetPath\(target string\) bool](<#IsSafeTargetPath>)
 - [func IsValidIntentType\(s string\) bool](<#IsValidIntentType>)
 - [func Key\(agentID, providerKey string\) string](<#Key>)
+- [func LaneAgentFor\(lane string\) string](<#LaneAgentFor>)
 - [func LoadJSONLTraces\(store \*InMemoryTraceStore, path string\) error](<#LoadJSONLTraces>)
 - [func LoadSoul\(path string\) \(string, error\)](<#LoadSoul>)
 - [func PairTopic\(sessionID string\) string](<#PairTopic>)
 - [func ParseVerdict\(output string\) \(Verdict, \[\]CheckResult\)](<#ParseVerdict>)
 - [func PhaseSpecsToPlan\(in \[\]PlanPhaseSpec\) \*plan.CompiledPlan](<#PhaseSpecsToPlan>)
 - [func PresetPrompt\(presetName string, taskDescription string\) \(string, error\)](<#PresetPrompt>)
+- [func PublishLaneAgentIndex\(idx map\[string\]string\)](<#PublishLaneAgentIndex>)
 - [func RecoverPendingFollowUps\(db \*sql.DB, msgBus \*bus.MessageBus, logger \*slog.Logger\)](<#RecoverPendingFollowUps>)
 - [func RenderSpawnContext\(sc SpawnContext\) string](<#RenderSpawnContext>)
 - [func ResultsToChatMessages\(results \[\]\*ExecutionResult\) \[\]llm.ChatMessage](<#ResultsToChatMessages>)
@@ -172,6 +176,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) IsAgentActive\(\) bool](<#AgentLoop.IsAgentActive>)
   - [func \(l \*AgentLoop\) IsModelOverridePersistent\(\) bool](<#AgentLoop.IsModelOverridePersistent>)
   - [func \(l \*AgentLoop\) LastStablePrefixHash\(\) string](<#AgentLoop.LastStablePrefixHash>)
+  - [func \(l \*AgentLoop\) LoopAutonomousMarker\(\) bool](<#AgentLoop.LoopAutonomousMarker>)
   - [func \(l \*AgentLoop\) RetryMetricsSnapshot\(\) RetryMetricsSnapshot](<#AgentLoop.RetryMetricsSnapshot>)
   - [func \(l \*AgentLoop\) Run\(ctx context.Context, messages \<\-chan \*AgentMessage, responses chan\<\- \*AgentResponse\) error](<#AgentLoop.Run>)
   - [func \(l \*AgentLoop\) RunOnce\(ctx context.Context, userMessage, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnce>)
@@ -855,6 +860,8 @@ Package agent provides the agent loop and related components.
   - [func \(c \*LLMClassifier\) UnmarkUnavailable\(\)](<#LLMClassifier.UnmarkUnavailable>)
 - [type LLMClassifierConfig](<#LLMClassifierConfig>)
 - [type LLMMessage](<#LLMMessage>)
+- [type LaneRoute](<#LaneRoute>)
+  - [func LaneAgentTable\(\) \[\]LaneRoute](<#LaneAgentTable>)
 - [type LearnedPattern](<#LearnedPattern>)
 - [type LearningPipeline](<#LearningPipeline>)
 - [type LifecycleOutcome](<#LifecycleOutcome>)
@@ -2280,6 +2287,13 @@ Clears h.pendingEscalation on success — consumed exactly once; a second call i
 
 AssembleOrdered assembles a system prompt with all stable sections first \(preserving their given relative order\), followed by all unstable sections \(also preserving their given relative order\). Sections with an empty Body are skipped. The returned stablePrefixHash is the hex\-encoded sha256 over the exact bytes of the concatenated stable prefix; an empty stable set yields sha256\(""\). This gives provider prompt caches a byte\-identical prefix to hit on every turn, and callers a cheap drift signal.
 
+<a name="BuildLaneAgentIndexFromDir"></a>
+## func BuildLaneAgentIndexFromDir
+
+	func BuildLaneAgentIndexFromDir(dir string) (map[string]string, error)
+
+BuildLaneAgentIndexFromDir builds a lane \-\> agent\-ID index from the AGENT.md definitions under dir. dir may contain AGENT.md files directly, agent subdirectories \(\<dir\>/\<id\>/AGENT.md\), or both. Definition paths are visited in sorted order so the result is deterministic when two agents declare the same lane \(the first path sorted wins\). Disabled agents \(enabled: false\) and empty lane names are skipped. An empty or nil index means no agent declares any lane.
+
 <a name="BuildPlannerPromptHint"></a>
 ## func BuildPlannerPromptHint
 
@@ -2346,6 +2360,13 @@ ContinuationDescription prefixes desc with a \[continuation k/N\] marker.
 	func CosineSimilarity(a, b []float64) float64
 
 CosineSimilarity computes cosine similarity between two vectors.
+
+<a name="CurrentLaneAgentIndex"></a>
+## func CurrentLaneAgentIndex
+
+	func CurrentLaneAgentIndex() map[string]string
+
+CurrentLaneAgentIndex returns the installed lane routing index, or nil when none is published. The returned map must not be mutated.
 
 <a name="DefaultCoworkerAwareness"></a>
 ## func DefaultCoworkerAwareness
@@ -2485,6 +2506,13 @@ IsValid checks if a string is a valid intent type.
 
 Key returns the map key for an episode.
 
+<a name="LaneAgentFor"></a>
+## func LaneAgentFor
+
+	func LaneAgentFor(lane string) string
+
+LaneAgentFor resolves one lane to its agent using the same order as the classifier: the frontmatter\-derived index, then the static table, then the lane's own default. Exported so callers outside this package \(the CLI's \`meept lanes\` command, tests\) read the routing decision rather than a copy of the tables.
+
 <a name="LoadJSONLTraces"></a>
 ## func LoadJSONLTraces
 
@@ -2526,6 +2554,13 @@ PhaseSpecsToPlan converts agent phase specs back into the pure compiler/emitter 
 	func PresetPrompt(presetName string, taskDescription string) (string, error)
 
 PresetPrompt returns the rendered prompt template for a preset with the given task description.
+
+<a name="PublishLaneAgentIndex"></a>
+## func PublishLaneAgentIndex
+
+	func PublishLaneAgentIndex(idx map[string]string)
+
+PublishLaneAgentIndex atomically installs idx as the lane routing index. A nil or empty map clears it, restoring the static fallback path. The map is copied so later caller mutation cannot race with reads.
 
 <a name="RecoverPendingFollowUps"></a>
 ## func RecoverPendingFollowUps
@@ -3368,6 +3403,17 @@ IsModelOverridePersistent returns true if the current override was set via SetPe
 
 LastStablePrefixHash returns the hex sha256 of the stable prefix of the most recently assembled system prompt. Empty before the first build. Intended for logging/metrics hooks that detect prompt\-cache drift \(loop\-economics leaf 01\).
 
+<a name="AgentLoop.LoopAutonomousMarker"></a>
+### func \(\*AgentLoop\) LoopAutonomousMarker
+
+	func (l *AgentLoop) LoopAutonomousMarker() bool
+
+LoopAutonomousMarker reports whether the LOOP\-level autonomous latch \(SetAutonomous / l.autonomous, loop.go\) is set.
+
+It exists for the daemon's wiring pin: since F14 the production job path \(AgentJobProcessor.Process\) marks the TURN's context, never the loop, and that latch must stay false for every production path — it is a one\-way marker with no reset, so setting it on the process\-wide interactive loop silently disables the pending\-change preview for every later chat turn. Read\-only; guarded by the loop mutex \(SetAutonomous writes under it\).
+
+SetAutonomous itself is retained as the escape hatch for a caller that genuinely owns a headless\-only loop; it is NOT part of the queued\-job path.
+
 <a name="AgentLoop.RetryMetricsSnapshot"></a>
 ### func \(\*AgentLoop\) RetryMetricsSnapshot
 
@@ -4154,6 +4200,12 @@ AgentSpec defines the specification for creating an agent.
 	    // (code|debug|plan|analysis|test) the reviewer covers. ReviewPolicy uses
 	    // this for dynamic reviewer selection.
 	    ReviewsDomain string `json:"reviews_domain,omitempty"`
+	    // Intents lists the classifier lanes (intent names, e.g. "code", "debug")
+	    // this agent is the routing destination for. Derived from the AGENT.md
+	    // `intents:` frontmatter. internal/agent builds its lane-to-agent routing
+	    // index from these, so a new specialist is routable with a frontmatter
+	    // edit alone. Empty = the agent declares no lanes.
+	    Intents []string `json:"intents,omitempty"`
 	    // Purpose is a description of what this agent does (used in system prompt).
 	    Purpose string `json:"purpose"`
 	    // Model can be an alias name (e.g., "coder"), a direct model reference (e.g., "zai/glm-4.7"),
@@ -4169,6 +4221,15 @@ AgentSpec defines the specification for creating an agent.
 	    EscalationModel string `json:"escalation_model,omitempty" yaml:"escalation_model,omitempty"`
 	    // AdditionalTools are tools beyond the baseline that this agent has access to.
 	    AdditionalTools []string `json:"additional_tools,omitempty"`
+	    // ToolScopeLimit caps how many tools are offered to this agent in the
+	    // request (tool-list scoping). 0 (default) = no cap: every baseline +
+	    // additional tool is offered, which preserves the existing behavior.
+	    // A positive value offers only the first ToolScopeLimit names from
+	    // AdditionalTools followed by BaselineTools (see ScopedToolNames).
+	    // Reason: a forced tool call (models.json5 `tool_choice: "required"`)
+	    // must choose among few candidates — the measured failure was 81 tools
+	    // offered at once. See docs/reference/agent-loop-tools.md.
+	    ToolScopeLimit int `json:"tool_scope_limit,omitempty"`
 	    // Constraints are operational limits for this agent.
 	    Constraints AgentConstraints `json:"constraints"`
 	    // SystemPromptSections are additional prompt sections for this agent.
@@ -7078,6 +7139,15 @@ DispatchResult is the result of dispatching a request.
 	    // nil for every other classification door. Tagged json:"-" (operational
 	    // metadata, not user-facing serialization).
 	    PrefilterVerdict *PrefilterVerdict `json:"-"`
+	
+	    // AgentOverrideApplied records that the client explicitly named this
+	    // agent (chat.request agent_id → dispatcher agentOverride) and the
+	    // override was applied at step 5.3. RouteToAgent reads this to skip
+	    // intent-Type shortcuts (e.g. the platform-introspection canned dump)
+	    // that would otherwise swallow the turn before the overridden agent
+	    // runs (researcher-extract e2e, 2026-09-12). Tagged json:"-" —
+	    // operational metadata.
+	    AgentOverrideApplied bool `json:"-"`
 	}
 
 <a name="Dispatcher"></a>
@@ -9426,6 +9496,25 @@ LLMMessage represents one message in the LLM exchange for a turn.
 	    Content string `json:"content"`
 	}
 
+<a name="LaneRoute"></a>
+## type LaneRoute
+
+LaneRoute is one row of the routing table: a classifier lane and the agent it routes to.
+
+	type LaneRoute struct {
+	    Intent string `json:"intent"`
+	    Agent  string `json:"agent"`
+	}
+
+<a name="LaneAgentTable"></a>
+### func LaneAgentTable
+
+	func LaneAgentTable() []LaneRoute
+
+LaneAgentTable returns the canonical lane \-\> agent table in classifierLanes order. It is the exported face of agentForIntent, so the daemon classifier, the \`meept lanes\` artifact \(consumed by the prompt\-router sidecar\) and any doc generator all read the SAME table instead of restating it.
+
+Named LaneAgentTable, not RoutingTable: strategic\_routing.go already owns that name for its actor/reviewer table.
+
 <a name="LearnedPattern"></a>
 ## type LearnedPattern
 
@@ -11450,6 +11539,8 @@ ParkedTurn captures a chat turn that was interrupted by budget exhaustion and is
 
 ParkedTurnRecord is the class\-agnostic parked\-turn record \(frozen; SHARED\-CONVENTIONS §4.5 / master Contract 1\). NAME GUARD: the type is ParkedTurnRecord, NOT ParkedTurn — package agent already declares ParkedTurn in budget\_resume.go \(budget watcher\); a second ParkedTurn would be a duplicate\-type compile error.
 
+EXTENSION \(bughunt 2026\-09\-12 wave, F14 follow\-up\): Autonomous is an ADDITIVE field appended to the frozen shape — the freeze protects the meaning and order of the existing fields, which are unchanged; the new field is zero\-value \(false = interactive\) for every record built before it existed and for every non\-autonomous turn. It is the carrier that lets a park/resume keep a step job headless; see its own doc below.
+
 TurnPayload carries the class\-specific original request as JSON so the resume router \(tree 03 leaves 02/03\) can re\-run the turn without reconstructing history. For class=FailureQuota the encoding is the quota watcher's stored fields \(see quota\_resume.go quotaTurnPayload\); class=FailureThrottle's encoding is frozen by tree 03 leaf 02.
 
 	type ParkedTurnRecord struct {
@@ -11461,6 +11552,22 @@ TurnPayload carries the class\-specific original request as JSON so the resume r
 	    Attempt        int
 	    MaxAttempts    int
 	    TurnPayload    json.RawMessage // class-specific original request
+	    // Autonomous records that the parked turn executed with the AUTONOMOUS
+	    // marker on its context (tools.ContextWithAutonomous — daemon step jobs,
+	    // stepJobTurnContext) so the RESUME can re-apply it. A resume callback runs
+	    // on the parker's own context, which carries no turn markers: without this
+	    // flag a parked-then-resumed step turn re-enters the loop interactive,
+	    // file_write/file_edit STAGE a pending change no human can accept, the step
+	    // reports success, and the file never exists (e2e run 8, 2026-09-11 —
+	    // re-created by the F14 fix, which moved the marker off the loop but left
+	    // the park/resume path dropping it).
+	    //
+	    // Class payloads carry the same bit (throttledTurnPayload.Autonomous)
+	    // because the SQLite park store persists ONLY turn_payload: the payload
+	    // copy is what survives a restart, this field is the in-process copy. A
+	    // resume path re-applies the marker when EITHER is set (parkedAutonomous),
+	    // so the two can never disagree in a way that matters.
+	    Autonomous bool
 	}
 
 <a name="ParseResult"></a>
