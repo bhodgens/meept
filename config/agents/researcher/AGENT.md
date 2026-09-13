@@ -3,6 +3,7 @@ id: researcher
 name: Research Specialist
 role: executor
 description: Gathers information from web, documentation, and codebase
+intents: [research]
 enabled: true
 can_delegate: false
 additional_tools:

@@ -3,6 +3,7 @@ id: coder
 name: Code Specialist
 role: executor
 description: Implements, modifies, and maintains code with precision
+intents: [code, review, tooluse]
 enabled: true
 can_delegate: false
 additional_tools:

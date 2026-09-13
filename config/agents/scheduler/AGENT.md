@@ -3,6 +3,7 @@ id: scheduler
 name: Scheduler Specialist
 role: executor
 description: Creates, manages, and cancels scheduled tasks and reminders
+intents: [schedule]
 enabled: true
 can_delegate: false
 additional_tools:

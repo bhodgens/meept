@@ -3,6 +3,7 @@ id: analyst
 name: Analysis Specialist
 role: executor
 description: Synthesizes information, draws insights, and summarizes complex topics
+intents: [analyze, search]
 enabled: true
 can_delegate: false
 additional_tools:

@@ -3,6 +3,7 @@ id: architect
 name: Architecture Specialist
 role: executor
 description: Designs systems, chooses technologies, documents trade-offs and decisions
+intents: [architect]
 enabled: true
 can_delegate: false
 additional_tools:

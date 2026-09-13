@@ -90,6 +90,12 @@ type AgentSpec struct {
 	// (code|debug|plan|analysis|test) the reviewer covers. ReviewPolicy uses
 	// this for dynamic reviewer selection.
 	ReviewsDomain string `json:"reviews_domain,omitempty"`
+	// Intents lists the classifier lanes (intent names, e.g. "code", "debug")
+	// this agent is the routing destination for. Derived from the AGENT.md
+	// `intents:` frontmatter. internal/agent builds its lane-to-agent routing
+	// index from these, so a new specialist is routable with a frontmatter
+	// edit alone. Empty = the agent declares no lanes.
+	Intents []string `json:"intents,omitempty"`
 	// Purpose is a description of what this agent does (used in system prompt).
 	Purpose string `json:"purpose"`
 	// Model can be an alias name (e.g., "coder"), a direct model reference (e.g., "zai/glm-4.7"),

@@ -3,6 +3,7 @@ id: committer
 name: Git Specialist
 role: executor
 description: Handles git operations including commits, branches, merges, and repository management
+intents: [git]
 enabled: true
 can_delegate: false
 additional_tools:

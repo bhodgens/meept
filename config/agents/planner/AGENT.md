@@ -3,6 +3,7 @@ id: planner
 name: Planning Specialist
 role: executor
 description: Decomposes complex tasks into actionable plans and execution strategies
+intents: [plan]
 enabled: true
 can_delegate: false
 capabilities:

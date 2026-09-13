@@ -3,6 +3,7 @@ id: writer
 name: Writing Specialist
 role: executor
 description: Produces long-form writing — essays, docs, briefs, explanations
+intents: [write]
 enabled: true
 can_delegate: false
 additional_tools:

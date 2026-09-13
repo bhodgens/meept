@@ -3,6 +3,7 @@ id: skeptic
 name: Skeptic
 role: executor
 description: Stress-tests claims, hunts for flaws in reasoning, surfaces contradictions
+intents: [skeptic]
 enabled: true
 can_delegate: false
 additional_tools:

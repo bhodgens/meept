@@ -3,6 +3,7 @@ id: explore
 name: Explore
 role: executor
 description: fast read-only codebase search specialist
+intents: [explore]
 enabled: true
 can_delegate: false
 additional_tools:

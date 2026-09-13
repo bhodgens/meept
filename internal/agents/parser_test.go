@@ -323,3 +323,70 @@ Body.`,
 		})
 	}
 }
+
+// TestParseAgentText_Intents verifies the explicit `intents:` lane list parses
+// into AgentMetadata.Intents (both the primary metadata struct and the
+// alternative-field parse block) and that an absent key leaves it nil.
+func TestParseAgentText_Intents(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name: "flow list",
+			input: `---
+id: intents-agent
+name: Intents Agent
+role: executor
+intents: [quickplan, plan]
+---
+
+Body.`,
+			want: []string{"quickplan", "plan"},
+		},
+		{
+			name: "block list",
+			input: `---
+id: intents-agent
+name: Intents Agent
+role: executor
+intents:
+  - code
+  - review
+  - tooluse
+---
+
+Body.`,
+			want: []string{"code", "review", "tooluse"},
+		},
+		{
+			name: "absent key stays nil",
+			input: `---
+id: intents-agent
+name: Intents Agent
+role: executor
+---
+
+Body.`,
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			def, err := ParseAgentText(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(def.Intents) != len(tt.want) {
+				t.Fatalf("Intents = %v, want %v", def.Intents, tt.want)
+			}
+			for i := range tt.want {
+				if def.Intents[i] != tt.want[i] {
+					t.Errorf("Intents[%d] = %q, want %q", i, def.Intents[i], tt.want[i])
+				}
+			}
+		})
+	}
+}

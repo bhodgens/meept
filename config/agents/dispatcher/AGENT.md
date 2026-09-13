@@ -3,6 +3,7 @@ id: dispatcher
 name: Dispatcher
 role: dispatcher
 description: Intake agent that classifies user intent and routes to specialists
+intents: [compound]
 enabled: true
 can_delegate: true
 max_iterations: 5

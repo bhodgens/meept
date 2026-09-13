@@ -3,6 +3,7 @@ id: image-gen
 name: Image Generator
 role: executor
 description: Expands a brief with a small enhancer model, then generates images
+intents: [image_gen]
 enabled: true
 can_delegate: false
 enhancer_model: small

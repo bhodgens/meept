@@ -3,6 +3,7 @@ id: video-gen
 name: Video Generator
 role: executor
 description: Expands a brief with a small enhancer model, then generates video clips
+intents: [video_gen]
 enabled: true
 can_delegate: false
 enhancer_model: small

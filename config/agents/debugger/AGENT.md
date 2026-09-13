@@ -3,6 +3,7 @@ id: debugger
 name: Debug Specialist
 role: executor
 description: Investigates, diagnoses, and fixes bugs with systematic precision
+intents: [debug]
 enabled: true
 can_delegate: false
 additional_tools:

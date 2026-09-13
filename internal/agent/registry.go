@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"sort"
 	"strings"
 	"sync"
 
@@ -805,6 +806,43 @@ func (r *AgentRegistry) loadAgentDefinitions(bundledPath string) {
 	r.logger.Info("Loaded agent definitions from AGENT.md files",
 		"count", loaded, "disabled", disabled,
 	)
+
+	// Publish the frontmatter-derived lane routing index so agentForIntent
+	// resolves lanes from AGENT.md `intents:` first (no Go change to add a
+	// routable specialist). Falls back to the static tables for undeclared
+	// lanes; see publishLaneIndex and internal/agent/llm_classifier.go.
+	r.publishLaneIndex()
+}
+
+// publishLaneIndex rebuilds the frontmatter-derived lane routing index from
+// the registry's loaded specs and installs it for agentForIntent. A lane is
+// attributed to the first spec (in sorted ID order) that declares it, so the
+// result is deterministic. Called after AGENT.md definitions load; with no
+// declared intents the index is cleared and agentForIntent uses its static
+// fallbacks. Safe to call concurrently: it snapshots under the read lock and
+// installs the finished map outside it (no I/O while holding the lock).
+func (r *AgentRegistry) publishLaneIndex() {
+	r.mu.RLock()
+	ids := make([]string, 0, len(r.specs))
+	for id := range r.specs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	idx := make(map[string]string)
+	for _, id := range ids {
+		spec := r.specs[id]
+		for _, lane := range spec.Intents {
+			lane = strings.TrimSpace(lane)
+			if lane == "" {
+				continue
+			}
+			if _, exists := idx[lane]; !exists {
+				idx[lane] = spec.ID
+			}
+		}
+	}
+	r.mu.RUnlock()
+	PublishLaneAgentIndex(idx)
 }
 
 // mergeAgentDefinition merges an AGENT.md definition into the registry.
@@ -879,6 +917,10 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 	} else {
 		merged.ReviewsDomain = base.ReviewsDomain
 	}
+
+	// Intents: MERGE (union) so a lane declared in either the loaded AGENT.md
+	// or a prior spec is retained; the lane routing index reads these.
+	merged.Intents = mergeStringSlices(base.Intents, def.Intents)
 
 	// SystemPromptSections: carry from base (AGENT.md body replaces Purpose, not sections)
 	if len(base.SystemPromptSections) > 0 {
@@ -1000,6 +1042,7 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		Enabled:         def.IsEnabled(),
 		CanDelegate:     def.CanDelegate,
 		ReviewsDomain:   def.ReviewsDomain,
+		Intents:         append([]string(nil), def.Intents...),
 		Purpose:         r.assemblePurpose(def.PromptComponents, def.Body),
 		Model:           def.Model,
 		EnhancerModel:   def.EnhancerModel,

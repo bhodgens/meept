@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -99,10 +103,32 @@ func laneList() string {
 	return strings.Join(names, ", ")
 }
 
-// agentForIntent maps a lane to its agent. Lanes without an explicit
-// agentMapping entry fall back to the lane's own DefaultAgent, so adding a
-// lane to classifierLanes is enough to give it a route.
+// laneAgentIndex is the frontmatter-derived lane -> agent-ID routing index.
+// It is the PRIMARY destination for agentForIntent: it is built from the
+// `intents:` list in each AGENT.md definition (see BuildLaneAgentIndexFromDir
+// and AgentRegistry.publishLaneIndex), so adding a new specialist agent is a
+// frontmatter-only change with no Go edit. agentMapping and each lane's
+// IntentType.DefaultAgent remain ordered fallbacks for lanes that no agent
+// declares. Stored as an atomic pointer so reads are lock-free and a
+// republish is a single Store that can never expose a half-built map.
+var laneAgentIndex atomic.Pointer[map[string]string]
+
+// agentForIntent maps a lane to its agent. Resolution order:
+//
+//  1. the frontmatter-derived laneAgentIndex - any agent whose AGENT.md
+//     declares the lane in `intents:` is authoritative;
+//  2. the static agentMapping table (backward compatibility);
+//  3. the lane's own IntentType.DefaultAgent;
+//  4. the chat agent as the final safety net.
+//
+// Steps 2-4 keep existing behavior intact when no agent declares a lane, so
+// the dynamic path can be adopted incrementally without regressing routing.
 func agentForIntent(intent string) string {
+	if idx := laneAgentIndex.Load(); idx != nil {
+		if agent, ok := (*idx)[intent]; ok && agent != "" {
+			return agent
+		}
+	}
 	if agent, ok := agentMapping[intent]; ok && agent != "" {
 		return agent
 	}
@@ -110,6 +136,123 @@ func agentForIntent(intent string) string {
 		return agent
 	}
 	return config.AgentIDChat
+}
+
+// LaneRoute is one row of the routing table: a classifier lane and the agent
+// it routes to.
+type LaneRoute struct {
+	Intent string `json:"intent"`
+	Agent  string `json:"agent"`
+}
+
+// LaneAgentFor resolves one lane to its agent using the same order as the
+// classifier: the frontmatter-derived index, then the static table, then the
+// lane's own default. Exported so callers outside this package (the CLI's
+// `meept lanes` command, tests) read the routing decision rather than a copy
+// of the tables.
+func LaneAgentFor(lane string) string {
+	return agentForIntent(lane)
+}
+
+// LaneAgentTable returns the canonical lane -> agent table in classifierLanes
+// order. It is the exported face of agentForIntent, so the daemon classifier,
+// the `meept lanes` artifact (consumed by the prompt-router sidecar) and any
+// doc generator all read the SAME table instead of restating it.
+//
+// Named LaneAgentTable, not RoutingTable: strategic_routing.go already owns
+// that name for its actor/reviewer table.
+func LaneAgentTable() []LaneRoute {
+	routes := make([]LaneRoute, 0, len(classifierLanes))
+	for _, lane := range classifierLanes {
+		routes = append(routes, LaneRoute{
+			Intent: string(lane),
+			Agent:  agentForIntent(string(lane)),
+		})
+	}
+	return routes
+}
+
+// BuildLaneAgentIndexFromDir builds a lane -> agent-ID index from the AGENT.md
+// definitions under dir. dir may contain AGENT.md files directly, agent
+// subdirectories (<dir>/<id>/AGENT.md), or both. Definition paths are visited
+// in sorted order so the result is deterministic when two agents declare the
+// same lane (the first path sorted wins). Disabled agents (enabled: false) and
+// empty lane names are skipped. An empty or nil index means no agent declares
+// any lane.
+func BuildLaneAgentIndexFromDir(dir string) (map[string]string, error) {
+	paths, err := agentDefinitionPaths(dir)
+	if err != nil {
+		return nil, err
+	}
+	idx := make(map[string]string)
+	for _, path := range paths {
+		def, err := agents.ParseAgentFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("lane agent index: parse %s: %w", path, err)
+		}
+		if !def.IsEnabled() {
+			continue
+		}
+		for _, lane := range def.Intents {
+			lane = strings.TrimSpace(lane)
+			if lane == "" {
+				continue
+			}
+			if _, exists := idx[lane]; !exists {
+				idx[lane] = def.ID
+			}
+		}
+	}
+	return idx, nil
+}
+
+// agentDefinitionPaths lists the AGENT.md files under dir in sorted order.
+// A directory entry contributes <dir>/<entry>/AGENT.md when that file exists;
+// a plain file named AGENT.md contributes itself.
+func agentDefinitionPaths(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("lane agent index: read dir %s: %w", dir, err)
+	}
+	var paths []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			candidate := filepath.Join(dir, entry.Name(), "AGENT.md")
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				paths = append(paths, candidate)
+			}
+			continue
+		}
+		if entry.Name() == "AGENT.md" {
+			paths = append(paths, filepath.Join(dir, entry.Name()))
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// PublishLaneAgentIndex atomically installs idx as the lane routing index. A
+// nil or empty map clears it, restoring the static fallback path. The map is
+// copied so later caller mutation cannot race with reads.
+func PublishLaneAgentIndex(idx map[string]string) {
+	if len(idx) == 0 {
+		laneAgentIndex.Store(nil)
+		return
+	}
+	snapshot := make(map[string]string, len(idx))
+	for lane, agent := range idx {
+		snapshot[lane] = agent
+	}
+	laneAgentIndex.Store(&snapshot)
+}
+
+// CurrentLaneAgentIndex returns the installed lane routing index, or nil when
+// none is published. The returned map must not be mutated.
+func CurrentLaneAgentIndex() map[string]string {
+	if p := laneAgentIndex.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 var intentThresholds = map[string]float64{

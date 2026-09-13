@@ -198,6 +198,7 @@ func parseMetadata(frontmatter string) (*AgentMetadata, error) {
 		AdditionalTools       []string          `yaml:"additional_tools"`
 		AvailableSkills       []string          `yaml:"available_skills"`
 		SkillTriggers         map[string]string `yaml:"skill_triggers"`
+		Intents               []string          `yaml:"intents"`
 		MaxIterations         int               `yaml:"max_iterations"`
 		TimeoutSeconds        int               `yaml:"timeout_seconds"`
 		MaxTokensPerTurn      int               `yaml:"max_tokens_per_turn"`
@@ -218,6 +219,9 @@ func parseMetadata(frontmatter string) (*AgentMetadata, error) {
 	}
 	if meta.SkillTriggers == nil && altMeta.SkillTriggers != nil {
 		meta.SkillTriggers = altMeta.SkillTriggers
+	}
+	if len(meta.Intents) == 0 && len(altMeta.Intents) > 0 {
+		meta.Intents = altMeta.Intents
 	}
 	if meta.MaxIterations == 0 && altMeta.MaxIterations != 0 {
 		meta.MaxIterations = altMeta.MaxIterations

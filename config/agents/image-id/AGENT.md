@@ -3,6 +3,7 @@ id: image-id
 name: Image Identifier
 role: executor
 description: Identifies subjects, text, style, and likely source of an image
+intents: [image_id]
 enabled: true
 can_delegate: false
 additional_tools:

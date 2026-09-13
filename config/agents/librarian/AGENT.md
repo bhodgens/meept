@@ -3,6 +3,7 @@ id: librarian
 name: Memory Steward
 role: executor
 description: Tends the memory platform — dedup, tag hygiene, reflection, epistemic integrity
+intents: [librarian]
 enabled: true
 can_delegate: false
 additional_tools:

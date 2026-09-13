@@ -3,6 +3,7 @@ id: chat
 name: Chat Assistant
 role: conversational
 description: Friendly conversational assistant with memory and web tools
+intents: [chat, report, recall, platform, security, status, instruction, clarify]
 enabled: true
 can_delegate: false
 additional_tools:

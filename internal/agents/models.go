@@ -81,6 +81,14 @@ type AgentMetadata struct {
 	// SkillTriggers maps keywords to skill names for automatic invocation.
 	SkillTriggers map[string]string `yaml:"skill_triggers,omitempty"`
 
+	// Intents lists the classifier lanes (intent names) this agent is the
+	// destination for, e.g. ["code", "review", "tooluse"]. The lane-to-agent
+	// routing index in internal/agent is built from this field, so a new
+	// specialist becomes routable by adding AGENT.md frontmatter alone - no
+	// Go change. Empty/absent = the agent declares no lanes and is reachable
+	// only by explicit handoff.
+	Intents []string `yaml:"intents,omitempty"`
+
 	// MaxIterations is the maximum reasoning cycles.
 	MaxIterations int `yaml:"max_iterations,omitempty"`
 

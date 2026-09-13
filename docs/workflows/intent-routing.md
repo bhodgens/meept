@@ -39,23 +39,45 @@ autonomously — no approval pauses after that point.
 
 The LLM classifier can only emit lanes it is told about. That list lives in
 ONE place — `classifierLanes` in `internal/agent/llm_classifier.go` — and it
-drives all four consumers: the classifier system prompt, the per-lane
-description list in the user prompt, the `isValidIntent` gate, and the
-lane-to-agent mapping (`agentMapping`, falling back to each lane's
-`IntentType.DefaultAgent`).
+drives the classifier system prompt, the per-lane description list in the
+user prompt, and the `isValidIntent` gate. The list used to be duplicated as
+a literal in three of those places, and they drifted. `quickplan` had a
+dispatcher route, an agent mapping and 58 gold evaluation cases while being
+absent from every list, so the LLM classifier could never emit it;
+`research` was missing from the `isValidIntent` gate, which made the
+research lane unreachable from the classifier entirely. Adding a lane to
+`classifierLanes` is now the whole change on the **emit** side.
 
-The list used to be duplicated as a literal in three of those places, and
-they drifted. `quickplan` had a dispatcher route, an agent mapping and 58
-gold evaluation cases while being absent from every list, so the LLM
-classifier could never emit it; `research` was missing from the
-`isValidIntent` gate, which made the research lane unreachable from the
-classifier entirely. Adding a lane to `classifierLanes` is now the whole
-change.
+The lane-to-**agent** destination is no longer a Go table; it is derived from
+the agent definitions. Each `config/agents/*/AGENT.md` declares the lanes it
+owns in an `intents:` frontmatter list — for example `intents: [code,
+review, tooluse]` on the coder, `intents: [plan]` on the planner. At load
+time those lists build the lane-to-agent index
+(`BuildLaneAgentIndexFromDir` → `AgentRegistry.publishLaneIndex`), which
+`agentForIntent` consults first. **Adding a new specialist is a
+frontmatter-only change**: create `config/agents/<id>/AGENT.md` with
+`intents: [<lane>]` and the lane routes to it with no Go edit.
+
+`agentForIntent` fallback order (first match wins):
+
+1. the frontmatter `intents:` index — any agent that declares the lane;
+2. the static `agentMapping` table in `internal/agent/llm_classifier.go`;
+3. the lane's own `IntentType.DefaultAgent`;
+4. `chat`, the final safety net.
+
+Steps 2-4 keep every lane routable when no agent declares it (for example
+`quickplan`, whose destination is the orchestrator and which no AGENT.md
+declares), so the dynamic path can be adopted incrementally without
+regressing existing routing.
 
 Guards, in `internal/agent/classifier_lanes_test.go` — the build fails when
 the lists drift again: every lane used by the gold corpora is emittable,
 every corpus `expected_agent` equals `agentForIntent`, every advertised lane
-has a description and a route, and the user prompt lists every lane.
+has a description and a route, a brand-new AGENT.md in a temp directory
+becomes routable purely from its `intents:` frontmatter, an undeclared lane
+still falls back to the static tables, and every lane the shipped
+`config/agents` declares matches the route the static tables produced before
+`intents:` existed.
 
 ## Intent decision table
 
