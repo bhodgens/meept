@@ -317,8 +317,71 @@ func MergeProvidersConfig(base, overlay *ProvidersConfig) *ProvidersConfig {
 		}
 		providers[k] = mergeProviderConfig(existing, v)
 	}
+	// Endpoint ownership: when the overlay (the user's models.json5) declares a
+	// provider on the same base URL as a bundled one, the overlay's provider
+	// takes that endpoint and the bundled provider is dropped. The bundled
+	// entries are templates for a default port (127.0.0.1:8080 for the general
+	// local driver), and two providers on one endpoint make the runtime manager
+	// pick a winner by registration order - it logged "Conflicting
+	// spawn_command for shared endpoint; keeping the first" and silently ran
+	// the bundled command from a stale binary. Same-ID merges above are
+	// unaffected; only a cross-ID endpoint clash drops the bundled entry.
+	dropBundledEndpointDuplicates(base.Providers, overlay.Providers, providers)
 	out.Providers = providers
 	return &out
+}
+
+// dropBundledEndpointDuplicates removes from merged every BASE provider whose
+// base URL is also declared by an OVERLAY provider under a different ID, so a
+// user-defined provider owns its endpoint. Providers are compared on the
+// normalized host:port of Options.BaseURL; entries with an empty BaseURL, with
+// the same ID, or with a distinct endpoint are left untouched.
+func dropBundledEndpointDuplicates(base, overlay, merged map[string]ProviderConfig) {
+	if len(overlay) == 0 {
+		return
+	}
+	claimed := make(map[string]string, len(overlay))
+	for id, p := range overlay {
+		if key := endpointHostPort(p.Options.BaseURL); key != "" {
+			claimed[key] = id
+		}
+	}
+	if len(claimed) == 0 {
+		return
+	}
+	for id, p := range base {
+		if _, isOverlay := overlay[id]; isOverlay {
+			continue
+		}
+		key := endpointHostPort(p.Options.BaseURL)
+		if key == "" {
+			continue
+		}
+		if _, ok := claimed[key]; ok {
+			delete(merged, id)
+		}
+	}
+}
+
+// endpointHostPort normalizes a provider base URL to its host:port, dropping
+// the scheme, path and trailing slash. Returns "" for an unparseable or empty
+// URL, which callers treat as "not an endpoint owner".
+func endpointHostPort(baseURL string) string {
+	if baseURL == "" {
+		return ""
+	}
+	trimmed := strings.TrimSpace(baseURL)
+	trimmed = strings.TrimSuffix(trimmed, "/")
+	if i := strings.Index(trimmed, "://"); i >= 0 {
+		trimmed = trimmed[i+3:]
+	}
+	if i := strings.IndexAny(trimmed, "/?#"); i >= 0 {
+		trimmed = trimmed[:i]
+	}
+	if trimmed == "" {
+		return ""
+	}
+	return strings.ToLower(trimmed)
 }
 
 func cloneProviderConfig(p ProviderConfig) ProviderConfig {

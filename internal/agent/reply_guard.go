@@ -72,8 +72,12 @@ func replaceCatalogReply(reply string) (string, replyGuardMatch, bool) {
 	// bar and shipped to a naive user). The roster header is unambiguous:
 	// no legitimate assistant reply contains it, so it always sanitizes.
 	// Headerless dumps still get the prose-ratio escape hatch.
-	if match.Category != "agents" && proseLineRatio(reply) > 0.40 {
+	if match.Category != "agents" && match.Category != "tool_result" && proseLineRatio(reply) > 0.40 {
 		return reply, replyGuardMatch{}, false
+	}
+
+	if match.Category == "tool_result" {
+		return "the tool ran, but the result came back as raw data instead of an answer. ask me to do something specific — for example 'make me a program that ...' — and i'll get to work.", match, true
 	}
 
 	return "i looked up the platform " + match.Category + " information, but that isn't a useful answer on its own. ask me to do something specific — for example 'make me a program that ...' — and i'll get to work.", match, true
@@ -92,7 +96,43 @@ func detectCatalogReply(reply string) (replyGuardMatch, bool) {
 	if token, ok := matchedTotalsLine(reply); ok {
 		return replyGuardMatch{Rule: "tools_totals_line", Matched: token, Category: "tools"}, true
 	}
+	if key, ok := toolResultJSONKey(reply); ok {
+		return replyGuardMatch{Rule: "tool_result_json", Matched: key, Category: "tool_result"}, true
+	}
 	return replyGuardMatch{}, false
+}
+
+// toolResultJSONKey reports whether the reply is a raw tool-result JSON dump:
+// machine output forwarded verbatim to the user (memory_store's
+// {"success": true, "memory_id": ..., "type": "task"} and friends) rather than
+// an answer written for a person. Observed end to end 2026-09-13: a chat turn
+// replied with two concatenated memory_store result objects and the guard had
+// no rule for that shape.
+//
+// It is deliberately narrow, because the guard REPLACES whatever it matches:
+// the reply must be pure JSON (it starts with '{' or '[', ends with the
+// matching brace, and every non-blank line is structural) and must carry a
+// tool-result identity key. A fenced or prose-wrapped JSON answer fails the
+// first test and passes through untouched.
+func toolResultJSONKey(reply string) (string, bool) {
+	trimmed := strings.TrimSpace(reply)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return "", false
+	}
+	if !strings.HasSuffix(trimmed, "}") && !strings.HasSuffix(trimmed, "]") {
+		return "", false
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		if s := strings.TrimSpace(line); s != "" && !isStructuralLine(s) {
+			return "", false
+		}
+	}
+	for _, key := range []string{`"memory_id"`, `"task_id"`, `"job_id"`, `"tool_result"`, `"tool_output"`, `"step_id"`} {
+		if strings.Contains(reply, key) {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 // matchedTotalsLine reports whether the reply carries a tools/agents catalog
