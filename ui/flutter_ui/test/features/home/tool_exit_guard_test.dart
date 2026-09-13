@@ -242,6 +242,15 @@ Future<void> _pickPalette(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
 }
 
+/// Awaits an exit request, but gives up after a moment.
+///
+/// A request that nothing completes (a guard that never answers, a latch that
+/// was never settled) would otherwise hang the test instead of failing it;
+/// this turns that hang into a null the assertion can name.
+Future<bool?> _answerOrNull(Future<bool> request) => request
+    .then<bool?>((allowed) => allowed)
+    .timeout(const Duration(seconds: 1), onTimeout: () => null);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -340,6 +349,66 @@ void main() {
         1,
         reason: 'the newly registered guard must still be asked',
       );
+    });
+
+    // A guard the panel registered can go away while its own answer is still
+    // pending - the panel disposes on a route change, or the dialog is torn
+    // down with the navigator it was shown in, and nothing ever completes that
+    // future. Left latched, the never-completing future is handed to every
+    // later exit: each one is silently unasked, and the panel that could have
+    // vetoed it is already gone.
+    test('a guard released while its answer is pending does not wedge '
+        'later exits', () async {
+      final registry = ToolExitGuardRegistry();
+      final stuck = Completer<bool>();
+      Future<bool> guard() => stuck.future;
+      registry.register(guard);
+
+      final first = registry.requestExit();
+      expect(registry.guard, isNotNull);
+
+      // The panel goes away (route change / dispose) with its answer owed.
+      registry.release(guard);
+
+      // The caller that was waiting is settled instead of hanging forever.
+      expect(
+        await _answerOrNull(first),
+        isTrue,
+        reason: 'the panel that owed the answer is gone; nothing is lost',
+      );
+      expect(registry.guard, isNull);
+
+      // And the next exit is a fresh request: the guard that replaced it is
+      // asked, rather than sharing a future that never completes.
+      var asked = 0;
+      registry.register(() async {
+        asked++;
+        return false;
+      });
+      expect(await _answerOrNull(registry.requestExit()), isFalse);
+      expect(asked, 1, reason: 'the new guard must be asked');
+    });
+
+    test('releasing another guard leaves an in-flight request alone', () async {
+      final registry = ToolExitGuardRegistry();
+      var asked = 0;
+      final gate = Completer<bool>();
+      Future<bool> guard() async {
+        asked++;
+        return gate.future;
+      }
+
+      registry.register(guard);
+      final pending = registry.requestExit();
+
+      // A panel that never owned this request disposes: its release must not
+      // answer a question that is still being asked.
+      registry.release(() async => true);
+      expect(registry.guard, same(guard));
+
+      gate.complete(true);
+      expect(await _answerOrNull(pending), isTrue);
+      expect(asked, 1);
     });
   });
 
@@ -658,6 +727,35 @@ void main() {
       expect(find.text('settings panel marker'), findsNothing);
     });
 
+    // The no-guard case above short-circuits the registry: `_ask` returns
+    // true without touching a guard, so it never exercises the interesting
+    // half of the exit - a REGISTERED guard answering across the async gap
+    // `guardRouteExit` awaits, and the `requested != applied` check deciding
+    // whether the route still has to leave. This case is the one a panel with
+    // unsaved edits actually takes.
+    testWidgets('an allowed pop with a registered guard is asked once, '
+        'releases the guard, and lands on chat', (tester) async {
+      final (container, router) = await pumpPanel(tester);
+
+      var asked = 0;
+      container.read(toolExitGuardProvider).register(() async {
+        asked++;
+        return true;
+      });
+
+      expect(await router.routerDelegate.popRoute(), isFalse);
+      await tester.pumpAndSettle();
+
+      expect(asked, 1, reason: 'the one allowed pop asks the guard once');
+      expect(
+        container.read(toolExitGuardProvider).guard,
+        isNull,
+        reason: 'the allow released the registration',
+      );
+      expect(find.text('chat home marker'), findsOneWidget);
+      expect(find.text('settings panel marker'), findsNothing);
+    });
+
     testWidgets('an app-driven navigation off the panel route is left alone', (
       tester,
     ) async {
@@ -671,6 +769,33 @@ void main() {
 
       expect(find.text('memory route marker'), findsOneWidget);
       expect(find.text('chat home marker'), findsNothing);
+    });
+
+    // The same app-driven navigation, this time with a guard registered: the
+    // route's `onExit` still runs (and still asks), so the `requested !=
+    // applied` check - not the empty registry - is what has to leave the
+    // navigation the user chose in place.
+    testWidgets('an app-driven navigation with a registered guard is not '
+        'redirected to chat', (tester) async {
+      final (container, router) = await pumpPanel(tester);
+
+      var asked = 0;
+      container.read(toolExitGuardProvider).register(() async {
+        asked++;
+        return true;
+      });
+
+      router.go('/tools/memory');
+      await tester.pumpAndSettle();
+
+      expect(asked, 1, reason: 'the veto ran inside the navigation');
+      expect(find.text('memory route marker'), findsOneWidget);
+      expect(find.text('chat home marker'), findsNothing);
+      expect(
+        container.read(toolExitGuardProvider).guard,
+        isNull,
+        reason: 'the allow released the registration either way',
+      );
     });
   });
 

@@ -863,11 +863,64 @@ void main() {
       expect(client.loadCount, 3);
       expect(find.byType(AlertDialog), findsNothing);
       expect(find.byKey(mainConfigErrorKey), findsOneWidget);
-      expect(find.textContaining('changed again'), findsOneWidget);
+      // No dialog was shown, so there was no agreement: the reconcile read
+      // above still saw the loaded copy (the writer landed while it was in
+      // flight, after it had read). The stop must describe the file moving,
+      // not a consent the user never gave.
+      expect(
+        find.textContaining('the file moved after this save'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('agreed to overwrite'),
+        findsNothing,
+        reason: 'no overwrite dialog was ever shown',
+      );
       expect(find.textContaining('line 2'), findsOneWidget);
       // The edited copy is the only copy of the work: it stays, still dirty.
       expect(_textOf(tester, mainConfigTextKey), '{"mine": true}');
       expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
+    });
+
+    // The other half of the same branch: a writer landing after the user DID
+    // choose to overwrite a named revision is stopped too, and that message
+    // does name the agreement - the revision it names is the one the user was
+    // shown, which is no longer the one on disk.
+    testWidgets('a writer landing after an agreed overwrite is named as the '
+        'agreement it broke', (tester) async {
+      const changedAgain = MainConfigFile(
+        path: _path,
+        content: '{\n  "orchestrator": {"max_phases": 9},\n}',
+        writable: true,
+      );
+      final client = _StubMainConfigClient(_file());
+      // Read 1 is the load, which returns the loaded copy; the writer lands as
+      // it completes. Read 2 is the reconcile read, which returns `changed`
+      // (so the dialog is shown) and leaves a second writer behind it. Read 3
+      // is the write-time re-read, which sees the second writer.
+      client.onRead = (readIndex) {
+        if (readIndex == 1) client.file = changed;
+        if (readIndex == 2) client.file = changedAgain;
+      };
+
+      await _pump(tester, client);
+      await tester.enterText(find.byKey(mainConfigTextKey), '{"mine": true}');
+      await tester.pump();
+
+      await tester.tap(find.byKey(mainConfigSaveKey));
+      await tester.pumpAndSettle();
+      expect(find.text('config changed on disk'), findsOneWidget);
+      await tester.tap(find.text('overwrite'));
+      await tester.pumpAndSettle();
+
+      expect(client.lastSavedContent, isNull);
+      expect(client.loadCount, 3);
+      expect(find.byKey(mainConfigErrorKey), findsOneWidget);
+      expect(
+        find.textContaining('the change you agreed to overwrite'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('changed again'), findsOneWidget);
     });
 
     testWidgets('an ordinary save survives the write-time re-read', (

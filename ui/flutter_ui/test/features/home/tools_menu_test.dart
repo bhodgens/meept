@@ -244,6 +244,61 @@ void main() {
             reason: '${route.path} does not veto through the shared guard',
           );
         }
+
+        // Identity alone is weak: an `onExit` that never consults the
+        // registry - its body emptied to `return true` - keeps the same
+        // function identity and the check above stays green. Drive each
+        // route's REAL handler through a real router with a guard registered
+        // that refuses, and prove the refusal reaches the pop.
+        for (final route in panelRoutes) {
+          final container = ProviderContainer(overrides: _stubs);
+          addTearDown(container.dispose);
+          var asked = 0;
+          container.read(toolExitGuardProvider).register(() async {
+            asked++;
+            return false;
+          });
+
+          final probe = GoRouter(
+            initialLocation: route.path,
+            routes: [
+              GoRoute(
+                path: '/',
+                builder: (_, __) =>
+                    const Scaffold(body: Text('chat home marker')),
+              ),
+              GoRoute(
+                path: route.path,
+                builder: (_, __) => const Scaffold(body: Text('panel marker')),
+                onExit: route.onExit,
+              ),
+            ],
+          );
+          await tester.pumpWidget(
+            UncontrolledProviderScope(
+              container: container,
+              child: MaterialApp.router(routerConfig: probe),
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          final handled = await probe.routerDelegate.popRoute();
+          await tester.pumpAndSettle();
+
+          expect(
+            asked,
+            1,
+            reason: '${route.path} onExit never asked the shared guard',
+          );
+          expect(
+            find.text('panel marker'),
+            findsOneWidget,
+            reason:
+                '${route.path} left on a pop its guard refused '
+                '(handled: $handled)',
+          );
+          expect(find.text('chat home marker'), findsNothing);
+        }
       },
     );
 

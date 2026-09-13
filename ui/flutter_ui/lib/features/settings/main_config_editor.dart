@@ -260,12 +260,22 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
       _reconciledContent ?? _loadedContent,
       latest.content,
     );
+    // Whether the user was actually asked before this save began. The two
+    // reconcile answers record the daemon's copy, and the reload answer
+    // returns before the write, so [_reconciledContent] equals
+    // [_loadedContent] only on the clean path - the one where the re-read
+    // matched and no dialog was shown. Naming an agreement that never
+    // happened ("the change you agreed to overwrite") would tell the user
+    // they approved an overwrite of a revision they were never shown.
+    final agreedOverwrite =
+        _reconciledContent != null && _reconciledContent != _loadedContent;
     setState(() {
       _error =
-          'save stopped: ${latest.path} changed again while this save was '
-          'being prepared, so it was not written.'
+          'save stopped: ${latest.path} changed '
+          '${agreedOverwrite ? 'again ' : ''}'
+          'while this save was being prepared, so it was not written.'
           '${difference.isEmpty ? '' : ' $difference.'} '
-          'the change you agreed to overwrite is not the one on disk now - '
+          '${agreedOverwrite ? 'the change you agreed to overwrite is not the one on disk now - ' : 'the file moved after this save re-read it - '}'
           'reload to see it, then save again.';
     });
     return false;

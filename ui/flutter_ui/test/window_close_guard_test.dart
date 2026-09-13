@@ -23,6 +23,8 @@
 // a desktop build and a real window): main()'s windowManager.addListener
 // registration, and the native windowShouldClose round trip.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -180,9 +182,11 @@ void main() {
   // The listener API hands the handler no future, so a second close request
   // arriving before the first answer (a double click on the close button, a
   // close while the dialog is up) used to ask the guard again and stack a
-  // second dialog. The handler now latches, like ToolPanelShell._exitPending.
+  // second dialog. The handler now serves every caller the ONE undecided
+  // request: a second caller gets the same future, never an early "done"
+  // while nothing had been decided.
   testWidgets(
-    'a second close request while the first is undecided is ignored',
+    'a second close request while the first is undecided shares its decision',
     (tester) async {
       final container = ProviderContainer();
       addTearDown(container.dispose);
@@ -196,20 +200,37 @@ void main() {
         return _dialogGuard(harness)();
       });
 
-      // Two rapid requests: the listener's own entry point for both, so this is
-      // the path a double click actually takes.
+      // The listener's own entry point for the first request (the path a click
+      // actually takes), then two callers of the awaitable half.
       handler.onWindowClose();
-      handler.onWindowClose();
+      final first = handler.handleCloseRequest();
+      final second = handler.handleCloseRequest();
+      expect(
+        second,
+        same(first),
+        reason: 'one undecided request is one future, not two answers',
+      );
+
+      var decided = false;
+      unawaited(second.then((_) => decided = true));
       await tester.pumpAndSettle();
 
       expect(asked, 1, reason: 'one request in flight is one ask');
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(calls.order, isEmpty);
+      // The dialog is still open, so nothing has been decided: the second
+      // caller being released here is exactly the claim that was false.
+      expect(
+        decided,
+        isFalse,
+        reason: 'an undecided close must not release a waiting caller',
+      );
 
       await tester.tap(find.text('cancel'));
       await tester.pumpAndSettle();
 
-      // One decision, one keepOpen: the ignored request changed nothing.
+      expect(decided, isTrue, reason: 'the shared future carries the decision');
+      // One decision, one keepOpen: the shared request changed nothing twice.
       expect(calls.order, ['keepOpen']);
     },
   );
@@ -280,9 +301,10 @@ void main() {
       await tester.pumpAndSettle();
       await pending;
 
+      // Exact call list, so the vetoed close neither destroys the window nor
+      // touches any other plugin method.
       expect(calls.map((call) => call.method), ['setPreventClose']);
       expect(calls.single.arguments, {'isPreventClose': true});
-      expect(calls.map((call) => call.method), isNot(contains('destroy')));
     },
   );
 }

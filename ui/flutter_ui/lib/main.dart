@@ -202,14 +202,19 @@ class WindowCloseHandler extends WindowListener {
   /// The window-manager calls, injectable for tests.
   final WindowCloseActions actions;
 
-  /// Latch for the close request that is currently in flight.
+  /// The close request currently being decided, if any.
   ///
   /// The guard is asynchronous (it usually opens the discard dialog), so a
   /// second close request arriving before the first answer - a double click
   /// on the close button, a close during the dialog - would ask the guard
-  /// again and stack a second dialog. While this is set further requests are
-  /// ignored. Mirrors `ToolPanelShell._exitPending`.
-  bool _closePending = false;
+  /// again and stack a second dialog. While one request is in flight,
+  /// further requests share its future instead of being told the close is
+  /// already done: the listener API gives no future back, but
+  /// [handleCloseRequest] is awaited by tests and future callers, and a
+  /// caller released before the decision was made would be told "done" while
+  /// nothing had been decided. The shared registry
+  /// (`ToolExitGuardRegistry._inFlight`) shares its answer the same way.
+  Future<void>? _closePending;
 
   @override
   void onWindowClose() {
@@ -223,10 +228,19 @@ class WindowCloseHandler extends WindowListener {
   /// Returns when the request has been decided (and, when allowed, when the
   /// window-manager calls are done), so a widget test can await the decision
   /// the listener itself cannot wait for. A request that arrives while one is
-  /// undecided returns immediately and changes nothing.
-  Future<void> handleCloseRequest() async {
-    if (_closePending) return;
-    _closePending = true;
+  /// undecided returns that request's future, so both callers see the one
+  /// decision and neither is released early.
+  Future<void> handleCloseRequest() {
+    final inFlight = _closePending;
+    if (inFlight != null) return inFlight;
+    final pending = _decideCloseRequest();
+    _closePending = pending;
+    return pending;
+  }
+
+  /// The decision half of [handleCloseRequest], with the latch cleared on
+  /// every outcome so the next request starts fresh.
+  Future<void> _decideCloseRequest() async {
     try {
       final allowed = await container.read(toolExitGuardProvider).requestExit();
       if (!allowed) {
@@ -237,7 +251,7 @@ class WindowCloseHandler extends WindowListener {
       await actions.saveGeometry();
       await actions.close();
     } finally {
-      _closePending = false;
+      _closePending = null;
     }
   }
 }

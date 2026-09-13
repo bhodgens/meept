@@ -86,14 +86,30 @@ class ToolExitGuardRegistry {
   /// second request arriving before the first answer (a second browser pop, a
   /// menu pick during the shared back control's dialog) would ask the guard
   /// again and stack a second dialog over the first. While one request is in
-  /// flight, further requests share its answer instead of asking again. The
-  /// panel shell has the same protection in `ToolPanelShell._exitPending`.
+  /// flight, further requests share its answer instead of asking again.
+  /// `ToolPanelShell._exitPending` prevents the same double dialog from a
+  /// second press of its back control or esc by ignoring it.
   ///
   /// Sharing rather than refusing is what keeps this correct on the exit
   /// path: leaving the panel after an allowed pop runs the route's `onExit`
   /// again (see [_leaveRouteAfterAllowedExit]), and a refusal there would
   /// cancel the very navigation the user just approved.
+  ///
+  /// There is deliberately no time bound on the latch. A bound would have to
+  /// invent an answer for a request that is still being asked - usually a
+  /// dialog the user has open in front of them - and answering "allowed"
+  /// there would dismiss unsaved edits on a timer. The one moment a stuck
+  /// request can be answered honestly is when its guard goes away, which
+  /// [release] does.
   Future<bool>? _inFlight;
+
+  /// The latch behind [_inFlight], so [release] can settle a request whose
+  /// guard is going away instead of leaving it and the latch pending forever.
+  Completer<bool>? _inFlightCompleter;
+
+  /// The guard [_inFlight] was handed to, so [release] can tell whether the
+  /// panel being dropped is the one whose answer is still owed.
+  ToolExitGuard? _inFlightGuard;
 
   /// The registered guard, or null when the open panel has nothing to lose.
   ToolExitGuard? get guard => _guard;
@@ -108,8 +124,18 @@ class ToolExitGuardRegistry {
   /// Only clears the registration while [guard] is still the active one: a
   /// panel disposing itself must never clear a guard a newer panel
   /// registered.
+  ///
+  /// A panel that goes away (a route change, a window close, a tab switch)
+  /// while its own exit request is undecided takes the answer with it: no
+  /// other path ever completes that guard's future, so the latch is settled
+  /// here and allowed. Left latched, the never-completing future would be
+  /// shared by every later exit - each one silently unasked, and the panel
+  /// that could have vetoed it already gone. Allowing is the safe answer for
+  /// exactly that reason: the guard that would have refused is no longer the
+  /// panel on screen.
   void release(ToolExitGuard guard) {
     if (identical(_guard, guard)) _guard = null;
+    if (identical(_inFlightGuard, guard)) _settleInFlight(true);
   }
 
   /// Ask the registered guard whether the open panel may be left, and
@@ -129,20 +155,44 @@ class ToolExitGuardRegistry {
     // sharing a stale answer - the panel would never be asked again.
     final completer = Completer<bool>();
     final pending = completer.future;
+    final asked = _guard;
     _inFlight = pending;
+    _inFlightCompleter = completer;
+    _inFlightGuard = asked;
     unawaited(
       _ask().then(
         (allowed) {
-          if (identical(_inFlight, pending)) _inFlight = null;
-          completer.complete(allowed);
+          // A settled latch (see [release]) has already answered this request
+          // and cleared the fields, so only the still-current ask completes.
+          if (identical(_inFlightCompleter, completer)) {
+            _settleInFlight(allowed);
+          }
         },
         onError: (Object error, StackTrace stack) {
-          if (identical(_inFlight, pending)) _inFlight = null;
+          if (!identical(_inFlightCompleter, completer)) return;
+          _inFlight = null;
+          _inFlightCompleter = null;
+          _inFlightGuard = null;
           completer.completeError(error, stack);
         },
       ),
     );
     return pending;
+  }
+
+  /// Answer the in-flight request with [allowed] and drop the latch.
+  ///
+  /// The one place the latch is cleared, so the two ways a request ends - the
+  /// guard answering, and the guard going away (see [release]) - cannot drift
+  /// apart and leave a request pending that nothing will ever complete.
+  void _settleInFlight(bool allowed) {
+    final completer = _inFlightCompleter;
+    _inFlight = null;
+    _inFlightCompleter = null;
+    _inFlightGuard = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(allowed);
+    }
   }
 
   Future<bool> _ask() async {
