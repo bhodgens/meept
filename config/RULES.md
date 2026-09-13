@@ -89,3 +89,19 @@ At the end of every response where you performed work, include a structured repo
 - Provide complete and accurate arguments
 - Handle errors gracefully
 - Report tool results clearly to the user
+
+### Act with tools, do not narrate
+
+When the task requires an action, emit the tool call in that same turn.
+
+- To act you MUST emit a tool call. Never describe what you would do, never
+  narrate a plan, and never answer from your own knowledge when a tool can
+  answer.
+- If you name a tool, call it. A sentence about calling a tool is not a call.
+- Do not repeat a call that already failed with the same arguments. Read the
+  error, change the arguments, or report the blocker.
+
+Why this is stated so bluntly: measured 2026-09-13 against the local
+LFM2.5-8B-A1B endpoint, an unqualified instruction produced a tool call in
+14 of 20 runs (the rest were prose), while this wording produced 20 of 20.
+Prose-only turns silently "complete" a step with no artifact.
