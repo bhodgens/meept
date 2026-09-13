@@ -68,18 +68,21 @@ make gui-connect-check          # Static self-check of the installed GUI connect
 
 # Connectivity graphs
 make graphs               # Regenerate bus/RPC/HTTP/WS topology (writes docs/generated/*)
-# NOT a CI gate yet: `make graphs-check` is red until docs/generated/* is
-# regenerated, and the generator embeds absolute line offsets (audit F66).
-# Run `make graphs` after changing bus/RPC/HTTP/WS surfaces.
-make graphs-check         # Verify generated files are fresh (local check only)
+# Both freshness checks below run in CI (code-quality.yml, job
+# "generated-artifacts"). Run `make graphs` after changing bus/RPC/HTTP/WS
+# surfaces; the generator still embeds absolute line offsets (audit F66), so a
+# red graphs-check after an unrelated edit means "regenerate", not "topology
+# changed".
+make graphs-check         # Verify generated files are fresh (CI gate)
 make research-harness      # verify harness catalog evidence + regenerate techniques md
 make research-harness-check # CI: fail if evidence missing or techniques md stale
 
 # Reference docs (magefiles/docs.go)
 make docs-generate        # Regenerate docs/reference/generated/* (needs mage + gomarkdoc)
-# docs-check is NOT a CI gate yet: docs/reference/generated/agent.md and llm.md
-# are stale at HEAD (audit F67), and CI would need mage + gomarkdoc installed.
-make docs-check           # Verify those pages are fresh (local check only)
+make docs-check           # Verify those pages are fresh (CI gate; needs mage + gomarkdoc)
+
+# Classifier-eval guards (tools/classifier-eval)
+make classifier-eval-selftest # CI: corpus/replay guard + coverage-floor self-test
 
 # Git hooks (bash >= 3.2; sub-hooks run under whatever `bash` is on PATH, so the
 # suite also executes on the Linux CI runner)

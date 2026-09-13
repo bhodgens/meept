@@ -702,15 +702,25 @@ docs-generate:
 # (magefiles/docs.go DocsCheck: "Returns an error if any file differs, suitable
 # for use in CI").
 #
-# NOT WIRED INTO CI YET: it is red on this tree (docs/reference/generated/
-# agent.md and llm.md are stale — audit F67) and it needs mage + gomarkdoc,
-# which the workflow would have to install first. Run it locally now; wire it
-# into .github/workflows/ci.yml after `make docs-generate` has been run and its
-# docs/reference/generated/* changes committed.
+# WIRED: code-quality.yml job "generated-artifacts" runs `make docs-check`, so
+# this is a hard gate. It needs mage + gomarkdoc on PATH (the job installs
+# both). Run `make docs-generate` and commit the result after changing any
+# documented package's exported surface.
 .PHONY: docs-check
 docs-check:
 	@echo "Verifying generated reference docs are fresh..."
 	mage -d magefiles docsCheck
+
+# classifier-eval-selftest exercises the eval guards that gate every acceptance
+# number: the corpus<->replay disjointness guard (a leaked case refuses to
+# score), the empty-ruler and degenerate-embedding refusals, the near-duplicate
+# allowlist semantics, and the coverage floor boundary. It is pure stdlib
+# (no numpy/torch), so CI can run it before any heavy import, and it is the pin
+# for logic that otherwise has none.
+.PHONY: classifier-eval-selftest
+classifier-eval-selftest:
+	@echo "Running classifier-eval guard self-test..."
+	python3 tools/classifier-eval/m4_gold_acceptance.py --self-test
 
 # =============================================================================
 # Legacy Aliases (for backwards compatibility)

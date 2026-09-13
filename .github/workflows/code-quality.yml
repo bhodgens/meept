@@ -56,6 +56,43 @@ jobs:
           echo "Parsed $checked shell script(s)."
           [ "$fail" -eq 0 ] || exit 1
 
+  generated-artifacts:
+    runs-on: ubuntu-latest
+    name: Generated Artifacts Freshness
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # go.mod declares the toolchain, so this job cannot drift from the
+          # module's required Go version the way the pinned '1.23' jobs can.
+          go-version-file: go.mod
+
+      # docs/generated/* (bus topology, RPC handlers, HTTP routes, WSEvent
+      # map): pure Python, no dependencies. Red until `make graphs` is run
+      # after a bus/RPC/HTTP/WS surface change.
+      - name: Connectivity graphs are fresh
+        run: make graphs-check
+
+      # docs/reference/generated/* (gomarkdoc pages): needs mage + gomarkdoc,
+      # which nothing else in CI installed - which is why this check was
+      # documented as a gate for months while nothing ran it.
+      - name: Install docs tooling
+        run: |
+          go install github.com/magefile/mage@latest
+          go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@latest
+
+      - name: Reference docs are fresh
+        run: make docs-check
+
+      # The eval guards that gate every acceptance number had no pin and no
+      # runner: a revert of the corpus/replay disjointness guard or of the
+      # coverage floor broke nothing. Pure stdlib, so it runs before any
+      # heavy import.
+      - name: Classifier-eval guard self-test
+        run: make classifier-eval-selftest
+
   analyzers:
     runs-on: ubuntu-latest
     name: Static Analyzers
