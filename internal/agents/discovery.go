@@ -191,6 +191,17 @@ func (d *Discovery) loadAgentFile(path string, priority int) {
 			// Don't overwrite with lower priority
 			return
 		}
+		// A higher-priority definition replaces the shadowed one, but the
+		// ADDITIVE fields are unioned first. Otherwise a stale user copy
+		// silently drops everything the bundled definition has gained since it
+		// was copied: observed 2026-09-13, a ~/.meept/agents/coder/AGENT.md
+		// from Sep 6 shadowed the bundled coder and lost json_extract and the
+		// intents list, so production could not run the tool its route aimed
+		// at. The user's own values still win for every field they set.
+		agent.AdditionalTools = unionStrings(agent.AdditionalTools, existing.AdditionalTools)
+		agent.AvailableSkills = unionStrings(agent.AvailableSkills, existing.AvailableSkills)
+		agent.PromptComponents = unionStrings(agent.PromptComponents, existing.PromptComponents)
+		agent.Intents = unionStrings(agent.Intents, existing.Intents)
 	}
 
 	d.agents[key] = agent
@@ -199,6 +210,24 @@ func (d *Discovery) loadAgentFile(path string, priority int) {
 		"path", path,
 		"priority", priority,
 	)
+}
+
+// unionStrings returns primary plus any entries of secondary that are not
+// already present, preserving order (primary first). Used when a
+// higher-priority agent definition shadows a lower-priority one: the shadowing
+// definition wins the scalars, but nothing additive is silently lost.
+func unionStrings(primary, secondary []string) []string {
+	if len(secondary) == 0 {
+		return primary
+	}
+	out := make([]string, 0, len(primary)+len(secondary))
+	out = append(out, primary...)
+	for _, s := range secondary {
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // isAgentFile checks if a filename is a valid agent file.
