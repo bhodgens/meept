@@ -24,10 +24,17 @@ class _StubMainConfigClient extends SdkApiClient {
   SdkApiException? saveError;
   int loadCount = 0;
 
+  /// Invoked after every [getMainConfig] with the read's 1-based index, so a
+  /// test can move the daemon's copy between two of the editor's reads. The
+  /// read itself still returns the copy that was current when it started.
+  void Function(int readIndex)? onRead;
+
   @override
   Future<MainConfigFile> getMainConfig() async {
+    final current = file;
     loadCount++;
-    return file;
+    onRead?.call(loadCount);
+    return current;
   }
 
   @override
@@ -821,9 +828,66 @@ void main() {
 
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(find.text('config changed on disk'), findsOneWidget);
+      // The prompt names the first line that differs instead of asking for a
+      // blind overwrite: meept.json5's first line (the comment) is gone and
+      // the orchestrator block took its place.
+      expect(find.textContaining('first difference - line 2'), findsOneWidget);
       // Nothing was written while the choice is open.
       expect(client.lastSavedContent, isNull);
       expect(_textOf(tester, mainConfigTextKey), '{"mine": true}');
+    });
+
+    // The re-read before the write narrows the window but does not close it:
+    // a writer landing between that read and the POST was still silently
+    // reverted. The editor now re-reads once more as late as it can and stops
+    // instead of overwriting a revision the user never saw.
+    testWidgets('a writer landing between the re-read and the write is not '
+        'silently reverted', (tester) async {
+      final client = _StubMainConfigClient(_file());
+      // Read 1 is the editor's load. Read 2 is the reconcile re-read: it still
+      // sees the loaded copy, and the writer lands while it is in flight.
+      client.onRead = (readIndex) {
+        if (readIndex == 2) client.file = changed;
+      };
+
+      await _pump(tester, client);
+      await tester.enterText(find.byKey(mainConfigTextKey), '{"mine": true}');
+      await tester.pump();
+
+      await tester.tap(find.byKey(mainConfigSaveKey));
+      await tester.pumpAndSettle();
+
+      // The write-time re-read saw the new revision, so nothing was written:
+      // the newer save is still on the daemon, not reverted by stale text.
+      expect(client.lastSavedContent, isNull);
+      expect(client.loadCount, 3);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byKey(mainConfigErrorKey), findsOneWidget);
+      expect(find.textContaining('changed again'), findsOneWidget);
+      expect(find.textContaining('line 2'), findsOneWidget);
+      // The edited copy is the only copy of the work: it stays, still dirty.
+      expect(_textOf(tester, mainConfigTextKey), '{"mine": true}');
+      expect(find.byKey(mainConfigDirtyKey), findsOneWidget);
+    });
+
+    testWidgets('an ordinary save survives the write-time re-read', (
+      tester,
+    ) async {
+      // The extra read must not disturb a save whose file never moved: the
+      // text is written and the notice appears as before.
+      final client = _StubMainConfigClient(_file());
+      await _pump(tester, client);
+      await tester.enterText(find.byKey(mainConfigTextKey), '{"mine": true}');
+      await tester.pump();
+
+      await tester.tap(find.byKey(mainConfigSaveKey));
+      await tester.pumpAndSettle();
+
+      expect(client.loadCount, 3);
+      expect(client.lastSavedContent, '{"mine": true}');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byKey(mainConfigErrorKey), findsNothing);
+      expect(find.byKey(mainConfigNoticeKey), findsOneWidget);
     });
 
     testWidgets('cancel on the conflict keeps the text and writes nothing', (

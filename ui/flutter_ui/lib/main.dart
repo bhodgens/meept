@@ -68,6 +68,17 @@ void main() async {
     // Intercept the native close button so we can persist geometry
     await windowManager.setPreventClose(true);
     windowManager.addListener(WindowCloseHandler(appProviderContainer));
+    // KNOWN GAP (audit F62 regression, group F): the veto below covers the
+    // window close button and the red traffic light only. window_manager
+    // implements its veto as NSWindowDelegate.windowShouldClose, and
+    // `NSApp.terminate` (Cmd+Q, or Quit from the menu bar) never calls it -
+    // the plugin implements no applicationShouldTerminate and neither does
+    // macos/Runner/AppDelegate.swift, so the app terminates with unsaved
+    // edits and no prompt. Closing this needs a native
+    // applicationShouldTerminate in AppDelegate that asks this same guard
+    // over a channel and answers `.terminateLater`; that is a desktop build
+    // change and could not be verified (or built) here, so it is documented
+    // instead of half-implemented.
   }
 
   // Initialize certificate pinning (desktop only - web uses browser TLS)
@@ -149,8 +160,12 @@ class WindowCloseActions {
   /// Persist window geometry before the window goes away.
   final Future<void> Function() saveGeometry;
 
-  /// Keep the window open and re-arm the prevent-close latch, so the next
-  /// close request is intercepted too.
+  /// Keep the window open.
+  ///
+  /// The plugin's prevent-close latch is sticky: [main] sets it once and only
+  /// [close] clears it, so the window stays open because nothing cleared it.
+  /// This call repeats the startup setting (a no-op while it is already true)
+  /// rather than being the re-arm step the veto depends on.
   final Future<void> Function() keepOpen;
 
   /// Let the window close and destroy it.
@@ -174,6 +189,9 @@ class WindowCloseActions {
 /// the panel, and its edits - exactly as they were. With no guard registered
 /// (no panel holds unsaved state) the exit goes straight through, so the
 /// handler adds nothing to the ordinary close.
+///
+/// Scope: this covers the window close button and the red traffic light. It
+/// does NOT cover Cmd+Q - see the known-gap note in [main].
 class WindowCloseHandler extends WindowListener {
   WindowCloseHandler(this.container, {WindowCloseActions? actions})
     : actions = actions ?? WindowCloseActions.real;
@@ -183,6 +201,15 @@ class WindowCloseHandler extends WindowListener {
 
   /// The window-manager calls, injectable for tests.
   final WindowCloseActions actions;
+
+  /// Latch for the close request that is currently in flight.
+  ///
+  /// The guard is asynchronous (it usually opens the discard dialog), so a
+  /// second close request arriving before the first answer - a double click
+  /// on the close button, a close during the dialog - would ask the guard
+  /// again and stack a second dialog. While this is set further requests are
+  /// ignored. Mirrors `ToolPanelShell._exitPending`.
+  bool _closePending = false;
 
   @override
   void onWindowClose() {
@@ -195,16 +222,23 @@ class WindowCloseHandler extends WindowListener {
   ///
   /// Returns when the request has been decided (and, when allowed, when the
   /// window-manager calls are done), so a widget test can await the decision
-  /// the listener itself cannot wait for.
+  /// the listener itself cannot wait for. A request that arrives while one is
+  /// undecided returns immediately and changes nothing.
   Future<void> handleCloseRequest() async {
-    final allowed = await container.read(toolExitGuardProvider).requestExit();
-    if (!allowed) {
-      await actions.keepOpen();
-      return;
+    if (_closePending) return;
+    _closePending = true;
+    try {
+      final allowed = await container.read(toolExitGuardProvider).requestExit();
+      if (!allowed) {
+        await actions.keepOpen();
+        return;
+      }
+      // Geometry is persisted before the window goes away.
+      await actions.saveGeometry();
+      await actions.close();
+    } finally {
+      _closePending = false;
     }
-    // Geometry is persisted before the window goes away.
-    await actions.saveGeometry();
-    await actions.close();
   }
 }
 

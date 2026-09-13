@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +11,13 @@ import 'package:go_router/go_router.dart';
 /// (the hamburger menu, a tab switch). `false` means "keep the panel and
 /// its state", `true` means "the exit may proceed".
 typedef ToolExitGuard = Future<bool> Function();
+
+/// Where a panel route lands the user when an allowed system pop leaves it.
+///
+/// Every tool panel is a top-level route with the chat home below it, so an
+/// allowed pop returns there - the same destination the shared back control
+/// uses (`exitToolPanel`).
+const String _chatHomeLocation = '/';
 
 /// Route-level veto (`GoRoute.onExit`) for exits no panel control drives.
 ///
@@ -22,9 +31,37 @@ typedef ToolExitGuard = Future<bool> Function();
 /// Reads the registry through the [ProviderScope] above [context] and asks it
 /// exactly like the shell does. Every panel route in
 /// `ui/flutter_ui/lib/core/router.dart` points its `onExit` here.
-Future<bool> guardRouteExit(BuildContext context, GoRouterState state) {
+Future<bool> guardRouteExit(BuildContext context, GoRouterState state) async {
   final container = ProviderScope.containerOf(context, listen: false);
-  return container.read(toolExitGuardProvider).requestExit();
+  final allowed = await container.read(toolExitGuardProvider).requestExit();
+  if (!allowed) return false;
+  // An ALLOWED onExit is not a navigation in go_router 14.x, so leaving the
+  // route is this callback's job; see [_leaveRouteAfterAllowedExit].
+  if (context.mounted) _leaveRouteAfterAllowedExit(context);
+  return true;
+}
+
+/// Leave the current panel route after its veto allowed the exit.
+///
+/// `GoRouterDelegate.popRoute` answers the platform with "not handled" when
+/// `onExit` allows the pop (`return !(await lastRoute.onExit(...))`), and the
+/// platform's own back handling does not move a single-entry go_router stack:
+/// nothing navigates. Without this the panel would stay on screen while the
+/// registry had already released its guard, so the next tool switch or window
+/// close would drop the panel's edits with no prompt at all.
+///
+/// Only when the router has no other destination to apply. While an
+/// app-driven navigation is being applied - a menu pick, a tab switch, a home
+/// layout's guarded navigation, or the shared back control - this same
+/// `onExit` runs inside that navigation, and a second `go` here would replace
+/// the destination the user actually chose with the chat home.
+void _leaveRouteAfterAllowedExit(BuildContext context) {
+  final router = GoRouter.maybeOf(context);
+  if (router == null) return;
+  final applied = router.state.uri.path;
+  final requested = router.routeInformationProvider.value.uri.path;
+  if (requested != applied) return;
+  router.go(_chatHomeLocation);
 }
 
 /// The exit guard of the panel that is currently open, if it has unsaved
@@ -42,6 +79,21 @@ Future<bool> guardRouteExit(BuildContext context, GoRouterState state) {
 /// this provider).
 class ToolExitGuardRegistry {
   ToolExitGuard? _guard;
+
+  /// The answer to the exit request currently being decided, if any.
+  ///
+  /// The guard is asynchronous and usually opens a confirmation dialog, so a
+  /// second request arriving before the first answer (a second browser pop, a
+  /// menu pick during the shared back control's dialog) would ask the guard
+  /// again and stack a second dialog over the first. While one request is in
+  /// flight, further requests share its answer instead of asking again. The
+  /// panel shell has the same protection in `ToolPanelShell._exitPending`.
+  ///
+  /// Sharing rather than refusing is what keeps this correct on the exit
+  /// path: leaving the panel after an allowed pop runs the route's `onExit`
+  /// again (see [_leaveRouteAfterAllowedExit]), and a refusal there would
+  /// cancel the very navigation the user just approved.
+  Future<bool>? _inFlight;
 
   /// The registered guard, or null when the open panel has nothing to lose.
   ToolExitGuard? get guard => _guard;
@@ -67,7 +119,33 @@ class ToolExitGuardRegistry {
   /// no state change). Releasing on an allowed exit is what keeps one
   /// switch from asking twice: the route change that follows the answer
   /// must not consult a guard for edits the user just agreed to discard.
-  Future<bool> requestExit() async {
+  Future<bool> requestExit() {
+    final inFlight = _inFlight;
+    if (inFlight != null) return inFlight;
+
+    // The completer is installed before the guard is asked: a guard that
+    // answers without awaiting anything completes synchronously, and a
+    // request that latched itself afterwards would leave every later request
+    // sharing a stale answer - the panel would never be asked again.
+    final completer = Completer<bool>();
+    final pending = completer.future;
+    _inFlight = pending;
+    unawaited(
+      _ask().then(
+        (allowed) {
+          if (identical(_inFlight, pending)) _inFlight = null;
+          completer.complete(allowed);
+        },
+        onError: (Object error, StackTrace stack) {
+          if (identical(_inFlight, pending)) _inFlight = null;
+          completer.completeError(error, stack);
+        },
+      ),
+    );
+    return pending;
+  }
+
+  Future<bool> _ask() async {
     final guard = _guard;
     if (guard == null) return true;
     final allowed = await guard();

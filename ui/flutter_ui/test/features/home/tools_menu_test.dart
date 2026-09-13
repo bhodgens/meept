@@ -21,6 +21,7 @@ import 'package:meept_ui/features/search/search_panel.dart';
 import 'package:meept_ui/features/settings/settings_panel.dart';
 import 'package:meept_ui/features/skills/skill_panel.dart';
 import 'package:meept_ui/providers/providers.dart';
+import 'package:meept_ui/providers/tool_exit_guard.dart';
 import 'package:meept_ui/services/sdk_client.dart';
 import 'package:meept_ui/services/storage_service.dart';
 import 'package:meept_ui/services/websocket_service.dart';
@@ -226,7 +227,9 @@ void main() {
         // The browser Back button and the OS back gesture reach the router
         // through RouterDelegate.popRoute, never through the shared back
         // control, so the veto has to sit on the route (GoRoute.onExit) for
-        // every route a panel can be open on.
+        // every route a panel can be open on - and it has to be the shared
+        // guard, not just any callback: an `onExit` that always allows would
+        // satisfy a null-check while vetoing nothing.
         final panelRoutes = router.configuration.routes
             .whereType<GoRoute>()
             .where(
@@ -237,8 +240,8 @@ void main() {
         for (final route in panelRoutes) {
           expect(
             route.onExit,
-            isNotNull,
-            reason: '${route.path} has no route-level exit veto',
+            same(guardRouteExit),
+            reason: '${route.path} does not veto through the shared guard',
           );
         }
       },

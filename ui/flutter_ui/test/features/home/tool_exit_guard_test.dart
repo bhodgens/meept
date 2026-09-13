@@ -14,6 +14,8 @@
 // building the whole settings panel: the real settings wiring is covered by
 // test/features/settings/main_config_editor_test.dart.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -209,7 +211,8 @@ Future<void> _disposeHomeApp(
 }
 
 /// Router for the system-pop harness: the panel route carries the same
-/// `onExit` veto the real panel routes do (core/router.dart).
+/// `onExit` veto the real panel routes do (core/router.dart), plus a second
+/// tool route so an app-driven navigation has somewhere else to go.
 GoRouter _systemBackRouter() => GoRouter(
   initialLocation: '/settings',
   routes: [
@@ -221,6 +224,10 @@ GoRouter _systemBackRouter() => GoRouter(
       path: '/settings',
       builder: (_, __) => const Scaffold(body: Text('settings panel marker')),
       onExit: guardRouteExit,
+    ),
+    GoRoute(
+      path: '/tools/memory',
+      builder: (_, __) => const Scaffold(body: Text('memory route marker')),
     ),
   ],
 );
@@ -274,6 +281,65 @@ void main() {
 
       registry.release(newer);
       expect(registry.guard, isNull);
+    });
+
+    // Two exits can be asked for at once - a second browser pop while the
+    // discard dialog is up, a menu pick during the shared back control's
+    // request - and a second dialog stacked on the first is what
+    // ToolPanelShell._exitPending exists to prevent elsewhere. The registry
+    // answers the second request with the first one's answer instead of
+    // asking the guard again.
+    test('a request while one is in flight shares its answer', () async {
+      final registry = ToolExitGuardRegistry();
+      var asked = 0;
+      final gate = Completer<bool>();
+      registry.register(() async {
+        asked++;
+        return gate.future;
+      });
+
+      final first = registry.requestExit();
+      final second = registry.requestExit();
+
+      expect(asked, 1, reason: 'one request in flight is one ask');
+
+      gate.complete(true);
+      expect(await first, isTrue);
+      expect(await second, isTrue);
+      // The allow still released the registration, and the latch cleared: the
+      // next request is a fresh one.
+      expect(registry.guard, isNull);
+
+      var askedAgain = 0;
+      registry.register(() async {
+        askedAgain++;
+        return true;
+      });
+      expect(await registry.requestExit(), isTrue);
+      expect(askedAgain, 1);
+    });
+
+    // A guard that answers without awaiting anything completes synchronously.
+    // If the latch were installed after asking, it would keep that already
+    // finished answer and every later request would share it: the panel would
+    // never be asked again, and its edits would go unguarded.
+    test('a request answered without awaiting does not latch', () async {
+      final registry = ToolExitGuardRegistry();
+
+      // Nothing registered: the first request answers immediately.
+      expect(await registry.requestExit(), isTrue);
+
+      var asked = 0;
+      registry.register(() async {
+        asked++;
+        return false;
+      });
+      expect(await registry.requestExit(), isFalse);
+      expect(
+        asked,
+        1,
+        reason: 'the newly registered guard must still be asked',
+      );
     });
   });
 
@@ -502,10 +568,16 @@ void main() {
   // The browser Back button and the OS back gesture never touch the shared
   // back control: they reach the router through RouterDelegate.popRoute, and
   // the panel routes veto there through GoRoute.onExit (F62).
+  //
+  // An ALLOWED onExit is not a navigation in this go_router version -
+  // popRoute answers the platform "not handled" and a single-entry stack
+  // stays where it is - so the guard has to leave the route itself. Before
+  // that, a confirmed pop left the panel on screen with the registry already
+  // released, and the next tool switch or window close dropped its edits with
+  // no prompt at all.
   group('system back', () {
-    testWidgets('an allowed pop leaves the route, an unsaved pop is vetoed', (
-      tester,
-    ) async {
+    // Pumps the panel route and returns the container plus its router.
+    Future<(ProviderContainer, GoRouter)> pumpPanel(WidgetTester tester) async {
       final container = ProviderContainer(overrides: _stubs);
       addTearDown(container.dispose);
       final router = _systemBackRouter();
@@ -517,13 +589,15 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('settings panel marker'), findsOneWidget);
+      return (container, router);
+    }
+
+    testWidgets('an unsaved pop is vetoed, and an allowed pop leaves the '
+        'route without the test navigating', (tester) async {
+      final (container, router) = await pumpPanel(tester);
       // Captured up front: the guard below runs from the router's async pop,
       // where no test API may be called.
       final panelContext = tester.element(find.text('settings panel marker'));
-
-      // Nothing unsaved: the veto allows the pop, which reports back to the
-      // platform as "not handled" so the platform performs the navigation.
-      expect(await router.routerDelegate.popRoute(), isFalse);
 
       var asked = 0;
       container.read(toolExitGuardProvider).register(() async {
@@ -554,9 +628,9 @@ void main() {
       expect(await pending, isTrue);
       expect(find.text('settings panel marker'), findsOneWidget);
 
-      // Confirm: the veto lifts, the pop reports back to the platform, and
-      // the route change that follows must not ask a second time (the allow
-      // released the registration).
+      // Confirm: the veto lifts, the pop reports back to the platform as
+      // unhandled, and the panel really leaves - the guard navigated, nothing
+      // here did.
       final confirmed = router.routerDelegate.popRoute();
       await tester.pumpAndSettle();
       expect(asked, 2);
@@ -564,11 +638,39 @@ void main() {
       await tester.pumpAndSettle();
       expect(await confirmed, isFalse);
 
-      router.go('/');
-      await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
-      expect(asked, 2);
+      expect(asked, 2, reason: 'leaving must not ask the guard a second time');
       expect(find.text('chat home marker'), findsOneWidget);
+      expect(find.text('settings panel marker'), findsNothing);
+    });
+
+    testWidgets('an allowed pop with nothing unsaved leaves the route too', (
+      tester,
+    ) async {
+      final (container, router) = await pumpPanel(tester);
+      // No panel registered a guard: nothing to lose and nothing to ask.
+      expect(container.read(toolExitGuardProvider).guard, isNull);
+
+      expect(await router.routerDelegate.popRoute(), isFalse);
+      await tester.pumpAndSettle();
+
+      expect(find.text('chat home marker'), findsOneWidget);
+      expect(find.text('settings panel marker'), findsNothing);
+    });
+
+    testWidgets('an app-driven navigation off the panel route is left alone', (
+      tester,
+    ) async {
+      // A menu pick or a tab switch navigates for itself; the veto runs
+      // inside that navigation and must not redirect it to the chat home.
+      final (container, router) = await pumpPanel(tester);
+      expect(container.read(toolExitGuardProvider).guard, isNull);
+
+      router.go('/tools/memory');
+      await tester.pumpAndSettle();
+
+      expect(find.text('memory route marker'), findsOneWidget);
+      expect(find.text('chat home marker'), findsNothing);
     });
   });
 

@@ -69,6 +69,10 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
   /// callback fires only on an actual flip.
   bool _notifiedDirty = false;
 
+  /// The daemon content this save reconciled against, set by
+  /// [_confirmFreshBeforeSave] and re-checked immediately before the write.
+  String? _reconciledContent;
+
   bool get _isDirty => !_isLoading && _controller.text != _loadedContent;
 
   /// Publish the current dirty state to the parent, only when it changes.
@@ -139,6 +143,13 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
         if (mounted) setState(() => _isSaving = false);
         return;
       }
+      // That re-read and this write are two round-trips apart, so a writer
+      // landing between them is still reverted silently - re-check
+      // immediately before the POST.
+      if (!await _confirmUnchangedAtWrite()) {
+        if (mounted) setState(() => _isSaving = false);
+        return;
+      }
       await _client.saveMainConfig(text);
       if (!mounted) return;
       setState(() {
@@ -187,35 +198,38 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
   /// the user chose to overwrite. A `reload` answer is applied here and
   /// returns false, because the editor then holds the daemon's copy and there
   /// is nothing left to save.
+  ///
+  /// Records the copy the save reconciled against in [_reconciledContent], so
+  /// [_confirmUnchangedAtWrite] can re-check it at the last moment.
   Future<bool> _confirmFreshBeforeSave() async {
-    final MainConfigFile latest;
-    try {
-      latest = await _client.getMainConfig();
-    } catch (e) {
-      if (!mounted) return false;
-      setState(() {
-        _error =
-            'save stopped: could not re-read '
-            '${_file?.path ?? 'the main config file'} first, so writing would '
-            'risk replacing a change made since ($e)';
-      });
-      return false;
+    final latest = await _readLatestForWrite();
+    if (latest == null || !mounted) return false;
+    if (latest.content == _loadedContent) {
+      _reconciledContent = _loadedContent;
+      return true;
     }
-    if (!mounted) return false;
-    if (latest.content == _loadedContent) return true;
 
     // Stop the save spinner while the user decides: the prompt sits over a
     // header that must not keep animating, and nothing is being written yet.
     setState(() => _isSaving = false);
-    final choice = await showStaleConfigDialog(context, path: latest.path);
+    final choice = await showStaleConfigDialog(
+      context,
+      path: latest.path,
+      current: _loadedContent,
+      incoming: latest.content,
+    );
     if (!mounted) return false;
     switch (choice) {
       case StaleConfigChoice.overwrite:
+        // The user accepted replacing exactly this revision, so that is what
+        // the write below is allowed to overwrite.
+        _reconciledContent = latest.content;
         setState(() => _isSaving = true);
         return true;
       case StaleConfigChoice.cancel:
         return false;
       case StaleConfigChoice.reload:
+        _reconciledContent = null;
         setState(() {
           _file = latest;
           _loadedContent = latest.content;
@@ -226,6 +240,52 @@ class _MainConfigEditorState extends ConsumerState<MainConfigEditor> {
         });
         _syncDirty();
         return false;
+    }
+  }
+
+  /// Last-moment guard before the POST: the daemon's copy must still hold the
+  /// revision this save reconciled against.
+  ///
+  /// Re-reading once before the write cannot close the window on its own - it
+  /// narrows it by one round-trip, and a writer (the orchestrator editor, the
+  /// CLI) that lands between that read and this POST is still reverted by it.
+  /// The daemon exposes no version or hash to compare against, so the best
+  /// available check is to read once more as late as possible and stop
+  /// instead of overwriting. Returns true when the write may go ahead.
+  Future<bool> _confirmUnchangedAtWrite() async {
+    final latest = await _readLatestForWrite();
+    if (latest == null || !mounted) return false;
+    if (latest.content == _reconciledContent) return true;
+    final difference = describeFirstDifference(
+      _reconciledContent ?? _loadedContent,
+      latest.content,
+    );
+    setState(() {
+      _error =
+          'save stopped: ${latest.path} changed again while this save was '
+          'being prepared, so it was not written.'
+          '${difference.isEmpty ? '' : ' $difference.'} '
+          'the change you agreed to overwrite is not the one on disk now - '
+          'reload to see it, then save again.';
+    });
+    return false;
+  }
+
+  /// Fetch the daemon's current copy, reporting a failure as the save error.
+  ///
+  /// Returns null when the read failed, in which case nothing may be written.
+  Future<MainConfigFile?> _readLatestForWrite() async {
+    try {
+      return await _client.getMainConfig();
+    } catch (e) {
+      if (!mounted) return null;
+      setState(() {
+        _error =
+            'save stopped: could not re-read '
+            '${_file?.path ?? 'the main config file'} first, so writing would '
+            'risk replacing a change made since ($e)';
+      });
+      return null;
     }
   }
 
