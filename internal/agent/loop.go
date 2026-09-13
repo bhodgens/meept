@@ -125,6 +125,7 @@ func DefaultDetectionConfig() DetectionConfig {
 type cycleDetector struct {
 	mu       sync.Mutex
 	history  []toolCallSignature
+	streak   int // trailing run of identical (tool, args) calls
 	config   DetectionConfig
 	logger   *slog.Logger
 	lastWarn time.Time
@@ -146,9 +147,11 @@ func newCycleDetector(config DetectionConfig, logger *slog.Logger) *cycleDetecto
 	}
 }
 
-// recordCall records a tool call and checks for cycles.
-// Returns true if a cycle was detected.
-func (cd *cycleDetector) recordCall(tool string, argsJSON string) bool {
+// recordCall records a tool call and reports whether the loop may abort.
+// The second return value is the length of the trailing run of identical
+// (tool, args) calls, including the call just recorded; any change of tool or
+// arguments restarts the run at 1.
+func (cd *cycleDetector) recordCall(tool string, argsJSON string) (bool, int) {
 	cd.mu.Lock()
 	defer cd.mu.Unlock()
 
@@ -160,55 +163,77 @@ func (cd *cycleDetector) recordCall(tool string, argsJSON string) bool {
 		timestamp: time.Now(),
 	}
 
+	// Trailing run length. Counted independently of the history window so a
+	// small HistorySize can never silently disarm the abort threshold.
+	streak := 1
+	if n := len(cd.history); n > 0 {
+		last := cd.history[n-1]
+		if last.tool == tool && last.argHash == argHash {
+			streak = cd.streak + 1
+		}
+	}
+	cd.streak = streak
+
 	// Add to history
 	cd.history = append(cd.history, sig)
-	if len(cd.history) > cd.config.HistorySize {
+	window := cd.config.HistorySize
+	if window <= 0 {
+		// Keep the window bounded even when unconfigured: the run length is
+		// tracked separately in cd.streak, so the window is only context.
+		window = 1
+	}
+	if len(cd.history) > window {
 		cd.history = cd.history[1:]
 	}
 
 	// Check for cycles: look for consecutive similar calls
-	return cd.detectCycle()
+	return cd.detectCycle(tool, argHash, streak)
 }
 
-// detectCycle checks if we have consecutive similar tool calls.
-func (cd *cycleDetector) detectCycle() bool {
-	if len(cd.history) < cd.config.CycleThreshold {
-		return false
+// detectCycle decides whether the trailing run of identical tool calls has
+// OUTLASTED the corrective nudge. Returns (abort, repeats).
+//
+// Ordering contract -- the nudge gets its chance first. A run of
+// CycleThreshold identical calls is exactly the point at which the
+// no-progress ladder (NoProgressWarnAt, default 3 == CycleThreshold) injects
+// its corrective nudge, so it must NOT be the point of abort: aborting there
+// preempted the very nudge meant to correct the behaviour, and the turn ended
+// with the guard's bare error instead. The abort therefore fires only once
+// the model has repeated the identical call AGAIN, i.e. on a run of
+// CycleThreshold+1 (default 4).
+func (cd *cycleDetector) detectCycle(tool, argHash string, streak int) (bool, int) {
+	threshold := cd.config.CycleThreshold
+	if threshold < 1 {
+		// Degenerate config: one call is the floor of any run. (The old
+		// implementation indexed an empty window here and panicked.)
+		threshold = 1
 	}
 
-	// Check last N calls for similarity
-	recent := cd.history[len(cd.history)-cd.config.CycleThreshold:]
-
-	// All must be same tool with same args
-	firstTool := recent[0].tool
-	firstArgs := recent[0].argHash
-
-	for i := 1; i < len(recent); i++ {
-		if recent[i].tool != firstTool || recent[i].argHash != firstArgs {
-			return false
-		}
+	if streak < threshold {
+		return false, streak
 	}
 
 	// Rate limit warnings
 	if time.Since(cd.lastWarn) > 30*time.Second {
-		// AUDIT FIX (D-C3, bughunt 2026-09-04): hashArgs("{}") returns the
-		// 5-char literal "empty" — firstArgs[:8] panicked with slice
-		// bounds out of range on exactly the degenerate cycle cycle
-		// detection exists for (a tool called 3x with empty args).
-		// Reproduced by the auditor; clamp the prefix.
-		prefix := firstArgs
+		// AUDIT FIX (D-C3, bughunt 2026-09-04): hashArgs used to return the
+		// 5-char literal "empty" -- firstArgs[:8] panicked with slice
+		// bounds out of range on exactly the degenerate cycle detection
+		// exists for (a tool called 3x with empty args). The hash is now a
+		// real 16-char digest, but keep the clamp: it is the only thing
+		// standing between any future short signature and a panic.
+		prefix := argHash
 		if len(prefix) > 8 {
 			prefix = prefix[:8]
 		}
 		cd.logger.Warn("Cycle detected in tool calls",
-			"tool", firstTool,
+			"tool", tool,
 			"args_hash", prefix,
-			"count", len(recent),
+			"count", streak,
 		)
 		cd.lastWarn = time.Now()
 	}
 
-	return true
+	return streak >= threshold+1, streak
 }
 
 // Reset clears recorded tool-call history. Same within-turn semantic as
@@ -218,6 +243,7 @@ func (cd *cycleDetector) detectCycle() bool {
 func (cd *cycleDetector) Reset() {
 	cd.mu.Lock()
 	cd.history = cd.history[:0]
+	cd.streak = 0
 	cd.mu.Unlock()
 }
 
@@ -332,19 +358,34 @@ func (cd *convergenceDetector) Reset() {
 	cd.mu.Unlock()
 }
 
-// hashArgs creates a hash of tool arguments for comparison.
-// Accepts JSON string arguments directly.
+// hashArgs creates a hash of tool arguments for cycle comparison.
+// Accepts the tool-call arguments JSON string directly.
+//
+// The hash is taken over the EXACT serialized arguments: nothing is
+// special-cased and no input is collapsed onto another. The previous
+// implementation mapped BOTH "" and "{}" onto the literal "empty", so a tool
+// called with no arguments and the same tool called with an empty object
+// produced the same cycle signature: three legitimate, distinct-looking calls
+// were counted as one cycle and aborted the turn (fresh-rig daemon11.log:
+// list_directory repeated with empty args, aborted with args_hash=empty
+// count=3).
+//
+// Byte exactness is deliberate. Cycle detection is the byte-level guard (see
+// normalizeArgsJSON / HashToolCall for the normalized companion), so a retry
+// whose arguments changed can never trip it; near-duplicates that differ only
+// in key order or whitespace belong to the normalized no-progress ladder.
 func hashArgs(argsJSON string) string {
-	if argsJSON == "" || argsJSON == "{}" {
-		return "empty"
-	}
+	return hashString(argsJSON)
+}
 
-	// Normalize JSON: remove extra whitespace
-	normalized := strings.TrimSpace(argsJSON)
-
-	// For simple comparison, we can hash the normalized JSON directly
-	// Most LLMs produce deterministic JSON for the same arguments
-	return hashString(normalized)
+// cycleAbortError is the terminal error for a cycle abort. %w keeps
+// ErrCycleDetected classifiable (errors.Is) so a caller can still tell a
+// guard abort from a real tool failure, while the detail tells the user and
+// the next agent WHY the turn stopped: which tool repeated and how many times
+// it was repeated identically.
+func cycleAbortError(tool string, repeats int) error {
+	return fmt.Errorf("%w: tool=%s repeated the identical call %d times in a row",
+		ErrCycleDetected, tool, repeats)
 }
 
 // normalizeContent normalizes response content for comparison.
@@ -2609,8 +2650,21 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			"conversation", conversationID,
 			"error", err,
 		)
-		// Add error message to conversation
-		errorMsg := "I encountered an error during processing. Please try again."
+		// The loop's terminal guards (cycle, convergence, max-iterations,
+		// token budget) return a user-language wrap-up in `response` alongside
+		// their error. Substituting the generic sentence threw that away: the
+		// user saw a bare "I encountered an error" while the only explanation
+		// lived in the log and in the caller's error string (observed:
+		// "agent execution failed: agent detected a cycle in tool calls" with
+		// no hint of which tool repeated). Keep the loop's own explanation
+		// when it produced one; every error path that returns an empty
+		// response (LLM call failures, cancelled context) still gets the
+		// generic sentence. The error is unchanged -- the caller still
+		// receives the classified terminal error.
+		errorMsg := strings.TrimSpace(response)
+		if errorMsg == "" {
+			errorMsg = "I encountered an error during processing. Please try again."
+		}
 		conv.AddAssistantMessage(errorMsg)
 		return errorMsg, err
 	}
@@ -3618,6 +3672,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	// cycle/no-progress ladder vetoes it.
 	searchRollbacks := 0
 
+	// The last chain-of-thought the mlx client promoted into Content
+	// (Response.ReasoningPromoted). The give-up paths deliver it LABELLED
+	// rather than discarding the only text the model produced (audit finding
+	// F78/F80, "the text is never discarded"): the reasoning watchdog's
+	// terminate path reads the live response, and the max-iterations path
+	// below the loop reads this snapshot.
+	var lastPromotedReasoning string
+
 	// Transition to thinking state at the start of the reasoning cycle.
 	l.safeTransition(StateThinking, "reasoning_cycle_start", map[string]any{
 		"conversation_id": conversationID,
@@ -3835,6 +3897,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// In warning zone, don't send tools so the LLM produces a final text response
 		if len(tools) > 0 && !inWarningZone {
 			chatOpts = append(chatOpts, llm.WithTools(tools))
+			// Executor turns must ACT, not narrate. With tools present and the
+			// endpoint opted in (models.json5 tool_choice: "required"), ask for
+			// a tool call instead of letting the model answer in prose.
+			//
+			// Measured 2026-09-13 on the local LFM2.5-8B endpoint: without this
+			// a turn "completed" by narrating a finished extraction while
+			// running zero tools; with it the same turn calls the tool 5/5.
+			// Deliberately narrow - executor role only, never the
+			// conversational/reviewer roles, because a forced call on a prose
+			// turn produced spurious calls 5/5 in the same measurements.
+			if l.spec != nil && l.spec.Role == RoleExecutor {
+				chatOpts = append(chatOpts, llm.WithToolChoice(llm.ToolChoiceRequired))
+			}
 		}
 		if inWarningZone {
 			// Inject wrap-up instruction so the LLM summarizes without further tool use
@@ -4151,6 +4226,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Publish token usage event
 		l.publishTokenUsage(conversationID, totalTokens)
 
+		// Snapshot a promoted chain-of-thought for the give-up paths. The
+		// reply is about to be re-asked for visible output (the watchdog
+		// nudge ladder and the reasoning-only nudge below both `continue`),
+		// and this response is out of scope once the loop exits — without
+		// the snapshot the max-iterations path has nothing to deliver.
+		if response.ReasoningPromoted {
+			lastPromotedReasoning = response.Content
+		}
+
 		// Case 1: LLM returned tool calls
 		if response.HasToolCalls() {
 			hadToolCalls = true
@@ -4316,6 +4400,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// dangles (HIGH-2).
 			pendingNudges := 0
 			for _, tc := range response.ToolCalls {
+				// nudgeInFlight records that the no-progress ladder flagged
+				// THIS call as a repeat at/over its warn threshold, i.e. the
+				// corrective nudge has been earned (and is injected below,
+				// after the tool results). The cycle abort is gated on it so
+				// the nudge always gets its chance first: a run of identical
+				// calls aborts only after the ladder has had a nudge delivered
+				// and the model repeated the identical call again.
+				nudgeInFlight := false
 				// Leaf 07 guard: normalized no-progress ladder. Composes with
 				// (does not replace) the byte-level cycle detector above.
 				if l.noProgress != nil {
@@ -4327,6 +4419,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 							"conversation", conversationID,
 						)
 						pendingNudges++
+						nudgeInFlight = true
 					case GuardVeto:
 						l.logger.Warn("No-progress veto",
 							"tool", tc.Function.Name,
@@ -4346,6 +4439,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 						}
 						// Inject veto nudge AFTER the tool results (see NOTE).
 						pendingNudges++
+						nudgeInFlight = true
 					}
 				}
 
@@ -4355,20 +4449,31 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					l.searchRollbk.Observe(HashToolCall("web_search", tc.Function.Arguments))
 				}
 
-				if l.cycleDetector.recordCall(tc.Function.Name, tc.Function.Arguments) {
-					// Cycle detected - abort with helpful message
+				cycleAbort, repeats := l.cycleDetector.recordCall(tc.Function.Name, tc.Function.Arguments)
+				// The nudge gets its chance first: with the ladder present,
+				// abort only on a call the ladder has already flagged as a
+				// repeat (its nudge for that call is flushed below, and any
+				// earlier iteration of the same run has already delivered
+				// one). Without the ladder there is nothing to yield to.
+				if cycleAbort && (l.noProgress == nil || nudgeInFlight) {
+					// Cycle detected - abort with an explanation, not a bare
+					// guard error: the terminal error carries the tool name
+					// and the repeat count and still wraps ErrCycleDetected,
+					// so callers can classify it while the user and the next
+					// agent can see WHY the turn stopped.
 					l.logger.Warn("Cycle detected, aborting loop",
 						"iteration", iteration,
 						"tool", tc.Function.Name,
+						"repeats", repeats,
 					)
 					// Flush synthetic tool results first: the assistant
 					// tool_calls entry is already in the conversation, and
 					// returning with unanswered calls poisons every later
 					// provider call on this conversation (HIGH-2).
 					flushDeferredToolResults(conv, response.ToolCalls, results, pendingNudges)
-					exhaustMsg := fmt.Sprintf("I detected I was repeating the same action (%s) and stopped to avoid getting stuck. "+
-						"Please provide more specific guidance or clarify what you'd like me to do.", tc.Function.Name)
-					return exhaustMsg, ErrCycleDetected
+					exhaustMsg := fmt.Sprintf("I detected I was repeating the same action (%s) %d times in a row and stopped to avoid getting stuck. "+
+						"Please provide more specific guidance or clarify what you'd like me to do.", tc.Function.Name, repeats)
+					return exhaustMsg, cycleAbortError(tc.Function.Name, repeats)
 				}
 			}
 
@@ -4611,9 +4716,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					// a legitimate answer is not discarded, and a
 					// chain-of-thought is still never passed off as an ordinary
 					// answer (audit finding F78/F80).
-					if response.ReasoningPromoted && strings.TrimSpace(response.Content) != "" {
-						msg += "\n\n[reasoning-only output — unverified, and the model never produced a visible answer:]\n" +
-							strings.TrimSpace(response.Content)
+					if response.ReasoningPromoted {
+						msg = labelledReasoningOnly(msg, response.Content)
 					}
 					return msg, nil
 				}
@@ -4847,7 +4951,35 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 	exhaustMsg := "I've reached the maximum number of reasoning steps for this turn. " +
 		"Here is what I have so far -- please let me know if you'd like me to continue."
+	// The "the text is never discarded" half of the promoted-reasoning
+	// contract (audit finding F78/F80) has to hold on THIS give-up path too: a
+	// turn that spent its whole iteration budget re-asking a thinking-only
+	// model for visible output still carries the only text the model produced,
+	// LABELLED, through the same helper the watchdog terminate path uses.
+	// Without it the generic wrap-up sentence replaced the promoted
+	// chain-of-thought (wave-3 finding).
+	exhaustMsg = labelledReasoningOnly(exhaustMsg, lastPromotedReasoning)
 	return exhaustMsg, ErrMaxIterationsReached
+}
+
+// reasoningOnlyLabel marks text the model produced in its reasoning channel
+// (mlx shape: the client promoted the chain-of-thought into Content) when a
+// give-up path delivers it. The label keeps a chain-of-thought from reading as
+// an ordinary answer while still honouring the "the text is never discarded"
+// half of audit finding F78/F80.
+const reasoningOnlyLabel = "[reasoning-only output — unverified, and the model never produced a visible answer:]"
+
+// labelledReasoningOnly appends promoted reasoning-channel text to msg under
+// reasoningOnlyLabel. Empty content leaves msg untouched, so every give-up path
+// can call it unconditionally. Shared by the reasoning watchdog's terminate path
+// and the max-iterations path so BOTH honour the same contract — the watchdog
+// alone honoured it, and a promoted turn that exhausted its iteration budget
+// lost the only text the model produced (wave-3 finding).
+func labelledReasoningOnly(msg, promoted string) string {
+	if strings.TrimSpace(promoted) == "" {
+		return msg
+	}
+	return msg + "\n\n" + reasoningOnlyLabel + "\n" + strings.TrimSpace(promoted)
 }
 
 // safeTransition is a convenience wrapper around stateMachine.Transition that
@@ -5759,7 +5891,19 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 			"model", modelID,
 			"error", err,
 		)
-		errorMsg := "I encountered an error during processing. Please try again."
+		// The loop's terminal guards (cycle, convergence, max-iterations,
+		// token budget) return a user-language wrap-up in `response` alongside
+		// their error — including the promoted reasoning-only text the
+		// max-iterations path delivers labelled. Substituting the generic
+		// sentence threw that away (wave-3 finding, group B item 3), so keep
+		// the loop's own explanation when it produced one; every error path
+		// that returns an empty response (LLM call failures, cancelled
+		// context) still gets the generic sentence. Mirrors the chat path in
+		// RunOnceWithParts.
+		errorMsg := strings.TrimSpace(response)
+		if errorMsg == "" {
+			errorMsg = "I encountered an error during processing. Please try again."
+		}
 		conv.AddAssistantMessage(errorMsg)
 
 		// Emit task failure notification

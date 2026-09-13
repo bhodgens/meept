@@ -53,16 +53,16 @@ func TestResetTurnGuards_ClearsCycleHistory(t *testing.T) {
 		t.Fatal("NewAgentLoop must initialize cycleDetector")
 	}
 
-	if cyc.recordCall("web_search", `{"query":"x"}`) {
+	if abort, _ := cyc.recordCall("web_search", `{"query":"x"}`); abort {
 		t.Fatal("unexpected cycle on first stale call")
 	}
-	if cyc.recordCall("web_search", `{"query":"x"}`) {
+	if abort, _ := cyc.recordCall("web_search", `{"query":"x"}`); abort {
 		t.Fatal("unexpected cycle on second stale call")
 	}
 
 	loop.resetTurnGuards()
 
-	if cyc.recordCall("web_search", `{"query":"x"}`) {
+	if abort, _ := cyc.recordCall("web_search", `{"query":"x"}`); abort {
 		t.Fatal("stale history tripped cycle detection in a fresh turn; resetTurnGuards must clear the cycle detector")
 	}
 }

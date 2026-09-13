@@ -511,12 +511,17 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 // Each agent only gets its baseline tools plus its additional tools,
 // reducing the number of tool definitions sent per LLM call.
 // When CanDelegate is false, the delegate_task baseline tool is stripped.
+//
+// The allow-list is normalized to registered tool names (a grant of
+// shell_execute resolves to the registered `shell` tool) and capped when the
+// spec sets tool_scope_limit (tool-list scoping; 0 = no cap, existing
+// behavior). See AgentSpec.GrantedToolNames / ScopedToolNames.
 func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 	if r.tools == nil {
 		return nil
 	}
 
-	allowedTools := spec.AllTools()
+	allowedTools := spec.ScopedToolNames(spec.ToolScopeLimit)
 	if !spec.CanDelegate {
 		allowedTools = removeString(allowedTools, "delegate_task")
 	}

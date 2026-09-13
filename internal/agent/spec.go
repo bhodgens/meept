@@ -111,6 +111,15 @@ type AgentSpec struct {
 	EscalationModel string `json:"escalation_model,omitempty" yaml:"escalation_model,omitempty"`
 	// AdditionalTools are tools beyond the baseline that this agent has access to.
 	AdditionalTools []string `json:"additional_tools,omitempty"`
+	// ToolScopeLimit caps how many tools are offered to this agent in the
+	// request (tool-list scoping). 0 (default) = no cap: every baseline +
+	// additional tool is offered, which preserves the existing behavior.
+	// A positive value offers only the first ToolScopeLimit names from
+	// AdditionalTools followed by BaselineTools (see ScopedToolNames).
+	// Reason: a forced tool call (models.json5 `tool_choice: "required"`)
+	// must choose among few candidates — the measured failure was 81 tools
+	// offered at once. See docs/reference/agent-loop-tools.md.
+	ToolScopeLimit int `json:"tool_scope_limit,omitempty"`
 	// Constraints are operational limits for this agent.
 	Constraints AgentConstraints `json:"constraints"`
 	// SystemPromptSections are additional prompt sections for this agent.
@@ -171,12 +180,87 @@ func (s *AgentSpec) HasTool(tool string) bool {
 	return slices.Contains(s.AdditionalTools, tool)
 }
 
-// AllTools returns all tools available to this agent.
+// AllTools returns all tools available to this agent, as declared (baseline +
+// additional, in that order). The declared names are NOT normalized to
+// registry names — use GrantedToolNames for that.
 func (s *AgentSpec) AllTools() []string {
 	tools := make([]string, 0, len(BaselineTools)+len(s.AdditionalTools))
 	tools = append(tools, BaselineTools...)
 	tools = append(tools, s.AdditionalTools...)
 	return tools
+}
+
+// toolGrantAliases maps agent-grant names — the vocabulary used in AGENT.md
+// `additional_tools` and in BaselineTools — to the registered tool names in
+// the tool registry (tools.Tool.Name()). The registry is keyed by the
+// registered name, and FilteredToolRegistry matches grants against those keys
+// exactly, so an unnormalized grant is silently dropped: the coder's AGENT.md
+// grants `shell_execute` while the registered tool is `shell`, so the shell
+// tool was never offered to the coder at all.
+//
+// Keep this list tiny and one-directional (grant -> registered name). Add an
+// entry only when a grant token and a registry name genuinely diverge.
+var toolGrantAliases = map[string]string{
+	"shell_execute": "shell",
+}
+
+// CanonicalToolName returns the registered tool name for an agent grant.
+// Unknown names pass through unchanged.
+func CanonicalToolName(name string) string {
+	if canonical, ok := toolGrantAliases[name]; ok {
+		return canonical
+	}
+	return name
+}
+
+// GrantedToolNames returns the agent's declared tools (baseline + additional)
+// normalized to registered registry names. It is the allow-list the registry
+// filters against, so a grant of `shell_execute` resolves to the registered
+// `shell` tool.
+func (s *AgentSpec) GrantedToolNames() []string {
+	declared := s.AllTools()
+	out := make([]string, 0, len(declared))
+	for _, name := range declared {
+		out = append(out, CanonicalToolName(name))
+	}
+	return out
+}
+
+// ScopedToolNames returns the tool names offered to this agent under
+// tool-list scoping, capped at limit.
+//
+//   - limit <= 0: no cap — the full normalized grant set (GrantedToolNames),
+//     i.e. the existing behavior.
+//   - limit > 0: at most `limit` names, ordered AdditionalTools first (the
+//     task-relevant tools the agent was granted for its job — these survive
+//     the cap) then BaselineTools (the always-available platform/task tools),
+//     de-duplicated, with names normalized to registry names.
+//
+// The cap exists because a forced tool call must choose among few candidates:
+// with a large candidate set a `tool_choice: "required"` request produces
+// spurious calls (measured; see docs/reference/agent-loop-tools.md).
+func (s *AgentSpec) ScopedToolNames(limit int) []string {
+	if limit <= 0 {
+		return s.GrantedToolNames()
+	}
+	names := make([]string, 0, limit)
+	seen := make(map[string]bool, limit)
+	add := func(list []string) {
+		for _, raw := range list {
+			if len(names) >= limit {
+				return
+			}
+			name := CanonicalToolName(raw)
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	add(s.AdditionalTools) // task-relevant tools first: they survive the cap
+	add(BaselineTools)     // then the always-available baseline
+	return names
 }
 
 // HasSkill checks if the agent spec includes a specific skill.

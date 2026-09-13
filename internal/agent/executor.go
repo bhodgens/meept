@@ -2008,3 +2008,40 @@ func FilterToolsForSkill(registry ToolRegistry, allowedTools []string) ToolRegis
 	}
 	return NewFilteredToolRegistry(registry, allowedTools)
 }
+
+// ToolsWithoutProperties returns the names (sorted) of tools whose declared
+// parameter schema carries no properties (FunctionParameters.Properties is
+// empty).
+//
+// Such a tool is a HAZARD for grammar-constrained / forced tool calls: the
+// tool-call grammar builds the arguments object from the declared properties,
+// so a property-less tool emits {"arguments":{}} for every call (measured
+// 5/5), and a model offered a zero-argument decoy alongside the intended tool
+// picked the decoy 10/10. This function only REPORTS; it never mutates or
+// hides a tool (flag, do not silently change). Run it at daemon startup over
+// the full registry, or in tests as a regression gate.
+func ToolsWithoutProperties(reg ToolRegistry) []string {
+	if reg == nil {
+		return nil
+	}
+	var names []string
+	for _, def := range reg.GetDefinitions() {
+		if len(def.Function.Parameters.Properties) == 0 {
+			names = append(names, def.Function.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// WarnToolsWithoutProperties logs a warning listing every property-less tool
+// in reg and returns the names. Nil-safe on both arguments. See
+// ToolsWithoutProperties for why this is a hazard.
+func WarnToolsWithoutProperties(reg ToolRegistry, logger *slog.Logger) []string {
+	names := ToolsWithoutProperties(reg)
+	if len(names) > 0 && logger != nil {
+		logger.Warn("tools with no declared parameters: grammar/forced calls yield {} arguments (zero-argument decoys win over the intended tool)",
+			"count", len(names), "tools", names)
+	}
+	return names
+}

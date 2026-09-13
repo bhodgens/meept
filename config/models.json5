@@ -288,7 +288,7 @@
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-general.pid",
-        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1", "--jinja", "--ctx-size", "16384"],
+        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1", "--jinja", "--reasoning-budget", "0", "--ctx-size", "16384"],
         "spawn_timeout_seconds": 180,
         "health_check": {
           "endpoint": "/health",
@@ -311,6 +311,12 @@
           "name": "LFM2.5-8B-A1B-Q4_K_M.gguf",
           "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
           "capabilities": ["completion", "code", "reasoning", "tool_use"],
+          // tool_choice: "required" asks for a tool call on executor turns that
+          // carry tools (the loop gates it on the agent's executor role, never
+          // on conversational turns). Measured 2026-09-13 on this endpoint:
+          // 15/20 turns called the tool without it, 20/20 with it; without it a
+          // turn "completes" by narrating work it never did.
+          "tool_choice": "required",
           "input_cost": 0.0,
           "output_cost": 0.0,
           "context_limit": 16384,

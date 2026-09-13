@@ -41,6 +41,13 @@ type ProviderOptionsConfig struct {
 	// [agent.tools].schema_mode. Per-model schema_mode overrides this value.
 	// Unknown values are ignored at resolve time (warn + fall through).
 	SchemaMode string `json:"schema_mode,omitempty"`
+	// ToolChoice is the provider-level default tool_choice policy sent on
+	// requests that carry tools AND whose caller marked the turn as an
+	// action turn (llm.WithToolChoice). Empty (default) = no tool_choice
+	// field is ever sent, so nothing regresses. "required" opts the model
+	// into forced tool calls. Per-model tool_choice overrides this value.
+	// Unknown values are ignored at resolve time (warn + fall through).
+	ToolChoice string `json:"tool_choice,omitempty"`
 	// ExtraHeaders are additional HTTP headers sent with every request to
 	// this provider (e.g. x-opencode-session for session affinity on the
 	// OpenCode Zen/Go gateway). Per-model extra_headers merge over these
@@ -82,6 +89,10 @@ type ModelDef struct {
 	// model ("full"|"indexed", loop-economics leaf 02). Empty inherits
 	// the provider setting. Unknown values are ignored at resolve time.
 	SchemaMode string `json:"schema_mode,omitempty"`
+	// ToolChoice overrides the provider-level tool_choice policy for this
+	// model. Empty inherits the provider setting. See
+	// ProviderOptionsConfig.ToolChoice.
+	ToolChoice string `json:"tool_choice,omitempty"`
 	// ExtraHeaders overrides/extends the provider-level extra HTTP headers
 	// for this model (merged per key over the provider map). See
 	// ProviderOptionsConfig.ExtraHeaders for the "${session_id}" sentinel.
@@ -113,6 +124,25 @@ type ModelAliasEntry struct {
 	MaxFails               int      `json:"max_fails"` // Max consecutive failures before rotation
 	DefaultModel           string   `json:"default_model,omitempty"`
 	BalancedStickyRequests bool     `json:"balanced_sticky_requests,omitempty"`
+}
+
+// ToolChoiceRequired is the only tool_choice value the request builder acts
+// on today: force the model to emit a tool call instead of prose. It is the
+// measured lever that fixed the llama.cpp/LFM2.5 narration failure
+// (tool_choice auto 15/20, required 20/20 on the failing prompt). Other
+// values accepted in config are parsed for forward compatibility but are
+// not sent — see resolveToolChoice in client.go.
+const ToolChoiceRequired = "required"
+
+// ToolChoiceValid reports whether v is a recognized tool_choice value.
+// The empty string is valid and means "no tool_choice field" (the default).
+func ToolChoiceValid(v string) bool {
+	switch v {
+	case "", "auto", "none", ToolChoiceRequired:
+		return true
+	default:
+		return false
+	}
 }
 
 // envVarPattern matches ${VAR_NAME} or $VAR_NAME patterns.
@@ -469,6 +499,18 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 			"provider", providerID, "model", mapKey, "mode", schemaMode)
 		schemaMode = ""
 	}
+	// Resolve tool_choice the same way: per-model override > provider
+	// default. Unknown values warn and clear so the request builder falls
+	// back to sending no tool_choice (the safe default).
+	toolChoice := modelDef.ToolChoice
+	if toolChoice == "" {
+		toolChoice = provider.Options.ToolChoice
+	}
+	if !ToolChoiceValid(toolChoice) {
+		slog.Warn("providers: ignoring unknown tool_choice",
+			"provider", providerID, "model", mapKey, "value", toolChoice)
+		toolChoice = ""
+	}
 	name := modelDef.Name
 	if name == "" {
 		name = mapKey
@@ -500,6 +542,7 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		CatalogRef:           providerID + "/" + mapKey,
 		ToolConstraint:       mode,
 		SchemaMode:           schemaMode,
+		ToolChoice:           toolChoice,
 		ExtraHeaders:         extraHeaders,
 		Timeout:              time.Duration(opts.Timeout) * time.Second,
 		MaxConcurrency:       modelDef.MaxConcurrency,

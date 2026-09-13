@@ -483,6 +483,13 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 		payload["tools"] = chatOpts.tools
 	}
 
+	// Force a tool call when the model opted in AND the caller marked this
+	// turn an action turn (see resolveToolChoice). Nothing is added by
+	// default: cfg.ToolChoice empty => no field, byte-identical payload.
+	if tc := resolveToolChoice(cfg, chatOpts); tc != "" {
+		payload["tool_choice"] = tc
+	}
+
 	if addStream {
 		payload["stream"] = true
 		// B-02 FIX: Request usage in the final stream chunk so budget
@@ -941,6 +948,12 @@ type chatOptions struct {
 	// different layer (stamped at enqueue from the originating session)
 	// and does not flow here; see docs/workflows/llm-management.md.
 	priority bool
+	// toolChoice is the caller's per-turn tool_choice request, set with
+	// WithToolChoice. Non-empty means the caller marked THIS turn an
+	// action turn. The wire value is still gated on the resolved model
+	// opting in (ModelConfig.ToolChoice) and on tools being present; see
+	// resolveToolChoice.
+	toolChoice string
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -1196,6 +1209,62 @@ func PriorityOf(opts []ChatOption) bool {
 		}
 	}
 	return o.priority
+}
+
+// WithToolChoice marks THIS request as an action turn and sets the requested
+// tool_choice value. It is the per-turn half of the forced-tool-call contract
+// and the only signal the request builder has for turn type: the agent loop's
+// intent/agent-capability information is not visible at the request-building
+// layer (internal/llm cannot import internal/agent — import cycle), so the
+// caller must mark action turns explicitly.
+//
+// Wiring the agent loop's intent (action vs prose) to this option is the
+// follow-up: see docs/reference/agent-loop-tools.md ("Forced tool calls").
+// Until that lands, passing this option is the only way to send tool_choice;
+// with no option (or a prose turn that passes none) the payload is unchanged.
+//
+// Only ToolChoiceRequired is honored. An empty value is a no-op (prose).
+func WithToolChoice(value string) ChatOption {
+	return func(o *chatOptions) {
+		o.toolChoice = value
+	}
+}
+
+// ToolChoiceOf reports the per-turn tool_choice requested through the option
+// slice ("" when none was passed). It is the inspection counterpart of
+// WithToolChoice, for callers that stub the Chatter and assert on options.
+func ToolChoiceOf(opts []ChatOption) string {
+	var o chatOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	return o.toolChoice
+}
+
+// resolveToolChoice returns the wire "tool_choice" value for the request, or
+// "" when the field must be omitted. The field is sent ONLY when all three
+// of the measured conditions hold:
+//
+//  1. the request carries tools — there is nothing to choose among otherwise;
+//  2. the caller marked the turn an ACTION turn via WithToolChoice("required")
+//     — a prose/analysis turn must not carry it. Sending "required" on a
+//     prose question with a full tool list produced wrong or spurious calls
+//     5/5 in the llama.cpp/LFM2.5 measurement;
+//  3. the resolved model/provider opted in via models.json5 `tool_choice:
+//     "required"` (the default "" is off, so nothing regresses).
+//
+// The model opt-in also keeps the wire value from ever exceeding what the
+// operator enabled, and the action-turn mark keeps prose turns safe.
+func resolveToolChoice(cfg *ModelConfig, o *chatOptions) string {
+	if o == nil || len(o.tools) == 0 || o.toolChoice != ToolChoiceRequired {
+		return ""
+	}
+	if cfg == nil || cfg.ToolChoice != ToolChoiceRequired {
+		return ""
+	}
+	return ToolChoiceRequired
 }
 
 // doRequest performs the HTTP request and parses the response.

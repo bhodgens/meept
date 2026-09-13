@@ -244,6 +244,16 @@ type ModelConfig struct {
 	// global [agent.tools].schema_mode (default "indexed") via
 	// Resolver.EffectiveSchemaMode.
 	SchemaMode string
+	// ToolChoice is the resolved tool_choice policy for this endpoint,
+	// resolved per-model over provider from models.json5 `tool_choice`
+	// (see internal/llm/providers.go). Empty (the default) means the
+	// request builder never sends a tool_choice field. "required" opts the
+	// model into forced tool calls: a request that carries tools AND whose
+	// caller marked the turn as an action turn (llm.WithToolChoice) then
+	// sends "tool_choice":"required". The action-turn gate is mandatory:
+	// sending "required" on a prose turn produced spurious calls 5/5 in
+	// the llama.cpp/LFM2.5 measurement (see docs/reference/agent-loop-tools.md).
+	ToolChoice string
 	// OAuthProvider identifies the OAuth provider (e.g. "github-models",
 	// "google-oauth") whose token should be used in place of a static API
 	// key. When non-empty, the LLM client resolves a fresh access token

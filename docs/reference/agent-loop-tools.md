@@ -131,6 +131,88 @@ User Input (CLI / TUI / HTTP / Telegram)
 
 All agents receive these 10 tools automatically via `BaselineTools` in `internal/agent/spec.go`. Additional tools are layered on per-agent by the `AgentRegistry.filterTools()` method.
 
+### Forced tool calls (`tool_choice`) and tool-list scoping
+
+A local model can narrate a tool call instead of emitting one (prose escape).
+The measured fix is `tool_choice: "required"` plus a small candidate set.
+
+**Config key** — `tool_choice` in `config/models.json5`, per provider
+(`providers.<id>.options.tool_choice`) or per model
+(`providers.<id>.models.<id>.tool_choice`, which overrides the provider
+value). Accepted values: `""` (default), `"auto"`, `"none"`, `"required"`.
+Only `"required"` is acted on today; unknown values are warned about and
+cleared at resolve time. Resolution lives in `modelConfigFrom`
+(`internal/llm/providers.go`) and lands on `ModelConfig.ToolChoice`.
+
+```json5
+{
+  providers: {
+    "local-llama": {
+      options: { baseURL: "http://127.0.0.1:8081/v1" },
+      models: {
+        "lfm2.5-8b": {
+          name: "lfm2.5-8b",
+          tool_choice: "required", // opt-in: forced calls for this model
+        },
+      },
+    },
+  },
+}
+```
+
+**Wire contract** — `"tool_choice":"required"` is sent ONLY when all three
+hold (`resolveToolChoice`, `internal/llm/client.go`):
+
+1. the request carries tools;
+2. the caller marks the turn an **action turn** via
+   `llm.WithToolChoice("required")`;
+3. the resolved model/provider opted in via `tool_choice: "required"`.
+
+The default (`tool_choice` absent) sends no `tool_choice` field at all, so
+nothing regresses. Gate 2 is mandatory: `required` on a prose question with a
+full tool list produced wrong or spurious calls 5/5, and a tool name merely
+echoed in the prompt produced spurious calls 5/5. Gate 3 keeps the model from
+being forced further than the operator enabled.
+
+**Scoping rule** — a forced call must choose among few candidates; the
+measured failure was 81 tools offered at once (1-10 per step is the useful
+band). `AgentRegistry.filterTools()` now assembles the allow-list through
+`AgentSpec.ScopedToolNames`:
+
+- grant names are normalised to registered registry names, so a grant of
+  `shell_execute` resolves to the registered `shell` tool
+  (`toolGrantAliases` / `CanonicalToolName`, `internal/agent/spec.go`);
+- with `tool_scope_limit` unset (0, the default) every baseline + additional
+  grant is offered — the existing behavior;
+- with `tool_scope_limit: N` (per-agent AGENT.md frontmatter), at most `N`
+  names are offered, `additional_tools` first (the task-relevant tools survive
+  the cap) then `BaselineTools`, de-duplicated.
+
+```yaml
+# config/agents/coder/AGENT.md frontmatter
+additional_tools: [file_read, file_write, file_delete, list_directory, shell_execute, json_extract]
+tool_scope_limit: 8   # opt-in cap; 0/absent = no cap (existing behavior)
+```
+
+**Wiring follow-up** — `llm.WithToolChoice("required")` is exposed but not yet
+called by the agent loop; the loop's intent (action vs prose) is the signal
+that must drive it. `internal/llm` cannot read the loop's intent (import
+cycle), so the loop is where the option gets appended — next to the existing
+`llm.WithTools(tools)` append in `internal/agent/loop.go`
+(`reasoningCycle`, ~line 3831). Until that lands, no production request sends
+`tool_choice`; the config field alone is inert by design.
+
+### Zero-property tools are a hazard
+
+A tool whose declared parameters carry no properties makes the tool-call
+grammar emit `{"arguments":{}}` for every call (measured 5/5), and a
+zero-argument decoy alongside the intended tool was picked 10/10. The
+registry-side check is `agent.ToolsWithoutProperties` /
+`agent.WarnToolsWithoutProperties` (`internal/agent/executor.go`); it only
+reports — it never hides a tool. Run it over the full registry at daemon
+startup, or in tests as a regression gate.
+
+
 ## Intent Routing
 
 The `LLMClassifier` (`internal/agent/llm_classifier.go`) uses the `classifier_model` (typically the `small_model`) to classify user messages into intent types. The `Dispatcher` then routes based on the result:
