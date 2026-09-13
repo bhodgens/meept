@@ -13,26 +13,42 @@ import (
 //     (repo development: daemon launched from the repo root).
 //  2. Else, if it exists relative to the executable's directory, use it
 //     (installed layouts where config/ ships next to the binary).
-//  3. Else fall back to the original relative path — discovery logs a
-//     warning when nothing is found, and the user-tier copy in
+//  3. Else fall back to the CWD candidate — discovery logs a warning when
+//     nothing is found, and the user-tier copy in
 //     ~/.meept/{agents,prompts,skills} (populated by `make install` /
 //     `make sync-config`) is the effective source.
 //
 // The CWD-first order preserves repo-dev behavior exactly: a developer
 // working from the repo root always sees the working tree, even if a stale
 // config/ copy sits next to an old binary.
+//
+// Every branch returns an ABSOLUTE path (F83, bughunt 2026-09-12 wave): the
+// resolved tier is snapshotted at start-up and read later, so a bare relative
+// path handed to the prompt service/agent registry would be re-resolved
+// against whatever the process CWD is at READ time — the doc contract is that
+// the bundled tier is resolved once, never against a live CWD.
 func resolveBundledPath(rel string) string {
 	if rel == "" || filepath.IsAbs(rel) {
 		return rel
 	}
 	if _, err := os.Stat(rel); err == nil {
-		return rel
+		return absOrSelf(rel)
 	}
 	if exe, err := os.Executable(); err == nil {
 		candidate := filepath.Join(filepath.Dir(exe), rel)
 		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+			return absOrSelf(candidate)
 		}
 	}
-	return rel
+	return absOrSelf(rel)
+}
+
+// absOrSelf makes a path absolute, falling back to the input when the OS
+// cannot resolve the current directory. Callers treat the result as a
+// fixed directory resolved at start-up.
+func absOrSelf(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }

@@ -1469,7 +1469,7 @@ func (c *AgentToolsConfig) Validate() error {
 func DefaultAlwaysFullTools() []string {
 	return []string{
 		"shell", "file_read", "file_edit", "file_write",
-		"memory_search", "memory_store", "web_fetch", "websearch",
+		"memory_search", "memory_store", "web_fetch", "web_search",
 		"platform_status", "tool_view",
 		// transcript_fetch: 5 params with distinct types (url/timestamps/
 		// language/offset/max_chars) — the indexed one-liner gives the

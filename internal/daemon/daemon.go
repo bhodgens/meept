@@ -1146,7 +1146,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if fullCfg.Transport.HTTP.Enabled {
 		if configService != nil && daemonControl != nil {
 			httpCfg := http.DefaultServerConfig()
-			httpCfg.Addr = fullCfg.Transport.HTTP.ListenAddr()
+			// Keep the server's own loopback default when the config resolves
+			// to NO address: ListenAddr() returns "" when neither `addr` nor
+			// `port` is set, and assigning "" would hand net.Listen a
+			// wildcard/ephemeral address — the all-interfaces exposure
+			// 84ce30f9 removed (audit 2026-09-12, F13).
+			httpCfg.Addr = httpListenAddrFor(fullCfg.Transport.HTTP, httpCfg.Addr)
 			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
 			httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
 			httpCfg.TLSCertFile = fullCfg.Transport.HTTP.TLSCertFile
@@ -1640,12 +1645,31 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 // which misreported every non-default configuration and sent operators
 // chasing a port collision on an address the server never bound. Resolution
 // goes through ListenAddr so the `transport.http.port` alias is honored here
-// too (a config with only `port` previously logged the Addr default).
+// too (a config with only `port` previously logged the Addr default), and
+// falls back to the server's own loopback default when the config resolves to
+// none — otherwise the boot log printed an empty addr for the very config the
+// server binds on 127.0.0.1:8081 (audit 2026-09-12, F13).
 func httpTransportAddr(fullCfg *config.Config) string {
 	if fullCfg == nil {
 		return ""
 	}
-	return fullCfg.Transport.HTTP.ListenAddr()
+	return httpListenAddrFor(fullCfg.Transport.HTTP, http.DefaultServerConfig().Addr)
+}
+
+// httpListenAddrFor resolves the listener address for an HTTP transport
+// config: the config's own address when it sets one, else serverDefault (the
+// DefaultServerConfig loopback address).
+//
+// ListenAddr() deliberately returns "" for the documented "neither addr nor
+// port set" case, so consumers must NOT assign that "" to a ServerConfig:
+// net.Listen("tcp", "") binds EVERY interface on an ephemeral port (Go's
+// empty-host resolution), which is the exposure 84ce30f9 removed when it made
+// the HTTP transport loopback-only (audit 2026-09-12, F13).
+func httpListenAddrFor(transport config.HTTPTransportConfig, serverDefault string) string {
+	if addr := transport.ListenAddr(); addr != "" {
+		return addr
+	}
+	return serverDefault
 }
 
 // Run starts the daemon and blocks until shutdown.

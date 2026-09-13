@@ -164,6 +164,64 @@ func fieldKeys(fields []Field) []string {
 	return keys
 }
 
+// TestBuildProviderItems_AutoStopOnExitMatchesProviderAccessor pins F82
+// (bughunt 2026-09-12 wave): the lifecycle toggle rendered
+// lc.AutoStopOnExitOrDefault() on a SUBSTITUTED zero-value block, so every
+// provider with no lifecycle block (openai/anthropic/…) displayed
+// "auto stop on exit: on" — the opposite of ProviderConfig.IsAutoStopOnExit()
+// (false), the accessor added by the same commit. An operator toggling the
+// displayed value off marked the field dirty and save.go then materialized a
+// brand-new lifecycle block for a provider that manages no runtime.
+func TestBuildProviderItems_AutoStopOnExitMatchesProviderAccessor(t *testing.T) {
+	tru, fal := true, false
+	cases := []struct {
+		name     string
+		provider llm.ProviderConfig
+		want     bool
+	}{
+		{
+			name:     "no lifecycle block renders off",
+			provider: llm.ProviderConfig{API: "openai"},
+			want:     false,
+		},
+		{
+			name:     "existing block with absent key still means on",
+			provider: llm.ProviderConfig{API: "openai", Lifecycle: &llm.RuntimeLifecycleConfig{Runtime: "llama-cpp"}},
+			want:     true,
+		},
+		{
+			name:     "explicit false renders off",
+			provider: llm.ProviderConfig{API: "openai", Lifecycle: &llm.RuntimeLifecycleConfig{AutoStopOnExit: &fal}},
+			want:     false,
+		},
+		{
+			name:     "explicit true renders on",
+			provider: llm.ProviderConfig{API: "openai", Lifecycle: &llm.RuntimeLifecycleConfig{AutoStopOnExit: &tru}},
+			want:     true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			items := buildProviderItems(map[string]llm.ProviderConfig{"p": tc.provider})
+			if len(items) != 1 {
+				t.Fatalf("expected 1 provider item, got %d", len(items))
+			}
+			toggle, ok := findField(items[0].Fields, "lifecycle.auto_stop_on_exit").(*ToggleField)
+			if !ok {
+				t.Fatalf("expected a ToggleField for lifecycle.auto_stop_on_exit; field keys: %v", fieldKeys(items[0].Fields))
+			}
+			wantStr := formatBool(tc.want)
+			if got := toggle.Get(); got != wantStr {
+				t.Errorf("rendered auto_stop_on_exit = %q, want %q", got, wantStr)
+			}
+			// The rendered value must equal the value the daemon acts on.
+			if got := toggle.Get(); got != formatBool(tc.provider.IsAutoStopOnExit()) {
+				t.Errorf("rendered %q but ProviderConfig.IsAutoStopOnExit() = %v", got, tc.provider.IsAutoStopOnExit())
+			}
+		})
+	}
+}
+
 // findField returns the field with the given key, or nil.
 func findField(fields []Field, key string) Field {
 	for _, f := range fields {

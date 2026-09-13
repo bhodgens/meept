@@ -7778,6 +7778,28 @@ func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
 	return ""
 }
 
+// stepJobTurnContext returns the execution context for a queued job's turn.
+//
+// Step jobs run headless — no human sees their intermediate state and no later
+// interactive turn belongs to the task — so their turn carries the AUTONOMOUS
+// marker and staging tools (file_write, file_edit) write directly instead of
+// staging a pending change that would silently expire unaccepted (e2e run 8,
+// 2026-09-11).
+//
+// The marker goes on the JOB'S CONTEXT, never on the loop. The loop selection
+// in Process can hand us the process-wide interactive loop that ChatHandler
+// serves (agent id absent from the registry, or step job without an agent id),
+// and the old `agentLoop.SetAutonomous(true)` was a one-way latch: after a
+// single step job every later interactive chat turn wrote files directly,
+// bypassing the pending-change preview/accept workflow (audit 2026-09-12, F14).
+// Nothing on the loop is mutated, so no cleanup can be missed.
+func stepJobTurnContext(ctx context.Context, isStepJob bool) context.Context {
+	if !isStepJob {
+		return ctx
+	}
+	return tools.ContextWithAutonomous(ctx)
+}
+
 // Process executes a job using the appropriate agent loop.
 // If the job has an AgentID and a registry is configured, it dispatches to
 // the agent-specific loop. Otherwise it falls back to the main loop.
@@ -7854,15 +7876,18 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	// Autonomous marker for step jobs (e2e run 8, 2026-09-11): a step job
 	// runs headless — no human sees its intermediate state and no later
 	// interactive turn belongs to this task — so the preview/accept
-	// workflow can never complete. Mark the loop autonomous so staging
-	// tools (file_write, file_edit) write directly instead of staging a
-	// pending change that silently expires unaccepted (run 8: the write
-	// staged, the step reported success with fabricated file evidence, and
-	// the artifact never existed). Session-attached chat loops stay
-	// interactive — SetAutonomous is only reached on this job path.
-	if isStepJob {
-		agentLoop.SetAutonomous(true)
-	}
+	// workflow can never complete. Mark the JOB's turn context autonomous so
+	// staging tools (file_write, file_edit) write directly instead of
+	// staging a pending change that silently expires unaccepted (run 8: the
+	// write staged, the step reported success with fabricated file evidence,
+	// and the artifact never existed).
+	//
+	// The marker MUST NOT be applied to the loop: `agentLoop` above can be
+	// p.agentLoop — the same pointer ChatHandler serves interactive turns on
+	// — and a loop-level latch stayed set forever, silently disabling the
+	// pending-change preview for every later chat turn (audit 2026-09-12,
+	// F14). Context scope is per-turn and cannot leak.
+	ctx = stepJobTurnContext(ctx, isStepJob)
 
 	// Build prompt and conversation ID with context
 	var prompt, conversationID string

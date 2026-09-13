@@ -45,6 +45,7 @@ func TestMainConfig_GetReturnsContentAndPath(t *testing.T) {
 
 	s, mux := newMainConfigTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/main", http.NoBody)
+	req.RemoteAddr = "127.0.0.1:54321" // the read is loopback-gated too (F32)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -117,8 +118,9 @@ func TestMainConfig_PostValidWritesAndReadsBack(t *testing.T) {
 		t.Errorf(".bak = %q, want %q", bak, old)
 	}
 
-	// Readable back over GET.
+	// Readable back over GET (loopback-gated, like the write).
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/config/main", http.NoBody)
+	req.RemoteAddr = "127.0.0.1:54321"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	var getBody map[string]any
@@ -189,6 +191,77 @@ func TestMainConfig_PostNonLoopbackForbidden(t *testing.T) {
 	}
 	if string(got) != string(old) {
 		t.Errorf("file changed on rejected write:\n got %q\nwant %q", got, old)
+	}
+}
+
+// TestMainConfig_GetNonLoopbackForbidden pins F32 (bughunt 2026-09-12 wave):
+// the read returned the raw meept.json5 — which carries transport API keys —
+// to any authenticated client, while the write on the same path was
+// loopback-only. The commit claimed "loopback-only main config read/write".
+func TestMainConfig_GetNonLoopbackForbidden(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MEEPT_HOME", home)
+	path := filepath.Join(home, "meept.json5")
+	secret := `{
+  "transport": { "http": { "enabled": true, "api_keys": ["sk-live-should-not-leak"] } },
+}`
+	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	_, mux := newMainConfigTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/main", http.NoBody)
+	req.RemoteAddr = "203.0.113.9:4444" // TEST-NET-3, non-loopback
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "loopback") {
+		t.Errorf("403 body = %q, want a loopback explanation", body)
+	}
+	if strings.Contains(body, "should-not-leak") {
+		t.Errorf("403 body leaked main-config content: %s", body)
+	}
+	if strings.Contains(body, "\\n") || strings.Contains(body, "transport") {
+		t.Errorf("403 body looks like the config payload, not an error: %s", body)
+	}
+
+	// The same client can read the file over loopback (the GUI/menubar path).
+	okReq := httptest.NewRequest(http.MethodGet, "/api/v1/config/main", http.NoBody)
+	okReq.RemoteAddr = "127.0.0.1:54321"
+	okW := httptest.NewRecorder()
+	mux.ServeHTTP(okW, okReq)
+	if okW.Code != http.StatusOK {
+		t.Fatalf("loopback GET status = %d, want 200; body: %s", okW.Code, okW.Body.String())
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(okW.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode loopback body: %v", err)
+	}
+	if decoded["content"] != secret {
+		t.Errorf("loopback content = %v, want the seeded text (the same-host GUI read must keep working)", decoded["content"])
+	}
+}
+
+// TestMainConfig_GetNonLoopbackFailsClosedOnUnavailableService: the loopback
+// gate runs BEFORE the availability check, so a remote caller cannot even
+// learn whether the config service is wired.
+func TestMainConfig_GetNonLoopbackFailsClosedOnUnavailableService(t *testing.T) {
+	t.Setenv("MEEPT_HOME", t.TempDir())
+
+	s := NewServer(ServerConfig{}, nil, nil, nil, nil, nil) // no config service
+	mux := http.NewServeMux()
+	s.setupRESTRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/main", http.NoBody)
+	req.RemoteAddr = "203.0.113.9:4444"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("non-loopback GET with no config service = %d, want 403 (fail closed)", w.Code)
 	}
 }
 

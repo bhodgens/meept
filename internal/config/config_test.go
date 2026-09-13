@@ -333,11 +333,19 @@ func TestDefaultConfigTransport(t *testing.T) {
 	// supplies the same loopback default (127.0.0.1:8081 — NewServer in
 	// internal/comm/http), and an empty Addr is what lets
 	// `transport.http.port` take effect through ListenAddr.
+	//
+	// "" is NOT a bind address: net.Listen("tcp", "") binds all interfaces on
+	// an ephemeral port, so every consumer MUST fall back to the server's
+	// loopback default. The end-to-end "an enabled keyless transport is bound
+	// to loopback" invariant is pinned where the binding is decided —
+	// internal/daemon/http_listen_addr_test.go
+	// (TestHTTPListenAddrEmptyConfigBindsLoopback) — because this config type
+	// cannot express or observe a bind policy.
 	if cfg.Transport.HTTP.Addr != "" {
 		t.Errorf("expected HTTP addr to default to empty (server default applies), got %s", cfg.Transport.HTTP.Addr)
 	}
 	if got := cfg.Transport.HTTP.ListenAddr(); got != "" {
-		t.Errorf("expected default ListenAddr() to be empty, got %s", got)
+		t.Errorf("expected default ListenAddr() to be empty (no address configured; the loopback default belongs to the server, never to this value), got %s", got)
 	}
 	if !cfg.Transport.HTTP.RequireAuth {
 		t.Error("HTTP RequireAuth should be true by default")

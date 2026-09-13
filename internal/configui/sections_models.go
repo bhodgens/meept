@@ -51,7 +51,7 @@ func buildProviderItems(providers map[string]llm.ProviderConfig) []DrilldownItem
 		if p.Lifecycle != nil {
 			lc = *p.Lifecycle
 		}
-		fields = append(fields, lifecycleFields(lc)...)
+		fields = append(fields, lifecycleFields(lc, p.IsAutoStopOnExit())...)
 		items = append(items, DrilldownItem{Name: name, Fields: fields})
 	}
 	return items
@@ -59,7 +59,15 @@ func buildProviderItems(providers map[string]llm.ProviderConfig) []DrilldownItem
 
 // lifecycleFields returns the drilldown fields for a RuntimeLifecycleConfig.
 // Field keys mirror the JSON tags so save.go's reflection path resolves them.
-func lifecycleFields(lc llm.RuntimeLifecycleConfig) []Field {
+//
+// autoStopOnExit is the provider's EFFECTIVE value (ProviderConfig.
+// IsAutoStopOnExit — false when the provider carries no lifecycle block).
+// Rendering lc.AutoStopOnExitOrDefault() on a substituted zero-value block
+// reported "on" for every non-local provider (openai/anthropic/…), the
+// OPPOSITE of the accessor the same commit added, and toggling it
+// materialized a brand-new lifecycle block on save (F82, bughunt 2026-09-12
+// wave). Absent-means-true still applies once a lifecycle block EXISTS.
+func lifecycleFields(lc llm.RuntimeLifecycleConfig, autoStopOnExit bool) []Field {
 	// model_paths rendered as JSON (map[string]string).
 	modelPathsJSON := "{}"
 	if len(lc.ModelPaths) > 0 {
@@ -73,10 +81,14 @@ func lifecycleFields(lc llm.RuntimeLifecycleConfig) []Field {
 	return []Field{
 		NewSelectField("lifecycle.runtime", "runtime", lc.Runtime, []string{"llama-cpp", "mlx"}),
 		NewToggleField("lifecycle.auto_start", "auto start", lc.AutoStart),
-		// Display the effective value: an absent auto_stop_on_exit key means
-		// true. Saving without touching the toggle leaves the key absent; a
-		// toggle writes an explicit true/false (save.go setStructField).
-		NewToggleField("lifecycle.auto_stop_on_exit", "auto stop on exit", lc.AutoStopOnExitOrDefault()),
+		// Display the provider's EFFECTIVE value (IsAutoStopOnExit): an absent
+		// auto_stop_on_exit key inside an EXISTING lifecycle block means true,
+		// and a provider with NO lifecycle block means false — matching the
+		// daemon's own accessor instead of reporting "on" for every remote
+		// provider (F82). Saving without touching the toggle leaves the key
+		// absent; a toggle writes an explicit true/false (save.go
+		// setStructField).
+		NewToggleField("lifecycle.auto_stop_on_exit", "auto stop on exit", autoStopOnExit),
 		NewTextField("lifecycle.model_path", "model path (legacy)", lc.ModelPath),
 		NewTextField("lifecycle.model_paths", "model paths (json)", modelPathsJSON),
 		NewTextField("lifecycle.spawn_command", "spawn command", spawnCmd),

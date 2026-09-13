@@ -42,7 +42,19 @@ func readMainConfigPayload() (mainConfigPayload, error) {
 // overwritten. A missing file yields content "" and writable reflecting the
 // parent directory. This is the canonical way to read the main config; there
 // is no second read implementation.
-func (s *Server) handleGetMainConfig(w http.ResponseWriter, _ *http.Request) {
+//
+// Reads are accepted only from loopback clients, exactly like writes: the
+// payload is the verbatim meept.json5, which carries transport API keys (and
+// provider credentials), so a non-loopback — including a multi-user
+// non-owner — authenticated client must not be able to read every credential
+// in the file while it cannot even write it (audit 2026-09-12, F32). The
+// Flutter GUI and the menubar app read this endpoint from the same host, so
+// their reads stay loopback and are unaffected.
+func (s *Server) handleGetMainConfig(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRequest(r) {
+		s.writeError(w, http.StatusForbidden, "config read is restricted to loopback clients")
+		return
+	}
 	if s.configService == nil {
 		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
 		return

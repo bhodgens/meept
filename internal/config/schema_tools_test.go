@@ -55,11 +55,18 @@ func TestConfigValidateAll_SchemaModeWired(t *testing.T) {
 
 // TestDefaultAlwaysFullTools checks the curated core-tool list that stays
 // full-schema under indexed mode. Order-stable copy each call.
+//
+// The names must be the REGISTERED tool names ("web_search", not the
+// "websearch" spelling: registry normalization is lower+trim only, so the old
+// spelling never matched and the tool shipped stubbed under the default
+// indexed schema mode — audit 2026-09-12, F29). The registry-level pin that
+// fails on any unknown name lives in internal/daemon
+// (TestDefaultAlwaysFullToolsAllRegistered).
 func TestDefaultAlwaysFullTools(t *testing.T) {
 	got := DefaultAlwaysFullTools()
 	want := []string{
 		"shell", "file_read", "file_edit", "file_write",
-		"memory_search", "memory_store", "web_fetch", "websearch",
+		"memory_search", "memory_store", "web_fetch", "web_search",
 		"platform_status", "tool_view",
 		"transcript_fetch",
 		"json_extract",
