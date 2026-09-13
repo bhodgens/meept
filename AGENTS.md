@@ -454,9 +454,35 @@ replacement mechanism, not just a deletion:
   before `ContainerManager.StartAll`. Moving it later makes the duplicate-spawn
   guard refuse the spawn of the endpoint the sweep has not freed yet.
 
-macOS has no parent-death signal, so a runtime cannot be made to die with the
-daemon. The boot sweep plus the spawn guard is the whole defense. Windows has no
-`ps`, so it gets no sweep (documented gap).
+**Termination is two-sided; only one side is automatic.** Graceful shutdown
+stops owned runtimes: `Daemon.Stop` calls `ContainerManager.StopAll(ctx)`
+(`internal/daemon/daemon.go:1904`), which stops every endpoint whose
+`auto_stop_on_exit` is true. SIGINT/SIGTERM therefore leaves no children
+behind - verified 2026-09-12, killing a scratch daemon took its `mlx_lm` and
+`llama-server` children down with it.
+
+A hard kill leaves them running. SIGKILL, `kill -9`, a crash, or a closed
+terminal that skips the signal path re-parents every runtime to init
+(ppid==1), and only `StartupOrphanSweep` reaps them - at the NEXT daemon
+boot. Until then the orphans hold their endpoint ports, and the
+served-endpoint guard refuses the next spawn of those endpoints. Cleanup
+after a hard kill, in order:
+
+1. `kill <daemon-pid>` first (graceful) and re-check; do not kill children of
+   a live daemon, its restart policy respawns them.
+2. `pgrep -fl "llama-server|mlx_lm"` and
+   `lsof -nP -iTCP:<port> -sTCP:LISTEN` to find what survived.
+3. Kill each leftover child explicitly and confirm the port is free.
+
+Children cannot detect their own orphanhood today. macOS has no parent-death
+signal, so a runtime is never notified when the daemon dies; the boot sweep
+plus the spawn guard is the whole defense. The in-code fix, when it is
+needed, is a supervisor process that spawns the runtime as its own child and
+exits - killing the child - when its parent disappears. The child keeps its
+original argv under that design, so the sweep's command-line matching and the
+pid-file ownership token are unaffected. Until then, terminate the daemon
+gracefully and verify the children are gone. Windows has no `ps`, so it gets
+no sweep (documented gap).
 
 ## Coding Practices
 
