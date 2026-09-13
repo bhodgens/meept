@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -61,6 +61,11 @@ help:
 	@echo "Comparison:"
 	@echo "  compare-prep     Clone competitor repos into TMPDIR/meept-compare"
 	@echo ""
+	@echo "Dependencies:"
+	@echo "  deps             Download Go modules + check the llama.cpp build floor"
+	@echo "  deps-llama-check Verify llama.cpp >= b$(LLAMA_CPP_MIN_BUILD) (LFM2.5 tool-call floor)"
+	@echo "  deps-llama       Build/install llama.cpp into $(LLAMA_CPP_PREFIX) (idempotent)"
+	@echo ""
 	@echo "Daemon:"
 	@echo "  daemon           Build and run daemon (foreground)"
 	@echo "  daemon-debug     Run daemon with debug logging"
@@ -87,6 +92,28 @@ MEEPT_HOME ?= $(HOME)/.meept
 BIN_DIR := bin
 DAEMON := $(BIN_DIR)/meept-daemon
 CLI := $(BIN_DIR)/meept
+
+# meept-scoped dependency prefix.
+# meept keeps its own copies of runtime dependencies under one prefix so a
+# Homebrew/system build can never silently shadow them. The daemon prepends
+# $(MEEPT_DEPS)/llama.cpp/bin to PATH (internal/daemon/daemonpath.go
+# meeptPrefixPathDirs) so a meept-managed binary wins over /opt/homebrew/bin.
+MEEPT_DEPS ?= $(MEEPT_HOME)/deps
+# Keep the default layout: the daemon searches $(MEEPT_DEPS)/llama.cpp/bin
+# first, then $(MEEPT_DEPS)/llama.cpp/build/bin (in-tree CMake build), before
+# any other PATH entry -- overriding LLAMA_CPP_PREFIX moves the build out of
+# the daemon's precedence path.
+LLAMA_CPP_PREFIX ?= $(MEEPT_DEPS)/llama.cpp
+# Minimum llama.cpp build for local tool calling. b9660 is the upstream
+# release published 2026-06-15T22:05Z: its release notes contain PR #24667
+# ("chat : fix LFM2 tool-call parsing double-escaping"), the last of the
+# June-2026 LFM2.5 parser changes (#21242/#24071/#24178/#24234), so it is the
+# first build with the complete LFM2.5 native tool-call parser. Older builds
+# log "Chat format: Generic" and fall back to a generic JSON grammar whose
+# root also allows a "response" branch -- a tool-forcing prompt may then
+# legally answer in prose, which is the agent narration failure this floor
+# prevents. Enforced by `make deps-llama-check` (wired into deps + install).
+LLAMA_CPP_MIN_BUILD ?= 9660
 
 # Build flags
 GO_LDFLAGS := -s -w
@@ -232,9 +259,34 @@ hooks:
 	@echo "on PATH, so the same suite executes on macOS and on a Linux runner."
 	@echo "Bypass with --no-verify."
 
-deps:
+deps: deps-go deps-llama-check
+
+deps-go:
 	@echo "Downloading Go dependencies..."
-	go mod download
+	@go mod download
+
+# deps-llama-check: enforce the llama.cpp version floor. meept spawns
+# `llama-server` from PATH, and a build older than $(LLAMA_CPP_MIN_BUILD)
+# predates llama.cpp's LFM2.5 native tool-call parser: it logs
+# "Chat format: Generic" and lets a tool-forcing prompt answer in prose
+# instead of calling a tool. Fails when the resolved build is too old
+# (or missing, with MEEPT_LLAMA_REQUIRE=1).
+deps-llama-check:
+	@MEEPT_DEPS="$(MEEPT_DEPS)" \
+	 LLAMA_CPP_PREFIX="$(LLAMA_CPP_PREFIX)" \
+	 LLAMA_CPP_MIN_BUILD="$(LLAMA_CPP_MIN_BUILD)" \
+	 bash scripts/install-llama-cpp.sh check
+
+# deps-llama: build/install llama.cpp into $(LLAMA_CPP_PREFIX) at
+# $(LLAMA_CPP_MIN_BUILD) or newer. Idempotent: skips when the installed
+# binary is already at or above the floor. Default method is the official
+# prebuilt tarball on macOS arm64, CMake source build elsewhere
+# (override: LLAMA_CPP_METHOD=source|prebuilt, LLAMA_CPP_REF=b9660).
+deps-llama:
+	@MEEPT_DEPS="$(MEEPT_DEPS)" \
+	 LLAMA_CPP_PREFIX="$(LLAMA_CPP_PREFIX)" \
+	 LLAMA_CPP_MIN_BUILD="$(LLAMA_CPP_MIN_BUILD)" \
+	 bash scripts/install-llama-cpp.sh install
 
 # =============================================================================
 # Build
@@ -273,7 +325,12 @@ build-release: build-all
 # provisions the dev key, so the GUI built by `build`/`build-gui` below embeds
 # the key and endpoint the daemon actually serves (see the FLUTTER_DART_DEFINES
 # block near the top of this file).
-install: gui-connect-setup build menubar-app build-gui
+#
+# `deps-llama-check` gates the whole install (LFM2.5 tool-call floor): an
+# install must not quietly land a llama.cpp whose generic JSON grammar lets a
+# tool-forcing prompt answer in prose. Override for machines that do not serve
+# local models with MEEPT_LLAMA_SKIP_CHECK=1.
+install: deps-llama-check gui-connect-setup build menubar-app build-gui
 	@echo "Installing binaries to GOPATH/bin..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
 	go install $(GO_BUILD_FLAGS) ./cmd/meept
@@ -714,9 +771,12 @@ docs-check:
 # classifier-eval-selftest exercises the eval guards that gate every acceptance
 # number: the corpus<->replay disjointness guard (a leaked case refuses to
 # score), the empty-ruler and degenerate-embedding refusals, the near-duplicate
-# allowlist semantics, and the coverage floor boundary. It is pure stdlib
-# (no numpy/torch), so CI can run it before any heavy import, and it is the pin
-# for logic that otherwise has none.
+# allowlist semantics, and the coverage floor boundary. It is the pin for logic
+# that otherwise has none.
+#
+# It needs NumPy: the guard logic is stdlib, but eval_harness imports numpy at
+# module level, so the CI job installs it first rather than assuming the runner
+# image ships it.
 .PHONY: classifier-eval-selftest
 classifier-eval-selftest:
 	@echo "Running classifier-eval guard self-test..."

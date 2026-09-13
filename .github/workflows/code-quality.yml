@@ -88,8 +88,17 @@ jobs:
 
       # The eval guards that gate every acceptance number had no pin and no
       # runner: a revert of the corpus/replay disjointness guard or of the
-      # coverage floor broke nothing. Pure stdlib, so it runs before any
-      # heavy import.
+      # coverage floor broke nothing.
+      #
+      # eval_harness imports numpy at module level, so "no dependencies" is NOT
+      # true here (the guard logic itself is stdlib, but the import is not
+      # lazy). Install it explicitly instead of assuming the runner image has
+      # it, or this gate fails for the wrong reason on a clean image.
+      - name: Install self-test dependencies
+        run: |
+          python3 -m pip install --quiet numpy 2>/dev/null \
+            || python3 -m pip install --quiet --break-system-packages numpy
+
       - name: Classifier-eval guard self-test
         run: make classifier-eval-selftest
 
