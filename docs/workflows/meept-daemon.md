@@ -20,6 +20,55 @@ meept daemon status    # running state, model, budget
 Paths resolve under `$MEEPT_HOME` when that variable is set, otherwise under
 `~/.meept`. See `docs/configuration/` for the full config reference.
 
+## Environment
+
+The daemon is launched with **the caller's environment**, and it is passed
+explicitly: `meept daemon start` / `meept daemon restart`
+(`newDaemonSpawnCmd`, `cmd/meept/daemon.go`) and the daemon-control start path
+(`newDaemonStartCmd`, `internal/services/daemon_service.go`) both set the
+child's `Env` to `os.Environ()` instead of relying on `exec`'s implicit
+inheritance.
+
+That is load-bearing, not cosmetic. Provider credentials are referenced from
+config as `${VAR}` (`models.json5` → `"apiKey": "${GALA_API_KEY}"`, plus
+`AGNRES_API_KEY`, `ZAI_API_KEY`, and any other variable a config names). The
+daemon expands those references when it loads its config, so a daemon started
+without them substitutes the empty string: it starts healthy, then every cloud
+call fails `HTTP 401: Token not provided` and the log shows the provider
+resolved with `has_api_key=false` (`internal/daemon/components.go`,
+`resolveModelRef`) alongside `config references undefined environment variable
+var=<NAME>`. Nothing at start time reports the problem.
+
+With `Env` left unset, a caller's keys survive only as a side effect of the
+spawn call site, so any path that routes a spawn through a rebuilt environment
+(a launchd service definition, a supervisor wrapper, a future `cmd.Env = ...`)
+starts a key-less daemon silently. Passing `Env` explicitly makes the
+inheritance a contract, and `cmd/meept/daemon_env_test.go` /
+`internal/services/daemon_service_env_test.go` fail if it is removed (the child
+environment is asserted through a non-secret sentinel variable, by NAME only).
+
+Verify a running daemon without ever printing a secret — names, never values:
+
+```sh
+printenv AGNRES_API_KEY GALA_API_KEY >/dev/null && echo "caller has the keys"
+ps eww -p "$(cat ~/.meept/meept.pid)" | tr ' ' '\n' \
+  | grep -oE '^(AGNRES|GALA)_API_KEY' | sort -u      # both names must appear
+grep -c 'has_api_key=false' ~/.meept/meept.log        # per-boot provider warnings
+```
+
+Caveat: a daemon started **by launchd** (`meept-daemon service install`) does
+not inherit a login shell's environment. The generated plist carries only `PATH`
+(and `MEEPT_HOME` when set) — `plistEnvironmentVariables()` in
+`internal/daemon/launchd.go`, and the MenuBar app's own copy
+(`menubar/MeeptMenuBar/Services/DaemonController.swift`) writes no
+`EnvironmentVariables` at all. A service-managed daemon therefore cannot see
+shell-only keys; run `meept daemon stop` and start the binary from a keyed shell
+(`meept-daemon -f`, or `meept daemon start`) when the provider credentials come
+from the shell rather than from the service environment. A launchd agent with
+`KeepAlive` respawns any daemon it owns the moment it is stopped, so a `meept
+daemon stop` against a service-managed daemon can be undone by launchd within
+milliseconds, with a rebuilt (key-less) environment.
+
 ## Problem
 
 A daemon that outlives a shell is needed for sessions, schedules, queue jobs

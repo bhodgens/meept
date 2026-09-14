@@ -140,7 +140,7 @@ func (s *DaemonService) Start(ctx context.Context) error {
 		daemonArgs = append([]string{"-d", s.stateDir}, daemonArgs...)
 	}
 
-	cmd := exec.Command(daemonBin, daemonArgs...)
+	cmd := newDaemonStartCmd(daemonBin, daemonArgs)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true, // Detach from terminal
 	}
@@ -173,6 +173,25 @@ func (s *DaemonService) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// newDaemonStartCmd builds the detached command that launches the daemon
+// binary.
+//
+// The daemon expands the ${VAR} provider credentials its config references
+// (models.json5 `"apiKey"`, e.g. `${GALA_API_KEY}`), so it must receive THIS
+// process's environment. The environment is passed explicitly instead of
+// relying on exec's implicit inheritance: with a nil Env the credentials
+// survive only as a side effect of the spawn call site, and any path that
+// routes the spawn through a rebuilt environment starts a daemon whose first
+// cloud call fails `HTTP 401: Token not provided` (starting itself looks
+// healthy — the log carries `has_api_key=false`). The regression test
+// (daemon_service_env_test.go) fails if Env stops being set. Values are never
+// logged or printed; diagnostics assert variable NAMES only.
+func newDaemonStartCmd(bin string, args []string) *exec.Cmd {
+	cmd := exec.Command(bin, args...)
+	cmd.Env = os.Environ()
+	return cmd
 }
 
 // Stop stops the running daemon.

@@ -92,6 +92,34 @@ func newDaemonStatusCmd() *cobra.Command {
 	}
 }
 
+// newDaemonSpawnCmd builds the exec.Cmd that launches the daemon binary.
+//
+// The spawned daemon's environment is set EXPLICITLY to this process's own
+// environment. That is load-bearing, not decorative: provider credentials are
+// referenced from config as ${VAR} (models.json5 `"apiKey":
+// "${GALA_API_KEY}"`, and the same shape for AGNRES_API_KEY / ZAI_API_KEY), and
+// the daemon expands them when it loads its config. A daemon started without
+// them expands the reference to the empty string, so every cloud call fails
+// `HTTP 401: Token not provided` while the log shows `has_api_key=false`
+// (internal/daemon/components.go resolveModelRef) — the failure surfaces at the
+// first provider call, never at start.
+//
+// With `Env` left nil the environment is inherited only implicitly, so the
+// caller's keys survive purely as a side effect of the spawn call site: any
+// path that routes the spawn through a rebuilt environment (a launchd service
+// definition, a supervisor wrapper, a future `cmd.Env = ...` here) silently
+// produces a key-less daemon. Setting Env makes `meept daemon start` and
+// `meept daemon restart` carry the caller's environment by contract, and the
+// regression test (daemon_env_test.go) fails if this line is removed.
+//
+// The values are never logged or printed anywhere: tests and diagnostics assert
+// on variable NAMES only.
+func newDaemonSpawnCmd(bin string, args []string) *exec.Cmd {
+	cmd := exec.Command(bin, args...)
+	cmd.Env = os.Environ()
+	return cmd
+}
+
 func startDaemon(foreground bool) error {
 	// Check if already running
 	pidFile := filepath.Join(stateDir, "meept.pid")
@@ -120,7 +148,7 @@ func startDaemon(foreground bool) error {
 	if foreground {
 		// Run in foreground - just exec the daemon
 		daemonArgs = append(daemonArgs, "-f")
-		daemonCmd := exec.Command(daemonBin, daemonArgs...)
+		daemonCmd := newDaemonSpawnCmd(daemonBin, daemonArgs)
 		daemonCmd.Stdout = os.Stdout
 		daemonCmd.Stderr = os.Stderr
 		daemonCmd.Stdin = os.Stdin
@@ -131,7 +159,7 @@ func startDaemon(foreground bool) error {
 	daemonArgs = append(daemonArgs, "-f") // Daemon always runs in "foreground" mode, we background it
 
 	// Create the command
-	daemonCmd := exec.Command(daemonBin, daemonArgs...)
+	daemonCmd := newDaemonSpawnCmd(daemonBin, daemonArgs)
 
 	// Detach from terminal
 	daemonCmd.SysProcAttr = &syscall.SysProcAttr{
