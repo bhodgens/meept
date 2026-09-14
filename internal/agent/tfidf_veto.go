@@ -29,18 +29,18 @@ import (
 // stdlib — the training script is python (sklearn-equivalent math
 // ported to stdlib so inference needs nothing new).
 type tfidfVeto struct {
-	vocab      map[string]int
-	idf        []float64
-	classes    []string
-	coef       [][]float64
-	intercept  []float64
-	ngramLo    int
-	ngramHi    int
-	charWB     bool
-	builtAt    string
-	trainDocs  int
-	trainAcc   float64
-	loaded     bool
+	vocab     map[string]int
+	idf       []float64
+	classes   []string
+	coef      [][]float64
+	intercept []float64
+	ngramLo   int
+	ngramHi   int
+	charWB    bool
+	builtAt   string
+	trainDocs int
+	trainAcc  float64
+	loaded    bool
 }
 
 // loadTfidfVeto reads the model JSON; missing file returns (nil, nil)
@@ -55,16 +55,16 @@ func loadTfidfVeto(path string) (*tfidfVeto, error) {
 		return nil, fmt.Errorf("read tfidf veto model: %w", err)
 	}
 	var m struct {
-		Vocab      map[string]int   `json:"vocab"`
-		IDF        []float64        `json:"idf"`
-		Classes    []string         `json:"classes"`
-		Coef       [][]float64      `json:"coef"`
-		Intercept  []float64        `json:"intercept"`
-		NgramRange []int            `json:"ngram_range"`
-		CharWB     bool             `json:"char_wb"`
-		BuiltAt    string           `json:"built_at"`
-		TrainDocs  int              `json:"train_docs"`
-		TrainAcc   float64          `json:"train_accuracy"`
+		Vocab      map[string]int `json:"vocab"`
+		IDF        []float64      `json:"idf"`
+		Classes    []string       `json:"classes"`
+		Coef       [][]float64    `json:"coef"`
+		Intercept  []float64      `json:"intercept"`
+		NgramRange []int          `json:"ngram_range"`
+		CharWB     bool           `json:"char_wb"`
+		BuiltAt    string         `json:"built_at"`
+		TrainDocs  int            `json:"train_docs"`
+		TrainAcc   float64        `json:"train_accuracy"`
 	}
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse tfidf veto model: %w", err)
