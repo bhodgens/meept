@@ -377,16 +377,10 @@ type Dispatcher struct {
 	// sessionStore looks up session project paths for loopManager.
 	sessionStore SessionStoreReader
 
-	// activeProjectPath returns the local path of the user's ACTIVE project.
-	// It is the last-resort fallback for a dispatched turn whose session has
-	// no worktree, no bound project and no detection-context CWD: without it
-	// the loop runs with no working directory and every filesystem tool fails
-	// (tools.ErrNoWorkingDir). Optional; nil-safe.
-	activeProjectPath func() string
-
 	// defaultWorkingDir is the configured last resort
 	// (daemon.default_working_dir), consulted only after every session-bound
-	// source and the active project have come up empty. Empty means none.
+	// source has come up empty. There is NO global active-project fallback:
+	// projects are scoped per session. Empty means none.
 	defaultWorkingDir string
 
 	// fenceController configures the shared fence sandbox per-session
@@ -691,27 +685,20 @@ func (d *Dispatcher) SetSessionStore(s SessionStoreReader) {
 	}
 }
 
-// SetActiveProjectPathResolver wires the resolver for the user's ACTIVE
-// project, the last-resort working directory for a dispatched turn whose
-// session has nothing bound. Nil is a no-op.
-func (d *Dispatcher) SetActiveProjectPathResolver(fn func() string) {
-	if d != nil && fn != nil {
-		d.activeProjectPath = fn
-	}
-}
-
 // resolveSessionWorkingDir returns the working directory for a dispatched
 // turn and the source it came from, using the ONE precedence documented in
 // AGENTS.md and implemented by session.ResolveWorkingDir:
 //
 //	WorktreePath > ProjectPath > DetectionContext.CWD
 //
-// Two fallbacks follow, in order, because the dispatch path reaches sessions
-// the chat path never sees (HTTP requests with a synthetic or project-less
-// session): the session's project ID resolved through the loop manager, then
-// the user's ACTIVE project. Neither invents a directory; when all of them
-// come up empty the caller gets ("", WorkingDirFromNone) and the tools fail
-// actionably instead of writing relative paths into the daemon's own CWD.
+// One session-bound resolution follows because the dispatch path reaches
+// sessions the chat path never sees (HTTP requests with a synthetic or
+// project-less session): the session's project ID resolved through the loop
+// manager. Project scoping is PER-SESSION — there is no global
+// active-project fallback. Nothing here invents a directory; when every
+// session-bound source comes up empty the caller gets
+// ("", WorkingDirFromNone) and the tools fail actionably instead of writing
+// relative paths into the daemon's own CWD.
 func (d *Dispatcher) resolveSessionWorkingDir(sess *session.Session) (string, session.WorkingDirSource) {
 	dir, source := session.ResolveWorkingDir(sess)
 	if dir != "" {
@@ -720,11 +707,6 @@ func (d *Dispatcher) resolveSessionWorkingDir(sess *session.Session) (string, se
 	if sess != nil && sess.ProjectID != "" && d.loopManager != nil {
 		if p := d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID); p != "" {
 			return p, session.WorkingDirFromProject
-		}
-	}
-	if d.activeProjectPath != nil {
-		if p := d.activeProjectPath(); p != "" {
-			return p, session.WorkingDirFromActiveProject
 		}
 	}
 	if d.defaultWorkingDir != "" {

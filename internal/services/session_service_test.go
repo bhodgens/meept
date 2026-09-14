@@ -105,32 +105,115 @@ func newTestProjectManager(t *testing.T) *project.ProjectManager {
 	return project.NewProjectManager(store, nil, cfg, nil)
 }
 
-func TestCreateSession_InheritsActiveProject(t *testing.T) {
-	// Create a session store + project manager with an active project.
+// TestCreateSession_DoesNotInheritActiveProject: sessions are scoped
+// PER-SESSION, so an active project must NOT leak into a session created
+// without a project_id or a client CWD. The session is left unbound.
+func TestCreateSession_DoesNotInheritActiveProject(t *testing.T) {
 	sessionStore := session.NewMemoryStore(nil)
 	pm := newTestProjectManager(t)
 	ctx := context.Background()
 
-	// Create an active project.
+	// Create an active project — it must not be inherited.
 	activeProj, err := pm.EnsureDefault(ctx)
 	if err != nil {
 		t.Fatalf("EnsureDefault: %v", err)
 	}
 
-	// Wire project manager into session service.
 	svc := NewSessionService(sessionStore)
 	svc.SetProjectManager(pm)
 
-	// Create a session — should inherit the active project.
 	sess, err := svc.CreateSession(ctx, CreateSessionRequest{Name: "test"})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if sess.ProjectID != activeProj.ID {
-		t.Errorf("ProjectID = %q, want %q", sess.ProjectID, activeProj.ID)
+	if sess.ProjectID != "" {
+		t.Errorf("ProjectID = %q, want empty (no active-project fallback)", sess.ProjectID)
 	}
-	if sess.ProjectPath != activeProj.LocalPath {
-		t.Errorf("ProjectPath = %q, want %q", sess.ProjectPath, activeProj.LocalPath)
+	if sess.ProjectPath != "" {
+		t.Errorf("ProjectPath = %q, want empty (no active-project fallback)", sess.ProjectPath)
+	}
+	if _, src := session.ResolveWorkingDir(sess); src != session.WorkingDirFromNone {
+		t.Errorf("ResolveWorkingDir source = %q, want none", src)
+	}
+	// The active project still exists and is untouched.
+	still, err := pm.GetActive(ctx)
+	if err != nil || still == nil {
+		t.Fatalf("GetActive: %v %v", still, err)
+	}
+	if still.ID != activeProj.ID {
+		t.Errorf("active project changed: %q -> %q", activeProj.ID, still.ID)
+	}
+}
+
+// TestCreateSession_BindsDetectionCWD: the client CWD is resolved into a
+// project and bound to that session only.
+func TestCreateSession_BindsDetectionCWD(t *testing.T) {
+	sessionStore := session.NewMemoryStore(nil)
+	pm := newTestProjectManager(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	svc := NewSessionService(sessionStore)
+	svc.SetProjectManager(pm)
+
+	sess, err := svc.CreateSession(ctx, CreateSessionRequest{
+		Name:             "cwd-bound",
+		DetectionContext: &session.DetectionContext{CWD: dir},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if sess.ProjectID == "" || sess.ProjectPath == "" {
+		t.Fatalf("expected the CWD to bind a project, got id=%q path=%q", sess.ProjectID, sess.ProjectPath)
+	}
+	if got, src := session.ResolveWorkingDir(sess); got != sess.ProjectPath || src != session.WorkingDirFromProject {
+		t.Errorf("ResolveWorkingDir() = (%q, %q), want the bound project %q", got, src, sess.ProjectPath)
+	}
+	// The detection context was persisted too, so the CWD survives a restart.
+	if sess.DetectionContext == nil || sess.DetectionContext.CWD != dir {
+		t.Errorf("DetectionContext = %+v, want CWD %q", sess.DetectionContext, dir)
+	}
+	reloaded, _ := svc.GetSession(ctx, GetSessionRequest{ID: sess.ID})
+	if reloaded == nil || reloaded.DetectionContext == nil || reloaded.DetectionContext.CWD != dir {
+		t.Errorf("reloaded session lost its detection CWD: %+v", reloaded)
+	}
+}
+
+// TestCreateSession_PerSessionProjectIsolation: two sessions created with
+// different explicit projects each resolve their own project.
+func TestCreateSession_PerSessionProjectIsolation(t *testing.T) {
+	sessionStore := session.NewMemoryStore(nil)
+	pm := newTestProjectManager(t)
+	ctx := context.Background()
+
+	projA, err := pm.CreateOrResolve(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("CreateOrResolve A: %v", err)
+	}
+	projB, err := pm.CreateOrResolve(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("CreateOrResolve B: %v", err)
+	}
+
+	svc := NewSessionService(sessionStore)
+	svc.SetProjectManager(pm)
+
+	sessA, err := svc.CreateSession(ctx, CreateSessionRequest{Name: "a", ProjectID: projA.ID})
+	if err != nil {
+		t.Fatalf("CreateSession A: %v", err)
+	}
+	sessB, err := svc.CreateSession(ctx, CreateSessionRequest{Name: "b", ProjectID: projB.ID})
+	if err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+	if sessA.ProjectPath != projA.LocalPath {
+		t.Errorf("session A path = %q, want %q", sessA.ProjectPath, projA.LocalPath)
+	}
+	if sessB.ProjectPath != projB.LocalPath {
+		t.Errorf("session B path = %q, want %q", sessB.ProjectPath, projB.LocalPath)
+	}
+	if sessA.ProjectPath == sessB.ProjectPath {
+		t.Error("sessions bound to different projects must not share a path")
 	}
 }
 
@@ -197,21 +280,45 @@ func (failingProjectResolver) CreateOrResolve(ctx context.Context, arg string) (
 	return nil, errors.New("simulated failure")
 }
 
-func TestCreateSession_EnsureDefaultError(t *testing.T) {
-	// When EnsureDefault fails, CreateSession should still succeed — the
-	// error is logged, not propagated. The session just won't have a project.
+func TestCreateSession_ResolverFailuresLeaveSessionUnbound(t *testing.T) {
+	// When every project-resolution call fails, CreateSession must still
+	// succeed: the session is left unbound (never a global fallback) and the
+	// error is logged, not propagated.
 	sessionStore := session.NewMemoryStore(nil)
 	svc := NewSessionService(sessionStore)
 	svc.SetProjectManager(failingProjectResolver{})
 
 	sess, err := svc.CreateSession(context.Background(), CreateSessionRequest{Name: "test"})
 	if err != nil {
-		t.Fatalf("CreateSession should not fail even if EnsureDefault errors: %v", err)
+		t.Fatalf("CreateSession should not fail on resolver error: %v", err)
 	}
 	if sess == nil || sess.ID == "" {
 		t.Error("expected valid session")
 	}
 	if sess.ProjectID != "" {
-		t.Errorf("expected empty ProjectID on EnsureDefault failure, got %q", sess.ProjectID)
+		t.Errorf("expected empty ProjectID on resolver failure, got %q", sess.ProjectID)
+	}
+}
+
+func TestCreateSession_ResolverFailureStillPersistsDetectionCWD(t *testing.T) {
+	// A failed CWD->project resolution must NOT lose the client CWD: the
+	// detection context is persisted regardless, so the session still
+	// resolves its directory at turn time (including after a restart).
+	sessionStore := session.NewMemoryStore(nil)
+	svc := NewSessionService(sessionStore)
+	svc.SetProjectManager(failingProjectResolver{})
+
+	sess, err := svc.CreateSession(context.Background(), CreateSessionRequest{
+		Name:             "cwd-only",
+		DetectionContext: &session.DetectionContext{CWD: "/tmp/cwd-only"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if sess.ProjectPath != "" {
+		t.Errorf("expected no project binding, got %q", sess.ProjectPath)
+	}
+	if dir, src := session.ResolveWorkingDir(sess); dir != "/tmp/cwd-only" || src != session.WorkingDirFromDetection {
+		t.Errorf("ResolveWorkingDir() = (%q, %q), want the detection CWD", dir, src)
 	}
 }

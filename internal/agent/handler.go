@@ -76,20 +76,15 @@ type ChatHandler struct {
 	// SessionStoreReader for looking up session project paths.
 	sessionStore SessionStoreReader
 
-	// activeProjectPath returns the local path of the user's active project
-	// (or "" when none is active). Wired by the daemon from
-	// ProjectManager.GetActive. Turn-start fallback for sessions that are
-	// unbound: a fresh session binds to the ACTIVE project exactly like
-	// session creation does, and we never synthesize one
-	// (AGENTS.md: no EnsureDefault for session binding).
-	activeProjectPath func() string
-
 	// defaultWorkingDir is the daemon's configured default working
-	// directory, used only when neither the session nor the active project
-	// resolves one. Empty (the default) means such a turn genuinely has no
-	// working directory and filesystem tools fail with
-	// tools.ErrNoWorkingDir — never with the daemon's own process CWD
-	// (AGENTS.md: Daemon CWD is NOT the user's project).
+	// directory, used only when the session itself resolves no working
+	// directory (no worktree, no project, no detection-context CWD).
+	// There is deliberately NO global active-project fallback: projects
+	// are scoped per session, so a session resolves its OWN binding only.
+	// Empty (the default) means such a turn genuinely has no working
+	// directory and filesystem tools fail with tools.ErrNoWorkingDir —
+	// never with the daemon's own process CWD (AGENTS.md: Daemon CWD is
+	// NOT the user's project).
 	defaultWorkingDir string
 
 	// FenceController is the per-session fence sandbox controller (optional).
@@ -2117,9 +2112,10 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 //
 //	WorktreePath > ProjectPath > DetectionContext.CWD
 //
-// then, only when the session resolves nothing, the active project at
-// turn time and finally the daemon's configured default working dir.
-// The daemon's process CWD is never a source (AGENTS.md).
+// then, only when the session resolves nothing, the daemon's configured
+// default working dir. There is NO global active-project fallback:
+// projects are scoped per session, so a session resolves its OWN binding
+// only. The daemon's process CWD is never a source (AGENTS.md).
 func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	if h.loopManager == nil {
 		return h.loop
@@ -2155,7 +2151,7 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 		h.logger.Warn("chat turn has no working directory bound; filesystem tools will require an explicit path",
 			"conversation_id", conversationID,
 			"has_session", sess != nil,
-			"hint", "bind a project (project.set), start the client from the project directory, or activate a project")
+			"hint", "bind a project to this session (project.set) or start the client from the project directory (--cwd)")
 		return h.loop
 	}
 	// Configure the shared fence sandbox for this session: the sandbox root
@@ -2218,21 +2214,17 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 // diagnostic label for where it came from. Order:
 //
 //  1. session.ResolveWorkingDir — WorktreePath > ProjectPath > DetectionContext.CWD
-//  2. the user's active project (activeProjectPath), a turn-time fallback
-//     for sessions created without a project
-//  3. the daemon's configured default working dir (defaultWorkingDir)
+//  2. the daemon's configured default working dir (defaultWorkingDir)
 //
-// Returns ("", "none") when nothing resolves; callers must fail actionably
-// rather than guessing a directory. The daemon's own process CWD is never
-// consulted (AGENTS.md: Daemon CWD is NOT the user's project).
+// Per-session project scoping: there is no global active-project fallback,
+// so a session with no worktree, no project and no client CWD resolves only
+// the configured default. Returns ("", "none") when nothing resolves;
+// callers must fail actionably rather than guessing a directory. The
+// daemon's own process CWD is never consulted (AGENTS.md: Daemon CWD is NOT
+// the user's project).
 func (h *ChatHandler) effectiveWorkingDir(sess *session.Session) (string, string) {
 	if dir, src := session.ResolveWorkingDir(sess); dir != "" {
 		return dir, string(src)
-	}
-	if h.activeProjectPath != nil {
-		if dir := h.activeProjectPath(); dir != "" {
-			return dir, string(session.WorkingDirFromActiveProject)
-		}
 	}
 	if h.defaultWorkingDir != "" {
 		return h.defaultWorkingDir, string(session.WorkingDirFromDefault)
@@ -2240,23 +2232,11 @@ func (h *ChatHandler) effectiveWorkingDir(sess *session.Session) (string, string
 	return "", string(session.WorkingDirFromNone)
 }
 
-// SetActiveProjectPathResolver wires the turn-start fallback that returns
-// the local path of the user's active project ("" when none is active).
-// Nil-safe; the daemon wires this from ProjectManager.GetActive. Sessions
-// are bound to the ACTIVE project, never to a synthesized default
-// (AGENTS.md), so this fallback resolves an existing project or nothing.
-func (h *ChatHandler) SetActiveProjectPathResolver(fn func() string) {
-	if h == nil {
-		return
-	}
-	h.activeProjectPath = fn
-}
-
 // SetDefaultWorkingDir wires the daemon's configured default working
-// directory. It is the LAST resort, used only for turns whose session and
-// active project both resolve nothing. Empty string (the default) leaves
-// such a turn unbound: filesystem tools then return tools.ErrNoWorkingDir
-// instead of silently operating on the daemon's own directory.
+// directory. It is the LAST resort, used only for turns whose session binds
+// no working directory of its own. Empty string (the default) leaves such a
+// turn unbound: filesystem tools then return tools.ErrNoWorkingDir instead
+// of silently operating on the daemon's own directory.
 func (h *ChatHandler) SetDefaultWorkingDir(dir string) {
 	if h == nil {
 		return

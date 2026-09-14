@@ -983,3 +983,20 @@ func sha256HexT(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
 }
+
+// TestListDirectoryTool_NoWorkingDir_ActionableSentinel pins the failure an
+// UNBOUND session's filesystem tools produce: with no explicit path and no
+// session working directory in the context, list_directory returns the
+// actionable tools.ErrNoWorkingDir sentinel (detectable via
+// tools.IsNoWorkingDir) — never the bare "no path specified" that made the
+// model retry until the cycle guard aborted the turn.
+func TestListDirectoryTool_NoWorkingDir_ActionableSentinel(t *testing.T) {
+	tool := &ListDirectoryTool{}
+	_, err := tool.Execute(context.Background(), map[string]any{})
+	if err == nil {
+		t.Fatal("expected an error when no working directory is bound")
+	}
+	if !tools.IsNoWorkingDir(err) {
+		t.Fatalf("err = %v, want it to wrap tools.ErrNoWorkingDir", err)
+	}
+}

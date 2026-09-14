@@ -173,6 +173,12 @@ func (s *SQLiteStore) migrate() error {
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN project_path TEXT DEFAULT ''", "project_path")
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN no_fence BOOLEAN DEFAULT 0", "no_fence")
 
+	// Add the client detection context (JSON: cwd + detected project id +
+	// CLI args) so a session created with a client CWD still resolves that
+	// directory at turn time after a daemon restart. TEXT DEFAULT '' means
+	// "no context"; pre-existing rows need no backfill.
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN detection_context TEXT DEFAULT ''", "detection_context")
+
 	// Add worktree association columns to sessions
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN worktree_id TEXT DEFAULT ''", "worktree_id")
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN worktree_path TEXT DEFAULT ''", "worktree_path")
@@ -460,8 +466,8 @@ func (s *SQLiteStore) Create(name string) (*Session, error) {
 	workersJSON, _ := json.Marshal(session.WorkerIDs)
 
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false)`,
+		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, detection_context)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false, '')`,
 		session.ID,
 		session.Name,
 		session.ConversationID,
@@ -506,8 +512,8 @@ func (s *SQLiteStore) CreateForOwner(_ context.Context, req CreateForOwnerReques
 	workersJSON, _ := json.Marshal(session.WorkerIDs)
 
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, owner_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false, ?)`,
+		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, owner_id, detection_context)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false, ?, '')`,
 		session.ID,
 		session.Name,
 		session.ConversationID,
@@ -574,7 +580,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	defer s.mu.RUnlock()
 
 	row := s.db.QueryRow(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context
 		FROM sessions
 		ORDER BY last_activity DESC
 		LIMIT 1`) //nolint:mutexio // mutex serializes sqlite connection access
@@ -586,7 +592,7 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -621,9 +627,10 @@ func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 		ownerID                   sql.NullString
 		foreground                bool
 		lastUserMessageAt         sql.NullString
+		detectionContextJSON      sql.NullString
 	)
 
-	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt)
+	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt, &detectionContextJSON)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			s.logger.Error("Failed to scan session", "error", err)
@@ -666,6 +673,12 @@ func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 			session.LastUserMessageAt = t
 		}
 	}
+	if detectionContextJSON.Valid && detectionContextJSON.String != "" {
+		var dc DetectionContext
+		if err := json.Unmarshal([]byte(detectionContextJSON.String), &dc); err == nil {
+			session.DetectionContext = &dc
+		}
+	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		session.CreatedAt = t
@@ -690,7 +703,7 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id, s.foreground, s.last_user_message_at
+		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id, s.foreground, s.last_user_message_at, s.detection_context
 		FROM sessions s
 		ORDER BY s.archived ASC, s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
@@ -1279,7 +1292,7 @@ func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -1296,7 +1309,7 @@ func (s *SQLiteStore) updateSession(session *Session) error {
 
 	result, err := s.db.Exec(`
 		UPDATE sessions
-		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?, leaf_message_id = ?, project_id = ?, project_path = ?, no_fence = ?, worktree_id = ?, worktree_path = ?
+		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?, leaf_message_id = ?, project_id = ?, project_path = ?, no_fence = ?, worktree_id = ?, worktree_path = ?, detection_context = ?
 		WHERE id = ?`,
 		session.Name,
 		string(attachedJSON),
@@ -1309,6 +1322,7 @@ func (s *SQLiteStore) updateSession(session *Session) error {
 		session.NoFence,
 		session.WorktreeID,
 		session.WorktreePath,
+		marshalDetectionContext(session.DetectionContext),
 		session.ID,
 	)
 
@@ -1375,6 +1389,43 @@ func (s *SQLiteStore) SetProject(sessionID, projectID, projectPath string) error
 	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to set project for session: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// marshalDetectionContext serializes a detection context for storage; a nil
+// context is stored as the empty string (the column's "unset" value).
+func marshalDetectionContext(dc *DetectionContext) string {
+	if dc == nil {
+		return ""
+	}
+	b, err := json.Marshal(dc)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// SetDetectionContext persists the client-side detection context (the
+// interactive client's CWD plus detected project/CLI args) on a session. This
+// is what makes a session created with `meept session create --cwd DIR` /
+// `meept chat --cwd DIR` still resolve DIR at turn time after a daemon
+// restart: the working-directory chain reads it back from the store. A nil
+// context clears the column.
+func (s *SQLiteStore) SetDetectionContext(sessionID string, dc *DetectionContext) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(
+		`UPDATE sessions SET detection_context = ?, last_activity = ? WHERE id = ?`,
+		marshalDetectionContext(dc), time.Now().UTC().Format(time.RFC3339), sessionID,
+	) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to set detection context for session: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {

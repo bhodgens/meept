@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/caimlas/meept/internal/session"
@@ -12,8 +15,12 @@ import (
 // no project (and no client CWD), sessionLoop returned the singleton loop, the
 // loop's working directory was empty, and every filesystem tool that needed a
 // session directory failed. These tests pin the turn-start resolution:
-// WorktreePath > ProjectPath > DetectionContext.CWD, then the user's active
-// project, then the daemon's configured default. Never the daemon's own CWD.
+// WorktreePath > ProjectPath > DetectionContext.CWD, then the daemon's
+// configured default. Never the daemon's own CWD.
+//
+// Project scoping is PER-SESSION: there is NO global active-project fallback.
+// A session with no worktree, no project and no client CWD resolves only the
+// configured default (or nothing), even when some other project is active.
 
 func newTurnWorkdirHandler(t *testing.T, sessions map[string]*session.Session) *ChatHandler {
 	t.Helper()
@@ -24,6 +31,21 @@ func newTurnWorkdirHandler(t *testing.T, sessions map[string]*session.Session) *
 	}
 	h.SetAgentLoopManager(NewManager(ManagerConfig{}))
 	return h
+}
+
+// newCapturingTurnWorkdirHandler is newTurnWorkdirHandler with a logger whose
+// records are captured, so a test can assert the unbound-turn WARN fired.
+func newCapturingTurnWorkdirHandler(t *testing.T, sessions map[string]*session.Session) (*ChatHandler, *bytes.Buffer) {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	singleton := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singleton, nil, nil, logger)
+	if sessions != nil {
+		h.SetSessionStore(&stubSessionStore{sessions: sessions})
+	}
+	h.SetAgentLoopManager(NewManager(ManagerConfig{}))
+	return h, buf
 }
 
 // TestSessionLoop_DetectionCWDWithoutProject_BindsThatCWD: the daemon11 shape —
@@ -75,52 +97,78 @@ func TestSessionLoop_WorktreePreferredOverProject(t *testing.T) {
 	}
 }
 
-// TestSessionLoop_UnboundSessionFallsBackToActiveProject: a fresh session with
-// no project binds to the user's ACTIVE project at turn start — the same
-// source session creation uses. No synthetic project is created.
-func TestSessionLoop_UnboundSessionFallsBackToActiveProject(t *testing.T) {
+// TestSessionLoop_PerSessionProjectIsolation: two sessions bound to different
+// projects each resolve their OWN project. There is no global active project
+// to leak into either of them.
+func TestSessionLoop_PerSessionProjectIsolation(t *testing.T) {
+	h := newTurnWorkdirHandler(t, map[string]*session.Session{
+		"sess-a": {ID: "sess-a", ConversationID: "sess-a", ProjectID: "proj-a", ProjectPath: "/repos/a"},
+		"sess-b": {ID: "sess-b", ConversationID: "sess-b", ProjectID: "proj-b", ProjectPath: "/repos/b"},
+	})
+
+	loopA := h.sessionLoop("sess-a")
+	if loopA == nil || loopA.GetSessionID() == "singleton" {
+		t.Fatalf("expected a session-scoped loop for sess-a, got %v", loopA)
+	}
+	if got := loopA.GetWorkingDir(); got != "/repos/a" {
+		t.Errorf("sess-a GetWorkingDir() = %q, want /repos/a", got)
+	}
+	loopB := h.sessionLoop("sess-b")
+	if loopB == nil || loopB.GetSessionID() == "singleton" {
+		t.Fatalf("expected a session-scoped loop for sess-b, got %v", loopB)
+	}
+	if got := loopB.GetWorkingDir(); got != "/repos/b" {
+		t.Errorf("sess-b GetWorkingDir() = %q, want /repos/b", got)
+	}
+	if loopA.GetWorkingDir() == loopB.GetWorkingDir() {
+		t.Fatal("sessions bound to different projects must not share a working directory")
+	}
+}
+
+// TestSessionLoop_UnboundSessionHasNoProjectFallback: a fresh session with no
+// project, no worktree and no client CWD resolves NOTHING. The only thing it
+// can fall to is the configured daemon default; there is no active-project
+// fallback, so with no default configured the singleton is kept.
+func TestSessionLoop_UnboundSessionHasNoProjectFallback(t *testing.T) {
 	const sessionID = "sess-unbound"
-	const activePath = "/repos/active-project"
 	h := newTurnWorkdirHandler(t, map[string]*session.Session{
 		sessionID: {ID: sessionID, ConversationID: sessionID},
 	})
-	h.SetActiveProjectPathResolver(func() string { return activePath })
+	// Another session in the same store IS bound to a project; it must not
+	// leak into this unbound session's resolution.
+	h.sessionStore = &stubSessionStore{sessions: map[string]*session.Session{
+		sessionID: {ID: sessionID, ConversationID: sessionID},
+		"other":   {ID: "other", ConversationID: "other", ProjectID: "p", ProjectPath: "/repos/other"},
+	}}
 
 	loop := h.sessionLoop(sessionID)
-	if loop == nil || loop.GetSessionID() == "singleton" {
-		t.Fatalf("expected a session-scoped loop, got %v", loop)
-	}
-	if got := loop.GetWorkingDir(); got != activePath {
-		t.Errorf("GetWorkingDir() = %q, want the active project path %q", got, activePath)
+	if loop == nil || loop.GetSessionID() != "singleton" {
+		t.Fatalf("expected the singleton for an unbound session, got %v", loop)
 	}
 }
 
-// TestSessionLoop_UnknownSessionFallsBackToActiveProject: even with no session
-// record at all (the rig's sessions table had 0 rows while messages existed),
-// a turn binds to the active project rather than running pathless.
-func TestSessionLoop_UnknownSessionFallsBackToActiveProject(t *testing.T) {
-	const activePath = "/repos/active-project"
-	h := newTurnWorkdirHandler(t, map[string]*session.Session{})
-	h.SetActiveProjectPathResolver(func() string { return activePath })
+// TestSessionLoop_UnknownSessionHasNoProjectFallback: even with no session
+// record at all, there is no active-project fallback — the turn keeps the
+// singleton rather than borrowing another session's project.
+func TestSessionLoop_UnknownSessionHasNoProjectFallback(t *testing.T) {
+	h := newTurnWorkdirHandler(t, map[string]*session.Session{
+		"other": {ID: "other", ConversationID: "other", ProjectID: "p", ProjectPath: "/repos/other"},
+	})
 
 	loop := h.sessionLoop("session-with-no-record")
-	if loop == nil || loop.GetSessionID() == "singleton" {
-		t.Fatalf("expected a session-scoped loop, got %v", loop)
-	}
-	if got := loop.GetWorkingDir(); got != activePath {
-		t.Errorf("GetWorkingDir() = %q, want the active project path %q", got, activePath)
+	if loop == nil || loop.GetSessionID() != "singleton" {
+		t.Fatalf("expected the singleton for an unknown session, got %v", loop)
 	}
 }
 
-// TestSessionLoop_DaemonDefaultWorkingDirIsLastResort: with no session and no
-// active project, the daemon's configured default working dir applies.
+// TestSessionLoop_DaemonDefaultWorkingDirIsLastResort: with no session-bound
+// directory, the daemon's configured default working dir applies.
 func TestSessionLoop_DaemonDefaultWorkingDirIsLastResort(t *testing.T) {
 	const sessionID = "sess-default-only"
 	const configured = "/srv/meept-workspace"
 	h := newTurnWorkdirHandler(t, map[string]*session.Session{
 		sessionID: {ID: sessionID, ConversationID: sessionID},
 	})
-	h.SetActiveProjectPathResolver(func() string { return "" })
 	h.SetDefaultWorkingDir(configured)
 
 	loop := h.sessionLoop(sessionID)
@@ -149,6 +197,32 @@ func TestSessionLoop_NothingBoundKeepsSingleton(t *testing.T) {
 	}
 }
 
+// TestSessionLoop_UnboundSessionWarns: the unbound turn emits a WARN naming
+// the session and why nothing resolved, so a pathless turn is debuggable from
+// the daemon log alone. Together with the tools sentinel
+// (tools.ErrNoWorkingDir) this is the "actionable failure" contract.
+func TestSessionLoop_UnboundSessionWarns(t *testing.T) {
+	const sessionID = "sess-warn"
+	h, buf := newCapturingTurnWorkdirHandler(t, map[string]*session.Session{
+		sessionID: {ID: sessionID, ConversationID: sessionID},
+	})
+
+	loop := h.sessionLoop(sessionID)
+	if loop == nil || loop.GetSessionID() != "singleton" {
+		t.Fatalf("expected the singleton for an unbound session, got %v", loop)
+	}
+	logged := buf.String()
+	if !strings.Contains(logged, "level=WARN") {
+		t.Fatalf("expected a WARN log line for the unbound turn, got:\n%s", logged)
+	}
+	if !strings.Contains(logged, "no working directory bound") {
+		t.Fatalf("expected the WARN to name the missing working directory, got:\n%s", logged)
+	}
+	if !strings.Contains(logged, sessionID) {
+		t.Fatalf("expected the WARN to name the session %q, got:\n%s", sessionID, logged)
+	}
+}
+
 // TestSessionLoop_PrimarySessionIDLookup: the client sends the session's
 // primary ID in the conversation_id field, so a session whose ConversationID
 // is empty must still resolve through the Get fallback.
@@ -170,6 +244,7 @@ func TestSessionLoop_PrimarySessionIDLookup(t *testing.T) {
 
 // TestEffectiveWorkingDir_Labels documents the resolution order and the
 // diagnostic labels, including the explicit "none" when nothing resolves.
+// There is no active-project case: projects are per-session.
 func TestEffectiveWorkingDir_Labels(t *testing.T) {
 	const sessionID = "sess-labels"
 	h := newTurnWorkdirHandler(t, nil)
@@ -177,7 +252,6 @@ func TestEffectiveWorkingDir_Labels(t *testing.T) {
 	tests := []struct {
 		name       string
 		sess       *session.Session
-		active     string
 		defaultDir string
 		wantDir    string
 		wantSource string
@@ -201,21 +275,6 @@ func TestEffectiveWorkingDir_Labels(t *testing.T) {
 			wantSource: "detection_context_cwd",
 		},
 		{
-			name:       "active project fallback",
-			sess:       &session.Session{ID: sessionID},
-			active:     "/active",
-			wantDir:    "/active",
-			wantSource: "active_project",
-		},
-		{
-			name:       "daemon default is last",
-			sess:       &session.Session{ID: sessionID},
-			active:     "/active",
-			defaultDir: "/default",
-			wantDir:    "/active",
-			wantSource: "active_project",
-		},
-		{
 			name:       "daemon default alone",
 			sess:       &session.Session{ID: sessionID},
 			defaultDir: "/default",
@@ -223,7 +282,7 @@ func TestEffectiveWorkingDir_Labels(t *testing.T) {
 			wantSource: "daemon_default",
 		},
 		{
-			name:       "nothing bound",
+			name:       "unbound session has no project fallback",
 			sess:       &session.Session{ID: sessionID},
 			wantDir:    "",
 			wantSource: "none",
@@ -237,12 +296,7 @@ func TestEffectiveWorkingDir_Labels(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h.SetActiveProjectPathResolver(nil)
 			h.SetDefaultWorkingDir("")
-			if tt.active != "" {
-				active := tt.active
-				h.SetActiveProjectPathResolver(func() string { return active })
-			}
 			if tt.defaultDir != "" {
 				h.SetDefaultWorkingDir(tt.defaultDir)
 			}
@@ -257,10 +311,9 @@ func TestEffectiveWorkingDir_Labels(t *testing.T) {
 	}
 }
 
-// TestSetActiveProjectPathResolver_NilSafe: the setter follows the package's
+// TestSetDefaultWorkingDir_NilSafe: the setter follows the package's
 // nil-receiver convention.
-func TestSetActiveProjectPathResolver_NilSafe(t *testing.T) {
+func TestSetDefaultWorkingDir_NilSafe(t *testing.T) {
 	var h *ChatHandler
-	h.SetActiveProjectPathResolver(func() string { return "/x" })
 	h.SetDefaultWorkingDir("/x")
 }

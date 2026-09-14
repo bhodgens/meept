@@ -15,10 +15,6 @@ const (
 	// session's detection context (the interactive client's process CWD,
 	// sent with session.create / `meept chat --cwd`).
 	WorkingDirFromDetection WorkingDirSource = "detection_context_cwd"
-	// WorkingDirFromActiveProject: fallback to the local path of the
-	// user's ACTIVE project when the session itself binds nothing. Sessions
-	// are bound to the active project, never to a synthesized default.
-	WorkingDirFromActiveProject WorkingDirSource = "active_project"
 	// WorkingDirFromDefault: the configured last resort
 	// (daemon.default_working_dir), consulted after everything else.
 	WorkingDirFromDefault WorkingDirSource = "daemon_default"
@@ -32,6 +28,12 @@ const (
 // directory"):
 //
 //	WorktreePath > ProjectPath > DetectionContext.CWD
+//
+// Project scoping is PER-SESSION: only the session's OWN binding is
+// consulted. There is no global "active project" fallback — a session
+// created without a project and without a client CWD resolves nothing
+// here, and callers then apply the configured daemon default
+// (daemon.default_working_dir) or fail actionably.
 //
 // The daemon process's own working directory is never consulted: it is
 // wherever the daemon was launched from (often the meept repo itself) and

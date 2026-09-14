@@ -111,6 +111,11 @@ type Store interface {
 	SetProject(sessionID, projectID, projectPath string) error
 	SetWorktree(sessionID, worktreeID, worktreePath string) error
 	UpdateSessionsProjectPath(ctx context.Context, oldPath, newPath string) error
+	// SetDetectionContext persists the client-side detection context (the
+	// interactive client's CWD) so a session created with --cwd still
+	// resolves that directory at turn time after a daemon restart. A nil
+	// context clears it.
+	SetDetectionContext(sessionID string, dc *DetectionContext) error
 
 	// F-04 FIX: Allow per-session fence override for --nofence CLI flag.
 	SetNoFence(sessionID string, noFence bool) error

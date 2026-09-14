@@ -58,6 +58,29 @@ type DetectionContext struct {
 	CLIArgs           []string `json:"cli_args,omitempty"`
 }
 
+// ProjectBinding identifies a project a session can be bound to: its stable
+// ID plus the local working directory turns should run in.
+type ProjectBinding struct {
+	ID   string
+	Path string
+}
+
+// ProjectResolver is the narrow project-manager surface the session handler
+// needs to bind a NEW session to a project by itself. The daemon adapts
+// *project.ProjectManager onto it; package session must not import package
+// project (dependency direction: daemon -> {session, project}).
+//
+// Binding is PER-SESSION: the RPC session.create path resolves the explicit
+// project_id or the client's detection-context CWD, and otherwise leaves the
+// session UNBOUND. It never consults the global active project.
+type ProjectResolver interface {
+	// GetProject returns the project with the given id.
+	GetProject(ctx context.Context, id string) (*ProjectBinding, error)
+	// CreateOrResolveProject resolves a filesystem path into a project,
+	// registering it when unknown.
+	CreateOrResolveProject(ctx context.Context, path string) (*ProjectBinding, error)
+}
+
 // Session represents an active conversation session that can be shared
 // by multiple clients.
 //
@@ -676,6 +699,23 @@ func (s *MemoryStore) SetProject(sessionID, projectID, projectPath string) error
 	}
 	session.ProjectID = projectID
 	session.ProjectPath = projectPath
+	return nil
+}
+
+// SetDetectionContext persists the client-side detection context on a
+// session. MemoryStore returns the same *Session pointer from Get, so the
+// assignment is the persistence; this exists for parity with SQLiteStore
+// (where it writes the detection_context column) and to keep the Store
+// interface honest.
+func (s *MemoryStore) SetDetectionContext(sessionID string, dc *DetectionContext) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.DetectionContext = dc
 	return nil
 }
 
@@ -1382,10 +1422,30 @@ type Handler struct {
 	summarizer    *Summarizer
 	refresher     *SessionRefresher
 	branchManager *BranchManager
+	projects      ProjectResolver
 }
 
 // HandlerOption configures the session handler.
 type HandlerOption func(*Handler)
+
+// SetProjectResolver wires the project resolver used to bind a newly created
+// session to a project (explicit project_id, else the client's
+// detection-context CWD). Nil-safe; nil means the RPC create path can only
+// bind an explicit project_id/project_path pair and otherwise leaves the
+// session UNBOUND (never the global active project).
+func (h *Handler) SetProjectResolver(pm ProjectResolver) {
+	if h == nil {
+		return
+	}
+	h.projects = pm
+}
+
+// WithProjectResolver sets the project resolver at construction time.
+func WithProjectResolver(pm ProjectResolver) HandlerOption {
+	return func(h *Handler) {
+		h.projects = pm
+	}
+}
 
 // WithSummarizer sets the summarizer for LLM-based description generation.
 func WithSummarizer(s *Summarizer) HandlerOption {
@@ -1612,6 +1672,17 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 }
 
 // handleCreate creates a new session.
+//
+// Project binding is PER-SESSION and matches the services path exactly:
+//  1. the explicit project_id from the client (its LocalPath is resolved
+//     through the project resolver when one is wired);
+//  2. else the client's detection-context CWD, resolved into a project;
+//  3. else the session is left UNBOUND — never the global active project
+//     and never EnsureDefault.
+//
+// The detection context itself is PERSISTED (SetDetectionContext) so a
+// session created with `meept session create --cwd DIR` resolves DIR at turn
+// time after a daemon restart, from the store alone.
 func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 	// F-04 FIX: Accept no_fence, project_id, and project_path in create params.
 	var params struct {
@@ -1639,13 +1710,27 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 		}
 	}
 
+	// Persist the client detection context FIRST: the working-directory chain
+	// reads DetectionContext.CWD back from the store, so it must survive a
+	// daemon restart even when project resolution below fails or is
+	// unavailable.
+	if params.DetectionContext != nil {
+		if err := h.store.SetDetectionContext(session.ID, params.DetectionContext); err != nil {
+			return nil, fmt.Errorf("failed to set detection context: %w", err)
+		}
+		session.DetectionContext = params.DetectionContext
+	}
+
 	// F-04 FIX: Apply project binding if provided at creation time.
-	if params.ProjectID != "" || params.ProjectPath != "" {
-		if err := h.store.SetProject(session.ID, params.ProjectID, params.ProjectPath); err != nil {
+	// Per-session binding: explicit project_id/project_path, else the
+	// detection-context CWD resolved into a project, else UNBOUND.
+	binding := h.resolveCreateProjectBinding(params.ProjectID, params.ProjectPath, params.DetectionContext)
+	if binding != nil {
+		if err := h.store.SetProject(session.ID, binding.ID, binding.Path); err != nil {
 			return nil, fmt.Errorf("failed to set project: %w", err)
 		}
-		session.ProjectID = params.ProjectID
-		session.ProjectPath = params.ProjectPath
+		session.ProjectID = binding.ID
+		session.ProjectPath = binding.Path
 	}
 
 	// F-04 FIX: Apply fence override if requested at creation time.
@@ -1656,16 +1741,54 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 		session.NoFence = true
 	}
 
-	// Store detection context if provided
-	if params.DetectionContext != nil {
-		session.DetectionContext = params.DetectionContext
-		// If a project was detected, bind it
-		if params.DetectionContext.DetectedProjectID != "" {
-			// Project binding happens via project.set RPC
-			// Here we just store the context for later use
-		}
+	// Working-directory visibility: name what this session will run in, or
+	// warn loudly that it has none (filesystem tools then require an
+	// explicit path). The daemon's own CWD is never a source.
+	if dir, src := ResolveWorkingDir(session); dir != "" {
+		h.logger.Info("session bound to working directory",
+			"session_id", session.ID,
+			"working_dir", dir,
+			"source", string(src),
+		)
+	} else {
+		h.logger.Warn("session created with no working directory: no project bound and no client CWD; filesystem tools will require an explicit path until one is bound",
+			"session_id", session.ID,
+			"hint", "pass --cwd, or bind a project to this session (project.set)",
+		)
 	}
 	return session, nil
+}
+
+// resolveCreateProjectBinding decides what project (if any) a newly created
+// session should be bound to. It returns nil for the UNBOUND case; it never
+// consults the global active project and never synthesizes one.
+func (h *Handler) resolveCreateProjectBinding(projectID, projectPath string, dc *DetectionContext) *ProjectBinding {
+	if projectID != "" || projectPath != "" {
+		if projectID != "" && h.projects != nil {
+			if b, err := h.projects.GetProject(context.Background(), projectID); err != nil {
+				h.logger.Warn("explicit project lookup failed for session create",
+					"project_id", projectID,
+					"error", err,
+				)
+			} else if b != nil {
+				return b
+			}
+		}
+		// No resolver (or unknown id): keep the client-supplied pair as-is.
+		return &ProjectBinding{ID: projectID, Path: projectPath}
+	}
+	if dc != nil && dc.CWD != "" && h.projects != nil {
+		b, err := h.projects.CreateOrResolveProject(context.Background(), dc.CWD)
+		if err != nil {
+			h.logger.Warn("CWD-based project resolution failed for session create; session stays bound to its detection CWD only",
+				"cwd", dc.CWD,
+				"error", err,
+			)
+			return nil
+		}
+		return b
+	}
+	return nil
 }
 
 // F-04 FIX: handleSetNoFence updates the no_fence flag on an existing session.

@@ -18,10 +18,11 @@ type SessionService struct {
 }
 
 // ProjectResolver is the narrow interface SessionService needs from the
-// project manager: ensuring a default project exists and returning it.
+// project manager: resolving an explicit project or a filesystem path into a
+// project. Session scoping is PER-SESSION — there is deliberately no
+// GetActive/EnsureDefault here, because a session must never inherit the
+// global active project nor be bound to a synthesized default.
 type ProjectResolver interface {
-	EnsureDefault(ctx context.Context) (*project.Project, error)
-	GetActive(ctx context.Context) (*project.Project, error)
 	// Get retrieves a project by ID. Used when the client explicitly
 	// requests a specific project for a new session.
 	Get(ctx context.Context, id string) (*project.Project, error)
@@ -89,21 +90,30 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 	}
 
 	// Store the client-provided detection context (cwd, etc.) on the
-	// session so downstream components can resolve the working directory.
+	// session so downstream components can resolve the working directory,
+	// and PERSIST it so the directory survives a store round-trip (daemon
+	// restart): the working-directory chain reads DetectionContext.CWD back
+	// from the store.
 	if req.DetectionContext != nil {
 		sess.DetectionContext = req.DetectionContext
+		if err := s.store.SetDetectionContext(sess.ID, req.DetectionContext); err != nil {
+			s.logger.Warn("SetDetectionContext failed during session creation",
+				"session_id", sess.ID,
+				"error", err,
+			)
+		}
 	}
 
-	// Project resolution priority:
+	// Project resolution priority (PER-SESSION, no global fallback):
 	//   1. Explicit project_id from the client (GUI project selection)
 	//   2. CWD from detection context (binds to user's actual repo)
-	//   3. Fall back to the active/default project
+	//   3. UNBOUND — never the global active project, never EnsureDefault
 	if s.pm != nil {
 		var p *project.Project
 		if req.ProjectID != "" {
 			p, err = s.pm.Get(ctx, req.ProjectID)
 			if err != nil {
-				s.logger.Warn("explicit project lookup failed, falling back to default",
+				s.logger.Warn("explicit project lookup failed; session stays unbound or falls back to the client CWD",
 					"session_id", sess.ID,
 					"project_id", req.ProjectID,
 					"error", err,
@@ -114,7 +124,7 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 		if p == nil && req.DetectionContext != nil && req.DetectionContext.CWD != "" {
 			p, err = s.pm.CreateOrResolve(ctx, req.DetectionContext.CWD)
 			if err != nil {
-				s.logger.Warn("CWD-based project resolution failed, falling back to default",
+				s.logger.Warn("CWD-based project resolution failed; session stays bound to its detection CWD only",
 					"session_id", sess.ID,
 					"cwd", req.DetectionContext.CWD,
 					"error", err,
@@ -122,26 +132,12 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 				p = nil
 			}
 		}
-		if p == nil {
-			// Bind to the user's active project if one exists. Do NOT
-			// call EnsureDefault — that creates a synthetic empty git
-			// repo which gives the agent a workingDir with no code,
-			// no CLAUDE.md, and no git history, causing it to respond
-			// with generic "platform capabilities" instead of project
-			// context. An unbound session is better than a misleading one.
-			p, err = s.pm.GetActive(ctx)
-			if err != nil {
-				s.logger.Warn("GetActive failed during session creation",
-					"session_id", sess.ID,
-					"error", err,
-				)
-			}
-		}
-		// No project could be resolved from the request or the default
-		// project. Do NOT fall back to the daemon's own CWD — the daemon
-		// process's working directory is wherever it was launched from and
-		// is never the user's project. Leave the session unbound; the caller
-		// (or a later BindProject call) is responsible for setting it.
+		// No project could be resolved from the request or the client CWD.
+		// Do NOT fall back to the global active project (projects are scoped
+		// per session) and do NOT call EnsureDefault (a synthetic empty git
+		// repo gives the agent a workingDir with no code, no CLAUDE.md, and
+		// no git history). Also never the daemon's own CWD. Leave the session
+		// unbound; the caller (or a later BindProject call) is responsible.
 		if p == nil {
 			s.logger.Debug("no project bound to session",
 				"session_id", sess.ID,

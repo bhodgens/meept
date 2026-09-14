@@ -198,18 +198,28 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   (internal/session/working_dir.go) is the single precedence for the
   session-bound sources — `WorktreePath > ProjectPath > DetectionContext.CWD`
   — and the chat path binds it at turn start in `ChatHandler.sessionLoop`,
-  falling back to the user's ACTIVE project (`ProjectManager.GetActive`,
-  wired via `SetActiveProjectPathResolver`) and then to a configured
-  default (`SetDefaultWorkingDir`, unset today). Session creation binds
-  the explicit `project_id`, else the client CWD (resolved into a project
-  by `CreateOrResolve`), else the active project; an unbound session is
-  logged at Warn. Never synthesize a project (`EnsureDefault` is not for
-  session binding) and never use the daemon's own CWD. When nothing
-  resolves, the filesystem tools return `tools.ErrNoWorkingDir`
+  then falls to the configured default (`daemon.default_working_dir` via
+  `SetDefaultWorkingDir`, unset today) and finally to the actionable
+  `tools.ErrNoWorkingDir`.
+- **Projects are scoped PER SESSION; there is NO global active-project
+  fallback.** A session resolves its OWN binding only. `ProjectManager.GetActive`
+  is never consulted at turn start or at dispatch — the
+  `SetActiveProjectPathResolver` seam and the `WorkingDirFromActiveProject`
+  source were REMOVED, not merely left unset. Every session carries its own
+  project: session creation (both the services path and the RPC
+  `session.create` path) binds the explicit `project_id`, else the client
+  CWD (resolved into a project by `CreateOrResolve`), else leaves the
+  session UNBOUND; an unbound session is logged at Warn and its filesystem
+  tools return `tools.ErrNoWorkingDir`
   ("no working directory for this session; pass an explicit path") — a
   detectable sentinel (`tools.IsNoWorkingDir`), never the bare
   `no path specified` that made the model retry until the cycle guard
-  aborted the turn (fresh-rig daemon11, 2026-09-13).
+  aborted the turn (fresh-rig daemon11, 2026-09-13). Never synthesize a
+  project (`EnsureDefault` is not for session binding) and never use the
+  daemon's own CWD. The client detection context is PERSISTED
+  (`detection_context` column; `Store.SetDetectionContext`) so a session
+  created with `meept session create --cwd DIR` still resolves DIR at turn
+  time after a daemon restart, from the store alone.
 - **Machine-shaped output never becomes a reply.** `RunOnceWithParts`
   applies `applyReplyGuard` — raw `platform_*` tool dumps, agent
   rosters, and status JSON are replaced with user-language fallbacks.
@@ -270,9 +280,11 @@ the meept repo itself). It is NEVER the user's project directory.
   `extract_model` slot (`provider/id` ref, typically a small local llama.cpp
   endpoint such as `local-extract/lfm2-extract`). Empty slot = tool reports
   not-configured; never fall back to the chat model.
-- Session creation binds to the user's active project via
-  `ProjectManager.GetActive()`. Do NOT call `EnsureDefault()` for session
-  binding — it creates a synthetic empty git repo.
+- Session creation binds PER SESSION: the explicit `project_id`, else the
+  client CWD resolved into a project by `CreateOrResolve`, else the session
+  stays UNBOUND. Never call `ProjectManager.GetActive()` for session binding
+  (no global active-project fallback) and never `EnsureDefault()` — it
+  creates a synthetic empty git repo.
 
 ### WS event type classification
 

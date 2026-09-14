@@ -2076,6 +2076,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			pm := project.NewProjectManager(projStore, recents, cfg.Projects, logger.With("component", "project-manager"))
 			c.ProjectManager = pm
+			// Wire the RPC session handler to the project manager so
+			// session.create binds like the services path: explicit
+			// project_id, else the client's detection-context CWD resolved
+			// into a project, else UNBOUND. Projects are scoped per session —
+			// the handler never consults the global active project.
+			if c.SessionHandler != nil {
+				c.SessionHandler.SetProjectResolver(sessionProjectResolver{pm: pm})
+			}
 			// Wire session store into project manager for bulk path updates on rename.
 			if c.SessionStore != nil {
 				pm.SetSessionStore(c.SessionStore)
@@ -2560,15 +2568,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if c.SessionStore != nil {
 			c.Dispatcher.SetSessionStore(c.SessionStore)
 		}
-		// The dispatcher prepares the same kind of turn as the chat path, so
-		// it needs the same last-resort working directory: the user's ACTIVE
-		// project. Without it, an HTTP turn whose session carries no project
-		// and no detection-context CWD runs pathless and every filesystem
-		// tool fails with tools.ErrNoWorkingDir.
-		c.Dispatcher.SetActiveProjectPathResolver(activeProjectWorkingDir(c.ProjectManager))
 		// daemon.default_working_dir is the documented last resort, consulted
-		// only after the session chain and the active project both come up
-		// empty. Empty (the default) keeps the actionable ErrNoWorkingDir.
+		// only after the session's own binding (worktree > project >
+		// detection-context CWD) comes up empty. There is no global
+		// active-project fallback: projects are scoped per session. Empty
+		// (the default) keeps the actionable ErrNoWorkingDir.
 		c.Dispatcher.SetDefaultWorkingDir(cfg.Daemon.DefaultWorkingDir)
 
 		// Register platform tools now that agent registry is available
@@ -3045,17 +3049,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// a chat turn whose session had no project and no client CWD ran with no
 	// working directory at all, so every filesystem tool failed with the bare
 	// "no path specified" and the model retried until the cycle guard aborted
-	// the turn. ChatHandler now resolves WorktreePath > ProjectPath >
-	// DetectionContext.CWD at turn start and, for a session that resolves
-	// nothing, falls back to the user's ACTIVE project — the same source
-	// session creation binds to. It never synthesizes a default project
+	// the turn. ChatHandler resolves WorktreePath > ProjectPath >
+	// DetectionContext.CWD at turn start. Project scoping is PER-SESSION:
+	// there is no global active-project fallback, so a session that binds no
+	// directory of its own falls to the configured default or fails
+	// actionably. It never synthesizes a default project
 	// (ProjectManager.EnsureDefault is not used for session binding) and never
 	// falls back to the daemon's own process CWD (AGENTS.md: Daemon CWD is NOT
 	// the user's project).
 	if c.ChatHandler != nil {
-		c.ChatHandler.SetActiveProjectPathResolver(activeProjectWorkingDir(c.ProjectManager))
-		// daemon.default_working_dir: the last resort after the session chain
-		// and the active project, so the setter is no longer inert.
+		// daemon.default_working_dir: the last resort after the session's own
+		// binding, so the setter is not inert.
 		c.ChatHandler.SetDefaultWorkingDir(cfg.Daemon.DefaultWorkingDir)
 	}
 	// Wire the shared fence checker onto the ChatHandler so each session
@@ -8620,35 +8624,41 @@ func truncateEvidence(s string) string {
 	return string(r[:max]) + "…"
 }
 
-// projectActiveGetter is the narrow slice of project.ProjectManager needed to
-// resolve a fallback working directory for a chat turn.
-type projectActiveGetter interface {
-	GetActive(ctx context.Context) (*project.Project, error)
+// sessionProjectResolver adapts *project.ProjectManager onto the narrow
+// session.ProjectResolver surface the RPC session.create handler needs to
+// bind a new session to its OWN project. Package session must not import
+// package project, so the adapter lives here.
+//
+// Binding is per-session by construction: GetProject resolves an explicit
+// project id, CreateOrResolveProject resolves the client's detection-context
+// CWD. Neither ever consults the global active project.
+type sessionProjectResolver struct {
+	pm *project.ProjectManager
 }
 
-// activeProjectWorkingDir returns a nil-safe resolver for the local path of
-// the user's active project.
-//
-// It is the turn-start fallback for chat sessions that are not bound to any
-// project — the same source session creation binds to (AGENTS.md: "Session
-// creation binds to the user's active project via ProjectManager.GetActive").
-// The daemon binds an EXISTING active project or nothing: it never calls
-// EnsureDefault to synthesize a project, and it never falls back to its own
-// process CWD. An empty result means the turn genuinely has no working
-// directory, which filesystem tools report as tools.ErrNoWorkingDir so the
-// model can pass an explicit path instead of retrying blind.
-//
-// The GetActive read happens outside any lock and with a request-independent
-// context: it is a single indexed store read on the turn-start path only.
-func activeProjectWorkingDir(pm projectActiveGetter) func() string {
-	return func() string {
-		if pm == nil {
-			return ""
-		}
-		p, err := pm.GetActive(context.Background())
-		if err != nil || p == nil {
-			return ""
-		}
-		return p.LocalPath
+// GetProject returns the binding for an explicit project id, or nil when the
+// manager is absent or the project is unknown.
+func (r sessionProjectResolver) GetProject(ctx context.Context, id string) (*session.ProjectBinding, error) {
+	if r.pm == nil {
+		return nil, nil
 	}
+	p, err := r.pm.Get(ctx, id)
+	if err != nil || p == nil {
+		return nil, err
+	}
+	return &session.ProjectBinding{ID: p.ID, Path: p.LocalPath}, nil
+}
+
+// CreateOrResolveProject resolves a filesystem path into a project binding,
+// registering the project when it is unknown. This is what lets the RPC
+// session.create path bind exactly like the services path.
+func (r sessionProjectResolver) CreateOrResolveProject(ctx context.Context, path string) (*session.ProjectBinding, error) {
+	if r.pm == nil {
+		return nil, nil
+	}
+	p, err := r.pm.CreateOrResolve(ctx, path)
+	if err != nil || p == nil {
+		return nil, err
+	}
+	return &session.ProjectBinding{ID: p.ID, Path: p.LocalPath}, nil
 }

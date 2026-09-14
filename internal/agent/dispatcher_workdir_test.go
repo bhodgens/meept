@@ -66,34 +66,48 @@ func TestDispatcherResolveSessionWorkingDir_Precedence(t *testing.T) {
 	}
 }
 
-// TestDispatcherResolveSessionWorkingDir_ActiveProjectFallback covers the
-// unbound session: the user's ACTIVE project is the fallback, and it is
-// labelled as such so the daemon log names the real source.
-func TestDispatcherResolveSessionWorkingDir_ActiveProjectFallback(t *testing.T) {
+// TestDispatcherResolveSessionWorkingDir_PerSessionIsolation: two dispatched
+// sessions bound to different projects each resolve their OWN project. There
+// is no global active project, so neither leaks into the other.
+func TestDispatcherResolveSessionWorkingDir_PerSessionIsolation(t *testing.T) {
 	d := newDispatcherWithSessionStore(nil)
-	d.SetActiveProjectPathResolver(func() string { return "/active/proj" })
+
+	dirA, srcA := d.resolveSessionWorkingDir(&session.Session{ID: "a", ProjectID: "pa", ProjectPath: "/repos/a"})
+	if dirA != "/repos/a" || srcA != session.WorkingDirFromProject {
+		t.Fatalf("session a: got (%q, %q), want /repos/a", dirA, srcA)
+	}
+	dirB, srcB := d.resolveSessionWorkingDir(&session.Session{ID: "b", ProjectID: "pb", ProjectPath: "/repos/b"})
+	if dirB != "/repos/b" || srcB != session.WorkingDirFromProject {
+		t.Fatalf("session b: got (%q, %q), want /repos/b", dirB, srcB)
+	}
+}
+
+// TestDispatcherResolveSessionWorkingDir_UnboundHasNoProjectFallback: a
+// dispatched session with nothing bound resolves the configured default, or
+// nothing at all — never some other project's path.
+func TestDispatcherResolveSessionWorkingDir_UnboundHasNoProjectFallback(t *testing.T) {
+	d := newDispatcherWithSessionStore(nil)
 
 	dir, source := d.resolveSessionWorkingDir(&session.Session{ID: "s1"})
-	if dir != "/active/proj" {
-		t.Fatalf("dir = %q, want /active/proj", dir)
+	if dir != "" {
+		t.Fatalf("dir = %q, want empty for an unbound session", dir)
 	}
-	if source != session.WorkingDirFromActiveProject {
-		t.Fatalf("source = %q, want %q", source, session.WorkingDirFromActiveProject)
+	if source != session.WorkingDirFromNone {
+		t.Fatalf("source = %q, want %q", source, session.WorkingDirFromNone)
 	}
 }
 
 // TestDispatcherResolveSessionWorkingDir_DefaultIsLastResort pins that the
-// configured default (daemon.default_working_dir) is consulted only after the
-// session chain and the active project, and that an empty default means none.
+// configured default (daemon.default_working_dir) is the last resort after the
+// session's own binding, and that an empty default means none.
 func TestDispatcherResolveSessionWorkingDir_DefaultIsLastResort(t *testing.T) {
 	d := newDispatcherWithSessionStore(nil)
 	d.SetDefaultWorkingDir("/configured/default")
-	d.SetActiveProjectPathResolver(func() string { return "/active/proj" })
 
-	if dir, _ := d.resolveSessionWorkingDir(&session.Session{ID: "s1"}); dir != "/active/proj" {
-		t.Fatalf("active project must win over the configured default, got %q", dir)
+	// A session-bound directory still wins over the configured default.
+	if dir, _ := d.resolveSessionWorkingDir(&session.Session{ID: "s1", ProjectPath: "/repos/p"}); dir != "/repos/p" {
+		t.Fatalf("session project must win over the configured default, got %q", dir)
 	}
-	d.SetActiveProjectPathResolver(func() string { return "" })
 	dir, source := d.resolveSessionWorkingDir(&session.Session{ID: "s1"})
 	if dir != "/configured/default" || source != session.WorkingDirFromDefault {
 		t.Fatalf("got (%q, %q), want the configured default", dir, source)
@@ -105,11 +119,9 @@ func TestDispatcherResolveSessionWorkingDir_DefaultIsLastResort(t *testing.T) {
 func TestDispatcherSetDefaults_NilAndEmptyAreNoOps(t *testing.T) {
 	d := newDispatcherWithSessionStore(nil)
 	d.SetDefaultWorkingDir("")
-	d.SetActiveProjectPathResolver(nil)
-	if d.defaultWorkingDir != "" || d.activeProjectPath != nil {
-		t.Fatal("empty default / nil resolver must not be stored")
+	if d.defaultWorkingDir != "" {
+		t.Fatal("empty default must not be stored")
 	}
 	var nilDispatcher *Dispatcher
 	nilDispatcher.SetDefaultWorkingDir("/x")
-	nilDispatcher.SetActiveProjectPathResolver(func() string { return "/x" })
 }
