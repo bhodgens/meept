@@ -198,13 +198,66 @@ red.
   rerun is preferred instead, the owner adds `classifier-eval-rerun/` to
   `.gitignore` (the owner's call, not this script's).
 - **Exit codes** (also in the module docstring): 0 green, 2 leak,
-  3 missing inputs (UNVALIDATED), 4 empty ruler, 5 degenerate embeddings.
-  Exit 4 fires only on a GENUINELY empty list (a JSON5-style ruler parses
-  now). Exit 5 has no allowlist override: a degenerate row must be
-  re-embedded, never waived.
+  3 missing inputs (UNVALIDATED), 4 empty ruler, 5 degenerate embeddings,
+  6 unparseable ruler. Exit 4 fires only on a GENUINELY empty list (a
+  JSON5-style ruler parses now). Exit 5 has no allowlist override: a
+  degenerate row must be re-embedded, never waived. Exit 6 (2026-09-13)
+  covers a ruler file that EXISTS but cannot be decoded/parsed — a
+  zero-byte file or a truncated document used to escape as an uncaught
+  `json.JSONDecodeError` traceback (process exit 1, an UNDOCUMENTED code)
+  from `load_replay` and from the harvest path; both now print a clear
+  `REFUSING:` line and return 6. Reproduce:
+  `printf '{ "cases": [ { "input": "x"' > /tmp/bad.json5` then
+  `python3 tools/classifier-eval/m4_gold_acceptance.py --check-overlap`
+  with `REPLAY` pointed at it (the self-test pins both the zero-byte and
+  the truncated case).
 
 Reproduce:
 `python3 tools/classifier-eval/m4_gold_acceptance.py --self-test`
 (no embed server, no replay corpus needed) and
 `python3 tools/classifier-eval/m4_gold_acceptance.py --check-overlap`
 (needs the untracked replay corpus).
+
+### 5. Ruler-text privacy, behavioural pins, and the remap/hook hardening test (2026-09-13, wave 4)
+
+The wave-3 regression review of `bdac163e` (hooks + e2e) and `e3760c1e`
+(eval guards) found that several guards were only partially closed. Fixed
+and pinned here:
+
+- **Ruler text reached the terminal and the leak records.** A leak record
+  stored `replay_text`, `format_leaks` printed its first 60 chars (to
+  STDOUT from `--check-overlap`, to stderr from `run_scoring_guard`), and
+  those records are what a scoring run copies into the artifact's `leaks`
+  field. Reproduced before the fix: `--check-overlap` on the real ruler
+  printed a private row to stdout. Leak records now carry
+  `replay_case_key` (never `replay_text`), `format_leaks` prints the key,
+  and the self-test asserts the ruler text is absent from the records, the
+  stats, and the printed string — while the leak is still REPORTED and
+  identified (both directions; an over-redacting filter fails too).
+- **A malformed ruler raised instead of a documented code.** Zero-byte and
+  truncated rulers produced an uncaught `json.JSONDecodeError` (exit 1);
+  now exit 6 (above), pinned for both shapes.
+- **Behavioural guard pins (was: a source grep).** The self-test used
+  `"run_scoring_guard(" in body`, satisfied by `if False:`. It now drives
+  `run_full` with a leaking ruler AND with `torch`/`transformers` blocked
+  in `sys.modules`: the run must refuse (exit 2) and write NO artifact. A
+  neutered call site falls through to the import and raises. Both
+  `_as_unit` call sites are pinned too — `build_centroids` (extracted from
+  `run_full`) and `CentroidGate.fit` must RAISE on a cancelling centroid
+  row rather than normalise it to a zero vector via `norm+1e-12`. The
+  margin-row-carrying-text and deleted-`EmptyRulerError` mutations also
+  keep failing.
+- **The remap and hook hardening had no runner at all.**
+  `tools/classifier-eval/test_hardening.py` extracts the e2e remapper
+  heredoc and the hook's bash functions from source and drives them on
+  synthetic inputs: the five false rewrites (`timeout_ms`/`seed`/
+  `foo/:9000`/`EXPORT`/`TRANSPORT`) stay unrewritten while the real config
+  diff is unchanged (only the 4 spawn-bearing providers); the escaped and
+  unescaped variable-port forms agree (FATAL with no literal endpoint,
+  allowed-with-a-warning when a literal pins the provider); a clobbered
+  `./gendoc` moves the fingerprint and BLOCKS while a stray `coverage.out`
+  only warns; the go-less derivation prints an explicit UNCHECKED warning.
+  Wired as `make classifier-eval-hardening-test` plus a
+  `generated-artifacts` CI step in `.github/workflows/code-quality.yml`,
+  because CI's pre-commit job runs on a fresh checkout where
+  `git diff --cached` is empty and never exercises the hook classifier.

@@ -205,8 +205,14 @@ def replay_disjointness(replay_texts, corpus_cases, *,
     can print the threshold headroom beside the leak list.
 
     Returns a list of leak records:
-      {"replay_index", "replay_text", "corpus_case_id", "reason",
+      {"replay_index", "replay_case_key", "corpus_case_id", "reason",
        "similarity"} -- empty list means the ruler is disjoint.
+
+    PRIVACY: a leak record NEVER carries the replay TEXT. The ruler is
+    untracked private transcript text, and leak records are printed and
+    (for the acceptance run) copied into the written artifact, so each
+    record identifies its row by ``case_key`` instead. Callers must not
+    re-introduce the text.
     """
     replay_texts = list(replay_texts)
     if not replay_texts:
@@ -237,7 +243,7 @@ def replay_disjointness(replay_texts, corpus_cases, *,
             if (i, c.case_id) in seen:
                 continue
             seen.add((i, c.case_id))
-            leaks.append({"replay_index": i, "replay_text": t,
+            leaks.append({"replay_index": i, "replay_case_key": case_key(t),
                           "corpus_case_id": c.case_id,
                           "reason": "exact", "similarity": 1.0})
             info["exact_leaks"] += 1
@@ -275,7 +281,8 @@ def replay_disjointness(replay_texts, corpus_cases, *,
             if (i, corpus_cases[j].case_id) in seen:
                 continue
             seen.add((i, corpus_cases[j].case_id))
-            leaks.append({"replay_index": i, "replay_text": replay_texts[i],
+            leaks.append({"replay_index": i,
+                          "replay_case_key": case_key(replay_texts[i]),
                           "corpus_case_id": corpus_cases[j].case_id,
                           "reason": f"similarity>{sim_threshold:.2f}",
                           "similarity": round(s, 4)})
@@ -335,12 +342,20 @@ def format_margins(stats: dict) -> str:
 
 
 def format_leaks(leaks: list[dict]) -> str:
+    """Human-readable leak list. PRIVACY: it prints the replay row's
+    ``case_key``, never its text -- the ruler is private transcript text and
+    this string is printed to stdout/stderr (and, for the acceptance run,
+    the records reach the written artifact)."""
     lines = [f"{len(leaks)} corpus<->replay leak(s):"]
     for lk in leaks:
+        # .get() (not []) so a record from an older/mutated revision cannot
+        # crash the printer; a missing key prints as <no-key> -- visibly
+        # wrong, never a traceback that hides the leak list.
         lines.append(
-            f"  replay[{lk['replay_index']}] {lk['replay_text'][:60]!r} "
-            f"== corpus {lk['corpus_case_id']} ({lk['reason']}, "
-            f"sim={lk['similarity']})")
+            f"  replay[{lk.get('replay_index', '?')}] "
+            f"key={lk.get('replay_case_key', '<no-key>')} "
+            f"== corpus {lk.get('corpus_case_id', '?')} "
+            f"({lk.get('reason', '?')}, sim={lk.get('similarity', '?')})")
     return "\n".join(lines)
 
 

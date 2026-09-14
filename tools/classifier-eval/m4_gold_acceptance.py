@@ -74,7 +74,8 @@ Usage:
   python3 m4_gold_acceptance.py --self-test        # guard/floor self-test
 
 Exit codes: 0 green | 2 leak | 3 missing inputs (UNVALIDATED) |
-            4 empty ruler | 5 degenerate (zero/non-finite) embeddings.
+            4 empty ruler | 5 degenerate (zero/non-finite) embeddings |
+            6 unparseable ruler (malformed JSON/JSON5, or not UTF-8).
 """
 import argparse
 import hashlib
@@ -132,6 +133,7 @@ EXIT_LEAK = 2
 EXIT_UNVALIDATED = 3
 EXIT_EMPTY_RULER = 4
 EXIT_DEGENERATE = 5
+EXIT_UNPARSEABLE = 6
 
 # Recorded near-duplicate allowlist: replay case_key -> reason. An entry
 # exempts that replay row from the SIMILARITY check only (byte-identity is
@@ -151,6 +153,14 @@ ORCH = re.compile(
     r"to completion|implement tasks?|work (through|items))\b")
 
 
+class RulerUnparseableError(ValueError):
+    """The ruler file EXISTS but is not parseable (zero-byte, truncated, or
+    not UTF-8). Exit code 6: a broken FILE, deliberately distinct from exit 4
+    (a valid file holding an empty list). Raised by ``load_replay`` so both
+    entry points refuse with a documented code instead of dumping an
+    uncaught ``json.JSONDecodeError`` traceback (exit 1)."""
+
+
 def load_replay():
     """Return the adjudicated replay records, or None when the untracked
     replay corpus is absent (gitignored by design).
@@ -162,10 +172,26 @@ def load_replay():
     -- parsed to ZERO cases and tripped the empty-ruler refusal (exit 4)
     forever. Accepts the ``{ cases: [...] }`` layout the committed ruler
     uses, a ``{ categories: {...} }`` layout, or a bare list.
+
+    Raises ``RulerUnparseableError`` when the file EXISTS but cannot be
+    decoded or parsed -- a ZERO-BYTE ruler, a truncated document, or a
+    non-UTF-8 file. That is exit 6, deliberately distinct from the empty
+    ruler (exit 4): a broken file is not a ruler with nothing in it, and
+    neither may surface as an uncaught JSONDecodeError traceback.
     """
     if not REPLAY.exists():
         return None
-    data = H.parse_json5(REPLAY.read_text())
+    try:
+        raw = REPLAY.read_text()
+    except (UnicodeDecodeError, OSError) as e:
+        raise RulerUnparseableError(
+            f"cannot read ruler {REPLAY}: {type(e).__name__}: {e}") from e
+    try:
+        data = H.parse_json5(raw)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise RulerUnparseableError(
+            f"ruler {REPLAY} is not parseable JSON5 "
+            f"({type(e).__name__}: {e})") from e
     if isinstance(data, dict):
         if "cases" in data:
             return list(data["cases"] or [])
@@ -218,7 +244,14 @@ def check_overlap_only() -> int:
     """Disjointness check that needs no embed server: exact-match only."""
     cases_b, cases_a = H.load_cases()
     gold = cases_b + cases_a
-    replay = load_replay()
+    try:
+        replay = load_replay()
+    except RulerUnparseableError as e:
+        print(f"REFUSING: {e}", file=sys.stderr)
+        print("  a malformed ruler is exit 6, never an uncaught traceback; "
+              "fix the ruler file (or remove it) before re-running.",
+              file=sys.stderr)
+        return EXIT_UNPARSEABLE
     if replay is None:
         print(f"replay corpus absent ({REPLAY.name}); cannot check "
               f"disjointness", file=sys.stderr)
@@ -258,11 +291,16 @@ def run_scoring_guard(s_texts, gold, *, corpus_vectors=None,
                       replay_vectors=None):
     """GUARD 1: corpus<->replay disjointness, BEFORE any scoring.
 
-    Shared by ``run_full`` and ``--self-test`` so the refusal path is
-    exercised by the self-test and cannot be ripped out of the run without
-    the self-test failing (the self-test also asserts run_full's source
-    actually calls this function). Returns ``(exit_code, guard_stats,
-    leaks)``; ``exit_code`` is None when the ruler is disjoint.
+    Shared by ``run_full`` (as the exact-match pre-flight and again with
+    vectors) and ``--self-test`` so the refusal path is exercised by the
+    self-test and cannot be ripped out of the run without the self-test
+    failing. The pin is BEHAVIOURAL: the self-test calls this through
+    ``run_full`` with a leaked ruler and asserts the run refuses (exit 2) and
+    writes no payload -- a neutered call site fails that assertion, where the
+    old source grep could be satisfied by dead code. Returns ``(exit_code,
+    guard_stats, leaks)``; ``exit_code`` is None when the ruler is disjoint.
+    Also returns the leak RECORDS, which carry the replay ``case_key`` and
+    never the ruler text (privacy).
     """
     guard: dict = {}
     try:
@@ -286,10 +324,32 @@ def run_scoring_guard(s_texts, gold, *, corpus_vectors=None,
     return None, guard, leaks
 
 
+def build_centroids(V, intents, labs):
+    """Per-label centroid rows of the fitting corpus, L2-normalised.
+
+    Normalisation goes through ``H._as_unit``: ``C /= (norm + 1e-12)`` would
+    turn a zero-norm centroid row (cancelling unit vectors) into an all-zero
+    vector whose cosine is 0.0 and silently reads as "disjoint" -- the F20
+    hole ``_as_unit`` closes. Extracted so the self-test can drive the EXACT
+    call site ``run_full`` uses: reverting this to norm+1e-12 must fail the
+    self-test, which a source grep could not see.
+    """
+    import numpy as np
+    C = np.stack([V[[i for i in range(len(intents)) if intents[i] == lab]]
+                  .mean(axis=0) for lab in labs])
+    return H._as_unit(C)
+
+
 def run_full(policies: set) -> int:
-    # Input guards run BEFORE the heavy ML imports: an absent or EMPTY
-    # ruler must be refused without requiring torch/transformers/:8090.
-    replay = load_replay()
+    # Input guards run BEFORE the heavy ML imports: an absent, EMPTY or
+    # MALFORMED ruler must be refused without requiring torch/transformers/:8090.
+    try:
+        replay = load_replay()
+    except RulerUnparseableError as e:
+        print(f"REFUSING: {e}", file=sys.stderr)
+        print("  a malformed ruler is exit 6, never an uncaught traceback.",
+              file=sys.stderr)
+        return EXIT_UNPARSEABLE
     if replay is None:
         unvalidated("all", f"untracked replay corpus missing ({REPLAY})")
         return EXIT_UNVALIDATED
@@ -299,11 +359,21 @@ def run_full(policies: set) -> int:
               file=sys.stderr)
         return EXIT_EMPTY_RULER
 
+    s_texts = [r["input"] for r in replay]
+    # GUARD 1 PRE-FLIGHT (exact-match only): needs no vectors and no ML
+    # stack, so a leaked ruler refuses HERE -- before torch/:8090 are
+    # required. This is also the seam the self-test drives to assert the
+    # guard's EFFECT in run_full's own control flow (a leaked ruler refuses
+    # to score and writes NO payload), rather than grep-ing for the call.
+    _gb, _ga = H.load_cases()
+    preflight_rc, _pguard, _pleaks = run_scoring_guard(s_texts, _gb + _ga)
+    if preflight_rc is not None:
+        return preflight_rc
+
     import numpy as np
     import torch
     from transformers import AutoModel, AutoTokenizer
 
-    s_texts = [r["input"] for r in replay]
     s_true = [r["expected_intent"] for r in replay]
     replay_sha = replay_sha256()
 
@@ -335,14 +405,11 @@ def run_full(policies: set) -> int:
     emb = H.Embedder(EMBED_URL, "qwen3-embedding", "")
     emb.embed_keys([c.text for c in gold], gkeys)
     V = emb.vectors(gkeys)
-    C = np.stack([V[[i for i in range(len(gold)) if intents[i] == l]].mean(axis=0)
-                  for l in labs])
-    # Guarded normalisation. ``C /= (norm + 1e-12)`` would turn a zero-norm
-    # centroid row (cancelling unit vectors) into an all-zero vector whose
-    # cosine is 0.0 and silently reads as "disjoint" -- the same F20 hole
-    # ``_as_unit`` closes for the leak guard. Fail loud instead.
+    # Guarded normalisation, in one driven seam (build_centroids): see its
+    # docstring -- a zero-norm centroid row must fail loud, not read as
+    # "disjoint" (F20).
     try:
-        C = H._as_unit(C)
+        C = build_centroids(V, intents, labs)
     except H.DegenerateVectorError as e:
         print(f"REFUSING to score: degenerate centroid row: {e}",
               file=sys.stderr)
@@ -560,6 +627,17 @@ def self_test() -> int:
     check("check_overlap_only green on a clean sample",
           clean_code == 0, f"-> exit {clean_code}")
 
+    # 2c. a MALFORMED ruler (zero-byte / truncated) refuses with the
+    #     documented exit 6, never an uncaught JSONDecodeError traceback.
+    z = d / "zero.json5"
+    z.write_text("")
+    tr = d / "trunc.json5"
+    tr.write_text('{ "cases": [ { "input": "x"')
+    for tag, path in (("zero-byte", z), ("truncated", tr)):
+        code = quiet_check(path)
+        check(f"malformed ruler ({tag}) -> exit {EXIT_UNPARSEABLE}",
+              code == EXIT_UNPARSEABLE, f"-> exit {code}")
+
     # 3. a zero-norm embedding row is not green.
     V = np.ones((len(gold), 4), dtype=np.float32)
     Z = np.zeros((1, 4), dtype=np.float32)
@@ -620,10 +698,12 @@ def self_test() -> int:
     check("committed tfidf-veto (2 routed) is sub-floor",
           verdict_for(2, 2, 46, 48)[1] == "INSUFFICIENT_COVERAGE")
 
-    # 6. GUARD-1 WIRING (F: deleting the guard block used to leave every
-    #    check green). The shared run guard refuses a leaked ruler, and
-    #    run_full's source actually calls it -- extracting the guard is
-    #    pointless if the call site can be deleted unnoticed.
+    # 6. GUARD-1 WIRING, BEHAVIOURAL. The guard's EFFECT must be pinned in
+    #    run_full's own control flow: a leaked ruler refuses to score and NO
+    #    payload is written. The old source grep
+    #    (`"run_scoring_guard(" in body`) was satisfied by `if False:`
+    #    wrapped around the call, so the guard could be neutered while every
+    #    check stayed green.
     import contextlib
     import io
     with contextlib.redirect_stdout(io.StringIO()), \
@@ -631,29 +711,108 @@ def self_test() -> int:
         guard_rc, _gstats, _gleaks = run_scoring_guard([known], gold)
     check("run GUARD-1 refuses a leaked ruler (exit 2)",
           guard_rc == EXIT_LEAK, f"-> exit {guard_rc}")
-    _body = Path(__file__).read_text().split("def run_full(")[1] \
-        .split("def self_test(")[0]
-    check("run_full wires run_scoring_guard",
-          "run_scoring_guard(" in _body, "-> GUARD-1 call site missing")
 
-    # 7. PRIVACY: the guard stats run_full copies into the artifact must not
-    #    carry ruler text -- a margin row is (sim, index, corpus_case_id,
-    #    replay_case_key), never the replay input.
+    # 6b. run_full itself refuses a leaking ruler BEFORE the ML stack and
+    #     writes NOTHING. torch/transformers are BLOCKED (None in sys.modules
+    #     makes `import torch` raise) so the check is load-bearing: if the
+    #     pre-flight call site is neutered the run falls through to the
+    #     import and raises, instead of being rescued by the vector guard
+    #     after the embeddings.
+    leak_dir = Path(tempfile.mkdtemp())
+    leak_ruler = leak_dir / "replay-gold.local.json5"
+    leak_ruler.write_text(
+        '{ cases: [ { input: "%s", expected_intent: "quickplan" } ] }\n'
+        % known)
+    _art_before = sorted(p.name for p in RESULTS.glob("*"))
+    _saved_replay = REPLAY
+    _blocked = {m: sys.modules.get(m) for m in ("torch", "transformers")}
+    for m in _blocked:
+        sys.modules[m] = None  # type: ignore[assignment]
+    globals()["REPLAY"] = leak_ruler
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            run_rc = run_full({"double-confidence"})
+    except Exception as e:  # a neutered pre-flight falls through to the import
+        run_rc = f"raised {type(e).__name__}"
+    finally:
+        globals()["REPLAY"] = _saved_replay
+        for m, mod in _blocked.items():
+            if mod is None:
+                sys.modules.pop(m, None)
+            else:
+                sys.modules[m] = mod
+    check("run_full refuses a leaked ruler without the ML stack (no scoring)",
+          run_rc == EXIT_LEAK, f"-> {run_rc}")
+    check("run_full writes no payload on a leak refusal",
+          sorted(p.name for p in RESULTS.glob("*")) == _art_before,
+          "-> an artifact appeared on the refusal path")
+
+    # 6c. a DEGENERATE row refuses too (the vector guard's effect at the
+    #     same seam run_full uses).
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        deg_rc, _s2, _l2 = run_scoring_guard(
+            ["zzz selftest deg-run-full"], gold,
+            corpus_vectors=np.ones((len(gold), 4), dtype=np.float32),
+            replay_vectors=np.zeros((1, 4), dtype=np.float32))
+    check("run GUARD-1 refuses a degenerate row (exit 5)",
+          deg_rc == EXIT_DEGENERATE, f"-> exit {deg_rc}")
+
+    # 6d. BOTH _as_unit call sites: a cancelling centroid row must RAISE
+    #     rather than normalise to an all-zero vector via norm+1e-12 (the
+    #     mutation the source grep could not see).
+    _full = np.array([[1.0, 0, 0, 0], [-1.0, 0, 0, 0]], dtype=np.float32)
+    cen_raised = False
+    try:
+        build_centroids(_full, ["a", "a"], ["a"])
+    except H.DegenerateVectorError:
+        cen_raised = True
+    check("build_centroids refuses a cancelling centroid", cen_raised)
+    _saved_full = H.__dict__.get("_FULL_V")
+    H.__dict__["_FULL_V"] = _full
+    gate_raised = False
+    try:
+        H.CentroidGate(0.70).fit(np.array([0, 1]), ["a", "a"])
+    except H.DegenerateVectorError:
+        gate_raised = True
+    finally:
+        H.__dict__["_FULL_V"] = _saved_full
+    check("CentroidGate.fit refuses a cancelling centroid", gate_raised)
+
+    # 7. PRIVACY, BOTH DIRECTIONS. (a) The stats run_full copies into the
+    #    artifact AND the leak records themselves must not carry ruler text;
+    #    (b) the filter must not over-redact -- a leak must still be reported
+    #    and identified by case_key, and format_leaks must be printable
+    #    without leaking (it reaches stdout AND stderr).
     with contextlib.redirect_stdout(io.StringIO()), \
             contextlib.redirect_stderr(io.StringIO()):
         _one = np.array([[1.0, 0, 0, 0]], dtype=np.float32)
         _stats: dict = {}
-        H.replay_disjointness(["zsecret-guard-text-z"], gold[:1],
-                              corpus_vectors=_one, replay_vectors=_one,
-                              sim_threshold=0.95, stats=_stats)
-    _blob = json.dumps(_stats)
-    check("guard stats never contain ruler text",
-          "zsecret-guard-text-z" not in _blob,
-          f"-> {_stats.get('top_margins')}")
+        _leaks = H.replay_disjointness(["zsecret-guard-text-z"], gold[:1],
+                                       corpus_vectors=_one,
+                                       replay_vectors=_one,
+                                       sim_threshold=0.95, stats=_stats)
+    _blob = json.dumps(_stats) + json.dumps(_leaks)
+    check("guard stats + leak records never contain ruler text",
+          "zsecret-guard-text-z" not in _blob, f"-> {_leaks}")
     check("guard margin row carries the replay case_key",
           isinstance(_stats.get("top_margins", [None])[0][3], str)
           and _stats["top_margins"][0][3] == H.case_key("zsecret-guard-text-z"),
           f"-> {_stats.get('top_margins')}")
+    check("similarity leak record still reported and keyed (no over-redact)",
+          len(_leaks) == 1
+          and _leaks[0].get("replay_case_key") == H.case_key("zsecret-guard-text-z")
+          and "replay_text" not in _leaks[0], f"-> {_leaks}")
+    _exact_leaks = H.replay_disjointness([known], gold)
+    check("exact leak record carries no ruler text either",
+          len(_exact_leaks) == 1 and known not in json.dumps(_exact_leaks)
+          and _exact_leaks[0].get("replay_case_key") == H.case_key(known),
+          f"-> {_exact_leaks}")
+    _fmt = H.format_leaks(_exact_leaks) + H.format_leaks(_leaks)
+    check("format_leaks prints keys, never the ruler text",
+          known not in _fmt and "zsecret-guard-text-z" not in _fmt
+          and H.case_key(known) in _fmt, f"-> {_fmt}")
 
     if failures:
         print(f"self-test FAILED: {len(failures)} check(s): {failures}",

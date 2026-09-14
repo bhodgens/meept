@@ -483,12 +483,17 @@ PORT_MAP_FILE_READY=0
 #     127.0.0.1: changes BIND semantics, not merely the port;
 #   * an endpoint that cannot be remapped is FATAL. The patterns cover the forms
 #     the daemon itself accepts (spawnCommandBindsPort: `"--port", "8081"`,
-#     `--port=8081`, `ROUTER_PORT=8081`, `--listen-port 8088`) plus every
-#     loopback spelling (`127.0.0.1`, `localhost`, `0.0.0.0`, `[::1]`,
-#     `[::ffff:127.0.0.1]`, `host.docker.internal`) and the host-less `:8086`
-#     bind form. A spawn-bearing provider whose port is a variable
-#     (`--port "${PORT}"`) or is not recognisable at all stops the run (exit 2)
-#     instead of being silently kept pointed at the user's live runtime.
+#     `--port=8081`, `ROUTER_PORT=8081`, `--listen-port 8088`, including the
+#     backslash-escaped `--port \"8081\"` spelling) plus every loopback
+#     spelling (`127.0.0.1`, `localhost`, `0.0.0.0`, `[::1]`,
+#     `[::ffff:127.0.0.1]`, `host.docker.internal`) and the host-less scheme /
+#     addr-key bind forms (`http://:8091/v1`, `"addr": ":8091"`). A
+#     spawn-bearing provider whose port is a variable (`--port "${PORT}"`,
+#     `--port \"${PORT}\"`) and that declares NO literal endpoint at all stops
+#     the run (exit 2) instead of being silently kept pointed at the user's
+#     live runtime. A variable port ALONGSIDE a literal endpoint is not fatal
+#     (the endpoint is pinnable) but is reported on stderr so it is never
+#     silent.
 # Points the scratch daemon at the user's live runtimes share with the old
 # hardcoded sed: neither may come back.
 remap_models_config() {
@@ -519,15 +524,20 @@ def _skip_string(s, i):
 
 
 def blank_comments(s):
-    """Same-length copy of s with every comment byte replaced by a space.
+    """Same-length (in CHARACTERS, not bytes) copy of s with every comment
+    character replaced by a space.
 
-    ALL scanning runs on this copy (offsets are preserved, so a match found here
-    maps 1:1 back onto the original text). A comment is documentation, not
-    config: a `// spawn_command: none` note inside a provider object must not
-    make this remapper believe the provider spawns a runtime — doing so flipped
-    comfyui into the spawn set, remapped its dial-only 8188 to a dead port with
-    no warning at all, and rewrote a port quoted in the comment. Strings are
-    skipped first so a `//` inside a URL stays inside its string.
+    ALL scanning runs on this copy (offsets are preserved, so a match found
+    here maps 1:1 back onto the original text; every consumer indexes a
+    Python ``str``, i.e. character offsets, which is why character length --
+    not byte length -- is the property that matters: a multi-byte character
+    in a comment keeps the string's CHARACTER length, not its byte length).
+    A comment is documentation, not config: a `// spawn_command: none` note
+    inside a provider object must not make this remapper believe the
+    provider spawns a runtime — doing so flipped comfyui into the spawn set,
+    remapped its dial-only 8188 to a dead port with no warning at all, and
+    rewrote a port quoted in the comment. Strings are skipped first so a
+    `//` inside a URL stays inside its string.
     """
     out = list(s)
     i, n = 0, len(s)
@@ -588,7 +598,7 @@ def object_spans(s):
 
 scan = blank_comments(text)
 spans = object_spans(scan)
-prov_key = re.search(r'"providers"\s*:\s*\{', scan)
+prov_key = re.search(r'["\']?providers["\']?\s*:\s*\{', scan)
 provider_members = []
 if prov_key:
     prov_start = prov_key.end() - 1
@@ -612,26 +622,43 @@ HOSTS = (r'\[[0-9A-Fa-f:.]+\]'      # [::1], [::ffff:127.0.0.1]
          r'|localhost'
          r'|127\.0\.0\.1'
          r'|0\.0\.0\.0')
-# `<host>:<port>` plus the host-less `:port` bind form (http://:8091/v1,
-# "addr": ":8091", --addr=:8091). The second/third alternatives are what keep a
-# REMOTE literal such as `https://api.example.com:8443` (colon preceded by a
-# word char) from being remapped as if it were local; the scheme form
-# (`http://:port`) is matched by the single-`/` lookbehind.
+# `<host>:<port>`, plus the two host-LESS endpoint spellings that keep a
+# scheme (`http://:8091/v1`) or an addr/host key (`"addr": ":8091"`,
+# `--addr=:8091`, `"baseURL": ":8091"`) in an explicit endpoint context.
+# A bare `:digits` anywhere else is NOT an endpoint: the old
+# `(?<![\w.\-/])` alternative treated any colon not preceded by a word
+# char/dot/slash as a local bind, so inside a spawning provider it rewrote
+# `"timeout_ms":5000`, `"seed":12345`, `"blank":"foo/:9000"` and the
+# env-shaped `--env "EXPORT=3000"` to freshly probed free ports. The
+# host-qualified alternatives keep a REMOTE literal such as
+# `https://api.example.com:8443` (colon preceded by a word char) untouched.
+ENDPOINTCTX = (r'(?P<addr>["\']?(?:addr|address|bind|host|listen|'
+               r'baseURL|base_url)["\']?\s*[:=]\s*["\']?)')
 LOCALPORT = re.compile(
-    r'(?P<host>' + HOSTS + r'|(?<=/)|(?<![\w.\-/])):(?P<port>\d{1,5})')
+    r'(?:(?P<host>' + HOSTS + r')|(?<=//)|' + ENDPOINTCTX +
+    r'):(?P<port>\d{1,5})')
 
 # A port FLAG in a spawn command: `--port`, `--listen-port`, `--router_port`,
 # or the env-assignment spelling the daemon's own duplicate-spawn pre-check
 # accepts (spawnCommandBindsPort: token == port, or a token ending "=<port>").
-# `["\']?` tolerates the JSON5 string form (`"--port", "8081"`).
+# The env form is anchored to a REAL port variable: exactly `PORT`, or a name
+# ending `_PORT` (`ROUTER_PORT`, `MY_PORT`). A looser `[A-Z][A-Z0-9_]*PORT`
+# matched EXPORT / SUPPORT / TRANSPORT, so `--env "EXPORT=3000"` inside a
+# spawning provider was rewritten to a free port.
+# Q tolerates the JSON5 string form (`"--port", "8081"`) AND its
+# backslash-escaped spelling inside a single quoted string
+# (`--port \"8081\"`): both the literal and the variable form must be
+# recognisable, else `--port \"${PORT}\"` was silently left live with no
+# warning and no fatal.
+Q = r'(?:\\?["\'])?'
 PORTFLAG = (r'(?<![\w.\-])'
-            r'(?:--(?:[A-Za-z0-9_]+[-_])?port|[A-Z][A-Z0-9_]*PORT)'
-            r'["\']?\s*[=,\s]\s*')
+            r'(?:--(?:[A-Za-z0-9_]+[-_])?port|PORT|[A-Z][A-Z0-9_]*_PORT)'
+            + Q + r'\s*[=,\s]\s*')
 # `"--port", 8081` / `"--port", "8081"` / `--port=8081` / `ROUTER_PORT=8081`.
 SPAWNPORT = re.compile(PORTFLAG + r'(?:"(?P<port>\d{1,5})"|(?P<bare>\d{1,5}))')
 # The same flag with a value this script cannot resolve (`--port "${PORT}"`).
 SPAWNVAR = re.compile(
-    PORTFLAG + r'["\']?(?P<val>\$(?:\{[^}"\']*\}|\(|[A-Za-z_][A-Za-z0-9_]*))')
+    PORTFLAG + Q + r'(?P<val>\$(?:\{[^}"\']*\}|\(|[A-Za-z_][A-Za-z0-9_]*))')
 
 
 def plausible_local(p, host):
@@ -696,18 +723,36 @@ if not spawning:
 # inherit the endpoint of (a port the script cannot see, or one behind a
 # variable it cannot resolve) must stop the run instead of being silently kept.
 unresolved = []
+# Not fatal, but never silent: a variable port in a spawning provider that
+# ALSO carries a literal endpoint this script can pin (options.baseURL or a
+# --port flag). Refusing there was over-strict (the endpoint is pinnable),
+# but leaving it unreported was the original hole: `--port \"${PORT}\"`
+# passed with no message at all.
+left_live = []
 for span in spawning:
     name = member_name(span[0])
     block = scan[span[0]:span[1]]
+    ports = block_ports(block)
     m = SPAWNVAR.search(block)
+    if ports:
+        if m:
+            left_live.append("%s: %s" % (name, m.group("val")))
+        continue
     if m:
+        # No literal endpoint anywhere in the block: only the variable port
+        # exists, so the sandbox cannot pin the runtime's endpoint. FATAL.
         unresolved.append("%s: %s is not a literal port this script can remap"
                           % (name, m.group("val")))
         continue
-    if not block_ports(block):
-        unresolved.append(
-            "%s: spawns a runtime but declares no local <host>:<port> the "
-            "sandbox can remap (unknown endpoint)" % name)
+    unresolved.append(
+        "%s: spawns a runtime but declares no local <host>:<port> the "
+        "sandbox can remap (unknown endpoint)" % name)
+if left_live:
+    print("WARNING: variable port(s) left as-is in a spawning provider "
+          "(pinned by a literal endpoint in the same provider):",
+          file=sys.stderr)
+    for lv in left_live:
+        print("  %s" % lv, file=sys.stderr)
 if unresolved:
     print("ERROR: refusing to run — a spawning provider's endpoint cannot be "
           "remapped:", file=sys.stderr)

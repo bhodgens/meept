@@ -794,6 +794,21 @@ classifier-eval-selftest:
 	@echo "Running classifier-eval guard self-test..."
 	python3 tools/classifier-eval/m4_gold_acceptance.py --self-test
 
+# classifier-eval-hardening-test pins the two guards that had NO runner: the
+# e2e sandbox remapper (a python heredoc inside scripts/e2e-naive-user-chat.sh)
+# and the pre-commit-build root-artifact classifier. CI runs
+# `.githooks/pre-commit` on a fresh checkout, where `git diff --cached` is
+# empty, so the hook's classifier never executes there; the remapper has no
+# caller at all outside a live sandbox run. The test EXTRACTS the real code
+# (heredoc and bash functions) and drives it on synthetic inputs, so a revert
+# of the endpoint/variable patterns, the derived-name fingerprint, or the
+# classification rule turns this red. Needs bash + go (the go step asserts the
+# derivation returns real `package main` basenames).
+.PHONY: classifier-eval-hardening-test
+classifier-eval-hardening-test:
+	@echo "Running classifier-eval hardening test (remap + hook classification)..."
+	python3 tools/classifier-eval/test_hardening.py
+
 # =============================================================================
 # Legacy Aliases (for backwards compatibility)
 # =============================================================================

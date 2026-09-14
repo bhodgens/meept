@@ -108,10 +108,21 @@ import numpy as np
 # The shared guard also raises EmptyRulerError / DegenerateVectorError on a
 # broken ruler instead of skipping the check.
 replay_texts, rcases, RV = [], [], None
+# Documented exit code for a ruler that EXISTS but cannot be parsed (zero
+# byte, truncated, non-UTF-8). Same code as m4_gold_acceptance.py; a broken
+# FILE, distinct from an empty ruler. Without this the harvest path died on
+# an uncaught json.JSONDecodeError traceback (exit 1).
+EXIT_UNPARSEABLE = 6
 if REPLAY.exists():
     # committed ruler layout is { cases: [...] } (H.parse_json5, the shared
     # parser -- the old key-order regex is gone). A bare list is tolerated.
-    _parsed = H.parse_json5(REPLAY.read_text())
+    try:
+        _parsed = H.parse_json5(REPLAY.read_text())
+    except (UnicodeDecodeError, OSError, ValueError) as e:
+        print(f"REFUSING: ruler {REPLAY} is not parseable "
+              f"({type(e).__name__}: {e}); fix the ruler file (or remove it) "
+              f"before harvesting.", file=sys.stderr)
+        sys.exit(EXIT_UNPARSEABLE)
     _cases = _parsed.get("cases", []) if isinstance(_parsed, dict) else _parsed
     replay_texts = [r["input"] for r in _cases]
     rcases = [H.Case(t, "replay", "", False, "replay", "", f"replay#{i}")

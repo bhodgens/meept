@@ -102,6 +102,14 @@ jobs:
       - name: Classifier-eval guard self-test
         run: make classifier-eval-selftest
 
+      # The remap + hook-classification guards had no runner either: CI's
+      # pre-commit job runs on a fresh checkout where `git diff --cached` is
+      # empty, so the build hook's root-artifact classifier never executes,
+      # and the e2e sandbox remapper has no caller outside a live run. This
+      # step extracts both from source and drives them on synthetic inputs.
+      - name: Classifier-eval hardening test (remap + hook classification)
+        run: make classifier-eval-hardening-test
+
   analyzers:
     runs-on: ubuntu-latest
     name: Static Analyzers
