@@ -190,6 +190,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func WithFrequencyPenalty\(p float64\) ChatOption](<#WithFrequencyPenalty>)
   - [func WithGrammar\(mode string\) ChatOption](<#WithGrammar>)
   - [func WithMaxTokens\(tokens int\) ChatOption](<#WithMaxTokens>)
+  - [func WithModelOverride\(mc \*ModelConfig\) ChatOption](<#WithModelOverride>)
   - [func WithPresencePenalty\(p float64\) ChatOption](<#WithPresencePenalty>)
   - [func WithPriority\(interactive bool\) ChatOption](<#WithPriority>)
   - [func WithRawGrammar\(grammar string\) ChatOption](<#WithRawGrammar>)
@@ -2615,6 +2616,13 @@ WithGrammar enables GBNF/grammar\-constrained tool calling for this request usin
 	func WithMaxTokens(tokens int) ChatOption
 
 WithMaxTokens sets the max tokens for the chat request.
+
+<a name="WithModelOverride"></a>
+### func WithModelOverride
+
+	func WithModelOverride(mc *ModelConfig) ChatOption
+
+WithModelOverride carries a USER model directive \(model reassignment / PrepareNextTurn ModelOverride\) naming the model that must serve THIS one request. It is the user\-directive twin of WithResolvedModel: precedence is explicit and enforced in requestModelOverride — a user directive beats an alias resolution regardless of option\-append order, because the two travel in separate chatOptions fields and requestModelOverride \(not slice order\) picks the winner. Nil is a no\-op.
 
 <a name="WithPresencePenalty"></a>
 ### func WithPresencePenalty
