@@ -135,13 +135,25 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 
 	// Evaluate this attempt's evidence and checklists exactly once, so the
 	// cap decision below judges the attempt it is about to kill.
+	//
+	// Tool-issued proof OUTRANKS the narration gate (wave-3 regression review
+	// of 9af23f86). "evidence" is the daemon's synthetic job-completion stamp,
+	// whose text is the MODEL'S narration; "tool_evidence" is the proof a tool
+	// actually produced. The previous order tested the narration first and
+	// short-circuited with &&, so a real tool record was never consulted once
+	// the narration failed validateEvidence: "done. task finished
+	// successfully." or "the requested artifact is now present" alongside a
+	// recorded file-exists proof still terminalized the task StateFailed at
+	// the cap. Only the narration heuristic is skipped — the checklist gate
+	// below still applies.
+	toolEvidenceObserved := hasMeaningfulEvidence(resultData.ToolEvidence)
 	evidenceSufficient := true
-	if rl.config.EvidenceRequired && len(resultData.Evidence) == 0 {
+	if !toolEvidenceObserved && rl.config.EvidenceRequired && len(resultData.Evidence) == 0 {
 		rl.logger.Info("Task completed without evidence",
 			"task_id", taskID, "description", t.Description)
 		evidenceSufficient = false
 	}
-	if evidenceSufficient && !rl.validateEvidence(t.Description, resultData.Evidence) {
+	if evidenceSufficient && !toolEvidenceObserved && !rl.validateEvidence(t.Description, resultData.Evidence) {
 		rl.logger.Info("Evidence insufficient",
 			"task_id", taskID, "evidence_count", len(resultData.Evidence))
 		evidenceSufficient = false

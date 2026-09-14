@@ -42,6 +42,16 @@ func TestLeadingRecallClause_Separators(t *testing.T) {
 		{"do a and do b", "do a"},
 		{"do a but not b", "do a"},
 		{"update me: did the file get created?", "update me: did the file get created"}, // ':' is not a boundary (F41); the trailing '?' is
+		// Version/abbreviation periods are points INSIDE a token, not clause
+		// boundaries (wave-3 regression review of 9af23f86): the period
+		// between "1" and "2" used to cut the clause to "run the check on
+		// v1", moving a recall predicate out of the judged clause, and the
+		// sentence period after a version was confused with the version's
+		// own points.
+		{"run the check on v1.2 is the file created?", "run the check on v1.2 is the file created"},
+		{"deploy 1.2. did the change get made?", "deploy 1.2"},
+		{"roll out v2.0.10. was the file created?", "roll out v2.0.10"},
+		{"check e.g. the file, did the change get made?", "check e.g. the file"},
 		{"no boundary in this string", "no boundary in this string"},
 	} {
 		if got := leadingRecallClause(tc.in); got != tc.want {
@@ -90,12 +100,58 @@ func TestLeadingRecallClause_NoByteArithmeticPanic(t *testing.T) {
 	}
 }
 
+// recallArbitrationVerdict drives the REAL classifyIntent chain with a canned
+// verdict for that input and returns whatever the arbitration produced. The
+// arbitration — not the classifier — decides the route.
+func recallArbitrationVerdict(t *testing.T, input, verdict string) *Intent {
+	t.Helper()
+	d := NewDispatcher(DispatcherConfig{
+		Logger:           testLogger(),
+		ClassifierClient: newClassifierJSONServer(t, `{"intent":"`+verdict+`","confidence":0.9}`),
+	})
+	intent, err := d.classifyIntent(context.Background(), input, &MemoryContext{IntentCounts: map[string]int{}})
+	if err != nil {
+		t.Fatalf("classifyIntent(%q): %v", input, err)
+	}
+	if intent == nil {
+		t.Fatalf("classifyIntent(%q) returned nil", input)
+	}
+	return intent
+}
+
+// assertRecallOverride requires the session-aware recall route.
+func assertRecallOverride(t *testing.T, input, verdict string) {
+	t.Helper()
+	intent := recallArbitrationVerdict(t, input, verdict)
+	if intent.Type != string(IntentRecall) || intent.Method != "platform_recall_arbitration" {
+		t.Fatalf("%s verdict on %q: intent = %q (method %q), want recall via platform_recall_arbitration — the recall match was narrowed away and the untrusted verdict survived",
+			verdict, input, intent.Type, intent.Method)
+	}
+}
+
+// assertNotRecall requires the recall match to have been narrowed away.
+func assertNotRecall(t *testing.T, input, verdict string) {
+	t.Helper()
+	intent := recallArbitrationVerdict(t, input, verdict)
+	if intent.Type == string(IntentRecall) || intent.Method == "platform_recall_arbitration" {
+		t.Fatalf("%s verdict on %q: intent = %q (method %q), want the narrowing to keep the recall route off (the imperative work request was swallowed)",
+			verdict, input, intent.Type, intent.Method)
+	}
+}
+
 // TestRecallArbitration_SeparatorBeforeStatusPhraseStillRecalls pins the
 // arbitration reversal. Each of these is a genuine recall/report question whose
 // status phrase sits AFTER a conversational separator. The wave-2 narrowing
 // judged only the leading clause, so the recall match died and the untrusted
 // platform verdict survived. The classifier returns platform for every input,
 // so the arbitration — not the classifier — decides.
+//
+// Wave-3 review of 9af23f86: this pin used to FATAL whenever an input opened
+// with an imperative verb, which excluded exactly the pronoun-lead-in family
+// the narrowing still broke ("update me, did the file get created?") and left
+// the rows it did cover unable to detect that breakage. An imperative head is
+// now admitted when it is a recall lead-in (pronoun object) or when the status
+// question has its own clause; those rows are part of the table.
 func TestRecallArbitration_SeparatorBeforeStatusPhraseStillRecalls(t *testing.T) {
 	for _, input := range []string{
 		"hey, did the change get made?",
@@ -104,32 +160,146 @@ func TestRecallArbitration_SeparatorBeforeStatusPhraseStillRecalls(t *testing.T)
 		"did the build pass, and was the file created?",
 		"check the log at /tmp/x,y.log, did the change get made?",
 		"what files did you make for me? where is the file?",
+		// Pronoun lead-ins: the imperative-looking head IS the recall
+		// request's own lead-in, so narrowing to it deletes the question.
+		"update me, did the file get created?",
+		"please update me, did the file get created?",
+		"run me through it, did the change get made?",
+		"build me a summary, was the file created?",
+		"make me a report, did the change get made?",
+		// Non-pronoun object, but the status question is its own clause.
+		"fix the test, did the file get created?",
+		"set up the report, is the task done?",
 	} {
 		t.Run(input, func(t *testing.T) {
-			// Precondition: the whole input IS a recall question and does NOT
-			// open with an imperative verb, so the whole-input match must stand.
+			// Precondition: the whole input IS a recall question, and nothing
+			// licenses narrowing it away: the head is not an imperative, or
+			// the head is the recall request's own lead-in (pronoun object),
+			// or the status question forms its own clause. A row whose head
+			// is a plain imperative with no status clause of its own would
+			// legitimately narrow.
 			if !isWorkStatusRecall(input) && !isSecondPersonWorkRecall(input) {
 				t.Fatalf("precondition: %q must read as a whole-input recall question", input)
 			}
-			if hasLeadingImperativeVerb(input) {
-				t.Fatalf("precondition: %q must not open with an imperative verb", input)
+			if hasLeadingImperativeVerb(input) && !hasPronounObjectImperativeHead(input) && !hasInterrogativeRecallClause(input) {
+				t.Fatalf("precondition: %q opens with an imperative head that is not a recall lead-in and carries no status clause of its own; narrowing would be correct", input)
 			}
+			assertRecallOverride(t, input, "platform")
+		})
+	}
+}
 
-			d := NewDispatcher(DispatcherConfig{
-				Logger:           testLogger(),
-				ClassifierClient: newClassifierJSONServer(t, `{"intent":"platform","confidence":0.9}`),
+// TestRecallArbitration_PronounLeadInKeepsRecall is the item-level pin for the
+// wave-3 recall loss (9af23f86) on BOTH untrusted arms — git, which is the
+// worse one: the imperative salvage covers only platform/schedule, so a
+// surviving git verdict reaches async git dispatch and the committer runs
+// contextless. Each row here opened with an execution verb (update/run/build/
+// make/fix/set) whose object is the recall request's own audience, so the old
+// gate narrowed to "update me" / "fix the test" and the verdict survived. The
+// rows with a non-pronoun object ("fix the test", "set up the report") are
+// kept by the second rule: their status question forms its own clause.
+func TestRecallArbitration_PronounLeadInKeepsRecall(t *testing.T) {
+	for _, input := range []string{
+		"update me, did the file get created?",
+		"please update me, did the file get created?",
+		"run me through it, did the change get made?",
+		"build me a summary, was the file created?",
+		"make me a report, did the change get made?",
+		"fix the test, did the file get created?",
+		"set up the report, is the task done?",
+	} {
+		for _, verdict := range []string{"git", "platform", "schedule"} {
+			t.Run(verdict+"/"+input, func(t *testing.T) {
+				// Preconditions: the whole input is a recall question, and
+				// the narrowing predicate itself must refuse (this is the
+				// unit-level half of the pin — the old gate narrowed on
+				// hasLeadingImperativeVerb alone, which is true here).
+				if !isWorkStatusRecall(input) && !isSecondPersonWorkRecall(input) {
+					t.Fatalf("precondition: %q must read as a whole-input recall question", input)
+				}
+				switch verdict {
+				case "git":
+					if inputContainsGitVerb(input) {
+						t.Fatalf("precondition: %q must carry no git verb, or the git arm never arbitrates", input)
+					}
+				case "schedule":
+					if hasTimeSignal(input) {
+						t.Fatalf("precondition: %q must carry no time signal, or the schedule arm never arbitrates", input)
+					}
+				}
+				if narrowsRecallToLeadingClause(input) {
+					t.Fatalf("narrowsRecallToLeadingClause(%q) = true, want false: this head is a recall lead-in, and narrowing to %q deletes the question",
+						input, leadingRecallClause(input))
+				}
+				assertRecallOverride(t, input, verdict)
 			})
-			intent, err := d.classifyIntent(context.Background(), input, &MemoryContext{IntentCounts: map[string]int{}})
-			if err != nil {
-				t.Fatalf("classifyIntent: %v", err)
+		}
+	}
+}
+
+// TestRecallArbitration_CommonImperativeVerbsAreRecognized pins the second
+// wave-3 defect: the recall narrowing keyed on hasLeadingImperativeVerb's
+// hand-maintained 22-verb list, so any imperative verb the list forgot
+// (check/test/verify/review/look/tell/show/remind/validate/inspect/…) left the
+// narrowing off and the imperative work request stayed swallowed as a
+// work-status question. Recognition is structural now (a closed class of
+// non-imperative openers, so no verb can be missing); this table is the pin
+// that would have caught the old membership test — it fails for every verb
+// missing from such a list.
+func TestRecallArbitration_CommonImperativeVerbsAreRecognized(t *testing.T) {
+	for _, verb := range []string{
+		"check", "test", "verify", "review", "look", "tell", "show", "remind",
+		"validate", "inspect", "implement", "refactor", "audit", "benchmark",
+		"profile", "summarize", "document", "wire", "port", "migrate",
+		"upgrade", "trace", "debug", "lint", "format",
+	} {
+		input := verb + " the endpoint. check that the response is this format"
+		t.Run(verb, func(t *testing.T) {
+			// Precondition: the tail clause alone is what makes the whole
+			// input read as a work-status question.
+			if !isWorkStatusRecall(input) {
+				t.Fatalf("precondition: %q must read as a whole-input work-status question", input)
 			}
-			if intent == nil {
-				t.Fatal("nil intent")
+			if !hasImperativeHead(input) {
+				t.Fatalf("hasImperativeHead(%q) = false; %q is missing from the imperative recognition", input, verb)
 			}
-			if intent.Type != string(IntentRecall) || intent.Method != "platform_recall_arbitration" {
-				t.Fatalf("intent = %q (method %q), want recall via platform_recall_arbitration — a separator before the status phrase killed the recall match and the untrusted platform verdict survived",
-					intent.Type, intent.Method)
+			if !narrowsRecallToLeadingClause(input) {
+				t.Fatalf("narrowsRecallToLeadingClause(%q) = false, want true: this is an imperative work request whose status clause is in the tail", input)
 			}
+			assertNotRecall(t, input, "platform")
+		})
+	}
+}
+
+// TestRecallArbitration_VersionPeriodDoesNotTruncateClause pins item 3 of the
+// wave-3 review: the period separator used to cut INSIDE a version/decimal
+// token, so "run the check on v1.2 is the file created?" was judged as
+// "run the check on v1" — the recall predicate fell outside the narrowed
+// clause and a git verdict survived into the contextless committer. The
+// abbreviation shapes ("e.g.") are the same class of false boundary.
+func TestRecallArbitration_VersionPeriodDoesNotTruncateClause(t *testing.T) {
+	// wantLeading pins the clause cut as well: a version token is never split
+	// at its own decimal point, and an abbreviation's period is not a
+	// boundary either.
+	for _, row := range []struct{ input, wantLeading string }{
+		{"run the check on v1.2 is the file created?", "run the check on v1.2 is the file created"},
+		{"deploy 1.2. did the change get made?", "deploy 1.2"},
+		{"roll out v2.0.10. was the file created?", "roll out v2.0.10"},
+		{"check e.g. the file, did the change get made?", "check e.g. the file"},
+	} {
+		t.Run(row.input, func(t *testing.T) {
+			if !isWorkStatusRecall(row.input) && !isSecondPersonWorkRecall(row.input) {
+				t.Fatalf("precondition: %q must read as a whole-input recall question", row.input)
+			}
+			if got := leadingRecallClause(row.input); got != row.wantLeading {
+				t.Fatalf("leadingRecallClause(%q) = %q, want %q — a version/abbreviation period is not a clause boundary", row.input, got, row.wantLeading)
+			}
+			if inputContainsGitVerb(row.input) {
+				t.Fatalf("precondition: %q must carry no git verb, or the git arm never arbitrates", row.input)
+			}
+			// The git arm is the one that reached the contextless committer.
+			assertRecallOverride(t, row.input, "git")
+			assertRecallOverride(t, row.input, "platform")
 		})
 	}
 }
@@ -139,31 +309,33 @@ func TestRecallArbitration_SeparatorBeforeStatusPhraseStillRecalls(t *testing.T)
 // response is this format" is an imperative work request whose TAIL clause reads
 // as a work-status question. The whole-input match fires, so the input must be
 // narrowed to its leading clause — and that only happens when '.' is a boundary.
+//
+// Wave-3 review of 9af23f86: this pin drove only a PLATFORM verdict, so it
+// stayed green while the git arm of the same gate had the bug, and only
+// platform/schedule were salvaged afterwards. Every verdict arm runs now, so a
+// regression in the git arm cannot hide behind the platform arm.
 func TestRecallArbitration_PeriodSeparatorDoesNotSwallowImperative(t *testing.T) {
 	const input = "implement the endpoint. check that the response is this format"
 
 	// Preconditions: the whole input reads as a work-status question and opens
-	// with an imperative verb; only the leading clause does not.
+	// with an imperative head; only the leading clause does not narrow, and
+	// the input carries no time signal (so the schedule arm also arbitrates).
 	if !isWorkStatusRecall(input) {
 		t.Fatalf("precondition: %q must read as a whole-input work-status question", input)
 	}
 	if !hasLeadingImperativeVerb(input) {
 		t.Fatalf("precondition: %q must open with an imperative verb", input)
 	}
+	if !narrowsRecallToLeadingClause(input) {
+		t.Fatalf("precondition: %q must be narrowed to its leading clause", input)
+	}
+	if hasTimeSignal(input) {
+		t.Fatalf("precondition: %q must carry no schedule time signal", input)
+	}
 
-	d := NewDispatcher(DispatcherConfig{
-		Logger:           testLogger(),
-		ClassifierClient: newClassifierJSONServer(t, `{"intent":"platform","confidence":0.9}`),
-	})
-	intent, err := d.classifyIntent(context.Background(), input, &MemoryContext{IntentCounts: map[string]int{}})
-	if err != nil {
-		t.Fatalf("classifyIntent: %v", err)
-	}
-	if intent == nil {
-		t.Fatal("nil intent")
-	}
-	if intent.Type == string(IntentRecall) || intent.Method == "platform_recall_arbitration" {
-		t.Fatalf("imperative work request swallowed into chat recall: intent=%q method=%q ('.' must be a clause boundary)",
-			intent.Type, intent.Method)
+	for _, verdict := range []string{"platform", "git", "schedule"} {
+		t.Run(verdict, func(t *testing.T) {
+			assertNotRecall(t, input, verdict)
+		})
 	}
 }

@@ -380,6 +380,91 @@ func TestRalphLoop_CapCompletesOnToolEvidence(t *testing.T) {
 	}
 }
 
+// TestRalphLoop_CapPrefersToolEvidenceOverNarration pins the wave-3 defect in
+// the cap gate (9af23f86 review): evidenceSufficient was computed from the
+// synthetic "evidence" stamp — the MODEL'S narration — and tested FIRST with
+// &&, so hasMeaningfulEvidence(resultData.ToolEvidence) was never consulted
+// once validateEvidence rejected the prose. All three narration shapes below
+// accompany a REAL recorded tool proof (the file exists), so the task must
+// complete at the cap no matter what the model wrote about it.
+func TestRalphLoop_CapPrefersToolEvidenceOverNarration(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		narration string
+	}{
+		{"narration names the task terms", "wrote the answer file to disk"},
+		{"narration is generic prose", "done. task finished successfully."},
+		{"narration is unrelated prose", "the requested artifact is now present"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rl, _, taskStore, _ := newRalphCapFixture(t)
+
+			tk := task.NewTask("cap-tool-outranks-narration", "write answer file")
+			if err := taskStore.Create(tk); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			driveToReplanCap(t, rl, tk.ID)
+
+			// Daemon-shaped result: "evidence" holds only the synthetic stamp
+			// carrying the narration; the independently recorded proof sits
+			// under the sibling "tool_evidence" key.
+			result, _ := json.Marshal(map[string]any{
+				"success":  true,
+				"result":   "wrote the answer file",
+				"evidence": []string{syntheticJobEvidence(tc.narration)},
+				"tool_evidence": []models.Evidence{
+					{Type: models.EvidenceFileExists, Subject: "/tmp/answer.txt", Value: "present"},
+				},
+			})
+			isComplete, _, needsReplan := rl.CheckCompletion(context.Background(), tk.ID, result)
+			if !isComplete {
+				t.Fatalf("isComplete = false with narration %q and REAL tool evidence: the narration gate vetoed recorded proof", tc.narration)
+			}
+			if needsReplan {
+				t.Fatal("needsReplan = true, want false (the cap is terminal)")
+			}
+			got, err := taskStore.GetByID(tk.ID)
+			if err != nil || got == nil {
+				t.Fatalf("get task: %v", err)
+			}
+			if got.State.IsTerminal() {
+				t.Fatalf("task state = %q, want non-terminal: recorded tool evidence must clear the cap", got.State)
+			}
+		})
+	}
+}
+
+// TestRalphLoop_CapNarrationAloneStillFails is the negative control for the
+// tool-evidence precedence: the same synthetic narration with NO tool-issued
+// proof still fails at the cap. Preferring tool_evidence must not turn the cap
+// into a no-op.
+func TestRalphLoop_CapNarrationAloneStillFails(t *testing.T) {
+	rl, _, taskStore, _ := newRalphCapFixture(t)
+
+	tk := task.NewTask("cap-narration-no-tool", "write answer file")
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	driveToReplanCap(t, rl, tk.ID)
+
+	result, _ := json.Marshal(map[string]any{
+		"success":  true,
+		"result":   "done",
+		"evidence": []string{syntheticJobEvidence("done. task finished successfully.")},
+	})
+	isComplete, _, needsReplan := rl.CheckCompletion(context.Background(), tk.ID, result)
+	if isComplete || needsReplan {
+		t.Fatalf("CheckCompletion = (%v, %v), want (false, false): narration alone must not clear the cap", isComplete, needsReplan)
+	}
+	got, err := taskStore.GetByID(tk.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.State != task.StateFailed {
+		t.Fatalf("task state = %q, want failed (the cap stays armed without tool evidence)", got.State)
+	}
+}
+
 // TestRalphLoop_IndependentEvidenceHeuristic pins the string-filter rule itself,
 // including the two evasions the earlier version admitted: the prefix match was
 // case-sensitive ("Job 42 …" read as independent) and the marker search used

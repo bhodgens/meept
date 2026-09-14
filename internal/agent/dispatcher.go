@@ -1364,8 +1364,32 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			// let the untrusted platform/git/schedule verdict survive (the
 			// F40/run-10 contextless-committer failure and the run-5 A2
 			// roster failure the guard exists to close).
+			// ...and ONLY then narrow, and only for an input whose head is a
+			// plain execution imperative. Two head shapes must NOT narrow,
+			// because the imperative-looking first token IS the recall
+			// request's own lead-in (wave-3 regression review of 9af23f86):
+			//
+			//  1. an imperative whose OBJECT is a pronoun ("update me, did
+			//     the file get created?", "run me through it, …", "build me a
+			//     summary, …", "please update me, …"). The old gate keyed on
+			//     hasLeadingImperativeVerb alone, and update/run/build/make/
+			//     fix/add/set are simultaneously the natural lead-ins for a
+			//     recall request, so narrowing to "update me" killed the
+			//     recall match and let the untrusted verdict survive. For
+			//     IntentGit that is worse than a misroute: the imperative
+			//     salvage below covers only platform/schedule, so a surviving
+			//     git verdict reaches async git dispatch — the contextless
+			//     committer this guard exists to prevent.
+			//  2. an input with a later clause that is ITSELF a work-status
+			//     question ("fix the test, did the file get created?", "set
+			//     up the report, is the task done?"). The status question
+			//     lives after the boundary, so the leading clause legitimately
+			//     holds no recall predicate; narrowing there deletes the real
+			//     question. The control still narrows because its tail clause
+			//     opens with an instruction, not a status predicate ("implement
+			//     the endpoint. check that the response is this format").
 			recall := isWorkStatusRecall(input) || isSecondPersonWorkRecall(input)
-			if recall && hasLeadingImperativeVerb(input) {
+			if recall && narrowsRecallToLeadingClause(input) {
 				recall = isWorkStatusRecall(leadingRecallClause(input)) ||
 					isSecondPersonWorkRecall(leadingRecallClause(input))
 			}
@@ -2043,14 +2067,36 @@ func (d *Dispatcher) shouldCreateTask(intent *Intent) bool {
 }
 
 // dispatchConsumesTask reports whether the created task will actually be
-// consumed downstream. The only branches that read Result.Task are the
+// consumed downstream, i.e. whether some branch RUNS it. Two do: the
 // async-dispatch branch (handler.go: ShouldDispatchAsync(result) &&
-// result.Task != nil), the collaboration route (startCollaborationSession,
-// which falls back to the conversation ID when Task is nil), and the
-// compound/plan path. A task created for a synchronous intent is never read —
-// the row is orphaned the moment it is written (IntentSchedule:
+// result.Task != nil — the only branch that drives the task to completion) and
+// the collaboration route (startCollaborationSession, which reads
+// result.Task.ID for the collaborative task and falls back to the conversation
+// ID when Task is nil). A task created for a synchronously dispatched intent is
+// never run — the row is orphaned the moment it is written (IntentSchedule:
 // ShouldCreateTask()=true, ShouldDispatchAsync()=false). Gate creation on
 // this, not on shouldCreateTask alone.
+//
+// Result.Task is also READ, without being consumed, on three dispatcher paths:
+// buildContextMessage (called from RouteToAgent at dispatcher.go:2510) names
+// the new task in the context message and excludes it from the digest,
+// recordInteraction stores its id in the interaction metadata, and
+// recordDispatch — the routing record — stores it as task_id. Those reads are
+// why the field stays populated for consumed tasks; they do not make an
+// UNCONSUMED task meaningful, and they are not a reason to widen this
+// predicate. (An earlier revision of this comment named only the handler
+// branches and the compound/plan path, which mis-stated the reader set.)
+//
+// Residual gap against the handler's own ShouldDispatchAsync, documented not
+// redesigned (LOW): this predicate delegates to
+// IntentType.ShouldDispatchAsync(RequiresPlanning), which does NOT model the
+// handler's extra `result.Response != ""` refusal — that early return is what
+// keeps SKILL results inline (the inline branch is tested FIRST at
+// handler.go:728). So an async-true intent that also carries a non-empty
+// Response still writes a task row while the handler answers it inline. The
+// row is not run by the async branch; only a non-empty Response distinguishes
+// it, and threading DispatchResult.Response through this predicate is a wider
+// change than the orphan-task gate needs.
 //
 // No pair/collaborate special case: both intents are in ShouldDispatchAsync's
 // unconditional true case, and IntentPair never reaches task creation anyway
@@ -4127,6 +4173,169 @@ func hasLeadingImperativeVerb(input string) bool {
 	return false
 }
 
+// nonImperativeHeadWords is the CLOSED class of words that can never OPEN an
+// imperative clause: interrogatives, auxiliaries/modals/copulas, subject
+// pronouns and determiners, prepositions/conjunctions, and the polite or
+// filler lead-ins the callers already skip. Closed classes do not grow, which
+// is the point: the alternative — an open list of imperative verbs — is what
+// the wave-3 regression review found broken (see hasImperativeHead).
+var nonImperativeHeadWords = map[string]bool{
+	"what": true, "which": true, "where": true, "when": true, "why": true,
+	"who": true, "whom": true, "whose": true, "how": true, "whether": true,
+	"is": true, "are": true, "was": true, "were": true, "be": true,
+	"been": true, "being": true, "am": true, "do": true, "does": true,
+	"did": true, "have": true, "has": true, "had": true, "will": true,
+	"would": true, "shall": true, "should": true, "can": true, "could": true,
+	"may": true, "might": true, "must": true,
+	"i": true, "we": true, "you": true, "he": true, "she": true, "it": true,
+	"they": true, "them": true, "the": true, "a": true, "an": true,
+	"this": true, "that": true, "these": true, "those": true, "my": true,
+	"our": true, "your": true, "his": true, "her": true, "its": true,
+	"their": true, "there": true, "here": true,
+	"in": true, "on": true, "at": true, "for": true, "to": true, "of": true,
+	"with": true, "by": true, "from": true, "if": true, "because": true,
+	"so": true, "but": true, "and": true, "or": true, "not": true, "no": true,
+	"yes": true, "maybe": true, "perhaps": true, "please": true, "hey": true,
+	"ok": true, "okay": true, "now": true, "first": true, "then": true,
+}
+
+// headTokenRe is the shape of a plausible imperative head token: a plain
+// lowercase word. Numbers, symbols and empty tokens are never imperatives.
+var headTokenRe = regexp.MustCompile(`^[a-z]+$`)
+
+// hasImperativeHead reports whether the input OPENS with an imperative clause
+// — a bare verb followed by its object or argument ("test the endpoint",
+// "check that all tests pass", "implement the endpoint").
+//
+// STRUCTURAL on purpose. The wave-3 fix keyed the recall narrowing on
+// hasLeadingImperativeVerb, whose hand-maintained 22-verb list omits
+// check/test/verify/review/look/tell/show/remind/validate/inspect — so "test
+// the endpoint. check that the response is this format" was not recognized as
+// imperative-headed, the narrowing never ran, and the request stayed swallowed
+// as a work-status question (wave-3 regression review of 9af23f86). A closed
+// class of NON-imperative openers cannot be defeated by any verb the next
+// reviewer forgets to add: everything left over is treated as a verb in head
+// position. The caller still requires an explicit object, so a bare noun or
+// interjection ("hello there" — one clause, no argument) is not an
+// instruction, and the recall question's own lead-ins are handled by
+// hasPronounObjectImperativeHead.
+//
+// Deliberately NOT wired into hasLeadingImperativeVerb's callers: those are
+// pinned on the execution-verb list (platform/action arbitration), and this
+// predicate is the broader question the recall narrowing actually asks.
+func hasImperativeHead(input string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(input))
+	if trimmed == "" {
+		return false
+	}
+	fields := strings.Fields(trimmed)
+	headIdx := -1
+	for i, f := range fields {
+		switch f {
+		case "please", "hey", "ok", "okay", "now", "first", "then", ",":
+			continue
+		}
+		headIdx = i
+		break
+	}
+	if headIdx < 0 {
+		return false
+	}
+	head := strings.Trim(fields[headIdx], ",.!?:;\"'")
+	if head == "" || !headTokenRe.MatchString(head) || nonImperativeHeadWords[head] {
+		return false
+	}
+	// An imperative carries an explicit object/argument; a bare head token
+	// names no work and is not treated as an instruction.
+	return len(fields) > headIdx+1
+}
+
+// recallLeadInPronouns are the objects of an imperative lead-in that is
+// directing the ASSISTANT ("update me", "run me through it", "build me a
+// summary", "make us a report") rather than naming a work artifact.
+var recallLeadInPronouns = map[string]bool{
+	"me": true, "us": true, "it": true, "them": true, "him": true,
+	"her": true, "these": true, "those": true, "everything": true,
+	"anything": true, "myself": true, "ourselves": true,
+}
+
+// hasPronounObjectImperativeHead reports whether the input's head imperative
+// takes a pronoun object ("update me: …", "fix it, …"). Those heads are also
+// the natural lead-ins for a recall request, so narrowing to them deletes the
+// question ("update me, did the file get created?" → "update me") and lets an
+// untrusted verdict through (wave-3 regression review of 9af23f86).
+func hasPronounObjectImperativeHead(input string) bool {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(input)))
+	for i, f := range fields {
+		switch f {
+		case "please", "hey", "ok", "okay", "now", "first", "then", ",":
+			continue
+		}
+		if i+1 >= len(fields) {
+			return false
+		}
+		return recallLeadInPronouns[strings.Trim(fields[i+1], ",.!?:;\"'")]
+	}
+	return false
+}
+
+// recallStatusOpenerRe matches a clause that OPENS with an interrogative
+// status predicate or wh-word — the shape of a standalone work-status
+// question. A clause that merely CONTAINS "is … this" (an instruction like
+// "check that the response is this format") does not open with one.
+var recallStatusOpenerRe = regexp.MustCompile(
+	`(?i)^(?:and |then |but |ok |okay |so |also |please |hey |now )*(?:did|was|were|is|are|has|have|do|does|what|which|where|who|how)\b`)
+
+// hasInterrogativeRecallClause reports whether any clause AFTER the input's
+// first boundary is itself a work-status question. The status phrase then
+// legitimately sits outside the leading clause ("fix the test, did the file
+// get created?", "set up the report, is the task done?"), so narrowing would
+// delete the real question and leave the untrusted verdict standing.
+//
+// Clause boundaries are the same ones leadingRecallClause uses, internal
+// periods included: a version point must not be read as a clause end here
+// either ("deploy 1.2, did the change get made?").
+func hasInterrogativeRecallClause(input string) bool {
+	rest := input
+	offset := 0
+	for {
+		loc := leadingClauseSepRe.FindStringIndex(rest)
+		if loc == nil {
+			return false
+		}
+		idx := offset + loc[0]
+		if input[idx] == '.' && isInternalPeriod(input, idx) {
+			offset = idx + 1
+			rest = input[offset:]
+			continue
+		}
+		offset = idx + 1
+		rest = strings.TrimSpace(input[offset:])
+		if rest == "" {
+			return false
+		}
+		if recallStatusOpenerRe.MatchString(rest) &&
+			(isWorkStatusRecall(rest) || isSecondPersonWorkRecall(rest)) {
+			return true
+		}
+	}
+}
+
+// narrowsRecallToLeadingClause reports whether a whole-input recall match must
+// be re-judged on the leading clause alone. It is the F41 guard's inverse: an
+// imperative head is needed for the narrowing at all (otherwise the whole
+// input's recall match stands), but two head shapes ARE the recall request and
+// must keep the whole-input match (see the call site in classifyIntent).
+func narrowsRecallToLeadingClause(input string) bool {
+	if !hasImperativeHead(input) {
+		return false
+	}
+	if hasPronounObjectImperativeHead(input) {
+		return false
+	}
+	return !hasInterrogativeRecallClause(input)
+}
+
 // isSecondPersonWorkRecall reports whether the input asks what the
 // ASSISTANT did ("what files did you make for me?", "what did you
 // create?"). Used by the platform-vs-recall arbitration (e2e run 5,
@@ -4246,6 +4455,58 @@ func inputContainsGitVerb(input string) bool {
 // indices onto the original.
 var leadingClauseSepRe = regexp.MustCompile(`(?i),|;|\.|\?|!| and | then | but `)
 
+// isInternalPeriod reports whether the period at byte offset i in input is a
+// point INSIDE a token rather than a clause boundary: a version/decimal point
+// ("v1.2", "1.2", "2.0.10") or the period closing an abbreviation ("e.g.",
+// "i.e.", "etc.", "vs.", a single-letter initial). Treating those as
+// boundaries truncated the leading clause mid-token — "run the check on v1.2
+// is the file created?" cut to "run the check on v1" (outcome-changing: the
+// recall predicate fell outside the judged clause) and "deploy 1.2. did the
+// change get made?" cut to "deploy 1" (wave-3 regression review of 9af23f86).
+// The period after the version in that last example IS a boundary (flanked by
+// a digit and a space), so the clause keeps the whole "deploy 1.2".
+func isInternalPeriod(input string, i int) bool {
+	// Digit on both sides: a version/decimal point.
+	if i > 0 && i+1 < len(input) && isASCIIDigit(input[i-1]) && isASCIIDigit(input[i+1]) {
+		return true
+	}
+	// Walk back over the token ending at i (letters and earlier periods, so
+	// the first period of "e.g." sees the "e" of the same token).
+	j := i
+	for j > 0 {
+		c := input[j-1]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' {
+			j--
+			continue
+		}
+		break
+	}
+	token := strings.ToLower(strings.Trim(input[j:i], "."))
+	if token == "" {
+		return false
+	}
+	if abbreviationTokens[token] {
+		return true
+	}
+	// A single-letter token is an initial or abbreviation stem ("e." in
+	// "e.g.", "A. Smith"), never a real clause end.
+	return len([]rune(token)) == 1
+}
+
+func isASCIIDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+// abbreviationTokens is the closed set of abbreviation stems whose trailing
+// period is not a clause boundary.
+var abbreviationTokens = map[string]bool{
+	"e.g": true, "i.e": true, "etc": true, "eg": true, "ie": true,
+	"vs": true, "cf": true, "approx": true, "dept": true, "est": true,
+	"fig": true, "figs": true, "no": true, "vol": true, "sec": true,
+	"dr": true, "mr": true, "mrs": true, "ms": true, "prof": true,
+	"sr": true, "jr": true, "inc": true, "ltd": true, "co": true,
+	"al": true, "min": true, "max": true, "p": true, "pp": true,
+	"ed": true, "eds": true, "st": true,
+}
+
 // leadingRecallClause returns the input up to its first clause boundary. The
 // recall matchers are position-independent — isWorkStatusRecall scans every
 // field for a status predicate plus a nearby work noun — so evaluated against
@@ -4256,11 +4517,25 @@ var leadingClauseSepRe = regexp.MustCompile(`(?i),|;|\.|\?|!| and | then | but `
 // ("update me: did the file get created?" — no clause boundary, so the whole
 // string) and lets a genuine imperative fall through to the imperative
 // override.
+//
+// A period that sits INSIDE a token (version point, abbreviation) is skipped
+// and scanning continues for the next boundary (isInternalPeriod).
 func leadingRecallClause(input string) string {
-	if loc := leadingClauseSepRe.FindStringIndex(input); loc != nil {
-		return input[:loc[0]]
+	rest := input
+	offset := 0
+	for {
+		loc := leadingClauseSepRe.FindStringIndex(rest)
+		if loc == nil {
+			return input
+		}
+		idx := offset + loc[0]
+		if input[idx] == '.' && isInternalPeriod(input, idx) {
+			offset = idx + 1
+			rest = input[offset:]
+			continue
+		}
+		return input[:idx]
 	}
-	return input
 }
 
 // isWorkStatusRecall reports whether the input is a yes/no WORK-STATUS
