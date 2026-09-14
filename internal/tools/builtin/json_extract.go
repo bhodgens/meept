@@ -17,6 +17,12 @@ import (
 
 const toolJSONExtract = "json_extract"
 
+// schemaExample is appended to the schema argument's description. Keeping it
+// as a named constant lets tests and the probe harness assert the exact
+// shipped text (the description wording is measured to matter for small-model
+// argument shaping: see docs/workflows/json_extract.md).
+const schemaExample = `Example: {"type":"object","properties":{"title":{"type":"string"},"year":{"type":"integer"}},"required":["title"]}`
+
 const jsonExtractSystemPrompt = `You are a strict JSON extraction engine. ` +
 	`Extract data from the input text according to the schema given by the user. ` +
 	`Output ONLY one JSON object conforming to the schema. ` +
@@ -88,7 +94,7 @@ func (t *JSONExtractTool) Parameters() llm.FunctionParameters {
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropText: {
 				Type:        schemaTypeString,
-				Description: "Raw text to extract from. Required unless file_path is given.",
+				Description: "The SOURCE TEXT to extract data from (the full raw text). Required unless file_path is given. Never put source text in schema.",
 			},
 			schemaPropFilePath: {
 				Type:        schemaTypeString,
@@ -96,7 +102,7 @@ func (t *JSONExtractTool) Parameters() llm.FunctionParameters {
 			},
 			"schema": {
 				Type:        schemaTypeObject,
-				Description: "JSON schema (type/properties/required) describing the record to extract. Example: {\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"year\":{\"type\":\"integer\"}},\"required\":[\"title\"]}",
+				Description: "The JSON SCHEMA that describes the output record's shape — property names and types ONLY, never any source text or data. Pass the source material in the text parameter instead. " + schemaExample,
 			},
 			"instructions": {
 				Type:        schemaTypeString,

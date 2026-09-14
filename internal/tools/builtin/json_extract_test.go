@@ -56,6 +56,37 @@ func TestJSONExtract_NameAndSchema(t *testing.T) {
 	}
 }
 
+// TestJSONExtract_ArgumentShapingDescriptions guards the measured wording that
+// keeps small local models (LFM2.5-8B-A1B) from folding the source text into
+// the schema argument. Probe measurement (2026-09-14, llama-server Generic
+// envelope, N>=12/variant): baseline description 10/12 correct; the tightened
+// "schema = shape only, source text goes in text" description 31/32 pooled.
+// Renaming text -> source_text (2/12) and typing schema as string (6/12)
+// measurably HURT. If these strings must change, re-run the shaping probe.
+func TestJSONExtract_ArgumentShapingDescriptions(t *testing.T) {
+	params := NewJSONExtractTool(nil, time.Second).Parameters()
+	schemaDesc := params.Properties["schema"].Description
+	if !strings.Contains(schemaDesc, "SCHEMA") ||
+		!strings.Contains(schemaDesc, "never any source text") ||
+		!strings.Contains(schemaDesc, "text parameter") {
+		t.Fatalf("schema description lost the shaping-critical wording: %q", schemaDesc)
+	}
+	if !strings.Contains(schemaDesc, `"type":"object"`) {
+		t.Fatalf("schema description lost its example: %q", schemaDesc)
+	}
+	textDesc := params.Properties[schemaPropText].Description
+	if !strings.Contains(textDesc, "SOURCE TEXT") ||
+		!strings.Contains(textDesc, "Never put source text in schema") {
+		t.Fatalf("text description lost the shaping-critical wording: %q", textDesc)
+	}
+	if params.Properties["schema"].Type != schemaTypeObject {
+		t.Fatalf("schema property must stay type object (string type measured at 6/12): %q", params.Properties["schema"].Type)
+	}
+	if _, ok := params.Properties["source_text"]; ok {
+		t.Fatal("text param must stay named text (source_text rename measured at 2/12)")
+	}
+}
+
 func TestJSONExtract_NotConfigured(t *testing.T) {
 	tool := NewJSONExtractTool(nil, time.Second)
 	_, err := tool.Execute(context.Background(), map[string]any{

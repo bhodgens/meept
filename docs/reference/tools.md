@@ -882,6 +882,16 @@ models.json5 to a provider/model ref)`.
 
 **Notes:**
 - Input larger than 24 KB is truncated before the extraction turn.
+- **Argument-shaping wording matters for small local models.** The `schema`
+  description states it is the output record's SHAPE only ("never any source
+  text or data — pass the source material in the text parameter") and the
+  `text` description says "Never put source text in schema". Measured
+  (2026-09-14, LFM2.5-8B-A1B Q4_K_M behind llama-server, coder-shaped ~19-tool
+  offer, `tool_choice: required`, N≥12 per variant): baseline descriptions
+  produced correctly shaped arguments 10/12; the tightened descriptions
+  31/32 pooled. Renaming `text` to `source_text` (2/12) or declaring `schema`
+  as a string type (6/12) measurably HURT. `TestJSONExtract_ArgumentShapingDescriptions`
+  guards the wording; re-run the shaping probe before changing it.
 - **Path policy** (one rule for both `file_path` and `output_path`):
   - an **absolute** path is an explicit target and is honored anywhere, inside
     or outside the session working directory (e.g. `/tmp/final-e2e/paper.json`);
