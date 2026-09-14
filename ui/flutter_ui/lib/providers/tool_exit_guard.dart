@@ -128,14 +128,35 @@ class ToolExitGuardRegistry {
   /// A panel that goes away (a route change, a window close, a tab switch)
   /// while its own exit request is undecided takes the answer with it: no
   /// other path ever completes that guard's future, so the latch is settled
-  /// here and allowed. Left latched, the never-completing future would be
-  /// shared by every later exit - each one silently unasked, and the panel
-  /// that could have vetoed it already gone. Allowing is the safe answer for
-  /// exactly that reason: the guard that would have refused is no longer the
-  /// panel on screen.
+  /// here. Which answer it settles with is decided by who owns the screen
+  /// now:
+  ///
+  ///   - no guard is registered (the releasing guard was the only one -
+  ///     `_guard` cleared above), so nothing on screen can refuse and the
+  ///     request is settled ALLOWED. The guard that would have refused is no
+  ///     longer the panel on screen.
+  ///   - a superseding guard registered on top while this request was owed.
+  ///     That guard owns the screen now and was never asked, so the request
+  ///     is settled REFUSED. Allowing here released the exit past a panel
+  ///     that was never consulted with its edits still on screen.
+  ///
+  /// CONTRACT (pinned by test/features/home/tool_exit_guard_test.dart): a
+  /// request is answered exactly once, by whichever settles it first. A guard
+  /// that is released while its own request is undecided therefore loses a
+  /// later answer it gives - the released guard's dialog is answered after the
+  /// latch already settled, and that late answer (a cancel included) is
+  /// ignored because the request is closed. This is deliberate: the settling
+  /// answer is final, and [_settleInFlight] is the only place a request ends,
+  /// so the two endings (guard answering, guard going away) cannot both
+  /// complete the same completer.
   void release(ToolExitGuard guard) {
     if (identical(_guard, guard)) _guard = null;
-    if (identical(_inFlightGuard, guard)) _settleInFlight(true);
+    if (identical(_inFlightGuard, guard)) {
+      // `_guard` is null exactly when the releasing guard still owned the
+      // screen; a superseding registration leaves it non-null and refuses.
+      final stillMine = identical(_guard, guard);
+      _settleInFlight(stillMine || _guard == null);
+    }
   }
 
   /// Ask the registered guard whether the open panel may be left, and

@@ -258,6 +258,42 @@ void main() {
     expect(calls.order, ['saveGeometry', 'close']);
   });
 
+  // A superseding panel can register on top while a close is undecided (the
+  // older panel's guard has its dialog up, then a newer panel opens on it).
+  // The older panel then disposes. That must NOT settle the owed decision
+  // "allowed": before the fix the close went straight through - saveGeometry
+  // then close - with the newer panel still mounted and never asked, so a
+  // window close destroyed its unsaved edits with no prompt. Refusing keeps
+  // the window (and the newer panel) alive.
+  testWidgets(
+    'a close with a superseding guard mounted is refused, not waved through',
+    (tester) async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final calls = _WindowCalls();
+      final handler = WindowCloseHandler(container, actions: calls.actions);
+
+      final gate = Completer<bool>();
+      Future<bool> older() => gate.future;
+      final registry = container.read(toolExitGuardProvider);
+      registry.register(older);
+
+      final pending = handler.handleCloseRequest();
+      expect(registry.guard, isNotNull);
+
+      // A newer panel registers on top while the close is undecided, then the
+      // older panel disposes.
+      registry.register(() async => false);
+      registry.release(older);
+      await pending;
+
+      // The close was refused: the window is kept, nothing is destroyed, and
+      // the newer guard is still the one registered.
+      expect(calls.order, ['keepOpen']);
+      expect(registry.guard, isNotNull);
+    },
+  );
+
   // The veto is only as good as the plugin calls it makes: `keepOpen` has to
   // leave the prevent-close latch set and `close` has to clear it before
   // destroying the window. Both go through window_manager's method channel, so

@@ -44,9 +44,11 @@ void exitToolPanel(BuildContext context, WidgetRef ref) {
 /// the first handler that returns `handled`.
 ///
 /// A panel that holds unsaved work passes [exitGuard] so both exit
-/// affordances ask before dropping it. One press runs one request: while a
-/// request is being decided the shell ignores further presses, so the
-/// guard's confirmation cannot be stacked on itself.
+/// affordances ask before dropping it. A second press of the back control or
+/// esc is ignored while the first request is decided, so this shell cannot
+/// stack its own confirmation on itself (see the `_exitPending` scope note:
+/// a menu pick or tab switch bypasses it, and only the dialog's modality
+/// blocks a double ask there).
 class ToolPanelShell extends ConsumerStatefulWidget {
   /// Panel name shown in the header, lowercase.
   final String title;
@@ -97,12 +99,23 @@ class ToolPanelShell extends ConsumerStatefulWidget {
 }
 
 class _ToolPanelShellState extends ConsumerState<ToolPanelShell> {
-  /// Latch for the exit request that is currently in flight.
+  /// Latch for a shell-driven exit request (back control, esc) in flight.
   ///
   /// The guard is asynchronous - it usually opens a confirmation dialog - so
-  /// a second press of the back control or esc before the first answer
-  /// arrives would ask it again and stack a second dialog over the panel.
-  /// While this is set, further exit requests are ignored.
+  /// a second press of THIS shell's back control or esc before the first
+  /// answer arrives would ask the guard again and stack a second dialog over
+  /// the panel. While this is set, further presses of that control are
+  /// ignored.
+  ///
+  /// SCOPE: this latch is per-shell and covers only the shell's own
+  /// affordances; it is NOT the shared request latch. [_requestExit] calls
+  /// the panel guard directly instead of going through
+  /// [ToolExitGuardRegistry.requestExit], so a hamburger-menu pick, a tab
+  /// switch or the registry's own request never sees this flag and can ask
+  /// the same guard while this one is still deciding. That double ask is
+  /// blocked in practice only because the discard dialog is modal - it
+  /// swallows the pointer and key events that would reach another
+  /// affordance - not because of anything this latch does.
   bool _exitPending = false;
 
   @override

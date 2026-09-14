@@ -401,15 +401,149 @@ void main() {
       registry.register(guard);
       final pending = registry.requestExit();
 
+      var decided = false;
+      unawaited(pending.then((_) => decided = true));
+
       // A panel that never owned this request disposes: its release must not
-      // answer a question that is still being asked.
+      // answer a question that is still being asked. The request must still
+      // be UNDECIDED afterwards - a real answer is still owed - so the guard
+      // is asked once and its answer is what settles the request.
       registry.release(() async => true);
       expect(registry.guard, same(guard));
 
-      gate.complete(true);
-      expect(await _answerOrNull(pending), isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        decided,
+        isFalse,
+        reason: 'a foreign release must not settle a request it does not own',
+      );
+
+      // The owed guard answers "no": that refusal is the request's answer,
+      // which a foreign release answering "yes" would have masked.
+      gate.complete(false);
+      expect(await _answerOrNull(pending), isFalse);
       expect(asked, 1);
     });
+
+    // A newer panel can register on top while an older panel's request is
+    // still undecided (the older guard's discard dialog is open, then a
+    // superseding panel opens). The older panel then disposes. The
+    // superseding guard owns the screen now, so the owed request must NOT be
+    // answered "allowed": that released a window close (or a browser pop)
+    // past the guard that would have refused it, with the newer panel still
+    // mounted and never asked. Refusing is the safe answer - the newer guard
+    // is left registered, and a fresh request asks it.
+    test('a release while a newer guard owns the screen refuses, never '
+        'allows', () async {
+      final registry = ToolExitGuardRegistry();
+      final gate = Completer<bool>();
+      Future<bool> older() => gate.future;
+      registry.register(older);
+
+      final pending = registry.requestExit();
+
+      // A superseding panel registers on top while the first request is owed.
+      var newerAsked = 0;
+      registry.register(() async {
+        newerAsked++;
+        return false;
+      });
+
+      // The older panel goes away.
+      registry.release(older);
+
+      expect(
+        await _answerOrNull(pending),
+        isFalse,
+        reason:
+            'a superseding guard owns the screen; the exit must be '
+            'refused, not waved through unasked',
+      );
+
+      // The newer guard still owns the screen, and a fresh request asks it.
+      expect(registry.guard, isNotNull);
+      expect(await _answerOrNull(registry.requestExit()), isFalse);
+      expect(newerAsked, 1);
+    });
+
+    // The contract for a request whose guard goes away with its answer owed
+    // and nothing left on screen: it settles ALLOWED once, and that is the
+    // final answer. An answer arriving from the released guard afterwards
+    // loses. Pinned so the choice is explicit - a late refusal is discarded
+    // by contract (the request is already closed), never silently ignored
+    // while some other behaviour is assumed.
+    test(
+      'a released request settles allowed once; a late refusal loses',
+      () async {
+        final registry = ToolExitGuardRegistry();
+        final gate = Completer<bool>();
+        Future<bool> released() => gate.future;
+        registry.register(released);
+
+        final request = registry.requestExit();
+        registry.release(released);
+        expect(await _answerOrNull(request), isTrue);
+
+        // The dialog the released guard had open is answered later (cancel).
+        gate.complete(false);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          await _answerOrNull(request),
+          isTrue,
+          reason: 'the settled answer is final; the request did not reopen',
+        );
+        expect(registry.guard, isNull);
+      },
+    );
+
+    // A request that has already been settled must not be re-answered by the
+    // released guard's late answer: the latch it would complete now belongs
+    // to a DIFFERENT, newer request. Without the identity check on the
+    // completer, the old refusal settles the new request (a new guard's ask
+    // #2 answered by ask #1's late "false"), so a fresh panel is never asked.
+    test(
+      'a late answer from a released request cannot answer a newer one',
+      () async {
+        final registry = ToolExitGuardRegistry();
+        final firstGate = Completer<bool>();
+        Future<bool> released() => firstGate.future;
+        registry.register(released);
+
+        final first = registry.requestExit();
+        registry.release(released);
+        expect(await _answerOrNull(first), isTrue);
+
+        // A new guard registers and asks while request #1 is closing out.
+        var asked = 0;
+        final secondGate = Completer<bool>();
+        registry.register(() async {
+          asked++;
+          return secondGate.future;
+        });
+        final second = registry.requestExit();
+        expect(asked, 1);
+
+        // Request #1's released guard finally answers (a refusal). It must not
+        // reach request #2, which has its own guard to ask.
+        firstGate.complete(false);
+        var decided = false;
+        unawaited(second.then((_) => decided = true));
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          decided,
+          isFalse,
+          reason: "ask #1's late answer must not settle ask #2",
+        );
+
+        secondGate.complete(true);
+        expect(
+          await _answerOrNull(second),
+          isTrue,
+          reason: "ask #2 carries its own guard's answer",
+        );
+      },
+    );
   });
 
   group('hamburger menu tool switch', () {
