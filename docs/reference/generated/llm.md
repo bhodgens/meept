@@ -194,6 +194,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func WithPriority\(interactive bool\) ChatOption](<#WithPriority>)
   - [func WithRawGrammar\(grammar string\) ChatOption](<#WithRawGrammar>)
   - [func WithReasoning\(rc \*ReasoningConfig\) ChatOption](<#WithReasoning>)
+  - [func WithResolvedModel\(mc \*ModelConfig\) ChatOption](<#WithResolvedModel>)
   - [func WithStopSequences\(seqs \[\]string\) ChatOption](<#WithStopSequences>)
   - [func WithTaskScope\(taskID, sessionID string\) ChatOption](<#WithTaskScope>)
   - [func WithTemperature\(temp float64\) ChatOption](<#WithTemperature>)
@@ -2642,6 +2643,13 @@ WithRawGrammar attaches the caller's GBNF grammar body directly to the request p
 	func WithReasoning(rc *ReasoningConfig) ChatOption
 
 WithReasoning sets the reasoning/thinking effort for the chat request. The config is translated to vendor\-specific wire formats via applyOpenAICompatReasoning \(OpenAI\-compatible path\) or applyAnthropicReasoning \(Anthropic path\).
+
+<a name="WithResolvedModel"></a>
+### func WithResolvedModel
+
+	func WithResolvedModel(mc *ModelConfig) ChatOption
+
+WithResolvedModel carries the model the resolver selected for this ONE request \(alias resolution\) alongside the call, instead of mutating shared client state. ProviderManager uses the provider id to route the attempt to the named provider first \(the rest stay as failover tail\); the serving Client uses the model id for the wire payload and for the metrics.db llm\_calls row, so the ledger records the provider/model that actually served the call. Nil is a no\-op. A selection whose ProviderID names a different provider than the client being invoked is ignored by that client \(it cannot serve another provider's endpoint\); see requestModelOverride.
 
 <a name="WithStopSequences"></a>
 ### func WithStopSequences

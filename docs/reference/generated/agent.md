@@ -451,7 +451,6 @@ Package agent provides the agent loop and related components.
   - [func \(h \*ChatHandler\) LookupLoop\(conversationID string\) \*AgentLoop](<#ChatHandler.LookupLoop>)
   - [func \(h \*ChatHandler\) Name\(\) string](<#ChatHandler.Name>)
   - [func \(h \*ChatHandler\) QuotaResumeWatcher\(\) \*QuotaResumeWatcher](<#ChatHandler.QuotaResumeWatcher>)
-  - [func \(h \*ChatHandler\) SetActiveProjectPathResolver\(fn func\(\) string\)](<#ChatHandler.SetActiveProjectPathResolver>)
   - [func \(h \*ChatHandler\) SetAgentLoopManager\(m \*Manager\)](<#ChatHandler.SetAgentLoopManager>)
   - [func \(h \*ChatHandler\) SetBudget\(budget \*llm.Budget\)](<#ChatHandler.SetBudget>)
   - [func \(h \*ChatHandler\) SetCollaborationEngine\(engine \*CollaborationEngine\)](<#ChatHandler.SetCollaborationEngine>)
@@ -632,6 +631,7 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) RouteToAgent\(ctx context.Context, result \*DispatchResult, conversationID string\) \(string, error\)](<#Dispatcher.RouteToAgent>)
   - [func \(d \*Dispatcher\) SetAgentLoopManager\(m \*Manager\)](<#Dispatcher.SetAgentLoopManager>)
   - [func \(d \*Dispatcher\) SetCapabilityMatcher\(matcher \*CapabilityMatcher\)](<#Dispatcher.SetCapabilityMatcher>)
+  - [func \(d \*Dispatcher\) SetDefaultWorkingDir\(dir string\)](<#Dispatcher.SetDefaultWorkingDir>)
   - [func \(d \*Dispatcher\) SetFenceController\(fc FenceController\)](<#Dispatcher.SetFenceController>)
   - [func \(d \*Dispatcher\) SetInputHasher\(fn func\(message string\) string\)](<#Dispatcher.SetInputHasher>)
   - [func \(d \*Dispatcher\) SetInstructionParser\(parser \*InstructionParser\)](<#Dispatcher.SetInstructionParser>)
@@ -5771,13 +5771,6 @@ Name returns the component name for the registry.
 
 QuotaResumeWatcher exposes the configured watcher so the daemon can Start it on its lifecycle. Returns nil when quota deferral is not wired.
 
-<a name="ChatHandler.SetActiveProjectPathResolver"></a>
-### func \(\*ChatHandler\) SetActiveProjectPathResolver
-
-	func (h *ChatHandler) SetActiveProjectPathResolver(fn func() string)
-
-SetActiveProjectPathResolver wires the turn\-start fallback that returns the local path of the user's active project \("" when none is active\). Nil\-safe; the daemon wires this from ProjectManager.GetActive. Sessions are bound to the ACTIVE project, never to a synthesized default \(AGENTS.md\), so this fallback resolves an existing project or nothing.
-
 <a name="ChatHandler.SetAgentLoopManager"></a>
 ### func \(\*ChatHandler\) SetAgentLoopManager
 
@@ -5804,7 +5797,7 @@ SetCollaborationEngine sets the collaboration engine for starting collaboration 
 
 	func (h *ChatHandler) SetDefaultWorkingDir(dir string)
 
-SetDefaultWorkingDir wires the daemon's configured default working directory. It is the LAST resort, used only for turns whose session and active project both resolve nothing. Empty string \(the default\) leaves such a turn unbound: filesystem tools then return tools.ErrNoWorkingDir instead of silently operating on the daemon's own directory.
+SetDefaultWorkingDir wires the daemon's configured default working directory. It is the LAST resort, used only for turns whose session binds no working directory of its own. Empty string \(the default\) leaves such a turn unbound: filesystem tools then return tools.ErrNoWorkingDir instead of silently operating on the daemon's own directory.
 
 <a name="ChatHandler.SetEffectsResumeHook"></a>
 ### func \(\*ChatHandler\) SetEffectsResumeHook
@@ -7371,6 +7364,13 @@ SetAgentLoopManager wires the per\-session AgentLoop manager so that RouteToAgen
 
 SetCapabilityMatcher sets the capability matcher for fast routing.
 
+<a name="Dispatcher.SetDefaultWorkingDir"></a>
+### func \(\*Dispatcher\) SetDefaultWorkingDir
+
+	func (d *Dispatcher) SetDefaultWorkingDir(dir string)
+
+SetDefaultWorkingDir wires the configured last\-resort working directory \(daemon.default\_working\_dir\). Empty is a no\-op: "no last resort" is the documented default. Nil\-safe.
+
 <a name="Dispatcher.SetFenceController"></a>
 ### func \(\*Dispatcher\) SetFenceController
 
@@ -7418,7 +7418,7 @@ SetPlanManager wires the plan manager after construction. The daemon creates the
 
 	func (d *Dispatcher) SetSessionStore(s SessionStoreReader)
 
-SetSessionStore wires a session store for project\-path lookup in RouteToAgent. Nil is a no\-op.
+SetSessionStore wires a session store for project\-path lookup in SetSessionStore wires the session store used to resolve a dispatched turn's working directory. Nil is a no\-op.
 
 <a name="Dispatcher.SetThreadRouter"></a>
 ### func \(\*Dispatcher\) SetThreadRouter

@@ -1832,15 +1832,23 @@ ContextDiscoveryConfig configures provider context\-length discovery \(DECISIONS
 DaemonConfig holds daemon\-specific settings.
 
 	type DaemonConfig struct {
-	    SocketPath         string               `json:"socket_path"         toml:"socket_path"`
-	    PIDFile            string               `json:"pid_file"             toml:"pid_file"`
-	    LogLevel           string               `json:"log_level"             toml:"log_level"`
-	    DataDir            string               `json:"data_dir"             toml:"data_dir"`
-	    ShutdownTimeout    time.Duration        `json:"shutdown_timeout"     toml:"shutdown_timeout"`
-	    ChatTimeoutSeconds int                  `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
-	    Uploads            UploadsConfig        `json:"uploads"              toml:"uploads"`
-	    UserInstructions   InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
-	    Verification       VerificationDefaults `json:"verification"         toml:"verification"`
+	    SocketPath         string        `json:"socket_path"         toml:"socket_path"`
+	    PIDFile            string        `json:"pid_file"             toml:"pid_file"`
+	    LogLevel           string        `json:"log_level"             toml:"log_level"`
+	    DataDir            string        `json:"data_dir"             toml:"data_dir"`
+	    ShutdownTimeout    time.Duration `json:"shutdown_timeout"     toml:"shutdown_timeout"`
+	    ChatTimeoutSeconds int           `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	    // DefaultWorkingDir is the LAST-RESORT working directory for a chat or
+	    // dispatched turn. It is consulted only after the session chain
+	    // (WorktreePath > ProjectPath > detection-context CWD) and the user's
+	    // ACTIVE project both come up empty, and it is never the daemon's own
+	    // process CWD (AGENTS.md). Empty (the default) means "no last resort":
+	    // such a turn fails actionably with tools.ErrNoWorkingDir instead of
+	    // writing relative paths somewhere unintended.
+	    DefaultWorkingDir string               `json:"default_working_dir"   toml:"default_working_dir"`
+	    Uploads           UploadsConfig        `json:"uploads"              toml:"uploads"`
+	    UserInstructions  InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
+	    Verification      VerificationDefaults `json:"verification"         toml:"verification"`
 	}
 
 <a name="DetectionConfig"></a>
