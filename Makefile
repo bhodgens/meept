@@ -382,6 +382,12 @@ install: deps-llama-check gui-connect-setup build menubar-app build-gui
 # (see scripts/install-sync.py). User-modified files are preserved; new
 # defaults land as <file>.new for manual review. Interactive collisions
 # prompt when run from a tty. `--drift-test` self-verifies the merge matrix.
+# It also reports top-level keys that the shipped models.json5/meept.json5
+# declare but the installed copies lack: those flat files are copied only when
+# absent (`setup`) or overwritten wholesale (`install`), so a key added to the
+# template never propagated on its own. That silence left extract_model and the
+# local-extract provider out of an existing install, so json_extract failed
+# with "extraction model not configured" on a correctly-configured repo.
 # Runs as part of `make install` and standalone.
 sync-config:
 	@python3 scripts/install-sync.py config

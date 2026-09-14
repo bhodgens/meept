@@ -280,12 +280,54 @@ def drift_test(script: Path, repo_config: Path) -> int:
               (home / "agents/alpha/AGENT.md").exists()
               and "left on disk" in r.stdout)
 
+        # key drift: a shipped key absent from the installed file is reported,
+        # and the note reaches the sync output (this is what would have caught
+        # a missing extract_model on an existing install).
+        (repo / "models.json5").write_text('{\n  "model": "a",\n  "newkey": 1\n}\n')
+        (home / "models.json5").write_text('{\n  "model": "a"\n}\n')
+        check("key drift reports the absent shipped key",
+              missing_top_level_keys(repo / "models.json5",
+                                     home / "models.json5") == ["newkey"])
+        check("key drift is empty when nothing is absent",
+              missing_top_level_keys(repo / "models.json5",
+                                     repo / "models.json5") == [])
+        r = run()
+        check("key drift note reaches the sync output",
+              "models.json5: newkey" in r.stdout)
+
     print()
     if failures:
         print(f"DRIFT TEST: {len(failures)} FAILURE(S): {failures}")
         return 1
     print("DRIFT TEST: all cases pass")
     return 0
+
+
+def missing_top_level_keys(template: Path, installed: Path) -> list:
+    """Top-level json5 keys the template declares that the installed file lacks.
+
+    Deliberately a line scan, not a json5 parse: it needs no dependency, and it
+    catches the drift that actually hurts - a NEW shipped key an existing
+    install never received. models.json5 gained extract_model and a whole
+    local-extract provider, and no path propagated them (setup copies only when
+    the file is absent; install overwrites wholesale), so on an install that
+    predated the key json_extract failed with "extraction model not
+    configured" and the tool was dead in production while correct in the repo.
+    """
+    def keys(path: Path) -> list:
+        found = []
+        if not path.is_file():
+            return found
+        for line in path.read_text(errors="replace").splitlines():
+            if not line.startswith('  "') or line.startswith('   '):
+                continue
+            key, _, rest = line[3:].partition('"')
+            if rest.startswith(":"):
+                found.append(key)
+        return found
+
+    have = set(keys(installed))
+    return [k for k in keys(template) if k not in have]
 
 
 def main() -> int:
@@ -331,6 +373,28 @@ def main() -> int:
     save_manifest(target, manifest)
     print(f"target: {target}")
     print_report(report)
+
+    # Flat config files (models.json5, meept.json5) are NOT in ASSET_DIRS: setup
+    # copies one only when it is absent and install overwrites it wholesale, so
+    # a key added to the shipped template never reaches an existing install.
+    # Report that drift here instead of leaving it silent.
+    drift = {}
+    for name in ("models.json5", "meept.json5"):
+        missing = missing_top_level_keys(repo_cfg / name, target / name)
+        if missing:
+            drift[name] = missing
+    if drift:
+        print()
+        print("NOTE: the shipped config declares keys your file does not have.")
+        print("Absent keys normally fall back to their defaults, which is fine for")
+        print("a deliberately minimal file - but a key whose value exists ONLY in")
+        print("the template (extract_model and the local-extract provider were")
+        print("exactly that) silently disables a feature. Review these:")
+        for name, keys in sorted(drift.items()):
+            shown = keys[:8]
+            more = len(keys) - len(shown)
+            tail = f" (+{more} more)" if more > 0 else ""
+            print(f"  {name}: {', '.join(shown)}{tail}")
     return 0
 
 
