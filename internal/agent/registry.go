@@ -343,7 +343,54 @@ func (r *AgentRegistry) GetDispatcher() (*AgentLoop, error) {
 	return r.Get(config.AgentIDDispatcher)
 }
 
-// createLoop creates a new agent loop from a spec.
+// modelRefForAgent picks the model reference for an agent's loop.
+//
+// The spec's explicit model: always wins. Otherwise the agent resolves ITS OWN
+// alias when the config defines one under the agent's id, because the
+// models.json5 aliases (coder, planner, analyst, ...) exist for exactly that.
+// Without the fallback the loop resolved no alias at all and ran every turn on
+// the config's default model - observed 2026-09-13: the coder agent always ran
+// on agnes/agnes-2.5-flash even with local/lfm-8b-q4 first in the coder alias,
+// so the local driver was never exercised through the daemon.
+//
+// An empty return means "no alias": the loop keeps the client it was built
+// with, which is the resolver's default model.
+func modelRefForAgent(spec *AgentSpec, resolver *llm.Resolver) string {
+	if spec == nil {
+		return ""
+	}
+	if spec.Model != "" {
+		return spec.Model
+	}
+	if resolver != nil && spec.ID != "" && resolver.HasAlias(spec.ID) {
+		return spec.ID
+	}
+	return ""
+}
+
+// modelSwitcher is the part of a chat client that alias resolution needs: it
+// can report and retarget the model it will call. *llm.Client implements it;
+// naming it as an interface means a client reached through the Chatter seam
+// (WithLLMChatter accepts any llm.Chatter) can still be retargeted, instead of
+// the resolution being silently dropped because the concrete *llm.Client could
+// not be recovered from the wrapper.
+type modelSwitcher interface {
+	SwitchModel(config *llm.ModelConfig) error
+	Config() *llm.ModelConfig
+}
+
+// modelSwitcherFor returns a retargetable client for the loop: the concrete
+// client when it is known, else the chatter if it implements the switcher.
+func modelSwitcherFor(client *llm.Client, chatter llm.Chatter) (modelSwitcher, bool) {
+	if client != nil {
+		return client, true
+	}
+	if sw, ok := chatter.(modelSwitcher); ok {
+		return sw, true
+	}
+	return nil, false
+}
+
 func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	agentCfg := AgentConfig{
 		MaxIterations:         spec.Constraints.MaxIterations,
@@ -381,9 +428,16 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		opts = append(opts, WithResolver(r.resolver))
 	}
 
-	// Pass the model from the spec (can be alias or direct ref)
-	if spec.Model != "" {
-		opts = append(opts, WithModelRef(spec.Model))
+	// Pass the model from the spec (can be alias or direct ref). An agent with
+	// no explicit model: still resolves ITS OWN alias when models.json5 defines
+	// one under the agent's id - the aliases (coder, planner, analyst, ...)
+	// exist for exactly this, and without the fallback the loop resolved no
+	// alias at all and every turn ran on the config's default model. Observed
+	// 2026-09-13: the coder agent always ran on agnes/agnes-2.5-flash even with
+	// local/lfm-8b-q4 first in the coder alias, so the local driver was never
+	// exercised through the daemon.
+	if modelRef := modelRefForAgent(spec, r.resolver); modelRef != "" {
+		opts = append(opts, WithModelRef(modelRef))
 	}
 
 	if r.bus != nil {

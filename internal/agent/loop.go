@@ -3933,11 +3933,25 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"alias", l.modelRef,
 					"error", err,
 				)
-			} else if llmClientSnap != nil {
+			} else if llmClientSnap == nil {
+				// The resolver decided a model but there is no client to
+				// retarget, so the call silently proceeds on whatever client
+				// the loop already had - the routing decision is recorded and
+				// then discarded. Observed 2026-09-13: the resolver logged
+				// alias=coder -> provider=local while every call still went to
+				// the config's default model (verified by the local
+				// llama-server's unchanged CPU time). Never fail silently here.
+				l.logger.Warn("Alias resolved but the loop has no LLM client to switch",
+					"agent_id", l.agentID,
+					"alias", l.modelRef,
+					"resolved_model", modelConfig.ModelID,
+					"resolved_provider", modelConfig.ProviderID,
+				)
+			} else if sw, ok := modelSwitcherFor(llmClientSnap, l.llm); ok {
 				// Switch the LLM client to the resolved model
 				l.modelMu.Lock()
-				oldModel := llmClientSnap.Config().ModelID
-				if err := llmClientSnap.SwitchModel(modelConfig); err != nil {
+				oldModel := sw.Config().ModelID
+				if err := sw.SwitchModel(modelConfig); err != nil {
 					l.modelMu.Unlock()
 					l.logger.Warn("Failed to switch model",
 						"agent_id", l.agentID,
