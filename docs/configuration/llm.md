@@ -599,6 +599,12 @@ export ZAI_API_KEY="your-api-key"
 export OPENROUTER_API_KEY="your-key"
 ```
 
+When a variable is not set in the daemon's process environment, the daemon
+consults the executable env resolver script at `<meept home>/env` (invoked
+with the variable name, value on stdout, 5s timeout). See
+[docs/configuration/env-script.md](env-script.md) for the full resolution
+chain and how to write pins.
+
 ## Model Resolution Process
 
 1. **Capability matching**: Skills declare required capabilities

@@ -263,8 +263,30 @@ func DeepMerge(dst, src map[string]any) map[string]any {
 	return out
 }
 
+// EnvScriptName is the literal filename of the meept-home env resolver script
+// (see internal/llm/envscript.go). It is defined here too because the config
+// sync exclusion guard needs the same name and internal/config cannot import
+// internal/llm.
+const EnvScriptName = "env"
+
 // applyConfigFile validates and applies a single config file from src → dst atomically.
 func (m *Merger) applyConfigFile(src, dst string, result *MergeResult) error {
+	// NEVER sync the env resolver script. Config sync pulls files from a
+	// remote git repo; a repo could carry a file that lands as <meept
+	// home>/env — the executable script the daemon runs at config-expansion
+	// time with attacker-chosen contents. Syncing it would be remote code
+	// execution at daemon boot, so a file named `env` destined for the meept
+	// home root is refused unconditionally, regardless of extension or
+	// permissions. (The merger only walks .json5/.toml today, but the guard
+	// is name-based so it holds even if the walked set grows.)
+	if filepath.Base(dst) == EnvScriptName && filepath.Dir(dst) == m.baseDir {
+		result.FilesSkipped = append(result.FilesSkipped, EnvScriptName)
+		m.logger.Warn("config sync: REFUSING to sync the env resolver script; "+
+			"this file is user-owned local code executed at daemon boot",
+			"file", EnvScriptName)
+		return nil
+	}
+
 	// Read source
 	data, err := os.ReadFile(src)
 	if err != nil {

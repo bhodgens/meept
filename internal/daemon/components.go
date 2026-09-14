@@ -553,6 +553,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
+	// Install the env-script resolver for config expansion (see
+	// internal/llm/envscript.go): process env first, then the executable
+	// `env` script in the meept home. Must happen BEFORE the first
+	// LoadProvidersConfig so expansion at boot consults the script. The
+	// script is never synced (config-sync refuses it — remote code execution
+	// at boot).
+	llm.SetEnvScriptResolver(llm.NewEnvScriptResolver())
+
 	// Load models configuration - fail explicitly if not found
 	var configPath string
 	var err error

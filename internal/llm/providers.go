@@ -450,6 +450,13 @@ func mergeProviderConfig(base, overlay ProviderConfig) ProviderConfig {
 // Uses a regex rather than os.ExpandEnv because configs use both $VAR and
 // ${VAR} syntax (os.ExpandEnv only supports the former) and because it skips
 // known placeholder variables that are expanded later (e.g. MODEL_PATH).
+//
+// Each reference resolves through the shared env-script resolver (see
+// envscript.go): process environment first, then the executable `env` script
+// in the meept home, then empty (diagnostics name the variable, never the
+// value). expandEnvScriptResolver is nil until SetEnvScriptResolver is called
+// — tests and callers that have not opted in keep the pure-os.LookupEnv
+// behavior exactly.
 func expandEnvVars(s string) string {
 	// Placeholder variables that should NOT be expanded here
 	// They are expanded later by ValidateAndNormalize in runtime_config.go.
@@ -474,11 +481,34 @@ func expandEnvVars(s string) string {
 			return match
 		}
 
+		if expandEnvScriptResolver != nil {
+			val, _ := expandEnvScriptResolver.Resolve(varName)
+			return val
+		}
 		if val, ok := os.LookupEnv(varName); ok {
 			return val
 		}
 		return ""
 	})
+}
+
+// expandEnvScriptResolver is the process-wide env-script resolver used by
+// config expansion. Set it once at daemon boot via SetEnvScriptResolver;
+// when nil, expansion consults only the process environment (the pre-existing
+// behavior, and what unit tests exercise by default).
+var expandEnvScriptResolver *envScriptResolver
+
+// SetEnvScriptResolver installs the daemon-wide env-script resolver for
+// config expansion. The daemon calls this once at startup; a nil resolver
+// (the default) keeps expansion env-only.
+func SetEnvScriptResolver(r *envScriptResolver) {
+	expandEnvScriptResolver = r
+}
+
+// NewEnvScriptResolver builds the env-script resolver for the meept home.
+// Exposed for daemon boot wiring and tests.
+func NewEnvScriptResolver() *envScriptResolver {
+	return newEnvScriptResolver()
 }
 
 // ResolveModelRef resolves a "provider/model-id" reference to a ModelConfig.

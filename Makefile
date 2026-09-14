@@ -195,6 +195,12 @@ CONFIG_FILES := \
 	$(MEEPT_HOME)/q_agent.json5 \
 	$(MEEPT_HOME)/menubar.json5
 
+# The env resolver script (config/env -> $(MEEPT_HOME)/env) is NOT in
+# CONFIG_FILES: it is an EXECUTABLE (the daemon runs it at config-expansion
+# time; see internal/llm/envscript.go), and it is NEVER synced by
+# install-sync/config-sync — a synced script would be remote code execution
+# at daemon boot. config-bootstrap copies it if absent, mode 0700, and never
+# overwrites a user-modified one.
 setup:
 	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
 	@if [ ! -f $(MEEPT_HOME)/meept.json5 ] && [ ! -f $(MEEPT_HOME)/meept.toml ]; then \
@@ -222,6 +228,17 @@ config-bootstrap:
 			echo "  skipping $$f (already exists)"; \
 		fi; \
 	done
+	@if [ ! -f $(MEEPT_HOME)/env ]; then \
+		if [ -f config/env ]; then \
+			cp config/env $(MEEPT_HOME)/env; \
+			chmod 700 $(MEEPT_HOME)/env; \
+			echo "  created $(MEEPT_HOME)/env (mode 0700)"; \
+		else \
+			echo "  template config/env not found (skipping $(MEEPT_HOME)/env)"; \
+		fi; \
+	else \
+		echo "  skipping $(MEEPT_HOME)/env (already exists; never overwritten)"; \
+	fi
 
 # dev-key: provision the per-installation API key the daemon accepts
 # ($MEEPT_HOME/dev_key, 0600). Idempotent; `build-gui` embeds this key in the

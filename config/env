@@ -1,0 +1,60 @@
+#!/bin/sh
+# meept env resolver script.
+#
+# The daemon invokes this script with ONE argument: the name of a variable its
+# configuration references (e.g. GALA_API_KEY). Print the value on stdout and
+# exit 0; exit nonzero when you cannot provide it. It runs at config-expansion
+# time only for variables the process environment does not already have, with
+# a 5 second timeout per invocation. Values are never logged by the daemon.
+#
+# This file is USER-OWNED and NEVER synced by config sync or install-sync:
+# a remotely-pushed script executed at boot would be remote code execution.
+
+# ---------------------------------------------------------------------------
+# 1. Explicit pins (take precedence over everything below). Edit freely:
+# ---------------------------------------------------------------------------
+# case "$1" in
+#   GALA_API_KEY) echo "paste-your-key-here"; exit 0 ;;
+# esac
+
+# ---------------------------------------------------------------------------
+# 2. Fall through: ask the user's shell profiles where the key actually lives.
+#    zsh profiles are zsh-syntax; they must be sourced BY zsh, not by sh.
+# ---------------------------------------------------------------------------
+case "$1" in
+  ""|*[!A-Za-z0-9_]*) exit 1 ;;  # refuse anything that is not a plain name
+esac
+
+zprofile="$HOME/.zprofile"
+bash_profile="$HOME/.bash_profile"
+
+# zsh: source the profiles inside a zsh child, then print the variable.
+# zsh profiles are zsh-syntax; they must be sourced BY zsh, never by sh.
+if command -v zsh >/dev/null 2>&1; then
+  val=$(zsh -dfc '
+    [ -f "$HOME/.zprofile" ] && . "$HOME/.zprofile"
+    [ -f "$HOME/.zshrc" ] && . "$HOME/.zshrc"
+    eval "print -r -- \$$1"
+  ' sh "$1" 2>/dev/null) && [ -n "$val" ] && { printf '%s\n' "$val"; exit 0; }
+fi
+
+# bash: source the profiles inside a bash child, then print the variable.
+if command -v bash >/dev/null 2>&1; then
+  val=$(bash -c '
+    [ -f "$HOME/.bash_profile" ] && . "$HOME/.bash_profile"
+    [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
+    eval "printf '\''%s'\'' \"\$$1\""
+  ' sh "$1" 2>/dev/null) && [ -n "$val" ] && { printf '%s\n' "$val"; exit 0; }
+fi
+
+# POSIX sh fallback: sh-source profile fragments that are themselves
+# POSIX-compatible (dot-zprofile usually is; dot-zshrc is NOT and is skipped
+# here on purpose — the zsh branch above already covered it).
+for f in "$zprofile" "$bash_profile"; do
+  [ -f "$f" ] || continue
+  . "$f"
+done
+eval "val=\$$1"
+[ -n "$val" ] && { printf '%s\n' "$val"; exit 0; }
+
+exit 1

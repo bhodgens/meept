@@ -374,6 +374,29 @@ def main() -> int:
     print(f"target: {target}")
     print_report(report)
 
+    # Env-script guard: <meept home>/env is the user-owned executable the
+    # daemon runs at config-expansion time (internal/llm/envscript.go). It is
+    # NEVER shipped or synced — a repo-supplied script would execute at every
+    # daemon boot (remote code execution). This tool does not touch it, but if
+    # an executable `env` appears in the target home root we warn loudly so a
+    # bad sync source or manual mistake is visible, and if the permissions are
+    # wider than 0700 we say so (the file holds secrets-adjacent logic).
+    env_script = target / "env"
+    if env_script.is_file():
+        if not os.access(env_script, os.X_OK):
+            print()
+            print("WARNING: %s/env exists but is not executable; the daemon" % target)
+            print("ignores it (it must be an executable script, mode 0700).")
+        else:
+            mode = env_script.stat().st_mode & 0o777
+            if mode & 0o077:
+                print()
+                print("WARNING: %s/env is executable but mode %o, not 0700." % (target, mode))
+                print("Tighten it:  chmod 700 %s" % env_script)
+            print("NOTE: %s/env is user-owned local code executed at daemon" % target)
+            print("boot. This tool never ships or syncs it; verify you created")
+            print("it yourself and no sync source wrote it.")
+
     # Flat config files (models.json5, meept.json5) are NOT in ASSET_DIRS: setup
     # copies one only when it is absent and install overwrites it wholesale, so
     # a key added to the shipped template never reaches an existing install.

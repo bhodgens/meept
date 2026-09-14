@@ -109,6 +109,16 @@ Supported file extensions: `.json5`, `.toml`.
 
 Files in `config/nodes/<node_id>/` are **deep-merged** on top of the corresponding file in `~/.meept/`. This lets you override individual nested fields without republishing the entire config.
 
+### Excluded: the env resolver script (`env`)
+
+A file named `env` in the meept home root is the user's executable env
+resolver script (see [env-script.md](env-script.md)) — the daemon runs it at
+config-expansion time. Config sync **refuses to sync it**: a synced script
+would let anyone who can push to the config repository execute code on every
+node at daemon boot (remote code execution). Attempts are logged as a loud
+warning and the file is recorded in `files_skipped`. Edit the script locally,
+by hand.
+
 ## Deep-Merge Semantics
 
 Deep-merge applies to `.json5` files only. TOML files use wholesale replacement.
