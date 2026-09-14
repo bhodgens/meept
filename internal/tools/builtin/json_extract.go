@@ -77,7 +77,9 @@ func (t *JSONExtractTool) Category() string { return "data" }
 func (t *JSONExtractTool) Description() string {
 	return "Extract structured JSON from text using the local extraction model. " +
 		"Pass the source text (or a file path) plus the JSON schema of the record to extract. " +
-		"Returns the parsed JSON object. Use for research notes, transcripts, and scraped pages that need consistent machine-readable records."
+		"Returns the parsed JSON object. Use for research notes, transcripts, and scraped pages that need consistent machine-readable records. " +
+		"Paths: a relative file_path/output_path resolves against the session working dir and must stay inside it (so \"../..\" is refused); " +
+		"an absolute path is an explicit target and is honored anywhere, so pass /tmp/e2e/paper.json (not ~/paper.json) when the file must land outside the working dir."
 }
 
 func (t *JSONExtractTool) Parameters() llm.FunctionParameters {
@@ -90,7 +92,7 @@ func (t *JSONExtractTool) Parameters() llm.FunctionParameters {
 			},
 			schemaPropFilePath: {
 				Type:        schemaTypeString,
-				Description: "Read text from this file instead of the text parameter. Relative paths resolve against the session working dir.",
+				Description: "Read text from this file instead of the text parameter. Relative paths resolve against the session working dir and may not escape it (\"../..\" is refused). An absolute path is an explicit target and is read as given, inside or outside the working dir; \"~\" is refused - pass the absolute path.",
 			},
 			"schema": {
 				Type:        schemaTypeObject,
@@ -102,7 +104,7 @@ func (t *JSONExtractTool) Parameters() llm.FunctionParameters {
 			},
 			schemaPropOutputPath: {
 				Type:        schemaTypeString,
-				Description: "Optional file to write the extracted JSON to. Relative paths resolve against the session working dir.",
+				Description: "Optional file to write the extracted JSON to. Relative paths resolve against the session working dir and may not escape it (\"../..\" is refused). An absolute path is an explicit target and is written as given, inside or outside the working dir (e.g. /tmp/out/paper.json); \"~\" is refused - pass the absolute path.",
 			},
 		},
 		Required: []string{"schema"},
@@ -226,12 +228,68 @@ func (t *JSONExtractTool) buildUserTurn(schema map[string]any, args map[string]a
 	return b.String()
 }
 
+// resolveExtractPath is THE path policy for json_extract's file_path (read)
+// and output_path (write) arguments. ArgName is the argument being resolved
+// (schemaPropFilePath / schemaPropOutputPath) and is named in every refusal
+// so the model knows which argument it must change.
+//
+// POLICY (2026-09-13) - keyed on EXPLICITNESS, not on location:
+//
+//  1. ABSOLUTE path: honored, inside or outside the session working dir.
+//     The caller wrote the exact file, so the target is an intended one;
+//     containment adds no protection against a stated intent - it only
+//     pushed the caller to a different mechanism (live 2026-09-13: an
+//     agent told to write /tmp/final-e2e/paper.json was refused, then
+//     produced the artifact with a shell copy). Sibling tools agree:
+//     file_read/file_write resolve absolute paths and leave enforcement
+//     to the optional security-engine fenceChecker, with no hard
+//     working-dir fence at all.
+//  2. RELATIVE path: resolved against the session working dir and fenced
+//     to it - "../../etc/passwd" traversal is still refused. A relative
+//     path is the ambiguous case (the caller believes it is writing
+//     "inside the workspace"), so that is where the fence earns its keep.
+//  3. "~": refused. Tilde is home-dir shorthand, not an explicit absolute
+//     path: it resolves against a root the caller never named (and it is
+//     the classic accidental-escape into dotfiles). The refusal prints
+//     the expanded candidate so the model can simply re-issue it.
+//  4. No session working dir: relative paths are refused (there is no
+//     root to resolve against); absolute paths still work, since they
+//     need no root. Never fall back to the process cwd (AGENTS.md).
+//
+// There is no bypass flag and no "allow anything" mode: every path is
+// classified by this function before it reaches the filesystem.
+func resolveExtractPath(ctx context.Context, rawPath, argName string) (string, error) {
+	if strings.HasPrefix(rawPath, "~") {
+		if home, herr := os.UserHomeDir(); herr == nil {
+			expanded := filepath.Join(home, rawPath[1:])
+			return "", fmt.Errorf("json_extract: %s %q rejected: \"~\" resolves against the user home dir, not the session working dir; pass the absolute path explicitly instead (for example %q)", argName, rawPath, expanded)
+		}
+		return "", fmt.Errorf("json_extract: %s %q rejected: \"~\" resolves against the user home dir, not the session working dir; pass the absolute path explicitly instead", argName, rawPath)
+	}
+	explicitAbs := filepath.IsAbs(rawPath)
+	wd := tools.WorkingDirFromContext(ctx)
+	if !explicitAbs && wd == "" {
+		return "", fmt.Errorf("json_extract: %s %q rejected: no session working dir to resolve a relative path against; pass an absolute path explicitly (or pass the text directly)", argName, rawPath)
+	}
+	p, err := resolveToolPath(ctx, rawPath)
+	if err != nil {
+		return "", fmt.Errorf("json_extract: %s %q: %w", argName, rawPath, err)
+	}
+	if explicitAbs {
+		// Explicit target: honored as written (cleaned), no fence.
+		return p, nil
+	}
+	if err := containPath(p, wd); err != nil {
+		return "", fmt.Errorf("json_extract: %s %q rejected: relative paths resolve against the session working dir %q and may not escape it (resolved %q); pass the absolute path explicitly if you mean a file outside it", argName, rawPath, wd, p)
+	}
+	return p, nil
+}
+
 // resolveText returns the input text: the text argument, or the contents of
-// file_path resolved against the session working dir (no os.Getwd anywhere:
-// the daemon carries the working dir through the context, AGENTS.md).
-// SECURITY (H11-read): the file_path must resolve INSIDE the session
-// working dir — absolute paths outside it (and "~" expansion, which points
-// at the home dir, not the workspace) are rejected instead of read.
+// file_path. Relative file_path resolves inside the session working dir; an
+// explicit absolute file_path is honored anywhere (resolveExtractPath -
+// reads and writes share one policy). No os.Getwd anywhere: the daemon
+// carries the working dir through the context (AGENTS.md).
 func (t *JSONExtractTool) resolveText(ctx context.Context, args map[string]any) (string, error) {
 	if text := stringArg(args, schemaPropText); text != "" {
 		return text, nil
@@ -240,16 +298,9 @@ func (t *JSONExtractTool) resolveText(ctx context.Context, args map[string]any) 
 	if rawPath == "" {
 		return "", nil
 	}
-	wd := tools.WorkingDirFromContext(ctx)
-	if wd == "" {
-		return "", fmt.Errorf("json_extract: file_path %q rejected: no session working dir; pass text directly", rawPath)
-	}
-	p, err := resolveToolPath(ctx, rawPath)
+	p, err := resolveExtractPath(ctx, rawPath, schemaPropFilePath)
 	if err != nil {
-		return "", fmt.Errorf("json_extract: %w", err)
-	}
-	if err := containPath(p, wd); err != nil {
-		return "", fmt.Errorf("json_extract: file_path %q rejected: %w (file reads are confined to the session working dir)", rawPath, err)
+		return "", err
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -258,22 +309,13 @@ func (t *JSONExtractTool) resolveText(ctx context.Context, args map[string]any) 
 	return string(data), nil
 }
 
-// writeOutput writes the JSON document, resolving relative paths against the
-// session working dir with the same rules as resolveText.
-// SECURITY (H11-write): output_path is fenced to the session working dir;
-// escapes (e.g. "../../x.json" or absolute paths outside the workspace)
-// are rejected before MkdirAll touches the filesystem.
+// writeOutput writes the JSON document through the same path policy as
+// resolveText (resolveExtractPath): relative output_path stays fenced to the
+// session working dir, an explicit absolute output_path is honored.
 func (t *JSONExtractTool) writeOutput(ctx context.Context, rawPath, doc string) (string, error) {
-	wd := tools.WorkingDirFromContext(ctx)
-	if wd == "" {
-		return "", fmt.Errorf("json_extract: output_path %q rejected: no session working dir", rawPath)
-	}
-	p, err := resolveToolPath(ctx, rawPath)
+	p, err := resolveExtractPath(ctx, rawPath, schemaPropOutputPath)
 	if err != nil {
-		return "", fmt.Errorf("json_extract: %w", err)
-	}
-	if err := containPath(p, wd); err != nil {
-		return "", fmt.Errorf("json_extract: output_path %q rejected: %w (writes are confined to the session working dir)", rawPath, err)
+		return "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", fmt.Errorf("json_extract: create output dir: %w", err)

@@ -395,15 +395,94 @@ func TestJSONExtract_SetChatterNilSafe(t *testing.T) {
 	}
 }
 
-// --- H11 fence tests (write + read confined to the session working dir) ---
+// --- Path policy tests (explicit absolute honored; relative stays fenced) ---
+//
+// POLICY (2026-09-13): an ABSOLUTE file_path/output_path is an explicit
+// target and is honored anywhere; a RELATIVE path resolves against the
+// session working dir and may not escape it (traversal or symlink); "~" is
+// refused (home shorthand, not an explicit path). See resolveExtractPath.
 
-func TestJSONExtract_OutputPathEscapeDenied(t *testing.T) {
-	dir := t.TempDir()
-	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
-	fake := &fakeChatter{content: `{}`}
+// TestJSONExtract_ExplicitAbsoluteOutputPathHonored is the live 2026-09-13
+// case: "Use the json_extract tool to extract the paper metadata and write
+// it to /tmp/final-e2e/paper.json" was refused by the containment check, so
+// the model produced the artifact with a shell copy instead. It now works.
+func TestJSONExtract_ExplicitAbsoluteOutputPathHonored(t *testing.T) {
+	wd := t.TempDir()
+	outside := t.TempDir() // the target lives OUTSIDE the session working dir
+	target := filepath.Join(outside, "final-e2e", "paper.json")
+	ctx := tools.ContextWithWorkingDir(context.Background(), wd)
+	fake := &fakeChatter{content: `{"title":"Attention Is All You Need","year":2017}`}
 	tool := NewJSONExtractTool(fake, time.Second)
 
-	for _, raw := range []string{"../../x.json", "/tmp/meept-escape/x.json", "~/outside.json"} {
+	res, err := tool.Execute(ctx, map[string]any{
+		"schema":             testExtractSchema,
+		schemaPropText:       "Attention Is All You Need (2017).",
+		schemaPropOutputPath: target,
+	})
+	if err != nil {
+		t.Fatalf("explicit absolute output_path %q rejected: %v", target, err)
+	}
+	m := res.(*tools.ToolResult).Result.(map[string]any)
+	if got := m["path"]; got != target {
+		t.Errorf("result path = %v, want %q", got, target)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("absolute output_path did not write the file: %v", err)
+	}
+	if !strings.Contains(string(data), `"title": "Attention Is All You Need"`) {
+		t.Errorf("written content = %q", string(data))
+	}
+	// A missing parent dir outside the wd is created (MkdirAll), and the
+	// write happens even with no session working dir at all.
+	res, err = tool.Execute(context.Background(), map[string]any{
+		"schema":             testExtractSchema,
+		schemaPropText:       "text",
+		schemaPropOutputPath: target,
+	})
+	if err != nil {
+		t.Fatalf("absolute output_path with no working dir rejected: %v", err)
+	}
+	if got := res.(*tools.ToolResult).Result.(map[string]any)["path"]; got != target {
+		t.Errorf("no-wd absolute path = %v, want %q", got, target)
+	}
+}
+
+// TestJSONExtract_ExplicitAbsoluteFilePathReadHonored: the same class of
+// refusal hit file_path reads outside the working dir; they are honored now.
+func TestJSONExtract_ExplicitAbsoluteFilePathReadHonored(t *testing.T) {
+	wd := t.TempDir()
+	outside := t.TempDir()
+	src := filepath.Join(outside, "paper.txt")
+	if err := os.WriteFile(src, []byte("absolute read content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeChatter{content: `{"title":"A"}`}
+	tool := NewJSONExtractTool(fake, time.Second)
+	for _, ctx := range []context.Context{
+		tools.ContextWithWorkingDir(context.Background(), wd),
+		context.Background(), // no working dir: absolute needs no root
+	} {
+		if _, err := tool.Execute(ctx, map[string]any{
+			"schema":           map[string]any{"type": "object"},
+			schemaPropFilePath: src,
+		}); err != nil {
+			t.Fatalf("explicit absolute file_path %q rejected: %v", src, err)
+		}
+	}
+	if !strings.Contains(fake.gotMsgs[1].Content, "absolute read content") {
+		t.Errorf("absolute file content missing from prompt: %q", fake.gotMsgs[1].Content)
+	}
+}
+
+// TestJSONExtract_RelativeTraversalStillDenied: the fence that must survive.
+func TestJSONExtract_RelativeTraversalStillDenied(t *testing.T) {
+	wd := t.TempDir()
+	ctx := tools.ContextWithWorkingDir(context.Background(), wd)
+	tool := NewJSONExtractTool(&fakeChatter{content: `{}`}, time.Second)
+
+	// Write escapes.
+	for _, raw := range []string{"../../x.json", "../../etc/x.json", ".."} {
 		_, err := tool.Execute(ctx, map[string]any{
 			"schema":             map[string]any{"type": "object"},
 			schemaPropText:       "text",
@@ -413,82 +492,163 @@ func TestJSONExtract_OutputPathEscapeDenied(t *testing.T) {
 			t.Errorf("output_path %q: expected rejection, got nil error", raw)
 			continue
 		}
-		if !strings.Contains(err.Error(), "outside the allowed directories") {
+		msg := err.Error()
+		if !strings.Contains(msg, "may not escape it") {
 			t.Errorf("output_path %q: error = %v, want containment message", raw, err)
+		}
+		// The refusal must tell the model what to do instead.
+		if !strings.Contains(msg, "pass the absolute path explicitly") {
+			t.Errorf("output_path %q: refusal is not actionable: %v", raw, err)
+		}
+		if !strings.Contains(msg, wd) {
+			t.Errorf("output_path %q: refusal omits the working dir root: %v", raw, err)
+		}
+	}
+	// Read escapes.
+	for _, raw := range []string{"../../etc/passwd", "../../x.txt"} {
+		_, err := tool.Execute(ctx, map[string]any{
+			"schema":           map[string]any{"type": "object"},
+			schemaPropFilePath: raw,
+		})
+		if err == nil {
+			t.Errorf("file_path %q: expected rejection, got nil error", raw)
+			continue
+		}
+		if !strings.Contains(err.Error(), "may not escape it") ||
+			!strings.Contains(err.Error(), "pass the absolute path explicitly") {
+			t.Errorf("file_path %q: error = %v, want actionable containment message", raw, err)
 		}
 	}
 	// Nothing was written outside the workspace.
-	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "x.json")); err == nil {
-		t.Error("escape wrote a file outside the working dir")
+	if _, err := os.Stat(filepath.Join(filepath.Dir(wd), "x.json")); err == nil {
+		t.Error("relative escape wrote a file outside the working dir")
 	}
 }
 
-func TestJSONExtract_FilePathOutsideWorkdirDenied(t *testing.T) {
-	dir := t.TempDir()
-	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
-	fake := &fakeChatter{content: `{}`}
-	tool := NewJSONExtractTool(fake, time.Second)
-
-	cases := []struct{ label, path string }{
-		{"absolute /etc/passwd", "/etc/passwd"},
-		{"tilde home file", "~/.ssh/id_rsa"},
-		{"relative escape", "../../etc/passwd"},
+// TestJSONExtract_RelativeSymlinkEscapeStillDenied: a relative path that
+// resolves through a symlink out of the wd is still refused - the fence is
+// not hollowed out by the explicit-absolute rule.
+func TestJSONExtract_RelativeSymlinkEscapeStillDenied(t *testing.T) {
+	wd := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(wd, "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
 	}
-	for _, tc := range cases {
-		_, err := tool.Execute(ctx, map[string]any{
-			"schema":           map[string]any{"type": "object"},
-			schemaPropFilePath: tc.path,
-		})
-		if err == nil {
-			t.Errorf("%s: expected rejection, got nil error", tc.label)
-			continue
-		}
-		if !strings.Contains(err.Error(), "outside the allowed directories") {
-			t.Errorf("%s: error = %v, want containment message", tc.label, err)
-		}
+	ctx := tools.ContextWithWorkingDir(context.Background(), wd)
+	tool := NewJSONExtractTool(&fakeChatter{content: `{}`}, time.Second)
+	_, err := tool.Execute(ctx, map[string]any{
+		"schema":             map[string]any{"type": "object"},
+		schemaPropText:       "text",
+		schemaPropOutputPath: "link/escaped.json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "may not escape it") {
+		t.Errorf("relative symlink escape: error = %v, want containment message", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "escaped.json")); statErr == nil {
+		t.Error("relative symlink escape wrote through the link")
 	}
 }
 
-func TestJSONExtract_NoWorkdir_RejectsPaths(t *testing.T) {
+// TestJSONExtract_TildePathDenied: "~" is not an explicit absolute path.
+func TestJSONExtract_TildePathDenied(t *testing.T) {
+	wd := t.TempDir()
+	ctx := tools.ContextWithWorkingDir(context.Background(), wd)
+	tool := NewJSONExtractTool(&fakeChatter{content: `{}`}, time.Second)
+	_, err := tool.Execute(ctx, map[string]any{
+		"schema":             map[string]any{"type": "object"},
+		schemaPropText:       "text",
+		schemaPropOutputPath: "~/outside.json",
+	})
+	if err == nil {
+		t.Fatal("tilde output_path accepted")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "resolves against the user home dir") {
+		t.Errorf("tilde refusal unclear: %v", err)
+	}
+	// The refusal must hand the model the expanded absolute path to re-issue.
+	if !strings.Contains(msg, "pass the absolute path explicitly") {
+		t.Errorf("tilde refusal not actionable: %v", err)
+	}
+	if home, herr := os.UserHomeDir(); herr == nil && !strings.Contains(msg, filepath.Join(home, "outside.json")) {
+		t.Errorf("tilde refusal omits the expanded candidate: %v", err)
+	}
+	// Same for reads.
+	if _, err := tool.Execute(ctx, map[string]any{
+		"schema":           map[string]any{"type": "object"},
+		schemaPropFilePath: "~/.ssh/id_rsa",
+	}); err == nil || !strings.Contains(err.Error(), "user home dir") {
+		t.Errorf("tilde file_path: error = %v, want home-dir refusal", err)
+	}
+}
+
+// TestJSONExtract_NoWorkdir_RejectsRelativePaths: a relative path with no
+// session working dir has no root to resolve against - refused, never
+// resolved against the daemon's own cwd (AGENTS.md).
+func TestJSONExtract_NoWorkdir_RejectsRelativePaths(t *testing.T) {
 	fake := &fakeChatter{content: `{}`}
 	tool := NewJSONExtractTool(fake, time.Second)
-	// No working dir in ctx: file reads and writes with paths are
-	// rejected instead of silently resolving against the process cwd.
 	if _, err := tool.Execute(context.Background(), map[string]any{
 		"schema":           map[string]any{"type": "object"},
 		schemaPropFilePath: "notes.txt",
 	}); err == nil || !strings.Contains(err.Error(), "no session working dir") {
 		t.Errorf("file_path without wd: error = %v, want no-session-working-dir message", err)
 	}
-	if _, err := tool.Execute(context.Background(), map[string]any{
+	_, err := tool.Execute(context.Background(), map[string]any{
 		"schema":             map[string]any{"type": "object"},
 		schemaPropText:       "text",
 		schemaPropOutputPath: "out.json",
-	}); err == nil || !strings.Contains(err.Error(), "no session working dir") {
+	})
+	if err == nil || !strings.Contains(err.Error(), "no session working dir") {
 		t.Errorf("output_path without wd: error = %v, want no-session-working-dir message", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "pass an absolute path") {
+		t.Errorf("no-wd refusal not actionable: %v", err)
 	}
 }
 
-func TestJSONExtract_FilePathInsideWorkdirAllowed(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("fenced read"), 0o644); err != nil {
+// TestJSONExtract_RelativePathInsideWorkdirAllowed: the ordinary case the
+// fence exists to protect - a relative path under the working dir, including
+// one whose ".." segments stay inside it.
+func TestJSONExtract_RelativePathInsideWorkdirAllowed(t *testing.T) {
+	wd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wd, "notes.txt"), []byte("fenced read"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ctx := tools.ContextWithWorkingDir(context.Background(), dir)
-	fake := &fakeChatter{content: `{}`}
+	ctx := tools.ContextWithWorkingDir(context.Background(), wd)
+	fake := &fakeChatter{content: `{"title":"R"}`}
 	tool := NewJSONExtractTool(fake, time.Second)
-	// Absolute path inside wd AND relative path both work.
-	if _, err := tool.Execute(ctx, map[string]any{
-		"schema":           map[string]any{"type": "object"},
-		schemaPropFilePath: filepath.Join(dir, "notes.txt"),
-	}); err != nil {
-		t.Errorf("absolute inside-wd read rejected: %v", err)
+
+	// Read: relative, and absolute-inside-wd, both work.
+	for _, raw := range []string{"notes.txt", "./notes.txt", filepath.Join(wd, "notes.txt")} {
+		if _, err := tool.Execute(ctx, map[string]any{
+			"schema":           map[string]any{"type": "object"},
+			schemaPropFilePath: raw,
+		}); err != nil {
+			t.Errorf("file_path %q rejected: %v", raw, err)
+		}
 	}
-	if _, err := tool.Execute(ctx, map[string]any{
-		"schema":           map[string]any{"type": "object"},
-		schemaPropFilePath: "notes.txt",
-	}); err != nil {
-		t.Errorf("relative read rejected: %v", err)
+	// Write: relative, nested, and ".."-inside-wd resolve under the wd.
+	for _, tc := range []struct{ raw, want string }{
+		{"data/out.json", filepath.Join(wd, "data", "out.json")},
+		{"nested/../inside.json", filepath.Join(wd, "inside.json")},
+		{"./dot.json", filepath.Join(wd, "dot.json")},
+	} {
+		res, err := tool.Execute(ctx, map[string]any{
+			"schema":             testExtractSchema,
+			schemaPropText:       "text",
+			schemaPropOutputPath: tc.raw,
+		})
+		if err != nil {
+			t.Errorf("output_path %q rejected: %v", tc.raw, err)
+			continue
+		}
+		if got := res.(*tools.ToolResult).Result.(map[string]any)["path"]; got != tc.want {
+			t.Errorf("output_path %q -> %v, want %q", tc.raw, got, tc.want)
+		}
+		if _, err := os.Stat(tc.want); err != nil {
+			t.Errorf("output_path %q not written to %s: %v", tc.raw, tc.want, err)
+		}
 	}
 }
 
@@ -575,7 +735,9 @@ func TestTruncateUTF8_TrimsToRuneBoundary(t *testing.T) {
 		t.Errorf("ascii cut = %q, want abc", got)
 	}
 	// Multibyte at every boundary stays valid.
-	long := strings.Repeat("日", 100) // 3 bytes each
+	// U+65E5 written as an escape so this source file stays ASCII; the
+	// runtime string is still 3 bytes per rune, which is the point.
+	long := strings.Repeat("\u65e5", 100) // 3 bytes each
 	for i := 0; i <= len(long); i++ {
 		if got := truncateUTF8(long, i); !utf8.ValidString(got) {
 			t.Fatalf("truncateUTF8(multibyte, %d) produced invalid UTF-8: %q", i, got)
@@ -587,7 +749,7 @@ func TestJSONExtract_LongInputTruncatedOnRuneBoundary(t *testing.T) {
 	fake := &fakeChatter{content: `{}`}
 	tool := NewJSONExtractTool(fake, time.Second)
 	// Pad ASCII then put a 3-byte char so the cut lands mid-rune.
-	big := strings.Repeat("a", maxExtractInputBytes-1) + "日本語テキスト"
+	big := strings.Repeat("a", maxExtractInputBytes-1) + "\u65e5\u672c\u8a9e\u30c6\u30ad\u30b9\u30c8"
 	if _, err := tool.Execute(context.Background(), map[string]any{
 		"schema":       map[string]any{"type": "object"},
 		schemaPropText: big,

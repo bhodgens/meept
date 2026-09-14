@@ -882,8 +882,18 @@ models.json5 to a provider/model ref)`.
 
 **Notes:**
 - Input larger than 24 KB is truncated before the extraction turn.
-- Relative `file_path` / `output_path` resolve against the session working
-  directory (never the daemon CWD).
+- **Path policy** (one rule for both `file_path` and `output_path`):
+  - an **absolute** path is an explicit target and is honored anywhere, inside
+    or outside the session working directory (e.g. `/tmp/final-e2e/paper.json`);
+  - a **relative** path resolves against the session working directory and may
+    not escape it — `../..` traversal and a relative path through a symlink
+    that leaves the directory are refused;
+  - `~` is refused (it resolves against the user home dir, not the session
+    working directory); pass the absolute path instead.
+  - With no session working directory, relative paths are refused (there is no
+    root to resolve against — never the daemon CWD); absolute paths still work.
+  A refusal names the argument and tells the model what to do instead
+  (`pass the absolute path explicitly`). There is no bypass or allow-all flag.
 - Results carry the source-text external taint label.
 - Requires the model file on disk; the `local-extract` provider in the
   bundled models.json5 documents the expected path.
