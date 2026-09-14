@@ -39,11 +39,30 @@ the single outgoing call (`internal/agent/loop.go` `chatWithFailoverRaw`,
   provider stays in the list as the failover tail, so a disabled, unhealthy, or
   erroring preferred provider still rotates. Turns that resolve no alias are
   byte-identical to before (no reorder).
-- **Wire + ledger** — the serving `Client` uses the resolved model id in the
+- **Wire + ledger** — the serving client uses the resolved model id in the
   request payload and in the `metrics.db` `llm_calls` row
   (`provider`/`model_id`), so the ledger records the provider/model that
   actually served the call, not the caller's configured default. A selection
   naming a provider other than the served client's is ignored by that client.
+  All three transports honour the selection: the OpenAI-compatible `Client`
+  (buildChatRequest/withRequestModelOverride), `AnthropicClient`
+  (buildRequest + anthropicRequestURL + recordUsageStore take the effective
+  config), and `CodexClient` (buildPayload + doRequest + recordUsageStore).
+- **Precedence: user directive > alias resolution > default ordering.** A
+  user's model-reassignment directive rides a separate request-scoped
+  channel, `llm.WithModelOverride` (fields `overrideProviderID`/
+  `overrideModelID` next to the alias fields on `chatOptions`). The ranked
+  merge lives in ONE place, `requestModelOverride`: a user directive wins
+  whenever it is set — including the `chatWithFailoverRaw` hazard where the
+  alias option (`WithResolvedModel`) is appended AFTER the caller's options;
+  the channels are separate fields, so append order can never demote the
+  user's choice. With a `ProviderManager` chatter (no single client to
+  switch), `reasoningCycle` resolves the directive and stages it in
+  `AgentLoop.pendingModelOverrideConfig`; `chatWithFailoverRaw` stamps it via
+  `WithModelOverride` and the manager routes the call to the directed
+  provider first. One-shot directives are cleared after the turn that
+  consumed them; persistent directives (shadow hot-swap) remain until
+  explicitly cleared.
 - **Why not a manager-level `SwitchModel`** — `ProviderManager` is shared by
   every session. A `SwitchModel` (or any manager-level "current model") would
   make one turn's alias choice visible to concurrent turns in other sessions;

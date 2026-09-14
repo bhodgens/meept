@@ -795,6 +795,16 @@ type AgentLoop struct {
 	// explicitly called (e.g. daemon shutdown, adapter rollback).
 	modelOverridePersistent bool
 
+	// pendingModelOverrideConfig caches the *ModelConfig a user-directive
+	// override resolved to THIS cycle (reasoningCycle). The dispatcher's
+	// user directive must outrank the alias resolution stamped later in
+	// chatWithFailoverRaw (option-append order would otherwise let the
+	// alias option win) — so instead of mutating a client, the resolved
+	// config is carried per-request via llm.WithModelOverride. One-shot
+	// for non-persistent overrides: consumed and cleared after the first
+	// LLM call of the cycle. Guarded by l.mu (same mutex as modelOverride).
+	pendingModelOverrideConfig *llm.ModelConfig
+
 	// pendingHookMessages holds ExtraMessages returned by PrepareNextTurn
 	// hooks (applyTurnModification). One-shot: prepended to the next LLM
 	// call's messages in reasoningCycle, then cleared. Guarded by l.mu —
@@ -3973,23 +3983,53 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Apply model override from user's reassignment directive (if set).
 		// This takes precedence over alias resolution when a user explicitly
 		// requests a specific model for this task/step.
-		if override := l.GetModelOverride(); override != "" && l.resolver != nil && llmClientSnap != nil {
+		//
+		// PRECEDENCE CONTRACT (explicit, tested): user directive > alias
+		// resolution > default ordering. The override works with ANY
+		// chatter:
+		//   - concrete *llm.Client (or any modelSwitcher): retargeted via
+		//     SwitchModel exactly as before, AND the resolved config is
+		//     staged so the request ALSO carries llm.WithModelOverride —
+		//     belt and suspenders, harmless when they agree.
+		//   - ProviderManager (llmClientSnap == nil, the daemon wiring):
+		//     the config is staged and carried per-request via
+		//     llm.WithModelOverride in chatWithFailoverRaw. Pre-fix this
+		//     branch was silently SKIPPED here and the one-shot override
+		//     never cleared, so a user naming a model was ignored and the
+		//     directive could fire on a LATER turn.
+		// Because the directive rides in its own chatOptions channel
+		// (WithModelOverride) that requestModelOverride ranks ABOVE the
+		// alias channel (WithResolvedModel), the alias option appended
+		// later by chatWithFailoverRaw can never demote the user's choice.
+		if override := l.GetModelOverride(); override != "" && l.resolver != nil {
 			if modelConfig := l.resolver.ResolveRef(override); modelConfig != nil {
-				l.modelMu.Lock()
-				oldModel := llmClientSnap.Config().ModelID
-				err := llmClientSnap.SwitchModel(modelConfig)
-				l.modelMu.Unlock()
-				if err == nil {
-					l.logger.Info("Applied model override from user directive",
-						"agent_id", l.agentID,
-						"from_model", oldModel,
-						"to_model", modelConfig.ModelID,
-						"override_ref", override,
-					)
+				l.mu.Lock()
+				l.pendingModelOverrideConfig = modelConfig
+				l.mu.Unlock()
+				if sw, ok := modelSwitcherFor(llmClientSnap, l.llm); ok {
+					l.modelMu.Lock()
+					oldModel := sw.Config().ModelID
+					err := sw.SwitchModel(modelConfig)
+					l.modelMu.Unlock()
+					if err == nil {
+						l.logger.Info("Applied model override from user directive",
+							"agent_id", l.agentID,
+							"from_model", oldModel,
+							"to_model", modelConfig.ModelID,
+							"override_ref", override,
+						)
+					} else {
+						l.logger.Warn("Failed to apply model override, using current model",
+							"override_ref", override,
+							"error", err,
+						)
+					}
 				} else {
-					l.logger.Warn("Failed to apply model override, using current model",
+					l.logger.Info("User model override staged for request-scoped delivery",
+						"agent_id", l.agentID,
 						"override_ref", override,
-						"error", err,
+						"override_provider", modelConfig.ProviderID,
+						"override_model", modelConfig.ModelID,
 					)
 				}
 			} else {
@@ -5416,11 +5456,42 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		// chatter with no single config to switch (ProviderManager), so the
 		// call silently went to the manager's default model. A fresh slice per
 		// attempt keeps the rotation loop from aliasing earlier attempts.
+		//
+		// PRECEDENCE: the USER directive (staged by reasoningCycle into
+		// pendingModelOverrideConfig) is stamped FIRST, and the alias
+		// selection (WithResolvedModel) is appended after. Order in the
+		// slice does NOT decide the winner — the two travel in separate
+		// chatOptions channels and llm.requestModelOverride ranks the
+		// user-directive channel above the alias channel explicitly. The
+		// append order only documents intent; the decider is the Resolver
+		// + the ranked merge in requestModelOverride.
+		userOverrideSnap := func() *llm.ModelConfig {
+			l.mu.RLock()
+			defer l.mu.RUnlock()
+			return l.pendingModelOverrideConfig
+		}()
+		overrideCount := 0
+		if userOverrideSnap != nil {
+			overrideCount = 1
+		}
 		attemptOpts := opts
-		if servedModel != nil {
-			attemptOpts = make([]llm.ChatOption, 0, len(opts)+1)
+		if servedModel != nil || userOverrideSnap != nil {
+			attemptOpts = make([]llm.ChatOption, 0, len(opts)+overrideCount+1)
 			attemptOpts = append(attemptOpts, opts...)
-			attemptOpts = append(attemptOpts, llm.WithResolvedModel(servedModel))
+			if userOverrideSnap != nil {
+				attemptOpts = append(attemptOpts, llm.WithModelOverride(userOverrideSnap))
+			}
+			if servedModel != nil {
+				attemptOpts = append(attemptOpts, llm.WithResolvedModel(servedModel))
+			}
+		}
+		// One-shot user override: consumed by this cycle's FIRST LLM call.
+		// Persistent overrides keep the staged config until explicitly
+		// cleared, mirroring the modelOverride lifecycle.
+		if userOverrideSnap != nil && !l.IsModelOverridePersistent() {
+			l.mu.Lock()
+			l.pendingModelOverrideConfig = nil
+			l.mu.Unlock()
 		}
 
 		// Make the LLM call — streaming if onDelta is set and supported

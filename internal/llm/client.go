@@ -968,7 +968,7 @@ type chatOptions struct {
 	// opting in (ModelConfig.ToolChoice) and on tools being present; see
 	// resolveToolChoice.
 	toolChoice string
-	// resolvedProviderID/resolvedModelID carry the model the resolver
+	// resolvedProviderID/resolvedModelID carry the model the RESOLVER
 	// selected for THIS single request (alias resolution), set with
 	// WithResolvedModel. Empty means no per-request selection: the serving
 	// client's own config decides, exactly as before. These are per-request
@@ -976,6 +976,19 @@ type chatOptions struct {
 	// manager's shared configuration.
 	resolvedProviderID string
 	resolvedModelID    string
+	// overrideProviderID/overrideModelID carry a USER directive (model
+	// reassignment) naming the model that must serve THIS request, set with
+	// WithModelOverride. PRECEDENCE (explicit, enforced in
+	// requestModelOverride): user directive > alias resolution
+	// (resolvedProviderID/resolvedModelID) > the client's configured
+	// default. The fields are SEPARATE from the alias fields precisely so
+	// option-append order can never demote a user directive: a caller's
+	// WithModelOverride and a later WithResolvedModel write different
+	// fields, and requestModelOverride — not slice order — picks the
+	// winner. Same per-request, never-shared-state contract as the alias
+	// channel.
+	overrideProviderID string
+	overrideModelID    string
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -1067,33 +1080,88 @@ func WithResolvedModel(mc *ModelConfig) ChatOption {
 	}
 }
 
+// WithModelOverride carries a USER model directive (model reassignment /
+// PrepareNextTurn ModelOverride) naming the model that must serve THIS one
+// request. It is the user-directive twin of WithResolvedModel: precedence is
+// explicit and enforced in requestModelOverride — a user directive beats an
+// alias resolution regardless of option-append order, because the two travel
+// in separate chatOptions fields and requestModelOverride (not slice order)
+// picks the winner. Nil is a no-op.
+func WithModelOverride(mc *ModelConfig) ChatOption {
+	return func(o *chatOptions) {
+		if mc == nil {
+			return
+		}
+		o.overrideProviderID = mc.ProviderID
+		o.overrideModelID = mc.ModelID
+	}
+}
+
 // requestModelOverride reports the provider/model this request must be served
-// by when a resolver-provided selection (WithResolvedModel) applies to cfg.
+// by, resolving the explicit precedence chain:
+//
+//	USER directive (WithModelOverride)  >  alias resolution (WithResolvedModel)  >  the client's configured default.
+//
+// The user-directive channel wins whenever it is set, even when the alias
+// channel is also set — including the chatWithFailoverRaw hazard where the
+// alias option is APPENDED AFTER the caller's options: the channels are
+// separate fields, so append order cannot demote the user's choice.
+//
 // A selection that names a provider different from the client's own is NOT
 // applied: the client cannot reach another provider's endpoint, and silently
 // sending a foreign model id there would mis-attribute the call. An empty
-// resolved provider id inherits the client's provider.
-func (o *chatOptions) requestModelOverride(cfg *ModelConfig) (providerID, modelID string, ok bool) {
-	if o == nil || o.resolvedModelID == "" {
-		return "", "", false
+// selection provider id inherits the client's provider. The returned string
+// names the precedence lane that won ("user-directive", "alias", or "") for
+// observability and testing.
+func (o *chatOptions) requestModelOverride(cfg *ModelConfig) (providerID, modelID, lane string, ok bool) {
+	if o == nil {
+		return "", "", "", false
+	}
+	// Lane 1: explicit user directive. Always beats the alias channel.
+	if o.overrideModelID != "" {
+		if o.overrideProviderID != "" && cfg != nil && cfg.ProviderID != "" &&
+			o.overrideProviderID != cfg.ProviderID {
+			// The directive names a provider this client cannot reach.
+			// FALL THROUGH to the alias lane (and then the default): the
+			// directive is unfulfillable HERE, but this same request may
+			// be routed to the directed provider by the ProviderManager
+			// (which consults requestResolvedProviderID first) and then
+			// the directive applies on that client. Ignoring it entirely
+			// would lose the user's choice; mis-applying it to this
+			// provider would hit the wrong endpoint.
+			if o.resolvedModelID == "" {
+				return "", "", "", false
+			}
+		} else {
+			providerID := o.overrideProviderID
+			if providerID == "" && cfg != nil {
+				providerID = cfg.ProviderID
+			}
+			return providerID, o.overrideModelID, "user-directive", true
+		}
+	}
+	// Lane 2: alias resolution (WithResolvedModel).
+	if o.resolvedModelID == "" {
+		return "", "", "", false
 	}
 	if o.resolvedProviderID != "" && cfg != nil && cfg.ProviderID != "" &&
 		o.resolvedProviderID != cfg.ProviderID {
-		return "", "", false
+		return "", "", "", false
 	}
 	providerID = o.resolvedProviderID
 	if providerID == "" && cfg != nil {
 		providerID = cfg.ProviderID
 	}
-	return providerID, o.resolvedModelID, true
+	return providerID, o.resolvedModelID, "alias", true
 }
 
 // withRequestModelOverride returns cfg with ProviderID/ModelID replaced by
-// the request-scoped resolver selection when one applies. It returns a COPY:
-// the client's stored config is never mutated (the selection is per-turn
-// state, and the client may be shared by concurrent sessions).
+// the request-scoped selection when one applies (precedence: user directive
+// > alias resolution > the client's default, see requestModelOverride). It
+// returns a COPY: the client's stored config is never mutated (the selection
+// is per-turn state, and the client may be shared by concurrent sessions).
 func withRequestModelOverride(cfg *ModelConfig, o *chatOptions) *ModelConfig {
-	providerID, modelID, ok := o.requestModelOverride(cfg)
+	providerID, modelID, _, ok := o.requestModelOverride(cfg)
 	if !ok || cfg == nil {
 		return cfg
 	}

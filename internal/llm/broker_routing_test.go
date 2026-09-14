@@ -117,7 +117,7 @@ func TestAnthropicRequestURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := NewAnthropicClient(tt.cfg)
-			got := c.anthropicRequestURL(tt.streaming)
+			got := c.anthropicRequestURL(tt.cfg, tt.streaming)
 			if got != tt.want {
 				t.Errorf("anthropicRequestURL(streaming=%v) = %q, want %q", tt.streaming, got, tt.want)
 			}

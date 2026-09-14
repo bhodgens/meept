@@ -246,12 +246,15 @@ func isAnthropicRoute(cfg *ModelConfig) bool {
 }
 
 // anthropicRequestURL constructs the request URL honoring provider quirks.
+// cfg is the effective config for the call (withRequestModelOverride
+// output): the Bedrock model path uses the request-scoped ModelID, and the
+// provider-specific suffix rules key off the request-scoped ProviderID.
 // Bedrock uses /model/{modelId}/invoke[_with_response_stream]; all others
 // use {baseURL}/v1/messages. OpenRouter and similar providers whose BaseURL
 // already ends in /v1 have that suffix stripped to avoid a doubled /v1/v1/.
-func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
-	base := strings.TrimSuffix(c.config.BaseURL, "/")
-	if c.config.ProviderID == ProviderIDBedrock {
+func (c *AnthropicClient) anthropicRequestURL(cfg *ModelConfig, streaming bool) string {
+	base := strings.TrimSuffix(cfg.BaseURL, "/")
+	if cfg.ProviderID == ProviderIDBedrock {
 		suffix := "invoke"
 		if streaming {
 			// Hyphenated form per the Bedrock InvokeModelWithResponseStream
@@ -260,7 +263,7 @@ func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
 		}
 		// url.PathEscape preserves ':' (valid pchar per RFC 3986) so
 		// "anthropic.claude-sonnet-4-6-v2:0" round-trips correctly.
-		return base + "/model/" + url.PathEscape(c.config.ModelID) + "/" + suffix
+		return base + "/model/" + url.PathEscape(cfg.ModelID) + "/" + suffix
 	}
 	// OpenRouter and other OpenAI-compatible gateways expose Anthropic
 	// behind /api/v1; strip a trailing /v1 so appending /v1/messages
@@ -271,12 +274,12 @@ func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
 
 // recordUsageStore appends one completed call to the app-level metrics
 // store (metrics.db llm_calls + model_performance). No-op without a store.
-func (c *AnthropicClient) recordUsageStore(usage TokenUsage, isErr bool, errMsg string, latencyMs int64, chatOpts *chatOptions) {
-	if c.usageStore == nil {
-		return
-	}
-	cfg := c.config
-	if cfg == nil {
+// cfg is the EFFECTIVE config for the call: after a request-scoped selection
+// (WithModelOverride user directive / WithResolvedModel alias resolution) it
+// names the provider/model that actually served the call, not the client's
+// configured default.
+func (c *AnthropicClient) recordUsageStore(cfg *ModelConfig, usage TokenUsage, isErr bool, errMsg string, latencyMs int64, chatOpts *chatOptions) {
+	if c.usageStore == nil || cfg == nil {
 		return
 	}
 	//nolint:gosec // goroutine outlives request context
@@ -321,9 +324,16 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		opt(chatOpts)
 	}
 
+	// Request-scoped model selection (precedence: USER directive
+	// WithModelOverride > alias resolution WithResolvedModel > this
+	// client's configured default). The effective config is a per-request
+	// COPY — the client's stored config is never mutated (the selection is
+	// per-turn, and the client may be shared by concurrent sessions).
+	effCfg := withRequestModelOverride(cfg, chatOpts)
+
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
-		cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
+		cacheKey := c.keyBuilder.Build("", effCfg.ModelID, messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			return cached.Response, nil
 		}
@@ -353,8 +363,8 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		}
 		timeout := c.timeoutCalc.Calculate(
 			ctx,
-			cfg.ProviderID,
-			cfg.ModelID,
+			effCfg.ProviderID,
+			effCfg.ModelID,
 			estimatedTokens,
 			anthropicDefaultTimeout,
 		)
@@ -363,8 +373,10 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		defer cancel()
 	}
 
-	// Build Anthropic API request
-	reqBody, err := c.buildRequest(messages, chatOpts, false)
+	// Build Anthropic API request. effCfg supplies the wire model: a
+	// request-scoped selection (user directive or alias resolution) names
+	// the model that must serve THIS call.
+	reqBody, err := c.buildRequest(effCfg, messages, chatOpts, false)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to build request", Cause: err}
 	}
@@ -381,7 +393,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
 
 	for attempt := 1; attempt <= shortRetries; attempt++ {
-		resp, err := c.doRequest(ctx, reqBody)
+		resp, err := c.doRequest(ctx, reqBody, effCfg)
 		if err != nil {
 			// Quota errors never re-enter the short-retry loop: the window
 			// is hours, not seconds. Return immediately (quota-reset-
@@ -424,8 +436,8 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 					}
 				}
 				return nil, &ThrottleBackoffError{
-					ProviderID: c.config.ProviderID,
-					ModelID:    c.config.ModelID,
+					ProviderID: effCfg.ProviderID,
+					ModelID:    effCfg.ModelID,
 					RetryAt:    plan.NextAttempt(time.Now(), attempt, errorRetryAt(err)),
 					Attempt:    attempt,
 					Cause:      err,
@@ -458,13 +470,13 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		}
 
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
-		c.recordUsageStore(resp.Usage, false, "", 0, chatOpts)
+		c.recordUsageStore(effCfg, resp.Usage, false, "", 0, chatOpts)
 
 		if c.budget != nil {
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
 			// Record cost with scope if model pricing is available
-			if cfg != nil {
-				costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+			if effCfg != nil {
+				costUSD := float64(resp.Usage.PromptTokens)*effCfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*effCfg.CostPerMillionOutput/1_000_000
 				if costUSD > 0 {
 					c.budget.RecordCostWithScope(CostRecord{
 						Timestamp:        time.Now(),
@@ -478,7 +490,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 
 		// Store in cache
 		if c.tokenCache != nil && c.keyBuilder != nil {
-			cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
+			cacheKey := c.keyBuilder.Build("", effCfg.ModelID, messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
@@ -492,7 +504,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(TokenUsage{}, true, allFailed.Message, 0, chatOpts)
+	c.recordUsageStore(effCfg, TokenUsage{}, true, allFailed.Message, 0, chatOpts)
 	return nil, allFailed
 }
 
@@ -531,9 +543,14 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		opt(chatOpts)
 	}
 
+	// Request-scoped model selection (same precedence chain as Chat):
+	// user directive > alias resolution > configured default; per-request
+	// copy, stored config untouched.
+	effCfg := withRequestModelOverride(cfg, chatOpts)
+
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
-		cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
+		cacheKey := c.keyBuilder.Build("", effCfg.ModelID, messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			reportProgress(ProgressStageDone, "Cache hit")
 			return cached.Response, nil
@@ -567,8 +584,8 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		}
 		timeout := c.timeoutCalc.Calculate(
 			ctx,
-			cfg.ProviderID,
-			cfg.ModelID,
+			effCfg.ProviderID,
+			effCfg.ModelID,
 			estimatedTokens,
 			anthropicDefaultTimeout,
 		)
@@ -577,8 +594,9 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		defer cancel()
 	}
 
-	// Build Anthropic API request with streaming enabled for progress
-	reqBody, err := c.buildRequest(messages, chatOpts, true)
+	// Build Anthropic API request with streaming enabled for progress.
+	// effCfg supplies the wire model (request-scoped selection; see Chat).
+	reqBody, err := c.buildRequest(effCfg, messages, chatOpts, true)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to build request", Cause: err}
 	}
@@ -612,7 +630,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
 
-		resp, err := c.doStreamingRequest(ctx, reqBody, reportProgress)
+		resp, err := c.doStreamingRequest(ctx, reqBody, effCfg, reportProgress)
 		if err != nil {
 			// Quota errors never re-enter the short-retry loop (streaming
 			// path): hours-scale window, return immediately.
@@ -653,8 +671,8 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 				}
 				reportProgress(ProgressStageDone, "Throttled: parked for backoff")
 				return nil, &ThrottleBackoffError{
-					ProviderID: c.config.ProviderID,
-					ModelID:    c.config.ModelID,
+					ProviderID: effCfg.ProviderID,
+					ModelID:    effCfg.ModelID,
 					RetryAt:    plan.NextAttempt(time.Now(), attempt, errorRetryAt(err)),
 					Attempt:    attempt,
 					Cause:      err,
@@ -691,13 +709,13 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		reportProgress(ProgressStageStreaming, "Receiving response...")
 
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
-		c.recordUsageStore(resp.Usage, false, "", 0, chatOpts)
+		c.recordUsageStore(effCfg, resp.Usage, false, "", 0, chatOpts)
 
 		if c.budget != nil {
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
 			// Record cost with scope if model pricing is available
-			if cfg != nil {
-				costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+			if effCfg != nil {
+				costUSD := float64(resp.Usage.PromptTokens)*effCfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*effCfg.CostPerMillionOutput/1_000_000
 				if costUSD > 0 {
 					c.budget.RecordCostWithScope(CostRecord{
 						Timestamp:        time.Now(),
@@ -711,7 +729,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 
 		// Store in cache
 		if c.tokenCache != nil && c.keyBuilder != nil {
-			cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
+			cacheKey := c.keyBuilder.Build("", effCfg.ModelID, messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
@@ -729,7 +747,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(TokenUsage{}, true, allFailed.Message, 0, chatOpts)
+	c.recordUsageStore(effCfg, TokenUsage{}, true, allFailed.Message, 0, chatOpts)
 	return nil, allFailed
 }
 
@@ -931,7 +949,14 @@ type contentBlockAccum struct {
 }
 
 // buildRequest constructs an Anthropic API request from our internal message format.
-func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions, stream bool) (*anthropicRequest, error) {
+// buildRequest constructs an Anthropic API request from our internal message format.
+// cfg is the EFFECTIVE config for the call (withRequestModelOverride output):
+// its ModelID/ProviderID put the request-scoped selection (user directive or
+// alias resolution) on the wire — Model field and Bedrock model path — while
+// falling back to the client's configured default when no selection applies.
+// TimeoutCalc and retry loops also receive this cfg so ThrottleBackoffError
+// attributes to the actually-serving model.
+func (c *AnthropicClient) buildRequest(cfg *ModelConfig, messages []ChatMessage, opts *chatOptions, stream bool) (*anthropicRequest, error) {
 	// Extract system prompt from messages
 	var systemPrompt string
 	var apiMessages []anthropicMessage
@@ -1025,13 +1050,13 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 	}
 
 	req := &anthropicRequest{
-		Model:       c.config.ModelID,
+		Model:       cfg.ModelID,
 		MaxTokens:   opts.maxTokens,
 		Messages:    apiMessages,
 		Stream:      stream,
 		Temperature: &opts.temperature,
 	}
-	if c.config.ProviderID == ProviderIDBedrock {
+	if cfg.ProviderID == ProviderIDBedrock {
 		// Bedrock carries the API version in-band instead of the
 		// anthropic-version HTTP header (which its endpoint rejects).
 		req.AnthropicVersion = bedrockAnthropicVersion
@@ -1187,15 +1212,15 @@ func (c *AnthropicClient) applyAnthropicExtraHeaders(httpReq *http.Request) {
 	}
 }
 
-func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicRequest) (*Response, error) {
+func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicRequest, cfg *ModelConfig) (*Response, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
 	}
 
-	url := c.anthropicRequestURL(false)
+	url := c.anthropicRequestURL(cfg, false)
 
-	c.logger.Debug("Making Anthropic request", "url", url, "model", c.config.ModelID)
+	c.logger.Debug("Making Anthropic request", "url", url, "model", cfg.ModelID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -1224,8 +1249,8 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 		}
 		record := metrics.RequestRecord{
 			Timestamp:  time.Now(),
-			ProviderID: c.config.ProviderID,
-			ModelID:    c.config.ModelID,
+			ProviderID: cfg.ProviderID,
+			ModelID:    cfg.ModelID,
 			LatencyMs:  latencyMs,
 			HTTPStatus: 0,
 			ErrorType:  errType,
@@ -1267,22 +1292,22 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 	if resp.StatusCode == http.StatusTooManyRequests {
 		if classifyQuotaDecision(resp.StatusCode, respBody, ParseRateLimitBody(respBody)) {
 			if qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
-				ProviderID: c.config.ProviderID,
-				ModelID:    c.config.ModelID,
+				ProviderID: cfg.ProviderID,
+				ModelID:    cfg.ModelID,
 				MaxWait:    c.quotaMaxWait,
 			}); qe != nil {
 				qe.Cause = &APIError{StatusCode: resp.StatusCode, Detail: c.quotaDetailFromBody(respBody)}
 				return nil, qe
 			}
 		}
-		return nil, c.buildRateLimitError(respBody, resp.StatusCode, resp.Header.Get("Retry-After"))
+		return nil, c.buildRateLimitError(respBody, resp.StatusCode, resp.Header.Get("Retry-After"), cfg)
 	}
 
 	// Quota payment-required (402): treat as retry-with-estimate.
 	if resp.StatusCode == http.StatusPaymentRequired {
 		qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
-			ProviderID: c.config.ProviderID,
-			ModelID:    c.config.ModelID,
+			ProviderID: cfg.ProviderID,
+			ModelID:    cfg.ModelID,
 			MaxWait:    c.quotaMaxWait,
 		})
 		if qe != nil {
@@ -1330,11 +1355,11 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	// Record successful request metrics with actual usage data
 	if c.metricsStore != nil {
-		costUSD := float64(apiResp.Usage.InputTokens)*c.config.CostPerMillionInput/1_000_000 + float64(apiResp.Usage.OutputTokens)*c.config.CostPerMillionOutput/1_000_000
+		costUSD := float64(apiResp.Usage.InputTokens)*cfg.CostPerMillionInput/1_000_000 + float64(apiResp.Usage.OutputTokens)*cfg.CostPerMillionOutput/1_000_000
 		record := metrics.RequestRecord{
 			Timestamp:        time.Now(),
-			ProviderID:       c.config.ProviderID,
-			ModelID:          c.config.ModelID,
+			ProviderID:       cfg.ProviderID,
+			ModelID:          cfg.ModelID,
 			PromptTokens:     apiResp.Usage.InputTokens,
 			CompletionTokens: apiResp.Usage.OutputTokens,
 			CachedTokens:     apiResp.Usage.CacheReadInputTokens,
@@ -1368,15 +1393,15 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 // doStreamingRequest performs a streaming HTTP request to Anthropic's API.
 // It processes server-sent events and reports progress via the callback.
-func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthropicRequest, progress func(ProgressStage, string)) (*Response, error) {
+func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthropicRequest, cfg *ModelConfig, progress func(ProgressStage, string)) (*Response, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
 	}
 
-	url := c.anthropicRequestURL(true)
+	url := c.anthropicRequestURL(cfg, true)
 
-	c.logger.Debug("Making Anthropic streaming request", "url", url, "model", c.config.ModelID)
+	c.logger.Debug("Making Anthropic streaming request", "url", url, "model", cfg.ModelID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -1405,8 +1430,8 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 		}
 		record := metrics.RequestRecord{
 			Timestamp:  time.Now(),
-			ProviderID: c.config.ProviderID,
-			ModelID:    c.config.ModelID,
+			ProviderID: cfg.ProviderID,
+			ModelID:    cfg.ModelID,
 			LatencyMs:  latencyMs,
 			ErrorType:  errType,
 			Success:    false,
@@ -1442,22 +1467,22 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 		if resp.StatusCode == http.StatusTooManyRequests {
 			if classifyQuotaDecision(resp.StatusCode, respBody, ParseRateLimitBody(respBody)) {
 				if qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
-					ProviderID: c.config.ProviderID,
-					ModelID:    c.config.ModelID,
+					ProviderID: cfg.ProviderID,
+					ModelID:    cfg.ModelID,
 					MaxWait:    c.quotaMaxWait,
 				}); qe != nil {
 					qe.Cause = &APIError{StatusCode: resp.StatusCode, Detail: c.quotaDetailFromBody(respBody)}
 					return nil, qe
 				}
 			}
-			return nil, c.buildRateLimitError(respBody, resp.StatusCode, resp.Header.Get("Retry-After"))
+			return nil, c.buildRateLimitError(respBody, resp.StatusCode, resp.Header.Get("Retry-After"), cfg)
 		}
 
 		// Quota payment-required (402): treat as retry-with-estimate.
 		if resp.StatusCode == http.StatusPaymentRequired {
 			if qe := ParseQuotaResponse(resp.StatusCode, resp.Header, respBody, QuotaContext{
-				ProviderID: c.config.ProviderID,
-				ModelID:    c.config.ModelID,
+				ProviderID: cfg.ProviderID,
+				ModelID:    cfg.ModelID,
 				MaxWait:    c.quotaMaxWait,
 			}); qe != nil {
 				qe.Cause = &APIError{StatusCode: resp.StatusCode, Detail: c.quotaDetailFromBody(respBody)}
@@ -1487,18 +1512,18 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	// event-stream binary framing (vnd.amazon.eventstream); the adapter
 	// unwraps it into SSE-shaped bytes so the shared parser is unchanged.
 	streamBody := io.Reader(resp.Body)
-	if c.config.ProviderID == ProviderIDBedrock || hasBedrockEventStreamBody(resp.Header) {
+	if cfg.ProviderID == ProviderIDBedrock || hasBedrockEventStreamBody(resp.Header) {
 		streamBody = newBedrockEventStreamAdapter(resp.Body)
 	}
 	parsedResp, parseErr := c.parseStreamingResponse(streamBody, progress)
 
 	// Record successful request metrics with actual usage from the stream
 	if c.metricsStore != nil && parseErr == nil && parsedResp != nil {
-		costUSD := float64(parsedResp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(parsedResp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+		costUSD := float64(parsedResp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(parsedResp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
 		record := metrics.RequestRecord{
 			Timestamp:        time.Now(),
-			ProviderID:       c.config.ProviderID,
-			ModelID:          c.config.ModelID,
+			ProviderID:       cfg.ProviderID,
+			ModelID:          cfg.ModelID,
 			PromptTokens:     parsedResp.Usage.PromptTokens,
 			CompletionTokens: parsedResp.Usage.CompletionTokens,
 			CachedTokens:     parsedResp.Usage.CachedTokens,
@@ -1523,7 +1548,9 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 
 // buildRateLimitError constructs a *RateLimitError from a 429 response,
 // parsing the Retry-After header and Anthropic's structured JSON error body.
-func (c *AnthropicClient) buildRateLimitError(respBody []byte, statusCode int, retryAfterHeader string) *RateLimitError {
+// cfg is the effective config: the error attributes to the model that
+// actually served (or attempted to serve) the request.
+func (c *AnthropicClient) buildRateLimitError(respBody []byte, statusCode int, retryAfterHeader string, cfg *ModelConfig) *RateLimitError {
 	retryAfter := parseRetryAfter(retryAfterHeader)
 
 	detail := &ProviderError{}
@@ -1543,8 +1570,8 @@ func (c *AnthropicClient) buildRateLimitError(respBody []byte, statusCode int, r
 	}
 
 	rlErr := &RateLimitError{
-		ProviderID: c.config.ProviderID,
-		ModelID:    c.config.ModelID,
+		ProviderID: cfg.ProviderID,
+		ModelID:    cfg.ModelID,
 		RetryAfter: retryAfter,
 		LimitType:  detail.Type,
 		Cause:      apiErr,

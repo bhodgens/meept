@@ -318,19 +318,25 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 		opt(chatOpts)
 	}
 
-	payload := c.buildPayload(messages, cfg, chatOpts, true)
-	resp, err := c.doRequest(ctx, payload, cfg, chatOpts.sessionID, onDelta)
+	// Request-scoped model selection (same precedence chain as Chat):
+	// user directive > alias resolution > configured default; per-request
+	// copy, stored config untouched. The ledger records the model that
+	// actually served.
+	effCfg := withRequestModelOverride(cfg, chatOpts)
+
+	payload := c.buildPayload(messages, effCfg, chatOpts, true)
+	resp, err := c.doRequest(ctx, payload, effCfg, chatOpts.sessionID, onDelta)
 	if err != nil {
-		c.recordUsageStore(cfg, chatOpts, TokenUsage{}, true, err.Error())
+		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error())
 		return nil, err
 	}
 
 	// Mirror Chat's budget accounting (mutex-free; Budget locks internally).
 	if c.budget != nil {
 		c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
-		if cfg.CostPerMillionInput > 0 || cfg.CostPerMillionOutput > 0 {
-			costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 +
-				float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+		if effCfg.CostPerMillionInput > 0 || effCfg.CostPerMillionOutput > 0 {
+			costUSD := float64(resp.Usage.PromptTokens)*effCfg.CostPerMillionInput/1_000_000 +
+				float64(resp.Usage.CompletionTokens)*effCfg.CostPerMillionOutput/1_000_000
 			if costUSD > 0 {
 				c.budget.RecordCostWithScope(CostRecord{
 					Timestamp:        time.Now(),
@@ -343,7 +349,7 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 	}
 
 	// Per-provider/per-agent token accounting (metrics.db llm_calls).
-	c.recordUsageStore(cfg, chatOpts, resp.Usage, false, "")
+	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "")
 
 	return resp, nil
 }

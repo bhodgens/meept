@@ -789,14 +789,19 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 	return nil, fmt.Errorf("no providers available")
 }
 
-// requestResolvedProviderID extracts a request-scoped resolver selection
-// (see WithResolvedModel) from a call's options. Applying the functional
-// options to a scratch struct is side-effect free: every ChatOption writes
-// only to its receiver. Empty when the caller made no per-request selection,
-// in which case routing is byte-identical to the pre-change behavior.
-func requestResolvedProviderID(opts []ChatOption) string {
+// requestResolvedProviderID extracts the request-scoped model selection from
+// a call's options, honoring the explicit precedence chain: a USER directive
+// (WithModelOverride) beats an alias resolution (WithResolvedModel), which
+// beats the manager's default ordering. Applying the functional options to a
+// scratch struct is side-effect free: every ChatOption writes only to its
+// receiver. The *ModelConfig return carries the selection's provider+model
+// (nil when the caller made no per-request selection); the selection's
+// provider id alone steers routing via preferRequestedProvider, so the model
+// id rides along for observability without changing the routing contract.
+// Callers that only need the provider id use the .ProviderID field.
+func requestResolvedProviderID(opts []ChatOption) *ModelConfig {
 	if len(opts) == 0 {
-		return ""
+		return nil
 	}
 	probe := &chatOptions{}
 	for _, opt := range opts {
@@ -804,7 +809,13 @@ func requestResolvedProviderID(opts []ChatOption) string {
 			opt(probe)
 		}
 	}
-	return probe.resolvedProviderID
+	if probe.overrideModelID != "" {
+		return &ModelConfig{ProviderID: probe.overrideProviderID, ModelID: probe.overrideModelID}
+	}
+	if probe.resolvedModelID != "" {
+		return &ModelConfig{ProviderID: probe.resolvedProviderID, ModelID: probe.resolvedModelID}
+	}
+	return nil
 }
 
 // preferRequestedProvider is a STABLE reorder that moves the provider named by
@@ -814,8 +825,8 @@ func requestResolvedProviderID(opts []ChatOption) string {
 // reorder — so health/cost/priority ordering is untouched for turns that do
 // not resolve an alias. Failover is preserved: if the preferred provider is
 // disabled, unhealthy, or errors, the loop still walks the remaining entries.
-// This is per-CALL routing, never manager state: concurrent sessions using the
-// same manager are unaffected (each call passes its own option).
+// This is per-CALL routing, never manager state: concurrent sessions using
+// the same manager are unaffected (each call passes its own option).
 func preferRequestedProvider(providers []*ProviderEntry, providerID string) []*ProviderEntry {
 	if providerID == "" || len(providers) < 2 {
 		return providers
@@ -840,7 +851,12 @@ func preferRequestedProvider(providers []*ProviderEntry, providerID string) []*P
 // the front for THIS call only. Callers must hold at least pm.mu.RLock (it
 // calls getOrderedProviders).
 func (pm *ProviderManager) orderedProvidersForRequest(opts []ChatOption) []*ProviderEntry {
-	return preferRequestedProvider(pm.getOrderedProviders(), requestResolvedProviderID(opts))
+	selection := requestResolvedProviderID(opts)
+	providerID := ""
+	if selection != nil {
+		providerID = selection.ProviderID
+	}
+	return preferRequestedProvider(pm.getOrderedProviders(), providerID)
 }
 
 // getOrderedProviders returns providers sorted by preference, with

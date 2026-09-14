@@ -292,7 +292,7 @@ func TestAnthropicClient_BuildRequest_ToolResultPlacement(t *testing.T) {
 		{Role: RoleAssistant, Content: "The weather is 72F and sunny."},
 	}
 
-	req, err := c.buildRequest(messages, &chatOptions{maxTokens: 1024}, false)
+	req, err := c.buildRequest(c.config, messages, &chatOptions{maxTokens: 1024}, false)
 	if err != nil {
 		t.Fatalf("buildRequest failed: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestAnthropicClient_BuildRequest_MultipleSystemMessages(t *testing.T) {
 		}},
 	}
 
-	req, err := c.buildRequest(messages, &chatOptions{maxTokens: 1024}, false)
+	req, err := c.buildRequest(c.config, messages, &chatOptions{maxTokens: 1024}, false)
 	if err != nil {
 		t.Fatalf("buildRequest failed: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestAnthropicClient_BuildRequest_ToolResultIsError(t *testing.T) {
 				}},
 				{Role: RoleTool, Content: tt.content, ToolCallID: "tc1", IsToolError: tt.isToolError},
 			}
-			req, err := c.buildRequest(messages, &chatOptions{maxTokens: 128}, false)
+			req, err := c.buildRequest(c.config, messages, &chatOptions{maxTokens: 128}, false)
 			if err != nil {
 				t.Fatalf("buildRequest: %v", err)
 			}

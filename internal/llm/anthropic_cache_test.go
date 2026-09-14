@@ -32,7 +32,7 @@ func TestAnthropicCacheControl(t *testing.T) {
 		{Role: RoleUser, Content: "hello"},
 	}
 
-	req, err := c.buildRequest(messages, &chatOptions{maxTokens: 1024}, false)
+	req, err := c.buildRequest(c.config, messages, &chatOptions{maxTokens: 1024}, false)
 	if err != nil {
 		t.Fatalf("buildRequest failed: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestAnthropicCacheControlDisabled(t *testing.T) {
 		{Role: RoleUser, Content: "hello"},
 	}
 
-	req, err := c.buildRequest(messages, &chatOptions{maxTokens: 1024}, false)
+	req, err := c.buildRequest(c.config, messages, &chatOptions{maxTokens: 1024}, false)
 	if err != nil {
 		t.Fatalf("buildRequest failed: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestBoundaryStripped(t *testing.T) {
 				{Role: RoleUser, Content: "test"},
 			}
 
-			req, err := c.buildRequest(messages, &chatOptions{maxTokens: 1024}, false)
+			req, err := c.buildRequest(c.config, messages, &chatOptions{maxTokens: 1024}, false)
 			if err != nil {
 				t.Fatalf("buildRequest failed: %v", err)
 			}

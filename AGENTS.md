@@ -360,11 +360,24 @@ boundaries:
   WITH the request via `llm.WithResolvedModel` (never by mutating shared
   `ProviderManager`/`Client` state — the manager is shared by every session).
   `ProviderManager` reorders the named provider first for that call only,
-  keeping the rest as failover tail; the serving `Client` uses the resolved
+  keeping the rest as failover tail; the serving client — OpenAI-compatible
+  `Client`, `AnthropicClient`, and `CodexClient` alike — uses the resolved
   model id on the wire and in the `metrics.db` `llm_calls`
   `provider`/`model_id`, so the ledger names the provider/model that actually
   served the call, not the caller's configured default. Turns that resolve no
   alias keep health/cost/priority ordering byte-identical.
+- **Model-selection precedence: user directive > alias resolution > default
+  ordering.** A user's reassignment directive (dispatcher / PrepareNextTurn
+  hook) travels its OWN request-scoped channel, `llm.WithModelOverride`, and
+  `llm.requestModelOverride` ranks the channels explicitly — the user
+  directive beats the alias resolution regardless of option-append order
+  (chatWithFailoverRaw appends the alias option AFTER caller opts; append
+  order must never decide precedence). With a `ProviderManager` chatter the
+  directive works per-request too: reasoningCycle stages the resolved config
+  (`pendingModelOverrideConfig`) and chatWithFailoverRaw stamps it onto the
+  call, and the one-shot override is cleared after that turn. Every client
+  type that observes a selection names the actually-serving provider/model in
+  the ledger.
 - **Deferral parks at the handler, mirroring budget.** `ChatHandler`
   parks quota-interrupted turns in `QuotaResumeWatcher`
   (`internal/agent/quota_resume.go`, the quota twin of

@@ -338,19 +338,25 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 		opt(chatOpts)
 	}
 
-	payload := c.buildPayload(messages, cfg, chatOpts, false)
-	resp, err := c.doRequest(ctx, payload, cfg, chatOpts.sessionID, nil)
+	// Request-scoped model selection (precedence: USER directive
+	// WithModelOverride > alias resolution WithResolvedModel > this
+	// client's configured default). Per-request copy; stored config
+	// untouched. The ledger records the model that actually served.
+	effCfg := withRequestModelOverride(cfg, chatOpts)
+
+	payload := c.buildPayload(messages, effCfg, chatOpts, false)
+	resp, err := c.doRequest(ctx, payload, effCfg, chatOpts.sessionID, nil)
 	if err != nil {
-		c.recordUsageStore(cfg, chatOpts, TokenUsage{}, true, err.Error())
+		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error())
 		return nil, err
 	}
 
 	// Record usage against the budget (mutex-free; Budget locks internally).
 	if c.budget != nil {
 		c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
-		if cfg.CostPerMillionInput > 0 || cfg.CostPerMillionOutput > 0 {
-			costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 +
-				float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+		if effCfg.CostPerMillionInput > 0 || effCfg.CostPerMillionOutput > 0 {
+			costUSD := float64(resp.Usage.PromptTokens)*effCfg.CostPerMillionInput/1_000_000 +
+				float64(resp.Usage.CompletionTokens)*effCfg.CostPerMillionOutput/1_000_000
 			if costUSD > 0 {
 				c.budget.RecordCostWithScope(CostRecord{
 					Timestamp:        time.Now(),
@@ -363,7 +369,7 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 	}
 
 	// Per-provider/per-agent token accounting (metrics.db llm_calls).
-	c.recordUsageStore(cfg, chatOpts, resp.Usage, false, "")
+	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "")
 
 	return resp, nil
 }
