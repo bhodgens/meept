@@ -3933,20 +3933,6 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"alias", l.modelRef,
 					"error", err,
 				)
-			} else if llmClientSnap == nil {
-				// The resolver decided a model but there is no client to
-				// retarget, so the call silently proceeds on whatever client
-				// the loop already had - the routing decision is recorded and
-				// then discarded. Observed 2026-09-13: the resolver logged
-				// alias=coder -> provider=local while every call still went to
-				// the config's default model (verified by the local
-				// llama-server's unchanged CPU time). Never fail silently here.
-				l.logger.Warn("Alias resolved but the loop has no LLM client to switch",
-					"agent_id", l.agentID,
-					"alias", l.modelRef,
-					"resolved_model", modelConfig.ModelID,
-					"resolved_provider", modelConfig.ProviderID,
-				)
 			} else if sw, ok := modelSwitcherFor(llmClientSnap, l.llm); ok {
 				// Switch the LLM client to the resolved model
 				l.modelMu.Lock()
@@ -3966,6 +3952,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"to_model", modelConfig.ModelID,
 					"alias", l.modelRef,
 					"reason", "alias_resolution",
+				)
+			} else {
+				// No single client config to retarget (e.g. the daemon wires a
+				// ProviderManager, which owns many providers and has no one
+				// model to switch). The resolution is NOT dropped: the request
+				// carries it per-turn via llm.WithResolvedModel (stamped in
+				// chatWithFailoverRaw), and the manager routes that call to the
+				// resolved provider/model for this turn only. Reaching here
+				// used to be a false "decision discarded" warning.
+				l.logger.Debug("Alias resolved; request-scoped model selection will route this call",
+					"agent_id", l.agentID,
+					"alias", l.modelRef,
+					"resolved_model", modelConfig.ModelID,
+					"resolved_provider", modelConfig.ProviderID,
 				)
 			}
 		}
@@ -5408,6 +5408,21 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 			}
 		}
 
+		// Carry the resolver's per-attempt selection WITH this request
+		// (request-scoped option, never shared state): ProviderManager routes
+		// the attempt to the resolved provider first and the serving Client
+		// uses the resolved model on the wire and in the metrics.db ledger.
+		// Without this, a resolved alias was recorded and then ignored for any
+		// chatter with no single config to switch (ProviderManager), so the
+		// call silently went to the manager's default model. A fresh slice per
+		// attempt keeps the rotation loop from aliasing earlier attempts.
+		attemptOpts := opts
+		if servedModel != nil {
+			attemptOpts = make([]llm.ChatOption, 0, len(opts)+1)
+			attemptOpts = append(attemptOpts, opts...)
+			attemptOpts = append(attemptOpts, llm.WithResolvedModel(servedModel))
+		}
+
 		// Make the LLM call — streaming if onDelta is set and supported
 		var response *llm.Response
 		var err error
@@ -5441,13 +5456,13 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 					}
 					return onDelta(delta)
 				}
-				response, err = sc.ChatWithDeltaCallback(ctx, messages, wrappedOnDelta, opts...)
+				response, err = sc.ChatWithDeltaCallback(ctx, messages, wrappedOnDelta, attemptOpts...)
 			} else {
 				l.logger.Debug("streaming requested but chatter does not support it; falling back to non-streaming")
-				response, err = l.llm.Chat(ctx, messages, opts...)
+				response, err = l.llm.Chat(ctx, messages, attemptOpts...)
 			}
 		} else {
-			response, err = l.llm.Chat(ctx, messages, opts...)
+			response, err = l.llm.Chat(ctx, messages, attemptOpts...)
 		}
 		if err == nil {
 			// Non-streaming path: check full response against TTSR rules.

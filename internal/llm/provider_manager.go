@@ -308,7 +308,7 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 	}
 
 	// Get providers in order of preference and snapshot health status while locked
-	orderedProviders := pm.getOrderedProviders()
+	orderedProviders := pm.orderedProvidersForRequest(opts)
 	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
 	for i, e := range orderedProviders {
 		healthSnapshot[i] = e.Health.Status
@@ -471,7 +471,7 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 		return nil, errors.New("provider manager not initialized or no providers configured")
 	}
 
-	orderedProviders := pm.getOrderedProviders()
+	orderedProviders := pm.orderedProvidersForRequest(opts)
 	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
 	for i, e := range orderedProviders {
 		healthSnapshot[i] = e.Health.Status
@@ -675,7 +675,7 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 		pm.mu.RUnlock()
 		return nil, errors.New("provider manager not initialized or no providers configured")
 	}
-	orderedProviders := pm.getOrderedProviders()
+	orderedProviders := pm.orderedProvidersForRequest(opts)
 	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
 	for i, e := range orderedProviders {
 		healthSnapshot[i] = e.Health.Status
@@ -787,6 +787,60 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 		return nil, fmt.Errorf("all %d provider(s) failed (last: %w)", len(orderedProviders), lastErr)
 	}
 	return nil, fmt.Errorf("no providers available")
+}
+
+// requestResolvedProviderID extracts a request-scoped resolver selection
+// (see WithResolvedModel) from a call's options. Applying the functional
+// options to a scratch struct is side-effect free: every ChatOption writes
+// only to its receiver. Empty when the caller made no per-request selection,
+// in which case routing is byte-identical to the pre-change behavior.
+func requestResolvedProviderID(opts []ChatOption) string {
+	if len(opts) == 0 {
+		return ""
+	}
+	probe := &chatOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(probe)
+		}
+	}
+	return probe.resolvedProviderID
+}
+
+// preferRequestedProvider is a STABLE reorder that moves the provider named by
+// a request-scoped selection to the front while preserving every other
+// entry's relative order as the failover tail. It returns the input unchanged
+// when no selection applies, when nothing matches, or when there is nothing to
+// reorder — so health/cost/priority ordering is untouched for turns that do
+// not resolve an alias. Failover is preserved: if the preferred provider is
+// disabled, unhealthy, or errors, the loop still walks the remaining entries.
+// This is per-CALL routing, never manager state: concurrent sessions using the
+// same manager are unaffected (each call passes its own option).
+func preferRequestedProvider(providers []*ProviderEntry, providerID string) []*ProviderEntry {
+	if providerID == "" || len(providers) < 2 {
+		return providers
+	}
+	preferred := make([]*ProviderEntry, 0, len(providers))
+	rest := make([]*ProviderEntry, 0, len(providers))
+	for _, e := range providers {
+		if e != nil && e.Config != nil && e.Config.ProviderID == providerID {
+			preferred = append(preferred, e)
+		} else {
+			rest = append(rest, e)
+		}
+	}
+	if len(preferred) == 0 || len(rest) == 0 {
+		return providers
+	}
+	return append(preferred, rest...)
+}
+
+// orderedProvidersForRequest returns the health/cost/priority-ordered provider
+// list with any request-scoped model selection (WithResolvedModel) moved to
+// the front for THIS call only. Callers must hold at least pm.mu.RLock (it
+// calls getOrderedProviders).
+func (pm *ProviderManager) orderedProvidersForRequest(opts []ChatOption) []*ProviderEntry {
+	return preferRequestedProvider(pm.getOrderedProviders(), requestResolvedProviderID(opts))
 }
 
 // getOrderedProviders returns providers sorted by preference, with

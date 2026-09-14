@@ -446,6 +446,12 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 		opt(chatOpts)
 	}
 
+	// Request-scoped resolver selection (alias resolution) applies to THIS
+	// call only: a copy of cfg with the resolved provider/model. Everything
+	// below (wire model, tool-choice gating, grammar, reasoning) sees the
+	// effective model; the client's stored config is untouched.
+	cfg = withRequestModelOverride(cfg, chatOpts)
+
 	// Build request payload
 	msgDicts := make([]map[string]any, len(messages))
 	for i, msg := range messages {
@@ -529,6 +535,10 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	if err != nil {
 		return nil, err
 	}
+	// Effective model for this request: cache key, budget/timeout scoping,
+	// and the metrics.db llm_calls row below must all use the model that
+	// actually serves the call, not the client's configured default.
+	cfg = withRequestModelOverride(cfg, chatOpts)
 
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
@@ -727,6 +737,10 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 	if err != nil {
 		return nil, err
 	}
+	// Effective model for this request: cache key, budget/timeout scoping,
+	// and the metrics.db llm_calls row below must all use the model that
+	// actually serves the call, not the client's configured default.
+	cfg = withRequestModelOverride(cfg, chatOpts)
 
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
@@ -954,6 +968,14 @@ type chatOptions struct {
 	// opting in (ModelConfig.ToolChoice) and on tools being present; see
 	// resolveToolChoice.
 	toolChoice string
+	// resolvedProviderID/resolvedModelID carry the model the resolver
+	// selected for THIS single request (alias resolution), set with
+	// WithResolvedModel. Empty means no per-request selection: the serving
+	// client's own config decides, exactly as before. These are per-request
+	// state carried on the call — they never mutate a client's or a
+	// manager's shared configuration.
+	resolvedProviderID string
+	resolvedModelID    string
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -1024,6 +1046,61 @@ func WithAgentScope(agentID string) ChatOption {
 			o.agentID = agentID
 		}
 	}
+}
+
+// WithResolvedModel carries the model the resolver selected for this ONE
+// request (alias resolution) alongside the call, instead of mutating shared
+// client state. ProviderManager uses the provider id to route the attempt to
+// the named provider first (the rest stay as failover tail); the serving
+// Client uses the model id for the wire payload and for the metrics.db
+// llm_calls row, so the ledger records the provider/model that actually
+// served the call. Nil is a no-op. A selection whose ProviderID names a
+// different provider than the client being invoked is ignored by that client
+// (it cannot serve another provider's endpoint); see requestModelOverride.
+func WithResolvedModel(mc *ModelConfig) ChatOption {
+	return func(o *chatOptions) {
+		if mc == nil {
+			return
+		}
+		o.resolvedProviderID = mc.ProviderID
+		o.resolvedModelID = mc.ModelID
+	}
+}
+
+// requestModelOverride reports the provider/model this request must be served
+// by when a resolver-provided selection (WithResolvedModel) applies to cfg.
+// A selection that names a provider different from the client's own is NOT
+// applied: the client cannot reach another provider's endpoint, and silently
+// sending a foreign model id there would mis-attribute the call. An empty
+// resolved provider id inherits the client's provider.
+func (o *chatOptions) requestModelOverride(cfg *ModelConfig) (providerID, modelID string, ok bool) {
+	if o == nil || o.resolvedModelID == "" {
+		return "", "", false
+	}
+	if o.resolvedProviderID != "" && cfg != nil && cfg.ProviderID != "" &&
+		o.resolvedProviderID != cfg.ProviderID {
+		return "", "", false
+	}
+	providerID = o.resolvedProviderID
+	if providerID == "" && cfg != nil {
+		providerID = cfg.ProviderID
+	}
+	return providerID, o.resolvedModelID, true
+}
+
+// withRequestModelOverride returns cfg with ProviderID/ModelID replaced by
+// the request-scoped resolver selection when one applies. It returns a COPY:
+// the client's stored config is never mutated (the selection is per-turn
+// state, and the client may be shared by concurrent sessions).
+func withRequestModelOverride(cfg *ModelConfig, o *chatOptions) *ModelConfig {
+	providerID, modelID, ok := o.requestModelOverride(cfg)
+	if !ok || cfg == nil {
+		return cfg
+	}
+	eff := *cfg
+	eff.ProviderID = providerID
+	eff.ModelID = modelID
+	return &eff
 }
 
 // WithAdapter sets the LoRA adapter path to use for this request. The
@@ -1711,6 +1788,10 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	if err != nil {
 		return nil, err
 	}
+	// Effective model for the streaming request (see Chat()): the streamed
+	// call and its metrics.db llm_calls row are attributed to the model
+	// that actually serves the request.
+	cfg = withRequestModelOverride(cfg, chatOpts)
 
 	body, err := json.Marshal(payload)
 	if err != nil {

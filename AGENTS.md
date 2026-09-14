@@ -355,6 +355,16 @@ boundaries:
   alias-blocked, the Resolver returns the DISTINCT
   `ErrAllEndpointsBlocked` — check with `errors.Is`, never string
   matching. Precedence: quota blocks > endpoint blocks > alias blocks.
+- **Alias selection is request-scoped; the ledger records the server.** The
+  Resolver is the only component that picks a model, and its decision travels
+  WITH the request via `llm.WithResolvedModel` (never by mutating shared
+  `ProviderManager`/`Client` state — the manager is shared by every session).
+  `ProviderManager` reorders the named provider first for that call only,
+  keeping the rest as failover tail; the serving `Client` uses the resolved
+  model id on the wire and in the `metrics.db` `llm_calls`
+  `provider`/`model_id`, so the ledger names the provider/model that actually
+  served the call, not the caller's configured default. Turns that resolve no
+  alias keep health/cost/priority ordering byte-identical.
 - **Deferral parks at the handler, mirroring budget.** `ChatHandler`
   parks quota-interrupted turns in `QuotaResumeWatcher`
   (`internal/agent/quota_resume.go`, the quota twin of

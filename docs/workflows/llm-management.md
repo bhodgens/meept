@@ -25,6 +25,33 @@ Different tasks require different LLM capabilities and cost profiles. LLM manage
 - **Cost Optimization**: Cheapest capable model selected
 - **Automatic Fallback**: Retryable errors trigger failover
 
+### Alias Selection Is Request-Scoped (one decider, one carrier)
+
+The resolver is the **only** component that chooses a model. Its decision is
+carried **with the request**, never by mutating shared client/manager state:
+`llm.WithResolvedModel(*ModelConfig)` stamps the resolved provider/model onto
+the single outgoing call (`internal/agent/loop.go` `chatWithFailoverRaw`,
+`internal/llm/client.go` `chatOptions.resolvedProviderID/resolvedModelID`).
+
+- **Routing** — `ProviderManager` moves the provider named by the selection to
+  the front of its health/cost/priority order **for that call only**
+  (`orderedProvidersForRequest` → `preferRequestedProvider`). Every other
+  provider stays in the list as the failover tail, so a disabled, unhealthy, or
+  erroring preferred provider still rotates. Turns that resolve no alias are
+  byte-identical to before (no reorder).
+- **Wire + ledger** — the serving `Client` uses the resolved model id in the
+  request payload and in the `metrics.db` `llm_calls` row
+  (`provider`/`model_id`), so the ledger records the provider/model that
+  actually served the call, not the caller's configured default. A selection
+  naming a provider other than the served client's is ignored by that client.
+- **Why not a manager-level `SwitchModel`** — `ProviderManager` is shared by
+  every session. A `SwitchModel` (or any manager-level "current model") would
+  make one turn's alias choice visible to concurrent turns in other sessions;
+  per-request options keep the choice per-turn. Concrete `*llm.Client` loops
+  still retarget their own config via `SwitchModel` (unchanged).
+- **No secrets** — only provider id and model id travel on the option; keys and
+  endpoints are never logged or recorded.
+
 ### Model-Slot Fairness (Interactive Priority)
 
 When a model's `max_concurrency` is set, requests wait for a free slot
