@@ -4232,7 +4232,12 @@ func hasLeadingImperativeVerb(input string) bool {
 			"delete", "remove", "update", "refactor", "generate", "run",
 			"code", "commit", "push", "merge", "rebase", "deploy",
 			"install", "configure", "set", "rename", "move", "copy",
-			"open", "close", "start", "stop", "restart":
+			"open", "close", "start", "stop", "restart",
+			// Sweep e2e (2026-09-15): "Use the json_extract tool with
+			// schema=…" scored intent=platform @0.9 because "use" was not
+			// an imperative verb and the roster dump swallowed the turn.
+			// Tool-invocation and data-extraction imperatives belong here.
+			"use", "extract", "call", "fetch", "search", "analyze":
 			return true
 		default:
 			return false
