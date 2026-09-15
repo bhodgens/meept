@@ -661,6 +661,16 @@
       "assert_only": false,
       "centroids_path": "",
       "timeout_seconds": 2,
+      // Embed-pipeline health gate (issue #42): cosine distance from the
+      // incoming embedding to the nearest known-good reference vector.
+      // Unhealthy => the prefilter abstains and the LLM chain runs (fail
+      // safe). Default on: pure Go, deterministic, no network dependency;
+      // inert (logged once at startup) when the reference file is absent.
+      // Build the reference with tools/build_embed_health_ref.py.
+      "embed_health_check": {
+        "enabled": true,
+        "reference_path": "",   // empty → ~/.meept/embed_health_reference.json
+      },
     },
   },
 

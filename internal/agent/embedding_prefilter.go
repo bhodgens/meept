@@ -54,6 +54,14 @@ type EmbeddingPrefilter struct {
 	// alone, exactly as before.
 	veto *tfidfVeto
 
+	// embedHealth is the embedding-pipeline health gate (issue #42).
+	// Nil = disabled/inert: Match behaves exactly as before. When active,
+	// the produced embedding is scored against the known-good reference
+	// set and an unhealthy verdict skips the vote (falls through to the
+	// LLM chain). Read-only after construction (reference matrix is
+	// immutable), so Check needs no lock.
+	embedHealth *EmbedHealthCheck
+
 	mu       sync.RWMutex
 	examples []prefilterExample
 	storeDim int
@@ -146,16 +154,38 @@ func NewEmbeddingPrefilter(emb PrefilterEmbedder, cfg config.ClassifierPrefilter
 				"built_at", veto.builtAt)
 		}
 	}
+	// Embed-pipeline health gate (issue #42). Loaded eagerly at
+	// construction (unlike the kNN index) so the "reference missing →
+	// check inert" warning fires exactly once at startup, not per turn.
+	// A missing reference leaves the check nil — Match is unchanged —
+	// which is the shipped default until the operator runs
+	// tools/build_embed_health_ref.py. A CORRUPT reference also disables
+	// the gate (fail-safe: an untrustworthy reference must not gate
+	// anything), logged at warn so the operator can fix the file.
+	var health *EmbedHealthCheck
+	if cfg.EmbedHealthCheck.Enabled {
+		refPath := cfg.EmbedHealthCheck.ReferencePath
+		if refPath == "" {
+			refPath = config.MeeptPath("embed_health_reference.json")
+		}
+		hc, hcErr := NewEmbedHealthCheck(refPath, logger)
+		if hcErr != nil {
+			embedHealthRefLogWarn(logger, refPath, hcErr)
+		} else {
+			health = hc
+		}
+	}
 	return &EmbeddingPrefilter{
-		embedder:   emb,
-		threshold:  threshold,
-		k:          defaultPrefilterK,
-		assertOnly: cfg.AssertOnly,
-		timeout:    timeout,
-		path:       path,
-		dimension:  cfg.Dimension,
-		logger:     logger.With("component", "classifier_prefilter"),
-		veto:       veto,
+		embedder:    emb,
+		embedHealth: health,
+		threshold:   threshold,
+		k:           defaultPrefilterK,
+		assertOnly:  cfg.AssertOnly,
+		timeout:     timeout,
+		path:        path,
+		dimension:   cfg.Dimension,
+		logger:      logger.With("component", "classifier_prefilter"),
+		veto:        veto,
 	}
 }
 
@@ -422,6 +452,23 @@ func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 			"got", len(vec), "want", p.dimension)
 		p.emitVerdict(PrefilterVerdict{AssertedIntent: ""})
 		return nil
+	}
+
+	// Embedding-pipeline health gate (issue #42): score the embedding
+	// against the known-good reference set BEFORE any vote. Unhealthy =
+	// degraded or unfamiliar embedding pipeline output → skip the vote
+	// entirely and let the LLM chain decide (fail safe: the gate can only
+	// skip prefilter work, never enable a confident route on garbage).
+	// Nil check = disabled/inert (no reference file): zero overhead path.
+	if p.embedHealth != nil {
+		if ok, dist := p.embedHealth.Check(vec); !ok {
+			p.logger.Warn("embed health check failed; falling through to LLM chain",
+				"distance", dist,
+				"threshold", p.embedHealth.Threshold(),
+			)
+			p.emitVerdict(PrefilterVerdict{AssertedIntent: ""})
+			return nil
+		}
 	}
 
 	p.mu.RLock()

@@ -2448,6 +2448,31 @@ type ClassifierPrefilterConfig struct {
 	// disagreement falls through to the LLM chain. Empty disables the
 	// veto (Door 1 routes on the kNN vote alone — legacy behavior).
 	VetoPath string `json:"veto_path" toml:"veto_path"`
+	// EmbedHealthCheck guards the prefilter against a degraded embedding
+	// pipeline (meept issue #42): when active, the input embedding is
+	// scored against a fixed reference set before the kNN vote and a
+	// degraded/unfamiliar embedding falls through to the LLM chain.
+	EmbedHealthCheck EmbedHealthCheckConfig `json:"embed_health_check" toml:"embed_health_check"`
+}
+
+// EmbedHealthCheckConfig configures the embedding-pipeline health gate
+// (issue #42). The check is pure Go and deterministic: cosine distance from
+// the incoming embedding to the nearest vector in a fixed reference set of
+// known-good embeddings, compared to a 95th-percentile threshold calibrated
+// from the reference itself. Unhealthy => the prefilter abstains and the
+// full LLM chain runs (fail safe: the check can only skip prefilter work,
+// never enable a confident route on garbage).
+type EmbedHealthCheckConfig struct {
+	// Enabled turns on the health gate inside the prefilter. Default
+	// true in the shipped config: the check has no network dependency
+	// and is inert (never blocks) when ReferencePath is absent.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// ReferencePath is the JSON file of known-good embeddings
+	// ([[float,...],...]) produced by tools/build_embed_health_ref.py
+	// from the prefilter centroid store. Empty defaults to
+	// ~/.meept/embed_health_reference.json. A missing file leaves the
+	// check inert (logged once at startup).
+	ReferencePath string `json:"reference_path" toml:"reference_path"`
 }
 
 // EvalConfig holds eval-harness settings (harness-eval leaf 15, contract:
@@ -3115,6 +3140,15 @@ func DefaultConfig() *Config {
 				AssertOnly: false,
 				// CentroidsPath empty → ~/.meept/classifier_prefilter_centroids.json
 				TimeoutSeconds: 2,
+				// Embed-pipeline health gate (issue #42): default on —
+				// pure Go, deterministic, no network dependency, and
+				// inert (never blocks routing) when the reference file
+				// is absent. Empty ReferencePath →
+				// ~/.meept/embed_health_reference.json.
+				EmbedHealthCheck: EmbedHealthCheckConfig{
+					Enabled:       true,
+					ReferencePath: "",
+				},
 			},
 		},
 		Learning: LearningConfig{
