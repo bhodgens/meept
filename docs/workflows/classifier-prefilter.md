@@ -190,3 +190,54 @@ template parse.
 4. If precision holds at production-worthy levels, flip
    `assert_only: false`. Otherwise try a bigger embedder
    (Qwen3-Embedding-4B) and repeat.
+
+## Temporal anomaly detectors (issues #41 and #43)
+
+Two log-only monitors watch the streams around the prefilter. Both ship
+disabled by default and neither changes routing.
+
+### Session drift (issue #41, `[orchestrator.classifier_prefilter.session_drift]`)
+
+`agent.SessionDriftDetector` watches the per-session sequence of Door-1
+embeddings. When the dispatcher wires it (`SetDriftDetector`), every
+embedding that passes the embed-health gate feeds
+`Observe(sessionID, embedding)` — no extra model call. The score is
+`clamp01(shift + 0.5·rate)`: cosine distance between the baseline (older
+8) and current (newest 4) window-half centroids plus a rate term so
+gradual shifts accumulate. Default window 12, threshold 0.60 (97.5th
+percentile derivation in the type doc). No signal before the window
+fills; degenerate inputs abstain.
+
+- Acceptance: ≥95% of stable sessions produce zero signals (simulated
+  3 seeds × 200 sessions; threshold derivation documented in
+  `internal/agent/session_drift.go`); a 90° intent rotation fires
+  within ≤6 turns at ≥96%.
+- Signal: `session drift detected (log-only; not acting)` — session id
+  and numbers only, never message text.
+
+### Tool-failure burst (issue #43, `[orchestrator.classifier_prefilter.burst_detection]`)
+
+`metrics.BurstDetector` watches the per-session resolved outcome stream
+(`ok`/`corrected`/`failed_replan`). `Store.ResolvePendingOutcome` now
+returns the resolved outcome, and `recordDispatch` feeds it to
+`ObserveOutcome`. The score is `clamp(ewmaFast − ewmaSlow, 0, 1)` with
+α_fast=0.40, α_slow=0.02 (the slow EWMA is the session's adaptation
+baseline). Default window 20, threshold 0.50: 0/1500 known-good
+synthetic sessions flagged; on gradual degradation (failure probability
+ramping 0.02→1.0) it fires a median 44 turns earlier than the plain
+3-consecutive-failures `ThresholdRule`, which the issue mandates as the
+comparison baseline. `Store.LoadSessionOutcomes` reconstructs a
+session's outcome sequence for replay.
+
+- Note: `metrics.BurstDetectionConfig` mirrors the config struct —
+  `internal/metrics` cannot import `internal/config` (config → llm →
+  metrics cycle); the wiring site copies the fields, the established
+  pattern in this package's `collector.go`.
+- Signal: `tool-failure burst signal (log-only; not acting)`.
+
+### Testing
+
+```bash
+go test -race ./internal/agent/ -run TestSessionDrift
+go test -race ./internal/metrics/ -run 'TestBurst|TestLoadSessionOutcomes'
+```

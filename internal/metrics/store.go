@@ -964,7 +964,12 @@ func (s *Store) CountDispatchRows(sessionID string) int {
 // pending as excluded-from-denominator. An empty agentID (non-classified
 // current dispatch: agent comparison is meaningless) can resolve the prior row
 // to 'ok' only -- it never marks 'corrected'. No prior row is a no-op.
-func (s *Store) ResolvePendingOutcome(sessionID string, turnNo int, agentID string, window int) error {
+//
+// Returns the resolved outcome ("ok", "corrected", or "" when no row was
+// resolved) so callers can feed the resolved value into temporal
+// consumers such as the burst detector (issue #43) without re-reading
+// the row.
+func (s *Store) ResolvePendingOutcome(sessionID string, turnNo int, agentID string, window int) (string, error) {
 	var row struct {
 		ID      int    `db:"id"`
 		AgentID string `db:"agent_id"`
@@ -979,9 +984,9 @@ func (s *Store) ResolvePendingOutcome(sessionID string, turnNo int, agentID stri
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil // no prior pending classified row: no-op
+			return "", nil // no prior pending classified row: no-op
 		}
-		return fmt.Errorf("failed to find pending dispatch outcome for session %s: %w", sessionID, err)
+		return "", fmt.Errorf("failed to find pending dispatch outcome for session %s: %w", sessionID, err)
 	}
 
 	if agentID != "" && row.AgentID != agentID && (turnNo-row.TurnNo) <= window {
@@ -989,18 +994,18 @@ func (s *Store) ResolvePendingOutcome(sessionID string, turnNo int, agentID stri
 			`UPDATE dispatch_log SET outcome = 'corrected', corrected_agent = ? WHERE id = ?`,
 			agentID, row.ID,
 		); err != nil {
-			return fmt.Errorf("failed to mark corrected dispatch outcome (session %s): %w", sessionID, err)
+			return "", fmt.Errorf("failed to mark corrected dispatch outcome (session %s): %w", sessionID, err)
 		}
-		return nil
+		return "corrected", nil
 	}
 
 	if _, err := s.db.Exec(
 		`UPDATE dispatch_log SET outcome = 'ok' WHERE id = ?`,
 		row.ID,
 	); err != nil {
-		return fmt.Errorf("failed to mark ok dispatch outcome (session %s): %w", sessionID, err)
+		return "", fmt.Errorf("failed to mark ok dispatch outcome (session %s): %w", sessionID, err)
 	}
-	return nil
+	return "ok", nil
 }
 
 // MarkTaskFailedReplan flips the pending dispatch_log rows for a task to

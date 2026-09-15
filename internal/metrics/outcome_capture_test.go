@@ -59,7 +59,7 @@ func TestResolvePendingOutcome_SameAgentOk(t *testing.T) {
 		ClassifierMethod: "llm", TurnNo: 1, Outcome: "pending",
 	})
 
-	if err := store.ResolvePendingOutcome("sess-ok", 2, "llm/code", 3); err != nil {
+	if _, err := store.ResolvePendingOutcome("sess-ok", 2, "llm/code", 3); err != nil {
 		t.Fatalf("ResolvePendingOutcome: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func TestResolvePendingOutcome_DifferentAgentCorrected(t *testing.T) {
 		ClassifierMethod: "llm", TurnNo: 1, Outcome: "pending",
 	})
 
-	if err := store.ResolvePendingOutcome("sess-corr", 2, "llm/review", 3); err != nil {
+	if _, err := store.ResolvePendingOutcome("sess-corr", 2, "llm/review", 3); err != nil {
 		t.Fatalf("ResolvePendingOutcome: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestResolvePendingOutcome_WindowExpired(t *testing.T) {
 		ClassifierMethod: "llm", TurnNo: 1, Outcome: "pending",
 	})
 
-	if err := store.ResolvePendingOutcome("sess-window", 6, "llm/review", 3); err != nil {
+	if _, err := store.ResolvePendingOutcome("sess-window", 6, "llm/review", 3); err != nil {
 		t.Fatalf("ResolvePendingOutcome: %v", err)
 	}
 
@@ -128,7 +128,7 @@ func TestResolvePendingOutcome_NonClassifiedSourceStaysPending(t *testing.T) {
 		ClassifierMethod: "", TurnNo: 1, Outcome: "pending", // non-classified path
 	})
 
-	if err := store.ResolvePendingOutcome("sess-guard", 2, "llm/code", 3); err != nil {
+	if _, err := store.ResolvePendingOutcome("sess-guard", 2, "llm/code", 3); err != nil {
 		t.Fatalf("ResolvePendingOutcome: %v", err)
 	}
 
@@ -190,7 +190,7 @@ func TestResolvePendingOutcome_NoPriorRowNoOp(t *testing.T) {
 	store := newOutcomeTestStore(t)
 
 	// Empty session: nothing to resolve.
-	if err := store.ResolvePendingOutcome("sess-empty", 1, "llm/code", 3); err != nil {
+	if _, err := store.ResolvePendingOutcome("sess-empty", 1, "llm/code", 3); err != nil {
 		t.Fatalf("ResolvePendingOutcome on empty session: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestResolvePendingOutcome_NoPriorRowNoOp(t *testing.T) {
 		SessionID: "sess-resolved", AgentID: "llm/code",
 		ClassifierMethod: "llm", TurnNo: 1, Outcome: "ok",
 	})
-	if err := store.ResolvePendingOutcome("sess-resolved", 2, "llm/review", 3); err != nil {
+	if _, err := store.ResolvePendingOutcome("sess-resolved", 2, "llm/review", 3); err != nil {
 		t.Fatalf("ResolvePendingOutcome with resolved prior: %v", err)
 	}
 
@@ -225,7 +225,7 @@ func TestResolvePendingOutcome_NonClassifiedCurrentResolvesOkOnly(t *testing.T) 
 	})
 
 	// The current dispatch came from a non-classified path: agentID "".
-	if err := store.ResolvePendingOutcome("sess-nonclass", 2, "", 3); err != nil {
+	if _, err := store.ResolvePendingOutcome("sess-nonclass", 2, "", 3); err != nil {
 		t.Fatalf("ResolvePendingOutcome: %v", err)
 	}
 
