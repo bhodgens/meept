@@ -1747,6 +1747,23 @@ func (d *Dispatcher) routeToPlan(ctx context.Context, input string, intent *Inte
 		return nil, fmt.Errorf("failed to create plan: %w", err)
 	}
 
+	// Advance the lifecycle past draft (issue #40 item 1): plans created on
+	// the daemon dispatch path previously stayed in state='draft' forever
+	// because SubmitPlan was only reachable from the TUI/HTTP paths. Submit
+	// immediately — when plans.approval.require_approval is false the plan
+	// auto-approves (pending_approval -> approved -> synthesized task
+	// hierarchy); when true it parks at pending_approval for the operator's
+	// approve/reject decision. A submit failure must not fail the dispatch:
+	// the plan row exists and the approval paths can still act on it.
+	if err := d.planManager.SubmitPlan(ctx, p.ID); err != nil {
+		d.logger.Warn("failed to submit plan after creation",
+			"plan_id", p.ID,
+			"error", err,
+		)
+	} else if refreshed, err := d.planManager.GetPlan(ctx, p.ID); err == nil {
+		p = refreshed
+	}
+
 	d.logger.Info("Routed request to plan",
 		"plan_id", p.ID,
 		"title", p.Title,
