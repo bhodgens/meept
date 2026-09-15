@@ -2258,21 +2258,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6972
+    "line": 6980
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6983
+    "line": 6991
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 6964
+    "line": 6972
   },
   {
     "method": "GET",

@@ -1646,6 +1646,50 @@ func (l *AgentLoop) ClearModelOverride() {
 	l.modelOverridePersistent = false
 }
 
+// ApplyRequestModel applies a client-supplied per-request model ref
+// (chat.request "model": an alias name or "provider/model-id") through the
+// same one-shot SetModelOverride seam the dispatcher's parsed user
+// directives use — so it takes the SAME precedence slot: request model /
+// user directive > alias resolution > default ordering. It is one-shot for
+// the turn that carries it: reasoningCycle consumes and clears it, and
+// nothing is written to the config. An empty ref is a no-op (the turn runs
+// the alias/default chain unchanged). Alias names are resolved to their
+// first "provider/model-id" member here so the in-cycle override branch
+// (which resolves via ResolveRef) can serve the turn; unresolvable refs are
+// logged at Warn and dropped, matching the in-cycle branch's behavior.
+// Thread-safe.
+func (l *AgentLoop) ApplyRequestModel(modelRef string) {
+	if modelRef == "" {
+		return
+	}
+	if l.resolver != nil && l.resolver.ResolveRef(modelRef) == nil {
+		// Not a provider/model ref — is it an alias name?
+		if l.resolver.HasAlias(modelRef) {
+			if mc, err := l.resolver.ResolveForAlias(modelRef, ""); err == nil && mc != nil {
+				modelRef = mc.ProviderID + "/" + mc.ModelID
+			} else {
+				l.logger.Warn("Per-request model alias could not be resolved, using current model chain",
+					"agent_id", l.agentID,
+					"model_ref", modelRef,
+					"error", err,
+				)
+				return
+			}
+		} else {
+			l.logger.Warn("Per-request model could not be resolved, using current model chain",
+				"agent_id", l.agentID,
+				"model_ref", modelRef,
+			)
+			return
+		}
+	}
+	l.SetModelOverride(modelRef)
+	l.logger.Info("Per-request model override armed",
+		"agent_id", l.agentID,
+		"model_ref", modelRef,
+	)
+}
+
 // applyTurnModification applies a PrepareNextTurn hook's TurnModification to
 // the loop so it takes effect on the next LLM call in reasoningCycle:
 //   - ExtraMessages non-empty -> staged in pendingHookMessages; reasoningCycle

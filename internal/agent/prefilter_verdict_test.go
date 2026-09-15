@@ -246,7 +246,7 @@ func TestDispatcher_PrefilterMarginPersistedRoutedAndAbstained(t *testing.T) {
 
 	// 1) Direct route: unanimous chat vote -> method=embedding_prefilter.
 	res, err := d.ClassifyAndRoute(context.Background(),
-		"hello there friend how are you doing today", "sess-margin-1", nil, "")
+		"hello there friend how are you doing today", "sess-margin-1", nil, "", "")
 	if err != nil {
 		t.Fatalf("routed ClassifyAndRoute: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestDispatcher_PrefilterMarginPersistedRoutedAndAbstained(t *testing.T) {
 	pref.mu.Unlock()
 
 	res2, err := d.ClassifyAndRoute(context.Background(),
-		"something out of distribution entirely", "sess-margin-1", nil, "")
+		"something out of distribution entirely", "sess-margin-1", nil, "", "")
 	if err != nil {
 		t.Fatalf("abstained ClassifyAndRoute: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestDispatcher_PrefilterCueSuppressedMarginPersisted(t *testing.T) {
 	d.SetInputHasher(func(message string) string { return "0123456789abcdef" })
 
 	if _, err := d.ClassifyAndRoute(context.Background(),
-		"please write some code for me", "sess-margin-2", nil, ""); err != nil {
+		"please write some code for me", "sess-margin-2", nil, "", ""); err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
 	// Mirror the handler: recordDispatch runs after ClassifyAndRoute

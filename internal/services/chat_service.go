@@ -31,6 +31,14 @@ type ChatRequest struct {
 	Parts          []llm.ContentPart `json:"parts,omitempty"`
 	ConversationID string            `json:"conversation_id"`
 	AgentID        string            `json:"agent_id,omitempty"`
+	// Model optionally names the model that serves THIS turn: a
+	// "provider/model-id" ref or a models.json5 alias name. It rides the
+	// chat.request payload into the agent loop's one-shot model-override
+	// seam (the same precedence slot as a parsed user directive:
+	// request model / user directive > alias resolution > default) and is
+	// consumed by the turn that carries it — it never persists into the
+	// config. Empty = turn uses the alias/default chain unchanged.
+	Model string `json:"model,omitempty"`
 }
 
 // ChatResponse contains chat output.
@@ -131,6 +139,9 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 		"conversation_id": conversationID,
 		"session_id":      req.ConversationID, // original session ID for persistence
 		"agent_id":        req.AgentID,
+	}
+	if req.Model != "" {
+		payload["model"] = req.Model
 	}
 	if len(req.Parts) > 0 {
 		payload["parts"] = req.Parts

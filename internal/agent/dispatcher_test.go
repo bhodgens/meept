@@ -1290,7 +1290,7 @@ func TestClassifyAndRoute_IntentModelPropagated(t *testing.T) {
 	// shared alias; the classifier is the component whose provenance this
 	// test asserts.
 	d.intentAnalyzer.failFast = true
-	result, err := d.ClassifyAndRoute(context.Background(), "commit these changes please", "prov-conv-1", nil, "")
+	result, err := d.ClassifyAndRoute(context.Background(), "commit these changes please", "prov-conv-1", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute failed: %v", err)
 	}

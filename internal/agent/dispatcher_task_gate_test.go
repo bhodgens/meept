@@ -119,7 +119,7 @@ func TestClassifyAndRoute_ScheduleCreatesNoOrphanTask(t *testing.T) {
 	// recall-arbitrated; the single-intent classifier decides.
 	const input = "remind me to review the deployment checklist next week on Friday before the release window opens"
 
-	res, err := d.ClassifyAndRoute(context.Background(), input, "sess-orphan-sched", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), input, "sess-orphan-sched", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}

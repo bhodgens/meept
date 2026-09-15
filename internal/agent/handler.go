@@ -192,6 +192,13 @@ type ChatRequest struct {
 	AgentID        string            `json:"agent_id,omitempty"`   // agent override from the client
 	SourceClient   string            `json:"source_client,omitempty"`
 	Parts          []llm.ContentPart `json:"parts,omitempty"`
+	// Model optionally names the model that serves THIS turn ("provider/
+	// model-id" ref or alias name). It is applied through the loop's
+	// one-shot SetModelOverride seam — the SAME precedence slot as a
+	// parsed user model directive — so it outranks the alias resolution
+	// for exactly this turn and auto-clears after it (never persisted to
+	// the config). Empty = unchanged alias/default behavior.
+	Model string `json:"model,omitempty"`
 }
 
 // ChatResponse is the payload for chat.response messages.
@@ -709,9 +716,12 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	recordOnTaskPath := false
 
 	if h.dispatcher != nil {
-		// Multi-agent mode: classify and route through dispatcher
+		// Multi-agent mode: classify and route through dispatcher.
+		// The per-request model (req.Model) rides along so the routed
+		// specialist's loop serves this turn on the requested model
+		// (same precedence slot as a parsed user directive).
 		var dispatchErr error
-		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID, req.Parts, req.AgentID)
+		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID, req.Parts, req.AgentID, req.Model)
 
 		// handlerCase tracks which switch case was selected for audit logging.
 		handlerCase := "direct_mode"
@@ -875,6 +885,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		// Falls back to the singleton loop when the manager is unset,
 		// the session is unknown, or GetOrCreateWired fails.
 		loop := h.sessionLoop(conversationID)
+		h.applyRequestModel(loop, req.Model, conversationID)
 		reply, err = loop.RunOnceWithParts(ctx, req.Message, req.Parts, conversationID)
 	}
 
@@ -2097,6 +2108,21 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 		"session_id", turn.SessionID,
 		"reply_length", len(reply),
 	)
+}
+
+// applyRequestModel arms a chat.request "model" ref on the turn's loop via
+// the loop's one-shot ApplyRequestModel seam (same precedence slot as a
+// parsed user directive; consumed by this turn, never persisted). Nil-safe;
+// empty refs no-op inside the loop.
+func (h *ChatHandler) applyRequestModel(loop *AgentLoop, modelRef, conversationID string) {
+	if loop == nil || modelRef == "" {
+		return
+	}
+	h.logger.Info("Chat request carries a per-request model",
+		"conversation", conversationID,
+		"model", modelRef,
+	)
+	loop.ApplyRequestModel(modelRef)
 }
 
 // sessionLoop returns a per-session AgentLoop when a manager is wired

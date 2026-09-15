@@ -81,7 +81,7 @@ func TestAmbiguityGate_EmptyDigestClarifies(t *testing.T) {
 		t.Fatalf("digest should be empty with no stores; got %+v", digest)
 	}
 
-	res, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "session-empty", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "session-empty", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestAmbiguityGate_SessionContextSuppressesClarification(t *testing.T) {
 		t.Fatal("fixture digest should be non-empty")
 	}
 
-	res, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "session-ctx", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "session-ctx", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}

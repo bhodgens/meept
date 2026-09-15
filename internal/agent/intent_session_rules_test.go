@@ -207,7 +207,7 @@ func TestDispatcher_ClassifyAndRoute_BuildsSessionDigest(t *testing.T) {
 	seedDigestTask(t, d, "task-w1", "digest wiring task", "sess-wire", task.StateCompleted, base, "coder")
 	seedDigestStep(t, d.taskRegistry, "task-w1", 0, task.StepCompleted, "Implemented the fix.")
 
-	result, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "sess-wire", nil, "")
+	result, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "sess-wire", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestDispatcher_ClassifyAndRoute_EmptyDigestOmitsBlock(t *testing.T) {
 	d := newDigestCaptureDispatcher(t, cs)
 
 	const input = "did the change get made?"
-	result, err := d.ClassifyAndRoute(context.Background(), input, "sess-empty", nil, "")
+	result, err := d.ClassifyAndRoute(context.Background(), input, "sess-empty", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}

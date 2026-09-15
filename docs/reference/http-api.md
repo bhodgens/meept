@@ -46,6 +46,25 @@ curl -X POST http://localhost:8081/api/v1/chat \
   -d '{"message": "Hello", "conversation_id": "conv-123"}'
 ```
 
+**Per-request model selection:**
+
+The chat request body accepts an optional `model` field naming the model that
+serves THIS turn — either a `provider/model-id` ref (e.g. `local/lfm-8b-q4`)
+or a models.json5 alias name (e.g. `classifier`):
+
+```bash
+curl -X POST http://localhost:8081/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello", "conversation_id": "conv-123", "model": "local/lfm-8b-q4"}'
+```
+
+The selection is one-shot for that turn and is never persisted to the config
+(unlike `POST /api/v1/models/default`, which rewrites models.json5). It takes
+the same precedence slot as a parsed user model directive:
+**request model / user directive > alias resolution > default ordering**. An
+unresolvable ref is logged and the turn falls back to the alias/default chain;
+an absent field leaves behavior unchanged.
+
 **Chat Stream (SSE):**
 `GET /api/v1/chat/stream` returns a Server-Sent Events stream subscribing to `tool.execution.progress`, `agent.progress`, and `tool.execution.complete` bus topics. Includes a 15-second heartbeat.
 

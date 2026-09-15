@@ -150,6 +150,7 @@ Package agent provides the agent loop and related components.
 - [type AgentLoop](<#AgentLoop>)
   - [func NewAgentLoop\(sessionID string, workingDir string, opts ...LoopOption\) \*AgentLoop](<#NewAgentLoop>)
   - [func \(l \*AgentLoop\) AdvanceBudgetPhase\(newPhaseID string\) error](<#AgentLoop.AdvanceBudgetPhase>)
+  - [func \(l \*AgentLoop\) ApplyRequestModel\(modelRef string\)](<#AgentLoop.ApplyRequestModel>)
   - [func \(l \*AgentLoop\) ClearConversation\(id string\)](<#AgentLoop.ClearConversation>)
   - [func \(l \*AgentLoop\) ClearModelOverride\(\)](<#AgentLoop.ClearModelOverride>)
   - [func \(l \*AgentLoop\) ClearReasoningOverride\(\)](<#AgentLoop.ClearReasoningOverride>)
@@ -613,7 +614,7 @@ Package agent provides the agent loop and related components.
   - [func NewDispatcher\(cfg DispatcherConfig\) \*Dispatcher](<#NewDispatcher>)
   - [func \(d \*Dispatcher\) BuildPlanSessionContext\(ctx context.Context, sessionID, excludeTaskID string\) string](<#Dispatcher.BuildPlanSessionContext>)
   - [func \(d \*Dispatcher\) BuildSessionExecutionContext\(ctx context.Context, sessionID string\) string](<#Dispatcher.BuildSessionExecutionContext>)
-  - [func \(d \*Dispatcher\) ClassifyAndRoute\(ctx context.Context, input, sessionID string, parts \[\]llm.ContentPart, agentOverride string\) \(\*DispatchResult, error\)](<#Dispatcher.ClassifyAndRoute>)
+  - [func \(d \*Dispatcher\) ClassifyAndRoute\(ctx context.Context, input, sessionID string, parts \[\]llm.ContentPart, agentOverride, requestModel string\) \(\*DispatchResult, error\)](<#Dispatcher.ClassifyAndRoute>)
   - [func \(d \*Dispatcher\) FollowUpActiveAgent\(ctx context.Context, conversationID, content, source string\) error](<#Dispatcher.FollowUpActiveAgent>)
   - [func \(d \*Dispatcher\) GetActiveTasks\(ctx context.Context\) \(\[\]\*task.Task, error\)](<#Dispatcher.GetActiveTasks>)
   - [func \(d \*Dispatcher\) GetCapabilityMatcher\(\) \*CapabilityMatcher](<#Dispatcher.GetCapabilityMatcher>)
@@ -3227,6 +3228,13 @@ NewAgentLoop creates a new agent loop with explicit session context. sessionID i
 AdvanceBudgetPhase transitions the budget hierarchy to a new phase, carrying over unused budget if the current phase allows it. Returns nil \(no\-op\) if the hierarchy is not initialized.
 
 TODO: call from orchestrator\_phases.go startNextPhase\(\) when phase transitions occur, so the budget hierarchy tracks plan\-driven phase changes.
+
+<a name="AgentLoop.ApplyRequestModel"></a>
+### func \(\*AgentLoop\) ApplyRequestModel
+
+	func (l *AgentLoop) ApplyRequestModel(modelRef string)
+
+ApplyRequestModel applies a client\-supplied per\-request model ref \(chat.request "model": an alias name or "provider/model\-id"\) through the same one\-shot SetModelOverride seam the dispatcher's parsed user directives use — so it takes the SAME precedence slot: request model / user directive \> alias resolution \> default ordering. It is one\-shot for the turn that carries it: reasoningCycle consumes and clears it, and nothing is written to the config. An empty ref is a no\-op \(the turn runs the alias/default chain unchanged\). Alias names are resolved to their first "provider/model\-id" member here so the in\-cycle override branch \(which resolves via ResolveRef\) can serve the turn; unresolvable refs are logged at Warn and dropped, matching the in\-cycle branch's behavior. Thread\-safe.
 
 <a name="AgentLoop.ClearConversation"></a>
 ### func \(\*AgentLoop\) ClearConversation
@@ -5913,6 +5921,13 @@ ChatRequest is the expected payload for chat.request messages.
 	    AgentID        string            `json:"agent_id,omitempty"`   // agent override from the client
 	    SourceClient   string            `json:"source_client,omitempty"`
 	    Parts          []llm.ContentPart `json:"parts,omitempty"`
+	    // Model optionally names the model that serves THIS turn ("provider/
+	    // model-id" ref or alias name). It is applied through the loop's
+	    // one-shot SetModelOverride seam — the SAME precedence slot as a
+	    // parsed user model directive — so it outranks the alias resolution
+	    // for exactly this turn and auto-clears after it (never persisted to
+	    // the config). Empty = unchanged alias/default behavior.
+	    Model string `json:"model,omitempty"`
 	}
 
 <a name="ChatResponse"></a>
@@ -7176,6 +7191,15 @@ DispatchResult is the result of dispatching a request.
 	    // Forwarded to PlanRequest.ExecutorModelRef. Empty = no directive.
 	    ExecutorModelRef string `json:"executor_model_ref,omitempty"`
 	
+	    // RequestModel is a client-supplied per-request model ref (chat.request
+	    // "model" field: alias name or "provider/model-id"). RouteToAgent applies
+	    // it to the executor loop through the ONE-SHOT SetModelOverride seam —
+	    // the same precedence slot as a parsed user model directive — so it
+	    // serves exactly this turn and auto-clears. Empty = no request-level
+	    // model; the agent's alias/default chain runs unchanged. Tagged json:"-"
+	    // (operational metadata, not user-facing serialization).
+	    RequestModel string `json:"-"`
+	
 	    // ReasoningOverride carries the parsed user reasoning directive (if any)
 	    // so downstream code can forward it to the agent loop. When non-nil, it
 	    // takes precedence over SuggestedReasoningTier per spec §7.5. Tagged
@@ -7239,11 +7263,13 @@ BuildSessionExecutionContext is the exported wrapper used by the chat handler to
 <a name="Dispatcher.ClassifyAndRoute"></a>
 ### func \(\*Dispatcher\) ClassifyAndRoute
 
-	func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart, agentOverride string) (*DispatchResult, error)
+	func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart, agentOverride, requestModel string) (*DispatchResult, error)
 
 ClassifyAndRoute is the main entry point for the dispatcher.
 
 parts carries optional multimodal content \(e.g. image attachments\). When non\-empty, the parts are attached to the returned DispatchResult so that RouteToAgent can forward them to the specialist agent's RunOnceWithParts. Text\-only callers may pass nil.
+
+requestModel carries an optional client\-supplied per\-request model ref \(chat.request "model": alias name or "provider/model\-id"\). It lands on DispatchResult.RequestModel and flows to the executor loop via RouteToAgent's one\-shot SetModelOverride application. Empty = the turn runs the alias/default chain unchanged.
 
 <a name="Dispatcher.FollowUpActiveAgent"></a>
 ### func \(\*Dispatcher\) FollowUpActiveAgent

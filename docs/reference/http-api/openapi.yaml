@@ -239,6 +239,12 @@ components:
           type: string
         agent_id,omitempty:
           type: string
+        model:
+          type: string
+          description: >-
+            Optional per-request model: a "provider/model-id" ref or a
+            models.json5 alias name. One-shot for this turn (same precedence
+            slot as a parsed user directive); never persisted to config.
       required:
         - message
         - conversation_id

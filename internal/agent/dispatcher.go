@@ -245,6 +245,15 @@ type DispatchResult struct {
 	// Forwarded to PlanRequest.ExecutorModelRef. Empty = no directive.
 	ExecutorModelRef string `json:"executor_model_ref,omitempty"`
 
+	// RequestModel is a client-supplied per-request model ref (chat.request
+	// "model" field: alias name or "provider/model-id"). RouteToAgent applies
+	// it to the executor loop through the ONE-SHOT SetModelOverride seam —
+	// the same precedence slot as a parsed user model directive — so it
+	// serves exactly this turn and auto-clears. Empty = no request-level
+	// model; the agent's alias/default chain runs unchanged. Tagged json:"-"
+	// (operational metadata, not user-facing serialization).
+	RequestModel string `json:"-"`
+
 	// ReasoningOverride carries the parsed user reasoning directive (if any)
 	// so downstream code can forward it to the agent loop. When non-nil, it
 	// takes precedence over SuggestedReasoningTier per spec §7.5. Tagged
@@ -799,7 +808,13 @@ func suggestReasoningForIntent(intentType string) string {
 // non-empty, the parts are attached to the returned DispatchResult so that
 // RouteToAgent can forward them to the specialist agent's RunOnceWithParts.
 // Text-only callers may pass nil.
-func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart, agentOverride string) (*DispatchResult, error) {
+//
+// requestModel carries an optional client-supplied per-request model ref
+// (chat.request "model": alias name or "provider/model-id"). It lands on
+// DispatchResult.RequestModel and flows to the executor loop via
+// RouteToAgent's one-shot SetModelOverride application. Empty = the turn
+// runs the alias/default chain unchanged.
+func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart, agentOverride, requestModel string) (*DispatchResult, error) {
 	d.logger.Debug("Dispatching request",
 		"session", sessionID,
 		"input_len", len(input),
@@ -1140,6 +1155,10 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		Parts:            parts,
 		SuggestedMode:    intent.SuggestedMode,
 		ExecutorModelRef: executorModelRefFromDirective(parseResult.Directive),
+		// Client-supplied per-request model (chat.request "model").
+		// Rides the result so RouteToAgent applies it to the executor
+		// loop's one-shot override seam. Empty = no request-level model.
+		RequestModel: requestModel,
 
 		AgentOverrideApplied: agentOverrideApplied,
 	}
@@ -1873,7 +1892,8 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 		)
 		d.clearPendingClarification(sessionID)
 		// Classify just the user's latest response to break the cycle.
-		return d.ClassifyAndRoute(ctx, userResponse, sessionID, nil, "")
+		// (Parts and the one-shot request model do not survive clarification.)
+		return d.ClassifyAndRoute(ctx, userResponse, sessionID, nil, "", "")
 	}
 
 	d.logger.Info("Resuming after clarification",
@@ -1979,9 +1999,10 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 	// Fallback: if intent analysis is unavailable or fails, proceed with normal
 	// classification of the combined input. Parts are not propagated through
 	// the clarification flow — multimodal attachments only attach to the
-	// original user turn.
+	// original user turn. The request model is likewise one-shot and does not
+	// survive a clarification round-trip ("" = alias/default chain).
 	d.clearPendingClarification(sessionID)
-	result, err := d.ClassifyAndRoute(ctx, combinedInput, sessionID, nil, "")
+	result, err := d.ClassifyAndRoute(ctx, combinedInput, sessionID, nil, "", "")
 	// Pending-mode preservation (quickplan-mode leaf 02): the analyzer-less
 	// fallback must not downgrade a pending quickplan clarification either.
 	if err == nil && result != nil && pendingMode == "quick_plan" {
@@ -2563,6 +2584,15 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	if agent == nil {
 		return "", fmt.Errorf("no agent available for %q", result.AgentID)
 	}
+
+	// Apply the client-supplied per-request model (chat.request "model")
+	// through the loop's ONE-SHOT SetModelOverride seam — the same
+	// precedence slot as a parsed user model directive, so it outranks the
+	// agent's alias resolution for exactly this turn and auto-clears after
+	// it (nothing is persisted to the config). applyRequestModel no-ops on
+	// an empty ref or an unresolvable one (a warn is logged and the turn
+	// runs the alias/default chain).
+	agent.ApplyRequestModel(result.RequestModel)
 
 	// Run the agent. When the dispatcher is carrying multimodal parts
 	// (e.g. image attachments), route them through RunOnceWithParts so the

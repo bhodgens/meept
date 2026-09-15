@@ -431,6 +431,10 @@ Package config provides configuration loading and validation for meept.
 
 	const EnvMeeptHome = "MEEPT_HOME"
 
+<a name="EnvScriptName"></a>EnvScriptName is the literal filename of the meept\-home env resolver script \(see internal/llm/envscript.go\). It is defined here too because the config sync exclusion guard needs the same name and internal/config cannot import internal/llm.
+
+	const EnvScriptName = "env"
+
 ## Variables
 
 <a name="ErrGitConflict"></a>Sentinel errors for the config sync subsystem.

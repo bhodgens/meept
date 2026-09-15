@@ -228,7 +228,7 @@ func TestClassifyAndRoute_LLMQuickPlanOpensAsyncGate(t *testing.T) {
 	// classifier with the canned quickplan verdict.
 	const input = "knock out the whole roadmap of remaining migration work without checking in with me at every step"
 
-	res, err := d.ClassifyAndRoute(context.Background(), input, "sess-llm-qp", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), input, "sess-llm-qp", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}

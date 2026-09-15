@@ -62,7 +62,12 @@ the single outgoing call (`internal/agent/loop.go` `chatWithFailoverRaw`,
   `WithModelOverride` and the manager routes the call to the directed
   provider first. One-shot directives are cleared after the turn that
   consumed them; persistent directives (shadow hot-swap) remain until
-  explicitly cleared.
+  explicitly cleared. The HTTP chat API feeds the SAME channel: a
+  `chat.request` `model` field (ref or alias name) is armed through
+  `AgentLoop.ApplyRequestModel` — the same one-shot `SetModelOverride` seam
+  and precedence slot as a parsed directive — so a per-request model also
+  outranks the alias resolution for exactly its turn and never persists into
+  the config.
 - **Why not a manager-level `SwitchModel`** — `ProviderManager` is shared by
   every session. A `SwitchModel` (or any manager-level "current model") would
   make one turn's alias choice visible to concurrent turns in other sessions;

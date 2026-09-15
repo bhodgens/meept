@@ -154,3 +154,175 @@ func TestAgentLoop_UserModelOverride_PersistentSurvives(t *testing.T) {
 	assert.NotNil(t, loop.pendingModelOverrideConfig,
 		"persistent override keeps its staged config")
 }
+
+// ---------------------------------------------------------------------------
+// Per-request model (chat.request "model") — the HTTP chat API surface.
+//
+// ApplyRequestModel arms the SAME one-shot SetModelOverride seam the
+// dispatcher's parsed user directives use, so everything below rides the
+// existing precedence contract: request model / user directive > alias
+// resolution > default. These tests extend the RunOnce-level pattern above
+// with the chat-API entry point.
+// ---------------------------------------------------------------------------
+
+// TestAgentLoop_RequestModelReachesWire_ProviderManager: a chat request
+// naming local/user-b as its per-request model must serve the turn on
+// user-override-b (not the alias-resolved local/a, not the manager default)
+// through a ProviderManager chatter — the daemon's real wiring.
+func TestAgentLoop_RequestModelReachesWire_ProviderManager(t *testing.T) {
+	cap := &modelCapture{}
+	server := newModelCaptureServer(cap)
+	defer server.Close()
+
+	resolver := overrideResolver(t, server.URL)
+
+	pm := llm.NewProviderManager(llm.ProviderManagerConfig{
+		Providers: []*llm.ModelConfig{
+			{ProviderID: "local", ModelID: "manager-default", BaseURL: server.URL},
+		},
+		Logger: slog.New(slog.DiscardHandler),
+	})
+
+	loop := newOverrideLoop(t, resolver, pm)
+
+	loop.ApplyRequestModel("local/user-b")
+
+	_, err := loop.RunOnce(context.Background(), "do a thing", "conv-req-model")
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, cap.count(), 1, "the LLM must have been reached")
+	assert.Equal(t, "user-override-b", cap.models[0],
+		"the per-request model must reach the wire, outranking the alias resolution")
+	assert.Empty(t, loop.GetModelOverride(),
+		"the per-request model is one-shot: consumed by the turn that carried it")
+	assert.Nil(t, loop.pendingModelOverrideConfig, "staged override config must be consumed")
+}
+
+// TestAgentLoop_RequestModelBeatsAlias pins precedence at the chat-API
+// entry: the request model outranks the loop's configured alias
+// (request model > alias resolution) on the same turn.
+func TestAgentLoop_RequestModelBeatsAlias(t *testing.T) {
+	cap := &modelCapture{}
+	server := newModelCaptureServer(cap)
+	defer server.Close()
+
+	resolver := overrideResolver(t, server.URL)
+
+	pm := llm.NewProviderManager(llm.ProviderManagerConfig{
+		Providers: []*llm.ModelConfig{
+			{ProviderID: "local", ModelID: "manager-default", BaseURL: server.URL},
+		},
+		Logger: slog.New(slog.DiscardHandler),
+	})
+
+	loop := newOverrideLoop(t, resolver, pm) // WithModelRef(testClassifierAlias) → local/a
+
+	loop.ApplyRequestModel("local/user-b")
+	_, err := loop.RunOnce(context.Background(), "turn with a request model", "conv-req-beats-alias")
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, cap.count(), 1)
+	assert.Equal(t, "user-override-b", cap.models[0],
+		"request model must outrank the alias resolution (alias resolves local/a); "+
+			"the FIRST wire call of the turn carries it — later calls in the same turn's "+
+			"nudge ladder legitimately fall back to the alias (one-shot = one LLM call)")
+}
+
+// TestAgentLoop_RequestModel_NoLeakToNextTurn: turn 1 carries the request
+// model; turn 2 (same loop, no new model field) must fall back to the
+// alias-resolved model — the one-shot override must not leak forward.
+func TestAgentLoop_RequestModel_NoLeakToNextTurn(t *testing.T) {
+	cap := &modelCapture{}
+	server := newModelCaptureServer(cap)
+	defer server.Close()
+
+	resolver := overrideResolver(t, server.URL)
+
+	pm := llm.NewProviderManager(llm.ProviderManagerConfig{
+		Providers: []*llm.ModelConfig{
+			{ProviderID: "local", ModelID: "manager-default", BaseURL: server.URL},
+		},
+		Logger: slog.New(slog.DiscardHandler),
+	})
+
+	loop := newOverrideLoop(t, resolver, pm)
+
+	loop.ApplyRequestModel("local/user-b")
+	_, err := loop.RunOnce(context.Background(), "turn one with model", "conv-no-leak")
+	require.NoError(t, err)
+	require.Equal(t, "user-override-b", cap.models[0])
+
+	// Turn 2: no request model — the alias must serve again.
+	_, err = loop.RunOnce(context.Background(), "turn two without model", "conv-no-leak")
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, cap.count(), 2)
+	assert.Equal(t, "alias-model-a", cap.last(),
+		"the next turn must fall back to the alias-resolved model (no leak)")
+	assert.NotContains(t, cap.models[1:], "user-override-b",
+		"the request model must not appear again after its turn (no leak)")
+	assert.Empty(t, loop.GetModelOverride())
+}
+
+// TestAgentLoop_RequestModel_AbsentUnchangedBehavior: no model field →
+// byte-identical legacy behavior (alias resolution serves the turn, no
+// override is ever armed).
+func TestAgentLoop_RequestModel_AbsentUnchangedBehavior(t *testing.T) {
+	cap := &modelCapture{}
+	server := newModelCaptureServer(cap)
+	defer server.Close()
+
+	resolver := overrideResolver(t, server.URL)
+
+	pm := llm.NewProviderManager(llm.ProviderManagerConfig{
+		Providers: []*llm.ModelConfig{
+			{ProviderID: "local", ModelID: "manager-default", BaseURL: server.URL},
+		},
+		Logger: slog.New(slog.DiscardHandler),
+	})
+
+	loop := newOverrideLoop(t, resolver, pm)
+
+	// No ApplyRequestModel call at all.
+	_, err := loop.RunOnce(context.Background(), "plain turn", "conv-absent")
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, cap.count(), 1)
+	assert.Equal(t, "alias-model-a", cap.last(),
+		"without a request model the alias-resolved model serves the turn")
+	assert.Empty(t, loop.GetModelOverride())
+
+	// An explicit empty ref is an explicit no-op too.
+	loop.ApplyRequestModel("")
+	assert.Empty(t, loop.GetModelOverride())
+}
+
+// TestAgentLoop_RequestModel_UnresolvableRefDropped: a model ref that
+// resolves to nothing is dropped with a warn — the turn runs the
+// alias/default chain rather than arming a dead override.
+func TestAgentLoop_RequestModel_UnresolvableRefDropped(t *testing.T) {
+	cap := &modelCapture{}
+	server := newModelCaptureServer(cap)
+	defer server.Close()
+
+	resolver := overrideResolver(t, server.URL)
+
+	pm := llm.NewProviderManager(llm.ProviderManagerConfig{
+		Providers: []*llm.ModelConfig{
+			{ProviderID: "local", ModelID: "manager-default", BaseURL: server.URL},
+		},
+		Logger: slog.New(slog.DiscardHandler),
+	})
+
+	loop := newOverrideLoop(t, resolver, pm)
+
+	loop.ApplyRequestModel("local/does-not-exist")
+	assert.Empty(t, loop.GetModelOverride(),
+		"an unresolvable ref must not arm the override")
+
+	_, err := loop.RunOnce(context.Background(), "turn after a bad ref", "conv-bad-ref")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, cap.count(), 1)
+	assert.Equal(t, "alias-model-a", cap.last(),
+		"the alias-resolved model serves the turn after a dropped ref")
+}

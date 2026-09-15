@@ -80,6 +80,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func RuntimeHasLiveOwner\(cfgs \[\]\*RuntimeConfig, command string, pid int\) bool](<#RuntimeHasLiveOwner>)
 - [func SchemaModeValid\(s string\) bool](<#SchemaModeValid>)
 - [func SetCatalogContextWindow\(providerID, modelID string, contextWindow int\) bool](<#SetCatalogContextWindow>)
+- [func SetEnvScriptResolver\(r \*envScriptResolver\)](<#SetEnvScriptResolver>)
 - [func SetGBNFConstrained\(on bool\)](<#SetGBNFConstrained>)
 - [func SpawnRecordPath\(pidFile string\) string](<#SpawnRecordPath>)
 - [func StripPromptCacheBoundary\(s string\) string](<#StripPromptCacheBoundary>)
@@ -787,6 +788,14 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 <a name="DefaultQuotaMaxWait"></a>DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without importing internal/config \(which would create a cycle via tools/mcp\).
 
 	const DefaultQuotaMaxWait = 24 * time.Hour
+
+<a name="EnvScriptName"></a>EnvScriptName is the literal filename of the env resolver script, directly under the meept home. It is an EXECUTABLE script, not a static env file.
+
+	const EnvScriptName = "env"
+
+<a name="EnvScriptTimeout"></a>EnvScriptTimeout bounds a single env\-script invocation. A hung script must never hang daemon boot: on timeout the variable counts as not\-found and a warning names the variable \(never any value\).
+
+	const EnvScriptTimeout = 5 * time.Second
 
 <a name="LocalModelsProviderID"></a>LocalModelsProviderID is the synthetic provider alias that pulled local models register under.
 
@@ -1593,6 +1602,13 @@ SchemaModeValid reports whether s is a recognized schema\-mode string: "" \(unse
 	func SetCatalogContextWindow(providerID, modelID string, contextWindow int) bool
 
 SetCatalogContextWindow updates one entry's ContextWindow. The slice is copied and replaced \(never mutated in place\) so existing snapshots stay consistent. Returns false when the provider/model is unknown.
+
+<a name="SetEnvScriptResolver"></a>
+## func SetEnvScriptResolver
+
+	func SetEnvScriptResolver(r *envScriptResolver)
+
+SetEnvScriptResolver installs the daemon\-wide env\-script resolver for config expansion. The daemon calls this once at startup; a nil resolver \(the default\) keeps expansion env\-only.
 
 <a name="SetGBNFConstrained"></a>
 ## func SetGBNFConstrained

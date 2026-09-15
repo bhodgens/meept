@@ -87,7 +87,7 @@ func TestDispatcher_PrefilterDirectRouteSkipsClassifierChain(t *testing.T) {
 	// chat, so the direct route is attributable to Stage-0 alone.
 	d := newPrefilterDispatcher(t, pfInlineStore, []float64{0.1, 0.99, 0, 0}, nil)
 
-	res, err := d.ClassifyAndRoute(context.Background(), "hello there friend how are you doing today", "session-pf-1", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), "hello there friend how are you doing today", "session-pf-1", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestDispatcher_PrefilterDirectRouteSkipsClassifierChain(t *testing.T) {
 func TestDispatcher_PrefilterTaskIntentFallsThrough(t *testing.T) {
 	d := newPrefilterDispatcher(t, pfCodeStore, []float64{0.99, 0.1, 0, 0}, nil)
 
-	res, err := d.ClassifyAndRoute(context.Background(), "please write some code for me", "session-pf-task-1", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), "please write some code for me", "session-pf-task-1", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestDispatcher_PrefilterTaskIntentFallsThrough(t *testing.T) {
 func TestDispatcher_PrefilterAgentOverrideFallsThrough(t *testing.T) {
 	d := newPrefilterDispatcher(t, pfInlineStore, []float64{0.1, 0.99, 0, 0}, nil)
 
-	res, err := d.ClassifyAndRoute(context.Background(), "hello there friend how are you doing today", "session-pf-override-1", nil, "planner")
+	res, err := d.ClassifyAndRoute(context.Background(), "hello there friend how are you doing today", "session-pf-override-1", nil, "planner", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestDispatcher_PrefilterCompoundSignalStillExcluded(t *testing.T) {
 	if !hasCompoundSignalWords(in) {
 		t.Fatal("test input lost its compound signal (fixture drift)")
 	}
-	res, err := d.ClassifyAndRoute(context.Background(), in, "session-pf-compound-1", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), in, "session-pf-compound-1", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestDispatcher_PrefilterAssertOnlyNeverRoutes(t *testing.T) {
 		t.Fatal("assertOnly flag not propagated")
 	}
 
-	res, err := d.ClassifyAndRoute(context.Background(), "please write some code for me", "session-assert-1", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), "please write some code for me", "session-assert-1", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}

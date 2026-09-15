@@ -99,7 +99,7 @@ func TestClassifyIntent_FallbackQuickPlanDispatchesAsync(t *testing.T) {
 	// same way the handler-visible path requires (ShouldCreateTask is
 	// true for quickplan; the handler's async branch needs Task != nil).
 	const input = "zorblification quixomatic rendlement requested"
-	res, err := d.ClassifyAndRoute(context.Background(), input, "sess-qp-async-fallback", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), input, "sess-qp-async-fallback", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestClassifyIntent_ShortSimpleGuardStillChat(t *testing.T) {
 func TestClassifyAndRoute_ShortInputRoutesChat(t *testing.T) {
 	d := NewDispatcher(DispatcherConfig{Logger: testLogger()})
 
-	res, err := d.ClassifyAndRoute(context.Background(), "hi there", "session-qp-guard", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), "hi there", "session-qp-guard", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestAmbiguityGate_QuickPlanClarifySeedsPendingMode(t *testing.T) {
 	cs := newCaptureServer(t, quickplanAmbiguousAnalysis)
 	d := newDigestCaptureDispatcher(t, cs)
 
-	res, err := d.ClassifyAndRoute(context.Background(), "review the module for bugs and fix them", "sess-qp-gate", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), "review the module for bugs and fix them", "sess-qp-gate", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestAmbiguityGate_NonQuickPlanUnchanged(t *testing.T) {
 	cs := newCaptureServer(t, ambiguousAnalysisJSON) // category "clarification"
 	d := newDigestCaptureDispatcher(t, cs)
 
-	res, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "sess-other-gate", nil, "")
+	res, err := d.ClassifyAndRoute(context.Background(), "did the change get made?", "sess-other-gate", nil, "", "")
 	if err != nil {
 		t.Fatalf("ClassifyAndRoute: %v", err)
 	}
