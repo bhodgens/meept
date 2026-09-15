@@ -671,6 +671,30 @@
         "enabled": true,
         "reference_path": "",   // empty → ~/.meept/embed_health_reference.json
       },
+      // Session drift detector (issue #41): watches the per-session
+      // intent-embedding sequence and signals when the pattern deviates
+      // from the recent trajectory. Default OFF, log-only: the signal is
+      // logged but never changes routing until precision is measured on
+      // real traffic. Zero raw-text persistence — embeddings and hashes
+      // only. Needs multi-turn sessions to calibrate; keep disabled until
+      // the outcome loop (#40) accumulates data.
+      "session_drift": {
+        "enabled": false,
+        "window_size": 0,       // 0 → built-in default (12 turns)
+        "threshold": 0,         // 0 → built-in default
+        "log_only": true,
+      },
+      // Tool-failure burst detector (issue #43): watches the per-session
+      // dispatch outcome stream (ok/corrected/failed_replan) and signals
+      // when the failure pattern shifts. Default OFF, log-only. Blocked on
+      // real outcome data from the outcome loop (#40); compare against a
+      // simple "N failures in a row" threshold rule before adopting.
+      "burst_detection": {
+        "enabled": false,
+        "window_size": 0,       // 0 → built-in default (20 turns)
+        "threshold": 0,         // 0 → built-in default
+        "log_only": true,
+      },
     },
   },
 

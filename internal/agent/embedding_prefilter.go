@@ -62,6 +62,15 @@ type EmbeddingPrefilter struct {
 	// immutable), so Check needs no lock.
 	embedHealth *EmbedHealthCheck
 
+	// embeddingObserver, when non-nil, receives each healthy embedding
+	// Match produces (issue #41 session drift): the dispatcher registers
+	// an observer that feeds the per-session drift detector. Register
+	// once via SetEmbeddingObserver during construction, before Match
+	// runs; not lock-protected (same wiring-order contract as
+	// SetVerdictObserver). Only embeddings that passed the health gate
+	// are emitted — drift never observes degraded vectors.
+	embeddingObserver func(sessionID string, vec []float64)
+
 	mu       sync.RWMutex
 	examples []prefilterExample
 	storeDim int
@@ -313,6 +322,17 @@ func (p *EmbeddingPrefilter) SetVerdictObserver(fn func(PrefilterVerdict)) {
 	}
 }
 
+// SetEmbeddingObserver wires the healthy-embedding consumer (issue #41
+// session drift). Nil-guarded per project invariant (cf.
+// SetVerdictObserver). Not lock-protected: register once during
+// construction, before Match runs. The observer receives (sessionID,
+// embedding) for every embedding that passed the health gate.
+func (p *EmbeddingPrefilter) SetEmbeddingObserver(fn func(sessionID string, vec []float64)) {
+	if fn != nil {
+		p.embeddingObserver = fn
+	}
+}
+
 // emitVerdict invokes the observer when one is wired. Called synchronously
 // on every Match return path; observer panics are NOT caught (the observer
 // is in-process and trusted).
@@ -426,6 +446,16 @@ func (p *EmbeddingPrefilter) vote(vec []float64, input string) (kNNVote, bool) {
 // nearest examples vote unanimously for one intent. nil means "no opinion"
 // -- caller falls through to the LLM chain.
 func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
+	return p.MatchForSession(ctx, input, "")
+}
+
+// MatchForSession is Match with session attribution (issue #41 session
+// drift): when an embedding observer is wired, each healthy embedding is
+// emitted with the session id so the drift detector can track the
+// per-session embedding sequence. sessionID may be empty (legacy Match
+// path and tests) — the observer simply receives an empty session key
+// and can drop it.
+func (p *EmbeddingPrefilter) MatchForSession(ctx context.Context, input, sessionID string) *Intent {
 	input = strings.TrimSpace(input)
 	if input == "" || !p.loadIndex(false) {
 		// Empty index (or blank input): nothing to assert, nothing to
@@ -469,6 +499,16 @@ func (p *EmbeddingPrefilter) Match(ctx context.Context, input string) *Intent {
 			p.emitVerdict(PrefilterVerdict{AssertedIntent: ""})
 			return nil
 		}
+	}
+
+	// Session drift feed (issue #41): after the health gate, hand each
+	// healthy embedding to the drift observer with the session id. The
+	// observer is registered once at construction; an empty sessionID
+	// (legacy Match path) is forwarded as-is — the drift call site drops
+	// it. Never on the error/degraded paths above: drift observes only
+	// embeddings that the health check accepted.
+	if p.embeddingObserver != nil {
+		p.embeddingObserver(sessionID, vec)
 	}
 
 	p.mu.RLock()

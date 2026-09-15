@@ -2401,6 +2401,14 @@ type OrchestratorConfig struct {
 	// prefilter is inert and all traffic flows through the LLM path
 	// unchanged.
 	Prefilter ClassifierPrefilterConfig `json:"classifier_prefilter" toml:"classifier_prefilter"`
+	// SessionDrift configures the session drift detector (issue #41): a
+	// temporal anomaly check on the per-session intent-embedding stream.
+	// Default off, log-only — the established first production mode.
+	SessionDrift SessionDriftConfig `json:"session_drift" toml:"session_drift"`
+	// BurstDetection configures the tool-failure burst detector (issue
+	// #43): a temporal anomaly check on the per-session dispatch outcome
+	// stream. Default off, log-only.
+	BurstDetection BurstDetectionConfig `json:"burst_detection" toml:"burst_detection"`
 }
 
 // ClassifierPrefilterConfig configures the Stage-0 embedding prefilter in
@@ -2453,6 +2461,47 @@ type ClassifierPrefilterConfig struct {
 	// scored against a fixed reference set before the kNN vote and a
 	// degraded/unfamiliar embedding falls through to the LLM chain.
 	EmbedHealthCheck EmbedHealthCheckConfig `json:"embed_health_check" toml:"embed_health_check"`
+}
+
+// SessionDriftConfig configures the session drift detector (meept issue
+// #41): a temporal anomaly check on the per-session intent-embedding
+// stream. The detector watches the sequence of embeddings a session
+// produces and raises a signal when the current window deviates from the
+// prior trajectory, so the dispatcher can re-run the full classification
+// chain instead of trusting a per-message verdict.
+type SessionDriftConfig struct {
+	// Enabled turns on the drift detector. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// WindowSize is the length of the rolling embedding window, in
+	// turns. 0 uses the built-in default.
+	WindowSize int `json:"window_size" toml:"window_size"`
+	// Threshold is the anomaly score above which drift is signaled.
+	// 0 uses the built-in default.
+	Threshold float64 `json:"threshold" toml:"threshold"`
+	// LogOnly makes the signal observational: drift is logged but never
+	// changes routing. Default true — the established first
+	// production mode (assert_only / log-only) until precision is
+	// measured on real traffic.
+	LogOnly bool `json:"log_only" toml:"log_only"`
+}
+
+// BurstDetectionConfig configures the tool-failure burst detector (meept
+// issue #43): a temporal anomaly check on the per-session dispatch outcome
+// stream. The detector watches resolved outcomes (ok / corrected /
+// failed_replan) and raises a signal when the failure pattern shifts,
+// for the dispatcher to consider a replan or model switch.
+type BurstDetectionConfig struct {
+	// Enabled turns on the burst detector. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// WindowSize is the length of the rolling outcome window, in
+	// turns. 0 uses the built-in default.
+	WindowSize int `json:"window_size" toml:"window_size"`
+	// Threshold is the anomaly score above which a burst is signaled.
+	// 0 uses the built-in default.
+	Threshold float64 `json:"threshold" toml:"threshold"`
+	// LogOnly makes the signal observational: bursts are logged but
+	// never trigger replans. Default true.
+	LogOnly bool `json:"log_only" toml:"log_only"`
 }
 
 // EmbedHealthCheckConfig configures the embedding-pipeline health gate
@@ -3149,6 +3198,21 @@ func DefaultConfig() *Config {
 					Enabled:       true,
 					ReferencePath: "",
 				},
+			},
+			// Session drift (issue #41): default off, log-only.
+			SessionDrift: SessionDriftConfig{
+				Enabled:    false,
+				WindowSize: 0,
+				Threshold:  0,
+				LogOnly:    true,
+			},
+			// Tool-failure burst detection (issue #43): default off,
+			// log-only.
+			BurstDetection: BurstDetectionConfig{
+				Enabled:    false,
+				WindowSize: 0,
+				Threshold:  0,
+				LogOnly:    true,
 			},
 		},
 		Learning: LearningConfig{

@@ -345,6 +345,20 @@ type Dispatcher struct {
 	stashVerdict    PrefilterVerdict
 	stashHasVerdict bool
 
+	// sessionDrift is the per-session intent-embedding drift detector
+	// (issue #41). Wired via SetDriftDetector by daemon composition;
+	// nil/disabled => Observe is never called and routing is unchanged
+	// (the detector is log-only at this call site until precision is
+	// measured on real traffic).
+	sessionDrift *SessionDriftDetector
+
+	// burstDetector is the tool-failure burst detector (issue #43),
+	// fed by resolved dispatch outcomes in recordDispatch. Wired via
+	// SetBurstDetector by daemon composition; nil/disabled => outcomes
+	// are not observed and routing is unchanged (log-only at the call
+	// site).
+	burstDetector *metrics.BurstDetector
+
 	// toolRegistry provides structural tool gating by depth.
 	// When non-nil, the dispatcher uses it to gate depth-sensitive
 	// tools (like subagent spawn) so agents at maxDepth simply
@@ -945,7 +959,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// AssertOnly mode never routes: the verdict is logged (agreement data
 	// vs whatever the LLM chain classifies) and the chain always runs.
 	if d.prefilter != nil && agentOverride == "" && !hasCompoundSignalWords(input) {
-		pi := d.prefilter.Match(ctx, input)
+		pi := d.prefilter.MatchForSession(ctx, input, sessionID)
 		// Door-1 verdict capture (classifier-outcome-loop leaf 02): Match
 		// stashed its verdict synchronously above. PEEK it (do not
 		// consume): recordDispatch — invoked by the handler after this
@@ -3710,6 +3724,54 @@ func (d *Dispatcher) SetMetricsStore(store *metrics.Store) {
 	}
 }
 
+// SetDriftDetector wires the session drift detector (issue #41). Nil
+// guard per project invariant (cf. SetMetricsStore): a nil detector —
+// including a typed-nil pointer — is ignored so a wiring-order bug
+// cannot strip a live detector. Disabled detectors are accepted and
+// stay inert at Observe.
+//
+// Wiring model: the dispatcher registers the detector as the prefilter's
+// embedding observer (SetEmbeddingObserver), so every healthy Door-1
+// embedding feeds the per-session drift check with zero extra model
+// calls. The signal is LOG-ONLY at this call site (issue #41 acceptance
+// criterion 3): a drift event logs one Info line and never changes
+// routing — the full-chain fall-through decision belongs to a later,
+// measured rollout.
+func (d *Dispatcher) SetDriftDetector(det *SessionDriftDetector) {
+	if det == nil {
+		return
+	}
+	d.sessionDrift = det
+	if d.prefilter != nil {
+		d.prefilter.SetEmbeddingObserver(func(sessionID string, vec []float64) {
+			if sessionID == "" || !det.Enabled() {
+				return
+			}
+			drifted, score := det.Observe(sessionID, vec)
+			if drifted {
+				// Log-only signal (issue #41): session id and
+				// numbers only, never message text.
+				d.logger.Info("session drift detected (log-only; not acting)",
+					"session", sessionID,
+					"score", score,
+					"threshold", det.Threshold(),
+					"window", det.WindowSize(),
+				)
+			}
+		})
+	}
+}
+
+// SetBurstDetector wires the tool-failure burst detector (issue #43).
+// Nil guard per project invariant (cf. SetMetricsStore). The dispatcher
+// feeds it resolved dispatch outcomes in recordDispatch; the signal is
+// LOG-ONLY at that call site.
+func (d *Dispatcher) SetBurstDetector(det *metrics.BurstDetector) {
+	if det != nil {
+		d.burstDetector = det
+	}
+}
+
 // SetInputHasher wires the salted input-hash function used to fill
 // dispatch_log.input_hash (classifier-observability S4). The daemon loads
 // the per-install salt and injects a closure over metrics.HashInput; the
@@ -3914,11 +3976,29 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 		if classifierMethod == "" {
 			resolveAgentID = ""
 		}
-		if resolveErr := d.metricsStore.ResolvePendingOutcome(
+		resolvedOutcome, resolveErr := d.metricsStore.ResolvePendingOutcome(
 			sessionID, turnNo, resolveAgentID, reRouteWindow,
-		); resolveErr != nil {
+		)
+		if resolveErr != nil {
 			d.logger.Warn("failed to resolve pending dispatch outcome",
 				"session", sessionID, "turn", turnNo, "error", resolveErr)
+		}
+
+		// Tool-failure burst detection (issue #43): feed each resolved
+		// outcome into the temporal detector. Log-only at this call
+		// site — a burst logs one Info line and never triggers a replan
+		// or model switch (acceptance criterion 3; the replan decision
+		// belongs to a later, measured rollout). The detector itself is
+		// nil/disabled-inert, so this is a no-op until wired.
+		if resolvedOutcome != "" && d.burstDetector != nil && d.burstDetector.Enabled() {
+			if burst, score := d.burstDetector.ObserveOutcome(sessionID, resolvedOutcome); burst {
+				d.logger.Info("tool-failure burst signal (log-only; not acting)",
+					"session", sessionID,
+					"score", score,
+					"threshold", d.burstDetector.Threshold(),
+					"turn", turnNo,
+				)
+			}
 		}
 	}
 }

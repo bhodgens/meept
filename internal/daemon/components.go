@@ -46,6 +46,7 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
+	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/placement"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/preferences"
@@ -2554,6 +2555,43 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// analyzer + router LLM calls.
 			PrefilterConfig: cfg.Orchestrator.Prefilter,
 		})
+
+		// Session drift detector (issue #41): watches the per-session
+		// intent-embedding sequence fed by the prefilter's Door-1 path.
+		// Default off, log-only — the detector is constructed only when
+		// config enables it, and the dispatcher treats the signal as
+		// observational.
+		if cfg.Orchestrator.SessionDrift.Enabled {
+			drift := agent.NewSessionDriftDetector(cfg.Orchestrator.SessionDrift, logger.With("component", "session-drift"))
+			if drift.Enabled() {
+				c.Dispatcher.SetDriftDetector(drift)
+				logger.Info("session drift detector enabled (log-only)",
+					"window", drift.WindowSize(),
+					"threshold", drift.Threshold(),
+				)
+			}
+		}
+
+		// Tool-failure burst detector (issue #43): watches the
+		// per-session dispatch outcome stream resolved by the
+		// re-route detector in recordDispatch. Default off,
+		// log-only. Blocked on real outcome data from the outcome
+		// loop (#40) before its signal is trusted.
+		if cfg.Orchestrator.BurstDetection.Enabled {
+			burst := metrics.NewBurstDetector(metrics.BurstDetectionConfig{
+				Enabled:    cfg.Orchestrator.BurstDetection.Enabled,
+				WindowSize: cfg.Orchestrator.BurstDetection.WindowSize,
+				Threshold:  cfg.Orchestrator.BurstDetection.Threshold,
+				LogOnly:    cfg.Orchestrator.BurstDetection.LogOnly,
+			}, logger.With("component", "burst-detector"))
+			if burst.Enabled() {
+				c.Dispatcher.SetBurstDetector(burst)
+				logger.Info("tool-failure burst detector enabled (log-only)",
+					"window", burst.WindowSize(),
+					"threshold", burst.Threshold(),
+				)
+			}
+		}
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
 		// Wire thread router for thread-based context partitioning.
