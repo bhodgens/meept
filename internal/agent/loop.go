@@ -5477,7 +5477,24 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				return nil, err
 			}
 			servedModel = modelConfig
-			if l.llmClient != nil {
+			// An armed one-shot user override wins over the alias here too.
+			// reasoningCycle applies the override via SwitchModel BEFORE this
+			// rotation loop runs; the unconditional SwitchModel below used to
+			// clobber it one millisecond later (observed live 2026-09-14:
+			// "Applied model override ... to=LFM2.5" at .083, bare
+			// "Switched model agnes" at .084, and the ledger showed agnes for
+			// a turn the user directed at the local model). The request still
+			// carries llm.WithModelOverride (ranked above the alias channel),
+			// but a concrete shared client also needs its retargeting left
+			// alone, because OTHER loops share it and their own alias passes
+			// race this one.
+			if l.pendingModelOverrideConfig != nil {
+				// A user/one-shot override is armed and survives until the
+				// first LLM call consumes it (GetModelOverride() was already
+				// cleared by reasoningCycle's application step above, so the
+				// staged config is the reliable signal here).
+				servedModel = l.pendingModelOverrideConfig
+			} else if l.llmClient != nil {
 				l.modelMu.Lock()
 				if err := l.llmClient.SwitchModel(modelConfig); err != nil {
 					l.modelMu.Unlock()
