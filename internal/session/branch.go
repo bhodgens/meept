@@ -26,6 +26,7 @@ type BranchManager struct {
 }
 
 // NewBranchManager creates a new BranchManager.
+// NewBranchManager creates a new BranchManager.
 func NewBranchManager(store Store, summarizer BranchSummarizer, cfg config.SessionConfig, logger *slog.Logger) *BranchManager {
 	if logger == nil {
 		logger = slog.Default()

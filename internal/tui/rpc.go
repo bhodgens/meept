@@ -1327,6 +1327,55 @@ func (c *RPCClient) ReadDirProjects(prefix string) ([]string, []string, error) {
 }
 
 // ============================================================================
+
+// ============================================================================
+// Thread Methods
+// ============================================================================
+
+// ListThreadsBySession lists all threads for a session.
+func (c *RPCClient) ListThreadsBySession(sessionID string) (*types.Session, error) {
+	params := map[string]string{ParamSessionID: sessionID}
+	result, err := c.Call("session.get", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.Session
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse session response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// SetActiveThread sets the active thread for a session.
+func (c *RPCClient) SetActiveThread(sessionID, threadID string) error {
+	params := map[string]string{
+		ParamSessionID: sessionID,
+		"thread_id":    threadID,
+	}
+	_, err := c.Call("session.thread.set_active", params)
+	return err
+}
+
+// CreateThread creates a new thread for a session.
+func (c *RPCClient) CreateThread(sessionID, topicLabel string) (*types.Thread, error) {
+	params := map[string]string{
+		ParamSessionID: sessionID,
+		"topic_label":  topicLabel,
+	}
+	result, err := c.Call("session.thread.create", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.Thread
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse thread response: %w", err)
+	}
+
+	return &resp, nil
+}
 // Search Methods
 // ============================================================================
 

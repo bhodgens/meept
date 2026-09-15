@@ -194,6 +194,9 @@ type App struct {
 
 	// Toast notifications
 	notifications *components.NotificationManager
+
+	// Thread indicator (thread-based context partitioning)
+	threadIndicator *ThreadIndicator
 }
 
 // KeyMap defines the key bindings.
@@ -361,6 +364,9 @@ func NewApp(socketPath string, cwd string) *App {
 	}
 	handlerOpts = append(handlerOpts, WithNotificationToggler(app.notifications))
 	app.commandHandler = NewCommandHandler(rpc, handlerOpts...)
+
+	// Initialize thread indicator
+	app.threadIndicator = NewThreadIndicator()
 
 	// Initialize STT (speech-to-text) from client config
 	if clientConfig.STT.Enabled {
@@ -1061,6 +1067,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Wire up session ID for plans filtering
 			a.plans.SetSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
+			// Initialize thread indicator from session threads
+			if a.threadIndicator != nil {
+				a.threadIndicator.SetThreads(msg.Session)
+			}
 			if msg.IsNew {
 				a.statusMessage = fmt.Sprintf("created session: %s", msg.Session.Name)
 			} else {
@@ -1116,6 +1126,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Wire up session ID for plans filtering
 			a.plans.SetSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
+			// Initialize thread indicator from session threads
+			if a.threadIndicator != nil {
+				a.threadIndicator.SetThreads(msg.Session)
+			}
 			a.statusMessage = fmt.Sprintf("switched to: %s", msg.Session.Name)
 			a.statusMessageTime = time.Now()
 			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
@@ -1142,6 +1156,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Wire up session ID for plans filtering
 			a.plans.SetSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
+			// Initialize thread indicator from session threads
+			if a.threadIndicator != nil {
+				a.threadIndicator.SetThreads(msg.Session)
+			}
 			a.statusMessage = fmt.Sprintf("switched to: %s", msg.Session.Name)
 			a.statusMessageTime = time.Now()
 			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
@@ -2052,6 +2070,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusMessageTime = time.Now()
 		}
 		return a, nil
+
+	case types.ThreadSwitchMsg:
+		// Thread switch requested by user via indicator
+		if msg.Err != nil {
+			a.statusMessage = fmt.Sprintf("thread switch failed: %v", msg.Err)
+			a.statusMessageTime = time.Now()
+			return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+		}
+		return a, nil
+
+	case types.ThreadListChangedMsg:
+		// Update the thread indicator with fresh thread data
+		if a.threadIndicator != nil && a.currentSession != nil {
+			a.threadIndicator.SetThreads(a.currentSession)
+		}
+		return a, nil
 	}
 
 	// Handle slash autocomplete filter updates when typing
@@ -2071,6 +2107,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Show all commands
 			a.slashAutocomplete.SetFilter("")
 		}
+	}
+
+	// Update thread indicator (handles key events when thread list is open)
+	if a.currentView == ViewChat && a.threadIndicator != nil {
+		a.threadIndicator.Update(msg)
 	}
 
 	// Delegate to current view
@@ -2559,6 +2600,16 @@ func (a *App) renderHeader() string {
 	default:
 		// Nothing to show
 		content = "meept"
+	}
+
+	// Append thread indicator if threads are active
+	if a.currentSession != nil && a.threadIndicator != nil && a.threadIndicator.IsActive() {
+		threadView := a.threadIndicator.View()
+		if threadView != "" {
+			if len(content)+len(threadView)+2 < width {
+				content += "  " + threadView
+			}
+		}
 	}
 
 	// Pad content to fill width

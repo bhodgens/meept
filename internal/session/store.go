@@ -142,10 +142,10 @@ type Store interface {
 	UnembeddedMessages(ctx context.Context, limit int) ([]MessageSearchResult, error)
 
 	// Thread operations (NEW)
-	GetActiveThread(ctx context.Context, sessionID string) (*Thread, error)
-	ListThreadsBySession(ctx context.Context, sessionID string) ([]*Thread, error)
 	CreateThread(ctx context.Context, thread *Thread) error
 	GetThread(ctx context.Context, threadID string) (*Thread, error)
+	ListThreadsBySession(ctx context.Context, sessionID string) ([]*Thread, error)
+	GetActiveThread(ctx context.Context, sessionID string) (*Thread, error)
 	UpdateThread(ctx context.Context, thread *Thread) error
 	DeleteThread(ctx context.Context, threadID string) error
 	SetActiveThread(ctx context.Context, sessionID, threadID string) error

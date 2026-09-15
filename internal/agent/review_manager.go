@@ -885,12 +885,44 @@ func (rm *ReviewManager) GetPolicy() *ReviewPolicy {
 
 // stepHasError returns true if the step result appears to contain an error
 // or failure message, making a review redundant.
+//
+// The indicators are checked against the STRUCTURED envelope, not free
+// prose. The step-job result (components.go) is a JSON envelope whose
+// "response" field is the model's own narration: a successful agent that
+// merely MENTIONS a past failure ("an initial draft failed to link, so I
+// switched to a library package") must not be judged failed by scanning
+// its narrative. The sweep found exactly that false positive (e2e
+// 2026-09-15: a coder step with passing vet/build/test was rejected
+// because its narration contained "failed to link"). Parse the envelope;
+// if it parses, judge success by the envelope's "success" flag and keep
+// the prose scan only for the structured "error" field. Non-JSON results
+// (legacy free-text steps) still get the prose scan.
 func (rm *ReviewManager) stepHasError(step *task.TaskStep) bool {
 	result := strings.TrimSpace(step.Result)
 	if result == "" {
 		return false // Empty result: will be caught by later heuristic, not "error"
 	}
 
+	// Structured envelope path (preferred): authoritative success flag.
+	var envelope struct {
+		Success bool   `json:"success"`
+		Status  string `json:"status"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(result), &envelope); err == nil {
+		if envelope.Error != "" {
+			return true
+		}
+		if envelope.Status == "failed" {
+			return true
+		}
+		// Envelope parsed: the processor's success flag is authoritative.
+		// Narrative text inside "response"/"evidence" is not re-scanned —
+		// agents legitimately describe past failures there.
+		return false
+	}
+
+	// Legacy free-text path.
 	lower := strings.ToLower(result)
 	errorIndicators := []string{
 		"message:error",

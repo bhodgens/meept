@@ -821,6 +821,27 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		"parts_count", len(parts),
 	)
 
+	// Resolve thread-specific conversation ID.
+	// The thread router converts the session-level sessionID into a
+	// thread-scoped conversationID based on topic detection. Downstream
+	// memory retrieval and routing use the thread-specific ID, while
+	// session-level operations (session tracker) continue using sessionID.
+	conversationID := sessionID
+	if d.threadRouter != nil {
+		convID, err := d.threadRouter.GetThreadConversationID(ctx, sessionID, input)
+		if err != nil {
+			d.logger.Debug("Thread routing failed, falling back to session ID",
+				"session", sessionID, "error", err)
+		} else {
+			conversationID = convID
+		}
+	}
+
+	if conversationID != sessionID {
+		d.logger.Debug("Thread routing resolved conversation ID",
+			"session", sessionID, "conversation", conversationID)
+	}
+
 	// Check for clarification follow-up: if the last intent for this session
 	// was IntentClarify, treat the current input as the user's response to
 	// the clarification questions.
@@ -850,7 +871,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				AgentType:  config.AgentIDPlanner,
 				Summary:    extractSummary(desc),
 			}
-			return d.routeToPlan(ctx, desc, planIntent, sessionID)
+			return d.routeToPlan(ctx, desc, planIntent, conversationID)
 		}
 		skillName, skillInput := d.parseSkillInvocation(input)
 		if skill := d.getSkill(skillName); skill != nil {
@@ -858,7 +879,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				"skill", skillName,
 				"session", sessionID,
 			)
-			return d.executeSkill(ctx, skill, skillInput, sessionID)
+			return d.executeSkill(ctx, skill, skillInput, conversationID)
 		}
 		// Check template registry if no skill matched
 		if d.templateRegistry != nil {
@@ -910,8 +931,8 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		}, nil
 	}
 
-	// 3. Build memory context with session history
-	memCtx := d.buildMemoryContext(ctx, input, sessionID)
+	// 3. Build memory context with thread-aware conversation ID
+	memCtx := d.buildMemoryContext(ctx, input, conversationID)
 
 	// 3.25. STAGE-0 embedding prefilter (classifier-observability
 	// follow-up): unanimous kNN vote over labeled example vectors routes
@@ -1082,7 +1103,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 5. Check for compound (multi-intent) requests
 	multiIntent := d.classifyMultiIntent(ctx, resolvedInput, memCtx)
 	if multiIntent.IsCompound {
-		return d.routeCompoundWithModel(ctx, multiIntent, input, sessionID, parseResult.Directive)
+		return d.routeCompoundWithModel(ctx, multiIntent, input, conversationID, parseResult.Directive)
 	}
 
 	// 4. Classify primary intent
@@ -1125,7 +1146,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// 5.5. Check if plan creation is warranted (before task creation)
 	if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
-		return d.routeToPlan(ctx, input, intent, sessionID)
+		return d.routeToPlan(ctx, input, intent, conversationID)
 	}
 
 	// 6. Create task if needed (for trackable work). Task creation is
