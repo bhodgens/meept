@@ -1160,7 +1160,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// 5.5. Check if plan creation is warranted (before task creation)
 	if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
-		return d.routeToPlan(ctx, input, intent, conversationID)
+		return d.routeToPlanWithOverride(ctx, input, intent, conversationID, agentOverrideApplied)
 	}
 
 	// 6. Create task if needed (for trackable work). Task creation is
@@ -1772,6 +1772,13 @@ const (
 // with the created plan. This is used for plan-eligible requests that should
 // go through the planning workflow instead of direct task creation.
 func (d *Dispatcher) routeToPlan(ctx context.Context, input string, intent *Intent, sessionID string) (*DispatchResult, error) {
+	return d.routeToPlanWithOverride(ctx, input, intent, sessionID, false)
+}
+
+// routeToPlanWithOverride is routeToPlan with the client-override flag.
+// agentOverrideApplied records that a client agent override was applied
+// upstream (step 5.3) and must survive plan routing.
+func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, intent *Intent, sessionID string, agentOverrideApplied bool) (*DispatchResult, error) {
 	summary := intent.Summary
 	if summary == "" {
 		summary = truncateString(input, 100)
@@ -1816,12 +1823,25 @@ func (d *Dispatcher) routeToPlan(ctx context.Context, input string, intent *Inte
 	// legacy text response.
 	if IntentType(intent.Type) == IntentQuickPlan {
 		created := d.createTask(ctx, input, intent, sessionID, intent.AgentType)
+		// Preserve a client agent override (researcher-extract e2e,
+		// 2026-09-15): the quickplan path previously hard-coded the
+		// planner as the DispatchResult agent, discarding the override —
+		// the researcher/analyst assignment was lost and the strategic
+		// planner re-picked agents for the synthesized subtasks. When an
+		// override named a specific executor, keep it as the dispatch
+		// agent and flag the result so downstream override handling
+		// (RouteToAgent's shortcut skip) still applies.
+		resultAgent := intent.AgentType
+		if resultAgent == "" || resultAgent == config.AgentIDChat {
+			resultAgent = config.AgentIDPlanner
+		}
 		return &DispatchResult{
-			AgentID:       config.AgentIDPlanner,
-			Task:          created,
-			Intent:        intent,
-			Plan:          p,
-			SuggestedMode: string(IntentQuickPlan.SuggestedMode()),
+			AgentID:              resultAgent,
+			Task:                 created,
+			Intent:               intent,
+			Plan:                 p,
+			SuggestedMode:        string(IntentQuickPlan.SuggestedMode()),
+			AgentOverrideApplied: agentOverrideApplied,
 		}, nil
 	}
 
