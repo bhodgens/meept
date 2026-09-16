@@ -67,6 +67,14 @@ type PlanRequest struct {
 	// no explicit model directive; the daemon's default-model fallback
 	// applies at resolution time.
 	ExecutorModelRef string `json:"executor_model_ref,omitempty"`
+
+	// AssignedAgent carries the client-specified executor override
+	// (chat.request agent_id, researcher-extract e2e 2026-09-15). When
+	// non-empty, synthesized steps are stamped with this agent so the
+	// tactical scheduler dispatches to the requested specialist instead of
+	// re-picking agents per step from the tool-hint table. Empty = no
+	// override; per-step selection proceeds.
+	AssignedAgent string `json:"assigned_agent,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.
@@ -1026,6 +1034,15 @@ func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest
 
 	// Parse JSON output
 	steps, parseErr := sp.parsePlanOutput(req.TaskID, output)
+	// Client agent override (researcher-extract e2e, 2026-09-15): stamp
+	// every synthesized step with the overridden executor so the tactical
+	// scheduler dispatches to the requested specialist instead of
+	// re-picking from the tool-hint table.
+	if req.AssignedAgent != "" {
+		for _, s := range steps {
+			s.AgentID = req.AssignedAgent
+		}
+	}
 	if parseErr != nil {
 		return nil, parseErr
 	}

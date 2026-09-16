@@ -1123,6 +1123,9 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 		Mode:             result.SuggestedMode,
 		TrueAnalysis:     result.Intent.TrueAnalysis,
 		ExecutorModelRef: result.ExecutorModelRef,
+		// Client agent override: synthesized steps must dispatch to the
+		// requested specialist, not re-picked hint-table agents.
+		AssignedAgent: result.Task.AssignedAgent,
 	}
 
 	// Session execution context (quickplan-mode leaf 02 / master Contract
