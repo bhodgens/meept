@@ -191,42 +191,62 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) (any, 
 	t.lastRequestTime = time.Now()
 	t.mu.Unlock()
 
-	// Build search URL
+	// Build search URL. The primary html endpoint now answers many scripted
+	// requests with an anti-bot challenge (HTTP 202 + challenge HTML); when
+	// that happens we retry once against the lite endpoint, which still
+	// serves parseable results (verified live 2026-09-15).
 	searchURL := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, http.NoBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-
-	// Execute request
-	resp, err := t.client.Do(req)
-	if err != nil {
+	resp, status, fetchErr := t.fetchSearchPage(ctx, searchURL)
+	if fetchErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("request timed out after %v", t.timeout)
 		}
-		return nil, fmt.Errorf("search request failed: %w", err)
+		return nil, fmt.Errorf("search request failed: %w", fetchErr)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("search returned HTTP %d: %s", resp.StatusCode, resp.Status)
+	if isChallengeStatus(status) {
+		// Primary endpoint challenged — retry against the lite endpoint.
+		if resp != nil {
+			resp.Body.Close()
+			resp = nil
+		}
+		liteURL := fmt.Sprintf("https://lite.duckduckgo.com/lite/?q=%s", url.QueryEscape(query))
+		resp, status, fetchErr = t.fetchSearchPage(ctx, liteURL)
+		if fetchErr != nil {
+			return nil, fmt.Errorf("search request failed (primary endpoint blocked by anti-bot challenge; lite fallback also failed): %w", fetchErr)
+		}
+		defer resp.Body.Close()
+	}
+
+	if status != http.StatusOK {
+		if isChallengeStatus(status) {
+			return nil, fmt.Errorf("search blocked: duckduckgo returned an anti-bot challenge (HTTP %d) on both the html and lite endpoints; try again later or use a different search backend", status)
+		}
+		return nil, fmt.Errorf("search returned HTTP %d: %s", status, http.StatusText(status))
 	}
 
 	// Read response with size limit to prevent memory exhaustion
 	limitedReader := io.LimitReader(resp.Body, MaxSearchResponseSize)
-	body, err := io.ReadAll(limitedReader)
+	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
+	body := string(bodyBytes)
 
-	// Parse results
-	results, truncated := t.parseDuckDuckGoHTML(string(body), limit)
+	// Parse results — lite pages use the lite parser, html pages the html one
+	var results []SearchResult
+	var truncated bool
+	if isLitePage(body) {
+		results, truncated = t.parseDuckDuckGoLite(body, limit)
+	} else {
+		results, truncated = t.parseDuckDuckGoHTML(body, limit)
+	}
 
 	return SearchResults{
 		Query:     query,
@@ -234,6 +254,42 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) (any, 
 		Count:     len(results),
 		Truncated: truncated,
 	}, nil
+}
+
+// isChallengeStatus reports whether an HTTP status from DuckDuckGo indicates
+// an anti-bot challenge rather than real results (202 Accepted with a
+// challenge form, 403 Forbidden).
+func isChallengeStatus(status int) bool {
+	return status == http.StatusAccepted || status == http.StatusForbidden
+}
+
+// isLitePage detects the lite-endpoint response shape (table-based, no
+// result__body divs).
+func isLitePage(body string) bool {
+	return !strings.Contains(body, "result__body") && strings.Contains(body, "duckduckgo.com/l/?uddg=")
+}
+
+// fetchSearchPage GETs a DuckDuckGo search page and returns the response,
+// its status code, and any transport error. On a non-2xx status the caller
+// is responsible for closing the returned response (it may want the body).
+func (t *WebSearchTool) fetchSearchPage(ctx context.Context, pageURL string) (*http.Response, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, http.NoBody)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, 0, fmt.Errorf("request timed out after %v", t.timeout)
+		}
+		return nil, 0, err
+	}
+	return resp, resp.StatusCode, nil
 }
 
 // parseDuckDuckGoHTML parses DuckDuckGo's HTML response to extract search results.
@@ -323,6 +379,67 @@ func (t *WebSearchTool) parseDuckDuckGoHTML(html string, limit int) ([]SearchRes
 	}
 
 	return results, false
+}
+
+// parseDuckDuckGoLite parses the lite-endpoint response. The lite page is a
+// flat table: one row holds the result link
+// (<a rel="nofollow" href="//duckduckgo.com/l/?uddg=<real url>&rut=...">TITLE</a>),
+// the next row holds the snippet text. Verified live 2026-09-15.
+func (t *WebSearchTool) parseDuckDuckGoLite(html string, limit int) ([]SearchResult, bool) {
+	var results []SearchResult
+	truncated := false
+
+	linkPattern := regexp.MustCompile(`(?si)<a[^>]*href="((?://)?duckduckgo\.com/l/\?uddg=[^"]*)"[^>]*>(.*?)</a>`)
+	matches := linkPattern.FindAllStringSubmatch(html, -1)
+
+	for i, match := range matches {
+		if len(results) >= limit {
+			truncated = true
+			break
+		}
+		if len(match) < 3 {
+			continue
+		}
+
+		cleanURL := t.cleanDuckDuckGoURL(match[1])
+		if cleanURL == "" {
+			continue
+		}
+
+		title := t.decodeHTMLEntities(match[2])
+		title = stripHTML(title)
+		title = strings.TrimSpace(title)
+		if title == "" {
+			continue
+		}
+
+		// The snippet lives in the text between this link and the next one.
+		snippet := ""
+		thisEnd := strings.Index(html, match[0]) + len(match[0])
+		nextStart := len(html)
+		if i+1 < len(matches) {
+			if nextIdx := strings.Index(html[thisEnd:], matches[i+1][0]); nextIdx >= 0 {
+				nextStart = thisEnd + nextIdx
+			}
+		}
+		between := html[thisEnd:nextStart]
+		// Snippet text is plain text between tags; strip everything else.
+		snippet = stripHTML(t.decodeHTMLEntities(between))
+		snippet = strings.Join(strings.Fields(snippet), " ")
+		// Trim the "..." continuation marker DDG appends, and cap length.
+		snippet = strings.TrimSuffix(snippet, "...")
+		if len(snippet) > 300 {
+			snippet = snippet[:300]
+		}
+
+		results = append(results, SearchResult{
+			Title:   title,
+			URL:     cleanURL,
+			Snippet: snippet,
+		})
+	}
+
+	return results, truncated
 }
 
 // cleanDuckDuckGoURL removes DuckDuckGo redirect parameters from URLs.
