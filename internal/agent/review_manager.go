@@ -225,11 +225,26 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 				Confidence: 1.0,
 			}, nil
 		}
-		return &ReviewResult{
-			Status:     ReviewRejected,
-			Feedback:   "Heuristic check failed: non-empty result but no meaningful content",
-			Confidence: 0.7,
-		}, nil
+		// Guard failure vs. meaningless content (sweep e2e, 2026-09-15/16):
+		// the guard refusals (artifact/tool-execution claims with no
+		// captured evidence) describe SUSPICION, not emptiness. A coder
+		// that wrote the file and documented "go test — exit code 0" was
+		// rejected outright here because shell-run verification produces
+		// no file-tool evidence events. Suspicion must go to the full
+		// reviewer, not reject the step. Only a truly vacuous result
+		// (whitespace/short) stays a heuristic rejection.
+		if len(strings.TrimSpace(step.Result)) < 40 {
+			return &ReviewResult{
+				Status:     ReviewRejected,
+				Feedback:   "Heuristic check failed: non-empty result but no meaningful content",
+				Confidence: 0.7,
+			}, nil
+		}
+		rm.logger.Info("Heuristic guard flagged the result; escalating to full review",
+			"step_id", step.ID,
+			"tool_hint", step.ToolHint,
+		)
+		// Fall through to the full reviewer below — do NOT reject.
 	}
 
 	// Select reviewer agent
