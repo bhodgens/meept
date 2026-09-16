@@ -1019,6 +1019,21 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 			return false
 		}
 	}
+	// Tool-execution-claim guard (agent sweep e2e, 2026-09-15): chat/analyst
+	// steps reported "Extraction ran clean on the first pass" — claiming a
+	// json_extract tool execution — with zero extraction-model calls having
+	// been routed (metrics.db: 0 llm_calls to local-extract). These hints
+	// are conversational, so the artifact guard above does not apply; but a
+	// CONVERSATIONAL agent claiming it RAN a named tool is the same
+	// hallucination shape. Any result asserting a specific tool execution
+	// with no meaningful tool evidence routes to full review.
+	if !hasMeaningfulEvidence(step.Evidence) && claimsToolExecution(result) {
+		rm.logger.Warn("Heuristic review: tool-execution claims with no tool evidence; refusing auto-approve",
+			"step_id", step.ID,
+			"tool_hint", step.ToolHint,
+		)
+		return false
+	}
 	return true
 }
 
@@ -1028,6 +1043,30 @@ func reviewHintIsConversational(hint string) bool {
 	switch strings.ToLower(strings.TrimSpace(hint)) {
 	case "chat", "report", "recall", "research", "analyze", "analyst", "plan":
 		return true
+	}
+	return false
+}
+
+// claimsToolExecution reports whether a result asserts that a specific
+// NAMED tool was executed ("extraction ran clean", "called json_extract",
+// "ran the web_fetch tool"). Sweep e2e 2026-09-15: conversational agents
+// fabricated tool-execution reports with zero tool activity behind them.
+// Generic phrases like "used my tools" don't match; the claim must name a
+// tool-ish noun or a tool-run verb.
+func claimsToolExecution(result string) bool {
+	lower := strings.ToLower(result)
+	for _, marker := range []string{
+		"extraction ran", "extraction ran clean",
+		"called the json_extract", "called json_extract",
+		"ran the json_extract", "json_extract tool",
+		"called the web_fetch", "ran web_fetch", "web_fetch tool",
+		"called the websearch", "websearch tool",
+		"shell_exec tool", "transcript_fetch tool",
+		"via json_extract", "via web_fetch", "via websearch",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
 	}
 	return false
 }
