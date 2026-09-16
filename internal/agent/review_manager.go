@@ -981,6 +981,21 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	if len(result) < 3 {
 		return false
 	}
+	// Scan scope (sweep e2e, 2026-09-15): for structured step-job envelopes,
+	// scan only the model's RESPONSE narration — not the whole envelope.
+	// The envelope's evidence[] strings quote the tool-issued items and the
+	// model's report copy, so markers like "file_exists" appear there on
+	// every successful file-tool turn and the artifact/claim guards would
+	// reject genuinely successful work. Legacy free-text results keep the
+	// whole-string scan.
+	scanText := result
+	var envelope struct {
+		Response string `json:"response"`
+		Success  bool   `json:"success"`
+	}
+	if err := json.Unmarshal([]byte(result), &envelope); err == nil && envelope.Response != "" {
+		scanText = envelope.Response
+	}
 	// Reasoning-only guard (2026-09-10, outcome-loop L3 session): the
 	// reasoning-watchdog writes "[reasoning-only turn]" assistant markers
 	// and its terminate path returns the canned "I stopped after extended
@@ -988,7 +1003,7 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	// both are the loop GIVING UP. A canned no-tool termination must not
 	// ride the trivial-task heuristic to auto-approval.
 	if !reviewHintIsConversational(step.ToolHint) &&
-		strings.Contains(result, "stopped after extended thinking") &&
+		strings.Contains(scanText, "stopped after extended thinking") &&
 		!hasMeaningfulEvidence(step.Evidence) {
 		rm.logger.Warn("Heuristic review: reasoning-only termination with no tool evidence; refusing auto-approve",
 			"step_id", step.ID,
@@ -1011,7 +1026,7 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	// holding a zero-value Evidence — len(step.Evidence) == 0 is therefore
 	// never true for a job-driven step and this refusal was unreachable.
 	if step.ToolHint != "" && !reviewHintIsConversational(step.ToolHint) && !hasMeaningfulEvidence(step.Evidence) {
-		if claimsArtifacts(result) {
+		if claimsArtifacts(scanText) {
 			rm.logger.Warn("Heuristic review: artifact claims with no tool evidence; refusing auto-approve",
 				"step_id", step.ID,
 				"tool_hint", step.ToolHint,
@@ -1027,7 +1042,7 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	// CONVERSATIONAL agent claiming it RAN a named tool is the same
 	// hallucination shape. Any result asserting a specific tool execution
 	// with no meaningful tool evidence routes to full review.
-	if !hasMeaningfulEvidence(step.Evidence) && claimsToolExecution(result) {
+	if !hasMeaningfulEvidence(step.Evidence) && claimsToolExecution(scanText) {
 		rm.logger.Warn("Heuristic review: tool-execution claims with no tool evidence; refusing auto-approve",
 			"step_id", step.ID,
 			"tool_hint", step.ToolHint,
