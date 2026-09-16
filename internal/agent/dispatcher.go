@@ -359,6 +359,12 @@ type Dispatcher struct {
 	// site).
 	burstDetector *metrics.BurstDetector
 
+	// gitVerbAgreementVeto enables the git-verb agreement veto (issue
+	// #46): a git verdict on a git-verb-free imperative input is
+	// discarded so the chain continues. Set in NewDispatcher; default
+	// true.
+	gitVerbAgreementVeto bool
+
 	// toolRegistry provides structural tool gating by depth.
 	// When non-nil, the dispatcher uses it to gate depth-sensitive
 	// tools (like subagent spawn) so agents at maxDepth simply
@@ -504,6 +510,15 @@ type DispatcherConfig struct {
 	// When non-nil, tools are gated so agents at maxDepth don't
 	// see spawn capabilities ("make illegal states unrepresentable").
 	ToolRegistry *DepthToolRegistry
+
+	// GitVerbAgreementVeto gates the git-verb agreement veto (issue #46):
+	// a classifier git/committer verdict on an input that opens with an
+	// execution imperative but carries NO git verb is a lexical bias of
+	// small classifiers (the 350M prompt-router routes "create a file in
+	// the repository root" to git because of the word "repository"), and
+	// the verdict is discarded so the chain continues. Nil = default true
+	// (veto active); false disables it (escape hatch while measuring).
+	GitVerbAgreementVeto *bool
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -526,6 +541,13 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		capabilityMatcher: cfg.CapabilityMatcher,
 		planManager:       cfg.PlanManager,
 		toolRegistry:      cfg.ToolRegistry,
+	}
+
+	// Git-verb agreement veto (issue #46). Nil = default on.
+	if cfg.GitVerbAgreementVeto != nil {
+		d.gitVerbAgreementVeto = *cfg.GitVerbAgreementVeto
+	} else {
+		d.gitVerbAgreementVeto = true
 	}
 
 	// Initialize model reassignment parser
@@ -1496,6 +1518,29 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 					"input_len", len(input),
 				)
 				d.recordClassificationMethod("platform_action_arbitration")
+				intent = nil
+			} else if d.gitVerbAgreementVeto &&
+				intent.Type == string(IntentGit) &&
+				!inputContainsGitVerb(input) &&
+				hasLeadingImperativeVerb(input) {
+				// Git-verb agreement veto (issue #46, bench gate
+				// 2026-09-15): the 350M prompt-router scored "Create a
+				// file named X in the repository root …" intent=git
+				// @0.91 — the word "repository" pulls the prompt into
+				// the git lane (confirmed by direct encoder probing:
+				// "current directory" routes tooluse, "repository root"
+				// routes git, deterministic). A git verdict on an
+				// imperative that names NO git action is a lexical
+				// bias, and the committer runs contextless — worse
+				// than a misroute. Discard the verdict so the chain
+				// continues; the recall branch above keeps its
+				// priority (F41 branch order).
+				d.logger.Info("git verdict vetoed (no git verb in imperative input)",
+					"verdict", intent.Type,
+					"llm_confidence", intent.Confidence,
+					"input_len", len(input),
+				)
+				d.recordClassificationMethod("git_verb_agreement_veto")
 				intent = nil
 			} else if ShouldUseLLMResult(intent) {
 				d.logger.Debug("LLM classifier succeeded",

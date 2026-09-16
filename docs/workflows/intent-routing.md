@@ -184,7 +184,17 @@ Test cases:
    threshold skip classification entirely → chat.
 2. **Stage-0 gate**: confident unanimous matches route instantly,
    skipping the LLM chain (latency win; falls through on any doubt).
-3. **LLM chain**: primary classification.
+3. **LLM chain**: primary classification. Inside the chain, three
+   arbitration gates discard verdicts that contradict the input's own
+   structure: a platform/schedule/git verdict on a work-status recall
+   question becomes recall; a platform/schedule verdict on an
+   imperative becomes a fall-through; and (since the 2026-09-15 bench
+   gate, issue #46) a **git verdict on a git-verb-free imperative
+   falls through** — the 350M prompt-router routes "create a file in
+   the repository root" to git because of the word "repository", and a
+   git verdict without commit/push/merge/branch/rebase/checkout/stash
+   in the input is discarded (`git_verb_agreement_veto`; disable with
+   dispatcher config `git_verb_agreement_veto=false` to measure).
 4. **Heuristic fallback**: keyword tables when the chain fails.
 5. **Final fallback**: **quickplan** — clarifies ambiguity with you
    first (only if needed), then plans and executes to completion.
