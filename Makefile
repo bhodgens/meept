@@ -811,6 +811,21 @@ classifier-eval-selftest:
 	@echo "Running classifier-eval guard self-test..."
 	python3 tools/classifier-eval/m4_gold_acceptance.py --self-test
 
+# adversarial runs the e2e adversarial sweep (tools/e2e-sweep) against a LIVE
+# daemon. Requires: daemon up at the endpoint, dev key at <home>/dev_key.
+# Override MEEPT_SWEEP_BASE_URL / MEEPT_SWEEP_HOME for a scratch rig. Categories
+# can be passed: make adversarial ARGS="INJECTION MISROUTE". Unlike
+# classifier-eval-selftest this needs a live daemon, so it is NOT a CI gate.
+.PHONY: adversarial
+adversarial:
+	@echo "Running adversarial e2e sweep against $(MEEPT_SWEEP_BASE_URL)..."
+	python3 tools/e2e-sweep/run_adversarial.py $(ARGS)
+
+.PHONY: sweep
+sweep:
+	@echo "Running happy-path agent sweep..."
+	python3 tools/e2e-sweep/run_sweep.py $(ARGS)
+
 # classifier-eval-hardening-test pins the two guards that had NO runner: the
 # e2e sandbox remapper (a python heredoc inside scripts/e2e-naive-user-chat.sh)
 # and the pre-commit-build root-artifact classifier. CI runs
