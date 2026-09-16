@@ -2319,7 +2319,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if transcriptChatter == nil {
 		transcriptChatter = c.SummarizerClient
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager)
 
 	// json_extract (dedicated extraction model from the extract_model
 	// slot). Registered even when ExtractClient is nil: the tool's
@@ -5670,6 +5670,7 @@ func registerBuiltinTools(
 	skillWriter *lifecycle.Writer,
 	skillRegistry *skills.Registry,
 	tokenStore llm.TokenResolver,
+	mcpManager *mcp.Manager,
 ) {
 	readCache := builtin.NewReadCache(30)
 
@@ -5846,11 +5847,15 @@ func registerBuiltinTools(
 	// working-dir fence.
 	registry.Register(builtin.NewSpreadsheetWriteTool())
 
-	// Web search tool (DuckDuckGo)
+	// Web search tool (MCP-first: searxng when connected; DuckDuckGo
+	// direct-scrape fallback). The MCP manager is built earlier in
+	// NewComponents (components.go:2159), so the provider can be attached
+	// here; a nil manager leaves the tool on the DuckDuckGo-only path.
 	webSearchTool := builtin.NewWebSearchTool(15 * time.Second)
 	if webSSRFGuard != nil {
 		webSearchTool.SetSSRFGuard(webSSRFGuard)
 	}
+	ensureMCPSearchProvider(webSearchTool, mcpManager)
 	registry.Register(webSearchTool)
 
 	// Browser automation tools ([browser], disabled by default). When

@@ -290,11 +290,15 @@
       "command": ["uvx", "mcp-server-sqlite", "--db-path", "~/.meept/mcp/sqlite.db"],
     },
 
-    // searxng: meta-search aggregator. disabled unless you run a local searxng.
-    // to enable: point SEARXNG_URL at your local instance (default localhost:8080).
+    // searxng: meta-search aggregator. When connected and healthy, the
+    // built-in web_search tool prefers it over the direct DuckDuckGo
+    // scraper (which increasingly hits anti-bot challenges); if the server
+    // is absent or errors, web_search falls back to DuckDuckGo
+    // automatically. point SEARXNG_URL at your local instance (default
+    // localhost:8080; override by exporting SEARXNG_URL).
     {
       "name": "searxng",
-      "enabled": false,
+      "enabled": true,
       "category": "search",
       "description": "searxng meta-search, requires local searxng instance at searxng_url",
       "install_hint": "brew install uv  (or: pip install uv)",

@@ -492,7 +492,10 @@ Fetch content from a URL.
 
 #### `web_search` - Web Search
 
-Search the web using DuckDuckGo.
+Search the web, preferring a connected search MCP server (searxng) and
+falling back to direct DuckDuckGo scraping (html endpoint; the lite
+endpoint is tried automatically when the primary serves an anti-bot
+challenge).
 
 **Description:** "Search the web using DuckDuckGo and return results with titles, URLs, and snippets. Useful for finding current information, researching topics, and discovering relevant web pages."
 
@@ -515,8 +518,10 @@ Search the web using DuckDuckGo.
 ```
 
 **Features:**
+- MCP-first: prefers a connected search MCP server (searxng, see
+  `config/mcp_servers.json5`), falls back to direct DuckDuckGo scraping
 - No API key required
-- Rate limiting (500ms between requests)
+- Rate limiting (500ms between requests, DuckDuckGo path only)
 - Automatic HTML entity decoding
 - URL cleaning and validation
 

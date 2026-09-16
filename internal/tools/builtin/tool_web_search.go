@@ -59,6 +59,19 @@ type WebSearchTool struct {
 	// When non-nil it supersedes the legacy checkURL/ssrfDialContext path.
 	guard   *ssrf.Guard
 	guardMu sync.Mutex
+
+	// searchProvider is the optional MCP-first search provider (searxng
+	// behind the searxng-mcp server). Nil => the direct DuckDuckGo scraper
+	// is the only backend. When set, Execute prefers it and falls back to
+	// the scraper on any provider error.
+	searchProvider   SearchProvider
+	searchProviderMu sync.Mutex
+}
+
+// SearchProvider is a pluggable search backend consulted before the direct
+// DuckDuckGo scraper. Implemented by MCPSearchProvider (searxng MCP).
+type SearchProvider interface {
+	Search(ctx context.Context, query string, limit int) (SearchResults, error)
 }
 
 // NewWebSearchTool creates a new web search tool.
@@ -158,7 +171,45 @@ func (t *WebSearchTool) Parameters() llm.FunctionParameters {
 	}
 }
 
-// Execute performs a web search.
+// SetSearchProvider installs the MCP-first search provider (searxng).
+// Follows the typed-nil guard pattern: a nil provider leaves the direct
+// DuckDuckGo scraper as the only backend. Must be called before the tool
+// serves requests.
+func (t *WebSearchTool) SetSearchProvider(p SearchProvider) {
+	if p == nil {
+		return
+	}
+	t.searchProviderMu.Lock()
+	defer t.searchProviderMu.Unlock()
+	t.searchProvider = p
+}
+
+// currentSearchProvider returns the installed provider, or nil.
+func (t *WebSearchTool) currentSearchProvider() SearchProvider {
+	t.searchProviderMu.Lock()
+	defer t.searchProviderMu.Unlock()
+	return t.searchProvider
+}
+
+// searchViaMCP runs one query through the installed search provider. It
+// returns (results, true) on success; (zero, false) on any failure — the
+// fallback chain then consults the DuckDuckGo scraper.
+func (t *WebSearchTool) searchViaMCP(ctx context.Context, query string, limit int) (SearchResults, bool) {
+	provider := t.currentSearchProvider()
+	if provider == nil {
+		return SearchResults{}, false
+	}
+	results, err := provider.Search(ctx, query, limit)
+	if err != nil {
+		return SearchResults{}, false
+	}
+	return results, true
+}
+
+// Execute performs a web search, preferring the MCP search provider
+// (searxng) when one is installed and healthy, and falling back to the
+// direct DuckDuckGo scraper (html endpoint, lite endpoint on challenge) on
+// any provider error or absence.
 func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	query, _ := args["query"].(string)
 	if strings.TrimSpace(query) == "" {
@@ -169,6 +220,15 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) (any, 
 	limit := DefaultResultLimit
 	if limitFloat, ok := args["limit"].(float64); ok && limitFloat > 0 {
 		limit = min(int(limitFloat), MaxResultLimit)
+	}
+
+	// MCP-first: when a search provider (searxng MCP) is installed and
+	// answers, its results ARE the answer; the DuckDuckGo path below is
+	// the fallback for provider absence/failure only. The provider applies
+	// its own timeout, so the DDG rate-limit slot below is only taken on
+	// the fallback path.
+	if results, ok := t.searchViaMCP(ctx, query, limit); ok {
+		return results, nil
 	}
 
 	// Rate limiting: ensure minimum interval between requests
