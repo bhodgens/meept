@@ -937,6 +937,10 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				h.publishPlanRequest(result, conversationID)
 				reply = h.waitForTaskCompletion(ctx, result.Task.ID)
 				recordOnTaskPath = true
+				// Async-turn liveness (leaf 06): record the orchestrator
+				// task on the tracked turn so a reaped terminal event
+				// carries its task_id. No-op for legacy untracked turns.
+				h.attachTask(result.Task.ID, syncTaskID)
 				// turn.terminal ceiling detection: the stub reply is NOT
 				// sniffed — the wait hit the ceiling (or the task failed)
 				// when the task is still non-terminal in the store after
@@ -982,6 +986,10 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 				// Publish plan request to orchestrator
 				h.publishPlanRequest(result, conversationID)
+				// Async-turn liveness (leaf 06): same task-id
+				// attachment as the sync path above — reaped events
+				// for async-dispatched turns carry task_id too.
+				h.attachTask(result.Task.ID, syncTaskID)
 			}
 		default:
 			handlerCase = "route_to_agent"
@@ -2037,6 +2045,24 @@ func (h *ChatHandler) completeTurn(turnID string) {
 		return
 	}
 	h.turnRegistry.Complete(turnID)
+}
+
+// attachTask records the orchestrator task created for a tracked turn
+// (leaf 06 task 2): a reaped turn's terminal event then carries the
+// task_id. Both args empty-guarded; no-op for legacy untracked turns.
+func (h *ChatHandler) attachTask(turnID, taskID string) {
+	if h == nil || turnID == "" || h.turnRegistry == nil {
+		return
+	}
+	h.turnRegistry.AttachTask(turnID, taskID)
+}
+
+// EmitTurnTerminal is the exported emit seam for the TurnWatchdog (leaf
+// 06): it forwards to the frozen publishTurnTerminal funnel. Exported
+// because package agent's watchdog must not reach back into the handler
+// through an unexported method reference from the daemon composition.
+func (h *ChatHandler) EmitTurnTerminal(ev TurnTerminalEvent) {
+	h.publishTurnTerminal(ev)
 }
 
 // SetTaskStore sets the task store for looking up linked sessions.

@@ -252,6 +252,30 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if components != nil && components.ChatHandler != nil {
 		turnRegistry = agent.NewTurnRegistry()
 		components.ChatHandler.SetTurnRegistry(turnRegistry)
+
+		// Liveness watchdog + turn reaper (async-turn-migration leaf 06):
+		// emits turn.terminal failed events for submitted turns that
+		// stopped making progress, so every submitted turn eventually
+		// reaches a terminal state. Started here with the handler wiring
+		// and stopped in Components.stopComponents; disabled config
+		// constructs nothing (zero goroutines).
+		twCfg := fullCfg.Orchestrator.TurnWatchdog
+		if twCfg.Enabled {
+			watchdog := agent.NewTurnWatchdog(
+				turnRegistry,
+				components.ChatHandler.EmitTurnTerminal,
+				logger.With("component", "turn-watchdog"),
+			)
+			watchdog.Start(
+				time.Duration(twCfg.IntervalSeconds)*time.Second,
+				time.Duration(twCfg.StaleAfterSeconds)*time.Second,
+			)
+			components.TurnWatchdog = watchdog
+			logger.Info("turn watchdog started",
+				"interval_s", twCfg.IntervalSeconds,
+				"stale_after_s", twCfg.StaleAfterSeconds,
+			)
+		}
 	}
 
 	// Wire the shared chat.submit handler (leaf 02): replace the proxy's

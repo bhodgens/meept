@@ -439,6 +439,12 @@ type Components struct {
 	// the bus is unavailable.
 	QuotaNotifier *services.QuotaNotifier
 
+	// TurnWatchdog is the async-turn liveness reaper (async-turn-migration
+	// leaf 06). Constructed and started by the daemon composition next to
+	// the SetTurnRegistry wiring; stopped in stopComponents. Nil when the
+	// orchestrator.turn_watchdog config is disabled (zero goroutines).
+	TurnWatchdog *agent.TurnWatchdog
+
 	// Bot context for push notifications (bot-to-user delivery)
 	BotContext *services.BotContextImpl
 
@@ -4833,6 +4839,15 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.QuotaNotifier != nil {
 		c.QuotaNotifier.Stop()
 		c.Logger.Info("Quota notifier stopped")
+	}
+
+	// Stop the async-turn liveness reaper (async-turn-migration leaf 06)
+	// next to the other handler-side background loops. Nil when the
+	// orchestrator.turn_watchdog config is disabled. Stop() joins the
+	// reap goroutine (no leak) and is safe even if Start never ran.
+	if c.TurnWatchdog != nil {
+		c.TurnWatchdog.Stop()
+		c.Logger.Info("Turn watchdog stopped")
 	}
 
 	// Stop sync handler and manager first (depends on queue events)

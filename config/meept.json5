@@ -696,6 +696,17 @@
       "threshold": 0,         // 0 → built-in default
       "log_only": true,
     },
+    // Async-turn liveness watchdog (async-turn-migration leaf 06):
+    // reaps submitted turns that stopped making progress and emits
+    // turn.terminal failed events for them, so every submitted turn
+    // eventually reaches a terminal state. Liveness-based and
+    // workload-independent — replaces the old static task-wait semantics
+    // for async turns. Enabled by default.
+    "turn_watchdog": {
+      "enabled": true,              // false disables the reaper entirely (zero goroutines)
+      "interval_seconds": 30,       // 0 → 30: seconds between reap passes
+      "stale_after_seconds": 120,   // 0 → 120: no progress for this long → reaped as failed
+    },
   },
 
   // Shadow training system (response shadowing for model improvement)

@@ -2409,6 +2409,28 @@ type OrchestratorConfig struct {
 	// #43): a temporal anomaly check on the per-session dispatch outcome
 	// stream. Default off, log-only.
 	BurstDetection BurstDetectionConfig `json:"burst_detection" toml:"burst_detection"`
+	// TurnWatchdog configures the async-turn liveness reaper
+	// (async-turn-migration leaf 06): a periodic pass marks submitted
+	// turns that stopped making progress as failed (turn.terminal
+	// handler_case=turn_reaped) so every submitted turn eventually
+	// reaches a terminal state. Liveness-based and workload-independent —
+	// it replaces the old static task-wait semantics for async turns.
+	TurnWatchdog TurnWatchdogConfig `json:"turn_watchdog" toml:"turn_watchdog"`
+}
+
+// TurnWatchdogConfig is the liveness-reaper knob block (async-turn-
+// migration leaf 06). Enabled defaults TRUE — without a reaper a vanished
+// turn would leave its client waiting forever, which is the silent-death
+// failure mode this leaf exists to close. Zero IntervalSeconds maps to 30,
+// zero StaleAfterSeconds maps to 120 (normalized in DefaultConfig).
+type TurnWatchdogConfig struct {
+	// Enabled turns on the reaper. Default true.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// IntervalSeconds is the seconds between reap passes. 0 → 30.
+	IntervalSeconds int `json:"interval_seconds" toml:"interval_seconds"`
+	// StaleAfterSeconds is how long a turn must go without progress
+	// before it is reaped as failed. 0 → 120.
+	StaleAfterSeconds int `json:"stale_after_seconds" toml:"stale_after_seconds"`
 }
 
 // ClassifierPrefilterConfig configures the Stage-0 embedding prefilter in
@@ -3213,6 +3235,14 @@ func DefaultConfig() *Config {
 				WindowSize: 0,
 				Threshold:  0,
 				LogOnly:    true,
+			},
+			// Async-turn liveness reaper (async-turn-migration leaf 06):
+			// enabled by default — a vanished submitted turn must reach a
+			// terminal state instead of leaving the client waiting forever.
+			TurnWatchdog: TurnWatchdogConfig{
+				Enabled:           true,
+				IntervalSeconds:   30,
+				StaleAfterSeconds: 120,
 			},
 		},
 		Learning: LearningConfig{
