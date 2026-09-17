@@ -192,13 +192,20 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 
 	// Create RPC server (if enabled)
 	var rpcServer *rpc.Server
+	var proxy *rpc.ProxyHandler
+	var chatSubmitHandler *rpc.SubmitHandler
 	if fullCfg.Transport.RPC.Enabled {
 		rpcServer = rpc.New(&rpc.Config{
 			SocketPath: cfg.SocketPath,
 		}, msgBus, logger)
 
+		// Async chat submit (leaf 02): the proxy's default submit handler
+		// carries no turn registry; this shared one (constructed below,
+		// after components) does, so submit dedupe and handler-side turn
+		// tracking agree. Must be set BEFORE RegisterProxyMethods.
+		proxy = rpc.NewProxyHandler(msgBus)
+
 		// Register proxy handlers that forward to bus subscribers
-		proxy := rpc.NewProxyHandler(msgBus)
 		proxy.RegisterProxyMethods(rpcServer)
 
 		// Register security handlers (Go-native, high-performance)
@@ -235,6 +242,27 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// Set default model info on RPC server for status reporting
 	if rpcServer != nil && components.ModelsConfig != nil {
 		rpcServer.SetDefaultModel(components.ModelsConfig.Model)
+	}
+
+	// Async-turn registry (async-turn-migration leaf 02/03): one shared
+	// registry tracks submitted turns for the ChatHandler (Touch/Complete)
+	// and the submit handler's idempotent-retry dedupe, so both surfaces
+	// agree on which turn ids exist.
+	var turnRegistry *agent.TurnRegistry
+	if components != nil && components.ChatHandler != nil {
+		turnRegistry = agent.NewTurnRegistry()
+		components.ChatHandler.SetTurnRegistry(turnRegistry)
+	}
+
+	// Wire the shared chat.submit handler (leaf 02): replace the proxy's
+	// default (registry-less) submit handler with one carrying the shared
+	// turn registry, so submit dedupe and handler-side tracking agree.
+	// RegisterHandler overwrites the eager proxy registration. Also
+	// exposed to HTTP via WithChatSubmitter below.
+	if rpcServer != nil && proxy != nil {
+		chatSubmitHandler = rpc.NewSubmitHandler(msgBus, turnRegistry, logger)
+		proxy.SetSubmitHandler(chatSubmitHandler)
+		rpcServer.RegisterHandler("chat.submit", chatSubmitHandler.Submit)
 	}
 
 	// Register skills handlers (direct RPC closures — there is no bus path
@@ -1260,6 +1288,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			if rpcServer != nil {
 				httpOpts = append(httpOpts, http.WithRPCCall(rpcServer.CallMethod))
 				logger.Info("RPC call bridge enabled", "endpoint", "/api/v1/bus/call")
+			}
+
+			// Async chat submit HTTP endpoint (leaf 04): POST
+			// /api/v1/chat/submit shares the SAME handler (and the same
+			// turn registry) as the chat.submit RPC method, so validation
+			// and ack semantics cannot drift between surfaces. *rpc.
+			// SubmitHandler satisfies the seam directly via its Submit
+			// method (the ack path performs no waits, so passing the
+			// request context through is safe and simple).
+			if chatSubmitHandler != nil {
+				httpOpts = append(httpOpts, http.WithChatSubmitter(chatSubmitHandler))
+				logger.Info("Chat submit HTTP endpoint enabled", "path", "/api/v1/chat/submit")
 			}
 
 			// AI Employee HTTP endpoints under /api/v1/agents/* (Phase 7).

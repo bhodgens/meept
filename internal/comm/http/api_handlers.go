@@ -2280,6 +2280,37 @@ func (s *Server) handleSelfImproveReject(w http.ResponseWriter, r *http.Request)
 
 // ===== Chat Steering Endpoints =====
 
+// handleChatSubmit handles POST /api/v1/chat/submit (async-turn-migration
+// leaf 04). Same ack JSON as the chat.submit RPC: it delegates to the SAME
+// shared validation+publish+ack function (SubmitHandler.BuildChatSubmitAck)
+// so RPC and HTTP semantics can't drift. Like the RPC, it never blocks on
+// agent work — the result arrives via the turn.terminal event.
+func (s *Server) handleChatSubmit(w http.ResponseWriter, r *http.Request) {
+	if s.chatSubmitter == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "chat submit service not available")
+		return
+	}
+
+	var req services.ChatSubmitRequest
+	if !s.readJSON(w, r, &req) {
+		return
+	}
+
+	params, err := json.Marshal(req)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	ack, err := s.chatSubmitter.Submit(r.Context(), params)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, ack)
+}
+
 // handleChatSteer handles POST /api/v1/chat/steer.
 func (s *Server) handleChatSteer(w http.ResponseWriter, r *http.Request) {
 	if s.services == nil || s.services.Chat == nil {

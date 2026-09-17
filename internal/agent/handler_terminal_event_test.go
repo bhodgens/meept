@@ -576,3 +576,168 @@ func TestHandleTaskFailed_EmitsFailedTerminalEvent(t *testing.T) {
 		t.Errorf("conversation_id = %q, want conv-failed (worker-map correlation)", ev.ConversationID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Async-turn registry wiring (leaf 03 of async-turn-migration)
+// ---------------------------------------------------------------------------
+
+// TestHandleRequest_TurnIDTrackedAndCompleted drives a submitted turn
+// (ChatRequest.TurnID set) through the error path: the registry must contain
+// the turn while it runs and have it removed once the turn.terminal fires.
+func TestHandleRequest_TurnIDTrackedAndCompleted(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	loop := NewAgentLoop("test-session", "/tmp") // no LLM client: turn errors out fast
+	h := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
+	reg := NewTurnRegistry()
+	h.SetTurnRegistry(reg)
+
+	sub := msgBus.Subscribe("test-turn-terminal", "turn.terminal")
+	defer h.bus.Unsubscribe(sub)
+
+	payload, _ := json.Marshal(ChatRequest{
+		Message:        "tracked submit",
+		ConversationID: "conv-tracked",
+		TurnID:         "turn-submit-1",
+	})
+	reqMsg := &models.BusMessage{
+		ID:        "m-tracked-1",
+		Type:      models.MessageTypeRequest,
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	}
+
+	h.handleRequest(context.Background(), reqMsg)
+
+	ev := waitTurnTerminal(t, sub)
+	if ev.TurnID != "turn-submit-1" {
+		t.Errorf("terminal event turn_id = %q, want turn-submit-1 (submitted id preserved)", ev.TurnID)
+	}
+	if ev.ConversationID != "conv-tracked" {
+		t.Errorf("conversation_id = %q, want conv-tracked", ev.ConversationID)
+	}
+	if ev.Status != "failed" {
+		t.Errorf("status = %q, want failed (no-LLM error path)", ev.Status)
+	}
+
+	// Complete ran adjacent to the terminal emission: the turn is gone.
+	if _, ok := reg.turns["turn-submit-1"]; ok {
+		t.Error("turn-submit-1 still tracked after terminal event (Complete not called)")
+	}
+}
+
+// TestPublishWorkerEvent_TouchesTrackedTurn proves the per-worker-event
+// Touch: register the turn, fire a worker event carrying the turn id in
+// Worker.RequestID, and observe LastProgressAt advance under the fake clock.
+func TestPublishWorkerEvent_TouchesTrackedTurn(t *testing.T) {
+	h := newTestChatHandlerWithBus(t)
+	reg := NewTurnRegistry()
+	start := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	fc := newFakeClock(start)
+	reg.now = fc.Now
+	h.SetTurnRegistry(reg)
+
+	reg.Register("turn-w1", "conv-1")
+	h.registerWorker(&Worker{
+		ID:             "w-touch",
+		ConversationID: "conv-1",
+		RequestID:      "m-1",
+		TurnID:         "turn-w1", // submit-time turn id rides the worker
+	})
+
+	fc.Advance(3 * time.Minute)
+	h.publishWorkerEvent("chat.worker.state_changed", &Worker{
+		ID:             "w-touch",
+		ConversationID: "conv-1",
+		RequestID:      "m-1",
+		TurnID:         "turn-w1",
+		State:          "executing_tool",
+	})
+
+	rec, ok := reg.turns["turn-w1"]
+	if !ok {
+		t.Fatal("tracked turn vanished on worker event")
+	}
+	if !rec.LastProgressAt.Equal(start.Add(3 * time.Minute)) {
+		t.Errorf("last_progress_at = %v, want %v (Touch advanced by the worker event)", rec.LastProgressAt, start.Add(3*time.Minute))
+	}
+}
+
+// TestHandleRequest_LegacyTurnUntracked pins the legacy-path contract:
+// ChatRequest without TurnID (the `chat` RPC) never creates registry state.
+func TestHandleRequest_LegacyTurnUntracked(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	loop := NewAgentLoop("test-session", "/tmp")
+	h := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
+	reg := NewTurnRegistry()
+	h.SetTurnRegistry(reg)
+
+	sub := msgBus.Subscribe("test-turn-terminal", "turn.terminal")
+	defer h.bus.Unsubscribe(sub)
+
+	payload, _ := json.Marshal(ChatRequest{
+		Message:        "legacy blocking turn",
+		ConversationID: "conv-legacy",
+		// TurnID deliberately empty
+	})
+	reqMsg := &models.BusMessage{
+		ID:        "m-legacy-1",
+		Type:      models.MessageTypeRequest,
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	}
+
+	h.handleRequest(context.Background(), reqMsg)
+
+	ev := waitTurnTerminal(t, sub)
+	if ev.TurnID == "" {
+		t.Error("terminal event still needs a synthetic turn_id for the wire contract")
+	}
+	if len(reg.turns) != 0 {
+		t.Errorf("legacy turn left registry state: %+v", reg.turns)
+	}
+}
+
+// TestSetTurnRegistry_NilAndTypedNil pins the setter convention: both a real
+// nil and a typed nil *TurnRegistry in an interface must be rejected, and a
+// nil receiver must not panic.
+func TestSetTurnRegistry_NilAndTypedNil(t *testing.T) {
+	h := newTestChatHandlerWithBus(t)
+
+	h.SetTurnRegistry(nil) // plain nil: ignored, no panic
+	if h.turnRegistry != nil {
+		t.Error("SetTurnRegistry(nil) must not install a registry")
+	}
+
+	// Typed-nil through an interface-shaped call site (project invariant).
+	var typedNil *TurnRegistry
+	var regAny any = typedNil
+	if reg, ok := regAny.(*TurnRegistry); !ok || reg != nil {
+		t.Fatalf("test setup: typed-nil assertion failed")
+	} else {
+		h.SetTurnRegistry(reg) // typed nil pointer: ignored
+	}
+	if h.turnRegistry != nil {
+		t.Error("SetTurnRegistry(typed-nil) must not install a registry")
+	}
+
+	var nilHandler *ChatHandler
+	nilHandler.SetTurnRegistry(NewTurnRegistry()) // nil receiver: no panic
+}
+
+// TestTouchTurn_NilRegistryNoOp proves touchTurn/completeTurn are safe when
+// no registry was wired (the registry is optional infrastructure).
+func TestTouchTurn_NilRegistryNoOp(t *testing.T) {
+	h := newTestChatHandlerWithBus(t)
+	h.touchTurn("turn-x")    // registry nil: no panic
+	h.completeTurn("turn-x") // registry nil: no panic
+
+	reg := NewTurnRegistry()
+	h.SetTurnRegistry(reg)
+	h.touchTurn("")    // empty id: no-op
+	h.completeTurn("") // empty id: no-op
+	if len(reg.turns) != 0 {
+		t.Errorf("empty-id helpers mutated the registry: %+v", reg.turns)
+	}
+}

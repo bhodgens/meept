@@ -197,6 +197,12 @@ type Server struct {
 	// When nil, dispatch endpoints return 503.
 	dispatchSubmitter DispatchSubmitter
 
+	// chatSubmitter serves POST /api/v1/chat/submit (async-turn migration
+	// leaf 04). It wraps the SAME shared validation+publish+ack function
+	// the chat.submit RPC handler uses, so the two surfaces cannot drift.
+	// When nil the route returns 503.
+	chatSubmitter ChatSubmitter
+
 	// Change review API (optional, set via WithChangesAPI): exposes the
 	// pending changes registry and change journal under /api/v1/* for
 	// human review (TUI modal, Flutter panel). Nil registry means the
@@ -909,6 +915,29 @@ func WithDispatchSubmitter(ds DispatchSubmitter) ServerOption {
 	}
 }
 
+// ChatSubmitter is the seam the HTTP chat-submit endpoint calls through.
+// Defined locally to avoid an import cycle (the rpc package adapts
+// *rpc.SubmitHandler to it in the daemon wiring). Params are the raw JSON
+// body marshaled from services.ChatSubmitRequest; the ack is the shared
+// chat.submit ack map.
+type ChatSubmitter interface {
+	// Submit validates, publishes chat.request, and returns the ack —
+	// never blocking on agent work.
+	Submit(ctx context.Context, params json.RawMessage) (any, error)
+}
+
+// WithChatSubmitter enables the POST /api/v1/chat/submit endpoint. Routes
+// inherit the server's authentication middleware when RequireAuth is
+// enabled. Nil-guarded per the setter convention (typed-nil included: the
+// nil check runs on the concrete interface value here).
+func WithChatSubmitter(cs ChatSubmitter) ServerOption {
+	return func(s *Server) {
+		if cs != nil {
+			s.chatSubmitter = cs
+		}
+	}
+}
+
 // WithChangesAPI enables the change-review endpoints under /api/v1/*
 // (pending change list/accept/reject and journal list/revert). The
 // registry holds staged writes, resolveTool supplies the shared accept
@@ -1239,6 +1268,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 
 	// Chat endpoints
 	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
+	mux.HandleFunc("POST /api/v1/chat/submit", s.handleChatSubmit)
 	mux.HandleFunc("GET /api/v1/chat/stream", s.handleChatStream)
 	mux.HandleFunc("GET /api/v1/chat/queue/{id}", s.handleChatQueueStatus)
 	mux.HandleFunc("POST /api/v1/chat/with-agent", s.handleChatWithAgent)

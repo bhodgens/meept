@@ -121,6 +121,12 @@ type ChatHandler struct {
 	workers   map[string]*Worker
 	workersMu sync.RWMutex
 
+	// turnRegistry tracks async-submitted turns (async-turn-migration leaf
+	// 02/03): submit-time Register, per-worker-event Touch, and Complete
+	// adjacent to every turn.terminal emission. Nil (legacy path) disables
+	// tracking entirely — only explicit chat.submit turns are ever tracked.
+	turnRegistry *TurnRegistry
+
 	// Shutdown
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -183,6 +189,9 @@ type Worker struct {
 	StartTime      time.Time `json:"start_time"`
 	LastActivity   time.Time `json:"last_activity"`
 	CurrentTool    string    `json:"current_tool,omitempty"`
+	// TurnID is the async-submit turn identity (leaf 03). Empty on legacy
+	// `chat` turns, which are never registry-tracked.
+	TurnID string `json:"turn_id,omitempty"`
 }
 
 // ChatRequest is the expected payload for chat.request messages.
@@ -200,6 +209,11 @@ type ChatRequest struct {
 	// for exactly this turn and auto-clears after it (never persisted to
 	// the config). Empty = unchanged alias/default behavior.
 	Model string `json:"model,omitempty"`
+	// TurnID is the caller-chosen turn identity from chat.submit (leaf 02
+	// of async-turn-migration). Non-empty turns are tracked in the
+	// TurnRegistry (Register/Touch/Complete); the legacy `chat` path
+	// leaves it empty and stays UNTRACKED.
+	TurnID string `json:"turn_id,omitempty"`
 }
 
 // ChatResponse is the payload for chat.response messages.
@@ -644,7 +658,10 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// below have no conversation yet, so they emit with the request ID as
 	// a synthetic conversation sentinel (consumers key on request id via
 	// the existing error response).
-	turnID := id.Generate("turn-")
+	// turnID comes from the submit-time identity when present (chat.submit
+	// sets ChatRequest.TurnID so terminal events correlate with the ack);
+	// legacy `chat` turns get a fresh synthetic id. start is captured
+	// before any exit path so duration_ms always spans the full turn.
 	start := time.Now()
 
 	// Parse request payload
@@ -654,7 +671,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		h.sendError(msg.ID, "invalid request format: "+err.Error())
 		h.publishTurnTerminal(TurnTerminalEvent{
 			ConversationID: msg.ID,
-			TurnID:         turnID,
+			TurnID:         id.Generate("turn-"),
 			HandlerCase:    "invalid_request",
 			Status:         "failed",
 			Reply:          "I encountered an error: invalid request format: " + err.Error(),
@@ -662,6 +679,11 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			Error:          "invalid request format: " + err.Error(),
 		})
 		return
+	}
+
+	turnID := req.TurnID
+	if turnID == "" {
+		turnID = id.Generate("turn-")
 	}
 
 	if req.Message == "" {
@@ -682,6 +704,16 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	conversationID := req.ConversationID
 	if conversationID == "" {
 		conversationID = generateConversationID()
+	}
+
+	// Async-turn tracking (leaf 03): register the submit-time turn under
+	// its explicit turn id. Only chat.submit turns carry TurnID — the
+	// legacy `chat` path has it empty and stays untracked. Registration is
+	// idempotent (a duplicate chat.request for the same turn_id is the
+	// submit handler's dedupe problem; here a re-registered turn simply
+	// keeps its original record).
+	if req.TurnID != "" && h.turnRegistry != nil {
+		h.turnRegistry.Register(req.TurnID, conversationID)
 	}
 
 	// Broadcast chat.message.received for bilateral visibility.
@@ -720,6 +752,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		State:          "processing",
 		StartTime:      time.Now(),
 		LastActivity:   time.Now(),
+		TurnID:         req.TurnID, // async-submit identity; "" on legacy turns
 	}
 	h.registerWorker(worker)
 	defer h.unregisterWorker(workerID)
@@ -1161,6 +1194,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		Model:          syncModel,
 		Error:          turnError,
 	})
+
+	// Async-turn completion (leaf 03): the submitted turn reached a
+	// terminal state, so it leaves the registry exactly when its
+	// turn.terminal event fires. No-op for untracked (legacy) turns.
+	if req.TurnID != "" {
+		h.completeTurn(req.TurnID)
+	}
 }
 
 // recordExchangeInSessionConv best-effort mirrors a completed task-path
@@ -1482,6 +1522,12 @@ func (h *ChatHandler) publishWorkerEvent(topic string, w *Worker) {
 	if err != nil {
 		return
 	}
+
+	// Async-turn liveness (leaf 03): every worker lifecycle event Touch()es
+	// the submit-time turn so the reaper sees progress. w.TurnID carries
+	// the chat.submit identity; legacy turns leave it empty and this is a
+	// no-op (they are never tracked).
+	h.touchTurn(w.TurnID)
 
 	msg := &models.BusMessage{
 		ID:        generateMessageID(),
@@ -1957,6 +2003,40 @@ func (h *ChatHandler) SetStepStore(store *task.StepStore) {
 	if store != nil {
 		h.stepStore = store
 	}
+}
+
+// SetTurnRegistry wires the async-turn registry (async-turn-migration leaf
+// 03). Nil-guarded INCLUDING typed-nil per the project invariant (`if tr !=
+// nil` does NOT survive a typed-nil *TurnRegistry in an any-typed check —
+// the explicit nil test here handles both because the parameter type is the
+// concrete pointer). A nil registry disables turn tracking: the legacy
+// `chat` path (empty ChatRequest.TurnID) is untracked regardless.
+func (h *ChatHandler) SetTurnRegistry(registry *TurnRegistry) {
+	if h == nil || registry == nil {
+		return
+	}
+	h.turnRegistry = registry
+}
+
+// touchTurn registers-or-progresses a tracked turn. Cheap (mutex + map
+// write); fires per worker lifecycle event. turnID "" (legacy path) is a
+// no-op.
+func (h *ChatHandler) touchTurn(turnID string) {
+	if h == nil || turnID == "" || h.turnRegistry == nil {
+		return
+	}
+	if existing := h.turnRegistry.Register(turnID, ""); existing {
+		h.turnRegistry.Touch(turnID)
+	}
+}
+
+// completeTurn removes a finished tracked turn. Called adjacent to every
+// publishTurnTerminal emission in handleRequest. turnID "" is a no-op.
+func (h *ChatHandler) completeTurn(turnID string) {
+	if h == nil || turnID == "" || h.turnRegistry == nil {
+		return
+	}
+	h.turnRegistry.Complete(turnID)
 }
 
 // SetTaskStore sets the task store for looking up linked sessions.

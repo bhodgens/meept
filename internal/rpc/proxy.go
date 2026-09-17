@@ -20,6 +20,11 @@ type ProxyHandler struct {
 	bus           *bus.MessageBus
 	pending       sync.Map // map[string]chan *models.BusMessage
 	subscriptions sync.Map // map[string]*busSubscription for TUI event streaming
+
+	// submitHandler serves chat.submit (async-turn-migration leaf 02).
+	// Constructed lazily per NewProxyHandler; registry stays nil there so
+	// the plain-proxy construction path gains no new dependencies.
+	submitHandler *SubmitHandler
 }
 
 // busSubscription holds state for a bus subscription.
@@ -45,13 +50,29 @@ type busEventRecord struct {
 
 // NewProxyHandler creates a new proxy handler.
 func NewProxyHandler(msgBus *bus.MessageBus) *ProxyHandler {
-	return &ProxyHandler{bus: msgBus}
+	return &ProxyHandler{bus: msgBus, submitHandler: NewSubmitHandler(msgBus, nil, nil)}
+}
+
+// SetSubmitHandler replaces the default submit handler (constructed with a
+// nil registry by NewProxyHandler). The daemon calls this BEFORE
+// RegisterProxyMethods so chat.submit picks up the shared turn registry for
+// idempotent-retry dedupe. Nil-guarded per the setter convention.
+func (p *ProxyHandler) SetSubmitHandler(h *SubmitHandler) {
+	if h != nil {
+		p.submitHandler = h
+	}
 }
 
 // RegisterProxyMethods registers all proxy methods that forward to the bus.
 func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	// Chat methods
 	server.RegisterHandler("chat", p.makeProxy("chat.request", "chat.response", 120*time.Second))
+
+	// Async chat submit (async-turn-migration leaf 02): fire-and-forget
+	// submit that acks BEFORE any agent work. Direct handler, not a proxy —
+	// it never waits on a response topic. The existing `chat` proxy above
+	// is untouched.
+	p.submitHandler.RegisterSubmitMethods(server)
 
 	// Status methods
 	server.RegisterHandler("status", p.makeProxy("status.request", "status.response", 10*time.Second))

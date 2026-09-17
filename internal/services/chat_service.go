@@ -41,6 +41,21 @@ type ChatRequest struct {
 	Model string `json:"model,omitempty"`
 }
 
+// ChatSubmitRequest is the POST /api/v1/chat/submit body (async-turn
+// migration leaf 04). JSON keys match agent.ChatRequest's wire shape so the
+// HTTP body passes through the shared chat.submit ack function unchanged;
+// Parts stay raw JSON because the http package passes them opaquely.
+type ChatSubmitRequest struct {
+	Message        string            `json:"message"`
+	SessionID      string            `json:"session_id,omitempty"`
+	ConversationID string            `json:"conversation_id,omitempty"`
+	AgentID        string            `json:"agent_id,omitempty"`
+	SourceClient   string            `json:"source_client,omitempty"`
+	Parts          []json.RawMessage `json:"parts,omitempty"`
+	Model          string            `json:"model,omitempty"`
+	TurnID         string            `json:"turn_id,omitempty"`
+}
+
 // ChatResponse contains chat output.
 type ChatResponse struct {
 	Reply      string `json:"reply"`
