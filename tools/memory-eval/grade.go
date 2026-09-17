@@ -259,10 +259,32 @@ func tokenOverlap(a, b string) float64 {
 
 // ---- distill eval ----
 
-type lessonOut struct {
-	Principle   string   `json:"principle"`
-	Because     string   `json:"because,omitempty"`
-	EvidenceIDs []string `json:"evidence_ids,omitempty"`
+// lessonFromJSON tolerantly decodes a lesson object. evidence_ids may be
+// strings or integers (models invent ids); the shape mismatch is reported via
+// evidenceTyped so the eval can count it against schema conformance.
+func lessonFromJSON(content string) (principle, because string, evidenceTyped bool, err error) {
+	var raw struct {
+		Principle   string          `json:"principle"`
+		Because     string          `json:"because"`
+		EvidenceIDs json.RawMessage `json:"evidence_ids"`
+	}
+	if err := unmarshalLoose(content, &raw); err != nil {
+		return "", "", false, err
+	}
+	if len(raw.EvidenceIDs) > 0 {
+		var ss []string
+		if json.Unmarshal(raw.EvidenceIDs, &ss) == nil {
+			evidenceTyped = true
+		} else {
+			var anys []any
+			if json.Unmarshal(raw.EvidenceIDs, &anys) == nil {
+				evidenceTyped = false
+			}
+		}
+	} else {
+		evidenceTyped = true // absent is fine
+	}
+	return raw.Principle, raw.Because, evidenceTyped, nil
 }
 
 const distillPrompt = `Distill the principle below into ONE reusable lesson.
@@ -290,24 +312,25 @@ func runDistillEval(client *chatClient, corpus *corpus, threshold float64) *Dist
 				m.TransportErrors++
 				continue
 			}
-			var l lessonOut
-			if err := unmarshalLoose(content, &l); err != nil {
+			principle, _, evidenceTyped, err := lessonFromJSON(content)
+			if err != nil {
 				continue
 			}
 			m.JSONParseOK++
-			conform := l.Principle != "" && len(l.Principle) <= 280
-			if conform {
+			conform := principle != "" && len(principle) <= 280 && evidenceTyped
+			if principle != "" && len(principle) <= 280 && evidenceTyped {
 				m.SchemaConformant++
-			} else if l.Principle != "" {
+			} else if principle != "" && len(principle) > 280 {
 				m.CapViolations++
 			}
-			if l.Principle == "" {
+			_ = conform
+			if principle == "" {
 				continue
 			}
 			m.LessonsExtracted++
 			// gold for distill segment = the observation itself (a good lesson
 			// retains the observation's substance)
-			if tokenOverlap(obs, l.Principle) >= threshold {
+			if tokenOverlap(obs, principle) >= threshold {
 				m.TruePositives++
 			} else {
 				m.FalseNegatives++

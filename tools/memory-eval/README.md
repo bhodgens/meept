@@ -65,8 +65,50 @@ behavior (if any) is part of what's being measured for this candidate.
   --port 8090 --host 127.0.0.1 --ctx-size 8192
 ```
 
-The Extract model has no chat template thinking mode; `--jinja` is harmless
-either way.
+The 8B "instruct" comparison resolves as: LFM2.5-8B-A1B is the instruct variant
+(Liquid ships it alongside a separate Base model), so candidates 1 and 2 are the
+same model in GGUF-Q4_K_M vs MLX-4bit formats.
+
+## Results (2026-09-16 run, unconstrained, temp 0.2)
+
+| Metric | LFM2-1.2B-Extract Q4 | LFM2.5-8B-A1B Q4 GGUF | LFM2.5-8B-A1B MLX-4bit |
+|--------|----------------------|-----------------------|------------------------|
+| ambient precision | 0.158 | 0.174 | 0.143 |
+| ambient recall    | 0.547 | 0.532 | 0.483 |
+| ambient F1        | 0.245 | 0.262 | 0.220 |
+| json_parse_ok     | 36/51 | 40/51 | 39/51 |
+| schema_conformant | 19/51 | 21/51 | 19/51 |
+| decoy false pos   | 49    | 53    | 51 |
+| distill recall    | 0.000* | 1.000 | 0.800 |
+| distill parse     | 0/5*  | 5/5   | 5/5 |
+| mean latency ms   | 1638  | 1412  | 1532 |
+
+*first run predated a harness fix for integer evidence_ids.
+
+## Findings
+
+1. **None of the three is production-usable UNCONSTRAINED for ambient
+   extraction.** All three fragment assertions ("Go", "1200 requests per
+   second" instead of full statements), all three wrap the array in
+   `{"candidates": [...]}` or paraphrase into fragments, and all three treat
+   ~50 of 29 decoys as extractable. Precision ~0.15 means 85% of what would be
+   stored is noise.
+2. **The `{"candidates": ...}` wrapper is a production risk**: production's
+   `ParseAmbientCandidates` expects a bare array. Constrained decoding (GBNF
+   forcing a bare array root) is mandatory before any of these models ships in
+   the ambient path.
+3. **Distillation is nearly solved**: the 8B (both formats) parses 5/5 and
+   recalls 1.0/0.8 on lessons. The only schema miss is inventing INTEGER
+   evidence_ids where production requires []string — production's
+   `DecodeLesson` would reject these. Either the prompt should say "omit
+   evidence_ids" or production should tolerate/coerce ints.
+4. **8B vs 1.2B**: the 8B is marginally better on F1 and clearly better on
+   distill, but not enough to justify a second resident model — the deciding
+   factor is that ALL ambient results need grammar constraints regardless of
+   model. A single shared model + GBNF is the recommended path; the Extract
+   1.2B offers no advantage here over the 8B you already run.
+5. GGUF Q4 vs MLX 4bit: statistically a wash on quality; latency similar. Keep
+   whichever serves your existing stack (GGUF for llama.cpp lifecycle wiring).
 
 ### Evaluate
 
