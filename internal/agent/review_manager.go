@@ -122,8 +122,30 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		}, nil
 	}
 
+	// F9 (2026-09-17 bughunt): the claim-without-evidence guards must run
+	// BEFORE the policy.NeedsReview shortcut below. DefaultReviewPolicy
+	// skips review for conversational hints ("chat", "report", …), so a
+	// conversational step narrating a fabricated tool execution
+	// ("extraction ran clean") with zero tool evidence was auto-approved
+	// here and heuristicReviewPasses — where the guards live — never
+	// ran. The guard is cheap and policy-independent: a step CLAIMING a
+	// specific tool execution it cannot evidence needs a reviewer even
+	// when its hint is on the skip list. Plain conversational answers
+	// (no tool-run claims) still fall through to the shortcut and pass.
+	if !rm.heuristicGuardsPass(step) {
+		// Route to the full reviewer instead of waving the step through.
+		// SelectReviewer/buildReviewPrompt need no policy short-circuit;
+		// fall through to the normal review flow below (the trivial-task
+		// heuristic re-runs the same guards and lands on the same
+		// escalate-to-reviewer path, so behavior is consistent).
+		rm.logger.Warn("Claim-without-evidence guard fired under a skip-review policy hint; forcing full review",
+			"step_id", step.ID,
+			"tool_hint", step.ToolHint,
+		)
+	}
+
 	// Check if review is needed based on policy
-	if !policy.NeedsReview(step) {
+	if !policy.NeedsReview(step) && rm.heuristicGuardsPass(step) {
 		rm.logger.Debug("Step does not require review", "step_id", step.ID)
 		return &ReviewResult{
 			Status:     ReviewApproved,
@@ -977,6 +999,51 @@ func (rm *ReviewManager) isTrivialTask(step *task.TaskStep) bool {
 		return false
 	}
 	return len(steps) < 3
+}
+
+// heuristicGuardsPass runs ONLY the claim-without-evidence guards from
+// heuristicReviewPasses — no error/emptiness checks, no full heuristic
+// verdict. F9 (2026-09-17 bughunt): ReviewStep consults this BEFORE the
+// policy.NeedsReview shortcut, so a step whose hint is on the policy
+// skip list ("chat", "report", …) cannot be auto-approved when it
+// narrates a specific tool execution with no tool evidence behind it.
+// Returns true when the guards are silent (step may proceed).
+func (rm *ReviewManager) heuristicGuardsPass(step *task.TaskStep) bool {
+	result := strings.TrimSpace(step.Result)
+	if result == "" {
+		return true
+	}
+	// Scan scope mirrors heuristicReviewPasses: structured step-job
+	// envelopes are scanned on the model's RESPONSE narration only.
+	scanText := result
+	var envelope struct {
+		Response string `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(result), &envelope); err == nil && envelope.Response != "" {
+		scanText = envelope.Response
+	}
+	// Artifact guard: a non-conversational step claiming artifacts with
+	// no meaningful tool evidence (e2e run 7, 2026-09-10).
+	if step.ToolHint != "" && !reviewHintIsConversational(step.ToolHint) && !hasMeaningfulEvidence(step.Evidence) {
+		if claimsArtifacts(scanText) {
+			rm.logger.Warn("Review policy gate: artifact claims with no tool evidence; review required",
+				"step_id", step.ID,
+				"tool_hint", step.ToolHint,
+			)
+			return false
+		}
+	}
+	// Tool-execution-claim guard (agent sweep e2e, 2026-09-15): any step
+	// asserting a specific tool execution with no meaningful tool
+	// evidence needs a reviewer, conversational hint or not.
+	if !hasMeaningfulEvidence(step.Evidence) && claimsToolExecution(scanText) {
+		rm.logger.Warn("Review policy gate: tool-execution claims with no tool evidence; review required",
+			"step_id", step.ID,
+			"tool_hint", step.ToolHint,
+		)
+		return false
+	}
+	return true
 }
 
 // heuristicReviewPasses performs a lightweight, non-LLM check to determine
