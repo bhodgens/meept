@@ -2431,7 +2431,7 @@ type OrchestratorConfig struct {
 // migration leaf 06). Enabled defaults TRUE — without a reaper a vanished
 // turn would leave its client waiting forever, which is the silent-death
 // failure mode this leaf exists to close. Zero IntervalSeconds maps to 30,
-// zero StaleAfterSeconds maps to 120 (normalized in DefaultConfig).
+// zero StaleAfterSeconds maps to 600 (normalized in DefaultConfig) — 600s tolerates a legitimate silent LLM+tool stretch (a single multi-minute step emits no intermediate events; the bench gate showed 2-minute silent steps are routine).
 type TurnWatchdogConfig struct {
 	// Enabled turns on the reaper. Default true.
 	Enabled bool `json:"enabled" toml:"enabled"`
@@ -3254,7 +3254,7 @@ func DefaultConfig() *Config {
 			TurnWatchdog: TurnWatchdogConfig{
 				Enabled:           true,
 				IntervalSeconds:   30,
-				StaleAfterSeconds: 120,
+				StaleAfterSeconds: 600,
 			},
 		},
 		Learning: LearningConfig{

@@ -705,7 +705,7 @@
     "turn_watchdog": {
       "enabled": true,              // false disables the reaper entirely (zero goroutines)
       "interval_seconds": 30,       // 0 → 30: seconds between reap passes
-      "stale_after_seconds": 120,   // 0 → 120: no progress for this long → reaped as failed
+      "stale_after_seconds": 600,   // 0 → 600: no progress for this long → reaped as failed
     },
     // Legacy blocking chat (async-turn-migration leaf 07). Default OFF:
     // task-dispatched turns ack immediately via chat.submit and deliver

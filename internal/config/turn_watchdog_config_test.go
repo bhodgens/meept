@@ -7,7 +7,7 @@ import (
 )
 
 // TestTurnWatchdogConfig_Defaults pins the leaf-06 defaults: the reaper is
-// ENABLED by default with 30s pass interval and 120s staleness threshold.
+// ENABLED by default with 30s pass interval and 600s staleness threshold.
 // A silent default-off would resurrect the exact silent-death failure mode
 // the watchdog exists to close.
 func TestTurnWatchdogConfig_Defaults(t *testing.T) {
@@ -19,8 +19,8 @@ func TestTurnWatchdogConfig_Defaults(t *testing.T) {
 	if tw.IntervalSeconds != 30 {
 		t.Errorf("TurnWatchdog.IntervalSeconds default = %d, want 30", tw.IntervalSeconds)
 	}
-	if tw.StaleAfterSeconds != 120 {
-		t.Errorf("TurnWatchdog.StaleAfterSeconds default = %d, want 120", tw.StaleAfterSeconds)
+	if tw.StaleAfterSeconds != 600 {
+		t.Errorf("TurnWatchdog.StaleAfterSeconds default = %d, want 600", tw.StaleAfterSeconds)
 	}
 }
 
@@ -50,8 +50,8 @@ func TestTurnWatchdogConfig_TemplateParses(t *testing.T) {
 	if tw.IntervalSeconds != 30 {
 		t.Errorf("template turn_watchdog interval_seconds = %d, want 30", tw.IntervalSeconds)
 	}
-	if tw.StaleAfterSeconds != 120 {
-		t.Errorf("template turn_watchdog stale_after_seconds = %d, want 120", tw.StaleAfterSeconds)
+	if tw.StaleAfterSeconds != 600 {
+		t.Errorf("template turn_watchdog stale_after_seconds = %d, want 600", tw.StaleAfterSeconds)
 	}
 }
 
