@@ -1327,6 +1327,16 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	// Check for other error status codes
 	if resp.StatusCode != http.StatusOK {
+		// Refusal surfacing (refusal-fallback leaf 01): a typed safeguard /
+		// content-filter error body is a RefusalError, not a bare APIError.
+		// Conservative marker list — no match, no change.
+		if refusal := DetectRefusalFromBody(cfg.ProviderID, cfg.ModelID, resp.StatusCode, string(respBody)); refusal != nil {
+			var apiErrBody anthropicErrorResponse
+			if err := json.Unmarshal(respBody, &apiErrBody); err == nil && apiErrBody.Error.Message != "" {
+				refusal.Cause = &APIError{StatusCode: resp.StatusCode, Detail: apiErrBody.Error.Message}
+			}
+			return nil, refusal
+		}
 		var apiErr anthropicErrorResponse
 		if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error.Message != "" {
 			return nil, &APIError{StatusCode: resp.StatusCode, Detail: apiErr.Error.Message}
@@ -1351,6 +1361,13 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 			"body_preview", preview,
 		)
 		return nil, &ClientError{Message: "failed to parse response", Cause: err}
+	}
+
+	// Refusal surfacing (refusal-fallback leaf 01): Anthropic's
+	// stop_reason:"refusal" surfaces as a typed RefusalError instead of a
+	// generic completion.
+	if refusal := DetectRefusal(cfg.ProviderID, cfg.ModelID, apiResp.StopReason); refusal != nil {
+		return nil, refusal
 	}
 
 	// Record successful request metrics with actual usage data
@@ -1672,6 +1689,13 @@ func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(P
 
 	if err := scanner.Err(); err != nil {
 		return nil, &ClientError{Message: "error reading stream", Cause: err}
+	}
+
+	// Refusal surfacing (refusal-fallback leaf 01): a stream whose
+	// message_delta carries stop_reason "refusal" surfaces as a typed
+	// RefusalError instead of a generic completion.
+	if refusal := DetectRefusal(c.config.ProviderID, c.config.ModelID, stopReason); refusal != nil {
+		return nil, refusal
 	}
 
 	// Build the response from accumulated blocks

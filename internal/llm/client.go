@@ -1549,6 +1549,18 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 	}
 	c.logger.Debug("LLM response received", "status", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"), "body_preview", bodyPreview)
 
+	// Refusal surfacing (refusal-fallback leaf 01): a typed safeguard /
+	// content-filter error body on any non-429/402 status is a RefusalError,
+	// not a bare APIError. Conservative marker list — no match, no change.
+	// Gated to non-OK statuses: a 200 body can legitimately carry
+	// "finish_reason":"content_filter", which contains the quoted marker.
+	if resp.StatusCode != http.StatusOK {
+		if refusal := DetectRefusalFromBody(providerID, modelID, resp.StatusCode, string(respBody)); refusal != nil {
+			refusal.Cause = &APIError{StatusCode: resp.StatusCode, Detail: bodyPreview}
+			return nil, refusal
+		}
+	}
+
 	// Check for rate limit (429) specifically
 	if resp.StatusCode == http.StatusTooManyRequests {
 		detail := string(respBody)
@@ -1679,7 +1691,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 		}
 	}
 
-	parsedResp, err := c.parseResponseWithTools(&chatResp, hasTools)
+	parsedResp, err := c.parseResponseWithTools(&chatResp, hasTools, providerID, modelID)
 
 	// Update metrics with actual token counts if available
 	if c.metricsStore != nil && parsedResp != nil {
@@ -1745,7 +1757,7 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 // calls from every recognized shape, including the ambiguous bare-JSON one;
 // callers that know whether tools were offered should use parseResponseWithTools.
 func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
-	return c.parseResponseWithTools(chatResp, true)
+	return c.parseResponseWithTools(chatResp, true, "", chatResp.Model)
 }
 
 // parseResponseWithTools is parseResponse with the ambiguous bare-JSON call
@@ -1754,7 +1766,10 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 // must pass through untouched: mining one out of the intent analyzer's reply
 // stripped it to empty content and the classifier stage failed with
 // "intent analysis: empty content" (fresh-rig run 5, 2026-09-12).
-func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool) (*Response, error) {
+//
+// providerID and modelID attribute a detected refusal to the provider/model
+// that served the request (empty modelID allowed on streaming paths).
+func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool, providerID, modelID string) (*Response, error) {
 	if len(chatResp.Choices) == 0 {
 		return nil, ErrEmptyResponse
 	}
@@ -1802,6 +1817,14 @@ func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool) (
 	if content == "" && len(msg.ToolCalls) == 0 && len(lfmCalls) == 0 && reasoning != "" {
 		content = strings.TrimSpace(reasoningRest)
 		reasoningPromoted = content != ""
+	}
+
+	// Refusal surfacing (refusal-fallback leaf 01): a content_filter /
+	// refusal finish reason is a typed RefusalError (NonRetryable), not a
+	// generic completion or the empty-content sentinel. Checked BEFORE the
+	// empty-content check so a refusal with no text still classifies.
+	if refusal := DetectRefusal(providerID, modelID, choice.FinishReason); refusal != nil {
+		return nil, refusal
 	}
 
 	// Empty content with no tool calls is the "model said nothing" failure.
@@ -2439,6 +2462,13 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		!strings.Contains(content[idx:], "</function_calls>") {
 		c.logger.Warn("LFM <function_calls> block truncated at stream cutoff; raw text kept in content",
 			"model", modelID, "remainder", content[idx:])
+	}
+
+	// Refusal surfacing (refusal-fallback leaf 01): a stream that ends with
+	// a refusal finish reason surfaces as a typed RefusalError instead of a
+	// generic completion.
+	if refusal := DetectRefusal(providerID, modelID, finishReason); refusal != nil {
+		return nil, resp.StatusCode, refusal
 	}
 
 	result := &Response{
