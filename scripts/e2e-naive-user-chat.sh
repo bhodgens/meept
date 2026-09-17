@@ -339,6 +339,10 @@ run_chat_turn() {
 # honesty (only fires when the reply is quota-shaped).
 assert_reply_shape() {
   local turn="$1" file="$2"
+  if ! grep -q '[^[:space:]]' "$file"; then
+    note_result FAIL "A0/$turn" "reply is empty or whitespace-only"
+    return
+  fi
   if grep -Eq '^[[:space:]]*Task .* completed\.[[:space:]]*$' "$file"; then
     note_result FAIL "A1/$turn" "reply is the literal 'Task ... completed.' stub (F1/C1)"
   else
@@ -349,9 +353,10 @@ assert_reply_shape() {
   else
     note_result PASS "A2/$turn" "no agent-roster dump"
   fi
-  local first last
-  first="$(head -c 1 "$file" | tr -d '[:space:]')"
-  last="$(tail -c 1 "$file" | tr -d '[:space:]')"
+  local first last compact
+  compact="$(tr -d '[:space:]' <"$file")"
+  first="${compact:0:1}"
+  last="${compact: -1}"
   if [ "$first" = "{" ] && [ "$last" = "}" ]; then
     note_result FAIL "A3/$turn" "reply is a raw JSON object dump (F5/C5)"
   else
@@ -443,6 +448,13 @@ cat >"$WORK/meept.json5" <<EOF
   "security": {
     "audit_db_path": "$STATE/audit.db",
     "allowed_paths": ["$WORK/**", "$WORK_RESOLVED/**"],
+  },
+  "orchestrator": {
+    // e2e relies on the LEGACY sync-dispatch path (handler.go
+    // sync_dispatch): the naive-user transcript asserts the chat RPC
+    // reply carries the real task result. Requires the leaf-07 opt-in
+    // since 0014bee2 gated the bench sync latch behind this flag.
+    "sync_chat_enabled": true,
   },
   // Multi-agent orchestration: the roster specialists (chat/coder/...)
   // register only when this is on (components.go creates AgentRegistry
@@ -1065,7 +1077,7 @@ log "  project: $(head -n 1 "$REPLIES/project-add.txt")"
 #      plain CLI turns classify async and return an ack instead.
 #
 # The warmup turn doubles as the provider smoke test: no provider answer =>
-# whole transcript SKIPs (printed, exit 0 — never silent).
+# warmup failure fails the run; reachability alone cannot identify provider outages.
 log ""
 log "[4/7] creating session via CLI chat --project (plumbing turn)"
 PLUMB_ERR="$REPLIES/plumbing.err"
@@ -1132,39 +1144,48 @@ def wait_response(want_id, deadline):
         time.sleep(0.2)
     return None
 
-deadline = time.time() + 60
-send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-      "params": {"protocolVersion": "2024-11-05", "capabilities": {},
-                 "clientInfo": {"name": "meept-e2e", "version": "0"}}})
-if wait_response(1, deadline) is None:
-    print("__WARMUP_FAILED__: no initialize response", file=sys.stderr)
-    p.kill(); sys.exit(3)
-send({"jsonrpc": "2.0", "method": "notifications/initialized"})
-
-send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-      "params": {"name": "meept_send",
-                 "arguments": {"session_id": sid, "source_client": source_client,
-                               "message": "Reply with the single word: ok"}}})
-msg = wait_response(2, time.time() + timeout)
-p.kill()
-if msg is None:
-    print("__WARMUP_FAILED__: meept_send timed out", file=sys.stderr)
-    sys.exit(3)
-if "error" in msg and msg["error"]:
-    print("__WARMUP_FAILED__: %s" % msg["error"], file=sys.stderr)
-    sys.exit(3)
 try:
-    text = msg["result"]["content"][0]["text"]
-except (KeyError, IndexError, TypeError):
-    print("__WARMUP_FAILED__: unexpected tools/call result shape", file=sys.stderr)
-    sys.exit(3)
-sys.stdout.write(text)
+    deadline = time.time() + 60
+    send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+          "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                     "clientInfo": {"name": "meept-e2e", "version": "0"}}})
+    initial = wait_response(1, deadline)
+    if initial is None or initial.get("error"):
+        print("__WARMUP_FAILED__: no initialize response", file=sys.stderr)
+        sys.exit(3)
+    send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+          "params": {"name": "meept_send",
+                     "arguments": {"session_id": sid, "source_client": source_client,
+                                   "message": "Reply with the single word: ok"}}})
+    msg = wait_response(2, time.time() + timeout)
+    if msg is None:
+        print("__WARMUP_FAILED__: meept_send timed out", file=sys.stderr)
+        sys.exit(3)
+    if "error" in msg and msg["error"]:
+        print("__WARMUP_FAILED__: %s" % msg["error"], file=sys.stderr)
+        sys.exit(3)
+    if isinstance(msg.get("result"), dict) and msg["result"].get("isError"):
+        print("MCP tool returned isError", file=sys.stderr)
+        sys.exit(3)
+    try:
+        text = msg["result"]["content"][0]["text"]
+    except (KeyError, IndexError, TypeError):
+        print("__WARMUP_FAILED__: unexpected tools/call result shape", file=sys.stderr)
+        sys.exit(3)
+    sys.stdout.write(text)
+finally:
+    if p.poll() is None:
+        p.kill()
+    p.wait()
+    t.join(timeout=1)
 PY
 )"
 WARMUP_RC=$?
 if [ "$WARMUP_RC" -ne 0 ]; then
   if daemon_ping; then
-    note_result SKIP "warmup" "no provider reply via mcp-chat-server (rc=$WARMUP_RC): $(tail -c 300 "$WARMUP_ERR" 2>/dev/null | tr '\n' ' ')"
+    note_result FAIL "warmup" "MCP warmup failed; daemon reachability does not prove a provider outage (rc=$WARMUP_RC): $(tail -c 300 "$WARMUP_ERR" 2>/dev/null | tr '\n' ' ')"
   else
     note_result FAIL "warmup" "daemon stopped answering RPC (see $DAEMON_LOG)"
   fi
@@ -1235,30 +1256,39 @@ def wait_response(want_id, deadline):
         time.sleep(0.2)
     return None
 
-deadline = time.time() + 60
-send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-      "params": {"protocolVersion": "2024-11-05", "capabilities": {},
-                 "clientInfo": {"name": "meept-e2e", "version": "0"}}})
-if wait_response(1, deadline) is None:
-    p.kill(); sys.exit(3)
-send({"jsonrpc": "2.0", "method": "notifications/initialized"})
-
-send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-      "params": {"name": "meept_send",
-                 "arguments": {"session_id": sid, "source_client": source_client,
-                               "message": message}}})
-msg = wait_response(2, time.time() + timeout)
-p.kill()
-if msg is None:
-    sys.exit(124)
-if msg.get("error"):
-    sys.stderr.write(json.dumps(msg["error"]))
-    sys.exit(1)
 try:
-    text = msg["result"]["content"][0]["text"]
-except (KeyError, IndexError, TypeError):
-    sys.exit(3)
-sys.stdout.write(text)
+    deadline = time.time() + 60
+    send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+          "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                     "clientInfo": {"name": "meept-e2e", "version": "0"}}})
+    initial = wait_response(1, deadline)
+    if initial is None or initial.get("error"):
+        sys.exit(3)
+    send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+          "params": {"name": "meept_send",
+                     "arguments": {"session_id": sid, "source_client": source_client,
+                                   "message": message}}})
+    msg = wait_response(2, time.time() + timeout)
+    if msg is None:
+        sys.exit(124)
+    if msg.get("error"):
+        sys.stderr.write(json.dumps(msg["error"]))
+        sys.exit(1)
+    if isinstance(msg.get("result"), dict) and msg["result"].get("isError"):
+        print("MCP tool returned isError", file=sys.stderr)
+        sys.exit(3)
+    try:
+        text = msg["result"]["content"][0]["text"]
+    except (KeyError, IndexError, TypeError):
+        sys.exit(3)
+    sys.stdout.write(text)
+finally:
+    if p.poll() is None:
+        p.kill()
+    p.wait()
+    t.join(timeout=1)
 PY
     )"
         rc=$?
