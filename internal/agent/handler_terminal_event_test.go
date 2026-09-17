@@ -799,3 +799,45 @@ func TestPublishTaskTerminalRelay_UntrackedTaskGetsFreshID(t *testing.T) {
 		t.Errorf("ConversationID = %q, want task:task-99 sentinel", ev.ConversationID)
 	}
 }
+
+// TestHandleTaskProgressLiveness_TouchesAttachedTurn pins the async-turn
+// liveness wiring (relay-fix follow-up): a task.progress event for a task
+// attached to a tracked turn must refresh that turn's liveness so
+// multi-minute step execution does not trip the client/watchdog windows.
+func TestHandleTaskProgressLiveness_TouchesAttachedTurn(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
+	reg := NewTurnRegistry()
+	h.SetTurnRegistry(reg)
+
+	reg.Register("turn-live", "conv-live")
+	reg.AttachTask("turn-live", "task-live")
+
+	// Age the turn to the edge of staleness via the injectable clock.
+	base := time.Now()
+	reg.now = func() time.Time { return base }
+	before := base
+
+	payload, _ := json.Marshal(map[string]any{"task_id": "task-live"})
+	msg := &models.BusMessage{
+		ID: "tp1", Type: models.MessageTypeEvent, Source: "tactical",
+		Timestamp: base, Payload: payload,
+	}
+
+	// Advance the clock past the handle, then handle: Touch must stamp
+	// LastProgressAt with the NEW now.
+	reg.now = func() time.Time { return base.Add(90 * time.Second) }
+	h.handleTaskProgressLiveness(msg)
+
+	recs := reg.Stale(120 * time.Second)
+	for _, rec := range recs {
+		if rec.TurnID == "turn-live" {
+			t.Errorf("turn-live went stale despite task.progress touch (last progress %v, want ~%v)",
+				rec.LastProgressAt, before.Add(90*time.Second))
+		}
+	}
+	// And the turn must still be tracked (not completed/reaped).
+	if got := reg.TurnIDForTask("task-live"); got != "turn-live" {
+		t.Errorf("TurnIDForTask = %q, want turn-live (edge must survive a touch)", got)
+	}
+}

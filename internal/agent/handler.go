@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/comm/wsclass"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/session"
@@ -251,6 +252,10 @@ type TurnTerminalEvent struct {
 	Error          string `json:"error,omitempty"`         // non-empty iff Status=="failed"
 }
 
+// WSClass implements wsclass.WSClassified: turn lifecycle events render
+// as agent_progress - never chat_message (blank-bubble invariant).
+func (TurnTerminalEvent) WSClass() wsclass.WSClass { return wsclass.WSProgress }
+
 // NewChatHandler creates a new ChatHandler.
 // The dispatcher parameter is optional; if nil, requests go directly to the loop.
 func NewChatHandler(loop *AgentLoop, dispatcher *Dispatcher, msgBus *bus.MessageBus, logger *slog.Logger) *ChatHandler {
@@ -290,6 +295,14 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	taskCompletedSub := h.bus.Subscribe(SourceChatHandler, "task.completed")
 	taskFailedSub := h.bus.Subscribe(SourceChatHandler, "task.failed")
 
+	// Async-turn liveness (relay-fix follow-up, bench gate 2026-09-17):
+	// task.progress events fire on task/step transitions — including long
+	// LLM/tool executions between step boundaries. Touch the attached
+	// tracked turn so the client's liveness window and the turn watchdog
+	// both see progress during multi-minute step execution. task.progress
+	// carries task_id; the registry resolves task→turn.
+	taskProgressSub := h.bus.Subscribe(SourceChatHandler, "task.progress")
+
 	// Subscribe to agent progress events to keep worker state in sync with
 	// the agent loop's stage transitions (thinking vs. executing tools).
 	progressSub := h.bus.Subscribe(SourceChatHandler, "agent.progress")
@@ -303,7 +316,7 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	// Subscribe to collaboration result events to push results back to chat sessions
 	collabResultSub := h.bus.Subscribe(SourceChatHandler, TopicCollabResult)
 
-	h.wg.Add(8)
+	h.wg.Add(9)
 
 	// Chat request handler
 	go func() {
@@ -352,6 +365,26 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 					return
 				}
 				h.handleTaskCompleted(msg)
+			}
+		}
+	}()
+
+	// Task progress handler - async-turn liveness (relay-fix follow-up):
+	// every task.progress for a tracked turn's task Touches that turn, so
+	// multi-minute step execution keeps the client liveness window and the
+	// watchdog fed between worker lifecycle events.
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				h.bus.Unsubscribe(taskProgressSub)
+				return
+			case msg, ok := <-taskProgressSub.Channel:
+				if !ok {
+					return
+				}
+				h.handleTaskProgressLiveness(msg)
 			}
 		}
 	}()
@@ -2062,6 +2095,26 @@ func (h *ChatHandler) SetTurnRegistry(registry *TurnRegistry) {
 		return
 	}
 	h.turnRegistry = registry
+}
+
+// handleTaskProgressLiveness feeds task.progress events into the turn
+// registry (async-turn liveness, relay-fix follow-up): a task.progress
+// carrying task_id Touches the turn that dispatched it, so multi-minute
+// step execution — where no worker lifecycle event fires — still counts as
+// progress for the client liveness window and the turn watchdog.
+func (h *ChatHandler) handleTaskProgressLiveness(msg *models.BusMessage) {
+	if h == nil || h.turnRegistry == nil || msg == nil {
+		return
+	}
+	var payload struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.TaskID == "" {
+		return
+	}
+	if turnID := h.turnIDForTask(payload.TaskID); turnID != "" {
+		h.touchTurn(turnID)
+	}
 }
 
 // touchTurn registers-or-progresses a tracked turn. Cheap (mutex + map
