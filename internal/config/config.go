@@ -358,6 +358,9 @@ type ModelsConfig struct {
 	ImageModel      string `json:"image_model"`
 	VideoModel      string `json:"video_model"`
 	ExtractModel    string `json:"extract_model"` // Model for json_extract extraction (empty = json_extract reports not-configured)
+	// MemoryModel is the model for ambient epistemic extraction + distill
+	// summarization (empty = falls back to the general chat client).
+	MemoryModel string `json:"memory_model"`
 	// RefusalModel is the global default refusal fallback target
 	// (provider/model ref or alias name; refusal-fallback tree 02).
 	// Empty = no global default; a per-agent spec refusal_model overrides

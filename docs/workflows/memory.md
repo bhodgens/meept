@@ -101,6 +101,26 @@ Behavior:
 
 ## Configuration
 
+### Memory Model Slot
+
+In `models.json5`, the optional `memory_model` slot selects a dedicated
+model for **ambient epistemic extraction** and **distill summarization**
+(the memory manager's consolidation/distill LLM and the epistemic detector
++ ambient extraction hook):
+
+```json5
+{
+  // Dedicated model for memory extraction/distillation (provider/model-id
+  // or alias). Empty = falls back to the general chat client.
+  "memory_model": "zai/glm-4.5-air",
+}
+```
+
+Preference order when resolving the memory-path chatter:
+`memory_model` client > general LLM provider > general LLM client.
+Leaving the slot empty keeps the historical behavior (the general chat
+client serves memory extraction/distillation).
+
 ```toml
 [memory]
 backend = "memvid"  # or "sqlite"

@@ -110,7 +110,12 @@ type Components struct {
 	// ExtractClient is the dedicated client for the json_extract tool
 	// (extract_model slot in models.json5). Nil = json_extract reports
 	// not-configured; the tool never falls back to the chat model.
-	ExtractClient     *llm.Client
+	ExtractClient *llm.Client
+	// MemoryModelClient is the dedicated client for ambient epistemic
+	// extraction + distill summarization (memory_model slot in
+	// models.json5). Nil = those paths use the general chat client
+	// (LLMProvider/LLMClient).
+	MemoryModelClient *llm.Client
 	LLMResolver       *llm.Resolver
 	ToolRegistry      *tools.Registry
 	SecurityChecker   *security.PermissionChecker
@@ -906,6 +911,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				logger.Info("Extract LLM client initialized", "model", c.ModelsConfig.ExtractModel)
 			} else {
 				logger.Warn("Extract model unresolvable; json_extract disabled", "model", c.ModelsConfig.ExtractModel)
+			}
+		}
+
+		// Dedicated memory model for ambient epistemic extraction +
+		// distill summarization. Built ONLY when memory_model names a
+		// model; nil leaves those paths on the general chat client
+		// (byte-identical to the pre-slot behavior).
+		if c.ModelsConfig.MemoryModel != "" {
+			c.MemoryModelClient = createAuxiliaryLLMClientWithResolver(
+				c.ModelsConfig,
+				c.ModelsConfig.MemoryModel,
+				c.LLMResolver,
+				logger.With("component", "memory-model-llm"),
+				budgetTracker,
+			)
+			if c.MemoryModelClient != nil {
+				logger.Info("Memory model LLM client initialized", "model", c.ModelsConfig.MemoryModel)
+			} else {
+				logger.Warn("Memory model unresolvable; extraction/distill falls back to the general chat client", "model", c.ModelsConfig.MemoryModel)
 			}
 		}
 	} else {
@@ -1714,6 +1738,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// MemoryManager.Embedder() for downstream consumers (clustering,
 	// session embedding worker, etc.). embedder is a vector.Provider which
 	// satisfies memory.EmbeddingProvider (structural typing).
+	//
+	// The manager's LLM (consolidation summarization + distill
+	// summarization) prefers the dedicated memory_model client when set;
+	// otherwise the general chat client — byte-identical to the
+	// pre-slot behavior. Typed-nil guard: only a non-nil client may
+	// occupy the interface field.
+	memoryLLM := c.LLMProvider
+	if c.MemoryModelClient != nil {
+		memoryLLM = c.MemoryModelClient
+	}
 	c.MemoryManager = memory.NewManager(memory.ManagerConfig{
 		Config:            cfg.Memory,
 		MemvidConfig:      cfg.Memvid,
@@ -1721,7 +1755,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		Logger:            logger.With("component", "memory"),
 		Sanitizer:         c.SecurityOrchestrator.InputSanitizer(),
 		SecurityConfig:    cfg.Memory.Security,
-		LLM:               c.LLMProvider,
+		LLM:               memoryLLM,
 		Embedder:          embedder,
 		VectorStore:       vectorSearcher,
 	})
@@ -1769,7 +1803,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// is disabled in the user's config. The detector runs after every
 		// Store of an epistemic memory type; the hook runs after every
 		// agent turn. See internal/daemon/epistemic_wiring.go.
+		//
+		// Preference order: dedicated memory_model client (when the slot
+		// resolved) > LLMProvider > LLMClient. Empty slot = byte-identical
+		// to the pre-slot behavior.
 		epistemicChatter := c.LLMProvider
+		if c.MemoryModelClient != nil {
+			epistemicChatter = c.MemoryModelClient
+		}
 		if epistemicChatter == nil {
 			epistemicChatter = c.LLMClient
 		}

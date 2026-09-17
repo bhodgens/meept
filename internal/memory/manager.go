@@ -2076,6 +2076,13 @@ func (m *Manager) Embedder() EmbeddingProvider {
 	return m.embedder
 }
 
+// LLM returns the manager's chat client (consolidation summarization +
+// distill summarization), or nil if none is set. Exposed for wiring tests
+// that assert which client the daemon construction site preferred.
+func (m *Manager) LLM() llm.Chatter {
+	return m.llm
+}
+
 // SetEpistemicDetector configures the detector used by the post-Store hook
 // to run LLM-driven relationship detection for epistemic memories.
 // Pass nil to disable the hook (defence-in-depth: a nil detector is a no-op).
