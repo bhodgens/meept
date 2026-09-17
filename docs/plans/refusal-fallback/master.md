@@ -323,12 +323,12 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-llm-refusal-error | PENDING | 0 | |
-| 02-refusal-model-slot | PENDING | 0 | |
-| 03-loop-refusal-branch | PENDING | 0 | |
-| 04-refusal-observability | PENDING | 0 | |
-| 05-e2e-and-ws-verification | PENDING | 0 | |
-| 06-docs-and-config-templates | PENDING | 0 | |
+| 01-llm-refusal-error | COMPLETE | 1 | commit 99c656ef; 14 tests green; 6 wired sites (3 client.go + 3 anthropic.go); deviations: parseResponseWithTools signature extended (no cfg access at parser), error-body wiring at existing error branches |
+| 02-refusal-model-slot | COMPLETE | 1 | files swept into sibling commit 5120221c (parallel session relay-fix); content verified in that commit's stat; 7 tests green; deviations: separate test files (conflict avoidance), AgentMetadata+registry wiring added to make the mirrored surface test possible |
+| 03-loop-refusal-branch | COMPLETE | 1 | commit 1771980f; full agent pkg green; hook at loop.go:5861-5886 between quota + generic branches; orchestrator added the daemon SetGlobalRefusalModel wiring (components.go:1493-1499) + U1000 cleanup; deviations: dual one-hop check (serving ref + armed pin), request-scoped WithModelOverride pin, refusalFailureRecorder seam |
+| 04-refusal-observability | COMPLETE | 1 | commit b18234c4; both packages green; disclosure at loop.go:2811 (chat) + :6189 (task), state loop.go:838, set loop_refusal.go:120-128, cleared loop.go:2529; event publish already existed from leaf 03; WS pin passed with zero production change; ledger pin reads real llm_calls |
+| 05-e2e-and-ws-verification | COMPLETE | 2 | commit 9c81d4ef; 5 scenarios green; FINDING fixed in leaf-05 scope: RefusalError was short-retried by Chat/ChatWithProgress/ChatWithDeltaCallback loops - added early-exit (client.go:600,822,2035,2044); stub rewritten to SSE (stream:true); orchestration fixes: RefusalSeams export seam, integr. test 6-arg ClassifyAndRoute drift repair, dead createTestSchemaAndData removal |
+| 06-docs-and-config-templates | COMPLETE | 2 | commit 4ad6ab56; 10 files; competitor marks evidence-backed (atomic-agent/Hermes/oh-my-pi ~, rest -); orchestrator added missed refusal_model slot to models.json5 + llm.md reference + agent-gated startup list |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
