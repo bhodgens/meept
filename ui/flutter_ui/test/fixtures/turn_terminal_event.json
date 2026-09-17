@@ -1,0 +1,16 @@
+{
+  "agent_id": "agent-golden",
+  "classified_by": "heuristic",
+  "conversation_id": "conv-golden-1",
+  "duration_ms": 4321,
+  "handler_case": "sync_dispatch",
+  "intent_type": "coding",
+  "model": "local/test-model",
+  "reply": "golden round-trip reply",
+  "session_id": "session-golden-1",
+  "source_topic": "turn.terminal",
+  "status": "completed",
+  "task_id": "task-golden-1",
+  "turn_id": "turn-golden-1",
+  "type": "agent_progress"
+}

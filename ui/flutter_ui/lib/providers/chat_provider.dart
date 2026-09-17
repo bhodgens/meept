@@ -7,8 +7,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
+import '../models/ws_events.dart' show TurnTerminalEvent;
 import '../services/sdk_client.dart';
-import '../services/websocket_service.dart' show WebSocketService, TurnTerminalEvent;
+import '../services/websocket_service.dart' show WebSocketService;
 import 'providers.dart'; // exports tts_provider.dart
 
 /// Detect a phase-1 destructive-action confirmation request in a WebSocket

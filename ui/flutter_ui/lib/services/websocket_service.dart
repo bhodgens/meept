@@ -11,6 +11,14 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart' show IOWebSocketChannel;
 import '../core/constants.dart';
 import 'storage_service.dart';
+import '../models/ws_events.dart';
+
+/// Re-export of the generated WS event models (issue #48 Tier 3) so existing
+/// `import '../services/websocket_service.dart'` call sites keep resolving
+/// `TurnTerminalEvent`, `ChatMessageEvent`, `isTurnTerminalPayload` and
+/// `WsEventTypes`.
+export '../models/ws_events.dart';
+
 import 'daemon_cert_pinner.dart';
 
 /// WebSocket service for real-time updates
@@ -586,7 +594,7 @@ class WebSocketService {
     return _messageSubject.stream.where((m) {
       final type = m['type'] as String?;
       final sid = m['session_id'] as String?;
-      return type == 'chat_message' && sid == sessionId;
+      return type == WsEventTypes.chatMessage && sid == sessionId;
     });
   }
 
@@ -610,7 +618,7 @@ class WebSocketService {
       send({'type': 'subscribe', 'channel': 'jobs'});
     }
     return _messageSubject.stream.where((m) {
-      return m['type'] == 'job_update';
+      return m['type'] == WsEventTypes.jobUpdate;
     });
   }
 
@@ -623,7 +631,7 @@ class WebSocketService {
       send({'type': 'subscribe', 'channel': 'metrics'});
     }
     return _messageSubject.stream.where((m) {
-      return m['type'] == 'metrics_update';
+      return m['type'] == WsEventTypes.metricsUpdate;
     });
   }
 
@@ -636,7 +644,7 @@ class WebSocketService {
       send({'type': 'subscribe', 'channel': 'plans'});
     }
     return _messageSubject.stream.where((m) {
-      return m['type'] == 'plan_update';
+      return m['type'] == WsEventTypes.planUpdate;
     });
   }
 
@@ -660,7 +668,7 @@ class WebSocketService {
     return _messageSubject.stream.where((m) {
       final type = m['type'] as String?;
       final sid = m['session_id'] as String?;
-      return type == 'agent_progress' && sid == sessionId;
+      return type == WsEventTypes.agentProgress && sid == sessionId;
     });
   }
 
@@ -715,7 +723,7 @@ class WebSocketService {
 
     return _messageSubject.stream.where((m) {
       final type = m['type'] as String?;
-      if (type != 'agent_progress') return false;
+      if (type != WsEventTypes.agentProgress) return false;
       final sid = m['session_id'] as String?;
       if (sid != sessionId) return false;
       return isTurnTerminalPayload(m);
@@ -732,6 +740,11 @@ class WebSocketService {
   /// [TurnTerminalEvent].
   Stream<TurnTerminalEvent> turnTerminalStream(String sessionId) =>
       subscribeToTurnTerminal(sessionId).map(TurnTerminalEvent.fromParse);
+
+  /// Typed stream of `chat_message` frames for a session, parsed by the
+  /// generated [ChatMessageEvent] model (issue #48 Tier 3).
+  Stream<ChatMessageEvent> chatMessageEventStream(String sessionId) =>
+      subscribeToChat(sessionId).map(ChatMessageEvent.fromParse);
 
   /// Dispose all resources
   void dispose() {
@@ -828,58 +841,4 @@ extension _SafeAdd<T> on Subject<T> {
 class SessionSubscription {
   final String sessionId;
   const SessionSubscription(this.sessionId);
-}
-
-/// Parsed `turn.terminal` relay (async-turn-migration leaf 05, Task 2).
-///
-/// Arrives as a WS frame classified `agent_progress` whose payload carries
-/// the frozen Plan-1 Contract 1 key set: `turn_id`, `conversation_id`,
-/// `session_id`, `status`, `reply`, `error`, `duration_ms` (+ the
-/// `handler_case` provenance key this client keys on).
-class TurnTerminalEvent {
-  /// Statuses: completed | failed | timeout | parked (CLOSED set).
-  static const statusCompleted = 'completed';
-  static const statusFailed = 'failed';
-  static const statusTimeout = 'timeout';
-  static const statusParked = 'parked';
-
-  final String turnId;
-  final String conversationId;
-  final String sessionId;
-  final String status;
-  final String reply;
-  final String error;
-  final int durationMs;
-
-  const TurnTerminalEvent({
-    required this.turnId,
-    required this.conversationId,
-    required this.sessionId,
-    required this.status,
-    this.reply = '',
-    this.error = '',
-    this.durationMs = 0,
-  });
-
-  factory TurnTerminalEvent.fromParse(Map<String, dynamic> json) {
-    return TurnTerminalEvent(
-      turnId: json['turn_id'] as String? ?? '',
-      conversationId: json['conversation_id'] as String? ?? '',
-      sessionId: json['session_id'] as String? ?? '',
-      status: json['status'] as String? ?? '',
-      reply: json['reply'] as String? ?? '',
-      error: json['error'] as String? ?? '',
-      durationMs: (json['duration_ms'] as num?)?.toInt() ?? 0,
-    );
-  }
-}
-
-/// Whether a (flattened) WS message map is a turn.terminal relay rather
-/// than an ordinary progress event. Terminal frames are identified by
-/// payload shape: `turn_id` AND `handler_case` present and non-empty.
-/// Ordinary progress events (agent.progress synthesizer) carry neither.
-bool isTurnTerminalPayload(Map<String, dynamic> m) {
-  final turnId = m['turn_id'];
-  final handlerCase = m['handler_case'];
-  return turnId is String && turnId.isNotEmpty && handlerCase is String && handlerCase.isNotEmpty;
 }

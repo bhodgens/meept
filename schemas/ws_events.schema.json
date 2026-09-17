@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meept.local/schemas/ws_events.schema.json",
+  "title": "meept WS event surface (issue #48 Tier 3)",
+  "description": "Contract for the flattened frames emitted by the daemon's WS relay (internal/comm/http/server.go transformBusEventToWS). Only the two stable typed shapes are specified: chat_message (normalized by the relay) and agent_progress frames carrying the frozen agent.TurnTerminalEvent payload. The Dart models in ui/flutter_ui/lib/models/ws_events.dart mirror this file; internal/comm/http/ws_schema_drift_test.go validates marshaled Go payloads against it and fails on drift.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "description": "WSClass wire string (internal/comm/wsclass wsclass.go String()).",
+      "enum": [
+        "chat_message",
+        "agent_progress",
+        "metrics_update",
+        "job_update",
+        "plan_update",
+        "event"
+      ]
+    }
+  },
+  "definitions": {
+    "rfc3339String": {
+      "type": "string",
+      "description": "RFC3339 timestamp injected by the relay when the payload has none."
+    },
+    "chat_message": {
+      "type": "object",
+      "description": "chat_message classification. Published by ChatHandler.publishChatMessage (internal/agent/handler.go) and the chat.message.received broadcast; normalized by the relay: session_id falls back to conversation_id, content mirrors reply, role defaults to assistant, id defaults to the bus message ID.",
+      "properties": {
+        "session_id": { "type": "string" },
+        "conversation_id": { "type": "string" },
+        "role": { "type": "string", "default": "assistant" },
+        "content": { "type": "string" },
+        "error": { "type": "string" },
+        "source_client": { "type": "string" },
+        "id": { "type": "string" },
+        "timestamp": { "$ref": "#/definitions/rfc3339String" },
+        "source_topic": { "type": "string" },
+        "type": { "const": "chat_message" }
+      },
+      "required": ["type", "session_id", "role", "content", "source_topic"],
+      "additionalProperties": true
+    },
+    "turn_terminal": {
+      "type": "object",
+      "description": "agent_progress classification carrying the frozen agent.TurnTerminalEvent payload (internal/agent/handler.go, turn.terminal topic; CLOSED field set). Optional here == Go omitempty. Identified on the client by payload shape: turn_id AND handler_case present and non-empty.",
+      "properties": {
+        "turn_id": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string" },
+        "task_id": { "type": "string" },
+        "intent_type": { "type": "string" },
+        "agent_id": { "type": "string" },
+        "handler_case": { "type": "string", "minLength": 1 },
+        "status": {
+          "description": "CLOSED set: completed | failed | timeout | parked.",
+          "enum": ["completed", "failed", "timeout", "parked"]
+        },
+        "reply": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "classified_by": { "type": "string" },
+        "model": { "type": "string" },
+        "error": { "type": "string" },
+        "source_topic": { "type": "string" },
+        "timestamp": { "$ref": "#/definitions/rfc3339String" },
+        "type": { "const": "agent_progress" }
+      },
+      "required": [
+        "type",
+        "turn_id",
+        "conversation_id",
+        "handler_case",
+        "status",
+        "reply",
+        "duration_ms"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/definitions/chat_message" },
+    { "$ref": "#/definitions/turn_terminal" },
+    {
+      "type": "object",
+      "description": "Heterogeneous relay shapes (metrics_update, job_update, plan_update, generic event) deliberately left schema-free: only the type key is contractual.",
+      "properties": { "type": { "enum": ["metrics_update", "job_update", "plan_update", "event"] } },
+      "required": ["type"]
+    }
+  ]
+}
