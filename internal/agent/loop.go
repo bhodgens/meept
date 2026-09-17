@@ -805,6 +805,32 @@ type AgentLoop struct {
 	// LLM call of the cycle. Guarded by l.mu (same mutex as modelOverride).
 	pendingModelOverrideConfig *llm.ModelConfig
 
+	// --- Loop refusal fallback (refusal-fallback tree 03, loop_refusal.go).
+	// All seams nil-safe: nil resolver / nil publisher / nil applier degrade
+	// the refusal branch to "surface the original error", never panic.
+	// refusalResolver backs the ModelResolver seam (usually the same
+	// *llm.Resolver as l.resolver, wired in WithResolver).
+	refusalResolver ModelResolver
+	// globalRefusalModel mirrors the global models.json5 refusal_model slot
+	// (SetGlobalRefusalModel at wiring time); spec.RefusalModel outranks it.
+	globalRefusalModel string
+	// refusalServingRef supplies the currently-serving "provider/model" ref
+	// for the one-hop comparison (default l.refusalServingModelRef).
+	refusalServingRef func() string
+	// refusalEventPublisher publishes the agent.model_escalated event
+	// (mirrors the verification-escalation bus closure; nil skips events).
+	refusalEventPublisher EventPublisher
+	// refusalOverrideApplier pins the fallback override for the retry
+	// (default l.SetPersistentModelOverride — the request-scoped
+	// llm.WithModelOverride seam consumes it within the retry call).
+	refusalOverrideApplier func(modelRef string)
+	// refusalOverrideClear restores the base model when the retry never
+	// consumed the pin (default l.ClearModelOverride).
+	refusalOverrideClear func()
+	// refusalFailureRecorder lets tests observe any call into an
+	// alias-failure-class seam from the refusal path (nil in production).
+	refusalFailureRecorder func(where string)
+
 	// pendingHookMessages holds ExtraMessages returned by PrepareNextTurn
 	// hooks (applyTurnModification). One-shot: prepended to the next LLM
 	// call's messages in reasoningCycle, then cleared. Guarded by l.mu —
@@ -1066,6 +1092,24 @@ func WithLLMChatter(chatter llm.Chatter) LoopOption {
 func WithResolver(resolver *llm.Resolver) LoopOption {
 	return func(l *AgentLoop) {
 		l.resolver = resolver
+
+		// Loop refusal fallback (refusal-fallback tree 03). The resolver
+		// backs the ModelResolver seam; the serving ref reads alias
+		// resolution through the same resolver. Explicit per-loop overrides
+		// (SetRefusal* setters) stay authoritative — wiring must be able to
+		// run in any order without clobbering a test/daemon override.
+		if l.refusalResolver == nil {
+			l.refusalResolver = resolver
+		}
+		if l.refusalServingRef == nil {
+			l.refusalServingRef = l.refusalServingModelRef
+		}
+		if l.refusalOverrideApplier == nil {
+			l.refusalOverrideApplier = l.SetPersistentModelOverride
+		}
+		if l.refusalOverrideClear == nil {
+			l.refusalOverrideClear = l.ClearModelOverride
+		}
 	}
 }
 
@@ -5808,6 +5852,39 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				// Rotation failed: every candidate is quota-blocked (or the
 				// alias has no other member). Surface the original error for
 				// caller-side parking.
+			}
+			return nil, err
+		}
+
+		// Loop refusal fallback (refusal-fallback tree 03): a typed model
+		// refusal is the safety layer declining, NOT an alias health
+		// failure — it must NEVER reach the generic RecordAliasFailure /
+		// RotateToNextModel branch below. One-hop policy: re-dispatch the
+		// same turn to the configured refusal model (persistent override
+		// pin, request-scoped llm.WithModelOverride consumes it); the
+		// fallback refusing too surfaces the original error. Guarded by the
+		// shared backoff budget like every other continue-branch so a
+		// misconfigured loop cannot spin.
+		var refusalErr *llm.RefusalError
+		if errors.As(err, &refusalErr) {
+			if retry, rerr := l.handleRefusal(refusalErr); retry {
+				if _, ok := llmBackoff.NextDelay(); !ok {
+					l.logger.Warn("Refusal fallback retry budget exhausted",
+						"alias", l.modelRef,
+						"attempts", attempt,
+					)
+					return nil, fmt.Errorf("max retry attempts (%d) reached after refusal fallback: %w", maxAttempts, err)
+				}
+				l.logger.Info("Retrying turn on refusal fallback model",
+					"alias", l.modelRef,
+					"attempt", attempt,
+					"fallback", l.GetModelOverride(),
+				)
+				continue
+			} else if rerr != nil {
+				// Feature off / one-hop give-up: surface the ORIGINAL
+				// refusal unchanged.
+				return nil, rerr
 			}
 			return nil, err
 		}

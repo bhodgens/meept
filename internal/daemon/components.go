@@ -1490,6 +1490,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 	}
 	c.AgentLoop = agent.NewAgentLoop("daemon", "", agentOpts...)
+	// Wire the global refusal-fallback default (refusal-fallback tree 02+03):
+	// the loop package cannot import internal/config, so the models.json5
+	// refusal_model slot is mirrored onto the loop here. Per-agent spec
+	// RefusalModel outranks it (loop-side precedence); both empty = off.
+	if c.ModelsConfig != nil && c.ModelsConfig.RefusalModel != "" {
+		c.AgentLoop.SetGlobalRefusalModel(c.ModelsConfig.RefusalModel)
+		logger.Info("Global refusal fallback configured", "ref", c.ModelsConfig.RefusalModel)
+	}
 	// Wire the user-authored persona (SOUL.md). Startup policy:
 	//   - missing file  → seed the shipped default, proceed
 	//   - invalid file  → refuse component creation (daemon start fails)
