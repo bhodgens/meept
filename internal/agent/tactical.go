@@ -158,6 +158,14 @@ type TacticalScheduler struct {
 	// capture; every no-metrics invariant is preserved.
 	metricsStore *metrics.Store
 
+	// burstDetector, when non-nil and enabled, observes each hard step
+	// failure as a 'failed_replan' outcome (F29, 2026-09-17 bughunt):
+	// hard failures previously only flipped the dispatch_log row and
+	// never reached the burst detector, which was fed exclusively by the
+	// dispatcher's Signal-A resolution path (ok/corrected). Log-only
+	// here: a burst logs one Info line and triggers nothing.
+	burstDetector *metrics.BurstDetector
+
 	// stepStoreReadHook, when set, is consulted before every
 	// stepStore.GetByID/GetByJobID read. Returning a non-nil override
 	// short-circuits the real read — the test seam that reproduces the
@@ -187,6 +195,17 @@ func (ts *TacticalScheduler) SetSessionStore(store sessionStoreReader) {
 func (ts *TacticalScheduler) SetMetricsStore(store *metrics.Store) {
 	if store != nil {
 		ts.metricsStore = store
+	}
+}
+
+// SetBurstDetector wires the tool-failure burst detector (issue #43) into
+// the task-failure path (F29, 2026-09-17 bughunt). nil is ignored. The
+// daemon composition sets this alongside the dispatcher's detector so hard
+// step failures reach the detector; without it the detector only ever saw
+// ok/corrected resolutions and real failure bursts were invisible.
+func (ts *TacticalScheduler) SetBurstDetector(det *metrics.BurstDetector) {
+	if det != nil {
+		ts.burstDetector = det
 	}
 }
 
@@ -1259,6 +1278,19 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 				ts.logger.Warn("failed to set step failed after validation exhaustion",
 					"step_id", step.ID, "error", err)
 			}
+			// F10 (2026-09-17 bughunt): the failed step's PENDING dependents
+			// can never run (PromoteReadySteps requires successfully-terminal
+			// deps), so they stayed pending forever and the task never
+			// finalized — allStepsTerminalWithFailures returns false on any
+			// non-terminal step. Terminalize every transitively-blocked
+			// pending step as failed so the exhaustion terminus is genuinely
+			// terminal and the task finalizes as StateFailed. Same cascade
+			// the job-failure path relies on via PromoteReadySteps'
+			// blocked-by-failed handling.
+			if err := ts.failBlockedDependents(step.TaskID, step.ID); err != nil {
+				ts.logger.Warn("failed to terminalize pending dependents after validation exhaustion",
+					"task_id", step.TaskID, "failed_step", step.ID, "error", err)
+			}
 		} else {
 			// Persist the verdict AFTER assigning it (F2/F7, 2026-09-12
 			// bughunt): stepStore.Update serializes step.Validated and
@@ -1963,6 +1995,25 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 					"task_id", step.TaskID, "error", markErr)
 			}
 		}
+
+		// F29 (2026-09-17 bughunt): feed the hard failure to the burst
+		// detector. MarkTaskFailedReplan only writes the dispatch_log
+		// row; the detector itself is fed exclusively by the dispatcher's
+		// Signal-A resolver, which resolves pending rows to ok/corrected
+		// and never reports already-marked failed_replan rows — so real
+		// hard failures were invisible to burst detection. Log-only: a
+		// burst logs (inside the detector) and nothing else happens.
+		if ts.burstDetector != nil && ts.burstDetector.Enabled() && step.SessionID != "" {
+			if burst, score := ts.burstDetector.ObserveOutcome(step.SessionID, "failed_replan"); burst {
+				ts.logger.Info("tool-failure burst signal at task-failure path (log-only; not acting)",
+					"task_id", step.TaskID,
+					"step_id", step.ID,
+					"session", step.SessionID,
+					"score", score,
+					"threshold", ts.burstDetector.Threshold(),
+				)
+			}
+		}
 	}
 
 	// Check if all paths are blocked (no more pending/ready steps that don't
@@ -2362,6 +2413,65 @@ func (ts *TacticalScheduler) allStepsTerminalWithFailures(taskID string) (bool, 
 		}
 	}
 	return false, nil
+}
+
+// failBlockedDependents terminalizes every PENDING step that is
+// transitively blocked by the given failed step, marking each failed.
+// A pending step whose dependencies can never reach
+// IsSuccessfullyTerminal (a dep is StepFailed) is unrunnable —
+// PromoteReadySteps will never promote it — so leaving it pending
+// blocks finalization forever (F10, 2026-09-17 bughunt: validation
+// exhaustion failed the step but its dependents stayed pending and
+// allStepsTerminalWithFailures returned false indefinitely).
+//
+// Revision steps are skipped: a revision of a failed original is the
+// sanctioned recovery lane and its readiness is governed by
+// PromoteReadySteps' revision rules, not by this cascade.
+func (ts *TacticalScheduler) failBlockedDependents(taskID, failedStepID string) error {
+	steps, err := ts.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to list steps: %w", err)
+	}
+
+	// failedIDs accumulates every known-failed step; iterate to fixpoint
+	// so a pending→failed marking unlocks its own dependents on the next
+	// pass (handles diamond/graph shapes, not just direct dependents).
+	failedIDs := map[string]bool{failedStepID: true}
+	for {
+		changed := false
+		for _, s := range steps {
+			if s.State != task.StepPending || failedIDs[s.ID] {
+				continue
+			}
+			if task.IsRevisionStep(s.ID) {
+				continue
+			}
+			blocked := false
+			for _, dep := range s.DependsOn {
+				if failedIDs[dep] {
+					blocked = true
+					break
+				}
+			}
+			if !blocked {
+				continue
+			}
+			if err := ts.stepStore.SetState(s.ID, task.StepFailed); err != nil {
+				return fmt.Errorf("failed to mark dependent step %s failed: %w", s.ID, err)
+			}
+			s.State = task.StepFailed
+			failedIDs[s.ID] = true
+			changed = true
+			ts.logger.Warn("Dependent step terminalized as failed (blocked by failed step)",
+				"task_id", taskID,
+				"step_id", s.ID,
+				"failed_dep", failedStepID,
+			)
+		}
+		if !changed {
+			return nil
+		}
+	}
 }
 
 // failedStepsForTask returns the failed steps for a task, ordered by sequence.
