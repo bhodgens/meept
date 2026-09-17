@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -384,5 +386,60 @@ func TestDistillEmptyParsedPrincipleCountsAsMisses(t *testing.T) {
 	}
 	if m.Recall != 0.5 {
 		t.Errorf("Recall = %v, want 0.5", m.Recall)
+	}
+}
+
+// TestLatencyMeasuresCompletedBody (F30): reported latency must cover the
+// full response body transfer (io.ReadAll+Close), and failed calls must
+// report their real elapsed time instead of 0.
+func TestLatencyMeasuresCompletedBody(t *testing.T) {
+	const delay = 150 * time.Millisecond
+	start := time.Now()
+	_, latency, _, err := stubClient([]string{`{"principle":"x"}`}, delay).
+		chat(context.Background(), "synthetic", "synthetic")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latency < 100 {
+		t.Errorf("latency = %.0f ms, want >= 100 (body delay was %v — headers-only measurement)", latency, delay)
+	}
+	if elapsed < time.Duration(latency)*time.Millisecond-time.Millisecond {
+		t.Errorf("reported latency %.0f ms exceeds elapsed %v", latency, elapsed)
+	}
+}
+
+// TestFailedCallLatencyIsRealElapsed (F30): a call that fails after a slow
+// body must still record its real elapsed time, not 0.
+func TestFailedCallLatencyIsRealElapsed(t *testing.T) {
+	// Status 500 after a delayed body: the call fails, but the reported
+	// latency must reflect the real elapsed time instead of 0.
+	c2 := newChatClient("http://unused.invalid/v1", "synthetic", 5*time.Second)
+	var elapsedServer time.Duration
+	c2.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		start := time.Now()
+		body, _ := json.Marshal(map[string]any{"error": "boom"})
+		time.Sleep(60 * time.Millisecond)
+		elapsedServer = time.Since(start)
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(body)),
+		}, nil
+	})
+	start := time.Now()
+	_, latency, _, err := c2.chat(context.Background(), "synthetic", "synthetic")
+	wall := time.Since(start)
+	if err == nil {
+		t.Fatal("chat = nil error, want transport error (HTTP 500)")
+	}
+	if latency <= 0 {
+		t.Errorf("latency = %.0f ms for a failed call, want real elapsed (~%v)", latency, elapsedServer)
+	}
+	if latency < 30 {
+		t.Errorf("latency = %.0f ms, want >= 30 (server delayed the body 60ms)", latency)
+	}
+	if wall < time.Duration(latency)*time.Millisecond-time.Millisecond {
+		t.Errorf("reported latency %.0f ms exceeds wall clock %v", latency, wall)
 	}
 }

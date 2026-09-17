@@ -76,6 +76,7 @@ func (c *chatClient) chat(ctx context.Context, system, user string) (string, flo
 	}
 
 	var lastErr error
+	lastLatency := 0.0
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
 			select {
@@ -94,22 +95,30 @@ func (c *chatClient) chat(ctx context.Context, system, user string) (string, flo
 		start := time.Now()
 		resp, err := c.http.Do(req)
 		if err != nil {
+			// F30: even a failed attempt costs time — report the real
+			// elapsed instead of 0 so mean latency stays honest.
 			lastErr = fmt.Errorf("transport: %w", err)
+			lastLatency = float64(time.Since(start).Milliseconds())
 			continue // retry once on transport error
 		}
-		latency := float64(time.Since(start).Milliseconds())
 		body, readErr := io.ReadAll(resp.Body)
 		closeErr := resp.Body.Close()
+		// F30: latency measures the completed body (ReadAll + Close), not
+		// just the response headers.
+		latency := float64(time.Since(start).Milliseconds())
 		if readErr != nil {
 			lastErr = fmt.Errorf("read body: %w", readErr)
+			lastLatency = latency
 			continue
 		}
 		if closeErr != nil {
 			lastErr = fmt.Errorf("close body: %w", closeErr)
+			lastLatency = latency
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 200))
+			lastLatency = latency
 			continue
 		}
 		var cr chatResponse
@@ -122,7 +131,9 @@ func (c *chatClient) chat(ctx context.Context, system, user string) (string, flo
 		return cr.Choices[0].Message.Content, latency,
 			cr.Usage.PromptTokens + cr.Usage.CompletionTokens, nil
 	}
-	return "", 0, 0, lastErr
+	// F30: retries keep last-attempt semantics — return the last attempt's
+	// error with its real elapsed time.
+	return "", lastLatency, 0, lastErr
 }
 
 // chatJudge sends the judge-lane request: temperature 0, max_tokens 4, and NO
@@ -140,6 +151,7 @@ func (c *chatClient) chatJudge(ctx context.Context, system, user string) (string
 	}
 
 	var lastErr error
+	lastLatency := 0.0
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
 			select {
@@ -159,21 +171,27 @@ func (c *chatClient) chatJudge(ctx context.Context, system, user string) (string
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("transport: %w", err)
+			lastLatency = float64(time.Since(start).Milliseconds())
 			continue
 		}
-		latency := float64(time.Since(start).Milliseconds())
 		body, readErr := io.ReadAll(resp.Body)
 		closeErr := resp.Body.Close()
+		// F30: latency measures the completed body (ReadAll + Close), not
+		// just the response headers.
+		latency := float64(time.Since(start).Milliseconds())
 		if readErr != nil {
 			lastErr = fmt.Errorf("read body: %w", readErr)
+			lastLatency = latency
 			continue
 		}
 		if closeErr != nil {
 			lastErr = fmt.Errorf("close body: %w", closeErr)
+			lastLatency = latency
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 200))
+			lastLatency = latency
 			continue
 		}
 		var cr chatResponse
@@ -186,7 +204,9 @@ func (c *chatClient) chatJudge(ctx context.Context, system, user string) (string
 		return cr.Choices[0].Message.Content, latency,
 			cr.Usage.PromptTokens + cr.Usage.CompletionTokens, nil
 	}
-	return "", 0, 0, lastErr
+	// F30: retries keep last-attempt semantics — return the last attempt's
+	// error with its real elapsed time.
+	return "", lastLatency, 0, lastErr
 }
 
 func truncate(s string, n int) string {
