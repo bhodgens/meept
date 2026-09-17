@@ -31,7 +31,13 @@ type ParkedTurn struct {
 	Parts          []llm.ContentPart // multimodal parts, if any
 	AgentID        string            // agent override, if any
 	SourceClient   string            // originating client identifier
-	ParkedAt       time.Time         // when the turn was parked
+	// TurnID is the chat.submit turn identity (week bughunt 2026-09-17
+	// F15): recorded at park time so the resume can emit the FINAL
+	// turn.terminal event under the id the client's ack returned —
+	// without it the awaiter never resolves. Empty on legacy parked
+	// turns (the blocking `chat` path), which stay silent on resume.
+	TurnID   string
+	ParkedAt time.Time // when the turn was parked
 }
 
 // BudgetResumeWatcher parks chat turns interrupted by budget exhaustion and

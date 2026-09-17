@@ -27,7 +27,12 @@ type QuotaParkedTurn struct {
 	ProviderID     string            // provider that hit the quota
 	CredentialKey  string            // credential fingerprint of the blocked pool
 	UnblockAt      time.Time         // earliest time the quota window lifts
-	ParkedAt       time.Time         // when the turn was parked
+	// TurnID is the chat.submit turn identity (week bughunt 2026-09-17
+	// F15): recorded at park time so the resume can emit the FINAL
+	// turn.terminal event under the id the client's ack returned.
+	// Empty on legacy parked turns, which stay silent on resume.
+	TurnID   string
+	ParkedAt time.Time // when the turn was parked
 }
 
 // DefaultQuotaResumePollInterval is the re-check cadence for parked turns.
@@ -51,7 +56,11 @@ type quotaTurnPayload struct {
 	ProviderID     string            `json:"provider_id"`
 	CredentialKey  string            `json:"credential_key"`
 	SourceClient   string            `json:"source_client,omitempty"`
-	ParkedAt       time.Time         `json:"parked_at,omitempty"`
+	// TurnID carries the chat.submit turn identity (F15) so the resume
+	// can emit the final turn.terminal under the acked id; it must
+	// survive the persistence round-trip like the rest of the payload.
+	TurnID   string    `json:"turn_id,omitempty"`
+	ParkedAt time.Time `json:"parked_at,omitempty"`
 }
 
 // quotaTurnToRecord encodes a QuotaParkedTurn as a Class=quota
@@ -64,6 +73,7 @@ func quotaTurnToRecord(turn QuotaParkedTurn) (ParkedTurnRecord, error) {
 		ProviderID:     turn.ProviderID,
 		CredentialKey:  turn.CredentialKey,
 		SourceClient:   turn.SourceClient,
+		TurnID:         turn.TurnID,
 		ParkedAt:       turn.ParkedAt,
 	})
 	if err != nil {
@@ -95,6 +105,7 @@ func recordToQuotaTurn(rec ParkedTurnRecord) (QuotaParkedTurn, error) {
 		ProviderID:     p.ProviderID,
 		CredentialKey:  p.CredentialKey,
 		SourceClient:   p.SourceClient,
+		TurnID:         p.TurnID,
 		UnblockAt:      rec.ResumeAt,
 		ParkedAt:       p.ParkedAt,
 	}, nil
