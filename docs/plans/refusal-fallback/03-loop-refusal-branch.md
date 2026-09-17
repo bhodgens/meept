@@ -57,23 +57,24 @@ Key files to understand before implementing:
 // File: internal/agent/loop_refusal.go (new)
 package agent
 
-// refusalFallbackRef resolves the configured fallback: ModelsConfig slot
-// value (provider/id or bare alias name). Resolution uses
-// Resolver.ResolveEscalationRef (existing seam) so bare alias names work.
-// Returns "" when unconfigured/unresolvable.
+// refusalFallbackRef resolves the configured fallback by frozen precedence
+// (user decision 2026-09-16: per-agent configurable):
+//   1. spec.RefusalModel (per-agent, any provider/model ref or alias)
+//   2. ModelsConfig.RefusalModel (global default slot)
+//   3. "" (feature off for this agent)
+// Resolution uses Resolver.ResolveEscalationRef (existing seam) so bare
+// alias names work. Returns "" when unconfigured/unresolvable.
 func (l *AgentLoop) refusalFallbackRef() string
 
 // handleRefusal implements the one-hop policy. Called from the loop's
 // error path when errors.As(err, &refusalErr) matches.
-//   already on the fallback model  => return err unchanged (give up)
-//   slot empty / unresolvable      => return err unchanged (feature off)
-//   otherwise                      => pin override to the fallback ref,
-//                                     publish agent.model_escalated with
-//                                     reason "refusal_fallback", return
-//                                     retry=true (loop retries with the
-//                                     pinned override; the pin clears
-//                                     after the turn like the escalation
-//                                     override does).
+//   fallback ref already serving => return err unchanged (give up)
+//   both sources empty / unresolvable => return err unchanged (feature off)
+//   otherwise => pin override to the fallback ref, publish
+//                agent.model_escalated with reason "refusal_fallback",
+//                return retry=true (loop retries with the pinned override;
+//                the pin clears after the turn like the escalation
+//                override does).
 func (l *AgentLoop) handleRefusal(err *llm.RefusalError) (retry bool, err error)
 ```
 
@@ -116,11 +117,14 @@ tests DecideEscalation with a fake resolver).
 **Step 1: Write failing test**
 
 Table cases:
-1. slot empty => (false, original err), no event published.
-2. slot unresolvable (fake resolver errors) => (false, original err).
-3. slot resolves, current model != fallback => (true, nil), event published
-   with keys {agent_id, from_model, to_model, reason: "refusal_fallback"}.
-4. current model == fallback model => (false, original err) — one-hop rule.
+1. spec set, global empty => fallback = spec value.
+2. spec empty, global set => fallback = global value.
+3. both empty => (false, original err), no event published (feature off).
+4. configured but unresolvable (fake resolver errors) => (false, original err).
+5. configured and resolves, current model != fallback => (true, nil), event
+   published with keys {agent_id, from_model, to_model, reason:
+   "refusal_fallback"}.
+6. current model == fallback model => (false, original err) — one-hop rule.
 
 Fake resolver: implement the ModelResolver interface the same way
 verification_escalation_test.go does (find it via search_files for
@@ -186,6 +190,7 @@ Before reporting completion, verify:
       RecordAliasFailure branch in loop.go (verify by reading the function)
 - [ ] No RecordAliasFailure / BlockQuota / RotateToNextModel call anywhere
       in the refusal path
+- [ ] Precedence test coverage: spec > global > off (table cases 1-3)
 - [ ] Event payload keys exactly {agent_id, from_model, to_model, reason,
       fix_loops} with reason "refusal_fallback", fix_loops 0
 - [ ] gofmt clean; `go vet ./internal/agent/` passes
@@ -202,7 +207,7 @@ Before reporting completion, verify:
 - [ ] Event published on the fallback path only (not on give-up paths)
 - [ ] Alias health untouched
 - [ ] No debug artifacts, no TODOs
-- [ ] Tests cover all four decision exits + the two invariants
+- [ ] Tests cover all six decision exits + the two invariants
 
 Output: APPROVED or list of specific gaps with file + line references.
 

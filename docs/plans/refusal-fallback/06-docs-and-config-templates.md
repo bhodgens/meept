@@ -10,17 +10,18 @@
 ## Meta
 
 - **Parent:** ../master.md
-- **Scope:** Documentation and config template updates for refusal_model.
+- **Scope:** Documentation + config templates + ALL FOUR capability surfaces (features.md, feature-comparison-matrix.md, meept.dev charts, README.md).
 - **Dependencies:** 02-refusal-model-slot.md (slot exists)
-- **Estimated Context:** 35K
+- **Estimated Context:** 55K
 - **Concurrency Group:** C
 
 ## Goal
 
 The feature is discoverable and configurable: models.json5 template gains
-the slot, the docs gain the workflow page section and reference entries,
-and AGENTS.md documents the new cross-boundary invariant (refusals are not
-alias failures) per its own maintenance rule.
+the slot, the docs gain the workflow page and reference entries, AGENTS.md
+documents the new invariant, AND the capability appears in all four
+marketing/reference surfaces with an honest comparison against the 8
+competitor harnesses (user requirement 2026-09-16).
 
 ## Context
 
@@ -36,6 +37,12 @@ Key files to understand before implementing:
   DIFFERENT layer (model selection), document it in the LLM/config docs
 - docs/configuration/ - models.json5 reference pages
 - AGENTS.md - Critical Invariants (quota section is the model to follow)
+- docs/features.md - the full feature reference (linked from meept.dev)
+- docs/feature-comparison-matrix.md - parity matrix vs 8 competitors;
+  "Model & Cost" section ~line 98-108
+- meept.dev/index.html - the website's "Model & Cost" comparison chart,
+  "Model failover chain" row ~line 549
+- README.md - Models row ~line 66, LLM management summary ~line 293
 
 ## Interface Contracts (From Parent)
 
@@ -44,29 +51,53 @@ Key files to understand before implementing:
 Documentation only. Files (exact set):
 
 1. `config/models.json5` - add commented slot next to extract_model:
-   `"refusal_model": ""` with a 2-line comment: provider/id or alias name
-   the agent re-dispatches to when the serving model refuses; empty = off.
-2. `docs/workflows/llm-refusal-fallback.md` - NEW page (~60 lines):
+   `"refusal_model": ""` with a 2-line comment: global default refusal
+   fallback (provider/id or alias); a per-agent spec refusal_model
+   overrides it; empty = no default.
+2. `docs/workflows/llm-refusal-fallback.md` - NEW page (~70 lines):
    what triggers a fallback (typed signals only: finish_reason
-   content_filter, stop_reason refusal, typed safeguard bodies), the one-hop
-   rule, the agent.model_escalated event with reason refusal_fallback, the
-   config slot, and the explicit NON-goal (no content sniffing — cite the
-   false-positive failure mode this avoids).
+   content_filter, stop_reason refusal, typed safeguard bodies), the
+   per-agent + global configuration with precedence (spec > global > off),
+   the one-hop rule, the agent.model_escalated event with reason
+   refusal_fallback, the reply-text disclosure note, and the explicit
+   NON-goal (no content sniffing - cite the false-positive failure mode
+   this avoids).
 3. `docs/configuration/` models reference page (find the page documenting
    extract_model via search_files) - add refusal_model to the slot table.
 4. `AGENTS.md` - under Critical Invariants, inside the quota-resilience
    section's list, add one bullet: "Refusal is not a failure. A
    *llm.RefusalError must never reach Resolver.RecordAliasFailure; the
-   loop's refusal branch re-dispatches once to models.json5 refusal_model
-   (default off) and surfaces the refusal if the fallback also refuses."
+   loop's refusal branch re-dispatches once to the agent's refusal_model
+   (per-agent spec field, else the global models.json5 slot; default off)
+   and surfaces the refusal if the fallback also refuses."
    Plus: add the new docs page to the appropriate docs index if one exists.
 5. `docs/workflows/` index (if the workflows dir has an index/README) -
    link the new page.
+6. `docs/features.md` - NEW "Refusal Fallback" subsection in the LLM/model
+   management area (locate the model-alias/failover section via
+   search_files "failover" in features.md). Cover: per-agent config,
+   precedence, one-hop rule, disclosure note, typed-signals-only
+   detection. Match the section style of its neighbors.
+7. `docs/feature-comparison-matrix.md` - add ONE row to the "Model & Cost"
+   matrix: `| Refusal fallback (per-agent) | X (typed signals, one-hop, reply disclosure) | ... |`.
+   Competitor cells: "-" by default, BUT verify before writing any non-"-"
+   mark: check each competitor's repo/docs (web_search) for an equivalent
+   content-refusal-driven model fallback. The 2026-08-29 audit found none;
+   refresh that check and cite evidence in the report for any X/~ given.
+8. `meept.dev/index.html` - add ONE row to the "Model & Cost" comparison
+   table after the "Model failover chain" row (~line 549), same label
+   "Refusal fallback (per-agent)", Meept cell dot-yes (no cell-note
+   needed), competitor cells dot-no (same verification rule as #7 - the
+   dot classes are dot-yes / dot-no / dot-partial; mirror the failover
+   row's markup exactly).
+9. `README.md` - Models row (~line 66): Meept's cell gains
+   "+ refusal fallback"; the LLM management summary row (~line 293)
+   gains "refusal fallback" in the capability list. Match cell style.
 
 ### What This Leaf Consumes
 
 Final behavior from leaves 01-04 (write docs to match what WAS built; if a
-detail differs from this spec, the CODE is the truth — flag the mismatch
+detail differs from this spec, the CODE is the truth - flag the mismatch
 in the report).
 
 ## Tasks
@@ -106,13 +137,49 @@ project's json5 loader test if the binary is absent.
 and markdown links resolve (`grep -rn "llm-refusal-fallback" docs/` shows
 page + links).
 
+### Task 4: features.md capability subsection
+
+**Objective:** The feature reference documents refusal fallback.
+
+**Files:** docs/features.md.
+
+**Step 1:** Locate the model-management section (search_files "failover"
+in docs/features.md) and read its neighbor style (terminal sed, not
+read_file, for the section range).
+
+**Step 2:** Write the subsection per contract item 6.
+
+**Step 3:** Verify section heading renders in the doc's structure (grep
+the heading level matches siblings).
+
+### Task 5: Comparison matrix + website chart + README (competitor comparison)
+
+**Objective:** The capability appears in all three comparison surfaces
+with honest, evidence-backed competitor marks.
+
+**Files:** docs/feature-comparison-matrix.md; meept.dev/index.html;
+README.md.
+
+**Step 1:** For each of the 8 competitors (FrontierAgent, duckagent,
+atomic-agent, prime-agent, Hermes, OpenCode, oh-my-pi, Claude Code),
+verify via web_search + repo docs whether a refusal-driven model fallback
+exists. Default "-"; any X/~ needs cited evidence in the leaf report.
+
+**Step 2:** Add the row to the matrix (contract item 7), the chart row to
+meept.dev/index.html (item 8, mirror the failover row markup), and the
+README edits (item 9).
+
+**Step 3:** Verify: `grep -n "Refusal fallback" docs/feature-comparison-matrix.md meept.dev/index.html README.md`
+shows all three; the HTML row has 9 `<td>` cells matching the table.
+
 ## Self-Verification Checklist
 
-- [ ] All five file targets edited/created
+- [ ] All nine file targets edited/created
 - [ ] Cross-references resolve (every path named in the new docs exists)
 - [ ] config/models.json5 still valid (parse check)
 - [ ] No contradiction with AGENTS.md's existing invariants
 - [ ] Hyphens used in prose, not em-dashes (project copy convention)
+- [ ] Competitor marks evidence-backed (report cites sources for every non-"-")
 
 **DO NOT COMMIT.** The orchestrator handles all git operations after review.
 
@@ -124,6 +191,9 @@ page + links).
 - [ ] The invariant bullet matches the enforcement in loop_refusal.go
 - [ ] No new docs in docs/generated/ (auto-generated; make graphs owns it)
 - [ ] Copy uses hyphens, short sentences, no marketing words
+- [ ] features.md section matches neighbor style and depth
+- [ ] Matrix row, HTML row, and README cells are consistent with each other
+- [ ] HTML row markup mirrors the failover row exactly (9 cells, dot classes)
 
 Output: APPROVED or list of specific gaps with file + line references.
 

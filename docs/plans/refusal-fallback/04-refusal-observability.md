@@ -11,19 +11,27 @@
 ## Meta
 
 - **Parent:** ../master.md
-- **Scope:** WS classification guard, surface parity (TUI/GUI status), ledger identity pin.
+- **Scope:** WS classification guard, chat-reply disclosure, surface parity, ledger identity pin.
 - **Dependencies:** 03-loop-refusal-branch.md (the branch that publishes the event)
-- **Estimated Context:** 40K
+- **Estimated Context:** 45K
 - **Concurrency Group:** B (after 03)
 
 ## Goal
 
-The fallback must be visible, never silent (the Fable-5 lesson). The bus
-event from leaf 03 already flows over WS as agent_progress via the existing
-`agent.model_escalated` prefix classification. This leaf pins that
-classification with a test, verifies the step result names the model that
-served (honest-reply invariant), and confirms the metrics ledger records
-the fallback model — no new topic, no schema change.
+The fallback must be visible, never silent (the Fable-5 lesson). Two
+visibility channels, both required (user decision 2026-09-16 chose the
+reply-text note for interactive turns):
+
+1. The bus event from leaf 03 flows over WS as agent_progress via the
+   existing `agent.model_escalated` prefix classification.
+2. The CHAT REPLY itself carries a disclosure note when a fallback served
+   the turn: "[answered by <fallback model> after refusal]" appended to
+   the reply text — visible in the transcript on every surface, no client
+   code needed.
+
+This leaf pins the WS classification with a test, implements the
+reply-text disclosure, and confirms the metrics ledger records the
+fallback model — no new topic, no schema change.
 
 ## Context
 
@@ -57,13 +65,16 @@ package http // the server package's actual test package name — check an
 // prefix rule does not exist as documented and THAT is the finding).
 
 // File: internal/agent/loop_refusal_observability_test.go
-// TestRefusalFallback_StepResultNamesFallbackModel: after a successful
-// fallback retry, the stored/returned step result mentions the fallback
-// model id (honest-reply invariant: machine output never masquerades as
-// the originally-selected model's answer without disclosure).
-// If leaf 03's retry already includes the model in the result text, this
-// test pins it; if not, add the sentence in the smallest possible way:
-// append to the step result: "[served by <fallback model> after refusal]".
+// TestRefusalFallback_ReplyCarriesDisclosure (USER DECISION 2026-09-16,
+// option b): after a successful fallback retry on a chat turn, the
+// user-visible REPLY text ends with
+//   "\n\n[answered by <fallback model> after refusal]"
+// — visible in the transcript on every surface (CLI/TUI/GUI render reply
+// text directly; no client code). The note is appended at the point the
+// turn's final reply text is assembled after a refusal-fallback retry,
+// NOT by the model. Step results carry the same disclosure. The note is
+// omitted when the turn did NOT fall back (byte-identical replies for
+// normal turns — existing reply-guard behavior untouched).
 ```
 
 ### What This Leaf Consumes
@@ -90,21 +101,29 @@ minimally and note the deviation.
 
 **Step 3: Full package** — `go test -p 2 ./internal/comm/http/ -short`
 
-### Task 2: Honest step-result disclosure
+### Task 2: Chat-reply disclosure note
 
-**Objective:** The user's reply discloses the fallback served it.
+**Objective:** The user's reply discloses the fallback served it, in the
+transcript itself (user decision 2026-09-16, option b).
 
 **Files:**
-- Test + (only if needed) Modify: `internal/agent/loop_refusal.go` or the
-  result-assembly site leaf 03 used.
+- Modify: `internal/agent/loop_refusal.go` (leaf 03's file — the retry
+  succeeded path sets a flag the reply-assembly site reads) OR the
+  turn-reply assembly site leaf 03's hook feeds (search_files for where
+  the loop's returned response text becomes the chat reply — follow how
+  the existing quota sentence is appended to step results in the agent
+  loop for the established pattern).
+- Test: `internal/agent/loop_refusal_observability_test.go`
 
-**Step 1: Write failing test** per contract (fallback success => result
-text contains the fallback model id).
+**Step 1: Write failing test** per contract: fallback success => reply
+text ends with the disclosure line naming the fallback model; no
+fallback => reply text byte-identical to today.
 
 **Step 2: Run to verify failure.**
 
-**Step 3: Implement** the one-sentence disclosure append (smallest change;
-do not reformat existing result text).
+**Step 3: Implement** the append at reply assembly (one branch, one
+constant for the note format; the note is code-appended, never
+model-generated).
 
 **Step 4: Run to verify pass** + `go test -p 2 ./internal/agent/ -short`
 
@@ -128,7 +147,8 @@ as a deviation, do not hack the recorder.
 - [ ] All tasks implemented and tests passing
 - [ ] No new bus topic introduced (grep agent.refusal over internal/ => zero)
 - [ ] No metrics schema change
-- [ ] Disclosure sentence appended, existing result text untouched
+- [ ] Disclosure note appended to reply + step result; normal-turn replies
+      byte-identical (test covers the no-fallback case)
 - [ ] gofmt clean; go vet passes on touched packages
 
 **DO NOT COMMIT.** The orchestrator handles all git operations after review.
@@ -138,7 +158,8 @@ as a deviation, do not hack the recorder.
 ## Review Checklist (For Review Agent)
 
 - [ ] WS pin test present and passing
-- [ ] Honest-reply disclosure test present and passing
+- [ ] Chat-reply disclosure test present and passing (positive AND
+      byte-identical-negative cases)
 - [ ] Ledger identity test present and passing
 - [ ] Zero new topics; zero schema changes
 - [ ] No scope creep

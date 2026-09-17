@@ -11,18 +11,19 @@
 ## Meta
 
 - **Parent:** ../master.md
-- **Scope:** Add the `refusal_model` slot to config + providers config + boot pre-warm.
+- **Scope:** Add the `refusal_model` slot — global default in config PLUS a per-agent `refusal_model` field in AgentSpec.
 - **Dependencies:** none
-- **Estimated Context:** 45K
+- **Estimated Context:** 55K
 - **Concurrency Group:** A
 
 ## Goal
 
-A `refusal_model` value in models.json5 names the provider/model (or bare
-alias name) the agent loop re-dispatches to when the serving model refuses.
-Empty string means the feature is disabled. This leaf adds the slot
-everywhere the sibling slots (extract_model) already appear, following that
-precedent exactly.
+The refusal fallback target is configurable at two levels (user decision,
+2026-09-16): a GLOBAL default slot in models.json5 and a PER-AGENT
+`refusal_model` field on every AI employee spec (any provider/model ref or
+alias the user defines). Empty on both levels = feature off for that
+agent. This leaf adds both declarations, the overlay merge, and the boot
+pre-warm inclusion.
 
 ## Context
 
@@ -43,6 +44,9 @@ Key files to understand before implementing:
 - internal/llm/providers.go:100-130 - ProvidersConfig slot fields
 - internal/llm/providers.go:280-310 - overlay merge (applyOverlay)
 - internal/llm/inuse.go:11-100 - ModelSlots and BuildModelsInUse
+- internal/agent/spec.go:100-112 - AgentSpec per-agent model fields
+  (Model, EnhancerModel, EscalationModel) — the block where the per-agent
+  refusal_model field lands
 
 ## Interface Contracts (From Parent)
 
@@ -50,14 +54,22 @@ Key files to understand before implementing:
 
 ```go
 // internal/config/config.go — ModelsConfig gains (after ExtractModel):
-RefusalModel string `json:"refusal_model"` // provider/id or alias name the
-// agent loop re-dispatches to on a provider refusal. Empty = feature off.
+RefusalModel string `json:"refusal_model"` // global default refusal
+// fallback: provider/id or alias name. Empty = no global default; a
+// per-agent spec refusal_model overrides this.
 
 // internal/llm/providers.go — ProvidersConfig gains the same field with
 // the same comment; applyOverlay gains:
 if overlay.RefusalModel != "" {
     out.RefusalModel = overlay.RefusalModel
 }
+
+// internal/agent/spec.go — AgentSpec gains, beside EscalationModel
+// (spec.go:108-112):
+RefusalModel string `json:"refusal_model,omitempty" yaml:"refusal_model,omitempty"`
+// Per-agent refusal fallback (alias name or "provider/model" ref).
+// Empty = inherit the global models.json5 refusal_model slot; both empty
+// = refusal fallback disabled for this agent.
 
 // internal/llm/inuse.go — ModelSlots gains RefusalModel string;
 // BuildModelsInUse adds:
@@ -152,16 +164,36 @@ report. If it FAILS, there is an explicit field filter; fix it.
 
 **Step 3: Run full package tests.**
 
-## Self-Verification Checklist
+### Task 4: Per-agent spec field
 
-Before reporting completion, verify:
+**Objective:** AgentSpec gains the per-agent `refusal_model` field with
+JSON5+YAML tags (employees are defined in JSON5; specs also round-trip
+YAML in places — mirror EscalationModel's dual tags exactly).
+
+**Files:**
+- Modify: `internal/agent/spec.go` (~line 112, after EscalationModel)
+- Test: extend the existing spec-parsing test (search_files for
+  `escalation_model` in internal/agent/*_test.go)
+
+**Step 1: Write failing test** — an employee JSON5 with
+`refusal_model: "mlx-local/uncensored-8b"` parses into
+spec.RefusalModel; a spec without the field leaves it empty; the field
+marshals back out with the exact `refusal_model` key.
+
+**Step 2: Run to verify failure.**
+
+**Step 3: Implement** the field.
+
+**Step 4: Run to verify pass** — `go test -p 2 ./internal/agent/ -short -run Spec`
+
+## Self-Verification Checklist
 
 - [ ] All tasks implemented and tests passing
 - [ ] Interface contracts (above) satisfied exactly
 - [ ] All files at exact specified paths
 - [ ] No deviations from spec (or deviations documented below)
 - [ ] No scope creep - only what the tasks specify
-- [ ] gofmt clean; `go vet ./internal/llm/ ./internal/config/` passes
+- [ ] gofmt clean; `go vet ./internal/llm/ ./internal/config/ ./internal/agent/` passes
 
 **DO NOT COMMIT.** The orchestrator handles all git operations after review.
 
@@ -169,7 +201,8 @@ Before reporting completion, verify:
 
 ## Review Checklist (For Review Agent)
 
-- [ ] Slot present in BOTH structs with identical json tags and comments
+- [ ] Slot present in BOTH config structs with identical json tags and comments
+- [ ] AgentSpec field present with json+yaml tags matching EscalationModel style
 - [ ] Overlay merge present and tested
 - [ ] Pre-warm inclusion present and tested
 - [ ] Round-trip test present
@@ -180,9 +213,8 @@ Output: APPROVED or list of specific gaps with file + line references.
 
 ## Notes
 
-- Do NOT resolve the slot into a model config here — leaf 03 does that in
-  the loop via Resolver.ResolveEscalationRef. This leaf is declaration +
-  pre-warm only.
-- GUI/TUI exposure of the slot is explicitly out of scope (config-file only
-  for phase 1). `meept config get/set models.refusal_model` works via the
-  generic key path with no extra code — verify manually at integration.
+- Do NOT resolve either value into a model config here — leaf 03 does that
+  in the loop via Resolver.ResolveEscalationRef. This leaf is declaration
+  + pre-warm only. Precedence (spec > global > off) is leaf 03's logic.
+- GUI/TUI exposure of the slot is out of scope (config-file and employee
+  JSON5 only for phase 1).

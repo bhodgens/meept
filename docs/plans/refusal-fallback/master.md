@@ -94,25 +94,35 @@ func DetectRefusalFromBody(providerID, modelID string, statusCode int, body stri
 Owner: 01-llm-refusal-error.md
 Consumers: 03-loop-refusal-branch.md, 04-refusal-observability.md
 
-### Contract 2: refusal_model config slot
+### Contract 2: refusal_model config — per-agent spec field + global slot
 
 ```go
 // internal/config/config.go (ModelsConfig) AND internal/llm/providers.go
-// (ProvidersConfig) — both add:
-RefusalModel string `json:"refusal_model"` // provider/id or alias name the
-// loop re-dispatches to on refusal. Empty string = feature disabled.
+// (ProvidersConfig) — both add a GLOBAL slot:
+RefusalModel string `json:"refusal_model"` // global default: provider/id or
+// alias name the loop re-dispatches to on refusal. Empty = no global default.
 // Overlay merge in providers.go applyOverlay follows the ExtractModel
 // pattern (providers.go:296-298).
+
+// internal/agent/spec.go — AgentSpec gains a PER-AGENT field beside
+// EscalationModel (spec.go:108-112):
+RefusalModel string `json:"refusal_model,omitempty" yaml:"refusal_model,omitempty"`
+// Per-agent refusal fallback (alias name or "provider/model" ref).
+// Empty = inherit the global models.json5 refusal_model slot; both empty
+// = refusal fallback disabled for this agent.
+
+// PRECEDENCE (frozen): spec.RefusalModel > ModelsConfig.RefusalModel > off.
+// Resolution uses Resolver.ResolveEscalationRef (verification_escalation.go
+// seam) so bare alias names resolve identically to escalation_model.
 
 // internal/llm/inuse.go — ModelSlots gains RefusalModel; BuildModelsInUse
 // adds it to the boot pre-warm set (inuse.go:90 sibling add() call).
 ```
 
-Value forms: `provider/model-id` OR a bare alias name. The loop resolves
-bare names through the existing `Resolver.ResolveEscalationRef` seam
-(`internal/agent/verification_escalation.go:20-27`).
+Value forms: `provider/model-id` OR a bare alias name, in both the spec
+field and the global slot.
 
-Owner: 02-refusal-model-slot.md
+Owner: 02-refusal-model-slot.md (slot + spec field)
 Consumers: 03-loop-refusal-branch.md, 06-docs-and-config-templates.md
 
 ### Contract 3: loop refusal branch
@@ -124,11 +134,12 @@ Consumers: 03-loop-refusal-branch.md, 06-docs-and-config-templates.md
 package agent
 
 // handleRefusal decides and executes the fallback:
-//   - refusalModelRef from spec/config: ModelsConfig.RefusalModel (slot)
-//     or AgentSpec.EscalationModel when spec declares override_refusal.
-//   - already serving the refusal model => give up: return the original
+//   - fallback ref = spec.RefusalModel if set, else ModelsConfig.RefusalModel
+//     (Contract 2 precedence: per-agent > global > off).
+//   - already serving the fallback ref => give up: return the original
 //     *llm.RefusalError (one-hop rule).
-//   - slot empty => feature off: return the original error unchanged.
+//   - both sources empty / unresolvable => feature off: return the original
+//     error unchanged.
 //   - otherwise: switch to the refusal model for this turn
 //     (llm.WithResolvedModel / SwitchModel — the SAME request-scoped seam
 //     verification escalation uses via SetOverrideApplier), publish the
@@ -142,6 +153,29 @@ Placement rule: the refusal check must precede the generic
 
 Owner: 03-loop-refusal-branch.md
 Consumers: 04-refusal-observability.md, 05-e2e-and-ws-verification.md
+
+### Contract 6: capability documentation surfaces (USER REQUIREMENT)
+
+The feature must appear in ALL FOUR marketing/reference surfaces, with the
+capability compared against the 8 competitor harnesses:
+
+1. `docs/features.md` — new "Refusal Fallback" subsection under the model/
+   LLM management area (find the sibling section for model aliases via
+   search_files "failover" in features.md).
+2. `docs/feature-comparison-matrix.md` — new row in the "Model & Cost"
+   matrix (line ~98-108): "Refusal fallback (per-agent)" — Meept X with a
+   parenthetical, competitors "-" unless the auditor verifies otherwise
+   (leaf verifies each competitor claim against their repo/docs before
+   writing any non-"-" mark; the 2026-08-29 audit found none — refresh
+   that check).
+3. `meept.dev/index.html` — new row in the "Model & Cost" comparison
+   table (after line ~549 "Model failover chain"): dot-yes for Meept,
+   dot-no for competitors (same verification rule).
+4. `README.md` — Models row (line ~66) gains "+ refusal fallback" in
+   Meept's cell, and the LLM management summary row (~line 293) gains
+   "refusal fallback".
+
+Owner: 06-docs-and-config-templates.md
 
 ### Contract 4: observability event (REUSE existing topic)
 
@@ -324,19 +358,20 @@ Required orchestrator sections: Dispatch Protocol, Interface Contracts,
 Review Checklist, Coding Conventions, Completion Tracking Table,
 Integration Test Plan. Re-run until `ALL TREES COMPLIANT: True`.
 
-## Open Questions (defaults chosen; user may override before dispatch)
+## Open Questions — RESOLVED by user (2026-09-16)
 
-1. **Slot scope** — global `refusal_model` slot (chosen) vs per-alias
-   `refusal_fallback` field. Global matches extract_model precedent and
-   ships in one config line; per-alias allows different fallbacks per role
-   but adds resolver surface. Default: global.
-2. **Interactive turns** — step/background turns fall back silently-with-
-   event (chosen). Interactive chat turns: same behavior in phase 1 (the
-   event reaches the client as agent_progress). A follow-up could surface
-   a user-visible note in the reply text. Default: event-only.
-3. **AgentSpec override** — whether employees can declare their own refusal
-   target overriding the global slot. Deferred; Contract 3 reserves the
-   spec seam. Default: global slot only.
+1. **Slot scope** — RESOLVED: per-agent. Every AI employee spec gains
+   `refusal_model` (any provider/model ref or alias the user defines);
+   the global models.json5 slot is the inherited default. Precedence:
+   spec > global > off (Contract 2).
+2. **Interactive turns** — RESOLVED: reply-text note (option b). Leaf 04
+   appends the disclosure to the CHAT REPLY for interactive turns, not
+   just the step result: e.g. "[answered by <fallback model> after
+   refusal]". Applies per the honest-reply invariant; machine-shaped
+   output guards unaffected.
+3. **AgentSpec override** — RESOLVED: included now (it IS Q1's answer).
+   The spec field ships in this tree; leaf 02 owns the field, leaf 03 the
+   precedence logic.
 
 ## Notes
 
