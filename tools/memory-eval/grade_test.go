@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -298,5 +300,89 @@ func TestJudgeLaneRescueGrading(t *testing.T) {
 	}
 	if len(m.ConfidenceAnalysis) != 1 || !m.ConfidenceAnalysis[0].MatchedJudge {
 		t.Errorf("confidence_analysis = %+v, want one judge-matched point", m.ConfidenceAnalysis)
+	}
+}
+
+// delayedBody sleeps before its first Read so the measured latency includes
+// the body transfer, not just the response headers.
+type delayedBody struct {
+	*bytes.Reader
+	delay time.Duration
+}
+
+func (b *delayedBody) Read(p []byte) (int, error) {
+	if b.delay > 0 {
+		time.Sleep(b.delay)
+		b.delay = 0
+	}
+	return b.Reader.Read(p)
+}
+
+func (b *delayedBody) Close() error { return nil }
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// stubTransport returns a RoundTripper serving canned OpenAI-shaped chat
+// responses, one per call (last one repeats), with an optional body delay.
+func stubTransport(contents []string, bodyDelay time.Duration) http.RoundTripper {
+	n := 0
+	return roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		content := contents[n%len(contents)]
+		n++
+		body, err := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{
+				"message": map[string]any{"content": content},
+			}},
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: &delayedBody{
+				Reader: bytes.NewReader(body),
+				delay:  bodyDelay,
+			},
+		}, nil
+	})
+}
+
+// stubClient returns a chatClient wired to the canned transport.
+func stubClient(contents []string, bodyDelay time.Duration) *chatClient {
+	c := newChatClient("http://unused.invalid/v1", "synthetic", 5*time.Second)
+	c.http.Transport = stubTransport(contents, bodyDelay)
+	return c
+}
+
+// TestDistillEmptyParsedPrincipleCountsAsMisses (F7): a candidate that parses
+// as JSON but carries an empty principle must count as a FALSE NEGATIVE —
+// the recall denominator must equal the number of gold lessons, so a model
+// that drops hard lessons cannot look perfect. 2 gold lessons, 1 real answer
+// + 1 empty principle: calls=2 tp=1 fn=1 recall=0.5.
+func TestDistillEmptyParsedPrincipleCountsAsMisses(t *testing.T) {
+	c := &corpus{Segments: []segment{{
+		ID:   "seg-empty-principle",
+		Gold: goldSet{Lessons: []string{"always set explicit timeouts", "always verify results"}},
+	}}}
+	m := runDistillEval(
+		stubClient([]string{`{"principle":"always set explicit timeouts"}`, `{}`}, 0),
+		c, 0.6)
+	if m.Calls != 2 {
+		t.Errorf("Calls = %d, want 2", m.Calls)
+	}
+	if m.JSONParseOK != 2 {
+		t.Errorf("JSONParseOK = %d, want 2 (both bodies parse as JSON)", m.JSONParseOK)
+	}
+	if m.TruePositives != 1 {
+		t.Errorf("TruePositives = %d, want 1", m.TruePositives)
+	}
+	if m.FalseNegatives != 1 {
+		t.Errorf("FalseNegatives = %d, want 1 (empty parsed principle must stay in the denominator)", m.FalseNegatives)
+	}
+	if m.Recall != 0.5 {
+		t.Errorf("Recall = %v, want 0.5", m.Recall)
 	}
 }

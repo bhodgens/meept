@@ -597,6 +597,9 @@ func runDistillEval(client *chatClient, corpus *corpus, threshold float64) *Dist
 			}
 			_ = conform
 			if principle == "" {
+				// F7: a parsed-but-empty lesson is a miss, not an invisible
+				// success — it must stay in the recall denominator.
+				m.FalseNegatives++
 				continue
 			}
 			m.LessonsExtracted++
