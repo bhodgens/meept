@@ -226,15 +226,33 @@ outputs.
 Watch first: **decoy_false_pos** (does the model know what NOT to store),
 **json_parse_ok** (will it work in production without a grammar), then F1.
 
-## 2026-09-17 live runs: NOT PERFORMED (endpoint access denied)
+## 2026-09-17 live runs: PERFORMED (parent session, post-prompt-V1 grammar runs)
 
-The judge-lane deliverable called for two live runs against the daemon's
-llama-server at 127.0.0.1:8080 (`judge-lexical.json` / `judge-judge.json` in
-`results/`), but endpoint access was denied in the execution environment this
-session — the health check and both runs were blocked. The judge lane and
-sweep were verified end-to-end against a deterministic local stub endpoint
-(shape only, zero quality signal — do not cite those numbers). Run when
-endpoint access is available:
+Live numbers, LFM2.5-8B-A1B Q4 on the daemon's :8080, --grammar-file
+/tmp/ambient.gbnf, anti-restatement prompt (commit 9ea86850):
+
+| lane | precision | recall | F1 | decoy FP |
+|------|-----------|--------|----|----------|
+| lexical | 0.649 | 0.580 | 0.657 | 13 |
+| judge | 0.691 | 0.580 | 0.631 | 17 |
+| judge-rescued totals | 0.735 | 0.617 | 0.671 | — |
+
+Judge rescued 3 semantic matches the lexical gate missed (7 judge calls,
+cached). Note: run-to-run variance at this corpus size is ±0.05-0.08 on
+precision (temperature 0.2 sampling); compare lanes within a run, not
+across runs.
+
+Confidence sweep (judge matching): candidates are bimodal — confidence
+0.3-0.9 keeps 91.5-93% precision with flat behavior; the sweep shows the
+model's confidence is NOT well-calibrated as a quality gate at this size
+(nearly all candidates sit in one confidence band). A confidence gate
+would discard ~30% of candidates for ~0 precision gain — NOT recommended;
+route everything to the review pipeline and rely on the librarian
+curation instead.
+
+Earlier stub-only note superseded: the shape-verification numbers in the
+previous revision of this section were stub output and carried no quality
+signal.
 
 ```bash
 # (a) lexical baseline
