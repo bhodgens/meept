@@ -4,9 +4,11 @@
 Usage:
   python3 tools/e2e-sweep/run_sweep.py [--base-url URL] [--home DIR] [agent ...]
 """
+import sys
+
 import client
 import async_wait
-import scenarios
+from evidence import require_tool
 
 # agent_id -> (task, must-contain substrings, never-contain substrings)
 TASKS = {
@@ -51,14 +53,20 @@ def classify(reply, must, never):
 
 def main():
     args = client.parse_args()
-    c = client.Client(args)
     wanted = set(args.categories)
-    counts = {"PASS": 0, "FAIL": 0, "WEAK": 0, "ERROR": 0, "TIMEOUT": 0}
+    unknown = wanted - set(TASKS)
+    if unknown:
+        print("unknown filter: " + ", ".join(sorted(unknown)), file=sys.stderr)
+        return 2
+    c = client.Client(args)
+    counts = {"PASS": 0, "UNVERIFIED": 0, "FAIL": 0, "WEAK": 0, "ERROR": 0, "TIMEOUT": 0}
     for agent, (task, must, never) in TASKS.items():
         if wanted and agent not in wanted:
             continue
         try:
             grade = lambda r, ctx=None: (classify(r, must, never), "")
+            if agent == "researcher":
+                grade = require_tool(grade, count=1)
             v, d, dt = async_wait.run_async_aware(
                 c, args.home, "SWEEP", agent, agent, task, grade)
         except Exception as e:
@@ -67,8 +75,9 @@ def main():
         print(f"[{agent:20s}] {v:26s} {dt:5.1f}s  {d[:60]}")
     total = sum(counts.values())
     print(f"\n=== PASS {counts['PASS']} / WEAK {counts['WEAK']} / FAIL {counts['FAIL']} "
-          f"/ TIMEOUT {counts['TIMEOUT']} / ERROR {counts['ERROR']} of {total} ===")
+          f"/ UNVERIFIED {counts['UNVERIFIED']} / TIMEOUT {counts['TIMEOUT']} / ERROR {counts['ERROR']} of {total} ===")
+    return 0 if total and counts["PASS"] == total else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -162,7 +162,7 @@ outputs.
 | Metric | Meaning |
 |--------|---------|
 | precision | of extracted items, fraction matching a gold label (token overlap ≥ threshold, default 0.6) |
-| recall | of gold labels, fraction the model found |
+| recall | of gold labels, fraction the model found (segments/lessons whose call failed or produced unparseable output count as misses) |
 | f1 | harmonic mean |
 | decoy_false_pos | extractions from decoy-only segments (jokes/hypotheticals treated as fact) |
 | json_parse_ok | calls whose raw output parsed as JSON |

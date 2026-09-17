@@ -816,6 +816,13 @@ classifier-eval-selftest:
 # Override MEEPT_SWEEP_BASE_URL / MEEPT_SWEEP_HOME for a scratch rig. Categories
 # can be passed: make adversarial ARGS="INJECTION MISROUTE". Unlike
 # classifier-eval-selftest this needs a live daemon, so it is NOT a CI gate.
+# Offline tests exercise sweep graders, SQLite completion and local HTTP fixtures.
+.PHONY: e2e-sweep-selftest
+e2e-sweep-selftest:
+	python3 -m unittest discover -s tools/e2e-sweep -p 'test_*.py' -v
+	python3 scripts/test_e2e_chat_harness.py -v
+	bash -n scripts/e2e-naive-user-chat.sh
+
 .PHONY: adversarial
 adversarial:
 	@echo "Running adversarial e2e sweep against $(MEEPT_SWEEP_BASE_URL)..."

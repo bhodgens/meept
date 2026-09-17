@@ -443,8 +443,8 @@ class Embedder:
                 got[item["index"]] = np.asarray(item["embedding"], dtype=np.float32)
             if any(v is None for v in got):
                 raise RuntimeError("embed server returned fewer vectors than inputs")
-            for (k, _), item in zip(missing, out["data"]):
-                v = np.asarray(item["embedding"], dtype=np.float32)
+            for (k, _), v in zip(missing, got):
+                assert v is not None  # completeness checked above
                 n = float(np.linalg.norm(v))
                 if n > 0 and np.isfinite(v).all():
                     v = v / n
@@ -756,9 +756,8 @@ def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
             fit(train_idx, [intents[i] for i in train_idx])
         results = []
         for qi in np.where(test_m)[0]:
-            if is_ood[qi]:
-                results.append(None)
-                continue
+            # OOD stays out of training, but must reach the same prediction
+            # path as every other query. Gold labels may grade, not decide.
             # self-exclusion: mask any train case with the same text key
             self_mask = np.where(key_arr[qi] == key_arr[train_m])[0]
             lab, score = head.decide(V[qi], [intents[i] for i in train_idx])

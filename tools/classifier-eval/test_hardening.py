@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hardening test for the sandbox remapper and the pre-commit build hook.
+"""Hardening tests for sandbox remapping, build hooks and classifier scoring.
 
 Both scripts carried guard logic that nothing exercised: CI runs
 ``.githooks/pre-commit`` on a fresh checkout where ``git diff --cached`` is
@@ -18,7 +18,12 @@ This test drives the REAL code, not a copy:
     synthetic inputs (a clobbered ./gendoc, a new ./gendoc, a stray
     coverage.out, and a go-less PATH).
 
-Pure stdlib. No embed server, no ruler, no daemon.
+  * classifier scoring: the real fold runner is driven with fixed embeddings
+    and always-route/always-abstain controls; gold OOD labels must not bypass
+    prediction or manufacture perfect abstention.
+
+Requires NumPy (already provisioned by the CI self-test job).
+No embed server, no private ruler, no daemon.
 Exit 0 green, 1 on any failed check.
 """
 from __future__ import annotations
@@ -326,6 +331,94 @@ def test_hook_derives_real_names() -> None:
     check("gendoc is a derived name", "gendoc" in names, f"-> {names}")
 
 
+def test_reordered_embeddings_keep_key_association() -> None:
+    """Response indices, not response-array order, identify each input."""
+    import io
+    import json
+    import numpy as np
+    from unittest.mock import patch
+    import eval_harness as harness
+
+    texts = ["first input", "second input", "zero input"]
+    keys = [harness.case_key(text) for text in texts]
+    response = {"data": [
+        {"index": 2, "embedding": [0.0, 0.0]},
+        {"index": 0, "embedding": [3.0, 0.0]},
+        {"index": 1, "embedding": [0.0, 4.0]},
+    ]}
+    with tempfile.TemporaryDirectory() as cache:
+        emb = harness.Embedder("http://embed.invalid/v1", "test", cache_dir=Path(cache))
+        with patch.object(harness.urllib.request, "urlopen",
+                          return_value=io.BytesIO(json.dumps(response).encode())):
+            emb.embed_keys(texts, keys)
+        np.testing.assert_array_equal(
+            emb.vectors(keys), np.array([[1, 0], [0, 1], [0, 0]], dtype=np.float32),
+            err_msg="reordered embeddings must stay associated with their input keys")
+        check("reordered embeddings: degenerate row counted", emb.degenerate_rows == 1)
+        check("reordered embeddings: latency accounting retained",
+              emb.embed_calls == 1 and len(emb.latency_ms) == 3)
+
+
+def test_ood_predictions_are_measured() -> None:
+    """Gold OOD labels must never manufacture perfect abstention."""
+    import numpy as np
+    from unittest.mock import patch
+    import eval_harness as harness
+
+    print("classifier: OOD queries use the head, never their gold label")
+    cases = [harness.Case(f"synthetic-{i}", "code", "", False,
+                          "test", "", f"in-{i}") for i in range(5)]
+    cases.append(harness.Case("synthetic-unsupported", "OOD", "", True,
+                              "test", "", "ood"))
+    folds = {harness.case_key(c.text): i % 5 for i, c in enumerate(cases)}
+
+    class FixedEmbeddings(harness.Embedder):
+        def __init__(self):
+            # Do not create the normal disk cache or contact an embed server.
+            self.latency_ms = []
+
+        def embed_keys(self, texts, keys):
+            pass
+
+        def vectors(self, keys):
+            return np.tile(np.array([[1.0, 0.0]]), (len(keys), 1))
+
+    for verdict in ("code", None):
+        queried = []
+        training_labels = []
+
+        class FixedHead:
+            def fit(self, indices, intents):
+                training_labels.extend(intents)
+
+            def decide(self, query, intents):
+                queried.append(query)
+                return verdict, 1.0
+
+        # Only substitute external embeddings and the head. Exercise the real
+        # fold runner, training exclusion, confusion recording and score pool.
+        with patch.object(harness, "build_head", return_value=FixedHead()):
+            metrics = harness.run_permutation(
+                {"name": "ood-control", "head": {"type": "test"}},
+                cases, folds, FixedEmbeddings())
+        label = "always-route" if verdict else "always-abstain"
+        check(f"{label}: every held-out query reaches head", len(queried) == 6,
+              f"-> {len(queried)}")
+        check(f"{label}: OOD excluded from training", "OOD" not in training_labels)
+        check(f"{label}: OOD denominator retained", metrics["OOD_total"] == 1)
+        check(f"{label}: measured OOD abstention",
+              metrics["OOD_R"] == (0.0 if verdict else 1.0))
+        check(f"{label}: OOD wrong-route penalty",
+              metrics["wrong"] == (1 if verdict else 0))
+        check(f"{label}: in-domain denominator unchanged", metrics["total"] == 5)
+        check(f"{label}: chain credit stays in-domain",
+              metrics["E2E"] == (1.0 if verdict else harness.CHAIN_BASELINE))
+        if verdict:
+            check("always-route: OOD appears in confusion evidence",
+                  any(c.case_id == "ood" for c, _, _ in metrics["confusion"]))
+            check("always-route: OOD lowers composite score", metrics["SCORE"] == 0.0)
+
+
 def main() -> int:
     print("classifier-eval hardening test (remap + hook classification)")
     test_remap_false_rewrites()
@@ -337,6 +430,8 @@ def main() -> int:
     test_hook_clobber_and_classification()
     test_hook_go_unavailable_warns()
     test_hook_derives_real_names()
+    test_reordered_embeddings_keep_key_association()
+    test_ood_predictions_are_measured()
     shutil.rmtree(_TMP, ignore_errors=True)
     if failures:
         print(f"hardening test FAILED: {len(failures)} check(s): {failures}",

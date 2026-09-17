@@ -86,6 +86,7 @@ make docs-check           # Verify those pages are fresh (CI gate; needs mage + 
 
 # Classifier-eval guards (tools/classifier-eval)
 make classifier-eval-selftest # CI: corpus/replay guard + coverage-floor self-test
+make e2e-sweep-selftest       # CI: offline sweep grading/completion/CLI regressions
 
 # Git hooks (bash >= 3.2; sub-hooks run under whatever `bash` is on PATH, so the
 # suite also executes on the Linux CI runner)

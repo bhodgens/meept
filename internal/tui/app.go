@@ -2124,13 +2124,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return StatusMessageClearMsg{}
 			})
 		}
-		return a, nil
+		if msg.Reply != nil {
+			return a, a.chat.Update(msg)
+		}
+		return a, a.switchThread(msg.ThreadID)
 
 	case types.ThreadListChangedMsg:
-		// Update the thread indicator with fresh thread data
-		if a.threadIndicator != nil && a.currentSession != nil {
-			a.threadIndicator.SetThreads(a.currentSession)
+		// Apply fresh RPC data rather than redisplaying the stale session.
+		if a.currentSession != nil {
+			a.currentSession.Threads = make(map[string]types.Thread, len(msg.Threads))
+			for _, thread := range msg.Threads {
+				a.currentSession.Threads[thread.ID] = thread
+			}
+			a.currentSession.ActiveThreadID = msg.ActiveID
+			if a.threadIndicator != nil {
+				a.threadIndicator.SetThreads(a.currentSession)
+			}
 		}
+		a.chat.Update(msg)
 		return a, nil
 	}
 
@@ -2413,6 +2424,43 @@ func (a *App) switchToSessionByID(sessionID string, messageID int64) tea.Cmd {
 			}
 		}
 		return SessionSwitchMsg{Err: fmt.Errorf("session not found: %s", sessionID)}
+	}
+}
+
+// switchThread sets the active thread for the current session.
+func (a *App) switchThread(threadID string) tea.Cmd {
+	return func() tea.Msg {
+		if a.rpc == nil || !a.rpc.IsConnected() {
+			return types.ThreadSwitchMsg{Err: fmt.Errorf("not connected")}
+		}
+
+		sess := a.sessionMgr.GetCurrentSession()
+		if sess == nil || sess.ID == "" {
+			return types.ThreadSwitchMsg{Err: fmt.Errorf("no active session")}
+		}
+
+		sessionID := sess.ID
+		err := a.rpc.SetActiveThread(sessionID, threadID)
+		if err != nil {
+			return types.ThreadSwitchMsg{Err: err}
+		}
+
+		// Refresh session to get updated thread data
+		refreshedSess, err := a.rpc.ListThreadsBySession(sessionID)
+		if err != nil {
+			return types.ThreadSwitchMsg{Err: err}
+		}
+
+		// Convert map to slice
+		threadSlice := make([]types.Thread, 0, len(refreshedSess.Threads))
+		for _, t := range refreshedSess.Threads {
+			threadSlice = append(threadSlice, t)
+		}
+
+		return types.ThreadListChangedMsg{
+			Threads:  threadSlice,
+			ActiveID: refreshedSess.ActiveThreadID,
+		}
 	}
 }
 

@@ -240,7 +240,13 @@ func (r *MutationReport) String() string {
 
 // RunFileMutations runs mutation testing on a Go source file.
 // Returns a report of which mutations were caught by existing tests.
-func RunFileMutations(t *testing.T, filePath string, testFn func() error) *MutationReport {
+//
+// testFn validates the Go source at the path it is given. It is called
+// first with the ORIGINAL filePath (baseline; must pass), then once per
+// mutant with the path of the mutated copy. Mutants are written to fresh
+// files under t.TempDir and the original file is never modified. The test
+// suite catches a mutant when testFn returns a non-nil error for it.
+func RunFileMutations(t *testing.T, filePath string, testFn func(sourcePath string) error) *MutationReport {
 	t.Helper()
 
 	report := &MutationReport{}
@@ -259,30 +265,42 @@ func RunFileMutations(t *testing.T, filePath string, testFn func() error) *Mutat
 	mutator := NewFileMutator()
 	lineCount := len(strings.Split(string(source), "\n"))
 
+	// Baseline: the suite must pass against the original, unmutated file
+	// before any mutation is tried.
+	if err := testFn(filePath); err != nil {
+		t.Fatalf("mutation test: original test must pass for %s, got error: %v", filePath, err)
+	}
+
 	// Try mutations on each line
 	for i := 1; i <= lineCount; i++ {
 		// Try condition inversion
 		mutatedSource, ok := mutator.MutateInCondition(string(source), i)
-		if ok {
-			result := MutationResult{
-				MutatorType:  MutatorInvertCondition,
-				FilePath:     filePath,
-				LineNumber:   i,
-				Description:  "Inverted condition on line " + fmt.Sprint(i),
-				ExpectedFail: true,
-			}
-
-			// Write mutated source to temp file
-			tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("mutation_%d.go", i))
-			os.WriteFile(tmpFile, []byte(mutatedSource), 0644)
-			defer os.Remove(tmpFile)
-
-			// Run test
-			testErr := testFn()
-			result.TestPassed = (testErr == nil)
-
-			report.AddResult(result)
+		if !ok {
+			continue
 		}
+
+		result := MutationResult{
+			MutatorType:  MutatorInvertCondition,
+			FilePath:     filePath,
+			LineNumber:   i,
+			Description:  "Inverted condition on line " + fmt.Sprint(i),
+			ExpectedFail: true,
+		}
+
+		// Write the mutated copy to its own file in the test's temp dir;
+		// never overwrite the original source. The write error is checked:
+		// a failed write would silently test the ORIGINAL code instead.
+		tmpFile := filepath.Join(t.TempDir(), fmt.Sprintf("mutation_%d.go", i))
+		if err := os.WriteFile(tmpFile, []byte(mutatedSource), 0o644); err != nil {
+			t.Fatalf("failed to write mutated file %s: %v", tmpFile, err)
+		}
+
+		// Run the suite against the MUTANT, not the original.
+		testErr := testFn(tmpFile)
+		result.TestPassed = (testErr == nil)
+		result.Error = testErr
+
+		report.AddResult(result)
 	}
 
 	return report

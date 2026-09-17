@@ -23,21 +23,21 @@ type EvalResult struct {
 
 // AmbientMetrics grades the ambient epistemic extraction run.
 type AmbientMetrics struct {
-	Calls            int     `json:"calls"`
-	TransportErrors  int     `json:"transport_errors"`
-	JSONParseOK      int     `json:"json_parse_ok"`
-	SchemaConformant int     `json:"schema_conformant"`
-	Extracted        int     `json:"extracted_total"`
+	Calls            int            `json:"calls"`
+	TransportErrors  int            `json:"transport_errors"`
+	JSONParseOK      int            `json:"json_parse_ok"`
+	SchemaConformant int            `json:"schema_conformant"`
+	Extracted        int            `json:"extracted_total"`
 	ByType           map[string]int `json:"extracted_by_type"`
-	TruePositives    int     `json:"true_positives"`
-	FalsePositives   int     `json:"false_positives"`
-	FalseNegatives   int     `json:"false_negatives"`
-	DecoyFalsePos    int     `json:"decoy_false_positives"`
-	Precision        float64 `json:"precision"`
-	Recall           float64 `json:"recall"`
-	F1               float64 `json:"f1"`
-	MeanLatencyMs    float64 `json:"mean_latency_ms"`
-	TokensUsed       int     `json:"tokens_used"`
+	TruePositives    int            `json:"true_positives"`
+	FalsePositives   int            `json:"false_positives"`
+	FalseNegatives   int            `json:"false_negatives"`
+	DecoyFalsePos    int            `json:"decoy_false_positives"`
+	Precision        float64        `json:"precision"`
+	Recall           float64        `json:"recall"`
+	F1               float64        `json:"f1"`
+	MeanLatencyMs    float64        `json:"mean_latency_ms"`
+	TokensUsed       int            `json:"tokens_used"`
 }
 
 // DistillMetrics grades the distillation run.
@@ -122,11 +122,13 @@ func runAmbientEval(client *chatClient, corpus *corpus, threshold float64) *Ambi
 		latencies = append(latencies, latency)
 		if err != nil {
 			m.TransportErrors++
+			m.FalseNegatives += len(seg.Gold.Claims) + len(seg.Gold.Decisions) + len(seg.Gold.Predictions)
 			continue
 		}
 
 		cands, parseErr := parseCandidates(content)
 		if parseErr != nil {
+			m.FalseNegatives += len(seg.Gold.Claims) + len(seg.Gold.Decisions) + len(seg.Gold.Predictions)
 			continue // JSONParseOK stays false
 		}
 		m.JSONParseOK++
@@ -332,10 +334,12 @@ func runDistillEval(client *chatClient, corpus *corpus, threshold float64) *Dist
 			latencies = append(latencies, latency)
 			if err != nil {
 				m.TransportErrors++
+				m.FalseNegatives++
 				continue
 			}
 			principle, _, evidenceTyped, err := lessonFromJSON(content)
 			if err != nil {
+				m.FalseNegatives++
 				continue
 			}
 			m.JSONParseOK++

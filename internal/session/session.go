@@ -1329,6 +1329,14 @@ func (s *MemoryStore) CreateThread(ctx context.Context, thread *Thread) error {
 	if sess.Threads == nil {
 		sess.Threads = make(map[string]*Thread)
 	}
+	if thread.IsActive {
+		for _, existing := range sess.Threads {
+			if existing.ID != thread.ID {
+				existing.IsActive = false
+			}
+		}
+		sess.ActiveThreadID = thread.ID
+	}
 	sess.Threads[thread.ID] = thread
 	return nil
 }
@@ -1340,7 +1348,8 @@ func (s *MemoryStore) GetThread(ctx context.Context, threadID string) (*Thread, 
 	for _, sess := range s.sessions {
 		if sess.Threads != nil {
 			if t, ok := sess.Threads[threadID]; ok {
-				return t, nil
+				thr := *t
+				return &thr, nil
 			}
 		}
 	}
@@ -1506,6 +1515,12 @@ func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger, opts .
 		"session.set_nofence":           h.handleSessionSetNoFence, // F-04 FIX
 		"session.set_foreground":        h.handleSessionSetForeground,
 		"session.set_last_user_message": h.handleSessionSetLastUserMessage,
+		// Thread operations
+		"session.thread.new":     h.handleThreadNew,
+		"session.thread.list":    h.handleThreadList,
+		"session.thread.switch":  h.handleThreadSwitch,
+		"session.thread.current": h.handleThreadCurrent,
+		"session.thread.delete":  h.handleThreadDelete,
 	}
 
 	for topic, callback := range topics {
@@ -1615,6 +1630,26 @@ func (h *Handler) handleSessionSetLastUserMessage(ctx context.Context, topic str
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
+func (h *Handler) handleThreadNew(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleThreadList(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleThreadSwitch(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleThreadCurrent(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleThreadDelete(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
 // handleMessage routes messages to the appropriate handler.
 func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 	var response any
@@ -1663,6 +1698,17 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 		response, err = h.handleSetForeground(msg)
 	case "session.set_last_user_message":
 		response, err = h.handleSetLastUserMessage(msg)
+	// Thread operations
+	case "session.thread.new":
+		response, err = h.handleThreadNewMsg(msg)
+	case "session.thread.list":
+		response, err = h.handleThreadListMsg(msg)
+	case "session.thread.switch":
+		response, err = h.handleThreadSwitchMsg(msg)
+	case "session.thread.current":
+		response, err = h.handleThreadCurrentMsg(msg)
+	case "session.thread.delete":
+		response, err = h.handleThreadDeleteMsg(msg)
 	default:
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
@@ -2249,6 +2295,178 @@ func (h *Handler) handleTreeGetMsg(msg *models.BusMessage) (any, error) {
 	}
 
 	return map[string]any{"nodes": nodes}, nil
+}
+
+// handleThreadNewMsg creates a new thread for the current session.
+func (h *Handler) handleThreadNewMsg(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID      string `json:"session_id"`
+		TopicLabel     string `json:"topic_label"`
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if params.TopicLabel == "" {
+		params.TopicLabel = "general"
+	}
+	if params.ConversationID == "" {
+		params.ConversationID = params.SessionID
+	}
+
+	thread := &Thread{
+		ID:             sid.Generate("thread-"),
+		SessionID:      params.SessionID,
+		TopicLabel:     params.TopicLabel,
+		ConversationID: params.ConversationID,
+		CreatedAt:      time.Now().UTC(),
+		LastActivityAt: time.Now().UTC(),
+		IsActive:       true,
+	}
+
+	if err := h.store.CreateThread(context.Background(), thread); err != nil {
+		return nil, err
+	}
+	if err := h.store.SetActiveThread(context.Background(), params.SessionID, thread.ID); err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"id":              thread.ID,
+		"session_id":      thread.SessionID,
+		"topic_label":     thread.TopicLabel,
+		"conversation_id": thread.ConversationID,
+		"is_active":       thread.IsActive,
+		"created_at":      thread.CreatedAt.Format(time.RFC3339),
+	}, nil
+}
+
+// handleThreadListMsg lists all threads for a session.
+func (h *Handler) handleThreadListMsg(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	threads, err := h.store.ListThreadsBySession(context.Background(), params.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	threadsSlice := make([]map[string]any, 0, len(threads))
+	for _, t := range threads {
+		threadsSlice = append(threadsSlice, map[string]any{
+			"id":               t.ID,
+			"session_id":       t.SessionID,
+			"topic_label":      t.TopicLabel,
+			"conversation_id":  t.ConversationID,
+			"created_at":       t.CreatedAt.Format(time.RFC3339),
+			"last_activity_at": t.LastActivityAt.Format(time.RFC3339),
+			"is_active":        t.IsActive,
+		})
+	}
+
+	return map[string]any{"threads": threadsSlice}, nil
+}
+
+// handleThreadSwitchMsg switches the active thread for a session.
+func (h *Handler) handleThreadSwitchMsg(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+		ThreadID  string `json:"thread_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if params.ThreadID == "" {
+		return nil, fmt.Errorf("thread_id is required")
+	}
+
+	if err := h.store.SetActiveThread(context.Background(), params.SessionID, params.ThreadID); err != nil {
+		return nil, err
+	}
+
+	// Get the thread to return its details
+	thread, err := h.store.GetThread(context.Background(), params.ThreadID)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"id":          thread.ID,
+		"topic_label": thread.TopicLabel,
+		"is_active":   thread.IsActive,
+	}, nil
+}
+
+// handleThreadCurrentMsg returns the current active thread for a session.
+func (h *Handler) handleThreadCurrentMsg(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	thread, err := h.store.GetActiveThread(context.Background(), params.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if thread == nil {
+		return map[string]any{"thread": nil, "message": "no active thread"}, nil
+	}
+
+	return map[string]any{
+		"thread": map[string]any{
+			"id":               thread.ID,
+			"session_id":       thread.SessionID,
+			"topic_label":      thread.TopicLabel,
+			"conversation_id":  thread.ConversationID,
+			"created_at":       thread.CreatedAt.Format(time.RFC3339),
+			"last_activity_at": thread.LastActivityAt.Format(time.RFC3339),
+			"is_active":        thread.IsActive,
+		},
+	}, nil
+}
+
+// handleThreadDeleteMsg deletes a thread.
+func (h *Handler) handleThreadDeleteMsg(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+		ThreadID  string `json:"thread_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if params.ThreadID == "" {
+		return nil, fmt.Errorf("thread_id is required")
+	}
+
+	if err := h.store.DeleteThread(context.Background(), params.ThreadID); err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"deleted_id": params.ThreadID,
+		"message":    "thread deleted",
+	}, nil
 }
 
 // sendResponse publishes a response to the bus.

@@ -110,6 +110,9 @@ jobs:
       - name: Classifier-eval hardening test (remap + hook classification)
         run: make classifier-eval-hardening-test
 
+      - name: E2E sweep offline regression tests
+        run: make e2e-sweep-selftest
+
   analyzers:
     runs-on: ubuntu-latest
     name: Static Analyzers

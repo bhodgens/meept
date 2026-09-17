@@ -7776,9 +7776,10 @@ func (p *AgentJobProcessor) WithBus(b *bus.MessageBus) *AgentJobProcessor {
 // on its own worker goroutine while absorb() runs on the subscription
 // goroutine, so a mutex guards the map.
 type toolEvidenceCollector struct {
-	mu     sync.Mutex
-	byConv map[string][]map[string]any
-	wg     sync.WaitGroup
+	invocations map[string]map[string]toolInvocation
+	mu          sync.Mutex
+	byConv      map[string][]map[string]any
+	wg          sync.WaitGroup
 }
 
 func newToolEvidenceCollector() *toolEvidenceCollector {
@@ -7788,6 +7789,10 @@ func newToolEvidenceCollector() *toolEvidenceCollector {
 // absorb parses one tool.execution.complete payload and files any
 // evidence entries under the payload's conversation_id.
 func (c *toolEvidenceCollector) absorb(payload json.RawMessage) {
+	var invocation toolInvocation
+	if err := json.Unmarshal(payload, &invocation); err == nil {
+		c.recordInvocation(invocation)
+	}
 	var ev struct {
 		ConversationID string            `json:"conversation_id"`
 		ToolName       string            `json:"tool_name"`
@@ -8189,6 +8194,8 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	// successful file-tool turn yields entries; the run-7 hallucination
 	// (zero tool calls) yields none — exactly the contrast the gate needs.
 	if isStepJob && p.toolEvidence != nil {
+		result["execution_conversation_id"] = conversationID
+		result["tool_invocations"] = p.toolEvidence.drainInvocations(conversationID)
 		if tev := p.toolEvidence.drain(conversationID); len(tev) > 0 {
 			result["tool_evidence"] = tev
 		}

@@ -16,10 +16,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -109,13 +107,4 @@ func writeJSON(path string, v any) error {
 		return fmt.Errorf("write: %w", err)
 	}
 	return nil
-}
-
-// quietLogger keeps the memory package's slog noise out of the eval output.
-func quietLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-}
-
-func normalize(s string) string {
-	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }

@@ -3460,7 +3460,7 @@ func DefaultConfig() *Config {
 		},
 		Session: SessionConfig{
 			Persistence:                  false,
-			Branching:                    true,
+			Branching:                    false,
 			BranchSummaryThreshold:       3,
 			RestoreMessageLimit:          0,
 			BranchesEnabled:              false, // Deprecated: use threads instead
