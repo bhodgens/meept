@@ -1,7 +1,8 @@
 {
   "segments": [
     {
-      "id": "seg-001", "category": "multi-claim",
+      "id": "seg-001",
+      "category": "multi-claim",
       "messages": [
         "user: We run PostgreSQL 14 in production for the orders database. Migrations take about 40 minutes because of the audit triggers.",
         "assistant: Understood. Postgres 14 for orders, 40-minute migration windows due to audit triggers.",
@@ -14,11 +15,14 @@
           "The payments service is written in Go and talks to Stripe",
           "Payments service handles about 1200 requests per second at peak"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-002", "category": "decoy-heavy",
+      "id": "seg-002",
+      "category": "decoy-heavy",
       "messages": [
         "user: Honestly, if I won the lottery I'd probably rewrite the whole thing in Rust, but that's never going to happen.",
         "assistant: Noted as humor — no action taken.",
@@ -28,11 +32,14 @@
       ],
       "gold": {
         "claims": [],
-        "decisions": [], "predictions": [], "decoys": 3
+        "decisions": [],
+        "predictions": [],
+        "decoys": 3
       }
     },
     {
-      "id": "seg-003", "category": "prediction",
+      "id": "seg-003",
+      "category": "prediction",
       "messages": [
         "user: I predict the new caching layer will cut our p99 latency below 200 milliseconds by the end of Q3.",
         "assistant: Logged as a forecast: p99 below 200ms by end of Q3, pending the caching layer rollout.",
@@ -49,7 +56,8 @@
       }
     },
     {
-      "id": "seg-004", "category": "decision",
+      "id": "seg-004",
+      "category": "decision",
       "messages": [
         "user: We've decided to standardize on gRPC for all new internal services going forward. REST stays only for the public API.",
         "assistant: Decision captured: gRPC for new internal services; REST reserved for public API.",
@@ -61,11 +69,13 @@
           "Standardize on gRPC for all new internal services, REST only for public API",
           "Drop the old Python cron jobs, move everything to the Go scheduler by March"
         ],
-        "predictions": [], "decoys": 0
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-005", "category": "decoy-heavy",
+      "id": "seg-005",
+      "category": "decoy-heavy",
       "messages": [
         "user: Ha, my coworker jokes that YAML stands for 'yet another markup lie'. Funny guy.",
         "assistant: That's a joke from your coworker, not a claim of yours.",
@@ -74,11 +84,15 @@
         "user: Thanks, you're a great listener. Anyway what time is it?"
       ],
       "gold": {
-        "claims": [], "decisions": [], "predictions": [], "decoys": 3
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 3
       }
     },
     {
-      "id": "seg-006", "category": "baseline",
+      "id": "seg-006",
+      "category": "baseline",
       "messages": [
         "user: Our CI runs on GitHub Actions with self-hosted ARM runners in the basement rack. The basement runners cost about 30 dollars a month in power."
       ],
@@ -87,11 +101,14 @@
           "CI runs on GitHub Actions with self-hosted ARM runners in the basement rack",
           "Basement runners cost about 30 dollars a month in power"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-007", "category": "dedupe-pair-a",
+      "id": "seg-007",
+      "category": "dedupe-pair-a",
       "pair_with": "seg-008",
       "messages": [
         "user: The billing exporter writes to BigQuery every 15 minutes. If the job fails three times in a row it pages the on-call."
@@ -101,11 +118,14 @@
           "Billing exporter writes to BigQuery every 15 minutes",
           "Three consecutive failures page the on-call"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-008", "category": "dedupe-pair-b",
+      "id": "seg-008",
+      "category": "dedupe-pair-b",
       "pair_with": "seg-007",
       "messages": [
         "user: Like I said before, the billing pipeline syncs to BigQuery on a quarter-hour schedule and the on-call gets paged after the third straight failure."
@@ -115,11 +135,14 @@
           "Billing pipeline syncs to BigQuery every 15 minutes",
           "On-call paged after three straight failures"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-009", "category": "contradiction",
+      "id": "seg-009",
+      "category": "contradiction",
       "messages": [
         "user: Earlier this year I told you the API gateway handles 5k requests per second. That was wrong. Load testing showed it tops out at 2800.",
         "assistant: Correction recorded: gateway ceiling is 2800 rps, not 5000.",
@@ -129,11 +152,14 @@
         "claims": [
           "API gateway tops out at 2800 requests per second under load testing"
         ],
-        "decisions": [], "predictions": [], "decoys": 1
+        "decisions": [],
+        "predictions": [],
+        "decoys": 1
       }
     },
     {
-      "id": "seg-010", "category": "multi-claim",
+      "id": "seg-010",
+      "category": "multi-claim",
       "messages": [
         "user: Our design system is built on Radix primitives with a Tailwind layer on top. We froze the component API last June.",
         "assistant: Captured: Radix + Tailwind design system, component API frozen June.",
@@ -145,11 +171,14 @@
           "Component API was frozen last June",
           "Storybook hosts docs at design.internal.example.com behind the VPN"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-011", "category": "prediction",
+      "id": "seg-011",
+      "category": "prediction",
       "messages": [
         "user: I expect the EU AI Act compliance work to consume most of the platform team's capacity through the summer.",
         "assistant: Forecast noted: EU AI Act work dominates platform team capacity through summer.",
@@ -166,7 +195,8 @@
       }
     },
     {
-      "id": "seg-012", "category": "decoy-heavy",
+      "id": "seg-012",
+      "category": "decoy-heavy",
       "messages": [
         "user: 'Microservices are just distributed monoliths with extra steps,' my old manager used to say. He was mostly joking. Mostly.",
         "assistant: Quoted opinion from a former manager; not your committed view.",
@@ -176,11 +206,14 @@
         "claims": [
           "The user's service boundaries are fine as they are"
         ],
-        "decisions": [], "predictions": [], "decoys": 1
+        "decisions": [],
+        "predictions": [],
+        "decoys": 1
       }
     },
     {
-      "id": "seg-013", "category": "decision",
+      "id": "seg-013",
+      "category": "decision",
       "messages": [
         "user: Leadership decided we're dropping support for Internet Explorer in the next release. Only evergreen browsers from now on.",
         "assistant: Decision: drop IE support next release; evergreen browsers only.",
@@ -192,11 +225,13 @@
           "Drop Internet Explorer support in the next release",
           "Kill the intern debug flag"
         ],
-        "predictions": [], "decoys": 0
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-014", "category": "baseline",
+      "id": "seg-014",
+      "category": "baseline",
       "messages": [
         "user: My home lab runs Proxmox on four nodes. The cluster quorum lives on the QDevice plugged into the office switch."
       ],
@@ -205,11 +240,14 @@
           "Home lab runs Proxmox on four nodes",
           "Cluster quorum lives on a QDevice plugged into the office switch"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-015", "category": "decoy-heavy",
+      "id": "seg-015",
+      "category": "decoy-heavy",
       "messages": [
         "user: Suppose we moved everything to serverless — would that even work? I'm just thinking out loud.",
         "assistant: Hypothetical, no commitment registered.",
@@ -218,11 +256,15 @@
         "user: Anyway I love these chats. What else is new?"
       ],
       "gold": {
-        "claims": [], "decisions": [], "predictions": [], "decoys": 3
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 3
       }
     },
     {
-      "id": "seg-016", "category": "multi-claim",
+      "id": "seg-016",
+      "category": "multi-claim",
       "messages": [
         "user: The etcd cluster on totem nodes runs three members with quorum of two. Backups ship nightly to the NAS at 2am.",
         "assistant: Recorded: 3-member etcd, quorum 2, nightly 2am backups to NAS.",
@@ -234,11 +276,14 @@
           "Backups ship nightly to the NAS at 2am",
           "Restore drills happen quarterly, last one took 50 minutes"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-017", "category": "prediction",
+      "id": "seg-017",
+      "category": "prediction",
       "messages": [
         "user: I predict our GPU prices will drop once the new supply contract kicks in, probably 20 percent cheaper by fall."
       ],
@@ -252,18 +297,23 @@
       }
     },
     {
-      "id": "seg-018", "category": "decoy-heavy",
+      "id": "seg-018",
+      "category": "decoy-heavy",
       "messages": [
         "user: Wouldn't it be hilarious if the prod database password was 'password123'? Obviously it isn't, calm down.",
         "assistant: Joke; no credential discussed.",
         "user: Haha anyway. What's two plus two?"
       ],
       "gold": {
-        "claims": [], "decisions": [], "predictions": [], "decoys": 2
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 2
       }
     },
     {
-      "id": "seg-019", "category": "contradiction",
+      "id": "seg-019",
+      "category": "contradiction",
       "messages": [
         "user: I used to say the data pipeline runs on Flink. Correction: we migrated to Kafka Streams in January. Flink is gone.",
         "assistant: Updated: pipeline is Kafka Streams since January, Flink removed.",
@@ -273,11 +323,14 @@
         "claims": [
           "Data pipeline runs on Kafka Streams since January; Flink was removed"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-020", "category": "decision",
+      "id": "seg-020",
+      "category": "decision",
       "messages": [
         "user: We agreed in the ops review: all new dashboards go in Grafana, no more per-team alerting tools.",
         "assistant: Decision: Grafana for new dashboards; per-team alerting tools retired.",
@@ -289,11 +342,13 @@
           "All new dashboards go in Grafana",
           "PagerDuty stays the single paging system"
         ],
-        "predictions": [], "decoys": 0
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-021", "category": "baseline",
+      "id": "seg-021",
+      "category": "baseline",
       "messages": [
         "user: The meeting notes live in Obsidian under the Work vault, folder 2026, one file per meeting named YYYY-MM-DD."
       ],
@@ -302,11 +357,14 @@
           "Meeting notes live in Obsidian under the Work vault",
           "Files are named YYYY-MM-DD, one per meeting, under the 2026 folder"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-022", "category": "dedupe-pair-a",
+      "id": "seg-022",
+      "category": "dedupe-pair-a",
       "pair_with": "seg-023",
       "messages": [
         "user: The image resizer lambda has a 6 second timeout and it processes about 400 images per minute at peak."
@@ -316,11 +374,14 @@
           "Image resizer lambda has a 6 second timeout",
           "It processes about 400 images per minute at peak"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-023", "category": "dedupe-pair-b",
+      "id": "seg-023",
+      "category": "dedupe-pair-b",
       "pair_with": "seg-022",
       "messages": [
         "user: As mentioned, that resizing function times out at 6 seconds and churns through roughly 400 pictures a minute when busy."
@@ -330,11 +391,14 @@
           "Resizer times out at 6 seconds",
           "Roughly 400 pictures processed per minute at peak"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-024", "category": "decoy-heavy",
+      "id": "seg-024",
+      "category": "decoy-heavy",
       "messages": [
         "user: If I were in charge I'd ban JavaScript, thank god I'm not.",
         "assistant: Joking hypothetical.",
@@ -343,11 +407,15 @@
         "user: Ha. Anyway, ready for lunch?"
       ],
       "gold": {
-        "claims": [], "decisions": [], "predictions": [], "decoys": 3
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 3
       }
     },
     {
-      "id": "seg-025", "category": "multi-claim",
+      "id": "seg-025",
+      "category": "multi-claim",
       "messages": [
         "user: Our monorepo is about 400 thousand lines of Go. The build takes 11 minutes cold and 90 seconds warm with the build cache on the SSD."
       ],
@@ -356,11 +424,14 @@
           "Monorepo is about 400 thousand lines of Go",
           "Cold build takes 11 minutes, warm build 90 seconds with cache on SSD"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-026", "category": "prediction",
+      "id": "seg-026",
+      "category": "prediction",
       "messages": [
         "user: I think the ARM migration will finish by December. Most services build multi-arch already; only the legacy batch jobs remain."
       ],
@@ -376,7 +447,8 @@
       }
     },
     {
-      "id": "seg-027", "category": "decision",
+      "id": "seg-027",
+      "category": "decision",
       "messages": [
         "user: From now on we tag releases only from main. Release branches are dead to us, cut tags directly.",
         "assistant: Decision: tag releases from main only; release branches discontinued.",
@@ -388,11 +460,13 @@
           "Tag releases only from main; release branches discontinued",
           "Changelogs are generated by tooling, not hand-edited"
         ],
-        "predictions": [], "decoys": 0
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-028", "category": "decoy-heavy",
+      "id": "seg-028",
+      "category": "decoy-heavy",
       "messages": [
         "user: Someone on HN said Rust compile times are a dealbreaker. For them maybe, I actually don't mind ours.",
         "assistant: Your view: your Rust compile times are acceptable.",
@@ -403,11 +477,14 @@
         "claims": [
           "The user's Rust compile times are acceptable"
         ],
-        "decisions": [], "predictions": [], "decoys": 2
+        "decisions": [],
+        "predictions": [],
+        "decoys": 2
       }
     },
     {
-      "id": "seg-029", "category": "baseline",
+      "id": "seg-029",
+      "category": "baseline",
       "messages": [
         "user: The WiFi at the office drops when the microwave runs. It's the 2.4GHz band, channel overlap with the kitchen."
       ],
@@ -415,11 +492,14 @@
         "claims": [
           "Office WiFi drops when the microwave runs due to 2.4GHz channel overlap"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-030", "category": "multi-claim",
+      "id": "seg-030",
+      "category": "multi-claim",
       "messages": [
         "user: We keep Terraform state in S3 with DynamoDB locking. The state bucket versioning is on and replicated to a cold region.",
         "assistant: Captured: S3 state + DynamoDB lock, versioning, cross-region replication.",
@@ -431,11 +511,14 @@
           "State bucket versioning is on and replicated to a cold region",
           "Drift detection runs weekly on Sundays"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-031", "category": "contradiction",
+      "id": "seg-031",
+      "category": "contradiction",
       "messages": [
         "user: Earlier I said the cluster runs k3s. Wrong — we moved to vanilla Kubernetes 1.29 in the spring upgrade. k3s is only on the edge boxes now.",
         "assistant: Corrected: control plane is K8s 1.29; k3s remains only on edge nodes."
@@ -445,11 +528,14 @@
           "Cluster runs vanilla Kubernetes 1.29 after spring upgrade",
           "k3s remains only on edge boxes"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-032", "category": "dedupe-pair-a",
+      "id": "seg-032",
+      "category": "dedupe-pair-a",
       "pair_with": "seg-033",
       "messages": [
         "user: The backup verify job runs after each snapshot and checks checksums against the manifest. A mismatch quarantines the file."
@@ -459,11 +545,14 @@
           "Backup verify job runs after each snapshot checking checksums against the manifest",
           "Checksum mismatch quarantines the file"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-033", "category": "dedupe-pair-b",
+      "id": "seg-033",
+      "category": "dedupe-pair-b",
       "pair_with": "seg-032",
       "messages": [
         "user: Like I mentioned, every snapshot gets a verification pass comparing hashes to the manifest, and bad files get quarantined."
@@ -473,11 +562,14 @@
           "Every snapshot gets verification comparing hashes to the manifest",
           "Bad files are quarantined"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-034", "category": "decoy-heavy",
+      "id": "seg-034",
+      "category": "decoy-heavy",
       "messages": [
         "user: In a perfect world we'd all write tests first, but come on, nobody actually does that here.",
         "assistant: Rhetorical complaint, not a factual claim.",
@@ -486,11 +578,15 @@
         "user: OK fine, back to work. What's next on the list?"
       ],
       "gold": {
-        "claims": [], "decisions": [], "predictions": [], "decoys": 3
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 3
       }
     },
     {
-      "id": "seg-035", "category": "prediction",
+      "id": "seg-035",
+      "category": "prediction",
       "messages": [
         "user: I'd wager the new hire ramps up in about three weeks given her Rust background. Faster than the last one, who took two months."
       ],
@@ -506,7 +602,8 @@
       }
     },
     {
-      "id": "seg-036", "category": "multi-claim",
+      "id": "seg-036",
+      "category": "multi-claim",
       "messages": [
         "user: The audio pipeline uses PipeWire now instead of PulseAudio, and the sample rate is locked at 48kHz to avoid crackling in the VMs."
       ],
@@ -515,11 +612,14 @@
           "Audio pipeline uses PipeWire instead of PulseAudio",
           "Sample rate is locked at 48kHz to avoid crackling in VMs"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-037", "category": "decision",
+      "id": "seg-037",
+      "category": "decision",
       "messages": [
         "user: We decided to keep the monolith for the storefront and only extract the search service. No further decomposition this year.",
         "assistant: Decision: storefront stays monolithic; only search is extracted this year.",
@@ -531,11 +631,13 @@
           "Keep the storefront monolith, extract only the search service this year",
           "Search service will be Typesense, not Elasticsearch"
         ],
-        "predictions": [], "decoys": 0
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-038", "category": "decoy-heavy",
+      "id": "seg-038",
+      "category": "decoy-heavy",
       "messages": [
         "user: My uncle swears by that crypto thing where you 'store everything on-chain'. I smile and nod.",
         "assistant: Uncle's view, not yours.",
@@ -544,11 +646,15 @@
         "user: Ha. OK, real question: does the backup NAS show up in the dashboard?"
       ],
       "gold": {
-        "claims": [], "decisions": [], "predictions": [], "decoys": 3
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 3
       }
     },
     {
-      "id": "seg-039", "category": "baseline",
+      "id": "seg-039",
+      "category": "baseline",
       "messages": [
         "user: Our status page is hosted on a separate provider so it stays up when the main site is down. That split saved us twice last year."
       ],
@@ -557,11 +663,14 @@
           "Status page is hosted on a separate provider from the main site",
           "The split saved them twice last year"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-040", "category": "contradiction",
+      "id": "seg-040",
+      "category": "contradiction",
       "messages": [
         "user: Update on the port numbers I gave you: the metrics port is 9102, not 9012. I mixed up the digits earlier. Everything else stands."
       ],
@@ -569,11 +678,14 @@
         "claims": [
           "Metrics port is 9102, not 9012"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-041", "category": "multi-claim",
+      "id": "seg-041",
+      "category": "multi-claim",
       "messages": [
         "user: The on-call rotation is weekly, handoff Fridays at 5pm. Escalation goes page lead after 15 minutes unanswered, then director after 30."
       ],
@@ -582,11 +694,14 @@
           "On-call rotation is weekly with handoff Fridays at 5pm",
           "Escalation pages the lead after 15 minutes unanswered, director after 30"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-042", "category": "prediction",
+      "id": "seg-042",
+      "category": "prediction",
       "messages": [
         "user: Mark my words, that vendor will be acquired within a year. Their last two release notes were pure cost-cutting."
       ],
@@ -602,7 +717,8 @@
       }
     },
     {
-      "id": "seg-043", "category": "decoy-heavy",
+      "id": "seg-043",
+      "category": "decoy-heavy",
       "messages": [
         "user: Sure, and maybe I'll win the DevOps lottery and get a config file that documents itself. One can dream.",
         "assistant: Sarcasm; no commitment.",
@@ -611,11 +727,15 @@
         "user: She really is the senior engineer of the house."
       ],
       "gold": {
-        "claims": [], "decisions": [], "predictions": [], "decoys": 3
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 3
       }
     },
     {
-      "id": "seg-044", "category": "baseline",
+      "id": "seg-044",
+      "category": "baseline",
       "messages": [
         "user: I use Karabiner to remap caps lock to escape and control depending on whether it's held or tapped. Vim habits die hard."
       ],
@@ -623,11 +743,14 @@
         "claims": [
           "Caps lock is remapped via Karabiner: escape on tap, control on hold"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-045", "category": "multi-claim",
+      "id": "seg-045",
+      "category": "multi-claim",
       "messages": [
         "user: The warehouse ROS robots report battery over MQTT every 10 seconds. Below 20 percent they dock automatically and the scheduler reroutes their tasks."
       ],
@@ -636,11 +759,14 @@
           "Warehouse robots report battery over MQTT every 10 seconds",
           "Below 20 percent battery they dock automatically and tasks get rerouted"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-046", "category": "decision",
+      "id": "seg-046",
+      "category": "decision",
       "messages": [
         "user: Ops decision: we're freezing infrastructure changes during the holiday code-break, December 20 through January 5.",
         "assistant: Decision: infra freeze December 20 through January 5."
@@ -650,11 +776,13 @@
         "decisions": [
           "Infrastructure changes frozen December 20 through January 5"
         ],
-        "predictions": [], "decoys": 0
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-047", "category": "decoy-heavy",
+      "id": "seg-047",
+      "category": "decoy-heavy",
       "messages": [
         "user: A guy on Twitch said NAT traversal is impossible without a relay. He's wrong but he was very confident.",
         "assistant: Streamer's claim, not yours; you disagree.",
@@ -666,11 +794,14 @@
         "claims": [
           "The user disagrees that NAT traversal requires a relay"
         ],
-        "decisions": [], "predictions": [], "decoys": 2
+        "decisions": [],
+        "predictions": [],
+        "decoys": 2
       }
     },
     {
-      "id": "seg-048", "category": "multi-claim",
+      "id": "seg-048",
+      "category": "multi-claim",
       "messages": [
         "user: The docs site builds with Hugo and deploys on Netlify. Preview deploys get a comment on the PR with the link within a minute."
       ],
@@ -679,11 +810,14 @@
           "Docs site builds with Hugo and deploys on Netlify",
           "Preview deploys post a PR comment with the link within a minute"
         ],
-        "decisions": [], "predictions": [], "decoys": 0
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0
       }
     },
     {
-      "id": "seg-049", "category": "prediction",
+      "id": "seg-049",
+      "category": "prediction",
       "messages": [
         "user: I expect the RISC-V dev boards to ship in Q1. The pre-order page said January but those always slip, so realistically March."
       ],
@@ -699,7 +833,8 @@
       }
     },
     {
-      "id": "seg-050", "category": "dedupe-pair-a",
+      "id": "seg-050",
+      "category": "dedupe-pair-a",
       "pair_with": "seg-051",
       "messages": [
         "user: The anomaly detector retrain runs nightly at 3am and takes about 25 minutes on the GPU box.",
@@ -710,14 +845,17 @@
           "Anomaly detector retrain runs nightly at 3am on the GPU box",
           "Retrain takes about 25 minutes"
         ],
-        "decisions": [], "predictions": [], "decoys": 0,
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
         "lessons": [
           "The anomaly detector retrain must finish before 6am report generation or the report shows stale scores"
         ]
       }
     },
     {
-      "id": "seg-051", "category": "dedupe-pair-b",
+      "id": "seg-051",
+      "category": "dedupe-pair-b",
       "pair_with": "seg-050",
       "messages": [
         "user: Reiterating the constraint: the 3am nightly retrain (about 25 min) has to be done before report generation at 6, otherwise the report carries yesterday's scores."
@@ -727,14 +865,17 @@
           "Nightly retrain at 3am takes about 25 minutes",
           "Retrain must complete before 6am report generation"
         ],
-        "decisions": [], "predictions": [], "decoys": 0,
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
         "lessons": [
           "The nightly retrain must complete before the 6am report or the report is stale"
         ]
       }
     },
     {
-      "id": "seg-052", "category": "lessons",
+      "id": "seg-052",
+      "category": "lessons",
       "messages": [
         "user: Remember this rule: never run migrations on Friday afternoons at this company. We got burned twice doing that with the audit triggers.",
         "assistant: Lesson captured: no Friday-afternoon migrations due to audit-trigger risk.",
@@ -742,7 +883,9 @@
       ],
       "gold": {
         "claims": [],
-        "decisions": [], "predictions": [], "decoys": 0,
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
         "lessons": [
           "Never run migrations on Friday afternoons because audit triggers caused incidents twice",
           "Always check replica lag before deploys, not after"
@@ -750,7 +893,8 @@
       }
     },
     {
-      "id": "seg-053", "category": "lessons",
+      "id": "seg-053",
+      "category": "lessons",
       "messages": [
         "user: Lesson learned the hard way: pin the base image digest in every Dockerfile. A floating tag broke our builds for a whole day when upstream pushed a breaking change.",
         "assistant: Lesson: pin base images by digest; floating tags caused a day-long build outage.",
@@ -758,9 +902,210 @@
       ],
       "gold": {
         "claims": [],
-        "decisions": [], "predictions": [], "decoys": 0,
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
         "lessons": [
           "Pin base image digests in Dockerfiles because a floating tag broke builds for a day"
+        ]
+      }
+    },
+    {
+      "id": "seg-054",
+      "category": "lessons",
+      "messages": [
+        "user: Remember: always flush the batch writer before you snapshot the shard map, or the snapshot will reference rows the writer still holds in memory.",
+        "assistant: Lesson captured: flush the batch writer before snapshotting the shard map.",
+        "user: Right. It's the kind of thing you only find out after a restore doesn't come back clean."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Always flush the batch writer before snapshotting the shard map or the snapshot will be inconsistent"
+        ]
+      }
+    },
+    {
+      "id": "seg-055",
+      "category": "lessons",
+      "messages": [
+        "user: We got absolutely burned in March when the CDN cache purge job raced the origin redeploys — customers saw half-stale pages for two hours. Ever since then we always purge the CDN after the health checks go green, never during the rollout.",
+        "assistant: Noted: CDN purge ordering was the root cause of the March staleness incident.",
+        "user: Yeah, it cost us a postmortem and a very unhappy enterprise account."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Purge the CDN only after redeploy health checks pass, never during the rollout"
+        ]
+      }
+    },
+    {
+      "id": "seg-056",
+      "category": "lessons",
+      "messages": [
+        "user: The pager rotation taught me something last quarter. We had the webhook retry loop hammering the billing service every 30 seconds with no jitter, and when billing slowed down all the retries landed in the same window and took it fully offline. The retry storm wasn't the bug — it was the amplifier. So the principle I keep coming back to is: retries without exponential backoff and jitter don't recover from an outage, they multiply it.",
+        "assistant: That's a good abstraction from the billing incident.",
+        "user: It applies way beyond billing too. Any service with a queue behind it."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Retries need exponential backoff and jitter or they amplify outages instead of recovering from them"
+        ]
+      }
+    },
+    {
+      "id": "seg-057",
+      "category": "lessons",
+      "messages": [
+        "user: Log ingestion was silently dropping events for a week before anyone noticed. Turned out the shipper's flush interval was set to 10 minutes, so any crash lost up to ten minutes of events, and our disk-watermark alert only fired at 90%.",
+        "assistant: What did you change?",
+        "user: Lowered the flush interval to 60 seconds and moved the watermark alert to 75%. Since then we've caught every backlog incident early."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Keep the log shipper flush interval at or under 60 seconds and alert on the disk watermark at 75%"
+        ]
+      }
+    },
+    {
+      "id": "seg-058",
+      "category": "lessons",
+      "messages": [
+        "user: New hard rule for the platform team: never deploy to production directly from a feature branch, even for hotfixes. The May incident where a hotfix branch bypassed the release train shipped an unmerged refactor that reverted two other teams' changes.",
+        "assistant: Understood — production deploys only from the release branch.",
+        "user: No exceptions. The branch protections are being updated today."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Never deploy to production from a feature branch, even for hotfixes, because unmerged changes can revert other teams' work"
+        ]
+      }
+    },
+    {
+      "id": "seg-059",
+      "category": "lessons",
+      "messages": [
+        "user: Pro tip for the on-call doc: when a Postgres failover happens, memory 104 has the runbook, but the key thing we learned from the October incident is to always wait for replication lag to reach zero before re-pointing the app's connection pool — memory 205 has the exact query we use to check it.",
+        "assistant: Captured: check replication lag before re-pointing the pool after failover.",
+        "user: Otherwise the pool reconnects and immediately reads stale rows. Ask the finance team how we know."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Wait for Postgres replication lag to reach zero before re-pointing the application connection pool after a failover"
+        ]
+      }
+    },
+    {
+      "id": "seg-060",
+      "category": "lessons",
+      "messages": [
+        "user: We stopped putting business logic in database triggers after the order-state trigger deadlocked under load. The rule now: triggers may validate and reject, but any state transition that fires notifications or external calls belongs in the application layer where it can be retried and observed.",
+        "assistant: Lesson: keep side-effecting state transitions out of database triggers.",
+        "user: Exactly. Validation in the trigger, side effects in the app."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Keep side-effecting state transitions in the application layer, not in database triggers, so they can be retried and observed"
+        ]
+      }
+    },
+    {
+      "id": "seg-061",
+      "category": "lessons",
+      "messages": [
+        "user: Remember: rate-limit the report-export endpoint at 5 requests per minute per tenant before you even think about raising the 30-second request timeout. The export worker queue backs up way faster than the timeout protects it.",
+        "assistant: Lesson captured: export endpoint rate limit of 5/min/tenant takes priority over timeout tuning.",
+        "user: Yes — the queue is the failure mode, not the timeout."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Rate-limit the report-export endpoint to 5 requests per minute per tenant; the worker queue backs up faster than the 30-second timeout protects it"
+        ]
+      }
+    },
+    {
+      "id": "seg-062",
+      "category": "lessons",
+      "messages": [
+        "user: Two things from the incident review. First: if a canary deploy's error budget burn exceeds 2x baseline for 10 minutes, roll back automatically — no human in the loop, that's what the automation is for. Second: keep canary traffic at 5% for at least one full daily traffic cycle before promoting, because our traffic shape at 2am looks nothing like noon.",
+        "assistant: Two lessons captured: auto-rollback on 2x error-budget burn over 10 minutes, and canary promotion after a full daily cycle at 5% traffic.",
+        "user: That's the whole policy, put it in the team handbook."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Roll back a canary automatically when error-budget burn exceeds 2x baseline for 10 minutes",
+          "Hold canary traffic at 5% for at least one full daily traffic cycle before promoting"
+        ]
+      }
+    },
+    {
+      "id": "seg-063",
+      "category": "lessons",
+      "messages": [
+        "user: Never store JWT signing keys in the same secrets namespace as the service's runtime config. We caught a deploy script last month that env-dumped the entire namespace into its logs — including the signing key. Nothing leaked, but it was one careless `set -x` away from being an incident.",
+        "assistant: Lesson: isolate signing keys from runtime config namespaces.",
+        "user: And rotate anything that was ever co-located with verbose scripts."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Never store JWT signing keys in the same secrets namespace as runtime config because verbose deploy scripts can dump the whole namespace into logs"
+        ]
+      }
+    },
+    {
+      "id": "seg-064",
+      "category": "lessons",
+      "messages": [
+        "user: The load generator config taught us the hard way: closed-loop concurrency of 500 with no think time is not a load test, it's a denial-of-service attack on ourselves. Real users pause. Cap synthetic concurrency at 150 and add 2-5 seconds of randomized think time between requests, or the results are meaningless AND the staging environment falls over.",
+        "assistant: Lesson: realistic load tests need think time and bounded concurrency.",
+        "user: We re-ran it that way and staging survived, for what it's worth."
+      ],
+      "gold": {
+        "claims": [],
+        "decisions": [],
+        "predictions": [],
+        "decoys": 0,
+        "lessons": [
+          "Cap synthetic load-test concurrency at 150 with 2-5 seconds of randomized think time; closed-loop no-think-time runs are unrealistic and overwhelm staging"
         ]
       }
     }

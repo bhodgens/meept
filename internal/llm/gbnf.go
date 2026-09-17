@@ -438,3 +438,36 @@ func AmbientCandidateGrammar() string {
 	fmt.Fprintf(&b, "candidate-category ::= %s\n", strings.Join(catAlts, " | "))
 	return b.String()
 }
+
+// LessonGrammar returns the GBNF grammar forcing the distill lesson JSON
+// object — exactly the shape internal/memory's DecodeLesson accepts as its
+// primary contract (a single bare object, no wrapper). Declared keys:
+//
+//	principle     string  (required — the distilled rule itself)
+//	because       string  (optional — one-sentence rationale)
+//	evidence_ids  array of quoted strings (optional)
+//
+// The system prompt caps principle at 280 chars; GBNF cannot count
+// characters, so the cap stays a post-parse check in DecodeLesson. Pair with
+// WithRawGrammar to attach it as payload["grammar"] (llama.cpp wire format,
+// local endpoints only). Never returns an empty string.
+func LessonGrammar() string {
+	var b strings.Builder
+	b.WriteString("ws ::= [ \\t\\n]*\n")
+	b.WriteString("string ::= \"\\\"\" char* \"\\\"\"\n")
+	b.WriteString("char ::= [^\"\\\\]\n")
+	b.WriteString("string-array ::= \"[\" ws (string (\",\" ws string)*)? ws \"]\"\n")
+	// Lesson rule: one object with the declared keys in a fixed order
+	// (required key first), ws between every token. Optional keys are
+	// listed after the required one, each alternative a complete tail of
+	// the member sequence. Mirrors AmbientCandidateGrammar's member layout:
+	//
+	//   Member:  "\"key\"" ws ":" ws <valueRule>
+	//   Sep:     ws "," ws
+	//   Envelope:"{" ws <members> ws "}"
+	fmt.Fprintf(&b, "lesson ::= \"{\" ws principle-member ws evidence-member ws because-member ws \"}\"\n")
+	fmt.Fprintf(&b, "principle-member ::= \"\\\"principle\\\"\" ws \":\" ws string\n")
+	fmt.Fprintf(&b, "evidence-member ::= \",\" ws \"\\\"evidence_ids\\\"\" ws \":\" ws string-array\n")
+	fmt.Fprintf(&b, "because-member ::= \",\" ws \"\\\"because\\\"\" ws \":\" ws string\n")
+	return b.String()
+}

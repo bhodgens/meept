@@ -633,7 +633,7 @@ func (s *llmDistillSummarizer) SummarizeForDistill(ctx context.Context, kind str
 	resp, err := s.client.Chat(ctx, []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: sys},
 		{Role: llm.RoleUser, Content: sb.String()},
-	}, llm.WithMaxTokens(500), llm.WithTemperature(0.2))
+	}, llm.WithMaxTokens(500), llm.WithTemperature(0.2), llm.WithRawGrammar(llm.LessonGrammar()))
 	if err != nil {
 		return "", fmt.Errorf("distill chat: %w", err)
 	}
