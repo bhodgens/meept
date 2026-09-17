@@ -209,7 +209,9 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
         child: Stack(
           children: [
             Positioned.fill(
-              child: chatState.messages.isEmpty
+              child: chatState.messages.isEmpty &&
+                          !chatState.isAgentProcessing &&
+                          chatState.pendingTurns.isEmpty
                   ? (chatState.isLoading
                         ? const _SessionLoadingPlaceholder()
                         : const MessagePlaceholder())
@@ -269,6 +271,25 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                           // text as a live preview bubble instead of a bare
                           // progress line.
                           final progress = chatState.currentProgress;
+                          // Async pending-turn states (leaf 05): one row per
+                          // tracked turn — running / stalled / parked.
+                          if (chatState.pendingTurns.isNotEmpty) {
+                            return AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 150),
+                              switchInCurve: Curves.easeIn,
+                              switchOutCurve: Curves.easeOut,
+                              child: Column(
+                                key: const ValueKey('pending-turns'),
+                                children: [
+                                  for (final turn in chatState.pendingTurns.values)
+                                    PendingTurnIndicator(
+                                      key: ValueKey('pending-${turn.turnId}'),
+                                      turn: turn,
+                                    ),
+                                ],
+                              ),
+                            );
+                          }
                           if (progress != null &&
                               progress.stage == 'streaming' &&
                               (progress.textSoFar?.isNotEmpty ?? false)) {
@@ -618,5 +639,66 @@ class _ThinkingIndicatorState extends State<_ThinkingIndicator> {
         ],
       ),
     );
+  }
+}
+
+/// Per-turn async state row (async-turn-migration leaf 05): renders the
+/// pending / progress / stalled / parked state of one submitted turn.
+/// Lowercase labels; the parked (quota) state deliberately uses progress
+/// styling, never error styling — the turn will resume automatically.
+class PendingTurnIndicator extends StatelessWidget {
+  final PendingTurn turn;
+
+  const PendingTurnIndicator({super.key, required this.turn});
+
+  @override
+  Widget build(BuildContext context) {
+    final isStalled = turn.status == PendingTurnStatus.stalled;
+    final isParked = turn.status == PendingTurnStatus.parked;
+    final color = isParked
+        ? CyberpunkColors.orangePrimary
+        : isStalled
+        ? CyberpunkColors.yellowWarning
+        : CyberpunkColors.lightGray;
+
+    return Padding(
+      key: ValueKey('pending-${turn.turnId}'),
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                CyberpunkColors.orangePrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _label.toLowerCase(),
+              style: CyberpunkTypography.bodySmall.copyWith(color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String get _label {
+    switch (turn.status) {
+      case PendingTurnStatus.pending:
+        return 'running turn …';
+      case PendingTurnStatus.progress:
+        return turn.progressText.isEmpty ? 'running turn …' : turn.progressText;
+      case PendingTurnStatus.stalled:
+      case PendingTurnStatus.parked:
+        return turn.progressText;
+      case PendingTurnStatus.terminal:
+        return '';
+    }
   }
 }

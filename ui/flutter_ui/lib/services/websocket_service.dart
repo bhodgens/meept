@@ -688,6 +688,51 @@ class WebSocketService {
     });
   }
 
+  /// Subscribe to turn terminal events for a session (async-turn-migration
+  /// leaf 05, Task 2).
+  ///
+  /// The daemon relays each chat turn's final outcome on the `turn.terminal`
+  /// bus topic; the WS classifier labels those frames `agent_progress`
+  /// (internal/comm/http/server.go transformBusEventToWS: `turn.*` prefix).
+  /// A terminal frame is identified by payload shape — it carries BOTH
+  /// `turn_id` AND `handler_case`; ordinary progress events carry neither.
+  ///
+  /// The session filter mirrors [subscribeToAgentProgress]: server-side
+  //  `subscribe` with `channel: 'progress'` is shared, so the client-side
+  //  `where` here re-checks `session_id` exactly like the existing filter
+  //  (falling back to `conversation_id` like the daemon's own
+  //  session→conversation correlation, which never reaches the client —
+  //  the client keys turns by session).
+  Stream<Map<String, dynamic>> subscribeToTurnTerminal(String sessionId) {
+    _progressSubscriptions[sessionId] = SessionSubscription(sessionId);
+    if (isConnected) {
+      send({
+        'type': 'subscribe',
+        'channel': 'progress',
+        'session_id': sessionId,
+      });
+    }
+
+    return _messageSubject.stream.where((m) {
+      final type = m['type'] as String?;
+      if (type != 'agent_progress') return false;
+      final sid = m['session_id'] as String?;
+      if (sid != sessionId) return false;
+      return isTurnTerminalPayload(m);
+    });
+  }
+
+  /// Unsubscribe from turn terminal updates for a session.
+  void unsubscribeFromTurnTerminal(String sessionId) {
+    unsubscribeFromAgentProgress(sessionId);
+  }
+
+  /// Typed turn-terminal stream (leaf 05 interface contract): same source
+  /// as [subscribeToTurnTerminal] with each frame parsed into a
+  /// [TurnTerminalEvent].
+  Stream<TurnTerminalEvent> turnTerminalStream(String sessionId) =>
+      subscribeToTurnTerminal(sessionId).map(TurnTerminalEvent.fromParse);
+
   /// Dispose all resources
   void dispose() {
     disconnect();
@@ -783,4 +828,58 @@ extension _SafeAdd<T> on Subject<T> {
 class SessionSubscription {
   final String sessionId;
   const SessionSubscription(this.sessionId);
+}
+
+/// Parsed `turn.terminal` relay (async-turn-migration leaf 05, Task 2).
+///
+/// Arrives as a WS frame classified `agent_progress` whose payload carries
+/// the frozen Plan-1 Contract 1 key set: `turn_id`, `conversation_id`,
+/// `session_id`, `status`, `reply`, `error`, `duration_ms` (+ the
+/// `handler_case` provenance key this client keys on).
+class TurnTerminalEvent {
+  /// Statuses: completed | failed | timeout | parked (CLOSED set).
+  static const statusCompleted = 'completed';
+  static const statusFailed = 'failed';
+  static const statusTimeout = 'timeout';
+  static const statusParked = 'parked';
+
+  final String turnId;
+  final String conversationId;
+  final String sessionId;
+  final String status;
+  final String reply;
+  final String error;
+  final int durationMs;
+
+  const TurnTerminalEvent({
+    required this.turnId,
+    required this.conversationId,
+    required this.sessionId,
+    required this.status,
+    this.reply = '',
+    this.error = '',
+    this.durationMs = 0,
+  });
+
+  factory TurnTerminalEvent.fromParse(Map<String, dynamic> json) {
+    return TurnTerminalEvent(
+      turnId: json['turn_id'] as String? ?? '',
+      conversationId: json['conversation_id'] as String? ?? '',
+      sessionId: json['session_id'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      reply: json['reply'] as String? ?? '',
+      error: json['error'] as String? ?? '',
+      durationMs: (json['duration_ms'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// Whether a (flattened) WS message map is a turn.terminal relay rather
+/// than an ordinary progress event. Terminal frames are identified by
+/// payload shape: `turn_id` AND `handler_case` present and non-empty.
+/// Ordinary progress events (agent.progress synthesizer) carry neither.
+bool isTurnTerminalPayload(Map<String, dynamic> m) {
+  final turnId = m['turn_id'];
+  final handlerCase = m['handler_case'];
+  return turnId is String && turnId.isNotEmpty && handlerCase is String && handlerCase.isNotEmpty;
 }

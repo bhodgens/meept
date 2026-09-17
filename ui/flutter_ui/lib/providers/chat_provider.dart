@@ -8,7 +8,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/sdk_client.dart';
-import '../services/websocket_service.dart';
+import '../services/websocket_service.dart' show WebSocketService, TurnTerminalEvent;
 import 'providers.dart'; // exports tts_provider.dart
 
 /// Detect a phase-1 destructive-action confirmation request in a WebSocket
@@ -123,6 +123,12 @@ Map<String, dynamic>? _tryParseConfirmationJson(String text) {
 /// Maximum number of messages to keep in memory
 const int _maxMessages = 500;
 
+/// Liveness timeout for pending async turns (async-turn-migration leaf 05):
+/// a pending turn with no terminal event for this long is marked stalled.
+/// Stalled is NOT terminal — a late turn.terminal event still renders the
+/// reply and clears the stalled state. Parity with the TUI leaf.
+const Duration kTurnLivenessTimeout = Duration(seconds: 120);
+
 const _unset = Object();
 const _progressUnset = Object();
 const _confirmUnset = Object();
@@ -130,6 +136,52 @@ const _thinkingUnset = Object();
 
 /// Send endpoint type — distinct route for normal, steer, and follow-up messages.
 enum _SendEndpoint { normal, steer, followUp }
+
+/// Lifecycle state of a submitted async turn (leaf 05 Task 3):
+/// pending → progress → terminal. `stalled` and `parked` are overlays,
+/// not terminal states — a late terminal event still resolves the turn.
+enum PendingTurnStatus { pending, progress, stalled, parked, terminal }
+
+/// A submitted turn tracked from submit-ack to terminal event.
+class PendingTurn {
+  final String turnId;
+  final String conversationId;
+  final String sessionId;
+  final DateTime startedAt;
+  final DateTime lastProgressAt;
+  final PendingTurnStatus status;
+
+  /// Progress text from the latest agent_progress event (status=progress),
+  /// the stalled label (status=stalled), or the parked reason
+  /// (status=parked). Empty for pending/terminal.
+  final String progressText;
+
+  const PendingTurn({
+    required this.turnId,
+    required this.conversationId,
+    required this.sessionId,
+    required this.startedAt,
+    required this.lastProgressAt,
+    this.status = PendingTurnStatus.pending,
+    this.progressText = '',
+  });
+
+  PendingTurn copyWith({
+    PendingTurnStatus? status,
+    String? progressText,
+    DateTime? lastProgressAt,
+  }) {
+    return PendingTurn(
+      turnId: turnId,
+      conversationId: conversationId,
+      sessionId: sessionId,
+      startedAt: startedAt,
+      lastProgressAt: lastProgressAt ?? this.lastProgressAt,
+      status: status ?? this.status,
+      progressText: progressText ?? this.progressText,
+    );
+  }
+}
 
 /// State for the chat provider
 class ChatState {
@@ -156,6 +208,16 @@ class ChatState {
   /// calls [ChatNotifier.resolveConfirmation] to confirm or decline.
   final Map<String, dynamic>? pendingConfirmation;
 
+  /// Submitted turns still awaiting their terminal event, keyed by turn_id
+  /// (async-turn-migration leaf 05). Concurrent turns track independently.
+  final Map<String, PendingTurn> pendingTurns;
+
+  /// Count of late failed turns that landed while the user was looking at a
+  /// DIFFERENT conversation (leaf 05 Task 4). The sessions list renders a
+  /// badge so the user discovers the failure contextually. Reset when this
+  /// session's chat view is opened.
+  final int lateFailureCount;
+
   const ChatState({
     this.messages = const [],
     this.isLoading = false,
@@ -164,6 +226,8 @@ class ChatState {
     this.currentProgress,
     this.thinkingStartedAt,
     this.pendingConfirmation,
+    this.pendingTurns = const {},
+    this.lateFailureCount = 0,
   });
 
   ChatState copyWith({
@@ -174,6 +238,8 @@ class ChatState {
     Object? currentProgress = _progressUnset,
     Object? pendingConfirmation = _confirmUnset,
     Object? thinkingStartedAt = _thinkingUnset,
+    Map<String, PendingTurn>? pendingTurns,
+    int? lateFailureCount,
   }) {
     // Limit messages to prevent memory leaks
     List<ChatMessage> limitedMessages = messages ?? this.messages;
@@ -197,6 +263,8 @@ class ChatState {
       thinkingStartedAt: identical(thinkingStartedAt, _thinkingUnset)
           ? this.thinkingStartedAt
           : thinkingStartedAt as DateTime?,
+      pendingTurns: pendingTurns ?? this.pendingTurns,
+      lateFailureCount: lateFailureCount ?? this.lateFailureCount,
     );
   }
 }
@@ -224,6 +292,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
   final String sessionId;
   StreamSubscription<Map<String, dynamic>>? _wsChatSubscription;
   StreamSubscription<Map<String, dynamic>>? _progressSubscription;
+  StreamSubscription<Map<String, dynamic>>? _turnTerminalSubscription;
+
+  /// Per-pending-turn liveness timers (leaf 05): fire once per turn after
+  /// [kTurnLivenessTimeout] to mark the turn stalled (NOT terminal).
+  final Map<String, Timer> _livenessTimers = {};
   int _loadGeneration = 0;
 
   /// Prevents duplicate message sends from rapid button taps
@@ -348,6 +421,281 @@ class ChatNotifier extends StateNotifier<ChatState> {
           final progress = AgentProgress.fromJson(message);
           state = state.copyWith(currentProgress: progress);
         });
+
+    // Subscribe to turn.terminal relays for this session
+    // (async-turn-migration leaf 05). Terminal frames arrive classified as
+    // agent_progress; the subscription filters them by payload shape.
+    _turnTerminalSubscription = websocket
+        .subscribeToTurnTerminal(sessionId)
+        .listen((message) {
+          if (_disposed) return;
+          _handleTurnTerminal(TurnTerminalEvent.fromParse(message));
+        });
+  }
+
+  /// Handle a turn.terminal relay for a tracked pending turn (leaf 05
+  /// Tasks 3/4): render the reply or error bubble, clear the pending-turn
+  /// entry and its liveness timer, and bump the late-failure indicator when
+  /// the failure landed on a conversation the user has navigated away from.
+  void _handleTurnTerminal(TurnTerminalEvent event) {
+    final turn = state.pendingTurns[event.turnId];
+    // Foreign/untracked turn: not ours to resolve.
+    if (turn == null && event.status != TurnTerminalEvent.statusParked) {
+      return;
+    }
+    final turns = Map<String, PendingTurn>.from(state.pendingTurns);
+    _cancelLivenessTimer(event.turnId);
+
+    // Parked (quota) turns are NOT resolved: the daemon will resume the
+    // turn automatically and a later terminal event will arrive. Downgrade
+    // the pending entry to the parked state with honest, non-error text.
+    if (event.status == TurnTerminalEvent.statusParked) {
+      final parked = turn?.copyWith(
+        status: PendingTurnStatus.parked,
+        progressText: 'waiting for provider quota — will resume automatically',
+      );
+      if (parked != null) {
+        turns[event.turnId] = parked;
+        state = state.copyWith(pendingTurns: turns);
+      }
+      return;
+    }
+
+    if (turn == null) return;
+    turns.remove(event.turnId);
+
+    switch (event.status) {
+      case TurnTerminalEvent.statusFailed:
+      case TurnTerminalEvent.statusTimeout:
+        // Error bubble with the daemon's error text (timeout falls back to
+        // a fixed sentence when the daemon sent no error field).
+        final errorText = event.error.isNotEmpty
+            ? event.error
+            : 'turn failed: ${event.status}';
+        _appendErrorBubble(errorText);
+        // The failure may have landed minutes later while the user views a
+        // different conversation — bump the session's discoverable badge.
+        state = state.copyWith(
+          lateFailureCount: state.lateFailureCount + 1,
+          pendingTurns: turns,
+          isAgentProcessing: turns.isEmpty ? false : state.isAgentProcessing,
+          thinkingStartedAt: turns.isEmpty ? null : state.thinkingStartedAt,
+        );
+        return;
+      case TurnTerminalEvent.statusCompleted:
+        // Render the reply as an assistant bubble unless the reply already
+        // arrived via the regular chat_message WS push (dedupe by content
+        // against the most recent assistant bubble).
+        if (event.reply.isNotEmpty && !_lastAssistantContentEquals(event.reply)) {
+          final reply = ChatMessage(
+            id: 'turn_${event.turnId}',
+            role: 'assistant',
+            content: event.reply,
+            timestamp: DateTime.now(),
+            sessionId: sessionId,
+          );
+          final newMessages = [...state.messages, reply];
+          ttsNotifier.speak(event.reply);
+          state = state.copyWith(
+            messages: newMessages,
+            pendingTurns: turns,
+            isAgentProcessing: turns.isEmpty ? false : state.isAgentProcessing,
+            thinkingStartedAt: turns.isEmpty ? null : state.thinkingStartedAt,
+          );
+          return;
+        }
+        break;
+      default:
+        break;
+    }
+
+    state = state.copyWith(
+      pendingTurns: turns,
+      isAgentProcessing: turns.isEmpty ? false : state.isAgentProcessing,
+      thinkingStartedAt: turns.isEmpty ? null : state.thinkingStartedAt,
+    );
+  }
+
+  /// True when the most recent assistant message already carries [content]
+  /// (the reply landed via the regular chat_message WS push before the
+  /// terminal event; rendering the terminal reply too would duplicate it).
+  bool _lastAssistantContentEquals(String content) {
+    for (final m in state.messages.reversed) {
+      if (m.role == 'assistant') return m.content == content;
+      if (m.role == 'user') return false;
+    }
+    return false;
+  }
+
+  /// Append a system error bubble and surface the text in the error slot.
+  void _appendErrorBubble(String errorText) {
+    final errMessage = ChatMessage(
+      id: 'error_${DateTime.now().millisecondsSinceEpoch}',
+      role: 'system',
+      content: errorText,
+      timestamp: DateTime.now(),
+    );
+    state = state.copyWith(
+      messages: [...state.messages, errMessage],
+      error: errorText,
+    );
+  }
+
+  /// Submit a turn via the async endpoint (leaf 05 Task 3). The ack returns
+  /// immediately; the reply arrives later via the turn.terminal relay.
+  /// Returns the ack so callers can surface a rejection note.
+  Future<ChatSubmitAck> submitTurn({
+    required String sessionId,
+    required String text,
+    String? agentId,
+    List<Map<String, dynamic>>? parts,
+  }) async {
+    if (_isSending) {
+      return const ChatSubmitAck(
+        turnId: '',
+        conversationId: '',
+        sessionId: '',
+        accepted: false,
+        note: 'a send is already in flight',
+      );
+    }
+    if (!websocket.isConnected) {
+      state = state.copyWith(
+        error: 'not connected to daemon — check that meept-daemon is running',
+      );
+      return const ChatSubmitAck(
+        turnId: '',
+        conversationId: '',
+        sessionId: '',
+        accepted: false,
+        note: 'not connected to daemon',
+      );
+    }
+
+    _isSending = true;
+    try {
+      final ack = await sdkClient.submitTurn(
+        message: text,
+        conversationId: sessionId,
+        agentId: agentId,
+        parts: parts,
+      );
+      if (_disposed) return ack;
+
+      if (!ack.accepted || ack.turnId.isEmpty) {
+        state = state.copyWith(error: ack.note);
+        return ack;
+      }
+
+      // Optimistic user bubble (parity with the sync send path).
+      final userMessage = ChatMessage(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        role: 'user',
+        content: text,
+        timestamp: DateTime.now(),
+        sessionId: sessionId,
+      );
+
+      final pending = PendingTurn(
+        turnId: ack.turnId,
+        conversationId: ack.conversationId,
+        sessionId: sessionId,
+        startedAt: DateTime.now(),
+        lastProgressAt: DateTime.now(),
+      );
+      final turns = Map<String, PendingTurn>.from(state.pendingTurns);
+      turns[ack.turnId] = pending;
+
+      state = state.copyWith(
+        messages: [...state.messages, userMessage],
+        pendingTurns: turns,
+        isAgentProcessing: true,
+        thinkingStartedAt: state.thinkingStartedAt ?? DateTime.now(),
+      );
+
+      // Liveness watchdog: mark the turn stalled after the timeout. A
+      // stalled turn is NOT terminal — a late terminal event still renders
+      // the reply and clears the stalled state.
+      _livenessTimers[ack.turnId] = Timer(kTurnLivenessTimeout, () {
+        _markStalled(ack.turnId);
+      });
+      return ack;
+    } catch (e) {
+      if (_disposed) return ChatSubmitAck(turnId: '', conversationId: '', sessionId: '', accepted: false, note: e.toString());
+      String errorStr;
+      if (e is DioException) {
+        final code = e.response?.statusCode;
+        final url = e.requestOptions.path;
+        final method = e.requestOptions.method;
+        errorStr = '$method $url -> ${code ?? e.type}';
+      } else {
+        errorStr = e.toString();
+      }
+      state = state.copyWith(error: errorStr);
+      return ChatSubmitAck(turnId: '', conversationId: '', sessionId: '', accepted: false, note: errorStr);
+    } finally {
+      _isSending = false;
+    }
+  }
+
+  /// Cancel and forget a turn's liveness timer.
+  void _cancelLivenessTimer(String turnId) {
+    _livenessTimers.remove(turnId)?.cancel();
+  }
+
+  /// Mark a pending turn stalled after the liveness timeout. The UI keeps
+  /// showing an honest "may still complete" line; the turn stays tracked.
+  void _markStalled(String turnId) {
+    _livenessTimers.remove(turnId);
+    final turn = state.pendingTurns[turnId];
+    if (turn == null) return;
+    if (turn.status == PendingTurnStatus.parked) return;
+    final seconds = DateTime.now().difference(turn.lastProgressAt).inSeconds;
+    final turns = Map<String, PendingTurn>.from(state.pendingTurns);
+    turns[turnId] = turn.copyWith(
+      status: PendingTurnStatus.stalled,
+      progressText: 'no progress for ${seconds}s — task may still complete',
+    );
+    state = state.copyWith(pendingTurns: turns);
+  }
+
+  /// Advance a pending turn to the progress state on an ordinary
+  /// agent_progress event. Called from the progress subscription path so a
+  /// stalled turn that resumes emitting progress goes back to progress
+  /// (and re-arms its liveness timer).
+  void noteTurnProgress(String turnId, String progressText) {
+    final turn = state.pendingTurns[turnId];
+    if (turn == null) return;
+    _livenessTimers.remove(turnId)?.cancel();
+    _livenessTimers[turnId] = Timer(kTurnLivenessTimeout, () {
+      _markStalled(turnId);
+    });
+    final turns = Map<String, PendingTurn>.from(state.pendingTurns);
+    turns[turnId] = turn.copyWith(
+      status: PendingTurnStatus.progress,
+      progressText: progressText,
+      lastProgressAt: DateTime.now(),
+    );
+    state = state.copyWith(pendingTurns: turns);
+  }
+
+  /// Reset the late-failure indicator when this conversation's view opens.
+  void clearLateFailures() {
+    if (state.lateFailureCount == 0) return;
+    state = state.copyWith(lateFailureCount: 0);
+  }
+
+  /// Test/UI seam: route a terminal event through the same handler the WS
+  /// subscription uses. Public so widget tests and the subscription share
+  /// one code path.
+  void debugHandleTurnTerminal(TurnTerminalEvent event) {
+    _handleTurnTerminal(event);
+  }
+
+  /// Test seam: simulate a late failure badge bump (the sessions-list
+  /// routing logic calls this path in production via the WS subscription).
+  void debugNoteLateFailure() {
+    state = state.copyWith(lateFailureCount: state.lateFailureCount + 1);
   }
 
   /// Send a message and append it to the messages list
@@ -366,10 +714,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   /// Send a multimodal message with structured content parts.
   ///
-  /// Mirrors [sendMessage] but routes through
-  /// [SdkApiClient.sendChatMessageWithParts] so the backend receives the
-  /// `parts` array alongside the text fallback.  Used by the chat input
-  /// when the user has attached images.
+  /// Mirrors [sendMessage] but carries the `parts` array alongside the text
+  /// fallback so the backend receives structured image content. Used by the
+  /// chat input when the user has attached images. Routes through the async
+  /// submit endpoint (leaf 05) like [sendMessage].
   Future<void> sendMessageWithParts({
     required String sessionId,
     required String text,
@@ -484,24 +832,60 @@ class ChatNotifier extends StateNotifier<ChatState> {
       thinkingStartedAt: DateTime.now(),
     );
 
+    // The steer/followup endpoints return void; the normal endpoint exits
+    // early via the async submit path, so no response map is carried here.
     try {
-      Map<String, dynamic>? chatResp;
       switch (endpoint) {
         case _SendEndpoint.normal:
-          if (parts != null && parts.isNotEmpty) {
-            chatResp = await sdkClient.sendChatMessageWithParts(
-              message: text,
-              conversationId: sessionId,
-              agentId: agentId,
-              parts: parts,
+          // Async-turn migration (leaf 05): normal sends go through
+          // POST /api/v1/chat/submit and return immediately. The reply
+          // arrives later via the turn.terminal relay; pending/stalled/
+          // parked states are tracked in [ChatState.pendingTurns]. The
+          // legacy blocking /api/v1/chat is no longer called on this path.
+          final ack = await sdkClient.submitTurn(
+            message: text,
+            conversationId: sessionId,
+            agentId: agentId,
+            parts: parts,
+          );
+          if (_disposed) return;
+          if (!ack.accepted || ack.turnId.isEmpty) {
+            // Submit rejected (validation, dedupe-with-note, etc.) —
+            // surface the daemon's note, no pending turn is tracked.
+            _lastFailedSend = null;
+            state = ChatState(
+              messages: state.messages,
+              isLoading: false,
+              isAgentProcessing: false,
+              error: ack.note.isEmpty ? 'submit rejected' : ack.note,
+              thinkingStartedAt: null,
             );
-          } else {
-            chatResp = await sdkClient.sendChatMessage(
-              message: text,
-              conversationId: sessionId,
-              agentId: agentId,
-            );
+            return;
           }
+          // Track the turn and keep the sending flag until the terminal
+          // event arrives (bounded by the sending timeout guard).
+          final pending = PendingTurn(
+            turnId: ack.turnId,
+            conversationId: ack.conversationId,
+            sessionId: sessionId,
+            startedAt: DateTime.now(),
+            lastProgressAt: DateTime.now(),
+          );
+          final turns = Map<String, PendingTurn>.from(state.pendingTurns);
+          turns[ack.turnId] = pending;
+          _livenessTimers[ack.turnId] = Timer(kTurnLivenessTimeout, () {
+            _markStalled(ack.turnId);
+          });
+          _lastFailedSend = null;
+          state = ChatState(
+            messages: state.messages,
+            isLoading: false,
+            isAgentProcessing: true,
+            currentProgress: state.currentProgress,
+            pendingTurns: turns,
+            thinkingStartedAt: state.thinkingStartedAt ?? DateTime.now(),
+          );
+          return;
         case _SendEndpoint.steer:
           await sdkClient.sendSteerMessage(
             message: text,
@@ -518,58 +902,18 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
       if (_disposed) return;
 
-      // Check for agent-side errors in the response body (LLM failures, etc.)
-      if (chatResp != null && chatResp['error'] != null) {
-        final errorMsg = chatResp['error'].toString();
-        // Add error as a system message so it's visible in the chat history
-        final errMessage = ChatMessage(
-          id: 'error_${DateTime.now().millisecondsSinceEpoch}',
-          role: 'system',
-          content: errorMsg,
-          timestamp: DateTime.now(),
-        );
-        state = ChatState(
-          messages: [...state.messages, errMessage],
-          isLoading: false,
-          isAgentProcessing: false,
-          error: errorMsg,
-          thinkingStartedAt: null,
-        );
-      } else {
-        // The HTTP response body may contain a synchronous reply, but we do
-        // NOT add it as a chat message here. The daemon publishes the
-        // assistant reply via the chat_message bus topic (WS push), which is
-        // the single source of truth for assistant messages. Adding the HTTP
-        // reply here would duplicate the WS event.
-        //
-        // The HTTP response is used only for:
-        // - Error handling (above)
-        // - Transitioning from "loading history" to "waiting for agent"
-        //
-        // Keep isAgentProcessing=true so the progress indicator stays
-        // visible until the WS chat_message event arrives and resolves
-        // the turn via addStreamMessage.
-        _lastFailedSend = null;
-        state = ChatState(
-          messages: state.messages,
-          isLoading: false,
-          isAgentProcessing: true,
-          currentProgress: state.currentProgress,
-        );
-        // Safety net: if no WS chat_message event arrives within a
-        // reasonable window (e.g. daemon didn't broadcast), clear the
-        // processing state so the UI doesn't stay stuck on "thinking".
-        _processingFallbackTimer?.cancel();
-        _processingFallbackTimer = Timer(const Duration(seconds: 30), () {
-          _processingFallbackTimer = null;
-          if (!_disposed && state.isAgentProcessing) {
-            state = state.copyWith(
-              isAgentProcessing: false,
-              thinkingStartedAt: null,
-            );
-          }
-        });
-      }
+      // Steer / followup land here (void endpoints — no ack body, no
+      // pending-turn lifecycle). The normal endpoint returned earlier via
+      // the async submit path. Steer/followup are control-plane calls: the
+      // daemon either queues them or errors, and both outcomes surface via
+      // existing WS events.
+      _lastFailedSend = null;
+      state = ChatState(
+        messages: state.messages,
+        isLoading: false,
+        isAgentProcessing: state.isAgentProcessing,
+        currentProgress: state.currentProgress,
+      );
     } catch (e) {
       if (_disposed) return;
       // Extract URL from DioException for better error messages.
@@ -864,6 +1208,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _wsChatSubscription = null;
     _progressSubscription?.cancel();
     _progressSubscription = null;
+    _turnTerminalSubscription?.cancel();
+    _turnTerminalSubscription = null;
+    for (final timer in _livenessTimers.values) {
+      timer.cancel();
+    }
+    _livenessTimers.clear();
     websocket.unsubscribeFromChat(sessionId);
     super.dispose();
   }

@@ -414,6 +414,47 @@ class SdkApiClient {
     return _post('/api/v1/chat', body: body);
   }
 
+  /// Submits a chat turn asynchronously (async-turn-migration leaf 05).
+  ///
+  /// POSTs the chat body to `/api/v1/chat/submit` (Contract 5) and returns
+  /// the ack immediately. The daemon does NOT run the turn inside this HTTP
+  /// call — the final reply arrives later on the WebSocket as a
+  /// turn.terminal relay (classified `agent_progress`). This method never
+  /// blocks on agent work.
+  ///
+  /// The body is the same JSON the legacy `/api/v1/chat` endpoint accepts,
+  /// with `parts` passed through for multimodal sends.
+  Future<ChatSubmitAck> submitTurn({
+    required String message,
+    String? conversationId,
+    String? agentId,
+    List<Map<String, dynamic>>? parts,
+  }) async {
+    final body = <String, dynamic>{
+      'message': message,
+      'conversation_id': conversationId ?? '',
+      'source_client': 'flutter_ui',
+    };
+    if (agentId != null) body['agent_id'] = agentId;
+    if (parts != null && parts.isNotEmpty) body['parts'] = parts;
+    return submitChatRaw(body);
+  }
+
+  /// Typed submit variant taking the generated [sdk.ChatRequest] (spec
+  /// surface). See [submitTurn] for the parts-carrying variant.
+  Future<ChatSubmitAck> submitChat(sdk.ChatRequest req) async {
+    final body = _toJson(req);
+    body['source_client'] = 'flutter_ui';
+    return submitChatRaw(body);
+  }
+
+  /// POSTs a pre-built chat body to `/api/v1/chat/submit` and parses the
+  /// ack. Single funnel for [submitTurn] and [submitChat].
+  Future<ChatSubmitAck> submitChatRaw(Map<String, dynamic> body) async {
+    final raw = await _post('/api/v1/chat/submit', body: body);
+    return ChatSubmitAck.fromParse(raw);
+  }
+
   /// Upload a file to the daemon's upload service.
   ///
   /// Uses [Dio]'s [FormData] for multipart/form-data upload so we don't need
@@ -1897,4 +1938,41 @@ class SdkApiException implements Exception {
 
   @override
   String toString() => 'SdkApiException: $message (HTTP $statusCode)';
+}
+
+/// Ack returned by POST `/api/v1/chat/submit` (async-turn-migration
+/// Contract 5, leaf 01). The submit endpoint never blocks on agent work —
+/// the turn's final outcome arrives later over the WebSocket as a
+/// turn.terminal relay.
+///
+/// Key set is frozen: `turn_id`, `conversation_id`, `session_id`,
+/// `accepted`, `note`. `turnId` is empty when `accepted` is false; `note`
+/// then carries the human-readable rejection reason.
+class ChatSubmitAck {
+  final String turnId;
+  final String conversationId;
+  final String sessionId;
+  final bool accepted;
+
+  /// Daemon note: acceptance confirmation, or the rejection reason when
+  /// [accepted] is false.
+  final String note;
+
+  const ChatSubmitAck({
+    required this.turnId,
+    required this.conversationId,
+    required this.sessionId,
+    required this.accepted,
+    this.note = '',
+  });
+
+  factory ChatSubmitAck.fromParse(Map<String, dynamic> json) {
+    return ChatSubmitAck(
+      turnId: json['turn_id'] as String? ?? '',
+      conversationId: json['conversation_id'] as String? ?? '',
+      sessionId: json['session_id'] as String? ?? '',
+      accepted: json['accepted'] == true,
+      note: json['note'] as String? ?? '',
+    );
+  }
 }

@@ -3,19 +3,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/providers/chat_provider.dart';
 import 'package:meept_ui/providers/tts_provider.dart';
 import 'package:meept_ui/services/sdk_client.dart';
-import 'package:meept_ui/services/websocket_service.dart';
 
 import '../mocks/mock_websocket_service.dart';
 
 /// SDK stub whose send always throws, so sends land in the retry slot.
+/// (Async migration leaf 05: sends go through submitTurn.)
 class _ThrowingSdkClient extends SdkApiClient {
   _ThrowingSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<Map<String, dynamic>> sendChatMessage({
+  Future<ChatSubmitAck> submitTurn({
     required String message,
     String? conversationId,
     String? agentId,
+    List<Map<String, dynamic>>? parts,
   }) async {
     throw Exception('daemon unreachable');
   }
@@ -27,13 +28,19 @@ class _RecordingSdkClient extends SdkApiClient {
   final sent = <String>[];
 
   @override
-  Future<Map<String, dynamic>> sendChatMessage({
+  Future<ChatSubmitAck> submitTurn({
     required String message,
     String? conversationId,
     String? agentId,
+    List<Map<String, dynamic>>? parts,
   }) async {
     sent.add(message);
-    return {};
+    return ChatSubmitAck(
+      turnId: 'turn-${sent.length}',
+      conversationId: conversationId ?? '',
+      sessionId: '',
+      accepted: true,
+    );
   }
 }
 
