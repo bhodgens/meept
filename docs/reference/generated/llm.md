@@ -33,6 +33,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 
 - Constants
 - Variables
+- [func AmbientCandidateGrammar\(\) string](<#AmbientCandidateGrammar>)
 - [func AttachGrammar\(reqPayload map\[string\]any, mode string, g string\)](<#AttachGrammar>)
 - [func AttachUsageStore\(chatter Chatter, store \*appmetrics.Store\)](<#AttachUsageStore>)
 - [func BackoffWithJitter\(delay time.Duration, maxDelay time.Duration, useJitter bool\) time.Duration](<#BackoffWithJitter>)
@@ -65,12 +66,14 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func IsSupportedRuntime\(rt string\) bool](<#IsSupportedRuntime>)
 - [func IsValidEffort\(s string\) bool](<#IsValidEffort>)
 - [func JSONSchemaForTools\(defs \[\]ToolDefinition\) string](<#JSONSchemaForTools>)
+- [func LessonGrammar\(\) string](<#LessonGrammar>)
 - [func NewMetricsStoreForPacing\(dbPath string\) \(\*metrics.Store, error\)](<#NewMetricsStoreForPacing>)
 - [func ParsePIDFile\(path string\) \(int, error\)](<#ParsePIDFile>)
 - [func ParseRetryAfter\(header http.Header\) \(date time.Time, delta time.Duration, present bool\)](<#ParseRetryAfter>)
 - [func PriorityOf\(opts \[\]ChatOption\) bool](<#PriorityOf>)
 - [func Ptr\[T any\]\(v T\) \*T](<#Ptr>)
 - [func QuotaCredentialKey\(providerID string, cfg \*ModelConfig\) string](<#QuotaCredentialKey>)
+- [func RawGrammarOf\(opts \[\]ChatOption\) string](<#RawGrammarOf>)
 - [func ReapRuntimeProcesses\(targets \[\]OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log \*slog.Logger\) \[\]int](<#ReapRuntimeProcesses>)
 - [func RemoveRuntimeHandlesForPids\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, pids \[\]int\)](<#RemoveRuntimeHandlesForPids>)
 - [func RemoveSpawnRecord\(pidFile string\)](<#RemoveSpawnRecord>)
@@ -544,6 +547,12 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(r \*ReasoningConfig\) IsZero\(\) bool](<#ReasoningConfig.IsZero>)
   - [func \(r \*ReasoningConfig\) ResolveEnabled\(\) bool](<#ReasoningConfig.ResolveEnabled>)
   - [func \(r \*ReasoningConfig\) Validate\(\) error](<#ReasoningConfig.Validate>)
+- [type RefusalError](<#RefusalError>)
+  - [func DetectRefusal\(providerID, modelID, finishReason string\) \*RefusalError](<#DetectRefusal>)
+  - [func DetectRefusalFromBody\(providerID, modelID string, statusCode int, body string\) \*RefusalError](<#DetectRefusalFromBody>)
+  - [func \(e \*RefusalError\) Error\(\) string](<#RefusalError.Error>)
+  - [func \(e \*RefusalError\) NonRetryable\(\) bool](<#RefusalError.NonRetryable>)
+  - [func \(e \*RefusalError\) Unwrap\(\) error](<#RefusalError.Unwrap>)
 - [type Resolver](<#Resolver>)
   - [func NewResolver\(cfg \*ProvidersConfig, logger \*slog.Logger\) \*Resolver](<#NewResolver>)
   - [func \(r \*Resolver\) ActiveQuotaBlocks\(\) \[\]QuotaBlockStatus](<#Resolver.ActiveQuotaBlocks>)
@@ -1215,6 +1224,23 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 	    },
 	}
 
+<a name="AmbientCandidateGrammar"></a>
+## func AmbientCandidateGrammar
+
+	func AmbientCandidateGrammar() string
+
+AmbientCandidateGrammar returns the GBNF grammar forcing a bare JSON array of ambient epistemic candidates — exactly the shape memory.ParseAmbientCandidates accepts as its primary contract \(no object wrapper\). Each element carries exactly the declared keys:
+
+	type       enum claim|decision|prediction
+	text       string
+	source     string
+	confidence number
+	premises   array of string
+	category   enum (architecture|business|technical|prediction|opinion|methodology)
+	
+
+Pair with WithRawGrammar to attach it as payload\["grammar"\] \(llama.cpp wire format\). Never returns an empty string.
+
 <a name="AttachGrammar"></a>
 ## func AttachGrammar
 
@@ -1466,6 +1492,20 @@ IsValidEffort reports whether s is a recognized effort tier \(including the empt
 
 JSONSchemaForTools converts tool definitions into a JSON Schema document \(as a JSON\-encoded string\) suitable for response\_format structured\-output endpoints. Unlike the GBNF converter this path tolerates the full schema surface \(oneOf etc.\), so ALL tools are included; enum tightness may be lower than the GBNF path depending on server support. Never panics on arbitrary input.
 
+<a name="LessonGrammar"></a>
+## func LessonGrammar
+
+	func LessonGrammar() string
+
+LessonGrammar returns the GBNF grammar forcing the distill lesson JSON object — exactly the shape internal/memory's DecodeLesson accepts as its primary contract \(a single bare object, no wrapper\). Declared keys:
+
+	principle     string  (required — the distilled rule itself)
+	because       string  (optional — one-sentence rationale)
+	evidence_ids  array of quoted strings (optional)
+	
+
+The system prompt caps principle at 280 chars; GBNF cannot count characters, so the cap stays a post\-parse check in DecodeLesson. Pair with WithRawGrammar to attach it as payload\["grammar"\] \(llama.cpp wire format, local endpoints only\). Never returns an empty string.
+
 <a name="NewMetricsStoreForPacing"></a>
 ## func NewMetricsStoreForPacing
 
@@ -1523,6 +1563,13 @@ QuotaCredentialKey returns a stable identity for a provider credential:
 	OAuth provider  -> providerID + ":oauth:" + OAuthProvider
 	nothing identifiable -> providerID + ":default"
 	
+
+<a name="RawGrammarOf"></a>
+## func RawGrammarOf
+
+	func RawGrammarOf(opts []ChatOption) string
+
+RawGrammarOf reports the raw grammar body attached through WithRawGrammar \("" when none was passed\). It is the inspection counterpart of WithRawGrammar, for callers that stub the Chatter and assert on options.
 
 <a name="ReapRuntimeProcesses"></a>
 ## func ReapRuntimeProcesses
@@ -4725,7 +4772,7 @@ ModelRecord describes one locally pulled GGUF model file.
 <a name="ModelSlots"></a>
 ## type ModelSlots
 
-ModelSlots bundles the five slot fields from ProvidersConfig / models.json5.
+ModelSlots bundles the six slot fields from ProvidersConfig / models.json5.
 
 	type ModelSlots struct {
 	    Model           string
@@ -4736,6 +4783,10 @@ ModelSlots bundles the five slot fields from ProvidersConfig / models.json5.
 	    // (extract_model slot). Included so its local runtime pre-warms at
 	    // boot instead of failing on first tool call.
 	    ExtractModel string
+	    // RefusalModel is the global default refusal fallback target
+	    // (refusal_model slot). Included so its local runtime pre-warms at
+	    // boot instead of being found dead on first fallback.
+	    RefusalModel string
 	}
 
 <a name="ModelStore"></a>
@@ -5636,7 +5687,12 @@ ProvidersConfig represents the full models.json5 configuration.
 	    // ExtractModel is the models.json5 slot for the json_extract tool's
 	    // dedicated extraction model (typically a local small LLM). Empty =
 	    // json_extract reports not-configured.
-	    ExtractModel      string                     `json:"extract_model"`
+	    ExtractModel string `json:"extract_model"`
+	    // RefusalModel is the global default refusal fallback target
+	    // (provider/model ref or alias name; refusal-fallback tree 02).
+	    // Empty = no global default; a per-agent spec refusal_model overrides
+	    // this; both empty = refusal fallback disabled for that agent.
+	    RefusalModel      string                     `json:"refusal_model"`
 	    DisabledProviders []string                   `json:"disabled_providers"`
 	    ModelAliases      map[string]ModelAliasEntry `json:"model_aliases"`
 	    Providers         map[string]ProviderConfig  `json:"providers"`
@@ -5910,6 +5966,61 @@ ResolveEnabled returns the effective on/off state. When Enabled is nil it is der
 	func (r *ReasoningConfig) Validate() error
 
 Validate returns an error if the config's fields conflict — currently the only check is Enabled=false while Effort is a non\-none, non\-empty tier.
+
+<a name="RefusalError"></a>
+## type RefusalError
+
+RefusalError is a typed model refusal: the provider \(or its safety layer\) declined to answer. Like QuotaResetError it is NonRetryable — the client short\-retry loops must exit immediately; surfacing/fallback is the caller's decision \(plan refusal\-fallback\).
+
+	type RefusalError struct {
+	    ProviderID   string
+	    ModelID      string
+	    Source       string // "finish_reason" | "stop_reason" | "error_body"
+	    FinishReason string // raw signal: "refusal", "content_filter", or ""
+	    Message      string // provider detail, truncated to 500 chars
+	    StatusCode   int    // HTTP status when from an error body; 0 otherwise
+	    Cause        error
+	}
+
+<a name="DetectRefusal"></a>
+### func DetectRefusal
+
+	func DetectRefusal(providerID, modelID, finishReason string) *RefusalError
+
+DetectRefusal maps a finish/stop reason signal onto a \*RefusalError. Triggers, exact strings, case\-insensitive:
+
+- "refusal" =\> Source "stop\_reason" \(Anthropic\)
+- "content\_filter" =\> Source "finish\_reason" \(OpenAI\-compatible\)
+
+Anything else \(including ""\) returns nil. Empty modelID is allowed \(streaming paths may not have it\); fill from context when known.
+
+<a name="DetectRefusalFromBody"></a>
+### func DetectRefusalFromBody
+
+	func DetectRefusalFromBody(providerID, modelID string, statusCode int, body string) *RefusalError
+
+DetectRefusalFromBody classifies typed safeguard/refusal error\-body text conservatively. Match =\> \*RefusalError with Source "error\_body", StatusCode set, and Message carrying the body truncated to 500 chars. No match =\> nil.
+
+<a name="RefusalError.Error"></a>
+### func \(\*RefusalError\) Error
+
+	func (e *RefusalError) Error() string
+
+
+
+<a name="RefusalError.NonRetryable"></a>
+### func \(\*RefusalError\) NonRetryable
+
+	func (e *RefusalError) NonRetryable() bool
+
+NonRetryable returns true so the client short\-retry loops exit immediately.
+
+<a name="RefusalError.Unwrap"></a>
+### func \(\*RefusalError\) Unwrap
+
+	func (e *RefusalError) Unwrap() error
+
+
 
 <a name="Resolver"></a>
 ## type Resolver

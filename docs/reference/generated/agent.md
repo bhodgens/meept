@@ -154,6 +154,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) ClearConversation\(id string\)](<#AgentLoop.ClearConversation>)
   - [func \(l \*AgentLoop\) ClearModelOverride\(\)](<#AgentLoop.ClearModelOverride>)
   - [func \(l \*AgentLoop\) ClearReasoningOverride\(\)](<#AgentLoop.ClearReasoningOverride>)
+  - [func \(l \*AgentLoop\) ClearRefusalFallback\(\)](<#AgentLoop.ClearRefusalFallback>)
   - [func \(l \*AgentLoop\) Close\(\)](<#AgentLoop.Close>)
   - [func \(l \*AgentLoop\) CompressionPipeline\(\) \*compress.Pipeline](<#AgentLoop.CompressionPipeline>)
   - [func \(l \*AgentLoop\) ConfigSnapshot\(\) \[\]LoopOption](<#AgentLoop.ConfigSnapshot>)
@@ -202,6 +203,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetDetectionContext\(dc \*DetectionContext\)](<#AgentLoop.SetDetectionContext>)
   - [func \(l \*AgentLoop\) SetEpistemicHook\(hook \*EpistemicHook\)](<#AgentLoop.SetEpistemicHook>)
   - [func \(l \*AgentLoop\) SetFileWatcher\(fw \*FileWatcherHook\)](<#AgentLoop.SetFileWatcher>)
+  - [func \(l \*AgentLoop\) SetGlobalRefusalModel\(ref string\)](<#AgentLoop.SetGlobalRefusalModel>)
   - [func \(l \*AgentLoop\) SetHTTPHooks\(executor \*HookBatchExecutor\)](<#AgentLoop.SetHTTPHooks>)
   - [func \(l \*AgentLoop\) SetIsolatedChild\(isolated bool\)](<#AgentLoop.SetIsolatedChild>)
   - [func \(l \*AgentLoop\) SetMCPServerLister\(lister func\(\) \[\]MCPServerInfo\)](<#AgentLoop.SetMCPServerLister>)
@@ -445,6 +447,7 @@ Package agent provides the agent loop and related components.
 - [type ChatHandler](<#ChatHandler>)
   - [func NewChatHandler\(loop \*AgentLoop, dispatcher \*Dispatcher, msgBus \*bus.MessageBus, logger \*slog.Logger\) \*ChatHandler](<#NewChatHandler>)
   - [func \(h \*ChatHandler\) ClearConversation\(conversationID string\)](<#ChatHandler.ClearConversation>)
+  - [func \(h \*ChatHandler\) EmitTurnTerminal\(ev TurnTerminalEvent\)](<#ChatHandler.EmitTurnTerminal>)
   - [func \(h \*ChatHandler\) FormatAsyncTaskAck\(result \*DispatchResult\) string](<#ChatHandler.FormatAsyncTaskAck>)
   - [func \(h \*ChatHandler\) FormatEnhancedAsyncTaskAck\(result \*DispatchResult, steps \[\]TaskStepSummary, estimatedMinutes int, planRef string\) string](<#ChatHandler.FormatEnhancedAsyncTaskAck>)
   - [func \(h \*ChatHandler\) GetWorkerCount\(\) int](<#ChatHandler.GetWorkerCount>)
@@ -467,6 +470,7 @@ Package agent provides the agent loop and related components.
   - [func \(h \*ChatHandler\) SetSyncMode\(enabled bool\)](<#ChatHandler.SetSyncMode>)
   - [func \(h \*ChatHandler\) SetTaskStore\(store \*task.Store\)](<#ChatHandler.SetTaskStore>)
   - [func \(h \*ChatHandler\) SetThrottleParker\(parker \*TurnParker\)](<#ChatHandler.SetThrottleParker>)
+  - [func \(h \*ChatHandler\) SetTurnRegistry\(registry \*TurnRegistry\)](<#ChatHandler.SetTurnRegistry>)
   - [func \(h \*ChatHandler\) Start\(ctx context.Context\) error](<#ChatHandler.Start>)
   - [func \(h \*ChatHandler\) Stop\(ctx context.Context\) error](<#ChatHandler.Stop>)
 - [type ChatMessageReceivedData](<#ChatMessageReceivedData>)
@@ -631,8 +635,10 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) ResumeAfterClarification\(ctx context.Context, originalInput, userResponse, sessionID string\) \(\*DispatchResult, error\)](<#Dispatcher.ResumeAfterClarification>)
   - [func \(d \*Dispatcher\) RouteToAgent\(ctx context.Context, result \*DispatchResult, conversationID string\) \(string, error\)](<#Dispatcher.RouteToAgent>)
   - [func \(d \*Dispatcher\) SetAgentLoopManager\(m \*Manager\)](<#Dispatcher.SetAgentLoopManager>)
+  - [func \(d \*Dispatcher\) SetBurstDetector\(det \*metrics.BurstDetector\)](<#Dispatcher.SetBurstDetector>)
   - [func \(d \*Dispatcher\) SetCapabilityMatcher\(matcher \*CapabilityMatcher\)](<#Dispatcher.SetCapabilityMatcher>)
   - [func \(d \*Dispatcher\) SetDefaultWorkingDir\(dir string\)](<#Dispatcher.SetDefaultWorkingDir>)
+  - [func \(d \*Dispatcher\) SetDriftDetector\(det \*SessionDriftDetector\)](<#Dispatcher.SetDriftDetector>)
   - [func \(d \*Dispatcher\) SetFenceController\(fc FenceController\)](<#Dispatcher.SetFenceController>)
   - [func \(d \*Dispatcher\) SetInputHasher\(fn func\(message string\) string\)](<#Dispatcher.SetInputHasher>)
   - [func \(d \*Dispatcher\) SetInstructionParser\(parser \*InstructionParser\)](<#Dispatcher.SetInstructionParser>)
@@ -655,11 +661,18 @@ Package agent provides the agent loop and related components.
 - [type DrainMode](<#DrainMode>)
   - [func ParseDrainMode\(s string\) DrainMode](<#ParseDrainMode>)
 - [type EffectsResumeHook](<#EffectsResumeHook>)
+- [type EmbedHealthCheck](<#EmbedHealthCheck>)
+  - [func NewEmbedHealthCheck\(refPath string, logger \*slog.Logger\) \(\*EmbedHealthCheck, error\)](<#NewEmbedHealthCheck>)
+  - [func \(c \*EmbedHealthCheck\) Check\(embedding \[\]float64\) \(healthy bool, distance float64\)](<#EmbedHealthCheck.Check>)
+  - [func \(c \*EmbedHealthCheck\) Loaded\(\) bool](<#EmbedHealthCheck.Loaded>)
+  - [func \(c \*EmbedHealthCheck\) Threshold\(\) float64](<#EmbedHealthCheck.Threshold>)
 - [type EmbeddingClient](<#EmbeddingClient>)
 - [type EmbeddingPrefilter](<#EmbeddingPrefilter>)
   - [func NewEmbeddingPrefilter\(emb PrefilterEmbedder, cfg config.ClassifierPrefilterConfig, logger \*slog.Logger\) \*EmbeddingPrefilter](<#NewEmbeddingPrefilter>)
   - [func \(p \*EmbeddingPrefilter\) Match\(ctx context.Context, input string\) \*Intent](<#EmbeddingPrefilter.Match>)
+  - [func \(p \*EmbeddingPrefilter\) MatchForSession\(ctx context.Context, input, sessionID string\) \*Intent](<#EmbeddingPrefilter.MatchForSession>)
   - [func \(p \*EmbeddingPrefilter\) Reload\(\)](<#EmbeddingPrefilter.Reload>)
+  - [func \(p \*EmbeddingPrefilter\) SetEmbeddingObserver\(fn func\(sessionID string, vec \[\]float64\)\)](<#EmbeddingPrefilter.SetEmbeddingObserver>)
   - [func \(p \*EmbeddingPrefilter\) SetVerdictObserver\(fn func\(PrefilterVerdict\)\)](<#EmbeddingPrefilter.SetVerdictObserver>)
 - [type EpistemicHook](<#EpistemicHook>)
   - [func NewEpistemicHook\(cfg EpistemicHookConfig\) \*EpistemicHook](<#NewEpistemicHook>)
@@ -1249,6 +1262,9 @@ Package agent provides the agent loop and related components.
 - [type ReflectionTrajectory](<#ReflectionTrajectory>)
   - [func \(t ReflectionTrajectory\) JSON\(\) \(\[\]byte, error\)](<#ReflectionTrajectory.JSON>)
 - [type ReflectionTrajectoryStep](<#ReflectionTrajectoryStep>)
+- [type RefusalSeams](<#RefusalSeams>)
+  - [func ExportedRefusalSeams\(l \*AgentLoop\) \*RefusalSeams](<#ExportedRefusalSeams>)
+  - [func \(s \*RefusalSeams\) Apply\(\)](<#RefusalSeams.Apply>)
 - [type RegistryConfig](<#RegistryConfig>)
 - [type ReplyFuncSetter](<#ReplyFuncSetter>)
 - [type ReportCapture](<#ReportCapture>)
@@ -1388,6 +1404,13 @@ Package agent provides the agent loop and related components.
 - [type SessionContextDigest](<#SessionContextDigest>)
   - [func \(s \*SessionContextDigest\) IsEmpty\(\) bool](<#SessionContextDigest.IsEmpty>)
   - [func \(s \*SessionContextDigest\) IsEmptyIgnoringClarify\(\) bool](<#SessionContextDigest.IsEmptyIgnoringClarify>)
+- [type SessionDriftDetector](<#SessionDriftDetector>)
+  - [func NewSessionDriftDetector\(cfg config.SessionDriftConfig, logger \*slog.Logger\) \*SessionDriftDetector](<#NewSessionDriftDetector>)
+  - [func \(d \*SessionDriftDetector\) Enabled\(\) bool](<#SessionDriftDetector.Enabled>)
+  - [func \(d \*SessionDriftDetector\) Observe\(sessionID string, embedding \[\]float64\) \(drifted bool, score float64\)](<#SessionDriftDetector.Observe>)
+  - [func \(d \*SessionDriftDetector\) ResetSession\(sessionID string\)](<#SessionDriftDetector.ResetSession>)
+  - [func \(d \*SessionDriftDetector\) Threshold\(\) float64](<#SessionDriftDetector.Threshold>)
+  - [func \(d \*SessionDriftDetector\) WindowSize\(\) int](<#SessionDriftDetector.WindowSize>)
 - [type SessionEndData](<#SessionEndData>)
 - [type SessionEndHook](<#SessionEndHook>)
 - [type SessionLifecyclePayload](<#SessionLifecyclePayload>)
@@ -1483,6 +1506,7 @@ Package agent provides the agent loop and related components.
   - [func \(sp \*StrategicPlanner\) SetRegistry\(reg \*AgentRegistry\)](<#StrategicPlanner.SetRegistry>)
 - [type StrategicPlannerConfig](<#StrategicPlannerConfig>)
 - [type SubagentExecution](<#SubagentExecution>)
+- [type SubmittedTurnRecord](<#SubmittedTurnRecord>)
 - [type SubtaskAssignment](<#SubtaskAssignment>)
 - [type SynthesizeTracesTool](<#SynthesizeTracesTool>)
   - [func NewSynthesizeTracesTool\(store TraceStoreReader, llmClient \*llm.Client\) \*SynthesizeTracesTool](<#NewSynthesizeTracesTool>)
@@ -1683,11 +1707,26 @@ Package agent provides the agent loop and related components.
   - [func \(p \*TurnParker\) Stop\(\)](<#TurnParker.Stop>)
   - [func \(p \*TurnParker\) WaitInfo\(\) \[\]ParkWaitInfo](<#TurnParker.WaitInfo>)
 - [type TurnRecord](<#TurnRecord>)
+- [type TurnRegistry](<#TurnRegistry>)
+  - [func NewTurnRegistry\(\) \*TurnRegistry](<#NewTurnRegistry>)
+  - [func \(r \*TurnRegistry\) AttachTask\(turnID, taskID string\)](<#TurnRegistry.AttachTask>)
+  - [func \(r \*TurnRegistry\) Complete\(turnID string\)](<#TurnRegistry.Complete>)
+  - [func \(r \*TurnRegistry\) Register\(turnID, conversationID string\) bool](<#TurnRegistry.Register>)
+  - [func \(r \*TurnRegistry\) Stale\(olderThan time.Duration\) \[\]SubmittedTurnRecord](<#TurnRegistry.Stale>)
+  - [func \(r \*TurnRegistry\) Touch\(turnID string\)](<#TurnRegistry.Touch>)
+  - [func \(r \*TurnRegistry\) TurnIDForTask\(taskID string\) string](<#TurnRegistry.TurnIDForTask>)
 - [type TurnSnapshot](<#TurnSnapshot>)
 - [type TurnSnapshotFile](<#TurnSnapshotFile>)
 - [type TurnStartData](<#TurnStartData>)
 - [type TurnState](<#TurnState>)
 - [type TurnStatus](<#TurnStatus>)
+- [type TurnTerminalEvent](<#TurnTerminalEvent>)
+  - [func \(TurnTerminalEvent\) WSClass\(\) wsclass.WSClass](<#TurnTerminalEvent.WSClass>)
+- [type TurnWatchdog](<#TurnWatchdog>)
+  - [func NewTurnWatchdog\(reg \*TurnRegistry, emit func\(TurnTerminalEvent\), logger \*slog.Logger\) \*TurnWatchdog](<#NewTurnWatchdog>)
+  - [func \(w \*TurnWatchdog\) RunOnce\(staleAfter time.Duration\) int](<#TurnWatchdog.RunOnce>)
+  - [func \(w \*TurnWatchdog\) Start\(interval, staleAfter time.Duration\)](<#TurnWatchdog.Start>)
+  - [func \(w \*TurnWatchdog\) Stop\(\)](<#TurnWatchdog.Stop>)
 - [type ValidateCheckpointResult](<#ValidateCheckpointResult>)
 - [type ValidationPolicy](<#ValidationPolicy>)
   - [func DefaultValidationPolicy\(\) \*ValidationPolicy](<#DefaultValidationPolicy>)
@@ -2265,6 +2304,12 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "platform_team_create": "task_write",
 	    "team_preset_create":   "task_write",
 	}
+
+<a name="TopicTurnTerminal"></a>TopicTurnTerminal is the typed declaration for the turn.terminal bus topic \(typed\-bus\-topics leaf 02\). Publishers MUST use bus.PublishT with this declaration; future subscribers MUST use bus.SubscribeT with it. Payload is the frozen TurnTerminalEvent \- see its doc comment \(CLOSED field set\).
+
+Placement note: the declaration lives IN package agent \(not pkg/models or internal/bus\) because TurnTerminalEvent lives here and agent already imports bus; the reverse imports would be a cycle.
+
+	var TopicTurnTerminal = bus.NewTopic[TurnTerminalEvent]("turn.terminal")
 
 <a name="AllotmentTokens"></a>
 ## func AllotmentTokens
@@ -3257,6 +3302,13 @@ ClearModelOverride clears the model override after it has been applied. Also res
 
 ClearReasoningOverride removes any per\-turn reasoning override. Called after the turn completes so the next turn is unaffected. Thread\-safe.
 
+<a name="AgentLoop.ClearRefusalFallback"></a>
+### func \(\*AgentLoop\) ClearRefusalFallback
+
+	func (l *AgentLoop) ClearRefusalFallback()
+
+ClearRefusalFallback clears a fallback override armed by handleRefusal when the retry never consumed it \(fresh\-turn restore, mirroring the verification\-escalation clear\-after\-turn behavior\). Idempotent.
+
 <a name="AgentLoop.Close"></a>
 ### func \(\*AgentLoop\) Close
 
@@ -3598,6 +3650,13 @@ SetEpistemicHook wires the post\-turn ambient\-extraction hook. Nil\-safe per CL
 	func (l *AgentLoop) SetFileWatcher(fw *FileWatcherHook)
 
 SetFileWatcher wire a file watcher for filesystem\-level hooks. Nil is safely ignored.
+
+<a name="AgentLoop.SetGlobalRefusalModel"></a>
+### func \(\*AgentLoop\) SetGlobalRefusalModel
+
+	func (l *AgentLoop) SetGlobalRefusalModel(ref string)
+
+SetGlobalRefusalModel mirrors the global models.json5 refusal\_model slot onto this loop. Precedence lives in refusalFallbackRef: a non\-empty spec.RefusalModel wins; the global value fills an empty spec field. Wire once at loop construction \(alongside the resolver wiring\); not thread\-safe by design because construction\-time wiring is.
 
 <a name="AgentLoop.SetHTTPHooks"></a>
 ### func \(\*AgentLoop\) SetHTTPHooks
@@ -4257,6 +4316,11 @@ AgentSpec defines the specification for creating an agent.
 	    // for the next fix attempt when verification exhausts max_fix_loops.
 	    // Empty = escalation disabled; hook falls back to escalate-to-user.
 	    EscalationModel string `json:"escalation_model,omitempty" yaml:"escalation_model,omitempty"`
+	    // RefusalModel is the per-agent refusal fallback (alias name or
+	    // "provider/model" ref). Empty = inherit the global models.json5
+	    // refusal_model slot; both empty = refusal fallback disabled for this
+	    // agent (precedence: per-agent spec field > global slot > off).
+	    RefusalModel string `json:"refusal_model,omitempty" yaml:"refusal_model,omitempty"`
 	    // AdditionalTools are tools beyond the baseline that this agent has access to.
 	    AdditionalTools []string `json:"additional_tools,omitempty"`
 	    // ToolScopeLimit caps how many tools are offered to this agent in the
@@ -5730,6 +5794,13 @@ NewChatHandler creates a new ChatHandler. The dispatcher parameter is optional; 
 
 ClearConversation removes the in\-memory conversation cache for a session. Called by the /reset RPC handler after clearing persisted messages.
 
+<a name="ChatHandler.EmitTurnTerminal"></a>
+### func \(\*ChatHandler\) EmitTurnTerminal
+
+	func (h *ChatHandler) EmitTurnTerminal(ev TurnTerminalEvent)
+
+EmitTurnTerminal is the exported emit seam for the TurnWatchdog \(leaf 06\): it forwards to the frozen publishTurnTerminal funnel. Exported because package agent's watchdog must not reach back into the handler through an unexported method reference from the daemon composition.
+
 <a name="ChatHandler.FormatAsyncTaskAck"></a>
 ### func \(\*ChatHandler\) FormatAsyncTaskAck
 
@@ -5870,6 +5941,8 @@ SetStepStore sets the step store for fetching step summaries.
 
 SetSyncMode enables or disables synchronous dispatch mode. When enabled, async\-dispatched tasks are waited on in the handler instead of returning immediately.
 
+Deprecated \(async\-turn\-migration leaf 07\): this is the seam for the LEGACY blocking\-chat opt\-in only — production wiring calls SetSyncMode\(cfg.Orchestrator.SyncChatEnabled\). Under the default \(sync\_chat\_enabled=false\) the sync wait is unreachable: chat.submit acks and results arrive via turn.terminal. No in\-tree caller forces sync by itself any more \(the former meept\-bench source special\-case now also requires the flag\).
+
 <a name="ChatHandler.SetTaskStore"></a>
 ### func \(\*ChatHandler\) SetTaskStore
 
@@ -5883,6 +5956,13 @@ SetTaskStore sets the task store for looking up linked sessions.
 	func (h *ChatHandler) SetThrottleParker(parker *TurnParker)
 
 SetThrottleParker wires the loop's throttle\-resume parker \(tree 03 leaf 02 Task 3\): the parker's resume callback routes by record class — throttle records re\-enter the loop via resumeThrottledTurn; quota records \(when a parker other than the handler's own quota watcher is shared\) delegate to the existing quota resume callback. Nil\-guarded.
+
+<a name="ChatHandler.SetTurnRegistry"></a>
+### func \(\*ChatHandler\) SetTurnRegistry
+
+	func (h *ChatHandler) SetTurnRegistry(registry *TurnRegistry)
+
+SetTurnRegistry wires the async\-turn registry \(async\-turn\-migration leaf 03\). Nil\-guarded INCLUDING typed\-nil per the project invariant \(\`if tr \!= nil\` does NOT survive a typed\-nil \*TurnRegistry in an any\-typed check — the explicit nil test here handles both because the parameter type is the concrete pointer\). A nil registry disables turn tracking: the legacy \`chat\` path \(empty ChatRequest.TurnID\) is untracked regardless.
 
 <a name="ChatHandler.Start"></a>
 ### func \(\*ChatHandler\) Start
@@ -5928,6 +6008,11 @@ ChatRequest is the expected payload for chat.request messages.
 	    // for exactly this turn and auto-clears after it (never persisted to
 	    // the config). Empty = unchanged alias/default behavior.
 	    Model string `json:"model,omitempty"`
+	    // TurnID is the caller-chosen turn identity from chat.submit (leaf 02
+	    // of async-turn-migration). Non-empty turns are tracked in the
+	    // TurnRegistry (Register/Touch/Complete); the legacy `chat` path
+	    // leaves it empty and stays UNTRACKED.
+	    TurnID string `json:"turn_id,omitempty"`
 	}
 
 <a name="ChatResponse"></a>
@@ -7383,6 +7468,13 @@ RouteToAgent routes a dispatch result to the appropriate agent. If an active age
 
 SetAgentLoopManager wires the per\-session AgentLoop manager so that RouteToAgent can resolve a session\-scoped loop \(with the correct project working directory\) instead of always using the singleton registry agent. Nil is a no\-op.
 
+<a name="Dispatcher.SetBurstDetector"></a>
+### func \(\*Dispatcher\) SetBurstDetector
+
+	func (d *Dispatcher) SetBurstDetector(det *metrics.BurstDetector)
+
+SetBurstDetector wires the tool\-failure burst detector \(issue \#43\). Nil guard per project invariant \(cf. SetMetricsStore\). The dispatcher feeds it resolved dispatch outcomes in recordDispatch; the signal is LOG\-ONLY at that call site.
+
 <a name="Dispatcher.SetCapabilityMatcher"></a>
 ### func \(\*Dispatcher\) SetCapabilityMatcher
 
@@ -7396,6 +7488,15 @@ SetCapabilityMatcher sets the capability matcher for fast routing.
 	func (d *Dispatcher) SetDefaultWorkingDir(dir string)
 
 SetDefaultWorkingDir wires the configured last\-resort working directory \(daemon.default\_working\_dir\). Empty is a no\-op: "no last resort" is the documented default. Nil\-safe.
+
+<a name="Dispatcher.SetDriftDetector"></a>
+### func \(\*Dispatcher\) SetDriftDetector
+
+	func (d *Dispatcher) SetDriftDetector(det *SessionDriftDetector)
+
+SetDriftDetector wires the session drift detector \(issue \#41\). Nil guard per project invariant \(cf. SetMetricsStore\): a nil detector — including a typed\-nil pointer — is ignored so a wiring\-order bug cannot strip a live detector. Disabled detectors are accepted and stay inert at Observe.
+
+Wiring model: the dispatcher registers the detector as the prefilter's embedding observer \(SetEmbeddingObserver\), so every healthy Door\-1 embedding feeds the per\-session drift check with zero extra model calls. The signal is LOG\-ONLY at this call site \(issue \#41 acceptance criterion 3\): a drift event logs one Info line and never changes routing — the full\-chain fall\-through decision belongs to a later, measured rollout.
 
 <a name="Dispatcher.SetFenceController"></a>
 ### func \(\*Dispatcher\) SetFenceController
@@ -7578,6 +7679,15 @@ DispatcherConfig holds configuration for creating a Dispatcher.
 	    // When non-nil, tools are gated so agents at maxDepth don't
 	    // see spawn capabilities ("make illegal states unrepresentable").
 	    ToolRegistry *DepthToolRegistry
+	
+	    // GitVerbAgreementVeto gates the git-verb agreement veto (issue #46):
+	    // a classifier git/committer verdict on an input that opens with an
+	    // execution imperative but carries NO git verb is a lexical bias of
+	    // small classifiers (the 350M prompt-router routes "create a file in
+	    // the repository root" to git because of the word "repository"), and
+	    // the verdict is discarded so the chain continues. Nil = default true
+	    // (veto active); false disables it (escape hatch while measuring).
+	    GitVerbAgreementVeto *bool
 	}
 
 <a name="DispatcherStats"></a>
@@ -7623,6 +7733,49 @@ EffectsResumeHook is the parked\-turn\-resume reconcile callback \(effects tree 
 
 	type EffectsResumeHook func(ctx context.Context)
 
+<a name="EmbedHealthCheck"></a>
+## type EmbedHealthCheck
+
+EmbedHealthCheck guards the Stage\-0 embedding prefilter against a degraded or silently\-changed embedding pipeline \(meept issue \#42\).
+
+Mechanism \(measured and verified, classi\-fly docs/MEEPT\-TESTS.md test 3 / docs/AXES\-2026\-09\-12.md axis D\): cosine distance from the incoming embedding to the NEAREST vector in a fixed reference set of known\-good embeddings. Per\-item distance to a fixed reference set detected every distribution shift with 2.5\-step median latency and 0.83% false alarms.
+
+Threshold: the 95th percentile of the reference's own cross\-fitted nearest\-neighbour cosine distances \(each vector scored against the OTHER vectors, never itself\), so \~95% of known\-good embeddings pass by construction. Reference implementation: classi\-fly tools/eval/embed\_health.py calibrate\(\).
+
+Fail\-safe policy \(OOD = safety\): a missing/corrupt/empty reference set, a dimension mismatch, NaN/Inf input, or a zero\-norm input all resolve to unhealthy=false — the caller falls through to the full LLM chain. The check can only skip prefilter work, never enable a confident route on garbage. Mirrors the prefilter invariant \(embedding\_prefilter.go\): the gate can only skip work, never degrade routing.
+
+	type EmbedHealthCheck struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewEmbedHealthCheck"></a>
+### func NewEmbedHealthCheck
+
+	func NewEmbedHealthCheck(refPath string, logger *slog.Logger) (*EmbedHealthCheck, error)
+
+NewEmbedHealthCheck loads the reference set from refPath \(JSON \[\[float,...\],...\]\), calibrates the 95th\-percentile threshold, and returns the check. Errors \(never silently disables\) when the file is missing, unparseable, or degenerate \(\< 2 vectors, ragged rows, NaN/Inf\) — fail closed, per the owner decision that OOD policy is safety\-first.
+
+<a name="EmbedHealthCheck.Check"></a>
+### func \(\*EmbedHealthCheck\) Check
+
+	func (c *EmbedHealthCheck) Check(embedding []float64) (healthy bool, distance float64)
+
+Check reports whether embedding looks like it came from the healthy embedding pipeline: cosine distance to the nearest reference vector compared against the calibrated threshold. Loaded=false \(no reference — e.g. the shipped default when the file is absent\) means the check is INERT and returns healthy=true so it never blocks routing; operators opt in by generating the reference file. Degenerate inputs \(dimension mismatch, NaN/Inf, zero norm\) return healthy=false \(fail safe: fall through to the LLM chain rather than route on garbage\).
+
+<a name="EmbedHealthCheck.Loaded"></a>
+### func \(\*EmbedHealthCheck\) Loaded
+
+	func (c *EmbedHealthCheck) Loaded() bool
+
+Loaded reports whether a reference set is active. False = the check is inert \(Check always returns healthy=true\).
+
+<a name="EmbedHealthCheck.Threshold"></a>
+### func \(\*EmbedHealthCheck\) Threshold
+
+	func (c *EmbedHealthCheck) Threshold() float64
+
+Threshold exposes the calibrated 95th\-percentile distance \(for tests and the startup log only\).
+
 <a name="EmbeddingClient"></a>
 ## type EmbeddingClient
 
@@ -7661,12 +7814,26 @@ NewEmbeddingPrefilter builds the Stage\-0 gate. Index load is lazy \(first Match
 
 Match embeds the input and returns a direct\-route Intent when the k nearest examples vote unanimously for one intent. nil means "no opinion" \-\- caller falls through to the LLM chain.
 
+<a name="EmbeddingPrefilter.MatchForSession"></a>
+### func \(\*EmbeddingPrefilter\) MatchForSession
+
+	func (p *EmbeddingPrefilter) MatchForSession(ctx context.Context, input, sessionID string) *Intent
+
+MatchForSession is Match with session attribution \(issue \#41 session drift\): when an embedding observer is wired, each healthy embedding is emitted with the session id so the drift detector can track the per\-session embedding sequence. sessionID may be empty \(legacy Match path and tests\) — the observer simply receives an empty session key and can drop it.
+
 <a name="EmbeddingPrefilter.Reload"></a>
 ### func \(\*EmbeddingPrefilter\) Reload
 
 	func (p *EmbeddingPrefilter) Reload()
 
 Reload forces a re\-read of the example store on the next Match. Used after rebuilding the index without a daemon restart.
+
+<a name="EmbeddingPrefilter.SetEmbeddingObserver"></a>
+### func \(\*EmbeddingPrefilter\) SetEmbeddingObserver
+
+	func (p *EmbeddingPrefilter) SetEmbeddingObserver(fn func(sessionID string, vec []float64))
+
+SetEmbeddingObserver wires the healthy\-embedding consumer \(issue \#41 session drift\). Nil\-guarded per project invariant \(cf. SetVerdictObserver\). Not lock\-protected: register once during construction, before Match runs. The observer receives \(sessionID, embedding\) for every embedding that passed the health gate.
 
 <a name="EmbeddingPrefilter.SetVerdictObserver"></a>
 ### func \(\*EmbeddingPrefilter\) SetVerdictObserver
@@ -11835,6 +12002,14 @@ PlanRequest is the input to the strategic planner.
 	    // no explicit model directive; the daemon's default-model fallback
 	    // applies at resolution time.
 	    ExecutorModelRef string `json:"executor_model_ref,omitempty"`
+	
+	    // AssignedAgent carries the client-specified executor override
+	    // (chat.request agent_id, researcher-extract e2e 2026-09-15). When
+	    // non-empty, synthesized steps are stamped with this agent so the
+	    // tactical scheduler dispatches to the requested specialist instead of
+	    // re-picking agents per step from the tool-hint table. Empty = no
+	    // override; per-step selection proceeds.
+	    AssignedAgent string `json:"assigned_agent,omitempty"`
 	}
 
 <a name="PlannerThresholds"></a>
@@ -13099,6 +13274,32 @@ ReflectionTrajectoryStep describes one step in the reflection execution trace.
 	    ErrorCode  string `json:"error_code,omitempty"`
 	    RetryOf    string `json:"retry_of,omitempty"`
 	}
+
+<a name="RefusalSeams"></a>
+## type RefusalSeams
+
+RefusalSeams carries the injectable refusal\-fallback collaborators.
+
+	type RefusalSeams struct {
+	
+	    // EventPublisher installs the agent.model_escalated publisher closure.
+	    EventPublisher func(topic string, payload map[string]any)
+	    // contains filtered or unexported fields
+	}
+
+<a name="ExportedRefusalSeams"></a>
+### func ExportedRefusalSeams
+
+	func ExportedRefusalSeams(l *AgentLoop) *RefusalSeams
+
+ExportedRefusalSeams returns a mutable view of the loop's refusal\-fallback seams. Call Apply to write any set fields back onto the loop.
+
+<a name="RefusalSeams.Apply"></a>
+### func \(\*RefusalSeams\) Apply
+
+	func (s *RefusalSeams) Apply()
+
+Apply writes any configured seams onto the loop. Nil entries are skipped \(plain\-nil guard per repo convention\).
 
 <a name="RegistryConfig"></a>
 ## type RegistryConfig
@@ -14398,6 +14599,93 @@ IsEmpty reports whether the digest carries no information. The caller treats an 
 
 IsEmptyIgnoringClarify reports whether the digest carries no information EXCEPT a trailing clarify marker. buildClarificationResult records the clarify intent in the session tracker, so a session whose only history is a pending clarification produces a digest whose LastIntentType is "clarify" — making IsEmpty false even though no real context exists. The clarification\-resume gate \(ResumeAfterClarification A5\) uses this variant so "still ambiguous after clarification" can re\-fire a follow\-up question for exactly the context\-less sessions clarification exists for \(bughunt 2026\-09\-10 M2\). The ClassifyAndRoute gate keeps plain IsEmpty.
 
+<a name="SessionDriftDetector"></a>
+## type SessionDriftDetector
+
+SessionDriftDetector watches the per\-session sequence of intent embeddings and raises a drift signal when the recent pattern deviates from the trajectory established earlier in the session \(meept issue \#41\). It is not a classifier — it is a change detector for a temporal stream: it never judges what an embedding means, only whether the session's embedding distribution has moved. Intended use is alongside the per\-message classifier: when drift fires, the dispatcher can re\-run the full classification chain instead of trusting a per\-message verdict.
+
+Privacy: the detector sees embeddings and session IDs only. Observe never accepts raw text, and no raw text ever appears in logs or errors — session IDs and numeric scores only.
+
+Score \(both halves are of the CURRENT window's content\):
+
+	Let W be the rolling window of the last N normalized embeddings,
+	split asymmetrically so the current side is purely post-shift data
+	(a symmetric 6/6 split keeps the "current" half contaminated with
+	pre-shift embeddings for ~N/6 extra turns): B = W[0 : N-ncur]
+	(older baseline) and C = W[N-ncur : N] (newest ncur), with
+	ncur = N/3 clamped to [2, N/2] — 8/4 at the default N=12.
+	Normalize each half's mean to unit length, then
+	
+	  shift = 1 - cos(mean(B), mean(C))     (how far the stream moved)
+	  rate  = 1 - cos(prevMean(B), mean(B)) (how fast the baseline is
+	          itself moving; prevMean(B) is the baseline half's mean as
+	          of the previous scored turn, zero-vector at the first
+	          scored turn so rate = 1 there — after clamp, see below)
+	  score = clamp01(shift + 0.5 * rate)
+	
+	Kept in [0,1] by construction (cosine distance of unit vectors is
+	in [0,2] in theory but ~[0,1] in practice; the clamp makes the
+	range contract explicit).
+	
+
+Default threshold derivation \(measured by simulation, 16\-dim noisy unit vectors, 8/4 split\): the 97.5th\-percentile principle says take a scaled quantile of the score distribution over stable traffic. At turn\-to\-turn noise sigma=0.3 \(cosine similarity to the session intent \>= \~0.95, a realistic per\-message classifier embedding\) the stable score distribution has p97.5 \~= 0.40 and p99 \~= 0.43; 0.60 sits above those with headroom so a 100\-turn stable session fires with probability \~1.6% — comfortably past the requirement that \>= 95% of stable sessions produce zero signals. The headroom is deliberate: pushing to the raw p97.5 \(\~0.40\) triples the false\-alarm rate, while at higher noise \(sigma=0.4\) even the p97.5 is \~0.56, so no threshold near the quantile both holds the 95% bar there and detects anything — such traffic needs a raised Threshold in config. Detection at the default: a 90\-degree intent rotation fires within \<= 6 turns with simulated rate \>= 96% at sigma \<= 0.3.
+
+Warm\-up: no signal until the window has filled once \(N observations in the session\). During warm\-up Observe returns drifted=false and the score computed so far \(0 before the midpoint split exists\).
+
+Concurrency: all per\-session state is guarded by a single mutex; sessions are independent so contention is negligible. The sessions map is capped at maxDriftSessions — inserting a new session beyond the cap evicts the least\-recently\-used one \(LRU via container/list, chosen because Observe is a per\-turn hot path and LRU keeps active sessions without an arbitrary re\-creation cost\).
+
+Log\-only semantics live at the CALL SITE \(config agent session\_drift log\_only\), not here: Observe only reports \(drifted, score\). The one Info log in this file is the drift signal itself and carries session id, score, threshold, and window size — never message text.
+
+	type SessionDriftDetector struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSessionDriftDetector"></a>
+### func NewSessionDriftDetector
+
+	func NewSessionDriftDetector(cfg config.SessionDriftConfig, logger *slog.Logger) *SessionDriftDetector
+
+NewSessionDriftDetector builds the detector. A nil logger falls back to slog.Default. cfg.Enabled == false \(the shipped default\) returns an inert detector: Enabled\(\) is false, Observe is a no\-op returning \(false, 0\), and no per\-session state is kept. WindowSize \<= 0 uses is floored at 4; Threshold \<= 0 uses the calibrated default \(0.60\) — 0 is therefore "use the default", not "signal on everything" \(mirrors SessionDriftConfig's documented semantics\).
+
+<a name="SessionDriftDetector.Enabled"></a>
+### func \(\*SessionDriftDetector\) Enabled
+
+	func (d *SessionDriftDetector) Enabled() bool
+
+Enabled reports whether the detector is active. False = Observe is a no\-op; call sites check this before doing any work.
+
+<a name="SessionDriftDetector.Observe"></a>
+### func \(\*SessionDriftDetector\) Observe
+
+	func (d *SessionDriftDetector) Observe(sessionID string, embedding []float64) (drifted bool, score float64)
+
+Observe records one classified turn's embedding for sessionID and reports whether drift fired. One call per classified turn.
+
+Degenerate inputs \(empty, dimension mismatch with the session's prior window, NaN/Inf, zero norm\) are ignored: the observation is not recorded and Observe returns \(false, 0\) with no panic — the detector can only abstain, never drift on garbage \(mirrors EmbedHealthCheck's fail\-safe posture\). The first accepted embedding fixes the session's dimension; later mismatches are dropped.
+
+Warm\-up: while the window has fewer than \`window\` accepted observations, no signal can fire \(drifted=false\) and score is the running score \(0 until the midpoint split exists\).
+
+<a name="SessionDriftDetector.ResetSession"></a>
+### func \(\*SessionDriftDetector\) ResetSession
+
+	func (d *SessionDriftDetector) ResetSession(sessionID string)
+
+ResetSession drops all state for sessionID \(next Observe starts a fresh warm\-up\). Safe to call for unknown sessions.
+
+<a name="SessionDriftDetector.Threshold"></a>
+### func \(\*SessionDriftDetector\) Threshold
+
+	func (d *SessionDriftDetector) Threshold() float64
+
+
+
+<a name="SessionDriftDetector.WindowSize"></a>
+### func \(\*SessionDriftDetector\) WindowSize
+
+	func (d *SessionDriftDetector) WindowSize() int
+
+WindowSize and Threshold expose the effective configuration \(for tests and call\-site logging only\).
+
 <a name="SessionEndData"></a>
 ## type SessionEndData
 
@@ -15320,6 +15608,19 @@ SubagentExecution records execution metadata for a subagent invocation.
 	    TurnsUsed int `json:"turns_used"`
 	    // ToolCallsMade is the total number of tool calls issued.
 	    ToolCallsMade int `json:"tool_calls_made"`
+	}
+
+<a name="SubmittedTurnRecord"></a>
+## type SubmittedTurnRecord
+
+SubmittedTurnRecord is one tracked async\-submitted chat turn. Shape is stable for the reaper \(async\-turn\-migration leaf 06\), which consumes Stale\(\) to reap abandoned turns as failed. Named ...TurnRecord \(not TurnRecord\) because package agent already has a snapshot TurnRecord in turn\_compaction.go.
+
+	type SubmittedTurnRecord struct {
+	    TurnID         string
+	    ConversationID string
+	    TaskID         string
+	    SubmittedAt    time.Time
+	    LastProgressAt time.Time
 	}
 
 <a name="SubtaskAssignment"></a>
@@ -17200,6 +17501,64 @@ TurnRecord represents a single tool invocation in a turn snapshot.
 	    DurationMs int            `json:"duration_ms,omitempty"`
 	}
 
+<a name="TurnRegistry"></a>
+## type TurnRegistry
+
+TurnRegistry tracks async chat.submit turns in memory. It backs the submit\-ack idempotency dedupe \(Register\), progress liveness \(Touch\), and the reaper seam \(Stale\). Sufficient in\-memory only: a daemon restart orphans tracked turns, which the reaper treats as failed.
+
+	type TurnRegistry struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTurnRegistry"></a>
+### func NewTurnRegistry
+
+	func NewTurnRegistry() *TurnRegistry
+
+NewTurnRegistry creates an empty registry. Nil logger\-safe.
+
+<a name="TurnRegistry.AttachTask"></a>
+### func \(\*TurnRegistry\) AttachTask
+
+	func (r *TurnRegistry) AttachTask(turnID, taskID string)
+
+AttachTask records the orchestrator task created for a turn. No\-op when the turn is unknown or taskID is empty.
+
+<a name="TurnRegistry.Complete"></a>
+### func \(\*TurnRegistry\) Complete
+
+	func (r *TurnRegistry) Complete(turnID string)
+
+Complete removes a finished turn from tracking. No\-op when the turn is unknown.
+
+<a name="TurnRegistry.Register"></a>
+### func \(\*TurnRegistry\) Register
+
+	func (r *TurnRegistry) Register(turnID, conversationID string) bool
+
+Register tracks a newly submitted turn. Idempotent on turnID: when the turn is already registered it returns existing=true and the ORIGINAL record is preserved untouched \(retry dedupe — never overwrite\).
+
+<a name="TurnRegistry.Stale"></a>
+### func \(\*TurnRegistry\) Stale
+
+	func (r *TurnRegistry) Stale(olderThan time.Duration) []SubmittedTurnRecord
+
+Stale returns records whose last progress is older than the given duration, ordered by LastProgressAt \(oldest first\). The returned slice is a copy; the registry keeps tracking these turns \(the reaper owns removal via Complete\).
+
+<a name="TurnRegistry.Touch"></a>
+### func \(\*TurnRegistry\) Touch
+
+	func (r *TurnRegistry) Touch(turnID string)
+
+Touch marks a turn as making progress \(reaper clock reset\). No\-op when the turn is unknown.
+
+<a name="TurnRegistry.TurnIDForTask"></a>
+### func \(\*TurnRegistry\) TurnIDForTask
+
+	func (r *TurnRegistry) TurnIDForTask(taskID string) string
+
+TurnIDForTask returns the turn id that dispatched taskID, or "" when no tracked turn claims it \(headless task, legacy turn, or already\-completed turn\). Used by the task\-end relay so the real result is re\-broadcast with the ORIGINATING turn id — clients filter turn.terminal by turn\_id, and a fresh id would be invisible to them \(bench gate 2026\-09\-16: relay events carried new ids, so async task results never reached the awaiting client\).
+
 <a name="TurnSnapshot"></a>
 ## type TurnSnapshot
 
@@ -17284,6 +17643,75 @@ TurnStatus is the machine\-maintained snapshot rendered into the per\-turn \[sta
 	    // invents success.
 	    GateState string
 	}
+
+<a name="TurnTerminalEvent"></a>
+## type TurnTerminalEvent
+
+TurnTerminalEvent is the frozen payload published on the "turn.terminal" bus topic when a chat turn reaches its terminal state. Field set is CLOSED: add nothing, remove nothing, rename nothing without updating every consumer \(TUI, GUI, bench\) and the contract in docs/plans/20260916\-turn\-lifecycle\-events/master.md.
+
+	type TurnTerminalEvent struct {
+	    ConversationID string `json:"conversation_id"`         // required, non-empty
+	    SessionID      string `json:"session_id,omitempty"`    //
+	    TurnID         string `json:"turn_id"`                 // uuid per chat request
+	    TaskID         string `json:"task_id,omitempty"`       // set iff the turn dispatched a task
+	    IntentType     string `json:"intent_type,omitempty"`   //
+	    AgentID        string `json:"agent_id,omitempty"`      //
+	    HandlerCase    string `json:"handler_case"`            // matches dispatch_log handler_case values
+	    Status         string `json:"status"`                  // completed | failed | timeout | parked  (CLOSED set)
+	    Reply          string `json:"reply"`                   // final user-facing reply text (stub included if that is what was returned)
+	    DurationMS     int64  `json:"duration_ms"`             //
+	    ClassifiedBy   string `json:"classified_by,omitempty"` // intent.Method provenance
+	    Model          string `json:"model,omitempty"`         //
+	    Error          string `json:"error,omitempty"`         // non-empty iff Status=="failed"
+	}
+
+<a name="TurnTerminalEvent.WSClass"></a>
+### func \(TurnTerminalEvent\) WSClass
+
+	func (TurnTerminalEvent) WSClass() wsclass.WSClass
+
+WSClass implements wsclass.WSClassified: turn lifecycle events render as agent\_progress \- never chat\_message \(blank\-bubble invariant\).
+
+<a name="TurnWatchdog"></a>
+## type TurnWatchdog
+
+TurnWatchdog is the async\-turn liveness reaper \(async\-turn\-migration leaf 06\). Every pass it asks the TurnRegistry for turns whose last progress is older than the stale threshold and, for each, emits a turn.terminal event with status=failed and handler\_case=turn\_reaped, then removes the turn from tracking. Mark\-and\-continue ONLY: the reaper never re\-dispatches work and never cancels in\-flight goroutines — if late work eventually completes, the normal turn.terminal still fires and clients treat a post\-reaped completion as valid.
+
+The emit func is the injection seam: production passes ChatHandler.EmitTurnTerminal \(wrapped by the daemon composition, which also logs the Warn "turn reaped" line per leaf\-06 task 4\); tests pass a capturing func. This keeps package agent free of any watchdog→ChatHandler construction dependency.
+
+Staleness is judged on the registry's injectable clock \(TurnRegistry.now\), so tests advance time without sleeping. The pass cadence is a real time.Ticker, exercised with tiny intervals in tests.
+
+	type TurnWatchdog struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTurnWatchdog"></a>
+### func NewTurnWatchdog
+
+	func NewTurnWatchdog(reg *TurnRegistry, emit func(TurnTerminalEvent), logger *slog.Logger) *TurnWatchdog
+
+NewTurnWatchdog builds a watchdog over reg. reg or emit nil disables it \(Start no\-ops\). Nil logger falls back to slog.Default\(\).
+
+<a name="TurnWatchdog.RunOnce"></a>
+### func \(\*TurnWatchdog\) RunOnce
+
+	func (w *TurnWatchdog) RunOnce(staleAfter time.Duration) int
+
+RunOnce executes exactly one reap pass and returns the number of turns reaped. Exported test seam over the unexported reapOnce \(the leaf contract offers "RunOnce\(\) exported test seam OR Start with tiny interval" — this is the former; Start\-with\-tiny\-interval is covered by the lifecycle test too\).
+
+<a name="TurnWatchdog.Start"></a>
+### func \(\*TurnWatchdog\) Start
+
+	func (w *TurnWatchdog) Start(interval, staleAfter time.Duration)
+
+Start spawns the reap loop. Safe to call once; subsequent calls are no\-ops. Also a no\-op when the watchdog was built without a registry or emit func \(disabled\).
+
+<a name="TurnWatchdog.Stop"></a>
+### func \(\*TurnWatchdog\) Stop
+
+	func (w *TurnWatchdog) Stop()
+
+Stop halts the loop and waits for its exit \(no goroutine leak: the wait is on the loop's own done channel\). Idempotent and safe when Start was never called.
 
 <a name="ValidateCheckpointResult"></a>
 ## type ValidateCheckpointResult
@@ -17753,6 +18181,9 @@ Worker represents an active agent processing a request.
 	    StartTime      time.Time `json:"start_time"`
 	    LastActivity   time.Time `json:"last_activity"`
 	    CurrentTool    string    `json:"current_tool,omitempty"`
+	    // TurnID is the async-submit turn identity (leaf 03). Empty on legacy
+	    // `chat` turns, which are never registry-tracked.
+	    TurnID string `json:"turn_id,omitempty"`
 	}
 
 <a name="WorkerStage"></a>

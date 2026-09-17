@@ -85,6 +85,7 @@ Package config provides configuration loading and validation for meept.
 - [type BrowserConfig](<#BrowserConfig>)
   - [func \(c BrowserConfig\) HeadlessEnabled\(\) bool](<#BrowserConfig.HeadlessEnabled>)
 - [type BudgetConfig](<#BudgetConfig>)
+- [type BurstDetectionConfig](<#BurstDetectionConfig>)
 - [type BwrapRuntimeConfig](<#BwrapRuntimeConfig>)
 - [type CacheConfig](<#CacheConfig>)
 - [type CalendarConfig](<#CalendarConfig>)
@@ -139,6 +140,7 @@ Package config provides configuration loading and validation for meept.
 - [type DockerRuntimeConfig](<#DockerRuntimeConfig>)
 - [type EgressConfig](<#EgressConfig>)
 - [type EgressRuleConfig](<#EgressRuleConfig>)
+- [type EmbedHealthCheckConfig](<#EmbedHealthCheckConfig>)
 - [type EmbeddingConfig](<#EmbeddingConfig>)
 - [type EmployeesAuditConfig](<#EmployeesAuditConfig>)
   - [func \(c \*EmployeesAuditConfig\) Validate\(\) error](<#EmployeesAuditConfig.Validate>)
@@ -287,6 +289,7 @@ Package config provides configuration loading and validation for meept.
   - [func \(c \*SecurityConfig\) Validate\(\) error](<#SecurityConfig.Validate>)
 - [type SelfImproveConfig](<#SelfImproveConfig>)
 - [type SessionConfig](<#SessionConfig>)
+- [type SessionDriftConfig](<#SessionDriftConfig>)
 - [type ShadowAdaptersConfig](<#ShadowAdaptersConfig>)
 - [type ShadowConfig](<#ShadowConfig>)
 - [type ShadowDPOConfig](<#ShadowDPOConfig>)
@@ -318,6 +321,7 @@ Package config provides configuration loading and validation for meept.
 - [type TranscriptConfig](<#TranscriptConfig>)
   - [func DefaultTranscriptConfig\(\) TranscriptConfig](<#DefaultTranscriptConfig>)
 - [type TransportConfig](<#TransportConfig>)
+- [type TurnWatchdogConfig](<#TurnWatchdogConfig>)
 - [type UploadsConfig](<#UploadsConfig>)
 - [type ValidationConfig](<#ValidationConfig>)
 - [type VerificationDefaults](<#VerificationDefaults>)
@@ -1273,6 +1277,25 @@ Enabled is the ONE global budget switch. When false \(the default\) NO budget is
 	    PerSessionCostLimit  float64 `json:"per_session_cost_limit" toml:"per_session_cost_limit"`
 	}
 
+<a name="BurstDetectionConfig"></a>
+## type BurstDetectionConfig
+
+BurstDetectionConfig configures the tool\-failure burst detector \(meept issue \#43\): a temporal anomaly check on the per\-session dispatch outcome stream. The detector watches resolved outcomes \(ok / corrected / failed\_replan\) and raises a signal when the failure pattern shifts, for the dispatcher to consider a replan or model switch.
+
+	type BurstDetectionConfig struct {
+	    // Enabled turns on the burst detector. Default false.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // WindowSize is the length of the rolling outcome window, in
+	    // turns. 0 uses the built-in default.
+	    WindowSize int `json:"window_size" toml:"window_size"`
+	    // Threshold is the anomaly score above which a burst is signaled.
+	    // 0 uses the built-in default.
+	    Threshold float64 `json:"threshold" toml:"threshold"`
+	    // LogOnly makes the signal observational: bursts are logged but
+	    // never trigger replans. Default true.
+	    LogOnly bool `json:"log_only" toml:"log_only"`
+	}
+
 <a name="BwrapRuntimeConfig"></a>
 ## type BwrapRuntimeConfig
 
@@ -1368,6 +1391,11 @@ ClassifierPrefilterConfig configures the Stage\-0 embedding prefilter in Classif
 	    // disagreement falls through to the LLM chain. Empty disables the
 	    // veto (Door 1 routes on the kNN vote alone — legacy behavior).
 	    VetoPath string `json:"veto_path" toml:"veto_path"`
+	    // EmbedHealthCheck guards the prefilter against a degraded embedding
+	    // pipeline (meept issue #42): when active, the input embedding is
+	    // scored against a fixed reference set before the kNN vote and a
+	    // degraded/unfamiliar embedding falls through to the LLM chain.
+	    EmbedHealthCheck EmbedHealthCheckConfig `json:"embed_health_check" toml:"embed_health_check"`
 	}
 
 <a name="ClusterConfig"></a>
@@ -1952,6 +1980,24 @@ EgressRuleConfig is one \[security.egress.rules\] entry.
 	type EgressRuleConfig struct {
 	    Match  string `json:"match"  toml:"match"`  // host suffix or CIDR
 	    Action string `json:"action" toml:"action"` // allow | ask | deny
+	}
+
+<a name="EmbedHealthCheckConfig"></a>
+## type EmbedHealthCheckConfig
+
+EmbedHealthCheckConfig configures the embedding\-pipeline health gate \(issue \#42\). The check is pure Go and deterministic: cosine distance from the incoming embedding to the nearest vector in a fixed reference set of known\-good embeddings, compared to a 95th\-percentile threshold calibrated from the reference itself. Unhealthy =\> the prefilter abstains and the full LLM chain runs \(fail safe: the check can only skip prefilter work, never enable a confident route on garbage\).
+
+	type EmbedHealthCheckConfig struct {
+	    // Enabled turns on the health gate inside the prefilter. Default
+	    // true in the shipped config: the check has no network dependency
+	    // and is inert (never blocks) when ReferencePath is absent.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // ReferencePath is the JSON file of known-good embeddings
+	    // ([[float,...],...]) produced by tools/build_embed_health_ref.py
+	    // from the prefilter centroid store. Empty defaults to
+	    // ~/.meept/embed_health_reference.json. A missing file leaves the
+	    // check inert (logged once at startup).
+	    ReferencePath string `json:"reference_path" toml:"reference_path"`
 	}
 
 <a name="EmbeddingConfig"></a>
@@ -3033,14 +3079,22 @@ ModelPreset represents a model preset with parameters.
 ModelsConfig represents the models.json5 configuration structure.
 
 	type ModelsConfig struct {
-	    Model             string              `json:"model"`
-	    SmallModel        string              `json:"small_model"`
-	    ClassifierModel   string              `json:"classifier_model"` // Model for intent classification (empty = use model)
-	    SummarizerModel   string              `json:"summarizer_model"` // Model for session summarization (empty = use model)
-	    VisionModel       string              `json:"vision_model"`
-	    ImageModel        string              `json:"image_model"`
-	    VideoModel        string              `json:"video_model"`
-	    ExtractModel      string              `json:"extract_model"` // Model for json_extract extraction (empty = json_extract reports not-configured)
+	    Model           string `json:"model"`
+	    SmallModel      string `json:"small_model"`
+	    ClassifierModel string `json:"classifier_model"` // Model for intent classification (empty = use model)
+	    SummarizerModel string `json:"summarizer_model"` // Model for session summarization (empty = use model)
+	    VisionModel     string `json:"vision_model"`
+	    ImageModel      string `json:"image_model"`
+	    VideoModel      string `json:"video_model"`
+	    ExtractModel    string `json:"extract_model"` // Model for json_extract extraction (empty = json_extract reports not-configured)
+	    // MemoryModel is the model for ambient epistemic extraction + distill
+	    // summarization (empty = falls back to the general chat client).
+	    MemoryModel string `json:"memory_model"`
+	    // RefusalModel is the global default refusal fallback target
+	    // (provider/model ref or alias name; refusal-fallback tree 02).
+	    // Empty = no global default; a per-agent spec refusal_model overrides
+	    // this; both empty = refusal fallback disabled for that agent.
+	    RefusalModel      string              `json:"refusal_model"`
 	    DisabledProviders []string            `json:"disabled_providers"`
 	    DefaultTimeout    int                 `json:"default_timeout"` // Default timeout in seconds
 	    Providers         map[string]Provider `json:"providers"`
@@ -3168,6 +3222,30 @@ OrchestratorConfig holds hierarchical orchestrator settings.
 	    // prefilter is inert and all traffic flows through the LLM path
 	    // unchanged.
 	    Prefilter ClassifierPrefilterConfig `json:"classifier_prefilter" toml:"classifier_prefilter"`
+	    // SessionDrift configures the session drift detector (issue #41): a
+	    // temporal anomaly check on the per-session intent-embedding stream.
+	    // Default off, log-only — the established first production mode.
+	    SessionDrift SessionDriftConfig `json:"session_drift" toml:"session_drift"`
+	    // BurstDetection configures the tool-failure burst detector (issue
+	    // #43): a temporal anomaly check on the per-session dispatch outcome
+	    // stream. Default off, log-only.
+	    BurstDetection BurstDetectionConfig `json:"burst_detection" toml:"burst_detection"`
+	    // TurnWatchdog configures the async-turn liveness reaper
+	    // (async-turn-migration leaf 06): a periodic pass marks submitted
+	    // turns that stopped making progress as failed (turn.terminal
+	    // handler_case=turn_reaped) so every submitted turn eventually
+	    // reaches a terminal state. Liveness-based and workload-independent —
+	    // it replaces the old static task-wait semantics for async turns.
+	    TurnWatchdog TurnWatchdogConfig `json:"turn_watchdog" toml:"turn_watchdog"`
+	    // SyncChatEnabled is the legacy blocking-chat opt-in (async-turn-
+	    // migration leaf 07). Default FALSE: task-dispatched turns always
+	    // ack immediately (chat.submit) and results arrive via turn.terminal.
+	    // When true, task-dispatched turns block the chat RPC up to the 110s
+	    // sync-wait ceiling and may return the "still running" stub — kept
+	    // only so un-migrated external integrations keep working during the
+	    // migration tail. The meept-bench source special-case ALSO requires
+	    // this flag; under the default it is async like every other client.
+	    SyncChatEnabled bool `json:"sync_chat_enabled" toml:"sync_chat_enabled"`
 	}
 
 <a name="PTYConfig"></a>
@@ -3971,6 +4049,27 @@ SessionConfig holds session persistence and branching settings.
 	    SummaryPromptTruncationLimit int `json:"summary_prompt_truncation_limit" toml:"summary_prompt_truncation_limit"`
 	}
 
+<a name="SessionDriftConfig"></a>
+## type SessionDriftConfig
+
+SessionDriftConfig configures the session drift detector \(meept issue \#41\): a temporal anomaly check on the per\-session intent\-embedding stream. The detector watches the sequence of embeddings a session produces and raises a signal when the current window deviates from the prior trajectory, so the dispatcher can re\-run the full classification chain instead of trusting a per\-message verdict.
+
+	type SessionDriftConfig struct {
+	    // Enabled turns on the drift detector. Default false.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // WindowSize is the length of the rolling embedding window, in
+	    // turns. 0 uses the built-in default.
+	    WindowSize int `json:"window_size" toml:"window_size"`
+	    // Threshold is the anomaly score above which drift is signaled.
+	    // 0 uses the built-in default.
+	    Threshold float64 `json:"threshold" toml:"threshold"`
+	    // LogOnly makes the signal observational: drift is logged but never
+	    // changes routing. Default true — the established first
+	    // production mode (assert_only / log-only) until precision is
+	    // measured on real traffic.
+	    LogOnly bool `json:"log_only" toml:"log_only"`
+	}
+
 <a name="ShadowAdaptersConfig"></a>
 ## type ShadowAdaptersConfig
 
@@ -4466,6 +4565,21 @@ TransportConfig controls which transports the daemon exposes. Clients can connec
 	type TransportConfig struct {
 	    RPC  RPCTransportConfig  `json:"rpc"  toml:"rpc"`
 	    HTTP HTTPTransportConfig `json:"http" toml:"http"`
+	}
+
+<a name="TurnWatchdogConfig"></a>
+## type TurnWatchdogConfig
+
+TurnWatchdogConfig is the liveness\-reaper knob block \(async\-turn\- migration leaf 06\). Enabled defaults TRUE — without a reaper a vanished turn would leave its client waiting forever, which is the silent\-death failure mode this leaf exists to close. Zero IntervalSeconds maps to 30, zero StaleAfterSeconds maps to 600 \(normalized in DefaultConfig\) — 600s tolerates a legitimate silent LLM\+tool stretch \(a single multi\-minute step emits no intermediate events; the bench gate showed 2\-minute silent steps are routine\).
+
+	type TurnWatchdogConfig struct {
+	    // Enabled turns on the reaper. Default true.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // IntervalSeconds is the seconds between reap passes. 0 → 30.
+	    IntervalSeconds int `json:"interval_seconds" toml:"interval_seconds"`
+	    // StaleAfterSeconds is how long a turn must go without progress
+	    // before it is reaped as failed. 0 → 120.
+	    StaleAfterSeconds int `json:"stale_after_seconds" toml:"stale_after_seconds"`
 	}
 
 <a name="UploadsConfig"></a>

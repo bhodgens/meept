@@ -198,6 +198,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) IsDistributed\(\) bool](<#Manager.IsDistributed>)
   - [func \(m \*Manager\) IsInitialized\(\) bool](<#Manager.IsInitialized>)
   - [func \(m \*Manager\) IsMemvidActive\(\) bool](<#Manager.IsMemvidActive>)
+  - [func \(m \*Manager\) LLM\(\) llm.Chatter](<#Manager.LLM>)
   - [func \(m \*Manager\) ListAutoClaims\(ctx context.Context, createdAfter time.Time, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListAutoClaims>)
   - [func \(m \*Manager\) ListExpiredClaims\(ctx context.Context, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListExpiredClaims>)
   - [func \(m \*Manager\) ListPendingReviews\(ctx context.Context, before time.Time\) \(decisions, predictions \[\]MemoryResult, err error\)](<#Manager.ListPendingReviews>)
@@ -654,6 +655,15 @@ AmbientCandidate is a single claim/decision/prediction extracted from conversati
 	func ParseAmbientCandidates(raw []byte) ([]AmbientCandidate, error)
 
 ParseAmbientCandidates parses the raw JSON body returned by the LLM into AmbientCandidate values.
+
+Tolerated shapes \(defense in depth — the grammar\-constrained wire path in internal/llm forces the bare\-array shape, but unconstrained endpoints do not, see tools/memory\-eval findings\):
+
+1. bare JSON array \(the contract shape\),
+2. an object wrapping the array under "candidates", "results", or "items",
+3. markdown code fences around either of the above,
+4. arbitrary prose surrounding a top\-level JSON array \(the first bracket\-balanced \[...\] block that unmarshals wins\).
+
+Anything else is an error.
 
 <a name="AmbientClassifierLLM"></a>
 ## type AmbientClassifierLLM
@@ -1876,7 +1886,7 @@ Lesson is a distilled principle with supporting evidence references.
 
 	func DecodeLesson(content string) (*Lesson, error)
 
-DecodeLesson parses stored content into a Lesson, rejecting malformed JSON.
+DecodeLesson parses stored content into a Lesson, rejecting malformed JSON. evidence\_ids elements are coerced to strings when the producer emitted numbers \(small models emit \[101, 102\] for \["101", "102"\]\); elements that are neither strings nor numbers are dropped rather than failing the whole lesson. Only the decode path is tolerant — EncodeLesson stays strict.
 
 <a name="Manager"></a>
 ## type Manager
@@ -2110,6 +2120,13 @@ IsInitialized returns true if the memory manager was successfully initialized. T
 	func (m *Manager) IsMemvidActive() bool
 
 IsMemvidActive returns true if memvid is the active backend.
+
+<a name="Manager.LLM"></a>
+### func \(\*Manager\) LLM
+
+	func (m *Manager) LLM() llm.Chatter
+
+LLM returns the manager's chat client \(consolidation summarization \+ distill summarization\), or nil if none is set. Exposed for wiring tests that assert which client the daemon construction site preferred.
 
 <a name="Manager.ListAutoClaims"></a>
 ### func \(\*Manager\) ListAutoClaims
