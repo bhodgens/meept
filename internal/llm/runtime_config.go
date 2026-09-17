@@ -218,7 +218,29 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 	// Resolved supervisor decision: an absent `supervise` key means true (see
 	// SuperviseOrDefault), and the resolved value is stored as a pointer so a
 	// literal-constructed RuntimeConfig keeps the same absent-means-true rule.
+	//
+	// Precedence with auto_stop_on_exit (audit finding F24): supervision
+	// exists to terminate a runtime whose daemon died HARD. A normal daemon
+	// exit closes the parent-death pipe too, so a supervised runtime is
+	// killed on EVERY daemon exit — which must not defeat an explicit
+	// auto_stop_on_exit:false (the operator opted to preserve the runtime;
+	// StopAll's skip and the boot sweep's auto_stop gate both assume it
+	// survives). An ABSENT supervise key is a default, not a choice, so
+	// default-on supervision yields to the explicit preserve opt-out and
+	// the runtime is spawned DIRECT. An explicit `supervise: true` with
+	// `auto_stop_on_exit: false` keeps supervision: the operator overrode
+	// the default knowingly. Full table:
+	//
+	//	supervise        auto_stop_on_exit   spawn
+	//	absent           absent / true       supervised
+	//	absent           explicit false      DIRECT (default yields to opt-out)
+	//	explicit true    absent / true       supervised
+	//	explicit true    explicit false      supervised (operator override)
+	//	explicit false   any                 DIRECT (supervise opt-out)
 	supervise := cfg.SuperviseOrDefault()
+	if cfg.Supervise == nil && !cfg.AutoStopOnExitOrDefault() {
+		supervise = false
+	}
 
 	return &RuntimeConfig{
 		Type:               rt,
@@ -329,6 +351,13 @@ func IsLoopbackBaseURL(baseURL string) bool {
 // process. An absent value (nil, i.e. every literal-constructed config) means
 // true: only an explicit false opts out. A nil config manages no runtime and
 // reports false.
+//
+// Precedence note (audit finding F24): ValidateAndNormalize resolves the
+// default-on supervision to an explicit false when the lifecycle also sets
+// auto_stop_on_exit:false WITHOUT an explicit supervise key — a default must
+// not defeat an explicit preserve opt-out. Only the config-file resolution
+// applies that rule; a literal-constructed RuntimeConfig (CLI flags, internal
+// callers) that sets AutoStop=false by hand keeps whatever Supervise says.
 func (c *RuntimeConfig) Supervised() bool {
 	if c == nil {
 		return false
