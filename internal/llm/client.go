@@ -592,6 +592,15 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	for attempt := 1; attempt <= shortRetries; attempt++ {
 		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID)
 		if err != nil {
+			// Refusal errors never re-enter the short-retry loop: the
+			// serving model declined by policy — retrying the SAME model
+			// cannot change the verdict. Return immediately; the agent
+			// loop's refusal branch re-dispatches to the configured
+			// refusal model (refusal-fallback tree 01/03).
+			if _, ok := errors.AsType[*RefusalError](err); ok {
+				return nil, err
+			}
+
 			// Quota errors never re-enter the short-retry loop: the window
 			// is hours, not seconds. Return immediately; the caller decides
 			// whether to wait/rotate (quota-reset-resilience contract 1).
@@ -808,6 +817,12 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		if err != nil {
 			// ChatWithProgress retry loop: same classification contract
 			// as Chat() above.
+			// Refusal errors never re-enter the short-retry loop: the
+			// serving model declined by policy (refusal-fallback 01/03).
+			if _, ok := errors.AsType[*RefusalError](err); ok {
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
+			}
 			// Quota errors never re-enter the short-retry loop (streaming
 			// path): hours-scale window, return immediately.
 			if _, ok := errors.AsType[*QuotaResetError](err); ok {
@@ -2011,6 +2026,24 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			return resp, nil
 		}
 		lastErr = err
+
+		// Refusal errors never re-enter the short-retry loop (streaming
+		// delta path): the serving model declined by policy — retrying the
+		// SAME model cannot change the verdict. Return immediately; the
+		// agent loop's refusal branch re-dispatches to the configured
+		// refusal model (refusal-fallback tree 01/03).
+		if _, ok := errors.AsType[*RefusalError](err); ok {
+			return nil, err
+		}
+
+		// Refusal errors never re-enter the short-retry loop (streaming
+		// delta path): the serving model declined by policy — retrying
+		// the SAME model cannot change the verdict. Return immediately;
+		// the agent loop's refusal branch re-dispatches to the configured
+		// refusal model (refusal-fallback tree 01/03).
+		if _, ok := errors.AsType[*RefusalError](err); ok {
+			return nil, err
+		}
 
 		// Quota errors never re-enter the short-retry loop (streaming
 		// delta path): the window is hours, not seconds. Return immediately;

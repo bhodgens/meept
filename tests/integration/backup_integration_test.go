@@ -13,7 +13,6 @@ import (
 	"github.com/caimlas/meept/internal/backup"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/memory"
-	"github.com/caimlas/meept/pkg/id"
 )
 
 // TestBackupSchedulerIntegration tests the backup scheduler lifecycle.
@@ -206,63 +205,5 @@ var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level:
 
 func newTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
-func createTestSchemaAndData(t *testing.T, db *sql.DB) {
-	t.Helper()
-
-	// Create schema
-	schema := `
-		CREATE TABLE IF NOT EXISTS sessions (
-			id TEXT PRIMARY KEY,
-			created_at INTEGER,
-			updated_at INTEGER,
-			metadata BLOB
-		);
-		CREATE TABLE IF NOT EXISTS turns (
-			turn_id TEXT PRIMARY KEY,
-			session_id TEXT,
-			role TEXT,
-			content TEXT,
-			timestamp INTEGER,
-			source_node TEXT
-		);
-		CREATE TABLE IF NOT EXISTS memories (
-			id TEXT PRIMARY KEY,
-			type TEXT,
-			category TEXT,
-			content TEXT,
-			created_at INTEGER,
-			agent_id TEXT,
-			session_id TEXT,
-			source_node TEXT
-		);
-	`
-	_, err := db.Exec(schema)
-	if err != nil {
-		t.Fatalf("Create schema failed: %v", err)
-	}
-
-	// Insert test data
-	for i := 0; i < 5; i++ {
-		sessionID := id.Generate("sess-")
-		_, err = db.Exec(`
-			INSERT INTO sessions (id, created_at, updated_at, metadata)
-			VALUES (?, ?, ?, ?)
-		`, sessionID, time.Now().UnixNano(), time.Now().UnixNano(), []byte(`{}`))
-		if err != nil {
-			t.Fatalf("Insert session failed: %v", err)
-		}
-
-		for j := 0; j < 10; j++ {
-			_, err = db.Exec(`
-				INSERT INTO turns (turn_id, session_id, role, content, timestamp)
-				VALUES (?, ?, ?, ?, ?)
-			`, id.Generate("turn-"), sessionID, "user", "test", time.Now().UnixNano())
-			if err != nil {
-				t.Fatalf("Insert turn failed: %v", err)
-			}
-		}
-	}
 }
 
