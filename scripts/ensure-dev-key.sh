@@ -36,7 +36,11 @@ if [ ! -s "$key_file" ]; then
     head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$tmp"
   fi
   chmod 600 "$tmp"
-  mv "$tmp" "$key_file"
+  # Race-safe publication: -C (noclobber) fails when a concurrent
+  # gui-connect-setup/build already installed a key; the existing key wins.
+  if ! (set -C; mv "$tmp" "$key_file" 2>/dev/null); then
+    rm -f "$tmp"
+  fi
 fi
 
 key="$(tr -d '\r\n' <"$key_file")"

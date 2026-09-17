@@ -344,16 +344,23 @@ build-release: GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 build-release: build-all
 	@echo "Release build with version $(VERSION)"
 
-# `gui-connect-setup` runs FIRST: it makes the installed config GUI-ready and
-# provisions the dev key, so the GUI built by `build`/`build-gui` below embeds
-# the key and endpoint the daemon actually serves (see the FLUTTER_DART_DEFINES
-# block near the top of this file).
+# `install-install-order` forces strict sequencing under parallel make: the
+# llama floor check and the GUI connect setup (which provisions dev_key)
+# MUST complete before any build embeds the key (see the FLUTTER_DART_DEFINES
+# block near the top of this file). Recipe steps within one target always
+# run in order, even under -j; plain prerequisite lists do not.
 #
 # `deps-llama-check` gates the whole install (LFM2.5 tool-call floor): an
 # install must not quietly land a llama.cpp whose generic JSON grammar lets a
 # tool-forcing prompt answer in prose. Override for machines that do not serve
 # local models with MEEPT_LLAMA_SKIP_CHECK=1.
-install: deps-llama-check gui-connect-setup build menubar-app build-gui
+.PHONY: install-install-order
+install-install-order:
+	@$(MAKE) deps-llama-check
+	@$(MAKE) gui-connect-setup
+	@$(MAKE) build menubar-app build-gui
+
+install: install-install-order
 	@echo "Installing binaries to GOPATH/bin..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
 	go install $(GO_BUILD_FLAGS) ./cmd/meept
