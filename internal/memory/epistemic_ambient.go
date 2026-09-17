@@ -59,10 +59,19 @@ func NewAmbientExtractor(cfg AmbientExtractorConfig) *AmbientExtractor {
 
 // ambientExtractionPromptTemplate is the LLM prompt template per spec
 // section "Path B: Ambient extraction / LLM prompt template".
+// SYNC REQUIREMENT: the eval harness mirrors this template verbatim as
+// ambientPrompt in tools/memory-eval/grade.go — any wording change here MUST
+// be applied identically there (guarded by
+// TestAmbientExtractionPromptMatchesEvalHarness).
 const ambientExtractionPromptTemplate = `You are an epistemic extractor. Read the following conversation segment and
 extract assertions of belief (claims), forward-looking commitments (decisions),
 and forecasts (predictions). For each candidate:
 
+- Extract only assertions the USER commits to. An assistant's restatement,
+  summary, or confirmation of what the user said is NOT a new candidate —
+  skip it.
+- Never split one assertion into fragments; each candidate must be a complete,
+  self-contained assertion.
 - Only extract statements the speaker is committing to, not hypotheticals,
   questions, sarcasm, jokes, or quotations of others' views.
 - Skip pleasantries, agreements without content, and meta-conversation.

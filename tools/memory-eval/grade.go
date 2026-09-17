@@ -73,10 +73,18 @@ var validCategories = map[string]bool{
 
 // ambientPrompt matches production's ambientExtractionPromptTemplate wording
 // (see internal/memory/epistemic_ambient.go) with the conversation substituted.
+// SYNC REQUIREMENT: any wording change here MUST be applied identically to
+// ambientExtractionPromptTemplate in internal/memory/epistemic_ambient.go —
+// the eval only measures what production would say.
 const ambientPrompt = `You are an epistemic extractor. Read the following conversation segment and
 extract assertions of belief (claims), forward-looking commitments (decisions),
 and forecasts (predictions). For each candidate:
 
+- Extract only assertions the USER commits to. An assistant's restatement,
+  summary, or confirmation of what the user said is NOT a new candidate —
+  skip it.
+- Never split one assertion into fragments; each candidate must be a complete,
+  self-contained assertion.
 - Only extract statements the speaker is committing to, not hypotheticals,
   questions, sarcasm, jokes, or quotations of others' views.
 - Skip pleasantries, agreements without content, and meta-conversation.

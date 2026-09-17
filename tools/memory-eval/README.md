@@ -96,6 +96,27 @@ same model in GGUF-Q4_K_M vs MLX-4bit formats.
 
 *first run predated a harness fix for integer evidence_ids.
 
+## Ambient prompt iteration (2026-09-17, constrained, LFM2.5-8B Q4 on :8080)
+
+Baseline after the grammar/slot fixes (`/tmp/ambient-post-slot.json`): precision
+0.576, recall 0.605, F1 0.590, decoy FP 27, parse 51/51, conformance 51/51.
+27 of 36 FPs were decoy-segment extractions (assistant restatements treated as
+new claims, paraphrase fragments). The prompt was iterated against the fixed
+harness; every variant below keeps the same grammar and key set.
+
+| Variant | Prompt change | precision | recall | F1 | decoy FP | parse | conform |
+|---------|--------------|-----------|--------|----|----------|-------|---------|
+| baseline | post-slot-fix prompt | 0.576 | 0.605 | 0.590 | 27 | 51/51 | 51/51 |
+| V1 (SHIPPED) | + anti-restatement & no-fragmentation rules | **0.708** | 0.568 | **0.630** | **13** | 51/51 | 51/51 |
+| V2 | (not run — V1 cleared skip gate: precision ≥ 0.70 with recall ≥ 0.55) | | | | | | |
+| V3 | (not run — skipped) | | | | | | |
+
+Winner: **V1**. Decoy FPs halved (27→13), precision +0.13, recall drop 0.037
+(inside the 0.05 budget). Applied identically to
+`internal/memory/epistemic_ambient.go` (`ambientExtractionPromptTemplate`) and
+the harness mirror (`ambientPrompt` in `grade.go`); sync is guarded by
+`TestAmbientExtractionPromptMatchesEvalHarness`.
+
 ## Findings
 
 1. **None of the three is production-usable UNCONSTRAINED for ambient
