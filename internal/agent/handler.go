@@ -1218,10 +1218,15 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		Error:          turnError,
 	})
 
-	// Async-turn completion (leaf 03): the submitted turn reached a
-	// terminal state, so it leaves the registry exactly when its
-	// turn.terminal event fires. No-op for untracked (legacy) turns.
-	if req.TurnID != "" {
+	// Async-turn completion (leaf 03): the submitted turn leaves the
+	// registry when its turn.terminal event fires — EXCEPT when a task is
+	// still pending on it (relay fix, bench gate 2026-09-16): the
+	// task_completed_relay needs TurnIDForTask to re-broadcast the real
+	// result under the SAME turn id, so the registry entry (the task→turn
+	// edge) must survive until the relay fires. The relay emits under the
+	// recovered id and the reaper bounds any orphan. No-op for untracked
+	// (legacy) turns.
+	if req.TurnID != "" && syncTaskID == "" {
 		h.completeTurn(req.TurnID)
 	}
 }
@@ -1712,6 +1717,10 @@ func (h *ChatHandler) publishTaskTerminalRelay(taskID string, linkedSessions []s
 		Reply:          reply,
 		Error:          errMsg,
 	})
+	// The task→turn registry edge has served its purpose (the relay
+	// recovered the originating id): drop the entry so the watchdog does
+	// not later reap an already-answered turn. Untracked turns no-op.
+	h.completeTurn(turnID)
 }
 
 // workerConversationForSession looks up the conversation a live worker bound

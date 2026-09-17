@@ -743,3 +743,59 @@ func TestTouchTurn_NilRegistryNoOp(t *testing.T) {
 		t.Errorf("empty-id helpers mutated the registry: %+v", reg.turns)
 	}
 }
+
+// TestPublishTaskTerminalRelay_UsesOriginatingTurnID pins the relay
+// correlation fix (bench gate 2026-09-16): a tracked turn that dispatched a
+// task gets its real result re-broadcast under the SAME turn id the client's
+// chat.submit ack returned — never a fresh id, which a turn-scoped awaiter
+// can never match.
+func TestPublishTaskTerminalRelay_UsesOriginatingTurnID(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
+	reg := NewTurnRegistry()
+	h.SetTurnRegistry(reg)
+
+	// The client submitted turn-orig; dispatch attached task-77 to it.
+	reg.Register("turn-orig", "conv-relay")
+	reg.AttachTask("turn-orig", "task-77")
+
+	sub := msgBus.Subscribe("test-relay", "turn.terminal")
+	defer h.bus.Unsubscribe(sub)
+
+	h.publishTaskTerminalRelay("task-77", []string{"sess-1"},
+		"task_completed_relay", "completed", "the real result", "")
+
+	ev := waitTurnTerminal(t, sub)
+	if ev.TurnID != "turn-orig" {
+		t.Errorf("TurnID = %q, want turn-orig (the client's ack id)", ev.TurnID)
+	}
+	if ev.TaskID != "task-77" || ev.Status != "completed" || ev.Reply != "the real result" {
+		t.Errorf("event = %+v", ev)
+	}
+	// The registry edge is consumed: no watchdog reap of an answered turn.
+	if got := reg.TurnIDForTask("task-77"); got != "" {
+		t.Errorf("registry entry survived the relay: %q", got)
+	}
+}
+
+// TestPublishTaskTerminalRelay_UntrackedTaskGetsFreshID pins the fallback:
+// a task with no tracked turn (headless, legacy) still emits, under a fresh
+// turn-scoped id — the task:<id> conversation sentinel keys it for consumers.
+func TestPublishTaskTerminalRelay_UntrackedTaskGetsFreshID(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
+
+	sub := msgBus.Subscribe("test-relay", "turn.terminal")
+	defer h.bus.Unsubscribe(sub)
+
+	h.publishTaskTerminalRelay("task-99", nil,
+		"task_completed_relay", "completed", "result", "")
+
+	ev := waitTurnTerminal(t, sub)
+	if ev.TurnID == "" || ev.TurnID == "turn-orig" {
+		t.Errorf("TurnID = %q, want a fresh non-empty id", ev.TurnID)
+	}
+	if ev.ConversationID != "task:task-99" {
+		t.Errorf("ConversationID = %q, want task:task-99 sentinel", ev.ConversationID)
+	}
+}
