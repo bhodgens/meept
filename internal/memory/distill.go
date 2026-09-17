@@ -86,15 +86,72 @@ func EncodeLesson(l Lesson) (string, error) {
 }
 
 // DecodeLesson parses stored content into a Lesson, rejecting malformed JSON.
+// evidence_ids elements are coerced to strings when the producer emitted
+// numbers (small models emit [101, 102] for ["101", "102"]); elements that
+// are neither strings nor numbers are dropped rather than failing the whole
+// lesson. Only the decode path is tolerant — EncodeLesson stays strict.
 func DecodeLesson(content string) (*Lesson, error) {
-	var l Lesson
-	if err := json.Unmarshal([]byte(content), &l); err != nil {
+	return decodeLessonWire(content)
+}
+
+// lessonWire is the tolerant decode shape for lesson JSON: evidence_ids is
+// captured raw so element-level coercion can happen after the outer object
+// parses.
+type lessonWire struct {
+	Principle   string          `json:"principle"`
+	Because     string          `json:"because"`
+	EvidenceIDs json.RawMessage `json:"evidence_ids"`
+}
+
+// decodeLessonWire parses raw lesson JSON into a Lesson with lenient
+// evidence_ids handling; everything else keeps strict decoding semantics.
+func decodeLessonWire(content string) (*Lesson, error) {
+	var w lessonWire
+	if err := json.Unmarshal([]byte(content), &w); err != nil {
 		return nil, fmt.Errorf("%w: lesson: %w", ErrMalformedDistilled, err)
 	}
-	if strings.TrimSpace(l.Principle) == "" {
+	if strings.TrimSpace(w.Principle) == "" {
 		return nil, fmt.Errorf("%w: lesson principle is empty", ErrMalformedDistilled)
 	}
-	return &l, nil
+	return &Lesson{
+		Principle:   w.Principle,
+		Because:     w.Because,
+		EvidenceIDs: coerceEvidenceIDs(w.EvidenceIDs),
+	}, nil
+}
+
+// coerceEvidenceIDs converts a raw evidence_ids JSON value into []string.
+// String elements pass through; numeric elements are formatted losslessly;
+// anything else (null, object, bool) is dropped. A non-array or absent value
+// yields nil.
+func coerceEvidenceIDs(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var elems []json.RawMessage
+	if err := json.Unmarshal(raw, &elems); err != nil {
+		return nil // not an array: treat as absent
+	}
+	out := make([]string, 0, len(elems))
+	for _, el := range elems {
+		if string(el) == "null" {
+			continue // null element: drop rather than coerce to ""
+		}
+		var s string
+		if err := json.Unmarshal(el, &s); err == nil {
+			out = append(out, s)
+			continue
+		}
+		var num json.Number
+		if err := json.Unmarshal(el, &num); err == nil {
+			out = append(out, num.String())
+		}
+		// null / object / bool element: drop rather than fail the lesson.
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // EncodeProcedure validates caps and serializes a Procedure to stored content.
@@ -556,7 +613,7 @@ type llmDistillSummarizer struct {
 var _ DistillSummarizer = (*llmDistillSummarizer)(nil)
 
 const (
-	distillLessonSystemPrompt    = "You are a distillation engine. Condense observations into ONE reusable principle. Output ONLY JSON: {\"principle\": string (<=280 chars), \"because\": string, \"evidence_ids\": [string]}."
+	distillLessonSystemPrompt    = "You are a distillation engine. Condense observations into ONE reusable principle. Output ONLY JSON: {\"principle\": string (<=280 chars), \"because\": string, \"evidence_ids\": [string]}. evidence_ids MUST be an array of strings (IDs as quoted strings). If no evidence IDs are known, use an empty array."
 	distillProcedureSystemPrompt = "You are a distillation engine. Condense observations into ONE reusable how-to procedure template (documentation only, never auto-executed). Output ONLY JSON: {\"title\": string, \"steps\": [string] (max 20), \"trigger_hints\": [string]}."
 )
 

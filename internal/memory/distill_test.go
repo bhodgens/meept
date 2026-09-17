@@ -173,6 +173,108 @@ func TestDecodeRejectsWrongShape(t *testing.T) {
 	}
 }
 
+// TestDecodeLessonEvidenceIDsTolerance covers the tolerant evidence_ids
+// decode path: small models emit numeric or mixed arrays where production
+// requires []string. String arrays pass through; numbers are coerced;
+// garbage elements are dropped; genuinely malformed JSON and empty
+// principles still fail.
+func TestDecodeLessonEvidenceIDsTolerance(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		wantIDs     []string
+		wantErr     bool
+		wantMalform bool // errors.Is(err, ErrMalformedDistilled)
+	}{
+		{
+			name:    "string array passes through",
+			content: `{"principle":"p","evidence_ids":["101","102"]}`,
+			wantIDs: []string{"101", "102"},
+		},
+		{
+			name:    "int array coerced to strings",
+			content: `{"principle":"p","evidence_ids":[101,102]}`,
+			wantIDs: []string{"101", "102"},
+		},
+		{
+			name:    "mixed array coerced",
+			content: `{"principle":"p","evidence_ids":["mem-1",42,103]}`,
+			wantIDs: []string{"mem-1", "42", "103"},
+		},
+		{
+			name:    "null and object elements dropped",
+			content: `{"principle":"p","evidence_ids":["101",null,{"id":102},true]}`,
+			wantIDs: []string{"101"},
+		},
+		{
+			name:    "all elements dropped yields empty",
+			content: `{"principle":"p","evidence_ids":[null,{"x":1}]}`,
+			wantIDs: nil,
+		},
+		{
+			name:    "non-array evidence_ids treated as absent",
+			content: `{"principle":"p","evidence_ids":null}`,
+			wantIDs: nil,
+		},
+		{
+			name:    "absent evidence_ids accepted",
+			content: `{"principle":"p"}`,
+			wantIDs: nil,
+		},
+		{
+			name:        "empty principle still errors",
+			content:     `{"principle":"","evidence_ids":["101"]}`,
+			wantErr:     true,
+			wantMalform: true,
+		},
+		{
+			name:        "non-JSON still errors",
+			content:     `not json at all {{{`,
+			wantErr:     true,
+			wantMalform: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := DecodeLesson(tt.content)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("DecodeLesson(%s) err = nil, want error", tt.content)
+				}
+				if tt.wantMalform && !errors.Is(err, ErrMalformedDistilled) {
+					t.Fatalf("DecodeLesson(%s) err = %v, want ErrMalformedDistilled", tt.content, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DecodeLesson(%s): %v", tt.content, err)
+			}
+			if len(got.EvidenceIDs) != len(tt.wantIDs) {
+				t.Fatalf("evidence_ids = %v, want %v", got.EvidenceIDs, tt.wantIDs)
+			}
+			for i := range tt.wantIDs {
+				if got.EvidenceIDs[i] != tt.wantIDs[i] {
+					t.Fatalf("evidence_ids = %v, want %v", got.EvidenceIDs, tt.wantIDs)
+				}
+			}
+		})
+	}
+}
+
+// TestDistillLessonPromptRequiresStringEvidenceIDs asserts the production
+// LLM prompt explicitly demands string evidence_ids (the LFM2.5-8B eval
+// showed integer emission when the instruction was absent).
+func TestDistillLessonPromptRequiresStringEvidenceIDs(t *testing.T) {
+	for _, fragment := range []string{
+		"evidence_ids MUST be an array of strings",
+		"If no evidence IDs are known, use an empty array",
+	} {
+		if !strings.Contains(distillLessonSystemPrompt, fragment) {
+			t.Errorf("distillLessonSystemPrompt missing instruction %q", fragment)
+		}
+	}
+}
+
 // --- Distill ---------------------------------------------------------------
 
 func TestDistillDisabledByDefault(t *testing.T) {
