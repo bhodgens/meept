@@ -2632,6 +2632,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// re-route detector in recordDispatch. Default off,
 		// log-only. Blocked on real outcome data from the outcome
 		// loop (#40) before its signal is trusted.
+		// F29: held in a var so the tactical task-failure path can be
+		// wired further down, after the scheduler is constructed.
+		var burstDetector *metrics.BurstDetector
 		if cfg.Orchestrator.BurstDetection.Enabled {
 			burst := metrics.NewBurstDetector(metrics.BurstDetectionConfig{
 				Enabled:    cfg.Orchestrator.BurstDetection.Enabled,
@@ -2641,6 +2644,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}, logger.With("component", "burst-detector"))
 			if burst.Enabled() {
 				c.Dispatcher.SetBurstDetector(burst)
+				burstDetector = burst
 				logger.Info("tool-failure burst detector enabled (log-only)",
 					"window", burst.WindowSize(),
 					"threshold", burst.Threshold(),
@@ -2893,6 +2897,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			})
 			// Interactive stamp origin lookup (tree 04 leaf 02, D11).
 			tacticalScheduler.SetSessionStore(c.SessionStore)
+
+			// F29 (2026-09-17 bughunt): the tactical task-failure path
+			// must also feed the burst detector — hard failures mark
+			// dispatch_log 'failed_replan' directly and never pass
+			// through the dispatcher's Signal-A ok/corrected resolution,
+			// so without this wiring real failure bursts were invisible
+			// to the detector. Log-only end to end.
+			if burstDetector != nil {
+				tacticalScheduler.SetBurstDetector(burstDetector)
+			}
 
 			// Context-window provider (allotment tree leaf 02): resolves an
 			// executor agent's model to its configured context limit so
