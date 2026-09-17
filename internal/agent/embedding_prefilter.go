@@ -153,9 +153,19 @@ func NewEmbeddingPrefilter(emb PrefilterEmbedder, cfg config.ClassifierPrefilter
 	var veto *tfidfVeto
 	if vetoPath != "" {
 		v, vetoErr := loadTfidfVeto(vetoPath)
-		if vetoErr != nil {
+		switch {
+		case vetoErr != nil:
 			logger.Warn("tfidf veto model unreadable; veto disabled", "error", vetoErr)
-		} else {
+		case v == nil:
+			// F3 (2026-09-17 bughunt): loadTfidfVeto returns (nil, nil)
+			// for a MISSING model file ("not built") — not an error, but
+			// dereferencing v for the enabled-log below was a guaranteed
+			// nil-pointer panic at construction whenever cfg.VetoPath
+			// pointed at a file that does not exist. Log the disabled
+			// state and leave veto nil: Door 1 routes on the kNN vote
+			// alone (legacy behavior).
+			logger.Info("tfidf veto model not built; veto disabled", "path", vetoPath)
+		default:
 			veto = v
 			logger.Info("tfidf veto enabled",
 				"train_docs", veto.trainDocs,
