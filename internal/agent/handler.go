@@ -888,11 +888,16 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			reply, err = h.startCollaborationSession(ctx, result, conversationID)
 		case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
 			handlerCase = "async_dispatch"
-			// Headless benchmark clients (source_client prefix "meept-bench")
-			// drive outcome-level evaluation: they need the FINAL result, not
-			// an acknowledgment. Force synchronous dispatch for them so the
-			// chat RPC reply carries task completion instead of an ack.
-			if strings.HasPrefix(req.SourceClient, "meept-bench") {
+			// LEGACY (async-turn-migration leaf 07): headless benchmark
+			// clients (source_client prefix "meept-bench") used to be
+			// force-switched into synchronous dispatch so the chat RPC
+			// reply carried the final result. The bench now speaks
+			// submit-ack (leaf 02), so the special-case survives only
+			// under the legacy opt-in: sync_chat_enabled=true. Under the
+			// default config the wait path is unreachable for every
+			// client, bench included — the ack is the reply and the
+			// result arrives via turn.terminal.
+			if h.syncMode && strings.HasPrefix(req.SourceClient, "meept-bench") {
 				h.syncMode = true
 			}
 			// Async dispatch goes through the orchestrator pipeline, which is
@@ -2201,6 +2206,14 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 // SetSyncMode enables or disables synchronous dispatch mode.
 // When enabled, async-dispatched tasks are waited on in the handler
 // instead of returning immediately.
+//
+// Deprecated (async-turn-migration leaf 07): this is the seam for the
+// LEGACY blocking-chat opt-in only — production wiring calls
+// SetSyncMode(cfg.Orchestrator.SyncChatEnabled). Under the default
+// (sync_chat_enabled=false) the sync wait is unreachable: chat.submit
+// acks and results arrive via turn.terminal. No in-tree caller forces
+// sync by itself any more (the former meept-bench source special-case
+// now also requires the flag).
 func (h *ChatHandler) SetSyncMode(enabled bool) {
 	h.syncMode = enabled
 }

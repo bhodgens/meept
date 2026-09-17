@@ -707,6 +707,15 @@
       "interval_seconds": 30,       // 0 → 30: seconds between reap passes
       "stale_after_seconds": 120,   // 0 → 120: no progress for this long → reaped as failed
     },
+    // Legacy blocking chat (async-turn-migration leaf 07). Default OFF:
+    // task-dispatched turns ack immediately via chat.submit and deliver
+    // results through turn.terminal. Set true ONLY to keep an un-migrated
+    // external integration working during the migration tail — the chat
+    // RPC then blocks up to the 110s sync-wait ceiling and may return the
+    // "Task <id> is still running" stub. The meept-bench source
+    // special-case honors this flag too: under the default, bench turns
+    // are async like every other client.
+    "sync_chat_enabled": false,
   },
 
   // Shadow training system (response shadowing for model improvement)

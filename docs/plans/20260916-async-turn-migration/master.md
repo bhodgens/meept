@@ -277,3 +277,14 @@ Re-run until `ALL TREES COMPLIANT: True`.
   (websocket_service.dart:646-663) — no new WS machinery.
 - meept-bench is a SEPARATE repo (~/git/meept-bench). Leaf 02 works there;
   commit policy differs: orchestrator commits in both repos, explicit paths.
+
+## Completion Notes
+
+- **Leaf 07 (sync chat deprecation) — IMPLEMENTED.** The default is now
+  async-everywhere: `orchestrator.sync_chat_enabled` (default false) gates
+  the legacy blocking chat; the meept-bench source special-case also
+  requires the flag. `waitForTaskCompletion` is unchanged —
+  reachability-only deprecation. The AGENTS.md invariant "sync replies
+  carry the real step result" is replaced by "Turns are asynchronous;
+  acks are immediate" (legacy behavior documented inside the new bullet).
+  The RPC proxy 120s cap is untouched.

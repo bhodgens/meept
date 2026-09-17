@@ -2640,6 +2640,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Create chat handler with dispatcher for multi-agent routing
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, c.Dispatcher, msgBus, logger)
 
+		// Legacy sync chat opt-in (async-turn-migration leaf 07): the
+		// default is async-everywhere — chat.submit acks immediately and
+		// results arrive via turn.terminal. Only an explicit
+		// orchestrator.sync_chat_enabled=true makes task-dispatched turns
+		// block the chat RPC again (110s ceiling, stub possible).
+		c.ChatHandler.SetSyncMode(cfg.Orchestrator.SyncChatEnabled)
+
 		// Wire step store for fetching step summaries in ACK and completion messages
 		if c.TaskRegistry != nil {
 			c.ChatHandler.SetStepStore(c.TaskRegistry.StepStore())
@@ -3027,6 +3034,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.Orchestrator == nil {
 		// Create chat handler without dispatcher (single-agent mode)
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, nil, msgBus, logger)
+
+		// Legacy sync chat opt-in (async-turn-migration leaf 07) —
+		// same contract as the multi-agent construction site above.
+		c.ChatHandler.SetSyncMode(cfg.Orchestrator.SyncChatEnabled)
 
 		// Wire step store for fetching step summaries in ACK and completion messages
 		if c.TaskRegistry != nil {

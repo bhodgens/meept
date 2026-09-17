@@ -2416,6 +2416,15 @@ type OrchestratorConfig struct {
 	// reaches a terminal state. Liveness-based and workload-independent —
 	// it replaces the old static task-wait semantics for async turns.
 	TurnWatchdog TurnWatchdogConfig `json:"turn_watchdog" toml:"turn_watchdog"`
+	// SyncChatEnabled is the legacy blocking-chat opt-in (async-turn-
+	// migration leaf 07). Default FALSE: task-dispatched turns always
+	// ack immediately (chat.submit) and results arrive via turn.terminal.
+	// When true, task-dispatched turns block the chat RPC up to the 110s
+	// sync-wait ceiling and may return the "still running" stub — kept
+	// only so un-migrated external integrations keep working during the
+	// migration tail. The meept-bench source special-case ALSO requires
+	// this flag; under the default it is async like every other client.
+	SyncChatEnabled bool `json:"sync_chat_enabled" toml:"sync_chat_enabled"`
 }
 
 // TurnWatchdogConfig is the liveness-reaper knob block (async-turn-
@@ -3236,6 +3245,9 @@ func DefaultConfig() *Config {
 				Threshold:  0,
 				LogOnly:    true,
 			},
+			// Sync chat is legacy (async-turn-migration leaf 07): the default is
+			// async-everywhere — chat.submit acks and turn.terminal delivers.
+			SyncChatEnabled: false,
 			// Async-turn liveness reaper (async-turn-migration leaf 06):
 			// enabled by default — a vanished submitted turn must reach a
 			// terminal state instead of leaving the client waiting forever.

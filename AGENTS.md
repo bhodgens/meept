@@ -182,10 +182,17 @@ only window into the daemon. These contracts were added after the
 2026-09-04 naive-user comparison (docs/plans/chat-dispatch-ux/) and
 are guarded by `scripts/e2e-naive-user-chat.sh`:
 
-- **Sync replies carry the real step result.** `waitForTaskCompletion`
-  (internal/agent/handler.go) returns the terminal step's `Result` —
-  never the `Task <id> completed.` stub except when every step result
-  is empty or the store errors.
+- **Turns are asynchronous; acks are immediate.** chat.submit acks a turn
+  in milliseconds (turn_id + conversation_id); the result arrives via the
+  turn.terminal bus event (Plan: docs/plans/20260916-async-turn-migration).
+  The blocking `chat` RPC is a legacy opt-in (`orchestrator.
+  sync_chat_enabled=true`, default false): task-dispatched turns then
+  block up to the 110s sync-wait ceiling and may return the "still
+  running" stub — `waitForTaskCompletion` (internal/agent/handler.go)
+  returns the terminal step's `Result`, never the stub except when every
+  step result is empty or the store errors. Under the default, no path
+  can return the stub. Stalled async turns are reaped by the turn
+  watchdog and surface as failed terminal events.
 - **Errored steps never pass review.** `ReviewStep` gates on
   `stepHasError` before every policy path; a task with any failed step
   finalizes `StateFailed` and its `task.completed` payload carries

@@ -82,9 +82,17 @@ For truly async tasks (sync mode disabled), full end-to-end result delivery requ
 - Subscribe CLI clients to `task-completed-*` and `task-failed-*` topics
 - Implement `meept tasks show <task-id>` for retrieving results later
 
-## Status
+### Status
 
 **FIXED** (handler-side). Sync mode and budget pre-check are implemented. Full end-to-end CLI delivery for async dispatch still requires caller-side connection management in the CLI tooling.
+
+> **LEGACY NOTE (2026-09-16, async-turn-migration leaf 07):** sync mode is
+> no longer the default. All first-party clients (bench, CLI, TUI, GUI)
+> speak submit-ack via `chat.submit` and receive results through the
+> `turn.terminal` event. The `syncMode` path above is reachable ONLY via
+> the explicit opt-in `orchestrator.sync_chat_enabled=true` (default
+> false) for un-migrated external integrations. This analysis describes
+> the legacy behavior, kept for history.
 
 ## Model vs Harness
 [X] Harness bug  [ ] Model quality issue  [ ] Both
