@@ -397,6 +397,16 @@ func reapOrphanRuntimes(cfgs []*RuntimeConfig, records []SpawnRecord, waitAfterT
 // that survives config drift. Best-effort: a removal failure is diagnostic
 // only, and a handle naming a pid that is NOT in pids is left alone (a
 // concurrent Start may have rewritten it for a fresh runtime).
+//
+// The pids arrive from a SNAPSHOT taken earlier in the sweep (detection →
+// reap), and a health-driven restart or a CLI `runtime start` can have
+// installed a REPLACEMENT runtime behind the same PID file path in that
+// window (audit finding F26). removeHandle therefore re-reads the PID file
+// immediately before each removal and skips when its content no longer names
+// the snapshot pid — mirroring ReapRuntimeProcesses' re-validation before the
+// signal, on the handle-removal side. The .cmd record removal follows the
+// same check: a record whose pid differs from the snapshot belongs to the
+// replacement.
 func RemoveRuntimeHandlesForPids(cfgs []*RuntimeConfig, records []SpawnRecord, pids []int) {
 	if len(pids) == 0 {
 		return
@@ -406,22 +416,39 @@ func RemoveRuntimeHandlesForPids(cfgs []*RuntimeConfig, records []SpawnRecord, p
 		gone[pid] = struct{}{}
 	}
 	removed := make(map[string]struct{})
-	removeHandle := func(pidFile string) {
+	removeHandle := func(pidFile string, snapshotPID int) {
 		if pidFile == "" {
 			return
 		}
 		if _, dup := removed[pidFile]; dup {
 			return
 		}
+		// Re-validate against the CURRENT PID file right before removal:
+		// a replacement runtime installed since the snapshot (different
+		// pid behind the same path) must keep its handles.
+		current, err := ParsePIDFile(pidFile)
+		if err == nil && current != snapshotPID {
+			slog.Debug("orphan reap: pid file was rewritten since the snapshot; keeping the replacement's handles",
+				"pid_file", pidFile, "snapshot_pid", snapshotPID, "current_pid", current)
+			return
+		}
 		removed[pidFile] = struct{}{}
 		if rmErr := os.Remove(pidFile); rmErr != nil && !os.IsNotExist(rmErr) {
 			slog.Debug("orphan reap: pid file removal failed", "pid_file", pidFile, "error", rmErr)
+		}
+		// Same guard for the durable record: a record rewritten for a
+		// replacement runtime (different pid) is the replacement's, not
+		// the reaped runtime's.
+		if rec, recErr := ReadSpawnRecord(pidFile); recErr == nil && rec.PID != 0 && rec.PID != snapshotPID {
+			slog.Debug("orphan reap: spawn record was rewritten since the snapshot; keeping the replacement's record",
+				"pid_file", pidFile, "snapshot_pid", snapshotPID, "record_pid", rec.PID)
+			return
 		}
 		RemoveSpawnRecord(pidFile)
 	}
 	for _, rec := range records {
 		if _, ok := gone[rec.PID]; ok {
-			removeHandle(rec.PIDFile)
+			removeHandle(rec.PIDFile, rec.PID)
 		}
 	}
 	for _, cfg := range cfgs {
@@ -433,7 +460,7 @@ func RemoveRuntimeHandlesForPids(cfgs []*RuntimeConfig, records []SpawnRecord, p
 			continue
 		}
 		if _, ok := gone[filePID]; ok {
-			removeHandle(cfg.PIDFile)
+			removeHandle(cfg.PIDFile, filePID)
 		}
 	}
 }
