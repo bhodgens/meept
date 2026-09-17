@@ -92,9 +92,14 @@ func newAmbientClassifierAdapter(chatter llm.Chatter) *ambientClassifierAdapter 
 }
 
 func (a *ambientClassifierAdapter) ExtractCandidates(ctx context.Context, prompt string) ([]byte, error) {
+	// Grammar-constrained extraction: force a bare JSON array of candidate
+	// objects (the shape memory.ParseAmbientCandidates accepts) directly on
+	// the wire for llama.cpp-style endpoints. attachRawGrammar is nil-safe:
+	// with the GBNFConstrained switch off (the default) the payload is
+	// byte-identical to the unconstrained path.
 	resp, err := a.chatter.Chat(ctx, []llm.ChatMessage{
 		{Role: llm.RoleUser, Content: prompt},
-	}, llm.WithTemperature(0.2))
+	}, llm.WithTemperature(0.2), llm.WithRawGrammar(llm.AmbientCandidateGrammar()))
 	if err != nil {
 		return nil, fmt.Errorf("ambient classifier chat: %w", err)
 	}

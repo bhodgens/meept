@@ -130,15 +130,52 @@ func (ex *AmbientExtractor) WriteCandidates(ctx context.Context, candidates []Am
 
 // ParseAmbientCandidates parses the raw JSON body returned by the LLM into
 // AmbientCandidate values.
+//
+// Tolerated shapes (defense in depth — the grammar-constrained wire path in
+// internal/llm forces the bare-array shape, but unconstrained endpoints do
+// not, see tools/memory-eval findings):
+//
+//  1. bare JSON array (the contract shape),
+//  2. an object wrapping the array under "candidates", "results", or "items",
+//  3. markdown code fences around either of the above,
+//  4. arbitrary prose surrounding a top-level JSON array (the first
+//     bracket-balanced [...] block that unmarshals wins).
+//
+// Anything else is an error.
 func ParseAmbientCandidates(raw []byte) ([]AmbientCandidate, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" {
 		return nil, errors.New("empty ambient classifier response")
 	}
 	trimmed = stripCodeFences(trimmed)
+	// Shape 1: bare JSON array. Byte-identical to the original behavior.
 	var out []AmbientCandidate
-	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
-		return nil, fmt.Errorf("unmarshal candidates: %w", err)
+	if err := json.Unmarshal([]byte(trimmed), &out); err == nil {
+		return out, nil
 	}
-	return out, nil
+	// Shape 2: object wrapping the array under a known key.
+	var wrapper struct {
+		Candidates []AmbientCandidate `json:"candidates"`
+		Results    []AmbientCandidate `json:"results"`
+		Items      []AmbientCandidate `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &wrapper); err == nil {
+		switch {
+		case wrapper.Candidates != nil:
+			return wrapper.Candidates, nil
+		case wrapper.Results != nil:
+			return wrapper.Results, nil
+		case wrapper.Items != nil:
+			return wrapper.Items, nil
+		}
+	}
+	// Shape 3: prose around a JSON array (bracket-balanced scan from
+	// consolidation.go — string/escape aware).
+	if block := extractJSONArray(trimmed); block != "" {
+		var out []AmbientCandidate
+		if err := json.Unmarshal([]byte(block), &out); err == nil {
+			return out, nil
+		}
+	}
+	return nil, errors.New("unmarshal candidates: no JSON array in ambient classifier response")
 }

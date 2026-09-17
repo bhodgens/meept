@@ -381,3 +381,60 @@ func ToolConstraintSupported(mode string) bool {
 	}
 	return false
 }
+
+// AmbientCandidateGrammar returns the GBNF grammar forcing a bare JSON array
+// of ambient epistemic candidates — exactly the shape
+// memory.ParseAmbientCandidates accepts as its primary contract (no object
+// wrapper). Each element carries exactly the declared keys:
+//
+//	type       enum claim|decision|prediction
+//	text       string
+//	source     string
+//	confidence number
+//	premises   array of string
+//	category   enum (architecture|business|technical|prediction|opinion|methodology)
+//
+// Pair with WithRawGrammar to attach it as payload["grammar"] (llama.cpp wire
+// format). Never returns an empty string.
+func AmbientCandidateGrammar() string {
+	var b strings.Builder
+	b.WriteString("root ::= \"[\" ws candidate (\",\" ws candidate)* ws \"]\"\n")
+	b.WriteString("ws ::= [ \\t\\n]*\n")
+	b.WriteString("string ::= \"\\\"\" char* \"\\\"\"\n")
+	b.WriteString("char ::= [^\"\\\\]\n")
+	b.WriteString("number ::= (\"-\"? [0-9]+) (\".\" [0-9]+)? ([\"e\" \"E\"] [\"-\" \"+\"]? [0-9]+)?\n")
+	// Candidate rule: one object with exactly the six declared keys in a
+	// fixed order, ws between every token, and enum values rendered as
+	// quote-wrapped GBNF literals (the literal token itself contains the
+	// double quotes, so generated JSON values come out properly quoted).
+	// This exact grammar shape is wire-verified against llama-server b7730:
+	// 3/3 generations were valid bare JSON arrays carrying all six keys.
+	// GBNF has no unordered-object primitive, so the fixed key sequence is
+	// the standard constraining approach.
+	//
+	// Member layout (GBNF text):  "\"key\"" ws ":" ws <valueRule>
+	// Separator:                  ws "," ws
+	// Envelope:                   "{" ws <members> ws "}"
+	keys := []string{"text", "source", "confidence", "premises", "type", "category"}
+	valueRules := []string{"string", "string", "number", "string-array", "candidate-type", "candidate-category"}
+	var seq strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			seq.WriteString(" ws \",\" ws ")
+		}
+		fmt.Fprintf(&seq, "\"\\\"%s\\\"\" ws \":\" ws %s", k, valueRules[i])
+	}
+	fmt.Fprintf(&b, "candidate ::= \"{\" ws %s ws \"}\"\n", seq.String())
+	fmt.Fprintf(&b, "string-array ::= \"[\" ws (string (\",\" ws string)*)? ws \"]\"\n")
+	var typeAlts []string
+	for _, e := range []string{"claim", "decision", "prediction"} {
+		typeAlts = append(typeAlts, "\"\\\""+e+"\\\"\"")
+	}
+	fmt.Fprintf(&b, "candidate-type ::= %s\n", strings.Join(typeAlts, " | "))
+	var catAlts []string
+	for _, e := range []string{"architecture", "business", "technical", "prediction", "opinion", "methodology"} {
+		catAlts = append(catAlts, "\"\\\""+e+"\\\"\"")
+	}
+	fmt.Fprintf(&b, "candidate-category ::= %s\n", strings.Join(catAlts, " | "))
+	return b.String()
+}

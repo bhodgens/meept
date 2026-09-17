@@ -1388,6 +1388,19 @@ func ToolChoiceOf(opts []ChatOption) string {
 	return o.toolChoice
 }
 
+// RawGrammarOf reports the raw grammar body attached through WithRawGrammar
+// ("" when none was passed). It is the inspection counterpart of
+// WithRawGrammar, for callers that stub the Chatter and assert on options.
+func RawGrammarOf(opts []ChatOption) string {
+	var o chatOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	return o.rawGrammar
+}
+
 // resolveToolChoice returns the wire "tool_choice" value for the request, or
 // "" when the field must be omitted. The field is sent ONLY when all three
 // of the measured conditions hold:
