@@ -27,19 +27,37 @@ type TurnRegistry struct {
 
 	mu    sync.Mutex
 	turns map[string]*SubmittedTurnRecord
+	// tombstones records turn ids whose work already reached a terminal
+	// state (week bughunt 2026-09-17 F16): a same-turn-id retry arriving
+	// AFTER Complete deleted the live record used to re-register and
+	// re-execute the completed work. Register consults this set and
+	// reports the id as existing (suppressed). Bounded by
+	// turnRegistryTombstoneCap with oldest-first eviction.
+	tombstones map[string]time.Time
 }
+
+// turnRegistryTombstoneCap bounds the completed-tombstone set. Large enough
+// to absorb realistic client retry storms (the same turn id retried after
+// completion), small enough that the set never grows without bound.
+const turnRegistryTombstoneCap = 4096
 
 // NewTurnRegistry creates an empty registry. Nil logger-safe.
 func NewTurnRegistry() *TurnRegistry {
 	return &TurnRegistry{
-		now:   time.Now,
-		turns: make(map[string]*SubmittedTurnRecord),
+		now:        time.Now,
+		turns:      make(map[string]*SubmittedTurnRecord),
+		tombstones: make(map[string]time.Time),
 	}
 }
 
 // Register tracks a newly submitted turn. Idempotent on turnID: when the
 // turn is already registered it returns existing=true and the ORIGINAL
 // record is preserved untouched (retry dedupe — never overwrite).
+//
+// Completed-tombstone (F16): an id whose turn already reached a terminal
+// state also returns existing=true WITHOUT re-registering — a same-turn-id
+// retry after completion must not re-execute the finished work; the caller
+// answers "already submitted; result arrives via turn.terminal".
 func (r *TurnRegistry) Register(turnID, conversationID string) bool {
 	if r == nil {
 		return false
@@ -49,6 +67,9 @@ func (r *TurnRegistry) Register(turnID, conversationID string) bool {
 	defer r.mu.Unlock()
 	if _, ok := r.turns[turnID]; ok {
 		return true
+	}
+	if _, done := r.tombstones[turnID]; done {
+		return true // already completed — suppress the retry
 	}
 	r.turns[turnID] = &SubmittedTurnRecord{
 		TurnID:         turnID,
@@ -86,15 +107,37 @@ func (r *TurnRegistry) Touch(turnID string) {
 	}
 }
 
-// Complete removes a finished turn from tracking. No-op when the turn is
-// unknown.
+// Complete removes a finished turn from tracking and tombstones its id
+// (F16): a same-turn-id retry arriving after the terminal event must be
+// suppressed by Register, not re-executed. The tombstone set is bounded —
+// inserting beyond turnRegistryTombstoneCap evicts the OLDEST entry.
+// No-op when the turn is unknown.
 func (r *TurnRegistry) Complete(turnID string) {
 	if r == nil {
 		return
 	}
+	now := r.now().UTC()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.turns, turnID)
+	if turnID == "" {
+		return
+	}
+	if len(r.tombstones) >= turnRegistryTombstoneCap {
+		// Oldest-first eviction keeps the most recent completions, which
+		// are the ones a late retry can still race against.
+		oldestID := ""
+		var oldestAt time.Time
+		for id, at := range r.tombstones {
+			if oldestID == "" || at.Before(oldestAt) {
+				oldestID, oldestAt = id, at
+			}
+		}
+		if oldestID != "" {
+			delete(r.tombstones, oldestID)
+		}
+	}
+	r.tombstones[turnID] = now
 }
 
 // Stale returns records whose last progress is older than the given
