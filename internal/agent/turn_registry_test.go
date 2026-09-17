@@ -225,3 +225,36 @@ func TestTurnRegistry_Concurrent16Goroutines(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestTurnRegistry_TurnIDForTask pins the relay correlation (async-turn-
+// migration relay fix, bench gate 2026-09-16): the task-end relay must
+// re-broadcast the real result under the turn id the client's ack returned,
+// so AttachTask's task→turn edge must be recoverable.
+func TestTurnRegistry_TurnIDForTask(t *testing.T) {
+	reg := NewTurnRegistry()
+
+	if got := reg.TurnIDForTask("task-none"); got != "" {
+		t.Errorf("unknown task → %q, want empty", got)
+	}
+	if got := reg.TurnIDForTask(""); got != "" {
+		t.Errorf("empty task id → %q, want empty", got)
+	}
+
+	reg.Register("turn-1", "conv-1")
+	reg.AttachTask("turn-1", "task-1")
+	if got := reg.TurnIDForTask("task-1"); got != "turn-1" {
+		t.Errorf("TurnIDForTask(task-1) = %q, want turn-1", got)
+	}
+
+	// Complete removes the turn: the correlation must not resurrect.
+	reg.Complete("turn-1")
+	if got := reg.TurnIDForTask("task-1"); got != "" {
+		t.Errorf("after Complete, TurnIDForTask(task-1) = %q, want empty", got)
+	}
+
+	// Nil-registry safety (mirrors the other registry methods).
+	var nilReg *TurnRegistry
+	if got := nilReg.TurnIDForTask("task-x"); got != "" {
+		t.Errorf("nil registry → %q, want empty", got)
+	}
+}

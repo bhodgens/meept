@@ -289,8 +289,10 @@ func TestHandleRequest_EmitsTurnTerminalOnError(t *testing.T) {
 }
 
 // TestHandleRequest_EmitsTurnTerminalOnAsyncAck drives the async-dispatch
-// ack path: the ack IS the RPC turn's terminal state, so the event carries
-// status completed with task_id set.
+// ack path: the ack means "accepted, work continuing elsewhere", so the
+// event carries status PARKED with task_id set — clients skip it and keep
+// waiting for the task_completed_relay, which re-broadcasts the real
+// result under the SAME turn id (relay fix, bench gate 2026-09-16).
 func TestHandleRequest_EmitsTurnTerminalOnAsyncAck(t *testing.T) {
 	msgBus := bus.New(nil, slogDiscardLogger())
 	d, _ := asyncTurnTestDispatcher(t)
@@ -314,8 +316,8 @@ func TestHandleRequest_EmitsTurnTerminalOnAsyncAck(t *testing.T) {
 	h.handleRequest(context.Background(), reqMsg)
 
 	ev := waitTurnTerminal(t, sub)
-	if ev.Status != "completed" {
-		t.Errorf("status = %q, want completed (the ack IS the terminal state)", ev.Status)
+	if ev.Status != "parked" {
+		t.Errorf("status = %q, want parked (the ack is accepted-not-finished; completed made clients grade the ack as the result)", ev.Status)
 	}
 	if ev.TaskID == "" {
 		t.Error("task_id must be set on the async-ack path")

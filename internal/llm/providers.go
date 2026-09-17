@@ -111,7 +111,12 @@ type ProvidersConfig struct {
 	// ExtractModel is the models.json5 slot for the json_extract tool's
 	// dedicated extraction model (typically a local small LLM). Empty =
 	// json_extract reports not-configured.
-	ExtractModel      string                     `json:"extract_model"`
+	ExtractModel string `json:"extract_model"`
+	// RefusalModel is the global default refusal fallback target
+	// (provider/model ref or alias name; refusal-fallback tree 02).
+	// Empty = no global default; a per-agent spec refusal_model overrides
+	// this; both empty = refusal fallback disabled for that agent.
+	RefusalModel      string                     `json:"refusal_model"`
 	DisabledProviders []string                   `json:"disabled_providers"`
 	ModelAliases      map[string]ModelAliasEntry `json:"model_aliases"`
 	Providers         map[string]ProviderConfig  `json:"providers"`
@@ -295,6 +300,9 @@ func MergeProvidersConfig(base, overlay *ProvidersConfig) *ProvidersConfig {
 	}
 	if overlay.ExtractModel != "" {
 		out.ExtractModel = overlay.ExtractModel
+	}
+	if overlay.RefusalModel != "" {
+		out.RefusalModel = overlay.RefusalModel
 	}
 	if overlay.DisabledProviders != nil {
 		out.DisabledProviders = append([]string(nil), overlay.DisabledProviders...)

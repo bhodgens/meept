@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// ModelSlots bundles the five slot fields from ProvidersConfig /
+// ModelSlots bundles the six slot fields from ProvidersConfig /
 // models.json5.
 type ModelSlots struct {
 	Model           string
@@ -16,6 +16,10 @@ type ModelSlots struct {
 	// (extract_model slot). Included so its local runtime pre-warms at
 	// boot instead of failing on first tool call.
 	ExtractModel string
+	// RefusalModel is the global default refusal fallback target
+	// (refusal_model slot). Included so its local runtime pre-warms at
+	// boot instead of being found dead on first fallback.
+	RefusalModel string
 }
 
 // AgentModelRef is a minimal view of an agent definition used by
@@ -88,6 +92,7 @@ func BuildModelsInUse(
 	add(slots.ClassifierModel)
 	add(slots.SummarizerModel)
 	add(slots.ExtractModel)
+	add(slots.RefusalModel)
 
 	// 3. Alias expansion: every configured alias's full member list is
 	// included. Alias members are explicitly configured failover targets

@@ -121,3 +121,23 @@ func (r *TurnRegistry) Stale(olderThan time.Duration) []SubmittedTurnRecord {
 	}
 	return stale
 }
+
+// TurnIDForTask returns the turn id that dispatched taskID, or "" when no
+// tracked turn claims it (headless task, legacy turn, or already-completed
+// turn). Used by the task-end relay so the real result is re-broadcast with
+// the ORIGINATING turn id — clients filter turn.terminal by turn_id, and a
+// fresh id would be invisible to them (bench gate 2026-09-16: relay events
+// carried new ids, so async task results never reached the awaiting client).
+func (r *TurnRegistry) TurnIDForTask(taskID string) string {
+	if r == nil || taskID == "" {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, rec := range r.turns {
+		if rec.TaskID == taskID {
+			return rec.TurnID
+		}
+	}
+	return ""
+}

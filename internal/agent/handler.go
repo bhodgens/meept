@@ -1191,6 +1191,16 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		}
 	} else if syncTurnTimeout {
 		turnStatus = "timeout"
+	} else if handlerCase == "async_dispatch" && syncTaskID != "" {
+		// Async-ack for a dispatched task (async-turn-migration relay
+		// fix, bench gate 2026-09-16): the ack is NOT the work's terminal
+		// state — it means "accepted, work continuing elsewhere".
+		// Reporting "completed" here made awaiting clients take the ack
+		// text as the final result (the bench graded the ack as a fail).
+		// "parked" is the closed vocabulary's accepted-not-finished
+		// state; clients skip it and keep waiting for the
+		// task_completed_relay event, which now carries this turn's id.
+		turnStatus = "parked"
 	}
 	h.publishTurnTerminal(TurnTerminalEvent{
 		ConversationID: conversationID,
@@ -1682,10 +1692,20 @@ func (h *ChatHandler) publishTaskTerminalRelay(taskID string, linkedSessions []s
 			conversationID = "task:" + taskID
 		}
 	}
+	// Originating turn id (async-turn-migration fix, bench gate 2026-09-16):
+	// clients filter turn.terminal by turn_id — the id their chat.submit ack
+	// returned. A fresh id here would make the real result invisible to the
+	// awaiting client. The registry's task→turn correlation (AttachTask at
+	// dispatch) recovers it; unknown → fresh id (headless/legacy, no
+	// turn-scoped awaiter exists).
+	turnID := h.turnIDForTask(taskID)
+	if turnID == "" {
+		turnID = id.Generate("turn-")
+	}
 	h.publishTurnTerminal(TurnTerminalEvent{
 		ConversationID: conversationID,
 		SessionID:      sessionID,
-		TurnID:         id.Generate("turn-"),
+		TurnID:         turnID,
 		TaskID:         taskID,
 		HandlerCase:    handlerCase,
 		Status:         status,
@@ -2060,6 +2080,17 @@ func (h *ChatHandler) attachTask(turnID, taskID string) {
 		return
 	}
 	h.turnRegistry.AttachTask(turnID, taskID)
+}
+
+// turnIDForTask resolves the originating turn id for a finished task
+// (async-turn-migration relay fix): the task-end relay must re-broadcast
+// the real result under the turn id the client's chat.submit ack returned,
+// or a turn-scoped awaiter never matches it. "" when unresolvable.
+func (h *ChatHandler) turnIDForTask(taskID string) string {
+	if h == nil || h.turnRegistry == nil {
+		return ""
+	}
+	return h.turnRegistry.TurnIDForTask(taskID)
 }
 
 // EmitTurnTerminal is the exported emit seam for the TurnWatchdog (leaf

@@ -1018,6 +1018,14 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.EscalationModel = base.EscalationModel
 	}
 
+	// RefusalModel: prefer AGENT.md if set (empty = inherit the global
+	// models.json5 refusal_model slot; both empty = fallback off)
+	if def.RefusalModel != "" {
+		merged.RefusalModel = def.RefusalModel
+	} else {
+		merged.RefusalModel = base.RefusalModel
+	}
+
 	// Verification: prefer AGENT.md when the re-loaded frontmatter carries a
 	// verification block; omission keeps the current config (D16 gap fix —
 	// previously only definitionToSpec wired this, so re-loads silently
@@ -1106,6 +1114,7 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		Model:           def.Model,
 		EnhancerModel:   def.EnhancerModel,
 		EscalationModel: def.EscalationModel,
+		RefusalModel:    def.RefusalModel,
 		AdditionalTools: append([]string(nil), def.AdditionalTools...),
 		AvailableSkills: append([]string(nil), def.AvailableSkills...),
 		SkillTriggers:   copyStringMap(def.SkillTriggers),

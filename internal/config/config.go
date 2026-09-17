@@ -350,14 +350,19 @@ func expandConfigPaths(cfg *Config) {
 
 // ModelsConfig represents the models.json5 configuration structure.
 type ModelsConfig struct {
-	Model             string              `json:"model"`
-	SmallModel        string              `json:"small_model"`
-	ClassifierModel   string              `json:"classifier_model"` // Model for intent classification (empty = use model)
-	SummarizerModel   string              `json:"summarizer_model"` // Model for session summarization (empty = use model)
-	VisionModel       string              `json:"vision_model"`
-	ImageModel        string              `json:"image_model"`
-	VideoModel        string              `json:"video_model"`
-	ExtractModel      string              `json:"extract_model"` // Model for json_extract extraction (empty = json_extract reports not-configured)
+	Model           string `json:"model"`
+	SmallModel      string `json:"small_model"`
+	ClassifierModel string `json:"classifier_model"` // Model for intent classification (empty = use model)
+	SummarizerModel string `json:"summarizer_model"` // Model for session summarization (empty = use model)
+	VisionModel     string `json:"vision_model"`
+	ImageModel      string `json:"image_model"`
+	VideoModel      string `json:"video_model"`
+	ExtractModel    string `json:"extract_model"` // Model for json_extract extraction (empty = json_extract reports not-configured)
+	// RefusalModel is the global default refusal fallback target
+	// (provider/model ref or alias name; refusal-fallback tree 02).
+	// Empty = no global default; a per-agent spec refusal_model overrides
+	// this; both empty = refusal fallback disabled for that agent.
+	RefusalModel      string              `json:"refusal_model"`
 	DisabledProviders []string            `json:"disabled_providers"`
 	DefaultTimeout    int                 `json:"default_timeout"` // Default timeout in seconds
 	Providers         map[string]Provider `json:"providers"`

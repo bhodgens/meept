@@ -60,6 +60,12 @@ type AgentMetadata struct {
 	// empty = escalation disabled (escalate-to-user fallback).
 	EscalationModel string `yaml:"escalation_model,omitempty"`
 
+	// RefusalModel is the per-agent refusal fallback (alias name or
+	// "provider/model" ref). Empty = inherit the global models.json5
+	// refusal_model slot; both empty = refusal fallback disabled for this
+	// agent (precedence: per-agent spec field > global slot > off).
+	RefusalModel string `yaml:"refusal_model,omitempty"`
+
 	// PromptComponents lists component IDs (e.g., "base.constitution") that wrap
 	// the AGENT.md body when assembling the system prompt.
 	PromptComponents []string `yaml:"prompt_components,omitempty"`

@@ -72,6 +72,18 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 		return nil
 	}
 
+	if msg.Status == turnStatusParked && msg.Error == "" {
+		// Accepted-not-finished (async_dispatch ack): the work continues
+		// elsewhere; the real result arrives in a later terminal event
+		// with this turn's id. Keep the pending line and re-arm — do not
+		// render the ack text as the result (async-turn-migration relay
+		// fix, bench gate 2026-09-16).
+		if m.livenessTimeout > 0 {
+			return awaitTurnCmd(m.turns, pt, m.livenessTimeout)
+		}
+		return nil
+	}
+
 	m.dropPendingTurn(msg.TurnID)
 	m.turns.remove(msg.TurnID)
 

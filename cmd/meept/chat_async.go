@@ -239,6 +239,12 @@ func submitAndAwait(ctx context.Context, client transport.Client, msg, sessionID
 			if payload.TurnID != ack.TurnID {
 				continue // someone else's turn
 			}
+			if payload.Status == "parked" {
+				// Accepted-not-finished (async_dispatch ack): keep
+				// waiting — the real result arrives in a later event
+				// with this turn's id. Liveness already reset above.
+				continue
+			}
 			progress.finish()
 			turnSeconds := float64(payload.DurationMS) / 1000.0
 			if turnSeconds <= 0 {

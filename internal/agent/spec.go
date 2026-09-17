@@ -109,6 +109,11 @@ type AgentSpec struct {
 	// for the next fix attempt when verification exhausts max_fix_loops.
 	// Empty = escalation disabled; hook falls back to escalate-to-user.
 	EscalationModel string `json:"escalation_model,omitempty" yaml:"escalation_model,omitempty"`
+	// RefusalModel is the per-agent refusal fallback (alias name or
+	// "provider/model" ref). Empty = inherit the global models.json5
+	// refusal_model slot; both empty = refusal fallback disabled for this
+	// agent (precedence: per-agent spec field > global slot > off).
+	RefusalModel string `json:"refusal_model,omitempty" yaml:"refusal_model,omitempty"`
 	// AdditionalTools are tools beyond the baseline that this agent has access to.
 	AdditionalTools []string `json:"additional_tools,omitempty"`
 	// ToolScopeLimit caps how many tools are offered to this agent in the
