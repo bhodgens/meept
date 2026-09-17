@@ -133,7 +133,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 
 | Layer | Packages |
 |-------|----------|
-| **Server** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus`, `internal/comm` |
+| **Server** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` (typed topics: `bus.Topic[T]`/`PublishT`/`SubscribeT`, `internal/bus/topic.go`), `internal/comm` (WS classification: `internal/comm/wsclass`) |
 | **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace, executor, dispatcher) |
 | **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall) |
 | **Memory** | `internal/memory` (manager, episodic, task, ftstore, facts) |
@@ -307,32 +307,34 @@ client creates a visible message bubble for every `chat_message` event —
 misclassified lifecycle events appear as blank messages.
 
 Quota events on `agent.quota_wait` MUST be classified as `agent_progress`, never
-`chat_message`. This is enforced by the topic prefix match:
+`chat_message`. Classification derives from each payload's `WSClass()` marker
+(`internal/comm/wsclass`) where the payload is typed (currently
+`turn.terminal`/`TurnTerminalEvent`); all other topics classify through the
+legacy topic-prefix table in `transformBusEventToWS` (kept as a labeled
+fallback until every WS-visible topic is typed). Switch coverage is enforced
+by the `exhaustive` linter (`//exhaustive:enforce` on
+`wsclass.WSClass.String()`); a new `WSClass` constant without a covering case
+fails CI. `agent.quota_wait` is intentionally RAW (not a typed `Topic[T]`):
+it carries multiple payload shapes (`QuotaEvent`, `ParkTurnEvent`, and a
+job-level map payload), and consumers discriminate by class/reason keys.
 
-```go
-case strings.HasPrefix(topic, "agent.quota"):
-    eventType = "agent_progress"
-```
+Future agents adding new bus topics: declare stable, single-shape topics as
+`bus.Topic[T]` vars beside their payload structs (see
+`internal/agent/topics.go`) and publish via `bus.PublishT` / subscribe via
+`bus.SubscribeT`. Give any WS-visible payload a `WSClass()` method.
 
-Model-escalation events on `agent.model_escalated` (verification fix-loop
-exhaustion, tree 01 leaf 04) are likewise classified `agent_progress`, never
-`chat_message`:
+### Bus topics: typed when stable, raw when open-ended
 
-```go
-case strings.HasPrefix(topic, "agent.model_escalated"):
-    eventType = "agent_progress"
-```
-
-Turn lifecycle events on `turn.terminal` (async-turn-migration step 1, plan
-`docs/plans/20260916-turn-lifecycle-events/`) are likewise classified
-`agent_progress`, never `chat_message`:
-
-```go
-case strings.HasPrefix(topic, "turn."):
-    eventType = "agent_progress"
-```
-
-Future agents adding new bus topics must verify they land in the correct bucket.
+New bus topics with stable, single-shape payloads are declared as
+`bus.Topic[T]` vars beside their payload structs (`internal/agent/topics.go`
+is the worked example); publishers use `bus.PublishT` (or
+`bus.PublishBlockingT` for must-not-drop events), subscribers use
+`bus.SubscribeT`. The compiler then enforces publisher/subscriber payload
+agreement. Raw string `Publish`/`Subscribe` remains for: wildcard
+subscriptions, request/response bus patterns (`chat.request`/`chat.response`),
+and multi-shape/open-ended topics — `agent.quota_wait` carries `QuotaEvent`,
+`ParkTurnEvent`, and a job-level map payload and is deliberately raw. Do not
+wrap `map[string]any` in a `Topic[T]`; that is ceremony without a guarantee.
 
 ### Quota errors are not failures (quota-reset-resilience)
 
