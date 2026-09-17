@@ -964,6 +964,17 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				}
 			}
 
+			// turn.terminal liveness (week bughunt 2026-09-17 F1): record
+			// the orchestrator task on the tracked turn BEFORE the
+			// sync/async branch — both paths dispatch the same task and the
+			// task-end relay needs the task→turn edge to re-broadcast the
+			// real result under the SUBMITTED turn id. Pre-fix both call
+			// sites passed the arguments swapped/wrong (async: task id as
+			// the turn key; sync: an empty turn id), so turn-scoped clients
+			// never received the task result. No-op for legacy untracked
+			// turns (req.TurnID == "").
+			h.attachTask(req.TurnID, result.Task.ID)
+
 			if h.syncMode {
 				handlerCase = "sync_dispatch"
 				// Issue 0022: synchronous mode -- wait for task completion
@@ -975,10 +986,6 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				h.publishPlanRequest(result, conversationID)
 				reply = h.waitForTaskCompletion(ctx, result.Task.ID)
 				recordOnTaskPath = true
-				// Async-turn liveness (leaf 06): record the orchestrator
-				// task on the tracked turn so a reaped terminal event
-				// carries its task_id. No-op for legacy untracked turns.
-				h.attachTask(result.Task.ID, syncTaskID)
 				// turn.terminal ceiling detection: the stub reply is NOT
 				// sniffed — the wait hit the ceiling (or the task failed)
 				// when the task is still non-terminal in the store after
@@ -1024,10 +1031,6 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 				// Publish plan request to orchestrator
 				h.publishPlanRequest(result, conversationID)
-				// Async-turn liveness (leaf 06): same task-id
-				// attachment as the sync path above — reaped events
-				// for async-dispatched turns carry task_id too.
-				h.attachTask(result.Task.ID, syncTaskID)
 			}
 		default:
 			handlerCase = "route_to_agent"
@@ -1114,6 +1117,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 					Parts:          req.Parts,
 					AgentID:        req.AgentID,
 					SourceClient:   req.SourceClient,
+					TurnID:         turnID, // F15: the resume emits the final terminal event under this id
 				}) {
 					response.Reply = budgetErr.UserMessage() +
 						"\n\nYour message has been queued and will be sent automatically when the budget window resets."
@@ -1139,6 +1143,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 					SourceClient:   req.SourceClient,
 					ProviderID:     quotaErr.ProviderID,
 					UnblockAt:      unblockAt,
+					TurnID:         turnID, // F15: the resume emits the final terminal event under this id
 				}) {
 					response.Reply = quotaErr.UserMessage() +
 						"\n\nyour message is queued and will run automatically when the quota resets."
@@ -1366,6 +1371,10 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 		// Client agent override: synthesized steps must dispatch to the
 		// requested specialist, not re-picked hint-table agents.
 		AssignedAgent: result.Task.AssignedAgent,
+		// Per-request model (F18): the ref the client's chat.request
+		// carried must reach specialist execution even on async task
+		// dispatch, not just the interactive RouteToAgent path.
+		RequestModel: result.RequestModel,
 	}
 
 	// Session execution context (quickplan-mode leaf 02 / master Contract
@@ -1644,6 +1653,12 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 		ExecutionTime  string            `json:"execution_time,omitempty"`
 		Result         string            `json:"result,omitempty"`
 		TokenUsage     int               `json:"token_usage,omitempty"`
+		// Status is the producer's honest completion verdict
+		// ("completed" | "failed"; tactical.go publishes "failed" for
+		// failed steps or validation exhaustion). Empty on legacy
+		// payloads = "completed".
+		Status string `json:"status,omitempty"`
+		Error  string `json:"error,omitempty"`
 	}
 
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
@@ -1656,7 +1671,18 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 		"name", payload.Name,
 		"completed", payload.CompletedJobs,
 		"total", payload.TotalJobs,
+		"status", payload.Status,
 	)
+
+	// Honest relay status (week bughunt 2026-09-17 F2): the producer's
+	// status decides how the turn.terminal relay and the notifications are
+	// shaped. A failed payload relayed as "completed" made clients grade
+	// failed work as success.
+	failed := payload.Status == "failed"
+	status := "completed"
+	if failed {
+		status = "failed"
+	}
 
 	// Build human-readable completion message
 	// Use event-provided steps, falling back to step store
@@ -1666,23 +1692,51 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	}
 	reply := h.formatTaskCompletedMessage(payload.Name, steps, payload.ExecutionTime, payload.Result, payload.CompletedJobs, payload.TotalJobs, payload.TokenUsage)
 
-	// Publish success notification (Plan 4.3)
-	h.publishNotification("success", "Task Complete",
-		fmt.Sprintf("%s completed (%d/%d steps)", payload.Name, payload.CompletedJobs, payload.TotalJobs))
+	// Publish notification (Plan 4.3) — severity follows the honest status.
+	if failed {
+		h.publishNotification("error", "Task Failed",
+			fmt.Sprintf("%s failed: %s (%d/%d steps completed)", payload.Name, payload.Result, payload.CompletedJobs, payload.TotalJobs))
+	} else {
+		h.publishNotification("success", "Task Complete",
+			fmt.Sprintf("%s completed (%d/%d steps)", payload.Name, payload.CompletedJobs, payload.TotalJobs))
+	}
 
 	// Broadcast session-scoped notifications to linked sessions
 	for _, sessionID := range payload.LinkedSessions {
 		if h.notificationPublisher != nil {
+			severity := "success"
+			title := "Task Complete"
+			summary := fmt.Sprintf("%s completed (%d/%d steps)", payload.Name, payload.CompletedJobs, payload.TotalJobs)
+			if failed {
+				severity = "error"
+				title = "Task Failed"
+				summary = fmt.Sprintf("%s failed: %s (%d/%d steps completed)", payload.Name, payload.Result, payload.CompletedJobs, payload.TotalJobs)
+			}
 			h.notificationPublisher.PublishSessionNotification(
-				sessionID, "task-orchestrator", "success",
-				"Task Complete",
-				fmt.Sprintf("%s completed (%d/%d steps)", payload.Name, payload.CompletedJobs, payload.TotalJobs),
+				sessionID, "task-orchestrator", severity,
+				title,
+				summary,
 			)
 		}
 	}
 
+	// A failed payload's reply carries the failure reason, not a success
+	// summary — the user's reply text must read as a failure too.
+	relayReply := reply
+	relayError := ""
+	if failed {
+		relayError = payload.Result
+		if relayError == "" {
+			relayError = payload.Error
+		}
+		relayReply = "the task failed: " + relayError
+	}
+
 	response := ChatResponse{
-		Reply: reply,
+		Reply: relayReply,
+	}
+	if failed {
+		response.Error = relayError
 	}
 
 	// Send to all linked sessions
@@ -1703,7 +1757,7 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	// Session→conversation correlation reuses the live worker map; when no
 	// worker matches, the task_id sentinel keys the event for consumers.
 	h.publishTaskTerminalRelay(payload.TaskID, payload.LinkedSessions,
-		"task_completed_relay", "completed", reply, "")
+		"task_completed_relay", status, relayReply, relayError)
 }
 
 // publishTaskTerminalRelay emits the turn.terminal event for a task-end
@@ -2263,6 +2317,7 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 				Parts:          turn.Parts,
 				AgentID:        turn.AgentID,
 				SourceClient:   turn.SourceClient,
+				TurnID:         turn.TurnID, // F15: preserve the turn identity across re-parks
 				ProviderID:     quotaErr.ProviderID,
 				UnblockAt:      unblockAt,
 			}) {
@@ -2281,6 +2336,21 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 			ConversationID: turn.SessionID,
 			Error:          "Auto-resume failed: " + err.Error(),
 		})
+
+		// Final turn.terminal for the submitted turn (F15): the resume
+		// failed after the re-park declined — report it honestly so the
+		// awaiter resolves as failed. Legacy parked turns stay silent.
+		if turn.TurnID != "" {
+			h.publishTurnTerminal(TurnTerminalEvent{
+				ConversationID: turn.ConversationID,
+				SessionID:      turn.SessionID,
+				TurnID:         turn.TurnID,
+				HandlerCase:    "quota_resume",
+				Status:         "failed",
+				Reply:          "I encountered an error: Auto-resume failed: " + err.Error(),
+				Error:          err.Error(),
+			})
+		}
 		return
 	}
 
@@ -2293,6 +2363,21 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 		SessionID:      turn.SessionID, // for WS push routing
 		Reply:          reply,
 	})
+
+	// Final turn.terminal for the submitted turn (F15): a parked
+	// chat.submit turn ended here — the client's awaiter resolves only if
+	// the terminal event fires under the id the ack returned. Legacy
+	// parked turns (TurnID "") stay silent.
+	if turn.TurnID != "" {
+		h.publishTurnTerminal(TurnTerminalEvent{
+			ConversationID: turn.ConversationID,
+			SessionID:      turn.SessionID,
+			TurnID:         turn.TurnID,
+			HandlerCase:    "quota_resume",
+			Status:         "completed",
+			Reply:          reply,
+		})
+	}
 
 	h.logger.Info("resumed turn completed after quota reset",
 		"session_id", turn.SessionID,
@@ -2534,6 +2619,21 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 			ConversationID: turn.SessionID,
 			Error:          "Auto-resume failed: " + err.Error(),
 		})
+
+		// Final turn.terminal for the submitted turn (F15): the resume
+		// failed — report it honestly so the awaiter resolves as failed.
+		// Legacy parked turns (TurnID "") stay silent.
+		if turn.TurnID != "" {
+			h.publishTurnTerminal(TurnTerminalEvent{
+				ConversationID: turn.ConversationID,
+				SessionID:      turn.SessionID,
+				TurnID:         turn.TurnID,
+				HandlerCase:    "budget_resume",
+				Status:         "failed",
+				Reply:          "I encountered an error: Auto-resume failed: " + err.Error(),
+				Error:          err.Error(),
+			})
+		}
 		return
 	}
 
@@ -2547,6 +2647,21 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 		SessionID:      turn.SessionID, // for WS push routing
 		Reply:          reply,
 	})
+
+	// Final turn.terminal for the submitted turn (F15): a parked
+	// chat.submit turn ended here — the client's awaiter resolves only if
+	// the terminal event fires under the id the ack returned. Legacy
+	// parked turns stay silent.
+	if turn.TurnID != "" {
+		h.publishTurnTerminal(TurnTerminalEvent{
+			ConversationID: turn.ConversationID,
+			SessionID:      turn.SessionID,
+			TurnID:         turn.TurnID,
+			HandlerCase:    "budget_resume",
+			Status:         "completed",
+			Reply:          reply,
+		})
+	}
 
 	h.logger.Info("resumed turn completed successfully",
 		"session_id", turn.SessionID,
