@@ -556,18 +556,36 @@ func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error
 		p.cmd.Process = proc
 	}
 
-	// Snapshot the fields we need after releasing the lock.
+	// Snapshot the fields we need after releasing the lock. pid is the
+	// RUNTIME's pid: under a supervised spawn p.cmd is the supervisor
+	// wrapper while p.pid names the process that holds the model and the
+	// port (see Start). supervised marks that split; a direct spawn and a
+	// PID-file recovery both have cmd.Process.Pid == pid.
 	cmd := p.cmd
 	waitDone := p.waitDone
-	fromPIDFile := p.cmd.Process != nil && p.pid == 0 // recovered from PID file, no Wait goroutine
+	pid := p.pid
+	supervised := cmd != nil && cmd.Process != nil && pid > 0 && cmd.Process.Pid != pid
+	fromPIDFile := cmd != nil && cmd.Process != nil && pid == 0 // recovered from PID file, no Wait goroutine
 	p.mu.Unlock()
 
 	// Send SIGTERM to the entire process group for a clean shutdown.
 	// Setpgid=true in Start() isolates the child; killing the group
 	// ensures no grandchild survives the daemon's death.
-	if err := killProcessGroup(cmd, syscall.SIGTERM); err != nil {
-		// Already dead
-		p.clearPIDFileAndRecord()
+	//
+	// Under a supervised spawn the runtime leads its OWN process group
+	// (the supervisor gives it one, supervisor.go), while p.cmd is the
+	// wrapper. The group signal must therefore target the runtime's pid,
+	// not the wrapper's: a group kill on the wrapper can never reach a
+	// runtime in a different group. The wrapper itself needs no signal
+	// here — it exits as soon as its runtime exits (and it forwards this
+	// SIGTERM to the runtime anyway), so it will die with the runtime.
+	killTarget := cmd
+	if supervised {
+		killTarget = &exec.Cmd{Process: &os.Process{Pid: pid}}
+	}
+	if err := killProcessGroup(killTarget, syscall.SIGTERM); err != nil {
+		// Already dead — verified before the handles are dropped.
+		p.clearPIDFileAndRecordIfDead(pid)
 		return nil
 	}
 
@@ -583,11 +601,11 @@ func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error
 				// Best-effort kill + cleanup on cancellation: a Kill error
 				// after ctx.Done cannot be surfaced to a caller that has
 				// already given up, and the returned nil IS the signal.
-				_ = killProcessGroup(cmd, syscall.SIGKILL)
-				p.clearPIDFileAndRecord() // ctx already cancelled; nothing to report to
+				_ = killProcessGroup(killTarget, syscall.SIGKILL)
+				p.clearPIDFileAndRecordIfDead(pid) // ctx already cancelled; nothing to report to
 				return nil
 			case <-ticker.C:
-				if !p.isProcessRunning(cmd.Process.Pid) {
+				if !p.isProcessRunning(killTarget.Process.Pid) {
 					p.clearPIDFileAndRecord() // process already exited; stale file removal is best-effort
 					return nil
 				}
@@ -597,13 +615,48 @@ func (p *RuntimeProcess) stopProcess(ctx context.Context, asOperator bool) error
 
 	select {
 	case <-ctx.Done():
-		// Force-kill the process group on context cancellation
-		_ = killProcessGroup(cmd, syscall.SIGKILL)
+		// Force-kill on context cancellation. Target the RUNTIME's own
+		// process group (audit finding F23): under the supervisor,
+		// cmd points at the wrapper while the reported pid in the PID
+		// file is the runtime, which leads its own group — killing the
+		// wrapper's group never reaches it.
+		_ = killProcessGroup(killTarget, syscall.SIGKILL)
 	case <-waitDone:
 	}
 
-	p.clearPIDFileAndRecord() // terminal cleanup; the runtime result is already decided
+	// Terminal cleanup — but only when the runtime pid is verifiably dead
+	// (audit finding F23). Under the supervisor, waitDone fires when the
+	// WRAPPER exits, which happens both when the runtime is dead AND when
+	// the wrapper was killed while the runtime keeps serving; and a ctx
+	// cancellation above raced a health-driven restart that may already
+	// have rewritten the handles for a fresh runtime. Mirror the sweep's
+	// pid re-validation discipline: clear the handles only if the recorded
+	// runtime pid is really gone and the PID file still names it.
+	p.clearPIDFileAndRecordIfDead(pid)
 	return nil
+}
+
+// clearPIDFileAndRecordIfDead removes the PID file and durable spawn record
+// only when the given runtime pid is verifiably gone AND the PID file (when it
+// still exists) still names that pid. A live runtime keeps its handles — the
+// next Stop must still be able to find and stop it — and a PID file rewritten
+// for a replacement runtime (a health-driven restart) is never touched. The
+// re-validation mirrors the sweep's discipline (ReapRuntimeProcesses reports a
+// pid gone only after the process table confirms it).
+func (p *RuntimeProcess) clearPIDFileAndRecordIfDead(pid int) {
+	if pid <= 0 {
+		return
+	}
+	if p.isProcessRunning(pid) {
+		slog.Warn("runtime stop: keeping the PID file and record; the runtime pid is still alive",
+			"pid", pid, "pid_file", p.pidFile)
+		return
+	}
+	if entry, err := p.readPIDFile(); err == nil && entry.PID != pid {
+		// A replacement runtime was installed; its handles are not ours.
+		return
+	}
+	p.clearPIDFileAndRecord()
 }
 
 // clearPIDFileAndRecord removes the runtime's PID file and its durable spawn
