@@ -288,7 +288,13 @@ func (m *ServiceManager) Install() error {
 		// kardianos/service.Config.EnvVars (verified via `go doc`) lands in
 		// the generated launchd plist's EnvironmentVariables, fixing issue
 		// #32 ("works in shell, fails under launchd").
-		EnvVars: map[string]string{"PATH": DaemonPath()},
+		//
+		// MEEPT_HOME is propagated when set (audit finding F27), matching
+		// the fallback plist writer's plistEnvironmentVariables: without it
+		// a launchd-installed daemon silently resolves the operator's
+		// ~/.meept instead of the rig's isolated home. Unset keeps the
+		// output identical to the PATH-only dictionary.
+		EnvVars: envVarsWithMeeptHome(),
 	}
 
 	svc, err := service.New(prg, cfg)
@@ -311,6 +317,20 @@ func (m *ServiceManager) Install() error {
 
 // plistValueEscaper escapes XML-significant characters in plist values.
 var plistValueEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+
+// envVarsWithMeeptHome builds the service.Config.EnvVars dictionary both
+// install mechanisms share: PATH is always augmented, and MEEPT_HOME is added
+// when the environment carries it (audit finding F27 — the primary
+// kardianos install must propagate it exactly like the fallback
+// plistEnvironmentVariables does). With MEEPT_HOME unset the map is
+// byte-identical to the historical PATH-only entry.
+func envVarsWithMeeptHome() map[string]string {
+	vars := map[string]string{"PATH": DaemonPath()}
+	if override := os.Getenv(config.EnvMeeptHome); override != "" {
+		vars[config.EnvMeeptHome] = override
+	}
+	return vars
+}
 
 // plistEnvironmentVariables renders the launchd plist EnvironmentVariables
 // dictionary. PATH is always augmented (matches kardianos/service Install).
