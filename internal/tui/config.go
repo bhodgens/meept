@@ -74,6 +74,12 @@ type ChatConfig struct {
 	AutoCopyOnRelease bool   `json:"auto_copy_on_release"` // Auto-copy selected text on mouse release (default: false)
 	ScrollSpeed       int    `json:"scroll_speed"`         // Lines to scroll per mouse wheel event (default: 3)
 	Verbosity         string `json:"verbosity"`            // Progress verbosity: "quiet", "normal", "verbose" (default: "normal")
+	// LivenessTimeoutSeconds is the async-turn stalled-turn window
+	// (async-turn-migration leaf 04): when a submitted turn produces no
+	// terminal — and no progress — event for this long, the chat view
+	// shows the honest stalled indicator. Default 120; an explicit 0
+	// disables the stalled check.
+	LivenessTimeoutSeconds int `json:"liveness_timeout_seconds"`
 }
 
 // SidebarConfig defines sidebar panel settings.
@@ -200,7 +206,8 @@ func DefaultClientConfig() *ClientConfig {
 			AutoExpand:    false,
 		},
 		Chat: ChatConfig{
-			Verbosity: "normal",
+			Verbosity:              "normal",
+			LivenessTimeoutSeconds: 120,
 		},
 		STT: STTConfig{
 			Engine:   "whisper",
@@ -322,6 +329,10 @@ func checkClientConfigDefaults(path string, cfg *ClientConfig) {
 	if cfg.Chat.ScrollSpeed == 0 {
 		slog.Warn("client config: using default for missing field", "field", "chat.scroll_speed", "default", 3, "path", path)
 		cfg.Chat.ScrollSpeed = 3
+	}
+	if cfg.Chat.LivenessTimeoutSeconds < 0 {
+		slog.Warn("client config: negative chat.liveness_timeout_seconds, disabling", "path", path)
+		cfg.Chat.LivenessTimeoutSeconds = 0
 	}
 	if cfg.Keybindings.CommandMode == "" {
 		slog.Warn("client config: using default for missing field", "field", "keybindings.command_mode", "default", "ctrl+x", "path", path)

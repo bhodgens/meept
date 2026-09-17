@@ -109,6 +109,13 @@ type ChatModel struct {
 	// Pending message tracking
 	pendingMsgIdx int // index of the "sending..." message, -1 if none
 
+	// Async turn tracking (async-turn-migration leaf 04): turns submitted
+	// via chat.submit that are awaiting their turn.terminal event.
+	turns            *turnRouter
+	pendingTurns     []*pendingTurn
+	livenessTimeout  time.Duration // stalled-turn window; 0 = disabled
+	pendingTurnOwner string        // turn id owning the shared pending line slot
+
 	// Progress state for the current pending message
 	progressState *ProgressState
 
@@ -240,6 +247,9 @@ const findMaxMatches = 1000
 type RPCClient interface {
 	Chat(ctx context.Context, message, conversationID string) (string, error)
 	ChatWithParts(ctx context.Context, message, conversationID string, parts []llm.ContentPart) (string, error)
+	// SubmitChat fires the fire-and-forget "chat.submit" RPC (async-turn-
+	// migration leaf 04) and returns the immediate ack — never agent work.
+	SubmitChat(ctx context.Context, message, sessionID string, parts []llm.ContentPart) (TurnSubmitAck, error)
 	UploadFile(ctx context.Context, filePath string) (string, error)
 	IsConnected() bool
 	SaveSessionMessages(sessionID string, msgs []types.SessionMessage) error
@@ -256,6 +266,9 @@ type RPCClient interface {
 type ChatConfig struct {
 	AutoCopyOnRelease bool // Whether to auto-copy text selection on mouse release
 	ScrollSpeed       int  // Lines to scroll per mouse wheel event
+	// LivenessTimeout is the stalled-turn window for async turns
+	// (async-turn-migration leaf 04). Zero disables the stalled indicator.
+	LivenessTimeout time.Duration
 }
 
 // InputBehaviorConfig holds input textarea behavior settings.
@@ -310,6 +323,7 @@ func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss
 	}, ChatConfig{
 		AutoCopyOnRelease: false,
 		ScrollSpeed:       3,
+		LivenessTimeout:   defaultTurnLivenessTimeout,
 	})
 }
 
@@ -377,6 +391,9 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 		focused:           FocusInput,
 		selectedMsgIdx:    -1,
 		pendingMsgIdx:     -1,
+		turns:             newTurnRouter(nil),
+		pendingTurns:      nil,
+		livenessTimeout:   chatConfig.LivenessTimeout,
 		historyIdx:        -1,
 		sessionMessages:   make(map[string][]ChatMessage),
 		history:           sharedclient.NewSessionHistory(maxHistorySize),
@@ -1249,10 +1266,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		m.progressState = nil
 
 		// Remove the pending message
-		if m.pendingMsgIdx >= 0 && m.pendingMsgIdx < len(m.messages) {
-			m.messages = append(m.messages[:m.pendingMsgIdx], m.messages[m.pendingMsgIdx+1:]...)
-		}
-		m.pendingMsgIdx = -1
+		m.removePendingMessage()
 
 		if msg.Err != nil {
 			m.addMessage(RoleSystem, llm.UserMessage(msg.Err))
@@ -1384,6 +1398,47 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		m.addMessage(RoleSystem, content)
 		return nil
 
+	case turnSubmittedMsg:
+		// The chat view does not render its own pending line for
+		// submitted turns: the legacy pending "sending..." message
+		// (created in doSendMessage) already shows live progress via
+		// the shared progressState. This case exists so tests and the
+		// parent app can assert a turn is now tracked; the await
+		// goroutine was spawned in the submitTurnResultMsg case.
+		return nil
+
+	case turnProgressMsg:
+		// Latest progress text wins for the tracked turn. Only a matching
+		// conversation drives the shared pending line — other
+		// conversations' progress must not clobber it.
+		matched := false
+		for _, pt := range m.pendingTurns {
+			if pt.conversationID == msg.ConversationID {
+				pt.progressText = msg.Text
+				pt.lastActivity = time.Now()
+				matched = true
+			}
+		}
+		if matched && m.progressState != nil && msg.Text != "" {
+			m.progressState.Stage = msg.Text
+			m.progressState.LastUpdate = time.Now()
+			m.updateProgressMessage()
+		}
+		return nil
+
+	case turnTerminalMsg:
+		return m.handleTurnTerminal(msg)
+
+	case ChatSubmitErrorMsg:
+		// The submission never started: clear the pending line and
+		// surface the error honestly.
+		m.loading = false
+		m.progressState = nil
+		m.removePendingMessage()
+		m.addMessage(RoleSystem, llm.UserMessage(msg.Err))
+		m.updateViewport()
+		return nil
+
 	case ChatTaskResultMsg:
 		// Render a styled task result message in chat
 		stateLabel := StateCompleted
@@ -1403,6 +1458,22 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		content += "└─────────────────────────────────────────────┘"
 		m.addMessage(RoleSystem, content)
 		return nil
+
+	case submitTurnResultMsg:
+		// chat.submit ack arrived (async-turn-migration leaf 04):
+		// register the turn and spawn the await goroutine. Never blocks.
+		cmd := m.handleSubmitTurnResult(msg)
+		if cmd != nil {
+			// Claim the pending line for this turn so per-turn resolution
+			// under concurrent submits removes the right line.
+			m.claimPendingLine(msg.Ack.TurnID)
+			// Initialize the shared progress state if the legacy pending
+			// line has not been created yet (doSendMessage creates it).
+			if m.progressState == nil {
+				m.progressState = &ProgressState{Stage: "thinking...", StartedAt: time.Now()}
+			}
+		}
+		return cmd
 
 	case ProgressUpdateMsg:
 		if m.progressState == nil {
@@ -1811,12 +1882,46 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 	m.updateViewport()
 
 	m.loading = true
-	// Start a 1-second tick to re-render the elapsed timer in the
-	// pending progress message while the agent is thinking.
+	// Async turn path (async-turn-migration leaf 04): fire chat.submit
+	// (returns the ack immediately — never agent work) and await the
+	// turn.terminal result on a tea.Cmd goroutine so Update never blocks.
 	return tea.Batch(
-		m.sendMessageWithParts(actualText, parts),
+		m.submitChatAsync(actualText, parts),
 		tea.Tick(time.Second, func(time.Time) tea.Msg { return ProgressTickMsg{} }),
 	)
+}
+
+// submitChatAsync fires the chat.submit RPC as a tea.Cmd goroutine and
+// returns either the resulting submitTurnResultMsg or a ChatSubmitErrorMsg
+// if the daemon rejected the submission outright (transport error, or an
+// accepted=false ack — nothing is running, so the user must hear that).
+func (m *ChatModel) submitChatAsync(text string, parts []llm.ContentPart) tea.Cmd {
+	return func() tea.Msg {
+		ack, err := m.rpc.SubmitChat(context.Background(), text, m.sessionID, parts)
+		if err != nil {
+			return ChatSubmitErrorMsg{Err: err}
+		}
+		if !ack.Accepted {
+			note := ack.Note
+			if note == "" {
+				note = "submission rejected"
+			}
+			return ChatSubmitErrorMsg{Err: fmt.Errorf("%s", note)}
+		}
+		return submitTurnResultMsg{Ack: ack}
+	}
+}
+
+// submitTurnResultMsg carries the accepted chat.submit ack back into
+// Update, which registers the turn and spawns the await goroutine.
+type submitTurnResultMsg struct {
+	Ack TurnSubmitAck
+}
+
+// ChatSubmitErrorMsg signals that a chat submission was NOT accepted —
+// the turn never started, so the pending line must clear with an error.
+type ChatSubmitErrorMsg struct {
+	Err error
 }
 
 // GetInputHeight returns the fixed input height in lines.

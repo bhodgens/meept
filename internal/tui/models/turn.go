@@ -1,0 +1,459 @@
+package models
+
+// Async turn lifecycle for the chat view (async-turn-migration leaf 04).
+//
+// The TUI no longer blocks on the synchronous "chat" RPC. A send now:
+//  1. fires chat.submit via the RPCClient interface (returns the ack
+//     immediately — never agent work),
+//  2. registers the turn in the chat model's turnRouter keyed by turn_id,
+//  3. spawns awaitTurnCmd — a tea.Cmd goroutine that never blocks Update —
+//     which waits for the terminal result and delivers it as a tea.Msg.
+//
+// Terminal results and progress reach this process through the TUI
+// EventStream poll loop (internal/tui/events.go): the App's event dispatch
+// calls ChatModel.DeliverTurnTerminal / DeliverTurnProgress, which resolve
+// the waiting awaitTurnCmd goroutine. No sleeps are involved: liveness is
+// enforced with injectable timers (timerSource), so tests never wait on the
+// wall clock.
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+// Turn submit statuses — the ack's accepted flag is the honest signal that
+// the daemon took the turn; accepted=false means nothing is running.
+const (
+	turnStatusCompleted = "completed"
+	turnStatusFailed    = "failed"
+	turnStatusTimeout   = "timeout"
+	turnStatusParked    = "parked"
+	turnStatusStalled   = "stalled"
+)
+
+// TurnSubmitAck is the parsed "chat.submit" RPC ack. It carries ONLY the
+// submission receipt — agent work has not happened yet and the final reply
+// arrives later on the turn.terminal bus event.
+type TurnSubmitAck struct {
+	TurnID         string `json:"turn_id"`
+	ConversationID string `json:"conversation_id"`
+	SessionID      string `json:"session_id"`
+	Accepted       bool   `json:"accepted"`
+	Note           string `json:"note"`
+}
+
+// turnSubmittedMsg signals that chat.submit was accepted and the turn is
+// now tracked in the chat view (pending line visible).
+type turnSubmittedMsg struct {
+	TurnID         string
+	ConversationID string
+}
+
+// turnProgressMsg carries a live progress text for a submitted turn.
+type turnProgressMsg struct {
+	ConversationID string
+	Text           string
+}
+
+// turnTerminalMsg carries the terminal state of a submitted turn. Status is
+// completed | failed | timeout | parked (daemon statuses) or stalled (the
+// local liveness verdict — the daemon may still complete; the reply is not
+// lost, see renderTurnPending).
+type turnTerminalMsg struct {
+	TurnID         string
+	ConversationID string
+	Reply          string
+	Status         string
+	Error          string
+	DurationMS     int64
+}
+
+// defaultTurnLivenessTimeout is the stalled-turn window used when the chat
+// config does not override it. Mirrors the daemon's chat timeout so the
+// honest stalled indicator appears at roughly the moment the old blocking
+// path would have errored out.
+const defaultTurnLivenessTimeout = 120 * time.Second
+
+// stalledTurnText is the honest, lowercase stalled-turn wording (UI text
+// convention: all lowercase).
+const stalledTurnText = "no progress for %ds — task may still be running"
+
+// timerSource is the injectable clock used for liveness. The default
+// source uses real timers; tests install short timers and a channel-based
+// waiter so no test ever sleeps.
+type timerSource interface {
+	// After arms a one-shot timer. It must respect ctx cancellation so a
+	// terminal event racing the timer resolves immediately.
+	After(ctx context.Context, d time.Duration) <-chan struct{}
+}
+
+// realTimerSource arms real timers (production).
+type realTimerSource struct{}
+
+// After implements timerSource with time.AfterFunc.
+func (realTimerSource) After(ctx context.Context, d time.Duration) <-chan struct{} {
+	ch := make(chan struct{}, 1)
+	t := time.AfterFunc(d, func() {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	})
+	go func() {
+		<-ctx.Done()
+		t.Stop()
+	}()
+	return ch
+}
+
+// defaultTimerSource is the production timer source.
+var defaultTimerSource timerSource = realTimerSource{}
+
+// pendingTurn is one chat.submit turn being awaited by the chat view.
+type pendingTurn struct {
+	turnID         string
+	conversationID string
+	startedAt      time.Time
+	lastActivity   time.Time
+	// progressText is the latest progress line for this turn.
+	progressText string
+
+	// waiters are the awaitTurnCmd goroutine channels (single waiter in
+	// practice; a slice keeps delivery fan-out safe).
+	mu      sync.Mutex
+	waiters []chan turnTerminalMsg
+	done    bool
+	result  turnTerminalMsg
+}
+
+// notify resolves every waiter with the terminal result exactly once.
+func (p *pendingTurn) notify(res turnTerminalMsg) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.done {
+		return
+	}
+	p.done = true
+	p.result = res
+	for _, w := range p.waiters {
+		// Buffered channels: never block the event-dispatch goroutine.
+		w <- res
+		close(w)
+	}
+	p.waiters = nil
+}
+
+// addWaiter registers a waiter channel unless the turn already resolved.
+func (p *pendingTurn) addWaiter() (<-chan turnTerminalMsg, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.done {
+		return nil, false
+	}
+	ch := make(chan turnTerminalMsg, 1)
+	p.waiters = append(p.waiters, ch)
+	return ch, true
+}
+
+// turnRouter tracks submitted turns keyed by turn id. It is safe for
+// concurrent use: awaitTurnCmd goroutines, the Update loop, and the
+// EventStream dispatch all touch it.
+type turnRouter struct {
+	mu    sync.Mutex
+	turns map[string]*pendingTurn
+	// timers is the injectable liveness timer source.
+	timers timerSource
+}
+
+// newTurnRouter creates a router with the given timer source (nil = real).
+func newTurnRouter(timers timerSource) *turnRouter {
+	if timers == nil {
+		timers = defaultTimerSource
+	}
+	return &turnRouter{turns: make(map[string]*pendingTurn), timers: timers}
+}
+
+// register adds a submitted turn. Returns false if the turn id is already
+// tracked (idempotent-retry duplicate acks must not double-register).
+func (r *turnRouter) register(turnID, conversationID string) (*pendingTurn, bool) {
+	if turnID == "" {
+		return nil, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.turns[turnID]; exists {
+		return nil, false
+	}
+	now := time.Now()
+	pt := &pendingTurn{
+		turnID:         turnID,
+		conversationID: conversationID,
+		startedAt:      now,
+		lastActivity:   now,
+	}
+	r.turns[turnID] = pt
+	return pt, true
+}
+
+// get returns the tracked turn by id, if any.
+func (r *turnRouter) get(turnID string) (*pendingTurn, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	pt, ok := r.turns[turnID]
+	return pt, ok
+}
+
+// progress updates the last-activity timestamp and stored progress text.
+func (r *turnRouter) progress(turnID, text string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	pt, ok := r.turns[turnID]
+	if !ok {
+		return false
+	}
+	pt.mu.Lock()
+	pt.lastActivity = time.Now()
+	if text != "" {
+		pt.progressText = text
+	}
+	pt.mu.Unlock()
+	return true
+}
+
+// remove forgets a turn (after its terminal resolution was rendered).
+func (r *turnRouter) remove(turnID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.turns, turnID)
+}
+
+// hasPendingFor reports whether any unresolved submitted turn belongs to
+// conversationID. This drives the double-render dedupe: while true, the
+// chat view ignores task.completed chat messages for that conversation —
+// the same completion also arrives as turn.terminal, and rendering
+// both would put two result bubbles in the transcript.
+func (r *turnRouter) hasPendingFor(conversationID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, pt := range r.turns {
+		if pt.conversationID == conversationID {
+			return true
+		}
+	}
+	return false
+}
+
+// anyPending returns the pending turns for a conversation.
+func (r *turnRouter) anyPending(conversationID string) []*pendingTurn {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*pendingTurn
+	for _, pt := range r.turns {
+		if pt.conversationID == conversationID {
+			out = append(out, pt)
+		}
+	}
+	return out
+}
+
+// Test-facing exports (leaf 04 contract tests). These live in the models
+// package so tests in package tui and package models can drive the router
+// and the await command without real timers or a real daemon.
+
+// TestTurnTerminalMsg is the exported alias of turnTerminalMsg for tests
+// outside the models package.
+type TestTurnTerminalMsg = turnTerminalMsg
+
+// FireTimers exposes the manual timer source's FireTimers through the
+// router for tests that hold only the router.
+func (r *turnRouter) FireTimers() {
+	if mts, ok := r.timers.(*manualTimerSource); ok {
+		mts.FireTimers()
+	}
+}
+
+// ArmedTimers exposes the manual timer source's armed count through the
+// router for tests that must synchronize with awaitTurnCmd's arming.
+func (r *turnRouter) ArmedTimers() int {
+	if mts, ok := r.timers.(*manualTimerSource); ok {
+		return mts.ArmedTimers()
+	}
+	return 0
+}
+
+// NewTestTurnRouter creates a router with real timers disabled by passing
+// a no-op timer source (liveness 0 in tests avoids arming anything).
+func NewTestTurnRouter() *turnRouter {
+	return newTurnRouter(noopTimerSource{})
+}
+
+// NewTestTurnRouterWithTimers creates a router with an explicit timer
+// source (e.g. a manual timer the test fires synchronously).
+func NewTestTurnRouterWithTimers(ts timerSource) *turnRouter {
+	return newTurnRouter(ts)
+}
+
+// TestAwaitTurnCmd exposes awaitTurnCmd for external tests.
+func TestAwaitTurnCmd(r *turnRouter, pt *pendingTurn, liveness time.Duration) tea.Cmd {
+	return awaitTurnCmd(r, pt, liveness)
+}
+
+// Register exposes turnRouter.register for tests.
+func (r *turnRouter) Register(turnID, conversationID string) (*pendingTurn, bool) {
+	return r.register(turnID, conversationID)
+}
+
+// DeliverTestTerminal routes a terminal result by turn id; returns false
+// when no tracked turn matches (the turn_id filtering behavior).
+func (r *turnRouter) DeliverTestTerminal(turnID, reply, status string) bool {
+	r.mu.Lock()
+	pt, ok := r.turns[turnID]
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	pt.notify(turnTerminalMsg{
+		TurnID:         turnID,
+		ConversationID: pt.conversationID,
+		Reply:          reply,
+		Status:         status,
+	})
+	return true
+}
+
+// DeliverTestProgress refreshes liveness for a conversation's turns.
+func (r *turnRouter) DeliverTestProgress(conversationID, text string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	for _, pt := range r.turns {
+		if pt.conversationID == conversationID {
+			pt.mu.Lock()
+			pt.lastActivity = now
+			if text != "" {
+				pt.progressText = text
+			}
+			pt.mu.Unlock()
+		}
+	}
+}
+
+// TurnRouter is the exported alias of turnRouter for tests outside the
+// models package.
+type TurnRouter = turnRouter
+
+// noopTimerSource never fires — used with liveness=0 tests.
+type noopTimerSource struct{}
+
+// After implements timerSource by returning a channel that never fires.
+func (noopTimerSource) After(ctx context.Context, _ time.Duration) <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+	}()
+	return ch
+}
+
+// manualTimer is one armed timer the test can fire synchronously.
+type manualTimer struct {
+	fire chan struct{}
+}
+
+// manualTimerSource is a timerSource whose timers fire only when the test
+// calls FireTimers — zero real sleeps in liveness tests.
+type manualTimerSource struct {
+	mu     sync.Mutex
+	timers []*manualTimer
+}
+
+// NewManualTimerSource creates a manually-fired timer source.
+func NewManualTimerSource() *manualTimerSource {
+	return &manualTimerSource{}
+}
+
+// After implements timerSource by arming a manual timer.
+func (m *manualTimerSource) After(ctx context.Context, _ time.Duration) <-chan struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := &manualTimer{fire: make(chan struct{}, 1)}
+	m.timers = append(m.timers, t)
+	go func() {
+		<-ctx.Done()
+		// Cancel: drop the timer so FireTimers after ctx death is a no-op.
+		m.mu.Lock()
+		for i, existing := range m.timers {
+			if existing == t {
+				m.timers = append(m.timers[:i], m.timers[i+1:]...)
+				break
+			}
+		}
+		m.mu.Unlock()
+	}()
+	return t.fire
+}
+
+// FireTimers fires every armed timer exactly once, synchronously.
+func (m *manualTimerSource) FireTimers() {
+	m.mu.Lock()
+	firing := m.timers
+	m.timers = nil
+	m.mu.Unlock()
+	for _, t := range firing {
+		select {
+		case t.fire <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// ArmedTimers returns how many manual timers are currently armed.
+func (m *manualTimerSource) ArmedTimers() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.timers)
+}
+
+// awaitTurnCmd waits for the terminal result of a submitted turn without
+// ever blocking the UI thread: it runs as a tea.Cmd goroutine and delivers
+// exactly one turnTerminalMsg. Terminal results arrive through the
+// EventStream dispatch (ChatModel.DeliverTurnTerminal); if no terminal
+// event — and no progress event — arrives within the liveness window, the
+// command emits the honest stalled verdict (Status "stalled") so the view
+// can show that the task may still complete. Liveness timers come from the
+// injectable timerSource (turnRouter.timers); liveness <= 0 disables the
+// stalled check entirely (0=disabled in the chat config contract).
+func awaitTurnCmd(r *turnRouter, pt *pendingTurn, liveness time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		waitCh, ok := pt.addWaiter()
+		if !ok {
+			// Already resolved (terminal raced the await registration).
+			pt.mu.Lock()
+			res := pt.result
+			pt.mu.Unlock()
+			return res
+		}
+
+		var timer <-chan struct{}
+		if liveness > 0 && r != nil {
+			timer = r.timers.After(context.Background(), liveness)
+		}
+
+		select {
+		case res := <-waitCh:
+			return res
+		case <-timer:
+			res := turnTerminalMsg{
+				TurnID:         pt.turnID,
+				ConversationID: pt.conversationID,
+				Status:         turnStatusStalled,
+				Error:          fmt.Sprintf(stalledTurnText, int(liveness.Seconds())),
+			}
+			pt.notify(res) // idempotent: a real terminal arriving later is ignored
+			return res
+		}
+	}
+}

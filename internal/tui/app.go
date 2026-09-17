@@ -20,7 +20,6 @@ import (
 	"github.com/caimlas/meept/internal/stt"
 	"github.com/caimlas/meept/internal/tts"
 	"github.com/caimlas/meept/internal/tui/components"
-	"github.com/caimlas/meept/internal/tui/handlers"
 	"github.com/caimlas/meept/internal/tui/modals"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -309,6 +308,7 @@ func NewApp(socketPath string, cwd string) *App {
 		chat: models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior, inputConfig, models.ChatConfig{
 			AutoCopyOnRelease: clientConfig.Chat.AutoCopyOnRelease,
 			ScrollSpeed:       clientConfig.Chat.ScrollSpeed,
+			LivenessTimeout:   time.Duration(clientConfig.Chat.LivenessTimeoutSeconds) * time.Second,
 		}),
 		tasks:            models.NewTasksModel(rpc),
 		sessions:         models.NewSessionsModel(rpc),
@@ -1325,16 +1325,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Extract progress data and update chat directly
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
 					progressMsg := models.ProgressUpdateMsg{}
+					convID := ""
+					if v, ok := payloadMap["conversation_id"].(string); ok {
+						convID = v
+					}
 					if v, ok := payloadMap["agent_id"].(string); ok {
 						progressMsg.AgentID = v
 					} else if v, ok := payloadMap["conversation_id"].(string); ok {
 						progressMsg.AgentID = v
 					}
+					stage := ""
 					if v, ok := payloadMap["stage"].(string); ok {
+						stage = v
 						progressMsg.Stage = v
 					}
 					if v, ok := payloadMap["detail"].(string); ok {
 						progressMsg.CurrentTool = v
+						if stage == "" {
+							stage = v
+						}
 					}
 					if v, ok := payloadMap["percent"].(float64); ok {
 						progressMsg.Percent = v
@@ -1346,6 +1355,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					if v, ok := payloadMap["token_count"].(float64); ok {
 						progressMsg.TokensUsed = int(v)
+					}
+					// Liveness (async-turn-migration leaf 04): every
+					// progress event refreshes the pending turns' stall
+					// timers so a visibly-working turn is never marked
+					// stalled. Text must be lowercase per UI convention.
+					if stage != "" {
+						a.chat.DeliverTurnProgress(convID, strings.ToLower(stage))
+					} else {
+						a.chat.DeliverTurnProgress(convID, "")
 					}
 					// Update chat directly
 					if cmd := a.chat.Update(progressMsg); cmd != nil {
@@ -1494,55 +1512,63 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			case "turn.terminal":
-				// Turn lifecycle surface (leaf 01-turn-terminal-event
-				// Task 5): minimal — a timeout-status turn refreshes the
-				// pending indicator so the user knows the task outlived
-				// the synchronous wait. Full surfacing is the sibling
-				// async-turn-migration plan's scope.
+				// Async turn terminal surface (async-turn-migration
+				// leaf 04, replacing leaf 01's minimal timeout-only
+				// handler). The event is routed BY TURN ID into the chat
+				// model's await goroutine, which renders the reply/error
+				// bubble; untracked turn ids are ignored.
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
-					if notif := handlers.NewTaskEventHandler().HandleTurnTerminal(payloadMap); notif != nil {
-						progressMsg := models.ProgressUpdateMsg{
-							Stage:       notif.Message,
-							ChatVisible: true,
-						}
-						if cmd := a.chat.Update(progressMsg); cmd != nil {
-							cmds = append(cmds, cmd)
-						}
-					}
+					turnID, _ := payloadMap["turn_id"].(string)
+					a.chat.DeliverTurnTerminal(turnID, payloadMap)
 				}
 			case "task.completed", EventTaskFailed:
 				// Inject task result message into chat
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
-					resultMsg := models.ChatTaskResultMsg{
-						State: "completed",
-					}
-					if e.Topic == EventTaskFailed {
-						resultMsg.State = "failed"
-					}
-					if v, ok := payloadMap["task_id"].(string); ok {
-						resultMsg.TaskID = v
-					}
-					if v, ok := payloadMap["name"].(string); ok {
-						resultMsg.TaskName = v
-					}
-					if v, ok := payloadMap["completed_jobs"].(float64); ok {
-						resultMsg.CompletedSteps = int(v)
-					}
-					if v, ok := payloadMap["total_jobs"].(float64); ok {
-						resultMsg.TotalSteps = int(v)
-					}
-					if v, ok := payloadMap["result"].(string); ok {
-						resultMsg.ResultSummary = v
-					}
-					if cmd := a.chat.Update(resultMsg); cmd != nil {
-						cmds = append(cmds, cmd)
+					// DOUBLE-RENDER DEDUPE (async-turn-migration leaf 04):
+					// a submitted turn produces BOTH a task.completed
+					// relay chat message AND a turn.terminal event. While
+					// a turn is pending for this conversation, the relay
+					// is suppressed — the turn.terminal path renders the
+					// single result bubble. The ack carries no task_id,
+					// so the rule is conversation-scoped. Sidebar task
+					// handling (task LIST view) is unaffected.
+					if convID, _ := payloadMap["conversation_id"].(string); convID != "" && a.chat.SuppressTaskCompletedFor(convID) {
+						// Toast still fires below via resultMsg fields; keep
+						// the suppression silent for the transcript only.
+					} else {
+						resultMsg := models.ChatTaskResultMsg{
+							State: "completed",
+						}
+						if e.Topic == EventTaskFailed {
+							resultMsg.State = "failed"
+						}
+						if v, ok := payloadMap["task_id"].(string); ok {
+							resultMsg.TaskID = v
+						}
+						if v, ok := payloadMap["name"].(string); ok {
+							resultMsg.TaskName = v
+						}
+						if v, ok := payloadMap["completed_jobs"].(float64); ok {
+							resultMsg.CompletedSteps = int(v)
+						}
+						if v, ok := payloadMap["total_jobs"].(float64); ok {
+							resultMsg.TotalSteps = int(v)
+						}
+						if v, ok := payloadMap["result"].(string); ok {
+							resultMsg.ResultSummary = v
+						}
+						if cmd := a.chat.Update(resultMsg); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
 					}
 
-					// Push toast notification
-					if a.notifications != nil && resultMsg.TaskName != "" {
+					// Push toast notification (outside the dedupe guard —
+					// the sidebar/toast surface is NOT suppressed).
+					taskName, _ := payloadMap["name"].(string)
+					if a.notifications != nil && taskName != "" {
 						level := components.NotifySuccess
 						title := "task completed"
-						msg := resultMsg.TaskName
+						msg := taskName
 						if e.Topic == EventTaskFailed {
 							level = components.NotifyError
 							title = "task failed"

@@ -39,6 +39,18 @@ type MockChatRPCClient struct {
 	QueueStatus    *types.QueueStatusResponse
 	QueueStatusErr error
 
+	// SubmitChat tracking (async-turn-migration leaf 04)
+	SubmitCalls          []string
+	SubmitParts          []int
+	SubmitErr            error
+	SubmitAccepted       bool
+	SubmitNote           string
+	SubmitTurnID         string
+	SubmitConversationID string
+	SubmitSessionID      string
+	SubmitSessionIDSent  string
+	SubmitPartsList      [][]llm.ContentPart
+
 	// Message persistence tracking
 	SavedMessages       map[string][]types.SessionMessage
 	GetMessagesResp     *types.SessionMessagesResponse
@@ -157,9 +169,31 @@ func (m *MockChatRPCClient) GetQueueStatus(_ string) (*types.QueueStatusResponse
 	return m.QueueStatus, nil
 }
 
+// SubmitChat implements the async submit path (async-turn-migration
+// leaf 04). Records the call and returns the configured ack or error.
+func (m *MockChatRPCClient) SubmitChat(_ context.Context, message, sessionID string, parts []llm.ContentPart) (TurnSubmitAck, error) {
+	m.SubmitCalls = append(m.SubmitCalls, message)
+	m.SubmitParts = append(m.SubmitParts, len(parts))
+	m.SubmitSessionIDSent = sessionID
+	partsCopy := make([]llm.ContentPart, len(parts))
+	copy(partsCopy, parts)
+	m.SubmitPartsList = append(m.SubmitPartsList, partsCopy)
+	if m.SubmitErr != nil {
+		return TurnSubmitAck{}, m.SubmitErr
+	}
+	if !m.SubmitAccepted {
+		return TurnSubmitAck{Accepted: false, Note: m.SubmitNote}, nil
+	}
+	return TurnSubmitAck{
+		TurnID:         m.SubmitTurnID,
+		ConversationID: m.SubmitConversationID,
+		SessionID:      m.SubmitSessionID,
+		Accepted:       true,
+	}, nil
+}
+
 // Call implements the RPCClient interface for generic RPC calls.
 func (m *MockChatRPCClient) Call(method string, params any) (json.RawMessage, error) {
-	// For testing, return a minimal response based on method
 	switch method {
 	case "session.thread.list":
 		return json.RawMessage(`{"threads":[],"count":0}`), nil
@@ -1538,16 +1572,19 @@ func TestChatModel_UpdateQueueStatus(t *testing.T) {
 // TestChatModel_SendMessage_WithImageAttachment verifies that when the chat
 // model carries an image attachment (with UploadID populated), doSendMessage:
 //
-//   - calls ChatWithParts (not Chat) on the RPC client
+//   - calls SubmitChat (not the deprecated blocking Chat/ChatWithParts)
 //   - passes exactly one image_url ContentPart referencing the upload
 //   - leaves the user message body intact (no "[Attached file: ...]" prefix)
 func TestChatModel_SendMessage_WithImageAttachment(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	mock.UploadID = "sha256deadbeef"
+	mock.SubmitAccepted = true
+	mock.SubmitTurnID = "turn-1"
 	userStyle := lipgloss.NewStyle()
 	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
 	model.SetSize(80, 24)
 	model.agentActive = false
+	model.sessionID = "sess-1"
 
 	model.attachments = []attachmentEntry{
 		{
@@ -1563,39 +1600,25 @@ func TestChatModel_SendMessage_WithImageAttachment(t *testing.T) {
 		t.Fatal("expected command returned for image send")
 	}
 	// Execute the returned command so the RPC call is actually made.
-	// doSendMessage returns a tea.BatchMsg ([send, progressTick]); find the
-	// ChatResponseMsg within the batch and drain it.
-	msg := cmd()
-	if batch, ok := msg.(tea.BatchMsg); ok {
-		for _, c := range batch {
-			sub := c()
-			if sub == nil {
-				continue
-			}
-			// Skip non-ChatResponseMsgs (e.g. ProgressTickMsg).
-			switch sub.(type) {
-			case ChatResponseMsg:
-				// drained
-			}
-		}
-	} else {
-		switch msg.(type) {
-		case ChatResponseMsg:
-			// drained
-		}
-	}
+	// doSendMessage returns a tea.BatchMsg ([submit, progressTick]); find
+	// the submitTurnResultMsg within the batch and drain it.
+	drainSubmitMsg(t, cmd, mock)
 
-	if len(mock.ChatWithPartsCalls) != 1 {
-		t.Fatalf("expected 1 ChatWithParts call, got %d (Chat calls=%d)",
-			len(mock.ChatWithPartsCalls), len(mock.ChatCalls))
+	if len(mock.SubmitCalls) != 1 {
+		t.Fatalf("expected 1 SubmitChat call, got %d (Chat calls=%d, ChatWithParts calls=%d)",
+			len(mock.SubmitCalls), len(mock.ChatCalls), len(mock.ChatWithPartsCalls))
 	}
-	if len(mock.ChatCalls) != 0 {
-		t.Errorf("expected 0 plain Chat calls, got %d", len(mock.ChatCalls))
+	if len(mock.ChatCalls) != 0 || len(mock.ChatWithPartsCalls) != 0 {
+		t.Errorf("expected no blocking chat calls, got Chat=%d ChatWithParts=%d",
+			len(mock.ChatCalls), len(mock.ChatWithPartsCalls))
 	}
-	if len(mock.ChatWithPartsPartsList) != 1 {
-		t.Fatalf("expected 1 parts slice recorded, got %d", len(mock.ChatWithPartsPartsList))
+	if mock.SubmitSessionIDSent != "sess-1" {
+		t.Errorf("expected session_id sess-1, got %q", mock.SubmitSessionIDSent)
 	}
-	parts := mock.ChatWithPartsPartsList[0]
+	if len(mock.SubmitPartsList) != 1 {
+		t.Fatalf("expected 1 parts slice recorded, got %d", len(mock.SubmitPartsList))
+	}
+	parts := mock.SubmitPartsList[0]
 	if len(parts) != 2 {
 		t.Fatalf("expected 2 parts (image + text), got %d", len(parts))
 	}
@@ -1614,15 +1637,45 @@ func TestChatModel_SendMessage_WithImageAttachment(t *testing.T) {
 	}
 }
 
+// drainSubmitMsg executes a doSendMessage command and drains the
+// submitTurnResultMsg (and any turnSubmittedMsg) from the returned batch.
+func drainSubmitMsg(t *testing.T, cmd tea.Cmd, mock *MockChatRPCClient) {
+	t.Helper()
+	drain := func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		switch msg := c().(type) {
+		case submitTurnResultMsg:
+			model := newTestChatModel()
+			model.turns = newTurnRouter(nil)
+			model.handleSubmitTurnResult(msg)
+		case turnSubmittedMsg:
+			// drained
+		}
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			drain(c)
+		}
+	} else if msg != nil {
+		drain(func() tea.Msg { return msg })
+	}
+}
+
 // TestChatModel_SendMessage_WithNonImageAttachment verifies that non-image
 // attachments fall back to the legacy "[Attached file: <path>]" text prefix
-// and invoke plain Chat (no parts).
+// and invoke the async SubmitChat path (no blocking chat call).
 func TestChatModel_SendMessage_WithNonImageAttachment(t *testing.T) {
 	mock := NewMockChatRPCClient()
+	mock.SubmitAccepted = true
+	mock.SubmitTurnID = "turn-1"
 	userStyle := lipgloss.NewStyle()
 	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
 	model.SetSize(80, 24)
 	model.agentActive = false
+	model.sessionID = "sess-1"
 
 	model.attachments = []attachmentEntry{
 		{
@@ -1637,37 +1690,29 @@ func TestChatModel_SendMessage_WithNonImageAttachment(t *testing.T) {
 		t.Fatal("expected command returned for non-image send")
 	}
 	// Execute the returned command so the RPC call is actually made.
-	// doSendMessage returns a tea.BatchMsg ([send, progressTick]); drain any
-	// ChatResponseMsg within it, ignoring tick/other messages.
-	if msg := cmd(); msg != nil {
-		if batch, ok := msg.(tea.BatchMsg); ok {
-			for _, c := range batch {
-				if sub := c(); sub != nil {
-					switch sub.(type) {
-					case ChatResponseMsg:
-						// drained
-					}
-				}
-			}
-		} else {
-			switch msg.(type) {
-			case ChatResponseMsg:
-				// drained
-			}
-		}
-	}
+	// doSendMessage returns a tea.BatchMsg ([submit, progressTick]); drain
+	// the submit messages within it, ignoring tick/other messages.
+	drainSubmitMsg(t, cmd, mock)
 
-	if len(mock.ChatCalls) != 1 {
-		t.Fatalf("expected 1 plain Chat call, got %d", len(mock.ChatCalls))
+	if len(mock.SubmitCalls) != 1 {
+		t.Fatalf("expected 1 SubmitChat call, got %d (Chat calls=%d)",
+			len(mock.SubmitCalls), len(mock.ChatCalls))
 	}
-	if len(mock.ChatWithPartsCalls) != 0 {
-		t.Errorf("expected 0 ChatWithParts calls, got %d", len(mock.ChatWithPartsCalls))
+	if len(mock.ChatCalls) != 0 || len(mock.ChatWithPartsCalls) != 0 {
+		t.Errorf("expected no blocking chat calls, got Chat=%d ChatWithParts=%d",
+			len(mock.ChatCalls), len(mock.ChatWithPartsCalls))
 	}
-	if !strings.HasPrefix(mock.ChatCalls[0], "[Attached file: /tmp/notes.txt]") {
-		t.Errorf("expected [Attached file: ...] prefix, got %q", mock.ChatCalls[0])
+	if len(mock.SubmitPartsList) != 1 || len(mock.SubmitPartsList[0]) != 0 {
+		t.Errorf("expected 0 content parts for non-image attachment, got %+v",
+			mock.SubmitPartsList)
 	}
-	if !strings.Contains(mock.ChatCalls[0], "summary please") {
-		t.Errorf("expected user text preserved, got %q", mock.ChatCalls[0])
+	// The message body must carry the "[Attached file: ...]" prefix and the
+	// user text (the parts slice is empty — the text travels as `message`).
+	if !strings.HasPrefix(mock.SubmitCalls[0], "[Attached file: /tmp/notes.txt]") {
+		t.Errorf("expected [Attached file: ...] prefix, got %q", mock.SubmitCalls[0])
+	}
+	if !strings.Contains(mock.SubmitCalls[0], "summary please") {
+		t.Errorf("expected user text preserved, got %q", mock.SubmitCalls[0])
 	}
 }
 

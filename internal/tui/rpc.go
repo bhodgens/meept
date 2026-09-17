@@ -277,7 +277,9 @@ func (c *RPCClient) SetTimeout(d time.Duration) {
 	c.timeout = d
 }
 
-// Chat sends a chat message and returns the response.
+// Deprecated: blocking chat send — superseded by SubmitChat +
+// awaitTurnCmd (async-turn-migration leaf 04). Kept for leaf 07's
+// removal sweep; other callers, if any, keep working.
 func (c *RPCClient) Chat(ctx context.Context, message, conversationID string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -307,9 +309,9 @@ func (c *RPCClient) Chat(ctx context.Context, message, conversationID string) (s
 	return resp.Reply, nil
 }
 
-// ChatWithParts sends a chat message with multimodal content parts (e.g.
-// image_url references to uploaded files) and returns the response. When
-// parts is empty this behaves identically to Chat.
+// Deprecated: blocking chat send with parts — superseded by SubmitChat +
+// awaitTurnCmd (async-turn-migration leaf 04). Kept for leaf 07's
+// removal sweep; other callers, if any, keep working.
 func (c *RPCClient) ChatWithParts(ctx context.Context, message, conversationID string, parts []llm.ContentPart) (string, error) {
 	// Fast path: no parts, delegate to plain Chat to avoid touching params shape.
 	if len(parts) == 0 {
@@ -1376,6 +1378,7 @@ func (c *RPCClient) CreateThread(sessionID, topicLabel string) (*types.Thread, e
 
 	return &resp, nil
 }
+
 // Search Methods
 // ============================================================================
 
@@ -1425,4 +1428,45 @@ func (c *RPCClient) ListSkills(ctx context.Context) ([]commands.SkillInfo, error
 	}
 
 	return resp.Skills, nil
+}
+
+// SubmitChat fires the fire-and-forget "chat.submit" RPC (async-turn-
+// migration leaf 04) and parses the immediate ack. It NEVER waits for
+// agent work — the reply arrives later via the turn.terminal bus event
+// (leaf 01). Empty parts are omitted so the wire shape matches the
+// plain-text path. This is the async replacement for the deprecated
+// blocking Chat/ChatWithParts (which stay for the leaf 07 removal sweep).
+func (c *RPCClient) SubmitChat(ctx context.Context, message, sessionID string, parts []llm.ContentPart) (tuimodels.TurnSubmitAck, error) {
+	if err := ctx.Err(); err != nil {
+		return tuimodels.TurnSubmitAck{}, err
+	}
+
+	params := map[string]any{
+		ParamMessage:   message,
+		ParamSessionID: sessionID,
+	}
+	if len(parts) > 0 {
+		params["parts"] = parts
+	}
+
+	result, err := c.Call("chat.submit", params)
+	if err != nil {
+		return tuimodels.TurnSubmitAck{}, err
+	}
+
+	var ack tuimodels.TurnSubmitAck
+	if err := json.Unmarshal(result, &ack); err != nil { //nolint:mutexio // unmarshal of local result under callMu serialize-RPC lock
+		return tuimodels.TurnSubmitAck{}, fmt.Errorf("failed to parse chat.submit ack: %w", err)
+	}
+	// An accepted=false ack means the daemon did NOT take the turn
+	// (e.g. empty message) — surface the note as an error so the chat
+	// view can render the honest failure instead of awaiting forever.
+	if !ack.Accepted {
+		note := ack.Note
+		if note == "" {
+			note = "submission rejected"
+		}
+		return ack, fmt.Errorf("%s", note)
+	}
+	return ack, nil
 }
