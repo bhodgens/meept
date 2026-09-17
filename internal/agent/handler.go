@@ -19,6 +19,7 @@ import (
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -213,6 +214,27 @@ type ChatResponse struct {
 	// Populated only on the classified reply path (result.Intent != nil);
 	// omitted entirely otherwise. Additive metadata — reply text unchanged.
 	Meta map[string]string `json:"meta,omitempty"`
+}
+
+// TurnTerminalEvent is the frozen payload published on the "turn.terminal"
+// bus topic when a chat turn reaches its terminal state. Field set is
+// CLOSED: add nothing, remove nothing, rename nothing without updating
+// every consumer (TUI, GUI, bench) and the contract in
+// docs/plans/20260916-turn-lifecycle-events/master.md.
+type TurnTerminalEvent struct {
+	ConversationID string `json:"conversation_id"`         // required, non-empty
+	SessionID      string `json:"session_id,omitempty"`    //
+	TurnID         string `json:"turn_id"`                 // uuid per chat request
+	TaskID         string `json:"task_id,omitempty"`       // set iff the turn dispatched a task
+	IntentType     string `json:"intent_type,omitempty"`   //
+	AgentID        string `json:"agent_id,omitempty"`      //
+	HandlerCase    string `json:"handler_case"`            // matches dispatch_log handler_case values
+	Status         string `json:"status"`                  // completed | failed | timeout | parked  (CLOSED set)
+	Reply          string `json:"reply"`                   // final user-facing reply text (stub included if that is what was returned)
+	DurationMS     int64  `json:"duration_ms"`             //
+	ClassifiedBy   string `json:"classified_by,omitempty"` // intent.Method provenance
+	Model          string `json:"model,omitempty"`         //
+	Error          string `json:"error,omitempty"`         // non-empty iff Status=="failed"
 }
 
 // NewChatHandler creates a new ChatHandler.
@@ -616,16 +638,43 @@ func (h *ChatHandler) Name() string {
 func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage) {
 	h.logger.Debug("Received chat request", "id", msg.ID)
 
+	// turn.terminal bookkeeping (async-turn-migration step 1): every
+	// terminal exit path of this function emits exactly one turn.terminal
+	// event through publishTurnTerminal. The early format-error returns
+	// below have no conversation yet, so they emit with the request ID as
+	// a synthetic conversation sentinel (consumers key on request id via
+	// the existing error response).
+	turnID := id.Generate("turn-")
+	start := time.Now()
+
 	// Parse request payload
 	var req ChatRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		h.logger.Error("Failed to parse chat request", "error", err)
 		h.sendError(msg.ID, "invalid request format: "+err.Error())
+		h.publishTurnTerminal(TurnTerminalEvent{
+			ConversationID: msg.ID,
+			TurnID:         turnID,
+			HandlerCase:    "invalid_request",
+			Status:         "failed",
+			Reply:          "I encountered an error: invalid request format: " + err.Error(),
+			DurationMS:     time.Since(start).Milliseconds(),
+			Error:          "invalid request format: " + err.Error(),
+		})
 		return
 	}
 
 	if req.Message == "" {
 		h.sendError(msg.ID, "message is required")
+		h.publishTurnTerminal(TurnTerminalEvent{
+			ConversationID: req.ConversationID,
+			TurnID:         turnID,
+			HandlerCase:    "empty_message",
+			Status:         "failed",
+			Reply:          "I encountered an error: message is required",
+			DurationMS:     time.Since(start).Milliseconds(),
+			Error:          "message is required",
+		})
 		return
 	}
 
@@ -708,12 +757,27 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	var reply string
 	var err error
 	var result *DispatchResult
+	// handlerCase tracks which switch case was selected for audit logging.
+	// Declared at function scope so the turn.terminal funnel (below) emits
+	// the same vocabulary the dispatch_log row records.
+	handlerCase := "direct_mode"
 	// recordOnTaskPath is set when the reply was produced by the task path
 	// (route_to_agent or sync_dispatch). Only those paths need the exchange
 	// mirrored into the session conversation: the direct path already
 	// records both sides via RunOnce's AddUserMessage/AddAssistantMessage,
 	// so recording here too would double-append.
 	recordOnTaskPath := false
+
+	// turn.terminal accumulators (async-turn-migration step 1): the sync
+	// ceiling flag and the terminal event emitted by the single funnel at
+	// the bottom of this function. syncTaskID carries the dispatched task
+	// for the event payload on task-path turns.
+	syncTurnTimeout := false
+	syncTaskID := ""
+	syncIntentType := ""
+	syncAgentID := ""
+	syncClassifiedBy := ""
+	syncModel := ""
 
 	if h.dispatcher != nil {
 		// Multi-agent mode: classify and route through dispatcher.
@@ -723,8 +787,9 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		var dispatchErr error
 		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID, req.Parts, req.AgentID, req.Model)
 
-		// handlerCase tracks which switch case was selected for audit logging.
-		handlerCase := "direct_mode"
+		// handlerCase is declared at function scope above; re-sync the
+		// direct-mode default for this dispatch attempt.
+		handlerCase = "direct_mode"
 		inputSummary := extractSummary(req.Message)
 		hasParts := len(req.Parts) > 0
 
@@ -839,6 +904,23 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				h.publishPlanRequest(result, conversationID)
 				reply = h.waitForTaskCompletion(ctx, result.Task.ID)
 				recordOnTaskPath = true
+				// turn.terminal ceiling detection: the stub reply is NOT
+				// sniffed — the wait hit the ceiling (or the task failed)
+				// when the task is still non-terminal in the store after
+				// the wait. That maps to Status "timeout" (StateFailed is
+				// reported through the task.failed relay instead).
+				if h.taskStore != nil {
+					if tk, tkErr := h.taskStore.GetByID(result.Task.ID); tkErr == nil && tk != nil && !tk.State.IsTerminal() {
+						syncTurnTimeout = true
+					}
+				}
+				syncTaskID = result.Task.ID
+				if result.Intent != nil {
+					syncIntentType = result.Intent.Type
+					syncClassifiedBy = result.Intent.Method
+					syncModel = result.Intent.Model
+				}
+				syncAgentID = result.AgentID
 			} else {
 				// Async dispatch: send ack immediately, let orchestrator handle it
 				h.logger.Info("Async dispatch: sending ack and publishing plan request",
@@ -853,6 +935,17 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 					steps = h.fetchStepSummaries(result.Task.ID)
 				}
 				reply = h.FormatEnhancedAsyncTaskAck(result, steps, h.estimateDuration(result.Task.ID, len(steps)), h.getPlanReference(result.Task.ID))
+
+				// turn.terminal provenance for the ack event (the ack IS
+				// the RPC turn's terminal state; the real result arrives
+				// later via the task_completed_relay event).
+				syncTaskID = result.Task.ID
+				if result.Intent != nil {
+					syncIntentType = result.Intent.Type
+					syncClassifiedBy = result.Intent.Method
+					syncModel = result.Intent.Model
+				}
+				syncAgentID = result.AgentID
 
 				// Publish plan request to orchestrator
 				h.publishPlanRequest(result, conversationID)
@@ -1022,6 +1115,52 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	// Send response
 	h.sendResponse(msg.ID, response)
+
+	// turn.terminal funnel (async-turn-migration step 1): exactly one
+	// terminal event per turn, emitted here with the reply this path
+	// produced. Status is "timeout" when the sync wait hit its ceiling
+	// with the task still non-terminal, "failed" on error paths, and
+	// "completed" otherwise (including the async ack, which IS this RPC
+	// turn's terminal state). Parked turns (budget/quota deferral) keep
+	// the error-free reply and report "parked".
+	turnStatus := "completed"
+	turnError := ""
+	turnReply := response.Reply
+	if err != nil {
+		if response.Error == "" && response.Reply != "" {
+			// Parked turn: the error was deferred, the reply carries the
+			// queue notice — the RPC turn ended in the parked state.
+			turnStatus = "parked"
+		} else {
+			turnStatus = "failed"
+			turnError = response.Error
+			if turnError == "" {
+				turnError = err.Error()
+			}
+			if turnReply == "" {
+				// The user-facing reply documents the failure even when
+				// the error-only response left it empty.
+				turnReply = "I encountered an error: " + turnError
+			}
+		}
+	} else if syncTurnTimeout {
+		turnStatus = "timeout"
+	}
+	h.publishTurnTerminal(TurnTerminalEvent{
+		ConversationID: conversationID,
+		SessionID:      req.SessionID,
+		TurnID:         turnID,
+		TaskID:         syncTaskID,
+		IntentType:     syncIntentType,
+		AgentID:        syncAgentID,
+		HandlerCase:    handlerCase,
+		Status:         turnStatus,
+		Reply:          turnReply,
+		DurationMS:     time.Since(start).Milliseconds(),
+		ClassifiedBy:   syncClassifiedBy,
+		Model:          syncModel,
+		Error:          turnError,
+	})
 }
 
 // recordExchangeInSessionConv best-effort mirrors a completed task-path
@@ -1355,6 +1494,22 @@ func (h *ChatHandler) publishWorkerEvent(topic string, w *Worker) {
 	h.bus.PublishExternalOnly(topic, msg)
 }
 
+// publishTurnTerminal is the single emission point for the turn.terminal
+// topic (async-turn-migration step 1). Payload contract is frozen — see
+// docs/plans/20260916-turn-lifecycle-events/master.md Interface Contracts.
+func (h *ChatHandler) publishTurnTerminal(ev TurnTerminalEvent) {
+	if h == nil || h.bus == nil {
+		return
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, SourceChatHandler, ev)
+	if err != nil {
+		h.logger.Error("failed to build turn.terminal event", "error", err)
+		return
+	}
+	msg.Topic = "turn.terminal"
+	h.bus.Publish("turn.terminal", msg)
+}
+
 // TaskStepSummary represents a step in a task completion payload.
 type TaskStepSummary struct {
 	ID                 string `json:"id"`
@@ -1430,6 +1585,70 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	if len(payload.LinkedSessions) == 0 {
 		h.sendResponse("task-completed-"+payload.TaskID, response)
 	}
+
+	// turn.terminal relay (async-turn-migration step 1): the originating
+	// RPC turn may have already returned (async ack or sync timeout), so
+	// the real result is re-broadcast as a structured terminal event.
+	// Session→conversation correlation reuses the live worker map; when no
+	// worker matches, the task_id sentinel keys the event for consumers.
+	h.publishTaskTerminalRelay(payload.TaskID, payload.LinkedSessions,
+		"task_completed_relay", "completed", reply, "")
+}
+
+// publishTaskTerminalRelay emits the turn.terminal event for a task-end
+// relay (task.completed / task.failed). The first linked session that maps
+// to a live worker's conversation wins; otherwise the first linked session
+// ID is used as the conversation; with no linked sessions at all the
+// "task:<taskID>" sentinel keys the event for consumers (Task 3 contract).
+func (h *ChatHandler) publishTaskTerminalRelay(taskID string, linkedSessions []string, handlerCase, status, reply, errMsg string) {
+	conversationID := ""
+	sessionID := ""
+	for _, sID := range linkedSessions {
+		if sID == "" {
+			continue
+		}
+		if sessionID == "" {
+			sessionID = sID
+		}
+		if conv := h.workerConversationForSession(sID); conv != "" {
+			conversationID = conv
+			sessionID = sID
+			break
+		}
+	}
+	if conversationID == "" {
+		if sessionID != "" {
+			conversationID = sessionID
+		} else {
+			conversationID = "task:" + taskID
+		}
+	}
+	h.publishTurnTerminal(TurnTerminalEvent{
+		ConversationID: conversationID,
+		SessionID:      sessionID,
+		TurnID:         id.Generate("turn-"),
+		TaskID:         taskID,
+		HandlerCase:    handlerCase,
+		Status:         status,
+		Reply:          reply,
+		Error:          errMsg,
+	})
+}
+
+// workerConversationForSession looks up the conversation a live worker bound
+// to the given session (best-effort correlation; "" when unmapped).
+func (h *ChatHandler) workerConversationForSession(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	h.workersMu.RLock()
+	defer h.workersMu.RUnlock()
+	for _, w := range h.workers {
+		if w != nil && (w.SessionID == sessionID || w.ConversationID == sessionID) {
+			return w.ConversationID
+		}
+	}
+	return ""
 }
 
 // formatTaskCompletedMessage builds a human-readable task completion message.
@@ -1534,6 +1753,12 @@ func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
 	if len(payload.LinkedSessions) == 0 {
 		h.sendResponse("task-failed-"+payload.TaskID, response)
 	}
+
+	// turn.terminal relay (async-turn-migration step 1): the failure
+	// mirrors the completed-task relay — same correlation, Status
+	// "failed" with the error text.
+	h.publishTaskTerminalRelay(payload.TaskID, payload.LinkedSessions,
+		"task_failed_relay", "failed", reply, payload.Error)
 }
 
 // formatTaskFailedMessage builds a human-readable task failure message.

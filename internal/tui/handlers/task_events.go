@@ -145,6 +145,24 @@ func (h *TaskEventHandler) HandleStepCompleted(payload map[string]any) *TaskNoti
 	}
 }
 
+// HandleTurnTerminal processes a turn.terminal event (leaf
+// 01-turn-terminal-event Task 5). Minimal surface: only the timeout status
+// surfaces, refreshing the pending indicator with the fixed lowercase text
+// so the user knows the task outlived the synchronous wait and the real
+// result will still arrive (via the task_completed_relay / task_failed_relay
+// events). All other statuses are no-ops here — full surfacing is the
+// sibling async-turn-migration plan's scope.
+func (h *TaskEventHandler) HandleTurnTerminal(payload map[string]any) *TaskNotification {
+	if getString(payload, "status", "") != "timeout" {
+		return nil
+	}
+	return &TaskNotification{
+		Type:    "timeout",
+		Message: "task still running — result will arrive",
+		TaskID:  getString(payload, "task_id", ""),
+	}
+}
+
 // Helper functions for extracting values from payload maps
 
 func getString(payload map[string]any, key, defaultVal string) string {

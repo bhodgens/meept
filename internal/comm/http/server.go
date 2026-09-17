@@ -724,6 +724,14 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 		// agent state transitions. They MUST render as progress — never
 		// chat_message (AGENTS.md WS classification invariant).
 		eventType = "agent_progress"
+	case strings.HasPrefix(topic, "turn."):
+		// Turn lifecycle events (turn.terminal, leaf
+		// 01-turn-terminal-event of the turn-lifecycle tree): the frozen
+		// payload reports a chat turn's final outcome with provenance.
+		// They are lifecycle signals and MUST classify as
+		// agent_progress — never chat_message (AGENTS.md WS
+		// classification invariant: blank bubbles otherwise).
+		eventType = "agent_progress"
 	case strings.HasPrefix(topic, "metrics."):
 		eventType = "metrics_update"
 	case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job.") ||

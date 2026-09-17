@@ -20,6 +20,7 @@ import (
 	"github.com/caimlas/meept/internal/stt"
 	"github.com/caimlas/meept/internal/tts"
 	"github.com/caimlas/meept/internal/tui/components"
+	"github.com/caimlas/meept/internal/tui/handlers"
 	"github.com/caimlas/meept/internal/tui/modals"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -1490,6 +1491,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					if cmd := a.chat.Update(progressMsg); cmd != nil {
 						cmds = append(cmds, cmd)
+					}
+				}
+			case "turn.terminal":
+				// Turn lifecycle surface (leaf 01-turn-terminal-event
+				// Task 5): minimal — a timeout-status turn refreshes the
+				// pending indicator so the user knows the task outlived
+				// the synchronous wait. Full surfacing is the sibling
+				// async-turn-migration plan's scope.
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					if notif := handlers.NewTaskEventHandler().HandleTurnTerminal(payloadMap); notif != nil {
+						progressMsg := models.ProgressUpdateMsg{
+							Stage:       notif.Message,
+							ChatVisible: true,
+						}
+						if cmd := a.chat.Update(progressMsg); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
 					}
 				}
 			case "task.completed", EventTaskFailed:

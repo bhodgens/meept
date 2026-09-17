@@ -316,6 +316,15 @@ case strings.HasPrefix(topic, "agent.model_escalated"):
     eventType = "agent_progress"
 ```
 
+Turn lifecycle events on `turn.terminal` (async-turn-migration step 1, plan
+`docs/plans/20260916-turn-lifecycle-events/`) are likewise classified
+`agent_progress`, never `chat_message`:
+
+```go
+case strings.HasPrefix(topic, "turn."):
+    eventType = "agent_progress"
+```
+
 Future agents adding new bus topics must verify they land in the correct bucket.
 
 ### Quota errors are not failures (quota-reset-resilience)
