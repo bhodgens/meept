@@ -20,95 +20,101 @@
 
 ## Goal
 
-AGENTS.md is the repo's standing instruction set for AI coding agents - the file's own header says it must be validated on every commit and that stale guidance causes bugs. After leaves 01-04, three statements in it are stale: the manual "verify they land in the correct bucket" instructions for WS events, the absence of typed topics from the package table, and the absence of a typed-topic invariant. This leaf fixes exactly those three things and nothing else.
+AGENTS.md is the repo's standing instruction set for AI coding agents - its own header says it must be validated on every commit and that stale guidance causes bugs. After leaves 01-04, three things in it are stale: the manual "verify they land in the correct bucket" instructions for WS events, the absence of typed topics from the package table, and the absence of a typed-topic invariant. This leaf fixes exactly those three things and nothing else.
 
 ## Context
 
-AGENTS.md is ~45K chars at repo root. Relevant regions (locate with grep, do not assume line numbers):
+AGENTS.md is ~45K chars at repo root. Relevant regions (locate with grep):
 
-- "### WS event type classification" - contains the quota/model_escalated/turn. prefix paragraphs each ending in instructions for "future agents adding new bus topics"
-- "Key Components" table (Architecture Overview) - the layer/package table where Server/Bus rows live
-- "Critical Invariants" - section where a new invariant paragraph goes
+- "### WS event type classification" - paragraphs on quota (`agent.quota` prefix), model_escalated, and turn. topics, each ending in instructions for future authors to verify bucket placement; plus the `chat.response` exclusion note (KEEP) and the employee.* note (KEEP - it is a classification statement, still true via fallback).
+- "Key Components" table (Architecture Overview) - Server/Bus rows.
+- "Critical Invariants" - where the new invariant paragraph goes.
 
-The orchestrator's master.md Interface Contracts section (Contract 6) contains the exact edit list - follow it verbatim.
+The master.md Interface Contracts section (Contract 6) holds the exact edit list. AMENDED FACTS the new text must reflect (verified 2026-09-16):
+- Only `turn.terminal` is typed today (`TopicTurnTerminal` in internal/agent/topics.go on the frozen TurnTerminalEvent).
+- `agent.quota_wait` is deliberately RAW (polymorphic payload: QuotaEvent, ParkTurnEvent, job-level map).
+- WS classification: marker-first for payloads with `WSClass()` (internal/comm/wsclass, six classes), prefix table as legacy fallback, `exhaustive` linter enforces switch coverage in CI.
 
 ## Interface Contracts (From Parent)
 
 ### What This Leaf Exposes
 
-Exactly three AGENTS.md edits (full text in master.md Contract 6):
+Exactly three AGENTS.md edits:
 
-1. WS event type classification section: remove the three manual-verification sentences; replace with marker-derivation statement (classification from `WSClass()` in `internal/comm/wsclass`, enforced by `exhaustive` in CI); KEEP the `chat.response` exclusion sentence (still true - RPC reply, not relayed).
-2. Key Components table: mention `internal/bus/topic.go` typed topics (Topic[T], PublishT/SubscribeT).
-3. Critical Invariants: add the typed-topic invariant paragraph, including the scope-discipline sentence - raw path stays for wildcards, request/response bus patterns, and caller-defined payloads; do not wrap `map[string]any` in a Topic ("ceremony without a guarantee").
+1. **WS event type classification section**: replace the per-topic manual-verification sentences (quota/model_escalated/turn paragraphs' trailing "future agents must verify" instructions) with a statement that classification derives from each payload's `WSClass()` marker (see `internal/comm/wsclass`) where the payload is typed, with the topic-prefix table as legacy fallback for map-shaped payloads, enforced by the `exhaustive` linter in CI; new WS-visible payload types implement the marker. KEEP verbatim: the `chat.response` exclusion sentence, the employee.* leaf-11 note, and the quota_wait polymorphism note (add one clause: quota_wait is intentionally raw - it carries multiple payload shapes).
+2. **Key Components table**: mention `internal/bus/topic.go` (Topic[T], PublishT/SubscribeT) and `internal/comm/wsclass` on the Server/Bus rows.
+3. **Critical Invariants**: add the typed-topic invariant paragraph, including scope discipline - "New bus topics with stable, single-shape payloads are declared as `bus.Topic[T]` vars beside their payload structs (see internal/agent/topics.go); publishers use `bus.PublishT`, subscribers use `bus.SubscribeT`. Raw string Publish/Subscribe remains for wildcard subscriptions, request/response bus patterns (chat.request/chat.response), and multi-shape/open-ended topics (agent.quota_wait carries QuotaEvent, ParkTurnEvent, and job-level map payloads - deliberately raw). Do not wrap `map[string]any` in a Topic; that is ceremony without a guarantee."
 
 ### What This Leaf Consumes
 
-- Committed state of leaves 01-04 (the doc must describe what exists - before editing, verify each claim against the code: `grep -n 'func PublishT' internal/bus/topic.go`, `grep -rn 'WSClass()' internal/ --include='*.go' | head`, `grep -n 'exhaustive' .golangci.yml`. If any check fails, STOP and report BLOCKED - the doc must not describe aspirational code.)
+- Committed state of leaves 01-04. Before editing, verify every claim against code (Task 1). If any check fails: report BLOCKED - the doc must not describe aspirational code.
 
 ## Tasks
 
 ### Task 1: Verify the described code exists (docs-only "confirm old state")
 
-**Objective:** Every claim the new text makes is true on disk before writing it.
+**Objective:** Every claim the new text makes is true on disk.
 
 **Files:** none modified
 
 **Step 1: Read current content**
 
-- `terminal("grep -n 'WS event type classification' -A 40 AGENTS.md")` - the section as it stands
-- `terminal("grep -n 'chat.response' AGENTS.md")` - locate the exclusion sentence to preserve
+- `terminal("grep -n 'WS event type classification' AGENTS.md")` then cat the section
+- `terminal("grep -n 'chat.response' AGENTS.md")` and `terminal("grep -n 'employee' AGENTS.md")` - sentences to preserve
 - Key Components table region; Critical Invariants region
 
 **Step 2: Confirm old state (verification gate)**
 
-Run the three greps from Context. Also confirm the prefix table in server.go still carries the legacy-fallback comment (it should - leaf 03 kept it): `grep -n 'legacy fallback' internal/comm/http/server.go`.
+- `grep -n 'func PublishT\|func SubscribeT\|type Topic\[' internal/bus/topic.go` - leaf 01 exists
+- `grep -n 'TopicTurnTerminal' internal/agent/topics.go` - leaf 02 exists
+- `grep -rn 'WSClass()' internal/ --include='*.go' | grep -v _test | head` - leaf 03 exists
+- `grep -n 'exhaustive' .golangci.yml` - leaf 04 exists
+- `grep -n 'legacy fallback' internal/comm/http/server.go` - fallback comment present
 
 **Step 3: Record findings**
 
-Your report lists: what the current section says (quote the three manual-verification sentences you will delete), the confirmed code evidence for each new claim.
+Report: quoted manual-verification sentences to be deleted; confirmation output for each new claim.
 
 **Step 4: Halt condition**
 
-Any verification failure -> report BLOCKED with the failing grep. Do not edit the doc to match reality that does not exist.
+Any failure -> report BLOCKED with the failing grep.
 
 ### Task 2: Apply the three edits
 
-**Objective:** Contract 6 edits, surgical, nothing else.
+**Objective:** Contract edits, surgical, nothing else.
 
 **Files:**
 - Modify: `AGENTS.md` (three regions only)
 
 **Step 1: Prepare exact old/new strings**
 
-From Task 1's captures, write the exact current text of each of the three regions and the exact replacement text (from master Contract 6). Preserve surrounding markdown structure and the section's other content byte-for-byte.
+From Task 1 captures: exact current text per region + exact replacement (per Contracts, with the amended facts). Preserve surrounding markdown byte-for-byte.
 
 **Step 2: Confirm old state**
 
-Re-grep each region immediately before editing (the file is dirty in the worktree from unrelated work - if it changed since Task 1, re-read and re-derive).
+Re-grep each region immediately before editing (the file is dirty from unrelated work; if it changed since Task 1, re-read and re-derive).
 
 **Step 3: Write implementation**
 
-Apply with three targeted `patch` operations (old_string unique + exact, new_string per Contract 6). One edit per region. Do not reflow, reformat, or "improve" adjacent text.
+Three targeted `patch` operations, one per region. No reflowing, no drive-by improvements.
 
 **Step 4: Verify**
 
 - `grep -c 'verify they land in the correct bucket' AGENTS.md` -> 0
-- `grep -c 'chat.response' AGENTS.md` -> unchanged from Task 1 count (sentence preserved)
-- `grep -n 'internal/bus/topic.go' AGENTS.md` -> present (table row)
-- `grep -n 'map\[string\]any' AGENTS.md` -> present (invariant's scope-discipline sentence)
-- `git diff --stat AGENTS.md` -> changes confined to the three regions (read the full diff; every hunk must be one of your three edits plus the pre-existing unrelated hunks which you must NOT have touched)
+- `grep -c 'chat.response' AGENTS.md` -> unchanged count (preserved)
+- `grep -n 'internal/bus/topic.go\|internal/comm/wsclass' AGENTS.md` -> present
+- `grep -n 'map\[string\]any' AGENTS.md` -> present (scope-discipline sentence)
+- `git diff AGENTS.md` -> every new hunk is one of your three edits (pre-existing unrelated hunks untouched)
 
 ## Self-Verification Checklist
 
 Before reporting completion, verify:
 
-- [ ] All three edits applied per Contract 6, verbatim intent
-- [ ] chat.response exclusion sentence retained
-- [ ] The three deleted manual-verification sentences are gone (grep count 0)
-- [ ] No other AGENTS.md changes (full diff reviewed)
-- [ ] Pre-existing unrelated dirty hunks untouched
-- [ ] Every factual claim in the new text verified against code in Task 1
+- [ ] Three edits applied; manual-verification sentences gone (count 0)
+- [ ] chat.response exclusion and employee.* note preserved
+- [ ] New invariant includes: Topic[T] beside payload structs, PublishT/SubscribeT, raw-path exceptions (wildcards, request/response, quota_wait polymorphism), map[string]any prohibition
+- [ ] No other AGENTS.md changes; pre-existing dirty hunks untouched
+- [ ] Every factual claim verified against committed code in Task 1
 
 **DO NOT COMMIT.** The orchestrator handles all git operations after review.
 
@@ -116,15 +122,15 @@ Before reporting completion, verify:
 
 ## Review Checklist (For Review Agent)
 
-- [ ] Diff shows exactly three new hunks (plus pre-existing ones, untouched)
-- [ ] New invariant includes the raw-path exceptions (wildcards, request/response, caller-defined) and the map[string]any prohibition
-- [ ] Marker-derivation statement names internal/comm/wsclass and the exhaustive linter
-- [ ] No aspiration: every claim checked against committed code
-- [ ] Markdown structure intact (table rows render, section headings unchanged)
+- [ ] Diff shows exactly three new hunks (plus untouched pre-existing ones)
+- [ ] Marker-derivation statement names internal/comm/wsclass + exhaustive
+- [ ] quota_wait documented as intentionally raw with its three shapes
+- [ ] No aspiration: every claim verified in Task 1
+- [ ] Markdown structure intact
 
 Output: APPROVED or specific gaps with file + line references.
 
 ## Notes
 
-- This leaf is the tree's cleanup deliverable - it is what makes the new mechanism discoverable to every future agent. The invariant text is load-bearing; do not paraphrase Contract 6 loosely.
-- If master.md's tracking table records a topics-file location different from Contract 6's wording (leaf 02 chose pkg/models), adjust the path in the invariant text to match reality - reality wins over contract wording.
+- This leaf makes the new mechanism discoverable to every future agent - the invariant text is load-bearing; do not paraphrase loosely.
+- If leaf 02 placed topics.go somewhere other than internal/agent/topics.go, the master tracking table records reality - reality wins over contract wording.

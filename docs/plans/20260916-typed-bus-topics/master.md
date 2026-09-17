@@ -31,7 +31,7 @@ Cleanup of AGENTS.md when the work completes is an explicit deliverable (leaf 05
 
 ## Architecture
 
-The bus today: `internal/bus/bus.go` - `MessageBus` with `map[string][]*Subscriber`, wildcard subscription support (`"agent.*"` matches `agent.status`; 3 in-tree wildcard subscribers exist in `internal/metrics/collector.go`). `pkg/models/types.go:23` - `BusMessage{... Payload json.RawMessage}`. Payload structs (35 ad-hoc `*Payload struct` types) are marshaled at publish, unmarshaled at subscribe, with no compile-time link.
+The bus today: `internal/bus/bus.go` - `MessageBus` with `map[string][]*Subscriber`, wildcard subscription support (`"agent.*"` matches `agent.status`; the WS relay subscribes via a wildcard set including bare `*`). `pkg/models/types.go:23` - `BusMessage{... Payload json.RawMessage}`. Payload structs (35 ad-hoc `*Payload struct` types) are marshaled at publish, unmarshaled at subscribe, with no compile-time link.
 
 The design adds a generic layer on top, not a rewrite:
 
@@ -45,12 +45,21 @@ bus.PublishT(t, payload)      bus.SubscribeT(b, id, t, func(T))
 raw Publish(topic, BusMessage{RawMessage})  -> raw Subscribe -> decode callback(T)
 ```
 
-The raw path is untouched - typed wrappers marshal/unmarshal in exactly one place each. WS classification moves from string-prefix matching in `internal/comm/http/server.go:703-746` to a type switch over a `WSClassified` marker interface, with `exhaustive` linter enforcement.
+The raw path is untouched - typed wrappers marshal/unmarshal in exactly one place each. WS classification moves from string-prefix matching in `internal/comm/http/server.go:703-760` to a type switch over a `WSClassified` marker interface, with `exhaustive` linter enforcement.
 
-Migration set (exhaustive for this tree, per scope discipline):
-- Tier 1 typed: `turn.terminal`, `agent.quota_wait` (both have documented misclassification scars).
-- Tier 2 marker: every payload whose topic currently reaches `transformBusEventToWS` - the `chat_message`, `chat.message.received`, `chat.*` lifecycle, `agent.quota*`, `agent.model_escalated`, `turn.*`, `metrics.*`, `task.*`/`step.*`/`job.*`/`queue.*`, `plan.*` prefix sets at server.go:703-746.
-- Explicitly NOT typed in this tree: `chat.request`/`chat.response` RPC-over-bus pair (string `ReplyTo` correlation, request/response pairing not topic pairing - a different pattern, left raw), wildcard-only subscriptions (`step.*`, `worker.*` - typing a wildcard defeats the purpose), and any payload the leaf discovers is caller-defined at runtime.
+### Pre-dispatch verification findings (2026-09-16, orchestrator-verified - binding amendments)
+
+The authoring-time assumptions were checked against the code before dispatch. Reality:
+
+1. **`turn.terminal` is single-shape and publisher-migrated only.** Payload is the frozen `agent.TurnTerminalEvent` (internal/agent/handler.go:233, "CLOSED" field set). Single publisher: handler.go:1584 (`publishTurnTerminal`). NO direct bus subscriber exists - consumers are (a) the WS relay via its `*` wildcard subscription and (b) the TUI via the RPC event stream (internal/tui/events.go topic filter), neither of which uses `bus.Subscribe("turn.terminal")`. So leaf 02 migrates the publisher to `PublishT` and declares the topic; there is no SubscribeT call site for this topic today.
+2. **`agent.quota_wait` is POLYMORPHIC - it stays RAW.** Three distinct payload shapes ride this one topic: `agent.QuotaEvent` (internal/agent/loop.go:2093, wired from QuotaEpisodeTracker), `agent.ParkTurnEvent` (internal/agent/parked_turn.go:712, class="quota"|"throttle"), and a job-level `map[string]any` payload (internal/daemon/components.go:8318, class="quota_wait", includes a user-facing message). Consumers discriminate by class/reason fields (services/quota_notifier.go decodes to map and reads keys; TUI reads unblock_at/class). A single `Topic[QuotaEvent]` would decode ParkTurnEvent JSON into partially-zero QuotaEvent fields - silent data corruption, strictly worse than today. Per the scope-discipline rule this topic is declared RAW with a labeled comment, NOT typed. Leaf 02 documents the polymorphism at a single canonical comment site.
+3. **WS event types number six, not two**: `chat_message`, `agent_progress`, `metrics_update`, `job_update`, `plan_update`, and the generic default `event` (server.go:703-758). Leaf 03's WSClass enum carries all six.
+
+Migration set (final, per the amendments above):
+- Tier 1 typed: `turn.terminal` only (publisher-side; TopicTurnTerminal declared on agent.TurnTerminalEvent).
+- RAW-labeled: `agent.quota_wait` (polymorphic - see finding 2).
+- Tier 2 marker: the WS-visible payload structs that exist as named types (TurnTerminalEvent, chat message payloads, others as leaf 03 finds); everything else stays on the prefix-table fallback.
+- Explicitly NOT typed in this tree: `chat.request`/`chat.response` RPC-over-bus pair, wildcard-only subscriptions, and any multi-shape/open-ended topic discovered (quota_wait is the first, labeled).
 
 ## Interface Contracts
 
@@ -100,27 +109,32 @@ func SubscribeT[T any](b *MessageBus, id string, t Topic[T], fn func(T)) *Subscr
 
 Owner: leaf 01. Consumers: leaves 02, 03.
 
-### Contract 3: Migrated topic declarations
+### Contract 3: Migrated topic declarations (AMENDED per verification findings)
 
 ```go
-// File: internal/bus/topics.go  (note: topics.go plural, distinct from topic.go)
+// File: location decided by leaf 02 (pkg/models/topics.go expected - bus
+// cannot import internal/agent without a cycle). Contract names:
 
-// Declared in the bus package to avoid an import cycle: payload structs
-// stay in their owning packages; the declarations here use those types.
-// IMPORTANT: if this creates an import cycle (bus cannot import agent),
-// the declarations move to pkg/models/topics.go instead - leaf 02
-// decides based on where payload structs actually live, per Task 1.
+var TopicTurnTerminal = NewTopic[agentpkg.TurnTerminalEvent]("turn.terminal")
 
-var TopicTurnTerminal = NewTopic[agentpkg.TurnTerminalPayload]("turn.terminal")
-var TopicAgentQuotaWait = NewTopic[agentpkg.QuotaWaitPayload]("agent.quota_wait")
+// agent.quota_wait is DECLARED RAW - it is polymorphic (QuotaEvent,
+// ParkTurnEvent, and a job-level map payload share the topic; see master
+// Architecture, finding 2). No Topic var is created for it. Leaf 02 adds
+// a canonical comment at the declaration site:
+//
+//   // RAW TOPIC (polymorphic payload): "agent.quota_wait" carries
+//   // QuotaEvent, ParkTurnEvent, and job-level map payloads. Do NOT
+//   // wrap in Topic[T] until the shapes unify - a single T silently
+//   // zero-fills the other shapes' fields.
 ```
 
-- The exact payload struct names will not match verbatim - the implementing leaf MUST locate the real struct types the current call sites marshal (search: `internal/agent/handler.go:1584` for turn.terminal; search: `agent.quota_wait` in `internal/agent/loop.go` and `internal/agent/quota_resume.go`) and use those types. If a call site marshals an anonymous struct or `map[string]any`, the leaf promotes it to a named struct in the owning package and both sites use it. This promotion is in scope.
-- Package placement is the one open construction decision: `internal/bus/topics.go` if import-clean, else `pkg/models/topics.go`. Leaf 02 decides per its Task 1 and records the choice in its report; leaves 03-05 consume whichever path leaf 02 chose (stated in master's tracking table by the orchestrator at review time).
+- The exact payload type is `agent.TurnTerminalEvent` (verified: internal/agent/handler.go:233). It already exists as a named, frozen struct - no promotion needed.
+- Package placement decision stays with leaf 02 per its Task 1; `pkg/models/topics.go` is the expected acyclic location (bus already imports pkg/models; agent imports bus). The declarations must not create an import cycle - verify with `go build` after adding.
+- Leaf 02 scope after amendment: declare TopicTurnTerminal, migrate the single publisher (handler.go publishTurnTerminal) to PublishT, add the RAW-topic comment for agent.quota_wait. There are NO SubscribeT call sites for turn.terminal today (verified - consumers are the WS `*` wildcard and the TUI RPC stream). Do not invent one. The typed topic still buys: compile-checked publisher payload + a declaration any future subscriber must use.
 
 Owner: leaf 02 (declarations + migration of the two Tier 1 topics). Consumers: leaves 03, 04, 05.
 
-### Contract 4: WS classification marker
+### Contract 4: WS classification marker (AMENDED per verification findings)
 
 ```go
 // File: internal/comm/wsclass/wsclass.go (new package, no deps on comm/http)
@@ -128,8 +142,12 @@ Owner: leaf 02 (declarations + migration of the two Tier 1 topics). Consumers: l
 type WSClass int
 
 const (
-    WSChatMessage WSClass = iota // renders as a chat bubble in Flutter
-    WSProgress                   // renders as agent_progress
+    WSChatMessage  WSClass = iota // renders as a chat bubble in Flutter
+    WSProgress                    // agent_progress
+    WSMetricsUpdate               // metrics_update
+    WSJobUpdate                   // job_update
+    WSPlanUpdate                  // plan_update
+    WSEvent                       // generic "event" (the old default branch)
 )
 
 // WSClassified is implemented by bus event payloads that reach the
@@ -140,9 +158,11 @@ type WSClassified interface {
 }
 ```
 
+- SIX classes, matching the six event types at server.go:703-758 (chat_message, agent_progress, metrics_update, job_update, plan_update, default event) - the authoring-time two-class assumption was wrong.
 - Payload structs that reach the WS relay implement `WSClass() WSClass`. The marker methods live WITH the payload structs (owning packages), not in comm.
 - `transformBusEventToWS` keeps its existing string-prefix cases as FALLBACK for topics whose payloads are not yet `WSClassified` (the raw path still delivers those). Classification order: type-assert `WSClassified` on the decoded payload first; fall back to the existing prefix table only when the assertion fails. The prefix table gets a comment: "legacy fallback - remove when all WS-visible topics are typed."
-- The default branch behavior is unchanged: unknown topics remain `agent_progress` (current behavior, server.go:746 area).
+- The default branch behavior is unchanged: unknown topics remain `event` (current behavior - verified: server.go default branch sets "event", not agent_progress).
+- In-scope marker implementations: `agent.TurnTerminalEvent` -> WSProgress (verified named struct). Other named WS-visible structs leaf 03 discovers at their publish sites (chat message payloads, metrics payloads, etc.) get markers matching their current prefix-table classification. Topics with map/anonymous payloads (agent.quota_wait's three shapes, employee.*, most task/step/queue publishers) stay on fallback - do NOT invent structs for them.
 
 Owner: leaf 03. Consumers: leaf 04 (lint enforcement depends on the marker existing).
 

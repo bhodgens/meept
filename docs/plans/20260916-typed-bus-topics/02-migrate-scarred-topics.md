@@ -1,4 +1,4 @@
-# Migrate turn.terminal and agent.quota_wait to Typed Topics - Implementation Leaf
+# Migrate turn.terminal to a Typed Topic + Label quota_wait RAW - Implementation Leaf
 
 > **For the implementing agent:** You are the implementer for this leaf.
 > Implement ALL tasks below using TDD. Do NOT commit - the orchestrator
@@ -11,46 +11,61 @@
 ## Meta
 
 - **Parent:** master.md
-- **Scope:** Declare typed topics for `turn.terminal` and `agent.quota_wait`, promote any anonymous payload structs to named types, and migrate their publish + subscribe call sites to `bus.PublishT`/`bus.SubscribeT`.
+- **Scope:** Declare `TopicTurnTerminal` on the frozen `agent.TurnTerminalEvent`, migrate its single publisher to `PublishT`, and add the canonical RAW-topic comment for polymorphic `agent.quota_wait`.
 - **Dependencies:** 01-topic-generic.md (COMPLETE - `internal/bus/topic.go` exists with Topic[T], PublishT, SubscribeT)
-- **Estimated Context:** 60K
+- **Estimated Context:** 50K
 - **Concurrency Group:** B
+
+## AMENDMENT (orchestrator, post-verification - this overrides the original task shape)
+
+Pre-dispatch verification changed the picture. Verified facts (trust these; re-confirm only the exact line numbers):
+
+1. **turn.terminal has NO direct bus subscriber.** Consumers are (a) the WS relay via its `*` wildcard subscription (internal/comm/http/server.go ~536, topics list includes bare "*") and (b) the TUI via the RPC event stream (internal/tui/events.go:60 topic filter - RPC polling, not bus.Subscribe). There is no `bus.Subscribe(..., "turn.terminal")` anywhere. You will NOT create a SubscribeT call site. Do not invent one.
+2. **The payload is the frozen `TurnTerminalEvent`** (internal/agent/handler.go:233-253, field set CLOSED per its own doc comment). It already exists - no promotion, no changes to the struct.
+3. **The single publisher is `ChatHandler.publishTurnTerminal`** (internal/agent/handler.go ~1574-1587). Current body: builds via models.NewBusMessage, sets msg.Topic, calls h.bus.Publish.
+4. **agent.quota_wait stays RAW** - it carries three payload shapes (`QuotaEvent` via loop.go ~2093, `ParkTurnEvent` via parked_turn.go ~712, job-level `map[string]any` via daemon/components.go ~8318). This leaf only ADDS the canonical RAW comment; no code changes to any quota_wait site.
 
 ## Goal
 
-These two topics have documented misclassification scars (blank-bubble class bugs; the async-turn migration built turn.terminal; quota events must render as progress, never chat bubbles). They become the first typed topics. Exactly two topics migrate in this leaf - no others.
+One typed topic (turn.terminal), publisher migrated; one labeled raw topic (agent.quota_wait); tests proving the migrated publisher delivers the frozen payload through the real bus to a raw wildcard subscriber unchanged.
 
 ## Context
 
-Publish sites to find and migrate (verify with grep - line numbers may have drifted):
-
-- `internal/agent/handler.go` ~line 1584: `h.bus.Publish("turn.terminal", msg)`
-- `internal/agent/loop.go` and/or `internal/agent/quota_resume.go`: publishes of `agent.quota_wait` (search the exact string)
-- Subscribers: grep `Subscribe(` with `"turn.terminal"` and `"agent.quota_wait"` across `internal/` (TUI, GUI bridge, comm relay, metrics collector are candidates). EVERY subscriber of these two exact topics migrates in this leaf. Wildcard subscribers (`agent.*`) do NOT count and do NOT migrate.
-
 Key files:
 
-- `internal/bus/topic.go` - the wrappers from leaf 01 (consumed, not modified)
-- `internal/agent/handler.go`, `internal/agent/loop.go`, `internal/agent/quota_resume.go` - publish sites
-- Wherever the subscriber(s) live - find them; do not assume
+- `internal/bus/topic.go` - leaf 01's wrappers (consumed, not modified)
+- `internal/agent/handler.go` - TurnTerminalEvent definition (~233) + publishTurnTerminal (~1574)
+- `pkg/models/` - expected home for the topic declaration (bus imports pkg/models; agent imports bus; a declaration in pkg/models importing agent is ALSO a cycle - see Task 1 decision)
+
+Import-cycle reality to resolve in Task 1: the declaration needs `NewTopic[TurnTerminalEvent]`, and TurnTerminalEvent lives in package agent. `pkg/models` cannot import `internal/agent` (agent imports pkg/models - cycle). `internal/bus` cannot import `internal/agent` either. The clean solution: declare the topic IN package agent (e.g. `internal/agent/topics.go`: `var TopicTurnTerminal = bus.NewTopic[TurnTerminalEvent]("turn.terminal")`) - agent already imports bus. The declaration then lives beside the payload struct it types, which is the pattern going forward. Verify with `go build` and record the decision.
 
 ## Interface Contracts (From Parent)
 
 ### What This Leaf Exposes
 
 ```go
-// File: internal/bus/topics.go  (new file; see Task 1 for placement decision)
-package bus  // OR pkg/models - see Task 1
+// File: internal/agent/topics.go (expected; Task 1 confirms placement)
+package agent
 
-// Exact payload types depend on what the current call sites marshal.
-// The leaf MUST locate them (Step 1 of Task 1) and use those types.
-var TopicTurnTerminal = NewTopic[<TurnTerminalPayloadType>]("turn.terminal")
-var TopicAgentQuotaWait = NewTopic[<QuotaWaitPayloadType>]("agent.quota_wait")
+import "github.com/caimlas/meept/internal/bus"
+
+// TopicTurnTerminal is the typed declaration for the turn.terminal bus
+// topic. Publishers MUST use bus.PublishT with this declaration; future
+// subscribers MUST use bus.SubscribeT with it. Payload is the frozen
+// TurnTerminalEvent - see its doc comment (CLOSED field set).
+var TopicTurnTerminal = bus.NewTopic[TurnTerminalEvent]("turn.terminal")
+
+// RAW TOPIC (polymorphic payload): "agent.quota_wait" carries QuotaEvent
+// (loop.go quota tracker wiring), ParkTurnEvent (parked_turn.go), and a
+// job-level map payload (daemon/components.go publishQuotaWait). Do NOT
+// wrap in Topic[T] until the shapes unify - a single T silently
+// zero-fills the other shapes' fields. Consumers decode to
+// map[string]any and discriminate by class/reason keys.
 ```
 
-- Placement decision: `internal/bus/topics.go` if the payload types live in packages bus can import without a cycle (they live in `internal/agent` or `pkg/models`). `internal/bus` importing `internal/agent` is ALMOST CERTAINLY a cycle (agent imports bus). Expected outcome: declarations go in `pkg/models/topics.go` (payload structs are already referenced by bus consumers via pkg/models) OR alongside the payload structs in their owning package. DECIDE BY LOOKING: find where the payload structs live, find what imports what, pick the acyclic location, record the choice + rationale in your report. The orchestrator records it in the tracking table and leaves 03-05 follow it.
-- If the publish sites marshal anonymous structs or map[string]any: promote to a named, exported, json-tagged struct in the OWNING package (internal/agent) and use it at both ends. Promotion in scope. Renaming an existing exported type is NOT in scope - if promotion seems to require a rename, STOP and report.
-- Scope discipline (binding): if either payload turns out to be caller-defined/open-ended (map[string]any with divergent shapes per caller), do NOT force a single struct. Leave that topic on the raw path, add a `// RAW TOPIC (open-ended payload):` comment at the declaration site you would have used, and report it. That is a valid leaf outcome.
+- Publisher migration: `publishTurnTerminal` uses `bus.PublishT(h.bus, TopicTurnTerminal, SourceChatHandler, ev)` - replacing the NewBusMessage + Topic-set + Publish sequence. Behavior preserved: same topic name string, same Source value, MessageType event, external delivery semantics of plain Publish (note: current code uses h.bus.Publish, not PublishExternalOnly - keep plain Publish semantics, which PublishT wraps).
+- Error handling: current code logs `h.logger.Error("failed to build turn.terminal event", ...)` on marshal failure. PublishT per leaf 01's decision panics OR returns int-only on marshal failure - if PublishT cannot log-and-drop like the current code, wrap the call: marshal the event yourself first (`json.Marshal(ev)`), log-and-return on error exactly as today, then pass the check passed - or if leaf 01 chose error-returning PublishT variant, use it and keep the log-and-drop. MATCH THE CURRENT log-and-drop behavior - the parker side channels established "a marshal failure is logged and never affects the turn" as the repo posture. Report exactly how you preserved it.
+- NO changes to: TurnTerminalEvent struct, any quota_wait call site, the WS relay, the TUI.
 
 ### What This Leaf Consumes
 
@@ -58,104 +73,111 @@ var TopicAgentQuotaWait = NewTopic[<QuotaWaitPayloadType>]("agent.quota_wait")
 // From 01-topic-generic.md (committed):
 bus.NewTopic[T](name string) Topic[T]
 bus.PublishT[T](b *MessageBus, t Topic[T], source string, payload T) int
-bus.SubscribeT[T](b *MessageBus, id string, t Topic[T], fn func(T)) *Subscriber
 ```
 
 ## Tasks
 
-### Task 1: Locate payload types + decide declaration placement
+### Task 1: Declaration + placement decision
 
-**Objective:** Pin the exact payload structs for both topics and the acyclic home for their Topic declarations.
+**Objective:** Create internal/agent/topics.go with TopicTurnTerminal + the RAW comment for quota_wait.
 
 **Files:**
-- Create or modify: `internal/bus/topics.go` OR `pkg/models/topics.go` OR owning package - per your findings
+- Create: `internal/agent/topics.go`
 
-**Step 1: Read current content (docs-only-style exploration, use terminal cat / search_files)**
+**Step 1: Read current content (exploration)**
 
-- `terminal("grep -n 'turn.terminal' internal/ -r --include='*.go'" | grep -v _test)` - enumerate ALL publish and subscribe sites
-- Same for `agent.quota_wait`
-- For each publish site, read ~30 lines around it: what type is `msg` built from? That is your payload type. If `NewBusMessage(..., someStructLiteral{...})` with an inline literal - that is a promotion candidate.
-- For each subscribe site: what struct does it unmarshal into? Publisher's type and subscriber's type MUST unify - if they differ but are field-compatible, unify on the publisher's (promote if needed) and migrate the subscriber to decode the shared type. If they differ semantically (different fields actually used), STOP on that topic and report - it is open-ended, leave raw.
+- `terminal("grep -rn 'Subscribe(' internal/ --include='*.go' | grep -v _test | grep 'turn.terminal'")` - confirm zero direct subscribers
+- Confirm the import graph: `terminal("head -30 internal/agent/handler.go")` shows agent importing bus already.
 
 **Step 2: Confirm old state**
 
-Record in your report (before changing anything): every call site (file:line), the payload type each uses today, the subscriber decode type, and your placement decision with the import-graph reasoning (run `go list -deps` or inspect imports to confirm the cycle assumption).
+Record: the exact current publishTurnTerminal body (cat handler.go around 1574-1587), confirmation of zero direct subscribers, leaf 01's PublishT signature (cat internal/bus/topic.go).
 
-**Step 3: Write/rewrite content**
+**Step 3: Write implementation**
 
-Create the topics file with the two declarations using the real payload types.
+Create topics.go per the contract. The RAW comment is part of the deliverable - it is the canonical warning future agents read.
 
 **Step 4: Verify**
 
-Run: `go build ./internal/... ./pkg/...`
-Expected: compiles (declarations unused so far - if staticcheck/unused-var gates complain about package-level vars, that is fine for now, the gate runs in CI not in go build; leaf 02's Task 3 wires the consumers).
+`go build ./internal/agent/ ./internal/bus/` - compiles; declaration unused-but-referenced (publisher migration is Task 2, so the var may be temporarily unused - go build does not fail on unused package-level vars; if a lint gate complains in CI that is leaf 04/05 territory, note it).
 
-### Task 2: Migrate turn.terminal
+### Task 2: Migrate the publisher
 
-**Objective:** Publisher + all exact-topic subscribers of turn.terminal use the typed API.
+**Objective:** publishTurnTerminal uses the typed path with preserved log-and-drop marshal semantics.
 
 **Files:**
-- Modify: `internal/agent/handler.go` (publish site ~1584)
-- Modify: every exact-topic subscriber file found in Task 1
-- Test: a focused test proving typed delivery over this topic
+- Modify: `internal/agent/handler.go` (publishTurnTerminal only)
+- Test: `internal/agent/handler_turnterminal_typed_test.go` (new file)
 
 **Step 1: Write failing test**
 
-In the package of the subscriber (or a small integration test in internal/bus if the subscriber is the comm relay), write a test that publishes via `bus.PublishT(b, bus.TopicTurnTerminal, ...)` (import path per Task 1 decision) and asserts the production subscriber receives the decoded typed payload. If the subscriber is wired deep (TUI model), test at the nearest seam: assert the callback/decoding layer with a typed publish into a real MessageBus.
+```go
+func TestPublishTurnTerminal_TypedDelivery(t *testing.T) {
+    // Real MessageBus (bus.New(nil, nil), deferred Close).
+    // Raw wildcard subscriber: sub := b.Subscribe("wildcard", "*") - this
+    // is how the WS relay actually consumes the topic today.
+    // Call h.publishTurnTerminal(TurnTerminalEvent{...representative fields...}).
+    // Assert: sub receives exactly one BusMessage; Topic == "turn.terminal";
+    // Type == models.MessageTypeEvent; Source == SourceChatHandler;
+    // unmarshal(msg.Payload) deep-equals the published event.
+}
+```
+
+If ChatHandler is heavy to construct, check how existing handler tests build one (search internal/agent for existing ChatHandler test fixtures) and reuse that pattern.
 
 **Step 2: Run test to verify failure**
 
-Run: `go test -p 2 -short ./internal/agent/ -run TestTurnTerminalTyped -v` (adjust package)
-Expected: FAIL (site still raw - test asserts the new path)
+The test may PASS against the old code path (it publishes the same shape). To make it genuinely RED-first, add an assertion that fails pre-migration only if you can observe the typed path - e.g. assert via the topics declaration: publish through `bus.PublishT(b, TopicTurnTerminal, ...)` in a second sub-test and confirm identical wire bytes to the handler's output (json.Marshal of the same event). Acceptance: the handler test suite passes AND a compile-level check that the handler references TopicTurnTerminal: `grep -n 'TopicTurnTerminal' internal/agent/handler.go` non-empty is the real gate. State this honestly in your report - the behavior is unchanged by design; the leaf's deliverable is the typed call path.
 
 **Step 3: Write implementation**
 
-- Publisher: replace `NewBusMessage` + `b.Publish("turn.terminal", msg)` with `bus.PublishT(h.bus, <pkg>.TopicTurnTerminal, h.sourceName, typedPayload)`. Preserve the exact source string and MessageType semantics - if the raw site used a MessageType other than event, extend nothing; PublishT fixes MessageType=event internally. If the original message used a non-event MessageType, STOP and report - that is a contract deviation needing the orchestrator.
-- Subscribers: replace channel-read + json.Unmarshal with `bus.SubscribeT(b, id, <pkg>.TopicTurnTerminal, func(p Type) {...})`, moving the old handler body into fn. Preserve Unsubscribe/lifetime handling exactly.
+Rewrite publishTurnTerminal per the contract (preserve log-and-drop marshal semantics per the error-handling note).
 
 **Step 4: Run test to verify pass**
 
-Expected: PASS. Then `go build ./... && go test -p 2 -short ./internal/agent/ ./internal/comm/... ./internal/tui/...` - all green.
+`go build ./... && go test -p 2 -short ./internal/agent/ -run 'TestPublishTurnTerminal' -v` then the full package: `go test -p 2 -short ./internal/agent/`. Full-tree sanity: `go test -p 2 -short ./internal/comm/... ./internal/tui/...` (the WS + TUI consumers must be untouched and green).
 
-### Task 3: Migrate agent.quota_wait + full verification
+### Task 3: Verify no functional drift anywhere
 
-**Objective:** Same migration for quota_wait; prove no regression in the AGENTS.md-classified event path.
+**Objective:** Prove the migration is wire-identical.
 
-**Files:**
-- Modify: the quota_wait publish site(s) (loop.go / quota_resume.go)
-- Modify: quota_wait subscriber(s)
-- Test: same package test file as Task 2
+**Files:** none new
 
-**Step 1: Write failing test**
+**Step 1: Write test (wire-identity check, in the same test file)**
 
-Mirror Task 2: typed publish -> production subscriber decodes -> assert fields (quota state fields the TUI/WS relay actually reads).
+```go
+func TestPublishTurnTerminal_WireIdentity(t *testing.T) {
+    // Marshal TurnTerminalEvent{...} directly with json.Marshal - this is
+    // the pre-migration wire format (NewBusMessage marshaled the same struct
+    // with the same tags). Assert the received message's Payload bytes equal
+    // that marshal. This pins: field tags, omitempty behavior, timestamp
+    // absence (the event struct carries no timestamp field of its own).
+}
+```
 
-**Step 2: Run test to verify failure**
+**Step 2: Run to verify pass**
 
-Expected: FAIL.
+`go test -p 2 -short ./internal/agent/ -run 'WireIdentity' -v` - PASS (if FAIL, your migration changed the wire - fix the migration, never the test).
 
-**Step 3: Write implementation**
+**Step 3: Grep verification**
 
-Same pattern as Task 2. Preserve behavior: quota_wait must still reach the WS relay classified as agent_progress (that classification is leaf 03's work - here only the bus delivery must be unchanged; the WS test in internal/comm/http, if one exists, must stay green unchanged).
+- `grep -rn '"turn.terminal"' internal/ --include='*.go' | grep -v _test` - hits allowed ONLY in: agent/topics.go (declaration), agent/handler.go (comment references ok), comm/http/server.go (WS prefix fallback - untouched), tui/ (RPC stream - untouched). NO other functional publish/subscribe sites.
+- `grep -rn '"agent.quota_wait"' internal/ --include='*.go' | grep -v _test | grep -v '//'` - all functional sites UNCHANGED (loop.go, parked_turn.go, components.go, quota_notifier.go, tui/app.go).
 
-**Step 4: Run test to verify pass**
+**Step 4: Full verify**
 
-Full verification:
-- `go build ./...`
-- `go test -p 2 -short ./internal/...` (full internal tree, short mode)
-- `grep -rn '"turn.terminal"' internal/ --include='*.go' | grep -v _test | grep -v topics` - every remaining hit must be in the topics declaration file or a comment; same for `"agent.quota_wait"`. If any functional call site remains raw, migrate it or justify it in the report (e.g. it is the WS relay's prefix match, which reads topic strings by design and is leaf 03's scope).
+`go build ./... && go test -p 2 -short ./internal/...` green. gofmt clean on touched files.
 
 ## Self-Verification Checklist
 
 Before reporting completion, verify:
 
-- [ ] Both topics declared as typed Topic vars in the chosen acyclic location
-- [ ] Publisher and ALL exact-topic subscribers migrated; zero remaining functional raw call sites for these two topics
-- [ ] Placement decision + import-cycle reasoning + call-site inventory in the report
-- [ ] No `map[string]any` wrapped in a Topic; any open-ended finding left raw with a RAW TOPIC comment
-- [ ] `go build ./...` and `go test -p 2 -short ./internal/...` green
-- [ ] gofmt clean on all touched files
-- [ ] No debug artifacts, no TODOs
+- [ ] internal/agent/topics.go exists: TopicTurnTerminal declared on TurnTerminalEvent + RAW comment for agent.quota_wait
+- [ ] publishTurnTerminal migrated to PublishT (or marshal-check + PublishT), log-and-drop semantics preserved
+- [ ] Zero SubscribeT call sites invented; zero changes to quota_wait sites, WS relay, TUI
+- [ ] Wire-identity test passes; wildcard subscriber receives identical bytes
+- [ ] `go build ./...` + `go test -p 2 -short ./internal/...` green
+- [ ] gofmt clean; no debug artifacts
 
 **DO NOT COMMIT.** The orchestrator handles all git operations after review.
 
@@ -163,18 +185,15 @@ Before reporting completion, verify:
 
 ## Review Checklist (For Review Agent)
 
-- [ ] Exactly two topics migrated - no others (grep confirms)
-- [ ] All call sites inventoried in the report match what was changed
-- [ ] Payload types unified (or topic left raw with justification per scope rule)
-- [ ] Subscriber lifetime handling (Unsubscribe, goroutine) preserved
-- [ ] WS relay tests and TUI tests pass unchanged
-- [ ] Contracts: declaration names exactly `TopicTurnTerminal`, `TopicAgentQuotaWait`; topic name strings unchanged
-- [ ] No line-number corruption; gofmt clean
+- [ ] Exactly one topic typed, exactly one RAW comment added, nothing else
+- [ ] TurnTerminalEvent struct untouched (diff shows no changes to lines 233-253)
+- [ ] Publisher behavior: topic name, Source, MessageType, wire bytes, marshal-failure logging all preserved
+- [ ] topics.go placement creates no import cycle (agent imports bus - one direction only)
+- [ ] Grep verification output in report matches expectations
 
 Output: APPROVED or specific gaps with file + line references.
 
 ## Notes
 
-- The WS relay (internal/comm/http/server.go) matches topics by string prefix - it is a subscriber-adjacent consumer but its prefix table is leaf 03's scope. Do not touch server.go in this leaf.
-- `chat.request`/`chat.response` are request/response patterns - explicitly out of scope, do not migrate even if you notice them.
-- If metrics collector's wildcard subscriptions surface in your grep, they are out of scope (wildcards stay raw).
+- The typed topic's immediate value is narrow (compile-checked publisher + a declaration for future subscribers). Its real value arrives as more topics migrate onto the pattern. Do not oversell or overbuild - no fan-out to other topics.
+- If leaf 01's PublishT cannot preserve log-and-drop marshal semantics (e.g. it panics), do NOT change leaf 01's code - wrap at the call site (pre-marshal with json.Marshal, log-and-drop on error, then call PublishT; the double marshal is negligible for a per-turn event, note it).

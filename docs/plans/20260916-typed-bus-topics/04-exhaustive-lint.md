@@ -12,27 +12,20 @@
 
 - **Parent:** master.md
 - **Scope:** Enable the `exhaustive` linter so the WSClass type switch from leaf 03 is coverage-enforced in CI, scoped honestly if repo-wide enablement trips pre-existing switches.
-- **Dependencies:** 03-ws-classification.md (COMPLETE - the WSClass switch exists in internal/comm/http/server.go)
+- **Dependencies:** 03-ws-classification.md (COMPLETE - the WSClass switch over six constants exists in internal/comm/http)
 - **Estimated Context:** 25K
 - **Concurrency Group:** D
 
 ## Goal
 
-A new WS-visible payload type without a `WSClass()` method - or a new WSClass constant without a covering case - must fail `make lint-ci` instead of silently rendering as a blank chat bubble. This leaf wires that gate and proves it fires.
+A new WS-visible payload type without a `WSClass()` method - or a new WSClass constant without a covering case - must fail `make lint-ci` instead of silently misclassifying. This leaf wires that gate and proves it fires with a RED experiment.
 
 ## Context
 
-- `.golangci.yml` exists at repo root. Read it fully first: existing enabled linters, `issues.exclude-rules`, any `linters-settings`.
-- `make lint-ci` (see Makefile) runs golangci-lint + the custom analyzers; the new linter joins that path via the yml.
-- The switch to guard: `internal/comm/http/server.go`, the WSClass switch written by leaf 03 (`switch cls := ...` over `wsclass.WSClass`).
-- golangci-lint version in use matters: `exhaustive` is built into golangci-lint (no separate install). Verify the version pinned by the repo/CI (`grep -rn golangci Makefile .github/ 2>/dev/null`) supports it; if the pinned version predates exhaustive support, report BLOCKED with the version found - do not upgrade toolchain versions in this leaf.
-
-Key files:
-
-- `.golangci.yml`
-- `Makefile` (lint-ci target - read only)
-- `internal/comm/http/server.go` (the switch being guarded - read only)
-- `internal/comm/wsclass/wsclass.go` (read only)
+- `.golangci.yml` exists at repo root. Read it fully first: enabled linters, `linters-settings`, `issues.exclude-rules`.
+- `make lint-ci` (Makefile) = golangci-lint + analyzers + audit scripts + fmt-check-gui. The new linter joins via the yml.
+- The guarded switch: the WSClass -> wire-string switch leaf 03 added (in internal/comm/http), over six constants (WSChatMessage, WSProgress, WSMetricsUpdate, WSJobUpdate, WSPlanUpdate, WSEvent).
+- `exhaustive` is built into golangci-lint. Check the pinned version (Makefile / .github/workflows/code-quality.yml). If the pinned version predates exhaustive support: report BLOCKED with the version - do NOT upgrade toolchains in this leaf (standing rule: no software installs/updates without explicit user OK).
 
 ## Interface Contracts (From Parent)
 
@@ -45,99 +38,84 @@ linters:
     - exhaustive
 ```
 
-- If repo-wide enablement is clean (existing code passes), that is the preferred end state - enable it plainly.
-- If pre-existing switches elsewhere trip it: scope via `linters-settings.exhaustive` (e.g. `explicit-exhaustive-switch: true` limits enforcement to switches on types with an explicit marker comment - then add the marker comment `//exhaustive:enforce` on the WSClass switch) or via `issues.exclude-rules` targeting the noisy legacy packages. Whichever mechanism: the WSClass switch MUST be covered, the scoping must be the narrowest that achieves a clean `make lint-ci`, and the final yml must contain a comment explaining the scoping choice. Do NOT add blanket `nolint` comments on the WSClass switch itself.
-- Optional (do if clean): a `//exhaustive:enforce` comment above the WSClass switch makes the intent explicit when scoped mode is used.
+- Plain repo-wide enablement preferred if existing code passes.
+- If pre-existing switches trip it: scope via `linters-settings.exhaustive` (e.g. `explicit-exhaustive-switch: true` + a `//exhaustive:enforce` comment on the WSClass switch) or narrow `issues.exclude-rules`. The WSClass switch MUST be covered; scoping must be the narrowest that yields a clean run; the final yml carries a comment explaining the choice. NEVER a `nolint` on the WSClass switch itself.
 
 ### What This Leaf Consumes
 
-- Leaf 03's WSClass switch (committed) - the thing being guarded.
+- Leaf 03's WSClass switch (committed).
 
 ## Tasks
 
-### Task 1: Enable exhaustive and establish the baseline
+### Task 1: Enable exhaustive, baseline, and RED experiment
 
-**Objective:** Turn the linter on; find out what it says about the existing repo.
+**Objective:** Turn the linter on; establish the baseline; prove the gate fires via a deliberate, fully-reverted mutation.
 
 **Files:**
 - Modify: `.golangci.yml`
+- TEMPORARILY modify then REVERT: `internal/comm/wsclass/wsclass.go`
 
 **Step 1: Confirm old state**
 
-- `terminal("grep -n 'linters' -A 20 .golangci.yml")` - current config
-- `terminal("golangci-lint version")` - available version (and what Makefile/CI pins)
-- `terminal("golangci-lint run --no-config --disable-all -E exhaustive ./internal/comm/... 2>&1 | head -50")` - what exhaustive says about the comm tree right now (post-leaf-03, this should be CLEAN - the switch covers both constants)
+- Current yml (grep linters section), golangci-lint version (binary on PATH and any CI pin).
 
-**Step 2: Write the "failing test" (the gate itself, exercised via temp break)**
+**Step 2: RED experiment (do this BEFORE finalizing config)**
 
-The TDD loop here is config + a deliberate mutation test:
+1. Enable `exhaustive` in .golangci.yml (plain, repo-wide).
+2. TEMPORARILY add to wsclass.go:
+   ```go
+   WSTestOnly // TEMPORARY lint experiment - reverted before completion
+   ```
+   (iota appends after WSEvent; the leaf 03 switch now misses a case.)
+3. Run the linter on the comm packages: expected - exhaustive flags the WSClass switch. If NOT flagged: fix the config mechanism (try `explicit-exhaustive-switch: true` + `//exhaustive:enforce` on the switch) until it DOES flag. Record the exact finding output.
+4. REVERT the constant: `git checkout -- internal/comm/wsclass/wsclass.go`. Verify: `git diff --stat internal/comm/wsclass/` empty.
+5. Run the linter again: clean (the real six-constant switch covers everything).
 
-1. Edit `.golangci.yml` to enable `exhaustive` (start plain, repo-wide).
-2. Run: `make lint-ci 2>&1 | tail -30` (or `golangci-lint run ./internal/... | head -50` if make lint-ci needs services unavailable in this environment - report which you ran).
-3. Record the result as your baseline (see Step 3 branch).
+The RED experiment output (step 3) and clean re-run (step 5) are both required in your report.
 
-**Step 2b: Verify failure fires (the RED step, in a THROWAWAY state)**
+**Step 3: Finalize config**
 
-- Temporarily add a third WSClass constant WITHOUT extending the switch (edit `internal/comm/wsclass/wsclass.go` in your working tree only - this file gets REVERTED before you finish; do it via `git stash`-free direct edit + explicit `git checkout -- internal/comm/wsclass/wsclass.go` after the experiment, and say so in your report):
-  ```go
-  const (
-      WSChatMessage WSClass = iota
-      WSProgress
-      WSTestOnly // TEMPORARY - lint experiment, reverted
-  )
-  ```
-- Run the linter on comm again. Expected: exhaustive flags the WSClass switch in server.go as non-exhaustive. If it does NOT flag it, the scoping mechanism is wrong - fix the config until it does.
-- REVERT the temporary constant: `git checkout -- internal/comm/wsclass/wsclass.go`. Verify clean: `git diff --stat internal/comm/wsclass/` empty.
-
-This RED experiment is the test that the gate works. Report its exact output.
-
-**Step 3: Write implementation (the final config state)**
-
-- If Step 2's plain repo-wide run produced a clean baseline (no pre-existing exhaustive findings outside the deliberate mutation): keep plain repo-wide enablement.
-- If it produced unrelated findings: scope narrowly (per contract) until `make lint-ci`-equivalent run is clean WITH the WSClass switch covered. Document exactly what was noisy and what scoping was chosen.
-
-**Step 4: Verify pass**
-
-- `golangci-lint run ./internal/...` (or the make target) - clean.
-- The reverted wsclass.go compiles: `go build ./internal/comm/...`
-
-### Task 2: CI wiring verification + report
-
-**Objective:** Confirm the gate runs where CI runs it, and document.
-
-**Files:**
-- Modify: `.golangci.yml` (comments)
-- Possibly modify: CI workflow file IF it pins a separate golangci config or version that needs the same yml (read `.github/workflows/code-quality.yml` if present; only touch it if the linter would NOT run there otherwise)
-
-**Step 1: Read current state**
-
-- Find where lint-ci runs in CI (Makefile target -> workflow). Confirm the workflow uses this `.golangci.yml` (same file, no override) and its golangci-lint version supports exhaustive.
-
-**Step 2: Confirm old state**
-
-Record: workflow file, the lint job's commands, version pins.
-
-**Step 3: Write implementation**
-
-- Add the explanatory comment in `.golangci.yml` next to the enable line: what exhaustive guards here (WSClass switch in internal/comm/http/server.go; new WS-visible payload types must implement WSClass and the switch must cover all constants).
-- Touch the workflow ONLY if the linter would not otherwise run there; if you touch it, diff-explain in the report.
+- If the plain repo-wide run (with the real code) is clean: keep it plain.
+- If unrelated pre-existing switches trip: scope per the contract until clean, documenting what was noisy.
+- Add the explanatory comment in the yml: what exhaustive guards (the WSClass switch; new WS-visible payload types implement WSClass(); switch coverage is CI-enforced).
 
 **Step 4: Verify**
 
-- Local gate run clean (same command as Task 1 Step 3).
-- `go build ./...` unaffected.
+- Linter run clean on ./internal/... (or the narrowest scope that is clean).
+- `go build ./...` unaffected; wsclass.go fully reverted.
+
+### Task 2: CI path verification
+
+**Objective:** Confirm the gate actually runs where CI runs it.
+
+**Files:**
+- Modify: `.github/workflows/code-quality.yml` ONLY if the linter would not otherwise run there
+
+**Step 1: Read current state**
+
+- Find the lint job: which workflow, which commands, which golangci-lint version, whether it uses the same .golangci.yml.
+
+**Step 2: Confirm old state**
+
+Record the job's commands + version pin in your report.
+
+**Step 3: Write implementation**
+
+- Touch the workflow only if the gate would not run there otherwise; explain any diff.
+
+**Step 4: Verify**
+
+- Local gate command clean; `go build ./...` fine.
 
 ## Self-Verification Checklist
 
 Before reporting completion, verify:
 
-- [ ] `exhaustive` enabled in `.golangci.yml` (plain or scoped, with comment)
-- [ ] RED experiment performed and reverted; `git diff --stat internal/comm/wsclass/` is empty; experiment output in report
-- [ ] The gate demonstrably covers the WSClass switch (the RED experiment proved it fires)
-- [ ] Local lint run clean
-- [ ] CI path verified (workflow uses this config; version supports exhaustive) - or BLOCKED report with versions
-- [ ] No `nolint` on the WSClass switch
-- [ ] No other config changes (do not enable/disable unrelated linters)
+- [ ] `exhaustive` enabled in .golangci.yml with explanatory comment
+- [ ] RED experiment: firing output captured, constant fully reverted (`git diff --stat internal/comm/wsclass/` empty)
+- [ ] Final linter run clean
+- [ ] CI path verified (config used, version supports exhaustive) or BLOCKED report with versions
+- [ ] No `nolint` on the WSClass switch; no unrelated linter changes; no toolchain upgrades
 
 **DO NOT COMMIT.** The orchestrator handles all git operations after review.
 
@@ -145,15 +123,14 @@ Before reporting completion, verify:
 
 ## Review Checklist (For Review Agent)
 
-- [ ] `.golangci.yml` diff is minimal and commented
-- [ ] Scoping (if any) is the narrowest that works; WSClass switch covered either way
-- [ ] RED experiment evidence in report; wsclass.go fully reverted
-- [ ] No unrelated linter changes, no toolchain upgrades
-- [ ] `make lint-ci` path (or its local equivalent) passes
+- [ ] .golangci.yml diff minimal + commented; scoping (if any) narrowest-that-works
+- [ ] RED experiment evidence present; wsclass.go byte-identical to committed state
+- [ ] WSClass switch demonstrably covered
+- [ ] CI wiring confirmed or honestly reported as unverifiable locally
 
 Output: APPROVED or specific gaps with file + line references.
 
 ## Notes
 
-- This leaf is small on purpose. Do not expand scope to other linters or fix unrelated findings that pre-date this tree - report them, orchestrator decides.
-- If golangci-lint is not installed locally, install is OUT OF SCOPE without the user's explicit OK (standing rule: never install software unprompted). Instead verify via `go run github.com/golangci/golangci-lint/cmd/golangci-lint@<pinned-version> run ...` only if the pinned version is already in the module cache; otherwise report BLOCKED with findings-from-config-review and let the orchestrator decide (CI will exercise the gate regardless).
+- Small leaf by design. Do not fix unrelated lint findings, enable other linters, or touch toolchain versions. Report them; the orchestrator decides.
+- If golangci-lint is not installed locally: do NOT install it (standing rule - no installs without explicit user OK). If a pinned version exists in the module cache you may `go run` it; otherwise verify config by inspection, report BLOCKED for the local-run portion, and note CI will exercise the gate.

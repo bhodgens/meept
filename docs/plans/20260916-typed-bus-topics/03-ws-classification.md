@@ -11,175 +11,202 @@
 ## Meta
 
 - **Parent:** master.md
-- **Scope:** Add the `WSClassified` marker interface and switch `transformBusEventToWS` from topic-string prefixes to payload-marker classification, keeping the prefix table as a documented legacy fallback.
-- **Dependencies:** 02-migrate-scarred-topics.md (COMPLETE - TopicTurnTerminal/TopicAgentQuotaWait exist; the leaf 02 report names the real payload types and the topics-file location)
+- **Scope:** Add the `WSClassified` marker interface (six classes) and switch `transformBusEventToWS` from topic-string prefixes to payload-marker classification, keeping the prefix table as a documented legacy fallback.
+- **Dependencies:** 02-migrate-scarred-topics.md (COMPLETE - TopicTurnTerminal declared on agent.TurnTerminalEvent; quota_wait labeled RAW)
 - **Estimated Context:** 65K
 - **Concurrency Group:** C
 
+## AMENDMENT (orchestrator, post-verification - overrides the original task shape)
+
+Verified facts (line numbers approximate - re-confirm with grep):
+
+1. **Six event types exist, not two**: `chat_message`, `agent_progress`, `metrics_update`, `job_update`, `plan_update`, and the default `event` (server.go:685-758). The WSClass enum carries all six. The old default branch sets `"event"` - preserve that exactly.
+2. **The relay decodes payloads to `map[string]any` once** at the top of transformBusEventToWS (server.go ~693). For marker classification you need the TYPED value for migrated payloads - but most WS-visible topics still publish raw maps and stay on the fallback. Design below.
+3. **agent.quota_wait is RAW-labeled (leaf 02)** - its three payload shapes do NOT get markers; it classifies via the prefix fallback exactly as today. This is intentional.
+4. **The relay subscribes via wildcard patterns** (server.go ~530-545: "*", "agent.*", "chat.*", etc.) and receives raw `*models.BusMessage` - it does NOT use SubscribeT. You will not change the subscription mechanics.
+
 ## Goal
 
-Kill the misclassification bug class at `internal/comm/http/server.go:703-746`. Today classification is a chain of `topic ==` and `strings.HasPrefix(topic, ...)` cases; a new topic either matches a prefix by luck or falls into a default. The fix: payloads that reach the WS relay implement `WSClass() WSClass`; the relay type-asserts the decoded payload and classifies from the marker. The prefix table remains ONLY as fallback for raw-path topics without markers, commented as legacy. A follow-on leaf adds `exhaustive` lint coverage (leaf 04) - this leaf does not add the linter.
+Classification order in transformBusEventToWS becomes: (0) `chat.response` exclusion unchanged, (1) marker assertion on the decoded payload when the payload was decoded into a typed value, (2) existing prefix table as legacy fallback, (3) default `event`. TurnTerminalEvent (the one typed WS-visible payload from leaf 02) classifies via its marker; everything else classifies via the unchanged fallback. The `exhaustive` linter (leaf 04) guards switch coverage.
 
 ## Context
 
-Current classification (verify with terminal cat, line numbers may drift):
-
-- `server.go:703` - `case topic == "chat_message" || topic == "chat.message.received":` -> `chat_message`
-- `server.go:711` - `strings.HasPrefix(topic, "chat.")` -> agent_progress (with the documented exception: `chat.response` is NEVER relayed)
-- `server.go:717` - `strings.HasPrefix(topic, "agent.quota")` -> agent_progress
-- `server.go:727` - `agent.model_escalated` -> agent_progress
-- `server.go:733` - `turn.` -> agent_progress
-- `server.go:741+` - `metrics.`, `task./step./job./queue.`, `plan.` and a default -> agent_progress
-
-Read the whole `transformBusEventToWS` function AND the surrounding relay loop (`frontendData := transformBusEventToWS(msg)` ~line 567) before changing anything. Note: the relay sees `*models.BusMessage` with `Payload json.RawMessage` - to marker-classify, the relay must decode the payload into the typed payload struct. Topics migrated in leaf 02 have typed wrappers; topics still on the raw path have none.
-
 Key files:
 
-- `internal/comm/http/server.go` - the classification + relay
-- `internal/bus/topics.go` or `pkg/models/topics.go` - leaf 02's declarations (master tracking table records the location the orchestrator confirmed)
-- Payload structs in their owning packages (internal/agent, others as found)
+- `internal/comm/http/server.go` - transformBusEventToWS (~685-760), the relay loop (~520-580), and the chat_message payload normalization after the switch (~760+, which reads session_id/content keys from the map - UNTOUCHED)
+- `internal/agent/topics.go` - TopicTurnTerminal (leaf 02)
+- `internal/agent/handler.go` - TurnTerminalEvent (the frozen struct; marker method goes in this package, near the struct)
+
+How marker classification works with a map-decoding relay: when the relay decodes msg.Payload, it currently gets map[string]any. For the typed path, after the map decode attempt, ALSO attempt a decode into the typed payload for topics that have a declared Topic[T]: concretely, check `msg.Topic == agent.TopicTurnTerminal.Name` (or, better, a small package-level lookup table mapping topic name -> decode function that returns a WSClassified) and decode into the typed struct; on success, classify via the marker; on decode failure, fall through to the prefix fallback. This table (in comm/http or wsclass) is the ONLY place that knows about specific payload types - it must not import more than wsclass + the packages owning typed payloads (agent). Keep it to the migrated set: exactly one entry today (turn.terminal).
+
+Do NOT touch: the chat_message normalization block (~760+), the subscription topic list, handleWSEvent's broadcast logic, the `employee.*` classification comment.
 
 ## Interface Contracts (From Parent)
 
 ### What This Leaf Exposes
 
 ```go
-// File: internal/comm/wsclass/wsclass.go (new package, no deps beyond stdlib)
+// File: internal/comm/wsclass/wsclass.go (new package; imports stdlib only)
 package wsclass
 
 type WSClass int
 
 const (
-    WSChatMessage WSClass = iota // renders as a chat bubble in Flutter
-    WSProgress                   // renders as agent_progress
+    WSChatMessage  WSClass = iota // chat_message
+    WSProgress                    // agent_progress
+    WSMetricsUpdate               // metrics_update
+    WSJobUpdate                   // job_update
+    WSPlanUpdate                  // plan_update
+    WSEvent                       // generic "event" (the old default)
 )
 
 // WSClassified is implemented by bus event payloads that reach the
-// WebSocket relay. transformBusEventToWS classifies by this marker
-// instead of topic string prefix matching.
+// WebSocket relay. Classification prefers the marker over the legacy
+// topic-prefix table.
 type WSClassified interface {
     WSClass() WSClass
 }
 ```
 
-- Marker methods live WITH the payload structs in their owning packages (`func (p TurnTerminalPayload) WSClass() wsclass.WSClass { return wsclass.WSProgress }`) - NOT in comm/http. Verify this does not create an import cycle: wsclass must not import agent; agent imports wsclass. That direction is clean.
-- Scope (binding): add `WSClass()` methods ONLY to payload types for topics in the current prefix table's sets that have a NAMED payload struct. Concretely at minimum: turn.terminal (leaf 02's type), agent.quota_wait (leaf 02's type), and any other WS-visible payload struct that already exists as a named type (search the publish sites of the prefix sets). If a topic's payload is map[string]any / anonymous / caller-defined: do NOT invent a struct for it - it stays on the prefix-table fallback. Count and name the fallback topics in your report.
-- `transformBusEventToWS` signature may change (it is unexported) but its callers' behavior must not: same `map[string]any` frontend shape, same event type strings.
+```go
+// In the payload's owning package (internal/agent/handler.go, next to the struct):
+// WSClass implements wsclass.WSClassified: turn lifecycle events render
+// as agent_progress - never chat_message (blank-bubble invariant).
+func (TurnTerminalEvent) WSClass() wsclass.WSClass { return wsclass.WSProgress }
+```
+
+- wsclass imports NOTHING from internal/ - direction is agent -> wsclass only.
+- Named WS-visible payloads beyond TurnTerminalEvent: leaf 03 MAY add markers to other named structs ONLY if their publish site already marshals that exact named struct (verify with grep at the publish site). If a topic publishes map[string]any or anonymous structs (quota_wait's three shapes, employee.*, most task/step/queue publishers), it stays on fallback - do NOT invent structs. Record: marked topics vs fallback topics, in the report.
+- transformBusEventToWS returns the same map shape; event-type strings unchanged; the six-way classification table is behavior-identical (parity test proves it).
 
 ### What This Leaf Consumes
 
 ```go
-// From leaf 02 (committed): the typed payload structs for turn.terminal
-// and agent.quota_wait, and the topics-file location decision.
-// From pkg/models: models.BusMessage (existing).
+// From leaf 02 (committed): agent.TopicTurnTerminal, agent.TurnTerminalEvent.
+// From pkg/models: models.BusMessage.
 ```
 
 ## Tasks
 
-### Task 1: wsclass package + marker methods
+### Task 1: wsclass package + TurnTerminalEvent marker
 
-**Objective:** Create the marker package; implement `WSClass()` on the named WS-visible payload structs.
+**Objective:** Create the marker package and put the first marker method beside its struct.
 
 **Files:**
 - Create: `internal/comm/wsclass/wsclass.go`
-- Modify: the payload-struct files in their owning packages (add marker methods)
+- Modify: `internal/agent/handler.go` (marker method only - one 3-line func near TurnTerminalEvent)
 - Test: `internal/comm/wsclass/wsclass_test.go`
 
 **Step 1: Write failing test**
 
 ```go
 func TestWSClassConstants(t *testing.T) {
-    // Assert iota ordering: WSChatMessage == 0, WSProgress == 1.
-    // Assert the WSClassified interface is satisfied by the migrated
-    // payload types (compile-time assertions via var _ wsclass.WSClassified = ...).
+    // iota ordering: WSChatMessage==0 .. WSEvent==5.
+}
+func TestTurnTerminalEventImplementsWSClassified(t *testing.T) {
+    // var _ wsclass.WSClassified = agent.TurnTerminalEvent{}
+    // and agent.TurnTerminalEvent{}.WSClass() == wsclass.WSProgress
+    // (wsclass_test.go cannot import agent without... check the direction:
+    // wsclass is imported BY agent, so this test lives in agent's package
+    // instead - put it in internal/agent/handler_turnterminal_typed_test.go
+    // or a new internal/agent/wsclass_test.go. wsclass_test.go keeps only
+    // the constants test.)
 }
 ```
 
 **Step 2: Run test to verify failure**
 
-Run: `go test -p 2 -short ./internal/comm/wsclass/ -v`
-Expected: FAIL - package does not exist / types not implemented.
+`go test -p 2 -short ./internal/comm/wsclass/ ./internal/agent/ -run 'TestWSClass' -v` - FAIL.
 
 **Step 3: Write implementation**
 
-Package + constants + interface per contract. Then add marker methods to payload structs: turn.terminal and agent.quota_wait types get `WSProgress`. For each OTHER named payload struct serving a prefix-table topic, add the marker matching its current prefix-table classification (chat_message for the chat message payloads; agent_progress for everything else). Report the full list of marked vs fallback topics.
+Package + constants + interface + the one marker method. Nothing more.
 
 **Step 4: Run test to verify pass**
 
-`go build ./... && go test -p 2 -short ./internal/comm/wsclass/` green; owning packages still compile and their tests pass.
+Both packages green.
 
-### Task 2: Switch transformBusEventToWS to marker-first classification
+### Task 2: Marker-first classification in transformBusEventToWS
 
-**Objective:** Marker assertion first; prefix table retained as fallback with legacy comment.
+**Objective:** Marker assertion before the prefix table; typed decode table for migrated topics; parity preserved.
 
 **Files:**
-- Modify: `internal/comm/http/server.go` (transformBusEventToWS + wherever the relay decodes payloads)
-- Test: extend or create `internal/comm/http/server_wsclass_test.go`
+- Modify: `internal/comm/http/server.go`
+- Test: `internal/comm/http/server_wsclass_test.go` (new)
 
 **Step 1: Write failing test**
 
-Table-driven test over `transformBusEventToWS` (it is unexported - test in-package):
+Table-driven, in-package (transformBusEventToWS is unexported):
 
-- Case: BusMessage with topic `turn.terminal` and a JSON payload of the turn-terminal type -> `agent_progress` (via MARKER - assert by publishing through the typed path or by constructing the BusMessage with that payload).
-- Case: BusMessage with topic `agent.quota_wait` -> `agent_progress` via marker.
-- Case: a chat-message payload type -> `chat_message` via marker.
-- Case: UNKNOWN topic with raw `map[string]any` payload that matches NO prefix -> `agent_progress` (default, unchanged).
-- Case: topic `some.brand.new.thing` with an untyped payload -> still `agent_progress` via FALLBACK (not marker) - and a case for a legacy prefix like `metrics.cpu` -> `agent_progress` via fallback.
-- Case: `chat.response` topic -> must not appear as chat_message (preserve the exclusion; check how the relay excludes it today and keep that behavior).
+- turn.terminal with a marshaled TurnTerminalEvent payload -> `agent_progress` (this must pass BOTH pre- and post-change - it is a parity case; the marker case is distinguished by an additional assertion below).
+- turn.terminal with CORRUPTED payload bytes (invalid for the struct) -> still `agent_progress` (decode fails, fallback catches it).
+- quota_wait topic with a ParkTurnEvent-shaped map -> `agent_progress` via FALLBACK (no marker - assert classification result only).
+- `chat_message` topic with a chat-shaped map -> `chat_message` (fallback path, unchanged).
+- `metrics.cpu.sample` -> `metrics_update`; `task.completed` -> `job_update`; `plan.approved` -> `plan_update`; `employee.notify` -> `event` (default branch - verify what employee.* actually hits today by reading the switch: employee.* matches NO prefix case, so it lands in default `event`; assert that).
+- `chat.response` -> the function must never return chat_message for it (assert whatever today's behavior is - likely falls to default `event`; PRESERVE whatever you measure, and note it).
+- Marker-proof case: a BusMessage on an UNKNOWN topic name (no prefix match, e.g. "future.topic") whose payload decodes as TurnTerminalEvent -> `agent_progress` VIA MARKER. This is the case that FAILS before your change (pre-change it hits default `event`) and passes after. This is the RED assertion that proves the marker path works.
 
 **Step 2: Run test to verify failure**
 
-Run: `go test -p 2 -short ./internal/comm/http/ -run TestWSClass -v`
-Expected: FAIL (marker path not implemented).
+`go test -p 2 -short ./internal/comm/http/ -run TestWSClass -v` - the marker-proof case FAILS, all parity cases PASS. If a parity case fails pre-change, your expected value is wrong - fix the test's expectation to measured behavior FIRST (parity means matching today, not matching hopes).
 
 **Step 3: Write implementation**
 
-- In the relay path (or inside transformBusEventToWS if decoding there is cleaner - choose the spot where a decode error can be handled without changing the frontend contract), attempt `json.Unmarshal(msg.Payload, &candidate)` for typed delivery. Prefer: if the relay already holds the decoded value from leaf 02's SubscribeT callback path, use it; if the relay still consumes raw BusMessages from its own subscription, decode here. Record the mechanics in your report.
-- Classification order in transformBusEventToWS: (1) `chat.response` exclusion (unchanged, keep existing code), (2) type-assert the decoded payload against `wsclass.WSClassified` -> use marker, (3) existing prefix table as fallback, wrapped in a comment block: `// legacy fallback - remove when all WS-visible topics are typed`, (4) default `agent_progress`.
-- Chat-message payloads marked WSChatMessage must produce type `chat_message` exactly as today.
+- Small decode table (package-level in server.go or a new server_wsclass.go in comm/http):
+  ```go
+  // typedPayloadDecoders maps topic names to decoders for payloads with
+  // WSClass markers. Entries exist only for topics migrated to Topic[T]
+  // (currently: turn.terminal). Legacy fallback still classifies any
+  // topic missing here.
+  var typedPayloadDecoders = map[string]func(json.RawMessage) (wsclass.WSClassified, error){
+      agent.TopicTurnTerminal.Name: decodeTurnTerminal, // unmarshal into agent.TurnTerminalEvent
+  }
+  ```
+- In transformBusEventToWS after the existing map decode: if a decoder exists for msg.Topic, try it; success -> `eventType = typed.WSClass().wsString()` (add a small method mapping WSClass to its wire string: chat_message/agent_progress/metrics_update/job_update/plan_update/event); failure -> continue to the prefix switch.
+- Add the legacy-fallback comment above the existing switch: `// legacy fallback - remove when all WS-visible topics are typed (see internal/comm/wsclass).`
+- Use a `switch` statement keyed on WSClass for the wire-string mapping (leaf 04's exhaustive lint must be able to check it). NEVER if/else chains.
 
 **Step 4: Run test to verify pass**
 
-`go test -p 2 -short ./internal/comm/http/` full package green. Then `go test -p 2 -short ./internal/...` full internal tree green (the e2e chat contract guards live elsewhere but the TUI/GUI event tests must not regress).
+All cases green. Full package: `go test -p 2 -short ./internal/comm/http/`. Then `go test -p 2 -short ./internal/comm/... ./internal/agent/... ./internal/tui/...`.
 
-### Task 3: Document the derivation + verify no behavior change
+### Task 3: Parity fence + report
 
-**Objective:** Prove classification parity old-vs-new and leave the code self-explaining.
+**Objective:** Enumerate every prefix-table topic with a raw map payload and assert classification is byte-identical to the pre-change table.
 
 **Files:**
-- Modify: `internal/comm/http/server.go` (comments only beyond Task 2)
-- Test: none new
+- Test: same test file as Task 2
 
-**Step 1: Write test (parity proof, in the same test file)**
+**Step 1: Write the parity test**
 
-A test that iterates EVERY topic string in the old prefix table (enumerate them from the pre-change code: chat_message, chat.message.received, chat.* examples, agent.quota*, agent.model_escalated, turn.*, metrics.*, task.*, step.*, job.*, queue.*, plan.*) with a minimal raw payload and asserts the event type is IDENTICAL to the pre-change classification (agent_progress for all except the chat_message set). This is the regression fence.
+Iterate representative topics for EVERY prefix case in the pre-change switch: chat_message, chat.message.received, chat.progress (chat.* case), agent.quota_wait (agent.quota case), agent.model_escalated, turn.terminal (turn. case), metrics.cpu (metrics. case), task.completed / step.started / job.done / queue.updated (job_update case), plan.approved (plan. case), employee.notify + unknown.topic (default event case). Each with a minimal `{"k":"v"}` map payload. Assert exact event-type strings. This table is the regression fence - derive expected values from the PRE-CHANGE switch (measure first if unsure; the values above are from the verified switch but confirm employee.* and any case you are unsure about by checking out the pre-change function via git show HEAD:internal/comm/http/server.go if needed).
 
-**Step 2: Confirm old state / run new test**
+**Step 2: Run to verify pass**
 
-Run: `go test -p 2 -short ./internal/comm/http/ -run TestWSClassParity -v`
-Expected: PASS (parity holds after Task 2 - if it fails, Task 2 changed behavior; fix Task 2, do not weaken the parity table).
+`go test -p 2 -short ./internal/comm/http/ -run TestWSClassParity -v` - PASS. A failure here means Task 2 changed behavior: fix Task 2, never the table.
 
-**Step 3: Comments**
+**Step 3: Comments + report**
 
-- At the prefix table: `// legacy fallback - remove when all WS-visible topics are typed (see internal/comm/wsclass).`
-- At each migrated topic's publish site (if not already commented by leaf 02): one line noting the WS class.
-- Report: the exact list of topics still on fallback and why (no named struct).
+- Legacy-fallback comment present above the switch (from Task 2).
+- Report lists: topics classified via marker today (turn.terminal), topics on fallback and why (map-shaped payloads: quota_wait trio, chat lifecycle, metrics, task/step/queue/job, plan, employee, everything unprefixed).
 
-**Step 4: Verify**
+**Step 4: Full verify**
 
-`go build ./... && go test -p 2 -short ./internal/comm/... ./internal/agent/...` green. gofmt clean.
+`go build ./... && go test -p 2 -short ./internal/...` green. gofmt clean.
 
 ## Self-Verification Checklist
 
 Before reporting completion, verify:
 
-- [ ] `internal/comm/wsclass` exists with WSClass, the two constants, WSClassified; no imports beyond stdlib
-- [ ] Marker methods live in payload-owning packages (grep `func.*WSClass() wsclass.WSClass` shows them outside comm/)
-- [ ] transformBusEventToWS: exclusion -> marker -> fallback(prefix) -> default, in that order
-- [ ] Parity test passes over every legacy prefix topic
-- [ ] No payload struct invented for map[string]any topics; fallback list in report
+- [ ] wsclass package: six constants + interface; imports stdlib only
+- [ ] Marker method beside TurnTerminalEvent in internal/agent; agent imports wsclass (one direction)
+- [ ] Classification order: chat.response exclusion -> marker (typed decode table) -> prefix fallback -> default event
+- [ ] Wire-string mapping is a switch over WSClass (exhaustive-checkable)
+- [ ] Parity test covers every prefix case + default; passes
+- [ ] Marker-proof case (unknown topic, typed payload) passes - the RED-first proof
+- [ ] No structs invented for map-shaped topics; fallback list in report
+- [ ] chat_message normalization block untouched (diff confirms)
 - [ ] `go build ./...` + `go test -p 2 -short ./internal/...` green; gofmt clean
-- [ ] No debug artifacts
 
 **DO NOT COMMIT.** The orchestrator handles all git operations after review.
 
@@ -187,18 +214,17 @@ Before reporting completion, verify:
 
 ## Review Checklist (For Review Agent)
 
-- [ ] Marker-based classification actually drives the migrated topics (not just tested alongside)
-- [ ] Prefix table retained ONLY as fallback with the legacy comment
-- [ ] chat.response exclusion preserved exactly
-- [ ] Default behavior unchanged for unknown topics
-- [ ] Parity test enumerates the full legacy prefix set
-- [ ] No import cycle (wsclass imports nothing from internal/agent etc.)
-- [ ] Contracts match: package path internal/comm/wsclass, names WSClass/WSChatMessage/WSProgress/WSClassified
+- [ ] Marker path demonstrably drives turn.terminal classification (marker-proof test)
+- [ ] Prefix table retained as fallback with legacy comment
+- [ ] All six event-type strings produced correctly; default is `event`
+- [ ] typedPayloadDecoders table has exactly one entry (turn.terminal)
+- [ ] No import cycle: wsclass <- agent only; comm/http imports agent (check this is already the case or acceptable - server.go is comm/http; if comm/http importing agent is NEW, flag it in the report for orchestrator review; the decode table alternatively lives behind a registration seam if the import is unacceptable)
+- [ ] Parity table enumerates the full prefix set
 
 Output: APPROVED or specific gaps with file + line references.
 
 ## Notes
 
-- The Flutter client creates a bubble for every `chat_message` event - the parity test is the guard that keeps lifecycle events out of that bucket. Treat any parity failure as a REAL bug in the migration, never adjust the expected values.
-- leaf 04 (exhaustive lint) builds on the type switch you write here - keep the switch a clean `switch cls := ...` over WSClass values so exhaustive can check it. If you use if/else chains, leaf 04 cannot enforce coverage; use a switch.
-- The relay decode adds one json.Unmarshal per event for typed topics - negligible at this scale; note it in the report.
+- The Flutter client creates a bubble for every `chat_message` event - the parity fence is what keeps lifecycle events out of that bucket. Any parity failure is a REAL bug in your migration; never adjust expected values to match broken output.
+- The comm/http importing internal/agent question: server.go currently imports internal/bus and pkg/models. Adding an agent import for one decoder entry may be undesirable layering. Acceptable alternative: define the decoder registration as a seam - wsclass or comm/http exposes `RegisterTypedDecoder(topic string, fn ...)` and the agent package (or daemon wiring) registers the turn.terminal decoder at startup. Prefer the direct map if a comm/http->agent import already exists or is clearly harmless; prefer the registration seam if not. Report which you chose and why.
+- leaf 04 builds on the switch you write here - keep it a `switch` over WSClass values.
