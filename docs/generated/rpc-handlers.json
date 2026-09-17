@@ -141,7 +141,7 @@
     "topic": "chat.submit",
     "handler": "chatSubmitHandler.Submit",
     "file": "internal/daemon/daemon.go",
-    "line": 265
+    "line": 289
   },
   {
     "topic": "chat.submit",
