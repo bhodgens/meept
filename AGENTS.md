@@ -373,6 +373,12 @@ boundaries:
   alias-blocked, the Resolver returns the DISTINCT
   `ErrAllEndpointsBlocked` — check with `errors.Is`, never string
   matching. Precedence: quota blocks > endpoint blocks > alias blocks.
+- **Refusal is not a failure.** A `*llm.RefusalError` must never reach
+  `Resolver.RecordAliasFailure`; the loop's refusal branch
+  (`internal/agent/loop_refusal.go`) re-dispatches once to the agent's
+  `refusal_model` (per-agent AGENT.md spec field, else the global
+  `models.json5` slot; default off) and surfaces the refusal if the
+  fallback also refuses. One hop only, never rotation.
 - **Alias selection is request-scoped; the ledger records the server.** The
   Resolver is the only component that picks a model, and its decision travels
   WITH the request via `llm.WithResolvedModel` (never by mutating shared

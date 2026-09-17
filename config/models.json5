@@ -31,6 +31,16 @@
   // on the local-extract llama.cpp endpoint below).
   "extract_model": "local-extract/lfm2-extract",
 
+  // Global default refusal fallback: when a provider's safety layer
+  // refuses a turn, the agent re-dispatches once to this model. Empty =
+  // no global default; a per-agent AGENT.md refusal_model overrides this.
+  "refusal_model": "",
+
+  // Dedicated model for ambient epistemic extraction + distill
+  // summarization. Empty = falls back to the general chat client. Point
+  // this at a small, cheap model.
+  // "memory_model": "zai/glm-4.5-air",
+
   // Image / video generation (same provider/id form as chat models)
   "image_model": "xai-oauth/grok-imagine-image-2.0",
   "video_model": "xai-oauth/grok-imagine-video",

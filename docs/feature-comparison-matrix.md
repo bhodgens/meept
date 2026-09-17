@@ -102,6 +102,7 @@
 | Provider count | 10+ | ~5 | 30+ | ~10 | ~10 | 15+ | 2-3 | limited | ~3 |
 | Capability-based routing | X | - | - | - | - | - | - | - | - |
 | Model failover chain | X | - | - | X | - | X | - | - | - |
+| Refusal fallback (per-agent) | X (typed signals, one-hop, reply disclosure) | - | - | ~ (refusal/content_filter advance the fallback chain; same-model retries first) | - | ~ (content_filter tries one configured fallback, no per-agent slot) | - | ~ (classifier refusals trigger retry.fallbackChains, pinned for the session) | - |
 | Token budgeting | X | ~ | ~ | X | X | X | - | - | ~ |
 | Dollar cost tracking | X (OpenRouter live) | - | - | - | - | ~ | - | - | - |
 | Reasoning effort support | X | - | - | - | - | ~ | - | - | X |

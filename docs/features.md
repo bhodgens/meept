@@ -915,6 +915,25 @@ When rate limits hit:
 2. Exponential backoff if alias exhausted (2s → 4s → 8s → 16s → 32s)
 3. Max 5 attempts before returning error
 
+#### Refusal Fallback
+When a provider's safety layer declines a turn (typed signals only:
+OpenAI `finish_reason: "content_filter"`, Anthropic `stop_reason:
+"refusal"`, or typed safeguard error bodies), the agent loop
+re-dispatches that turn to a refusal fallback model instead of failing
+the step. Refusals are typed `*llm.RefusalError` (NonRetryable) and
+never reach alias failover or rotation.
+
+- Per-agent config: `refusal_model` in `AGENT.md` frontmatter
+- Global default: `refusal_model` slot in `models.json5`
+- Precedence: per-agent > global slot > off
+- One hop only: if the fallback also refuses, the refusal surfaces
+- Disclosure: fallback-served replies end with
+  `[answered by <fallback model> after refusal]`
+- Bus event `agent.model_escalated` (reason `refusal_fallback`)
+
+No content sniffing: only the provider's typed signals count. See
+[LLM Refusal Fallback](workflows/llm-refusal-fallback.md).
+
 #### Error Handling & Rate Limiting
 - Structured error types: `RateLimitError`, `APIError`, `ClientError` with `RetryStrategy` and `ProviderErrorDetail`
 - OpenRouter/Anthropic 429 response parsing with `ParseOpenRouterError` and `ParseGenericProviderError`

@@ -63,6 +63,7 @@ temperature: 0.3
 - **max_memory_refs**: Maximum memory references per turn
 - **temperature**: LLM temperature setting
 - **escalation_model**: Model (alias name or `"provider/model"` ref) used for the next fix attempt when adversarial verification exhausts `max_fix_loops`; empty/absent = escalation disabled (escalates to the user instead)
+- **refusal_model**: Model (alias name or `"provider/model"` ref) this agent re-dispatches to when the provider's safety layer refuses a turn (one-hop; see [LLM refusal fallback](workflows/llm-refusal-fallback.md)); empty = inherit the global `models.json5` `refusal_model` slot (both empty = disabled)
 
 ## Discovery Hierarchy
 

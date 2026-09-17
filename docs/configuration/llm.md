@@ -23,8 +23,18 @@ The `models.json5` file defines providers, models, and their capabilities.
   // Fast/cheap model for classification, summarization
   "small_model": "zai/glm-4.5-air",
 
+  // Model for ambient epistemic extraction + distill summarization
+  // (memory manager + epistemic wiring). Empty = falls back to the
+  // general chat client. Point this at a small, cheap model.
+  "memory_model": "",
+
   // Model for intent classification (defaults to small_model)
   "classifier_model": "zai/glm-4.5-air",
+
+  // Global default refusal fallback: when a provider's safety layer
+  // refuses a turn, the agent re-dispatches once to this model. Empty =
+  // no global default; a per-agent AGENT.md refusal_model overrides this.
+  "refusal_model": "",
 
   // Model aliases with cooldown-based failover
   "model_aliases": {
@@ -642,7 +652,7 @@ A provider's `lifecycle` block is only activated when its `options.baseURL` host
 
 ### Agent-gated startup
 
-A runtime is only spawned at platform startup when at least one of its provider's models is "in use" — referenced by an enabled agent's `model` field, one of the models.json5 slots (`model`, `small_model`, `classifier_model`, `summarizer_model`), or a `model_aliases` target. Runtimes with no in-use models are skipped with a debug log. Use `meept runtime status` to see the `would_start` verdict per provider.
+A runtime is only spawned at platform startup when at least one of its provider's models is "in use" — referenced by an enabled agent's `model` field, one of the models.json5 slots (`model`, `small_model`, `classifier_model`, `summarizer_model`, `refusal_model`), or a `model_aliases` target. Runtimes with no in-use models are skipped with a debug log. Use `meept runtime status` to see the `would_start` verdict per provider.
 
 ### Shared process per port
 
