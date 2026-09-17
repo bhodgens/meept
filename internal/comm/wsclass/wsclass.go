@@ -33,6 +33,7 @@ type WSClassified interface {
 // frontend receives). This switch is the single mapping site between the
 // enum and wire strings; the exhaustive linter guards its coverage.
 func (c WSClass) String() string {
+	//exhaustive:enforce
 	switch c {
 	case WSChatMessage:
 		return "chat_message"

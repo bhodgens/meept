@@ -34,6 +34,16 @@ linters:
     # Security
     - gosec              # Security issues
 
+    # Enforcement of enum-switch coverage (scoped): only switches carrying
+    # an explicit //exhaustive:enforce comment are checked. The guarded
+    # switch is wsclass.WSClass.String() (internal/comm/wsclass) - the
+    # WS relay's event-type mapping. New WS-visible payload types must
+    # implement WSClass(); new WSClass constants must extend every
+    # enforced switch or CI fails. Repo-wide enablement was rejected:
+    # 50 pre-existing non-enforced enum switches (tui, llm, code/ast)
+    # would need unrelated churn (2026-09-17 baseline).
+    - exhaustive         # Enum switch coverage (//exhaustive:enforce sites only)
+
     # Performance
     - unconvert          # Unnecessary type conversions
 
@@ -68,6 +78,10 @@ linters:
       - ".worktrees/.*"  # git worktrees hold parallel feature branches; never lint
 
   settings:
+    exhaustive:
+      # Scoped enforcement: only switches marked //exhaustive:enforce are
+      # checked. See the linter-enable comment above for rationale.
+      explicit-exhaustive-switch: true
     staticcheck:
       checks:
         - "all"
