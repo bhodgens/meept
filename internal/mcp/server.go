@@ -264,6 +264,17 @@ func (s *Server) toolSend(args map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The chat RPC returns the ChatResponse envelope (reply, conversation_id,
+	// meta, ...). Surface .reply directly when present so MCP clients get the
+	// user-facing answer instead of a raw JSON envelope dump (e2e A3/A4).
+	var chatResp struct {
+		Reply string `json:"reply"`
+	}
+	if err := json.Unmarshal(result, &chatResp); err == nil && chatResp.Reply != "" {
+		return map[string]any{
+			"response": chatResp.Reply,
+		}, nil
+	}
 	return map[string]any{
 		"response": string(result),
 	}, nil
