@@ -30,6 +30,8 @@ func main() {
 	validateOnly := flag.Bool("validate-corpus", false, "validate the corpus and print counts, then exit")
 	grammarFile := flag.String("grammar-file", "", "GBNF grammar file attached to every request (llama.cpp wire grammar; measures the constrained path)")
 	matchThreshold := flag.Float64("match-threshold", 0.6, "token-overlap threshold for a gold match")
+	judge := flag.Bool("judge", false, "enable the LLM judge lane: unmatched candidates get a semantic second opinion (yes/no) from the model")
+	judgeEndpoint := flag.String("judge-endpoint", "", "OpenAI-compatible endpoint for the judge lane (default: same as --endpoint)")
 	timeout := flag.Duration("timeout", 120*time.Second, "per-call timeout")
 	flag.Parse()
 
@@ -73,7 +75,16 @@ func main() {
 	}
 
 	if *mode == "ambient" || *mode == "both" {
-		result.Ambient = runAmbientEval(client, corpus, *matchThreshold)
+		var judgePairer *judgePairer
+		if *judge {
+			je := *judgeEndpoint
+			if je == "" {
+				je = *endpoint
+			}
+			judgeClient := newChatClient(je, *model, *timeout)
+			judgePairer = newJudgePairer(judgeClient)
+		}
+		result.Ambient = runAmbientEvalJudge(client, corpus, *matchThreshold, judgePairer)
 	}
 	if *mode == "distill" || *mode == "both" {
 		result.Distill = runDistillEval(client, corpus, *matchThreshold)

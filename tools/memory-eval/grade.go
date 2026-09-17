@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -21,7 +24,10 @@ type EvalResult struct {
 	Distill    *DistillMetrics   `json:"distill,omitempty"`
 }
 
-// AmbientMetrics grades the ambient epistemic extraction run.
+// AmbientMetrics grades the ambient epistemic extraction run. The lexical
+// block (precision/recall/f1) is the reproducible regression gate; the Judge
+// block is a parallel, optional semantic second opinion (self-judged — see
+// README caveat).
 type AmbientMetrics struct {
 	Calls            int            `json:"calls"`
 	TransportErrors  int            `json:"transport_errors"`
@@ -38,6 +44,47 @@ type AmbientMetrics struct {
 	F1               float64        `json:"f1"`
 	MeanLatencyMs    float64        `json:"mean_latency_ms"`
 	TokensUsed       int            `json:"tokens_used"`
+	// Judge holds the LLM-judge lane (nil unless --judge is on).
+	Judge *JudgeMetrics `json:"judge,omitempty"`
+	// ConfidenceAnalysis records (confidence, match) per candidate for the
+	// confidence-gating sweep. Candidates from judge-off runs have
+	// MatchedJudge equal to MatchedLexical.
+	ConfidenceAnalysis []ConfidencePoint `json:"confidence_analysis,omitempty"`
+	// ConfidenceSweep is the threshold sweep over ConfidenceAnalysis.
+	ConfidenceSweep []SweepRow `json:"confidence_sweep,omitempty"`
+}
+
+// ConfidencePoint is one candidate's confidence plus how it was matched.
+type ConfidencePoint struct {
+	Confidence     float64 `json:"confidence"`
+	MatchedLexical bool    `json:"matched_lexical"`
+	MatchedJudge   bool    `json:"matched_judge"`
+}
+
+// SweepRow is one threshold's operating point in the confidence sweep.
+type SweepRow struct {
+	Threshold     float64 `json:"threshold"`
+	CandidatesGT  int     `json:"candidates_at_threshold"`
+	TruePositives int     `json:"true_positives_at_threshold"`
+	PrecisionAtT  float64 `json:"precision_at_threshold"`
+	KeptFraction  float64 `json:"kept_fraction"`
+	Precision     float64 `json:"precision"`
+	Recall        float64 `json:"recall"`
+}
+
+// JudgeMetrics is the semantic-judge parallel grading block.
+type JudgeMetrics struct {
+	// JudgeMatched counts lexical TPs plus judge-only TPs (unmatched
+	// candidates the judge confirmed against some gold).
+	JudgeMatched  int     `json:"judge_matched"`
+	TruePositives int     `json:"true_positives"`
+	FalsePositives int    `json:"false_positives"`
+	FalseNegatives int    `json:"false_negatives"`
+	Precision     float64 `json:"precision"`
+	Recall        float64 `json:"recall"`
+	F1            float64 `json:"f1"`
+	Calls         int     `json:"judge_calls"`
+	CacheHits     int     `json:"cache_hits"`
 }
 
 // DistillMetrics grades the distillation run.
@@ -104,8 +151,123 @@ If no candidates, return [].
 Conversation:
 %s`
 
+// judgeJudgePrompt asks the strict yes/no question per unmatched candidate.
+const judgeJudgePrompt = `Candidate: %s
+
+Gold assertion: %s
+
+Does the candidate express the same assertion as the gold? Answer only yes or no.`
+
+const judgeSystemPrompt = `You are a strict yes/no judge. You answer only "yes" or "no", nothing else.`
+
+// judgePairer answers "does this candidate express the same assertion as some
+// gold item?" with one LLM call per unmatched candidate (O(unmatched), not
+// O(n*m)) plus a cache keyed on (candidate-hash, gold-hash).
+type judgePairer struct {
+	client    *chatClient
+	cache     map[string]bool
+	calls     int
+	cacheHits int
+	transport int
+}
+
+func newJudgePairer(client *chatClient) *judgePairer {
+	return &judgePairer{client: client, cache: map[string]bool{}}
+}
+
+func hashText(s string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.Join(strings.Fields(s), " "))))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (j *judgePairer) judgePair(candText, goldText string) bool {
+	key := hashText(candText) + ":" + hashText(goldText)
+	if v, ok := j.cache[key]; ok {
+		j.cacheHits++
+		return v
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	j.calls++
+	content, _, _, err := j.client.chatJudge(ctx, judgeSystemPrompt,
+		fmt.Sprintf(judgeJudgePrompt, candText, goldText))
+	if err != nil {
+		j.transport++
+		j.cache[key] = false // failed judgment: treat as no (conservative)
+		return false
+	}
+	v := parseJudgeYesNo(content)
+	j.cache[key] = v
+	return v
+}
+
+// judgeCandidate: does any gold item match this candidate according to the
+// judge? One call per (candidate, gold) pair on cache miss, but the pair cache
+// dedups across candidates that repeat the same text (dedupes fragments).
+func (j *judgePairer) judgeCandidate(candText string, gold []string) bool {
+	for _, g := range gold {
+		if j.judgePair(candText, g) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseJudgeYesNo parses the judge's answer: yes = true. Tolerates case,
+// whitespace, markdown fences (with or without a language tag), and trailing
+// punctuation ("yes.", "Yes", " YES ", "```yes```", "```json\nyes\n```").
+// Junk (anything else) is false.
+func parseJudgeYesNo(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSpace(s)
+	// Strip a fence language tag (e.g. "json") if present.
+	if i := strings.IndexAny(s, " 	\n"); i > 0 && s[:i] == "json" {
+		s = strings.TrimSpace(s[i:])
+	}
+	s = strings.TrimSuffix(s, "```")
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, " .!?	\n\"'")
+	return s == "yes" || s == "y"
+}
+
+// computeConfidenceSweep sweeps thresholds 0.3..0.9 over confidence-gated
+// candidates using judge matching.
+func computeConfidenceSweep(pts []ConfidencePoint, totalCandidates int) []SweepRow {
+	var rows []SweepRow
+	for t := 0.3; t <= 0.9001; t += 0.1 {
+		kept, tp := 0, 0
+		for _, p := range pts {
+			if p.Confidence >= t {
+				kept++
+				if p.MatchedJudge {
+					tp++
+				}
+			}
+		}
+		row := SweepRow{Threshold: math.Round(t*100) / 100, CandidatesGT: kept, TruePositives: tp}
+		if kept > 0 {
+			row.PrecisionAtT = float64(tp) / float64(kept)
+			row.KeptFraction = float64(kept) / float64(totalCandidates)
+		}
+		if totalCandidates > 0 {
+			row.Precision = row.PrecisionAtT
+			row.Recall = float64(tp) / float64(totalCandidates)
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 func runAmbientEval(client *chatClient, corpus *corpus, threshold float64) *AmbientMetrics {
+	return runAmbientEvalJudge(client, corpus, threshold, nil)
+}
+
+func runAmbientEvalJudge(client *chatClient, corpus *corpus, threshold float64, judge *judgePairer) *AmbientMetrics {
 	m := &AmbientMetrics{ByType: map[string]int{}}
+	if judge != nil {
+		m.Judge = &JudgeMetrics{}
+	}
 	var latencies []float64
 
 	for _, seg := range corpus.Segments {
@@ -123,12 +285,18 @@ func runAmbientEval(client *chatClient, corpus *corpus, threshold float64) *Ambi
 		if err != nil {
 			m.TransportErrors++
 			m.FalseNegatives += len(seg.Gold.Claims) + len(seg.Gold.Decisions) + len(seg.Gold.Predictions)
+			if judge != nil {
+				m.Judge.FalseNegatives += len(seg.Gold.Claims) + len(seg.Gold.Decisions) + len(seg.Gold.Predictions)
+			}
 			continue
 		}
 
 		cands, parseErr := parseCandidates(content)
 		if parseErr != nil {
 			m.FalseNegatives += len(seg.Gold.Claims) + len(seg.Gold.Decisions) + len(seg.Gold.Predictions)
+			if judge != nil {
+				m.Judge.FalseNegatives += len(seg.Gold.Claims) + len(seg.Gold.Decisions) + len(seg.Gold.Predictions)
+			}
 			continue // JSONParseOK stays false
 		}
 		m.JSONParseOK++
@@ -151,6 +319,7 @@ func runAmbientEval(client *chatClient, corpus *corpus, threshold float64) *Ambi
 		// Grade against gold: claims + decisions + predictions share one pool.
 		gold := append(append(append([]string{}, seg.Gold.Claims...), seg.Gold.Decisions...), seg.Gold.Predictions...)
 		matched := make([]bool, len(cands))
+		judgeMatched := make([]bool, len(cands))
 		for _, g := range gold {
 			hit := false
 			for i, c := range cands {
@@ -159,6 +328,7 @@ func runAmbientEval(client *chatClient, corpus *corpus, threshold float64) *Ambi
 				}
 				if tokenOverlap(g, c.Text) >= threshold {
 					matched[i] = true
+					judgeMatched[i] = true // lexical TP is also a judge TP
 					hit = true
 					break
 				}
@@ -169,6 +339,41 @@ func runAmbientEval(client *chatClient, corpus *corpus, threshold float64) *Ambi
 				m.FalseNegatives++
 			}
 		}
+
+		// Judge lane: each candidate with no lexical match gets a second
+		// opinion against the gold pool. When the judge rescues a candidate,
+		// the judge lane's FN for this segment shrinks.
+		segJudgeRescues := 0
+		for i := range cands {
+			if judgeMatched[i] || !validTypes[cands[i].Type] || cands[i].Text == "" {
+				continue
+			}
+			if judge != nil && judge.judgeCandidate(cands[i].Text, gold) {
+				judgeMatched[i] = true
+				segJudgeRescues++
+			}
+		}
+
+		// Confidence-gating record: one point per valid candidate.
+		for i, c := range cands {
+			if !validTypes[c.Type] || c.Text == "" {
+				continue
+			}
+			conf := 0.0
+			if c.Confidence != nil {
+				conf = *c.Confidence
+			}
+			jm := judgeMatched[i]
+			if judge == nil {
+				jm = matched[i] // judge-off runs: judge-match equals lexical
+			}
+			m.ConfidenceAnalysis = append(m.ConfidenceAnalysis, ConfidencePoint{
+				Confidence:     conf,
+				MatchedLexical: matched[i],
+				MatchedJudge:   jm,
+			})
+		}
+
 		for i, c := range cands {
 			if matched[i] {
 				continue
@@ -179,8 +384,19 @@ func runAmbientEval(client *chatClient, corpus *corpus, threshold float64) *Ambi
 			}
 			_ = c
 		}
+
+		if judge != nil {
+			m.Judge.JudgeMatched += segJudgeRescues
+			m.Judge.FalseNegatives -= segJudgeRescues
+			// Copy judge MatchedJudge into JudgeMatched for the run-level count:
+			// judge_matched = lexical TPs + judge-only TPs is computed in finalize.
+		}
 	}
 	finalizeAmbient(m, latencies)
+	if judge != nil {
+		m.Judge.Calls = judge.calls
+		m.Judge.CacheHits = judge.cacheHits
+	}
 	return m
 }
 
@@ -250,6 +466,36 @@ func finalizeAmbient(m *AmbientMetrics, latencies []float64) {
 			sum += l
 		}
 		m.MeanLatencyMs = sum / float64(len(latencies))
+	}
+	if m.Judge != nil {
+		finalizeJudge(m.Judge, m.TruePositives, m.FalsePositives, m.FalseNegatives)
+	}
+	m.ConfidenceSweep = computeConfidenceSweep(m.ConfidenceAnalysis, m.Extracted)
+}
+
+// finalizeJudge derives the judge lane's parallel P/R/F1. Judge TPs are the
+// lexical TPs plus judge-only rescues; FPs are lexical FPs minus judge-only
+// rescues (candidates the judge confirms are not false positives in the
+// judge lane); the judge FN denominator matches the lexical one net of
+// rescues.
+func finalizeJudge(j *JudgeMetrics, lexicalTP, lexicalFP, lexicalFN int) {
+	j.TruePositives = lexicalTP + j.JudgeMatched
+	j.FalsePositives = lexicalFP - j.JudgeMatched
+	if j.FalsePositives < 0 {
+		j.FalsePositives = 0
+	}
+	j.FalseNegatives = lexicalFN - j.JudgeMatched
+	if j.FalseNegatives < 0 {
+		j.FalseNegatives = 0
+	}
+	if j.TruePositives+j.FalsePositives > 0 {
+		j.Precision = float64(j.TruePositives) / float64(j.TruePositives+j.FalsePositives)
+	}
+	if j.TruePositives+j.FalseNegatives > 0 {
+		j.Recall = float64(j.TruePositives) / float64(j.TruePositives+j.FalseNegatives)
+	}
+	if j.Precision+j.Recall > 0 {
+		j.F1 = 2 * j.Precision * j.Recall / (j.Precision + j.Recall)
 	}
 }
 
@@ -403,6 +649,17 @@ func printSummary(r EvalResult) {
 		fmt.Printf("  mean_latency_ms    %.0f\n", m.MeanLatencyMs)
 		fmt.Printf("  tokens_used        %d\n", m.TokensUsed)
 		fmt.Printf("  transport_errors   %d\n", m.TransportErrors)
+		if m.Judge != nil {
+			j := m.Judge
+			fmt.Println("--- judge lane (semantic second opinion) ---")
+			printBar("precision ", j.Precision)
+			printBar("recall    ", j.Recall)
+			printBar("f1        ", j.F1)
+			fmt.Printf("  tp/fp/fn           %d/%d/%d\n", j.TruePositives, j.FalsePositives, j.FalseNegatives)
+			fmt.Printf("  judge_only_rescues %d\n", j.JudgeMatched)
+			fmt.Printf("  judge_calls        %d (cache hits %d)\n", j.Calls, j.CacheHits)
+		}
+		printConfidenceSweep(m.ConfidenceSweep)
 	}
 	if r.Distill != nil {
 		m := r.Distill
@@ -422,6 +679,20 @@ func printBar(label string, v float64) {
 	filled := int(v * float64(width))
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 	fmt.Printf("  %s %s %.3f\n", label, bar, v)
+}
+
+// printConfidenceSweep prints the confidence-gating threshold sweep table.
+func printConfidenceSweep(rows []SweepRow) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println("--- confidence sweep (judge matching) ---")
+	fmt.Println("  t     kept  tp  prec@t  kept_frac  precision  recall")
+	for _, r := range rows {
+		fmt.Printf("  %.1f  %4d  %3d   %.3f     %.3f      %.3f     %.3f\n",
+			r.Threshold, r.CandidatesGT, r.TruePositives,
+			r.PrecisionAtT, r.KeptFraction, r.Precision, r.Recall)
+	}
 }
 
 func sortedCounts(m map[string]int) string {

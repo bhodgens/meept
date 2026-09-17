@@ -125,6 +125,70 @@ func (c *chatClient) chat(ctx context.Context, system, user string) (string, flo
 	return "", 0, 0, lastErr
 }
 
+// chatJudge sends the judge-lane request: temperature 0, max_tokens 4, and NO
+// grammar constraint (the judge answers a bare yes/no). It posts to whatever
+// endpoint the client carries, so a --judge-endpoint client is used as-is.
+func (c *chatClient) chatJudge(ctx context.Context, system, user string) (string, float64, int, error) {
+	reqBody, err := json.Marshal(chatRequest{
+		Model:       c.model,
+		Messages:    []chatMessage{{Role: "system", Content: system}, {Role: "user", Content: user}},
+		Temperature: 0,
+		MaxTokens:   4,
+	})
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("marshal judge request: %w", err)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", 0, 0, ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			c.endpoint+"/chat/completions", bytes.NewReader(reqBody))
+		if err != nil {
+			return "", 0, 0, fmt.Errorf("build judge request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		start := time.Now()
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("transport: %w", err)
+			continue
+		}
+		latency := float64(time.Since(start).Milliseconds())
+		body, readErr := io.ReadAll(resp.Body)
+		closeErr := resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("read body: %w", readErr)
+			continue
+		}
+		if closeErr != nil {
+			lastErr = fmt.Errorf("close body: %w", closeErr)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 200))
+			continue
+		}
+		var cr chatResponse
+		if err := json.Unmarshal(body, &cr); err != nil {
+			return "", latency, 0, fmt.Errorf("decode judge response: %w", err)
+		}
+		if len(cr.Choices) == 0 {
+			return "", latency, 0, fmt.Errorf("no choices in judge response")
+		}
+		return cr.Choices[0].Message.Content, latency,
+			cr.Usage.PromptTokens + cr.Usage.CompletionTokens, nil
+	}
+	return "", 0, 0, lastErr
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

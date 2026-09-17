@@ -80,6 +80,58 @@ The 8B "instruct" comparison resolves as: LFM2.5-8B-A1B is the instruct variant
 (Liquid ships it alongside a separate Base model), so candidates 1 and 2 are the
 same model in GGUF-Q4_K_M vs MLX-4bit formats.
 
+## Judge lane (--judge, 2026-09-17)
+
+The lexical grader (token overlap ≥ 0.6) penalizes correct-but-abstracted
+extractions, so measured recall understates true quality. `--judge` adds a
+second opinion: every candidate with NO lexical match is sent to the model as
+
+> Does candidate C express the same assertion as gold G? Answer only yes or no.
+
+with a strict yes/no system prompt, temperature 0, max_tokens 4, and NO
+grammar. Judgments are cached per (candidate-hash, gold-hash) pair; the scan
+is per unmatched candidate with early exit on the first "yes".
+
+```bash
+go run ./tools/memory-eval --endpoint http://127.0.0.1:8080/v1 \
+  --model <model-id> --mode ambient --judge \
+  --out tools/memory-eval/results/judge-judge.json
+
+# optional: a different endpoint for the judge lane
+go run ./tools/memory-eval --judge --judge-endpoint http://127.0.0.1:8090/v1 ...
+```
+
+The summary prints a parallel `judge:` block (`judge_matched`,
+`judge_precision`, `judge_recall`, `judge_f1`) next to the lexical one, and
+the metrics JSON carries it as `"judge": {...}` inside the ambient object.
+
+### Self-judge caveat
+
+By default the judge is **the same model on the same endpoint** that produced
+the candidates — a self-judge. A model family grading its own outputs
+systematically over-accepts paraphrases of its own phrasing, so judge numbers
+are an **upper-bound estimate** of semantic matching quality, not a
+measurement of it. The lexical number stays the reproducible regression gate;
+use the judge lane to estimate how much recall the lexical gate is leaving on
+the table, not as the shipping metric. (--judge-endpoint allows a different
+judge model, but the bias direction is unchanged unless the judge is strictly
+stronger than the extractor.)
+
+### Confidence sweep
+
+Both judge-on and judge-off ambient runs record every candidate into
+`confidence_analysis` (`{confidence, matched_lexical, matched_judge}`) and
+sweep thresholds 0.3..0.9 into `confidence_sweep`, using JUDGE matching:
+
+| column | meaning |
+|--------|---------|
+| prec@t | TP among candidates with confidence ≥ t / candidates ≥ t |
+| kept_frac | fraction of candidates kept at the threshold |
+| precision / recall | the gate's full operating point |
+
+This is the input to confidence-gated storage: keep the highest threshold
+whose recall loss is acceptable, and gate writes on it.
+
 ## Results (2026-09-16 run, unconstrained, temp 0.2)
 
 | Metric | LFM2-1.2B-Extract Q4 | LFM2.5-8B-A1B Q4 GGUF | LFM2.5-8B-A1B MLX-4bit |
@@ -173,3 +225,26 @@ outputs.
 
 Watch first: **decoy_false_pos** (does the model know what NOT to store),
 **json_parse_ok** (will it work in production without a grammar), then F1.
+
+## 2026-09-17 live runs: NOT PERFORMED (endpoint access denied)
+
+The judge-lane deliverable called for two live runs against the daemon's
+llama-server at 127.0.0.1:8080 (`judge-lexical.json` / `judge-judge.json` in
+`results/`), but endpoint access was denied in the execution environment this
+session — the health check and both runs were blocked. The judge lane and
+sweep were verified end-to-end against a deterministic local stub endpoint
+(shape only, zero quality signal — do not cite those numbers). Run when
+endpoint access is available:
+
+```bash
+# (a) lexical baseline
+go run ./tools/memory-eval --endpoint http://127.0.0.1:8080/v1 \
+  --model <model-id> --mode ambient \
+  --out tools/memory-eval/results/judge-lexical.json
+# (b) judge lane
+go run ./tools/memory-eval --endpoint http://127.0.0.1:8080/v1 \
+  --model <model-id> --mode ambient --judge \
+  --out tools/memory-eval/results/judge-judge.json
+```
+
+Record the resulting P/R/F1 for both lanes plus the sweep table here.
