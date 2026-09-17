@@ -94,12 +94,15 @@ func newAmbientClassifierAdapter(chatter llm.Chatter) *ambientClassifierAdapter 
 func (a *ambientClassifierAdapter) ExtractCandidates(ctx context.Context, prompt string) ([]byte, error) {
 	// Grammar-constrained extraction: force a bare JSON array of candidate
 	// objects (the shape memory.ParseAmbientCandidates accepts) directly on
-	// the wire for llama.cpp-style endpoints. attachRawGrammar is nil-safe:
-	// with the GBNFConstrained switch off (the default) the payload is
-	// byte-identical to the unconstrained path.
+	// the wire for llama.cpp-style endpoints. attachRawGrammar is nil-safe
+	// and local-endpoint-gated: local models get the grammar, cloud
+	// providers never see the field. DisableThinking keeps the LFM2.5
+	// <think> template from fighting the grammar (mechanical extraction
+	// gains nothing from reasoning); the task_summarizer uses the same
+	// option for the same reason.
 	resp, err := a.chatter.Chat(ctx, []llm.ChatMessage{
 		{Role: llm.RoleUser, Content: prompt},
-	}, llm.WithTemperature(0.2), llm.WithRawGrammar(llm.AmbientCandidateGrammar()))
+	}, llm.WithTemperature(0.2), llm.WithRawGrammar(llm.AmbientCandidateGrammar()), llm.DisableThinking())
 	if err != nil {
 		return nil, fmt.Errorf("ambient classifier chat: %w", err)
 	}

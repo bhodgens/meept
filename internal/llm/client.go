@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"net/url"
+
 	"bufio"
 	"bytes"
 	"context"
@@ -520,7 +522,7 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 	}
 
 	c.attachToolGrammar(payload, cfg, chatOpts)
-	attachRawGrammar(payload, chatOpts)
+	attachRawGrammar(payload, cfg, chatOpts)
 
 	return chatOpts, payload, nil
 }
@@ -950,7 +952,7 @@ type chatOptions struct {
 	// ("", see gbnf.go constraint constants). Set via WithGrammar.
 	grammarMode string
 	// rawGrammar is a caller-supplied grammar body attached verbatim when
-	// GBNFConstrainedEnabled() is on (see WithRawGrammar). Unlike
+	// GBNFConstrainedEnabled() is on (tool-calling grammar path). Unlike
 	// grammarMode, it does NOT require tools on the request — for
 	// structured-output constraints on tool-free calls (e.g. SKILL.state
 	// response envelopes).
@@ -1279,18 +1281,33 @@ func (c *Client) attachToolGrammar(payload map[string]any, cfg *ModelConfig, cha
 	AttachGrammar(payload, mode, grammar)
 }
 
-// attachRawGrammar attaches a caller-supplied grammar to the payload when the
-// global GBNFConstrained switch is on. This path is independent of tools and
-// model capability: the caller opted in explicitly via WithRawGrammar and owns
-// the grammar body.
-func attachRawGrammar(payload map[string]any, chatOpts *chatOptions) {
+// attachRawGrammar attaches a caller-supplied grammar to the payload. The
+// caller opted in explicitly via WithRawGrammar and owns the grammar body —
+// no config surface. The only gate is the endpoint: the "grammar" wire field
+// is a llama.cpp extension, so it is attached only when the resolved endpoint
+// is local (loopback). Cloud providers must never see the field.
+func attachRawGrammar(payload map[string]any, cfg *ModelConfig, chatOpts *chatOptions) {
 	if chatOpts.rawGrammar == "" {
 		return
 	}
-	if !GBNFConstrainedEnabled() {
+	if !isLocalEndpoint(cfg.BaseURL) {
 		return
 	}
 	payload["grammar"] = chatOpts.rawGrammar
+}
+
+// isLocalEndpoint reports whether the base URL points at a loopback host,
+// where llama.cpp-style grammar support is guaranteed by the runtime floor.
+func isLocalEndpoint(baseURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1", "[::1]":
+		return true
+	}
+	return false
 }
 
 func toolNames(defs []ToolDefinition) []string {
