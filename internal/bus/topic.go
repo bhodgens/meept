@@ -48,6 +48,26 @@ func PublishT[T any](b *MessageBus, t Topic[T], source string, payload T) int {
 	return b.Publish(t.Name, msg)
 }
 
+// PublishBlockingT is PublishT with MessageBus.PublishBlocking delivery:
+// sends to subscriber channels with a 5-second timeout instead of a
+// non-blocking drop-on-full. For per-turn-once events whose loss breaks a
+// client state machine (turn.terminal is the canonical case: awaiting
+// clients key on it, and the C-09 security-approval class of full-buffer
+// drops applies). Marshal policy identical to PublishT.
+func PublishBlockingT[T any](b *MessageBus, t Topic[T], source string, payload T) int {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		panic(fmt.Sprintf("bus: PublishBlockingT: marshal payload for topic %q (%s): %v", t.Name, typeName[T](), err))
+	}
+	msg := &models.BusMessage{
+		Type:      models.MessageTypeEvent,
+		Source:    source,
+		Timestamp: time.Now().UTC(),
+		Payload:   data,
+	}
+	return b.PublishBlocking(t.Name, msg)
+}
+
 // SubscribeT subscribes to t and invokes fn with each decoded payload.
 //
 // Decode failures are logged at warn level (topic + type name) and the

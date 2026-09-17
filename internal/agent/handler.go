@@ -1575,13 +1575,17 @@ func (h *ChatHandler) publishTurnTerminal(ev TurnTerminalEvent) {
 	if h == nil || h.bus == nil {
 		return
 	}
-	msg, err := models.NewBusMessage(models.MessageTypeEvent, SourceChatHandler, ev)
-	if err != nil {
+	// Pre-marshal to preserve the log-and-drop contract (typed-bus-topics
+	// leaf 02): bus.PublishT panics on marshal failure, but a marshal
+	// failure here must be logged and never affect the turn (same posture
+	// as parked_turn.go's publishParkEvent). TurnTerminalEvent is a
+	// closed, marshal-safe field set, so the error path is unreachable in
+	// practice and PublishT's panic branch is dead for this payload.
+	if _, err := json.Marshal(ev); err != nil {
 		h.logger.Error("failed to build turn.terminal event", "error", err)
 		return
 	}
-	msg.Topic = "turn.terminal"
-	h.bus.Publish("turn.terminal", msg)
+	bus.PublishBlockingT(h.bus, TopicTurnTerminal, SourceChatHandler, ev)
 }
 
 // TaskStepSummary represents a step in a task completion payload.
