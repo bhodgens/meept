@@ -30,6 +30,7 @@ func main() {
 	outPath := flag.String("out", "", "metrics JSON output path (default: stdout only)")
 	mode := flag.String("mode", "both", "ambient | distill | both")
 	validateOnly := flag.Bool("validate-corpus", false, "validate the corpus and print counts, then exit")
+	grammarFile := flag.String("grammar-file", "", "GBNF grammar file attached to every request (llama.cpp wire grammar; measures the constrained path)")
 	matchThreshold := flag.Float64("match-threshold", 0.6, "token-overlap threshold for a gold match")
 	timeout := flag.Duration("timeout", 120*time.Second, "per-call timeout")
 	flag.Parse()
@@ -50,16 +51,27 @@ func main() {
 	}
 
 	client := newChatClient(*endpoint, *model, *timeout)
+	if *grammarFile != "" {
+		gb, err := os.ReadFile(*grammarFile)
+		if err != nil {
+			fatal("read grammar: %v", err)
+		}
+		client.setGrammar(string(gb))
+	}
 	fmt.Printf("\nEvaluating model: %s\nEndpoint: %s\nMode: %s\nThreshold: %.2f\n\n",
 		*model, *endpoint, *mode, *matchThreshold)
 
+	conds := map[string]string{"grammar": "none", "temperature": "0.2", "max_tokens": "1024"}
+	if *grammarFile != "" {
+		conds["grammar"] = *grammarFile
+	}
 	result := EvalResult{
 		Model:      *model,
 		Endpoint:   *endpoint,
 		Mode:       *mode,
 		Threshold:  *matchThreshold,
 		RunAt:      time.Now().UTC().Format(time.RFC3339),
-		Conditions: map[string]string{"grammar": "none", "temperature": "0.2", "max_tokens": "1024"},
+		Conditions: conds,
 	}
 
 	if *mode == "ambient" || *mode == "both" {

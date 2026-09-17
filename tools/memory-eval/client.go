@@ -18,7 +18,10 @@ type chatClient struct {
 	endpoint string
 	model    string
 	timeout  time.Duration
-	http     *http.Client
+	// grammar, when non-empty, is attached to the request payload as the
+	// llama.cpp wire "grammar" field — measuring the constrained path.
+	grammar string
+	http    *http.Client
 }
 
 func newChatClient(endpoint, model string, timeout time.Duration) *chatClient {
@@ -30,6 +33,9 @@ func newChatClient(endpoint, model string, timeout time.Duration) *chatClient {
 	}
 }
 
+// setGrammar enables grammar-constrained requests (llama.cpp endpoints only).
+func (c *chatClient) setGrammar(g string) { c.grammar = g }
+
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -40,6 +46,7 @@ type chatRequest struct {
 	Messages    []chatMessage `json:"messages"`
 	Temperature float64       `json:"temperature"`
 	MaxTokens   int           `json:"max_tokens"`
+	Grammar     string        `json:"grammar,omitempty"`
 }
 
 type chatResponse struct {
@@ -62,6 +69,7 @@ func (c *chatClient) chat(ctx context.Context, system, user string) (string, flo
 		Messages:    []chatMessage{{Role: "system", Content: system}, {Role: "user", Content: user}},
 		Temperature: 0.2,
 		MaxTokens:   1024,
+		Grammar:     c.grammar,
 	})
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("marshal request: %w", err)

@@ -178,7 +178,21 @@ func segGoldOnlyDistill(seg segment) bool {
 	return len(seg.Gold.Claims) == 0 && len(seg.Gold.Decisions) == 0 && len(seg.Gold.Predictions) == 0
 }
 
+// stripThink removes LFM2.5's (possibly empty) <think>...</think> block so the
+// JSON payload parses; production strips fences analogously before decoding.
+func stripThink(s string) string {
+	if i := strings.Index(s, "<think>"); i >= 0 {
+		if j := strings.Index(s[i:], "</think>"); j >= 0 {
+			s = s[:i] + s[i+j+len("</think>"):]
+		} else {
+			s = s[:i] // unterminated think: drop the rest
+		}
+	}
+	return s
+}
+
 func parseCandidates(content string) ([]candidate, error) {
+	content = stripThink(content)
 	// Strip markdown fences if present, then parse a JSON array. Accept an
 	// object wrapping an array under "candidates"/"results" too (models do this).
 	s := strings.TrimSpace(content)
@@ -352,7 +366,7 @@ func runDistillEval(client *chatClient, corpus *corpus, threshold float64) *Dist
 
 // unmarshalLoose strips fences before parsing a JSON object.
 func unmarshalLoose(content string, v any) error {
-	s := strings.TrimSpace(content)
+	s := stripThink(strings.TrimSpace(content))
 	s = strings.TrimPrefix(s, "```json")
 	s = strings.TrimPrefix(s, "```")
 	s = strings.TrimSuffix(s, "```")
