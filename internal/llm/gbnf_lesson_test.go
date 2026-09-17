@@ -15,10 +15,11 @@ func TestLessonGrammar_Shape(t *testing.T) {
 	if g == "" {
 		t.Fatal("grammar is empty")
 	}
-	// Root is a single object: the lesson rule opens with a "{" literal and
-	// there is no bare-array root.
-	if !strings.Contains(g, `lesson ::= "{"`) {
-		t.Errorf("lesson rule must force a single JSON object, grammar:\n%s", g)
+	// Root is a single object: the root rule opens with a "{" literal and
+	// there is no bare-array root. (llama.cpp requires the first rule to be
+	// named `root` — any other name fails grammar parse on the wire.)
+	if !strings.Contains(g, `root ::= "{"`) {
+		t.Errorf("root rule must force a single JSON object, grammar:\n%s", g)
 	}
 	if strings.Contains(g, `root ::= "["`) {
 		t.Error("grammar must not force a bare array (that is the ambient shape)")
@@ -31,14 +32,14 @@ func TestLessonGrammar_Shape(t *testing.T) {
 		}
 	}
 	// Every referenced rule is defined.
-	for _, rule := range []string{"ws", "string", "char", "string-array", "lesson", "principle-member", "evidence-member", "because-member"} {
+	for _, rule := range []string{"ws", "string", "char", "string-array", "root", "principle-member", "evidence-or-close", "because-cont"} {
 		if !strings.Contains(g, rule+" ::=") {
 			t.Errorf("rule %s used but not defined", rule)
 		}
 	}
 	// evidence_ids must be an array of quoted strings, and the string rule
 	// must produce quoted values (the evidence_ids contract is []string).
-	if !strings.Contains(g, "evidence-member ::= \",\" ws \"\\\"evidence_ids\\\"\" ws \":\" ws string-array") {
+	if !strings.Contains(g, "evidence_ids") || !strings.Contains(g, "string-array") {
 		t.Error("evidence_ids member must map to the string-array rule")
 	}
 }

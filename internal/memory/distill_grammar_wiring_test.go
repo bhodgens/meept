@@ -52,10 +52,13 @@ func TestLLMDistillSummarizer_InjectsGrammar(t *testing.T) {
 	// The grammar must force a single bare JSON object — not the ambient
 	// bare-array shape — and must not wrap the lesson in an outer key.
 	g := llm.LessonGrammar()
-	if !strings.Contains(g, `lesson ::= "{"`) {
+	if !strings.Contains(g, `root ::= "{"`) {
 		t.Error("lesson grammar does not force a single JSON object")
 	}
-	for _, banned := range []string{"lesson ::= \"[\"", "lessons", "result", "wrapper"} {
+	if !strings.Contains(g, "principle") || !strings.Contains(g, "evidence_ids") {
+		t.Error("lesson grammar missing required member rules")
+	}
+	for _, banned := range []string{"root ::= \"[\"", "lessons", "result", "wrapper"} {
 		if strings.Contains(g, banned) {
 			t.Errorf("grammar references banned token %q", banned)
 		}

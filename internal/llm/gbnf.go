@@ -453,21 +453,18 @@ func AmbientCandidateGrammar() string {
 // local endpoints only). Never returns an empty string.
 func LessonGrammar() string {
 	var b strings.Builder
+	// llama.cpp requires the first rule to be named `root`; any other root
+	// name fails grammar parse on the wire ("failed to parse grammar").
+	b.WriteString("root ::= \"{\" ws principle-member evidence-or-close ws \"}\"\n")
 	b.WriteString("ws ::= [ \\t\\n]*\n")
 	b.WriteString("string ::= \"\\\"\" char* \"\\\"\"\n")
 	b.WriteString("char ::= [^\"\\\\]\n")
 	b.WriteString("string-array ::= \"[\" ws (string (\",\" ws string)*)? ws \"]\"\n")
-	// Lesson rule: one object with the declared keys in a fixed order
-	// (required key first), ws between every token. Optional keys are
-	// listed after the required one, each alternative a complete tail of
-	// the member sequence. Mirrors AmbientCandidateGrammar's member layout:
-	//
-	//   Member:  "\"key\"" ws ":" ws <valueRule>
-	//   Sep:     ws "," ws
-	//   Envelope:"{" ws <members> ws "}"
-	fmt.Fprintf(&b, "lesson ::= \"{\" ws principle-member ws evidence-member ws because-member ws \"}\"\n")
-	fmt.Fprintf(&b, "principle-member ::= \"\\\"principle\\\"\" ws \":\" ws string\n")
-	fmt.Fprintf(&b, "evidence-member ::= \",\" ws \"\\\"evidence_ids\\\"\" ws \":\" ws string-array\n")
-	fmt.Fprintf(&b, "because-member ::= \",\" ws \"\\\"because\\\"\" ws \":\" ws string\n")
+	b.WriteString("principle-member ::= \"\\\"principle\\\"\" ws \":\" ws string\n")
+	// evidence_ids and because are optional; each continuation is a complete
+	// comma-prefixed tail so the key order stays fixed while either or both
+	// may be absent.
+	b.WriteString("evidence-or-close ::= (\",\" ws \"\\\"evidence_ids\\\"\" ws \":\" ws string-array because-cont)? ws\n")
+	b.WriteString("because-cont ::= \",\" ws \"\\\"because\\\"\" ws \":\" ws string\n")
 	return b.String()
 }
