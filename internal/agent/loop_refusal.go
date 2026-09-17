@@ -117,6 +117,16 @@ func (l *AgentLoop) handleRefusal(refusalErr *llm.RefusalError) (bool, error) {
 	// base model on the next fresh turn if the retry never fired.
 	if applier != nil {
 		applier(resolved)
+		// Observability leaf 04 (user decision 2026-09-16, option b): the
+		// pin was accepted, so IF the retry succeeds the served turn must
+		// disclose the fallback in the user-visible reply text. The flag
+		// is set ONLY here — never on give-up paths — and cleared at the
+		// start of the next turn, exactly like the modelOverride
+		// lifecycle it mirrors. refusalFallbackModel() reads it at reply
+		// assembly; no normal turn can see it.
+		l.mu.Lock()
+		l.refusalFallbackServedModel = resolved
+		l.mu.Unlock()
 	}
 
 	// Stage the resolved fallback config so the retry call carries it
@@ -171,6 +181,33 @@ func (l *AgentLoop) handleRefusal(refusalErr *llm.RefusalError) (bool, error) {
 	)
 
 	return true, nil
+}
+
+// refusalFallbackDisclosure returns the reply-text disclosure suffix when a
+// refusal-fallback retry was armed during this turn (refusal-fallback leaf
+// 04, user decision 2026-09-16 option b): the user-visible reply ends with
+//
+//	"\n\n[answered by <fallback model> after refusal]"
+//
+// so the transcript itself discloses the fallback on every surface without
+// client changes. Empty string for normal turns — replies stay byte-
+// identical. The note is CODE-appended at reply assembly, never
+// model-generated.
+func (l *AgentLoop) refusalFallbackDisclosure() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.refusalFallbackServedModel == "" {
+		return ""
+	}
+	return "\n\n[answered by " + l.refusalFallbackServedModel + " after refusal]"
+}
+
+// clearRefusalFallbackServed resets the turn-scoped disclosure state at the
+// start of a fresh turn. Idempotent; guarded by l.mu.
+func (l *AgentLoop) clearRefusalFallbackServed() {
+	l.mu.Lock()
+	l.refusalFallbackServedModel = ""
+	l.mu.Unlock()
 }
 
 // ClearRefusalFallback clears a fallback override armed by handleRefusal

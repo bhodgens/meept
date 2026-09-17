@@ -830,6 +830,14 @@ type AgentLoop struct {
 	// refusalFailureRecorder lets tests observe any call into an
 	// alias-failure-class seam from the refusal path (nil in production).
 	refusalFailureRecorder func(where string)
+	// refusalFallbackServedModel carries the fact that a refusal-fallback
+	// retry was ARMED for this turn (refusal-fallback tree 03 → leaf 04
+	// chat-reply disclosure). Set in handleRefusal when the persistent
+	// override pin is applied, read at reply assembly by
+	// refusalFallbackDisclosure(), cleared at the start of the next turn
+	// (clearRefusalFallbackServed, same lifecycle as the override pin).
+	// Guarded by l.mu.
+	refusalFallbackServedModel string
 
 	// pendingHookMessages holds ExtraMessages returned by PrepareNextTurn
 	// hooks (applyTurnModification). One-shot: prepended to the next LLM
@@ -2515,6 +2523,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	if l.hookRegistry != nil {
 		l.hookRegistry.ClearFreshTurnOverrides(ctx)
 	}
+	// Refusal-fallback leaf 04: reset the turn-scoped disclosure state so a
+	// fallback armed in a PREVIOUS turn can never leak its note into this
+	// turn's reply. Same fresh-turn lifecycle as the override sweep above;
+	// handleRefusal re-arms it if THIS turn refuses and falls back.
+	l.clearRefusalFallbackServed()
 
 	// Snapshot file watcher under lock to avoid racing with SetFileWatcher.
 	l.mu.RLock()
@@ -2792,6 +2805,13 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// dumps and substitute a short user-language fallback before the text
 	// is persisted, notified, or returned. Prose passes byte-identical.
 	finalResponse = applyReplyGuard(finalResponse)
+	// Refusal-fallback leaf 04 (user decision 2026-09-16, option b): when a
+	// refusal-fallback retry served this turn, append the CODE-generated
+	// disclosure line so the transcript itself names the fallback model on
+	// every surface. Normal turns: refusalFallbackDisclosure() returns ""
+	// and the reply is byte-identical to before. The note rides AFTER the
+	// reply guard so a substituted fallback reply is disclosed too.
+	finalResponse += l.refusalFallbackDisclosure()
 	if l.securityOrch != nil {
 		scannedText, hasCredentials, warnings := l.securityOrch.ScanOutput(response)
 		if hasCredentials {
@@ -6161,6 +6181,13 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Estimate iterations from conversation length (approximation since reasoningCycle doesn't expose it directly)
 	// For accurate iteration tracking, we'd need to modify reasoningCycle to return iteration count
 	taskIterations = conv.Len() // Use conversation length as proxy
+
+	// Refusal-fallback leaf 04 (user decision 2026-09-16, option b): a task
+	// turn served via a refusal-fallback retry carries the same CODE-
+	// generated disclosure as the chat path — step results surface it too,
+	// keeping every reply surface consistent. Normal turns: "" appended,
+	// byte-identical.
+	response += l.refusalFallbackDisclosure()
 
 	// Log task completion
 	l.logger.Info("Agent completed task",
