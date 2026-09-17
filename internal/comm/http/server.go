@@ -699,55 +699,63 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 	}
 
 	var eventType string
-	switch {
-	case topic == "chat_message" || topic == "chat.message.received":
-		// Actual chat messages → chat_message
-		// Note: chat.response is deliberately excluded — it is an RPC reply
-		// topic consumed by ChatService for the HTTP body. Relaying it to WS
-		// clients duplicates the reply for HTTP+WS clients (Flutter GUI).
-		// WS push notifications use the separate chat_message topic, published
-		// by ChatHandler.publishChatMessage alongside sendResponse.
-		eventType = "chat_message"
-	case strings.HasPrefix(topic, "chat."):
-		// Lifecycle events (chat.progress, chat.processing,
-		// chat.worker.started, chat.worker.completed) are NOT chat
-		// messages. Label them as progress so the client can update
-		// indicators without creating blank message bubbles.
-		eventType = "agent_progress"
-	case strings.HasPrefix(topic, "agent.quota"):
-		// Quota-state events (agent.quota_wait from the episode tracker,
-		// leaf 07 quota-reset-resilience) carry agent state transitions.
-		// Tree 03 leaf 04 (universal parking, D9) publishes throttle
-		// park/resume/give-up events on the SAME agent.quota_wait topic
-		// (ParkTurnEvent payloads with class="throttle"), precisely so this
-		// prefix match keeps classifying them: they MUST render as progress
-		// indicators — never chat_message (a chat bubble would appear
-		// blank; AGENTS.md WS classification invariant).
-		eventType = "agent_progress"
-	case strings.HasPrefix(topic, "agent.model_escalated"):
-		// Model-escalation events (tree 01 leaf 04: verification fix-loop
-		// exhaustion switches the fix loop to the escalation model) are
-		// agent state transitions. They MUST render as progress — never
-		// chat_message (AGENTS.md WS classification invariant).
-		eventType = "agent_progress"
-	case strings.HasPrefix(topic, "turn."):
-		// Turn lifecycle events (turn.terminal, leaf
-		// 01-turn-terminal-event of the turn-lifecycle tree): the frozen
-		// payload reports a chat turn's final outcome with provenance.
-		// They are lifecycle signals and MUST classify as
-		// agent_progress — never chat_message (AGENTS.md WS
-		// classification invariant: blank bubbles otherwise).
-		eventType = "agent_progress"
-	case strings.HasPrefix(topic, "metrics."):
-		eventType = "metrics_update"
-	case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job.") ||
-		strings.HasPrefix(topic, "queue."):
-		eventType = "job_update"
-	case strings.HasPrefix(topic, "plan."):
-		eventType = "plan_update"
-	default:
-		// Generic fallback instead of mislabeling as job_update
-		eventType = "event"
+	// Marker-first classification: topics migrated to typed Topic[T]
+	// declarations carry payloads implementing wsclass.WSClassified. On a
+	// successful typed decode the marker decides the event type.
+	if wsClass, ok := classifyTypedPayload(msg); ok {
+		eventType = wsClass.String()
+	} else {
+		// legacy fallback - remove when all WS-visible topics are typed (see internal/comm/wsclass).
+		switch {
+		case topic == "chat_message" || topic == "chat.message.received":
+			// Actual chat messages → chat_message
+			// Note: chat.response is deliberately excluded — it is an RPC reply
+			// topic consumed by ChatService for the HTTP body. Relaying it to WS
+			// clients duplicates the reply for HTTP+WS clients (Flutter GUI).
+			// WS push notifications use the separate chat_message topic, published
+			// by ChatHandler.publishChatMessage alongside sendResponse.
+			eventType = "chat_message"
+		case strings.HasPrefix(topic, "chat."):
+			// Lifecycle events (chat.progress, chat.processing,
+			// chat.worker.started, chat.worker.completed) are NOT chat
+			// messages. Label them as progress so the client can update
+			// indicators without creating blank message bubbles.
+			eventType = "agent_progress"
+		case strings.HasPrefix(topic, "agent.quota"):
+			// Quota-state events (agent.quota_wait from the episode tracker,
+			// leaf 07 quota-reset-resilience) carry agent state transitions.
+			// Tree 03 leaf 04 (universal parking, D9) publishes throttle
+			// park/resume/give-up events on the SAME agent.quota_wait topic
+			// (ParkTurnEvent payloads with class="throttle"), precisely so this
+			// prefix match keeps classifying them: they MUST render as progress
+			// indicators — never chat_message (a chat bubble would appear
+			// blank; AGENTS.md WS classification invariant).
+			eventType = "agent_progress"
+		case strings.HasPrefix(topic, "agent.model_escalated"):
+			// Model-escalation events (tree 01 leaf 04: verification fix-loop
+			// exhaustion switches the fix loop to the escalation model) are
+			// agent state transitions. They MUST render as progress — never
+			// chat_message (AGENTS.md WS classification invariant).
+			eventType = "agent_progress"
+		case strings.HasPrefix(topic, "turn."):
+			// Turn lifecycle events (turn.terminal, leaf
+			// 01-turn-terminal-event of the turn-lifecycle tree): the frozen
+			// payload reports a chat turn's final outcome with provenance.
+			// They are lifecycle signals and MUST classify as
+			// agent_progress — never chat_message (AGENTS.md WS
+			// classification invariant: blank bubbles otherwise).
+			eventType = "agent_progress"
+		case strings.HasPrefix(topic, "metrics."):
+			eventType = "metrics_update"
+		case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job.") ||
+			strings.HasPrefix(topic, "queue."):
+			eventType = "job_update"
+		case strings.HasPrefix(topic, "plan."):
+			eventType = "plan_update"
+		default:
+			// Generic fallback instead of mislabeling as job_update
+			eventType = "event"
+		}
 	}
 
 	if payload == nil {
