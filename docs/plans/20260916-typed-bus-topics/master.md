@@ -283,11 +283,11 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-topic-generic | PENDING | 0 | |
-| 02-migrate-scarred-topics | PENDING | 0 | |
-| 03-ws-classification | PENDING | 0 | |
-| 04-exhaustive-lint | PENDING | 0 | |
-| 05-agents-md-cleanup | PENDING | 0 | |
+| 01-topic-generic | COMPLETE | 1 | Reviewed in-session: contract-exact, 7 tests green, panic-on-marshal documented, both interop directions tested. Committed a384204f. PublishBlockingT added later by bughunt 18c34d66 (accepted). |
+| 02-migrate-scarred-topics | COMPLETE | 3 | Amended shape: declaration + RAW label + tests only (publisher typed by 18c34d66). Wildcard correction accepted (turn.* not *). Committed aa7cf489 after 2 commit races with a parallel session. |
+| 03-ws-classification | COMPLETE | 1 | Subagent implementation; reviewed in-session. wsclass pkg (6 classes), marker on TurnTerminalEvent, marker-first + labeled fallback, parity fence 14 cases. chat.response measured as agent_progress (plan assumption corrected). wsclass files landed via parallel 1ccdb36f; server.go committed 98c6823d, marker test 6c21a86b. |
+| 04-exhaustive-lint | COMPLETE | 1 | Orchestrator-implemented (config-only). Scoped via explicit-exhaustive-switch + //exhaustive:enforce ON THE SWITCH (doc-comment marker is invisible to the linter). RED experiment proved firing; 50 pre-existing findings kept out of scope. Committed a44ec38b. |
+| 05-agents-md-cleanup | COMPLETE | 1 | Orchestrator-implemented. 3 hunks staged via filtered patch (sibling refusal hunk left uncommitted). Committed 9294e2ca. |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
