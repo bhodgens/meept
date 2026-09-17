@@ -991,6 +991,14 @@ func (s *Server) SetDispatchSubmitter(ds DispatchSubmitter) {
 // ServerOption is a functional option for configuring a Server.
 type ServerOption func(*Server)
 
+// ChatSubmitter returns the handler serving POST /api/v1/chat/submit, or nil
+// when the endpoint is disabled. Exposed for composition self-checks (the
+// daemon pins that an HTTP-only config — Unix RPC disabled — still wires the
+// shared chat.submit handler; week bughunt 2026-09-17 finding 17).
+func (s *Server) ChatSubmitter() ChatSubmitter {
+	return s.chatSubmitter
+}
+
 // Addr returns the actual address the server is listening on. Useful when
 // binding to :0 to discover the kernel-assigned port.
 func (s *Server) Addr() string {

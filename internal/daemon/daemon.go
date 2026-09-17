@@ -278,13 +278,22 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	}
 
-	// Wire the shared chat.submit handler (leaf 02): replace the proxy's
-	// default (registry-less) submit handler with one carrying the shared
-	// turn registry, so submit dedupe and handler-side tracking agree.
-	// RegisterHandler overwrites the eager proxy registration. Also
-	// exposed to HTTP via WithChatSubmitter below.
-	if rpcServer != nil && proxy != nil {
+	// Wire the shared chat.submit handler (leaf 02, F17): the handler needs
+	// only msgBus + the turn registry — NOT the RPC server. Construct it
+	// unconditionally (when a registry exists) so the HTTP
+	// /api/v1/chat/submit endpoint works on an HTTP-only daemon
+	// (transport.rpc.enabled=false); pre-fix it was built only inside the
+	// rpc gate and HTTP answered 503. The proxy/rpc registration stays
+	// inside the rpc gate.
+	if turnRegistry != nil {
 		chatSubmitHandler = rpc.NewSubmitHandler(msgBus, turnRegistry, logger)
+	}
+	if rpcServer != nil && proxy != nil {
+		if chatSubmitHandler == nil {
+			// Unreachable with the default ChatHandler wiring; a
+			// registry-less fallback keeps the RPC method functional.
+			chatSubmitHandler = rpc.NewSubmitHandler(msgBus, nil, logger)
+		}
 		proxy.SetSubmitHandler(chatSubmitHandler)
 		rpcServer.RegisterHandler("chat.submit", chatSubmitHandler.Submit)
 	}
