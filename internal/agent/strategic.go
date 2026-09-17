@@ -75,6 +75,16 @@ type PlanRequest struct {
 	// re-picking agents per step from the tool-hint table. Empty = no
 	// override; per-step selection proceeds.
 	AssignedAgent string `json:"assigned_agent,omitempty"`
+
+	// RequestModel carries the client's per-request model ref (chat.request
+	// "model"; week bughunt 2026-09-17 F18). Pre-fix it was dropped at
+	// publishPlanRequest, so async task dispatch served the turn on the
+	// default/alias chain instead of the requested model. The strategic
+	// planner applies it to specialist execution via the task's
+	// model_override metadata — the same channel the dispatcher's parsed
+	// user directives use, which AgentLoop consumes one-shot per task run.
+	// Empty = no request-level model; unchanged behavior.
+	RequestModel string `json:"request_model,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.
@@ -402,6 +412,34 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	if err != nil || t == nil {
 		return fmt.Errorf("task not found: %s", req.TaskID)
 	}
+
+	// Per-request model propagation (F18): merge the client's model ref
+	// into the task's model_override metadata — the SAME channel the
+	// dispatcher's parsed user directives use, which AgentLoop extracts
+	// one-shot at task-run start (extractModelOverrideFromMetadata). A
+	// directive already present in the metadata (parsed from the user's
+	// message) wins: it is the more specific instruction.
+	if req.RequestModel != "" {
+		meta := map[string]any{}
+		if len(t.Metadata) > 0 {
+			if err := json.Unmarshal(t.Metadata, &meta); err != nil {
+				sp.logger.Warn("Failed to parse task metadata for request model merge",
+					"task_id", req.TaskID, "error", err)
+				meta = map[string]any{}
+			}
+		}
+		if _, hasDirective := meta["model_override"]; !hasDirective {
+			meta["model_override"] = req.RequestModel
+			if metaJSON, mErr := json.Marshal(meta); mErr == nil {
+				t.Metadata = json.RawMessage(metaJSON)
+				if err := sp.taskStore.Update(t); err != nil {
+					sp.logger.Warn("Failed to persist request model on task",
+						"task_id", req.TaskID, "error", err)
+				}
+			}
+		}
+	}
+
 	t.SetState(task.StatePlanning)
 	if err := sp.taskStore.Update(t); err != nil {
 		sp.logger.Error("Failed to update task state to planning", "error", err)
@@ -434,6 +472,25 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 			// (the user sees the error) rather than completing with a
 			// deflection. createFallbackSteps is STILL correct for direct
 			// mode — only the spec_pair degradation is removed.
+
+			// Immediate failure delivery (week bughunt 2026-09-17 F11):
+			// persist StateFailed and publish task.failed NOW — pre-fix
+			// the task stayed in planning with the error only logged, so
+			// clients learned of the failure solely via the watchdog.
+			t.SetState(task.StateFailed)
+			if updateErr := sp.taskStore.Update(t); updateErr != nil {
+				sp.logger.Error("Failed to persist failed state after pair-session setup error",
+					"task_id", req.TaskID,
+					"error", updateErr,
+				)
+			}
+			sp.publishEvent("task.failed", map[string]any{
+				KeyTaskID:                req.TaskID,
+				"name":                   t.Name,
+				string(MessageTypeError): pairErr.Error(),
+				"linked_sessions":        t.LinkedSessions,
+			})
+
 			sp.logger.Error("Pair-session handling failed; failing compound task",
 				"task_id", req.TaskID,
 				"error", pairErr,
