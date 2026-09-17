@@ -9,18 +9,29 @@ Grades how well local models perform meept's memory extraction work:
   matching production's `DistillSummarizer` contract
   (`internal/memory/distill.go`).
 
-No grammar constraint is applied: the eval grades the model's native ability
-to emit parseable, schema-conformant JSON at temperature 0.2 — the same
-conditions production runs under today.
+No grammar constraint is applied by default: the eval grades the model's
+native ability to emit parseable, schema-conformant JSON at temperature 0.2.
+Pass `--grammar-file` to measure the constrained path — production now
+attaches `llm.LessonGrammar()` to distill calls on local endpoints
+(`internal/memory/distill.go`), mirroring the ambient candidate grammar.
 
 ## Corpus
 
-`corpus.json` holds 53 synthetic segments with gold labels:
-61 claims, 11 decisions, 9 predictions, 5 lessons, 29 decoys, plus 4 dedupe
+`corpus.json` holds 64 synthetic segments with gold labels:
+61 claims, 11 decisions, 9 predictions, 17 lessons (across 15 lesson
+segments), 29 decoys, plus 4 dedupe
 pairs (segments restating earlier claims in different words) and 4
 corrections/contradictions. Categories: baseline, multi-claim, decoy-heavy
 (hypotheticals, jokes, quoted opinions, pleasantries that must NOT be
 extracted), prediction, decision, contradiction, dedupe pairs, lessons.
+
+The lesson segments (seg-050..seg-064) vary the observation style the
+distiller must handle: explicit rule statements, war stories that imply the
+lesson, multi-sentence observations requiring abstraction, principles with
+concrete numbers (timeouts, thresholds, rate limits), and negative lessons
+("never do X because Z"). Some transcripts reference memory IDs ("memory
+104", "memory 205") so evidence_ids may surface as ints or strings —
+production's `DecodeLesson` coerces both (commit b4ea06d7).
 
 Validate without an endpoint:
 
