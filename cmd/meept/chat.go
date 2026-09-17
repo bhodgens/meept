@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/tui"
 	"github.com/caimlas/meept/pkg/id"
@@ -23,6 +22,7 @@ var (
 	chatNoFence   bool
 	chatSessionID string // target specific session by ID
 	chatCwd       string // working directory for session
+	chatAwait     string // "wait" (default) to await turn.terminal, "off" to fire-and-forget
 )
 
 func newChatCmd() *cobra.Command {
@@ -50,6 +50,11 @@ Examples:
 	cmd.Flags().BoolVar(&chatNoFence, "nofence", false, "disable path fencing for this session")
 	cmd.Flags().StringVar(&chatSessionID, "session", "", "target specific session by ID")
 	cmd.Flags().StringVar(&chatCwd, "cwd", "", "set working directory for session")
+	// --await controls the oneshot/session (non-TUI) wait behavior:
+	//   "wait" (default): submit via chat.submit and await the real
+	//     turn.terminal result — long tasks print their genuine reply.
+	//   "off": print the ack line and exit 0 without waiting.
+	cmd.Flags().StringVar(&chatAwait, "await", "wait", `wait for the turn result: "wait" (default) or "off" (fire-and-forget)`)
 
 	return cmd
 }
@@ -159,9 +164,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 				sessionID = sid
 			}
 		}
-		reply, err := client.Chat(context.Background(), message, sessionID)
+		reply, err := runChatTurn(client, message, sessionID)
 		if err != nil {
-			return fmt.Errorf("%s", llm.UserMessage(err))
+			return err
 		}
 		fmt.Println(reply)
 		return nil
@@ -365,14 +370,41 @@ func chatWithSession(client transport.Client, sessionID, message string) error {
 		return fmt.Errorf("session %q not found", sessionID)
 	}
 
-	// Session exists - send message
-	reply, err := client.Chat(context.Background(), message, sessionID)
+	// Session exists - send the async turn (chat.submit + await turn.terminal).
+	opts, err := chatOptsFromFlags()
 	if err != nil {
-		return fmt.Errorf("%s", llm.UserMessage(err))
+		return err
 	}
+	return submitChatTurn(client, message, sessionID, opts)
+}
 
-	fmt.Println(reply)
-	return nil
+// runChatTurn executes one async chat turn and returns the reply text for
+// the caller to print. It is the oneshot path's entry into submitAndAwait
+// (the session path goes through chatWithSession → submitChatTurn directly).
+func runChatTurn(client transport.Client, message, sessionID string) (string, error) {
+	opts, err := chatOptsFromFlags()
+	if err != nil {
+		return "", err
+	}
+	res, err := submitAndAwait(context.Background(), client, message, sessionID, opts)
+	if err != nil {
+		return "", err
+	}
+	if res.Error != "" {
+		return "", fmt.Errorf("%s", res.Error)
+	}
+	return res.Reply, nil
+}
+
+// chatOptsFromFlags builds chatOpts from the parsed CLI flags. It validates
+// --await so a typo fails loudly instead of silently falling back to "wait".
+func chatOptsFromFlags() (chatOpts, error) {
+	switch chatAwait {
+	case "", "wait", "off":
+		return chatOpts{Await: chatAwait}, nil
+	default:
+		return chatOpts{}, fmt.Errorf("--await must be \"wait\" or \"off\", got %q", chatAwait)
+	}
 }
 
 // openTUIToSession opens the TUI targeted to a specific session.
