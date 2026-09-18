@@ -2,9 +2,14 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
+	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
@@ -140,15 +145,32 @@ func wireEpistemicHook(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, ch
 	if !memCfg.Epistemic.AmbientExtraction.Enabled {
 		return
 	}
+	// Raw-response retention: the (prompt, rawBody) pair per classifier call,
+	// written to the memory data dir (gitignored). Training/calibration data
+	// for the judge lane; nil when no data dir. Raw conversation text — never
+	// enters the repo.
+	var rawHook func(prompt, rawBody string)
+	if dataDir := memoryMgr.DataDir(); dataDir != "" {
+		rw := &rawResponseWriter{path: filepath.Join(dataDir, "raw_responses.jsonl"), log: logger}
+		rawHook = rw.write
+	}
 	extractor := memory.NewAmbientExtractor(memory.AmbientExtractorConfig{
-		Manager:    memoryMgr,
-		Classifier: newAmbientClassifierAdapter(chatter),
-		Logger:     logger.With("component", "ambient-extractor"),
+		Manager:         memoryMgr,
+		Classifier:      newAmbientClassifierAdapter(chatter),
+		Logger:          logger.With("component", "ambient-extractor"),
+		RawResponseHook: rawHook,
 	})
+	// Calibration log: rejected ambient candidates land in the memory data
+	// dir. Nil (no data dir) = logging disabled; never blocks extraction.
+	var rejectedLogger *agent.RejectedCandidateLogger
+	if dataDir := memoryMgr.DataDir(); dataDir != "" {
+		rejectedLogger = agent.NewRejectedCandidateLogger(dataDir, logger)
+	}
 	hook := agent.NewEpistemicHook(agent.EpistemicHookConfig{
-		Cfg:       memCfg.Epistemic,
-		Extractor: extractor,
-		Logger:    logger.With("component", "epistemic-hook"),
+		Cfg:            memCfg.Epistemic,
+		Extractor:      extractor,
+		Logger:         logger.With("component", "epistemic-hook"),
+		RejectedLogger: rejectedLogger,
 	})
 	agentLoop.SetEpistemicHook(hook)
 	logger.Info("epistemic hook wired",
@@ -264,4 +286,46 @@ func wireHTTPHooks(agentLoop *agent.AgentLoop, cfg config.Config, bus *bus.Messa
 		"count", wired,
 		"total_configured", len(cfg.Hooks.HTTP),
 	)
+}
+
+// rawResponseWriter appends (prompt, response) pairs to a JSONL file.
+// Write errors disable the writer after one warning (best-effort).
+type rawResponseWriter struct {
+	mu   sync.Mutex
+	path string
+	log  *slog.Logger
+	dead bool
+}
+
+type rawResponseRecord struct {
+	TS       string `json:"ts"`
+	Prompt   string `json:"prompt"`
+	Response string `json:"response"`
+}
+
+func (w *rawResponseWriter) write(prompt, rawBody string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.dead {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(w.path), 0o755); err != nil {
+		w.dead = true
+		w.log.Warn("raw-response logging disabled (mkdir)", "error", err)
+		return
+	}
+	f, err := os.OpenFile(w.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		w.dead = true
+		w.log.Warn("raw-response logging disabled (open)", "error", err)
+		return
+	}
+	rec := rawResponseRecord{TS: time.Now().UTC().Format(time.RFC3339), Prompt: prompt, Response: rawBody}
+	if err := json.NewEncoder(f).Encode(rec); err != nil {
+		w.dead = true
+		w.log.Warn("raw-response logging disabled (encode)", "error", err)
+	}
+	if err := f.Close(); err != nil {
+		w.log.Warn("raw-response close failed", "error", err)
+	}
 }

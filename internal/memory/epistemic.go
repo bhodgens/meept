@@ -339,6 +339,7 @@ func (m *Manager) PromoteClaim(ctx context.Context, claimID string) error {
 	if asString(mem.Metadata["status"]) != string(ClaimStatusAuto) {
 		return fmt.Errorf("claim %s is not auto (status=%q)", claimID, mem.Metadata["status"])
 	}
+	m.logCalibration(ctx, claimID, "promote", mem)
 	return m.updateMetadataField(ctx, claimID, "status", string(ClaimStatusPromoted))
 }
 
@@ -351,6 +352,7 @@ func (m *Manager) RejectClaim(ctx context.Context, claimID string) error {
 	if mem.Type != MemoryTypeClaim {
 		return fmt.Errorf("memory %s is type %s, not claim", claimID, mem.Type)
 	}
+	m.logCalibration(ctx, claimID, "reject", mem)
 	return m.updateMetadataField(ctx, claimID, "status", string(ClaimStatusRejected))
 }
 
@@ -765,3 +767,15 @@ func generateAuditID() string {
 
 // Suppress unused-import warnings until later tasks wire these into use.
 var _ = context.Background
+
+// logCalibration records a promote/reject verdict for the confidence
+// calibration dataset. Best-effort: calibration never fails the transition.
+func (m *Manager) logCalibration(ctx context.Context, claimID, verdict string, mem *Memory) {
+	m.mu.RLock()
+	cal := m.calibration
+	m.mu.RUnlock()
+	if cal == nil {
+		return
+	}
+	cal.LogVerdict(ctx, claimID, verdict, mem)
+}

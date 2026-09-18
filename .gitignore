@@ -112,3 +112,13 @@ tools/classifier-eval/silver_adjudication_rows.json
 tools/classifier-eval/silver_adjudication_data.json
 # gold-promoted replay corpus (verbatim transcript text, adjudicated)
 tools/classifier-eval/replay-gold.local.json5
+# any renamed/derived local variant of the private corpora and their
+# working files, including inside the re-included results tree (the
+# `!results/**` rules above re-open that directory, so this rule must
+# come after them to win; legitimate tracked fixtures are not *.local.*)
+tools/classifier-eval/**/*.local.json5
+
+# memory calibration artifacts (raw conversation text — never commit)
+rejected_candidates.jsonl
+claim_verdicts.jsonl
+raw_responses.jsonl

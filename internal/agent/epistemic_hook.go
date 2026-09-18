@@ -22,23 +22,29 @@ type EpistemicHookConfig struct {
 	Cfg       config.EpistemicConfig
 	Extractor AmbientExtractorInterface
 	Logger    *slog.Logger
+	// RejectedLogger, when non-nil, records every candidate the confidence/
+	// category/max gates drop — the calibration population for the judge
+	// lane. Nil = logging disabled.
+	RejectedLogger *RejectedCandidateLogger
 }
 
 // EpistemicHook is the post-turn ambient-extraction hook (Path B). It is
 // gated entirely by EpistemicConfig.AmbientExtraction.Enabled and the
 // ExcludeIntents filter.
 type EpistemicHook struct {
-	cfg       config.EpistemicConfig
-	extractor AmbientExtractorInterface
-	logger    *slog.Logger
+	cfg            config.EpistemicConfig
+	extractor      AmbientExtractorInterface
+	logger         *slog.Logger
+	rejectedLogger *RejectedCandidateLogger
 }
 
 // NewEpistemicHook constructs a hook from the given configuration.
 func NewEpistemicHook(cfg EpistemicHookConfig) *EpistemicHook {
 	h := &EpistemicHook{
-		cfg:       cfg.Cfg,
-		extractor: cfg.Extractor,
-		logger:    cfg.Logger,
+		cfg:            cfg.Cfg,
+		extractor:      cfg.Extractor,
+		logger:         cfg.Logger,
+		rejectedLogger: cfg.RejectedLogger,
 	}
 	if h.logger == nil {
 		h.logger = slog.Default()
@@ -76,7 +82,22 @@ func (h *EpistemicHook) AfterTurn(ctx context.Context, intent string, messages [
 		h.logger.Warn("epistemic hook extract failed", "error", err, "intent", intent)
 		return nil, nil
 	}
-	candidates = filterAmbientCandidates(candidates, h.cfg.AmbientExtraction)
+	threshold := h.cfg.AmbientExtraction.ConfidenceThreshold
+	if threshold <= 0 {
+		threshold = 0.7 // spec default (mirrors filterAmbientCandidates)
+	}
+	maxPerTurn := h.cfg.AmbientExtraction.MaxPerTurn
+	if maxPerTurn <= 0 {
+		maxPerTurn = 3 // spec default
+	}
+	excludedCat := make(map[string]struct{}, len(h.cfg.AmbientExtraction.ExcludeCategories))
+	for _, c := range h.cfg.AmbientExtraction.ExcludeCategories {
+		excludedCat[c] = struct{}{}
+	}
+	candidates, rejected := splitFiltered(candidates, threshold, excludedCat, maxPerTurn)
+	if h.rejectedLogger != nil {
+		h.rejectedLogger.LogRejected(intent, threshold, rejected)
+	}
 	if len(candidates) == 0 {
 		return nil, nil
 	}
@@ -112,37 +133,7 @@ func normalizeIntentName(s string) string {
 	return strings.ToLower(s)
 }
 
-// filterAmbientCandidates applies the ConfidenceThreshold, ExcludeCategories,
-// and MaxPerTurn gates from AmbientExtractionConfig.
-func filterAmbientCandidates(in []memory.AmbientCandidate, cfg config.AmbientExtractionConfig) []memory.AmbientCandidate {
-	if len(in) == 0 {
-		return nil
-	}
-	max := cfg.MaxPerTurn
-	if max <= 0 {
-		max = 3 // spec default
-	}
-	threshold := cfg.ConfidenceThreshold
-	if threshold <= 0 {
-		threshold = 0.7 // spec default
-	}
-	excludedCat := make(map[string]struct{}, len(cfg.ExcludeCategories))
-	for _, c := range cfg.ExcludeCategories {
-		excludedCat[c] = struct{}{}
-	}
+// intentExcluded reports whether the given intent is in the exclude list.
+// The comparison is case-insensitive.
 
-	out := make([]memory.AmbientCandidate, 0, len(in))
-	for _, c := range in {
-		if c.Confidence < threshold {
-			continue
-		}
-		if _, skip := excludedCat[c.Category]; skip {
-			continue
-		}
-		out = append(out, c)
-		if len(out) >= max {
-			break
-		}
-	}
-	return out
-}
+// normalizeIntentName lowercases and trims for comparison.

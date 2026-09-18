@@ -106,6 +106,10 @@ type Manager struct {
 	epistemicCtx    context.Context
 	epistemicCancel context.CancelFunc
 
+	// CalibrationLogger records promote/reject verdicts on auto-claims
+	// (confidence calibration dataset). Nil = disabled.
+	calibration *CalibrationLogger
+
 	// DualStore reference for cluster-aware routing (Phase 3 dual-DB).
 	// When non-nil, the manager can publish local memory writes to gossip
 	// peers via the DualStore's GossipPublisher. The existing storeViaSQLite
@@ -2079,6 +2083,15 @@ func (m *Manager) Embedder() EmbeddingProvider {
 // LLM returns the manager's chat client (consolidation summarization +
 // distill summarization), or nil if none is set. Exposed for wiring tests
 // that assert which client the daemon construction site preferred.
+// DataDir returns the manager's resolved data directory. Used by callers
+// that need to co-locate derived artifacts (e.g. the rejected-candidate
+// calibration log) with the memory stores.
+func (m *Manager) DataDir() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.dataDir
+}
+
 func (m *Manager) LLM() llm.Chatter {
 	return m.llm
 }
@@ -2093,6 +2106,21 @@ func (m *Manager) SetEpistemicDetector(d *EpistemicDetector) {
 	m.mu.Lock()
 	m.detector = d
 	m.mu.Unlock()
+}
+
+// SetCalibrationLogger wires the claim-verdict calibration logger. Nil-safe
+// (a nil logger disables calibration logging).
+func (m *Manager) SetCalibrationLogger(c *CalibrationLogger) {
+	m.mu.Lock()
+	m.calibration = c
+	m.mu.Unlock()
+}
+
+// CalibrationLogger returns the configured calibration logger, or nil.
+func (m *Manager) CalibrationLogger() *CalibrationLogger {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.calibration
 }
 
 // EpistemicDetector returns the configured detector, or nil if none is set.
