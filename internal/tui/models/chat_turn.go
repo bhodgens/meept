@@ -278,13 +278,40 @@ func (m *ChatModel) dropPendingTurn(turnID string) {
 	}
 }
 
+// clearPendingTurns unregisters every pending turn (F-C). Called when the
+// view discards its conversation identity (ctrl+l, Reset): the turns were
+// submitted under the OLD conversation, so their terminal events would
+// become cross-session deliveries that silently discard the real result.
+// Turn ids are removed from the router and the pending list, and buffered
+// early terminals are dropped — a terminal arriving after the reset is a
+// clean no-op, not a misrouted render.
+func (m *ChatModel) clearPendingTurns() {
+	for _, pt := range m.pendingTurns {
+		m.turns.remove(pt.turnID)
+	}
+	m.pendingTurns = nil
+	m.earlyTerminals = newTurnRouterEarlyBuffer()
+}
+
+// earlyTerminalBufferMax is the cap on buffered early terminals. In
+// normal operation the buffer holds at most a couple of in-flight races;
+// the cap exists so turn ids that never register (e.g. task_completed_relay
+// events for fresh ids submitted by another client) cannot grow it
+// unboundedly. Oldest entries are evicted first.
+const earlyTerminalBufferMax = 64
+
 // earlyTerminalBuffer retains turn.terminal events that arrive BEFORE the
 // ack registers the turn (F19): the submit RPC round-trip and the WS
 // event race, so a fast daemon can deliver the terminal first. Buffered
-// events are consumed on ack registration — never dropped.
+// events are consumed on ack registration — never dropped. The map is
+// capped (F-B): insert order is tracked and the OLDEST entry is evicted
+// when the cap is hit, so ids that never register cannot grow it
+// unboundedly.
 type turnRouterEarlyBuffer struct {
 	mu     sync.Mutex
 	events map[string]turnTerminalMsg
+	// order preserves insertion order for oldest-first eviction.
+	order []string
 }
 
 // newTurnRouterEarlyBuffer creates the ephemeral early-event buffer.
@@ -292,7 +319,8 @@ func newTurnRouterEarlyBuffer() *turnRouterEarlyBuffer {
 	return &turnRouterEarlyBuffer{events: make(map[string]turnTerminalMsg)}
 }
 
-// buffer records a terminal event for a turn id not (yet) tracked.
+// buffer records a terminal event for a turn id not (yet) tracked. When
+// the buffer is at capacity the oldest entry is evicted (F-B).
 func (b *turnRouterEarlyBuffer) buffer(turnID string, msg turnTerminalMsg) {
 	if turnID == "" {
 		return
@@ -301,6 +329,14 @@ func (b *turnRouterEarlyBuffer) buffer(turnID string, msg turnTerminalMsg) {
 	defer b.mu.Unlock()
 	if b.events == nil {
 		b.events = make(map[string]turnTerminalMsg)
+	}
+	if _, exists := b.events[turnID]; !exists {
+		b.order = append(b.order, turnID)
+		for len(b.order) > earlyTerminalBufferMax {
+			oldest := b.order[0]
+			b.order = b.order[1:]
+			delete(b.events, oldest)
+		}
 	}
 	b.events[turnID] = msg
 }
@@ -312,6 +348,12 @@ func (b *turnRouterEarlyBuffer) take(turnID string) (turnTerminalMsg, bool) {
 	msg, ok := b.events[turnID]
 	if ok {
 		delete(b.events, turnID)
+		for i, id := range b.order {
+			if id == turnID {
+				b.order = append(b.order[:i], b.order[i+1:]...)
+				break
+			}
+		}
 	}
 	return msg, ok
 }

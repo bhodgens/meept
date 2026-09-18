@@ -1156,9 +1156,15 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		case "ctrl+l":
 			// Clear chat history
 			m.messages = []ChatMessage{}
+			// F-C: the turns were submitted under the old conversation —
+			// forget them so a later terminal event cannot become a
+			// cross-session delivery that silently discards the result.
+			m.clearPendingTurns()
 			m.conversationID = generateConversationID()
 			m.pendingMsgIdx = -1
 			m.selectedMsgIdx = -1
+			m.loading = false
+			m.progressState = nil
 			m.updateViewport()
 			return nil
 
@@ -2532,6 +2538,10 @@ func (m *ChatModel) ClearSlashAutocompletePopup() {
 // Reset clears the chat state.
 func (m *ChatModel) Reset() {
 	m.messages = []ChatMessage{}
+	// F-C: the turns were submitted under the old conversation — forget
+	// them so a later terminal event cannot become a cross-session
+	// delivery that silently discards the result.
+	m.clearPendingTurns()
 	m.conversationID = generateConversationID()
 	m.sessionID = ""
 	m.sessionDescription = ""
@@ -2541,6 +2551,8 @@ func (m *ChatModel) Reset() {
 	m.selectedMsgIdx = -1
 	m.historyIdx = -1
 	m.savedInput = ""
+	m.loading = false
+	m.progressState = nil
 	m.closeFindBar()
 	if m.history != nil {
 		m.history.Reset("")
