@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/client_config_parse.dart';
 import '../models/api_models.dart';
 import '../models/ws_events.dart' show TurnTerminalEvent;
 import '../services/sdk_client.dart';
@@ -124,10 +125,17 @@ Map<String, dynamic>? _tryParseConfirmationJson(String text) {
 /// Maximum number of messages to keep in memory
 const int _maxMessages = 500;
 
-/// Liveness timeout for pending async turns (async-turn-migration leaf 05):
-/// a pending turn with no terminal event for this long is marked stalled.
-/// Stalled is NOT terminal — a late turn.terminal event still renders the
-/// reply and clears the stalled state. Parity with the TUI leaf.
+/// Default liveness timeout for pending async turns (async-turn-migration
+/// leaf 05): a pending turn with no terminal event for this long is marked
+/// stalled. Stalled is NOT terminal — a late turn.terminal event still
+/// renders the reply and clears the stalled state.
+///
+/// Source of truth: `chat.liveness_timeout_seconds` in client.json5
+/// (internal/tui/config.go ChatConfig, default 120, explicit 0 disables the
+/// stalled check — parity with the TUI at internal/tui/models/turn.go). The
+/// configured value is fetched best-effort from GET /api/v1/config/client
+/// by [ChatNotifier._loadLivenessTimeout]; this constant is the fallback
+/// while the fetch is in flight or when the daemon is unreachable.
 const Duration kTurnLivenessTimeout = Duration(seconds: 120);
 
 const _unset = Object();
@@ -288,10 +296,57 @@ class ChatNotifier extends StateNotifier<ChatState> {
     required this.sessionId,
   }) : super(const ChatState()) {
     _initWebSocket();
+    // Fetch the configured stalled-turn window from client.json5 (TUI
+    // parity); best-effort — failures keep the built-in default.
+    _loadLivenessTimeout();
     // Auto-load messages on creation — the family provider is created
     // on first watch, so this happens when the UI first references the
     // session's chat state.
     _autoLoadMessages();
+  }
+
+  /// The stalled-turn window in effect, in seconds. Mirrors
+  /// `chat.liveness_timeout_seconds` from client.json5 (fetched via
+  /// GET /api/v1/config/client); 0 disables the stalled check (TUI
+  /// semantics), negative means "fetch has not resolved yet".
+  int _livenessTimeoutSeconds = -1;
+
+  /// Fetch `chat.liveness_timeout_seconds` from GET /api/v1/config/client.
+  /// Best-effort: any failure (offline, daemon older than the route,
+  /// malformed JSON5) silently keeps [kTurnLivenessTimeout].
+  Future<void> _loadLivenessTimeout() async {
+    try {
+      final raw = await sdkClient.getClientConfig();
+      if (_disposed) return;
+      final decoded = parseClientConfig(raw);
+      final chat = decoded['chat'];
+      if (chat is! Map) return;
+      final v = chat['liveness_timeout_seconds'];
+      if (v is int && v >= 0) {
+        _livenessTimeoutSeconds = v;
+      }
+    } catch (_) {
+      // Keep the default — liveness is an optimization, not a gate.
+    }
+  }
+
+  /// The liveness timeout currently in effect: the configured
+  /// `chat.liveness_timeout_seconds` once the client.json5 fetch resolves
+  /// (0 = disabled, per TUI semantics), else the [kTurnLivenessTimeout]
+  /// fallback.
+  Duration get _effectiveLivenessTimeout {
+    final s = _livenessTimeoutSeconds;
+    if (s < 0) return kTurnLivenessTimeout;
+    if (s == 0) return const Duration(days: 365); // effectively disabled
+    return Duration(seconds: s);
+  }
+
+  /// Arm the per-turn liveness timer using the effective timeout.
+  void _armLivenessTimer(String turnId) {
+    if (_livenessTimeoutSeconds == 0) return; // disabled by config
+    _livenessTimers[turnId] = Timer(_effectiveLivenessTimeout, () {
+      _markStalled(turnId);
+    });
   }
 
   final SdkApiClient sdkClient;
@@ -303,7 +358,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
   StreamSubscription<Map<String, dynamic>>? _turnTerminalSubscription;
 
   /// Per-pending-turn liveness timers (leaf 05): fire once per turn after
-  /// [kTurnLivenessTimeout] to mark the turn stalled (NOT terminal).
+  /// the effective liveness timeout (see [_armLivenessTimer]) to mark the
+  /// turn stalled (NOT terminal).
   final Map<String, Timer> _livenessTimers = {};
   int _loadGeneration = 0;
 
@@ -670,9 +726,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // Liveness watchdog: mark the turn stalled after the timeout. A
       // stalled turn is NOT terminal — a late terminal event still renders
       // the reply and clears the stalled state.
-      _livenessTimers[ack.turnId] = Timer(kTurnLivenessTimeout, () {
-        _markStalled(ack.turnId);
-      });
+      _armLivenessTimer(ack.turnId);
       // F19: a terminal event that raced the ack is applied immediately.
       _consumeEarlyTerminal(ack.turnId);
       return ack;
@@ -723,9 +777,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     final turn = state.pendingTurns[turnId];
     if (turn == null) return;
     _livenessTimers.remove(turnId)?.cancel();
-    _livenessTimers[turnId] = Timer(kTurnLivenessTimeout, () {
-      _markStalled(turnId);
-    });
+    _armLivenessTimer(turnId);
     final turns = Map<String, PendingTurn>.from(state.pendingTurns);
     turns[turnId] = turn.copyWith(
       status: PendingTurnStatus.progress,
@@ -934,9 +986,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
           );
           final turns = Map<String, PendingTurn>.from(state.pendingTurns);
           turns[ack.turnId] = pending;
-          _livenessTimers[ack.turnId] = Timer(kTurnLivenessTimeout, () {
-            _markStalled(ack.turnId);
-          });
+          _armLivenessTimer(ack.turnId);
           _lastFailedSend = null;
           // F20: copyWith preserves pendingTurns — `turns` already carries
           // the pre-send in-flight turns (copied from state.pendingTurns
