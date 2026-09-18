@@ -4871,11 +4871,25 @@ var timeMeridiemRe = regexp.MustCompile(`\b[0-9]{1,2}(:[0-9]{2})?\s*(am|pm)\b`)
 // tree?" (git noun, no verb match) and "merging"/"rebasing" all read as
 // git-verb-free. Also admits the "uncommitted" prefix the commit stem
 // needs to reach.
+//
+// git-status evidence class (routing-repair acceptance, 2026-09-18): an
+// explicit "git <subcommand>" pair (status, diff, log, show, blame, tag,
+// fetch, remote, config, add, restore, switch, init, clone) is git
+// OPERATION evidence equivalent to an action verb — the acceptance rig
+// scored verdict=git @0.95 on "run git status --porcelain…" and the
+// agreement veto killed the correct verdict because "status" carried no
+// action-verb stem. The pair must be adjacent ("git status", not "the
+// status of git") to stay noun-tight; standalone "status"/"diff"/"log"
+// still match nothing ("what is my status", "log these hours").
+var gitSubcommandRe = regexp.MustCompile(
+	`\bgit (?:status|diff|log|show|blame|tag|fetch|remote|config|add|restore|switch|init|clone)\b`)
+
 var gitVerbRe = regexp.MustCompile(
 	`\b(?:un)?(?:commit|push|pull|merg(?:e|es|ed|ing)|branch(?:es|ed|ing)?|rebas(?:e|es|ed|ing)|revert|checkout|stash|cherry-pick)(?:s|es|ed|d|ing|ted|ting)?\b`)
 
 func inputContainsGitVerb(input string) bool {
-	return gitVerbRe.MatchString(strings.ToLower(input))
+	return gitVerbRe.MatchString(strings.ToLower(input)) ||
+		gitSubcommandRe.MatchString(strings.ToLower(input))
 }
 
 // leadingClauseSepRe matches the first clause boundary: a comma, semicolon,
