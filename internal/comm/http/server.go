@@ -526,11 +526,20 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 		topics := []string{"*", "agent.*", "agent.*.*", "task.*", "task.*.*", "step.*", "step.*.*", "orchestrator.*",
 			"chat.*", "chat.*.*", "tool.*", "llm.*", "review.*",
 			"queue.*", "queue.*.*", "plan.*", "plan.*.*",
+			"turn.*",
 			"terminal.*", "daemon.*", "collaboration.*", "pair.*",
-			// Leaf 11 (harness-routed speak): employee.notify carries
-			// detached goal-round notifications. Forwarded as the generic
-			// "event" type — NEVER classified as chat_message (AGENTS.md
-			// invariant: only chat_message/chat.response produce it).
+			// Employee notify (leaf 11, harness-routed speak):
+			// employee.notify carries detached goal-round notifications.
+			// Forwarded as the generic "event" type — NEVER classified as
+			// chat_message (AGENTS.md invariant: only chat_message and
+			// chat.response produce it).
+			//
+			// turn.* (scopes-2 audit HIGH, 2026-09-18): turn lifecycle
+			// events (turn.terminal) are 2-segment topics; the leading "*"
+			// above is single-segment and never matches them
+			// (bus.matchWildcard compares segment counts). Without an
+			// explicit pattern the WS relay drops every terminal event and
+			// HTTP/WS clients (Flutter GUI) hang in pending forever.
 			"employee.*"}
 		for _, topic := range topics {
 			sub := msgBus.Subscribe("http-ws-"+topic, topic)
