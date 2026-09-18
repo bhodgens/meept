@@ -438,9 +438,13 @@ var mediaContextPattern = regexp.MustCompile(`(?i)\b(?:video|videos|youtube|watc
 // the deterministic routing exists specifically because transcript_fetch
 // is the ingest tool for these targets.
 //
-// URL forms match unconditionally; the bare 11-char-ID form additionally
-// requires media-context co-occurrence (H5) so ordinary prose carrying an
-// 11-char word is not hijacked to the analyst before the LLM chain runs.
+// URL forms match unconditionally in this DETECTOR (the raw signal);
+// the GATE that consumes it — mediaGuardVerdict below — applies the
+// media-consumption-operation requirement (AR-2, routing-repair leaf
+// 04): a coding request that merely cites a YouTube URL as fixture/data
+// must fall through to the LLM chain, while "summarize this video
+// <url>" keeps the deterministic analyst route. The bare 11-char-ID
+// form requires media-context co-occurrence (H5) here, unchanged.
 func detectMediaURL(input string) string {
 	if m := mediaURLPattern.FindString(input); m != "" {
 		return m
@@ -450,6 +454,32 @@ func detectMediaURL(input string) string {
 	}
 	return ""
 }
+
+// mediaGuardVerdict reports the media target when the message carries
+// media-CONSUMPTION operation evidence — the condition under which the
+// dispatcher's media guard routes deterministically to the analyst.
+// Operation class, not phrase class: a leading ingest verb (summarize,
+// watch, transcribe, recap) whose object is the media, or an
+// object-anchored transitive construction ("transcript of/for the
+// video", "get the transcript for <url>"). A URL cited as DATA inside
+// a coding/testing request returns "" and the normal chain runs.
+func mediaGuardVerdict(input string) string {
+	target := detectMediaURL(input)
+	if target == "" {
+		return ""
+	}
+	if mediaConsumptionPattern.MatchString(input) {
+		return target
+	}
+	return ""
+}
+
+// mediaConsumptionPattern is the media-consumption OPERATION evidence
+// consumed by mediaGuardVerdict (AR-2, routing-repair leaf 04).
+var mediaConsumptionPattern = regexp.MustCompile(`(?i)^\s*(?:please\s+)?(?:can|could|would)?\s*(?:you\s+)?(?:please\s+)?(?:summar\w*|transcribe|transcribing|watch\w*|rewatch|recap\w*|vlog)\b|` +
+	`\btranscripts?\b(?:\s+(?:of|for))?\s+(?:this |that |the )?(?:video|clip|recording|youtube)|` +
+	`\b(?:get|fetch|pull|grab|obtain)\b[^.!?]{0,40}\b(?:transcript|subtitles?|captions?)\b|` +
+	`\bsubtitles?\s+(?:for|of)\b`)
 
 // IntentClassifier is an interface for classifying intents.
 type IntentClassifier interface {
@@ -1136,10 +1166,54 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		}
 	}
 
-	// 5. Check for compound (multi-intent) requests
+	// 5. Check for compound (multi-intent) requests. This MUST run before
+	// the media-URL guard: a compound-signal message ("summarize the
+	// video <url> and then write the summary into notes.md") is genuine
+	// multi-work; deterministic ingestion would drop the second intent
+	// (routing-repair leaf 04, AR-2).
 	multiIntent := d.classifyMultiIntent(ctx, resolvedInput, memCtx)
 	if multiIntent.IsCompound {
 		return d.routeCompoundWithModel(ctx, multiIntent, input, conversationID, parseResult.Directive)
+	}
+
+	// 4.5b. Media-URL guard: a media-CONSUMPTION request carrying a
+	// YouTube URL (or a context-qualified bare video ID) is a
+	// media-ingest request regardless of how a small model reads the
+	// surrounding words — "summarize this video" is analysis, not code.
+	// Deterministic structural signal, checked before the LLM
+	// classifier: the analyst agent holds the transcript_fetch grant,
+	// and the coder (the LLM's habitual choice for anything tool-shaped)
+	// does not. mediaGuardVerdict demands media-consumption operation
+	// evidence (AR-2), so a coding request that merely cites a URL as
+	// fixture/data falls through to the chain below.
+	// The SAME gate also runs inside classifyIntent (see above), which
+	// the clarification-resume path calls directly; here it runs BEFORE
+	// compound detection so a compound-signal message is never swallowed
+	// into single-intent ingestion.
+	if mediaTarget := mediaGuardVerdict(resolvedInput); mediaTarget != "" {
+		d.recordTotalDispatch()
+		d.recordClassificationMethod("media_url_guard")
+		d.recordAgent(config.AgentIDAnalyst)
+		d.recordIntentType(string(IntentAnalyze))
+		mediaIntent := &Intent{
+			Type:       string(IntentAnalyze),
+			Confidence: 0.9,
+			AgentType:  config.AgentIDAnalyst,
+			Summary:    extractSummary(input),
+			Method:     "media_url_guard",
+		}
+		mediaIntent.SuggestedMode = suggestMode(IntentAnalyze, mediaIntent.TrueAnalysis, input)
+		if d.sessionTracker != nil {
+			d.sessionTracker.RecordIntent(sessionID, mediaIntent, mediaIntent.AgentType)
+		}
+		return &DispatchResult{
+			AgentID:       mediaIntent.AgentType,
+			Intent:        mediaIntent,
+			MemoryContext: memCtx.Results,
+			OriginalInput: input,
+			Parts:         parts,
+			SuggestedMode: mediaIntent.SuggestedMode,
+		}, nil
 	}
 
 	// 4. Classify primary intent
@@ -1324,14 +1398,18 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		}, nil
 	}
 
-	// Media-URL guard: a message carrying a YouTube URL (or a bare video
-	// ID) is a media-ingest request regardless of how a small model reads
-	// the surrounding words — "summarize this video" is analysis, not
-	// code. Deterministic structural signal, checked before the LLM
-	// classifier for the same reason as the short-message guard above:
-	// the analyst agent holds the transcript_fetch grant, and the coder
-	// (the LLM's habitual choice for anything tool-shaped) does not.
-	if mediaTarget := detectMediaURL(input); mediaTarget != "" {
+	// Media-URL guard: a media-CONSUMPTION request carrying a YouTube URL
+	// (or a context-qualified bare video ID) is a media-ingest request
+	// regardless of how a small model reads the surrounding words —
+	// "summarize this video" is analysis, not code. Deterministic
+	// structural signal, checked before the LLM classifier: the analyst
+	// agent holds the transcript_fetch grant, and the coder (the LLM's
+	// habitual choice for anything tool-shaped) does not.
+	// (AR-2, routing-repair leaf 04: mediaGuardVerdict requires
+	// media-consumption operation evidence, so a coding request that
+	// merely cites a URL as fixture/data falls through to the chain
+	// below instead of being hijacked to the analyst.)
+	if mediaTarget := mediaGuardVerdict(input); mediaTarget != "" {
 		d.recordClassificationMethod("media_url_guard")
 		d.recordAgent(config.AgentIDAnalyst)
 		d.recordIntentType(string(IntentAnalyze))
@@ -1511,7 +1589,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				}
 				return d.applyContextWeighting(recall, memCtx, input), nil
 			} else if (intent.Type == string(IntentPlatform) || (intent.Type == string(IntentSchedule) && !hasTimeSignal(input))) &&
-				hasLeadingImperativeVerb(input) {
+				(hasLeadingImperativeVerb(input) || isInterrogativeNonImperativeQuestion(input)) {
 				d.logger.Info("Classifier verdict overridden by imperative execution phrasing",
 					"verdict", intent.Type,
 					"llm_confidence", intent.Confidence,
@@ -3309,6 +3387,18 @@ func (c *KeywordClassifier) Classify(ctx context.Context, input string, memCtx *
 	for _, p := range keywordPatterns {
 		for _, kw := range p.keywords {
 			if strings.Contains(lower, kw) {
+				// Platform lane demotion (I11, routing-repair leaf 04):
+				// the platform row carries the bare informational phrase
+				// "help me understand", which pulled "help me understand
+				// how X works" onto the roster-dump lane. Platform intent
+				// is QUESTIONS ABOUT THE PLATFORM; an informational help
+				// request about a domain topic is ANALYZE material. The
+				// informationalHelpRe match is the shared operation rule,
+				// not a sentence exception: any input asking to
+				// understand a topic skips ONLY the platform row.
+				if p.intentType == string(IntentPlatform) && informationalHelpRe.MatchString(lower) {
+					continue
+				}
 				// Score based on keyword length and position
 				score := p.confidence * (float64(len(kw)) / float64(len(input)+1))
 				if strings.HasPrefix(lower, kw) {
@@ -4204,6 +4294,42 @@ const (
 // isShortSimpleMessage returns true if the input is too short or too simple
 // to warrant more than a single chat agent response.
 // Guards against tiny-model over-classification (Issues 0006, 0029, 0036).
+
+// arithmeticExprRe matches a bounded arithmetic EXPRESSION: digits,
+// decimal points, parentheses, whitespace and operator symbols only —
+// at least one digit and at least one operator. It is a shape test for
+// routing only; the expression is never evaluated, so no arbitrary
+// input reaches any evaluator. (AR-1: the previous check read ANY
+// +-*-/ anywhere in prose as arithmetic, so "what is the bug in
+// src/parser.go?" matched "what is " + "/" and was short-circuited to
+// chat before any classifier ran.)
+var arithmeticExprRe = regexp.MustCompile(`^[0-9().\s+\-*/xX]+$`)
+
+// isArithmeticExpression reports whether s is a bare arithmetic
+// expression ("2+2", "3.5 * 4", "(2 + 3) / 7"). Requires at least one
+// digit and one operator so ".", "()" or prose cannot match, and the
+// character class leaves no room for identifiers, paths or code.
+func isArithmeticExpression(s string) bool {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "?!.= ")
+	if s == "" {
+		return false
+	}
+	if !arithmeticExprRe.MatchString(s) {
+		return false
+	}
+	hasDigit, hasOp := false, false
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case r == '+' || r == '-' || r == '*' || r == '/' || r == 'x' || r == 'X':
+			hasOp = true
+		}
+	}
+	return hasDigit && hasOp
+}
+
 func isShortSimpleMessage(input string) bool {
 	trimmed := strings.TrimSpace(input)
 	if len(trimmed) == 0 {
@@ -4211,9 +4337,18 @@ func isShortSimpleMessage(input string) bool {
 	}
 	lower := strings.ToLower(trimmed)
 
-	// Pure arithmetic or math expressions
-	if strings.Contains(lower, "what is ") && (strings.Contains(lower, "+") || strings.Contains(lower, "-") || strings.Contains(lower, "*") || strings.Contains(lower, "/")) {
+	// Pure arithmetic or math expressions: an arithmetic EXPRESSION —
+	// operands joined by operators — not operator punctuation anywhere
+	// in prose (AR-1, routing-repair leaf 04). A question carrying a
+	// source path ("what is the bug in src/parser.go?") is different
+	// from "what is 144/12?" and must reach classification.
+	if isArithmeticExpression(lower) {
 		return true
+	}
+	for _, prefix := range []string{"what is ", "what's ", "what are "} {
+		if strings.HasPrefix(lower, prefix) && isArithmeticExpression(strings.TrimPrefix(lower, prefix)) {
+			return true
+		}
 	}
 
 	// Very short messages (under 10 chars) are trivially chat unless they
@@ -4366,9 +4501,12 @@ func hasLeadingImperativeVerb(input string) bool {
 		return false
 	}
 	// Treat leading polite/clarifying lead-ins ("please create…",
-	// "hey, create…") as still imperative.
+	// "hey, create…") as still imperative. Fields are compared with
+	// punctuation stripped (AR-4, routing-repair leaf 04): the raw
+	// field "hey," (comma attached) missed the bare-word case and the
+	// imperative recognition silently died.
 	for _, f := range fields {
-		switch f {
+		switch strings.Trim(f, ",.!?:;\"'") {
 		case "please", "hey", "ok", "okay", "now", "first", "then", ",":
 			continue
 		}
@@ -4449,7 +4587,9 @@ func hasImperativeHead(input string) bool {
 	fields := strings.Fields(trimmed)
 	headIdx := -1
 	for i, f := range fields {
-		switch f {
+		// Punctuation-stripped comparison (AR-4): "hey," and "ok:" are
+		// the same lead-ins as their bare forms.
+		switch strings.Trim(f, ",.!?:;\"'") {
 		case "please", "hey", "ok", "okay", "now", "first", "then", ",":
 			continue
 		}
@@ -4485,7 +4625,8 @@ var recallLeadInPronouns = map[string]bool{
 func hasPronounObjectImperativeHead(input string) bool {
 	fields := strings.Fields(strings.ToLower(strings.TrimSpace(input)))
 	for i, f := range fields {
-		switch f {
+		// Punctuation-stripped comparison (AR-4).
+		switch strings.Trim(f, ",.!?:;\"'") {
 		case "please", "hey", "ok", "okay", "now", "first", "then", ",":
 			continue
 		}
@@ -4606,14 +4747,27 @@ func isSecondPersonWorkRecall(input string) bool {
 // e2e run 8 (2026-09-10): the 8B scored "create a file named hello.txt …"
 // as schedule @0.8 with zero time references; a schedule classification
 // without any of these signals is a classifier mistake.
+//
+// Evidence class, not substring presence (AR-3, routing-repair leaf 04):
+// a locative preposition ("the parse error at src/parser.go") does NOT
+// express timing, and a noun naming an ARTIFACT ("a reminder component
+// in React") does not request scheduling. So:
+//   - " at " requires a digit-clock on at least one side ("at 3pm",
+//     "meeting at 5") — the clock IS the time evidence;
+//   - bare clock forms (3pm, 7:30 am) match via timeMeridiemRe;
+//   - "reminder(s)" requires a scheduling verb within a short window
+//     before it (remind/set/schedule/create… for me) — an artifact noun
+//     ("Create a reminder component in React") is not evidence;
+//   - weekdays require "next"/"this"/"on" anchoring or a clock ("on
+//     monday", "next friday") — a bare weekday inside a path or prose
+//     token is not timing.
 func hasTimeSignal(input string) bool {
 	lower := strings.ToLower(input)
 	for _, signal := range []string{
-		"remind", "reminder", "alarm", "timer", "tomorrow", "today at",
+		"remind me", "reminder for me", "set a reminder", "schedule ",
+		"alarm", "timer", "tomorrow", "today at", "in minutes",
+		"in hours", "o'clock", "oclock", "deadline",
 		"next week", "next month", "every day", "daily", "weekly",
-		" at ", "schedule", "calendar", "cron", "in minutes", "in hours",
-		"o'clock", "oclock", "monday", "tuesday", "wednesday",
-		"thursday", "friday", "saturday", "sunday", "later", "deadline",
 	} {
 		if strings.Contains(lower, signal) {
 			return true
@@ -4622,6 +4776,69 @@ func hasTimeSignal(input string) bool {
 	// "am"/"pm" need a digit prefix and word boundary: "name" contains "am".
 	if timeMeridiemRe.MatchString(lower) {
 		return true
+	}
+	// " at " is temporal only when anchored to a clock: a digit on at
+	// least one side ("at 3pm", "meeting at 5", "3pm at the office").
+	// A locative "at src/parser.go" or "error at line 12" is position,
+	// not timing (AR-3).
+	if timeAtClockRe.MatchString(lower) {
+		return true
+	}
+	// Weekdays anchored by "next"/"this"/"on" (or followed by " at <n>"):
+	// "on monday", "next friday", "monday at 5". A bare weekday inside a
+	// filename or prose ("satellite", no — word-bounded) is not timing.
+	if anchoredWeekdayRe.MatchString(lower) {
+		return true
+	}
+	// "remind"/"reminder" scheduling VERB forms already matched above;
+	// the artifact noun "reminder(s)" alone is NOT a time signal.
+	return false
+}
+
+// timeAtClockRe matches " at " anchored to a clock: a digit or
+// meridiem-terminated time on at least one side of the preposition
+// ("at 3pm", "meeting at 5", "3pm at the office"). Pure locative uses
+// ("at src/parser.go", "at line 12") have no digit-clock head and do
+// not match.
+var timeAtClockRe = regexp.MustCompile(
+	`(?:\b[0-9]{1,2}(:[0-9]{2})?\s*(?:am|pm)?\s*at\b)|(?:\bat\s+[0-9]{1,2}(:[0-9]{2})?\s*(?:am|pm)\b)|(?:\bat\s+[0-9]{1,2}\b)`)
+
+// anchoredWeekdayRe matches weekday evidence anchored to scheduling
+// usage: "next <day>", "this <day>", "on <day>", or "<day> at <n>".
+var anchoredWeekdayRe = regexp.MustCompile(
+	`\b(?:(?:next|this|on)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b|(?:\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+at\s+[0-9])`)
+
+// interrogativeOpeners is the CLOSED class of wh-words that open a
+// direct question. A question is not an instruction; a platform or
+// time-signal-free schedule verdict on a wh-question is the classifier
+// costume the arbitration discards (AR-3 arm, routing-repair leaf 04:
+// "what is the parse error at src/parser.go line 12" scored schedule
+// @0.9 — the verdict names no executable lane for an interrogative).
+var interrogativeOpeners = map[string]bool{
+	"what": true, "which": true, "where": true, "when": true,
+	"why": true, "who": true, "whom": true, "whose": true, "how": true,
+}
+
+// isInterrogativeNonImperativeQuestion reports whether the input opens
+// with a wh-word (polite lead-ins skipped, punctuation-insensitive) —
+// i.e. it is a QUESTION, not an imperative. Used by the platform/
+// schedule arbitration so an untrusted verdict on a question is
+// discarded like the imperative case, letting the chain continue.
+// Deliberately position-bound: "tell me how the parser works" keeps its
+// verdict because its head is an imperative, not a question.
+func isInterrogativeNonImperativeQuestion(input string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(input))
+	if trimmed == "" {
+		return false
+	}
+	fields := strings.Fields(trimmed)
+	for _, f := range fields {
+		// Normalize punctuation before comparison (AR-4 evidence class).
+		switch strings.Trim(f, ",.!?:;\"'") {
+		case "please", "hey", "ok", "okay", "now", "first", "then":
+			continue
+		}
+		return interrogativeOpeners[strings.Trim(f, ",.!?:;\"'")]
 	}
 	return false
 }
@@ -4798,8 +5015,93 @@ func isWorkStatusRecall(input string) bool {
 // heuristicFallback provides targeted keyword-based routing when all other
 // classifiers fail (Issue 0036). Rules are ordered by specificity and
 // confidence to avoid misrouting code tasks to scheduler/committer.
+// reviewRequestRe matches review-OPERATION evidence: a request for a
+// verdict on quality — findings only, nothing modified. Anchored to a
+// review verb + object window so "review the auth module", "check the
+// migration script", and "audit the config" all fire, while
+// "re-view the code" style non-words cannot. The correction-clause and
+// autonomy-clause alternatives are checked FIRST (classifyReviewIntent
+// order) so review-and-correct routes quickplan, not review.
+var reviewRequestRe = regexp.MustCompile(
+	`(?i)\b(?:review|recheck|re-check|audit|verify|validate|check)\b\s+(?:the |this |my |our |all |each )?[a-z][a-z0-9 _./-]{0,60}`)
+
+// correctionClauseRe matches an autonomous-correction clause: the
+// orchestration evidence that upgrades a review request to quickplan
+// ("and correct them as you find them", "fix any issues", "apply the
+// fixes"). Mirrors QuickPlanCuePattern's adjudicated evidence rule.
+var correctionClauseRe = regexp.MustCompile(
+	`(?i)\b(?:and |then |)?(?:correct|fix|repair|apply|resolve|address)\b[^.!?]{0,40}\b(?:them|as you|any|all|the (?:issues|findings|problems|bugs))\b|` +
+		`\bas you (?:find|go)\b|` +
+		`\b(?:fix|correct|address)\s+(?:them|any|all|everything)\b`)
+
+// defectReportRe matches ONE named defect evidence: a defect noun with
+// a pointer to its location ("the nil pointer in handler.go", "a crash
+// on startup", "this panic"). The debug lane's own contract: one named
+// defect, fix follows directly. The bare words "bug"/"error" inside a
+// review request ("for bugs") do NOT constitute a named defect.
+var defectReportRe = regexp.MustCompile(
+	`(?i)\b(?:fix|repair|resolve|debug)\b[^.!?]{0,60}\b(?:the |a |an |this )?(?:nil pointer|segfault|panic|crash|leak|deadlock|race|regression|off-by-one|null pointer|stack overflow|infinite loop)\b|` +
+		`\b(?:nil|null) pointer\b|\bsegfault\b|\bpanics?\b|\bdeadlock\b|\bdata race\b`)
+
+// informationalHelpRe matches an informational help request: "help me
+// understand/explain/learn X" — the speaker wants to understand X, not
+// to introspect the platform. (I11: the platform keyword row's bare
+// "help me understand" pulled these onto the roster-dump lane.)
+var informationalHelpRe = regexp.MustCompile(
+	`(?i)\bhelp (?:me |us )?(?:to )?(?:understand|explain|learn|figure out|make sense of|see why|know why|grasp)\b`)
+
+// docUpdateRe matches a documentation/repository ARTIFACT update: an
+// imperative on a named repo document (README, docs, CHANGELOG, …).
+// The degraded path previously had NO rule for these, so they fell to
+// quickplan fallback — treating a one-file doc edit as undeterminable
+// orchestration (I11 taxonomy: an artifact to change is CODE/WRITE).
+var docUpdateRe = regexp.MustCompile(
+	`(?i)\b(?:update|edit|rewrite|revise|amend|extend|improve|document)\b[^.!?]{0,50}\b(?:the |this |a |an )?(?:readme|changelog|license|contributing|makefile|dockerfile|docs?|documentation|guide|notes)\b`)
+
 func heuristicFallback(input string) *Intent {
 	lower := strings.ToLower(strings.TrimSpace(input))
+
+	// Knowledge-lane arbitration (I11, routing-repair leaf 04): the
+	// degraded path must agree with docs/workflows/intent-routing.md's
+	// output-based taxonomy. Ordered by specificity:
+	//   1. review + correction clause  → quickplan (autonomous execution)
+	//   2. review operation            → review  (verdict only)
+	//   3. one named defect            → debug
+	// Informational "help me understand" is ANALYZE material and is
+	// demoted from the platform keyword row below (keywordPatterns).
+	if reviewRequestRe.MatchString(lower) {
+		if correctionClauseRe.MatchString(lower) {
+			return &Intent{
+				Type:             string(IntentQuickPlan),
+				Confidence:       0.6,
+				AgentType:        "orchestrator",
+				RequiresPlanning: true,
+				Summary:          extractSummary(input),
+			}
+		}
+		return &Intent{
+			Type:       string(IntentReview),
+			Confidence: 0.55,
+			AgentType:  config.AgentIDCoder,
+			Summary:    extractSummary(input),
+		}
+	}
+	if defectReportRe.MatchString(lower) {
+		return &Intent{
+			Type:       string(IntentDebug),
+			Confidence: 0.55,
+			AgentType:  config.AgentIDDebugger,
+			Summary:    extractSummary(input),
+		}
+	}
+	if docUpdateRe.MatchString(lower) {
+		return &Intent{
+			Type:       string(IntentWrite),
+			Confidence: 0.55,
+			AgentType:  config.AgentIDWriter,
+			Summary:    extractSummary(input),
+		}
+	}
 
 	// Code-related rules with explicit confidence >= 0.3
 	// These address the bug where "write a Go function" was routed to chat
