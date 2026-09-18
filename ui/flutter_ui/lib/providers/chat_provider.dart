@@ -510,6 +510,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // Subscribe to turn.terminal relays for this session
     // (async-turn-migration leaf 05). Terminal frames arrive classified as
     // agent_progress; the subscription filters them by payload shape.
+    // Cancel any previous terminal subscription first — loadMessages() can
+    // run more than once per provider, and reassigning without cancelling
+    // leaks a listener that double-delivers terminals (scopes-2 audit LOW).
+    _turnTerminalSubscription?.cancel();
     _turnTerminalSubscription = websocket
         .subscribeToTurnTerminal(sessionId)
         .listen((message) {
