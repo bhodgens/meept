@@ -76,43 +76,63 @@ worth revisiting if legacy mode stays in use.
 ## Scopes 2+3 re-dispatch (2026-09-17 ~23:00, post quota reset)
 
 Dispatched as two parallel read-only subagents (zai quota verified HTTP
-200 first). Completed and dispositioned 2026-09-18:
+200 first). Completed and dispositioned 2026-09-18.
 
-### Scope 2 (TUI + GUI, deleg_9fb259e7/sa-0)
+### Scope 2 (TUI + GUI, deleg_9fb259e7/sa-0) — full report received
 
-- HIGH — WS relay never subscribed `turn.*`: the bus wildcard `*`
-  matches single-segment topics only (matchWildcard compares segment
-  counts), so turn.terminal never reached HTTP/WS clients. RPC-path
-  clients (bench/CLI/TUI direct socket) were unaffected — exactly
-  matches the observed GUI-pending symptom. FIXED 1fd787e5 with pin.
-- MED — Flutter agent.progress payloads carry only conversation_id (no
-  session_id) so the client where-clause drops them: pending turns
-  never refresh liveness, showing stalled after the fixed 120s despite
-  progress. Parity break vs TUI (DeliverTurnProgress on every
-  agent.progress, app.go:1360). OPEN — needs payload session_id or
-  client matching on conversation_id.
-- MED — Flutter WS poll path does not re-mint the subscription id after
-  a reconnect, so resumed events are dropped until the next full
-  resubscribe. OPEN.
-- LOW — chat_provider loadMessages() leaks the previous
-  _turnTerminalSubscription (no cancel before reassign): duplicate
-  terminal delivery after repeated reloads. OPEN.
+The headline: a chain of 3 HIGH defects meant a GUI-submitted async
+reply could NEVER render — persisted daemon-side but dropped on every
+delivery channel, leaving the turn stuck pending then false-stalling
+at 120s.
 
-### Scope 3 (refusal fallback, deleg_9fb259e7/sa-1)
+- HIGH — WS relay never subscribed `turn.*` (bus `*` is
+  single-segment). FIXED 1fd787e5 + pin.
+- HIGH — websocket_service subscribeToTurnTerminal filtered strictly
+  on session_id; GUI submits carry only conversation_id so the GUI
+  dropped its own terminal frames. FIXED 2f56f190 (fallback added,
+  mirrors daemon WS filter).
+- HIGH — handler.go gated the chat_message push on req.SessionID,
+  empty for GUI submits → no reply bubble ever published. FIXED
+  2f56f190 (routed on resolved persistID).
+- MED — noteTurnProgress had no caller (dead liveness refresh; turns
+  false-stall at 120s mid-progress; TUI parity break). FIXED
+  2f56f190 (progress listener feeds pending turns).
+- MED — fresh ChatState in GUI error/system/reload branches dropped
+  pendingTurns (F20 regression class). FIXED 2f56f190 (copyWith).
+- LOW (OPEN) — chat.response still relayed as agent_progress
+  (classification accident, not exclusion).
+- LOW (OPEN) — wsclass decoder gate only covers turn.terminal; future
+  typed topics silently regress to prefix classification.
+- LOW (OPEN) — TUI F19 earlyTerminals buffer unbounded for
+  never-registered turn ids.
+- LOW (OPEN) — TUI ctrl+l/Reset orphan pendingTurns (cross-session
+  terminals silently discarded).
+- LOW (OPEN) — loadMessages() leaks _turnTerminalSubscription.
+- LOW (OPEN) — GUI hardcodes 120s liveness; TUI reads chat config.
 
-- MED — streaming refusal fallback concatenates refused-partial + fall-
-  back tokens in the client-visible stream (streamOnDelta accumulator
-  not reset on retry; the PM rotation path solved this with attempt
-  tagging, the refusal path did not). OPEN — loop.go:4204/5891.
-- MED — refused-call usage ledgered to llm_calls but never charged to
-  Budget token/cost accounting. OPEN.
-- MED — SpawnVerifier child loop missed WithGlobalRefusalModel + spec
-  (third loop-construction site after F5 fixed the other two). FIXED
-  447d945c.
-- LOW — one-hop budget resets across park/resume generations. OPEN.
+### Scope 3 (refusal fallback, deleg_9fb259e7/sa-1) — full report received
 
-Full finding text lives in the delegation transcripts:
-~/.hermes/cache/delegation/live/deleg_9fb259e7/task-{0,1}.log
+Verified clean: no double-ledger (one llm_calls row per provider
+call); no pin leak through park/resume (all resume paths re-enter
+RunOnceWithParts → clearRefusalFreshTurnState); clone propagation via
+ConfigSnapshot/manager/registry/components all present.
+
+- MED — streaming refusal retry concatenates refused-partial +
+  fallback tokens in the live text_so_far preview (no attempt-reset
+  on the delta accumulator; the PM rotation path has attempt
+  tagging, the refusal path doesn't). OPEN — loop.go:5893.
+- MED — refused-call usage ledgered to llm_calls but never charged
+  to Budget token/cost (F12's fix covered only the ledger half).
+  OPEN — client.go:602/827/2054, anthropic.go:404/650.
+- MED — SpawnVerifier child loop missed WithGlobalRefusalModel +
+  spec. FIXED 447d945c.
+- LOW (OPEN) — park/resume cycles reset the one-hop refusal budget
+  (one extra refused call per generation).
+- LOW (OPEN) — openai refusal ledger rows mix cfg.ProviderID with
+  refusal.ModelID when a cross-provider override refused.
+
+Full finding text: ~/.hermes/cache/delegation/live/deleg_9fb259e7/
+task-{0,1}.log
 
 ## Verification
 
