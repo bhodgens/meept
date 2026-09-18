@@ -314,6 +314,13 @@ func (w *rawResponseWriter) write(prompt, rawBody string) {
 		w.log.Warn("raw-response logging disabled (mkdir)", "error", err)
 		return
 	}
+	// Size-cap rotation (shared policy with the other calibration logs; the
+	// helper lives in internal/memory, which this package already imports).
+	if err := memory.RotateIfNeeded(w.path, memory.MaxCalibrationLogBytes); err != nil {
+		w.dead = true
+		w.log.Warn("raw-response logging disabled (rotate)", "error", err)
+		return
+	}
 	f, err := os.OpenFile(w.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		w.dead = true

@@ -76,8 +76,13 @@ func (c *CalibrationLogger) LogVerdict(ctx context.Context, claimID, verdict str
 }
 
 // appendJSONL appends one value as a JSON line, creating the parent dir.
+// Rotation first: the calibration log is size-capped (see RotateIfNeeded) so
+// append-heavy verdict traffic cannot grow it unbounded.
 func appendJSONL(path string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := RotateIfNeeded(path, maxCalibrationLogBytes); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
