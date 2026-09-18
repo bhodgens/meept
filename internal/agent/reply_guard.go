@@ -127,7 +127,7 @@ func toolResultJSONKey(reply string) (string, bool) {
 			return "", false
 		}
 	}
-	for _, key := range []string{`"memory_id"`, `"task_id"`, `"job_id"`, `"tool_result"`, `"tool_output"`, `"step_id"`} {
+	for _, key := range []string{`"memory_id"`, `"task_id"`, `"job_id"`, `"tool_result"`, `"tool_output"`, `"step_id"`, `"evidence"`} {
 		if strings.Contains(reply, key) {
 			return key, true
 		}
