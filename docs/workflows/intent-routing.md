@@ -7,24 +7,43 @@ matches.
 
 ## The routing pipeline
 
-The pipeline is three doors, cheapest first. Each message falls to the
-next door only when the current one declines; Door 3 always responds.
-Full component detail, resource costs, and the observability story:
-`docs/workflows/classification-architecture.md`.
+The pipeline is gated doors, cheapest first. Each message falls to the
+next door only when the current one declines; the final door always
+responds. Order below reflects the shipped code path
+(`Dispatcher.ClassifyAndRoute`, `internal/agent/dispatcher.go`): the
+embedding gate runs BEFORE the short-message guard, which lives inside
+`classifyIntent`, not in front of it. Full component detail, resource
+costs, and the observability story:
+`docs/workflows/classification-architecture.md`. Measurement and scoring
+methodology: `docs/workflows/classifier-evaluation.md`.
 
 ```
 your message
   │
-  ├─ short/simple guard ──────► chat (greetings, "2", single words)
+  ├─ /skill, /plan, templates ─► handled directly (no classification)
   │
   ├─ DOOR 1: embedding gate ──► direct route on confident match
-  │  (qwen3 embed + 13-centroid store + margin logic; ~0.1s, free)
+  │  (qwen3 embed + kNN unanimity + tfidf agreement veto; ~0.1s, free;
+  │   skipped for compound signals, agent overrides, and /-commands;
+  │   task-creating or async-dispatch verdicts are suppressed into the
+  │   full chain; assert_only mode observes without routing)
+  │
+  ├─ short/simple guard ──────► chat (bare arithmetic like "2+2",
+  │   greetings, single words; a question carrying a source path is
+  │   NOT arithmetic and reaches the chain)
+  │
+  ├─ media guard ─────────────► analyst (media-CONSUMPTION evidence +
+  │   YouTube URL; a coding request that merely cites a URL falls through)
   │
   ├─ DOOR 2: LLM chain ───────► intent + agent + planning mode
   │  (LFM2.5-8B + intent analyzer; ~1-2s; ~87% lab / ~84% live;
-  │   ~13% misrouted but recovered downstream, never lost)
+  │   ~13% misrouted but recovered downstream, never lost; recall
+  │   arbitration > imperative fall-through > git-verb veto; an empty
+  │   model response routes to chat, not the keyword tables)
   │
   ├─ heuristic fallback ──────► intent from keyword tables
+  │  (output-based taxonomy: review+correction→quickplan, review→coder,
+  │   one named defect→debugger, doc artifact→writer)
   │
   └─ DOOR 3: quickplan ───────► clarify (if ambiguous) → plan → execute
 ```
@@ -178,24 +197,59 @@ Test cases:
 | `pair` / `collaborate` | analyst | dual-agent sessions |
 | `image_gen` / `video_gen` / `image_id` | respective media agents | media creation/ID |
 
+**Canonical lane agents vs execution labels.** The intent column above
+names the agent that OWNS the lane (`agentForIntent` resolution); the
+plan/run trees inside the orchestrator may attach special-workflow
+EXECUTION labels (planner-reviewer, code-reviewer, debug-reviewer,
+release-manager, …) to individual steps of the work those agents
+dispatch. Those labels are execution-layer roles, not lane owners: a
+lane routes to its canonical agent first, and the executing agent's own
+gates (review loops, verification) determine whether specialist
+reviewers run. Do not add a reviewer to the `intents:` frontmatter of
+an AGENT.md to make it a lane owner — lane ownership is declared on the
+agent that ANSWERS the intent, not on agents that participate in the
+work afterward.
+
 ## Fall-through guarantee
 
-1. **Short/simple guard**: messages under a length/simple-content
-   threshold skip classification entirely → chat.
-2. **Stage-0 gate**: confident unanimous matches route instantly,
-   skipping the LLM chain (latency win; falls through on any doubt).
+1. **Embedding gate (Stage-0/Door 1)**: runs first
+   (`ClassifyAndRoute` step 3.25). A unanimous kNN vote confirmed by the
+   tfidf agreement veto routes instantly; any miss, veto disagreement,
+   error, or suppressed verdict falls through unchanged. Compound
+   signals, agent overrides, and /-commands skip it entirely.
+2. **Short/simple guard** (inside `classifyIntent`): messages under a
+   length/simple-content threshold — including bare arithmetic
+   expressions, which are shape-matched, never evaluated — skip the
+   chain → chat. A question carrying a source path is not arithmetic
+   and reaches the chain (AR-1 repair).
 3. **LLM chain**: primary classification. Inside the chain, three
-   arbitration gates discard verdicts that contradict the input's own
-   structure: a platform/schedule/git verdict on a work-status recall
-   question becomes recall; a platform/schedule verdict on an
-   imperative becomes a fall-through; and (since the 2026-09-15 bench
-   gate, issue #46) a **git verdict on a git-verb-free imperative
-   falls through** — the 350M prompt-router routes "create a file in
-   the repository root" to git because of the word "repository", and a
-   git verdict without commit/push/merge/branch/rebase/checkout/stash
-   in the input is discarded (`git_verb_agreement_veto`; disable with
-   dispatcher config `git_verb_agreement_veto=false` to measure).
-4. **Heuristic fallback**: keyword tables when the chain fails.
+   arbitration gates run in fixed order — recall first, then the
+   imperative fall-through, then the veto — and discard verdicts that
+   contradict the input's own structure: a platform/schedule/git
+   verdict on a work-status recall question becomes recall; a
+   platform/schedule verdict on an imperative becomes a fall-through;
+   and (since the 2026-09-15 bench gate, issue #46) a **git verdict on
+   a git-verb-free imperative falls through** — the 350M prompt-router
+   routes "create a file in the repository root" to git because of the
+   word "repository", and a git verdict without
+   commit/push/merge/branch/rebase/checkout/stash in the input is
+   discarded (`git_verb_agreement_veto`; disable with dispatcher config
+   `git_verb_agreement_veto=false` to measure). Time evidence for the
+   schedule arm must express TIMING, not location: "at 3pm" counts,
+   "the bug at src/parser.go" does not (AR-3). Polite lead-ins are
+   compared with punctuation normalized, so "hey, create…" is still an
+   imperative (AR-4).
+   Exception (documented, deliberate): an EMPTY model response routes
+   to chat with method `llm_empty_fallback_chat` — an empty response
+   signals a degraded model, not an ambiguous input, and the keyword
+   table is verb-dense enough to misclassify task-shaped prompts, so
+   it is bypassed on this path. This exception is product behavior, not
+   a defect; changing it requires a product decision.
+4. **Heuristic fallback**: keyword tables when the chain fails —
+   governed by the output-based taxonomy (review + correction clause →
+   quickplan; review operation → coder; one named defect → debugger;
+   repo-document update → writer; informational "help me understand"
+   → analyze, never platform).
 5. **Final fallback**: **quickplan** — clarifies ambiguity with you
    first (only if needed), then plans and executes to completion.
 6. **Agent-resolution safety**: if a classified agent doesn't exist in

@@ -199,3 +199,62 @@ script now enforces a coverage floor (`MIN_ROUTED = 20`) and reports
 `INSUFFICIENT_COVERAGE` instead of PASS/FAIL below it; the observed
 values (87.35 / 84.56) are unchanged.
 
+### 6. Forced-abstention fabrication: OOD fields of iter-1..13 summaries are invalid (2026-09-18)
+
+`eval_harness.py` historically inserted `None` for OOD cases without
+calling `head.decide`, then counted the inserted `None` as a successful
+abstention (`OOD_abstain == OOD_total`, `OOD_R = 1.0` on every row). The
+bypass was removed by `0688a9b0`; leaf 02 of the routing-repair tree
+hardened the self-tests so any held-out case skipping prediction fails
+`m4_gold_acceptance.py --self-test`.
+
+Invalidation scope, precisely: the `OOD_total` / `OOD_abstain` / `OOD_R`
+FIELDS of 119 committed summary rows —
+`results/summary-20260907-235210.json`,
+`results/summary-20260908-000456.json`, and every `summary-*.json` under
+`results/iter-3` through `results/iter-13` — are fabricated, not
+measured. iter-14..16 summaries carry no OOD fields and make no OOD
+claim. WITHOUT evidence of a prediction call these rows never
+demonstrated OOD rejection; the M1 claim "zero wrong routes at m=0.030"
+rests only on in-domain wrong counts and stands, but every
+OOD-abstention-derived quality claim in this report is struck. The
+in-domain arithmetic in the same files (`total`, `direct`, `correct`,
+`wrong`, `E2E`, `SCORE`, `P`, `A`, `F1`) comes from real prediction
+calls and is NOT invalidated. The committed JSON artifacts are left
+byte-identical (this section and
+`docs/workflows/classifier-evaluation.md` are the corrections of
+record).
+
+### 7. Policy-selection data reuse (2026-09-18 selection-on-test note)
+
+The M4 acceptance run re-used policy-SELECTION data: ALT-5 (tfidf-veto)
+was selected by comparing five variants on the same 48-case replay the
+acceptance later scored, and the iter-20 cascade picked its tau×guard
+policy by a 13-way sweep on the same 48 cases (selection-on-test, see
+`results/iter-20/report.md` CAVEAT M6b). Selection-on-test means
+choosing and judging a policy on the same examples: the reported number
+is a max over in-sample scores and overstates held-out accuracy. No
+headline in this report is a held-out estimate; the 87.35% verdict is
+UNVALIDATED (CORRECTIONS 1/5), not merely unmeasured. The follow-up
+campaign design (`docs/plans/20260917-routing-repair/verification.md`)
+separates tuning from acceptance sets and freezes thresholds before
+observation.
+
+### 8. Corpus, cache, and fixture status as of the routing-repair tree (2026-09-18)
+
+- Corpus row (CORRECTIONS 3) confirmed at 389 = 139 + 250 (361 non-OOD /
+  28 OOD) against the committed loader.
+- The centroid builder previously trained Door 1 on a 222-key subset of
+  the 361 eligible keys (MEAS-02); the default now equals the loader's
+  eligible population (`tools/classifier-eval/test_provenance.py`).
+- Embedding cache identity previously keyed on the model ALIAS
+  (MEAS-05); it now hashes verified local model content, with
+  fail-closed `unverified` namespaces for legacy caches.
+- `internal/agent/testdata/prefilter_tfidf_veto.json` (202 training
+  docs, cited in the acceptance discussion) was FIXTURE metadata, never
+  evidence about a deployed model; it was deleted with recorded
+  approval and tests build temporary models.
+- Historical artifacts remain byte-identical; corrections are appended
+  only. Measurement methodology lives in
+  `docs/workflows/classifier-evaluation.md`.
+

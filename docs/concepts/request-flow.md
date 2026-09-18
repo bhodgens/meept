@@ -150,7 +150,7 @@ flowchart LR
 | Topic | Publisher | Payload |
 |-------|-----------|---------|
 | `chat.request` | RPC handler | User chat input |
-| `chat.response` | Agent loop | Agent response |
+| `chat.response` | Agent loop | Agent response (RPC reply; not relayed to WS clients) |
 | `agent.action` | Tool executor | Tool call results |
 | `task.create` | RPC proxy | Task creation |
 | `task.result` | Agent loop | Task completion |

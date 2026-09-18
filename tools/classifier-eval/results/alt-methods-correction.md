@@ -73,3 +73,21 @@ applies unchanged (1/2 routes correct would score 85.27%, below the
 86.8% gate). A 2/2 sample cannot distinguish a 100%-precision router
 from a coin-flip router at p<0.25. Re-validate on a larger harvested
 corpus before building on tfidf-veto.
+
+## Addendum (2026-09-18, routing-repair leaf 05): selection-on-test
+
+This correction covered the artifact and sensitivity legs; the third
+leg is that the ALT sweep's policy selection was not disjoint from its
+judging data. All five ALT variants were compared on the same 48
+replay cases the acceptance later scored, and the winning variant's
+headline was then read off that comparison — selection-on-test (the
+87.35% decomposition above is the winner's in-sample score, a
+max over five variants, not a held-out estimate). This does not change
+any number in this file; it adds the reason the number cannot support
+a promotion decision even in principle, beyond the 2-case-sample
+problem already recorded. The follow-up campaign design
+(`docs/plans/20260917-routing-repair/verification.md`) freezes corpus,
+folds, fingerprints, stage order, and acceptance thresholds BEFORE
+observing results, and separates tuning examples from untouched
+acceptance examples. Route-count disclosure and the `MIN_ROUTED = 20`
+coverage floor are preserved as standing checks.

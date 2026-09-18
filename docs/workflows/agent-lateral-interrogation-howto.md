@@ -204,7 +204,7 @@ The MCP server is stateless — it translates between MCP protocol and meept's e
 | Bus Topic | Trigger | What You See |
 |-----------|---------|-------------|
 | `chat.message.received` | Any client sends a message | `[source_client] message content` |
-| `chat.response` | Agent completes | Full agent response text |
+| `chat.response` | Agent completes | Full agent response text (bus/RPC consumers; NOT relayed to WebSocket clients — the relay drops this topic, it is an RPC reply topic) |
 | `agent.event.*` | Agent lifecycle events | Tool calls, turns, progress |
 | `worker.*` | Pool worker lifecycle | `worker.started`, `worker.stopped` |
 | `chat.worker.*` | Per-request chat worker state | `chat.worker.started`, `chat.worker.completed` |

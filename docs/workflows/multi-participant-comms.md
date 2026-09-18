@@ -56,7 +56,15 @@ Client A sends "fix the auth bug"
      -> all session clients see "[client_a] fix the auth bug"
   -> Dispatcher routes to debugger agent
   -> Agent responds
-  -> chat.response broadcast to all session clients
+  -> chat.response is delivered as the RPC reply to the requesting
+     client; the WS relay deliberately does NOT re-broadcast it
+     (de671eb2: transformBusEventToWS drops the chat.response topic
+     before classification — the legacy chat.* prefix match used to
+     classify it as agent_progress and double-deliver the reply to
+     HTTP+WS clients). Session clients see the reply via the
+     chat_message push published by ChatHandler.publishChatMessage.
+     Pinned by TestTransformBusEventToWS_ChatResponseNotRelayed and
+     the WSClassParity fence.
 ```
 
 **Event types:**
