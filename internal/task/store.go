@@ -478,6 +478,17 @@ func (s *Store) List(state *TaskState, limit int) ([]*Task, error) {
 		return nil, fmt.Errorf("failed to iterate tasks: %w", err)
 	}
 
+	// Hydrate linked sessions (scopes-2 audit follow-up, 2026-09-18):
+	// GetByID loads them; List skipped the join, so task.list_extended
+	// reported linked_sessions: null and session-keyed consumers (the
+	// bench plan-seal driver, autonomous clients) could not match tasks.
+	for _, t := range tasks {
+		sessions, err := s.GetLinkedSessions(t.ID)
+		if err == nil {
+			t.LinkedSessions = sessions
+		}
+	}
+
 	return tasks, nil
 }
 
