@@ -480,6 +480,11 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Context overflow is a request-size verdict: retrying the same
+	// payload cannot shrink it (F-A1).
+	if IsContextOverflowError(err) {
+		return false
+	}
 	// Check for rate limit errors
 	if IsRateLimitError(err) {
 		return true

@@ -441,6 +441,12 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 				return nil, err
 			}
 
+			// Context-overflow errors never re-enter the short-retry loop
+			// (F-A1): the payload must be trimmed, not re-sent.
+			if _, ok := errors.AsType[*ContextOverflowError](err); ok {
+				return nil, err
+			}
+
 			// D4/D7: classify FIRST. The request layer already resolved
 			// quota shapes (rate_limit_error / quota_exceeded / 402) to
 			// QuotaResetError, so a surviving error is a bare throttle or
@@ -685,6 +691,14 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 			// Quota errors never re-enter the short-retry loop (streaming
 			// path): hours-scale window, return immediately.
 			if _, ok := errors.AsType[*QuotaResetError](err); ok {
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
+			}
+
+			// Context-overflow errors never re-enter the short-retry loop
+			// (F-A1, streaming path): the payload must be trimmed, not
+			// re-sent.
+			if _, ok := errors.AsType[*ContextOverflowError](err); ok {
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -1377,6 +1391,16 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	// Check for other error status codes
 	if resp.StatusCode != http.StatusOK {
+		// Context-overflow surfacing (F-A1): a context-window-exceeded
+		// body is a typed ContextOverflowError, not a retryable APIError.
+		// Same scan site as DetectRefusalFromBody; conservative markers.
+		if overflow := DetectContextOverflowFromBody(cfg.ProviderID, cfg.ModelID, resp.StatusCode, string(respBody)); overflow != nil {
+			var apiErrBody anthropicErrorResponse
+			if err := json.Unmarshal(respBody, &apiErrBody); err == nil && apiErrBody.Error.Message != "" {
+				overflow.Cause = &APIError{StatusCode: resp.StatusCode, Detail: apiErrBody.Error.Message}
+			}
+			return nil, overflow
+		}
 		// Refusal surfacing (refusal-fallback leaf 01): a typed safeguard /
 		// content-filter error body is a RefusalError, not a bare APIError.
 		// Conservative marker list — no match, no change.
@@ -1602,6 +1626,13 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 				detail = detail[:500]
 			}
 			return nil, &APIError{StatusCode: resp.StatusCode, Detail: detail}
+		}
+		// Context-overflow surfacing (F-A1, streaming path): classify
+		// BEFORE the generic APIError fallback so a 500 overflow body
+		// never short-retries.
+		if overflow := DetectContextOverflowFromBody(cfg.ProviderID, cfg.ModelID, resp.StatusCode, string(respBody)); overflow != nil {
+			overflow.Cause = &APIError{StatusCode: resp.StatusCode, Detail: truncateContextOverflowMessage(string(respBody))}
+			return nil, overflow
 		}
 		var apiErr anthropicErrorResponse
 		if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error.Message != "" {

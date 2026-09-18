@@ -1150,6 +1150,44 @@ func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []Cha
 	return final, nil
 }
 
+// CompactForOverflow applies AGGRESSIVE context reduction after a provider
+// rejected the request for exceeding the model's context window (F-A1). It
+// is deliberately LLM-free: the overflowing model may be unable to serve
+// ANY request reliably right now, so the restart-summary path is not used —
+// reduction is purely structural: the wired compactor (if any), then
+// dropOldContext (system prompt + tool-paired recent tail). Returns the
+// reduced messages and whether anything was actually trimmed; false means
+// the context is already minimal and a retry cannot help.
+func (f *ContextFirewall) CompactForOverflow(ctx context.Context, messages []ChatMessage) ([]ChatMessage, bool) {
+	if f == nil || f.model == nil || f.model.ContextLimit == 0 {
+		return messages, false
+	}
+	before := f.countTokens(messages)
+	result := messages
+
+	f.compactorMu.RLock()
+	compactor := f.compactor
+	f.compactorMu.RUnlock()
+	if compactor != nil {
+		if cr := compactor.Compact(ctx, result); cr.Compacted {
+			f.compactionEvents.Add(1)
+			result = cr.Messages
+		}
+	}
+
+	result = f.dropOldContext(result)
+
+	after := f.countTokens(result)
+	f.logger.Warn("context overflow: aggressive compaction applied",
+		"tokens_before", before,
+		"tokens_after", after,
+		"messages_before", len(messages),
+		"messages_after", len(result),
+		"limit", f.model.ContextLimit,
+	)
+	return result, after < before || len(result) < len(messages)
+}
+
 // ValidateContextSize checks if the context size exceeds the model limit.
 // Returns a ContextSizeExceededError error if the limit is exceeded.
 func (f *ContextFirewall) ValidateContextSize(messages []ChatMessage) error {

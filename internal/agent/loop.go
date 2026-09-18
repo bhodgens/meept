@@ -55,6 +55,13 @@ var (
 	ErrConvergenceDetected         = errors.New("agent responses converged without progress")
 	ErrConversationBudgetExhausted = errors.New("conversation token budget exhausted")
 	ErrNoSkill                     = errors.New("skill is nil")
+	// ErrNudgeBudgetExhausted is the F-A3 honest-failure sentinel: a
+	// corrective-nudge class spent its per-turn budget and the behaviour
+	// persisted, so the step terminalizes with an error instead of
+	// appending more nudges to the context ladder. Callers can
+	// errors.Is-classify it to distinguish "gave up on repeated
+	// unbacked claims" from a transport or guard failure.
+	ErrNudgeBudgetExhausted = errors.New("nudge budget exhausted")
 	// ErrAgentBlocked is returned by attemptStateRecovery when the state
 	// machine is in StateBlocked and requires external action (approval or
 	// rate-limit lift). It wraps the triggering error so callers retain the
@@ -615,7 +622,15 @@ type AgentLoop struct {
 	// Guard-state semantics: reset per turn in resetTurnGuards, guarded
 	// by mu. Records ATTEMPTS (emission ≠ success) — conservative: it can
 	// only undercount the model's tool use, never fabricate a mismatch.
-	turnToolCalls map[string]int // tool name -> emission count this turn
+	// turnToolCalls is the per-turn tool-emission ledger (anti-hallucination
+	// contract); reset per turn in resetTurnGuards.
+	turnToolCalls map[string]int
+	// nudgeClassCounts is the F-A3 per-turn nudge budget: nudge class ->
+	// number of nudges of that class appended to the conversation this
+	// turn. Past maxNudgesPerClassPerTurn of a class the loop stops
+	// nudging and terminalizes the step with an honest failure. Reset per
+	// turn in resetTurnGuards. Guarded by l.mu.
+	nudgeClassCounts map[string]int
 
 	// Conversation management
 	conversations *ConversationStore
@@ -3817,6 +3832,46 @@ func flushDeferredToolResults(conv *Conversation, toolCalls []llm.ToolCall, resu
 	}
 }
 
+// maxNudgesPerClassPerTurn caps corrective nudges per nudge class per turn
+// (F-A3, 2026-09-18 e2e): 27 'Unbacked file side-effect claims' + 17 'No
+// measurable progress' nudges were appended to context on ONE step, and the
+// ladder itself fed the context overflow. After 2 nudges of the same class,
+// the loop stops nudging and terminalizes the step with an honest failure.
+const maxNudgesPerClassPerTurn = 2
+
+// Nudge classes (per-turn budget keys). Every corrective message that would
+// be appended to the conversation as a user-role system nudge belongs to
+// exactly one class.
+const (
+	nudgeClassUnbackedClaims  = "unbacked_file_side_effect_claims"
+	nudgeClassNoProgress      = "no_measurable_progress"
+	nudgeClassAnnouncedAction = "announced_but_unexecuted_action"
+)
+
+// consumeNudgeBudget reports whether a nudge of the given class may still be
+// appended this turn, recording it when allowed (F-A3). The first
+// maxNudgesPerClassPerTurn nudges of a class append; past that the caller
+// must stop nudging and terminalize the step with an honest failure. Budget
+// resets per turn in resetTurnGuards. Guarded by l.mu.
+func (l *AgentLoop) consumeNudgeBudget(class string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.nudgeClassCounts[class] >= maxNudgesPerClassPerTurn {
+		return false
+	}
+	l.nudgeClassCounts[class]++
+	return true
+}
+
+// nudgeBudgetExhausted reports whether the per-turn budget for the class is
+// spent WITHOUT consuming anything (read-only probe for terminalization
+// paths). Guarded by l.mu.
+func (l *AgentLoop) nudgeBudgetExhausted(class string) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.nudgeClassCounts[class] >= maxNudgesPerClassPerTurn
+}
+
 // resetTurnGuards clears all per-turn guard state at the START of a turn
 // (D-H3, bughunt 2026-09-04): the AgentLoop persists across turns, so guard
 // state from turn N must not veto or nudge turn N+1's first tool calls.
@@ -3863,6 +3918,8 @@ func (l *AgentLoop) resetTurnGuards() {
 	// Anti-hallucination contract: a fresh turn starts with an empty
 	// tool-emission ledger.
 	l.turnToolCalls = nil
+	// F-A3: a fresh turn starts with an empty per-class nudge budget.
+	l.nudgeClassCounts = make(map[string]int)
 	l.mu.Unlock()
 }
 
@@ -4675,12 +4732,23 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					switch l.noProgress.Track(tc.Function.Name, tc.Function.Arguments,
 						l.guards.NoProgressWarnAt, l.guards.NoProgressVetoAt) {
 					case GuardWarn:
-						l.logger.Warn("No measurable progress on repeated calls, nudging",
-							"tool", tc.Function.Name,
-							"conversation", conversationID,
-						)
-						pendingNudges++
-						nudgeInFlight = true
+						// F-A3: the nudge only lands if the per-turn
+						// budget for this class has room. Past the cap
+						// the nudge is dropped entirely (the ladder's
+						// veto path still terminates the turn).
+						if l.consumeNudgeBudget(nudgeClassNoProgress) {
+							l.logger.Warn("No measurable progress on repeated calls, nudging",
+								"tool", tc.Function.Name,
+								"conversation", conversationID,
+							)
+							pendingNudges++
+							nudgeInFlight = true
+						} else {
+							l.logger.Warn("No-progress nudge suppressed by per-turn class cap",
+								"tool", tc.Function.Name,
+								"conversation", conversationID,
+							)
+						}
 					case GuardVeto:
 						l.logger.Warn("No-progress veto",
 							"tool", tc.Function.Name,
@@ -4698,9 +4766,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 							return "I stopped because my recent actions were repeating without measurable progress. " +
 								"Here is what I accomplished so far -- please provide more specific guidance if you'd like me to continue.", nil
 						}
-						// Inject veto nudge AFTER the tool results (see NOTE).
-						pendingNudges++
-						nudgeInFlight = true
+						// Inject veto nudge AFTER the tool results (see
+						// NOTE); subject to the same F-A3 class cap.
+						if l.consumeNudgeBudget(nudgeClassNoProgress) {
+							pendingNudges++
+							nudgeInFlight = true
+						}
 					}
 				}
 
@@ -5177,8 +5248,13 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// retracts. After the nudge, return the text (possibly annotated) —
 		// repeated nudges against a model that cannot emit tool calls would
 		// burn the iteration budget against a documented capability ceiling.
+		// F-A3: "once" is now enforced structurally — the per-turn class
+		// budget (maxNudgesPerClassPerTurn) caps this nudge; past the cap
+		// the step terminalizes with an honest failure instead of feeding
+		// more context to the ladder (27 same-class nudges observed on ONE
+		// step in the 2026-09-18 e2e).
 		if l.unbackedSideEffectClaims(response.Content) && !l.turnExecutedFileTools() {
-			if iteration < l.config.MaxIterations {
+			if iteration < l.config.MaxIterations && l.consumeNudgeBudget(nudgeClassUnbackedClaims) {
 				l.logger.Warn("Unbacked file side-effect claims with zero tool executions, nudging for real tool use",
 					"iteration", iteration,
 					"conversation", conversationID,
@@ -5188,10 +5264,16 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				l.publishIteration(conversationID, iteration)
 				continue
 			}
-			// No iteration budget left: return the text annotated so
-			// downstream consumers (step reports, digests) can tell an
-			// unverified claim from a real result. The hallucinated
-			// success must not read as ground truth.
+			// No iteration budget left OR nudge class cap spent: do not
+			// append another nudge. Terminalize the step with an honest
+			// failure so downstream consumers can tell an unverified claim
+			// from a real result — the hallucinated success must not read
+			// as ground truth.
+			if l.nudgeBudgetExhausted(nudgeClassUnbackedClaims) {
+				l.logger.Warn("Unbacked file side-effect claims persist after nudge cap; terminalizing step with honest failure",
+					"conversation", conversationID)
+				return "", fmt.Errorf("%w: repeated unbacked claims; giving up this step", ErrNudgeBudgetExhausted)
+			}
 			l.logger.Warn("Unbacked file side-effect claims with zero tool executions; no iteration budget to nudge, annotating response",
 				"conversation", conversationID)
 			return "[unverified: no tools were executed this turn] " + response.Content, nil
@@ -5206,7 +5288,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// actually has. Same budget discipline: no nudge without
 		// iterations left; annotate instead of fabricating success.
 		if l.terminatesOnAnnouncedAction(response.Content) && !l.turnExecutedAnyTools() {
-			if iteration < l.config.MaxIterations {
+			if iteration < l.config.MaxIterations && l.consumeNudgeBudget(nudgeClassAnnouncedAction) {
 				l.logger.Warn("Turn ends on announced-but-unexecuted action with zero tool executions, nudging",
 					"iteration", iteration,
 					"conversation", conversationID,
@@ -5215,6 +5297,13 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				conv.AddUserMessage("[system: Your response announces work you have not done (\"let me examine…\", \"I'll check…\") and this turn executed no tools. Do NOT end your turn on a promise: either perform the action with the available tools now, or answer the user's question directly from what you already know or already retrieved. A response that only promises future work is not a completed task.]")
 				l.publishIteration(conversationID, iteration)
 				continue
+			}
+			// F-A3: nudge class cap spent (and iterations remain) — stop
+			// feeding the ladder and terminalize with an honest failure.
+			if l.nudgeBudgetExhausted(nudgeClassAnnouncedAction) {
+				l.logger.Warn("Announced-but-unexecuted action persists after nudge cap; terminalizing step with honest failure",
+					"conversation", conversationID)
+				return "", fmt.Errorf("%w: repeated announced-but-unexecuted actions; giving up this step", ErrNudgeBudgetExhausted)
 			}
 			l.logger.Warn("Turn ends on announced-but-unexecuted action; no iteration budget to nudge, annotating response",
 				"conversation", conversationID)
@@ -5599,6 +5688,9 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	}
 
 	attempt := 0
+	// overflowRetried gates F-A1's trim-and-retry-once: an overflow retry
+	// has been spent this call, and a second overflow fails honestly.
+	overflowRetried := false
 	// servedModel tracks the model the current attempt is served by, for
 	// accurate failure attribution in RecordAliasFailure (issue #30).
 	var servedModel *llm.ModelConfig
@@ -5820,6 +5912,41 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				l.quotaTracker.Clear(l.agentID, servedModel.ProviderID)
 			}
 			return response, nil
+		}
+
+		// F-A1: a typed ContextOverflowError means the provider rejected
+		// THIS request for exceeding the model's context window. Retrying
+		// the same payload is hopeless (the 2026-09-18 e2e burned 10
+		// llama.cpp HTTP-500s per turn on hopeless retries) — instead
+		// compact context AGGRESSIVELY via the existing context firewall
+		// and retry ONCE. A second overflow surfaces as an honest error.
+		var overflowErr *llm.ContextOverflowError
+		if errors.As(err, &overflowErr) {
+			if overflowRetried {
+				l.logger.Error("Context overflow persists after aggressive compaction; failing the call honestly",
+					"provider", overflowErr.ProviderID,
+					"model", overflowErr.ModelID,
+					"attempt", attempt,
+				)
+				return nil, fmt.Errorf("context overflow persisted after compaction: %w", err)
+			}
+			overflowRetried = true
+			compacted, trimmed := l.compactForOverflow(ctx, messages)
+			if !trimmed {
+				l.logger.Error("Context overflow but compaction could not shrink the request; failing honestly",
+					"provider", overflowErr.ProviderID,
+					"model", overflowErr.ModelID,
+				)
+				return nil, fmt.Errorf("context overflow and compaction exhausted: %w", err)
+			}
+			l.logger.Warn("Context overflow: compacted context, retrying once",
+				"provider", overflowErr.ProviderID,
+				"model", overflowErr.ModelID,
+				"messages_before", len(messages),
+				"messages_after", len(compacted),
+			)
+			messages = compacted
+			continue
 		}
 
 		// D4/D8 (tree 03 leaf 02): a ThrottleBackoffError is provider
@@ -6098,6 +6225,17 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		}
 		return nil, err
 	}
+}
+
+// compactForOverflow drains context through the existing context firewall's
+// aggressive-compaction seam (F-A1). It returns the original slice when no
+// firewall is wired (a stub chatter in tests) — callers must treat
+// trimmed=false as "cannot shrink" and fail honestly rather than retry.
+func (l *AgentLoop) compactForOverflow(ctx context.Context, messages []llm.ChatMessage) ([]llm.ChatMessage, bool) {
+	if l.contextFirewall == nil {
+		return messages, false
+	}
+	return l.contextFirewall.CompactForOverflow(ctx, messages)
 }
 
 // HandleMessage processes a single message without conversation context.

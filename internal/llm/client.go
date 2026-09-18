@@ -612,6 +612,14 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 				return nil, err
 			}
 
+			// Context-overflow errors never re-enter the short-retry loop
+			// (F-A1): the verdict is about THIS request's size — retrying
+			// the same payload cannot shrink it. Return immediately; the
+			// agent loop owns compaction + the single trim-and-retry.
+			if _, ok := errors.AsType[*ContextOverflowError](err); ok {
+				return nil, err
+			}
+
 			// D4/D7: Classify FIRST on the failure. The request layer
 			// already resolved quota-shaped responses to QuotaResetError,
 			// so a RateLimitError/APIError here is a bare throttle or
@@ -834,6 +842,12 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			// Quota errors never re-enter the short-retry loop (streaming
 			// path): hours-scale window, return immediately.
 			if _, ok := errors.AsType[*QuotaResetError](err); ok {
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
+			}
+			// Context-overflow errors never re-enter the short-retry loop
+			// (F-A1): the payload must be trimmed, not re-sent.
+			if _, ok := errors.AsType[*ContextOverflowError](err); ok {
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -1595,6 +1609,16 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 	// Gated to non-OK statuses: a 200 body can legitimately carry
 	// "finish_reason":"content_filter", which contains the quoted marker.
 	if resp.StatusCode != http.StatusOK {
+		// Context-overflow surfacing (F-A1): a context-window-exceeded
+		// body is a typed ContextOverflowError, not a retryable APIError.
+		// Conservative marker list — no match, no change. Classified at
+		// the SAME scan site as DetectRefusalFromBody and BEFORE the
+		// retryable-status check below so the evidence shape (llama.cpp
+		// HTTP 500 "Context size has been exceeded.") never short-retries.
+		if overflow := DetectContextOverflowFromBody(providerID, modelID, resp.StatusCode, string(respBody)); overflow != nil {
+			overflow.Cause = &APIError{StatusCode: resp.StatusCode, Detail: bodyPreview}
+			return nil, overflow
+		}
 		if refusal := DetectRefusalFromBody(providerID, modelID, resp.StatusCode, string(respBody)); refusal != nil {
 			refusal.Cause = &APIError{StatusCode: resp.StatusCode, Detail: bodyPreview}
 			return nil, refusal
@@ -2095,6 +2119,15 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			return nil, err
 		}
 
+		// Context-overflow errors never re-enter the short-retry loop
+		// (streaming delta path, F-A1): the request only shrinks by trimming,
+		// never by retrying — the 2026-09-18 e2e burned 3 hopeless attempts
+		// ("streaming failed after 3 attempts") on exactly this shape. Return
+		// immediately; the agent loop owns compaction + the single retry.
+		if _, ok := errors.AsType[*ContextOverflowError](err); ok {
+			return nil, err
+		}
+
 		// D4/D7 (leaf 03): classify FIRST, then obey. The quota early-exit
 		// above already peeled off quota-shaped responses, so a throttle
 		// verdict here is a bare 429/503 (Retry-After alone is never a
@@ -2260,6 +2293,13 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		}
 
 		apiErr := &APIError{StatusCode: resp.StatusCode, Detail: string(detail)}
+
+		// Context-overflow surfacing (F-A1): classify BEFORE the
+		// retryable-status lanes so a 500 overflow body never short-retries.
+		if overflow := DetectContextOverflowFromBody(providerID, modelID, resp.StatusCode, string(detail)); overflow != nil {
+			overflow.Cause = apiErr
+			return nil, 0, overflow
+		}
 
 		// Quota-window classification (quota-reset-resilience): 429/402
 		// usage-window/billing shapes become QuotaResetError so callers

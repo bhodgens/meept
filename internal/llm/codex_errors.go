@@ -109,6 +109,15 @@ func codexErrorFromResponse(statusCode int, respBody []byte, retryAfterHeader, p
 		return rlErr
 	}
 
+	// Context-overflow surfacing (F-A1): a context-window-exceeded body is
+	// a typed ContextOverflowError before the generic APIError fallback —
+	// same contract as client.go's non-429 error lane, so the NonRetryable
+	// early-exits classify codex failures correctly too.
+	if overflow := DetectContextOverflowFromBody(providerID, modelID, statusCode, string(respBody)); overflow != nil {
+		overflow.Cause = &APIError{StatusCode: statusCode, Detail: detail}
+		return overflow
+	}
+
 	// Every other non-200 is a plain APIError with the status and body
 	// detail — matching client.go's non-429 error lane.
 	return &APIError{StatusCode: statusCode, Detail: detail}

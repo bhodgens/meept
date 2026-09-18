@@ -398,6 +398,21 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 				)
 				return nil, err
 
+			case isContextOverflowError(err):
+				// F-A1: a context overflow is a REQUEST-size verdict, not a
+				// provider health problem — the same body would overflow any
+				// candidate. No recordFailure, NO rotation: the agent loop
+				// compacts context and retries ONCE. Placement before the
+				// 5xx lanes keeps the llama.cpp HTTP-500 shape out of the
+				// rotate-on-server-error path (2026-09-18 e2e: 10 hopeless
+				// rotations per turn).
+				pm.logger.Info("Context overflow: returning to caller without health impact (no rotation)",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+					"latency", latency,
+				)
+				return nil, err
+
 			case IsRateLimitError(err):
 				// Rate limit is provider-specific — rotate immediately.
 				// Don't record as a health failure since rate limits are transient.
@@ -580,6 +595,19 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 				)
 				if progress != nil {
 					progress(ProgressStageDone, fmt.Sprintf("Provider %s refused by safety layer", entry.Config.ProviderID))
+				}
+				return nil, err
+
+			case isContextOverflowError(err):
+				// F-A1: request-size verdict, not provider health — no
+				// recordFailure, NO rotation. The agent loop compacts and
+				// retries once.
+				pm.logger.Info("Context overflow: returning to caller without health impact (no rotation)",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+				)
+				if progress != nil {
+					progress(ProgressStageDone, fmt.Sprintf("Provider %s reported context overflow", entry.Config.ProviderID))
 				}
 				return nil, err
 
@@ -792,6 +820,16 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 				// failure — no recordFailure, no rotation. Return so the
 				// agent loop's one-hop fallback policy owns it.
 				pm.logger.Info("Model refusal on streaming call: returning to caller without health impact (no rotation)",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+				)
+				return nil, err
+
+			case isContextOverflowError(err):
+				// F-A1: request-size verdict, not provider health — no
+				// recordFailure, NO rotation. The agent loop compacts and
+				// retries once.
+				pm.logger.Info("Context overflow on streaming call: returning to caller without health impact (no rotation)",
 					"provider", entry.Config.ProviderID,
 					"error", err,
 				)
