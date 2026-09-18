@@ -5,7 +5,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io; // ignore: web_unsafe_import - guarded by kIsWeb checks
 import 'dart:math';
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb, kReleaseMode;
+import 'package:flutter/foundation.dart'
+    show debugPrint, kIsWeb, kReleaseMode, visibleForTesting;
 import 'package:rxdart/rxdart.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart' show IOWebSocketChannel;
@@ -83,6 +84,14 @@ class WebSocketService {
   int _retryCount = 0;
   Timer? _pongTimeoutTimer;
   final _random = Random();
+
+  /// Test seam (F22 pin): when non-null, the reconnect loop calls this
+  /// instead of [_diagnoseConnectFailure]. Tests inject a throwing
+  /// diagnoser to prove the loop survives a diagnosis failure (on web the
+  /// real one threw synchronously before the kIsWeb guard existed).
+  @visibleForTesting
+  static Future<String?> Function(int retryCount)?
+      diagnoseConnectFailureOverride;
 
   /// Timestamp when the connection was last established (null when disconnected).
   DateTime? _connectedAt;
@@ -235,7 +244,21 @@ class WebSocketService {
           // upgraded to websocket"), so ask the daemon why with an
           // authenticated REST probe and surface an actionable message
           // instead of an opaque endless "connecting...".
-          final diagnosis = await _diagnoseConnectFailure(_retryCount);
+          //
+          // F22: the diagnosis itself must NEVER escape this catch block —
+          // on Flutter Web the dart:io probe used to throw synchronously
+          // (io.HttpClient is unavailable), aborting the retry loop so a
+          // failed web connect never retried. The kIsWeb guard inside the
+          // default diagnoser is the first layer; this try/catch is the
+          // second: whatever the diagnoser does, the loop keeps retrying.
+          String? diagnosis;
+          try {
+            final diagnoser =
+                diagnoseConnectFailureOverride ?? _diagnoseConnectFailure;
+            diagnosis = await diagnoser(_retryCount);
+          } catch (_) {
+            diagnosis = null;
+          }
           _lastConnectError = diagnosis;
           _lastConnectErrorTag = diagnosis == null
               ? null
@@ -770,7 +793,16 @@ class WebSocketService {
   ///   socket error -> nothing listening / transport.http disabled,
   ///   handshake error -> certificate pin mismatch.
   /// Returns null when the probe cannot tell (REST disabled, other status).
+  ///
+  /// F22: on Flutter Web this MUST return null early — the dart:io
+  /// HttpClient below does not exist on the web platform. Constructing it
+  /// here threw synchronously inside the reconnect loop's catch block,
+  /// escaping the retry (the thrown error aborted _connectWithRetry before
+  /// its backoff/`await Future.delayed` could run), so a failed web connect
+  /// never retried.
   Future<String?> _diagnoseConnectFailure(int retryCount) async {
+    if (kIsWeb) return null;
+
     // The reconnect loop backs off to 30 s and the diagnosis is identical each
     // time, so probe the first few attempts and then only occasionally.
     if (retryCount > 3 && retryCount % 5 != 0) return _lastConnectError;
