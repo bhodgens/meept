@@ -1257,12 +1257,17 @@ type EpistemicConfig struct {
 // AmbientExtractionConfig holds settings for extracting epistemic claims
 // from conversation turns without explicit user action.
 type AmbientExtractionConfig struct {
-	Enabled             bool     `json:"enabled"              toml:"enabled"`
-	ConfidenceThreshold float64  `json:"confidence_threshold" toml:"confidence_threshold"`
-	MaxPerTurn          int      `json:"max_per_turn"         toml:"max_per_turn"`
-	ExcludeIntents      []string `json:"exclude_intents"      toml:"exclude_intents"`
-	ExcludeCategories   []string `json:"exclude_categories"   toml:"exclude_categories"`
-	ContextWindow       int      `json:"context_window"       toml:"context_window"`
+	Enabled             bool    `json:"enabled"              toml:"enabled"`
+	ConfidenceThreshold float64 `json:"confidence_threshold" toml:"confidence_threshold"`
+	// RejectBelow hard-drops candidates under this confidence (reason
+	// "reject_band" in the rejected-candidates log). Default 0 when unset =
+	// nothing hard-rejected (legacy binary behavior). Measured optimum 0.3:
+	// below it candidates are overwhelmingly decoy activations.
+	RejectBelow       float64  `json:"reject_below"         toml:"reject_below"`
+	MaxPerTurn        int      `json:"max_per_turn"         toml:"max_per_turn"`
+	ExcludeIntents    []string `json:"exclude_intents"      toml:"exclude_intents"`
+	ExcludeCategories []string `json:"exclude_categories"   toml:"exclude_categories"`
+	ContextWindow     int      `json:"context_window"       toml:"context_window"`
 }
 
 // EpisodicConfig holds episodic memory settings.

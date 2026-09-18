@@ -73,6 +73,23 @@ ws = 0.005
 - **Periodic Updates**: Refreshed every N conversations
 - **Response Style Influence**: Adapts to user preferences
 
+### Ambient Candidate Confidence Disposal (three bands)
+
+Ambient extraction candidates are disposed by confidence band
+(`AmbientExtractionConfig`):
+
+| Band | Disposal |
+|------|----------|
+| `confidence < reject_below` (default 0 = disabled) | Hard-dropped, logged to `rejected_candidates.jsonl` (reason `reject_band`) |
+| `reject_below <= confidence` | Stored as `status=auto` claim — librarian review pipeline confirms or rejects |
+| `confidence >= confidence_threshold` (default 0.7) | Stored as `status=auto` claim (same pipeline) |
+
+The confidence threshold no longer drops candidates: calibration data
+(2026-09-17) showed the middle band is 33% correct, so hard-dropping it
+loses real memory. Measured optimum for `reject_below` is 0.3 (below it
+candidates are overwhelmingly decoy activations); recalibrate on live
+verdicts (`claim_verdicts.jsonl`) before adjusting.
+
 ### Claim Temporal Validity
 
 Claims carry optional temporal bounds and a monotonic revision counter.

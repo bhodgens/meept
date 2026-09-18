@@ -39,12 +39,15 @@ func TestSplitFiltered_ReasonsAndOrder(t *testing.T) {
 		{Text: "over max", Confidence: 0.95},
 	}
 	excluded := map[string]struct{}{"opinion": {}}
-	passed, rejected := splitFiltered(in, 0.7, excluded, 2)
+	// Post-calibration: threshold no longer drops (mid band is stored for
+	// review); only category excludes and max_per_turn gate here. With max=2,
+	// "low conf decoy" (3rd eligible in input order) is rejected as max_per_turn.
+	passed, rejected := splitFiltered(in, 0.7, 0.0, excluded, 2)
 	if len(passed) != 2 || passed[0].Text != "passes 1" || passed[1].Text != "passes 2" {
 		t.Fatalf("passed = %v", passed)
 	}
 	wantReasons := map[string]string{
-		"low conf decoy": "confidence",
+		"low conf decoy": "max_per_turn",
 		"excluded cat":   "category",
 		"over max":       "max_per_turn",
 	}
@@ -59,6 +62,39 @@ func TestSplitFiltered_ReasonsAndOrder(t *testing.T) {
 		}
 		if r.Reason != want {
 			t.Errorf("%s: reason = %q, want %q", r.Text, r.Reason, want)
+		}
+	}
+}
+
+// TestSplitFiltered_ThreeBand pins the corrected calibration wiring: below
+// reject_below is hard-dropped (reject_band), the middle band is stored for
+// librarian review, and default reject_below=0 keeps legacy behavior.
+func TestSplitFiltered_ThreeBand(t *testing.T) {
+	in := []memory.AmbientCandidate{
+		{Text: "decoy activation", Confidence: 0.1},
+		{Text: "mid band correct", Confidence: 0.5},
+		{Text: "top band", Confidence: 1.0},
+	}
+	excluded := map[string]struct{}{}
+
+	// With rejectBelow=0.3: 0.1 is hard-dropped; 0.5 (middle band) and 1.0
+	// are stored for librarian review.
+	passed, rejected := splitFiltered(in, 0.7, 0.3, excluded, 5)
+	if len(passed) != 2 || passed[0].Text != "mid band correct" || passed[1].Text != "top band" {
+		t.Fatalf("passed = %v", passed)
+	}
+	if len(rejected) != 1 || rejected[0].Reason != "reject_band" || rejected[0].Text != "decoy activation" {
+		t.Fatalf("rejected = %+v", rejected)
+	}
+
+	// Default rejectBelow=0: byte-identical to legacy (nothing hard-dropped).
+	passed, rejected = splitFiltered(in, 0.7, 0.0, excluded, 5)
+	if len(passed) != 3 {
+		t.Fatalf("default passed = %v", passed)
+	}
+	for _, r := range rejected {
+		if r.Reason == "reject_band" {
+			t.Errorf("reject_band fired with rejectBelow=0: %+v", r)
 		}
 	}
 }
@@ -122,14 +158,11 @@ func TestEpistemicHook_RejectedLogged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AfterTurn: %v", err)
 	}
-	if len(ids) != 1 {
-		t.Fatalf("ids = %v, want 1 written claim", ids)
+	if len(ids) != 2 {
+		t.Fatalf("ids = %v, want 2 written claims (rejectBelow=0 stores junk band)", ids)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "rejected_candidates.jsonl"))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if !strings.Contains(string(data), `"junk"`) || !strings.Contains(string(data), `"confidence"`) {
-		t.Errorf("rejected log missing junk/confidence:\n%s", data)
+	if _, err := os.Stat(filepath.Join(dir, "rejected_candidates.jsonl")); !os.IsNotExist(err) {
+		data, _ := os.ReadFile(filepath.Join(dir, "rejected_candidates.jsonl"))
+		t.Errorf("rejected log should not exist with rejectBelow=0, got:\n%s", data)
 	}
 }

@@ -86,6 +86,7 @@ func (h *EpistemicHook) AfterTurn(ctx context.Context, intent string, messages [
 	if threshold <= 0 {
 		threshold = 0.7 // spec default (mirrors filterAmbientCandidates)
 	}
+	rejectBelow := h.cfg.AmbientExtraction.RejectBelow // 0 = disabled (legacy binary behavior)
 	maxPerTurn := h.cfg.AmbientExtraction.MaxPerTurn
 	if maxPerTurn <= 0 {
 		maxPerTurn = 3 // spec default
@@ -94,7 +95,7 @@ func (h *EpistemicHook) AfterTurn(ctx context.Context, intent string, messages [
 	for _, c := range h.cfg.AmbientExtraction.ExcludeCategories {
 		excludedCat[c] = struct{}{}
 	}
-	candidates, rejected := splitFiltered(candidates, threshold, excludedCat, maxPerTurn)
+	candidates, rejected := splitFiltered(candidates, threshold, rejectBelow, excludedCat, maxPerTurn)
 	if h.rejectedLogger != nil {
 		h.rejectedLogger.LogRejected(intent, threshold, rejected)
 	}

@@ -108,11 +108,18 @@ func (r *RejectedCandidateLogger) appendAll(path, intent string, threshold float
 // mirroring filterAmbientCandidates' gates. It returns the same passing slice
 // the filter would, plus a rejection reason per dropped candidate so the
 // calibration log records WHY each one was dropped.
-func splitFiltered(in []memory.AmbientCandidate, threshold float64, excludedCat map[string]struct{}, max int) (passed []memory.AmbientCandidate, rejected []rejectedCandidateRecord) {
+// splitFiltered applies the three-band confidence disposal (corrected
+// calibration design): below rejectBelow is hard-dropped (reason "reject_band"
+// — overwhelmingly decoy activations); everything else is stored as status=auto
+// for librarian review, regardless of the legacy ConfidenceThreshold (the
+// threshold no longer drops — the calibration data showed the middle band is
+// 33% correct, so hard-dropping it loses real memory). Category excludes and
+// max_per_turn still gate.
+func splitFiltered(in []memory.AmbientCandidate, threshold, rejectBelow float64, excludedCat map[string]struct{}, max int) (passed []memory.AmbientCandidate, rejected []rejectedCandidateRecord) {
 	for _, c := range in {
 		switch {
-		case c.Confidence < threshold:
-			rejected = append(rejected, rejectRec(c, "confidence"))
+		case c.Confidence < rejectBelow:
+			rejected = append(rejected, rejectRec(c, "reject_band"))
 		case catExcluded(c.Category, excludedCat):
 			rejected = append(rejected, rejectRec(c, "category"))
 		case len(passed) >= max:

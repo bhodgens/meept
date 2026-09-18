@@ -85,8 +85,11 @@ func TestEpistemicHookHappyPath(t *testing.T) {
 	if len(fake.writeCalls) != 1 {
 		t.Errorf("expected 1 WriteCandidates call, got %d", len(fake.writeCalls))
 	}
-	if len(fake.writeCalls[0]) != 1 {
-		t.Errorf("expected 1 filtered candidate, got %d", len(fake.writeCalls[0]))
+	// Post-calibration: the confidence threshold no longer drops — the
+	// "low conf" candidate is stored for librarian review. Only the
+	// excluded-category candidate is gated.
+	if len(fake.writeCalls[0]) != 2 {
+		t.Errorf("expected 2 stored candidates (low conf kept for review), got %d", len(fake.writeCalls[0]))
 	}
 }
 
