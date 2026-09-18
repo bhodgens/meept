@@ -1391,9 +1391,8 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 		}
 	}
 
-	// Build remaining work description. Classify the existing steps into
-	// completed (successfully terminal) vs. uncompleted so the planner knows
-	// what's left to retry or finish.
+	// Classify the existing steps into completed (successfully terminal)
+	// vs. uncompleted so the planner knows what's left to retry or finish.
 	var completedDescs, remainingDescs []string
 	for _, s := range completedSteps {
 		if s.State.IsSuccessfullyTerminal() {
@@ -1403,34 +1402,16 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 		}
 	}
 
-	// Format completed steps as "do not redo" context.
-	completedList := "none"
-	if len(completedDescs) > 0 {
-		var sb strings.Builder
-		for _, d := range completedDescs {
-			sb.WriteString(fmt.Sprintf("\n  - %s", d))
-		}
-		completedList = sb.String()
-	}
-
-	// Format remaining (uncompleted) work for the planner. Fall back to the
-	// original task objective if no uncompleted steps were recorded.
-	remainingList := "re-attempt the original task objective"
-	if len(remainingDescs) > 0 {
-		var sb strings.Builder
-		for _, d := range remainingDescs {
-			sb.WriteString(fmt.Sprintf("\n  - %s", d))
-		}
-		remainingList = sb.String()
-	}
-
-	replanDesc := fmt.Sprintf(
-		"RE-PLAN: Task '%s' failed with error: %s.\nCompleted steps (do not redo): %s\nRemaining (uncompleted) steps to retry or finish: %s",
-		t.Description,
-		failureReason,
-		completedList,
-		remainingList,
-	)
+	// F-B4 (2026-09-18 e2e): the failure reason used to be embedded VERBATIM
+	// into the replan prompt. A coder cycle-abort result — the full step
+	// result, and transitively much of the loop's conversation — flowed
+	// straight back into the next plan request; the escalation manager
+	// replanned 3+ times, each replan replayed the transcript into a fresh
+	// loop (27 unbacked-claims nudges, context regrowth to llama.cpp 500
+	// "Context size has been exceeded"). The planner needs the failure's
+	// shape, never the transcript: buildReplanDigest carries the task
+	// description, the step split, and a first-line-only bounded reason.
+	replanDesc := buildReplanDigest(t.Description, completedDescs, remainingDescs, failureReason)
 
 	req := PlanRequest{
 		TaskID: taskID,

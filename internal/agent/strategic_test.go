@@ -1634,3 +1634,69 @@ func TestStrategicPlanner_DefaultTemplateLoaderRegistersSpecFallback(t *testing.
 		}
 	}
 }
+
+// TestReplanFailedTask_DigestBounded drives the full ReplanFailedTask path
+// (F-B4) with a pathological multi-KB failureReason and asserts (a) the
+// planner still produces a step and (b) the persisted replan description
+// stays under the digest bound — the end-to-end guarantee the escalation
+// replan path relies on.
+func TestReplanFailedTask_DigestBounded(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	stepStore := taskStore.StepStore()
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		Registry:       NewAgentRegistry(RegistryConfig{Logger: slogDiscardLogger()}),
+		TaskStore:      taskStore,
+		StepStore:      stepStore,
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	tsk := newTestTask("task-replan-digest", "ship the release notes")
+	if err := taskStore.Create(tsk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	// A previously planned step that failed.
+	failedStep := task.NewTaskStep(tsk.ID, "draft the changelog", 0)
+	failedStep.State = task.StepFailed
+	if err := stepStore.Create(failedStep); err != nil {
+		t.Fatalf("failed to create failed step: %v", err)
+	}
+
+	hugeReason := strings.Repeat("Previous attempt transcript line. ", 500) + "\nmore\nlines"
+	if err := sp.ReplanFailedTask(context.Background(), tsk.ID, hugeReason); err != nil {
+		t.Fatalf("ReplanFailedTask failed: %v", err)
+	}
+
+	steps, err := stepStore.ListByTaskID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+	var replanned bool
+	for _, s := range steps {
+		if strings.Contains(s.Description, "RE-PLAN") {
+			replanned = true
+			if got := len([]rune(s.Description)); got > replanDigestMaxChars {
+				t.Errorf("replan description = %d runes, want <= %d", got, replanDigestMaxChars)
+			}
+			if strings.Contains(s.Description, "more\nlines") {
+				t.Errorf("replan description leaked full failure reason")
+			}
+		}
+	}
+	if !replanned {
+		t.Fatalf("replan did not produce a step; steps: %+v", steps)
+	}
+}

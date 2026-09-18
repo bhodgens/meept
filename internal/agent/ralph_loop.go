@@ -349,13 +349,18 @@ func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousE
 		return fmt.Errorf("failed to get task: %w", err)
 	}
 
-	// Create replan context with previous attempt info
+	// Create replan context with previous attempt info. F-B4 (2026-09-18
+	// e2e): previousEvidence carried full evidence strings — each replan
+	// replayed the prior conversation into the fresh loop, growing context
+	// to llama.cpp 500 "Context size has been exceeded" after 3+ replans.
+	// Bound each evidence line to its first line so the envelope stays
+	// compact; the replanning planner only needs the failure's shape.
 	replanContext := fmt.Sprintf("Previous attempt (iteration %d/%d) completed without sufficient evidence.\n",
 		iteration-1, rl.config.MaxIterations)
 	if len(previousEvidence) > 0 {
-		replanContext += "Evidence from previous attempt:\n"
+		replanContext += "Evidence from previous attempt (summarized):\n"
 		for i, ev := range previousEvidence {
-			replanContext += fmt.Sprintf("  %d. %s\n", i+1, ev)
+			replanContext += fmt.Sprintf("  %d. %s\n", i+1, truncateRunes(firstLine(ev), 200, "…"))
 		}
 	}
 	replanContext += "\nPlease revise the approach to ensure verifiable completion."

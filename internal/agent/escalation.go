@@ -264,13 +264,18 @@ func (em *EscalationManager) triggerReplan(ctx context.Context, failure FailureC
 		return fmt.Errorf("failed to get task for re-planning: %w", err)
 	}
 
-	// Build a more constrained plan request
-	replanDescription := fmt.Sprintf(
-		"RE-PLAN (escalation level %d): Original task failed at step '%s' with error: %s. "+
-			"Please break this into smaller, more focused steps that avoid the previous failure. "+
-			"Original description: %s",
-		level, failure.StepID, failure.Error, t.Description,
-	)
+	// Build a more constrained plan request. F-B4 (2026-09-18 e2e): the
+	// raw failure.Error (the failing step's full result) used to be
+	// interpolated here verbatim, growing each replan's prompt toward the
+	// context limit across escalation levels. The bounded digest keeps the
+	// planner's required shape — task, steps, one-line failure — under
+	// replanDigestMaxChars.
+	replanDescription := buildReplanDigest(
+		t.Description,
+		nil,
+		nil,
+		fmt.Sprintf("step '%s' failed: %s", failure.StepID, failure.Error),
+	) + "\nPlease break this into smaller, more focused steps that avoid the previous failure."
 
 	req := PlanRequest{
 		TaskID:    failure.TaskID,
