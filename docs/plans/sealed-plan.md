@@ -2,8 +2,8 @@
 
 ## Meta
 
-- plan_id: plan-20260908042953-0001
-- created: 2026-09-08
+- plan_id: plan-20260918052859-0005
+- created: 2026-09-18
 - status: planning
 
 ## Summary
