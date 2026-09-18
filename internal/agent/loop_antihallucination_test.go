@@ -95,3 +95,60 @@ func TestResetTurnGuards_ClearsToolLedger(t *testing.T) {
 		t.Fatalf("ledger survived turn reset: map=%v", got)
 	}
 }
+
+// Live scratch-rig regression (2026-09-18, routing-smoke rig, repaired
+// dispatcher): the quantized 8B debugger answered "What is wrong with
+// routing/geometry.py?" by calling memory_search once, then TERMINATING
+// with announced-but-unexecuted work: "To help identify what's wrong with
+// the file, I need to first check what's in the current project directory.
+// Let me examine the project structure." No follow-up iteration happened —
+// the step approved as completed on that narration alone. This is the
+// INVERSE of the run-7 shape: run 7 claimed completed effects; this shape
+// ends the turn promising future work. The step store recorded
+// state=approved with the announcement as the result.
+func TestTerminatesOnAnnouncedAction_LiveShapes(t *testing.T) {
+	l := &AgentLoop{}
+	cases := []string{
+		"To help identify what's wrong with the file, I need to first check what's in the current project directory. Let me examine the project structure.",
+		"Let me examine the project structure.",
+		"I need to first check what's in the current project directory.",
+		"let me look at the file to find the bug",
+		"First, I'll check the configuration.",
+		"I'll read the file now.",
+	}
+	for _, c := range cases {
+		if !l.terminatesOnAnnouncedAction(c) {
+			t.Errorf("announced-action termination not detected: %q", c)
+		}
+	}
+}
+
+func TestTerminatesOnAnnouncedAction_AnswersPassThrough(t *testing.T) {
+	l := &AgentLoop{}
+	cases := []string{
+		"The file returns width + height; area needs width * height.", // real answer
+		"The bug is on line 3: addition instead of multiplication.",   // real answer
+		"I examined the project structure and found the defect.",      // past action, completed
+		"",                                      // empty
+		"The project structure looks fine.",     // statement, no announced action
+		"let me know if you need anything else", // closing courtesy
+	}
+	for _, c := range cases {
+		if l.terminatesOnAnnouncedAction(c) {
+			t.Errorf("answer/complete narration matched as announced action: %q", c)
+		}
+	}
+}
+
+func TestTurnExecutedAnyTools_Ledger(t *testing.T) {
+	l := &AgentLoop{}
+	if l.turnExecutedAnyTools() {
+		t.Fatal("empty ledger must report no tools")
+	}
+	l.mu.Lock()
+	l.turnToolCalls = map[string]int{"memory_search": 1}
+	l.mu.Unlock()
+	if !l.turnExecutedAnyTools() {
+		t.Fatal("memory_search in ledger must report tools")
+	}
+}

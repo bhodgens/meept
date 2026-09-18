@@ -3204,6 +3204,48 @@ func (l *AgentLoop) turnExecutedFileTools() bool {
 	return false
 }
 
+// turnExecutedAnyTools reports whether ANY tool was emitted for execution
+// this turn. Used by the announced-action termination guard: a turn whose
+// model executed real tools and then narrated is in a different class from
+// a turn that ends on a promise ("Let me examine…") with nothing behind it.
+func (l *AgentLoop) turnExecutedAnyTools() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return len(l.turnToolCalls) > 0
+}
+
+// announcedActionRe matches FORWARD-LOOKING action narration: first-person
+// statements that promise work about to happen ("Let me examine the
+// project structure.", "I'll read the file now.", "I need to first check
+// what's in the current project directory."). Every alternative is
+// verb-anchored so courtesy phrases ("let me know") and topic questions
+// ("let me explain why X fails" is an answer) pass through. The live
+// failure shape (routing-smoke rig, 2026-09-18): the model terminated its
+// turn on such a promise and the step approved as completed on narration
+// alone — the INVERSE of the run-7 completed-effect fabrication. This is
+// a shape test for the loop's final-text guard only; it never gates
+// content by topic.
+var announcedActionRe = regexp.MustCompile(
+	`(?i)\blet me (?:just |first |quickly )?(?:check|read|look|examine|inspect|analyze|search|find|open|run|see|review|trace|verify|test|grab|fetch|pull|dig|investigate|explore|walk)\b|` +
+		`\bi(?:'ll| will) (?:first |just |now )?(?:check|read|look|examine|inspect|analyze|search|find|open|run|review|verify|test|start|begin|investigate|explore)\b|` +
+		`\bi need to (?:first |just )?(?:check|read|look|examine|inspect|analyze|search|find|open|run|verify|review|investigate)\b|` +
+		`\bfirst,? (?:i|let me)\b`)
+
+// terminatesOnAnnouncedAction reports whether text ends the turn on an
+// announced-but-not-yet-executed action. Clause-anchored: hypotheticals
+// about the user ("let me know"), past-tense completions ("I examined…
+// and found"), and plain answers contain no first-person future promise,
+// so they pass through. Used together with turnExecutedAnyTools: the
+// nudge fires only when the turn ends on a promise AND no tool ran —
+// a promise backed by prior executions is the model narrating its own
+// work, which is the reviewer's job, not the loop's.
+func (l *AgentLoop) terminatesOnAnnouncedAction(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	return announcedActionRe.MatchString(strings.ToLower(text))
+}
+
 // unbackedSideEffectClaims reports whether text claims COMPLETED file
 // side-effects ("Created file hello.txt", "I've updated the config") —
 // the exact narration shape the quantized LFM2.5 hallucinated in e2e run
@@ -5099,6 +5141,30 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			l.logger.Warn("Unbacked file side-effect claims with zero tool executions; no iteration budget to nudge, annotating response",
 				"conversation", conversationID)
 			return "[unverified: no tools were executed this turn] " + response.Content, nil
+		}
+		// Announced-action termination guard (routing-smoke rig,
+		// 2026-09-18): the model ENDS the turn on a promise of future
+		// work ("Let me examine the project structure.") with zero tool
+		// executions this turn — the inverse of the run-7 fabrication.
+		// The step then approved on that narration alone. Same remedy
+		// as the run-7 guard: nudge ONCE so the model either performs
+		// the announced action with real tools or answers from what it
+		// actually has. Same budget discipline: no nudge without
+		// iterations left; annotate instead of fabricating success.
+		if l.terminatesOnAnnouncedAction(response.Content) && !l.turnExecutedAnyTools() {
+			if iteration < l.config.MaxIterations {
+				l.logger.Warn("Turn ends on announced-but-unexecuted action with zero tool executions, nudging",
+					"iteration", iteration,
+					"conversation", conversationID,
+				)
+				conv.AddAssistantMessage(response.Content)
+				conv.AddUserMessage("[system: Your response announces work you have not done (\"let me examine…\", \"I'll check…\") and this turn executed no tools. Do NOT end your turn on a promise: either perform the action with the available tools now, or answer the user's question directly from what you already know or already retrieved. A response that only promises future work is not a completed task.]")
+				l.publishIteration(conversationID, iteration)
+				continue
+			}
+			l.logger.Warn("Turn ends on announced-but-unexecuted action; no iteration budget to nudge, annotating response",
+				"conversation", conversationID)
+			return "[incomplete: the turn ended on planned-but-unexecuted work] " + response.Content, nil
 		}
 		return response.Content, nil
 	}
