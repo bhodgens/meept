@@ -47,6 +47,25 @@ NGRAM_LO, NGRAM_HI = 2, 4
 CHAR_WB = True  # word-boundary padding like sklearn char_wb
 
 
+def _file_sha256(path: str, chunk: int = 1 << 20) -> str:
+    """Streaming sha256 of a source corpus file (content, not just the
+    path label)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(chunk)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+
+def _harness_mod():
+    """Return the already-imported eval_harness module (imported at
+    module load below for corpus loading reuse)."""
+    return H
+
+
 def char_ngrams(text):
     text = text.lower()
     if CHAR_WB:
@@ -88,34 +107,36 @@ def tfidf_matrix(docs, vocab, idf):
     return rows
 
 
-def main():
+def build(argv=None):
+    """Entry point used by the provenance tests: parses argv (defaults to
+    sys.argv), trains, writes the model, returns an exit code. `main`
+    delegates here so the provenance shape is exercised by the exact
+    production code path (offline; synthetic corpora only in tests)."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", action="append", required=True)
     ap.add_argument("--out", default="internal/agent/testdata/prefilter_tfidf_veto.json")
     ap.add_argument("--min-df", type=int, default=1)
-    args = ap.parse_args()
+    ap.add_argument("-v", "--verbose", action="store_true")
+    args = ap.parse_args(argv)
 
-    cases = []
+    h = _harness_mod()
+    selected: list = []   # (text, intent, corpus_path)
     for cpath in args.corpus:
-        cb, ca = H.load_cases(base=Path(cpath) if "test-corpus" in cpath else H.BASE_CORPUS,
-                              adv=Path(cpath) if "adversarial" in cpath else H.ADV_CORPUS)
-        if "test-corpus" in cpath:
-            cases.extend(cb)
-        else:
-            cases.extend(ca)
+        cb, ca = h.load_cases(h.BASE_CORPUS, Path(cpath))
+        selected.extend((c.text, c.intent, cpath) for c in ca)
 
     # dedup identical texts (multi-corpus overlap)
     seen = set()
     docs, labels = [], []
-    for c in cases:
-        if c.ood or not c.intent:
+    for text, intent, _ in selected:
+        if not intent or intent == "OOD":
             continue
-        k = hashlib.sha256(c.text.encode()).hexdigest()
+        k = hashlib.sha256(text.encode()).hexdigest()
         if k in seen:
             continue
         seen.add(k)
-        docs.append(c.text)
-        labels.append(c.intent)
+        docs.append(text)
+        labels.append(intent)
 
     classes = sorted(set(labels))
     y = [classes.index(l) for l in labels]
@@ -166,6 +187,25 @@ def main():
         if scores.index(max(scores)) == yi:
             correct += 1
 
+    # PROVENANCE (leaf 03, MEAS-03): the metadata describes the ACTUAL
+    # selected population (docs/labels above after OOD exclusion and
+    # dedup), never a constant. The eligible key set is hashed in the
+    # same form the centroid builder uses, so both artifacts from one
+    # build are comparable by hash. The population label is derived from
+    # REAL SET PARITY against the harness default eligible keys — an
+    # explicit single-corpus run is recorded as the subset experiment it
+    # is, never silently presented as the evaluated population. Go
+    # decoder (internal/agent/tfidf_veto.go loadTfidfVeto) unmarshals a
+    # fixed struct without DisallowUnknownFields: the extra
+    # ``provenance`` key is tolerated.
+    key_list = sorted(hashlib.sha256(t.strip().encode()).hexdigest()[:16]
+                      for t in docs)
+    eligible_sha = hashlib.sha256("\n".join(key_list).encode()).hexdigest()
+    base_cases, adv_cases = h.load_cases()
+    default_keys = {hashlib.sha256(c.text.strip().encode()).hexdigest()[:16]
+                    for c in base_cases + adv_cases
+                    if not c.ood and c.intent}
+    is_default = set(key_list) == default_keys
     model = {
         "built_at": datetime.now(timezone.utc).isoformat(),
         "corpus": [c for c in args.corpus],
@@ -179,6 +219,23 @@ def main():
         "coef": coef,
         "intercept": intercept,
         "threshold": 0.0,
+        # ---- additive provenance block (Go-tolerated) ----
+        "provenance": {
+            "schema": 1,
+            "population": ("default-eval-population" if is_default
+                           else "subset-explicit"),
+            "document_count": N,
+            "eligible_key_set_sha256": eligible_sha,
+            "source_files": [str(Path(c).resolve()) for c in args.corpus],
+            "source_sha256": {str(Path(c).resolve()): _file_sha256(c)
+                              for c in args.corpus},
+            "preprocessing": {
+                "ngram_lo": NGRAM_LO, "ngram_hi": NGRAM_HI,
+                "char_wb": CHAR_WB, "sublinear_tf": True,
+                "smooth_idf": True, "min_df": args.min_df,
+                "lowercase": True,
+            },
+        },
     }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -186,6 +243,11 @@ def main():
     print(f"docs: {N}  features: {len(vocab)}  classes: {nC}")
     print(f"train accuracy: {correct/N:.2%}")
     print(f"wrote {out} ({out.stat().st_size/1024:.0f} KB)")
+    return 0
+
+
+def main():
+    sys.exit(build())
 
 
 if __name__ == "__main__":

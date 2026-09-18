@@ -814,6 +814,249 @@ def self_test() -> int:
           known not in _fmt and "zsecret-guard-text-z" not in _fmt
           and H.case_key(known) in _fmt, f"-> {_fmt}")
 
+    # ------------------------------------------------------------------
+    # 8. SCORING INTEGRITY (leaf 02 / MEAS-04 + MEAS-08): the REAL
+    #    run_permutation, driven with an in-memory embedder and
+    #    constant/scripted predictors over synthetic in-memory cases --
+    #    no embed server, no disk cache, no files written. Pins:
+    #      - every held-out case (in-domain AND OOD) reaches head.decide;
+    #      - OOD gold labels never enter training (they only grade);
+    #      - the C2 count definitions hold, including the recorded hand
+    #        calculation (1 correct in-domain route + 1 wrong OOD route
+    #        => total=1 direct=1 correct=1 wrong=1 OOD_R=0, modeled
+    #        in-domain E2E stays 1, and the wrong-route penalty fires);
+    #      - zero-denominator ratios are None (JSON null, rendered "n/a"),
+    #        never a fabricated 0.0 or 100% (recorded decision 2026-09-17);
+    #      - E2E keeps the 0.868 chain coefficient as MODELED in-domain
+    #        accuracy and is unchanged by OOD errors when the in-domain
+    #        predictions are identical.
+    print("self-test: scoring integrity (real run_permutation, scripted heads)")
+    _saved_env = {k: H.__dict__.get(k)
+                  for k in ("ALLVEC", "self_mask", "_FULL_V", "build_head")}
+
+    def _restore_env():
+        for _k, _v in _saved_env.items():
+            if _v is None:
+                H.__dict__.pop(_k, None)
+            else:
+                H.__dict__[_k] = _v
+
+    def close(a, b, tol=1e-9):
+        return a is not None and b is not None and abs(a - b) <= tol
+
+    def mk_case(i: int, ood: bool = False) -> H.Case:
+        text = f"leaf02 selftest synthetic {'ood' if ood else 'in'}-{i}"
+        return H.Case(text, "OOD" if ood else "code", "", ood,
+                      "selftest", "", f"leaf02-{i}")
+
+    class MemEmbedder(H.Embedder):
+        """In-memory embedder: no disk cache, no network, no latency."""
+
+        def __init__(self, vecs: dict):
+            self.mem = dict(vecs)
+            self.latency_ms = []
+
+        def embed_keys(self, texts, keys):
+            pass
+
+        def vectors(self, keys):
+            return np.stack([np.asarray(self.mem[k], dtype=np.float32)
+                             for k in keys])
+
+    def vecs_for(cases) -> dict:
+        eye = np.eye(max(len(cases), 1), dtype=np.float32)
+        return {H.case_key(c.text): eye[i] for i, c in enumerate(cases)}
+
+    def scripted_run(spec_name, cases, folds, verdicts):
+        """Drive the real run_permutation with a scripted constant head.
+        Returns (metrics, decide-call count, labels seen by fit)."""
+        calls = {"n": 0}
+        train: list = []
+
+        class ScriptedHead:
+            def fit(self, idx, intents):
+                train.extend(intents)
+
+            def decide(self, q, intents):
+                calls["n"] += 1
+                v = verdicts[min(calls["n"] - 1, len(verdicts) - 1)]
+                return (v, 1.0) if v is not None else (None, 1.0)
+
+        H.build_head = lambda spec, emb: ScriptedHead()
+        try:
+            m = H.run_permutation(
+                {"name": spec_name, "head": {"type": "scripted"}},
+                cases, folds, MemEmbedder(vecs_for(cases)))
+        finally:
+            pass  # globals restored once by the outer finally
+        return m, calls["n"], train
+
+    try:
+        # --- recorded hand calculation: one in-domain + one OOD case,
+        #     always-code predictor. Two prediction calls, OOD_abstain=0,
+        #     wrong=1; total/direct/correct=1; E2E=1; penalty fires.
+        in1, ood1 = mk_case(101), mk_case(102, ood=True)
+        folds2 = {H.case_key(in1.text): 0, H.case_key(ood1.text): 1}
+        m, calls, train = scripted_run("leaf02-hand-calc", [in1, ood1],
+                                       folds2, ["code"])
+        check("hand-calc: BOTH held-out cases reach head.decide (2 calls)",
+              calls == 2, f"-> {calls} calls")
+        check("hand-calc: OOD gold label never entered training",
+              "OOD" not in train, f"-> trained on {train}")
+        check("hand-calc: total=1 direct=1 correct=1",
+              (m["total"], m["direct"], m["correct"]) == (1, 1, 1),
+              f"-> {m['total']}/{m['direct']}/{m['correct']}")
+        check("hand-calc: wrong=1 (the routed OOD case)",
+              m["wrong"] == 1, f"-> {m['wrong']}")
+        check("hand-calc: OOD_total=1 OOD_abstain=0 OOD_R=0 (measured)",
+              (m["OOD_total"], m["OOD_abstain"]) == (1, 0)
+              and close(m["OOD_R"], 0.0),
+              f"-> {m['OOD_total']}/{m['OOD_abstain']}/{m['OOD_R']}")
+        check("hand-calc: modeled in-domain E2E stays 1",
+              close(m["E2E"], 1.0), f"-> {m['E2E']}")
+        check("hand-calc: wrong-route penalty fires (SCORE=-4)",
+              close(m["SCORE"], -4.0), f"-> {m['SCORE']}")
+        check("hand-calc: C=1 P=1 A=0.5",
+              close(m["C"], 1.0) and close(m["P"], 1.0)
+              and close(m["A"], 0.5),
+              f"-> {m['C']}/{m['P']}/{m['A']}")
+        check("hand-calc: the wrong OOD route lands in confusion evidence",
+              any(c.case_id == ood1.case_id for c, _, _ in m["confusion"]),
+              f"-> {[c.case_id for c, _, _ in m['confusion']]}")
+
+        # --- controls on a 6-case fixture: 5 in-domain (one per fold, so
+        #     every test fold keeps 4 training cases) + 1 OOD (fold 0).
+        in5 = [mk_case(200 + i) for i in range(5)]
+        ood6 = mk_case(299, ood=True)
+        six = in5 + [ood6]
+        folds6 = {**{H.case_key(c.text): i for i, c in enumerate(in5)},
+                  H.case_key(ood6.text): 0}
+        folds5 = {H.case_key(c.text): i for i, c in enumerate(in5)}
+
+        m, calls, train = scripted_run("always-route", six, folds6, ["code"])
+        check("always-route: all 6 held-out cases predicted", calls == 6,
+              f"-> {calls}")
+        check("always-route: OOD excluded from training", "OOD" not in train)
+        check("always-route: routed OOD counts as wrong", m["wrong"] == 1,
+              f"-> {m['wrong']}")
+        check("always-route: OOD_R measured 0 (not assumed)", close(m["OOD_R"], 0.0),
+              f"-> {m['OOD_R']}")
+        check("always-route: E2E=1, SCORE=0 (penalty -5*1/5 fires)",
+              close(m["E2E"], 1.0) and close(m["SCORE"], 0.0),
+              f"-> {m['E2E']}/{m['SCORE']}")
+        ref_indomain = (m["total"], m["direct"], m["correct"], m["E2E"])
+
+        m, _c, _t = scripted_run("always-abstain", six, folds6, [None])
+        check("always-abstain: direct=0 correct=0 wrong=0",
+              (m["direct"], m["correct"], m["wrong"]) == (0, 0, 0),
+              f"-> {m['direct']}/{m['correct']}/{m['wrong']}")
+        check("always-abstain: OOD_abstain=1, OOD_R=1 MEASURED (head said no)",
+              (m["OOD_abstain"],) == (1,) and close(m["OOD_R"], 1.0),
+              f"-> {m['OOD_abstain']}/{m['OOD_R']}")
+        check("always-abstain: undefined P and A are null, not 0.0",
+              m["P"] is None and m["A"] is None,
+              f"-> {m['P']}/{m['A']}")
+        check("always-abstain: C=0 is defined; E2E=0.868 modeled credit",
+              close(m["C"], 0.0) and close(m["E2E"], H.CHAIN_BASELINE),
+              f"-> {m['C']}/{m['E2E']}")
+        check("always-abstain: SCORE keeps the 0-contribution convention",
+              close(m["SCORE"], 0.0), f"-> {m['SCORE']}")
+
+        m, _c, _t = scripted_run("wrong-in-domain", six, folds6, ["chat"])
+        check("wrong-in-domain: direct=5 correct=0 wrong=6 (5 + 1 OOD)",
+              (m["direct"], m["correct"], m["wrong"]) == (5, 0, 6),
+              f"-> {m['direct']}/{m['correct']}/{m['wrong']}")
+        check("wrong-in-domain: P=0, A=0, E2E=0 (no abstention credit)",
+              close(m["P"], 0.0) and close(m["A"], 0.0) and close(m["E2E"], 0.0),
+              f"-> {m['P']}/{m['A']}/{m['E2E']}")
+        check("wrong-in-domain: SCORE=-6 (penalty 5*6/5)",
+              close(m["SCORE"], -6.0), f"-> {m['SCORE']}")
+
+        # mixed script: call order follows case order per fold
+        # (in0, ood, in1, in2, in3, in4); route calls 0/2/3, abstain 1/4/5.
+        m, calls, _t = scripted_run(
+            "mixed-domain", six, folds6,
+            ["code", None, "code", "code", None, None])
+        check("mixed-domain: 6 prediction calls", calls == 6, f"-> {calls}")
+        check("mixed-domain: direct=3 correct=3 wrong=0",
+              (m["direct"], m["correct"], m["wrong"]) == (3, 3, 0),
+              f"-> {m['direct']}/{m['correct']}/{m['wrong']}")
+        check("mixed-domain: OOD abstention measured (OOD_R=1)",
+              (m["OOD_abstain"],) == (1,) and close(m["OOD_R"], 1.0),
+              f"-> {m['OOD_abstain']}/{m['OOD_R']}")
+        check("mixed-domain: C=0.6 P=1 A=1",
+              close(m["C"], 0.6) and close(m["P"], 1.0) and close(m["A"], 1.0),
+              f"-> {m['C']}/{m['P']}/{m['A']}")
+        check("mixed-domain: E2E=(3 + 0.868*2)/5 (modeled, deterministic)",
+              close(m["E2E"], (3 + 2 * H.CHAIN_BASELINE) / 5), f"-> {m['E2E']}")
+
+        # --- zero-denominator representation (recorded decision
+        #     2026-09-17): undefined ratios are null, never fabricated.
+        m, _c, _t = scripted_run("no-ood", in5, folds5, ["code"])
+        check("no-ood: OOD_total=0", m["OOD_total"] == 0, f"-> {m['OOD_total']}")
+        check("no-ood: OOD_R is null (never a fabricated 100% abstention)",
+              m["OOD_R"] is None, f"-> {m['OOD_R']!r}")
+        check("no-ood: in-domain metrics identical to the mixed corpus "
+              "(OOD errors do not corrupt in-domain-only ratios)",
+              (m["total"], m["direct"], m["correct"]) == ref_indomain[:3]
+              and close(m["E2E"], ref_indomain[3]),
+              f"-> {m['total']}/{m['direct']}/{m['correct']}/{m['E2E']} "
+              f"vs {ref_indomain}")
+        _row = H.fmt_row(m)
+        check("fmt_row renders a null OOD_R as n/a",
+              _row.split("OOD-R=")[1].split()[0] == "n/a", f"-> {_row}")
+
+        m, _c, _t = scripted_run("ood-only", [ood6],
+                                 {H.case_key(ood6.text): 0}, ["code"])
+        check("ood-only: total=0 -> C, E2E and SCORE are null "
+              "(no unsupported claims on an empty denominator)",
+              m["total"] == 0 and m["C"] is None and m["E2E"] is None
+              and m["SCORE"] is None,
+              f"-> {m['total']}/{m['C']}/{m['E2E']}/{m['SCORE']}")
+        check("ood-only: wrong=1 and OOD_R=0 still measured",
+              m["wrong"] == 1 and close(m["OOD_R"], 0.0),
+              f"-> {m['wrong']}/{m['OOD_R']}")
+        _row = H.fmt_row(m)
+        check("fmt_row renders a total=0 row as n/a without raising",
+              "n/a" in _row and "C=" in _row, f"-> {_row}")
+
+        m, _c, _t = scripted_run("ood-only-abstain", [ood6],
+                                 {H.case_key(ood6.text): 0}, [None])
+        check("no-label fixture: vacuous macro-F1 is null, not 0.0",
+              m["F1"] is None, f"-> {m['F1']!r}")
+        _row = H.fmt_row(m)
+        check("fmt_row renders null F1 as n/a",
+              _row.split("F1=")[1].split()[0] == "n/a", f"-> {_row}")
+
+        # --- Task 3 (MEAS-08): cascade expected-count formatting. The
+        #     historical iter16 print used `:2d` on the WRONG count, which
+        #     is an EXPECTED (fractional) number because stage-C credit is
+        #     CHAIN_BASELINE per chain case; one chain case => ValueError.
+        _frac = 106 - (100 + 6 * H.CHAIN_BASELINE)  # fractional by design
+        try:
+            f"wrong={_frac:2d}"
+            _d2d_failed = False
+        except ValueError:
+            _d2d_failed = True
+        check(":2d on a fractional wrong count raises ValueError (bug "
+              "reproduced against the live interpreter)",
+              _d2d_failed, f"-> wrong={_frac}")
+        _crow = H.fmt_cascade_row(0.30, {
+            "C": 1.0, "P": _frac and (106 - _frac) / 106, "wrong": _frac,
+            "E2E": 0.9, "stageA": (100, 95), "stageB": (6, 5), "stageC": 3})
+        check("fmt_cascade_row prints a fractional wrong count as a decimal "
+              "estimate (est suffix), never crashing",
+              f"wrong={_frac:.2f}est" in _crow, f"-> {_crow}")
+        _crow_int = H.fmt_cascade_row(0.30, {
+            "C": 1.0, "P": 106 / 106, "wrong": 0, "E2E": 0.9,
+            "stageA": (106, 106), "stageB": (0, 0), "stageC": 0})
+        check("fmt_cascade_row keeps integer format for integral wrong "
+              "counts (an observation stays an observation)",
+              "wrong= 0 " in _crow_int and "est" not in _crow_int,
+              f"-> {_crow_int}")
+    finally:
+        _restore_env()
+
     if failures:
         print(f"self-test FAILED: {len(failures)} check(s): {failures}",
               file=sys.stderr)

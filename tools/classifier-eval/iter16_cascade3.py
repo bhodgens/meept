@@ -156,10 +156,7 @@ print("=== 3-stage cascade (deterministic expected credit): A centroid / B probe
 rows = []
 for q_b in (0.30, 0.40, 0.50):
     r = cascade(q_b, margin_gate=False)
-    a_n, a_ok = r["stageA"]
-    b_n, b_ok = r["stageB"]
-    print(f"q={q_b:.2f} C={r['C']:6.1%} P={r['P']:6.1%} wrong={r['wrong']:2d} E2E={r['E2E']:6.2%} | "
-          f"A:{a_n}({a_ok}) B:{b_n}({b_ok}) C(chain):{r['stageC']}")
+    print(H.fmt_cascade_row(q_b, r))
     rows.append({"q": q_b, **{k: v for k, v in r.items()}})
 
 stamp = H.time.strftime("%Y%m%d-%H%M%S")

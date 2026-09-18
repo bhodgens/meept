@@ -388,17 +388,241 @@ def assign_folds(cases: list[Case]) -> dict[str, int]:
     return out
 
 
+# ---------------------------------------------------------------- folds (leaf 03 policy)
+
+def explicit_assign_folds(cases: list[Case], cache_path: Path,
+                          experiment: str = "") -> dict[str, int]:
+    """Explicit fold initialization (leaf 03, MEAS-06): identical
+    deterministic assignment to ``assign_folds``, but the cache path is a
+    REQUIRED argument (no silent module-global default), the recording is
+    versioned metadata ({schema, experiment, created_at, cases, folds}),
+    and a corrupt or foreign recording is a LOUD error, never silently
+    treated as empty or mixed in:
+      - malformed JSON -> ValueError
+      - stored fold values that are not ints in [0, NFOLDS) -> ValueError
+        (naming the offending key)
+      - a recording made under a DIFFERENT experiment name -> ValueError
+    Growth is safe: existing keys always keep their recorded fold; only
+    new keys are appended.
+    """
+    if cache_path.exists():
+        try:
+            doc = json.loads(cache_path.read_text())
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"fold cache {cache_path} is malformed JSON: {e}; refusing "
+                f"to treat recorded fold evidence as empty") from e
+        if isinstance(doc, dict) and "folds" in doc:
+            # versioned recording: same-experiment enforcement
+            if experiment and doc.get("experiment") not in ("", experiment):
+                raise ValueError(
+                    f"fold cache {cache_path} belongs to experiment "
+                    f"{doc.get('experiment')!r}, not {experiment!r}; use a "
+                    f"separate cache per experiment (no silent fold mixing)")
+            saved = doc["folds"]
+            if not isinstance(saved, dict):
+                raise ValueError(
+                    f"fold cache {cache_path} has a non-object 'folds' "
+                    f"member")
+        elif isinstance(doc, dict):
+            # legacy recording (the campaign's bare {key: fold} map):
+            # migrated in place; it predates experiment names, so any
+            # experiment may adopt it once.
+            saved = doc
+            doc = {"schema": 1, "experiment": experiment,
+                   "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                   "cases": 0, "folds": saved}
+        else:
+            raise ValueError(
+                f"fold cache {cache_path} is not a fold recording "
+                f"(expected an object)")
+    else:
+        saved = {}
+        doc = {"schema": 1, "experiment": experiment,
+               "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+               "cases": 0, "folds": {}}
+    out: dict[str, int] = {}
+    for c in cases:
+        k = case_key(c.text)
+        if k in saved:
+            v = saved[k]
+            if not isinstance(v, int) or isinstance(v, bool) \
+                    or not 0 <= v < NFOLDS:
+                raise ValueError(
+                    f"fold cache {cache_path} holds invalid fold {v!r} "
+                    f"for key {k}; recorded evidence must be an int in "
+                    f"[0, {NFOLDS})")
+            out[k] = v
+            continue
+        h = int(hashlib.sha256(f"{SEED}:{k}".encode()).hexdigest(), 16)
+        out[k] = h % NFOLDS
+        saved[k] = out[k]
+    doc["folds"] = saved
+    doc["cases"] = len(saved)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps(doc, indent=1, sort_keys=True))
+    return out
+
+
+def require_fold_evidence(cache_path: Path, cases: list[Case]) -> dict:
+    """Fail-closed acceptance gate (leaf 03, MEAS-06): acceptance runs
+    MUST present recorded fold evidence covering EVERY case, produced by
+    explicit_assign_folds. Missing, malformed, schema-mismatched, or
+    incomplete recordings raise; the verified recording (with its folds)
+    is returned so the acceptance artifact can carry it."""
+    if not cache_path.exists():
+        raise RuntimeError(
+            f"no recorded fold evidence at {cache_path}: acceptance "
+            f"requires an explicit fold assignment "
+            f"(explicit_assign_folds) before scoring")
+    try:
+        doc = json.loads(cache_path.read_text())
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"recorded fold evidence at {cache_path} is malformed: {e}") from e
+    if not isinstance(doc, dict) or doc.get("schema") != 1 \
+            or not isinstance(doc.get("folds"), dict):
+        raise RuntimeError(
+            f"recorded fold evidence at {cache_path} does not match the "
+            f"versioned fold-recording schema ({{schema:1, experiment, "
+            f"created_at, cases, folds}})")
+    folds = doc["folds"]
+    missing = [case_key(c.text) for c in cases
+               if case_key(c.text) not in folds]
+    if missing:
+        raise RuntimeError(
+            f"recorded fold evidence at {cache_path} is incomplete: "
+            f"{len(missing)} case key(s) unassigned (e.g. {missing[:3]})")
+    doc["folds"] = {k: folds[k] for k in sorted(folds)}
+    return doc
+
+
 # ---------------------------------------------------------------- embedder
+
+def model_content_identity(model_path: str | None) -> dict:
+    """Verified LOCAL content identity for the embedding weights
+    (contract C3, recorded decision 2026-09-17 #3: hash local model
+    content; every weight shard + preprocessing file; never a server
+    alias or URL). Returns {verified, fingerprint, model_path}. The
+    fingerprint is deterministic over (relative path, content) in sorted
+    order. An absent/unusable path yields verified=False, NEVER a
+    synthetic fingerprint that would masquerade as verification."""
+    if not model_path:
+        return {"verified": False, "fingerprint": None, "model_path": None}
+    root = Path(model_path)
+    if not root.is_dir():
+        return {"verified": False, "fingerprint": None,
+                "model_path": str(model_path)}
+    h = hashlib.sha256()
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        h.update(str(p.relative_to(root)).encode())
+        h.update(b"\x00")
+        h.update(p.read_bytes())
+        h.update(b"\x00")
+    return {"verified": True, "fingerprint": h.hexdigest(),
+            "model_path": str(root.resolve())}
+
+
+# preprocessing that changes vectors (beyond the instruction, which is
+# already part of every cache namespace); keep in one place so the
+# namespace hash and the artifact metadata agree.
+PREPROCESSING_IDENTITY = "unit-l2"  # L2-normalized rows stored in cache
+
+
+def _map_response_vectors(out: dict, missing: list) -> list:
+    """Map an OpenAI-shaped embeddings response onto the requested rows
+    BY DECLARED INDEX, never by response position. missing is the
+    [(key, text), ...] list that was sent. Duplicate, missing, and
+    out-of-range indexes are hard errors (a silent positional fallback
+    would attach the wrong vector to a key -- an undetectable corruption
+    of every downstream measurement)."""
+    n = len(missing)
+    got: list = [None] * n
+    seen: set[int] = set()
+    for item in out.get("data", []):
+        idx = item["index"]
+        if not isinstance(idx, int) or isinstance(idx, bool):
+            raise RuntimeError(f"embed server returned non-integer index "
+                               f"{idx!r}")
+        if idx < 0 or idx >= n:
+            raise RuntimeError(f"embed server returned out-of-range index "
+                               f"{idx} for {n} inputs")
+        if idx in seen:
+            raise RuntimeError(f"embed server returned duplicate index "
+                               f"{idx}")
+        seen.add(idx)
+        got[idx] = np.asarray(item["embedding"], dtype=np.float32)
+    if any(v is None for v in got):
+        missing_idx = [i for i, v in enumerate(got) if v is None]
+        raise RuntimeError(f"embed server returned no vector for input "
+                           f"index(es) {missing_idx} of {n}")
+    return got
+
 
 class Embedder:
     def __init__(self, url: str, model: str, instruction: str = "",
-                 cache_dir: Path | None = None):
+                 cache_dir: Path | None = None,
+                 model_path: str | None = None):
         self.url = url.rstrip("/")
         self.model = model
         self.instruction = instruction
-        tag = hashlib.sha256(f"{model}|{instruction}".encode()).hexdigest()[:12]
-        self.cache_dir = (cache_dir or (Path.home() / ".meept" / "classifier-eval-cache")) / tag
+        # ---- cache identity (leaf 03, MEAS-05, contract C3) ----
+        # The namespace must identify WEIGHTS CONTENT, not the alias: a
+        # URL/alias tag alone let different weight revisions under the
+        # same alias silently reuse each other's cached vectors. The
+        # verified fingerprint comes from hashing the local model
+        # directory (all shards + preprocessing files). Without a
+        # verifiable fingerprint the cache lands in an explicit
+        # ``unverified`` namespace and is flagged: acceptance consumers
+        # refuse it (fail-closed); exploratory use stays possible with
+        # the unverified label attached to every result.
+        self.identity = model_content_identity(model_path)
+        if not self.identity["verified"]:
+            print(
+                "WARNING: no verified model content identity "
+                f"(model_path={model_path!r}); using the UNVERIFIED cache "
+                "namespace. Vectors may come from ANY model ever served "
+                "under this alias. Acceptance runs must set model_path.",
+                file=sys.stderr)
+        id_component = self.identity["fingerprint"] or "unverified"
+        instruction_component = hashlib.sha256(
+            instruction.encode()).hexdigest()[:12]
+        preproc_component = hashlib.sha256(
+            PREPROCESSING_IDENTITY.encode()).hexdigest()[:8]
+        tag = hashlib.sha256(
+            f"{id_component}|{instruction_component}|"
+            f"{preproc_component}".encode()).hexdigest()[:16]
+        self.cache_dir = (cache_dir or (Path.home() / ".meept" /
+                                        "classifier-eval-cache")) / tag
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        # identity metadata sidecar: written once per namespace so any
+        # consumer (acceptance script) can verify what produced it. The
+        # sidecar records the FIRST writer's alias; the alias is NOT
+        # part of the namespace identity (contract C3: two aliases over
+        # the same verified content intentionally share a cache), so it
+        # is excluded from the collision comparison.
+        meta = {
+            "schema": 1,
+            "verified": self.identity["verified"],
+            "model_fingerprint": self.identity["fingerprint"],
+            "model_path": self.identity["model_path"],
+            "instruction": instruction,
+            "preprocessing": PREPROCESSING_IDENTITY,
+        }
+        meta_path = self.cache_dir / "identity.json"
+        if not meta_path.exists():
+            meta_path.write_text(json.dumps(meta))
+        # a namespace is single-identity: an existing sidecar with a
+        # DIFFERENT identity (fingerprint/instruction/preprocessing)
+        # means the hash truncated two identities into one namespace --
+        # refuse rather than mix vectors.
+        existing = json.loads(meta_path.read_text())
+        if existing != meta:
+            raise RuntimeError(
+                f"cache namespace collision under {self.cache_dir}: "
+                f"existing identity {existing} != {meta}")
         self.mem: dict[str, np.ndarray] = {}
         self.embed_time = 0.0
         self.embed_calls = 0
@@ -438,11 +662,7 @@ class Embedder:
             per = dt / max(len(missing), 1)
             self.latency_ms.extend([per] * len(missing))
             self.embed_calls += 1
-            got: list[np.ndarray | None] = [None] * len(missing)
-            for item in out["data"]:
-                got[item["index"]] = np.asarray(item["embedding"], dtype=np.float32)
-            if any(v is None for v in got):
-                raise RuntimeError("embed server returned fewer vectors than inputs")
+            got = _map_response_vectors(out, missing)
             for (k, _), v in zip(missing, got):
                 assert v is not None  # completeness checked above
                 n = float(np.linalg.norm(v))
@@ -720,6 +940,26 @@ ALLVEC: np.ndarray = np.zeros((1, 1))  # global index matrix, set per fold
 self_mask: np.ndarray = np.array([], dtype=int)
 
 
+def assert_verified_cache(emb) -> dict:
+    """Fail-closed acceptance gate (leaf 03, MEAS-05): acceptance runs
+    MUST call this before trusting cached vectors. It refuses an
+    Embedder whose cache namespace is not backed by a verified model
+    content fingerprint; exploratory callers may catch the error and
+    continue with the explicit ``unverified`` label. The identity dict
+    is returned so the acceptance artifact can carry the fingerprint."""
+    ident = getattr(emb, "identity", None)
+    if ident is None:
+        raise RuntimeError(
+            "embedder carries no cache identity (e.g. an in-memory "
+            "embedder): cannot verify model content for acceptance")
+    if not ident.get("verified"):
+        raise RuntimeError(
+            "refusing acceptance over an UNVERIFIED cache namespace "
+            f"(model_path={ident.get('model_path')!r}): legacy alias-only "
+            "cache reuse must not support fresh acceptance claims")
+    return ident
+
+
 def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
                     emb: Embedder, collect_confusions: int = 0):
     global ALLVEC, self_mask
@@ -804,13 +1044,31 @@ def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
             if abs(r[1] - spec["head"].get("floor", spec["head"].get("tau", 0.7))) < 0.05:
                 margin_cases.append((c, r[0], r[1]))
 
-    C = direct / total_in if total_in else 0.0
-    P = correct / direct if direct else 0.0
-    A = (correct / (correct + wrong)) if (correct + wrong) else 0.0
-    f1 = macro_f1(tp, fp, fn)
-    ood_r = ood_abstain / ood_total if ood_total else 1.0
-    e2e = (correct + CHAIN_BASELINE * (total_in - direct)) / total_in if total_in else 0.0
-    score = C * P * P - 5 * (wrong / total_in if total_in else 0.0)
+    # C2 denominators (leaf 02): undefined ratios are None, never a
+    # fabricated number (recorded decision 2026-09-17: JSON null, display
+    # n/a). A missing denominator means "no measurement", which is
+    # different from a measured 0% or 100%:
+    #   C     direct/total_in       -- undefined only when total_in == 0
+    #   P     correct/direct        -- undefined when nothing routed direct
+    #   A     correct/(correct+wrong) -- undefined when nothing routed at all
+    #   OOD_R OOD_abstain/OOD_total -- undefined when the corpus has no OOD
+    #     cases (the old `else 1.0` fabricated a 100% abstention claim from
+    #     a corpus that never tested abstention);
+    #   E2E   modeled in-domain accuracy (CHAIN_BASELINE credit for
+    #     abstentions, coefficient 0.868 = old lfm-8b estimate) -- undefined
+    #     when total_in == 0, i.e. never claimed over an empty denominator;
+    #   SCORE C*P*P - 5*wrong/total_in -- undefined when total_in == 0.
+    #     When C or P is individually undefined they contribute 0 to the
+    #     product (never credit), so an all-abstain run still scores the
+    #     bare penalty term.
+    C = direct / total_in if total_in else None
+    P = correct / direct if direct else None
+    A = (correct / (correct + wrong)) if (correct + wrong) else None
+    f1 = macro_f1(tp, fp, fn) if (tp or fp or fn) else None
+    ood_r = ood_abstain / ood_total if ood_total else None
+    e2e = (correct + CHAIN_BASELINE * (total_in - direct)) / total_in if total_in else None
+    score = ((C or 0.0) * (P or 0.0) ** 2
+             - 5 * (wrong / total_in if total_in else 0.0)) if total_in else None
     # latency p50 from cache-miss embeds (per-text); None when the whole
     # run was served from cache -- a p50 of 0.0 would read as "instant"
     # rather than "no samples taken" (F89).
@@ -825,11 +1083,46 @@ def run_permutation(spec: dict, cases: list[Case], folds: dict[str, int],
     }
 
 
+def fmt_cascade_row(q_b: float, r: dict) -> str:
+    """Row printer for cascade sweeps (iter16_cascade3-style results).
+
+    ``wrong`` in a cascade is an EXPECTED count, not an observation: stage-C
+    contributions are chain credit (CHAIN_BASELINE per abstained case), so
+    ``routed - correct`` is fractional (e.g. 106 routes, 105.68 expected
+    correct -> wrong = 0.32). The historical print formatted it with ``:2d``
+    and crashed with ``ValueError: Unknown format code 'd' for object of
+    type 'float'`` whenever any case fell to the chain. Expected counts are
+    formatted as decimal estimates (``est``), never as integer observations.
+    Import-safe: no torch/transformers/model load at module import.
+    """
+    a_n, a_ok = r["stageA"]
+    b_n, b_ok = r["stageB"]
+    wrong = r["wrong"]
+    wrong_s = f"{wrong:2d}" if isinstance(wrong, int) else f"{wrong:.2f}est"
+    return (f"q={q_b:.2f} C={r['C']:6.1%} P={r['P']:6.1%} "
+            f"wrong={wrong_s} E2E={r['E2E']:6.2%} | "
+            f"A:{a_n}({a_ok}) B:{b_n}({b_ok}) C(chain):{r['stageC']}")
+
+
 def fmt_row(m: dict) -> str:
     p50 = "n/a" if m["p50_ms"] is None else f"{m['p50_ms']:.0f}ms"
-    return (f"{m['name']:<38} C={m['C']:6.1%} P={m['P']:6.1%} A={m['A']:6.1%} "
-            f"F1={m['F1']:.3f} OOD-R={m['OOD_R']:6.1%} wrong={m['wrong']:>2} "
-            f"E2E={m['E2E']:6.2%} SCORE={m['SCORE']:+.3f} p50={p50}")
+    def _col(label, key, spec, width):
+        # None = undefined ratio (no denominator): display n/a, never a
+        # fabricated 0% or 100% (recorded decision 2026-09-17). The label
+        # stays so the column remains identifiable in the table.
+        v = m[key]
+        if v is None:
+            return f"{label}{'n/a':>{width}}"
+        return f"{label}{format(v, spec)}"
+    return (f"{m['name']:<38} "
+            f"{_col('C=', 'C', '6.1%', 6)} "
+            f"{_col('P=', 'P', '6.1%', 6)} "
+            f"{_col('A=', 'A', '6.1%', 6)} "
+            f"{_col('F1=', 'F1', '.3f', 5)} "
+            f"{_col('OOD-R=', 'OOD_R', '6.1%', 6)} "
+            f"wrong={m['wrong']:>2} "
+            f"{_col('E2E=', 'E2E', '6.2%', 6)} "
+            f"{_col('SCORE=', 'SCORE', '+.3f', 6)} p50={p50}")
 
 
 def main() -> int:
