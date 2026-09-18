@@ -1245,6 +1245,12 @@ try:
     except (KeyError, IndexError, TypeError):
         print("__WARMUP_FAILED__: unexpected tools/call result shape", file=sys.stderr)
         sys.exit(3)
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict) and isinstance(parsed.get("response"), str):
+            text = parsed["response"]
+    except ValueError:
+        pass
     sys.stdout.write(text)
 finally:
     if p.poll() is None:
@@ -1354,6 +1360,16 @@ try:
         text = msg["result"]["content"][0]["text"]
     except (KeyError, IndexError, TypeError):
         sys.exit(3)
+    # meept_send wraps the reply as {"response": <text>}. Unwrap so the
+    # saved reply file holds the user-facing text, not the envelope
+    # (assert_reply_shape's A3 check would flag the envelope as a raw
+    # JSON dump, and A4/A5 substring checks would run against keys).
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict) and isinstance(parsed.get("response"), str):
+            text = parsed["response"]
+    except ValueError:
+        pass
     sys.stdout.write(text)
 finally:
     if p.poll() is None:
