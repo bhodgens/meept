@@ -690,8 +690,14 @@ class WebSocketService {
 
     return _messageSubject.stream.where((m) {
       final type = m['type'] as String?;
+      // Dual-ID invariant: raw agent.progress payloads carry only
+      // conversation_id (the loop publishes progress before a session_id is
+      // normalized), so accept either identifier — mirrors the daemon's
+      // session_id->conversation_id WS filter fallback.
       final sid = m['session_id'] as String?;
-      return type == WsEventTypes.agentProgress && sid == sessionId;
+      final cid = m['conversation_id'] as String?;
+      return type == WsEventTypes.agentProgress &&
+          (sid == sessionId || cid == sessionId);
     });
   }
 
@@ -747,8 +753,14 @@ class WebSocketService {
     return _messageSubject.stream.where((m) {
       final type = m['type'] as String?;
       if (type != WsEventTypes.agentProgress) return false;
+      // Dual-ID invariant (AGENTS.md): turn-terminal frames may carry only
+      // conversation_id — TurnTerminalEvent.SessionID is omitempty and the
+      // GUI's own chat.submit body sends conversation_id, never session_id.
+      // Fall back like the daemon's WS filter does; a strict session_id
+      // match drops the GUI's own replies and the turn false-stalls.
       final sid = m['session_id'] as String?;
-      if (sid != sessionId) return false;
+      final cid = m['conversation_id'] as String?;
+      if (sid != sessionId && cid != sessionId) return false;
       return isTurnTerminalPayload(m);
     });
   }

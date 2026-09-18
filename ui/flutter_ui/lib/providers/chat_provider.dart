@@ -401,10 +401,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
       }
       _hasMoreHistory = _oldestLoadedOffset > 0;
       if (_disposed || generation != _loadGeneration) return;
-      state = ChatState(messages: messages, isLoading: false);
+      // copyWith: keep pendingTurns — a history reload must not orphan
+      // in-flight turns (scopes-2 audit MED, 2026-09-18).
+      state = state.copyWith(messages: messages, isLoading: false);
     } catch (e) {
       if (_disposed) return;
-      state = ChatState(messages: [], isLoading: false, error: e.toString());
+      state = state.copyWith(messages: [], isLoading: false, error: e.toString());
     }
 
     if (_disposed || generation != _loadGeneration) return;
@@ -428,6 +430,25 @@ class ChatNotifier extends StateNotifier<ChatState> {
           }
           final progress = AgentProgress.fromJson(message);
           state = state.copyWith(currentProgress: progress);
+          // Liveness refresh (scopes-2 audit MED, 2026-09-18): feed every
+          // progress frame into the pending-turn trackers — parity with the
+          // TUI's DeliverTurnProgress (app.go). Without this, GUI turns
+          // false-stall at the fixed 120s timer even while visibly
+          // progressing. Match by turn id when the frame carries one, else
+          // refresh every pending turn on this session (the frame is
+          // session-scoped by the subscription filter).
+          final frameTurnId = message['turn_id'] as String?;
+          state.pendingTurns.forEach((pendingId, pt) {
+            if (frameTurnId == null || pt.turnId == frameTurnId) {
+              noteTurnProgress(
+                  pt.turnId,
+                  progress.stage.isNotEmpty
+                      ? progress.stage
+                      : (progress.message.isNotEmpty
+                          ? progress.message
+                          : 'working'));
+            }
+          });
         });
 
     // Subscribe to turn.terminal relays for this session
@@ -828,7 +849,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
     // Block sending when disconnected — the daemon won't receive the message.
     if (!websocket.isConnected) {
-      state = ChatState(
+      // copyWith: preserve pendingTurns (F20 regression class guard).
+      state = state.copyWith(
         messages: state.messages,
         isLoading: false,
         error: 'not connected to daemon — check that meept-daemon is running',
@@ -1079,7 +1101,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
         );
         _processingFallbackTimer?.cancel();
         _processingFallbackTimer = null;
-        state = ChatState(
+        // copyWith (NOT fresh ChatState): a fresh constructor drops
+        // state.pendingTurns — the F20 regression class (scopes-2 audit
+        // MED, 2026-09-18). An error frame mid-turn must not erase
+        // in-flight turn rows and tracking.
+        state = state.copyWith(
           messages: [...state.messages, systemMessage],
           isLoading: false,
           isAgentProcessing: false,
@@ -1143,7 +1169,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
       );
       _processingFallbackTimer?.cancel();
       _processingFallbackTimer = null;
-      state = ChatState(
+      // copyWith: preserve pendingTurns (F20 regression class).
+      state = state.copyWith(
         messages: [...state.messages, errorMessage],
         isLoading: false,
         isAgentProcessing: false,

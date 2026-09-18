@@ -1100,6 +1100,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	if persistID == "" {
 		persistID = conversationID
 	}
+	// Scopes-2 audit HIGH (deleg_9fb259e7, 2026-09-18): GUI chat.submit
+	// requests carry no session_id (sdk_client sends only
+	// conversation_id). Gating the WS chat_message push on
+	// req.SessionID meant the daemon never published the reply bubble
+	// for GUI-submitted direct replies — persisted but never rendered.
+	// Route on the resolved persistence ID instead.
+	response.SessionID = persistID
 
 	if err != nil {
 		// Check for BudgetExceededError to provide user-friendly message
