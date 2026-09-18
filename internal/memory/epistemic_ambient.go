@@ -34,6 +34,10 @@ type AmbientExtractorConfig struct {
 	Manager    *Manager
 	Classifier AmbientClassifierLLM
 	Logger     *slog.Logger
+	// RawResponseHook, when non-nil, receives (prompt, rawBody) for every
+	// classifier call — the calibration/training pair. Raw conversation
+	// text: write only to gitignored paths. Nil = disabled.
+	RawResponseHook func(prompt, rawBody string)
 }
 
 // AmbientExtractor runs the ambient-extraction LLM prompt over a conversation
@@ -42,6 +46,7 @@ type AmbientExtractor struct {
 	manager    *Manager
 	classifier AmbientClassifierLLM
 	logger     *slog.Logger
+	rawHook    func(prompt, rawBody string)
 }
 
 // NewAmbientExtractor constructs an extractor from the given configuration.
@@ -50,6 +55,7 @@ func NewAmbientExtractor(cfg AmbientExtractorConfig) *AmbientExtractor {
 		manager:    cfg.Manager,
 		classifier: cfg.Classifier,
 		logger:     cfg.Logger,
+		rawHook:    cfg.RawResponseHook,
 	}
 	if ex.logger == nil {
 		ex.logger = slog.Default()
@@ -105,6 +111,9 @@ func (ex *AmbientExtractor) Extract(ctx context.Context, messages []string) ([]A
 	raw, err := ex.classifier.ExtractCandidates(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("ambient classifier call: %w", err)
+	}
+	if ex.rawHook != nil {
+		ex.rawHook(prompt, string(raw))
 	}
 	candidates, err := ParseAmbientCandidates(raw)
 	if err != nil {
