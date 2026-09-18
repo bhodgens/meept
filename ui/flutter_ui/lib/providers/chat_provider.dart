@@ -213,6 +213,12 @@ class ChatState {
   /// (async-turn-migration leaf 05). Concurrent turns track independently.
   final Map<String, PendingTurn> pendingTurns;
 
+  /// Terminal events that arrived BEFORE the submit ack registered their
+  /// turn (F19): the HTTP submit reply races the WS relay. Buffered
+  /// events are consumed on ack registration (see ChatNotifier) and never
+  /// dropped. This is ephemeral per-notifier state, not UI state.
+  final Map<String, TurnTerminalEvent> earlyTerminals;
+
   /// Count of late failed turns that landed while the user was looking at a
   /// DIFFERENT conversation (leaf 05 Task 4). The sessions list renders a
   /// badge so the user discovers the failure contextually. Reset when this
@@ -228,6 +234,7 @@ class ChatState {
     this.thinkingStartedAt,
     this.pendingConfirmation,
     this.pendingTurns = const {},
+    this.earlyTerminals = const {},
     this.lateFailureCount = 0,
   });
 
@@ -438,12 +445,40 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Tasks 3/4): render the reply or error bubble, clear the pending-turn
   /// entry and its liveness timer, and bump the late-failure indicator when
   /// the failure landed on a conversation the user has navigated away from.
+  ///
+  /// F19: an event for an UNTRACKED turn may arrive before its submit ack
+  /// registers the turn (the HTTP submit reply races the WS relay). Such
+  /// events are buffered in the notifier's ephemeral early-event map and
+  /// consumed on ack registration — never dropped.
   void _handleTurnTerminal(TurnTerminalEvent event) {
     final turn = state.pendingTurns[event.turnId];
-    // Foreign/untracked turn: not ours to resolve.
-    if (turn == null && event.status != TurnTerminalEvent.statusParked) {
+    // Foreign/untracked turn: buffer it — the ack may still be in flight.
+    if (turn == null) {
+      _earlyTerminals[event.turnId] = event;
       return;
     }
+    _consumeTurnTerminal(event, turn);
+  }
+
+  /// Ephemeral early-event buffer (F19): turn.terminal events that raced
+  /// their submit ack. Consumed (and drained) on ack registration.
+  final Map<String, TurnTerminalEvent> _earlyTerminals = {};
+
+  /// Consume any early-buffered terminal event for [turnId], if present.
+  /// Called on ack registration so a fast daemon's terminal is applied
+  /// immediately after the turn is tracked.
+  void _consumeEarlyTerminal(String turnId) {
+    final early = _earlyTerminals.remove(turnId);
+    if (early == null) return;
+    final turn = state.pendingTurns[turnId];
+    if (turn == null) return;
+    _consumeTurnTerminal(early, turn);
+  }
+
+  /// Apply a terminal event to its tracked pending turn (the original
+  /// leaf 05 handler body, extracted so both the live-relay path and the
+  /// F19 early-buffer path share it).
+  void _consumeTurnTerminal(TurnTerminalEvent event, PendingTurn turn) {
     final turns = Map<String, PendingTurn>.from(state.pendingTurns);
     _cancelLivenessTimer(event.turnId);
 
@@ -451,18 +486,15 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // turn automatically and a later terminal event will arrive. Downgrade
     // the pending entry to the parked state with honest, non-error text.
     if (event.status == TurnTerminalEvent.statusParked) {
-      final parked = turn?.copyWith(
+      final parked = turn.copyWith(
         status: PendingTurnStatus.parked,
         progressText: 'waiting for provider quota — will resume automatically',
       );
-      if (parked != null) {
-        turns[event.turnId] = parked;
-        state = state.copyWith(pendingTurns: turns);
-      }
+      turns[event.turnId] = parked;
+      state = state.copyWith(pendingTurns: turns);
       return;
     }
 
-    if (turn == null) return;
     turns.remove(event.turnId);
 
     switch (event.status) {
@@ -620,6 +652,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
       _livenessTimers[ack.turnId] = Timer(kTurnLivenessTimeout, () {
         _markStalled(ack.turnId);
       });
+      // F19: a terminal event that raced the ack is applied immediately.
+      _consumeEarlyTerminal(ack.turnId);
       return ack;
     } catch (e) {
       if (_disposed) return ChatSubmitAck(turnId: '', conversationId: '', sessionId: '', accepted: false, note: e.toString());
@@ -825,7 +859,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
     if (newMessages.length > _maxMessages) {
       newMessages = newMessages.sublist(newMessages.length - _maxMessages);
     }
-    state = ChatState(
+    // F20: state reconstructions on the send path must preserve
+    // state.pendingTurns — copyWith keeps them, but a fresh ChatState(...)
+    // would silently drop in-flight turns (and their UI rows).
+    state = state.copyWith(
       messages: newMessages,
       isLoading: true,
       isAgentProcessing: true,
@@ -853,9 +890,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
           if (!ack.accepted || ack.turnId.isEmpty) {
             // Submit rejected (validation, dedupe-with-note, etc.) —
             // surface the daemon's note, no pending turn is tracked.
+            // F20: copyWith preserves pendingTurns (existing in-flight
+            // turns survive a rejected send).
             _lastFailedSend = null;
-            state = ChatState(
-              messages: state.messages,
+            state = state.copyWith(
               isLoading: false,
               isAgentProcessing: false,
               error: ack.note.isEmpty ? 'submit rejected' : ack.note,
@@ -878,14 +916,19 @@ class ChatNotifier extends StateNotifier<ChatState> {
             _markStalled(ack.turnId);
           });
           _lastFailedSend = null;
-          state = ChatState(
-            messages: state.messages,
+          // F20: copyWith preserves pendingTurns — `turns` already carries
+          // the pre-send in-flight turns (copied from state.pendingTurns
+          // above) plus this new one.
+          state = state.copyWith(
             isLoading: false,
             isAgentProcessing: true,
             currentProgress: state.currentProgress,
             pendingTurns: turns,
             thinkingStartedAt: state.thinkingStartedAt ?? DateTime.now(),
           );
+          // F19: a terminal event that raced the ack is applied
+          // immediately.
+          _consumeEarlyTerminal(ack.turnId);
           return;
         case _SendEndpoint.steer:
           await sdkClient.sendSteerMessage(
@@ -908,12 +951,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // the async submit path. Steer/followup are control-plane calls: the
       // daemon either queues them or errors, and both outcomes surface via
       // existing WS events.
+      // F20: copyWith preserves pendingTurns — steering while a turn is
+      // in flight must not drop it.
       _lastFailedSend = null;
-      state = ChatState(
-        messages: state.messages,
+      state = state.copyWith(
         isLoading: false,
-        isAgentProcessing: state.isAgentProcessing,
-        currentProgress: state.currentProgress,
       );
     } catch (e) {
       if (_disposed) return;
@@ -927,13 +969,9 @@ class ChatNotifier extends StateNotifier<ChatState> {
       } else {
         errorStr = e.toString();
       }
-      state = ChatState(
-        messages: state.messages,
-        isLoading: false,
-        isAgentProcessing: false,
-        error: errorStr,
-        thinkingStartedAt: null,
-      );
+      // F20: copyWith preserves pendingTurns — a failed send must not
+      // drop in-flight turns.
+      state = state.copyWith(isLoading: false, error: errorStr);
     } finally {
       _sendingTimeoutTimer?.cancel();
       _sendingTimeoutTimer = null;
