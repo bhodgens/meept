@@ -109,10 +109,10 @@ Load hierarchical-plan-execution before execution. Read source with read_file af
 
 | Child | Status | Iterations | Review notes |
 |---|---|---|---|
-| 01 | PENDING | 0 | Preparation only; historical removal separately gated |
-| 02 | PENDING | 0 | Forced OOD abstention independently reproduced |
-| 03 | PENDING | 0 | Default population mismatch independently reproduced |
-| 04 | PENDING | 0 | Two route errors reproduced; other routes conditional |
+| 01 | COMPLETE (verified) | 27 privacy tests pass (parent-rerun); 4 producers refactored import-safe, misses carry case keys; scoped *.local.json5 ignore rule; 3 extra writers found awaiting adjudication; historical handoff proposal in /tmp/meept-private-exposure-inventory-leaf01-20260918.md |
+| 02 | COMPLETE (verified) | Both self-test entry points pass rc=0 (parent-rerun); forced-abstention defect pinned via in-memory baseline exec; OOD bypass already removed by 0688a9b0 (branch advanced past baseline); null/n/a undefined ratios shipped; hand-calc case verified (SCORE=-4, E2E=1); iter16 :2d fixed via fmt_cascade_row; historical invalidation scope for iter-1..13 documented for leaf 05 |
+| 03 | COMPLETE (verified) | 27 provenance tests pass (parent-rerun, plus full tools discovery 54 tests); builder default now 361-key parity with harness loader (was 222); tfidf builder doc-selection bug fixed (corpus files routed to adversarial slot); content-hash cache identity + fail-closed unverified namespace; response-order lead REFUTED (index mapping already correct) with hardening added; fold-evidence policy repair (MEAS-06 = policy, not demonstrated error); Go decoders tolerate additive provenance (no DisallowUnknownFields) |
+| 04 | COMPLETE (verified) | All four routing guard repairs in; parent reran TestRoutingRepair groups, full internal/agent suite (47.9s ok), vet, gofmt. Live rig confirms AR-1 repair: path-question now dispatches intent=debug method=llm (was chat/short_message_guard). New: announced-action termination guard in loop.go — model ending turn on "let me examine…" with zero tools executed now gets a nudge or an [incomplete] annotation instead of an approved step. Deferred to leaf 05: workflow docs, empty-response exception |
 | 05 | PENDING | 0 | Integration and independent review pending |
 
 ## Integration Test Plan
