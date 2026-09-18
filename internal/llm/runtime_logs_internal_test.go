@@ -394,14 +394,14 @@ func TestRuntimeManager_SharedSpawn_PerModelFanOut(t *testing.T) {
 
 	pidFile := filepath.Join(home, "shared-fanout.pid")
 	cfg1 := &RuntimeConfig{
-		Type:            RuntimeLlamaCpp,
-		ModelPath:       tempModelFileInternal(t),
-		ModelPaths:      map[string]string{"alpha": tempModelFileInternal(t)},
-		ModelKeys:       []string{"alpha"},
-		EndpointKey:     "llama-cpp:127.0.0.1:7790",
-		PIDFile:         pidFile,
-		AutoStart:       true,
-		AutoStop:        true,
+		Type:        RuntimeLlamaCpp,
+		ModelPath:   tempModelFileInternal(t),
+		ModelPaths:  map[string]string{"alpha": tempModelFileInternal(t)},
+		ModelKeys:   []string{"alpha"},
+		EndpointKey: "llama-cpp:127.0.0.1:7790",
+		PIDFile:     pidFile,
+		AutoStart:   true,
+		AutoStop:    true,
 		// Must outlive the test: the health check now requires the spawned
 		// process to be alive, so a "sleep 0.1" fake reads unhealthy and
 		// StartAll fails before the log fan-out under test can happen.

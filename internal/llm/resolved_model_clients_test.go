@@ -271,11 +271,11 @@ func TestRequestModelOverridePrecedence(t *testing.T) {
 	cfg := &ModelConfig{ProviderID: "local", ModelID: "configured-default"}
 
 	tests := []struct {
-		name       string
-		opts       []ChatOption
-		wantModel  string
-		wantLane   string
-		wantOK     bool
+		name      string
+		opts      []ChatOption
+		wantModel string
+		wantLane  string
+		wantOK    bool
 	}{
 		{
 			name:     "no selection keeps configured default",

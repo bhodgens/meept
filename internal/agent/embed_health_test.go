@@ -255,8 +255,8 @@ func goldCluster(rng *rand.Rand, n, dim int) [][]float64 {
 	return out
 }
 
-//nolint:U1000 // reserved for per-intent retention reporting
-//nolint:U1000 // reserved for per-intent retention reporting
+// nolint:U1000 // reserved for per-intent retention reporting
+// nolint:U1000 // reserved for per-intent retention reporting
 type prefilterStoreMeta struct {
 	Examples []struct {
 		Intent string `json:"intent"`

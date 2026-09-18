@@ -40,8 +40,8 @@ func newUsageStore(t *testing.T) *metrics.Store {
 		t.Fatalf("create agent_task_outcomes: %v", err)
 	}
 	for _, r := range []struct {
-		task  string
-		ok    int
+		task string
+		ok   int
 	}{{"t1", 1}, {"t2", 1}} {
 		if _, err := store.DB().Exec(
 			`INSERT INTO agent_task_outcomes (task_id, agent_id, success) VALUES (?, 'chat', ?)`,
