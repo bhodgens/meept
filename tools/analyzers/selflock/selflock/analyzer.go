@@ -3,15 +3,15 @@
 //
 // This analyzer detects two related deadlock patterns:
 //
-// 1. Self-deadlock: External lock followed by method with internal locking
-//    goal.Lock()                    // External lock
-//    goal.AddActivePlan(planID)     // Has internal: defer g.mu.Unlock()
-//    goal.Unlock()                  // Never reached - DEADLOCK
+//  1. Self-deadlock: External lock followed by method with internal locking
+//     goal.Lock()                    // External lock
+//     goal.AddActivePlan(planID)     // Has internal: defer g.mu.Unlock()
+//     goal.Unlock()                  // Never reached - DEADLOCK
 //
-// 2. Callback deadlock: External lock held during store callback
-//    goal.Lock()                    // External lock
-//    store.Update(ctx, goal)        // Calls goal.snapshot() -> RLock()
-//    goal.Unlock()                  // Never reached - DEADLOCK
+//  2. Callback deadlock: External lock held during store callback
+//     goal.Lock()                    // External lock
+//     store.Update(ctx, goal)        // Calls goal.snapshot() -> RLock()
+//     goal.Unlock()                  // Never reached - DEADLOCK
 //
 // Both patterns violate the project's locking discipline: methods with
 // internal locking should not be called while holding an external lock
@@ -61,24 +61,24 @@ var Analyzer = &analysis.Analyzer{
 // This list should be extended based on project conventions.
 var internalLockMethods = map[string]bool{
 	// Employee goal methods (internal/employee/goal.go)
-	"AddActivePlan":   true,
+	"AddActivePlan":    true,
 	"RemoveActivePlan": true,
-	"AppendHistory":   true,
-	"Assess":          true,
-	"snapshot":        true,
+	"AppendHistory":    true,
+	"Assess":           true,
+	"snapshot":         true,
 	// Common patterns in other projects
-	"DoWithLock":      true,
-	"UpdateSync":      true,
+	"DoWithLock": true,
+	"UpdateSync": true,
 }
 
 // storeUpdateMethods are store methods that may call back into object methods.
 var storeUpdateMethods = map[string]bool{
-	"Update":      true,
-	"Save":        true,
-	"Persist":     true,
-	"Store":       true,
-	"Write":       true,
-	"Commit":      true,
+	"Update":  true,
+	"Save":    true,
+	"Persist": true,
+	"Store":   true,
+	"Write":   true,
+	"Commit":  true,
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {
@@ -130,10 +130,10 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 // callInfo tracks a method call with locking semantics
 type callInfo struct {
-	call    *ast.CallExpr
-	method  string
-	recvKey string // canonical dotted path of receiver
-	isLock  bool
+	call     *ast.CallExpr
+	method   string
+	recvKey  string // canonical dotted path of receiver
+	isLock   bool
 	isUnlock bool
 }
 
@@ -180,8 +180,8 @@ func checkBody(pass *analysis.Pass, body *ast.BlockStmt, nolintLines map[string]
 
 	// Track active locks by receiver
 	type lockFrame struct {
-		ci       callInfo
-		varName  string // the variable being locked (e.g., "goal" from "goal.Lock()")
+		ci      callInfo
+		varName string // the variable being locked (e.g., "goal" from "goal.Lock()")
 	}
 	var stack []lockFrame
 
