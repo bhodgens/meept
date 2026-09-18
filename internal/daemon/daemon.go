@@ -1851,6 +1851,34 @@ func (d *Daemon) Run(ctx context.Context) error {
 				d.logger.Error("Failed to start LLM runtimes", "error", err)
 			}
 		}()
+
+		// F-D8 classifier boot fail-fast. StartAll is async (slow model
+		// loads must not delay socket readiness), but a LOCAL classifier
+		// runtime that never becomes healthy is a platform failure, not a
+		// degradation to tolerate: wait for the classifier chain's health
+		// window here and fail the boot (non-zero exit) when it stays
+		// unhealthy. The gate runs AFTER the StartAll goroutine above —
+		// StartAll arms the endpoint health checkers, and a checker that was
+		// never started would never report healthy. The rest of StartAll
+		// continues in the background during the wait; on failure, the
+		// shutdown below stops every runtime this boot spawned (StopAll)
+		// before Run returns the fatal error (the same fatal-startup shape
+		// as the registry.StartAll failure path above).
+		if d.fullConfig != nil && d.fullConfig.Orchestrator.ClassifierBootFailFast {
+			logger := d.logger.With("component", "classifier-boot-gate")
+			if err := gateClassifierRuntimeHealth(
+				ctx,
+				logger,
+				d.components.ModelsConfig,
+				d.fullConfig.Orchestrator.ClassifierBootFailFast,
+				d.components.ContainerManager,
+			); err != nil {
+				d.logger.Error("FATAL: classifier runtime unhealthy at startup — refusing to serve with degraded classification", "error", err)
+				cancelLlm()
+				d.shutdown()
+				return fmt.Errorf("classifier runtime health gate failed: %w", err)
+			}
+		}
 	}
 
 	// Metrics collector is started automatically by NewCollector

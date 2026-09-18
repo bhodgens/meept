@@ -647,6 +647,15 @@
     "interview_ambiguity_threshold": 0.6,  // planner: conducts interview for plan-mode when >= this
     "max_steps_per_phase": 8,              // Thread C+F: per-phase step cap
     "max_phases": 12,                      // Thread C+F: phase count soft cap
+    // Classifier boot fail-fast (F-D8): when a LOCAL spawned runtime in the
+    // classifier chain (classifier_model / classifier alias members with a
+    // lifecycle block) never answers /health within its configured health
+    // window, the daemon logs an ERROR naming the endpoint, model path and
+    // spawn command, then EXITS non-zero. An unhealthy local classifier at
+    // boot is a platform failure, not a degradation to tolerate. Set false
+    // only if your classifier endpoint is started out of band. Cloud-only
+    // classifier chains never trip this gate.
+    "classifier_boot_fail_fast": true,
     // Stage-0 classifier prefilter (docs/workflows/classifier-prefilter.md):
     // embedding cosine gate that direct-routes confident inputs before the
     // analyzer + router LLM calls. Disabled by default; requires a local

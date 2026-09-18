@@ -2393,6 +2393,18 @@ type OrchestratorConfig struct {
 	// production keeps rotation; exists to make classifier failures
 	// honest during testing/iteration.
 	ClassifierFailFast bool `json:"classifier_fail_fast" toml:"classifier_fail_fast"`
+	// ClassifierBootFailFast gates daemon startup on classifier-runtime
+	// health (F-D8): when true (the default), a LOCAL SPAWNED runtime in
+	// the classifier chain (models.json5 classifier_model / classifier
+	// alias members carrying a lifecycle block) that is not healthy after
+	// its configured health window is a FATAL boot failure — the daemon
+	// logs an ERROR naming the endpoint, model path and spawn command,
+	// then exits non-zero. An unhealthy classifier at boot is a platform
+	// failure, not a degradation to tolerate. Set false to skip the gate
+	// (e.g. classifier endpoint provided externally and started out of
+	// band). Cloud-only classifier chains (no local runtime) never trip
+	// the gate regardless of this setting.
+	ClassifierBootFailFast bool `json:"classifier_boot_fail_fast" toml:"classifier_boot_fail_fast"`
 	// Prefilter configures the Stage-0 embedding prefilter
 	// (classifier-observability follow-up): embed the input, cosine-match
 	// against labeled intent centroids, and route directly when confident
@@ -3211,6 +3223,10 @@ func DefaultConfig() *Config {
 			MaxStepsPerPhase:            8,
 			MaxPhases:                   12,
 			ClassifierFailFast:          false, // production keeps rotation; fail-fast is a testing mode
+			// ClassifierBootFailFast (F-D8): a local classifier runtime that
+			// never becomes healthy at boot is fatal by default; opt out
+			// with orchestrator.classifier_boot_fail_fast = false.
+			ClassifierBootFailFast: true,
 			Prefilter: ClassifierPrefilterConfig{
 				Enabled:    false,
 				BaseURL:    "",

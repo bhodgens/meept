@@ -582,6 +582,20 @@ stops owned runtimes: `Daemon.Stop` calls `ContainerManager.StopAll(ctx)`
 behind - verified 2026-09-12, killing a scratch daemon took its `mlx_lm` and
 `llama-server` children down with it.
 
+**Classifier runtime health gates startup (F-D8).** With
+`orchestrator.classifier_boot_fail_fast` true (the default), the daemon —
+after `ContainerManager.StartAll` launches in `Run` — waits for every LOCAL
+SPAWNED runtime in the classifier chain (models.json5 `classifier_model` /
+`classifier` alias members whose provider carries a lifecycle block on a
+loopback baseURL) to answer `/health` within its configured window
+(spawn timeout + unhealthy_threshold x interval). A local classifier still
+unhealthy after the window is a platform failure: the gate logs an ERROR
+naming endpoint, model path and spawn command, shuts down cleanly, and `Run`
+returns the fatal error so `meept-daemon` exits non-zero. Cloud-only chains
+and `classifier_boot_fail_fast: false` skip the gate. Keep the gate AFTER the
+StartAll goroutine: StartAll arms the health checkers, and a checker that
+was never started never reports healthy.
+
 A hard kill no longer leaks. Each runtime is spawned under a supervisor (the
 daemon binary in a hidden mode, `meept-daemon --supervise-parent <pid> -- <argv>`)
 that kills the runtime's process group - SIGTERM, then SIGKILL after 10s - once
