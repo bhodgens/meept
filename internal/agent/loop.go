@@ -2527,7 +2527,10 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// fallback armed in a PREVIOUS turn can never leak its note into this
 	// turn's reply. Same fresh-turn lifecycle as the override sweep above;
 	// handleRefusal re-arms it if THIS turn refuses and falls back.
-	l.clearRefusalFallbackServed()
+	// Bughunt F4: when the flag is set the refusal pin was ACCEPTED last
+	// turn — clear the persistent override + staged config too, so the
+	// fresh turn serves the base model instead of the sticky fallback pin.
+	l.clearRefusalFreshTurnState()
 
 	// Snapshot file watcher under lock to avoid racing with SetFileWatcher.
 	l.mu.RLock()
@@ -7599,6 +7602,13 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		WithResolver(l.resolver),
 		WithModelRef(l.modelRef),
 		WithAgentSpec(l.spec),
+		// --- Bughunt F5: the global models.json5 refusal_model slot must
+		// survive the clone — without it a per-session loop cloned from the
+		// daemon template had refusalFallbackRef() == "" and silently ran
+		// with the fallback feature off (spec.RefusalModel empty + global
+		// slot lost). Mirrors the SetGlobalRefusalModel wiring call in
+		// components.go on the template itself.
+		WithGlobalRefusalModel(l.globalRefusalModel),
 
 		// --- Config ---
 		WithAgentConfig(l.config),

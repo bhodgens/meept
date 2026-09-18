@@ -30,6 +30,19 @@ func (l *AgentLoop) SetGlobalRefusalModel(ref string) {
 	l.globalRefusalModel = ref
 }
 
+// WithGlobalRefusalModel is the LoopOption form of SetGlobalRefusalModel
+// (bughunt F5): ConfigSnapshot carries the template's global refusal slot so
+// clones inherit it, and the registry can wire the slot straight into
+// specialist loops. Non-empty only; an empty slot is a no-op so the option
+// never clobbers a value set by an earlier wiring step.
+func WithGlobalRefusalModel(ref string) LoopOption {
+	return func(l *AgentLoop) {
+		if ref != "" {
+			l.globalRefusalModel = ref
+		}
+	}
+}
+
 // refusalFallbackRef resolves the configured fallback by frozen precedence:
 // spec.RefusalModel > global ModelsConfig.RefusalModel > "". The loop holds
 // the global slot value (mirrored at wiring time) because the loop package
@@ -212,11 +225,39 @@ func (l *AgentLoop) clearRefusalFallbackServed() {
 
 // ClearRefusalFallback clears a fallback override armed by handleRefusal
 // when the retry never consumed it (fresh-turn restore, mirroring the
-// verification-escalation clear-after-turn behavior). Idempotent.
+// verification-escalation clear-after-turn behavior). Restores the base
+// model by clearing the persistent override AND the staged fallback config
+// (pendingModelOverrideConfig): the staged config is part of the pin —
+// leaving it armed would re-apply WithModelOverride on the next call even
+// after the override ref itself was cleared (bughunt F4). Idempotent.
 func (l *AgentLoop) ClearRefusalFallback() {
+	l.mu.Lock()
+	l.pendingModelOverrideConfig = nil
+	l.mu.Unlock()
 	if l.refusalOverrideClear != nil {
 		l.refusalOverrideClear()
 	}
+}
+
+// clearRefusalFreshTurnState is the fresh-turn half of the refusal-fallback
+// lifecycle (bughunt F4): when the pin was REFUSAL-ARMED in a previous turn
+// (signaled by the turn-scoped disclosure flag, set exactly when handleRefusal
+// accepted the pin), restore the base model before this turn resolves its
+// own. Without this the persistent override survived the successful fallback
+// turn and every later turn silently served the fallback model — the fresh
+// turn must start from the base alias unless THIS turn refuses and re-arms.
+// Always resets the disclosure flag (the clearRefusalFallbackServed
+// lifecycle). Idempotent; guarded by l.mu.
+func (l *AgentLoop) clearRefusalFreshTurnState() {
+	l.mu.RLock()
+	refusalArmed := l.refusalFallbackServedModel != ""
+	l.mu.RUnlock()
+	if refusalArmed {
+		l.ClearRefusalFallback()
+	}
+	l.mu.Lock()
+	l.refusalFallbackServedModel = ""
+	l.mu.Unlock()
 }
 
 // refusalServingModelRef returns the "provider/model" ref of the model the
