@@ -708,6 +708,14 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 	}
 
 	var eventType string
+	// chat.response is an RPC reply topic consumed by ChatService for the
+	// HTTP body — it is deliberately NOT relayed to WS clients. The prefix
+	// match below would classify it as agent_progress and re-deliver the
+	// reply to HTTP+WS clients (double delivery, AGENTS.md invariant), so
+	// drop it before classification.
+	if topic == "chat.response" {
+		return nil
+	}
 	// Marker-first classification: topics migrated to typed Topic[T]
 	// declarations carry payloads implementing wsclass.WSClassified. On a
 	// successful typed decode the marker decides the event type.

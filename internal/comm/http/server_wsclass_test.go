@@ -39,9 +39,11 @@ func TestWSClassParity(t *testing.T) {
 		{"chat_message", "chat_message"},
 		{"chat.message.received", "chat_message"},
 		{"chat.progress", "agent_progress"},
-		// chat.response is excluded from chat_message only; the "chat."
-		// prefix classifies it agent_progress (measured pre-change behavior).
-		{"chat.response", "agent_progress"},
+		// chat.response is DELIBERATELY NOT RELAYED (scopes-2 F-A): it is
+		// an RPC reply topic consumed by ChatService for the HTTP body;
+		// relaying it double-delivers the reply to HTTP+WS clients
+		// (AGENTS.md invariant). transformBusEventToWS returns nil —
+		// asserted separately below.
 		{"agent.quota_wait", "agent_progress"},
 		{"agent.model_escalated", "agent_progress"},
 		{"turn.terminal", "agent_progress"},
@@ -63,6 +65,10 @@ func TestWSClassParity(t *testing.T) {
 		if got := out["type"]; got != tc.want {
 			t.Errorf("topic %q: type = %v, want %q", tc.topic, got, tc.want)
 		}
+	}
+	// chat.response must return nil (never relayed), not a payload.
+	if out := transformBusEventToWS(busMsg("chat.response", map[string]any{"k": "v"})); out != nil {
+		t.Errorf("chat.response: got type=%v, want nil (not relayed to WS clients)", out["type"])
 	}
 }
 

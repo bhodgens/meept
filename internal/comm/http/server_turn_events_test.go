@@ -61,3 +61,32 @@ func TestTransformBusEventToWS_TurnPrefixIsAgentProgress(t *testing.T) {
 		}
 	}
 }
+
+// TestTransformBusEventToWS_ChatResponseNotRelayed pins the F-A fix:
+// chat.response is an RPC reply topic consumed by ChatService for the
+// HTTP body. It must never be relayed to WS clients — HTTP+WS clients
+// (Flutter GUI) would otherwise receive the reply twice (double-delivery
+// invariant, AGENTS.md). transformBusEventToWS must return nil for it.
+func TestTransformBusEventToWS_ChatResponseNotRelayed(t *testing.T) {
+	msg := &models.BusMessage{
+		Topic:   "chat.response",
+		Payload: mustJSONMap(t, map[string]any{"conversation_id": "c1", "reply": "the answer", "session_id": "s1"}),
+	}
+	if out := transformBusEventToWS(msg); out != nil {
+		t.Fatalf("chat.response must not be relayed to WS clients, got type=%v", out["type"])
+	}
+
+	// Neighbor chat.* lifecycle topics keep flowing (the drop is exact,
+	// not a prefix wide-net).
+	keep := &models.BusMessage{
+		Topic:   "chat.progress",
+		Payload: mustJSONMap(t, map[string]any{"conversation_id": "c1"}),
+	}
+	out := transformBusEventToWS(keep)
+	if out == nil {
+		t.Fatal("chat.progress must still be relayed")
+	}
+	if out["type"] != "agent_progress" {
+		t.Errorf("chat.progress type = %v, want agent_progress", out["type"])
+	}
+}
