@@ -383,6 +383,21 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 				)
 				continue
 
+			case isRefusalError(err):
+				// Bughunt F13 (AGENTS.md invariant "refusal is not a
+				// failure"): a *RefusalError is the provider's SAFETY layer
+				// declining — the provider is HEALTHY. Do NOT recordFailure,
+				// do NOT rotate to another provider (one hop only, owned by
+				// the agent loop's refusal-fallback policy); return the
+				// refusal so the loop can re-dispatch to its configured
+				// refusal model.
+				pm.logger.Info("Model refusal: returning to caller without health impact (no rotation)",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+					"latency", latency,
+				)
+				return nil, err
+
 			case IsRateLimitError(err):
 				// Rate limit is provider-specific — rotate immediately.
 				// Don't record as a health failure since rate limits are transient.
@@ -554,6 +569,19 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 					progress(ProgressStageDone, fmt.Sprintf("Provider %s quota limited, trying next", entry.Config.ProviderID))
 				}
 				continue
+
+			case isRefusalError(err):
+				// Bughunt F13 (AGENTS.md invariant): refusal is NOT a health
+				// failure — no recordFailure, no rotation. Return so the
+				// agent loop's one-hop fallback policy owns it.
+				pm.logger.Info("Model refusal: returning to caller without health impact (no rotation)",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+				)
+				if progress != nil {
+					progress(ProgressStageDone, fmt.Sprintf("Provider %s refused by safety layer", entry.Config.ProviderID))
+				}
+				return nil, err
 
 			case IsRateLimitError(err):
 				if progress != nil {
@@ -758,6 +786,16 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 					"error", err,
 				)
 				continue
+
+			case isRefusalError(err):
+				// Bughunt F13 (AGENTS.md invariant): refusal is NOT a health
+				// failure — no recordFailure, no rotation. Return so the
+				// agent loop's one-hop fallback policy owns it.
+				pm.logger.Info("Model refusal on streaming call: returning to caller without health impact (no rotation)",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+				)
+				return nil, err
 
 			case isClientError(err):
 				pm.logger.Warn("Client error on streaming call, not rotating (request-level issue)",
