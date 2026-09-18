@@ -898,6 +898,77 @@ if preserved:
     print("note: kept as-is (provider does not spawn): %s"
           % ", ".join(sorted(preserved)), file=sys.stderr)
 
+# The sandboxed e2e can reach ONLY what the scratch daemon spawns itself: zai
+# has no API key here and ollama is not running, so an alias chain that ends
+# in a cloud/ollama model makes specialist step jobs fail (the naive-user e2e:
+# T1's coder step -> A4; later turns -> error envelopes -> A3/A5). Rewrite
+# every agent-id alias to the local-gguf runtime the daemon spawns. Same
+# scanner as above (no json5 module: spans + comment-blanked text); the alias
+# objects are top-level, so the provider-scoped port rewrite never touched
+# them and these edits are applied to the rebuilt text.
+ALIAS_NAMES = ("classifier", "summarizer", "small", "coder", "planner",
+               "analyst")
+LOCAL_MODEL = "local-gguf/lfm-8b-gguf"
+alias_edits = []
+alias_key = re.search(r'["\']?model_aliases["\']?\s*:\s*\{', scan)
+if alias_key is None:
+    print("WARNING: no model_aliases object in %s; aliases left as-is" % path,
+          file=sys.stderr)
+else:
+    alias_start = alias_key.end() - 1
+    alias_parents = next((parents for s, e, parents in spans
+                          if s == alias_start), None)
+    if alias_parents is None:
+        print("WARNING: model_aliases object in %s could not be sliced; "
+              "aliases left as-is" % path, file=sys.stderr)
+    else:
+        want = alias_parents + (alias_start,)
+        for s, e in sorted((a, b) for a, b, pr in spans if pr == want):
+            name = member_name(s)
+            if name not in ALIAS_NAMES:
+                continue
+            block_scan = scan[s:e]
+            mkey = re.search(r'["\']?models["\']?\s*:\s*\[', block_scan)
+            if mkey is None:
+                print("WARNING: alias %s has no models array; left as-is"
+                      % name, file=sys.stderr)
+                continue
+            # Walk to the array's matching ']' (strings skipped; comments are
+            # already blanked in block_scan).
+            i, blen, depth = mkey.end(), e - s, 1
+            while i < blen and depth:
+                c = block_scan[i]
+                if c == '"':
+                    i = _skip_string(block_scan, i)
+                    continue
+                if c == "[":
+                    depth += 1
+                elif c == "]":
+                    depth -= 1
+                i += 1
+            if depth:
+                print("WARNING: alias %s models array is unterminated; "
+                      "left as-is" % name, file=sys.stderr)
+                continue
+            close = i - 1  # index of the matching ']' within the block
+            # Match the array's own indentation for the replacement entry.
+            line_start = block_scan.rfind("\n", 0, mkey.end() - 1) + 1
+            indent = re.match(r"[ \t]*", block_scan[line_start:]).group(0)
+            replacement = (
+                '[\n%s  "%s"   // sandbox e2e: only the spawned local '
+                'runtime is reachable\n%s]' % (indent, LOCAL_MODEL, indent))
+            alias_edits.append((s + mkey.end() - 1, s + close + 1, replacement))
+        if not alias_edits:
+            print("WARNING: none of the agent aliases (%s) found in %s; "
+                  "nothing rewritten" % (", ".join(ALIAS_NAMES), path),
+                  file=sys.stderr)
+for astart, aend, rep in sorted(alias_edits, reverse=True):
+    new = new[:astart] + rep + new[aend:]
+if alias_edits:
+    print("note: model_aliases rewritten for the sandbox (spawned local "
+          "runtime only): %s" % ", ".join(
+              sorted({member_name(a[0]) for a in alias_edits})), file=sys.stderr)
+
 open(path, "w", encoding="utf-8").write(new)
 for old in old_ports:
     print("%d %d" % (old, mapping[old]))
