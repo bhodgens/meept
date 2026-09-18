@@ -465,6 +465,12 @@ func TestRefusalFallbackE2E_LedgerNamesFallbackModel(t *testing.T) {
 	var primaryRows int
 	require.NoError(t, store.DB().Get(&primaryRows,
 		`SELECT COUNT(*) FROM llm_calls WHERE model_id='stub-model-a'`))
-	assert.Zero(t, primaryRows,
-		"the refusing call must not ledger under the primary model; only the fallback retry records")
+	// Bughunt F12: this assertion previously demanded ZERO primary rows,
+	// enshrining the usage-discarding bug — a refused call consumed tokens
+	// and the ledger silently dropped them. The refusal now carries
+	// RefusalError.Usage and recordUsageStore writes the row before the
+	// refusal surfaces, so exactly one primary row (an error row) is the
+	// contract.
+	assert.Equal(t, 1, primaryRows,
+		"the refusing primary call must ledger exactly one llm_calls row carrying its consumed usage (was wrongly asserted 0 pre-F12)")
 }

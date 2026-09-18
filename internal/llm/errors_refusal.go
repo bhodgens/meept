@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -38,7 +39,13 @@ type RefusalError struct {
 	FinishReason string // raw signal: "refusal", "content_filter", or ""
 	Message      string // provider detail, truncated to 500 chars
 	StatusCode   int    // HTTP status when from an error body; 0 otherwise
-	Cause        error
+	// Usage carries the token usage the provider reported for the refused
+	// call (bughunt F12). A refusal still consumed prompt (+ often output)
+	// tokens — budget accounting and the metrics.db llm_calls ledger must
+	// record them instead of silently dropping the row. Zero value when the
+	// provider reported no usage.
+	Usage TokenUsage
+	Cause error
 }
 
 func (e *RefusalError) Error() string {
@@ -64,6 +71,19 @@ func (e *RefusalError) NonRetryable() bool {
 
 var _ NonRetryableError = (*RefusalError)(nil)
 
+// isRefusalError reports whether err is (or wraps) a *RefusalError. The
+// ProviderManager failover switches use it to keep refusals OUT of the
+// health-failure path (bughunt F13): a refusal is the provider's safety
+// layer declining, not a provider health problem — no recordFailure, no
+// rotation; the agent loop's one-hop fallback policy owns it.
+func isRefusalError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var re *RefusalError
+	return errors.As(err, &re)
+}
+
 // truncateRefusalMessage caps the stored provider detail at
 // refusalMessageMaxLen chars (mirrors errors_quota.go).
 func truncateRefusalMessage(msg string) string {
@@ -79,7 +99,9 @@ func truncateRefusalMessage(msg string) string {
 //   - "content_filter" => Source "finish_reason" (OpenAI-compatible)
 //
 // Anything else (including "") returns nil. Empty modelID is allowed
-// (streaming paths may not have it); fill from context when known.
+// (streaming paths may not have it); fill from context when known. The
+// provider-reported usage rides along (bughunt F12): a refused call still
+// consumed tokens and the usage ledger must record them.
 func DetectRefusal(providerID, modelID, finishReason string) *RefusalError {
 	switch {
 	case strings.EqualFold(finishReason, refusalReasonStopReason):
@@ -98,6 +120,17 @@ func DetectRefusal(providerID, modelID, finishReason string) *RefusalError {
 		}
 	default:
 		return nil
+	}
+}
+
+// AttachUsageToRefusal stamps the provider-reported usage onto a refusal
+// error (bughunt F12). Callers record the usage row (recordUsageStore /
+// metrics) BEFORE returning the refusal so a refused call still bills its
+// consumed tokens; this helper keeps the error itself truthful when a parse
+// site has usage in hand but records separately. Nil refusal is a no-op.
+func AttachUsageToRefusal(refusal *RefusalError, usage TokenUsage) {
+	if refusal != nil {
+		refusal.Usage = usage
 	}
 }
 

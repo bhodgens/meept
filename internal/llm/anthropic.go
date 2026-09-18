@@ -395,6 +395,17 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	for attempt := 1; attempt <= shortRetries; attempt++ {
 		resp, err := c.doRequest(ctx, reqBody, effCfg)
 		if err != nil {
+			// Refusal errors never re-enter the short-retry loop: the
+			// serving model declined by policy — retrying the SAME model
+			// cannot change the verdict. Bughunt F12: ledger the refused
+			// call's provider-reported usage BEFORE surfacing the refusal
+			// (the non-streaming doRequest site stamps refusal.Usage but
+			// has no chatOpts for the llm_calls ledger).
+			if refusal, ok := errors.AsType[*RefusalError](err); ok {
+				c.recordUsageStore(effCfg, refusal.Usage, true, "model refusal", 0, chatOpts)
+				return nil, err
+			}
+
 			// Quota errors never re-enter the short-retry loop: the window
 			// is hours, not seconds. Return immediately (quota-reset-
 			// resilience contract 1).
@@ -632,6 +643,16 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 
 		resp, err := c.doStreamingRequest(ctx, reqBody, effCfg, reportProgress)
 		if err != nil {
+			// Refusal errors never re-enter the short-retry loop: the
+			// serving model declined by policy — retrying the SAME model
+			// cannot change the verdict. Bughunt F12: ledger the refused
+			// call's provider-reported usage BEFORE surfacing the refusal.
+			if refusal, ok := errors.AsType[*RefusalError](err); ok {
+				c.recordUsageStore(effCfg, refusal.Usage, true, "model refusal", 0, chatOpts)
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
+			}
+
 			// Quota errors never re-enter the short-retry loop (streaming
 			// path): hours-scale window, return immediately.
 			if _, ok := errors.AsType[*QuotaResetError](err); ok {
@@ -1366,7 +1387,46 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 	// Refusal surfacing (refusal-fallback leaf 01): Anthropic's
 	// stop_reason:"refusal" surfaces as a typed RefusalError instead of a
 	// generic completion.
+	// Bughunt F12: record the refused call's usage + metrics BEFORE
+	// returning — a refusal consumed prompt/output tokens and previously
+	// vanished from budget and the llm_calls ledger. The usage rides on the
+	// refusal too, so callers without a store still see it.
 	if refusal := DetectRefusal(cfg.ProviderID, cfg.ModelID, apiResp.StopReason); refusal != nil {
+		refusal.Usage = TokenUsage{
+			PromptTokens:        apiResp.Usage.InputTokens,
+			CompletionTokens:    apiResp.Usage.OutputTokens,
+			TotalTokens:         apiResp.Usage.InputTokens + apiResp.Usage.OutputTokens,
+			CachedTokens:        apiResp.Usage.CacheReadInputTokens,
+			CacheCreationTokens: apiResp.Usage.CacheCreationInputTokens,
+		}
+		// The usage-store path (metrics.db llm_calls) has no chatOpts inside
+		// doRequest — it lives one frame up in Chat/ChatWithProgress, which
+		// ledger the refusal retry-loop branch. Metrics + refusal.Usage here
+		// cover the consumed tokens (bughunt F12).
+		if c.metricsStore != nil {
+			costUSD := float64(apiResp.Usage.InputTokens)*cfg.CostPerMillionInput/1_000_000 + float64(apiResp.Usage.OutputTokens)*cfg.CostPerMillionOutput/1_000_000
+			record := metrics.RequestRecord{
+				Timestamp:        time.Now(),
+				ProviderID:       cfg.ProviderID,
+				ModelID:          cfg.ModelID,
+				PromptTokens:     apiResp.Usage.InputTokens,
+				CompletionTokens: apiResp.Usage.OutputTokens,
+				CachedTokens:     apiResp.Usage.CacheReadInputTokens,
+				LatencyMs:        latencyMs,
+				HTTPStatus:       resp.StatusCode,
+				ErrorType:        metrics.ErrorTypeNone,
+				Success:          true,
+				CostUSD:          costUSD,
+			}
+			store := c.metricsStore
+			logger := c.logger
+			//nolint:gosec // goroutine outlives request context
+			go func() {
+				if rerr := store.Record(context.Background(), record); rerr != nil {
+					logger.Debug("metrics record failed", "error", rerr)
+				}
+			}()
+		}
 		return nil, refusal
 	}
 
@@ -1528,11 +1588,13 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	// Parse the stream. Bedrock wraps the Anthropic SSE events in AWS
 	// event-stream binary framing (vnd.amazon.eventstream); the adapter
 	// unwraps it into SSE-shaped bytes so the shared parser is unchanged.
+	// effCfg is threaded through (bughunt F14): the streaming refusal must
+	// attribute to the request-selected model, not c.config's default.
 	streamBody := io.Reader(resp.Body)
 	if cfg.ProviderID == ProviderIDBedrock || hasBedrockEventStreamBody(resp.Header) {
 		streamBody = newBedrockEventStreamAdapter(resp.Body)
 	}
-	parsedResp, parseErr := c.parseStreamingResponse(streamBody, progress)
+	parsedResp, parseErr := c.parseStreamingResponse(streamBody, progress, cfg)
 
 	// Record successful request metrics with actual usage from the stream
 	if c.metricsStore != nil && parseErr == nil && parsedResp != nil {
@@ -1602,8 +1664,18 @@ func (c *AnthropicClient) buildRateLimitError(respBody []byte, statusCode int, r
 	return rlErr
 }
 
-// parseStreamingResponse parses server-sent events from Anthropic's streaming API.
-func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(ProgressStage, string)) (*Response, error) {
+// parseStreamingResponse parses server-sent events from Anthropic's
+// streaming API. cfg is the EFFECTIVE config for this request (bughunt F14):
+// after a request-scoped model selection it names the model that actually
+// served the stream — the streaming refusal must attribute to it, not to the
+// client's configured default (which is stale under override/refusal
+// fallback). May be nil (legacy callers); the client's stored config is the
+// then-fallback attribution source.
+func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(ProgressStage, string), cfg ...*ModelConfig) (*Response, error) {
+	effective := c.config
+	if len(cfg) > 0 && cfg[0] != nil {
+		effective = cfg[0]
+	}
 	var blocks []contentBlockAccum
 	var stopReason = "end_turn"
 	var usage anthropicUsage
@@ -1694,7 +1766,17 @@ func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(P
 	// Refusal surfacing (refusal-fallback leaf 01): a stream whose
 	// message_delta carries stop_reason "refusal" surfaces as a typed
 	// RefusalError instead of a generic completion.
-	if refusal := DetectRefusal(c.config.ProviderID, c.config.ModelID, stopReason); refusal != nil {
+	// Bughunt F14: attribute to the EFFECTIVE config's model (the
+	// request-selected one), not c.config's stale default. Bughunt F12:
+	// the stream usage rides on the refusal so the caller can ledger it.
+	if refusal := DetectRefusal(effective.ProviderID, effective.ModelID, stopReason); refusal != nil {
+		refusal.Usage = TokenUsage{
+			PromptTokens:        usage.InputTokens,
+			CompletionTokens:    usage.OutputTokens,
+			TotalTokens:         usage.InputTokens + usage.OutputTokens,
+			CachedTokens:        usage.CacheReadInputTokens,
+			CacheCreationTokens: usage.CacheCreationInputTokens,
+		}
 		return nil, refusal
 	}
 

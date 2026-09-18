@@ -597,7 +597,10 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			// cannot change the verdict. Return immediately; the agent
 			// loop's refusal branch re-dispatches to the configured
 			// refusal model (refusal-fallback tree 01/03).
-			if _, ok := errors.AsType[*RefusalError](err); ok {
+			// Bughunt F12: the refused call still consumed tokens — ledger
+			// the provider-reported usage BEFORE surfacing the refusal.
+			if refusal, ok := errors.AsType[*RefusalError](err); ok {
+				c.recordUsageStore(cfg.ProviderID, refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", 0)
 				return nil, err
 			}
 
@@ -819,7 +822,10 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			// as Chat() above.
 			// Refusal errors never re-enter the short-retry loop: the
 			// serving model declined by policy (refusal-fallback 01/03).
-			if _, ok := errors.AsType[*RefusalError](err); ok {
+			// Bughunt F12: ledger the refused call's provider-reported
+			// usage BEFORE surfacing the refusal.
+			if refusal, ok := errors.AsType[*RefusalError](err); ok {
+				c.recordUsageStore(cfg.ProviderID, refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", 0)
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -1855,7 +1861,17 @@ func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool, p
 	// refusal finish reason is a typed RefusalError (NonRetryable), not a
 	// generic completion or the empty-content sentinel. Checked BEFORE the
 	// empty-content check so a refusal with no text still classifies.
+	// Bughunt F12: the provider-reported usage rides on the refusal — the
+	// refused call consumed tokens and must be ledgered by the caller
+	// before the refusal surfaces.
 	if refusal := DetectRefusal(providerID, modelID, choice.FinishReason); refusal != nil {
+		refusal.Usage = TokenUsage{
+			PromptTokens:     chatResp.Usage.PromptTokens,
+			CompletionTokens: chatResp.Usage.CompletionTokens,
+			TotalTokens:      chatResp.Usage.TotalTokens,
+			CachedTokens:     chatResp.Usage.PromptTokensDetails.CachedTokens,
+			ReasoningTokens:  chatResp.Usage.CompletionTokensDetails.ReasoningTokens,
+		}
 		return nil, refusal
 	}
 
@@ -2032,16 +2048,11 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		// SAME model cannot change the verdict. Return immediately; the
 		// agent loop's refusal branch re-dispatches to the configured
 		// refusal model (refusal-fallback tree 01/03).
-		if _, ok := errors.AsType[*RefusalError](err); ok {
-			return nil, err
-		}
-
-		// Refusal errors never re-enter the short-retry loop (streaming
-		// delta path): the serving model declined by policy — retrying
-		// the SAME model cannot change the verdict. Return immediately;
-		// the agent loop's refusal branch re-dispatches to the configured
-		// refusal model (refusal-fallback tree 01/03).
-		if _, ok := errors.AsType[*RefusalError](err); ok {
+		// Bughunt F12: ledger the refused call's provider-reported usage
+		// BEFORE surfacing the refusal. (The duplicated branch below was
+		// collapsed into this one — identical semantics.)
+		if refusal, ok := errors.AsType[*RefusalError](err); ok {
+			c.recordUsageStore(cfg.ProviderID, refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", 0)
 			return nil, err
 		}
 
@@ -2517,7 +2528,11 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	// Refusal surfacing (refusal-fallback leaf 01): a stream that ends with
 	// a refusal finish reason surfaces as a typed RefusalError instead of a
 	// generic completion.
+	// Bughunt F12: the provider-reported stream usage rides on the refusal —
+	// the refused call consumed tokens; the caller records the ledger row
+	// from RefusalError.Usage before surfacing it.
 	if refusal := DetectRefusal(providerID, modelID, finishReason); refusal != nil {
+		refusal.Usage = usage
 		return nil, resp.StatusCode, refusal
 	}
 
