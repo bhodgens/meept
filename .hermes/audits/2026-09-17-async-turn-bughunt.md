@@ -71,18 +71,48 @@ worth revisiting if legacy mode stays in use.
 
 ## Coverage ledger (what was NOT audited)
 
-- Scope 2 deep pass (TUI models/turn.go 459 lines, chat model wiring,
-  Flutter provider state machine) — partial only (parked-skip verified
-  on bench; TUI/GUI parked handling spot-checked).
-- Scope 3 deep pass (refusal-fallback) — parent read the detection
-  markers (conservative 4-marker list), error-body gating (non-200
-  only), NonRetryable classification, one-hop give-up rules, and the
-  disclosure lifecycle (fresh-turn clear at loop.go:2530); NOT audited:
-  streaming-path detection coverage, budget/token accounting across the
-  fallback call, alias-health interaction.
 - meept-bench checkers' internal logic.
-- Re-dispatch scopes 2+3 when the provider quota resets (17:30
-  2026-09-17).
+
+## Scopes 2+3 re-dispatch (2026-09-17 ~23:00, post quota reset)
+
+Dispatched as two parallel read-only subagents (zai quota verified HTTP
+200 first). Completed and dispositioned 2026-09-18:
+
+### Scope 2 (TUI + GUI, deleg_9fb259e7/sa-0)
+
+- HIGH — WS relay never subscribed `turn.*`: the bus wildcard `*`
+  matches single-segment topics only (matchWildcard compares segment
+  counts), so turn.terminal never reached HTTP/WS clients. RPC-path
+  clients (bench/CLI/TUI direct socket) were unaffected — exactly
+  matches the observed GUI-pending symptom. FIXED 1fd787e5 with pin.
+- MED — Flutter agent.progress payloads carry only conversation_id (no
+  session_id) so the client where-clause drops them: pending turns
+  never refresh liveness, showing stalled after the fixed 120s despite
+  progress. Parity break vs TUI (DeliverTurnProgress on every
+  agent.progress, app.go:1360). OPEN — needs payload session_id or
+  client matching on conversation_id.
+- MED — Flutter WS poll path does not re-mint the subscription id after
+  a reconnect, so resumed events are dropped until the next full
+  resubscribe. OPEN.
+- LOW — chat_provider loadMessages() leaks the previous
+  _turnTerminalSubscription (no cancel before reassign): duplicate
+  terminal delivery after repeated reloads. OPEN.
+
+### Scope 3 (refusal fallback, deleg_9fb259e7/sa-1)
+
+- MED — streaming refusal fallback concatenates refused-partial + fall-
+  back tokens in the client-visible stream (streamOnDelta accumulator
+  not reset on retry; the PM rotation path solved this with attempt
+  tagging, the refusal path did not). OPEN — loop.go:4204/5891.
+- MED — refused-call usage ledgered to llm_calls but never charged to
+  Budget token/cost accounting. OPEN.
+- MED — SpawnVerifier child loop missed WithGlobalRefusalModel + spec
+  (third loop-construction site after F5 fixed the other two). FIXED
+  447d945c.
+- LOW — one-hop budget resets across park/resume generations. OPEN.
+
+Full finding text lives in the delegation transcripts:
+~/.hermes/cache/delegation/live/deleg_9fb259e7/task-{0,1}.log
 
 ## Verification
 
