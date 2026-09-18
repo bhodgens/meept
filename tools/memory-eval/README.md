@@ -242,13 +242,18 @@ cached). Note: run-to-run variance at this corpus size is ±0.05-0.08 on
 precision (temperature 0.2 sampling); compare lanes within a run, not
 across runs.
 
-Confidence sweep (judge matching): candidates are bimodal — confidence
-0.3-0.9 keeps 91.5-93% precision with flat behavior; the sweep shows the
-model's confidence is NOT well-calibrated as a quality gate at this size
-(nearly all candidates sit in one confidence band). A confidence gate
-would discard ~30% of candidates for ~0 precision gain — NOT recommended;
-route everything to the review pipeline and rely on the librarian
-curation instead.
+Confidence sweep (judge matching): CORRECTED after distribution analysis.
+Confidence is bimodal (46 candidates at 1.0, 19 at 0.0, 3 scatter) — the
+flat 0.3-0.9 region masked the real signal, which lives between 0.0 and
+0.3: gating at t=0.3 lifts judge precision 0.735 -> 0.918 (+0.18) by
+excluding the 0.0-confidence band, which holds most decoy FPs. The
+excluded band is NOT garbage: 7 of 21 low-confidence candidates are
+correct (33%), so a hard drop loses real memory. Recommended wiring:
+confidence < 0.3 -> auto-reject as untrusted (they are overwhelmingly
+decoy activations); 0.3 <= conf < 1.0 partial band -> librarian review
+pipeline (status=auto claims already have this surface); conf = 1.0 ->
+auto-store. Re-calibrate the 0.3 cut on live traffic via the outcome loop
+(#49 measurement pattern) before shipping.
 
 Earlier stub-only note superseded: the shape-verification numbers in the
 previous revision of this section were stub output and carried no quality
