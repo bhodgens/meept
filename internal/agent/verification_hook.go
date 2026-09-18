@@ -404,6 +404,10 @@ func (l *AgentLoop) SpawnVerifier(ctx context.Context, prompt string, modelRef s
 	verifierConfig.MaxIterations = 20
 
 	// Create child loop with restricted tools.
+	// Scopes-3 audit (2026-09-18): the hand-rolled opts list must carry the
+	// global refusal_model slot AND the parent's spec, exactly like the
+	// bughunt-F5 fix on the session-clone path — otherwise verifier children
+	// run with refusal fallback silently off (spec nil + global slot "").
 	childOpts := []LoopOption{
 		WithLLMChatter(l.llm),
 		WithResolver(l.resolver),
@@ -412,6 +416,8 @@ func (l *AgentLoop) SpawnVerifier(ctx context.Context, prompt string, modelRef s
 		WithSecurityOrchestrator(l.securityOrch),
 		WithLoopLogger(l.logger),
 		WithAgentConfig(verifierConfig),
+		WithAgentSpec(l.spec),
+		WithGlobalRefusalModel(l.globalRefusalModel),
 	}
 
 	// Use the verifier model if specified.
