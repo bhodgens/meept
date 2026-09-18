@@ -116,6 +116,11 @@ type ChatModel struct {
 	livenessTimeout  time.Duration // stalled-turn window; 0 = disabled
 	pendingTurnOwner string        // turn id owning the shared pending line slot
 
+	// Early terminal events (F19): turn.terminal events that arrived
+	// before the submit ack registered their turn. Consumed on
+	// registration; a tiny ephemeral map keyed by turn id.
+	earlyTerminals *turnRouterEarlyBuffer
+
 	// Progress state for the current pending message
 	progressState *ProgressState
 
@@ -392,6 +397,7 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 		selectedMsgIdx:    -1,
 		pendingMsgIdx:     -1,
 		turns:             newTurnRouter(nil),
+		earlyTerminals:    newTurnRouterEarlyBuffer(),
 		pendingTurns:      nil,
 		livenessTimeout:   chatConfig.LivenessTimeout,
 		historyIdx:        -1,

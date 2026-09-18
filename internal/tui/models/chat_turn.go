@@ -6,6 +6,7 @@ package models
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -25,13 +26,27 @@ func (m *ChatModel) handleSubmitTurnResult(msg submitTurnResultMsg) tea.Cmd {
 		conversationID = m.conversationID
 	}
 
-	pt, ok := m.turns.register(ack.TurnID, conversationID)
+	pt, ok := m.turns.register(ack.TurnID, conversationID, ack.SessionID)
 	if !ok {
 		// Duplicate ack (idempotent retry) — already tracked, never
 		// double-register or double-await.
 		return nil
 	}
 	m.pendingTurns = append(m.pendingTurns, pt)
+
+	// F19: a terminal event may have arrived BEFORE this ack registered
+	// the turn (WS event raced the submit RPC reply). Consume the
+	// buffered event now — with a terminal status it resolves the turn
+	// directly; parked keeps it pending.
+	if early, buffered := m.earlyTerminals.take(ack.TurnID); buffered {
+		if cmd := m.handleTurnTerminal(early); cmd != nil {
+			return tea.Batch(
+				func() tea.Msg { return turnSubmittedMsg{TurnID: ack.TurnID, ConversationID: conversationID} },
+				cmd,
+			)
+		}
+		return func() tea.Msg { return turnSubmittedMsg{TurnID: ack.TurnID, ConversationID: conversationID} }
+	}
 
 	return tea.Batch(
 		func() tea.Msg { return turnSubmittedMsg{TurnID: ack.TurnID, ConversationID: conversationID} },
@@ -45,6 +60,12 @@ func (m *ChatModel) handleSubmitTurnResult(msg submitTurnResultMsg) tea.Cmd {
 // still complete" wording and their await state is kept so the real
 // terminal result still lands when it arrives; every other status clears
 // the turn. The pending progress line is removed for resolved turns.
+//
+// F21: delivery/persistence is keyed by the turn's OWN conversation id —
+// never the currently selected session. A completed turn for another
+// conversation is stored into THAT session's transcript and skipped from
+// cross-session rendering (the current view must not show another
+// session's reply).
 func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 	pt, tracked := m.turns.get(msg.TurnID)
 	if !tracked {
@@ -53,11 +74,29 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 		return nil
 	}
 
+	// The turn's own conversation identity wins over the model's
+	// currently selected one (F21). The ack may have carried an empty
+	// conversation id (fell back to m.conversationID at register time),
+	// so re-derive it when the event carries the real value.
+	turnConversation := pt.conversationID
+	if msg.ConversationID != "" {
+		turnConversation = msg.ConversationID
+	}
+	crossSession := turnConversation != "" && turnConversation != m.conversationID
+
 	// Multiple concurrent turns are resolved independently: only this
 	// turn's pending line is removed; other in-flight turns stay visible.
-	m.removePendingMessageForTurn(pt)
+	// Cross-session turns never owned this view's pending line.
+	if !crossSession {
+		m.removePendingMessageForTurn(pt)
+	}
 
 	if msg.Status == turnStatusStalled {
+		if crossSession {
+			// Stalled notice for another conversation: no rendering
+			// here; the turn stays pending and its await stays armed.
+			return nil
+		}
 		// Honest stalled state: the task may still be running. Keep the
 		// turn tracked so the real terminal event still renders when it
 		// arrives; re-arm the await with the same liveness window.
@@ -77,7 +116,12 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 		// elsewhere; the real result arrives in a later terminal event
 		// with this turn's id. Keep the pending line and re-arm — do not
 		// render the ack text as the result (async-turn-migration relay
-		// fix, bench gate 2026-09-16).
+		// fix, bench gate 2026-09-16). F6: parked never resolves the
+		// awaiter (pendingTurn.notify ignores non-terminal statuses), so
+		// this re-arm observes the real terminal when it lands.
+		if crossSession {
+			return nil
+		}
 		if m.livenessTimeout > 0 {
 			return awaitTurnCmd(m.turns, pt, m.livenessTimeout)
 		}
@@ -87,10 +131,22 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 	m.dropPendingTurn(msg.TurnID)
 	m.turns.remove(msg.TurnID)
 
+	// F21: persistence is keyed by the turn's own session — the
+	// transcript of the conversation the turn BELONGS to gets the
+	// result, whatever view is active. Rendering into the visible
+	// transcript happens only when it is the same conversation.
+	persistSessionID := m.sessionIDForConversation(turnConversation, pt)
+
 	if msg.Status == turnStatusCompleted && msg.Error == "" {
 		if msg.Reply != "" {
-			m.addMessage(RoleAssistant, msg.Reply)
-			m.trackDirtyMessage(RoleAssistant, msg.Reply)
+			if crossSession {
+				// Store into the owning session's transcript without
+				// rendering into the currently visible one.
+				m.appendToSessionTranscript(persistSessionID, RoleAssistant, msg.Reply)
+			} else {
+				m.addMessage(RoleAssistant, msg.Reply)
+				m.trackDirtyMessage(RoleAssistant, msg.Reply)
+			}
 		}
 	} else {
 		// failed / timeout / parked: error-styled, honest bubble.
@@ -98,7 +154,17 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 		if detail == "" {
 			detail = fmt.Sprintf("turn ended with status %q", msg.Status)
 		}
-		m.addMessage(RoleSystem, llm.UserMessage(fmt.Errorf("%s", detail)))
+		if crossSession {
+			m.appendToSessionTranscript(persistSessionID, RoleSystem, detail)
+		} else {
+			m.addMessage(RoleSystem, llm.UserMessage(fmt.Errorf("%s", detail)))
+		}
+	}
+
+	if crossSession {
+		// The visible view belongs to another conversation: loading and
+		// progress state there are not driven by this turn.
+		return nil
 	}
 
 	// Loading clears only when the last tracked turn resolves — with
@@ -110,6 +176,47 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 	}
 	m.updateViewport()
 	return nil
+}
+
+// sessionIDForConversation maps a conversation id to the daemon session id
+// whose transcript owns its turns (F21). Preference order: the session id
+// recorded on the pending turn at submit time (the ack's session_id),
+// then the model's own session when the conversation matches, then the
+// conversation id itself (the daemon accepts it as the session key for
+// relay persistence).
+func (m *ChatModel) sessionIDForConversation(conversationID string, pt *pendingTurn) string {
+	if pt != nil && pt.sessionID != "" {
+		return pt.sessionID
+	}
+	if conversationID == "" || conversationID == m.conversationID {
+		return m.sessionID
+	}
+	return conversationID
+}
+
+// appendToSessionTranscript records a rendered message into a NON-active
+// session's stored transcript (F21): it lands in the per-session message
+// store and the dirty-persistence buffer so switching to that session (or
+// flushing) delivers it, without touching the currently visible view.
+func (m *ChatModel) appendToSessionTranscript(sessionID, role, content string) {
+	if sessionID == "" {
+		return
+	}
+	msg := ChatMessage{
+		Role:      role,
+		Content:   content,
+		Timestamp: time.Now(),
+	}
+	// Dirty buffer first: flushMessages persists per session id.
+	if m.dirtyMessages == nil {
+		m.dirtyMessages = make(map[string][]ChatMessage)
+	}
+	m.dirtyMessages[sessionID] = append(m.dirtyMessages[sessionID], msg)
+	// Per-session transcript store so SetSession renders it on switch.
+	if m.sessionMessages == nil {
+		m.sessionMessages = make(map[string][]ChatMessage)
+	}
+	m.sessionMessages[sessionID] = append(m.sessionMessages[sessionID], msg)
 }
 
 // showPendingTurnLine ensures a pending transcript line exists for the
@@ -171,6 +278,44 @@ func (m *ChatModel) dropPendingTurn(turnID string) {
 	}
 }
 
+// earlyTerminalBuffer retains turn.terminal events that arrive BEFORE the
+// ack registers the turn (F19): the submit RPC round-trip and the WS
+// event race, so a fast daemon can deliver the terminal first. Buffered
+// events are consumed on ack registration — never dropped.
+type turnRouterEarlyBuffer struct {
+	mu     sync.Mutex
+	events map[string]turnTerminalMsg
+}
+
+// newTurnRouterEarlyBuffer creates the ephemeral early-event buffer.
+func newTurnRouterEarlyBuffer() *turnRouterEarlyBuffer {
+	return &turnRouterEarlyBuffer{events: make(map[string]turnTerminalMsg)}
+}
+
+// buffer records a terminal event for a turn id not (yet) tracked.
+func (b *turnRouterEarlyBuffer) buffer(turnID string, msg turnTerminalMsg) {
+	if turnID == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.events == nil {
+		b.events = make(map[string]turnTerminalMsg)
+	}
+	b.events[turnID] = msg
+}
+
+// take removes and returns a buffered event for turnID, if any.
+func (b *turnRouterEarlyBuffer) take(turnID string) (turnTerminalMsg, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	msg, ok := b.events[turnID]
+	if ok {
+		delete(b.events, turnID)
+	}
+	return msg, ok
+}
+
 // TurnActivityTimeout is the liveness window derived from the chat
 // config: pending turns idle longer than this (with no progress events)
 // are considered stalled by the App's stall sweep. Exported for the app
@@ -187,17 +332,42 @@ func (m *ChatModel) HasPendingTurns() bool {
 
 // DeliverTurnTerminal routes a turn.terminal bus event (delivered by the
 // App's EventStream dispatch) into the await goroutine for the tracked
-// turn. It is safe to call for events that match no tracked turn — those
-// are ignored (turn_id filtering).
+// turn. Events whose turn id is NOT (yet) tracked are retained in the
+// early-event buffer (F19): the submit RPC reply can race the WS event,
+// and the buffered terminal is consumed when the ack registers the turn.
 func (m *ChatModel) DeliverTurnTerminal(turnID string, payload map[string]any) {
 	if turnID == "" {
 		return
 	}
 	pt, ok := m.turns.get(turnID)
 	if !ok {
+		// F19: buffer the early event — the ack may still be in flight.
+		m.earlyTerminals.buffer(turnID, turnTerminalMsg{
+			TurnID:         turnID,
+			ConversationID: stringFromPayload(payload, "conversation_id"),
+			Reply:          stringFromPayload(payload, "reply"),
+			Status:         stringFromPayload(payload, "status"),
+			Error:          stringFromPayload(payload, "error"),
+			DurationMS:     int64FromPayload(payload, "duration_ms"),
+		})
 		return
 	}
-	pt.progressText = stringFromPayload(payload, "reply")
+	if payload != nil {
+		if v, ok := payload["conversation_id"].(string); ok && v != "" {
+			pt.mu.Lock()
+			// The event carries the authoritative conversation id (F21).
+			if pt.conversationID == "" {
+				pt.conversationID = v
+			}
+			pt.mu.Unlock()
+		}
+	}
+	pt.mu.Lock()
+	pt.lastActivity = time.Now()
+	if reply := stringFromPayload(payload, "reply"); reply != "" {
+		pt.progressText = reply
+	}
+	pt.mu.Unlock()
 	pt.notify(turnTerminalMsg{
 		TurnID:         turnID,
 		ConversationID: pt.conversationID,
@@ -211,19 +381,19 @@ func (m *ChatModel) DeliverTurnTerminal(turnID string, payload map[string]any) {
 // DeliverTurnProgress routes a progress text for a conversation into the
 // tracked turns of that conversation: it refreshes liveness (so the
 // stalled timer does not fire while the daemon is visibly making
-// progress) and stores the latest text for the pending line.
+// progress — F6: the refresh resets the timer window, not just the
+// timestamp) and stores the latest text for the pending line.
 func (m *ChatModel) DeliverTurnProgress(conversationID, text string) {
-	now := time.Now()
 	for _, pt := range m.pendingTurns {
 		if pt.conversationID != conversationID && conversationID != "" {
 			continue
 		}
-		pt.mu.Lock()
-		pt.lastActivity = now
+		pt.bumpActivity()
 		if text != "" {
+			pt.mu.Lock()
 			pt.progressText = text
+			pt.mu.Unlock()
 		}
-		pt.mu.Unlock()
 	}
 }
 

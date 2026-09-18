@@ -117,8 +117,17 @@ var defaultTimerSource timerSource = realTimerSource{}
 type pendingTurn struct {
 	turnID         string
 	conversationID string
-	startedAt      time.Time
-	lastActivity   time.Time
+	// sessionID is the daemon session the turn was submitted under (the
+	// ack echoes it). F21: terminal delivery/persistence keys on THIS id,
+	// never the currently selected session.
+	sessionID    string
+	startedAt    time.Time
+	lastActivity time.Time
+	// activityGen increments on every liveness refresh (progress or
+	// parked delivery). The await timer re-arms only when the generation
+	// changed since it armed — a wall-clock freshness re-check alone
+	// would re-arm forever and never emit the stalled verdict.
+	activityGen uint64
 	// progressText is the latest progress line for this turn.
 	progressText string
 
@@ -130,10 +139,38 @@ type pendingTurn struct {
 	result  turnTerminalMsg
 }
 
+// isTerminalTurnStatus reports whether a turn status RESOLVES the
+// awaiter. completed, failed and timeout end the turn; parked (quota wait)
+// and the local stalled verdict are non-terminal — the real result still
+// arrives later, so the waiter must stay armed (week bughunt F6).
+func isTerminalTurnStatus(status string) bool {
+	switch status {
+	case turnStatusCompleted, turnStatusFailed, turnStatusTimeout:
+		return true
+	}
+	return false
+}
+
 // notify resolves every waiter with the terminal result exactly once.
+// Non-terminal statuses (parked, stalled) do NOT latch done and do NOT
+// resolve waiters: they only record the notice text (and, for parked, the
+// daemon liveness) so the re-armed/still-armed await resolves with the
+// real terminal result when it arrives.
 func (p *pendingTurn) notify(res turnTerminalMsg) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if !isTerminalTurnStatus(res.Status) {
+		if res.Error != "" {
+			p.progressText = res.Error
+		}
+		if res.Status == turnStatusParked {
+			// The daemon is alive (quota wait): this counts as activity
+			// for the liveness window.
+			p.lastActivity = time.Now()
+			p.activityGen++
+		}
+		return
+	}
 	if p.done {
 		return
 	}
@@ -147,8 +184,48 @@ func (p *pendingTurn) notify(res turnTerminalMsg) {
 	p.waiters = nil
 }
 
+// dropWaiter removes a waiter channel without resolving it. The stall
+// re-arm path abandons its waiter (the verdict is returned as the command
+// message, not through the channel), so the stale channel must be removed
+// or later terminal notifications would fan out to dead receivers.
+func (p *pendingTurn) dropWaiter(ch chan turnTerminalMsg) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, w := range p.waiters {
+		if w == ch {
+			p.waiters = append(p.waiters[:i], p.waiters[i+1:]...)
+			return
+		}
+	}
+}
+
+// livenessRemaining reports how much of the liveness window remains based
+// on the turn's last recorded activity, together with the activity
+// generation (callers re-arm only when the generation changed — see
+// pendingTurn.activityGen). live=false means the window has fully
+// elapsed since lastActivity (the stalled verdict is then honest).
+func (p *pendingTurn) livenessRemaining(liveness time.Duration) (time.Duration, uint64, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	gen := p.activityGen
+	elapsed := time.Since(p.lastActivity)
+	if elapsed >= liveness {
+		return 0, gen, false
+	}
+	return liveness - elapsed, gen, true
+}
+
+// bumpActivity refreshes liveness (lastActivity=now) and increments the
+// activity generation. Called by progress and parked delivery.
+func (p *pendingTurn) bumpActivity() {
+	p.mu.Lock()
+	p.lastActivity = time.Now()
+	p.activityGen++
+	p.mu.Unlock()
+}
+
 // addWaiter registers a waiter channel unless the turn already resolved.
-func (p *pendingTurn) addWaiter() (<-chan turnTerminalMsg, bool) {
+func (p *pendingTurn) addWaiter() (chan turnTerminalMsg, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.done {
@@ -179,7 +256,9 @@ func newTurnRouter(timers timerSource) *turnRouter {
 
 // register adds a submitted turn. Returns false if the turn id is already
 // tracked (idempotent-retry duplicate acks must not double-register).
-func (r *turnRouter) register(turnID, conversationID string) (*pendingTurn, bool) {
+// sessionID records the daemon session the turn belongs to (F21); it may
+// be empty when the caller only knows the conversation.
+func (r *turnRouter) register(turnID, conversationID, sessionID string) (*pendingTurn, bool) {
 	if turnID == "" {
 		return nil, false
 	}
@@ -192,11 +271,18 @@ func (r *turnRouter) register(turnID, conversationID string) (*pendingTurn, bool
 	pt := &pendingTurn{
 		turnID:         turnID,
 		conversationID: conversationID,
+		sessionID:      sessionID,
 		startedAt:      now,
 		lastActivity:   now,
 	}
 	r.turns[turnID] = pt
 	return pt, true
+}
+
+// registerConversation is the conversation-only form of register used by
+// tests and non-session callers.
+func (r *turnRouter) registerConversation(turnID, conversationID string) (*pendingTurn, bool) {
+	return r.register(turnID, conversationID, "")
 }
 
 // get returns the tracked turn by id, if any.
@@ -215,8 +301,8 @@ func (r *turnRouter) progress(turnID, text string) bool {
 	if !ok {
 		return false
 	}
+	pt.bumpActivity()
 	pt.mu.Lock()
-	pt.lastActivity = time.Now()
 	if text != "" {
 		pt.progressText = text
 	}
@@ -304,7 +390,13 @@ func TestAwaitTurnCmd(r *turnRouter, pt *pendingTurn, liveness time.Duration) te
 
 // Register exposes turnRouter.register for tests.
 func (r *turnRouter) Register(turnID, conversationID string) (*pendingTurn, bool) {
-	return r.register(turnID, conversationID)
+	return r.registerConversation(turnID, conversationID)
+}
+
+// RegisterWithSession exposes turnRouter.register (with session id) for
+// tests exercising F21 cross-session delivery.
+func (r *turnRouter) RegisterWithSession(turnID, conversationID, sessionID string) (*pendingTurn, bool) {
+	return r.register(turnID, conversationID, sessionID)
 }
 
 // DeliverTestTerminal routes a terminal result by turn id; returns false
@@ -329,11 +421,10 @@ func (r *turnRouter) DeliverTestTerminal(turnID, reply, status string) bool {
 func (r *turnRouter) DeliverTestProgress(conversationID, text string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	now := time.Now()
 	for _, pt := range r.turns {
 		if pt.conversationID == conversationID {
+			pt.bumpActivity()
 			pt.mu.Lock()
-			pt.lastActivity = now
 			if text != "" {
 				pt.progressText = text
 			}
@@ -426,6 +517,14 @@ func (m *manualTimerSource) ArmedTimers() int {
 // can show that the task may still complete. Liveness timers come from the
 // injectable timerSource (turnRouter.timers); liveness <= 0 disables the
 // stalled check entirely (0=disabled in the chat config contract).
+//
+// Liveness is keyed on the turn's lastActivity (refreshed by progress and
+// parked events): the window is the REMAINING time since the last
+// activity, so a turn that just received progress gets a fresh window.
+// The stalled verdict never resolves the waiter (pendingTurn.notify
+// ignores non-terminal statuses), so this goroutine must abandon its
+// waiter channel via dropWaiter before returning the verdict — the later
+// re-arm (handleTurnTerminal) registers a fresh one.
 func awaitTurnCmd(r *turnRouter, pt *pendingTurn, liveness time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		waitCh, ok := pt.addWaiter()
@@ -437,23 +536,52 @@ func awaitTurnCmd(r *turnRouter, pt *pendingTurn, liveness time.Duration) tea.Cm
 			return res
 		}
 
+		// The liveness window counts from the turn's last activity, not
+		// from await arming: progress/parked events keep the turn alive.
+		// When the timer fires while a liveness refresh landed mid-window
+		// (generation advanced since arming), the timer re-arms for the
+		// remaining time instead of emitting a dishonest stalled verdict.
+		window := liveness
+		armedGen := uint64(0)
+		if r != nil {
+			if remaining, gen, live := pt.livenessRemaining(liveness); live {
+				window = remaining
+				armedGen = gen
+			}
+		}
 		var timer <-chan struct{}
-		if liveness > 0 && r != nil {
-			timer = r.timers.After(context.Background(), liveness)
+		if window > 0 && r != nil {
+			timer = r.timers.After(context.Background(), window)
 		}
 
-		select {
-		case res := <-waitCh:
-			return res
-		case <-timer:
-			res := turnTerminalMsg{
-				TurnID:         pt.turnID,
-				ConversationID: pt.conversationID,
-				Status:         turnStatusStalled,
-				Error:          fmt.Sprintf(stalledTurnText, int(liveness.Seconds())),
+		for {
+			select {
+			case res := <-waitCh:
+				return res
+			case <-timer:
+				if r != nil {
+					if _, gen, live := pt.livenessRemaining(liveness); live && gen != armedGen {
+						// Progress arrived mid-window: reset the timer
+						// for the remaining time of the fresh window.
+						remaining, gen2, _ := pt.livenessRemaining(liveness)
+						armedGen = gen2
+						timer = r.timers.After(context.Background(), remaining)
+						continue
+					}
+				}
+				// Abandon the waiter WITHOUT resolving the turn: the real
+				// terminal still lands later through a fresh await (F6).
+				pt.dropWaiter(waitCh)
+				res := turnTerminalMsg{
+					TurnID:         pt.turnID,
+					ConversationID: pt.conversationID,
+					Status:         turnStatusStalled,
+					Error:          fmt.Sprintf(stalledTurnText, int(liveness.Seconds())),
+				}
+				// Records the notice text only — never latches done.
+				pt.notify(res)
+				return res
 			}
-			pt.notify(res) // idempotent: a real terminal arriving later is ignored
-			return res
 		}
 	}
 }
