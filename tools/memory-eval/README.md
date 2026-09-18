@@ -121,7 +121,12 @@ stronger than the extractor.)
 
 Both judge-on and judge-off ambient runs record every candidate into
 `confidence_analysis` (`{confidence, matched_lexical, matched_judge}`) and
-sweep thresholds 0.3..0.9 into `confidence_sweep`, using JUDGE matching:
+sweep thresholds 0.0..0.9 (step 0.1) into `confidence_sweep`, using JUDGE
+matching. The t=0.0 row is the keep-everything baseline (the run's overall
+precision/recall). **The 0.0-0.3 rows are mandatory viewing**: live runs
+found the real signal lives entirely in that region, and the old sweep
+(0.3..0.9) was blind to it — that blind spot produced a wrong "confidence
+not calibrated" verdict before distribution analysis corrected it.
 
 | column | meaning |
 |--------|---------|
@@ -129,8 +134,25 @@ sweep thresholds 0.3..0.9 into `confidence_sweep`, using JUDGE matching:
 | kept_frac | fraction of candidates kept at the threshold |
 | precision / recall | the gate's full operating point |
 
-This is the input to confidence-gated storage: keep the highest threshold
-whose recall loss is acceptable, and gate writes on it.
+#### Corrected finding (2026-09-17 runs)
+
+Confidence from these models is **bimodal**: 46 candidates at 1.0, 19 at
+0.0, 3 scattered between. There is no usable mid-band to "calibrate" —
+the old sweep's flat 0.3-0.9 region was masked by that bimodality. The
+actual operating points:
+
+- **t=0.3 cut lifts judge precision 0.735 → 0.918** (+0.18) by excluding
+  the 0.0-confidence band, which holds most decoy false positives.
+- The excluded band is NOT garbage: 7 of 21 low-confidence candidates are
+  correct (**33%**), so a hard drop loses real memory — route that band
+  to **librarian review** (status=auto surface), don't discard it.
+- Recommended wiring: confidence < 0.3 → auto-reject as untrusted
+  (overwhelmingly decoy activations); 0.3 ≤ conf < 1.0 → librarian
+  review; conf = 1.0 → auto-store. Re-calibrate the 0.3 cut on live
+  traffic via the outcome loop (#49 measurement pattern) before shipping.
+
+This is the input to confidence-gated storage: read the full sweep table
+(the 0.0-0.3 region first), not just the high-threshold tail.
 
 ## Results (2026-09-16 run, unconstrained, temp 0.2)
 

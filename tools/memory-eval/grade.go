@@ -231,11 +231,14 @@ func parseJudgeYesNo(s string) bool {
 	return s == "yes" || s == "y"
 }
 
-// computeConfidenceSweep sweeps thresholds 0.3..0.9 over confidence-gated
-// candidates using judge matching.
+// computeConfidenceSweep sweeps thresholds 0.0..0.9 over confidence-gated
+// candidates using judge matching. The t=0.0 row is the keep-everything
+// baseline (total precision/recall); the 0.0-0.3 region is mandatory
+// viewing — live 2026-09-17 runs found confidence bimodal (mass at 0.0 and
+// 1.0), so the entire useful signal sits in that low band (README).
 func computeConfidenceSweep(pts []ConfidencePoint, totalCandidates int) []SweepRow {
 	var rows []SweepRow
-	for t := 0.3; t <= 0.9001; t += 0.1 {
+	for t := 0.0; t <= 0.9001; t += 0.1 {
 		kept, tp := 0, 0
 		for _, p := range pts {
 			if p.Confidence >= t {
@@ -689,7 +692,7 @@ func printConfidenceSweep(rows []SweepRow) {
 	if len(rows) == 0 {
 		return
 	}
-	fmt.Println("--- confidence sweep (judge matching) ---")
+	fmt.Println("--- confidence sweep (judge matching; 0.0-0.3 region is mandatory viewing) ---")
 	fmt.Println("  t     kept  tp  prec@t  kept_frac  precision  recall")
 	for _, r := range rows {
 		fmt.Printf("  %.1f  %4d  %3d   %.3f     %.3f      %.3f     %.3f\n",

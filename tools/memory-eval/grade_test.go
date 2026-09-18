@@ -225,8 +225,8 @@ func TestConfidenceSweepSynthetic(t *testing.T) {
 		{Confidence: 0.35, MatchedJudge: false},
 	}
 	rows := computeConfidenceSweep(pts, len(pts))
-	if len(rows) != 7 {
-		t.Fatalf("got %d sweep rows, want 7 (thresholds 0.3..0.9)", len(rows))
+	if len(rows) != 10 {
+		t.Fatalf("got %d sweep rows, want 10 (thresholds 0.0..0.9)", len(rows))
 	}
 	tests := []struct {
 		threshold float64
@@ -235,6 +235,9 @@ func TestConfidenceSweepSynthetic(t *testing.T) {
 		precAtT   float64
 		keptFrac  float64
 	}{
+		{0.0, 10, 4, 0.4, 1.0},
+		{0.1, 10, 4, 0.4, 1.0},
+		{0.2, 10, 4, 0.4, 1.0},
 		{0.3, 10, 4, 0.4, 1.0},
 		{0.4, 8, 4, 0.5, 0.8},
 		{0.5, 8, 4, 0.5, 0.8},
