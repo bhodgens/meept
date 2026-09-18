@@ -76,15 +76,15 @@ type SweepRow struct {
 type JudgeMetrics struct {
 	// JudgeMatched counts lexical TPs plus judge-only TPs (unmatched
 	// candidates the judge confirmed against some gold).
-	JudgeMatched  int     `json:"judge_matched"`
-	TruePositives int     `json:"true_positives"`
-	FalsePositives int    `json:"false_positives"`
-	FalseNegatives int    `json:"false_negatives"`
-	Precision     float64 `json:"precision"`
-	Recall        float64 `json:"recall"`
-	F1            float64 `json:"f1"`
-	Calls         int     `json:"judge_calls"`
-	CacheHits     int     `json:"cache_hits"`
+	JudgeMatched   int     `json:"judge_matched"`
+	TruePositives  int     `json:"true_positives"`
+	FalsePositives int     `json:"false_positives"`
+	FalseNegatives int     `json:"false_negatives"`
+	Precision      float64 `json:"precision"`
+	Recall         float64 `json:"recall"`
+	F1             float64 `json:"f1"`
+	Calls          int     `json:"judge_calls"`
+	CacheHits      int     `json:"cache_hits"`
 }
 
 // DistillMetrics grades the distillation run.

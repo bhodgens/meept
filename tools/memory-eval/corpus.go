@@ -22,8 +22,8 @@ type segment struct {
 	Gold     goldSet  `json:"gold"`
 	// Category documents the segment's intent (decoy-heavy, multi-claim,
 	// prediction, decision, contradiction, dedupe-pair, baseline). Free text.
-	Category string   `json:"category,omitempty"`
-	PairWith string   `json:"pair_with,omitempty"`
+	Category string `json:"category,omitempty"`
+	PairWith string `json:"pair_with,omitempty"`
 }
 
 type corpus struct {
