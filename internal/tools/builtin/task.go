@@ -122,19 +122,19 @@ func (t *TaskGetTool) Name() string { return "task_get" }
 func (t *TaskGetTool) Category() string { return "tasks" }
 
 func (t *TaskGetTool) Description() string {
-	return "Get detailed information about a specific task by its ID."
+	return "Get detailed information about a specific task by its ID. task_id (required): the task identifier, e.g. from task_list output. Calling task_get with no arguments always fails."
 }
 
 func (t *TaskGetTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"id": {
+			"task_id": {
 				Type:        schemaTypeString,
-				Description: "The task ID to retrieve.",
+				Description: "The task identifier to retrieve, e.g. from task_list output.",
 			},
 		},
-		Required: []string{"id"},
+		Required: []string{"task_id"},
 	}
 }
 
@@ -143,9 +143,14 @@ func (t *TaskGetTool) Execute(ctx context.Context, args map[string]any) (any, er
 		return nil, fmt.Errorf("task store not configured")
 	}
 
-	id, _ := args["id"].(string)
+	id, _ := args["task_id"].(string)
 	if id == "" {
-		return nil, fmt.Errorf("task id is required")
+		// Tolerate the legacy "id" argument name from callers predating the
+		// task_id rename (the planner's no-arg calls were the F-C6 symptom).
+		id, _ = args["id"].(string)
+	}
+	if id == "" {
+		return nil, fmt.Errorf("task_id is required; pass the task identifier, e.g. from task_list output")
 	}
 
 	taskObj, err := t.store.GetByID(id)

@@ -395,7 +395,7 @@ func (t *WriteFileTool) Name() string { return "file_write" }
 func (t *WriteFileTool) Category() string { return "filesystem" }
 
 func (t *WriteFileTool) Description() string {
-	return "Write text content to a file. Creates the file if it does not exist, overwrites if it does. Parent directories are created automatically."
+	return "Write text content to a file. Creates the file if it does not exist, overwrites if it does. Parent directories are created automatically. The returned evidence (path, size, hash) is proof of the write; do not re-read the file to verify."
 }
 
 func (t *WriteFileTool) Parameters() llm.FunctionParameters {
