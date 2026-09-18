@@ -307,6 +307,33 @@ func (c *AnthropicClient) recordUsageStore(cfg *ModelConfig, usage TokenUsage, i
 	}()
 }
 
+// recordRefusalBudget charges a REFUSED call's provider-reported usage to the
+// scoped budget, mirroring the success path's RecordUsageWithScope +
+// RecordCostWithScope shape. Before the scopes-3 audit fix the refusal
+// early-exit branch ledgered llm_calls but skipped the budget entirely — a
+// refused call consumed tokens yet never billed them. Priced at the SERVING
+// model's rates (cfg — the effective config for the call); nil budget is a
+// no-op (typed-nil guard).
+func (c *AnthropicClient) recordRefusalBudget(refusal *RefusalError, cfg *ModelConfig, chatOpts *chatOptions) {
+	if c.budget == nil || refusal == nil {
+		return
+	}
+	taskID, sessionID := "", ""
+	if chatOpts != nil {
+		taskID = chatOpts.taskID
+		sessionID = chatOpts.sessionID
+	}
+	c.budget.RecordUsageWithScope(refusal.Usage, taskID, sessionID)
+	if costUSD := refusalCostUSD(refusal.Usage, cfg); costUSD > 0 {
+		c.budget.RecordCostWithScope(CostRecord{
+			Timestamp:        time.Now(),
+			CostUSD:          costUSD,
+			PromptTokens:     refusal.Usage.PromptTokens,
+			CompletionTokens: refusal.Usage.CompletionTokens,
+		}, taskID, sessionID)
+	}
+}
+
 // Chat sends a chat completion request to Anthropic's Messages API.
 func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
 	// Capture config under lock to avoid race with SwitchModel
@@ -403,6 +430,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 			// has no chatOpts for the llm_calls ledger).
 			if refusal, ok := errors.AsType[*RefusalError](err); ok {
 				c.recordUsageStore(effCfg, refusal.Usage, true, "model refusal", 0, chatOpts)
+				c.recordRefusalBudget(refusal, effCfg, chatOpts)
 				return nil, err
 			}
 
@@ -649,6 +677,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 			// call's provider-reported usage BEFORE surfacing the refusal.
 			if refusal, ok := errors.AsType[*RefusalError](err); ok {
 				c.recordUsageStore(effCfg, refusal.Usage, true, "model refusal", 0, chatOpts)
+				c.recordRefusalBudget(refusal, effCfg, chatOpts)
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}

@@ -93,6 +93,29 @@ func truncateRefusalMessage(msg string) string {
 	return msg
 }
 
+// refusalProviderOr resolves the ledger provider for a refusal row: the
+// refusal's own ProviderID when the detection site stamped it, else the
+// serving config's provider (the effective provider for the call). Preferring
+// the refusal's stamp keeps a cross-provider fallback row from pairing
+// provider A with refusal.ModelID from provider B (scopes-3 audit finding 2).
+func refusalProviderOr(servingProviderID string, refusal *RefusalError) string {
+	if refusal != nil && refusal.ProviderID != "" {
+		return refusal.ProviderID
+	}
+	return servingProviderID
+}
+
+// refusalCostUSD prices a refused call's usage at the serving model's rates.
+// Zero when pricing is unavailable (no config, non-positive rates) — mirrors
+// the success path's cost gating.
+func refusalCostUSD(usage TokenUsage, cfg *ModelConfig) float64 {
+	if cfg == nil {
+		return 0
+	}
+	return float64(usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 +
+		float64(usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+}
+
 // DetectRefusal maps a finish/stop reason signal onto a *RefusalError.
 // Triggers, exact strings, case-insensitive:
 //   - "refusal"        => Source "stop_reason"   (Anthropic)

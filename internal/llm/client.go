@@ -600,7 +600,8 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			// Bughunt F12: the refused call still consumed tokens — ledger
 			// the provider-reported usage BEFORE surfacing the refusal.
 			if refusal, ok := errors.AsType[*RefusalError](err); ok {
-				c.recordUsageStore(cfg.ProviderID, refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", 0)
+				c.recordUsageStore(refusalProviderOr(cfg.ProviderID, refusal), refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", 0)
+				c.recordRefusalBudget(refusal, cfg, chatOpts)
 				return nil, err
 			}
 
@@ -825,7 +826,8 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			// Bughunt F12: ledger the refused call's provider-reported
 			// usage BEFORE surfacing the refusal.
 			if refusal, ok := errors.AsType[*RefusalError](err); ok {
-				c.recordUsageStore(cfg.ProviderID, refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", 0)
+				c.recordUsageStore(refusalProviderOr(cfg.ProviderID, refusal), refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", 0)
+				c.recordRefusalBudget(refusal, cfg, chatOpts)
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -1791,6 +1793,32 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 	}()
 }
 
+// recordRefusalBudget charges a REFUSED call's provider-reported usage to the
+// scoped budget, mirroring the success path's RecordUsageWithScope +
+// RecordCostWithScope shape. Before the scopes-3 audit fix the refusal
+// early-exit branch ledgered llm_calls but skipped the budget entirely — a
+// refused call consumed tokens yet never billed them. Priced at the SERVING
+// model's rates (cfg); nil budget is a no-op (typed-nil guard).
+func (c *Client) recordRefusalBudget(refusal *RefusalError, cfg *ModelConfig, chatOpts *chatOptions) {
+	if c.budget == nil || refusal == nil {
+		return
+	}
+	taskID, sessionID := "", ""
+	if chatOpts != nil {
+		taskID = chatOpts.taskID
+		sessionID = chatOpts.sessionID
+	}
+	c.budget.RecordUsageWithScope(refusal.Usage, taskID, sessionID)
+	if costUSD := refusalCostUSD(refusal.Usage, cfg); costUSD > 0 {
+		c.budget.RecordCostWithScope(CostRecord{
+			Timestamp:        time.Now(),
+			CostUSD:          costUSD,
+			PromptTokens:     refusal.Usage.PromptTokens,
+			CompletionTokens: refusal.Usage.CompletionTokens,
+		}, taskID, sessionID)
+	}
+}
+
 // parseResponse converts a raw ChatResponse to a Response. It recovers tool
 // calls from every recognized shape, including the ambiguous bare-JSON one;
 // callers that know whether tools were offered should use parseResponseWithTools.
@@ -2052,7 +2080,8 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		// BEFORE surfacing the refusal. (The duplicated branch below was
 		// collapsed into this one — identical semantics.)
 		if refusal, ok := errors.AsType[*RefusalError](err); ok {
-			c.recordUsageStore(cfg.ProviderID, refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", 0)
+			c.recordUsageStore(refusalProviderOr(cfg.ProviderID, refusal), refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", 0)
+			c.recordRefusalBudget(refusal, cfg, chatOpts)
 			return nil, err
 		}
 
