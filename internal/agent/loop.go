@@ -838,6 +838,33 @@ type AgentLoop struct {
 	// (clearRefusalFallbackServed, same lifecycle as the override pin).
 	// Guarded by l.mu.
 	refusalFallbackServedModel string
+	// refusalFallbackHops is the PERSISTENT one-hop refusal budget
+	// (scopes-3 audit finding B): the number of refusal-fallback pins this
+	// loop has armed across ALL turn generations. Unlike the turn-scoped
+	// disclosure state it is deliberately NOT reset by
+	// clearRefusalFreshTurnState — a park/resume cycle re-enters
+	// RunOnceWithParts as a fresh turn (which clears the pin, correctly) and
+	// would otherwise earn an unlimited sequence of fresh one-hop budgets
+	// (refuse → park → resume → refuse → …). handleRefusal refuses to arm
+	// once the counter reaches maxRefusalFallbackHops. Guarded by l.mu.
+	refusalFallbackHops int
+	// refusalFallbackHopsCleared marks that a turn genuinely started FRESH
+	// (a new chat dispatch, not a park resume): the fresh-turn sweep sets
+	// it, and the NEXT fresh turn's sweep consumes it to reset the hop
+	// budget. A resume re-runs RunOnceWithParts under WithResumedTurn, whose
+	// clearRefusalFreshTurnState call does NOT set the marker, so the
+	// counter survives park/resume cycles. Guarded by l.mu.
+	refusalFallbackHopsCleared bool
+	// streamAttemptEpoch tags streaming generations (scopes-3 audit finding
+	// A): bumped whenever handleRefusal arms a refusal-fallback retry. The
+	// streaming accumulator in RunOnceWithParts compares the epoch it was
+	// created with and RESETS its accumulated text when the epoch moves —
+	// without this, the fallback's full text appends after the refused
+	// attempt's partial tokens in the client-visible text_so_far preview
+	// (the same duplication the ProviderManager fixed with
+	// DeltaCallbackWithAttempt). Atomic: the callback fires on the LLM
+	// stream goroutine while the epoch bumps on the loop error path.
+	streamAttemptEpoch atomic.Int64
 
 	// pendingHookMessages holds ExtraMessages returned by PrepareNextTurn
 	// hooks (applyTurnModification). One-shot: prepended to the next LLM
@@ -2526,11 +2553,20 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// Refusal-fallback leaf 04: reset the turn-scoped disclosure state so a
 	// fallback armed in a PREVIOUS turn can never leak its note into this
 	// turn's reply. Same fresh-turn lifecycle as the override sweep above;
-	// handleRefusal re-arms it if THIS turn refuses and falls back.
+	// handleRefusal re-arms it if THIS turn refuses and re-arms.
 	// Bughunt F4: when the flag is set the refusal pin was ACCEPTED last
 	// turn — clear the persistent override + staged config too, so the
 	// fresh turn serves the base model instead of the sticky fallback pin.
 	l.clearRefusalFreshTurnState()
+	// Persistent one-hop budget reset (scopes-3 audit finding B): ONLY a
+	// genuinely fresh turn resets the cross-generation hop counter. A
+	// park/resume re-entry (WithResumedTurn) skips this — clearRefusalFreshTurnState
+	// already cleared its pin, but the resumed generation keeps the budget
+	// spent by earlier generations, so refuse → park → resume → refuse
+	// cycles cannot re-arm the fallback forever.
+	if !ResumedTurnFromContext(ctx) {
+		l.resetRefusalHopBudgetOnFreshTurn()
+	}
 
 	// Snapshot file watcher under lock to avoid racing with SetFileWatcher.
 	l.mu.RLock()
@@ -3807,6 +3843,19 @@ func (l *AgentLoop) resetTurnGuards() {
 	if l.convergenceDetector != nil {
 		l.convergenceDetector.Reset()
 	}
+	// Refusal lifecycle (scopes-3 finding B): resetTurnGuards runs at the
+	// TOP of every turn generation — fresh or resumed — while
+	// clearRefusalFreshTurnState (later in RunOnceWithParts) runs AFTER the
+	// fresh-turn override sweep and can consume the pin of the turn that
+	// just ended. Clearing the pin here is the resume-safe half: a resumed
+	// generation must serve the base alias even though its fresh-turn budget
+	// reset is suppressed (the persistent hop counter rides through). Without
+	// this the first handleRefusal of a test/loop without the escalation
+	// sweep wired would see the previous generation's still-armed override
+	// and short-circuit as "already serving".
+	if l.refusalFallbackServedModel != "" {
+		l.ClearRefusalFallback()
+	}
 	l.mu.Lock()
 	l.reasonWatchStreakBreach = false
 	l.reasonWatchRescued = false
@@ -4244,8 +4293,13 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// carrying text_so_far; the GUI renders it as a live preview
 		// until the final chat_message arrives.
 		var streamAccumulated string
+		// scopes-3 audit finding A: the accumulator resets on the first delta
+		// of a NEW attempt (epoch bumped by handleRefusal when the fallback
+		// retry is armed), so the refused attempt's partial tokens never
+		// precede the fallback text in the published preview.
+		streamAcc := newStreamAccumulator(l)
 		streamOnDelta := func(delta string) error {
-			streamAccumulated += delta
+			streamAccumulated = streamAcc.observe(delta)
 			l.publishStreamDelta(conversationID, iteration, &streamAccumulated)
 			return nil
 		}

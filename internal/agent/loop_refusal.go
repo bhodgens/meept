@@ -21,6 +21,15 @@ import (
 //     the spec by SetGlobalRefusalModel at wiring time)
 //  3. "" (feature off for this agent)
 
+// maxRefusalFallbackHops is the PERSISTENT one-hop refusal budget across
+// park/resume generations (scopes-3 audit finding B): the turn-scoped pin
+// clears on every fresh turn (clearRefusalFreshTurnState), so without a
+// cross-generation counter a refuse → park → resume → refuse cycle would
+// re-arm the fallback unbounded. Two total hops per genuinely-fresh turn
+// window: the primary's hop and one fallback re-arm before the refusal
+// surfaces.
+const maxRefusalFallbackHops = 2
+
 // SetGlobalRefusalModel mirrors the global models.json5 refusal_model slot
 // onto this loop. Precedence lives in refusalFallbackRef: a non-empty
 // spec.RefusalModel wins; the global value fills an empty spec field.
@@ -111,13 +120,23 @@ func (l *AgentLoop) handleRefusal(refusalErr *llm.RefusalError) (bool, error) {
 	// One-hop rules — either exits surface the original refusal:
 	//   a) the fallback is ALREADY the armed override: the retry just ran on
 	//      it and refused again — no third attempt;
-	//   b) the fallback IS the model currently serving (resolver-reported).
+	//   b) the fallback IS the model currently serving (resolver-reported);
+	//   c) the PERSISTENT hop budget is exhausted (maxRefusalFallbackHops
+	//      pins armed across park/resume generations — scopes-3 audit
+	//      finding B: clearRefusalFreshTurnState clears the pin on every
+	//      resume, so without a cross-generation counter each refuse →
+	//      park → resume cycle could re-arm the fallback forever).
+	l.mu.RLock()
+	hops := l.refusalFallbackHops
+	l.mu.RUnlock()
 	if l.GetModelOverride() == resolved ||
-		(serving != "" && serving == resolved) {
+		(serving != "" && serving == resolved) ||
+		hops >= maxRefusalFallbackHops {
 		slog.Info("refusal fallback already serving: surfacing original refusal",
 			"agent_id", l.agentID,
 			"fallback_ref", fallbackRef,
 			"serving_ref", serving,
+			"hops_used", hops,
 		)
 		// Restore the base model — the fallback window is over.
 		l.ClearRefusalFallback()
@@ -130,6 +149,23 @@ func (l *AgentLoop) handleRefusal(refusalErr *llm.RefusalError) (bool, error) {
 	// base model on the next fresh turn if the retry never fired.
 	if applier != nil {
 		applier(resolved)
+		// Persistent hop budget (scopes-3 finding B): the pin was accepted,
+		// so count it. The counter is intentionally OUTSIDE the fresh-turn
+		// reset lifecycle — it survives park/resume re-entry and resets only
+		// when a genuinely fresh (non-resumed) turn begins.
+		l.mu.Lock()
+		l.refusalFallbackHops++
+		// Streaming epoch bump (scopes-3 finding A): tag the retry attempt
+		// so the live stream accumulator in RunOnceWithParts drops the
+		// refused attempt's partial text instead of appending the fallback
+		// tokens after it.
+		l.streamAttemptEpoch.Add(1)
+		epoch := l.streamAttemptEpoch.Load()
+		l.mu.Unlock()
+		slog.Info("refusal fallback hop armed",
+			"agent_id", l.agentID,
+			"hops_used", epoch,
+		)
 		// Observability leaf 04 (user decision 2026-09-16, option b): the
 		// pin was accepted, so IF the retry succeeds the served turn must
 		// disclose the fallback in the user-visible reply text. The flag
@@ -248,6 +284,13 @@ func (l *AgentLoop) ClearRefusalFallback() {
 // turn must start from the base alias unless THIS turn refuses and re-arms.
 // Always resets the disclosure flag (the clearRefusalFallbackServed
 // lifecycle). Idempotent; guarded by l.mu.
+//
+// scopes-3 finding B: a park/resume re-entry ALSO runs through here (the
+// resume re-enters RunOnceWithParts), and that clear is CORRECT for the pin —
+// the resumed generation must serve the base alias. But the one-hop BUDGET
+// must survive the cycle: resumedTurn ctx does NOT set the cleared marker, so
+// the hop counter persists; the next GENUINELY fresh (non-resumed) turn
+// consumes the marker and resets the budget.
 func (l *AgentLoop) clearRefusalFreshTurnState() {
 	l.mu.RLock()
 	refusalArmed := l.refusalFallbackServedModel != ""
@@ -258,6 +301,78 @@ func (l *AgentLoop) clearRefusalFreshTurnState() {
 	l.mu.Lock()
 	l.refusalFallbackServedModel = ""
 	l.mu.Unlock()
+}
+
+// resetRefusalHopBudgetOnFreshTurn is the genuinely-fresh-turn half of the
+// persistent hop budget (scopes-3 finding B): called from RunOnceWithParts
+// AFTER clearRefusalFreshTurnState on NON-resumed turns only. Semantics: the
+// marker set by the previous fresh turn says "one full turn window elapsed
+// without any park/resume re-entry" — the budget resets so a session can
+// still use its fallback on a later turn. A park/resume cycle skips this
+// (WithResumedTurn), keeping the count. Guarded by l.mu.
+func (l *AgentLoop) resetRefusalHopBudgetOnFreshTurn() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.refusalFallbackHopsCleared {
+		// A fresh turn already consumed the previous window's budget.
+		return
+	}
+	if l.refusalFallbackHops == 0 {
+		l.refusalFallbackHopsCleared = true
+		return
+	}
+	l.refusalFallbackHops = 0
+	l.refusalFallbackHopsCleared = true
+}
+
+// refusalHopsExhausted reports whether the persistent one-hop budget
+// (maxRefusalFallbackHops pins across park/resume generations) is spent.
+func (l *AgentLoop) refusalHopsExhausted() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.refusalFallbackHops >= maxRefusalFallbackHops
+}
+
+// streamAttemptEpochSnapshot returns the current streaming attempt epoch
+// (scopes-3 finding A): the accumulator in RunOnceWithParts snapshots this
+// before the chat call and RESETS its text when the epoch moves (a
+// refusal-fallback retry must not append its tokens after the refused
+// attempt's partial stream).
+func (l *AgentLoop) streamAttemptEpochSnapshot() int64 {
+	return l.streamAttemptEpoch.Load()
+}
+
+// streamAccumulator is the refusal-retry-aware live-stream text accumulator
+// (scopes-3 audit finding A). RunOnceWithParts owns one per streaming call;
+// when handleRefusal arms a fallback retry it bumps the loop's
+// streamAttemptEpoch, and the FIRST delta of the next attempt observes the
+// epoch change and DISCARDS the refused attempt's partial text — the same
+// reset the ProviderManager rotation path gets from DeltaCallbackWithAttempt
+// (provider_manager.go), applied to the loop-side accumulator that feeds the
+// client-visible text_so_far preview. Without the reset, the fallback's full
+// text appends after the refused partial and the preview shows the mixed
+// text (the final persisted reply is unaffected: the refused call returns no
+// response).
+type streamAccumulator struct {
+	loop  *AgentLoop
+	epoch int64
+	text  string
+}
+
+func newStreamAccumulator(l *AgentLoop) *streamAccumulator {
+	return &streamAccumulator{loop: l, epoch: l.streamAttemptEpochSnapshot()}
+}
+
+// observe folds one delta into the accumulated preview text, resetting first
+// when the streaming attempt epoch moved (a refusal retry armed between
+// attempts). Returns the text to publish as text_so_far.
+func (a *streamAccumulator) observe(delta string) string {
+	if cur := a.loop.streamAttemptEpochSnapshot(); cur != a.epoch {
+		a.epoch = cur
+		a.text = ""
+	}
+	a.text += delta
+	return a.text
 }
 
 // refusalServingModelRef returns the "provider/model" ref of the model the
