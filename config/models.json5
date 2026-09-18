@@ -210,7 +210,7 @@
           // blocks cut mid-JSON that the LFM recovery parser cannot
           // reassemble (e2e run 6, 2026-09-10: T1 completed with zero tools
           // executed). 4096 halves the truncation incidence within the
-          // 16384 context.
+          // 16K context (gguf variant now 64K, see local-gguf spawn below).
           "max_output": 4096,
           "temperature": 0.7,
           "max_concurrency": 2
@@ -298,7 +298,13 @@
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-general.pid",
-        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1", "--jinja", "--reasoning-budget", "0", "--ctx-size", "16384"],
+        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1", "--jinja", "--reasoning-budget", "0", "--ctx-size", "65536"],
+        // 65536 (was 16384): the model supports 128K (max_position_embeddings);
+        // 16K dates from the MLX era and the 2026-09-18 e2e exhausted it via
+        // guard-nudge + escalation churn (10x llama.cpp 500 "Context size has
+        // been exceeded"). 64K = 4x headroom; KV-cache cost is ~2-4 GB resident.
+        // Per-request window: llama.cpp builds a fresh cache per call; with
+        // max_concurrency: 2 concurrent requests share the allocation.
         "spawn_timeout_seconds": 180,
         "health_check": {
           "endpoint": "/health",
@@ -329,7 +335,7 @@
           "tool_choice": "required",
           "input_cost": 0.0,
           "output_cost": 0.0,
-          "context_limit": 16384,
+          "context_limit": 65536,
           "max_output": 4096,
           "temperature": 0.7,
           "max_concurrency": 2
