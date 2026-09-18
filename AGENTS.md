@@ -380,6 +380,15 @@ boundaries:
   `refusal_model` (per-agent AGENT.md spec field, else the global
   `models.json5` slot; default off) and surfaces the refusal if the
   fallback also refuses. One hop only, never rotation.
+  `ProviderManager` treats refusals the same way: no `recordFailure`, no
+  rotation — it returns the refusal so the loop's one-hop policy owns it.
+  A refusal is not free: the provider-reported usage rides on
+  `RefusalError.Usage` and is ledgered before the refusal surfaces. The
+  fallback pin (persistent override + staged config) clears at the start
+  of the next fresh turn (`clearRefusalFreshTurnState`); the global
+  refusal_model slot propagates to session clones via
+  `ConfigSnapshot`/`WithGlobalRefusalModel` and to registry-built
+  specialists via `RegistryConfig.GlobalRefusalModel`.
 - **Alias selection is request-scoped; the ledger records the server.** The
   Resolver is the only component that picks a model, and its decision travels
   WITH the request via `llm.WithResolvedModel` (never by mutating shared
