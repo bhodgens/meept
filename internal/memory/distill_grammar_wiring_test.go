@@ -64,3 +64,46 @@ func TestLLMDistillSummarizer_InjectsGrammar(t *testing.T) {
 		}
 	}
 }
+
+// TestLLMDistillSummarizer_ProcedureGrammar pins the procedure branch of the
+// distill wiring (bughunt F28): a DomainProcedure distill call must carry
+// llm.WithRawGrammar with llm.ProcedureGrammar() — NOT the lesson grammar,
+// which every constrained procedure response previously failed validation
+// against, blocking the distill queue.
+func TestLLMDistillSummarizer_ProcedureGrammar(t *testing.T) {
+	chatter := &recordingDistillChatter{}
+	s := &llmDistillSummarizer{client: chatter}
+	_, err := s.SummarizeForDistill(context.Background(), DomainProcedure, []Memory{
+		{Category: "procedure", Content: "to deploy: check replica lag, then roll the canary"},
+	})
+	if err != nil {
+		t.Fatalf("SummarizeForDistill(procedure): %v", err)
+	}
+	if chatter.called != 1 {
+		t.Fatalf("called %d times, want 1", chatter.called)
+	}
+	if got := llm.RawGrammarOf(chatter.opts); got != llm.ProcedureGrammar() {
+		t.Errorf("RawGrammarOf(opts) = %q, want ProcedureGrammar()", got)
+	}
+	if got := llm.RawGrammarOf(chatter.opts); got == llm.LessonGrammar() {
+		t.Error("procedure distill must NOT ride the lesson grammar")
+	}
+
+	// The grammar must force a single bare JSON object with the
+	// title/steps/trigger_hints shape DecodeProcedure accepts, and must not
+	// wrap the procedure in an outer key.
+	g := llm.ProcedureGrammar()
+	if !strings.Contains(g, `root ::= "{"`) {
+		t.Error("procedure grammar does not force a single JSON object")
+	}
+	for _, want := range []string{"title", "steps", "trigger_hints"} {
+		if !strings.Contains(g, want) {
+			t.Errorf("procedure grammar missing required member rule %q", want)
+		}
+	}
+	for _, banned := range []string{"principle", "evidence_ids", "lessons", "result", "wrapper"} {
+		if strings.Contains(g, banned) {
+			t.Errorf("procedure grammar references lesson/banned token %q", banned)
+		}
+	}
+}

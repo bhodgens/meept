@@ -468,3 +468,36 @@ func LessonGrammar() string {
 	b.WriteString("because-cont ::= \",\" ws \"\\\"because\\\"\" ws \":\" ws string\n")
 	return b.String()
 }
+
+// ProcedureGrammar returns the GBNF grammar forcing the distill procedure
+// JSON object — exactly the shape internal/memory's EncodeProcedure /
+// DecodeProcedure (via normalizeDistillPayload) accepts as its primary
+// contract (a single bare object, no wrapper). Declared keys:
+//
+//	title         string            (required — the procedure title)
+//	steps         array of strings  (required — the how-to steps)
+//	trigger_hints array of strings  (optional — evidence/close shape)
+//
+// Mirrors LessonGrammar's shape (bughunt F28): without it, procedure
+// distillation was forced through the LESSON grammar, so every constrained
+// procedure response failed grammar validation and blocked the distill
+// queue. The system prompt caps steps at 20 (MaxProcedureSteps); GBNF cannot
+// count, so the cap stays a post-parse check. Pair with WithRawGrammar
+// (llama.cpp wire format, local endpoints only). Never returns an empty
+// string.
+func ProcedureGrammar() string {
+	var b strings.Builder
+	// llama.cpp requires the first rule to be named `root`; any other root
+	// name fails grammar parse on the wire ("failed to parse grammar").
+	b.WriteString("root ::= \"{\" ws title-member \",\" ws steps-member hints-or-close ws \"}\"\n")
+	b.WriteString("ws ::= [ \\t\\n]*\n")
+	b.WriteString("string ::= \"\\\"\" char* \"\\\"\"\n")
+	b.WriteString("char ::= [^\"\\\\]\n")
+	b.WriteString("string-array ::= \"[\" ws (string (\",\" ws string)*)? ws \"]\"\n")
+	b.WriteString("title-member ::= \"\\\"title\\\"\" ws \":\" ws string\n")
+	b.WriteString("steps-member ::= \"\\\"steps\\\"\" ws \":\" ws string-array\n")
+	// trigger_hints is optional: a comma-prefixed tail keeps the key order
+	// fixed while allowing the bare close.
+	b.WriteString("hints-or-close ::= (\",\" ws \"\\\"trigger_hints\\\"\" ws \":\" ws string-array)? ws\n")
+	return b.String()
+}

@@ -627,13 +627,19 @@ func (s *llmDistillSummarizer) SummarizeForDistill(ctx context.Context, kind str
 		}
 	}
 	sys := distillLessonSystemPrompt
+	grammar := llm.LessonGrammar()
 	if kind == DomainProcedure {
 		sys = distillProcedureSystemPrompt
+		// Bughunt F28: procedure distillation was forced through the LESSON
+		// grammar, so every constrained procedure response failed grammar
+		// validation and blocked the distill queue. Procedure shapes ride
+		// their own grammar mirroring the lesson one.
+		grammar = llm.ProcedureGrammar()
 	}
 	resp, err := s.client.Chat(ctx, []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: sys},
 		{Role: llm.RoleUser, Content: sb.String()},
-	}, llm.WithMaxTokens(500), llm.WithTemperature(0.2), llm.WithRawGrammar(llm.LessonGrammar()))
+	}, llm.WithMaxTokens(500), llm.WithTemperature(0.2), llm.WithRawGrammar(grammar))
 	if err != nil {
 		return "", fmt.Errorf("distill chat: %w", err)
 	}
