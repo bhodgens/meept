@@ -100,15 +100,31 @@ at 120s.
 - MED — fresh ChatState in GUI error/system/reload branches dropped
   pendingTurns (F20 regression class). FIXED 2f56f190 (copyWith).
 - LOW (OPEN) — chat.response still relayed as agent_progress
-  (classification accident, not exclusion).
+  (classification accident, not exclusion). FIXED de671eb2
+  (deleg_935226b6/sa-1): transformBusEventToWS skips chat.response;
+  pin TestTransformBusEventToWS_ChatResponseNotRelayed; WSClassParity
+  table updated to the new intended behavior.
 - LOW (OPEN) — wsclass decoder gate only covers turn.terminal; future
-  typed topics silently regress to prefix classification.
+  typed topics silently regress to prefix classification. FIXED
+  5b08d5d1 (deleg_935226b6/sa-2): TestEveryWSClassifiedHasDecoderEntry
+  — expectation table + type-checker sweep of ./... so a new
+  WSClassified implementer without a decoder entry fails the gate.
 - LOW (OPEN) — TUI F19 earlyTerminals buffer unbounded for
-  never-registered turn ids.
+  never-registered turn ids. FIXED 84cfa548 (sa-1): capped
+  (oldest-evicted), pin in scopes2_pins_test.go.
 - LOW (OPEN) — TUI ctrl+l/Reset orphan pendingTurns (cross-session
-  terminals silently discarded).
-- LOW (OPEN) — loadMessages() leaks _turnTerminalSubscription.
+  terminals silently discarded). FIXED 84cfa548 (sa-1): both paths
+  unregister pending turns; pin in scopes2_pins_test.go.
+- LOW (OPEN) — loadMessages() leaks _turnTerminalSubscription
+  (no cancel before reassign; double-delivery after reload). Still
+  OPEN — not in any dispatch's file scope (chat_provider.dart was
+  sa-2's file, but this hunk was not assigned).
 - LOW (OPEN) — GUI hardcodes 120s liveness; TUI reads chat config.
+  FIXED 4f412d48 (deleg_935226b6/sa-2): ChatNotifier fetches
+  chat.liveness_timeout_seconds from the existing
+  GET /api/v1/config/client endpoint (0-disables semantics honored,
+  120s fallback retained); parseClientConfig hoisted to
+  lib/core/client_config_parse.dart.
 
 ### Scope 3 (refusal fallback, deleg_9fb259e7/sa-1) — full report received
 
@@ -123,13 +139,20 @@ ConfigSnapshot/manager/registry/components all present.
   tagging, the refusal path doesn't). OPEN — loop.go:5893.
 - MED — refused-call usage ledgered to llm_calls but never charged
   to Budget token/cost (F12's fix covered only the ledger half).
-  OPEN — client.go:602/827/2054, anthropic.go:404/650.
+  FIXED f3e59605 (deleg_935226b6/sa-0): recordRefusalBudget charges
+  RecordUsageWithScope + RecordCostWithScope in all 5 refusal
+  branches; tests TestChatRefusalChargesBudget,
+  TestChatRefusalRecordsCostWithScope,
+  TestAnthropicChatRefusalChargesBudget, TestRefusalCostUSDNilConfig.
 - MED — SpawnVerifier child loop missed WithGlobalRefusalModel +
   spec. FIXED 447d945c.
 - LOW (OPEN) — park/resume cycles reset the one-hop refusal budget
-  (one extra refused call per generation).
+  (one extra refused call per generation). Skipped by sa-0: clean fix
+  needs loop.go or loop_park.go access outside its file scope.
 - LOW (OPEN) — openai refusal ledger rows mix cfg.ProviderID with
   refusal.ModelID when a cross-provider override refused.
+  FIXED f3e59605 (refusalProviderOr prefers the refusal's stamped
+  ProviderID; test TestChatRefusalLedgerCarriesServingProvider).
 
 Full finding text: ~/.hermes/cache/delegation/live/deleg_9fb259e7/
 task-{0,1}.log
