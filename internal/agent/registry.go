@@ -121,6 +121,11 @@ type AgentRegistry struct {
 	// sharedConvStore is a single ConversationStore shared across all agent
 	// loops so that cross-agent handoffs preserve conversation history.
 	sharedConvStore *ConversationStore
+
+	// globalRefusalModel mirrors RegistryConfig.GlobalRefusalModel: the
+	// global models.json5 refusal_model slot stamped onto every
+	// registry-built loop (bughunt F5).
+	globalRefusalModel string
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -179,6 +184,13 @@ type RegistryConfig struct {
 	// ConversationStoreSize is the LRU capacity of the shared ConversationStore.
 	// When <= 0, DefaultConversationStoreSize is used.
 	ConversationStoreSize int
+
+	// GlobalRefusalModel is the global models.json5 refusal_model slot
+	// (bughunt F5). When set, every registry-built agent loop inherits it as
+	// the fallback of last resort in refusalFallbackRef (spec.RefusalModel
+	// still outranks it). Empty = refusal fallback feature off unless the
+	// per-agent spec sets its own RefusalModel.
+	GlobalRefusalModel string
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -209,6 +221,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		guardsCfg:             cfg.Guards,
 		db:                    cfg.DB,
 		sharedConvStore:       NewConversationStore(cfg.ConversationStoreSize),
+		globalRefusalModel:    cfg.GlobalRefusalModel,
 	}
 
 	// Load global rules
@@ -514,6 +527,16 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	// escalation events and transitions identically to the daemon loop.
 	if r.quotaTracker != nil {
 		opts = append(opts, WithQuotaTracker(r.quotaTracker))
+	}
+
+	// Global refusal_model slot (bughunt F5): registry-built loops inherit
+	// the global models.json5 refusal_model so their refusalFallbackRef
+	// precedence matches the daemon template's (spec.RefusalModel wins when
+	// set, global slot fills an empty spec field, feature off when both
+	// empty). Without this, specialist loops silently ran with the fallback
+	// feature off.
+	if r.globalRefusalModel != "" {
+		opts = append(opts, WithGlobalRefusalModel(r.globalRefusalModel))
 	}
 
 	// Create a message queue for steering/follow-up support (unless disabled).
