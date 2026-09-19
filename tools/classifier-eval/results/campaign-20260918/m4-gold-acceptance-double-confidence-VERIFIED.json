@@ -1,0 +1,65 @@
+{
+  "n": 48,
+  "n_scored": 48,
+  "a_routes": 9,
+  "a_correct": 7,
+  "b_routes": 0,
+  "b_correct": 0,
+  "chain": 39,
+  "routed": 9,
+  "min_routed": 20,
+  "coverage_floor": 20,
+  "system_accuracy": 0.8511,
+  "acceptance_threshold": 0.868,
+  "verdict": "INSUFFICIENT_COVERAGE",
+  "policy": "double-confidence",
+  "replay_n": 48,
+  "replay_sha256": "9bc5010baf3293012d3260c0c583173a7795ff8d96c70d2cead61b59b1fc1555",
+  "sim_threshold": 0.95,
+  "leaks": [],
+  "guard": {
+    "replay_n": 48,
+    "corpus_n": 388,
+    "exact_leaks": 0,
+    "sim_leaks": 0,
+    "allowlisted_sims": 0,
+    "rows_compared": 48,
+    "vectors_checked": true,
+    "sim_threshold": 0.95,
+    "top_margins": [
+      [
+        0.943,
+        16,
+        "h18-cfgops-001",
+        "2a7a0eb076138ce4"
+      ],
+      [
+        0.9228,
+        44,
+        "h19-qp-006",
+        "338cb3b2e9ffa8c4"
+      ],
+      [
+        0.911,
+        32,
+        "h20-015",
+        "6e0fc8a0c28f759a"
+      ],
+      [
+        0.9065,
+        15,
+        "h18-cfgops-001",
+        "59a8671673770be7"
+      ],
+      [
+        0.9051,
+        25,
+        "h20-007",
+        "75b30be008dd2244"
+      ]
+    ],
+    "allowlist": []
+  },
+  "near_dup_allowlist": [],
+  "chain_baseline": 0.868
+}

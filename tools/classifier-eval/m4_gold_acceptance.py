@@ -402,7 +402,8 @@ def run_full(policies: set) -> int:
     intents = [c.intent for c in gold]
     labs = sorted({c.intent for c in gold if not c.ood})
 
-    emb = H.Embedder(EMBED_URL, "qwen3-embedding", "")
+    emb = H.Embedder(EMBED_URL, "qwen3-embedding", "",
+                 model_path="/Volumes/LLMs/Qwen3-Embedding-0.6B-4bit-DWQ")
     emb.embed_keys([c.text for c in gold], gkeys)
     V = emb.vectors(gkeys)
     # Guarded normalisation, in one driven seam (build_centroids): see its

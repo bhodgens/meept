@@ -12,5 +12,12 @@
     "reason": "scikit-learn unavailable; no install approved"
   },
   "corpus_amendment": "h18-planexec-001 removed from tuning corpus (disjointness guard refusal)",
-  "phase2_live_chain": "PENDING \u2014 requires scratch rig; 0.868 constant reported as reference only"
+  "phase2_live_chain": "PENDING \u2014 requires scratch rig; 0.868 constant reported as reference only",
+  "embedding_provenance_caveat": {
+    "observed": "run stderr: 'no verified model content identity (model_path=None); using the UNVERIFIED cache namespace. Acceptance runs must set model_path.'",
+    "impact": "embedding vectors came from the unverified namespace \u2014 per the MEAS-05 fail-closed policy these results CANNOT be cited as verified-acceptance evidence",
+    "remediation": "phase-1 rerun (or phase 2) must pass model_path so the cache namespace hashes the verified Qwen3-Embedding content",
+    "severity": "blocks verified-acceptance claim; numeric values themselves recorded honestly but flagged",
+    "resolution": "Embedder now passes model_path=/Volumes/LLMs/Qwen3-Embedding-0.6B-4bit-DWQ; verified rerun produced IDENTICAL numbers (deterministic seed 42) with zero UNVERIFIED warnings. VERIFIED artifact: campaign-20260918/m4-gold-acceptance-double-confidence-VERIFIED.json"
+  }
 }

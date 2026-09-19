@@ -41,5 +41,11 @@
       "ood": 28
     },
     "corpus_sha256_after": "9100562d3722cd79ceb6143ece78df5ebc43e3bb145344efb0fe1cd7c8af90f5"
+  },
+  "embedding_identity_amendment": {
+    "when": "2026-09-19T11:05:20.187856",
+    "what": "m4_gold_acceptance Embedder now passes model_path=/Volumes/LLMs/Qwen3-Embedding-0.6B-4bit-DWQ (the weights embed_server.py serves), moving the cache from the UNVERIFIED namespace to a verified content-hash namespace",
+    "why": "MEAS-05 fail-closed policy: acceptance claims require verified model identity; phase-1 run warned 'Acceptance runs must set model_path'",
+    "scoring_code_sha256_after": "17005836c08ea69760b0308ce1a8f123c9ef82d45dab6aa78ee33b67e962ee13"
   }
 }
