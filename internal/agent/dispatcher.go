@@ -2634,9 +2634,81 @@ func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memC
 			multi.IsCompound = false
 			multi.CompoundType = ""
 		}
+
+		// Report-readback arbitration (2026-09-18 tool-boundary-hardening
+		// leaf 04, e2e T1): exactly TWO actionable intents where the
+		// lower-confidence one is `report` AND the report clause references
+		// the first action's output ("then tell me the full path") is a
+		// readback, not a second deliverable — collapse to the single
+		// actionable intent. F42's protection stands: a report clause with
+		// its own work verb ("write a report about the findings") fails
+		// classifyReportTagAlong and stays compound. actionable >= 3 and
+		// the chatLike arm above are untouched. Clause split is connector
+		// substring matching ONLY (" then " / ", and " / " and then ") — no
+		// general NLP parser; without a recognized connector the verdict
+		// stays compound.
+		if actionable == 2 && multi.IsCompound {
+			primary, secondary := reportReadbackIntents(multi.Intents)
+			if primary != nil && secondary != nil {
+				actionClause, reportClause, ok := splitReportReadbackClauses(input)
+				if ok && classifyReportTagAlong(actionClause, reportClause) {
+					d.logger.Info("Compound arbitration: report readback collapsed",
+						"actionable_intent", primary.Type,
+						"report_clause", truncateString(reportClause, 80),
+						"action_clause", truncateString(actionClause, 80),
+						"input_len", len(input),
+					)
+					multi.IsCompound = false
+					multi.CompoundType = ""
+				}
+			}
+		}
 	}
 
 	return multi
+}
+
+// reportReadbackIntents reports whether the intent set above the confidence
+// floor is exactly two actionable intents with `report` as the LOWER-confidence
+// one, returning the primary (higher-confidence) and the report intent.
+func reportReadbackIntents(intents []*Intent) (primary, report *Intent) {
+	var secondary []*Intent
+	for _, intent := range intents {
+		if intent.Confidence < compoundIntentConfidenceFloor {
+			continue
+		}
+		if intent.Type == string(IntentChat) || intent.Type == string(IntentPlatform) || intent.Type == string(IntentRecall) {
+			continue
+		}
+		secondary = append(secondary, intent)
+	}
+	if len(secondary) != 2 {
+		return nil, nil
+	}
+	a, b := secondary[0], secondary[1]
+	if a.Type == string(IntentReport) && a.Confidence < b.Confidence {
+		return b, a
+	}
+	if b.Type == string(IntentReport) && b.Confidence < a.Confidence {
+		return a, b
+	}
+	return nil, nil
+}
+
+// splitReportReadbackClauses splits the two-intent input on the compound
+// connectors the clause-split rule allows (" then ", " and then ", ", and ")
+// and returns (actionClause, reportClause, true). Everything BEFORE the
+// connector is the action; everything after is the report readback. Only the
+// FIRST connector occurrence splits; no recognized connector ⇒ (,, false).
+func splitReportReadbackClauses(input string) (action, report string, ok bool) {
+	// ", and " must be tried before " and " shapes so the comma variant
+	// wins when both match.
+	for _, sep := range []string{" then ", " and then ", ", and "} {
+		if idx := strings.Index(input, sep); idx >= 0 {
+			return input[:idx], input[idx+len(sep):], true
+		}
+	}
+	return "", "", false
 }
 
 // compoundIntentConfidenceFloor is the minimum confidence an intent from the
