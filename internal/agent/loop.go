@@ -62,6 +62,14 @@ var (
 	// errors.Is-classify it to distinguish "gave up on repeated
 	// unbacked claims" from a transport or guard failure.
 	ErrNudgeBudgetExhausted = errors.New("nudge budget exhausted")
+	// ErrToolRepeatExhausted is the repeat-error-breaker honest-failure
+	// sentinel (tool-boundary-hardening leaf 02): the same tool with the
+	// same input failed with the same error maxIdenticalToolErrors times in
+	// one logical work scope, so the loop refused further identical calls
+	// and terminalized the turn. errors.Is-classifiable, mirroring
+	// ErrCycleDetected, so callers distinguish "gave up on a doomed call"
+	// from a transport or guard failure.
+	ErrToolRepeatExhausted = errors.New("tool repeated identical failures")
 	// ErrAgentBlocked is returned by attemptStateRecovery when the state
 	// machine is in StateBlocked and requires external action (approval or
 	// rate-limit lift). It wraps the triggering error so callers retain the
@@ -393,6 +401,53 @@ func hashArgs(argsJSON string) string {
 func cycleAbortError(tool string, repeats int) error {
 	return fmt.Errorf("%w: tool=%s repeated the identical call %d times in a row",
 		ErrCycleDetected, tool, repeats)
+}
+
+// repeatBreakerRefusal returns the breaker's honest summary when tc's
+// execution result is a pre-execution refusal produced by the repeat-error
+// breaker gate in executeToolCalls ("" otherwise). Matched on the refusal
+// suffix, not the tool name: only the gate writes it.
+func repeatBreakerRefusal(tc llm.ToolCall, results []*ExecutionResult) string {
+	for _, r := range results {
+		if r == nil || r.ToolCallID != tc.ID || r.Success {
+			continue
+		}
+		return refusalSummaryFromResult(r.Error)
+	}
+	return ""
+}
+
+// firstRepeatBreakerRefusal scans a whole result batch for the first
+// breaker refusal (used by the post-execution terminalization check).
+func firstRepeatBreakerRefusal(results []*ExecutionResult) (summary, tool string) {
+	for _, r := range results {
+		if r == nil || r.Success {
+			continue
+		}
+		if s := refusalSummaryFromResult(r.Error); s != "" {
+			return s, ""
+		}
+	}
+	return "", ""
+}
+
+const repeatBreakerRefusalSuffix = "[refused without execution: this identical input already failed the maximum number of times]"
+
+// refusalSummaryFromResult extracts the breaker's honest summary from a
+// refusal result's error text ("" when the result is not a breaker refusal).
+func refusalSummaryFromResult(errText string) string {
+	if strings.HasSuffix(errText, repeatBreakerRefusalSuffix) {
+		return strings.TrimSpace(strings.TrimSuffix(errText, " "+repeatBreakerRefusalSuffix))
+	}
+	return ""
+}
+
+// repeatExhaustedError is the terminal error for a breaker refusal. %w keeps
+// ErrToolRepeatExhausted classifiable (errors.Is), mirroring cycleAbortError;
+// the detail carries the breaker's full honest summary so the user and the
+// next agent see WHY the turn stopped.
+func repeatExhaustedError(tool, summary string) error {
+	return fmt.Errorf("%w: tool=%s: %s", ErrToolRepeatExhausted, tool, summary)
 }
 
 // normalizeContent normalizes response content for comparison.
@@ -952,6 +1007,16 @@ type AgentLoop struct {
 	// (harness-eval leaf 05). Initialized unconditionally; Observe is a
 	// no-op cost when everything succeeds.
 	toolBreaker *ToolRetryBreaker
+
+	// repeatErr is the repeat-identical-error breaker (tool-boundary-hardening
+	// leaf 02): after (tool, canonical-args, error-first-line) fails 3 times
+	// within this loop's logical work scope, identical calls are refused
+	// WITHOUT executing and the turn terminalizes with the honest summary.
+	// Deliberately NOT reset by resetTurnGuards — see the comment there and
+	// the struct comment on repeatErrorBreaker for the lifetime proof (it
+	// must survive the abort→escalation→replan cycle, which re-enters this
+	// same loop instance).
+	repeatErr *repeatErrorBreaker
 
 	// rosterGate is the per-agent quality gate from AGENT.md `gate:`
 	// (leaf 04-coder-gates). Evaluated after each turn that ran a mutating
@@ -2247,6 +2312,14 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	// a tool call that has failed identically five consecutive times.
 	// Unconditional: the breaker is inert until Observe sees a failure.
 	loop.toolBreaker = NewToolRetryBreaker()
+
+	// Repeat-identical-error breaker (tool-boundary-hardening leaf 02):
+	// constructed ONCE per loop instance — its memory is per logical work
+	// scope (this loop), not per turn, so it survives the
+	// abort→escalation→replan cycle that re-enters this same instance
+	// (see repeatErrorBreaker struct comment). Never reset by
+	// resetTurnGuards.
+	loop.repeatErr = newRepeatErrorBreaker()
 
 	// Wrap LLM with ContextFirewall for context budget enforcement
 	if loop.llm != nil {
@@ -3882,6 +3955,16 @@ func (l *AgentLoop) nudgeBudgetExhausted(class string) bool {
 // chat loop, and T2's quickplan handoff aborted with "Convergence detected
 // ... count=3" at iteration=1 because two stale entries from earlier turns
 // pre-filled the window. Detection is a within-turn semantic; both reset.
+//
+// repeatErr (repeat_error_breaker.go) is DELIBERATELY NOT reset here: its
+// memory is per logical WORK SCOPE, not per turn. The abort→escalation→
+// replan cycle (orchestrator.handlePlanRequest → strategic.ReplanFailedTask
+// → planSinglePhase / the step-job path re-entering
+// registry.GetForTask(agentID, taskID)) reuses the SAME loop instance across
+// replan attempts while every turn boundary calls this reset — if the breaker
+// were cleared here, each fresh replan generation would repeat the doomed
+// identical call forever (the 2026-09-18 e2e's 45-call failure mode). Only a
+// NEW loop instance (new session/task scope) starts with a clean breaker.
 func (l *AgentLoop) resetTurnGuards() {
 	if l.noProgress != nil {
 		l.noProgress.Reset()
@@ -4717,6 +4800,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// deferred nudges as synthetic tool results so no tool call
 			// dangles (HIGH-2).
 			pendingNudges := 0
+			// pendingRepeat* carries a repeat-error-breaker refusal (if any)
+			// out of this guard loop; the turn terminalizes AFTER the tool
+			// results are recorded in the conversation (see below).
+			pendingRepeatRefusal, pendingRepeatTool := "", ""
 			for _, tc := range response.ToolCalls {
 				// nudgeInFlight records that the no-progress ladder flagged
 				// THIS call as a repeat at/over its warn threshold, i.e. the
@@ -4782,6 +4869,26 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				}
 
 				cycleAbort, repeats := l.cycleDetector.recordCall(tc.Function.Name, tc.Function.Arguments)
+				// Repeat-identical-error breaker (tool-boundary-hardening
+				// leaf 02): a refusal result produced by executeToolCalls
+				// means this identical input already exhausted its failure
+				// budget. The breaker's terminalization takes precedence
+				// over the cycle abort: the breaker is cross-generation
+				// evidence the input is DOOMED, not merely repeated. The
+				// return is deferred (pendingRepeat*) until after the tool
+				// results are recorded in the conversation (HIGH-2: no
+				// dangling tool_call_id), by breaking out of the guard loop
+				// below. Any other calls in this batch already ran; their
+				// results are still recorded.
+				if repeatRefusal := repeatBreakerRefusal(tc, results); repeatRefusal != "" {
+					l.logger.Warn("Repeat-error breaker exhausted, terminalizing turn",
+						"iteration", iteration,
+						"tool", tc.Function.Name,
+						"conversation", conversationID,
+					)
+					pendingRepeatRefusal, pendingRepeatTool = repeatRefusal, tc.Function.Name
+					break
+				}
 				// The nudge gets its chance first: with the ladder present,
 				// abort only on a call the ladder has already flagged as a
 				// repeat (its nudge for that call is flushed below, and any
@@ -4932,6 +5039,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// an interleaved user message (bughunt round-2 HIGH-1).
 			for i := 0; i < pendingNudges; i++ {
 				conv.AddUserMessage("[system: no measurable progress; change approach.]")
+			}
+
+			// Repeat-error-breaker terminalization (tool-boundary-hardening
+			// leaf 02): pendingRepeat* was set in the guard loop above when
+			// the breaker refused a call whose identical-input failure
+			// budget was spent. The refusal result is now recorded in the
+			// conversation (no dangling tool_call_id, HIGH-2 by
+			// construction); set the terminal state and end the turn with
+			// the breaker's honest summary instead of another model round.
+			if pendingRepeatRefusal != "" {
+				l.safeTransition(StateError, "repeat_error_breaker_exhausted", map[string]any{
+					"tool":      pendingRepeatTool,
+					"iteration": iteration,
+				})
+				return pendingRepeatRefusal, repeatExhaustedError(pendingRepeatTool, pendingRepeatRefusal)
 			}
 
 			// Publish agent result event
@@ -7193,9 +7315,79 @@ var memoryToolNames = map[string]bool{
 	"memory_get_version_history": true,
 }
 
-// executeToolCalls executes tool calls using the executor.
-// Memory tools are gated when recall mode is "disabled".
+// executeToolCalls executes tool calls using the executor, gated by the
+// repeat-identical-error breaker (tool-boundary-hardening leaf 02): a call
+// whose (tool, canonical-args-hash) pair is already dead is REFUSED WITHOUT
+// executing — the breaker's honest summary lands in the tool-result slot
+// instead. Every executed failure is observed post-execution; when a key
+// exhausts, the NEXT identical call hits the refusal gate, and the refusal
+// terminalizes the turn in reasoningCycle.
 func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) []*ExecutionResult {
+	results := make([]*ExecutionResult, len(toolCalls))
+	if len(toolCalls) == 0 {
+		return results
+	}
+
+	hashes := make([]string, len(toolCalls))
+	toExecute := make([]llm.ToolCall, 0, len(toolCalls))
+	executeIdx := make([]int, 0, len(toolCalls))
+	for i, tc := range toolCalls {
+		var args map[string]any
+		// Best-effort parse (mirrors the toolBreaker block below):
+		// unparseable args hash deterministically as nil.
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			args = nil
+		}
+		hashes[i] = repeatErrorArgsHash(args)
+		if l.repeatErr != nil && !l.repeatErr.Allow(tc.Function.Name, hashes[i]) {
+			refusal := l.repeatErr.Refusal(tc.Function.Name, hashes[i])
+			l.logger.Warn("repeat-error breaker refused identical call without execution",
+				"tool", tc.Function.Name,
+			)
+			results[i] = &ExecutionResult{
+				ToolCallID: tc.ID,
+				Success:    false,
+				// Not a breakable repeat-failure: the refusal is the
+				// breaker's OWN output, not a new tool failure to observe.
+				IsBreakableRepeat: false,
+				Error:             refusal + " [refused without execution: this identical input already failed the maximum number of times]",
+			}
+			continue
+		}
+		toExecute = append(toExecute, tc)
+		executeIdx = append(executeIdx, i)
+	}
+
+	if len(toExecute) > 0 {
+		execResults := l.executeToolCallsUngated(ctx, toExecute)
+		for j, execResult := range execResults {
+			results[executeIdx[j]] = execResult
+		}
+	}
+
+	// Post-failure observation: only executed calls whose failure came from
+	// the tool itself (IsBreakableRepeat) feed the breaker. Deterministic
+	// pre-execution denies — "permission denied", "unknown tool",
+	// "security not configured", memory-tool gates — are policy outcomes,
+	// not evidence the input is doomed, and must not burn the budget (a
+	// guard-only harness otherwise trips breaker terminalization at
+	// iteration 4, preempting the no-progress ladder's own budget).
+	if l.repeatErr != nil {
+		for _, i := range executeIdx {
+			r := results[i]
+			if r == nil || r.Success || !r.IsBreakableRepeat {
+				continue
+			}
+			l.repeatErr.Observe(toolCalls[i].Function.Name, hashes[i], r.Error)
+		}
+	}
+
+	return results
+}
+
+// executeToolCallsUngated executes tool calls using the executor.
+// Memory tools are gated when recall mode is "disabled".
+func (l *AgentLoop) executeToolCallsUngated(ctx context.Context, toolCalls []llm.ToolCall) []*ExecutionResult {
 	// Inject the loop's working directory into the context so tools that
 	// need per-session project info (e.g. project_info) can read it without
 	// shared mutable state on the tool registry.

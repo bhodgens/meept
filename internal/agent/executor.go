@@ -451,6 +451,12 @@ type ExecutionResult struct {
 	CascadeFrom string `json:"cascade_from,omitempty"`
 	// IsCascading is true when this failure is a downstream effect of an earlier failure.
 	IsCascading bool `json:"is_cascading,omitempty"`
+	// IsBreakableRepeat marks a failure as a real tool-execution failure (as
+	// opposed to a deterministic pre-execution deny such as "permission
+	// denied" or "unknown tool"). Only these feed the repeat-error breaker,
+	// so a guard-only harness that fails every call identically by policy —
+	// not by the tool's own logic — never trips breaker terminalization.
+	IsBreakableRepeat bool `json:"is_breakable_repeat,omitempty"`
 }
 
 // ErrorSeverity classifies the severity of a parallel execution error.
@@ -1249,7 +1255,11 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		return &ExecutionResult{
 			ToolCallID: toolCall.ID,
 			Success:    false,
-			Error:      fmt.Sprintf("tool execution failed: %v", toolErr),
+			// A failure surfaced by the tool itself: this is exactly the
+			// evidence the repeat-error breaker keys on (a repeated
+			// "tool execution failed: X" means the input is doomed).
+			IsBreakableRepeat: true,
+			Error:             fmt.Sprintf("tool execution failed: %v", toolErr),
 		}
 	}
 
