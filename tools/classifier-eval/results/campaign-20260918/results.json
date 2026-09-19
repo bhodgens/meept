@@ -1,0 +1,16 @@
+{
+  "policy_double_confidence": {
+    "n": 48,
+    "routed": 9,
+    "routed_correct": 7,
+    "routed_accuracy": 0.778,
+    "system_accuracy_modeled": 0.8511,
+    "verdict": "INSUFFICIENT_COVERAGE"
+  },
+  "policy_tfidf_veto": {
+    "status": "UNVALIDATED",
+    "reason": "scikit-learn unavailable; no install approved"
+  },
+  "corpus_amendment": "h18-planexec-001 removed from tuning corpus (disjointness guard refusal)",
+  "phase2_live_chain": "PENDING \u2014 requires scratch rig; 0.868 constant reported as reference only"
+}

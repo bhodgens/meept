@@ -1,0 +1,45 @@
+{
+  "frozen_at": "2026-09-19T10:51:20.994196",
+  "issue": "https://github.com/bhodgens/meept/issues/50",
+  "corpus_hashes": {
+    "testdata/eval/classifier-test-corpus.json5": "b1c2072553db9c1656a0cd2c1357d94b935a159448d1a515962969df9215f4fa",
+    "testdata/eval/classifier-adversarial-corpus.json5": "848b33eb2118f573c0305bae0eaac6e46843c3ac968bdff4106d0c95ce0b012c",
+    "tools/classifier-eval/fold-assignment.json": "7d0b73cecb3b7c5ade48c62bb68d3b4c17728edf6d17aee4190b16253ec5cdb6",
+    "tools/classifier-eval/eval_harness.py": "aac28618c4341307cc32498d8acf440a00f2ed5e17aae71e2ad7b50f2ce7b8bd"
+  },
+  "population": {
+    "total": 389,
+    "eligible": 361,
+    "ood": 28
+  },
+  "acceptance_set": "48-case adjudicated gold replay (replay-gold.local.json5), HELD-OUT, never trained on",
+  "stage_order": "A (embedding gate + tfidf/kNN veto) -> B (ModernBERT rescue if measured) -> C (chain)",
+  "chain_constant_note": "0.868 reported as historical reference only; acceptance scored on ACTUAL chain answers",
+  "thresholds": {
+    "acceptance_set": "48-case adjudicated gold replay (held-out)",
+    "min_routed_per_policy": 20,
+    "pass_bar": "policy accepted iff replay accuracy >= 0.80 AND routed >= 20/48 AND precision >= 0.70 on routed",
+    "chain_reference_only": "0.868 reported alongside as historical estimate, never added to scores",
+    "compute_budget": "single offline pass, both policies (double-confidence, tfidf-veto), one seed (42)",
+    "refusal_conditions": [
+      "corpus<->replay overlap guard fires (selection-on-test)",
+      "routed < 20 for a policy -> policy UNVALIDATED, not failed",
+      "any threshold changed after seeing results -> run invalid"
+    ]
+  },
+  "scoring_code": {
+    "m4_gold_acceptance.py": "7620df8ee60c156dccc576bdfdd668a0b96a2c694801a173f2c030b35b12dd17",
+    "eval_harness.py": "aac28618c4341307cc32498d8acf440a00f2ed5e17aae71e2ad7b50f2ce7b8bd"
+  },
+  "corpus_amendment": {
+    "when": "2026-09-19T10:58:24.365361",
+    "what": "removed adversarial case h18-planexec-001 (exact duplicate of replay case 14) from the TUNING corpus",
+    "why": "pre-registered corpus<->replay disjointness guard refused to score (selection-on-test condition fired); the acceptance set is untouched",
+    "population_after": {
+      "total": 388,
+      "eligible": 360,
+      "ood": 28
+    },
+    "corpus_sha256_after": "9100562d3722cd79ceb6143ece78df5ebc43e3bb145344efb0fe1cd7c8af90f5"
+  }
+}
