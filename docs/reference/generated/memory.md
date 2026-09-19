@@ -28,6 +28,7 @@ Package memory provides memory storage and retrieval for meept.
 - [func MemoryFreshnessText\(ageDays int\) string](<#MemoryFreshnessText>)
 - [func MigrateToDualDB\(dataDir string, nodeID string, logger \*slog.Logger\) error](<#MigrateToDualDB>)
 - [func ParseMetadata\(jsonStr string\) map\[string\]any](<#ParseMetadata>)
+- [func RotateIfNeeded\(path string, maxBytes int64\) error](<#RotateIfNeeded>)
 - [func ScoreCandidate\(mem Memory, netVotes int, accesses int, now time.Time, w Weights\) float64](<#ScoreCandidate>)
 - [func StampFacts\(facts \[\]MemoryFact, ownerID, sourceSession string, at time.Time\)](<#StampFacts>)
 - [func Usefulness\(sumVotes, accesses int, ageDays float64, w Weights\) float64](<#Usefulness>)
@@ -40,6 +41,9 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(ex \*AmbientExtractor\) Extract\(ctx context.Context, messages \[\]string\) \(\[\]AmbientCandidate, error\)](<#AmbientExtractor.Extract>)
   - [func \(ex \*AmbientExtractor\) WriteCandidates\(ctx context.Context, candidates \[\]AmbientCandidate\) \(\[\]string, error\)](<#AmbientExtractor.WriteCandidates>)
 - [type AmbientExtractorConfig](<#AmbientExtractorConfig>)
+- [type CalibrationLogger](<#CalibrationLogger>)
+  - [func NewCalibrationLogger\(dataDir string, log \*slog.Logger\) \*CalibrationLogger](<#NewCalibrationLogger>)
+  - [func \(c \*CalibrationLogger\) LogVerdict\(ctx context.Context, claimID, verdict string, mem \*Memory\)](<#CalibrationLogger.LogVerdict>)
 - [type Claim](<#Claim>)
 - [type ClaimStatus](<#ClaimStatus>)
   - [func \(s ClaimStatus\) IsEligibleCanonical\(\) bool](<#ClaimStatus.IsEligibleCanonical>)
@@ -169,9 +173,11 @@ Package memory provides memory storage and retrieval for meept.
   - [func NewManager\(cfg ManagerConfig\) \*Manager](<#NewManager>)
   - [func \(m \*Manager\) AddMemoryRelation\(ctx context.Context, sourceID, targetID string, edgeType EdgeType, weight float64\) error](<#Manager.AddMemoryRelation>)
   - [func \(m \*Manager\) Backend\(\) string](<#Manager.Backend>)
+  - [func \(m \*Manager\) CalibrationLogger\(\) \*CalibrationLogger](<#Manager.CalibrationLogger>)
   - [func \(m \*Manager\) Close\(\) error](<#Manager.Close>)
   - [func \(m \*Manager\) Config\(\) config.MemoryConfig](<#Manager.Config>)
   - [func \(m \*Manager\) Consolidate\(ctx context.Context\) \(\*ConsolidationReport, error\)](<#Manager.Consolidate>)
+  - [func \(m \*Manager\) DataDir\(\) string](<#Manager.DataDir>)
   - [func \(m \*Manager\) Delete\(ctx context.Context, id string\) error](<#Manager.Delete>)
   - [func \(m \*Manager\) Distill\(ctx context.Context, src \[\]Memory\) \(\*Memory, error\)](<#Manager.Distill>)
   - [func \(m \*Manager\) DistributedConfig\(\) config.DistributedMemoryConfig](<#Manager.DistributedConfig>)
@@ -221,6 +227,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) SearchHybrid\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchHybrid>)
   - [func \(m \*Manager\) SearchSemantic\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchSemantic>)
   - [func \(m \*Manager\) SearchWithGraph\(ctx context.Context, query MemoryQuery, alpha float64\) \(\[\]MemoryResult, error\)](<#Manager.SearchWithGraph>)
+  - [func \(m \*Manager\) SetCalibrationLogger\(c \*CalibrationLogger\)](<#Manager.SetCalibrationLogger>)
   - [func \(m \*Manager\) SetDistillSummarizer\(s DistillSummarizer\)](<#Manager.SetDistillSummarizer>)
   - [func \(m \*Manager\) SetDualStore\(ds \*DualStore\)](<#Manager.SetDualStore>)
   - [func \(m \*Manager\) SetEpistemicDetector\(d \*EpistemicDetector\)](<#Manager.SetEpistemicDetector>)
@@ -467,6 +474,10 @@ Lessons are distilled principles \("always X before Y because Z"\); procedures a
 
 	const HarmfulVoteThreshold = -2
 
+<a name="MaxCalibrationLogBytes"></a>MaxCalibrationLogBytes exposes the rotation cap for tests and callers that need to size a file past it.
+
+	const MaxCalibrationLogBytes = maxCalibrationLogBytes
+
 <a name="MaxReasonBytes"></a>MaxReasonBytes caps the stored reason length for a vote.
 
 	const MaxReasonBytes = 512
@@ -602,6 +613,13 @@ All operations are destructive after step 2 \(files are moved\); a backup direct
 
 ParseMetadata parses a JSON string into metadata.
 
+<a name="RotateIfNeeded"></a>
+## func RotateIfNeeded
+
+	func RotateIfNeeded(path string, maxBytes int64) error
+
+RotateIfNeeded rotates path to path\+".1" when the file currently exceeds maxBytes. The previous .1 generation is overwritten, so at most two generations of the log exist \(current \+ .1\). Rename on the same filesystem is atomic, so a crash mid\-rotation leaves either the old file or the rotated one, never a partial copy. A missing file is not an error \(nothing to rotate\).
+
 <a name="ScoreCandidate"></a>
 ## func ScoreCandidate
 
@@ -715,7 +733,34 @@ AmbientExtractorConfig holds construction parameters for AmbientExtractor.
 	    Manager    *Manager
 	    Classifier AmbientClassifierLLM
 	    Logger     *slog.Logger
+	    // RawResponseHook, when non-nil, receives (prompt, rawBody) for every
+	    // classifier call — the calibration/training pair. Raw conversation
+	    // text: write only to gitignored paths. Nil = disabled.
+	    RawResponseHook func(prompt, rawBody string)
 	}
+
+<a name="CalibrationLogger"></a>
+## type CalibrationLogger
+
+CalibrationLogger appends claim verdicts to \<dataDir\>/claim\_verdicts.jsonl. Nil\-safe; write errors disable the logger \(best\-effort — calibration must never break the promote/reject path\).
+
+	type CalibrationLogger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewCalibrationLogger"></a>
+### func NewCalibrationLogger
+
+	func NewCalibrationLogger(dataDir string, log *slog.Logger) *CalibrationLogger
+
+NewCalibrationLogger creates a logger writing into the memory data dir. Empty dataDir returns nil \(disabled\).
+
+<a name="CalibrationLogger.LogVerdict"></a>
+### func \(\*CalibrationLogger\) LogVerdict
+
+	func (c *CalibrationLogger) LogVerdict(ctx context.Context, claimID, verdict string, mem *Memory)
+
+LogVerdict appends one verdict record. Snapshot the path under the lock, write outside it \(mutexio rule\); a write error disables the logger.
 
 <a name="Claim"></a>
 ## type Claim
@@ -1918,6 +1963,13 @@ AddMemoryRelation creates a relationship between two memories.
 
 Backend returns the active backend name.
 
+<a name="Manager.CalibrationLogger"></a>
+### func \(\*Manager\) CalibrationLogger
+
+	func (m *Manager) CalibrationLogger() *CalibrationLogger
+
+CalibrationLogger returns the configured calibration logger, or nil.
+
 <a name="Manager.Close"></a>
 ### func \(\*Manager\) Close
 
@@ -1938,6 +1990,13 @@ Config returns the memory configuration.
 	func (m *Manager) Consolidate(ctx context.Context) (*ConsolidationReport, error)
 
 Consolidate runs memory consolidation \(SQLite backend only\).
+
+<a name="Manager.DataDir"></a>
+### func \(\*Manager\) DataDir
+
+	func (m *Manager) DataDir() string
+
+LLM returns the manager's chat client \(consolidation summarization \+ distill summarization\), or nil if none is set. Exposed for wiring tests that assert which client the daemon construction site preferred. DataDir returns the manager's resolved data directory. Used by callers that need to co\-locate derived artifacts \(e.g. the rejected\-candidate calibration log\) with the memory stores.
 
 <a name="Manager.Delete"></a>
 ### func \(\*Manager\) Delete
@@ -2126,7 +2185,7 @@ IsMemvidActive returns true if memvid is the active backend.
 
 	func (m *Manager) LLM() llm.Chatter
 
-LLM returns the manager's chat client \(consolidation summarization \+ distill summarization\), or nil if none is set. Exposed for wiring tests that assert which client the daemon construction site preferred.
+
 
 <a name="Manager.ListAutoClaims"></a>
 ### func \(\*Manager\) ListAutoClaims
@@ -2283,6 +2342,13 @@ SearchSemantic performs vector similarity search for memories. If the vector sto
 	func (m *Manager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64) ([]MemoryResult, error)
 
 SearchWithGraph searches memories and applies graph\-aware ranking. The alpha parameter controls PageRank influence: 0 = pure relevance, 1 = pure PageRank.
+
+<a name="Manager.SetCalibrationLogger"></a>
+### func \(\*Manager\) SetCalibrationLogger
+
+	func (m *Manager) SetCalibrationLogger(c *CalibrationLogger)
+
+SetCalibrationLogger wires the claim\-verdict calibration logger. Nil\-safe \(a nil logger disables calibration logging\).
 
 <a name="Manager.SetDistillSummarizer"></a>
 ### func \(\*Manager\) SetDistillSummarizer

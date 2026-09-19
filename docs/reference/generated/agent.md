@@ -902,6 +902,7 @@ Package agent provides the agent loop and related components.
   - [func WithEpistemicHook\(hook \*EpistemicHook\) LoopOption](<#WithEpistemicHook>)
   - [func WithEventEmitter\(em \*EventEmitter\) LoopOption](<#WithEventEmitter>)
   - [func WithFileWatcher\(fw \*FileWatcherHook\) LoopOption](<#WithFileWatcher>)
+  - [func WithGlobalRefusalModel\(ref string\) LoopOption](<#WithGlobalRefusalModel>)
   - [func WithGlobalRules\(rules string\) LoopOption](<#WithGlobalRules>)
   - [func WithHTTPHooks\(executor \*HookBatchExecutor\) LoopOption](<#WithHTTPHooks>)
   - [func WithHallucinationDetector\(hd \*HallucinationDetector\) LoopOption](<#WithHallucinationDetector>)
@@ -1266,6 +1267,9 @@ Package agent provides the agent loop and related components.
   - [func ExportedRefusalSeams\(l \*AgentLoop\) \*RefusalSeams](<#ExportedRefusalSeams>)
   - [func \(s \*RefusalSeams\) Apply\(\)](<#RefusalSeams.Apply>)
 - [type RegistryConfig](<#RegistryConfig>)
+- [type RejectedCandidateLogger](<#RejectedCandidateLogger>)
+  - [func NewRejectedCandidateLogger\(dataDir string, log \*slog.Logger\) \*RejectedCandidateLogger](<#NewRejectedCandidateLogger>)
+  - [func \(r \*RejectedCandidateLogger\) LogRejected\(intent string, threshold float64, rejected \[\]rejectedCandidateRecord\)](<#RejectedCandidateLogger.LogRejected>)
 - [type ReplyFuncSetter](<#ReplyFuncSetter>)
 - [type ReportCapture](<#ReportCapture>)
 - [type ReportRouter](<#ReportRouter>)
@@ -1531,6 +1535,7 @@ Package agent provides the agent loop and related components.
   - [func \(ts \*TacticalScheduler\) OnJobFailed\(ctx context.Context, jobID, jobErr string\) error](<#TacticalScheduler.OnJobFailed>)
   - [func \(ts \*TacticalScheduler\) ScheduleReadySteps\(ctx context.Context, taskID string\) error](<#TacticalScheduler.ScheduleReadySteps>)
   - [func \(ts \*TacticalScheduler\) SelectAgentForHint\(toolHint string\) string](<#TacticalScheduler.SelectAgentForHint>)
+  - [func \(ts \*TacticalScheduler\) SetBurstDetector\(det \*metrics.BurstDetector\)](<#TacticalScheduler.SetBurstDetector>)
   - [func \(ts \*TacticalScheduler\) SetContextWindowProvider\(fn func\(agentID string\) int\)](<#TacticalScheduler.SetContextWindowProvider>)
   - [func \(ts \*TacticalScheduler\) SetHandoffPropagator\(fn func\(ctx context.Context, completedStep \*task.TaskStep\) error\)](<#TacticalScheduler.SetHandoffPropagator>)
   - [func \(ts \*TacticalScheduler\) SetMetricsStore\(store \*metrics.Store\)](<#TacticalScheduler.SetMetricsStore>)
@@ -2085,6 +2090,13 @@ Package agent provides the agent loop and related components.
 	    ErrConvergenceDetected         = errors.New("agent responses converged without progress")
 	    ErrConversationBudgetExhausted = errors.New("conversation token budget exhausted")
 	    ErrNoSkill                     = errors.New("skill is nil")
+	    // ErrNudgeBudgetExhausted is the F-A3 honest-failure sentinel: a
+	    // corrective-nudge class spent its per-turn budget and the behaviour
+	    // persisted, so the step terminalizes with an error instead of
+	    // appending more nudges to the context ladder. Callers can
+	    // errors.Is-classify it to distinguish "gave up on repeated
+	    // unbacked claims" from a transport or guard failure.
+	    ErrNudgeBudgetExhausted = errors.New("nudge budget exhausted")
 	    // ErrAgentBlocked is returned by attemptStateRecovery when the state
 	    // machine is in StateBlocked and requires external action (approval or
 	    // rate-limit lift). It wraps the triggering error so callers retain the
@@ -3307,7 +3319,7 @@ ClearReasoningOverride removes any per\-turn reasoning override. Called after th
 
 	func (l *AgentLoop) ClearRefusalFallback()
 
-ClearRefusalFallback clears a fallback override armed by handleRefusal when the retry never consumed it \(fresh\-turn restore, mirroring the verification\-escalation clear\-after\-turn behavior\). Idempotent.
+ClearRefusalFallback clears a fallback override armed by handleRefusal when the retry never consumed it \(fresh\-turn restore, mirroring the verification\-escalation clear\-after\-turn behavior\). Restores the base model by clearing the persistent override AND the staged fallback config \(pendingModelOverrideConfig\): the staged config is part of the pin — leaving it armed would re\-apply WithModelOverride on the next call even after the override ref itself was cleared \(bughunt F4\). Idempotent.
 
 <a name="AgentLoop.Close"></a>
 ### func \(\*AgentLoop\) Close
@@ -7876,6 +7888,10 @@ EpistemicHookConfig holds construction parameters for EpistemicHook.
 	    Cfg       config.EpistemicConfig
 	    Extractor AmbientExtractorInterface
 	    Logger    *slog.Logger
+	    // RejectedLogger, when non-nil, records every candidate the confidence/
+	    // category/max gates drop — the calibration population for the judge
+	    // lane. Nil = logging disabled.
+	    RejectedLogger *RejectedCandidateLogger
 	}
 
 <a name="ErrorBuilder"></a>
@@ -9932,6 +9948,13 @@ WithEventEmitter sets the event emitter for agent lifecycle events.
 
 WithFileWatcher sets the file watcher hook for filesystem\-level hooks.
 
+<a name="WithGlobalRefusalModel"></a>
+### func WithGlobalRefusalModel
+
+	func WithGlobalRefusalModel(ref string) LoopOption
+
+WithGlobalRefusalModel is the LoopOption form of SetGlobalRefusalModel \(bughunt F5\): ConfigSnapshot carries the template's global refusal slot so clones inherit it, and the registry can wire the slot straight into specialist loops. Non\-empty only; an empty slot is a no\-op so the option never clobbers a value set by an earlier wiring step.
+
 <a name="WithGlobalRules"></a>
 ### func WithGlobalRules
 
@@ -11787,7 +11810,13 @@ ParkedTurn captures a chat turn that was interrupted by budget exhaustion and is
 	    Parts          []llm.ContentPart // multimodal parts, if any
 	    AgentID        string            // agent override, if any
 	    SourceClient   string            // originating client identifier
-	    ParkedAt       time.Time         // when the turn was parked
+	    // TurnID is the chat.submit turn identity (week bughunt 2026-09-17
+	    // F15): recorded at park time so the resume can emit the FINAL
+	    // turn.terminal event under the id the client's ack returned —
+	    // without it the awaiter never resolves. Empty on legacy parked
+	    // turns (the blocking `chat` path), which stay silent on resume.
+	    TurnID   string
+	    ParkedAt time.Time // when the turn was parked
 	}
 
 <a name="ParkedTurnRecord"></a>
@@ -12010,6 +12039,16 @@ PlanRequest is the input to the strategic planner.
 	    // re-picking agents per step from the tool-hint table. Empty = no
 	    // override; per-step selection proceeds.
 	    AssignedAgent string `json:"assigned_agent,omitempty"`
+	
+	    // RequestModel carries the client's per-request model ref (chat.request
+	    // "model"; week bughunt 2026-09-17 F18). Pre-fix it was dropped at
+	    // publishPlanRequest, so async task dispatch served the turn on the
+	    // default/alias chain instead of the requested model. The strategic
+	    // planner applies it to specialist execution via the task's
+	    // model_override metadata — the same channel the dispatcher's parsed
+	    // user directives use, which AgentLoop consumes one-shot per task run.
+	    // Empty = no request-level model; unchanged behavior.
+	    RequestModel string `json:"request_model,omitempty"`
 	}
 
 <a name="PlannerThresholds"></a>
@@ -12749,7 +12788,12 @@ Since tree 03 leaf 01 the scheduling machinery lives on the class\-agnostic Turn
 	    ProviderID     string            // provider that hit the quota
 	    CredentialKey  string            // credential fingerprint of the blocked pool
 	    UnblockAt      time.Time         // earliest time the quota window lifts
-	    ParkedAt       time.Time         // when the turn was parked
+	    // TurnID is the chat.submit turn identity (week bughunt 2026-09-17
+	    // F15): recorded at park time so the resume can emit the FINAL
+	    // turn.terminal event under the id the client's ack returned.
+	    // Empty on legacy parked turns, which stay silent on resume.
+	    TurnID   string
+	    ParkedAt time.Time // when the turn was parked
 	}
 
 <a name="QuotaResumeWatcher"></a>
@@ -13361,7 +13405,37 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // ConversationStoreSize is the LRU capacity of the shared ConversationStore.
 	    // When <= 0, DefaultConversationStoreSize is used.
 	    ConversationStoreSize int
+	
+	    // GlobalRefusalModel is the global models.json5 refusal_model slot
+	    // (bughunt F5). When set, every registry-built agent loop inherits it as
+	    // the fallback of last resort in refusalFallbackRef (spec.RefusalModel
+	    // still outranks it). Empty = refusal fallback feature off unless the
+	    // per-agent spec sets its own RefusalModel.
+	    GlobalRefusalModel string
 	}
+
+<a name="RejectedCandidateLogger"></a>
+## type RejectedCandidateLogger
+
+RejectedCandidateLogger appends filtered\-out ambient candidates to a JSONL file under the memory data dir. Nil\-safe: a nil logger \(or an empty path\) disables logging entirely. Writes are serialized; each line is flushed on write so a daemon crash loses at most the in\-flight record.
+
+	type RejectedCandidateLogger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewRejectedCandidateLogger"></a>
+### func NewRejectedCandidateLogger
+
+	func NewRejectedCandidateLogger(dataDir string, log *slog.Logger) *RejectedCandidateLogger
+
+NewRejectedCandidateLogger creates a logger writing to \<dataDir\>/rejected\_candidates.jsonl. The directory is created on first write, not at construction, so a read\-only environment stays construction\-safe.
+
+<a name="RejectedCandidateLogger.LogRejected"></a>
+### func \(\*RejectedCandidateLogger\) LogRejected
+
+	func (r *RejectedCandidateLogger) LogRejected(intent string, threshold float64, rejected []rejectedCandidateRecord)
+
+LogRejected appends the given filtered\-out candidates. Best\-effort: an unwritable path logs a warning once per writer and stops attempting \(a broken calibration log must never break extraction\).
 
 <a name="ReplyFuncSetter"></a>
 ## type ReplyFuncSetter
@@ -15817,6 +15891,13 @@ ScheduleReadySteps finds ready steps for a task and enqueues them as jobs. Steps
 
 SelectAgentForHint exports selectAgent so the tactical orchestrator \(and other callers outside the agent package\) can pick an executor agent ID for a tool hint without constructing a full TaskStep.
 
+<a name="TacticalScheduler.SetBurstDetector"></a>
+### func \(\*TacticalScheduler\) SetBurstDetector
+
+	func (ts *TacticalScheduler) SetBurstDetector(det *metrics.BurstDetector)
+
+SetBurstDetector wires the tool\-failure burst detector \(issue \#43\) into the task\-failure path \(F29, 2026\-09\-17 bughunt\). nil is ignored. The daemon composition sets this alongside the dispatcher's detector so hard step failures reach the detector; without it the detector only ever saw ok/corrected resolutions and real failure bursts were invisible.
+
 <a name="TacticalScheduler.SetContextWindowProvider"></a>
 ### func \(\*TacticalScheduler\) SetContextWindowProvider
 
@@ -17529,7 +17610,7 @@ AttachTask records the orchestrator task created for a turn. No\-op when the tur
 
 	func (r *TurnRegistry) Complete(turnID string)
 
-Complete removes a finished turn from tracking. No\-op when the turn is unknown.
+Complete removes a finished turn from tracking and tombstones its id \(F16\): a same\-turn\-id retry arriving after the terminal event must be suppressed by Register, not re\-executed. The tombstone set is bounded — inserting beyond turnRegistryTombstoneCap evicts the OLDEST entry. No\-op when the turn is unknown.
 
 <a name="TurnRegistry.Register"></a>
 ### func \(\*TurnRegistry\) Register
@@ -17537,6 +17618,8 @@ Complete removes a finished turn from tracking. No\-op when the turn is unknown.
 	func (r *TurnRegistry) Register(turnID, conversationID string) bool
 
 Register tracks a newly submitted turn. Idempotent on turnID: when the turn is already registered it returns existing=true and the ORIGINAL record is preserved untouched \(retry dedupe — never overwrite\).
+
+Completed\-tombstone \(F16\): an id whose turn already reached a terminal state also returns existing=true WITHOUT re\-registering — a same\-turn\-id retry after completion must not re\-execute the finished work; the caller answers "already submitted; result arrives via turn.terminal".
 
 <a name="TurnRegistry.Stale"></a>
 ### func \(\*TurnRegistry\) Stale

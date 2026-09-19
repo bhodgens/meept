@@ -36,6 +36,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func AmbientCandidateGrammar\(\) string](<#AmbientCandidateGrammar>)
 - [func AttachGrammar\(reqPayload map\[string\]any, mode string, g string\)](<#AttachGrammar>)
 - [func AttachUsageStore\(chatter Chatter, store \*appmetrics.Store\)](<#AttachUsageStore>)
+- [func AttachUsageToRefusal\(refusal \*RefusalError, usage TokenUsage\)](<#AttachUsageToRefusal>)
 - [func BackoffWithJitter\(delay time.Duration, maxDelay time.Duration, useJitter bool\) time.Duration](<#BackoffWithJitter>)
 - [func BuildModelsInUse\(agents \[\]AgentModelRef, slots ModelSlots, aliases map\[string\]ModelAliasEntry, disabled \[\]string\) map\[string\]struct\{\}](<#BuildModelsInUse>)
 - [func CatalogSnapshot\(\) map\[string\]\[\]ModelCatalogEntry](<#CatalogSnapshot>)
@@ -58,6 +59,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func GrammarForTools\(defs \[\]ToolDefinition\) \(string, bool\)](<#GrammarForTools>)
 - [func HasImageParts\(parts \[\]ContentPart\) bool](<#HasImageParts>)
 - [func HasUndescribedImages\(parts \[\]ContentPart\) bool](<#HasUndescribedImages>)
+- [func IsContextOverflowError\(err error\) bool](<#IsContextOverflowError>)
 - [func IsLoopbackBaseURL\(baseURL string\) bool](<#IsLoopbackBaseURL>)
 - [func IsNonRetryable\(err error\) bool](<#IsNonRetryable>)
 - [func IsQuotaResetError\(err error\) bool](<#IsQuotaResetError>)
@@ -71,6 +73,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func ParsePIDFile\(path string\) \(int, error\)](<#ParsePIDFile>)
 - [func ParseRetryAfter\(header http.Header\) \(date time.Time, delta time.Duration, present bool\)](<#ParseRetryAfter>)
 - [func PriorityOf\(opts \[\]ChatOption\) bool](<#PriorityOf>)
+- [func ProcedureGrammar\(\) string](<#ProcedureGrammar>)
 - [func Ptr\[T any\]\(v T\) \*T](<#Ptr>)
 - [func QuotaCredentialKey\(providerID string, cfg \*ModelConfig\) string](<#QuotaCredentialKey>)
 - [func RawGrammarOf\(opts \[\]ChatOption\) string](<#RawGrammarOf>)
@@ -291,6 +294,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(f \*ContextFirewall\) Chat\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#ContextFirewall.Chat>)
   - [func \(f \*ContextFirewall\) ChatWithDeltaCallback\(ctx context.Context, messages \[\]ChatMessage, onDelta DeltaCallback, opts ...ChatOption\) \(\*Response, error\)](<#ContextFirewall.ChatWithDeltaCallback>)
   - [func \(f \*ContextFirewall\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#ContextFirewall.ChatWithProgress>)
+  - [func \(f \*ContextFirewall\) CompactForOverflow\(ctx context.Context, messages \[\]ChatMessage\) \(\[\]ChatMessage, bool\)](<#ContextFirewall.CompactForOverflow>)
   - [func \(f \*ContextFirewall\) Compress\(ctx context.Context, messages \[\]ChatMessage\) \(CompressionResult, error\)](<#ContextFirewall.Compress>)
   - [func \(f \*ContextFirewall\) Config\(\) \*ModelConfig](<#ContextFirewall.Config>)
   - [func \(f \*ContextFirewall\) ContextUtilization\(messages \[\]ChatMessage\) float64](<#ContextFirewall.ContextUtilization>)
@@ -300,6 +304,12 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(f \*ContextFirewall\) Stats\(\) FirewallStats](<#ContextFirewall.Stats>)
   - [func \(f \*ContextFirewall\) ValidateContextSize\(messages \[\]ChatMessage\) error](<#ContextFirewall.ValidateContextSize>)
 - [type ContextFirewallConfig](<#ContextFirewallConfig>)
+- [type ContextOverflowError](<#ContextOverflowError>)
+  - [func AsContextOverflowError\(err error\) \(\*ContextOverflowError, bool\)](<#AsContextOverflowError>)
+  - [func DetectContextOverflowFromBody\(providerID, modelID string, statusCode int, body string\) \*ContextOverflowError](<#DetectContextOverflowFromBody>)
+  - [func \(e \*ContextOverflowError\) Error\(\) string](<#ContextOverflowError.Error>)
+  - [func \(e \*ContextOverflowError\) NonRetryable\(\) bool](<#ContextOverflowError.NonRetryable>)
+  - [func \(e \*ContextOverflowError\) Unwrap\(\) error](<#ContextOverflowError.Unwrap>)
 - [type ContextSizeExceededError](<#ContextSizeExceededError>)
   - [func \(e \*ContextSizeExceededError\) Error\(\) string](<#ContextSizeExceededError.Error>)
   - [func \(e \*ContextSizeExceededError\) NonRetryable\(\) bool](<#ContextSizeExceededError.NonRetryable>)
@@ -1263,6 +1273,13 @@ For json\_schema mode g should be the JSON\-encoded schema produced by JSONSchem
 
 AttachUsageStore attaches the store to a Chatter when the underlying client implements UsageStoreAttacher. No\-op otherwise \(unknown Chatter implementations keep their current behavior\). Nil\-safe.
 
+<a name="AttachUsageToRefusal"></a>
+## func AttachUsageToRefusal
+
+	func AttachUsageToRefusal(refusal *RefusalError, usage TokenUsage)
+
+AttachUsageToRefusal stamps the provider\-reported usage onto a refusal error \(bughunt F12\). Callers record the usage row \(recordUsageStore / metrics\) BEFORE returning the refusal so a refused call still bills its consumed tokens; this helper keeps the error itself truthful when a parse site has usage in hand but records separately. Nil refusal is a no\-op.
+
 <a name="BackoffWithJitter"></a>
 ## func BackoffWithJitter
 
@@ -1434,6 +1451,13 @@ HasImageParts returns true if any part in the slice is an image\_url type.
 
 HasUndescribedImages returns true if any image part lacks a Description OR has its AnalysisFailed flag set \(meaning a prior vision pre\-flight attempt failed and should be retried on a subsequent turn\).
 
+<a name="IsContextOverflowError"></a>
+## func IsContextOverflowError
+
+	func IsContextOverflowError(err error) bool
+
+IsContextOverflowError reports whether err is \(or wraps\) a \*ContextOverflowError.
+
 <a name="IsLoopbackBaseURL"></a>
 ## func IsLoopbackBaseURL
 
@@ -1544,6 +1568,20 @@ Try order is spec order first — delta\-seconds, IMF\-fixdate, RFC850, asctime,
 
 PriorityOf reports whether the given options mark the turn INTERACTIVE for model\-slot acquisition \(tree 04 leaf 03, D11\). It is the inspection counterpart of WithPriority: a priority\-less \(nil / empty\) option slice or one never passing WithPriority reads as false \(background\), which is exactly how the client's acquire path treats such callers. Test\-facing seam for callers that stub the Chatter and assert on option contents.
 
+<a name="ProcedureGrammar"></a>
+## func ProcedureGrammar
+
+	func ProcedureGrammar() string
+
+ProcedureGrammar returns the GBNF grammar forcing the distill procedure JSON object — exactly the shape internal/memory's EncodeProcedure / DecodeProcedure \(via normalizeDistillPayload\) accepts as its primary contract \(a single bare object, no wrapper\). Declared keys:
+
+	title         string            (required — the procedure title)
+	steps         array of strings  (required — the how-to steps)
+	trigger_hints array of strings  (optional — evidence/close shape)
+	
+
+Mirrors LessonGrammar's shape \(bughunt F28\): without it, procedure distillation was forced through the LESSON grammar, so every constrained procedure response failed grammar validation and blocked the distill queue. The system prompt caps steps at 20 \(MaxProcedureSteps\); GBNF cannot count, so the cap stays a post\-parse check. Pair with WithRawGrammar \(llama.cpp wire format, local endpoints only\). Never returns an empty string.
+
 <a name="Ptr"></a>
 ## func Ptr
 
@@ -1586,6 +1624,8 @@ list and signal are seams: nil means the real ps scan and the real process\-grou
 	func RemoveRuntimeHandlesForPids(cfgs []*RuntimeConfig, records []SpawnRecord, pids []int)
 
 RemoveRuntimeHandlesForPids removes the PID file and durable spawn record of every handle that still names one of pids — the pids a reap CONFIRMED gone \(never a candidate\). A config carries no pid, so the PID file itself is the only link; a durable record carries the pid it spawned, which is the link that survives config drift. Best\-effort: a removal failure is diagnostic only, and a handle naming a pid that is NOT in pids is left alone \(a concurrent Start may have rewritten it for a fresh runtime\).
+
+The pids arrive from a SNAPSHOT taken earlier in the sweep \(detection → reap\), and a health\-driven restart or a CLI \`runtime start\` can have installed a REPLACEMENT runtime behind the same PID file path in that window \(audit finding F26\). removeHandle therefore re\-reads the PID file immediately before each removal and skips when its content no longer names the snapshot pid — mirroring ReapRuntimeProcesses' re\-validation before the signal, on the handle\-removal side. The .cmd record removal follows the same check: a record whose pid differs from the snapshot belongs to the replacement.
 
 <a name="RemoveSpawnRecord"></a>
 ## func RemoveSpawnRecord
@@ -3505,6 +3545,13 @@ ChatWithDeltaCallback sends a request with streaming delta callback through cont
 
 ChatWithProgress sends a request with progress reporting through context filtering.
 
+<a name="ContextFirewall.CompactForOverflow"></a>
+### func \(\*ContextFirewall\) CompactForOverflow
+
+	func (f *ContextFirewall) CompactForOverflow(ctx context.Context, messages []ChatMessage) ([]ChatMessage, bool)
+
+CompactForOverflow applies AGGRESSIVE context reduction after a provider rejected the request for exceeding the model's context window \(F\-A1\). It is deliberately LLM\-free: the overflowing model may be unable to serve ANY request reliably right now, so the restart\-summary path is not used — reduction is purely structural: the wired compactor \(if any\), then dropOldContext \(system prompt \+ tool\-paired recent tail\). Returns the reduced messages and whether anything was actually trimmed; false means the context is already minimal and a retry cannot help.
+
 <a name="ContextFirewall.Compress"></a>
 ### func \(\*ContextFirewall\) Compress
 
@@ -3602,6 +3649,54 @@ ContextFirewallConfig configures context budget and summarization behavior.
 	    // "restart" (summarize full conversation, fresh context). Default: "restart".
 	    OverflowStrategy string
 	}
+
+<a name="ContextOverflowError"></a>
+## type ContextOverflowError
+
+ContextOverflowError is a typed provider verdict that the request exceeded the model's context window. It is fundamentally different from a 5xx server fault: retrying the SAME payload is hopeless — the request only shrinks by trimming context. Like QuotaResetError/RefusalError it is NonRetryable, so every client short\-retry loop must early\-exit on it BEFORE the retryable\-status checks; recovery \(aggressive compaction \+ a single retry\) is the agent loop's decision, not the transport's.
+
+	type ContextOverflowError struct {
+	    ProviderID string
+	    ModelID    string
+	    Message    string // raw body detail, truncated to 500 chars
+	    StatusCode int    // HTTP status reported by the provider (500/400/...)
+	    Cause      error
+	}
+
+<a name="AsContextOverflowError"></a>
+### func AsContextOverflowError
+
+	func AsContextOverflowError(err error) (*ContextOverflowError, bool)
+
+AsContextOverflowError returns the \*ContextOverflowError in err's chain, mirroring AsQuotaResetError \(errors\_quota.go\).
+
+<a name="DetectContextOverflowFromBody"></a>
+### func DetectContextOverflowFromBody
+
+	func DetectContextOverflowFromBody(providerID, modelID string, statusCode int, body string) *ContextOverflowError
+
+DetectContextOverflowFromBody classifies a provider error body as a context overflow when it carries one of the conservative case\-insensitive markers. Match =\> \*ContextOverflowError with the status code and the truncated body detail; no match =\> nil. Called at the same non\-OK body\-scan sites as DetectRefusalFromBody, placed BEFORE the retryable\-status\-code classification so a 500 overflow body never becomes a retryable \*APIError.
+
+<a name="ContextOverflowError.Error"></a>
+### func \(\*ContextOverflowError\) Error
+
+	func (e *ContextOverflowError) Error() string
+
+
+
+<a name="ContextOverflowError.NonRetryable"></a>
+### func \(\*ContextOverflowError\) NonRetryable
+
+	func (e *ContextOverflowError) NonRetryable() bool
+
+NonRetryable returns true so the client short\-retry loops exit immediately.
+
+<a name="ContextOverflowError.Unwrap"></a>
+### func \(\*ContextOverflowError\) Unwrap
+
+	func (e *ContextOverflowError) Unwrap() error
+
+
 
 <a name="ContextSizeExceededError"></a>
 ## type ContextSizeExceededError
@@ -5979,7 +6074,13 @@ RefusalError is a typed model refusal: the provider \(or its safety layer\) decl
 	    FinishReason string // raw signal: "refusal", "content_filter", or ""
 	    Message      string // provider detail, truncated to 500 chars
 	    StatusCode   int    // HTTP status when from an error body; 0 otherwise
-	    Cause        error
+	    // Usage carries the token usage the provider reported for the refused
+	    // call (bughunt F12). A refusal still consumed prompt (+ often output)
+	    // tokens — budget accounting and the metrics.db llm_calls ledger must
+	    // record them instead of silently dropping the row. Zero value when the
+	    // provider reported no usage.
+	    Usage TokenUsage
+	    Cause error
 	}
 
 <a name="DetectRefusal"></a>
@@ -5992,7 +6093,7 @@ DetectRefusal maps a finish/stop reason signal onto a \*RefusalError. Triggers, 
 - "refusal" =\> Source "stop\_reason" \(Anthropic\)
 - "content\_filter" =\> Source "finish\_reason" \(OpenAI\-compatible\)
 
-Anything else \(including ""\) returns nil. Empty modelID is allowed \(streaming paths may not have it\); fill from context when known.
+Anything else \(including ""\) returns nil. Empty modelID is allowed \(streaming paths may not have it\); fill from context when known. The provider\-reported usage rides along \(bughunt F12\): a refused call still consumed tokens and the usage ledger must record them.
 
 <a name="DetectRefusalFromBody"></a>
 ### func DetectRefusalFromBody
@@ -6559,6 +6660,8 @@ ValidateAndNormalize validates the config and expands paths. Supports both legac
 	func (c *RuntimeConfig) Supervised() bool
 
 Supervised reports whether this runtime must be spawned under the supervisor process. An absent value \(nil, i.e. every literal\-constructed config\) means true: only an explicit false opts out. A nil config manages no runtime and reports false.
+
+Precedence note \(audit finding F24\): ValidateAndNormalize resolves the default\-on supervision to an explicit false when the lifecycle also sets auto\_stop\_on\_exit:false WITHOUT an explicit supervise key — a default must not defeat an explicit preserve opt\-out. Only the config\-file resolution applies that rule; a literal\-constructed RuntimeConfig \(CLI flags, internal callers\) that sets AutoStop=false by hand keeps whatever Supervise says.
 
 <a name="RuntimeLifecycleConfig"></a>
 ## type RuntimeLifecycleConfig

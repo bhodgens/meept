@@ -683,6 +683,14 @@ Meept implements a multi-tiered memory architecture with different storage backe
 - **ConsolidationBackend interface**: Pluggable storage backends for consolidation — `SQLiteConsolidationBackend` (default) and `MemvidConsolidationBackend` for distributed memory
 - Configurable consolidation interval
 
+#### Memory Extraction Pipeline (ambient + distill)
+- **Dedicated model slot**: `memory_model` in models.json5 routes ambient epistemic extraction and lesson distillation to their own model, isolated from the general chat client (fallback: general client when unset)
+- **Grammar-constrained output**: ambient candidates and lesson objects are forced to schema-exact JSON via GBNF on local llama.cpp endpoints (cloud providers never see the wire field); parser tolerates wrapper objects, markdown fences, and prose around the array
+- **Three-band confidence disposal**: candidates below `reject_below` (default 0 = disabled; measured optimum 0.3) are hard-dropped as decoy activations and logged; everything else is stored as `status=auto` for librarian review — the confidence threshold no longer drops candidates (calibration showed the middle band is 33% correct)
+- **Calibration data collection**: rejected candidates, raw (prompt, response) pairs, and promote/reject verdicts persist to size-capped JSONL logs (10 MiB, one rotated generation) in the memory data dir — the confidence-vs-verdict dataset for recalibrating disposal bands on live traffic
+
+**Learn more:** [Memory Workflows](workflows/memory.md), [Memory Eval Harness](../tools/memory-eval/)
+
 **Configuration:**
 ```toml
 [memory]
