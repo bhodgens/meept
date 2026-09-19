@@ -73,7 +73,7 @@
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
-        "line": 7374,
+        "line": 7566,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -84,7 +84,7 @@
     "agent.iteration.completed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 7582,
+        "line": 7774,
         "payload_keys": [
           "agent_id",
           "conversation_id",
@@ -96,7 +96,7 @@
     "agent.lifecycle.ended": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2629,
+        "line": 2680,
         "payload_keys": [],
         "via_const": true
       }
@@ -104,7 +104,7 @@
     "agent.lifecycle.started": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2569,
+        "line": 2620,
         "payload_keys": [],
         "via_const": true
       }
@@ -130,7 +130,7 @@
     "agent.progress": [
       {
         "file": "internal/agent/loop.go",
-        "line": 7439,
+        "line": 7631,
         "payload_keys": [
           "detail",
           "iteration",
@@ -141,7 +141,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 7493,
+        "line": 7685,
         "payload_keys": [
           "conversation_id",
           "detail",
@@ -171,7 +171,7 @@
     "agent.queue.followup.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 7564,
+        "line": 7756,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -208,7 +208,7 @@
     "agent.queue.steer.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 7540,
+        "line": 7732,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -226,7 +226,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 2093,
+        "line": 2135,
         "payload_keys": []
       },
       {
@@ -238,7 +238,7 @@
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
-        "line": 7404,
+        "line": 7596,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -249,7 +249,7 @@
     "agent.state.changed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2082,
+        "line": 2124,
         "payload_keys": [],
         "via_const": true
       }
@@ -566,7 +566,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2361,
+        "line": 2389,
         "payload_keys": [
           "event"
         ]
@@ -575,7 +575,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2018,
+        "line": 2046,
         "payload_keys": [
           "event"
         ]
@@ -685,7 +685,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
-        "line": 7513,
+        "line": 7705,
         "payload_keys": [
           "conversation_id",
           "total_tokens"
@@ -768,7 +768,7 @@
     "orchestrator.replan": [
       {
         "file": "internal/agent/ralph_loop.go",
-        "line": 375,
+        "line": 380,
         "payload_keys": [
           "context",
           "iteration",
@@ -791,7 +791,7 @@
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 1603,
+        "line": 1584,
         "payload_keys": [],
         "via_helper": true
       },
@@ -803,7 +803,7 @@
       },
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2671,
+        "line": 2699,
         "payload_keys": [
           "task_id"
         ],
@@ -1678,7 +1678,7 @@
     "session.title_updated": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8579,
+        "line": 8771,
         "payload_keys": [
           "description",
           "name",
@@ -1840,7 +1840,7 @@
     "task.approved": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1597,
+        "line": 1578,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1929,7 +1929,7 @@
     "task.failed": [
       {
         "file": "internal/agent/ralph_loop.go",
-        "line": 493,
+        "line": 498,
         "payload_keys": [
           "completed_jobs",
           "failed_jobs",
@@ -2036,7 +2036,7 @@
     "task.pending_approval": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1507,
+        "line": 1488,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2090,7 +2090,7 @@
     "task.rejected": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1633,
+        "line": 1614,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2420,7 +2420,7 @@
     "*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 2820,
+        "line": 2828,
         "subscriber_id": "session.sessionID"
       }
     ],
