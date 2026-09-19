@@ -1,0 +1,49 @@
+{
+  "phase": 2,
+  "frozen_at": "2026-09-19T13:36:35.282542",
+  "suite_sha256": "752443b0ab9de9055bbc11eb91b5ba8690a7abf8ffbcb6eaaeb229ba9a6389c2",
+  "n_cases": 48,
+  "measurement": "per-case routing evidence (expect_agent + expect_intent) via leaf-01 RoutingObservation, single dispatch per fresh session",
+  "verdict_rule": {
+    "case_pass": "all routing checks pass for the case (expect_agent AND expect_intent, from leaf-01 RoutingObservation, evidence_status=available)",
+    "policy_score": "routed_correct / 48 (every case gets a live dispatch verdict; abstention is not possible live, so routed == 48 or the case is an error row and excluded with an explicit count)",
+    "bands": [
+      {
+        "verdict": "PASS",
+        "range": ">= 0.80",
+        "meaning": "live chain landing beats the modeled 0.868-era bar with real answers"
+      },
+      {
+        "verdict": "MARGINAL",
+        "range": "0.60 - 0.79",
+        "meaning": "measurement valid; policy needs lane work (expected: quickplan/review/code boundary variance on the 8B)"
+      },
+      {
+        "verdict": "FAIL",
+        "range": "< 0.60",
+        "meaning": "live chain landing is not acceptance-grade"
+      }
+    ],
+    "amendment": {
+      "when": "2026-09-19T14:06:29.787678",
+      "what": "replaced flat pass bar >= 0.80 with graded PASS/MARGINAL/FAIL bands",
+      "why": "0.80 anchored to the manufactured 0.868-era constant; pre-phase-2 evidence (phase-1 routed 7/9=0.778, live acceptance 5/8=0.625, 20/48 quickplan mix) makes a flat bar a near-certain FAIL regardless of policy merit; bands set BEFORE any phase-2 observation per the pre-registration rule",
+      "error_rows": "cases with evidence_status != available are counted separately and excluded from the denominator; if >10% of cases are error rows the run itself is INVALID"
+    }
+  },
+  "chain_constant": "NOT used \u2014 this phase measures actual chain landing, replacing the 0.868 reference",
+  "intents": {
+    "review": 10,
+    "quickplan": 20,
+    "plan": 3,
+    "code": 4,
+    "analyze": 3,
+    "debug": 2,
+    "git": 5,
+    "platform": 1
+  },
+  "model": "local 8B LFM2.5-8B-A1B-Q4_K_M on llama.cpp (scratch rig, same recipe as the 2026-09-18 acceptance passes)",
+  "daemon_sha256": "d40990f1d3bed98b7e2f0a14783e44172463ed19994410c34056ffc5f7e18779",
+  "rig_root": "/private/tmp/routing-smoke-n9ly4n3g",
+  "meept_head": "366ce236994a7772987ae2f46ff1d8999c866e05"
+}
