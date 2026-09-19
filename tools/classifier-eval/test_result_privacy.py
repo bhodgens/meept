@@ -36,6 +36,12 @@ PRODUCERS_JSON_MISSES = ("iter20_cascade_v2", "iter20_cascade_v2b",
                          "validate_silver")
 # Producer whose miss excerpts go to stdout only (result dict has no misses).
 PRODUCER_STDOUT_MISSES = "iter19_quickplan_cascade"
+# Producers that cache per-case records over the private replay corpus.
+# iter20c_sweep stores case keys + probe vectors in ``cases_cache``;
+# iter18_misscheck resolves hardcoded-style miss keys to corpus text only
+# inside main(). Neither may carry raw input excerpts in module or cache
+# state after a run.
+PRODUCERS_CASE_CACHE = ("iter20c_sweep", "iter18_misscheck")
 
 
 def _sentinel() -> str:
@@ -66,6 +72,16 @@ def _dotted_name(node):
     return tuple(reversed(parts))
 
 
+def _is_const_literal(node):
+    """True for constants and (nested) tuple/list/frozenset-of-constant
+    literals -- the shapes allowed as module-level identifier tables."""
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return bool(node.elts) and all(_is_const_literal(e) for e in node.elts)
+    return False
+
+
 def _load_producer(modname):
     src = (TOOLS_DIR / f"{modname}.py").read_text()
     for node in ast.parse(src).body:
@@ -77,6 +93,11 @@ def _load_producer(modname):
         if not ok and isinstance(node, ast.Assign) and \
                 isinstance(node.value, ast.Constant):
             ok = True
+        if not ok and isinstance(node, ast.Assign) and \
+                isinstance(node.value, (ast.Tuple, ast.List)) and \
+                node.value.elts and \
+                all(_is_const_literal(e) for e in node.value.elts):
+            ok = True  # tuple/list of constants (identifier tables)
         if not ok and isinstance(node, ast.AnnAssign) and \
                 node.value is not None and isinstance(node.value, ast.Constant):
             ok = True
@@ -269,6 +290,59 @@ class TestIter19QuickplanCascade(ProducerPrivacyContract):
             "tau": 0.421,
         }
         self.assertEqual(res, expected)
+
+
+# --------------------------------------------------------------------------
+# Case-cache producers: no raw excerpt may reach the per-case cache, the
+# module namespace, or the module source (routing-repair leaf 01 follow-up).
+# --------------------------------------------------------------------------
+
+class TestCaseCacheProducers(unittest.TestCase):
+    """iter20c_sweep / iter18_misscheck redaction contract."""
+
+    def test_case_cache_producers_are_import_safe(self):
+        for modname in PRODUCERS_CASE_CACHE:
+            with self.subTest(mod=modname):
+                self.assertIsNotNone(_load_producer(modname))
+                mod = sys.modules[modname]
+                self.assertTrue(callable(getattr(mod, "main", None)),
+                                f"{modname}.py must keep execution behind main()")
+
+    def test_iter20c_cache_entry_holds_case_key_not_excerpt(self):
+        import iter20c_sweep as sweep
+        s = _sentinel()
+        entry = sweep.cache_entry(s, "git", None, False)
+        self.assertEqual(entry["input_case_key"], H.case_key(s))
+        self.assertEqual(entry["true"], "git")
+        self.assertEqual(entry["a_lab"], None)
+        self.assertEqual(entry["cue"], False)
+        blob = json.dumps(entry)
+        self.assertNotIn(s, blob, "raw sentinel leaked through cases_cache entry")
+        for key in entry:
+            self.assertNotIn("text", key.lower(),
+                             "excerpt hidden in a text-named cache field")
+
+    def test_iter18_miss_keys_do_not_embed_private_text(self):
+        import iter18_misscheck as mc
+        src = (TOOLS_DIR / "iter18_misscheck.py").read_text()
+        expected_keys = {k for k, _, _ in mc.MISS_KEYS}
+        self.assertEqual(len(expected_keys), 3,
+                         "three silver-miss case keys expected")
+        for k in expected_keys:
+            self.assertRegex(k, r"^[0-9a-f]{16}$",
+                             "miss identifier must be a case key")
+        # resolve-from-corpus path: the source must not contain any
+        # prefix of a resolved private text (prefixes are derived from
+        # the local corpus at run time -- nothing private is embedded
+        # in this test file).
+        texts = mc.load_miss_texts()
+        self.assertTrue(texts, "miss keys must resolve against the corpus")
+        for k, t in texts.items():
+            self.assertEqual(H.case_key(t), k,
+                             f"corpus text {k} does not resolve to its key")
+            self.assertNotIn(t[:30], src,
+                             f"private excerpt prefix leaked into source ({k})")
+            self.assertNotIn(t, src)
 
 
 # --------------------------------------------------------------------------
