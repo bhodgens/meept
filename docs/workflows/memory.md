@@ -90,6 +90,22 @@ loses real memory. Measured optimum for `reject_below` is 0.3 (below it
 candidates are overwhelmingly decoy activations); recalibrate on live
 verdicts (`claim_verdicts.jsonl`) before adjusting.
 
+### Calibration Data Collection
+
+Three JSONL logs in the memory data dir feed the confidence-calibration
+loop:
+
+- `rejected_candidates.jsonl` — candidates dropped by any gate, with the
+  drop reason (`reject_band`, `confidence`, `category`, `max_per_turn`)
+- `claim_verdicts.jsonl` — librarian promote/reject verdicts paired with
+  the claim's extraction-time confidence
+- `raw_responses.jsonl` — raw (prompt, response) pairs per classifier
+  call, for extraction-model training
+
+All three are size-capped at 10 MiB with one rotated generation
+(`<name>.jsonl.1`). They contain raw conversation text: they live outside
+the repo and are gitignored — never commit them.
+
 ### Claim Temporal Validity
 
 Claims carry optional temporal bounds and a monotonic revision counter.
