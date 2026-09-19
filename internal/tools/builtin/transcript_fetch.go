@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // Default configuration values for TranscriptFetchTool.
@@ -312,6 +315,25 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 	if err != nil {
 		return nil, err
 	}
+	// Evidence emission (plan 20260917-routing-repair): peers attach
+	// verification-grade Evidence to every success (shell.go: process_exit +
+	// shell_output hash; file_write: file_exists + file_hash). transcript_fetch
+	// mirrors that with transcript_fetched (requested URL + byte count) and
+	// transcript_hash (sha256 of the FULL pre-pagination text), both joined to
+	// the requested URL as typed by the caller. The executor's
+	// publishToolComplete copies Evidence verbatim into tool.execution.complete,
+	// whose payload already carries conversation_id (executor.KeyConversationID)
+	// — that field IS the turn-to-tool join for single-turn sessions, so a
+	// checker can verify THIS turn fetched THIS URL without a new payload key.
+	// Failures return before this point and carry no evidence (a failed fetch
+	// never claims one happened).
+	fetchedEvidence := []models.Evidence{
+		models.NewEvidence(models.EvidenceTranscriptFetched, p.URL, fmt.Sprintf("chars=%d", len(text)), t.Name()),
+	}
+	sum := sha256.Sum256([]byte(text))
+	fetchedEvidence = append(fetchedEvidence, models.NewEvidence(
+		models.EvidenceTranscriptHash, p.URL, hex.EncodeToString(sum[:]), t.Name(),
+	))
 	// File-backed output: write the FULL formatted text to disk before
 	// any pagination slicing, so the file is byte-identical to the text
 	// the caller paginates. Write failure is a hard error — no silent
@@ -362,6 +384,7 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 		// untrusted-derived data (same discipline as json_extract).
 		tr := tools.NewSuccessResult(result)
 		tr.TaintLabel = taint.TaintExternal
+		tr.Evidence = fetchedEvidence
 		return tr, nil
 	}
 	// Pagination slices the FORMATTED text (timestamps included), so
@@ -440,6 +463,7 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 	// M8-taint: external YouTube content on the pagination path too.
 	tr := tools.NewSuccessResult(result)
 	tr.TaintLabel = taint.TaintExternal
+	tr.Evidence = fetchedEvidence
 	return tr, nil
 }
 

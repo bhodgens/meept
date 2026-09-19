@@ -21,6 +21,14 @@ const (
 	EvidenceProcessExit EvidenceType = "process_exit"
 	// EvidenceShellOutput indicates shell command output (hashed for compactness).
 	EvidenceShellOutput EvidenceType = "shell_output"
+	// EvidenceTranscriptFetched indicates a media transcript was fetched.
+	// Subject is the requested URL/ID; Value is "chars=N", the fetched
+	// character count (routing-repair plan 20260917).
+	EvidenceTranscriptFetched EvidenceType = "transcript_fetched"
+	// EvidenceTranscriptHash indicates the sha256 hex hash of the FULL
+	// fetched transcript text (pre-pagination). Subject is the requested
+	// URL/ID, so a checker can verify THIS turn fetched THIS content.
+	EvidenceTranscriptHash EvidenceType = "transcript_hash"
 )
 
 // Evidence represents proof that a tool operation occurred successfully.
