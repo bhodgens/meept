@@ -326,5 +326,6 @@ control excluded by its blocked tags) on the isolated scratch rig
 - Suite SHA256 7535193e4ba4b74c9ef56133df0aec7218d49df3b356bf79c2510873cd360632;
   evidence_status=available on all 16 attempts (fresh_session_unique_dispatch).
 - Media control: BLOCKED (producer lacks turn/step-to-tool + URL/content evidence).
-  I13 stale graphs: still open, deferred pending clear ownership after the parallel
-  comm fix wave.
+- I13 stale graphs: CLOSED — cdc5b58b regenerated the graphs after the parallel fix
+  waves settled (10-minute-stable repo watch); line-offset drift only, no topology
+  change; `make graphs-check` is green.
