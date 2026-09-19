@@ -99,27 +99,27 @@ at 120s.
   2f56f190 (progress listener feeds pending turns).
 - MED — fresh ChatState in GUI error/system/reload branches dropped
   pendingTurns (F20 regression class). FIXED 2f56f190 (copyWith).
-- LOW (OPEN) — chat.response still relayed as agent_progress
+- LOW — chat.response still relayed as agent_progress
   (classification accident, not exclusion). FIXED de671eb2
   (deleg_935226b6/sa-1): transformBusEventToWS skips chat.response;
   pin TestTransformBusEventToWS_ChatResponseNotRelayed; WSClassParity
   table updated to the new intended behavior.
-- LOW (OPEN) — wsclass decoder gate only covers turn.terminal; future
+- LOW — wsclass decoder gate only covers turn.terminal; future
   typed topics silently regress to prefix classification. FIXED
   5b08d5d1 (deleg_935226b6/sa-2): TestEveryWSClassifiedHasDecoderEntry
   — expectation table + type-checker sweep of ./... so a new
   WSClassified implementer without a decoder entry fails the gate.
-- LOW (OPEN) — TUI F19 earlyTerminals buffer unbounded for
+- LOW — TUI F19 earlyTerminals buffer unbounded for
   never-registered turn ids. FIXED 84cfa548 (sa-1): capped
   (oldest-evicted), pin in scopes2_pins_test.go.
-- LOW (OPEN) — TUI ctrl+l/Reset orphan pendingTurns (cross-session
+- LOW — TUI ctrl+l/Reset orphan pendingTurns (cross-session
   terminals silently discarded). FIXED 84cfa548 (sa-1): both paths
   unregister pending turns; pin in scopes2_pins_test.go.
 - LOW (OPEN) — loadMessages() leaks _turnTerminalSubscription
   (no cancel before reassign; double-delivery after reload). Still
   OPEN — not in any dispatch's file scope (chat_provider.dart was
   sa-2's file, but this hunk was not assigned).
-- LOW (OPEN) — GUI hardcodes 120s liveness; TUI reads chat config.
+- LOW — GUI hardcodes 120s liveness; TUI reads chat config.
   FIXED 4f412d48 (deleg_935226b6/sa-2): ChatNotifier fetches
   chat.liveness_timeout_seconds from the existing
   GET /api/v1/config/client endpoint (0-disables semantics honored,
@@ -136,7 +136,13 @@ ConfigSnapshot/manager/registry/components all present.
 - MED — streaming refusal retry concatenates refused-partial +
   fallback tokens in the live text_so_far preview (no attempt-reset
   on the delta accumulator; the PM rotation path has attempt
-  tagging, the refusal path doesn't). OPEN — loop.go:5893.
+  tagging, the refusal path doesn't). FIXED 163af834
+  (deleg_c88ea801): handleRefusal bumps a streamAttemptEpoch atomic;
+  the live-preview accumulator snapshots the epoch at stream start
+  and resets on the first delta of a new attempt (loop-side mirror of
+  PM's DeltaCallbackWithAttempt). Tests:
+  TestRefusalFallback_StreamRetryResetsAccumulator,
+  TestRefusalFallback_StreamEpochResetsAccumulator_Unit.
 - MED — refused-call usage ledgered to llm_calls but never charged
   to Budget token/cost (F12's fix covered only the ledger half).
   FIXED f3e59605 (deleg_935226b6/sa-0): recordRefusalBudget charges
@@ -147,8 +153,13 @@ ConfigSnapshot/manager/registry/components all present.
 - MED — SpawnVerifier child loop missed WithGlobalRefusalModel +
   spec. FIXED 447d945c.
 - LOW (OPEN) — park/resume cycles reset the one-hop refusal budget
-  (one extra refused call per generation). Skipped by sa-0: clean fix
-  needs loop.go or loop_park.go access outside its file scope.
+  (one extra refused call per generation). FIXED 163af834
+  (deleg_c88ea801): refusalFallbackHops counter on the loop survives
+  park/resume (clearRefusalFreshTurnState does not clear it; reset
+  only on a genuinely fresh turn), and handleRefusal gives up at
+  hops >= 2, surfacing the original refusal. Tests:
+  TestRefusalFallback_HopBudgetSurvivesResume,
+  TestRefusalFallback_HopBudgetResetsOnGenuinelyFreshTurn.
 - LOW (OPEN) — openai refusal ledger rows mix cfg.ProviderID with
   refusal.ModelID when a cross-provider override refused.
   FIXED f3e59605 (refusalProviderOr prefers the refusal's stamped
