@@ -1,4 +1,4 @@
-import 'dart:convert';
+import '../../core/client_config_parse.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -84,39 +84,7 @@ const _prefs = <_Pref>[
   ),
 ];
 
-/// Parse the client config text returned by GET /api/v1/config/client.
-///
-/// The daemon stores JSON5; most real files are strict JSON so plain
-/// [jsonDecode] succeeds. When it does not (comments, trailing commas,
-/// unquoted keys), fall back to a conservative cleanup pass before
-/// retrying. Returns {} when nothing parses — the editor then shows
-/// defaults rather than crashing.
-Map<String, dynamic> parseClientConfig(String raw) {
-  Map<String, dynamic> tryDecode(String s) {
-    final v = jsonDecode(s);
-    if (v is Map<String, dynamic>) return v;
-    if (v is Map) return v.map((k, val) => MapEntry('$k', val));
-    throw const FormatException('not an object');
-  }
 
-  try {
-    return tryDecode(raw);
-  } catch (_) {}
-
-  var cleaned = raw
-      .replaceAll(RegExp(r'/\*.*?\*/', dotAll: true), '')
-      .replaceAll(RegExp(r'//[^\n]*'), '');
-  cleaned = cleaned.replaceFirst(RegExp(r'^[^\{]*'), '');
-  cleaned = cleaned.replaceAllMapped(
-    RegExp(r',\s*([}\]])'),
-    (m) => m.group(1)!,
-  );
-  cleaned = cleaned.replaceAllMapped(
-    RegExp(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:'),
-    (m) => '${m.group(1)}"${m.group(2)}":',
-  );
-  return tryDecode(cleaned);
-}
 
 /// Structured editor for GUI-relevant blocks of client.json5.
 ///

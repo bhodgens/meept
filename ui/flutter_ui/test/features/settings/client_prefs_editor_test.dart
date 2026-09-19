@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:meept_ui/core/client_config_parse.dart';
 import 'package:meept_ui/features/settings/client_prefs_editor.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/sdk_client.dart';
