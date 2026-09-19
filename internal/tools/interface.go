@@ -77,6 +77,11 @@ type ToolResult struct {
 	Err       error             `json:"-"` // Original typed error (when available) so callers can use errors.Is/As
 	Evidence  []models.Evidence `json:"evidence,omitempty"`
 	Terminate bool              `json:"terminate,omitempty"` // Advisory: hint that result is final and needs no LLM follow-up
+	// ErrCode is a machine-readable error class for failed results
+	// (e.g. "invalid_args" for registry-level schema validation failures).
+	// Zero value "" for every other path: purely additive, existing
+	// constructors are untouched.
+	ErrCode string `json:"err_code,omitempty"`
 	// TaintLabel records the provenance taint of the result payload.
 	// Tools that return data from untrusted sources (web fetches, shell
 	// output, etc.) set this so downstream policy checks can apply

@@ -4,6 +4,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/task"
@@ -64,7 +65,11 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	name, _ := args[schemaPropName].(string)
-	if name == "" {
+	// TrimSpace: a whitespace-only name previously PASSED this check and
+	// created a task named "  " — a silent no-op the 2026-09-18 boundary
+	// sweep caught (the registry gate rejects "  " as "empty", but the
+	// hand-rolled check is defense-in-depth and must agree).
+	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("name is required")
 	}
 

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -12,6 +13,11 @@ import (
 
 	"github.com/caimlas/meept/internal/llm"
 )
+
+// ErrCodeInvalidArgs is the machine-readable ErrCode stamped on tool-result
+// envelopes whose arguments failed the registry-level schema gate
+// (ValidateToolArgs) before the tool could run.
+const ErrCodeInvalidArgs = "invalid_args"
 
 // SchemaMode controls how tool definitions are exposed to the LLM.
 //
@@ -298,6 +304,27 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 	tool := r.Get(name)
 	if tool == nil {
 		return nil, fmt.Errorf("tool not found: %s", name)
+	}
+
+	// Registry-level boundary gate: the tool's own declared Required schema
+	// is server-enforced BEFORE Execute. A model that sends {} gets a typed
+	// ArgValidationError naming the argument (ErrCode "invalid_args") and
+	// the tool is never invoked — the 2026-09-18 e2e run showed 45 identical
+	// task_create{} calls because nothing structural stopped the loop.
+	if err := ValidateToolArgs(tool, args); err != nil {
+		var ae *ArgValidationError
+		if errors.As(err, &ae) {
+			r.logger.Warn("tool arguments failed schema validation",
+				"name", name,
+				"arg", ae.Arg,
+				"problem", ae.Problem,
+			)
+		} else {
+			r.logger.Warn("tool arguments failed validation", "name", name, "error", err)
+		}
+		res := NewErrorResultErr(err)
+		res.ErrCode = ErrCodeInvalidArgs
+		return res, nil
 	}
 
 	r.logger.Debug("executing tool",
