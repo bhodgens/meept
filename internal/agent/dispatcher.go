@@ -2649,6 +2649,20 @@ func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memC
 		// stays compound.
 		if actionable == 2 && multi.IsCompound {
 			primary, secondary := reportReadbackIntents(multi.Intents)
+			if primary == nil || secondary == nil {
+				// Diagnostic (2026-09-19 live e2e): the readback arm did not
+				// fire; log the above-floor intent set so live runs reveal
+				// which shape missed (e.g. report not second by confidence).
+				names := make([]string, 0, len(multi.Intents))
+				for _, it := range multi.Intents {
+					if it.Confidence >= compoundIntentConfidenceFloor {
+						names = append(names, fmt.Sprintf("%s@%.2f", it.Type, it.Confidence))
+					}
+				}
+				d.logger.Info("Report-readback arm considered; intent shape",
+					"intents", strings.Join(names, ","),
+				)
+			}
 			if primary != nil && secondary != nil {
 				actionClause, reportClause, ok := splitReportReadbackClauses(input)
 				if ok && classifyReportTagAlong(actionClause, reportClause) {
