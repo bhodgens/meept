@@ -1131,6 +1131,18 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 		)
 		return false
 	}
+	// Plan-vacuity guard (leaf 03, 20260918-tool-boundary-hardening; e2e
+	// 2026-09-18): a planner-hint step whose result is pure first-person
+	// future-intent narration ("I will...", "Let me...") with zero
+	// task-management tool evidence and no structured plan artifact is
+	// VACUOUS — approving it lets a doomed loop continue. The gate is
+	// against SILENT auto-approval: the step routes to the full reviewer,
+	// which may still approve with justification.
+	if planLooksVacuous(step) {
+		rm.logger.Warn("Heuristic review: vacuous plan result (narration only); refusing auto-approve",
+			"step_id", step.ID, "tool_hint", step.ToolHint)
+		return false
+	}
 	return true
 }
 
