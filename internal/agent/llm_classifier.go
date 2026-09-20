@@ -269,7 +269,12 @@ var intentThresholds = map[string]float64{
 	string(IntentResearch): 0.55,
 	string(IntentSecurity): 0.70,
 	string(IntentSearch):   0.60,
-	string(IntentChat):     0.50,
+	// Chat is the catch-all: an 8B emits 0.9+ confidence on every lane it lands
+	// in (run-to-run T1 wandered chat/compound/quickplan), so a routine 0.9
+	// chat verdict must NOT outrank a keyword code match on an imperative
+	// prompt. 0.85 keeps genuine small talk (high-confidence) while letting
+	// the keyword/heuristic chain route imperative work.
+	string(IntentChat):     0.85,
 }
 
 var agentMapping = map[string]string{
@@ -720,9 +725,14 @@ func (c *LLMClassifier) buildClassificationPrompt(input string) string {
 
 func (c *LLMClassifier) getIntentDescription(intent string) string {
 	descriptions := map[string]string{
-		string(IntentGit):       "Git operations (commit, push, pull, merge, branch)",
-		string(IntentSchedule):  "Scheduling, reminders, timers, future tasks",
-		string(IntentCode):      "Code writing, implementation, refactoring",
+		string(IntentGit):      "Git operations (commit, push, pull, merge, branch)",
+		string(IntentSchedule): "Scheduling, reminders, timers, future tasks",
+		// "create a file named X …" (e2e 2026-09-18/19) is CODE, not chat: the
+		// description must name concrete artifact creation so the 8B stops
+		// wandering to the catch-all lane. The "then tell me Y" tail is a
+		// readback of the work's output, still code (report-readback collapse
+		// backs this up at the dispatcher).
+		string(IntentCode):      "Code writing, implementation, refactoring, and creating concrete artifacts: create/write a file, script, function, component, config, or document; includes an action plus a follow-up report of its result",
 		string(IntentDebug):     "Bug fixing, debugging, error handling",
 		string(IntentReview):    "Code review, PR review, assessing existing work",
 		string(IntentPlan):      "Planning, architecture, design",

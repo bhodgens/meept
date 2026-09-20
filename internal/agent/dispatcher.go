@@ -1620,6 +1620,28 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				)
 				d.recordClassificationMethod("git_verb_agreement_veto")
 				intent = nil
+			} else if intent.Type == string(IntentChat) &&
+				hasLeadingImperativeVerb(input) &&
+				inputMentionsWorkArtifact(input) {
+				// Chat-vs-imperative arbitration (e2e run 3, 2026-09-19):
+				// the 8B scored "create a file named hello.txt …, then tell
+				// me the full path" intent=chat @0.9 — the catch-all lane
+				// with the LOWEST threshold (0.50) wins on raw confidence
+				// and the turn deflected ("the tool ran, but the result
+				// came back as raw data") with zero work done. A leading
+				// imperative verb plus a concrete work artifact is not
+				// small talk: discard the chat verdict so the chain
+				// continues (keyword "create a file" → code @0.8 routes to
+				// the coder). Threshold hardening alone cannot fix this —
+				// the 8B emits 0.9+ on every lane it lands in (see also
+				// platform/git/schedule arbitrations above; same family).
+				d.logger.Info("Chat verdict overridden by imperative work phrasing",
+					"verdict", intent.Type,
+					"llm_confidence", intent.Confidence,
+					"input_len", len(input),
+				)
+				d.recordClassificationMethod("chat_imperative_arbitration")
+				intent = nil
 			} else if ShouldUseLLMResult(intent) {
 				d.logger.Debug("LLM classifier succeeded",
 					"intent", intent.Type,
@@ -4577,6 +4599,26 @@ func hasCompoundSignalWords(input string) bool {
 // is a classifier mistake — introspection asks ("what can you do"),
 // imperatives instruct. Only leading position counts, so
 // "what can you do to create a file?" still classifies as platform.
+// inputMentionsWorkArtifact reports whether the input names a concrete work
+// artifact (a file, directory, script, component, test, doc, endpoint...).
+// Used by the chat-vs-imperative arbitration: "create a file named hello.txt"
+// mentions an artifact; "hey there" and "thanks" do not. Conservative noun
+// list — a false false keeps the old chat behavior (safe), a false true would
+// route real conversation to executors (avoid).
+func inputMentionsWorkArtifact(input string) bool {
+	trimmed := strings.ToLower(input)
+	for _, noun := range []string{
+		"file", "directory", "folder", "script", "function", "component",
+		"endpoint", "test", "doc", "document", "readme", "config", "report",
+		"summary", "list", "table", "schema", "migration", "api", "service",
+	} {
+		if strings.Contains(trimmed, noun) {
+			return true
+		}
+	}
+	return false
+}
+
 func hasLeadingImperativeVerb(input string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(input))
 	if trimmed == "" {

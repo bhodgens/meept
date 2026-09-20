@@ -24,7 +24,7 @@ func TestGetThresholdForIntent(t *testing.T) {
 		{"recall threshold", "recall", 0.70},
 		{"analyze threshold", "analyze", 0.60},
 		{"search threshold", "search", 0.60},
-		{"chat threshold", "chat", 0.50},
+		{"chat threshold", "chat", 0.85},
 		{"unknown intent defaults to 0.5", "unknown_intent", 0.5},
 		{"empty intent defaults to 0.5", "", 0.5},
 	}
@@ -61,14 +61,14 @@ func TestShouldUseLLMResult(t *testing.T) {
 			want:   false,
 		},
 		{
-			name:   "chat intent at 0.6 confidence passes 0.50 threshold",
+			name:   "chat intent at 0.6 confidence fails 0.85 threshold",
 			intent: &Intent{Type: "chat", Confidence: 0.6},
-			want:   true,
+			want:   false,
 		},
 		{
-			name:   "chat intent at 0.4 confidence fails 0.50 threshold",
-			intent: &Intent{Type: "chat", Confidence: 0.4},
-			want:   false,
+			name:   "chat intent at 0.9 confidence passes 0.85 threshold",
+			intent: &Intent{Type: "chat", Confidence: 0.9},
+			want:   true,
 		},
 		{
 			name:   "code intent at 0.75 confidence exactly at threshold",
