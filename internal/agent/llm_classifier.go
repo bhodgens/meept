@@ -726,7 +726,7 @@ func (c *LLMClassifier) getIntentDescription(intent string) string {
 		string(IntentDebug):     "Bug fixing, debugging, error handling",
 		string(IntentReview):    "Code review, PR review, assessing existing work",
 		string(IntentPlan):      "Planning, architecture, design",
-		string(IntentQuickPlan): "Do the work now, end to end, without check-ins",
+		string(IntentQuickPlan): "Do the work now, end to end, without check-ins: multi-step work executed immediately - e.g. review the code for bugs and correct them as you find them, implement the plan using subagents, implement tasks from a plan in order",
 		// platform is QUESTIONS ABOUT the platform, not the act of using a
 		// tool. The old wording ("Questions about agent capabilities, tools")
 		// matched "call the <tool> tool" prompts and sent them here
