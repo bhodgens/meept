@@ -29,6 +29,11 @@
       { input: "implement file upload with S3", expected_intent: "code", expected_agent: "coder" },
       { input: "write a cron-style background worker for log rotation", expected_intent: "code", expected_agent: "coder" },
       { input: "create a queue consumer for email dispatch", expected_intent: "code", expected_agent: "coder" },
+      // e2e T1 2026-09-18/19: "create a file … then tell me the path" —
+      // the readback tail is part of the code request (chat/compound wander).
+      { input: "create a file named hello.txt in the current directory containing the word hello, then tell me the full path", expected_intent: "code", expected_agent: "coder" },
+      { input: "write a script named backup.sh in the scripts folder, and show me the result", expected_intent: "code", expected_agent: "coder" },
+      { input: "create a config.yaml with the database settings, then tell me where it is", expected_intent: "code", expected_agent: "coder" },
     ],
     debugging: [
       { input: "why is this test failing?", expected_intent: "debug", expected_agent: "debugger" },
