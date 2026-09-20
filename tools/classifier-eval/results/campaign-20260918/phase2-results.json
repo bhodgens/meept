@@ -1,0 +1,45 @@
+{
+  "phase": 2,
+  "executed_at": "2026-09-19T19:31:00.321042",
+  "suite_sha256": "98ec70b4fc1d",
+  "attempt_counts": {
+    "expected": 48,
+    "collected": 48
+  },
+  "verdict_per_preregistered_rule": "RUN INVALID \u2014 9/48 (18.8%) error rows exceed the 10% invalid-run threshold",
+  "scored_subset_observations_not_a_verdict": {
+    "denominator": 39,
+    "routing_pass": 17,
+    "score": 0.4359,
+    "band_if_it_counted": "FAIL",
+    "per_intent": {
+      "quickplan": "0/17",
+      "review": "9/9",
+      "git": "5/5",
+      "code": "1/3",
+      "plan": "1/2",
+      "analyze": "1/2",
+      "debug": "0/1"
+    },
+    "error_breakdown": {
+      "agent_cycle_tool_loop": 1,
+      "ralph_max_iterations": 2,
+      "turn_timeout": 2,
+      "empty_response": 1,
+      "note": "plus 3 counted-as-fail rows were routing mismatches with valid evidence (chat instead of quickplan/analyze)"
+    }
+  },
+  "next_steps": [
+    "re-quickplan-lane diagnosis before any phase-2 rerun",
+    "or accept phase-1-only verdict (policies lack routing coverage) and close #50 with both findings"
+  ],
+  "error_distribution": {
+    "by_intent": {
+      "quickplan": 1,
+      "plan": 1,
+      "code": 1,
+      "platform": 1
+    },
+    "note": "errors spread across intents (quickplan 1/4, code 1/3, analyze 1/2, plan 1/2, review 1/10, git 1/5, platform 0/1, debug 1/1) \u2014 NOT concentrated in the quickplan lane; consistent with general 8B/chain instability under multi-step task load"
+  }
+}

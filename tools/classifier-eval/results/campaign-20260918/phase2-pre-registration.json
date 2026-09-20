@@ -1,7 +1,7 @@
 {
   "phase": 2,
   "frozen_at": "2026-09-19T13:36:35.282542",
-  "suite_sha256": "752443b0ab9de9055bbc11eb91b5ba8690a7abf8ffbcb6eaaeb229ba9a6389c2",
+  "suite_sha256": "98ec70b4fc1d52bdb669a1b4c0d0285da37bb55c3940decf565f2496d46e9f99",
   "n_cases": 48,
   "measurement": "per-case routing evidence (expect_agent + expect_intent) via leaf-01 RoutingObservation, single dispatch per fresh session",
   "verdict_rule": {
@@ -45,5 +45,12 @@
   "model": "local 8B LFM2.5-8B-A1B-Q4_K_M on llama.cpp (scratch rig, same recipe as the 2026-09-18 acceptance passes)",
   "daemon_sha256": "d40990f1d3bed98b7e2f0a14783e44172463ed19994410c34056ffc5f7e18779",
   "rig_root": "/private/tmp/routing-smoke-n9ly4n3g",
-  "meept_head": "366ce236994a7772987ae2f46ff1d8999c866e05"
+  "meept_head": "366ce236994a7772987ae2f46ff1d8999c866e05",
+  "amendments": [
+    {
+      "when": "2026-09-19T19:05:49.914357",
+      "what": "added neutral exit_zero(true) checker to every case",
+      "why": "suite loader requires >=1 checker per task; phase 2 is routing-only so a neutral checker preserves the measurement (routing checks evaluated separately)"
+    }
+  ]
 }
