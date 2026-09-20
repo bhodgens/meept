@@ -1642,6 +1642,38 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				)
 				d.recordClassificationMethod("chat_imperative_arbitration")
 				intent = nil
+			} else if ShouldUseLLMResult(intent) &&
+				quickPlanCueUpgradeApplies(intent.Type, input) {
+				// QuickPlan cue upgrade (#52, campaign 20260918 phase 2):
+				// the 8B scattered 17/20 adjudicated quickplan replay cases
+				// across debug/review/analyze/plan/code — the input's
+				// orchestration evidence ("using subagents, review … and
+				// correct them as you find them", "implement the plan")
+				// lexically pulls toward those lanes while the quickplan
+				// description carries no surface forms. When the verdict
+				// lands in the scatter set AND the input carries STRONG
+				// adjudicated quickplan cues (QuickPlanCuePattern plus the
+				// strong-form requirement shared with heuristicFallback),
+				// the verdict is a lexical costume: upgrade to quickplan.
+				// Positive-signal gated on the ADJUDICATED forms only —
+				// the same discipline as the git-verb veto's
+				// inputContainsGitVerb.
+				d.logger.Info("LLM verdict upgraded to quickplan by orchestration cue evidence",
+					"verdict", intent.Type,
+					"llm_confidence", intent.Confidence,
+					"input_len", len(input),
+				)
+				d.recordClassificationMethod("quickplan_cue_upgrade")
+				upgraded := &Intent{
+					Type:             string(IntentQuickPlan),
+					Confidence:       0.85,
+					AgentType:        "orchestrator",
+					RequiresPlanning: true,
+					Summary:          extractSummary(input),
+					Method:           "quickplan_cue_upgrade",
+					Model:            d.llmClassifier.ResolvedModel(),
+				}
+				return d.applyContextWeighting(upgraded, memCtx, input), nil
 			} else if ShouldUseLLMResult(intent) {
 				d.logger.Debug("LLM classifier succeeded",
 					"intent", intent.Type,
@@ -5086,6 +5118,31 @@ var abbreviationTokens = map[string]bool{
 	"ed": true, "eds": true, "st": true,
 }
 
+// quickPlanCueUpgradeApplies reports whether an LLM verdict in the
+// quickplan-scatter set (the lanes the 8B's quickplan cases scattered to in
+// campaign 20260918 phase 2: debug, review, analyze, plan, code) should be
+// upgraded to quickplan because the input carries STRONG adjudicated
+// orchestration evidence. The cue check reuses QuickPlanCuePattern narrowed
+// to its strongest forms — the same requirement heuristicFallback applies —
+// so incidental cue words ("add a function" + one loose hit) cannot trigger
+// the upgrade. chat/clarify verdicts are excluded: the ambiguity gate's
+// question is a real question about scope, not a lexical costume.
+func quickPlanCueUpgradeApplies(verdictType string, input string) bool {
+	switch verdictType {
+	case string(IntentDebug), string(IntentReview), string(IntentAnalyze),
+		string(IntentPlan), string(IntentCode):
+	default:
+		return false
+	}
+	lower := strings.ToLower(input)
+	if !QuickPlanCuePattern.MatchString(lower) {
+		return false
+	}
+	return strings.Contains(lower, "subagent") ||
+		strings.Contains(lower, "implement the plan") ||
+		strings.Contains(lower, "implement tasks")
+}
+
 // leadingRecallClause returns the input up to its first clause boundary. The
 // recall matchers are position-independent — isWorkStatusRecall scans every
 // field for a status predicate plus a nearby work noun — so evaluated against
@@ -5204,6 +5261,28 @@ var docUpdateRe = regexp.MustCompile(
 
 func heuristicFallback(input string) *Intent {
 	lower := strings.ToLower(strings.TrimSpace(input))
+
+	// QuickPlan cue arbitration (#52, campaign 20260918 phase 2): the
+	// adjudicated orchestration evidence (QuickPlanCuePattern — subagents,
+	// "implement the plan", "implement tasks N") outranks the generic code
+	// keywords below. "implement the plan using subagents" matched
+	// "implement the" → code at 0.55 BEFORE any quickplan consideration;
+	// the cue check must precede it. Narrowed to the STRONG adjudicated
+	// forms (subagents / implement plan-or-tasks), not the full loose
+	// pattern, so "add a function" with an incidental cue word still
+	// routes code.
+	if QuickPlanCuePattern.MatchString(lower) &&
+		(strings.Contains(lower, "subagent") ||
+			strings.Contains(lower, "implement the plan") ||
+			strings.Contains(lower, "implement tasks")) {
+		return &Intent{
+			Type:             string(IntentQuickPlan),
+			Confidence:       0.6,
+			AgentType:        "orchestrator",
+			RequiresPlanning: true,
+			Summary:          extractSummary(input),
+		}
+	}
 
 	// Knowledge-lane arbitration (I11, routing-repair leaf 04): the
 	// degraded path must agree with docs/workflows/intent-routing.md's

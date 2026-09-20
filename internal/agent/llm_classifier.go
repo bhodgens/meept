@@ -274,7 +274,7 @@ var intentThresholds = map[string]float64{
 	// chat verdict must NOT outrank a keyword code match on an imperative
 	// prompt. 0.85 keeps genuine small talk (high-confidence) while letting
 	// the keyword/heuristic chain route imperative work.
-	string(IntentChat):     0.85,
+	string(IntentChat): 0.85,
 }
 
 var agentMapping = map[string]string{
