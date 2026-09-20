@@ -50,5 +50,36 @@
     "error_rows": "10/48 = 20.8% -> still INVALID run",
     "quickplan": "2/17 (was 0/17) \u2014 movement within run-to-run noise; the description repair alone is NOT sufficient",
     "conclusion": "Description repair was necessary (the lane had zero surface forms) but not sufficient. The adjudicated cue evidence (QuickPlanCuePattern, 16/20 inputs match) needs to arbitrate at the classifier-decision layer the way the git-verb veto does \u2014 not just decorate the prompt. That is issue #52's remaining scope."
+  },
+  "post_arbitration_verification": {
+    "binary": "72048740 (cue arbitration af31fde5)",
+    "rig": "/private/tmp/routing-smoke-yae_w4s3 (fresh, phase2-arb)",
+    "scored": {
+      "pass": 21,
+      "fail": 10,
+      "denominator": 31,
+      "score": 0.6774,
+      "band_if_it_counted": "MARGINAL"
+    },
+    "error_rows": "17/48 = 35.4% -> run INVALID under the pre-registered 10% rule",
+    "quickplan_lane": "8/10 scored = 0.80 landed (was 2/17, 0/17) \u2014 cue upgrade fired and works",
+    "tradeoff": "routing quickplan into real multi-step orchestration moved the failure downstream: 7 timeouts + 4 ralph-loop exhaustions, 8 of 17 errors are quickplan cases now EXECUTING instead of misrouting",
+    "interpretation": "the classifier-layer fix did its job; the remaining blocker is chain stability under multi-step orchestration (timeouts at 240s, ralph-loop exhaustion) \u2014 a different layer, tracked as the same #52 chain-stability scope",
+    "artifacts": "phase2-arb/ in the rig; rows re-derivable from the frozen suite + recorded verdict rule"
+  },
+  "error_distribution_post_arb": {
+    "by_intent": {
+      "quickplan": 8,
+      "review": 2,
+      "code": 1,
+      "plan": 1,
+      "git": 1,
+      "platform": 1
+    },
+    "by_kind": {
+      "timeout": 7,
+      "ralph_loop": 4,
+      "other": 3
+    }
   }
 }
