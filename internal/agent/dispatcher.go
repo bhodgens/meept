@@ -2669,22 +2669,24 @@ func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memC
 		// substring matching ONLY (" then " / ", and " / " and then ") — no
 		// general NLP parser; without a recognized connector the verdict
 		// stays compound.
-		if actionable == 2 && multi.IsCompound {
-			primary, secondary := reportReadbackIntents(multi.Intents)
-			if primary == nil || secondary == nil {
-				// Diagnostic (2026-09-19 live e2e): the readback arm did not
-				// fire; log the above-floor intent set so live runs reveal
-				// which shape missed (e.g. report not second by confidence).
-				names := make([]string, 0, len(multi.Intents))
-				for _, it := range multi.Intents {
-					if it.Confidence >= compoundIntentConfidenceFloor {
-						names = append(names, fmt.Sprintf("%s@%.2f", it.Type, it.Confidence))
-					}
+		if actionable >= 2 && multi.IsCompound {
+			// Diagnostic (2026-09-19 live e2e run 4): log the above-floor
+			// intent set whenever compound stands with 2+ actionable —
+			// whether or not the readback arm fires — so live runs reveal
+			// which verdict shape missed. (First placement was inside
+			// actionable==2, so runs with 3+ actionable intents — the
+			// actual live shape, intents=5 — produced no diagnostic.)
+			names := make([]string, 0, len(multi.Intents))
+			for _, it := range multi.Intents {
+				if it.Confidence >= compoundIntentConfidenceFloor {
+					names = append(names, fmt.Sprintf("%s@%.2f", it.Type, it.Confidence))
 				}
-				d.logger.Info("Report-readback arm considered; intent shape",
-					"intents", strings.Join(names, ","),
-				)
 			}
+			d.logger.Info("Compound intent shape (above floor)",
+				"intents", strings.Join(names, ","),
+				"actionable", actionable,
+			)
+			primary, secondary := reportReadbackIntents(multi.Intents)
 			if primary != nil && secondary != nil {
 				actionClause, reportClause, ok := splitReportReadbackClauses(input)
 				if ok && classifyReportTagAlong(actionClause, reportClause) {
