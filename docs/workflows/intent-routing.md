@@ -48,6 +48,18 @@ your message
   └─ DOOR 3: quickplan ───────► clarify (if ambiguous) → plan → execute
 ```
 
+### Session-state upgrade (one-way, default off)
+
+`orchestrator.classifier.session_state_upgrade` (default false) enables a
+one-way upgrade at dispatch time: when the LLM verdict lands in a
+boundary lane (code/debug/review/plan/git/analyze) AND the session holds
+quickplan-shaped state (an approved/executing plan or active tracked
+tasks) AND the input carries an orchestration cue, the verdict upgrades
+to quickplan. The evidence is session state, never a classifier feature;
+a quickplan verdict is never downgraded. Measured on the adjudicated
+replay: +3.0 cases over the gate-off baseline with zero regressions
+(`tools/classifier-eval/results/session-upgrade/REPORT.md`).
+
 **Nothing is ever dropped.** Every path terminates in an agent that
 responds to you. The final fall-through is the quickplan agent: if the
 classifier cannot determine intent, quickplan clarifies what you need
