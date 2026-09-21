@@ -161,9 +161,9 @@ Sequential: 01 -> 02 -> 03 (each consumes the prior leaf's artifact).
 
 | leaf | status | notes |
 |---|---|---|
-| 01-model-probe.md | PENDING | |
-| 02-teacher-sweep.md | PENDING | |
-| 03-scoring-analysis.md | PENDING | |
+| 01-model-probe.md | COMPLETE | 2026-09-21; worker-b CLI auth fails -> HTTP fallback proven |
+| 02-teacher-sweep.md | COMPLETE | 2026-09-21; 48/48 raw artifacts, 0 errors, 11 judge calls |
+| 03-scoring-analysis.md | COMPLETE | 2026-09-21; FAIL 31/48 (64.58%) vs 86.8% floor |
 
 ## Integration Test Plan
 
