@@ -352,6 +352,11 @@ type Dispatcher struct {
 	// measured on real traffic).
 	sessionDrift *SessionDriftDetector
 
+	// classifierGate carries the session-state upgrade knob (docs/plans/
+	// quickplan-session-upgrade/). Zero value = off = the gate is inert
+	// and dispatch behavior is byte-identical to legacy.
+	classifierConfig classifierGateConfig
+
 	// burstDetector is the tool-failure burst detector (issue #43),
 	// fed by resolved dispatch outcomes in recordDispatch. Wired via
 	// SetBurstDetector by daemon composition; nil/disabled => outcomes
@@ -536,6 +541,11 @@ type DispatcherConfig struct {
 	// (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
 	AmbiguityThreshold float64
 
+	// SessionStateUpgrade enables the one-way quickplan session-evidence
+	// upgrade (docs/plans/quickplan-session-upgrade/). Mirrors
+	// orchestrator.classifier.session_state_upgrade; default false.
+	SessionStateUpgrade bool
+
 	// ToolRegistry provides structural depth-based tool gating.
 	// When non-nil, tools are gated so agents at maxDepth don't
 	// see spawn capabilities ("make illegal states unrepresentable").
@@ -571,6 +581,7 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		capabilityMatcher: cfg.CapabilityMatcher,
 		planManager:       cfg.PlanManager,
 		toolRegistry:      cfg.ToolRegistry,
+		classifierConfig:  classifierGateConfig{SessionStateUpgrade: cfg.SessionStateUpgrade},
 	}
 
 	// Git-verb agreement veto (issue #46). Nil = default on.
@@ -1219,6 +1230,18 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 4. Classify primary intent
 	intent, _ := d.classifyIntent(ctx, resolvedInput, memCtx)
 
+	// 4.5. One-way session-state upgrade (docs/plans/
+	// quickplan-session-upgrade/): a boundary-lane verdict upgrades to
+	// quickplan when the session holds an approved/executing plan or
+	// active tracked tasks AND the input carries orchestration cues.
+	// Applied at THIS layer (not inside classifyIntent) because the
+	// session evidence sources are session-scoped; knob off (default) =
+	// the call returns the intent untouched (byte-identical legacy).
+	if d.classifierConfig.SessionStateUpgrade && intent != nil &&
+		sessionUpgradeBoundaryLanes(intent.Type) {
+		intent = d.maybeUpgradeSessionQuickplan(ctx, intent, resolvedInput, conversationID, true)
+	}
+
 	// 5. Extract memory refs for context continuity
 	intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
 
@@ -1228,7 +1251,6 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	if intent.TrueAnalysis == nil && memCtx.LastIntent != nil {
 		intent.TrueAnalysis = memCtx.LastIntent.TrueAnalysis
 	}
-
 	// 5.2. Synthesize planning mode (Thread D complexity routing).
 	intent.SuggestedMode = suggestMode(IntentType(intent.Type), intent.TrueAnalysis, input)
 

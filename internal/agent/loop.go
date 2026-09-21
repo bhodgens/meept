@@ -686,6 +686,13 @@ type AgentLoop struct {
 	// nudging and terminalizes the step with an honest failure. Reset per
 	// turn in resetTurnGuards. Guarded by l.mu.
 	nudgeClassCounts map[string]int
+	// turnUserPrompt carries the current turn's user prompt so the
+	// final-text guards can tell a file-DELIVERABLE turn (whose
+	// unbacked side-effect claim is a fabrication — honest failure) from
+	// an analyze/answer turn whose narration claims prior file work
+	// (labelled delivery, chain-stability phase-2 replay-01/47). Set at
+	// turn entry, cleared in resetTurnGuards. Guarded by l.mu.
+	turnUserPrompt string
 
 	// Conversation management
 	conversations *ConversationStore
@@ -2575,6 +2582,15 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// the previous turn would nudge/veto this turn's first tool calls.
 	l.resetTurnGuards()
 
+	// Chain-stability phase-2 (replay-01/47): the final-text guards need
+	// the turn's prompt to distinguish a file-DELIVERABLE turn (unbacked
+	// side-effect claim = fabrication, honest failure) from an
+	// analyze/answer turn (labelled delivery). Captured right after the
+	// guard reset; cleared with the rest of the per-turn state.
+	l.mu.Lock()
+	l.turnUserPrompt = userMessage
+	l.mu.Unlock()
+
 	// AUDIT FIX H3 (bughunt 2026-09-03): a RESUMED parked turn re-enters
 	// with the same conversation — which still holds the original user
 	// message from the parked attempt. Unconditional AddUserMessage below
@@ -3313,6 +3329,40 @@ var fileOperationToolNames = []string{
 	"file_write", "file_edit", "file_delete", "resolve", "shell",
 }
 
+// deliverableFileEffectRe matches a turn prompt whose DELIVERABLE is a file
+// side-effect: create/write/update/save/delete/move a file, produce an
+// artifact, fix code in place. When the prompt demands one, a final text
+// claiming the file work happened WITHOUT any file tool execution is the
+// run-7 fabrication shape and must fail the step honestly; when the
+// deliverable is analysis/answer/report text, the same claim is narration
+// over the model's own reply and is delivered labelled instead of killing
+// the step (chain-stability phase-2, replay-01/47).
+//
+// Imperative-anchored: the verb must lead the prompt (optionally after a
+// short preamble of 3 filler words: "please", "now", "first", "also",
+// "then", "and") so a QUESTION about a previously created file ("how do I
+// use the profile I asked you to create?") or an analysis request that
+// merely MENTIONS files ("analyze the readings and update the json files,
+// and report" — replay-01, whose deliverable was the report) does not
+// classify the whole turn as a file-deliverable task.
+var deliverableFileEffectRe = regexp.MustCompile(
+	`(?i)^\s*(?:please\s+|now\s+|first\s+|also\s+|then\s+|and\s+){0,3}` +
+		`(?:create|write|update|save|delete|remove|move|copy|rename|generate|produce|make|fix|patch|edit|modify|implement)\b[^.?!]{0,80}\b(?:file|files|document|doc|config|json|yaml|yml|toml|csv|md|markdown|txt|script|artifact)\b`)
+
+// deliverableClaimsFileEffect reports whether the CURRENT turn's user
+// prompt demands a file deliverable. Empty prompt (defensive: the guard
+// runs after a response exists, so a prompt was seen) reports false —
+// labelled delivery is the conservative default because it loses nothing.
+func (l *AgentLoop) deliverableClaimsFileEffect() bool {
+	l.mu.RLock()
+	prompt := l.turnUserPrompt
+	l.mu.RUnlock()
+	if strings.TrimSpace(prompt) == "" {
+		return false
+	}
+	return deliverableFileEffectRe.MatchString(strings.ToLower(prompt))
+}
+
 // turnExecutedFileTools reports whether any file-operation tool was
 // emitted for execution during the current turn (per the turn tool
 // ledger). False also when only non-file tools ran — their executions
@@ -4003,6 +4053,9 @@ func (l *AgentLoop) resetTurnGuards() {
 	l.turnToolCalls = nil
 	// F-A3: a fresh turn starts with an empty per-class nudge budget.
 	l.nudgeClassCounts = make(map[string]int)
+	// Chain-stability phase-2: the per-turn prompt snapshot clears with
+	// the rest of the guard state.
+	l.turnUserPrompt = ""
 	l.mu.Unlock()
 }
 
@@ -5387,11 +5440,24 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				continue
 			}
 			// No iteration budget left OR nudge class cap spent: do not
-			// append another nudge. Terminalize the step with an honest
-			// failure so downstream consumers can tell an unverified claim
-			// from a real result — the hallucinated success must not read
-			// as ground truth.
+			// append another nudge. Chain-stability fix (phase-2 run,
+			// 2026-09-20, replay-01/47): the exhausted budget used to FAIL
+			// the step outright, so the user received a bare "nudge budget
+			// exhausted" chain error and the model's actual analysis was
+			// discarded — on turns (analyze/answer/report) whose
+			// deliverable is the text itself, not a file side-effect. The
+			// honest-failure form is reserved for turns whose PROMPT
+			// demanded a file deliverable (the run-7 fabrication shape —
+			// deliverableClaimGuard). Otherwise deliver the final text
+			// LABELLED unverified: the claim-vs-reality gap is preserved,
+			// the budget discipline holds (no more nudges), and the answer
+			// reaches the user.
 			if l.nudgeBudgetExhausted(nudgeClassUnbackedClaims) {
+				if !l.deliverableClaimsFileEffect() {
+					l.logger.Warn("Unbacked file side-effect claims persist after nudge cap; delivering labelled response (turn deliverable is not a file effect)",
+						"conversation", conversationID)
+					return "[unverified: no tools were executed this turn] " + response.Content, nil
+				}
 				l.logger.Warn("Unbacked file side-effect claims persist after nudge cap; terminalizing step with honest failure",
 					"conversation", conversationID)
 				return "", fmt.Errorf("%w: repeated unbacked claims; giving up this step", ErrNudgeBudgetExhausted)
@@ -5813,6 +5879,10 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	// overflowRetried gates F-A1's trim-and-retry-once: an overflow retry
 	// has been spent this call, and a second overflow fails honestly.
 	overflowRetried := false
+	// saturatedRetried gates the chain-stability saturation path: a
+	// small-request overflow from a busy local endpoint backs off and
+	// retries the same payload up to maxSaturatedOverflowRetries times.
+	saturatedRetried := 0
 	// servedModel tracks the model the current attempt is served by, for
 	// accurate failure attribution in RecordAliasFailure (issue #30).
 	var servedModel *llm.ModelConfig
@@ -6042,7 +6112,46 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		// llama.cpp HTTP-500s per turn on hopeless retries) — instead
 		// compact context AGGRESSIVELY via the existing context firewall
 		// and retry ONCE. A second overflow surfaces as an honest error.
+		//
+		// Chain-stability phase-2 exception (2026-09-20, replay-21): a
+		// SMALL request can also draw this verdict from a saturated local
+		// endpoint — llama-server answers HTTP 500 "Context size has been
+		// exceeded" when CONCURRENT sibling requests fill the server-side
+		// KV cache, even though this request fits the context window with
+		// room to spare (~2.5k estimated tokens vs a 32768 limit in
+		// replay-21). Compaction cannot shrink such a request (nothing to
+		// drop), so the old path failed the turn immediately on a
+		// TRANSIENT condition. When the request is small relative to the
+		// model's limit, treat the overflow as saturation: back off and
+		// retry the SAME payload instead of failing.
 		var overflowErr *llm.ContextOverflowError
+		if errors.As(err, &overflowErr) && !overflowRetried && l.requestIsSmallVersusLimit(messages, servedModel) {
+			if saturatedRetried >= maxSaturatedOverflowRetries {
+				l.logger.Error("Saturated-endpoint overflow persists after retries; failing the call honestly",
+					"provider", overflowErr.ProviderID,
+					"model", overflowErr.ModelID,
+					"attempt", attempt,
+				)
+				return nil, fmt.Errorf("context overflow (saturated endpoint) persisted after retries: %w", err)
+			}
+			saturatedRetried++
+			delay, ok := llmBackoff.NextDelay()
+			if !ok {
+				return nil, fmt.Errorf("context overflow (saturated endpoint) retry budget exhausted: %w", err)
+			}
+			l.logger.Warn("Context overflow on a small request: treating as endpoint saturation, backing off before retry",
+				"provider", overflowErr.ProviderID,
+				"model", overflowErr.ModelID,
+				"saturated_retry", saturatedRetried,
+				"backoff", delay,
+			)
+			select {
+			case <-time.After(delay):
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 		if errors.As(err, &overflowErr) {
 			if overflowRetried {
 				l.logger.Error("Context overflow persists after aggressive compaction; failing the call honestly",
@@ -6353,6 +6462,59 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 // aggressive-compaction seam (F-A1). It returns the original slice when no
 // firewall is wired (a stub chatter in tests) — callers must treat
 // trimmed=false as "cannot shrink" and fail honestly rather than retry.
+
+// maxSaturatedOverflowRetries caps the saturated-endpoint backoff retries
+// for a small-request context overflow (chain-stability phase-2,
+// 2026-09-20, replay-21): llama-server answers HTTP 500 "Context size has
+// been exceeded" while CONCURRENT sibling requests fill its server-side KV
+// cache even when the request itself fits the window with room to spare.
+// Beyond this cap the condition is not transient and the error surfaces.
+const maxSaturatedOverflowRetries = 3
+
+// saturatedOverflowRatio is the smallness threshold: a request estimated at
+// or below this fraction of the model's context limit cannot itself be the
+// cause of an overflow verdict, so the verdict is endpoint saturation.
+// Replay-21's failing request sat at ~8% of the limit (2.5k / 32768).
+const saturatedOverflowRatio = 0.5
+
+// saturatedOverflowMinTokens is the ABSOLUTE floor for the saturation
+// classification: below this token count the request cannot be compacted
+// (dropOldContext alone keeps ~5 messages), but there is also nothing a
+// retry can wait out that a compaction retry would handle better — more
+// importantly, an unparsable-tiny request that overflows signals a broken
+// endpoint/limit config, not saturation. Backing off burns turn budget
+// against a hopeless condition, so tiny requests skip the saturation path
+// and take the historical F-A1 compaction-then-honest-failure route.
+const saturatedOverflowMinTokens = 600
+
+// requestIsSmallVersusLimit reports whether the request is small enough —
+// relative to the model's context limit — that a provider "context size
+// exceeded" verdict must be endpoint saturation rather than a true size
+// overflow. The limit comes from the served model config first, then the
+// loop's context firewall; with neither, the fallback limit applies. A
+// request below saturatedOverflowMinTokens (tiny) is NOT classified as
+// saturation: there is nothing transient to wait out and the historical
+// F-A1 compaction-then-honest-failure path handles it.
+func (l *AgentLoop) requestIsSmallVersusLimit(messages []llm.ChatMessage, servedModel *llm.ModelConfig) bool {
+	limit := 0
+	if servedModel != nil {
+		limit = servedModel.ContextLimit
+	}
+	if limit == 0 && l.contextFirewall != nil {
+		if mc := l.contextFirewall.Config(); mc != nil {
+			limit = mc.ContextLimit
+		}
+	}
+	if limit <= 0 {
+		limit = llm.FallbackContextLimit
+	}
+	if limit <= 0 {
+		return false
+	}
+	estimated := llm.EstimateChatTokens(messages)
+	return estimated >= saturatedOverflowMinTokens && estimated <= int(float64(limit)*saturatedOverflowRatio)
+}
+
 func (l *AgentLoop) compactForOverflow(ctx context.Context, messages []llm.ChatMessage) ([]llm.ChatMessage, bool) {
 	if l.contextFirewall == nil {
 		return messages, false

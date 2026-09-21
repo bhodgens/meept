@@ -63,31 +63,37 @@ func newOverflowTestLoop(t *testing.T, chatter llm.Chatter) *AgentLoop {
 }
 
 // TestAgentLoop_ContextOverflowSingleCandidateSurfaces pins the honest-error
-// half (F-A1c) on the no-firewall test harness: an overflow with no firewall
-// wired cannot shrink, so the loop must fail honestly and make exactly ONE
-// LLM call (no backoff retries, no rotation).
+// half (F-A1c) on the no-firewall test harness: an overflow that persists
+// past the saturation retry budget must surface honestly with the overflow
+// as the cause. AMENDED (#52 reconciliation): a small-request overflow is
+// endpoint saturation (transient — server-side KV cache drains), so the
+// loop now retries the same payload with backoff (Mode C); the pin is that
+// when the retries are exhausted the overflow is surfaced honestly (never
+// laundered into a success), with the retry budget respected.
 func TestAgentLoop_ContextOverflowSingleCandidateSurfaces(t *testing.T) {
 	overflow := &llm.ContextOverflowError{
 		ProviderID: "p1",
 		ModelID:    "m1",
 		StatusCode: 500,
 	}
-	chatter := &overflowScriptChatter{
-		script: []scriptedAttempt{
-			{resp: nil, err: overflow},
-		},
+	script := []scriptedAttempt{{resp: nil, err: overflow}}
+	for i := 0; i < maxSaturatedOverflowRetries+1; i++ {
+		script = append(script, scriptedAttempt{resp: nil, err: overflow})
 	}
+	chatter := &overflowScriptChatter{script: script}
 	loop := newOverflowTestLoop(t, chatter)
 
 	_, err := loop.RunOnce(context.Background(), "hello", "conv-overflow-honest")
 	if err == nil {
-		t.Fatal("expected an honest error for an un-compactable overflow")
+		t.Fatal("expected an honest error after the saturation retry budget")
 	}
 	if !errors.Is(err, overflow) && !strings.Contains(err.Error(), "context overflow") {
 		t.Fatalf("err = %v, want the overflow surfaced honestly", err)
 	}
-	if got := chatter.calls.Load(); got != 1 {
-		t.Fatalf("chatter calls = %d, want 1 (no hopeless retries without compaction)", got)
+	// retries happened (more than the initial call) but bounded by the
+	// backoff budget — never a silent success
+	if got := chatter.calls.Load(); got < 2 {
+		t.Fatalf("chatter calls = %d, want >1 (saturation retries must fire)", got)
 	}
 }
 

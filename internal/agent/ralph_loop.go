@@ -45,7 +45,15 @@ type RalphLoop struct {
 
 	// Iteration tracking: task_id -> iteration count
 	iterations map[string]int
-	mu         sync.Mutex
+	// progressSeen tracks the highest completed-step count observed for a
+	// task across its replan cycle (task_id -> completed steps). The cap
+	// decision consults it: a task whose completed-step count GREW since
+	// the last attempt is making forward progress, and the hard cap —
+	// calibrated for a STALLED task — must not kill it (chain-stability
+	// phase-2 run, 2026-09-20: replay-04/08/18/43 all died at the cap
+	// mid-progress, e.g. "1/8 steps completed" → "4/7" on replay-04).
+	progressSeen map[string]int
+	mu           sync.Mutex
 }
 
 // NewRalphLoop creates a new Ralph loop manager.
@@ -62,6 +70,7 @@ func NewRalphLoop(config RalphLoopConfig, orchestrator *Orchestrator, taskStore 
 		bus:          bus,
 		logger:       *logger,
 		iterations:   make(map[string]int),
+		progressSeen: make(map[string]int),
 	}
 }
 
@@ -77,6 +86,45 @@ func (rl *RalphLoop) SetPlanManager(pm *plan.PlanManager) {
 // PlanManager returns the plan manager, if configured.
 func (rl *RalphLoop) PlanManager() *plan.PlanManager {
 	return rl.planManager
+}
+
+// taskProgress counts the task's successfully-terminal steps (its forward
+// movement). A store error or absent step store reports 0 — progress
+// tracking is best-effort and must never gate the completion check.
+func (rl *RalphLoop) taskProgress(taskID string) int {
+	if rl.stepStore == nil {
+		return 0
+	}
+	counts, err := rl.stepStore.CountByState(taskID)
+	if err != nil {
+		return 0
+	}
+	return counts[task.StepCompleted] + counts[task.StepApproved]
+}
+
+// madeForwardProgress reports whether the task's completed-step count has
+// grown past the highest count previously observed for it. The FIRST
+// observation (prev == 0 with real steps present) does NOT count as
+// progress: a task that completed its initial steps before the first
+// evidence failure has not yet proven forward movement ACROSS attempts —
+// only an increase over a previously-seen nonzero baseline is.
+// Callers must NOT hold rl.mu.
+func (rl *RalphLoop) madeForwardProgress(taskID string, current int) bool {
+	if current <= 0 {
+		return false
+	}
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	prev := rl.progressSeen[taskID]
+	if prev > 0 && current > prev {
+		rl.progressSeen[taskID] = current
+		return true
+	}
+	if prev == 0 {
+		// First observation: record the baseline, no extension granted.
+		rl.progressSeen[taskID] = current
+	}
+	return false
 }
 
 // CheckCompletion verifies if a completed task actually achieved its goal.
@@ -168,6 +216,11 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 		}
 	}
 
+	// Progress accounting happens BEFORE the cap check so the cap decision
+	// judges the progress this attempt has produced (chain-stability
+	// phase-2, 2026-09-20).
+	progressed := rl.madeForwardProgress(taskID, rl.taskProgress(taskID))
+
 	if iteration >= rl.config.MaxIterations {
 		if evidenceSufficient && hasIndependentCapEvidence(resultData.ToolEvidence, resultData.Evidence) {
 			// The final granted attempt DID produce independently
@@ -176,6 +229,28 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 			rl.logger.Info("Max Ralph loop iterations reached but the final attempt produced sufficient evidence; completing",
 				"task_id", taskID, "iterations", iteration)
 			return true, resultData.Evidence, false
+		}
+		// Progress-aware cap (chain-stability phase-2, 2026-09-20): the
+		// hard cap is calibrated for a STALLED task — one whose replans
+		// produce no forward movement. A task whose completed-step count
+		// GREW across attempts (replay-04: "1/8 steps completed" → "4/7"
+		// before the cap hit) is executing, just slowly; killing it
+		// discards real progress and surfaces a chain failure to the
+		// user. Grant one extension cycle per observed progress increase
+		// instead: the counter rolls back below the cap so ordinary
+		// replanning continues, and the NEXT attempt with no further
+		// progress still fails at the cap.
+		if progressed {
+			completed := rl.taskProgress(taskID)
+			rl.logger.Info("Max Ralph loop iterations reached but the task is making forward progress; extending the replan budget",
+				"task_id", taskID,
+				"iterations", iteration,
+				"completed_steps", completed,
+			)
+			rl.mu.Lock()
+			rl.iterations[taskID] = rl.config.MaxIterations - 1
+			rl.mu.Unlock()
+			return false, resultData.Evidence, true
 		}
 		// Cap reached (e2e run 3/8, 2026-09-11): the previous contract
 		// returned (true, nil, false) — "complete" — so the orchestrator
@@ -332,15 +407,37 @@ func (rl *RalphLoop) validateChecklists(taskID string) (bool, int, int, []string
 func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousEvidence []string) error {
 	rl.mu.Lock()
 	iteration := rl.iterations[taskID] + 1
+	rl.mu.Unlock()
+
 	if iteration > rl.config.MaxIterations {
-		rl.mu.Unlock()
-		rl.logger.Warn("Replan cap reached, failing task instead of re-enqueueing",
-			"task_id", taskID,
-			"iterations", rl.iterations[taskID],
-			"max_iterations", rl.config.MaxIterations)
-		rl.failTaskAtCap(taskID, "replan iteration cap reached")
-		return nil
+		// Progress-aware cap (chain-stability phase-2, 2026-09-20): a
+		// task whose completed-step count grew since the last check is
+		// not a ralph loop — extend the budget instead of failing it.
+		// Mirrors the CheckCompletion extension so BOTH cap sites agree.
+		// madeForwardProgress takes rl.mu itself, so the outer lock is
+		// released before the store read + progress update.
+		if rl.madeForwardProgress(taskID, rl.taskProgress(taskID)) {
+			rl.mu.Lock()
+			rl.iterations[taskID] = rl.config.MaxIterations - 1
+			rl.mu.Unlock()
+			rl.logger.Info("Replan cap reached but the task is making forward progress; extending the replan budget",
+				"task_id", taskID,
+				"completed_steps", rl.taskProgress(taskID),
+			)
+			iteration = rl.config.MaxIterations
+		} else {
+			rl.mu.Lock()
+			iterations := rl.iterations[taskID]
+			rl.mu.Unlock()
+			rl.logger.Warn("Replan cap reached, failing task instead of re-enqueueing",
+				"task_id", taskID,
+				"iterations", iterations,
+				"max_iterations", rl.config.MaxIterations)
+			rl.failTaskAtCap(taskID, "replan iteration cap reached")
+			return nil
+		}
 	}
+	rl.mu.Lock()
 	rl.iterations[taskID] = iteration
 	rl.mu.Unlock()
 
@@ -430,6 +527,7 @@ func (rl *RalphLoop) Reset(taskID string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	delete(rl.iterations, taskID)
+	delete(rl.progressSeen, taskID)
 }
 
 // failTaskAtCap marks a task failed after TriggerReplan hit MaxIterations
