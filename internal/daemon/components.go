@@ -2609,6 +2609,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// follow-up): direct-route confident inputs without the
 			// analyzer + router LLM calls.
 			PrefilterConfig: cfg.Orchestrator.Prefilter,
+			// One-way session-state upgrade to quickplan (docs/plans/
+			// quickplan-session-upgrade/): default off.
+			SessionStateUpgrade: cfg.Orchestrator.Classifier.SessionStateUpgrade,
 		})
 
 		// Session drift detector (issue #41): watches the per-session
