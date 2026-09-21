@@ -1,0 +1,131 @@
+{
+ "replay_n": 48,
+ "chain_acc": 0.868,
+ "tau": 0.153,
+ "leg_off": {
+  "correct": 38.30399999999999,
+  "n": 48,
+  "sys_acc": 0.798,
+  "routes": 20,
+  "upgrades": [],
+  "wrong": [
+   {
+    "case": 13,
+    "stage": "B",
+    "verdict": "code",
+    "final": "code",
+    "expected": "plan"
+   },
+   {
+    "case": 17,
+    "stage": "B",
+    "verdict": "code",
+    "final": "code",
+    "expected": "quickplan"
+   },
+   {
+    "case": 18,
+    "stage": "B",
+    "verdict": "code",
+    "final": "code",
+    "expected": "quickplan"
+   },
+   {
+    "case": 30,
+    "stage": "B",
+    "verdict": "code",
+    "final": "code",
+    "expected": "git"
+   },
+   {
+    "case": 32,
+    "stage": "A",
+    "verdict": "platform",
+    "final": "platform",
+    "expected": "quickplan"
+   },
+   {
+    "case": 37,
+    "stage": "A",
+    "verdict": "git",
+    "final": "git",
+    "expected": "quickplan"
+   }
+  ]
+ },
+ "leg_on_cue": {
+  "correct": 41.304,
+  "n": 48,
+  "sys_acc": 0.8605,
+  "routes": 20,
+  "upgrades": [
+   17,
+   18,
+   37
+  ],
+  "wrong": [
+   {
+    "case": 13,
+    "stage": "B",
+    "verdict": "code",
+    "final": "code",
+    "expected": "plan"
+   },
+   {
+    "case": 30,
+    "stage": "B",
+    "verdict": "code",
+    "final": "code",
+    "expected": "git"
+   },
+   {
+    "case": 32,
+    "stage": "A",
+    "verdict": "platform",
+    "final": "platform",
+    "expected": "quickplan"
+   }
+  ]
+ },
+ "leg_on_strong": {
+  "correct": 40.303999999999995,
+  "n": 48,
+  "sys_acc": 0.8397,
+  "routes": 20,
+  "upgrades": [
+   17,
+   18
+  ],
+  "wrong": [
+   {
+    "case": 13,
+    "stage": "B",
+    "verdict": "code",
+    "final": "code",
+    "expected": "plan"
+   },
+   {
+    "case": 30,
+    "stage": "B",
+    "verdict": "code",
+    "final": "code",
+    "expected": "git"
+   },
+   {
+    "case": 32,
+    "stage": "A",
+    "verdict": "platform",
+    "final": "platform",
+    "expected": "quickplan"
+   },
+   {
+    "case": 37,
+    "stage": "A",
+    "verdict": "git",
+    "final": "git",
+    "expected": "quickplan"
+   }
+  ]
+ },
+ "note": "offline cascade simulation per iter-20 method; session evidence seeded = gold quickplan; artifacts carry no message text"
+}

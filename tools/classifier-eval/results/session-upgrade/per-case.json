@@ -1,0 +1,434 @@
+[
+ {
+  "case": 0,
+  "stage": "C",
+  "verdict": null,
+  "expected": "review",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 1,
+  "stage": "C",
+  "verdict": null,
+  "expected": "quickplan",
+  "cue": false,
+  "strong": false,
+  "evidence": true
+ },
+ {
+  "case": 2,
+  "stage": "B",
+  "verdict": "quickplan",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 3,
+  "stage": "A",
+  "verdict": "quickplan",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 4,
+  "stage": "C",
+  "verdict": null,
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 5,
+  "stage": "A",
+  "verdict": "review",
+  "expected": "review",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 6,
+  "stage": "C",
+  "verdict": null,
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 7,
+  "stage": "B",
+  "verdict": "quickplan",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 8,
+  "stage": "A",
+  "verdict": "quickplan",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 9,
+  "stage": "B",
+  "verdict": "quickplan",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 10,
+  "stage": "A",
+  "verdict": "quickplan",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 11,
+  "stage": "B",
+  "verdict": "quickplan",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 12,
+  "stage": "C",
+  "verdict": null,
+  "expected": "quickplan",
+  "cue": false,
+  "strong": false,
+  "evidence": true
+ },
+ {
+  "case": 13,
+  "stage": "B",
+  "verdict": "code",
+  "expected": "plan",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 14,
+  "stage": "C",
+  "verdict": null,
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 15,
+  "stage": "B",
+  "verdict": "code",
+  "expected": "code",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 16,
+  "stage": "B",
+  "verdict": "code",
+  "expected": "code",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 17,
+  "stage": "B",
+  "verdict": "code",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 18,
+  "stage": "B",
+  "verdict": "code",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 19,
+  "stage": "C",
+  "verdict": null,
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 20,
+  "stage": "C",
+  "verdict": null,
+  "expected": "review",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 21,
+  "stage": "C",
+  "verdict": null,
+  "expected": "review",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 22,
+  "stage": "C",
+  "verdict": null,
+  "expected": "review",
+  "cue": true,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 23,
+  "stage": "C",
+  "verdict": null,
+  "expected": "analyze",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 24,
+  "stage": "C",
+  "verdict": null,
+  "expected": "debug",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 25,
+  "stage": "C",
+  "verdict": null,
+  "expected": "review",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 26,
+  "stage": "C",
+  "verdict": null,
+  "expected": "plan",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 27,
+  "stage": "A",
+  "verdict": "plan",
+  "expected": "plan",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 28,
+  "stage": "C",
+  "verdict": null,
+  "expected": "quickplan",
+  "cue": false,
+  "strong": false,
+  "evidence": true
+ },
+ {
+  "case": 29,
+  "stage": "A",
+  "verdict": "git",
+  "expected": "git",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 30,
+  "stage": "B",
+  "verdict": "code",
+  "expected": "git",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 31,
+  "stage": "C",
+  "verdict": null,
+  "expected": "code",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 32,
+  "stage": "A",
+  "verdict": "platform",
+  "expected": "quickplan",
+  "cue": false,
+  "strong": false,
+  "evidence": true
+ },
+ {
+  "case": 33,
+  "stage": "C",
+  "verdict": null,
+  "expected": "review",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 34,
+  "stage": "C",
+  "verdict": null,
+  "expected": "review",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 35,
+  "stage": "C",
+  "verdict": null,
+  "expected": "analyze",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 36,
+  "stage": "C",
+  "verdict": null,
+  "expected": "git",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 37,
+  "stage": "A",
+  "verdict": "git",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": false,
+  "evidence": true
+ },
+ {
+  "case": 38,
+  "stage": "C",
+  "verdict": null,
+  "expected": "git",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 39,
+  "stage": "C",
+  "verdict": null,
+  "expected": "debug",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 40,
+  "stage": "C",
+  "verdict": null,
+  "expected": "code",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 41,
+  "stage": "C",
+  "verdict": null,
+  "expected": "review",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 42,
+  "stage": "C",
+  "verdict": null,
+  "expected": "review",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 43,
+  "stage": "B",
+  "verdict": "quickplan",
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 44,
+  "stage": "C",
+  "verdict": null,
+  "expected": "quickplan",
+  "cue": true,
+  "strong": true,
+  "evidence": true
+ },
+ {
+  "case": 45,
+  "stage": "A",
+  "verdict": "git",
+  "expected": "git",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 46,
+  "stage": "C",
+  "verdict": null,
+  "expected": "analyze",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ },
+ {
+  "case": 47,
+  "stage": "C",
+  "verdict": null,
+  "expected": "platform",
+  "cue": false,
+  "strong": false,
+  "evidence": false
+ }
+]
