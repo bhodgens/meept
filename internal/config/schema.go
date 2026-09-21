@@ -2418,6 +2418,15 @@ type OrchestratorConfig struct {
 	// prefilter is inert and all traffic flows through the LLM path
 	// unchanged.
 	Prefilter ClassifierPrefilterConfig `json:"classifier_prefilter" toml:"classifier_prefilter"`
+	// Classifier configures LLM intent-classifier ancillary gates that are
+	// not part of the Stage-0 prefilter. Currently only the one-way
+	// session-state upgrade (docs/plans/quickplan-session-upgrade/): when
+	// enabled, a boundary-lane verdict upgrades to quickplan at dispatch
+	// time if the session holds an approved/executing plan or active
+	// tracked tasks. Session evidence is never a classifier feature and
+	// never downgrades a verdict. Default false = byte-identical legacy
+	// behavior; the gate itself lives in internal/agent/session_state_gate.go.
+	Classifier ClassifierConfig `json:"classifier" toml:"classifier"`
 	// SessionDrift configures the session drift detector (issue #41): a
 	// temporal anomaly check on the per-session intent-embedding stream.
 	// Default off, log-only — the established first production mode.
@@ -2457,6 +2466,20 @@ type TurnWatchdogConfig struct {
 	// StaleAfterSeconds is how long a turn must go without progress
 	// before it is reaped as failed. 0 → 120.
 	StaleAfterSeconds int `json:"stale_after_seconds" toml:"stale_after_seconds"`
+}
+
+// ClassifierConfig configures LLM intent-classifier ancillary gates that
+// are not part of the Stage-0 embedding prefilter.
+type ClassifierConfig struct {
+	// SessionStateUpgrade enables the one-way session-evidence upgrade to
+	// quickplan at dispatch time (docs/plans/quickplan-session-upgrade/):
+	// when an LLM verdict lands in a boundary lane (code/plan/review/
+	// debug/git/analyze) AND the session holds quickplan-shaped state
+	// (approved/executing plan, active tracked tasks) AND the input
+	// carries lexical orchestration evidence, the verdict upgrades to
+	// quickplan. One-way: session evidence never downgrades a quickplan
+	// verdict. Default false = byte-identical legacy behavior.
+	SessionStateUpgrade bool `json:"session_state_upgrade" toml:"session_state_upgrade"`
 }
 
 // ClassifierPrefilterConfig configures the Stage-0 embedding prefilter in
@@ -3252,6 +3275,11 @@ func DefaultConfig() *Config {
 				},
 			},
 			// Session drift (issue #41): default off, log-only.
+			// One-way session-evidence upgrade to quickplan: default off
+			// (docs/plans/quickplan-session-upgrade/).
+			Classifier: ClassifierConfig{
+				SessionStateUpgrade: false,
+			},
 			SessionDrift: SessionDriftConfig{
 				Enabled:    false,
 				WindowSize: 0,

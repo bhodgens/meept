@@ -677,9 +677,16 @@
       // inert (logged once at startup) when the reference file is absent.
       // Build the reference with tools/build_embed_health_ref.py.
       "embed_health_check": {
-        "enabled": true,
-        "reference_path": "",   // empty → ~/.meept/embed_health_reference.json
+        "enabled": true,        "reference_path": "",   // empty → ~/.meept/embed_health_reference.json
       },
+    },
+    // One-way session-evidence upgrade to quickplan (docs/plans/
+    // quickplan-session-upgrade/): a boundary-lane classifier verdict
+    // upgrades to quickplan when the session holds an approved/executing
+    // plan or active tracked tasks AND the input carries orchestration
+    // cues. Default off — legacy behavior until opted in.
+    "classifier": {
+      "session_state_upgrade": false,
     },
     // Session drift detector (issue #41): watches the per-session
     // intent-embedding sequence and signals when the pattern deviates
