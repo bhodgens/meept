@@ -1,0 +1,47 @@
+{
+  "accuracy": 0.6458,
+  "correct": 31,
+  "errors": [],
+  "mix_cost_usd_est": null,
+  "n": 48,
+  "n_final_nonerror": 48,
+  "per_intent": {
+    "analysis": {
+      "correct": 3,
+      "n": 3
+    },
+    "coding": {
+      "correct": 4,
+      "n": 4
+    },
+    "debugging": {
+      "correct": 2,
+      "n": 2
+    },
+    "git": {
+      "correct": 4,
+      "n": 5
+    },
+    "planning": {
+      "correct": 1,
+      "n": 3
+    },
+    "platform": {
+      "correct": 0,
+      "n": 1
+    },
+    "quickplan": {
+      "correct": 11,
+      "n": 20
+    },
+    "review": {
+      "correct": 6,
+      "n": 10
+    }
+  },
+  "source_distribution": {
+    "a": 37,
+    "judge": 11
+  },
+  "timestamp": "2026-09-21T05:15:25+00:00"
+}
