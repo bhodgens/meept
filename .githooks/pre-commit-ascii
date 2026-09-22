@@ -54,6 +54,7 @@ ALLOWLIST=(
   ".firecrawl/oh-my-openagent-repo.md"
   ".firecrawl/oh-my-openagent.json"
   "testdata/eval/classifier-adversarial-corpus.json5"
+  "internal/validator/filter_language_test.go"
 )
 
 is_allowlisted() {
