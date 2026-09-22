@@ -104,5 +104,12 @@
     "decision": "Quickplan uses the main (large) model in production, NOT the LFM 8B. The campaign ran on the 8B because it is the only configured model for testing \u2014 by intention, not changed by this campaign.",
     "implication": "The 35% error share (quickplan multi-step orchestration exceeding 600s on the 8B) is an EXPECTED-ENVIRONMENT result, not a platform defect. #52's classifier-layer repairs (description, cue arbitration, ordering) are the deliverables; the chain-stability fixes (ralph progress-aware cap, nudge recovery, saturation retry, timeout scaling) are durable improvements that apply regardless of model.",
     "phase2_verdict_under_this_decision": "The MARGINAL scored band and INVALID error rule reflect the 8B test environment. Production quickplan on the main model is expected to complete within budget; re-validation on the production model configuration is future scope when that configuration exists."
+  },
+  "session_state_upgrade_validation": {
+    "decided": "owner approved enable AFTER feature-specific validation",
+    "offline_validation": "PASSED \u2014 3 feature-specific tests (full maybeUpgradeSessionQuickplan path with real seeded plan store): approved-plan evidence upgrades code->quickplan (method quickplan_session_upgrade, RequiresPlanning set); no-evidence passes through; knob-off inert. Committed 4c59c13c.",
+    "live_validation": "BLOCKED by bench architecture: the runner creates a FRESH session per task (runner.go:188 SessionCreate), so no task ever sees prior-session plan evidence \u2014 the feature's precondition. This is the documented 'completion-gated session-state scenarios require a second tree' gap.",
+    "knob_status": "config key verified parsing (orchestrator.classifier.session_state_upgrade) and enabled in the test rig; stays DEFAULT-OFF in shipped config per the C3 contract",
+    "live_continue_scatter_case": "1 case DID land quickplan via heuristic_fallback (the review+correction rule from #52's sibling fix) \u2014 evidence the lane repairs hold"
   }
 }
