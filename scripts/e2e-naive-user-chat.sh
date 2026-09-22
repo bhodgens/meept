@@ -124,6 +124,33 @@ kill_daemon() {
     fi
   fi
   wait "$DPID" 2>/dev/null || true
+  reap_workdir_runtimes
+}
+
+# reap_workdir_runtimes (issue #54): a SIGKILLed daemon cannot run its
+# graceful runtime StopAll, and the boot orphan sweep only covers a daemon
+# booting with the SAME home. After the daemon is gone, kill any runtime
+# process still holding a pid file under this workdir (llama-server /
+# mlx_lm spawned for the scratch endpoints). Ownership check: the pid
+# file's recorded pid must be alive AND its command line must carry
+# llama-server or mlx_lm so we never signal an unrelated reused pid.
+reap_workdir_runtimes() {
+  local pid_file pid
+  for pid_file in "$WORK"/home/.meept/run/*.pid "$WORK"/state/*.pid; do
+    [ -f "$pid_file" ] || continue
+    pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null)"
+    case "$pid" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    kill -0 "$pid" 2>/dev/null || continue
+    if ps -p "$pid" -o command= 2>/dev/null | grep -qE 'llama-server|mlx_lm'; then
+      log "  reaping leaked runtime (pid $pid from $pid_file)"
+      kill "$pid" 2>/dev/null || true
+      sleep 1
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pid_file"
+  done
 }
 
 cleanup() {
