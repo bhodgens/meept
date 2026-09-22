@@ -1323,6 +1323,18 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 // immediately. Streaming tools use their streaming path when the bus is
 // available.
 func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, config BackoffConfig, toolCallID, toolName string, args map[string]any) (any, error) {
+	// Registry-level boundary gate (tool-boundary-hardening leaf 01; live
+	// e2e 2026-09-19): the executor is the LIVE tool path — it calls
+	// tool.Execute directly, never tools.Registry.Execute, so the gate must
+	// run here. A declared-Required arg that is missing/empty/ill-typed is
+	// rejected BEFORE the tool runs (the 45x task_create{} e2e loop).
+	if err := tools.ValidateToolArgs(tool, args); err != nil {
+		e.logger.Warn("tool arguments failed schema validation",
+			"tool", toolName,
+			"error", err,
+		)
+		return nil, err
+	}
 	backoff := NewBackoff(config)
 	var lastErr error
 
