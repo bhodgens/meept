@@ -2789,9 +2789,14 @@ func DefaultConfig() *Config {
 				AutoTriggerThreshold: 3,
 			},
 			OutputFilters: OutputFiltersConfig{
-				// Enabled stays FALSE: the filter stage is opt-in until
-				// config turns it on (zero behavior change for existing
-				// installs - output-filters master.md Contract 6).
+				// Enabled defaults to TRUE (2026-09-22 decision): the
+				// filter stage is part of the shipped validation pipeline.
+				// The chain is host-adaptive - an empty filters list
+				// resolves to the always-safe content filters plus every
+				// script linter whose toolchain exists on this host, so a
+				// fresh install without node/python never sees linter
+				// rejections caused by a missing binary.
+				Enabled:          true,
 				MaxPasses:        2,
 				MaxFilterRetries: 2,
 			},

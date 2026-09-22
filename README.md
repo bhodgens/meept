@@ -428,10 +428,11 @@ Meept checks every task step result through layered gates. The gates run cheapes
 After the gates, reply guarding protects the final answer. `applyReplyGuard` (internal/agent) replaces machine-shaped dumps in user-facing replies with user-language text.
 
 The output-filter stage (deterministic pass/rewrite/fail content checks
-before evidence validation) is now implemented. It runs mechanical content
-repairs — JSON canonicalization, language checks, Go formatting — as frozen
-stage 3 of the pipeline, off by default until enabled in config, with an
-independent retry cap that never consumes validation retries. See
+before evidence validation) is now implemented and **enabled by default**.
+It runs mechanical content repairs and checks — JSON canonicalization,
+language checks, Go/Python/JS syntax — as frozen stage 3 of the pipeline,
+with a host-adaptive default filter set and an independent retry cap that
+never consumes validation retries. See
 [docs/workflows/output-filters.md](docs/workflows/output-filters.md) and
 [docs/plans/20260921-output-filters/](docs/plans/20260921-output-filters/master.md).
 

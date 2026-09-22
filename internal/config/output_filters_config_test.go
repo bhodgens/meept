@@ -6,14 +6,15 @@ import (
 	"testing"
 )
 
-// TestDefaultConfig_OutputFiltersDisabledFrozen verifies the frozen
-// zero-behavior default: output filters are OFF until explicitly opted in,
-// with the documented caps and an empty (nil) filter list (leaf 04 Task 1).
+// TestDefaultConfig_OutputFiltersEnabledDefault verifies the 2026-09-22
+// decision: output filters are ON by default, with the documented caps and
+// an empty (nil) filter list meaning "host-adaptive defaults resolve at
+// wiring time" (leaf 04 Task 1, revised by user direction).
 func TestDefaultConfig_OutputFiltersDisabledFrozen(t *testing.T) {
 	cfg := DefaultConfig()
 	ofs := cfg.Daemon.OutputFilters
-	if ofs.Enabled {
-		t.Error("Daemon.OutputFilters.Enabled = true; want false (frozen zero-behavior default)")
+	if !ofs.Enabled {
+		t.Error("Daemon.OutputFilters.Enabled = false; want true (enabled-by-default)")
 	}
 	if ofs.MaxPasses != 2 {
 		t.Errorf("Daemon.OutputFilters.MaxPasses = %d, want 2", ofs.MaxPasses)

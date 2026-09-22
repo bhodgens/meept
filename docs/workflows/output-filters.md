@@ -65,13 +65,21 @@ Daemon level, `~/.meept/meept.json5`:
 ```json5
 "daemon": {
     "output_filters": {
-        "enabled":            false, // frozen zero-behavior default; opt in
+        "enabled":            true,  // ON by default (2026-09-22)
         "max_passes":         2,     // rewrite sweeps before chain fail
         "max_filter_retries": 2,     // independent of validation retries
-        "filters":            ["json_format", "language_en"]
+        "filters":            []     // empty = host-adaptive defaults
     }
 }
 ```
+
+**Enabled by default.** The filter stage is part of the shipped validation
+pipeline. An empty `filters` list means "the sensible defaults for THIS
+host": the always-safe content filters (`json_format`, `language_en`,
+`lint_go`) plus every script linter whose toolchain is resolvable on the
+host (`lint_python` when python3 exists, `lint_js` when node exists). A
+fresh install without node never sees lint_js rejections caused by the
+missing binary rather than by the content. Set `enabled: false` to opt out.
 
 Inspect with the CLI:
 
@@ -79,9 +87,8 @@ Inspect with the CLI:
 meept config get daemon.output_filters
 ```
 
-When the stage is disabled (the default) the completion path is
-byte-identical to the pre-filter pipeline: zero invocations, zero filter log
-lines.
+When the stage is disabled the completion path is byte-identical to the
+pre-filter pipeline: zero invocations, zero filter log lines.
 
 ## Per-agent override chain
 
@@ -129,6 +136,29 @@ e.g. `lang=fr confidence=0.87`.
 Shells `gofmt -l` / `go vet` (advisory) on code-bearing outputs; applies
 `gofmt -w` as a rewrite in a temp dir. Subprocess timeout 10s; a timeout
 fails with reason `timeout`.
+
+### `lint_python`
+
+Typechecks fenced ```python / ```py blocks with `python -m py_compile` - a
+pure syntax check (no imports run, no code executes). Syntax errors fail
+with the compiler's message; Python has no deterministic autofix, so this
+filter never rewrites. Idempotent (pure check).
+
+### `lint_js`
+
+Typechecks fenced ```js / ```javascript blocks with `node --check` (syntax
+parse, no execution) and ```ts / ```typescript blocks with `tsc --noEmit
+--skipLibCheck` when a tsc binary is resolvable (PATH + nvm locations). A
+missing tsc is a logged skip, not a failure - a host's missing toolchain
+must never fail a step whose content is fine. No autofix; never rewrites.
+
+## Host-adaptive defaults
+
+`validator.DefaultFilters()` resolves the default set at daemon wiring:
+`json_format`, `language_en`, `lint_go` unconditionally, then `lint_python`
+and `lint_js` only when their toolchains exist on the host. Config with a
+non-empty `filters` list replaces the defaults entirely (and an unknown
+name there disables the stage with a warning naming the valid set).
 
 ## Observability
 

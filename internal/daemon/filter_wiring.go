@@ -21,15 +21,27 @@ func wireOutputFilterChain(c *Components, cfg *config.Config, scheduler *agent.T
 		return
 	}
 	ofs := cfg.Daemon.OutputFilters
-	if !ofs.Enabled || len(ofs.Filters) == 0 {
+	if !ofs.Enabled {
+		return
+	}
+	// An empty filters list means "the sensible defaults for this host":
+	// the always-safe content filters plus every script linter whose
+	// toolchain is resolvable here. A host without node never sees
+	// lint_js rejections caused by the missing binary rather than the
+	// content.
+	names := ofs.Filters
+	if len(names) == 0 {
+		names = validator.DefaultFilters()
+	}
+	if len(names) == 0 {
 		return
 	}
 
 	// Resolve each configured name against the builtin registry; an
 	// unknown name is a config error logged at Warn with the valid set,
 	// and skips the whole stage (never a partial chain).
-	filters := make([]validator.OutputFilter, 0, len(ofs.Filters))
-	for _, name := range ofs.Filters {
+	filters := make([]validator.OutputFilter, 0, len(names))
+	for _, name := range names {
 		f, err := validator.NewBuiltinFilter(name, validator.BuiltinConfig{})
 		if err != nil {
 			logger.Warn("invalid output_filters entry; filter stage disabled",
@@ -44,7 +56,7 @@ func wireOutputFilterChain(c *Components, cfg *config.Config, scheduler *agent.T
 	scheduler.SetFilterChain(validator.NewFilterChain(filters, ofs.MaxPasses))
 	scheduler.SetFilterRetryLimiter(configFilterRetryLimiter{maxRetries: ofs.MaxFilterRetries})
 	logger.Info("output filter chain wired",
-		"filters", ofs.Filters,
+		"filters", names,
 		"max_passes", ofs.MaxPasses,
 		"max_filter_retries", ofs.MaxFilterRetries,
 	)
