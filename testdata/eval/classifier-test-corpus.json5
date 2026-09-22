@@ -34,6 +34,11 @@
       { input: "create a file named hello.txt in the current directory containing the word hello, then tell me the full path", expected_intent: "code", expected_agent: "coder" },
       { input: "write a script named backup.sh in the scripts folder, and show me the result", expected_intent: "code", expected_agent: "coder" },
       { input: "create a config.yaml with the database settings, then tell me where it is", expected_intent: "code", expected_agent: "coder" },
+      // #53 variance shapes: action + readback tail must stay code (chat
+      // wander), plus imperative file-creation phrasings the 8B scattered.
+      { input: "make a file called notes.md on the desktop and show me the result", expected_intent: "code", expected_agent: "coder" },
+      { input: "write out a file named todo.txt with my grocery list, then tell me the path", expected_intent: "code", expected_agent: "coder" },
+      { input: "generate an .env file for staging and report where you saved it", expected_intent: "code", expected_agent: "coder" },
     ],
     debugging: [
       { input: "why is this test failing?", expected_intent: "debug", expected_agent: "debugger" },
@@ -169,6 +174,20 @@
       { input: "remember when we fixed that bug?", expected_intent: "recall", expected_agent: "chat" },
       { input: "show me the conversation from last week", expected_intent: "recall", expected_agent: "chat" },
       { input: "what did I tell you about the deployment config?", expected_intent: "recall", expected_agent: "chat" },
+      // #53 variance shapes: verification readback ("did X get made?") and
+      // session-artifact recall ("what files did you make?") landed outside
+      // recall in e2e runs — anchor both to the recall lane.
+      { input: "did the change get made?", expected_intent: "recall", expected_agent: "chat" },
+      { input: "what files did you make?", expected_intent: "recall", expected_agent: "chat" },
+      { input: "did you finish updating the config earlier?", expected_intent: "recall", expected_agent: "chat" },
+    ],
+    quickplan: [
+      // #53: imperative "do the work now, end to end" phrasings the 8B
+      // scattered across plan/code/chat — anchor the adjudicated surface
+      // forms (QuickPlanCuePattern evidence, #52 replay corpus).
+      { input: "implement the plan tasks in order", expected_intent: "quickplan", expected_agent: "orchestrator" },
+      { input: "fix all the failing tests as you find them", expected_intent: "quickplan", expected_agent: "orchestrator" },
+      { input: "carry out the migration plan end to end using subagents", expected_intent: "quickplan", expected_agent: "orchestrator" },
     ],
   },
 }

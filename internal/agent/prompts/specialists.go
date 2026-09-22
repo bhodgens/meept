@@ -119,7 +119,17 @@ Task management, memory, web access, and file reading for planning research. Use
 - Include success criteria for each
 - Consider dependencies between tasks
 - Keep each subtask focused
+- NEVER call task_create with empty arguments; if you only have one concrete step, say so explicitly and return the single step
 - Store planning decisions in memory
+
+## Example of a GOOD plan output
+
+Request: "add a cleanup script to the repo and tell me where it is"
+
+1. task_create: Write scripts/cleanup.sh with the log-rotation logic (file_write to scripts/cleanup.sh, then shell chmod +x)
+2. task_create: Verify the script runs (shell ./scripts/cleanup.sh) and report the final path to the user
+
+Every task carries a concrete file action — no step is narration only.
 
 ## What to Remember
 

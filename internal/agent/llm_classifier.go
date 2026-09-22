@@ -601,21 +601,7 @@ func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemo
 	}
 
 	// Use a prompt that asks LLM to detect ALL intents
-	prompt := fmt.Sprintf(`Analyze this user request and identify ALL distinct intents.
-
-A request may contain multiple independent tasks joined by "and", "also", "then", "but", "while", etc.
-
-For EACH detected intent, output:
-- intent: one of [%s]
-- confidence: 0.0-1.0
-- summary: brief description
-
-User input: %s
-
-Return ONLY valid JSON array: [{"intent": "debug", "confidence": 0.8, "summary": "..."}]
-
-If only one intent is present, return a single-element array.
-If no intents detected, return empty array [].`, laneList(), input)
+	prompt := buildClassifyMultiPrompt(input)
 
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: "You are a multi-intent detector for an AI agent system. Identify ALL distinct intents in user requests."},
@@ -699,6 +685,30 @@ func (c *LLMClassifier) MarkUnavailable() {
 	c.unavailMu.Unlock()
 }
 
+// buildClassifyMultiPrompt renders the multi-intent detection prompt. The
+// readback rule (issue #53 direction 1) mirrors the single-intent
+// classification hardening: an action plus a follow-up report of its result
+// is ONE intent — without it, "create X then tell me the path" split into
+// two intents and the compound routed to the wrong lanes.
+func buildClassifyMultiPrompt(input string) string {
+	return fmt.Sprintf(`Analyze this user request and identify ALL distinct intents.
+
+A request may contain multiple independent tasks joined by "and", "also", "then", "but", "while", etc.
+An action plus a follow-up report of its result (tell me/show me the path|result) is ONE intent, not multiple.
+
+For EACH detected intent, output:
+- intent: one of [%s]
+- confidence: 0.0-1.0
+- summary: brief description
+
+User input: %s
+
+Return ONLY valid JSON array: [{"intent": "debug", "confidence": 0.8, "summary": "..."}]
+
+If only one intent is present, return a single-element array.
+If no intents detected, return empty array [].`, laneList(), input)
+}
+
 // UnmarkUnavailable clears the unavailable flag, allowing immediate retries.
 func (c *LLMClassifier) UnmarkUnavailable() {
 	c.unavailable.Store(false)
@@ -719,6 +729,18 @@ func (c *LLMClassifier) buildClassificationPrompt(input string) string {
 		sb.WriteString(c.getIntentDescription(intent))
 		sb.WriteString("\n")
 	}
+	// Few-shot anchoring (issue #53 direction 1): the 8B wandered on
+	// readback tails and imperative multi-step phrasings even after the
+	// description hardening. Short per-lane examples anchor the adjudicated
+	// surface forms. Keep this block tiny — the classifier runs under a
+	// 10s timeout and the prompt size is pinned by
+	// TestClassifierPrompt_SizeCeiling.
+	sb.WriteString("\nExamples:\n")
+	sb.WriteString(`- "create a file named X then tell me the path" -> code (the report-back is part of the work, not a second intent)
+- "implement the plan tasks in order" -> quickplan
+- "did the change get made?" -> recall
+- "what files did you make?" -> recall
+`)
 	sb.WriteString("\nReturn JSON with intent, confidence, and reasoning.")
 	return sb.String()
 }
