@@ -361,6 +361,9 @@ type ModelsConfig struct {
 	// MemoryModel is the model for ambient epistemic extraction + distill
 	// summarization (empty = falls back to the general chat client).
 	MemoryModel string `json:"memory_model"`
+	// PlannerModel is the dedicated model for the strategic planner; empty
+	// = planner uses its agent default (local 8B).
+	PlannerModel string `json:"planner_model"`
 	// RefusalModel is the global default refusal fallback target
 	// (provider/model ref or alias name; refusal-fallback tree 02).
 	// Empty = no global default; a per-agent spec refusal_model overrides

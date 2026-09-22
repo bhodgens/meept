@@ -41,6 +41,12 @@
   // this at a small, cheap model.
   // "memory_model": "zai/glm-4.5-air",
 
+  // Dedicated model for the strategic planner (issue #53 direction 4):
+  // point planning at a stronger model without changing the general chat
+  // model. Commented out (disabled) by default = the planner uses its
+  // agent default (local 8B) via the usual planner alias chain.
+  // "planner_model": "zai/glm-5.2",
+
   // Image / video generation (same provider/id form as chat models)
   "image_model": "xai-oauth/grok-imagine-image-2.0",
   "video_model": "xai-oauth/grok-imagine-video",

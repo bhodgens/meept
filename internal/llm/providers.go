@@ -112,6 +112,9 @@ type ProvidersConfig struct {
 	// dedicated extraction model (typically a local small LLM). Empty =
 	// json_extract reports not-configured.
 	ExtractModel string `json:"extract_model"`
+	// PlannerModel is the dedicated model for the strategic planner; empty
+	// = planner uses its agent default (local 8B).
+	PlannerModel string `json:"planner_model"`
 	// RefusalModel is the global default refusal fallback target
 	// (provider/model ref or alias name; refusal-fallback tree 02).
 	// Empty = no global default; a per-agent spec refusal_model overrides
@@ -300,6 +303,9 @@ func MergeProvidersConfig(base, overlay *ProvidersConfig) *ProvidersConfig {
 	}
 	if overlay.ExtractModel != "" {
 		out.ExtractModel = overlay.ExtractModel
+	}
+	if overlay.PlannerModel != "" {
+		out.PlannerModel = overlay.PlannerModel
 	}
 	if overlay.RefusalModel != "" {
 		out.RefusalModel = overlay.RefusalModel

@@ -1242,6 +1242,23 @@ func WithModelRef(modelRef string) LoopOption {
 	}
 }
 
+// Chatter returns the loop's LLM chatter (Client, ProviderManager, or a
+// wrapper such as the context firewall). Read-only seam for wiring tests.
+func (l *AgentLoop) Chatter() llm.Chatter {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.llm
+}
+
+// GetModelRef returns the loop's model reference (alias name or direct
+// "provider/model" ref; empty = the loop keeps the client it was built
+// with). Read-only seam for wiring tests.
+func (l *AgentLoop) GetModelRef() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.modelRef
+}
+
 // WithAgentSpec sets the agent specification for inference parameter overrides.
 func WithAgentSpec(spec *AgentSpec) LoopOption {
 	return func(l *AgentLoop) {

@@ -1231,6 +1231,13 @@ func (f *ContextFirewall) Config() *ModelConfig {
 	return f.inner.Config()
 }
 
+// Inner returns the wrapped chatter (the client or manager the firewall
+// forwards Chat calls to). Read-only seam for wiring tests that must
+// identify the concrete client behind the wrapper.
+func (f *ContextFirewall) Inner() Chatter {
+	return f.inner
+}
+
 // Ensure ContextFirewall implements Chatter
 var _ Chatter = (*ContextFirewall)(nil)
 

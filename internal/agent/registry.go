@@ -126,6 +126,12 @@ type AgentRegistry struct {
 	// global models.json5 refusal_model slot stamped onto every
 	// registry-built loop (bughunt F5).
 	globalRefusalModel string
+
+	// plannerChatter mirrors RegistryConfig.PlannerChatter: the dedicated
+	// models.json5 planner_model client used ONLY when createLoop builds
+	// the planner agent's loop (issue #53 direction 4). Nil = the planner
+	// loop uses the shared chain like every other loop.
+	plannerChatter llm.Chatter
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -191,6 +197,15 @@ type RegistryConfig struct {
 	// still outranks it). Empty = refusal fallback feature off unless the
 	// per-agent spec sets its own RefusalModel.
 	GlobalRefusalModel string
+
+	// PlannerChatter is the dedicated chatter (built at daemon wiring time
+	// from the models.json5 planner_model slot; issue #53 direction 4).
+	// When set, the registry builds the planner agent's loop on this
+	// chatter instead of the shared LLMClient and blanks the loop's
+	// modelRef so the planner alias resolution cannot retarget the
+	// dedicated client. Nil = every loop uses the shared chain (pre-slot
+	// behavior, byte-identical).
+	PlannerChatter llm.Chatter
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -222,6 +237,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		db:                    cfg.DB,
 		sharedConvStore:       NewConversationStore(cfg.ConversationStoreSize),
 		globalRefusalModel:    cfg.GlobalRefusalModel,
+		plannerChatter:        cfg.PlannerChatter,
 	}
 
 	// Load global rules
@@ -404,6 +420,21 @@ func modelSwitcherFor(client *llm.Client, chatter llm.Chatter) (modelSwitcher, b
 	return nil, false
 }
 
+// plannerChatterLive reports whether the planner chatter is usable: the
+// interface must be non-nil AND must not carry a typed-nil *llm.Client
+// (RegistryConfig is a public struct; the daemon wiring guards this, but
+// the check here is defense in depth against the documented typed-nil
+// hazard json_extract also guards against).
+func plannerChatterLive(c llm.Chatter) bool {
+	if c == nil {
+		return false
+	}
+	if cc, ok := c.(*llm.Client); ok && cc == nil {
+		return false
+	}
+	return true
+}
+
 func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	agentCfg := AgentConfig{
 		MaxIterations:         spec.Constraints.MaxIterations,
@@ -434,7 +465,23 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	}
 
 	if r.llm != nil {
-		opts = append(opts, WithLLMClient(r.llm))
+		// Dedicated planner_model slot (issue #53 direction 4): when the
+		// daemon resolved the models.json5 planner_model entry, the
+		// planner's loop is built on that dedicated client and its
+		// modelRef is blanked — otherwise the alias-resolution block in
+		// reasoningCycle would SwitchModel the dedicated client onto the
+		// planner alias chain and silently discard the slot. Empty slot
+		// (nil plannerChatter) leaves every loop on the shared client,
+		// byte-identical to the pre-slot behavior.
+		if plannerChatterLive(r.plannerChatter) {
+			if spec.ID == config.AgentIDPlanner {
+				opts = append(opts, WithLLMChatter(r.plannerChatter))
+			} else {
+				opts = append(opts, WithLLMClient(r.llm))
+			}
+		} else {
+			opts = append(opts, WithLLMClient(r.llm))
+		}
 	}
 
 	if r.resolver != nil {
@@ -450,7 +497,15 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	// local/lfm-8b-q4 first in the coder alias, so the local driver was never
 	// exercised through the daemon.
 	if modelRef := modelRefForAgent(spec, r.resolver); modelRef != "" {
-		opts = append(opts, WithModelRef(modelRef))
+		// Dedicated planner_model slot (issue #53 direction 4): the slot
+		// outranks the planner alias — blank the modelRef so the alias
+		// resolution cannot SwitchModel the dedicated client. Any other
+		// agent's modelRef passes through untouched.
+		if plannerChatterLive(r.plannerChatter) && spec.ID == config.AgentIDPlanner {
+			opts = append(opts, WithModelRef(""))
+		} else {
+			opts = append(opts, WithModelRef(modelRef))
+		}
 	}
 
 	if r.bus != nil {

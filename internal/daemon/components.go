@@ -116,10 +116,16 @@ type Components struct {
 	// models.json5). Nil = those paths use the general chat client
 	// (LLMProvider/LLMClient).
 	MemoryModelClient *llm.Client
-	LLMResolver       *llm.Resolver
-	ToolRegistry      *tools.Registry
-	SecurityChecker   *security.PermissionChecker
-	BudgetCleanupStop chan struct{} // Stop channel for budget periodic cleanup
+	// PlannerModelClient is the dedicated client for the strategic
+	// planner (planner_model slot in models.json5; issue #53 direction
+	// 4). Non-nil only when planner_model names a resolvable model; nil =
+	// the planner loop uses its agent default (general chat chain), the
+	// pre-slot behavior.
+	PlannerModelClient *llm.Client
+	LLMResolver        *llm.Resolver
+	ToolRegistry       *tools.Registry
+	SecurityChecker    *security.PermissionChecker
+	BudgetCleanupStop  chan struct{} // Stop channel for budget periodic cleanup
 	// EvolverPlanStore backs the evolver-DEDICATED PlanManager (plan sink).
 	// Owned by the evolver wiring, NOT the shared plan system: closed in
 	// stopComponents, never by the daemon's plan-store shutdown.
@@ -930,6 +936,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				logger.Info("Memory model LLM client initialized", "model", c.ModelsConfig.MemoryModel)
 			} else {
 				logger.Warn("Memory model unresolvable; extraction/distill falls back to the general chat client", "model", c.ModelsConfig.MemoryModel)
+			}
+		}
+
+		// Dedicated planner model for the strategic planner (issue #53
+		// direction 4). Built ONLY when planner_model names a model; nil
+		// leaves the planner loop on the general chat client (byte-identical
+		// to the pre-slot behavior).
+		if c.ModelsConfig.PlannerModel != "" {
+			c.PlannerModelClient = createAuxiliaryLLMClientWithResolver(
+				c.ModelsConfig,
+				c.ModelsConfig.PlannerModel,
+				c.LLMResolver,
+				logger.With("component", "planner-model-llm"),
+				budgetTracker,
+			)
+			if c.PlannerModelClient != nil {
+				logger.Info("Planner model LLM client initialized", "model", c.ModelsConfig.PlannerModel)
+			} else {
+				logger.Warn("Planner model unresolvable; planner falls back to its agent default", "model", c.ModelsConfig.PlannerModel)
 			}
 		}
 	} else {
@@ -2496,6 +2521,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			Queues:                cfg.Agent.Queues,
 			Guards:                cfg.Agent.Guards,
 			DB:                    getQueueDB(c),
+			// Dedicated planner_model slot (issue #53 direction 4): the
+			// registry builds the planner loop on this client when the
+			// models.json5 slot resolved; nil keeps the shared chain
+			// (pre-slot behavior, byte-identical). Typed-nil guard: only
+			// assign when the concrete client is non-nil, so the Chatter
+			// interface never carries a nil *llm.Client (the same hazard
+			// json_extract guards against).
+			PlannerChatter: func() llm.Chatter {
+				if c.PlannerModelClient != nil {
+					return c.PlannerModelClient
+				}
+				return nil
+			}(),
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
 
