@@ -27,7 +27,20 @@ var (
 	ErrInterviewNoRegistry     = errors.New("interview skipped: agent registry not available")
 	ErrInterviewPlannerMissing = errors.New("interview skipped: planner agent not available")
 	ErrInterviewGenerationFail = errors.New("interview skipped: LLM question generation failed")
+
+	// ErrPlannerEmptyPlan is returned when the planner LLM parses cleanly but
+	// produces zero steps. The empty-plan guard (issue #53 direction 3)
+	// matches on this sentinel with errors.Is to route to the deterministic
+	// single-step degradation or the honest failure — never the generic
+	// fallback steps.
+	ErrPlannerEmptyPlan = errors.New("planner returned empty plan")
 )
+
+// errPlannerNoPlanNotArtifact is the honest-failure reason (issue #53
+// direction 3, pin 2): the planner produced no plan and the task description
+// does not carry a single concrete artifact action, so there is nothing to
+// execute deterministically.
+var ErrPlannerNoPlanNotArtifact = errors.New("planner produced no plan; not a single-artifact task")
 
 // PlanRequest is the input to the strategic planner.
 type PlanRequest struct {
@@ -509,6 +522,12 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		// without an interview and execute without an approval pause.
 		steps, err = sp.planSinglePhase(ctx, req)
 		if err != nil {
+			// Empty-plan honest failure (issue #53 direction 3, pin 2):
+			// propagate the sentinel so the task fails with its reason
+			// instead of degrading to generic fallback steps.
+			if errors.Is(err, ErrPlannerNoPlanNotArtifact) {
+				return err
+			}
 			sp.logger.Warn("Quickplan single-phase plan failed, using fallback steps",
 				"task_id", req.TaskID, "error", err)
 			// Failure/replan outcome capture (classifier-outcome-loop leaf
@@ -553,6 +572,12 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		}
 		steps, err = sp.planSinglePhase(ctx, req)
 		if err != nil {
+			// Empty-plan honest failure (issue #53 direction 3, pin 2):
+			// propagate the sentinel so the task fails with its reason
+			// instead of degrading to generic fallback steps.
+			if errors.Is(err, ErrPlannerNoPlanNotArtifact) {
+				return err
+			}
 			sp.logger.Warn("Single-phase plan failed, using fallback steps",
 				"task_id", req.TaskID, "error", err)
 			sp.recordMetric("strategic_planner.fallback", 1, map[string]string{"intent": req.Intent, "reason": "plan_failed"})
@@ -653,6 +678,13 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		sp.logger.Error("Failed to set task counters after planning", "error", err)
 	}
 	t.SetState(task.StateExecuting)
+	// Empty-plan guard (issue #53 direction 3): the guard's degraded marker
+	// was persisted to the store mid-planning, but `t` still carries the
+	// pre-guard metadata snapshot — a full-row write here would silently
+	// drop the marker. Preserve-merge it before the update.
+	if meta := sp.readPersistedPlanQuality(req.TaskID); meta != "" {
+		t.Metadata = mergePlanQualityIntoMetadata(t.Metadata, meta)
+	}
 	if err := sp.taskStore.UpdateWithoutCounters(t); err != nil {
 		sp.logger.Error("Failed to update task after planning", "error", err)
 	}
@@ -1006,6 +1038,46 @@ func (sp *StrategicPlanner) buildContextSection(req PlanRequest) string {
 // Renamed from generatePlan in Thread D Task 5 to fit the mode-switch nomenclature
 // (direct/plan/spec_plan/spec_pair → createFallbackSteps/planSinglePhase/planMultiPhase/planPairSession).
 func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
+	steps, err := sp.planSinglePhaseOnce(ctx, req)
+	if err != nil {
+		// Empty-plan guard (issue #53 direction 3): only the EMPTY-plan
+		// sentinel takes the deterministic-first paths. Other planner
+		// failures (malformed JSON, no JSON, planner down) keep the legacy
+		// behavior untouched.
+		if !errors.Is(err, ErrPlannerEmptyPlan) {
+			return nil, err
+		}
+		if isSingleArtifactTask(req.Input) {
+			// One real execution attempt beats a doomed replan loop:
+			// deterministically build a single coder step carrying the task
+			// description as-is.
+			sp.logger.Info("Planner returned empty plan; degrading to deterministic single-step",
+				"task_id", req.TaskID,
+			)
+			sp.recordMetric("strategic_planner.empty_plan_guard", 1, map[string]string{
+				"intent":  req.Intent,
+				"outcome": "deterministic_single_step",
+			})
+			sp.markPlanDegraded(req.TaskID, "degraded: deterministic single-step")
+			return sp.createDeterministicSingleStep(req), nil
+		}
+		// Honest failure: no artifact shape to lean on, and the historical
+		// generic fallback produced memory_search noise instead of work.
+		sp.logger.Warn("Planner produced no plan; failing task",
+			"task_id", req.TaskID,
+		)
+		sp.recordMetric("strategic_planner.empty_plan_guard", 1, map[string]string{
+			"intent":  req.Intent,
+			"outcome": "honest_failure",
+		})
+		sp.failTaskWithReason(req.TaskID, ErrPlannerNoPlanNotArtifact.Error())
+		return nil, ErrPlannerNoPlanNotArtifact
+	}
+	return steps, nil
+}
+
+// planSinglePhaseOnce is the pre-#53 planSinglePhase body, unchanged.
+func (sp *StrategicPlanner) planSinglePhaseOnce(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
 	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
 	if err != nil {
 		return nil, fmt.Errorf("planner agent not available: %w", err)
@@ -1122,7 +1194,7 @@ func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.Task
 	}
 
 	if len(plan.Steps) == 0 {
-		return nil, fmt.Errorf("planner returned empty plan")
+		return nil, fmt.Errorf("%w", ErrPlannerEmptyPlan)
 	}
 
 	// Cap to max steps
@@ -1214,6 +1286,163 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []st
 		step.AddMemoryRef(ref)
 	}
 	return []*task.TaskStep{step}
+}
+
+// artifactActionVerbs are the concrete production actions that, paired with
+// an artifact noun, identify a single-artifact task (issue #53 direction 3).
+var artifactActionVerbs = map[string]bool{
+	"create": true, "write": true, "make": true, "add": true,
+	"generate": true, "produce": true, "draft": true,
+}
+
+// artifactNouns are the concrete file-like deliverables a single-artifact
+// task produces. Matched as substrings so "config file", "docs/", and
+// "readme.md" all count.
+var artifactNouns = []string{
+	"file", "doc", "document", "readme", "config", "configuration",
+	"manifest", "yaml", "yml", "json", "toml", "markdown", "note",
+	"report", "spec", "template", "script", "guide", "changelog", "diagram",
+}
+
+// isSingleArtifactTask reports whether the task description carries a single
+// concrete artifact action: a create/write/make-style verb plus a
+// file/doc/config-style noun (case-insensitive). This is the deterministic
+// detector for the empty-plan guard; it deliberately stays small and
+// explainable over being clever.
+func isSingleArtifactTask(input string) bool {
+	if strings.TrimSpace(input) == "" {
+		return false
+	}
+	lower := strings.ToLower(input)
+	hasAction := false
+	for verb := range artifactActionVerbs {
+		if strings.Contains(lower, verb) {
+			hasAction = true
+			break
+		}
+	}
+	if !hasAction {
+		return false
+	}
+	for _, noun := range artifactNouns {
+		if strings.Contains(lower, noun) {
+			return true
+		}
+	}
+	return false
+}
+
+// createDeterministicSingleStep builds the deterministic one-step plan for
+// the empty-plan guard: a single step assigned to the coder carrying the
+// task description as-is (issue #53 direction 3, pin 1). No LLM re-entry.
+func (sp *StrategicPlanner) createDeterministicSingleStep(req PlanRequest) []*task.TaskStep {
+	step := task.NewTaskStep(req.TaskID, req.Input, 0)
+	step.ToolHint = req.Intent
+	step.AgentID = config.AgentIDCoder
+	return []*task.TaskStep{step}
+}
+
+// markPlanDegraded records the plan-quality marker (e.g. 'degraded:
+// deterministic single-step') in the task's persisted metadata under the
+// 'plan_quality' key. Best-effort: a persistence failure is logged, never
+// fatal (the guard's step is still better than a replan loop).
+func (sp *StrategicPlanner) markPlanDegraded(taskID, marker string) {
+	t, err := sp.taskStore.GetByID(taskID)
+	if err != nil || t == nil {
+		sp.logger.Warn("empty-plan guard: task vanished before degraded marker write",
+			"task_id", taskID, "error", err,
+		)
+		return
+	}
+	meta := map[string]any{}
+	if len(t.Metadata) > 0 {
+		if err := json.Unmarshal(t.Metadata, &meta); err != nil {
+			sp.logger.Warn("empty-plan guard: unparseable task metadata for degraded marker",
+				"task_id", taskID, "error", err,
+			)
+			meta = map[string]any{}
+		}
+	}
+	meta["plan_quality"] = marker
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		sp.logger.Warn("empty-plan guard: failed to marshal degraded marker",
+			"task_id", taskID, "error", err,
+		)
+		return
+	}
+	t.Metadata = json.RawMessage(metaJSON)
+	if err := sp.taskStore.Update(t); err != nil {
+		sp.logger.Warn("empty-plan guard: failed to persist degraded marker",
+			"task_id", taskID, "error", err,
+		)
+	}
+}
+
+// readPersistedPlanQuality reads the persisted 'plan_quality' metadata value
+// for the task, returning "" when absent, unparsable, or on store errors.
+func (sp *StrategicPlanner) readPersistedPlanQuality(taskID string) string {
+	t, err := sp.taskStore.GetByID(taskID)
+	if err != nil || t == nil || len(t.Metadata) == 0 {
+		return ""
+	}
+	meta := map[string]any{}
+	if err := json.Unmarshal(t.Metadata, &meta); err != nil {
+		return ""
+	}
+	if q, ok := meta["plan_quality"].(string); ok {
+		return q
+	}
+	return ""
+}
+
+// mergePlanQualityIntoMetadata sets the 'plan_quality' key in the given
+// metadata JSON (creating it when empty) and returns the merged JSON. On an
+// unparseable payload the original metadata is returned unchanged — the
+// merge is best-effort, never destructive.
+func mergePlanQualityIntoMetadata(metadataJSON []byte, planQuality string) json.RawMessage {
+	meta := map[string]any{}
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &meta); err != nil {
+			return metadataJSON
+		}
+	}
+	meta["plan_quality"] = planQuality
+	merged, err := json.Marshal(meta)
+	if err != nil {
+		return metadataJSON
+	}
+	return json.RawMessage(merged)
+}
+
+// failTaskWithReason fails the task immediately with an honest reason
+// (issue #53 direction 3, pin 2): persists StateFailed and publishes
+// task.failed so clients learn of the failure directly (week bughunt
+// 2026-09-17 F11 shape). Best-effort on persistence errors.
+func (sp *StrategicPlanner) failTaskWithReason(taskID, reason string) {
+	t, err := sp.taskStore.GetByID(taskID)
+	if err != nil || t == nil {
+		sp.logger.Warn("empty-plan guard: task vanished before honest-failure write",
+			"task_id", taskID, "error", err,
+		)
+		sp.publishEvent("task.failed", map[string]any{
+			KeyTaskID:                taskID,
+			string(MessageTypeError): reason,
+		})
+		return
+	}
+	t.SetState(task.StateFailed)
+	if updateErr := sp.taskStore.Update(t); updateErr != nil {
+		sp.logger.Error("empty-plan guard: failed to persist failed state",
+			"task_id", taskID, "error", updateErr,
+		)
+	}
+	sp.publishEvent("task.failed", map[string]any{
+		KeyTaskID:                taskID,
+		"name":                   t.Name,
+		string(MessageTypeError): reason,
+		"linked_sessions":        t.LinkedSessions,
+	})
 }
 
 // planPairSession creates a pair session for the task instead of
