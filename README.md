@@ -416,6 +416,19 @@ When reviewing code, check for...
 
 Learn more: [Skill System](docs/workflows/skills.md)
 
+## Post-Step Validation Pipeline
+
+Meept checks every task step result through layered gates. The gates run cheapest first. A step must pass each gate before its result reaches the user.
+
+1. **Claim-vs-evidence marking.** A step that claims file side-effects with no tool-issued evidence is marked unverified. This is not a failure, but the result is flagged (internal/agent/tactical.go).
+2. **Evidence validation.** This checks that tool-claimed side-effects match ground truth on the filesystem, shell, web, and memory. Deterministic validators (internal/validator, `ValidatorManager`) do this without an LLM. Failed validations retry, with a capped number of loops.
+3. **Step review.** `ReviewManager.ReviewStep` (internal/agent/review_manager.go) approves or rejects the step. Policy can auto-approve. Heuristic guards catch known bad shapes. Steps with errors never pass review. An LLM reviewer runs when the policy requires one.
+4. **Adversarial verification.** This re-checks a finished step with a separate verifier agent. Agents opt in through per-agent verification front matter. Verifiers return a `VERDICT` of Pass, Fail, Partial, or Unknown (internal/agent/verdict.go).
+
+After the gates, reply guarding protects the final answer. `applyReplyGuard` (internal/agent) replaces machine-shaped dumps in user-facing replies with user-language text.
+
+A planned output-filter stage (deterministic pass/rewrite/fail content checks before evidence validation) is tracked in [docs/plans/20260921-output-filters/](docs/plans/20260921-output-filters/master.md) and [issue #55](https://github.com/bhodgens/meept/issues/55).
+
 ## Documentation
 
 - **[Getting Started](docs/getting-started/)** &mdash; Installation and first steps
