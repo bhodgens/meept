@@ -131,6 +131,25 @@ type TacticalScheduler struct {
 	validationRetries map[string]int
 	validationRetryMu sync.Mutex
 
+	// filterRetryLimiter, when set, supplies the filter-retry cap
+	// (output-filters tree leaf 03). Nil falls back to
+	// defaultMaxFilterRetries so the exhaustion terminus is always
+	// reachable. Leaf 04's config snapshot is the production
+	// implementation.
+	filterRetryLimiter filterRetryLimiter
+
+	// filterChain holds the milter-style output-filter chain wired by the
+	// daemon (output-filters tree, leaf 03). Nil means the filter stage is
+	// skipped entirely: the completion path is byte-identical to the
+	// pre-filter completion path.
+	filterChain *validator.FilterChain
+
+	// filterRetries counts filter-retry attempts per step ID (in-memory
+	// half; the persisted FilterRetryCount column is authoritative across
+	// restarts, and the effective count is max(in-memory, persisted)).
+	filterRetries map[string]int
+	filterRetryMu sync.Mutex
+
 	// handoffPropagator, when set, replaces propagateContextToNextStepsLegacy.
 	// Set by the daemon when the orchestrator is wired with handoff deps
 	// (templateReg + registry + LLM). Nil falls back to the legacy 500-char
@@ -440,6 +459,7 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		amendmentMgr:           cfg.AmendmentManager,
 		contextWindowProvider:  cfg.ContextWindowProvider,
 		allotmentCfg:           allotmentCfg,
+		filterRetries:          make(map[string]int),
 	}
 }
 
@@ -1008,6 +1028,132 @@ func (ts *TacticalScheduler) terminalizeStepCompleted(step *task.TaskStep, reaso
 		"step_id", step.ID, "reason", reason)
 }
 
+// filterRetryLimiter is the seam for the filter-retry cap (output-filters
+// tree, leaf 03). The production implementation is leaf 04's config
+// snapshot; tests supply fixed values. Nil limiter = default cap so the
+// exhaustion terminus stays reachable without wiring.
+type filterRetryLimiter interface {
+	MaxFilterRetries() int
+}
+
+// defaultMaxFilterRetries is the filter-rejection requeue cap when no
+// limiter is wired (master.md Contract 3: default 2).
+const defaultMaxFilterRetries = 2
+
+// maxFilterRetries returns the effective filter-retry cap.
+func (ts *TacticalScheduler) maxFilterRetries() int {
+	if ts.filterRetryLimiter == nil {
+		return defaultMaxFilterRetries
+	}
+	if n := ts.filterRetryLimiter.MaxFilterRetries(); n > 0 {
+		return n
+	}
+	return defaultMaxFilterRetries
+}
+
+// filtersEnabledFor reports whether the output-filter stage applies to this
+// step. Leaf 04 owns the config snapshot (output_filters.enabled +
+// filters); until it lands, the stage is scoped by whether the chain can
+// meaningfully judge the step - a step with no tool hint gets no filter
+// pass, mirroring the evidence gate's per-hint validator lookup. This
+// predicate is the single place leaf 04 narrows with the config snapshot;
+// a nil chain already means the stage is skipped entirely.
+func filtersEnabledFor(step *task.TaskStep) bool {
+	return step != nil && step.ToolHint != ""
+}
+
+// SetFilterChain wires the milter-style output-filter chain into the
+// step-completion path (output-filters tree, leaf 03). The nil guard follows
+// the repo's typed-nil convention for *Set methods: a nil pointer (including
+// a typed-nil *validator.FilterChain arriving through an interface) is
+// IGNORED, leaving the stage disabled - a disabled chain must mean
+// byte-identical legacy behavior, not a panic at the call site.
+func (ts *TacticalScheduler) SetFilterChain(fc *validator.FilterChain) {
+	if fc != nil {
+		ts.filterChain = fc
+	}
+}
+
+// filterRetryCount returns the effective filter-retry count for a step:
+// max(in-memory counter, persisted FilterRetryCount field). Same defensive
+// shape as validationRetryCount; the persisted column (leaf 03 Task 1)
+// makes the field authoritative across daemon restarts.
+func (ts *TacticalScheduler) filterRetryCount(step *task.TaskStep) int {
+	ts.filterRetryMu.Lock()
+	defer ts.filterRetryMu.Unlock()
+	return ts.filterRetries[step.ID]
+}
+
+// bumpFilterRetry increments the in-memory filter-retry counter for a step
+// and returns the new value.
+func (ts *TacticalScheduler) bumpFilterRetry(stepID string) int {
+	ts.filterRetryMu.Lock()
+	defer ts.filterRetryMu.Unlock()
+	ts.filterRetries[stepID]++
+	return ts.filterRetries[stepID]
+}
+
+// clearFilterRetries drops the filter-retry counter for a step that reached
+// a terminal verdict (exhaustion or a clean pass), so a later re-created
+// step ID reuse cannot inherit stale accounting.
+func (ts *TacticalScheduler) clearFilterRetries(stepID string) {
+	ts.filterRetryMu.Lock()
+	defer ts.filterRetryMu.Unlock()
+	delete(ts.filterRetries, stepID)
+}
+
+// terminalizeStepFailedAfterFilter finishes the terminalization of a step
+// that exhausted its filter retries: terminal event, failed-jobs counter,
+// and task finalization (the same duties the validation-exhaustion branch
+// gets from the completion flow it falls through to). A filter-exhausted
+// step must not ride the rest of the completion invocation - review would
+// re-process a FAILED step - so this helper owns everything terminal here.
+func (ts *TacticalScheduler) terminalizeStepFailedAfterFilter(step *task.TaskStep) {
+	// Terminal event with the step's failed state (never "completed").
+	ts.publishEvent("task.step_completed", map[string]any{
+		KeyTaskID: step.TaskID,
+		KeyStepID: step.ID,
+		"state":   string(task.StepFailed),
+		"result":  truncateString(step.FilterError, 200),
+	})
+
+	if err := ts.taskStore.IncrementFailedJobs(step.TaskID); err != nil {
+		ts.logger.Error("Failed to increment failed jobs after filter exhaustion",
+			"step_id", step.ID, "error", err)
+	}
+
+	// Recount and finalize the task honestly: any failed step fails the
+	// task (2026-09-04 finding F2). Same shape as the completion-flow
+	// finalization the validation-exhaustion branch relies on.
+	if _, _, _, recountErr := ts.taskStore.RecountJobs(step.TaskID); recountErr != nil {
+		ts.logger.Error("Failed to recount jobs after filter exhaustion",
+			"task_id", step.TaskID, "error", recountErr)
+	}
+	t, terr := ts.taskStore.GetByID(step.TaskID)
+	if terr != nil || t == nil {
+		ts.logger.Error("Failed to reload task after filter exhaustion",
+			"task_id", step.TaskID, "error", terr)
+		return
+	}
+	if !t.State.IsTerminal() {
+		t.SetState(task.StateFailed)
+		if err := ts.taskStore.Update(t); err != nil {
+			ts.logger.Error("Failed to set task failed after filter exhaustion", "error", err)
+		}
+	}
+	ts.cleanupValidationGateCounter(step.TaskID)
+	ts.publishEvent("task.failed", map[string]any{
+		KeyTaskID:                step.TaskID,
+		"name":                   t.Name,
+		"failed_jobs":            t.FailedJobs,
+		KeyCompletedJobs:         t.CompletedJobs,
+		KeyTotalJobs:             t.TotalJobs,
+		"failed_step":            step.ID,
+		string(MessageTypeError): step.FilterError,
+		"linked_sessions":        t.LinkedSessions,
+	})
+}
+
 // OnJobCompleted handles a completed job by updating the step, promoting
 // newly unblocked steps, and checking task completion.
 func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, result json.RawMessage) error {
@@ -1180,6 +1326,196 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		// task-finalization block — the step stayed non-terminal forever
 		// and the task never left executing. Fall through instead; the
 		// standing ValidationError is what the task-level gate acts on.
+	}
+
+	// ------------------------------------------------------------------
+	// OUTPUT FILTER CHAIN (stage 3 of the frozen post-step pipeline,
+	// output-filters tree leaf 03, master.md Contract 4). Order is FROZEN:
+	//
+	//   1. step job result arrives
+	//   2. claim-vs-evidence marking (above)
+	//   3. OUTPUT FILTER CHAIN (here)
+	//   4. evidence validation gate (below)
+	//   5. ReviewStep policy/reviewer
+	//   6. adversarial verification
+	//
+	// The filter chain validates/repairs RESULT CONTENT (JSON shape,
+	// language, lint); the evidence gate below validates SIDE-EFFECTS.
+	// Neither substitutes for the other and the order never swaps: filters
+	// must repair content BEFORE the evidence gate reads the result, and a
+	// rejection must requeue without consuming a validation retry (the
+	// two retry classes are independent - master.md Contract 3).
+	//
+	// Disabled path (no chain wired, leaf 04 owns the config): skipped
+	// entirely - zero invocations, zero log lines, byte-identical to the
+	// pre-filter completion path.
+	// ------------------------------------------------------------------
+	if ts.filterChain != nil && filtersEnabledFor(step) {
+		chainResult := ts.filterChain.Run(ctx, step, step.Result)
+
+		// Every filter action is logged with its stage so the ordering
+		// contract is observable from logs alone (Contract 4: a rejection
+		// that does not name its stage in the log is a bug). The Actions
+		// slice is logged verbatim; rejections additionally Warn.
+		if chainResult.Rejected == nil {
+			ts.logger.Info("output filter action",
+				"stage", "output_filter",
+				"filter", "filter_chain",
+				"pass", chainResult.Passes,
+				"action", "pass",
+				"step_id", step.ID,
+				"actions", chainResult.Actions,
+			)
+		} else {
+			ts.logger.Warn("output filter rejected step",
+				"stage", "output_filter",
+				"filter", chainResult.Rejected.Filter,
+				"pass", chainResult.Passes,
+				"action", "fail",
+				"step_id", step.ID,
+				"reason", chainResult.Rejected.Reason,
+				"actions", chainResult.Actions,
+			)
+		}
+
+		if chainResult.Rejected != nil {
+			rejected := chainResult.Rejected
+
+			// Independent filter retry accounting (master.md Contract 3):
+			// a filter rejection consumes a FILTER retry, never a
+			// validation retry, and vice versa. The requeue sequence below
+			// mirrors the validation-retry block EXACTLY (bump ->
+			// stepStore.Update with Warn-on-failure -> rebuild payload from
+			// the persisted step -> enqueue -> SetState(scheduled) ->
+			// SetJobID) so a filter-retry job re-stamps identically to the
+			// first schedule.
+			//
+			// Unlike the persisted ValidationRetryCount (which the store
+			// never writes, hence validationRetries' in-memory half being
+			// load-bearing), FilterRetryCount HAS a store column, so
+			// stepStore.Update below persists the bump durably: the
+			// exhaustion terminus survives a process restart.
+			maxRetries := ts.maxFilterRetries()
+			retryCount := step.FilterRetryCount
+			if mem := ts.filterRetryCount(step); mem > retryCount {
+				retryCount = mem
+			}
+			if retryCount < maxRetries {
+				step.FilterRetryCount = retryCount + 1
+				step.FilterError = rejected.Reason
+				ts.bumpFilterRetry(step.ID)
+				if err := ts.stepStore.Update(step); err != nil {
+					ts.logger.Warn("failed to persist step filter retry count", "step_id", step.ID, "error", err)
+				}
+
+				retryPayload := stepJobPayloadFromStep(step)
+				retryJob, jobErr := queue.NewJob(queue.JobTypeProjectTask, retryPayload)
+				if jobErr != nil {
+					ts.logger.Error("Failed to create filter-retry job", "step_id", step.ID, "error", jobErr)
+					return fmt.Errorf("output filter rejected step and retry job creation failed: %w", jobErr)
+				}
+				retryJob.WithTaskID(step.TaskID).WithAgentID(step.AgentID)
+
+				if enqueueErr := ts.queue.Enqueue(ctx, retryJob); enqueueErr != nil {
+					ts.logger.Error("Failed to enqueue filter-retry job", "step_id", step.ID, "error", enqueueErr)
+					return fmt.Errorf("output filter rejected step and retry enqueue failed: %w", enqueueErr)
+				}
+
+				// Reset step state to scheduled for retry
+				if err := ts.stepStore.SetState(step.ID, task.StepScheduled); err != nil {
+					ts.logger.Error("Failed to reset step state for filter retry", "step_id", step.ID, "error", err)
+				}
+				if err := ts.stepStore.SetJobID(step.ID, retryJob.ID); err != nil {
+					ts.logger.Error("Failed to update step job_id for filter retry", "step_id", step.ID, "error", err)
+				}
+
+				ts.logger.Info("output filter action",
+					"stage", "output_filter",
+					"filter", rejected.Filter,
+					"pass", chainResult.Passes,
+					"action", "fail",
+					"step_id", step.ID,
+					"reason", rejected.Reason,
+					"retry_count", step.FilterRetryCount,
+					"max_retries", maxRetries,
+				)
+				ts.publishEvent("task.filter_retry", map[string]any{
+					KeyTaskID:                step.TaskID,
+					KeyStepID:                step.ID,
+					"retry_count":            step.FilterRetryCount,
+					"max_retries":            maxRetries,
+					string(MessageTypeError): rejected.Reason,
+				})
+				return nil // Don't proceed to completion; step will be retried
+			}
+
+			// Retry cap exhausted: the step finalizes FAILED with the
+			// filter Reason as the error text (master.md Contract 3),
+			// mirroring the validation-exhaustion terminus (F51 + F10):
+			// persist the verdict, cascade the blockage, and STOP the
+			// completion flow for this invocation.
+			ts.logger.Warn("output filter action",
+				"stage", "output_filter",
+				"filter", rejected.Filter,
+				"pass", chainResult.Passes,
+				"action", "rejected_exhausted",
+				"step_id", step.ID,
+				"reason", rejected.Reason,
+				"retry_count", step.FilterRetryCount,
+				"max_retries", maxRetries,
+			)
+			// Terminal HERE, not fall-through: unlike validation
+			// exhaustion (which relies on the completion flow below to
+			// finalize the task), a filter-exhausted step must not ride
+			// the rest of this invocation to completion - the review
+			// stage would re-process a FAILED step and the task would
+			// finalize as if the work succeeded. Return after the
+			// terminalization block above.
+			step.FilterError = rejected.Reason
+			step.State = task.StepFailed
+			ts.clearFilterRetries(step.ID)
+			if err := ts.stepStore.Update(step); err != nil {
+				ts.logger.Warn("failed to persist failed step after filter exhaustion",
+					"step_id", step.ID, "error", err)
+			}
+			if err := ts.stepStore.SetState(step.ID, task.StepFailed); err != nil {
+				ts.logger.Warn("failed to set step failed after filter exhaustion",
+					"step_id", step.ID, "error", err)
+			}
+			// F10-style terminus: terminalize every transitively-blocked
+			// pending dependent so the step is genuinely terminal and the
+			// task finalizes as StateFailed (same cascade the
+			// validation-exhaustion branch relies on).
+			if err := ts.failBlockedDependents(step.TaskID, step.ID); err != nil {
+				ts.logger.Warn("failed to terminalize pending dependents after filter exhaustion",
+					"task_id", step.TaskID, "failed_step", step.ID, "error", err)
+			}
+			// Bookkeeping parity with validation exhaustion: the terminal
+			// event and task finalization run through the shared
+			// terminalization helper so the task cannot hang executing.
+			ts.terminalizeStepFailedAfterFilter(step)
+			// Terminal HERE: the completion flow below must never run for a
+			// FAILED step (review would re-process it and the task would
+			// finalize as if the work succeeded); the helper above already
+			// published the terminal event and finalized the task.
+			return nil
+		} else if chainResult.Output != step.Result {
+			// FilterRewrite: the chain's final output replaces the step
+			// result. The rewrite is already logged above (Actions carry
+			// action=rewrite); persist it so downstream gates - evidence
+			// validation, review, task finalization - read the REPAIRED
+			// content, and so a retry round never resurrects the
+			// un-repaired text.
+			step.Result = chainResult.Output
+			if err := ts.stepStore.Update(step); err != nil {
+				ts.logger.Warn("failed to persist filter-rewritten step result", "step_id", step.ID, "error", err)
+			}
+		}
+		// A pass-through that rewrote nothing leaves step.Result untouched;
+		// clear any in-memory filter-retry bookkeeping on a clean verdict.
+		if chainResult.Rejected == nil {
+			ts.clearFilterRetries(step.ID)
+		}
 	}
 
 	// NEW: Validation gate - validate evidence before proceeding

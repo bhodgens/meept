@@ -189,6 +189,16 @@ type TaskStep struct {
 	AccumulatedContext string `json:"accumulated_context,omitempty"`
 	// ValidationRetryCount tracks how many times this step has been re-queued for validation retry.
 	ValidationRetryCount int `json:"validation_retry_count,omitempty"`
+	// FilterRetryCount tracks how many times this step has been re-queued
+	// because an output filter REJECTED its result (output-filters tree,
+	// leaf 03; master.md Contract 3). Filter rejections are a retry class
+	// fully independent from evidence-validation retries: the validation
+	// retry path never writes this field, and the filter-retry path never
+	// writes ValidationRetryCount.
+	FilterRetryCount int `json:"filter_retry_count,omitempty"`
+	// FilterError carries the last output-filter rejection Reason (the
+	// machine-readable repair context) for audit/debug.
+	FilterError string `json:"filter_error,omitempty"`
 	// SessionID records the originating session for provenance (tree 04
 	// leaf 02, audit R4): the tactical scheduler copies it into
 	// StepJobPayload and uses it to evaluate the interactive stamp at
@@ -366,6 +376,8 @@ func (s *StepStore) migrate() error {
 		claims         TEXT,
 		validated      BOOLEAN DEFAULT FALSE,
 		validation_error TEXT,
+		filter_retry_count INTEGER DEFAULT 0,
+		filter_error   TEXT,
 		token_usage    INTEGER DEFAULT 0,
 		memory_refs    TEXT,
 		accumulated_context TEXT,
@@ -422,6 +434,11 @@ func (s *StepStore) migrate() error {
 		"ALTER TABLE task_steps ADD COLUMN conversation_id TEXT",
 		// Originating-session provenance (tree 04 leaf 02, audit R4).
 		"ALTER TABLE task_steps ADD COLUMN session_id TEXT",
+		// Output-filter retry accounting (output-filters tree, leaf 03):
+		// filter rejections persist their own counter + last reason beside
+		// the evidence-validation verdict columns.
+		"ALTER TABLE task_steps ADD COLUMN filter_retry_count INTEGER DEFAULT 0",
+		"ALTER TABLE task_steps ADD COLUMN filter_error TEXT",
 	} {
 		_, _ = s.db.Exec(col)
 	}
@@ -442,10 +459,11 @@ func (s *StepStore) Create(step *TaskStep) error {
 		INSERT INTO task_steps (id, task_id, description, depends_on, tool_hint, agent_id,
 		                        job_id, state, result, sequence, revision_count,
 		                        recommendations, evidence, claims, validated, validation_error,
+		                        filter_retry_count, filter_error,
 		                        token_usage, memory_refs, accumulated_context, model_override,
 		                        checklist, phase, checkpoint_gate, is_handoff, conversation_id,
 		                        session_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		step.ID,
 		step.TaskID,
 		step.Description,
@@ -462,6 +480,8 @@ func (s *StepStore) Create(step *TaskStep) error {
 		nullableString(claimsJSON),
 		step.Validated,
 		nullableString(step.ValidationError),
+		step.FilterRetryCount,
+		nullableString(step.FilterError),
 		step.TokenUsage,
 		nullableString(memoryRefsJSON),
 		nullableString(step.AccumulatedContext),
@@ -523,7 +543,8 @@ func (s *StepStore) Update(step *TaskStep) error {
 		SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
 		    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
 		    recommendations = ?, evidence = ?, claims = ?, validated = ?,
-		    validation_error = ?, token_usage = ?, memory_refs = ?, accumulated_context = ?,
+		    validation_error = ?, filter_retry_count = ?, filter_error = ?,
+		    token_usage = ?, memory_refs = ?, accumulated_context = ?,
 		    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, is_handoff = ?,
 		    conversation_id = ?, session_id = ?, updated_at = ?
 		WHERE id = ?`,
@@ -541,6 +562,8 @@ func (s *StepStore) Update(step *TaskStep) error {
 		nullableString(claimsJSON),
 		step.Validated,
 		nullableString(step.ValidationError),
+		step.FilterRetryCount,
+		nullableString(step.FilterError),
 		step.TokenUsage,
 		nullableString(memoryRefsJSON),
 		nullableString(step.AccumulatedContext),
@@ -612,7 +635,8 @@ func (s *StepStore) UpdatePhaseSteps(steps []*TaskStep) error {
 			SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
 			    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
 			    recommendations = ?, evidence = ?, claims = ?, validated = ?,
-			    validation_error = ?, token_usage = ?, memory_refs = ?, accumulated_context = ?,
+			    validation_error = ?, filter_retry_count = ?, filter_error = ?,
+			    token_usage = ?, memory_refs = ?, accumulated_context = ?,
 			    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, is_handoff = ?,
 			    conversation_id = ?, session_id = ?, updated_at = ?
 			WHERE id = ?`,
@@ -630,6 +654,8 @@ func (s *StepStore) UpdatePhaseSteps(steps []*TaskStep) error {
 			nullableString(claimsJSON),
 			step.Validated,
 			nullableString(step.ValidationError),
+			step.FilterRetryCount,
+			nullableString(step.FilterError),
 			step.TokenUsage,
 			nullableString(memoryRefsJSON),
 			nullableString(step.AccumulatedContext),
@@ -659,6 +685,7 @@ func (s *StepStore) GetByID(id string) (*TaskStep, error) {
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
+		       filter_retry_count, filter_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
 		       checklist, phase, checkpoint_gate, is_handoff, conversation_id,
 		       session_id, created_at, updated_at
@@ -673,6 +700,7 @@ func (s *StepStore) GetByJobID(jobID string) (*TaskStep, error) {
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
+		       filter_retry_count, filter_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
 		       checklist, phase, checkpoint_gate, is_handoff, conversation_id,
 		       session_id, created_at, updated_at
@@ -687,6 +715,7 @@ func (s *StepStore) ListByTaskID(taskID string) ([]*TaskStep, error) {
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
+		       filter_retry_count, filter_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
 		       checklist, phase, checkpoint_gate, is_handoff, conversation_id,
 		       session_id, created_at, updated_at
@@ -1061,10 +1090,11 @@ func (s *StepStore) ReplaceWithSubSteps(stepID string, subSteps []*TaskStep) err
 			INSERT INTO task_steps (id, task_id, description, depends_on, tool_hint, agent_id,
 			                        job_id, state, result, sequence, revision_count,
 			                        recommendations, evidence, claims, validated, validation_error,
+			                        filter_retry_count, filter_error,
 			                        token_usage, memory_refs, accumulated_context, model_override,
 			                        checklist, phase, checkpoint_gate, is_handoff, conversation_id,
 			                        session_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			ss.ID,
 			ss.TaskID,
 			ss.Description,
@@ -1081,6 +1111,8 @@ func (s *StepStore) ReplaceWithSubSteps(stepID string, subSteps []*TaskStep) err
 			nullableString(claimsJSON),
 			ss.Validated,
 			nullableString(ss.ValidationError),
+			ss.FilterRetryCount,
+			nullableString(ss.FilterError),
 			ss.TokenUsage,
 			nullableString(memoryRefsJSON),
 			nullableString(ss.AccumulatedContext),
@@ -1117,6 +1149,8 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		recommendations, evidence, claims   sql.NullString
 		validated                           bool
 		validationError                     sql.NullString
+		filterRetryCount                    int
+		filterError                         sql.NullString
 		memoryRefs, accumulatedContext      sql.NullString
 		modelOverride, checklist, phase     sql.NullString
 		checkpointGate                      bool
@@ -1128,6 +1162,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 	err := row.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
+		&filterRetryCount, &filterError,
 		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride,
 		&checklist, &phase, &checkpointGate, &isHandoff, &conversationID,
 		&sessionID, &createdAt, &updatedAt)
@@ -1141,6 +1176,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
 		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
+		filterRetryCount, filterError,
 		memoryRefs, accumulatedContext, modelOverride, checklist, phase,
 		checkpointGate, isHandoff, conversationID, sessionID, createdAt, updatedAt), nil
 }
@@ -1154,6 +1190,8 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		recommendations, evidence, claims   sql.NullString
 		validated                           bool
 		validationError                     sql.NullString
+		filterRetryCount                    int
+		filterError                         sql.NullString
 		memoryRefs, accumulatedContext      sql.NullString
 		modelOverride, checklist, phase     sql.NullString
 		checkpointGate                      bool
@@ -1165,6 +1203,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 	err := rows.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
+		&filterRetryCount, &filterError,
 		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride,
 		&checklist, &phase, &checkpointGate, &isHandoff, &conversationID,
 		&sessionID, &createdAt, &updatedAt)
@@ -1175,6 +1214,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
 		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
+		filterRetryCount, filterError,
 		memoryRefs, accumulatedContext, modelOverride, checklist, phase,
 		checkpointGate, isHandoff, conversationID, sessionID, createdAt, updatedAt), nil
 }
@@ -1184,6 +1224,7 @@ func buildStep(id, taskID, description, state string,
 	sequence, revisionCount, tokenUsage int,
 	recommendations, evidence, claims sql.NullString,
 	validated bool, validationError sql.NullString,
+	filterRetryCount int, filterError sql.NullString,
 	memoryRefs, accumulatedContext, modelOverride, checklist, phase sql.NullString,
 	checkpointGate bool,
 	isHandoff bool,
@@ -1199,9 +1240,14 @@ func buildStep(id, taskID, description, state string,
 		RevisionCount:      revisionCount,
 		TokenUsage:         tokenUsage,
 		Validated:          validated,
+		FilterRetryCount:   filterRetryCount,
 		MemoryRefs:         decodeStringSlice(memoryRefs.String),
 		AccumulatedContext: accumulatedContext.String,
 		IsHandoff:          isHandoff,
+	}
+
+	if filterError.Valid {
+		step.FilterError = filterError.String
 	}
 
 	if modelOverride.Valid {

@@ -962,3 +962,50 @@ func TestStepStore_SetStateWithReason_ConcurrentRace(t *testing.T) {
 		t.Errorf("expected exactly one pending->running transition, got %d", pendingToRunning)
 	}
 }
+
+// TestStepFilterFieldsRoundTrip pins master.md Contract 3 (output-filters
+// tree, leaf 03 Task 1): FilterRetryCount and FilterError must survive a
+// full persist -> reload cycle through the step store, exactly as the
+// evidence-validation verdict fields do. A store that drops either field
+// breaks the filter-retry exhaustion accounting (the reloaded step would
+// report retries=0 forever).
+func TestStepFilterFieldsRoundTrip(t *testing.T) {
+	store := newTestStepStore(t)
+
+	step := NewTaskStep("task-filter-rt", "filter round-trip step", 0)
+	step.FilterRetryCount = 3
+	step.FilterError = "$.tools[2].name: expected string, got null"
+
+	if err := store.Create(step); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if got.FilterRetryCount != 3 {
+		t.Errorf("FilterRetryCount round-trip = %d, want 3", got.FilterRetryCount)
+	}
+	if got.FilterError != "$.tools[2].name: expected string, got null" {
+		t.Errorf("FilterError round-trip = %q, want the rejection reason", got.FilterError)
+	}
+
+	// Update path too: the retry branch persists bumps via Update, not
+	// Create, so the fields must survive a full-row UPDATE as well.
+	got.FilterRetryCount = 4
+	got.FilterError = "filter chain did not converge after 2 passes"
+	if err := store.Update(got); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	reloaded, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID after Update failed: %v", err)
+	}
+	if reloaded.FilterRetryCount != 4 {
+		t.Errorf("FilterRetryCount after Update = %d, want 4", reloaded.FilterRetryCount)
+	}
+	if reloaded.FilterError != "filter chain did not converge after 2 passes" {
+		t.Errorf("FilterError after Update = %q, want the non-convergence reason", reloaded.FilterError)
+	}
+}
