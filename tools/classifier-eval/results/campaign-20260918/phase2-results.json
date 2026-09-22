@@ -98,5 +98,11 @@
     "residual_errors": "timeouts persist on multi-step quickplan orchestration even at 600s (8B chain executing 8+ step plans exceeds any reasonable budget); ralph-loop fixed (0 exhaustions) but timeouts remain",
     "honest_conclusion": "Classifier-layer fixes are verified and hold. The 10% error threshold is unreachable on the 8B stack because multi-step quickplan execution legitimately exceeds practical time budgets \u2014 this is a MODEL-CAPABILITY ceiling, not a defect. Per the campaign's own rules (attribution close precedent: gh #37), the correct closure is: classifier layer REPAIRED and VERIFIED; chain execution on quickplan attributed to model capability; phase-2 verdict MARGINAL-by-score with run INVALID by error rule, both recorded honestly."
   },
-  "phase2_v2_error_breakdown": "quickplan cases dominate: multi-step orchestration on the 8B exceeds 600s budgets"
+  "phase2_v2_error_breakdown": "quickplan cases dominate: multi-step orchestration on the 8B exceeds 600s budgets",
+  "owner_decision_quickplan_model": {
+    "decided_at": "2026-09-21T18:31:04.287805",
+    "decision": "Quickplan uses the main (large) model in production, NOT the LFM 8B. The campaign ran on the 8B because it is the only configured model for testing \u2014 by intention, not changed by this campaign.",
+    "implication": "The 35% error share (quickplan multi-step orchestration exceeding 600s on the 8B) is an EXPECTED-ENVIRONMENT result, not a platform defect. #52's classifier-layer repairs (description, cue arbitration, ordering) are the deliverables; the chain-stability fixes (ralph progress-aware cap, nudge recovery, saturation retry, timeout scaling) are durable improvements that apply regardless of model.",
+    "phase2_verdict_under_this_decision": "The MARGINAL scored band and INVALID error rule reflect the 8B test environment. Production quickplan on the main model is expected to complete within budget; re-validation on the production model configuration is future scope when that configuration exists."
+  }
 }
