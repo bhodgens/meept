@@ -8,8 +8,15 @@
     "verdict": "INSUFFICIENT_COVERAGE"
   },
   "policy_tfidf_veto": {
-    "status": "UNVALIDATED",
-    "reason": "scikit-learn unavailable; no install approved"
+    "n": 48,
+    "routed": 5,
+    "routed_correct": 5,
+    "routed_accuracy": 1.0,
+    "system_accuracy_modeled": 0.8817,
+    "verdict": "INSUFFICIENT_COVERAGE",
+    "measured_at": "2026-09-21",
+    "artifact": "results/m4-gold-acceptance-tfidf-veto.json",
+    "note": "routed 5/48 < 20 floor: policy UNVALIDATED, not failed (pre-registered refusal condition). Routed precision 5/5=1.0; modeled system accuracy 0.8817 > 0.868 bar but not acceptance-evidence. sklearn 1.9.1 (installed with user approval via pip --break-system-packages on Homebrew python@3.12)."
   },
   "corpus_amendment": "h18-planexec-001 removed from tuning corpus (disjointness guard refusal)",
   "phase2_live_chain": "PENDING \u2014 requires scratch rig; 0.868 constant reported as reference only",

@@ -581,6 +581,18 @@ def self_test() -> int:
     cases_b, cases_a = H.load_cases()
     gold = cases_b + cases_a
     known = "implement the plan using subagents"
+    # Self-contained leak fixture (20260919 disjointness amendment): the real
+    # corpus case h18-planexec-001 was removed from the tuning corpus by the
+    # pre-registered corpus/replay amendment, so the leak fixture injects a
+    # SYNTHETIC corpus entry carrying the known text instead of relying on
+    # the removed real case. The guard's detection logic is what the pin
+    # tests; the corpus content is not.
+    synthetic_leak = H.Case(
+        text=known, intent="quickplan", agent="orchestrator", ood=False,
+        provenance="self-test", added_in="self-test",
+        case_id="selftest-planexec-leak",
+    )
+    gold = gold + [synthetic_leak]
 
     print("self-test: guards + coverage floor")
 
@@ -588,7 +600,7 @@ def self_test() -> int:
     leaks = H.replay_disjointness([known], gold)
     check("known leak reported (exact)",
           len(leaks) == 1 and leaks[0]["reason"] == "exact"
-          and leaks[0]["corpus_case_id"] == "h18-planexec-001",
+          and leaks[0]["corpus_case_id"] == "selftest-planexec-leak",
           f"-> {leaks}")
 
     # 2. an empty ruler is not green.
@@ -721,9 +733,14 @@ def self_test() -> int:
     #     after the embeddings.
     leak_dir = Path(tempfile.mkdtemp())
     leak_ruler = leak_dir / "replay-gold.local.json5"
+    # The ruler text must exist in the CURRENT tuning corpus for the leak to
+    # be detectable (the 20260919 amendment removed the original fixture
+    # case from the corpus). Derive it from the loaded corpus at run time so
+    # this test is immune to future corpus amendments.
+    corpus_leak_text = (cases_b + cases_a)[0].text  # a REAL corpus case
     leak_ruler.write_text(
         '{ cases: [ { input: "%s", expected_intent: "quickplan" } ] }\n'
-        % known)
+        % corpus_leak_text)
     _art_before = sorted(p.name for p in RESULTS.glob("*"))
     _saved_replay = REPLAY
     _blocked = {m: sys.modules.get(m) for m in ("torch", "transformers")}
