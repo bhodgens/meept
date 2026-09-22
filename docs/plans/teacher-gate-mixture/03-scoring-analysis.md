@@ -83,7 +83,7 @@ results. The orchestrator handles all git operations.
 - [ ] Denominator discipline: accuracy = correct / all-non-OOD-n
 - [ ] Every wrong + error case id listed in REPORT.md
 - [ ] py_compile clean; no new dependencies
-- [ ] `grep -cE 'implement the plan|subagents, review' REPORT.md` = 0
+- [ ] `grep -cE '[replay case 338cb3b2e9ffa8c4]|subagents, review' REPORT.md` = 0
       (no verbatim replay text leaked)
 
 ## Review Checklist (orchestrator)

@@ -111,8 +111,7 @@ on the case count (46 cases), credited at the constant.
 ### 3. Corpus <-> replay disjointness guard (train-on-test)
 
 The models are fit on the committed corpus; the ruler is the adjudicated
-replay. They were not disjoint: the replay case "implement the plan using
-subagents" is byte-identical to committed corpus row `h18-planexec-001`
+replay. They were not disjoint: the replay case "[replay case 2c0434047ecad05e (line-wrapped)]" is byte-identical to committed corpus row `h18-planexec-001`
 (case_key match; that row's own note records it was aligned to "the
 adjudicated replay gold for this verbatim text"). The committed script now
 runs `eval_harness.replay_disjointness()` before scoring (exact case_key

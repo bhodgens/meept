@@ -111,7 +111,7 @@ Pre-existing, now load-bearing for quickplan resume.
 
 ### M5 — train/test contamination: replay case in the training corpus with a conflicting label
 `testdata/eval/classifier-adversarial-corpus.json5:165`
-"implement the plan using subagents" → `code` (iteration-18) vs adjudicated
+"[replay case 2c0434047ecad05e]" → `code` (iteration-18) vs adjudicated
 replay → `quickplan`, contradicting adjudication rule #3
 (`results/adjudication-record.md:13-15`). Sits in every training set
 (stage-A centroids, B probe, tfidf `clf.fit`). Anti-inflation direction, but

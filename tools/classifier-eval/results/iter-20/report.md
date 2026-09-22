@@ -28,8 +28,8 @@ still reads as code/git.
 
 After 3 policy families and 2 anchor waves, the residual misses are ALL
 quickplan-labeled real messages whose surface form is indistinguishable
-from code/git/review ("Implement Tasks 7 and 8: Add project fields to
-Session struct" — reads code; "commit, push, then run prodenv/prod" —
+from code/git/review ("[replay case 834aead92a2a8d7f prefix]lds to
+Session struct" — reads code; "[replay case d8ef399b90b87cfe]" —
 reads git). The signal that makes them quickplan is NOT in the message
 text: it is conversational state (an approved plan exists; tasks are
 tracked in session state). A per-message classifier — at ANY model

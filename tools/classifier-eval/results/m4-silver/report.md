@@ -21,14 +21,14 @@ corpus's 92.8% and below even the chain-only 86.8%.
 ## Why the gap (3 causes, all visible in the misses)
 
 1. **Domain shift in intent mix.** Real Hermes traffic is
-   plan-execution-heavy ("implement the plan using subagents" ×2,
+   plan-execution-heavy ("[replay case 2c0434047ecad05e]" ×2,
    doc/report writing, resume creation) — the gold corpus has no
    plan-execution or document-writing intents. A routed these to
    plan/platform by surface similarity. These are taxonomy gaps, not
    gate bugs: meept will also receive such messages, so the taxonomy
    needs a `plan`-execution boundary decision or an `ops`/`docs` intent.
 2. **Silver labels are themselves noisy** (48 hand-audited examples; the
-   "implement the plan" → code label is defensible but the gold corpus's
+   "[replay case 338cb3b2e9ffa8c4]" → code label is defensible but the gold corpus's
    plan class pulls the other way). Real measurement needs gold-promoted
    replays or human labels.
 3. **Small n**: 48 cases → single-route swings move percentages by 2+pts.

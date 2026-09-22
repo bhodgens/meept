@@ -18,7 +18,7 @@
 ## Goal
 
 Users issue plan-and-do requests ("review the daemon for bugs and correct
-them as you find them", "implement the plan using subagents", "commit, push,
+them as you find them", "[replay case 2c0434047ecad05e]", "commit, push,
 then run prodenv/prod"). Today these either route to single intents (losing
 the multi-step orchestration) or stop at the plan-approval gate. QuickPlan
 adds a third execution style: **clarify-if-ambiguous → orchestrator plans →

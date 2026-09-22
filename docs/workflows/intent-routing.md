@@ -184,7 +184,7 @@ Test cases:
 
 - "review the daemon for bugs, and correct them as you find them" →
   **quickplan** (correction clause = autonomous execution)
-- "review the json files to make sure they're complete" → **review**
+- "[replay case 244c105b409b844e]" → **review**
   (verdict only, nothing modified)
 - "investigate how #1 and #2 can be solved" → **analyze**
   (understanding of a contention, not a quality verdict)

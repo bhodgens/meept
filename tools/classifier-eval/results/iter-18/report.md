@@ -17,20 +17,20 @@ Provenance `iteration-18`/`hermes-inspired` on all.
 
 E2E essentially unchanged (−0.3pt, within noise). Miss analysis:
 
-1. **"implement the plan" now ROUTES — to plan, confidently (0.850,
+1. **"[replay case 338cb3b2e9ffa8c4]" now ROUTES — to plan, confidently (0.850,
    margin 0.040).** The wave-4 anchors taught the gate that
-   "implement the plan" = code, but the plan centroid absorbed the
+   "[replay case 338cb3b2e9ffa8c4]" = code, but the plan centroid absorbed the
    phrasing too: the pre-existing plan class ("create a project
    roadmap", "design the architecture") is lexically closer to the
    silver label's phrasing than the new code anchors are. The silver
-   label itself is contestable — "implement the plan" reads plan-ish;
+   label itself is contestable — "[replay case 338cb3b2e9ffa8c4]" reads plan-ish;
    under the campaign invariant this specific case is a silver-label
    ambiguity, not a clean gate miss.
-2. **"implement the plan using subagents" now correctly ABSTAINS**
+2. **"[replay case 2c0434047ecad05e]" now correctly ABSTAINS**
    (margin 0.018 < 0.030): the two centroids now compete, and the gate
    falls through to B/C instead of confidently choosing platform. This
    is the invariant working: fall-through replaced a probable wrong.
-3. Stage-B dropped one (git→code on "commit, omit the .env..."): the
+3. Stage-B dropped one (git→code on "commit-omit-env [replay case effcf40fbc1160e3]"): the
    added code anchors pulled the probe's decision boundary; a
    git-classified message with heavy code vocabulary. n=5, noise-level.
 

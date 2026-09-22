@@ -346,6 +346,45 @@ class TestCaseCacheProducers(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
+# Task 4: no tracked file may carry raw replay-corpus text (category 3
+# scrub, decision B). Needles are derived at run time from the untracked
+# private replay corpus; the designed 389-case corpus (testdata/eval) and
+# the harness fixtures are excluded per the campaign adjudication.
+# --------------------------------------------------------------------------
+
+REPLAY_CORPUS = TOOLS_DIR / "replay-gold.local.json5"
+SCAN_SCRIPT = TOOLS_DIR / "scan_replay_privacy.py"
+
+
+class TestNoReplayTextInTrackedFiles(unittest.TestCase):
+    """The tracked tree must not carry verbatim replay-corpus text."""
+
+    def test_scan_script_reports_no_hits(self):
+        if not REPLAY_CORPUS.exists():
+            self.skipTest("private replay corpus not present on this machine")
+        out = subprocess.run([sys.executable, str(SCAN_SCRIPT)],
+                             cwd=REPO_ROOT, capture_output=True, text=True)
+        self.assertEqual(
+            out.returncode, 0,
+            f"tracked files carry replay-corpus text:\n{out.stdout}")
+
+    def test_scan_script_covers_full_corpus(self):
+        """Guard the needle derivation itself: every corpus case must
+        contribute at least a 40-char prefix needle, and the corpus must
+        be the adjudicated 48-case replay set."""
+        if not REPLAY_CORPUS.exists():
+            self.skipTest("private replay corpus not present on this machine")
+        import scan_replay_privacy as S
+        inputs = S.corpus_inputs()
+        self.assertEqual(len(inputs), 48,
+                         "replay corpus changed; re-derive needles")
+        for t in inputs:
+            with self.subTest(case_key=H.case_key(t)):
+                self.assertTrue(S.needles_for(t),
+                                "every case must yield needles")
+
+
+# --------------------------------------------------------------------------
 # Task 3: renamed local data must stay untracked, without hiding fixtures.
 # --------------------------------------------------------------------------
 

@@ -33,7 +33,7 @@ records can be compared without touching either JSON's canonical path.
 | stageC_chain | 33 | 34 |
 | expected_system_accuracy | 0.8468 | 0.844 |
 | tau | 0.147 | 0.152 |
-| first miss | ("A", "implement the plan using subagents", "code", "plan") | ("B", "commit, omit the .env but include an env.sample with comment", "git", "code") |
+| first miss | ("A", "[replay case 2c0434047ecad05e]", "code", "plan") | ("B", "[replay case effcf40fbc1160e3]", "git", "code") |
 
 The pre-edit numbers match the prose in
 `results/m4-silver/report.md` (A 11/8 = 72.7%, B 4/4 = 100%, chain 33,

@@ -25,7 +25,7 @@ per-intent view shows exactly why:
    quickplan-labeled messages routed to git/platform.
 2. **Stage B's quickplan precision is the real problem**: 3 of its 5
    routes were quickplan-labeled messages predicted as `code`
-   ("Implement Tasks 7 and 8: Add project fields..."). These are
+   ("[replay case 834aead92a2a8d7f prefix]lds..."). These are
    20 quickplan anchors vs ~35 code anchors — the code class dominates
    the shared vocabulary (implement/add/wire) and wins the boundary.
    With 5 B-routes total, 2/5 vs 4/4 is also within small-n noise, but

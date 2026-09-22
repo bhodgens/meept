@@ -16,19 +16,19 @@
  "misses": [
   [
    "B",
-   "commit, omit the .env but include an env.sample with comment",
+   "[replay case effcf40fbc1160e3]",
    "git",
    "code"
   ],
   [
    "A",
-   "create a skill-tailored resume for this posting (1-page) bas",
+   "[replay case 6e0fc8a0c28f759a prefix]",
    "code",
    "platform"
   ],
   [
    "A",
-   "implement the plan",
+   "[replay case 338cb3b2e9ffa8c4]",
    "code",
    "plan"
   ]
