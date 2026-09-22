@@ -34,6 +34,7 @@
 package daemon
 
 import (
+	"os"
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
@@ -68,7 +69,29 @@ func (d *Daemon) StartupOrphanSweep() {
 	reaped := d.components.ContainerManager.SweepOrphanRuntimes(orphanTermGrace, records)
 	if len(reaped) > 0 {
 		d.logger.Warn("daemon: reaped orphaned runtime processes", "pids", reaped)
-		return
+	} else {
+		d.logger.Info("daemon: orphan sweep complete", "reaped", 0)
 	}
-	d.logger.Info("daemon: orphan sweep complete", "reaped", 0)
+
+	// Age-keyed second pass (issue #54): a leftover whose daemon was
+	// SIGKILLed can survive the ppid==1 sweep above through the ownership
+	// guard (observed-not-owned). A spawn record older than
+	// llm.SpawnRecordStaleAfter whose pid is STILL alive, re-parented to
+	// init, and command-line-identical to the record is exactly such a
+	// leftover, so it is reaped here — after the existing sweep, and only
+	// through the guarded stale-record path. Ages are read BEFORE the call
+	// because a reaped record's PID file is removed by it.
+	staleReaped := llm.SweepStaleSpawnRecords(records, llm.SpawnRecordStaleAfter, time.Now)
+	if len(staleReaped) > 0 {
+		ageOf := make(map[int]time.Duration, len(records))
+		for _, rec := range records {
+			if info, err := os.Stat(rec.PIDFile); err == nil {
+				ageOf[rec.PID] = time.Since(info.ModTime())
+			}
+		}
+		for _, pid := range staleReaped {
+			d.logger.Warn("daemon: reaped stale-record orphan runtime",
+				"pid", pid, "record_age", ageOf[pid])
+		}
+	}
 }

@@ -465,6 +465,126 @@ func RemoveRuntimeHandlesForPids(cfgs []*RuntimeConfig, records []SpawnRecord, p
 	}
 }
 
+// spawnRecordStaleAfter bounds how old a durable spawn record may be before
+// its pid — if it is STILL alive — is treated as a leftover of a dead meept
+// generation rather than a runtime somebody owns. No legitimate e2e or dev
+// runtime lives this long. The daemon's own live runtimes are excluded because
+// their daemon re-validates ownership at ITS boot (RuntimeManager's
+// live-owner veto in SweepOrphanRuntimes) and while it runs it is the recorded
+// parent (ppid != 1), which the stale sweep requires.
+const spawnRecordStaleAfter = 6 * time.Hour
+
+// SpawnRecordStaleAfter is the exported read of spawnRecordStaleAfter for the
+// daemon call site (internal/daemon/orphan.go) — the constant itself stays
+// unexported so the sweep's own tests are the only other consumer.
+const SpawnRecordStaleAfter = spawnRecordStaleAfter
+
+// SweepStaleSpawnRecords reaps runtimes that the ppid==1 match of the boot
+// orphan sweep cannot see through the ownership guard: a record older than
+// maxAge whose pid is still ALIVE, re-parented to init, and whose command line
+// matches the record's argv (issue #54 — two orphaned llama-servers survived
+// --keep runs whose daemons were SIGKILLed). The PID file's ModTime is the
+// record age proxy.
+//
+// Guards, in order: a record at or under maxAge is skipped; a dead pid is
+// skipped (the existing orphan sweep and record pruning own dead-pid
+// cleanup — double-processing here would race a replacement spawn);
+// a process whose parent is not init is skipped (a live meept daemon owns
+// it); a command line that does not match the record's argv is skipped
+// (matchesSpawnCommand, the same identity-revalidation helper the boot sweep
+// matches with). A surviving pid keeps its handles.
+//
+// maxAge is a parameter so tests can pin the boundary; production callers
+// pass spawnRecordStaleAfter. now is likewise a test seam. Returns the pids
+// confirmed gone. Best-effort, like every sweep: never returns an error.
+func SweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now func() time.Time) []int {
+	return sweepStaleSpawnRecords(records, maxAge, now, orphanTermGraceDefault, nil, nil, slog.Default())
+}
+
+// orphanTermGraceDefault bounds the SIGTERM grace period in
+// SweepStaleSpawnRecords (internal/daemon/orphan.go passes its own
+// orphanTermGrace to the manager sweeps; this sweep has no manager, so the
+// value is mirrored here).
+const orphanTermGraceDefault = 2 * time.Second
+
+// sweepStaleSpawnRecords is the seam-complete core of SweepStaleSpawnRecords.
+func sweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now func() time.Time,
+	waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log *slog.Logger) []int {
+
+	if now == nil {
+		now = time.Now
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	// Age gate first: the PID file's ModTime is the record age proxy. A
+	// missing PID file is not stale-by-mtime — without an age the record is
+	// left to the existing sweep paths.
+	var stale []SpawnRecord
+	for _, rec := range records {
+		if rec.PIDFile == "" {
+			continue
+		}
+		info, err := os.Stat(rec.PIDFile)
+		if err != nil {
+			log.Debug("stale-record sweep: pid file unstattable; skipping", "pid_file", rec.PIDFile, "error", err)
+			continue
+		}
+		if age := now().Sub(info.ModTime()); age <= maxAge {
+			continue
+		}
+		stale = append(stale, rec)
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+
+	// Identity re-validation with the SAME helper the boot sweep matches
+	// with: the pid must be alive, re-parented to init, and its command
+	// line must equal the record's argv. Anything else is left alone — a
+	// dead pid belongs to the existing cleanup paths, a ppid != 1 process
+	// to its live parent, a mismatched command to whoever runs it.
+	live, err := scanByPID(listOrFallback(list))
+	if err != nil {
+		log.Debug("stale-record sweep: process scan unavailable; skipping", "error", err)
+		return nil
+	}
+	var targets []OrphanRuntime
+	argvOf := make(map[int][]string, len(stale))
+	for _, rec := range stale {
+		info, ok := live[rec.PID]
+		if !ok || info.PPID != 1 || !matchesSpawnCommand(info.Command, rec.Argv) {
+			continue
+		}
+		targets = append(targets, OrphanRuntime{EndpointKey: rec.EndpointKey, PID: rec.PID, Command: info.Command})
+		argvOf[rec.PID] = rec.Argv
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	// TERM → grace → KILL with the same re-validated machinery the boot
+	// sweep uses, then the existing removeHandle discipline: no reaped
+	// runtime may leave a PID file or a spawn record behind.
+	confirmed := ReapRuntimeProcesses(targets, waitAfterTerm, listOrFallback(list), signal, log)
+	RemoveRuntimeHandlesForPids(nil, stale, confirmed)
+
+	for _, pid := range confirmed {
+		log.Warn("stale-record sweep: reaped runtime whose spawn record passed the age bound",
+			"pid", pid, "argv", argvOf[pid])
+	}
+	return confirmed
+}
+
+// listOrFallback resolves a nil process-table seam to the real ps scan.
+func listOrFallback(list RuntimeProcLister) RuntimeProcLister {
+	if list == nil {
+		return ListRuntimeProcesses
+	}
+	return list
+}
+
 // ReapRuntimeProcesses stops the given leftover runtimes: SIGTERM to each
 // process group, a grace period, then SIGKILL for those still alive. The process
 // table is re-read BEFORE any signal (a pid whose entry changed since detection
