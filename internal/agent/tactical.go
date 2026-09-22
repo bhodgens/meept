@@ -1074,6 +1074,17 @@ func (ts *TacticalScheduler) SetFilterChain(fc *validator.FilterChain) {
 	}
 }
 
+// SetFilterRetryLimiter wires the filter-retry cap source (output-filters
+// tree, leaf 04: the production implementation is the config snapshot
+// satisfying MaxFilterRetriesOrDefault). Nil-guarded per the repo's
+// typed-nil convention: a nil limiter leaves the defaultMaxFilterRetries
+// fallback in place.
+func (ts *TacticalScheduler) SetFilterRetryLimiter(limiter filterRetryLimiter) {
+	if limiter != nil {
+		ts.filterRetryLimiter = limiter
+	}
+}
+
 // filterRetryCount returns the effective filter-retry count for a step:
 // max(in-memory counter, persisted FilterRetryCount field). Same defensive
 // shape as validationRetryCount; the persisted column (leaf 03 Task 1)

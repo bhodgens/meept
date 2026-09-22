@@ -57,17 +57,6 @@ func (f *fakeAsyncClient) ackResult() map[string]any {
 	}
 }
 
-func (f *fakeAsyncClient) subscribeParams() map[string]any {
-	return map[string]any{"topics": chatSubmitTopics}
-}
-
-func (f *fakeAsyncClient) pollParams(since string) map[string]any {
-	return map[string]any{
-		"subscription_id": "sub-1",
-		"since":           since,
-	}
-}
-
 // terminalEvent builds a turn.terminal poll response carrying one event.
 func terminalEvent(turnID, status, reply, errText string, durationMS int64) map[string]any {
 	payload := map[string]any{

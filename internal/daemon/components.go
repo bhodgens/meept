@@ -2692,6 +2692,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				)
 			}
 		}
+
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
 		// Wire thread router for thread-based context partitioning.
@@ -2938,6 +2939,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			})
 			// Interactive stamp origin lookup (tree 04 leaf 02, D11).
 			tacticalScheduler.SetSessionStore(c.SessionStore)
+
+			// Output-filter chain (output-filters tree, leaf 04): built
+			// from the daemon config snapshot and wired ONLY when
+			// output_filters.enabled — a disabled config leaves the
+			// completion path byte-identical to the pre-filter behavior.
+			// Also wires the filter-retry cap source from the same config.
+			wireOutputFilterChain(c, cfg, tacticalScheduler, logger.With("component", "tactical"))
 
 			// F29 (2026-09-17 bughunt): the tactical task-failure path
 			// must also feed the burst detector — hard failures mark

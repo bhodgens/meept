@@ -307,6 +307,13 @@ func newAgentsShowCmd() *cobra.Command {
 				fmt.Printf("  max_fix_loops: %v\n", verification["max_fix_loops"])
 			}
 
+			// Output-filter config (output-filters tree, leaf 04). The
+			// section renders whenever the daemon returned the block;
+			// values are lowercase per the repo UI convention.
+			if outputFilters, ok := resultMap["output_filters"].(map[string]any); ok {
+				fmt.Println(renderOutputFiltersSection(outputFilters))
+			}
+
 			// Constitution summary.
 			if constitution, ok := resultMap["constitution"].(map[string]any); ok {
 				fmt.Println("\nConstitution:")

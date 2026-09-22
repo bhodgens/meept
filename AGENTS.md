@@ -246,6 +246,15 @@ sends `session_id` as `conversation_id` in chat requests. WS subscriptions use
 MUST handle both. The WS filter in `internal/comm/http/server.go` falls back
 from `session_id` to `conversation_id` — preserve this.
 
+### Output-filter gate order and retry caps
+
+The post-step pipeline order is FROZEN: result → claim-vs-evidence marking →
+output filter chain → evidence validation → ReviewStep → adversarial
+verification — it never swaps (docs/workflows/output-filters.md). Filter
+rejections consume `FilterRetryCount` (cap `max_filter_retries`) and never
+validation retries, and vice versa. Every filter action logs
+`stage=output_filter` with `action=pass|rewrite|fail|rejected_exhausted`.
+
 ### Multi-user is opt-in; RPC stays owner-trusted
 
 `multiuser.enabled` (default **false**) gates per-user key auth. When off:

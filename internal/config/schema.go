@@ -655,6 +655,25 @@ type DaemonConfig struct {
 	Uploads           UploadsConfig        `json:"uploads"              toml:"uploads"`
 	UserInstructions  InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
 	Verification      VerificationDefaults `json:"verification"         toml:"verification"`
+	OutputFilters     OutputFiltersConfig  `json:"output_filters"       toml:"output_filters"`
+}
+
+// OutputFiltersConfig holds daemon-level output-filter defaults
+// (output-filters tree, leaf 04). Enabled defaults to FALSE: the filter
+// stage is opt-in until config turns it on, keeping the completion path
+// byte-identical for existing installs.
+type OutputFiltersConfig struct {
+	// Enabled gates the output-filter stage in the step-completion path.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// MaxPasses caps rewrite sweeps before the chain reports
+	// non-convergence (chain-level convergence cap; chain default 2).
+	MaxPasses int `json:"max_passes" toml:"max_passes"`
+	// MaxFilterRetries caps filter-rejection requeues. Independent of
+	// validation retries in both directions (master.md Contract 3).
+	MaxFilterRetries int `json:"max_filter_retries" toml:"max_filter_retries"`
+	// Filters lists the builtin filter names to run, in order
+	// (json_format, language_en, lint_go).
+	Filters []string `json:"filters" toml:"filters"`
 }
 
 // VerificationDefaults holds daemon-level verification defaults.
@@ -2768,6 +2787,13 @@ func DefaultConfig() *Config {
 				Enabled:              true,
 				MaxFixLoops:          3,
 				AutoTriggerThreshold: 3,
+			},
+			OutputFilters: OutputFiltersConfig{
+				// Enabled stays FALSE: the filter stage is opt-in until
+				// config turns it on (zero behavior change for existing
+				// installs - output-filters master.md Contract 6).
+				MaxPasses:        2,
+				MaxFilterRetries: 2,
 			},
 		},
 		Transport: TransportConfig{

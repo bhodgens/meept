@@ -304,6 +304,13 @@ type rawResponseRecord struct {
 }
 
 func (w *rawResponseWriter) write(prompt, rawBody string) {
+	// Mutexio note: the mutex DOES span the file I/O here by design - the
+	// write is a serialized append where hold-across-I/O is the point (the
+	// sibling calibration loggers share this shape). Suppressed, not
+	// restructured: restructuring would change the serialization contract
+	// the rotation + dead-flag logic depends on.
+	//
+	//nolint:mutexio // serialized append: rotation + dead-flag correctness require holding the lock across the write
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.dead {
@@ -332,7 +339,7 @@ func (w *rawResponseWriter) write(prompt, rawBody string) {
 		w.dead = true
 		w.log.Warn("raw-response logging disabled (encode)", "error", err)
 	}
-	if err := f.Close(); err != nil {
+	if err := f.Close(); err != nil { //nolint:mutexio // same serialized-append contract as the write above
 		w.log.Warn("raw-response close failed", "error", err)
 	}
 }

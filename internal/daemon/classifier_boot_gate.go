@@ -42,13 +42,11 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 )
 
-// classifierAliasName is the resolver alias intent classification rotates
-// through (components.go wires ClassifierAlias to it; empty defaults to this
-// name in the dispatcher). A classifier_model slot naming this alias (or any
-// bare alias name) expands the gate to that alias's full member list: every
-// member is a failover target, so any of them serving the classification turn
-// dead is a platform failure.
-const classifierAliasName = "classifier"
+// The classifier failover alias is "classifier" (the dispatcher hardcodes
+// this default when ClassifierAlias is empty). A classifier_model slot
+// naming that alias (or any bare alias name) expands the boot gate to the
+// alias's full member list: every member is a failover target, so any of
+// them serving the classification turn dead is a platform failure.
 
 // classifierRuntimeProber reports whether the local runtime registered for
 // providerID is currently healthy. ok is false when no runtime (no endpoint
