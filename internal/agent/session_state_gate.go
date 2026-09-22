@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/caimlas/meept/internal/plan"
@@ -152,12 +151,6 @@ func (d *Dispatcher) maybeUpgradeSessionQuickplan(ctx context.Context, intent *I
 		Method:           "quickplan_session_upgrade",
 		Model:            intent.Model,
 	}
-}
-
-// sessionGateKnobEnabled extracts the knob from config for wiring; kept as a
-// function so tests can stub config-less dispatchers via the field.
-func sessionGateKnobEnabled(cfgUp bool, logger *slog.Logger) bool {
-	return cfgUp
 }
 
 // classifierConfig mirrors config.ClassifierConfig (session-state gate

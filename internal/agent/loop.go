@@ -417,20 +417,6 @@ func repeatBreakerRefusal(tc llm.ToolCall, results []*ExecutionResult) string {
 	return ""
 }
 
-// firstRepeatBreakerRefusal scans a whole result batch for the first
-// breaker refusal (used by the post-execution terminalization check).
-func firstRepeatBreakerRefusal(results []*ExecutionResult) (summary, tool string) {
-	for _, r := range results {
-		if r == nil || r.Success {
-			continue
-		}
-		if s := refusalSummaryFromResult(r.Error); s != "" {
-			return s, ""
-		}
-	}
-	return "", ""
-}
-
 const repeatBreakerRefusalSuffix = "[refused without execution: this identical input already failed the maximum number of times]"
 
 // refusalSummaryFromResult extracts the breaker's honest summary from a
