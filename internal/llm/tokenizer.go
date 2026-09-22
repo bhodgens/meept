@@ -8,6 +8,39 @@ import (
 	tiktoken "github.com/pkoukk/tiktoken-go"
 )
 
+// FallbackContextLimit is the conservative default context limit used when
+// no model config or firewall limit is available (chain-stability phase-2
+// saturation check). Chosen as a common small local-model window so a
+// smallness verdict against it errs toward "not small" — i.e. toward the
+// old F-A1 compaction path.
+const FallbackContextLimit = 16384
+
+// EstimateChatTokens estimates the token cost of a full chat request using
+// the 3-chars-per-token heuristic (HeuristicTokenizer) across every
+// message's content plus tool-call envelopes. Used by the agent loop's
+// saturated-endpoint overflow classification; a cheap structural estimate
+// is sufficient there because the decision threshold is 50% of the window.
+func EstimateChatTokens(messages []ChatMessage) int {
+	tk := HeuristicTokenizer{}
+	total := 0
+	for _, msg := range messages {
+		total += tk.CountTokens(msg.Content)
+		if msg.ToolCallID != "" {
+			total += tk.CountTokens(msg.ToolCallID)
+		}
+		for _, tc := range msg.ToolCalls {
+			total += tk.CountTokens(tc.ID)
+			total += tk.CountTokens(tc.Type)
+			total += tk.CountTokens(tc.Function.Name)
+			total += tk.CountTokens(tc.Function.Arguments)
+		}
+		if msg.Name != "" {
+			total += tk.CountTokens(msg.Name)
+		}
+	}
+	return total
+}
+
 // Tokenizer provides token counting for text content.
 // Implementations can use actual tokenizers (tiktoken) or heuristics.
 type Tokenizer interface {
