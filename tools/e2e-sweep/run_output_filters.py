@@ -246,17 +246,36 @@ def daemon_log_tail(home):
     return ""
 
 
+DAEMON_LOG = ""  # set from --daemon-log
+
+
 def run_daemon_layer(base, home):
     print("\n== daemon layer: live rig contracts ==")
-    key_path = os.path.join(home, "dev_key")
-    if not os.path.exists(key_path):
-        note("SKIP", "daemon/all", f"no dev_key at {key_path}")
+    # dev_key lives under MEEPT_HOME (default <home>/.meept when MEEPT_HOME
+    # is not set; the rig sets MEEPT_HOME=$home/.meept).
+    for cand in (os.path.join(home, "dev_key"), os.path.join(home, ".meept", "dev_key")):
+        if os.path.exists(cand):
+            key_path = cand
+            break
+    else:
+        note("SKIP", "daemon/all", f"no dev_key under {home}")
         return
     key = open(key_path).read().strip()
     db_path = os.path.join(home, "tasks.db")
-    log0 = daemon_log_tail(home)
+    if not os.path.exists(db_path):
+        db_path = os.path.join(home, ".meept", "tasks.db")
+    log_path_opts = [os.path.join(home, "daemon.log"),
+                     os.path.join(home, ".meept", "daemon.log"),
+                     os.path.join(os.path.dirname(home), "daemon.log")]
 
-    # Contract 1: the chain is wired at boot (enabled by default).
+    # Contract 1: the chain is wired at boot (enabled by default). The log
+    # file is wherever the operator sends it; scan the common locations.
+    log0 = ""
+    for lp in log_path_opts + [DAEMON_LOG]:
+        if os.path.exists(lp):
+            with open(lp, errors="replace") as fh:
+                log0 = fh.read()
+            break
     if "output filter chain wired" in log0:
         m = re.search(r'output filter chain wired.*', log0)
         note("PASS", "daemon/chain-wired", m.group(0)[-70:] if m else "")
@@ -280,7 +299,7 @@ def run_daemon_layer(base, home):
 
     if reply is not None:
         state, rows = wait_terminal(db_path, task_id) if task_id else ("no-task", [])
-        log = daemon_log_tail(home)
+        log = log0
         actions = re.findall(r'action=(pass|rewrite|fail|rejected_exhausted)', log)
         if actions:
             note("PASS", "daemon/filter-actions-logged", f"{len(actions)} logged actions: {actions[:6]}")
@@ -309,11 +328,14 @@ def main():
     ap.add_argument("--home", default=os.environ.get("MEEPT_SWEEP_HOME", os.path.expanduser("~/.meept")))
     ap.add_argument("--unit-only", action="store_true")
     ap.add_argument("--skip-unit", action="store_true")
+    ap.add_argument("--daemon-log", default="", help="path to the rig's daemon.log")
     args = ap.parse_args()
 
     if not args.skip_unit:
         run_unit_layer()
     if not args.unit_only:
+        global DAEMON_LOG
+        DAEMON_LOG = args.daemon_log
         run_daemon_layer(args.base_url.rstrip("/"), args.home)
 
     print(f"\n=== PASS {RESULTS['PASS']} / FAIL {RESULTS['FAIL']} / SKIP {RESULTS['SKIP']} ===")
