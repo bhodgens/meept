@@ -134,11 +134,16 @@ kill_daemon() {
 # mlx_lm spawned for the scratch endpoints). Ownership check: the pid
 # file's recorded pid must be alive AND its command line must carry
 # llama-server or mlx_lm so we never signal an unrelated reused pid.
+#
+# Pid files are JSON ({"pid":N,"token":"..."}), so extract the pid with the
+# numeric guard: a bare `tr -d` read makes every JSON file fail the
+# *[!0-9]* test and silently skip the reap (2026-09-22 orphan audit: six
+# scratch runtimes leaked exactly this way once pid files became JSON).
 reap_workdir_runtimes() {
   local pid_file pid
   for pid_file in "$WORK"/home/.meept/run/*.pid "$WORK"/state/*.pid; do
     [ -f "$pid_file" ] || continue
-    pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null)"
+    pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$pid_file" 2>/dev/null | head -1)"
     case "$pid" in
       ''|*[!0-9]*) continue ;;
     esac
@@ -149,7 +154,7 @@ reap_workdir_runtimes() {
       sleep 1
       kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
     fi
-    rm -f "$pid_file"
+    rm -f "$pid_file" "$pid_file.cmd"
   done
 }
 
@@ -172,6 +177,41 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# SIGHUP: terminal teardown kills the harness WITHOUT running the EXIT trap
+# on some shells unless HUP is also trapped; an untrapped HUP skips
+# kill_daemon + reap_workdir_runtimes and leaks the scratch runtimes
+# (2026-09-22 orphan audit).
+trap 'exit 129' HUP
+
+# ---------------------------------------------------------------------------
+# Stale-workdir pruning (2026-09-22 orphan audit): the cleanup trap above
+# fires on every normal exit, but a SIGKILLed run (terminal torn down,
+# harness killed mid-flight) skips it, and a --keep run leaves its workdir
+# on purpose. Those leftovers then sit in ${TMPDIR} forever. At startup the
+# harness prunes meept-e2e.* workdirs older than one day whose path no
+# live process references. Granularity is 24h (find -mtime); a concurrent
+# run's workdir is fresh by mtime, so the age gate alone makes races safe —
+# the pgrep guard is defense in depth for a rig whose mtime is somehow old.
+# Best-effort: a pruning failure must never fail the run.
+# ---------------------------------------------------------------------------
+prune_stale_workdirs() {
+  local found dir
+  found="$(find "$(dirname "$WORK")" -maxdepth 1 -name 'meept-e2e.*' -type d -mtime +0 2>/dev/null || true)"
+  [ -n "$found" ] || return 0
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    [ "$dir" = "$WORK" ] && continue
+    if pgrep -f -- "$dir" >/dev/null 2>&1; then
+      warn "not pruning $dir: a live process references it"
+      continue
+    fi
+    if rm -rf "$dir" 2>/dev/null; then
+      log "pruned stale e2e workdir (older than 1 day): $dir"
+    fi
+  done <<EOF_PRUNE_LIST
+$found
+EOF_PRUNE_LIST
+}
 
 # ---------------------------------------------------------------------------
 # Concurrency guard (e2e 2026-09-11): two simultaneous runs each spawn their
@@ -236,6 +276,10 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/meept-e2e.XXXXXX")"
 # the "//" form and every file_write was denied ("Path does not match any
 # allowed path pattern"). Normalize WORK once; everything derives from it.
 WORK="$(cd "$WORK" && pwd)"
+# Prune workdirs left by runs that died hard (cleanup trap skipped) or --keep
+# runs older than a day. Runs AFTER WORK is assigned: the pruner skips $WORK
+# itself, and the dirname is the same temp root.
+prune_stale_workdirs
 # macOS TMPDIR is /var/folders/... but the kernel resolves tools' paths
 # through /private/var/folders/...; permission patterns must cover both
 # forms or file_write gets "access denied" on the /private prefix.
@@ -925,17 +969,67 @@ if preserved:
     print("note: kept as-is (provider does not spawn): %s"
           % ", ".join(sorted(preserved)), file=sys.stderr)
 
-# The sandboxed e2e can reach ONLY what the scratch daemon spawns itself: zai
-# has no API key here and ollama is not running, so an alias chain that ends
-# in a cloud/ollama model makes specialist step jobs fail (the naive-user e2e:
-# T1's coder step -> A4; later turns -> error envelopes -> A3/A5). Rewrite
-# every agent-id alias to the local-gguf runtime the daemon spawns. Same
-# scanner as above (no json5 module: spans + comment-blanked text); the alias
-# objects are top-level, so the provider-scoped port rewrite never touched
-# them and these edits are applied to the rebuilt text.
+# The sandboxed e2e can reach what the scratch daemon SPAWNS itself, plus
+# nothing else: zai has no API key here and ollama is not running, so an
+# alias chain that ends in a cloud/ollama model makes specialist step jobs
+# fail (the naive-user e2e: T1's coder step -> A4; later turns -> error
+# envelopes -> A3/A5).
+#
+# Filter, don't collapse (2026-09-23 run 0zmnHP): the old rewrite collapsed
+# EVERY agent alias to [local-gguf/lfm-8b-gguf]. That aimed the CLASSIFIER
+# alias at the busy general endpoint — every classify call queued behind
+# planner/coder on max_concurrency=2 and deadline-exceeded, the keyword
+# fallback misrouted, planner loops blew past the 120s RPC ceiling, and all
+# four transcript turns failed. It also left the spawned local-mlx runtime
+# referenced by NOTHING: the daemon's in-use gate skipped its spawn, its
+# port sat empty, and the classifier health-wait could never pass. The fix:
+# drop only members that are UNREACHABLE in the sandbox (cloud/ollama, or a
+# local provider whose endpoint this sandbox does not spawn) and keep the
+# original preference ORDER of everything reachable. The classifier alias
+# keeps its fast dedicated runtime and the in-use gate sees its model.
 ALIAS_NAMES = ("classifier", "summarizer", "small", "coder", "planner",
                "analyst")
-LOCAL_MODEL = "local-gguf/lfm-8b-gguf"
+FALLBACK_MODEL = "local-gguf/lfm-8b-gguf"
+
+def reachable_members(block_scan):
+    """Alias member refs kept in the sandbox, in original order.
+
+    A member survives when its provider is one the scratch daemon spawns
+    (any provider key in spawning_provider_names — their endpoints are all
+    remapped live here) — or when its ref carries no provider/members that
+    the sandbox could reach anyway. Cloud (zai/glm-*), ollama, and any
+    provider without a spawn_command in this config are dropped.
+    """
+    models_m = re.search(r'["\']?models["\']?\s*:\s*\[', block_scan)
+    if models_m is None:
+        return None
+    i, blen, depth = models_m.end(), len(block_scan), 1
+    while i < blen and depth:
+        c = block_scan[i]
+        if c == '"':
+            i = _skip_string(block_scan, i)
+            continue
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+        i += 1
+    if depth:
+        return None
+    inner = block_scan[models_m.end():i - 1]
+    refs = re.findall(r'["\']([a-zA-Z0-9\-]+/[a-zA-Z0-9\-.]+)["\']', inner)
+    kept = [r for r in refs if r.split("/", 1)[0] in spawning_provider_names]
+    return kept
+
+# Provider keys the sandbox daemon spawns (computed above from
+# spawn_command markers) — every one of their endpoints is remapped and
+# will be listening by the time turns run. Only TOP-LEVEL provider members
+# count: `spawning` also holds nested spans (a lifecycle block contains its
+# own spawn_command), whose member_name() is a nested key like "models" or
+# a model id — those must not enter the reachability set.
+spawning_provider_names = {member_name(s) for s, e in spawning_set}
+spawning_provider_names.discard("?")
+
 alias_edits = []
 alias_key = re.search(r'["\']?model_aliases["\']?\s*:\s*\{', scan)
 if alias_key is None:
@@ -955,13 +1049,23 @@ else:
             if name not in ALIAS_NAMES:
                 continue
             block_scan = scan[s:e]
-            mkey = re.search(r'["\']?models["\']?\s*:\s*\[', block_scan)
-            if mkey is None:
+            kept = reachable_members(block_scan)
+            if kept is None:
                 print("WARNING: alias %s has no models array; left as-is"
                       % name, file=sys.stderr)
                 continue
+            if not kept:
+                # No reachable member at all (e.g. coder/planner name only
+                # cloud/ollama models): fall back to the spawned general
+                # runtime. Leaving the alias untouched would send every
+                # specialist step to an endpoint the sandbox cannot dial.
+                kept = [FALLBACK_MODEL]
+                print("note: alias %s had no sandbox-reachable member; "
+                      "rewritten to %s" % (name, FALLBACK_MODEL),
+                      file=sys.stderr)
             # Walk to the array's matching ']' (strings skipped; comments are
             # already blanked in block_scan).
+            mkey = re.search(r'["\']?models["\']?\s*:\s*\[', block_scan)
             i, blen, depth = mkey.end(), e - s, 1
             while i < blen and depth:
                 c = block_scan[i]
@@ -978,12 +1082,16 @@ else:
                       "left as-is" % name, file=sys.stderr)
                 continue
             close = i - 1  # index of the matching ']' within the block
-            # Match the array's own indentation for the replacement entry.
+            # Match the array's own indentation for the replacement entries.
             line_start = block_scan.rfind("\n", 0, mkey.end() - 1) + 1
             indent = re.match(r"[ \t]*", block_scan[line_start:]).group(0)
-            replacement = (
-                '[\n%s  "%s"   // sandbox e2e: only the spawned local '
-                'runtime is reachable\n%s]' % (indent, LOCAL_MODEL, indent))
+            # Per-entry comments would swallow the separating comma (a //
+            # comment runs to end of line, so "value // c," parses with the
+            # comma INSIDE the comment and hujson rejects the array). The
+            # rewrite note in stderr documents what was filtered; keep the
+            # array itself comment-free.
+            entries = ",\n".join('%s"%s"' % (indent, r) for r in kept)
+            replacement = "[\n%s\n%s]" % (entries, indent)
             alias_edits.append((s + mkey.end() - 1, s + close + 1, replacement))
         if not alias_edits:
             print("WARNING: none of the agent aliases (%s) found in %s; "
@@ -992,8 +1100,8 @@ else:
 for astart, aend, rep in sorted(alias_edits, reverse=True):
     new = new[:astart] + rep + new[aend:]
 if alias_edits:
-    print("note: model_aliases rewritten for the sandbox (spawned local "
-          "runtime only): %s" % ", ".join(
+    print("note: model_aliases filtered for the sandbox (unreachable members "
+          "dropped, order kept): %s" % ", ".join(
               sorted({member_name(a[0]) for a in alias_edits})), file=sys.stderr)
 
 open(path, "w", encoding="utf-8").write(new)
@@ -1265,7 +1373,14 @@ try:
         print("__WARMUP_FAILED__: %s" % msg["error"], file=sys.stderr)
         sys.exit(3)
     if isinstance(msg.get("result"), dict) and msg["result"].get("isError"):
-        print("MCP tool returned isError", file=sys.stderr)
+        # Surface the tool's error text: "MCP tool returned isError" alone
+        # hides the root cause (2026-09-23 run: every turn failed with the
+        # actual cause — an RPC chat.response timeout — buried in content).
+        try:
+            err_text = msg["result"]["content"][0]["text"]
+        except (KeyError, IndexError, TypeError):
+            err_text = "<no content>"
+        sys.stderr.write("MCP tool returned isError: %s\n" % err_text[:500])
         sys.exit(3)
     try:
         text = msg["result"]["content"][0]["text"]
@@ -1381,7 +1496,14 @@ try:
         sys.stderr.write(json.dumps(msg["error"]))
         sys.exit(1)
     if isinstance(msg.get("result"), dict) and msg["result"].get("isError"):
-        print("MCP tool returned isError", file=sys.stderr)
+        # Surface the tool's error text: "MCP tool returned isError" alone
+        # hides the root cause (2026-09-23 run: every turn failed with the
+        # actual cause — an RPC chat.response timeout — buried in content).
+        try:
+            err_text = msg["result"]["content"][0]["text"]
+        except (KeyError, IndexError, TypeError):
+            err_text = "<no content>"
+        sys.stderr.write("MCP tool returned isError: %s\n" % err_text[:500])
         sys.exit(3)
     try:
         text = msg["result"]["content"][0]["text"]
