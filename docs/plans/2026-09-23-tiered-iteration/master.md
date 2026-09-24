@@ -121,10 +121,9 @@ then 2 (the loop), then 4 (observability) last so it measures the real thing.
 
 ## Open questions (for review)
 
-1. Critic model: same planner model, or `critic_model` slot? Default
-   proposal: same model first; slot only if the corpus shows critique misses.
-2. Should TierComplex self-seal be gated behind a config flag for the first
-   release (`plans.self_seal_enabled`, default false) so the flow can ship
-   dark? Proposal: yes.
-3. Review-verdict retention: does the review pipeline persist verdicts
-   per-task today, or are they ephemeral? (Leaf 3 discovery task.)
+All four RESOLVED by operator 2026-09-23 (all option 1) — see
+OPEN-QUESTIONS.md: critic = same planner model (slot only if corpus shows
+capability misses); self-seal ships dark behind
+`plans.self_seal_enabled` (default false); leaf 3 discovers review-verdict
+persistence with both outcomes specified; ReplanAttempt reads the escalation
+level from task metadata, one source of truth.
