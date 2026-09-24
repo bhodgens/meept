@@ -69,6 +69,22 @@ var extractReportRegex = regexp.MustCompile("(?s)```json\\s*\\n(\\{[^`]*\"status
 // claimsBlockRegex matches a JSON code block containing claims/evidence.
 var claimsBlockRegex = regexp.MustCompile("(?s)```json\\s*\\n\\{.*?\"claims\".*?\\}.*?\\n```")
 
+// bareClaimsObjectRegex matches a BARE (unfenced) claims/evidence JSON object
+// occupying a whole paragraph of the response. Task-step prompts MANDATE this
+// envelope as the agent's final output (loop.go evidenceSection); the 8B often
+// emits it without the fences, which StripReport's fenced-only regexes missed
+// — the raw envelope then reached the reply guard, which replaced the ENTIRE
+// reply with a canned line and the user never saw the agent's prose (e2e run
+// 2026-09-23 EHpc4r: T1 created hello.txt but A4's "reply names the path"
+// failed because the whole reply was replaced). The regex anchors on the
+// leading "claims" key so ordinary prose or JSON data dumps are untouched.
+// bareClaimsObjectRegex is retained for reference in tests only; envelope
+// removal is brace-aware (findClaimsEnvelopeSpan) because the evidence array
+// nests objects and a non-greedy regex cannot find the balancing brace.
+var bareClaimsObjectRegex = regexp.MustCompile("(?s)\\s*\\{\\s*\"claims\"\\s*:.*?\"evidence\"\\s*:.*?\\}\\s*")
+
+var _ = bareClaimsObjectRegex // referenced by comments/tests; keep linters quiet
+
 // ExtractReport parses an AgentReport from the agent's response.
 // It looks for a JSON code block containing a status field.
 // Returns nil if no valid report is found.
@@ -153,11 +169,97 @@ func isValidStatus(status string) bool {
 	}
 }
 
+// StripClaimsEvidence removes a bare claims/evidence JSON envelope from the
+// response and returns the remaining prose. Exported so the chat handler's
+// bestStepResult can clean a task step's stored result before it becomes a
+// user-facing reply: the envelope is machine-facing evidence mandated by the
+// step prompt (loop.go evidenceSection), not user prose, and left in place it
+// trips the reply guard's tool_result_json rule, which replaces the whole
+// reply with a canned line.
+//
+// Brace-aware rather than regex-based: the envelope's "evidence" array nests
+// objects, so a non-greedy `.*?\}` pattern stops at the first inner brace and
+// leaves trailing `]}` debris. The scanner finds an object that starts with
+// the "claims" key, walks to its BALANCING close brace (strings skipped), and
+// removes exactly that span — fenced or bare (fenced removal matches
+// StripReport's behavior for the same envelope).
+func StripClaimsEvidence(response string) string {
+	out := response
+	for {
+		start, end, ok := findClaimsEnvelopeSpan(out)
+		if !ok {
+			break
+		}
+		out = out[:start] + out[end:]
+	}
+	return strings.TrimSpace(out)
+}
+
+// findClaimsEnvelopeSpan locates one claims/evidence JSON object in s and
+// returns (start, end, true) with end exclusive. ok=false when no envelope is
+// present. start is the index of the opening '{'.
+func findClaimsEnvelopeSpan(s string) (int, int, bool) {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' {
+			continue
+		}
+		// The object must open with the "claims" key (whitespace between).
+		j := i + 1
+		for j < len(s) && (s[j] == ' ' || s[j] == '	' || s[j] == '\n' || s[j] == '\r') {
+			j++
+		}
+		if !strings.HasPrefix(s[j:], `"claims"`) {
+			continue
+		}
+		// Walk to the balancing close brace; strings are skipped so braces
+		// inside strings cannot miscount. The k-- compensates for the loop
+		// post-increment: skipJSONString returns the index of the closing
+		// quote's NEXT byte, and that byte still needs its own switch pass.
+		depth := 0
+		for k := i; k < len(s); k++ {
+			switch s[k] {
+			case '"':
+				k = skipJSONString(s, k) - 1
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					return i, k + 1, true
+				}
+			}
+		}
+		// Unbalanced: no envelope here.
+		return 0, 0, false
+	}
+	return 0, 0, false
+}
+
+// skipJSONString returns the index just past the string whose opening quote is
+// at s[i]. Best-effort on malformed input: returns len(s) on unterminated
+// strings.
+func skipJSONString(s string, i int) int {
+	i++
+	for i < len(s) {
+		switch s[i] {
+		case '\\':
+			i += 2
+			continue
+		case '"':
+			return i + 1
+		}
+		i++
+	}
+	return i
+}
+
 // StripReport removes the report JSON block and claims/evidence blocks from the response.
 // This returns the response without structured metadata for user display.
 func StripReport(response string) string {
-	// Remove claims/evidence JSON code block (FIX #0047)
+	// Remove claims/evidence JSON code block (FIX #0047), then the bare
+	// (unfenced) envelope form.
 	response = claimsBlockRegex.ReplaceAllString(response, "")
+	response = StripClaimsEvidence(response)
 
 	// Remove JSON code block with report
 	matches := extractReportRegex.FindStringSubmatch(response)

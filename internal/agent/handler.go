@@ -2062,27 +2062,37 @@ func (h *ChatHandler) FormatEnhancedAsyncTaskAck(
 // Result of the highest-sequence completed/approved step that has
 // non-empty text; falls back to any non-empty Result.
 func bestStepResult(steps []*task.TaskStep) string {
+	// Strip-then-select: a step's raw result can be ONLY the machine-facing
+	// claims/evidence envelope (loop.go evidenceSection). Such a result is
+	// useless as a user-facing reply even when it is the newest step, so
+	// strip every candidate first and prefer the highest-sequence step that
+	// still carries prose. Fall back to the raw result only when EVERY
+	// candidate was envelope-only (better than an empty reply).
 	best := ""
 	bestSeq := -1
+	fallback := ""
+	fallbackSeq := -1
 	for _, s := range steps {
 		if s == nil || s.Result == "" {
 			continue
 		}
 		done := s.State == task.StepCompleted || s.State == task.StepApproved
-		if done && s.Sequence > bestSeq {
-			best, bestSeq = s.Result, s.Sequence
+		stripped := StripClaimsEvidence(s.Result)
+		if done {
+			if stripped != "" && s.Sequence > bestSeq {
+				best, bestSeq = stripped, s.Sequence
+			}
+		}
+		if fallback == "" || s.Sequence > fallbackSeq {
+			fallback = s.Result
+			fallbackSeq = s.Sequence
 		}
 	}
 	if best != "" {
 		return best
 	}
 	// Fallback: any non-empty result (e.g. approved-state variants).
-	for _, s := range steps {
-		if s != nil && s.Result != "" {
-			return s.Result
-		}
-	}
-	return ""
+	return fallback
 }
 
 // fetchStepSummaries retrieves step summaries for a task from the step store.
@@ -2481,6 +2491,20 @@ func (h *ChatHandler) waitForTaskCompletion(ctx context.Context, taskID string) 
 			}
 			if t.State.IsTerminal() {
 				if t.State == task.StateFailed {
+					// A failed task may still hold a finished step with the
+					// user's answer (e2e run 2026-09-23 gp2KnX: T1's file-write
+					// step completed but a later bookkeeping step failed). Relay
+					// the best approved/completed step result when one exists —
+					// the generic "failed" sentence is the LAST resort, not the
+					// first, matching the degraded-reply behavior at the wait
+					// ceiling above.
+					if h.stepStore != nil {
+						if steps, err := h.stepStore.ListByTaskID(taskID); err == nil {
+							if result := bestStepResult(steps); result != "" {
+								return result
+							}
+						}
+					}
 					return fmt.Sprintf("Task %s failed after reaching terminal state.", taskID)
 				}
 				if h.stepStore != nil {
