@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	sid "github.com/caimlas/meept/pkg/id"
@@ -17,6 +18,45 @@ import (
 
 // ErrStepNotFound is returned when a step cannot be found by ID.
 var ErrStepNotFound = errors.New("step not found")
+
+// ReviewReasonMaxChars bounds the persisted review reason (and, in
+// ReviewVerdictsForSession, the step description) so a bounded critic read
+// can never regrow the prompt (tiered-iteration leaf 03).
+const ReviewReasonMaxChars = 200
+
+// truncateRunes truncates s to at most limit runes INCLUSIVE (the limit
+// counts a trailing "…" when one is appended: the returned string is never
+// longer than limit runes). Rune-safe: no multi-byte character is split.
+func truncateRunes(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= limit {
+		return s
+	}
+	if limit == 1 {
+		return "…"
+	}
+	return string(r[:limit-1]) + "…"
+}
+
+// truncateReason bounds a review reason / step description to
+// ReviewReasonMaxChars runes.
+func truncateReason(s string) string {
+	return truncateRunes(strings.TrimSpace(s), ReviewReasonMaxChars)
+}
+
+// ReviewVerdictSummary is the bounded, per-step review outcome the critic's
+// evidence assembler reads back from the step store (tiered-iteration
+// leaf 03): {task_id, step description, verdict, reason}, each string
+// bounded to reviewReasonMaxChars runes at read time.
+type ReviewVerdictSummary struct {
+	TaskID      string `json:"task_id"`
+	Description string `json:"description"`
+	Verdict     string `json:"verdict"`
+	Reason      string `json:"reason"`
+}
 
 // CategorizedRecommendation represents a recommendation from an agent.
 type CategorizedRecommendation struct {
@@ -199,6 +239,17 @@ type TaskStep struct {
 	// FilterError carries the last output-filter rejection Reason (the
 	// machine-readable repair context) for audit/debug.
 	FilterError string `json:"filter_error,omitempty"`
+	// ReviewVerdict is the persisted outcome of the step's review
+	// ("approved" | "rejected" | "needs_info"; tiered-iteration leaf 03).
+	// Empty when the step has not been reviewed. Written by the review
+	// pipeline at HandleReviewResult time and read back by the critic's
+	// evidence assembler via ReviewVerdictsForSession.
+	ReviewVerdict string `json:"review_verdict,omitempty"`
+	// ReviewReason is the reviewer feedback accompanying ReviewVerdict,
+	// bounded at write time by the review pipeline.
+	ReviewReason string `json:"review_reason,omitempty"`
+	// ReviewAt is the RFC3339 timestamp of the verdict write.
+	ReviewAt string `json:"review_at,omitempty"`
 	// SessionID records the originating session for provenance (tree 04
 	// leaf 02, audit R4): the tactical scheduler copies it into
 	// StepJobPayload and uses it to evaluate the interactive stamp at
@@ -378,6 +429,9 @@ func (s *StepStore) migrate() error {
 		validation_error TEXT,
 		filter_retry_count INTEGER DEFAULT 0,
 		filter_error   TEXT,
+		review_verdict TEXT,
+		review_reason  TEXT,
+		review_at      TEXT,
 		token_usage    INTEGER DEFAULT 0,
 		memory_refs    TEXT,
 		accumulated_context TEXT,
@@ -439,6 +493,13 @@ func (s *StepStore) migrate() error {
 		// the evidence-validation verdict columns.
 		"ALTER TABLE task_steps ADD COLUMN filter_retry_count INTEGER DEFAULT 0",
 		"ALTER TABLE task_steps ADD COLUMN filter_error TEXT",
+		// Review verdict persistence (tiered-iteration leaf 03): the
+		// ReviewStep verdict was previously ephemeral (bus event only);
+		// persisting it beside the step lets the critic's evidence
+		// assembler read prior verdicts back per session.
+		"ALTER TABLE task_steps ADD COLUMN review_verdict TEXT",
+		"ALTER TABLE task_steps ADD COLUMN review_reason TEXT",
+		"ALTER TABLE task_steps ADD COLUMN review_at TEXT",
 	} {
 		_, _ = s.db.Exec(col)
 	}
@@ -950,6 +1011,86 @@ func (s *StepStore) SetResult(id, result string) error {
 		return fmt.Errorf("failed to set step result: %w", err)
 	}
 	return nil
+}
+
+// SetReviewVerdict persists the review pipeline's verdict for a step
+// (tiered-iteration leaf 03). reason is bounded to ReviewReasonMaxChars
+// at write time so the critic's bounded read (ReviewVerdictsForSession)
+// can rely on per-verdict bounds. The verdict columns ride beside the
+// step row, so they survive process restarts with the rest of the step.
+func (s *StepStore) SetReviewVerdict(id, verdict, reason string) error {
+	if id == "" {
+		return fmt.Errorf("SetReviewVerdict: empty step id")
+	}
+	if strings.TrimSpace(verdict) == "" {
+		return fmt.Errorf("SetReviewVerdict: empty verdict for step %s", id)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`
+		UPDATE task_steps
+		SET review_verdict = ?, review_reason = ?, review_at = ?, updated_at = ?
+		WHERE id = ?`,
+		verdict, truncateReason(reason), now, now, id)
+	if err != nil {
+		return fmt.Errorf("failed to set step review verdict: %w", err)
+	}
+	return nil
+}
+
+// ReviewVerdictsForSession returns the last (most recently reviewed) count
+// review verdicts for steps belonging to the given session, oldest first
+// (tiered-iteration leaf 03). Empty sessionID returns a nil slice and no
+// error — verdicts are session-scoped by construction, and a session-less
+// step (empty session_id) never leaks across the boundary. A nil or closed
+// store surfaces its error rather than pretending there were no verdicts.
+func (s *StepStore) ReviewVerdictsForSession(sessionID string, count int) ([]ReviewVerdictSummary, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("review verdicts unavailable: step store not initialized")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || count <= 0 {
+		return nil, nil
+	}
+
+	rows, err := s.db.Query(`
+		SELECT task_id, description, review_verdict, review_reason
+		FROM task_steps
+		WHERE session_id = ? AND review_verdict IS NOT NULL AND review_verdict != ''
+		ORDER BY review_at DESC, rowid DESC
+		LIMIT ?`, sessionID, count)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query review verdicts for session: %w", err)
+	}
+	defer func() {
+		if cerr := rows.Close(); cerr != nil {
+			s.logger.Warn("failed to close review-verdict rows", "error", cerr)
+		}
+	}()
+
+	var out []ReviewVerdictSummary
+	for rows.Next() {
+		var (
+			taskID, description, verdict, reason sql.NullString
+		)
+		if err := rows.Scan(&taskID, &description, &verdict, &reason); err != nil {
+			return nil, fmt.Errorf("failed to scan review verdict row: %w", err)
+		}
+		out = append(out, ReviewVerdictSummary{
+			TaskID:      taskID.String,
+			Description: truncateReason(description.String),
+			Verdict:     verdict.String,
+			Reason:      truncateReason(reason.String),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate review verdict rows: %w", err)
+	}
+
+	// Oldest-first so prompt assembly renders a chronological narrative.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
 }
 
 // AreAllCompleted returns true if all steps for a task are in a terminal state

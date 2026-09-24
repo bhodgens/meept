@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -548,6 +549,23 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 	var revisions []*task.TaskStep
 	// outErr accumulates errors from non-fatal SetResult calls (S1-10).
 	var outErr error
+
+	// Persist the verdict beside the step (tiered-iteration leaf 03): the
+	// ReviewResult was previously ephemeral (bus event only), so the
+	// critic's evidence assembler had nothing to read back per session.
+	// Every terminal verdict — including the auto-approval paths — is
+	// written; the reason is bounded at write time (reviewReasonMaxChars)
+	// by SetReviewVerdict. A write failure is non-fatal (logged, surfaced
+	// through outErr alongside the other non-fatal SetResult failures) so
+	// review gating behavior is unchanged.
+	if err := rm.stepStore.SetReviewVerdict(stepID, string(result.Status), result.Feedback); err != nil {
+		rm.logger.Error("Failed to persist review verdict",
+			"step_id", stepID,
+			"status", string(result.Status),
+			"error", err,
+		)
+		outErr = errors.Join(outErr, fmt.Errorf("failed to persist review verdict: %w", err))
+	}
 
 	switch result.Status {
 	case ReviewApproved:
