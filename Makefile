@@ -1327,3 +1327,18 @@ compare-prep:
 .PHONY: e2e-chat
 e2e-chat:
 	@bash scripts/e2e-naive-user-chat.sh $(E2E_ARGS)
+
+# Hermetic Go e2e suites (e2e/): fresh binaries, sandboxed HOME/MEEPT_HOME,
+# fake LLM — never touches ~/.meept or the live daemon.
+#   make e2e-fast                  # all suites
+#   make e2e-fast-area AREA=smoke  # one suite dir (e2e/suites/<AREA>)
+.PHONY: e2e-fast e2e-fast-area
+e2e-fast:
+	go test -tags e2e ./e2e/... -p 2
+
+e2e-fast-area:
+	@if [ -z "$(AREA)" ]; then \
+		echo "usage: make e2e-fast-area AREA=<suite dir under e2e/suites>"; \
+		exit 2; \
+	fi
+	go test -tags e2e ./e2e/suites/$(AREA)/... -p 2
