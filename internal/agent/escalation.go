@@ -60,6 +60,7 @@ type EscalationManager struct {
 	config    EscalationConfig
 	planner   *StrategicPlanner
 	taskStore *task.Store
+	stepStore *task.StepStore
 	bus       *bus.MessageBus
 	logger    *slog.Logger
 
@@ -72,6 +73,9 @@ type EscalationManagerConfig struct {
 	Config    EscalationConfig
 	Planner   *StrategicPlanner
 	TaskStore *task.Store
+	// StepStore is optional; when set it supplies the failed-step errors
+	// for the failure-aware replan context (issue #58 capability 2).
+	StepStore *task.StepStore
 	Bus       *bus.MessageBus
 	Logger    *slog.Logger
 }
@@ -89,10 +93,43 @@ func NewEscalationManager(cfg EscalationManagerConfig) *EscalationManager {
 		config:      cfg.Config,
 		planner:     cfg.Planner,
 		taskStore:   cfg.TaskStore,
+		stepStore:   cfg.StepStore,
 		bus:         cfg.Bus,
 		logger:      cfg.Logger.With("component", "escalation-manager"),
 		escalations: make(map[string]*EscalationLevel),
 	}
+}
+
+// buildReplanFailureContext renders the "## Previous attempt failed" block
+// from the task's failed steps (issue #58 capability 2). Each entry carries
+// the step description, executing agent, and bounded error text so the
+// replan prompt shows the CONCRETE failure — tool/args/error — not just the
+// digest's one-line reason. Returns "" when the step store is nil or the
+// task has no failed steps, in which case no block is attached.
+func (em *EscalationManager) buildReplanFailureContext(taskID string) string {
+	if em.stepStore == nil {
+		return ""
+	}
+	steps, err := em.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		em.logger.Error("Failed to list steps for replan failure context",
+			"task_id", taskID,
+			"error", err,
+		)
+		return ""
+	}
+	var failures []stepFailure
+	for _, s := range steps {
+		if s == nil || s.State != task.StepFailed {
+			continue
+		}
+		failures = append(failures, stepFailure{
+			Description: s.Description,
+			Agent:       s.AgentID,
+			Error:       s.Result,
+		})
+	}
+	return buildFailureBlock(failures)
 }
 
 // Escalate triggers re-planning for a failed task.
@@ -282,7 +319,19 @@ func (em *EscalationManager) triggerReplan(ctx context.Context, failure FailureC
 		SessionID: "",
 		Input:     replanDescription,
 		Intent:    string(IntentPlan),
+		// Complexity signal (issue #58): a replan is never trivial — the
+		// first attempt already failed, so downstream routing must treat
+		// the request as at least TierStandard.
+		IsReplan: true,
 	}
+
+	// Failure-aware replan context (issue #58 capability 2): the failing
+	// step's concrete error text rides in SessionContext, which the
+	// planner prompt already appends — no template changes. The step
+	// store is the source of truth for failed steps (description, agent,
+	// Result/error), bounded per step; empty when the store is nil or
+	// lists nothing failed.
+	req.SessionContext = em.buildReplanFailureContext(failure.TaskID)
 
 	if err := em.planner.Plan(ctx, req); err != nil {
 		em.logger.Error("Re-planning failed",

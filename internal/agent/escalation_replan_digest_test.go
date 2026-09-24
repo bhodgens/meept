@@ -41,3 +41,65 @@ func TestBuildReplanDigest_Empty(t *testing.T) {
 		t.Errorf("expected Failure section, got: %s", digest)
 	}
 }
+
+// Pin (issue #58 capability 2): the failure block renders the concrete
+// per-step failure — description, agent, and bounded error text — under the
+// "## Previous attempt failed" header.
+func TestBuildFailureBlock_CarriesConcreteFailure(t *testing.T) {
+	block := buildFailureBlock([]stepFailure{
+		{
+			Description: "Create the sprint backlog task via task_create",
+			Agent:       "task-manager",
+			Error:       "task_create failed: name is missing\nargs were: {\"description\":\"...\"}",
+		},
+	})
+	if !strings.Contains(block, "## Previous attempt failed") {
+		t.Errorf("expected failure-block header, got: %s", block)
+	}
+	if !strings.Contains(block, "Create the sprint backlog task via task_create") {
+		t.Errorf("expected step description in block, got: %s", block)
+	}
+	if !strings.Contains(block, "Agent: task-manager") {
+		t.Errorf("expected agent in block, got: %s", block)
+	}
+	if !strings.Contains(block, "task_create failed: name is missing") {
+		t.Errorf("expected concrete error text in block, got: %s", block)
+	}
+	// Multi-line error text is truncated to ~400 chars, not first-line
+	// only: the args shape is exactly what the replanning planner needs.
+	if !strings.Contains(block, "args were") {
+		t.Errorf("expected error args detail to survive within the bound, got: %s", block)
+	}
+}
+
+// Pin: empty failure list renders no block (callers attach nothing).
+func TestBuildFailureBlock_Empty(t *testing.T) {
+	if got := buildFailureBlock(nil); got != "" {
+		t.Errorf("expected empty block for nil failures, got: %q", got)
+	}
+	if got := buildFailureBlock([]stepFailure{}); got != "" {
+		t.Errorf("expected empty block for empty failures, got: %q", got)
+	}
+}
+
+// Pin: per-step error text is bounded at failureStepErrorMaxChars and the
+// whole block stays under failureBlockMaxChars even with many failures.
+func TestBuildFailureBlock_Bounded(t *testing.T) {
+	huge := strings.Repeat("x", 10*failureStepErrorMaxChars)
+	failures := make([]stepFailure, 0, 30)
+	for i := 0; i < 30; i++ {
+		failures = append(failures, stepFailure{
+			Description: "step with a giant transcript result",
+			Agent:       "coder",
+			Error:       huge,
+		})
+	}
+	block := buildFailureBlock(failures)
+	if got := len([]rune(block)); got > failureBlockMaxChars {
+		t.Fatalf("block = %d runes, want <= %d", got, failureBlockMaxChars)
+	}
+	// A prefix of the error survives (bounded), proving incorporation.
+	if !strings.Contains(block, string([]rune(huge)[:100])) {
+		t.Errorf("block lost the bounded error prefix:\\n%.400s", block)
+	}
+}
