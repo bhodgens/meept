@@ -18,7 +18,7 @@ type countingRequiredTool struct {
 	runs atomic.Int32
 }
 
-func (t *countingRequiredTool) Name() string { return "fake_required" }
+func (t *countingRequiredTool) Name() string        { return "fake_required" }
 func (t *countingRequiredTool) Description() string { return "test" }
 func (t *countingRequiredTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
@@ -30,7 +30,7 @@ func (t *countingRequiredTool) Parameters() llm.FunctionParameters {
 	}
 }
 func (t *countingRequiredTool) IsConcurrencySafe(args map[string]any) bool { return true }
-func (t *countingRequiredTool) IsReadOnly(input map[string]any) bool { return false }
+func (t *countingRequiredTool) IsReadOnly(input map[string]any) bool       { return false }
 func (t *countingRequiredTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	t.runs.Add(1)
 	return "ran", nil
