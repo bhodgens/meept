@@ -82,27 +82,21 @@ func deriveAcceptanceCriteria(step *task.TaskStep) string {
 }
 
 // StoreSpecInTask serializes the spec into the task's Metadata field.
-// It preserves any existing metadata keys by merging the "spec" key in.
+// It merges the "spec" key into the existing metadata map — the legacy
+// wrapper re-marshal DROPPED every non-spec key (plan_draft, pending_steps,
+// escalation_level, ...) whenever a plan was stored.
 func StoreSpecInTask(t *task.Task, spec *TaskSpec) {
-	if spec == nil {
+	if spec == nil || t == nil {
 		return
 	}
 
-	if len(t.Metadata) > 0 {
-		var wrapper specMetadataWrapper
-		if json.Unmarshal(t.Metadata, &wrapper) == nil {
-			wrapper.Spec = spec
-			if merged, err := json.Marshal(wrapper); err == nil {
-				t.Metadata = merged
-				return
-			}
-		}
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return
 	}
-
-	wrapper := specMetadataWrapper{Spec: spec}
-	if data, err := json.Marshal(wrapper); err == nil {
-		t.Metadata = data
-	}
+	t.Metadata = mergeMetadata(t.Metadata, map[string]json.RawMessage{
+		"spec": specJSON,
+	})
 }
 
 // ExtractSpecFromTask reads the spec from a task's Metadata field.

@@ -152,9 +152,11 @@ func (em *EscalationManager) Escalate(ctx context.Context, failure FailureContex
 	if !exists {
 		// Query task store WITHOUT holding the lock
 		originalTaskDesc := ""
+		var originalTask *task.Task
 		if em.taskStore != nil {
 			if t, err := em.taskStore.GetByID(failure.TaskID); err == nil && t != nil {
 				originalTaskDesc = t.Description
+				originalTask = t
 			}
 		}
 
@@ -177,6 +179,18 @@ func (em *EscalationManager) Escalate(ctx context.Context, failure FailureContex
 		level.Timestamp = time.Now()
 		currentLevel := level.Level
 		em.mu.Unlock()
+
+		// Tiered-iteration leaf 01: record the level on task metadata so
+		// replan sites (triggerReplan here, ReplanFailedTask in the
+		// orchestrator path) read the same single source of truth — the
+		// in-memory map does not survive a daemon restart.
+		if originalTask != nil {
+			if err := writeEscalationLevelToTask(em.taskStore, originalTask, currentLevel); err != nil {
+				em.logger.Warn("Failed to persist escalation level on task metadata",
+					"task_id", failure.TaskID, "level", currentLevel, "error", err,
+				)
+			}
+		}
 
 		em.logger.Info("Escalating task",
 			"task_id", failure.TaskID,
@@ -207,6 +221,19 @@ func (em *EscalationManager) Escalate(ctx context.Context, failure FailureContex
 	level.Timestamp = time.Now()
 	currentLevel := level.Level
 	em.mu.Unlock()
+
+	// Tiered-iteration leaf 01: keep the task-metadata level current in
+	// this branch too — a daemon restart between escalations must not
+	// reset the count (single source of truth decision).
+	if em.taskStore != nil {
+		if t, err := em.taskStore.GetByID(failure.TaskID); err == nil && t != nil {
+			if err := writeEscalationLevelToTask(em.taskStore, t, currentLevel); err != nil {
+				em.logger.Warn("Failed to persist escalation level on task metadata",
+					"task_id", failure.TaskID, "level", currentLevel, "error", err,
+				)
+			}
+		}
+	}
 
 	em.logger.Info("Escalating task",
 		"task_id", failure.TaskID,
@@ -314,11 +341,18 @@ func (em *EscalationManager) triggerReplan(ctx context.Context, failure FailureC
 		fmt.Sprintf("step '%s' failed: %s", failure.StepID, failure.Error),
 	) + "\nPlease break this into smaller, more focused steps that avoid the previous failure."
 
+	// Tiered-iteration leaf 01: the escalation level recorded on task
+	// metadata is the single source of truth for the replan count.
+	// triggerReplan also takes the `level` param, but the metadata read
+	// keeps both replan sites symmetrical; on any mismatch the metadata
+	// (freshly written by Escalate above) governs. 0 = unknown, never a
+	// guessed count.
 	req := PlanRequest{
-		TaskID:    failure.TaskID,
-		SessionID: "",
-		Input:     replanDescription,
-		Intent:    string(IntentPlan),
+		TaskID:        failure.TaskID,
+		SessionID:     "",
+		Input:         replanDescription,
+		Intent:        string(IntentPlan),
+		ReplanAttempt: replanAttemptFromTask(t),
 		// Complexity signal (issue #58): a replan is never trivial — the
 		// first attempt already failed, so downstream routing must treat
 		// the request as at least TierStandard.

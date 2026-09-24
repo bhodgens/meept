@@ -105,6 +105,14 @@ type PlanRequest struct {
 	// and failed once gets the richer Complex-tier planning treatment.
 	IsReplan bool `json:"is_replan,omitempty"`
 
+	// ReplanAttempt carries the task's escalation level at replan time,
+	// read from the escalation_level key on task metadata (tiered-iteration
+	// leaf 01: the escalation manager writes the level there, making task
+	// metadata the single source of truth). attempt >= 2 forces TierComplex
+	// in tierForRequest. 0 = not a replan or level unknown — callers must
+	// never guess a count.
+	ReplanAttempt int `json:"replan_attempt,omitempty"`
+
 	// RequestModel carries the client's per-request model ref (chat.request
 	// "model"; week bughunt 2026-09-17 F18). Pre-fix it was dropped at
 	// publishPlanRequest, so async task dispatch served the turn on the
@@ -579,6 +587,18 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	case "direct":
 		steps = sp.createFallbackSteps(req, parentMemoryRefs)
 	case "quick_plan":
+		// Tiered-iteration leaf 01: the tier is computed FIRST and routed
+		// on. TierComplex dispatches to the iterative flow (leaf 2, not yet
+		// landed) — until then, fall back to single-shot (dark launch).
+		tier := tierForRequest(req)
+		sp.recordMetric("strategic_planner.tier", 1, map[string]string{"tier": string(tier)})
+		if tier == TierComplex {
+			sp.logger.Warn("tier complex but iterative planning unavailable; single-shot",
+				"task_id", req.TaskID,
+				"tier", string(tier),
+			)
+			sp.recordMetric("strategic_planner.tier_complex_fallback", 1, map[string]string{"reason": "flow_disabled"})
+		}
 		// quickplan-mode leaf 02 / master Contract 2: clarify-if-needed
 		// already happened upstream (dispatcher ambiguity gate); plan
 		// without an interview and execute without an approval pause.
@@ -605,6 +625,12 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 			steps = sp.createFallbackSteps(req, parentMemoryRefs)
 		}
 	case "plan":
+		// Tiered-iteration leaf 01: same tier computation BEFORE the
+		// compiler-flag branch. On TierComplex, mark the seeded draft's
+		// metadata so the interactive surface knows more critique rounds
+		// apply. The seed still happens either way.
+		tier := tierForRequest(req)
+		sp.recordMetric("strategic_planner.tier", 1, map[string]string{"tier": string(tier)})
 		// Plan compiler pipeline (plan-compiler leaf 04): when enabled the
 		// brainstorm draft IS the interview — seed the scaffold from the
 		// request and return without ConductInterview or LLM decomposition.
@@ -614,6 +640,12 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 			if seedErr := sp.seedDraftFromRequest(req.TaskID, req.Input); seedErr != nil {
 				sp.logger.Error("Failed to seed plan draft", "task_id", req.TaskID, "error", seedErr)
 				return seedErr
+			}
+			if tier == TierComplex {
+				if markErr := sp.markDraftComplexity(req.TaskID, tier); markErr != nil {
+					sp.logger.Warn("Failed to mark draft complexity metadata",
+						"task_id", req.TaskID, "error", markErr)
+				}
 			}
 			sp.logger.Info("Plan compiler pipeline: brainstorm draft seeded",
 				"task_id", req.TaskID,
@@ -1774,10 +1806,14 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 	// description, the step split, and a first-line-only bounded reason.
 	replanDesc := buildReplanDigest(t.Description, completedDescs, remainingDescs, failureReason)
 
+	// Tiered-iteration leaf 01: read the escalation level the escalation
+	// manager recorded on task metadata (single source of truth). 0 =
+	// unknown level — never guessed.
 	req := PlanRequest{
-		TaskID: taskID,
-		Input:  replanDesc,
-		Intent: string(IntentPlan),
+		TaskID:        taskID,
+		Input:         replanDesc,
+		Intent:        string(IntentPlan),
+		ReplanAttempt: replanAttemptFromTask(t),
 		// Complexity signal (issue #58): a replan is never trivial — the
 		// first attempt already failed, so downstream routing must treat
 		// the request as at least TierStandard.
@@ -2086,6 +2122,87 @@ func (sp *StrategicPlanner) recordMetric(name string, value float64, tags map[st
 	if sp.metricsStore != nil {
 		sp.metricsStore.Record(name, value, tags)
 	}
+}
+
+// escalationLevelMetadataKey is the task.Metadata key the escalation
+// manager writes the current escalation level under (tiered-iteration
+// leaf 01). Task metadata is the single source of truth for replan
+// attempts: the in-memory escalations map does not survive a daemon
+// restart, and ReplanFailedTask has no EscalationManager handle.
+const escalationLevelMetadataKey = "escalation_level"
+
+// tierForRequest classifies a plan request for routing in Plan().
+// EvaluatePlanComplexity stays pure (3 signals); the replan-attempt
+// policy lives here: a second or later replan attempt forces TierComplex
+// regardless of the evaluator's signal. ReplanAttempt 0 = unknown/not a
+// replan — the evaluator's verdict stands.
+func tierForRequest(req PlanRequest) ComplexityTier {
+	if req.ReplanAttempt >= 2 {
+		return TierComplex
+	}
+	return EvaluatePlanComplexity(req)
+}
+
+// writeEscalationLevelToTask persists the current escalation level on the
+// task's metadata so replan sites can read it back into PlanRequest
+// without access to the EscalationManager's in-memory map.
+func writeEscalationLevelToTask(ts *task.Store, t *task.Task, level int) error {
+	if ts == nil || t == nil {
+		return nil
+	}
+	t.Metadata = mergeMetadata(t.Metadata, map[string]json.RawMessage{
+		escalationLevelMetadataKey: json.RawMessage(fmt.Sprintf("%d", level)),
+	})
+	if err := ts.Update(t); err != nil {
+		return fmt.Errorf("persist escalation level on task %s: %w", t.ID, err)
+	}
+	return nil
+}
+
+// replanAttemptFromTask reads the escalation level recorded on the task's
+// metadata. Returns 0 (unknown) when the key is absent or unparsable —
+// callers must never guess a count.
+func replanAttemptFromTask(t *task.Task) int {
+	if t == nil || len(t.Metadata) == 0 {
+		return 0
+	}
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(t.Metadata, &meta) != nil {
+		return 0
+	}
+	raw, ok := meta[escalationLevelMetadataKey]
+	if !ok {
+		return 0
+	}
+	var level int
+	if json.Unmarshal(raw, &level) != nil {
+		return 0
+	}
+	if level < 0 {
+		return 0
+	}
+	return level
+}
+
+// markDraftComplexity stamps a `complexity: <tier>` marker on the task's
+// draft metadata so the interactive surface knows more critique rounds
+// apply (tiered-iteration leaf 01, work item 2). Follows storeDraft's
+// metadata-merge pattern; no-op for non-complex tiers.
+func (sp *StrategicPlanner) markDraftComplexity(taskID string, tier ComplexityTier) error {
+	if tier != TierComplex {
+		return nil
+	}
+	t, err := sp.taskStore.GetByID(taskID)
+	if err != nil || t == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	t.Metadata = mergeMetadata(t.Metadata, map[string]json.RawMessage{
+		"complexity": json.RawMessage(fmt.Sprintf("%q", string(tier))),
+	})
+	if err := sp.taskStore.Update(t); err != nil {
+		return fmt.Errorf("persist draft complexity marker on task %s: %w", taskID, err)
+	}
+	return nil
 }
 
 // parsePhaseOutput extracts phases from planner LLM output and runs a
