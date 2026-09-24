@@ -1702,6 +1702,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if fullCfg.Plans.PlanCompilerEnabled && components.Orchestrator.Strategic() != nil {
 			sp := components.Orchestrator.Strategic()
 			sp.SetPlanCompilerEnabled(true)
+			// Tiered-iteration leaf 02: thread the critique-loop knobs.
+			// SelfSealEnabled defaults false (ships dark); the round cap
+			// was clamped to its default 2 at the load boundary
+			// (NormalizePlansDefaults).
+			sp.SetSelfSealEnabled(fullCfg.Plans.SelfSealEnabled)
+			sp.SetCritiqueMaxRounds(fullCfg.Plans.ComplexMaxCritiqueRounds)
 			treeRoot := filepath.Join(cfg.StateDir, "plan-trees")
 			if fullCfg.Daemon.DataDir != "" {
 				treeRoot = filepath.Join(fullCfg.Daemon.DataDir, "plan-trees")

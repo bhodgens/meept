@@ -196,3 +196,38 @@ func TestPlansConfig_ParallelPhasesJSONKey(t *testing.T) {
 		t.Error("parallel_phases = true decoded false, want true")
 	}
 }
+
+// TestPlansConfig_TieredIterationDefaults pins the tiered-iteration leaf 02
+// knobs: self_seal_enabled defaults FALSE (ships dark), and
+// complex_max_critique_rounds clamps to 2 at the load boundary — a
+// non-positive value means "default", never "unbounded" or "zero rounds".
+func TestPlansConfig_TieredIterationDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Plans.SelfSealEnabled {
+		t.Error("plans.self_seal_enabled default = true, want false (dark launch)")
+	}
+	NormalizePlansDefaults(&cfg.Plans)
+	if cfg.Plans.ComplexMaxCritiqueRounds != 2 {
+		t.Errorf("complex_max_critique_rounds default = %d, want 2", cfg.Plans.ComplexMaxCritiqueRounds)
+	}
+
+	// Explicit values survive the clamp; non-positive values clamp to 2.
+	explicit := PlansConfig{ComplexMaxCritiqueRounds: 5}
+	NormalizePlansDefaults(&explicit)
+	if explicit.ComplexMaxCritiqueRounds != 5 {
+		t.Errorf("explicit rounds = %d after clamp, want 5", explicit.ComplexMaxCritiqueRounds)
+	}
+	zero := PlansConfig{}
+	NormalizePlansDefaults(&zero)
+	if zero.ComplexMaxCritiqueRounds != 2 {
+		t.Errorf("zero rounds = %d after clamp, want 2", zero.ComplexMaxCritiqueRounds)
+	}
+	negative := PlansConfig{ComplexMaxCritiqueRounds: -3}
+	NormalizePlansDefaults(&negative)
+	if negative.ComplexMaxCritiqueRounds != 2 {
+		t.Errorf("negative rounds = %d after clamp, want 2", negative.ComplexMaxCritiqueRounds)
+	}
+	if err := negative.Validate(); err != nil {
+		t.Errorf("Validate() after clamp = %v, want nil", err)
+	}
+}

@@ -14,9 +14,11 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -189,6 +191,23 @@ type StrategicPlanner struct {
 	maxStepsPerPhase      int
 	planPhaseSink         func(taskID string, phases []PlanPhaseSpec)
 	planCompilerEnabled   bool
+	// TierComplex critique loop (tiered-iteration leaf 02). selfSealEnabled
+	// gates the autonomous seal (plans.self_seal_enabled, default false —
+	// ships dark); maxCritiqueRounds caps the draft-critique-refine rounds
+	// (plans.complex_max_critique_rounds, default 2). Set via
+	// SetSelfSealEnabled / SetCritiqueMaxRounds.
+	selfSealEnabled   bool
+	maxCritiqueRounds int
+	// critiqueToolRegistry, when non-nil, feeds the tool-coverage
+	// pre-check (leaf 03 ValidateToolHints). Same *tools.Registry the
+	// daemon wires SetValidToolNames with; nil disables the check.
+	critiqueToolRegistry *tools.Registry
+	// critiqueChatter, when non-nil, is the raw LLM chatter the critique
+	// loop's draft/critic/revise calls use instead of the planner agent
+	// loop (reply-guard shaping is for user-facing replies, not
+	// machine-to-machine plan documents). Test seam + future
+	// dedicated-critic slot; nil = planner loop.
+	critiqueChatter llm.Chatter
 	// validToolNames, when non-empty, gates parsePlanOutput's tool_hint
 	// passthrough: hints outside the set are dropped (with a Warn) so the
 	// executor's tool-hint table picks instead. Empty/nil = legacy behavior
@@ -587,13 +606,28 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	case "direct":
 		steps = sp.createFallbackSteps(req, parentMemoryRefs)
 	case "quick_plan":
-		// Tiered-iteration leaf 01: the tier is computed FIRST and routed
-		// on. TierComplex dispatches to the iterative flow (leaf 2, not yet
-		// landed) — until then, fall back to single-shot (dark launch).
+		// Tiered-iteration leaf 01/02: the tier is computed FIRST and
+		// routed on. TierComplex dispatches to the critique-loop flow when
+		// plans.self_seal_enabled is on; with the flag off (default, dark
+		// launch) it falls back to single-shot with a Warn.
 		tier := tierForRequest(req)
 		sp.recordMetric("strategic_planner.tier", 1, map[string]string{"tier": string(tier)})
-		if tier == TierComplex {
-			sp.logger.Warn("tier complex but iterative planning unavailable; single-shot",
+		if tier == TierComplex && sp.selfSealFlag() {
+			flowResult, flowErr := sp.runCritiqueFlowForPlan(ctx, req)
+			if flowErr != nil {
+				return flowErr
+			}
+			if flowResult.Action == critiqueActionHandled {
+				// Self-seal path persisted steps, updated task, and
+				// published task.planned + orchestrator.schedule. Done.
+				return nil
+			}
+			// await_seal/fallback: fall through to single-shot below —
+			// await_seal cannot happen for quick_plan (only plan mode
+			// waits at the human seal), fallback means the loop could not
+			// run and the legacy path is the degradation the leaf wants.
+		} else if tier == TierComplex {
+			sp.logger.Warn("tier complex but self-seal disabled; single-shot",
 				"task_id", req.TaskID,
 				"tier", string(tier),
 			)
@@ -646,6 +680,36 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 					sp.logger.Warn("Failed to mark draft complexity metadata",
 						"task_id", req.TaskID, "error", markErr)
 				}
+				// Tiered-iteration leaf 02: on TierComplex the critique
+				// rounds run NOW so the human reviews a refined draft plus
+				// the critique summary, not a first attempt. The flow
+				// always WAITS at the existing seal step in plan mode —
+				// self-seal is the DEFAULT the user can override, never a
+				// bypass. Fallback (draft/revise transport failure, no
+				// planner available) degrades to the plain seeded draft
+				// with a Warn — the seal step still happens, minus the
+				// refinement rounds.
+				flowResult, flowErr := sp.runCritiqueFlowForPlan(ctx, req)
+				if flowErr != nil {
+					sp.logger.Warn("Critique flow unavailable; seeded draft awaits seal as-is",
+						"task_id", req.TaskID,
+						"error", flowErr,
+					)
+					return nil
+				}
+				if flowResult.Action == critiqueActionAwaitSeal {
+					sp.logger.Info("Plan compiler pipeline: critique rounds done; awaiting seal",
+						"task_id", req.TaskID,
+						"rounds_used", flowResult.RoundsUsed,
+						"known_risks", flowResult.KnownRisks,
+					)
+					return nil
+				}
+				sp.logger.Warn("Plan compiler pipeline: critique flow did not finish; draft awaits seal as seeded",
+					"task_id", req.TaskID,
+					"action", flowResult.Action,
+				)
+				return nil
 			}
 			sp.logger.Info("Plan compiler pipeline: brainstorm draft seeded",
 				"task_id", req.TaskID,

@@ -405,6 +405,32 @@ type PlansConfig struct {
 	// docs/workflows/agent-orchestration.md (plan compiler pipeline
 	// section).
 	PlanCompilerEnabled bool `json:"plan_compiler_enabled" toml:"plan_compiler_enabled"`
+
+	// ComplexMaxCritiqueRounds caps the draft-critique-refine rounds the
+	// TierComplex critique loop runs before the draft seals with a
+	// Known Risks section (tiered-iteration leaf 02). Default 2;
+	// zero/negative values clamp to the default at the load boundary
+	// (NormalizePlansDefaults).
+	ComplexMaxCritiqueRounds int `json:"complex_max_critique_rounds" toml:"complex_max_critique_rounds"`
+
+	// SelfSealEnabled gates the planner's autonomous self-seal
+	// (tiered-iteration leaf 02; default FALSE — ships dark). False =
+	// quick_plan TierComplex falls back to single-shot with a Warn and
+	// plan mode runs the critique rounds then waits at the human seal
+	// step. True = quick_plan TierComplex runs the full
+	// draft-critique-refine flow and seals with provenance
+	// "planner-self" without a human in the loop.
+	SelfSealEnabled bool `json:"self_seal_enabled" toml:"self_seal_enabled"`
+}
+
+// NormalizePlansDefaults clamps the tiered-iteration planning knobs to
+// their defaults (leaf 02 contract: a non-positive round cap means
+// "default 2", never "unbounded" or "zero rounds"). Applied at the load
+// boundary so every consumer sees normalized values.
+func NormalizePlansDefaults(c *PlansConfig) {
+	if c.ComplexMaxCritiqueRounds <= 0 {
+		c.ComplexMaxCritiqueRounds = 2
+	}
 }
 
 // Validate validates the PlansConfig.

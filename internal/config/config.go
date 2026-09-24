@@ -49,6 +49,11 @@ func Load(path string) (*Config, error) {
 	// so every consumer sees normalized values.
 	NormalizeQuotaRetryDefaults(&cfg.LLM.QuotaRetry)
 
+	// Clamp the tiered-iteration planning knobs (tiered-iteration leaf 02:
+	// non-positive critique-round cap -> default 2). Load-boundary
+	// normalization so every consumer sees normalized values.
+	NormalizePlansDefaults(&cfg.Plans)
+
 	// Clamp invalid context_discovery values to defaults (tree 05 leaf 01:
 	// zero/negative interval -> 6h). Same load-boundary rationale.
 	NormalizeContextDiscoveryDefaults(&cfg.LLM.ContextDiscovery)
@@ -155,6 +160,11 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// negatives clamp, zeros take defaults). Applied at the load boundary
 	// so every consumer sees normalized values.
 	NormalizeQuotaRetryDefaults(&cfg.LLM.QuotaRetry)
+
+	// Clamp the tiered-iteration planning knobs (tiered-iteration leaf 02:
+	// non-positive critique-round cap -> default 2). Load-boundary
+	// normalization so every consumer sees normalized values.
+	NormalizePlansDefaults(&cfg.Plans)
 
 	// Clamp invalid context_discovery values to defaults (tree 05 leaf 01:
 	// zero/negative interval -> 6h). Same load-boundary rationale.
