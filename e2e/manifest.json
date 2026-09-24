@@ -3,268 +3,1739 @@
   "generated": "2026-09-23",
   "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L.",
   "path_map": {
-    "e2e/suites/smoke": ["smoke"],
-    "internal/rpc/": ["rpc-ping", "chat-submit", "session-binding"],
-    "internal/comm/": ["ws-classification", "ws-filter", "http-auth", "http-stream"],
-    "internal/transport/": ["rpc-ping"],
-    "internal/bus/": ["ws-classification"],
-    "internal/services/": ["chat-submit", "session-binding", "http-stream"],
-    "internal/agent/": ["dispatcher", "planner", "step-pipeline", "task-state", "async-turn", "quota-park", "breakers", "output-filters", "refusal"],
-    "internal/queue/": ["goal-loop"],
-    "internal/worker/": ["goal-loop"],
-    "internal/scheduler/": ["goal-loop"],
-    "internal/skills/": ["skills-discovery"],
-    "internal/tools/": ["tools-argvalidate", "tools-filesystem", "tools-web-ssrf", "tools-memory", "tools-tasks", "tools-docs", "tools-mcp"],
-    "internal/eval/": ["eval-judge"],
-    "internal/session/": ["session-binding", "state-restart", "state-identity"],
-    "internal/memory/": ["memory-persistence"],
-    "internal/auth/": ["auth-multiuser"],
-    "internal/auditlog/": ["audit-chain"],
-    "internal/effects/": ["effects-ledger"],
-    "internal/backup/": ["backup-sync"],
-    "internal/project/": ["project-binding"],
-    "internal/config/": ["config-home", "config-models", "config-reload"],
-    "internal/daemon/": ["state-restart", "daemon-lifecycle", "project-binding"],
-    "internal/llm/": ["daemon-lifecycle", "runtime-guards"],
-    "internal/security/": ["security-fence", "security-tls"],
-    "internal/employee/": ["goal-loop"],
-    "internal/acp/": ["acp-wire"],
-    "cmd/meept/": ["cli-surface"],
-    "cmd/meept-daemon/": ["daemon-lifecycle"]
+    "e2e/suites/smoke": [
+      "smoke"
+    ],
+    "internal/rpc/": [
+      "rpc-ping",
+      "chat-submit",
+      "session-binding"
+    ],
+    "internal/comm/": [
+      "ws-classification",
+      "ws-filter",
+      "http-auth",
+      "http-stream"
+    ],
+    "internal/transport/": [
+      "rpc-ping"
+    ],
+    "internal/bus/": [
+      "ws-classification"
+    ],
+    "internal/services/": [
+      "chat-submit",
+      "session-binding",
+      "http-stream"
+    ],
+    "internal/agent/": [
+      "dispatcher",
+      "planner",
+      "step-pipeline",
+      "task-state",
+      "async-turn",
+      "quota-park",
+      "breakers",
+      "output-filters",
+      "refusal"
+    ],
+    "internal/queue/": [
+      "goal-loop"
+    ],
+    "internal/worker/": [
+      "goal-loop"
+    ],
+    "internal/scheduler/": [
+      "goal-loop"
+    ],
+    "internal/skills/": [
+      "skills-discovery"
+    ],
+    "internal/tools/": [
+      "tools-argvalidate",
+      "tools-filesystem",
+      "tools-web-ssrf",
+      "tools-memory",
+      "tools-tasks",
+      "tools-docs",
+      "tools-mcp"
+    ],
+    "internal/eval/": [
+      "eval-judge"
+    ],
+    "internal/session/": [
+      "session-binding",
+      "state-restart",
+      "state-identity"
+    ],
+    "internal/memory/": [
+      "memory-persistence"
+    ],
+    "internal/auth/": [
+      "auth-multiuser"
+    ],
+    "internal/auditlog/": [
+      "audit-chain"
+    ],
+    "internal/effects/": [
+      "effects-ledger"
+    ],
+    "internal/backup/": [
+      "backup-sync"
+    ],
+    "internal/project/": [
+      "project-binding"
+    ],
+    "internal/config/": [
+      "config-home",
+      "config-models",
+      "config-reload"
+    ],
+    "internal/daemon/": [
+      "state-restart",
+      "daemon-lifecycle",
+      "project-binding"
+    ],
+    "internal/llm/": [
+      "daemon-lifecycle",
+      "runtime-guards"
+    ],
+    "internal/security/": [
+      "security-fence",
+      "security-tls"
+    ],
+    "internal/employee/": [
+      "goal-loop"
+    ],
+    "internal/acp/": [
+      "acp-wire"
+    ],
+    "cmd/meept/": [
+      "cli-surface"
+    ],
+    "cmd/meept-daemon/": [
+      "daemon-lifecycle"
+    ]
   },
   "suites": [
-    {"name": "smoke", "dir": "e2e/suites/smoke", "status": "implemented"},
-    {"name": "rpc-ping", "dir": "e2e/suites/rpc-ping", "status": "todo"},
-    {"name": "chat-submit", "dir": "e2e/suites/chat-submit", "status": "todo"},
-    {"name": "ws-classification", "dir": "e2e/suites/ws-classification", "status": "todo"},
-    {"name": "ws-filter", "dir": "e2e/suites/ws-filter", "status": "todo"},
-    {"name": "http-auth", "dir": "e2e/suites/http-auth", "status": "todo"},
-    {"name": "http-stream", "dir": "e2e/suites/http-stream", "status": "todo"},
-    {"name": "session-binding", "dir": "e2e/suites/session-binding", "status": "todo"},
-    {"name": "dispatcher", "dir": "e2e/suites/dispatcher", "status": "todo"},
-    {"name": "planner", "dir": "e2e/suites/planner", "status": "todo"},
-    {"name": "step-pipeline", "dir": "e2e/suites/step-pipeline", "status": "todo"},
-    {"name": "task-state", "dir": "e2e/suites/task-state", "status": "todo"},
-    {"name": "async-turn", "dir": "e2e/suites/async-turn", "status": "todo"},
-    {"name": "quota-park", "dir": "e2e/suites/quota-park", "status": "todo"},
-    {"name": "breakers", "dir": "e2e/suites/breakers", "status": "todo"},
-    {"name": "output-filters", "dir": "e2e/suites/output-filters", "status": "todo"},
-    {"name": "refusal", "dir": "e2e/suites/refusal", "status": "todo"},
-    {"name": "goal-loop", "dir": "e2e/suites/goal-loop", "status": "todo"},
-    {"name": "eval-judge", "dir": "e2e/suites/eval-judge", "status": "todo"},
-    {"name": "tools-argvalidate", "dir": "e2e/suites/tools-argvalidate", "status": "todo"},
-    {"name": "tools-filesystem", "dir": "e2e/suites/tools-filesystem", "status": "todo"},
-    {"name": "tools-web-ssrf", "dir": "e2e/suites/tools-web-ssrf", "status": "todo"},
-    {"name": "tools-memory", "dir": "e2e/suites/tools-memory", "status": "todo"},
-    {"name": "tools-tasks", "dir": "e2e/suites/tools-tasks", "status": "todo"},
-    {"name": "tools-docs", "dir": "e2e/suites/tools-docs", "status": "todo"},
-    {"name": "tools-mcp", "dir": "e2e/suites/tools-mcp", "status": "todo"},
-    {"name": "skills-discovery", "dir": "e2e/suites/skills-discovery", "status": "todo"},
-    {"name": "state-restart", "dir": "e2e/suites/state-restart", "status": "todo"},
-    {"name": "state-identity", "dir": "e2e/suites/state-identity", "status": "todo"},
-    {"name": "memory-persistence", "dir": "e2e/suites/memory-persistence", "status": "todo"},
-    {"name": "auth-multiuser", "dir": "e2e/suites/auth-multiuser", "status": "todo"},
-    {"name": "audit-chain", "dir": "e2e/suites/audit-chain", "status": "todo"},
-    {"name": "effects-ledger", "dir": "e2e/suites/effects-ledger", "status": "todo"},
-    {"name": "backup-sync", "dir": "e2e/suites/backup-sync", "status": "todo"},
-    {"name": "project-binding", "dir": "e2e/suites/project-binding", "status": "todo"},
-    {"name": "config-home", "dir": "e2e/suites/config-home", "status": "todo"},
-    {"name": "config-models", "dir": "e2e/suites/config-models", "status": "todo"},
-    {"name": "config-reload", "dir": "e2e/suites/config-reload", "status": "todo"},
-    {"name": "daemon-lifecycle", "dir": "e2e/suites/daemon-lifecycle", "status": "todo"},
-    {"name": "runtime-guards", "dir": "e2e/suites/runtime-guards", "status": "todo"},
-    {"name": "security-fence", "dir": "e2e/suites/security-fence", "status": "todo"},
-    {"name": "security-tls", "dir": "e2e/suites/security-tls", "status": "todo"},
-    {"name": "cli-surface", "dir": "e2e/suites/cli-surface", "status": "todo"},
-    {"name": "acp-wire", "dir": "e2e/suites/acp-wire", "status": "todo"}
+    {
+      "name": "smoke",
+      "dir": "e2e/suites/smoke",
+      "status": "implemented"
+    },
+    {
+      "name": "rpc-ping",
+      "dir": "e2e/suites/rpc-ping",
+      "status": "implemented"
+    },
+    {
+      "name": "chat-submit",
+      "dir": "e2e/suites/chat-submit",
+      "status": "implemented"
+    },
+    {
+      "name": "ws-classification",
+      "dir": "e2e/suites/ws-classification",
+      "status": "deferred",
+      "deferred_reason": "needs per-prompt classifier pinning + crafted WS client helpers (harness gap: per-prompt FakeLLM scripting)"
+    },
+    {
+      "name": "ws-filter",
+      "dir": "e2e/suites/ws-filter",
+      "status": "deferred",
+      "deferred_reason": "needs crafted WS client harness helpers (harness gap)"
+    },
+    {
+      "name": "http-auth",
+      "dir": "e2e/suites/http-auth",
+      "status": "deferred",
+      "deferred_reason": "needs crafted HTTP client fixtures; core auth paths covered by auth-multiuser suite"
+    },
+    {
+      "name": "http-stream",
+      "dir": "e2e/suites/http-stream",
+      "status": "deferred",
+      "deferred_reason": "needs SSE + WS client helpers (harness gap); submit/terminal covered by chat-submit + async-turn"
+    },
+    {
+      "name": "session-binding",
+      "dir": "e2e/suites/session-binding",
+      "status": "implemented"
+    },
+    {
+      "name": "dispatcher",
+      "dir": "e2e/suites/dispatcher",
+      "status": "implemented"
+    },
+    {
+      "name": "planner",
+      "dir": "e2e/suites/planner",
+      "status": "implemented"
+    },
+    {
+      "name": "step-pipeline",
+      "dir": "e2e/suites/step-pipeline",
+      "status": "deferred",
+      "deferred_reason": "needs conversation-bound tool-call scripting to force step failures (harness gap: FIFO tool-call binding)"
+    },
+    {
+      "name": "task-state",
+      "dir": "e2e/suites/task-state",
+      "status": "implemented"
+    },
+    {
+      "name": "async-turn",
+      "dir": "e2e/suites/async-turn",
+      "status": "implemented"
+    },
+    {
+      "name": "quota-park",
+      "dir": "e2e/suites/quota-park",
+      "status": "implemented"
+    },
+    {
+      "name": "breakers",
+      "dir": "e2e/suites/breakers",
+      "status": "implemented"
+    },
+    {
+      "name": "output-filters",
+      "dir": "e2e/suites/output-filters",
+      "status": "implemented"
+    },
+    {
+      "name": "refusal",
+      "dir": "e2e/suites/refusal",
+      "status": "implemented"
+    },
+    {
+      "name": "goal-loop",
+      "dir": "e2e/suites/goal-loop",
+      "status": "implemented"
+    },
+    {
+      "name": "eval-judge",
+      "dir": "e2e/suites/eval-judge",
+      "status": "implemented"
+    },
+    {
+      "name": "tools-argvalidate",
+      "dir": "e2e/suites/tools-argvalidate",
+      "status": "implemented"
+    },
+    {
+      "name": "tools-filesystem",
+      "dir": "e2e/suites/tools-filesystem",
+      "status": "implemented"
+    },
+    {
+      "name": "tools-web-ssrf",
+      "dir": "e2e/suites/tools-web-ssrf",
+      "status": "implemented"
+    },
+    {
+      "name": "tools-memory",
+      "dir": "e2e/suites/tools-memory",
+      "status": "implemented"
+    },
+    {
+      "name": "tools-tasks",
+      "dir": "e2e/suites/tools-tasks",
+      "status": "implemented"
+    },
+    {
+      "name": "tools-docs",
+      "dir": "e2e/suites/tools-docs",
+      "status": "implemented"
+    },
+    {
+      "name": "tools-mcp",
+      "dir": "e2e/suites/tools-mcp",
+      "status": "deferred",
+      "deferred_reason": "needs stdio stub-MCP subprocess fixture; substantial follow-up"
+    },
+    {
+      "name": "skills-discovery",
+      "dir": "e2e/suites/skills-discovery",
+      "status": "deferred",
+      "deferred_reason": "needs skills roster/registry fixtures; requires-tools gating pinned at unit level"
+    },
+    {
+      "name": "state-restart",
+      "dir": "e2e/suites/state-restart",
+      "status": "implemented"
+    },
+    {
+      "name": "state-identity",
+      "dir": "e2e/suites/state-identity",
+      "status": "implemented"
+    },
+    {
+      "name": "memory-persistence",
+      "dir": "e2e/suites/memory-persistence",
+      "status": "implemented"
+    },
+    {
+      "name": "auth-multiuser",
+      "dir": "e2e/suites/auth-multiuser",
+      "status": "implemented"
+    },
+    {
+      "name": "audit-chain",
+      "dir": "e2e/suites/audit-chain",
+      "status": "implemented"
+    },
+    {
+      "name": "effects-ledger",
+      "dir": "e2e/suites/effects-ledger",
+      "status": "implemented"
+    },
+    {
+      "name": "backup-sync",
+      "dir": "e2e/suites/backup-sync",
+      "status": "implemented"
+    },
+    {
+      "name": "project-binding",
+      "dir": "e2e/suites/project-binding",
+      "status": "implemented"
+    },
+    {
+      "name": "config-home",
+      "dir": "e2e/suites/config-home",
+      "status": "implemented"
+    },
+    {
+      "name": "config-models",
+      "dir": "e2e/suites/config-models",
+      "status": "implemented"
+    },
+    {
+      "name": "config-reload",
+      "dir": "e2e/suites/config-reload",
+      "status": "implemented"
+    },
+    {
+      "name": "daemon-lifecycle",
+      "dir": "e2e/suites/daemon-lifecycle",
+      "status": "implemented"
+    },
+    {
+      "name": "runtime-guards",
+      "dir": "e2e/suites/runtime-guards",
+      "status": "implemented"
+    },
+    {
+      "name": "security-fence",
+      "dir": "e2e/suites/security-fence",
+      "status": "implemented"
+    },
+    {
+      "name": "security-tls",
+      "dir": "e2e/suites/security-tls",
+      "status": "implemented"
+    },
+    {
+      "name": "cli-surface",
+      "dir": "e2e/suites/cli-surface",
+      "status": "implemented"
+    },
+    {
+      "name": "acp-wire",
+      "dir": "e2e/suites/acp-wire",
+      "status": "implemented"
+    }
   ],
   "scenarios": [
-    {"id": "rpc-ping-01", "suite": "rpc-ping", "diff": "S", "title": "ping round-trip on the Unix socket returns a valid JSON-RPC envelope", "paths": ["internal/rpc/server.go"]},
-    {"id": "rpc-ping-02", "suite": "rpc-ping", "diff": "S", "title": "unknown method returns JSON-RPC -32601 method-not-found, no hang", "paths": ["internal/rpc/server.go"]},
-    {"id": "rpc-ping-03", "suite": "rpc-ping", "diff": "S", "title": "status reports version + uptime_seconds; uptime increases between calls", "paths": ["internal/rpc/server.go", "internal/daemon/daemon_rpc.go"]},
-    {"id": "rpc-ping-04", "suite": "rpc-ping", "diff": "S", "title": "invalid params produce ErrCodeInvalidParams, not internal error", "paths": ["internal/rpc/server.go"]},
-    {"id": "rpc-ping-05", "suite": "rpc-ping", "diff": "S", "title": "bus.publish RPC delivers to a bus subscriber (RPC->bus bridge)", "paths": ["internal/rpc/server.go", "internal/bus/bus.go"]},
-
-    {"id": "chat-submit-01", "suite": "chat-submit", "diff": "M", "title": "chat.submit acks in ms with turn_id+conversation_id+session_id+accepted", "paths": ["internal/rpc/chat_submit.go"]},
-    {"id": "chat-submit-02", "suite": "chat-submit", "diff": "S", "title": "empty-message chat.submit returns accepted=false, no turn minted, no publish", "paths": ["internal/rpc/chat_submit.go"]},
-    {"id": "chat-submit-03", "suite": "chat-submit", "diff": "S", "title": "explicit turn_id retry is idempotent, no double chat.request publish", "paths": ["internal/rpc/chat_submit.go"]},
-    {"id": "chat-submit-04", "suite": "chat-submit", "diff": "M", "title": "HTTP POST /api/v1/chat/submit returns the identical ack shape as RPC", "paths": ["internal/comm/http/api_handlers.go", "internal/rpc/chat_submit.go"]},
-
-    {"id": "ws-classification-01", "suite": "ws-classification", "diff": "M", "title": "turn.terminal classifies as agent_progress, never chat_message", "paths": ["internal/comm/http/server_wsclass.go", "internal/comm/wsclass/wsclass.go"]},
-    {"id": "ws-classification-02", "suite": "ws-classification", "diff": "S", "title": "chat_message topic normalizes reply->content/role on WS", "paths": ["internal/comm/http/server.go"]},
-    {"id": "ws-classification-03", "suite": "ws-classification", "diff": "S", "title": "chat.response topic is never relayed to WS clients", "paths": ["internal/comm/http/server.go"]},
-    {"id": "ws-classification-04", "suite": "ws-classification", "diff": "S", "title": "agent.quota_wait (incl. throttle park payloads) classifies as agent_progress", "paths": ["internal/comm/http/server.go", "internal/services/quota_notifier.go"]},
-    {"id": "ws-classification-05", "suite": "ws-classification", "diff": "M", "title": "typed Topic[T] payloads classify marker-first via wsclass.WSClass()", "paths": ["internal/comm/wsclass/wsclass.go", "internal/bus/topic.go"]},
-
-    {"id": "ws-filter-01", "suite": "ws-filter", "diff": "M", "title": "WS client subscribed with session_id receives only that session's events", "paths": ["internal/comm/http/server.go"]},
-    {"id": "ws-filter-02", "suite": "ws-filter", "diff": "M", "title": "WS filter falls back session_id -> conversation_id (duality invariant)", "paths": ["internal/comm/http/server.go"]},
-    {"id": "ws-filter-03", "suite": "ws-filter", "diff": "M", "title": "chat_message payload session_id backfilled from conversation_id", "paths": ["internal/comm/http/server.go"]},
-    {"id": "ws-filter-04", "suite": "ws-filter", "diff": "S", "title": "connections with no session filter stay in broadcast mode", "paths": ["internal/comm/http/server.go"]},
-    {"id": "ws-filter-05", "suite": "ws-filter", "diff": "S", "title": "unsubscribe removes per-session and channel-level filters", "paths": ["internal/comm/http/server.go"]},
-    {"id": "ws-filter-06", "suite": "ws-filter", "diff": "M", "title": "synthesized progress events are session-filtered and rate-limited", "paths": ["internal/comm/http/server.go"]},
-
-    {"id": "http-auth-01", "suite": "http-auth", "diff": "S", "title": "missing Authorization -> 401; /health and OPTIONS exempt", "paths": ["internal/comm/http/auth.go"]},
-    {"id": "http-auth-02", "suite": "http-auth", "diff": "S", "title": "bad key -> 418 invalid API key; Basic header treated as missing (401)", "paths": ["internal/comm/http/auth.go"]},
-    {"id": "http-auth-03", "suite": "http-auth", "diff": "M", "title": "WS upgrade authenticates via Sec-WebSocket-Protocol bearer.<key>", "paths": ["internal/comm/http/auth.go", "internal/comm/http/server.go"]},
-
-    {"id": "http-stream-01", "suite": "http-stream", "diff": "M", "title": "SSE /api/v1/chat/stream session filter suppresses other sessions' events", "paths": ["internal/comm/http/api_handlers.go"]},
-    {"id": "http-stream-02", "suite": "http-stream", "diff": "M", "title": "notifications poll honors since; /ws/notifications streams live", "paths": ["internal/comm/http/notification_handlers.go"]},
-    {"id": "http-stream-03", "suite": "http-stream", "diff": "M", "title": "HTTP /api/v1/bus/publish + /api/v1/bus/call bridge to bus/RPC", "paths": ["internal/comm/http/api_handlers.go", "internal/rpc/server.go"]},
-    {"id": "http-stream-04", "suite": "http-stream", "diff": "L", "title": "HTTP chat loop: submit ack -> turn.terminal on WS -> queue status terminal", "paths": ["internal/comm/http/api_handlers.go", "internal/services/chat_service.go"]},
-
-    {"id": "session-binding-01", "suite": "session-binding", "diff": "M", "title": "session.create binds client CWD into a project; detection context persisted", "paths": ["internal/services/session_service.go", "internal/session/working_dir.go"]},
-    {"id": "session-binding-02", "suite": "session-binding", "diff": "S", "title": "session with no CWD/project stays unbound; tools return ErrNoWorkingDir", "paths": ["internal/services/session_service.go", "internal/session/working_dir.go"]},
-    {"id": "session-binding-03", "suite": "session-binding", "diff": "S", "title": "explicit project_id binding wins over CWD detection", "paths": ["internal/services/session_service.go"]},
-
-    {"id": "dispatcher-01", "suite": "dispatcher", "diff": "S", "title": "chat imperative routes to a direct reply; no task created", "paths": ["internal/agent/dispatcher.go", "internal/agent/intent.go"]},
-    {"id": "dispatcher-02", "suite": "dispatcher", "diff": "M", "title": "planning intent creates a task row and dispatches async", "paths": ["internal/agent/dispatcher.go", "internal/agent/intent.go"]},
-    {"id": "dispatcher-03", "suite": "dispatcher", "diff": "M", "title": "ambiguous input yields a clarification question; resume dispatches", "paths": ["internal/agent/dispatcher.go"]},
-    {"id": "dispatcher-04", "suite": "dispatcher", "diff": "S", "title": "platform roster fast path is rewritten to user language by reply guard", "paths": ["internal/agent/handler.go", "internal/agent/reply_guard.go"]},
-    {"id": "dispatcher-05", "suite": "dispatcher", "diff": "M", "title": "quickplan routing repair picks the repaired lane", "paths": ["internal/agent/dispatcher.go", "internal/agent/quickplan_cue.go"]},
-    {"id": "dispatcher-06", "suite": "dispatcher", "diff": "M", "title": "compound request is split, not misrouted into one lane", "paths": ["internal/agent/dispatcher.go"]},
-    {"id": "dispatcher-07", "suite": "dispatcher", "diff": "S", "title": "media-URL input gets the deterministic media-guard verdict", "paths": ["internal/agent/dispatcher.go"]},
-
-    {"id": "planner-01", "suite": "planner", "diff": "M", "title": "valid plan JSON becomes N steps in scheduled state", "paths": ["internal/agent/strategic.go", "internal/agent/plan_draft.go"]},
-    {"id": "planner-02", "suite": "planner", "diff": "M", "title": "malformed plan output triggers one repair retry, then succeeds", "paths": ["internal/agent/strategic.go"]},
-    {"id": "planner-03", "suite": "planner", "diff": "M", "title": "plan failure degrades to fallback steps; task still completes", "paths": ["internal/agent/strategic.go", "internal/agent/plan_draft.go"]},
-    {"id": "planner-04", "suite": "planner", "diff": "S", "title": "empty-plan guard rejects zero-actionable-step plans", "paths": ["internal/agent/strategic.go"]},
-    {"id": "planner-05", "suite": "planner", "diff": "L", "title": "escalation replan on repeated step failure produces new steps", "paths": ["internal/agent/escalation.go", "internal/agent/tactical.go"]},
-    {"id": "planner-06", "suite": "planner", "diff": "M", "title": "max-revision guard stops infinite revisions; task finalizes failed", "paths": ["internal/agent/review_manager.go", "internal/agent/tactical.go"]},
-    {"id": "planner-07", "suite": "planner", "diff": "L", "title": "interview flow: questions, answers, then plan", "paths": ["internal/agent/strategic.go", "internal/plan/manager.go"]},
-
-    {"id": "step-pipeline-01", "suite": "step-pipeline", "diff": "S", "title": "errored step never passes review; task finalizes StateFailed", "paths": ["internal/agent/review_manager.go", "internal/agent/tactical.go"]},
-    {"id": "step-pipeline-02", "suite": "step-pipeline", "diff": "M", "title": "review rejection creates a revision step; task stays active", "paths": ["internal/agent/review_manager.go"]},
-    {"id": "step-pipeline-03", "suite": "step-pipeline", "diff": "M", "title": "needs_info review verdict pauses the task for human input", "paths": ["internal/agent/tactical.go", "internal/agent/review.go"]},
-    {"id": "step-pipeline-04", "suite": "step-pipeline", "diff": "L", "title": "parallel steps respect the dependency graph; cascades marked", "paths": ["internal/agent/executor.go"]},
-    {"id": "step-pipeline-05", "suite": "step-pipeline", "diff": "S", "title": "vacuous review approval is gated", "paths": ["internal/agent/review_vacuity.go", "internal/agent/review_manager.go"]},
-
-    {"id": "task-state-01", "suite": "task-state", "diff": "M", "title": "all-steps-done task completes with honest recounted counters", "paths": ["internal/agent/tactical.go", "internal/task/task.go"]},
-    {"id": "task-state-02", "suite": "task-state", "diff": "S", "title": "one failed step fails the task; result carries the error text", "paths": ["internal/agent/tactical.go", "internal/task/task.go"]},
-    {"id": "task-state-03", "suite": "task-state", "diff": "M", "title": "validation-block failure is terminal and honest", "paths": ["internal/agent/tactical.go"]},
-    {"id": "task-state-04", "suite": "task-state", "diff": "M", "title": "step jobs run in the session-resolved directory, never daemon CWD", "paths": ["internal/daemon/components.go", "internal/session/working_dir.go"]},
-
-    {"id": "async-turn-01", "suite": "async-turn", "diff": "M", "title": "chat.submit acks immediately; exactly one turn.terminal completed", "paths": ["internal/agent/handler.go"]},
-    {"id": "async-turn-02", "suite": "async-turn", "diff": "S", "title": "every early-error path still emits exactly one failed turn.terminal", "paths": ["internal/agent/handler.go"]},
-    {"id": "async-turn-03", "suite": "async-turn", "diff": "S", "title": "failed task.completed is relayed honestly as failure text", "paths": ["internal/agent/handler.go"]},
-    {"id": "async-turn-04", "suite": "async-turn", "diff": "M", "title": "stalled turn reaped by watchdog; late completion still valid", "paths": ["internal/agent/turn_watchdog.go", "internal/agent/turn_registry.go"]},
-
-    {"id": "quota-park-01", "suite": "quota-park", "diff": "M", "title": "quota-interrupted turn parks with a queued message and resumes at reset", "paths": ["internal/agent/handler.go", "internal/agent/quota_resume.go"]},
-    {"id": "quota-park-02", "suite": "quota-park", "diff": "M", "title": "park/resume emits agent.quota_wait events with unblock_at", "paths": ["internal/agent/parked_turn.go", "internal/services/quota_notifier.go"]},
-    {"id": "quota-park-03", "suite": "quota-park", "diff": "L", "title": "parked turns survive daemon restart via ParkStore", "paths": ["internal/agent/park_store_sqlite.go", "internal/agent/parked_turn.go"]},
-    {"id": "quota-park-04", "suite": "quota-park", "diff": "L", "title": "throttle park beyond maxWait gives up visibly", "paths": ["internal/agent/loop_park.go", "internal/agent/parked_turn.go"]},
-    {"id": "quota-park-05", "suite": "quota-park", "diff": "M", "title": "budget-exhausted turn parks and resumes under the original turn_id", "paths": ["internal/agent/handler.go", "internal/agent/budget_resume.go"]},
-    {"id": "quota-park-06", "suite": "quota-park", "diff": "M", "title": "goal-loop quota park shares the one TurnParker", "paths": ["internal/employee/park.go", "internal/daemon/components.go"]},
-
-    {"id": "breakers-01", "suite": "breakers", "diff": "S", "title": "identical failing tool call trips the repeat-error breaker", "paths": ["internal/agent/repeat_error_breaker.go"]},
-    {"id": "breakers-02", "suite": "breakers", "diff": "S", "title": "byte-identical successful-call cycle aborts the turn", "paths": ["internal/agent/loop.go", "internal/agent/guards.go"]},
-    {"id": "breakers-03", "suite": "breakers", "diff": "M", "title": "no-progress ladder nudges before vetoing", "paths": ["internal/agent/guards.go"]},
-    {"id": "breakers-04", "suite": "breakers", "diff": "S", "title": "tool breaker halts a persistently failing tool", "paths": ["internal/agent/tool_breaker.go"]},
-
-    {"id": "output-filters-01", "suite": "output-filters", "diff": "M", "title": "filter rejection consumes filter retries; exhaustion fails the task", "paths": ["internal/agent/tactical.go"]},
-    {"id": "output-filters-02", "suite": "output-filters", "diff": "S", "title": "claims marked vs evidence before filters; hallucinated file write fails the gate", "paths": ["internal/agent/tactical.go", "internal/agent/hallucination.go"]},
-    {"id": "output-filters-03", "suite": "output-filters", "diff": "S", "title": "filter-disabled path is byte-identical; no stage=output_filter logs", "paths": ["internal/agent/tactical.go", "internal/agent/filter_config.go"]},
-
-    {"id": "refusal-01", "suite": "refusal", "diff": "M", "title": "provider refusal re-dispatches the turn to the fallback model, once", "paths": ["internal/agent/loop_refusal.go"]},
-    {"id": "refusal-02", "suite": "refusal", "diff": "S", "title": "per-agent refusal_model overrides the global slot", "paths": ["internal/agent/loop_refusal.go"]},
-
-    {"id": "goal-loop-01", "suite": "goal-loop", "diff": "M", "title": "failed job retries then dead-letters; transient failures requeue", "paths": ["internal/queue/store.go", "internal/worker/worker.go"]},
-    {"id": "goal-loop-02", "suite": "goal-loop", "diff": "M", "title": "scheduler rewake fires a due goal turn with observable output", "paths": ["internal/scheduler/rewake.go", "internal/employee/goal_loop.go"]},
-    {"id": "goal-loop-03", "suite": "goal-loop", "diff": "M", "title": "goal loop stops after consecutive failures and escalates", "paths": ["internal/employee/goal_loop.go", "internal/employee/enforcement.go"]},
-
-    {"id": "eval-judge-01", "suite": "eval-judge", "diff": "S", "title": "eval judge grades a recorded trajectory; contentLooksFailed honest", "paths": ["internal/eval/judge.go", "internal/eval/store.go"]},
-
-    {"id": "tools-argvalidate-01", "suite": "tools-argvalidate", "diff": "S", "title": "missing required arg -> invalid_args before execution; no side effect", "paths": ["internal/tools/registry.go", "internal/tools/argvalidate.go"]},
-    {"id": "tools-argvalidate-02", "suite": "tools-argvalidate", "diff": "S", "title": "wrong-type arg rejected with type mismatch text", "paths": ["internal/tools/argvalidate.go"]},
-    {"id": "tools-argvalidate-03", "suite": "tools-argvalidate", "diff": "S", "title": "empty-after-trim required arg fails the gate; no network dial", "paths": ["internal/tools/argvalidate.go"]},
-    {"id": "tools-argvalidate-04", "suite": "tools-argvalidate", "diff": "S", "title": "unknown tool name returns a recoverable tool-not-found result", "paths": ["internal/tools/registry.go"]},
-    {"id": "tools-argvalidate-05", "suite": "tools-argvalidate", "diff": "M", "title": "indexed schema mode stubs tools; tool_view expands the full schema mid-turn", "paths": ["internal/tools/registry.go", "internal/tools/builtin/tool_view.go"]},
-
-    {"id": "tools-filesystem-01", "suite": "tools-filesystem", "diff": "S", "title": "file_write writes a real file relative to the session working dir", "paths": ["internal/tools/builtin/filesystem.go"]},
-    {"id": "tools-filesystem-02", "suite": "tools-filesystem", "diff": "M", "title": "file_read hashline output feeds file_edit anchor replacement", "paths": ["internal/tools/builtin/filesystem.go", "internal/tools/builtin/file_edit.go"]},
-    {"id": "tools-filesystem-03", "suite": "tools-filesystem", "diff": "M", "title": "file_edit stale anchor rejected with fresh hashline for retry", "paths": ["internal/tools/builtin/file_edit.go"]},
-    {"id": "tools-filesystem-04", "suite": "tools-filesystem", "diff": "S", "title": "file_grep/file_find resolve relative patterns against the workdir", "paths": ["internal/tools/builtin/file_grep.go", "internal/tools/builtin/file_find.go"]},
-    {"id": "tools-filesystem-05", "suite": "tools-filesystem", "diff": "M", "title": "unbound session surfaces the ErrNoWorkingDir sentinel (not bare 'no path')", "paths": ["internal/tools/workdir_ctx.go"]},
-    {"id": "tools-filesystem-06", "suite": "tools-filesystem", "diff": "S", "title": "shell runs a real command in the session workdir; stdout returned", "paths": ["internal/tools/builtin/shell.go"]},
-    {"id": "tools-filesystem-07", "suite": "tools-filesystem", "diff": "S", "title": "shell refuses a destructive command via risk classification", "paths": ["internal/tools/builtin/shell.go", "internal/tools/builtin/shell_refusing.go"]},
-
-    {"id": "tools-web-ssrf-01", "suite": "tools-web-ssrf", "diff": "S", "title": "web_fetch to 127.0.0.1 blocked by SSRF guard; zero hits recorded", "paths": ["internal/tools/builtin/ssrf.go", "internal/tools/builtin/web_fetch.go"]},
-    {"id": "tools-web-ssrf-02", "suite": "tools-web-ssrf", "diff": "S", "title": "web_fetch to a private-range local test server returns page text", "paths": ["internal/tools/builtin/web_fetch.go"]},
-    {"id": "tools-web-ssrf-03", "suite": "tools-web-ssrf", "diff": "S", "title": "web_search returns stubbed provider results into the tool envelope", "paths": ["internal/tools/builtin/tool_web_search.go"]},
-
-    {"id": "tools-memory-01", "suite": "tools-memory", "diff": "S", "title": "memory_store then memory_search retrieves verbatim in a later turn", "paths": ["internal/tools/builtin/memory.go"]},
-    {"id": "tools-memory-02", "suite": "tools-memory", "diff": "M", "title": "memory_vote applies a delta; version tools reflect it", "paths": ["internal/tools/builtin/memory.go"]},
-    {"id": "tools-memory-03", "suite": "tools-memory", "diff": "S", "title": "retain/recall curation pair persists across store reopen", "paths": ["internal/tools/builtin/memory_curation.go"]},
-    {"id": "tools-memory-04", "suite": "tools-memory", "diff": "S", "title": "remember queues a proposal without applying the change to the target file", "paths": ["internal/tools/builtin/remember.go"]},
-
-    {"id": "tools-tasks-01", "suite": "tools-tasks", "diff": "M", "title": "full task lifecycle: task_create -> task_update -> task_get -> task_list", "paths": ["internal/tools/builtin/task.go"]},
-
-    {"id": "tools-docs-01", "suite": "tools-docs", "diff": "M", "title": "spreadsheet_write produces a real xlsx + csv in the session workdir", "paths": ["internal/tools/builtin/spreadsheet_write.go"]},
-    {"id": "tools-docs-02", "suite": "tools-docs", "diff": "M", "title": "pdf_read page-range filter on a real PDF; scanned-PDF note exact", "paths": ["internal/tools/builtin/pdf_read.go", "internal/tools/builtin/pdf_extract.go"]},
-    {"id": "tools-docs-03", "suite": "tools-docs", "diff": "S", "title": "pdf_read http(s) path is SSRF-guarded before download", "paths": ["internal/tools/builtin/pdf_read.go"]},
-
-    {"id": "tools-mcp-01", "suite": "tools-mcp", "diff": "L", "title": "stdio MCP: config -> spawn -> initialize -> tool exposed -> called", "paths": ["internal/tools/mcp/manager.go", "internal/tools/mcp/transport/stdio.go"]},
-    {"id": "tools-mcp-02", "suite": "tools-mcp", "diff": "M", "title": "disabled MCP server never starts; mcp_servers reports disabled", "paths": ["internal/tools/mcp/manager.go", "internal/tools/builtin/mcp_servers.go"]},
-    {"id": "tools-mcp-03", "suite": "tools-mcp", "diff": "M", "title": "MCP tool calls route through the rate limiter and per-server stats", "paths": ["internal/tools/mcp/manager.go"]},
-
-    {"id": "skills-discovery-01", "suite": "skills-discovery", "diff": "S", "title": "user-tier skill discovered and wins over a bundled copy", "paths": ["internal/skills/discovery.go", "internal/skills/registry.go"]},
-    {"id": "skills-discovery-02", "suite": "skills-discovery", "diff": "S", "title": "requires-tools gate blocks pre-LLM with the contract message; 0 LLM calls", "paths": ["internal/skills/executor.go"]},
-    {"id": "skills-discovery-03", "suite": "skills-discovery", "diff": "M", "title": "skill execution passes gating, runs on the fake LLM; allowed-tools filter holds", "paths": ["internal/skills/executor.go", "internal/agent/executor.go"]},
-    {"id": "skills-discovery-04", "suite": "skills-discovery", "diff": "M", "title": "skills_create writes a real skill dir; invalid name rejected pre-write", "paths": ["internal/tools/builtin/skill_create_tool.go", "internal/skills/lifecycle/writer.go"]},
-    {"id": "skills-discovery-05", "suite": "skills-discovery", "diff": "M", "title": "skills_patch applies a patch via the shared parser; version bumped", "paths": ["internal/tools/builtin/skill_patch_tool.go", "internal/skills/lifecycle/versioner.go"]},
-
-    {"id": "state-restart-01", "suite": "state-restart", "diff": "M", "title": "session + messages survive a daemon restart (same MEEPT_HOME)", "paths": ["internal/session/store_sqlite.go", "cmd/meept/session.go"]},
-    {"id": "state-restart-02", "suite": "state-restart", "diff": "M", "title": "detection_context CWD re-resolves from the store after restart", "paths": ["internal/session/working_dir.go", "internal/session/store_sqlite.go"]},
-    {"id": "state-restart-03", "suite": "state-restart", "diff": "M", "title": "threads survive restart with the active-thread pointer intact", "paths": ["internal/session/thread_store.go", "cmd/meept/thread.go"]},
-    {"id": "state-restart-04", "suite": "state-restart", "diff": "M", "title": "unbound session stays unbound and keeps the actionable sentinel across restart", "paths": ["internal/session/working_dir.go", "internal/daemon/components.go"]},
-    {"id": "state-restart-05", "suite": "state-restart", "diff": "L", "title": "project-bound session re-binds via persisted project_id after restart", "paths": ["internal/session/store_sqlite.go", "internal/project/manager.go"]},
-
-    {"id": "state-identity-01", "suite": "state-identity", "diff": "M", "title": "conversation_id vs session_id duality holds in stores and lookups", "paths": ["internal/session/store_sqlite.go", "internal/comm/http/server.go"]},
-
-    {"id": "memory-persistence-01", "suite": "memory-persistence", "diff": "M", "title": "episodic/task/facts writes land in real sqlite and re-read after restart", "paths": ["internal/memory/manager.go", "internal/memory/episodic.go"]},
-    {"id": "memory-persistence-02", "suite": "memory-persistence", "diff": "M", "title": "dual-store write does not duplicate the local row", "paths": ["internal/memory/manager.go", "internal/memory/dual_store.go"]},
-
-    {"id": "auth-multiuser-01", "suite": "auth-multiuser", "diff": "M", "title": "key auth happy path issues an Identity and scopes the session to the owner", "paths": ["internal/auth/store.go", "internal/comm/http/identity.go"]},
-    {"id": "auth-multiuser-02", "suite": "auth-multiuser", "diff": "S", "title": "expired key -> distinct 418 expiry message; unknown key -> distinct 418", "paths": ["internal/auth/users.go", "internal/comm/http/identity.go"]},
-    {"id": "auth-multiuser-03", "suite": "auth-multiuser", "diff": "M", "title": "multiuser opt-out preserves legacy single-key behavior", "paths": ["internal/daemon/components.go", "internal/comm/http/auth.go"]},
-    {"id": "auth-multiuser-04", "suite": "auth-multiuser", "diff": "S", "title": "quota + permission stubs are no-ops in the wired path", "paths": ["internal/auth/quota.go", "internal/auth/permissions.go"]},
-    {"id": "auth-multiuser-05", "suite": "auth-multiuser", "diff": "S", "title": "raw key material is never persisted (hashes only on disk)", "paths": ["internal/auth/users.go"]},
-
-    {"id": "audit-chain-01", "suite": "audit-chain", "diff": "M", "title": "real writes produce a verifiable hash chain; tamper reports the exact seq", "paths": ["internal/auditlog/store.go", "internal/auditlog/chain.go"]},
-    {"id": "audit-chain-02", "suite": "audit-chain", "diff": "S", "title": "canonical JSON deterministic under key-order/float perturbation", "paths": ["internal/auditlog/canonical.go"]},
-    {"id": "audit-chain-03", "suite": "audit-chain", "diff": "M", "title": "anchor job appends verifiable digests to anchors JSONL", "paths": ["internal/auditlog/anchor.go", "internal/auditlog/store.go"]},
-
-    {"id": "effects-ledger-01", "suite": "effects-ledger", "diff": "M", "title": "same external effect key across a restart executes exactly once", "paths": ["internal/effects/effects.go", "internal/effects/ledger_sqlite.go"]},
-    {"id": "effects-ledger-02", "suite": "effects-ledger", "diff": "S", "title": "state machine rejects illegal transitions (completed cannot be abandoned)", "paths": ["internal/effects/effects.go"]},
-
-    {"id": "backup-sync-01", "suite": "backup-sync", "diff": "M", "title": "git backup cycle produces manifest + commit; backup list shows it", "paths": ["internal/backup/git_backup.go", "internal/backup/manifest.go"]},
-    {"id": "backup-sync-02", "suite": "backup-sync", "diff": "S", "title": "DB path selection prefers local.db; warns on legacy sessions.db", "paths": ["internal/backup/db_paths.go"]},
-    {"id": "backup-sync-03", "suite": "backup-sync", "diff": "L", "title": "usersync exchange merges peer users; inactive peers' users removed", "paths": ["internal/backup/usersync.go", "internal/auth/store.go"]},
-
-    {"id": "project-binding-01", "suite": "project-binding", "diff": "M", "title": "CreateOrResolve idempotently resolves the same directory (sidecar id)", "paths": ["internal/project/manager.go", "internal/services/session_service.go"]},
-    {"id": "project-binding-02", "suite": "project-binding", "diff": "S", "title": "no global active-project fallback: unbound session B unaffected by session A", "paths": ["internal/session/working_dir.go", "internal/project/manager.go"]},
-
-    {"id": "config-home-01", "suite": "config-home", "diff": "S", "title": "MEEPT_HOME redirects every meept path including ~/.meept-prefixed values", "paths": ["internal/config/home.go"]},
-
-    {"id": "config-models-01", "suite": "config-models", "diff": "M", "title": "user models.json5 wins; empty slot leaves the general client wired", "paths": ["internal/config/config.go", "internal/daemon/components.go"]},
-
-    {"id": "config-reload-01", "suite": "config-reload", "diff": "M", "title": "SIGHUP reload applies config; bad reload keeps the old config", "paths": ["internal/daemon/daemon.go", "internal/config/reload_hooks.go"]},
-
-    {"id": "daemon-lifecycle-01", "suite": "daemon-lifecycle", "diff": "L", "title": "graceful shutdown stops spawned runtimes and nothing merely observed", "paths": ["internal/daemon/daemon.go", "internal/llm/runtime_manager.go"]},
-    {"id": "daemon-lifecycle-02", "suite": "daemon-lifecycle", "diff": "L", "title": "startup orphan sweep reaps only qualifying ppid==1 matches", "paths": ["internal/daemon/orphan.go", "internal/llm/runtime_sweep.go"]},
-    {"id": "daemon-lifecycle-03", "suite": "daemon-lifecycle", "diff": "M", "title": "supervisor parent-death reaps the runtime when the daemon is SIGKILLed", "paths": ["internal/llm/supervisor.go", "cmd/meept-daemon/supervisor_main.go"]},
-    {"id": "daemon-lifecycle-04", "suite": "daemon-lifecycle", "diff": "M", "title": "start lock prevents concurrent spawn of the same endpoint", "paths": ["internal/llm/runtime_startlock.go", "internal/llm/runtime_manager.go"]},
-
-    {"id": "runtime-guards-01", "suite": "runtime-guards", "diff": "M", "title": "spawn into an already-served endpoint is refused loudly; no pidfile", "paths": ["internal/llm/runtime_process.go"]},
-    {"id": "runtime-guards-02", "suite": "runtime-guards", "diff": "M", "title": "foreign pidfile adopted observed-not-owned; same-token restart stays owned", "paths": ["internal/llm/runtime_process.go"]},
-    {"id": "runtime-guards-03", "suite": "runtime-guards", "diff": "S", "title": "classifyRecoveredPID refuses to signal an unverifiable pid", "paths": ["internal/llm/runtime_process.go", "internal/llm/runtime_record.go"]},
-
-    {"id": "security-fence-01", "suite": "security-fence", "diff": "M", "title": "fence root rejects outside paths; no_fence bypasses; symlink escapes caught", "paths": ["internal/security/fence.go", "internal/session/session.go"]},
-
-    {"id": "security-tls-01", "suite": "security-tls", "diff": "M", "title": "tls_min_version enforced on the HTTP listener (1.2 client vs 1.3 floor)", "paths": ["internal/security/tls.go", "internal/daemon/daemon.go"]},
-
-    {"id": "cli-surface-01", "suite": "cli-surface", "diff": "S", "title": "CLI session/thread/effects commands reflect the daemon's persisted state; dead daemon fails fast", "paths": ["cmd/meept/session.go", "cmd/meept/thread.go", "cmd/meept/effects.go"]},
-
-    {"id": "acp-wire-01", "suite": "acp-wire", "diff": "S", "title": "ACP disabled by default: acp_agent call returns disabled, no subprocess", "paths": ["internal/acp/manager.go", "internal/config/schema.go"]},
-    {"id": "acp-wire-02", "suite": "acp-wire", "diff": "L", "title": "ACP catalog + stub agent: handshake, send, response chunks; not-found/disabled errors", "paths": ["internal/acp/manager.go", "internal/config/acp.go"]}
+    {
+      "id": "rpc-ping-01",
+      "suite": "rpc-ping",
+      "diff": "S",
+      "title": "ping round-trip on the Unix socket returns a valid JSON-RPC envelope",
+      "paths": [
+        "internal/rpc/server.go"
+      ]
+    },
+    {
+      "id": "rpc-ping-02",
+      "suite": "rpc-ping",
+      "diff": "S",
+      "title": "unknown method returns JSON-RPC -32601 method-not-found, no hang",
+      "paths": [
+        "internal/rpc/server.go"
+      ]
+    },
+    {
+      "id": "rpc-ping-03",
+      "suite": "rpc-ping",
+      "diff": "S",
+      "title": "status reports version + uptime_seconds; uptime increases between calls",
+      "paths": [
+        "internal/rpc/server.go",
+        "internal/daemon/daemon_rpc.go"
+      ]
+    },
+    {
+      "id": "rpc-ping-04",
+      "suite": "rpc-ping",
+      "diff": "S",
+      "title": "invalid params produce ErrCodeInvalidParams, not internal error",
+      "paths": [
+        "internal/rpc/server.go"
+      ]
+    },
+    {
+      "id": "rpc-ping-05",
+      "suite": "rpc-ping",
+      "diff": "S",
+      "title": "bus.publish RPC delivers to a bus subscriber (RPC->bus bridge)",
+      "paths": [
+        "internal/rpc/server.go",
+        "internal/bus/bus.go"
+      ]
+    },
+    {
+      "id": "chat-submit-01",
+      "suite": "chat-submit",
+      "diff": "M",
+      "title": "chat.submit acks in ms with turn_id+conversation_id+session_id+accepted",
+      "paths": [
+        "internal/rpc/chat_submit.go"
+      ]
+    },
+    {
+      "id": "chat-submit-02",
+      "suite": "chat-submit",
+      "diff": "S",
+      "title": "empty-message chat.submit returns accepted=false, no turn minted, no publish",
+      "paths": [
+        "internal/rpc/chat_submit.go"
+      ]
+    },
+    {
+      "id": "chat-submit-03",
+      "suite": "chat-submit",
+      "diff": "S",
+      "title": "explicit turn_id retry is idempotent, no double chat.request publish",
+      "paths": [
+        "internal/rpc/chat_submit.go"
+      ]
+    },
+    {
+      "id": "chat-submit-04",
+      "suite": "chat-submit",
+      "diff": "M",
+      "title": "HTTP POST /api/v1/chat/submit returns the identical ack shape as RPC",
+      "paths": [
+        "internal/comm/http/api_handlers.go",
+        "internal/rpc/chat_submit.go"
+      ]
+    },
+    {
+      "id": "ws-classification-01",
+      "suite": "ws-classification",
+      "diff": "M",
+      "title": "turn.terminal classifies as agent_progress, never chat_message",
+      "paths": [
+        "internal/comm/http/server_wsclass.go",
+        "internal/comm/wsclass/wsclass.go"
+      ]
+    },
+    {
+      "id": "ws-classification-02",
+      "suite": "ws-classification",
+      "diff": "S",
+      "title": "chat_message topic normalizes reply->content/role on WS",
+      "paths": [
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "ws-classification-03",
+      "suite": "ws-classification",
+      "diff": "S",
+      "title": "chat.response topic is never relayed to WS clients",
+      "paths": [
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "ws-classification-04",
+      "suite": "ws-classification",
+      "diff": "S",
+      "title": "agent.quota_wait (incl. throttle park payloads) classifies as agent_progress",
+      "paths": [
+        "internal/comm/http/server.go",
+        "internal/services/quota_notifier.go"
+      ]
+    },
+    {
+      "id": "ws-classification-05",
+      "suite": "ws-classification",
+      "diff": "M",
+      "title": "typed Topic[T] payloads classify marker-first via wsclass.WSClass()",
+      "paths": [
+        "internal/comm/wsclass/wsclass.go",
+        "internal/bus/topic.go"
+      ]
+    },
+    {
+      "id": "ws-filter-01",
+      "suite": "ws-filter",
+      "diff": "M",
+      "title": "WS client subscribed with session_id receives only that session's events",
+      "paths": [
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "ws-filter-02",
+      "suite": "ws-filter",
+      "diff": "M",
+      "title": "WS filter falls back session_id -> conversation_id (duality invariant)",
+      "paths": [
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "ws-filter-03",
+      "suite": "ws-filter",
+      "diff": "M",
+      "title": "chat_message payload session_id backfilled from conversation_id",
+      "paths": [
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "ws-filter-04",
+      "suite": "ws-filter",
+      "diff": "S",
+      "title": "connections with no session filter stay in broadcast mode",
+      "paths": [
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "ws-filter-05",
+      "suite": "ws-filter",
+      "diff": "S",
+      "title": "unsubscribe removes per-session and channel-level filters",
+      "paths": [
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "ws-filter-06",
+      "suite": "ws-filter",
+      "diff": "M",
+      "title": "synthesized progress events are session-filtered and rate-limited",
+      "paths": [
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "http-auth-01",
+      "suite": "http-auth",
+      "diff": "S",
+      "title": "missing Authorization -> 401; /health and OPTIONS exempt",
+      "paths": [
+        "internal/comm/http/auth.go"
+      ]
+    },
+    {
+      "id": "http-auth-02",
+      "suite": "http-auth",
+      "diff": "S",
+      "title": "bad key -> 418 invalid API key; Basic header treated as missing (401)",
+      "paths": [
+        "internal/comm/http/auth.go"
+      ]
+    },
+    {
+      "id": "http-auth-03",
+      "suite": "http-auth",
+      "diff": "M",
+      "title": "WS upgrade authenticates via Sec-WebSocket-Protocol bearer.<key>",
+      "paths": [
+        "internal/comm/http/auth.go",
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "http-stream-01",
+      "suite": "http-stream",
+      "diff": "M",
+      "title": "SSE /api/v1/chat/stream session filter suppresses other sessions' events",
+      "paths": [
+        "internal/comm/http/api_handlers.go"
+      ]
+    },
+    {
+      "id": "http-stream-02",
+      "suite": "http-stream",
+      "diff": "M",
+      "title": "notifications poll honors since; /ws/notifications streams live",
+      "paths": [
+        "internal/comm/http/notification_handlers.go"
+      ]
+    },
+    {
+      "id": "http-stream-03",
+      "suite": "http-stream",
+      "diff": "M",
+      "title": "HTTP /api/v1/bus/publish + /api/v1/bus/call bridge to bus/RPC",
+      "paths": [
+        "internal/comm/http/api_handlers.go",
+        "internal/rpc/server.go"
+      ]
+    },
+    {
+      "id": "http-stream-04",
+      "suite": "http-stream",
+      "diff": "L",
+      "title": "HTTP chat loop: submit ack -> turn.terminal on WS -> queue status terminal",
+      "paths": [
+        "internal/comm/http/api_handlers.go",
+        "internal/services/chat_service.go"
+      ]
+    },
+    {
+      "id": "session-binding-01",
+      "suite": "session-binding",
+      "diff": "M",
+      "title": "session.create binds client CWD into a project; detection context persisted",
+      "paths": [
+        "internal/services/session_service.go",
+        "internal/session/working_dir.go"
+      ]
+    },
+    {
+      "id": "session-binding-02",
+      "suite": "session-binding",
+      "diff": "S",
+      "title": "session with no CWD/project stays unbound; tools return ErrNoWorkingDir",
+      "paths": [
+        "internal/services/session_service.go",
+        "internal/session/working_dir.go"
+      ]
+    },
+    {
+      "id": "session-binding-03",
+      "suite": "session-binding",
+      "diff": "S",
+      "title": "explicit project_id binding wins over CWD detection",
+      "paths": [
+        "internal/services/session_service.go"
+      ]
+    },
+    {
+      "id": "dispatcher-01",
+      "suite": "dispatcher",
+      "diff": "S",
+      "title": "chat imperative routes to a direct reply; no task created",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/intent.go"
+      ]
+    },
+    {
+      "id": "dispatcher-02",
+      "suite": "dispatcher",
+      "diff": "M",
+      "title": "planning intent creates a task row and dispatches async",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/intent.go"
+      ]
+    },
+    {
+      "id": "dispatcher-03",
+      "suite": "dispatcher",
+      "diff": "M",
+      "title": "ambiguous input yields a clarification question; resume dispatches",
+      "paths": [
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "dispatcher-04",
+      "suite": "dispatcher",
+      "diff": "S",
+      "title": "platform roster fast path is rewritten to user language by reply guard",
+      "paths": [
+        "internal/agent/handler.go",
+        "internal/agent/reply_guard.go"
+      ]
+    },
+    {
+      "id": "dispatcher-05",
+      "suite": "dispatcher",
+      "diff": "M",
+      "title": "quickplan routing repair picks the repaired lane",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/quickplan_cue.go"
+      ]
+    },
+    {
+      "id": "dispatcher-06",
+      "suite": "dispatcher",
+      "diff": "M",
+      "title": "compound request is split, not misrouted into one lane",
+      "paths": [
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "dispatcher-07",
+      "suite": "dispatcher",
+      "diff": "S",
+      "title": "media-URL input gets the deterministic media-guard verdict",
+      "paths": [
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "planner-01",
+      "suite": "planner",
+      "diff": "M",
+      "title": "valid plan JSON becomes N steps in scheduled state",
+      "paths": [
+        "internal/agent/strategic.go",
+        "internal/agent/plan_draft.go"
+      ]
+    },
+    {
+      "id": "planner-02",
+      "suite": "planner",
+      "diff": "M",
+      "title": "malformed plan output triggers one repair retry, then succeeds",
+      "paths": [
+        "internal/agent/strategic.go"
+      ]
+    },
+    {
+      "id": "planner-03",
+      "suite": "planner",
+      "diff": "M",
+      "title": "plan failure degrades to fallback steps; task still completes",
+      "paths": [
+        "internal/agent/strategic.go",
+        "internal/agent/plan_draft.go"
+      ]
+    },
+    {
+      "id": "planner-04",
+      "suite": "planner",
+      "diff": "S",
+      "title": "empty-plan guard rejects zero-actionable-step plans",
+      "paths": [
+        "internal/agent/strategic.go"
+      ]
+    },
+    {
+      "id": "planner-05",
+      "suite": "planner",
+      "diff": "L",
+      "title": "escalation replan on repeated step failure produces new steps",
+      "paths": [
+        "internal/agent/escalation.go",
+        "internal/agent/tactical.go"
+      ]
+    },
+    {
+      "id": "planner-06",
+      "suite": "planner",
+      "diff": "M",
+      "title": "max-revision guard stops infinite revisions; task finalizes failed",
+      "paths": [
+        "internal/agent/review_manager.go",
+        "internal/agent/tactical.go"
+      ]
+    },
+    {
+      "id": "planner-07",
+      "suite": "planner",
+      "diff": "L",
+      "title": "interview flow: questions, answers, then plan",
+      "paths": [
+        "internal/agent/strategic.go",
+        "internal/plan/manager.go"
+      ]
+    },
+    {
+      "id": "step-pipeline-01",
+      "suite": "step-pipeline",
+      "diff": "S",
+      "title": "errored step never passes review; task finalizes StateFailed",
+      "paths": [
+        "internal/agent/review_manager.go",
+        "internal/agent/tactical.go"
+      ]
+    },
+    {
+      "id": "step-pipeline-02",
+      "suite": "step-pipeline",
+      "diff": "M",
+      "title": "review rejection creates a revision step; task stays active",
+      "paths": [
+        "internal/agent/review_manager.go"
+      ]
+    },
+    {
+      "id": "step-pipeline-03",
+      "suite": "step-pipeline",
+      "diff": "M",
+      "title": "needs_info review verdict pauses the task for human input",
+      "paths": [
+        "internal/agent/tactical.go",
+        "internal/agent/review.go"
+      ]
+    },
+    {
+      "id": "step-pipeline-04",
+      "suite": "step-pipeline",
+      "diff": "L",
+      "title": "parallel steps respect the dependency graph; cascades marked",
+      "paths": [
+        "internal/agent/executor.go"
+      ]
+    },
+    {
+      "id": "step-pipeline-05",
+      "suite": "step-pipeline",
+      "diff": "S",
+      "title": "vacuous review approval is gated",
+      "paths": [
+        "internal/agent/review_vacuity.go",
+        "internal/agent/review_manager.go"
+      ]
+    },
+    {
+      "id": "task-state-01",
+      "suite": "task-state",
+      "diff": "M",
+      "title": "all-steps-done task completes with honest recounted counters",
+      "paths": [
+        "internal/agent/tactical.go",
+        "internal/task/task.go"
+      ]
+    },
+    {
+      "id": "task-state-02",
+      "suite": "task-state",
+      "diff": "S",
+      "title": "one failed step fails the task; result carries the error text",
+      "paths": [
+        "internal/agent/tactical.go",
+        "internal/task/task.go"
+      ]
+    },
+    {
+      "id": "task-state-03",
+      "suite": "task-state",
+      "diff": "M",
+      "title": "validation-block failure is terminal and honest",
+      "paths": [
+        "internal/agent/tactical.go"
+      ]
+    },
+    {
+      "id": "task-state-04",
+      "suite": "task-state",
+      "diff": "M",
+      "title": "step jobs run in the session-resolved directory, never daemon CWD",
+      "paths": [
+        "internal/daemon/components.go",
+        "internal/session/working_dir.go"
+      ]
+    },
+    {
+      "id": "async-turn-01",
+      "suite": "async-turn",
+      "diff": "M",
+      "title": "chat.submit acks immediately; exactly one turn.terminal completed",
+      "paths": [
+        "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "async-turn-02",
+      "suite": "async-turn",
+      "diff": "S",
+      "title": "every early-error path still emits exactly one failed turn.terminal",
+      "paths": [
+        "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "async-turn-03",
+      "suite": "async-turn",
+      "diff": "S",
+      "title": "failed task.completed is relayed honestly as failure text",
+      "paths": [
+        "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "async-turn-04",
+      "suite": "async-turn",
+      "diff": "M",
+      "title": "stalled turn reaped by watchdog; late completion still valid",
+      "paths": [
+        "internal/agent/turn_watchdog.go",
+        "internal/agent/turn_registry.go"
+      ]
+    },
+    {
+      "id": "quota-park-01",
+      "suite": "quota-park",
+      "diff": "M",
+      "title": "quota-interrupted turn parks with a queued message and resumes at reset",
+      "paths": [
+        "internal/agent/handler.go",
+        "internal/agent/quota_resume.go"
+      ]
+    },
+    {
+      "id": "quota-park-02",
+      "suite": "quota-park",
+      "diff": "M",
+      "title": "park/resume emits agent.quota_wait events with unblock_at",
+      "paths": [
+        "internal/agent/parked_turn.go",
+        "internal/services/quota_notifier.go"
+      ]
+    },
+    {
+      "id": "quota-park-03",
+      "suite": "quota-park",
+      "diff": "L",
+      "title": "parked turns survive daemon restart via ParkStore",
+      "paths": [
+        "internal/agent/park_store_sqlite.go",
+        "internal/agent/parked_turn.go"
+      ]
+    },
+    {
+      "id": "quota-park-04",
+      "suite": "quota-park",
+      "diff": "L",
+      "title": "throttle park beyond maxWait gives up visibly",
+      "paths": [
+        "internal/agent/loop_park.go",
+        "internal/agent/parked_turn.go"
+      ]
+    },
+    {
+      "id": "quota-park-05",
+      "suite": "quota-park",
+      "diff": "M",
+      "title": "budget-exhausted turn parks and resumes under the original turn_id",
+      "paths": [
+        "internal/agent/handler.go",
+        "internal/agent/budget_resume.go"
+      ]
+    },
+    {
+      "id": "quota-park-06",
+      "suite": "quota-park",
+      "diff": "M",
+      "title": "goal-loop quota park shares the one TurnParker",
+      "paths": [
+        "internal/employee/park.go",
+        "internal/daemon/components.go"
+      ]
+    },
+    {
+      "id": "breakers-01",
+      "suite": "breakers",
+      "diff": "S",
+      "title": "identical failing tool call trips the repeat-error breaker",
+      "paths": [
+        "internal/agent/repeat_error_breaker.go"
+      ]
+    },
+    {
+      "id": "breakers-02",
+      "suite": "breakers",
+      "diff": "S",
+      "title": "byte-identical successful-call cycle aborts the turn",
+      "paths": [
+        "internal/agent/loop.go",
+        "internal/agent/guards.go"
+      ]
+    },
+    {
+      "id": "breakers-03",
+      "suite": "breakers",
+      "diff": "M",
+      "title": "no-progress ladder nudges before vetoing",
+      "paths": [
+        "internal/agent/guards.go"
+      ]
+    },
+    {
+      "id": "breakers-04",
+      "suite": "breakers",
+      "diff": "S",
+      "title": "tool breaker halts a persistently failing tool",
+      "paths": [
+        "internal/agent/tool_breaker.go"
+      ]
+    },
+    {
+      "id": "output-filters-01",
+      "suite": "output-filters",
+      "diff": "M",
+      "title": "filter rejection consumes filter retries; exhaustion fails the task",
+      "paths": [
+        "internal/agent/tactical.go"
+      ]
+    },
+    {
+      "id": "output-filters-02",
+      "suite": "output-filters",
+      "diff": "S",
+      "title": "claims marked vs evidence before filters; hallucinated file write fails the gate",
+      "paths": [
+        "internal/agent/tactical.go",
+        "internal/agent/hallucination.go"
+      ]
+    },
+    {
+      "id": "output-filters-03",
+      "suite": "output-filters",
+      "diff": "S",
+      "title": "filter-disabled path is byte-identical; no stage=output_filter logs",
+      "paths": [
+        "internal/agent/tactical.go",
+        "internal/agent/filter_config.go"
+      ]
+    },
+    {
+      "id": "refusal-01",
+      "suite": "refusal",
+      "diff": "M",
+      "title": "provider refusal re-dispatches the turn to the fallback model, once",
+      "paths": [
+        "internal/agent/loop_refusal.go"
+      ]
+    },
+    {
+      "id": "refusal-02",
+      "suite": "refusal",
+      "diff": "S",
+      "title": "per-agent refusal_model overrides the global slot",
+      "paths": [
+        "internal/agent/loop_refusal.go"
+      ]
+    },
+    {
+      "id": "goal-loop-01",
+      "suite": "goal-loop",
+      "diff": "M",
+      "title": "failed job retries then dead-letters; transient failures requeue",
+      "paths": [
+        "internal/queue/store.go",
+        "internal/worker/worker.go"
+      ]
+    },
+    {
+      "id": "goal-loop-02",
+      "suite": "goal-loop",
+      "diff": "M",
+      "title": "scheduler rewake fires a due goal turn with observable output",
+      "paths": [
+        "internal/scheduler/rewake.go",
+        "internal/employee/goal_loop.go"
+      ]
+    },
+    {
+      "id": "goal-loop-03",
+      "suite": "goal-loop",
+      "diff": "M",
+      "title": "goal loop stops after consecutive failures and escalates",
+      "paths": [
+        "internal/employee/goal_loop.go",
+        "internal/employee/enforcement.go"
+      ]
+    },
+    {
+      "id": "eval-judge-01",
+      "suite": "eval-judge",
+      "diff": "S",
+      "title": "eval judge grades a recorded trajectory; contentLooksFailed honest",
+      "paths": [
+        "internal/eval/judge.go",
+        "internal/eval/store.go"
+      ]
+    },
+    {
+      "id": "tools-argvalidate-01",
+      "suite": "tools-argvalidate",
+      "diff": "S",
+      "title": "missing required arg -> invalid_args before execution; no side effect",
+      "paths": [
+        "internal/tools/registry.go",
+        "internal/tools/argvalidate.go"
+      ]
+    },
+    {
+      "id": "tools-argvalidate-02",
+      "suite": "tools-argvalidate",
+      "diff": "S",
+      "title": "wrong-type arg rejected with type mismatch text",
+      "paths": [
+        "internal/tools/argvalidate.go"
+      ]
+    },
+    {
+      "id": "tools-argvalidate-03",
+      "suite": "tools-argvalidate",
+      "diff": "S",
+      "title": "empty-after-trim required arg fails the gate; no network dial",
+      "paths": [
+        "internal/tools/argvalidate.go"
+      ]
+    },
+    {
+      "id": "tools-argvalidate-04",
+      "suite": "tools-argvalidate",
+      "diff": "S",
+      "title": "unknown tool name returns a recoverable tool-not-found result",
+      "paths": [
+        "internal/tools/registry.go"
+      ]
+    },
+    {
+      "id": "tools-argvalidate-05",
+      "suite": "tools-argvalidate",
+      "diff": "M",
+      "title": "indexed schema mode stubs tools; tool_view expands the full schema mid-turn",
+      "paths": [
+        "internal/tools/registry.go",
+        "internal/tools/builtin/tool_view.go"
+      ]
+    },
+    {
+      "id": "tools-filesystem-01",
+      "suite": "tools-filesystem",
+      "diff": "S",
+      "title": "file_write writes a real file relative to the session working dir",
+      "paths": [
+        "internal/tools/builtin/filesystem.go"
+      ]
+    },
+    {
+      "id": "tools-filesystem-02",
+      "suite": "tools-filesystem",
+      "diff": "M",
+      "title": "file_read hashline output feeds file_edit anchor replacement",
+      "paths": [
+        "internal/tools/builtin/filesystem.go",
+        "internal/tools/builtin/file_edit.go"
+      ]
+    },
+    {
+      "id": "tools-filesystem-03",
+      "suite": "tools-filesystem",
+      "diff": "M",
+      "title": "file_edit stale anchor rejected with fresh hashline for retry",
+      "paths": [
+        "internal/tools/builtin/file_edit.go"
+      ]
+    },
+    {
+      "id": "tools-filesystem-04",
+      "suite": "tools-filesystem",
+      "diff": "S",
+      "title": "file_grep/file_find resolve relative patterns against the workdir",
+      "paths": [
+        "internal/tools/builtin/file_grep.go",
+        "internal/tools/builtin/file_find.go"
+      ]
+    },
+    {
+      "id": "tools-filesystem-05",
+      "suite": "tools-filesystem",
+      "diff": "M",
+      "title": "unbound session surfaces the ErrNoWorkingDir sentinel (not bare 'no path')",
+      "paths": [
+        "internal/tools/workdir_ctx.go"
+      ]
+    },
+    {
+      "id": "tools-filesystem-06",
+      "suite": "tools-filesystem",
+      "diff": "S",
+      "title": "shell runs a real command in the session workdir; stdout returned",
+      "paths": [
+        "internal/tools/builtin/shell.go"
+      ]
+    },
+    {
+      "id": "tools-filesystem-07",
+      "suite": "tools-filesystem",
+      "diff": "S",
+      "title": "shell refuses a destructive command via risk classification",
+      "paths": [
+        "internal/tools/builtin/shell.go",
+        "internal/tools/builtin/shell_refusing.go"
+      ]
+    },
+    {
+      "id": "tools-web-ssrf-01",
+      "suite": "tools-web-ssrf",
+      "diff": "S",
+      "title": "web_fetch to 127.0.0.1 blocked by SSRF guard; zero hits recorded",
+      "paths": [
+        "internal/tools/builtin/ssrf.go",
+        "internal/tools/builtin/web_fetch.go"
+      ]
+    },
+    {
+      "id": "tools-web-ssrf-02",
+      "suite": "tools-web-ssrf",
+      "diff": "S",
+      "title": "web_fetch to a private-range local test server returns page text",
+      "paths": [
+        "internal/tools/builtin/web_fetch.go"
+      ]
+    },
+    {
+      "id": "tools-web-ssrf-03",
+      "suite": "tools-web-ssrf",
+      "diff": "S",
+      "title": "web_search returns stubbed provider results into the tool envelope",
+      "paths": [
+        "internal/tools/builtin/tool_web_search.go"
+      ]
+    },
+    {
+      "id": "tools-memory-01",
+      "suite": "tools-memory",
+      "diff": "S",
+      "title": "memory_store then memory_search retrieves verbatim in a later turn",
+      "paths": [
+        "internal/tools/builtin/memory.go"
+      ]
+    },
+    {
+      "id": "tools-memory-02",
+      "suite": "tools-memory",
+      "diff": "M",
+      "title": "memory_vote applies a delta; version tools reflect it",
+      "paths": [
+        "internal/tools/builtin/memory.go"
+      ]
+    },
+    {
+      "id": "tools-memory-03",
+      "suite": "tools-memory",
+      "diff": "S",
+      "title": "retain/recall curation pair persists across store reopen",
+      "paths": [
+        "internal/tools/builtin/memory_curation.go"
+      ]
+    },
+    {
+      "id": "tools-memory-04",
+      "suite": "tools-memory",
+      "diff": "S",
+      "title": "remember queues a proposal without applying the change to the target file",
+      "paths": [
+        "internal/tools/builtin/remember.go"
+      ]
+    },
+    {
+      "id": "tools-tasks-01",
+      "suite": "tools-tasks",
+      "diff": "M",
+      "title": "full task lifecycle: task_create -> task_update -> task_get -> task_list",
+      "paths": [
+        "internal/tools/builtin/task.go"
+      ]
+    },
+    {
+      "id": "tools-docs-01",
+      "suite": "tools-docs",
+      "diff": "M",
+      "title": "spreadsheet_write produces a real xlsx + csv in the session workdir",
+      "paths": [
+        "internal/tools/builtin/spreadsheet_write.go"
+      ]
+    },
+    {
+      "id": "tools-docs-02",
+      "suite": "tools-docs",
+      "diff": "M",
+      "title": "pdf_read page-range filter on a real PDF; scanned-PDF note exact",
+      "paths": [
+        "internal/tools/builtin/pdf_read.go",
+        "internal/tools/builtin/pdf_extract.go"
+      ]
+    },
+    {
+      "id": "tools-docs-03",
+      "suite": "tools-docs",
+      "diff": "S",
+      "title": "pdf_read http(s) path is SSRF-guarded before download",
+      "paths": [
+        "internal/tools/builtin/pdf_read.go"
+      ]
+    },
+    {
+      "id": "tools-mcp-01",
+      "suite": "tools-mcp",
+      "diff": "L",
+      "title": "stdio MCP: config -> spawn -> initialize -> tool exposed -> called",
+      "paths": [
+        "internal/tools/mcp/manager.go",
+        "internal/tools/mcp/transport/stdio.go"
+      ]
+    },
+    {
+      "id": "tools-mcp-02",
+      "suite": "tools-mcp",
+      "diff": "M",
+      "title": "disabled MCP server never starts; mcp_servers reports disabled",
+      "paths": [
+        "internal/tools/mcp/manager.go",
+        "internal/tools/builtin/mcp_servers.go"
+      ]
+    },
+    {
+      "id": "tools-mcp-03",
+      "suite": "tools-mcp",
+      "diff": "M",
+      "title": "MCP tool calls route through the rate limiter and per-server stats",
+      "paths": [
+        "internal/tools/mcp/manager.go"
+      ]
+    },
+    {
+      "id": "skills-discovery-01",
+      "suite": "skills-discovery",
+      "diff": "S",
+      "title": "user-tier skill discovered and wins over a bundled copy",
+      "paths": [
+        "internal/skills/discovery.go",
+        "internal/skills/registry.go"
+      ]
+    },
+    {
+      "id": "skills-discovery-02",
+      "suite": "skills-discovery",
+      "diff": "S",
+      "title": "requires-tools gate blocks pre-LLM with the contract message; 0 LLM calls",
+      "paths": [
+        "internal/skills/executor.go"
+      ]
+    },
+    {
+      "id": "skills-discovery-03",
+      "suite": "skills-discovery",
+      "diff": "M",
+      "title": "skill execution passes gating, runs on the fake LLM; allowed-tools filter holds",
+      "paths": [
+        "internal/skills/executor.go",
+        "internal/agent/executor.go"
+      ]
+    },
+    {
+      "id": "skills-discovery-04",
+      "suite": "skills-discovery",
+      "diff": "M",
+      "title": "skills_create writes a real skill dir; invalid name rejected pre-write",
+      "paths": [
+        "internal/tools/builtin/skill_create_tool.go",
+        "internal/skills/lifecycle/writer.go"
+      ]
+    },
+    {
+      "id": "skills-discovery-05",
+      "suite": "skills-discovery",
+      "diff": "M",
+      "title": "skills_patch applies a patch via the shared parser; version bumped",
+      "paths": [
+        "internal/tools/builtin/skill_patch_tool.go",
+        "internal/skills/lifecycle/versioner.go"
+      ]
+    },
+    {
+      "id": "state-restart-01",
+      "suite": "state-restart",
+      "diff": "M",
+      "title": "session + messages survive a daemon restart (same MEEPT_HOME)",
+      "paths": [
+        "internal/session/store_sqlite.go",
+        "cmd/meept/session.go"
+      ]
+    },
+    {
+      "id": "state-restart-02",
+      "suite": "state-restart",
+      "diff": "M",
+      "title": "detection_context CWD re-resolves from the store after restart",
+      "paths": [
+        "internal/session/working_dir.go",
+        "internal/session/store_sqlite.go"
+      ]
+    },
+    {
+      "id": "state-restart-03",
+      "suite": "state-restart",
+      "diff": "M",
+      "title": "threads survive restart with the active-thread pointer intact",
+      "paths": [
+        "internal/session/thread_store.go",
+        "cmd/meept/thread.go"
+      ]
+    },
+    {
+      "id": "state-restart-04",
+      "suite": "state-restart",
+      "diff": "M",
+      "title": "unbound session stays unbound and keeps the actionable sentinel across restart",
+      "paths": [
+        "internal/session/working_dir.go",
+        "internal/daemon/components.go"
+      ]
+    },
+    {
+      "id": "state-restart-05",
+      "suite": "state-restart",
+      "diff": "L",
+      "title": "project-bound session re-binds via persisted project_id after restart",
+      "paths": [
+        "internal/session/store_sqlite.go",
+        "internal/project/manager.go"
+      ]
+    },
+    {
+      "id": "state-identity-01",
+      "suite": "state-identity",
+      "diff": "M",
+      "title": "conversation_id vs session_id duality holds in stores and lookups",
+      "paths": [
+        "internal/session/store_sqlite.go",
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "memory-persistence-01",
+      "suite": "memory-persistence",
+      "diff": "M",
+      "title": "episodic/task/facts writes land in real sqlite and re-read after restart",
+      "paths": [
+        "internal/memory/manager.go",
+        "internal/memory/episodic.go"
+      ]
+    },
+    {
+      "id": "memory-persistence-02",
+      "suite": "memory-persistence",
+      "diff": "M",
+      "title": "dual-store write does not duplicate the local row",
+      "paths": [
+        "internal/memory/manager.go",
+        "internal/memory/dual_store.go"
+      ]
+    },
+    {
+      "id": "auth-multiuser-01",
+      "suite": "auth-multiuser",
+      "diff": "M",
+      "title": "key auth happy path issues an Identity and scopes the session to the owner",
+      "paths": [
+        "internal/auth/store.go",
+        "internal/comm/http/identity.go"
+      ]
+    },
+    {
+      "id": "auth-multiuser-02",
+      "suite": "auth-multiuser",
+      "diff": "S",
+      "title": "expired key -> distinct 418 expiry message; unknown key -> distinct 418",
+      "paths": [
+        "internal/auth/users.go",
+        "internal/comm/http/identity.go"
+      ]
+    },
+    {
+      "id": "auth-multiuser-03",
+      "suite": "auth-multiuser",
+      "diff": "M",
+      "title": "multiuser opt-out preserves legacy single-key behavior",
+      "paths": [
+        "internal/daemon/components.go",
+        "internal/comm/http/auth.go"
+      ]
+    },
+    {
+      "id": "auth-multiuser-04",
+      "suite": "auth-multiuser",
+      "diff": "S",
+      "title": "quota + permission stubs are no-ops in the wired path",
+      "paths": [
+        "internal/auth/quota.go",
+        "internal/auth/permissions.go"
+      ]
+    },
+    {
+      "id": "auth-multiuser-05",
+      "suite": "auth-multiuser",
+      "diff": "S",
+      "title": "raw key material is never persisted (hashes only on disk)",
+      "paths": [
+        "internal/auth/users.go"
+      ]
+    },
+    {
+      "id": "audit-chain-01",
+      "suite": "audit-chain",
+      "diff": "M",
+      "title": "real writes produce a verifiable hash chain; tamper reports the exact seq",
+      "paths": [
+        "internal/auditlog/store.go",
+        "internal/auditlog/chain.go"
+      ]
+    },
+    {
+      "id": "audit-chain-02",
+      "suite": "audit-chain",
+      "diff": "S",
+      "title": "canonical JSON deterministic under key-order/float perturbation",
+      "paths": [
+        "internal/auditlog/canonical.go"
+      ]
+    },
+    {
+      "id": "audit-chain-03",
+      "suite": "audit-chain",
+      "diff": "M",
+      "title": "anchor job appends verifiable digests to anchors JSONL",
+      "paths": [
+        "internal/auditlog/anchor.go",
+        "internal/auditlog/store.go"
+      ]
+    },
+    {
+      "id": "effects-ledger-01",
+      "suite": "effects-ledger",
+      "diff": "M",
+      "title": "same external effect key across a restart executes exactly once",
+      "paths": [
+        "internal/effects/effects.go",
+        "internal/effects/ledger_sqlite.go"
+      ]
+    },
+    {
+      "id": "effects-ledger-02",
+      "suite": "effects-ledger",
+      "diff": "S",
+      "title": "state machine rejects illegal transitions (completed cannot be abandoned)",
+      "paths": [
+        "internal/effects/effects.go"
+      ]
+    },
+    {
+      "id": "backup-sync-01",
+      "suite": "backup-sync",
+      "diff": "M",
+      "title": "git backup cycle produces manifest + commit; backup list shows it",
+      "paths": [
+        "internal/backup/git_backup.go",
+        "internal/backup/manifest.go"
+      ]
+    },
+    {
+      "id": "backup-sync-02",
+      "suite": "backup-sync",
+      "diff": "S",
+      "title": "DB path selection prefers local.db; warns on legacy sessions.db",
+      "paths": [
+        "internal/backup/db_paths.go"
+      ]
+    },
+    {
+      "id": "backup-sync-03",
+      "suite": "backup-sync",
+      "diff": "L",
+      "title": "usersync exchange merges peer users; inactive peers' users removed",
+      "paths": [
+        "internal/backup/usersync.go",
+        "internal/auth/store.go"
+      ]
+    },
+    {
+      "id": "project-binding-01",
+      "suite": "project-binding",
+      "diff": "M",
+      "title": "CreateOrResolve idempotently resolves the same directory (sidecar id)",
+      "paths": [
+        "internal/project/manager.go",
+        "internal/services/session_service.go"
+      ]
+    },
+    {
+      "id": "project-binding-02",
+      "suite": "project-binding",
+      "diff": "S",
+      "title": "no global active-project fallback: unbound session B unaffected by session A",
+      "paths": [
+        "internal/session/working_dir.go",
+        "internal/project/manager.go"
+      ]
+    },
+    {
+      "id": "config-home-01",
+      "suite": "config-home",
+      "diff": "S",
+      "title": "MEEPT_HOME redirects every meept path including ~/.meept-prefixed values",
+      "paths": [
+        "internal/config/home.go"
+      ]
+    },
+    {
+      "id": "config-models-01",
+      "suite": "config-models",
+      "diff": "M",
+      "title": "user models.json5 wins; empty slot leaves the general client wired",
+      "paths": [
+        "internal/config/config.go",
+        "internal/daemon/components.go"
+      ]
+    },
+    {
+      "id": "config-reload-01",
+      "suite": "config-reload",
+      "diff": "M",
+      "title": "SIGHUP reload applies config; bad reload keeps the old config",
+      "paths": [
+        "internal/daemon/daemon.go",
+        "internal/config/reload_hooks.go"
+      ]
+    },
+    {
+      "id": "daemon-lifecycle-01",
+      "suite": "daemon-lifecycle",
+      "diff": "L",
+      "title": "graceful shutdown stops spawned runtimes and nothing merely observed",
+      "paths": [
+        "internal/daemon/daemon.go",
+        "internal/llm/runtime_manager.go"
+      ]
+    },
+    {
+      "id": "daemon-lifecycle-02",
+      "suite": "daemon-lifecycle",
+      "diff": "L",
+      "title": "startup orphan sweep reaps only qualifying ppid==1 matches",
+      "paths": [
+        "internal/daemon/orphan.go",
+        "internal/llm/runtime_sweep.go"
+      ]
+    },
+    {
+      "id": "daemon-lifecycle-03",
+      "suite": "daemon-lifecycle",
+      "diff": "M",
+      "title": "supervisor parent-death reaps the runtime when the daemon is SIGKILLed",
+      "paths": [
+        "internal/llm/supervisor.go",
+        "cmd/meept-daemon/supervisor_main.go"
+      ]
+    },
+    {
+      "id": "daemon-lifecycle-04",
+      "suite": "daemon-lifecycle",
+      "diff": "M",
+      "title": "start lock prevents concurrent spawn of the same endpoint",
+      "paths": [
+        "internal/llm/runtime_startlock.go",
+        "internal/llm/runtime_manager.go"
+      ]
+    },
+    {
+      "id": "runtime-guards-01",
+      "suite": "runtime-guards",
+      "diff": "M",
+      "title": "spawn into an already-served endpoint is refused loudly; no pidfile",
+      "paths": [
+        "internal/llm/runtime_process.go"
+      ]
+    },
+    {
+      "id": "runtime-guards-02",
+      "suite": "runtime-guards",
+      "diff": "M",
+      "title": "foreign pidfile adopted observed-not-owned; same-token restart stays owned",
+      "paths": [
+        "internal/llm/runtime_process.go"
+      ]
+    },
+    {
+      "id": "runtime-guards-03",
+      "suite": "runtime-guards",
+      "diff": "S",
+      "title": "classifyRecoveredPID refuses to signal an unverifiable pid",
+      "paths": [
+        "internal/llm/runtime_process.go",
+        "internal/llm/runtime_record.go"
+      ]
+    },
+    {
+      "id": "security-fence-01",
+      "suite": "security-fence",
+      "diff": "M",
+      "title": "fence root rejects outside paths; no_fence bypasses; symlink escapes caught",
+      "paths": [
+        "internal/security/fence.go",
+        "internal/session/session.go"
+      ]
+    },
+    {
+      "id": "security-tls-01",
+      "suite": "security-tls",
+      "diff": "M",
+      "title": "tls_min_version enforced on the HTTP listener (1.2 client vs 1.3 floor)",
+      "paths": [
+        "internal/security/tls.go",
+        "internal/daemon/daemon.go"
+      ]
+    },
+    {
+      "id": "cli-surface-01",
+      "suite": "cli-surface",
+      "diff": "S",
+      "title": "CLI session/thread/effects commands reflect the daemon's persisted state; dead daemon fails fast",
+      "paths": [
+        "cmd/meept/session.go",
+        "cmd/meept/thread.go",
+        "cmd/meept/effects.go"
+      ]
+    },
+    {
+      "id": "acp-wire-01",
+      "suite": "acp-wire",
+      "diff": "S",
+      "title": "ACP disabled by default: acp_agent call returns disabled, no subprocess",
+      "paths": [
+        "internal/acp/manager.go",
+        "internal/config/schema.go"
+      ]
+    },
+    {
+      "id": "acp-wire-02",
+      "suite": "acp-wire",
+      "diff": "L",
+      "title": "ACP catalog + stub agent: handshake, send, response chunks; not-found/disabled errors",
+      "paths": [
+        "internal/acp/manager.go",
+        "internal/config/acp.go"
+      ]
+    }
   ]
 }
