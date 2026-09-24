@@ -267,13 +267,26 @@ func (s *Server) toolSend(args map[string]any) (any, error) {
 	// The chat RPC returns the ChatResponse envelope (reply, conversation_id,
 	// meta, ...). Surface .reply directly when present so MCP clients get the
 	// user-facing answer instead of a raw JSON envelope dump (e2e A3/A4).
+	// When the turn errored (reply empty, error set), surface the ERROR TEXT
+	// — never the raw envelope: an error envelope dumped as the response is
+	// the machine-shaped-reply failure mode the reply guard exists for (e2e
+	// run 2026-09-23 GiqWsG T4: "conversation token budget exhausted" shipped
+	// as raw JSON and failed A3).
 	var chatResp struct {
 		Reply string `json:"reply"`
+		Error string `json:"error"`
 	}
-	if err := json.Unmarshal(result, &chatResp); err == nil && chatResp.Reply != "" {
-		return map[string]any{
-			"response": chatResp.Reply,
-		}, nil
+	if err := json.Unmarshal(result, &chatResp); err == nil {
+		if chatResp.Reply != "" {
+			return map[string]any{
+				"response": chatResp.Reply,
+			}, nil
+		}
+		if chatResp.Error != "" {
+			return map[string]any{
+				"response": "the turn failed: " + chatResp.Error,
+			}, nil
+		}
 	}
 	return map[string]any{
 		"response": string(result),
