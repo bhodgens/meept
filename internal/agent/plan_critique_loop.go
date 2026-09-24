@@ -67,6 +67,12 @@ const (
 	knownRisksCountMetadataKey    = "known_risks_count"
 )
 
+// critiqueOutcomeMetadataKey is the leaf-04 draft companion carrying the
+// loop verdict ("clean" | "exhausted" | "critic_fail") so the plan-mode
+// draft surface (plan.draft get / seal request) can present what the
+// critique concluded, not just the counts.
+const critiqueOutcomeMetadataKey = "critique_outcome"
+
 // knownRisksHeading is the section the draft gains on rounds-exhausted
 // sealing (and that advisory objections roll into unconditionally).
 const knownRisksHeading = "## Known Risks"
@@ -319,7 +325,7 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	// fancy path is down).
 	filled, err := sp.draftWithPlanner(ctx, plannerLoop, req, draft)
 	if err != nil {
-		sp.recordMetric("strategic_planner.tier_complex_fallback", 1, map[string]string{"reason": "draft_failed"})
+		sp.recordMetric("strategic_planner.tier_complex_fallback", 1, map[string]string{"reason": "draft_transport"})
 		sp.logger.Warn("Critique loop draft call failed; falling back to legacy path",
 			"task_id", req.TaskID,
 			"error", err,
@@ -365,7 +371,7 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 		}
 		revised, reviseErr := sp.reviseDraft(ctx, plannerLoop, req, draft, append(append([]criticObjection{}, blocking...), advisory...), "")
 		if reviseErr != nil {
-			sp.recordMetric("strategic_planner.tier_complex_fallback", 1, map[string]string{"reason": "revise_failed"})
+			sp.recordMetric("strategic_planner.tier_complex_fallback", 1, map[string]string{"reason": "revise_transport"})
 			sp.logger.Warn("Critique loop revise failed; falling back to legacy path",
 				"task_id", req.TaskID,
 				"error", reviseErr,
@@ -388,6 +394,13 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	if len(known) > 0 {
 		draft.Markdown = appendKnownRisks(draft.Markdown, known)
 	}
+	// Leaf-04 critique summary on the draft itself: the presented draft
+	// carries the loop's verdict (rounds, risks, outcome) so the human
+	// reviewer sees it wherever the draft markdown travels — plan.draft
+	// get, the seal request, the CLI — without a separate metadata read.
+	draft.CritiqueRoundsUsed = roundsUsed
+	draft.KnownRisksCount = len(known)
+	draft.CritiqueOutcome = outcome
 	draft.UpdatedAt = time.Now().UTC()
 	draft.Version++
 	if err := sp.storeDraft(t, draft); err != nil {
@@ -398,9 +411,9 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	sp.recordMetric("strategic_planner.critique_outcome", 1, map[string]string{"outcome": outcome})
 	sp.recordMetric("strategic_planner.known_risks", float64(len(known)), nil)
 
-	// Draft companions (leaf: draft metadata carries critique_rounds_used
-	// and known_risks_count).
-	if err := sp.stampCritiqueMetadata(req.TaskID, roundsUsed, len(known)); err != nil {
+	// Draft companions (leaf: draft metadata carries critique_rounds_used,
+	// known_risks_count, and — leaf 04 — the outcome verdict).
+	if err := sp.stampCritiqueMetadata(req.TaskID, roundsUsed, len(known), outcome); err != nil {
 		sp.logger.Warn("Failed to stamp critique metadata",
 			"task_id", req.TaskID, "error", err)
 	}
@@ -674,9 +687,11 @@ func asAgentCompileError(err error, target **plan.CompileError) bool {
 	return ok
 }
 
-// stampCritiqueMetadata persists critique_rounds_used and
-// known_risks_count on the task's metadata bag (leaf 02).
-func (sp *StrategicPlanner) stampCritiqueMetadata(taskID string, roundsUsed, knownRisks int) error {
+// stampCritiqueMetadata persists critique_rounds_used,
+// known_risks_count, and critique_outcome on the task's metadata bag
+// (leaf 02 rounds/risks; leaf 04 adds the outcome so the interactive
+// draft surface can show the loop's verdict next to the counts).
+func (sp *StrategicPlanner) stampCritiqueMetadata(taskID string, roundsUsed, knownRisks int, outcome string) error {
 	t, err := sp.taskStore.GetByID(taskID)
 	if err != nil || t == nil {
 		return fmt.Errorf("task not found: %s", taskID)
@@ -684,6 +699,7 @@ func (sp *StrategicPlanner) stampCritiqueMetadata(taskID string, roundsUsed, kno
 	t.Metadata = mergeMetadata(t.Metadata, map[string]json.RawMessage{
 		critiqueRoundsUsedMetadataKey: json.RawMessage(fmt.Sprintf("%d", roundsUsed)),
 		knownRisksCountMetadataKey:    json.RawMessage(fmt.Sprintf("%d", knownRisks)),
+		critiqueOutcomeMetadataKey:    json.RawMessage(fmt.Sprintf("%q", outcome)),
 	})
 	if err := sp.taskStore.Update(t); err != nil {
 		return fmt.Errorf("persist critique metadata on task %s: %w", taskID, err)

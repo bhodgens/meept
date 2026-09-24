@@ -30,6 +30,15 @@ type PlanDraft struct {
 	Version    int       `json:"version"`
 	UpdatedAt  time.Time `json:"updated_at"`
 	SealedHash string    `json:"sealed_hash,omitempty"`
+
+	// Critique summary (tiered-iteration leaf 04): what the TierComplex
+	// critique-refine loop concluded before the draft was presented for
+	// review. Zero values = the plain (non-critiqued) draft path; the
+	// fields ride the draft bag so plan.draft get / the seal request
+	// surface the verdict wherever the draft markdown already travels.
+	CritiqueRoundsUsed int    `json:"critique_rounds_used,omitempty"`
+	KnownRisksCount    int    `json:"known_risks_count,omitempty"`
+	CritiqueOutcome    string `json:"critique_outcome,omitempty"`
 }
 
 func marshalPlanDraft(d *PlanDraft) ([]byte, error) {

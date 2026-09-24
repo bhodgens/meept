@@ -612,6 +612,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		// launch) it falls back to single-shot with a Warn.
 		tier := tierForRequest(req)
 		sp.recordMetric("strategic_planner.tier", 1, map[string]string{"tier": string(tier)})
+		sp.logPlanTierSelected(tier, req)
 		if tier == TierComplex && sp.selfSealFlag() {
 			flowResult, flowErr := sp.runCritiqueFlowForPlan(ctx, req)
 			if flowErr != nil {
@@ -665,6 +666,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		// apply. The seed still happens either way.
 		tier := tierForRequest(req)
 		sp.recordMetric("strategic_planner.tier", 1, map[string]string{"tier": string(tier)})
+		sp.logPlanTierSelected(tier, req)
 		// Plan compiler pipeline (plan-compiler leaf 04): when enabled the
 		// brainstorm draft IS the interview — seed the scaffold from the
 		// request and return without ConductInterview or LLM decomposition.
@@ -695,6 +697,13 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 						"task_id", req.TaskID,
 						"error", flowErr,
 					)
+					// Leaf-04 coverage: the flow itself errored (evidence
+					// assembly is fail-open, so this is a store-level
+					// failure) — the complex tier degraded to the plain
+					// seeded draft. Emit the fallback metric so the
+					// degradation is countable; the Warn above carries
+					// the transport detail.
+					sp.recordMetric("strategic_planner.tier_complex_fallback", 1, map[string]string{"reason": "flow_error"})
 					return nil
 				}
 				if flowResult.Action == critiqueActionAwaitSeal {
@@ -2205,6 +2214,19 @@ func tierForRequest(req PlanRequest) ComplexityTier {
 		return TierComplex
 	}
 	return EvaluatePlanComplexity(req)
+}
+
+// logPlanTierSelected emits the leaf-04 structured plan-time log line:
+// exactly ONE per plan request, naming the tier and the task id so the
+// eval corpus can join log ground truth to request outcomes. The tier
+// metric (strategic_planner.tier) is the machine counter; this line is
+// the human/audit view of the same decision.
+func (sp *StrategicPlanner) logPlanTierSelected(tier ComplexityTier, req PlanRequest) {
+	sp.logger.Info("plan tier selected",
+		"tier", string(tier),
+		"replan_attempt", req.ReplanAttempt,
+		"task_id", req.TaskID,
+	)
 }
 
 // writeEscalationLevelToTask persists the current escalation level on the
