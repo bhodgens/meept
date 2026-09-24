@@ -33,8 +33,8 @@ chmod +x .githooks/*
 
 ### pre-commit (Main Hook)
 
-Entry point that runs all checks sequentially (17 total). The numbers below are
-the `[n/17]` labels `.githooks/pre-commit` prints:
+Entry point that runs all checks sequentially (18 total). The numbers below are
+the `[n/18]` labels `.githooks/pre-commit` prints:
 
 | # | Hook | Purpose |
 |---|------|---------|
@@ -55,8 +55,10 @@ the `[n/17]` labels `.githooks/pre-commit` prints:
 | 15 | pre-commit-feature-docs | Documentation updates |
 | 16 | pre-commit-ascii | No CJK/Hangul/fullwidth characters in staged text files |
 | 17 | pre-commit-dart-format | Staged Dart blob (index content) is dart-format clean |
+| 18 | pre-commit-e2e | Affected hermetic e2e suites run + new feature packages have e2e coverage |
 
-Steps 13 and 14 are reported but never block the commit. Steps 1-12 and 15-17 do.
+Steps 13 and 14 are reported but never block the commit. Steps 1-12, 15-17,
+and 18 do.
 `pre-commit-staticcheck` is not in this list: it is standalone (run it directly,
 or via your editor) and additionally analyzes the tag-gated `magefiles` package
 with `-tags mage`.
@@ -351,6 +353,35 @@ Blocks commits that stage unformatted Dart files under `ui/flutter_ui/`.
 **Requires:** dart (on PATH, or the dart bundled with the Flutter SDK)
 
 **See:** `make fmt-check-gui`, `make fmt-gui`, docs/workflows/flutter_gui.md
+
+---
+
+### pre-commit-e2e
+
+Enforces the e2e testing policy on staged Go changes (the repo's
+NO-NEW-UNIT-TESTS policy — see docs/workflows/e2e-testing.md).
+
+**Triggers on:** Staged Go files under `internal/`, `pkg/`, or `cmd/` (and any
+new package directory under those trees)
+
+**Checks:**
+- **Affected-suite gate**: maps staged paths through `e2e/manifest.json`
+  `path_map` and runs the affected hermetic e2e suites
+  (`scripts/e2e-affected.sh`). Suites whose dirs don't exist yet (manifest
+  status `todo`) are reported and skipped; the smoke suite runs as fallback
+  whenever feature Go files are staged with no hit or with only-pending hits.
+  Any failing suite FAILS the commit.
+- **New-feature coverage rule**: a staged change creating files under a NEW
+  package directory (no `path_map` entry) FAILS with instructions to add an
+  e2e suite + manifest entry, unless e2e suite files are staged in the same
+  commit. Exempt: `_test.go`, docs, generated files, the e2e tree itself.
+
+**Skip (emergencies only — prints a loud warning):**
+```bash
+MEEPT_SKIP_E2E=1 git commit -m "..."
+```
+
+**See:** docs/workflows/e2e-testing.md, scripts/e2e-affected.sh, e2e/manifest.json
 
 ---
 

@@ -2,6 +2,21 @@
 
 Guidance for AI coding agents working in this repository.
 
+**Before touching code in a package, read its invariant doc** — the root file keeps only
+summaries; the full contracts live next to the code:
+
+```
+internal/llm/     -> internal/llm/AGENTS.md     (quota blocks, refusals, alias resolution)
+internal/daemon/  -> internal/daemon/AGENTS.md  (runtime lifecycle, spawn guards)
+internal/agent/   -> internal/agent/AGENTS.md   (chat contracts, output filters, session IDs)
+internal/comm/    -> internal/comm/AGENTS.md    (WS classification, bus topics)
+docs/agents/      -> coding-practices.md | opt-in-defaults.md | projects-and-workdirs.md
+```
+
+Hermes merges every AGENTS.md on the directory chain from git root to cwd, so the
+per-package files load automatically when working inside that directory. Update a rule
+and its summary (or its doc) in the same commit.
+
 **This file must be reviewed and validated for completeness and correctness on
 every commit.** If a commit adds, removes, or renames a package, changes a build
 command, introduces a new convention, or invalidates any statement below, update
@@ -178,454 +193,71 @@ before reading source.
 
 ### Chat replies must be honest and user-shaped
 
-The chat path (sync dispatch and task-completion events) is the user's
-only window into the daemon. These contracts were added after the
-2026-09-04 naive-user comparison (docs/plans/chat-dispatch-ux/) and
-are guarded by `scripts/e2e-naive-user-chat.sh`:
+The chat path is the user's only window into the daemon. Full contracts (async turns,
+errored steps, per-session working dirs, no global active-project fallback,
+machine-shaped-output guard) live in `internal/agent/AGENTS.md`. Short form: turns are
+async, errored steps never pass review, and projects bind PER SESSION with no global
+fallback. `session_id` and `conversation_id` are distinct; new code handles both.
 
-- **Turns are asynchronous; acks are immediate.** chat.submit acks a turn
-  in milliseconds (turn_id + conversation_id); the result arrives via the
-  turn.terminal bus event (Plan: docs/plans/20260916-async-turn-migration).
-  The blocking `chat` RPC is a legacy opt-in (`orchestrator.
-  sync_chat_enabled=true`, default false): task-dispatched turns then
-  block up to the 110s sync-wait ceiling and may return the "still
-  running" stub — `waitForTaskCompletion` (internal/agent/handler.go)
-  returns the terminal step's `Result`, never the stub except when every
-  step result is empty or the store errors. Under the default, no path
-  can return the stub. Stalled async turns are reaped by the turn
-  watchdog and surface as failed terminal events.
-- **Errored steps never pass review.** `ReviewStep` gates on
-  `stepHasError` before every policy path; a task with any failed step
-  finalizes `StateFailed` and its `task.completed` payload carries
-  `"status": "failed"` plus the error text as `result`.
-- **Step jobs run in the session's directory.** `resolveStepWorkingDir`
-  resolves WorktreePath > ProjectPath > session `DetectionContext.CWD`
-  > "". Never fall back to the daemon's CWD (see also the os.Getwd
-  rule above).
-- **Chat turns always resolve a working directory.** `session.ResolveWorkingDir`
-  (internal/session/working_dir.go) is the single precedence for the
-  session-bound sources — `WorktreePath > ProjectPath > DetectionContext.CWD`
-  — and the chat path binds it at turn start in `ChatHandler.sessionLoop`,
-  then falls to the configured default (`daemon.default_working_dir` via
-  `SetDefaultWorkingDir`, unset today) and finally to the actionable
-  `tools.ErrNoWorkingDir`.
-- **Projects are scoped PER SESSION; there is NO global active-project
-  fallback.** A session resolves its OWN binding only. `ProjectManager.GetActive`
-  is never consulted at turn start or at dispatch — the
-  `SetActiveProjectPathResolver` seam and the `WorkingDirFromActiveProject`
-  source were REMOVED, not merely left unset. Every session carries its own
-  project: session creation (both the services path and the RPC
-  `session.create` path) binds the explicit `project_id`, else the client
-  CWD (resolved into a project by `CreateOrResolve`), else leaves the
-  session UNBOUND; an unbound session is logged at Warn and its filesystem
-  tools return `tools.ErrNoWorkingDir`
-  ("no working directory for this session; pass an explicit path") — a
-  detectable sentinel (`tools.IsNoWorkingDir`), never the bare
-  `no path specified` that made the model retry until the cycle guard
-  aborted the turn (fresh-rig daemon11, 2026-09-13). Never synthesize a
-  project (`EnsureDefault` is not for session binding) and never use the
-  daemon's own CWD. The client detection context is PERSISTED
-  (`detection_context` column; `Store.SetDetectionContext`) so a session
-  created with `meept session create --cwd DIR` still resolves DIR at turn
-  time after a daemon restart, from the store alone.
-- **Machine-shaped output never becomes a reply.** `RunOnceWithParts`
-  applies `applyReplyGuard` — raw `platform_*` tool dumps, agent
-  rosters, and status JSON are replaced with user-language fallbacks.
-- **Quota failures surface to the user.** Terminal
-  `*llm.QuotaResetError` in a step job publishes the existing
-  `agent.quota_wait` event and appends a user-language quota sentence
-  to the stored step Result. Quota is still never an alias failure and
-  never re-queued through the tactical retry gate.
+### Projects, working dirs, and trust boundaries
 
-### session_id vs conversation_id
+Full rules live in `docs/agents/projects-and-workdirs.md`. Short form: never use
+`os.Getwd()` as a fallback in `internal/`/`pkg/` daemon code; projects bind PER
+SESSION with no global active-project fallback; `multiuser.enabled=false` preserves
+the legacy flat-key HTTP path byte-identically; Unix RPC stays owner-trusted (no
+token auth on the socket).
 
-`session_id` (primary key, e.g. `session-abc123`) and `conversation_id`
-(internal, e.g. `conv-xyz789`) are distinct identifiers. The Flutter client
-sends `session_id` as `conversation_id` in chat requests. WS subscriptions use
-`session_id`. Bus events carry `conversation_id`. New event/filter/routing code
-MUST handle both. The WS filter in `internal/comm/http/server.go` falls back
-from `session_id` to `conversation_id` — preserve this.
+### WS event classification and bus topics
 
-### Output-filter gate order and retry caps
-
-The post-step pipeline order is FROZEN: result → claim-vs-evidence marking →
-output filter chain → evidence validation → ReviewStep → adversarial
-verification — it never swaps (docs/workflows/output-filters.md). Filter
-rejections consume `FilterRetryCount` (cap `max_filter_retries`) and never
-validation retries, and vice versa. Every filter action logs
-`stage=output_filter` with `action=pass|rewrite|fail|rejected_exhausted`.
-
-### Multi-user is opt-in; RPC stays owner-trusted
-
-`multiuser.enabled` (default **false**) gates per-user key auth. When off:
-the daemon never constructs `internal/auth.Store`, HTTP auth uses the legacy
-flat-key path byte-identically, and sessions have no owner — every visible
-session belongs to everyone. Code touching auth, session ownership, or
-identity MUST preserve the disabled-path behavior exactly.
-
-Two trust boundaries, never mix them:
-
-- **HTTP/WS** (`transport.http`): bearer-key identity. In multi-user mode,
-  keys map to `*auth.Identity` via `IdentityFromContext`; expired/unknown
-  keys get 418. Sessions created through it are owner-scoped.
-- **Unix RPC** (`transport.rpc`): kernel-enforced same-OS-user only (0600
-  socket, optional SO_PEERCRED/LOCAL_PEERCRED UID allowlist). It has NO
-  user identity by design — RPC callers act as the daemon owner. Do not add
-  token auth to the socket path and do not expose the socket over a network.
-
-Cluster user pooling syncs users over gossip events
-(`USERS_SYNC` in `internal/backup/usersync.go`); foreign users' lifecycle
-belongs to peer sync — local code must not delete them.
-
-### Daemon CWD is NOT the user's project
-
-The daemon process's working directory is wherever it was launched from (often
-the meept repo itself). It is NEVER the user's project directory.
-
-- **Never use `os.Getwd()` as a project/working-directory fallback** in daemon
-  code (`internal/`, `pkg/`). The CLI client (`cmd/meept/`) and TUI
-  (`internal/tui/`) may use `os.Getwd()` because they run in the user's shell.
-- Tools receive their working directory per-session via
-  `tools.ContextWithWorkingDir` or `SetWorkingDir`, not from the daemon's CWD.
-- `generate_image` / `generate_video` write under `media.output_dir`
-  (`~/.meept/media`) or a relative `output_path` resolved against the session
-  working dir. Never `os.Getwd()`.
-- Image and video models are `provider/id` entries in `models.json5` with
-  capability `image` or `video`. Slots: `image_model`, `video_model`. Do not
-  add a second provider catalog.
-- The `json_extract` tool runs a dedicated extraction model via the
-  `extract_model` slot (`provider/id` ref, typically a small local llama.cpp
-  endpoint such as `local-extract/lfm2-extract`). Empty slot = tool reports
-  not-configured; never fall back to the chat model.
-- Session creation binds PER SESSION: the explicit `project_id`, else the
-  client CWD resolved into a project by `CreateOrResolve`, else the session
-  stays UNBOUND. Never call `ProjectManager.GetActive()` for session binding
-  (no global active-project fallback) and never `EnsureDefault()` — it
-  creates a synthetic empty git repo.
-
-### WS event type classification
-
-`transformBusEventToWS` in `internal/comm/http/server.go` maps bus topics to
-frontend event types. Only the `chat_message` and `chat.message.received`
-topics produce `type: "chat_message"`. The `chat.response` topic is
-intentionally EXCLUDED from WS relay: it is an RPC reply consumed by
-ChatService for the HTTP response body, and relaying it would double-deliver
-the reply to HTTP+WS clients (Flutter GUI) — do not add it to the
-`chat_message` bucket. All other `chat.*` lifecycle topics (heartbeats,
-processing, worker events) produce `type: "agent_progress"`. The Flutter
-client creates a visible message bubble for every `chat_message` event —
-misclassified lifecycle events appear as blank messages.
-
-Quota events on `agent.quota_wait` MUST be classified as `agent_progress`, never
-`chat_message`. Classification derives from each payload's `WSClass()` marker
-(`internal/comm/wsclass`) where the payload is typed (currently
-`turn.terminal`/`TurnTerminalEvent`); all other topics classify through the
-legacy topic-prefix table in `transformBusEventToWS` (kept as a labeled
-fallback until every WS-visible topic is typed). Switch coverage is enforced
-by the `exhaustive` linter (`//exhaustive:enforce` on
-`wsclass.WSClass.String()`); a new `WSClass` constant without a covering case
-fails CI. `agent.quota_wait` is intentionally RAW (not a typed `Topic[T]`):
-it carries multiple payload shapes (`QuotaEvent`, `ParkTurnEvent`, and a
-job-level map payload), and consumers discriminate by class/reason keys.
-
-Future agents adding new bus topics: declare stable, single-shape topics as
-`bus.Topic[T]` vars beside their payload structs (see
-`internal/agent/topics.go`) and publish via `bus.PublishT` / subscribe via
-`bus.SubscribeT`. Give any WS-visible payload a `WSClass()` method.
-
-### Bus topics: typed when stable, raw when open-ended
-
-New bus topics with stable, single-shape payloads are declared as
-`bus.Topic[T]` vars beside their payload structs (`internal/agent/topics.go`
-is the worked example); publishers use `bus.PublishT` (or
-`bus.PublishBlockingT` for must-not-drop events), subscribers use
-`bus.SubscribeT`. The compiler then enforces publisher/subscriber payload
-agreement. Raw string `Publish`/`Subscribe` remains for: wildcard
-subscriptions, request/response bus patterns (`chat.request`/`chat.response`),
-and multi-shape/open-ended topics — `agent.quota_wait` carries `QuotaEvent`,
-`ParkTurnEvent`, and a job-level map payload and is deliberately raw. Do not
-wrap `map[string]any` in a `Topic[T]`; that is ceremony without a guarantee.
+Full rules live in `internal/comm/AGENTS.md`. Short form: only `chat_message` topics
+produce `type: "chat_message"` (everything else is `agent_progress`); `chat.response`
+is never WS-relayed; typed `bus.Topic[T]` for stable payloads, raw `Publish` for
+multi-shape; a bus proxy registration needs a live responder on both sides.
 
 ### Quota errors are not failures (quota-reset-resilience)
 
-The quota subsystem (`docs/workflows/quota-resilience.md`, plan in
-`docs/plans/quota-reset-resilience/`) has invariants that cross package
-boundaries:
+Full invariants live in `internal/llm/AGENTS.md` (quota blocks, endpoint cooldowns,
+refusals, alias resolution, universal parking, slot gate). Short form: a
+`*llm.QuotaResetError` is never an alias failure and never short-retried; check
+`ErrAllModelsQuotaBlocked` / `ErrAllEndpointsBlocked` with `errors.Is`.
 
-- **Quota is not a health failure.** A `*llm.QuotaResetError` must NEVER
-  reach `Resolver.RecordAliasFailure` — the agent loop's quota branch
-  (`internal/agent/loop.go`) tracks the episode, marks `BlockQuotaEntry` +
-  `BlockQuotaCredential`, and returns BEFORE the failure path. Quota blocks
-  live in separate Resolver state (`entryBlocks`/`credentialBlock` on
-  `AliasHealth`) and lazily clear only after expiry + a successful call.
-- **Never short-retry a quota error.** `QuotaResetError` implements
-  `NonRetryable`; every client retry loop (openai non-streaming/streaming,
-  openai streaming-delta, anthropic non-streaming/streaming) has an
-  explicit `errors.As` quota early-exit BEFORE the
-  `RateLimitError`/retryable-status checks. A new retry loop must
-  preserve this — a 429 quota window is hours, and the default
-  3-attempt loop would burn it.
-- **All-blocked is a distinct error.** When every alias candidate is
-  quota-blocked, the Resolver returns `ErrAllModelsQuotaBlocked` — never a
-  blocked model.
-- **Endpoint-level cooldown identity (tree 02 leaf 04, D10).** Timeout
-  cooldowns key on the base endpoint — `EndpointKey` = host + credential
-  fingerprint — and their state lives ON THE RESOLVER
-  (`Resolver.endpointBlocks`), never on `AliasHealth`: a timeout on
-  `openai/model-1` (medium alias) must also skip `openai/model-2`
-  (thinkhard alias), and per-alias state cannot deliver that cross-alias
-  shared fate. A throttled/timed-out model's endpoint is blocked for the
-  alias `timeout` base (30s default), cleared lazily after expiry + a
-  success (same single lazy-clear pattern as quota blocks). Alias-level
-  timeout blocks arm ONLY when the alias config declares `timeout:`
-  explicitly, and only on consistent same-member consecutive failure
-  (doubling capped at 4× base). When every candidate is endpoint- or
-  alias-blocked, the Resolver returns the DISTINCT
-  `ErrAllEndpointsBlocked` — check with `errors.Is`, never string
-  matching. Precedence: quota blocks > endpoint blocks > alias blocks.
-- **Refusal is not a failure.** A `*llm.RefusalError` must never reach
-  `Resolver.RecordAliasFailure`; the loop's refusal branch
-  (`internal/agent/loop_refusal.go`) re-dispatches once to the agent's
-  `refusal_model` (per-agent AGENT.md spec field, else the global
-  `models.json5` slot; default off) and surfaces the refusal if the
-  fallback also refuses. One hop only, never rotation.
-  `ProviderManager` treats refusals the same way: no `recordFailure`, no
-  rotation — it returns the refusal so the loop's one-hop policy owns it.
-  A refusal is not free: the provider-reported usage rides on
-  `RefusalError.Usage` and is ledgered before the refusal surfaces. The
-  fallback pin (persistent override + staged config) clears at the start
-  of the next fresh turn (`clearRefusalFreshTurnState`); the global
-  refusal_model slot propagates to session clones via
-  `ConfigSnapshot`/`WithGlobalRefusalModel` and to registry-built
-  specialists via `RegistryConfig.GlobalRefusalModel`.
-- **Alias selection is request-scoped; the ledger records the server.** The
-  Resolver is the only component that picks a model, and its decision travels
-  WITH the request via `llm.WithResolvedModel` (never by mutating shared
-  `ProviderManager`/`Client` state — the manager is shared by every session).
-  `ProviderManager` reorders the named provider first for that call only,
-  keeping the rest as failover tail; the serving client — OpenAI-compatible
-  `Client`, `AnthropicClient`, and `CodexClient` alike — uses the resolved
-  model id on the wire and in the `metrics.db` `llm_calls`
-  `provider`/`model_id`, so the ledger names the provider/model that actually
-  served the call, not the caller's configured default. Turns that resolve no
-  alias keep health/cost/priority ordering byte-identical.
-- **Model-selection precedence: user directive > alias resolution > default
-  ordering.** A user's reassignment directive (dispatcher / PrepareNextTurn
-  hook) travels its OWN request-scoped channel, `llm.WithModelOverride`, and
-  `llm.requestModelOverride` ranks the channels explicitly — the user
-  directive beats the alias resolution regardless of option-append order
-  (chatWithFailoverRaw appends the alias option AFTER caller opts; append
-  order must never decide precedence). With a `ProviderManager` chatter the
-  directive works per-request too: reasoningCycle stages the resolved config
-  (`pendingModelOverrideConfig`) and chatWithFailoverRaw stamps it onto the
-  call, and the one-shot override is cleared after that turn. Every client
-  type that observes a selection names the actually-serving provider/model in
-  the ledger.
-- **Deferral parks at the handler, mirroring budget.** `ChatHandler`
-  parks quota-interrupted turns in `QuotaResumeWatcher`
-  (`internal/agent/quota_resume.go`, the quota twin of
-  `BudgetResumeWatcher`/`ParkedTurn`) and auto-resumes them at
-  `min(unblockAt, now+MaxWait)`. Turn-level deferral is the wired
-  mechanism; task-checkpoint-level deferral is a documented deviation.
-- **State machine must stay reachable.** `agent.StateQuotaWait`
-  ("quota_wait") is a legal transition target from all active states and
-  Idle; the tracker drives it via `SetStateSetter` → `SafeTransition`.
-  Adding an AgentState without a transition-table entry makes it
-  unreachable (safe-by-default table rejects unknown states).
-- **Surfaces consume the event, not the RPC.** `agents.list`/`agents.get`
-  do not carry quota fields; TUI/GUI quota state arrives solely via
-  `agent.quota_wait` bus events (WS type `agent_progress`). Restarting a
-  client mid-episode shows base status until the next event.
-- **No turn hangs on a provider wait — universal parking (tree 03,
-  DECISIONS.md D9).** Every turn type (chat, goal-loop episode,
-  specialist agent, queue job) PARKS on a classified provider wait
-  instead of blocking or failing: the turn's re-entry data goes to the
-  ONE shared `agent.TurnParker`, the agent/model slot is released, and
-  the parker resumes the turn when the schedule allows. Throttle waits
-  REUSE the `quota_wait` state (`agent.StateQuotaWait`) — no
-  `StateThrottleWait` exists — with the reason payload
-  ("throttle_wait" / "throttle_resumed" / "throttle_give_up") and the
-  wait label ("quota_wait · throttle retry HH:MM") carrying the class.
-  A wait beyond MaxWait never parks: throttle surfaces
-  `ThrottleGiveUpError` (D8) and quota escalates to `blocked` at 24h.
-  Park/resume/give-up events ride the existing `agent.quota_wait` topic
-  (`agent.ParkTurnEvent` payloads with a `class` key) — never a new
-  topic prefix — so the WS `agent.quota` classification above keeps
-  every park event on `agent_progress`.
-- **Slot priority is a ChatOption, two tiers only (tree 04 leaf 03,
-  D11).** Model-concurrency slots are gated by `slotGate`
-  (`internal/llm/slot_gate.go`), not a raw channel: interactive chat
-  turns pass `llm.WithPriority(true)` and jump background waiters
-  (starvation-guarded: 3 interactive grants → 1 background). Priority
-  is request-scoped ordering ONLY — never serialized into payloads, and
-  never inferred from the queue job's `Interactive` flag (that flag is
-  queue-layer, stamped at enqueue; the slot gate reads the calling
-  turn). New client transports that honor `max_concurrency` must go
-  through `acquireConcurrencyLimit` so they inherit the two-lane
-  behavior.
+### Opt-in defaults and evolver wiring
 
-### Bus proxy registrations must have a live responder
-
-`internal/rpc/proxy.go makeProxy` publishes a request topic and waits on a
-response topic. Before adding a proxy registration, verify BOTH sides exist
-in source: a subscriber for the request topic AND a publisher that echoes
-`ReplyTo` on the response topic (see `internal/memory/handler.go` for the
-correct pattern). A proxy with no responder blocks the caller for the full
-timeout (10-30s) and then fails — worse than method-not-found. Prefer a
-direct `RegisterHandler` closure (the epistemic/memory_rpc/scheduler
-pattern). The generator's `ANNOTATED_ORPHANS` table
-(`scripts/gen-connectivity-graph.py`) suppresses topics with documented
-external-only paths (e.g. `dispatcher.stats` via the `bus.publish` RPC);
-add entries there instead of deleting intentional external surfaces.
-
-### Wiki and traces are evolver-only
-
-The skill knowledge stores (`internal/selfimprove` WikiStore + TraceStore,
-rooted at `skills.wiki.dir`) are inputs to the skill EVOLVER only. They must
-never be reachable from `ContextInjector`, `BuildSystemPrompt`, or any
-inference-path prompt builder (WikiSkill §5.1: giving the worker wiki access
-during evolution degrades final skill quality). Sampling constants
-(5 fail / 3 pass traces, 15k chars) live in code, not config.
-
-Every loop that serves user turns must be wired for trace persistence: the
-primary loop (components.go, `agent.WithTraceWriter`) AND every
-registry-created specialist loop (`AgentRegistry.SetTraceWriter`) — chat,
-coder, etc. turns all reach the store via `agent.NewTraceStoreWriter` +
-`traceStorePersist`. When adding a new loop construction path, wire these
-three (trace writer, usage tracker, learning pipeline) or the evolver
-blind spot grows.
-
-### State mode is per-skill opt-in
-
-`SKILL.state` execution (`internal/agent/skill_state.go`) activates only when
-BOTH the skill frontmatter declares `state: true` AND `skills.state.enabled`
-is true (default false). A skill declaring `state: true` with no runtime wired
-falls back to the conversation path. Never force state mode on audit, debug,
-or provenance tasks — for those, the history IS the deliverable (SKILL.state
-§7). The state Σ uses null-deletion semantics: explicit `null` deletes a key,
-a missing key leaves it unchanged.
-
-### Phase dispatch mode is per-config opt-in
-
-`plans.parallel_phases` (default false) preserves strict serial plan phases;
-when true, phase starts are frontier-driven (artifact + dependency gating;
-list order is a tiebreak only), conversationIDs stay phase-scoped
-(`phase-<phaseID>-<stepID>`), per-phase worktrees are provisioned via the
-orchestrator hook (leaf 03) and win in step working-dir resolution
-(`internal/daemon` `resolveStepWorkingDirFor`: phase worktree > session
-WorktreePath > ProjectPath > session CWD), and BudgetHierarchy phase
-selection is per-phase (multi-select). Subscribers to the phase-transition
-hook must tolerate `fromPhase == ""` (frontier activations have no completed
-predecessor). Flipping the default is a product decision, not a code cleanup.
-See docs/workflows/agent-orchestration.md (phase frontier section).
-
-### Skill evolver ordering: constructed after its dependencies
-
-The evolver requires `SkillUsageTracker`, `SkillWriter`, and `PlanManager`.
-It is constructed by `initializeSkillEvolver` (components_wiki.go), invoked
-from daemon.go AFTER the plan system initializes — NOT inside
-`initializeSkills`, which runs before those dependencies exist (the old
-inline gate was always false; found by the wiki smoke test, 2026-08-29).
-Keep this ordering if you refactor daemon startup.
-
-### Wiki/state defaults
-
-`skills.wiki` is enabled by default but inert until wired into the daemon
-(writes happen only via the learning pipeline + evolver paths);
-`skills.state.enabled` and `skills.evolver.enabled` default false. Flipping
-these defaults is a product decision, not a code cleanup.
-
-### Plan compiler pipeline is opt-in
-
-`plans.plan_compiler_enabled` (default false) gates the brainstorm
-draft→seal→compile planning pipeline. When false, the legacy JSON
-`spec_plan` path is byte-identical — no code may assume the draft store
-(`task.Metadata["plan_draft"]`) exists. When true, the draft IS the
-interview: the one-shot `task.interview` path stays only for the legacy
-pipeline. `plan.seal` and `plan.draft` are RPC-only, never a bus topic.
-See docs/workflows/agent-orchestration.md ("Plan compiler pipeline").
+Full rules live in `docs/agents/opt-in-defaults.md`. Short form: `skills.state`,
+`plans.parallel_phases`, and `plans.plan_compiler_enabled` are opt-in with default
+false; flipping a default is a product decision. Wiki/trace stores are evolver-only,
+never reachable from inference-path prompt builders; wire trace writer + usage
+tracker + learning pipeline on every new loop; construct the evolver after its
+dependencies in daemon startup.
 
 ### Local runtime lifecycle: spawn guards and orphan reaping
 
-Local LLM runtimes (`internal/llm`) are long-lived children of the daemon. Each
-rule below was added after a real leak; changing any of them requires a
-replacement mechanism, not just a deletion:
-
-- **No spawn into a served endpoint.** `RuntimeProcess.Start` probes the
-  endpoint address when `spawn_command` declares that port and refuses when
-  something already listens there. Keep the refusal: `mlx_lm server` does not
-  exit after a failed bind — it stays alive with the model loaded and no socket
-  while the foreign listener answers its `/health`, so the spawn "succeeds" as a
-  healthy-looking runtime that serves nothing. The check applies only to a spawn
-  command that declares the port, so wrappers and test harnesses are unaffected.
-- **Health requires a live process, and the run outlives its caller.**
-  `HealthChecker.SetProcessAliveProbe` binds each endpoint's checker to its own
-  `RuntimeProcess`; a dead child is unhealthy whatever the endpoint returns. The
-  check run detaches from the caller's context and re-arms whenever no run is
-  active: every caller passes a short-lived context (the daemon cancels its boot
-  context when `StartAll` returns), so binding the run to it silently ended
-  health monitoring seconds after boot.
-- **Ownership forbids killing; the sweep permits it.**
-  `RuntimeProcess.Stop` never stops a runtime whose PID file carries another
-  instance's token (adopted observed-not-owned — that guard is what keeps a CLI
-  or eval process from killing the daemon's server) and returns
-  `ErrRuntimeNotOwned`, so no surface reports a stop that did not happen.
-  `StopAsOperator` is the explicit operator override used by
-  `meept runtime stop`, and it verifies the pid's identity before signalling.
-  The startup sweep (`RuntimeManager.SweepOrphanRuntimes`, driven by
-  `Daemon.StartupOrphanSweep`) is the only path that reaps a leftover, and only
-  when all hold: `ppid == 1` (spawner gone), the command line matches the
-  endpoint's `spawn_command` or its durable spawn record, the endpoint is
-  sweepable under `auto_stop_on_exit` (absent means true), and no live recorded
-  owner vetoes it. Every pid is re-validated against the process table
-  immediately before it is signalled. Do not widen the sweep to untagged or
-  unrelated processes.
-- **Sweep before spawn.** `StartupOrphanSweep` runs after components exist and
-  before `ContainerManager.StartAll`. Moving it later makes the duplicate-spawn
-  guard refuse the spawn of the endpoint the sweep has not freed yet.
-
-**Termination is two-sided; only one side is automatic.** Graceful shutdown
-stops owned runtimes: `Daemon.Stop` calls `ContainerManager.StopAll(ctx)`
-(`internal/daemon/daemon.go:1904`), which stops every endpoint whose
-`auto_stop_on_exit` is true. SIGINT/SIGTERM therefore leaves no children
-behind - verified 2026-09-12, killing a scratch daemon took its `mlx_lm` and
-`llama-server` children down with it.
-
-**Classifier runtime health gates startup (F-D8).** With
-`orchestrator.classifier_boot_fail_fast` true (the default), the daemon —
-after `ContainerManager.StartAll` launches in `Run` — waits for every LOCAL
-SPAWNED runtime in the classifier chain (models.json5 `classifier_model` /
-`classifier` alias members whose provider carries a lifecycle block on a
-loopback baseURL) to answer `/health` within its configured window
-(spawn timeout + unhealthy_threshold x interval). A local classifier still
-unhealthy after the window is a platform failure: the gate logs an ERROR
-naming endpoint, model path and spawn command, shuts down cleanly, and `Run`
-returns the fatal error so `meept-daemon` exits non-zero. Cloud-only chains
-and `classifier_boot_fail_fast: false` skip the gate. Keep the gate AFTER the
-StartAll goroutine: StartAll arms the health checkers, and a checker that
-was never started never reports healthy.
-
-A hard kill no longer leaks. Each runtime is spawned under a supervisor (the
-daemon binary in a hidden mode, `meept-daemon --supervise-parent <pid> -- <argv>`)
-that kills the runtime's process group - SIGTERM, then SIGKILL after 10s - once
-its parent disappears, and exits with the runtime. macOS has no parent-death
-signal, so the supervisor uses a parent-death pipe plus a 2s pid poll. The
-runtime keeps its original argv and pid: the sweep's command-line match and the
-pid-file ownership token still identify it, never the wrapper. Per-endpoint
-escape hatch: `supervise: false`. Cleanup after a hard kill, in order:
-
-1. `kill <daemon-pid>` first (graceful) and re-check; do not kill children of
-   a live daemon, its restart policy respawns them.
-2. `pgrep -fl "llama-server|mlx_lm"` and
-   `lsof -nP -iTCP:<port> -sTCP:LISTEN` to find what survived.
-3. Kill each leftover child explicitly and confirm the port is free.
-
-The boot sweep (`StartupOrphanSweep`) remains the backstop: it reaps what
-self-termination cannot - a runtime whose supervisor was itself SIGKILLed, and
-anything left by an older build. Windows has no `ps`, so it gets no sweep
-(documented gap).
+Full rules live in `internal/daemon/AGENTS.md`. Short form: runtimes are long-lived
+daemon children — never spawn into a served endpoint, never kill another instance's
+runtime, only `StartupOrphanSweep` reaps orphans, sweep before spawn, and a local
+classifier that never becomes healthy fails startup (F-D8).
 
 ## Coding Practices
+
+### e2e Testing Policy
+
+**All new feature tests go in the hermetic e2e tier — no new unit test files
+for new features.** Existing unit tests may be updated for bug fixes only.
+
+- Suites: `e2e/suites/<name>/` with the `e2e` build tag; manifest +
+  path→suite mapping in `e2e/manifest.json`. See
+  `docs/workflows/e2e-testing.md` for tiers, manifest format, and the
+  coverage rule.
+- `make e2e-fast` (all suites), `make e2e-fast-area AREA=<name>` (one suite),
+  `make e2e-affected` (suites affected by the working diff, via
+  `scripts/e2e-affected.sh`). The fast tier is hermetic and runs in CI;
+  `make e2e-chat` is the live-model tier, local-only.
+- Enforcement: pre-commit check [18/18] (`pre-commit-e2e`) runs the affected
+  suites on staged `internal/|pkg/|cmd/` Go changes and blocks commits that
+  add files under a NEW package directory without an e2e suite + manifest
+  entry. Emergency-only bypass: `MEEPT_SKIP_E2E=1 git commit` (prints a loud
+  warning). When you add a package, add its `path_map` entry + suite to the
+  manifest in the same commit.
 
 ### Predictable ID Prevention
 
@@ -671,81 +303,14 @@ if the PR explicitly notes which interfaces are deferred and why.
 - Files only in `internal/` with no changes to `cmd/`, `internal/tui/`, `ui/`,
   or `internal/comm/http/`
 
-### Typed-nil interface guard
+### Typed-nil guards, setters, mutex scope, error handling, clean fixes
 
-Nil `*ConcreteType` assigned to an interface produces a non-nil interface that
-panics on method calls. Guard at call sites and in `With*` functions:
-
-```go
-if tokenCache != nil {
-    opts = append(opts, WithTokenCache(tokenCache))
-}
-```
-
-### Setter methods
-
-Every `Set*` method MUST include a nil guard. Verified by
-`internal/tools/builtin/setters_test.go`:
-
-```go
-func (t *SomeTool) SetFenceChecker(fc FenceChecker) {
-    if fc != nil {
-        t.fenceChecker = fc
-    }
-}
-```
-
-### Mutex scope
-
-Never hold a mutex across I/O operations. Use "collect under lock, release,
-then operate":
-
-```go
-mu.Lock()
-cfg := m.config  // snapshot
-mu.Unlock()
-result, err := doNetworkCall(ctx, cfg)  // I/O outside lock
-```
-
-When the collect-then-operate pattern spans an IIFE or closure boundary, the
-`mutexio` static analyzer cannot see the scope separation and will flag it as
-a false positive. Suppress with a `//nolint:mutexio` directive that explains
-why the call is outside the lock scope:
-
-```go
-var stale *Resource
-func() {
-    mu.Lock()
-    defer mu.Unlock()
-    stale = m.resource  // collect under lock
-    delete(m.resources, id)
-}()
-
-// Lock released by IIFE above; safe to do I/O here.
-if stale != nil {
-    stale.Close() //nolint:mutexio // collected outside IIFE lock scope
-}
-```
-
-### Error handling
-
-Pre-commit hooks block commits that introduce new `_ = someFunc()` ignored-error
-sites or bare `panic(err)`. Always handle errors:
-
-```go
-if err != nil {
-    return fmt.Errorf("context: %w", err)
-}
-```
-
-Type assertions on `map[string]any` values (common in bus payloads) must use
-the two-value form:
-
-```go
-if convID, ok := payload["conversation_id"].(string); ok {
-    // use convID
-}
-```
+Full rules with code examples live in `docs/agents/coding-practices.md`. Short form:
+guard typed-nil interface assignments; every `Set*` needs a nil guard (enforced by
+`internal/tools/builtin/setters_test.go`); never hold a mutex across I/O; no ignored
+errors or bare `panic(err)` (pre-commit enforced); two-value map assertions; prefer
+clean architectural fixes over workarounds — never ship a workaround as the final
+solution without user approval.
 
 ### Surface Unacted Observations
 
@@ -938,6 +503,10 @@ Before committing, verify:
 4. **Analyzers/scripts** — new static analyzers or audit scripts are listed.
 5. **Conventions** — new coding conventions discovered during the change are
    captured.
+6. **Invariant docs** — a rule whose full text lives in a package
+   `AGENTS.md` (`internal/{llm,daemon,agent,comm}/AGENTS.md`) or a
+   `docs/agents/*.md` doc was updated in the same commit as its summary
+   here.
 
 If any item is stale, fix it in the same commit. Do not defer AGENTS.md
 updates to a follow-up.

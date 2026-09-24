@@ -1332,7 +1332,9 @@ e2e-chat:
 # fake LLM — never touches ~/.meept or the live daemon.
 #   make e2e-fast                  # all suites
 #   make e2e-fast-area AREA=smoke  # one suite dir (e2e/suites/<AREA>)
-.PHONY: e2e-fast e2e-fast-area
+#   make e2e-affected              # only suites affected by the working diff
+#                                  # (scripts/e2e-affected.sh --from-diff)
+.PHONY: e2e-fast e2e-fast-area e2e-affected
 e2e-fast:
 	go test -tags e2e ./e2e/... -p 2
 
@@ -1342,3 +1344,6 @@ e2e-fast-area:
 		exit 2; \
 	fi
 	go test -tags e2e ./e2e/suites/$(AREA)/... -p 2
+
+e2e-affected:
+	bash scripts/e2e-affected.sh --from-diff

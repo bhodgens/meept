@@ -213,3 +213,21 @@ jobs:
         with:
           files: ./coverage.out
           fail_ci_if_error: false
+
+  e2e-fast:
+    runs-on: ubuntu-latest
+    name: E2E Fast (hermetic)
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      # Hermetic Go e2e suites (e2e/): fresh binaries, sandboxed HOME/
+      # MEEPT_HOME, fake LLM — no live daemon, no live model, no secrets.
+      # The live-model tier (make e2e-chat) stays local-only by design.
+      - name: Run hermetic e2e suites
+        run: make e2e-fast

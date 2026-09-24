@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+#
+# pre-commit-e2e — enforce the e2e testing policy on staged Go changes.
+#
+# Two failure modes (fail-closed):
+#
+#   1. Affected-suite gate: staged Go paths under internal/, pkg/, or cmd/
+#      are mapped through e2e/manifest.json path_map and the affected
+#      hermetic e2e suites are run (scripts/e2e-affected.sh). Any failing
+#      suite FAILS the commit.
+#
+#   2. New-feature coverage rule: a staged change that creates files under a
+#      NEW package directory (a directory with no path_map entry) FAILS with
+#      instructions to add e2e coverage + a manifest entry, unless e2e suite
+#      files are staged in the same commit or the files are exempt
+#      (_test.go, docs, generated).
+#
+# This is the repo's NO-NEW-UNIT-TESTS policy enforcement point: all new
+# feature tests go in the e2e tier (see docs/workflows/e2e-testing.md).
+#
+# Escape hatch (emergencies only — prints a loud warning, stays in the
+# transcript):
+#   MEEPT_SKIP_E2E=1 git commit ...
+#
+# Exempt paths (never trigger either mode): _test.go files, docs/,
+# e2e/ harness+manifest itself, generated dirs, ui/, tools/, magefiles/.
+
+set -u -o pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+AFFECTED_SCRIPT="scripts/e2e-affected.sh"
+
+# Staged paths (index, not worktree) — added/copied/modified/renamed.
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+if [ -z "$STAGED" ]; then
+    echo "pre-commit-e2e: no staged changes — nothing to check."
+    exit 0
+fi
+
+if [ "${MEEPT_SKIP_E2E:-0}" = "1" ]; then
+    echo ""
+    echo "============================================================"
+    echo "  !!! E2E ENFORCEMENT SKIPPED — MEEPT_SKIP_E2E=1 !!!"
+    echo "  The affected-suite gate and new-feature coverage rule"
+    echo "  were NOT run for this commit. This is an escape hatch:"
+    echo "  use it for emergencies only and follow up with a commit"
+    echo "  that runs the affected suites."
+    echo "============================================================"
+    echo ""
+    exit 0
+fi
+
+TMP="$(mktemp "${TMPDIR:-/tmp}/pre-commit-e2e.XXXXXX")"
+trap 'rm -f "$TMP"' EXIT
+printf '%s\n' "$STAGED" > "$TMP"
+
+is_exempt() {
+    case "$1" in
+        *_test.go)                   return 0 ;;
+        docs/*|*.md)                 return 0 ;;
+        e2e/manifest.json|e2e/harness/*|e2e/suites/*) return 0 ;;
+        */generated/*|docs/generated/*) return 0 ;;
+        ui/*|tools/*|magefiles/*|scripts/*|config/*|theme/*) return 0 ;;
+        *)                           return 1 ;;
+    esac
+}
+
+# --- Mode 2 first: new-feature coverage rule ------------------------------
+
+new_pkg_fail=""
+suite_files_staged=0
+
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+
+    case "$f" in
+        e2e/suites/*) suite_files_staged=1 ;;
+    esac
+
+    is_exempt "$f" && continue
+
+    # Only .go files under the feature trees can open a new package dir.
+    case "$f" in
+        *.go) ;;
+        *) continue ;;
+    esac
+    case "$f" in
+        internal/*|pkg/*|cmd/*) ;;
+        *) continue ;;
+    esac
+
+    # The staged path's package directory.
+    pkg_dir="$(dirname "$f")"
+
+    # NEW = the directory is not a prefix key in the manifest path_map and
+    # is not itself an existing e2e suite dir.
+    known="$(python3 - e2e/manifest.json "$pkg_dir" <<'PYEOF'
+import json, sys
+manifest = json.load(open(sys.argv[1]))
+pkg = sys.argv[2]
+if any(pkg == p or p.startswith(pkg + "/") for p in manifest.get("path_map", {})):
+    print("known")
+else:
+    print("new")
+PYEOF
+)"
+    if [ "$known" = "new" ]; then
+        new_pkg_fail="$new_pkg_fail$f"
+    fi
+done < "$TMP"
+
+if [ "$suite_files_staged" = "1" ]; then
+    new_pkg_fail=""
+fi
+
+if [ -n "$new_pkg_fail" ]; then
+    echo ""
+    echo "❌ pre-commit-e2e: NEW package directory staged without e2e coverage"
+    echo ""
+    echo "These files live under a package directory that has no entry in"
+    echo "e2e/manifest.json path_map, and no e2e suite files are staged:"
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        echo "  - $f"
+    done <<EOF
+$new_pkg_fail
+EOF
+    echo ""
+    echo "Repo policy (docs/workflows/e2e-testing.md): new feature tests go"
+    echo "in the hermetic e2e tier — NOT as new unit-test files."
+    echo ""
+    echo "To fix:"
+    echo "  1. Create an e2e suite dir e2e/suites/<your-suite>/ with tests"
+    echo "     (build tag 'e2e'; see e2e/suites/smoke/ for the pattern)."
+    echo "  2. Add a path_map entry and a suites[] row for it in"
+    echo "     e2e/manifest.json."
+    echo "  3. Stage both, then re-commit."
+    echo ""
+    exit 1
+fi
+
+# --- Mode 1: affected-suite gate ------------------------------------------
+
+# Mode 1 only applies to Go files under internal/, pkg/, cmd/.
+feature_go=0
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+        *.go) ;;
+        *) continue ;;
+    esac
+    case "$f" in
+        internal/*|pkg/*|cmd/*) feature_go=1 ;;
+    esac
+done < "$TMP"
+
+if [ "$feature_go" = "1" ]; then
+    echo "pre-commit-e2e: running affected hermetic e2e suites on staged paths..."
+    # Hand the staged paths straight to the affected script (it reads stdin
+    # when no args are given). Any failing suite fails the commit.
+    if ! "$REPO_ROOT/$AFFECTED_SCRIPT" < "$TMP"; then
+        echo ""
+        echo "❌ pre-commit-e2e: affected e2e suite(s) FAILED — commit blocked."
+        echo "   Fix the failing suite, or stage fixes alongside this change."
+        echo "   Emergency-only bypass: MEEPT_SKIP_E2E=1 git commit"
+        echo ""
+        exit 1
+    fi
+else
+    echo "pre-commit-e2e: no feature Go files staged — suite gate not applicable."
+fi
+
+echo "pre-commit-e2e: OK"
+exit 0

@@ -19,6 +19,7 @@
 # 15. Feature documentation (code changes)
 # 16. Non-English character check (CJK/Hangul/fullwidth in staged text files)
 # 17. Dart formatting (staged ui/flutter_ui Dart files)
+# 18. e2e enforcement (affected suites + new-feature coverage rule)
 #
 # Requires bash >= 4 (macOS /bin/bash is 3.2): sub-hooks carry
 # /opt/homebrew/bin/bash shebangs.
@@ -36,72 +37,76 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # 1. go build (catches compile errors before anything else runs)
-echo -e "\e[34m[1/17]\e[0m Building staged packages..."
+echo -e "\e[34m[1/18]\e[0m Building staged packages..."
 "$SCRIPT_DIR/pre-commit-build"
 
 # 2. Deferred item check (findings docs have resolution plans)
-echo -e "\e[34m[2/17]\e[0m Running deferred item validation..."
+echo -e "\e[34m[2/18]\e[0m Running deferred item validation..."
 "$SCRIPT_DIR/pre-commit-deferred" || exit 1
 
 # 3. Mutex I/O analyzer (CLAUDE.md rule: no I/O under lock)
-echo -e "\e[34m[3/17]\e[0m Running mutex I/O analyzer..."
+echo -e "\e[34m[3/18]\e[0m Running mutex I/O analyzer..."
 "$SCRIPT_DIR/pre-commit-mutexio" || exit 1
 
 # 4. Staticcheck U1000 (unused code detection)
-echo -e "\e[34m[4/17]\e[0m Running unused code check..."
+echo -e "\e[34m[4/18]\e[0m Running unused code check..."
 "$SCRIPT_DIR/pre-commit-u1000" || exit 1
 
 # 5. go vet (common Go bugs)
-echo -e "\e[34m[5/17]\e[0m Running go vet..."
+echo -e "\e[34m[5/18]\e[0m Running go vet..."
 "$SCRIPT_DIR/pre-commit-vet" || exit 1
 
 # 6. Setter nil-safety (typed-nil interface guard)
-echo -e "\e[34m[6/17]\e[0m Verifying setter nil-safety..."
+echo -e "\e[34m[6/18]\e[0m Verifying setter nil-safety..."
 "$SCRIPT_DIR/pre-commit-setters"
 
 # 7. Selflock analyzer (self-deadlocking locks)
-echo -e "\e[34m[7/17]\e[0m Checking for self-deadlocking locks..."
+echo -e "\e[34m[7/18]\e[0m Checking for self-deadlocking locks..."
 "$SCRIPT_DIR/pre-commit-selflock" || exit 1
 
 # 8. gosec security scan (if installed)
-echo -e "\e[34m[8/17]\e[0m Running security scan..."
+echo -e "\e[34m[8/18]\e[0m Running security scan..."
 "$SCRIPT_DIR/pre-commit-gosec" || exit 1
 
 # 9. Error handling patterns
-echo -e "\e[34m[9/17]\e[0m Checking error handling patterns..."
+echo -e "\e[34m[9/18]\e[0m Checking error handling patterns..."
 "$SCRIPT_DIR/pre-commit-errors" || exit 1
 
 # 10. Predictable ID detection (use pkg/id.Generate, not time.Now().UnixNano())
-echo -e "\e[34m[10/17]\e[0m Checking for predictable ID generation..."
+echo -e "\e[34m[10/18]\e[0m Checking for predictable ID generation..."
 "$SCRIPT_DIR/pre-commit-predictable-ids" || exit 1
 
 # 11. SQLite pragma check (WAL + busy_timeout required)
-echo -e "\e[34m[11/17]\e[0m Checking SQLite pragma compliance..."
+echo -e "\e[34m[11/18]\e[0m Checking SQLite pragma compliance..."
 "$SCRIPT_DIR/pre-commit-sqlite-pragmas" || exit 1
 
 # 12. Channel close-then-nil detection (use sync.Once instead)
-echo -e "\e[34m[12/17]\e[0m Checking for close-then-nil channel pattern..."
+echo -e "\e[34m[12/18]\e[0m Checking for close-then-nil channel pattern..."
 "$SCRIPT_DIR/pre-commit-channel-nilafterclose" || exit 1
 
 # 13. Concurrency annotations (informational, does not block)
-echo -e "\e[34m[13/17]\e[0m Checking concurrency annotations..."
+echo -e "\e[34m[13/18]\e[0m Checking concurrency annotations..."
 "$SCRIPT_DIR/pre-commit-concurrency" || true
 
 # 14. Mutation testing (report only, does not block)
-echo -e "\e[34m[14/17]\e[0m Checking mutation test coverage..."
+echo -e "\e[34m[14/18]\e[0m Checking mutation test coverage..."
 "$SCRIPT_DIR/pre-commit-mutation" || true
 
 # 15. Feature documentation check
-echo -e "\e[34m[15/17]\e[0m Verifying feature documentation..."
+echo -e "\e[34m[15/18]\e[0m Verifying feature documentation..."
 "$SCRIPT_DIR/pre-commit-feature-docs" || exit 1
 
 # 16. Non-English character check (CJK/Hangul/fullwidth in staged text files)
-echo -e "\e[34m[16/17]\e[0m Checking for non-English characters..."
+echo -e "\e[34m[16/18]\e[0m Checking for non-English characters..."
 "$SCRIPT_DIR/pre-commit-ascii" || exit 1
 
 # 17. Dart formatting check (staged ui/flutter_ui Dart files)
-echo -e "\e[34m[17/17]\e[0m Checking Dart formatting (ui/flutter_ui)..."
+echo -e "\e[34m[17/18]\e[0m Checking Dart formatting (ui/flutter_ui)..."
 "$SCRIPT_DIR/pre-commit-dart-format" || exit 1
+
+# 18. e2e enforcement (affected suites + new-feature coverage rule)
+echo -e "\e[34m[18/18]\e[0m Checking e2e coverage (affected suites)..."
+"$SCRIPT_DIR/pre-commit-e2e" || exit 1
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
