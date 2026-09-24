@@ -2882,6 +2882,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				InterviewAmbiguity: cfg.Orchestrator.InterviewAmbiguityThreshold,
 				TemplateLoader:     agent.NewDaemonPlannerTemplateLoader("config/prompts"),
 			})
+			// Tool-hint validation (issue #58 capability 3): gate the
+			// planner's tool_hint passthrough on the real tool registry.
+			// A hint the planner hallucinates (e.g. a fabricated tool name)
+			// previously routed nowhere useful; dropping it lets the
+			// executor's tool-hint table pick. Nil registry → validation
+			// stays off (legacy behavior).
+			if c.ToolRegistry != nil {
+				names := make(map[string]bool)
+				for _, n := range c.ToolRegistry.Names() {
+					names[n] = true
+				}
+				strategicPlanner.SetValidToolNames(names)
+			}
 
 			reviewManager := agent.NewReviewManager(agent.ReviewManagerConfig{
 				Registry:  c.AgentRegistry,
@@ -2897,6 +2910,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				Config:    agent.DefaultEscalationConfig(),
 				Planner:   strategicPlanner,
 				TaskStore: orchTaskStore,
+				// Failed-step errors feed the failure-aware replan
+				// context (issue #58 capability 2).
+				StepStore: stepStore,
 				Bus:       msgBus,
 				Logger:    logger.With("component", "escalation"),
 			})

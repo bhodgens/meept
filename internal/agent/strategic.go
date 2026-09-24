@@ -9,6 +9,7 @@ import (
 	"maps"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
@@ -34,6 +35,15 @@ var (
 	// single-step degradation or the honest failure — never the generic
 	// fallback steps.
 	ErrPlannerEmptyPlan = errors.New("planner returned empty plan")
+
+	// ErrPlannerParse wraps every parse-failure kind from parsePlanOutput
+	// ("no JSON found in planner output", "failed to parse plan JSON: ...")
+	// while excluding ErrPlannerEmptyPlan (which parses cleanly). The
+	// plan-repair retry (issue #58 capability 1) matches on this sentinel
+	// with errors.Is so a single repair pass fires only on malformed output —
+	// never on transport/agent failures from plannerLoop.RunOnce and never on
+	// the empty-plan degradation path.
+	ErrPlannerParse = errors.New("planner output failed to parse")
 )
 
 // errPlannerNoPlanNotArtifact is the honest-failure reason (issue #53
@@ -88,6 +98,12 @@ type PlanRequest struct {
 	// re-picking agents per step from the tool-hint table. Empty = no
 	// override; per-step selection proceeds.
 	AssignedAgent string `json:"assigned_agent,omitempty"`
+
+	// IsReplan marks a plan request produced by the escalation/replan path
+	// (ReplanFailedTask). Complexity evaluation (issue #58 capability 4)
+	// treats it as an explicit complexity signal: a task that already ran
+	// and failed once gets the richer Complex-tier planning treatment.
+	IsReplan bool `json:"is_replan,omitempty"`
 
 	// RequestModel carries the client's per-request model ref (chat.request
 	// "model"; week bughunt 2026-09-17 F18). Pre-fix it was dropped at
@@ -165,6 +181,13 @@ type StrategicPlanner struct {
 	maxStepsPerPhase      int
 	planPhaseSink         func(taskID string, phases []PlanPhaseSpec)
 	planCompilerEnabled   bool
+	// validToolNames, when non-empty, gates parsePlanOutput's tool_hint
+	// passthrough: hints outside the set are dropped (with a Warn) so the
+	// executor's tool-hint table picks instead. Empty/nil = legacy behavior
+	// (validation skipped). Guarded by validToolNamesMu; set via
+	// SetValidToolNames.
+	validToolNames   map[string]bool
+	validToolNamesMu sync.RWMutex
 	// interviewProbe, when non-nil, is invoked immediately before
 	// ConductInterview. Test seam only — lets the interview-gate test
 	// observe the call without an LLM.
@@ -275,6 +298,45 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 		sp.templateLoader.fallbacks["planner/decompose_spec.md"] = defaultDecomposeSpecFallback()
 	}
 	return sp
+}
+
+// SetValidToolNames installs the set of tool names the planner is allowed to
+// emit in step tool_hint fields (issue #58 capability 3). When the set is
+// non-empty, parsePlanOutput drops unknown hints (with a Warn) so the
+// executor's tool-hint table picks instead of routing on a hallucinated
+// hint; a nil or empty set skips validation entirely (legacy behavior).
+// Nil-guarded: a nil receiver or nil map is a no-op.
+func (sp *StrategicPlanner) SetValidToolNames(names map[string]bool) {
+	if sp == nil || names == nil {
+		return
+	}
+	sp.validToolNamesMu.Lock()
+	defer sp.validToolNamesMu.Unlock()
+	sp.validToolNames = maps.Clone(names)
+}
+
+// validateToolHint applies the valid-tool-name gate to a single planner-
+// emitted hint. Empty hints pass through unchanged (absence of a hint is not
+// an error), and an unset/empty valid set skips validation (legacy behavior).
+func (sp *StrategicPlanner) validateToolHint(taskID, hint string) string {
+	if hint == "" {
+		return ""
+	}
+	sp.validToolNamesMu.RLock()
+	valid := sp.validToolNames
+	sp.validToolNamesMu.RUnlock()
+	if len(valid) == 0 {
+		// Validation skipped: no valid-name set was wired.
+		return hint
+	}
+	if valid[hint] {
+		return hint
+	}
+	sp.logger.Warn("planner emitted unknown tool_hint",
+		"task_id", taskID,
+		"hint", hint,
+	)
+	return ""
 }
 
 // ConductInterview determines whether an interview is needed for the given plan
@@ -1040,6 +1102,23 @@ func (sp *StrategicPlanner) buildContextSection(req PlanRequest) string {
 func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
 	steps, err := sp.planSinglePhaseOnce(ctx, req)
 	if err != nil {
+		// Parse-repair retry (issue #58 capability 1): a malformed planner
+		// response gets exactly ONE re-ask with the parse error appended to
+		// the prompt. Only parse failures retry — transport/agent failures
+		// from plannerLoop.RunOnce (wrapped "planner failed") and the
+		// empty-plan sentinel (which parsed cleanly and takes the
+		// degradation paths below) never re-enter the planner.
+		if errors.Is(err, ErrPlannerParse) {
+			repairSteps, repairErr := sp.retryPlanWithRepairPrompt(ctx, req, err)
+			if repairErr == nil {
+				return repairSteps, nil
+			}
+			// One retry maximum: the second failure is final. Fall through
+			// with a wrapped error that carries the original parse failure
+			// so the legacy failure paths see what they expect.
+			err = fmt.Errorf("%w (plan-repair retry also failed: %v)", err, repairErr)
+			steps = nil
+		}
 		// Empty-plan guard (issue #53 direction 3): only the EMPTY-plan
 		// sentinel takes the deterministic-first paths. Other planner
 		// failures (malformed JSON, no JSON, planner down) keep the legacy
@@ -1076,8 +1155,51 @@ func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest
 	return steps, nil
 }
 
-// planSinglePhaseOnce is the pre-#53 planSinglePhase body, unchanged.
+// planSinglePhaseOnce renders the decompose prompt, runs the planner agent
+// once, and parses the output. The pre-#53 body's render/run/parse logic
+// now lives in runPlannerOnceWithPrompt (shared with the parse-repair
+// retry); with an empty extra section this path is byte-identical to it.
 func (sp *StrategicPlanner) planSinglePhaseOnce(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
+	return sp.runPlannerOnceWithPrompt(ctx, req, "")
+}
+
+// retryPlanWithRepairPrompt re-runs the planner once with the original prompt
+// plus a repair instruction carrying the parse failure (issue #58 capability
+// 1). It reuses planSinglePhaseOnce's prompt construction verbatim (same
+// template, context section, and session context) so the only delta is the
+// appended repair section.
+func (sp *StrategicPlanner) retryPlanWithRepairPrompt(ctx context.Context, req PlanRequest, parseErr error) ([]*task.TaskStep, error) {
+	sp.recordMetric("strategic_planner.plan_repair_retry", 1, map[string]string{
+		"intent":  req.Intent,
+		"outcome": "recovered",
+	})
+	sp.logger.Warn("Planner output failed to parse; retrying once with repair instruction",
+		"task_id", req.TaskID,
+		"error", parseErr,
+	)
+
+	steps, err := sp.runPlannerOnceWithPrompt(ctx, req, repairPromptSection(parseErr))
+	if err != nil {
+		sp.recordMetric("strategic_planner.plan_repair_retry", 1, map[string]string{
+			"intent":  req.Intent,
+			"outcome": "failed",
+		})
+		return nil, err
+	}
+	return steps, nil
+}
+
+// repairPromptSection builds the appended repair instruction. Unexported so
+// the pin test can assert the exact wording.
+func repairPromptSection(parseErr error) string {
+	return fmt.Sprintf("Your previous response failed to parse: %s. Respond again with ONLY the JSON plan object.", parseErr)
+}
+
+// runPlannerOnceWithPrompt is planSinglePhaseOnce's render-and-run body with
+// an optional extra prompt section appended after the session context. It
+// exists so the parse-repair retry re-enters the planner exactly once
+// without duplicating the template/context logic.
+func (sp *StrategicPlanner) runPlannerOnceWithPrompt(ctx context.Context, req PlanRequest, extraSection string) ([]*task.TaskStep, error) {
 	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
 	if err != nil {
 		return nil, fmt.Errorf("planner agent not available: %w", err)
@@ -1134,18 +1256,15 @@ func (sp *StrategicPlanner) planSinglePhaseOnce(ctx context.Context, req PlanReq
 		return nil, fmt.Errorf("render decompose template: %w", renderErr)
 	}
 
-	// Session execution context (quickplan-mode leaf 02 / master Contract
-	// 6): active plan + tracked tasks + prior waves, pre-rendered by the
-	// dispatcher, plus the one-way upgrade instruction. Quickplan only —
-	// other modes keep byte-identical prompts. The quickplan upgrade
-	// instruction is quickplan-only; non-quickplan modes that carry the
-	// bare digest block (PlanDigestContext, run-8 follow-up) must NOT get
-	// an upgrade nudge — their mode was already decided.
+	// Session execution context (same rules as planSinglePhaseOnce).
 	if req.SessionContext != "" {
 		prompt += "\n\n" + req.SessionContext
 		if req.Mode == "quick_plan" {
 			prompt += "\n" + quickPlanUpgradeInstruction
 		}
+	}
+	if extraSection != "" {
+		prompt += "\n\n" + extraSection
 	}
 
 	// Run with timeout
@@ -1185,12 +1304,12 @@ func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.Task
 	// Try to find JSON in the output (LLM might wrap it in markdown)
 	jsonStr := ExtractJSON(output)
 	if jsonStr == "" {
-		return nil, fmt.Errorf("no JSON found in planner output")
+		return nil, fmt.Errorf("%w: no JSON found in planner output", ErrPlannerParse)
 	}
 
 	var plan plannerOutput
 	if err := json.Unmarshal([]byte(jsonStr), &plan); err != nil {
-		return nil, fmt.Errorf("failed to parse plan JSON: %w", err)
+		return nil, fmt.Errorf("%w: failed to parse plan JSON: %w", ErrPlannerParse, err)
 	}
 
 	if len(plan.Steps) == 0 {
@@ -1209,7 +1328,7 @@ func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.Task
 	// First pass: create steps and collect IDs
 	for i, ps := range plan.Steps {
 		step := task.NewTaskStep(taskID, ps.Description, i)
-		step.ToolHint = ps.ToolHint
+		step.ToolHint = sp.validateToolHint(taskID, ps.ToolHint)
 		steps[i] = step
 		stepIDs[i] = step.ID
 	}
@@ -1622,12 +1741,25 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 
 	// Classify the existing steps into completed (successfully terminal)
 	// vs. uncompleted so the planner knows what's left to retry or finish.
+	// Failed steps additionally feed the failure-aware block below
+	// (issue #58 capability 2): the digest's first-line-only Failure line
+	// carries the shape of the failure but not the concrete tool/args/
+	// error text, so the planner kept re-emitting schema-invalid calls
+	// (e2e 2026-09-23 GiqWsG).
 	var completedDescs, remainingDescs []string
+	var failedSteps []stepFailure
 	for _, s := range completedSteps {
 		if s.State.IsSuccessfullyTerminal() {
 			completedDescs = append(completedDescs, s.Description)
-		} else {
-			remainingDescs = append(remainingDescs, s.Description)
+			continue
+		}
+		remainingDescs = append(remainingDescs, s.Description)
+		if s.State == task.StepFailed {
+			failedSteps = append(failedSteps, stepFailure{
+				Description: s.Description,
+				Agent:       s.AgentID,
+				Error:       s.Result,
+			})
 		}
 	}
 
@@ -1646,6 +1778,19 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 		TaskID: taskID,
 		Input:  replanDesc,
 		Intent: string(IntentPlan),
+		// Complexity signal (issue #58): a replan is never trivial — the
+		// first attempt already failed, so downstream routing must treat
+		// the request as at least TierStandard.
+		IsReplan: true,
+	}
+
+	// Failure-aware replan context (issue #58 capability 2): attach the
+	// concrete per-failed-step error block AFTER the digest content by
+	// reusing SessionContext — prompt templates already append this field,
+	// so no template changes are needed. Empty when no step failed (e.g.
+	// the escalation fired from a non-step failure signal).
+	if failureBlock := buildFailureBlock(failedSteps); failureBlock != "" {
+		req.SessionContext = failureBlock
 	}
 
 	return sp.Plan(ctx, req)
