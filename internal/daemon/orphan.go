@@ -82,15 +82,38 @@ func (d *Daemon) StartupOrphanSweep() {
 	// through the guarded stale-record path. Ages are read BEFORE the call
 	// because a reaped record's PID file is removed by it.
 	staleReaped := llm.SweepStaleSpawnRecords(records, llm.SpawnRecordStaleAfter, time.Now)
-	if len(staleReaped) > 0 {
-		ageOf := make(map[int]time.Duration, len(records))
-		for _, rec := range records {
+
+	// Scratch-rig records (2026-09-22 orphan audit): e2e/bench rigs run
+	// daemons with their own MEEPT_HOME under the OS temp dir, so a rig
+	// daemon that died hard left runtimes whose spawn records no
+	// production-home sweep could ever see. Scan those run dirs and run the
+	// SAME guarded stale-record path over them: a record is reaped only when
+	// its pid is alive, re-parented to init, command-line-identical to the
+	// record, and older than the stale bound. A live rig's daemons own their
+	// runtimes (ppid != 1) and young records are skipped by the age gate, so
+	// a rig mid-run is untouched by construction.
+	rigRecords, err := llm.CollectScratchRigSpawnRecords(scratchRigRunDirs())
+	if err != nil {
+		d.logger.Debug("daemon: scratch-rig record scan unavailable", "error", err)
+	}
+	if len(rigRecords) > 0 {
+		d.logger.Debug("daemon: orphan sweep considering scratch-rig spawn records", "records", len(rigRecords))
+	}
+	rigReaped := llm.SweepStaleSpawnRecords(rigRecords, llm.ScratchRecordStaleAfter, time.Now)
+
+	if len(staleReaped) > 0 || len(rigReaped) > 0 {
+		ageOf := make(map[int]time.Duration, len(records)+len(rigRecords))
+		for _, rec := range append(records, rigRecords...) {
 			if info, err := os.Stat(rec.PIDFile); err == nil {
 				ageOf[rec.PID] = time.Since(info.ModTime())
 			}
 		}
 		for _, pid := range staleReaped {
 			d.logger.Warn("daemon: reaped stale-record orphan runtime",
+				"pid", pid, "record_age", ageOf[pid])
+		}
+		for _, pid := range rigReaped {
+			d.logger.Warn("daemon: reaped scratch-rig orphan runtime",
 				"pid", pid, "record_age", ageOf[pid])
 		}
 	}

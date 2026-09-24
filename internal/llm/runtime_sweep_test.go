@@ -61,6 +61,33 @@ func TestMatchesSpawnCommand(t *testing.T) {
 			spawn:   nil,
 			want:    false,
 		},
+		{
+			// The prompt-router sidecar spawn is env VAR=... python3 script.py;
+			// env consumes its argv and execs python3, so ps shows only the
+			// exec'd form. Rule 2 must identify it by its final path token.
+			name:    "exec'd wrapper spawn matches by final path token",
+			command: "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/Python /Users/caimlas/git/meept/scripts/prompt_router_sidecar.py",
+			spawn:   []string{"/usr/bin/env", "ROUTER_LANES_FILE=/x/lanes.json", "python3", "/Users/caimlas/git/meept/scripts/prompt_router_sidecar.py"},
+			want:    true,
+		},
+		{
+			name:    "different script path is a different endpoint (rule 2)",
+			command: "Python /other/scripts/prompt_router_sidecar.py",
+			spawn:   []string{"/usr/bin/env", "A=B", "python3", "/Users/caimlas/git/meept/scripts/prompt_router_sidecar.py"},
+			want:    false,
+		},
+		{
+			name:    "rule 2 never fires when the final spawn token is a flag value",
+			command: "some-server --port 8081",
+			spawn:   []string{"mlx_lm", "server", "--port", "8081"},
+			want:    false,
+		},
+		{
+			name:    "rule 2 requires the line to end with the spawn path",
+			command: "Python /Users/caimlas/git/meept/scripts/prompt_router_sidecar.py --port 8082",
+			spawn:   []string{"/usr/bin/env", "A=B", "python3", "/Users/caimlas/git/meept/scripts/prompt_router_sidecar.py"},
+			want:    false,
+		},
 	}
 
 	for _, tc := range cases {

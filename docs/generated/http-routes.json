@@ -2265,21 +2265,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7112
+    "line": 7161
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7123
+    "line": 7172
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7104
+    "line": 7153
   },
   {
     "method": "GET",
@@ -2545,6 +2545,6 @@
     "path": "v",
     "handler": "",
     "file": "internal/tools/builtin/transcript_fetch.go",
-    "line": 676
+    "line": 700
   }
 ]

@@ -855,34 +855,71 @@ func (m *RuntimeManager) removePIDFileForPid(endpointKey string, pid int) {
 }
 
 // matchesSpawnCommand reports whether a process command line came from spawn.
-// The trailing arguments must equal spawn[1:] exactly, and either argv[0] or
-// argv[1] must name the same binary as spawn[0] — script-based runtimes get an
-// interpreter prefix in ps (mlx_lm shows as "<python> /path/mlx_lm server ...").
+// Two rules, both exact:
+//
+//   - Direct form (rule 1, unchanged): the trailing fields must equal
+//     spawn[1:] exactly, and the spawn binary (basename) must appear in the
+//     head before them. This covers llama-server / mlx_lm, whose ps line
+//     carries every spawn argument in order.
+//   - Exec'd wrapper form (rule 2): when a spawn goes through a wrapper —
+//     /usr/bin/env, a shell — the wrapper CONSUMES its own arguments and
+//     execs the real program, so the process line shows only the exec'd argv.
+//     The prompt-router sidecar spawn (env VAR=... python3 script.py) shows
+//     in ps as "Python /path/prompt_router_sidecar.py": the env var and the
+//     interpreter token are gone. The one spawn token guaranteed to survive
+//     exec is the LAST argument when it is a path, so rule 2 fires only when
+//     spawn's final token contains "/" (script or config path — never a bare
+//     flag value like a port or host, which would match unrelated servers)
+//     and requires the process line to END with exactly that token.
+//
+// A different port or model is still a different endpoint under rule 1, and
+// rule 2 anchors on a full unique path, so an unrelated process never
+// matches. Audit scope note: this predicate authorizes kills; both rules
+// remain exact-equality matches, no substring or fuzzy logic.
 func matchesSpawnCommand(command string, spawn []string) bool {
 	if len(spawn) == 0 {
 		return false
 	}
 	fields := strings.Fields(command)
-	if len(fields) < len(spawn) {
+	// Rule 1 needs at least as many tokens as the spawn; rule 2 needs at
+	// least one. An exec'd wrapper line legitimately has FEWER tokens than
+	// its spawn (env consumed the interpreter and the env vars), so the
+	// length gate may not run before rule 2.
+	if len(fields) == 0 {
 		return false
 	}
-	want := filepath.Base(spawn[0])
-	head := fields[:len(fields)-len(spawn)+1]
-	headMatch := false
-	for _, token := range head {
-		if filepath.Base(token) == want {
-			headMatch = true
-			break
+	// Rule 1: direct form — binary in the head, exact tail at the end.
+	if len(fields) >= len(spawn) {
+		want := filepath.Base(spawn[0])
+		head := fields[:len(fields)-len(spawn)+1]
+		headMatch := false
+		for _, token := range head {
+			if filepath.Base(token) == want {
+				headMatch = true
+				break
+			}
+		}
+		if headMatch {
+			tail := fields[len(fields)-len(spawn)+1:]
+			exact := true
+			for i, wantArg := range spawn[1:] {
+				if tail[i] != wantArg {
+					exact = false
+					break
+				}
+			}
+			if exact {
+				return true
+			}
 		}
 	}
-	if !headMatch {
+	// Rule 2: exec'd wrapper form — the spawn's final token is a path and
+	// the process line ends with exactly that token. The wrapper's own
+	// argv (env vars, the interpreter name) never reaches ps, so nothing
+	// earlier in the spawn can be required.
+	last := spawn[len(spawn)-1]
+	if !strings.Contains(last, "/") {
 		return false
 	}
-	tail := fields[len(fields)-len(spawn)+1:]
-	for i, want := range spawn[1:] {
-		if tail[i] != want {
-			return false
-		}
-	}
-	return true
+	return fields[len(fields)-1] == last
 }

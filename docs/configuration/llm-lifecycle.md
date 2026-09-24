@@ -206,6 +206,26 @@ SIGKILLed, and runtimes left by a build older than this one.
 `--fix` sends them SIGTERM. Windows is not supported by the sweep (no `ps`): the
 scan produces no candidates there, so nothing is killed.
 
+### Scratch-rig leftovers (e2e / bench harnesses)
+
+The e2e and bench harnesses run daemons with their own `MEEPT_HOME` under the
+OS temp dir (`${TMPDIR}/meept-e2e.*`, `meept-bench-async*`). A rig daemon that
+dies hard leaves runtimes whose spawn records live in the RIG's run dir —
+records no production-home sweep could ever read (2026-09-22 orphan audit: six
+scratch runtimes leaked this way, each holding a full model in RAM). At boot
+the platform also scans those rig run dirs and runs the same guarded
+stale-record sweep over them, with a shorter age bound (30 minutes, vs 6 hours
+for production records): a record is reaped only when its pid is alive,
+re-parented to init, command-line-identical to the record, and the record is
+older than the bound. A rig mid-run is untouched: its daemons own their
+runtimes (`ppid != 1`) and young records fail the age gate.
+
+Wrapper spawns match too: a spawn whose argv[0] is a wrapper (`/usr/bin/env`,
+a shell) shows in `ps` as the EXEC'D program only — the router sidecar spawn
+(`env VAR=... python3 script.py`) appears as `Python .../script.py`. When the
+spawn's final token is a path, the sweep also accepts a process line that ends
+with exactly that path.
+
 ## Troubleshooting
 
 ### Runtime fails to start
