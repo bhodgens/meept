@@ -1711,7 +1711,10 @@ log ""
 # appended to ~/.meept/e2e-evidence.jsonl. Best-effort: never fail the
 # run over evidence bookkeeping.
 record_run_evidence() {
-  local evidence_file="${E2E_EVIDENCE_FILE:-$HOME/.meept/e2e-evidence.jsonl}"
+  # Anchor OUTSIDE $HOME: the harness reassigns HOME to the sandbox, so
+  # ~/.meept would put the evidence inside the deleted workdir. TMPDIR
+  # anchor survives cleanup and is operator-overridable.
+  local evidence_file="${E2E_EVIDENCE_FILE:-${TMPDIR:-/tmp}/meept-e2e-evidence.jsonl}"
   local t1_artifact="unknown" a5="unknown" result="fail" npass_n=0 nfail_n=0 nskip_n=0
   npass_n=$NPASS
   nfail_n=${#FAILURES[@]}
