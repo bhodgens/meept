@@ -34,7 +34,8 @@ class EmbeddedClientTest(unittest.TestCase):
         start = SOURCE.index(marker)
         code = SOURCE[start:].split("\n", 1)[1].split("\nPY\n", 1)[0]
         messages = [{"id": 1, "error": {"message": "bad initialization"}} if init_error else
-                    {"id": 1, "result": {}}, {"id": 2, "result": tool_result}]
+                    {"id": 1, "result": {}}, {"id": 2, "result": tool_result},
+                    {"id": 3, "result": tool_result}]
 
         class Process:
             stdin = io.StringIO()
@@ -53,7 +54,7 @@ class EmbeddedClientTest(unittest.TestCase):
                 return 0 if self.killed else None
 
         process = Process()
-        argv = ["fixture", "cli", "sock", "/tmp", "/tmp", "session", "test", "1", "hello"]
+        argv = ["fixture", "cli", "sock", "/tmp", "/tmp", "session", "test", "1", "300", "1", "hello"]
         with patch.object(subprocess, "Popen", return_value=process), \
                 patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
