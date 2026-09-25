@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/transport"
 )
 
@@ -292,8 +293,12 @@ func (s *Server) toolSend(args map[string]any) (any, error) {
 			}, nil
 		}
 		if chatResp.Error != "" {
+			// Error text can embed a step-result claims/evidence envelope
+			// (run 22: 'the turn failed: {"evidence":["job ... completed
+			// by agent coder: <prose>..."]}'). Recover the buried prose so
+			// the user sees what happened, not envelope JSON.
 			return map[string]any{
-				"response": "the turn failed: " + chatResp.Error,
+				"response": "the turn failed: " + agent.StripClaimsEvidenceOrProse(chatResp.Error),
 			}, nil
 		}
 	}
