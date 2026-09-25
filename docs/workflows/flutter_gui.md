@@ -24,6 +24,25 @@ override as the daemon, so set `MEEPT_HOME` consistently for both processes. A
 mismatched home makes the GUI send one key while the daemon expects another,
 which surfaces as a hard HTTP 418.
 
+### First-run pairing (distribution builds)
+
+A distributed GUI build carries NO embedded API key (`make build-gui-dist`,
+issue #59). On first launch with no stored key:
+
+1. **desktop** (kIsWeb false): the client auto-pairs by reading the local
+   `$HOME/.meept/dev_key` file when it is readable (same machine, same
+   `MEEPT_HOME`). Web never does this (no filesystem).
+2. otherwise the **pairing gate** screen asks for the one-time pairing code
+   the daemon prints to its console on startup (valid 15 minutes, single
+   use, `crypto/rand`, loopback-only endpoints `GET /api/v1/pair/status` +
+   `POST /api/v1/pair/exchange`).
+
+The exchanged key is stored in client storage (keychain on macOS, local
+storage on web) and the connection stack re-creates with it. The dev
+`make build-gui` / `make devbuild` dart-define path keeps working for
+development — it is not the distribution path; the pairing code is never
+logged at info level.
+
 ## Surfaces
 
 ### Status bar

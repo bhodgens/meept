@@ -66,6 +66,8 @@ agent-tui ./bin/meept chat      # TUI testing
 ./bin/meept soul path           # Resolved path (honors MEEPT_HOME)
 make config-bootstrap           # Copy missing config templates into $MEEPT_HOME
 make dev-key                    # Provision $MEEPT_HOME/dev_key (0600), shared with the GUI
+make build-gui-dist             # Flutter GUI with NO embedded dev key (distribution;
+                                # first-run pairing via the daemon's loopback handshake)
 make gui-connect-setup          # Make an installed home GUI-ready (transport.http + dev key)
 make gui-connect-check          # Static self-check of the installed GUI connect path
 
@@ -206,6 +208,18 @@ Full rules live in `docs/agents/projects-and-workdirs.md`. Short form: never use
 SESSION with no global active-project fallback; `multiuser.enabled=false` preserves
 the legacy flat-key HTTP path byte-identically; Unix RPC stays owner-trusted (no
 token auth on the socket).
+
+### First-run pairing and the dev key
+
+The per-installation dev key ($MEEPT_HOME/dev_key) is generated daemon-side at
+first boot; it must NEVER be baked into a distributed GUI binary. `make
+build-gui-dist` builds with no embedded key; a key-less GUI pairs on first run
+through the daemon's loopback-only handshake (`internal/comm/http/pairing.go`):
+a single-use `crypto/rand` code printed to the daemon console, exchanged once
+at `POST /api/v1/pair/exchange`. Pairing arms ONLY when require_auth is on with
+no explicit api_keys and no auth store. Never log the dev key or pairing code
+at info level; the build-time dart-define path (`make build-gui`/`devbuild`)
+remains dev-workflow-only.
 
 ### WS event classification and bus topics
 
