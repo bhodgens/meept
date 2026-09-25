@@ -5540,3 +5540,11 @@ func (d *Dispatcher) buildProviderClarification(providers []string, scope string
 		strings.Join(providers, ", "), scope,
 	)
 }
+
+// BuildSessionDigestForConversation exposes the session work digest to the
+// chat handler's reply-guard fallback (2026-09-25 A5): when the guard
+// replaces an introspection dump, the replacement should BE the session's
+// digest answer rather than a generic canned line.
+func (d *Dispatcher) BuildSessionDigestForConversation(sessionID string) *SessionContextDigest {
+	return d.buildSessionContextDigest(sessionID)
+}

@@ -360,3 +360,40 @@ func truncateRunes(s string, limit int, suffix string) string {
 	}
 	return string(runes[:limit]) + suffix
 }
+
+// applyReplyGuardWithFallback is applyReplyGuardLogged with a caller-supplied
+// fallback answer: when the guard replaces a machine-shaped reply AND the
+// caller has session context that answers the user's question (the session
+// work digest), the digest block is used instead of the generic canned line.
+// The canned line told the user to "ask something specific" on turns where
+// the session already held the specific answer (2026-09-25 run 21, A5).
+func applyReplyGuardWithFallback(final string, logger *slog.Logger, ctx replyGuardContext, fallback string) string {
+	guarded, match, replaced := replaceCatalogReply(final)
+	if !replaced {
+		return guarded
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if fallback != "" {
+		logger.Warn("reply guard replaced a machine-shaped reply with the session digest answer",
+			"rule", match.Rule,
+			"matched", match.Matched,
+			"session_id", ctx.SessionID,
+			"conversation_id", ctx.ConversationID,
+			"replaced_chars", len([]rune(final)),
+		)
+		return fallback
+	}
+	logger.Warn("reply guard replaced a machine-shaped reply",
+		"rule", match.Rule,
+		"matched", match.Matched,
+		"agent", ctx.Agent,
+		"intent", ctx.Intent,
+		"session_id", ctx.SessionID,
+		"conversation_id", ctx.ConversationID,
+		"replaced_chars", len([]rune(final)),
+		"preview", replyGuardPreview(final),
+	)
+	return guarded
+}

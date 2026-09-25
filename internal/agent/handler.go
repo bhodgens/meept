@@ -1186,12 +1186,26 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// persistence/push — so every reply path (direct, routed, sync-wait,
 	// platform fast path) is covered. sanitizeCatalogReply passes genuine
 	// prose through unchanged.
-	response.Reply = applyReplyGuardLogged(response.Reply, h.logger, replyGuardContext{
+	//
+	// Digest-aware replacement (2026-09-25 A5): when the guard replaces a
+	// catalog dump on a turn whose session HAS a work digest, the
+	// replacement is the digest answer itself (task name/state/result) —
+	// not the generic canned line. The 8B answering "did the change get
+	// made?" with an agents catalog still had the digest in its prompt; the
+	// canned replacement threw that answer away and manufactured the A5
+	// continuity failure (run 21).
+	guardFallback := ""
+	if h.dispatcher != nil && conversationID != "" {
+		if digest := h.dispatcher.BuildSessionDigestForConversation(conversationID); digest != nil && !digest.IsEmpty() {
+			guardFallback = BuildSessionContextBlock(digest)
+		}
+	}
+	response.Reply = applyReplyGuardWithFallback(response.Reply, h.logger, replyGuardContext{
 		Agent:          replyGuardAgent(req.AgentID, result),
 		Intent:         replyGuardIntent(result),
 		SessionID:      req.SessionID,
 		ConversationID: conversationID,
-	})
+	}, guardFallback)
 
 	// Classification provenance (leaf 01 of classifier-observability):
 	// attach metadata describing how this reply was classified — method,

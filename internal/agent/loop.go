@@ -91,8 +91,13 @@ requested data as prose when a tool exists that produces it.
 - "Created file config.json at /Users/caimlas/.meept/config.json"
 - "Modified the StartServer function in server.go"
 
-**Evidence**: Proof that your claims are true.
-- For file operations: stat output showing existence and size, SHA256 hash
+**Evidence**: Proof that your claims are true. A tool's own RETURN VALUE
+is evidence — cite what the tool result already gave you (paths, sizes,
+hashes, exit codes). Do NOT re-invoke a tool to "verify" what its result
+already reported: file_write's result IS the existence/size proof for the
+write, and re-reading a file you just wrote wastes a turn and trips the
+repeat-call cycle detector.
+- For file operations: the file_write result's path, size, and hash fields
 - For shell commands: exit code, relevant output excerpts
 - For API calls: response body or HTTP status code
 
