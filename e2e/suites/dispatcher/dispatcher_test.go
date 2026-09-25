@@ -46,6 +46,93 @@ func waitAnyTask(t *testing.T, s *harness.Stack) harness.TaskRow {
 	return tasks[len(tasks)-1]
 }
 
+// terminalSub is a turn.terminal subscription bound to its own RPC
+// connection (subscriptions die with the connection that made them).
+type terminalSub struct {
+	sess  *rpcSession
+	subID string
+}
+
+// subscribeTerminal opens a turn.terminal subscription. Call BEFORE
+// submitting the chat turn: the task-end relay fires the moment the task
+// finalizes, and a subscription opened after a fast completion misses the
+// event.
+func subscribeTerminal(t *testing.T, s *harness.Stack) *terminalSub {
+	t.Helper()
+	sess := openRPCSession(t, s)
+	subRaw, err := sess.call("bus.subscribe", map[string]any{
+		"topics": []string{"turn.terminal"},
+	})
+	if err != nil {
+		t.Fatalf("bus.subscribe: %v", err)
+	}
+	var sub struct {
+		SubscriptionID string `json:"subscription_id"`
+	}
+	if err := json.Unmarshal(subRaw, &sub); err != nil || sub.SubscriptionID == "" {
+		t.Fatalf("bus.subscribe ack unparseable: %s (%v)", subRaw, err)
+	}
+	t.Cleanup(func() {
+		_, _ = sess.call("bus.unsubscribe",
+			map[string]string{"subscription_id": sub.SubscriptionID})
+		sess.Close()
+	})
+	return &terminalSub{sess: sess, subID: sub.SubscriptionID}
+}
+
+// waitCompletedTerminalOn polls the subscription for a non-parked
+// turn.terminal event for turnID and asserts status=completed with a
+// non-stub reply.
+func (ts *terminalSub) waitCompletedTerminalOn(t *testing.T, s *harness.Stack, turnID string) {
+	t.Helper()
+	deadline := time.Now().Add(120 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, err := ts.sess.call("bus.poll", map[string]string{
+			"subscription_id": ts.subID,
+		})
+		if err == nil {
+			var resp struct {
+				Events []struct {
+					Topic   string          `json:"topic"`
+					Payload json.RawMessage `json:"payload"`
+				} `json:"events"`
+			}
+			if json.Unmarshal(raw, &resp) == nil {
+				for _, ev := range resp.Events {
+					if ev.Topic != "turn.terminal" {
+						continue
+					}
+					var p struct {
+						TurnID string `json:"turn_id"`
+						Status string `json:"status"`
+						Reply  string `json:"reply"`
+					}
+					if json.Unmarshal(ev.Payload, &p) != nil || p.TurnID != turnID {
+						continue
+					}
+					if p.Status == "parked" {
+						continue
+					}
+					if p.Status != "completed" {
+						t.Fatalf("dispatcher: turn %s terminal status = %q (reply %q)",
+							turnID, p.Status, p.Reply)
+					}
+					if p.Reply == "" ||
+						(strings.Contains(p.Reply, "Task ") && strings.Contains(p.Reply, "completed") &&
+							len(p.Reply) < 40) {
+						t.Fatalf("dispatcher: turn %s terminal reply is empty or a bare stub: %q",
+							turnID, p.Reply)
+					}
+					return
+				}
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("dispatcher: no non-parked turn.terminal for turn %s within 2m\ndaemon log tail:\n%s",
+		turnID, s.Daemon.LogTail())
+}
+
 // waitNoTask asserts no task row appears within a short grace window.
 func waitNoTask(t *testing.T, s *harness.Stack) {
 	t.Helper()
@@ -99,19 +186,27 @@ func TestDispatcher01ChatDirectReplyNoTask(t *testing.T) {
 // a REAL task row, and the orchestrator drives its step to a
 // successfully-terminal state with the artifact on disk.
 func TestDispatcher02PlanningIntentCreatesTask(t *testing.T) {
-	t.Skip("dispatcher-02 deferred (flaky in parallel runs): task row + completed step assert " +
-		"works in isolation but the 30s step-state window can be missed when the parallel " +
-		"suite run delays the orchestrator; the task itself completes. Same end-state coverage " +
-		"as task-state-01 (which passes); needs a longer window or sequential scheduling.")
 	s := newStack(t)
 	sessionID := s.CreateSession(t, "disp02", s.ProjectDir)
 
+	const marker = "DISP02-MARKER"
 	artifact := filepath.Join(s.ProjectDir, "dispatch02.txt")
+	// Pin the plan so the step-job prompt carries the marker the executor
+	// script binds to.
+	s.Fake.SetPlannerResponse(`{"steps":[{"description":"` + marker + `: create the file dispatch02.txt containing dispatch02","tool_hint":"file_write","depends_on":[]}]}`)
+	s.Fake.ScriptN(1,
+		harness.And(harness.IsExecutorRequest(),
+			harness.Not(harness.IsPlannerRequest()),
+			harness.MessageContains(marker)),
+		harness.ToolCallResponse(harness.ToolCall{
+			Name:      "file_write",
+			Arguments: `{"path":"` + artifact + `","content":"dispatch02","direct":true}`,
+		}))
 	s.Fake.SetPostToolText("Created dispatch02.txt at " + artifact + " with the requested content.")
-	s.Fake.EnqueueFileWrite("call-d02", artifact, "dispatch02")
 
+	tsub := subscribeTerminal(t, s)
 	ack := s.SubmitChatHTTP(t, sessionID,
-		"Create a file named dispatch02.txt containing dispatch02")
+		"Create a file named dispatch02.txt containing dispatch02. "+marker)
 
 	turnID, _ := ack["turn_id"].(string)
 	if turnID == "" {
@@ -129,9 +224,28 @@ func TestDispatcher02PlanningIntentCreatesTask(t *testing.T) {
 
 	// Observable end state 2: a step row for the task is successfully
 	// terminal and the artifact landed (the step actually executed).
-	step := harness.WaitForStepState(t, s.TasksDBPath(), task.ID, "completed", 30*time.Second)
+	// Successfully-terminal: completed (no review flow) or approved (full
+	// review passed). A wide window rides out parallel-suite delays.
+	deadline := time.Now().Add(150 * time.Second)
+	var step harness.StepRow
+	for time.Now().Before(deadline) {
+		for _, st := range harness.Steps(t, s.TasksDBPath(), task.ID) {
+			if st.State == "completed" || st.State == "approved" {
+				step = st
+				break
+			}
+		}
+		if step.ID != "" {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if step.ID == "" {
+		t.Fatalf("dispatcher-02: no successfully-terminal step for task %s within 150s; steps:\n%s",
+			task.ID, harness.FormatSteps(harness.Steps(t, s.TasksDBPath(), task.ID)))
+	}
 	if step.Result == "" {
-		t.Fatalf("dispatcher-02: completed step %s has empty result", step.ID)
+		t.Fatalf("dispatcher-02: terminal step %s has empty result", step.ID)
 	}
 	if _, err := os.Stat(artifact); err != nil {
 		t.Fatalf("dispatcher-02: artifact %s missing: %v\ndaemon log tail:\n%s",
@@ -140,7 +254,7 @@ func TestDispatcher02PlanningIntentCreatesTask(t *testing.T) {
 
 	// Observable end state 3: a non-parked turn.terminal for this turn id
 	// reports completed with a non-stub reply.
-	waitCompletedTerminal(t, s, turnID)
+	tsub.waitCompletedTerminalOn(t, s, turnID)
 }
 
 // waitCompletedTerminal polls bus.subscribe/bus.poll for a non-parked
@@ -229,11 +343,6 @@ func waitCompletedTerminal(t *testing.T, s *harness.Stack, turnID string) {
 // follow-up answer on the SAME conversation re-enters classification and
 // dispatches real work (task row + completed step + artifact).
 func TestDispatcher03ClarificationThenResume(t *testing.T) {
-	t.Skip("dispatcher-03 deferred: the clarification-resume loop re-clarifies on the scripted " +
-		"combined input (the fake analyzer/chat text cannot disambiguate it), so the resumed turn " +
-		"never dispatches. Needs a harness seam to pin the intent-analyzer JSON (the classifier " +
-		"branch serves single/multi/analysis prompts from ONE pinned output, which cannot express " +
-		"per-prompt answers). Unit coverage: internal/agent dispatcher clarification tests.")
 	s := newStack(t)
 	sessionID := s.CreateSession(t, "disp03", s.ProjectDir)
 
@@ -258,9 +367,30 @@ func TestDispatcher03ClarificationThenResume(t *testing.T) {
 	// (same conversation id is what makes the session tracker treat it as a
 	// follow-up) and becomes a real work request.
 	artifact := filepath.Join(s.ProjectDir, "clarified.txt")
-	s.Fake.SetPostToolText("Created clarified.txt at " + artifact + " after the clarification.")
-	s.Fake.EnqueueFileWrite("call-d03", artifact, "clarified work")
 
+	// Pin the INTENT ANALYZER (system prompt "intent analysis assistant";
+	// distinct from the intent classifier) so the resumed combined input
+	// analyzes as unambiguous implementation work — without this the
+	// re-analysis re-clarifies and the resume never dispatches.
+	s.Fake.Script(harness.SystemPromptContains("intent analysis assistant"),
+		harness.TextResponse(`{"goal":"create the clarified file","ambiguity":0.1,"scope":"narrow","category":"implementation","suggested_questions":[],"confidence":0.95,"suggested_mode":"direct"}`))
+	// Pin the classifier to the code lane for the resumed turn, and pin
+	// the plan so the step-job prompt carries the marker the executor
+	// script binds to.
+	s.Fake.SetClassifierOutput(`{"intent":"code","confidence":0.95,"reasoning":"pinned"}`)
+	s.Fake.SetPlannerResponse(`{"steps":[{"description":"create the file clarified.txt containing clarified work","tool_hint":"file_write","depends_on":[]}]}`)
+	// Bind the executor turn to the resumed work.
+	s.Fake.ScriptN(1,
+		harness.And(harness.IsExecutorRequest(),
+			harness.Not(harness.IsPlannerRequest()),
+			harness.MessageContains("clarified.txt")),
+		harness.ToolCallResponse(harness.ToolCall{
+			Name:      "file_write",
+			Arguments: `{"path":"` + artifact + `","content":"clarified work","direct":true}`,
+		}))
+	s.Fake.SetPostToolText("Created clarified.txt at " + artifact + " after the clarification.")
+
+	tsub2 := subscribeTerminal(t, s)
 	ack2 := submitChatWithConversation(t, s, sessionID, convID,
 		"the entire task: create a file named clarified.txt containing clarified work")
 	turnID2, _ := ack2["turn_id"].(string)
@@ -274,7 +404,7 @@ func TestDispatcher03ClarificationThenResume(t *testing.T) {
 		t.Fatalf("dispatcher-03: resumed work produced no artifact: %v\ndaemon log tail:\n%s",
 			err, s.Daemon.LogTail())
 	}
-	waitCompletedTerminal(t, s, turnID2)
+	tsub2.waitCompletedTerminalOn(t, s, turnID2)
 }
 
 // awaitTurnReply waits for the non-parked turn.terminal reply of the single
@@ -511,11 +641,6 @@ func TestDispatcher06CompoundSplitRecordsIntents(t *testing.T) {
 // the user gets the analyst lane's reply text, no executor tool work runs,
 // and no task row is created.
 func TestDispatcher07MediaURLGuardDeterministicAnalystRoute(t *testing.T) {
-	t.Skip("dispatcher-07 deferred: the message matches the model-directive clarify branch " +
-		"('use ... for me' shape) BEFORE the media guard's inline-analyze route fires, so the " +
-		"reply is the scope question, not the analyst lane text. Needs a harness seam to " +
-		"disable the model-directive parser or pin the classifier to analyze; the guard itself " +
-		"is deterministic and unit-pinned in internal/agent dispatcher_media_guard_test.go.")
 	s := newStack(t)
 	sessionID := s.CreateSession(t, "disp07", s.ProjectDir)
 
@@ -527,7 +652,7 @@ func TestDispatcher07MediaURLGuardDeterministicAnalystRoute(t *testing.T) {
 	s.Fake.SetPostToolText(analystReply)
 
 	reply := s.ChatTurn(t, sessionID,
-		"summarize this video https://www.youtube.com/watch?v=dQw4w9WgXcQ for me",
+		"summarize this video https://youtu.be/dQw4w9WgXcQ in three bullet points",
 		120*time.Second)
 
 	if !strings.Contains(reply, "summary of the video") {

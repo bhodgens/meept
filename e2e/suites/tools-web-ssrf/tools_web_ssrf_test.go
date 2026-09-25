@@ -10,7 +10,7 @@
 // Coverage map (manifest scenarios):
 //
 //	tools-web-ssrf-01  web_fetch to 127.0.0.1 blocked, zero hits  — TestWebFetchLoopbackBlockedWithZeroHits
-//	tools-web-ssrf-02  private-range fetch returns page text      — deferred variant (t.Skip; the shipped default guard blocks private ranges — the observable default behavior is covered by the private-IP literal refusal below)
+//	tools-web-ssrf-02  private-range fetch returns page text      — TestWebFetchPrivateTestServerReturnsPageText (allowed_cidrs overlay)
 //	tools-web-ssrf-03  web_search stubbed provider results        — deferred (t.Skip; backend URL is hardwired to DuckDuckGo, not stubbable without network)
 package toolswebssrf
 
@@ -125,18 +125,40 @@ func TestWebFetchPrivateIPLiteralBlocked(t *testing.T) {
 	}
 }
 
-// tools-web-ssrf-02 (manifest wording: "web_fetch to a private-range local
-// test server returns page text"). DEFERRED: the shipped default guard blocks
-// private ranges, and the harness-written meept.json5/models.json5 leave
-// [security.ssrf] at its enabled default with no allowed_cidrs seam, so the
-// happy-path fetch to a local test server cannot run without a config change
-// the harness does not expose.
+// tools-web-ssrf-02: web_fetch to a private-range local test server returns
+// page text. The sandbox boots with security.ssrf.allowed_cidrs allowing the
+// loopback (the harness config-overlay seam), so the guard permits the dial
+// while everything else stays default: the fetch must succeed and return the
+// served page text into the tool envelope.
 func TestWebFetchPrivateTestServerReturnsPageText(t *testing.T) {
-	t.Skip("deferred: the default [security.ssrf] guard (enabled, no allowed_cidrs " +
-		"in the harness-written configs) refuses private-range fetches by design; " +
-		"the positive path needs an allowed_cidrs override the harness does not " +
-		"currently expose. The default-refusal behavior is covered by " +
-		"TestWebFetchLoopbackBlockedWithZeroHits and TestWebFetchPrivateIPLiteralBlocked.")
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		"security.ssrf.allowed_cidrs": []string{"127.0.0.0/8"},
+	}))
+	s.RegisterProject(t, "e2e-project")
+	sessionID := s.CreateSession(t, "ssrf-allow", s.ProjectDir)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("private-range page text zebracoral"))
+	}))
+	defer srv.Close()
+
+	s.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat"}`)
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "web_fetch",
+		Arguments: `{"url":"` + srv.URL + `/page"}`,
+	})
+
+	s.ChatTurn(t, sessionID,
+		"Fetch the contents of "+srv.URL+"/page and tell me what the page says",
+		120*time.Second)
+
+	res := toolResultsJoined(s.Fake)
+	if !strings.Contains(res, "private-range page text zebracoral") {
+		t.Fatalf("web_fetch result missing the served page text; results:\n%s", res)
+	}
+	if strings.Contains(res, `"success":false`) {
+		t.Fatalf("allowed_cidrs fetch must not be refused; results:\n%s", res)
+	}
 }
 
 // tools-web-ssrf-03: web_search returns provider results into the tool

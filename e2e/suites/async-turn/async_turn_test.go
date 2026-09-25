@@ -283,21 +283,33 @@ func TestAsyncTurn02MalformedSubmitBodyRejected(t *testing.T) {
 // the task finalizes StateFailed in the store, and the terminal event for the
 // turn carries status=failed with the failure text (never a success stub).
 func TestAsyncTurn03FailedTaskRelayedHonestly(t *testing.T) {
-	t.Skip("async-turn-03 deferred: the impossible-path file_write never reaches the tool — " +
-		"the planned step's executor turn is not scripted to emit the doomed tool call (the " +
-		"enqueued call was consumed by a different request shape), so the task completes with " +
-		"a narrated result instead of a real tool failure. Forcing a genuine step-level tool " +
-		"failure end to end needs a harness seam to bind an enqueued call to a specific " +
-		"conversation. Unit coverage: internal/agent tactical failure-path tests.")
 	s := newStack(t)
 	sessionID := s.CreateSession(t, "async03", s.ProjectDir)
 	coll := newCollector(t, s)
 
-	// file_write into a nonexistent directory fails at the tool itself —
-	// the post-tool follow-up text is then served but the STEP result is the
-	// honest failure path.
+	// The doomed path is INSIDE the allowed project fence: blocker is a
+	// FILE, so the write fails at the tool with a real OS error on every
+	// retry (a security BLOCK would ride the permission-denied flow). The
+	// identical-args failures exhaust the repeat-error breaker, whose
+	// refusal ERROR fails the step job — a genuine step-level tool
+	// failure, bound to THIS conversation by the marker.
+	const marker = "ASYNC03-DOOMED"
+	blocker := filepath.Join(s.ProjectDir, "async03-blocker")
+	if err := os.WriteFile(blocker, []byte("obstacle"), 0o644); err != nil {
+		t.Fatalf("create blocker file: %v", err)
+	}
+	doomedPath := filepath.Join(blocker, "forbidden.txt")
+	s.Fake.SetPlannerResponse(`{"steps":[{"description":"` + marker + `: create the forbidden file","tool_hint":"file_write","depends_on":[]}]}`)
+	doomed := `{"path":"` + doomedPath + `","content":"nope","direct":true}`
+	s.Fake.ScriptN(8,
+		harness.And(harness.IsExecutorRequest(),
+			harness.Not(harness.IsPlannerRequest()),
+			harness.MessageContains(marker)),
+		harness.ToolCallResponse(harness.ToolCall{Name: "file_write", Arguments: doomed}))
+	s.Fake.SetPostToolText("The requested work could not be completed.")
+
 	ack := s.SubmitChatHTTP(t, sessionID,
-		"Create a file at /proc/meept-e2e-impossible/forbidden.txt containing nope")
+		"Create a file at "+doomedPath+" containing nope. "+marker)
 	turnID, _ := ack["turn_id"].(string)
 	if turnID == "" {
 		t.Fatalf("async-turn-03: ack missing turn_id: %+v", ack)

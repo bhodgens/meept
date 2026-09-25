@@ -18,6 +18,8 @@
 package toolsmemory
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -123,32 +125,131 @@ func TestMemoryGetContextSurfacesStoredMemory(t *testing.T) {
 	}
 }
 
-// tools-memory-02: memory_vote applies a delta. DEFERRED: memory_vote has no
-// grant in any roster agent and no executor ToolActionMap entry, so a real
-// turn denies it before the vote store is touched.
+// tools-memory-02: memory_vote applies a delta. STILL BLOCKED on an
+// internal-seam: memory_vote IS registered by the daemon, but it has no
+// internal/agent ToolActionMap entry, so Executor.checkPermission falls back
+// to the tool NAME as the permission action and pkg/security.BuiltinRules
+// denies it ("Unknown action: memory_vote") before RecordVote runs. Adding
+// the grant via the roster seeding below is not sufficient — the deny happens
+// before the tool executes.
 func TestMemoryVoteAppliesDelta(t *testing.T) {
-	t.Skip("deferred: memory_vote is not granted to any roster agent (config/agents) " +
-		"and lacks an executor ToolActionMap entry; a real turn denies the call with " +
-		"`Unknown action: memory_vote` before RecordVote runs. Requires a roster grant " +
-		"+ action mapping to cover e2e.")
+	t.Skip("blocked: memory_vote lacks an internal/agent ToolActionMap entry, so " +
+		"Executor.checkPermission falls back to the tool name as the action and " +
+		"pkg/security.BuiltinRules denies it (`Unknown action: memory_vote`) before " +
+		"the tool runs. Roster grants alone cannot cover it — needs the action mapping.")
 }
 
-// tools-memory-03: retain/recall curation pair persists. DEFERRED: the wired
-// tools memory_retain/memory_recall carry no roster grant, and the un-wired
-// retain/recall tools (memory_curation.go) are not registered by the daemon.
+// seedCurationAgent writes a user-tier agent ("aastub", alphabetically first
+// holder of the librarian lane) with the curation + remember grants, so the
+// filtered per-agent registry exposes them to real turns.
+func seedCurationAgent(t *testing.T, st *harness.Stack) {
+	t.Helper()
+	dir := filepath.Join(st.MeeptHome, "agents", "aastub")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir aastub agent dir: %v", err)
+	}
+	body := `---
+id: aastub
+name: E2E Curator
+role: executor
+description: e2e-only agent holding the curation tool grants
+intents: [librarian]
+enabled: true
+can_delegate: false
+additional_tools:
+  - memory_retain
+  - memory_recall
+  - remember
+  - memory_search
+  - memory_store
+capabilities:
+  - reasoning
+max_iterations: 8
+timeout_seconds: 120
+---
+
+# E2E Curator
+
+Follow the user's request briefly.
+`
+	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write aastub AGENT.md: %v", err)
+	}
+}
+
+// tools-memory-03: the registered curation pair memory_retain/memory_recall
+// persists across turns — retain queues a hindsight fact, recall surfaces it
+// verbatim in a later turn's tool envelope.
 func TestMemoryRetainRecallPairPersists(t *testing.T) {
-	t.Skip("deferred: memory_retain/memory_recall carry no roster grant, and the " +
-		"memory_curation.go retain/recall tools are not registered by the daemon " +
-		"(components.go registers only MemoryRetainTool/MemoryRecallTool). " +
-		"Requires a roster grant + registration to cover e2e.")
+	s := harness.Start(t, harness.WithPreBootHook(func(st *harness.Stack) error {
+		seedCurationAgent(t, st)
+		return nil
+	}))
+	s.RegisterProject(t, "e2e-project")
+	sessionID := s.CreateSession(t, "mem-curation", s.ProjectDir)
+	s.Fake.SetClassifierOutput(`{"intent":"librarian","confidence":0.95,"reasoning":"pinned librarian"}`)
+
+	const fact = "the hindsight bank marker is quokka-lantern-4419"
+
+	// Turn 1: retain the fact.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "memory_retain",
+		Arguments: `{"content":"` + fact + `","domain":"e2e","importance":"high"}`,
+	})
+	s.ChatTurn(t, sessionID,
+		"Curate the knowledge bank: retain that "+fact+" for later recall",
+		120*time.Second)
+
+	res := toolResultsJoined(s.Fake)
+	if !strings.Contains(res, `"success":true`) || !strings.Contains(res, "hindsight bank") {
+		t.Fatalf("memory_retain result missing the success envelope:\n%s", res)
+	}
+
+	// Turn 2: recall it.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "memory_recall",
+		Arguments: `{"query":"hindsight bank marker","limit":10}`,
+	})
+	s.ChatTurn(t, sessionID,
+		"Curate the knowledge bank: recall the hindsight bank marker fact",
+		120*time.Second)
+
+	res = toolResultsJoined(s.Fake)
+	if !strings.Contains(res, fact) {
+		t.Fatalf("memory_recall result missing the retained fact %q; results:\n%s", fact, res)
+	}
 }
 
-// tools-memory-04: remember queues a proposal without applying it. DEFERRED:
-// the remember tool has no roster grant, so the per-agent filtered registry
-// answers a scripted call with `unknown tool: remember`.
+// tools-memory-04: remember queues a proposal without applying a change —
+// the queue file (.meept/improvements.md, daemon-cwd relative) is the
+// observable end state.
 func TestRememberQueuesProposalOnly(t *testing.T) {
-	t.Skip("deferred: remember is not granted to any roster agent; the filtered " +
-		"registry turns the call into `unknown tool: remember`. The queue file " +
-		"(.meept/improvements.md, daemon-cwd relative) is otherwise assertable — " +
-		"requires a roster grant to cover e2e.")
+	s := harness.Start(t, harness.WithPreBootHook(func(st *harness.Stack) error {
+		seedCurationAgent(t, st)
+		return nil
+	}))
+	s.RegisterProject(t, "e2e-project")
+	sessionID := s.CreateSession(t, "mem-remember", s.ProjectDir)
+	s.Fake.SetClassifierOutput(`{"intent":"librarian","confidence":0.95,"reasoning":"pinned librarian"}`)
+
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name: "remember",
+		Arguments: `{"target":"config/agents/coder/AGENT.md","change":"add a section on caching planner prompts",` +
+			`"justification":"cuts turn latency","proposal_type":"agent_prompt"}`,
+	})
+	s.ChatTurn(t, sessionID,
+		"Remember an improvement for the coder agent prompt and queue it",
+		120*time.Second)
+
+	// The remember tool binds ".meept/improvements.md" relative to the
+	// daemon's CWD — the sandbox work root.
+	queue := filepath.Join(s.Work, ".meept", "improvements.md")
+	data, err := os.ReadFile(queue)
+	if err != nil {
+		t.Fatalf("improvements queue not created at %s: %v\ntool results:\n%s\ndaemon log tail:\n%s",
+			queue, err, toolResultsJoined(s.Fake), s.Daemon.LogTail())
+	}
+	if !strings.Contains(string(data), "add a section on caching planner prompts") {
+		t.Fatalf("queue file missing the remembered improvement:\n%s", data)
+	}
 }

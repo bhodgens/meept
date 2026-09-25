@@ -72,6 +72,54 @@ func chatCode(t *testing.T, s *harness.Stack, sessionID, msg string) string {
 	return s.ChatTurn(t, sessionID, msg, 120*time.Second)
 }
 
+// startWithAgentGrants boots a sandbox whose roster additionally contains a
+// custom user-tier agent ("aastub") that owns the given lane and holds the
+// given tool grants. "aastub" sorts before every bundled specialist that
+// shares the lane (coder, analyst, librarian, ...), so the lane routing
+// index — first sorted spec declaring the lane wins — routes pinned turns to
+// it. Must be called INSIDE a WithPreBootHook so the file exists before the
+// roster loads at boot.
+func seedGrantAgent(t *testing.T, st *harness.Stack, grants []string) {
+	t.Helper()
+	dir := filepath.Join(st.MeeptHome, "agents", "aastub")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir aastub agent dir: %v", err)
+	}
+	var tools strings.Builder
+	for _, g := range grants {
+		tools.WriteString("  - " + g + "\n")
+	}
+	body := "---\n" +
+		"id: aastub\n" +
+		"name: E2E Stub Specialist\n" +
+		"role: executor\n" +
+		"description: e2e-only agent holding extra tool grants\n" +
+		"intents: [code]\n" +
+		"enabled: true\n" +
+		"can_delegate: false\n" +
+		"additional_tools:\n" +
+		tools.String() +
+		"capabilities:\n  - reasoning\n" +
+		"max_iterations: 8\n" +
+		"timeout_seconds: 120\n" +
+		"---\n\n# E2E Stub Specialist\n\nFollow the user's request briefly.\n"
+	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write aastub AGENT.md: %v", err)
+	}
+}
+
+// startWithAgentGrants boots a stack whose roster includes the aastub agent
+// carrying the given grants, registers the project, and binds a session.
+func startWithAgentGrants(t *testing.T, name string, grants []string) *harness.Stack {
+	t.Helper()
+	s := harness.Start(t, harness.WithPreBootHook(func(st *harness.Stack) error {
+		seedGrantAgent(t, st, grants)
+		return nil
+	}))
+	s.RegisterProject(t, "e2e-project")
+	return s
+}
+
 // tools-filesystem-01: file_write writes a real file; the artifact lands in
 // the registered project dir with the scripted content, and the task store
 // records a terminal step. (Absolute path: the dispatched step-job path does
@@ -147,14 +195,44 @@ func TestFileReadReturnsHashlineAnchors(t *testing.T) {
 	}
 }
 
-// tools-filesystem-03: file_edit stale-anchor rejection. DEFERRED: no agent in
-// the shipped roster (config/agents) grants file_edit, so the filtered per-agent
-// tool registry never exposes it to a real turn — a scripted call dies as
-// "unknown tool: file_edit" before the anchor logic can run.
+// tools-filesystem-03: file_edit stale-anchor rejection. The e2e sandbox
+// extends the roster with a custom user-tier agent ("aastub", alphabetically
+// first holder of the code lane) that grants file_edit — no internal/ change
+// needed, just roster seeding via the harness pre-boot hook.
 func TestFileEditStaleAnchorFlow(t *testing.T) {
-	t.Skip("deferred: file_edit is not granted to any roster agent; the per-agent " +
-		"FilteredToolRegistry turns a scripted call into `unknown tool: file_edit` " +
-		"before the stale-anchor path can execute. Requires a roster grant to cover e2e.")
+	s := startWithAgentGrants(t, "fs-edit", []string{"file_edit", "file_read"})
+	sessionID := s.CreateSession(t, "fs-edit", s.ProjectDir)
+
+	target := filepath.Join(s.ProjectDir, "editme.txt")
+	if err := os.WriteFile(target, []byte("first line\nsecond line\n"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	// No file_read first ⇒ no read-cache snapshot, so stale-anchor recovery
+	// cannot kick in: the anchor mismatch must produce the clean rejection
+	// with fresh hashline content for a retry.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "file_edit",
+		Arguments: `{"path":"` + target + `","edits":[{"op":"replace","anchor":"1:zz","content":"hacked line"}]}`,
+	})
+
+	chatCode(t, s, sessionID, "Create a summary of editme.txt after editing it with the file_edit tool")
+
+	res := toolResultsJoined(s.Fake)
+	if !strings.Contains(res, "Edit rejected") || !strings.Contains(res, "do not match the current file") {
+		t.Fatalf("stale anchor not rejected with the retry contract; results:\n%s", res)
+	}
+	if !strings.Contains(res, "|second line") {
+		t.Fatalf("rejection does not carry fresh hashline content for retry:\n%s", res)
+	}
+	// The edit was NOT applied.
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("target vanished: %v", err)
+	}
+	if strings.Contains(string(data), "hacked line") {
+		t.Fatalf("rejected edit was applied anyway:\n%s", data)
+	}
 }
 
 // tools-filesystem-04: file_grep and file_find resolve their default search

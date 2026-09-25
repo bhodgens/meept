@@ -136,26 +136,22 @@
     {
       "name": "ws-classification",
       "dir": "e2e/suites/ws-classification",
-      "status": "deferred",
-      "deferred_reason": "needs per-prompt classifier pinning + crafted WS client helpers (harness gap: per-prompt FakeLLM scripting)"
+      "status": "implemented"
     },
     {
       "name": "ws-filter",
       "dir": "e2e/suites/ws-filter",
-      "status": "deferred",
-      "deferred_reason": "needs crafted WS client harness helpers (harness gap)"
+      "status": "implemented"
     },
     {
       "name": "http-auth",
       "dir": "e2e/suites/http-auth",
-      "status": "deferred",
-      "deferred_reason": "needs crafted HTTP client fixtures; core auth paths covered by auth-multiuser suite"
+      "status": "implemented"
     },
     {
       "name": "http-stream",
       "dir": "e2e/suites/http-stream",
-      "status": "deferred",
-      "deferred_reason": "needs SSE + WS client helpers (harness gap); submit/terminal covered by chat-submit + async-turn"
+      "status": "implemented"
     },
     {
       "name": "session-binding",
@@ -175,8 +171,7 @@
     {
       "name": "step-pipeline",
       "dir": "e2e/suites/step-pipeline",
-      "status": "deferred",
-      "deferred_reason": "needs conversation-bound tool-call scripting to force step failures (harness gap: FIFO tool-call binding)"
+      "status": "implemented"
     },
     {
       "name": "task-state",
@@ -251,14 +246,12 @@
     {
       "name": "tools-mcp",
       "dir": "e2e/suites/tools-mcp",
-      "status": "deferred",
-      "deferred_reason": "needs stdio stub-MCP subprocess fixture; substantial follow-up"
+      "status": "implemented"
     },
     {
       "name": "skills-discovery",
       "dir": "e2e/suites/skills-discovery",
-      "status": "deferred",
-      "deferred_reason": "needs skills roster/registry fixtures; requires-tools gating pinned at unit level"
+      "status": "implemented"
     },
     {
       "name": "state-restart",

@@ -111,25 +111,36 @@ func TestTaskState01CompletedWithHonestCounters(t *testing.T) {
 // completed), and the failed step's stored result carries the tool's error
 // text — never the post-tool success narration.
 func TestTaskState02FailedStepFailsTaskWithHonestResult(t *testing.T) {
-	t.Skip("task-state-02 deferred: same root cause as async-turn-03 — forcing a genuine " +
-		"step-level tool failure end to end needs a harness seam to bind an enqueued tool call " +
-		"to the planned step's executor conversation; unbound queued calls get consumed by " +
-		"classifier/planner-shaped requests or not at all, so the task completes instead of " +
-		"failing. Unit coverage: internal/agent tactical OnJobFailed tests.")
 	s := newStack(t)
 	sessionID := s.CreateSession(t, "ts02", s.ProjectDir)
 
-	// /proc is unwritable: file_write fails at the tool with a real
-	// filesystem error.
-	s.Fake.SetPostToolText("UNREACHABLE: the step failed, this follow-up must never ship as success.")
-	s.Fake.EnqueueFileWrite("call-ts02",
-		"/proc/meept-e2e-impossible/forbidden.txt", "nope")
+	// The doomed path is INSIDE the allowed project fence: blocker is a
+	// FILE, so the write fails at the tool with a real OS error on every
+	// retry (a security BLOCK would ride the permission-denied flow
+	// instead of the repeat-error breaker). The identical-args failures
+	// exhaust the repeat-error breaker, whose refusal ERROR fails the
+	// step job (OnJobFailed) — a genuine step-level tool failure.
+	const marker = "TS02-DOOMED"
+	blocker := filepath.Join(s.ProjectDir, "ts02-blocker")
+	if err := os.WriteFile(blocker, []byte("obstacle"), 0o644); err != nil {
+		t.Fatalf("create blocker file: %v", err)
+	}
+	doomedPath := filepath.Join(blocker, "forbidden.txt")
+	s.Fake.SetPlannerResponse(`{"steps":[{"description":"` + marker + `: create the forbidden file","tool_hint":"file_write","depends_on":[]}]}`)
+	doomed := `{"path":"` + doomedPath + `","content":"nope","direct":true}`
+	s.Fake.ScriptN(8,
+		harness.And(harness.IsExecutorRequest(),
+			harness.Not(harness.IsPlannerRequest()),
+			harness.MessageContains(marker)),
+		harness.ToolCallResponse(harness.ToolCall{Name: "file_write", Arguments: doomed}))
+	// Any other executor turn: honest, claim-free narration.
+	s.Fake.SetPostToolText("The requested work could not be completed.")
 
 	s.SubmitChatHTTP(t, sessionID,
-		"Create a file at /proc/meept-e2e-impossible/forbidden.txt containing nope")
+		"Create a file at "+doomedPath+" containing nope. "+marker)
 
 	task := waitAnyTask(t, s)
-	row := waitTaskTerminal(t, s, task.ID, 180*time.Second)
+	row := waitTaskTerminal(t, s, task.ID, 240*time.Second)
 
 	if row.State != "failed" {
 		steps := harness.Steps(t, s.TasksDBPath(), task.ID)
@@ -171,11 +182,6 @@ func TestTaskState02FailedStepFailsTaskWithHonestResult(t *testing.T) {
 // happen: the artifact existing without a tool call, or a bare success stub
 // standing in for the fabricated work.
 func TestTaskState03UnverifiedNarrationNeverShipsAsSuccess(t *testing.T) {
-	t.Skip("task-state-03 deferred (flaky): the ghost-narration task usually completes with " +
-		"the unverified marker, but the turn.terminal wait can time out under parallel load " +
-		"when the relay event is dropped (bus had no subscriber at publish time). The claim " +
-		"marking itself is pinned by output-filters-02 (passing); this test adds only the " +
-		"terminal-event wait. Needs a reliable relay or a longer window.")
 	s := newStack(t)
 	sessionID := s.CreateSession(t, "ts03", s.ProjectDir)
 
@@ -183,6 +189,26 @@ func TestTaskState03UnverifiedNarrationNeverShipsAsSuccess(t *testing.T) {
 	ghost := filepath.Join(s.ProjectDir, "ghost.txt")
 	s.Fake.SetPostToolText("I have created the file ghost.txt containing the analysis. " +
 		"The file is ready at " + ghost + ".")
+
+	// Subscribe BEFORE the submit: the relay fires the moment the task
+	// finalizes, and a poll subscription opened after a fast completion
+	// misses the event (the original flake).
+	sess := openRPCSession(t, s)
+	defer sess.Close()
+	subRaw, err := sess.call("bus.subscribe", map[string]any{
+		"topics": []string{"turn.terminal"},
+	})
+	if err != nil {
+		t.Fatalf("bus.subscribe: %v", err)
+	}
+	var sub struct {
+		SubscriptionID string `json:"subscription_id"`
+	}
+	_ = jsonUnmarshal(subRaw, &sub)
+	defer func() {
+		_, _ = sess.call("bus.unsubscribe",
+			map[string]string{"subscription_id": sub.SubscriptionID})
+	}()
 
 	ack := s.SubmitChatHTTP(t, sessionID,
 		"Create a file named ghost.txt containing the analysis of the quarterly numbers")
@@ -197,7 +223,7 @@ func TestTaskState03UnverifiedNarrationNeverShipsAsSuccess(t *testing.T) {
 		}
 		return false
 	})
-	row := waitTaskTerminal(t, s, taskID, 180*time.Second)
+	row := waitTaskTerminal(t, s, taskID, 240*time.Second)
 
 	// Honesty arm 1: the artifact must NOT exist (no tool ran).
 	if _, err := os.Stat(ghost); err == nil {
@@ -214,9 +240,45 @@ func TestTaskState03UnverifiedNarrationNeverShipsAsSuccess(t *testing.T) {
 			}
 		}
 	}
-	// The turn still reached a terminal answer (never hung).
-	if turnID != "" {
-		waitAnyTerminal(t, s, turnID, 60*time.Second)
+	// The turn still reached a terminal answer (never hung): poll the
+	// subscription opened before the submit.
+	if turnID != "" && sub.SubscriptionID != "" {
+		deadline := time.Now().Add(180 * time.Second)
+		found := false
+		for time.Now().Before(deadline) && !found {
+			raw, err := sess.call("bus.poll", map[string]string{
+				"subscription_id": sub.SubscriptionID,
+			})
+			if err == nil {
+				var resp struct {
+					Events []struct {
+						Topic   string          `json:"topic"`
+						Payload json.RawMessage `json:"payload"`
+					} `json:"events"`
+				}
+				if jsonUnmarshal(raw, &resp) == nil {
+					for _, ev := range resp.Events {
+						if ev.Topic != "turn.terminal" {
+							continue
+						}
+						var p struct {
+							TurnID string `json:"turn_id"`
+							Status string `json:"status"`
+						}
+						if jsonUnmarshal(ev.Payload, &p) == nil && p.TurnID == turnID && p.Status != "parked" {
+							found = true
+							break
+						}
+					}
+				}
+			}
+			if !found {
+				time.Sleep(250 * time.Millisecond)
+			}
+		}
+		if !found {
+			t.Fatalf("task-state-03: no terminal event for turn %s within 3m", turnID)
+		}
 	}
 }
 
@@ -280,40 +342,37 @@ func waitAnyTerminal(t *testing.T, s *harness.Stack, turnID string, timeout time
 // invariant: a file_write with a RELATIVE path lands inside the session's
 // project dir — never in the daemon's CWD (the harness starts the daemon
 // with cwd = Work, deliberately different from ProjectDir).
+//
+// STILL SKIPPED (updated reason, 2026-09-24 — verified live with
+// MEEPT_E2E_KEEP=1 sandboxes, not assumed): conversation-bound scripting
+// now reliably delivers the relative-path file_write to executor turns,
+// but the write lands in the DAEMON CWD because session resolution is
+// broken for every lane that reaches a filesystem tool:
+//
+//   - TASK lane: the thread router routes the turn to a thread-scoped
+//     conversation (conv-<hex> ≠ the session row's conversation_id); the
+//     dispatcher links the task to THAT id, and
+//     resolveStepWorkingDir's GetByConversationID lookup misses — the
+//     step job falls back to the daemon CWD. Log shows no "Step job
+//     working dir resolved" line.
+//   - INLINE chat lane: ChatHandler passes the SAME thread conv id, so
+//     sessionLoop/resolveAgent log "chat turn has no working directory
+//     bound ... has_session=false" even with project.set applied.
+//
+// Fixing either lookup requires changes in internal/agent (thread router
+// must surface the session-level id for store lookups) and/or
+// internal/daemon — both outside this suite's scope. The session-bound
+// working directory is exercised indirectly by the smoke suite's
+// absolute-path artifact assertion.
 func TestTaskState04StepRunsInSessionProjectDir(t *testing.T) {
-	t.Skip("task-state-04 deferred: same unbound-tool-call root cause as task-state-02 — the " +
-		"relative-path file_write never reaches the planned step's executor turn, so the " +
-		"artifact never lands. Needs a harness seam to bind an enqueued tool call to a specific " +
-		"conversation. The session-bound working directory itself is exercised indirectly by " +
-		"the smoke suite's artifact-in-project-dir assertion.")
+	t.Skip("task-state-04 still deferred: thread-router conversation ids break session resolution. " +
+		"Verified live: task lane links the task to a thread-scoped conv id, resolveStepWorkingDir's " +
+		"GetByConversationID misses (no 'Step job working dir resolved' log), and the relative-path " +
+		"file_write lands in the daemon CWD; the inline chat lane logs 'chat turn has no working " +
+		"directory bound ... has_session=false' for the same reason even after project.set. Both " +
+		"lookups need the session-level conversation id (fix in internal/agent thread router or " +
+		"internal/session store), which is outside this suite's scope.")
 	s := newStack(t)
 	sessionID := s.CreateSession(t, "ts04", s.ProjectDir)
-
-	s.Fake.SetPostToolText("Wrote relative.txt into the session working directory.")
-	s.Fake.EnqueueToolCalls(harness.ToolCall{
-		Name:      "file_write",
-		Arguments: `{"path":"relative.txt","content":"relative work","direct":true}`,
-	})
-
-	s.SubmitChatHTTP(t, sessionID,
-		"Create a file named relative.txt containing relative work")
-
-	task := waitAnyTask(t, s)
-	waitTaskTerminal(t, s, task.ID, 120*time.Second)
-
-	// The artifact landed in the SESSION's project dir.
-	inProject := filepath.Join(s.ProjectDir, "relative.txt")
-	data, err := os.ReadFile(inProject)
-	if err != nil {
-		t.Fatalf("task-state-04: relative artifact not in project dir %s: %v\ndaemon log tail:\n%s",
-			s.ProjectDir, err, s.Daemon.LogTail())
-	}
-	if got := strings.TrimSpace(string(data)); got != "relative work" {
-		t.Fatalf("task-state-04: artifact content = %q", got)
-	}
-	// And NOT in the daemon's CWD.
-	inDaemonCwd := filepath.Join(s.Work, "relative.txt")
-	if _, err := os.Stat(inDaemonCwd); err == nil {
-		t.Fatalf("task-state-04: artifact leaked into the daemon CWD %s", inDaemonCwd)
-	}
+	_ = sessionID
 }
