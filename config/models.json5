@@ -343,7 +343,13 @@
           "output_cost": 0.0,
           "context_limit": 65536,
           "max_output": 4096,
-          "temperature": 0.7,
+          // temperature 0.1 per LiquidAI's model-card sampling for LFM2.5
+          // tool calling (temp 0.1 / top_k 50 / rep 1.1). Live A/B
+          // 2026-09-25: at 0.7 the model emitted prose instead of tool
+          // calls 3/5 times even WITH tool_choice=required; at 0.1 +
+          // required it was 6/6. The 8B's tool-call format is fragile at
+          // high temperature.
+          "temperature": 0.1,
           "max_concurrency": 2
         }
       }
