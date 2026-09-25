@@ -81,6 +81,12 @@ class StorageService {
   ///
   /// On web, [platformService] returns null for the home directory,
   /// so this method returns null immediately without filesystem access.
+  ///
+  /// Public entry point for the first-run pairing flow's desktop
+  /// auto-pairing (issue #59); [_tryReadDevKeyFile] stays the init-time
+  /// consumer.
+  Future<String?> tryReadDevKeyFile() => _tryReadDevKeyFile();
+
   Future<String?> _tryReadDevKeyFile() async {
     final home = await platformService?.getHomeDirectory();
     if (home == null) return null;

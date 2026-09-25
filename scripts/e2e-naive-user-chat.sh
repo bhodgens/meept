@@ -1477,7 +1477,7 @@ mcp_send() { # $1=NAME $2=MESSAGE — reply to $REPLIES/$1.txt
 import json, os, subprocess, sys, threading, time
 
 # Args: cli sock home state sid source_client turn_timeout e2e_turn_timeout use_sync message
-cli, sock, home, state, sid, source_client, timeout, e2e_turn_timeout, use_sync, message = sys.argv[1:10]
+cli, sock, home, state, sid, source_client, timeout, e2e_turn_timeout, use_sync, message = sys.argv[1:11]
 timeout = float(timeout)
 e2e_turn_timeout = float(e2e_turn_timeout)
 use_sync = use_sync == "1"

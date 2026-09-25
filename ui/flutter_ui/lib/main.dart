@@ -17,6 +17,7 @@ import 'theme/colors.dart';
 import 'theme/palette_provider.dart';
 import 'core/constants.dart';
 import 'core/router.dart';
+import 'features/pairing/pairing_gate.dart';
 import 'providers/providers.dart';
 import 'providers/tool_exit_guard.dart';
 
@@ -106,9 +107,41 @@ void main() async {
     runApp(
       UncontrolledProviderScope(
         container: appProviderContainer,
-        child: const _ModifierKeyInitializer(child: CyberpunkApp()),
+        child: const _ModifierKeyInitializer(child: _PairingOrApp()),
       ),
     );
+  }
+}
+
+/// Shows the first-run pairing gate when the app has no API key (no stored
+/// key, no embedded dart-define key — i.e. a distribution build), and the
+/// real app once pairing succeeded. Desktop auto-pairs from the local dev
+/// key file; web always asks for the daemon's one-time pairing code.
+class _PairingOrApp extends StatefulWidget {
+  const _PairingOrApp();
+
+  @override
+  State<_PairingOrApp> createState() => _PairingOrAppState();
+}
+
+class _PairingOrAppState extends State<_PairingOrApp> {
+  /// Bumped after successful pairing so every provider below re-creates
+  /// with the freshly stored key (WebSocketService.fromStorage reads it).
+  int _pairedGeneration = 0;
+
+  bool get _needsPairing => shouldShowPairingGate(StorageService.instance);
+
+  void _onPaired() {
+    if (!mounted) return;
+    setState(() => _pairedGeneration++);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_needsPairing && _pairedGeneration == 0) {
+      return PairingGate(onPaired: _onPaired);
+    }
+    return CyberpunkApp(key: ValueKey('app-gen-$_pairedGeneration'));
   }
 }
 
