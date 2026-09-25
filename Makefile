@@ -544,7 +544,6 @@ status: build-cli
 clean:
 	rm -rf $(BIN_DIR)/meept_gui.app $(BIN_DIR)/meept-gui-* coverage/
 	rm -rf $(MENUBAR_DIR)/MeeptMenuBar.app $(MENUBAR_DIR)/.build
-	rm -rf $$(go env GOPATH)/bin/meept_gui.app $$(go env GOPATH)/bin/meept_ui.app
 	@cd $(FLUTTER_UI_DIR) && flutter clean 2>/dev/null || true
 	go clean -cache -testcache
 
@@ -737,8 +736,6 @@ uninstall-gui:
 		for app in ~/Applications/Meept\ Client\ GUI.app \
 		           ~/Applications/meept_gui.app \
 		           ~/Applications/MeeptMenuBar.app \
-		           $$(go env GOPATH)/bin/meept_gui.app \
-		           $$(go env GOPATH)/bin/meept_ui.app \
 		           $(BIN_DIR)/meept_gui.app; do \
 			if [ -d "$$app" ]; then \
 				echo "  Removing Spotlight index for $$app"; \
@@ -1110,35 +1107,7 @@ uninstall-all: uninstall uninstall-gui
 	rm -rf $(BIN_DIR)/meept_ui.app
 	@echo "Removing configuration directory ($(MEEPT_HOME))..."
 	rm -rf $(MEEPT_HOME)
-	@echo "Removing session/task databases..."
-	rm -f ~/.meept/sessions.db
-	rm -f ~/.meept/tasks.db
-	rm -f ~/.meept/queue.db
-	rm -f ~/.meept/plans.db
-	rm -f ~/.meept/metrics.db
-	rm -f ~/.meept/projects.db
-	@echo "Removing memory databases..."
-	rm -rf ~/.meept/memory/
-	@echo "Removing bundled skills (user-modified skills are kept)..."
-	@if [ -d ~/.meept/skills ]; then \
-		for d in ~/.meept/skills/*/; do \
-			[ -e "$$d" ] || continue; \
-			name=$$(basename $$d); \
-			if [ -d "config/skills/$$name" ] && diff -r "$$d" "config/skills/$$name" >/dev/null 2>&1; then \
-				rm -rf "$$d"; \
-				echo "  removed bundled skill $$name"; \
-			else \
-				echo "  keeping $$name (user-modified or custom)"; \
-			fi; \
-		done; \
-		if [ -z "$$(ls -A ~/.meept/skills 2>/dev/null)" ]; then \
-			rmdir ~/.meept/skills; \
-		fi; \
-	fi
-	@echo "Removing cached plugins..."
-	rm -rf ~/.meept/plugins/
-	@echo "Removing workspaces..."
-	rm -rf ~/.meept/workspaces/
+	@echo "Removed $(MEEPT_HOME) (session/task/queue/plans/metrics/projects databases, memory, bundled skills, cached plugins, workspaces)."
 	@echo ""
 	@echo "Full uninstall complete."
 	@echo "Note: Flutter build cache not removed. Run 'cd ui/flutter_ui && flutter clean' if needed."
