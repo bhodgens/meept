@@ -727,11 +727,26 @@
     // task-dispatched turns ack immediately via chat.submit and deliver
     // results through turn.terminal. Set true ONLY to keep an un-migrated
     // external integration working during the migration tail — the chat
-    // RPC then blocks up to the 110s sync-wait ceiling and may return the
-    // "Task <id> is still running" stub. The meept-bench source
-    // special-case honors this flag too: under the default, bench turns
-    // are async like every other client.
+    // RPC then blocks up to the stall-based sync-wait ceiling (see
+    // sync_wait_stall below) and may return the "Task <id> is still
+    // running" stub. The meept-bench source special-case honors this flag
+    // too: under the default, bench turns are async like every other
+    // client.
     "sync_chat_enabled": false,
+    // Stall-based sync-wait ceiling for the legacy blocking chat above.
+    // sync_wait_stall: when the task state AND the step set stay unchanged
+    // for this long, the wait returns the degraded still-running reply
+    // (best approved/completed step result first) instead of hanging.
+    // Default 0 = stall detection ENABLED with a 2-minute inactivity
+    // window; a NEGATIVE value restores the legacy fixed 110s elapsed
+    // ceiling (byte-identical escape hatch).
+    "sync_wait_stall": 0,
+    // sync_wait_max: hard elapsed cap for the legacy sync wait (default
+    // 30m) — even a visibly progressing task gets the degraded reply at
+    // the cap. The daemon raises the chat RPC proxy timeout to
+    // max(120s, sync_wait_max + 15s) so the graceful reply lands before
+    // the transport times out.
+    "sync_wait_max": "30m",
   },
 
   // Shadow training system (response shadowing for model improvement)

@@ -21,6 +21,12 @@ type ProxyHandler struct {
 	pending       sync.Map // map[string]chan *models.BusMessage
 	subscriptions sync.Map // map[string]*busSubscription for TUI event streaming
 
+	// chatTimeout bounds the "chat" RPC proxy (chat.request → chat.response).
+	// Default 120s; the daemon raises it to max(120s, sync_wait_max + 15s)
+	// via SetChatProxyTimeout so the legacy sync wait's graceful
+	// still-running reply lands before the transport gives up.
+	chatTimeout time.Duration
+
 	// submitHandler serves chat.submit (async-turn-migration leaf 02).
 	// Constructed lazily per NewProxyHandler; registry stays nil there so
 	// the plain-proxy construction path gains no new dependencies.
@@ -50,7 +56,16 @@ type busEventRecord struct {
 
 // NewProxyHandler creates a new proxy handler.
 func NewProxyHandler(msgBus *bus.MessageBus) *ProxyHandler {
-	return &ProxyHandler{bus: msgBus, submitHandler: NewSubmitHandler(msgBus, nil, nil)}
+	return &ProxyHandler{bus: msgBus, submitHandler: NewSubmitHandler(msgBus, nil, nil), chatTimeout: 120 * time.Second}
+}
+
+// SetChatProxyTimeout overrides the "chat" proxy's wait bound. Nil-guarded
+// per the setter convention; non-positive values are ignored so the 120s
+// default always survives a zero-value config field.
+func (p *ProxyHandler) SetChatProxyTimeout(d time.Duration) {
+	if p != nil && d > 0 {
+		p.chatTimeout = d
+	}
 }
 
 // SetSubmitHandler replaces the default submit handler (constructed with a
@@ -65,8 +80,12 @@ func (p *ProxyHandler) SetSubmitHandler(h *SubmitHandler) {
 
 // RegisterProxyMethods registers all proxy methods that forward to the bus.
 func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
-	// Chat methods
-	server.RegisterHandler("chat", p.makeProxy("chat.request", "chat.response", 120*time.Second))
+	// Chat methods. The timeout must exceed the legacy sync wait's ceiling
+	// (sync_wait_max + 15s margin, floor 120s) so waitForTaskCompletion's
+	// graceful still-running reply lands before the proxy gives up — see
+	// SetChatProxyTimeout, wired from orchestrator.sync_wait_max in the
+	// daemon.
+	server.RegisterHandler("chat", p.makeProxy("chat.request", "chat.response", p.chatTimeout))
 
 	// Async chat submit (async-turn-migration leaf 02): fire-and-forget
 	// submit that acks BEFORE any agent work. Direct handler, not a proxy —

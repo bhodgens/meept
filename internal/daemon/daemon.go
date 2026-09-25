@@ -43,6 +43,7 @@ import (
 	"github.com/caimlas/meept/internal/tools/builtin"
 	mcp "github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/worker"
+	"github.com/caimlas/meept/pkg/constants"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -204,6 +205,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// after components) does, so submit dedupe and handler-side turn
 		// tracking agree. Must be set BEFORE RegisterProxyMethods.
 		proxy = rpc.NewProxyHandler(msgBus)
+
+		// Stall-based sync-wait ceiling: keep the chat proxy alive at
+		// least as long as the legacy sync wait's hard cap (plus 15s of
+		// margin) so waitForTaskCompletion's graceful still-running reply
+		// lands before the transport times out. Floor stays 120s for the
+		// byte-identical legacy behavior (escape hatch / old configs).
+		proxy.SetChatProxyTimeout(max(120*time.Second, fullCfg.Orchestrator.SyncWaitMax+15*time.Second))
 
 		// Register proxy handlers that forward to bus subscribers
 		proxy.RegisterProxyMethods(rpcServer)
@@ -1396,6 +1404,23 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			if evalHandler != nil {
 				httpOpts = append(httpOpts, http.WithEval(evalHandler))
 				logger.Info("Eval HTTP endpoints enabled", "path", "/api/v1/eval/runs*")
+			}
+
+			// First-run pairing handshake (issue #59): when auth is
+			// required but no key came from config, the effective key is
+			// the per-installation dev key — a fresh GUI cannot know it.
+			// Arm the loopback-only pairing service so the daemon prints a
+			// one-time code a GUI can exchange for the key. Explicit
+			// api_keys (or multi-user mode, or auth off) leaves pairing
+			// unwired: those clients already have a distribution path.
+			if httpCfg.RequireAuth && len(httpCfg.APIKeys) == 0 && httpCfg.AuthStore == nil {
+				httpOpts = append(httpOpts, http.WithPairing(http.NewPairingService(
+					constants.DevAPIKey,
+					logger,
+				)))
+				logger.Info("first-run pairing enabled",
+					"path", "/api/v1/pair/*",
+					"hint", "the one-time pairing code is printed to this console")
 			}
 
 			var metricsService interface {

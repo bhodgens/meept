@@ -16,11 +16,17 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   turn.terminal bus event (Plan: docs/plans/20260916-async-turn-migration).
   The blocking `chat` RPC is a legacy opt-in (`orchestrator.
   sync_chat_enabled=true`, default false): task-dispatched turns then
-  block up to the 110s sync-wait ceiling and may return the "still
-  running" stub — `waitForTaskCompletion` (internal/agent/handler.go)
+  block up to the stall-based sync-wait ceiling and may return the
+  "still running" stub — `waitForTaskCompletion` (internal/agent/handler.go)
   returns the terminal step's `Result`, never the stub except when every
-  step result is empty or the store errors. Under the default, no path
-  can return the stub. Stalled async turns are reaped by the turn
+  step result is empty or the store errors. The ceiling is stall-based by
+  default (orchestrator.sync_wait_stall, 0 = enabled: the degraded reply
+  fires after ~2m of no task-state/step-set change, hard cap
+  orchestrator.sync_wait_max = 30m, and the daemon raises the chat proxy
+  timeout to max(120s, sync_wait_max + 15s) to match); a negative
+  sync_wait_stall restores the legacy fixed 110s elapsed ceiling.
+  Under the default, no path can return the stub. Stalled async turns are
+  reaped by the turn
   watchdog and surface as failed terminal events.
 - **Errored steps never pass review.** `ReviewStep` gates on
   `stepHasError` before every policy path; a task with any failed step

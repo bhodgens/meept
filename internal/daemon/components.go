@@ -2739,8 +2739,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// default is async-everywhere — chat.submit acks immediately and
 		// results arrive via turn.terminal. Only an explicit
 		// orchestrator.sync_chat_enabled=true makes task-dispatched turns
-		// block the chat RPC again (110s ceiling, stub possible).
+		// block the chat RPC again (stall-based ceiling, stub possible).
 		c.ChatHandler.SetSyncMode(cfg.Orchestrator.SyncChatEnabled)
+		c.ChatHandler.SetSyncWaitStall(cfg.Orchestrator.SyncWaitStall, cfg.Orchestrator.SyncWaitMax)
 
 		// Wire step store for fetching step summaries in ACK and completion messages
 		if c.TaskRegistry != nil {
@@ -3166,6 +3167,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Legacy sync chat opt-in (async-turn-migration leaf 07) —
 		// same contract as the multi-agent construction site above.
 		c.ChatHandler.SetSyncMode(cfg.Orchestrator.SyncChatEnabled)
+		c.ChatHandler.SetSyncWaitStall(cfg.Orchestrator.SyncWaitStall, cfg.Orchestrator.SyncWaitMax)
 
 		// Wire step store for fetching step summaries in ACK and completion messages
 		if c.TaskRegistry != nil {

@@ -53,11 +53,25 @@ type ChatHandler struct {
 	metricsStore *metrics.Store  // Optional: metrics store for duration estimates
 	stepStore    *task.StepStore // Optional: step store for fetching step summaries
 	taskStore    *task.Store     // Optional: task store for looking up linked sessions
-	// syncWaitCeiling overrides waitForTaskCompletion's 90s sync-reply bound
-	// (test seam; 0 = production default). Must stay well below the CLI's
-	// ~120s socket read so a stuck task surfaces a degraded reply instead of
-	// an i/o timeout (e2e run 3, 2026-09-10).
+	// syncWaitCeiling overrides waitForTaskCompletion's fixed sync-reply
+	// bound (test seam; 0 = stall-based ceiling per syncWaitStall/
+	// syncWaitMax, negative = the legacy fixed 110s production default).
+	// Must stay well below the CLI's ~120s socket read so a stuck task
+	// surfaces a degraded reply instead of an i/o timeout (e2e run 3,
+	// 2026-09-10).
 	syncWaitCeiling time.Duration
+	// syncWaitStall bounds the legacy sync wait by INACTIVITY (stall-based
+	// ceiling): the wait polls the task store every 2s and returns the
+	// degraded still-running reply when neither the task state nor the
+	// step set has changed for this long. Zero (the config default) means
+	// stall detection is enabled with syncWaitMax as the hard elapsed cap;
+	// negative disables stall detection entirely (legacy fixed ceiling —
+	// see syncWaitCeiling). Set by SetSyncWaitStall; test seam.
+	syncWaitStall time.Duration
+	// syncWaitMax is the hard elapsed cap when stall detection is enabled:
+	// even a visibly progressing task gets the degraded reply once the
+	// wait has run this long. Set by SetSyncWaitStall; test seam.
+	syncWaitMax time.Duration
 
 	// NotificationPublisher for desktop/notification-system events (Plan 4.3).
 	// When nil, task completion events still flow via the message bus.
@@ -2433,56 +2447,161 @@ func (h *ChatHandler) publishNotification(typ, title, message string) {
 	}
 }
 
+// SetSyncWaitStall wires the stall-based sync-wait ceiling (orchestrator.
+// sync_wait_stall / orchestrator.sync_wait_max). Nil-guarded per the
+// setter convention (the ChatHandler itself is never nil here, but the
+// daemon calls this unconditionally next to the other Set* wiring, so the
+// guard protects a partially-constructed handler).
+func (h *ChatHandler) SetSyncWaitStall(stall, hardMax time.Duration) {
+	if h != nil {
+		h.syncWaitStall = stall
+		h.syncWaitMax = hardMax
+	}
+}
+
+// syncWaitMode selects which ceiling waitForTaskCompletion enforces.
+type syncWaitMode int
+
+const (
+	// syncWaitModeStall: inactivity-based ceiling with a hard elapsed cap
+	// (the new default when sync_wait_stall is unset/zero).
+	syncWaitModeStall syncWaitMode = iota
+	// syncWaitModeFixed: the legacy fixed elapsed ceiling (110s), selected
+	// by syncWaitCeiling > 0 (test seam) or sync_wait_stall < 0.
+	syncWaitModeFixed
+)
+
+// syncWaitPlan resolves the ChatHandler's sync-wait knobs into a ceiling
+// mode + durations. Kept pure so the selection table is unit-testable
+// without a task store.
+func (h *ChatHandler) syncWaitPlan() (mode syncWaitMode, stall, hardMax time.Duration) {
+	if h.syncWaitCeiling > 0 {
+		// Explicit test ceiling always wins (legacy fixed semantics).
+		return syncWaitModeFixed, 0, h.syncWaitCeiling
+	}
+	if h.syncWaitStall < 0 {
+		// Escape hatch: sync_wait_stall < 0 restores the byte-identical
+		// legacy fixed 110s ceiling (syncWaitCeiling test seam may still
+		// raise it in tests; production keeps 110s).
+		return syncWaitModeFixed, 0, 110 * time.Second
+	}
+	// Stall mode. 0 = "enabled by default"; use the legacy 110s window as
+	// the stall threshold only when the operator set a positive value —
+	// otherwise any positive value they chose applies directly. A zero
+	// stall with a positive hardMax would mean "instant stall", which is
+	// meaningless, so zero means the documented default window (2 minutes
+	// of inactivity) — see the sync_wait_stall config comment.
+	stall = h.syncWaitStall
+	if stall == 0 {
+		stall = 2 * time.Minute
+	}
+	hardMax = h.syncWaitMax
+	if hardMax <= 0 {
+		hardMax = 30 * time.Minute
+	}
+	// NOTE: no normalization when hardMax < stall — the hard cap is hard:
+	// a config with sync_wait_max below sync_wait_stall simply means the
+	// elapsed cap fires before inactivity ever could.
+	return syncWaitModeStall, stall, hardMax
+}
+
+// degradedSyncReply returns the degraded still-running reply: the best
+// APPROVED/completed step result when one exists (e2e run 5, 2026-09-11 —
+// at ceiling time the user's answer may already sit in a finished step
+// while later bookkeeping steps still run), else the generic stub.
+func (h *ChatHandler) degradedSyncReply(taskID string) string {
+	h.logger.Warn("Task wait timeout exceeded", "task_id", taskID)
+	if h.stepStore != nil {
+		if steps, err := h.stepStore.ListByTaskID(taskID); err == nil {
+			if result := bestStepResult(steps); result != "" {
+				return result
+			}
+		}
+	}
+	return fmt.Sprintf("Task %s is still running; results will arrive when it completes.", taskID)
+}
+
+// syncFingerprint captures everything the stall detector treats as
+// progress: the task state plus every step's ID/state pair (count and any
+// per-step state transition both change the string). Intentionally cheap:
+// one task read + one step listing per 2s poll.
+func (h *ChatHandler) syncFingerprint(t *task.Task) string {
+	var b strings.Builder
+	b.WriteString(string(t.State))
+	if h.stepStore != nil {
+		steps, err := h.stepStore.ListByTaskID(t.ID)
+		if err != nil {
+			// An unreadable step set must NOT look like progress (that
+			// would stall the detector open-endedly): encode the error so
+			// the fingerprint differs from any healthy one.
+			b.WriteString("|steps-error")
+			return b.String()
+		}
+		for _, s := range steps {
+			b.WriteString("|")
+			b.WriteString(s.ID)
+			b.WriteString(":")
+			b.WriteString(string(s.State))
+		}
+	}
+	return b.String()
+}
+
 // waitForTaskCompletion waits for a task to reach a terminal state
 // and returns the final result string. Returns immediately if the task
 // is already terminal or if the store/ctx is not available.
+//
+// The wait is bounded two ways (stall-based sync-wait ceiling):
+//   - Stall mode (default): the 2s task-store poll compares the task
+//     state and the step set against the previous poll; no change for
+//     longer than the stall window returns the degraded reply even
+//     though the task is still non-terminal, and a hard elapsed cap
+//     bounds even visibly-progressing tasks.
+//   - Fixed mode (escape hatch, sync_wait_stall < 0): the legacy fixed
+//     elapsed ceiling (110s), byte-identical with the pre-stall code.
+//
+// A task that cannot finish in time still runs to completion
+// asynchronously — only the reply is bounded.
 func (h *ChatHandler) waitForTaskCompletion(ctx context.Context, taskID string) string {
 	if h.taskStore == nil || taskID == "" {
 		return ""
 	}
 
-	// syncTaskWaitTimeout bounds the synchronous reply below the CLI's
-	// ~120s socket read (internal/rpc/proxy.go). The previous 10-minute cap
-	// could never fire in time: e2e run 3 (2026-09-10) T2 replan-looped and
-	// T3/T4 held their sync replies until the socket read timed out and the
-	// daemon was killed mid-task. A task that cannot finish in time still
-	// runs to completion asynchronously — only the reply is bounded.
-	// 110s (was 90s, e2e run 5 2026-09-10): a healthy 4-step task on the
-	// local 8B model took ~112s; the 90s bound returned "still running"
-	// while the task finished 22s later, failing A4's reply-content check.
-	// 110s still leaves 10s of margin under the CLI's 120s socket read.
-	// syncWaitCeiling is a test seam; zero means the 110s production default.
-	syncTaskWaitTimeout := h.syncWaitCeiling
-	if syncTaskWaitTimeout <= 0 {
-		syncTaskWaitTimeout = 110 * time.Second
-	}
+	mode, stall, hardMax := h.syncWaitPlan()
 
+	start := time.Now()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	done := time.After(syncTaskWaitTimeout)
+
+	var fixedDone <-chan time.Time
+	if mode == syncWaitModeFixed {
+		fixedDone = time.After(hardMax)
+	}
+
+	// Progress fingerprint for stall mode: task state + every step's
+	// ID/state pair. Any poll that observes a different fingerprint resets
+	// the stall timer. Empty (and never compared) in fixed mode.
+	lastProgress := start
+	var lastFingerprint string
+	if mode == syncWaitModeStall {
+		if t, err := h.taskStore.GetByID(taskID); err == nil && t != nil {
+			lastFingerprint = h.syncFingerprint(t)
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ""
-		case <-done:
-			// Degraded still-running reply (e2e run 5, 2026-09-11): return
-			// the best APPROVED/completed step result when one exists — at
-			// ceiling time the task may have already produced the user's
-			// answer in a finished step while later bookkeeping steps
-			// (review, "return final confirmation") still run. Run 5's T1
-			// shipped the generic stub 22s before the task finalized even
-			// though step 2 held the file path the user asked for. Bounded
-			// well below the CLI's ~120s socket read either way.
-			h.logger.Warn("Task wait timeout exceeded", "task_id", taskID)
-			if h.stepStore != nil {
-				if steps, err := h.stepStore.ListByTaskID(taskID); err == nil {
-					if result := bestStepResult(steps); result != "" {
-						return result
-					}
-				}
-			}
-			return fmt.Sprintf("Task %s is still running; results will arrive when it completes.", taskID)
+		case <-fixedDone:
+			// Fixed-mode ceiling (legacy semantics). Degraded still-running
+			// reply (e2e run 5, 2026-09-11): return the best
+			// APPROVED/completed step result when one exists — at ceiling
+			// time the task may have already produced the user's answer in
+			// a finished step while later bookkeeping steps (review,
+			// "return final confirmation") still run. Bounded well below
+			// the CLI's ~120s socket read either way.
+			return h.degradedSyncReply(taskID)
 		case <-ticker.C:
 			t, err := h.taskStore.GetByID(taskID)
 			if err != nil {
@@ -2521,6 +2640,25 @@ func (h *ChatHandler) waitForTaskCompletion(ctx context.Context, taskID string) 
 					}
 				}
 				return fmt.Sprintf("Task %s completed.", taskID)
+			}
+			if mode == syncWaitModeStall {
+				now := time.Now()
+				if now.Sub(start) > hardMax {
+					// Hard cap: the task may still be visibly progressing,
+					// but the sync reply must land inside the proxy timeout.
+					return h.degradedSyncReply(taskID)
+				}
+				fp := h.syncFingerprint(t)
+				if fp != lastFingerprint {
+					// Visible progress: state or step set changed since the
+					// previous poll — reset the stall timer.
+					lastFingerprint = fp
+					lastProgress = now
+					continue
+				}
+				if now.Sub(lastProgress) > stall {
+					return h.degradedSyncReply(taskID)
+				}
 			}
 		}
 	}

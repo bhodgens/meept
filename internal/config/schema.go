@@ -2496,6 +2496,25 @@ type OrchestratorConfig struct {
 	// migration tail. The meept-bench source special-case ALSO requires
 	// this flag; under the default it is async like every other client.
 	SyncChatEnabled bool `json:"sync_chat_enabled" toml:"sync_chat_enabled"`
+	// SyncWaitStall bounds the legacy sync wait by INACTIVITY instead of
+	// fixed elapsed time (stall-based sync-wait ceiling): each 2s poll of
+	// the task store compares the task state and the step set against the
+	// previous poll; any change resets the progress timer. When no change
+	// is seen for longer than this duration the wait returns the degraded
+	// still-running reply (best APPROVED/completed step result first).
+	// Default 0 = stall detection ENABLED with a 30m hard cap
+	// (sync_wait_max). Explicitly setting a negative value selects the
+	// legacy behavior: a fixed 110s elapsed ceiling (byte-identical with
+	// the pre-stall implementation), regardless of sync_wait_max.
+	SyncWaitStall time.Duration `json:"sync_wait_stall" toml:"sync_wait_stall"`
+	// SyncWaitMax is the hard elapsed cap for the legacy sync wait when
+	// stall detection is enabled. The wait returns the same degraded reply
+	// at the cap even if the task keeps visibly progressing. Default 30m.
+	// NOTE: raising this above ~110s brings the legacy path back under the
+	// chat proxy's fixed timeout (internal/rpc/proxy.go registers "chat"
+	// with max(120s, this value + 15s)) — the proxy is bumped to match, so
+	// the graceful reply still lands before any transport timeout.
+	SyncWaitMax time.Duration `json:"sync_wait_max" toml:"sync_wait_max"`
 }
 
 // TurnWatchdogConfig is the liveness-reaper knob block (async-turn-
@@ -3354,6 +3373,12 @@ func DefaultConfig() *Config {
 			// Sync chat is legacy (async-turn-migration leaf 07): the default is
 			// async-everywhere — chat.submit acks and turn.terminal delivers.
 			SyncChatEnabled: false,
+			// Stall-based sync-wait ceiling: sync_wait_stall 0 means stall
+			// detection is ENABLED (return the degraded reply after the
+			// configured inactivity window) with a 30m hard cap; a negative
+			// value restores the legacy fixed 110s elapsed ceiling.
+			SyncWaitStall: 0,
+			SyncWaitMax:   30 * time.Minute,
 			// Async-turn liveness reaper (async-turn-migration leaf 06):
 			// enabled by default — a vanished submitted turn must reach a
 			// terminal state instead of leaving the client waiting forever.
