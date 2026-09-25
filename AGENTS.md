@@ -31,7 +31,15 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 go build -o bin/meept ./cmd/meept
 make build              # Everything (daemon + CLI + gendoc + GUI + lite + graphs)
 make build-gui          # Flutter GUI only
+make build-gui-dist     # Flutter GUI with NO embedded dev key (distribution; first-run pairing)
 make menubar-install    # macOS MenuBar app
+make install            # Full install: build + bin + config + GUI + menubar (needs Flutter)
+make install-cli        # Headless install: binaries + config only (no Flutter needed)
+make install-package    # Stage bin + web payload under DESTDIR= for packaging
+# Install destinations (command-line overrides):
+#   PREFIX=/opt/meept -> BINDIR=$(PREFIX)/bin, WEBDIR=$(PREFIX)/share/meept/web
+#   BINDIR (default GOPATH/bin or PREFIX/bin), APPSDIR (default ~/Applications,
+#   NEVER PREFIX-derived), DESTDIR (staging root; MEEPT_HOME is never staged)
 make deps-llama-check   # Enforce the llama.cpp build floor (>= b9660, LFM2.5 tool-call
                         # parser); wired into `make deps` and `make install`. `make
                         # deps-llama` installs it into $MEEPT_HOME/deps/llama.cpp

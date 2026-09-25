@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui build-gui-dist test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui build-gui-dist test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install install-cli install-desktop setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -26,7 +26,16 @@ help:
 	@echo "  menubar-install-app-bundle  Install .app bundle to ~/Applications"
 	@echo "  menubar-app          Build menubar as .app bundle"
 	@echo "  menubar-install-app-bundle  Install menubar .app to ~/Applications"
-	@echo "  install          Install binaries + GUI to GOPATH/bin"
+	@echo "  install          Install everything (build + bin + config + GUI + menubar)"
+	@echo "  install-cli      Headless install: binaries + config (no Flutter needed)"
+	@echo "  install-desktop  Install GUI + menubar apps (built first)"
+	@echo "  install-package  Stage bin + web payload under DESTDIR= for packaging"
+	@echo ""
+	@echo "Install destinations (override on the command line):"
+	@echo "  PREFIX=...       Derive BINDIR=$(PREFIX)/bin, WEBDIR=$(PREFIX)/share/meept/web"
+	@echo "  BINDIR=...       Binary dir (default: GOPATH/bin, or PREFIX/bin)"
+	@echo "  APPSDIR=...      macOS app bundle dir (default: ~/Applications, never PREFIX-derived)"
+	@echo "  DESTDIR=...      Staging root for packaging; empty = write destinations directly"
 	@echo ""
 	@echo "Testing:"
 	@echo "  test             Run tests (short mode)"
@@ -93,6 +102,31 @@ MEEPT_HOME ?= $(HOME)/.meept
 BIN_DIR := bin
 DAEMON := $(BIN_DIR)/meept-daemon
 CLI := $(BIN_DIR)/meept
+
+# Install destinations.
+#
+#   PREFIX   optional installation prefix (the "path=" from the install docs).
+#            When set, BINDIR and WEBDIR derive from it. APPSDIR deliberately
+#            does NOT: macOS Finder/Spotlight do not index arbitrary prefix
+#            trees, so app bundles stay in ~/Applications unless APPSDIR is
+#            set explicitly.
+#   DESTDIR  staging root for packaging. Every write in an install target
+#            goes to $(DESTDIR)$(BINDIR) / $(DESTDIR)$(APPSDIR) /
+#            $(DESTDIR)$(WEBDIR). Empty by default: normal installs write
+#            directly. `make install-package DESTDIR=/tmp/pkg` stages a
+#            distributable payload without touching the live machine.
+#   MEEPT_HOME is per-machine runtime data and is NEVER staged under DESTDIR;
+#            see install-config below.
+PREFIX ?=
+ifeq ($(PREFIX),)
+BINDIR ?= $(shell go env GOPATH)/bin
+WEBDIR ?= $(MEEPT_HOME)/webui
+else
+BINDIR ?= $(PREFIX)/bin
+WEBDIR ?= $(PREFIX)/share/meept/web
+endif
+APPSDIR ?= $(HOME)/Applications
+DESTDIR ?=
 
 # meept-scoped dependency prefix.
 # meept keeps its own copies of runtime dependencies under one prefix so a
@@ -361,36 +395,47 @@ build-release: build-all
 # install must not quietly land a llama.cpp whose generic JSON grammar lets a
 # tool-forcing prompt answer in prose. Override for machines that do not serve
 # local models with MEEPT_LLAMA_SKIP_CHECK=1.
+#
+# Build-before-install: everything `install*` copies is built HERE, so the
+# copy targets never recompile and never depend on stale bin/ state.
 .PHONY: install-install-order
 install-install-order:
 	@$(MAKE) deps-llama-check
 	@$(MAKE) gui-connect-setup
+	@$(MAKE) build-lite
 	@$(MAKE) build menubar-app build-gui
 
-install: install-install-order
-	@echo "Installing binaries to GOPATH/bin..."
-	go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
-	go install $(GO_BUILD_FLAGS) ./cmd/meept
-	@echo "Installing meept-lite..."
-	go install $(GO_BUILD_FLAGS) ./cmd/meept-lite
-	@echo "Installing GUI app to ~/Applications..."
-	mkdir -p ~/Applications
-	@if [ -d $(BIN_DIR)/meept_gui.app ]; then \
-		rm -rf ~/Applications/Meept\ Client\ GUI.app; \
-		cp -r $(BIN_DIR)/meept_gui.app ~/Applications/Meept\ Client\ GUI.app; \
-		touch ~/Applications/Meept\ Client\ GUI.app/.metadata_never_index; \
-		rm -rf $(BIN_DIR)/meept_gui.app; \
-		echo "Installed: ~/Applications/Meept Client GUI.app"; \
-	else \
-		echo "Skipping GUI app (not built — run 'make build-gui' first)"; \
-	fi
-	@echo "Installing menubar app bundle to ~/Applications..."
-	rm -rf ~/Applications/MeeptMenuBar.app
-	cp -r $(MENUBAR_APP) ~/Applications/
-	@touch ~/Applications/MeeptMenuBar.app/.metadata_never_index
-	@rm -rf $(MENUBAR_DIR)/.build
-	@echo "Installed: ~/Applications/MeeptMenuBar.app"
-	@$(MAKE) config-bootstrap
+# -----------------------------------------------------------------------------
+# Component install targets. Each copies an already-built component to its
+# destination (honoring DESTDIR staging); none of them build.
+#
+#   install-bin      meept, meept-daemon, meept-lite  -> $(DESTDIR)$(BINDIR)
+#   install-config   config templates + sync          -> $(MEEPT_HOME) (never staged)
+#   install-gui      Meept Client GUI.app             -> $(DESTDIR)$(APPSDIR)
+#   install-menubar  MeeptMenuBar.app                 -> $(DESTDIR)$(APPSDIR)
+#   install-package  bin + web payload under DESTDIR  -> packaging payload
+#
+# Aggregates:
+#   install-cli      headless machine: install-bin + install-config (no Flutter)
+#   install-desktop  install-gui + install-menubar
+#   install          full chain: build + cli + desktop (identical scope to the
+#                    pre-refactor `make install`)
+# -----------------------------------------------------------------------------
+.PHONY: install-bin
+install-bin:
+	@mkdir -p $(DESTDIR)$(BINDIR)
+	@for b in meept meept-daemon meept-lite; do \
+		if [ -f $(BIN_DIR)/$$b ]; then \
+			install -m 755 $(BIN_DIR)/$$b $(DESTDIR)$(BINDIR)/$$b; \
+			echo "  installed $(DESTDIR)$(BINDIR)/$$b"; \
+		else \
+			echo "  ERROR: $(BIN_DIR)/$$b not built (run 'make build' first)"; \
+			exit 1; \
+		fi; \
+	done
+
+.PHONY: install-config
+install-config: config-bootstrap
 	@echo "Copying agent definitions..."
 	@if [ -d config/agents ]; then \
 		cp -r config/agents/* $(MEEPT_HOME)/agents/ 2>/dev/null || true; \
@@ -401,8 +446,67 @@ install: install-install-order
 		cp -r config/prompts/* $(MEEPT_HOME)/prompts/ 2>/dev/null || true; \
 		echo "  copied prompts"; \
 	fi
-	@echo ""
 	@$(MAKE) sync-config
+	@echo "Config installed: $(MEEPT_HOME)/meept.json5"
+
+.PHONY: install-gui
+install-gui:
+	@mkdir -p $(DESTDIR)$(APPSDIR)
+	@if [ -d $(BIN_DIR)/meept_gui.app ]; then \
+		rm -rf "$(DESTDIR)$(APPSDIR)/Meept Client GUI.app"; \
+		cp -r $(BIN_DIR)/meept_gui.app "$(DESTDIR)$(APPSDIR)/Meept Client GUI.app"; \
+		touch "$(DESTDIR)$(APPSDIR)/Meept Client GUI.app/.metadata_never_index"; \
+		rm -rf $(BIN_DIR)/meept_gui.app; \
+		echo "Installed: $(DESTDIR)$(APPSDIR)/Meept Client GUI.app"; \
+	else \
+		echo "Skipping GUI app (not built — run 'make build-gui' first)"; \
+	fi
+
+.PHONY: install-menubar
+install-menubar:
+ifeq ($(shell uname -s),Darwin)
+	@mkdir -p $(DESTDIR)$(APPSDIR)
+	@rm -rf "$(DESTDIR)$(APPSDIR)/MeeptMenuBar.app"
+	@cp -r $(MENUBAR_APP) "$(DESTDIR)$(APPSDIR)/"
+	@touch "$(DESTDIR)$(APPSDIR)/MeeptMenuBar.app/.metadata_never_index"
+	@rm -rf $(MENUBAR_DIR)/.build
+	@echo "Installed: $(DESTDIR)$(APPSDIR)/MeeptMenuBar.app"
+else
+	@echo "Skipping menubar app (macOS only)"
+endif
+
+# install-web: stage the Flutter web bundle (build-gui's web variant or a
+# standalone gui-web build) into WEBDIR. This is the payload a future Linux/
+# macOS package ships; the daemon can serve it from WEBDIR (wiring to be
+# added with the packaging deliverable, see issue #59 follow-ups).
+.PHONY: install-web
+install-web:
+	@if [ -d $(FLUTTER_UI_DIR)/build/web ]; then \
+		mkdir -p $(DESTDIR)$(WEBDIR); \
+		cp -r $(FLUTTER_UI_DIR)/build/web/. $(DESTDIR)$(WEBDIR)/; \
+		echo "Installed web bundle: $(DESTDIR)$(WEBDIR)"; \
+	else \
+		echo "ERROR: $(FLUTTER_UI_DIR)/build/web not built (run 'make gui-web' first)"; \
+		exit 1; \
+	fi
+
+# install-package: the packaging payload. Binaries + web bundle under
+# DESTDIR, nothing else. Config/dev-key are per-machine runtime data and are
+# deliberately excluded; a packaged GUI pairs on first run (issue #59).
+.PHONY: install-package
+install-package:
+	@$(MAKE) build-lite
+	@$(MAKE) build menubar-app build-gui gui-web
+	@$(MAKE) install-bin install-web DESTDIR=$(DESTDIR)
+
+install-cli: install-bin install-config
+
+install-desktop: install-gui install-menubar
+
+install: install-install-order
+	@$(MAKE) install-desktop
+	@$(MAKE) install-cli
+	@echo ""
 	@echo "Install complete. Config: $(MEEPT_HOME)/meept.json5"
 	@echo "  GUI endpoint: $$(MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint)"
 	@echo "  GUI key:      embedded from $(MEEPT_HOME)/dev_key at build time"
@@ -484,7 +588,7 @@ daemon-debug: build-daemon setup
 # =============================================================================
 
 # devbuild: Rebuild only changed Go code and the Flutter GUI (incremental,
-# no dependency re-download), install to GOPATH/bin and ~/Applications,
+# no dependency re-download), install to $(BINDIR) and $(APPSDIR),
 # and run setup to recreate config templates.
 #
 # Speed notes:
@@ -499,9 +603,9 @@ devbuild:
 	@mkdir -p $(BIN_DIR)
 	@go build $(GO_BUILD_FLAGS) -o $(DAEMON) ./cmd/meept-daemon
 	@go build $(GO_BUILD_FLAGS) -o $(CLI) ./cmd/meept
-	@echo "==> Installing Go binaries to GOPATH/bin..."
-	@go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
-	@go install $(GO_BUILD_FLAGS) ./cmd/meept
+	@echo "==> Installing Go binaries to $(BINDIR)..."
+	@install -m 755 $(DAEMON) $(BINDIR)/meept-daemon
+	@install -m 755 $(CLI) $(BINDIR)/meept
 	@echo "==> Setting up directories and config files..."
 	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
 	@for f in $(CONFIG_FILES); do \
@@ -524,19 +628,19 @@ devbuild:
 ifeq ($(GUI_PLATFORM),macos)
 	@echo "==> Building Flutter GUI (incremental)..."
 	@cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release $(FLUTTER_DART_DEFINES) 2>&1 | tail -1
-	@echo "==> Installing GUI to ~/Applications..."
-	@mkdir -p ~/Applications
-	@rm -rf ~/Applications/Meept\ Client\ GUI.app
+	@echo "==> Installing GUI to $(APPSDIR)..."
+	@mkdir -p "$(APPSDIR)"
+	@rm -rf "$(APPSDIR)/Meept Client GUI.app"
 	@cp -r "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app" \
-		~/Applications/Meept\ Client\ GUI.app
-	@touch ~/Applications/Meept\ Client\ GUI.app/.metadata_never_index
+		"$(APPSDIR)/Meept Client GUI.app"
+	@touch "$(APPSDIR)/Meept Client GUI.app/.metadata_never_index"
 endif
 	@echo "==> Building Flutter web app (incremental)..."
 	@cd $(FLUTTER_UI_DIR) && flutter build web --release 2>&1 | tail -1
 	@echo "==> devbuild complete."
-	@echo "    binaries:  $$(go env GOPATH)/bin/meept{,-daemon}"
+	@echo "    binaries:  $(BINDIR)/meept{,-daemon}"
 ifeq ($(GUI_PLATFORM),macos)
-	@echo "    gui:       ~/Applications/Meept Client GUI.app"
+	@echo "    gui:       $(APPSDIR)/Meept Client GUI.app"
 endif
 	@echo "    config:    $(MEEPT_HOME)"
 	@echo "    start:     meept-daemon -f"
@@ -740,9 +844,9 @@ uninstall: uninstall-gui
 uninstall-gui:
 	@if [ "$$(uname)" = "Darwin" ]; then \
 		echo "Removing GUI apps and Spotlight registrations..."; \
-		for app in ~/Applications/Meept\ Client\ GUI.app \
-		           ~/Applications/meept_gui.app \
-		           ~/Applications/MeeptMenuBar.app \
+		for app in "$(APPSDIR)/Meept Client GUI.app" \
+		           "$(APPSDIR)/meept_gui.app" \
+		           "$(APPSDIR)/MeeptMenuBar.app" \
 		           $(BIN_DIR)/meept_gui.app; do \
 			if [ -d "$$app" ]; then \
 				echo "  Removing Spotlight index for $$app"; \
@@ -941,18 +1045,18 @@ menubar-clean:
 	rm -rf $(MENUBAR_APP)
 
 menubar-install: menubar
-	@echo "Installing menubar binary to ~/Applications..."
-	mkdir -p ~/Applications
-	cp $(MENUBAR_BIN) ~/Applications/MeeptMenuBar
-	@echo "Installed: ~/Applications/MeeptMenuBar"
+	@echo "Installing menubar binary to $(APPSDIR)..."
+	mkdir -p "$(APPSDIR)"
+	cp $(MENUBAR_BIN) "$(APPSDIR)/MeeptMenuBar"
+	@echo "Installed: $(APPSDIR)/MeeptMenuBar"
 
 menubar-install-app-bundle: menubar-app
-	@echo "Installing .app bundle to ~/Applications..."
-	rm -rf ~/Applications/MeeptMenuBar.app
-	cp -r $(MENUBAR_APP) ~/Applications/
-	@touch ~/Applications/MeeptMenuBar.app/.metadata_never_index
+	@echo "Installing .app bundle to $(APPSDIR)..."
+	rm -rf "$(APPSDIR)/MeeptMenuBar.app"
+	cp -r $(MENUBAR_APP) "$(APPSDIR)/"
+	@touch "$(APPSDIR)/MeeptMenuBar.app/.metadata_never_index"
 	@rm -rf $(MENUBAR_DIR)/.build
-	@echo "Installed: ~/Applications/MeeptMenuBar.app"
+	@echo "Installed: $(APPSDIR)/MeeptMenuBar.app"
 
 # =============================================================================
 # Flutter GUI (meept-gui)
@@ -1135,11 +1239,11 @@ webui: gui-web-run
 uninstall-all: uninstall uninstall-gui
 	@echo "Uninstalling all Meept components..."
 	@echo ""
-	@echo "Removing Go binaries from GOPATH/bin..."
-	rm -f $$(go env GOPATH)/bin/meept
-	rm -f $$(go env GOPATH)/bin/meept-daemon
-	rm -f $$(go env GOPATH)/bin/meept-lite
-	rm -f $$(go env GOPATH)/bin/meept-gui
+	@echo "Removing Go binaries from $(BINDIR)..."
+	rm -f $(BINDIR)/meept
+	rm -f $(BINDIR)/meept-daemon
+	rm -f $(BINDIR)/meept-lite
+	rm -f $(BINDIR)/meept-gui
 	@echo "Removing local build artifacts..."
 	rm -rf $(BIN_DIR)/meept
 	rm -rf $(BIN_DIR)/meept-daemon
