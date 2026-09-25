@@ -601,7 +601,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
 
 	for attempt := 1; attempt <= shortRetries; attempt++ {
-		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID)
+		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill)
 		if err != nil {
 			// Refusal errors never re-enter the short-retry loop: the
 			// serving model declined by policy — retrying the SAME model
@@ -836,7 +836,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
 
-		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID)
+		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill)
 		if err != nil {
 			// ChatWithProgress retry loop: same classification contract
 			// as Chat() above.
@@ -1499,7 +1499,7 @@ func resolveToolChoice(cfg *ModelConfig, o *chatOptions) string {
 // cfg must be captured under lock by the caller.
 // priority marks an interactive turn for slot-gate priority (tree 04
 // leaf 03); priority-less callers pass false, unchanged behavior.
-func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *ModelConfig, priority bool, sessionID string) (*Response, error) {
+func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *ModelConfig, priority bool, sessionID, assistantPrefill string) (*Response, error) {
 	// Acquire concurrency slot (if configured)
 	release, err := c.acquireConcurrencyLimit(ctx, priority)
 	if err != nil {
@@ -1771,7 +1771,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 		}
 	}
 
-	parsedResp, err := c.parseResponseWithTools(&chatResp, hasTools, providerID, modelID)
+	parsedResp, err := c.parseResponseWithTools(&chatResp, hasTools, providerID, modelID, assistantPrefill)
 
 	// Update metrics with actual token counts if available
 	if c.metricsStore != nil && parsedResp != nil {
@@ -1863,19 +1863,26 @@ func (c *Client) recordRefusalBudget(refusal *RefusalError, cfg *ModelConfig, ch
 // calls from every recognized shape, including the ambiguous bare-JSON one;
 // callers that know whether tools were offered should use parseResponseWithTools.
 func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
-	return c.parseResponseWithTools(chatResp, true, "", chatResp.Model)
+	return c.parseResponseWithTools(chatResp, true, "", chatResp.Model, "")
 }
 
 // parseResponseWithTools is parseResponse with the ambiguous bare-JSON call
 // recovery gated on hasTools, which reports whether the REQUEST offered tools.
 // Without tools offered, a JSON object in the reply is the model's ANSWER and
-// must pass through untouched: mining one out of the intent analyzer's reply
+// must pass through untouched: mining it out of the intent analyzer's reply
 // stripped it to empty content and the classifier stage failed with
 // "intent analysis: empty content" (fresh-rig run 5, 2026-09-12).
 //
+// assistantPrefill is the request's WithAssistantPrefill value ("" when the
+// request carried none). Non-empty enables the prefill-continuation recovery
+// (parseLFMPrefillContinuation): a prefill-continued bare-JSON tool call
+// completes as plain content with no tool_calls (the LFM2.5 server parser
+// only recognizes markers), so without this the continuation is treated as
+// prose and the unbacked-claims guard fires again.
+//
 // providerID and modelID attribute a detected refusal to the provider/model
 // that served the request (empty modelID allowed on streaming paths).
-func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool, providerID, modelID string) (*Response, error) {
+func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool, providerID, modelID, assistantPrefill string) (*Response, error) {
 	if len(chatResp.Choices) == 0 {
 		return nil, ErrEmptyResponse
 	}
@@ -1923,6 +1930,44 @@ func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool, p
 	if content == "" && len(msg.ToolCalls) == 0 && len(lfmCalls) == 0 && reasoning != "" {
 		content = strings.TrimSpace(reasoningRest)
 		reasoningPromoted = content != ""
+	}
+
+	// Prefill-continuation recovery (issue #57): when the request carried an
+	// assistant prefill and the model continued it as bare JSON in content
+	// (no native tool_calls — the LFM2.5 server parser only recognizes
+	// markers), reconstruct the call. Shape-gated: only a prefill+content
+	// concatenation that parses as ONE call-shaped JSON object converts;
+	// anything else stays prose. Native tool_calls win when present — the
+	// server parsed the reply authoritatively.
+	if assistantPrefill != "" && len(msg.ToolCalls) == 0 && len(lfmCalls) == 0 {
+		if prefillCalls, ok := parseLFMPrefillContinuation(assistantPrefill, content); ok {
+			slog.Default().Warn("lfm tool-call recovered from prefill continuation (bare JSON content)",
+				"calls", len(prefillCalls))
+			// The content's whole payload became the call; leaving the raw
+			// JSON fragment in Content would re-trigger the machine-shaped
+			// output guard downstream.
+			return &Response{
+				Content:   "",
+				ToolCalls: prefillCalls,
+				Usage: TokenUsage{
+					PromptTokens:     chatResp.Usage.PromptTokens,
+					CompletionTokens: chatResp.Usage.CompletionTokens,
+					TotalTokens:      chatResp.Usage.TotalTokens,
+					CachedTokens:     chatResp.Usage.PromptTokensDetails.CachedTokens,
+					ReasoningTokens:  chatResp.Usage.CompletionTokensDetails.ReasoningTokens,
+				},
+				Model: func() string {
+					if chatResp.Model != "" {
+						return chatResp.Model
+					}
+					c.configMu.RLock()
+					defer c.configMu.RUnlock()
+					return c.config.ModelID
+				}(),
+				FinishReason: choice.FinishReason,
+				Reasoning:    reasoning,
+			}, nil
+		}
 	}
 
 	// Refusal surfacing (refusal-fallback leaf 01): a content_filter /
@@ -2056,7 +2101,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			retryState.isResume = true
 			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", shortRetries)
 		}
-		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID)
+		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill)
 		if err == nil {
 			// Record usage with scope
 			if c.budget != nil && resp != nil {
@@ -2240,7 +2285,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 // Returns HTTP status code as int so callers don't manage *http.Response lifecycle.
 // cfg must be captured under lock by the caller.
 // priority marks an interactive turn for slot-gate priority (tree 04 leaf 03).
-func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState, cfg *ModelConfig, priority bool, sessionID string) (*Response, int, error) {
+func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState, cfg *ModelConfig, priority bool, sessionID, assistantPrefill string) (*Response, int, error) {
 	// Acquire concurrency slot (if configured)
 	release, err := c.acquireConcurrencyLimit(ctx, priority)
 	if err != nil {
@@ -2570,6 +2615,22 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	// streak ("stopped after extended thinking").
 	content, lfmCalls := parseLFMToolCalls(accumulated.String())
 	toolCalls = append(toolCalls, lfmCalls...)
+
+	// Prefill-continuation recovery (issue #57), streaming twin of the
+	// parseResponseWithTools branch: a WithAssistantPrefill continuation
+	// completes as bare JSON content with NO tool_calls (the LFM2.5 server
+	// parser only recognizes <|tool_call_start|> markers), so without this
+	// the loop reads the call as prose. Prefill- AND shape-gated: only when
+	// no other call was recovered and prefill+content joins into ONE
+	// call-shaped JSON object.
+	if assistantPrefill != "" && len(toolCalls) == 0 {
+		if prefillCalls, ok := parseLFMPrefillContinuation(assistantPrefill, content); ok {
+			c.logger.Warn("lfm tool-call recovered from prefill continuation in stream content (bare JSON)",
+				"model", modelID, "calls", len(prefillCalls))
+			content = ""
+			toolCalls = append(toolCalls, prefillCalls...)
+		}
+	}
 
 	// mlx_lm shape: while the model is still in thinking mode the entire
 	// reply — markers included — arrives as reasoning deltas with no

@@ -98,6 +98,106 @@ func parseLFMToolCallsWithBare(content string, allowBare bool) (string, []ToolCa
 	return content, append(append(append(markerCalls, xmlCalls...), fenceCalls...), bareCalls...)
 }
 
+// parseLFMPrefillContinuation recovers a tool call CONTINUING an assistant
+// prefill. With WithAssistantPrefill, llama-server seeds the generation with
+// the partial assistant message (e.g. `{"name": "file_write", "arguments": {`)
+// and the model SAMPLES ONLY THE REST: the server puts the continuation text
+// in the response `content` field — the prefill itself is never echoed back
+// (server-context.cpp: res->content = slot.generated_text, which accumulates
+// sampled tokens only). The LFM2.5 chat parser (common/parsers/lfm2.cpp)
+// recognizes ONLY <|tool_call_start|>...<|tool_call_end|> markers, so a
+// bare-JSON continuation completes as plain content with finish_reason
+// "stop" and NO tool_calls.
+//
+// The continuation alone is therefore a mid-object FRAGMENT, e.g.
+//
+//	"file_name": "hello.txt", "content": "hi"
+//
+// or a tail of the arguments object possibly deeper-nested:
+//
+//	"file_name": "a.txt"}, "extra": {"k": 1}}
+//
+// Recovery is prefill-gated (prefill != "") AND shape-gated: the prefill +
+// content concatenation must parse as ONE JSON object carrying a call shape
+// (name/tool string + args/arguments/parameters), the same structural test
+// parseLFMFenceBody applies. Without the prefill this function is never
+// consulted, so ordinary model JSON answers keep their existing semantics
+// (parseLFMBareJSONCalls' hasTools contract is untouched).
+//
+// Returns the reconstructed call and true, or false when the shape does not
+// match (content stays prose — the caller treats it as an answer).
+func parseLFMPrefillContinuation(prefill, content string) ([]ToolCall, bool) {
+	prefill = strings.TrimSpace(prefill)
+	if prefill == "" {
+		return nil, false
+	}
+	joined := prefill + strings.TrimLeft(content, " 	\r\n")
+	// ONE object only: the prefill opened it, so the joined text must start
+	// at that object's opening brace — trailing prose after the continuation
+	// voids the shape. The prefill may leave several brackets open (the outer
+	// call object AND its arguments object) or end mid-string (the OpenAI
+	// stringified-arguments shape): close whatever is still open, in the
+	// order the prefill opened it, counting only brackets outside JSON
+	// strings.
+	body := strings.TrimSpace(joined)
+	if !strings.HasPrefix(body, "{") {
+		return nil, false
+	}
+	open := openJSONBrackets(body)
+	closed := body
+	if len(open) == 0 {
+		// The continuation closed EVERY bracket the prefill opened. Valid
+		// only when the joined text is then exactly one balanced object:
+		// trailing prose after the final brace voids the shape.
+		if findJSONObjectEnd(body) != len(body)-1 {
+			return nil, false
+		}
+	} else {
+		for i := 0; i < len(open); i++ {
+			if open[i] == '{' {
+				closed += "}"
+			} else {
+				closed += "]"
+			}
+		}
+	}
+	mined := parseLFMFenceBody(closed)
+	if len(mined) == 0 {
+		return nil, false
+	}
+	mined[0].ID = lfmToolCallID(0, "prefill:"+closed)
+	return mined, true
+}
+
+// openJSONBrackets returns the brackets left OPEN at the end of s, outermost
+// last, skipping string literals (and their backslash escapes). Returns nil
+// when s ends with every bracket it opened. Single quotes are NOT string
+// delimiters in JSON and are not tracked.
+func openJSONBrackets(s string) []byte {
+	var stack []byte
+	inStr := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case inStr && ch == '\\':
+			i++ // skip the escaped byte inside a string
+		case inStr:
+			if ch == '"' {
+				inStr = false
+			}
+		case ch == '"':
+			inStr = true
+		case ch == '{' || ch == '[':
+			stack = append(stack, ch)
+		case ch == '}' || ch == ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	return stack
+}
+
 // arrayElementOffsets marks every byte offset in content at which a '{' opens an
 // object that is an ELEMENT of a JSON array. Offsets are the ones a caller
 // would pass to findJSONObjectEnd (the object's opening brace).

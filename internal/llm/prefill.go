@@ -12,8 +12,12 @@ package llm
 // mechanism.
 //
 // Wire format: the prefill rides as a final assistant chat message. The
-// server continues the assistant turn from it; any emitted tool-call markers
-// are parsed by the existing tool-call extraction path.
+// server continues the assistant turn from it. When the model completes the
+// call with native <|tool_call_start|> markers the existing marker parser
+// recovers it; when it completes with bare JSON (the LFM2.5 template parser
+// only recognizes markers, so the continuation lands in `content` as the
+// tail of the prefill's opened object) parseLFMPrefillContinuation
+// reconstructs the call — prefill- and shape-gated, see lfm_tool_calls.go.
 func WithAssistantPrefill(content string) ChatOption {
 	return func(o *chatOptions) {
 		o.assistantPrefill = content
