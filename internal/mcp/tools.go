@@ -60,6 +60,54 @@ func ToolDefinitions() []ToolDefinition {
 			},
 		},
 		{
+			Name:        "meept_chat_submit",
+			Description: "Submit a message to a meept session asynchronously (async-turn path). Returns an immediate ack with turn_id; the reply arrives later via turn.terminal — pair with meept_wait_turn to collect it.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{
+						"type":        "string",
+						"description": "Session ID to submit to",
+					},
+					"message": map[string]any{
+						"type":        "string",
+						"description": "Message text to send",
+					},
+					"source_client": map[string]any{
+						"type":        "string",
+						"description": "Client identifier (e.g. 'claude')",
+					},
+					"turn_id": map[string]any{
+						"type":        "string",
+						"description": "Optional client-supplied turn id (enables idempotent retry dedupe)",
+					},
+				},
+				"required": []string{"session_id", "message"},
+			},
+		},
+		{
+			Name:        "meept_wait_turn",
+			Description: "Wait for a chat.submit turn to reach a terminal state and return its final user-facing reply. Polls the bus for the turn.terminal event of the given turn_id.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"turn_id": map[string]any{
+						"type":        "string",
+						"description": "Turn ID from meept_chat_submit's ack",
+					},
+					"subscription_id": map[string]any{
+						"type":        "string",
+						"description": "Subscription ID from bus.subscribe (the mcp-chat-server's connection subscription)",
+					},
+					"timeout_ms": map[string]any{
+						"type":        "integer",
+						"description": "Total wait budget in milliseconds (default 600000)",
+					},
+				},
+				"required": []string{"turn_id", "subscription_id"},
+			},
+		},
+		{
 			Name:        "meept_events",
 			Description: "Poll events from a meept session since the last call. Returns agent progress events, chat messages from other participants, and agent responses.",
 			InputSchema: map[string]any{
@@ -72,6 +120,28 @@ func ToolDefinitions() []ToolDefinition {
 					"since": map[string]any{
 						"type":        "string",
 						"description": "RFC3339 timestamp to fetch events after",
+					},
+				},
+				"required": []string{"subscription_id"},
+			},
+		},
+		{
+			Name:        "meept_subscribe",
+			Description: "Create a bus event subscription for this connection. Returns subscription_id for meept_wait_turn / meept_events.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "meept_unsubscribe",
+			Description: "Release a bus event subscription created with meept_subscribe.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"subscription_id": map[string]any{
+						"type":        "string",
+						"description": "Subscription ID from meept_subscribe",
 					},
 				},
 				"required": []string{"subscription_id"},

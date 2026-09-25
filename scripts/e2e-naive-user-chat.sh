@@ -1446,10 +1446,25 @@ fi
 printf '%s\n' "$warmup_reply" >"$REPLIES/warmup.txt"
 log "  warmup reply: $(printf '%s' "$warmup_reply" | head -n 2 | tr '\n' ' ' | cut -c1-160)"
 
-# 6. Drive the naive-user transcript through the same MCP meept_send path
-# (real session id + sync latch), one function per turn.
+# 6. Drive the naive-user transcript through the same MCP meept path
+# (real session id), one function per turn.
+#
+# Turn transport: ASYNC by default (chat.submit + turn.terminal per the
+# async-turn-migration plan) — meept_chat_submit acks instantly with a
+# turn_id, then meept_wait_turn polls the connection's bus subscription for
+# that turn's terminal event. E2E_USE_SYNC=1 selects the legacy blocking
+# meept_send (chat RPC) byte-identically for A/B comparison.
 log ""
-log "[6/7] driving the naive-user transcript (timeout ${TURN_TIMEOUT}s/turn)..."
+if [ "${E2E_USE_SYNC:-0}" = "1" ]; then
+  log "[6/7] driving the naive-user transcript (SYNC path, timeout ${TURN_TIMEOUT}s/turn)..."
+else
+  log "[6/7] driving the naive-user transcript (ASYNC chat.submit+turn.terminal, timeout ${TURN_TIMEOUT}s/turn)..."
+fi
+
+# E2E_TURN_TIMEOUT: per-turn budget for the async wait (the terminal event
+# bound), distinct from TURN_TIMEOUT which historically bounded the blocking
+# chat RPC. Defaults to 600s; the sync path keeps using TURN_TIMEOUT.
+E2E_TURN_TIMEOUT="${E2E_TURN_TIMEOUT:-600}"
 
 mcp_send() { # $1=NAME $2=MESSAGE — reply to $REPLIES/$1.txt
   local name="$1" msg="$2"
@@ -1458,11 +1473,14 @@ mcp_send() { # $1=NAME $2=MESSAGE — reply to $REPLIES/$1.txt
       local attempt out rc
 
       for attempt in 1 2; do
-        out="$(python3 - "$CLI_BIN" "$SOCK" "$HOME_DIR" "$STATE" "$SID" "$SOURCE_CLIENT" "$TURN_TIMEOUT" "$msg" <<'PY' 2>"$errfile"
+        out="$(python3 - "$CLI_BIN" "$SOCK" "$HOME_DIR" "$STATE" "$SID" "$SOURCE_CLIENT" "$TURN_TIMEOUT" "$E2E_TURN_TIMEOUT" "${E2E_USE_SYNC:-0}" "$msg" <<'PY' 2>"$errfile"
 import json, os, subprocess, sys, threading, time
 
-cli, sock, home, state, sid, source_client, timeout, message = sys.argv[1:9]
+# Args: cli sock home state sid source_client turn_timeout e2e_turn_timeout use_sync message
+cli, sock, home, state, sid, source_client, timeout, e2e_turn_timeout, use_sync, message = sys.argv[1:10]
 timeout = float(timeout)
+e2e_turn_timeout = float(e2e_turn_timeout)
+use_sync = use_sync == "1"
 env = dict(os.environ, HOME=home)
 
 p = subprocess.Popen(
@@ -1494,9 +1512,44 @@ def wait_response(want_id, deadline):
         time.sleep(0.2)
     return None
 
+def unwrap_response_text(msg):
+    """Extract the user-facing reply text from a tools/call result.
+
+    Both meept_send and meept_wait_turn wrap the reply as
+    {"response": <text>}; unwrapping here (instead of saving the envelope)
+    keeps assert_reply_shape's A3 check from flagging the reply as a raw
+    JSON dump and A4/A5 substring checks working against real text.
+    """
+    try:
+        text = msg["result"]["content"][0]["text"]
+    except (KeyError, IndexError, TypeError):
+        return None, "unexpected tools/call result shape"
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict) and isinstance(parsed.get("response"), str):
+            text = parsed["response"]
+    except ValueError:
+        pass
+    return text, None
+
+def tool_error_text(msg):
+    try:
+        return msg["result"]["content"][0]["text"]
+    except (KeyError, IndexError, TypeError):
+        return "<no content>"
+
+# next_id for JSON-RPC request ids; connection subscription id is captured
+# at startup so the async path can poll turn.terminal events.
+req_id = [0]
+def next_id():
+    req_id[0] += 1
+    return req_id[0]
+
+sub_id = [None]
+
 try:
     deadline = time.time() + 60
-    send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+    send({"jsonrpc": "2.0", "id": next_id(), "method": "initialize",
           "params": {"protocolVersion": "2024-11-05", "capabilities": {},
                      "clientInfo": {"name": "meept-e2e", "version": "0"}}})
     initial = wait_response(1, deadline)
@@ -1504,41 +1557,95 @@ try:
         sys.exit(3)
     send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
-    send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-          "params": {"name": "meept_send",
-                     "arguments": {"session_id": sid, "source_client": source_client,
-                                   "message": message}}})
-    msg = wait_response(2, time.time() + timeout)
-    if msg is None:
-        sys.exit(124)
-    if msg.get("error"):
-        sys.stderr.write(json.dumps(msg["error"]))
-        sys.exit(1)
-    if isinstance(msg.get("result"), dict) and msg["result"].get("isError"):
-        # Surface the tool's error text: "MCP tool returned isError" alone
-        # hides the root cause (2026-09-23 run: every turn failed with the
-        # actual cause — an RPC chat.response timeout — buried in content).
+    if not use_sync:
+        # Async path: subscribe to turn.terminal BEFORE submitting so a
+        # fast terminal can never race the subscription (chat.submit acks
+        # in milliseconds and the turn may complete quickly).
+        sub_req = next_id()
+        send({"jsonrpc": "2.0", "id": sub_req, "method": "tools/call",
+              "params": {"name": "meept_subscribe", "arguments": {}}})
+        sub_msg = wait_response(sub_req, time.time() + 30)
+        if sub_msg is None or sub_msg.get("error"):
+            sys.stderr.write("bus.subscribe failed (async path)\n")
+            sys.exit(3)
         try:
-            err_text = msg["result"]["content"][0]["text"]
-        except (KeyError, IndexError, TypeError):
-            err_text = "<no content>"
-        sys.stderr.write("MCP tool returned isError: %s\n" % err_text[:500])
-        sys.exit(3)
-    try:
-        text = msg["result"]["content"][0]["text"]
-    except (KeyError, IndexError, TypeError):
-        sys.exit(3)
-    # meept_send wraps the reply as {"response": <text>}. Unwrap so the
-    # saved reply file holds the user-facing text, not the envelope
-    # (assert_reply_shape's A3 check would flag the envelope as a raw
-    # JSON dump, and A4/A5 substring checks would run against keys).
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict) and isinstance(parsed.get("response"), str):
-            text = parsed["response"]
-    except ValueError:
-        pass
-    sys.stdout.write(text)
+            sub_text = sub_msg["result"]["content"][0]["text"]
+            sub_parsed = json.loads(sub_text)
+            sub_id[0] = sub_parsed["subscription_id"]
+        except (KeyError, IndexError, TypeError, ValueError):
+            sys.stderr.write("bus.subscribe response missing subscription_id\n")
+            sys.exit(3)
+
+    if use_sync:
+        send({"jsonrpc": "2.0", "id": next_id(), "method": "tools/call",
+              "params": {"name": "meept_send",
+                         "arguments": {"session_id": sid, "source_client": source_client,
+                                       "message": message}}})
+        msg = wait_response(3, time.time() + timeout)
+        if msg is None:
+            sys.exit(124)
+        if msg.get("error"):
+            sys.stderr.write(json.dumps(msg["error"]))
+            sys.exit(1)
+        if isinstance(msg.get("result"), dict) and msg["result"].get("isError"):
+            # Surface the tool's error text: "MCP tool returned isError" alone
+            # hides the root cause (2026-09-23 run: every turn failed with the
+            # actual cause — an RPC chat.response timeout — buried in content).
+            sys.stderr.write("MCP tool returned isError: %s\n" % tool_error_text(msg)[:500])
+            sys.exit(3)
+        text, err = unwrap_response_text(msg)
+        if err:
+            sys.exit(3)
+        sys.stdout.write(text)
+    else:
+        # Submit via chat.submit (acks immediately; NEVER blocks on agent
+        # work), then wait for the turn.terminal event for that turn_id.
+        # Turn ids are client-supplied so a retried turn with the same id
+        # is deduped idempotently by the daemon's TurnRegistry instead of
+        # running the work twice.
+        turn_id = "turn-e2e-" + os.urandom(8).hex()
+        submit_id = next_id()
+        send({"jsonrpc": "2.0", "id": submit_id, "method": "tools/call",
+              "params": {"name": "meept_chat_submit",
+                         "arguments": {"session_id": sid, "source_client": source_client,
+                                       "message": message, "turn_id": turn_id}}})
+        ack = wait_response(submit_id, time.time() + 60)
+        if ack is None:
+            sys.stderr.write("meept_chat_submit: no ack within 60s\n")
+            sys.exit(3)
+        if ack.get("error"):
+            sys.stderr.write(json.dumps(ack["error"]))
+            sys.exit(1)
+        if isinstance(ack.get("result"), dict) and ack["result"].get("isError"):
+            sys.stderr.write("meept_chat_submit isError: %s\n" % tool_error_text(ack)[:500])
+            sys.exit(3)
+        try:
+            ack_text = ack["result"]["content"][0]["text"]
+            ack_parsed = json.loads(ack_text)
+            acked_turn_id = ack_parsed["turn_id"]
+        except (KeyError, IndexError, TypeError, ValueError):
+            sys.stderr.write("meept_chat_submit ack missing turn_id\n")
+            sys.exit(3)
+
+        wait_id = next_id()
+        send({"jsonrpc": "2.0", "id": wait_id, "method": "tools/call",
+              "params": {"name": "meept_wait_turn",
+                         "arguments": {"turn_id": acked_turn_id,
+                                       "subscription_id": sub_id[0],
+                                       "timeout_ms": int(e2e_turn_timeout * 1000)}}})
+        msg = wait_response(wait_id, time.time() + e2e_turn_timeout + 30)
+        if msg is None:
+            sys.exit(124)
+        if msg.get("error"):
+            sys.stderr.write(json.dumps(msg["error"]))
+            sys.exit(1)
+        if isinstance(msg.get("result"), dict) and msg["result"].get("isError"):
+            sys.stderr.write("MCP tool returned isError: %s\n" % tool_error_text(msg)[:500])
+            sys.exit(3)
+        text, err = unwrap_response_text(msg)
+        if err:
+            sys.exit(3)
+        sys.stdout.write(text)
 finally:
     if p.poll() is None:
         p.kill()
@@ -1568,7 +1675,11 @@ PY
         return 2
       fi
       if [ "$rc" -eq 124 ]; then
-        log "  turn exceeded ${TURN_TIMEOUT}s (provider too slow; chat RPC caps a sync wait at ~120s)"
+        if [ "${E2E_USE_SYNC:-0}" = "1" ]; then
+          log "  turn exceeded ${TURN_TIMEOUT}s (provider too slow; chat RPC caps a sync wait at ~120s)"
+        else
+          log "  turn exceeded ${E2E_TURN_TIMEOUT}s waiting for turn.terminal (turn_id-scoped async wait)"
+        fi
         return 2
       fi
       if printf '%s' "$errtail" | grep -Eiq 'connection refused|no route|connection reset|tls|ssl|certificate|unauthorized|401|403|api key|bad gateway|502|503|504|deadline|timeout|eof|method not found'; then

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/caimlas/meept/internal/transport"
 )
@@ -133,7 +134,7 @@ func (s *Server) handleToolsCall(req *JSONRPCRequest) *JSONRPCResponse {
 
 	// Validate tool name before checking client connection
 	switch params.Name {
-	case "meept_sessions", "meept_send", "meept_events", "meept_status", "meept_session_history":
+	case "meept_sessions", "meept_send", "meept_chat_submit", "meept_wait_turn", "meept_events", "meept_subscribe", "meept_unsubscribe", "meept_status", "meept_session_history":
 		// known tools
 	default:
 		if params.Name == "" {
@@ -166,8 +167,16 @@ func (s *Server) handleToolsCall(req *JSONRPCRequest) *JSONRPCResponse {
 		result, err = s.toolSessions(params.Arguments)
 	case "meept_send":
 		result, err = s.toolSend(params.Arguments)
+	case "meept_chat_submit":
+		result, err = s.toolChatSubmit(params.Arguments)
+	case "meept_wait_turn":
+		result, err = s.toolWaitTurn(params.Arguments)
 	case "meept_events":
 		result, err = s.toolEvents(params.Arguments)
+	case "meept_subscribe":
+		result, err = s.toolSubscribe()
+	case "meept_unsubscribe":
+		result, err = s.toolUnsubscribe(params.Arguments)
 	case "meept_status":
 		result, err = s.toolStatus(params.Arguments)
 	case "meept_session_history":
@@ -291,6 +300,182 @@ func (s *Server) toolSend(args map[string]any) (any, error) {
 	return map[string]any{
 		"response": string(result),
 	}, nil
+}
+
+func (s *Server) toolChatSubmit(args map[string]any) (any, error) {
+	sessionID, _ := args["session_id"].(string)
+	message, _ := args["message"].(string)
+	if sessionID == "" || message == "" {
+		return nil, fmt.Errorf("session_id and message are required")
+	}
+	sourceClient, _ := args["source_client"].(string)
+	if sourceClient == "" {
+		sourceClient = "mcp"
+	}
+	turnID, _ := args["turn_id"].(string)
+
+	// Fire-and-forget submit (async-turn-migration): chat.submit acks in
+	// milliseconds and NEVER blocks on agent work; the result reaches the
+	// caller later via the turn.terminal event (consumed with
+	// meept_wait_turn). Same params shape as the chat.submit RPC.
+	params := map[string]any{
+		"message":         message,
+		"conversation_id": sessionID,
+		"session_id":      sessionID,
+		"source_client":   sourceClient,
+	}
+	if turnID != "" {
+		params["turn_id"] = turnID
+	}
+	result, err := s.client.Call("chat.submit", params)
+	if err != nil {
+		return nil, err
+	}
+	var ack struct {
+		TurnID         string `json:"turn_id"`
+		ConversationID string `json:"conversation_id"`
+		SessionID      string `json:"session_id"`
+		Accepted       bool   `json:"accepted"`
+		Note           string `json:"note"`
+	}
+	if err := json.Unmarshal(result, &ack); err != nil {
+		return map[string]any{"ack_raw": string(result)}, nil
+	}
+	if !ack.Accepted {
+		return nil, fmt.Errorf("chat.submit rejected: %s", ack.Note)
+	}
+	if ack.TurnID == "" {
+		return nil, fmt.Errorf("chat.submit ack missing turn_id")
+	}
+	// Echo session_id so the caller can correlate the ack with its own
+	// bookkeeping without re-parsing the raw envelope.
+	return map[string]any{
+		"turn_id":         ack.TurnID,
+		"conversation_id": ack.ConversationID,
+		"session_id":      ack.SessionID,
+		"accepted":        true,
+		"note":            ack.Note,
+	}, nil
+}
+
+func (s *Server) toolWaitTurn(args map[string]any) (any, error) {
+	turnID, _ := args["turn_id"].(string)
+	subscriptionID, _ := args["subscription_id"].(string)
+	if turnID == "" || subscriptionID == "" {
+		return nil, fmt.Errorf("turn_id and subscription_id are required")
+	}
+	timeoutMS := 600000
+	if v, ok := args["timeout_ms"].(float64); ok && v > 0 {
+		timeoutMS = int(v)
+	}
+
+	// Poll the bus subscription for the matching turn.terminal event.
+	// The frozen TurnTerminalEvent payload is carried under "payload";
+	// "topic" is the source topic name. Poll loop budget: the caller's
+	// timeout_ms bounds TOTAL wait, so a slow daemon cannot stretch the
+	// tool past the harness's own per-turn ceiling.
+	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
+	since := ""
+	for {
+		params := map[string]any{
+			"subscription_id": subscriptionID,
+			"since":           since,
+		}
+		result, err := s.client.Call("bus.poll", params)
+		if err != nil {
+			return nil, fmt.Errorf("bus.poll: %w", err)
+		}
+		var poll struct {
+			Events []struct {
+				Topic string `json:"topic"`
+				// Timestamp decodes as time.Time from the RFC3339Nano
+				// string handleBusPoll stores; re-serializing it back to
+				// RFC3339Nano for the replay cursor keeps sub-nanosecond
+				// ordering intact.
+				Timestamp time.Time `json:"timestamp"`
+				Payload   struct {
+					TurnID         string `json:"turn_id"`
+					SessionID      string `json:"session_id"`
+					ConversationID string `json:"conversation_id"`
+					Status         string `json:"status"`
+					Reply          string `json:"reply"`
+					Error          string `json:"error"`
+				} `json:"payload"`
+			} `json:"events"`
+		}
+		if err := json.Unmarshal(result, &poll); err != nil {
+			return nil, fmt.Errorf("parse bus.poll response: %w", err)
+		}
+		for _, ev := range poll.Events {
+			// Advance the replay cursor past every event we've examined.
+			if !ev.Timestamp.IsZero() {
+				since = ev.Timestamp.Format(time.RFC3339Nano)
+			}
+			if ev.Topic != "turn.terminal" || ev.Payload.TurnID != turnID {
+				continue
+			}
+			// Parked is a mid-turn state (the liveness watchdog may later
+			// convert it to failed); keep waiting. Terminal statuses are
+			// the frozen completed|failed|timeout set.
+			switch ev.Payload.Status {
+			case "completed", "failed", "timeout":
+				resp := map[string]any{
+					"turn_id":         ev.Payload.TurnID,
+					"session_id":      ev.Payload.SessionID,
+					"conversation_id": ev.Payload.ConversationID,
+					"status":          ev.Payload.Status,
+				}
+				if ev.Payload.Error != "" {
+					resp["error"] = ev.Payload.Error
+					return map[string]any{"response": "the turn failed: " + ev.Payload.Error, "status": ev.Payload.Status, "turn_id": ev.Payload.TurnID}, nil
+				}
+				resp["response"] = ev.Payload.Reply
+				return resp, nil
+			}
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("timed out after %dms waiting for turn.terminal (turn_id=%s)", timeoutMS, turnID)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// toolSubscribe creates a fresh bus subscription over the daemon RPC
+// connection and returns its subscription_id. Callers pass the id to
+// meept_wait_turn / meept_events; meept_unsubscribe releases it. A tool of
+// its own (rather than overloading meept_events) keeps the subscribe/poll
+// lifecycle explicit.
+func (s *Server) toolSubscribe() (any, error) {
+	result, err := s.client.Call("bus.subscribe", map[string]any{
+		"topics": []string{"turn.terminal", "agent.progress", "agent.quota_wait", "chat.worker.*"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bus.subscribe: %w", err)
+	}
+	var resp struct {
+		SubscriptionID string `json:"subscription_id"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("parse subscription response: %w", err)
+	}
+	if resp.SubscriptionID == "" {
+		return nil, fmt.Errorf("bus.subscribe returned empty subscription_id")
+	}
+	return map[string]any{"subscription_id": resp.SubscriptionID}, nil
+}
+
+// toolUnsubscribe releases a subscription created with meept_subscribe.
+func (s *Server) toolUnsubscribe(args map[string]any) (any, error) {
+	subID, _ := args["subscription_id"].(string)
+	if subID == "" {
+		return nil, fmt.Errorf("subscription_id is required")
+	}
+	if _, err := s.client.Call("bus.unsubscribe", map[string]any{
+		"subscription_id": subID,
+	}); err != nil {
+		return nil, fmt.Errorf("bus.unsubscribe: %w", err)
+	}
+	return map[string]any{"unsubscribed": subID}, nil
 }
 
 func (s *Server) toolEvents(args map[string]any) (any, error) {
