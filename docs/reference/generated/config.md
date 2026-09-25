@@ -35,6 +35,7 @@ Package config provides configuration loading and validation for meept.
 - [func NormalizeContextDiscoveryDefaults\(c \*ContextDiscoveryConfig\)](<#NormalizeContextDiscoveryDefaults>)
 - [func NormalizeEvolverDefaults\(e \*SkillsEvolverConfig\) error](<#NormalizeEvolverDefaults>)
 - [func NormalizeFailurePolicyDefaults\(f \*FailurePolicyConfig\)](<#NormalizeFailurePolicyDefaults>)
+- [func NormalizePlansDefaults\(c \*PlansConfig\)](<#NormalizePlansDefaults>)
 - [func NormalizeQuotaRetryDefaults\(q \*QuotaRetryConfig\)](<#NormalizeQuotaRetryDefaults>)
 - [func NormalizeRuntimeDefaults\(rc \*RuntimeConfig\)](<#NormalizeRuntimeDefaults>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
@@ -89,6 +90,7 @@ Package config provides configuration loading and validation for meept.
 - [type BwrapRuntimeConfig](<#BwrapRuntimeConfig>)
 - [type CacheConfig](<#CacheConfig>)
 - [type CalendarConfig](<#CalendarConfig>)
+- [type ClassifierConfig](<#ClassifierConfig>)
 - [type ClassifierPrefilterConfig](<#ClassifierPrefilterConfig>)
 - [type ClusterConfig](<#ClusterConfig>)
   - [func DefaultClusterConfig\(\) ClusterConfig](<#DefaultClusterConfig>)
@@ -229,6 +231,7 @@ Package config provides configuration loading and validation for meept.
 - [type OAuthConfig](<#OAuthConfig>)
 - [type OAuthProviderEntry](<#OAuthProviderEntry>)
 - [type OrchestratorConfig](<#OrchestratorConfig>)
+- [type OutputFiltersConfig](<#OutputFiltersConfig>)
 - [type PTYConfig](<#PTYConfig>)
 - [type PacingConfig](<#PacingConfig>)
 - [type ParakeetConfig](<#ParakeetConfig>)
@@ -598,6 +601,13 @@ NormalizeEvolverDefaults normalizes the skills.evolver section: an empty PlanDir
 	func NormalizeFailurePolicyDefaults(f *FailurePolicyConfig)
 
 NormalizeFailurePolicyDefaults clamps invalid failure\_policy values to defaults: negative durations become the field default, zero means unset and takes the default; non\-positive ShortRetries takes the default; pacing intervals normalize the same way and max \< min lifts max to min. Idempotent on valid values. Pacing.Enabled is left as\-is: the default\-on value is applied by DefaultConfig\(\) \(which load unmarshal runs onto\), and an explicit pacing.enabled = false must survive every load.
+
+<a name="NormalizePlansDefaults"></a>
+## func NormalizePlansDefaults
+
+	func NormalizePlansDefaults(c *PlansConfig)
+
+NormalizePlansDefaults clamps the tiered\-iteration planning knobs to their defaults \(leaf 02 contract: a non\-positive round cap means "default 2", never "unbounded" or "zero rounds"\). Applied at the load boundary so every consumer sees normalized values.
 
 <a name="NormalizeQuotaRetryDefaults"></a>
 ## func NormalizeQuotaRetryDefaults
@@ -1355,6 +1365,23 @@ CalendarConfig holds Google Calendar integration settings. OAuth credentials are
 	    ReminderAdvanceMinutes int `json:"reminder_advance_minutes" toml:"reminder_advance_minutes"`
 	}
 
+<a name="ClassifierConfig"></a>
+## type ClassifierConfig
+
+ClassifierConfig configures LLM intent\-classifier ancillary gates that are not part of the Stage\-0 embedding prefilter.
+
+	type ClassifierConfig struct {
+	    // SessionStateUpgrade enables the one-way session-evidence upgrade to
+	    // quickplan at dispatch time (docs/plans/quickplan-session-upgrade/):
+	    // when an LLM verdict lands in a boundary lane (code/plan/review/
+	    // debug/git/analyze) AND the session holds quickplan-shaped state
+	    // (approved/executing plan, active tracked tasks) AND the input
+	    // carries lexical orchestration evidence, the verdict upgrades to
+	    // quickplan. One-way: session evidence never downgrades a quickplan
+	    // verdict. Default false = byte-identical legacy behavior.
+	    SessionStateUpgrade bool `json:"session_state_upgrade" toml:"session_state_upgrade"`
+	}
+
 <a name="ClassifierPrefilterConfig"></a>
 ## type ClassifierPrefilterConfig
 
@@ -1886,6 +1913,7 @@ DaemonConfig holds daemon\-specific settings.
 	    Uploads           UploadsConfig        `json:"uploads"              toml:"uploads"`
 	    UserInstructions  InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
 	    Verification      VerificationDefaults `json:"verification"         toml:"verification"`
+	    OutputFilters     OutputFiltersConfig  `json:"output_filters"       toml:"output_filters"`
 	}
 
 <a name="DetectionConfig"></a>
@@ -3095,6 +3123,9 @@ ModelsConfig represents the models.json5 configuration structure.
 	    // MemoryModel is the model for ambient epistemic extraction + distill
 	    // summarization (empty = falls back to the general chat client).
 	    MemoryModel string `json:"memory_model"`
+	    // PlannerModel is the dedicated model for the strategic planner; empty
+	    // = planner uses its agent default (local 8B).
+	    PlannerModel string `json:"planner_model"`
 	    // RefusalModel is the global default refusal fallback target
 	    // (provider/model ref or alias name; refusal-fallback tree 02).
 	    // Empty = no global default; a per-agent spec refusal_model overrides
@@ -3239,6 +3270,15 @@ OrchestratorConfig holds hierarchical orchestrator settings.
 	    // prefilter is inert and all traffic flows through the LLM path
 	    // unchanged.
 	    Prefilter ClassifierPrefilterConfig `json:"classifier_prefilter" toml:"classifier_prefilter"`
+	    // Classifier configures LLM intent-classifier ancillary gates that are
+	    // not part of the Stage-0 prefilter. Currently only the one-way
+	    // session-state upgrade (docs/plans/quickplan-session-upgrade/): when
+	    // enabled, a boundary-lane verdict upgrades to quickplan at dispatch
+	    // time if the session holds an approved/executing plan or active
+	    // tracked tasks. Session evidence is never a classifier feature and
+	    // never downgrades a verdict. Default false = byte-identical legacy
+	    // behavior; the gate itself lives in internal/agent/session_state_gate.go.
+	    Classifier ClassifierConfig `json:"classifier" toml:"classifier"`
 	    // SessionDrift configures the session drift detector (issue #41): a
 	    // temporal anomaly check on the per-session intent-embedding stream.
 	    // Default off, log-only — the established first production mode.
@@ -3263,6 +3303,44 @@ OrchestratorConfig holds hierarchical orchestrator settings.
 	    // migration tail. The meept-bench source special-case ALSO requires
 	    // this flag; under the default it is async like every other client.
 	    SyncChatEnabled bool `json:"sync_chat_enabled" toml:"sync_chat_enabled"`
+	    // SyncWaitStall bounds the legacy sync wait by INACTIVITY instead of
+	    // fixed elapsed time (stall-based sync-wait ceiling): each 2s poll of
+	    // the task store compares the task state and the step set against the
+	    // previous poll; any change resets the progress timer. When no change
+	    // is seen for longer than this duration the wait returns the degraded
+	    // still-running reply (best APPROVED/completed step result first).
+	    // Default 0 = stall detection ENABLED with a 30m hard cap
+	    // (sync_wait_max). Explicitly setting a negative value selects the
+	    // legacy behavior: a fixed 110s elapsed ceiling (byte-identical with
+	    // the pre-stall implementation), regardless of sync_wait_max.
+	    SyncWaitStall time.Duration `json:"sync_wait_stall" toml:"sync_wait_stall"`
+	    // SyncWaitMax is the hard elapsed cap for the legacy sync wait when
+	    // stall detection is enabled. The wait returns the same degraded reply
+	    // at the cap even if the task keeps visibly progressing. Default 30m.
+	    // NOTE: raising this above ~110s brings the legacy path back under the
+	    // chat proxy's fixed timeout (internal/rpc/proxy.go registers "chat"
+	    // with max(120s, this value + 15s)) — the proxy is bumped to match, so
+	    // the graceful reply still lands before any transport timeout.
+	    SyncWaitMax time.Duration `json:"sync_wait_max" toml:"sync_wait_max"`
+	}
+
+<a name="OutputFiltersConfig"></a>
+## type OutputFiltersConfig
+
+OutputFiltersConfig holds daemon\-level output\-filter defaults \(output\-filters tree, leaf 04\). Enabled defaults to FALSE: the filter stage is opt\-in until config turns it on, keeping the completion path byte\-identical for existing installs.
+
+	type OutputFiltersConfig struct {
+	    // Enabled gates the output-filter stage in the step-completion path.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // MaxPasses caps rewrite sweeps before the chain reports
+	    // non-convergence (chain-level convergence cap; chain default 2).
+	    MaxPasses int `json:"max_passes" toml:"max_passes"`
+	    // MaxFilterRetries caps filter-rejection requeues. Independent of
+	    // validation retries in both directions (master.md Contract 3).
+	    MaxFilterRetries int `json:"max_filter_retries" toml:"max_filter_retries"`
+	    // Filters lists the builtin filter names to run, in order
+	    // (json_format, language_en, lint_go).
+	    Filters []string `json:"filters" toml:"filters"`
 	}
 
 <a name="PTYConfig"></a>
@@ -3407,6 +3485,22 @@ PlansConfig holds configuration for the plan system.
 	    // docs/workflows/agent-orchestration.md (plan compiler pipeline
 	    // section).
 	    PlanCompilerEnabled bool `json:"plan_compiler_enabled" toml:"plan_compiler_enabled"`
+	
+	    // ComplexMaxCritiqueRounds caps the draft-critique-refine rounds the
+	    // TierComplex critique loop runs before the draft seals with a
+	    // Known Risks section (tiered-iteration leaf 02). Default 2;
+	    // zero/negative values clamp to the default at the load boundary
+	    // (NormalizePlansDefaults).
+	    ComplexMaxCritiqueRounds int `json:"complex_max_critique_rounds" toml:"complex_max_critique_rounds"`
+	
+	    // SelfSealEnabled gates the planner's autonomous self-seal
+	    // (tiered-iteration leaf 02; default FALSE — ships dark). False =
+	    // quick_plan TierComplex falls back to single-shot with a Warn and
+	    // plan mode runs the critique rounds then waits at the human seal
+	    // step. True = quick_plan TierComplex runs the full
+	    // draft-critique-refine flow and seals with provenance
+	    // "planner-self" without a human in the loop.
+	    SelfSealEnabled bool `json:"self_seal_enabled" toml:"self_seal_enabled"`
 	}
 
 <a name="PlansConfig.Validate"></a>

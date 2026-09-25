@@ -49,6 +49,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func DefaultBudgetTable\(\) map\[string\]int](<#DefaultBudgetTable>)
 - [func DerefOr\[T any\]\(p \*T, def T\) T](<#DerefOr>)
 - [func EndpointKey\(cfg \*ModelConfig\) string](<#EndpointKey>)
+- [func EstimateChatTokens\(messages \[\]ChatMessage\) int](<#EstimateChatTokens>)
 - [func EstimateTokenCountHeuristic\(content string\) int](<#EstimateTokenCountHeuristic>)
 - [func FetchLMStudioContexts\(ctx context.Context, client \*http.Client, logger \*slog.Logger, baseURL, apiKey string\) \(map\[string\]int, error\)](<#FetchLMStudioContexts>)
 - [func FetchLocalModelsContexts\(ctx context.Context, client \*http.Client, logger \*slog.Logger, baseURL string, modelKeys \[\]string\) map\[string\]int](<#FetchLocalModelsContexts>)
@@ -69,6 +70,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func IsValidEffort\(s string\) bool](<#IsValidEffort>)
 - [func JSONSchemaForTools\(defs \[\]ToolDefinition\) string](<#JSONSchemaForTools>)
 - [func LessonGrammar\(\) string](<#LessonGrammar>)
+- [func ListScratchRigRunDirs\(\) \[\]string](<#ListScratchRigRunDirs>)
 - [func NewMetricsStoreForPacing\(dbPath string\) \(\*metrics.Store, error\)](<#NewMetricsStoreForPacing>)
 - [func ParsePIDFile\(path string\) \(int, error\)](<#ParsePIDFile>)
 - [func ParseRetryAfter\(header http.Header\) \(date time.Time, delta time.Duration, present bool\)](<#ParseRetryAfter>)
@@ -92,6 +94,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func StripPromptCacheBoundary\(s string\) string](<#StripPromptCacheBoundary>)
 - [func SuperviseArgv\(parentPID, reportFD, deathFD int, spawn \[\]string\) \[\]string](<#SuperviseArgv>)
 - [func SupportedRuntimes\(\) \[\]string](<#SupportedRuntimes>)
+- [func SweepStaleSpawnRecords\(records \[\]SpawnRecord, maxAge time.Duration, now func\(\) time.Time\) \[\]int](<#SweepStaleSpawnRecords>)
 - [func ToolChoiceOf\(opts \[\]ChatOption\) string](<#ToolChoiceOf>)
 - [func ToolChoiceValid\(v string\) bool](<#ToolChoiceValid>)
 - [func ToolConstraintForRuntime\(rt RuntimeType\) string](<#ToolConstraintForRuntime>)
@@ -194,6 +197,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func DisableThinking\(\) ChatOption](<#DisableThinking>)
   - [func WithAdapter\(path string\) ChatOption](<#WithAdapter>)
   - [func WithAgentScope\(agentID string\) ChatOption](<#WithAgentScope>)
+  - [func WithAssistantPrefill\(content string\) ChatOption](<#WithAssistantPrefill>)
   - [func WithFrequencyPenalty\(p float64\) ChatOption](<#WithFrequencyPenalty>)
   - [func WithGrammar\(mode string\) ChatOption](<#WithGrammar>)
   - [func WithMaxTokens\(tokens int\) ChatOption](<#WithMaxTokens>)
@@ -300,6 +304,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(f \*ContextFirewall\) ContextUtilization\(messages \[\]ChatMessage\) float64](<#ContextFirewall.ContextUtilization>)
   - [func \(f \*ContextFirewall\) DerivedConversationBudget\(\) int](<#ContextFirewall.DerivedConversationBudget>)
   - [func \(f \*ContextFirewall\) DerivedIterationBudget\(\) int](<#ContextFirewall.DerivedIterationBudget>)
+  - [func \(f \*ContextFirewall\) Inner\(\) Chatter](<#ContextFirewall.Inner>)
   - [func \(f \*ContextFirewall\) SetCompactor\(compactor \*ContextCompactor, triggerRatio ...float64\)](<#ContextFirewall.SetCompactor>)
   - [func \(f \*ContextFirewall\) Stats\(\) FirewallStats](<#ContextFirewall.Stats>)
   - [func \(f \*ContextFirewall\) ValidateContextSize\(messages \[\]ChatMessage\) error](<#ContextFirewall.ValidateContextSize>)
@@ -658,6 +663,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type SessionSummaryResult](<#SessionSummaryResult>)
 - [type SkillRequirements](<#SkillRequirements>)
 - [type SpawnRecord](<#SpawnRecord>)
+  - [func CollectScratchRigSpawnRecords\(dirs \[\]string\) \(\[\]SpawnRecord, error\)](<#CollectScratchRigSpawnRecords>)
   - [func PruneStaleOperatorRecords\(records \[\]SpawnRecord\) \[\]SpawnRecord](<#PruneStaleOperatorRecords>)
   - [func ReadSpawnRecord\(pidFile string\) \(SpawnRecord, error\)](<#ReadSpawnRecord>)
   - [func ScanSpawnRecords\(dir string\) \(\[\]SpawnRecord, error\)](<#ScanSpawnRecords>)
@@ -816,6 +822,10 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 
 	const EnvScriptTimeout = 5 * time.Second
 
+<a name="FallbackContextLimit"></a>FallbackContextLimit is the conservative default context limit used when no model config or firewall limit is available \(chain\-stability phase\-2 saturation check\). Chosen as a common small local\-model window so a smallness verdict against it errs toward "not small" — i.e. toward the old F\-A1 compaction path.
+
+	const FallbackContextLimit = 16384
+
 <a name="LocalModelsProviderID"></a>LocalModelsProviderID is the synthetic provider alias that pulled local models register under.
 
 	const LocalModelsProviderID = "local-models"
@@ -823,6 +833,14 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 <a name="PromptCacheBoundary"></a>PromptCacheBoundary is a sentinel marker inserted into system prompt section lists to delineate static \(cacheable across sessions\) content from dynamic \(session\-specific\) content. Sections appearing before the boundary are classified as static; sections after it are classified as dynamic.
 
 	const PromptCacheBoundary = "__MEEPT_PROMPT_CACHE_BOUNDARY__"
+
+<a name="ScratchRecordStaleAfter"></a>ScratchRecordStaleAfter bounds how old a scratch\-rig spawn record may be before a live, init\-reparented, argv\-identical runtime behind it is treated as a leftover of a dead rig. Rigs are short\-lived by design: a scratch runtime that outlives its rig by this long is a leak, not a fixture. Deliberately much shorter than the production SpawnRecordStaleAfter \(6h\): no legitimate e2e or bench runtime serves a rig for hours after the rig's daemon went away.
+
+	const ScratchRecordStaleAfter = 30 * time.Minute
+
+<a name="SpawnRecordStaleAfter"></a>SpawnRecordStaleAfter is the exported read of spawnRecordStaleAfter for the daemon call site \(internal/daemon/orphan.go\) — the constant itself stays unexported so the sweep's own tests are the only other consumer.
+
+	const SpawnRecordStaleAfter = spawnRecordStaleAfter
 
 <a name="ToolChoiceRequired"></a>ToolChoiceRequired is the only tool\_choice value the request builder acts on today: force the model to emit a tool call instead of prose. It is the measured lever that fixed the llama.cpp/LFM2.5 narration failure \(tool\_choice auto 15/20, required 20/20 on the failing prompt\). Other values accepted in config are parsed for forward compatibility but are not sent — see resolveToolChoice in client.go.
 
@@ -1371,6 +1389,13 @@ DerefOr returns the dereferenced value of p, or def if p is nil.
 
 EndpointKey returns the cooldown identity for a model's base endpoint: endpoint URL host \+ credential fingerprint \(QuotaCredentialKey's provider portion; audit R2\). Host\-only keys are wrong in this repo's config practice — gala\-mlx and gala\-llama share one host while xai \(API key\) and xai\-oauth \(subscription\) share api.x.ai with unrelated credentials — so models share timeout fate ONLY when both host and credential match \(DECISIONS.md D10\). A nil or hostless config falls back to a stable, non\-empty key derived from the credential alone.
 
+<a name="EstimateChatTokens"></a>
+## func EstimateChatTokens
+
+	func EstimateChatTokens(messages []ChatMessage) int
+
+EstimateChatTokens estimates the token cost of a full chat request using the 3\-chars\-per\-token heuristic \(HeuristicTokenizer\) across every message's content plus tool\-call envelopes. Used by the agent loop's saturated\-endpoint overflow classification; a cheap structural estimate is sufficient there because the decision threshold is 50% of the window.
+
 <a name="EstimateTokenCountHeuristic"></a>
 ## func EstimateTokenCountHeuristic
 
@@ -1529,6 +1554,13 @@ LessonGrammar returns the GBNF grammar forcing the distill lesson JSON object �
 	
 
 The system prompt caps principle at 280 chars; GBNF cannot count characters, so the cap stays a post\-parse check in DecodeLesson. Pair with WithRawGrammar to attach it as payload\["grammar"\] \(llama.cpp wire format, local endpoints only\). Never returns an empty string.
+
+<a name="ListScratchRigRunDirs"></a>
+## func ListScratchRigRunDirs
+
+	func ListScratchRigRunDirs() []string
+
+ListScratchRigRunDirs exposes the scratch\-rig run\-dir discovery for callers outside this package \(the daemon's boot sweep\).
 
 <a name="NewMetricsStoreForPacing"></a>
 ## func NewMetricsStoreForPacing
@@ -1731,6 +1763,17 @@ SuperviseArgv returns the supervisor's argument list for a runtime spawn: the ru
 	func SupportedRuntimes() []string
 
 SupportedRuntimes returns the list of supported runtime types.
+
+<a name="SweepStaleSpawnRecords"></a>
+## func SweepStaleSpawnRecords
+
+	func SweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now func() time.Time) []int
+
+SweepStaleSpawnRecords reaps runtimes that the ppid==1 match of the boot orphan sweep cannot see through the ownership guard: a record older than maxAge whose pid is still ALIVE, re\-parented to init, and whose command line matches the record's argv \(issue \#54 — two orphaned llama\-servers survived \-\-keep runs whose daemons were SIGKILLed\). The PID file's ModTime is the record age proxy.
+
+Guards, in order: a record at or under maxAge is skipped; a dead pid is skipped \(the existing orphan sweep and record pruning own dead\-pid cleanup — double\-processing here would race a replacement spawn\); a process whose parent is not init is skipped \(a live meept daemon owns it\); a command line that does not match the record's argv is skipped \(matchesSpawnCommand, the same identity\-revalidation helper the boot sweep matches with\). A surviving pid keeps its handles.
+
+maxAge is a parameter so tests can pin the boundary; production callers pass spawnRecordStaleAfter. now is likewise a test seam. Returns the pids confirmed gone. Best\-effort, like every sweep: never returns an error.
 
 <a name="ToolChoiceOf"></a>
 ## func ToolChoiceOf
@@ -2699,6 +2742,17 @@ WithAdapter sets the LoRA adapter path to use for this request. The path is pass
 
 WithAgentScope sets the calling agent's identity for per\-agent token accounting. Empty string is a no\-op \(unknown agent\).
 
+<a name="WithAssistantPrefill"></a>
+### func WithAssistantPrefill
+
+	func WithAssistantPrefill(content string) ChatOption
+
+WithAssistantPrefill sets a partial assistant message appended after the conversation messages: llama\-server continues it instead of generating free\-form prose \(prefill / assistant\-prefill, server README 2026\-09\).
+
+Why: the LFM2.5\-8B GGUF is not tool\-trained. Live probes \(2026\-09\-24, issue \#57\) measured tool\_choice=required honored only 2/5 — the server accepts the field but the model has no tool\-call format to constrain. A HALF\-WRITTEN tool call continued to the complete, correct call 1/1; the platform\-side prefill retry \(loop.go unbacked\-claims nudge\) uses the same mechanism.
+
+Wire format: the prefill rides as a final assistant chat message. The server continues the assistant turn from it. When the model completes the call with native \<|tool\_call\_start|\> markers the existing marker parser recovers it; when it completes with bare JSON \(the LFM2.5 template parser only recognizes markers, so the continuation lands in \`content\` as the tail of the prefill's opened object\) parseLFMPrefillContinuation reconstructs the call — prefill\- and shape\-gated, see lfm\_tool\_calls.go.
+
 <a name="WithFrequencyPenalty"></a>
 ### func WithFrequencyPenalty
 
@@ -3586,6 +3640,13 @@ DerivedConversationBudget returns the total conversation history budget.
 	func (f *ContextFirewall) DerivedIterationBudget() int
 
 DerivedIterationBudget returns the iteration \(per\-turn\) token budget.
+
+<a name="ContextFirewall.Inner"></a>
+### func \(\*ContextFirewall\) Inner
+
+	func (f *ContextFirewall) Inner() Chatter
+
+Inner returns the wrapped chatter \(the client or manager the firewall forwards Chat calls to\). Read\-only seam for wiring tests that must identify the concrete client behind the wrapper.
 
 <a name="ContextFirewall.SetCompactor"></a>
 ### func \(\*ContextFirewall\) SetCompactor
@@ -5783,6 +5844,9 @@ ProvidersConfig represents the full models.json5 configuration.
 	    // dedicated extraction model (typically a local small LLM). Empty =
 	    // json_extract reports not-configured.
 	    ExtractModel string `json:"extract_model"`
+	    // PlannerModel is the dedicated model for the strategic planner; empty
+	    // = planner uses its agent default (local 8B).
+	    PlannerModel string `json:"planner_model"`
 	    // RefusalModel is the global default refusal fallback target
 	    // (provider/model ref or alias name; refusal-fallback tree 02).
 	    // Empty = no global default; a per-agent spec refusal_model overrides
@@ -7015,6 +7079,13 @@ SpawnRecord is the durable record of one runtime spawn: the expanded spawn comma
 	    AutoStop    bool     `json:"auto_stop"`
 	    PID         int      `json:"pid"`
 	}
+
+<a name="CollectScratchRigSpawnRecords"></a>
+### func CollectScratchRigSpawnRecords
+
+	func CollectScratchRigSpawnRecords(dirs []string) ([]SpawnRecord, error)
+
+CollectScratchRigSpawnRecords scans the given run dirs for parseable spawn records. A missing dir is skipped \(a rig cleaned up properly\); a scan of a present dir that fails is skipped the same way — the sweep's contract is best\-effort over every source, never one bad dir aborting the rest.
 
 <a name="PruneStaleOperatorRecords"></a>
 ### func PruneStaleOperatorRecords

@@ -108,6 +108,8 @@ Package agent provides the agent loop and related components.
 - [func SplitStepsByAllotment\(steps \[\]\*task.TaskStep, allotmentTokens int, cfg AllotmentConfig\) \[\]\[\]\*task.TaskStep](<#SplitStepsByAllotment>)
 - [func StatusBar\(s TurnStatus\) string](<#StatusBar>)
 - [func StoreSpecInTask\(t \*task.Task, spec \*TaskSpec\)](<#StoreSpecInTask>)
+- [func StripClaimsEvidence\(response string\) string](<#StripClaimsEvidence>)
+- [func StripClaimsEvidenceOrProse\(raw string\) string](<#StripClaimsEvidenceOrProse>)
 - [func StripReport\(response string\) string](<#StripReport>)
 - [func TeamMessageTopic\(sessionID string\) string](<#TeamMessageTopic>)
 - [func TeamResultTopic\(sessionID string\) string](<#TeamResultTopic>)
@@ -151,6 +153,7 @@ Package agent provides the agent loop and related components.
   - [func NewAgentLoop\(sessionID string, workingDir string, opts ...LoopOption\) \*AgentLoop](<#NewAgentLoop>)
   - [func \(l \*AgentLoop\) AdvanceBudgetPhase\(newPhaseID string\) error](<#AgentLoop.AdvanceBudgetPhase>)
   - [func \(l \*AgentLoop\) ApplyRequestModel\(modelRef string\)](<#AgentLoop.ApplyRequestModel>)
+  - [func \(l \*AgentLoop\) Chatter\(\) llm.Chatter](<#AgentLoop.Chatter>)
   - [func \(l \*AgentLoop\) ClearConversation\(id string\)](<#AgentLoop.ClearConversation>)
   - [func \(l \*AgentLoop\) ClearModelOverride\(\)](<#AgentLoop.ClearModelOverride>)
   - [func \(l \*AgentLoop\) ClearReasoningOverride\(\)](<#AgentLoop.ClearReasoningOverride>)
@@ -168,6 +171,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) GetConversation\(id string\) \*Conversation](<#AgentLoop.GetConversation>)
   - [func \(l \*AgentLoop\) GetDetectionContext\(\) \*DetectionContext](<#AgentLoop.GetDetectionContext>)
   - [func \(l \*AgentLoop\) GetModelOverride\(\) string](<#AgentLoop.GetModelOverride>)
+  - [func \(l \*AgentLoop\) GetModelRef\(\) string](<#AgentLoop.GetModelRef>)
   - [func \(l \*AgentLoop\) GetProjectID\(\) string](<#AgentLoop.GetProjectID>)
   - [func \(l \*AgentLoop\) GetSessionID\(\) string](<#AgentLoop.GetSessionID>)
   - [func \(l \*AgentLoop\) GetState\(\) AgentState](<#AgentLoop.GetState>)
@@ -468,6 +472,7 @@ Package agent provides the agent loop and related components.
   - [func \(h \*ChatHandler\) SetSessionStore\(s SessionStoreReader\)](<#ChatHandler.SetSessionStore>)
   - [func \(h \*ChatHandler\) SetStepStore\(store \*task.StepStore\)](<#ChatHandler.SetStepStore>)
   - [func \(h \*ChatHandler\) SetSyncMode\(enabled bool\)](<#ChatHandler.SetSyncMode>)
+  - [func \(h \*ChatHandler\) SetSyncWaitStall\(stall, hardMax time.Duration\)](<#ChatHandler.SetSyncWaitStall>)
   - [func \(h \*ChatHandler\) SetTaskStore\(store \*task.Store\)](<#ChatHandler.SetTaskStore>)
   - [func \(h \*ChatHandler\) SetThrottleParker\(parker \*TurnParker\)](<#ChatHandler.SetThrottleParker>)
   - [func \(h \*ChatHandler\) SetTurnRegistry\(registry \*TurnRegistry\)](<#ChatHandler.SetTurnRegistry>)
@@ -513,6 +518,8 @@ Package agent provides the agent loop and related components.
 - [type CompactTurn](<#CompactTurn>)
 - [type CompactionAgentConfig](<#CompactionAgentConfig>)
 - [type CompletionStatus](<#CompletionStatus>)
+- [type ComplexityTier](<#ComplexityTier>)
+  - [func EvaluatePlanComplexity\(req PlanRequest\) ComplexityTier](<#EvaluatePlanComplexity>)
 - [type CompressionReport](<#CompressionReport>)
 - [type ContextInjector](<#ContextInjector>)
   - [func NewContextInjector\(learning \*selfimprove.LearningPipeline, instructions \*preferences.Store\) \*ContextInjector](<#NewContextInjector>)
@@ -589,6 +596,7 @@ Package agent provides the agent loop and related components.
 - [type CountTracesTool](<#CountTracesTool>)
   - [func NewCountTracesTool\(store TraceStoreReader\) \*CountTracesTool](<#NewCountTracesTool>)
   - [func \(t \*CountTracesTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#CountTracesTool.Invoke>)
+- [type CritiqueInputSources](<#CritiqueInputSources>)
 - [type Decision](<#Decision>)
 - [type DependencyInferrer](<#DependencyInferrer>)
   - [func NewDependencyInferrer\(reg ToolRegistry, logger \*slog.Logger\) \*DependencyInferrer](<#NewDependencyInferrer>)
@@ -751,6 +759,10 @@ Package agent provides the agent loop and related components.
   - [func \(f \*FileWatcherHook\) SetSessionID\(id string\)](<#FileWatcherHook.SetSessionID>)
   - [func \(f \*FileWatcherHook\) Start\(ctx context.Context\) error](<#FileWatcherHook.Start>)
   - [func \(f \*FileWatcherHook\) Stop\(\) error](<#FileWatcherHook.Stop>)
+- [type FilterConfig](<#FilterConfig>)
+  - [func DefaultFilterConfig\(\) FilterConfig](<#DefaultFilterConfig>)
+  - [func EffectiveFilterConfig\(daemon config.OutputFiltersConfig, agent \*FilterConfig\) FilterConfig](<#EffectiveFilterConfig>)
+  - [func \(fc FilterConfig\) MaxFilterRetriesOrDefault\(\) int](<#FilterConfig.MaxFilterRetriesOrDefault>)
 - [type FilteredToolRegistry](<#FilteredToolRegistry>)
   - [func NewFilteredToolRegistry\(parent ToolRegistry, allowedTools \[\]string\) \*FilteredToolRegistry](<#NewFilteredToolRegistry>)
   - [func \(r \*FilteredToolRegistry\) Get\(name string\) tools.Tool](<#FilteredToolRegistry.Get>)
@@ -1122,6 +1134,10 @@ Package agent provides the agent loop and related components.
   - [func \(r \*PlaceholderToolRegistry\) GetDefinitions\(\) \[\]llm.ToolDefinition](<#PlaceholderToolRegistry.GetDefinitions>)
   - [func \(r \*PlaceholderToolRegistry\) List\(\) \[\]tools.Tool](<#PlaceholderToolRegistry.List>)
   - [func \(r \*PlaceholderToolRegistry\) Register\(tool tools.Tool\)](<#PlaceholderToolRegistry.Register>)
+- [type PlanCritiqueInput](<#PlanCritiqueInput>)
+  - [func BuildPlanCritiqueInput\(sources CritiqueInputSources\) \(\*PlanCritiqueInput, error\)](<#BuildPlanCritiqueInput>)
+  - [func \(in \*PlanCritiqueInput\) Render\(\) string](<#PlanCritiqueInput.Render>)
+  - [func \(in \*PlanCritiqueInput\) ValidateToolHints\(hints \[\]string\) \[\]critiqueObjection](<#PlanCritiqueInput.ValidateToolHints>)
 - [type PlanDraft](<#PlanDraft>)
 - [type PlanPhaseSpec](<#PlanPhaseSpec>)
   - [func PhaseSpecsFromPlan\(in \[\]plan.PhaseSpec\) \[\]PlanPhaseSpec](<#PhaseSpecsFromPlan>)
@@ -1498,16 +1514,22 @@ Package agent provides the agent loop and related components.
   - [func \(sp \*StrategicPlanner\) MaxPhases\(\) int](<#StrategicPlanner.MaxPhases>)
   - [func \(sp \*StrategicPlanner\) MaxStepsPerPhase\(\) int](<#StrategicPlanner.MaxStepsPerPhase>)
   - [func \(sp \*StrategicPlanner\) Plan\(ctx context.Context, req PlanRequest\) error](<#StrategicPlanner.Plan>)
+  - [func \(sp \*StrategicPlanner\) PlanCritiqueFlow\(ctx context.Context, req PlanRequest, input \*PlanCritiqueInput\) \(\*critiqueFlowResult, error\)](<#StrategicPlanner.PlanCritiqueFlow>)
   - [func \(sp \*StrategicPlanner\) RejectPlan\(ctx context.Context, taskID string, reason string\) error](<#StrategicPlanner.RejectPlan>)
   - [func \(sp \*StrategicPlanner\) ReplanFailedTask\(ctx context.Context, taskID, failureReason string\) error](<#StrategicPlanner.ReplanFailedTask>)
   - [func \(sp \*StrategicPlanner\) SaveDraft\(taskID, markdown string\) error](<#StrategicPlanner.SaveDraft>)
   - [func \(sp \*StrategicPlanner\) SealDraft\(taskID, hash string\) error](<#StrategicPlanner.SealDraft>)
   - [func \(sp \*StrategicPlanner\) SealPlan\(ctx context.Context, taskID string, phases \[\]PlanPhaseSpec, persistPhases func\(taskID string, phases \[\]PlanPhaseSpec\) error\) error](<#StrategicPlanner.SealPlan>)
+  - [func \(sp \*StrategicPlanner\) SetCritiqueChatter\(ch llm.Chatter\)](<#StrategicPlanner.SetCritiqueChatter>)
+  - [func \(sp \*StrategicPlanner\) SetCritiqueMaxRounds\(n int\)](<#StrategicPlanner.SetCritiqueMaxRounds>)
+  - [func \(sp \*StrategicPlanner\) SetCritiqueToolRegistry\(reg \*tools.Registry\)](<#StrategicPlanner.SetCritiqueToolRegistry>)
   - [func \(sp \*StrategicPlanner\) SetInterviewProbe\(fn func\(\)\)](<#StrategicPlanner.SetInterviewProbe>)
   - [func \(sp \*StrategicPlanner\) SetMetricsStore\(store \*metrics.Store\)](<#StrategicPlanner.SetMetricsStore>)
   - [func \(sp \*StrategicPlanner\) SetPlanCompilerEnabled\(enabled bool\)](<#StrategicPlanner.SetPlanCompilerEnabled>)
   - [func \(sp \*StrategicPlanner\) SetPlanPhaseSink\(fn func\(taskID string, phases \[\]PlanPhaseSpec\)\)](<#StrategicPlanner.SetPlanPhaseSink>)
   - [func \(sp \*StrategicPlanner\) SetRegistry\(reg \*AgentRegistry\)](<#StrategicPlanner.SetRegistry>)
+  - [func \(sp \*StrategicPlanner\) SetSelfSealEnabled\(enabled bool\)](<#StrategicPlanner.SetSelfSealEnabled>)
+  - [func \(sp \*StrategicPlanner\) SetValidToolNames\(names map\[string\]bool\)](<#StrategicPlanner.SetValidToolNames>)
 - [type StrategicPlannerConfig](<#StrategicPlannerConfig>)
 - [type SubagentExecution](<#SubagentExecution>)
 - [type SubmittedTurnRecord](<#SubmittedTurnRecord>)
@@ -1537,6 +1559,8 @@ Package agent provides the agent loop and related components.
   - [func \(ts \*TacticalScheduler\) SelectAgentForHint\(toolHint string\) string](<#TacticalScheduler.SelectAgentForHint>)
   - [func \(ts \*TacticalScheduler\) SetBurstDetector\(det \*metrics.BurstDetector\)](<#TacticalScheduler.SetBurstDetector>)
   - [func \(ts \*TacticalScheduler\) SetContextWindowProvider\(fn func\(agentID string\) int\)](<#TacticalScheduler.SetContextWindowProvider>)
+  - [func \(ts \*TacticalScheduler\) SetFilterChain\(fc \*validator.FilterChain\)](<#TacticalScheduler.SetFilterChain>)
+  - [func \(ts \*TacticalScheduler\) SetFilterRetryLimiter\(limiter filterRetryLimiter\)](<#TacticalScheduler.SetFilterRetryLimiter>)
   - [func \(ts \*TacticalScheduler\) SetHandoffPropagator\(fn func\(ctx context.Context, completedStep \*task.TaskStep\) error\)](<#TacticalScheduler.SetHandoffPropagator>)
   - [func \(ts \*TacticalScheduler\) SetMetricsStore\(store \*metrics.Store\)](<#TacticalScheduler.SetMetricsStore>)
   - [func \(ts \*TacticalScheduler\) SetSessionStore\(store sessionStoreReader\)](<#TacticalScheduler.SetSessionStore>)
@@ -2097,6 +2121,14 @@ Package agent provides the agent loop and related components.
 	    // errors.Is-classify it to distinguish "gave up on repeated
 	    // unbacked claims" from a transport or guard failure.
 	    ErrNudgeBudgetExhausted = errors.New("nudge budget exhausted")
+	    // ErrToolRepeatExhausted is the repeat-error-breaker honest-failure
+	    // sentinel (tool-boundary-hardening leaf 02): the same tool with the
+	    // same input failed with the same error maxIdenticalToolErrors times in
+	    // one logical work scope, so the loop refused further identical calls
+	    // and terminalized the turn. errors.Is-classifiable, mirroring
+	    // ErrCycleDetected, so callers distinguish "gave up on a doomed call"
+	    // from a transport or guard failure.
+	    ErrToolRepeatExhausted = errors.New("tool repeated identical failures")
 	    // ErrAgentBlocked is returned by attemptStateRecovery when the state
 	    // machine is in StateBlocked and requires external action (approval or
 	    // rate-limit lift). It wraps the triggering error so callers retain the
@@ -2120,6 +2152,22 @@ Package agent provides the agent loop and related components.
 	    ErrInterviewNoRegistry     = errors.New("interview skipped: agent registry not available")
 	    ErrInterviewPlannerMissing = errors.New("interview skipped: planner agent not available")
 	    ErrInterviewGenerationFail = errors.New("interview skipped: LLM question generation failed")
+	
+	    // ErrPlannerEmptyPlan is returned when the planner LLM parses cleanly but
+	    // produces zero steps. The empty-plan guard (issue #53 direction 3)
+	    // matches on this sentinel with errors.Is to route to the deterministic
+	    // single-step degradation or the honest failure — never the generic
+	    // fallback steps.
+	    ErrPlannerEmptyPlan = errors.New("planner returned empty plan")
+	
+	    // ErrPlannerParse wraps every parse-failure kind from parsePlanOutput
+	    // ("no JSON found in planner output", "failed to parse plan JSON: ...")
+	    // while excluding ErrPlannerEmptyPlan (which parses cleanly). The
+	    // plan-repair retry (issue #58 capability 1) matches on this sentinel
+	    // with errors.Is so a single repair pass fires only on malformed output —
+	    // never on transport/agent failures from plannerLoop.RunOnce and never on
+	    // the empty-plan degradation path.
+	    ErrPlannerParse = errors.New("planner output failed to parse")
 	)
 
 <a name="BaselineTools"></a>BaselineTools are the tools available to all agents.
@@ -2155,6 +2203,10 @@ Package agent provides the agent loop and related components.
 <a name="ErrNoExecutionSlot"></a>ErrNoExecutionSlot is returned when the semaphore blocks a step from executing.
 
 	var ErrNoExecutionSlot = errors.New("no available execution slot")
+
+<a name="ErrPlannerNoPlanNotArtifact"></a>errPlannerNoPlanNotArtifact is the honest\-failure reason \(issue \#53 direction 3, pin 2\): the planner produced no plan and the task description does not carry a single concrete artifact action, so there is nothing to execute deterministically.
+
+	var ErrPlannerNoPlanNotArtifact = errors.New("planner produced no plan; not a single-artifact task")
 
 <a name="ErrRetryBudgetExhausted"></a>ErrRetryBudgetExhausted indicates no retries remain.
 
@@ -2781,7 +2833,23 @@ Deterministic, code\-maintained, and compact: lowercase labels, fixed field orde
 
 	func StoreSpecInTask(t *task.Task, spec *TaskSpec)
 
-StoreSpecInTask serializes the spec into the task's Metadata field. It preserves any existing metadata keys by merging the "spec" key in.
+StoreSpecInTask serializes the spec into the task's Metadata field. It merges the "spec" key into the existing metadata map — the legacy wrapper re\-marshal DROPPED every non\-spec key \(plan\_draft, pending\_steps, escalation\_level, ...\) whenever a plan was stored.
+
+<a name="StripClaimsEvidence"></a>
+## func StripClaimsEvidence
+
+	func StripClaimsEvidence(response string) string
+
+StripClaimsEvidence removes a bare claims/evidence JSON envelope from the response and returns the remaining prose. Exported so the chat handler's bestStepResult can clean a task step's stored result before it becomes a user\-facing reply: the envelope is machine\-facing evidence mandated by the step prompt \(loop.go evidenceSection\), not user prose, and left in place it trips the reply guard's tool\_result\_json rule, which replaces the whole reply with a canned line.
+
+Brace\-aware rather than regex\-based: the envelope's "evidence" array nests objects, so a non\-greedy \`.\*?\\\}\` pattern stops at the first inner brace and leaves trailing \`\]\}\` debris. The scanner finds an object that starts with the "claims" key, walks to its BALANCING close brace \(strings skipped\), and removes exactly that span — fenced or bare \(fenced removal matches StripReport's behavior for the same envelope\).
+
+<a name="StripClaimsEvidenceOrProse"></a>
+## func StripClaimsEvidenceOrProse
+
+	func StripClaimsEvidenceOrProse(raw string) string
+
+StripClaimsEvidenceOrProse removes the envelope; when the ENTIRE input was the envelope, returns the envelope's own prose \(claims \+ evidence descriptions\) so the user still sees what was done instead of an empty or machine\-shaped reply \(2026\-09\-25 run NKZiEl: the model emitted an evidence\-only envelope whose inner strings held the full user answer\).
 
 <a name="StripReport"></a>
 ## func StripReport
@@ -3293,6 +3361,13 @@ TODO: call from orchestrator\_phases.go startNextPhase\(\) when phase transition
 
 ApplyRequestModel applies a client\-supplied per\-request model ref \(chat.request "model": an alias name or "provider/model\-id"\) through the same one\-shot SetModelOverride seam the dispatcher's parsed user directives use — so it takes the SAME precedence slot: request model / user directive \> alias resolution \> default ordering. It is one\-shot for the turn that carries it: reasoningCycle consumes and clears it, and nothing is written to the config. An empty ref is a no\-op \(the turn runs the alias/default chain unchanged\). Alias names are resolved to their first "provider/model\-id" member here so the in\-cycle override branch \(which resolves via ResolveRef\) can serve the turn; unresolvable refs are logged at Warn and dropped, matching the in\-cycle branch's behavior. Thread\-safe.
 
+<a name="AgentLoop.Chatter"></a>
+### func \(\*AgentLoop\) Chatter
+
+	func (l *AgentLoop) Chatter() llm.Chatter
+
+Chatter returns the loop's LLM chatter \(Client, ProviderManager, or a wrapper such as the context firewall\). Read\-only seam for wiring tests.
+
 <a name="AgentLoop.ClearConversation"></a>
 ### func \(\*AgentLoop\) ClearConversation
 
@@ -3413,6 +3488,13 @@ GetDetectionContext returns the detection context, or nil if not set. Safe to ca
 	func (l *AgentLoop) GetModelOverride() string
 
 GetModelOverride returns the current model override \(thread\-safe\).
+
+<a name="AgentLoop.GetModelRef"></a>
+### func \(\*AgentLoop\) GetModelRef
+
+	func (l *AgentLoop) GetModelRef() string
+
+GetModelRef returns the loop's model reference \(alias name or direct "provider/model" ref; empty = the loop keeps the client it was built with\). Read\-only seam for wiring tests.
 
 <a name="AgentLoop.GetProjectID"></a>
 ### func \(\*AgentLoop\) GetProjectID
@@ -5955,6 +6037,13 @@ SetSyncMode enables or disables synchronous dispatch mode. When enabled, async\-
 
 Deprecated \(async\-turn\-migration leaf 07\): this is the seam for the LEGACY blocking\-chat opt\-in only — production wiring calls SetSyncMode\(cfg.Orchestrator.SyncChatEnabled\). Under the default \(sync\_chat\_enabled=false\) the sync wait is unreachable: chat.submit acks and results arrive via turn.terminal. No in\-tree caller forces sync by itself any more \(the former meept\-bench source special\-case now also requires the flag\).
 
+<a name="ChatHandler.SetSyncWaitStall"></a>
+### func \(\*ChatHandler\) SetSyncWaitStall
+
+	func (h *ChatHandler) SetSyncWaitStall(stall, hardMax time.Duration)
+
+SetSyncWaitStall wires the stall\-based sync\-wait ceiling \(orchestrator. sync\_wait\_stall / orchestrator.sync\_wait\_max\). Nil\-guarded per the setter convention \(the ChatHandler itself is never nil here, but the daemon calls this unconditionally next to the other Set\* wiring, so the guard protects a partially\-constructed handler\).
+
 <a name="ChatHandler.SetTaskStore"></a>
 ### func \(\*ChatHandler\) SetTaskStore
 
@@ -6423,6 +6512,44 @@ CompletionStatus represents the result of a completion validation.
 	    CompletionInvalid CompletionStatus = "invalid"
 	    CompletionPartial CompletionStatus = "partial"
 	)
+
+<a name="ComplexityTier"></a>
+## type ComplexityTier
+
+ComplexityTier is the coarse planning\-effort classification for a plan request. String\-valued so it logs cleanly.
+
+	type ComplexityTier string
+
+<a name="TierTrivial"></a>
+
+	const (
+	    // TierTrivial marks work with a single concrete artifact shape — a
+	    // deterministic single step is the right plan.
+	    TierTrivial ComplexityTier = "trivial"
+	
+	    // TierStandard is the default tier: ordinary multi-step planning.
+	    TierStandard ComplexityTier = "standard"
+	
+	    // TierComplex marks work the user signaled as involved, or a re-plan
+	    // attempt of something that already failed once.
+	    TierComplex ComplexityTier = "complex"
+	)
+
+<a name="EvaluatePlanComplexity"></a>
+### func EvaluatePlanComplexity
+
+	func EvaluatePlanComplexity(req PlanRequest) ComplexityTier
+
+EvaluatePlanComplexity classifies a plan request by complexity tier.
+
+Signals, in priority order:
+
+1. Explicit user signal — the input contains "iterative"/"comprehensive"/ "thorough" or multi\-phase phrasing → TierComplex.
+2. Re\-plan attempt — req.IsReplan set by the escalation/replan path → TierComplex.
+3. Single\-artifact shape \(isSingleArtifactTask\) → TierTrivial.
+4. Otherwise → TierStandard.
+
+The first matching signal wins; nothing here is cumulative.
 
 <a name="CompressionReport"></a>
 ## type CompressionReport
@@ -6997,6 +7124,32 @@ NewCountTracesTool creates the count traces tool.
 	func (t *CountTracesTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
 
 Invoke executes the tool.
+
+<a name="CritiqueInputSources"></a>
+## type CritiqueInputSources
+
+CritiqueInputSources bundles the live system handles the assembler reads. All fields are optional; every nil/empty source degrades to an omitted section, never an error \(nil\-safe per the leaf's pins\).
+
+	type CritiqueInputSources struct {
+	    // StepStore, when non-nil, supplies the session's prior review
+	    // verdicts (bounded read, last maxCritiqueVerdicts).
+	    StepStore *task.StepStore
+	    // Registry, when non-nil, supplies ValidTools from Names() — the
+	    // same source as the planner's tool-hint validation wiring
+	    // (internal/daemon/components.go SetValidToolNames site). Declared
+	    // as the concrete *tools.Registry because the in-package
+	    // agent.ToolRegistry interface (executor.go) predates Names() and
+	    // is satisfied by the same production registry.
+	    Registry *tools.Registry
+	    // SessionID scopes the verdict read; cross-session retrieval is out
+	    // of scope (the memory system's job, later).
+	    SessionID string
+	    // Failures, when non-empty, renders the replan failure block via
+	    // buildFailureBlock (2af298b1) — no second format.
+	    Failures []stepFailure
+	    // PriorDraft, when non-nil, is carried through for rounds ≥ 2.
+	    PriorDraft *PlanDraft
+	}
 
 <a name="Decision"></a>
 ## type Decision
@@ -7687,6 +7840,11 @@ DispatcherConfig holds configuration for creating a Dispatcher.
 	    // (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
 	    AmbiguityThreshold float64
 	
+	    // SessionStateUpgrade enables the one-way quickplan session-evidence
+	    // upgrade (docs/plans/quickplan-session-upgrade/). Mirrors
+	    // orchestrator.classifier.session_state_upgrade; default false.
+	    SessionStateUpgrade bool
+	
 	    // ToolRegistry provides structural depth-based tool gating.
 	    // When non-nil, tools are gated so agents at maxDepth don't
 	    // see spawn capabilities ("make illegal states unrepresentable").
@@ -8107,6 +8265,9 @@ EscalationManagerConfig holds configuration for creating an EscalationManager.
 	    Config    EscalationConfig
 	    Planner   *StrategicPlanner
 	    TaskStore *task.Store
+	    // StepStore is optional; when set it supplies the failed-step errors
+	    // for the failure-aware replan context (issue #58 capability 2).
+	    StepStore *task.StepStore
 	    Bus       *bus.MessageBus
 	    Logger    *slog.Logger
 	}
@@ -8225,6 +8386,12 @@ ExecutionResult represents the result of a tool execution.
 	    CascadeFrom string `json:"cascade_from,omitempty"`
 	    // IsCascading is true when this failure is a downstream effect of an earlier failure.
 	    IsCascading bool `json:"is_cascading,omitempty"`
+	    // IsBreakableRepeat marks a failure as a real tool-execution failure (as
+	    // opposed to a deterministic pre-execution deny such as "permission
+	    // denied" or "unknown tool"). Only these feed the repeat-error breaker,
+	    // so a guard-only harness that fails every call identically by policy —
+	    // not by the tool's own logic — never trips breaker terminalization.
+	    IsBreakableRepeat bool `json:"is_breakable_repeat,omitempty"`
 	}
 
 <a name="ExecutionResult.ToChatMessage"></a>
@@ -8532,6 +8699,51 @@ Start begins watching filesystem paths.
 	func (f *FileWatcherHook) Stop() error
 
 Stop halts filesystem watching. It waits for in\-flight async callbacks to complete before returning.
+
+<a name="FilterConfig"></a>
+## type FilterConfig
+
+FilterConfig is the resolved output\-filter configuration for one agent. It mirrors VerificationConfig \(internal/agent/verification\_config.go\): daemon defaults flow through EffectiveFilterConfig, and per\-agent AGENT.md front matter / runtime metadata overrides win when explicitly set \(output\-filters tree, master.md Contract 6\).
+
+	type FilterConfig struct {
+	    // Enabled turns the output-filter stage on for this agent.
+	    Enabled bool `json:"enabled" yaml:"enabled"`
+	    // MaxPasses bounds the rewrite sweeps before chain fail. 0 = inherit
+	    // the daemon value.
+	    MaxPasses int `json:"max_passes" yaml:"max_passes"`
+	    // MaxFilterRetries caps filter-rejection requeues for this agent.
+	    // 0 = inherit the daemon value.
+	    MaxFilterRetries int `json:"max_filter_retries" yaml:"max_filter_retries"`
+	    // Filters names the builtin filters in execution order. The agent
+	    // list REPLACES the daemon list when non-empty.
+	    Filters []string `json:"filters" yaml:"filters"`
+	}
+
+<a name="DefaultFilterConfig"></a>
+### func DefaultFilterConfig
+
+	func DefaultFilterConfig() FilterConfig
+
+DefaultFilterConfig returns the daemon defaults, aligned with config.DefaultConfig\(\)'s OutputFilters block: disabled until opted in, both caps at 2, no filters.
+
+<a name="EffectiveFilterConfig"></a>
+### func EffectiveFilterConfig
+
+	func EffectiveFilterConfig(daemon config.OutputFiltersConfig, agent *FilterConfig) FilterConfig
+
+EffectiveFilterConfig resolves the daemon defaults against the agent override, mirroring the verification\-config semantics:
+
+- Scalars \(Enabled, MaxPasses, MaxFilterRetries\): the agent wins when explicitly set \(non\-zero\); zero falls through to the daemon value.
+- Filters: the agent list REPLACES the daemon list when non\-empty; otherwise the daemon list flows through.
+
+A nil agent pointer is the daemon\-only case.
+
+<a name="FilterConfig.MaxFilterRetriesOrDefault"></a>
+### func \(FilterConfig\) MaxFilterRetriesOrDefault
+
+	func (fc FilterConfig) MaxFilterRetriesOrDefault() int
+
+MaxFilterRetriesOrDefault returns the filter\-rejection requeue cap, defaulting 0/negative to 2 \(master.md Contract 3\). It satisfies the TacticalScheduler's filterRetryLimiter seam \(leaf 03\) as the production config\-snapshot implementation.
 
 <a name="FilteredToolRegistry"></a>
 ## type FilteredToolRegistry
@@ -11956,6 +12168,57 @@ List returns all available tools.
 
 Register adds a tool to the registry.
 
+<a name="PlanCritiqueInput"></a>
+## type PlanCritiqueInput
+
+PlanCritiqueInput is the evidence base the plan critic consumes \(tiered\-iteration leaf 03\). The planner never gathers this itself: the CALLER composes evidence, the critic judges, the planner writes.
+
+Every field is optional. Rendering \(Render\) omits empty/nil sections entirely so the critic prompt never contains "null" or empty\-list noise.
+
+	type PlanCritiqueInput struct {
+	    // PriorReviewVerdicts carries the last (bounded) review verdicts from
+	    // this session — evidence of what similar work already failed or
+	    // passed review. Source: StepStore.ReviewVerdictsForSession.
+	    PriorReviewVerdicts []task.ReviewVerdictSummary
+	    // FailureBlock is the "## Previous attempt failed" block from the
+	    // failure-triggered replan path (buildFailureBlock, 2af298b1),
+	    // reused verbatim — no second format.
+	    FailureBlock string
+	    // ValidTools is the registry's tool-name set (ToolRegistry.Names(),
+	    // the same source the planner's SetValidToolNames wiring uses), so
+	    // critic and parse-time tool-hint checks can never disagree about
+	    // what a valid tool is.
+	    ValidTools map[string]bool
+	    // PriorDraft is the previous PlanDraft, present from critique round
+	    // 2 onward (nil on the first critique).
+	    PriorDraft *PlanDraft
+	}
+
+<a name="BuildPlanCritiqueInput"></a>
+### func BuildPlanCritiqueInput
+
+	func BuildPlanCritiqueInput(sources CritiqueInputSources) (*PlanCritiqueInput, error)
+
+BuildPlanCritiqueInput assembles the critic's evidence base from the live sources. Nil\-safe: a nil step store yields zero verdicts \(not an error\), a nil registry yields an empty ValidTools set \(coverage checks then skip rather than flag everything unknown\), and no failures yields an empty FailureBlock. The returned input's FailureBlock is always bounded \(≤ failureBlockMaxChars\).
+
+<a name="PlanCritiqueInput.Render"></a>
+### func \(\*PlanCritiqueInput\) Render
+
+	func (in *PlanCritiqueInput) Render() string
+
+Render renders the input as critic\-prompt sections. Empty/nil sources omit their sections entirely: the output never contains "null", empty lists, or placeholder noise. The returned string is "" when no section has content \(callers then skip attaching an evidence block at all\).
+
+<a name="PlanCritiqueInput.ValidateToolHints"></a>
+### func \(\*PlanCritiqueInput\) ValidateToolHints
+
+	func (in *PlanCritiqueInput) ValidateToolHints(hints []string) []critiqueObjection
+
+ValidateToolHints is the tool\-coverage pre\-check: it returns a synthetic blocking objection for every draft tool hint that is NOT in ValidTools \(the leaf: such objections are decided at assembly time — no critic call is spent on that class\). Hints are checked case\-insensitively so a "Shell" hint matches a registered "shell" tool.
+
+The planner's parse\-time validation \(SetValidToolNames\) drops unknown hints; this check is the critic\-side twin and deliberately blocks instead of silently dropping, so the draft author sees the problem.
+
+Conversational hints \("chat", "report", "plan", …\) are not registry tool names and never were — they name agent roles, not tools — so they are exempt here exactly as reviewHintIsConversational exempts them elsewhere. Empty ValidTools \(nil registry\) disables the check: absence of registry information must not block every draft.
+
 <a name="PlanDraft"></a>
 ## type PlanDraft
 
@@ -11966,6 +12229,15 @@ PlanDraft is the brainstorm draft carried on a task's metadata while the user an
 	    Version    int       `json:"version"`
 	    UpdatedAt  time.Time `json:"updated_at"`
 	    SealedHash string    `json:"sealed_hash,omitempty"`
+	
+	    // Critique summary (tiered-iteration leaf 04): what the TierComplex
+	    // critique-refine loop concluded before the draft was presented for
+	    // review. Zero values = the plain (non-critiqued) draft path; the
+	    // fields ride the draft bag so plan.draft get / the seal request
+	    // surface the verdict wherever the draft markdown already travels.
+	    CritiqueRoundsUsed int    `json:"critique_rounds_used,omitempty"`
+	    KnownRisksCount    int    `json:"known_risks_count,omitempty"`
+	    CritiqueOutcome    string `json:"critique_outcome,omitempty"`
 	}
 
 <a name="PlanPhaseSpec"></a>
@@ -12039,6 +12311,20 @@ PlanRequest is the input to the strategic planner.
 	    // re-picking agents per step from the tool-hint table. Empty = no
 	    // override; per-step selection proceeds.
 	    AssignedAgent string `json:"assigned_agent,omitempty"`
+	
+	    // IsReplan marks a plan request produced by the escalation/replan path
+	    // (ReplanFailedTask). Complexity evaluation (issue #58 capability 4)
+	    // treats it as an explicit complexity signal: a task that already ran
+	    // and failed once gets the richer Complex-tier planning treatment.
+	    IsReplan bool `json:"is_replan,omitempty"`
+	
+	    // ReplanAttempt carries the task's escalation level at replan time,
+	    // read from the escalation_level key on task metadata (tiered-iteration
+	    // leaf 01: the escalation manager writes the level there, making task
+	    // metadata the single source of truth). attempt >= 2 forces TierComplex
+	    // in tierForRequest. 0 = not a replan or level unknown — callers must
+	    // never guess a count.
+	    ReplanAttempt int `json:"replan_attempt,omitempty"`
 	
 	    // RequestModel carries the client's per-request model ref (chat.request
 	    // "model"; week bughunt 2026-09-17 F18). Pre-fix it was dropped at
@@ -13412,6 +13698,15 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // still outranks it). Empty = refusal fallback feature off unless the
 	    // per-agent spec sets its own RefusalModel.
 	    GlobalRefusalModel string
+	
+	    // PlannerChatter is the dedicated chatter (built at daemon wiring time
+	    // from the models.json5 planner_model slot; issue #53 direction 4).
+	    // When set, the registry builds the planner agent's loop on this
+	    // chatter instead of the shared LLMClient and blanks the loop's
+	    // modelRef so the planner alias resolution cannot retarget the
+	    // dedicated client. Nil = every loop uses the shared chain (pre-slot
+	    // behavior, byte-identical).
+	    PlannerChatter llm.Chatter
 	}
 
 <a name="RejectedCandidateLogger"></a>
@@ -15552,6 +15847,13 @@ MaxStepsPerPhase returns the per\-phase step cap \(0 = uncapped\).
 
 Plan decomposes a task into executable steps.
 
+<a name="StrategicPlanner.PlanCritiqueFlow"></a>
+### func \(\*StrategicPlanner\) PlanCritiqueFlow
+
+	func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanRequest, input *PlanCritiqueInput) (*critiqueFlowResult, error)
+
+PlanCritiqueFlow runs the TierComplex draft→critique→refine loop for a request \(tiered\-iteration leaf 02\). See the file comment for the degradation rules and the mode/flag gating table.
+
 <a name="StrategicPlanner.RejectPlan"></a>
 ### func \(\*StrategicPlanner\) RejectPlan
 
@@ -15587,6 +15889,27 @@ SealDraft stamps the sealed document's hash on the draft \(sealing is a state ch
 
 SealPlan runs the full seal pipeline for a brainstorm task, mirroring ApprovePlan's tail with the compiled phases in place of pending steps: flatten → persist steps → generate spec → executing → promote ready → task.planned \+ orchestrator.schedule. PersistPhases \(the compiled phase declarations\) runs before the task state change; failures there abort the seal with the task still in planning.
 
+<a name="StrategicPlanner.SetCritiqueChatter"></a>
+### func \(\*StrategicPlanner\) SetCritiqueChatter
+
+	func (sp *StrategicPlanner) SetCritiqueChatter(ch llm.Chatter)
+
+SetCritiqueChatter wires the raw chatter the critique loop's draft/critic/revise calls run through. Nil \(the production default\) = the planner agent loop. Nil\-guarded.
+
+<a name="StrategicPlanner.SetCritiqueMaxRounds"></a>
+### func \(\*StrategicPlanner\) SetCritiqueMaxRounds
+
+	func (sp *StrategicPlanner) SetCritiqueMaxRounds(n int)
+
+SetCritiqueMaxRounds threads plans.complex\_max\_critique\_rounds into the planner. Values \<= 0 are ignored \(the config load boundary already clamped to the default 2 via NormalizePlansDefaults\). Nil\-guarded.
+
+<a name="StrategicPlanner.SetCritiqueToolRegistry"></a>
+### func \(\*StrategicPlanner\) SetCritiqueToolRegistry
+
+	func (sp *StrategicPlanner) SetCritiqueToolRegistry(reg *tools.Registry)
+
+SetCritiqueToolRegistry wires the production tool registry the tool\-coverage pre\-check reads \(internal/daemon/components.go beside the SetValidToolNames site — the same \*tools.Registry instance\). Nil\-guarded.
+
 <a name="StrategicPlanner.SetInterviewProbe"></a>
 ### func \(\*StrategicPlanner\) SetInterviewProbe
 
@@ -15621,6 +15944,20 @@ SetPlanPhaseSink registers a callback invoked after multi\-phase plan generation
 	func (sp *StrategicPlanner) SetRegistry(reg *AgentRegistry)
 
 SetRegistry replaces the agent registry after construction \(tests only\).
+
+<a name="StrategicPlanner.SetSelfSealEnabled"></a>
+### func \(\*StrategicPlanner\) SetSelfSealEnabled
+
+	func (sp *StrategicPlanner) SetSelfSealEnabled(enabled bool)
+
+SetSelfSealEnabled toggles the planner's autonomous self\-seal \(plans.self\_seal\_enabled, default false — ships dark\). Threaded from daemon.go next to the SetPlanCompilerEnabled site. Nil\-guarded per the repo's setter convention.
+
+<a name="StrategicPlanner.SetValidToolNames"></a>
+### func \(\*StrategicPlanner\) SetValidToolNames
+
+	func (sp *StrategicPlanner) SetValidToolNames(names map[string]bool)
+
+SetValidToolNames installs the set of tool names the planner is allowed to emit in step tool\_hint fields \(issue \#58 capability 3\). When the set is non\-empty, parsePlanOutput drops unknown hints \(with a Warn\) so the executor's tool\-hint table picks instead of routing on a hallucinated hint; a nil or empty set skips validation entirely \(legacy behavior\). Nil\-guarded: a nil receiver or nil map is a no\-op.
 
 <a name="StrategicPlannerConfig"></a>
 ## type StrategicPlannerConfig
@@ -15904,6 +16241,20 @@ SetBurstDetector wires the tool\-failure burst detector \(issue \#43\) into the 
 	func (ts *TacticalScheduler) SetContextWindowProvider(fn func(agentID string) int)
 
 SetContextWindowProvider installs the executor model's context\-window lookup \(allotment tree leaf 02\). nil is ignored \(allotment batching stays disabled; legacy scheduling behavior\), mirroring SetHandoffPropagator.
+
+<a name="TacticalScheduler.SetFilterChain"></a>
+### func \(\*TacticalScheduler\) SetFilterChain
+
+	func (ts *TacticalScheduler) SetFilterChain(fc *validator.FilterChain)
+
+SetFilterChain wires the milter\-style output\-filter chain into the step\-completion path \(output\-filters tree, leaf 03\). The nil guard follows the repo's typed\-nil convention for \*Set methods: a nil pointer \(including a typed\-nil \*validator.FilterChain arriving through an interface\) is IGNORED, leaving the stage disabled \- a disabled chain must mean byte\-identical legacy behavior, not a panic at the call site.
+
+<a name="TacticalScheduler.SetFilterRetryLimiter"></a>
+### func \(\*TacticalScheduler\) SetFilterRetryLimiter
+
+	func (ts *TacticalScheduler) SetFilterRetryLimiter(limiter filterRetryLimiter)
+
+SetFilterRetryLimiter wires the filter\-retry cap source \(output\-filters tree, leaf 04: the production implementation is the config snapshot satisfying MaxFilterRetriesOrDefault\). Nil\-guarded per the repo's typed\-nil convention: a nil limiter leaves the defaultMaxFilterRetries fallback in place.
 
 <a name="TacticalScheduler.SetHandoffPropagator"></a>
 ### func \(\*TacticalScheduler\) SetHandoffPropagator

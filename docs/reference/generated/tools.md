@@ -21,7 +21,10 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 - [func IsNoWorkingDir\(err error\) bool](<#IsNoWorkingDir>)
 - [func NoPathError\(tool string\) error](<#NoPathError>)
 - [func NoWorkingDirError\(tool string\) error](<#NoWorkingDirError>)
+- [func ValidateToolArgs\(tool Tool, args map\[string\]any\) error](<#ValidateToolArgs>)
 - [func WorkingDirFromContext\(ctx context.Context\) string](<#WorkingDirFromContext>)
+- [type ArgValidationError](<#ArgValidationError>)
+  - [func \(e \*ArgValidationError\) Error\(\) string](<#ArgValidationError.Error>)
 - [type Categorizer](<#Categorizer>)
 - [type CategoryTools](<#CategoryTools>)
 - [type Deferrable](<#Deferrable>)
@@ -120,6 +123,10 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 	    SchemaPropCapabilities   = "capabilities"
 	)
 
+<a name="ErrCodeInvalidArgs"></a>ErrCodeInvalidArgs is the machine\-readable ErrCode stamped on tool\-result envelopes whose arguments failed the registry\-level schema gate \(ValidateToolArgs\) before the tool could run.
+
+	const ErrCodeInvalidArgs = "invalid_args"
+
 ## Variables
 
 <a name="ErrNoPath"></a>ErrNoPath is the sentinel error for a filesystem call that requires an explicit path argument and received none, on a tool that does NOT fall back to the session working directory \(read\_file, write\_file, delete\_file, file\_edit\). The session may well have a working directory; the caller simply omitted the argument.
@@ -197,12 +204,39 @@ NoPathError reports that tool requires an explicit path argument and got none. T
 
 NoWorkingDirError reports that tool needed a path, had no path argument, and the session has no working directory to default to. The returned error wraps ErrNoWorkingDir \(%w\), so callers can detect it with IsNoWorkingDir / errors.Is.
 
+<a name="ValidateToolArgs"></a>
+## func ValidateToolArgs
+
+	func ValidateToolArgs(tool Tool, args map[string]any) error
+
+ValidateToolArgs validates args against the tool's declared schema: every name in Required must be present, non\-nil \(including typed nils\), and — for strings — non\-empty after TrimSpace; and every present required value must match the declared property type. Only required args are type\-checked: optional args stay the tool's own business \(forward/backward compatibility\).
+
+This is the single boundary the registry enforces; tools may keep their own hand\-rolled checks as defense\-in\-depth but the schema is now binding.
+
 <a name="WorkingDirFromContext"></a>
 ## func WorkingDirFromContext
 
 	func WorkingDirFromContext(ctx context.Context) string
 
 WorkingDirFromContext extracts the working directory from ctx, if set. Returns empty string when not present.
+
+<a name="ArgValidationError"></a>
+## type ArgValidationError
+
+ArgValidationError reports that tool arguments failed validation against the tool's own declared schema \(Tool.Parameters\(\).Required\) at the registry boundary — before the tool's Execute runs.
+
+	type ArgValidationError struct {
+	    Tool    string // tool name
+	    Arg     string // schema name of the offending argument
+	    Problem string // "missing" | "empty" | "wrong type: want string, got number"
+	}
+
+<a name="ArgValidationError.Error"></a>
+### func \(\*ArgValidationError\) Error
+
+	func (e *ArgValidationError) Error() string
+
+Error returns a message that names the argument, the problem, and the one action that unblocks the call \(pass the argument exactly as the schema names it\). The e2e offender this gate targets repeated an identical bad call because nothing structural said WHY it failed.
 
 <a name="Categorizer"></a>
 ## type Categorizer
@@ -608,6 +642,11 @@ ToolResult is the standardized result envelope returned by tool execution.
 	    Err       error             `json:"-"` // Original typed error (when available) so callers can use errors.Is/As
 	    Evidence  []models.Evidence `json:"evidence,omitempty"`
 	    Terminate bool              `json:"terminate,omitempty"` // Advisory: hint that result is final and needs no LLM follow-up
+	    // ErrCode is a machine-readable error class for failed results
+	    // (e.g. "invalid_args" for registry-level schema validation failures).
+	    // Zero value "" for every other path: purely additive, existing
+	    // constructors are untouched.
+	    ErrCode string `json:"err_code,omitempty"`
 	    // TaintLabel records the provenance taint of the result payload.
 	    // Tools that return data from untrusted sources (web fetches, shell
 	    // output, etc.) set this so downstream policy checks can apply
