@@ -466,6 +466,17 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 		msgDicts[i] = msg.ToOpenAIDictWithStore(c.uploadStore)
 	}
 
+	// Assistant prefill (WithAssistantPrefill): append the partial
+	// assistant message so llama-server CONTINUES it instead of generating
+	// free-form prose. Kept out of msgDicts truncation paths deliberately —
+	// the prefill is per-turn, not conversation history.
+	if chatOpts.assistantPrefill != "" {
+		msgDicts = append(msgDicts, map[string]any{
+			"role":    "assistant",
+			"content": chatOpts.assistantPrefill,
+		})
+	}
+
 	payload := map[string]any{
 		"model":       cfg.ModelID,
 		"messages":    msgDicts,
@@ -1007,6 +1018,11 @@ type chatOptions struct {
 	// opting in (ModelConfig.ToolChoice) and on tools being present; see
 	// resolveToolChoice.
 	toolChoice string
+	// assistantPrefill is a partial assistant message appended after the
+	// caller's messages (WithAssistantPrefill): llama-server continues the
+	// assistant turn from it instead of generating free-form prose. Empty =
+	// no prefill (payload unchanged).
+	assistantPrefill string
 	// resolvedProviderID/resolvedModelID carry the model the RESOLVER
 	// selected for THIS single request (alias resolution), set with
 	// WithResolvedModel. Empty means no per-request selection: the serving

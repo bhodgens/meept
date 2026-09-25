@@ -4341,6 +4341,18 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// turn produced spurious calls 5/5 in the same measurements.
 			if l.spec != nil && l.spec.Role == RoleExecutor {
 				chatOpts = append(chatOpts, llm.WithToolChoice(llm.ToolChoiceRequired))
+				// LFM-family executor turns ALSO get a first-call prefill
+				// (2026-09-24 probes: tool_choice=required honored only
+				// 2/5 by the LFM2.5 pair — the model has no trained
+				// tool-call format to constrain). The prefill starts the
+				// tool call; the model completes it. Only iteration 1:
+				// later iterations run the loop's own nudges/prefill
+				// retry path.
+				if iteration == 1 {
+					if hint := l.prefillToolCallHint(); hint != "" {
+						chatOpts = append(chatOpts, llm.WithAssistantPrefill(hint))
+					}
+				}
 			}
 		}
 		if inWarningZone {

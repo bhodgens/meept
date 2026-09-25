@@ -1705,6 +1705,36 @@ else
 fi
 log ""
 
+# Run-evidence JSONL (2026-09-24: per-run tier/outcome evidence that
+# SURVIVES the workdir cleanup — the metrics DB dies with $WORK, so T1
+# pass-rate trends were previously unmeasurable). One row per run,
+# appended to ~/.meept/e2e-evidence.jsonl. Best-effort: never fail the
+# run over evidence bookkeeping.
+record_run_evidence() {
+  local evidence_file="${E2E_EVIDENCE_FILE:-$HOME/.meept/e2e-evidence.jsonl}"
+  local t1_artifact="unknown" a5="unknown" result="fail" npass_n=0 nfail_n=0 nskip_n=0
+  npass_n=$NPASS
+  nfail_n=${#FAILURES[@]}
+  nskip_n=${#SKIPS[@]}
+  [ -f "$WORK/project/hello.txt" ] && t1_artifact="created" || t1_artifact="missing"
+  [ "$A5_OK" = "1" ] && a5="pass" || a5="fail"
+  [ "${#FAILURES[@]}" -eq 0 ] && result="pass"
+  python3 - "$evidence_file" "$result" "$t1_artifact" "$a5" "$npass_n" "$nfail_n" "$nskip_n" <<'PYEV' 2>/dev/null || true
+import json, sys, datetime
+path, result, t1, a5, p, f, s = sys.argv[1:8]
+row = {"date": datetime.datetime.now().isoformat(timespec="seconds"),
+       "result": result, "t1_artifact": t1, "a5_continuity": a5,
+       "pass": int(p), "fail": int(f), "skip": int(s)}
+try:
+    with open(path, "a") as fh:
+        fh.write(json.dumps(row) + "
+")
+except OSError:
+    pass
+PYEV
+}
+record_run_evidence
+
 if [ "${#FAILURES[@]}" -gt 0 ]; then
   log "RESULT: FAIL (integration bug or broken contract — see FAILED list)"
   exit 1
