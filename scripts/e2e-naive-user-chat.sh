@@ -206,19 +206,10 @@ record_run_evidence() {
   [ -f "$WORK/project/hello.txt" ] && t1_artifact="created" || t1_artifact="missing"
   [ "$A5_OK" = "1" ] && a5="pass" || a5="fail"
   [ "${#FAILURES[@]}" -eq 0 ] && result="pass"
-  python3 - "$evidence_file" "$result" "$t1_artifact" "$a5" "$npass_n" "$nfail_n" "$nskip_n" <<'PYEV' 2>/dev/null || true
-import json, sys, datetime
-path, result, t1, a5, p, f, s = sys.argv[1:8]
-row = {"date": datetime.datetime.now().isoformat(timespec="seconds"),
-       "result": result, "t1_artifact": t1, "a5_continuity": a5,
-       "pass": int(p), "fail": int(f), "skip": int(s)}
-try:
-    with open(path, "a") as fh:
-        fh.write(json.dumps(row) + "
-")
-except OSError:
-    pass
-PYEV
+  # Pure-shell append: no python dependency inside the harness env.
+  printf '{"date":"%s","result":"%s","t1_artifact":"%s","a5_continuity":"%s","pass":%s,"fail":%s,"skip":%s}\n' \
+    "$(date +%Y-%m-%dT%H:%M:%S)" "$result" "$t1_artifact" "$a5" "$npass_n" "$nfail_n" "$nskip_n" \
+    >> "$evidence_file" 2>/dev/null || true
 }
 
 prune_stale_workdirs() {
