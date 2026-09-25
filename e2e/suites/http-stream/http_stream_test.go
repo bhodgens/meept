@@ -383,6 +383,11 @@ func TestHTTPChatLoopEndToEnd(t *testing.T) {
 		t.Fatalf("http-stream-04: ack missing turn_id/conversation_id: %+v", ack)
 	}
 
+	// The terminal event may carry only the internal conversation_id; the
+	// WS filter matches subscribers by session_id OR conversation_id, so
+	// subscribe with the conv id from the ack too (the duality contract).
+	ws.Subscribe("all", convID)
+
 	// 3. turn.terminal for the acked turn arrives on WS as agent_progress
 	// (the typed Topic[T] marker path).
 	deadline := time.Now().Add(120 * time.Second)

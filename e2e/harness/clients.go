@@ -33,6 +33,10 @@ import (
 type WSClient struct {
 	conn *websocket.Conn
 	t    testing.TB
+	// skipped holds frames seen while waiting for other types, so a
+	// WaitEvent(scan A, then scan B) sequence cannot lose a B frame that
+	// arrived during the A scan.
+	skipped []WSEvent
 }
 
 // DialWS dials the daemon's WS endpoint over TLS (self-signed scratch
@@ -85,7 +89,7 @@ func (c *WSClient) Subscribe(channel, sessionID string) {
 		data["session_id"] = sessionID
 	}
 	raw, _ := json.Marshal(data)
-	payload, _ := json.Marshal(map[string]any{"type": "subscribe", "data": raw})
+	payload, _ := json.Marshal(map[string]any{"type": "subscribe", "data": json.RawMessage(raw)})
 	c.write(payload)
 	for {
 		msg := c.RecvEvent(10 * time.Second)
@@ -112,7 +116,7 @@ func (c *WSClient) Unsubscribe(channel, sessionID string) {
 		data["session_id"] = sessionID
 	}
 	raw, _ := json.Marshal(data)
-	payload, _ := json.Marshal(map[string]any{"type": "unsubscribe", "data": raw})
+	payload, _ := json.Marshal(map[string]any{"type": "unsubscribe", "data": json.RawMessage(raw)})
 	c.write(payload)
 }
 
@@ -167,6 +171,14 @@ func (c *WSClient) WaitEvent(timeout time.Duration, types ...string) *WSEvent {
 	for _, ty := range types {
 		want[ty] = true
 	}
+	// Replay frames a previous WaitEvent skipped (in arrival order) before
+	// reading anything new from the wire.
+	for i, ev := range c.skipped {
+		if want[ev.Type] {
+			c.skipped = append(c.skipped[:i], c.skipped[i+1:]...)
+			return &ev
+		}
+	}
 	deadline := time.Now().Add(timeout)
 	for {
 		budget := time.Until(deadline)
@@ -180,6 +192,7 @@ func (c *WSClient) WaitEvent(timeout time.Duration, types ...string) *WSEvent {
 		if want[msg.Type] {
 			return msg
 		}
+		c.skipped = append(c.skipped, *msg)
 	}
 }
 
