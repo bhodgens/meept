@@ -194,6 +194,33 @@ trap 'exit 129' HUP
 # the pgrep guard is defense in depth for a rig whose mtime is somehow old.
 # Best-effort: a pruning failure must never fail the run.
 # ---------------------------------------------------------------------------
+record_run_evidence() {
+  # Anchor OUTSIDE $HOME: the harness reassigns HOME to the sandbox, so
+  # ~/.meept would put the evidence inside the deleted workdir. TMPDIR
+  # anchor survives cleanup and is operator-overridable.
+  local evidence_file="${E2E_EVIDENCE_FILE:-${TMPDIR:-/tmp}/meept-e2e-evidence.jsonl}"
+  local t1_artifact="unknown" a5="unknown" result="fail" npass_n=0 nfail_n=0 nskip_n=0
+  npass_n=$NPASS
+  nfail_n=${#FAILURES[@]}
+  nskip_n=${#SKIPS[@]}
+  [ -f "$WORK/project/hello.txt" ] && t1_artifact="created" || t1_artifact="missing"
+  [ "$A5_OK" = "1" ] && a5="pass" || a5="fail"
+  [ "${#FAILURES[@]}" -eq 0 ] && result="pass"
+  python3 - "$evidence_file" "$result" "$t1_artifact" "$a5" "$npass_n" "$nfail_n" "$nskip_n" <<'PYEV' 2>/dev/null || true
+import json, sys, datetime
+path, result, t1, a5, p, f, s = sys.argv[1:8]
+row = {"date": datetime.datetime.now().isoformat(timespec="seconds"),
+       "result": result, "t1_artifact": t1, "a5_continuity": a5,
+       "pass": int(p), "fail": int(f), "skip": int(s)}
+try:
+    with open(path, "a") as fh:
+        fh.write(json.dumps(row) + "
+")
+except OSError:
+    pass
+PYEV
+}
+
 prune_stale_workdirs() {
   local found dir
   found="$(find "$(dirname "$WORK")" -maxdepth 1 -name 'meept-e2e.*' -type d -mtime +0 2>/dev/null || true)"
@@ -1420,6 +1447,7 @@ if [ "$WARMUP_RC" -ne 0 ]; then
     log "RESULT: FAIL (see FAILED list)"
     exit 1
   fi
+  record_run_evidence
   log ""
   log "RESULT: PASS with SKIPs (provider unavailable — reason printed above)"
   exit 0
@@ -1710,32 +1738,6 @@ log ""
 # pass-rate trends were previously unmeasurable). One row per run,
 # appended to ~/.meept/e2e-evidence.jsonl. Best-effort: never fail the
 # run over evidence bookkeeping.
-record_run_evidence() {
-  # Anchor OUTSIDE $HOME: the harness reassigns HOME to the sandbox, so
-  # ~/.meept would put the evidence inside the deleted workdir. TMPDIR
-  # anchor survives cleanup and is operator-overridable.
-  local evidence_file="${E2E_EVIDENCE_FILE:-${TMPDIR:-/tmp}/meept-e2e-evidence.jsonl}"
-  local t1_artifact="unknown" a5="unknown" result="fail" npass_n=0 nfail_n=0 nskip_n=0
-  npass_n=$NPASS
-  nfail_n=${#FAILURES[@]}
-  nskip_n=${#SKIPS[@]}
-  [ -f "$WORK/project/hello.txt" ] && t1_artifact="created" || t1_artifact="missing"
-  [ "$A5_OK" = "1" ] && a5="pass" || a5="fail"
-  [ "${#FAILURES[@]}" -eq 0 ] && result="pass"
-  python3 - "$evidence_file" "$result" "$t1_artifact" "$a5" "$npass_n" "$nfail_n" "$nskip_n" <<'PYEV' 2>/dev/null || true
-import json, sys, datetime
-path, result, t1, a5, p, f, s = sys.argv[1:8]
-row = {"date": datetime.datetime.now().isoformat(timespec="seconds"),
-       "result": result, "t1_artifact": t1, "a5_continuity": a5,
-       "pass": int(p), "fail": int(f), "skip": int(s)}
-try:
-    with open(path, "a") as fh:
-        fh.write(json.dumps(row) + "
-")
-except OSError:
-    pass
-PYEV
-}
 record_run_evidence
 
 if [ "${#FAILURES[@]}" -gt 0 ]; then
