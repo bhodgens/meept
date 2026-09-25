@@ -35,7 +35,13 @@ EXCLUDE_DIRS = {"vendor", "testdata", "node_modules", ".git"}
 
 
 def find_go_files():
-    """Yield all .go file paths under SCAN_DIRS, excluding EXCLUDE_DIRS."""
+    """Yield all .go file paths under SCAN_DIRS, excluding EXCLUDE_DIRS.
+
+    Sorted output: os.walk order is filesystem-dependent (macOS and Linux
+    differ), which made generated artifacts non-reproducible across OSes
+    and false-stale in CI's freshness check.
+    """
+    found = []
     for scan_dir in SCAN_DIRS:
         base = ROOT / scan_dir
         if not base.exists():
@@ -44,7 +50,8 @@ def find_go_files():
             dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
             for f in filenames:
                 if f.endswith(".go") and not f.endswith("_test.go"):
-                    yield Path(dirpath) / f
+                    found.append(Path(dirpath) / f)
+    yield from sorted(found)
 
 
 def rel(path: Path) -> str:

@@ -135,11 +135,17 @@ jobs:
       - name: Build fieldguard analyzer
         run: go build -o bin/fieldguard ./tools/analyzers/fieldguard/
 
+      - name: Build module (cgo export data for analyzers)
+        # x/tools-based analyzers load cgo deps (oto audio, tree-sitter,
+        # sqlite-vec) from export data; without a prior build they fail
+        # with "could not import C (no metadata for C)".
+        run: go build ./...
+
       - name: Run mutexio
-        # CGO off: the oto audio dep needs a C toolchain that adds nothing
-        # to a mutex-scope analysis; without this the cgo import fails on
-        # the runner ("could not import C") and the analyzer skips the pkg.
-        run: CGO_ENABLED=0 ./bin/mutexio ./...
+        # cgo must stay ON: internal/lint (tree-sitter) and
+        # internal/memory/vector (sqlite-vec) exclude all Go files
+        # without it.
+        run: ./bin/mutexio ./...
 
       - name: Run fieldguard (non-blocking)
         run: ./bin/fieldguard ./... || true
