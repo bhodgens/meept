@@ -125,8 +125,8 @@ while IFS= read -r pkg; do
     ok) ;;
     excluded*)
       echo -e "${YELLOW}SKIP(tag-gated) $pkg: ${STATE#*|}${NC}"
-      echo -e "${YELLOW}  -> analyzing with -tags=test,mage, not dropping it${NC}"
-      TAGS="test,mage" ;;
+      echo -e "${YELLOW}  -> analyzing with -tags=test,e2e,mage, not dropping it${NC}"
+      TAGS="test,e2e,mage" ;;
     nested-module*|missing*|nofiles*)
       echo -e "${YELLOW}SKIP(${STATE%%|*}) $pkg: ${STATE#*|}${NC}"
       continue ;;

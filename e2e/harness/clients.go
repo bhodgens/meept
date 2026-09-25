@@ -120,11 +120,6 @@ func (c *WSClient) Unsubscribe(channel, sessionID string) {
 	c.write(payload)
 }
 
-type wsOutMessage struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
-}
-
 func (c *WSClient) write(payload []byte) {
 	c.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

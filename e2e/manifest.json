@@ -6,6 +6,9 @@
     "e2e/suites/smoke": [
       "smoke"
     ],
+    "e2e/suites/gui-pairing": [
+      "gui-pairing"
+    ],
     "internal/rpc/": [
       "rpc-ping",
       "chat-submit",
@@ -146,6 +149,11 @@
     {
       "name": "http-auth",
       "dir": "e2e/suites/http-auth",
+      "status": "implemented"
+    },
+    {
+      "name": "gui-pairing",
+      "dir": "e2e/suites/gui-pairing",
       "status": "implemented"
     },
     {
@@ -552,6 +560,35 @@
       "paths": [
         "internal/comm/http/auth.go",
         "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "gui-pairing-01",
+      "suite": "gui-pairing",
+      "diff": "M",
+      "title": "first-run pairing: daemon console one-time code exchanges for the per-install dev key exactly once; paired key authenticates WS+REST; replay refused; key never logged",
+      "paths": [
+        "internal/comm/http/pairing.go",
+        "internal/daemon/daemon.go"
+      ]
+    },
+    {
+      "id": "gui-pairing-02",
+      "suite": "gui-pairing",
+      "diff": "S",
+      "title": "pairing negative paths: wrong code 403, malformed body 400, missing code 403",
+      "paths": [
+        "internal/comm/http/pairing.go"
+      ]
+    },
+    {
+      "id": "gui-pairing-03",
+      "suite": "gui-pairing",
+      "diff": "S",
+      "title": "pairing armed only when require_auth is on with no explicit keys/auth store; unwired otherwise (404)",
+      "paths": [
+        "internal/daemon/daemon.go",
+        "internal/comm/http/pairing.go"
       ]
     },
     {

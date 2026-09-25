@@ -218,6 +218,11 @@ type Server struct {
 	metricsUsage ModelAgentUsageProvider
 	usageDBMu    sync.Mutex
 	usageDB      *metrics.ReadOnlyStore
+
+	// pairing is the optional first-run pairing handshake (WithPairing).
+	// When nil the /api/v1/pair/* routes do not exist and the middleware
+	// chain is byte-identical to the pre-pairing behavior.
+	pairing *PairingService
 }
 
 // AgentInfo describes an agent for listing.
@@ -1040,6 +1045,13 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
 
+	// Arm the first-run pairing handshake (if wired): mint the one-time
+	// code and print it to the console BEFORE the listener comes up, so a
+	// fresh GUI can pair as soon as the daemon answers.
+	if s.pairing != nil {
+		s.pairing.Activate()
+	}
+
 	// Chain middleware: security headers first (always applied), then auth/CORS/logging
 	handler := s.middleware(SecurityHeadersMiddleware(s.config.SecurityHeaders)(mux))
 
@@ -1222,6 +1234,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Health check (always available)
 	mux.HandleFunc("GET /health", s.handleHealth)
+
+	// First-run pairing handshake (optional, loopback-only, exempt from
+	// bearer auth — the one-time pairing code is the credential). When no
+	// PairingService is wired the routes do not exist at all.
+	if s.pairing != nil {
+		mux.HandleFunc("GET /api/v1/pair/status", s.pairing.handleStatus)
+		mux.HandleFunc("POST /api/v1/pair/exchange", s.pairing.handleExchange)
+	}
 
 	if s.config.RESTEnabled {
 		s.setupRESTRoutes(mux)
@@ -1626,6 +1646,17 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 	}
 	handler = rateLimitMiddleware(handler)
 
+	// The pairing handshake is exempt from bearer auth AND rate limiting:
+	// its credential is the one-time pairing code, enforced inside the
+	// handlers together with the loopback restriction. The exemption is
+	// applied HERE (branching before the rate-limit+auth chain) so the
+	// ordinary chain stays byte-identical. When pairing is not wired this
+	// branch does not exist at all.
+	var pairingHandler *PairingService
+	if s.pairing != nil {
+		pairingHandler = s.pairing
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -1653,6 +1684,14 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 		// Wrap response writer to capture status code
 		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		if pairingHandler != nil && strings.HasPrefix(r.URL.Path, pairingPathPrefix) {
+			// Loopback-only pairing handshake: no bearer auth, no rate
+			// limit (the one-time code + single-use consumption bound the
+			// risk; remote callers are rejected inside the handlers).
+			pairingHandler.ServeHTTPForPath(lrw, r)
+			return
+		}
 
 		handler.ServeHTTP(lrw, r)
 

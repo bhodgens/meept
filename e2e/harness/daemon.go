@@ -543,6 +543,11 @@ func (d *Daemon) Pid() int {
 	return d.cmd.Process.Pid
 }
 
+// LogPath returns the daemon's combined stdout/stderr capture file. The
+// pairing suite reads it to verify the one-time pairing code was printed
+// to the console (the designed delivery channel).
+func (d *Daemon) LogPath() string { return d.logPath }
+
 // LogTail returns the last 4KB of the daemon log.
 func (d *Daemon) LogTail() string { return d.logTail() }
 
