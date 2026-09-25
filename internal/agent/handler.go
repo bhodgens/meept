@@ -2077,7 +2077,10 @@ func bestStepResult(steps []*task.TaskStep) string {
 			continue
 		}
 		done := s.State == task.StepCompleted || s.State == task.StepApproved
-		stripped := StripClaimsEvidence(s.Result)
+		// StripClaimsEvidenceOrProse: an envelope-ONLY result still carries
+		// the answer inside its evidence strings — recover that prose
+		// instead of discarding the step (2026-09-25 run NKZiEl).
+		stripped := StripClaimsEvidenceOrProse(s.Result)
 		if done {
 			if stripped != "" && s.Sequence > bestSeq {
 				best, bestSeq = stripped, s.Sequence

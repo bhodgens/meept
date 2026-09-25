@@ -203,12 +203,16 @@ func findClaimsEnvelopeSpan(s string) (int, int, bool) {
 		if s[i] != '{' {
 			continue
 		}
-		// The object must open with the "claims" key (whitespace between).
+		// The object must open with the "claims" OR "evidence" key
+		// (whitespace between): the model emits both variants of the
+		// mandated envelope (2026-09-25 run NKZiEl — an evidence-only
+		// envelope passed through the strip and the reply guard nuked the
+		// whole answer).
 		j := i + 1
 		for j < len(s) && (s[j] == ' ' || s[j] == '	' || s[j] == '\n' || s[j] == '\r') {
 			j++
 		}
-		if !strings.HasPrefix(s[j:], `"claims"`) {
+		if !strings.HasPrefix(s[j:], `"claims"`) && !strings.HasPrefix(s[j:], `"evidence"`) {
 			continue
 		}
 		// Walk to the balancing close brace; strings are skipped so braces
