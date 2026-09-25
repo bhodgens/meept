@@ -625,6 +625,7 @@ Package agent provides the agent loop and related components.
 - [type Dispatcher](<#Dispatcher>)
   - [func NewDispatcher\(cfg DispatcherConfig\) \*Dispatcher](<#NewDispatcher>)
   - [func \(d \*Dispatcher\) BuildPlanSessionContext\(ctx context.Context, sessionID, excludeTaskID string\) string](<#Dispatcher.BuildPlanSessionContext>)
+  - [func \(d \*Dispatcher\) BuildSessionDigestForConversation\(sessionID string\) \*SessionContextDigest](<#Dispatcher.BuildSessionDigestForConversation>)
   - [func \(d \*Dispatcher\) BuildSessionExecutionContext\(ctx context.Context, sessionID string\) string](<#Dispatcher.BuildSessionExecutionContext>)
   - [func \(d \*Dispatcher\) ClassifyAndRoute\(ctx context.Context, input, sessionID string, parts \[\]llm.ContentPart, agentOverride, requestModel string\) \(\*DispatchResult, error\)](<#Dispatcher.ClassifyAndRoute>)
   - [func \(d \*Dispatcher\) FollowUpActiveAgent\(ctx context.Context, conversationID, content, source string\) error](<#Dispatcher.FollowUpActiveAgent>)
@@ -7502,6 +7503,13 @@ NewDispatcher creates a new dispatcher.
 	func (d *Dispatcher) BuildPlanSessionContext(ctx context.Context, sessionID, excludeTaskID string) string
 
 BuildPlanSessionContext is BuildSessionExecutionContext composed with the session digest block \(BuildSessionContextBlock\) for plan requests. The execution\-context block carries open task TITLES; the digest block adds the most recent PRIOR task's state and best terminal step result — the evidence a "did the change get made?" plan needs to answer from session history instead of planning an interrogation of the user \(e2e run 7, 2026\-09\-11 T3\). excludeTaskID is the current turn's own placeholder task, created by ClassifyAndRoute before this call; digestContextEnabled gates the digest half so MEEPT\_DISABLE\_DIGEST\_CONTEXT=1 opts BOTH injections out together.
+
+<a name="Dispatcher.BuildSessionDigestForConversation"></a>
+### func \(\*Dispatcher\) BuildSessionDigestForConversation
+
+	func (d *Dispatcher) BuildSessionDigestForConversation(sessionID string) *SessionContextDigest
+
+BuildSessionDigestForConversation exposes the session work digest to the chat handler's reply\-guard fallback \(2026\-09\-25 A5\): when the guard replaces an introspection dump, the replacement should BE the session's digest answer rather than a generic canned line.
 
 <a name="Dispatcher.BuildSessionExecutionContext"></a>
 ### func \(\*Dispatcher\) BuildSessionExecutionContext
