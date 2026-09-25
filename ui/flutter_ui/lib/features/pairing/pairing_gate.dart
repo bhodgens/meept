@@ -138,8 +138,9 @@ class _PairingGateState extends ConsumerState<PairingGate> {
                       border: const OutlineInputBorder(),
                       errorText: _error,
                     ),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'enter the pairing code' : null,
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'enter the pairing code'
+                        : null,
                     onFieldSubmitted: (_) => _submit(),
                   ),
                   const SizedBox(height: 16),

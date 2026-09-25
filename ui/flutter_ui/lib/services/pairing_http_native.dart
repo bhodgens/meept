@@ -28,8 +28,7 @@ Future<Map<String, dynamic>?> postJsonPairing(
       // The daemon's TLS cert is self-signed; pairing is loopback-only
       // daemon-side, so mirror DaemonCertPinner's localhost-only trust.
       client.badCertificateCallback = (cert, host, port) {
-        final ok =
-            host == 'localhost' || host == '127.0.0.1' || host == '::1';
+        final ok = host == 'localhost' || host == '127.0.0.1' || host == '::1';
         if (!ok) debugPrint('[pairing] rejected non-localhost cert for $host');
         return ok;
       };
