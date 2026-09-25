@@ -239,26 +239,6 @@ classifier that never becomes healthy fails startup (F-D8).
 
 ## Coding Practices
 
-### e2e Testing Policy
-
-**All new feature tests go in the hermetic e2e tier — no new unit test files
-for new features.** Existing unit tests may be updated for bug fixes only.
-
-- Suites: `e2e/suites/<name>/` with the `e2e` build tag; manifest +
-  path→suite mapping in `e2e/manifest.json`. See
-  `docs/workflows/e2e-testing.md` for tiers, manifest format, and the
-  coverage rule.
-- `make e2e-fast` (all suites), `make e2e-fast-area AREA=<name>` (one suite),
-  `make e2e-affected` (suites affected by the working diff, via
-  `scripts/e2e-affected.sh`). The fast tier is hermetic and runs in CI;
-  `make e2e-chat` is the live-model tier, local-only.
-- Enforcement: pre-commit check [18/18] (`pre-commit-e2e`) runs the affected
-  suites on staged `internal/|pkg/|cmd/` Go changes and blocks commits that
-  add files under a NEW package directory without an e2e suite + manifest
-  entry. Emergency-only bypass: `MEEPT_SKIP_E2E=1 git commit` (prints a loud
-  warning). When you add a package, add its `path_map` entry + suite to the
-  manifest in the same commit.
-
 ### Predictable ID Prevention
 
 **Never use `time.Now().UnixNano()` or `math/rand` for ID generation, even in
