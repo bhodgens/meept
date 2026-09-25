@@ -144,6 +144,11 @@ func (m *Manager) sessionFor(ctx context.Context, sessionID string) (*session, e
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
 	)
+	// Root (CI runners) cannot use the Chrome sandbox: the zygote aborts
+	// with "No usable sandbox!" before any page loads.
+	if os.Geteuid() == 0 {
+		opts = append(opts, chromedp.Flag("no-sandbox", true))
+	}
 	if m.cfg.Headless {
 		opts = append(opts, chromedp.Headless)
 	}

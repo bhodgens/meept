@@ -244,6 +244,14 @@ func goldCluster(rng *rand.Rand, n, dim int) [][]float64 {
 	for j := range center {
 		center[j] = rng.NormFloat64()
 	}
+	return goldClusterAround(rng, center, n)
+}
+
+// goldClusterAround builds n vectors around the given center. Tests that
+// need a ref/gold split must share one center — independent centers sit
+// far apart in high dimensions and every gold vector gets flagged.
+func goldClusterAround(rng *rand.Rand, center []float64, n int) [][]float64 {
+	dim := len(center)
 	out := make([][]float64, n)
 	for i := range out {
 		v := make([]float64, dim)
@@ -277,8 +285,12 @@ func TestGoldEmbeddingsRetention(t *testing.T) {
 		ref, gold = stratifiedSplit(vecs, intents)
 	} else {
 		rng := rand.New(rand.NewSource(42))
-		ref = goldCluster(rng, 40, 32)
-		gold = goldCluster(rng, 40, 32)
+		shared := make([]float64, 32)
+		for j := range shared {
+			shared[j] = rng.NormFloat64()
+		}
+		ref = goldClusterAround(rng, shared, 40)
+		gold = goldClusterAround(rng, shared, 40)
 	}
 
 	hc, err := NewEmbedHealthCheck(writeRefJSON(t, ref), slog.New(slog.DiscardHandler))

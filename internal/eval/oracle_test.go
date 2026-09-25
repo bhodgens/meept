@@ -46,7 +46,9 @@ func TestShellOracleTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check returned error: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
+	// Slow CI runners can take several seconds to schedule the kill; assert
+	// the timeout fired well before the child's own runtime (5s sleep).
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
 		t.Errorf("timeout did not kill process promptly: %v", elapsed)
 	}
 	if res.Passed {

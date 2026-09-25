@@ -66,7 +66,7 @@ func TestWebFetchTool_SSRFGuardAllowedCIDRPermitsStub(t *testing.T) {
 	defer srv.Close()
 
 	tool := NewWebFetchTool(5*time.Second, 1000)
-	g, err := ssrf.NewGuard(ssrf.GuardConfig{AllowedCIDRs: []string{"127.0.0.0/8"}})
+	g, err := ssrf.NewGuard(ssrf.GuardConfig{AllowedCIDRs: []string{"127.0.0.0/8", "::1/128"}})
 	if err != nil {
 		t.Fatalf("NewGuard: %v", err)
 	}

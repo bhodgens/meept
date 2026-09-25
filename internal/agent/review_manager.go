@@ -283,13 +283,13 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 	// Get reviewer agent loop
 	reviewerLoop, err := rm.registry.Get(reviewerID)
 	if err != nil {
+		// Fail CLOSED: an unresolvable reviewer must never auto-approve.
+		// The old auto-approve fallback defeated the F9 guard whenever
+		// the reviewer agent spec was missing (e.g. an empty registry on
+		// a fresh checkout) — a guard-flagged step sailed through as
+		// approved. Surface the error like the RunOnce failure below.
 		rm.logger.Error("Failed to get reviewer agent", "reviewer", reviewerID, "error", err)
-		// Fall back to auto-approve if reviewer not available
-		return &ReviewResult{
-			Status:     ReviewApproved,
-			Feedback:   fmt.Sprintf("Reviewer %s not available, auto-approved", reviewerID),
-			Confidence: 0.5,
-		}, nil
+		return nil, fmt.Errorf("reviewer %s not available: %w", reviewerID, err)
 	}
 
 	// Run reviewer agent

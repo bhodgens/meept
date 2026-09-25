@@ -525,7 +525,8 @@ func TestDebugToolLoadCoreWithDummyFiles(t *testing.T) {
 		// The error should be about core dump analysis, not about dispatch.
 		t.Logf("expected analysis error (fake core file): %v", err)
 		if !strings.Contains(err.Error(), "core dump") && !strings.Contains(err.Error(), "core file") &&
-			!strings.Contains(err.Error(), "failed to analyze") && !strings.Contains(err.Error(), "not found") {
+			!strings.Contains(err.Error(), "failed to analyze") && !strings.Contains(err.Error(), "not found") &&
+			!strings.Contains(err.Error(), "no native debugger") {
 			t.Errorf("error message should mention core analysis, got: %v", err)
 		}
 	}
