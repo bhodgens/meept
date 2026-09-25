@@ -88,8 +88,10 @@ func runDoctor(fix, installMissing bool) error {
 
 	stateDirPath := stateDir
 	if stateDirPath == "" {
-		home, _ := os.UserHomeDir()
-		stateDirPath = filepath.Join(home, ".meept")
+		// MEEPT_HOME-aware (config.MeeptHome), same resolution as the
+		// socket path below — a doctor run against an overridden home
+		// must inspect that home, not ~/.meept.
+		stateDirPath = config.MeeptHome()
 	}
 	sock := getSocketPath()
 	pidFile := filepath.Join(stateDirPath, "meept.pid")
@@ -315,11 +317,7 @@ func checkStateDirWritable(dir string) doctorCheck {
 }
 
 func checkConfigReadable() doctorCheck {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return doctorCheck{name: "config-parse", ok: true, warn: true, detail: "could not resolve home directory"}
-	}
-	cfgPath := filepath.Join(home, ".meept", "meept.json5")
+	cfgPath := config.MeeptPath("meept.json5")
 	f, err := os.Open(cfgPath)
 	if err != nil {
 		return doctorCheck{name: "config-parse", ok: true, warn: true, detail: "no config file (using defaults)"}
