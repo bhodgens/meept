@@ -210,6 +210,27 @@ the override is set. Set `MEEPT_HOME` consistently for every process; if one
 side reads `~/.meept/dev_key` and the other reads `$MEEPT_HOME/dev_key`, the
 mismatch surfaces as a hard HTTP 418 auth failure.
 
+### First-run pairing (distribution GUIs)
+
+When `require_auth` is on, `api_keys` is empty, and no auth store exists
+(i.e. the effective key is the per-install dev key), the daemon arms a
+loopback-only pairing handshake:
+
+- `GET /api/v1/pair/status` and `POST /api/v1/pair/exchange` are
+  registered only when pairing is armed; otherwise the middleware chain is
+  byte-identical to before (`internal/comm/http/pairing.go`).
+- Both routes answer loopback clients only; the daemon prints a one-time
+  `crypto/rand` code (`XXXX-XXXX-XXXX`) to its console once, valid 15
+  minutes, single-use, constant-time compared, never logged at info level.
+- The exchange returns the dev key once; replay, wrong code, and expired
+  code all return the same 403.
+
+This is how a `make build-gui-dist` GUI (no embedded key) obtains
+credentials without shipping the builder's secret. Desktop apps on the same
+machine auto-pair from `$MEEPT_HOME/dev_key` when readable; web clients
+always pair explicitly. See
+[flutter_gui.md](../workflows/flutter_gui.md).
+
 ### CLI Token Management
 
 ```bash
@@ -230,7 +251,12 @@ Tokens are stored in the `transport.http.api_keys` array in `~/.meept/meept.json
 
 ### CORS
 
-CORS is enabled by default for local HTTP clients (`Access-Control-Allow-Origin: *`). This is appropriate for localhost-only deployments. For network-accessible deployments, restrict this by setting `EnableCORS: false` in server config or implementing origin whitelisting.
+CORS is enabled by default for local HTTP clients. The server never emits a
+wildcard origin: it echoes the request `Origin` only when it is empty or a
+localhost origin (`internal/comm/http/server.go`, `isLocalOrigin`), and sets
+`Access-Control-Allow-Credentials` only for explicit localhost origins. This
+is appropriate for loopback deployments. For network-accessible deployments,
+terminate TLS at a reverse proxy in front and keep the loopback bind.
 
 ### Endpoints Excluded from Authentication
 
@@ -720,20 +746,7 @@ If you're upgrading from the insecure HTTP configuration:
 
 ## Disabling Security (Development Only)
 
-For local development, you can disable transport security:
-
-```json5
-{
-  transport: {
-    http: {
-      "use_tls": false,
-      "require_auth": false,
-    },
-  },
-}
-```
-
-Or disable agent-level security:
+For local development, you can disable agent-level security:
 
 ```json5
 {
@@ -745,7 +758,14 @@ Or disable agent-level security:
 }
 ```
 
-**Warning:** This is insecure for any network-accessible deployment. Only use for local development.
+Note on transport: the HTTP server ALWAYS terminates TLS — `use_tls: false`
+is accepted for config compatibility but does not produce a plaintext
+endpoint (plain connections receive `426 Upgrade Required`; see
+`internal/comm/http/server.go` `ensureTLSCert`). The authentication knobs
+are the real transport-reduction levers: `require_auth: false` disables the
+API-key middleware.
+
+**Warning:** This is insecure for any network-accessible deployment. Only use for local development, and never with a bind address other than `127.0.0.1`.
 
 ---
 
