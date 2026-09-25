@@ -135,7 +135,7 @@
       },
       "lifecycle": {
         "runtime": "mlx",
-        "model_path": "${MEEPT_MODELS_DIR:-~/.meept/models}/lfm2.5-1.2b-combined-serialized-sft",
+        "model_path": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/mlx-classifier.pid",
@@ -157,8 +157,8 @@
       "models": {
         "lfm-combined-sft": {
           // mlx_lm.server reports the model ID as the path passed via --model.
-          "name": "${MEEPT_MODELS_DIR:-~/.meept/models}/lfm2.5-1.2b-combined-serialized-sft",
-          "path": "${MEEPT_MODELS_DIR:-~/.meept/models}/lfm2.5-1.2b-combined-serialized-sft",
+          "name": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
+          "path": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
           "capabilities": ["completion", "code", "reasoning"],
           "input_cost": 0.0,
           "output_cost": 0.0,
@@ -180,7 +180,7 @@
       },
       "lifecycle": {
         "runtime": "mlx",
-        "model_path": "${MEEPT_MODELS_DIR:-~/.meept/models}/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+        "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/mlx-general.pid",
@@ -204,8 +204,8 @@
           // mlx_lm.server reports the model ID as the path passed via --model.
           // The "name" must match this ID so the daemon doesn't try to look
           // up a different model name on HuggingFace.
-          "name": "${MEEPT_MODELS_DIR:-~/.meept/models}/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
-          "path": "${MEEPT_MODELS_DIR:-~/.meept/models}/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+          "name": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
           "capabilities": ["completion", "code", "reasoning"],
           "input_cost": 0.0,
           "output_cost": 0.0,
@@ -222,8 +222,8 @@
           "max_concurrency": 2
         },
         "lfm-1.2b-q8": {
-          "name": "${MEEPT_MODELS_DIR:-~/.meept/models}/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
-          "path": "${MEEPT_MODELS_DIR:-~/.meept/models}/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
+          "name": "/Volumes/LLMs/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
+          "path": "/Volumes/LLMs/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
           "capabilities": ["completion", "code", "reasoning"],
           "input_cost": 0.0,
           "output_cost": 0.0,
@@ -247,7 +247,7 @@
       },
       "lifecycle": {
         "runtime": "llama-cpp",
-        "model_path": "${MEEPT_MODELS_DIR:-~/.meept/models}/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
+        "model_path": "/Volumes/LLMs/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-extract.pid",
@@ -269,8 +269,8 @@
       "models": {
         "lfm2-extract": {
           // llama-server reports the model ID as the path passed via --model.
-          "name": "${MEEPT_MODELS_DIR:-~/.meept/models}/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
-          "path": "${MEEPT_MODELS_DIR:-~/.meept/models}/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
+          "name": "/Volumes/LLMs/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
+          "path": "/Volumes/LLMs/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
           "capabilities": ["completion"],
           "input_cost": 0.0,
           "output_cost": 0.0,
@@ -300,7 +300,7 @@
       },
       "lifecycle": {
         "runtime": "llama-cpp",
-        "model_path": "${MEEPT_MODELS_DIR:-~/.meept/models}/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
+        "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-general.pid",
@@ -331,7 +331,7 @@
           // GET /v1/models on :8080 reports "LFM2.5-8B-A1B-Q4_K_M.gguf"
           // for this --model path).
           "name": "LFM2.5-8B-A1B-Q4_K_M.gguf",
-          "path": "${MEEPT_MODELS_DIR:-~/.meept/models}/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
+          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
           "capabilities": ["completion", "code", "reasoning", "tool_use"],
           // tool_choice: "required" asks for a tool call on executor turns that
           // carry tools (the loop gates it on the agent's executor role, never
