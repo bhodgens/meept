@@ -81,6 +81,9 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TURN_TIMEOUT="${MEEPT_E2E_TURN_TIMEOUT:-300}"
+# Async per-turn budget (submit + wait for turn.terminal); defined early —
+# the [5/7] warmup consumes it before its later re-assignment site.
+E2E_TURN_TIMEOUT="${E2E_TURN_TIMEOUT:-600}"
 SOCKET_WAIT_SECONDS=30
 PROJECT_NAME="e2e-project"
 SESSION_NAME="e2e-naive"
@@ -1514,7 +1517,6 @@ fi
 # E2E_TURN_TIMEOUT: per-turn budget for the async wait (the terminal event
 # bound), distinct from TURN_TIMEOUT which historically bounded the blocking
 # chat RPC. Defaults to 600s; the sync path keeps using TURN_TIMEOUT.
-E2E_TURN_TIMEOUT="${E2E_TURN_TIMEOUT:-600}"
 
 mcp_send() { # $1=NAME $2=MESSAGE — reply to $REPLIES/$1.txt
   local name="$1" msg="$2"
