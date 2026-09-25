@@ -262,6 +262,38 @@ func TestExpandEnvVarsNilResolverEnvOnly(t *testing.T) {
 	}
 }
 
+// TestExpandEnvVarsDefaultSyntax pins the ${VAR:-default} syntax added for
+// MEEPT_MODELS_DIR in config/models.json5: env wins when set and non-empty;
+// the default applies when unset OR empty; plain ${VAR} still expands to
+// empty; the MODEL_PATH placeholder is never touched.
+func TestExpandEnvVarsDefaultSyntax(t *testing.T) {
+	isolateResolver(t)
+	prev := expandEnvScriptResolver
+	expandEnvScriptResolver = nil
+	t.Cleanup(func() { expandEnvScriptResolver = prev })
+
+	t.Setenv("MEEPT_TEST_VAR", "env-value")
+	if got, want := expandEnvVars("${MEEPT_TEST_VAR:-fallback}"), "env-value"; got != want {
+		t.Errorf("env set: expandEnvVars = %q, want %q", got, want)
+	}
+
+	t.Setenv("MEEPT_TEST_VAR", "")
+	if got, want := expandEnvVars("${MEEPT_TEST_VAR:-fallback}"), "fallback"; got != want {
+		t.Errorf("env empty: expandEnvVars = %q, want %q", got, want)
+	}
+
+	unsetSentinel(t, "MEEPT_TEST_VAR")
+	if got, want := expandEnvVars("${MEEPT_TEST_VAR:-/some/default}"), "/some/default"; got != want {
+		t.Errorf("env unset: expandEnvVars = %q, want %q", got, want)
+	}
+	if got, want := expandEnvVars("${MEEPT_TEST_VAR}"), ""; got != want {
+		t.Errorf("plain unset var: expandEnvVars = %q, want %q", got, want)
+	}
+	if got, want := expandEnvVars("${MODEL_PATH}"), "${MODEL_PATH}"; got != want {
+		t.Errorf("placeholder eaten: expandEnvVars = %q, want %q", got, want)
+	}
+}
+
 func TestEnvScriptResolverConcurrent(t *testing.T) {
 	home := isolateResolver(t)
 	unsetSentinel(t, "MEEPT_TEST_VAR")

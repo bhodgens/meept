@@ -67,8 +67,11 @@ func TestConfigLoads(t *testing.T) {
 	if !ok {
 		t.Fatal("lfm-8b-mlx-4bit model not found in local provider")
 	}
-	if lfm8b.Name != "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit" {
-		t.Errorf("lfm-8b-mlx-4bit name = %q, want /Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit", lfm8b.Name)
+	// LoadProvidersConfig always runs env expansion: with MEEPT_MODELS_DIR
+	// unset (test env), the ${MEEPT_MODELS_DIR:-~/.meept/models} default in
+	// the shipped config applies verbatim.
+	if lfm8b.Name != "~/.meept/models/LiquidAI/LFM2.5-8B-A1B-MLX-4bit" {
+		t.Errorf("lfm-8b-mlx-4bit name = %q, want ~/.meept/models/LiquidAI/LFM2.5-8B-A1B-MLX-4bit", lfm8b.Name)
 	}
 	if lfm8b.MaxConcurrency != 2 {
 		t.Errorf("lfm-8b-mlx-4bit max_concurrency = %d, want 2", lfm8b.MaxConcurrency)

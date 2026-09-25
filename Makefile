@@ -75,6 +75,9 @@ help:
 	@echo "  deps             Download Go modules + check the llama.cpp build floor"
 	@echo "  deps-llama-check Verify llama.cpp >= b$(LLAMA_CPP_MIN_BUILD) (LFM2.5 tool-call floor)"
 	@echo "  deps-llama       Build/install llama.cpp into $(LLAMA_CPP_PREFIX) (idempotent)"
+	@echo "  deps-models      Download model weights (prompts: path + basic/full set)"
+	@echo "  deps-models-status  Report which catalog models are present/missing"
+	@echo "  deps-mlx         Install mlx-lm into $(MEEPT_DEPS)/mlx-venv (Apple Silicon)"
 	@echo ""
 	@echo "Daemon:"
 	@echo "  daemon           Build and run daemon (foreground)"
@@ -351,6 +354,40 @@ deps-llama:
 	 LLAMA_CPP_MIN_BUILD="$(LLAMA_CPP_MIN_BUILD)" \
 	 LLAMA_CPP_MIN_DATE="$(LLAMA_CPP_MIN_DATE)" \
 	 bash scripts/install-llama-cpp.sh install
+
+# deps-models: download the meept-designed model catalog (LFM models).
+# Interactive: prompts for the storage path ($MEEPT_MODELS_DIR, default
+# $MEEPT_HOME/models) and the model set (basic = the two GGUFs on any
+# platform, full = + the 8B MLX 4-bit on Apple Silicon; non-Metal machines
+# get only the GGUFs). config/models.json5 references the same directory
+# through ${MEEPT_MODELS_DIR:-$HOME/.meept/models}, so the daemon finds what
+# this downloads. Optional (never a hard dependency of `install`): a
+# cloud-only machine skips it with choice 3 or MEEPT_MODELS_SKIP=1.
+.PHONY: deps-models deps-models-status deps-mlx
+deps-models:
+	@MEEPT_HOME="$(MEEPT_HOME)" bash scripts/install-models.sh install
+
+deps-models-status:
+	@MEEPT_HOME="$(MEEPT_HOME)" bash scripts/install-models.sh status
+
+# deps-mlx: install mlx-lm into a meept-scoped venv ($MEEPT_DEPS/mlx-venv),
+# never the system Python. Apple Silicon only; other platforms no-op.
+# models.json5 spawn_command uses "mlx_lm"; put the venv bin on PATH where
+# the daemon runs for that spawn to resolve.
+deps-mlx:
+ifeq ($(shell uname -s),Darwin)
+	@if [ "$(shell uname -m)" != "arm64" ]; then \
+		echo "mlx-lm requires Apple Silicon (arm64); skipping."; \
+		exit 0; \
+	fi
+	@python3 -m venv $(MEEPT_DEPS)/mlx-venv
+	@$(MEEPT_DEPS)/mlx-venv/bin/pip install -q --upgrade pip
+	@$(MEEPT_DEPS)/mlx-venv/bin/pip install -q mlx-lm
+	@echo "mlx-lm installed: $(MEEPT_DEPS)/mlx-venv/bin/mlx_lm.server"
+	@echo "Make sure $(MEEPT_DEPS)/mlx-venv/bin is on PATH where the daemon runs."
+else
+	@echo "mlx-lm is Apple Silicon only; skipping on this platform."
+endif
 
 # =============================================================================
 # Build

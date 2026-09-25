@@ -43,6 +43,15 @@ make install-package    # Stage bin + web payload under DESTDIR= for packaging
 make deps-llama-check   # Enforce the llama.cpp build floor (>= b9660, LFM2.5 tool-call
                         # parser); wired into `make deps` and `make install`. `make
                         # deps-llama` installs it into $MEEPT_HOME/deps/llama.cpp
+make deps-models        # Download model weights (LFM catalog); prompts for storage
+                        # path ($MEEPT_MODELS_DIR, default $MEEPT_HOME/models) and
+                        # set (basic = GGUFs any platform; full = + 8B MLX on
+                        # Apple Silicon). Optional — never blocks `make install`.
+make deps-mlx           # mlx-lm into $MEEPT_DEPS/mlx-venv (Apple Silicon only)
+# models.json5 paths use ${MEEPT_MODELS_DIR:-~/.meept/models}; an existing
+# drive-mounted layout keeps working by exporting MEEPT_MODELS_DIR (e.g.
+# /Volumes/LLMs) in the shell or $MEEPT_HOME/env. `meept doctor` reports
+# present/missing per lifecycle endpoint (report-only).
 
 # Test
 #

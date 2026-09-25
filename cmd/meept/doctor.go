@@ -129,6 +129,7 @@ func runDoctor(fix, installMissing bool) error {
 	checks = append(checks, checkStateDirWritable(stateDirPath))
 	checks = append(checks, checkConfigReadable())
 	checks = append(checks, checkDiskFreeDoctor(stateDirPath))
+	checks = append(checks, checkModelsDoctor()...)
 
 	// Build the sweep inputs once: the report path and the --fix reaper share
 	// them, so they can never disagree about what counts as an orphan. Configs

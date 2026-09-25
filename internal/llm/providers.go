@@ -153,8 +153,12 @@ func ToolChoiceValid(v string) bool {
 	}
 }
 
-// envVarPattern matches ${VAR_NAME} or $VAR_NAME patterns.
-var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+// envVarPattern matches ${VAR_NAME}, ${VAR_NAME:-default}, or $VAR_NAME
+// patterns.
+var envVarPattern = regexp.MustCompile(
+	`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}` + // ${VAR} or ${VAR:-default}
+		`|\$\{([^}]+)\}` + // legacy ${ANYTHING} (MODEL_PATH, session_id)
+		`|\$([A-Za-z_][A-Za-z0-9_]*)`) // plain $VAR
 
 // LoadProvidersConfig loads providers configuration from a JSON5 file.
 func LoadProvidersConfig(path string) (*ProvidersConfig, error) {
@@ -483,11 +487,18 @@ func expandEnvVars(s string) string {
 	}
 
 	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
-		var varName string
-		if strings.HasPrefix(match, "${") {
-			varName = match[2 : len(match)-1]
-		} else {
-			varName = match[1:]
+		m := envVarPattern.FindStringSubmatch(match)
+		var varName, defVal string
+		hasDefault := false
+		switch {
+		case m[1] != "":
+			varName = m[1]
+			hasDefault = m[2] != ""
+			defVal = m[3]
+		case m[4] != "":
+			varName = m[4]
+		case m[5] != "":
+			varName = m[5]
 		}
 
 		// Skip placeholder variables - they will be expanded later
@@ -495,12 +506,21 @@ func expandEnvVars(s string) string {
 			return match
 		}
 
+		var val string
 		if expandEnvScriptResolver != nil {
-			val, _ := expandEnvScriptResolver.Resolve(varName)
+			val, _ = expandEnvScriptResolver.Resolve(varName)
+		} else {
+			val, _ = os.LookupEnv(varName)
+		}
+		if val != "" {
 			return val
 		}
-		if val, ok := os.LookupEnv(varName); ok {
-			return val
+		// Unset or empty: fall back to ${VAR:-default} when the config
+		// declares one (e.g. MEEPT_MODELS_DIR defaults to the meept-scoped
+		// model store). Plain ${VAR} and $VAR keep the historical behavior:
+		// expand to empty.
+		if hasDefault {
+			return defVal
 		}
 		return ""
 	})
