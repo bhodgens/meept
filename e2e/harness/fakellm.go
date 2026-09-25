@@ -93,11 +93,249 @@ type FakeLLM struct {
 	postToolText  string     // executor reply once the queue is empty
 	chatText      string     // non-classifier/planner/executor replies
 	classifierOut string     // classification JSON (empty = heuristic)
+	plannerText   string     // planner decompose reply (empty = hard-coded plan)
 
 	requests []map[string]any
 
 	// debugPath, when set, receives one JSON line per request body.
 	debugPath string
+
+	// scripts holds predicate-keyed responses, evaluated in order BEFORE
+	// the shape heuristics. Conversations bind to responses via
+	// request-shape predicates instead of FIFO arrival order.
+	scripts []scriptEntry
+}
+
+// RequestPredicate evaluates one completion request body. Predicates run
+// under the FakeLLM mutex during response routing — they must not call
+// back into the FakeLLM.
+type RequestPredicate func(body map[string]any) bool
+
+// ScriptedResponse is one scripted reply served when its predicate
+// matches. Exactly one reply mode wins, checked in this order: Status
+// (raw HTTP error injection), Raw (fully canned envelope), ToolCalls
+// (tool_calls finish), Text (content + Finish). Usage, when set,
+// overrides the canned usage counters on Text/ToolCalls envelopes.
+type ScriptedResponse struct {
+	Text      string     // completion content
+	Finish    string     // finish_reason for Text (default "stop"; "content_filter" triggers DetectRefusal)
+	ToolCalls []ToolCall // OpenAI tool calls (finish "tool_calls")
+	Status    int        // non-zero: reply with this HTTP status + Body (error injection)
+	Body      string     // error body for Status
+	Raw       *ChatCompletionResponse
+	Usage     map[string]int
+
+	MaxServes int // 0 = unlimited; otherwise consumed after N matches
+}
+
+// TextResponse scripts a plain completion reply.
+func TextResponse(text string) ScriptedResponse { return ScriptedResponse{Text: text} }
+
+// ToolCallResponse scripts a tool_calls reply.
+func ToolCallResponse(calls ...ToolCall) ScriptedResponse {
+	return ScriptedResponse{ToolCalls: calls}
+}
+
+// QuotaResponse scripts the wire shape that internal/llm's client parses
+// into *QuotaResetError: HTTP 429 + {"error":{"type":code,"resets_at":...}}
+// (see parseQuotaBody / classifyQuotaDecision in internal/llm/errors_quota.go
+// and the 429 branch of internal/llm/client.go).
+func QuotaResponse(code string, resetsAt time.Time) ScriptedResponse {
+	errObj := map[string]any{"type": code, "message": "usage window exhausted (fake-llm)"}
+	if !resetsAt.IsZero() {
+		errObj["resets_at"] = resetsAt.Unix()
+	}
+	raw, _ := json.Marshal(map[string]any{"error": errObj})
+	return ScriptedResponse{Status: http.StatusTooManyRequests, Body: string(raw)}
+}
+
+// HTTPStatusResponse scripts a raw HTTP error (e.g. 500 for a retryable
+// APIError, or a refusal-marker body — see DetectRefusalFromBody's
+// conservative marker list in internal/llm/errors_refusal.go).
+func HTTPStatusResponse(status int, body string) ScriptedResponse {
+	return ScriptedResponse{Status: status, Body: body}
+}
+
+// RefusalFinishResponse scripts a 200 completion whose finish_reason is
+// "content_filter" — the OpenAI-compatible refusal signal DetectRefusal
+// maps onto *RefusalError (Source "finish_reason").
+func RefusalFinishResponse() ScriptedResponse {
+	return ScriptedResponse{Text: "", Finish: "content_filter"}
+}
+
+// PlannerPlanResponse scripts a planner decompose reply (raw plan JSON).
+func PlannerPlanResponse(planJSON string) ScriptedResponse {
+	return ScriptedResponse{Text: planJSON}
+}
+
+// ClassifierJSONResponse scripts an intent-classifier reply.
+func ClassifierJSONResponse(classifierJSON string) ScriptedResponse {
+	return ScriptedResponse{Text: classifierJSON}
+}
+
+// scriptEntry is one registered predicate/response pair.
+type scriptEntry struct {
+	pred   RequestPredicate
+	resp   ScriptedResponse
+	served int
+}
+
+func (e *scriptEntry) maxServes() int {
+	if e.resp.MaxServes > 0 {
+		return e.resp.MaxServes
+	}
+	return 0
+}
+
+// Script registers a predicate-keyed response. Scripts are evaluated in
+// registration order BEFORE the legacy shape heuristics (planner →
+// executor → classifier → chat), so a matching script always wins and
+// non-scripting suites keep their exact legacy behavior. A script whose
+// MaxServes is exhausted is skipped (later scripts, then heuristics).
+func (f *FakeLLM) Script(pred RequestPredicate, resp ScriptedResponse) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.scripts = append(f.scripts, scriptEntry{pred: pred, resp: resp})
+}
+
+// ScriptOnce registers a predicate-keyed response consumed on first match.
+func (f *FakeLLM) ScriptOnce(pred RequestPredicate, resp ScriptedResponse) {
+	resp.MaxServes = 1
+	f.Script(pred, resp)
+}
+
+// ScriptN registers a predicate-keyed response served at most n times.
+func (f *FakeLLM) ScriptN(n int, pred RequestPredicate, resp ScriptedResponse) {
+	resp.MaxServes = n
+	f.Script(pred, resp)
+}
+
+// ResetScripts drops every scripted predicate/response pair (legacy
+// fields — tool calls, chat text, classifier/planner overrides — survive;
+// use Reset for a full wipe).
+func (f *FakeLLM) ResetScripts() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.scripts = nil
+}
+
+// --- Request predicates -------------------------------------------------
+
+// MessageContains matches when ANY message's text contains substr
+// (same concatenation the shape heuristics match against).
+func MessageContains(substr string) RequestPredicate {
+	return func(body map[string]any) bool { return strings.Contains(msgTexts(body), substr) }
+}
+
+// LastUserMessageContains matches the final user message's text.
+func LastUserMessageContains(substr string) RequestPredicate {
+	return func(body map[string]any) bool {
+		msgs, _ := body["messages"].([]any)
+		var last string
+		for _, m := range msgs {
+			msg, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			if role, _ := msg["role"].(string); role == "user" {
+				last, _ = msg["content"].(string)
+			}
+		}
+		return strings.Contains(last, substr)
+	}
+}
+
+// SystemPromptContains matches the system prompt text.
+func SystemPromptContains(substr string) RequestPredicate {
+	return func(body map[string]any) bool { return strings.Contains(systemText(body), substr) }
+}
+
+// HasToolNamed matches when the request's tools array declares a tool
+// with the given function name.
+func HasToolNamed(name string) RequestPredicate {
+	return func(body map[string]any) bool {
+		tools, ok := body["tools"].([]any)
+		if !ok {
+			return false
+		}
+		for _, raw := range tools {
+			fn, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if f2, ok := fn["function"].(map[string]any); ok {
+				fn = f2
+			}
+			if n, _ := fn["name"].(string); n == name {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// IsPlannerRequest matches the planner decompose shape (same detection the
+// legacy heuristic uses).
+func IsPlannerRequest() RequestPredicate {
+	return func(body map[string]any) bool {
+		all := msgTexts(body)
+		return strings.Contains(all, "task planner") && strings.Contains(all, "Decompose")
+	}
+}
+
+// IsClassifierRequest matches the intent-classifier system-prompt shape.
+func IsClassifierRequest() RequestPredicate {
+	return func(body map[string]any) bool {
+		sys := systemText(body)
+		return strings.Contains(sys, "intent classifier") || strings.Contains(sys, "multi-intent detector")
+	}
+}
+
+// IsExecutorRequest matches tool-bearing executor turns.
+func IsExecutorRequest() RequestPredicate {
+	return func(body map[string]any) bool { return hasTools(body) }
+}
+
+// SessionMentions matches when the serialized request body contains the
+// given id anywhere (session ids travel in message context text, not a
+// dedicated wire field — this is deliberately broad).
+func SessionMentions(id string) RequestPredicate {
+	return func(body map[string]any) bool {
+		raw, err := json.Marshal(body)
+		return err == nil && strings.Contains(string(raw), id)
+	}
+}
+
+// And joins predicates conjunctively.
+func And(preds ...RequestPredicate) RequestPredicate {
+	return func(body map[string]any) bool {
+		for _, p := range preds {
+			if !p(body) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// Not negates a predicate.
+func Not(p RequestPredicate) RequestPredicate {
+	return func(body map[string]any) bool { return !p(body) }
+}
+
+// OnCallNumber matches on the nth (1-based) request that satisfies inner —
+// "the second executor turn of this step" style scripting. Each
+// OnCallNumber invocation carries its own counter (thread-safe: routing
+// runs under the FakeLLM mutex).
+func OnCallNumber(n int, inner RequestPredicate) RequestPredicate {
+	count := 0
+	return func(body map[string]any) bool {
+		if !inner(body) {
+			return false
+		}
+		count++
+		return count == n
+	}
 }
 
 // SetDebugPath enables per-request body dumping (diagnostics).
@@ -172,11 +410,23 @@ func (f *FakeLLM) SetChatText(text string) {
 // SetClassifierOutput pins the classification JSON. When empty (the
 // default), the classifier is answered heuristically: imperative +
 // artifact-noun inputs classify as "code" @0.92, everything else as
-// "chat" @0.9.
+// "chat" @0.9. Per-prompt classifier outputs are scriptable via
+// Script(IsClassifierRequest(), ClassifierJSONResponse(...)) and win
+// over this global pin.
 func (f *FakeLLM) SetClassifierOutput(jsonReply string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.classifierOut = jsonReply
+}
+
+// SetPlannerResponse pins the planner decompose reply (a plan JSON
+// document). When empty (the default), planner turns get the hard-coded
+// one-step plan. Per-conversation plans are scriptable via
+// Script(IsPlannerRequest(), PlannerPlanResponse(...)).
+func (f *FakeLLM) SetPlannerResponse(planJSON string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.plannerText = planJSON
 }
 
 // Reset clears all scripts and the request log (per-test setup).
@@ -187,6 +437,8 @@ func (f *FakeLLM) Reset() {
 	f.postToolText = "done"
 	f.chatText = "ok"
 	f.classifierOut = ""
+	f.plannerText = ""
+	f.scripts = nil
 	f.requests = nil
 }
 
@@ -228,8 +480,19 @@ func (f *FakeLLM) handleCompletions(w http.ResponseWriter, r *http.Request) {
 
 	f.mu.Lock()
 	f.requests = append(f.requests, body)
-	resp := f.classifyLocked(body)
+	resp, rawStatus := f.classifyLocked(body)
 	f.mu.Unlock()
+
+	// Raw HTTP error injection (ScriptedResponse.Status).
+	if rawStatus != nil {
+		if f.debugPath != "" {
+			if raw, err := json.Marshal(map[string]any{"injected_status": rawStatus.Status, "request": body}); err == nil {
+				f.appendDebugLocked(raw)
+			}
+		}
+		http.Error(w, rawStatus.Body, rawStatus.Status)
+		return
+	}
 
 	// Tool-bearing executor turns go through the client's STREAMING path
 	// ("stream": true). Emit the canned response as SSE deltas.
@@ -240,18 +503,10 @@ func (f *FakeLLM) handleCompletions(w http.ResponseWriter, r *http.Request) {
 
 	if f.debugPath != "" {
 		if raw, err := json.Marshal(body); err == nil {
-			fh, err := os.OpenFile(f.debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-			if err == nil {
-				_, _ = fh.Write(append(raw, '\n'))
-				_ = fh.Close()
-			}
+			f.appendDebugLocked(raw)
 		}
 		if rawResp, err := json.Marshal(resp); err == nil {
-			fh, err := os.OpenFile(f.debugPath+".resp", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-			if err == nil {
-				_, _ = fh.Write(append(rawResp, '\n'))
-				_ = fh.Close()
-			}
+			f.appendDebugLocked(rawResp)
 		}
 	}
 
@@ -261,18 +516,119 @@ func (f *FakeLLM) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// injectedStatus is a scripted raw HTTP error reply.
+type injectedStatus struct {
+	Status int
+	Body   string
+}
+
+// scriptReplyLocked renders a ScriptedResponse into the wire reply
+// (result, isRawHTTPError). Caller holds f.mu.
+func scriptReplyLocked(s ScriptedResponse) (any, bool) {
+	if s.Status != 0 {
+		return &injectedStatus{Status: s.Status, Body: s.Body}, true
+	}
+	if s.Raw != nil {
+		return *s.Raw, false
+	}
+	msg := ResponseMsg{Role: "assistant"}
+	finish := s.Finish
+	if finish == "" {
+		finish = "stop"
+	}
+	if len(s.ToolCalls) > 0 {
+		finish = "tool_calls"
+		for i, tc := range s.ToolCalls {
+			msg.ToolCalls = append(msg.ToolCalls, RawCall{
+				ID:   fmt.Sprintf("call-scripted-%d-%d", time.Now().UnixNano(), i),
+				Type: "function",
+				Function: RawFunc{
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+				},
+			})
+		}
+	} else {
+		msg.Content = s.Text
+	}
+	env := envelope(nil, msg, finish)
+	if s.Usage != nil {
+		env.Usage = s.Usage
+	}
+	return env, false
+}
+
+// matchScriptLocked finds the first script whose predicate matches and
+// still has serve budget, consuming one serve. Caller holds f.mu.
+func (f *FakeLLM) matchScriptLocked(body map[string]any) (ScriptedResponse, bool) {
+	for i := range f.scripts {
+		entry := &f.scripts[i]
+		if entry.maxServes() > 0 && entry.served >= entry.maxServes() {
+			continue
+		}
+		if entry.pred(body) {
+			entry.served++
+			return entry.resp, true
+		}
+	}
+	return ScriptedResponse{}, false
+}
+
+// appendDebugLocked appends one JSON line to the debug dump (best-effort).
+// Callers hold no lock: http.Error paths in handleCompletions race freely.
+func (f *FakeLLM) appendDebugLocked(raw []byte) {
+	fh, err := os.OpenFile(f.debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = fh.Write(append(raw, '\n'))
+	_ = fh.Close()
+}
+
 // classifyLocked routes one request by shape. Caller holds f.mu.
+//
+// Routing order:
+//  0. Predicate scripts (Script/ScriptOnce/ScriptN), registration order —
+//     conversation-bound responses and error injection live here.
+//  1. Legacy overrides (planner text, executor queue, classifier text).
+//  2. Shape heuristics (planner → executor → classifier → chat), unchanged.
 //
 // Order matters: the planner's decompose prompt is rendered into the USER
 // message of a planner-loop request that ALSO carries the base tool
 // schemas, so planner detection must run before the executor branch —
 // keyed on the rendered prompt text, not the system prompt.
-func (f *FakeLLM) classifyLocked(body map[string]any) ChatCompletionResponse {
-	// 1. Planner turns: the rendered decompose prompt (user message).
+func (f *FakeLLM) classifyLocked(body map[string]any) (ChatCompletionResponse, *injectedStatus) {
 	all := msgTexts(body)
+	sys := systemText(body)
+
+	// 0. Predicate scripts win over everything.
+	if resp, ok := f.matchScriptLocked(body); ok {
+		out, injected := scriptReplyLocked(resp)
+		if injected {
+			return ChatCompletionResponse{}, out.(*injectedStatus)
+		}
+		return out.(ChatCompletionResponse), nil
+	}
+
+	// 1. Legacy planner override.
+	if f.plannerText != "" && strings.Contains(all, "task planner") && strings.Contains(all, "Decompose") {
+		return envelope(body, ResponseMsg{Role: "assistant", Content: f.plannerText}, "stop"), nil
+	}
+
+	// 1. Legacy classifier override (planner prompts never carry the
+	// classifier system prompt, so the plan-JSON heuristic below still
+	// routes planner shapes even with a global classifier pin).
+	if f.classifierOut != "" && (strings.Contains(sys, "intent classifier") || strings.Contains(sys, "multi-intent detector")) {
+		return envelope(body, ResponseMsg{Role: "assistant", Content: f.classifierOut}, "stop"), nil
+	}
+
+	// 2. Planner turns: the rendered decompose prompt (user message).
 	if strings.Contains(all, "task planner") && strings.Contains(all, "Decompose") {
-		plan := `{"steps":[{"description":"do the scripted step","tool_hint":"code","depends_on":[]}]}`
-		return envelope(body, ResponseMsg{Role: "assistant", Content: plan}, "stop")
+		plan := f.plannerText
+		if plan == "" {
+			plan = `{"steps":[{"description":"do the scripted step","tool_hint":"code","depends_on":[]}]}`
+		}
+		return envelope(body, ResponseMsg{Role: "assistant", Content: plan}, "stop"), nil
 	}
 
 	// 2. Executor turns: the request carries tools.
@@ -290,15 +646,14 @@ func (f *FakeLLM) classifyLocked(body map[string]any) ChatCompletionResponse {
 						Arguments: next.Arguments,
 					},
 				}},
-			}, "tool_calls")
+			}, "tool_calls"), nil
 		}
 		return envelope(body, ResponseMsg{
 			Role: "assistant", Content: f.postToolText,
-		}, "stop")
+		}, "stop"), nil
 	}
 
 	// 3. Classifier turns.
-	sys := systemText(body)
 	if strings.Contains(sys, "intent classifier") || strings.Contains(sys, "multi-intent detector") {
 		content := f.classifierOut
 		if content == "" {
@@ -307,11 +662,11 @@ func (f *FakeLLM) classifyLocked(body map[string]any) ChatCompletionResponse {
 				content = `{"intent":"code","confidence":0.92,"reasoning":"fake-llm imperative"}`
 			}
 		}
-		return envelope(body, ResponseMsg{Role: "assistant", Content: content}, "stop")
+		return envelope(body, ResponseMsg{Role: "assistant", Content: content}, "stop"), nil
 	}
 
 	// 4. Everything else: chat agents, reviewers, summarizers.
-	return envelope(body, ResponseMsg{Role: "assistant", Content: f.chatText}, "stop")
+	return envelope(body, ResponseMsg{Role: "assistant", Content: f.chatText}, "stop"), nil
 }
 
 // msgTexts concatenates every message's content. Content may be a plain

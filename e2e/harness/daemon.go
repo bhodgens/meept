@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -61,6 +62,93 @@ type Stack struct {
 	t testing.TB
 }
 
+// StartOption customizes one Start() sandbox world. Options run in order
+// BEFORE the daemon boots: config overlays land in meept.json5, overlay
+// hooks run just before the write.
+type StartOption func(*startConfig)
+
+// startConfig collects Start() options.
+type startConfig struct {
+	configOverlay func(cfg map[string]any) error
+	beforeWrite   func(s *Stack) error
+}
+
+func newStartConfig() *startConfig { return &startConfig{} }
+
+// applyLocked merges one dotted key path into cfg, creating intermediate
+// maps. A nil value deletes the key.
+func applyLocked(cfg map[string]any, key string, value any) {
+	parts := strings.Split(key, ".")
+	m := cfg
+	for _, p := range parts[:len(parts)-1] {
+		next, ok := m[p].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			m[p] = next
+		}
+		m = next
+	}
+	last := parts[len(parts)-1]
+	if value == nil {
+		delete(m, last)
+		return
+	}
+	m[last] = value
+}
+
+// WithConfigOverlay merges dotted config keys into the sandbox
+// meept.json5 before the daemon boots ("multiuser.enabled" ->
+// {"multiuser":{"enabled":...}}). A nil value deletes a key. Applied in
+// option order; later keys win. Values must marshal to JSON (maps, slices,
+// scalars — no json5-specific syntax).
+func WithConfigOverlay(keys map[string]any) StartOption {
+	return func(sc *startConfig) {
+		prev := sc.configOverlay
+		sc.configOverlay = func(cfg map[string]any) error {
+			if prev != nil {
+				if err := prev(cfg); err != nil {
+					return err
+				}
+				if cfg == nil {
+					return nil
+				}
+			}
+			for k, v := range keys {
+				applyLocked(cfg, k, v)
+			}
+			return nil
+		}
+	}
+}
+
+// WithConfigHook registers a raw callback over the parsed meept.json5
+// tree just before it is written (full structural control when dotted
+// keys are not enough).
+func WithConfigHook(fn func(cfg map[string]any)) StartOption {
+	return func(sc *startConfig) {
+		prev := sc.configOverlay
+		sc.configOverlay = func(cfg map[string]any) error {
+			if prev != nil {
+				if err := prev(cfg); err != nil {
+					return err
+				}
+				if cfg == nil {
+					return nil
+				}
+			}
+			fn(cfg)
+			return nil
+		}
+	}
+}
+
+// WithPreBootHook runs a callback with the half-built Stack right before
+// the config write + boot (seed extra files into MeeptHome, stage
+// acp_agents.json5, etc). Fails the test on error.
+func WithPreBootHook(fn func(s *Stack) error) StartOption {
+	return func(sc *startConfig) { sc.beforeWrite = fn }
+}
+
 // Start builds the binaries once per process (sync.OnceValues), creates a
 // sandbox world under a fresh temp dir (NOT t.TempDir(): the daemon's Unix
 // socket path must stay under the macOS 104-char sun_path limit, and a
@@ -68,8 +156,19 @@ type Stack struct {
 // past it), writes minimal meept.json5 + models.json5 pointing every
 // provider at a fresh FakeLLM, boots the daemon, and registers t.Cleanup
 // teardown. Each call gets its own fake LLM and its own free HTTP port.
-func Start(t testing.TB) *Stack {
+// Options (WithConfigOverlay, WithConfigHook, WithPreBootHook) customize
+// the sandbox before boot.
+func Start(t testing.TB, opts ...StartOption) *Stack {
 	t.Helper()
+	sc := newStartConfig()
+	for _, opt := range opts {
+		if opt != nil {
+			opt(sc)
+		}
+	}
+	if sc.beforeWrite != nil {
+		// Deferred to just after the dirs exist (below).
+	}
 
 	// MkdirTemp("", "meept-e2e-*") yields /var/folders/.../T/meept-e2e-NNN
 	// (~70 chars); the socket at <root>/state/meept.sock stays ~85 chars.
@@ -106,6 +205,12 @@ func Start(t testing.TB) *Stack {
 
 	s.seedRoster()
 
+	if sc.beforeWrite != nil {
+		if err := sc.beforeWrite(s); err != nil {
+			t.Fatalf("harness: pre-boot hook: %v", err)
+		}
+	}
+
 	s.Fake = NewFakeLLM()
 	if os.Getenv("MEEPT_E2E_KEEP") != "" {
 		s.Fake.SetDebugPath(filepath.Join(work, "fake-llm-requests.jsonl"))
@@ -113,7 +218,7 @@ func Start(t testing.TB) *Stack {
 	t.Cleanup(s.Fake.Close)
 
 	s.Daemon = newDaemon(t, s)
-	s.writeConfigs()
+	s.writeConfigs(sc)
 	s.Daemon.boot()
 
 	// Defensive teardown even though Daemon.boot registers its own.
@@ -126,14 +231,16 @@ func Start(t testing.TB) *Stack {
 // probed free port; models.json5 points ONE openai-compatible provider at
 // the fake LLM and routes every alias through it (no lifecycle blocks —
 // nothing spawns, so the classifier boot gate never trips).
-func (s *Stack) writeConfigs() {
+// Start options (WithConfigOverlay / WithConfigHook) are applied to the
+// parsed template right before it is re-serialized.
+func (s *Stack) writeConfigs(sc *startConfig) {
 	t := s.t
 	httpPort := FreePort(t)
 	s.Daemon.httpPort = httpPort
 	s.Daemon.httpAddr = fmt.Sprintf("127.0.0.1:%d", httpPort)
 
 	workGlob := filepath.ToSlash(filepath.Join(s.Work, "**"))
-	cfg := fmt.Sprintf(`{
+	cfgSrc := fmt.Sprintf(`{
   // e2e scratch daemon (go test harness): everything stays in the temp dir.
   "daemon": {
     "socket_path": %q,
@@ -186,7 +293,28 @@ func (s *Stack) writeConfigs() {
 		filepath.Join(s.StateDir, "audit.db"),
 		workGlob,
 	)
-	if err := os.WriteFile(filepath.Join(s.MeeptHome, "meept.json5"), []byte(cfg), 0o600); err != nil {
+
+	cfg := []byte(cfgSrc)
+	if sc.configOverlay != nil {
+		// Strip // comments (invalid JSON) and trailing commas before
+		// parsing, overlay the parsed tree, and re-serialize. The daemon
+		// parses JSON5, so plain JSON output is accepted.
+		stripped := json5Comment.ReplaceAllString(cfgSrc, "")
+		stripped = json5TrailingCommas.ReplaceAllString(stripped, "$1")
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(stripped), &parsed); err != nil {
+			t.Fatalf("harness: parse config template: %v", err)
+		}
+		if err := sc.configOverlay(parsed); err != nil {
+			t.Fatalf("harness: config overlay: %v", err)
+		}
+		out, err := json.MarshalIndent(parsed, "", "  ")
+		if err != nil {
+			t.Fatalf("harness: serialize overlaid config: %v", err)
+		}
+		cfg = out
+	}
+	if err := os.WriteFile(filepath.Join(s.MeeptHome, "meept.json5"), cfg, 0o600); err != nil {
 		t.Fatalf("harness: write meept.json5: %v", err)
 	}
 
@@ -233,6 +361,16 @@ func (s *Stack) writeConfigs() {
 		t.Fatalf("harness: write models.json5: %v", err)
 	}
 }
+
+// json5TrailingCommas removes trailing commas before "}" or "]" so the
+// template (written for the daemon's JSON5 parser) is valid JSON for the
+// overlay round-trip.
+var json5TrailingCommas = regexp.MustCompile(`(?s),(\s*[}\]])`)
+
+// json5Comment strips // comments anywhere outside strings is overkill
+// here: the template only ever comments on whole lines, so a conservative
+// line-scoped pattern suffices for the overlay round-trip.
+var json5Comment = regexp.MustCompile(`(?m)^\s*//[^\n]*(\n|$)`)
 
 // Daemon manages one scratch meept-daemon process.
 type Daemon struct {
