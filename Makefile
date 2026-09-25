@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui build-gui-dist test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -16,6 +16,7 @@ help:
 	@echo "  build-cli        Build only the CLI binary"
 	@echo "  build-gendoc     Build only the documentation generator"
 	@echo "  build-gui        Build Flutter GUI (macOS/linux/windows)"
+	@echo "  build-gui-dist   Build Flutter GUI with NO embedded dev key (distribution; first-run pairing)"
 	@echo "  build-release    Build with version info from git"
 	@echo "  menubar          Build macOS menubar app (Swift, binary)"
 	@echo "  menubar-xcode    Build macOS menubar app (Xcode, .app bundle)"
@@ -180,6 +181,12 @@ MEEPT_API_HOST = $(shell MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-con
 MEEPT_API_PORT = $(shell MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint --field port 2>/dev/null || echo 8081)
 MEEPT_WS_PATH = $(shell MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint --field ws_path 2>/dev/null || echo /ws)
 FLUTTER_DART_DEFINES = --dart-define=MEEPT_DEV_API_KEY=$(MEEPT_DEV_API_KEY) --dart-define=MEEPT_GUI_LAYOUT=$(MEEPT_GUI_LAYOUT) --dart-define=MEEPT_API_HOST=$(MEEPT_API_HOST) --dart-define=MEEPT_API_PORT=$(MEEPT_API_PORT) --dart-define=MEEPT_WS_PATH=$(MEEPT_WS_PATH)
+# Distribution dart-defines: NO embedded API key (issue #59). The endpoint
+# stays localhost-default so a recipient's GUI dials their own machine and
+# pairs through the daemon's first-run handshake instead of shipping the
+# builder's secret. MEEPT_GUI_LAYOUT is dropped too: the default layout
+# holds until the paired client can read client.json5.
+FLUTTER_DART_DEFINES_DIST = --dart-define=MEEPT_DEV_API_KEY= --dart-define=MEEPT_API_HOST=localhost --dart-define=MEEPT_API_PORT=8081 --dart-define=MEEPT_WS_PATH=/ws
 # =============================================================================
 # Setup
 # =============================================================================
@@ -1013,6 +1020,40 @@ else ifeq ($(GUI_PLATFORM),linux)
 else
 	cp $(FLUTTER_UI_DIR)/build/windows/x64/runner/Release/meept_ui.exe $(GUI_BIN)
 	@echo "Built $(GUI_BIN) ($$(du -h $(GUI_BIN) | cut -f1))"
+endif
+
+# build-gui-dist: distribution GUI build with NO embedded dev key (issue
+# #59). The recipient's GUI dials localhost and pairs on first run through
+# the daemon's one-time handshake (printed on the daemon console); desktop
+# clients auto-pair from their own $HOME/.meept/dev_key when readable.
+# The dev build-gui target above keeps the dart-define path for dev
+# workflows — it is NOT the distribution path.
+.PHONY: build-gui-dist
+build-gui-dist:
+	@mkdir -p $(BIN_DIR)
+	@echo "Building meept-gui (distribution, no embedded key) for $(GUI_PLATFORM)..."
+	cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release $(FLUTTER_DART_DEFINES_DIST)
+ifeq ($(GUI_PLATFORM),macos)
+	@plutil -replace CFBundleName -string "Meept Client GUI" \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app/Contents/Info.plist"
+	@plutil -replace CFBundleDisplayName -string "Meept Client GUI" \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept Client GUI.app/Contents/Info.plist"
+	@plutil -replace CFBundleShortVersionString -string "$(VERSION)" \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept Client GUI.app/Contents/Info.plist"
+	@mv "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app" \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept Client GUI.app"
+	@codesign --force --deep --sign - \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept Client GUI.app" >/dev/null 2>&1 || true
+	@rm -rf $(BIN_DIR)/meept_gui.app
+	@cp -r "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept Client GUI.app" $(BIN_DIR)/meept_gui.app
+	@echo "Built $(BIN_DIR)/meept_gui.app (distribution, no embedded key)"
+	@rm -rf $(FLUTTER_UI_DIR)/build/macos/Build/Products/Release
+else ifeq ($(GUI_PLATFORM),linux)
+	cp $(FLUTTER_UI_DIR)/build/linux/x64/release/bundle/meept_ui $(BIN_DIR)/meept_gui-dist
+	@echo "Built $(BIN_DIR)/meept_gui-dist (distribution, no embedded key)"
+else
+	cp $(FLUTTER_UI_DIR)/build/windows/x64/runner/Release/meept_ui.exe $(BIN_DIR)/meept_gui-dist.exe
+	@echo "Built $(BIN_DIR)/meept_gui-dist.exe (distribution, no embedded key)"
 endif
 
 # =============================================================================
