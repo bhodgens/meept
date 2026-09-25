@@ -136,7 +136,10 @@ jobs:
         run: go build -o bin/fieldguard ./tools/analyzers/fieldguard/
 
       - name: Run mutexio
-        run: ./bin/mutexio ./...
+        # CGO off: the oto audio dep needs a C toolchain that adds nothing
+        # to a mutex-scope analysis; without this the cgo import fails on
+        # the runner ("could not import C") and the analyzer skips the pkg.
+        run: CGO_ENABLED=0 ./bin/mutexio ./...
 
       - name: Run fieldguard (non-blocking)
         run: ./bin/fieldguard ./... || true
