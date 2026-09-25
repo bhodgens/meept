@@ -279,13 +279,13 @@
     "budget-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2791,
+        "line": 2790,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 2818,
+        "line": 2817,
         "payload_keys": [],
         "via_helper": true
       }
@@ -408,7 +408,7 @@
     "collab-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3105,
+        "line": 3104,
         "payload_keys": [],
         "via_helper": true
       }
@@ -813,7 +813,7 @@
     "pair-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3151,
+        "line": 3150,
         "payload_keys": [],
         "via_helper": true
       }
@@ -892,7 +892,7 @@
     "pair.start": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2700,
+        "line": 2699,
         "payload_keys": [],
         "via_const": true
       }
