@@ -214,14 +214,45 @@ def test_remap_real_config_unchanged() -> None:
     check("real config remap exits 0", r.returncode == 0, f"-> {r.returncode}")
     changed = [l for l in _unified(orig, cfg.read_text().splitlines())
                if l.startswith(("+", "-")) and not l.startswith(("+++", "---"))]
-    check("real config: exactly 8 changed lines (4 providers x baseURL+spawn)",
-          len(changed) == 16, f"-> {len(changed)}")
-    check("real config: every changed line is a baseURL/spawn_command line",
-          all(("baseURL" in l or "spawn_command" in l) for l in changed),
-          f"-> {[l for l in changed if 'baseURL' not in l and 'spawn_command' not in l]}")
+    # The remap FILTERS alias member lists to sandbox-reachable (spawn-
+    # bearing provider) members, preserving order, and rewrites only
+    # spawn-bearing providers' baseURL/spawn lines. Remote-only aliases
+    # (e.g. coder/planner/analyst on zai/ollama) fall back to the general
+    # local runtime (documented filter semantics, post-0zmnHP fix).
+    member_re = re.compile(r'"\w[\w-]*/[\w.-]+"')
+    structural = {
+        '+      "models": [',
+        '+      ],',
+    }
+    check(
+        "real config: every changed line is a baseURL/spawn_command/"
+        "model-member/structural line",
+        all(
+            ("baseURL" in l
+             or "spawn_command" in l
+             or member_re.search(l) is not None
+             or l in structural)
+            for l in changed
+        ),
+        f"-> {[l for l in changed if not (member_re.search(l) or l in structural)]}",
+    )
+    remapped = cfg.read_text()
+    check(
+        "real config: alias members filtered to reachable providers",
+        # zai/ollama members must never survive in an alias list; media
+        # aliases legitimately keep xai-oauth/comfyui members.
+        all(
+            re.search(r'"(zai|ollama)/', block) is None
+            for block in re.findall(r'"models"\s*:\s*\[([^\]]*)\]', remapped, re.S)
+        ),
+        "-> remote member survived in an alias list",
+    )
     body = cfg.read_text()
-    check("real config: dial-only endpoints preserved",
-          "localhost:11434" in body and "127.0.0.1:8188" in body, "-> rewritten")
+    check(
+        "real config: dial-only endpoints preserved",
+        "localhost:11434" in body and "127.0.0.1:8188" in body,
+        "-> rewritten",
+    )
 
 
 def test_blank_comments_char_length() -> None:

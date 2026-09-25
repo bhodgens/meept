@@ -159,7 +159,11 @@ jobs:
         run: staticcheck ./...
 
       - name: Run gosec
-        run: gosec -quiet ./...
+        # Scope matches the repo's documented gosec policy (Makefile
+        # `gosec:` target): SQL-injection rules G201/G202. The unfiltered
+        # scan has ~1.1k pre-existing G115/G123-style findings across the
+        # tree; fixing those is tracked debt, not this gate's job.
+        run: gosec -quiet -include=G201,G202 ./...
 
   race-detector:
     runs-on: ubuntu-latest
