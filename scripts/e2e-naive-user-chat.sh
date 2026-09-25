@@ -101,6 +101,7 @@ DPID=""
 LOCK_DIR="${TMPDIR:-/tmp}/meept-e2e.lock"
 E2E_LOCK_HELD=0
 A5_OK=0   # set to 1 only when A5 PASSes on a provider-available T3 turn
+T1_ARTIFACT_STATE="" # stashed at T1 assertion time for the evidence row
 
 FAILURES=()
 SKIPS=()
@@ -203,7 +204,9 @@ record_run_evidence() {
   npass_n=$NPASS
   nfail_n=${#FAILURES[@]}
   nskip_n=${#SKIPS[@]}
-  [ -f "$WORK/project/hello.txt" ] && t1_artifact="created" || t1_artifact="missing"
+  # T1_ARTIFACT_STATE is stashed at assertion time (the workdir may already
+  # be removed by the A6 check when the summary recorder runs).
+  t1_artifact="${T1_ARTIFACT_STATE:-unknown}"
   [ "$A5_OK" = "1" ] && a5="pass" || a5="fail"
   [ "${#FAILURES[@]}" -eq 0 ] && result="pass"
   # Pure-shell append: no python dependency inside the harness env.
@@ -1702,6 +1705,10 @@ PY
       assert_reply_shape t1 "$REPLIES/t1.txt"
       # A4: artifact landed in the PROJECT dir (not daemon cwd) + reply names it.
       if [ -f "$PROJECT_DIR/hello.txt" ]; then
+        # Evidence capture at assertion time: the A6 temp-dir-removal check
+        # deletes $WORK before the summary recorder runs, so the artifact
+        # state must be stashed now (run 21: row said "missing" for a PASS).
+        T1_ARTIFACT_STATE="created"
         if grep -qi 'hello' "$PROJECT_DIR/hello.txt"; then
           note_result PASS "A4" "$PROJECT_DIR/hello.txt exists and contains 'hello'"
         else
