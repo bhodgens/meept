@@ -52,8 +52,15 @@ func gitRepoSuite(t *testing.T) (dir string, cleanup func()) {
 		t.Fatalf("git commit: %v", err)
 	}
 
+	// GitSync's remote operations hardcode branch "main" (push/pull
+	// "origin main"), so pin the fixture branch regardless of the local
+	// init.defaultBranch (GitHub runners default to master).
+	if err := exec.Command("git", "-C", repoDir, "branch", "-M", "main").Run(); err != nil {
+		t.Fatalf("branch -M main: %v", err)
+	}
+
 	// Push initial commit to origin
-	if err := exec.Command("git", "-C", repoDir, "push", "-u", "origin", "HEAD").Run(); err != nil {
+	if err := exec.Command("git", "-C", repoDir, "push", "-u", "origin", "main").Run(); err != nil {
 		t.Fatalf("git push initial: %v", err)
 	}
 
