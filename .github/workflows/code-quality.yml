@@ -135,6 +135,11 @@ jobs:
       - name: Build fieldguard analyzer
         run: go build -o bin/fieldguard ./tools/analyzers/fieldguard/
 
+      - name: Install cgo build deps (alsa headers for the oto audio driver)
+        # Linux-only CI runner dependency: oto's ALSA driver needs
+        # libasound2-dev for `go build ./...` (export data for analyzers).
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libasound2-dev
+
       - name: Build module (cgo export data for analyzers)
         # x/tools-based analyzers load cgo deps (oto audio, tree-sitter,
         # sqlite-vec) from export data; without a prior build they fail
