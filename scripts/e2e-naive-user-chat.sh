@@ -1335,7 +1335,7 @@ log "  session: $SID"
 log ""
 log "[5/7] sync-dispatch warmup via mcp-chat-server (source_client=$SOURCE_CLIENT)"
 WARMUP_ERR="$REPLIES/warmup.err"
-warmup_reply="$(python3 - "$CLI_BIN" "$SOCK" "$HOME_DIR" "$STATE" "$SID" "$SOURCE_CLIENT" "$TURN_TIMEOUT" <<'PY' 2>"$WARMUP_ERR"
+warmup_reply="$(python3 - "$CLI_BIN" "$SOCK" "$HOME_DIR" "$STATE" "$SID" "$SOURCE_CLIENT" "$E2E_TURN_TIMEOUT" <<'PY' 2>"$WARMUP_ERR"
 import json, os, subprocess, sys, threading, time
 
 cli, sock, home, state, sid, source_client, timeout = sys.argv[1:8]
@@ -1382,11 +1382,58 @@ try:
         sys.exit(3)
     send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
+    # Async warmup (2026-09-25): a cold 32B coder load takes minutes; the
+    # sync meept_send call died at the CLI's 120s read (run 25). Submit and
+    # wait for the turn.terminal event with the generous e2e timeout.
     send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-          "params": {"name": "meept_send",
+          "params": {"name": "meept_subscribe",
+                     "arguments": {"topics": ["turn.terminal"]}}})
+    sub_resp = wait_response(2, time.time() + timeout)
+    if sub_resp is None or sub_resp.get("error"):
+        print("__WARMUP_FAILED__: subscribe failed", file=sys.stderr)
+        sys.exit(3)
+    sub_id = (sub_resp["result"].get("content") or [{}])[0].get("text", "")
+    try:
+        sub_id = json.loads(sub_id).get("subscription_id", "")
+    except ValueError:
+        sub_id = ""
+    if not sub_id:
+        print("__WARMUP_FAILED__: no subscription id", file=sys.stderr)
+        sys.exit(3)
+    send({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+          "params": {"name": "meept_chat_submit",
                      "arguments": {"session_id": sid, "source_client": source_client,
-                                   "message": "Reply with the single word: ok"}}})
-    msg = wait_response(2, time.time() + timeout)
+                                   "message": "Reply with the single word: ok",
+                                   "turn_id": "turn-warmup-" + str(time.time())}}})
+    ack = wait_response(3, time.time() + timeout)
+    if ack is None or ack.get("error"):
+        print("__WARMUP_FAILED__: submit failed", file=sys.stderr)
+        sys.exit(3)
+    ack_text = ack["result"]["content"][0]["text"]
+    try:
+        turn_id = json.loads(ack_text).get("turn_id", "")
+    except ValueError:
+        turn_id = ""
+    if not turn_id:
+        print("__WARMUP_FAILED__: no turn_id in ack", file=sys.stderr)
+        sys.exit(3)
+    deadline = time.time() + timeout
+    msg = None
+    while time.time() < deadline:
+        send({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+              "params": {"name": "meept_wait_turn",
+                         "arguments": {"subscription_id": sub_id, "turn_id": turn_id,
+                                       "timeout_ms": 15000}}})
+        msg = wait_response(4, time.time() + 20)
+        if msg is None:
+            continue
+        if isinstance(msg.get("result"), dict) and msg["result"].get("isError"):
+            continue  # transient poll error; keep waiting until deadline
+        break
+    # best-effort unsubscribe
+    send({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+          "params": {"name": "meept_unsubscribe",
+                     "arguments": {"subscription_id": sub_id}}})
     if msg is None:
         print("__WARMUP_FAILED__: meept_send timed out", file=sys.stderr)
         sys.exit(3)
