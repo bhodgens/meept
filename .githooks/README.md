@@ -76,7 +76,41 @@ Validates that findings documents with deferred items have corresponding deferre
 - Verifies deferred implementation plans exist
 - Blocks commit if deferred items lack resolution plans
 
-**See:** CLAUDE.md "Deferred Item Resolution Protocol"
+**The workflow this hook enforces (Deferred Item Resolution Protocol):**
+
+After ANY systematic review, audit, or multi-agent analysis run:
+
+1. Catalog every deferred item before ending the session:
+
+   ```bash
+   grep -rn "deferred\|DEFERRED\|TODO.*later\|TODO.*future" \
+     docs/plans/*findings*.md | grep -v "fixed\|resolved\|closed"
+   ```
+
+2. Create or update `docs/plans/<review-name>-deferred-implementation.md`,
+   one row per item:
+
+   ```markdown
+   # <Review Name> Deferred Implementation
+
+   **Source:** `docs/plans/<review-name>-findings.md`
+
+   ## Deferred Items
+
+   | ID | Severity | File | Description | Resolution |
+   |----|----------|------|-------------|------------|
+   | S1-1 | High | file.go:123 | Description | Fixed in PR #X /
+     Documented as intentional / False positive |
+   ```
+
+3. Before session end, re-run the check (the hook runs it automatically
+   on any commit touching findings docs).
+4. Prefer inline resolution during review: fix it now instead of
+   deferring, when the fix is small.
+
+Related: `docs/agents/deferred-integration-wiring.md` covers the
+parallel-leaf variant (a leaf defers wiring to a sibling leaf or to "a
+later pass" and the gap must be assigned, not absorbed silently).
 
 ---
 

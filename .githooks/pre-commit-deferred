@@ -61,7 +61,7 @@ if [ -n "$CHANGED_FINDINGS" ]; then
     echo "   Option 2: Resolve the deferred items before committing"
     echo "   Option 3: Skip this check with --no-verify (not recommended)"
     echo ""
-    echo "📖 See CLAUDE.md 'Deferred Item Resolution Protocol' for details"
+    echo "📖 See .githooks/README.md 'pre-commit-deferred' (Deferred Item Resolution Protocol) for details"
     echo ""
     EXIT_CODE=1
   fi
@@ -88,7 +88,7 @@ for finding in $NEW_FINDINGS; do
         echo ""
         echo "📋 Expected plan: $DEFERRED_PLAN"
         echo ""
-        echo "📖 See CLAUDE.md 'Deferred Item Resolution Protocol' for details"
+        echo "📖 See .githooks/README.md 'pre-commit-deferred' (Deferred Item Resolution Protocol) for details"
         echo ""
         EXIT_CODE=1
       fi

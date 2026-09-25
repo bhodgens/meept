@@ -122,3 +122,10 @@ tools/classifier-eval/**/*.local.json5
 rejected_candidates.jsonl
 claim_verdicts.jsonl
 raw_responses.jsonl
+
+# Agent scratch / intermediates (convention: park on socrates or /tmp, never in repos)
+/scratch/
+/.tmpwave/
+/analysis/
+/mem-recall.txt
+/references/
