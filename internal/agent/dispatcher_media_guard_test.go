@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/caimlas/meept/internal/config"
@@ -72,7 +73,7 @@ func TestClassifyIntent_MediaURLGuard(t *testing.T) {
 	// which a zero-value Dispatcher leaves nil.
 	d := NewDispatcher(DispatcherConfig{})
 
-	intent, err := d.classifyIntent(nil, "summarize this video: https://www.youtube.com/watch?v=DWoJZs6TuVs", nil)
+	intent, err := d.classifyIntent(context.TODO(), "summarize this video: https://www.youtube.com/watch?v=DWoJZs6TuVs", nil)
 	if err != nil {
 		t.Fatalf("classifyIntent: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestClassifyIntent_BareVideoIDWithContextGuard(t *testing.T) {
 	d := NewDispatcher(DispatcherConfig{})
 
 	// Positive: media context + bare ID → analyst.
-	intent, err := d.classifyIntent(nil, "summarize this video DWoJZs6TuVs for me", nil)
+	intent, err := d.classifyIntent(context.TODO(), "summarize this video DWoJZs6TuVs for me", nil)
 	if err != nil {
 		t.Fatalf("classifyIntent: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestClassifyIntent_BareVideoIDWithContextGuard(t *testing.T) {
 		"review handleClick please",
 	}
 	for _, in := range negatives {
-		intent, err := d.classifyIntent(nil, in, nil)
+		intent, err := d.classifyIntent(context.TODO(), in, nil)
 		if err != nil {
 			t.Fatalf("classifyIntent(%q): %v", in, err)
 		}

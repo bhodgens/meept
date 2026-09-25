@@ -55,10 +55,7 @@ func (c *streamingRefusalChatter) Chat(ctx context.Context, messages []llm.ChatM
 
 	if call == 1 {
 		// Refused attempt: emit partial tokens, then refuse.
-		var got []string
-		for _, d := range deltas {
-			got = append(got, d)
-		}
+		got := append([]string(nil), deltas...)
 		c.mu.Lock()
 		c.streamed = append(c.streamed, got...)
 		c.mu.Unlock()

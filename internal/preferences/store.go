@@ -191,7 +191,7 @@ func parseInstructionFile(path string, tierPriority int) (*UserInstruction, erro
 	}
 
 	var frontmatter map[string]any
-	body := string(data)
+	var body string
 
 	// Try to extract YAML frontmatter (delimited by ---)
 	content := extractFrontmatter(data, &frontmatter)

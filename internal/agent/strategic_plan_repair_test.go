@@ -109,11 +109,6 @@ func newPlanRepairTestPlanner(t *testing.T, chatter llm.Chatter) *StrategicPlann
 	return sp
 }
 
-func newPlanRepairTestTask(t *testing.T, sp *StrategicPlanner, id, input string) error {
-	t.Helper()
-	return sp.taskStore.Create(newTestTask(id, input))
-}
-
 // TestPlanRepairRetry_RecoversMalformedThenValid pins the recovery path: the
 // planner emits prose (no JSON) once, then valid JSON on the repair re-ask.
 // The plan must succeed with the repaired steps, the planner must be entered

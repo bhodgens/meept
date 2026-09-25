@@ -26,7 +26,14 @@ func NewRPCClient(socketPath string, timeout time.Duration) Client {
 func (a *rpcAdapter) Connect() error    { return a.client.Connect() }
 func (a *rpcAdapter) Close() error      { return a.client.Close() }
 func (a *rpcAdapter) IsConnected() bool { return a.client.IsConnected() }
+
+// Chat bridges the deprecated blocking RPC chat for the transport
+// interface; the async path is SubmitChat + awaitTurnCmd. Kept until the
+// leaf-07 removal sweep decides the interface shape.
+//
+//nolint:staticcheck // SA1019 intentional bridge until leaf 07
 func (a *rpcAdapter) Chat(ctx context.Context, message, conversationID string) (string, error) {
+	//lint:ignore SA1019 intentional bridge until the leaf-07 removal sweep
 	return a.client.Chat(ctx, message, conversationID)
 }
 func (a *rpcAdapter) Status() (*types.DaemonStatusResponse, error) { return a.client.Status() }

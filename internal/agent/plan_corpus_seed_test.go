@@ -27,12 +27,10 @@ import (
 type planTierSeedCase struct {
 	name  string
 	input string
-	// isReplan / replanAttempt reproduce the routing-time request shape
-	// (tierForRequest applies the replan-attempt policy on top of the
-	// pure evaluator).
-	isReplan      bool
-	replanAttempt int
-	want          ComplexityTier
+	// isReplan reproduces the routing-time request shape (tierForRequest
+	// applies the replan-attempt policy on top of the pure evaluator).
+	isReplan bool
+	want     ComplexityTier
 }
 
 // planTierSeedCases is the seed of the eval corpus: representative
@@ -191,14 +189,4 @@ func TestPlanCorpus_SeedCasesAreScrubbed(t *testing.T) {
 			}
 		}
 	}
-}
-
-// containsFold is a small ASCII case-insensitive substring helper for
-// the scrub check (mirrors the planner's ASCII conventions).
-
-func lowerByte(b byte) byte {
-	if b >= 'A' && b <= 'Z' {
-		return b + ('a' - 'A')
-	}
-	return b
 }

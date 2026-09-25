@@ -118,6 +118,7 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 			errorCount++
 		}
 		c.logger.Error("Episodic consolidation failed", "error", err)
+		_ = errorCount // counted; cap logic above is the only consumer
 	} else {
 		report.EpisodicArchived = episodicReport.archived
 		report.SummariesCreated = episodicReport.created
@@ -138,6 +139,7 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 			errorCount++
 		}
 		c.logger.Error("Task deduplication failed", "error", err)
+		_ = errorCount // counted; cap logic above is the only consumer
 	} else {
 		report.DuplicatesRemoved = removed
 	}

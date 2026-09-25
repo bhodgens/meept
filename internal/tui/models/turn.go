@@ -294,6 +294,10 @@ func (r *turnRouter) get(turnID string) (*pendingTurn, bool) {
 }
 
 // progress updates the last-activity timestamp and stored progress text.
+// Currently uncalled — the async-turn flow renders progress via
+// turnProgressMsg directly; kept for the leaf-07 removal sweep decision.
+//
+//lint:ignore U1000 intentional until the leaf-07 sweep
 func (r *turnRouter) progress(turnID, text string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -334,6 +338,10 @@ func (r *turnRouter) hasPendingFor(conversationID string) bool {
 }
 
 // anyPending returns the pending turns for a conversation.
+// Currently uncalled — hasPendingFor supersedes it; kept for the
+// leaf-07 removal sweep decision.
+//
+//lint:ignore U1000 intentional until the leaf-07 sweep
 func (r *turnRouter) anyPending(conversationID string) []*pendingTurn {
 	r.mu.Lock()
 	defer r.mu.Unlock()

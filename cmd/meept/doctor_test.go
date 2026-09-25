@@ -314,9 +314,8 @@ func TestRunDoctorMcpChecksWired(t *testing.T) {
 	t.Cleanup(func() { stateDir = oldState })
 	stateDir = t.TempDir()
 
-	var out string
 	// captureStdout swaps the global os.Stdout; keep this test serial.
-	out = captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		if err := runDoctor(false, false); err != nil {
 			t.Errorf("runDoctor(false, false): %v", err)
 			return

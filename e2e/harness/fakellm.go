@@ -540,12 +540,9 @@ func scriptReplyLocked(s ScriptedResponse) (any, bool) {
 		finish = "tool_calls"
 		for i, tc := range s.ToolCalls {
 			msg.ToolCalls = append(msg.ToolCalls, RawCall{
-				ID:   fmt.Sprintf("call-scripted-%d-%d", time.Now().UnixNano(), i),
-				Type: "function",
-				Function: RawFunc{
-					Name:      tc.Name,
-					Arguments: tc.Arguments,
-				},
+				ID:       fmt.Sprintf("call-scripted-%d-%d", time.Now().UnixNano(), i),
+				Type:     "function",
+				Function: RawFunc(tc),
 			})
 		}
 	} else {
@@ -639,12 +636,9 @@ func (f *FakeLLM) classifyLocked(body map[string]any) (ChatCompletionResponse, *
 			return envelope(body, ResponseMsg{
 				Role: "assistant",
 				ToolCalls: []RawCall{{
-					ID:   fmt.Sprintf("call-%d", time.Now().UnixNano()),
-					Type: "function",
-					Function: RawFunc{
-						Name:      next.Name,
-						Arguments: next.Arguments,
-					},
+					ID:       fmt.Sprintf("call-%d", time.Now().UnixNano()),
+					Type:     "function",
+					Function: RawFunc(next),
 				}},
 			}, "tool_calls"), nil
 		}

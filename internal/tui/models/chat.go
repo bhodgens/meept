@@ -1745,25 +1745,6 @@ func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 	return prefix + formatMessage(content, m.width-6)
 }
 
-func (m *ChatModel) sendMessage(text string) tea.Cmd {
-	return func() tea.Msg {
-		reply, err := m.rpc.Chat(context.Background(), text, m.conversationID)
-		return ChatResponseMsg{Reply: reply, Err: err}
-	}
-}
-
-// sendMessageWithParts sends a chat message with optional multimodal parts.
-// When parts is empty it delegates to plain sendMessage.
-func (m *ChatModel) sendMessageWithParts(text string, parts []llm.ContentPart) tea.Cmd {
-	if len(parts) == 0 {
-		return m.sendMessage(text)
-	}
-	return func() tea.Msg {
-		reply, err := m.rpc.ChatWithParts(context.Background(), text, m.conversationID, parts)
-		return ChatResponseMsg{Reply: reply, Err: err}
-	}
-}
-
 func (m *ChatModel) addMessage(role, content string) {
 	m.messages = append(m.messages, ChatMessage{
 		Role:      role,

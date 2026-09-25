@@ -3,8 +3,6 @@ package backup
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,10 +12,6 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 )
-
-func effectsTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
 
 // runEffectsGit runs a git command in dir, failing the test on error.
 func runEffectsGit(t *testing.T, dir string, args ...string) {

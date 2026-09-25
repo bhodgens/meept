@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -68,7 +69,7 @@ func TestPlatformArbitration_FallbackChainCatchesCreateFile(t *testing.T) {
 // heuristicFallback is reached.
 func TestPlatformArbitration_KeywordClassifierCatchesCreateFile(t *testing.T) {
 	kc := &KeywordClassifier{}
-	intent, err := kc.Classify(nil, "create a file named hello.txt containing hello", nil)
+	intent, err := kc.Classify(context.TODO(), "create a file named hello.txt containing hello", nil)
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
