@@ -655,6 +655,15 @@ type AgentLoop struct {
 	// pointer — last apply wins; H3 fix), consumed and cleared on use.
 	reasonWatchRescueNext bool
 
+	// prefillStash carries a partial assistant message consumed by the NEXT
+	// LLM call (appended verbatim after the windowed messages). Set by the
+	// unbacked-claims nudge for LFM-family models: the model declined to
+	// emit a tool call, so the next call continues from a half-written tool
+	// call instead of free-form prose (2026-09-24 prose-answer probes:
+	// prefilled continuation produced a valid complete call where
+	// tool_choice=required was honored only 2/5). Consumed on use.
+	prefillStash string
+
 	// Turn tool ledger (anti-hallucination contract, e2e run 7 rkl3Th):
 	// per-turn count of tools the model ACTUALLY emitted for execution.
 	// The model narrating "Created file X" with zero tool calls is the
@@ -4225,6 +4234,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Uses the same effective budget that accounts for tool definition overhead
 		messages := conv.GetWindowedMessages(effectiveBudget)
 
+		// Prefill retry (2026-09-24 8B prose-answer investigation): the
+		// unbacked-claims nudge stashes a prefill when the model declines
+		// to act; the prefill is prepended as a partial assistant message
+		// so the model CONTINUES a tool call instead of writing prose
+		// again. Consumed once per nudge; gated LFM-family (the worked
+		// exemplar + prefill pair is for models without trained tool-call
+		// formats).
+		if l.prefillStash != "" {
+			messages = append(messages, llm.ChatMessage{
+				Role:    llm.RoleAssistant,
+				Content: l.prefillStash,
+			})
+			l.prefillStash = ""
+		}
+
 		// PrepareNextTurn hook pipeline (llm-resilience-forest leaf 02;
 		// ARCH-AUDIT B1: pipeline was inert — zero production callers).
 		//
@@ -5439,6 +5463,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				)
 				conv.AddAssistantMessage(response.Content)
 				conv.AddUserMessage("[system: Your response claims you created or modified files, but this turn executed no tools — those claims are unverified. Do NOT describe file operations: use the file_write tool to actually perform them, or state plainly that the work is not done. Reports must only cite evidence from real tool executions.]")
+				// Prefill retry (2026-09-24 8B prose-answer investigation):
+				// the nudge alone repeats against a model that does not
+				// believe it can act (live probes: "the functionality to
+				// create a file is not available in the provided tools";
+				// tool_choice=required honored only 2/5). For LFM-family
+				// models, the retried call CONTINUES from a half-written
+				// tool call — measured 1/1: the prefill continuation
+				// produced the complete, correct call. Consumed by the
+				// messages build at the top of the loop.
+				modelID, providerID := l.currentModelInfo()
+				if isLFMFamilyModel(modelID, providerID) {
+					if hint := l.prefillToolCallHint(); hint != "" {
+						l.prefillStash = hint
+					}
+				}
 				l.publishIteration(conversationID, iteration)
 				continue
 			}
@@ -7777,6 +7816,14 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 
 	// Evidence requirements apply to all prompt variants
 	builder.AddSectionWithStability("Evidence Requirements", evidenceSection, true)
+
+	// Worked tool-call exemplar (2026-09-24 8B prose-answer investigation):
+	// LFM-family executor turns get a worked example — proof by
+	// demonstration that the tools can act. Gated executor+LFM-only; no-op
+	// for every other role/model.
+	if section := l.buildToolExemplarSectionForCurrentModel(); section != "" {
+		builder.AddSection("How to act with tools", section)
+	}
 
 	// Inject compression instructions when compression is active
 	if l.compressionPipeline != nil {

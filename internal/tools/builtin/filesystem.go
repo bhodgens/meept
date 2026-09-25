@@ -395,7 +395,13 @@ func (t *WriteFileTool) Name() string { return "file_write" }
 func (t *WriteFileTool) Category() string { return "filesystem" }
 
 func (t *WriteFileTool) Description() string {
-	return "Write text content to a file. Creates the file if it does not exist, overwrites if it does. Parent directories are created automatically. The returned evidence (path, size, hash) is proof of the write; do not re-read the file to verify."
+	// "Creates a new file" is front-loaded: the LFM2.5 base model's live
+	// probes (2026-09-24) showed it declining to act with "the
+	// functionality to create a file is not available in the provided
+	// tools" — it does not believe a write-shaped tool can create. The
+	// creation claim is the first clause so the model's self-model is
+	// corrected before the write semantics.
+	return "Creates a new file on disk, or overwrites an existing file. Write text content to a file: the file at the given path is created if it does not exist, overwritten if it does. Parent directories are created automatically. The returned evidence (path, size, hash) is proof of the write; do not re-read the file to verify."
 }
 
 func (t *WriteFileTool) Parameters() llm.FunctionParameters {

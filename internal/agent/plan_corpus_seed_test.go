@@ -195,25 +195,6 @@ func TestPlanCorpus_SeedCasesAreScrubbed(t *testing.T) {
 
 // containsFold is a small ASCII case-insensitive substring helper for
 // the scrub check (mirrors the planner's ASCII conventions).
-func containsFold(s, substr string) bool {
-	if len(substr) == 0 {
-		return true
-	}
-	for i := 0; i+len(substr) <= len(s); i++ {
-		match := true
-		for j := 0; j < len(substr); j++ {
-			a, b := lowerByte(s[i+j]), lowerByte(substr[j])
-			if a != b {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
 
 func lowerByte(b byte) byte {
 	if b >= 'A' && b <= 'Z' {
