@@ -13,6 +13,22 @@ cp config/models.json5 ~/.meept/models.json5
 # Edit to add your API key or Ollama endpoint
 ```
 
+### "model file not found" at daemon start
+
+A lifecycle endpoint declares model weights that are not on disk. Check
+what is missing and fetch the meept catalog:
+
+```bash
+make deps-models-status    # present/missing per model
+make deps-models           # interactive download (path + model set)
+```
+
+Weights live under `MEEPT_MODELS_DIR` (default `~/.meept/models`). If your
+weights live elsewhere (e.g. a mounted drive), export
+`MEEPT_MODELS_DIR=/path/to/models` in your shell or `~/.meept/env` — no
+config edit needed. `meept doctor` reports each model as present/missing
+without starting anything.
+
 ### "address already in use"
 
 A platform is already running. Kill it first:

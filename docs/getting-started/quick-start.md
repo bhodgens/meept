@@ -112,31 +112,19 @@ flutter build windows  # Windows
 
 ### API Key Configuration
 
-The Flutter app needs an API key to authenticate with the platform:
+**Development (default):** `make build-gui` and `make devbuild` embed this
+machine's dev key (`~/.meept/dev_key`, provisioned automatically). No
+configuration needed.
 
-**Development (default):** The app automatically uses the default dev API key (`meept_dev_default_key_CHANGE_ME`). No configuration needed.
+**Distribution:** `make build-gui-dist` builds with NO embedded key. On
+first launch the app shows a pairing gate: the daemon prints a one-time
+code to its console, you enter it in the app, and the app receives and
+stores the per-install key over a loopback-only exchange. Desktop apps on
+the same machine auto-pair from `~/.meept/dev_key` when that file is
+readable; web clients always pair explicitly. See
+[flutter_gui.md](../workflows/flutter_gui.md).
 
-**Production:** Generate a secure API key and configure it in the app:
-
-1. Generate a key:
-   ```bash
-   ./bin/meept token generate
-   ```
-
-2. In the Flutter app:
-   - Open Settings (gear icon)
-   - Enter the API key in the "API Token" field
-   - Save
-
-Alternatively, set it in `~/.meept/menubar.json5`:
-```json5
-{
-  "daemon": {
-    "http_url": "https://localhost:8081",
-    "api_token": "your-generated-key-here"
-  }
-}
-```
+Never distribute a dev build: it ships your machine's key and endpoint.
 
 ### Troubleshooting
 
