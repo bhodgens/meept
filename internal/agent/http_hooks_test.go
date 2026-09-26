@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -19,7 +20,7 @@ import (
 // URL added to the allowlist.
 func newTestHTTPHook(t *testing.T, srv *httptest.Server, cfg HTTPHookConfig) *HTTPHook {
 	t.Helper()
-	hook, err := NewHTTPHook(cfg, []string{srv.URL}, slog.Default())
+	hook, err := NewHTTPHook(cfg, []string{regexp.QuoteMeta(srv.URL)}, slog.Default())
 	if err != nil {
 		t.Fatalf("NewHTTPHook: %v", err)
 	}
@@ -34,7 +35,7 @@ func TestNewHTTPHook_DefaultRetryCount(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 
-	hook, err := NewHTTPHook(HTTPHookConfig{URL: srv.URL, RetryCount: 3}, []string{srv.URL}, slog.Default())
+	hook, err := NewHTTPHook(HTTPHookConfig{URL: srv.URL, RetryCount: 3}, []string{regexp.QuoteMeta(srv.URL)}, slog.Default())
 	if err != nil {
 		t.Fatalf("NewHTTPHook: %v", err)
 	}

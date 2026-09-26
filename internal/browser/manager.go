@@ -144,13 +144,14 @@ func (m *Manager) sessionFor(ctx context.Context, sessionID string) (*session, e
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
 	)
-	// Root (CI runners) cannot use the Chrome sandbox: the zygote aborts
-	// with "No usable sandbox!" before any page loads.
-	if os.Geteuid() == 0 {
-		opts = append(opts, chromedp.Flag("no-sandbox", true))
-	}
 	if m.cfg.Headless {
 		opts = append(opts, chromedp.Headless)
+		// Headless automation context: Linux runners (root AND
+		// unprivileged users without kernel userns) abort the zygote with
+		// "No usable sandbox!" before any page loads. The Chrome sandbox
+		// protects interactive browsing; a headless single-purpose session
+		// running the operator's own commands gains nothing from it.
+		opts = append(opts, chromedp.Flag("no-sandbox", true))
 	}
 	if m.cfg.ChromePath != "" {
 		opts = append(opts, chromedp.ExecPath(m.cfg.ChromePath))

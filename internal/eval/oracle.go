@@ -62,6 +62,11 @@ func (s ShellOracle) Check(ctx context.Context, workdir string) (OracleResult, e
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
+	// Bound the pipe-wait: when the shell is killed but a grandchild
+	// (e.g. `sleep` under bash -c) inherited stdout/stderr, Run() blocks
+	// until THAT process exits, not the shell — the timeout then looks
+	// ignored. WaitDelay force-closes the pipes after the context kill.
+	cmd.WaitDelay = 2 * time.Second
 
 	runErr := cmd.Run()
 	out := buf.String()
