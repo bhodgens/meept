@@ -303,7 +303,15 @@ func looksLikeProse(code string) bool {
 		if len(words) < 4 {
 			return false
 		}
-		first := strings.ToLower(words[0])
+		// Code identifiers carry interior uppercase (camelCase/PascalCase)
+		// or ALL CAPS; narration is sentence-case. Check the ORIGINAL
+		// word: "myVar" is code, "The" is narration.
+		raw := words[0]
+		hasInteriorUpper := raw != strings.ToLower(raw) && raw != strings.ToUpper(raw)
+		if hasInteriorUpper {
+			return false
+		}
+		first := strings.ToLower(raw)
 		// Sentence openings: "the file ...", "The file ...", "this snippet
 		// ...". Case-insensitive on purpose: models capitalize narration
 		// (run 34 T1: "The file is at ..." slipped past the lowercase
