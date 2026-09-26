@@ -311,15 +311,24 @@ func TestResolver_ExponentialBackoff(t *testing.T) {
 
 	resolver := NewResolver(cfg, logger)
 
-	// Record first failure
+	// Record first failure. Snapshot the deadline IMMEDIATELY — health is
+	// a pointer into the resolver's map, and the second call overwrites
+	// the same struct (reading it lazily after call 2 sees call 2's values).
 	resolver.RecordAliasFailure("coder", nil, nil)
-	health1 := resolver.health["coder"]
-	cooldown1 := time.Until(health1.CooldownUntil)
+	deadline1 := resolver.health["coder"].CooldownUntil
+	setAt1 := time.Now()
 
 	// Record second failure
 	resolver.RecordAliasFailure("coder", nil, nil)
-	health2 := resolver.health["coder"]
-	cooldown2 := time.Until(health2.CooldownUntil)
+	deadline2 := resolver.health["coder"].CooldownUntil
+	setAt2 := time.Now()
+
+	// Compare ABSOLUTE deadline spans, not time.Until: time.Until decays
+	// as the wall clock advances between the two calls, so a scheduler
+	// stall between them (CI) made the second window look smaller than
+	// 2x the first.
+	cooldown1 := deadline1.Sub(setAt1)
+	cooldown2 := deadline2.Sub(setAt2)
 
 	// Cooldown should roughly double (30s -> 60s)
 	if cooldown2 < cooldown1+cooldown1 {
