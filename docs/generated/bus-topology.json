@@ -73,7 +73,7 @@
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
-        "line": 7987,
+        "line": 7999,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -84,7 +84,7 @@
     "agent.iteration.completed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8195,
+        "line": 8207,
         "payload_keys": [
           "agent_id",
           "conversation_id",
@@ -96,7 +96,7 @@
     "agent.lifecycle.ended": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2786,
+        "line": 2794,
         "payload_keys": [],
         "via_const": true
       }
@@ -104,7 +104,7 @@
     "agent.lifecycle.started": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2726,
+        "line": 2734,
         "payload_keys": [],
         "via_const": true
       }
@@ -130,7 +130,7 @@
     "agent.progress": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8052,
+        "line": 8064,
         "payload_keys": [
           "detail",
           "iteration",
@@ -141,7 +141,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 8106,
+        "line": 8118,
         "payload_keys": [
           "conversation_id",
           "detail",
@@ -171,7 +171,7 @@
     "agent.queue.followup.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8177,
+        "line": 8189,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -208,7 +208,7 @@
     "agent.queue.steer.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8153,
+        "line": 8165,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -221,7 +221,7 @@
     "agent.quota_wait": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2224,
+        "line": 2232,
         "payload_keys": []
       },
       {
@@ -238,7 +238,7 @@
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8017,
+        "line": 8029,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -249,7 +249,7 @@
     "agent.state.changed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2213,
+        "line": 2221,
         "payload_keys": [],
         "via_const": true
       }
@@ -279,13 +279,13 @@
     "budget-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2804,
+        "line": 2809,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 2831,
+        "line": 2836,
         "payload_keys": [],
         "via_helper": true
       }
@@ -408,7 +408,7 @@
     "collab-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3118,
+        "line": 3123,
         "payload_keys": [],
         "via_helper": true
       }
@@ -685,7 +685,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8126,
+        "line": 8138,
         "payload_keys": [
           "conversation_id",
           "total_tokens"
@@ -813,7 +813,7 @@
     "pair-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3164,
+        "line": 3169,
         "payload_keys": [],
         "via_helper": true
       }
@@ -892,7 +892,7 @@
     "pair.start": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2713,
+        "line": 2718,
         "payload_keys": [],
         "via_const": true
       }
@@ -1678,7 +1678,7 @@
     "session.title_updated": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9192,
+        "line": 9218,
         "payload_keys": [
           "description",
           "name",
