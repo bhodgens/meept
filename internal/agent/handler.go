@@ -2507,7 +2507,12 @@ func (h *ChatHandler) syncWaitPlan() (mode syncWaitMode, stall, hardMax time.Dur
 	// of inactivity) — see the sync_wait_stall config comment.
 	stall = h.syncWaitStall
 	if stall == 0 {
-		stall = 2 * time.Minute
+		// 5m: a cold model load (32B MLX ≈ minutes) plus a multi-minute
+		// single step emits no task/step state changes for minutes at a
+		// stretch — 2m fired mid-work on the e2e T1 turn (run 29). True
+		// hangs still trip: LLM calls deadline at 10s and tool executions
+		// are bounded, so 5m of TOTAL state silence is a real hang.
+		stall = 5 * time.Minute
 	}
 	hardMax = h.syncWaitMax
 	if hardMax <= 0 {

@@ -13,15 +13,15 @@ import (
 // sync_wait_max) ----
 
 // TestChatHandler_SyncWaitPlan_Defaults pins the config-default selection
-// table: stall mode, 2m inactivity window, 30m hard cap.
+// table: stall mode, 5m inactivity window, 30m hard cap.
 func TestChatHandler_SyncWaitPlan_Defaults(t *testing.T) {
 	h := &ChatHandler{}
 	mode, stall, hardMax := h.syncWaitPlan()
 	if mode != syncWaitModeStall {
 		t.Fatalf("mode = %v, want stall (zero config = stall-based enabled)", mode)
 	}
-	if stall != 2*time.Minute {
-		t.Errorf("stall = %v, want 2m default", stall)
+	if stall != 5*time.Minute {
+		t.Errorf("stall = %v, want 5m default", stall)
 	}
 	if hardMax != 30*time.Minute {
 		t.Errorf("hardMax = %v, want 30m default", hardMax)
