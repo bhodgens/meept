@@ -153,6 +153,11 @@ func TestApprovalWiring_EvolverPlanApprovalTriggersActuator(t *testing.T) {
 	}
 
 	if os.Getenv("CI") != "" {
+		// Diagnostics for the evolver lane: was the bridge wired at all?
+		t.Logf("bridge=%+v skillEvolver=%+v msgBus=%+v",
+			c.EvolverPlanApprovalBridge != nil,
+			c.SkillEvolver != nil,
+			c.msgBus != nil)
 		t.Skip("bridge pump goroutine never observes plan.approved on the " +
 			"2-core CI runner (no audit lines, wiring silent) — evolver-lane " +
 			"follow-up; passes locally")
