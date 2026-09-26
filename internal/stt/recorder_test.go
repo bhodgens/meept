@@ -62,9 +62,10 @@ func createMockRecorder(t *testing.T, name string, behavior string) string {
 	err := os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
 	// Linux ETXTBSY race: exec can hit the file while the write is still
-	// in flight on overlay filesystems. Reopen-and-close forces the write
-	// out before the binary is executed.
+	// in flight on overlay filesystems (reopen-and-close alone does not
+	// guarantee the writeback completed). fsync forces it out.
 	if f, oerr := os.OpenFile(binPath, os.O_RDWR, 0); oerr == nil {
+		_ = f.Sync()
 		_ = f.Close()
 	}
 	return binPath
@@ -85,7 +86,15 @@ func TestRecorder_StartAndStop(t *testing.T) {
 	r := NewRecorder(cfg)
 	require.NotNil(t, r)
 
-	err := r.Start()
+	// Linux overlayfs ETXTBSY retry (exec racing the mock's writeback).
+	var err error
+	for i := 0; i < 5; i++ {
+		err = r.Start()
+		if err == nil || !strings.Contains(err.Error(), "text file busy") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	require.NoError(t, err)
 	assert.True(t, r.recording)
 
