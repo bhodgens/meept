@@ -38,7 +38,8 @@ func TestLooksLikeProse(t *testing.T) {
 		{"import", "import fs from 'fs';", false},
 		{"short line", "hello", false},
 		{"identifier start", "myVar value here now", false},
-		{"capitalized narration", "The file is at hello.txt in the folder", false},
+		{"capitalized code keyword", "Const x = 1", false},
+		{"capitalized narration", "The file is at hello.txt in the folder", true},
 	}
 	for _, tc := range cases {
 		if got := looksLikeProse(tc.code); got != tc.want {

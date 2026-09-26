@@ -303,12 +303,12 @@ func looksLikeProse(code string) bool {
 		if len(words) < 4 {
 			return false
 		}
-		first := words[0]
-		// Sentence openings: "the file ...", "this snippet ...". A code
-		// identifier in that position is almost never 3+ lowercase words.
-		if first != strings.ToLower(first) {
-			return false
-		}
+		first := strings.ToLower(words[0])
+		// Sentence openings: "the file ...", "The file ...", "this snippet
+		// ...". Case-insensitive on purpose: models capitalize narration
+		// (run 34 T1: "The file is at ..." slipped past the lowercase
+		// check and node --check killed the turn). A real code line
+		// starting with an identifier is caught by the token checks below.
 		jsStatementStarts := []string{
 			"const", "let", "var", "function", "class", "import", "export",
 			"if", "for", "while", "switch", "try", "return", "await", "async",
