@@ -1053,6 +1053,12 @@ def reachable_members(block_scan):
 # a model id — those must not enter the reachability set.
 spawning_provider_names = {member_name(s) for s, e in spawning_set}
 spawning_provider_names.discard("?")
+# Cloud providers reachable in the sandbox: agnes needs only AGNRES_API_KEY,
+# which the daemon inherits from the harness environment. Keyed explicitly —
+# a cloud provider joins this set only when its key variable is present.
+import os as _os
+if _os.environ.get("AGNRES_API_KEY"):
+    spawning_provider_names.add("agnes")
 
 alias_edits = []
 alias_key = re.search(r'["\']?model_aliases["\']?\s*:\s*\{', scan)
