@@ -18,6 +18,12 @@ const (
 	FilterRewrite
 	// FilterFail indicates the result is rejected; Reason feeds rework.
 	FilterFail
+	// FilterAdvisory indicates a problem was detected and logged but the
+	// result continues unchanged — the verdict is advisory (linters over
+	// mixed prose/code step output, runs 33-36: a narration sentence
+	// inside a ```js fence is a labeling mistake, not a turn-fatal
+	// syntax error). Reason carries the diagnostic.
+	FilterAdvisory
 )
 
 // String returns the machine-readable name of the outcome, as used in
@@ -30,6 +36,8 @@ func (o FilterOutcome) String() string {
 		return "rewrite"
 	case FilterFail:
 		return "fail"
+	case FilterAdvisory:
+		return "advisory"
 	default:
 		return fmt.Sprintf("unknown_filter_outcome(%d)", int(o))
 	}
@@ -63,6 +71,8 @@ func (r FilterResult) Valid() bool {
 	case FilterRewrite:
 		return r.Output != "" && r.Reason == ""
 	case FilterFail:
+		return r.Reason != "" && r.Output == ""
+	case FilterAdvisory:
 		return r.Reason != "" && r.Output == ""
 	default:
 		return false
@@ -176,6 +186,8 @@ func (fc *FilterChain) Run(ctx context.Context, step *task.TaskStep, output stri
 				changed = true
 			case FilterPass:
 				// Output continues unchanged.
+			case FilterAdvisory:
+				// Diagnostic logged via Actions; output continues.
 			}
 			if changed {
 				break // restart the sweep from the first filter

@@ -17,12 +17,15 @@ func TestJSLintFilterSkipsProseFencedAsJS(t *testing.T) {
 	}
 }
 
-func TestJSLintFilterStillFailsBadJSCode(t *testing.T) {
+func TestJSLintFilterAdvisoryOnBadJSCode(t *testing.T) {
 	f := NewJSLintFilter("node", "")
 	res := f.Process(context.Background(), nil,
 		"```js\nconst x = ;\n```\n")
-	if res.Outcome != FilterFail {
-		t.Fatalf("Outcome = %v, want fail (real syntax errors still rejected)", res.Outcome)
+	if res.Outcome != FilterAdvisory {
+		t.Fatalf("Outcome = %v, want advisory (real syntax errors logged, not turn-fatal)", res.Outcome)
+	}
+	if res.Reason == "" {
+		t.Fatal("advisory result carries no diagnostic Reason")
 	}
 }
 

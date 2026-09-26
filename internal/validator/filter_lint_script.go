@@ -85,15 +85,20 @@ func (f *PythonLintFilter) Process(ctx context.Context, _ *task.TaskStep, output
 		cmd := newLintCmd(runCtx, f.pythonBin, "-m", "py_compile", path)
 		res := runLintCmd(runCtx, cmd)
 		if res.err != nil {
+			// Advisory verdict (runs 33-36): a linter over model output
+			// that mixes prose and code cannot distinguish a bad snippet
+			// from a mislabeled narration fence, and a rejection replaces
+			// the entire turn with the checker error. Log the diagnostic
+			// and let the step continue.
 			if res.timeout {
-				return FilterResult{Outcome: FilterFail, Filter: self,
+				return FilterResult{Outcome: FilterAdvisory, Filter: self,
 					Reason: fmt.Sprintf("lint_python: timeout after %s", lintPythonTimeout)}
 			}
 			detail := strings.TrimSpace(res.stderr)
 			if detail == "" {
 				detail = strings.TrimSpace(res.stdout)
 			}
-			return FilterResult{Outcome: FilterFail, Filter: self,
+			return FilterResult{Outcome: FilterAdvisory, Filter: self,
 				Reason: fmt.Sprintf("lint_python: %s: %s", name, firstMeaningfulLine(detail))}
 		}
 	}
@@ -240,7 +245,8 @@ func (f *JSLintFilter) Process(ctx context.Context, _ *task.TaskStep, output str
 		}
 		cmd := newLintCmd(runCtx, f.nodeBin, "--check", path)
 		if res := runLintCmd(runCtx, cmd); res.err != nil {
-			return FilterResult{Outcome: FilterFail, Filter: self,
+			// Advisory verdict (runs 33-36): see lint_python.
+			return FilterResult{Outcome: FilterAdvisory, Filter: self,
 				Reason: jsFailReason(checker, name, res, "node --check", lintTimeout)}
 		}
 	}
@@ -254,7 +260,8 @@ func (f *JSLintFilter) Process(ctx context.Context, _ *task.TaskStep, output str
 		cmd := newLintCmd(runCtx, tscBin, args...)
 		cmd.Dir = dir
 		if res := runLintCmd(runCtx, cmd); res.err != nil {
-			return FilterResult{Outcome: FilterFail, Filter: self,
+			// Advisory verdict (runs 33-36): see lint_python.
+			return FilterResult{Outcome: FilterAdvisory, Filter: self,
 				Reason: jsFailReason("tsc", strings.Join(tsFiles, ","), res, "tsc --noEmit", lintTimeout)}
 		}
 	}

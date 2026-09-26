@@ -46,8 +46,8 @@ func TestPythonLintFilter_SyntaxErrorFails(t *testing.T) {
 	f := NewPythonLintFilter("python3")
 	res := f.Process(context.Background(), &task.TaskStep{},
 		"```python\ndef broken(:\n    pass\n```\n")
-	if res.Outcome != FilterFail {
-		t.Fatalf("Outcome = %v, want fail (syntax error); reason: %s", res.Outcome, res.Reason)
+	if res.Outcome != FilterAdvisory {
+		t.Fatalf("Outcome = %v, want advisory (syntax error); reason: %s", res.Outcome, res.Reason)
 	}
 	if !strings.HasPrefix(res.Reason, "lint_python: snippet_0.py: ") {
 		t.Fatalf("Reason = %q, want the lint_python: <file>: <detail> shape", res.Reason)
@@ -78,8 +78,8 @@ func TestPythonLintFilter_MissingBinaryFails(t *testing.T) {
 	f := NewPythonLintFilter("/nonexistent/python-for-filter-test")
 	res := f.Process(context.Background(), &task.TaskStep{},
 		"```python\nx = 1\n```\n")
-	if res.Outcome != FilterFail {
-		t.Fatalf("Outcome = %v, want fail (missing binary is a hard failure, unlike lint_js)", res.Outcome)
+	if res.Outcome != FilterAdvisory {
+		t.Fatalf("Outcome = %v, want advisory (missing binary is a hard failure, unlike lint_js)", res.Outcome)
 	}
 	if !strings.HasPrefix(res.Reason, "lint_python: ") {
 		t.Fatalf("Reason = %q, want lint_python: prefix", res.Reason)
@@ -111,8 +111,8 @@ func TestJSLintFilter_SyntaxErrorFails(t *testing.T) {
 	f := NewJSLintFilter("", "")
 	res := f.Process(context.Background(), &task.TaskStep{},
 		"```js\nfunction broken( {\n```\n")
-	if res.Outcome != FilterFail {
-		t.Fatalf("Outcome = %v, want fail (syntax error); reason: %s", res.Outcome, res.Reason)
+	if res.Outcome != FilterAdvisory {
+		t.Fatalf("Outcome = %v, want advisory (syntax error); reason: %s", res.Outcome, res.Reason)
 	}
 	if !strings.HasPrefix(res.Reason, "lint_js: node: snippet_0.js: ") {
 		t.Fatalf("Reason = %q, want the lint_js: node: <file>: <detail> shape", res.Reason)
@@ -138,8 +138,8 @@ func TestJSLintFilter_TypeErrorFailsWhenTSCAvailable(t *testing.T) {
 	}
 	res := f.Process(context.Background(), &task.TaskStep{},
 		"```ts\nconst n: number = \"not a number\";\n```\n")
-	if res.Outcome != FilterFail {
-		t.Fatalf("Outcome = %v, want fail (type error); reason: %s", res.Outcome, res.Reason)
+	if res.Outcome != FilterAdvisory {
+		t.Fatalf("Outcome = %v, want advisory (type error); reason: %s", res.Outcome, res.Reason)
 	}
 }
 

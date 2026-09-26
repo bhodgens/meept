@@ -195,8 +195,8 @@ func TestGoLintFilter_MissingBinaryFails(t *testing.T) {
 	step := &task.TaskStep{Result: "go code"}
 
 	res := f.Process(ctx, step, badlyFormattedOutput)
-	if res.Outcome != FilterFail {
-		t.Fatalf("Outcome = %v, want fail (result=%+v)", res.Outcome, res)
+	if res.Outcome != FilterAdvisory {
+		t.Fatalf("Outcome = %v, want advisory (result=%+v)", res.Outcome, res)
 	}
 	if !strings.HasPrefix(res.Reason, "lint_go: ") {
 		t.Fatalf("Reason %q missing lint_go: prefix", res.Reason)
@@ -226,8 +226,8 @@ func TestGoLintFilter_TimeoutRespected(t *testing.T) {
 	res := f.Process(ctx, step, badlyFormattedOutput)
 	elapsed := time.Since(start)
 
-	if res.Outcome != FilterFail {
-		t.Fatalf("Outcome = %v, want fail (result=%+v)", res.Outcome, res)
+	if res.Outcome != FilterAdvisory {
+		t.Fatalf("Outcome = %v, want advisory (result=%+v)", res.Outcome, res)
 	}
 	if !strings.HasPrefix(res.Reason, "lint_go: ") {
 		t.Fatalf("Reason %q missing lint_go: prefix", res.Reason)

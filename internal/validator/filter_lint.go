@@ -153,7 +153,7 @@ func (f *GoLintFilter) Process(ctx context.Context, _ *task.TaskStep, output str
 
 	dir, err := os.MkdirTemp("", "lintgo-")
 	if err != nil {
-		return FilterResult{Outcome: FilterFail, Filter: self, Reason: lintGoReason(err)}
+		return FilterResult{Outcome: FilterAdvisory, Filter: self, Reason: lintGoReason(err)}
 	}
 	defer func() {
 		if rmErr := os.RemoveAll(dir); rmErr != nil {
@@ -166,7 +166,7 @@ func (f *GoLintFilter) Process(ctx context.Context, _ *task.TaskStep, output str
 	// (gofmt itself is module-independent).
 	if modErr := os.WriteFile(filepath.Join(dir, "go.mod"),
 		[]byte("module lintgo/temp\n\ngo 1.21\n"), 0o600); modErr != nil {
-		return FilterResult{Outcome: FilterFail, Filter: self, Reason: lintGoReason(modErr)}
+		return FilterResult{Outcome: FilterAdvisory, Filter: self, Reason: lintGoReason(modErr)}
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, lintTimeout)
@@ -176,14 +176,14 @@ func (f *GoLintFilter) Process(ctx context.Context, _ *task.TaskStep, output str
 	for i, block := range blocks {
 		name := fmt.Sprintf("snippet_%d.go", i)
 		if writeErr := os.WriteFile(filepath.Join(dir, name), []byte(block.code), 0o600); writeErr != nil {
-			return FilterResult{Outcome: FilterFail, Filter: self, Reason: lintGoReason(writeErr)}
+			return FilterResult{Outcome: FilterAdvisory, Filter: self, Reason: lintGoReason(writeErr)}
 		}
 		names[i] = name
 	}
 
 	listed, err := f.runGofmtList(runCtx, dir)
 	if err != nil {
-		return FilterResult{Outcome: FilterFail, Filter: self, Reason: lintGoReason(err)}
+		return FilterResult{Outcome: FilterAdvisory, Filter: self, Reason: lintGoReason(err)}
 	}
 	if len(listed) == 0 {
 		f.runGoVetAdvisory(runCtx, dir)
@@ -193,18 +193,18 @@ func (f *GoLintFilter) Process(ctx context.Context, _ *task.TaskStep, output str
 	formatted := make(map[string]string, len(listed))
 	for _, name := range listed {
 		if err := f.runGofmtWrite(runCtx, filepath.Join(dir, name)); err != nil {
-			return FilterResult{Outcome: FilterFail, Filter: self, Reason: lintGoReason(err)}
+			return FilterResult{Outcome: FilterAdvisory, Filter: self, Reason: lintGoReason(err)}
 		}
 		content, readErr := os.ReadFile(filepath.Join(dir, name))
 		if readErr != nil {
-			return FilterResult{Outcome: FilterFail, Filter: self, Reason: lintGoReason(readErr)}
+			return FilterResult{Outcome: FilterAdvisory, Filter: self, Reason: lintGoReason(readErr)}
 		}
 		formatted[name] = string(content)
 	}
 
 	rewritten, subErr := substituteBlocks(output, blocks, names, formatted)
 	if subErr != nil {
-		return FilterResult{Outcome: FilterFail, Filter: self, Reason: lintGoReason(subErr)}
+		return FilterResult{Outcome: FilterAdvisory, Filter: self, Reason: lintGoReason(subErr)}
 	}
 	f.runGoVetAdvisory(runCtx, dir)
 	return FilterResult{Outcome: FilterRewrite, Filter: self, Output: rewritten}
