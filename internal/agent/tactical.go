@@ -1058,8 +1058,46 @@ func (ts *TacticalScheduler) maxFilterRetries() int {
 // pass, mirroring the evidence gate's per-hint validator lookup. This
 // predicate is the single place leaf 04 narrows with the config snapshot;
 // a nil chain already means the stage is skipped entirely.
+//
+// Conversational intents are excluded from the script linters' blast
+// radius (runs 33-35: a chat/recall/status reply narrating work inside a
+// ```js fence fails node --check and the whole turn collapses to the
+// checker error). The linters judge CODE-PRODUCING steps: code, debug,
+// review, plan/quickplan. json_format and language_en still apply to
+// every step with a hint — but the lint stage is skipped for chat-shaped
+// intents by the lint filters' own Applies gate below (lintGuard).
 func filtersEnabledFor(step *task.TaskStep) bool {
 	return step != nil && step.ToolHint != ""
+}
+
+// lintIntentSet is the intent set the script linters (lint_go, lint_python,
+// lint_js) are allowed to judge. Anything else (chat, recall, status,
+// platform, report, unknown) produces prose, and a prose reply inside a
+// code fence is a labeling mistake — not a syntax error to fail a turn on.
+var lintIntentSet = map[string]bool{
+	string(IntentCode):      true,
+	string(IntentDebug):     true,
+	string(IntentReview):    true,
+	string(IntentPlan):      true,
+	string(IntentQuickPlan): true,
+}
+
+// lintGuard reports whether a step's intent permits script-lint filtering.
+// Steps without a recognized conversational hint keep the legacy behavior
+// (linted) so unknown integrations do not silently lose coverage.
+func lintGuard(step *task.TaskStep) bool {
+	if step == nil {
+		return false
+	}
+	hint := step.ToolHint
+	if lintIntentSet[hint] {
+		return true
+	}
+	switch IntentType(hint) {
+	case IntentChat, IntentRecall, IntentStatus, IntentPlatform, IntentReport, IntentUnknown:
+		return false
+	}
+	return true
 }
 
 // SetFilterChain wires the milter-style output-filter chain into the
@@ -1361,7 +1399,7 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	// entirely - zero invocations, zero log lines, byte-identical to the
 	// pre-filter completion path.
 	// ------------------------------------------------------------------
-	if ts.filterChain != nil && filtersEnabledFor(step) {
+	if ts.filterChain != nil && filtersEnabledFor(step) && lintGuard(step) {
 		chainResult := ts.filterChain.Run(ctx, step, step.Result)
 
 		// Every filter action is logged with its stage so the ordering
