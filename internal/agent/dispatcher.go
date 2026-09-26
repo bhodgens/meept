@@ -2940,7 +2940,14 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// result — no LLM call, no digest race. Falls through to the normal
 	// path when there is nothing to answer from.
 	if result.Intent != nil && result.Intent.Type == string(IntentRecall) {
-		if answer, handled := d.RecallAnswer(ctx, result, conversationID, true); handled && answer != "" {
+		// sessionConversationID, not the thread-resolved id: session_tasks
+		// links (and the digest's task lookup) key on the session-level
+		// conversation id. The thread router rewrote conversationID above
+		// (run 38: session-c00fede11814cc39 -> conv-b76d01584aed01b6), so
+		// the digest queried the wrong key, found no tasks, and every
+		// recall follow-up fell through to the LLM with no context — the
+		// A5 continuity failure across runs 31-38.
+		if answer, handled := d.RecallAnswer(ctx, result, sessionConversationID, true); handled && answer != "" {
 			d.recordAgent(config.AgentIDChat)
 			d.recordIntentType(string(IntentRecall))
 			d.logger.Info("Recall answered from stored task result",
