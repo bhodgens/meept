@@ -445,23 +445,34 @@ func TestEpisodicMemoryGetOldMemories(t *testing.T) {
 	if len(all) != 2 {
 		t.Fatalf("GetRecent = %d memories, want 2", len(all))
 	}
-	// GetRecent orders newest-first; all[0] is Memory 2.
-	boundary := all[0].Memory.CreatedAt
-	if all[1].Memory.CreatedAt.Equal(boundary) {
+	// Identify the two records BY CONTENT — do not assume GetRecent's
+	// ordering direction (it flipped between a macOS dev machine and the
+	// CI runner, which silently inverted this boundary).
+	var newer, older time.Time
+	for _, r := range all {
+		switch r.Memory.Content {
+		case "Memory 1":
+			older = r.Memory.CreatedAt
+		case "Memory 2":
+			newer = r.Memory.CreatedAt
+		}
+	}
+	if older.Equal(newer) {
 		// RFC3339Nano trims trailing zeros; on fast machines (or VMs with
 		// coarse clocks) two back-to-back Stores can serialize to the same
 		// timestamp, making a strict boundary untestable at this
-		// granularity. The strict-older assertion needs distinct stamps.
+		// granularity.
 		t.Skip("both memories share one timestamp; boundary granularity not testable")
 	}
-	boundaryCutoff := boundary.Add(-time.Nanosecond)
-	results, err = mem.GetOldMemories(ctx, boundaryCutoff, 10)
+	// Strict < cutoff with cutoff = newer.CreatedAt: Memory 1 (older) must
+	// match, Memory 2 (the boundary itself) must not.
+	results, err = mem.GetOldMemories(ctx, newer, 10)
 	if err != nil {
 		t.Fatalf("GetOldMemories (boundary) failed: %v", err)
 	}
 	if len(results) != 1 || results[0].Memory.Content != "Memory 1" {
 		t.Errorf("boundary cutoff %v: got %d memories (%v), want exactly ['Memory 1']",
-			boundaryCutoff, len(results), results)
+			newer, len(results), results)
 	}
 }
 
