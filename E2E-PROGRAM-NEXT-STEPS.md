@@ -89,6 +89,44 @@ the current contract.
 4. ci.yml gosec already scoped to G201/G202 — matches Makefile policy.
 5. Formalize `scripts/e2e-naive-user-chat.sh` as a manifest suite.
 
+## What remains (post-CI-repair, 2026-09-26 late)
+
+CI is green on both workflows as of `a4036479` (CI 8/8, Code Quality
+8/8). What follows is the outstanding list at that point:
+
+- One documented CI-only skip: `TestApprovalWiring_EvolverPlanApproval
+  TriggersActuator` (open item 1 above; diagnostics dump on every run).
+- Open item 2 above: operator confirmation of models.json5 alias
+  member-list intent.
+- Tracked lint debt: ~1100 pre-existing golangci findings repo-wide
+  (CI gates on new code via --new-from-rev merge-base) plus the gosec
+  G115/G123 classes outside the G201/G202 gate.
+- ci.yml gosec already scoped to G201/G202 — matches Makefile policy;
+  no action pending there.
+- `scripts/e2e-naive-user-chat.sh` still standalone (open item 3).
+
+## Recommended next steps (ranked)
+
+1. **Evolver lane — bridge pump CI silence.** Root-cause why the
+   plan.approved pump never fires on the 2-core runner (see open item
+   1). The skip's t.Logf dumps bridge/skillEvolver/msgBus state each CI
+   run; start there, then delete the skip.
+2. **Operator decision — alias member lists.** Confirm whether the
+   zai/ollama remote fallbacks in config/models.json5 aliases are the
+   intended production shape (open item 2). Suites pin the current
+   contract either way.
+3. **Formalize naive-user-chat (open item 3).** Prefer option (a): a
+   `make e2e-chat-naive` target wrapping the existing script — keeps
+   provider realism; no hermetic port needed yet.
+4. **Fix the six product findings** in "Known product findings" — each
+   has a pinned suite skip that flips green when fixed; start with the
+   step-lane workdir injection (blocks spreadsheet_write end-to-end)
+   and the memory_vote ToolActionMap entry (smallest).
+5. **Lint debt paydown.** ~1100 golangci findings + gosec G115/G123,
+   package by package; the CI gate already blocks regressions.
+6. **Verify A5 continuity** with a healthy-provider naive-user-chat run
+   (run 43 flaked upstream of the continuity path).
+
 ## Open item 3 — naive-user-chat harness is not a manifest suite
 
 `scripts/e2e-naive-user-chat.sh` (live-model tier, local-only) drives the
