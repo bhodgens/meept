@@ -2953,6 +2953,21 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// runs the alias/default chain).
 	agent.ApplyRequestModel(result.RequestModel)
 
+	// Digest-aware guard fallback (2026-09-25 A5): arm the executing
+	// agent's reply guard with the session digest answer, so a catalog-dump
+	// reply on a context-bearing question is replaced with the digest
+	// (task name/state/result) instead of the generic canned line — the
+	// canned line discarded the answer that was already in the prompt.
+	if d.digestContextEnabled() {
+		excludeID := ""
+		if result.Task != nil {
+			excludeID = result.Task.ID
+		}
+		if digest := d.buildSessionContextDigestExcluding(conversationID, excludeID); digest != nil && !digest.IsEmpty() {
+			agent.SetGuardFallback(BuildSessionContextBlock(digest))
+		}
+	}
+
 	// Run the agent. When the dispatcher is carrying multimodal parts
 	// (e.g. image attachments), route them through RunOnceWithParts so the
 	// provider serializer emits native image blocks. Otherwise use the

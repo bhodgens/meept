@@ -669,6 +669,14 @@ type AgentLoop struct {
 	// tool_choice=required was honored only 2/5). Consumed on use.
 	prefillStash string
 
+	// guardFallback carries a session-digest answer for the reply guard:
+	// when the model answers a context-bearing question with a platform
+	// catalog dump, the guard substitutes this instead of the generic
+	// canned line (2026-09-25 A5 — the canned line discarded the digest
+	// answer that was already in the prompt). Set by the dispatcher per
+	// turn; consumed by applyReplyGuard in the loop's response assembly.
+	guardFallback string
+
 	// Turn tool ledger (anti-hallucination contract, e2e run 7 rkl3Th):
 	// per-turn count of tools the model ACTUALLY emitted for execution.
 	// The model narrating "Created file X" with zero tool calls is the
@@ -2964,7 +2972,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// Catalog reply guard (leaf 05): classify machine-shaped platform_*
 	// dumps and substitute a short user-language fallback before the text
 	// is persisted, notified, or returned. Prose passes byte-identical.
-	finalResponse = applyReplyGuard(finalResponse)
+	finalResponse = applyReplyGuardWithFallback(finalResponse, l.logger, replyGuardContext{
+		Agent:          l.agentID,
+		ConversationID: conversationID,
+	}, l.guardFallback)
+	l.guardFallback = ""
 	// Refusal-fallback leaf 04 (user decision 2026-09-16, option b): when a
 	// refusal-fallback retry served this turn, append the CODE-generated
 	// disclosure line so the transcript itself names the fallback model on
@@ -8918,6 +8930,20 @@ func (l *AgentLoop) resolveInferenceParams() []llm.ChatOption {
 	}
 
 	return opts
+}
+
+// SetGuardFallback arms the reply-guard fallback for the next response
+// assembly: when the guard replaces a machine-shaped reply, this digest
+// answer is returned to the user instead of the generic canned line. The
+// dispatcher sets it when the turn's prompt carries a session digest; it is
+// consumed once (set to "" after the guard runs).
+func (l *AgentLoop) SetGuardFallback(digestBlock string) {
+	if digestBlock == "" {
+		return
+	}
+	l.mu.Lock()
+	l.guardFallback = digestBlock
+	l.mu.Unlock()
 }
 
 // currentModelInfo returns the current model ID and provider ID for logging.
