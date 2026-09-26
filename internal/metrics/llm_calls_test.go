@@ -92,7 +92,10 @@ func TestRecordLLMCall_WindowedAggregation(t *testing.T) {
 // model_performance UPSERT accumulates correctly per hour bucket and agent.
 func TestRecordLLMCall_RollupUpdatesModelPerformance(t *testing.T) {
 	s := newTestStore(t)
-	now := time.Now()
+	// Anchor inside one hour bucket: a raw time.Now() within minutes of
+	// the hour boundary puts the second call (now+2min) in the NEXT
+	// bucket, splitting the rollup across two rows (CI ran at 20:59 UTC).
+	now := time.Now().Truncate(time.Hour).Add(time.Minute)
 
 	s.RecordLLMCall(LLMCallRecord{Timestamp: now, Provider: "prov-a", ModelID: "m1", AgentID: "coder",
 		TokensSent: 100, TokensRecv: 10, LatencyMs: 100})
