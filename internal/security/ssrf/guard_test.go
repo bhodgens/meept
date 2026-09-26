@@ -167,7 +167,7 @@ func TestCheckURL_AllowedHostsBypass(t *testing.T) {
 }
 
 func TestCheckURL_AllowedCIDRs(t *testing.T) {
-	g := mustGuard(t, GuardConfig{AllowedCIDRs: []string{"127.0.0.0/8"}})
+	g := mustGuard(t, GuardConfig{AllowedCIDRs: []string{"127.0.0.0/8", "::1/128"}})
 	if err := g.CheckURL("http://127.0.0.1:8080/"); err != nil {
 		t.Fatalf("IP inside allowed CIDR denied: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestWrapClient_SetsCheckRedirectPreservesTimeout(t *testing.T) {
 func TestWrapClient_RedirectChainEndToEnd(t *testing.T) {
 	// The test server binds 127.0.0.1, so allow loopback explicitly; the
 	// redirect target 10.0.0.1 must still be denied on hop 2.
-	g := mustGuard(t, GuardConfig{AllowedCIDRs: []string{"127.0.0.0/8"}})
+	g := mustGuard(t, GuardConfig{AllowedCIDRs: []string{"127.0.0.0/8", "::1/128"}})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ok", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dest", http.StatusFound)
@@ -321,7 +321,7 @@ func TestWrapClient_RedirectChainEndToEnd(t *testing.T) {
 
 func TestWrapClient_TooManyRedirectsEndToEnd(t *testing.T) {
 	g := mustGuard(t, GuardConfig{
-		AllowedCIDRs: []string{"127.0.0.0/8"},
+		AllowedCIDRs: []string{"127.0.0.0/8", "::1/128"},
 		MaxRedirects: 1,
 	})
 	mux := http.NewServeMux()
@@ -377,7 +377,7 @@ func TestWithResolver_SharedByCheckURLAndDial(t *testing.T) {
 	// attempt fails fast with connection refused instead of hitting the
 	// network.
 	var calls []string
-	g := mustGuard(t, GuardConfig{AllowedCIDRs: []string{"127.0.0.0/8"}})
+	g := mustGuard(t, GuardConfig{AllowedCIDRs: []string{"127.0.0.0/8", "::1/128"}})
 	g = g.WithResolver(func(ctx context.Context, host string) ([]net.IP, error) {
 		calls = append(calls, host)
 		return []net.IP{net.ParseIP("127.0.0.1")}, nil

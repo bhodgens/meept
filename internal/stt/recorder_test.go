@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -161,7 +162,16 @@ func TestRecorder_Cleanup(t *testing.T) {
 	cfg := RecordingConfig{RecorderBin: binPath}
 	r := NewRecorder(cfg)
 
-	err := r.Start()
+	// Linux overlayfs: exec can race the mock script's writeback
+	// (ETXTBSY) even after close. Retry briefly.
+	var err error
+	for i := 0; i < 5; i++ {
+		err = r.Start()
+		if err == nil || !strings.Contains(err.Error(), "text file busy") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	require.NoError(t, err)
 
 	fp := r.FilePath()
@@ -331,7 +341,16 @@ func TestRecorder_StartWithWriteWavMock(t *testing.T) {
 	cfg := RecordingConfig{RecorderBin: binPath}
 	r := NewRecorder(cfg)
 
-	err := r.Start()
+	// Linux overlayfs: exec can race the mock script's writeback
+	// (ETXTBSY) even after close. Retry briefly.
+	var err error
+	for i := 0; i < 5; i++ {
+		err = r.Start()
+		if err == nil || !strings.Contains(err.Error(), "text file busy") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		r.Stop()
