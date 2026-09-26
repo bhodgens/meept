@@ -123,7 +123,9 @@ func newTestManager(t *testing.T, srv *httptest.Server) *Manager {
 func TestManager_Navigate_ReadText_Screenshot(t *testing.T) {
 	srv := newFixtureServer(t)
 	m := newTestManager(t, srv)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// 90s: Chrome cold start + retry on 2-core runners consumes most of a
+	// 30s budget before navigate/readtext/screenshot run.
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	finalURL, title, err := m.Navigate(ctx, "sess-a", srv.URL+"/")
@@ -158,7 +160,7 @@ func TestManager_Navigate_ReadText_Screenshot(t *testing.T) {
 func TestManager_Click_Type(t *testing.T) {
 	srv := newFixtureServer(t)
 	m := newTestManager(t, srv)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	if _, _, err := m.Navigate(ctx, "sess-b", srv.URL+"/"); err != nil {
@@ -188,7 +190,7 @@ func TestManager_Click_Type(t *testing.T) {
 func TestManager_RedirectToPrivateIP_Blocked(t *testing.T) {
 	srv := newFixtureServer(t)
 	m := newTestManager(t, srv)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	_, _, err := m.Navigate(ctx, "sess-c", srv.URL+"/redirect-to-private")
