@@ -87,3 +87,33 @@ the current contract.
 3. Debt paydown: ~1100 golangci findings repo-wide (gated on new code
    meanwhile); gosec G115/G123 classes; the product findings above.
 4. ci.yml gosec already scoped to G201/G202 — matches Makefile policy.
+5. Formalize `scripts/e2e-naive-user-chat.sh` as a manifest suite.
+
+## Open item 3 — naive-user-chat harness is not a manifest suite
+
+`scripts/e2e-naive-user-chat.sh` (live-model tier, local-only) drives the
+full async-turn chat path against a real provider through a 4-turn
+scenario: create a file → modify it → ask if the change was made (A5
+continuity) → ask what files exist, with A0-A6 assertions and evidence
+rows in `${TMPDIR}/meept-e2e-evidence.jsonl`. It is currently a
+standalone script, NOT registered in `e2e/manifest.json`, so
+`make e2e-fast-area` / `e2e-affected` never run it.
+
+Formalization work:
+- Fold the scenario into `e2e/suites/naive-user-chat/` with a manifest
+  path_map entry (internal/agent, internal/validator, scripts/).
+- Decide its tier: it needs a real provider (agnes coder + local MLX
+  classifier), so it belongs to the `make e2e-chat` live tier, not the
+  hermetic `e2e-fast` tier — CI cannot run it as-is. Options: (a) keep
+  it a script and add a `make e2e-chat-naive` target; (b) port the
+  scenario to the hermetic fake-LLM harness (loses provider realism but
+  gains CI + pre-commit coverage).
+- Session history (2026-09-26, runs 31-43): the harness surfaced and
+  drove fixes for A5 continuity (thread-router conversation-id mismatch,
+  platform-shortcut ordering, intent-label instability, digest
+  envelope-header summaries, interrogative gating) and lint_js prose
+  rejections. 13 commits, latest `ee0274be`. Run evidence rows record
+  pass/fail per run; A5 verdict still pending a healthy-provider
+  confirmation run (run 43 flaked on T1 upstream of the continuity
+  path).
+
