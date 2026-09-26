@@ -574,6 +574,10 @@ func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.B
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
 
+	// ReplyTo carries the proxy's request ID: makeProxy sets the request's
+	// ReplyTo to the RESPONSE TOPIC and correlates responses via
+	// resp.ReplyTo == req.ID, so echoing msg.ID here is the contract
+	// (aa7ddc88 fixed the same helper for the instructions handler).
 	h.sendResponse(msg.ID, "task.result", response, err)
 }
 
