@@ -303,12 +303,19 @@ func looksLikeProse(code string) bool {
 		if len(words) < 4 {
 			return false
 		}
-		// Code identifiers carry interior uppercase (camelCase/PascalCase)
-		// or ALL CAPS; narration is sentence-case. Check the ORIGINAL
-		// word: "myVar" is code, "The" is narration.
+		// Code identifiers carry INTERIOR uppercase (camelCase/PascalCase)
+		// or ALL CAPS; narration is sentence-case ("The", "the"). A word
+		// with both cases beyond a single leading capital is code:
+		// "myVar" -> code, "The" -> narration, "THE" -> code.
 		raw := words[0]
-		hasInteriorUpper := raw != strings.ToLower(raw) && raw != strings.ToUpper(raw)
-		if hasInteriorUpper {
+		body := raw
+		if len(body) > 1 {
+			body = body[1:]
+		}
+		low := strings.ToLower(body)
+		up := strings.ToUpper(body)
+		mixed := low != body && up != body // has both cases -> camelCase
+		if mixed {
 			return false
 		}
 		first := strings.ToLower(raw)
