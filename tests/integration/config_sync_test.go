@@ -48,6 +48,10 @@ func initBareRepo(t *testing.T, path string) string {
 		t.Fatalf("mkdir bare repo: %v", err)
 	}
 	runGit(t, path, "init", "--bare", path)
+	// Point the bare repo's HEAD at main: go-git's clone resolves the
+	// remote HEAD, and on machines whose init.defaultBranch is master
+	// (CI) the bare HEAD would reference a branch that never exists.
+	runGit(t, path, "symbolic-ref", "HEAD", "refs/heads/main")
 	return path
 }
 
