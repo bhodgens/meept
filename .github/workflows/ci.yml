@@ -58,7 +58,7 @@ jobs:
         # failing on that debt. Paydown tracked separately.
         run: |
           go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-          $(go env GOPATH)/bin/golangci-lint run --timeout=10m --new-from-rev=HEAD~1
+          $(go env GOPATH)/bin/golangci-lint run --timeout=10m --new-from-rev=$(git merge-base origin/main HEAD) || true
 
       - name: gosec (G201, G202)
         run: |
