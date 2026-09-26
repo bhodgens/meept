@@ -183,7 +183,45 @@ func (d *Dispatcher) populateDigestStepResult(digest *SessionContextDigest, task
 		)
 		return
 	}
-	digest.LastResultSummary = truncateString(firstLine(bestStepResult(steps)), digestSummaryCap)
+	digest.LastResultSummary = truncateString(informativeResultLine(bestStepResult(steps)), digestSummaryCap)
+}
+
+// informativeResultLine picks the most user-informative line(s) of a step
+// result for the digest summary. Run 41: the claims/evidence envelope's
+// header line ("- job ... completed by agent coder:") is machine-facing;
+// firstLine() grabbed it and the continuity answer carried no evidence
+// text (the A5 assertion lost its hello.txt). Skip envelope-header lines
+// and prose-free headers; fall back to the first line when nothing else
+// exists. Multi-line prose is joined so the summary keeps more of the
+// answer within the cap.
+func informativeResultLine(result string) string {
+	if result == "" {
+		return ""
+	}
+	var prose []string
+	var fallback string
+	for _, line := range strings.Split(result, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if fallback == "" {
+			fallback = line
+		}
+		// Envelope header / job bookkeeping lines: skip.
+		if strings.HasPrefix(line, "- job ") || strings.HasPrefix(line, "job ") ||
+			strings.HasPrefix(line, "```") {
+			continue
+		}
+		prose = append(prose, line)
+		if len(strings.Join(prose, " ")) >= digestSummaryCap {
+			break
+		}
+	}
+	if len(prose) == 0 {
+		return fallback
+	}
+	return strings.Join(prose, " ")
 }
 
 // ---------------------------------------------------------------------------
