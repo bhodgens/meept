@@ -3,6 +3,7 @@ package pty
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -234,17 +235,31 @@ func TestPTYSession_BasicIORW(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	// A single Read on a pty may return a partial chunk (the echo streams
+	// in as the master writes it). Accumulate until the full line (or the
+	// context deadline) arrives.
+	var acc []byte
 	output := make([]byte, 1024)
-	n, err = sess.Read(ctx, output)
-	if err != nil {
-		t.Fatalf("read failed: %v", err)
-	}
-	if n == 0 {
-		t.Fatal("expected non-zero output")
+	for {
+		n, err := sess.Read(ctx, output)
+		if err != nil {
+			if len(acc) > 0 {
+				break
+			}
+			t.Fatalf("read failed: %v", err)
+		}
+		if n == 0 {
+			t.Fatal("expected non-zero output")
+		}
+		acc = append(acc, output[:n]...)
+		got := string(acc)
+		if strings.HasSuffix(got, "\n") || strings.HasSuffix(got, "\r\n") {
+			break
+		}
 	}
 
 	// PTY may add \r before \n
-	got := string(output[:n])
+	got := string(acc)
 	if got != "hello world from pty test\n" && got != "hello world from pty test\r\n" {
 		t.Errorf("expected 'hello world from pty test\\n' or with \\r, got %q", got)
 	}

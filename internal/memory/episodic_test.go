@@ -447,6 +447,13 @@ func TestEpisodicMemoryGetOldMemories(t *testing.T) {
 	}
 	// GetRecent orders newest-first; all[0] is Memory 2.
 	boundary := all[0].Memory.CreatedAt
+	if all[1].Memory.CreatedAt.Equal(boundary) {
+		// RFC3339Nano trims trailing zeros; on fast machines (or VMs with
+		// coarse clocks) two back-to-back Stores can serialize to the same
+		// timestamp, making a strict boundary untestable at this
+		// granularity. The strict-older assertion needs distinct stamps.
+		t.Skip("both memories share one timestamp; boundary granularity not testable")
+	}
 	boundaryCutoff := boundary.Add(-time.Nanosecond)
 	results, err = mem.GetOldMemories(ctx, boundaryCutoff, 10)
 	if err != nil {
