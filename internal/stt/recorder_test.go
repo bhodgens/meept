@@ -114,7 +114,15 @@ func TestRecorder_StartAlreadyRecording(t *testing.T) {
 	cfg := RecordingConfig{RecorderBin: binPath}
 	r := NewRecorder(cfg)
 
-	err := r.Start()
+	// Linux overlayfs ETXTBSY retry (exec racing the mock's writeback).
+	var err error
+	for i := 0; i < 5; i++ {
+		err = r.Start()
+		if err == nil || !strings.Contains(err.Error(), "text file busy") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	require.NoError(t, err)
 
 	// Starting again should error.

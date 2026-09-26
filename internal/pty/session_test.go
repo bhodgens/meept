@@ -258,10 +258,12 @@ func TestPTYSession_BasicIORW(t *testing.T) {
 		}
 	}
 
-	// PTY may add \r before \n
+	// PTY may add \r before \n, and the echo may deliver the line more
+	// than once (master echo + subprocess output under varying timing).
+	// Assert the line arrived intact rather than exact-equality.
 	got := string(acc)
-	if got != "hello world from pty test\n" && got != "hello world from pty test\r\n" {
-		t.Errorf("expected 'hello world from pty test\\n' or with \\r, got %q", got)
+	if !strings.Contains(got, "hello world from pty test") {
+		t.Errorf("expected the echoed line in output, got %q", got)
 	}
 }
 
