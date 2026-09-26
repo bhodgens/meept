@@ -192,8 +192,8 @@ func TestSessionContextDigest_Build(t *testing.T) {
 				if digest.LastTaskAgent != "coder" {
 					t.Errorf("LastTaskAgent = %q, want %q", digest.LastTaskAgent, "coder")
 				}
-				if digest.LastResultSummary != "Fixed the login bug." {
-					t.Errorf("LastResultSummary = %q, want first line %q", digest.LastResultSummary, "Fixed the login bug.")
+				if digest.LastResultSummary != "Fixed the login bug. See the diff for details." {
+					t.Errorf("LastResultSummary = %q, want joined prose %q", digest.LastResultSummary, "Fixed the login bug. See the diff for details.")
 				}
 				if digest.LastIntentType != string(IntentInstruction) {
 					t.Errorf("LastIntentType = %q, want %q", digest.LastIntentType, string(IntentInstruction))
@@ -261,15 +261,15 @@ func TestSessionContextDigest_Build(t *testing.T) {
 			},
 		},
 		{
-			name:      "multi-line step result keeps first line only",
+			name:      "multi-line step result joins prose lines",
 			sessionID: "sess-f",
 			setup: func(t *testing.T, d *Dispatcher, reg *task.Registry) {
 				seedDigestTask(t, d, "task-f", "multi line", "sess-f", task.StateCompleted, base, "coder")
 				seedDigestStep(t, reg, "task-f", 0, task.StepApproved, "first line here\nsecond line\nthird line")
 			},
 			check: func(t *testing.T, digest *SessionContextDigest) {
-				if digest.LastResultSummary != "first line here" {
-					t.Errorf("LastResultSummary = %q, want %q", digest.LastResultSummary, "first line here")
+				if digest.LastResultSummary != "first line here second line third line" {
+					t.Errorf("LastResultSummary = %q, want joined prose %q", digest.LastResultSummary, "first line here second line third line")
 				}
 			},
 		},
