@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -143,8 +145,15 @@ func TestWhisperEngine_Start_WhenAlreadyRecording(t *testing.T) {
 
 	ctx := context.Background()
 
-	// First start should succeed.
-	err = engine.Start(ctx, func(Result) {})
+	// First start should succeed. Linux overlayfs: exec can race the mock
+	// script's writeback (ETXTBSY); retry briefly.
+	for i := 0; ; i++ {
+		err = engine.Start(ctx, func(Result) {})
+		if err == nil || !strings.Contains(err.Error(), "text file busy") || i >= 5 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	require.NoError(t, err)
 	assert.True(t, engine.IsRecording())
 
