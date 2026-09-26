@@ -60,6 +60,12 @@ func createMockRecorder(t *testing.T, name string, behavior string) string {
 
 	err := os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux ETXTBSY race: exec can hit the file while the write is still
+	// in flight on overlay filesystems. Reopen-and-close forces the write
+	// out before the binary is executed.
+	if f, oerr := os.OpenFile(binPath, os.O_RDWR, 0); oerr == nil {
+		_ = f.Close()
+	}
 	return binPath
 }
 

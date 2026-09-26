@@ -1138,7 +1138,7 @@
     "queue.job.deferred_quota": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 2218,
+        "line": 2256,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1170,7 +1170,7 @@
     "queue.job.retry": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 2280,
+        "line": 2318,
         "payload_keys": [],
         "via_helper": true
       },
@@ -1774,7 +1774,7 @@
     "step.review_requested": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1717,
+        "line": 1755,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1871,7 +1871,7 @@
     "task.completed": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 2010,
+        "line": 2048,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1921,7 +1921,7 @@
     "task.error": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 2238,
+        "line": 2276,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1958,13 +1958,13 @@
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 1156,
+        "line": 1194,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 2410,
+        "line": 2448,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1972,7 +1972,7 @@
     "task.filter_retry": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1453,
+        "line": 1491,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1995,7 +1995,7 @@
     "task.handoff_created": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 3157,
+        "line": 3195,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2096,19 +2096,19 @@
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 2041,
+        "line": 2079,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 2442,
+        "line": 2480,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 2504,
+        "line": 2542,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2145,7 +2145,7 @@
     "task.review_requested": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1726,
+        "line": 1764,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2153,13 +2153,13 @@
     "task.step_completed": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1124,
+        "line": 1162,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 1694,
+        "line": 1732,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2248,7 +2248,7 @@
     "task.validation_retry": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1594,
+        "line": 1632,
         "payload_keys": [],
         "via_helper": true
       }

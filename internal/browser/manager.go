@@ -162,14 +162,29 @@ func (m *Manager) sessionFor(ctx context.Context, sessionID string) (*session, e
 	// chromedp.Run blocks on process spawn — run OUTSIDE m.mu via a copy of
 	// the fields it needs; the session map insert happens after under lock.
 	launchCtx := cdpCtx
-	if err := func() error {
+	launchErr := func() error {
 		m.mu.Unlock()
 		defer m.mu.Lock()
 		return chromedp.Run(launchCtx) //nolint:mutexio // intentional: launch outside the sessions-map lock
-	}(); err != nil {
+	}()
+	if launchErr != nil {
+		// Chrome cold start on small runners can exceed chromedp's
+		// 20s websocket-URL deadline. One retry gives the slow start a
+		// second window before failing the session.
 		cdpcxl()
 		allocCxl()
-		return nil, fmt.Errorf("browser: launch failed: %w", err)
+		allocCtx2, allocCxl2 := chromedp.NewExecAllocator(ctx, opts...)
+		cdpCtx2, cdpcxl2 := chromedp.NewContext(allocCtx2)
+		if err := func() error {
+			m.mu.Unlock()
+			defer m.mu.Lock()
+			return chromedp.Run(cdpCtx2)
+		}(); err != nil {
+			cdpcxl2()
+			allocCxl2()
+			return nil, fmt.Errorf("browser: launch failed: %w", launchErr)
+		}
+		allocCtx, allocCxl, cdpCtx, cdpcxl = allocCtx2, allocCxl2, cdpCtx2, cdpcxl2
 	}
 	s := &session{allocCtx: allocCtx, allocCxl: allocCxl, ctx: cdpCtx, cxl: cdpcxl}
 	m.sessions[sessionID] = s
