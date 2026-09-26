@@ -52,8 +52,8 @@ func TestConfigLoads(t *testing.T) {
 	if !ok {
 		t.Fatal("coder alias not found")
 	}
-	if len(coderAlias.Models) == 0 || coderAlias.Models[0] != "qwen-coder/qwen2.5-coder-32b" {
-		t.Errorf("coder alias primary = %q, want qwen-coder/qwen2.5-coder-32b", coderAlias.Models[0])
+	if len(coderAlias.Models) == 0 || coderAlias.Models[0] != "agnes/agnes-2.5-flash" {
+		t.Errorf("coder alias primary = %q, want agnes/agnes-2.5-flash", coderAlias.Models[0])
 	}
 
 	// Verify local provider has lfm-8b-mlx-4bit model (2026-09-06: the

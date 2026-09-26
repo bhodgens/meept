@@ -208,6 +208,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetEpistemicHook\(hook \*EpistemicHook\)](<#AgentLoop.SetEpistemicHook>)
   - [func \(l \*AgentLoop\) SetFileWatcher\(fw \*FileWatcherHook\)](<#AgentLoop.SetFileWatcher>)
   - [func \(l \*AgentLoop\) SetGlobalRefusalModel\(ref string\)](<#AgentLoop.SetGlobalRefusalModel>)
+  - [func \(l \*AgentLoop\) SetGuardFallback\(digestBlock string\)](<#AgentLoop.SetGuardFallback>)
   - [func \(l \*AgentLoop\) SetHTTPHooks\(executor \*HookBatchExecutor\)](<#AgentLoop.SetHTTPHooks>)
   - [func \(l \*AgentLoop\) SetIsolatedChild\(isolated bool\)](<#AgentLoop.SetIsolatedChild>)
   - [func \(l \*AgentLoop\) SetMCPServerLister\(lister func\(\) \[\]MCPServerInfo\)](<#AgentLoop.SetMCPServerLister>)
@@ -640,6 +641,7 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) GetTask\(ctx context.Context, taskID string\) \(\*task.Task, error\)](<#Dispatcher.GetTask>)
   - [func \(d \*Dispatcher\) PlanDigestContext\(sessionID, excludeTaskID string\) string](<#Dispatcher.PlanDigestContext>)
   - [func \(d \*Dispatcher\) ProcessAmendment\(ctx context.Context, requestID string\) \(\*task.AmendmentReply, error\)](<#Dispatcher.ProcessAmendment>)
+  - [func \(d \*Dispatcher\) RecallAnswer\(ctx context.Context, result \*DispatchResult, conversationID string, wait bool\) \(string, bool\)](<#Dispatcher.RecallAnswer>)
   - [func \(d \*Dispatcher\) RecordDispatch\(sessionID, handlerCase, inputSummary string, result \*DispatchResult, hasParts bool, dispatchErr error\)](<#Dispatcher.RecordDispatch>)
   - [func \(d \*Dispatcher\) ResumeAfterClarification\(ctx context.Context, originalInput, userResponse, sessionID string\) \(\*DispatchResult, error\)](<#Dispatcher.ResumeAfterClarification>)
   - [func \(d \*Dispatcher\) RouteToAgent\(ctx context.Context, result \*DispatchResult, conversationID string\) \(string, error\)](<#Dispatcher.RouteToAgent>)
@@ -3752,6 +3754,13 @@ SetFileWatcher wire a file watcher for filesystem\-level hooks. Nil is safely ig
 	func (l *AgentLoop) SetGlobalRefusalModel(ref string)
 
 SetGlobalRefusalModel mirrors the global models.json5 refusal\_model slot onto this loop. Precedence lives in refusalFallbackRef: a non\-empty spec.RefusalModel wins; the global value fills an empty spec field. Wire once at loop construction \(alongside the resolver wiring\); not thread\-safe by design because construction\-time wiring is.
+
+<a name="AgentLoop.SetGuardFallback"></a>
+### func \(\*AgentLoop\) SetGuardFallback
+
+	func (l *AgentLoop) SetGuardFallback(digestBlock string)
+
+SetGuardFallback arms the reply\-guard fallback for the next response assembly: when the guard replaces a machine\-shaped reply, this digest answer is returned to the user instead of the generic canned line. The dispatcher sets it when the turn's prompt carries a session digest; it is consumed once \(set to "" after the guard runs\).
 
 <a name="AgentLoop.SetHTTPHooks"></a>
 ### func \(\*AgentLoop\) SetHTTPHooks
@@ -7612,6 +7621,13 @@ PlanDigestContext is the digest\-only half of BuildPlanSessionContext: the sessi
 	func (d *Dispatcher) ProcessAmendment(ctx context.Context, requestID string) (*task.AmendmentReply, error)
 
 ProcessAmendment processes a pending amendment request.
+
+<a name="Dispatcher.RecallAnswer"></a>
+### func \(\*Dispatcher\) RecallAnswer
+
+	func (d *Dispatcher) RecallAnswer(ctx context.Context, result *DispatchResult, conversationID string, wait bool) (string, bool)
+
+RecallAnswer is the option\-3 continuity answer for a recall\-intent follow\-up. handled=false means the caller should fall through to the normal LLM path \(no prior task, or nothing to say without an LLM\).
 
 <a name="Dispatcher.RecordDispatch"></a>
 ### func \(\*Dispatcher\) RecordDispatch
@@ -14950,6 +14966,9 @@ SessionContextDigest is a compact per\-session summary the dispatcher can hand t
 	    LastTaskState string
 	    // LastTaskAgent is the agent assigned to the most recent task.
 	    LastTaskAgent string
+	    // LastTaskID is the id of the most recently updated task, so callers
+	    // can poll/inspect it directly (e.g. the recall continuity answer).
+	    LastTaskID string
 	    // LastResultSummary is the first line (capped 400 chars) of the most
 	    // recent task's best terminal step result.
 	    LastResultSummary string

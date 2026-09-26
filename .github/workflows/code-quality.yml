@@ -229,7 +229,10 @@ jobs:
           go-version: '1.23'
 
       - name: Run tests
-        run: go test ./... -v -coverprofile=coverage.out
+        # -p 2: unbounded package parallelism opens enough concurrent
+        # localhost sockets to exhaust the ephemeral port range (the same
+        # rule the macOS sweeps already enforce via make test).
+        run: go test -p 2 ./... -v -coverprofile=coverage.out
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
