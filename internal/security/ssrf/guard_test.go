@@ -310,7 +310,10 @@ func TestWrapClient_RedirectChainEndToEnd(t *testing.T) {
 		t.Fatalf("unexpected body %q", body)
 	}
 
-	_, err = client.Get(srv.URL + "/bad")
+	resp, err = client.Get(srv.URL + "/bad")
+	if resp != nil {
+		resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("redirect chain to private IP succeeded")
 	}
@@ -335,7 +338,10 @@ func TestWrapClient_TooManyRedirectsEndToEnd(t *testing.T) {
 	defer srv.Close()
 
 	client := g.WrapClient(&http.Client{Timeout: 5 * time.Second})
-	_, err := client.Get(srv.URL + "/a")
+	resp, err := client.Get(srv.URL + "/a")
+	if resp != nil {
+		resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("redirect beyond MaxRedirects=1 succeeded")
 	}
@@ -350,7 +356,10 @@ func TestDialContext_BlocksAtDialTime(t *testing.T) {
 	g := mustGuard(t, GuardConfig{})
 	g = g.WithResolver(staticResolver(t, "127.0.0.1"))
 	client := g.WrapClient(&http.Client{Timeout: 2 * time.Second})
-	_, err := client.Get("http://fake.internal.host:9/")
+	resp, err := client.Get("http://fake.internal.host:9/")
+	if resp != nil {
+		resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("dial to hostname resolving to loopback succeeded")
 	}
@@ -361,7 +370,10 @@ func TestDialContext_BlocksAtDialTime(t *testing.T) {
 	// Literal-IP path: default guard refuses loopback at dial time even when
 	// no pre-flight CheckURL ran.
 	client2 := DefaultGuard().WrapClient(&http.Client{Timeout: 2 * time.Second})
-	_, err = client2.Get("http://127.0.0.1:9/")
+	resp2, err := client2.Get("http://127.0.0.1:9/")
+	if resp2 != nil {
+		resp2.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("dial to literal loopback succeeded")
 	}
