@@ -2812,6 +2812,37 @@ const compoundIntentConfidenceFloor = 0.5
 // If an active agent loop exists for this conversation, it injects
 // the message into the queue (steer or follow-up) based on the
 // SteeringHeuristicTable. Otherwise, it runs the agent synchronously.
+// isWorkIntent reports whether the intent produces new work and must
+// always run the executor path (never short-circuit into a recall answer).
+func isWorkIntent(intentType string) bool {
+	switch IntentType(intentType) {
+	case IntentCode, IntentDebug, IntentPlan, IntentQuickPlan, IntentReview:
+		return true
+	}
+	return false
+}
+
+// referencesPriorWork reports whether a message is follow-up shaped —
+// asking about work this session already did (the change / the file / did
+// it / what files / where is / status). Lowercased substring markers,
+// deliberately coarse: a false positive costs one digest lookup, a false
+// negative costs the continuity answer (the runs 38-40 failure).
+func referencesPriorWork(summary string) bool {
+	s := strings.ToLower(summary)
+	markers := []string{
+		"the change", "the file", "the fix", "the bug", "did it",
+		"did you", "what files", "where is", "where are", "did the",
+		"status", "is it done", "was it", "hello.txt", "made for me",
+		"you make", "you create", "you write",
+	}
+	for _, m := range markers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, conversationID string) (string, error) {
 	if result == nil || result.Intent == nil {
 		return "", fmt.Errorf("dispatch result has no intent to route")
@@ -2950,7 +2981,15 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// follow-up questions about prior work directly from the stored task
 	// result — no LLM call, no digest race. Falls through to the normal
 	// path when there is nothing to answer from.
-	if result.Intent != nil && result.Intent.Type == string(IntentRecall) {
+	//
+	// Intent-label independent (runs 38-40): the classifier labels the
+	// same follow-up question recall (run 38), platform (run 39), and
+	// chat/clarify (run 40) across runs. Two gates instead of the label:
+	// (1) non-work intent — code/debug/plan must always execute; (2) the
+	// message references prior work (follow-up markers). Without both,
+	// RecallAnswer returns handled=false and nothing changes.
+	if result.Intent != nil && !isWorkIntent(result.Intent.Type) &&
+		referencesPriorWork(result.Intent.Summary) {
 		// sessionConversationID, not the thread-resolved id: session_tasks
 		// links (and the digest's task lookup) key on the session-level
 		// conversation id. The thread router rewrote conversationID above
