@@ -33,9 +33,26 @@ class EmbeddedClientTest(unittest.TestCase):
     def run_client(self, marker, tool_result, init_error=False):
         start = SOURCE.index(marker)
         code = SOURCE[start:].split("\n", 1)[1].split("\nPY\n", 1)[0]
-        messages = [{"id": 1, "error": {"message": "bad initialization"}} if init_error else
-                    {"id": 1, "result": {}}, {"id": 2, "result": tool_result},
-                    {"id": 3, "result": tool_result}]
+        # Warmup protocol order (harness embeds it): 1 initialize,
+        # 2 meept_subscribe -> subscription_id JSON, 3 meept_chat_submit
+        # -> turn_id ack, 4 meept_wait_turn -> final result. For the
+        # init-error arm, id 1 is an error so the client exits before
+        # anything else. The tool_result appears at id 4 (wait_turn) so
+        # the isError arm can force the error path.
+        if marker == 'warmup_reply=':
+            # async warmup: init, subscribe, submit-ack, wait_turn result
+            messages = [{"id": 1, "error": {"message": "bad initialization"}} if init_error else
+                        {"id": 1, "result": {}},
+                        {"id": 2, "result": {"content": [{"type": "text",
+                            "text": "{\"subscription_id\": \"sub-fixture\"}"}]}},
+                        {"id": 3, "result": {"content": [{"type": "text",
+                            "text": "{\"turn_id\": \"turn-fixture\"}"}]}},
+                        {"id": 4, "result": tool_result}]
+        else:
+            # turn client sync branch: init, meept_send result on id3
+            messages = [{"id": 1, "error": {"message": "bad initialization"}} if init_error else
+                        {"id": 1, "result": {}},
+                        {"id": 3, "result": tool_result}]
 
         class Process:
             stdin = io.StringIO()
@@ -55,36 +72,38 @@ class EmbeddedClientTest(unittest.TestCase):
 
         process = Process()
         argv = ["fixture", "cli", "sock", "/tmp", "/tmp", "session", "test", "1", "300", "1", "hello"]
+        stderr_io = io.StringIO()
         with patch.object(subprocess, "Popen", return_value=process), \
                 patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()), \
-                contextlib.redirect_stderr(io.StringIO()):
+                contextlib.redirect_stderr(stderr_io):
             try:
                 exec(compile(code, "embedded-mcp-client", "exec"), {})
                 status = 0
             except SystemExit as exc:
                 status = exc.code
-        return status, process
+        return status, process, stderr_io
 
     def test_tool_error_cannot_pass_as_text(self):
         for marker in ("warmup_reply=", "        out=\"$(python3"):
             with self.subTest(marker=marker):
-                status, process = self.run_client(marker, {
+                status, process, stderr_io = self.run_client(marker, {
                     "isError": True, "content": [{"type": "text", "text": "hello.txt created"}]})
                 self.assertNotEqual(status, 0)
                 self.assertTrue(process.waited, "child must be reaped")
 
     def test_initialization_error_reaps_child(self):
         for marker in ("warmup_reply=", '        out="$(python3'):
-            status, process = self.run_client(marker, {
+            status, process, stderr_io = self.run_client(marker, {
                 "content": [{"type": "text", "text": "ok"}]}, init_error=True)
             self.assertNotEqual(status, 0)
             self.assertTrue(process.waited)
 
     def test_success_reaps_child(self):
         for marker in ("warmup_reply=", "        out=\"$(python3"):
-            status, process = self.run_client(marker, {
+            status, process, stderr_io = self.run_client(marker, {
                 "content": [{"type": "text", "text": "ok"}]})
-            self.assertEqual(status, 0)
+            if status != 0:
+                self.fail(f"success-path exit {status}; stderr: {stderr_io.getvalue()[:400]}")
             self.assertTrue(process.waited, "child must be reaped")
 
 

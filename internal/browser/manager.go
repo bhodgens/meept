@@ -178,7 +178,7 @@ func (m *Manager) sessionFor(ctx context.Context, sessionID string) (*session, e
 		if err := func() error {
 			m.mu.Unlock()
 			defer m.mu.Lock()
-			return chromedp.Run(cdpCtx2)
+			return chromedp.Run(cdpCtx2) //nolint:mutexio // same unlock pattern as the first launch above
 		}(); err != nil {
 			cdpcxl2()
 			allocCxl2()
