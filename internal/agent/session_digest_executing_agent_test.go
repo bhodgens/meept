@@ -117,12 +117,15 @@ func TestBuildSessionContextDigestExcluding_SkipsCurrentTurnTask(t *testing.T) {
 		t.Fatalf("LastTaskState = %q, want completed", got.LastTaskState)
 	}
 
-	// Control: excluding nothing surfaces the newest task (the placeholder) —
-	// pinning WHY the exclusion parameter exists.
+	// Control (updated for completed-preference, run 33 T4): excluding
+	// nothing, the digest still surfaces the COMPLETED task — a newer
+	// pending placeholder does not outrank delivered work. The exclusion
+	// parameter remains load-bearing for the newest-wins fallback: see
+	// TestDigestFallsBackWhenNothingCompleted (failures-only session).
 	legacy := d.buildSessionContextDigestExcluding("sess-x", "")
-	if legacy.LastTaskName != "status question" {
-		t.Fatalf("control: LastTaskName = %q, want the newest task %q",
-			legacy.LastTaskName, "status question")
+	if legacy.LastTaskName != "write report" {
+		t.Fatalf("control: LastTaskName = %q, want the completed task %q",
+			legacy.LastTaskName, "write report")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/internal/task"
 )
 
 // SessionContextDigest is a compact per-session summary the dispatcher can
@@ -102,19 +103,35 @@ func (d *Dispatcher) buildSessionContextDigestExcluding(sessionID, excludeTaskID
 				"error", err,
 			)
 		} else {
-			// GetTasksForSession is ordered by updated_at DESC, so the
-			// first non-excluded entry is the most recently updated task
-			// that is not the current turn's own placeholder.
-			for _, lastTask := range tasks {
-				if lastTask == nil || lastTask.ID == excludeTaskID {
+			// Prefer the most recent COMPLETED task over the most
+			// recently updated task: a follow-up question ("did the
+			// change get made?") is about the delivered work, and the
+			// most recent update is often the errored/failed turn the
+			// user is asking ABOUT (run 33 T4 quoted the failed T3
+			// instead of T1's completed hello.txt). Fall back to the
+			// first non-excluded task when nothing completed (active
+			// work, failures-only sessions) — the honest answer then
+			// is that the latest thing failed or is still running.
+			var chosen *task.Task
+			for i := range tasks {
+				cand := tasks[i]
+				if cand == nil || cand.ID == excludeTaskID {
 					continue
 				}
-				digest.LastTaskID = lastTask.ID
-				digest.LastTaskName = truncateString(lastTask.Name, digestTaskNameCap)
-				digest.LastTaskState = string(lastTask.State)
-				digest.LastTaskAgent = lastTask.AssignedAgent
-				d.populateDigestStepResult(digest, lastTask.ID, sessionID)
-				break
+				if cand.State == task.StateCompleted {
+					chosen = cand
+					break
+				}
+				if chosen == nil {
+					chosen = cand
+				}
+			}
+			if chosen != nil {
+				digest.LastTaskID = chosen.ID
+				digest.LastTaskName = truncateString(chosen.Name, digestTaskNameCap)
+				digest.LastTaskState = string(chosen.State)
+				digest.LastTaskAgent = chosen.AssignedAgent
+				d.populateDigestStepResult(digest, chosen.ID, sessionID)
 			}
 		}
 	}

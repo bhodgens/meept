@@ -226,6 +226,18 @@ func (f *JSLintFilter) Process(ctx context.Context, _ *task.TaskStep, output str
 			tsFiles = append(tsFiles, name)
 			continue
 		}
+		// Prose-in-a-js-fence guard: the model sometimes labels narration
+		// (a sentence about the file it just wrote) with a ```js fence.
+		// node --check then reports a syntax error at line 1 and the whole
+		// turn dies on a prose answer (run 33: T1/T3 replies replaced by
+		// "the turn failed: lint_js: ... snippet_0.js:1"). A block whose
+		// first line reads as natural-language narration is NOT code this
+		// filter can judge — skip it, matching the filter's existing
+		// stance that bare (unfenced) prose-adjacent JS is not detected.
+		if looksLikeProse(block.code) {
+			slogWarnToolSkip(self, "node", "js-fenced block is prose; skipped")
+			continue
+		}
 		cmd := newLintCmd(runCtx, f.nodeBin, "--check", path)
 		if res := runLintCmd(runCtx, cmd); res.err != nil {
 			return FilterResult{Outcome: FilterFail, Filter: self,
@@ -270,6 +282,55 @@ func lintJSReason(err error) string {
 }
 
 // containsJSTSCode reports whether output carries JS/TS content.
+
+// looksLikeProse reports whether a fenced block's first non-empty line reads
+// as natural-language narration rather than JavaScript. Conservative by
+// design: it returns true ONLY when the line starts with a lowercase
+// English word followed by other lowercase words (a sentence opening) and
+// contains no JS statement tokens. Real code lines start with keywords
+// (const/let/function/import), identifiers, punctuation, or indentation —
+// none of which match. A false negative (prose that slips through) costs
+// one node --check failure verdict, the pre-existing behavior; a false
+// positive (real code skipped) costs an unchecked block, which the filter
+// already treats as acceptable for missing toolchains.
+func looksLikeProse(code string) bool {
+	for _, line := range strings.Split(code, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		words := strings.Fields(line)
+		if len(words) < 4 {
+			return false
+		}
+		first := words[0]
+		// Sentence openings: "the file ...", "this snippet ...". A code
+		// identifier in that position is almost never 3+ lowercase words.
+		if first != strings.ToLower(first) {
+			return false
+		}
+		jsStatementStarts := []string{
+			"const", "let", "var", "function", "class", "import", "export",
+			"if", "for", "while", "switch", "try", "return", "await", "async",
+			"require", "console", "throw", "new", "delete", "typeof",
+		}
+		for _, kw := range jsStatementStarts {
+			if first == kw {
+				return false
+			}
+		}
+		// Statement-shaped characters: braces, semicolons, quotes, arrows,
+		// assignments, or a comment marker — treat as code.
+		for _, ch := range []string{"{", "}", ";", "=", "(", ")", "//", "/*", "=>", "\"", "`", "'"} {
+			if strings.Contains(line, ch) {
+				return false
+			}
+		}
+		// All-lowercase multi-word line with no code tokens: narration.
+		return true
+	}
+	return false
+}
 func containsJSTSCode(output string) bool {
 	for _, fence := range jsTSLintFences {
 		if strings.Contains(output, fence) {
