@@ -2822,6 +2822,24 @@ func isWorkIntent(intentType string) bool {
 	return false
 }
 
+// isInterrogative reports whether a message asks a question rather than
+// commanding work. Question-first messages ("did...", "what...", "where
+// is...", trailing "?") about prior work are answered from the stored
+// result; imperative messages still execute. Coarse by design — same
+// trade as referencesPriorWork.
+func isInterrogative(summary string) bool {
+	s := strings.TrimSpace(strings.ToLower(summary))
+	if strings.HasSuffix(s, "?") {
+		return true
+	}
+	for _, q := range []string{"did ", "what ", "where ", "is it", "was it", "are they", "which ", "who ", "when ", "how "} {
+		if strings.HasPrefix(s, q) {
+			return true
+		}
+	}
+	return false
+}
+
 // referencesPriorWork reports whether a message is follow-up shaped —
 // asking about work this session already did (the change / the file / did
 // it / what files / where is / status). Lowercased substring markers,
@@ -2984,12 +3002,15 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	//
 	// Intent-label independent (runs 38-40): the classifier labels the
 	// same follow-up question recall (run 38), platform (run 39), and
-	// chat/clarify (run 40) across runs. Two gates instead of the label:
-	// (1) non-work intent — code/debug/plan must always execute; (2) the
-	// message references prior work (follow-up markers). Without both,
-	// RecallAnswer returns handled=false and nothing changes.
-	if result.Intent != nil && !isWorkIntent(result.Intent.Type) &&
-		referencesPriorWork(result.Intent.Summary) {
+	// chat/clarify (run 40) across runs. Run 42 added a fourth: work
+	// (the question created a task). Two gates instead of the label:
+	// (1) the message is follow-up-shaped AND interrogative — questions
+	// about prior work never execute, so answering from the stored result
+	// is always correct; commands referencing prior work still execute.
+	// (2) RecallAnswer falls through when the digest has no prior task,
+	// so open chat is unchanged.
+	if result.Intent != nil && referencesPriorWork(result.Intent.Summary) &&
+		isInterrogative(result.Intent.Summary) {
 		// sessionConversationID, not the thread-resolved id: session_tasks
 		// links (and the digest's task lookup) key on the session-level
 		// conversation id. The thread router rewrote conversationID above
