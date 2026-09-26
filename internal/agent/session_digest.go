@@ -19,6 +19,9 @@ type SessionContextDigest struct {
 	LastTaskState string
 	// LastTaskAgent is the agent assigned to the most recent task.
 	LastTaskAgent string
+	// LastTaskID is the id of the most recently updated task, so callers
+	// can poll/inspect it directly (e.g. the recall continuity answer).
+	LastTaskID string
 	// LastResultSummary is the first line (capped 400 chars) of the most
 	// recent task's best terminal step result.
 	LastResultSummary string
@@ -106,6 +109,7 @@ func (d *Dispatcher) buildSessionContextDigestExcluding(sessionID, excludeTaskID
 				if lastTask == nil || lastTask.ID == excludeTaskID {
 					continue
 				}
+				digest.LastTaskID = lastTask.ID
 				digest.LastTaskName = truncateString(lastTask.Name, digestTaskNameCap)
 				digest.LastTaskState = string(lastTask.State)
 				digest.LastTaskAgent = lastTask.AssignedAgent

@@ -2935,6 +2935,27 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// Build context message with memory refs
 	contextMsg := d.buildContextMessage(result, conversationID)
 
+	// Recall continuity (option 3, issue #58 follow-up): answer
+	// follow-up questions about prior work directly from the stored task
+	// result — no LLM call, no digest race. Falls through to the normal
+	// path when there is nothing to answer from.
+	if result.Intent != nil && result.Intent.Type == string(IntentRecall) {
+		if answer, handled := d.RecallAnswer(ctx, result, conversationID, true); handled && answer != "" {
+			d.recordAgent(config.AgentIDChat)
+			d.recordIntentType(string(IntentRecall))
+			d.logger.Info("Recall answered from stored task result",
+				"conversation_id", conversationID,
+				"task_name", func() string {
+					if result.Task != nil {
+						return result.Task.Name
+					}
+					return ""
+				}(),
+			)
+			return answer, nil
+		}
+	}
+
 	// Resolve the agent loop. Prefer a session-scoped loop (with the
 	// session's project_path as working directory) when the manager and
 	// session store are wired. Falls back to the singleton registry agent
