@@ -2852,7 +2852,18 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// tool ..." as IntentPlatform, and this shortcut then swallowed the
 	// turn into the canned capabilities dump before the overridden agent
 	// ever ran. An explicit override is a task for THAT agent.
+	//
+	// A platform-labeled turn with session continuity (a completed prior
+	// task) first gets the recall answer: "did the change get made? where
+	// is the file?" mislabels as platform under the 8B classifier (run
+	// 39), and the canned dump destroyed the continuity answer. If the
+	// digest has a prior task, recall wins; genuine introspection turns
+	// have no prior task and fall through unchanged.
 	if result.Intent.Type == string(IntentPlatform) && !result.AgentOverrideApplied {
+		if answer, handled := d.RecallAnswer(ctx, result, sessionConversationID, false); handled && answer != "" {
+			d.recordAgent(config.AgentIDChat)
+			return answer, nil
+		}
 		return d.handlePlatformIntrospection(ctx, result.Intent.Summary)
 	}
 
