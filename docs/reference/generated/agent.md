@@ -7648,7 +7648,7 @@ ResumeAfterClarification re\-classifies a user input that is a response to a pre
 
 	func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, conversationID string) (string, error)
 
-RouteToAgent routes a dispatch result to the appropriate agent. If an active agent loop exists for this conversation, it injects the message into the queue \(steer or follow\-up\) based on the SteeringHeuristicTable. Otherwise, it runs the agent synchronously.
+
 
 <a name="Dispatcher.SetAgentLoopManager"></a>
 ### func \(\*Dispatcher\) SetAgentLoopManager
