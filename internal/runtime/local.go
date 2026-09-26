@@ -74,6 +74,11 @@ func (b *LocalBackend) Execute(ctx context.Context, cmd Command) (*CommandResult
 	}
 
 	command := exec.CommandContext(execCtx, "/bin/sh", "-c", cmd.Cmd)
+	// Bound the pipe-wait: after the context kill, a grandchild that
+	// inherited stdout/stderr (e.g. `sleep` under `sh -c`) keeps the pipe
+	// open and Run() blocks until IT exits — the timeout then looks
+	// ignored. WaitDelay force-closes the pipes shortly after the kill.
+	command.WaitDelay = 2 * time.Second
 
 	// Set working directory
 	if cmd.Dir != "" {

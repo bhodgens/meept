@@ -50,6 +50,13 @@ func NewGitCheckout(repoURL, checkoutDir string, logger *slog.Logger) (*GitCheck
 	return g, nil
 }
 
+// isLocalPath reports whether the repo URL is a filesystem path (not a
+// remote URL). go-git's file transport does not support shallow fetch.
+func (g *GitCheckout) isLocalPath() bool {
+	u := g.repoURL
+	return !strings.Contains(u, "://") && !strings.Contains(u, "@")
+}
+
 // cloneShallow performs a shallow clone of depth 1.
 func (g *GitCheckout) cloneShallow() error {
 	dir := checkoutDirParent(g.checkoutDir)
@@ -58,11 +65,17 @@ func (g *GitCheckout) cloneShallow() error {
 	}
 
 	for attempt := 1; attempt <= gitCloneRetryMax; attempt++ {
-		repo, err := git.PlainClone(g.checkoutDir, false, &git.CloneOptions{
+		cloneOpts := &git.CloneOptions{
 			URL:      g.repoURL,
-			Depth:    gitShallowDepth,
 			Progress: nil,
-		})
+		}
+		// Shallow (Depth) fetch is only honored by the remote transports;
+		// go-git's file transport rejects it ("reference not found" on a
+		// local path). Depth saves nothing on a local clone anyway.
+		if !g.isLocalPath() {
+			cloneOpts.Depth = gitShallowDepth
+		}
+		repo, err := git.PlainClone(g.checkoutDir, false, cloneOpts)
 		if err != nil {
 			// Cleanup partial clone
 			_ = os.RemoveAll(g.checkoutDir)
