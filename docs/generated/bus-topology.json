@@ -1863,7 +1863,7 @@
     "task.cancelled": [
       {
         "file": "internal/task/registry.go",
-        "line": 811,
+        "line": 815,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2124,7 +2124,7 @@
     "task.result": [
       {
         "file": "internal/task/registry.go",
-        "line": 577,
+        "line": 581,
         "payload_keys": [],
         "via_helper": true
       }

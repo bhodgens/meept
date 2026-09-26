@@ -161,7 +161,9 @@ func TestApprovalWiring_EvolverPlanApprovalTriggersActuator(t *testing.T) {
 
 	// The approval MUST succeed even though synthesis fails (no task
 	// creator) — an actuator-seam test must not depend on task wiring.
-	if err := waitForCondition(2*time.Second, func() bool {
+	// 10s: the actuator writes asynchronously; 2s starves under -p 2
+	// parallel load on 2-core runners.
+	if err := waitForCondition(10*time.Second, func() bool {
 		data, err := os.ReadFile(created.FilePath) //nolint:gosec // fixture path
 		return err == nil && strings.Contains(string(data), "\n- applied: ")
 	}); err != nil {
