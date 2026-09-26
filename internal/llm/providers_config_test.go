@@ -52,8 +52,8 @@ func TestConfigLoads(t *testing.T) {
 	if !ok {
 		t.Fatal("coder alias not found")
 	}
-	if len(coderAlias.Models) == 0 || coderAlias.Models[0] != "zai/glm-5.2" {
-		t.Errorf("coder alias primary = %q, want zai/glm-5.2", coderAlias.Models[0])
+	if len(coderAlias.Models) == 0 || coderAlias.Models[0] != "qwen-coder/qwen2.5-coder-32b" {
+		t.Errorf("coder alias primary = %q, want qwen-coder/qwen2.5-coder-32b", coderAlias.Models[0])
 	}
 
 	// Verify local provider has lfm-8b-mlx-4bit model (2026-09-06: the
@@ -67,11 +67,12 @@ func TestConfigLoads(t *testing.T) {
 	if !ok {
 		t.Fatal("lfm-8b-mlx-4bit model not found in local provider")
 	}
-	// LoadProvidersConfig always runs env expansion: with MEEPT_MODELS_DIR
-	// unset (test env), the ${MEEPT_MODELS_DIR:-~/.meept/models} default in
-	// the shipped config applies verbatim.
-	if lfm8b.Name != "~/.meept/models/LiquidAI/LFM2.5-8B-A1B-MLX-4bit" {
-		t.Errorf("lfm-8b-mlx-4bit name = %q, want ~/.meept/models/LiquidAI/LFM2.5-8B-A1B-MLX-4bit", lfm8b.Name)
+	// 2026-09-25: the shipped config uses absolute /Volumes/LLMs model
+	// paths (this install keeps weights there; the ${MEEPT_MODELS_DIR:-...}
+	// default resolved under the sandbox HOME and broke the e2e classifier
+	// gate — 3e721ccb).
+	if lfm8b.Name != "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit" {
+		t.Errorf("lfm-8b-mlx-4bit name = %q, want /Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit", lfm8b.Name)
 	}
 	if lfm8b.MaxConcurrency != 2 {
 		t.Errorf("lfm-8b-mlx-4bit max_concurrency = %d, want 2", lfm8b.MaxConcurrency)
