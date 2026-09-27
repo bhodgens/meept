@@ -768,7 +768,7 @@
     "orchestrator.replan": [
       {
         "file": "internal/agent/ralph_loop.go",
-        "line": 477,
+        "line": 479,
         "payload_keys": [
           "context",
           "iteration",
@@ -1138,7 +1138,7 @@
     "queue.job.deferred_quota": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 2261,
+        "line": 2259,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1170,7 +1170,7 @@
     "queue.job.retry": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 2323,
+        "line": 2321,
         "payload_keys": [],
         "via_helper": true
       },
@@ -1761,7 +1761,7 @@
     "step.review_completed": [
       {
         "file": "internal/agent/review_manager.go",
-        "line": 699,
+        "line": 701,
         "payload_keys": [
           "confidence",
           "feedback",
@@ -1774,7 +1774,7 @@
     "step.review_requested": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1760,
+        "line": 1758,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1871,7 +1871,7 @@
     "task.completed": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 2053,
+        "line": 2051,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1921,7 +1921,7 @@
     "task.error": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 2281,
+        "line": 2279,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1929,7 +1929,7 @@
     "task.failed": [
       {
         "file": "internal/agent/ralph_loop.go",
-        "line": 596,
+        "line": 598,
         "payload_keys": [
           "completed_jobs",
           "failed_jobs",
@@ -1958,13 +1958,13 @@
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 1194,
+        "line": 1192,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 2453,
+        "line": 2451,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1972,7 +1972,7 @@
     "task.filter_retry": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1496,
+        "line": 1494,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1995,7 +1995,7 @@
     "task.handoff_created": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 3200,
+        "line": 3198,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2090,25 +2090,25 @@
     "task.progress": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 569,
+        "line": 570,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 2084,
+        "line": 2082,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 2485,
+        "line": 2483,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 2547,
+        "line": 2545,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2132,7 +2132,7 @@
     "task.review_completed": [
       {
         "file": "internal/agent/review_manager.go",
-        "line": 716,
+        "line": 718,
         "payload_keys": [
           "confidence",
           "feedback",
@@ -2145,7 +2145,7 @@
     "task.review_requested": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1769,
+        "line": 1767,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2153,13 +2153,13 @@
     "task.step_completed": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1162,
+        "line": 1160,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/tactical.go",
-        "line": 1737,
+        "line": 1735,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2248,7 +2248,7 @@
     "task.validation_retry": [
       {
         "file": "internal/agent/tactical.go",
-        "line": 1637,
+        "line": 1635,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2256,7 +2256,7 @@
     "team.error": [
       {
         "file": "internal/agent/team_orchestrator.go",
-        "line": 541,
+        "line": 524,
         "payload_keys": [
           "error",
           "session_id"
@@ -2267,7 +2267,7 @@
     "team.result": [
       {
         "file": "internal/agent/team_orchestrator.go",
-        "line": 319,
+        "line": 320,
         "payload_keys": [],
         "via_const": true
       }
@@ -3692,7 +3692,7 @@
     "team.start": [
       {
         "file": "internal/agent/team_orchestrator.go",
-        "line": 113,
+        "line": 114,
         "subscriber_id": "team-orchestrator"
       }
     ],
