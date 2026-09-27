@@ -12,9 +12,9 @@
 // Coverage map (manifest scenarios):
 //
 //	tools-memory-01  memory_store -> memory_search verbatim   — TestMemoryStoreThenSearchRetrievesVerbatim
-//	tools-memory-02  memory_vote delta                        — deferred (t.Skip; not granted to any roster agent)
-//	tools-memory-03  retain/recall curation pair              — deferred (t.Skip; not granted/registered)
-//	tools-memory-04  remember queues a proposal               — deferred (t.Skip; not granted to any roster agent)
+//	tools-memory-02  memory_vote delta                        — TestMemoryVoteAppliesDelta
+//	tools-memory-03  retain/recall curation pair              — TestMemoryRetainRecallPairPersists
+//	tools-memory-04  remember queues a proposal               — TestRememberQueuesProposalOnly
 package toolsmemory
 
 import (
@@ -125,18 +125,107 @@ func TestMemoryGetContextSurfacesStoredMemory(t *testing.T) {
 	}
 }
 
-// tools-memory-02: memory_vote applies a delta. STILL BLOCKED on an
-// internal-seam: memory_vote IS registered by the daemon, but it has no
-// internal/agent ToolActionMap entry, so Executor.checkPermission falls back
-// to the tool NAME as the permission action and pkg/security.BuiltinRules
-// denies it ("Unknown action: memory_vote") before RecordVote runs. Adding
-// the grant via the roster seeding below is not sufficient — the deny happens
-// before the tool executes.
+// tools-memory-02: memory_vote applies a delta to a real stored memory and
+// reports the vote evidence in the tool result. Turn 1 stores a memory
+// (terminating tool), turn 2 searches it (the search envelope carries the
+// memory id the vote needs), turn 3 votes on that id — the vote mutates a
+// claim's usefulness score (memory_write class; the ToolActionMap entry maps
+// it there — before that entry every call was "Unknown action"-denied).
+// memory_vote is granted to the librarian, the memory-curation lane holder,
+// so the classifier is pinned to intent=librarian and the roster is extended
+// with an aastub agent (alphabetically first librarian-lane holder) that
+// carries the grant.
 func TestMemoryVoteAppliesDelta(t *testing.T) {
-	t.Skip("blocked: memory_vote lacks an internal/agent ToolActionMap entry, so " +
-		"Executor.checkPermission falls back to the tool name as the action and " +
-		"pkg/security.BuiltinRules denies it (`Unknown action: memory_vote`) before " +
-		"the tool runs. Roster grants alone cannot cover it — needs the action mapping.")
+	s := harness.Start(t, harness.WithPreBootHook(func(st *harness.Stack) error {
+		seedCurationAgent(t, st)
+		return nil
+	}))
+	s.RegisterProject(t, "e2e-project")
+	sessionID := s.CreateSession(t, "mem-vote", s.ProjectDir)
+	s.Fake.SetClassifierOutput(`{"intent":"librarian","confidence":0.95,"reasoning":"pinned librarian"}`)
+
+	const marker = "cobalt-turnstile-8823"
+
+	// Turn 1: store the vote target (terminating tool; the store is the
+	// observable of this turn).
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "memory_store",
+		Arguments: `{"content":"the vote target memory says ` + marker + `","type":"task","category":"general"}`,
+	})
+	s.ChatTurn(t, sessionID,
+		"Create a note for the review queue: store in memory that the vote target memory says "+marker,
+		120*time.Second)
+
+	// Turn 2: search surfaces the stored memory WITH its id in the result
+	// envelope. Extract the id and inject it into turn 3's scripted vote —
+	// ids are generated UUIDs, so the argument must be built at runtime.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "memory_search",
+		Arguments: `{"query":"vote target","limit":10,"min_relevance":0}`,
+	})
+	s.ChatTurn(t, sessionID,
+		"Create a summary file of the vote target: search memory for it first",
+		120*time.Second)
+
+	memID := memoryIDFromSearchResults(s.Fake)
+	if memID == "" {
+		t.Fatalf("no memory id in search results; results:\n%s", toolResultsJoined(s.Fake))
+	}
+
+	// Turn 3: vote on the memory. memory_vote is a TerminatingTool — the
+	// vote result becomes the turn REPLY (no follow-up request carries it
+	// as a tool message), so the observable is the returned reply text.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "memory_vote",
+		Arguments: `{"memory_id":"` + memID + `","delta":1,"reason":"e2e vote marker"}`,
+	})
+	reply := s.ChatTurn(t, sessionID,
+		"Record that the vote target memory was useful: vote +1 on it",
+		120*time.Second)
+
+	// The terminating tool result is pretty-printed into the reply
+	// (formatToolResult fallback), so assert on the values, not key layout.
+	if !strings.Contains(reply, `"voted": 1`) || !strings.Contains(reply, `"net_votes": 1`) {
+		t.Fatalf("memory_vote reply missing vote evidence:\n%s", reply)
+	}
+	if !strings.Contains(reply, "Recorded vote +1 on memory "+memID) {
+		t.Fatalf("memory_vote reply missing the voted memory id %q:\n%s", memID, reply)
+	}
+}
+
+// memoryIDFromSearchResults extracts the memory id of the marker-bearing
+// search hit from the tool-result envelopes the fake LLM has seen.
+func memoryIDFromSearchResults(f *harness.FakeLLM) string {
+	const marker = "cobalt-turnstile-8823"
+	for _, body := range f.Requests() {
+		msgs, _ := body["messages"].([]any)
+		for i := len(msgs) - 1; i >= 0; i-- {
+			msg, ok := msgs[i].(map[string]any)
+			if !ok {
+				continue
+			}
+			if role, _ := msg["role"].(string); role != "tool" {
+				continue
+			}
+			c, _ := msg["content"].(string)
+			if !strings.Contains(c, marker) {
+				continue
+			}
+			// The search envelope carries "id":"<uuid>" per result; JSON map
+			// keys marshal sorted, so "id" lands AFTER "content" — scan
+			// forward from the marker for the nearest "id":"...".
+			if idx := strings.Index(c, marker); idx >= 0 {
+				tail := c[idx:]
+				if p := strings.Index(tail, `"id":"`); p >= 0 {
+					rest := tail[p+len(`"id":"`):]
+					if end := strings.Index(rest, `"`); end >= 0 {
+						return rest[:end]
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // seedCurationAgent writes a user-tier agent ("aastub", alphabetically first
@@ -159,6 +248,7 @@ can_delegate: false
 additional_tools:
   - memory_retain
   - memory_recall
+  - memory_vote
   - remember
   - memory_search
   - memory_store

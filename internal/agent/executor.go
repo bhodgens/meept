@@ -376,6 +376,7 @@ var ToolActionMap = map[string]string{
 	"memory_retain":        "memory_write",
 	"memory_recall":        "memory_read",
 	"memory_reflect":       "memory_write",
+	"memory_vote":          "memory_write", // vote mutates a claim's usefulness score
 	"list_expired_claims":  "memory_read",
 	"purge_auto_claims":    "memory_write", // purges auto-generated claims only
 	"entity_create":        "memory_write", // knowledge graph = memory store

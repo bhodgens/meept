@@ -9,6 +9,7 @@ can_delegate: false
 additional_tools:
   - memory_search
   - memory_store
+  - memory_vote
   - retain
   - recall
   - reflect

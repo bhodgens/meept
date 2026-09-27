@@ -143,6 +143,9 @@ func TestPinnedGrantedToolsResolve(t *testing.T) {
 		"mark_superseded", "mark_resolved",
 		"record_review", "reject_claim", "promote_claim",
 		"remember", "ask",
+		// memory-vote family (daemon-registered via NewMemoryVoteTool;
+		// previously "Unknown action"-denied — tools-memory-02)
+		"memory_vote",
 	}
 	seen := map[string]bool{}
 	for _, name := range pinned {
