@@ -279,13 +279,13 @@
     "budget-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2834,
+        "line": 2831,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 2861,
+        "line": 2858,
         "payload_keys": [],
         "via_helper": true
       }
@@ -358,14 +358,14 @@
     "chat.response": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1544,
+        "line": 1541,
         "payload_keys": []
       }
     ],
     "chat_message": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1592,
+        "line": 1589,
         "payload_keys": []
       }
     ],
@@ -408,7 +408,7 @@
     "collab-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3148,
+        "line": 3145,
         "payload_keys": [],
         "via_helper": true
       }
@@ -761,7 +761,7 @@
     "orchestrator.plan": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1489,
+        "line": 1486,
         "payload_keys": []
       }
     ],
@@ -797,7 +797,7 @@
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 2067,
+        "line": 2066,
         "payload_keys": [],
         "via_helper": true
       },
@@ -813,7 +813,7 @@
     "pair-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3194,
+        "line": 3191,
         "payload_keys": [],
         "via_helper": true
       }
@@ -829,7 +829,7 @@
     "pair.error": [
       {
         "file": "internal/agent/pair_orchestrator.go",
-        "line": 503,
+        "line": 502,
         "payload_keys": [
           "error",
           "session_id"
@@ -848,7 +848,7 @@
     "pair.result": [
       {
         "file": "internal/agent/pair_orchestrator.go",
-        "line": 479,
+        "line": 478,
         "payload_keys": [],
         "via_const": true
       }
@@ -884,7 +884,7 @@
     "pair.session_created": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1722,
+        "line": 1721,
         "payload_keys": [],
         "via_helper": true
       }
@@ -892,7 +892,7 @@
     "pair.start": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2743,
+        "line": 2740,
         "payload_keys": [],
         "via_const": true
       }
@@ -1252,13 +1252,13 @@
     "quota-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2408,
+        "line": 2405,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 2434,
+        "line": 2431,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1782,13 +1782,13 @@
     "task-completed-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1796,
+        "line": 1793,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 1801,
+        "line": 1798,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1796,13 +1796,13 @@
     "task-failed-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1978,
+        "line": 1975,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 1983,
+        "line": 1980,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1840,7 +1840,7 @@
     "task.approved": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 2061,
+        "line": 2060,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1946,13 +1946,13 @@
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 1652,
+        "line": 1651,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 1664,
+        "line": 1663,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2062,7 +2062,7 @@
     "task.pending_approval": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1971,
+        "line": 1970,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2116,7 +2116,7 @@
     "task.rejected": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 2097,
+        "line": 2096,
         "payload_keys": [],
         "via_helper": true
       }
