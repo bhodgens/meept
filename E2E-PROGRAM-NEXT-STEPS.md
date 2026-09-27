@@ -150,12 +150,12 @@ Both forms now exist (verified 2026-09-26 late):
 - Live tier: `make e2e-chat` runs `scripts/e2e-naive-user-chat.sh`
   (real provider, local-only) — the recommended `e2e-chat-naive` target
   already exists under this name.
-- Session history (2026-09-26, runs 31-43): the harness surfaced and
+- Session history (2026-09-26, runs 31-45): the harness surfaced and
   drove fixes for A5 continuity (thread-router conversation-id mismatch,
   platform-shortcut ordering, intent-label instability, digest
-  envelope-header summaries, interrogative gating) and lint_js prose
-  rejections. 13 commits, latest `ee0274be`. Run evidence rows record
-  pass/fail per run; A5 verdict still pending a healthy-provider
-  confirmation run (run 43 flaked on T1 upstream of the continuity
-  path).
+  envelope-header summaries, interrogative gating, and follow-up
+  questions bypassing task creation). 15+ commits through `9c6f46f4`.
+  **A5 PASSED in run 45 (2026-09-26T21:53): 17/17 green — continuity
+  answered from the stored task result with the full artifact path.**
+  Closed.
 
