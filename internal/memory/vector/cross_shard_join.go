@@ -267,7 +267,7 @@ func (c *CrossShardJoin) QueryShards(ctx context.Context, queries map[string]str
 				"shard_alias", alias, "error", cursorErr)
 			scanErr = cursorErr
 		}
-		rows.Close() //nolint:sqlclosecheck,mutexio // same locked-query scope; deferred Close would hold the cursor past DETACH below
+		rows.Close() //nolint:mutexio,sqlclosecheck // same locked-query scope; deferred Close would hold the cursor past DETACH below
 
 		if scanErr != nil {
 			// D-09 FIX: abort this shard — don't return partial results from
