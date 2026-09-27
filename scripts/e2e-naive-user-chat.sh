@@ -136,6 +136,29 @@ kill_daemon() {
   fi
   wait "$DPID" 2>/dev/null || true
   reap_workdir_runtimes
+  reap_workdir_cmdline_runtimes
+}
+
+# reap_workdir_cmdline_runtimes (run-32 leak): a runtime caught MID-SPAWN
+# when the daemon dies has no pid file yet, so reap_workdir_runtimes cannot
+# see it. The supervisor normally kills it on parent death, but the window
+# between supervisor spawn and pid-file write is exactly when the daemon's
+# own kill happens under warmup-timeout exits. Sweep the process table for
+# mlx_lm/llama-server processes whose command line references THIS workdir
+# path — command-line match scopes the sweep to our own scratch runtime,
+# never an unrelated reused pid.
+reap_workdir_cmdline_runtimes() {
+  [ -n "$WORK" ] || return 0
+  local pid
+  for pid in $(pgrep -f 'llama-server|mlx_lm' 2>/dev/null); do
+    kill -0 "$pid" 2>/dev/null || continue
+    if ps -p "$pid" -o command= 2>/dev/null | grep -qF "$WORK"; then
+      log "  reaping mid-spawn runtime (pid $pid, cmdline references $WORK)"
+      kill "$pid" 2>/dev/null || true
+      sleep 1
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
 }
 
 # reap_workdir_runtimes (issue #54): a SIGKILLed daemon cannot run its
