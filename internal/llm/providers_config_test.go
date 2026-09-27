@@ -3,6 +3,7 @@ package llm
 import (
 	"net/url"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -47,13 +48,27 @@ func TestConfigLoads(t *testing.T) {
 		t.Errorf("classifier alias alternate = %v, want local/lfm-8b-mlx-4bit at [1]", classifierAlias.Models)
 	}
 
-	// Verify coder alias uses glm-5.2
-	coderAlias, ok := cfg.ModelAliases["coder"]
-	if !ok {
-		t.Fatal("coder alias not found")
-	}
-	if len(coderAlias.Models) == 0 || coderAlias.Models[0] != "agnes/agnes-2.5-flash" {
-		t.Errorf("coder alias primary = %q, want agnes/agnes-2.5-flash", coderAlias.Models[0])
+	// Verify coder/planner/analyst aliases (operator decision, 2026-09-26):
+	// agnes/agnes-2.5-flash primary, local-gguf fallback — and NO zai/ollama
+	// members (the intent is agnes + local-only fallback, not a remote
+	// provider ladder).
+	for _, id := range []string{"coder", "planner", "analyst"} {
+		alias, ok := cfg.ModelAliases[id]
+		if !ok {
+			t.Fatalf("%s alias not found", id)
+		}
+		if len(alias.Models) == 0 || alias.Models[0] != "agnes/agnes-2.5-flash" {
+			t.Errorf("%s alias primary = %v, want agnes/agnes-2.5-flash first", id, alias.Models)
+		}
+		if !slices.Contains(alias.Models, "local-gguf/lfm-8b-gguf") {
+			t.Errorf("%s alias = %v, want a local-gguf/lfm-8b-gguf fallback member", id, alias.Models)
+		}
+		for _, m := range alias.Models {
+			p := strings.SplitN(m, "/", 2)[0]
+			if p == "zai" || p == "ollama" {
+				t.Errorf("%s alias = %v: member %q violates the agnes+local-only intent", id, alias.Models, m)
+			}
+		}
 	}
 
 	// Verify local provider has lfm-8b-mlx-4bit model (2026-09-06: the

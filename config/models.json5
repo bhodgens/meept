@@ -85,18 +85,22 @@
       "timeout": 15,
       "max_fails": 2
     },
+    // coder/planner/analyst (operator decision, 2026-09-26): agnes primary
+    // (agnes-2.5-flash), LOCAL llama.cpp driver as fallback. Deliberately NO
+    // zai/ollama members — the intent is agnes with a local-only fallback
+    // chain, not a remote provider ladder.
     "coder": {
-      "models": ["agnes/agnes-2.5-flash", "zai/glm-5.2", "ollama/llama3.2"],
+      "models": ["agnes/agnes-2.5-flash", "local-gguf/lfm-8b-gguf"],
       "timeout": 30,
       "max_fails": 3
     },
     "planner": {
-      "models": ["zai/glm-4.5-air", "ollama/llama3.2"],
+      "models": ["agnes/agnes-2.5-flash", "local-gguf/lfm-8b-gguf"],
       "timeout": 15,
       "max_fails": 2
     },
     "analyst": {
-      "models": ["zai/glm-4.5-air", "ollama/qwen2.5-coder"],
+      "models": ["agnes/agnes-2.5-flash", "local-gguf/lfm-8b-gguf"],
       "timeout": 20,
       "max_fails": 3
     },
