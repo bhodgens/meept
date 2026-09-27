@@ -2281,6 +2281,8 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	
 	    "remember": ToolFileWrite,
 	
+	    "tool_view": "platform_read",
+	
 	    ToolWebSearch: "network_request",
 	    ToolWebFetch:  "network_request",
 	
@@ -2345,6 +2347,7 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "memory_retain":        "memory_write",
 	    "memory_recall":        "memory_read",
 	    "memory_reflect":       "memory_write",
+	    "memory_vote":          "memory_write",
 	    "list_expired_claims":  "memory_read",
 	    "purge_auto_claims":    "memory_write",
 	    "entity_create":        "memory_write",
