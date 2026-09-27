@@ -368,7 +368,10 @@ func TestPairOrchestrator_FullConversation(t *testing.T) {
 		if errPayload["session_id"] != sessionID {
 			t.Errorf("error session_id = %q, want %q", errPayload["session_id"], sessionID)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
+		// Generous budget: a loaded CI runner can take many seconds to
+		// schedule the error delivery through the bus. 5s flaked
+		// (2026-09-27, run 36356806686).
 		t.Fatal("Timed out waiting for pair error (registry has no agent loops)")
 	}
 
