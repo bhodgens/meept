@@ -13,7 +13,7 @@
 // Coverage map (manifest scenarios):
 //
 //	skills-discovery-01  tier discovery + shadowing (project beats user) — TestUserTierSkillDiscoveredAndProjectTierShadows
-//	skills-discovery-02  requires-tools gate blocks pre-LLM              — SKIPPED (two daemon-side seams unwired; see test)
+//	skills-discovery-02  requires-tools gate blocks pre-LLM              — TestRequiresToolsGateBlocksBeforeLLM + TestRequiresToolsSatisfiedSkillExecutes
 //	skills-discovery-03  skill execution on the fake LLM                 — TestSkillExecutionRunsOnFakeLLM
 //	skills-discovery-04  skills_create writes a skill; invalid rejected  — TestSkillsCreateWritesRealSkillDirAndRejectsInvalidName
 //	skills-discovery-05  skills_patch replace mode + version snapshot    — TestSkillsPatchReplacesBodyAndVersionsPreviousContent
@@ -35,6 +35,31 @@ func skillFixture(name, description, body string) string {
 	// Description is emitted as a quoted YAML scalar so colons and other
 	// special characters in fixtures stay valid frontmatter.
 	return "---\nname: " + name + "\ndescription: \"" + description + "\"\n---\n\n" + body + "\n"
+}
+
+// skillFixtureWithTools is skillFixture plus a requires-tools frontmatter
+// block (skills-discovery-02 fixtures).
+func skillFixtureWithTools(name, description string, tools []string, body string) string {
+	fm := "---\nname: " + name + "\ndescription: \"" + description + "\"\nrequires-tools:\n"
+	for _, tool := range tools {
+		fm += "  - " + tool + "\n"
+	}
+	return fm + "---\n\n" + body + "\n"
+}
+
+// seedSkillWithTools seeds <tierDir>/<name>/SKILL.md with a requires-tools
+// block; returns the skill path.
+func seedSkillWithTools(t *testing.T, tierDir, name, description string, tools []string, body string) string {
+	t.Helper()
+	dir := filepath.Join(tierDir, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(path, []byte(skillFixtureWithTools(name, description, tools, body)), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	return path
 }
 
 // seedSkill writes <tierDir>/<name>/SKILL.md.
@@ -180,28 +205,68 @@ func TestUserTierSkillDiscoveredAndProjectTierShadows(t *testing.T) {
 }
 
 // skills-discovery-02: the requires-tools gate blocks execution pre-LLM.
-// STILL BLOCKED on two daemon-side seams, so the skip stays (unit-level
-// coverage lives in internal/skills/executor_requires_tools_test.go):
-//
-//  1. The skills parser never populates Skill.RequiresTools from the
-//     `requires-tools:` frontmatter key (internal/skills/models.go
-//     SkillMetadata has no yaml field for it; only internal/context's
-//     separate skill parser reads the key), so a disk-discovered skill with
-//     `requires-tools: [...]` parses with an EMPTY RequiresTools list.
-//  2. Even with a populated list, the daemon never wires the availability
-//     checker: Executor.checkRequiredTools no-ops when toolAvailability is
-//     nil, and no WithToolAvailability/SetToolAvailability call exists
-//     outside internal/skills. With the checker wired, a gated skill would
-//     fail skills.execute with "skill execution failed: skill <name>
-//     requires unavailable tool(s): ..." and ZERO completion requests to
-//     the LLM — the assertions below are ready for that day.
+// The parser now populates Skill.RequiresTools from the `requires-tools:`
+// frontmatter key, and the daemon wires Executor tool-availability checking
+// against the live tool registry — a gated skill whose tools are absent
+// fails skills.execute with "skill <name> requires unavailable tool(s): ..."
+// and ZERO completion requests to the LLM.
 func TestRequiresToolsGateBlocksBeforeLLM(t *testing.T) {
-	t.Skip("blocked: internal/skills parser never populates Skill.RequiresTools from the " +
-		"`requires-tools:` frontmatter key (only internal/context's skill parser reads it), " +
-		"AND the daemon never wires Executor tool-availability checking (no WithToolAvailability " +
-		"call outside internal/skills), so checkRequiredTools no-ops on the live path. Needs the " +
-		"parser field + an executor wiring change in internal/daemon/components.go; unit coverage " +
-		"sits in internal/skills/executor_requires_tools_test.go.")
+	const marker = "REQTOOLS-MAGIC-WORD-9417"
+	s := harness.Start(t,
+		harness.WithPreBootHook(func(st *harness.Stack) error {
+			// Gated skill: requires tools nothing registers in the sandbox
+			// (an MCP-qualified name cannot exist without its server).
+			seedSkillWithTools(t, filepath.Join(st.MeeptHome, "skills"), "e2e-gated-skill",
+				"Requires unavailable tools. Marker: "+marker,
+				[]string{"e2e-nonexistent-tool", "cua-driver.capture"},
+				"Instruction: "+marker+". Ask the model to confirm.")
+			return nil
+		}),
+	)
+
+	content, errText := skillsExecuteRPC(t, s, "e2e-gated-skill", "run the gated skill")
+	if errText == "" {
+		t.Fatalf("gated skill executed despite missing tools; content:\n%s", content)
+	}
+	if !strings.Contains(errText, "requires unavailable tool(s)") {
+		t.Fatalf("unexpected rejection (want the requires-tools sentinel):\n%s", errText)
+	}
+	if strings.Contains(errText, marker) {
+		t.Fatalf("rejection leaked the skill body marker %q:\n%s", marker, errText)
+	}
+
+	// Pre-LLM: the fake LLM must have seen ZERO completion requests.
+	if fakeLLMSawSystemText(s.Fake, marker) {
+		t.Fatal("gated skill reached the LLM before the availability gate")
+	}
+}
+
+// skills-discovery-02 (control leg): a skill with requires-tools listing an
+// AVAILABLE tool executes normally — the gate only blocks when something is
+// actually missing.
+func TestRequiresToolsSatisfiedSkillExecutes(t *testing.T) {
+	const marker = "REQTOOLS-OK-ZEBRAPHONE"
+	s := harness.Start(t,
+		harness.WithPreBootHook(func(st *harness.Stack) error {
+			seedSkillWithTools(t, filepath.Join(st.MeeptHome, "skills"), "e2e-satisfied-skill",
+				"Requires baseline tools. Marker: "+marker,
+				[]string{"memory_search"},
+				"Instruction: "+marker+". Ask the model to confirm.")
+			return nil
+		}),
+	)
+	s.Fake.SetChatText("zebraphone acknowledged")
+
+	content, errText := skillsExecuteRPC(t, s, "e2e-satisfied-skill", "run the satisfied skill")
+	if errText != "" {
+		t.Fatalf("satisfied skill failed: %s\ndaemon log tail:\n%s", errText, s.Daemon.LogTail())
+	}
+	if !strings.Contains(content, "zebraphone acknowledged") {
+		t.Fatalf("skill result content = %q, want the fake LLM reply", content)
+	}
+	if !fakeLLMSawSystemText(s.Fake, marker) {
+		t.Fatal("no completion request carried the skill body marker in its system message")
+	}
 }
 
 // executor on the fake LLM: the skill body reaches the model as the system

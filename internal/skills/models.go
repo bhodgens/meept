@@ -240,6 +240,7 @@ type SkillMetadata struct {
 	Name          string            `yaml:"name"`
 	Description   string            `yaml:"description"`
 	Requires      stringList        `yaml:"requires"`
+	RequiresTools stringList        `yaml:"requires-tools"`
 	Tags          stringList        `yaml:"tags"`
 	Examples      stringList        `yaml:"examples"`
 	AllowedTools  stringList        `yaml:"allowed-tools"`

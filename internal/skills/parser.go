@@ -185,6 +185,7 @@ func ParseSkillText(text string) (*Skill, error) {
 		Name:          meta.Name,
 		Description:   meta.Description,
 		Requires:      meta.Requires,
+		RequiresTools: meta.RequiresTools,
 		Tags:          meta.Tags,
 		Examples:      meta.Examples,
 		Body:          strings.TrimSpace(body),

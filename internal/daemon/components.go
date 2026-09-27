@@ -7596,6 +7596,18 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 				skills.WithPrerequisiteChecker(skills.NewDefaultPrerequisiteChecker(logger.With("component", "skills-prereqs"))),
 			)
 		}
+		// requires-tools gating (skills-discovery-02): consult the LIVE tool
+		// registry at execution time, not a snapshot — builtin tools
+		// register after initializeSkills and MCP tools come and go with
+		// their servers. A skill listing unavailable tools fails before any
+		// LLM call (checkRequiredTools runs pre-flight in the executor).
+		if c.ToolRegistry != nil {
+			executorOpts = append(executorOpts,
+				skills.WithToolAvailability(func(toolName string) bool {
+					return c.ToolRegistry.Get(toolName) != nil
+				}),
+			)
+		}
 		executorOpts = append(executorOpts,
 			skills.WithToolMapper(skills.NewHermesToolMapper(logger.With("component", "skills-toolmapper"))),
 		)
