@@ -161,30 +161,34 @@ func (m *Manager) sessionFor(ctx context.Context, sessionID string) (*session, e
 	// Force the browser process to launch now so failures surface here.
 	// chromedp.Run blocks on process spawn — run OUTSIDE m.mu via a copy of
 	// the fields it needs; the session map insert happens after under lock.
+	// Chrome cold start on small runners can exceed chromedp's 20s
+	// websocket-URL deadline — sometimes twice in a row under load. Try up
+	// to 3 fresh allocator contexts (each gets its own 20s window) before
+	// failing the session.
 	launchCtx := cdpCtx
-	launchErr := func() error {
-		m.mu.Unlock()
-		defer m.mu.Lock()
-		return chromedp.Run(launchCtx) //nolint:mutexio // intentional: launch outside the sessions-map lock
-	}()
-	if launchErr != nil {
-		// Chrome cold start on small runners can exceed chromedp's
-		// 20s websocket-URL deadline. One retry gives the slow start a
-		// second window before failing the session.
-		cdpcxl()
-		allocCxl()
-		allocCtx2, allocCxl2 := chromedp.NewExecAllocator(ctx, opts...)
-		cdpCtx2, cdpcxl2 := chromedp.NewContext(allocCtx2)
-		if err := func() error {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		launchErr := func() error {
 			m.mu.Unlock()
 			defer m.mu.Lock()
-			return chromedp.Run(cdpCtx2) //nolint:mutexio // same unlock pattern as the first launch above
-		}(); err != nil {
-			cdpcxl2()
-			allocCxl2()
-			return nil, fmt.Errorf("browser: launch failed: %w", launchErr)
+			return chromedp.Run(launchCtx) //nolint:mutexio // intentional: launch outside the sessions-map lock
+		}()
+		if launchErr == nil {
+			lastErr = nil
+			break
 		}
-		allocCtx, allocCxl, cdpCtx, cdpcxl = allocCtx2, allocCxl2, cdpCtx2, cdpcxl2
+		lastErr = launchErr
+		cdpcxl()
+		allocCxl()
+		if attempt == 3 {
+			break
+		}
+		allocCtx, allocCxl = chromedp.NewExecAllocator(ctx, opts...)
+		cdpCtx, cdpcxl = chromedp.NewContext(allocCtx)
+		launchCtx = cdpCtx
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("browser: launch failed: %w", lastErr)
 	}
 	s := &session{allocCtx: allocCtx, allocCxl: allocCxl, ctx: cdpCtx, cxl: cdpcxl}
 	m.sessions[sessionID] = s
