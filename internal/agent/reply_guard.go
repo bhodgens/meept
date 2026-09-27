@@ -77,6 +77,13 @@ func replaceCatalogReply(reply string) (string, replyGuardMatch, bool) {
 	}
 
 	if match.Category == "tool_result" {
+		// Last-line defense: the LLM layer's empty-completion hardening
+		// (internal/llm client.go, agnes hardening) cannot catch NON-EMPTY
+		// machine-shaped dumps — raw tool JSON forwarded verbatim is valid
+		// content by that layer's definition. This replacement (plus the
+		// reply_guard context logged by applyReplyGuardLogged) is the
+		// correct final backstop; a retry layer here would double-retry
+		// with the loop's existing nudge ladder.
 		return "the tool ran, but the result came back as raw data instead of an answer. ask me to do something specific — for example 'make me a program that ...' — and i'll get to work.", match, true
 	}
 

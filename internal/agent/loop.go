@@ -5371,6 +5371,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// (audit finding F78/F80).
 		contentBlank := strings.TrimSpace(response.Content) == ""
 		reasoningOnlyPromoted := !contentBlank && response.ReasoningPromoted && !response.HasToolCalls()
+		// terminalBlankStop is defense-in-depth: since the empty-
+		// completion hardening (internal/llm client.go), the client never
+		// returns a blank completion as success — it retries in-budget and
+		// surfaces ErrEmptyResponse (an alias failure → rotation) instead.
+		// This branch now only fires for shapes the parser cannot see
+		// (e.g. provider-specific fields mapped after parse).
 		terminalBlankStop := contentBlank &&
 			response.FinishReason == "stop" &&
 			strings.TrimSpace(response.Reasoning) == ""
