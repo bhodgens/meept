@@ -2350,6 +2350,14 @@ func (d *Dispatcher) clearPendingClarification(sessionID string) {
 
 // shouldCreateTask determines if a task should be created.
 func (d *Dispatcher) shouldCreateTask(intent *Intent) bool {
+	// Follow-up QUESTIONS about prior work never create tasks (run 44:
+	// "did the change get made?" classified as work, created a task, and
+	// the async-dispatch branch intercepted before the recall continuity
+	// branch could answer from the stored result). A question cannot be
+	// new work; the recall branch answers it from the session digest.
+	if referencesPriorWork(intent.Summary) && isInterrogative(intent.Summary) {
+		return false
+	}
 	it := IntentType(intent.Type)
 	if it.ShouldCreateTask() {
 		return true
