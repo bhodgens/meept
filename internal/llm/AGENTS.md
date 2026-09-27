@@ -23,6 +23,21 @@ boundaries:
   `RateLimitError`/retryable-status checks. A new retry loop must
   preserve this — a 429 quota window is hours, and the default
   3-attempt loop would burn it.
+- **Empty/whitespace completions are provider flakes, not fatal errors.**
+  A 200-OK body whose `content` is blank or whitespace-only (and carries
+  no tool calls) classifies as `ErrEmptyResponse`
+  (`parseResponseWithTools` trims; a bare `"\n\n"` body is empty, while
+  `"\n\nok"` passes byte-identical — leading whitespace on real content
+  is normal for agnes-2.5-flash). The retry loops (openai
+  non-streaming/streaming-delta/ChatWithProgress) re-dispatch it
+  IMMEDIATELY within the short budget — no plan sleep, it is not a
+  rate-limit window — and surface the BARE sentinel on exhaustion so it
+  is an alias failure: the agent loop's generic branch records it and
+  rotation lands on the local fallback instead of completing the turn
+  with garbage. The refusal/quota/overflow early-exits keep precedence
+  (a `content_filter` finish reason with empty text is still a refusal,
+  never an empty retry). The streaming path treats a clean stream with
+  no content, no calls, and no reasoning the same way.
 - **All-blocked is a distinct error.** When every alias candidate is
   quota-blocked, the Resolver returns `ErrAllModelsQuotaBlocked` — never a
   blocked model.

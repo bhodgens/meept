@@ -250,7 +250,10 @@ multi-shape; a bus proxy registration needs a live responder on both sides.
 Full invariants live in `internal/llm/AGENTS.md` (quota blocks, endpoint cooldowns,
 refusals, alias resolution, universal parking, slot gate). Short form: a
 `*llm.QuotaResetError` is never an alias failure and never short-retried; check
-`ErrAllModelsQuotaBlocked` / `ErrAllEndpointsBlocked` with `errors.Is`.
+`ErrAllModelsQuotaBlocked` / `ErrAllEndpointsBlocked` with `errors.Is`. An
+empty/whitespace completion from a provider IS an alias failure: the client
+retries it immediately within the short budget, then the `ErrEmptyResponse`
+sentinel rotates to the fallback (never surfaced as a completed turn).
 
 ### Opt-in defaults and evolver wiring
 
