@@ -135,7 +135,7 @@ func GitAddCommitPush(repo *git.Repository, files []string, message string) erro
 	}
 
 	for _, f := range files {
-		_, err := w.Add(f)
+		_, err := w.Add(relToRepo(repo, f))
 		if err != nil {
 			slog.Debug("backup: failed to add file to git (may already be staged)",
 				"file", f, "error", err)
@@ -160,6 +160,54 @@ func GitAddCommitPush(repo *git.Repository, files []string, message string) erro
 	}
 
 	return gitPushWithRetry(repo)
+}
+
+// relToRepo converts an absolute file path to a path relative to the
+// repository root (go-git's Worktree.Add contract). Callers pass absolute
+// artifact paths (backups/<date>/<node>/... under the data dir, which IS the
+// repo root); passing them verbatim makes Add fail with "entry not found"
+// (swallowed at debug level), the following commit legitimately reports
+// "cannot create empty commit", and the first backup of a repo silently
+// produces no commit (pinned by e2e/suites/backup-sync). Relative inputs
+// already satisfy the contract and pass through unchanged.
+//
+// macOS twist: billy's chroot resolves symlinks when it computes the repo
+// root (/tmp → /private/tmp), while the artifact paths keep the unresolved
+// form the caller handed us. Comparing BOTH forms against the root avoids
+// a spurious out-of-tree fallback on symlinked temp prefixes.
+func relToRepo(repo *git.Repository, path string) string {
+	if !filepath.IsAbs(path) {
+		return path
+	}
+	if wt, err := repo.Worktree(); err == nil && wt.Filesystem != nil {
+		root := wt.Filesystem.Root()
+		if root != "" {
+			if rel, ok := relUnder(root, path); ok {
+				return rel
+			}
+			if resolved, err := filepath.EvalSymlinks(path); err == nil {
+				if rel, ok := relUnder(root, resolved); ok {
+					return rel
+				}
+			}
+		}
+	}
+	slog.Debug("backup: could not make path repo-relative, passing through",
+		"path", path)
+	return path
+}
+
+// relUnder computes path relative to root when path is inside root,
+// returning the slash-normalized repo-relative form; ok=false otherwise.
+func relUnder(root, path string) (rel string, ok bool) {
+	r, err := filepath.Rel(root, path)
+	if err != nil {
+		return "", false
+	}
+	if r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(r), true
 }
 
 // SetEffectsLedgerFunc is the process-wide effects-ledger injection point
@@ -266,7 +314,7 @@ func gitAddAndCommit(repo *git.Repository, files []string, message string) error
 	}
 
 	for _, f := range files {
-		_, err := w.Add(f)
+		_, err := w.Add(relToRepo(repo, f))
 		if err != nil {
 			slog.Debug("backup: failed to add file to git (may already be staged)",
 				"file", f, "error", err)
@@ -334,6 +382,13 @@ func gitPushWithRetry(repo *git.Repository) error {
 			return nil
 		}
 		if errors.Is(err, git.NoErrAlreadyUpToDate) {
+			return nil
+		}
+		// No origin configured (nil remote): the commit is the backup —
+		// pushing was never possible and nothing is lost. This is the
+		// config.NewGitBackupScheduler(local-only) shape, not a failure.
+		if errors.Is(err, git.ErrRemoteNotFound) {
+			slog.Debug("backup: no origin remote configured; skipping push (local-only backup)")
 			return nil
 		}
 

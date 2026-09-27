@@ -70,15 +70,14 @@ func newScheduler(t *testing.T, dataDir, checkoutDir string) *backup.GitBackupSc
 // reports the entry (both via the scheduler's git listing and its
 // filesystem fallback).
 //
-// NOTE on the commit assertion: GitAddCommitPush passes the artifact
-// paths to go-git's Worktree.Add VERBATIM (absolute). On this go-git
-// version an absolute path fails to stage ("entry not found", swallowed
-// at debug level), so the commit that follows legitimately reports
-// "cannot create empty commit" — an upstream limitation of the
-// absolute-path contract between runBackup and gitAddCommitPush, not a
-// sandbox artifact. The e2e therefore asserts the artifact/manifest/
-// listing half of the cycle (which is fully observable) and pins the
-// known commit-gap with a documenting check.
+// NOTE on the commit assertion: GitAddCommitPush previously passed artifact
+// paths to go-git's Worktree.Add VERBATIM (absolute). On this go-git version
+// an absolute path fails to stage ("entry not found", swallowed at debug
+// level), so the commit that followed legitimately reported "cannot create
+// empty commit" — the first backup of a repo produced NO commit. The backup
+// package now converts absolute paths to repo-relative before Add
+// (relToRepo), so RunNow commits succeed end-to-end and the test asserts a
+// real commit landed in the repo.
 func TestBackupSync_CycleProducesManifestAndListableEntry(t *testing.T) {
 	dataDir := seedSandboxDataDir(t, false)
 	s := newScheduler(t, dataDir, "")
@@ -91,26 +90,14 @@ func TestBackupSync_CycleProducesManifestAndListableEntry(t *testing.T) {
 		}
 		done <- err
 	})
-	runErr := s.RunNow()
-	if runErr != nil {
-		msg := runErr.Error()
-		if !strings.Contains(msg, "git_commit") || !strings.Contains(msg, "empty commit") {
-			t.Fatalf("RunNow failed with an unexpected error: %v", runErr)
-		}
-		t.Logf("known upstream gap: RunNow commit step failed as documented: %v", runErr)
+	if runErr := s.RunNow(); runErr != nil {
+		t.Fatalf("RunNow failed: %v", runErr)
 	}
-	select {
-	case err := <-done:
-		if err != nil && runErr == nil {
-			t.Fatalf("backup callback error: %v", err)
-		}
-	default:
+	if err := <-done; err != nil {
+		t.Fatalf("backup callback error: %v", err)
 	}
 	if !manifestAt.ok {
-		if runErr == nil {
-			t.Fatal("onBackupDone never reported a successful manifest")
-		}
-		t.Log("manifest callback skipped: the commit gap aborted the cycle before completion")
+		t.Fatal("onBackupDone never reported a successful manifest")
 	}
 
 	// manifest.json exists under backups/<today>/<nodeID>/ and parses.
@@ -135,9 +122,27 @@ func TestBackupSync_CycleProducesManifestAndListableEntry(t *testing.T) {
 		t.Fatalf("compressed artifact missing: %v", err)
 	}
 
+	// The backup commit EXISTS: the absolute-path staging gap is fixed, so
+	// the first cycle produces a real commit containing the artifacts.
+	repo, _, err := backup.GitInit(dataDir)
+	if err != nil {
+		t.Fatalf("GitInit(open backup repo): %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("backup repo has no HEAD commit (first backup produced no commit): %v", err)
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		t.Fatalf("CommitObject(%s): %v", head.Hash(), err)
+	}
+	if !strings.Contains(commit.Message, "backup:") {
+		t.Fatalf("commit message = %q, want a backup commit", commit.Message)
+	}
+
 	// ListBackups (fresh scheduler over the same data dir) shows the
-	// backup via the filesystem fallback (the git listing path needs the
-	// commit that the upstream absolute-path gap withholds on first run).
+	// backup — now via BOTH the git listing and the filesystem fallback,
+	// since the commit gap no longer withholds the git half.
 	lister := newScheduler(t, dataDir, "")
 	entries, err := lister.ListBackups()
 	if err != nil {
@@ -219,10 +224,9 @@ func TestBackupSync_DBPathPrefersLocalDB(t *testing.T) {
 	}
 
 	// LocalDBs round-trip through a real backup cycle: the manifest's
-	// SHA256 must match a re-hash of the artifact on disk. (The RunNow
-	// commit gap documented above does not affect the artifacts.)
+	// SHA256 must match a re-hash of the artifact on disk.
 	s := newScheduler(t, dir, "")
-	if err := s.RunNow(); err != nil && !strings.Contains(err.Error(), "empty commit") {
+	if err := s.RunNow(); err != nil {
 		t.Fatalf("RunNow for hash round-trip: %v", err)
 	}
 	today := time.Now().UTC().Format("2006-01-02")
