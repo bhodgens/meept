@@ -29,6 +29,21 @@ const evolverApprovedPlanTopic = "plan.approved"
 type EvolverApprovalBridge struct {
 	evolver *lifecycle.Evolver
 	logger  *slog.Logger
+
+	// done is closed when the pump goroutine exits (components context
+	// cancelled or subscription closed). Callers that must not race an
+	// in-flight actuator write — graceful shutdown, tests with temp dirs —
+	// wait on it instead of assuming the pump stopped when the context did.
+	done chan struct{}
+}
+
+// Done returns a channel closed when the bridge's pump goroutine has fully
+// exited. Nil for a nil bridge (degenerate wiring).
+func (b *EvolverApprovalBridge) Done() <-chan struct{} {
+	if b == nil {
+		return nil
+	}
+	return b.done
 }
 
 // wireEvolverApprovalBridge subscribes the approval bridge to the
@@ -52,9 +67,13 @@ func (c *Components) wireEvolverApprovalBridge() (*EvolverApprovalBridge, error)
 	bridge := &EvolverApprovalBridge{
 		evolver: c.SkillEvolver,
 		logger:  c.Logger,
+		done:    make(chan struct{}),
 	}
 	sub := c.msgBus.Subscribe("evolver-approval-bridge", evolverApprovedPlanTopic)
-	go c.pumpEvolverApprovals(sub)
+	go func() {
+		defer close(bridge.done)
+		c.pumpEvolverApprovals(sub)
+	}()
 	c.EvolverPlanApprovalBridge = bridge
 	c.Logger.Info("Skill evolver approval bridge wired",
 		"topic", evolverApprovedPlanTopic)

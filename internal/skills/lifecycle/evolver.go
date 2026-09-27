@@ -837,6 +837,13 @@ func planEvolverProvenance(path string) (evolverPlanMeta, string, error) {
 // guard's durable half, so a write failure is reported — but the in-memory
 // registry below still dedupes within the process.
 func markPlanApplied(path string) error {
+	// Serialize the read-modify-write against other plan.md rewriters —
+	// most importantly the plan manager's UpdatePlanStatus, which runs
+	// concurrently with this actuator inside the same ApprovePlan call
+	// (see plan.LockMarkdownWrite for the lost-update this prevents).
+	unlock := plan.LockMarkdownWrite(path)
+	defer unlock()
+
 	data, err := os.ReadFile(path) //nolint:gosec // caller-supplied plan path
 	if err != nil {
 		return fmt.Errorf("read plan file for applied marker: %w", err)
@@ -849,9 +856,28 @@ func markPlanApplied(path string) error {
 	}
 	// Atomic write (tmp + rename) so a crash mid-write cannot corrupt the
 	// plan file — the marker is metadata, but the file also carries the
-	// proposal's provenance and description.
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(stamped), 0o644); err != nil { //nolint:gosec // plan file, user-readable by design
+	// proposal's provenance and description. The scratch name is UNIQUE
+	// per call: ApprovePlan runs Synthesize's plan.md rewrite concurrently
+	// with this actuator on the SAME file, and a fixed "<path>.tmp" name
+	// let the two writers clobber each other's scratch (one rename consumed
+	// the other's tmp, so a "successful" marker write landed without the
+	// marker).
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create applied-marker scratch: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.WriteString(stamped); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup after write failure
+		return fmt.Errorf("write applied marker: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup after close failure
+		return fmt.Errorf("write applied marker: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil { //nolint:gosec // plan file, user-readable by design
+		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup after chmod failure
 		return fmt.Errorf("write applied marker: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {

@@ -62,6 +62,11 @@ func writeTierFixtureSkillForWiring(t *testing.T, tierDir, name string) string {
 // approval bridge needs, through the REAL wiring functions: the evolver plan
 // sink manager (newEvolverPlanManager) and the evolver itself, with a live
 // message bus so ApprovePlan's plan.approved event reaches the bridge.
+//
+// Cleanup ordering note: cleanups run LIFO, so the pump-join registered here
+// (after the tests called t.TempDir()) runs BEFORE the TempDir RemoveAll —
+// an in-flight actuator write from the pump can never land inside a deleted
+// fixture tree.
 func buildApprovalWiringComponents(t *testing.T, fixtureHome string) (*Components, *plan.PlanManager) {
 	t.Helper()
 
@@ -110,6 +115,25 @@ func buildApprovalWiringComponents(t *testing.T, fixtureHome string) (*Component
 		nil, nil, lifecycle.NewVerifier(nil, slog.Default()),
 		nil, sinkMgr, cfg.Skills.Evolver, slog.Default(),
 	)
+
+	// Join the bridge pump on cleanup: cancel (registered above) only
+	// SIGNALS the pump — without the join, an in-flight actuator write can
+	// land after the test's TempDir cleanups have already removed the
+	// fixture tree (observed as a flaky "TempDir RemoveAll cleanup:
+	// directory not empty" under load). Cancel FIRST, then wait for the
+	// pump to actually exit; cleanups run LIFO, so this join (registered
+	// after the TempDir calls) runs BEFORE their RemoveAll and after the
+	// cancel that unblocks the pump.
+	t.Cleanup(func() {
+		c.cancel()
+		select {
+		case <-c.EvolverPlanApprovalBridge.Done():
+		case <-time.After(5 * time.Second):
+			// Never block the suite on a wedged pump; the next test
+			// failure will name it.
+		}
+	})
+
 	return c, sinkMgr
 }
 
@@ -152,17 +176,6 @@ func TestApprovalWiring_EvolverPlanApprovalTriggersActuator(t *testing.T) {
 		t.Fatalf("wireEvolverApprovalBridge: %v", err)
 	}
 
-	if os.Getenv("CI") != "" {
-		// Diagnostics for the evolver lane: was the bridge wired at all?
-		t.Logf("bridge=%+v skillEvolver=%+v msgBus=%+v",
-			c.EvolverPlanApprovalBridge != nil,
-			c.SkillEvolver != nil,
-			c.msgBus != nil)
-		t.Skip("bridge pump goroutine never observes plan.approved on the " +
-			"2-core CI runner (no audit lines, wiring silent) — evolver-lane " +
-			"follow-up; passes locally")
-	}
-
 	created := createSubmittedEvolverPlan(t, mgr,
 		"evo-archive-approval-wired-skill-000042", "archive")
 
@@ -178,6 +191,12 @@ func TestApprovalWiring_EvolverPlanApprovalTriggersActuator(t *testing.T) {
 		data, err := os.ReadFile(created.FilePath) //nolint:gosec // fixture path
 		return err == nil && strings.Contains(string(data), "\n- applied: ")
 	}); err != nil {
+		// Dump the durable state so a regression is diagnosable from CI
+		// logs alone (see the git history: this test once failed there
+		// with zero observable wiring output).
+		if data, readErr := os.ReadFile(created.FilePath); readErr == nil {
+			t.Logf("plan file at timeout:\n%s", data)
+		}
 		t.Fatalf("applied marker never landed on the plan file: %v", err)
 	}
 

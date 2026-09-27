@@ -79,8 +79,14 @@ func WritePlanMarkdown(filePath string, plan *Plan, phases []ParsedPhase) error 
 
 // UpdatePlanStatus updates an existing plan.md file with new plan state and
 // phase progress. It re-parses the file, patches the status and step states,
-// then writes the file back.
+// then writes the file back. The read-modify-write span is serialized per
+// file (see LockMarkdownWrite): the evolver approval bridge's markPlanApplied
+// rewrites the same file concurrently with Synthesize on every approval, and
+// an unordered rename pair would silently drop one side's change.
 func UpdatePlanStatus(filePath string, planState PlanState, phases []PlanPhase) error {
+	unlock := LockMarkdownWrite(filePath)
+	defer unlock()
+
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("read plan file for update: %w", err)
@@ -242,13 +248,42 @@ func WritePlanFromParsed(filePath string, parsed *ParsedPlan) error {
 }
 
 // mkdirAndWrite creates parent directories and writes content to filePath.
+// The write is atomic (tmp + rename): concurrent readers of the plan file —
+// most importantly the evolver approval bridge, which classifies the file by
+// its Meta content on every plan.approved event — must never observe a
+// truncated or partially rewritten document. markPlanApplied in
+// internal/skills/lifecycle follows the same rule for the same reason,
+// including the unique-per-call scratch name.
 func mkdirAndWrite(filePath, content string) error {
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create directories: %w", err)
 	}
-	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+	// Unique scratch name per call: concurrent writers to the same plan
+	// file (Synthesize's UpdatePlanStatus races the evolver actuator's
+	// markPlanApplied on an approval) must not share a tmp path, or one
+	// writer's rename consumes the other's scratch.
+	tmp, err := os.CreateTemp(dir, filepath.Base(filePath)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create scratch: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup after write failure
 		return fmt.Errorf("write file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup after close failure
+		return fmt.Errorf("write file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup after chmod failure
+		return fmt.Errorf("write file: %w", err)
+	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup after rename failure
+		return fmt.Errorf("commit file: %w", err)
 	}
 	return nil
 }
