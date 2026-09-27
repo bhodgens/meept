@@ -24,6 +24,12 @@ exit 0
 `
 	err := os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+
 	return binPath
 }
 
@@ -40,6 +46,12 @@ exit 1
 `
 	err := os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+
 	return binPath
 }
 
@@ -147,6 +159,11 @@ exit 0
 `
 	err = os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 
 	engine, err := NewParakeetEngine(Config{
 		Parakeet: ParakeetConfig{BinPath: binPath},
@@ -184,6 +201,11 @@ exit 0
 `
 	err = os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 
 	engine, err := NewParakeetEngine(Config{
 		Parakeet: ParakeetConfig{
@@ -238,6 +260,11 @@ exit 0
 `
 	err = os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 
 	engine, err := NewParakeetEngine(Config{
 		Parakeet: ParakeetConfig{BinPath: binPath},
@@ -267,6 +294,11 @@ func TestCheckParakeetAvailable_ModelNotFound(t *testing.T) {
 	binPath := filepath.Join(tmpDir, "parakeet-transcribe")
 	err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 
 	err = checkParakeetAvailable(Config{
 		Parakeet: ParakeetConfig{
@@ -285,6 +317,11 @@ func TestCheckParakeetAvailable_BothFound(t *testing.T) {
 	binPath := filepath.Join(tmpDir, "parakeet-transcribe")
 	err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 
 	modelPath := filepath.Join(tmpDir, "model")
 	err = os.WriteFile(modelPath, []byte("model data"), 0644)

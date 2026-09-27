@@ -29,6 +29,17 @@ exit 0
 `
 	err := os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 	return binPath
 }
 
@@ -45,6 +56,17 @@ exit 1
 `
 	err := os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 	return binPath
 }
 
@@ -200,6 +222,11 @@ exit 0
 `
 	err = os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 
 	engine, err := NewWhisperEngine(Config{
 		Whisper: WhisperConfig{
@@ -241,6 +268,11 @@ exit 0
 `
 	err = os.WriteFile(binPath, []byte(script), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 
 	engine, err := NewWhisperEngine(Config{
 		Whisper: WhisperConfig{
@@ -297,6 +329,11 @@ func TestCheckWhisperAvailable_ModelNotFound(t *testing.T) {
 	binPath := filepath.Join(tmpDir, "whisper-cli")
 	err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0755)
 	require.NoError(t, err)
+	// Linux overlayfs: exec can race the writeback (ETXTBSY); fsync forces it out.
+	if f, ferr := os.OpenFile(binPath, os.O_RDWR, 0); ferr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 
 	err = checkWhisperAvailable(Config{
 		Whisper: WhisperConfig{
