@@ -890,6 +890,22 @@ def main():
         if stale:
             print(f"\n❌ Stale generated files: {', '.join(stale)}")
             print("   Run: python3 scripts/gen-connectivity-graph.py")
+            # First-difference debug (CI has no artifacts to inspect):
+            # show a bounded unified diff for the first stale file so the
+            # cross-platform divergence is diagnosable from the log alone.
+            import difflib
+            name = stale[0]
+            path = GENERATED_DIR / name
+            if name.endswith(".json") and path.exists():
+                existing = json.loads(path.read_text())
+                fresh = outputs[name]
+                old_txt = json.dumps(existing, indent=2, sort_keys=True).splitlines()
+                new_txt = json.dumps(fresh, indent=2, sort_keys=True).splitlines()
+                diff = list(difflib.unified_diff(old_txt, new_txt,
+                                                 "committed", "generated", lineterm=""))
+                print(f"\n   first stale file: {name} (diff, first 60 lines):")
+                for line in diff[:60]:
+                    print("   " + line)
             sys.exit(1)
         else:
             print("\n✅ All generated files are up to date.")
