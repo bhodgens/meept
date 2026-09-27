@@ -67,18 +67,30 @@ fallbacks in the template are not intended for production alias shapes,
 that is a template decision for the operator; the suites already encode
 the current contract.
 
-## Known product findings (documented in suite skips, not fixed)
+## Known product findings (FIXED 2026-09-27, see commits 5edcd799..7d8acd13)
+
+All six findings below are fixed and their pinned suite skips flipped
+green. Roster grants landed in the DEFAULT config (coder: file_edit,
+tool_view; analyst: pdf_read, spreadsheet_write; skeptic: remember;
+librarian: memory_vote) — each maps to a known BuiltinRules action, so
+the existing permission layer gates them; no operator action required.
 
 - No roster grants for file_edit/spreadsheet_write/pdf_read/memory_vote/
-  remember/curation tools (e2e coverage exists; grants are operator-side).
-- memory_vote lacks a ToolActionMap entry (denied "Unknown action").
-- Skill.RequiresTools never populated by the parser; WithToolAvailability
-  never wired (requires-tools gating is dormant).
-- ChatHandler.notificationPublisher never wired (no real notifications).
-- dispatch step lane does not inject session working dir into tool
-  context (inline lanes do) — spreadsheet_write hard-refuses without it.
-- GitAddCommitPush passes absolute paths to go-git Worktree.Add → first
-  backup commit is empty (pinned by backup-sync suite).
+  remember/curation tools → default roster grants added (see above);
+  curation family was already granted to librarian.
+- memory_vote lacked a ToolActionMap entry → mapped to memory_write.
+- Skill.RequiresTools never populated; WithToolAvailability never wired →
+  parser reads `requires-tools:` and the executor consults the live tool
+  registry.
+- ChatHandler.notificationPublisher never wired → notificationAdapter
+  wired at both ChatHandler construction sites.
+- Dispatch step lane did not inject the session working dir → root cause
+  was chat.submit minting an orphan conversation id; submit now resolves
+  the session's own conversation id, and resolveStepWorkingDirFor also
+  consults the step payload's session provenance.
+- GitAddCommitPush passed absolute paths to go-git Worktree.Add →
+  relToRepo converts to repo-relative; local-only backups (no origin)
+  no longer fail the cycle on push.
 
 ## Suggested order
 
