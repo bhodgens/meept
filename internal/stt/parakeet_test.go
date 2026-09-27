@@ -248,7 +248,17 @@ func TestParakeetEngine_TranscribeFailure(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	text, err := engine.transcribe(wavFile)
+	// ETXTBSY retry: only treat the call as a real failure once the mock
+	// binary actually executes (a first-exec "text file busy" must not
+	// satisfy this failure-path assertion with the wrong error).
+	var text string
+	for i := 0; ; i++ {
+		text, err = engine.transcribe(wavFile)
+		if err == nil || !strings.Contains(err.Error(), "text file busy") || i >= 5 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parakeet-transcribe failed")
 	assert.Empty(t, text)
