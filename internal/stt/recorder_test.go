@@ -154,7 +154,15 @@ func TestRecorder_FilePath(t *testing.T) {
 	// Before recording, FilePath returns empty string.
 	assert.Empty(t, r.FilePath())
 
-	err := r.Start()
+	// Linux overlayfs ETXTBSY retry (exec racing the mock writeback).
+	var err error
+	for i := 0; i < 5; i++ {
+		err = r.Start()
+		if err == nil || !strings.Contains(err.Error(), "text file busy") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	require.NoError(t, err)
 	defer r.Stop()
 
@@ -223,7 +231,15 @@ func TestRecorder_CleanupTwice(t *testing.T) {
 	cfg := RecordingConfig{RecorderBin: binPath}
 	r := NewRecorder(cfg)
 
-	err := r.Start()
+	// Linux overlayfs ETXTBSY retry (exec racing the mock writeback).
+	var err error
+	for i := 0; i < 5; i++ {
+		err = r.Start()
+		if err == nil || !strings.Contains(err.Error(), "text file busy") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	require.NoError(t, err)
 	r.Stop()
 
