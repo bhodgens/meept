@@ -2735,6 +2735,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Create chat handler with dispatcher for multi-agent routing
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, c.Dispatcher, msgBus, logger)
 
+		// Wire the notification publisher (Plan 4.3 finding: the field was
+		// settable but never wired, so every publishNotification call was a
+		// silent no-op). Same adapter the agent loop uses.
+		if c.NotificationEmitter != nil {
+			c.ChatHandler.SetNotificationPublisher(&notificationAdapter{emitter: c.NotificationEmitter})
+		}
+
 		// Legacy sync chat opt-in (async-turn-migration leaf 07): the
 		// default is async-everywhere — chat.submit acks immediately and
 		// results arrive via turn.terminal. Only an explicit
@@ -3163,6 +3170,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.Orchestrator == nil {
 		// Create chat handler without dispatcher (single-agent mode)
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, nil, msgBus, logger)
+
+		// Wire the notification publisher (Plan 4.3 finding) — single-agent
+		// construction site, same adapter as the multi-agent path above.
+		if c.NotificationEmitter != nil {
+			c.ChatHandler.SetNotificationPublisher(&notificationAdapter{emitter: c.NotificationEmitter})
+		}
 
 		// Legacy sync chat opt-in (async-turn-migration leaf 07) —
 		// same contract as the multi-agent construction site above.
