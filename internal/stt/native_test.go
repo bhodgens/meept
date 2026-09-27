@@ -103,7 +103,7 @@ func TestNativeEngine_Start_WhenAlreadyRecording(t *testing.T) {
 	assert.Contains(t, err.Error(), "already recording")
 
 	// Cleanup.
-	engine.Stop()
+	_, _ = engine.Stop() // test teardown
 }
 
 func TestCheckNativeAvailable_Linux(t *testing.T) {

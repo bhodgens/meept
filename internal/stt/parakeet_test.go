@@ -1,11 +1,11 @@
 package stt
 
 import (
-	"strings"
-	"time"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -227,8 +227,9 @@ exit 0
 	})
 	require.NoError(t, err)
 
-	text, err := engine.transcribe(wavFile)
-	require.NoError(t, err)
+	text := transcribeWithETXTBSYRetry(t, func() (string, error) {
+		return engine.transcribe(wavFile)
+	})
 	assert.Equal(t, "custom model transcription", text)
 }
 
@@ -283,8 +284,9 @@ exit 0
 	})
 	require.NoError(t, err)
 
-	text, err := engine.transcribe(wavFile)
-	require.NoError(t, err)
+	text := transcribeWithETXTBSYRetry(t, func() (string, error) {
+		return engine.transcribe(wavFile)
+	})
 	// All output lines were filtered, so text should be empty.
 	assert.Empty(t, text)
 }

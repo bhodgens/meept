@@ -185,7 +185,7 @@ func TestWhisperEngine_Start_WhenAlreadyRecording(t *testing.T) {
 	assert.Contains(t, err.Error(), "already recording")
 
 	// Cleanup.
-	engine.Stop()
+	_, _ = engine.Stop() // test teardown
 }
 
 func TestWhisperEngine_TranscribeOutputParsing(t *testing.T) {
@@ -235,8 +235,9 @@ exit 0
 	})
 	require.NoError(t, err)
 
-	text, err := engine.transcribe(wavFile)
-	require.NoError(t, err)
+	text := transcribeWithETXTBSYRetry(t, func() (string, error) {
+		return engine.transcribe(wavFile)
+	})
 	// Should contain the plain text lines, not timestamp or whisper info lines.
 	assert.Contains(t, text, "this is plain text")
 	assert.Contains(t, text, "and final text")
@@ -284,8 +285,9 @@ exit 0
 	})
 	require.NoError(t, err)
 
-	text, err := engine.transcribe(wavFile)
-	require.NoError(t, err)
+	text := transcribeWithETXTBSYRetry(t, func() (string, error) {
+		return engine.transcribe(wavFile)
+	})
 	assert.Equal(t, "transcribed text with custom model", text)
 }
 

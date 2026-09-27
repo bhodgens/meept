@@ -87,7 +87,7 @@ func TestRecorder_StartAndStop(t *testing.T) {
 
 	// Linux overlayfs ETXTBSY retry (exec racing the mock's writeback).
 	var err error
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		err = r.Start()
 		if err == nil || !strings.Contains(err.Error(), "text file busy") {
 			break
@@ -115,7 +115,7 @@ func TestRecorder_StartAlreadyRecording(t *testing.T) {
 
 	// Linux overlayfs ETXTBSY retry (exec racing the mock's writeback).
 	var err error
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		err = r.Start()
 		if err == nil || !strings.Contains(err.Error(), "text file busy") {
 			break
@@ -130,7 +130,7 @@ func TestRecorder_StartAlreadyRecording(t *testing.T) {
 	assert.Contains(t, err.Error(), "already active")
 
 	// Cleanup.
-	r.Stop()
+	_ = r.Stop() // test teardown: stop result not asserted here
 }
 
 func TestRecorder_StopWhenNotRecording(t *testing.T) {
@@ -155,7 +155,7 @@ func TestRecorder_FilePath(t *testing.T) {
 
 	// Linux overlayfs ETXTBSY retry (exec racing the mock writeback).
 	var err error
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		err = r.Start()
 		if err == nil || !strings.Contains(err.Error(), "text file busy") {
 			break
@@ -163,7 +163,7 @@ func TestRecorder_FilePath(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	require.NoError(t, err)
-	defer r.Stop()
+	defer func() { _ = r.Stop() }() // test teardown
 
 	fp := r.FilePath()
 	assert.NotEmpty(t, fp)
@@ -189,7 +189,7 @@ func TestRecorder_Cleanup(t *testing.T) {
 	// Linux overlayfs: exec can race the mock script's writeback
 	// (ETXTBSY) even after close. Retry briefly.
 	var err error
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		err = r.Start()
 		if err == nil || !strings.Contains(err.Error(), "text file busy") {
 			break
@@ -206,7 +206,7 @@ func TestRecorder_Cleanup(t *testing.T) {
 	_, _ = os.Stat(fp)
 	// The file may or may not exist depending on timing, so just check no panic.
 
-	r.Stop()
+	_ = r.Stop() // test teardown
 	r.Cleanup()
 
 	// After cleanup, the file should be removed.
@@ -232,7 +232,7 @@ func TestRecorder_CleanupTwice(t *testing.T) {
 
 	// Linux overlayfs ETXTBSY retry (exec racing the mock writeback).
 	var err error
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		err = r.Start()
 		if err == nil || !strings.Contains(err.Error(), "text file busy") {
 			break
@@ -240,7 +240,7 @@ func TestRecorder_CleanupTwice(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	require.NoError(t, err)
-	r.Stop()
+	_ = r.Stop() // test teardown
 
 	// First cleanup should remove file.
 	r.Cleanup()
@@ -376,7 +376,7 @@ func TestRecorder_StartWithWriteWavMock(t *testing.T) {
 	// Linux overlayfs: exec can race the mock script's writeback
 	// (ETXTBSY) even after close. Retry briefly.
 	var err error
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		err = r.Start()
 		if err == nil || !strings.Contains(err.Error(), "text file busy") {
 			break
@@ -385,7 +385,7 @@ func TestRecorder_StartWithWriteWavMock(t *testing.T) {
 	}
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		r.Stop()
+		_ = r.Stop() // test teardown
 		r.Cleanup()
 	})
 
