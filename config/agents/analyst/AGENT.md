@@ -10,6 +10,8 @@ additional_tools:
   - web_fetch
   - web_search
   - file_read
+  - pdf_read
+  - spreadsheet_write
   - list_directory
   - transcript_fetch
 capabilities:

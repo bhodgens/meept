@@ -9,10 +9,12 @@ can_delegate: false
 additional_tools:
   - file_read
   - file_write
+  - file_edit
   - file_delete
   - list_directory
   - shell_execute
   - json_extract
+  - tool_view
 capabilities:
   - code
   - reasoning

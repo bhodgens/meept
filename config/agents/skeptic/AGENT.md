@@ -11,6 +11,7 @@ additional_tools:
   - web_search
   - web_fetch
   - file_read
+  - remember
 capabilities:
   - reasoning
 max_iterations: 15

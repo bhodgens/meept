@@ -53,12 +53,6 @@ func toolResultsJoined(f *harness.FakeLLM) string {
 	return strings.Join(toolResultTexts(f), "\n")
 }
 
-// taskRowsInStore counts rows in tasks.db (side-effect probe).
-func taskRowsInStore(t *testing.T, s *harness.Stack) int {
-	t.Helper()
-	return len(harness.Tasks(t, s.TasksDBPath()))
-}
-
 // mkCodeSession boots a stack, registers the project, binds the session.
 func mkCodeSession(t *testing.T, name string) *harness.Stack {
 	t.Helper()
@@ -280,13 +274,37 @@ func TestIndexedSchemaModeStubsAndAlwaysFull(t *testing.T) {
 }
 
 // tools-argvalidate-05 (expansion leg): a mid-turn tool_view call expands the
-// full schema. DEFERRED: tool_view is not granted to any roster agent, so the
-// per-agent filtered registry answers a scripted call with
-// `unknown tool: tool_view` before the expansion can run.
+// full schema. tool_view is granted to the coder in the default roster
+// (config/agents) and mapped to platform_read in ToolActionMap, so the
+// per-agent filtered registry exposes it on the pinned code lane and the
+// expansion result carries the full definition JSON.
 func TestToolViewExpandsStubbedSchemaMidTurn(t *testing.T) {
-	t.Skip("deferred: tool_view is not granted to any roster agent (config/agents); " +
-		"the filtered per-agent registry turns a scripted call into " +
-		"`unknown tool: tool_view`. Requires a roster grant to cover e2e — the " +
-		"assertions are ready: the tool_view result envelope carries task_create's " +
-		"full definition JSON with the required \"name\" property.")
+	s := mkCodeSession(t, "arg-toolview")
+	sessionID := s.CreateSession(t, "arg-toolview", s.ProjectDir)
+
+	// A mid-turn tool_view{task_create} call. The result envelope must carry
+	// task_create's FULL definition — the required "name" property among
+	// them — proving the expansion reads full fidelity from the registry
+	// even while indexed mode stubs the offered schema.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "tool_view",
+		Arguments: `{"name":"task_create"}`,
+	})
+
+	s.ChatTurn(t, sessionID,
+		"Before writing the report, look up the full schema of the task_create tool with tool_view, then summarize what arguments it takes",
+		120*time.Second)
+
+	// The expanded definition arrives as a JSON-escaped string inside the
+	// result envelope — match on the escaped key sequences.
+	res := toolResultsJoined(s.Fake)
+	if strings.Contains(res, "unknown tool: tool_view") {
+		t.Fatalf("tool_view not exposed to the coder roster agent; results:\n%s", res)
+	}
+	if !strings.Contains(res, `\"name\":\"task_create\"`) {
+		t.Fatalf("tool_view result missing the expanded task_create definition; results:\n%s", res)
+	}
+	if !strings.Contains(res, `\"required\":[\"name\"]`) {
+		t.Fatalf("tool_view result missing the required-property list of the expanded schema; results:\n%s", res)
+	}
 }

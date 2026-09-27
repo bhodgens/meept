@@ -146,6 +146,10 @@ func TestPinnedGrantedToolsResolve(t *testing.T) {
 		// memory-vote family (daemon-registered via NewMemoryVoteTool;
 		// previously "Unknown action"-denied — tools-memory-02)
 		"memory_vote",
+		// default-roster grants added by the standing-debt paydown:
+		// file_edit/spreadsheet_write/pdf_read/remember (roster grants) and
+		// tool_view (coder grant + platform_read mapping)
+		"file_edit", "spreadsheet_write", "pdf_read", "tool_view",
 	}
 	seen := map[string]bool{}
 	for _, name := range pinned {

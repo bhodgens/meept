@@ -265,6 +265,10 @@ var ToolActionMap = map[string]string{
 	// remember appends improvement notes to a local markdown queue file
 	// (.meept/improvements.md): a plain local file write, MEDIUM.
 	"remember": ToolFileWrite,
+	// tool_view (leaf 02): read-only schema introspection — expands an
+	// indexed-schema stub back into the full definition from the registry.
+	// No side effects beyond the LRU read; platform_read is the family.
+	"tool_view": "platform_read",
 
 	// Network operations
 	ToolWebSearch: "network_request",
