@@ -589,18 +589,33 @@ func TestRuntimeProcess_ExitPathClearsStalePIDFileAndRecord(t *testing.T) {
 		t.Fatalf("record must exist after start: %v", err)
 	}
 
-	// The runtime exits on its own; the exit path must remove the stale handle.
+	// The runtime exits on its own; the exit path must remove the stale
+	// handle. Poll BOTH artifacts in one budget: the pid file and the
+	// spawn record are removed by the exit-path goroutine, possibly in
+	// separate steps — asserting the record immediately after the pid
+	// file vanishes raced the removal on a 2-core runner (CI, 2026-09-27).
 	deadline := time.Now().Add(8 * time.Second)
+	pidGone, recordGone := false, false
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(pidFile); os.IsNotExist(err) {
+		if !pidGone {
+			if _, err := os.Stat(pidFile); os.IsNotExist(err) {
+				pidGone = true
+			}
+		}
+		if !recordGone {
+			if _, err := llm.ReadSpawnRecord(pidFile); err != nil {
+				recordGone = true
+			}
+		}
+		if pidGone && recordGone {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
-		t.Fatalf("an exited runtime must leave no stale pid file (F97), stat err = %v", err)
+	if !pidGone {
+		t.Fatal("an exited runtime must leave no stale pid file (F97)")
 	}
-	if _, err := llm.ReadSpawnRecord(pidFile); err == nil {
+	if !recordGone {
 		t.Error("an exited runtime must leave no stale spawn record (F97)")
 	}
 }
