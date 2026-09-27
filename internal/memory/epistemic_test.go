@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 
@@ -416,9 +417,7 @@ func TestListExpiredClaims(t *testing.T) {
 		if err != nil {
 			t.Fatalf("load %q: %v", text, err)
 		}
-		for k, v := range extra {
-			mem.Metadata[k] = v
-		}
+		maps.Copy(mem.Metadata, extra)
 		if err := m.stampMetadataInPlace(ctx, mem); err != nil {
 			t.Fatalf("stamp %q: %v", text, err)
 		}

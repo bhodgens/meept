@@ -172,7 +172,7 @@ func claimInForce(mem Memory, now time.Time) bool {
 // stringTokenSet splits s on whitespace into a set of lowercase tokens.
 func stringTokenSet(s string) map[string]struct{} {
 	set := make(map[string]struct{})
-	for _, w := range strings.Fields(strings.ToLower(s)) {
+	for w := range strings.FieldsSeq(strings.ToLower(s)) {
 		set[w] = struct{}{}
 	}
 	return set

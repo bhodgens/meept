@@ -11,6 +11,7 @@ package queue
 //   - give-up                     → legacy Fail path → dead_letter row
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -79,7 +80,7 @@ func TestStoreRequeue_ClaimHonorsNotBefore(t *testing.T) {
 	}
 
 	// Before the not-before time: no job available.
-	if _, err := store.ClaimNextForAgent("worker-2", nil, ""); err != ErrNoJobAvailable {
+	if _, err := store.ClaimNextForAgent("worker-2", nil, ""); !errors.Is(err, ErrNoJobAvailable) {
 		t.Fatalf("claim before NotBefore returned %v, want ErrNoJobAvailable", err)
 	}
 

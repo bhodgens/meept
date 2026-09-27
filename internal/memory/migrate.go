@@ -74,7 +74,7 @@ func MigrateToDualDB(dataDir string, nodeID string, logger *slog.Logger) error {
 	if localExists && memExists {
 		// Both existed; try to merge common tables.
 		logger.Info("migrated: both local.db and memory.db existed, attempting merge")
-		if err := mergeMemoryDbIntoLocal(memoryPath, localPath, logger); err != nil {
+		if err := mergeMemoryDBIntoLocal(memoryPath, localPath, logger); err != nil {
 			logger.Warn("migration: memory merge failed (data kept in backup)", "error", err)
 		}
 	} else if !localExists && memExists {
@@ -128,7 +128,7 @@ func copyFileTo(src, dst string) error {
 
 // mergeMemoryDbIntoLocal ATTACHes memory.db and copies tables from it into
 // local.db. Best-effort: errors per-table are logged but don't abort.
-func mergeMemoryDbIntoLocal(memoryPath, localPath string, logger *slog.Logger) error {
+func mergeMemoryDBIntoLocal(memoryPath, localPath string, logger *slog.Logger) error {
 	localDB, err := sql.Open("sqlite", localPath)
 	if err != nil {
 		return fmt.Errorf("open local.db for merge: %w", err)
@@ -146,6 +146,7 @@ func mergeMemoryDbIntoLocal(memoryPath, localPath string, logger *slog.Logger) e
 	if err != nil {
 		return fmt.Errorf("list memory.db tables: %w", err)
 	}
+	defer rows.Close()
 	var tables []string
 	for rows.Next() {
 		var name string
@@ -153,7 +154,9 @@ func mergeMemoryDbIntoLocal(memoryPath, localPath string, logger *slog.Logger) e
 			tables = append(tables, name)
 		}
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate memory.db tables: %w", err)
+	}
 
 	if _, err := localDB.Exec(`ATTACH DATABASE ? AS src`, memoryPath); err != nil {
 		return fmt.Errorf("attach memory.db for merge: %w", err)
@@ -174,9 +177,12 @@ func mergeMemoryDbIntoLocal(memoryPath, localPath string, logger *slog.Logger) e
 		}
 		// Check if table already exists in local.db.
 		var exists int
-		localDB.QueryRow(
+		if qErr := localDB.QueryRow(
 			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`,
-			tbl).Scan(&exists)
+			tbl).Scan(&exists); qErr != nil {
+			logger.Warn("migration: table existence check failed", "table", tbl, "error", qErr)
+			continue
+		}
 		if exists > 0 {
 			logger.Debug("migration: skip merge, table already exists", "table", tbl)
 			continue
@@ -201,7 +207,7 @@ var sqliteIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // Returns empty if nothing remains after stripping, so callers can skip.
 func tblName(s string) string {
 	out := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		b := s[i]
 		if ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z') || b == '_' || ('0' <= b && b <= '9') {
 			out = append(out, b)

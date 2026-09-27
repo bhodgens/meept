@@ -53,7 +53,7 @@
     "path": "Content-Length",
     "handler": "",
     "file": "internal/secrets/proxy.go",
-    "line": 323
+    "line": 313
   },
   {
     "method": "GET",
@@ -88,14 +88,14 @@
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1620
+    "line": 1667
   },
   {
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1753
+    "line": 1800
   },
   {
     "method": "GET",
@@ -109,7 +109,7 @@
     "path": "Content-Type",
     "handler": "",
     "file": "internal/secrets/proxy.go",
-    "line": 287
+    "line": 277
   },
   {
     "method": "GET",
@@ -2076,7 +2076,7 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/auth/codex_flow.go",
-    "line": 168
+    "line": 166
   },
   {
     "method": "GET",
@@ -2097,14 +2097,14 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 1650
+    "line": 1697
   },
   {
     "method": "GET",
     "path": "Retry-After",
     "handler": "",
     "file": "internal/llm/client.go",
-    "line": 2767
+    "line": 2855
   },
   {
     "method": "GET",
@@ -2279,21 +2279,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7192
+    "line": 7190
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7203
+    "line": 7201
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7184
+    "line": 7182
   },
   {
     "method": "GET",
@@ -2321,7 +2321,7 @@
     "path": "json",
     "handler": "",
     "file": "internal/configui/keypath.go",
-    "line": 124
+    "line": 123
   },
   {
     "method": "GET",
@@ -2335,14 +2335,14 @@
     "path": "json",
     "handler": "",
     "file": "internal/configui/save.go",
-    "line": 232
+    "line": 231
   },
   {
     "method": "GET",
     "path": "json",
     "handler": "",
     "file": "internal/configui/save.go",
-    "line": 352
+    "line": 350
   },
   {
     "method": "GET",

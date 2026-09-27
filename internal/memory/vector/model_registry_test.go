@@ -1,6 +1,7 @@
 package vector
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -68,31 +69,24 @@ func TestGetModelInfo(t *testing.T) {
 
 func TestListModels(t *testing.T) {
 	models := ListModels()
-	if len(models) != len(knownModels) {
-		t.Errorf("ListModels() returned %d models, want %d", len(models), len(knownModels))
+	if len(models) != len(modelCatalog) {
+		t.Errorf("ListModels() returned %d models, want %d", len(models), len(modelCatalog))
 	}
 
 	// Verify all known models are listed
-	for id := range knownModels {
-		found := false
-		for _, m := range models {
-			if m == id {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("model %q from knownModels not found in ListModels()", id)
+	for id := range modelCatalog {
+		if !slices.Contains(models, id) {
+			t.Errorf("model %q from modelCatalog not found in ListModels()", id)
 		}
 	}
 }
 
 func TestRegisterModel(t *testing.T) {
 	// Save original state to restore after test
-	origSize := len(knownModels)
+	origSize := len(modelCatalog)
 
 	RegisterModel(ModelInfo{
-		ID:             "test/custom-model",
+		ID:             "test/custom-model", //nolint:gosec // G101: model identifier, not a credential
 		Dimension:      256,
 		MaxSequenceLen: 512,
 		ONNXModelPath:  "model.onnx",
@@ -113,9 +107,9 @@ func TestRegisterModel(t *testing.T) {
 	}
 
 	// Clean up
-	delete(knownModels, "test/custom-model")
-	if len(knownModels) != origSize {
-		t.Errorf("Cleanup failed: knownModels has %d entries, want %d", len(knownModels), origSize)
+	delete(modelCatalog, "test/custom-model")
+	if len(modelCatalog) != origSize {
+		t.Errorf("Cleanup failed: modelCatalog has %d entries, want %d", len(modelCatalog), origSize)
 	}
 }
 

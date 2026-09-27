@@ -351,7 +351,7 @@ func TestDistillProcedureCapAndFlagOff(t *testing.T) {
 	defer mgr.Close()
 
 	var steps []string
-	for i := 0; i < MaxProcedureSteps+10; i++ {
+	for range MaxProcedureSteps + 10 {
 		steps = append(steps, "do thing")
 	}
 	payload := `{"title":"big","steps":[`

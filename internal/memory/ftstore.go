@@ -312,9 +312,10 @@ func (s *SQLiteFTSStore) backfillSearchText(ctx context.Context) {
 		}
 		todo = append(todo, pending{rowid: rowid, text: canonicalDedupeText(domain, content)})
 	}
-	if cerr := rows.Close(); cerr != nil {
-		s.logger.Debug("search_text backfill scan close", "error", cerr)
+	if err := rows.Err(); err != nil {
+		s.logger.Debug("search_text backfill scan failed", "error", err)
 	}
+	rows.Close() //nolint:sqlclosecheck // closed before the update loop so UPDATEs don't run under an open read cursor
 	for _, p := range todo {
 		if _, err := s.db.ExecContext(ctx,
 			`UPDATE `+s.config.TableName+` SET search_text = ? WHERE rowid = ?`, p.text, p.rowid); err != nil {
@@ -351,6 +352,9 @@ func (s *SQLiteFTSStore) addColumnIfMissing(ctx context.Context, tableName, colu
 		if name == columnName {
 			return nil // Column exists, nothing to do
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("pragma table_info(%s) iteration: %w", tableName, err)
 	}
 
 	// Column doesn't exist, add it

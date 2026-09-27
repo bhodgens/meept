@@ -410,9 +410,9 @@ func loadWeights(path string, logger *slog.Logger) (*modelWeights, error) {
 
 	if logger != nil {
 		logger.Info("loaded model weights",
-			"hiddenIn", hiddenIn, "hiddenOut", hiddenOut,
-			"vocabSize", vocabSize, "maxSeqLen", maxSeqLen,
-			"totalWeights", len(weights))
+			"hidden_in", hiddenIn, "hidden_out", hiddenOut,
+			"vocab_size", vocabSize, "max_seq_len", maxSeqLen,
+			"total_weights", len(weights))
 	}
 
 	return mw, nil
@@ -545,7 +545,10 @@ func parseTokenizerJSON(data []byte) (*BPETokenizer, error) {
 
 	// Load vocabulary
 	for term, id := range tokSection.Vocab {
-		tok.vocab[term] = uint32(id)
+		if id < 0 || id > int(^uint32(0)) {
+			return nil, fmt.Errorf("tokenizer vocab id %d out of uint32 range for term %q", id, term)
+		}
+		tok.vocab[term] = uint32(id) //nolint:gosec // G115 — range-checked above
 	}
 
 	// Parse merges
@@ -583,7 +586,7 @@ func (t *BPETokenizer) Encode(text string) ([]uint32, error) {
 			tokenIDs = append(tokenIDs, id)
 		} else {
 			// Sub-word decomposition using BPE merges
-			splitTokens := subword_tokenize(t, token)
+			splitTokens := subwordTokenize(t, token)
 			if len(splitTokens) > 0 {
 				for _, st := range splitTokens {
 					if id, ok := t.vocab[st]; ok {
@@ -628,9 +631,9 @@ func preTokenize(text string) []string {
 	return tokens
 }
 
-// subword_tokenize attempts to decompose an unknown word into known sub-words
+// subwordTokenize attempts to decompose an unknown word into known sub-words
 // using BPE merge rules.
-func subword_tokenize(t *BPETokenizer, word string) []string {
+func subwordTokenize(t *BPETokenizer, word string) []string {
 	if len(word) <= 1 {
 		return nil
 	}
@@ -641,7 +644,7 @@ func subword_tokenize(t *BPETokenizer, word string) []string {
 		if _, ok := t.vocab[prefix]; ok {
 			suffix := word[end:]
 			if suffix != "" {
-				if subTokens := subword_tokenize(t, suffix); len(subTokens) > 0 {
+				if subTokens := subwordTokenize(t, suffix); len(subTokens) > 0 {
 					return append([]string{prefix}, subTokens...)
 				}
 			}

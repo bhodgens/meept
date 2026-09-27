@@ -483,7 +483,7 @@
     "topic": "memory.vector.stats",
     "handler": "func(_ context.Context, _ json.RawMessage",
     "file": "internal/daemon/memory_rpc.go",
-    "line": 75
+    "line": 77
   },
   {
     "topic": "models.delete_credential",

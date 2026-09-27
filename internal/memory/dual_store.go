@@ -131,7 +131,7 @@ func openWithRetries(path string, logger *slog.Logger, retries int) (*sql.DB, er
 		dsn += "&_busy_timeout=5000"
 	}
 	var lastErr error
-	for i := 0; i < retries; i++ {
+	for range retries {
 		db, err := sql.Open("sqlite", dsn)
 		if err != nil {
 			lastErr = err
@@ -631,12 +631,12 @@ func (s *DualStore) tableExists(ctx context.Context, db *sql.DB, table string) (
 func (s *DualStore) GetMemoryCountByOwner(ctx context.Context) (local int, gossip int, err error) {
 	if s.localDB != nil {
 		if exists, e := s.tableExists(ctx, s.localDB, "memories"); e == nil && exists {
-			s.localDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories").Scan(&local)
+			_ = s.localDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories").Scan(&local)
 		}
 	}
 	if s.gossipDB != nil {
 		if exists, e := s.tableExists(ctx, s.gossipDB, "memories"); e == nil && exists {
-			s.gossipDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories").Scan(&gossip)
+			_ = s.gossipDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories").Scan(&gossip)
 		}
 	}
 	return local, gossip, nil
@@ -891,7 +891,7 @@ func (s *DualStore) storeTurnGossipDB(ctx context.Context, db *sql.DB, turn *Tur
 // gossip.db. Returns nil, nil when the session does not exist in either DB.
 func (s *DualStore) GetSession(ctx context.Context, sessionID string) (*Session, error) {
 	if sessionID == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented "not found" contract: empty ID matches no session
 	}
 
 	if s.localDB != nil {
@@ -917,7 +917,7 @@ func (s *DualStore) GetSession(ctx context.Context, sessionID string) (*Session,
 			return sess, nil
 		}
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // documented "not found" contract: session absent from both DBs
 }
 
 // GetSessions returns every session across both DBs (local first, then
@@ -932,8 +932,8 @@ func (s *DualStore) GetSessions(ctx context.Context) ([]*Session, error) {
 			if err != nil {
 				return nil, fmt.Errorf("dual store: query local sessions: %w", err)
 			}
+			defer rows.Close()
 			sessions, err := scanSessionRows(rows, false)
-			rows.Close()
 			if err != nil {
 				return nil, err
 			}
@@ -950,8 +950,8 @@ func (s *DualStore) GetSessions(ctx context.Context) ([]*Session, error) {
 			if err != nil {
 				return nil, fmt.Errorf("dual store: query gossip sessions: %w", err)
 			}
+			defer rows.Close()
 			sessions, err := scanSessionRows(rows, true)
-			rows.Close()
 			if err != nil {
 				return nil, err
 			}
@@ -981,8 +981,8 @@ func (s *DualStore) GetTurnsForSession(ctx context.Context, sessionID string) ([
 			if err != nil {
 				return nil, fmt.Errorf("dual store: query local turns: %w", err)
 			}
+			defer rows.Close()
 			turns, err := scanTurnRows(rows, false)
-			rows.Close()
 			if err != nil {
 				return nil, err
 			}
@@ -997,8 +997,8 @@ func (s *DualStore) GetTurnsForSession(ctx context.Context, sessionID string) ([
 			if err != nil {
 				return nil, fmt.Errorf("dual store: query gossip turns: %w", err)
 			}
+			defer rows.Close()
 			turns, err := scanTurnRows(rows, true)
-			rows.Close()
 			if err != nil {
 				return nil, err
 			}
@@ -1040,7 +1040,7 @@ func scanSessionRow(row *sql.Row, fromGossip bool) (*Session, error) {
 	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return nil, nil //nolint:nilnil // documented "not found" contract: caller treats nil as absent
 		}
 		return nil, err
 	}
@@ -1149,12 +1149,12 @@ func scanTurnRows(rows *sql.Rows, fromGossip bool) ([]*Turn, error) {
 func (s *DualStore) GetSessionTurnCountByOwner(ctx context.Context) (local int, gossip int, err error) {
 	if s.localDB != nil {
 		if exists, e := s.tableExists(ctx, s.localDB, "turns"); e == nil && exists {
-			s.localDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM turns").Scan(&local)
+			_ = s.localDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM turns").Scan(&local)
 		}
 	}
 	if s.gossipDB != nil {
 		if exists, e := s.tableExists(ctx, s.gossipDB, "turns"); e == nil && exists {
-			s.gossipDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM turns").Scan(&gossip)
+			_ = s.gossipDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM turns").Scan(&gossip)
 		}
 	}
 	return local, gossip, nil

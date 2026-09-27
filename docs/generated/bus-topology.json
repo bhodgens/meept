@@ -73,7 +73,7 @@
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
-        "line": 7999,
+        "line": 8005,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -84,7 +84,7 @@
     "agent.iteration.completed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8207,
+        "line": 8213,
         "payload_keys": [
           "agent_id",
           "conversation_id",
@@ -130,7 +130,7 @@
     "agent.progress": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8064,
+        "line": 8070,
         "payload_keys": [
           "detail",
           "iteration",
@@ -141,7 +141,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 8118,
+        "line": 8124,
         "payload_keys": [
           "conversation_id",
           "detail",
@@ -156,7 +156,7 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 1693,
+        "line": 1694,
         "payload_keys": []
       }
     ],
@@ -171,7 +171,7 @@
     "agent.queue.followup.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8189,
+        "line": 8195,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -208,7 +208,7 @@
     "agent.queue.steer.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8165,
+        "line": 8171,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -231,14 +231,14 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8495,
+        "line": 8491,
         "payload_keys": []
       }
     ],
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8029,
+        "line": 8035,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -388,7 +388,7 @@
     "cluster.event.heartbeat": [
       {
         "file": "internal/cluster/gossip.go",
-        "line": 764,
+        "line": 757,
         "payload_keys": [
           "event",
           "node_id",
@@ -399,7 +399,7 @@
     "cluster.event.received": [
       {
         "file": "internal/cluster/gossip_transport.go",
-        "line": 259,
+        "line": 261,
         "payload_keys": [
           "event"
         ]
@@ -566,7 +566,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2427,
+        "line": 2435,
         "payload_keys": [
           "event"
         ]
@@ -575,7 +575,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2084,
+        "line": 2092,
         "payload_keys": [
           "event"
         ]
@@ -584,7 +584,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2854,
+        "line": 2855,
         "payload_keys": []
       }
     ],
@@ -605,7 +605,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4747,
+        "line": 4741,
         "payload_keys": [
           "name",
           "tags",
@@ -685,7 +685,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8138,
+        "line": 8144,
         "payload_keys": [
           "conversation_id",
           "total_tokens"
@@ -803,7 +803,7 @@
       },
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2737,
+        "line": 2745,
         "payload_keys": [
           "task_id"
         ],
@@ -1678,7 +1678,7 @@
     "session.title_updated": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9218,
+        "line": 9224,
         "payload_keys": [
           "description",
           "name",
@@ -1754,7 +1754,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 7776,
+        "line": 7774,
         "payload_keys": []
       }
     ],
@@ -2275,13 +2275,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6422,
+        "line": 6420,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 6459,
+        "line": 6457,
         "payload_keys": [],
         "via_const": true
       }
@@ -2466,7 +2466,7 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 1663,
+        "line": 1664,
         "subscriber_id": "progress-synthesizer"
       }
     ],
@@ -2640,7 +2640,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2832,
+        "line": 2833,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2655,7 +2655,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3627,
+        "line": 3628,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -2720,7 +2720,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/metrics/collector.go",
-        "line": 237,
+        "line": 231,
         "subscriber_id": "metrics-collector-tokens"
       }
     ],
@@ -2857,7 +2857,7 @@
     "plan.approved": [
       {
         "file": "internal/daemon/evolver_approval_bridge.go",
-        "line": 72,
+        "line": 75,
         "subscriber_id": "evolver-approval-bridge"
       }
     ],
@@ -3440,7 +3440,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 7703,
+        "line": 7701,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3455,7 +3455,7 @@
     "step.*": [
       {
         "file": "internal/metrics/collector.go",
-        "line": 209,
+        "line": 207,
         "subscriber_id": "metrics-collector-review"
       }
     ],
@@ -3726,7 +3726,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 7860,
+        "line": 7858,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],
@@ -3770,7 +3770,7 @@
     "worker.*": [
       {
         "file": "internal/metrics/collector.go",
-        "line": 224,
+        "line": 220,
         "subscriber_id": "metrics-collector-worker"
       }
     ],

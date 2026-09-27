@@ -1,5 +1,7 @@
 package vector
 
+import "slices"
+
 // ModelInfo holds metadata about a known sentence-transformer model.
 type ModelInfo struct {
 	ID             string
@@ -14,8 +16,10 @@ type ModelInfo struct {
 	Description    string
 }
 
-// knownModels is the registry of supported sentence-transformer models.
-var knownModels = map[string]ModelInfo{
+// modelCatalog is the registry of supported sentence-transformer models.
+// (Named to make clear these are model identifiers, not credentials.)
+var modelCatalog = map[string]ModelInfo{
+	//nolint:gosec // G101: model identifier, not a credential
 	"nomic-embed-text-v1.5": {
 		ID:             "nomic-embed-text-v1.5",
 		Dimension:      768,
@@ -28,6 +32,7 @@ var knownModels = map[string]ModelInfo{
 		Tags:           []string{"nomic", "matryoshka", "text-embedding"},
 		Description:    "Nomic embed text v1.5 -- high-quality English text embeddings with Matryoshka dimension support (768/512/256/128)",
 	},
+	//nolint:gosec // G101: model identifier, not a credential
 	"all-MiniLM-L6-v2": {
 		ID:             "all-MiniLM-L6-v2",
 		Dimension:      384,
@@ -40,6 +45,7 @@ var knownModels = map[string]ModelInfo{
 		Tags:           []string{"sentence-transformers", "fast", "text-embedding"},
 		Description:    "All-MiniLM-L6-v2 -- fast, compact embeddings suitable for semantic search (384-dim)",
 	},
+	//nolint:gosec // G101: model identifier, not a credential
 	"all-mpnet-base-v2": {
 		ID:             "all-mpnet-base-v2",
 		Dimension:      768,
@@ -52,6 +58,7 @@ var knownModels = map[string]ModelInfo{
 		Tags:           []string{"sentence-transformers", "high-quality", "text-embedding"},
 		Description:    "all-mpnet-base-v2 -- high-quality English embeddings from Sentence-Transformers",
 	},
+	//nolint:gosec // G101: model identifier, not a credential
 	"paraphrase-multilingual-mpnet-base-v2": {
 		ID:             "paraphrase-multilingual-mpnet-base-v2",
 		Dimension:      768,
@@ -69,14 +76,14 @@ var knownModels = map[string]ModelInfo{
 // GetModelInfo returns metadata for a known model by ID.
 // Returns (ModelInfo, true) if the model is known, (zero value, false) otherwise.
 func GetModelInfo(modelID string) (ModelInfo, bool) {
-	info, ok := knownModels[modelID]
+	info, ok := modelCatalog[modelID]
 	return info, ok
 }
 
 // ListModels returns all known model IDs.
 func ListModels() []string {
-	ids := make([]string, 0, len(knownModels))
-	for id := range knownModels {
+	ids := make([]string, 0, len(modelCatalog))
+	for id := range modelCatalog {
 		ids = append(ids, id)
 	}
 	return ids
@@ -84,23 +91,18 @@ func ListModels() []string {
 
 // RegisterModel registers a new custom model in the registry.
 func RegisterModel(info ModelInfo) {
-	knownModels[info.ID] = info
+	modelCatalog[info.ID] = info
 }
 
 // HasModel returns true if modelID is registered.
 func HasModel(modelID string) bool {
-	_, ok := knownModels[modelID]
+	_, ok := modelCatalog[modelID]
 	return ok
 }
 
 // SupportsMatryoshka returns true if the model supports variable-dimensional embeddings.
 func (mi ModelInfo) SupportsMatryoshka() bool {
-	for _, tag := range mi.Tags {
-		if tag == "matryoshka" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(mi.Tags, "matryoshka")
 }
 
 // ValidDimension checks if the given dimension is in the supported Matryoshka subspace.

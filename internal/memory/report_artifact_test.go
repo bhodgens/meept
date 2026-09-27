@@ -150,7 +150,9 @@ func TestReportStore_EnsureReportFile_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx1.Commit()
+	if err := tx1.Commit(); err != nil {
+		t.Fatalf("commit tx1: %v", err)
+	}
 
 	// Second call (should update, not insert new).
 	tx2, _ := db.Begin()
@@ -158,7 +160,9 @@ func TestReportStore_EnsureReportFile_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx2.Commit()
+	if err := tx2.Commit(); err != nil {
+		t.Fatalf("commit tx2: %v", err)
+	}
 
 	// Should have same ID (update, not insert).
 	if artifact1.ID != artifact2.ID {

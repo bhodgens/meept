@@ -33,7 +33,7 @@ func TestGetMemoriesEmpty(t *testing.T) {
 func TestGetMemoriesLocalOnly(t *testing.T) {
 	ds := setupDualStoreRead(t)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		mem := &Memory{
 			ID:        fmt.Sprintf("local-read-%d", i),
 			Type:      MemoryTypeEpisodic,
@@ -65,7 +65,7 @@ func TestGetMemoriesLocalOnly(t *testing.T) {
 func TestGetMemoriesGossipOnly(t *testing.T) {
 	ds := setupDualStoreRead(t)
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		mem := &Memory{
 			ID:        fmt.Sprintf("gossip-read-%d", i),
 			Type:      MemoryTypeTask,
@@ -102,7 +102,7 @@ func TestGetMemoriesMergedLocalFirst(t *testing.T) {
 	ds := setupDualStoreRead(t)
 
 	// 2 local memories.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		mem := &Memory{
 			ID:        fmt.Sprintf("merged-local-%d", i),
 			Type:      MemoryTypeEpisodic,
@@ -116,7 +116,7 @@ func TestGetMemoriesMergedLocalFirst(t *testing.T) {
 	}
 
 	// 2 gossip memories (same category to ensure merge).
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		mem := &Memory{
 			ID:        fmt.Sprintf("merged-gossip-%d", i),
 			Type:      MemoryTypeEpisodic,
@@ -140,7 +140,7 @@ func TestGetMemoriesMergedLocalFirst(t *testing.T) {
 	}
 
 	// First 2 should be local (most recent first).
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		wantID := fmt.Sprintf("merged-local-%d", 1-i)
 		if results[i].Memory.ID != wantID {
 			t.Errorf("result[%d].ID = %q, want %q (local first, DESC order)", i, results[i].Memory.ID, wantID)
@@ -148,7 +148,7 @@ func TestGetMemoriesMergedLocalFirst(t *testing.T) {
 	}
 
 	// Last 2 should be gossip (most recent first).
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		wantID := fmt.Sprintf("merged-gossip-%d", 1-i)
 		if results[2+i].Memory.ID != wantID {
 			t.Errorf("result[2+%d].ID = %q, want %q (gossip after local, DESC order)", i, results[2+i].Memory.ID, wantID)

@@ -120,10 +120,7 @@ func (c *Compactor) Compact(ctx context.Context, turns []TurnRecord) (*Compactio
 	}
 
 	// Reserve last N turns.
-	protected := cfg.KeepLastNTurns
-	if protected >= len(turns) {
-		protected = len(turns)
-	}
+	protected := min(cfg.KeepLastNTurns, len(turns))
 
 	compactable := make([]TurnRecord, len(turns)-protected)
 	copy(compactable, turns[:len(turns)-protected])

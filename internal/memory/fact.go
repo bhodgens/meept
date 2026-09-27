@@ -98,7 +98,7 @@ func hasAccount(lower string) bool {
 }
 
 func extractAccount(line string) accountFact {
-	marker := ""
+	var marker string
 	switch {
 	case strings.Contains(line, "number is"):
 		marker = "number is"
@@ -124,10 +124,7 @@ func extractAccount(line string) accountFact {
 		return accountFact{key: "account", value: value}
 	}
 	// Take up to the last 3 words before the marker as the key label.
-	start := len(fields) - 3
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(fields)-3, 0)
 	key := strings.Join(fields[start:], " ")
 	// Drop leading articles.
 	for _, art := range []string{"my ", "the "} {

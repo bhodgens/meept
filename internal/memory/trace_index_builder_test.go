@@ -190,10 +190,18 @@ func TestTraceIndexBuilder_InvalidJSON(t *testing.T) {
 	defer f.Close()
 
 	enc := json.NewEncoder(f)
-	enc.Encode(SpanRecord{TraceID: "t1", SpanID: "s1a"})
-	f.WriteString("not json\n")
-	enc.Encode(SpanRecord{TraceID: "t2", SpanID: "s2a", HasError: true})
-	f.WriteString("\n") // empty line
+	if err := enc.Encode(SpanRecord{TraceID: "t1", SpanID: "s1a"}); err != nil {
+		t.Fatalf("encode span 1: %v", err)
+	}
+	if _, err := f.WriteString("not json\n"); err != nil {
+		t.Fatalf("write invalid line: %v", err)
+	}
+	if err := enc.Encode(SpanRecord{TraceID: "t2", SpanID: "s2a", HasError: true}); err != nil {
+		t.Fatalf("encode span 2: %v", err)
+	}
+	if _, err := f.WriteString("\n"); err != nil { // empty line
+		t.Fatalf("write empty line: %v", err)
+	}
 
 	builder := &TraceIndexBuilder{
 		sourcePath: source,

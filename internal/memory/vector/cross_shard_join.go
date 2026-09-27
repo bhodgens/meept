@@ -55,7 +55,11 @@ func isSafeIdentifier(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_') {
+		isSafe := (r >= 'A' && r <= 'Z') ||
+			(r >= 'a' && r <= 'z') ||
+			(r >= '0' && r <= '9') ||
+			r == '_'
+		if !isSafe {
 			return false
 		}
 	}
@@ -128,12 +132,11 @@ func (c *CrossShardJoin) attachAllLocked(ctx context.Context, conn *sql.Conn) ([
 // detachAllLocked DETACHes the given aliases in reverse order (LIFO).
 // Caller MUST hold c.mu. Best-effort: errors are ignored.
 func (c *CrossShardJoin) detachAllLocked(ctx context.Context, conn *sql.Conn, aliases []string) {
-	for i := len(aliases) - 1; i >= 0; i-- {
-		alias := aliases[i]
+	for _, alias := range slices.Backward(aliases) {
 		if !isSafeIdentifier(alias) {
 			continue
 		}
-		_, _ = conn.ExecContext(ctx, fmt.Sprintf("DETACH DATABASE %s", alias)) //nolint:mutexio // mutex serializes cross-shard ATTACH/DETACH/query; conn is pinned to single connection
+		_, _ = conn.ExecContext(ctx, fmt.Sprintf("DETACH DATABASE %s", alias)) //nolint:mutexio // same locked-query scope as QueryContext above
 	}
 }
 
@@ -264,7 +267,7 @@ func (c *CrossShardJoin) QueryShards(ctx context.Context, queries map[string]str
 				"shard_alias", alias, "error", cursorErr)
 			scanErr = cursorErr
 		}
-		rows.Close() //nolint:mutexio // same locked-query scope as QueryContext above
+		rows.Close() //nolint:sqlclosecheck,mutexio // same locked-query scope; deferred Close would hold the cursor past DETACH below
 
 		if scanErr != nil {
 			// D-09 FIX: abort this shard — don't return partial results from

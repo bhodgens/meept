@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -258,7 +259,7 @@ func (s *Store) applyClusterSchema() error {
 		if has(existingCols, col) {
 			continue
 		}
-		altered.WriteString(fmt.Sprintf("ALTER TABLE jobs ADD COLUMN %s;\n", col))
+		fmt.Fprintf(&altered, "ALTER TABLE jobs ADD COLUMN %s;\n", col)
 	}
 
 	// Run the filtered ALTER statements.
@@ -311,12 +312,7 @@ func (s *Store) applyClusterSchema() error {
 
 // has reports whether slice contains the given element.
 func has(slice []string, elem string) bool {
-	for _, s := range slice {
-		if s == elem {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, elem)
 }
 
 // Insert adds a new job to the queue.
@@ -519,7 +515,7 @@ func (s *Store) Fail(jobID, errMsg string) error {
 		return fmt.Errorf("begin fail tx: %w", err)
 	}
 	defer func() {
-		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) {
 			s.logger.Debug("fail tx rollback (no-op after commit)", "error", rErr)
 		}
 	}()
@@ -583,7 +579,7 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 		return fmt.Errorf("begin requeue tx: %w", err)
 	}
 	defer func() {
-		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) {
 			s.logger.Debug("requeue tx rollback (no-op after commit)", "error", rErr)
 		}
 	}()
@@ -634,7 +630,7 @@ func (s *Store) Retry(jobID string) error {
 		return fmt.Errorf("begin retry tx: %w", err)
 	}
 	defer func() {
-		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) {
 			s.logger.Debug("requeue tx rollback (no-op after commit)", "error", rErr)
 		}
 	}()
@@ -745,6 +741,7 @@ func (s *Store) ResetStaleClaimsAtStartup(ctx context.Context, claimsBefore time
 	if err != nil {
 		return 0, fmt.Errorf("failed to query stale job claims: %w", err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
@@ -767,7 +764,9 @@ func (s *Store) ResetStaleClaimsAtStartup(ctx context.Context, claimsBefore time
 		return 0, fmt.Errorf("failed to begin startup reclaim transaction: %w", err)
 	}
 	// Safe to call after Commit; a no-op on a committed transaction.
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	result, err := tx.ExecContext(ctx, `
 		UPDATE jobs

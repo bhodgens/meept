@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -156,7 +155,7 @@ func TestDualStore_StoreRemoteSession(t *testing.T) {
 	// and would catch a regressed async publish. 20ms × 10 here. See also
 	// waitForEvents for the positive-assertion counterpart.
 	time.Sleep(200 * time.Millisecond)
-	if got := atomic.LoadInt64(&pub.eventCount); got != 0 {
+	if got := pub.eventCount.Load(); got != 0 {
 		t.Errorf("remote StoreRemoteSession published %d events, want 0 (no echo)", got)
 	}
 }
@@ -260,10 +259,7 @@ func TestDualStore_GetSessions(t *testing.T) {
 	if len(sessions) != 3 {
 		t.Fatalf("len(sessions) = %d, want 3", len(sessions))
 	}
-	// Local first.
-	if sessions[0].ID != "l2" && sessions[1].ID != "l1" {
-		// Order by last_activity DESC, so l2 (Jan 2) before l1 (Jan 1).
-	}
+	// Local first: ordered by last_activity DESC, so l2 (Jan 2) before l1 (Jan 1).
 	// Ensure remote appears last.
 	if sessions[2].ID != "g1" {
 		t.Errorf("sessions[2].ID = %q, want g1 (gossip last)", sessions[2].ID)
@@ -579,12 +575,12 @@ func waitForEvents(t *testing.T, pub *mockGossipPublisher, n int, max time.Durat
 	t.Helper()
 	deadline := time.Now().Add(max)
 	for time.Now().Before(deadline) {
-		if atomic.LoadInt64(&pub.eventCount) >= int64(n) {
+		if pub.eventCount.Load() >= int64(n) {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %d gossip events (got %d)", n, atomic.LoadInt64(&pub.eventCount))
+	t.Fatalf("timed out waiting for %d gossip events (got %d)", n, pub.eventCount.Load())
 }
 
 func countSessionsDB(t *testing.T, db *sql.DB) int {

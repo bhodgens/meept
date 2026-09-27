@@ -17,7 +17,7 @@ type mockProvider struct {
 func newMockProvider(dim int) *mockProvider {
 	return &mockProvider{
 		dim: dim,
-		rng: rand.New(rand.NewSource(42)),
+		rng: rand.New(rand.NewSource(42)), //nolint:gosec // G404: deterministic test embeddings, not crypto
 	}
 }
 
@@ -429,7 +429,7 @@ func BenchmarkSearch(b *testing.B) {
 			case 128:
 				name = "d128"
 			}
-			name += "_n" + string(rune('1'+size/1000))
+			name += "_n" + string(rune('1'+size/1000)) //nolint:gosec // G115: size/1000 <= 9 in this bench (sizes < 10000); '1'+x stays in rune range
 
 			b.Run(name, func(b *testing.B) {
 				dir := b.TempDir()

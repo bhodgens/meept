@@ -82,7 +82,7 @@ func assertCalibrationLine(t *testing.T, dir, verdict, text string, conf float64
 		t.Fatalf("read calibration log: %v", err)
 	}
 	found := false
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		var rec calibrationRecord
 		if json.Unmarshal([]byte(line), &rec) != nil {
 			continue

@@ -3,7 +3,6 @@ package queue
 import (
 	"database/sql"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -25,7 +24,7 @@ func newInteractiveTestStore(t *testing.T) *Store {
 }
 
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // interactiveSeedJob builds a pending job with explicit id, priority,
@@ -57,7 +56,7 @@ func seedJobs(t *testing.T, store *Store, jobs ...*Job) {
 func claimIDs(t *testing.T, store *Store, n int, agentID string) []string {
 	t.Helper()
 	var got []string
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var (
 			job *Job
 			err error

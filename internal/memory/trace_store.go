@@ -420,9 +420,11 @@ func (s *TraceStore) ViewSpans(traceID string, spanIDs []string) (*ViewTraceResu
 	row, hasIdx := s.rowsByTraceID[traceID]
 	s.mu.RUnlock()
 
-	var spans []SpanRecord
-	totalBytes := 0
-	idSet := make(map[string]struct{}, len(spanIDs))
+	var (
+		spans      []SpanRecord
+		totalBytes int
+		idSet      = make(map[string]struct{}, len(spanIDs))
+	)
 	for _, id := range spanIDs {
 		idSet[id] = struct{}{}
 	}
@@ -649,7 +651,7 @@ func searchLines(filePath, pattern string, maxMatches int) ([]SearchMatch, int, 
 			break
 		}
 		lineNum++
-		if len(strings.TrimSpace(string(line))) == 0 {
+		if len(strings.TrimSpace(line)) == 0 {
 			continue
 		}
 
@@ -672,14 +674,8 @@ func searchLines(filePath, pattern string, maxMatches int) ([]SearchMatch, int, 
 			start := matchIdx[0]
 			end := matchIdx[1]
 			pad := 128
-			s := start - pad
-			if s < 0 {
-				s = 0
-			}
-			e := end + pad
-			if e > len(line) {
-				e = len(line)
-			}
+			s := max(start-pad, 0)
+			e := min(end+pad, len(line))
 			ctxRaw := "[...]" + line[s:e] + "[...]"
 
 			matches = append(matches, SearchMatch{
@@ -722,7 +718,7 @@ func searchLinesFiltered(filePath, traceID, pattern string, maxMatches int) ([]S
 			break
 		}
 		lineNum++
-		if len(strings.TrimSpace(string(line))) == 0 {
+		if len(strings.TrimSpace(line)) == 0 {
 			continue
 		}
 
@@ -748,14 +744,8 @@ func searchLinesFiltered(filePath, traceID, pattern string, maxMatches int) ([]S
 			start := matchIdx[0]
 			end := matchIdx[1]
 			pad := 128
-			s := start - pad
-			if s < 0 {
-				s = 0
-			}
-			e := end + pad
-			if e > len(line) {
-				e = len(line)
-			}
+			s := max(start-pad, 0)
+			e := min(end+pad, len(line))
 			ctxRaw := "[...]" + line[s:e] + "[...]"
 
 			matches = append(matches, SearchMatch{
@@ -932,7 +922,7 @@ type rowAccumulator struct {
 type timeTime struct{ time.Time }
 
 func (t timeTime) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t.Time.Format("2006-01-02T15:04:05.000Z"))
+	return json.Marshal(t.Format("2006-01-02T15:04:05.000Z"))
 }
 
 func (acc *rowAccumulator) addSpan(sr SpanRecord, off, length int64) {

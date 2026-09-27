@@ -2,7 +2,6 @@ package memory
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,7 +47,7 @@ func TestManager_Store_PublishesGossip_WhenDualStoreSet(t *testing.T) {
 	// publishMemoryGossip runs in a goroutine — give it a moment.
 	// The publish happens inside DualStore.publishMemoryGossip via `go func()`.
 	waitFor(t, func() bool {
-		return atomic.LoadInt64(&pub.eventCount) > 0
+		return pub.eventCount.Load() > 0
 	}, "expected at least one gossip event after Manager.Store")
 
 	last, ok := pub.getLastEvent()
@@ -252,7 +251,7 @@ func TestManager_Store_DualStoreSetButMemoryIsRemote_NoEcho(t *testing.T) {
 	// 10× the previous window, and no seam can exist because the correct
 	// behavior publishes nothing to wait on.
 	time.Sleep(100 * time.Millisecond)
-	if count := atomic.LoadInt64(&pub.eventCount); count != 0 {
+	if count := pub.eventCount.Load(); count != 0 {
 		t.Errorf("expected 0 gossip events for remote-origin memory, got %d", count)
 	}
 

@@ -15,7 +15,7 @@ import (
 type mockGossipPublisher struct {
 	mu         sync.Mutex
 	events     []publishedEvent
-	eventCount int64 // atomic counter for non-locking reads
+	eventCount atomic.Int64 // atomic counter for non-locking reads
 }
 
 type publishedEvent struct {
@@ -27,7 +27,7 @@ func (m *mockGossipPublisher) PublishClusterEvent(eventType models.ClusterEventT
 	m.mu.Lock()
 	m.events = append(m.events, publishedEvent{eventType, payload})
 	m.mu.Unlock()
-	atomic.AddInt64(&m.eventCount, 1)
+	m.eventCount.Add(1)
 	return nil
 }
 

@@ -156,10 +156,10 @@ func TestMigrateBothDatabases(t *testing.T) {
 	}
 
 	// memory.db should still exist (it was only backed up, then attempted merge).
-	// The merge will fail gracefully but the file is left.
-	if _, err := os.Stat(memoryPath); os.IsNotExist(err) {
-		// Acceptable - if merge worked
-	}
+	// The merge will fail gracefully but the file is left. If the merge DID
+	// succeed the file may legitimately be gone, so a missing file is not fatal
+	// here — hence no assertion beyond the stat itself.
+	_, _ = os.Stat(memoryPath)
 }
 
 func TestTblNameStripsQuotesAndSpaces(t *testing.T) {
@@ -211,8 +211,8 @@ func TestMergeMemoryDbCopiesMissingTable(t *testing.T) {
 	}
 	memDB.Close()
 
-	if err := mergeMemoryDbIntoLocal(memoryPath, localPath, slog.Default()); err != nil {
-		t.Fatalf("mergeMemoryDbIntoLocal: %v", err)
+	if err := mergeMemoryDBIntoLocal(memoryPath, localPath, slog.Default()); err != nil {
+		t.Fatalf("mergeMemoryDBIntoLocal: %v", err)
 	}
 
 	db, err := sql.Open("sqlite", localPath)

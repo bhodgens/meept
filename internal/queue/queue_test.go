@@ -433,7 +433,7 @@ func TestPersistentQueue_ClaimThroughputUnderContention(t *testing.T) {
 
 	// Enqueue N jobs.
 	enqueuedIDs := make(map[string]struct{}, numJobs)
-	for i := 0; i < numJobs; i++ {
+	for i := range numJobs {
 		job, err := NewJob(JobTypeOneOff, map[string]string{
 			"prompt": "throughput-test",
 			"idx":    string(rune('a' + i%26)),
@@ -458,7 +458,7 @@ func TestPersistentQueue_ClaimThroughputUnderContention(t *testing.T) {
 	start := make(chan struct{})
 	wg.Add(numWorkers)
 
-	for w := 0; w < numWorkers; w++ {
+	for w := range numWorkers {
 		go func(workerID int) {
 			defer wg.Done()
 			<-start

@@ -187,11 +187,11 @@ func DecodeProcedure(content string) (*Procedure, error) {
 // parse as the corresponding structure; anything else returns
 // ErrMalformedDistilled. Non-distill categories return nil.
 func ValidateDistilledContent(category, content string) error {
-	switch {
-	case category == DomainLesson:
+	switch category {
+	case DomainLesson:
 		_, err := DecodeLesson(content)
 		return err
-	case category == DomainProcedure:
+	case DomainProcedure:
 		_, err := DecodeProcedure(content)
 		return err
 	default:
@@ -447,17 +447,7 @@ func (m *Manager) checkDistillDuplicate(ctx context.Context, kind, content strin
 	m.mu.RUnlock()
 
 	var candVec []float32
-	useVec := embedder != nil
-	if useVec {
-		v, verr := embedder.GenerateEmbedding(ctx, content)
-		if verr != nil || len(v) == 0 {
-			useVec = false
-		} else {
-			candVec = v
-		}
-	}
-	candVec = nil
-	useVec = false
+	useVec := false
 	if embedder != nil {
 		if v, verr := embedder.GenerateEmbedding(ctx, dedupeText); verr == nil && len(v) > 0 {
 			candVec = v
@@ -529,7 +519,7 @@ func tokenJaccard(a, b string) float64 {
 
 func tokenize(s string) map[string]bool {
 	out := make(map[string]bool)
-	for _, f := range strings.Fields(strings.ToLower(s)) {
+	for f := range strings.FieldsSeq(strings.ToLower(s)) {
 		out[strings.Trim(f, ".,;:!?\"'()")] = true
 	}
 	delete(out, "")

@@ -2,10 +2,12 @@ package memory
 
 import (
 	"database/sql"
-	"github.com/caimlas/meept/pkg/id"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // ReportArtifact represents a persisted analysis report on disk.
@@ -41,7 +43,7 @@ func NewReportStore(dbPath string) *ReportStore {
 // Modeled after HALO's ensureHaloReportFile (report.ts:30-54).
 func (rs *ReportStore) EnsureReportFile(tx *sql.Tx, runID string, content string) (*ReportArtifact, error) {
 	if content == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented contract: empty report produces no artifact
 	}
 
 	outputDir := filepath.Join(rs.outputDir, runID)
@@ -110,7 +112,7 @@ func (rs *ReportStore) upsertArtifact(tx *sql.Tx, runID, path string, sizeBytes 
 		}, nil
 	}
 
-	if err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 

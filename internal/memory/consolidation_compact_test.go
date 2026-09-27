@@ -112,7 +112,7 @@ func TestCompactor_KeepLastNTurns(t *testing.T) {
 	})
 
 	turns := make([]TurnRecord, 8)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		turns[i] = TurnRecord{
 			Type:    "observation",
 			Content: "turn " + string(rune('0'+i)),

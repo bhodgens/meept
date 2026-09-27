@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -227,7 +228,7 @@ func TestScopedManager_GetByID_Ownership(t *testing.T) {
 
 	// BotB gets ErrNotFound for botA's memory.
 	_, err = botB.GetByID(ctx, id)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
@@ -249,7 +250,7 @@ func TestScopedManager_Delete_Ownership(t *testing.T) {
 
 	// BotB cannot delete botA's memory.
 	err = botB.Delete(ctx, id)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 
@@ -261,7 +262,7 @@ func TestScopedManager_Delete_Ownership(t *testing.T) {
 
 	// Verify it's gone.
 	_, err = mgr.GetByID(ctx, id)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound after delete, got %v", err)
 	}
 }

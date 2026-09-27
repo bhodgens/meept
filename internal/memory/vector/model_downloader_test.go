@@ -16,7 +16,7 @@ import (
 func TestModelDownloader_CheckForUpdates(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(HFModelInfo{
+		_ = json.NewEncoder(w).Encode(HFModelInfo{ // test fixture body; encode failure is not observable
 			ModelID:      "nomic-ai/nomic-embed-text-v1.5",
 			CommitSHA:    "newcommit789",
 			LastModified: time.Now(),
@@ -27,7 +27,9 @@ func TestModelDownloader_CheckForUpdates(t *testing.T) {
 
 	dir := t.TempDir()
 	// Create model subdirectory so save/load of .commit.sha works
-	os.MkdirAll(filepath.Join(dir, "nomic-embed-text-v1.5"), 0o755)
+	if err := os.MkdirAll(filepath.Join(dir, "nomic-embed-text-v1.5"), 0o755); err != nil {
+		t.Fatalf("mkdir model dir: %v", err)
+	}
 	logger := slog.Default()
 	// Override the downloader's client to use our test server
 	dl := &ModelDownloader{
@@ -47,7 +49,9 @@ func TestModelDownloader_CheckForUpdates(t *testing.T) {
 	}
 
 	// Save a commit, then check again
-	dl.saveCommit("nomic-embed-text-v1.5", "oldcommit123")
+	if err := dl.saveCommit("nomic-embed-text-v1.5", "oldcommit123"); err != nil {
+		t.Fatalf("saveCommit: %v", err)
+	}
 	commit, err = dl.CheckForUpdates("nomic-embed-text-v1.5")
 	if err != nil {
 		t.Fatalf("CheckForUpdates after save commit error: %v", err)
@@ -57,7 +61,9 @@ func TestModelDownloader_CheckForUpdates(t *testing.T) {
 	}
 
 	// Now set the same commit, should return empty
-	dl.saveCommit("nomic-embed-text-v1.5", "newcommit789")
+	if err := dl.saveCommit("nomic-embed-text-v1.5", "newcommit789"); err != nil {
+		t.Fatalf("saveCommit (update): %v", err)
+	}
 	commit, err = dl.CheckForUpdates("nomic-embed-text-v1.5")
 	if err != nil {
 		t.Fatalf("CheckForUpdates after update set error: %v", err)
@@ -171,7 +177,7 @@ func TestModelDownloader_DownloadModel_SingleFile(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Serve dummy ONNX data for any path
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write([]byte("FAKE_ONNX_MODEL_DATA_HERE"))
+		_, _ = w.Write([]byte("FAKE_ONNX_MODEL_DATA_HERE")) // test fixture body
 	}))
 	defer server.Close()
 

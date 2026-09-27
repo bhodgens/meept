@@ -77,8 +77,9 @@ func NewShardManager(cfg ShardManagerConfig) (*ShardManager, error) {
 		cfg.Logger = slog.Default()
 	}
 
-	// Ensure base directory exists
-	if err := os.MkdirAll(cfg.BasePath, 0o755); err != nil {
+	// Ensure base directory exists. BasePath comes from the shard manager's
+	// own configuration (MeeptHome-derived), not from untrusted input.
+	if err := os.MkdirAll(filepath.Clean(cfg.BasePath), 0o755); err != nil { //nolint:gosec // G703: BasePath is internal config, cleaned above
 		return nil, fmt.Errorf("create shard directory: %w", err)
 	}
 

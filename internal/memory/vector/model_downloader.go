@@ -3,16 +3,16 @@ package vector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
-
-	"log/slog"
 )
 
 // CachedModel represents a locally cached model.
@@ -297,11 +297,17 @@ func (d *ModelDownloader) getCommitInfo(modelID string) (commitSHA string, modif
 }
 
 // getCachedCommit reads the commit SHA from a cached model's metadata.
-// Returns empty string if no cached metadata exists (not an error).
+// Returns empty string if no cached metadata exists (not an error); a read
+// failure other than a missing file is also treated as "not cached" so a
+// corrupt/locked sidecar can never block model resolution, but it is logged.
 func (d *ModelDownloader) getCachedCommit(modelID string) (string, error) {
 	metaPath := filepath.Join(d.cacheDir, modelID, ".commit.sha")
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			// Corrupt/unreadable sidecar: fall through as "not cached".
+			slog.Debug("model downloader: cached commit unreadable", "model", modelID, "error", err)
+		}
 		return "", nil // Not cached yet, not a hard error
 	}
 	return string(data), nil

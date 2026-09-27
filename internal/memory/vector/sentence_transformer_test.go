@@ -22,7 +22,10 @@ func TestSentenceTransformerProvider_DimensionReturnsConfiguredDim(t *testing.T)
 	ctx := context.Background()
 	_, err = provider.GenerateEmbedding(ctx, "test")
 	if err != nil {
-		// May fail due to dummy weights, but Dimension should work
+		// May fail due to dummy weights, but Dimension should work.
+		// Empty branch is intentional: this is a smoke test of initialization;
+		// the assertions below are what matter.
+		_ = err //nolint:errcheck // deliberately ignored: see comment above
 	}
 
 	if provider.Dimension() != 512 {
@@ -228,10 +231,10 @@ func TestModelWeights_loadWeights(t *testing.T) {
 }
 
 func binaryWrite(p int, data []byte, v int32) {
-	data[p] = byte(v)
-	data[p+1] = byte(v >> 8)
-	data[p+2] = byte(v >> 16)
-	data[p+3] = byte(v >> 24)
+	data[p] = byte(v)         //nolint:gosec // G115: test helper writes little-endian int32 bytes; truncation is intentional
+	data[p+1] = byte(v >> 8)  //nolint:gosec // G115: low byte of shifted value
+	data[p+2] = byte(v >> 16) //nolint:gosec // G115: low byte of shifted value
+	data[p+3] = byte(v >> 24) //nolint:gosec // G115: high byte
 }
 
 // Dummy weights are loaded when no actual model file is present.
@@ -292,18 +295,18 @@ func TestLoadWeights_BinaryFormat(t *testing.T) {
 }
 
 func writeInt32(data []byte, offset int, v int32) {
-	data[offset] = byte(v)
-	data[offset+1] = byte(v >> 8)
-	data[offset+2] = byte(v >> 16)
-	data[offset+3] = byte(v >> 24)
+	data[offset] = byte(v)         //nolint:gosec // G115: test helper writes little-endian int32 bytes; truncation is intentional
+	data[offset+1] = byte(v >> 8)  //nolint:gosec // G115: low byte of shifted value
+	data[offset+2] = byte(v >> 16) //nolint:gosec // G115: low byte of shifted value
+	data[offset+3] = byte(v >> 24) //nolint:gosec // G115: high byte
 }
 
 func writeFloat32(data []byte, offset int, v float32) {
 	bits := math.Float32bits(v)
-	data[offset] = byte(bits)
-	data[offset+1] = byte(bits >> 8)
-	data[offset+2] = byte(bits >> 16)
-	data[offset+3] = byte(bits >> 24)
+	data[offset] = byte(bits)         //nolint:gosec // G115: little-endian uint32 bit pattern; truncation is intentional
+	data[offset+1] = byte(bits >> 8)  //nolint:gosec // G115: low byte of shifted value
+	data[offset+2] = byte(bits >> 16) //nolint:gosec // G115: low byte of shifted value
+	data[offset+3] = byte(bits >> 24) //nolint:gosec // G115: high byte
 }
 
 func TestLoadWeights_TooSmall(t *testing.T) {
