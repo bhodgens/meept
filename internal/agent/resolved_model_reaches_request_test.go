@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -42,10 +43,22 @@ func (c *modelCapture) count() int { return int(atomic.LoadInt32(&c.hits)) }
 func newModelCaptureServer(cap *modelCapture) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Model string `json:"model"`
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		cap.record(body.Model)
+		if body.Stream {
+			// The agent loop's reasoningCycle streams (delta callback).
+			// Serve a real SSE completion chunk + [DONE]; a JSON body to a
+			// streaming request parses as zero deltas and now (empty-
+			// completion hardening) fails the turn as empty content.
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`)
+			fmt.Fprintln(w, "data: [DONE]")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`))
 	}))
