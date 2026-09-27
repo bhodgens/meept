@@ -631,6 +631,34 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 				return nil, err
 			}
 
+			// Empty-completion classification (agnes-2.5-flash hardening,
+			// 2026-09-26 e2e runs): a 200-OK body with blank/whitespace
+			// content is a provider FLAKE, not a fatal verdict — Classify(0)
+			// returns FailureNone and used to surface the sentinel with no
+			// retry. Retry within the short budget (same bounded shape as
+			// server errors, no status to key a plan step on) and return the
+			// BARE sentinel on exhaustion: it must stay classified as an
+			// empty response so the agent loop's generic branch records the
+			// alias failure and rotation lands on the local fallback.
+			// Refusal/quota/overflow early-exits above are untouched.
+			if errors.Is(err, ErrEmptyResponse) {
+				lastErr = err
+				c.logger.Warn("Empty completion, retrying",
+					"provider", cfg.ProviderID,
+					"model", cfg.ModelID,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				// Immediate re-dispatch, NO plan sleep: the request was
+				// served instantly and a blank body is not a rate-limit
+				// window — waiting a 30s throttle step here burns the
+				// turn's budget for nothing.
+				if attempt < shortRetries {
+					continue
+				}
+				return nil, err
+			}
+
 			// D4/D7: Classify FIRST on the failure. The request layer
 			// already resolved quota-shaped responses to QuotaResetError,
 			// so a RateLimitError/APIError here is a bare throttle or
@@ -859,6 +887,25 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			// Context-overflow errors never re-enter the short-retry loop
 			// (F-A1): the payload must be trimmed, not re-sent.
 			if _, ok := errors.AsType[*ContextOverflowError](err); ok {
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
+			}
+
+			// Empty-completion classification (ChatWithProgress retry loop;
+			// agnes-2.5-flash hardening): same contract as the Chat loop
+			// above — bounded retry, bare sentinel on exhaustion.
+			if errors.Is(err, ErrEmptyResponse) {
+				lastErr = err
+				c.logger.Warn("Empty completion, retrying",
+					"provider", cfg.ProviderID,
+					"model", cfg.ModelID,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				// Immediate re-dispatch, NO plan sleep (see Chat loop).
+				if attempt < shortRetries {
+					continue
+				}
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -1805,6 +1852,12 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 // identify the failure kind without string matching.
 var ErrEmptyResponse = &ClientError{Message: "empty content"}
 
+// DefaultEmptyCompletionRetries is the number of HTTP requests an
+// empty-completion flake consumes in the client retry loops before the
+// bare ErrEmptyResponse sentinel surfaces for alias failover: the short
+// budget itself (test seam — the loops read shortRetryBudget()).
+const DefaultEmptyCompletionRetries = 3
+
 // recordUsageStore appends one completed LLM call to the app-level metrics
 // store (metrics.db llm_calls ledger + model_performance rollup). No-op when
 // no usage store is attached. Storage errors are logged, never fatal.
@@ -1991,8 +2044,12 @@ func (c *Client) parseResponseWithTools(chatResp *ChatResponse, hasTools bool, p
 	// Empty content with no tool calls is the "model said nothing" failure.
 	// Surface the sentinel so ClassifyClassificationFailure sees
 	// ClassificationFailureEmptyResponse instead of falling back to
-	// string-matching heuristics.
-	if content == "" && len(msg.ToolCalls) == 0 && len(lfmCalls) == 0 {
+	// string-matching heuristics. Whitespace-only content (e.g. a bare
+	// "\n\n" body from a flaky cloud provider) is the same failure —
+	// leading whitespace on real content is normal (agnes-2.5-flash
+	// prefixes "\n\nok"-style bodies), so only a fully-blank completion
+	// classifies as empty.
+	if strings.TrimSpace(content) == "" && len(msg.ToolCalls) == 0 && len(lfmCalls) == 0 {
 		return nil, ErrEmptyResponse
 	}
 
@@ -2186,6 +2243,26 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		// ("streaming failed after 3 attempts") on exactly this shape. Return
 		// immediately; the agent loop owns compaction + the single retry.
 		if _, ok := errors.AsType[*ContextOverflowError](err); ok {
+			return nil, err
+		}
+
+		// Empty-completion classification (streaming delta path; agnes-2.5-
+		// flash hardening): same contract as the non-streaming Chat loop —
+		// a blank completion is a provider flake, retried within the short
+		// budget, and the BARE sentinel surfaces on exhaustion so the alias
+		// failure path classifies it as empty.
+		if errors.Is(err, ErrEmptyResponse) {
+			lastErr = err
+			c.logger.Warn("Empty completion, retrying (stream)",
+				"provider", cfg.ProviderID,
+				"model", cfg.ModelID,
+				"attempt", attempt,
+				"max_retries", shortRetries,
+			)
+			// Immediate re-dispatch, NO plan sleep (see Chat loop).
+			if attempt < shortRetries {
+				continue
+			}
 			return nil, err
 		}
 
@@ -2680,6 +2757,17 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	if refusal := DetectRefusal(providerID, modelID, finishReason); refusal != nil {
 		refusal.Usage = usage
 		return nil, resp.StatusCode, refusal
+	}
+
+	// Empty-completion classification (agnes-2.5-flash hardening): a stream
+	// that ends with no content, no tool calls, and no reasoning produced
+	// NOTHING — surface the same ErrEmptyResponse sentinel the non-streaming
+	// parser uses, so the delta retry loop retries the flake and the alias
+	// failure path classifies it as empty instead of completing the turn
+	// with blank text. Trailing-whitespace-only accumulation is empty too.
+	if strings.TrimSpace(content) == "" && len(toolCalls) == 0 &&
+		strings.TrimSpace(reasoningBuilder.String()) == "" {
+		return nil, resp.StatusCode, ErrEmptyResponse
 	}
 
 	result := &Response{
