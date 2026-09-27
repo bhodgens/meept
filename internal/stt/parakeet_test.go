@@ -1,6 +1,8 @@
 package stt
 
 import (
+	"strings"
+	"time"
 	"os"
 	"path/filepath"
 	"testing"
@@ -170,7 +172,17 @@ exit 0
 	})
 	require.NoError(t, err)
 
-	text, err := engine.transcribe(wavFile)
+	// Linux overlayfs: first exec can race the script writeback
+	// (ETXTBSY) even after fsync; retry briefly (same pattern as
+	// whisper_test.go).
+	var text string
+	for i := 0; ; i++ {
+		text, err = engine.transcribe(wavFile)
+		if err == nil || !strings.Contains(err.Error(), "text file busy") || i >= 5 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	require.NoError(t, err)
 	// Should contain text lines, not info/progress lines.
 	assert.Contains(t, text, "transcribed line one")
