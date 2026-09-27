@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/security/ssrf"
 	"github.com/chromedp/chromedp"
@@ -183,6 +184,9 @@ func (m *Manager) sessionFor(ctx context.Context, sessionID string) (*session, e
 		if attempt == 3 {
 			break
 		}
+		// Backoff before the next attempt: launch failures under CI load
+		// are contention, and retrying into the same spike loses again.
+		time.Sleep(time.Duration(attempt) * 2 * time.Second)
 		allocCtx, allocCxl = chromedp.NewExecAllocator(ctx, opts...)
 		cdpCtx, cdpcxl = chromedp.NewContext(allocCtx)
 		launchCtx = cdpCtx
