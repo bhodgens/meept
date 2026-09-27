@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	excelize "github.com/xuri/excelize/v2"
+
 	"github.com/caimlas/meept/e2e/harness"
 )
 
@@ -149,24 +151,63 @@ func textStream(s string) string {
 	return "BT /F1 24 Tf 72 720 Td (" + s + ") Tj ET"
 }
 
-// tools-docs-01:// tools-docs-01: spreadsheet_write produces a real CSV (and xlsx) in the
-// session workdir, with the rows_written evidence in the tool result.
+// tools-docs-01: spreadsheet_write produces a real CSV (and xlsx) in the
+// session workdir, with the rows_written evidence in the tool result. The
+// tool fences on tools.ContextWithWorkingDir: the loop injects
+// l.GetWorkingDir() into every tool context, so a session with a bound
+// project workdir satisfies the fence on the live turn path.
 func TestSpreadsheetWriteProducesCSVAndXLSX(t *testing.T) {
-	t.Skip("blocked: spreadsheet_write hard-refuses without tools.ContextWithWorkingDir " +
-		"(sessionDir must be in the tool ctx), and NEITHER live dispatch path injects it: " +
-		"the inline chat lane runs with has_session=false (no loop workingDir) and the " +
-		"task/step lane does not inject the session workdir into the tool ctx (the same " +
-		"fs-01 gap). The grant/registry half is proven by driving the call through a " +
-		"custom-roster agent — the real tool executes and returns the documented " +
-		"refusal — but the happy-path artifact assertions need the workdir-ctx seam. " +
-		"Unit coverage: internal/tools/builtin/spreadsheet_write_test.go.")
-}
+	s := startDocStack(t, "docs-sheet")
+	sessionID := s.CreateSession(t, "docs-sheet", s.ProjectDir)
 
-func min(a, b int) int {
-	if a < b {
-		return a
+	// Turn 1: CSV leg. The path is workdir-relative; the fence resolves it
+	// against the session workdir.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name: "spreadsheet_write",
+		Arguments: `{"path":"audit.csv","rows":[["city","rank"],["Austin",1],["Reno",2]],` +
+			`"header":true}`,
+	})
+	s.ChatTurn(t, sessionID, "Create an audit spreadsheet: write the audit table to a csv file", 120*time.Second)
+
+	csvPath := filepath.Join(s.ProjectDir, "audit.csv")
+	data, err := os.ReadFile(csvPath)
+	if err != nil {
+		t.Fatalf("csv artifact %s not created: %v\ntool results:\n%s\ndaemon log tail:\n%s",
+			csvPath, err, toolResultsJoined(s.Fake), s.Daemon.LogTail())
 	}
-	return b
+	want := "city,rank\nAustin,1\nReno,2\n"
+	if string(data) != want {
+		t.Fatalf("csv content = %q, want %q", string(data), want)
+	}
+
+	// Turn 2: XLSX leg with a highlighted row.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name: "spreadsheet_write",
+		Arguments: `{"path":"audit.xlsx","format":"xlsx","sheets":[{"name":"Audit",` +
+			`"headers":["Name","Score"],"rows":[["alice",30],["bob",41]],"highlight_rows":[1]}]}`,
+	})
+	s.ChatTurn(t, sessionID, "Create the xlsx audit workbook too: write the audit sheet to an xlsx file", 120*time.Second)
+
+	xlsxPath := filepath.Join(s.ProjectDir, "audit.xlsx")
+	xl, err := excelize.OpenFile(xlsxPath)
+	if err != nil {
+		t.Fatalf("xlsx artifact %s not created/openable: %v\ntool results:\n%s", xlsxPath, err, toolResultsJoined(s.Fake))
+	}
+	defer xl.Close()
+	rows, err := xl.GetRows("Audit")
+	if err != nil || len(rows) < 3 {
+		t.Fatalf("xlsx Audit sheet rows = %v (err %v), want header + 2 data rows", rows, err)
+	}
+	if rows[0][0] != "Name" || rows[1][0] != "alice" {
+		t.Fatalf("xlsx sheet content unexpected: %v", rows)
+	}
+
+	// Evidence: the tool results carry the write confirmations with counts
+	// (rows_written counts the header row too, so xlsx = 1 header + 2 data).
+	res := toolResultsJoined(s.Fake)
+	if !strings.Contains(res, `"rows_written":3`) || strings.Count(res, `"rows_written"`) < 2 {
+		t.Fatalf("tool results missing rows_written evidence:\n%s", res)
+	}
 }
 
 // tools-docs-02: pdf_read page-range filter on a real PDF; a text-free PDF

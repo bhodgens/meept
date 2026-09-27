@@ -295,6 +295,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// inside the rpc gate.
 	if turnRegistry != nil {
 		chatSubmitHandler = rpc.NewSubmitHandler(msgBus, turnRegistry, logger)
+		// Session store: lets chat.submit resolve a submit's session_id to
+		// the session's OWN conversation id (step-lane workdir injection
+		// finding). Nil-safe: without a store the legacy minted-conv
+		// behavior applies.
+		if components.SessionStore != nil {
+			chatSubmitHandler.SetSessionStore(components.SessionStore)
+		}
 	}
 	if rpcServer != nil && proxy != nil {
 		if chatSubmitHandler == nil {

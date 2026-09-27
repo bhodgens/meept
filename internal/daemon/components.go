@@ -7923,11 +7923,15 @@ func (p *AgentJobProcessor) WithOrchestrator(o *agent.Orchestrator) *AgentJobPro
 // the session precedence chain. stepID (may be "") selects the phase via
 // the step record; when no phase worktree applies — no step/phase, serial
 // mode, provisioner never cached a path — resolution falls back to
-// resolveStepWorkingDir unchanged.
+// resolveStepWorkingDir, extended with the payload's SessionID hint
+// (finding: the dispatch step lane never injected the session working dir
+// into the tool context because LinkedSessions held a conversation id the
+// store could not always resolve; the payload now carries the origin
+// session explicitly, mirroring the inline chat lane's injection).
 //
 // Mutex scope: PhaseWorktree reads a sync.Map (lock-free); the store read
 // happens WITHOUT holding any lock, matching mutexio constraints.
-func (p *AgentJobProcessor) resolveStepWorkingDirFor(job *queue.Job, stepID string) string {
+func (p *AgentJobProcessor) resolveStepWorkingDirFor(job *queue.Job, stepID, sessionID string) string {
 	if p.orchestrator != nil && stepID != "" && p.taskStore != nil {
 		if step, err := p.taskStore.StepStore().GetByID(stepID); err == nil && step != nil && step.Phase != "" {
 			if wt := p.orchestrator.PhaseWorktree(job.TaskID, step.Phase); wt != "" {
@@ -7935,7 +7939,25 @@ func (p *AgentJobProcessor) resolveStepWorkingDirFor(job *queue.Job, stepID stri
 			}
 		}
 	}
-	return p.resolveStepWorkingDir(job)
+	if wd := p.resolveStepWorkingDir(job); wd != "" {
+		return wd
+	}
+	// Payload-hinted origin session: the step job payload carries the
+	// session provenance (audit R4) resolved at schedule time. Look it up
+	// by primary ID and conversation ID (LinkedSessions may hold either
+	// form — same dual lookup as resolveStepWorkingDir's link chain).
+	if sessionID != "" && p.sessionStore != nil {
+		if sess := p.sessionStore.Get(sessionID); sess != nil {
+			if wd, _ := session.ResolveWorkingDir(sess); wd != "" {
+				return wd
+			}
+		} else if sess := p.sessionStore.GetByConversationID(sessionID); sess != nil {
+			if wd, _ := session.ResolveWorkingDir(sess); wd != "" {
+				return wd
+			}
+		}
+	}
+	return ""
 }
 
 // resolveStepWorkingDir finds the working directory for a step job:
@@ -8057,6 +8079,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		ToolHint           string   `json:"tool_hint,omitempty"`
 		MemoryRefs         []string `json:"memory_refs,omitempty"`
 		AccumulatedContext string   `json:"accumulated_context,omitempty"`
+		SessionID          string   `json:"session_id,omitempty"`
 	}
 
 	// Try legacy payload format
@@ -8099,7 +8122,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			// benchmark worktree. Per-phase worktrees (phase-frontier-parallel
 			// Contract C) take precedence over the session chain when the
 			// orchestrator provisioned one for this step's phase.
-			if wd := p.resolveStepWorkingDirFor(job, stepPayload.StepID); wd != "" {
+			if wd := p.resolveStepWorkingDirFor(job, stepPayload.StepID, stepPayload.SessionID); wd != "" {
 				loop.SetWorkingDir(wd)
 				p.logger.Info("Step job working dir resolved",
 					"job_id", job.ID,

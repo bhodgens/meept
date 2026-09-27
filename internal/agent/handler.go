@@ -747,8 +747,23 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		return
 	}
 
-	// Generate conversation ID if not provided
+	// Generate conversation ID if not provided. When the submit carried a
+	// session ID, resolve the session's OWN conversation ID first: minting
+	// a fresh conv id here orphans the turn from its session — the session
+	// loop finds no working directory (SessionID resolves nothing) and the
+	// dispatcher's task links to a conversation no session row backs, so
+	// the dispatch step lane can never inject the session working dir into
+	// the tool context (spreadsheet_write hard-refuses without it). Same
+	// dual resolution as ChatService.Chat: session primary id, then its
+	// conversation id.
 	conversationID := req.ConversationID
+	if conversationID == "" && req.SessionID != "" && h.sessionStore != nil {
+		if sess := h.sessionStore.Get(req.SessionID); sess != nil && sess.ConversationID != "" {
+			conversationID = sess.ConversationID
+		} else if sess := h.sessionStore.GetByConversationID(req.SessionID); sess != nil && sess.ConversationID != "" {
+			conversationID = sess.ConversationID
+		}
+	}
 	if conversationID == "" {
 		conversationID = generateConversationID()
 	}

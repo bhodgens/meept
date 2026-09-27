@@ -78,7 +78,7 @@ func TestResolveStepWorkingDirFor_NoWorktree(t *testing.T) {
 			if got := p.resolveStepWorkingDir(job); got != "/wt" {
 				t.Errorf("resolveStepWorkingDir = %q, want /wt", got)
 			}
-			if got := p.resolveStepWorkingDirFor(job, step.ID); got != "/wt" {
+			if got := p.resolveStepWorkingDirFor(job, step.ID, ""); got != "/wt" {
 				t.Errorf("resolveStepWorkingDirFor = %q, want /wt (precedence unchanged)", got)
 			}
 		})
@@ -154,7 +154,7 @@ func TestDaemonWiring_PhaseWorktreeWinsInDispatch(t *testing.T) {
 			}, "phase B start (wsB1 stamped)")
 
 			job := &queue.Job{TaskID: f.taskID}
-			if got := p.resolveStepWorkingDirFor(job, "wsB1"); got != tt.wantB {
+			if got := p.resolveStepWorkingDirFor(job, "wsB1", ""); got != tt.wantB {
 				t.Errorf("resolveStepWorkingDirFor(wsB1) = %q, want %q", got, tt.wantB)
 			}
 			// Legacy resolution untouched: session worktree still wins there.

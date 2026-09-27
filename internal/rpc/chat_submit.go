@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -50,13 +51,22 @@ type chatSubmitRegistry interface {
 	Register(turnID, conversationID string) bool
 }
 
+// chatSubmitSessionStore is the slice of session.Store behavior the submit
+// path needs, defined locally so internal/rpc keeps no hard dependency on
+// internal/session wiring details.
+type chatSubmitSessionStore interface {
+	Get(id string) *session.Session
+	GetByConversationID(conversationID string) *session.Session
+}
+
 // SubmitHandler serves the fire-and-forget chat submit surface
 // ("chat.submit" RPC). It publishes a chat.request on the bus and returns
 // the ack immediately — the ack path has no bus subscribe and no wait.
 type SubmitHandler struct {
-	bus      *bus.MessageBus
-	registry chatSubmitRegistry // optional; nil disables dedupe registration
-	logger   *slog.Logger
+	bus          *bus.MessageBus
+	registry     chatSubmitRegistry       // optional; nil disables dedupe registration
+	sessionStore chatSubmitSessionStore   // optional; nil disables session conversation resolution
+	logger       *slog.Logger
 }
 
 // NewSubmitHandler creates a new handler. bus must be non-nil for useful
@@ -67,6 +77,16 @@ func NewSubmitHandler(msgBus *bus.MessageBus, registry chatSubmitRegistry, logge
 		logger = slog.Default()
 	}
 	return &SubmitHandler{bus: msgBus, registry: registry, logger: logger}
+}
+
+// SetSessionStore wires the session store used to resolve a submit's
+// session_id into the session's own conversation id. Nil store is ignored
+// (setter convention): resolution is then skipped and the legacy minted
+// conversation id applies.
+func (h *SubmitHandler) SetSessionStore(store chatSubmitSessionStore) {
+	if store != nil {
+		h.sessionStore = store
+	}
 }
 
 // RegisterSubmitMethods registers chat.submit on the RPC server.
@@ -118,7 +138,22 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 		turnID = id.Generate("turn-")
 	}
 
+	// Conversation id resolution: the client may pass conversation_id
+	// directly, but the common CLI/GUI shape passes ONLY session_id. In
+	// that case resolve the session's OWN conversation id — minting a fresh
+	// conv id here orphans the turn from its session: the session loop
+	// binds no working directory (spreadsheet_write-class tools then
+	// hard-refuse), the dispatcher's task links to a conversation no
+	// session row backs, and the dispatch step lane can never recover the
+	// session working dir. Mirrors ChatService.Chat's dual resolution.
 	conversationID := req.ConversationID
+	if conversationID == "" && req.SessionID != "" && h.sessionStore != nil {
+		if sess := h.sessionStore.Get(req.SessionID); sess != nil && sess.ConversationID != "" {
+			conversationID = sess.ConversationID
+		} else if sess := h.sessionStore.GetByConversationID(req.SessionID); sess != nil && sess.ConversationID != "" {
+			conversationID = sess.ConversationID
+		}
+	}
 	if conversationID == "" {
 		conversationID = id.Generate("conv-")
 	}
