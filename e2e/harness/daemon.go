@@ -59,6 +59,10 @@ type Stack struct {
 	ProjectDir string // registered project directory
 	SocketPath string
 
+	// extraEnv carries WithExtraEnv entries, injected into the daemon
+	// process and every CLI invocation's environment.
+	extraEnv map[string]string
+
 	t testing.TB
 }
 
@@ -71,6 +75,8 @@ type StartOption func(*startConfig)
 type startConfig struct {
 	configOverlay func(cfg map[string]any) error
 	beforeWrite   func(s *Stack) error
+	// extraEnv accumulates WithExtraEnv entries (later options win).
+	extraEnv func() map[string]string
 }
 
 func newStartConfig() *startConfig { return &startConfig{} }
@@ -149,6 +155,30 @@ func WithPreBootHook(fn func(s *Stack) error) StartOption {
 	return func(sc *startConfig) { sc.beforeWrite = fn }
 }
 
+// WithExtraEnv injects additional environment variables into BOTH the
+// daemon process and the CLI invocations (RunCLI/ChatTurn). Applied in
+// option order at Start() time; each entry is exported verbatim
+// (NAME=VALUE). Used by suites that need to flip environment-gated daemon
+// behavior (e.g. MEEPT_DISABLE_DIGEST_CONTEXT=1 for deterministic
+// continuity answers instead of digest-injected prompts).
+func WithExtraEnv(env map[string]string) StartOption {
+	return func(sc *startConfig) {
+		prev := sc.extraEnv
+		sc.extraEnv = func() map[string]string {
+			merged := map[string]string{}
+			if prev != nil {
+				for k, v := range prev() {
+					merged[k] = v
+				}
+			}
+			for k, v := range env {
+				merged[k] = v
+			}
+			return merged
+		}
+	}
+}
+
 // Start builds the binaries once per process (sync.OnceValues), creates a
 // sandbox world under a fresh temp dir (NOT t.TempDir(): the daemon's Unix
 // socket path must stay under the macOS 104-char sun_path limit, and a
@@ -196,6 +226,9 @@ func Start(t testing.TB, opts ...StartOption) *Stack {
 	}
 	s.MeeptHome = filepath.Join(s.Home, ".meept")
 	s.SocketPath = filepath.Join(s.StateDir, "meept.sock")
+	if sc.extraEnv != nil {
+		s.extraEnv = sc.extraEnv()
+	}
 
 	for _, d := range []string{s.Home, s.MeeptHome, s.StateDir, s.ProjectDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -472,6 +505,9 @@ func (d *Daemon) boot() {
 		"HOME="+s.Home,
 		"MEEPT_HOME="+s.MeeptHome,
 	)
+	for k, v := range s.extraEnv {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		<-daemonSlots
@@ -516,7 +552,9 @@ func (d *Daemon) boot() {
 	}
 }
 
-// stop terminates the daemon (SIGTERM, then SIGKILL) exactly once.
+// stop terminates the daemon (SIGTERM, then SIGKILL) exactly once. Safe to
+// call from tests (A6 lifecycle checks) AND from t.Cleanup teardown — the
+// sync.Once makes the second call a no-op.
 func (d *Daemon) stop() {
 	d.stopOnce.Do(func() {
 		defer func() { <-daemonSlots }()
@@ -551,6 +589,26 @@ func (d *Daemon) LogPath() string { return d.logPath }
 // LogTail returns the last 4KB of the daemon log.
 func (d *Daemon) LogTail() string { return d.logTail() }
 
+// Stop terminates the daemon (SIGTERM, then SIGKILL) exactly once — the
+// exported A6 lifecycle seam over the cleanup-path stop. Safe to call from
+// a test body; the later t.Cleanup stop is a no-op.
+func (d *Daemon) Stop() { d.stop() }
+
+// Stopped reports whether the daemon process has exited: true when the
+// wait-child state is observed, OR the process no longer exists according
+// to the OS (an ESRCH from the signal probe — the authoritative "gone"
+// signal even when the goroutine's Process.Wait has not landed yet).
+func (d *Daemon) Stopped() bool {
+	if d.cmd == nil || d.cmd.Process == nil {
+		return false
+	}
+	if d.cmd.ProcessState != nil && d.cmd.ProcessState.Exited() {
+		return true
+	}
+	// os: Process.Signal(syscall.Signal(0)) errors when the process is gone.
+	return d.cmd.Process.Signal(syscall.Signal(0)) != nil
+}
+
 func (d *Daemon) logTail() string {
 	data, err := os.ReadFile(d.logPath)
 	if err != nil {
@@ -571,10 +629,14 @@ func (s *Stack) TasksDBPath() string { return filepath.Join(s.StateDir, "tasks.d
 
 // Env returns the sandboxed environment for CLI invocations.
 func (s *Stack) Env() []string {
-	return append(os.Environ(),
+	env := append(os.Environ(),
 		"HOME="+s.Home,
 		"MEEPT_HOME="+s.MeeptHome,
 	)
+	for k, v := range s.extraEnv {
+		env = append(env, k+"="+v)
+	}
+	return env
 }
 
 // CLIArgv assembles the common CLI prefix: binary + socket + state dir.

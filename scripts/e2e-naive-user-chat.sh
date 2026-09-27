@@ -4,6 +4,13 @@
 # (chat-dispatch-ux leaf 10; reproduces the 2026-09-04 comparison transcript,
 # /tmp/meept-vs-hermes-findings.md).
 #
+# HERMETIC TWIN: this scenario also exists as a manifest-registered hermetic
+# suite — e2e/suites/naive-user-chat/ (fake-LLM, CI-runnable, wired into
+# e2e/manifest.json and `make e2e-fast-area AREA=naive-user-chat`). The
+# four-turn transcript and the A0-A6 assertion contract live in both places;
+# changes to the scenario or the assertions must update BOTH. This script
+# remains the live-model tier (real provider realism, local-only).
+#
 # Usage:
 #   bash scripts/e2e-naive-user-chat.sh [--keep]
 #

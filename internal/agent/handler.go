@@ -2160,6 +2160,16 @@ func (h *ChatHandler) fetchStepSummaries(taskID string) []TaskStepSummary {
 		summaries[i] = TaskStepSummary{
 			Description: s.Description,
 			AgentID:     s.AgentID,
+			// Result rides along so the task-completion relay's step
+			// preview (formatTaskCompletedMessage, truncate 80) shows
+			// what the step actually produced — the file path, the
+			// answer. Result-less previews made every completed task
+			// read the same, and the A4/A5 e2e assertions (reply names
+			// the artifact) lost their substrate. The relay path
+			// (event-provided steps) already carried results via
+			// tactical buildStepSummaries; this store-fallback path was
+			// the gap.
+			Result: s.Result,
 		}
 	}
 	return summaries

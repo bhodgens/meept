@@ -40,7 +40,12 @@
       "quota-park",
       "breakers",
       "output-filters",
-      "refusal"
+      "refusal",
+      "naive-user-chat"
+    ],
+    "internal/validator/": [
+      "output-filters",
+      "naive-user-chat"
     ],
     "internal/queue/": [
       "goal-loop"
@@ -344,6 +349,11 @@
     {
       "name": "acp-wire",
       "dir": "e2e/suites/acp-wire",
+      "status": "implemented"
+    },
+    {
+      "name": "naive-user-chat",
+      "dir": "e2e/suites/naive-user-chat",
       "status": "implemented"
     }
   ],
@@ -1765,6 +1775,49 @@
       "paths": [
         "internal/acp/manager.go",
         "internal/config/acp.go"
+      ]
+    },
+    {
+      "id": "naive-user-chat-01",
+      "suite": "naive-user-chat",
+      "diff": "L",
+      "title": "T1 create turn: artifact lands in the project dir (never the daemon cwd), reply names the file, A0-A3 reply shape holds",
+      "paths": [
+        "internal/agent/handler.go",
+        "internal/agent/dispatcher.go",
+        "internal/agent/tactical.go",
+        "internal/validator/filter.go"
+      ]
+    },
+    {
+      "id": "naive-user-chat-02",
+      "suite": "naive-user-chat",
+      "diff": "L",
+      "title": "T3 status turn continuity: 'did the change get made?' answered from the stored task result, references hello.txt, not a bare clarification",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/recall_answer.go",
+        "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "naive-user-chat-03",
+      "suite": "naive-user-chat",
+      "diff": "M",
+      "title": "T4 artifact recall turn keeps the A0-A3 user-shaped reply contract across a 4-turn session",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/reply_guard.go",
+        "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "naive-user-chat-04",
+      "suite": "naive-user-chat",
+      "diff": "S",
+      "title": "A6 clean lifecycle: the scratch daemon terminates on teardown after real work",
+      "paths": [
+        "internal/daemon/daemon.go"
       ]
     }
   ]

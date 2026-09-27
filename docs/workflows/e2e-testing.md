@@ -8,7 +8,7 @@ tests go. Enforcement lives in the pre-commit hook (check [18/18]).
 | Tier | Command | What it is |
 |------|---------|------------|
 | **Fast (hermetic)** | `make e2e-fast` | Go tests under `e2e/suites/` with the `e2e` build tag. Fresh binaries, sandboxed `HOME`/`MEEPT_HOME`, fake LLM. Never touches `~/.meept` or a live daemon. Seconds per suite. Runs in CI (code-quality.yml, job `e2e-fast`) and in the pre-commit hook via the affected-suite gate. |
-| **Live-model** | `make e2e-chat` | `scripts/e2e-naive-user-chat.sh` drives a real daemon with a real model through a naive-user chat comparison. Slow, costs tokens, needs a configured local daemon. Local-only by design — never in CI. |
+| **Live-model** | `make e2e-chat` | `scripts/e2e-naive-user-chat.sh` drives a real daemon with a real model through a naive-user chat comparison. Slow, costs tokens, needs a configured local daemon. Local-only by design — never in CI. Its scenario also ships as the hermetic twin `e2e/suites/naive-user-chat/` (manifest-registered; CI + pre-commit coverage for the A0-A6 contract). |
 
 Single suite: `make e2e-fast-area AREA=smoke`.
 
