@@ -115,7 +115,8 @@ CI is green on both workflows as of `a4036479` (CI 8/8, Code Quality
   G115/G123 classes outside the G201/G202 gate.
 - ci.yml gosec already scoped to G201/G202 — matches Makefile policy;
   no action pending there.
-- `scripts/e2e-naive-user-chat.sh` still standalone (open item 3).
+- naive-user-chat: formalized (open item 3 resolved — hermetic twin
+  green; live tier = `make e2e-chat`).
 
 ## Recommended next steps (ranked)
 
@@ -127,9 +128,9 @@ CI is green on both workflows as of `a4036479` (CI 8/8, Code Quality
    zai/ollama remote fallbacks in config/models.json5 aliases are the
    intended production shape (open item 2). Suites pin the current
    contract either way.
-3. **Formalize naive-user-chat (open item 3).** Prefer option (a): a
-   `make e2e-chat-naive` target wrapping the existing script — keeps
-   provider realism; no hermetic port needed yet.
+3. ~~Formalize naive-user-chat~~ DONE — hermetic twin in
+   e2e/suites/naive-user-chat (manifest-registered, green) + live tier
+   via `make e2e-chat`.
 4. **Fix the six product findings** in "Known product findings" — each
    has a pinned suite skip that flips green when fixed; start with the
    step-lane workdir injection (blocks spreadsheet_write end-to-end)
@@ -139,25 +140,16 @@ CI is green on both workflows as of `a4036479` (CI 8/8, Code Quality
 6. **Verify A5 continuity** with a healthy-provider naive-user-chat run
    (run 43 flaked upstream of the continuity path).
 
-## Open item 3 — naive-user-chat harness is not a manifest suite
+## Open item 3 — RESOLVED: naive-user-chat is formalized
 
-`scripts/e2e-naive-user-chat.sh` (live-model tier, local-only) drives the
-full async-turn chat path against a real provider through a 4-turn
-scenario: create a file → modify it → ask if the change was made (A5
-continuity) → ask what files exist, with A0-A6 assertions and evidence
-rows in `${TMPDIR}/meept-e2e-evidence.jsonl`. It is currently a
-standalone script, NOT registered in `e2e/manifest.json`, so
-`make e2e-fast-area` / `e2e-affected` never run it.
-
-Formalization work:
-- Fold the scenario into `e2e/suites/naive-user-chat/` with a manifest
-  path_map entry (internal/agent, internal/validator, scripts/).
-- Decide its tier: it needs a real provider (agnes coder + local MLX
-  classifier), so it belongs to the `make e2e-chat` live tier, not the
-  hermetic `e2e-fast` tier — CI cannot run it as-is. Options: (a) keep
-  it a script and add a `make e2e-chat-naive` target; (b) port the
-  scenario to the hermetic fake-LLM harness (loses provider realism but
-  gains CI + pre-commit coverage).
+Both forms now exist (verified 2026-09-26 late):
+- Hermetic twin: `e2e/suites/naive-user-chat/naive_user_chat_test.go`
+  (fake-LLM, manifest-registered, `make e2e-fast-area
+  AREA=naive-user-chat` green, 2 tests). The scenario script header
+  documents the both-places sync rule.
+- Live tier: `make e2e-chat` runs `scripts/e2e-naive-user-chat.sh`
+  (real provider, local-only) — the recommended `e2e-chat-naive` target
+  already exists under this name.
 - Session history (2026-09-26, runs 31-43): the harness surfaced and
   drove fixes for A5 continuity (thread-router conversation-id mismatch,
   platform-shortcut ordering, intent-label instability, digest

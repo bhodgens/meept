@@ -99,22 +99,32 @@ func TestRecentsStore_PruneOlderThan(t *testing.T) {
 	ctx := context.Background()
 	s := NewRecentsStore(db)
 
-	// Touch /path/one, wait, then touch /path/two.
+	// Touch /path/one, wait, then touch /path/two. The 250ms gap gives
+	// the TTL a wide margin — a CI scheduler stall between the two touches
+	// must not age /path/two past the cutoff (50ms wall-clock flake).
 	if err := s.TouchRecent(ctx, "/path/one"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	if err := s.TouchRecent(ctx, "/path/two"); err != nil {
 		t.Fatal(err)
 	}
 
-	// Prune entries older than 50ms — should remove /path/one only.
-	deleted, err := s.PruneOlderThan(ctx, 50*time.Millisecond)
+	// Prune entries older than 120ms — should remove /path/one only.
+	deleted, err := s.PruneOlderThan(ctx, 120*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if deleted != 1 {
 		t.Errorf("expected 1 deleted, got %d", deleted)
+	}
+	// Pin the survivor by path, not just the count.
+	paths, err := s.ListRecents(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != "/path/two" {
+		t.Errorf("expected [/path/two] to survive, got %v", paths)
 	}
 }
 
