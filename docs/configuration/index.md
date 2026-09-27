@@ -61,7 +61,7 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 - **Security** - Input sanitization, command scanning, and permissions
 - **Skills** - Local skill discovery and management
 - **Self-Improve** - Automated code improvement system
-- **Plans** - Plan lifecycle, approval workflow, and task synthesis
+- **[Plans](plans.md)** - Plan storage location (`plans.storage`), lifecycle, approval workflow, and task synthesis
 - **Scheduler** - Background job scheduling
 - **Workspace** - Git-backed task tracking
 - **Speech-to-Text (STT)** - Client-side voice transcription for TUI and Flutter
