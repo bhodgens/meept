@@ -141,13 +141,13 @@
     "topic": "chat.submit",
     "handler": "chatSubmitHandler.Submit",
     "file": "internal/daemon/daemon.go",
-    "line": 306
+    "line": 313
   },
   {
     "topic": "chat.submit",
     "handler": "h.handleChatSubmit",
     "file": "internal/rpc/chat_submit.go",
-    "line": 74
+    "line": 94
   },
   {
     "topic": "cluster.debug.events",
