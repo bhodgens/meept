@@ -53,8 +53,11 @@ func TestIntentAnalyzer_FailFast_True_NoRotation(t *testing.T) {
 	if !strings.Contains(err.Error(), "empty content") {
 		t.Fatalf("error should name the primary failure (empty content), got: %v", err)
 	}
-	if got := atomic.LoadInt32(primaryCalls); got != 1 {
-		t.Errorf("expected exactly 1 request under fail-fast, got %d", got)
+	// The client absorbs the empty completion with bounded in-loop retries
+	// (agnes-2.5-flash hardening): the primary endpoint sees the full short
+	// budget, fail-fast still prevents any rotation.
+	if got := atomic.LoadInt32(primaryCalls); got != llm.DefaultEmptyCompletionRetries {
+		t.Errorf("expected exactly %d requests under fail-fast, got %d", llm.DefaultEmptyCompletionRetries, got)
 	}
 	if got := atomic.LoadInt32(secondaryCalls); got != 0 {
 		t.Errorf("rotate target must not be contacted under fail-fast, got %d requests", got)
@@ -93,8 +96,10 @@ func TestIntentAnalyzer_FailFast_False_Rotates(t *testing.T) {
 	if analysis == nil || analysis.Goal != "fix bug" {
 		t.Fatalf("expected goal 'fix bug', got %+v", analysis)
 	}
-	if got := atomic.LoadInt32(primaryCalls); got != 1 {
-		t.Errorf("expected exactly 1 primary request, got %d", got)
+	// The client retries the empty completion within its short budget
+	// before the analyzer's one-hop rotation (agnes-2.5-flash hardening).
+	if got := atomic.LoadInt32(primaryCalls); got != llm.DefaultEmptyCompletionRetries {
+		t.Errorf("expected exactly %d primary requests, got %d", llm.DefaultEmptyCompletionRetries, got)
 	}
 	if got := atomic.LoadInt32(secondaryCalls); got != 1 {
 		t.Errorf("expected exactly 1 rotate-target request, got %d", got)

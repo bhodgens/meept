@@ -127,8 +127,11 @@ func TestLLMClassifier_NoRotationWithoutResolver(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error with nil resolver, got intent %+v", intent)
 	}
-	if got := atomic.LoadInt32(&calls); got != 1 {
-		t.Errorf("expected exactly 1 request without resolver, got %d", got)
+	// The client absorbs the empty completion with bounded in-loop retries
+	// (agnes-2.5-flash hardening); with no resolver, the sentinel then
+	// surfaces without any rotation.
+	if got := atomic.LoadInt32(&calls); got != llm.DefaultEmptyCompletionRetries {
+		t.Errorf("expected exactly %d requests without resolver, got %d", llm.DefaultEmptyCompletionRetries, got)
 	}
 }
 

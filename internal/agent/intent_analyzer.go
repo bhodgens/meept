@@ -255,7 +255,7 @@ func (ia *IntentAnalyzer) chatWithFailover(ctx context.Context, messages []llm.C
 		if err != nil {
 			return nil, err
 		}
-		if resp == nil || resp.Content == "" {
+		if resp == nil || strings.TrimSpace(resp.Content) == "" {
 			return nil, fmt.Errorf("intent analysis: %w", llm.ErrEmptyResponse)
 		}
 		return resp, nil

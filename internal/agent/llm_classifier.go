@@ -531,7 +531,7 @@ func (c *LLMClassifier) chatWithFailover(ctx context.Context, messages []llm.Cha
 		if err != nil {
 			return nil, err
 		}
-		if resp == nil || resp.Content == "" {
+		if resp == nil || strings.TrimSpace(resp.Content) == "" {
 			return nil, fmt.Errorf("llm classification: %w", llm.ErrEmptyResponse)
 		}
 		return resp, nil
