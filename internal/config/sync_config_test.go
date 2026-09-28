@@ -3,6 +3,7 @@ package config
 import (
 	"testing"
 	"time"
+	"errors"
 )
 
 func TestDefaultConfigSyncConfig(t *testing.T) {
@@ -33,7 +34,7 @@ func TestConfigSyncConfig_Validate_NoRepo(t *testing.T) {
 		Enabled:      true,
 		PullSchedule: 5 * time.Minute,
 	}
-	if err := cfg.Validate(); err != ErrConfigSyncInvalid {
+	if err := cfg.Validate(); !errors.Is(err, ErrConfigSyncInvalid) {
 		t.Errorf("expected ErrConfigSyncInvalid for missing repo_url, got %v", err)
 	}
 }
@@ -44,7 +45,7 @@ func TestConfigSyncConfig_Validate_ZeroSchedule(t *testing.T) {
 		RepoURL:      "https://example.com/config.git",
 		PullSchedule: 0,
 	}
-	if err := cfg.Validate(); err != ErrConfigSyncInvalid {
+	if err := cfg.Validate(); !errors.Is(err, ErrConfigSyncInvalid) {
 		t.Errorf("expected ErrConfigSyncInvalid for zero schedule, got %v", err)
 	}
 }

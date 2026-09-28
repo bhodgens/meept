@@ -141,7 +141,7 @@ func (di *DeepInitializer) scanTree(ctx context.Context, root string) ([]*dirInf
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip unreadable
+			return nil //nolint:nilerr // skip unreadable
 		}
 		if d.IsDir() {
 			name := filepath.Base(path)

@@ -68,7 +68,7 @@ func TestFitToBudget_BinarySearch(t *testing.T) {
 
 	// Create ranked tags that will produce different token counts
 	var ranked RankedTags
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		ranked = append(ranked, RankedTag{
 			Tag: Tag{
 				RelFname: "test.go",
@@ -98,7 +98,7 @@ func TestFitToBudget_ToleranceBand(t *testing.T) {
 
 	// Create known set of ranked tags
 	var ranked RankedTags
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		ranked = append(ranked, RankedTag{
 			Tag: Tag{
 				RelFname: "file.go",
@@ -153,7 +153,7 @@ func TestFitToBudgetSimple(t *testing.T) {
 
 	// Create ranked tags
 	ranked := RankedTags{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		ranked = append(ranked, RankedTag{
 			Tag:   Tag{Name: "Func" + string(rune('0'+i)), IsDef: true},
 			Score: 1.0,

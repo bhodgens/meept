@@ -143,7 +143,7 @@ func (t *FileFindTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 	err = filepath.WalkDir(resolved, func(walkPath string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return nil //nolint:nilerr // best-effort search: an unreadable entry is skipped, not fatal
 		}
 
 		// Skip the root itself

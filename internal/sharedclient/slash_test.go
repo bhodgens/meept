@@ -89,14 +89,7 @@ func TestBuiltinCommands(t *testing.T) {
 	// Check for expected commands
 	expected := []string{"help", "clear", "session", "tasks", "cancel", "amend", "interrupt"}
 	for _, exp := range expected {
-		found := false
-		for _, cmd := range cmds {
-			if cmd == exp {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(cmds, exp) {
 			t.Errorf("BuiltinCommands() missing expected command: %s", exp)
 		}
 	}

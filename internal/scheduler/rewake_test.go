@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -193,5 +192,5 @@ func TestRewake_NilBusNoPanic(t *testing.T) {
 
 // newRewakeTestLogger returns a quiet logger for rewake tests.
 func newRewakeTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }

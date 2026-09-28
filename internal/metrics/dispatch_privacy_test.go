@@ -86,6 +86,9 @@ func TestDispatchLogMigration_IdempotentReopen(t *testing.T) {
 			wantIdx[name] = true
 		}
 	}
+	if err := idxRows.Err(); err != nil {
+		t.Fatalf("iterate indexes: %v", err)
+	}
 	for idx, found := range wantIdx {
 		if !found {
 			t.Errorf("dispatch_log missing index %q after migration", idx)

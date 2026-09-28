@@ -109,7 +109,7 @@ func (b *localPromptBase) listAll() []map[string]string {
 		var files []string
 		_ = filepath.Walk(tier.dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
-				return nil
+				return nil //nolint:nilerr // listing a prompt tier is best-effort: an unreadable tier is skipped, not fatal
 			}
 			if !strings.HasSuffix(strings.ToLower(path), ".md") {
 				return nil
@@ -209,7 +209,10 @@ text/template).`,
 			if editor == "" {
 				editor = "vi"
 			}
-			ec := exec.Command(editor, dest)
+			// EDITOR is the documented editor-override mechanism (executed
+			// as argv[0] with no shell), so its value is trusted user
+			// intent, not attacker-controlled input.
+			ec := exec.Command(editor, dest) //nolint:gosec // G702: EDITOR is the documented override mechanism, not attacker input
 			ec.Stdin = os.Stdin
 			ec.Stdout = os.Stdout
 			ec.Stderr = os.Stderr

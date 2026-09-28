@@ -213,7 +213,7 @@ func validateSelector(sel string) error {
 	if sel == "" {
 		return errors.New("browser: empty selector")
 	}
-	for _, part := range strings.Fields(sel) {
+	for part := range strings.FieldsSeq(sel) {
 		if i := strings.Index(part, ":"); i > 0 {
 			head := strings.ToLower(part[:i])
 			// Pseudo-classes/pseudo-elements attach directly to a tag,
@@ -238,8 +238,11 @@ func isSchemeLike(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
-			(r >= '0' && r <= '9') || r == '+' || r == '-' || r == '.') {
+		isSchemeChar := r >= 'a' && r <= 'z' ||
+			r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' ||
+			r == '+' || r == '-' || r == '.'
+		if !isSchemeChar {
 			return false
 		}
 	}
@@ -304,15 +307,17 @@ func (m *Manager) Navigate(ctx context.Context, sessionID, rawURL string) (strin
 			slog.Debug("browser: post-failure location probe failed", "error", locErr)
 		}
 		if ferr := m.checkURLFinal(finalURL); ferr != nil {
-			m.CloseSession(context.Background(), sessionID)
-			return "", "", fmt.Errorf("navigation failed and %v", ferr)
+			// Best-effort teardown on redirect-escape: the original error
+			// (ferr) is the one the caller must see.
+			_ = m.CloseSession(context.Background(), sessionID)
+			return "", "", fmt.Errorf("navigation failed: %w", ferr)
 		}
 		return "", "", fmt.Errorf("browser: navigate failed: %w", runErr)
 	}
 	if err := m.checkURLFinal(finalURL); err != nil {
 		// Redirect escape attempt: tear down the page so the session does
 		// not keep pointing at a disallowed origin.
-		m.CloseSession(context.Background(), sessionID)
+		_ = m.CloseSession(context.Background(), sessionID)
 		return "", "", err
 	}
 	return finalURL, title, nil

@@ -153,7 +153,7 @@ func (m *mockPatchStore) Add(_ context.Context, srcPath string) (string, error) 
 		// Copy file into store for later Resolve.
 		data, _ := os.ReadFile(srcPath)
 		stored := srcPath + ".stored"
-		_ = os.WriteFile(stored, data, 0o644)
+		_ = os.WriteFile(stored, data, 0o644) //nolint:gosec // test mock: path is a t.TempDir() fixture, not user input
 		if m.store == nil {
 			m.store = make(map[string]string)
 		}

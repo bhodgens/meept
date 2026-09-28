@@ -88,7 +88,7 @@ func (pm *ProjectManager) ReleaseWorktree(ctx context.Context, worktreeID string
 	if err := pm.runGit(ctx, p.LocalPath, "worktree", "remove", w.Path); err != nil {
 		// Try force remove
 		if forceErr := pm.runGit(ctx, p.LocalPath, "worktree", "remove", "--force", w.Path); forceErr != nil {
-			return fmt.Errorf("git worktree remove: %w (force: %v)", err, forceErr)
+			return fmt.Errorf("git worktree remove: %w (force: %w)", err, forceErr)
 		}
 	}
 

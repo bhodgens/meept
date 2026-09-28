@@ -16,7 +16,7 @@ func TestManager_CreateSession(t *testing.T) {
 	if err != nil {
 		t.Skipf("PTY not available: %v", err)
 	}
-	defer mgr.DestroySession(id)
+	defer func() { _ = mgr.DestroySession(id) }()
 
 	if sess == nil {
 		t.Fatal("session should not be nil")
@@ -52,7 +52,7 @@ func TestManager_GetSession(t *testing.T) {
 	if err != nil {
 		t.Skipf("PTY not available: %v", err)
 	}
-	defer mgr.DestroySession(id)
+	defer func() { _ = mgr.DestroySession(id) }()
 
 	// Get session
 	retrieved := mgr.GetSession(id)
@@ -69,7 +69,7 @@ func TestManager_SessionLimit(t *testing.T) {
 	defer mgr.Close()
 
 	// Create max sessions
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		id, sess, err := mgr.CreateAutoSession(SessionConfig{
 			Cmd: "cat",
 		})
@@ -167,7 +167,7 @@ func TestManager_ListSessions(t *testing.T) {
 	}
 
 	// Create a few sessions
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		sid, sess, err := mgr.CreateAutoSession(SessionConfig{
 			Cmd: "cat",
 		})
@@ -188,10 +188,12 @@ func TestManager_Close(t *testing.T) {
 	mgr := NewManager()
 
 	// Create a few sessions
-	for i := 0; i < 3; i++ {
-		mgr.CreateAutoSession(SessionConfig{
+	for range 3 {
+		if _, _, err := mgr.CreateAutoSession(SessionConfig{
 			Cmd: "cat",
-		})
+		}); err != nil {
+			t.Skipf("PTY not available: %v", err)
+		}
 	}
 
 	if err := mgr.Close(); err != nil {

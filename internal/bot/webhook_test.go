@@ -33,7 +33,7 @@ func TestWebhookHandler_PostTriggersBot(t *testing.T) {
 	}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	payload := map[string]any{"action": "deploy", "repo": "meept"}
 	body, _ := json.Marshal(payload)
@@ -49,7 +49,7 @@ func TestWebhookHandler_PostTriggersBot(t *testing.T) {
 	}
 
 	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	json.Unmarshal(w.Body.Bytes(), &resp) //nolint:errcheck // test setup: failures surface via the assertions below
 	if resp["status"] != "triggered" {
 		t.Errorf("status = %v, want %q", resp["status"], "triggered")
 	}
@@ -98,7 +98,7 @@ func TestWebhookHandler_NoWebhookTrigger(t *testing.T) {
 	}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	payload := map[string]any{"key": "value"}
 	body, _ := json.Marshal(payload)
@@ -124,7 +124,7 @@ func TestWebhookHandler_InvalidJSON(t *testing.T) {
 	}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/bot/json-test/trigger", bytes.NewReader([]byte("not json")))
 	w := httptest.NewRecorder()
@@ -147,7 +147,7 @@ func TestWebhookHandler_BudgetExhausted(t *testing.T) {
 	def.Constraints = BotConstraints{DailyBudgetCents: 10}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	// Set state to budget exhausted
 	state := BotState{
@@ -156,7 +156,7 @@ func TestWebhookHandler_BudgetExhausted(t *testing.T) {
 		TodayCostCents: 10,
 		TodayDate:      time.Now().Format("2006-01-02"),
 	}
-	mgr.store.UpdateState(ctx, state)
+	mgr.store.UpdateState(ctx, state) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	payload := map[string]any{"key": "value"}
 	body, _ := json.Marshal(payload)

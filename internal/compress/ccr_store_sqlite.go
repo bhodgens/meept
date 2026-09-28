@@ -147,9 +147,7 @@ func (s *sqliteStore) cleanupExpired() {
 	}
 
 	deleted, _ := result.RowsAffected()
-	if deleted > 0 {
-		// Could log: "Cleaned up %d expired CCR entries"
-	}
+	_ = deleted // cleanup is best-effort; count surfaced only for future logging
 }
 
 // Store saves a CCR entry and returns its hash.
@@ -276,6 +274,7 @@ func (s *sqliteStore) Retrieve(ctx context.Context, hash string) (*CCREntry, err
 		WHERE hash = ?
 	`, hash); updateErr != nil {
 		// Log but don't fail the retrieval - this is just metrics
+		_ = updateErr
 	}
 
 	return &entry, nil

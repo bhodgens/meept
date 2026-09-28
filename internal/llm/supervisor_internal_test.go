@@ -98,7 +98,7 @@ func runFakeDaemon(args []string) int {
 		deathFD = supervisorDeathFD
 		extra = append(extra, deathRead)
 	}
-	cmd := exec.Command(self, SuperviseArgv(os.Getpid(), supervisorReportFD, deathFD, runtimeArgv)...)
+	cmd := exec.Command(self, SuperviseArgv(os.Getpid(), supervisorReportFD, deathFD, runtimeArgv)...) //nolint:gosec // G702: self is os.Executable() and argv is constructed by this test, not user input
 	cmd.ExtraFiles = extra
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -194,7 +194,9 @@ func (g *RepoMapGenerator) Generate(ctx context.Context, chatFiles, mentionedIde
 // This avoids mutating g.cache across goroutines (S2-4).
 func (g *RepoMapGenerator) generateInternal(ctx context.Context, chatFiles, mentionedIdentifiers []string, cache *MapCache) (*RenderedMap, error) {
 	if !g.config.Enabled {
-		return nil, nil
+		// Documented contract: disabled config means "feature unavailable",
+		// not an error — callers treat (nil, nil) as enrichment skipped.
+		return nil, nil //nolint:nilnil // nil result is the documented "repomap disabled" contract
 	}
 
 	g.mu.RLock()
@@ -202,7 +204,9 @@ func (g *RepoMapGenerator) generateInternal(ctx context.Context, chatFiles, ment
 	g.mu.RUnlock()
 
 	if len(watchedFiles) == 0 {
-		return nil, nil
+		// Documented contract: nothing watched means "nothing to map",
+		// not an error — callers treat (nil, nil) as enrichment skipped.
+		return nil, nil //nolint:nilnil // nil result is the documented "no watched files" contract
 	}
 
 	// Check memory cache first
@@ -425,9 +429,8 @@ func ExtractIdentifiers(text string) []string {
 	}
 
 	var identifiers []string
-	words := strings.Fields(text)
 
-	for _, word := range words {
+	for word := range strings.FieldsSeq(text) {
 		// Clean up the word
 		word = strings.Trim(word, ".,;:!?()[]{}\"'`")
 		word = strings.ToLower(word)
@@ -443,7 +446,7 @@ func ExtractIdentifiers(text string) []string {
 		// Check if it looks like an identifier (alphanumeric + underscore)
 		isIdent := true
 		for _, c := range word {
-			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
 				isIdent = false
 				break
 			}

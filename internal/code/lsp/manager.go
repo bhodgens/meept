@@ -166,8 +166,11 @@ func (m *Manager) StartServer(ctx context.Context, name string, cfg config.LSPSe
 		m.logger.Info("LSP server already started by concurrent call, closing duplicate",
 			"name", name,
 		)
-		srv.DocMgr.CloseAll(ctx)
-		srv.Client.Shutdown(ctx)
+		// Best-effort cleanup of the duplicate instance: shutdown errors are
+		// non-actionable here (the loser is discarded regardless), so the
+		// errors are deliberately discarded.
+		_ = srv.DocMgr.CloseAll(ctx)
+		_ = srv.Client.Shutdown(ctx)
 		srv.Client.Close()
 		return existing, nil
 	}
@@ -286,7 +289,7 @@ func (m *Manager) WillRenameFiles(ctx context.Context, oldURI, newURI string) (*
 	// Check if server supports willRenameFiles capability
 	caps := NewCapabilities(client.Capabilities())
 	if !caps.HasWillRenameFiles() {
-		return nil, nil // Server doesn't support this capability
+		return nil, nil //nolint:nilnil // nil edit is the established "capability unsupported" contract; callers (e.g. internal/code/tools/lsp_rename_files.go) explicitly handle nil edit as not-found
 	}
 
 	return client.WillRenameFiles(ctx, oldURI, newURI)

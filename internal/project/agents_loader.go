@@ -93,7 +93,7 @@ func LoadAllAgentsMD(projectRoot string) ([]AgentsMD, error) {
 
 	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // Skip directories we can't access
+			return nil //nolint:nilerr // Skip directories we can't access
 		}
 		if d.IsDir() {
 			return nil
@@ -101,9 +101,11 @@ func LoadAllAgentsMD(projectRoot string) ([]AgentsMD, error) {
 		if filepath.Base(path) != "AGENTS.md" {
 			return nil
 		}
+		//nolint:gosec // G122: path comes from the WalkDir callback; this is a
+		// best-effort read-only loader over an already-trusted project root.
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil // Skip unreadable files
+			return nil //nolint:nilerr // Skip unreadable files
 		}
 		rel, _ := filepath.Rel(projectRoot, filepath.Dir(path))
 		if rel == "." {

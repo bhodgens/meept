@@ -146,15 +146,15 @@ func TestGenerate_DistributionFairness(t *testing.T) {
 	// times. We allow [0.5x, 2x] of the expected count, which is wildly lenient
 	// for true uniform randomness — designed to catch only catastrophic bugs.
 	expected := sampleSize // total bytes / 16
-	for _, hex := range "0123456789abcdef" {
-		got := counts[byte(hex)]
+	for _, hexChar := range []byte("0123456789abcdef") {
+		got := counts[hexChar]
 		// Allow down to 40% and up to 200% of expected (very lenient to avoid flakes)
-		low, high := uint64(expected*4/10), uint64(expected*2)
-		if uint64(got) < low {
-			t.Errorf("hex char %q underrepresented: %d (expected >= %d)", string(hex), got, low)
+		low, high := expected*4/10, expected*2
+		if got < low {
+			t.Errorf("hex char %q underrepresented: %d (expected >= %d)", string(hexChar), got, low)
 		}
-		if uint64(got) > high {
-			t.Errorf("hex char %q overrepresented: %d (expected <= %d)", string(hex), got, high)
+		if got > high {
+			t.Errorf("hex char %q overrepresented: %d (expected <= %d)", string(hexChar), got, high)
 		}
 	}
 }

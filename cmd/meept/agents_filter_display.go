@@ -34,7 +34,7 @@ func renderOutputFiltersSection(m map[string]any) string {
 		b.WriteString(", filters: ")
 		b.WriteString(strings.Join(filters, ", "))
 	}
-	b.WriteString(fmt.Sprintf(", max passes: %d, retries: %d", maxPasses, retries))
+	fmt.Fprintf(&b, ", max passes: %d, retries: %d", maxPasses, retries)
 	return b.String()
 }
 

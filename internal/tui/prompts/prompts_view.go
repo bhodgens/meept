@@ -176,7 +176,7 @@ func Discover() []PromptEntry {
 	for _, tier := range tiers {
 		_ = filepath.Walk(tier.dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
-				return nil
+				return nil //nolint:nilerr // listing a prompt tier is best-effort: an unreadable tier is skipped, not fatal
 			}
 			if !strings.HasSuffix(strings.ToLower(path), ".md") {
 				return nil

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,9 +24,9 @@ type Merger struct {
 }
 
 type logger interface {
-	Info(msg string, keysAndValues ...interface{})
-	Warn(msg string, keysAndValues ...interface{})
-	Debug(msg string, keysAndValues ...interface{})
+	Info(msg string, keysAndValues ...any)
+	Warn(msg string, keysAndValues ...any)
+	Debug(msg string, keysAndValues ...any)
 }
 
 // NewMerger creates a new Merger.
@@ -240,9 +241,7 @@ func (m *Merger) applyMergedConfigFile(src, dst string, result *MergeResult) err
 // Implements RFC 7396 JSON Merge Patch semantics.
 func DeepMerge(dst, src map[string]any) map[string]any {
 	out := make(map[string]any, len(dst))
-	for k, v := range dst {
-		out[k] = v
-	}
+	maps.Copy(out, dst)
 	for k, sv := range src {
 		if sv == nil {
 			// null in src → delete key.
@@ -316,8 +315,10 @@ func (m *Merger) applyConfigFile(src, dst string, result *MergeResult) error {
 		return &ConfigSyncError{Op: "write_dst", Path: dst, Err: err}
 	}
 
-	tmpFile := dst + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0o600); err != nil {
+	// G703: dst comes from the synced-file list joined under m.baseDir (not
+	// request input); the temp name is a fixed ".tmp" suffix on that path.
+	tmpFile := filepath.Join(filepath.Dir(dst), filepath.Base(dst)+".tmp")
+	if err := os.WriteFile(tmpFile, data, 0o600); err != nil { //nolint:gosec // G703: synced config path under m.baseDir, see comment above
 		return &ConfigSyncError{Op: "write_tmp", Path: tmpFile, Err: err}
 	}
 

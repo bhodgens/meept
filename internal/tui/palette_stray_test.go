@@ -30,7 +30,12 @@ var strayExemptFiles = map[string]bool{
 
 func TestNoStrayColorLiterals(t *testing.T) {
 	root := "."
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	rooted, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatalf("open root %q: %v", root, err)
+	}
+	defer func() { _ = rooted.Close() }()
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -51,7 +56,7 @@ func TestNoStrayColorLiterals(t *testing.T) {
 		if path == filepath.Join("viz", "colors.go") {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := rooted.ReadFile(path)
 		if err != nil {
 			return err
 		}

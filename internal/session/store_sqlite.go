@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -1130,7 +1131,7 @@ func (s *SQLiteStore) UpdateDesignation(sessionID string, status DesignationStat
 	err := s.db.QueryRow("SELECT designation_status FROM sessions WHERE id = ?", sessionID).Scan(&existingStatus) //nolint:mutexio
 	if err != nil {
 		s.mu.Unlock()
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("session not found: %s", sessionID)
 		}
 		return fmt.Errorf("failed to check existing designation: %w", err)
@@ -1283,6 +1284,9 @@ func (s *SQLiteStore) GetDesignatedSessionIDs() ([]string, error) {
 			continue
 		}
 		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate designated sessions: %w", err)
 	}
 	return ids, nil
 }
@@ -2286,19 +2290,23 @@ func (s *SQLiteStore) backfillFTS() error {
 		if err != nil {
 			return fmt.Errorf("query unindexed messages: %w", err)
 		}
-		for rs.Next() {
-			var r row
-			if err := rs.Scan(&r.id, &r.sessionID, &r.role, &r.content); err != nil {
-				rs.Close()
-				return fmt.Errorf("scan unindexed row: %w", err)
+		scanErr := func() error {
+			defer rs.Close()
+			for rs.Next() {
+				var r row
+				if err := rs.Scan(&r.id, &r.sessionID, &r.role, &r.content); err != nil {
+					return fmt.Errorf("scan unindexed row: %w", err)
+				}
+				batch = append(batch, r)
 			}
-			batch = append(batch, r)
+			if err := rs.Err(); err != nil {
+				return fmt.Errorf("iterate unindexed rows: %w", err)
+			}
+			return nil
+		}()
+		if scanErr != nil {
+			return scanErr
 		}
-		if err := rs.Err(); err != nil {
-			rs.Close()
-			return fmt.Errorf("iterate unindexed rows: %w", err)
-		}
-		rs.Close()
 		if len(batch) == 0 {
 			return nil
 		}
@@ -2308,17 +2316,22 @@ func (s *SQLiteStore) backfillFTS() error {
 		}
 		stmt, err := tx.Prepare(`INSERT INTO session_messages_fts(message_id, session_id, role, content) VALUES (?, ?, ?, ?)`)
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback() // best-effort unwind; the primary error is reported instead
 			return fmt.Errorf("prepare fts insert: %w", err)
 		}
-		for _, r := range batch {
-			if _, err := stmt.Exec(r.id, r.sessionID, r.role, r.content); err != nil {
-				stmt.Close()
-				tx.Rollback()
-				return fmt.Errorf("insert fts row %d: %w", r.id, err)
+		insertErr := func() error {
+			defer stmt.Close()
+			for _, r := range batch {
+				if _, err := stmt.Exec(r.id, r.sessionID, r.role, r.content); err != nil {
+					return fmt.Errorf("insert fts row %d: %w", r.id, err)
+				}
 			}
+			return nil
+		}()
+		if insertErr != nil {
+			_ = tx.Rollback() // best-effort unwind; the primary error is reported instead
+			return insertErr
 		}
-		stmt.Close()
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit fts backfill tx: %w", err)
 		}
@@ -2390,7 +2403,7 @@ func (s *SQLiteStore) SearchMessagesSemantic(ctx context.Context, embedding []fl
 	// Probe whether the vec0 table exists.
 	var name string
 	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_message_vectors'`).Scan(&name) //nolint:mutexio // mutex serializes sqlite connection access
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrSemanticUnavailable
 	}
 	if err != nil {

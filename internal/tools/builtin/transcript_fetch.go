@@ -302,11 +302,7 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 	// hard cap; the plain-fetch path keeps the raw timeout.
 	deadline := time.Duration(t.timeoutSeconds) * time.Second
 	if p.Summarize && t.summarizer != nil {
-		scaled := deadline * time.Duration(transcriptSummarizeMaxCalls)
-		if scaled > transcriptSummarizeMaxTimeout {
-			scaled = transcriptSummarizeMaxTimeout
-		}
-		deadline = scaled
+		deadline = min(deadline*time.Duration(transcriptSummarizeMaxCalls), transcriptSummarizeMaxTimeout)
 	}
 	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
@@ -397,25 +393,14 @@ func (t *TranscriptFetchTool) Execute(ctx context.Context, args map[string]any) 
 	// Normalize pagination: negative or oversized offsets clamp to the
 	// valid range; max_chars <= 0 falls back to the 100k default and is
 	// hard-capped at it.
-	offset := p.Offset
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > totalChars {
-		offset = totalChars
-	}
+	offset := max(min(p.Offset, totalChars), 0)
 	maxChars := p.MaxChars
 	if maxChars <= 0 {
 		maxChars = TranscriptMaxOutputLength
 	}
-	if maxChars > TranscriptMaxOutputLength {
-		maxChars = TranscriptMaxOutputLength
-	}
+	maxChars = min(maxChars, TranscriptMaxOutputLength)
 
-	end := offset + maxChars
-	if end > totalChars {
-		end = totalChars
-	}
+	end := min(offset+maxChars, totalChars)
 	page := text[offset:end]
 	// Clipped = the remaining text after the offset exceeded max_chars.
 	// Computed from lengths captured BEFORE any mutation, never from the
@@ -729,9 +714,12 @@ func isYouTubeVideoID(s string) bool {
 	if len(s) != 11 {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+		if c != '_' && c != '-' &&
+			(c < 'A' || c > 'Z') &&
+			(c < 'a' || c > 'z') &&
+			(c < '0' || c > '9') {
 			return false
 		}
 	}
@@ -883,8 +871,7 @@ func (t *TranscriptFetchTool) mapSubprocessError(ctx context.Context, stderr []b
 // isExitCode reports whether err carries the given subprocess exit code
 // (exec.ExitError) or wraps one.
 func isExitCode(err error, code int) bool {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		return exitErr.ExitCode() == code
 	}
 	return false

@@ -40,7 +40,7 @@ func TestWebSearch_MCPSuccessSkipsDuckDuckGo(t *testing.T) {
 		Count:   1,
 	}})
 
-	res, err := tm.Execute(__searchCtx(t), map[string]any{"query": "flaky tests"})
+	res, err := tm.Execute(_SearchCtx(t), map[string]any{"query": "flaky tests"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestWebSearch_MCPFailureFallsBackToDuckDuckGo(t *testing.T) {
 	}
 	tm.SetSearchProvider(failingProvider{err: errors.New("mcp down")})
 
-	res, err := tm.Execute(__searchCtx(t), map[string]any{"query": "flaky tests"})
+	res, err := tm.Execute(_SearchCtx(t), map[string]any{"query": "flaky tests"})
 	if err != nil {
 		t.Fatalf("DDG fallback should succeed: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestWebSearch_NilProviderIsPureDDG(t *testing.T) {
 		base: http.DefaultTransport,
 	}
 	// No SetSearchProvider call: DDG path must work unchanged.
-	res, err := tm.Execute(__searchCtx(t), map[string]any{"query": "flaky tests"})
+	res, err := tm.Execute(_SearchCtx(t), map[string]any{"query": "flaky tests"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

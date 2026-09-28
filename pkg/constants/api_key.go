@@ -14,6 +14,8 @@ import (
 // defaultDevAPIKeyLegacy is the old hardcoded public key from early versions.
 // It is kept ONLY for migration detection — never returned by DevAPIKey().
 // New code must use DevAPIKey() exclusively.
+//
+//nolint:gosec // G101: intentional legacy migration-detection constant, documented placeholder, never used as a real credential
 const defaultDevAPIKeyLegacy = "meept_dev_default_key_CHANGE_ME"
 
 // DefaultDevAPIKey returns the legacy hardcoded key value. This exists solely
@@ -63,7 +65,8 @@ func devKeyDir() string {
 // expandHomeTilde resolves a leading ~ (or ~/) to the user's home directory,
 // mirroring internal/config.expandTilde.
 func expandHomeTilde(path string) string {
-	if path != "~" && !(len(path) >= 2 && path[0] == '~' && path[1] == '/') {
+	// Not "~" and not "~/..." (De Morgan of the path-prefix test).
+	if path != "~" && (len(path) < 2 || path[0] != '~' || path[1] != '/') {
 		return path
 	}
 	home, err := os.UserHomeDir()

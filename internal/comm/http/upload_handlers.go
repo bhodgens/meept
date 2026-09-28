@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/base64"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -34,7 +35,7 @@ func (s *Server) handleMultipartUpload(w http.ResponseWriter, r *http.Request) {
 	// Limit body size
 	r.Body = http.MaxBytesReader(w, r.Body, s.services.Upload.MaxSizeBytes())
 
-	if err := r.ParseMultipartForm(32 << 20); err != nil { // 32MB buffer
+	if err := r.ParseMultipartForm(8 << 20); err != nil { // 8MB in-memory buffer; full body already capped by MaxBytesReader above
 		s.writeError(w, http.StatusBadRequest, "failed to parse multipart form: "+err.Error())
 		return
 	}
@@ -115,10 +116,19 @@ func (s *Server) handleUploadGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sanitize stored content-type before echoing it: a malicious stored value
+	// could smuggle header/control characters (G705).
+	if !isPlainContentType(mimeType) {
+		mimeType = "application/octet-stream"
+	}
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, max-age=3600")
-	w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		// Header already sent; nothing further to do — the client sees a
+		// truncated response and logs carry the failure.
+		slog.Error("upload download: short write", "error", err)
+	}
 }
 
 // handleUploadMetadata handles GET /api/v1/uploads/{id}/metadata.
@@ -162,4 +172,19 @@ func (s *Server) handleUploadDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "unreferenced"})
+}
+
+// isPlainContentType reports whether v is a simple token/subtype MIME type with
+// no control characters or spaces that could smuggle header content.
+func isPlainContentType(v string) bool {
+	if v == "" {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if c <= 0x20 || c >= 0x7f || c == '/' && i == 0 {
+			return false
+		}
+	}
+	return true
 }

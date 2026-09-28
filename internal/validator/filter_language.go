@@ -45,7 +45,7 @@ var (
 
 func parseWordList(list string) map[string]struct{} {
 	set := make(map[string]struct{}, 256)
-	for _, w := range strings.Fields(list) {
+	for w := range strings.FieldsSeq(list) {
 		set[w] = struct{}{}
 	}
 	return set

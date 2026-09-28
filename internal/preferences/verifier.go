@@ -73,9 +73,10 @@ func (v *InstructionVerifier) Verify(instr *ParsedInstruction) VerificationResul
 	risk := v.assessRisk(instr)
 	result.RiskLevel = risk
 
-	if result.RiskLevel == "medium" {
+	switch result.RiskLevel {
+	case "medium":
 		result.ConfirmationNeeded = true
-	} else if result.RiskLevel == "high" {
+	case "high":
 		result.ConfirmationNeeded = true
 	}
 

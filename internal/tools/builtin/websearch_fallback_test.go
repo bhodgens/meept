@@ -49,7 +49,7 @@ func newSweepSearchTool(t *testing.T, htmlStatus int) (*WebSearchTool, *httptest
 	return tm, srv
 }
 
-func __searchCtx(t *testing.T) context.Context {
+func _SearchCtx(t *testing.T) context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
 	return ctx
@@ -62,7 +62,7 @@ func TestWebSearch_202ChallengeFallsBackToLite(t *testing.T) {
 	srvHost := strings.TrimPrefix(srv.URL, "http://")
 	tm.client.Transport = &rewriteTransport{host: srvHost, base: http.DefaultTransport}
 
-	res, err := tm.Execute(__searchCtx(t), map[string]any{
+	res, err := tm.Execute(_SearchCtx(t), map[string]any{
 		"query": "flaky tests",
 	})
 	if err != nil {
@@ -101,7 +101,7 @@ func TestWebSearch_BothEndpointsChallengeHonestError(t *testing.T) {
 		base: http.DefaultTransport,
 	}
 
-	_, err := tm.Execute(__searchCtx(t), map[string]any{"query": "flaky tests"})
+	_, err := tm.Execute(_SearchCtx(t), map[string]any{"query": "flaky tests"})
 	if err == nil {
 		t.Fatal("expected honest error when both endpoints challenge")
 	}

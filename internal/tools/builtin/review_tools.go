@@ -187,7 +187,7 @@ func (t *RequestReviewTool) parseResponse(reviewerID, response string) (any, err
 	data, extractErr := ExtractJSONFromText(response)
 	if extractErr != nil {
 		// If the reviewer didn't return structured JSON, wrap the raw text
-		return InlineReviewResult{
+		return InlineReviewResult{ //nolint:nilerr // unstructured review text is a valid needs_info result, not a failure
 			ReviewerID: reviewerID,
 			Status:     "needs_info",
 			Feedback:   response,

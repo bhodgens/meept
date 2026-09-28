@@ -87,7 +87,7 @@ func TestContextRenderer_RenderSummarized(t *testing.T) {
 	renderer := NewContextRenderer(config, nil)
 
 	var ranked RankedTags
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		ranked = append(ranked, RankedTag{
 			Tag:   Tag{RelFname: "file" + string(rune('0'+i%10)) + ".go", Name: "Symbol" + string(rune('A'+i)), Kind: "function", Line: i * 5, IsDef: true},
 			Score: 1.0 - float64(i)*0.05,

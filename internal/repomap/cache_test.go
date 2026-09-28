@@ -219,7 +219,7 @@ func TestTagCache_Clear(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add some cached files
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		tags := []Tag{{FName: "/test/file.go", RelFname: "file.go", Line: i, Name: "Func", Kind: "function", IsDef: true}}
 		err := cache.Set(filepath.Join(tmpDir, "cache_file"), time.Now(), tags)
 		require.NoError(t, err)
@@ -309,7 +309,7 @@ func TestMapCache_Size(t *testing.T) {
 
 	assert.Equal(t, 0, cache.Size())
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		files := []string{string(rune('a' + i))}
 		cache.Set(files, []string{}, RenderedMap{Content: "test"})
 	}
@@ -369,7 +369,7 @@ func TestRenderCache_Size(t *testing.T) {
 
 	assert.Equal(t, 0, cache.Size())
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		cache.Set("/test/file.go", i, "content")
 	}
 
@@ -449,7 +449,7 @@ func TestCacheManager_Stats(t *testing.T) {
 
 	// Add some data
 	tags := []Tag{{FName: "/test/file.go", RelFname: "file.go", Line: 10, Name: "Func", Kind: "function", IsDef: true}}
-	manager.SetTags("/test/file.go", time.Now(), tags)
+	require.NoError(t, manager.SetTags("/test/file.go", time.Now(), tags))
 
 	manager.SetRenderedMap([]string{"file.go"}, []string{}, RenderedMap{Content: "test"})
 
@@ -472,7 +472,7 @@ func TestCacheManager_ClearAll(t *testing.T) {
 
 	// Add some data
 	tags := []Tag{{FName: "/test/file.go", RelFname: "file.go", Line: 10, Name: "Func", Kind: "function", IsDef: true}}
-	manager.SetTags("/test/file.go", time.Now(), tags)
+	require.NoError(t, manager.SetTags("/test/file.go", time.Now(), tags))
 
 	manager.SetRenderedMap([]string{"file.go"}, []string{}, RenderedMap{Content: "test"})
 	manager.SetRenderedContext("/test/file.go", 10, "context")

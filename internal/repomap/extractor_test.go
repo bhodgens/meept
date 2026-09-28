@@ -92,7 +92,7 @@ func Hello() string {
 type Foo struct{}
 `
 	goFile := filepath.Join(tmpDir, "test.go")
-	os.WriteFile(goFile, []byte(goContent), 0644)
+	require.NoError(t, os.WriteFile(goFile, []byte(goContent), 0644))
 
 	// Create a Python file
 	pyContent := `def hello():
@@ -102,7 +102,7 @@ class Foo:
     pass
 `
 	pyFile := filepath.Join(tmpDir, "test.py")
-	os.WriteFile(pyFile, []byte(pyContent), 0644)
+	require.NoError(t, os.WriteFile(pyFile, []byte(pyContent), 0644))
 
 	extractor := NewTagExtractor(nil)
 	tags, err := extractor.ExtractTagsRaw([]string{goFile, pyFile})
@@ -194,7 +194,7 @@ func TestContextCancellation(t *testing.T) {
 func main() {}
 `
 	testFile := filepath.Join(tmpDir, "test.go")
-	os.WriteFile(testFile, []byte(content), 0644)
+	require.NoError(t, os.WriteFile(testFile, []byte(content), 0644))
 
 	extractor := NewTagExtractor(nil)
 	ctx, cancel := context.WithCancel(context.Background())

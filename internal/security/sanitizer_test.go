@@ -345,6 +345,7 @@ func TestRedactCredential_ShortSecrets(t *testing.T) {
 		checkRedacted   func(string) bool // custom check function
 	}{
 		// AWS access key ID is exactly 20 chars: AKIA + 16
+		//nolint:gosec // G101: doc example key (AWS docs' canonical sample), fake fixture
 		{
 			name:            "AWS access key (20 chars)",
 			input:           "AKIAIOSFODNN7EXAMPLE",
@@ -355,6 +356,7 @@ func TestRedactCredential_ShortSecrets(t *testing.T) {
 			},
 		},
 		// Private key header - short match
+		//nolint:gosec // G101: PEM header sentinel string only, no key material
 		{
 			name:            "Private key header",
 			input:           "-----BEGIN RSA PRIVATE KEY-----",

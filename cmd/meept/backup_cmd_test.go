@@ -180,7 +180,9 @@ func TestBackupPushCLIWithMockServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		// Encode errors here mean the client would hang waiting for a response;
+		// the test asserts on the CLI output, not on handler I/O health.
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": "ok",
 		})
 	}))
@@ -195,8 +197,10 @@ func TestBackupPushCLIWithMockServer(t *testing.T) {
 func TestBackupListCLIWithMockServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"backups": []interface{}{},
+		// Encode errors here mean the client would hang waiting for a response;
+		// the test asserts on the CLI output, not on handler I/O health.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"backups": []any{},
 		})
 	}))
 	defer server.Close()

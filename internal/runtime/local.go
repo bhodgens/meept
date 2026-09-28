@@ -97,7 +97,7 @@ func (b *LocalBackend) Execute(ctx context.Context, cmd Command) (*CommandResult
 	duration := time.Since(start)
 
 	var exitCode int
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		exitCode = exitErr.ExitCode()
 		// Don't return error for non-zero exit codes - caller handles them
 		err = nil

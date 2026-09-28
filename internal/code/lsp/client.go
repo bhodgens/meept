@@ -419,7 +419,7 @@ func (c *Client) Rename(ctx context.Context, uri string, line, char int, newName
 	}
 
 	if len(result) == 0 || string(result) == "null" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil edit is the established "no rename edits returned" contract; callers (e.g. internal/code/tools/lsp_rename.go) explicitly handle nil edit as not-found
 	}
 
 	var edit WorkspaceEdit
@@ -446,7 +446,7 @@ func (c *Client) WillRenameFiles(ctx context.Context, oldURI, newURI string) (*W
 	}
 
 	if len(result) == 0 || string(result) == "null" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil edit is the established "server returned no edits" contract; callers (e.g. internal/code/tools/lsp_rename_files.go) explicitly handle nil edit as not-found
 	}
 
 	var edit WorkspaceEditWithOperations

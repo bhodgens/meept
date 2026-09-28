@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,7 +27,7 @@ func (m *mockMessageStore) Enqueue(msg *AgentMessage) error {
 		return errors.New("body too large")
 	}
 	m.nextID++
-	msg.ID = "msg-test-" + string(rune('a'+m.nextID))
+	msg.ID = "msg-test-" + strconv.Itoa(m.nextID)
 	msg.State = "queued"
 	m.queued = append(m.queued, msg)
 	return nil

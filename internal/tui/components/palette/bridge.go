@@ -16,26 +16,26 @@ import (
 // once and the active variant is fixed at process start, so the once-guarded
 // lookup needs no synchronization afterwards.
 var (
-	roleOnce  sync.Once
-	roleMap   map[string]string
-	roleParse error
+	roleOnce     sync.Once
+	roleMap      map[string]string
+	errRoleParse error
 )
 
 func loadRoles() (map[string]string, error) {
 	roleOnce.Do(func() {
 		tokens, err := theme.Parse(theme.TokensJSON5)
 		if err != nil {
-			roleParse = err
+			errRoleParse = err
 			return
 		}
 		roles, ok := tokens[theme.FrozenVariants[0]]
 		if !ok {
-			roleParse = errThemeVariant(theme.FrozenVariants[0])
+			errRoleParse = errThemeVariant(theme.FrozenVariants[0])
 			return
 		}
 		roleMap = roles
 	})
-	return roleMap, roleParse
+	return roleMap, errRoleParse
 }
 
 type themeError struct{ variant string }

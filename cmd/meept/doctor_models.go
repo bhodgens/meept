@@ -79,9 +79,9 @@ func checkModelsDoctor() []doctorCheck {
 				missing++
 			}
 			checks = append(checks, doctorCheck{
-				name:  "models:" + pid,
-				ok:    statErr == nil,
-				warn:  statErr != nil,
+				name: "models:" + pid,
+				ok:   statErr == nil,
+				warn: statErr != nil,
 				detail: fmt.Sprintf("%s: %s (run 'make deps-models' to fetch)",
 					state, displayPath(path)),
 			})
@@ -116,8 +116,8 @@ func expandModelsPathForDoctor(s string) string {
 		inner := out[open+2 : close]
 		name, def := inner, ""
 		hasDef := false
-		if i := strings.Index(inner, ":-"); i >= 0 {
-			name, def, hasDef = inner[:i], inner[i+2:], true
+		if n, d, ok := strings.Cut(inner, ":-"); ok {
+			name, def, hasDef = n, d, true
 		}
 		// Skip the runtime placeholder ($MODEL_PATH is expanded at spawn).
 		if name == "MODEL_PATH" {

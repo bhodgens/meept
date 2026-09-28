@@ -196,8 +196,16 @@ func ClearPendingAutoTrain(dataDir, domain, model string) error {
 			os.Remove(tmp)
 			return mErr
 		}
-		w.Write(data)
-		w.WriteByte('\n')
+		if _, err := w.Write(data); err != nil {
+			out.Close()
+			os.Remove(tmp)
+			return err
+		}
+		if err := w.WriteByte('\n'); err != nil {
+			out.Close()
+			os.Remove(tmp)
+			return err
+		}
 	}
 	if err := w.Flush(); err != nil {
 		out.Close()

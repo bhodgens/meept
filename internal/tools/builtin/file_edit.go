@@ -928,11 +928,12 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 
 		case "insert_before":
 			var insertLine int
-			if op.Anchor == "BOF" {
+			switch op.Anchor {
+			case "BOF":
 				insertLine = 1
-			} else if op.Anchor == "EOF" {
+			case "EOF":
 				insertLine = len(lines) + 1
-			} else {
+			default:
 				if l, _, _, parseErr := ParseSnapshotAnchor(op.Anchor); parseErr == nil {
 					insertLine = l
 				}
@@ -949,11 +950,12 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 
 		case "insert_after":
 			var insertLine int
-			if op.Anchor == "BOF" {
+			switch op.Anchor {
+			case "BOF":
 				insertLine = 1
-			} else if op.Anchor == "EOF" {
+			case "EOF":
 				insertLine = len(lines) + 1
-			} else {
+			default:
 				if l, _, _, parseErr := ParseSnapshotAnchor(op.Anchor); parseErr == nil {
 					insertLine = l + 1
 				}

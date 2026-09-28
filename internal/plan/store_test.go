@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"testing"
+	"errors"
 )
 
 // setupTestStore creates a fresh SQLiteStore backed by a temporary database.
@@ -78,7 +79,7 @@ func TestCreateAndGetPlan(t *testing.T) {
 
 	// Non-existent plan should return ErrPlanNotFound.
 	_, err = store.GetPlan(ctx, "nonexistent")
-	if err != ErrPlanNotFound {
+	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("GetPlan(nonexistent): got err=%v, want ErrPlanNotFound", err)
 	}
 }
@@ -456,7 +457,7 @@ func TestDeletePlan(t *testing.T) {
 
 	// Verify GetPlan returns ErrPlanNotFound.
 	_, err := store.GetPlan(ctx, p.ID)
-	if err != ErrPlanNotFound {
+	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("GetPlan after delete: got err=%v, want ErrPlanNotFound", err)
 	}
 
@@ -489,7 +490,7 @@ func TestDeletePlan(t *testing.T) {
 
 	// Deleting non-existent plan should return ErrPlanNotFound.
 	err = store.DeletePlan(ctx, "nonexistent")
-	if err != ErrPlanNotFound {
+	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("DeletePlan(nonexistent): got err=%v, want ErrPlanNotFound", err)
 	}
 }

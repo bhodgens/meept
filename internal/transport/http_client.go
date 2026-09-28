@@ -111,18 +111,36 @@ func (c *httpClient) applyPinning() {
 	if !ok || transport.TLSClientConfig == nil {
 		return
 	}
-	transport.TLSClientConfig.InsecureSkipVerify = false
-	transport.TLSClientConfig.MinVersion = c.tlsMinVersion
-	transport.TLSClientConfig.VerifyPeerCertificate = c.verifyPinnedCert
+	tlsCfg := transport.TLSClientConfig
+	tlsCfg.InsecureSkipVerify = false
+	tlsCfg.MinVersion = c.tlsMinVersion
+	tlsCfg.VerifyPeerCertificate = c.verifyPinnedCert
+	// G123: disable TLS session resumption so a resumed session cannot
+	// bypass the VerifyPeerCertificate pin check — every full handshake
+	// re-runs the callback. SessionTicketsDisabled + a nil ClientSessionCache
+	// covers both server tickets and client-side caches.
+	tlsCfg.SessionTicketsDisabled = true
+	tlsCfg.ClientSessionCache = nil
 }
 
 // buildTLSConfig constructs the tls.Config that would be used by this client.
 // Exposed primarily for tests so the pinning callback can be exercised in
 // isolation.
+//
+// G402: InsecureSkipVerify=true is the deliberate default for loopback /
+// self-signed deployments (see client.go InsecureSkipVerify); when a
+// fingerprint pin is configured it is forced off and verifyPinnedCert takes
+// over.
+//
+// G123: TLS session resumption is disabled (SessionTicketsDisabled +
+// nil ClientSessionCache) so a resumed session can never bypass the
+// verifyPinnedCert callback — every handshake runs the pin check.
 func (c *httpClient) buildTLSConfig() *tls.Config {
 	cfg := &tls.Config{
-		InsecureSkipVerify: true,
-		MinVersion:         c.tlsMinVersion,
+		InsecureSkipVerify:     true, //nolint:gosec // G402: intentional for loopback/self-signed; overridden when a pin is configured
+		MinVersion:             c.tlsMinVersion,
+		SessionTicketsDisabled: true,
+		ClientSessionCache:     nil,
 	}
 	if c.certFingerprint != "" || c.spkiFingerprint != "" {
 		cfg.InsecureSkipVerify = false

@@ -153,49 +153,49 @@
     "topic": "cluster.debug.events",
     "handler": "h.handleDebugEvents",
     "file": "internal/rpc/cluster_handler.go",
-    "line": 57
+    "line": 58
   },
   {
     "topic": "cluster.join",
     "handler": "h.handleJoin",
     "file": "internal/rpc/cluster_handler.go",
-    "line": 53
+    "line": 54
   },
   {
     "topic": "cluster.leave",
     "handler": "h.handleLeave",
     "file": "internal/rpc/cluster_handler.go",
-    "line": 55
+    "line": 56
   },
   {
     "topic": "cluster.peer_count",
     "handler": "h.handlePeerCount",
     "file": "internal/rpc/cluster_handler.go",
-    "line": 52
+    "line": 53
   },
   {
     "topic": "cluster.peers",
     "handler": "h.handlePeers",
     "file": "internal/rpc/cluster_handler.go",
-    "line": 51
+    "line": 52
   },
   {
     "topic": "cluster.reset",
     "handler": "h.handleReset",
     "file": "internal/rpc/cluster_handler.go",
-    "line": 56
+    "line": 57
   },
   {
     "topic": "cluster.start",
     "handler": "h.handleStart",
     "file": "internal/rpc/cluster_handler.go",
-    "line": 54
+    "line": 55
   },
   {
     "topic": "cluster.status",
     "handler": "h.handleStatus",
     "file": "internal/rpc/cluster_handler.go",
-    "line": 50
+    "line": 51
   },
   {
     "topic": "config.reload",
@@ -555,25 +555,25 @@
     "topic": "plan.approve",
     "handler": "h.handleApprove",
     "file": "internal/rpc/plan.go",
-    "line": 49
+    "line": 50
   },
   {
     "topic": "plan.confirm",
     "handler": "h.handleConfirm",
     "file": "internal/rpc/plan.go",
-    "line": 51
+    "line": 52
   },
   {
     "topic": "plan.count_by_session",
     "handler": "h.handleCountBySession",
     "file": "internal/rpc/plan.go",
-    "line": 54
+    "line": 55
   },
   {
     "topic": "plan.create",
     "handler": "h.handleCreate",
     "file": "internal/rpc/plan.go",
-    "line": 46
+    "line": 47
   },
   {
     "topic": "plan.draft",
@@ -585,37 +585,37 @@
     "topic": "plan.get",
     "handler": "h.handleGet",
     "file": "internal/rpc/plan.go",
-    "line": 48
+    "line": 49
   },
   {
     "topic": "plan.get_phases",
     "handler": "h.handleGetPhases",
     "file": "internal/rpc/plan.go",
-    "line": 55
+    "line": 56
   },
   {
     "topic": "plan.list",
     "handler": "h.handleList",
     "file": "internal/rpc/plan.go",
-    "line": 47
+    "line": 48
   },
   {
     "topic": "plan.list_by_session",
     "handler": "h.handleListBySession",
     "file": "internal/rpc/plan.go",
-    "line": 53
+    "line": 54
   },
   {
     "topic": "plan.reject",
     "handler": "h.handleReject",
     "file": "internal/rpc/plan.go",
-    "line": 50
+    "line": 51
   },
   {
     "topic": "plan.revise",
     "handler": "h.handleRevise",
     "file": "internal/rpc/plan.go",
-    "line": 52
+    "line": 53
   },
   {
     "topic": "plan.seal",

@@ -311,11 +311,9 @@ func TestConversationSession_TraceStoreIntegration(t *testing.T) {
 		t.Fatalf("create temp file: %v", err)
 	}
 	for i := 1; i <= 3; i++ {
-		hasErr := ""
+		hasErr := "false"
 		if i == 3 {
 			hasErr = "true"
-		} else {
-			hasErr = "false"
 		}
 		_, _ = fmt.Fprintf(tmp, `{"span_id":"span-%d","trace_id":"trace-%d","span_name":"test-operation","has_error":%s}`+"\n",
 			i, i, hasErr)
@@ -595,7 +593,9 @@ func TestConversationSession_TurnHasTraceRefs(t *testing.T) {
 	session := NewConversationSession(DefaultSessionConfig())
 	session.Start(store)
 
-	session.ProcessTurn("Show me trace details.")
+	if _, _, err := session.ProcessTurn("Show me trace details."); err != nil {
+		t.Fatalf("ProcessTurn: %v", err)
+	}
 
 	h := session.GetHistory()
 	if len(h) != 1 {
@@ -639,8 +639,12 @@ func TestConversationSession_HistoryCopying(t *testing.T) {
 	session := NewConversationSession(&SessionConfig{MaxTurns: 2})
 	session.Start(freshStore())
 
-	session.ProcessTurn("q1")
-	session.ProcessTurn("q2")
+	if _, _, err := session.ProcessTurn("q1"); err != nil {
+		t.Fatalf("ProcessTurn q1: %v", err)
+	}
+	if _, _, err := session.ProcessTurn("q2"); err != nil {
+		t.Fatalf("ProcessTurn q2: %v", err)
+	}
 
 	h1 := session.GetHistory()
 	_ = session.GetHistory()

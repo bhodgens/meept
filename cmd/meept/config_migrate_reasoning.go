@@ -166,7 +166,7 @@ func runConfigMigrateReasoning(dryRun, force bool, agentIDs []string) error {
 		for _, s := range suggestions {
 			fmt.Printf("agent: %s (%s)\n", s.agentID, s.path)
 			fmt.Println("  suggested:")
-			for _, line := range strings.Split(strings.TrimRight(s.newYAML, "\n"), "\n") {
+			for line := range strings.SplitSeq(strings.TrimRight(s.newYAML, "\n"), "\n") {
 				fmt.Printf("    %s\n", line)
 			}
 			if s.existing {
@@ -183,7 +183,7 @@ func runConfigMigrateReasoning(dryRun, force bool, agentIDs []string) error {
 	for _, s := range suggestions {
 		fmt.Printf("agent: %s (%s)\n", s.agentID, s.path)
 		fmt.Println("  suggested:")
-		for _, line := range strings.Split(strings.TrimRight(s.newYAML, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimRight(s.newYAML, "\n"), "\n") {
 			fmt.Printf("    %s\n", line)
 		}
 		if s.existing {
@@ -381,11 +381,7 @@ func splitAgentFrontmatter(text string) (frontmatter, body string, err error) {
 	}
 	frontmatter = after[:closeIdx]
 	rest := after[closeIdx+4:]
-	if i := strings.Index(rest, "\n"); i >= 0 {
-		body = rest[i+1:]
-	} else {
-		body = ""
-	}
+	_, body, _ = strings.Cut(rest, "\n")
 	return frontmatter, body, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/task"
+	"slices"
 )
 
 // lintPythonTimeout bounds the py_compile subprocess (master Contract 5
@@ -127,7 +128,7 @@ func lintPythonReason(err error) string {
 // firstMeaningfulLine returns the first non-empty line of checker output
 // (py_compile and friends report the syntax error there), bounded.
 func firstMeaningfulLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			if len(line) > 200 {
@@ -301,7 +302,7 @@ func lintJSReason(err error) string {
 // positive (real code skipped) costs an unchecked block, which the filter
 // already treats as acceptable for missing toolchains.
 func looksLikeProse(code string) bool {
-	for _, line := range strings.Split(code, "\n") {
+	for line := range strings.SplitSeq(code, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -336,10 +337,8 @@ func looksLikeProse(code string) bool {
 			"if", "for", "while", "switch", "try", "return", "await", "async",
 			"require", "console", "throw", "new", "delete", "typeof",
 		}
-		for _, kw := range jsStatementStarts {
-			if first == kw {
-				return false
-			}
+		if slices.Contains(jsStatementStarts, first) {
+			return false
 		}
 		// Statement-shaped characters: braces, semicolons, quotes, arrows,
 		// assignments, or a comment marker — treat as code.

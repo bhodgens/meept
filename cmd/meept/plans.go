@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -254,14 +255,15 @@ func newPlansShowCmd() *cobra.Command {
 					if totalSteps > 0 {
 						filled = (completedSteps * barWidth) / totalSteps
 					}
-					bar := ""
+					var sb strings.Builder
 					for j := range barWidth {
 						if j < filled {
-							bar += "#"
+							sb.WriteByte('#')
 						} else {
-							bar += "-"
+							sb.WriteByte('-')
 						}
 					}
+					bar := sb.String()
 
 					fmt.Printf("  %d. [%s] %s  [%s] %d/%d steps\n",
 						i+1, phaseState, phaseName, bar, completedSteps, totalSteps)

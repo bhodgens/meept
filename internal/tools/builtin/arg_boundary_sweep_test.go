@@ -113,7 +113,6 @@ func TestArgBoundarySweep(t *testing.T) {
 	require.NoError(t, taskStore.Create(seed))
 
 	for _, tc := range argSweepCases(seed.ID, target) {
-		tc := tc
 		t.Run(tc.toolName+"/valid_args_execute", func(t *testing.T) {
 			res, err := reg.Execute(context.Background(), tc.toolName, tc.validArgs)
 			require.Nil(t, err)
@@ -150,7 +149,6 @@ func TestArgBoundarySweep_SchemaRequiredCovered(t *testing.T) {
 	reg, _, target := newArgSweepRegistry(t)
 
 	for _, tc := range argSweepCases("unused", target) {
-		tc := tc
 		t.Run(tc.toolName, func(t *testing.T) {
 			tool := reg.Get(tc.toolName)
 			require.NotNil(t, tool)

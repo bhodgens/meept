@@ -131,11 +131,13 @@ func buildCalendarTokenStore() (*auth.TokenStore, error) {
 }
 
 // loadCalendarConfig loads the meept config and returns the calendar section.
+// A missing/unloadable config is not an error for calendar purposes — the
+// default calendar config is the documented fallback.
 func loadCalendarConfig() (*config.CalendarConfig, error) {
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		def := config.DefaultConfig()
-		return &def.Calendar, nil
+		return &def.Calendar, nil //nolint:nilerr // default calendar config is the documented fallback when config is unloadable
 	}
 	return &cfg.Calendar, nil
 }

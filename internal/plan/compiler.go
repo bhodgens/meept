@@ -410,7 +410,7 @@ func scanDraft(lines []string, problems *[]CompileProblem) *draftDoc {
 						line:        lineNo,
 					}
 					if m[6] != "" {
-						for _, ref := range strings.Split(m[6], ",") {
+						for ref := range strings.SplitSeq(m[6], ",") {
 							ref = strings.TrimSpace(ref)
 							if ref != "" {
 								st.needs = append(st.needs, ref)

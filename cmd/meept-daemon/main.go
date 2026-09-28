@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	_ "modernc.org/sqlite" // Ensure sqlite driver is registered for side effects
@@ -113,7 +114,8 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "\n")
 		// Config errors should not print usage, just the error message
-		if _, ok := err.(configError); ok {
+		var cfgErr configError
+		if errors.As(err, &cfgErr) {
 			fmt.Fprintf(os.Stderr, "Configuration Error:\n")
 			fmt.Fprintf(os.Stderr, "  %v\n\n", err)
 			fmt.Fprintf(os.Stderr, "Configuration file locations:\n")
@@ -245,16 +247,20 @@ func checkStatus(cmd *cobra.Command, args []string) error {
 	pid, perr := strconv.Atoi(pidStr)
 	if perr != nil {
 		fmt.Printf("Daemon PID file is corrupt (expected integer, got %q)\n", pidStr)
-		return nil
+		return nil //nolint:nilerr // corrupt PID file is reported as "not running" — the documented outcome of `status`, not a command failure
 	}
+	// os.FindProcess on Unix never fails for a live PID; signal(0) below is
+	// the real liveness probe, so a FindProcess error only reports exotic
+	// conditions. The stale/not-running diagnostics are the command's
+	// documented outcome, not a failure of `meept-daemon status` itself.
 	proc, ferr := os.FindProcess(pid)
 	if ferr != nil {
 		fmt.Printf("Daemon PID %d not found\n", pid)
-		return nil
+		return nil //nolint:nilerr // unreachable-PID is reported as "not running" — the documented outcome of `status`, not a command failure
 	}
 	if serr := proc.Signal(syscall.Signal(0)); serr != nil {
 		fmt.Printf("Daemon is not running (stale PID file: PID %d not alive)\n", pid)
-		return nil
+		return nil //nolint:nilerr // stale-PID is reported as "not running" — the documented outcome of `status`, not a command failure
 	}
 
 	fmt.Printf("Daemon is running (PID %d)\n", pid)

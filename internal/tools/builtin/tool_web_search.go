@@ -474,7 +474,6 @@ func (t *WebSearchTool) parseDuckDuckGoLite(html string, limit int) ([]SearchRes
 		}
 
 		// The snippet lives in the text between this link and the next one.
-		snippet := ""
 		thisEnd := strings.Index(html, match[0]) + len(match[0])
 		nextStart := len(html)
 		if i+1 < len(matches) {
@@ -484,7 +483,7 @@ func (t *WebSearchTool) parseDuckDuckGoLite(html string, limit int) ([]SearchRes
 		}
 		between := html[thisEnd:nextStart]
 		// Snippet text is plain text between tags; strip everything else.
-		snippet = stripHTML(t.decodeHTMLEntities(between))
+		snippet := stripHTML(t.decodeHTMLEntities(between))
 		snippet = strings.Join(strings.Fields(snippet), " ")
 		// Trim the "..." continuation marker DDG appends, and cap length.
 		snippet = strings.TrimSuffix(snippet, "...")
@@ -512,9 +511,8 @@ func (t *WebSearchTool) cleanDuckDuckGoURL(rawURL string) string {
 	// Handle redirect URLs
 	if strings.HasPrefix(rawURL, "/l/?") || strings.HasPrefix(rawURL, "//duckduckgo.com/l/?") {
 		// Extract the uddg parameter which contains the real URL
-		parts := strings.Split(rawURL, "uddg=")
-		if len(parts) > 1 {
-			encodedURL := strings.Split(parts[1], "&")[0]
+		if _, tail, found := strings.Cut(rawURL, "uddg="); found {
+			encodedURL, _, _ := strings.Cut(tail, "&")
 			if unescaped, err := url.QueryUnescape(encodedURL); err == nil {
 				rawURL = unescaped
 			}

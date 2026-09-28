@@ -218,7 +218,6 @@ func TestMcpDependencyCheckTable(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			t.Parallel()
 			got := mcpDependencyCheck(tc.name, tc.command0, tc.installHit)

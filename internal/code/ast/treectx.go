@@ -2,12 +2,17 @@ package ast
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sort"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
+
+// ErrUnsupportedLanguage is returned by CreateTreeContext when the file's
+// language cannot be detected or no tree-sitter grammar is registered for it.
+var ErrUnsupportedLanguage = errors.New("unsupported language for tree context")
 
 // TreeContextOptions configures tree context generation.
 type TreeContextOptions struct {
@@ -81,7 +86,7 @@ func TreeContextWithMarkers(filePath string, markedLines map[int]bool, padding i
 	// Detect language
 	lang := DetectLanguage(filePath)
 	if lang == LangUnknown {
-		return nil, nil
+		return nil, ErrUnsupportedLanguage
 	}
 
 	// Read file content
@@ -93,7 +98,7 @@ func TreeContextWithMarkers(filePath string, markedLines map[int]bool, padding i
 	// Parse the file
 	grammar := GetLanguageGrammar(lang)
 	if grammar == nil {
-		return nil, nil
+		return nil, ErrUnsupportedLanguage
 	}
 
 	parser := sitter.NewParser()
@@ -356,14 +361,15 @@ func guessIndent(source []byte, lineNum int) int {
 	line := getLine(source, lineNum)
 	indent := 0
 	for _, c := range line {
-		if c == ' ' {
+		switch c {
+		case ' ':
 			indent++
-		} else if c == '\t' {
+		case '	':
 			indent += 4
-		} else {
-			break
+		default:
+			// Return indent in "levels" (assuming 2 spaces per level)
+			return indent / 2
 		}
 	}
-	// Return indent in "levels" (assuming 2 spaces per level)
 	return indent / 2
 }

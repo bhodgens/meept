@@ -240,7 +240,9 @@ func (s *Server) toolSessions(args map[string]any) (any, error) {
 		// Auto-catchup: fetch recent history
 		messages, err := s.client.GetSessionMessages(sessionID, 0, 50)
 		if err != nil {
-			return map[string]any{"status": "attached", "session_id": sessionID}, nil
+			// Auto-catchup is best-effort: the attach itself succeeded, so return
+			// without history instead of failing the whole action.
+			return map[string]any{"status": "attached", "session_id": sessionID}, nil //nolint:nilerr // best-effort catchup, not an error
 		}
 		return map[string]any{
 			"status":     "attached",
@@ -344,7 +346,8 @@ func (s *Server) toolChatSubmit(args map[string]any) (any, error) {
 		Note           string `json:"note"`
 	}
 	if err := json.Unmarshal(result, &ack); err != nil {
-		return map[string]any{"ack_raw": string(result)}, nil
+		// Non-JSON ack: surface the raw envelope so the caller can decide.
+		return map[string]any{"ack_raw": string(result)}, nil //nolint:nilerr // intentional raw-ack fallback, not an error
 	}
 	if !ack.Accepted {
 		return nil, fmt.Errorf("chat.submit rejected: %s", ack.Note)

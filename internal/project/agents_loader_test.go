@@ -56,19 +56,29 @@ func TestLoadAgentsMDForPath_Hierarchical(t *testing.T) {
 
 	// Root AGENTS.md
 	rootContent := "# Root Context\nRoot-level info."
-	os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(rootContent), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(rootContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// internal/AGENTS.md
 	internalDir := filepath.Join(tmpDir, "internal")
-	os.MkdirAll(internalDir, 0o755)
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	internalContent := "# Internal Context\nInternal-level info."
-	os.WriteFile(filepath.Join(internalDir, "AGENTS.md"), []byte(internalContent), 0o644)
+	if err := os.WriteFile(filepath.Join(internalDir, "AGENTS.md"), []byte(internalContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// internal/agent/AGENTS.md
 	agentDir := filepath.Join(internalDir, "agent")
-	os.MkdirAll(agentDir, 0o755)
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	agentContent := "# Agent Context\nAgent-level info."
-	os.WriteFile(filepath.Join(agentDir, "AGENTS.md"), []byte(agentContent), 0o644)
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENTS.md"), []byte(agentContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	workingFile := filepath.Join(agentDir, "loop.go")
 	loaded, err := LoadAgentsMDForPath(tmpDir, workingFile)
@@ -121,12 +131,18 @@ func TestLoadAgentsMDForPath_PartialHierarchy(t *testing.T) {
 
 	// Only root and a deep subdir, no AGENTS.md in the middle
 	rootContent := "# Root"
-	os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(rootContent), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(rootContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	deepDir := filepath.Join(tmpDir, "a", "b", "c")
-	os.MkdirAll(deepDir, 0o755)
+	if err := os.MkdirAll(deepDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	deepContent := "# Deep"
-	os.WriteFile(filepath.Join(deepDir, "AGENTS.md"), []byte(deepContent), 0o644)
+	if err := os.WriteFile(filepath.Join(deepDir, "AGENTS.md"), []byte(deepContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	workingFile := filepath.Join(deepDir, "file.go")
 	loaded, err := LoadAgentsMDForPath(tmpDir, workingFile)
@@ -171,26 +187,42 @@ func TestLoadAllAgentsMD_FindsAllSubdirs(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Root
-	os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("# Root"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("# Root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// internal/
 	internalDir := filepath.Join(tmpDir, "internal")
-	os.MkdirAll(internalDir, 0o755)
-	os.WriteFile(filepath.Join(internalDir, "AGENTS.md"), []byte("# Internal"), 0o644)
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(internalDir, "AGENTS.md"), []byte("# Internal"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// internal/agent/
 	agentDir := filepath.Join(internalDir, "agent")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "AGENTS.md"), []byte("# Agent"), 0o644)
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENTS.md"), []byte("# Agent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// internal/tools/ (no AGENTS.md — should not appear)
 	toolsDir := filepath.Join(internalDir, "tools")
-	os.MkdirAll(toolsDir, 0o755)
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// docs/ (extra subdirectory with AGENTS.md)
 	docsDir := filepath.Join(tmpDir, "docs")
-	os.MkdirAll(docsDir, 0o755)
-	os.WriteFile(filepath.Join(docsDir, "AGENTS.md"), []byte("# Docs"), 0o644)
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "AGENTS.md"), []byte("# Docs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	loaded, err := LoadAllAgentsMD(tmpDir)
 	if err != nil {

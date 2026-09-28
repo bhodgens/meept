@@ -153,7 +153,12 @@ func (r *ComponentRegistry) discover(tier DiscoveryTier) {
 
 		rel, relErr := filepath.Rel(path, p)
 		if relErr != nil {
-			return nil
+			// filepath.Rel only fails when p is not under path, which the
+			// WalkDir contract makes impossible (p always starts with the
+			// walk root). Skip this entry rather than aborting the whole
+			// tier walk on an unreachable branch; the file is simply not
+			// registered as a component.
+			return nil //nolint:nilerr // defensive: WalkDir guarantees p is under root, so Rel cannot fail here; skipping (not erroring) keeps a malformed entry from aborting the tier
 		}
 		id := componentIDFromRel(rel)
 		if id == "" {
@@ -163,6 +168,8 @@ func (r *ComponentRegistry) discover(tier DiscoveryTier) {
 		// Read the raw file. We strip any leading HTML-comment frontmatter
 		// (legacy "<!-- ... -->" block) since the body is what gets injected
 		// into the system prompt.
+		//
+		//nolint:gosec // G122: the walk root is config-controlled (3-tier prompts dirs: .meept/prompts, ~/.meept/prompts, ~/.config/meept/prompts, bundled config/prompts) — never LLM-controlled; WalkDir yields p from that root so the path cannot escape it, and symlinked dirs are statically resolvable at startup
 		body, readErr := os.ReadFile(p)
 		if readErr != nil {
 			r.logger.Warn("Failed to read component file", "path", p, "error", readErr)

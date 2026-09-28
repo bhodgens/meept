@@ -55,7 +55,7 @@ func SaveACPAgents(path string, cfg *ACPAgentsConfig) error {
 
 	if err := os.Rename(tmpPath, path); err != nil {
 		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			return fmt.Errorf("failed to rename ACP agents into place (cleanup also failed: %v): %w", removeErr, err)
+			return fmt.Errorf("failed to rename ACP agents into place (cleanup also failed: %w): %w", removeErr, err)
 		}
 		return fmt.Errorf("failed to rename ACP agents into place: %w", err)
 	}

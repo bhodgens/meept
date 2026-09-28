@@ -88,7 +88,7 @@ func TestDaemonSpawnCmdPassesCallerEnvToChild(t *testing.T) {
 		t.Fatalf("read child environment report: %v", err)
 	}
 	childNames := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		if line != "" {
 			childNames[line] = true
 		}

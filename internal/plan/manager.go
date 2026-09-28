@@ -562,7 +562,9 @@ func (m *PlanManager) OnStepCompleted(ctx context.Context, taskID, stepID string
 	// Check if the phase is now complete.
 	phases, err := m.store.GetPhases(ctx, planID)
 	if err != nil {
-		return nil // non-fatal
+		// Phase-completion detection is advisory; the step increment above
+		// already succeeded, so don't fail the completion callback.
+		return nil //nolint:nilerr // non-fatal: progress was recorded above
 	}
 
 	for _, phase := range phases {

@@ -1,13 +1,14 @@
 package learning
 
 import (
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // G501: md5 is used only as a non-security content checksum (dataset snapshot identity/dedup), never for security
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -49,7 +50,9 @@ func CreateSnapshot(domain, datasetsDir, versionsDir string) (*DatasetVersion, e
 		return nil, fmt.Errorf("learning: create versioned snapshot %s: %w", dstPath, err)
 	}
 
-	hasher := md5.New()
+	// G401: md5 here is a content checksum for snapshot identity/dedup,
+	// not a security primitive.
+	hasher := md5.New() //nolint:gosec // non-security content hashing
 
 	// Copy through a tee reader, compute MD5, and count examples. A final
 	// non-empty partial line without trailing newline still counts as one
@@ -130,12 +133,12 @@ func PruneOldVersions(domain, versionsDir string, keep int) (int, error) {
 			continue
 		}
 		name := e.Name()
-		rest, ok := cutPrefix(name, prefix)
+		rest, ok := strings.CutPrefix(name, prefix)
 		if !ok {
 			continue
 		}
 		numStr := rest
-		if idx := indexByte(numStr, '.'); idx >= 0 {
+		if idx := strings.IndexByte(numStr, '.'); idx >= 0 {
 			numStr = numStr[:idx]
 		}
 		n := 0
@@ -199,7 +202,10 @@ func filterVersionMetadata(versionsDir, domain string, deletedNums map[int]struc
 	var versions []DatasetVersion
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, &versions); err != nil {
-			return nil // corrupt — leave alone
+			// A corrupt versions.json would silently desync version
+			// metadata from the snapshot files on disk, so surface it
+			// instead of ignoring it.
+			return fmt.Errorf("learning: parse versions.json: %w", err)
 		}
 	}
 	kept := versions[:0]
@@ -231,13 +237,13 @@ func nextVersionNumber(domain, versionsDir string) (int, error) {
 			continue
 		}
 		// Only count files matching {domain}_v{N}.jsonl.
-		rest, ok := cutPrefix(name, prefix)
+		rest, ok := strings.CutPrefix(name, prefix)
 		if !ok {
 			continue
 		}
 		// rest looks like "3.jsonl"
 		numStr := rest
-		if idx := indexByte(numStr, '.'); idx >= 0 {
+		if idx := strings.IndexByte(numStr, '.'); idx >= 0 {
 			numStr = numStr[:idx]
 		}
 		var n int
@@ -276,27 +282,4 @@ func appendVersionMetadata(versionsDir string, v *DatasetVersion) error {
 		return fmt.Errorf("learning: write versions.json: %w", err)
 	}
 	return nil
-}
-
-// cutPrefix is a local replacement for strings.CutPrefix (Go 1.20+) to
-// avoid importing strings just for this.
-func cutPrefix(s, prefix string) (string, bool) {
-	if len(s) < len(prefix) {
-		return s, false
-	}
-	for i := 0; i < len(prefix); i++ {
-		if s[i] != prefix[i] {
-			return s, false
-		}
-	}
-	return s[len(prefix):], true
-}
-
-func indexByte(s string, b byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
 }

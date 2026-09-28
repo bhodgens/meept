@@ -203,18 +203,18 @@ func warnDeprecatedConfig(cfg *Config) {
 	}
 }
 
-// ErrEnvVarCycle is returned when environment variable expansion detects a cycle.
-type ErrEnvVarCycle struct {
+// EnvVarCycleError is returned when environment variable expansion detects a cycle.
+type EnvVarCycleError struct {
 	Input string
 }
 
-func (e ErrEnvVarCycle) Error() string {
+func (e EnvVarCycleError) Error() string {
 	return fmt.Sprintf("environment variable expansion detected a cycle: %s", e.Input)
 }
 
-// Is reports whether err is an ErrEnvVarCycle.
-func (ErrEnvVarCycle) Is(err error) bool {
-	_, ok := err.(ErrEnvVarCycle)
+// Is reports whether err is an EnvVarCycleError.
+func (EnvVarCycleError) Is(err error) bool {
+	_, ok := err.(EnvVarCycleError)
 	return ok
 }
 
@@ -222,7 +222,7 @@ func (ErrEnvVarCycle) Is(err error) bool {
 // Uses a regex rather than os.ExpandEnv because configs use both $VAR and
 // ${VAR} syntax (os.ExpandEnv only supports the former).
 // Implements recursion depth limiting to detect cyclic env var references.
-// Returns ErrEnvVarCycle when a cycle is detected.
+// Returns EnvVarCycleError when a cycle is detected.
 func ExpandEnvVars(s string) (string, error) {
 	const maxPasses = 5
 	result := s
@@ -255,7 +255,7 @@ func ExpandEnvVars(s string) (string, error) {
 		}
 	}
 	if envVarPattern.MatchString(result) {
-		return result, ErrEnvVarCycle{Input: s}
+		return result, EnvVarCycleError{Input: s}
 	}
 	return result, nil
 }

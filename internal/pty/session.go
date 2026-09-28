@@ -194,6 +194,15 @@ func startPTY(cfg SessionConfig, rows, cols int) (*os.File, *exec.Cmd, error) {
 	cleanCmd.Stdout = nil
 	cleanCmd.Stderr = nil
 
+	// Clamp to uint16 terminal limits (gosec G115): rows/cols are validated
+	// positive above and clamped to 65535 here, so the conversion is exact.
+	if rows > 0xFFFF {
+		rows = 0xFFFF
+	}
+	if cols > 0xFFFF {
+		cols = 0xFFFF
+	}
+
 	ptmx, err := pty.StartWithSize(cleanCmd, &pty.Winsize{
 		Rows: uint16(rows),
 		Cols: uint16(cols),
@@ -290,6 +299,16 @@ func (s *ptySession) Resize(rows, cols int) error {
 
 	s.rows = rows
 	s.cols = cols
+
+	// Clamp to uint16 terminal limits (gosec G115): rows/cols are validated
+	// positive at the top of Resize and clamped to 65535 here, so the
+	// conversion below is exact.
+	if rows > 0xFFFF {
+		rows = 0xFFFF
+	}
+	if cols > 0xFFFF {
+		cols = 0xFFFF
+	}
 
 	if !s.fallback && s.ptmx != nil {
 		return pty.Setsize(s.ptmx, &pty.Winsize{
@@ -438,9 +457,9 @@ func (s *ptySession) waitLoop() {
 
 	s.mu.Lock()
 	s.finished = true
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		s.exitCode = exitErr.ExitCode()
-	} else if err != nil && err != context.DeadlineExceeded && err != io.EOF {
+	} else if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, io.EOF) {
 		select {
 		case s.errorChan <- err:
 		default:
@@ -520,7 +539,9 @@ func KillProcessTree(cmd *exec.Cmd) error {
 	if pid > 0 {
 		// Only send to process group if Setpgid was set when starting.
 		if cmd.SysProcAttr != nil && cmd.SysProcAttr.Setpgid {
-			syscall.Kill(-pid, syscall.SIGKILL)
+			// A failed group kill (e.g. ESRCH) is benign here: the fallback
+			// cmd.Process.Kill() below is the authoritative termination step.
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
 		}
 	}
 	return cmd.Process.Kill()

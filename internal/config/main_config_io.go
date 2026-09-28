@@ -110,9 +110,13 @@ func WriteMainConfigAtomic(content string) (string, error) {
 		if mode&0o200 == 0 {
 			return path, fmt.Errorf("%w: %s", ErrMainConfigNotWritable, path)
 		}
+		// Preserve the previous content so an operator can recover it.
+		// G703: path resolves through MainConfigPath() (MEEPT_HOME-aware,
+		// operator-controlled), not request input; build the fixed-suffix
+		// backup name explicitly to keep the write inside the config home.
+		backupPath := filepath.Join(filepath.Dir(path), filepath.Base(path)+".bak")
 		if previous, rerr := os.ReadFile(path); rerr == nil {
-			// Preserve the previous content so an operator can recover it.
-			if werr := os.WriteFile(path+".bak", previous, 0o600); werr != nil {
+			if werr := os.WriteFile(backupPath, previous, 0o600); werr != nil { //nolint:gosec // G703: operator-owned config path, see comment above
 				return path, fmt.Errorf("write main config backup %s.bak: %w", path, werr)
 			}
 		}

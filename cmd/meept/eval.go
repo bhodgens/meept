@@ -147,8 +147,7 @@ func handleEvalError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var usage *evalUsageError
-	if errors.As(err, &usage) {
+	if usage, ok := errors.AsType[*evalUsageError](err); ok {
 		fmt.Fprintln(os.Stderr, "Error:", usage.Error())
 		os.Exit(2)
 	}
@@ -183,7 +182,7 @@ func runEvalRun(ctx context.Context, w io.Writer, opts EvalRunOptions) error {
 
 	record := eval.NewRun(eval.KindPassK, opts.TaskID, opts.ModelID, opts.K)
 	record.HarnessHash = eval.HarnessHash("cli", "", "")
-	for i := 0; i < opts.K; i++ {
+	for i := range opts.K {
 		res, err := oracle.Check(ctx, opts.Workdir)
 		if err != nil {
 			return fmt.Errorf("oracle attempt %d failed: %w", i+1, err)

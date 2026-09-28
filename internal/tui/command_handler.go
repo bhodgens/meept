@@ -1064,7 +1064,7 @@ func discoverPromptTemplates() []promptEntry {
 		var files []string
 		_ = filepath.Walk(tier.dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
-				return nil
+				return nil //nolint:nilerr // listing a prompt tier is best-effort: an unreadable tier is skipped, not fatal
 			}
 			if !strings.HasSuffix(strings.ToLower(path), ".md") {
 				return nil
@@ -1881,7 +1881,6 @@ func (h *CommandHandler) executeProjectSet(args []string) *CommandResult {
 		} else {
 			msg.WriteString(fmt.Sprintf("  - path detection failed: %v", detectErr))
 		}
-		detected = nil // avoid confusion below (would-be detected project)
 	} else if detected != nil && detected.ID != "" {
 		// Detection succeeded and found a project, but somehow the name/ID fallback didn't
 		// pick it up — shouldn't normally happen, but if the detected project name doesn't

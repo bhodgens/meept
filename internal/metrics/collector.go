@@ -178,9 +178,7 @@ func NewCollector(store *Store, messageBus *bus.MessageBus, cfg *CollectorConfig
 
 // startCollection starts the background collection goroutine.
 func (c *Collector) startCollection(interval time.Duration) {
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -192,7 +190,7 @@ func (c *Collector) startCollection(interval time.Duration) {
 				return
 			}
 		}
-	}()
+	})
 }
 
 // subscribeToBus subscribes to relevant bus messages for metrics.
@@ -208,13 +206,11 @@ func (c *Collector) subscribeToBus() {
 	// Subscribe to review events for review metrics
 	reviewSub := c.bus.Subscribe("metrics-collector-review", "step.*")
 	c.subs = append(c.subs, reviewSub)
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		for msg := range reviewSub.Channel {
 			c.handleBusMessage(msg)
 		}
-	}()
+	})
 
 	// Subscribe to worker lifecycle events (worker.started, worker.completed,
 	// worker.stopped, worker.state_changed, worker.status, etc.). These are
@@ -223,26 +219,22 @@ func (c *Collector) subscribeToBus() {
 	// every publish trips the "bus: Publish with no subscribers" warning.
 	workerSub := c.bus.Subscribe("metrics-collector-worker", "worker.*")
 	c.subs = append(c.subs, workerSub)
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		for msg := range workerSub.Channel {
 			c.handleBusMessage(msg)
 		}
-	}()
+	})
 
 	// Token usage from AgentLoop.publishTokenUsage. Without this
 	// subscription the event has no in-process consumer when the TUI is
 	// not connected, and the collector never records LLM token volume.
 	tokenSub := c.bus.Subscribe("metrics-collector-tokens", "llm.tokens.used")
 	c.subs = append(c.subs, tokenSub)
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		for msg := range tokenSub.Channel {
 			c.handleBusMessage(msg)
 		}
-	}()
+	})
 }
 
 // handleBusMessage processes bus messages for metrics collection.
@@ -330,10 +322,7 @@ func (c *Collector) recordCompression(msg *models.BusMessage) {
 	if strategy == "" {
 		strategy = "unknown"
 	}
-	tokensSaved := payload.Event.TokensBefore - payload.Event.TokensAfter
-	if tokensSaved < 0 {
-		tokensSaved = 0
-	}
+	tokensSaved := max(payload.Event.TokensBefore-payload.Event.TokensAfter, 0)
 
 	c.store.RecordEvent("compression.saved", "info",
 		fmt.Sprintf("Compressed content: %d tokens saved (%s)", tokensSaved, strategy),

@@ -88,7 +88,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("webhook trigger received", "bot_id", botID, "payload_size", len(body), "trigger_context", triggerCtx)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	// Encode error ignored: a client that disconnected before the response
+	// is expected and unrecoverable here.
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":  "triggered",
 		"bot_id":  botID,
 		"message": "bot invocation queued",

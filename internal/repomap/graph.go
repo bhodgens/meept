@@ -7,6 +7,7 @@ package repomap
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -38,7 +39,7 @@ type RepoGraph struct {
 }
 
 // nodeID is used to generate unique node IDs atomically across concurrent BuildGraph calls.
-var nodeID int64
+var nodeID atomic.Int64
 
 // edgeID is a separate counter for edge IDs. Previously edges packed two node
 // IDs together (from.ID()*1e9 + to.ID()), which collides once node IDs exceed
@@ -63,7 +64,7 @@ func (g *RepoGraph) getOrCreateNode(filePath string) graph.Node {
 	}
 
 	// Atomic increment-and-fetch prevents duplicate IDs under concurrent repomap builds.
-	id := atomic.AddInt64(&nodeID, 1) - 1
+	id := nodeID.Add(1) - 1
 	node := &fileNode{id: id, filePath: filePath}
 	g.nodes[filePath] = node
 	g.g.AddNode(node)
@@ -266,12 +267,7 @@ func calculateEdgeWeight(ref, def Tag, chatFiles, mentionedIdentifiers []string,
 
 // contains checks if a string slice contains a specific value.
 func contains(slice []string, value string) bool {
-	for _, s := range slice {
-		if s == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, value)
 }
 
 // isCompoundIdentifier checks if an identifier uses compound naming (snake_case or camelCase).

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -96,8 +97,8 @@ type Config struct {
 	STT                 STTConfig                 `json:"stt"                 toml:"stt"`
 	TTS                 TTSConfig                 `json:"tts"                 toml:"tts"`
 	OAuth               OAuthConfig               `json:"oauth"               toml:"oauth"`
-	Analytics           AnalyticsConfig           `json:"analytics,omitempty" toml:"analytics"`
-	Notifications       NotificationsConfig       `json:"notifications,omitempty" toml:"notifications"`
+	Analytics           AnalyticsConfig           `json:"analytics,omitzero" toml:"analytics"`
+	Notifications       NotificationsConfig       `json:"notifications,omitzero" toml:"notifications"`
 	Runtime             RuntimeConfig             `json:"runtime"             toml:"runtime"`
 	PTY                 PTYConfig                 `json:"pty"                  toml:"pty"`
 	Reasoning           ReasoningGlobalConfig     `json:"reasoning"            toml:"reasoning"`
@@ -2025,15 +2026,11 @@ func (c *SecurityConfig) Validate() error {
 		}
 	}
 	// Validate allowed/blocked paths don't have obvious conflicts
-	for _, path := range c.AllowedPaths {
-		if path == "" {
-			return fmt.Errorf("allowed_paths contains empty string")
-		}
+	if slices.Contains(c.AllowedPaths, "") {
+		return fmt.Errorf("allowed_paths contains empty string")
 	}
-	for _, path := range c.BlockedPaths {
-		if path == "" {
-			return fmt.Errorf("blocked_paths contains empty string")
-		}
+	if slices.Contains(c.BlockedPaths, "") {
+		return fmt.Errorf("blocked_paths contains empty string")
 	}
 	// SSRF guard: fail fast on malformed CIDR entries at load time; the
 	// ssrf package re-parses them at guard construction.
@@ -3272,7 +3269,7 @@ func DefaultConfig() *Config {
 			MaxIterationsPerCycle: 5,
 			MaxFixesPerCycle:      10,
 			AutoRunIntervalHours:  0,
-			AIInfra: AIInfraConfig{
+			AIInfra: AIInfraConfig{ //nolint:gosec // G101: APIKeyEnv holds an env var NAME, not a credential
 				Enabled:         false,
 				BaseURL:         "http://localhost:8100",
 				APIKeyEnv:       "MEEPT_AI_INFRA_KEY",

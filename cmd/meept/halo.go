@@ -237,7 +237,7 @@ func generateReport(modes []agent.FailureMode) string {
 	var sb strings.Builder
 	sb.WriteString("# HALO Trace Analysis Report\n\n")
 	sb.WriteString("## Summary\n\n")
-	sb.WriteString(fmt.Sprintf("Failure modes found: **%d**\n\n", len(modes)))
+	fmt.Fprintf(&sb, "Failure modes found: **%d**\n\n", len(modes))
 
 	if len(modes) == 0 {
 		sb.WriteString("No failure modes detected.\n")
@@ -261,9 +261,9 @@ func generateReport(modes []agent.FailureMode) string {
 		if len(group) == 0 {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("## %s Severity Issues (%d)\n\n", strings.ToUpper(severity), len(group)))
+		fmt.Fprintf(&sb, "## %s Severity Issues (%d)\n\n", strings.ToUpper(severity), len(group))
 		for i, fm := range group {
-			sb.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, fm.ID))
+			fmt.Fprintf(&sb, "### %d. %s\n\n", i+1, fm.ID)
 			sb.WriteString(fmt.Sprintf("**Category:** %s\n\n", fm.Category))
 			sb.WriteString(fmt.Sprintf("**Description:** %s\n\n", fm.Description))
 			if len(fm.TraceIDs) > 0 {

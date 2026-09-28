@@ -185,9 +185,8 @@ func parseGoErrors(output, targetFile string) ([]LinterResult, error) {
 	simplePattern := regexp.MustCompile(`([^:]+):(\d+):\s*(.+)`)
 
 	var results []LinterResult
-	lines := strings.Split(output, "\n")
 
-	for _, line := range lines {
+	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -196,9 +195,8 @@ func parseGoErrors(output, targetFile string) ([]LinterResult, error) {
 		var result LinterResult
 
 		if matches := errorPattern.FindStringSubmatch(line); matches != nil {
-			lineNum := 0
 			colNum := 0
-			lineNum, _ = strconv.Atoi(matches[2])
+			lineNum, _ := strconv.Atoi(matches[2])
 			if matches[3] != "" {
 				colNum, _ = strconv.Atoi(matches[3])
 			}

@@ -160,12 +160,12 @@ func (t *GitOverviewTool) Execute(ctx context.Context, args map[string]any) (any
 func (t *GitOverviewTool) getAheadBehind(ctx context.Context, dir string) (string, error) {
 	upstream, err := t.runGitCmd(ctx, dir, "rev-parse", "--abbrev-ref", "@{upstream}")
 	if err != nil {
-		return "", nil
+		return "", nil //nolint:nilerr // no upstream is a normal state; ahead/behind is informational
 	}
 
 	output, err := t.runGitCmd(ctx, dir, "rev-list", "--left-right", "--count", fmt.Sprintf("HEAD...%s", strings.TrimSpace(upstream)))
 	if err != nil {
-		return "", nil
+		return "", nil //nolint:nilerr // ahead/behind is best-effort informational data, never fatal
 	}
 
 	parts := strings.Fields(strings.TrimSpace(output))
@@ -178,7 +178,7 @@ func (t *GitOverviewTool) getAheadBehind(ctx context.Context, dir string) (strin
 func (t *GitOverviewTool) getStagedChanges(ctx context.Context, dir string) ([]FileChangeInfo, error) {
 	output, err := t.runGitCmd(ctx, dir, "diff", "--cached", "--name-status")
 	if err != nil || strings.TrimSpace(output) == "" {
-		return []FileChangeInfo{}, nil
+		return []FileChangeInfo{}, nil //nolint:nilerr // git failure means "no staged info available", not a tool error
 	}
 	return t.parseFileStatus(ctx, dir, output, true)
 }
@@ -186,7 +186,7 @@ func (t *GitOverviewTool) getStagedChanges(ctx context.Context, dir string) ([]F
 func (t *GitOverviewTool) getUnstagedChanges(ctx context.Context, dir string) ([]FileChangeInfo, error) {
 	output, err := t.runGitCmd(ctx, dir, "diff", "--name-status")
 	if err != nil || strings.TrimSpace(output) == "" {
-		return []FileChangeInfo{}, nil
+		return []FileChangeInfo{}, nil //nolint:nilerr // git failure means "no unstaged info available", not a tool error
 	}
 	return t.parseFileStatus(ctx, dir, output, false)
 }
@@ -275,7 +275,7 @@ func (t *GitOverviewTool) getFileStats(ctx context.Context, dir, file string, st
 func (t *GitOverviewTool) getUntrackedFiles(ctx context.Context, dir string) ([]string, error) {
 	output, err := t.runGitCmd(ctx, dir, "ls-files", "--others", "--exclude-standard")
 	if err != nil {
-		return []string{}, nil
+		return []string{}, nil //nolint:nilerr // untracked listing is best-effort; an empty list is the honest answer
 	}
 
 	var files []string

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -199,8 +200,8 @@ func (s *SQLiteThreadStore) GetActiveThread(ctx context.Context, sessionID strin
 	err := row.Scan(&t.ID, &t.SessionID, &t.TopicLabel, &t.ConversationID,
 		&createdAtStr, &lastActivityStr, &t.Summary, &t.IsActive)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // no active thread is a normal, non-error state
 		}
 		return nil, err
 	}
@@ -216,7 +217,7 @@ func (s *SQLiteThreadStore) SetActiveThread(ctx context.Context, sessionID, thre
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // no-op after Commit; keeps the rollback path on early returns
 
 	// Deactivate all threads for this session
 	_, err = tx.ExecContext(ctx, `UPDATE session_threads SET is_active = 0 WHERE session_id = ?`, sessionID)

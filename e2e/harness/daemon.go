@@ -196,9 +196,7 @@ func Start(t testing.TB, opts ...StartOption) *Stack {
 			opt(sc)
 		}
 	}
-	if sc.beforeWrite != nil {
-		// Deferred to just after the dirs exist (below).
-	}
+	// sc.beforeWrite (when set) is deferred to just after the dirs exist (below).
 
 	// MkdirTemp("", "meept-e2e-*") yields /var/folders/.../T/meept-e2e-NNN
 	// (~70 chars); the socket at <root>/state/meept.sock stays ~85 chars.
@@ -445,7 +443,7 @@ var (
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			if err := cmd.Run(); err != nil {
-				return "", fmt.Errorf("go build %s: %v: %s", target.pkg, err, strings.TrimSpace(stderr.String()))
+				return "", fmt.Errorf("go build %s: %w: %s", target.pkg, err, strings.TrimSpace(stderr.String()))
 			}
 		}
 		return dir, nil
@@ -818,6 +816,7 @@ func (s *Stack) seedRoster() {
 
 // copyDir recursively copies src into dst (merge, files only).
 func copyDir(src, dst string) error {
+	//nolint:gosec // G122/G703: test fixture copy of trusted repo content into a fresh MkdirTemp sandbox; paths derive from the walk root, no untrusted input
 	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -37,7 +38,7 @@ func TestBackupConfig_Validate_NoRepo(t *testing.T) {
 		Schedule:      time.Hour,
 		RetentionDays: 7,
 	}
-	if err := cfg.Validate(); err != ErrBackupInvalid {
+	if err := cfg.Validate(); !errors.Is(err, ErrBackupInvalid) {
 		t.Errorf("expected ErrBackupInvalid for missing repo_url, got %v", err)
 	}
 }
@@ -49,7 +50,7 @@ func TestBackupConfig_Validate_ZeroSchedule(t *testing.T) {
 		Schedule:      0,
 		RetentionDays: 7,
 	}
-	if err := cfg.Validate(); err != ErrBackupInvalid {
+	if err := cfg.Validate(); !errors.Is(err, ErrBackupInvalid) {
 		t.Errorf("expected ErrBackupInvalid for zero schedule, got %v", err)
 	}
 }
@@ -61,7 +62,7 @@ func TestBackupConfig_Validate_ZeroRetention(t *testing.T) {
 		Schedule:      time.Hour,
 		RetentionDays: 0,
 	}
-	if err := cfg.Validate(); err != ErrBackupInvalid {
+	if err := cfg.Validate(); !errors.Is(err, ErrBackupInvalid) {
 		t.Errorf("expected ErrBackupInvalid for zero retention, got %v", err)
 	}
 }

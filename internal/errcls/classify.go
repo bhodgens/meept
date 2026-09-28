@@ -69,8 +69,7 @@ func IsRetryable(err error) bool {
 	if IsRateLimit(err) {
 		return true
 	}
-	var apiErr *llm.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
 		return apiErr.StatusCode >= 500 && apiErr.StatusCode < 600
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -93,8 +92,7 @@ func IsAuthError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var apiErr *llm.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
 		return apiErr.StatusCode == 401 || apiErr.StatusCode == 403
 	}
 	sentinelMu.RLock()
@@ -113,8 +111,7 @@ func IsClientError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var apiErr *llm.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
 		status := apiErr.StatusCode
 		return status >= 400 && status < 500 && status != 401 && status != 403
 	}
@@ -191,8 +188,7 @@ func IsJSONSyntaxError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var syntaxErr *json.SyntaxError
-	if errors.As(err, &syntaxErr) {
+	if _, ok := errors.AsType[*json.SyntaxError](err); ok {
 		return true
 	}
 	// Fall back to centralized substring check for wrapped errors that lose

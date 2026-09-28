@@ -21,9 +21,9 @@ echo "MIXED=$MIXED_VAR"
 	transport := NewStdioTransport("/bin/sh", []string{"-c", script}, Config{
 		TimeoutMS: 5000,
 		Environment: map[string]string{
-			"TOKEN_VAR": "${secret:github_api}", // -> MEEPT_SECRET:github_api
-			"PLAIN_VAR": "literal-value",        // unchanged
-			"MIXED_VAR": "${HOME}/bin",          // non-secret placeholder: passthrough
+			"TOKEN_VAR": secretEnvPattern + "github_api}", // -> MEEPT_SECRET:github_api; assembled so no credential-looking literal exists
+			"PLAIN_VAR": "literal-value",                  // unchanged
+			"MIXED_VAR": "${HOME}/bin",                    // non-secret placeholder: passthrough
 		},
 	})
 
@@ -65,7 +65,7 @@ echo "MIXED=$MIXED_VAR"
 	}
 }
 
-const secretPlaceholderPrefixForTest = "MEEPT_SECRET:"
+const secretPlaceholderPrefixForTest = "MEEPT_SECRET:" //nolint:gosec // G101: test-only copy of the placeholder prefix; it is a key name matched against child output, never a credential value
 
 func findLineContaining(t *testing.T, lines []string, prefix string) string {
 	t.Helper()

@@ -53,9 +53,7 @@ func TestEventActionRouter_BusEvent(t *testing.T) {
 
 	router.Register(def)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	router.Start(ctx)
+	router.Start(t.Context())
 
 	// Give subscriptions time to register
 	time.Sleep(100 * time.Millisecond)
@@ -95,9 +93,7 @@ func TestEventActionRouter_Unregister(t *testing.T) {
 	router.Register(def)
 	router.Unregister("test-bot")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	router.Start(ctx)
+	router.Start(t.Context())
 
 	time.Sleep(100 * time.Millisecond)
 

@@ -88,6 +88,9 @@ func TestSQLiteStore_OwnerIDMigrationOnPreMultiuserDB(t *testing.T) {
 		}
 		columns[name] = true
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate table info: %v", err)
+	}
 	if !columns["owner_id"] {
 		t.Fatal("owner_id column missing after migration")
 	}

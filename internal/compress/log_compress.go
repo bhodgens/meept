@@ -165,13 +165,9 @@ func (lc *LogCompressor) compressLogLines(lines []string) []string {
 		}
 	}
 
-	// Add summary for middle section
-	if middleEnd > middleStart {
-		omittedCount := middleEnd - middleStart
-		if omittedCount > 0 {
-			// Already handled by repetitions
-		}
-	}
+	// Add summary for middle section. Repeated lines are already handled by
+	// the repetition pass above, so middleStart/middleEnd need no extra work.
+	_ = middleEnd
 
 	// Keep last N lines
 	keepLast := lc.KeepLastN

@@ -133,7 +133,7 @@ func quoteBareDurations(content string) string {
 		case c == '/' && i+1 < len(content) && content[i+1] == '*':
 			cstart := i
 			i += 2
-			for i+1 < len(content) && !(content[i] == '*' && content[i+1] == '/') {
+			for i+1 < len(content) && (content[i] != '*' || content[i+1] != '/') {
 				i++
 			}
 			if i+1 < len(content) {
@@ -265,7 +265,7 @@ func convertQuotedDurations(data string) string {
 		case c == '/' && i+1 < len(data) && data[i+1] == '*':
 			cstart := i
 			i += 2
-			for i+1 < len(data) && !(data[i] == '*' && data[i+1] == '/') {
+			for i+1 < len(data) && (data[i] != '*' || data[i+1] != '/') {
 				i++
 			}
 			if i+1 < len(data) {
@@ -448,7 +448,7 @@ func wrapJSONUnmarshalError(err error, configPath string) error {
 
 	// Build the detailed error message
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("failed to parse config %s:\n", configPath))
+	fmt.Fprintf(&sb, "failed to parse config %s:\n", configPath)
 	if fieldInfo != "" {
 		sb.WriteString(fmt.Sprintf("  Field: %s\n", fieldInfo))
 	}
@@ -475,8 +475,7 @@ func extractTypeMismatch(errMsg string) string {
 	foundType := wordParts[0]
 
 	// Find the target type
-	if idx := strings.Index(remainder, " of type "); idx != -1 {
-		targetType := remainder[idx+9:]
+	if _, targetType, found := strings.Cut(remainder, " of type "); found {
 		return fmt.Sprintf("found %s, expected %s", foundType, targetType)
 	}
 

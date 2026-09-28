@@ -219,17 +219,13 @@ func (d *IssueDetector) ScanTraces(ctx context.Context, traceStorePath string) (
 // FailureModeToIssueType maps an RLM analyzer failure mode category to an IssueType.
 // Exported for use by external RLM analyzer callers.
 func FailureModeToIssueType(category string) IssueType {
-	switch {
-	case category == "hallucination", category == "semantic":
+	switch category {
+	case "hallucination", "semantic":
 		return IssueTypeError
-	case category == "refusal_loop":
+	case "refusal_loop", "tool_error", "timeout":
 		return IssueTypeReliability
-	case category == "redundant_args":
+	case "redundant_args":
 		return IssueTypePerformance
-	case category == "tool_error":
-		return IssueTypeReliability
-	case category == "timeout":
-		return IssueTypeReliability
 	default:
 		return IssueTypeReliability
 	}

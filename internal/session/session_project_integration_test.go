@@ -92,8 +92,8 @@ func TestSession_ProjectIsolation(t *testing.T) {
 			"cwd": "/tmp/project-a",
 		},
 	}
-	paramsJSON_A, _ := json.Marshal(paramsA)
-	resultA, err := handler.handleCreate(&models.BusMessage{Payload: paramsJSON_A})
+	paramsJSONA, _ := json.Marshal(paramsA)
+	resultA, err := handler.handleCreate(&models.BusMessage{Payload: paramsJSONA})
 	if err != nil {
 		t.Fatalf("handleCreate for session A failed: %v", err)
 	}
@@ -106,8 +106,8 @@ func TestSession_ProjectIsolation(t *testing.T) {
 			"cwd": "/tmp/project-b",
 		},
 	}
-	paramsJSON_B, _ := json.Marshal(paramsB)
-	resultB, err := handler.handleCreate(&models.BusMessage{Payload: paramsJSON_B})
+	paramsJSONB, _ := json.Marshal(paramsB)
+	resultB, err := handler.handleCreate(&models.BusMessage{Payload: paramsJSONB})
 	if err != nil {
 		t.Fatalf("handleCreate for session B failed: %v", err)
 	}
@@ -215,9 +215,9 @@ func TestSQLiteStore_UpdateSessionsProjectPath_MultiSession(t *testing.T) {
 	sess2, _ := store.Create("sess-2")
 	sess3, _ := store.Create("sess-3")
 
-	store.SetProject(sess1.ID, "proj-1", "/old/path")
-	store.SetProject(sess2.ID, "proj-1", "/old/path")
-	store.SetProject(sess3.ID, "proj-2", "/other/path")
+	store.SetProject(sess1.ID, "proj-1", "/old/path") //nolint:errcheck // test arrange: later assertions verify the effect
+	store.SetProject(sess2.ID, "proj-1", "/old/path") //nolint:errcheck // test arrange: later assertions verify the effect
+	store.SetProject(sess3.ID, "proj-2", "/other/path") //nolint:errcheck // test arrange: later assertions verify the effect
 
 	if err := store.UpdateSessionsProjectPath(ctx, "/old/path", "/new/path"); err != nil {
 		t.Fatalf("UpdateSessionsProjectPath: %v", err)
@@ -248,7 +248,7 @@ func TestSQLiteStore_UpdateSessionsProjectPath_ZeroMatches(t *testing.T) {
 	ctx := context.Background()
 
 	sess, _ := store.Create("sess-1")
-	store.SetProject(sess.ID, "proj-1", "/some/path")
+	store.SetProject(sess.ID, "proj-1", "/some/path") //nolint:errcheck // test arrange: later assertions verify the effect
 
 	// Update a path that doesn't match any session.
 	err := store.UpdateSessionsProjectPath(ctx, "/nonexistent", "/new/path")
@@ -271,8 +271,8 @@ func TestMemoryStore_UpdateSessionsProjectPath_MultiSession(t *testing.T) {
 
 	sess1, _ := store.Create("sess-1")
 	sess2, _ := store.Create("sess-2")
-	store.SetProject(sess1.ID, "proj-1", "/old/path")
-	store.SetProject(sess2.ID, "proj-1", "/old/path")
+	store.SetProject(sess1.ID, "proj-1", "/old/path") //nolint:errcheck // test arrange: later assertions verify the effect
+	store.SetProject(sess2.ID, "proj-1", "/old/path") //nolint:errcheck // test arrange: later assertions verify the effect
 
 	// Record pre-update activity.
 	before1 := store.Get(sess1.ID).LastActivity

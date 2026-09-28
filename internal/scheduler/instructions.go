@@ -54,7 +54,8 @@ func (s *InstructionScheduler) instructionToJob(instr *preferences.UserInstructi
 	// Remove existing job if any
 	_ = s.scheduler.Unschedule(jobID)
 
-	if instr.Action == "agent_trigger" {
+	switch instr.Action {
+	case "agent_trigger":
 		agentID, _ := instr.ActionArgs["agent_id"].(string)
 		prompt := fmt.Sprintf("Execute instruction: %s", instr.Trigger)
 
@@ -69,7 +70,7 @@ func (s *InstructionScheduler) instructionToJob(instr *preferences.UserInstructi
 			},
 		})
 		return err
-	} else if instr.Action == "shell_execute" {
+	case "shell_execute":
 		command, _ := instr.ActionArgs["command"].(string)
 		if command == "" {
 			return fmt.Errorf("shell_execute has no command")

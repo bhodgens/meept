@@ -138,7 +138,9 @@ func TestUnregister(t *testing.T) {
 	pm, _ := newTestManager(t)
 	ctx := context.Background()
 
-	pm.RegisterLocal(ctx, "u1", "temp", "/tmp/temp")
+	if _, err := pm.RegisterLocal(ctx, "u1", "temp", "/tmp/temp"); err != nil {
+		t.Fatal(err)
+	}
 	if err := pm.Unregister(ctx, "u1"); err != nil {
 		t.Fatalf("Unregister: %v", err)
 	}
@@ -152,8 +154,12 @@ func TestList(t *testing.T) {
 	pm, _ := newTestManager(t)
 	ctx := context.Background()
 
-	pm.RegisterLocal(ctx, "l1", "p1", "/tmp/p1")
-	pm.RegisterLocal(ctx, "l2", "p2", "/tmp/p2")
+	if _, err := pm.RegisterLocal(ctx, "l1", "p1", "/tmp/p1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pm.RegisterLocal(ctx, "l2", "p2", "/tmp/p2"); err != nil {
+		t.Fatal(err)
+	}
 
 	projects, err := pm.List(ctx)
 	if err != nil {
@@ -225,7 +231,9 @@ func TestStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Mode = ModeGit
-	pm.store.UpdateProject(ctx, p)
+	if err := pm.store.UpdateProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
 
 	status, err := pm.Status(ctx, "status-1")
 	if err != nil {
@@ -354,7 +362,9 @@ func TestManager_DeactivateActive(t *testing.T) {
 		ID: "a1", Name: "alpha", Mode: ModeGit,
 		LocalPath: "/tmp/alpha", Status: "active",
 	}
-	store.CreateProject(ctx, p)
+	if err := store.CreateProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := pm.DeactivateActive(ctx); err != nil {
 		t.Fatalf("DeactivateActive: %v", err)
@@ -415,7 +425,9 @@ func TestManager_EnsureDefault_DoesNotCreateWhenActiveExists(t *testing.T) {
 		ID: "existing", Name: "alpha", Mode: ModeGit,
 		LocalPath: realDir, Status: "active",
 	}
-	store.CreateProject(ctx, existing)
+	if err := store.CreateProject(ctx, existing); err != nil {
+		t.Fatal(err)
+	}
 
 	p, err := pm.EnsureDefault(ctx)
 	if err != nil {
@@ -632,7 +644,9 @@ func TestManager_Rename_ExternalProjectFails(t *testing.T) {
 		ID: "ext1", Name: "ext", Mode: ModeGit,
 		LocalPath: "/tmp/ext-project", Status: "active",
 	}
-	store.CreateProject(ctx, p)
+	if err := store.CreateProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := pm.Rename(ctx, "ext1", "newname")
 	if err == nil {
@@ -687,8 +701,12 @@ func TestManager_ResolutionChain_InheritThenSwitch(t *testing.T) {
 	}
 
 	// Deactivate old, activate new.
-	pm.DeactivateActive(ctx)
-	pm.SetStatus(ctx, p3.ID, "active")
+	if err := pm.DeactivateActive(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.SetStatus(ctx, p3.ID, "active"); err != nil {
+		t.Fatal(err)
+	}
 
 	// GetActive should now return the new project.
 	active, _ := pm.GetActive(ctx)
@@ -719,7 +737,9 @@ func TestManager_EnsureDefault_StaleDirRecreates(t *testing.T) {
 		ID: "stale", Name: "stale", Mode: ModeGit,
 		LocalPath: staleDir, Status: "active",
 	}
-	store.CreateProject(ctx, existing)
+	if err := store.CreateProject(ctx, existing); err != nil {
+		t.Fatal(err)
+	}
 
 	// Remove the directory to simulate external deletion.
 	os.RemoveAll(staleDir)

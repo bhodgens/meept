@@ -236,10 +236,10 @@ func TestBotRunner_RetryPolicy_ContextCancelNoRetry(t *testing.T) {
 
 func TestBotRunner_RetryPolicy_ExponentialBackoff(t *testing.T) {
 	var timestamps []time.Time
-	var callCount int32
+	var callCount atomic.Int32
 	exec := &countingExecutor{}
 	exec.execFunc = func(ctx context.Context, _, _ string) (string, int, error) {
-		n := atomic.AddInt32(&callCount, 1)
+		n := callCount.Add(1)
 		timestamps = append(timestamps, time.Now())
 		if n <= 2 {
 			return "", 0, errors.New("transient error")

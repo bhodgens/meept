@@ -121,7 +121,7 @@ func callRunFileMutations(t *testing.T, filePath string, fn func(sourcePath stri
 	}
 
 	cb := ft.In(2)
-	errType := reflect.TypeOf((*error)(nil)).Elem()
+	errType := reflect.TypeFor[error]()
 	if cb.NumIn() != 1 || cb.In(0).Kind() != reflect.String ||
 		cb.NumOut() != 1 || cb.Out(0) != errType {
 		return nil, fmt.Errorf("RunFileMutations testFn param is %s, want func(sourcePath string) error", cb)
@@ -131,7 +131,7 @@ func callRunFileMutations(t *testing.T, filePath string, fn func(sourcePath stri
 	if len(out) != 1 {
 		return nil, fmt.Errorf("RunFileMutations returned %d values, want 1", len(out))
 	}
-	rep, _ := out[0].Interface().(*MutationReport)
+	rep, _ := reflect.TypeAssert[*MutationReport](out[0])
 	if rep == nil {
 		return nil, fmt.Errorf("RunFileMutations returned a nil report")
 	}

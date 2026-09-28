@@ -86,5 +86,9 @@ func TestParallelTaintTracker_Concurrent(t *testing.T) {
 }
 
 func labelForIdx(i int) string {
-	return "call_" + string(rune('A'+i%26)) + string(rune('0'+i/26+1))
+	// i is a non-negative loop index < numWorkers; 'A'+i%26 and '0'+i/26+1
+	// are bounded to [65,90] and [49,58] respectively — always valid runes.
+	a := rune('A' + i%26)        //nolint:gosec // G115: i%26 bounds the value to 0..25
+	d := rune('0' + i/26%10 + 1) //nolint:gosec // G115: bounded to 0..9
+	return "call_" + string(a) + string(d)
 }

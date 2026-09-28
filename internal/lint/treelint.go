@@ -102,7 +102,7 @@ func traverseTreeForErrors(node *sitter.Node, results *[]LinterResult, file, con
 			endByte := int(node.EndByte())
 			contentLen := len(content)
 			if startByte < contentLen && endByte <= contentLen {
-				errorText := string(content[startByte:endByte])
+				errorText := content[startByte:endByte]
 				if len(errorText) > 50 {
 					errorText = errorText[:50] + "..."
 				}

@@ -916,11 +916,12 @@ func splitOnLogicalOperators(cmd string) []string {
 			}
 			break
 		}
-		// Find which comes first
-		splitIdx := -1
-		if idxAnd != -1 && (idxOr == -1 || idxAnd < idxOr) {
-			splitIdx = idxAnd
-		} else {
+		// Find which comes first.
+		// splitIdx > 0 here: -1 is impossible because at least one of the two
+		// indexes above is >= 0, and an operator at position 0 is impossible
+		// because an earlier iteration consumed the preceding segment.
+		splitIdx := idxAnd
+		if idxAnd == -1 || (idxOr != -1 && idxOr < idxAnd) {
 			splitIdx = idxOr
 		}
 		if splitIdx > 0 {

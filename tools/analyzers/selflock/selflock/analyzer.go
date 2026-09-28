@@ -29,6 +29,7 @@ package selflock
 import (
 	"go/ast"
 	"go/token"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -81,7 +82,7 @@ var storeUpdateMethods = map[string]bool{
 	"Commit":  true,
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	// Collect all comment groups for nolint:selflock suppression
@@ -125,7 +126,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 		checkBody(pass, body, nolintLines, fset)
 	})
-	return nil, nil
+	return nil, nil //nolint:nilnil // analysis.Analyzer Run contract: nil result with no diagnostics is valid
 }
 
 // callInfo tracks a method call with locking semantics
@@ -199,11 +200,11 @@ func checkBody(pass *analysis.Pass, body *ast.BlockStmt, nolintLines map[string]
 		}
 
 		if ci.isUnlock {
-			// Pop matching lock
-			for j := len(stack) - 1; j >= 0; j-- {
-				lf := stack[j]
+			// Unlock scans top-down so an outer frame unlocks before an
+			// inner one; slices.Backward yields the identical order.
+			for j, lf := range slices.Backward(stack) {
 				if lf.ci.recvKey == ci.recvKey && lf.ci.recvKey != "" {
-					stack = append(stack[:j], stack[j+1:]...)
+					stack = slices.Delete(stack, j, j+1)
 					break
 				}
 			}
@@ -245,7 +246,7 @@ func checkBody(pass *analysis.Pass, body *ast.BlockStmt, nolintLines map[string]
 	}
 }
 
-func reportIfNotSuppressed(pass *analysis.Pass, call *ast.CallExpr, nolintLines map[string]bool, fset *token.FileSet, format string, args ...interface{}) {
+func reportIfNotSuppressed(pass *analysis.Pass, call *ast.CallExpr, nolintLines map[string]bool, fset *token.FileSet, format string, args ...any) {
 	// Check suppression
 	if isNoLintSelfLock(call, nolintLines, fset) {
 		return

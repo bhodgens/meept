@@ -251,13 +251,13 @@ func (f *GoLintFilter) runGofmtList(ctx context.Context, dir string) ([]string, 
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("gofmt -l timed out after %s: %w", lintTimeout, ctx.Err())
 		}
-		return nil, fmt.Errorf("gofmt -l: %v: %s", err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("gofmt -l: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("gofmt -l timed out after %s: %w", lintTimeout, ctx.Err())
 	}
 	var listed []string
-	for _, line := range strings.Split(stdout.String(), "\n") {
+	for line := range strings.SplitSeq(stdout.String(), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			listed = append(listed, filepath.Base(line))
@@ -275,7 +275,7 @@ func (f *GoLintFilter) runGofmtWrite(ctx context.Context, path string) error {
 		if ctx.Err() != nil {
 			return fmt.Errorf("gofmt -w timed out after %s: %w", lintTimeout, ctx.Err())
 		}
-		return fmt.Errorf("gofmt -w: %v: %s", err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("gofmt -w: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }

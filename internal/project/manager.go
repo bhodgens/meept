@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -277,8 +278,10 @@ func (pm *ProjectManager) Status(ctx context.Context, id string) (*ProjectStatus
 		if len(parts) == 2 {
 			// --left-right: left = commits in origin but not local (behind),
 			// right = commits in local but not origin (ahead).
-			fmt.Sscanf(parts[0], "%d", &status.Behind)
-			fmt.Sscanf(parts[1], "%d", &status.Ahead)
+			// A parse failure leaves the zero value, which is the desired
+			// default when git's output is malformed.
+			status.Behind, _ = strconv.Atoi(parts[0])
+			status.Ahead, _ = strconv.Atoi(parts[1])
 		}
 	}
 

@@ -141,26 +141,25 @@ func (s *SQLiteStore) migrate() error {
 // 3.35, so we probe pragma table_info and ignore the duplicate-column error.
 func (s *SQLiteStore) addColumnIfMissing(table, column, colType string) error {
 	// Fast path: check if column exists via pragma.
+	// Use defer for Close so every return path releases the rows handle.
 	rows, err := s.db.QueryxContext(context.Background(),
 		"PRAGMA table_info("+table+")")
 	if err != nil {
 		return fmt.Errorf("pragma table_info(%s): %w", table, err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var cid int
 		var name, ctype string
 		var notnull, pk int
 		var dflt sql.NullString
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			rows.Close()
 			return fmt.Errorf("scan table_info: %w", err)
 		}
 		if name == column {
-			rows.Close()
 			return nil // already exists
 		}
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate table_info: %w", err)
 	}
@@ -756,7 +755,7 @@ func artifactsToJSON(arts []Artifact) (any, error) {
 	if err != nil {
 		// Should never happen for Artifact (only primitive fields); fall back
 		// to NULL so the row is still writable.
-		return nil, nil
+		return nil, nil //nolint:nilerr // deliberate NULL fallback keeps the row writable
 	}
 	return string(b), nil
 }

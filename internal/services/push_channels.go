@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/pkg/id"
@@ -19,20 +20,20 @@ import (
 //
 // This local interface mirrors those signatures without importing daemon/http.
 type notifier interface {
-	Publish(event interface{})
-	PublishNotification(sessionID, agentID string, notifType interface{}, title, message string)
+	Publish(event any)
+	PublishNotification(sessionID, agentID string, notifType any, title, message string)
 }
 
 // PushMessage carries the data routed to channel subscribers.
 type PushMessage struct {
-	SessionID string                 `json:"session_id"`
-	Source    string                 `json:"source"`
-	ChannelID string                 `json:"channel_id,omitempty"`
-	Type      PushType               `json:"type"`
-	Priority  PushPriority           `json:"priority"`
-	Content   string                 `json:"content"`
-	Timestamp time.Time              `json:"timestamp"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	SessionID string         `json:"session_id"`
+	Source    string         `json:"source"`
+	ChannelID string         `json:"channel_id,omitempty"`
+	Type      PushType       `json:"type"`
+	Priority  PushPriority   `json:"priority"`
+	Content   string         `json:"content"`
+	Timestamp time.Time      `json:"timestamp"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // PushChannel defines the interface that all push delivery channels must
@@ -245,7 +246,7 @@ func (t *TUIPushChannel) Push(ctx context.Context, msg *PushMessage) error {
 	t.notifier.PublishNotification(
 		msg.SessionID,
 		msg.Source,
-		nil, // notif type passed through as interface{}
+		nil, // notif type passed through as any
 		"Meept",
 		msg.Content,
 	)
@@ -279,7 +280,7 @@ func (h *HTTPPushChannel) CanReceive(ctx context.Context, sessionID string, msg 
 
 func (h *HTTPPushChannel) Push(ctx context.Context, msg *PushMessage) error {
 	// Build a notification payload matching http.NotificationEvent shape.
-	evt := map[string]interface{}{
+	evt := map[string]any{
 		"id":         generatePushNotificationID(),
 		"timestamp":  msg.Timestamp.UTC().Format(time.RFC3339),
 		"title":      "Meept",
@@ -321,7 +322,9 @@ func formatForTelegram(text string) string {
 		case '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!':
 			esc = append(esc, '\\')
 		}
-		esc = append(esc, byte(r))
+		// Telegram MarkdownV2 escaping is byte-oriented; non-ASCII runes must
+		// pass through as their UTF-8 bytes, not be truncated to one byte.
+		esc = utf8.AppendRune(esc, r)
 	}
 	return string(esc)
 }

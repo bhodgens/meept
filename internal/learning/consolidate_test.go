@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -90,13 +91,7 @@ func TestConsolidateRoutesCorrectly(t *testing.T) {
 		t.Errorf("expected 2 domains touched, got %d: %v", len(stats.DomainsTouched), stats.DomainsTouched)
 	}
 	for _, want := range []string{"code", "debugging"} {
-		found := false
-		for _, d := range stats.DomainsTouched {
-			if d == want {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(stats.DomainsTouched, want)
 		if !found {
 			t.Errorf("expected DomainsTouched to contain %q, got %v", want, stats.DomainsTouched)
 		}
@@ -299,7 +294,7 @@ func TestConsolidateRetention(t *testing.T) {
 	// Pre-create a domain file with multiple lines totaling > 100 bytes.
 	domainPath := filepath.Join(datasetsDir, "code.jsonl")
 	preLines := []string{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		// Each line ~30 bytes; 10 lines = ~300 bytes.
 		preLines = append(preLines, `{"instruction":"old data padding line `+string(rune('a'+i))+`"}`)
 	}

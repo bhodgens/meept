@@ -383,7 +383,7 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 	// Run the agent
 	response, err := t.registry.RunAgent(ctx, spec.ID, fullMessage, conversationID)
 	if err != nil {
-		return DelegateResult{
+		return DelegateResult{ //nolint:nilerr // the failure is reported to the caller through the DelegateResult envelope
 			AgentID: agentID,
 			Success: false,
 			Error:   err.Error(),

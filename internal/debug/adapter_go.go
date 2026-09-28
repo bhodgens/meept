@@ -3,6 +3,7 @@ package debug
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -184,15 +185,14 @@ func parseGoroutineStatus(userState string) GoroutineStatus {
 	}
 
 	lower := strings.ToLower(userState)
-	switch {
-	case lower == "running" || lower == "runnable":
+	switch lower {
+	case "running", "runnable":
 		return GoroutineRunning
-	case lower == "sleeping" || lower == "waiting":
+	case "sleeping", "waiting":
 		return GoroutineWaiting
-	case lower == "syscall":
+	case "syscall":
 		return GoroutineSyscall
-	case lower == "idle" || lower == "chan receive" || lower == "chan send" ||
-		lower == "select":
+	case "idle", "chan receive", "chan send", "select":
 		return GoroutineIdle
 	default:
 		return GoroutineUnknown
@@ -263,7 +263,7 @@ func readBoundedBinary(path string) ([]byte, error) {
 	// Read head.
 	head := make([]byte, headSize)
 	n, err := io.ReadFull(f, head)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	buf = append(buf, head[:n]...)
@@ -277,7 +277,7 @@ func readBoundedBinary(path string) ([]byte, error) {
 	// Read tail.
 	tail := make([]byte, tailSize)
 	n, err = io.ReadFull(f, tail)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	buf = append(buf, tail[:n]...)
@@ -349,7 +349,9 @@ func DetectGoBinary(program string) (bool, string, error) {
 	if isGo {
 		dlvPath, err := exec.LookPath("dlv")
 		if err != nil {
-			return true, "", nil // Go binary but dlv not installed.
+			// dlv simply not installed — this is an expected condition,
+			// not a failure: report Go-binary with no adapter path.
+			return true, "", nil //nolint:nilerr // LookPath miss is an expected outcome here, not an error
 		}
 		return true, dlvPath, nil
 	}

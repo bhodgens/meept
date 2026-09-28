@@ -109,7 +109,7 @@ func learningPaths() (learningDir, adaptersDir string, cfg *config.Config, err e
 	cfg, loadErr := config.LoadDefault()
 	if loadErr != nil {
 		// Config optional for offline/status use; keep home defaults.
-		return learningDir, adaptersDir, nil, nil
+		return learningDir, adaptersDir, nil, nil //nolint:nilerr // config is optional for offline/status use; home defaults are the documented fallback
 	}
 	if cfg.Learning.DataDir != "" {
 		learningDir = cfg.Learning.DataDir

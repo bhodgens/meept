@@ -419,8 +419,8 @@ func (r *ContextRenderer) RenderJSON(ranked RankedTags) (string, int, error) {
 	var sb strings.Builder
 	sb.WriteString("[\n")
 	for i, tag := range tags {
-		sb.WriteString(fmt.Sprintf(`  {"name": "%s", "kind": "%s", "file": "%s", "line": %d, "is_definition": %v, "score": %.4f}`,
-			escapeJSON(tag.Name), escapeJSON(tag.Kind), escapeJSON(tag.File), tag.Line, tag.Def, tag.Score))
+		fmt.Fprintf(&sb, `  {"name": "%s", "kind": "%s", "file": "%s", "line": %d, "is_definition": %v, "score": %.4f}`,
+			escapeJSON(tag.Name), escapeJSON(tag.Kind), escapeJSON(tag.File), tag.Line, tag.Def, tag.Score)
 		if i < len(tags)-1 {
 			sb.WriteString(",")
 		}

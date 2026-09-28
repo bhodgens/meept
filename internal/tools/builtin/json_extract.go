@@ -139,7 +139,7 @@ func (t *JSONExtractTool) Execute(ctx context.Context, args map[string]any) (any
 	// the interface holds the typed nil — the t.chatter == nil check above
 	// does NOT catch it, and Chat panicked dereferencing the nil receiver's
 	// mutex. reflect-based check catches interface-wrapped nil pointers.
-	if reflect.ValueOf(t.chatter).Kind() == reflect.Ptr &&
+	if reflect.ValueOf(t.chatter).Kind() == reflect.Pointer &&
 		reflect.ValueOf(t.chatter).IsNil() {
 		return nil, fmt.Errorf("json_extract: extraction model not configured (set extract_model in models.json5 to a provider/model ref)")
 	}

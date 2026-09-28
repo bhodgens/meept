@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -36,7 +37,7 @@ func NewGitCheckout(repoURL, checkoutDir string, logger *slog.Logger) (*GitCheck
 	// Try to open existing repo; if missing, do shallow clone
 	repo, err := git.PlainOpen(checkoutDir)
 	if err != nil {
-		if os.IsNotExist(err) || err == git.ErrRepositoryNotExists {
+		if os.IsNotExist(err) || errors.Is(err, git.ErrRepositoryNotExists) {
 			if cloneErr := g.cloneShallow(); cloneErr != nil {
 				return nil, fmt.Errorf("config sync: failed to clone %s: %w", repoURL, cloneErr)
 			}
@@ -123,7 +124,7 @@ func (g *GitCheckout) Pull(_ context.Context) (commitHash string, changed bool, 
 	err = g.repo.Fetch(&git.FetchOptions{
 		Depth: gitShallowDepth,
 	})
-	if err != nil && err != git.NoErrAlreadyUpToDate {
+	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return "", false, fmt.Errorf("git_pull_fetch: %w", err)
 	}
 
@@ -168,10 +169,12 @@ func (g *GitCheckout) Pull(_ context.Context) (commitHash string, changed bool, 
 		}
 	}
 
-	// Last resort: return current HEAD unchanged
+	// Last resort: return the pre-pull HEAD unchanged. If even that lookup
+	// fails the pull genuinely errored — reporting success here would hide a
+	// broken repo state from the config-sync caller.
 	currentHead, curErr := g.repo.Head()
 	if curErr != nil {
-		return headBefore.Hash().String(), false, nil
+		return headBefore.Hash().String(), false, fmt.Errorf("git_pull_head_after: %w", curErr)
 	}
 	return currentHead.Hash().String(), currentHead.Hash() != headBefore.Hash(), nil
 }
@@ -212,7 +215,7 @@ func (g *GitCheckout) CommitAndPush(_ context.Context, message string) error {
 		if err == nil {
 			return nil
 		}
-		if err == git.NoErrAlreadyUpToDate {
+		if errors.Is(err, git.NoErrAlreadyUpToDate) {
 			return nil
 		}
 

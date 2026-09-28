@@ -51,7 +51,9 @@ func newWorktreeTestManager(t *testing.T) (*ProjectManager, string) {
 	if p.Branch == "" {
 		p.Branch = "main"
 	}
-	store.UpdateProject(ctx(), p)
+	if err := store.UpdateProject(ctx(), p); err != nil {
+		t.Fatal(err)
+	}
 
 	return pm, repoDir
 }
@@ -125,12 +127,18 @@ func TestMergeWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.WriteString("hello from worktree")
-	f.Close()
+	if _, err := f.WriteString("hello from worktree"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := exec.Command("git", "add", ".")
 	cmd.Dir = w.Path
-	cmd.CombinedOutput()
+	if _, err := cmd.CombinedOutput(); err != nil {
+		t.Fatal(err)
+	}
 	cmd = exec.Command("git", "commit", "-m", "worktree change")
 	cmd.Dir = w.Path
 	cmd.Env = append(os.Environ(), "GIT_AUTHOR_EMAIL=test@test.com", "GIT_AUTHOR_NAME=Test", "GIT_COMMITTER_EMAIL=test@test.com", "GIT_COMMITTER_NAME=Test")
@@ -152,7 +160,9 @@ func TestMergeWorktree(t *testing.T) {
 	}
 
 	// Clean up
-	pm.ReleaseWorktree(ctx(), w.ID)
+	if err := pm.ReleaseWorktree(ctx(), w.ID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestGetActiveWorktree(t *testing.T) {
@@ -244,8 +254,12 @@ func TestCountActiveWorktrees(t *testing.T) {
 		t.Errorf("initial count = %d, want 0", count)
 	}
 
-	pm.CreateWorktree(ctx(), "wt-proj", "sess-1", "")
-	pm.CreateWorktree(ctx(), "wt-proj", "sess-2", "")
+	if _, err := pm.CreateWorktree(ctx(), "wt-proj", "sess-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pm.CreateWorktree(ctx(), "wt-proj", "sess-2", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	count, _ = pm.CountActiveWorktrees(ctx(), "wt-proj")
 	if count != 2 {

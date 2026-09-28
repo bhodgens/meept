@@ -28,14 +28,14 @@ import (
 
 // discardLogger keeps test output free of daemon log noise.
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // TestMain silences the GLOBAL slog default so production code paths that
 // log via slog.Warn/slog.Info directly (e.g. ResolveTool's drift refusal)
 // do not pollute test output. Test-binary scope only.
 func TestMain(m *testing.M) {
-	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	slog.SetDefault(slog.New(slog.DiscardHandler))
 	os.Exit(m.Run())
 }
 
@@ -171,9 +171,7 @@ func TestSecretPlaceholderRoundTrip(t *testing.T) {
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
 	proxy := secrets.NewProxy(broker, secrets.ProxyConfig{Enabled: true, Listen: "127.0.0.1:0"}, discardLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	proxyAddr, err := proxy.Start(ctx)
+	proxyAddr, err := proxy.Start(t.Context())
 	if err != nil {
 		t.Fatalf("proxy Start: %v", err)
 	}
@@ -198,7 +196,7 @@ func TestSecretPlaceholderRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("matched-host request through proxy failed: %v", err)
 	}
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body) // best-effort drain before close
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("matched-host status = %d, want 200", resp.StatusCode)
@@ -239,7 +237,7 @@ func TestSecretPlaceholderRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mismatched-host request through proxy failed: %v", err)
 	}
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body) // best-effort drain before close
 	resp.Body.Close()
 	if got := resp.Header.Get("X-Saw-Authorization"); got != secrets.Placeholder(mismatchNm) {
 		t.Errorf("mismatched host saw %q, want untouched placeholder %q", got, secrets.Placeholder(mismatchNm))
@@ -596,7 +594,7 @@ ready:
 		baseURL = "https://" + addr
 		resp, err := client.Get(baseURL + "/health")
 		if err == nil {
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body) // best-effort drain before close
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				break ready

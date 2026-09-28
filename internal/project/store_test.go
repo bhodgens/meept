@@ -130,7 +130,9 @@ func TestDeleteProject(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Project{ID: "d1", Name: "to-delete", Mode: ModeLocal}
-	s.CreateProject(ctx, p)
+	if err := s.CreateProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := s.DeleteProject(ctx, "d1"); err != nil {
 		t.Fatalf("DeleteProject: %v", err)
@@ -147,7 +149,9 @@ func TestCreateAndGetWorktree(t *testing.T) {
 	ctx := context.Background()
 
 	// Need a project first
-	s.CreateProject(ctx, &Project{ID: "wp1", Name: "proj", Mode: ModeGit})
+	if err := s.CreateProject(ctx, &Project{ID: "wp1", Name: "proj", Mode: ModeGit}); err != nil {
+		t.Fatal(err)
+	}
 
 	w := &Worktree{
 		ProjectID: "wp1",
@@ -179,23 +183,29 @@ func TestGetActiveWorktreeBySession(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	s.CreateProject(ctx, &Project{ID: "ws1", Name: "proj", Mode: ModeGit})
+	if err := s.CreateProject(ctx, &Project{ID: "ws1", Name: "proj", Mode: ModeGit}); err != nil {
+		t.Fatal(err)
+	}
 
-	s.CreateWorktree(ctx, &Worktree{
+	if err := s.CreateWorktree(ctx, &Worktree{
 		ProjectID: "ws1",
 		SessionID: "sess-active",
 		Path:      "/tmp/wt-active",
 		Branch:    "session/sess-active",
 		Status:    "active",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
-	s.CreateWorktree(ctx, &Worktree{
+	if err := s.CreateWorktree(ctx, &Worktree{
 		ProjectID: "ws1",
 		SessionID: "sess-done",
 		Path:      "/tmp/wt-done",
 		Branch:    "session/sess-done",
 		Status:    "cleaned",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := s.GetActiveWorktreeBySession(ctx, "sess-active")
 	if err != nil {
@@ -215,15 +225,19 @@ func TestListWorktreesByProject(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	s.CreateProject(ctx, &Project{ID: "wl1", Name: "proj", Mode: ModeGit})
+	if err := s.CreateProject(ctx, &Project{ID: "wl1", Name: "proj", Mode: ModeGit}); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, id := range []string{"wt-a", "wt-b", "wt-c"} {
-		s.CreateWorktree(ctx, &Worktree{
+		if err := s.CreateWorktree(ctx, &Worktree{
 			ID:        id,
 			ProjectID: "wl1",
 			Path:      "/tmp/" + id,
 			Branch:    "feature/" + id,
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	wts, err := s.ListWorktreesByProject(ctx, "wl1")
@@ -239,25 +253,31 @@ func TestCleanupOrphanedWorktrees(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	s.CreateProject(ctx, &Project{ID: "wc1", Name: "proj", Mode: ModeGit})
+	if err := s.CreateProject(ctx, &Project{ID: "wc1", Name: "proj", Mode: ModeGit}); err != nil {
+		t.Fatal(err)
+	}
 
 	// active with empty session -> orphaned
-	s.CreateWorktree(ctx, &Worktree{
+	if err := s.CreateWorktree(ctx, &Worktree{
 		ID:        "wt-orphan",
 		ProjectID: "wc1",
 		Path:      "/tmp/orphan",
 		Branch:    "orphan",
 		Status:    "active",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// active with session -> not orphaned
-	s.CreateWorktree(ctx, &Worktree{
+	if err := s.CreateWorktree(ctx, &Worktree{
 		ID:        "wt-session",
 		ProjectID: "wc1",
 		SessionID: "sess-1",
 		Path:      "/tmp/session",
 		Branch:    "session/sess-1",
 		Status:    "active",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// active with plan_id only -> not orphaned
 	s.CreateWorktree(ctx, &Worktree{
 		ID:        "wt-plan",

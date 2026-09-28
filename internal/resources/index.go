@@ -84,7 +84,7 @@ func (i *Index) warm() error {
 			var rec metaRecord
 			if err := json.Unmarshal(v, &rec); err != nil {
 				// Corrupt record: skip rather than fail startup.
-				return nil
+				return nil //nolint:nilerr // deliberate: corrupt records are skipped so startup survives
 			}
 			key := string(k)
 			i.cache[key] = &rec

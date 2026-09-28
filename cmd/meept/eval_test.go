@@ -26,9 +26,9 @@ func runEvalRunFor(t *testing.T, storeDir string, opts EvalRunOptions) (string, 
 	}
 	out := buf.String()
 	idLine := ""
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "id: ") {
-			idLine = strings.TrimPrefix(line, "id: ")
+	for line := range strings.SplitSeq(out, "\n") {
+		if found, ok := strings.CutPrefix(line, "id: "); ok {
+			idLine = found
 			break
 		}
 	}
@@ -251,7 +251,7 @@ func TestRunEvalList_Cap50(t *testing.T) {
 	base := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
 
 	const total = evalListLimit + 5
-	for i := 0; i < total; i++ {
+	for i := range total {
 		id := "eval-x" + pad16(i)
 		saveRecordWithTime(t, storeDir, id, base.Add(time.Duration(i)*time.Minute))
 	}

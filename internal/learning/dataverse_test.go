@@ -20,7 +20,7 @@ func TestCreateSnapshot(t *testing.T) {
 		t.Fatalf("NewDomainDatasets failed: %v", err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		example := TrainingExample{
 			Instruction: "test question",
 			Output:      "test answer",
@@ -108,7 +108,7 @@ func TestPruneOldVersions(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := CreateSnapshot("code", datasetsDir, versionsDir); err != nil {
 			t.Fatalf("CreateSnapshot %d: %v", i, err)
 		}

@@ -43,17 +43,17 @@ func TestExpandEnvVarsCycle(t *testing.T) {
 
 	_, err := ExpandEnvVars("${CYCLE_A}")
 	if err == nil {
-		t.Fatal("expected ErrEnvVarCycle, got nil")
+		t.Fatal("expected EnvVarCycleError, got nil")
 	}
-	if !errors.Is(err, ErrEnvVarCycle{}) {
-		t.Errorf("expected ErrEnvVarCycle, got %T: %v", err, err)
+	if !errors.Is(err, EnvVarCycleError{}) {
+		t.Errorf("expected EnvVarCycleError, got %T: %v", err, err)
 	}
 }
 
-func TestErrEnvVarCycleIs(t *testing.T) {
-	err := ErrEnvVarCycle{Input: "test"}
+func TestEnvVarCycleErrorIs(t *testing.T) {
+	err := EnvVarCycleError{Input: "test"}
 	if !err.Is(err) {
-		t.Error("ErrEnvVarCycle.Is should match itself")
+		t.Error("EnvVarCycleError.Is should match itself")
 	}
 }
 

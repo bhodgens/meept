@@ -82,13 +82,13 @@ func TestRecordExecution_Accumulates(t *testing.T) {
 	def.Triggers = []BotTrigger{{Type: TriggerTypeWebhook, Enabled: true}}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	exec1 := &BotExecutionResult{BotID: "accum-bot", TokensUsed: 100, Success: true, Duration: time.Second}
 	exec2 := &BotExecutionResult{BotID: "accum-bot", TokensUsed: 200, Success: true, Duration: time.Second}
 
-	ct.RecordExecution(ctx, "accum-bot", exec1, ExecutionCost{TokensUsed: 100, CostCents: 2})
-	ct.RecordExecution(ctx, "accum-bot", exec2, ExecutionCost{TokensUsed: 200, CostCents: 4})
+	ct.RecordExecution(ctx, "accum-bot", exec1, ExecutionCost{TokensUsed: 100, CostCents: 2}) //nolint:errcheck // test setup: failures surface via the assertions below
+	ct.RecordExecution(ctx, "accum-bot", exec2, ExecutionCost{TokensUsed: 200, CostCents: 4}) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	state, _ := mgr.GetBotStatus(ctx, "accum-bot")
 
@@ -114,7 +114,7 @@ func TestRecordExecution_FailureTracking(t *testing.T) {
 	def.Triggers = []BotTrigger{{Type: TriggerTypeWebhook, Enabled: true}}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	failResult := &BotExecutionResult{
 		BotID:    "fail-bot",
@@ -122,7 +122,7 @@ func TestRecordExecution_FailureTracking(t *testing.T) {
 		Error:    "LLM timeout",
 		Duration: time.Second,
 	}
-	ct.RecordExecution(ctx, "fail-bot", failResult, ExecutionCost{CostCents: 1})
+	ct.RecordExecution(ctx, "fail-bot", failResult, ExecutionCost{CostCents: 1}) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	state, _ := mgr.GetBotStatus(ctx, "fail-bot")
 
@@ -135,7 +135,7 @@ func TestRecordExecution_FailureTracking(t *testing.T) {
 
 	// Successful run resets consecutive failures.
 	okResult := &BotExecutionResult{BotID: "fail-bot", Success: true, Duration: time.Second}
-	ct.RecordExecution(ctx, "fail-bot", okResult, ExecutionCost{CostCents: 0})
+	ct.RecordExecution(ctx, "fail-bot", okResult, ExecutionCost{CostCents: 0}) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	state, _ = mgr.GetBotStatus(ctx, "fail-bot")
 	if state.ConsecutiveFailures != 0 {
@@ -154,7 +154,7 @@ func TestRecordExecution_DailyRollover(t *testing.T) {
 	def.Triggers = []BotTrigger{{Type: TriggerTypeWebhook, Enabled: true}}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	today := time.Now().Format("2006-01-02")
@@ -169,10 +169,10 @@ func TestRecordExecution_DailyRollover(t *testing.T) {
 		TotalRuns:      50,
 		TotalCostCents: 100,
 	}
-	mgr.store.UpdateState(ctx, state)
+	mgr.store.UpdateState(ctx, state) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	result := &BotExecutionResult{BotID: "rollover-bot", TokensUsed: 10, Success: true, Duration: time.Second}
-	ct.RecordExecution(ctx, "rollover-bot", result, ExecutionCost{TokensUsed: 10, CostCents: 1})
+	ct.RecordExecution(ctx, "rollover-bot", result, ExecutionCost{TokensUsed: 10, CostCents: 1}) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	updated, _ := mgr.GetBotStatus(ctx, "rollover-bot")
 
@@ -203,7 +203,7 @@ func TestIsBudgetExhausted_UnderBudget(t *testing.T) {
 	def.Constraints = BotConstraints{DailyBudgetCents: 100}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	state := BotState{
 		DefinitionID:   "budget-ok",
@@ -211,7 +211,7 @@ func TestIsBudgetExhausted_UnderBudget(t *testing.T) {
 		TodayCostCents: 50,
 		TodayDate:      time.Now().Format("2006-01-02"),
 	}
-	mgr.store.UpdateState(ctx, state)
+	mgr.store.UpdateState(ctx, state) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	exhausted, err := ct.IsBudgetExhausted(ctx, "budget-ok")
 	if err != nil {
@@ -231,7 +231,7 @@ func TestIsBudgetExhausted_AtBudget(t *testing.T) {
 	def.Constraints = BotConstraints{DailyBudgetCents: 100}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	state := BotState{
 		DefinitionID:   "budget-at",
@@ -239,7 +239,7 @@ func TestIsBudgetExhausted_AtBudget(t *testing.T) {
 		TodayCostCents: 100,
 		TodayDate:      time.Now().Format("2006-01-02"),
 	}
-	mgr.store.UpdateState(ctx, state)
+	mgr.store.UpdateState(ctx, state) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	exhausted, err := ct.IsBudgetExhausted(ctx, "budget-at")
 	if err != nil {
@@ -259,7 +259,7 @@ func TestIsBudgetExhausted_NoBudgetSet(t *testing.T) {
 	def.Constraints = BotConstraints{} // no daily budget
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	state := BotState{
 		DefinitionID:   "no-budget",
@@ -267,7 +267,7 @@ func TestIsBudgetExhausted_NoBudgetSet(t *testing.T) {
 		TodayCostCents: 99999,
 		TodayDate:      time.Now().Format("2006-01-02"),
 	}
-	mgr.store.UpdateState(ctx, state)
+	mgr.store.UpdateState(ctx, state) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	exhausted, err := ct.IsBudgetExhausted(ctx, "no-budget")
 	if err != nil {
@@ -287,7 +287,7 @@ func TestIsBudgetExhausted_StaleDate(t *testing.T) {
 	def.Constraints = BotConstraints{DailyBudgetCents: 10}
 	def.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	def.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	state := BotState{
 		DefinitionID:   "stale-date",
@@ -295,7 +295,7 @@ func TestIsBudgetExhausted_StaleDate(t *testing.T) {
 		TodayCostCents: 100,
 		TodayDate:      time.Now().AddDate(0, 0, -1).Format("2006-01-02"),
 	}
-	mgr.store.UpdateState(ctx, state)
+	mgr.store.UpdateState(ctx, state) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	exhausted, err := ct.IsBudgetExhausted(ctx, "stale-date")
 	if err != nil {

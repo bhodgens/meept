@@ -22,11 +22,10 @@ func TestHashInput_Deterministic16Hex(t *testing.T) {
 		t.Fatalf("hash length = %d, want 16", len(h1))
 	}
 	for _, c := range h1 {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Fatalf("hash %q contains non-lowercase-hex char %q", h1, c)
 		}
 	}
-
 	// Different salt id -> different hash (the salt id IS the hash key per
 	// the contract; the raw salt bytes are held for a future keyed scheme).
 	if HashInput("cafebabecafebabe", salt, "commit this") == h1 {
@@ -55,7 +54,7 @@ func TestLoadOrCreateSalt_CreatesAndReloads(t *testing.T) {
 		t.Fatalf("salt id length = %d, want 16 hex chars", len(id1))
 	}
 	for _, c := range id1 {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Fatalf("salt id %q is not hex", id1)
 		}
 	}

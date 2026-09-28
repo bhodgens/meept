@@ -115,7 +115,7 @@ func TestSecretsSourceIsBrokerSource(t *testing.T) {
 	var _ secrets.Config = map[string]secrets.Source{}
 	// Conversion between the two named types must be legal (identical
 	// underlying type), proving zero drift.
-	var cfg secrets.Config = secrets.Config(SecretSources{})
+	cfg := secrets.Config(SecretSources{})
 	if cfg == nil {
 		t.Fatal("conversion produced nil")
 	}

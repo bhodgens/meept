@@ -39,13 +39,13 @@ func newBackupPushCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			payload := map[string]interface{}{"force": force}
+			payload := map[string]any{"force": force}
 			result, err := client.Call("backup.push", payload)
 			if err != nil {
 				return fmt.Errorf("backup push failed: %w", err)
 			}
 
-			var resultMap map[string]interface{}
+			var resultMap map[string]any
 			if err := json.Unmarshal(result, &resultMap); err != nil {
 				return fmt.Errorf("failed to parse response: %w", err)
 			}
@@ -88,7 +88,7 @@ func newBackupListCmd() *cobra.Command {
 				return runLocalBackupList()
 			}
 
-			var resultMap map[string]interface{}
+			var resultMap map[string]any
 			if err := json.Unmarshal(result, &resultMap); err != nil {
 				return fmt.Errorf("failed to parse response: %w", err)
 			}
@@ -106,7 +106,7 @@ func newBackupListCmd() *cobra.Command {
 				return nil
 			}
 
-			backups, ok := resultMap["backups"].([]interface{})
+			backups, ok := resultMap["backups"].([]any)
 			if !ok || len(backups) == 0 {
 				fmt.Println("No backups found.")
 				return nil
@@ -116,7 +116,7 @@ func newBackupListCmd() *cobra.Command {
 			fmt.Fprintln(w, "DATE\tDATABASE\tCOMPRESSED\tUNCOMPRESSED\tSHA256")
 
 			for _, bk := range backups {
-				bm, ok := bk.(map[string]interface{})
+				bm, ok := bk.(map[string]any)
 				if !ok {
 					continue
 				}
@@ -163,7 +163,7 @@ func runLocalBackupList() error {
 
 	type backupEntry struct {
 		date string
-		info map[string]interface{}
+		info map[string]any
 	}
 
 	var entries []backupEntry
@@ -177,15 +177,15 @@ func runLocalBackupList() error {
 			continue
 		}
 
-		var manifest map[string]interface{}
+		var manifest map[string]any
 		if err := json.Unmarshal(data, &manifest); err != nil {
 			continue
 		}
 
-		databases, _ := manifest["databases"].([]interface{})
+		databases, _ := manifest["databases"].([]any)
 
 		for _, db := range databases {
-			dbm, ok := db.(map[string]interface{})
+			dbm, ok := db.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -219,7 +219,7 @@ func runLocalBackupList() error {
 	return nil
 }
 
-func toInt64(v interface{}) int64 {
+func toInt64(v any) int64 {
 	switch val := v.(type) {
 	case float64:
 		return int64(val)

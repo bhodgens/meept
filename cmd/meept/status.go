@@ -105,10 +105,13 @@ func fetchDaemonHealth(client transport.Client) (map[string]any, error) {
 }
 
 // appendHealthText prints a lowercase health block for text status output.
+// The health fetch is best-effort enrichment: a daemon without the health
+// endpoint degrades to the plain status block, which is the documented
+// behavior — hence the nil return despite the checked error.
 func appendHealthText(client transport.Client) error {
 	health, err := fetchDaemonHealth(client)
 	if err != nil {
-		return nil // best-effort enrichment only
+		return nil //nolint:nilerr // best-effort enrichment only: the caller already prints "health unavailable" via its own error branch
 	}
 	fmt.Println()
 	fmt.Println("health")

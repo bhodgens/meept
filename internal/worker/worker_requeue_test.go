@@ -11,7 +11,6 @@ package worker
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -33,7 +32,7 @@ func (p *requeueProcessor) Process(_ context.Context, _ *queue.Job) (any, error)
 // (temp SQLite) with the given processor error and failure policy.
 func newRequeueTestWorker(t *testing.T, proc *requeueProcessor, policy *llm.FailurePolicyConfig) (*Worker, *queue.PersistentQueue) {
 	t.Helper()
-	q, err := queue.NewPersistentQueue(t.TempDir()+"/queue.db", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	q, err := queue.NewPersistentQueue(t.TempDir()+"/queue.db", nil, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewPersistentQueue: %v", err)
 	}
@@ -46,7 +45,7 @@ func newRequeueTestWorker(t *testing.T, proc *requeueProcessor, policy *llm.Fail
 		ID:        "w-test",
 		Queue:     q,
 		Processor: proc,
-		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:    slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
 		t.Fatalf("NewWorker: %v", err)
@@ -241,8 +240,7 @@ func TestWorker_GiveUpQuotaKeepsLegacyPath(t *testing.T) {
 	if procErr == nil {
 		t.Fatal("give-up must surface the original error to the legacy path")
 	}
-	var qe *llm.QuotaResetError
-	if !errors.As(procErr, &qe) {
+	if _, ok := errors.AsType[*llm.QuotaResetError](procErr); !ok {
 		t.Fatalf("give-up error lost the quota error: %v", procErr)
 	}
 	// MaxRetries=0 → the legacy Fail path dead-lettered the job (moved

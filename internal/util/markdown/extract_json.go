@@ -63,10 +63,10 @@ func extractBracketed(s string, open string) string {
 
 	depth := 0
 	for i := start; i < len(s); i++ {
-		ch := string(s[i])
-		if ch == open {
+		switch string(s[i]) {
+		case open:
 			depth++
-		} else if ch == close {
+		case close:
 			depth--
 			if depth == 0 {
 				return s[start : i+1]

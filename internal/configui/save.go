@@ -122,7 +122,7 @@ func applyMapDrilldownFields(cfg *config.Config, prefix string, fields []Field) 
 	if err != nil {
 		return err
 	}
-	for v.Kind() == reflect.Ptr {
+	for v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 	if v.Kind() != reflect.Map {
@@ -134,7 +134,7 @@ func applyMapDrilldownFields(cfg *config.Config, prefix string, fields []Field) 
 	entry := v.MapIndex(reflect.ValueOf(mapKey))
 	var entryVal reflect.Value
 	if entry.IsValid() {
-		if entry.Kind() == reflect.Ptr {
+		if entry.Kind() == reflect.Pointer {
 			entryVal = entry.Elem()
 		} else {
 			// Map returns unaddressable values for struct-valued maps.
@@ -156,7 +156,7 @@ func applyMapDrilldownFields(cfg *config.Config, prefix string, fields []Field) 
 		for i := range entryVal.NumField() {
 			field := entryVal.Type().Field(i)
 			tag := field.Tag.Get("json")
-			tagName := strings.Split(tag, ",")[0]
+			tagName, _, _ := strings.Cut(tag, ",")
 			if tagName == fieldName {
 				fv := entryVal.Field(i)
 				switch fv.Kind() {
@@ -191,7 +191,7 @@ func applyMapDrilldownFields(cfg *config.Config, prefix string, fields []Field) 
 	}
 
 	// Write the modified entry back to the map
-	if elemType.Kind() == reflect.Ptr {
+	if elemType.Kind() == reflect.Pointer {
 		v.SetMapIndex(reflect.ValueOf(mapKey), entryVal.Addr())
 	} else {
 		v.SetMapIndex(reflect.ValueOf(mapKey), entryVal)
@@ -223,14 +223,14 @@ func setStructField(target any, path string, value string) error {
 	fieldName := parts[len(parts)-1]
 
 	parentType := parent.Type()
-	if parent.Kind() == reflect.Ptr {
+	if parent.Kind() == reflect.Pointer {
 		parent = parent.Elem()
 		parentType = parent.Type()
 	}
 	for i := range parentType.NumField() {
 		field := parentType.Field(i)
 		tag := field.Tag.Get("json")
-		tagName := strings.Split(tag, ",")[0]
+		tagName, _, _ := strings.Cut(tag, ",")
 		if tagName == fieldName {
 			fv := parent.Field(i)
 			switch fv.Kind() {
@@ -242,7 +242,7 @@ func setStructField(target any, path string, value string) error {
 					return fmt.Errorf("invalid bool %q: %w", value, err)
 				}
 				fv.SetBool(b)
-			case reflect.Ptr:
+			case reflect.Pointer:
 				// Optional scalar, e.g. the *bool "absent means default"
 				// convention (auto_stop_on_exit): allocate and set so an
 				// explicit true/false round-trips instead of being rejected
@@ -344,12 +344,12 @@ func resolveMapStringString(target any, path string) (map[string]string, bool) {
 	if err != nil {
 		return nil, false
 	}
-	if parent.Kind() == reflect.Ptr {
+	if parent.Kind() == reflect.Pointer {
 		parent = parent.Elem()
 	}
 	for i := range parent.NumField() {
 		field := parent.Type().Field(i)
-		tagName := strings.Split(field.Tag.Get("json"), ",")[0]
+		tagName, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 		if tagName == fieldName {
 			fv := parent.Field(i)
 			if fv.Kind() == reflect.Map && fv.Type().Key().Kind() == reflect.String && fv.Type().Elem().Kind() == reflect.String {
@@ -393,8 +393,8 @@ func saveModelsConfig(sm *SectionModel) error {
 				if strings.HasPrefix(key, "lifecycle.") && provider.Lifecycle == nil {
 					provider.Lifecycle = &llm.RuntimeLifecycleConfig{}
 				}
-				switch {
-				case key == "lifecycle.model_paths":
+				switch key {
+				case "lifecycle.model_paths":
 					// Parse JSON-encoded map[string]string.
 					var m map[string]string
 					if err := json.Unmarshal([]byte(f.Get()), &m); err != nil {
@@ -403,7 +403,7 @@ func saveModelsConfig(sm *SectionModel) error {
 					if provider.Lifecycle != nil {
 						provider.Lifecycle.ModelPaths = m
 					}
-				case key == "lifecycle.spawn_command":
+				case "lifecycle.spawn_command":
 					if provider.Lifecycle != nil {
 						provider.Lifecycle.SpawnCommand = strings.Fields(f.Get())
 					}

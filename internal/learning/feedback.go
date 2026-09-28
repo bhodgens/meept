@@ -84,8 +84,16 @@ func ApplyUserFeedback(dataDir, sessionID, trajectoryID, feedback string) (*Feed
 		}
 		var traj ResearchTrajectory
 		if err := json.Unmarshal(line, &traj); err != nil {
-			w.Write(line)
-			w.WriteByte('\n')
+			if _, wErr := w.Write(line); wErr != nil {
+				out.Close()
+				os.Remove(tmpPath)
+				return nil, fmt.Errorf("learning: write raw line: %w", wErr)
+			}
+			if wErr := w.WriteByte('\n'); wErr != nil {
+				out.Close()
+				os.Remove(tmpPath)
+				return nil, fmt.Errorf("learning: write raw newline: %w", wErr)
+			}
 			continue
 		}
 		match := traj.SessionID == sessionID
@@ -104,12 +112,28 @@ func ApplyUserFeedback(dataDir, sessionID, trajectoryID, feedback string) (*Feed
 				os.Remove(tmpPath)
 				return nil, fmt.Errorf("learning: marshal updated trajectory: %w", mErr)
 			}
-			w.Write(data)
-			w.WriteByte('\n')
+			if _, wErr := w.Write(data); wErr != nil {
+				out.Close()
+				os.Remove(tmpPath)
+				return nil, fmt.Errorf("learning: write updated trajectory: %w", wErr)
+			}
+			if wErr := w.WriteByte('\n'); wErr != nil {
+				out.Close()
+				os.Remove(tmpPath)
+				return nil, fmt.Errorf("learning: write updated trajectory newline: %w", wErr)
+			}
 			continue
 		}
-		w.Write(line)
-		w.WriteByte('\n')
+		if _, wErr := w.Write(line); wErr != nil {
+			out.Close()
+			os.Remove(tmpPath)
+			return nil, fmt.Errorf("learning: write raw line: %w", wErr)
+		}
+		if wErr := w.WriteByte('\n'); wErr != nil {
+			out.Close()
+			os.Remove(tmpPath)
+			return nil, fmt.Errorf("learning: write raw newline: %w", wErr)
+		}
 	}
 	if err := sc.Err(); err != nil {
 		out.Close()
@@ -219,25 +243,57 @@ func updateDomainExampleScore(datasetsDir, domain, sessionID, instruction string
 		}
 		var ex TrainingExample
 		if err := json.Unmarshal(line, &ex); err != nil {
-			w.Write(line)
-			w.WriteByte('\n')
+			if _, wErr := w.Write(line); wErr != nil {
+				out.Close()
+				os.Remove(tmp)
+				return err
+			}
+			if wErr := w.WriteByte('\n'); wErr != nil {
+				out.Close()
+				os.Remove(tmp)
+				return err
+			}
 			continue
 		}
 		if ex.Metadata.SessionID == sessionID && ex.Instruction == instruction {
 			ex.Metadata.QualityScore = score
 			data, mErr := json.Marshal(ex)
 			if mErr != nil {
-				w.Write(line)
-				w.WriteByte('\n')
+				if _, wErr := w.Write(line); wErr != nil {
+					out.Close()
+					os.Remove(tmp)
+					return err
+				}
+				if wErr := w.WriteByte('\n'); wErr != nil {
+					out.Close()
+					os.Remove(tmp)
+					return err
+				}
 				continue
 			}
-			w.Write(data)
-			w.WriteByte('\n')
+			if _, wErr := w.Write(data); wErr != nil {
+				out.Close()
+				os.Remove(tmp)
+				return err
+			}
+			if wErr := w.WriteByte('\n'); wErr != nil {
+				out.Close()
+				os.Remove(tmp)
+				return err
+			}
 			changed = true
 			continue
 		}
-		w.Write(line)
-		w.WriteByte('\n')
+		if _, wErr := w.Write(line); wErr != nil {
+			out.Close()
+			os.Remove(tmp)
+			return err
+		}
+		if wErr := w.WriteByte('\n'); wErr != nil {
+			out.Close()
+			os.Remove(tmp)
+			return err
+		}
 	}
 	if err := sc.Err(); err != nil {
 		out.Close()

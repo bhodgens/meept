@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -165,13 +166,11 @@ func (m *Manager) ServerStatus(name string) (ServerConfig, ServerStats, bool) {
 		// Backward compat: fall back to running clients if SetConfigs was
 		// never called or this is an ad-hoc server.
 		if client, exists := m.clients[name]; exists {
-			cfg = ServerConfig{Name: name}
-			cfgOk = true
 			// stats derived from presence.
 			if client.IsConnected() {
-				return cfg, makeStatsFromState(StateActive, m.stats[name]), true
+				return ServerConfig{Name: name}, makeStatsFromState(StateActive, m.stats[name]), true
 			}
-			return cfg, makeStatsFromState(StateInactive, m.stats[name]), true
+			return ServerConfig{Name: name}, makeStatsFromState(StateInactive, m.stats[name]), true
 		}
 		return ServerConfig{}, ServerStats{}, false
 	}
@@ -806,14 +805,7 @@ func (m *Manager) reloadPhase1(newConfigs map[string]ServerConfig) []ServerConfi
 	for _, name := range serversToStart {
 		if existingClient, exists := m.clients[name]; exists {
 			// Skip ones already queued for stop above; otherwise queue for restart.
-			alreadyQueued := false
-			for _, s := range serversToStop {
-				if s == name {
-					alreadyQueued = true
-					break
-				}
-			}
-			if alreadyQueued {
+			if slices.Contains(serversToStop, name) {
 				continue
 			}
 			toClose = append(toClose, clientToClose{name, existingClient, "restart"})

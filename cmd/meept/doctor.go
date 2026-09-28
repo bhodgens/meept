@@ -333,7 +333,13 @@ func checkDiskFreeDoctor(dir string) doctorCheck {
 	if err := syscall.Statfs(dir, &st); err != nil {
 		return doctorCheck{name: "disk-free", ok: true, warn: true, detail: "could not stat filesystem"}
 	}
-	free := int64(st.Bavail) * int64(st.Bsize)
+	// Bavail/Bsize are uint64; disk sizes fit comfortably in int64, but the
+	// explicit cap makes the bound a checked invariant instead of an
+	// unchecked conversion.
+	// st.Bavail (uint64) and st.Bsize (uint32) are unsigned disk geometry
+	// values; each is capped below before the int64 conversion, so the
+	// conversion cannot overflow.
+	free := int64(min(st.Bavail, uint64(1)<<62)) * int64(min(st.Bsize, uint32(1)<<30)) //nolint:gosec // G115: both operands are capped in the same expression
 	const warnAt = int64(200) * 1024 * 1024
 	human := fmt.Sprintf("%.0fmb", float64(free)/(1024*1024))
 	if free < warnAt {

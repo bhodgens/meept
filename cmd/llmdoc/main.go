@@ -194,9 +194,9 @@ func collectMarkdownFiles(dir string, topLevelOnly bool) []string {
 			files = append(files, filepath.Join(dir, entry.Name()))
 		}
 	} else {
-		filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return nil
+				return err
 			}
 			if d.IsDir() {
 				return nil
@@ -209,7 +209,9 @@ func collectMarkdownFiles(dir string, topLevelOnly bool) []string {
 			}
 			files = append(files, path)
 			return nil
-		})
+		}); err != nil {
+			return nil
+		}
 	}
 
 	sort.Strings(files)
@@ -224,10 +226,9 @@ func titleFromFile(path string) string {
 	if err != nil {
 		return prettifyFilename(filepath.Base(path))
 	}
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "# ") {
-			title := strings.TrimPrefix(line, "# ")
+		if title, ok := strings.CutPrefix(line, "# "); ok {
 			title = strings.TrimSpace(title)
 			// Skip generic "index" titles
 			if title == "index" || title == "Index" {

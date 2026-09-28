@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -163,32 +164,32 @@ func modifyAPIKeysInConfig(v hujson.Value, keyToAdd, keyToRemove string) (hujson
 	}
 
 	// Parse into a mutable structure
-	var cfg map[string]interface{}
+	var cfg map[string]any
 	if err := json.Unmarshal(stdJSON, &cfg); err != nil {
 		return hujson.Value{}, err
 	}
 
 	// Ensure transport.http.api_keys exists
-	transport, ok := cfg["transport"].(map[string]interface{})
+	transport, ok := cfg["transport"].(map[string]any)
 	if !ok {
-		transport = make(map[string]interface{})
+		transport = make(map[string]any)
 		cfg["transport"] = transport
 	}
 
-	http, ok := transport["http"].(map[string]interface{})
+	http, ok := transport["http"].(map[string]any)
 	if !ok {
-		http = make(map[string]interface{})
+		http = make(map[string]any)
 		transport["http"] = http
 	}
 
 	apiKeysRaw, ok := http["api_keys"]
 	if !ok {
-		apiKeysRaw = []interface{}{}
+		apiKeysRaw = []any{}
 	}
 
-	apiKeys, ok := apiKeysRaw.([]interface{})
+	apiKeys, ok := apiKeysRaw.([]any)
 	if !ok {
-		apiKeys = []interface{}{}
+		apiKeys = []any{}
 	}
 
 	if keyToAdd != "" {
@@ -207,7 +208,7 @@ func modifyAPIKeysInConfig(v hujson.Value, keyToAdd, keyToRemove string) (hujson
 
 	if keyToRemove != "" {
 		// Remove key
-		newKeys := []interface{}{}
+		newKeys := []any{}
 		for _, k := range apiKeys {
 			if ks, ok := k.(string); ok && ks != keyToRemove {
 				newKeys = append(newKeys, ks)
@@ -332,15 +333,7 @@ func newTokenRevokeCmd() *cobra.Command {
 				return err
 			}
 
-			found := false
-			for _, k := range keys {
-				if k == key {
-					found = true
-					break
-				}
-			}
-
-			if !found {
+			if !slices.Contains(keys, key) {
 				return fmt.Errorf("API token not found in config")
 			}
 

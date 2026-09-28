@@ -67,14 +67,14 @@
     "path": "Content-Type",
     "handler": "",
     "file": "internal/comm/http/upload_handlers.go",
-    "line": 17
+    "line": 18
   },
   {
     "method": "GET",
     "path": "Content-Type",
     "handler": "",
     "file": "internal/comm/http/upload_handlers.go",
-    "line": 49
+    "line": 50
   },
   {
     "method": "GET",
@@ -2559,6 +2559,6 @@
     "path": "v",
     "handler": "",
     "file": "internal/tools/builtin/transcript_fetch.go",
-    "line": 700
+    "line": 685
   }
 ]

@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -286,7 +287,7 @@ func (h *ClusterHandler) handleDebugEvents(_ context.Context, params json.RawMes
 		req.Limit,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return []DebugEventRow{}, nil
 		}
 		return nil, fmt.Errorf("failed to query cluster events: %w", err)
@@ -313,6 +314,9 @@ func (h *ClusterHandler) handleDebugEvents(_ context.Context, params json.RawMes
 		}
 
 		events = append(events, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate cluster events: %w", err)
 	}
 
 	if events == nil {

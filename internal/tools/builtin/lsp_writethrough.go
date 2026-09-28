@@ -146,7 +146,7 @@ func (n *lspWriteNotifier) NotifyWrite(ctx context.Context, filePath string, con
 			result.Formatting = fr
 			// If formatting changed the file, re-read the content for diagnostics
 			if fr.Reformatted {
-				if updated, err := os.ReadFile(absPath); err == nil {
+				if updated, err := os.ReadFile(absPath); err == nil { //nolint:gosec // G703: absPath is resolvePath()d and fence-checked ("write") at the top of NotifyWrite
 					content = string(updated)
 				}
 			}
@@ -192,7 +192,7 @@ func (n *lspWriteNotifier) formatFile(ctx context.Context, srv *lsp.ServerInstan
 	}
 
 	// Notify LSP of the formatting change
-	if updated, err := os.ReadFile(absPath); err == nil {
+	if updated, err := os.ReadFile(absPath); err == nil { //nolint:gosec // G703: absPath is resolvePath()d and fence-checked ("write") at the top of NotifyWrite
 		if err := srv.DocMgr.UpdateFile(ctx, absPath, string(updated)); err != nil {
 			n.logger.Debug("lsp writethrough: doc manager update failed", "path", absPath, "error", err)
 		}
@@ -318,7 +318,7 @@ func (n *lspWriteNotifier) collectDiagnostics(ctx context.Context, srv *lsp.Serv
 
 // applyFormattingEdits applies text edits to a file on disk.
 func applyFormattingEdits(filePath string, edits []lsp.TextEdit) error {
-	content, err := os.ReadFile(filePath)
+	content, err := os.ReadFile(filePath) //nolint:gosec // G703: filePath passed fence-check ("write") in formatFile before this call
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
@@ -369,5 +369,5 @@ func applyFormattingEdits(filePath string, edits []lsp.TextEdit) error {
 		lines = strings.Split(newContent, "\n")
 	}
 
-	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644)
+	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644) //nolint:gosec // G703: filePath passed fence-check ("write") in formatFile before this call
 }

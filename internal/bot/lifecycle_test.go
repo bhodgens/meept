@@ -40,7 +40,7 @@ func TestManager_DeleteBot_StopsRunning(t *testing.T) {
 	ctx := context.Background()
 
 	def := testBotDef("delete-test")
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	mgr.mu.Lock()
 	mgr.running["delete-test"] = &runningBot{
@@ -68,7 +68,7 @@ func TestManager_PauseResumeBot(t *testing.T) {
 	ctx := context.Background()
 
 	def := testBotDef("pause-test")
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	err := mgr.PauseBot(ctx, "pause-test")
 	if err != nil {
@@ -97,7 +97,7 @@ func TestManager_ListBots(t *testing.T) {
 
 	for _, id := range []string{"bot-a", "bot-b", "bot-c"} {
 		def := testBotDef(id)
-		mgr.CreateBot(ctx, def)
+		mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 	}
 
 	bots, err := mgr.ListBots(ctx)
@@ -114,7 +114,7 @@ func TestManager_GetBotStatus_NotRunning(t *testing.T) {
 	ctx := context.Background()
 
 	def := testBotDef("status-test")
-	mgr.CreateBot(ctx, def)
+	mgr.CreateBot(ctx, def) //nolint:errcheck // test setup: failures surface via the assertions below
 
 	state, err := mgr.GetBotStatus(ctx, "status-test")
 	if err != nil {

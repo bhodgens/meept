@@ -266,7 +266,7 @@ func (p *ProxyHandler) makeProxy(requestTopic, responseTopic string, timeout tim
 							slog.Debug("proxy: discarding response from wrong topic",
 								"expected", responseTopic,
 								"actual", resp.Topic,
-								"msgID", msgID,
+								"msg_id", msgID,
 							)
 							continue
 						}

@@ -119,10 +119,10 @@ func TestFailurePolicyConfigTags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			st := reflect.TypeOf(FailurePolicyConfig{})
+			st := reflect.TypeFor[FailurePolicyConfig]()
 			var field reflect.StructField
 			var found bool
-			for i := 0; i < st.NumField(); i++ {
+			for i := range st.NumField() {
 				if strings.Split(st.Field(i).Tag.Get("json"), ",")[0] == tt.jsonTag {
 					field, found = st.Field(i), true
 					break
@@ -130,7 +130,7 @@ func TestFailurePolicyConfigTags(t *testing.T) {
 			}
 			if !found {
 				// Nested sub-block keys (pacing.*) live on PacingConfig.
-				st = reflect.TypeOf(PacingConfig{})
+				st = reflect.TypeFor[PacingConfig]()
 				for i := 0; i < st.NumField(); i++ {
 					if strings.Split(st.Field(i).Tag.Get("json"), ",")[0] == tt.jsonTag {
 						field, found = st.Field(i), true

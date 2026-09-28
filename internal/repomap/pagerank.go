@@ -7,7 +7,9 @@ package repomap
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
+	"strings"
 
 	"gonum.org/v1/gonum/graph"
 	"gonum.org/v1/gonum/graph/multi"
@@ -71,7 +73,7 @@ func ComputeRank(g *RepoGraph, config PageRankConfig) RankedTags {
 	rankedDefs := redistributeRank(g, pagerank)
 
 	// Sort by rank (descending)
-	sort.Sort(RankedTags(rankedDefs))
+	sort.Sort(rankedDefs)
 
 	return rankedDefs
 }
@@ -320,13 +322,7 @@ func matchesPathComponents(filePath, identifier string) bool {
 // containsPathComponent checks if a path component exactly matches the identifier.
 func containsPathComponent(path, ident string) bool {
 	// Check each path component
-	components := splitPath(path)
-	for _, comp := range components {
-		if comp == ident {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(splitPath(path), ident)
 }
 
 // containsPathComponentWithoutExt checks if path component matches identifier without extension.
@@ -449,7 +445,7 @@ func GetTagsByFile(ranked RankedTags) map[string]RankedTags {
 
 	// Sort each file's tags by score
 	for file := range result {
-		sort.Sort(RankedTags(result[file]))
+		sort.Sort(result[file])
 	}
 
 	return result
@@ -512,14 +508,7 @@ func (r RankedTags) String() string {
 }
 
 func joinLines(lines ...string) string {
-	result := ""
-	for i, line := range lines {
-		if i > 0 {
-			result += "\n"
-		}
-		result += line
-	}
-	return result
+	return strings.Join(lines, "\n")
 }
 
 // CombinedPersonalization merges multiple personalization maps into one.
@@ -572,7 +561,7 @@ func InversePageRank(g *RepoGraph, config PageRankConfig) RankedTags {
 	}
 
 	// Re-sort (now ascending - least important first becomes highest inverse score)
-	sort.Sort(sort.Reverse(RankedTags(ranked)))
+	sort.Sort(sort.Reverse(ranked))
 
 	return ranked
 }
@@ -636,7 +625,7 @@ func ComputeRankDetailed(g *RepoGraph, config PageRankConfig) (RankedTags, map[s
 	rankedDefs := redistributeRank(g, pagerank)
 
 	// Sort by rank (descending)
-	sort.Sort(RankedTags(rankedDefs))
+	sort.Sort(rankedDefs)
 
 	return rankedDefs, fileScores, nil
 }

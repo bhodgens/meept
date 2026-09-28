@@ -69,7 +69,7 @@ func TestInstructionConfirmationUpdateY(t *testing.T) {
 }
 
 func TestInstructionConfirmationUpdateN(t *testing.T) {
-	m := NewInstructionConfirmationData_Default()
+	m := NewInstructionConfirmationDataDefault()
 	newM, _ := m.Update(tea.KeyPressMsg{Text: "n"})
 	im, ok := newM.(InstructionConfirmationModel)
 	if !ok {
@@ -205,9 +205,9 @@ func TestInstructionConfirmationAllRiskLevels(t *testing.T) {
 	}
 }
 
-// NewInstructionConfirmationData_Default is a test helper that creates a model
+// NewInstructionConfirmationDataDefault is a test helper that creates a model
 // with default data. Named to avoid collision with sampleInstructionData.
-func NewInstructionConfirmationData_Default() InstructionConfirmationModel {
+func NewInstructionConfirmationDataDefault() InstructionConfirmationModel {
 	return NewInstructionConfirmationModel(InstructionConfirmationData{
 		RiskLevel: RiskMedium,
 		Action:    "shell",

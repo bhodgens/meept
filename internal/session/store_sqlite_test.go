@@ -1630,7 +1630,7 @@ func TestListSortsArchivedToBottom(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 
-	var oldActiveIdx, newArchivedIdx int = -1, -1
+	var oldActiveIdx, newArchivedIdx = -1, -1
 	for i, s := range sessions {
 		switch s.Name {
 		case "old active":

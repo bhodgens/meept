@@ -280,14 +280,14 @@ func (j *Journal) Revert(id_ string, fence FenceChecker) (string, error) {
 	preSHA := sha256.Sum256(preImage)
 	preHex := hex.EncodeToString(preSHA[:])
 
-	switch {
-	case currentHex == preHex:
+	switch currentHex {
+	case preHex:
 		// Already reverted (or was never actually changed after apply).
 		j.logger.Info("change journal: file already at pre-image state; skipping rewrite",
 			"entry_id", id_, "path", filePath)
 		return filePath, nil
 
-	case currentHex == postSHA:
+	case postSHA:
 		// Clean revert path below.
 
 	default:

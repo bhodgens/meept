@@ -239,8 +239,7 @@ func scanInstalledVoices() map[string]bool {
 			continue
 		}
 		name := entry.Name()
-		if strings.HasSuffix(name, ".onnx") {
-			voiceName := strings.TrimSuffix(name, ".onnx")
+		if voiceName, found := strings.CutSuffix(name, ".onnx"); found {
 			installed[voiceName] = true
 		}
 	}

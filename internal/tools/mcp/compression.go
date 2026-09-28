@@ -162,12 +162,9 @@ func (h *CompressionHandler) execCompress(ctx context.Context, args map[string]a
 		return nil, fmt.Errorf("compression pipeline not available: %w", errors.New("pipeline unavailable"))
 	}
 
-	minTokens := h.config.MinTokensToCompress
-	if minTokens <= 0 {
-		minTokens = 500
-	}
-
 	// Compress via CompressToolResult — handles CCR storage + marker injection.
+	// The compression threshold is owned by the pipeline's own
+	// MinTokensToCompress config (checked inside CompressToolResult).
 	compressed, err := pipeline.CompressToolResult(ctx, toolName, content, 1_000_000)
 	if err != nil {
 		return nil, fmt.Errorf("compression failed: %w", err)

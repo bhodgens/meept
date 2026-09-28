@@ -269,8 +269,8 @@ func (s *memStore) Retrieve(ctx context.Context, hash string) (*CCREntry, error)
 }
 
 func (s *memStore) Search(ctx context.Context, hash, query string) ([]CCRSearchResult, error) {
-	entry, err := s.Retrieve(ctx, hash)
-	if err != nil || entry == nil {
+	entry, _ := s.Retrieve(ctx, hash)
+	if entry == nil {
 		return nil, nil
 	}
 

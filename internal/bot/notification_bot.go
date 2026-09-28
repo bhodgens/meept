@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -183,7 +184,9 @@ func (nb *NotificationBot) handleEvent(ctx context.Context, event *http.Notifica
 	if nb.telegram != nil && len(nb.config.TelegramChatIDs) > 0 {
 		for _, chatIDStr := range nb.config.TelegramChatIDs {
 			var chatID int64
-			fmt.Sscanf(chatIDStr, "%d", &chatID)
+			// Malformed IDs parse to 0 and are skipped below; Sscanf's
+			// error adds nothing over that zero check.
+			_, _ = fmt.Sscanf(chatIDStr, "%d", &chatID)
 			if chatID == 0 {
 				continue
 			}
@@ -201,7 +204,7 @@ func (nb *NotificationBot) handleEvent(ctx context.Context, event *http.Notifica
 			nb.auditLog("telegram", chatIDStr, msg, trigger)
 
 			nb.wg.Add(1)
-			go func(id int64, m string) {
+			go func(id int64, m string) { //nolint:gosec // G118: intentionally detached — in-flight Telegram sends must not be cancelled by the event loop shutting down; bounded by the 15s timeout and nb.wg
 				defer nb.wg.Done()
 				// Use a detached context with timeout so in-flight sends
 				// are not cancelled by the event loop shutting down.
@@ -254,12 +257,7 @@ func containsKeyword(s string, keywords ...string) bool {
 
 // shouldNotify checks whether this trigger type is configured for notification.
 func (nb *NotificationBot) shouldNotify(trigger NotificationTriggerType) bool {
-	for _, t := range nb.config.NotifyOn {
-		if t == string(trigger) {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(nb.config.NotifyOn, string(trigger))
 }
 
 // allowRateLimit checks and records under the per-hour rate limit.
@@ -327,12 +325,7 @@ func (nb *NotificationBot) isChannelAllowed(channelType, channelID string) bool 
 		return true // empty allowlist = allow all for this type
 	}
 
-	for _, id := range allowed {
-		if id == channelID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, channelID)
 }
 
 // auditLog records a notification delivery for audit purposes.

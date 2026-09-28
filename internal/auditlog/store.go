@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -116,7 +117,7 @@ func (s *Store) Append(ctx context.Context, rec Record) (Record, error) {
 	defer func() {
 		// Rollback after Commit is a documented no-op (sql.ErrTxDone);
 		// anything else is logged, never dropped.
-		if rerr := tx.Rollback(); rerr != nil && rerr != sql.ErrTxDone {
+		if rerr := tx.Rollback(); rerr != nil && !errors.Is(rerr, sql.ErrTxDone) {
 			s.logger.Debug("audit log append: post-commit rollback", "error", rerr)
 		}
 	}()
@@ -126,10 +127,10 @@ func (s *Store) Append(ctx context.Context, rec Record) (Record, error) {
 	var seq uint64
 	var prev string
 	err = tx.QueryRowContext(ctx, `SELECT seq, record_hash FROM audit_log_chain ORDER BY seq DESC LIMIT 1`).Scan(&seq, &prev)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Record{}, fmt.Errorf("audit log append: head: %w", err)
 	}
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		seq, prev = 0, ""
 	}
 	rec.Seq = seq + 1

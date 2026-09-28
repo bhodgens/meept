@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"text/tabwriter"
 
@@ -88,9 +89,7 @@ func buildLanesArtifact() lanesArtifact {
 			// will not load in the daemon either, so skipping is honest here.
 			continue
 		}
-		for lane, agentID := range index {
-			declared[lane] = agentID
-		}
+		maps.Copy(declared, index)
 	}
 	source := "static"
 	if len(declared) > 0 {

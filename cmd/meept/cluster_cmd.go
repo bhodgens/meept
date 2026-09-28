@@ -803,8 +803,11 @@ func newClusterRemoteListCmd() *cobra.Command {
 			registryPath := filepath.Join(stateDir, stateDirCluster, "registry")
 			out, err := exec.Command("git", "-C", registryPath, "remote", "-v").CombinedOutput()
 			if err != nil {
+				// git exits non-zero both for "no remotes" and for a
+				// registry that was never initialized; neither is a
+				// command failure for `cluster remote list`.
 				fmt.Println("(no remotes configured)")
-				return nil
+				return nil //nolint:nilerr // git exits non-zero for "no remotes" too; that is a report outcome, not a command failure
 			}
 			fmt.Print(string(out))
 			return nil
@@ -877,7 +880,9 @@ func sanitizeNodeID(id string) string {
 	var sb strings.Builder
 	for _, r := range id {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			sb.WriteByte(byte(r))
+			// The guard admits only ASCII (< 128), so the conversion
+			// cannot overflow a byte.
+			sb.WriteByte(byte(r)) //nolint:gosec // G115: r is proven ASCII by the guard above
 		}
 	}
 	return sb.String()

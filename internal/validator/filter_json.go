@@ -100,14 +100,10 @@ func decodeSingleJSON(output string) (any, error) {
 // "invalid JSON at offset N: <err>".
 func jsonInvalidReason(err error) string {
 	offset := int64(0)
-	var syn *json.SyntaxError
-	if errors.As(err, &syn) {
+	if syn, ok := errors.AsType[*json.SyntaxError](err); ok {
 		offset = syn.Offset
-	} else {
-		var typeErr *json.UnmarshalTypeError
-		if errors.As(err, &typeErr) {
-			offset = typeErr.Offset
-		}
+	} else if typeErr, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
+		offset = typeErr.Offset
 	}
 	return fmt.Sprintf("invalid JSON at offset %d: %v", offset, err)
 }

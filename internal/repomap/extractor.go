@@ -406,11 +406,8 @@ func GetReferencesByFile(tags []Tag) map[string][]Tag {
 func FilterTagsByKind(tags []Tag, kinds ...string) []Tag {
 	var filtered []Tag
 	for _, tag := range tags {
-		for _, kind := range kinds {
-			if tag.Kind == kind {
-				filtered = append(filtered, tag)
-				break
-			}
+		if slices.Contains(kinds, tag.Kind) {
+			filtered = append(filtered, tag)
 		}
 	}
 	return filtered

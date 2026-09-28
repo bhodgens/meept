@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -398,7 +400,11 @@ func newMemorySupersedeCmd() *cobra.Command {
 				fmt.Printf("supersede claim %s with %s?\n", oldID, newID)
 				fmt.Print("confirm? [y/N] ")
 				var resp string
-				fmt.Scanln(&resp)
+				// EOF (piped empty stdin) means no confirmation was given;
+				// resp stays empty and the branch below cancels.
+				if _, scanErr := fmt.Scanln(&resp); scanErr != nil && !errors.Is(scanErr, io.EOF) {
+					return fmt.Errorf("read confirmation: %w", scanErr)
+				}
 				if strings.ToLower(resp) != "y" {
 					fmt.Println("cancelled")
 					return nil

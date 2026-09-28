@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"strings"
 	"sync"
 
@@ -42,7 +43,7 @@ type Palette struct {
 var (
 	paletteOnce     sync.Once
 	paletteTokens   theme.Tokens
-	paletteParseErr error
+	errPaletteParse error
 
 	// Initialized as a var initializer (not in init()): styles.go's Color*
 	// vars call Current(), and Go initializes same-package vars in
@@ -82,9 +83,9 @@ func newDefaultPalette() *Palette {
 func loadTokens() (theme.Tokens, error) {
 	paletteOnce.Do(func() {
 		tokens, err := theme.Parse(theme.TokensJSON5)
-		paletteTokens, paletteParseErr = tokens, err
+		paletteTokens, errPaletteParse = tokens, err
 	})
-	return paletteTokens, paletteParseErr
+	return paletteTokens, errPaletteParse
 }
 
 // PaletteNames lists the selectable theme variants.
@@ -98,14 +99,7 @@ func PaletteNames() []string {
 // in theme.FrozenVariants are selectable: theme.Parse validates exactly that
 // set, so anything else in the token file is unvetted.
 func buildPalette(tokens theme.Tokens, name string) (*Palette, error) {
-	frozen := false
-	for _, v := range theme.FrozenVariants {
-		if v == name {
-			frozen = true
-			break
-		}
-	}
-	if !frozen {
+	if !slices.Contains(theme.FrozenVariants, name) {
 		return nil, fmt.Errorf("tui: unknown ui theme %q (valid: %s)",
 			name, strings.Join(PaletteNames(), ", "))
 	}

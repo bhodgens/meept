@@ -88,7 +88,7 @@ func TestRecordResearchMultiple(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := rec.RecordResearch(ctx, "session-multi", "query", "grep", "output"); err != nil {
 			t.Fatalf("RecordResearch[%d] failed: %v", i, err)
 		}

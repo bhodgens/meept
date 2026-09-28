@@ -179,7 +179,7 @@ func (t *FileGrepTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 	err = filepath.WalkDir(resolved, func(walkPath string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return nil //nolint:nilerr // best-effort grep: an unreadable entry is skipped, not fatal
 		}
 
 		// Skip .git and common ignored directories
@@ -196,14 +196,14 @@ func (t *FileGrepTool) Execute(ctx context.Context, args map[string]any) (any, e
 		if globFilter != "" {
 			matched, matchErr := filepath.Match(globFilter, d.Name())
 			if matchErr != nil || !matched {
-				return nil
+				return nil //nolint:nilerr // malformed glob or non-match: skip the file, never abort the walk
 			}
 		}
 
 		// Check file size
 		fInfo, statErr := d.Info()
 		if statErr != nil {
-			return nil
+			return nil //nolint:nilerr // unreadable file metadata: skip the file, never abort the walk
 		}
 		if fInfo.Size() > MaxReadSize {
 			return nil
@@ -212,7 +212,7 @@ func (t *FileGrepTool) Execute(ctx context.Context, args map[string]any) (any, e
 		// Read file and check for binary
 		content, readErr := os.ReadFile(walkPath)
 		if readErr != nil {
-			return nil
+			return nil //nolint:nilerr // unreadable file: skip it, never abort the walk
 		}
 		if isBinary(content) {
 			return nil

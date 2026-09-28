@@ -136,6 +136,7 @@ func TestScanAndReport(t *testing.T) {
 }
 
 func TestScanMultipleMatches(t *testing.T) {
+	//nolint:gosec // G101: AWS docs sample key + synthetic github token, no real credentials
 	text := `AKIAIOSFODNN7EXAMPLE and ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij1234`
 	s := NewSecretScanner()
 	matches := s.Scan(text)

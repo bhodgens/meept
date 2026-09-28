@@ -216,8 +216,11 @@ func TestReportArtifact_OutputDirCreation(t *testing.T) {
 	}
 	ra, _ := NewReportArtifact(cfg)
 
-	if _, err := os.Stat(nested); os.IsNotExist(err) {
-		// Verify dir does not exist yet
+	// Pre-condition: the nested output dir must not exist yet. (Note: the
+	// original check only asserted the err value, never that Stat actually
+	// reported NotExist.)
+	if _, statErr := os.Stat(nested); !os.IsNotExist(statErr) {
+		t.Fatalf("pre-condition: expected %s to not exist yet, got err=%v", nested, statErr)
 	}
 
 	err := ra.Generate(sampleFailures(), sampleAnalysis)

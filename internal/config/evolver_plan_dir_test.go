@@ -14,7 +14,9 @@ func TestEvolverPlanDir_EmptyResolvesToUserSink(t *testing.T) {
 	fixture := t.TempDir()
 	t.Setenv("HOME", fixture)
 	cfg := DefaultConfig()
-	NormalizeEvolverDefaults(&cfg.Skills.Evolver)
+	if err := NormalizeEvolverDefaults(&cfg.Skills.Evolver); err != nil {
+		t.Fatalf("NormalizeEvolverDefaults: %v", err)
+	}
 
 	want := filepath.Join(fixture, ".meept", "plans", "evolver")
 	if got := cfg.Skills.Evolver.PlanDir; got != want {
@@ -29,7 +31,9 @@ func TestEvolverPlanDir_TildeExpanded(t *testing.T) {
 	t.Setenv("HOME", fixture)
 	cfg := DefaultConfig()
 	cfg.Skills.Evolver.PlanDir = "~/my/evolver-sink"
-	NormalizeEvolverDefaults(&cfg.Skills.Evolver)
+	if err := NormalizeEvolverDefaults(&cfg.Skills.Evolver); err != nil {
+		t.Fatalf("NormalizeEvolverDefaults: %v", err)
+	}
 
 	want := filepath.Join(fixture, "my", "evolver-sink")
 	if got := cfg.Skills.Evolver.PlanDir; got != want {
@@ -45,7 +49,9 @@ func TestEvolverPlanDir_AbsolutePassthrough(t *testing.T) {
 	abs := filepath.Join(fixture, "data", "sink")
 	cfg := DefaultConfig()
 	cfg.Skills.Evolver.PlanDir = abs
-	NormalizeEvolverDefaults(&cfg.Skills.Evolver)
+	if err := NormalizeEvolverDefaults(&cfg.Skills.Evolver); err != nil {
+		t.Fatalf("NormalizeEvolverDefaults: %v", err)
+	}
 
 	if got := cfg.Skills.Evolver.PlanDir; got != abs {
 		t.Fatalf("plan_dir = %q, want unchanged %q", got, abs)

@@ -2,6 +2,7 @@ package pty
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -78,7 +79,7 @@ func TestPTYSession_Close(t *testing.T) {
 
 	// Writing to a closed session should return ErrSessionClosed
 	_, err = sess.Write([]byte("test"))
-	if err != ErrSessionClosed {
+	if !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("expected ErrSessionClosed, got %v", err)
 	}
 
@@ -285,7 +286,7 @@ func TestKillProcessTree(t *testing.T) {
 	}
 
 	// cmd.Wait will reap the process
-	cmd.Wait()
+	_ = cmd.Wait() // error is intentionally ignored; the Signal(0) check below verifies termination
 
 	// Process should be dead
 	err := cmd.Process.Signal(syscall.Signal(0))

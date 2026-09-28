@@ -108,7 +108,6 @@ func (m *FileMutator) MutateInCondition(source string, lineNum int) (string, boo
 	}
 
 	line := lines[lineNum-1]
-	mutated := line
 
 	// Pattern: if <expr> { -> if !(<expr>) {
 	ifPattern := regexp.MustCompile(`if\s+(\S+)\s*\{`)
@@ -116,6 +115,7 @@ func (m *FileMutator) MutateInCondition(source string, lineNum int) (string, boo
 		matches := ifPattern.FindStringSubmatch(line)
 		if len(matches) == 2 {
 			expr := matches[1]
+			var mutated string
 			// Don't double-negate
 			if strings.HasPrefix(expr, "!") {
 				// Remove double negation: if !x { -> if x {
@@ -217,10 +217,10 @@ func (r *MutationReport) String() string {
 	var sb strings.Builder
 	sb.WriteString("Mutation Testing Report\n")
 	sb.WriteString("=======================\n")
-	sb.WriteString(fmt.Sprintf("Total mutations: %d\n", r.TotalMutations))
-	sb.WriteString(fmt.Sprintf("Killed (caught): %d\n", r.KilledMutations))
-	sb.WriteString(fmt.Sprintf("Survived (missed): %d\n", r.SurvivedMutations))
-	sb.WriteString(fmt.Sprintf("Mutation score: %.1f%%\n", r.MutationScore))
+	fmt.Fprintf(&sb, "Total mutations: %d\n", r.TotalMutations)
+	fmt.Fprintf(&sb, "Killed (caught): %d\n", r.KilledMutations)
+	fmt.Fprintf(&sb, "Survived (missed): %d\n", r.SurvivedMutations)
+	fmt.Fprintf(&sb, "Mutation score: %.1f%%\n", r.MutationScore)
 	sb.WriteString("\n")
 
 	if len(r.Results) > 0 {
@@ -230,8 +230,8 @@ func (r *MutationReport) String() string {
 			if res.TestPassed {
 				status = "SURVIVED (test insufficient)"
 			}
-			sb.WriteString(fmt.Sprintf("  [%s] %s at %s:%d - %s\n",
-				status, res.MutatorType, res.FilePath, res.LineNumber, res.Description))
+			fmt.Fprintf(&sb, "  [%s] %s at %s:%d - %s\n",
+				status, res.MutatorType, res.FilePath, res.LineNumber, res.Description)
 		}
 	}
 
@@ -290,8 +290,12 @@ func RunFileMutations(t *testing.T, filePath string, testFn func(sourcePath stri
 		// Write the mutated copy to its own file in the test's temp dir;
 		// never overwrite the original source. The write error is checked:
 		// a failed write would silently test the ORIGINAL code instead.
+		// G703: tmpFile is contained — it is always
+		// filepath.Join(t.TempDir(), "mutation_<i>.go") where <i> is the
+		// loop counter, so the leaf name contains no user/LLM-controlled
+		// path separators and stays inside the TempDir root.
 		tmpFile := filepath.Join(t.TempDir(), fmt.Sprintf("mutation_%d.go", i))
-		if err := os.WriteFile(tmpFile, []byte(mutatedSource), 0o644); err != nil {
+		if err := os.WriteFile(tmpFile, []byte(mutatedSource), 0o644); err != nil { //nolint:gosec // path is rooted in t.TempDir() with a counter-only leaf name; no traversal possible
 			t.Fatalf("failed to write mutated file %s: %v", tmpFile, err)
 		}
 

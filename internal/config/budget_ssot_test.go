@@ -186,7 +186,14 @@ func TestNoNonZeroBudgetDefaultsOutsideConfig(t *testing.T) {
 			return nil
 		}
 
-		data, readErr := os.ReadFile(path)
+		// G122: read through an os.Root anchored at the walk root so a
+		// symlink swapped in during the walk cannot escape the tree.
+		rootFS, rootErr := os.OpenRoot(root)
+		if rootErr != nil {
+			return rootErr
+		}
+		defer rootFS.Close()
+		data, readErr := rootFS.ReadFile(rel)
 		if readErr != nil {
 			return readErr
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -153,10 +154,8 @@ func toolCallNames(calls []ToolCallRecord) []string {
 // appendUnique appends s to slice if not already present, deduplicating as it
 // goes. Returns the (possibly extended) slice.
 func appendUnique(slice []string, s string) []string {
-	for _, v := range slice {
-		if v == s {
-			return slice
-		}
+	if slices.Contains(slice, s) {
+		return slice
 	}
 	return append(slice, s)
 }
@@ -215,8 +214,14 @@ func enforceRetention(datasetsDir, domain string, maxBytes int64) error {
 	}
 	w := bufio.NewWriter(out)
 	for _, l := range kept {
-		w.WriteString(l)
-		w.WriteByte('\n')
+		if _, err := w.WriteString(l); err != nil {
+			out.Close()
+			return err
+		}
+		if err := w.WriteByte('\n'); err != nil {
+			out.Close()
+			return err
+		}
 	}
 	if err := w.Flush(); err != nil {
 		out.Close()

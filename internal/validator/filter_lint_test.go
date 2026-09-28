@@ -161,7 +161,7 @@ func TestGoLintFilter_RewriteSubstitution(t *testing.T) {
 // gofmtUsesTabs reports whether the block's body lines are tab-indented
 // (gofmt's canonical style) regardless of editor renderings.
 func gofmtUsesTabs(block string) bool {
-	for _, line := range strings.Split(block, "\n") {
+	for line := range strings.SplitSeq(block, "\n") {
 		if strings.Contains(line, "fmt.Println") {
 			return strings.HasPrefix(line, "\t")
 		}

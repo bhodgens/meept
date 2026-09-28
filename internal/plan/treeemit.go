@@ -489,8 +489,8 @@ func rootContracts(cp *CompiledPlan) string {
 // contractLetter maps a 0-based phase index to a stable A, B, ... label;
 // beyond Z it falls back to a deterministic indexed form.
 func contractLetter(i int) string {
-	if i < 26 {
-		return string(rune('A' + i))
+	if i >= 0 && i < 26 {
+		return string(rune('A' + i)) //nolint:gosec // i is bounded to [0,26) so the conversion cannot overflow
 	}
 	return "C" + strconv.Itoa(i-25)
 }

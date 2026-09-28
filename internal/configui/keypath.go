@@ -51,14 +51,14 @@ func SetKeypath(cfg *config.Config, path string, value any) error {
 
 	// Find field by JSON tag
 	parentType := parent.Type()
-	if parent.Kind() == reflect.Ptr {
+	if parent.Kind() == reflect.Pointer {
 		parent = parent.Elem()
 		parentType = parent.Type()
 	}
 	for i := range parentType.NumField() {
 		field := parentType.Field(i)
 		tag := field.Tag.Get("json")
-		tagName := strings.Split(tag, ",")[0]
+		tagName, _, _ := strings.Cut(tag, ",")
 		if tagName == fieldName {
 			fv := parent.Field(i)
 			switch val := value.(type) {
@@ -112,7 +112,7 @@ func SetKeypath(cfg *config.Config, path string, value any) error {
 
 func resolvePath(v reflect.Value, parts []string) (reflect.Value, error) {
 	for _, part := range parts {
-		for v.Kind() == reflect.Ptr {
+		for v.Kind() == reflect.Pointer {
 			v = v.Elem()
 		}
 		if v.Kind() != reflect.Struct {
@@ -122,7 +122,7 @@ func resolvePath(v reflect.Value, parts []string) (reflect.Value, error) {
 		found := false
 		for i := range t.NumField() {
 			tag := t.Field(i).Tag.Get("json")
-			tagName := strings.Split(tag, ",")[0]
+			tagName, _, _ := strings.Cut(tag, ",")
 			if tagName == part {
 				v = v.Field(i)
 				found = true

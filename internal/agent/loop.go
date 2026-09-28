@@ -223,11 +223,9 @@ func (cd *cycleDetector) recordCall(tool string, argsJSON string) (bool, int) {
 // CycleThreshold+1 (default 4).
 func (cd *cycleDetector) detectCycle(tool, argHash string, streak int) (bool, int) {
 	threshold := cd.config.CycleThreshold
-	if threshold < 1 {
-		// Degenerate config: one call is the floor of any run. (The old
-		// implementation indexed an empty window here and panicked.)
-		threshold = 1
-	}
+	// Degenerate config: one call is the floor of any run. (The old
+	// implementation indexed an empty window here and panicked.)
+	threshold = max(threshold, 1)
 
 	if streak < threshold {
 		return false, streak
@@ -3011,9 +3009,10 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		userMsg := userMessage
 		duration := time.Since(begin)
 
-		l.wg.Add(1)
-		go func() {
-			defer l.wg.Done()
+		// G118: goroutine intentionally outlives request context —
+		// background reflection persistence; loopCtx cancels when RunOnce
+		// returns but the LLM reflection call must complete.
+		l.wg.Go(func() {
 			defer func() {
 				if r := recover(); r != nil {
 					l.logger.Warn("reflection panicked", "error", r)
@@ -3024,7 +3023,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			if err := rc.ReflectTurn(context.Background(), traj); err != nil {
 				l.logger.Warn("reflection failed", "error", err)
 			}
-		}()
+		})
 	}
 
 	// Keep the legacy learning pipeline goroutine for skill success/fail
@@ -3050,11 +3049,12 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		}
 
 		if l.learningPipeline != nil && err == nil {
-			l.wg.Add(1)
-			go func() {
-				defer l.wg.Done()
+			// G118: goroutine intentionally outlives request context —
+			// background skill-outcome persistence after the turn's ctx is
+			// cancelled.
+			l.wg.Go(func() {
 				l.triggerLearning(context.Background(), conv, conversationID, finalResponse, injectedSkillsSnapshot)
-			}()
+			})
 		}
 	}
 
@@ -3072,9 +3072,10 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		synthesis := finalResponse
 		success := err == nil
 
-		l.wg.Add(1)
-		go func() {
-			defer l.wg.Done()
+		// G118: goroutine intentionally outlives request context —
+		// background LoRA trajectory persistence after the turn's ctx is
+		// cancelled.
+		l.wg.Go(func() {
 			defer func() {
 				if r := recover(); r != nil {
 					l.logger.Warn("learning trajectory capture panicked", "error", r)
@@ -3088,7 +3089,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			if err := lc.RecordTrajectory(context.Background(), convID, intent, synthesis, toolNames, success); err != nil {
 				l.logger.Warn("learning trajectory capture failed", "error", err)
 			}
-		}()
+		})
 	}
 
 	// Add final response to conversation. If the last iteration ended
@@ -3191,20 +3192,21 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			intent = "chat"
 		}
 		hook := l.epistemicHook // capture to avoid race on l.epistemicHook
-		l.wg.Add(1)
-		go func() {
-			defer l.wg.Done()
+		// G118: goroutine intentionally outlives request context —
+		// background epistemic extraction whose I/O must finish after the
+		// turn's ctx is cancelled. Uses context.Background() because the
+		// parent context may be cancelled before the extractor finishes
+		// its I/O.
+		l.wg.Go(func() {
 			defer func() {
 				if r := recover(); r != nil {
 					l.logger.Warn("epistemic hook panicked", "error", r)
 				}
 			}()
-			// Use context.Background() because the parent context may be
-			// cancelled before the extractor finishes its I/O.
 			if _, err := hook.AfterTurn(context.Background(), intent, window); err != nil {
 				l.logger.Debug("epistemic hook completed with error", "error", err)
 			}
-		}()
+		})
 	}
 
 	// Queue prefetch for next turn (Hermes pattern)
@@ -4566,8 +4568,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Check for TTSR abort — retry with rule content injected.
 			// On mid-stream rule match, the LLM output violated a guardrail.
 			// We prepend the rule as a system reminder and retry.
-			var abortErr *llm.StreamAbortedError
-			if errors.As(err, &abortErr) {
+			if abortErr, ok := errors.AsType[*llm.StreamAbortedError](err); ok {
 				l.logger.Info("TTSR abort detected, retrying with rule injection",
 					"iteration", iteration,
 					"rule", abortErr.RuleName,
@@ -4646,8 +4647,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				// transition records the park). The D8 give-up error
 				// surfaces when the wait exceeds MaxWait. With no parker
 				// wired, the tree-02 pass-through is kept verbatim.
-				var throttleBackoffErr *llm.ThrottleBackoffError
-				if errors.As(err, &throttleBackoffErr) {
+				if throttleBackoffErr, ok := errors.AsType[*llm.ThrottleBackoffError](err); ok {
 					if parked, giveUp := l.parkThrottledTurn(ctx, throttleBackoffErr); parked || giveUp != nil {
 						if giveUp != nil {
 							return "", giveUp
@@ -4671,8 +4671,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				// a ThrottleGiveUpError is terminal and non-retryable —
 				// surface it verbatim WITHOUT the StateError/recovery path
 				// (which would reset to Idle and absorb the error).
-				var giveUpErr *llm.ThrottleGiveUpError
-				if errors.As(err, &giveUpErr) {
+				if giveUpErr, ok := errors.AsType[*llm.ThrottleGiveUpError](err); ok {
 					return "", giveUpErr
 				}
 
@@ -4814,7 +4813,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				}
 				routingPath := l.deriveRoutingPath()
 				l.wg.Add(1)
-				go func(convID string, msgs []llm.ChatMessage, resp *llm.Response, mid, route string) {
+				go func(convID string, msgs []llm.ChatMessage, resp *llm.Response, mid, route string) { //nolint:gosec // G118: goroutine intentionally outlives request context — background shadow-training capture after the turn's ctx is cancelled
 					defer l.wg.Done()
 					defer func() {
 						if r := recover(); r != nil {
@@ -5457,7 +5456,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// when the loop returns, but shadow capture is best-effort and
 			// should outlive the request (S1-9).
 			l.wg.Add(1)
-			go func(convID string, msgs []llm.ChatMessage, resp *llm.Response, mid, route string) {
+			go func(convID string, msgs []llm.ChatMessage, resp *llm.Response, mid, route string) { //nolint:gosec // G118: goroutine intentionally outlives request context — background shadow-training capture after the turn's ctx is cancelled
 				defer l.wg.Done()
 				defer func() {
 					if r := recover(); r != nil {
@@ -5811,8 +5810,7 @@ func (l *AgentLoop) attemptStateRecovery(err error) error {
 	// Budget exhaustion must propagate to the caller so the handler can
 	// surface a user-visible message. Absorbing it here would leave the
 	// user staring at a blank reply with no explanation.
-	var budgetErr *llm.BudgetExceededError
-	if errors.As(err, &budgetErr) {
+	if _, ok := errors.AsType[*llm.BudgetExceededError](err); ok {
 		// Still reset the state machine so the next turn starts clean.
 		if l.stateMachine.CurrentState() == StateError {
 			if tErr := l.stateMachine.Transition(StateIdle, "budget_recovery_reset", map[string]any{
@@ -6264,8 +6262,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		// turn PARKS on the BackoffPlan schedule via parkThrottledTurn, or
 		// the D8 give-up error surfaces when the wait exceeds MaxWait. With
 		// no parker wired (nil), the tree-02 pass-through is kept verbatim.
-		var throttleBackoffErr *llm.ThrottleBackoffError
-		if errors.As(err, &throttleBackoffErr) {
+		if throttleBackoffErr, ok := errors.AsType[*llm.ThrottleBackoffError](err); ok {
 			if parked, giveUp := l.parkThrottledTurn(ctx, throttleBackoffErr); parked || giveUp != nil {
 				if giveUp != nil {
 					return nil, giveUp
@@ -6284,8 +6281,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		}
 
 		// Check if it's a rate limit error
-		var rateLimitErr *llm.RateLimitError
-		if errors.As(err, &rateLimitErr) {
+		if rateLimitErr, ok := errors.AsType[*llm.RateLimitError](err); ok {
 			l.logger.Warn("Rate limit hit, handling with backoff",
 				"provider", rateLimitErr.ProviderID,
 				"model", rateLimitErr.ModelID,
@@ -6383,8 +6379,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		// blocked (or no alias is configured) does the original error return
 		// — the caller (ChatHandler) then parks the turn for auto-resume at
 		// the reset time.
-		var quotaErr *llm.QuotaResetError
-		if errors.As(err, &quotaErr) {
+		if quotaErr, ok := errors.AsType[*llm.QuotaResetError](err); ok {
 			unblockAt := quotaErr.ResetAt
 			if unblockAt.IsZero() && quotaErr.RetryAfter > 0 {
 				unblockAt = time.Now().Add(quotaErr.RetryAfter)
@@ -6443,8 +6438,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		// fallback refusing too surfaces the original error. Guarded by the
 		// shared backoff budget like every other continue-branch so a
 		// misconfigured loop cannot spin.
-		var refusalErr *llm.RefusalError
-		if errors.As(err, &refusalErr) {
+		if refusalErr, ok := errors.AsType[*llm.RefusalError](err); ok {
 			if retry, rerr := l.handleRefusal(refusalErr); retry {
 				if _, ok := llmBackoff.NextDelay(); !ok {
 					l.logger.Warn("Refusal fallback retry budget exhausted",
@@ -6744,9 +6738,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 
 	// Start long-running task notification goroutine (after 30s)
 	if l.notificationPublisher != nil {
-		l.wg.Add(1)
-		go func() {
-			defer l.wg.Done()
+		l.wg.Go(func() {
 			select {
 			case <-ctx.Done():
 				return
@@ -6760,7 +6752,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 						"Long Running Task", "Task has been processing for over 30 seconds...")
 				}
 			}
-		}()
+		})
 	}
 
 	response, err := l.reasoningCycle(ctx, conv, conversationID)
@@ -7343,8 +7335,7 @@ func tokenizeFileReferences(text string) []string {
 	exts := strings.Split(extPattern, ",")
 
 	// Simple split and check suffixes
-	words := strings.Fields(text)
-	for _, w := range words {
+	for w := range strings.FieldsSeq(text) {
 		cleaned := strings.Trim(w, ".,;:!?()[]{}\"'`/")
 		if cleaned == "" {
 			continue
@@ -8763,10 +8754,7 @@ func (l *AgentLoop) SetBudgetConfig(total int, opts BudgetHierarchyOptions) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	reservedRatio := opts.effectiveReservedRatio()
-	reserved := int(float64(total) * reservedRatio)
-	if reserved < 0 {
-		reserved = 0
-	}
+	reserved := max(int(float64(total)*reservedRatio), 0)
 	phaseBudget := total - reserved
 	if phaseBudget < 1 {
 		phaseBudget = total // no meaningful phase budget; use full total
@@ -9242,9 +9230,9 @@ func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID stri
 // of the last message with role "user". Returns "" if none is found.
 // Used by chatWithFailoverRaw for domain classification input.
 func lastUserMessageText(messages []llm.ChatMessage) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == llm.RoleUser {
-			return messages[i].Content
+	for _, m := range slices.Backward(messages) {
+		if m.Role == llm.RoleUser {
+			return m.Content
 		}
 	}
 	return ""
@@ -9256,8 +9244,8 @@ func lastUserMessageText(messages []llm.ChatMessage) string {
 // example's tool_path. Returns nil when there is no user message or no tools.
 func toolNamesSinceLastUser(messages []llm.ChatMessage) []string {
 	lastUserIdx := -1
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == llm.RoleUser {
+	for i, m := range slices.Backward(messages) {
+		if m.Role == llm.RoleUser {
 			lastUserIdx = i
 			break
 		}

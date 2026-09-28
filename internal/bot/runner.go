@@ -64,15 +64,15 @@ func NewBotRunner(def BotDefinition) *BotRunner {
 	return &BotRunner{
 		definition:  def,
 		namespace:   NewMemoryNamespace(def.ID),
-		retryPolicy: DEFAULT_RETRY_POLICY_FOR_NEW_RUNNERS,
+		retryPolicy: defaultRetryPolicyForNewRunners,
 	}
 }
 
-// DEFAULT_RETRY_POLICY_FOR_NEW_RUNNERS is the retry policy used for
+// defaultRetryPolicyForNewRunners is the retry policy used for
 // newly-constructed runners. It is set to a zero-value RetryPolicy
 // (MaxRetries=0) by default so existing behavior is unchanged; callers
 // who want retries should call WithRetryPolicy.
-var DEFAULT_RETRY_POLICY_FOR_NEW_RUNNERS = RetryPolicy{}
+var defaultRetryPolicyForNewRunners = RetryPolicy{}
 
 func (r *BotRunner) Definition() BotDefinition {
 	return r.definition
@@ -112,12 +112,12 @@ func (r *BotRunner) BuildSystemPrompt(triggerContext string) string {
 	b.WriteString(r.definition.Prompt)
 
 	b.WriteString("\n\n## Bot Identity\n")
-	b.WriteString(fmt.Sprintf("You are bot %q (%s).\n", r.definition.ID, r.definition.Name))
-	b.WriteString(fmt.Sprintf("Description: %s\n", r.definition.Description))
+	fmt.Fprintf(&b, "You are bot %q (%s).\n", r.definition.ID, r.definition.Name)
+	fmt.Fprintf(&b, "Description: %s\n", r.definition.Description)
 
 	b.WriteString("\n## Current Invocation\n")
-	b.WriteString(fmt.Sprintf("Trigger context: %s\n", triggerContext))
-	b.WriteString(fmt.Sprintf("Timestamp: %s\n", time.Now().UTC().Format(time.RFC3339)))
+	fmt.Fprintf(&b, "Trigger context: %s\n", triggerContext)
+	fmt.Fprintf(&b, "Timestamp: %s\n", time.Now().UTC().Format(time.RFC3339))
 
 	b.WriteString("\n## Instructions\n")
 	b.WriteString("Perform your task and store any important observations in memory for future invocations.\n")

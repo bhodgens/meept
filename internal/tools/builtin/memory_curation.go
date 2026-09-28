@@ -227,11 +227,9 @@ func (t *ReflectTool) Execute(ctx context.Context, args map[string]any) (any, er
 		limit = min(int(l), 50)
 	}
 
-	// Query for retained facts
-	query := ""
-	if topic != "" {
-		query = topic
-	} else {
+	// Query for retained facts: empty topic means "everything recent".
+	query := topic
+	if query == "" {
 		query = "recent retained facts"
 	}
 

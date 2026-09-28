@@ -170,7 +170,7 @@ func om(kv ...any) *orderedMap {
 		return newOrderedMap()
 	}
 	omVal := newOrderedMap()
-	for i := 0; i < len(kv); i += 2 {
+	for i := 0; i+1 < len(kv); i += 2 {
 		key, _ := kv[i].(string)
 		omVal.Set(key, kv[i+1])
 	}

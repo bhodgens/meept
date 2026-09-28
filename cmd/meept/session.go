@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -269,7 +271,11 @@ func newSessionDeleteCmd() *cobra.Command {
 			if !force {
 				fmt.Printf("This will delete session '%s' and all associated messages. Are you sure? [y/N] ", sessionID)
 				var confirm string
-				fmt.Scanln(&confirm)
+				// EOF (piped empty stdin) means no confirmation was given;
+				// confirm stays empty and the branch below cancels.
+				if _, scanErr := fmt.Scanln(&confirm); scanErr != nil && !errors.Is(scanErr, io.EOF) {
+					return fmt.Errorf("read confirmation: %w", scanErr)
+				}
 				if strings.ToLower(confirm) != "y" {
 					fmt.Println("Cancelled.")
 					return nil

@@ -61,7 +61,7 @@ func (s *TokenStore) Save(provider string, token *TokenResult) error {
 		return err
 	}
 
-	data, err := json.Marshal(token)
+	data, err := json.Marshal(token) //nolint:gosec // G117: marshals a live OAuth token for encryption at rest (Encrypt below), never logged or sent in cleartext
 	if err != nil {
 		return fmt.Errorf("marshal token: %w", err)
 	}

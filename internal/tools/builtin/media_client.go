@@ -175,7 +175,7 @@ func (c *mediaClient) save(ctx context.Context, req mediaRequest, art *mediaArti
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return path, nil
+		return path, nil //nolint:nilerr // the file was written; the absolute-form fallback is still a valid result
 	}
 	return abs, nil
 }

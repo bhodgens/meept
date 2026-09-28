@@ -50,10 +50,10 @@ func TestHTTPHookConfig_RetryCountPointerResolution(t *testing.T) {
 		url  string
 		want *int // expected resolved value via the wiring rule (nil → 3)
 	}{
-		{"omitted resolves to default 3", "http://example.internal/omitted", intPtr(3)},
-		{"explicit 0 stays 0", "http://example.internal/zero", intPtr(0)},
-		{"explicit -1 stays -1", "http://example.internal/unlimited", intPtr(-1)},
-		{"explicit 5 stays 5", "http://example.internal/five", intPtr(5)},
+		{"omitted resolves to default 3", "http://example.internal/omitted", new(3)},
+		{"explicit 0 stays 0", "http://example.internal/zero", new(0)},
+		{"explicit -1 stays -1", "http://example.internal/unlimited", new(-1)},
+		{"explicit 5 stays 5", "http://example.internal/five", new(5)},
 	}
 
 	for _, tc := range cases {
@@ -85,5 +85,3 @@ func TestHTTPHookConfig_RetryCountPointerResolution(t *testing.T) {
 		})
 	}
 }
-
-func intPtr(i int) *int { return &i }

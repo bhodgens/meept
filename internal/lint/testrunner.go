@@ -3,6 +3,7 @@ package lint
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -215,7 +216,7 @@ func (tr *TestRunner) runGoTests(ctx context.Context, dirPath string, testFiles 
 
 	// Check for package-level failures
 	if waitErr != nil && len(results) == 0 {
-		return nil, fmt.Errorf("go test failed: %v", waitErr)
+		return nil, fmt.Errorf("go test failed: %w", waitErr)
 	}
 
 	return results, nil
@@ -305,7 +306,8 @@ func (tr *TestRunner) runPytestTests(ctx context.Context, dirPath string, testFi
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// pytest returns non-zero on test failures, which is expected
-		if _, ok := err.(*exec.ExitError); ok {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			_ = exitErr // non-nil exit status means test failures; fall through to output parsing
 			// Parse output for failures
 			return tr.parsePytestOutput(string(output), string(output))
 		}
@@ -475,8 +477,8 @@ func (tr *TestRunner) parseJestTextOutput(output string) ([]TestResult, error) {
 	failPattern := regexp.MustCompile(`^\s*✕\s+(.+)$`)
 	skipPattern := regexp.MustCompile(`^\s*○\s+(.+)$`)
 
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(output, "\n")
+	for line := range lines {
 		if matches := passPattern.FindStringSubmatch(line); matches != nil {
 			results = append(results, TestResult{
 				Name:   matches[1],

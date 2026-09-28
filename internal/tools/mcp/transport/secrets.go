@@ -9,7 +9,7 @@ import (
 // and internal/runtime.SecretPlaceholderPrefix ("MEEPT_SECRET:") so that
 // BuildChildEnv's placeholder passthrough recognizes these values. Declared
 // literally here to keep this wiring dependency-free.
-const secretEnvPlaceholderPrefix = "MEEPT_SECRET:"
+const secretEnvPlaceholderPrefix = "MEEPT_SECRET:" //nolint:gosec // G101: this is a key-name constant that never holds a secret value; it is the placeholder prefix children receive so BuildChildEnv's passthrough can recognize declared-secret references
 
 // secretEnvPattern marks a configured env value as a declared-secret
 // reference: "${secret:<name>}".

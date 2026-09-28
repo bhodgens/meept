@@ -63,7 +63,7 @@ func newClaimStore(dbPath string) (*claimStore, error) {
 
 	if err := migrateClaimStore(db); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
-			return nil, fmt.Errorf("migration failed: %w; close failed: %v", err, closeErr)
+			return nil, fmt.Errorf("migration failed: %w; close failed: %w", err, closeErr)
 		}
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func writeLastWake(dataDir string, wake time.Time) error {
 	}
 	if err := os.Rename(tempFile, path); err != nil {
 		if removeErr := os.Remove(tempFile); removeErr != nil {
-			return fmt.Errorf("failed to rename last wake file: %w; cleanup failed: %v", err, removeErr)
+			return fmt.Errorf("failed to rename last wake file: %w; cleanup failed: %w", err, removeErr)
 		}
 		return fmt.Errorf("failed to rename last wake file: %w", err)
 	}

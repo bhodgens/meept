@@ -178,7 +178,10 @@ func (ra *ReportArtifact) ensureOutputDir() (string, error) {
 func (ra *ReportArtifact) cleanupOld(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil // best-effort
+		// Best-effort: cleanup runs as a side effect of Generate, and the
+		// caller discards its error; a missing/unreadable dir must not
+		// block report generation.
+		return nil //nolint:nilerr // intentional best-effort: unreadable dir must not fail report generation
 	}
 	cut := time.Now().AddDate(0, 0, -ra.config.CleanupAfterDays)
 	for _, e := range entries {
@@ -226,8 +229,8 @@ func (ra *ReportArtifact) writeMarkdown(dir string, failures []FailureMode, anal
 	var sb strings.Builder
 	sb.WriteString("# Self-Improvement Report\n\n")
 	sb.WriteString("## Executive Summary\n\n")
-	sb.WriteString(fmt.Sprintf("- **Generated**: %s\n", time.Now().UTC().Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("- **Failure Modes Detected**: %d\n", len(failures)))
+	fmt.Fprintf(&sb, "- **Generated**: %s\n", time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(&sb, "- **Failure Modes Detected**: %d\n", len(failures))
 	sb.WriteString("- **Severity Breakdown**:\n\n")
 
 	sevCount := make(map[string]int)
@@ -235,7 +238,7 @@ func (ra *ReportArtifact) writeMarkdown(dir string, failures []FailureMode, anal
 		sevCount[fm.Severity]++
 	}
 	for sev, count := range sevCount {
-		sb.WriteString(fmt.Sprintf("  - %s: %d\n", sev, count))
+		fmt.Fprintf(&sb, "  - %s: %d\n", sev, count)
 	}
 
 	if analysis != "" {
@@ -246,17 +249,17 @@ func (ra *ReportArtifact) writeMarkdown(dir string, failures []FailureMode, anal
 	if len(failures) > 0 {
 		sb.WriteString("\n## Failure Modes\n\n")
 		for i, fm := range failures {
-			sb.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, fm.Category))
-			sb.WriteString(fmt.Sprintf("**Severity**: %s\n\n", fm.Severity))
-			sb.WriteString(fmt.Sprintf("%s\n\n", fm.Description))
+			fmt.Fprintf(&sb, "### %d. %s\n\n", i+1, fm.Category)
+			fmt.Fprintf(&sb, "**Severity**: %s\n\n", fm.Severity)
+			fmt.Fprintf(&sb, "%s\n\n", fm.Description)
 			if fm.TraceID != "" {
-				sb.WriteString(fmt.Sprintf("**Trace ID**: `%s`\n\n", fm.TraceID))
+				fmt.Fprintf(&sb, "**Trace ID**: `%s`\n\n", fm.TraceID)
 			}
 			if fm.Model != "" {
-				sb.WriteString(fmt.Sprintf("**Model**: `%s`\n\n", fm.Model))
+				fmt.Fprintf(&sb, "**Model**: `%s`\n\n", fm.Model)
 			}
 			if ra.config.IncludeRecommendations && fm.Recommendation != "" {
-				sb.WriteString(fmt.Sprintf("**Recommendation**: %s\n\n", fm.Recommendation))
+				fmt.Fprintf(&sb, "**Recommendation**: %s\n\n", fm.Recommendation)
 			}
 		}
 	}

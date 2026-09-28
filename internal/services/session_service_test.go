@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -18,7 +17,7 @@ import (
 // session store for unit testing.
 func newTestSessionService(t *testing.T) *SessionService {
 	t.Helper()
-	store := session.NewMemoryStore(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store := session.NewMemoryStore(slog.New(slog.DiscardHandler))
 	return NewSessionService(store)
 }
 
@@ -80,8 +79,8 @@ func TestSessionServiceArchiveSession_InvalidInput(t *testing.T) {
 // isServiceError reports whether err is a *ServiceError wrapping target via
 // errors.Is. This avoids duplicating error-text checks across tests.
 func isServiceError(err, target error) bool {
-	se, ok := err.(*ServiceError)
-	if !ok {
+	var se *ServiceError
+	if !errors.As(err, &se) {
 		return false
 	}
 	return errors.Is(se, target)
@@ -101,7 +100,9 @@ func newTestProjectManager(t *testing.T) *project.ProjectManager {
 		BaseDir:       filepath.Join(dir, "projects"),
 		DefaultBranch: "main",
 	}
-	os.MkdirAll(cfg.BaseDir, 0o755)
+	if err := os.MkdirAll(cfg.BaseDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	return project.NewProjectManager(store, nil, cfg, nil)
 }
 

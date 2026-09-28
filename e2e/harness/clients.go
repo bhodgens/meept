@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -246,10 +247,10 @@ func (r *SSEResponse) NextEvent() (*SSEEvent, error) {
 	for {
 		line, err := r.reader.ReadString('\n')
 		if err != nil {
-			if err == io.EOF && sawFrame {
+			if errors.Is(err, io.EOF) && sawFrame {
 				return ev, nil
 			}
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return nil, io.EOF
 			}
 			r.t.Fatalf("harness: sse read: %v", err)

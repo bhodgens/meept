@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"errors"
 
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
@@ -983,7 +984,7 @@ func (s *Store) ResolvePendingOutcome(sessionID string, turnNo int, agentID stri
 		sessionID, turnNo,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil // no prior pending classified row: no-op
 		}
 		return "", fmt.Errorf("failed to find pending dispatch outcome for session %s: %w", sessionID, err)

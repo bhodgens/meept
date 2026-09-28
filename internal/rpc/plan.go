@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/caimlas/meept/internal/plan"
@@ -167,7 +168,7 @@ func (h *PlanHandler) handleApprove(ctx context.Context, params json.RawMessage)
 			usedFallback = true
 			err = nil
 		} else {
-			err = fmt.Errorf("shared: %v; sink: %v", err, err2)
+			err = errors.Join(fmt.Errorf("shared: %w", err), fmt.Errorf("sink: %w", err2))
 		}
 	}
 	if err != nil {
@@ -196,7 +197,7 @@ func (h *PlanHandler) handleReject(ctx context.Context, params json.RawMessage) 
 	sharedErr := h.manager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason)
 	if sharedErr != nil && h.fallbackManager != nil {
 		if sinkErr := h.fallbackManager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason); sinkErr != nil {
-			sharedErr = fmt.Errorf("shared: %v; sink: %v", sharedErr, sinkErr)
+			sharedErr = errors.Join(fmt.Errorf("shared: %w", sharedErr), fmt.Errorf("sink: %w", sinkErr))
 		} else {
 			sharedErr = nil
 		}
@@ -222,7 +223,7 @@ func (h *PlanHandler) handleConfirm(ctx context.Context, params json.RawMessage)
 	sharedErr := h.manager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By)
 	if sharedErr != nil && h.fallbackManager != nil {
 		if sinkErr := h.fallbackManager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By); sinkErr != nil {
-			sharedErr = fmt.Errorf("shared: %v; sink: %v", sharedErr, sinkErr)
+			sharedErr = errors.Join(fmt.Errorf("shared: %w", sharedErr), fmt.Errorf("sink: %w", sinkErr))
 		} else {
 			sharedErr = nil
 		}
@@ -248,7 +249,7 @@ func (h *PlanHandler) handleRevise(ctx context.Context, params json.RawMessage) 
 	sharedErr := h.manager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback)
 	if sharedErr != nil && h.fallbackManager != nil {
 		if sinkErr := h.fallbackManager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback); sinkErr != nil {
-			sharedErr = fmt.Errorf("shared: %v; sink: %v", sharedErr, sinkErr)
+			sharedErr = errors.Join(fmt.Errorf("shared: %w", sharedErr), fmt.Errorf("sink: %w", sinkErr))
 		} else {
 			sharedErr = nil
 		}

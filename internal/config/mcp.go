@@ -55,7 +55,7 @@ func SaveMCPConfig(path string, cfg *MCPServersConfig) error {
 		// Best-effort cleanup of the temp file on failure; the rename error
 		// is the primary failure and should be surfaced, not the cleanup.
 		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			return fmt.Errorf("failed to rename MCP config into place (cleanup also failed: %v): %w", removeErr, err)
+			return fmt.Errorf("failed to rename MCP config into place (cleanup also failed: %w): %w", removeErr, err)
 		}
 		return fmt.Errorf("failed to rename MCP config into place: %w", err)
 	}

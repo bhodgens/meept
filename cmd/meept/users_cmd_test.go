@@ -147,9 +147,9 @@ func TestRunCLIStoreRoundTrip(t *testing.T) {
 	// add user
 	out := captureUsersStdout(t, func() { _ = runUsersAdd(usersStorePath(""), "carol") })
 	var userID string
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "created user: carol (") {
-			userID = strings.TrimSuffix(strings.TrimPrefix(line, "created user: carol ("), ")")
+	for line := range strings.SplitSeq(out, "\n") {
+		if rest, found := strings.CutPrefix(line, "created user: carol ("); found {
+			userID = strings.TrimSuffix(rest, ")")
 		}
 	}
 	if userID == "" {
@@ -164,7 +164,7 @@ func TestRunCLIStoreRoundTrip(t *testing.T) {
 	})
 	rawKey := ""
 	rawCount := 0
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if len(line) == 64 && strings.Trim(line, "0123456789abcdef") == "" {
 			rawKey = line
