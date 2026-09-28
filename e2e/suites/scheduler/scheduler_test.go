@@ -182,23 +182,23 @@ func TestScheduledShellJobFiresAndRecordsRun(t *testing.T) {
 	}
 
 	// The run accounting landed in the persisted config: run_count >= 1
-	// with a last_run_at inside the test window and no error.
-	jobs := readPersistedJobs(t, s)
-	job, ok := jobs[jobID]
-	if !ok {
-		t.Fatalf("job %s missing from jobs.json: %v", jobID, jobs)
-	}
-	if job.RunCount < 1 {
-		t.Fatalf("job run_count = %d, want >= 1 after the fire", job.RunCount)
-	}
-	if job.LastRunAt == nil {
-		t.Fatal("job last_run_at missing after the fire")
-	}
-	if job.LastRunAt.Before(now.Add(-time.Minute)) {
-		t.Fatalf("job last_run_at = %s, predates the test", job.LastRunAt)
-	}
-	if job.LastError != "" {
-		t.Fatalf("job last_error = %q, want empty for a successful fire", job.LastError)
+	// with a last_run_at inside the test window and no error. The artifact
+	// proves the command ran; UpdateLastRun persists just after execution,
+	// so poll briefly for the accounting to land rather than reading once.
+	accDeadline := time.Now().Add(15 * time.Second)
+	for {
+		jobs := readPersistedJobs(t, s)
+		job, ok := jobs[jobID]
+		if ok && job.RunCount >= 1 && job.LastRunAt != nil && job.LastError == "" {
+			if job.LastRunAt.Before(now.Add(-time.Minute)) {
+				t.Fatalf("job last_run_at = %s, predates the test", job.LastRunAt)
+			}
+			break
+		}
+		if time.Now().After(accDeadline) {
+			t.Fatalf("run accounting never landed for %s after the artifact fired: %+v", jobID, job)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 
 	// The claim store holds this fire's tick — the claim-before-deliver
