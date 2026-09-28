@@ -2,10 +2,10 @@ package plan
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"testing"
-	"errors"
 )
 
 // setupTestStore creates a fresh SQLiteStore backed by a temporary database.
@@ -354,7 +354,7 @@ func TestRevisionCount(t *testing.T) {
 	}
 
 	// Create 3 "revision_requested" signoffs.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		so := NewPlanSignoff(p.ID, "", "sess-001", "reviewer", "revision_requested", "fix stuff")
 		if err := store.CreateSignoff(ctx, so); err != nil {
 			t.Fatalf("CreateSignoff(%d): %v", i, err)

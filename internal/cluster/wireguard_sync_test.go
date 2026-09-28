@@ -352,7 +352,7 @@ func TestWireGuardConfig_JSONMarshal(t *testing.T) {
 	// WireGuardConfig doesn't have custom JSON marshaling, but
 	// verifying JSON round-trip ensures struct tags work.
 	cfg := &WireGuardConfig{
-		PrivateKey:          "testkey==",
+		PrivateKey:          "test-wireguard-key-not-a-secret", //nolint:gosec // G117/G101: fake test fixture, not a real key
 		ClusterIP:           "10.200.0.1",
 		ListenPort:          51820,
 		DNS:                 "8.8.8.8",
@@ -360,7 +360,10 @@ func TestWireGuardConfig_JSONMarshal(t *testing.T) {
 		Peers:               []Member{},
 	}
 
-	data, err := json.Marshal(cfg)
+	// G117 matches the field NAME ("PrivateKey"), which is the canonical
+	// WireGuard config key and cannot be renamed. The value is a fake
+	// test placeholder, not a real secret.
+	data, err := json.Marshal(cfg) // #nosec G117
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}

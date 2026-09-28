@@ -318,40 +318,40 @@ func CrashReport(r *CoreDumpResult) string {
 	var b strings.Builder
 
 	b.WriteString("=== core dump crash report ===\n")
-	b.WriteString(fmt.Sprintf("program:    %s\n", r.Program))
-	b.WriteString(fmt.Sprintf("core file:  %s\n", r.CoreFile))
-	b.WriteString(fmt.Sprintf("adapter:    %s\n", r.Adapter))
+	fmt.Fprintf(&b, "program:    %s\n", r.Program)
+	fmt.Fprintf(&b, "core file:  %s\n", r.CoreFile)
+	fmt.Fprintf(&b, "adapter:    %s\n", r.Adapter)
 
 	if r.Signal != "" {
-		b.WriteString(fmt.Sprintf("signal:     %s\n", r.Signal))
+		fmt.Fprintf(&b, "signal:     %s\n", r.Signal)
 	}
 	if r.FaultAddr != "" {
-		b.WriteString(fmt.Sprintf("fault addr: %s\n", r.FaultAddr))
+		fmt.Fprintf(&b, "fault addr: %s\n", r.FaultAddr)
 	}
 	if r.CrashReason != "" {
-		b.WriteString(fmt.Sprintf("reason:     %s\n", r.CrashReason))
+		fmt.Fprintf(&b, "reason:     %s\n", r.CrashReason)
 	}
 
 	if len(r.Threads) > 0 {
-		b.WriteString(fmt.Sprintf("\nthreads (%d):\n", len(r.Threads)))
+		fmt.Fprintf(&b, "\nthreads (%d):\n", len(r.Threads))
 		for _, thread := range r.Threads {
 			prefix := "  "
 			if thread.IsCrashed {
 				prefix = "* " // Mark the crashing thread.
 			}
-			b.WriteString(fmt.Sprintf("%sthread %d", prefix, thread.ID))
+			fmt.Fprintf(&b, "%sthread %d", prefix, thread.ID)
 			if thread.Reason != "" {
-				b.WriteString(fmt.Sprintf(" [%s]", thread.Reason))
+				fmt.Fprintf(&b, " [%s]", thread.Reason)
 			}
 			b.WriteString("\n")
 
 			for _, frame := range thread.Stack {
-				b.WriteString(fmt.Sprintf("    #%d  %s", frame.Index, frame.Function))
+				fmt.Fprintf(&b, "    #%d  %s", frame.Index, frame.Function)
 				if frame.File != "" {
-					b.WriteString(fmt.Sprintf("  at %s:%d", frame.File, frame.Line))
+					fmt.Fprintf(&b, "  at %s:%d", frame.File, frame.Line)
 				}
 				if frame.Address != "" {
-					b.WriteString(fmt.Sprintf("  [%s]", frame.Address))
+					fmt.Fprintf(&b, "  [%s]", frame.Address)
 				}
 				b.WriteString("\n")
 			}

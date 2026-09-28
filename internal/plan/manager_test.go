@@ -274,7 +274,7 @@ func TestManagerMaxRevisions(t *testing.T) {
 	// Revise 3 times (up to max revisions = 3).
 	// After each revise, state goes to planning. Simulate the re-work cycle:
 	// planning -> draft (via store) -> pending_approval (via SubmitPlan).
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := mgr.RevisePlan(ctx, plan.ID, "sess-001", "revision feedback"); err != nil {
 			t.Fatalf("RevisePlan(%d): %v", i+1, err)
 		}
@@ -471,7 +471,7 @@ func TestEnsureTaskPlan_ConcurrentSinglePlan(t *testing.T) {
 	errs := make([]error, goroutines)
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

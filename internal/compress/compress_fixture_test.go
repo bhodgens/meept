@@ -109,7 +109,7 @@ func TestFixture_SmartCrusher_JSONBlob(t *testing.T) {
 	}
 
 	// Property: the output should be valid JSON.
-	var decoded interface{}
+	var decoded any
 	if err := json.Unmarshal([]byte(compressed), &decoded); err != nil {
 		t.Errorf("SmartCrusher: compressed output should be valid JSON, got error: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestFixture_Pipeline_MixedMessages(t *testing.T) {
 
 func jsonRepetitiveItems(n int) string {
 	items := make([]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		items[i] = `{"id":` + itoa(i) + `,"name":"item","status":"active","path":"/some/long/path/` + itoa(i) + `"}`
 	}
 	return strings.Join(items, ",")
@@ -312,7 +312,7 @@ func generateLogFixture() string {
 		lines = append(lines, "2024-06-01 10:"+pad2(i%60)+" INFO: processing request "+itoa(i))
 	}
 	// Add some errors in the middle
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		lines = append(lines, "2024-06-01 10:3"+itoa(i)+" ERROR: connection timeout for host-"+itoa(i))
 	}
 	// More repetitive INFO lines

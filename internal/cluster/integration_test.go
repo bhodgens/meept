@@ -134,7 +134,7 @@ func TestClusterEventPersistence(t *testing.T) {
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer engine.Stop()
+	defer func() { _ = engine.Stop() }()
 
 	event := &models.ClusterEvent{
 		EventID:     "test-event-001",
@@ -168,6 +168,9 @@ func TestClusterEventPersistence(t *testing.T) {
 		}
 		found = true
 		break
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration failed: %v", err)
 	}
 
 	if !found {
@@ -224,7 +227,9 @@ func TestClusterQueueReclaim(t *testing.T) {
 
 	staleJobs := cq.ReclaimIfStale(ctx)
 	for _, staleJob := range staleJobs {
-		cq.ReclaimJob(ctx, staleJob.ID, "timeout")
+		if err := cq.ReclaimJob(ctx, staleJob.ID, "timeout"); err != nil {
+			t.Errorf("ReclaimJob: %v", err)
+		}
 	}
 
 	retrieved, err := store.GetByID("test-job-001")
@@ -353,12 +358,12 @@ func TestMultiNodeEventPropagation(t *testing.T) {
 	if err := g1.Start(ctx); err != nil {
 		t.Fatalf("g1 start: %v", err)
 	}
-	defer g1.Stop()
+	defer func() { _ = g1.Stop() }()
 
 	if err := g2.Start(ctx); err != nil {
 		t.Fatalf("g2 start: %v", err)
 	}
-	defer g2.Stop()
+	defer func() { _ = g2.Stop() }()
 
 	time.Sleep(50 * time.Millisecond)
 

@@ -64,8 +64,8 @@ type chatSubmitSessionStore interface {
 // the ack immediately — the ack path has no bus subscribe and no wait.
 type SubmitHandler struct {
 	bus          *bus.MessageBus
-	registry     chatSubmitRegistry       // optional; nil disables dedupe registration
-	sessionStore chatSubmitSessionStore   // optional; nil disables session conversation resolution
+	registry     chatSubmitRegistry     // optional; nil disables dedupe registration
+	sessionStore chatSubmitSessionStore // optional; nil disables session conversation resolution
 	logger       *slog.Logger
 }
 

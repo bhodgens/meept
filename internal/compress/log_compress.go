@@ -100,10 +100,7 @@ func (lc *LogCompressor) compressLogLines(lines []string) []string {
 	result := make([]string, 0)
 
 	// Keep first N lines
-	keepFirst := lc.KeepFirstN
-	if keepFirst > len(lines) {
-		keepFirst = len(lines)
-	}
+	keepFirst := min(lc.KeepFirstN, len(lines))
 	result = append(result, lines[:keepFirst]...)
 
 	// Track repetitions
@@ -116,10 +113,7 @@ func (lc *LogCompressor) compressLogLines(lines []string) []string {
 	currentCount := 0
 
 	middleStart := keepFirst
-	middleEnd := len(lines) - lc.KeepLastN
-	if middleEnd < middleStart {
-		middleEnd = middleStart
-	}
+	middleEnd := max(len(lines)-lc.KeepLastN, middleStart)
 
 	// Process middle section for repetitions
 	for i := middleStart; i < middleEnd; i++ {
@@ -159,7 +153,7 @@ func (lc *LogCompressor) compressLogLines(lines []string) []string {
 		if rep.count > lc.MaxRepetitions {
 			result = append(result, fmt.Sprintf("// ... repeated %d times: %s", rep.count, truncate(rep.line, 80)))
 		} else {
-			for i := 0; i < rep.count; i++ {
+			for range rep.count {
 				result = append(result, rep.line)
 			}
 		}
@@ -170,11 +164,7 @@ func (lc *LogCompressor) compressLogLines(lines []string) []string {
 	_ = middleEnd
 
 	// Keep last N lines
-	keepLast := lc.KeepLastN
-	startIdx := len(lines) - keepLast
-	if startIdx < keepFirst {
-		startIdx = keepFirst
-	}
+	startIdx := max(len(lines)-lc.KeepLastN, keepFirst)
 	if startIdx < len(lines) {
 		result = append(result, lines[startIdx:]...)
 	}

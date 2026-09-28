@@ -302,10 +302,10 @@ func TestOTLPExporter_ConcurrentRecording(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < iterations; i++ {
+			for i := range iterations {
 				empID := fmt.Sprintf("emp-%d", id%10)
 				sessID := fmt.Sprintf("sess-%d", id%5)
 				exp.RecordTurn(empID, sessID)

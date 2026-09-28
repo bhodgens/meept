@@ -208,7 +208,7 @@ func (t *GossipTransport) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
 	// Set read deadline to prevent hanging connections
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 
 	// Read the event from the connection
 	reader := bufio.NewReaderSize(conn, 1024*1024) // 1MB buffer for large payloads
@@ -235,9 +235,9 @@ func (t *GossipTransport) handleConnection(ctx context.Context, conn net.Conn) {
 	)
 
 	// Send ACK back to sender
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	ack := []byte("ACK\n")
-	conn.Write(ack)
+	_, _ = conn.Write(ack)
 
 	// Process through the gossip engine's existing handler pipeline.
 	// Call handleClusterEvent directly since the bus subscriber channel
@@ -283,7 +283,7 @@ func (t *GossipTransport) sendToPeer(sem chan struct{}, addr, nodeID string, dat
 	}
 	defer conn.Close()
 
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	_, err = conn.Write(append(data, '\n'))
 	if err != nil {
 		t.logger.Debug("gossip_transport: failed to send to peer",
@@ -292,7 +292,7 @@ func (t *GossipTransport) sendToPeer(sem chan struct{}, addr, nodeID string, dat
 	}
 
 	// Wait for ACK
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 	ack, err := reader.ReadString('\n')
 	if err != nil {

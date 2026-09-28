@@ -1,9 +1,9 @@
 package config
 
 import (
+	"errors"
 	"testing"
 	"time"
-	"errors"
 )
 
 func TestDefaultConfigSyncConfig(t *testing.T) {

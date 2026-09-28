@@ -174,7 +174,7 @@ func TestCountDispatchRows(t *testing.T) {
 	if got := s.CountDispatchRows("conv-count"); got != 0 {
 		t.Fatalf("fresh session count = %d, want 0", got)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		s.RecordDispatch(DispatchEntry{SessionID: "conv-count", TurnNo: i + 1})
 	}
 	if got := s.CountDispatchRows("conv-count"); got != 3 {

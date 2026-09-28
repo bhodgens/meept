@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -218,7 +219,7 @@ func (c *Client) readLoop(ctx context.Context) {
 			default:
 			}
 			// EOF means the adapter exited.
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				if c.logger != nil {
 					c.logger.Debug("adapter stdout closed")
 				}

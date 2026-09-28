@@ -283,7 +283,7 @@ func BenchmarkRefreshRequest_Marshal(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, err := json.Marshal(req)
 		if err != nil {
 			b.Fatal(err)
@@ -299,7 +299,7 @@ func BenchmarkRefreshResult_Marshal(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, err := json.Marshal(result)
 		if err != nil {
 			b.Fatal(err)

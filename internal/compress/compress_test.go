@@ -3,9 +3,9 @@ package compress
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sync"
 	"testing"
-	"slices"
 )
 
 func TestContentHash_Deterministic(t *testing.T) {
@@ -65,9 +65,9 @@ func TestSmartCrusher_JSONArray(t *testing.T) {
 	sc := NewSmartCrusher(DefaultSmartCrusherConfig())
 
 	// Create a JSON array with duplicates
-	items := make([]map[string]interface{}, 100)
-	for i := 0; i < 100; i++ {
-		items[i] = map[string]interface{}{
+	items := make([]map[string]any, 100)
+	for i := range 100 {
+		items[i] = map[string]any{
 			"id":      i,
 			"name":    "item",
 			"value":   42,
@@ -103,15 +103,15 @@ func TestSmartCrusher_ErrorPreservation(t *testing.T) {
 	})
 
 	// Create array with error in the middle
-	items := []interface{}{
-		map[string]interface{}{"id": 1, "data": "ok"},
-		map[string]interface{}{"id": 2, "data": "ok"},
-		map[string]interface{}{"error": "Something went wrong", "code": 500},
-		map[string]interface{}{"id": 4, "data": "ok"},
+	items := []any{
+		map[string]any{"id": 1, "data": "ok"},
+		map[string]any{"id": 2, "data": "ok"},
+		map[string]any{"error": "Something went wrong", "code": 500},
+		map[string]any{"id": 4, "data": "ok"},
 	}
 
 	for i := 4; i < 50; i++ {
-		items = append(items, map[string]interface{}{"id": i, "data": "ok"})
+		items = append(items, map[string]any{"id": i, "data": "ok"})
 	}
 
 	data, _ := json.Marshal(items)
@@ -222,9 +222,9 @@ func TestPipeline_Compress(t *testing.T) {
 }
 
 func createLargeJSONOutput() string {
-	items := make([]map[string]interface{}, 50)
-	for i := 0; i < 50; i++ {
-		items[i] = map[string]interface{}{
+	items := make([]map[string]any, 50)
+	for i := range 50 {
+		items[i] = map[string]any{
 			"id":      i,
 			"path":    "/some/long/path/that/makes/it/bigger",
 			"matches": []string{"result1", "result2", "result3"},
@@ -264,7 +264,7 @@ func (s *memStore) Retrieve(ctx context.Context, hash string) (*CCREntry, error)
 
 	entry, ok := s.data[hash]
 	if !ok {
-		return nil, nil
+		return nil, nil //nolint:nilnil // test double mirrors sqliteStore.Retrieve's cache-miss contract
 	}
 	return entry, nil
 }

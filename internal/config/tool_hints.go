@@ -121,7 +121,7 @@ func ToolHintAgent(hint string) (string, bool) {
 
 func normalizeHint(hint string) string {
 	out := make([]byte, 0, len(hint))
-	for i := 0; i < len(hint); i++ {
+	for i := range len(hint) {
 		c := hint[i]
 		if c >= 'A' && c <= 'Z' {
 			c += 'a' - 'A'

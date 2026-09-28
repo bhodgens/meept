@@ -1040,7 +1040,7 @@ func compileCycleCheck(n int, edges [][]int, names []string) string {
 		color[v] = black
 		return false
 	}
-	for v := 0; v < n; v++ {
+	for v := range n {
 		if color[v] == white && visit(v) {
 			parts := make([]string, 0, len(found))
 			for _, idx := range found {

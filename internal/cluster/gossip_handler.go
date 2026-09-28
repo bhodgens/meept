@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -282,7 +283,7 @@ func (h *eventGossipHandler) fetchExistingMemoryEvent(memoryID string) *models.C
 		memoryID,
 	).Scan(&tsStr, &sourceNode)
 	if err != nil {
-		if err != sql.ErrNoRows {
+		if !errors.Is(err, sql.ErrNoRows) {
 			h.logger.Debug("gossip handler: query existing memory failed",
 				"mem_id", memoryID, "err", err)
 		}

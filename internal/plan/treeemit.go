@@ -276,7 +276,7 @@ func concurrencyGroups(cp *CompiledPlan) []int {
 	producerWave := make(map[string]int)
 	for changed := true; changed; {
 		changed = false
-		for i := 0; i < n; i++ {
+		for i := range n {
 			phase := &cp.Phases[i]
 			g := 1
 			for _, a := range phase.Consumes {

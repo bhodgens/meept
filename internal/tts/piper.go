@@ -70,8 +70,10 @@ func (e *PiperEngine) Synthesize(ctx context.Context, text string) (*Result, err
 	if e.speaking {
 		if e.config.Behavior.InterruptOnNewMsg {
 			// Stop playback while holding the lock to avoid an
-			// unlock-relock race window (S6-23).
-			e.stopLocked()
+			// unlock-relock race window (S6-23). A failed stop of the
+			// previous utterance must not abort the new synthesis; the
+			// player recovers on the next Play.
+			_ = e.stopLocked() //nolint:errcheck // best-effort interrupt; failure is non-fatal here
 		}
 	}
 	e.speaking = true

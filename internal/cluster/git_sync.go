@@ -301,7 +301,7 @@ func (g *GitSync) pullRemote() error {
 	if err := g.git("pull", "--rebase", "origin", g.branch()); err != nil {
 		// If there's a rebase conflict, try to resolve it
 		if err2 := g.handleRebaseConflict(); err2 != nil {
-			return fmt.Errorf("pullRemote: pull --rebase failed: %w (rebase resolve: %v)", err, err2)
+			return fmt.Errorf("pullRemote: pull --rebase failed: %w (rebase resolve: %w)", err, err2)
 		}
 	}
 

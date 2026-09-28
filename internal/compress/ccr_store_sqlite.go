@@ -3,13 +3,13 @@ package compress
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-	"errors"
 
 	_ "modernc.org/sqlite"
 )

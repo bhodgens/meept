@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -70,7 +69,7 @@ func TestGossipTransport_SendReceiveEvent(t *testing.T) {
 		}
 		defer conn.Close()
 
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		buf := make([]byte, 8192)
 		n, err := conn.Read(buf)
 		if err != nil {
@@ -88,7 +87,7 @@ func TestGossipTransport_SendReceiveEvent(t *testing.T) {
 			return
 		}
 
-		conn.Write([]byte("ACK\n"))
+		_, _ = conn.Write([]byte("ACK\n"))
 		receiverGot <- &received
 	}()
 
@@ -220,8 +219,7 @@ func TestGossipTransport_StartStop(t *testing.T) {
 
 	transport := NewGossipTransport(cfg, "test-node", nil, nil, slog.Default())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := transport.Start(ctx); err != nil {
 		t.Fatalf("start failed: %v", err)

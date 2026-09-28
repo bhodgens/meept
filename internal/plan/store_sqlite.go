@@ -755,7 +755,7 @@ func artifactsToJSON(arts []Artifact) (any, error) {
 	if err != nil {
 		// Should never happen for Artifact (only primitive fields); fall back
 		// to NULL so the row is still writable.
-		return nil, nil //nolint:nilerr // deliberate NULL fallback keeps the row writable
+		return nil, nil //nolint:nilerr,nilnil // deliberate NULL fallback keeps the row writable
 	}
 	return string(b), nil
 }

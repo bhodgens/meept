@@ -750,8 +750,6 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 			RuleSource: RuleSourceFailClosed,
 		}
 	}
-	hasAllowRules := len(allowPatterns) > 0
-
 	for _, ap := range allowPatterns {
 		expandedPattern := pathutil.ExpandPath(ap.Pattern)
 		if matched, _ := filepath.Match(expandedPattern, resolved); matched {
@@ -763,7 +761,7 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 		}
 	}
 
-	if hasAllowRules {
+	if len(allowPatterns) > 0 {
 		return &Decision{
 			Allowed:    false,
 			Reason:     "Path does not match any allowed pattern",

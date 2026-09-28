@@ -25,11 +25,11 @@ type fakeAgentInvoker struct {
 	err         error
 	delay       time.Duration
 	panicValue  any
-	callCount   int32
+	callCount   atomic.Int32
 }
 
 func (f *fakeAgentInvoker) InvokeTask(ctx context.Context, job DispatchJob, worktreePath string) (string, []string, error) {
-	atomic.AddInt32(&f.callCount, 1)
+	f.callCount.Add(1)
 	f.mu.Lock()
 	f.invocations = append(f.invocations, job)
 	out := f.output
@@ -53,7 +53,7 @@ func (f *fakeAgentInvoker) InvokeTask(ctx context.Context, job DispatchJob, work
 }
 
 func (f *fakeAgentInvoker) calls() int {
-	return int(atomic.LoadInt32(&f.callCount))
+	return int(f.callCount.Load())
 }
 
 // fakeBusPublisher captures published events.

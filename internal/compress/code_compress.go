@@ -175,10 +175,7 @@ func compressCodeLines(lines []string, maxLines int) []string {
 	result := make([]string, 0, 30)
 
 	// Keep first 15 lines (imports, package, headers)
-	keepFirst := 15
-	if keepFirst > len(lines) {
-		keepFirst = len(lines)
-	}
+	keepFirst := min(15, len(lines))
 	result = append(result, lines[:keepFirst]...)
 
 	// Add summary for middle section
@@ -188,11 +185,7 @@ func compressCodeLines(lines []string, maxLines int) []string {
 	}
 
 	// Keep last 5 lines
-	keepLast := 5
-	startIdx := len(lines) - keepLast
-	if startIdx < keepFirst {
-		startIdx = keepFirst
-	}
+	startIdx := max(len(lines)-5, keepFirst)
 	if startIdx < len(lines) {
 		result = append(result, lines[startIdx:]...)
 	}
@@ -223,4 +216,3 @@ func detectLanguage(content string) string {
 	}
 	return "unknown"
 }
-

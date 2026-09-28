@@ -425,7 +425,7 @@ func buildBedrockTestHeaders(pairs ...string) []byte {
 		// encoded the same wrong shape the old parser read, so the suite
 		// validated the bug.)
 		buf.WriteByte(byte(len(val) >> 8)) //nolint:gosec // G115: header values are short constants
-		buf.WriteByte(byte(len(val))) //nolint:gosec // G115: header values are short constants
+		buf.WriteByte(byte(len(val)))      //nolint:gosec // G115: header values are short constants
 		buf.WriteString(val)
 	}
 	return buf.Bytes()

@@ -355,7 +355,7 @@ func (t *GRPCTransport) DialPeer(ctx context.Context, nodeID, addr string) (*Pee
 	}
 	t.peersMu.RUnlock()
 
-	v, err, _ := t.dialSF.Do(nodeID, func() (interface{}, error) {
+	v, err, _ := t.dialSF.Do(nodeID, func() (any, error) {
 		// Re-check cache after dedup — another caller may have populated it.
 		t.peersMu.RLock()
 		if pc, ok := t.peers[nodeID]; ok {

@@ -52,7 +52,7 @@ func testAddr(t *testing.T) string {
 // Returns the transport and its address.
 func newTestTransport(t *testing.T, localNodeID string) (*GRPCTransport, string) {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	cfg := &Config{NodeID: localNodeID}
 	tr := NewGRPCTransport(cfg, localNodeID, logger)
 
@@ -105,8 +105,8 @@ func newMockResourceProvider() *mockResourceProvider {
 func (m *mockResourceProvider) addBlob(hash string, data []byte) {
 	// Write to temp file outside mutex.
 	f, _ := os.CreateTemp("", "mock-cas-*")
-	f.Write(data)
-	f.Close()
+	_, _ = f.Write(data)
+	_ = f.Close()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.store[hash] = f.Name()
@@ -319,7 +319,7 @@ func TestEventService_Broadcast(t *testing.T) {
 	}
 
 	// Send 3 events, expect 3 acks.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		event := &models.ClusterEvent{
 			EventID:   fmt.Sprintf("bcast-%d", i),
 			NodeID:    "node-b",
@@ -683,7 +683,7 @@ func TestDispatchService_NilExecutor(t *testing.T) {
 // =====================================================================
 
 func TestGRPCTransport_TLSConfigSetter(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	tr := NewGRPCTransport(&Config{}, "node-a", logger)
 
 	// Nil config should be ignored.
@@ -713,7 +713,7 @@ func TestGRPCTransport_TLSConfigSetter(t *testing.T) {
 // =====================================================================
 
 func TestGRPCTransport_StartStop(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	tr := NewGRPCTransport(&Config{}, "node-a", logger)
 
 	addr := testAddr(t)
@@ -882,7 +882,7 @@ func TestResourceService_FetchChunkBoundaries(t *testing.T) {
 // =====================================================================
 
 func TestGRPCTransport_SettersNilGuard(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	tr := NewGRPCTransport(&Config{}, "node-a", logger)
 
 	// All setters must accept nil without panic.

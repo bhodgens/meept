@@ -1093,7 +1093,7 @@ type sessionStore interface {
 
 // branchManager is an interface for branch navigation operations needed by AgentLoop.
 type branchManager interface {
-	ListBranches(sessionID string) ([]interface{}, error)
+	ListBranches(sessionID string) ([]any, error)
 }
 
 // sessionMessageReader is a narrow structural interface for reading
@@ -2522,7 +2522,7 @@ func (l *AgentLoop) SetHTTPHooks(executor *HookBatchExecutor) {
 // FireHTTPHooks is an exported helper that agent code calls to signal HTTP
 // hook events. It builds a HookPayload from the provided data and fires all
 // registered hooks in parallel, respecting context lifetime.
-func (l *AgentLoop) FireHTTPHooks(ctx context.Context, event string, data map[string]interface{}) {
+func (l *AgentLoop) FireHTTPHooks(ctx context.Context, event string, data map[string]any) {
 	l.mu.RLock()
 	executor := l.httpHooks
 	agentID := l.agentID
@@ -8831,7 +8831,7 @@ func (l *AgentLoop) loadAgentsContext(workingDir string) string {
 		if af.RelPath == "" {
 			sb.WriteString("# AGENTS.md (project root)\n\n")
 		} else {
-			sb.WriteString(fmt.Sprintf("# AGENTS.md (%s)\n\n", af.RelPath))
+			fmt.Fprintf(&sb, "# AGENTS.md (%s)\n\n", af.RelPath)
 		}
 		sb.WriteString(af.Content)
 		sb.WriteString("\n\n")
@@ -8976,10 +8976,10 @@ func (l *AgentLoop) buildMCPContextSection() string {
 		if srv.Connected {
 			status = "connected"
 		}
-		sb.WriteString(fmt.Sprintf("- %s (%d tool(s), %s)\n", srv.Name, srv.ToolCount, status))
+		fmt.Fprintf(&sb, "- %s (%d tool(s), %s)\n", srv.Name, srv.ToolCount, status)
 		totalTools += srv.ToolCount
 	}
-	sb.WriteString(fmt.Sprintf("\nTotal: %d tool(s) across %d server(s)\n", totalTools, len(servers)))
+	fmt.Fprintf(&sb, "\nTotal: %d tool(s) across %d server(s)\n", totalTools, len(servers))
 	sb.WriteString("Use the platform_tools tool to list all available tools.\n")
 	sb.WriteString("Use the mcp_servers tool to inspect individual server details.\n")
 	return sb.String()

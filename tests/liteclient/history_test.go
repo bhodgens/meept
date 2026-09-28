@@ -173,7 +173,7 @@ func TestHistory_ScrollThenRestore(t *testing.T) {
 	var results []string
 
 	// Navigate up 3 steps
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		r, ok := h.Up("temp")
 		if ok {
 			results = append(results, r)

@@ -65,7 +65,7 @@ func (r *ContentRouter) DetectType(content string) ContentType {
 
 	// JSON: Try parsing
 	if trimmed[0] == '{' || trimmed[0] == '[' {
-		var v interface{}
+		var v any
 		if err := json.Unmarshal([]byte(content), &v); err == nil {
 			return ContentJSON
 		}

@@ -84,7 +84,7 @@ func TestIntegration_SessionAndChat(t *testing.T) {
 			var p struct {
 				Name string `json:"name"`
 			}
-		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
+			_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]any{
 				"id":         "sess-e2e",
 				"name":       p.Name,
@@ -94,7 +94,7 @@ func TestIntegration_SessionAndChat(t *testing.T) {
 			var p struct {
 				Message string `json:"message"`
 			}
-		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
+			_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]string{
 				"reply": "ack: " + p.Message,
 			}, nil
@@ -149,7 +149,7 @@ func TestIntegration_SlashCommandFlow(t *testing.T) {
 			var p struct {
 				Message string `json:"message"`
 			}
-		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
+			_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]string{"reply": "received: " + p.Message}, nil
 		default:
 			return map[string]string{"status": "ok"}, nil
@@ -290,7 +290,7 @@ func TestIntegration_SessionManagerLoadOrCreateFlow(t *testing.T) {
 			var p struct {
 				Name string `json:"name"`
 			}
-		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
+			_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]any{
 				"id":         "sess-new",
 				"name":       p.Name,
@@ -367,7 +367,7 @@ func TestIntegration_MultipleChatRoundTrips(t *testing.T) {
 			var p struct {
 				Message string `json:"message"`
 			}
-		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
+			_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]string{"reply": fmt.Sprintf("echo #%d: %s", callCount, p.Message)}, nil
 		case "session.create":
 			return map[string]any{

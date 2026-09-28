@@ -43,9 +43,9 @@ func TestParseResponseWithTools_EmptyAndWhitespaceBodies(t *testing.T) {
 	c := NewClient(&ModelConfig{ProviderID: "openai", ModelID: "gpt-test"})
 
 	for name, body := range map[string]string{
-		"empty content":       emptyChatBody(),
-		"whitespace content":  whitespaceChatBody(),
-		"zero choices":        noChoicesChatBody(),
+		"empty content":      emptyChatBody(),
+		"whitespace content": whitespaceChatBody(),
+		"zero choices":       noChoicesChatBody(),
 	} {
 		var resp ChatResponse
 		if err := json.Unmarshal([]byte(body), &resp); err != nil {

@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -150,12 +149,16 @@ func TestGitSync_ListMembers(t *testing.T) {
 	// Register a first member
 	m1 := &Member{NodeID: "node-alpha", NodeName: "Alpha", Status: "active"}
 	m1.LastHeartbeat = time.Now().UTC()
-	gs.RegisterNode(m1)
+	if err := gs.RegisterNode(m1); err != nil {
+		t.Fatalf("RegisterNode: %v", err)
+	}
 
 	// Register a second member
 	m2 := &Member{NodeID: "node-beta", NodeName: "Beta", Status: "active"}
 	m2.LastHeartbeat = time.Now().UTC()
-	gs.RegisterNode(m2)
+	if err := gs.RegisterNode(m2); err != nil {
+		t.Fatalf("RegisterNode: %v", err)
+	}
 
 	// Get members should return both
 	members, err := gs.GetMembers()
@@ -329,7 +332,9 @@ func TestGitSync_Leave(t *testing.T) {
 		NodeName: "Leaving Node",
 		Status:   "active",
 	}
-	gs.RegisterNode(m)
+	if err := gs.RegisterNode(m); err != nil {
+		t.Fatalf("RegisterNode: %v", err)
+	}
 
 	// Verify it exists
 	_, err := LoadMember(repo, "node-leave")
@@ -403,7 +408,9 @@ func TestListLocalMembers_SkipsNonJSON5(t *testing.T) {
 		Status:   "active",
 	}
 	UpdateHeartbeat(m)
-	SaveMember(repo, m)
+	if err := SaveMember(repo, m); err != nil {
+		t.Fatalf("SaveMember: %v", err)
+	}
 
 	// Add an ignored file
 	ignorePath := filepath.Join(repo, "nodes", "ignored.txt")
@@ -442,8 +449,7 @@ func TestGitSync_ContextCancellation(t *testing.T) {
 	gs := NewGitSync(cfg, localCfg, repo, logger)
 
 	// Start with a cancellable context
-	ctx, cancel := context.WithCancel(context.Background())
-	_ = cancel // reserved for future use with context-only cancellation
+	ctx := t.Context()
 
 	if err := gs.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)

@@ -585,11 +585,9 @@ func (g *GossipEngine) cleanupDedupCache() {
 // startRetryLoop launches a background goroutine that retries failed event broadcasts
 // up to maxRetryAttempts times. Tracked via wg so Stop waits for it (S6-16).
 func (g *GossipEngine) startRetryLoop(ctx context.Context) {
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
+	g.wg.Go(func() {
 		g.retryLoop(ctx)
-	}()
+	})
 }
 
 // retryLoop processes the retry queue, re-publishing events until max attempts.
@@ -602,6 +600,10 @@ func (g *GossipEngine) retryLoop(ctx context.Context) {
 		maxAttempts = 3
 	}
 
+	// attempts tracks how many times each event has been re-broadcast so
+	// the retry bound (maxAttempts) is actually enforced.
+	attempts := make(map[string]int)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -613,8 +615,15 @@ func (g *GossipEngine) retryLoop(ctx context.Context) {
 			// Drain retry queue at most once per tick
 			select {
 			case event := <-g.retryQueue:
+				attempts[event.EventID]++
+				if attempts[event.EventID] > maxAttempts {
+					g.logger.Warn("gossip: dropping event after max retry attempts",
+						"event_id", event.EventID, "attempts", attempts[event.EventID])
+					delete(attempts, event.EventID)
+					continue
+				}
 				g.logger.Info("gossip: retrying event broadcast",
-					"event_id", event.EventID, "attempt", 1)
+					"event_id", event.EventID, "attempt", attempts[event.EventID])
 				// Re-broadcast via existing Publish path
 				g.Publish(event)
 			default:
@@ -658,11 +667,9 @@ func (g *GossipEngine) Start(ctx context.Context) error {
 	}
 
 	// Heartbeat and event propagation goroutine
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
+	g.wg.Go(func() {
 		g.run(ctx)
-	}()
+	})
 
 	return nil
 }

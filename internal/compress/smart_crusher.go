@@ -71,7 +71,7 @@ func (sc *SmartCrusher) Crush(content string) (string, CompressionResult) {
 	}
 
 	// Parse JSON
-	var data interface{}
+	var data any
 	if err := json.Unmarshal([]byte(content), &data); err != nil {
 		// Not valid JSON - return passthrough
 		result.CompressedContent = content
@@ -119,11 +119,11 @@ func (sc *SmartCrusher) Crush(content string) (string, CompressionResult) {
 }
 
 // crushValue recursively processes a JSON value.
-func (sc *SmartCrusher) crushValue(v interface{}, depth int) (interface{}, compressionStats) {
+func (sc *SmartCrusher) crushValue(v any, depth int) (any, compressionStats) {
 	switch val := v.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return sc.crushObject(val, depth)
-	case []interface{}:
+	case []any:
 		return sc.crushArray(val, depth)
 	default:
 		// Primitives: pass through
@@ -135,7 +135,7 @@ func (sc *SmartCrusher) crushValue(v interface{}, depth int) (interface{}, compr
 }
 
 // crushObject processes a JSON object.
-func (sc *SmartCrusher) crushObject(obj map[string]interface{}, depth int) (interface{}, compressionStats) {
+func (sc *SmartCrusher) crushObject(obj map[string]any, depth int) (any, compressionStats) {
 	// Sort keys for deterministic output
 	keys := make([]string, 0, len(obj))
 	for k := range obj {
@@ -144,7 +144,7 @@ func (sc *SmartCrusher) crushObject(obj map[string]interface{}, depth int) (inte
 	sort.Strings(keys)
 
 	// Normalize: rebuild with sorted keys
-	normalized := make(map[string]interface{}, len(obj))
+	normalized := make(map[string]any, len(obj))
 	var stats compressionStats
 
 	for _, k := range keys {
@@ -164,7 +164,7 @@ func (sc *SmartCrusher) crushObject(obj map[string]interface{}, depth int) (inte
 }
 
 // crushArray processes a JSON array.
-func (sc *SmartCrusher) crushArray(arr []interface{}, depth int) (interface{}, compressionStats) {
+func (sc *SmartCrusher) crushArray(arr []any, depth int) (any, compressionStats) {
 	if len(arr) == 0 {
 		return arr, compressionStats{}
 	}
@@ -172,7 +172,7 @@ func (sc *SmartCrusher) crushArray(arr []interface{}, depth int) (interface{}, c
 	// Small arrays: keep all
 	if len(arr) <= sc.KeepFirstN+sc.KeepLastN {
 		var stats compressionStats
-		result := make([]interface{}, len(arr))
+		result := make([]any, len(arr))
 		for i, v := range arr {
 			crushed, childStats := sc.crushValue(v, depth+1)
 			result[i] = crushed
@@ -243,19 +243,19 @@ func (sc *SmartCrusher) crushArray(arr []interface{}, depth int) (interface{}, c
 }
 
 // buildArrayWithMarkers creates an array showing kept items with elision markers.
-func (sc *SmartCrusher) buildArrayWithMarkers(selected []selectedItem, total int) []interface{} {
+func (sc *SmartCrusher) buildArrayWithMarkers(selected []selectedItem, total int) []any {
 	if len(selected) == 0 {
-		return []interface{}{}
+		return []any{}
 	}
 
-	result := make([]interface{}, 0)
+	result := make([]any, 0)
 	lastIndex := -1
 
 	for _, item := range selected {
 		// Add elision marker if there's a gap
 		if lastIndex >= 0 && item.index-lastIndex > 1 {
 			gap := item.index - lastIndex - 1
-			result = append(result, map[string]interface{}{
+			result = append(result, map[string]any{
 				"__elided__": fmt.Sprintf("%d items", gap),
 			})
 		}
@@ -267,7 +267,7 @@ func (sc *SmartCrusher) buildArrayWithMarkers(selected []selectedItem, total int
 	// Add trailing elision if needed
 	if lastIndex < total-1 {
 		gap := total - 1 - lastIndex
-		result = append(result, map[string]interface{}{
+		result = append(result, map[string]any{
 			"__elided__": fmt.Sprintf("%d trailing items", gap),
 		})
 	}
@@ -293,7 +293,7 @@ func (s compressionStats) merge(other compressionStats) compressionStats {
 // selectedItem represents an array item that was kept.
 type selectedItem struct {
 	index  int
-	value  interface{}
+	value  any
 	hash   string
 	kept   bool
 	reason string
@@ -313,22 +313,22 @@ func keepReason(i, total int, preserve bool) string {
 }
 
 // hashJSON computes a short hash for a JSON value.
-func hashJSON(v interface{}) string {
+func hashJSON(v any) string {
 	data, _ := json.Marshal(v)
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:8])
 }
 
-// asMap tries to convert an interface{} to map[string]interface{}.
-func asMap(v interface{}) map[string]interface{} {
-	if m, ok := v.(map[string]interface{}); ok {
+// asMap tries to convert an any to map[string]any.
+func asMap(v any) map[string]any {
+	if m, ok := v.(map[string]any); ok {
 		return m
 	}
 	return nil
 }
 
 // isErrorObject checks if an object looks like an error response.
-func isErrorObject(obj map[string]interface{}) bool {
+func isErrorObject(obj map[string]any) bool {
 	if obj == nil {
 		return false
 	}
@@ -360,7 +360,7 @@ func isErrorObject(obj map[string]interface{}) bool {
 }
 
 // countTokensJSON estimates token count for a JSON value.
-func countTokensJSON(v interface{}) int {
+func countTokensJSON(v any) int {
 	data, _ := json.Marshal(v)
 	return countTokens(string(data))
 }

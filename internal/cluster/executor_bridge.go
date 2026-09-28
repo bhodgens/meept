@@ -568,7 +568,7 @@ func (b *ExecutorBridge) snapshotWorkspace(aj *activeJob) *WorkspaceRef {
 func (b *ExecutorBridge) SubmitJob(ctx context.Context, job DispatchJob) (DispatchJobAck, error) {
 	payload, err := encodeDispatchJob(job)
 	if err != nil {
-		return DispatchJobAck{JobID: job.JobID, Accepted: false, Message: err.Error()}, nil
+		return DispatchJobAck{}, fmt.Errorf("encode dispatch job: %w", err)
 	}
 
 	event := &models.ClusterEvent{
@@ -580,7 +580,7 @@ func (b *ExecutorBridge) SubmitJob(ctx context.Context, job DispatchJob) (Dispat
 	}
 
 	if err := b.HandleTaskCreate(event); err != nil {
-		return DispatchJobAck{JobID: job.JobID, Accepted: false, Message: err.Error()}, nil
+		return DispatchJobAck{}, fmt.Errorf("handle task create: %w", err)
 	}
 
 	return DispatchJobAck{JobID: job.JobID, Accepted: true}, nil

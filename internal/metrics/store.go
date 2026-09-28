@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	"errors"
+	"github.com/jmoiron/sqlx"
 
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
