@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generated": "2026-09-23",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L.",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet.",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -123,6 +123,125 @@
     ],
     "cmd/meept-daemon/": [
       "daemon-lifecycle"
+    ],
+    "internal/agents/": [
+      "smoke"
+    ],
+    "internal/benchmark/": [
+      "smoke"
+    ],
+    "internal/bot/": [
+      "smoke"
+    ],
+    "internal/browser/": [
+      "smoke"
+    ],
+    "internal/calendar/": [
+      "smoke"
+    ],
+    "internal/cluster/": [
+      "smoke"
+    ],
+    "internal/code/": [
+      "smoke"
+    ],
+    "internal/compress/": [
+      "smoke"
+    ],
+    "internal/configui/": [
+      "smoke"
+    ],
+    "internal/context/": [
+      "smoke"
+    ],
+    "internal/debug/": [
+      "smoke"
+    ],
+    "internal/errcls/": [
+      "smoke"
+    ],
+    "internal/gate/": [
+      "smoke"
+    ],
+    "internal/integration/": [
+      "smoke"
+    ],
+    "internal/learning/": [
+      "smoke"
+    ],
+    "internal/lint/": [
+      "smoke"
+    ],
+    "internal/mcp/": [
+      "tools-mcp"
+    ],
+    "internal/metrics/": [
+      "daemon-lifecycle"
+    ],
+    "internal/pathutil/": [
+      "smoke"
+    ],
+    "internal/placement/": [
+      "smoke"
+    ],
+    "internal/plan/": [
+      "step-pipeline",
+      "state-restart"
+    ],
+    "internal/preferences/": [
+      "smoke"
+    ],
+    "internal/pty/": [
+      "smoke"
+    ],
+    "internal/registry/": [
+      "smoke"
+    ],
+    "internal/repomap/": [
+      "smoke"
+    ],
+    "internal/resources/": [
+      "smoke"
+    ],
+    "internal/runtime/": [
+      "smoke"
+    ],
+    "internal/secrets/": [
+      "security-fence"
+    ],
+    "internal/selfimprove/": [
+      "smoke"
+    ],
+    "internal/shadow/": [
+      "smoke"
+    ],
+    "internal/sharedclient/": [
+      "smoke"
+    ],
+    "internal/stt/": [
+      "smoke"
+    ],
+    "internal/task/": [
+      "task-state",
+      "step-pipeline"
+    ],
+    "internal/templates/": [
+      "smoke"
+    ],
+    "internal/tts/": [
+      "smoke"
+    ],
+    "internal/tui/": [
+      "smoke"
+    ],
+    "internal/util/": [
+      "smoke"
+    ],
+    "internal/version/": [
+      "smoke"
+    ],
+    "internal/workspace/": [
+      "session-binding"
     ]
   },
   "suites": [
