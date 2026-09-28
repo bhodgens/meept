@@ -49,13 +49,19 @@
       "naive-user-chat"
     ],
     "internal/queue/": [
-      "goal-loop"
+      "goal-loop",
+      "task-queue"
+    ],
+    "internal/task/": [
+      "task-state",
+      "task-queue"
     ],
     "internal/worker/": [
       "goal-loop"
     ],
     "internal/scheduler/": [
-      "goal-loop"
+      "goal-loop",
+      "scheduler"
     ],
     "internal/skills/": [
       "skills-discovery",
@@ -190,7 +196,8 @@
     "internal/plan/": [
       "step-pipeline",
       "state-restart",
-      "continuity-regressions"
+      "continuity-regressions",
+      "plan-lifecycle"
     ],
     "internal/preferences/": [
       "smoke"
@@ -227,7 +234,8 @@
     ],
     "internal/task/": [
       "task-state",
-      "step-pipeline"
+      "step-pipeline",
+      "task-queue"
     ],
     "internal/templates/": [
       "smoke"
@@ -482,6 +490,21 @@
     {
       "name": "continuity-regressions",
       "dir": "e2e/suites/continuity-regressions",
+      "status": "implemented"
+    },
+    {
+      "name": "plan-lifecycle",
+      "dir": "e2e/suites/plan-lifecycle",
+      "status": "implemented"
+    },
+    {
+      "name": "task-queue",
+      "dir": "e2e/suites/task-queue",
+      "status": "implemented"
+    },
+    {
+      "name": "scheduler",
+      "dir": "e2e/suites/scheduler",
       "status": "implemented"
     }
   ],
@@ -2015,6 +2038,104 @@
       "paths": [
         "internal/llm/client.go",
         "internal/llm/provider_manager.go"
+      ]
+    },
+    {
+      "id": "plan-lifecycle-01",
+      "suite": "plan-lifecycle",
+      "diff": "S",
+      "title": "plan.create with an explicit project_path lands docs/plans/<slug>.md inside the project; file and store agree (plan_id, status line, draft state)",
+      "paths": [
+        "internal/plan/manager.go",
+        "internal/plan/writer.go",
+        "internal/rpc/plan.go"
+      ]
+    },
+    {
+      "id": "plan-lifecycle-02",
+      "suite": "plan-lifecycle",
+      "diff": "M",
+      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
+      "paths": [
+        "internal/plan/manager.go",
+        "internal/plan/filelock.go",
+        "internal/rpc/plan.go"
+      ]
+    },
+    {
+      "id": "plan-lifecycle-03",
+      "suite": "plan-lifecycle",
+      "diff": "S",
+      "title": "plan.reject lands the plan in cancelled; the tracking file survives and still parses (audit trail never destroyed)",
+      "paths": [
+        "internal/plan/manager.go",
+        "internal/rpc/plan.go"
+      ]
+    },
+    {
+      "id": "task-queue-01",
+      "suite": "task-queue",
+      "diff": "M",
+      "title": "a chat-dispatched task driven to completion keeps its task row and step rows across a daemon restart (task RPC + direct tasks.db read)",
+      "paths": [
+        "internal/task/store.go",
+        "internal/task/registry.go",
+        "internal/rpc/proxy.go"
+      ]
+    },
+    {
+      "id": "task-queue-02",
+      "suite": "task-queue",
+      "diff": "M",
+      "title": "a task in flight at SIGKILL is honestly marked failed by the RecoverStaleTasks boot sweep; non-terminal steps carry the daemon_shutdown result",
+      "paths": [
+        "internal/task/store.go",
+        "internal/daemon/daemon.go"
+      ]
+    },
+    {
+      "id": "task-queue-03",
+      "suite": "task-queue",
+      "diff": "M",
+      "title": "a queue.enqueue'd one-off job persists in queue.db across a restart and is honestly resolved by the startup reclaim sweep (never stuck claimed/processing)",
+      "paths": [
+        "internal/queue/store.go",
+        "internal/queue/queue.go",
+        "internal/daemon/daemon.go"
+      ]
+    },
+    {
+      "id": "scheduler-01",
+      "suite": "scheduler",
+      "diff": "M",
+      "title": "a shell job added via scheduler.add_job fires within its cron window, executes its command, and lands run accounting in jobs.json plus its tick in scheduler_claims.db",
+      "paths": [
+        "internal/scheduler/scheduler.go",
+        "internal/scheduler/jobs.go",
+        "internal/scheduler/persistence.go",
+        "internal/scheduler/claims.go",
+        "internal/scheduler/rpc.go"
+      ]
+    },
+    {
+      "id": "scheduler-02",
+      "suite": "scheduler",
+      "diff": "S",
+      "title": "idempotency: each delivery claims exactly one unique tick; two RunNow deliveries yield two claim rows, run_count=2, and UNIQUE(job_id, tick_time) refuses duplicates",
+      "paths": [
+        "internal/scheduler/claims.go",
+        "internal/scheduler/scheduler.go"
+      ]
+    },
+    {
+      "id": "scheduler-03",
+      "suite": "scheduler",
+      "diff": "S",
+      "title": "lifecycle: pause stops fires, resume restores, remove deletes the job from the live scheduler and jobs.json",
+      "paths": [
+        "internal/scheduler/scheduler.go",
+        "internal/scheduler/persistence.go",
+        "internal/scheduler/rpc.go"
       ]
     }
   ]
