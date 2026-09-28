@@ -749,7 +749,7 @@ func nullableTime(t *time.Time) any {
 // distinguish "no artifacts" from "empty array".
 func artifactsToJSON(arts []Artifact) (any, error) {
 	if len(arts) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil is the deliberate SQL NULL marker documented above, not an invalid value
 	}
 	b, err := json.Marshal(arts)
 	if err != nil {

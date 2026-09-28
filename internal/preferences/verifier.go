@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/tools"
+	"slices"
 )
 
 // InstructionVerifier validates instructions before they are persisted or executed.
@@ -125,10 +126,8 @@ func (v *InstructionVerifier) assessShellRisk(instr *ParsedInstruction) string {
 
 		// Check known-safe commands (exact match only to prevent bypass
 		// via substring injection like "rm -rf /; go test ./...").
-		for _, safe := range v.safeCommands {
-			if cmdLower == safe {
-				return "low"
-			}
+		if slices.Contains(v.safeCommands, cmdLower) {
+			return "low"
 		}
 
 		// Check high-risk shell patterns

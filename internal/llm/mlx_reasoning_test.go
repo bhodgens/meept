@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -158,7 +159,7 @@ func TestParseResponse_StillEmptyWhenNoContentAndNoReasoning(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	client := NewClient(&ModelConfig{ModelID: "mlx-test"})
-	if _, err := client.parseResponse(&chatResp); err != ErrEmptyResponse {
+	if _, err := client.parseResponse(&chatResp); !errors.Is(err, ErrEmptyResponse) {
 		t.Fatalf("parseResponse on a truly empty reply = %v, want ErrEmptyResponse", err)
 	}
 }

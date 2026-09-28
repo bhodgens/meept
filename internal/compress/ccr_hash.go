@@ -15,7 +15,7 @@ const HashLength = 24
 
 // hashPool provides reusable hash instances to reduce allocations.
 var hashPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return sha256.New()
 	},
 }

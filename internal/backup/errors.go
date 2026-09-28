@@ -31,8 +31,8 @@ func (e *BackupError) IsRetryable() bool {
 
 // IsRetryable reports whether the error is retryable.
 func IsRetryable(err error) bool {
-	var berr *BackupError
-	return errors.As(err, &berr) && berr.Retryable
+	berr, ok := errors.AsType[*BackupError](err)
+	return ok && berr.Retryable
 }
 
 // As wraps err in a *BackupError with the given op.
@@ -40,8 +40,7 @@ func As(op string, err error) *BackupError {
 	if err == nil {
 		return nil
 	}
-	var berr *BackupError
-	if errors.As(err, &berr) {
+	if berr, ok := errors.AsType[*BackupError](err); ok {
 		return &BackupError{
 			Op:        op + "->" + berr.Op,
 			Err:       berr.Err,
@@ -111,6 +110,6 @@ func Wrap(op string, err error) error {
 
 // IsBackupError returns true if err is a BackupError of any kind.
 func IsBackupError(err error) bool {
-	var berr *BackupError
-	return errors.As(err, &berr)
+	_, ok := errors.AsType[*BackupError](err)
+	return ok
 }

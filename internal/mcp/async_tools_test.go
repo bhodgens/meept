@@ -16,7 +16,7 @@ import (
 )
 
 // fakeRPCSeq serializes the /tmp socket filenames across tests.
-var fakeRPCSeq int32
+var fakeRPCSeq atomic.Int32
 
 // fakeRPCServer answers JSON-RPC lines on a Unix socket, dispatching by
 // method. It lets the tool implementations be exercised against a scripted
@@ -33,7 +33,7 @@ func startFakeRPC(t *testing.T, handler func(string, map[string]any) (any, error
 	t.Helper()
 	// macOS limits unix socket paths to 104 bytes; t.TempDir() under the
 	// per-test cache dir can exceed that, so bind a short /tmp path instead.
-	sock := fmt.Sprintf("/tmp/meept-mcp-test-%d-%d.sock", os.Getpid(), atomic.AddInt32(&fakeRPCSeq, 1))
+	sock := fmt.Sprintf("/tmp/meept-mcp-test-%d-%d.sock", os.Getpid(), fakeRPCSeq.Add(1))
 	l, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)

@@ -12,7 +12,7 @@ import (
 // parent is N-1. The first message has a nil ParentID (root).
 func makeMessageChain(count int) []Message {
 	msgs := make([]Message, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		msg := Message{
 			Role:      "user",
 			Content:   fmt.Sprintf("message %d", i+1),

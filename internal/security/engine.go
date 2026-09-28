@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -470,9 +471,7 @@ func (e *Engine) CheckForAgent(action, toolName string, details map[string]strin
 			// races when multiple goroutines call CheckForAgent concurrently
 			// with the same details map.
 			checkDetails := make(map[string]string, len(details)+2)
-			for k, v := range details {
-				checkDetails[k] = v
-			}
+			maps.Copy(checkDetails, details)
 			if _, hasRL := checkDetails["risk_level"]; !hasRL {
 				checkDetails["risk_level"] = effectiveRisk.String()
 			}
@@ -735,7 +734,6 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 
 	// Check allow rules
 	// SEC-5 FIX: Use separate variable for allow rows
-	hasAllowRules := false
 	var allowPatterns []struct {
 		Pattern string `db:"pattern"`
 	}
@@ -752,7 +750,7 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 			RuleSource: RuleSourceFailClosed,
 		}
 	}
-	hasAllowRules = len(allowPatterns) > 0
+	hasAllowRules := len(allowPatterns) > 0
 
 	for _, ap := range allowPatterns {
 		expandedPattern := pathutil.ExpandPath(ap.Pattern)

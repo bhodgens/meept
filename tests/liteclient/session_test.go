@@ -63,16 +63,16 @@ func (h *mockSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleDelete(w, req.Params)
 	case "status":
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"status": "running"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "running"}) // client disconnect possible; nothing to recover
 	default:
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"result": `{"status":"ok"}`})
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": `{"status":"ok"}`}) // client disconnect possible; nothing to recover
 	}
 }
 
 func (h *mockSessionHandler) handleList(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{ // client disconnect possible; nothing to recover
 		"result": json.RawMessage(`{"sessions":[]}`),
 	})
 }
@@ -81,7 +81,7 @@ func (h *mockSessionHandler) handleCreate(w http.ResponseWriter, params json.Raw
 	var p struct {
 		Name string `json:"name"`
 	}
-	json.Unmarshal(params, &p)
+	_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 	h.nextID++
 	sess := types.Session{
 		ID:            fmt.Sprintf("sess-%d", h.nextID),
@@ -91,7 +91,7 @@ func (h *mockSessionHandler) handleCreate(w http.ResponseWriter, params json.Raw
 	h.sessions = append(h.sessions, sess)
 	w.Header().Set("Content-Type", "application/json")
 	sessJSON, _ := json.Marshal(sess)
-	json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(sessJSON)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(sessJSON)}) // client disconnect possible; nothing to recover
 }
 
 func (h *mockSessionHandler) handleMostRecent(w http.ResponseWriter) {
@@ -101,25 +101,25 @@ func (h *mockSessionHandler) handleMostRecent(w http.ResponseWriter) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	sessJSON, _ := json.Marshal(h.sessions[len(h.sessions)-1])
-	json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(sessJSON)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(sessJSON)}) // client disconnect possible; nothing to recover
 }
 
 func (h *mockSessionHandler) handleUpdateDesc(w http.ResponseWriter, params json.RawMessage) {
 	var p struct {
 		Description string `json:"description"`
 	}
-	json.Unmarshal(params, &p)
+	_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 	h.lastDesc = p.Description
 	h.createdDS = true
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(`{"status":"ok"}`)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(`{"status":"ok"}`)}) // client disconnect possible; nothing to recover
 }
 
 func (h *mockSessionHandler) handleDelete(w http.ResponseWriter, params json.RawMessage) {
 	var p struct {
 		SessionID string `json:"session_id"`
 	}
-	json.Unmarshal(params, &p)
+	_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 	for i, s := range h.sessions {
 		if s.ID == p.SessionID {
 			h.sessions = append(h.sessions[:i], h.sessions[i+1:]...)
@@ -127,7 +127,7 @@ func (h *mockSessionHandler) handleDelete(w http.ResponseWriter, params json.Raw
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(`{"status":"ok"}`)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(`{"status":"ok"}`)}) // client disconnect possible; nothing to recover
 }
 
 // ============================================================================
@@ -200,7 +200,7 @@ func TestSessionManager_LoadOrCreateSession_ByName(t *testing.T) {
 	sm := sharedclient.NewSessionManager(client, "default")
 
 	// Pre-create a session to test switching
-	client.CreateSession("test-session", "")
+	_, _ = client.CreateSession("test-session", "") // pre-create; LoadOrCreateSession below asserts the outcome
 
 	err := sm.LoadOrCreateSession(context.TODO(), "test-session")
 	if err != nil {

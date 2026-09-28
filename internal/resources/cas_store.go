@@ -154,9 +154,7 @@ func (s *CASStore) StartSweep(parentCtx context.Context) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	s.sweepCancel = cancel
 
-	s.sweepWg.Add(1)
-	go func() {
-		defer s.sweepWg.Done()
+	s.sweepWg.Go(func() {
 		ticker := time.NewTicker(s.cfg.EvictionSweepInterval)
 		defer ticker.Stop()
 
@@ -174,7 +172,7 @@ func (s *CASStore) StartSweep(parentCtx context.Context) {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // Add registers a local file in the CAS store. It computes the hash,

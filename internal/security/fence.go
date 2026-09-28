@@ -354,27 +354,12 @@ func extractPathFromToken(tok string) string {
 	}
 
 	// Skip single-token command names with no path component
-	isPathLike := false
-
-	// Absolute paths
-	if strings.HasPrefix(tok, "/") {
-		isPathLike = true
-	}
-
-	// Home directory paths
-	if strings.HasPrefix(tok, "~") {
-		isPathLike = true
-	}
-
-	// Relative paths with parent traversal (../)
-	if strings.Contains(tok, "..") {
-		isPathLike = true
-	}
-
-	// Relative paths with explicit ./ prefix
-	if strings.HasPrefix(tok, "./") {
-		isPathLike = true
-	}
+	// Absolute (/...), home (~...), parent-traversal (..), or explicit
+	// relative (./...) tokens are path-like.
+	isPathLike := strings.HasPrefix(tok, "/") ||
+		strings.HasPrefix(tok, "~") ||
+		strings.Contains(tok, "..") ||
+		strings.HasPrefix(tok, "./")
 
 	if !isPathLike {
 		return ""

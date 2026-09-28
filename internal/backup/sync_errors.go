@@ -63,8 +63,8 @@ var (
 
 // IsSyncError reports whether err is a *SyncError.
 func IsSyncError(err error) bool {
-	var se *SyncError
-	return errors.As(err, &se)
+	_, ok := errors.AsType[*SyncError](err)
+	return ok
 }
 
 // IsRetryable checks if a sync error can be retried.
@@ -72,8 +72,7 @@ func IsSyncRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
-	var se *SyncError
-	if errors.As(err, &se) {
+	if se, ok := errors.AsType[*SyncError](err); ok {
 		switch se.Op {
 		case "pull", "find":
 			return true // network/transport failures are retryable
@@ -94,8 +93,7 @@ func SyncWrap(op string, err error) error {
 	if err == nil {
 		return nil
 	}
-	var se *SyncError
-	if errors.As(err, &se) {
+	if se, ok := errors.AsType[*SyncError](err); ok {
 		return &SyncError{
 			PeerID:  se.PeerID,
 			Op:      op + "->" + se.Op,

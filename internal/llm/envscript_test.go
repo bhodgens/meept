@@ -303,13 +303,11 @@ func TestEnvScriptResolverConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if v, ok := r.Resolve("MEEPT_TEST_VAR"); !ok || v != "value" {
 				t.Errorf("concurrent resolve got %q ok=%v", v, ok)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

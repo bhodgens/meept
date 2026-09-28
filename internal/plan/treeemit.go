@@ -109,7 +109,7 @@ func EmitTree(cp *CompiledPlan, opts TreeEmitOptions) (*EmittedTree, error) {
 // doc. Mirrors the Hermes skill's check_template_compliance.py section
 // scan so the compliance guarantee is testable in-repo.
 func sectionPresent(doc, section string) bool {
-	for _, ln := range strings.Split(doc, "\n") {
+	for ln := range strings.SplitSeq(doc, "\n") {
 		if strings.TrimRight(ln, " \t") == section {
 			return true
 		}

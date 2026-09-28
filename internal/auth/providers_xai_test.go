@@ -61,7 +61,8 @@ func TestResolveFlowConfig_Discovery(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"token_endpoint":"` + srvTokenPath(r) + `"}`))
+		//nolint:gosec // G705: test fixture writing static JSON with a local httptest path
+		_, _ = w.Write([]byte(`{"token_endpoint":"` + srvTokenPath(r) + `"}`))
 	}))
 	defer srv.Close()
 
@@ -93,7 +94,7 @@ func srvTokenPath(r *http.Request) string {
 func TestResolveFlowConfig_NoDiscovery(t *testing.T) {
 	t.Parallel()
 
-	cfg := &OAuthProviderConfig{
+	cfg := &OAuthProviderConfig{ //nolint:gosec // G101: fake test values
 		ProviderID: "test-fixed",
 		TokenEP:    "https://fixed/token",
 	}

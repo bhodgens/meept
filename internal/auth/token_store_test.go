@@ -117,14 +117,14 @@ func TestTokenStore_List(t *testing.T) {
 	now := time.Now()
 
 	// Save two tokens.
-	store.Save("github-models", &TokenResult{
+	_ = store.Save("github-models", &TokenResult{
 		AccessToken:  "at1",
 		TokenType:    "Bearer",
 		RefreshToken: "rt1",
 		Expiry:       now.Add(1 * time.Hour),
 		Scopes:       []string{"models:read"},
 	})
-	store.Save("google-oauth", &TokenResult{
+	_ = store.Save("google-oauth", &TokenResult{
 		AccessToken:  "at2",
 		TokenType:    "Bearer",
 		RefreshToken: "",
@@ -185,13 +185,14 @@ func TestTokenStore_GetValidToken_Fresh(t *testing.T) {
 	enc, _ := NewEncryptionKey("test-key")
 	store := NewTokenStoreDir(dir, enc)
 
-	store.Save("provider-a", &TokenResult{
+	_ = store.Save("provider-a", &TokenResult{
 		AccessToken:  "fresh-access-token",
 		TokenType:    "Bearer",
 		RefreshToken: "refresh-tok",
 		Expiry:       time.Now().Add(2 * time.Hour),
 	})
 
+	//nolint:gosec // G101: fake test values
 	cfg := DeviceFlowConfig{
 		ClientID: "test-client",
 		TokenEP:  "https://example.com/token", // not used for fresh tokens
@@ -211,13 +212,14 @@ func TestTokenStore_GetValidToken_ExpiredNoRefresh(t *testing.T) {
 	enc, _ := NewEncryptionKey("test-key")
 	store := NewTokenStoreDir(dir, enc)
 
-	store.Save("provider-b", &TokenResult{
+	_ = store.Save("provider-b", &TokenResult{
 		AccessToken:  "expired-token",
 		TokenType:    "Bearer",
 		RefreshToken: "",
 		Expiry:       time.Now().Add(-5 * time.Minute),
 	})
 
+	//nolint:gosec // G101: fake test values
 	cfg := DeviceFlowConfig{
 		ClientID: "test-client",
 		TokenEP:  "https://example.com/token",

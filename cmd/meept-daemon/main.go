@@ -114,8 +114,7 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "\n")
 		// Config errors should not print usage, just the error message
-		var cfgErr configError
-		if errors.As(err, &cfgErr) {
+		if _, ok := errors.AsType[configError](err); ok {
 			fmt.Fprintf(os.Stderr, "Configuration Error:\n")
 			fmt.Fprintf(os.Stderr, "  %v\n\n", err)
 			fmt.Fprintf(os.Stderr, "Configuration file locations:\n")

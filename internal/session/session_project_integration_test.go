@@ -215,8 +215,8 @@ func TestSQLiteStore_UpdateSessionsProjectPath_MultiSession(t *testing.T) {
 	sess2, _ := store.Create("sess-2")
 	sess3, _ := store.Create("sess-3")
 
-	store.SetProject(sess1.ID, "proj-1", "/old/path") //nolint:errcheck // test arrange: later assertions verify the effect
-	store.SetProject(sess2.ID, "proj-1", "/old/path") //nolint:errcheck // test arrange: later assertions verify the effect
+	store.SetProject(sess1.ID, "proj-1", "/old/path")   //nolint:errcheck // test arrange: later assertions verify the effect
+	store.SetProject(sess2.ID, "proj-1", "/old/path")   //nolint:errcheck // test arrange: later assertions verify the effect
 	store.SetProject(sess3.ID, "proj-2", "/other/path") //nolint:errcheck // test arrange: later assertions verify the effect
 
 	if err := store.UpdateSessionsProjectPath(ctx, "/old/path", "/new/path"); err != nil {

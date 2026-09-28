@@ -117,11 +117,11 @@ func ParseRef(raw string) (algo, body string, isCAS bool) {
 	case strings.HasPrefix(raw, prefixSHA256):
 		return AlgoSHA256, strings.TrimPrefix(raw, prefixSHA256), true
 	default:
-		if strings.HasPrefix(raw, prefixGitCommit) {
-			return "gitcommit", strings.TrimPrefix(raw, prefixGitCommit), false
+		if body, ok := strings.CutPrefix(raw, prefixGitCommit); ok {
+			return "gitcommit", body, false
 		}
-		if strings.HasPrefix(raw, prefixWorkspace) {
-			return "workspace", strings.TrimPrefix(raw, prefixWorkspace), false
+		if body, ok := strings.CutPrefix(raw, prefixWorkspace); ok {
+			return "workspace", body, false
 		}
 		return "", "", false
 	}

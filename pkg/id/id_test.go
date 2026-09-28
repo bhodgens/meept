@@ -39,7 +39,7 @@ func TestGenerate_Format(t *testing.T) {
 // TestGenerate_SuffixLength verifies the random portion is exactly 16 hex chars
 // (8 bytes). Longer would waste bytes; shorter would raise collision probability.
 func TestGenerate_SuffixLength(t *testing.T) {
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		got := Generate("t-")
 		// Strip prefix "t-"
 		suffix := strings.TrimPrefix(got, "t-")
@@ -115,7 +115,7 @@ func TestGenerate_ConcurrentSafety(t *testing.T) {
 // encoding/hex.EncodeToString's documented behavior. Mixed case would break
 // callers that do byte-level comparison or sort IDs lexicographically.
 func TestGenerate_HexLowercase(t *testing.T) {
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		got := Generate("lc-")
 		suffix := strings.TrimPrefix(got, "lc-")
 		for _, r := range suffix {
@@ -135,7 +135,7 @@ func TestGenerate_HexLowercase(t *testing.T) {
 func TestGenerate_DistributionFairness(t *testing.T) {
 	const sampleSize = 10_000
 	counts := make(map[byte]int, 16)
-	for i := 0; i < sampleSize; i++ {
+	for range sampleSize {
 		got := Generate("dist-")
 		suffix := strings.TrimPrefix(got, "dist-")
 		for _, c := range []byte(suffix) {
@@ -174,7 +174,7 @@ func TestGenerate_NilSafePrefix(t *testing.T) {
 // half their hex chars.
 func TestGenerate_NoPredictableSequence(t *testing.T) {
 	const samples = 1000
-	for i := 0; i < samples; i++ {
+	for range samples {
 		a := Generate("seq-")
 		b := Generate("seq-")
 		sa := strings.TrimPrefix(a, "seq-")

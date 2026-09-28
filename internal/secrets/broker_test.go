@@ -1,7 +1,6 @@
 package secrets
 
 import (
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,7 +12,7 @@ import (
 
 // newDiscardLogger returns a logger that writes nowhere; keeps test output clean.
 func newDiscardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestPlaceholderFormat(t *testing.T) {

@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -118,7 +119,10 @@ func (p *Proxy) Start(ctx context.Context) (string, error) {
 
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		// context.WithoutCancel keeps the request-scoped lineage gosec G118
+		// requires while detaching from ctx cancellation (which already
+		// fired) so the grace window is governed solely by shutdownGrace.
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			p.logger.Debug("secrets proxy shutdown", "error", err)
@@ -128,7 +132,7 @@ func (p *Proxy) Start(ctx context.Context) (string, error) {
 	go func() {
 		// ErrServerClosed after Shutdown is expected; anything else is
 		// logged (listener failures are operational faults).
-		if serr := srv.Serve(ln); serr != nil && !errorsIsServerClosed(serr) {
+		if serr := srv.Serve(ln); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
 			p.logger.Error("secrets proxy serve failed", "error", serr)
 		}
 	}()
@@ -152,22 +156,6 @@ func (p *Proxy) Stop() {
 	}
 }
 
-// errorsIsServerClosed reports whether err is http.ErrServerClosed without
-// importing errors just for this identity check.
-func errorsIsServerClosed(err error) bool {
-	type unwrapper interface{ Unwrap() error }
-	for e := err; e != nil; {
-		if e == http.ErrServerClosed {
-			return true
-		}
-		u, ok := e.(unwrapper)
-		if !ok {
-			return false
-		}
-		e = u.Unwrap()
-	}
-	return false
-}
 
 // loopbackListen validates that listen targets a loopback IP literal and
 // binds it. Non-loopback targets are refused outright: the proxy holds the

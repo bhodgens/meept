@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -219,12 +220,12 @@ func (s *GitBackupScheduler) initRepo() error {
 	if err != nil {
 		// If the repo URL is set, try to clone
 		if s.cfg.RepoURL != "" && repo != nil {
-			// Use EnsureRemote helper
-			if createErr := EnsureRemote(repo, "origin", s.cfg.RepoURL); createErr != nil {
-				// Already exists error is fine; try pull anyway
-			}
+			// Best-effort remote registration: EnsureRemote is idempotent and
+			// "already exists" is not an error worth surfacing; fetch below is
+			// the real probe of remote reachability.
+			_ = EnsureRemote(repo, "origin", s.cfg.RepoURL)
 			// Try to fetch
-			if fetchErr := repo.Fetch(&git.FetchOptions{}); fetchErr != nil && fetchErr != git.NoErrAlreadyUpToDate {
+			if fetchErr := repo.Fetch(&git.FetchOptions{}); fetchErr != nil && !errors.Is(fetchErr, git.NoErrAlreadyUpToDate) {
 				s.logger.Warn("backup: fetch failed (remote may not exist yet)", "error", fetchErr)
 			}
 		} else if repo == nil {

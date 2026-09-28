@@ -37,7 +37,7 @@ func TestStopSupervised_TargetsRuntimeGroupNotWrapper(t *testing.T) {
 		AutoStop:     true,
 		PIDFile:      pidFile,
 		SpawnCommand: []string{"sleep", "300"},
-		Supervise:    superviseFlag(true),
+		Supervise:    new(true),
 	}
 	p := NewRuntimeProcess(cfg)
 

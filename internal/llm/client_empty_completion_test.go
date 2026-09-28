@@ -162,10 +162,11 @@ func TestClientChat_EmptyCompletionNeverSwallowsRefusalOrQuota(t *testing.T) {
 
 	c := newFailurePolicyTestClient(t, srv, fastFailurePolicyCfg)
 	_, err := c.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}})
-	var refusalErr *RefusalError
-	if !errors.As(err, &refusalErr) {
+	refusalErr, ok := errors.AsType[*RefusalError](err)
+	if !ok {
 		t.Fatalf("err = %v (%T), want RefusalError", err, err)
 	}
+	_ = refusalErr
 	if got := atomic.LoadInt32(&hits); got != 1 {
 		t.Errorf("server hits = %d, want 1 (refusal must not re-enter the retry loop)", got)
 	}
@@ -176,9 +177,9 @@ func TestClientChat_EmptyCompletionNeverSwallowsRefusalOrQuota(t *testing.T) {
 // reasoning surfaces ErrEmptyResponse through the delta path, which then
 // retries within the short budget.
 func TestChatWithDeltaCallback_EmptyStreamSurfacesEmptySentinel(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		// One chunk with an empty delta and a stop finish — the
 		// "stream ended, nothing was produced" flake shape.
@@ -195,7 +196,7 @@ func TestChatWithDeltaCallback_EmptyStreamSurfacesEmptySentinel(t *testing.T) {
 	if !errors.Is(err, ErrEmptyResponse) {
 		t.Fatalf("err = %v, want ErrEmptyResponse", err)
 	}
-	if got := atomic.LoadInt32(&hits); got != int32(fastFailurePolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
+	if got := hits.Load(); got != int32(fastFailurePolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
 		t.Errorf("server hits = %d, want %d (short budget)", got, fastFailurePolicyCfg.ShortRetries)
 	}
 }
@@ -203,9 +204,9 @@ func TestChatWithDeltaCallback_EmptyStreamSurfacesEmptySentinel(t *testing.T) {
 // TestChatWithDeltaCallback_LeadingWhitespaceStreamPasses: a stream whose
 // content is "\n\nok" (the real agnes shape) is NOT empty.
 func TestChatWithDeltaCallback_LeadingWhitespaceStreamPasses(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\n\\nok\"},\"finish_reason\":null}]}\n\n"))
 		_, _ = w.Write([]byte("data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
@@ -224,7 +225,7 @@ func TestChatWithDeltaCallback_LeadingWhitespaceStreamPasses(t *testing.T) {
 	if resp.Content != "\n\nok" {
 		t.Errorf("Content = %q, want %q", resp.Content, "\n\nok")
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Errorf("server hits = %d, want 1", got)
 	}
 }

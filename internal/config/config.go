@@ -117,12 +117,12 @@ func wrapTOMLUnmarshalError(err error, configPath string) error {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("failed to parse TOML config %s:\n", configPath))
+	fmt.Fprintf(&sb, "failed to parse TOML config %s:\n", configPath)
 	if lineInfo != "" {
-		sb.WriteString(fmt.Sprintf("  Line: %s\n", lineInfo))
+		fmt.Fprintf(&sb, "  Line: %s\n", lineInfo)
 	}
-	sb.WriteString(fmt.Sprintf("  Detail: %s\n", detailMsg))
-	sb.WriteString(fmt.Sprintf("  %s", hintMsg))
+	fmt.Fprintf(&sb, "  Detail: %s\n", detailMsg)
+	fmt.Fprintf(&sb, "  %s", hintMsg)
 
 	return fmt.Errorf("%s", sb.String())
 }

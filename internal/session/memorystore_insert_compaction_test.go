@@ -16,7 +16,7 @@ func seedStoreWithMessages(t *testing.T, msgCount int) (*MemoryStore, string) {
 	}
 
 	msgs := make([]Message, 0, msgCount)
-	for i := 0; i < msgCount; i++ {
+	for range msgCount {
 		msgs = append(msgs, Message{
 			Role:      "user",
 			Content:   "msg",

@@ -24,7 +24,7 @@ func TestStartDeviceFlow_Success(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(wantResp)
+		_ = json.NewEncoder(w).Encode(wantResp)
 	}))
 	defer srv.Close()
 
@@ -63,7 +63,7 @@ func TestStartDeviceFlow_DefaultInterval(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -80,7 +80,7 @@ func TestStartDeviceFlow_DefaultInterval(t *testing.T) {
 func TestStartDeviceFlow_ServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error":"invalid_client"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
 	}))
 	defer srv.Close()
 
@@ -95,7 +95,7 @@ func TestStartDeviceFlow_ServerError(t *testing.T) {
 
 func TestStartDeviceFlow_IncompleteResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"device_code": "dc_abc",
 			// missing user_code and verification_uri
 		})
@@ -114,7 +114,8 @@ func TestStartDeviceFlow_IncompleteResponse(t *testing.T) {
 func writeTokenError(w http.ResponseWriter, code, desc string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
-	json.NewEncoder(w).Encode(tokenResponse{
+	//nolint:gosec // G117: test fixture writes fake token strings
+	_ = json.NewEncoder(w).Encode(tokenResponse{
 		Error:     code,
 		ErrorDesc: desc,
 	})
@@ -122,7 +123,8 @@ func writeTokenError(w http.ResponseWriter, code, desc string) {
 
 func writeTokenSuccess(w http.ResponseWriter, at, rt string, expiresIn int, scope string) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tokenResponse{
+	//nolint:gosec // G117: test fixture writes fake token strings
+	_ = json.NewEncoder(w).Encode(tokenResponse{
 		AccessToken:  at,
 		TokenType:    "Bearer",
 		RefreshToken: rt,
@@ -324,7 +326,7 @@ func TestRefreshTokenRequest_Success(t *testing.T) {
 func TestRefreshTokenRequest_Failure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error":"invalid_grant"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
 	}))
 	defer srv.Close()
 

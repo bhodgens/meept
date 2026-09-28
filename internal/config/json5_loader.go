@@ -450,10 +450,10 @@ func wrapJSONUnmarshalError(err error, configPath string) error {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "failed to parse config %s:\n", configPath)
 	if fieldInfo != "" {
-		sb.WriteString(fmt.Sprintf("  Field: %s\n", fieldInfo))
+		fmt.Fprintf(&sb, "  Field: %s\n", fieldInfo)
 	}
-	sb.WriteString(fmt.Sprintf("  Detail: %s\n", detailMsg))
-	sb.WriteString(fmt.Sprintf("  %s", hintMsg))
+	fmt.Fprintf(&sb, "  Detail: %s\n", detailMsg)
+	fmt.Fprintf(&sb, "  %s", hintMsg)
 
 	return fmt.Errorf("%s", sb.String())
 }

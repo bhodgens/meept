@@ -899,9 +899,9 @@ HermesSkillMetadata represents the full frontmatter of a Hermes SKILL.md. It emb
 	    // Platforms lists supported OS platforms (mapped to Meept tags).
 	    Platforms []string `yaml:"platforms" json:"platforms,omitempty"`
 	    // Prerequisites describes runtime requirements validated before execution.
-	    Prerequisites HermesPrerequisites `yaml:"prerequisites" json:"prerequisites,omitempty"`
+	    Prerequisites HermesPrerequisites `yaml:"prerequisites" json:"prerequisites,omitzero"`
 	    // Metadata holds nested Hermes-specific metadata.
-	    Metadata *HermesMetadataExtended `yaml:"metadata" json:"metadata,omitempty"`
+	    Metadata *HermesMetadataExtended `yaml:"metadata" json:"metadata,omitzero"`
 	}
 
 <a name="HermesToolMapper"></a>

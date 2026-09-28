@@ -53,7 +53,7 @@
     "path": "Content-Length",
     "handler": "",
     "file": "internal/secrets/proxy.go",
-    "line": 323
+    "line": 311
   },
   {
     "method": "GET",
@@ -109,7 +109,7 @@
     "path": "Content-Type",
     "handler": "",
     "file": "internal/secrets/proxy.go",
-    "line": 287
+    "line": 275
   },
   {
     "method": "GET",
@@ -2076,7 +2076,7 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/auth/codex_flow.go",
-    "line": 168
+    "line": 165
   },
   {
     "method": "GET",

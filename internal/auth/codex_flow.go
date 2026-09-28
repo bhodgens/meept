@@ -111,10 +111,7 @@ func StartCodexDeviceFlow(ctx context.Context, userCodeEP, clientID string) (*Co
 			return nil, fmt.Errorf("incomplete usercode response: missing user_code or device_auth_id")
 		}
 
-		interval := parseCodexInterval(respBody)
-		if interval < 3*time.Second {
-			interval = 3 * time.Second
-		}
+		interval := max(parseCodexInterval(respBody), 3*time.Second)
 
 		return &CodexDeviceResult{
 			UserCode:     payload.UserCode,
@@ -249,8 +246,8 @@ func PollCodexAuthorization(ctx context.Context, pollEP, deviceAuthID, userCode 
 			return nil, fmt.Errorf("read poll response: %w", readErr)
 		}
 
-		switch {
-		case resp.StatusCode == http.StatusOK:
+		switch resp.StatusCode {
+		case http.StatusOK:
 			var payload codexPollResponse
 			if unmarshalErr := json.Unmarshal(respBody, &payload); unmarshalErr != nil {
 				return nil, fmt.Errorf("parse poll response: %w", unmarshalErr)
@@ -262,7 +259,7 @@ func PollCodexAuthorization(ctx context.Context, pollEP, deviceAuthID, userCode 
 				AuthorizationCode: payload.AuthorizationCode,
 				CodeVerifier:      payload.CodeVerifier,
 			}, nil
-		case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound:
+		case http.StatusForbidden, http.StatusNotFound:
 			// Still pending; wait and retry below.
 		default:
 			return nil, fmt.Errorf("poll endpoint returned %d: %s", resp.StatusCode, string(respBody))

@@ -21,7 +21,7 @@ func TestRefreshManager_RefreshesExpiringToken(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"access_token": "refreshed-access-token",
 			"token_type": "Bearer",
 			"refresh_token": "new-refresh-token",
@@ -48,7 +48,7 @@ func TestRefreshManager_RefreshesExpiringToken(t *testing.T) {
 	defer func() { OAuthProviders = origProviders }()
 
 	// Save a token that is about to expire (within the 10-minute default margin).
-	store.Save("test-provider", &TokenResult{
+	_ = store.Save("test-provider", &TokenResult{
 		AccessToken:  "old-access-token",
 		TokenType:    "Bearer",
 		RefreshToken: "old-refresh-token",
@@ -57,7 +57,7 @@ func TestRefreshManager_RefreshesExpiringToken(t *testing.T) {
 
 	rm := NewRefreshManager(store, WithRefreshMargin(10*time.Minute))
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Start with a short interval so the test doesn't take long.
@@ -105,7 +105,7 @@ func TestRefreshManager_SkipsNonExpiringToken(t *testing.T) {
 	defer func() { OAuthProviders = origProviders }()
 
 	// Token has 2 hours of validity — well beyond the margin.
-	store.Save("test-provider", &TokenResult{
+	_ = store.Save("test-provider", &TokenResult{
 		AccessToken:  "still-valid",
 		TokenType:    "Bearer",
 		RefreshToken: "rt",
@@ -113,7 +113,7 @@ func TestRefreshManager_SkipsNonExpiringToken(t *testing.T) {
 	})
 
 	rm := NewRefreshManager(store, WithRefreshMargin(10*time.Minute))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	rm.Start(ctx, 100*time.Millisecond)
@@ -128,7 +128,7 @@ func TestRefreshManager_SkipsNonExpiringToken(t *testing.T) {
 func TestRefreshManager_TracksFailures(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error":"invalid_grant"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
 	}))
 	defer srv.Close()
 
@@ -148,7 +148,7 @@ func TestRefreshManager_TracksFailures(t *testing.T) {
 	defer func() { OAuthProviders = origProviders }()
 
 	// Token is expiring and will fail to refresh.
-	store.Save("fail-provider", &TokenResult{
+	_ = store.Save("fail-provider", &TokenResult{
 		AccessToken:  "expiring",
 		TokenType:    "Bearer",
 		RefreshToken: "bad-refresh",
@@ -156,7 +156,7 @@ func TestRefreshManager_TracksFailures(t *testing.T) {
 	})
 
 	rm := NewRefreshManager(store, WithRefreshMargin(10*time.Minute))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	rm.Start(ctx, 100*time.Millisecond)
@@ -195,7 +195,7 @@ func TestRefreshManager_StopIdempotent(t *testing.T) {
 	store := NewTokenStoreDir(dir, enc)
 
 	rm := NewRefreshManager(store)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	rm.Start(ctx, 1*time.Hour)

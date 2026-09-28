@@ -240,7 +240,9 @@ func userModelsConfigPath() (string, bool) {
 		home = filepath.Join(h, ".meept")
 	}
 	path := filepath.Join(home, "models.json5")
-	if _, err := os.Stat(path); err != nil {
+	// G703-safe: path is always filepath.Join(meeptHome, "models.json5") —
+	// it never carries any request- or user-controlled component.
+	if _, err := os.Stat(path); err != nil { //nolint:gosec // G703: path is constructed solely from MEEPT_HOME / UserHomeDir plus the constant file name
 		return "", false
 	}
 	return path, true

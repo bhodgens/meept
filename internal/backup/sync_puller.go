@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -42,10 +43,6 @@ func NewSyncPuller(cfg config.PeerSyncConfig, localDB, gossipDB *sql.DB) (*SyncP
 
 	home, _ := os.UserHomeDir()
 	backupDir := filepath.Join(home, ".meept", "backups-git")
-	if cfg.RepoURL != "" {
-		// Use the backup checkout dir from the backup config
-		// (we need to retrieve it from the backup config separately)
-	}
 
 	// localDB is kept for future use; currently only gossipDB is used for merge
 
@@ -62,7 +59,7 @@ func NewSyncPuller(cfg config.PeerSyncConfig, localDB, gossipDB *sql.DB) (*SyncP
 
 	metaStore := NewSyncMetadataStore(gossipDB)
 	if err := metaStore.EnsureTable(); err != nil {
-		tempMgr.Cleanup()
+		_ = tempMgr.Cleanup()
 		return nil, fmt.Errorf("backup: ensure sync_metadata table: %w", err)
 	}
 
@@ -116,7 +113,7 @@ func (p *SyncPuller) Start(ctx context.Context) {
 
 // Stop gracefully stops the puller.
 func (p *SyncPuller) Stop() {
-	p.tempMgr.Cleanup()
+	_ = p.tempMgr.Cleanup()
 }
 
 // PullNow triggers an immediate sync.
@@ -138,7 +135,7 @@ func (p *SyncPuller) pullOnce(ctx context.Context) error {
 		}
 	}
 
-	if err := GitPullRebase(repo); err != nil && err != git.NoErrAlreadyUpToDate {
+	if err := GitPullRebase(repo); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		p.logger.Warn("sync: git pull had conflicts", "error", err)
 		// Continue anyway; we may still have useful peer data
 	}

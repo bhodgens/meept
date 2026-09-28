@@ -196,7 +196,7 @@ func TestEmitTree_RootHasRequiredSections(t *testing.T) {
 	// Child Document Index: one row per leaf.
 	childIdx := extractSection(tree.Root, "## Child Document Index")
 	rows := 0
-	for _, line := range strings.Split(childIdx, "\n") {
+	for line := range strings.SplitSeq(childIdx, "\n") {
 		if strings.HasPrefix(line, "| ") && strings.Contains(line, ".md |") {
 			rows++
 		}
@@ -207,7 +207,7 @@ func TestEmitTree_RootHasRequiredSections(t *testing.T) {
 	// lands in a later group — derived from consumes edges, not phase order.
 	for _, leaf := range tree.Leaves {
 		var row string
-		for _, line := range strings.Split(childIdx, "\n") {
+		for line := range strings.SplitSeq(childIdx, "\n") {
 			if strings.Contains(line, leaf.Path) {
 				row = line
 				break

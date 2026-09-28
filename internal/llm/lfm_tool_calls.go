@@ -153,13 +153,15 @@ func parseLFMPrefillContinuation(prefill, content string) ([]ToolCall, bool) {
 			return nil, false
 		}
 	} else {
-		for i := 0; i < len(open); i++ {
+		var b strings.Builder
+		for i := range open {
 			if open[i] == '{' {
-				closed += "}"
+				b.WriteString("}")
 			} else {
-				closed += "]"
+				b.WriteString("]")
 			}
 		}
+		closed += b.String()
 	}
 	mined := parseLFMFenceBody(closed)
 	if len(mined) == 0 {

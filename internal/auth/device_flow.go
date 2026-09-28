@@ -194,8 +194,7 @@ func PollForToken(ctx context.Context, cfg DeviceFlowConfig, result *DeviceCodeR
 
 		token, err := pollOnce(ctx, cfg, result.DeviceCode)
 		if err != nil {
-			var dfe *DeviceFlowError
-			if errors.As(err, &dfe) {
+			if dfe, ok := errors.AsType[*DeviceFlowError](err); ok {
 				switch dfe.Code {
 				case errAuthorizationPending:
 					// Wait for the polling interval before retrying.

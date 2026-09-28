@@ -373,7 +373,7 @@ func mustEffectJSON(v any) json.RawMessage {
 }
 
 func gitPushWithRetry(repo *git.Repository) error {
-	for attempt := 0; attempt < gitPushRetryMax; attempt++ {
+	for attempt := range gitPushRetryMax {
 		err := repo.Push(&git.PushOptions{
 			RemoteName: "origin",
 		})

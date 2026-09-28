@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"errors"
 
 	_ "modernc.org/sqlite"
 )
@@ -247,8 +248,8 @@ func (s *sqliteStore) Retrieve(ctx context.Context, hash string) (*CCREntry, err
 		&entry.RetrievalCount,
 	)
 
-	if err == sql.ErrNoRows {
-		return nil, nil // Not found or expired
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil //nolint:nilnil // cache miss is a normal outcome; in-package caller (Search) nil-checks the entry
 	}
 	if err != nil {
 		return nil, fmt.Errorf("retrieving CCR entry: %w", err)

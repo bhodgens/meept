@@ -37,12 +37,12 @@ func TestStreamRequest_LFMToolCallMarkersReccovered(t *testing.T) {
 		f, _ := w.(http.Flusher)
 		for _, ch := range chunks {
 			b, _ := json.Marshal(map[string]any{"id": "x", "object": "chat.completion.chunk", "model": "m", "choices": ch["choices"], "usage": ch["usage"]})
-			w.Write([]byte("data: " + string(b) + "\n\n"))
+			_, _ = w.Write([]byte("data: " + string(b) + "\n\n"))
 			if f != nil {
 				f.Flush()
 			}
 		}
-		w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer srv.Close()
 

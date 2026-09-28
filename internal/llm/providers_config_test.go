@@ -64,7 +64,7 @@ func TestConfigLoads(t *testing.T) {
 			t.Errorf("%s alias = %v, want a local-gguf/lfm-8b-gguf fallback member", id, alias.Models)
 		}
 		for _, m := range alias.Models {
-			p := strings.SplitN(m, "/", 2)[0]
+			p, _, _ := strings.Cut(m, "/")
 			if p == "zai" || p == "ollama" {
 				t.Errorf("%s alias = %v: member %q violates the agnes+local-only intent", id, alias.Models, m)
 			}

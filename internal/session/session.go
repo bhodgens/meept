@@ -118,7 +118,7 @@ type Session struct {
 	// the recency source for IsInteractive (D11/Q1) — Session.LastActivity
 	// is NOT usable there because its writers are attach/store mutations,
 	// never user messages.
-	LastUserMessageAt time.Time `json:"last_user_message_at,omitempty"`
+	LastUserMessageAt time.Time `json:"last_user_message_at,omitzero"`
 
 	// OwnerID is the multi-user principal owning this session (auth user id).
 	// Empty string = unowned (legacy single-user mode): visible to everyone.
@@ -1293,7 +1293,7 @@ func (s *MemoryStore) GetActiveThread(ctx context.Context, sessionID string) (*T
 
 	session, exists := s.sessions[sessionID]
 	if !exists {
-		return nil, nil
+		return nil, nil //nolint:nilnil // "no active thread" is a valid state: all callers nil-check the thread (session RPC handler, services.ErrNotFound mapping)
 	}
 	return session.GetActiveThread(), nil
 }

@@ -83,7 +83,9 @@ func newEnvScriptResolver() *envScriptResolver {
 	r.homeDir = home
 
 	path := filepath.Join(home, EnvScriptName)
-	info, err := os.Stat(path)
+	// G703-safe: path is always filepath.Join(meeptHome, "env") — it never
+	// carries any request- or user-controlled component.
+	info, err := os.Stat(path) //nolint:gosec // G703: path is constructed solely from MEEPT_HOME / UserHomeDir plus the constant EnvScriptName
 	if err != nil || info.IsDir() {
 		return r
 	}

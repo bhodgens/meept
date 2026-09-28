@@ -192,7 +192,7 @@ func TestSyncWrap_PlainError(t *testing.T) {
 	plain := errors.New("disk full")
 	wrapped := SyncWrap("reserve", plain)
 
-	se, ok := wrapped.(*SyncError)
+	se, ok := errors.AsType[*SyncError](wrapped)
 	if !ok {
 		t.Fatalf("SyncWrap returned %T, want *SyncError", wrapped)
 	}
@@ -217,7 +217,7 @@ func TestSyncWrap_ChainedSyncError(t *testing.T) {
 	}
 	wrapped := SyncWrap("reserve_peer_db", inner)
 
-	se, ok := wrapped.(*SyncError)
+	se, ok := errors.AsType[*SyncError](wrapped)
 	if !ok {
 		t.Fatalf("SyncWrap returned %T, want *SyncError", wrapped)
 	}

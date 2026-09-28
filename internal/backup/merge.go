@@ -55,7 +55,7 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 	}
 	defer func() {
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 		}
 	}()
 
@@ -130,7 +130,7 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 // INSERT OR IGNORE did not insert — both duplicate PK collisions and rows
 // rejected due to CHECK/NOT NULL constraint violations.
 // D-15 FIX: SQLite does not distinguish these cases in its rows-affected count.
-func runMergeOp(ctx context.Context, tx *sql.Tx, sourceCount int, query string, args ...interface{}) (merged, skipped int, err error) {
+func runMergeOp(ctx context.Context, tx *sql.Tx, sourceCount int, query string, args ...any) (merged, skipped int, err error) {
 	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, 0, err
@@ -141,10 +141,7 @@ func runMergeOp(ctx context.Context, tx *sql.Tx, sourceCount int, query string, 
 		return 0, 0, err
 	}
 	merged = int(rows)
-	skipped = sourceCount - merged
-	if skipped < 0 {
-		skipped = 0
-	}
+	skipped = max(sourceCount-merged, 0)
 	return merged, skipped, nil
 }
 

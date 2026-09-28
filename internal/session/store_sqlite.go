@@ -633,7 +633,7 @@ func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 
 	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt, &detectionContextJSON)
 	if err != nil {
-		if err != sql.ErrNoRows {
+		if !errors.Is(err, sql.ErrNoRows) {
 			s.logger.Error("Failed to scan session", "error", err)
 		}
 		return nil
@@ -863,7 +863,7 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() {
-		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) {
 			slog.Debug("transaction rollback error", "error", rErr)
 		}
 	}()
@@ -893,7 +893,7 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 			branchID = BranchMain
 		}
 
-		var partsJSON interface{}
+		var partsJSON any
 		// searchContent is what the FTS5 trigger indexes and what
 		// GetMessages will later return as msg.Content. For text-only
 		// messages it is identical to msg.Content. For multimodal
@@ -1758,7 +1758,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() {
-		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone { //nolint:mutexio // mutex serializes sqlite connection access; rollback bound to protected conn
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) { //nolint:mutexio // mutex serializes sqlite connection access; rollback bound to protected conn
 			slog.Debug("transaction rollback error", "error", rErr)
 		}
 	}()
@@ -2159,7 +2159,7 @@ func (s *SQLiteStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() {
-		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone { //nolint:mutexio // mutex serializes sqlite connection access; rollback bound to protected conn
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) { //nolint:mutexio // mutex serializes sqlite connection access; rollback bound to protected conn
 			slog.Debug("transaction rollback error", "error", rErr)
 		}
 	}()

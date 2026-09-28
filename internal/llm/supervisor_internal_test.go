@@ -114,7 +114,10 @@ func runFakeDaemon(args []string) int {
 	} else {
 		closeFileQuietly(deathWrite)
 	}
-	if err := os.WriteFile(supPIDFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+	// G703-safe: both files are test-scoped temp paths handed to this
+	// fake-daemon role by the test itself via TestMain re-execution; no
+	// user input reaches them.
+	if err := os.WriteFile(supPIDFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil { //nolint:gosec // G703: supPIDFile is a t.TempDir path constructed by this test
 		fmt.Fprintf(os.Stderr, "fake daemon: write supervisor pid file: %v\n", err)
 		return 1
 	}
@@ -127,7 +130,7 @@ func runFakeDaemon(args []string) int {
 		if werr != nil {
 			status = werr.Error()
 		}
-		if writeErr := os.WriteFile(supExitFile, []byte(status), 0o600); writeErr != nil {
+		if writeErr := os.WriteFile(supExitFile, []byte(status), 0o600); writeErr != nil { //nolint:gosec // G703: supExitFile is a t.TempDir path constructed by this test
 			fmt.Fprintf(os.Stderr, "fake daemon: write supervisor exit file: %v\n", writeErr)
 		}
 	}()

@@ -49,10 +49,10 @@ func TestTaskCollectorConcurrentWithStore(t *testing.T) {
 	wg.Add(goroutines * 2)
 
 	// Half the goroutines write to the Store.
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < writesPerGoroutine; j++ {
+			for range writesPerGoroutine {
 				store.Record("concurrent.test", 1, map[string]string{
 					"goroutine": "store",
 				})
@@ -61,10 +61,10 @@ func TestTaskCollectorConcurrentWithStore(t *testing.T) {
 	}
 
 	// Half the goroutines write to the TaskCollector.
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(n int) {
 			defer wg.Done()
-			for j := 0; j < writesPerGoroutine; j++ {
+			for range writesPerGoroutine {
 				m := &AgentTaskMetrics{
 					TaskID:  "task-" + time.Now().Format("150405.000000"),
 					AgentID: "test-agent",
@@ -139,19 +139,19 @@ func TestTaskCollectorPathBasedConcurrentWithStore(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines * 2)
 
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < writesPerGoroutine; j++ {
+			for range writesPerGoroutine {
 				store.Record("concurrent.path", 1, nil)
 			}
 		}()
 	}
 
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < writesPerGoroutine; j++ {
+			for range writesPerGoroutine {
 				m := &AgentTaskMetrics{
 					TaskID:  "task-" + time.Now().Format("150405.000000"),
 					AgentID: "test-agent",

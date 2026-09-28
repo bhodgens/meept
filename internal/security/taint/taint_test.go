@@ -484,7 +484,7 @@ func TestTracker_ConcurrentStoreRetrieve(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(idx int) {
 			defer wg.Done()
 			key := fmt.Sprintf("var%d", idx)
@@ -496,7 +496,7 @@ func TestTracker_ConcurrentStoreRetrieve(t *testing.T) {
 	wg.Wait()
 
 	// Verify all keys were stored
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("var%d", i)
 		val := tracker.Retrieve(key)
 		if val == nil {
@@ -517,7 +517,7 @@ func TestTracker_ConcurrentCheckShellCommand(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(idx int) {
 			defer wg.Done()
 			cmd := fmt.Sprintf("echo %s step_%d", varName, idx)
@@ -544,7 +544,7 @@ func TestTracker_ConcurrentMarkAndRetrieve(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(idx int) {
 			defer wg.Done()
 			val := tracker.MarkExternal(fmt.Sprintf("val%d", idx), "ext")
@@ -557,7 +557,7 @@ func TestTracker_ConcurrentMarkAndRetrieve(t *testing.T) {
 	wg.Wait()
 
 	// Post-check: all vars still accessible
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("k%d", i)
 		val := tracker.Retrieve(key)
 		if val == nil {

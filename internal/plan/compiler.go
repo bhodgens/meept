@@ -433,7 +433,7 @@ func scanDraft(lines []string, problems *[]CompileProblem) *draftDoc {
 // parsePhaseNums splits "0, 2" style phase lists into ints.
 func parsePhaseNums(s string) []int {
 	var out []int
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		part = strings.TrimSpace(part)
 		if n, err := strconv.Atoi(part); err == nil {
 			out = append(out, n)

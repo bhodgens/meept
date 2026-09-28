@@ -53,7 +53,8 @@ type OAuthProviderConfig struct {
 // Client IDs marked with "<...>" are placeholders that must be replaced
 // once the OAuth apps are registered.
 var OAuthProviders = map[string]OAuthProviderConfig{
-	"github-models": {
+	"github-models": { //nolint:gosec // placeholder client ID, not a credential; real value arrives via ClientIDEnvVar
+		//nolint:gosec // placeholder client ID, not a credential; real value arrives via ClientIDEnvVar
 		ClientIDDefault: "placeholder-github-oauth-client-id",
 		ClientIDEnvVar:  "MEEPT_GITHUB_CLIENT_ID",
 		DeviceEP:        "https://github.com/login/device/code",
@@ -67,7 +68,7 @@ var OAuthProviders = map[string]OAuthProviderConfig{
 			"X-GitHub-Api-Version": "2026-03-10",
 		},
 	},
-	"google-oauth": {
+	"google-oauth": { //nolint:gosec // placeholder client ID/secret, not real credentials; real values arrive via env vars
 		ClientIDDefault:     "placeholder-google-oauth-client-id",
 		ClientIDEnvVar:      "MEEPT_GOOGLE_CLIENT_ID",
 		ClientSecretDefault: "placeholder-google-oauth-client-secret",
@@ -81,7 +82,7 @@ var OAuthProviders = map[string]OAuthProviderConfig{
 		Transport:  llm.TransportOpenAIChat,
 		BaseURL:    "https://generativelanguage.googleapis.com/v1beta/openai",
 	},
-	"google-calendar": {
+	"google-calendar": { //nolint:gosec // placeholder client ID/secret, not real credentials; real values arrive via env vars
 		ClientIDDefault:     "placeholder-google-oauth-client-id",
 		ClientIDEnvVar:      "MEEPT_GOOGLE_CLIENT_ID",
 		ClientSecretDefault: "placeholder-google-oauth-client-secret",
@@ -104,7 +105,7 @@ var OAuthProviders = map[string]OAuthProviderConfig{
 		Transport:       llm.TransportOpenAIChat,
 		BaseURL:         "https://api.x.ai/v1",
 	},
-	"openai-codex": {
+	"openai-codex": { //nolint:gosec // public client ID from the open Codex CLI spec, not a private credential
 		ClientIDDefault:  "app_EMoamEEZ73f0CkXaXp7hrann",
 		DeviceUserCodeEP: "https://auth.openai.com/api/accounts/deviceauth/usercode",
 		DevicePollEP:     "https://auth.openai.com/api/accounts/deviceauth/token",
@@ -114,7 +115,7 @@ var OAuthProviders = map[string]OAuthProviderConfig{
 		Transport:        llm.TransportCodexResponses,
 		BaseURL:          "https://chatgpt.com/backend-api/codex",
 	},
-	"anthropic-sub": {
+	"anthropic-sub": { //nolint:gosec // public PKCE client ID from the Claude OAuth flow, not a private credential
 		ClientIDDefault: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
 		AuthorizeURL:    "https://claude.ai/oauth/authorize",
 		TokenEP:         "https://platform.claude.com/v1/oauth/token",

@@ -14,7 +14,7 @@ package llm
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -47,7 +47,7 @@ func (h *herdSleeper) sortedSince(n int) []time.Duration {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := append([]time.Duration(nil), h.slots[n:]...)
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }
 
@@ -87,13 +87,11 @@ func TestAdaptivePacer_ConcurrentWaitsReserveDistinctSlots(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := p.Wait(context.Background(), "prov"); err != nil {
 				t.Errorf("concurrent Wait = %v, want nil", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -131,13 +129,11 @@ func TestAdaptivePacer_ConcurrentWaitsNotAllWakeTogether(t *testing.T) {
 	const n = 5
 	var wg sync.WaitGroup
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := p.Wait(context.Background(), "prov"); err != nil {
 				t.Errorf("concurrent Wait = %v, want nil", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -169,11 +165,9 @@ func TestAdaptivePacer_ReservationClaimsThenSubsequentWaitsQueue(t *testing.T) {
 	const n = 3
 	var wg sync.WaitGroup
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = p.Wait(context.Background(), "prov")
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -212,11 +206,9 @@ func TestAdaptivePacer_ReservationAcrossProvidersIndependent(t *testing.T) {
 	// claim is free, second takes the 40ms slot.
 	var wg sync.WaitGroup
 	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = p.Wait(context.Background(), "provB")
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -242,7 +234,7 @@ func TestAdaptivePacer_CtxCancelAbandonsWaitSlot(t *testing.T) {
 	p.sleepFn = func(ctx context.Context, d time.Duration) error {
 		return context.Canceled
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	p.Observe(PolicyVerdict{Class: FailureThrottle}, "prov")

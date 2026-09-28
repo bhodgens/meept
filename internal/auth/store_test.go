@@ -576,7 +576,7 @@ func TestMergeForeignIdempotentReMerge(t *testing.T) {
 	}
 	peers := map[string]struct{}{"node-i": {}}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := s.MergeForeign([]User{foreign}, peers); err != nil {
 			t.Fatalf("MergeForeign iteration %d: %v", i, err)
 		}

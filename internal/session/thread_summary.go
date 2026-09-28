@@ -12,11 +12,11 @@ func AssembleThreadContext(threads []*Thread, activeThreadID string) string {
 
 	for _, thread := range threads {
 		if thread.ID != activeThreadID && thread.Summary != "" {
-			sb.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&sb,
 				"[Context from %s thread]: %s\n",
 				thread.TopicLabel,
 				thread.Summary,
-			))
+			)
 		}
 	}
 

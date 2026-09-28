@@ -76,7 +76,7 @@ func TestActivityTracker_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	n := 100
 	wg.Add(n * 3)
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() {
 			defer wg.Done()
 			tr.RecordActivity("session", "client")
@@ -95,7 +95,7 @@ func TestActivityTracker_Concurrent(t *testing.T) {
 
 func TestActivityTracker_Consistency(t *testing.T) {
 	tr := NewActivityTracker()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		tr.RecordActivity("session", "client")
 		_ = tr.GetActiveSessions(time.Minute)
 		_ = tr.HasRecentActivity("session", time.Minute)

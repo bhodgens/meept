@@ -75,15 +75,17 @@ func lookupUser(s *auth.Store, ref string) *auth.User {
 }
 
 // parseExpiry parses an --expires value: RFC3339 timestamp or "never".
-func parseExpiry(spec string) (*time.Time, error) {
+// The bool reports whether an expiry was set; the zero time accompanies
+// ok == false ("" and "never" both mean never-expiring).
+func parseExpiry(spec string) (time.Time, bool, error) {
 	if spec == "" || spec == expiresNever {
-		return nil, nil
+		return time.Time{}, false, nil
 	}
 	t, err := time.Parse(time.RFC3339, spec)
 	if err != nil {
-		return nil, fmt.Errorf("invalid --expires value %q: use RFC3339 (e.g. 2026-12-31T23:59:59Z) or \"never\"", spec)
+		return time.Time{}, false, fmt.Errorf("invalid --expires value %q: use RFC3339 (e.g. 2026-12-31T23:59:59Z) or \"never\"", spec)
 	}
-	return &t, nil
+	return t, true, nil
 }
 
 // formatExpiry renders a key expiry for display ("never" for nil).
@@ -200,9 +202,13 @@ type keyRow struct {
 // runKeysAdd implements `meept keys add <user-id> [--label L] [--expires ...]`.
 // The raw key is printed EXACTLY ONCE and never persisted anywhere else.
 func runKeysAdd(path, userRef, label, expiresSpec string) error {
-	expiresAt, err := parseExpiry(expiresSpec)
+	expiryTime, hasExpiry, err := parseExpiry(expiresSpec)
 	if err != nil {
 		return err
+	}
+	var expiresAt *time.Time
+	if hasExpiry {
+		expiresAt = &expiryTime
 	}
 	s, err := openUsersStore(path)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/transport"
+	"slices"
 )
 
 // ============================================================================
@@ -39,11 +40,11 @@ func newIntegrationServer(handler func(method string, params json.RawMessage) (a
 			result, err := handler("chat", json.RawMessage(fmt.Sprintf(`{"message":%q,"conversation_id":%q}`, req.Message, req.ConversationID)))
 			if err != nil {
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()}) // client disconnect possible; nothing to recover
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(result)
+			_ = json.NewEncoder(w).Encode(result) // client disconnect possible; nothing to recover
 			return
 		}
 
@@ -60,7 +61,7 @@ func newIntegrationServer(handler func(method string, params json.RawMessage) (a
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"error": map[string]any{"code": -32603, "message": err.Error()},
 			})
 			return
@@ -68,7 +69,7 @@ func newIntegrationServer(handler func(method string, params json.RawMessage) (a
 
 		resultData, _ := json.Marshal(result)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(resultData)})
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": json.RawMessage(resultData)}) // client disconnect possible; nothing to recover
 	}))
 }
 
@@ -83,7 +84,7 @@ func TestIntegration_SessionAndChat(t *testing.T) {
 			var p struct {
 				Name string `json:"name"`
 			}
-			json.Unmarshal(params, &p)
+		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]any{
 				"id":         "sess-e2e",
 				"name":       p.Name,
@@ -93,7 +94,7 @@ func TestIntegration_SessionAndChat(t *testing.T) {
 			var p struct {
 				Message string `json:"message"`
 			}
-			json.Unmarshal(params, &p)
+		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]string{
 				"reply": "ack: " + p.Message,
 			}, nil
@@ -148,7 +149,7 @@ func TestIntegration_SlashCommandFlow(t *testing.T) {
 			var p struct {
 				Message string `json:"message"`
 			}
-			json.Unmarshal(params, &p)
+		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]string{"reply": "received: " + p.Message}, nil
 		default:
 			return map[string]string{"status": "ok"}, nil
@@ -223,14 +224,7 @@ func TestIntegration_HistoryAndAutocomplete(t *testing.T) {
 	filtered := auto.GetFilteredCommands()
 
 	// /status should be among filtered results
-	found := false
-	for _, c := range filtered {
-		if c == "status" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(filtered, "status") {
 		t.Errorf("expected 'status' in filtered autosuggestions, got: %v", filtered)
 	}
 
@@ -296,7 +290,7 @@ func TestIntegration_SessionManagerLoadOrCreateFlow(t *testing.T) {
 			var p struct {
 				Name string `json:"name"`
 			}
-			json.Unmarshal(params, &p)
+		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]any{
 				"id":         "sess-new",
 				"name":       p.Name,
@@ -373,7 +367,7 @@ func TestIntegration_MultipleChatRoundTrips(t *testing.T) {
 			var p struct {
 				Message string `json:"message"`
 			}
-			json.Unmarshal(params, &p)
+		_ = json.Unmarshal(params, &p) // test fake: zero-value params acceptable on malformed input
 			return map[string]string{"reply": fmt.Sprintf("echo #%d: %s", callCount, p.Message)}, nil
 		case "session.create":
 			return map[string]any{
@@ -464,9 +458,8 @@ func TestIntegration_AutocompleteEdgeCases(t *testing.T) {
 
 	// Select without match
 	selected, ok := auto.Select()
-	if !ok && selected == "" {
-		// This is acceptable for empty filter with many matches
-	}
+	_ = selected // empty-filter no-match is acceptable; exercising the call is the point
+	_ = ok
 
 	auto.Hide()
 	if auto.IsVisible() {

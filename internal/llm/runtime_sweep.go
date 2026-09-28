@@ -74,7 +74,7 @@ func ListRuntimeProcesses() ([]RuntimeProcInfo, error) {
 		return nil, fmt.Errorf("ps scan failed: %w", err)
 	}
 	var procs []RuntimeProcInfo
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 3 {
 			continue

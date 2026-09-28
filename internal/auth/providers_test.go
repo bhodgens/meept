@@ -106,7 +106,7 @@ func TestResolveProviderConfig_ClientSecretEnvOverride(t *testing.T) {
 }
 
 func TestOAuthProviderConfig_DeviceFlowConfig(t *testing.T) {
-	cfg := OAuthProviderConfig{
+	cfg := OAuthProviderConfig{ //nolint:gosec // G101: fake test values
 		ClientIDDefault:     "my-client-id",
 		ClientSecretDefault: "my-client-secret",
 		DeviceEP:            "https://example.com/device",

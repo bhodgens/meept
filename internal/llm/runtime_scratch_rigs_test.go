@@ -69,13 +69,15 @@ func TestCollectScratchRigSpawnRecords_ReadsRecords(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "mlx.pid")
 	writeTestPIDFile(t, pidFile, 4242)
-	WriteSpawnRecord(SpawnRecord{
+	if err := WriteSpawnRecord(SpawnRecord{
 		EndpointKey: "mlx:127.0.0.1:58081",
 		PIDFile:     pidFile,
 		Argv:        []string{"mlx_lm", "server", "--port", "58081"},
 		AutoStop:    true,
 		PID:         4242,
-	})
+	}); err != nil {
+		t.Fatalf("write spawn record: %v", err)
+	}
 
 	records, err := CollectScratchRigSpawnRecords([]string{dir})
 	if err != nil {
@@ -102,13 +104,15 @@ func TestSweepStaleSpawnRecords_ScratchAgeBound(t *testing.T) {
 	if err := os.Chtimes(pidFile, old, old); err != nil {
 		t.Fatal(err)
 	}
-	WriteSpawnRecord(SpawnRecord{
+	if err := WriteSpawnRecord(SpawnRecord{
 		EndpointKey: "mlx:127.0.0.1:58081",
 		PIDFile:     pidFile,
 		Argv:        []string{"mlx_lm", "server", "--port", "58081"},
 		AutoStop:    true,
 		PID:         300,
-	})
+	}); err != nil {
+		t.Fatalf("write spawn record: %v", err)
+	}
 
 	table := &sweepTable{procs_: []RuntimeProcInfo{
 		{PID: 300, PPID: 1, Command: "/usr/bin/python3 /opt/homebrew/bin/mlx_lm server --port 58081"},

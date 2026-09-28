@@ -321,7 +321,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 				if recoverErr == nil {
 					// Recovery succeeded -- write the recovered content
 					result := strings.Join(recovered, "\n")
-					if err := os.WriteFile(resolved, []byte(result), 0o644); err != nil {
+					if err := os.WriteFile(resolved, []byte(result), 0o644); err != nil { //nolint:gosec // G703: path is resolvePath()d and fence-checked ("write") at Execute entry
 						return nil, fmt.Errorf("recovery succeeded but write failed: %w", err)
 					}
 					msg := fmt.Sprintf("Edit applied with stale-anchor recovery to %s (%d lines, strategy: %s)", resolved, len(recovered), strategy)
@@ -343,7 +343,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 				recovered, strategy, recoverErr := t.attemptSessionChainRecovery(lines, history, ops)
 				if recoverErr == nil {
 					result := strings.Join(recovered, "\n")
-					if err := os.WriteFile(resolved, []byte(result), 0o644); err != nil {
+					if err := os.WriteFile(resolved, []byte(result), 0o644); err != nil { //nolint:gosec // G703: path is resolvePath()d and fence-checked ("write") at Execute entry
 						return nil, fmt.Errorf("session chain recovery succeeded but write failed: %w", err)
 					}
 					msg := fmt.Sprintf("Edit applied with session chain recovery to %s (%d lines, strategy: %s)", resolved, len(recovered), strategy)

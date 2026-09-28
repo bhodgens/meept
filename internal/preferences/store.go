@@ -36,7 +36,7 @@ type UserInstruction struct {
 	Scope      string         `yaml:"scope" json:"scope"`
 	Priority   string         `yaml:"priority" json:"priority"`
 	CreatedAt  time.Time      `yaml:"created_at" json:"created_at"`
-	UpdatedAt  time.Time      `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
+	UpdatedAt  time.Time      `yaml:"updated_at,omitempty" json:"updated_at,omitzero"`
 	SourceTier int            `yaml:"-" json:"-"`
 	SourcePath string         `yaml:"-" json:"-"`
 	Body       string         `yaml:"-" json:"-"`

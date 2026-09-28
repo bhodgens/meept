@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/task"
+	"slices"
 )
 
 // lintTimeout bounds both gofmt and go vet subprocesses (master Contract 5).
@@ -215,7 +216,7 @@ func (f *GoLintFilter) Process(ctx context.Context, _ *task.TaskStep, output str
 // temp-file name for blocks[i]; formatted holds the reformatted sources.
 func substituteBlocks(output string, blocks []codeBlock, names []string, formatted map[string]string) (string, error) {
 	out := output
-	for i := len(blocks) - 1; i >= 0; i-- {
+	for _, i := range slices.Backward(len(blocks)) {
 		newCode, ok := formatted[names[i]]
 		if !ok {
 			continue // file was already gofmt-clean

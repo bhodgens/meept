@@ -10,7 +10,7 @@ import (
 
 func TestToInt64(t *testing.T) {
 	tests := []struct {
-		input  interface{}
+		input  any
 		output int64
 	}{
 		{float64(42), 42},

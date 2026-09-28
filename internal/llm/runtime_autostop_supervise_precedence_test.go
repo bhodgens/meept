@@ -77,10 +77,7 @@ func TestAutoStopSupervisePrecedence(t *testing.T) {
 				t.Fatalf("ValidateAndNormalize: %v", err)
 			}
 
-			wantAutoStop := true
-			if tc.autoStopKey != "" {
-				wantAutoStop = false
-			}
+			wantAutoStop := tc.autoStopKey == ""
 			if runtimeCfg.AutoStop != wantAutoStop {
 				t.Errorf("AutoStop = %v, want %v", runtimeCfg.AutoStop, wantAutoStop)
 			}

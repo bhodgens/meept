@@ -48,19 +48,19 @@ func TestParseExpiry(t *testing.T) {
 	tests := []struct {
 		name    string
 		spec    string
-		wantNil bool
+		wantOK  bool
 		wantErr bool
 	}{
-		{name: "empty means never", spec: "", wantNil: true},
-		{name: "explicit never", spec: "never", wantNil: true},
-		{name: "valid RFC3339", spec: "2027-01-01T00:00:00Z"},
-		{name: "valid RFC3339 offset", spec: "2027-01-01T12:34:56+02:00"},
+		{name: "empty means never", spec: "", wantOK: false},
+		{name: "explicit never", spec: "never", wantOK: false},
+		{name: "valid RFC3339", spec: "2027-01-01T00:00:00Z", wantOK: true},
+		{name: "valid RFC3339 offset", spec: "2027-01-01T12:34:56+02:00", wantOK: true},
 		{name: "date only rejected", spec: "2027-01-01", wantErr: true},
 		{name: "prose rejected", spec: "tomorrow", wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseExpiry(tc.spec)
+			got, ok, err := parseExpiry(tc.spec)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("parseExpiry(%q) succeeded, want error", tc.spec)
@@ -70,8 +70,8 @@ func TestParseExpiry(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseExpiry(%q): %v", tc.spec, err)
 			}
-			if (got == nil) != tc.wantNil {
-				t.Fatalf("parseExpiry(%q) = %v, wantNil=%v", tc.spec, got, tc.wantNil)
+			if ok != tc.wantOK {
+				t.Fatalf("parseExpiry(%q) = %v, ok=%v, wantOK=%v", tc.spec, got, ok, tc.wantOK)
 			}
 		})
 	}

@@ -16,7 +16,7 @@ func platformMachineID() (string, error) {
 		return "", fmt.Errorf("ioreg: %w", err)
 	}
 	str := string(out)
-	for _, line := range strings.Split(str, "\n") {
+	for line := range strings.SplitSeq(str, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, "IOPlatformUUID") {
 			parts := strings.SplitN(line, "=", 2)

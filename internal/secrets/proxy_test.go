@@ -361,7 +361,7 @@ func TestProxy_ChunkedRejected400(t *testing.T) {
 		// is the expected fast path, not a failure here.
 		t.Logf("write returned early (expected when server rejects chunked): %v", writeErr)
 	}
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck // best-effort deadline; the ReadResponse below is the real assertion
 
 	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
 	if err != nil {

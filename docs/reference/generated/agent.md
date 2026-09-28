@@ -820,7 +820,7 @@ Package agent provides the agent loop and related components.
   - [func \(e \*HookBatchExecutor\) AddHook\(h \*HTTPHook\)](<#HookBatchExecutor.AddHook>)
   - [func \(e \*HookBatchExecutor\) ExecuteAll\(ctx context.Context, payload HookPayload\)](<#HookBatchExecutor.ExecuteAll>)
 - [type HookPayload](<#HookPayload>)
-  - [func NewHookPayload\(event, agentID, sessionID string, data map\[string\]interface\{\}\) HookPayload](<#NewHookPayload>)
+  - [func NewHookPayload\(event, agentID, sessionID string, data map\[string\]any\) HookPayload](<#NewHookPayload>)
 - [type HookPriority](<#HookPriority>)
 - [type HookRegistration](<#HookRegistration>)
 - [type HookRegistry](<#HookRegistry>)
@@ -2137,6 +2137,14 @@ Package agent provides the agent loop and related components.
 	    // rate-limit lift). It wraps the triggering error so callers retain the
 	    // original context.
 	    ErrAgentBlocked = errors.New("agent blocked awaiting external action")
+	    // ErrTurnParked is returned by chatWithFailoverRaw when the turn was
+	    // parked (throttle / endpoint-block) and scheduled for resume by the
+	    // TurnParker instead of being answered now. It is not a failure: the
+	    // loop's callers map it to an empty reply with no error, per the parked
+	    // turn contract ("a parked turn must not surface an error"). Check
+	    // with errors.Is; errors.As on *llm.Response would match a nil
+	    // *llm.Response, so the value side is NOT a reliable signal.
+	    ErrTurnParked = errors.New("turn parked for later resume")
 	)
 
 <a name="ErrQueueClosed"></a>Queue\-specific error types.
@@ -5013,7 +5021,7 @@ Attempt represents a single actor\-\>reviewer round within a pair session.
 	    StartedAt time.Time `json:"started_at"`
 	
 	    // CompletedAt is when the review came back.
-	    CompletedAt time.Time `json:"completed_at,omitempty"`
+	    CompletedAt time.Time `json:"completed_at,omitzero"`
 	}
 
 <a name="Attempt.Satisfied"></a>
@@ -5512,7 +5520,7 @@ BudgetStatus is an exported, JSON\-serializable overview of the entire budget hi
 	type BudgetStatus struct {
 	    Task   BudgetSummary            `json:"task"`
 	    Phases map[string]BudgetSummary `json:"phases"`
-	    Turn   BudgetSummary            `json:"turn,omitempty"`
+	    Turn   BudgetSummary            `json:"turn,omitzero"`
 	}
 
 <a name="BudgetSummary"></a>
@@ -9263,16 +9271,16 @@ ExecuteAll fires the payload at every registered hook in parallel.
 HookPayload is the data structure passed to HTTP hooks when events fire. It captures the event name, originating agent, session, and arbitrary event\-specific data.
 
 	type HookPayload struct {
-	    Event     string                 `json:"event"`
-	    AgentID   string                 `json:"agent_id,omitempty"`
-	    SessionID string                 `json:"session_id,omitempty"`
-	    Data      map[string]interface{} `json:"data,omitempty"`
+	    Event     string         `json:"event"`
+	    AgentID   string         `json:"agent_id,omitempty"`
+	    SessionID string         `json:"session_id,omitempty"`
+	    Data      map[string]any `json:"data,omitempty"`
 	}
 
 <a name="NewHookPayload"></a>
 ### func NewHookPayload
 
-	func NewHookPayload(event, agentID, sessionID string, data map[string]interface{}) HookPayload
+	func NewHookPayload(event, agentID, sessionID string, data map[string]any) HookPayload
 
 NewHookPayload constructs a HookPayload from the provided fields.
 
@@ -13944,8 +13952,8 @@ ResumeResult describes what happened when an incomplete run was resumed from a c
 	    SkippedTurns int `json:"skipped_turns"`
 	    // RunID is the ID of the run that was resumed.
 	    RunID string `json:"run_id"`
-	    // State is the restored agent state (caller-defined interface{}).
-	    State interface{} `json:"-"`
+	    // State is the restored agent state (caller-defined value).
+	    State any `json:"-"`
 	    // ResumedAt records when the resume operation occurred.
 	    ResumedAt time.Time `json:"resumed_at"`
 	    // Warning contains any non-fatal issues discovered during resume.

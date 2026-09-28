@@ -152,11 +152,11 @@ Package config provides configuration loading and validation for meept.
 - [type EmployeesDefaultsConfig](<#EmployeesDefaultsConfig>)
 - [type EmployeesGateConfig](<#EmployeesGateConfig>)
 - [type EnvPolicyConfig](<#EnvPolicyConfig>)
+- [type EnvVarCycleError](<#EnvVarCycleError>)
+  - [func \(e EnvVarCycleError\) Error\(\) string](<#EnvVarCycleError.Error>)
+  - [func \(EnvVarCycleError\) Is\(err error\) bool](<#EnvVarCycleError.Is>)
 - [type EpisodicConfig](<#EpisodicConfig>)
 - [type EpistemicConfig](<#EpistemicConfig>)
-- [type ErrEnvVarCycle](<#ErrEnvVarCycle>)
-  - [func \(e ErrEnvVarCycle\) Error\(\) string](<#ErrEnvVarCycle.Error>)
-  - [func \(ErrEnvVarCycle\) Is\(err error\) bool](<#ErrEnvVarCycle.Is>)
 - [type ErrorsConfig](<#ErrorsConfig>)
 - [type EvalConfig](<#EvalConfig>)
   - [func \(c \*EvalConfig\) Validate\(\) error](<#EvalConfig.Validate>)
@@ -519,7 +519,7 @@ EnsureDataDir creates the data directory if it doesn't exist.
 
 	func ExpandEnvVars(s string) (string, error)
 
-ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\). Implements recursion depth limiting to detect cyclic env var references. Returns ErrEnvVarCycle when a cycle is detected.
+ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\). Implements recursion depth limiting to detect cyclic env var references. Returns EnvVarCycleError when a cycle is detected.
 
 <a name="ExpandMeeptPath"></a>
 ## func ExpandMeeptPath
@@ -1633,8 +1633,8 @@ Config is the root configuration structure loaded from meept.toml.
 	    STT                 STTConfig                 `json:"stt"                 toml:"stt"`
 	    TTS                 TTSConfig                 `json:"tts"                 toml:"tts"`
 	    OAuth               OAuthConfig               `json:"oauth"               toml:"oauth"`
-	    Analytics           AnalyticsConfig           `json:"analytics,omitempty" toml:"analytics"`
-	    Notifications       NotificationsConfig       `json:"notifications,omitempty" toml:"notifications"`
+	    Analytics           AnalyticsConfig           `json:"analytics,omitzero" toml:"analytics"`
+	    Notifications       NotificationsConfig       `json:"notifications,omitzero" toml:"notifications"`
 	    Runtime             RuntimeConfig             `json:"runtime"             toml:"runtime"`
 	    PTY                 PTYConfig                 `json:"pty"                  toml:"pty"`
 	    Reasoning           ReasoningGlobalConfig     `json:"reasoning"            toml:"reasoning"`
@@ -2196,6 +2196,29 @@ EnvPolicyConfig configures child environment construction. This mirrors the shap
 	    DenyGlobs []string `json:"env_deny_globs" toml:"env_deny_globs"`
 	}
 
+<a name="EnvVarCycleError"></a>
+## type EnvVarCycleError
+
+EnvVarCycleError is returned when environment variable expansion detects a cycle.
+
+	type EnvVarCycleError struct {
+	    Input string
+	}
+
+<a name="EnvVarCycleError.Error"></a>
+### func \(EnvVarCycleError\) Error
+
+	func (e EnvVarCycleError) Error() string
+
+
+
+<a name="EnvVarCycleError.Is"></a>
+### func \(EnvVarCycleError\) Is
+
+	func (EnvVarCycleError) Is(err error) bool
+
+Is reports whether err is an EnvVarCycleError.
+
 <a name="EpisodicConfig"></a>
 ## type EpisodicConfig
 
@@ -2218,29 +2241,6 @@ EpistemicConfig holds epistemic memory platform settings.
 	    ReviewPromptFrequency string                  `json:"review_prompt_frequency" toml:"review_prompt_frequency"`
 	    MaxPendingReviews     int                     `json:"max_pending_reviews"     toml:"max_pending_reviews"`
 	}
-
-<a name="ErrEnvVarCycle"></a>
-## type ErrEnvVarCycle
-
-ErrEnvVarCycle is returned when environment variable expansion detects a cycle.
-
-	type ErrEnvVarCycle struct {
-	    Input string
-	}
-
-<a name="ErrEnvVarCycle.Error"></a>
-### func \(ErrEnvVarCycle\) Error
-
-	func (e ErrEnvVarCycle) Error() string
-
-
-
-<a name="ErrEnvVarCycle.Is"></a>
-### func \(ErrEnvVarCycle\) Is
-
-	func (ErrEnvVarCycle) Is(err error) bool
-
-Is reports whether err is an ErrEnvVarCycle.
 
 <a name="ErrorsConfig"></a>
 ## type ErrorsConfig

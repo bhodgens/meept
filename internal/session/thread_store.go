@@ -201,7 +201,7 @@ func (s *SQLiteThreadStore) GetActiveThread(ctx context.Context, sessionID strin
 		&createdAtStr, &lastActivityStr, &t.Summary, &t.IsActive)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil // no active thread is a normal, non-error state
+			return nil, nil //nolint:nilnil // no active thread is a normal, non-error state; callers nil-check the thread
 		}
 		return nil, err
 	}

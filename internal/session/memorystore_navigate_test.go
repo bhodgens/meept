@@ -11,7 +11,7 @@ import (
 // set to "main"; IDs are assigned by SaveMessages starting at 1.
 func makeMessages(n int) []Message {
 	msgs := make([]Message, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		role := "user"
 		if i%2 == 1 {
 			role = "assistant"
@@ -197,7 +197,7 @@ func TestMemoryStore_NavigateToBranch_ConcurrentAccess(t *testing.T) {
 	errs := make(chan error, goroutines)
 	panics := make(chan any, goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		// Target cycles through valid message IDs 1..10.
 		target := int64(i%10 + 1)
 		go func() {

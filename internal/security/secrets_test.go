@@ -33,11 +33,6 @@ func TestNewSecretObfuscator_EnvVars(t *testing.T) {
 		t.Errorf("secrets still present in obfuscated text: %s", obfuscated)
 	}
 
-	// Short value and non-matching key should not be obfuscated.
-	if !containsAny(obfuscated, "short", "somevalue123") {
-		// These aren't secrets, they shouldn't be present anyway since they weren't in the input.
-	}
-
 	// Deobfuscation should restore originals.
 	restored := s.Deobfuscate(obfuscated)
 	if restored != text {
@@ -181,10 +176,8 @@ func TestLoadFromConfig(t *testing.T) {
 	}
 
 	// Plain obfuscate entry should be reversible.
+	// (containsAny(restored, "config-secret-1234") is expected to hold.)
 	restored := s.Deobfuscate(obfuscated)
-	if containsAny(restored, "config-secret-1234") == false {
-		// This is expected — it should be restored.
-	}
 	// Replace mode should NOT be restored.
 	if containsAny(restored, "replaced-secret-99") {
 		t.Error("replaced secret was restored")
@@ -279,7 +272,7 @@ func TestThreadSafety(t *testing.T) {
 	errors := make(chan error, 100)
 
 	// Launch concurrent obfuscate/deobfuscate goroutines.
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -321,7 +314,7 @@ func TestPlaceholderUniqueness(t *testing.T) {
 	// Both secrets should be replaced with different placeholders.
 	// Count the number of #XXXX# patterns.
 	count := 0
-	for i := 0; i < len(obfuscated); i++ {
+	for i := range len(obfuscated) {
 		if obfuscated[i] == '#' {
 			// Look for closing #
 			for j := i + 1; j < len(obfuscated) && j <= i+5; j++ {

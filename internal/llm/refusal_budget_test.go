@@ -58,10 +58,11 @@ func TestChatRefusalChargesBudget(t *testing.T) {
 	if resp != nil {
 		t.Fatalf("refusal must return a nil response, got %+v", resp)
 	}
-	var refusal *RefusalError
-	if !errors.As(err, &refusal) {
+	refusal, ok := errors.AsType[*RefusalError](err)
+	if !ok {
 		t.Fatalf("error must satisfy errors.As for *RefusalError; got %T: %v", err, err)
 	}
+	_ = refusal
 
 	// Budget usage: one record, the provider-reported usage, scoped to the
 	// turn's session. (CheckBudgetWithScope only populates Used on the
@@ -92,10 +93,11 @@ func TestChatRefusalRecordsCostWithScope(t *testing.T) {
 
 	_, err := c.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}},
 		WithTaskScope("task-1", "sess-1"))
-	var refusal *RefusalError
-	if !errors.As(err, &refusal) {
+	refusal, ok := errors.AsType[*RefusalError](err)
+	if !ok {
 		t.Fatalf("error must satisfy errors.As for *RefusalError; got %T: %v", err, err)
 	}
+	_ = refusal
 
 	// 100*3/1M + 40*15/1M = 0.0009 USD must appear in the session's cost.
 	budget.mu.Lock()
@@ -145,8 +147,8 @@ func TestChatRefusalLedgerCarriesServingProvider(t *testing.T) {
 
 	_, err := c.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}},
 		WithModelOverride(&ModelConfig{ProviderID: "prov-a", ModelID: "wire-model"}))
-	var refusal *RefusalError
-	if !errors.As(err, &refusal) {
+	refusal, ok := errors.AsType[*RefusalError](err)
+	if !ok {
 		t.Fatalf("error must satisfy errors.As for *RefusalError; got %T: %v", err, err)
 	}
 	if refusal.ProviderID != "prov-a" || refusal.ModelID != "wire-model" {
@@ -210,10 +212,11 @@ func TestAnthropicChatRefusalChargesBudget(t *testing.T) {
 	if resp != nil {
 		t.Fatalf("refusal must return a nil response, got %+v", resp)
 	}
-	var refusal *RefusalError
-	if !errors.As(err, &refusal) {
+	refusal, ok := errors.AsType[*RefusalError](err)
+	if !ok {
 		t.Fatalf("error must satisfy errors.As for *RefusalError; got %T: %v", err, err)
 	}
+	_ = refusal
 
 	// Budget usage: the refused call's usage lands in the session ledger
 	// (CheckBudgetWithScope only populates Used on the exceeded branches).

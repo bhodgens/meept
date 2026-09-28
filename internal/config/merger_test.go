@@ -254,9 +254,9 @@ func TestSyncer_FileWouldChange(t *testing.T) {
 // testLogger is a minimal logger implementation for tests.
 type testLogger struct{}
 
-func (l *testLogger) Info(msg string, keysAndValues ...interface{})  {}
-func (l *testLogger) Warn(msg string, keysAndValues ...interface{})  {}
-func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) {}
+func (l *testLogger) Info(msg string, keysAndValues ...any)  {}
+func (l *testLogger) Warn(msg string, keysAndValues ...any)  {}
+func (l *testLogger) Debug(msg string, keysAndValues ...any) {}
 
 // ---- deepMerge unit tests ----
 

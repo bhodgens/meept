@@ -17,7 +17,7 @@ func TestResolveTokenEndpoint(t *testing.T) {
 			t.Errorf("Accept = %q, want application/json", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"issuer":"https://auth.x.ai","token_endpoint":"https://auth.x.ai/oauth2/token"}`))
+		_, _ = w.Write([]byte(`{"issuer":"https://auth.x.ai","token_endpoint":"https://auth.x.ai/oauth2/token"}`))
 	}))
 	defer srv.Close()
 
@@ -33,7 +33,7 @@ func TestResolveTokenEndpoint(t *testing.T) {
 func TestResolveTokenEndpoint_Missing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"issuer":"https://auth.x.ai"}`))
+		_, _ = w.Write([]byte(`{"issuer":"https://auth.x.ai"}`))
 	}))
 	defer srv.Close()
 

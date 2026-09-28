@@ -51,10 +51,11 @@ func TestProviderManager_RefusalNotAHealthFailure(t *testing.T) {
 	if resp != nil {
 		t.Fatalf("refusal must return a nil response, got %+v", resp)
 	}
-	var refusal *RefusalError
-	if !errors.As(err, &refusal) {
+	refusal, ok := errors.AsType[*RefusalError](err)
+	if !ok {
 		t.Fatalf("error must satisfy errors.As for *RefusalError; got %T: %v", err, err)
 	}
+	_ = refusal
 
 	// NO rotation: the backup must never be dialed.
 	if got := backupCalls.Load(); got != 0 {

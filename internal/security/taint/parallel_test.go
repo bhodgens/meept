@@ -71,7 +71,7 @@ func TestParallelTaintTracker_Concurrent(t *testing.T) {
 	labels := []TaintLabel{TaintSecret, TaintUntrusted, TaintShell, TaintExternal, TaintUserInput}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

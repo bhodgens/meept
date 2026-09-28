@@ -500,7 +500,7 @@ func (s *Server) toolEvents(args map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.RawMessage(result), nil
+	return result, nil
 }
 
 func (s *Server) toolStatus(args map[string]any) (any, error) {

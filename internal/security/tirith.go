@@ -59,7 +59,7 @@ func CheckTirithAvailable(ctx context.Context, binary string) bool {
 	// Use singleflight to deduplicate concurrent first-time checks.
 	// Only one goroutine per binary will run exec.CommandContext; the
 	// rest wait for its result.
-	v, err, _ := tirithSF.Do(binary, func() (interface{}, error) {
+	v, err, _ := tirithSF.Do(binary, func() (any, error) {
 		// Re-check cache after dedup — another goroutine may have
 		// populated it while we were waiting.
 		tirithCacheMu.RLock()

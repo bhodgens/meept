@@ -123,8 +123,7 @@ func (s *SyncMetadataStore) GetAllSyncStatus() (map[string]SyncStatus, error) {
 			return nil, fmt.Errorf("sync_metadata scan row: %w", err)
 		}
 
-		if strings.HasPrefix(key, "last_sync:") {
-			peerID := strings.TrimPrefix(key, "last_sync:")
+		if peerID, ok := strings.CutPrefix(key, "last_sync:"); ok {
 			ts, _ := strconv.ParseInt(value, 10, 64)
 			if peerID == "" {
 				continue
@@ -135,8 +134,7 @@ func (s *SyncMetadataStore) GetAllSyncStatus() (map[string]SyncStatus, error) {
 			}
 			st.LastSync = time.UnixMilli(ts).UTC()
 			result[peerID] = st
-		} else if strings.HasPrefix(key, "last_error:") {
-			peerID := strings.TrimPrefix(key, "last_error:")
+		} else if peerID, ok := strings.CutPrefix(key, "last_error:"); ok {
 			if peerID == "" {
 				continue
 			}
@@ -146,8 +144,7 @@ func (s *SyncMetadataStore) GetAllSyncStatus() (map[string]SyncStatus, error) {
 			}
 			st.Error = value
 			result[peerID] = st
-		} else if strings.HasPrefix(key, "last_merge_stats:") {
-			peerID := strings.TrimPrefix(key, "last_merge_stats:")
+		} else if peerID, ok := strings.CutPrefix(key, "last_merge_stats:"); ok {
 			if peerID == "" {
 				continue
 			}
@@ -161,6 +158,9 @@ func (s *SyncMetadataStore) GetAllSyncStatus() (map[string]SyncStatus, error) {
 			}
 			result[peerID] = st
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sync_metadata iterate rows: %w", err)
 	}
 
 	return result, nil

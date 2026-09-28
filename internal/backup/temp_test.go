@@ -36,7 +36,7 @@ func TestTempManager_ReservePeerDB_CreatesUniquePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTempManager: %v", err)
 	}
-	t.Cleanup(func() { tm.Cleanup() })
+	t.Cleanup(func() { _ = tm.Cleanup() })
 
 	compressed := makeCompressedPeerBackup(t, base, "peer.db", []byte("peer db payload"))
 
@@ -73,7 +73,7 @@ func TestTempManager_ReservePeerDB_EmptyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTempManager: %v", err)
 	}
-	t.Cleanup(func() { tm.Cleanup() })
+	t.Cleanup(func() { _ = tm.Cleanup() })
 
 	_, err = tm.ReservePeerDB("")
 	if err == nil {
@@ -92,7 +92,7 @@ func TestTempManager_ReservePeerDB_BadFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTempManager: %v", err)
 	}
-	t.Cleanup(func() { tm.Cleanup() })
+	t.Cleanup(func() { _ = tm.Cleanup() })
 
 	// A non-zstd file fed to DecompressFile produces an error.
 	bad := filepath.Join(base, "not-zstd.bin")
@@ -115,7 +115,7 @@ func TestTempManager_Remove_CleansUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTempManager: %v", err)
 	}
-	t.Cleanup(func() { tm.Cleanup() })
+	t.Cleanup(func() { _ = tm.Cleanup() })
 
 	compressed := makeCompressedPeerBackup(t, base, "peer.db", []byte("payload"))
 	got, err := tm.ReservePeerDB(compressed)
@@ -144,7 +144,7 @@ func TestTempManager_Remove_EmptyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTempManager: %v", err)
 	}
-	t.Cleanup(func() { tm.Cleanup() })
+	t.Cleanup(func() { _ = tm.Cleanup() })
 
 	// Should not panic.
 	tm.Remove("")
@@ -160,7 +160,7 @@ func TestTempManager_Remove_UntrackedPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTempManager: %v", err)
 	}
-	t.Cleanup(func() { tm.Cleanup() })
+	t.Cleanup(func() { _ = tm.Cleanup() })
 
 	// Write a random file that the manager doesn't track.
 	rogue := filepath.Join(base, "rogue.db")
@@ -257,7 +257,7 @@ func TestTempManager_NewTempManager_CleansStaleFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTempManager: %v", err)
 	}
-	t.Cleanup(func() { tm.Cleanup() })
+	t.Cleanup(func() { _ = tm.Cleanup() })
 
 	if _, err := os.Stat(staleFile); !os.IsNotExist(err) {
 		t.Errorf("stale file should have been removed on NewTempManager, got err=%v", err)
@@ -280,7 +280,7 @@ func TestTempManager_SizeCapNormalPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTempManager: %v", err)
 	}
-	t.Cleanup(func() { tm.Cleanup() })
+	t.Cleanup(func() { _ = tm.Cleanup() })
 
 	// Empty temp dir — well under the 1GB cap.
 	if err := tm.checkTempSize(); err != nil {
@@ -307,7 +307,7 @@ func TestTempManager_SizeCapTriggersForLargeFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTempManager: %v", err)
 	}
-	t.Cleanup(func() { tm.Cleanup() })
+	t.Cleanup(func() { _ = tm.Cleanup() })
 
 	// Create a sparse file with apparent size just over maxSyncTempSize.
 	sparsePath := filepath.Join(tm.tempDir, "huge.db")

@@ -98,7 +98,7 @@ func writeHeader(b *strings.Builder) {
 	b.WriteString("This document is a complete flattening of all Meept documentation into a single ")
 	b.WriteString("text file, designed to be fed to LLMs as context. It covers installation, ")
 	b.WriteString("architecture, configuration, workflows, and API reference.\n\n")
-	b.WriteString(fmt.Sprintf("Generated: %s\n", time.Now().UTC().Format(time.RFC3339)))
+	fmt.Fprintf(b, "Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
 	b.WriteString("Source: https://github.com/caimlas/meept\n\n")
 	b.WriteString("---\n\n")
 }
@@ -109,20 +109,20 @@ func writeTOC(b *strings.Builder, docsDir string) {
 		dirPath := filepath.Join(docsDir, section.dir)
 		files := collectMarkdownFiles(dirPath, section.skipDirs)
 		if section.dir == "" {
-			b.WriteString(fmt.Sprintf("- %s\n", section.title))
+			fmt.Fprintf(b, "- %s\n", section.title)
 			for _, f := range files {
 				heading := titleFromFile(f)
-				b.WriteString(fmt.Sprintf("  - %s\n", heading))
+				fmt.Fprintf(b, "  - %s\n", heading)
 			}
 			continue
 		}
 		if len(files) == 0 {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("- %s\n", section.title))
+		fmt.Fprintf(b, "- %s\n", section.title)
 		for _, f := range files {
 			heading := titleFromFile(f)
-			b.WriteString(fmt.Sprintf("  - %s\n", heading))
+			fmt.Fprintf(b, "  - %s\n", heading)
 		}
 	}
 	b.WriteString("\n---\n\n")
@@ -136,7 +136,7 @@ func writeSection(b *strings.Builder, docsDir string, section docSection) {
 		return
 	}
 
-	b.WriteString(fmt.Sprintf("# %s\n\n", section.title))
+	fmt.Fprintf(b, "# %s\n\n", section.title)
 
 	for _, file := range files {
 		content, err := os.ReadFile(file)
@@ -149,8 +149,8 @@ func writeSection(b *strings.Builder, docsDir string, section docSection) {
 		relPath, _ := filepath.Rel(docsDir, file)
 
 		heading := titleFromFile(file)
-		b.WriteString(fmt.Sprintf("## %s\n\n", heading))
-		b.WriteString(fmt.Sprintf("> Source: `%s`\n\n", relPath))
+		fmt.Fprintf(b, "## %s\n\n", heading)
+		fmt.Fprintf(b, "> Source: `%s`\n\n", relPath)
 
 		// Strip the first H1 heading from the content to avoid duplication,
 		// since we already wrote the section/heading above.

@@ -493,7 +493,7 @@ func TestCASStore_ConcurrentAdd(t *testing.T) {
 	hashes := make([]string, N)
 	errs := make([]error, N)
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

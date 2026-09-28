@@ -136,7 +136,7 @@ func TestRuntimeProcess_AdoptForeignToken_ObservedNotOwned(t *testing.T) {
 	// process plus the foreign pidfile survive. The sentinel replaced a silent
 	// nil return — a nil return let every stop surface (RPC, GUI, CLI) report
 	// "stopped" while the runtime kept the model and the endpoint port.
-	if err := p.Stop(ctx); err != ErrRuntimeNotOwned {
+	if err := p.Stop(ctx); !errors.Is(err, ErrRuntimeNotOwned) {
 		t.Fatalf("Stop on observed runtime = %v, want ErrRuntimeNotOwned", err)
 	}
 	if !testPidAlive(victim.Process.Pid) {
@@ -185,7 +185,7 @@ func TestRuntimeProcess_AdoptForeignToken_ManagerReusePath(t *testing.T) {
 	if pB.spawnedByUs {
 		t.Error("instance B must adopt instance A's runtime as observed-not-owned")
 	}
-	if err := pB.Stop(ctx); err != ErrRuntimeNotOwned {
+	if err := pB.Stop(ctx); !errors.Is(err, ErrRuntimeNotOwned) {
 		t.Fatalf("instance B stop = %v, want ErrRuntimeNotOwned (B must not kill A's runtime)", err)
 	}
 	if !testPidAlive(spawnedPid) {
@@ -311,7 +311,7 @@ func TestRuntimeProcess_LegacyPidfile_ObservedNotOwned(t *testing.T) {
 		t.Errorf("expected adopted pid %d, got %d", victim.Process.Pid, p.PID())
 	}
 
-	if err := p.Stop(ctx); err != ErrRuntimeNotOwned {
+	if err := p.Stop(ctx); !errors.Is(err, ErrRuntimeNotOwned) {
 		t.Fatalf("Stop on legacy-adopted runtime = %v, want ErrRuntimeNotOwned", err)
 	}
 	if !testPidAlive(victim.Process.Pid) {
@@ -337,7 +337,9 @@ func TestRuntimeProcess_StalePidFile_RemovedAndFreshSpawnOwned(t *testing.T) {
 	}
 
 	pidFile := filepath.Join(t.TempDir(), "stale.pid")
-	writeTestPidFile(t, pidFile, pidfileEntry{PID: deadPid, Token: "0000stale-boot-token"})
+	// The token is a fake instance token for a DEAD process in a t.TempDir
+	// pidfile — not a credential; any distinguishable non-empty string works.
+	writeTestPidFile(t, pidFile, pidfileEntry{PID: deadPid, Token: "0000stale-boot-token"}) //nolint:gosec // G101: fake pidfile instance token for a dead test process, not a credential
 
 	p := NewRuntimeProcess(&RuntimeConfig{SpawnCommand: []string{"sleep", "300"}, PIDFile: pidFile})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -387,7 +389,7 @@ func TestRuntimeProcess_Stop_AutomaticRefusesForeignToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := p.Stop(ctx); err != ErrRuntimeNotOwned {
+	if err := p.Stop(ctx); !errors.Is(err, ErrRuntimeNotOwned) {
 		t.Fatalf("automatic Stop on a foreign-token PID file = %v, want ErrRuntimeNotOwned", err)
 	}
 	if !testPidAlive(victim.Process.Pid) {
@@ -676,7 +678,7 @@ func TestRuntimeProcess_RefusedSpawnDoesNotClaimOwnership(t *testing.T) {
 	if p.spawnedByUs {
 		t.Error("a refused spawn must not set spawnedByUs (it would claim kill rights on the endpoint) (F56)")
 	}
-	if stopErr := p.Stop(context.Background()); stopErr != ErrRuntimeNotOwned {
+	if stopErr := p.Stop(context.Background()); !errors.Is(stopErr, ErrRuntimeNotOwned) {
 		t.Errorf("Stop after a refused spawn = %v, want ErrRuntimeNotOwned (F56)", stopErr)
 	}
 }

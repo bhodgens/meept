@@ -810,6 +810,10 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 	    ReasoningMax    = "max"    // maximum thinking budget
 	)
 
+<a name="DefaultEmptyCompletionRetries"></a>DefaultEmptyCompletionRetries is the number of HTTP requests an empty\-completion flake consumes in the client retry loops before the bare ErrEmptyResponse sentinel surfaces for alias failover: the short budget itself \(test seam — the loops read shortRetryBudget\(\)\).
+
+	const DefaultEmptyCompletionRetries = 3
+
 <a name="DefaultQuotaMaxWait"></a>DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without importing internal/config \(which would create a cycle via tools/mcp\).
 
 	const DefaultQuotaMaxWait = 24 * time.Hour

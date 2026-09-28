@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/caimlas/meept/internal/sharedclient"
+	"slices"
 )
 
 // ============================================================================
@@ -196,14 +197,7 @@ func TestBuiltinCommands(t *testing.T) {
 	// Check known builtins are present
 	expectedBuiltin := []string{"help", "new", "clear", "status", "stop", "usage"}
 	for _, expected := range expectedBuiltin {
-		found := false
-		for _, c := range cmds {
-			if c == expected {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(cmds, expected) {
 			t.Errorf("builtin command %q not found", expected)
 		}
 	}

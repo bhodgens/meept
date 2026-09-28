@@ -2,6 +2,7 @@ package backup
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,7 +55,7 @@ func TestGenerateManifest(t *testing.T) {
 
 func TestGenerateManifest_NoPaths(t *testing.T) {
 	_, err := GenerateManifest("test-node", []string{})
-	if err != ErrNoDatabases {
+	if !errors.Is(err, ErrNoDatabases) {
 		t.Errorf("expected ErrNoDatabases, got %v", err)
 	}
 }
@@ -95,7 +96,7 @@ func TestManifestSave(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 
-	var loaded map[string]interface{}
+	var loaded map[string]any
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestLoadManifest(t *testing.T) {
 
 func TestLoadManifest_NonExistent(t *testing.T) {
 	_, err := LoadManifest("/nonexistent/manifest.json")
-	if err != ErrManifestMissing {
+	if !errors.Is(err, ErrManifestMissing) {
 		t.Errorf("expected ErrManifestMissing, got %v", err)
 	}
 }

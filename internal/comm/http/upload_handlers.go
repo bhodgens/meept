@@ -35,7 +35,7 @@ func (s *Server) handleMultipartUpload(w http.ResponseWriter, r *http.Request) {
 	// Limit body size
 	r.Body = http.MaxBytesReader(w, r.Body, s.services.Upload.MaxSizeBytes())
 
-	if err := r.ParseMultipartForm(8 << 20); err != nil { // 8MB in-memory buffer; full body already capped by MaxBytesReader above
+	if err := r.ParseMultipartForm(8 << 20); err != nil { //nolint:gosec // G120: bounded — r.Body is wrapped in http.MaxBytesReader(w, …, Upload.MaxSizeBytes()) above and the in-memory part is capped at 8MB
 		s.writeError(w, http.StatusBadRequest, "failed to parse multipart form: "+err.Error())
 		return
 	}
@@ -121,10 +121,10 @@ func (s *Server) handleUploadGet(w http.ResponseWriter, r *http.Request) {
 	if !isPlainContentType(mimeType) {
 		mimeType = "application/octet-stream"
 	}
-	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Type", mimeType) //nolint:gosec // G705: mimeType passed isPlainContentType() above (whitelist: printable ASCII token/subtype only); otherwise replaced with application/octet-stream
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, max-age=3600")
-	if _, err := w.Write(data); err != nil {
+	if _, err := w.Write(data); err != nil { //nolint:gosec // G705: data is the stored upload payload itself; endpoint is a file download (Content-Type whitelisted above, X-Content-Type-Options: nosniff set) so the bytes are the intended response body
 		// Header already sent; nothing further to do — the client sees a
 		// truncated response and logs carry the failure.
 		slog.Error("upload download: short write", "error", err)
@@ -180,7 +180,7 @@ func isPlainContentType(v string) bool {
 	if v == "" {
 		return false
 	}
-	for i := 0; i < len(v); i++ {
+	for i := range len(v) {
 		c := v[i]
 		if c <= 0x20 || c >= 0x7f || c == '/' && i == 0 {
 			return false

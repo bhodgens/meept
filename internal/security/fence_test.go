@@ -143,9 +143,7 @@ func TestCheckPath_RelativePathInsideRoot(t *testing.T) {
 	}, nil)
 
 	// Save and restore working directory
-	origWd, _ := os.Getwd()
-	defer os.Chdir(origWd)
-	os.Chdir(root)
+	t.Chdir(root)
 
 	// Relative path that resolves inside root
 	err := fc.CheckPath("./subdir/file.go", "read")
@@ -255,9 +253,7 @@ func TestCheckCommand_PathValidation(t *testing.T) {
 	}
 
 	// Relative path inside root (./ prefix) -> allowed when cwd is root
-	origWd, _ := os.Getwd()
-	defer os.Chdir(origWd)
-	os.Chdir(root)
+	t.Chdir(root)
 	err = fc.CheckCommand("cat ./src/main.go", root)
 	if err != nil {
 		t.Errorf("CheckCommand with ./src/main.go = %v, want nil (inside root)", err)
@@ -302,9 +298,7 @@ func TestCheckPath_PathTraversalAttempt(t *testing.T) {
 	}, nil)
 
 	// Save and restore working directory
-	origWd, _ := os.Getwd()
-	defer os.Chdir(origWd)
-	os.Chdir(root)
+	t.Chdir(root)
 
 	// Path traversal using ../ to escape root
 	escapePath := filepath.Join(root, "..", "..", "etc", "passwd")

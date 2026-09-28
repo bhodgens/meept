@@ -23,10 +23,6 @@ import (
 	"time"
 )
 
-// superviseFlag returns a pointer to v, the shape RuntimeConfig.Supervise uses
-// so an absent value means "supervised".
-func superviseFlag(v bool) *bool { return &v }
-
 // testSupervisorBinary points the supervisor seam at this test binary, which
 // implements supervisor mode through TestMain.
 func testSupervisorBinary(t *testing.T) string {
@@ -103,7 +99,7 @@ func TestRuntimeProcess_SupervisedSpawnWrapsAndRecordsRuntime(t *testing.T) {
 		AutoStop:     true,
 		PIDFile:      pidFile,
 		SpawnCommand: spawn,
-		Supervise:    superviseFlag(true),
+		Supervise:    new(true),
 	}
 	p := NewRuntimeProcess(cfg)
 
@@ -218,7 +214,7 @@ func TestRuntimeProcess_SupervisorExitsWithRuntime(t *testing.T) {
 	cfg := &RuntimeConfig{
 		PIDFile:      pidFile,
 		SpawnCommand: []string{"sleep", "1"},
-		Supervise:    superviseFlag(true),
+		Supervise:    new(true),
 	}
 	p := NewRuntimeProcess(cfg)
 
@@ -275,7 +271,7 @@ func TestRuntimeProcess_SuperviseOptOut(t *testing.T) {
 				SpawnCommand: []string{"sleep", "30"},
 			}
 			if tc.optOut {
-				cfg.Supervise = superviseFlag(false)
+				cfg.Supervise = new(false)
 			}
 			p := NewRuntimeProcess(cfg)
 

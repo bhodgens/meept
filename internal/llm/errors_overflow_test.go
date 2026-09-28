@@ -187,7 +187,7 @@ func TestContextFirewall_CompactForOverflow(t *testing.T) {
 	messages := []ChatMessage{
 		{Role: RoleSystem, Content: "system prompt"},
 	}
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		messages = append(messages,
 			ChatMessage{Role: RoleUser, Content: fmt.Sprintf("question %d %s", i, strings.Repeat("q", 200))},
 			ChatMessage{Role: RoleAssistant, Content: fmt.Sprintf("answer %d %s", i, strings.Repeat("a", 200))},

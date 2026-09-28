@@ -170,9 +170,11 @@ CREATE TABLE IF NOT EXISTS provider_stats (
 		if err != nil {
 			return err
 		}
-		// Idempotent migrations for existing databases
-		db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0")
-		db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0.0")
+		// Idempotent migrations for existing databases. Errors are expected
+		// (duplicate column) when a database predates a given migration; the
+		// succeeding statement below re-verifies the schema is usable.
+		_, _ = db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0")
+		_, _ = db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0.0")
 
 		// Create model_cost_daily for persistent per-model cost tracking
 		const dailyCostSchema = `
@@ -754,13 +756,13 @@ GROUP BY provider_id, model_id
 			var providerID, modelID string
 			var count int
 			if err := rows.Scan(&providerID, &modelID, &count); err != nil {
-				rows.Close()
 				return err
 			}
 			summary.ByProvider[providerID] += count
 			summary.ByModel[modelID] += count
 			summary.Total24h += count
 		}
+		defer rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
 		}
@@ -777,11 +779,11 @@ LIMIT ?
 		if err != nil {
 			return err
 		}
+		defer recentRows.Close()
 		for recentRows.Next() {
 			var e RateLimitEntry
 			var tsUnix int64
 			if err := recentRows.Scan(&tsUnix, &e.ProviderID, &e.ModelID, &e.HTTPStatus, &e.ErrorMsg, &e.LatencyMs); err != nil {
-				recentRows.Close()
 				return err
 			}
 			e.Timestamp = time.UnixMilli(tsUnix)

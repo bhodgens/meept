@@ -157,18 +157,10 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 	}
 
 	// Start background flush goroutine
-	store.loopWG.Add(1)
-	go func() {
-		defer store.loopWG.Done()
-		store.flushLoop()
-	}()
+	store.loopWG.Go(store.flushLoop)
 
 	// Start hourly aggregation goroutine
-	store.loopWG.Add(1)
-	go func() {
-		defer store.loopWG.Done()
-		store.aggregationLoop()
-	}()
+	store.loopWG.Go(store.aggregationLoop)
 
 	return store, nil
 }
@@ -549,11 +541,7 @@ func (s *Store) flush() {
 	// Notify subscribers after successful flush. Tracked via the
 	// notifyWG WaitGroup so Close can wait for these goroutines to
 	// finish before closing the DB (S6-14).
-	s.notifyWG.Add(1)
-	go func() {
-		defer s.notifyWG.Done()
-		s.notifySubscribers()
-	}()
+	s.notifyWG.Go(s.notifySubscribers)
 }
 
 // aggregateHourly computes hourly aggregations from raw metrics.

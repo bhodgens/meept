@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -171,13 +172,8 @@ func (p *EgressPolicy) evaluate(host string, ips []net.IP) (string, string) {
 	matched := ""
 	for _, cr := range p.rules {
 		if cr.cidr != nil {
-			for _, ip := range ips {
-				if cr.cidr.Contains(ip) {
-					action, matched = cr.action, cr.cidr.String()
-					break
-				}
-			}
-			if action != "" {
+			if slices.ContainsFunc(ips, cr.cidr.Contains) {
+				action, matched = cr.action, cr.cidr.String()
 				break
 			}
 			continue
@@ -195,10 +191,8 @@ func (p *EgressPolicy) evaluate(host string, ips []net.IP) (string, string) {
 			if cr.cidr == nil || cr.action != EgressDeny {
 				continue
 			}
-			for _, ip := range ips {
-				if cr.cidr.Contains(ip) {
-					return EgressDeny, cr.cidr.String()
-				}
+			if slices.ContainsFunc(ips, cr.cidr.Contains) {
+				return EgressDeny, cr.cidr.String()
 			}
 		}
 	}
@@ -309,9 +303,9 @@ func ApplyEgressEnv(env []string, proxyAddr string, scrub bool) []string {
 
 // splitEnvKey splits "KEY=rest" into key and value-presence.
 func splitEnvKey(kv string) (key string, hasValue bool) {
-	i := strings.IndexByte(kv, '=')
-	if i < 0 {
+	k, _, found := strings.Cut(kv, "=")
+	if !found {
 		return kv, false
 	}
-	return kv[:i], true
+	return k, true
 }

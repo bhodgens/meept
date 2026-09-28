@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/code/ast"
+	"slices"
 )
 
 // CodeCompressor provides AST-aware code compression.
@@ -71,7 +72,7 @@ func (cc *CodeCompressor) Crush(content string, language string) (string, Compre
 	}
 
 	// Check if this language is supported
-	if len(cc.Languages) > 0 && !containsString(cc.Languages, language) {
+	if len(cc.Languages) > 0 && !slices.Contains(cc.Languages, language) {
 		result.CompressedContent = content
 		result.OriginalTokens = countTokens(content)
 		result.CompressedTokens = result.OriginalTokens
@@ -223,12 +224,3 @@ func detectLanguage(content string) string {
 	return "unknown"
 }
 
-// containsString checks if a slice contains a string.
-func containsString(slice []string, s string) bool {
-	for _, item := range slice {
-		if item == s {
-			return true
-		}
-	}
-	return false
-}

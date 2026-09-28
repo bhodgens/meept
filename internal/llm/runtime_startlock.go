@@ -105,7 +105,7 @@ func tryAcquireStartLock(pidFile string) (func(), bool) {
 		slog.Debug("start lock: create lock directory", "path", path, "error", err)
 		return nil, false
 	}
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			if _, werr := f.WriteString(strconv.Itoa(os.Getpid())); werr != nil {

@@ -83,7 +83,7 @@ func compilePrefix(prefix, action string) (tableRule, bool) {
 		r.segs = [][]string{{"*"}}
 		return r, true
 	}
-	for _, seg := range strings.Split(prefix, "|") {
+	for seg := range strings.SplitSeq(prefix, "|") {
 		tokens := strings.Fields(seg)
 		if len(tokens) == 0 {
 			continue // tolerate stray pipes like "a || b"

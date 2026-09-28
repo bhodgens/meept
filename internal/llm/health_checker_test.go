@@ -211,7 +211,7 @@ func TestHealthChecker_DeadProcessIsUnhealthy(t *testing.T) {
 	config.HealthInterval = 20 * time.Millisecond
 	config.HealthThreshold = 1
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Control: the same endpoint with a live process does become healthy.
@@ -286,7 +286,7 @@ func TestHealthChecker_RearmsAfterStop(t *testing.T) {
 	config.HealthInterval = 20 * time.Millisecond
 	config.HealthThreshold = 1
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	hc := llm.NewHealthChecker(&config, srv.URL)

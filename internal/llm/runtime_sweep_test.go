@@ -2,7 +2,6 @@ package llm
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -228,7 +227,7 @@ func TestReapRuntimeProcesses_SkipsEntryThatChangedBeforeKill(t *testing.T) {
 }
 
 func TestSweepOrphanRuntimes_ReapsConfirmedOrphanAndClearsPIDFile(t *testing.T) {
-	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr := NewRuntimeManager(slog.New(slog.DiscardHandler))
 
 	pidFile := filepath.Join(t.TempDir(), "runtime.pid")
 	// The endpoint's PID file names the leftover: corroboration that this is
@@ -288,7 +287,7 @@ func TestSweepOrphanRuntimes_ReapsConfirmedOrphanAndClearsPIDFile(t *testing.T) 
 }
 
 func TestSweepOrphanRuntimes_LeavesEndpointWithLiveOwnerAlone(t *testing.T) {
-	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr := NewRuntimeManager(slog.New(slog.DiscardHandler))
 
 	pidFile := filepath.Join(t.TempDir(), "runtime.pid")
 	// The endpoint's PID file names a DIFFERENT, live process: a live owner
@@ -341,7 +340,7 @@ func TestSweepOrphanRuntimes_LeavesEndpointWithLiveOwnerAlone(t *testing.T) {
 // (flip this pin) rather than a silent regression. The sweep reports which
 // endpoint vetoed so the operator can act on a genuinely stuck leftover.
 func TestSweepOrphanRuntimes_UnmanagedEndpointVetoesManagedReap(t *testing.T) {
-	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr := NewRuntimeManager(slog.New(slog.DiscardHandler))
 
 	dir := t.TempDir()
 	argv := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
@@ -558,7 +557,7 @@ func TestFindOrphanRuntimesWithRecords_DedupesPidMatchedByConfigAndRecord(t *tes
 // TestSweepOrphanRuntimes_ReapsRecordOnlyLeftover proves the leftover is reaped
 // end to end with no config registered: the record alone drives the sweep.
 func TestSweepOrphanRuntimes_ReapsRecordOnlyLeftover(t *testing.T) {
-	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr := NewRuntimeManager(slog.New(slog.DiscardHandler))
 
 	records := []SpawnRecord{{
 		EndpointKey: "mlx:127.0.0.1:8081",
@@ -594,7 +593,7 @@ func TestSweepOrphanRuntimes_ReapsRecordOnlyLeftover(t *testing.T) {
 }
 
 func TestSweepOrphanRuntimes_LeavesRecordWithAutoStopFalseAlone(t *testing.T) {
-	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr := NewRuntimeManager(slog.New(slog.DiscardHandler))
 
 	records := []SpawnRecord{{
 		EndpointKey: "mlx:127.0.0.1:8081",
@@ -630,7 +629,7 @@ func TestSweepOrphanRuntimes_LeavesRecordWithAutoStopFalseAlone(t *testing.T) {
 // reap removes the durable spawn record too, so records do not accumulate and a
 // stale one cannot later outvote an explicit auto_stop_on_exit:false.
 func TestSweepOrphanRuntimes_RemovesSpawnRecordOnReap(t *testing.T) {
-	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr := NewRuntimeManager(slog.New(slog.DiscardHandler))
 
 	pidFile := filepath.Join(t.TempDir(), "runtime.pid")
 	if err := os.WriteFile(pidFile, []byte(`{"pid":900,"token":"deadbeef"}`), 0o600); err != nil {
@@ -771,7 +770,7 @@ func TestFindOrphanRuntimesWithRecords_StaleOperatorRecordDoesNotSpare(t *testin
 // record's pid is the live runtime's own pid — the state the record describes
 // while the operator's runtime is up (finding F78 makes liveness load-bearing).
 func TestSweepOrphanRuntimes_LeavesOperatorStartedRuntimeAlone(t *testing.T) {
-	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr := NewRuntimeManager(slog.New(slog.DiscardHandler))
 
 	argv := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
 	pidFile := filepath.Join(t.TempDir(), "runtime.pid")
@@ -805,7 +804,7 @@ func TestSweepOrphanRuntimes_LeavesOperatorStartedRuntimeAlone(t *testing.T) {
 // its spare, the genuine leftover of an earlier generation IS reaped, and the
 // dead record file is pruned from disk instead of sparing every later boot.
 func TestSweepOrphanRuntimes_ReapsLeftoverAfterStaleOperatorRecord(t *testing.T) {
-	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr := NewRuntimeManager(slog.New(slog.DiscardHandler))
 
 	argv := []string{"mlx_lm", "server", "--model", "/m/x", "--port", "8081"}
 	dir := t.TempDir()

@@ -122,18 +122,18 @@ func TestFailurePolicyConfigTags(t *testing.T) {
 			st := reflect.TypeFor[FailurePolicyConfig]()
 			var field reflect.StructField
 			var found bool
-			for i := range st.NumField() {
-				if strings.Split(st.Field(i).Tag.Get("json"), ",")[0] == tt.jsonTag {
-					field, found = st.Field(i), true
+			for field = range st.Fields() {
+				if strings.Split(field.Tag.Get("json"), ",")[0] == tt.jsonTag {
+					found = true
 					break
 				}
 			}
 			if !found {
 				// Nested sub-block keys (pacing.*) live on PacingConfig.
 				st = reflect.TypeFor[PacingConfig]()
-				for i := 0; i < st.NumField(); i++ {
-					if strings.Split(st.Field(i).Tag.Get("json"), ",")[0] == tt.jsonTag {
-						field, found = st.Field(i), true
+				for field = range st.Fields() {
+					if strings.Split(field.Tag.Get("json"), ",")[0] == tt.jsonTag {
+						found = true
 						break
 					}
 				}

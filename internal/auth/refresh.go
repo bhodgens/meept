@@ -50,9 +50,7 @@ func NewRefreshManager(store *TokenStore, opts ...RefreshManagerOption) *Refresh
 // Start begins the background refresh loop. It runs until Stop is called
 // or the context is cancelled.
 func (rm *RefreshManager) Start(ctx context.Context, interval time.Duration) {
-	rm.wg.Add(1)
-	go func() {
-		defer rm.wg.Done()
+	rm.wg.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -76,7 +74,7 @@ func (rm *RefreshManager) Start(ctx context.Context, interval time.Duration) {
 				rm.refreshAll(ctx)
 			}
 		}
-	}()
+	})
 }
 
 // Stop gracefully stops the refresh manager, waiting for the goroutine

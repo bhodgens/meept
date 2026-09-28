@@ -401,7 +401,7 @@ func TestRunMergeOp_PropagatesExecError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	merged, skipped, err := runMergeOp(
 		context.Background(),

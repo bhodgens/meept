@@ -183,8 +183,7 @@ func TestScheduler_StartAndStop(t *testing.T) {
 		t.Fatalf("NewGitBackupScheduler: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Start in goroutine
 	done := make(chan struct{})

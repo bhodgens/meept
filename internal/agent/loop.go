@@ -75,6 +75,14 @@ var (
 	// rate-limit lift). It wraps the triggering error so callers retain the
 	// original context.
 	ErrAgentBlocked = errors.New("agent blocked awaiting external action")
+	// ErrTurnParked is returned by chatWithFailoverRaw when the turn was
+	// parked (throttle / endpoint-block) and scheduled for resume by the
+	// TurnParker instead of being answered now. It is not a failure: the
+	// loop's callers map it to an empty reply with no error, per the parked
+	// turn contract ("a parked turn must not surface an error"). Check
+	// with errors.Is; errors.As on *llm.Response would match a nil
+	// *llm.Response, so the value side is NOT a reliable signal.
+	ErrTurnParked = errors.New("turn parked for later resume")
 )
 
 // Evidence prompt section instructs agents to substantiate their claims.
@@ -1077,8 +1085,8 @@ type AgentLoop struct {
 
 // sessionStore is an interface for session persistence operations needed by AgentLoop.
 type sessionStore interface {
-	Get(id string) interface{}
-	SaveMessages(sessionID string, messages interface{}) error
+	Get(id string) any
+	SaveMessages(sessionID string, messages any) error
 	UpdateDesignation(sessionID string, status session.DesignationStatus, reason, priority string) error
 	ClearDesignation(sessionID string) error
 }
@@ -3981,7 +3989,7 @@ func flushDeferredToolResults(conv *Conversation, toolCalls []llm.ToolCall, resu
 		}
 		conv.AddToolResult(tc.ID, "[aborted: the loop stopped before this call ran]")
 	}
-	for i := 0; i < pendingNudges; i++ {
+	for range pendingNudges {
 		conv.AddUserMessage("[system: no measurable progress; change approach.]")
 	}
 }
@@ -4556,9 +4564,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		response, err := l.chatWithFailoverRaw(ctx, messages, streamOnDelta, chatOpts...)
-		if err == nil && response == nil {
+		if errors.Is(err, ErrTurnParked) {
 			// Parked turn (tree 03 leaf 02): chatWithFailoverRaw parks a
-			// ThrottleBackoffError and returns (nil, nil) — the turn ends
+			// ThrottleBackoffError and returns ErrTurnParked — the turn ends
 			// here with an empty reply and no error. The StateQuotaWait /
 			// "throttle_wait" transition already fired inside
 			// parkThrottledTurn; the TurnParker resumes the turn later.
@@ -4586,7 +4594,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				)
 
 				response, err = l.chatWithFailover(ctx, messagesWithRule, chatOpts...)
-				if err == nil && response == nil {
+				if errors.Is(err, ErrTurnParked) {
 					// Parked during the TTSR retry (tree 03 leaf 02) —
 					// same parked semantics as the main call above.
 					return "", nil
@@ -4603,13 +4611,13 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 						// Fall through to handle no-content response
 						response, err = l.chatWithFailover(ctx, messages, chatOpts...)
 						// AUDIT FIX H1 (bughunt 2026-09-03): chatWithFailover
-						// returns (nil, nil) after a successful throttle park.
+						// returns ErrTurnParked after a successful throttle park.
 						// The first TTSR retry (above) handles that; this third
 						// call must too — without it a parked turn fell into the
 						// empty-response error branch, so the caller saw a
 						// failure AND the parker would later re-run the same
 						// turn (double execution).
-						if err == nil && response == nil {
+						if errors.Is(err, ErrTurnParked) {
 							// Parked during the TTSR third call — same parked
 							// semantics as the main call and first retry.
 							return "", nil
@@ -5145,7 +5153,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Deliver deferred guard nudges AFTER the tool results so the
 			// assistant(tool_calls)→tool(result) pairing is never broken by
 			// an interleaved user message (bughunt round-2 HIGH-1).
-			for i := 0; i < pendingNudges; i++ {
+			for range pendingNudges {
 				conv.AddUserMessage("[system: no measurable progress; change approach.]")
 			}
 
@@ -5990,7 +5998,8 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 						if giveUp != nil {
 							return nil, giveUp
 						}
-						return nil, nil
+						// Parked: scheduled for resume by the TurnParker.
+						return nil, ErrTurnParked
 					}
 					// No parker wired: fall through to the original
 					// backoff/pass-through below (tree-02 behavior).
@@ -6269,7 +6278,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				}
 				// Parked: the turn is scheduled for resume by the
 				// TurnParker; nothing flows to the loop's caller.
-				return nil, nil
+				return nil, ErrTurnParked
 			}
 			l.logger.Warn("Provider throttled: returning park-capable error without rotation",
 				"provider", throttleBackoffErr.ProviderID,
@@ -6491,7 +6500,8 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 						if giveUp != nil {
 							return nil, giveUp
 						}
-						return nil, nil
+						// Parked: scheduled for resume by the TurnParker.
+						return nil, ErrTurnParked
 					}
 					// No parker wired or park refused: keep the
 					// historical pass-through below.
@@ -7342,11 +7352,8 @@ func tokenizeFileReferences(text string) []string {
 		}
 		base := filepath.Base(cleaned)
 		ext := filepath.Ext(base)
-		for _, e := range exts {
-			if ext == e {
-				files = append(files, cleaned)
-				break
-			}
+		if slices.Contains(exts, ext) {
+			files = append(files, cleaned)
 		}
 	}
 	return files
@@ -9279,10 +9286,5 @@ func (l *AgentLoop) replyToolNotifiedThisTurn(conv *Conversation) bool {
 	if conv == nil {
 		return false
 	}
-	for _, name := range toolNamesSinceLastUser(conv.GetMessages()) {
-		if name == "reply_to_user" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(toolNamesSinceLastUser(conv.GetMessages()), "reply_to_user")
 }

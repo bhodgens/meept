@@ -249,7 +249,7 @@ func TestDefaultGuard_MaxRedirectsIsFive(t *testing.T) {
 	}
 	pub := httptest.NewRequest(http.MethodGet, "http://8.8.8.8/next", nil)
 	var via []*http.Request
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		via = append(via, httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://8.8.8.8/hop%d", i), nil))
 		if err := g.CheckRedirect(pub, via); err != nil {
 			t.Fatalf("hop %d within default limit denied: %v", i+1, err)

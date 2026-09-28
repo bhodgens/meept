@@ -87,7 +87,7 @@ func TestProviderManager_NoDoubleCostRecording(t *testing.T) {
 	// One request flows through the manager: the stub's Chat (client layer)
 	// records cost, then recordSuccess runs. Budget must show exactly ONE
 	// record; the provider health ledger tracks its own copy for telemetry.
-	chatter.Chat(context.Background(), nil)
+	_, _ = chatter.Chat(context.Background(), nil)
 	pm.recordSuccess(entry, chatter.response, 100*time.Millisecond)
 
 	status := budget.GetStatus()

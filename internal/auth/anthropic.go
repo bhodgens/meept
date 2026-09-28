@@ -15,16 +15,20 @@ import (
 const (
 	// anthropicPlatformTokenEP is the primary token endpoint; the console
 	// endpoint below is the fallback since the platform migration.
-	anthropicPlatformTokenEP = "https://platform.claude.com/v1/oauth/token"
-	anthropicConsoleTokenEP  = "https://console.anthropic.com/v1/oauth/token"
+	// #gosec G101 -- public OAuth endpoint URL, not a credential.
+	anthropicPlatformTokenEP = "https://platform.claude.com/v1/oauth/token" //nolint:gosec // public OAuth endpoint URL, not a credential
+	// #gosec G101 -- public OAuth endpoint URL, not a credential.
+	anthropicConsoleTokenEP = "https://console.anthropic.com/v1/oauth/token" //nolint:gosec // public OAuth endpoint URL, not a credential
 	// anthropicRedirectURI is the registered OAuth callback.
-	anthropicRedirectURI = "https://console.anthropic.com/oauth/code/callback"
+	// #gosec G101 -- public OAuth callback URL, not a credential.
+	anthropicRedirectURI = "https://console.anthropic.com/oauth/code/callback" //nolint:gosec // public OAuth callback URL, not a credential
 	// anthropicAuthorizeEP is the authorization endpoint base.
 	anthropicAuthorizeEP = "https://claude.ai/oauth/authorize"
 	// anthropicTokenUA is the User-Agent for token endpoint requests.
 	// Anthropic 429-rate-limits token requests whose UA starts with
 	// claude-code/; the axios UA is verified working.
-	anthropicTokenUA = "axios/1.7.9"
+	// #gosec G101 -- fixed user-agent string, not a credential.
+	anthropicTokenUA = "axios/1.7.9" //nolint:gosec // fixed user-agent string, not a credential
 )
 
 // anthropicTokenEndpoints are the token endpoints tried in order. A variable

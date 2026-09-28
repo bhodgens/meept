@@ -584,7 +584,7 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 		r.isEndpointBlocked(health, alias.Models[health.CurrentIndex]) {
 		n := len(alias.Models)
 		finalIdx := -1
-		for i := 0; i < n; i++ {
+		for i := range n {
 			idx := (health.CurrentIndex + i) % n
 			blocked := r.isEndpointBlocked(health, alias.Models[idx]) ||
 				(r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[idx]))

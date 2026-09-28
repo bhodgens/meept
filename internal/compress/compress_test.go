@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
+	"slices"
 )
 
 func TestContentHash_Deterministic(t *testing.T) {
@@ -119,7 +120,7 @@ func TestSmartCrusher_ErrorPreservation(t *testing.T) {
 	compressed, result := sc.Crush(content)
 
 	// Error should be preserved
-	if !containsString(result.TransformsApplied, "error_preserved") {
+	if !slices.Contains(result.TransformsApplied, "error_preserved") {
 		t.Errorf("Expected error to be preserved")
 	}
 
