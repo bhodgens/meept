@@ -17,7 +17,6 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/errcls"
-	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/session"
@@ -2565,7 +2564,7 @@ func (ts *TacticalScheduler) publishTokenProgress(t *task.Task) {
 // requires threading the structured error value through the message bus, which
 // is a cross-package refactor tracked in docs/20260618-checkreview.md D2.
 func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
-	return llm.IsRateLimitErrorMessage(errMsg) //nolint:staticcheck // SA1019: caller has only the bus-serialized error string; see deprecation notice
+	return errcls.IsRateLimitErrorMessage(errMsg)
 }
 
 // isRateLimitErrorFromErr uses structured error classification via errcls.

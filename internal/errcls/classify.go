@@ -227,3 +227,24 @@ func IsAlreadyInstalled(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "already installed")
 }
+
+// IsRateLimitErrorMessage reports whether a serialized error STRING looks
+// like an HTTP 429 / provider rate-limit error. String-only sibling of
+// IsRateLimit: use when the original error value did not survive
+// serialization (e.g. errors relayed through the message bus).
+func IsRateLimitErrorMessage(errMsg string) bool {
+	if errMsg == "" {
+		return false
+	}
+	lower := strings.ToLower(errMsg)
+	return strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "429") ||
+		strings.Contains(lower, "too many requests") ||
+		strings.Contains(lower, "quota exceeded") ||
+		strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "requests per") ||
+		strings.Contains(lower, "api calls per") ||
+		strings.Contains(lower, "rpm limit") ||
+		strings.Contains(lower, "tpm limit") ||
+		strings.Contains(lower, "concurrent requests")
+}
