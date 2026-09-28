@@ -339,7 +339,17 @@ func checkDiskFreeDoctor(dir string) doctorCheck {
 	// st.Bavail (uint64) and st.Bsize (uint32) are unsigned disk geometry
 	// values; each is capped below before the int64 conversion, so the
 	// conversion cannot overflow.
-	free := int64(min(st.Bavail, uint64(1)<<62)) * int64(min(st.Bsize, uint32(1)<<30)) //nolint:gosec // G115: both operands are capped in the same expression
+	// st.Bsize is uint32 on darwin but int64 on linux; normalize both
+	// geometry values through uint64 caps before the int64 conversion.
+	bsize := uint64(st.Bsize)
+	if bsize > uint64(1)<<30 {
+		bsize = uint64(1) << 30
+	}
+	bavail := st.Bavail
+	if bavail > uint64(1)<<62 {
+		bavail = uint64(1) << 62
+	}
+	free := int64(bavail) * int64(bsize)
 	const warnAt = int64(200) * 1024 * 1024
 	human := fmt.Sprintf("%.0fmb", float64(free)/(1024*1024))
 	if free < warnAt {
